@@ -18,6 +18,7 @@
 
 #include "render_profile_runtime.h"
 #include "backend_selection.h"
+#include "dx11_legacy_material_compat.h"
 #include "openshim_assets.h"
 #include "render_profile_resources.h"
 #include "render_profile_request_tracker.h"
@@ -37,8 +38,10 @@
 #include <atomic>
 #include <cstring>
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 
 namespace BZROpenShim::RenderProfiles
 {
@@ -96,6 +99,22 @@ namespace BZROpenShim::RenderProfiles
         // Read on the render thread by the scheme hook, written under
         // s_stateLock by LoadConfigLocked; atomic so the two never tear.
         std::atomic<bool> s_enhancedSchemeFallbackEnabled { true };
+        // DX11 legacy material compatibility ladder (Docs/
+        // DX11_LEGACY_MATERIAL_COMPATIBILITY.md). Compat defaults ON once
+        // qualified (no mod-side setting can fix abandoned content); the
+        // shaderless guard defaults ON (bounded diagnostics instead of
+        // exception floods); aggressive generic fallback defaults OFF (it
+        // intentionally flattens unknown custom semantics).
+        std::atomic<bool> s_dx11CompatEnabled { true };
+        std::atomic<bool> s_dx11GuardEnabled { true };
+        std::atomic<bool> s_dx11AggressiveEnabled { false };
+        // Lock-free DX11 read for the render-thread compat probe. Mirrors
+        // s_detectedBackend (written under s_stateLock by the observation
+        // worker); DX9 sessions must never enter the compat ladder.
+        std::atomic<bool> s_detectedDx11Atomic { false };
+        // Lock-free mirror of s_resourcesValid for the render-thread probe.
+        // Compat techniques fail closed when the deployed set is broken.
+        std::atomic<bool> s_resourcesValidAtomic { false };
         bool s_transportWrittenThisBoot = false;
         Profile s_userProfile = Profile::Redux;
         ContentRequest s_contentRequest = ContentRequest::Inherit;
@@ -229,6 +248,31 @@ namespace BZROpenShim::RenderProfiles
                 s_enhancedSchemeFallbackEnabled.store(
                     BackendSelection::ParseTransportEnabled(
                         TrimAsciiCopy(value)),
+                    std::memory_order_release);
+            }
+            // DX11 legacy material compatibility ladder. Compat + guard
+            // default ON (abandoned mods have no mod-side fix; the guard
+            // only bounds diagnostics), aggressive defaults OFF (it
+            // intentionally approximates unknown custom semantics).
+            if (TryGetUserConfigString("Fixes", "DX11LegacyMaterialCompat",
+                                       value))
+            {
+                s_dx11CompatEnabled.store(
+                    Dx11Compat::ParseCompatFlag(TrimAsciiCopy(value), true),
+                    std::memory_order_release);
+            }
+            if (TryGetUserConfigString("Fixes", "DX11ShaderlessDrawGuard",
+                                       value))
+            {
+                s_dx11GuardEnabled.store(
+                    Dx11Compat::ParseCompatFlag(TrimAsciiCopy(value), true),
+                    std::memory_order_release);
+            }
+            if (TryGetUserConfigString("Fixes", "DX11LegacyMaterialAggressive",
+                                       value))
+            {
+                s_dx11AggressiveEnabled.store(
+                    Dx11Compat::ParseCompatFlag(TrimAsciiCopy(value), false),
                     std::memory_order_release);
             }
         }
@@ -1452,6 +1496,7 @@ namespace BZROpenShim::RenderProfiles
             AcquireSRWLockExclusive(&s_stateLock);
             s_detectedBackend = dx11 ? ActiveBackend::DX11 : ActiveBackend::DX9;
             s_backendDetected = true;
+            s_detectedDx11Atomic.store(dx11, std::memory_order_release);
             ResolveAndPublishLocked("backend observed");
             ReleaseSRWLockExclusive(&s_stateLock);
             // Seam A outcome reporting: pure logging + marker bookkeeping.
@@ -1658,6 +1703,523 @@ namespace BZROpenShim::RenderProfiles
             return schemeMatch;
         }
 
+        // ---- DX11 legacy material compatibility probe ----------------------
+        //
+        // Design anchor for Docs/DX11_LEGACY_MATERIAL_COMPATIBILITY.md.
+        // handleSchemeNotFound is Ogre's designed hook for a missing scheme;
+        // the ISDF Chronicles repro shows a second DX11-only failure shape on
+        // top of that: materials whose techniques exist but are unsupported
+        // on D3D11 (true fixed-function passes with no VS/PS at all, plus
+        // programmable passes referencing SM2/SM3-only families such as
+        // Effect_*/Textured_*/Untextured_*/Sky_*/simple_one_tex). D3D11 has
+        // no fixed pipeline, so Ogre reaches the render path with no shaders
+        // bound and throws per draw (1,300 observed) plus "Invalid target
+        // for D3D11 shader" spam (264 observed).
+        //
+        // Policy lives in the pure engine module
+        // (include/dx11_legacy_material_compat.h); this layer only resolves
+        // the narrow Ogre ABI needed to inspect techniques/passes, builds a
+        // LegacyPassDesc, classifies it, logs once per unique miss, bumps
+        // counters, and fails closed to nullptr (Ogre's stock answer) when
+        // no compat path can be proven. Full cached technique instantiation
+        // (clone source technique, swap in OSE_Compat_*/OSE_FixedFunc_* SM4
+        // programs, cache by BuildCompatCacheKey) is the defined next step
+        // once the createTechnique/createPass/setProgram ABI is proven; until
+        // then the probe converts exception floods into bounded diagnostics
+        // and records which ladder rung each miss needs.
+        //
+        // Constraints honored here: DX9 untouched (DX11-gated), native DX11
+        // techniques untouched (only reached when no supported technique
+        // exists), no disk rewriting, no per-draw generation (once-only log
+        // + cache-key set), aggressive mode OFF by default.
+
+        using FnTechniqueGetNumPasses = unsigned short(__thiscall*)(const void*);
+        using FnTechniqueGetPass = void* (__thiscall*)(void*, unsigned short);
+        using FnPassHasVertexProgram = bool(__thiscall*)(const void*);
+        using FnPassHasFragmentProgram = bool(__thiscall*)(const void*);
+        using FnPassGetVertexProgramName =
+            const std::string& (__thiscall*)(const void*);
+        using FnPassGetFragmentProgramName =
+            const std::string& (__thiscall*)(const void*);
+        using FnPassGetNumTexUnits = unsigned short(__thiscall*)(const void*);
+        using FnResourceGetName =
+            const std::string& (__thiscall*)(const void*);
+
+        struct OgreCompatPassApi
+        {
+            FnTechniqueGetNumPasses getNumPasses = nullptr;
+            FnTechniqueGetPass getPass = nullptr;
+            FnPassHasVertexProgram hasVertexProgram = nullptr;
+            FnPassHasFragmentProgram hasFragmentProgram = nullptr;
+            FnPassGetVertexProgramName getVertexProgramName = nullptr;
+            FnPassGetFragmentProgramName getFragmentProgramName = nullptr;
+            FnPassGetNumTexUnits getNumTexUnits = nullptr;
+            FnResourceGetName getResourceName = nullptr;
+
+            bool CanInspect() const
+            {
+                return getNumPasses != nullptr && getPass != nullptr &&
+                       hasVertexProgram != nullptr &&
+                       hasFragmentProgram != nullptr &&
+                       getVertexProgramName != nullptr &&
+                       getFragmentProgramName != nullptr;
+            }
+        };
+
+        const OgreCompatPassApi& CompatPassApi()
+        {
+            static const OgreCompatPassApi api = [] {
+                OgreCompatPassApi resolved;
+                resolved.getNumPasses =
+                    ResolveOgreExport<FnTechniqueGetNumPasses>(
+                        "?getNumPasses@Technique@Ogre@@QBEGXZ");
+                resolved.getPass =
+                    ResolveOgreExport<FnTechniqueGetPass>(
+                        "?getPass@Technique@Ogre@@QAEPAVPass@2@G@Z");
+                resolved.hasVertexProgram =
+                    ResolveOgreExport<FnPassHasVertexProgram>(
+                        "?hasVertexProgram@Pass@Ogre@@QBE_NXZ");
+                resolved.hasFragmentProgram =
+                    ResolveOgreExport<FnPassHasFragmentProgram>(
+                        "?hasFragmentProgram@Pass@Ogre@@QBE_NXZ");
+                resolved.getVertexProgramName =
+                    ResolveOgreExport<FnPassGetVertexProgramName>(
+                        "?getVertexProgramName@Pass@Ogre@@QBEABV?$basic_string@DU?"
+                        "$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+                resolved.getFragmentProgramName =
+                    ResolveOgreExport<FnPassGetFragmentProgramName>(
+                        "?getFragmentProgramName@Pass@Ogre@@QBEABV?$basic_string@DU?"
+                        "$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+                resolved.getNumTexUnits =
+                    ResolveOgreExport<FnPassGetNumTexUnits>(
+                        "?getNumTextureUnitStates@Pass@Ogre@@QBEGXZ");
+                resolved.getResourceName =
+                    ResolveOgreExport<FnResourceGetName>(
+                        "?getName@Resource@Ogre@@QBEABV?$basic_string@DU?"
+                        "$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+                return resolved;
+            }();
+            return api;
+        }
+
+        __declspec(noinline) static unsigned short GuardedGetNumPasses(
+            FnTechniqueGetNumPasses fn, const void* technique)
+        {
+            __try
+            {
+                return (fn != nullptr && technique != nullptr) ? fn(technique) : 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return 0;
+            }
+        }
+
+        __declspec(noinline) static void* GuardedGetPass(
+            FnTechniqueGetPass fn, void* technique, unsigned short index)
+        {
+            __try
+            {
+                return (fn != nullptr && technique != nullptr)
+                    ? fn(technique, index)
+                    : nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        __declspec(noinline) static bool GuardedHasProgram(
+            bool isVertex, const void* pass, bool fallback)
+        {
+            __try
+            {
+                const OgreCompatPassApi& api = CompatPassApi();
+                if (pass == nullptr)
+                {
+                    return false;
+                }
+                if (isVertex)
+                {
+                    return (api.hasVertexProgram != nullptr)
+                        ? api.hasVertexProgram(pass)
+                        : fallback;
+                }
+                return (api.hasFragmentProgram != nullptr)
+                    ? api.hasFragmentProgram(pass)
+                    : fallback;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return fallback;
+            }
+        }
+
+        __declspec(noinline) static bool GuardedCopyProgramName(
+            bool isVertex, const void* pass, std::string* out)
+        {
+            __try
+            {
+                const OgreCompatPassApi& api = CompatPassApi();
+                if (pass == nullptr || out == nullptr)
+                {
+                    return false;
+                }
+                if (isVertex && api.getVertexProgramName != nullptr)
+                {
+                    *out = api.getVertexProgramName(pass);
+                    return true;
+                }
+                if (!isVertex && api.getFragmentProgramName != nullptr)
+                {
+                    *out = api.getFragmentProgramName(pass);
+                    return true;
+                }
+                return false;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        __declspec(noinline) static bool GuardedCopyResourceName(
+            const void* material, std::string* out)
+        {
+            __try
+            {
+                const OgreCompatPassApi& api = CompatPassApi();
+                if (material == nullptr || out == nullptr ||
+                    api.getResourceName == nullptr)
+                {
+                    return false;
+                }
+                *out = api.getResourceName(material);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        struct CompatProbeState
+        {
+            std::mutex lock;
+            std::unordered_set<std::string> loggedLines;
+            std::unordered_set<std::string> cacheKeys;
+            std::atomic<uint64_t> nativeSupported { 0 };
+            std::atomic<uint64_t> familyRemaps { 0 };
+            std::atomic<uint64_t> fixedFunc { 0 };
+            std::atomic<uint64_t> aggressive { 0 };
+            std::atomic<uint64_t> unsupported { 0 };
+            std::atomic<uint64_t> skipped { 0 };
+            std::atomic<bool> apiWarned { false };
+            std::atomic<bool> resourcesWarned { false };
+        };
+
+        CompatProbeState& ProbeState()
+        {
+            static CompatProbeState state;
+            return state;
+        }
+
+        void LogCompatOnce(const std::string& line, LogLevel level)
+        {
+            CompatProbeState& state = ProbeState();
+            {
+                std::lock_guard<std::mutex> guard(state.lock);
+                if (!state.loggedLines.insert(line).second)
+                {
+                    return;
+                }
+            }
+            LogShimA(level, kLogTag, "%s", line.c_str());
+        }
+
+        bool NoteCompatCacheKey(const std::string& key)
+        {
+            CompatProbeState& state = ProbeState();
+            std::lock_guard<std::mutex> guard(state.lock);
+            if (state.cacheKeys.find(key) != state.cacheKeys.end())
+            {
+                return true;
+            }
+            state.cacheKeys.insert(key);
+            return false;
+        }
+
+        Dx11Compat::CompatConfig CurrentCompatConfig()
+        {
+            Dx11Compat::CompatConfig config;
+            config.compatEnabled =
+                s_dx11CompatEnabled.load(std::memory_order_acquire);
+            config.guardEnabled =
+                s_dx11GuardEnabled.load(std::memory_order_acquire);
+            config.aggressiveEnabled =
+                s_dx11AggressiveEnabled.load(std::memory_order_acquire);
+            return config;
+        }
+
+        // Best-effort legacy description for the FIRST pass of the source
+        // technique. Texture color-op is not resolved through the narrow ABI
+        // (TextureUnitState combine reads need a wider, proven surface), so
+        // single-texture passes assume the overwhelmingly common modulate
+        // combine; multi-texture passes are reported as-is and the pure
+        // policy marks 2+ units unsupported pending corpus telemetry.
+        Dx11Compat::LegacyPassDesc DescribeFirstPass(void* technique)
+        {
+            Dx11Compat::LegacyPassDesc desc;
+            if (technique == nullptr || !CompatPassApi().CanInspect())
+            {
+                return desc;
+            }
+            void* pass = GuardedGetPass(CompatPassApi().getPass, technique, 0);
+            if (pass == nullptr)
+            {
+                return desc;
+            }
+            desc.hasVertexRef = GuardedHasProgram(true, pass, false);
+            desc.hasFragmentRef = GuardedHasProgram(false, pass, false);
+            if (desc.hasVertexRef)
+            {
+                std::string vs;
+                if (GuardedCopyProgramName(true, pass, &vs))
+                {
+                    desc.vertexProgram = vs;
+                }
+            }
+            if (desc.hasFragmentRef)
+            {
+                std::string ps;
+                if (GuardedCopyProgramName(false, pass, &ps))
+                {
+                    desc.fragmentProgram = ps;
+                }
+            }
+            // Targets are not resolved through this narrow surface (that
+            // needs GpuProgram dereference); names alone drive the family
+            // table, and any technique that reaches this probe is already
+            // known-unsupported on DX11. Leave targets empty so
+            // ClassifyLegacyPass treats referenced programs as legacy.
+            if (CompatPassApi().getNumTexUnits != nullptr)
+            {
+                __try
+                {
+                    desc.textureUnits = static_cast<int>(
+                        CompatPassApi().getNumTexUnits(pass));
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    desc.textureUnits = 0;
+                }
+            }
+            if (desc.textureUnits == 1)
+            {
+                desc.colorOp0 = "modulate";
+            }
+            return desc;
+        }
+
+        void* ProbeDx11LegacyCompat(const std::string& schemeName,
+                                    void* material,
+                                    unsigned short lodIndex)
+        {
+            // DX9 untouched by construction.
+            if (!s_detectedDx11Atomic.load(std::memory_order_acquire))
+            {
+                return nullptr;
+            }
+            const Dx11Compat::CompatConfig config = CurrentCompatConfig();
+            if (!config.compatEnabled && !config.guardEnabled)
+            {
+                return nullptr;
+            }
+            if (!s_resourcesValidAtomic.load(std::memory_order_acquire))
+            {
+                CompatProbeState& state = ProbeState();
+                if (!state.resourcesWarned.exchange(true,
+                                                    std::memory_order_acq_rel))
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "[DX11COMPAT] probe disabled: renderer resources "
+                             "invalid; failing closed to stock fallback");
+                }
+                return nullptr;
+            }
+
+            const OgreTechniqueApi& techApi = TechniqueApi();
+            if (!techApi.Valid())
+            {
+                return nullptr;
+            }
+            if (!CompatPassApi().CanInspect())
+            {
+                CompatProbeState& state = ProbeState();
+                if (!state.apiWarned.exchange(true, std::memory_order_acq_rel))
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "[DX11COMPAT] pass-inspection ABI unavailable; "
+                             "compat probe fails closed to stock fallback");
+                }
+                return nullptr;
+            }
+
+            std::string materialName("<unknown>");
+            {
+                std::string probed;
+                if (GuardedCopyResourceName(material, &probed) && !probed.empty())
+                {
+                    materialName = probed;
+                }
+            }
+
+            // Collect every technique as a semantic-source candidate, even
+            // unsupported ones: the generator still needs the best template.
+            std::vector<Dx11Compat::TechniqueCandidate> candidates;
+            const unsigned short count =
+                techApi.getNumTechniques(material);
+            for (unsigned short i = 0; i < count; ++i)
+            {
+                void* technique = techApi.getTechnique(material, i);
+                if (technique == nullptr)
+                {
+                    continue;
+                }
+                Dx11Compat::TechniqueCandidate c;
+                c.scheme = std::string(techApi.getSchemeName(technique));
+                c.lod = techApi.getLodIndex(technique);
+                c.index = static_cast<size_t>(i);
+                c.supported = techApi.isSupported(technique);
+                candidates.push_back(std::move(c));
+            }
+            if (candidates.empty())
+            {
+                return nullptr;
+            }
+
+            const size_t sourceIndex =
+                Dx11Compat::SelectSourceTechniqueIndex(candidates, schemeName,
+                                                       lodIndex);
+            if (sourceIndex == Dx11Compat::kNoSourceTechnique)
+            {
+                return nullptr;
+            }
+            void* sourceTechnique = nullptr;
+            std::string sourceScheme("default");
+            for (const auto& c : candidates)
+            {
+                if (c.index == sourceIndex)
+                {
+                    sourceTechnique = techApi.getTechnique(
+                        material, static_cast<unsigned short>(c.index));
+                    sourceScheme = c.scheme.empty() ? "default" : c.scheme;
+                    break;
+                }
+            }
+
+            Dx11Compat::LegacyPassDesc desc = DescribeFirstPass(sourceTechnique);
+            const Dx11Compat::LegacyPassKind kind =
+                Dx11Compat::ClassifyLegacyPass(desc);
+            const Dx11Compat::CompatPath path =
+                Dx11Compat::DecideCompatPath(kind, desc, config, true);
+
+            char sourceLabel[192] = {};
+            snprintf(sourceLabel, sizeof(sourceLabel), "%s/%zu",
+                     sourceScheme.c_str(), sourceIndex);
+            const std::string cacheKey = Dx11Compat::BuildCompatCacheKey(
+                materialName, schemeName, lodIndex, sourceIndex,
+                Dx11Compat::CompatPathName(path));
+            const bool cached = NoteCompatCacheKey(cacheKey);
+
+            CompatProbeState& state = ProbeState();
+            switch (path)
+            {
+            case Dx11Compat::CompatPath::KeepNative:
+                state.nativeSupported.fetch_add(1, std::memory_order_relaxed);
+                break;
+            case Dx11Compat::CompatPath::FamilyRemap:
+            {
+                state.familyRemaps.fetch_add(1, std::memory_order_relaxed);
+                std::string mappedVs;
+                std::string mappedPs;
+                std::string family("legacy");
+                if (!desc.vertexProgram.empty() &&
+                    Dx11Compat::MapLegacyFamilyProgram(desc.vertexProgram,
+                                                       mappedVs))
+                {
+                    family = desc.vertexProgram;
+                }
+                else if (!desc.fragmentProgram.empty() &&
+                         Dx11Compat::MapLegacyFamilyProgram(desc.fragmentProgram,
+                                                            mappedPs))
+                {
+                    family = desc.fragmentProgram;
+                }
+                LogCompatOnce(Dx11Compat::FormatFamilyRemapLog(
+                                  materialName, family, desc.vertexProgram,
+                                  desc.fragmentProgram),
+                              LogLevel::Info);
+                LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
+                                  materialName, sourceLabel, path, cached),
+                              LogLevel::Info);
+                // Instantiation stub: the SM4 adapters are deployed and the
+                // cache key is reserved, but cloning the source technique
+                // through createTechnique/createPass/setProgram is withheld
+                // until that ABI surface is proven. Fail closed to the
+                // guard so this never half-renders.
+                break;
+            }
+            case Dx11Compat::CompatPath::FixedFuncTextured:
+            case Dx11Compat::CompatPath::FixedFuncUntextured:
+                state.fixedFunc.fetch_add(1, std::memory_order_relaxed);
+                LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
+                                  materialName, sourceLabel, path, cached),
+                              LogLevel::Info);
+                break;
+            case Dx11Compat::CompatPath::AggressiveGeneric:
+                state.aggressive.fetch_add(1, std::memory_order_relaxed);
+                LogCompatOnce(Dx11Compat::FormatUnsupportedLog(
+                                  materialName, desc.vertexProgram,
+                                  desc.fragmentProgram, true),
+                              LogLevel::Warn);
+                break;
+            case Dx11Compat::CompatPath::SkipShaderless:
+            default:
+                if (kind == Dx11Compat::LegacyPassKind::UnknownCustom)
+                {
+                    state.unsupported.fetch_add(1, std::memory_order_relaxed);
+                    if (config.guardEnabled)
+                    {
+                        LogCompatOnce(Dx11Compat::FormatUnsupportedLog(
+                                          materialName, desc.vertexProgram,
+                                          desc.fragmentProgram, false),
+                                      LogLevel::Warn);
+                    }
+                }
+                else
+                {
+                    state.unsupported.fetch_add(1, std::memory_order_relaxed);
+                    if (config.guardEnabled)
+                    {
+                        LogCompatOnce(Dx11Compat::FormatShaderlessSkippedLog(
+                                          materialName,
+                                          static_cast<unsigned>(sourceIndex),
+                                          0u, desc.vertexProgram,
+                                          desc.fragmentProgram),
+                                      LogLevel::Warn);
+                    }
+                }
+                if (config.guardEnabled)
+                {
+                    state.skipped.fetch_add(1, std::memory_order_relaxed);
+                }
+                break;
+            }
+            return nullptr;
+        }
+
         class EnhancedSchemeFallbackListener
         {
         public:
@@ -1675,8 +2237,22 @@ namespace BZROpenShim::RenderProfiles
                                                unsigned short lodIndex,
                                                const void* /*renderable*/)
             {
-                return ResolveBaseSchemeTechnique(schemeName, originalMaterial,
-                                                  lodIndex);
+                void* base = ResolveBaseSchemeTechnique(schemeName,
+                                                        originalMaterial,
+                                                        lodIndex);
+                if (base != nullptr)
+                {
+                    ProbeState().nativeSupported.fetch_add(
+                        1, std::memory_order_relaxed);
+                    return base;
+                }
+                // No supported technique exists: DX11 legacy probe (fixed
+                // function + SM2/SM3 families) with once-only diagnostics.
+                // Always fails closed to nullptr today; the ladder rung is
+                // recorded so technique instantiation can be enabled once
+                // its ABI is proven.
+                ProbeDx11LegacyCompat(schemeName, originalMaterial, lodIndex);
+                return nullptr;
             }
 
             virtual bool afterIlluminationPassesCreated(void* /*technique*/)
@@ -2306,6 +2882,13 @@ namespace BZROpenShim::RenderProfiles
         AcquireSRWLockExclusive(&s_stateLock);
         LoadConfigLocked();
         s_resourcesValid = ValidateDeployedResourceSet();
+        s_resourcesValidAtomic.store(s_resourcesValid, std::memory_order_release);
+        if (!s_resourcesValid)
+        {
+            LogShimA(LogLevel::Warn, kLogTag,
+                     "[DX11COMPAT] compat feature unavailable: renderer resource "
+                     "set invalid (see Enhanced resource warning above)");
+        }
 
         // The backend transport does NOT run here: it is triggered
         // synchronously by the intercepted startup ConfigFile::load (armed in
