@@ -1,4 +1,5 @@
 #include "bzr_hooks.h"
+#include "bzr_object_layout.h"
 #include "game_state.h"
 #include "openshim_ini.h"
 #include "openshim_preset_migration.h"
@@ -696,6 +697,10 @@ namespace BZROpenShim
         constexpr size_t kObjectClassOdfLen = 16;
         constexpr size_t kObj76TransformOffset = 0x20;
         constexpr size_t kObj76GameObjectOffset = 0x8C;
+        static_assert(kGameObjectObjOffset == ObjectLayout::kGameObjectObj76,
+                      "obj76 offset disagrees with bzr_object_layout.h");
+        static_assert(kObj76GameObjectOffset == ObjectLayout::kObj76GameObject,
+                      "obj76 back-pointer disagrees with bzr_object_layout.h");
         constexpr size_t kOrdnanceSpeedOffset = 0x20;
         constexpr size_t kOrdnanceInvSpeedOffset = 0x24;
         constexpr size_t kOrdnanceVelocityOffset = 0x30;
@@ -728,7 +733,12 @@ namespace BZROpenShim
         // skipped every ordnance in the list. It stayed invisible because
         // TeamFilterConfig defaults affectAllies/affectEnemies both true, which
         // short-circuits to true before the read is ever reached.
+        // Confirmed on the shipped image: Ordnance::Init stores its owner obj76
+        // argument ([ebp+0xC]) here at 0x00585292, and zeroes the paired handle
+        // at +0xDC (0x005852A4) when that argument is null.
         constexpr size_t kOrdnanceOwnerObjOffset = 0xD8;
+        static_assert(kOrdnanceOwnerObjOffset == ObjectLayout::kOrdnanceOwnerObj,
+                      "ordnance owner obj76 disagrees with bzr_object_layout.h");
         constexpr uintptr_t kOrdnanceListAddr = 0x0072665C;
         constexpr size_t kShieldTowerClassShieldMinXOffset = 0x160;
         constexpr size_t kShieldTowerClassShieldMaxXOffset = 0x16C;
@@ -2879,11 +2889,57 @@ namespace BZROpenShim
         //     +0x10C / +0x110, and the walker records "pos" size=12 at +0x108.
         static constexpr size_t kGameObjectActualTeamOffset = 0x174;
         static constexpr size_t kGameObjectPerceivedTeamOffset = 0x180;
-        // GameObject::SetOwner/GetOwner use this handle field. Redux's
-        // constructor zeros +0x21C/+0x220/+0x224; 0x00462610 resolves +0x21C
-        // as targetHandle, while owner writers at 0x004A8255 and 0x004AB3E1
-        // store GetHandle results at +0x220. This is complete-object relative.
-        static constexpr size_t kGameObjectOwnerHandleOffset = 0x220;
+        // CORRECTED 2026-09-19. This was 0x220, which is a different field in
+        // the tug/cargo path, so the owner walk below never once resolved an
+        // owner and PreserveSprayEmitterOwner wrote a craft handle into live
+        // engine state. The owner field is +0x224, taken from the engine's own
+        // accessor pair rather than from inline stores that merely look like
+        // one:
+        //
+        //   GameObject::SetOwner 0x0046FC40
+        //     0x0046FC50 call 0x00462380 (GetHandle) on the argument
+        //     0x0046FC58 mov [ecx+0x224], eax
+        //     0x0046FC63 mov [edx+0x224], 0        (null owner branch)
+        //   GameObject::GetOwner 0x004B0400
+        //     0x004B040A mov ecx, [eax+0x224]
+        //     0x004B0411 call 0x004DA060 (GetObj)
+        //
+        // Reached from the Lua bindings: the "SetOwner"/"GetOwner" name
+        // literals at .rdata 0x0087C4E4/0x0087C4F0 are entries 0 and 1 of the
+        // table at 0x00871D28, whose function pointers are 0x00500820 and
+        // 0x00500860; those tail into the handle-level pair 0x005C89D0 /
+        // 0x005C8A10, which call the two addresses above.
+        //
+        // Complete-object relative, unlike the GetTeam family: the call site at
+        // 0x005AA91C does `mov ecx, this` / `sub ecx, 0x18` before calling
+        // GetOwner, and re-adds 0x18 to the returned pointer before using it as
+        // an interface. So this offset shares the base of
+        // kGameObjectPerceivedTeamOffset and needs no rebasing.
+        //
+        // What +0x220 actually is: a tug/cargo claim handle. At 0x004A8229 the
+        // engine tests it for zero, lazily fills it with the object's *own*
+        // GetHandle when the carrier slot +0xFC is empty (0x004A8255), and
+        // clears it again at 0x004A828A when the carrier at +0xF8 is not class
+        // 'TUG ' (0x54554700). Writing a foreign handle there both fails to
+        // record an owner and suppresses that initialization.
+        static constexpr size_t kGameObjectOwnerHandleOffset = 0x224;
+
+        // Ties the offsets this file shares with bzr_object_layout.h, whose
+        // host test pins them to the disassembly evidence. Editing either side
+        // alone is a build break rather than a silent behaviour change.
+        static_assert(kGameObjectActualTeamOffset ==
+                          ObjectLayout::kGameObjectActualTeam,
+                      "actual team offset disagrees with bzr_object_layout.h");
+        static_assert(kGameObjectPerceivedTeamOffset ==
+                          ObjectLayout::kGameObjectPerceivedTeam,
+                      "perceived team offset disagrees with bzr_object_layout.h");
+        static_assert(kGameObjectOwnerHandleOffset ==
+                          ObjectLayout::kGameObjectOwnerHandle,
+                      "owner handle offset disagrees with bzr_object_layout.h");
+        static_assert(kGameObjectOwnerHandleOffset !=
+                          ObjectLayout::kGameObjectTugCargoClaim,
+                      "owner handle must not alias the tug/cargo claim field");
+
         static constexpr int kGameTeamMin = 0;
         static constexpr int kGameTeamMax = 15;
         static constexpr size_t kProcessOwnerObjectOffset = 0x34;
@@ -36728,7 +36784,17 @@ namespace BZROpenShim
                 return;
             }
             if (ownerHandle == 0)
+            {
+                // Only the first hop is traced. Depth 1 with a zero owner is
+                // the ordinary direct-fire case stock already handles, and is
+                // also what a wrong owner offset looks like, so the live matrix
+                // needs to see it; deeper hops would just repeat the terminator
+                // once per chain and burn the budget.
+                if (depth == 1)
+                    TraceOwnedObjectReveal(L"stop", L"no-owner", child,
+                                           nullptr, 0, 0, 0, depth);
                 return;
+            }
 
             void* owner = GameObjectFromHandleGog(ownerHandle);
             if (!owner || owner == current || owner == victim)
@@ -36776,6 +36842,17 @@ namespace BZROpenShim
     // call-site wrapper below preserves the SprayBomb's verified +0xD8 creator
     // on the returned emitter. callerFrame is SprayBomb::Hit's EBP; its
     // local_1B0 is the live SprayBomb pointer in exact Redux 2.2.301.
+    //
+    // Both frame facts re-verified against the shipped GOG image 2026-09-19:
+    //   0x005DB095 mov [ebp-0x1B0], ecx   -- SprayBomb `this` on entry
+    //   0x005DB37F call 0x004E1190        -- the patched GameObjectClass::Build
+    //   0x005DB384 mov [ebp-0x1D0], eax   -- the returned SprayBuilding
+    // and the payload side that makes the emitter the damager at all:
+    //   0x005DAB62 mov eax, [SprayBuilding+0xF4]   -- its obj76
+    //   0x005DAB73 call 0x00586FF0                 -- OrdnanceClass::Build(mat, obj76)
+    //   0x005DAB84 mov [payload+0x80], 0           -- bSend, the never-replicated marker
+    // with Ordnance::Init storing that owner obj76 at +0xD8 (0x00585292) and
+    // its handle at +0xDC (0x005852A4).
     static void* __cdecl PreserveSprayEmitterOwner(void* deployedEmitter,
                                                    void* callerFrame)
     {
@@ -36810,9 +36887,24 @@ namespace BZROpenShim
             return deployedEmitter;
         }
 
-        if (previousOwnerHandle != 0 ||
-            !TryGetGameObjectHandleValue(owner, ownerHandle))
+        // Traced, not silent: a live run has to be able to tell "the call-site
+        // patch never installed" apart from "it installed and declined", which
+        // is exactly the distinction the 0x220 offset bug hid. A stock emitter
+        // is built with a zero owner, so a non-zero read here means the field
+        // is not the one this code thinks it is.
+        if (previousOwnerHandle != 0)
+        {
+            TraceOwnedObjectReveal(L"skip", L"emitter-owner-not-empty",
+                                   deployedEmitter, owner, previousOwnerHandle,
+                                   0, 0, 0);
             return deployedEmitter;
+        }
+        if (!TryGetGameObjectHandleValue(owner, ownerHandle))
+        {
+            TraceOwnedObjectReveal(L"skip", L"emitter-owner-unhandled",
+                                   deployedEmitter, owner, 0, 0, 0, 0);
+            return deployedEmitter;
+        }
 
         __try
         {
