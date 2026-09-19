@@ -38,7 +38,6 @@ fragment_program OSE_FixedFunc_Textured_fragment hlsl
     entry_point fixedfunc_fragment
     default_params
     {
-        param_named diffuseMap int 0
         param_named_auto sceneAmbient derived_ambient_light_colour
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
@@ -54,7 +53,6 @@ fragment_program OSE_FixedFunc_Textured_fragment_replace hlsl
     preprocessor_defines COMPAT_OP_REPLACE
     default_params
     {
-        param_named diffuseMap int 0
         param_named_auto sceneAmbient derived_ambient_light_colour
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
@@ -70,7 +68,6 @@ fragment_program OSE_FixedFunc_Textured_fragment_add hlsl
     preprocessor_defines COMPAT_OP_ADD
     default_params
     {
-        param_named diffuseMap int 0
         param_named_auto sceneAmbient derived_ambient_light_colour
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
@@ -132,7 +129,6 @@ fragment_program OSE_Compat_Effect_fragment hlsl
     preprocessor_defines COMPAT_FAMILY_EFFECT
     default_params
     {
-        param_named diffuseMap int 0
         param_named_auto sceneAmbient derived_ambient_light_colour
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
@@ -163,7 +159,6 @@ fragment_program OSE_Compat_Textured_fragment hlsl
     preprocessor_defines COMPAT_FAMILY_TEXTURED
     default_params
     {
-        param_named diffuseMap int 0
         param_named_auto sceneAmbient derived_ambient_light_colour
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
@@ -223,7 +218,6 @@ fragment_program OSE_Compat_Sky_fragment hlsl
     preprocessor_defines COMPAT_FAMILY_SKY
     default_params
     {
-        param_named diffuseMap int 0
         param_named_auto sceneAmbient derived_ambient_light_colour
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
@@ -254,7 +248,6 @@ fragment_program OSE_Compat_Base_fragment hlsl
     preprocessor_defines COMPAT_FAMILY_BASE
     default_params
     {
-        param_named diffuseMap int 0
         param_named_auto sceneAmbient derived_ambient_light_colour
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
@@ -285,7 +278,6 @@ fragment_program OSE_Compat_SimpleOneTex_fragment hlsl
     preprocessor_defines COMPAT_FAMILY_SIMPLEONETEX
     default_params
     {
-        param_named diffuseMap int 0
         param_named_auto sceneAmbient derived_ambient_light_colour
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
@@ -316,7 +308,6 @@ fragment_program OSE_Compat_Ui_fragment hlsl
     preprocessor_defines COMPAT_FAMILY_UI
     default_params
     {
-        param_named diffuseMap int 0
         param_named_auto sceneAmbient derived_ambient_light_colour
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
@@ -347,7 +338,6 @@ fragment_program OSE_Compat_Terrain_fragment hlsl
     preprocessor_defines COMPAT_FAMILY_TERRAIN
     default_params
     {
-        param_named diffuseMap int 0
         param_named_auto sceneAmbient derived_ambient_light_colour
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
