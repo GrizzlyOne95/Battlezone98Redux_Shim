@@ -1721,12 +1721,12 @@ namespace BZROpenShim::RenderProfiles
         // the narrow Ogre ABI needed to inspect techniques/passes, builds a
         // LegacyPassDesc, classifies it, logs once per unique miss, bumps
         // counters, and fails closed to nullptr (Ogre's stock answer) when
-        // no compat path can be proven. Full cached technique instantiation
-        // (clone source technique, swap in OSE_Compat_*/OSE_FixedFunc_* SM4
-        // programs, cache by BuildCompatCacheKey) is the defined next step
-        // once the createTechnique/createPass/setProgram ABI is proven; until
-        // then the probe converts exception floods into bounded diagnostics
-        // and records which ladder rung each miss needs.
+        // no compat path can be proven. The first instantiation slice now
+        // deep-clones one-pass source techniques, swaps in
+        // OSE_Compat_*/OSE_FixedFunc_* SM4 programs, reloads the parent
+        // material so Ogre recompiles its supported-technique table, and
+        // returns the generated technique directly. Multi-pass and aggressive
+        // conversion remain diagnostic-only until each pass can be classified.
         //
         // Constraints honored here: DX9 untouched (DX11-gated), native DX11
         // techniques untouched (only reached when no supported technique
@@ -1744,6 +1744,16 @@ namespace BZROpenShim::RenderProfiles
         using FnPassGetNumTexUnits = unsigned short(__thiscall*)(const void*);
         using FnResourceGetName =
             const std::string& (__thiscall*)(const void*);
+        using FnMaterialCreateTechnique = void* (__thiscall*)(void*);
+        using FnMaterialRemoveTechnique = void(__thiscall*)(void*, unsigned short);
+        using FnMaterialNotifyNeedsRecompile = void(__thiscall*)(void*);
+        using FnTechniqueAssign = void* (__thiscall*)(void*, const void*);
+        using FnTechniqueSetSchemeName =
+            void(__thiscall*)(void*, const std::string&);
+        using FnTechniqueSetLodIndex = void(__thiscall*)(void*, unsigned short);
+        using FnPassSetProgram =
+            void(__thiscall*)(void*, const std::string&, bool);
+        using FnResourceLoad = void(__thiscall*)(void*, bool);
 
         struct OgreCompatPassApi
         {
@@ -1797,6 +1807,69 @@ namespace BZROpenShim::RenderProfiles
                     ResolveOgreExport<FnResourceGetName>(
                         "?getName@Resource@Ogre@@QBEABV?$basic_string@DU?"
                         "$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+                return resolved;
+            }();
+            return api;
+        }
+
+        struct OgreCompatMutationApi
+        {
+            FnMaterialCreateTechnique createTechnique = nullptr;
+            FnMaterialRemoveTechnique removeTechnique = nullptr;
+            FnMaterialNotifyNeedsRecompile notifyNeedsRecompile = nullptr;
+            FnTechniqueAssign assignTechnique = nullptr;
+            FnTechniqueSetSchemeName setSchemeName = nullptr;
+            FnTechniqueSetLodIndex setLodIndex = nullptr;
+            FnPassSetProgram setVertexProgram = nullptr;
+            FnPassSetProgram setFragmentProgram = nullptr;
+            FnResourceLoad loadResource = nullptr;
+
+            bool CanInstantiate() const
+            {
+                return createTechnique != nullptr &&
+                       assignTechnique != nullptr &&
+                       setSchemeName != nullptr &&
+                       setLodIndex != nullptr &&
+                       setVertexProgram != nullptr &&
+                       setFragmentProgram != nullptr &&
+                       loadResource != nullptr;
+            }
+        };
+
+        const OgreCompatMutationApi& CompatMutationApi()
+        {
+            static const OgreCompatMutationApi api = [] {
+                OgreCompatMutationApi resolved;
+                resolved.createTechnique =
+                    ResolveOgreExport<FnMaterialCreateTechnique>(
+                        "?createTechnique@Material@Ogre@@QAEPAVTechnique@2@XZ");
+                resolved.removeTechnique =
+                    ResolveOgreExport<FnMaterialRemoveTechnique>(
+                        "?removeTechnique@Material@Ogre@@QAEXG@Z");
+                resolved.notifyNeedsRecompile =
+                    ResolveOgreExport<FnMaterialNotifyNeedsRecompile>(
+                        "?_notifyNeedsRecompile@Material@Ogre@@QAEXXZ");
+                resolved.assignTechnique =
+                    ResolveOgreExport<FnTechniqueAssign>(
+                        "??4Technique@Ogre@@QAEAAV01@ABV01@@Z");
+                resolved.setSchemeName =
+                    ResolveOgreExport<FnTechniqueSetSchemeName>(
+                        "?setSchemeName@Technique@Ogre@@QAEXABV?$basic_string@DU?"
+                        "$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+                resolved.setLodIndex =
+                    ResolveOgreExport<FnTechniqueSetLodIndex>(
+                        "?setLodIndex@Technique@Ogre@@QAEXG@Z");
+                resolved.setVertexProgram =
+                    ResolveOgreExport<FnPassSetProgram>(
+                        "?setVertexProgram@Pass@Ogre@@QAEXABV?$basic_string@DU?"
+                        "$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+                resolved.setFragmentProgram =
+                    ResolveOgreExport<FnPassSetProgram>(
+                        "?setFragmentProgram@Pass@Ogre@@QAEXABV?$basic_string@DU?"
+                        "$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+                resolved.loadResource =
+                    ResolveOgreExport<FnResourceLoad>(
+                        "?load@Resource@Ogre@@UAEX_N@Z");
                 return resolved;
             }();
             return api;
@@ -2022,6 +2095,143 @@ namespace BZROpenShim::RenderProfiles
             return desc;
         }
 
+        void RestoreMaterialAfterCompatFailure(void* material,
+                                               unsigned short createdIndex)
+        {
+            const OgreCompatMutationApi& mutate = CompatMutationApi();
+            try
+            {
+                if (mutate.removeTechnique != nullptr)
+                {
+                    mutate.removeTechnique(material, createdIndex);
+                }
+                if (mutate.notifyNeedsRecompile != nullptr)
+                {
+                    mutate.notifyNeedsRecompile(material);
+                }
+                if (mutate.loadResource != nullptr)
+                {
+                    mutate.loadResource(material, false);
+                }
+            }
+            catch (...)
+            {
+                // The compatibility path is best-effort. Never allow cleanup
+                // of a failed generated technique to escape into Ogre's render
+                // loop; the caller will fail closed to the stock fallback.
+            }
+        }
+
+        void* InstantiateDx11CompatTechnique(
+            void* material,
+            void* sourceTechnique,
+            const std::string& schemeName,
+            unsigned short lodIndex,
+            Dx11Compat::CompatPath path,
+            const Dx11Compat::LegacyPassDesc& desc)
+        {
+            if (material == nullptr || sourceTechnique == nullptr)
+            {
+                return nullptr;
+            }
+
+            const OgreCompatPassApi& inspect = CompatPassApi();
+            const OgreCompatMutationApi& mutate = CompatMutationApi();
+            const OgreTechniqueApi& techApi = TechniqueApi();
+            if (!inspect.CanInspect() || !mutate.CanInstantiate() ||
+                !techApi.Valid())
+            {
+                return nullptr;
+            }
+
+            // First implementation slice: one-pass techniques only. The clone
+            // is deep, so all render state and texture units survive unchanged;
+            // multi-pass conversion needs per-pass classification before it is
+            // safe to retarget and is deliberately left for the next slice.
+            if (GuardedGetNumPasses(inspect.getNumPasses, sourceTechnique) != 1)
+            {
+                return nullptr;
+            }
+
+            std::string targetVs;
+            std::string targetPs;
+            switch (path)
+            {
+            case Dx11Compat::CompatPath::FamilyRemap:
+                if (!desc.hasVertexRef || !desc.hasFragmentRef ||
+                    !Dx11Compat::MapLegacyFamilyProgram(desc.vertexProgram,
+                                                        targetVs) ||
+                    !Dx11Compat::MapLegacyFamilyProgram(desc.fragmentProgram,
+                                                        targetPs))
+                {
+                    return nullptr;
+                }
+                break;
+            case Dx11Compat::CompatPath::FixedFuncTextured:
+                targetVs = Dx11Compat::FixedFuncTexturedVertex();
+                targetPs = Dx11Compat::FixedFuncTexturedFragment();
+                break;
+            case Dx11Compat::CompatPath::FixedFuncUntextured:
+                targetVs = Dx11Compat::FixedFuncUntexturedVertex();
+                targetPs = Dx11Compat::FixedFuncUntexturedFragment();
+                break;
+            default:
+                return nullptr;
+            }
+
+            const unsigned short createdIndex = techApi.getNumTechniques(material);
+            void* generated = nullptr;
+            try
+            {
+                generated = mutate.createTechnique(material);
+                if (generated == nullptr)
+                {
+                    return nullptr;
+                }
+
+                // Ogre 1.10's own RTSS uses this exact construction pattern:
+                // createTechnique(); *dst = *src; then retarget the clone.
+                // Technique::operator= deep-copies every Pass and each Pass
+                // deep-copies its TextureUnitStates and render state.
+                mutate.assignTechnique(generated, sourceTechnique);
+                mutate.setSchemeName(generated, schemeName);
+                mutate.setLodIndex(generated, lodIndex);
+
+                void* pass = GuardedGetPass(inspect.getPass, generated, 0);
+                if (pass == nullptr)
+                {
+                    RestoreMaterialAfterCompatFailure(material, createdIndex);
+                    return nullptr;
+                }
+
+                mutate.setVertexProgram(pass, targetVs, true);
+                mutate.setFragmentProgram(pass, targetPs, true);
+
+                // setSchemeName/setProgram call _notifyNeedsRecompile(), which
+                // unloads a loaded Material. Resource::load(false) is therefore
+                // not optional bookkeeping: prepareImpl recompiles the Material,
+                // rebuilds mSupportedTechniques / scheme+LOD lookup, and loadImpl
+                // loads the newly referenced SM4 programs before we hand Ogre the
+                // generated Technique from handleSchemeNotFound.
+                mutate.loadResource(material, false);
+
+                if (!techApi.isSupported(generated))
+                {
+                    RestoreMaterialAfterCompatFailure(material, createdIndex);
+                    return nullptr;
+                }
+                return generated;
+            }
+            catch (...)
+            {
+                if (generated != nullptr)
+                {
+                    RestoreMaterialAfterCompatFailure(material, createdIndex);
+                }
+                return nullptr;
+            }
+        }
+
         void* ProbeDx11LegacyCompat(const std::string& schemeName,
                                     void* material,
                                     unsigned short lodIndex)
@@ -2133,6 +2343,14 @@ namespace BZROpenShim::RenderProfiles
                 Dx11Compat::CompatPathName(path));
             const bool cached = NoteCompatCacheKey(cacheKey);
 
+            // A miss may be evaluated many times in one frame. Reserve the
+            // cache key before mutation so a failed conversion also cannot
+            // synthesize one Technique per draw.
+            if (cached && path != Dx11Compat::CompatPath::KeepNative)
+            {
+                return nullptr;
+            }
+
             CompatProbeState& state = ProbeState();
             switch (path)
             {
@@ -2161,23 +2379,41 @@ namespace BZROpenShim::RenderProfiles
                                   materialName, family, desc.vertexProgram,
                                   desc.fragmentProgram),
                               LogLevel::Info);
-                LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
-                                  materialName, sourceLabel, path, cached),
-                              LogLevel::Info);
-                // Instantiation stub: the SM4 adapters are deployed and the
-                // cache key is reserved, but cloning the source technique
-                // through createTechnique/createPass/setProgram is withheld
-                // until that ABI surface is proven. Fail closed to the
-                // guard so this never half-renders.
+                void* generated = InstantiateDx11CompatTechnique(
+                    material, sourceTechnique, schemeName, lodIndex, path, desc);
+                if (generated != nullptr)
+                {
+                    LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
+                                      materialName, sourceLabel, path, false),
+                                  LogLevel::Info);
+                    return generated;
+                }
+                LogCompatOnce(
+                    "[DX11COMPAT] instantiation failed material=" + materialName +
+                        " path=family-remap action=stock-fallback",
+                    LogLevel::Warn);
                 break;
             }
             case Dx11Compat::CompatPath::FixedFuncTextured:
             case Dx11Compat::CompatPath::FixedFuncUntextured:
+            {
                 state.fixedFunc.fetch_add(1, std::memory_order_relaxed);
-                LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
-                                  materialName, sourceLabel, path, cached),
-                              LogLevel::Info);
+                void* generated = InstantiateDx11CompatTechnique(
+                    material, sourceTechnique, schemeName, lodIndex, path, desc);
+                if (generated != nullptr)
+                {
+                    LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
+                                      materialName, sourceLabel, path, false),
+                                  LogLevel::Info);
+                    return generated;
+                }
+                LogCompatOnce(
+                    "[DX11COMPAT] instantiation failed material=" + materialName +
+                        " path=" + Dx11Compat::CompatPathName(path) +
+                        " action=stock-fallback",
+                    LogLevel::Warn);
                 break;
+            }
             case Dx11Compat::CompatPath::AggressiveGeneric:
                 state.aggressive.fetch_add(1, std::memory_order_relaxed);
                 LogCompatOnce(Dx11Compat::FormatUnsupportedLog(
@@ -2246,13 +2482,12 @@ namespace BZROpenShim::RenderProfiles
                         1, std::memory_order_relaxed);
                     return base;
                 }
-                // No supported technique exists: DX11 legacy probe (fixed
-                // function + SM2/SM3 families) with once-only diagnostics.
-                // Always fails closed to nullptr today; the ladder rung is
-                // recorded so technique instantiation can be enabled once
-                // its ABI is proven.
-                ProbeDx11LegacyCompat(schemeName, originalMaterial, lodIndex);
-                return nullptr;
+                // No supported technique exists: DX11 legacy compatibility
+                // ladder (fixed function + known SM2/SM3 families). The probe
+                // may synthesize one cached SM4 Technique and return it
+                // directly, matching Ogre RTSS's handleSchemeNotFound pattern.
+                return ProbeDx11LegacyCompat(schemeName, originalMaterial,
+                                             lodIndex);
             }
 
             virtual bool afterIlluminationPassesCreated(void* /*technique*/)
