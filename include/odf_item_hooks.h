@@ -13,9 +13,12 @@
 // FileData ctor 0x588E00 calls GetItemSize at 0x588E60 (result feeds malloc),
 // UseItem at 0x588E72 (result is the parse source), UnlockItem at 0x5893B4.
 // All three sites clean one pushed argument (add esp,4): __cdecl(const char*).
-// Live [RESOLVE] confirmation via a harness run is still pending; the sites
-// are require_unique with no fallback and re-verify their prologues at
-// install time, so a non-matching build simply keeps stock behavior.
+// Live bytes confirmed via Frida read on GOG 8D71F56C (ImageBase 0x400000,
+// no ASLR) during a harness-gated windowed run on 2026-09-15: entry bytes
+// match exactly, and the FileData filename hook installed cleanly (zero hits
+// at menu idle, as expected - class loads happen on mission start). The sites
+// stay require_unique with no fallback, so a non-matching build simply keeps
+// stock behavior.
 //
 // Copyright (C) 2026 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
