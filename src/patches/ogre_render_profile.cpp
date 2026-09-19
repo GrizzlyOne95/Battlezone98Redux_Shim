@@ -1903,6 +1903,19 @@ namespace BZROpenShim::RenderProfiles
             }
         }
 
+        __declspec(noinline) static unsigned short GuardedGetNumTexUnits(
+            FnPassGetNumTexUnits fn, const void* pass)
+        {
+            __try
+            {
+                return (fn != nullptr && pass != nullptr) ? fn(pass) : 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return 0;
+            }
+        }
+
         __declspec(noinline) static bool GuardedHasProgram(
             bool isVertex, const void* pass, bool fallback)
         {
@@ -2076,18 +2089,8 @@ namespace BZROpenShim::RenderProfiles
             // table, and any technique that reaches this probe is already
             // known-unsupported on DX11. Leave targets empty so
             // ClassifyLegacyPass treats referenced programs as legacy.
-            if (CompatPassApi().getNumTexUnits != nullptr)
-            {
-                __try
-                {
-                    desc.textureUnits = static_cast<int>(
-                        CompatPassApi().getNumTexUnits(pass));
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    desc.textureUnits = 0;
-                }
-            }
+            desc.textureUnits = static_cast<int>(
+                GuardedGetNumTexUnits(CompatPassApi().getNumTexUnits, pass));
             if (desc.textureUnits == 1)
             {
                 desc.colorOp0 = "modulate";
