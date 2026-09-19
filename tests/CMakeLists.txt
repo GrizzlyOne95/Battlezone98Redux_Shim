@@ -386,3 +386,35 @@ else()
     target_compile_options(enhanced_resource_bootstrap_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 add_test(NAME enhanced_resource_bootstrap_tests COMMAND enhanced_resource_bootstrap_tests)
+
+# Regression: the ODF item-hook trampoline must relocate whole instructions.
+# Relocating five bytes split `mov eax,[ebp+8]` and made the trampoline eat its
+# own return jump, which broke every engine item read and stopped the game
+# loading any mission. Header-only and engine-free, so it runs anywhere.
+add_executable(odf_item_prologue_tests
+    odf_item_prologue_tests.cpp
+)
+target_include_directories(odf_item_prologue_tests PRIVATE ../include)
+target_compile_features(odf_item_prologue_tests PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(odf_item_prologue_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(odf_item_prologue_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME odf_item_prologue_tests COMMAND odf_item_prologue_tests)
+# Render-effect intent (the EXU-facing renderer boundary). Engine-independent
+# by construction: the whole requested/supported/effective decision lives in
+# src/engine/render_effect_intent.cpp with no Windows, D3D11 or Ogre in it, and
+# the test drives it through a fake provider.
+add_executable(render_effect_intent_tests
+    render_effect_intent_tests.cpp
+    ../src/engine/render_effect_intent.cpp
+)
+target_include_directories(render_effect_intent_tests PRIVATE ../include)
+target_compile_features(render_effect_intent_tests PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(render_effect_intent_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(render_effect_intent_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME render_effect_intent_tests COMMAND render_effect_intent_tests)
