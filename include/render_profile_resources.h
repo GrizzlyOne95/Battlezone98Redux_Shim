@@ -18,7 +18,12 @@ namespace BZROpenShim::RenderProfiles
     // 2: Enhanced payload became canonical (PSSM v2, the N.V diffuse repair,
     //    detail-map modulation, detail-derived normals). A v1 deployment next
     //    to a v2 DLL renders the superseded lighting, so the pairing must fail.
-    constexpr char kEnhancedResourcesVersion[] = "2";
+    // 3: DX11 legacy material compatibility payload
+    //    (openshim_dx11_fixedfunc.program/.hlsl: OSE_FixedFunc_* SM4
+    //    emulation plus OSE_Compat_* family adapters). A v2 deployment next
+    //    to a v3 DLL would enable the compat probe with missing shader
+    //    assets, so the pairing must fail closed instead.
+    constexpr char kEnhancedResourcesVersion[] = "3";
 
     // Repository-relative name of the mandatory resource directory, as laid
     // out under the game install.
