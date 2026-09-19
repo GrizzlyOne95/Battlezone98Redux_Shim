@@ -414,6 +414,37 @@ MpVehiclePreviewShadowScheme = 1
 ; answers the scheme miss with the material's own base-scheme technique
 ; instead, via Ogre's handleSchemeNotFound hook.
 EnhancedSchemeFallback = 1
+; Automatic DX11 legacy material compatibility for old mods
+; (Docs/DX11_LEGACY_MATERIAL_COMPATIBILITY.md). D3D11 has no fixed pipeline
+; and rejects SM2/SM3 targets, so legacy fixed-function passes and stock
+; BZR shader families (Effect_*/Textured_*/Untextured_*/Sky_*/Base_*,
+; simple_one_tex, UI, terrain) render black with per-draw exception spam
+; under DX11 while DX9 looks correct. This ladder remaps known families to
+; OpenShim-owned SM4 adapters and emulates true fixed-function passes with
+; OSE_FixedFunc_* shaders, preserving source pass state through clone
+; semantics and caching by (material, scheme, lod, source, variant). No mod
+; files are rewritten; DX9 and native DX11 materials are untouched.
+; Accepted: boolean. Default: ON (reference value; the player preset ships
+; OFF until the live DX11 mod corpus qualifies technique instantiation --
+; the probe fails closed to bounded diagnostics until then).
+; See also DX11ShaderlessDrawGuard / DX11LegacyMaterialAggressive below.
+DX11LegacyMaterialCompat = 1
+; DX11 shaderless-draw safety guard. When a draw would reach D3D11 without
+; both shaders bound, log once per unique material/technique/pass/program
+; combination ([DX11COMPAT] skipped shaderless draw ...) and count it for
+; the exit summary instead of throwing hundreds/thousands of exceptions.
+; Accepted: boolean. Default: ON. This changes no pixels by itself; it only
+; bounds diagnostics. Never the normal compatibility path.
+DX11ShaderlessDrawGuard = 1
+; Aggressive generic compatibility for unknown abandoned custom shaders.
+; OFF by default: when a programmable pass references unsupported programs
+; outside the known family table, ON substitutes a generic textured/
+; untextured SM4 adapter (visible-but-imperfect over black geometry) while
+; OFF logs once and lets the guard skip the draw safely. Do not enable
+; until tested against a representative mod corpus: it intentionally does
+; not preserve custom shader semantics.
+; Accepted: boolean. Default: OFF.
+DX11LegacyMaterialAggressive = 0
 
 [Startup]
 

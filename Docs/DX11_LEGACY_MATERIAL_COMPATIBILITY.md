@@ -2,9 +2,51 @@
 
 Date: 2026-09-16
 
-Status: design / implementation plan
+Status: implemented (Phase 1 probe + policy/resources; technique
+instantiation fails closed pending live ABI proof)
 
 Branch: `agent/dx11-fixedfunc-fallback`
+
+## Implementation notes (2026-09-19)
+
+Phase 1 is implemented on this branch: classification helpers, material /
+pass / program diagnostics, once-only `[DX11COMPAT]` logging, counters, and
+the DX11 shaderless-draw guard policy live in the pure engine module
+`include/dx11_legacy_material_compat.h` /
+`src/engine/dx11_legacy_material_compat.cpp` (covered by
+`tests/dx11_legacy_material_compat_tests.cpp`, wired into
+`scripts/run_render_profile_tests.ps1` and `tests/CMakeLists.txt`).
+
+The runtime probe is wired into `EnhancedSchemeFallbackListener::
+handleSchemeNotFound` in `src/patches/ogre_render_profile.cpp`: after the
+existing supported-technique ladder misses, it selects the best semantic
+source technique, inspects the first pass through a narrow defensive Ogre
+ABI, classifies it (fixed-function vs known legacy family vs unknown
+custom), logs once, bumps counters, and fails closed to `nullptr`. Cached
+technique instantiation (clone source technique, swap in `OSE_Compat_*` /
+`OSE_FixedFunc_*` SM4 programs, cache by `BuildCompatCacheKey`) is the
+defined next step once the createTechnique/createPass/setProgram ABI is
+proven against the shipped game binary; until then the probe converts
+exception floods into bounded diagnostics and records which ladder rung
+each miss needs.
+
+Phase 2/3 resources ship on this branch:
+`resources/renderer/enhanced/openshim_dx11_fixedfunc.program` +
+`openshim_dx11_fixedfunc-sm4.hlsl` (fixed-function textured/untextured SM4
+entry points plus per-family `OSE_Compat_*` adapters sharing that
+implementation). They are part of the mandatory set validated by
+`render_profile_resources` (version bumped 2 -> 3), so a partial install
+fails closed with one clear warning instead of a half-working path.
+
+Settings (`[Fixes] DX11LegacyMaterialCompat` / `DX11ShaderlessDrawGuard` /
+`DX11LegacyMaterialAggressive`) are parsed in `LoadConfigLocked` with
+defaults ON/ON/OFF. The player preset ships Compat=0 (off until the live
+DX11 corpus qualifies instantiation), Guard=1 (safety net, allowlisted in
+`scripts/run_ini_tests.ps1`), Aggressive=0. RTSS (Level 3) remains an
+investigation item: the shipped Ogre build's generator availability,
+ownership, thread requirements, and interaction with the scheme takeover
+are unproven, so the probe reports `rtss=generator-unavailable` and skips
+rather than guessing.
 
 ## Problem statement
 
