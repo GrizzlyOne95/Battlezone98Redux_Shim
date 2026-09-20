@@ -1,8 +1,27 @@
 #include <windows.h>
 
+// One version resource, three modules. Each project defines its own module
+// token so the shipped binaries identify themselves correctly: before the
+// split this file was winmm.dll-only, and compiling it unchanged into the
+// plugin made plugins/openshim.dll report InternalName "winmm.dll", which is
+// exactly the wrong answer for crash triage across a three-binary chain.
+//
+// Plain #ifdef and string literals only -- rc.exe's preprocessor is not the
+// C one, and # stringification of a define is not dependable there.
+#if defined(OPENSHIM_MODULE_BZLOADER)
+#  define OSM_FILENAME "bzloader.dll"
+#  define OSM_DESC     "BZR Open Shim - BZLoader plugin host"
+#elif defined(OPENSHIM_MODULE_PLUGIN)
+#  define OSM_FILENAME "openshim.dll"
+#  define OSM_DESC     "BZR Open Shim - runtime plugin"
+#else
+#  define OSM_FILENAME "winmm.dll"
+#  define OSM_DESC     "BZR Open Shim - Native Patch Extension"
+#endif
+
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,29
- PRODUCTVERSION 1,0,0,29
+ FILEVERSION 1,0,0,30
+ PRODUCTVERSION 1,0,0,30
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -18,13 +37,13 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName", "BZR Open Shim Contributors"
-            VALUE "FileDescription", "BZR Open Shim - Native Patch Extension"
-            VALUE "FileVersion", "1.0.0.29"
-            VALUE "InternalName", "winmm.dll"
+            VALUE "FileDescription", OSM_DESC
+            VALUE "FileVersion", "1.0.0.30"
+            VALUE "InternalName", OSM_FILENAME
             VALUE "LegalCopyright", "Copyright (C) 2025"
-            VALUE "OriginalFilename", "winmm.dll"
+            VALUE "OriginalFilename", OSM_FILENAME
             VALUE "ProductName", "BZR Open Shim"
-            VALUE "ProductVersion", "1.0.0.29"
+            VALUE "ProductVersion", "1.0.0.30"
         END
     END
     BLOCK "VarFileInfo"
