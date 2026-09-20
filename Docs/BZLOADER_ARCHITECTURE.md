@@ -136,14 +136,64 @@ BZPlugin_Load(host API)
 BZPlugin_Shutdown()
 ```
 
-Metadata includes stable ID, display name, plugin version, required ABI,
-supported game mask, optional exact executable build ID, optional dependency and
-conflict declarations, priority, and flags. Dependency/conflict strings are
-diagnostic-only in v1; no load-order promise is inferred from them.
+### Append-only structures
 
-The initial host API provides loader/ABI versions, detected game, loader
-directory, executable path, a PE timestamp/image-size build identifier, and a
-logging callback. Fields are append-only and guarded by `structSize`.
+Both shared structures are genuinely append-only, not append-only by promise.
+Each has a **mandatory v1 prefix** that every participant must provide, and a
+tail of optional fields a participant may omit because it was compiled against
+an older header:
+
+| Structure | Mandatory prefix ends at | Optional tail |
+| --- | --- | --- |
+| `BZHostApi` | `log` (`BZLOADER_HOST_API_V1_SIZE`) | `executableTimeDateStamp`, `executableSizeOfImage`, `getExecutableSha256` |
+| `BZPluginInfo` | `supportedGameMask` (`BZLOADER_PLUGIN_INFO_V1_SIZE`) | `supportedBuildHint`, `dependencies`, `conflicts`, `loadPriority`, `flags`, `supportedExecutableSha256` |
+
+`structSize` means two different things by direction, and this is the part
+plugin authors get wrong:
+
+- `BZHostApi::structSize` is **what the host filled**. A plugin must not read a
+  field `BZLOADER_HAS_FIELD` does not cover.
+- `BZPluginInfo::structSize` is the buffer **capacity** on the way in and the
+  count of bytes **written** on the way out. A plugin compiled against a newer
+  header clamps itself to the capacity it was handed rather than refusing an
+  older host, and reports what it wrote. `src/loader/test_plugin.cpp` is the
+  worked example.
+
+The host reads the `BZPluginInfo` tail only through the guarded accessors in
+`bzloader_catalog.h`, never by touching the field. A plugin that reports more
+than the host's buffer holds is rejected outright (`PluginTooLarge`) rather
+than read off the end of that buffer.
+
+Dependency/conflict strings remain diagnostic-only in v1; no load-order promise
+is inferred from them.
+
+### Executable identity: a hint and an authority
+
+There are deliberately two, because the cheap one is not trustworthy:
+
+- `BZHostApi::executableBuildHint` is `pe-<TimeDateStamp>-<SizeOfImage>`, plus
+  the same two values exposed as raw fields. It is cheap, always present, and
+  **weak**: builds can collide on it and a relinked but behaviourally identical
+  build can differ on it. It is a filter and a log token. `supportedBuildHint`
+  matches against it and means "probably the right build".
+- `BZHostApi::getExecutableSha256` computes the real digest of the running
+  image, lazily and at most once per process, so only a plugin that actually
+  pins an image pays the file read. `supportedExecutableSha256` is matched
+  against it and is authoritative. It fails closed on every way of not
+  knowing: host too old to offer the callback, digest uncomputable, or digest
+  different.
+
+Neither replaces OpenShim's own exact-build, hash, and expected-byte guards,
+which stay authoritative for anything that writes into the game image.
+
+### Game gating is fail-closed
+
+A recognised host requires its own bit in `supportedGameMask`. An
+**unrecognised** host admits only a plugin that declares exactly
+`BZ_GAME_MASK_ANY`: a plugin that enumerated the games it supports has already
+said this is not one of them, so enumerating both known games is not a
+wildcard. This is why the standalone lifecycle test still works -- its plugin
+patches nothing and legitimately claims `BZ_GAME_MASK_ANY`.
 
 ## Path and loading security
 
@@ -196,6 +246,10 @@ that never became active.
 - During the foundation stage only, missing BZLoader is logged and the existing
   monolithic OpenShim continues. After OpenShim moves behind the ABI, a missing
   loader or plugin must fail closed before OpenShim patching begins.
+- `bzloader.log` is append-only across runs, so every line carries the id of
+  the run that wrote it (`[s=...]`, also exported as `BZLoader_GetSessionId`).
+  Without that, any reader -- including the host integration test -- can credit
+  this run with a previous run's success.
 
 ## Phase plan and validation
 
@@ -211,7 +265,14 @@ that never became active.
    Wine/Proton GOG launch/deployment lanes. Loading/path/layout changes require
    all four lanes or an explicit unverified-lane release block.
 
-Foundation automation covers metadata sizing, ABI mismatch, IDs, game/build
-constraints, duplicate IDs, stable ordering, and plugin-directory derivation.
+Foundation automation covers metadata sizing and the append-only prefix/tail
+rules, ABI mismatch, IDs, fail-closed game gating (including an unrecognised
+host), build hint and exact-SHA-256 constraints, duplicate IDs, stable
+ordering, and plugin-directory derivation. The Win32 workflow runs
+`BZLoaderHostTest.exe` after MSBuild and fails the job on a nonzero exit, so
+the green check means Windows really loaded another DLL through the ABI and
+completed the lifecycle. These tests are written with an explicit `CHECK`
+macro rather than `assert`, because CI configures the suite as Release and
+`NDEBUG` would compile every assertion away.
 Native integration must additionally exercise missing directories, invalid DLLs,
 missing exports, load failures/exceptions, shutdown order, and diagnostic paths.
