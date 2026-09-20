@@ -152,6 +152,53 @@ jobs:
 
           Get-Content -LiteralPath build-summary.txt
 
+      # The OpenShim* exports are forwarding thunks now, so the one thing that
+      # must never drift is the export table itself: docs/OPENSHIM_SDK_V2.md
+      # makes GetModuleHandleA("winmm.dll") the documented discovery path, and a
+      # dropped or re-decorated name breaks Extra Utilities silently at runtime.
+      # The Linux lane checks the .def as text; this checks the real binary.
+      - name: Verify winmm.dll export parity
+        shell: pwsh
+        run: |
+          $dumpbin = Get-ChildItem -LiteralPath "${env:VCToolsInstallDir}bin" -Filter dumpbin.exe -File -Recurse |
+            Where-Object { $_.FullName -like '*\x86\dumpbin.exe' } |
+            Select-Object -First 1
+          if (-not $dumpbin) {
+            $dumpbin = Get-ChildItem -LiteralPath "${env:ProgramFiles}\Microsoft Visual Studio" -Filter dumpbin.exe -File -Recurse -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+          }
+          if (-not $dumpbin) { throw "dumpbin.exe was not found" }
+
+          $dll = Join-Path $PWD "bin/Release/winmm.dll"
+          $raw = & $dumpbin.FullName /nologo /exports $dll
+          $actual = $raw |
+            Select-String -Pattern '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)(?:\s+=\s+(\S+))?' |
+            ForEach-Object {
+              $n = $_.Matches[0].Groups[1].Value
+              $decorated = $_.Matches[0].Groups[2].Value
+              # Pin the __stdcall stack size, but not which symbol /OPT:ICF
+              # folded the body onto -- that is a linker optimisation, not ABI.
+              if ($decorated -match '@(\d+)$') { "$n@$($Matches[1])" } else { $n }
+            } |
+            Sort-Object -Unique
+
+          $expected = Get-Content -LiteralPath (Join-Path $PWD "tests/winmm_export_baseline.txt") |
+            Where-Object { $_ -and -not $_.StartsWith("#") } |
+            Sort-Object -Unique
+
+          $missing = Compare-Object $expected $actual | Where-Object { $_.SideIndicator -eq "<=" }
+          $added   = Compare-Object $expected $actual | Where-Object { $_.SideIndicator -eq "=>" }
+
+          if ($missing) {
+            $missing | ForEach-Object { Write-Host "MISSING EXPORT: $($_.InputObject)" }
+            throw "winmm.dll dropped or changed the ABI of $($missing.Count) export(s) that a shipped build provided"
+          }
+          if ($added) {
+            $added | ForEach-Object { Write-Host "new export: $($_.InputObject)" }
+            Write-Host "::notice::winmm.dll gained $($added.Count) export(s); update tests/winmm_export_baseline.txt if intended"
+          }
+          "export parity OK: $($expected.Count) baseline exports all present"
+
       - name: Upload Release Win32 artifact
         uses: actions/upload-artifact@v4
         with:
