@@ -169,6 +169,7 @@
     <ClCompile Include="src\engine\backend_selection.cpp" />
     <ClCompile Include="src\engine\bzloader_bootstrap.cpp" />
     <ClCompile Include="src\engine\bootstrap_file_io.cpp" />
+    <ClCompile Include="src\engine\startup_backend_seam.cpp" />
     <ClCompile Include="src\engine\game_log_path.cpp" />
     <ClCompile Include="src\engine\openshim_sdk_bridge.cpp" />
     <ClCompile Include="src\engine\openshim_sdk_thunks.cpp" />
@@ -213,6 +214,7 @@
     <ClInclude Include="include\bzn_save_path.h" />
     <ClInclude Include="include\bzloader_bootstrap.h" />
     <ClInclude Include="include\bootstrap_file_io.h" />
+    <ClInclude Include="include\startup_backend_seam.h" />
     <ClInclude Include="include\game_log_path.h" />
     <ClInclude Include="include\openshim_sdk_bridge.h" />
     <ClInclude Include="include\openshim_sdk_provider.h" />
