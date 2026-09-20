@@ -229,6 +229,14 @@ jobs:
       # publish it as a standalone OpenShim build, and a renamed
       # bootstrap-only artifact would still be the thing people grab by
       # mistake. The complete chain is the only artifact.
+      #
+      # The resource trees use the same repository paths the suite archive
+      # uses, so a downloaded artifact resolves through Get-ArtifactSet
+      # exactly as a release bundle does. Without them the installer accepts
+      # the artifact but warns that the Enhanced renderer will stay
+      # unavailable, because it validates its resource set before enabling.
+      # (No comments inside the path list below -- upload-artifact reads
+      # every line of it as a pattern.)
       - name: Upload Release Win32 artifact
         uses: actions/upload-artifact@v4
         with:
@@ -247,3 +255,6 @@ jobs:
             openshim.ini.example
             net.ini
             build-summary.txt
+            resources/renderer/enhanced/**
+            resources/ui/custom_widgets/**
+            resources/openshim/OpenShimAssets.ini
