@@ -35,9 +35,16 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
+# Three binaries now, and they are a set. winmm.dll is the bootstrap;
+# bzloader.dll is the plugin host it starts; plugins/openshim.dll is the
+# runtime that host loads. Deploying winmm.dll alone gives a game with the
+# pre-main seams armed and no OpenShim at all -- which boots, which is exactly
+# why it has to be impossible to do by accident.
 $pairs = @(
-    @{ Source = Join-Path $repoRoot "bin\$Configuration\winmm.dll"; Target = Join-Path $GameDir 'winmm.dll' },
-    @{ Source = Join-Path $repoRoot 'scripts\patches.json';         Target = Join-Path $GameDir 'scripts\patches.json' }
+    @{ Source = Join-Path $repoRoot "bin\$Configuration\winmm.dll";            Target = Join-Path $GameDir 'winmm.dll' },
+    @{ Source = Join-Path $repoRoot "bin\$Configuration\bzloader.dll";         Target = Join-Path $GameDir 'bzloader.dll' },
+    @{ Source = Join-Path $repoRoot "bin\$Configuration\plugins\openshim.dll"; Target = Join-Path $GameDir 'plugins\openshim.dll' },
+    @{ Source = Join-Path $repoRoot 'scripts\patches.json';                     Target = Join-Path $GameDir 'scripts\patches.json' }
 )
 
 # Renderer resources move with the DLL by the same rule as patches.json: a new
@@ -65,6 +72,21 @@ foreach ($pair in $pairs) {
     $info = Get-Item -LiteralPath $pair.Target
     Write-Host ("deployed {0,-14} {1,9:N0} bytes" -f $info.Name, $info.Length)
 }
+
+# The load chain has to be whole. A missing link degrades silently to "the
+# game runs without OpenShim", which reads like a feature regression rather
+# than a deployment failure.
+$chain = @(
+    (Join-Path $GameDir 'winmm.dll'),
+    (Join-Path $GameDir 'bzloader.dll'),
+    (Join-Path $GameDir 'plugins\openshim.dll')
+)
+foreach ($link in $chain) {
+    if (-not (Test-Path -LiteralPath $link -PathType Leaf)) {
+        throw "Load chain incomplete after deployment: $link is missing"
+    }
+}
+Write-Host ("load chain verified: winmm.dll -> bzloader.dll -> plugins\openshim.dll")
 
 # Verify rather than trust: every patch name the repo declares must be present
 # in the deployed json, or the DLL will resolve it to address 0.

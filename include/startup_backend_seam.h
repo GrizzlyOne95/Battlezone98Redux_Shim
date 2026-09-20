@@ -121,6 +121,5 @@ namespace BZROpenShim::RenderProfiles
     // Bridges used by the seam's own public wrappers. Not for general use.
     const StartupSeam::StartupRendererResult& SeamResultForPublication();
     void ClearPendingMarkerFromRuntime();
-    const char* SeamArmStatusTextForValue(uint32_t armStatus);
     void RunStartupSelectionForTestImpl();
 }

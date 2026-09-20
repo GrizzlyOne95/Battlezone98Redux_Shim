@@ -481,6 +481,31 @@ extern "C" BOOL WINAPI OpenShimImpl_SupportsRenderProfile(DWORD profile);
 
 namespace
 {
+    // Legacy v1 C++ API, adapted to the table's plain-C signatures.
+    uint32_t __cdecl LegacyGetShimVersion()
+    {
+        return BZROpenShim::GetShimVersion();
+    }
+    int32_t __cdecl LegacyIsCompatibleGameVersion()
+    {
+        return BZROpenShim::IsCompatibleGameVersion() ? 1 : 0;
+    }
+    int32_t __cdecl LegacyIsPatchingComplete()
+    {
+        return BZROpenShim::IsPatchingComplete() ? 1 : 0;
+    }
+    uint32_t __cdecl LegacyGetAppliedPatchCount()
+    {
+        return BZROpenShim::GetAppliedPatchCount();
+    }
+    uint32_t __cdecl LegacyGetBzrDistribution()
+    {
+        return static_cast<uint32_t>(BZROpenShim::GetBzrDistribution());
+    }
+}
+
+namespace
+{
     // Static, so installing it is a pointer store with no allocation and no
     // loader work -- safe to do from DllMain while this TU still ships
     // inside winmm.dll.
@@ -557,6 +582,11 @@ namespace
         .OpenShimImpl_SetWeaponMaskCarrierBiasEnabled = OpenShimImpl_SetWeaponMaskCarrierBiasEnabled,
         .OpenShimImpl_StopMusic = OpenShimImpl_StopMusic,
         .OpenShimImpl_SupportsRenderProfile = OpenShimImpl_SupportsRenderProfile,
+        .legacyGetShimVersion = LegacyGetShimVersion,
+        .legacyIsCompatibleGameVersion = LegacyIsCompatibleGameVersion,
+        .legacyIsPatchingComplete = LegacyIsPatchingComplete,
+        .legacyGetAppliedPatchCount = LegacyGetAppliedPatchCount,
+        .legacyGetBzrDistribution = LegacyGetBzrDistribution,
     };
 }
 

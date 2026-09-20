@@ -10,6 +10,9 @@
 
 #include "openshim_bootstrap_api.h"
 
+#include "bootstrap_file_io.h"
+#include "cli_multiparam_parser.h"
+#include "openshim_sdk_bridge.h"
 #include "shim_log_sink.h"
 #include "startup_backend_seam.h"
 
@@ -35,6 +38,42 @@ namespace
         BZROpenShim::StartupSeam::ClearPendingMarker();
     }
 
+    int32_t __cdecl BootstrapInstallFileIoProvider(const void* provider)
+    {
+        return BZROpenShim::BootstrapFileIo::InstallProvider(
+                   static_cast<const BZROpenShim::BootstrapFileIo::Provider*>(provider))
+                   ? 1
+                   : 0;
+    }
+
+    int32_t __cdecl BootstrapInstallSdkProvider(const void* table)
+    {
+        return BZROpenShim::SdkBridge::InstallProvider(
+                   static_cast<const OpenShimSdkProviderTable*>(table))
+                   ? 1
+                   : 0;
+    }
+
+    int32_t __cdecl BootstrapPatchIatByFuncName(
+        void* targetModule, const char* funcName, void* newFunc, void** oldFunc)
+    {
+        return BZROpenShim::BootstrapFileIo::PatchIATByFuncName(
+                   static_cast<HMODULE>(targetModule), funcName, newFunc, oldFunc)
+                   ? 1
+                   : 0;
+    }
+
+    int32_t __cdecl BootstrapPatchCreateFileHooksForModule(void* targetModule)
+    {
+        return BZROpenShim::BootstrapFileIo::PatchCreateFileHooksForModule(
+            static_cast<HMODULE>(targetModule));
+    }
+
+    void __cdecl BootstrapVerifyCliMultiParameterOptionFix(void)
+    {
+        BZROpenShim::VerifyCliMultiParameterOptionFix();
+    }
+
     // Static, so handing it out is a pointer return with no allocation and no
     // lifetime question: winmm.dll is pinned for the process.
     const OpenShimBootstrapApiV1 g_Api = {
@@ -43,6 +82,11 @@ namespace
         BootstrapLogMessage,
         BootstrapCopyStartupRendererResult,
         BootstrapClearStartupPendingMarker,
+        BootstrapInstallFileIoProvider,
+        BootstrapInstallSdkProvider,
+        BootstrapPatchIatByFuncName,
+        BootstrapPatchCreateFileHooksForModule,
+        BootstrapVerifyCliMultiParameterOptionFix,
     };
 }
 

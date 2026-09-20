@@ -499,6 +499,7 @@ if(WIN32 AND MSVC)
     add_executable(startup_backend_seam_tests
         startup_backend_seam_tests.cpp
         ../src/engine/startup_backend_seam.cpp
+        ../src/engine/startup_seam_wire.cpp
         ../src/engine/backend_selection.cpp
         ../src/engine/render_profile.cpp
         ../src/engine/shim_log_sink.cpp
@@ -518,6 +519,10 @@ if(WIN32 AND MSVC)
         openshim_bootstrap_api_tests.cpp
         ../src/engine/openshim_bootstrap_api.cpp
         ../src/engine/startup_backend_seam.cpp
+        ../src/engine/startup_seam_wire.cpp
+        ../src/engine/bootstrap_file_io.cpp
+        ../src/engine/openshim_sdk_bridge.cpp
+        ../src/patches/cli_multiparam_parser.cpp
         ../src/engine/backend_selection.cpp
         ../src/engine/render_profile.cpp
         ../src/engine/shim_log_sink.cpp
@@ -527,6 +532,8 @@ if(WIN32 AND MSVC)
     target_compile_features(openshim_bootstrap_api_tests PRIVATE cxx_std_20)
     target_compile_definitions(openshim_bootstrap_api_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(openshim_bootstrap_api_tests PRIVATE /W4 /WX)
+    # cli_multiparam_parser reads the executable's version resource.
+    target_link_libraries(openshim_bootstrap_api_tests PRIVATE version)
     add_test(NAME openshim_bootstrap_api_tests COMMAND openshim_bootstrap_api_tests)
 endif()
 

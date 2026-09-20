@@ -341,6 +341,57 @@ split with the plugin) is **13 of 79**, down from 58 before the SDK, file-I/O
 and renderer cuts. `ogre_render_profile.cpp` moved from the bootstrap graph to
 the plugin side.
 
+## The module split, as built
+
+```text
+Battlezone98Redux.exe
+  -> winmm.dll                 18 TUs   bootstrap
+     -> bzloader.dll                    plugin host
+        -> plugins/openshim.dll  74 TUs  runtime
+```
+
+`winmm.dll` is 213 KB where the monolith was 3.0 MB. It compiles twelve
+translation units of its own plus six that are pure enough to share
+(`backend_selection`, `render_profile`, `render_effect_intent`,
+`game_log_path`, `shim_log_client`, `startup_seam_wire`) -- stateless mappings
+where a second copy cannot disagree with the first.
+
+### What the plugin may and may not do
+
+The loader owns the plugin's lifecycle. It called `BZPlugin_Load` to start the
+runtime and it calls `BZPlugin_Shutdown` to stop it, so the plugin never shuts
+down BZLoader, never frees the real WinMM, and never closes `openshim.log`. A
+plugin tearing down its own host would invert the dependency graph. That
+ordering is also what lets the runtime log its entire shutdown: BZLoader
+returns first, and only then does the bootstrap release WinMM and close the
+log.
+
+`BZPlugin_Load` resolves the bootstrap table, installs the log bridge, installs
+the file-I/O and SDK providers, and starts the patch worker. A failure before
+the worker starts is transactional -- nothing is installed, so returning 0
+leaves the process as it was.
+
+### Two directions, two tables
+
+- **plugin -> bootstrap** is `OpenShimBootstrapApi`, one versioned table behind
+  one export (`OpenShimBootstrap_GetApi`): logging, the startup renderer
+  result, the pending marker, provider installation, the import patcher, and
+  the deferred CLI verification. Private, and deliberately not
+  `BZPluginHostApi` -- third-party plugins have no business in it.
+- **bootstrap -> plugin** is `OpenShimSdkProviderTable`, which the export
+  thunks already used. The split appended the legacy v1 C++ API to it, so the
+  seven mangled symbols winmm.dll has always exported keep working while the
+  values come from the runtime.
+
+### The export surface
+
+`winmm.dll` still exports 271 symbols: every `OpenShim*` SDK name, the seven
+mangled v1 C++ symbols, and the WinMM forwarders. Exactly three left, all
+predicted and none of them published API -- `OpenShimSdkProvider_GetTable`
+(the plugin's own getter, which the bootstrap now resolves *from* the plugin)
+and the two `walker_cockpit_trace.cpp` debug hooks that were never in
+`winmm.def`.
+
 ## Path and loading security
 
 The proxy derives `bzloader.dll` from the proxy module address and calls

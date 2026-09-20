@@ -18,6 +18,15 @@
 # the bootstrap fetches the SDK provider table, and
 # OpenShimBootstrap_GetApi is the single private service table the
 # OpenShim plugin resolves for logging and the startup renderer result.
+#
+# Three OpenShim*-shaped entries left winmm.dll when the runtime moved into
+# plugins/openshim.dll, all of them expected and none of them published API:
+#   OpenShimSdkProvider_GetTable   - the plugin's own table getter; the
+#                                    bootstrap resolves it FROM the plugin.
+#   OpenShimSetWalkerCase          - dllexport debug hooks in
+#   OpenShimWalkerTraceSummary       walker_cockpit_trace.cpp, never API.
+# Everything documented survived the split, including the seven mangled C++
+# v1 symbols, which winmm.dll now forwards through the SDK provider table.
 
 ?GetAppliedPatchCount@BZROpenShim@@YAIXZ
 ?GetBzrDistribution@BZROpenShim@@YA?AW4BzrDistribution@1@XZ
@@ -73,7 +82,6 @@ OpenShimRestoreAllHudSprites@0
 OpenShimRestoreHudSprite@4
 OpenShimRestoreScrapPilotHudStock@0
 OpenShimResumeMusic@0
-OpenShimSdkProvider_GetTable
 OpenShimSetAiOdfGameplayTuningEnabled@4
 OpenShimSetAiUnitTuning@16
 OpenShimSetAiUnitTuningV2@32
@@ -103,11 +111,9 @@ OpenShimSetUnitVoMuted@4
 OpenShimSetUnitVoQueueDepth@4
 OpenShimSetUnitVoQueueStaleMs@4
 OpenShimSetUnitVoThrottle@4
-OpenShimSetWalkerCase
 OpenShimSetWeaponMaskCarrierBiasEnabled@4
 OpenShimStopMusic@0
 OpenShimSupportsRenderProfile@4
-OpenShimWalkerTraceSummary
 PlaySound@12
 PlaySoundA@12
 PlaySoundW@12

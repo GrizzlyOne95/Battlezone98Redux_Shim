@@ -118,7 +118,6 @@ namespace
     {
         return name == "OpenShimSetWalkerCase" ||
                name == "OpenShimWalkerTraceSummary" ||
-               name == "OpenShimSdkProvider_GetTable" ||
                name == "OpenShimBootstrap_GetApi";
     }
 
