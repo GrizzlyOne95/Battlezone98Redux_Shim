@@ -28,18 +28,35 @@
     Build - a compiler output tree; checks the three binaries only.
     Suite - a packaged suite; also checks the companion files an install needs.
 
-.EXAMPLE
-    .\Test-PackageShape.ps1 -Root . -Layout Build
+.PARAMETER ExpectedVersion
+    Dotted version the tag promises, e.g. 1.0.0.32. When given, every module
+    must carry it in both the string and numeric version fields, and must
+    name itself correctly. v1.0.0.31 shipped binaries reporting 1.0.0.30
+    because the tag moved and the resource did not; with three independently
+    identifiable binaries that invariant is worth enforcing rather than
+    remembering.
+
+.PARAMETER ExpectedTag
+    Suite layout only. release_metadata.json must record this tag.
+
+.PARAMETER ExpectedCommit
+    Suite layout only. release_metadata.json must record this commit.
 
 .EXAMPLE
-    .\Test-PackageShape.ps1 -Root $extractedZip -Layout Suite
+    .\Test-PackageShape.ps1 -Root . -Layout Build -ExpectedVersion 1.0.0.32
+
+.EXAMPLE
+    .\Test-PackageShape.ps1 -Root $extractedZip -Layout Suite -ExpectedTag v1.0.0.32
 #>
 [CmdletBinding()]
 param(
     [string]$Root = ".",
     [ValidateSet('Build', 'Suite')]
     [string]$Layout = 'Build',
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [string]$ExpectedVersion = "",
+    [string]$ExpectedTag = "",
+    [string]$ExpectedCommit = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -118,6 +135,48 @@ if ($present.ContainsKey('plugins\openshim.dll')) {
     }
 }
 
+# Tag, binary versions and self-identification must agree. The names are part
+# of it: one resource file feeds all three modules, so a module that forgets
+# to define its token silently inherits winmm.dll's identity.
+if ($ExpectedVersion) {
+    $identity = @{
+        'winmm.dll'            = 'winmm.dll'
+        'bzloader.dll'         = 'bzloader.dll'
+        'plugins\openshim.dll' = 'openshim.dll'
+    }
+    foreach ($name in $chain.Keys) {
+        if (-not $present.ContainsKey($name)) { continue }
+        $failuresBefore = $failures.Count
+        $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($chain[$name])
+
+        # The string fields and the numeric FILEVERSION are separate lines in
+        # the .rc and can disagree, so check both rather than either.
+        $numeric = "$($info.FileMajorPart).$($info.FileMinorPart)." +
+                   "$($info.FileBuildPart).$($info.FilePrivatePart)"
+        foreach ($pair in @(
+            @{ What = 'FileVersion';    Got = $info.FileVersion },
+            @{ What = 'ProductVersion'; Got = $info.ProductVersion },
+            @{ What = 'FILEVERSION';    Got = $numeric })) {
+            if ($pair.Got -ne $ExpectedVersion) {
+                Add-Failure "$name $($pair.What) is '$($pair.Got)', expected '$ExpectedVersion'"
+            }
+        }
+
+        $wanted = $identity[$name]
+        foreach ($pair in @(
+            @{ What = 'InternalName';     Got = $info.InternalName },
+            @{ What = 'OriginalFilename'; Got = $info.OriginalFilename })) {
+            if ($pair.Got -ne $wanted) {
+                Add-Failure "$name $($pair.What) is '$($pair.Got)', expected '$wanted'"
+            }
+        }
+
+        if ($failures.Count -eq $failuresBefore) {
+            Add-Pass ("{0,-22} v={1} identifies as {2}" -f $name, $info.FileVersion, $info.InternalName)
+        }
+    }
+}
+
 if ($Layout -eq 'Suite') {
     # Everything an install needs beyond the three binaries. Kept in step with
     # Get-ArtifactSet in install_windows.ps1 and find_artifact_set in
@@ -138,6 +197,23 @@ if ($Layout -eq 'Suite') {
             Add-Failure "suite is missing $rel ($($companions[$rel]))"
         } else {
             Add-Pass "suite carries $rel"
+        }
+    }
+
+    # Provenance: the archive states which tag and commit produced it, and
+    # that claim is only worth something if something checks it.
+    $metaPath = Join-Path $Root 'release_metadata.json'
+    if (($ExpectedTag -or $ExpectedCommit) -and (Test-Path -LiteralPath $metaPath -PathType Leaf)) {
+        $meta = Get-Content -LiteralPath $metaPath -Raw | ConvertFrom-Json
+        if ($ExpectedTag -and $meta.Tag -ne $ExpectedTag) {
+            Add-Failure "release_metadata.json Tag is '$($meta.Tag)', expected '$ExpectedTag'"
+        } elseif ($ExpectedTag) {
+            Add-Pass "release_metadata.json records tag $($meta.Tag)"
+        }
+        if ($ExpectedCommit -and $meta.Commit -ne $ExpectedCommit) {
+            Add-Failure "release_metadata.json Commit is '$($meta.Commit)', expected '$ExpectedCommit'"
+        } elseif ($ExpectedCommit) {
+            Add-Pass "release_metadata.json records commit $($meta.Commit.Substring(0, 8))"
         }
     }
 
