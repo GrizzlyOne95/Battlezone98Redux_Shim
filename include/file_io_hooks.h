@@ -11,9 +11,16 @@ namespace BZROpenShim
 {
     // Validates the original thiscall dialog target before a catalog CALL edit.
     void* PrepareEditorSaveDialogHook(uint32_t callAddress);
-    // Installs only the main-executable CreateFile hooks. Safe to call during
-    // process attach before the game opens its stock logger files.
-    void ApplyEarlyGameLogHooks();
+    // Installs OpenShim's runtime policy into the bootstrap file-I/O seam:
+    // terrain-atlas routing, TRN write tracking, BZN source tracking and load
+    // tracing, and shader-cache priming. The seam itself, and the early log
+    // routing, belong to the bootstrap and are already running by the time
+    // this is called -- see include/bootstrap_file_io.h.
+    //
+    // A pointer store, so it is safe from DllMain and is deliberately done as
+    // early as possible: until it runs, file opens get bootstrap behaviour
+    // only.
+    bool InstallFileIoProvider();
 
     // Compatibility/safety layer for .trn writes outside Redux's corrected
     // producer. Canonicalizes tracked files after close and leaves unsupported

@@ -42574,7 +42574,7 @@ namespace BZROpenShim
 
 // Optional high-level bridge used by EXU and other companion DLLs. BZRNet/native
 // details remain entirely inside OpenShim; callers receive only a stable status.
-extern "C" __declspec(dllexport) DWORD WINAPI OpenShimSetBZRNetNickname(LPCSTR nickname)
+extern "C" DWORD WINAPI OpenShimImpl_SetBZRNetNickname(LPCSTR nickname)
 {
     return static_cast<DWORD>(BZROpenShim::SetBzrNetNicknameFromBridge(nickname));
 }

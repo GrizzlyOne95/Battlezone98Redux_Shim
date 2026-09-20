@@ -104,31 +104,139 @@ jobs:
             /p:GenerateFullPaths=true `
             /verbosity:minimal
 
+      # Turns the green check from "the loader compiles" into "Windows actually
+      # loaded another DLL through the plugin ABI and completed the lifecycle".
+      # The test clears bzloader.log and validates only the lines stamped with
+      # the session id of the run it started, so a stale log cannot pass it.
+      - name: Run BZLoader host lifecycle test
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "bin/Release/BZLoaderHostTest.exe"
+          $plugin = Join-Path $PWD "bin/Release/plugins/bzloader_test_plugin.dll"
+
+          foreach ($required in @($exe, $plugin)) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+              throw "BZLoader lifecycle test prerequisite is missing: $required"
+            }
+          }
+
+          & $exe
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "--- bzloader.log ---"
+            Get-Content -LiteralPath (Join-Path $PWD "bin/Release/bzloader.log") -ErrorAction SilentlyContinue
+            throw "BZLoaderHostTest failed with exit code $LASTEXITCODE"
+          }
+
+      # OpenShim is three binaries now, and they are a set. A missing plugin is
+      # deliberately survivable at runtime, which is exactly why packaging has
+      # to be strict about it: an artifact carrying winmm.dll alone installs
+      # clean and reaches a user as "OpenShim's features don't work".
+      - name: Verify the load chain is whole
+        shell: pwsh
+        run: ./scripts/Test-PackageShape.ps1 -Root . -Layout Build
+
       - name: Verify build outputs
         shell: pwsh
         run: |
-          $dll = Join-Path $PWD "bin/Release/winmm.dll"
-          $pdb = Join-Path $PWD "bin/Release/winmm.pdb"
-
-          if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
-            throw "Expected build output was not produced: $dll"
+          $chain = [ordered]@{
+            "winmm.dll"            = "bin/Release/winmm.dll"
+            "bzloader.dll"         = "bin/Release/bzloader.dll"
+            "plugins/openshim.dll" = "bin/Release/plugins/openshim.dll"
+          }
+          $symbols = [ordered]@{
+            "winmm.pdb"            = "bin/Release/winmm.pdb"
+            "bzloader.pdb"         = "bin/Release/bzloader.pdb"
+            "plugins/openshim.pdb" = "bin/Release/plugins/openshim.pdb"
           }
 
-          $dllInfo = Get-Item -LiteralPath $dll
-          $dllHash = Get-FileHash -LiteralPath $dll -Algorithm SHA256
+          Remove-Item -LiteralPath build-summary.txt -Force -ErrorAction SilentlyContinue
 
-          "winmm.dll size: $($dllInfo.Length) bytes" | Tee-Object -FilePath build-summary.txt
-          "winmm.dll SHA-256: $($dllHash.Hash.ToLowerInvariant())" | Tee-Object -FilePath build-summary.txt -Append
+          foreach ($name in $chain.Keys) {
+            $path = Join-Path $PWD $chain[$name]
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Expected build output was not produced: $($chain[$name])"
+            }
+            $info = Get-Item -LiteralPath $path
+            $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$name size: $($info.Length) bytes" | Tee-Object -FilePath build-summary.txt -Append
+            "$name SHA-256: $hash" | Tee-Object -FilePath build-summary.txt -Append
+          }
 
-          if (Test-Path -LiteralPath $pdb -PathType Leaf) {
-            $pdbInfo = Get-Item -LiteralPath $pdb
-            "winmm.pdb size: $($pdbInfo.Length) bytes" | Tee-Object -FilePath build-summary.txt -Append
-          } else {
-            "winmm.pdb was not produced" | Tee-Object -FilePath build-summary.txt -Append
+          # Crashes can now land in any of the three, so report symbols for all
+          # three rather than leaving post-release debugging asymmetric.
+          foreach ($name in $symbols.Keys) {
+            $path = Join-Path $PWD $symbols[$name]
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+              "$name size: $((Get-Item -LiteralPath $path).Length) bytes" |
+                Tee-Object -FilePath build-summary.txt -Append
+            } else {
+              "$name was not produced" | Tee-Object -FilePath build-summary.txt -Append
+            }
           }
 
           Get-Content -LiteralPath build-summary.txt
 
+      # The OpenShim* exports are forwarding thunks now, so the one thing that
+      # must never drift is the export table itself: docs/OPENSHIM_SDK_V2.md
+      # makes GetModuleHandleA("winmm.dll") the documented discovery path, and a
+      # dropped or re-decorated name breaks Extra Utilities silently at runtime.
+      # The Linux lane checks the .def as text; this checks the real binary.
+      - name: Verify winmm.dll export parity
+        shell: pwsh
+        run: |
+          $dumpbin = Get-ChildItem -LiteralPath "${env:VCToolsInstallDir}bin" -Filter dumpbin.exe -File -Recurse |
+            Where-Object { $_.FullName -like '*\x86\dumpbin.exe' } |
+            Select-Object -First 1
+          if (-not $dumpbin) {
+            $dumpbin = Get-ChildItem -LiteralPath "${env:ProgramFiles}\Microsoft Visual Studio" -Filter dumpbin.exe -File -Recurse -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+          }
+          if (-not $dumpbin) { throw "dumpbin.exe was not found" }
+
+          $dll = Join-Path $PWD "bin/Release/winmm.dll"
+          $raw = & $dumpbin.FullName /nologo /exports $dll
+          $actual = $raw |
+            Select-String -Pattern '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)(?:\s+=\s+(\S+))?' |
+            ForEach-Object {
+              $n = $_.Matches[0].Groups[1].Value
+              $decorated = $_.Matches[0].Groups[2].Value
+              # Pin the __stdcall stack size, but not which symbol /OPT:ICF
+              # folded the body onto -- that is a linker optimisation, not ABI.
+              if ($decorated -match '@(\d+)$') { "$n@$($Matches[1])" } else { $n }
+            } |
+            Sort-Object -Unique
+
+          $expected = Get-Content -LiteralPath (Join-Path $PWD "tests/winmm_export_baseline.txt") |
+            Where-Object { $_ -and -not $_.StartsWith("#") } |
+            Sort-Object -Unique
+
+          $missing = Compare-Object $expected $actual | Where-Object { $_.SideIndicator -eq "<=" }
+          $added   = Compare-Object $expected $actual | Where-Object { $_.SideIndicator -eq "=>" }
+
+          if ($missing) {
+            $missing | ForEach-Object { Write-Host "MISSING EXPORT: $($_.InputObject)" }
+            throw "winmm.dll dropped or changed the ABI of $($missing.Count) export(s) that a shipped build provided"
+          }
+          if ($added) {
+            $added | ForEach-Object { Write-Host "new export: $($_.InputObject)" }
+            Write-Host "::notice::winmm.dll gained $($added.Count) export(s); update tests/winmm_export_baseline.txt if intended"
+          }
+          "export parity OK: $($expected.Count) baseline exports all present"
+
+      # The BZROpenShim-winmm-only artifact was retired with the split. After
+      # the extraction winmm.dll is the bootstrap, not OpenShim: on its own it
+      # lets the game run with no runtime at all. There is no honest way to
+      # publish it as a standalone OpenShim build, and a renamed
+      # bootstrap-only artifact would still be the thing people grab by
+      # mistake. The complete chain is the only artifact.
+      #
+      # The resource trees use the same repository paths the suite archive
+      # uses, so a downloaded artifact resolves through Get-ArtifactSet
+      # exactly as a release bundle does. Without them the installer accepts
+      # the artifact but warns that the Enhanced renderer will stay
+      # unavailable, because it validates its resource set before enabling.
+      # (No comments inside the path list below -- upload-artifact reads
+      # every line of it as a pattern.)
       - name: Upload Release Win32 artifact
         uses: actions/upload-artifact@v4
         with:
@@ -138,14 +246,15 @@ jobs:
           path: |
             bin/Release/winmm.dll
             bin/Release/winmm.pdb
+            bin/Release/bzloader.dll
+            bin/Release/bzloader.pdb
+            bin/Release/plugins/openshim.dll
+            bin/Release/plugins/openshim.pdb
+            scripts/patches.json
             openshim.ini
             openshim.ini.example
+            net.ini
             build-summary.txt
-
-      - name: Upload standalone DLL artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: BZROpenShim-winmm-only
-          if-no-files-found: error
-          retention-days: 14
-          path: bin/Release/winmm.dll
+            resources/renderer/enhanced/**
+            resources/ui/custom_widgets/**
+            resources/openshim/OpenShimAssets.ini

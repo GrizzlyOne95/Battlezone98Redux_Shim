@@ -28,6 +28,14 @@ if (!api || api->apiVersion != BZROpenShim::SDK_API_V2 ||
 }
 ```
 
+> **Discovery is unchanged by the BZLoader work.** The `OpenShim*` symbols are
+> forwarding thunks inside `winmm.dll` now, and will stay exported from
+> `winmm.dll` after the runtime moves to `plugins/openshim.dll`. Keep resolving
+> them exactly as shown above. If an export is called before the runtime is
+> ready it returns the documented unavailable value (`nullptr` here) rather
+> than failing to resolve, so treat a null table as "not ready yet", not as
+> "this shim has no v2".
+
 `OpenShimGetApi(0)` asks for the newest table supported by the loaded shim. An explicit unsupported version returns `nullptr` rather than a partially compatible table.
 
 SDK v2 is append-only. Check `structSize` against the end of the specific field

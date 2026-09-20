@@ -17,8 +17,17 @@ target_compile_features(bzrnet_protocol_tests PRIVATE cxx_std_20)
 
 add_executable(shim_log_tests
     shim_log_tests.cpp
-    ../src/engine/shim_log.cpp
+    ../src/engine/shim_log_sink.cpp
+    ../src/engine/shim_log_client.cpp
+    ../src/engine/game_log_path.cpp
 )
+
+add_executable(bzloader_catalog_tests
+    bzloader_catalog_tests.cpp
+    ../src/loader/bzloader_catalog.cpp
+)
+target_include_directories(bzloader_catalog_tests PRIVATE ../include)
+target_compile_features(bzloader_catalog_tests PRIVATE cxx_std_20)
 
 add_executable(trn_codec_tests
     trn_codec_tests.cpp
@@ -43,10 +52,15 @@ target_include_directories(bzn_save_path_tests PRIVATE ../include)
 target_compile_features(bzn_save_path_tests PRIVATE cxx_std_20)
 
 if(WIN32 AND MSVC)
+    # file_io_hooks.cpp (included directly by the test) is the runtime half of
+    # the file-I/O seam, so the bootstrap half has to be linked with it. Note
+    # game_log_path.cpp is deliberately NOT linked: the test supplies its own
+    # GetGameLogPath stub, which keeps it from creating a real logs directory.
     add_executable(editor_save_dialog_win32_tests
         editor_save_dialog_win32_tests.cpp
         ../src/patches/trn_codec.cpp
-        ../src/patches/terrain_atlas_rect_repair.cpp)
+        ../src/patches/terrain_atlas_rect_repair.cpp
+        ../src/engine/bootstrap_file_io.cpp)
     target_include_directories(editor_save_dialog_win32_tests PRIVATE ../include)
     target_compile_features(editor_save_dialog_win32_tests PRIVATE cxx_std_20)
     target_compile_definitions(editor_save_dialog_win32_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -170,7 +184,9 @@ add_executable(openshim_assets_tests
     openshim_assets_tests.cpp
     ../src/engine/openshim_assets.cpp
     ../src/engine/render_profile_resources.cpp
-    ../src/engine/shim_log.cpp
+    ../src/engine/shim_log_sink.cpp
+    ../src/engine/shim_log_client.cpp
+    ../src/engine/game_log_path.cpp
 )
 
 target_include_directories(shim_log_tests PRIVATE ../include)
@@ -215,6 +231,7 @@ target_compile_definitions(resolve_table_tests PRIVATE
 if(MSVC)
     target_compile_options(bzrnet_protocol_tests PRIVATE /W4 /WX)
     target_compile_options(shim_log_tests PRIVATE /W4 /WX)
+    target_compile_options(bzloader_catalog_tests PRIVATE /W4 /WX)
     target_compile_options(trn_codec_tests PRIVATE /W4 /WX)
     target_compile_options(bzn_save_path_tests PRIVATE /W4 /WX)
     target_compile_options(bzn_analysis_tests PRIVATE /W4 /WX)
@@ -239,6 +256,7 @@ if(MSVC)
 else()
     target_compile_options(bzrnet_protocol_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(shim_log_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(bzloader_catalog_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(trn_codec_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(bzn_save_path_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(bzn_analysis_tests PRIVATE -Wall -Wextra -Werror)
@@ -263,6 +281,7 @@ endif()
 
 add_test(NAME bzrnet_protocol_tests COMMAND bzrnet_protocol_tests)
 add_test(NAME shim_log_tests COMMAND shim_log_tests)
+add_test(NAME bzloader_catalog_tests COMMAND bzloader_catalog_tests)
 add_test(NAME shadow_far_distance_tests COMMAND shadow_far_distance_tests)
 add_test(NAME trn_codec_tests COMMAND trn_codec_tests)
 add_test(NAME bzn_save_path_tests COMMAND bzn_save_path_tests)
@@ -417,6 +436,107 @@ add_test(NAME odf_item_prologue_tests COMMAND odf_item_prologue_tests)
 # by construction: the whole requested/supported/effective decision lives in
 # src/engine/render_effect_intent.cpp with no Windows, D3D11 or Ogre in it, and
 # the test drives it through a fake provider.
+# The published SDK export contract. Pure text over the repository, so it runs
+# on the Linux lane: winmm.def, the generated thunk list, and the recorded
+# export baseline of a shipped winmm.dll must all agree.
+add_executable(openshim_sdk_export_contract_tests
+    openshim_sdk_export_contract_tests.cpp
+)
+target_compile_features(openshim_sdk_export_contract_tests PRIVATE cxx_std_20)
+target_compile_definitions(openshim_sdk_export_contract_tests PRIVATE
+    BZR_WINMM_DEF="${CMAKE_CURRENT_SOURCE_DIR}/../src/winmm.def"
+    BZR_SDK_EXPORTS_INC="${CMAKE_CURRENT_SOURCE_DIR}/../include/openshim_sdk_exports.inc"
+    BZR_EXPORT_BASELINE="${CMAKE_CURRENT_SOURCE_DIR}/winmm_export_baseline.txt")
+if(MSVC)
+    target_compile_options(openshim_sdk_export_contract_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(openshim_sdk_export_contract_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME openshim_sdk_export_contract_tests COMMAND openshim_sdk_export_contract_tests)
+
+# Runtime behaviour of the generated export thunks. Windows-only: it links the
+# real thunks, which are Win32 calling conventions over Win32 types.
+if(WIN32 AND MSVC)
+    add_executable(openshim_sdk_thunk_tests
+        openshim_sdk_thunk_tests.cpp
+        ../src/engine/openshim_sdk_thunks.cpp
+        ../src/engine/openshim_sdk_bridge.cpp
+        ../src/engine/shim_log_sink.cpp
+    ../src/engine/shim_log_client.cpp
+        ../src/engine/game_log_path.cpp)
+    target_include_directories(openshim_sdk_thunk_tests PRIVATE ../include ../third_party)
+    target_compile_features(openshim_sdk_thunk_tests PRIVATE cxx_std_20)
+    # BZRO_API must be dllexport here, matching how the shim builds these
+    # translation units; otherwise the namespaced thunks are declared
+    # dllimport and defined locally.
+    target_compile_definitions(openshim_sdk_thunk_tests PRIVATE
+        BZROPENSHIM_EXPORTS _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(openshim_sdk_thunk_tests PRIVATE /W4 /WX)
+    add_test(NAME openshim_sdk_thunk_tests COMMAND openshim_sdk_thunk_tests)
+endif()
+
+# The bootstrap file-I/O seam, end to end and offline. Patches the test's own
+# import table with the real wrappers, then drives the lifecycle the game will
+# see: opens with no provider installed, then the same opens once OpenShim's
+# policy is in place. Windows-only -- it is Win32 import tables and handles.
+if(WIN32 AND MSVC)
+    add_executable(bootstrap_file_io_tests
+        bootstrap_file_io_tests.cpp
+        ../src/engine/bootstrap_file_io.cpp
+        ../src/engine/game_log_path.cpp)
+    target_include_directories(bootstrap_file_io_tests PRIVATE ../include)
+    target_compile_features(bootstrap_file_io_tests PRIVATE cxx_std_20)
+    target_compile_definitions(bootstrap_file_io_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(bootstrap_file_io_tests PRIVATE /W4 /WX)
+    add_test(NAME bootstrap_file_io_tests COMMAND bootstrap_file_io_tests)
+endif()
+
+# The bootstrap startup renderer seam with nothing else alive. This is the
+# case the renderer split exists for: the decision must be complete before the
+# intercepted ConfigFile::load returns, so "a plugin will supply it later" is
+# not an option. Windows-only: Win32 file APIs and the real transport.
+if(WIN32 AND MSVC)
+    add_executable(startup_backend_seam_tests
+        startup_backend_seam_tests.cpp
+        ../src/engine/startup_backend_seam.cpp
+        ../src/engine/startup_seam_wire.cpp
+        ../src/engine/backend_selection.cpp
+        ../src/engine/render_profile.cpp
+        ../src/engine/shim_log_sink.cpp
+    ../src/engine/shim_log_client.cpp
+        ../src/engine/game_log_path.cpp)
+    target_include_directories(startup_backend_seam_tests PRIVATE ../include)
+    target_compile_features(startup_backend_seam_tests PRIVATE cxx_std_20)
+    target_compile_definitions(startup_backend_seam_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(startup_backend_seam_tests PRIVATE /W4 /WX)
+    add_test(NAME startup_backend_seam_tests COMMAND startup_backend_seam_tests)
+endif()
+
+# The private bootstrap service table and the two bridges over it. After the
+# DLL split these are the only calls from the plugin back into winmm.dll.
+if(WIN32 AND MSVC)
+    add_executable(openshim_bootstrap_api_tests
+        openshim_bootstrap_api_tests.cpp
+        ../src/engine/openshim_bootstrap_api.cpp
+        ../src/engine/startup_backend_seam.cpp
+        ../src/engine/startup_seam_wire.cpp
+        ../src/engine/bootstrap_file_io.cpp
+        ../src/engine/openshim_sdk_bridge.cpp
+        ../src/patches/cli_multiparam_parser.cpp
+        ../src/engine/backend_selection.cpp
+        ../src/engine/render_profile.cpp
+        ../src/engine/shim_log_sink.cpp
+        ../src/engine/shim_log_client.cpp
+        ../src/engine/game_log_path.cpp)
+    target_include_directories(openshim_bootstrap_api_tests PRIVATE ../include)
+    target_compile_features(openshim_bootstrap_api_tests PRIVATE cxx_std_20)
+    target_compile_definitions(openshim_bootstrap_api_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(openshim_bootstrap_api_tests PRIVATE /W4 /WX)
+    # cli_multiparam_parser reads the executable's version resource.
+    target_link_libraries(openshim_bootstrap_api_tests PRIVATE version)
+    add_test(NAME openshim_bootstrap_api_tests COMMAND openshim_bootstrap_api_tests)
+endif()
+
 add_executable(render_effect_intent_tests
     render_effect_intent_tests.cpp
     ../src/engine/render_effect_intent.cpp
