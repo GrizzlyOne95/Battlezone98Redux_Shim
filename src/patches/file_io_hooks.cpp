@@ -6,6 +6,8 @@
 
 #include "file_io_hooks.h"
 
+#include "bootstrap_file_io.h"
+
 #include "bzn_load_trace.h"
 #include "bzn_save_path.h"
 #include "patcher.h"
@@ -33,14 +35,10 @@
 
 namespace BZROpenShim
 {
-    using PFN_CreateFileA = HANDLE(WINAPI*)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
-    using PFN_CreateFileW = HANDLE(WINAPI*)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
     using PFN_CloseHandle = BOOL(WINAPI*)(HANDLE);
     using PFN_MoveFileExA = BOOL(WINAPI*)(LPCSTR, LPCSTR, DWORD);
     using PFN_MoveFileExW = BOOL(WINAPI*)(LPCWSTR, LPCWSTR, DWORD);
 
-    static PFN_CreateFileA g_RealCreateFileA = nullptr;
-    static PFN_CreateFileW g_RealCreateFileW = nullptr;
     static PFN_CloseHandle g_RealCloseHandle = nullptr;
     static PFN_MoveFileExA g_RealMoveFileExA = nullptr;
     static PFN_MoveFileExW g_RealMoveFileExW = nullptr;
@@ -104,84 +102,6 @@ namespace BZROpenShim
             return true;
         }
 
-        static char g_BzLoggerPath[] = "logs\\BZLogger.txt";
-        static char g_BzOgreLogPath[] = "logs\\BZOgreLogfile.log";
-        static char g_Crc32HostLogPath[] = "logs\\crc32host.log";
-        static char g_Crc32MissionLogPath[] = "logs\\crc32mission.log";
-
-        static bool PatchPushStringOperand(uintptr_t instructionAddress,
-                                           uintptr_t expectedStringAddress,
-                                           const char* replacement)
-        {
-            if (!replacement)
-                return false;
-
-            __try
-            {
-                auto* instruction = reinterpret_cast<uint8_t*>(instructionAddress);
-                auto* operand = reinterpret_cast<uint32_t*>(instruction + 1);
-                if (*instruction != 0x68 || *operand != expectedStringAddress)
-                    return false;
-
-                DWORD oldProtect = 0;
-                if (!VirtualProtect(operand, sizeof(*operand), PAGE_EXECUTE_READWRITE, &oldProtect))
-                    return false;
-                *operand = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(replacement));
-                FlushInstructionCache(GetCurrentProcess(), operand, sizeof(*operand));
-                DWORD ignored = 0;
-                VirtualProtect(operand, sizeof(*operand), oldProtect, &ignored);
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
-        static bool ShouldRouteGameLog(const std::filesystem::path& path)
-        {
-            if (path.empty() || path.has_parent_path())
-                return false;
-
-            const std::wstring fileName = ToLowerWide(path.filename().wstring());
-            const std::wstring extension = ToLowerWide(path.extension().wstring());
-            return extension == L".log" || fileName == L"bzlogger.txt";
-        }
-
-        static std::string RouteGameLogPath(LPCSTR fileName)
-        {
-            if (!fileName || !*fileName || !ShouldRouteGameLog(std::filesystem::path(fileName)))
-                return fileName ? fileName : "";
-            return GetGameLogPath(fileName);
-        }
-
-        static std::wstring RouteGameLogPath(LPCWSTR fileName)
-        {
-            if (!fileName || !*fileName || !ShouldRouteGameLog(std::filesystem::path(fileName)))
-                return fileName ? fileName : L"";
-
-            const std::wstring leaf = std::filesystem::path(fileName).filename().wstring();
-            const int byteCount = WideCharToMultiByte(
-                CP_UTF8, 0, leaf.c_str(), -1, nullptr, 0, nullptr, nullptr);
-            if (byteCount <= 1)
-                return fileName;
-
-            std::string utf8(static_cast<size_t>(byteCount), '\0');
-            WideCharToMultiByte(
-                CP_UTF8, 0, leaf.c_str(), -1, utf8.data(), byteCount, nullptr, nullptr);
-            utf8.pop_back();
-            const std::string routed = GetGameLogPath(utf8.c_str());
-
-            const int wideCount = MultiByteToWideChar(
-                CP_UTF8, 0, routed.c_str(), -1, nullptr, 0);
-            if (wideCount <= 1)
-                return fileName;
-
-            std::wstring wide(static_cast<size_t>(wideCount), L'\0');
-            MultiByteToWideChar(CP_UTF8, 0, routed.c_str(), -1, wide.data(), wideCount);
-            wide.pop_back();
-            return wide;
-        }
 
         // ------------------------------------------------------------------
         // Terrain detail-atlas rect repair.
@@ -415,66 +335,6 @@ namespace BZROpenShim
         private:
             bool m_Previous;
         };
-
-        static bool PatchIATByFuncName(HMODULE targetModule, const char* funcName, void* newFunc, void** oldFunc)
-        {
-            if (!targetModule || !funcName || !*funcName || !newFunc)
-                return false;
-
-            auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(targetModule);
-            if (dos->e_magic != IMAGE_DOS_SIGNATURE)
-                return false;
-
-            auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(
-                reinterpret_cast<uint8_t*>(targetModule) + dos->e_lfanew);
-            if (nt->Signature != IMAGE_NT_SIGNATURE)
-                return false;
-
-            const DWORD importRva =
-                nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-            if (!importRva)
-                return false;
-
-            auto* importDesc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(
-                reinterpret_cast<uint8_t*>(targetModule) + importRva);
-            while (importDesc->Name)
-            {
-                auto* origThunk = reinterpret_cast<IMAGE_THUNK_DATA*>(
-                    reinterpret_cast<uint8_t*>(targetModule) +
-                    (importDesc->OriginalFirstThunk ? importDesc->OriginalFirstThunk : importDesc->FirstThunk));
-                auto* thunk = reinterpret_cast<IMAGE_THUNK_DATA*>(
-                    reinterpret_cast<uint8_t*>(targetModule) + importDesc->FirstThunk);
-
-                while (origThunk->u1.AddressOfData)
-                {
-                    if (!IMAGE_SNAP_BY_ORDINAL(origThunk->u1.Ordinal))
-                    {
-                        auto* importByName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(
-                            reinterpret_cast<uint8_t*>(targetModule) + origThunk->u1.AddressOfData);
-                        if (std::strcmp(reinterpret_cast<const char*>(importByName->Name), funcName) == 0)
-                        {
-                            auto** iatEntry = reinterpret_cast<void**>(&thunk->u1.Function);
-                            DWORD oldProtect = 0;
-                            if (!VirtualProtect(iatEntry, sizeof(void*), PAGE_READWRITE, &oldProtect))
-                                return false;
-
-                            if (oldFunc && *oldFunc == nullptr)
-                                *oldFunc = *iatEntry;
-                            *iatEntry = newFunc;
-                            VirtualProtect(iatEntry, sizeof(void*), oldProtect, &oldProtect);
-                            return true;
-                        }
-                    }
-
-                    ++origThunk;
-                    ++thunk;
-                }
-
-                ++importDesc;
-            }
-
-            return false;
-        }
 
         static std::wstring ToLowerWide(std::wstring value)
         {
@@ -945,95 +805,6 @@ namespace BZROpenShim
                 static_cast<unsigned>(desiredAccess));
         }
 
-        static HANDLE WINAPI Hooked_CreateFileW(
-            LPCWSTR fileName,
-            DWORD desiredAccess,
-            DWORD shareMode,
-            LPSECURITY_ATTRIBUTES securityAttributes,
-            DWORD creationDisposition,
-            DWORD flagsAndAttributes,
-            HANDLE templateFile)
-        {
-            if (!g_RealCreateFileW)
-                return INVALID_HANDLE_VALUE;
-
-            const std::wstring routedPath = RouteTerrainAtlasPath(
-                RouteGameLogPath(fileName), desiredAccess, creationDisposition);
-            const HANDLE handle = g_RealCreateFileW(
-                routedPath.c_str(),
-                desiredAccess,
-                shareMode,
-                securityAttributes,
-                creationDisposition,
-                flagsAndAttributes,
-                templateFile);
-            const DWORD openError = GetLastError();
-
-            if (!g_InTrnNormalization && handle != INVALID_HANDLE_VALUE)
-                MaybeTrackOpenedTrnHandle(handle, fileName ? fileName : L"", desiredAccess, creationDisposition);
-            if (handle != INVALID_HANDLE_VALUE && IsEditorSourcePath(routedPath))
-                RememberOpenedBznSource(handle, desiredAccess, creationDisposition);
-            if (handle != INVALID_HANDLE_VALUE)
-                BznLoadTraceOnOpen(routedPath.c_str(), desiredAccess);
-
-            // Ogre parses the mod's *.program scripts (and then compiles the
-            // enhanced-lighting shaders) right after this open succeeds. Prime
-            // the microcode cache on this exact thread so a prior session's
-            // compiled shaders are available before compilation begins.
-            if (handle != INVALID_HANDLE_VALUE && PathEndsWithProgramW(fileName))
-            {
-                OgreShaderCacheOnProgramScriptOpen();
-                if (UiPerf::IsEnabled())
-                    UiPerf::RecordShaderCache(0, 0, 0.0); // marker: program open triggered cache
-            }
-
-            SetLastError(openError);
-            return handle;
-        }
-
-        static HANDLE WINAPI Hooked_CreateFileA(
-            LPCSTR fileName,
-            DWORD desiredAccess,
-            DWORD shareMode,
-            LPSECURITY_ATTRIBUTES securityAttributes,
-            DWORD creationDisposition,
-            DWORD flagsAndAttributes,
-            HANDLE templateFile)
-        {
-            if (!g_RealCreateFileA)
-                return INVALID_HANDLE_VALUE;
-
-            const std::string routedPath = RouteTerrainAtlasPath(
-                RouteGameLogPath(fileName), desiredAccess, creationDisposition);
-            const std::wstring wideRequested = AnsiPathToWide(routedPath.c_str());
-            const HANDLE handle = g_RealCreateFileA(
-                routedPath.c_str(),
-                desiredAccess,
-                shareMode,
-                securityAttributes,
-                creationDisposition,
-                flagsAndAttributes,
-                templateFile);
-            const DWORD openError = GetLastError();
-
-            if (!g_InTrnNormalization && handle != INVALID_HANDLE_VALUE)
-                MaybeTrackOpenedTrnHandle(handle, ResolveAbsolutePathFromAnsi(fileName), desiredAccess, creationDisposition);
-            if (handle != INVALID_HANDLE_VALUE && IsEditorSourcePath(wideRequested))
-                RememberOpenedBznSource(handle, desiredAccess, creationDisposition);
-            if (handle != INVALID_HANDLE_VALUE)
-                BznLoadTraceOnOpenA(routedPath.c_str(), desiredAccess);
-
-            if (handle != INVALID_HANDLE_VALUE && PathEndsWithProgramA(fileName))
-            {
-                OgreShaderCacheOnProgramScriptOpen();
-                if (UiPerf::IsEnabled())
-                    UiPerf::RecordShaderCache(0, 0, 0.0);
-            }
-
-            SetLastError(openError);
-            return handle;
-        }
-
         static BOOL WINAPI Hooked_CloseHandle(HANDLE object)
         {
             if (!g_RealCloseHandle)
@@ -1095,17 +866,120 @@ namespace BZROpenShim
             return result;
         }
 
+        // ------------------------------------------------------------------
+        // Runtime policy for the bootstrap file-I/O seam.
+        //
+        // These four callbacks are exactly what the old Hooked_CreateFileW/A
+        // did either side of the real call. The bootstrap owns the hook and
+        // the log routing; everything here is what OpenShim adds once it
+        // exists. Before it does, the wrappers run without any of it.
+        //
+        // Callable on any thread from the first file the process opens, so
+        // nothing here may assume the game is initialised.
+        // ------------------------------------------------------------------
+
+        // The seam hands back a borrowed pointer that has to stay valid until
+        // this thread routes again, so the storage is thread_local rather
+        // than a return-by-value the caller would have to own.
+        static thread_local std::wstring g_RoutedPathW;
+        static thread_local std::string g_RoutedPathA;
+
+        static const wchar_t* __cdecl ProviderRoutePathW(
+            const wchar_t* path, DWORD desiredAccess, DWORD creationDisposition)
+        {
+            if (!path)
+                return nullptr;
+            std::wstring routed = RouteTerrainAtlasPath(path, desiredAccess, creationDisposition);
+            if (routed == path)
+                return nullptr;  // nothing to say; let the seam use its own path
+            g_RoutedPathW = std::move(routed);
+            return g_RoutedPathW.c_str();
+        }
+
+        static const char* __cdecl ProviderRoutePathA(
+            const char* path, DWORD desiredAccess, DWORD creationDisposition)
+        {
+            if (!path)
+                return nullptr;
+            std::string routed = RouteTerrainAtlasPath(std::string(path), desiredAccess, creationDisposition);
+            if (routed == path)
+                return nullptr;
+            g_RoutedPathA = std::move(routed);
+            return g_RoutedPathA.c_str();
+        }
+
+        static void __cdecl ProviderOnOpenedW(
+            HANDLE handle, const wchar_t* requested, const wchar_t* routed,
+            DWORD desiredAccess, DWORD creationDisposition)
+        {
+            // TRN write tracking keys off the name the caller asked for.
+            if (!g_InTrnNormalization)
+                MaybeTrackOpenedTrnHandle(handle, requested ? requested : L"", desiredAccess, creationDisposition);
+            // Editor-source detection and load tracing follow what was really
+            // opened, which is not the same string once a path is rerouted.
+            const std::wstring routedPath = routed ? routed : L"";
+            if (IsEditorSourcePath(routedPath))
+                RememberOpenedBznSource(handle, desiredAccess, creationDisposition);
+            BznLoadTraceOnOpen(routedPath.c_str(), desiredAccess);
+
+            // Ogre parses the mod's *.program scripts (and then compiles the
+            // enhanced-lighting shaders) right after this open succeeds. Prime
+            // the microcode cache on this exact thread so a prior session's
+            // compiled shaders are available before compilation begins.
+            if (PathEndsWithProgramW(requested))
+            {
+                OgreShaderCacheOnProgramScriptOpen();
+                if (UiPerf::IsEnabled())
+                    UiPerf::RecordShaderCache(0, 0, 0.0); // marker: program open triggered cache
+            }
+        }
+
+        static void __cdecl ProviderOnOpenedA(
+            HANDLE handle, const char* requested, const char* routed,
+            DWORD desiredAccess, DWORD creationDisposition)
+        {
+            if (!g_InTrnNormalization)
+                MaybeTrackOpenedTrnHandle(handle, ResolveAbsolutePathFromAnsi(requested), desiredAccess, creationDisposition);
+            const std::wstring wideRouted = AnsiPathToWide(routed ? routed : "");
+            if (IsEditorSourcePath(wideRouted))
+                RememberOpenedBznSource(handle, desiredAccess, creationDisposition);
+            BznLoadTraceOnOpenA(routed ? routed : "", desiredAccess);
+
+            if (PathEndsWithProgramA(requested))
+            {
+                OgreShaderCacheOnProgramScriptOpen();
+                if (UiPerf::IsEnabled())
+                    UiPerf::RecordShaderCache(0, 0, 0.0);
+            }
+        }
+
+        // Static, so installing it is a pointer store with no allocation and
+        // no loader work. It has to outlive the process: the seam keeps
+        // calling through it and there is no uninstall.
+        static const BootstrapFileIo::Provider g_FileIoProvider = {
+            sizeof(BootstrapFileIo::Provider),
+            ProviderRoutePathW,
+            ProviderRoutePathA,
+            ProviderOnOpenedW,
+            ProviderOnOpenedA,
+        };
+
         static int PatchTrackedFunctionsForModule(HMODULE module, const wchar_t* label)
         {
             if (!module)
                 return 0;
 
-            int patched = 0;
-            patched += PatchIATByFuncName(module, "CreateFileW", reinterpret_cast<void*>(Hooked_CreateFileW), reinterpret_cast<void**>(&g_RealCreateFileW)) ? 1 : 0;
-            patched += PatchIATByFuncName(module, "CreateFileA", reinterpret_cast<void*>(Hooked_CreateFileA), reinterpret_cast<void**>(&g_RealCreateFileA)) ? 1 : 0;
-            patched += PatchIATByFuncName(module, "CloseHandle", reinterpret_cast<void*>(Hooked_CloseHandle), reinterpret_cast<void**>(&g_RealCloseHandle)) ? 1 : 0;
-            patched += PatchIATByFuncName(module, "MoveFileExW", reinterpret_cast<void*>(Hooked_MoveFileExW), reinterpret_cast<void**>(&g_RealMoveFileExW)) ? 1 : 0;
-            patched += PatchIATByFuncName(module, "MoveFileExA", reinterpret_cast<void*>(Hooked_MoveFileExA), reinterpret_cast<void**>(&g_RealMoveFileExA)) ? 1 : 0;
+            // CreateFileA/W always resolve to the bootstrap's wrappers, never
+            // to a second interceptor of our own. For the main executable
+            // these entries are already pointing there from process attach,
+            // so this is a no-op; for the CRT modules, which only appear
+            // later, it routes them through the same seam. Either way the
+            // runtime's own behaviour arrives through the installed provider,
+            // not through a different hook.
+            int patched = BootstrapFileIo::PatchCreateFileHooksForModule(module);
+            patched += BootstrapFileIo::PatchIATByFuncName(module, "CloseHandle", reinterpret_cast<void*>(Hooked_CloseHandle), reinterpret_cast<void**>(&g_RealCloseHandle)) ? 1 : 0;
+            patched += BootstrapFileIo::PatchIATByFuncName(module, "MoveFileExW", reinterpret_cast<void*>(Hooked_MoveFileExW), reinterpret_cast<void**>(&g_RealMoveFileExW)) ? 1 : 0;
+            patched += BootstrapFileIo::PatchIATByFuncName(module, "MoveFileExA", reinterpret_cast<void*>(Hooked_MoveFileExA), reinterpret_cast<void**>(&g_RealMoveFileExA)) ? 1 : 0;
 
             Log(L"[TRN] Module %ls file hook results: patched=%d base=0x%p\n",
                 label ? label : L"<unknown>",
@@ -1131,32 +1005,9 @@ namespace BZROpenShim
         return reinterpret_cast<void*>(Hooked_EditorSaveDialog);
     }
 
-    void ApplyEarlyGameLogHooks()
+    bool InstallFileIoProvider()
     {
-        HMODULE mainModule = GetModuleHandleW(nullptr);
-        if (!mainModule)
-            return;
-
-        PatchIATByFuncName(
-            mainModule,
-            "CreateFileW",
-            reinterpret_cast<void*>(Hooked_CreateFileW),
-            reinterpret_cast<void**>(&g_RealCreateFileW));
-        PatchIATByFuncName(
-            mainModule,
-            "CreateFileA",
-            reinterpret_cast<void*>(Hooked_CreateFileA),
-            reinterpret_cast<void**>(&g_RealCreateFileA));
-
-        // These logger paths are passed as immediate string pointers inside
-        // the executable and bypass the Win32 imports above through the
-        // statically linked runtime. Redirect the operands before the entry
-        // point runs. GOG and Steam currently share these settled bytes.
-        PatchPushStringOperand(0x00663FF6u, 0x00892050u, g_BzOgreLogPath);
-        PatchPushStringOperand(0x0081E864u, 0x008A1EE0u, g_BzLoggerPath);
-        PatchPushStringOperand(0x00743E55u, 0x0089A794u, g_Crc32HostLogPath);
-        PatchPushStringOperand(0x0079631Fu, 0x0089A794u, g_Crc32HostLogPath);
-        PatchPushStringOperand(0x00743109u, 0x0089A760u, g_Crc32MissionLogPath);
+        return BootstrapFileIo::InstallProvider(&g_FileIoProvider);
     }
 
     void ApplyTrnSaveNormalizeHooks()

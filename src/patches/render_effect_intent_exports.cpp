@@ -16,24 +16,29 @@ namespace
     using namespace BZROpenShim::RenderEffects;
 }
 
-// Reading the export table, this currently appears as
-//   OpenShimGetRenderEffectApiVersion = _OpenShimGetRenderApiVersion@0
-// sharing an RVA with the render-profile version export. That is not a
-// mis-wired .def: both functions compile to `mov eax, 1; ret`, so /OPT:ICF
-// folds them. Behaviour is correct, and they separate on their own as soon as
-// either version constant moves. Do not "fix" it by perturbing the code.
-extern "C" UINT WINAPI OpenShimGetRenderEffectApiVersion()
+// This used to share an RVA with the render-profile version export, showing up
+// as `OpenShimGetRenderEffectApiVersion = _OpenShimGetRenderApiVersion@0`:
+// both compiled to `mov eax, 1; ret`, so /OPT:ICF folded them. That was always
+// correct, just confusing to read.
+//
+// It no longer happens. The exported names are forwarding thunks in
+// openshim_sdk_thunks.cpp now, and each one loads a different provider-table
+// slot, so there is nothing identical left to fold. The implementations below
+// may still fold with each other, but they are not exported, so the export
+// table shows two distinct RVAs. Either way, do not perturb the code to
+// influence it.
+extern "C" UINT WINAPI OpenShimImpl_GetRenderEffectApiVersion()
 {
     return static_cast<UINT>(GetApiVersion());
 }
 
-extern "C" DWORD WINAPI OpenShimSetRenderEffectEnabled(DWORD effectId, BOOL enabled)
+extern "C" DWORD WINAPI OpenShimImpl_SetRenderEffectEnabled(DWORD effectId, BOOL enabled)
 {
     return static_cast<DWORD>(
         SetEnabled(static_cast<uint32_t>(effectId), enabled != FALSE));
 }
 
-extern "C" DWORD WINAPI OpenShimSetRenderEffectFloat(DWORD effectId, DWORD paramId, float value)
+extern "C" DWORD WINAPI OpenShimImpl_SetRenderEffectFloat(DWORD effectId, DWORD paramId, float value)
 {
     return static_cast<DWORD>(
         SetFloat(static_cast<uint32_t>(effectId), static_cast<uint32_t>(paramId), value));
@@ -42,7 +47,7 @@ extern "C" DWORD WINAPI OpenShimSetRenderEffectFloat(DWORD effectId, DWORD param
 // `statusSize` is what the CALLER believes the struct is. It is written into
 // the struct before the call is forwarded so a future, larger StatusV2 can be
 // distinguished from a V1 without another export.
-extern "C" BOOL WINAPI OpenShimGetRenderEffectStatus(
+extern "C" BOOL WINAPI OpenShimImpl_GetRenderEffectStatus(
     DWORD effectId,
     Abi::StatusV1* status,
     DWORD statusSize)
@@ -58,7 +63,7 @@ extern "C" BOOL WINAPI OpenShimGetRenderEffectStatus(
 
 // Mission-scoped teardown. A companion calls this when a mission ends so one
 // mission's renderer requests cannot leak into the next.
-extern "C" BOOL WINAPI OpenShimResetRenderEffects()
+extern "C" BOOL WINAPI OpenShimImpl_ResetRenderEffects()
 {
     Reset();
     return TRUE;

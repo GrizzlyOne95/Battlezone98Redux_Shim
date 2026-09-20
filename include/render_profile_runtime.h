@@ -20,6 +20,9 @@ namespace BZROpenShim::RenderProfiles
     // not happened yet (callers may fall back to GetCommandLineA).
     const char* GetCapturedCommandLine();
 
+    // Defined by the bootstrap startup seam.
+    const char* RequestedBackendName(RendererBackend backend);
+
     // Seam A arming entry point. MUST be called from DllMain
     // (DLL_PROCESS_ATTACH) — process init is single-threaded then, which makes
     // the IAT swap race-free. Loader-lock-bounded by contract: executable

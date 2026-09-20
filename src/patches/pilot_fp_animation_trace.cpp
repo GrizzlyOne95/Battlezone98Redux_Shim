@@ -1733,7 +1733,7 @@ namespace BZROpenShim
         }
     }
 
-    extern "C" BZRO_API int32_t __cdecl OpenShimResolveLocalFirstPersonEntity(
+    extern "C" int32_t __cdecl OpenShimImpl_ResolveLocalFirstPersonEntity(
         void** outEntity, uint64_t* outGeneration)
     {
         if (!outEntity || !outGeneration)

@@ -2,11 +2,18 @@
 #   irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_windows.ps1 | iex
 #
 # Downloads ONE versioned release bundle, OpenShim-Suite.zip, verifies it
-# against the published SHA-256, and deploys the whole compatibility set:
-# winmm.dll, scripts\patches.json, openshim.ini, net.ini, the mandatory Enhanced
-# renderer resources, and the custom UI widget tiles. Downloading the loose
-# per-file assets instead would silently drop the resource trees, and the
-# Enhanced renderer refuses to enable without its validated resource set.
+# against the published SHA-256, and deploys the whole compatibility set: the
+# three-binary load chain (winmm.dll -> bzloader.dll -> plugins\openshim.dll),
+# scripts\patches.json, openshim.ini, net.ini, the mandatory Enhanced renderer
+# resources, and the custom UI widget tiles. Downloading the loose per-file
+# assets instead would silently drop the resource trees, and the Enhanced
+# renderer refuses to enable without its validated resource set.
+#
+# The load chain is deployed as a set for the same reason patches.json travels
+# with the DLL. winmm.dll is only the bootstrap: without bzloader.dll and the
+# plugin it starts, the game launches happily with no OpenShim at all. That is
+# correct runtime behaviour and an unacceptable install outcome, so a bundle
+# that cannot supply all three is refused rather than partially deployed.
 #
 # An existing player openshim.ini is preserved by default. The installer always
 # refreshes openshim.ini.canonical so startup migration has the current shipped
@@ -158,8 +165,10 @@ function Test-OpenShimDll {
 # Resolve one artifact set out of a tree. OpenShim-Suite.zip mirrors the
 # repository layout on purpose, so the extracted bundle, a local checkout, and
 # a flat directory beside an explicit OPENSHIM_DLL all resolve here. Returns
-# $null unless the four core files are all present. This is the PowerShell twin
-# of find_artifact_set in install_linux.sh; keep the two in step.
+# $null unless every core file is present -- including the whole load chain,
+# because a set without bzloader.dll and plugins\openshim.dll installs a game
+# with no OpenShim in it. This is the PowerShell twin of find_artifact_set in
+# install_linux.sh; keep the two in step.
 function Get-ArtifactSet {
     param([string]$Root, [string]$DllOverride)
 
@@ -172,12 +181,47 @@ function Get-ArtifactSet {
         $dllPath = Join-Path $Root "winmm.dll"
     }
 
+    # The rest of the chain sits beside the bootstrap in every layout that
+    # resolves here, so search relative to the DLL that was actually picked --
+    # that is what keeps OPENSHIM_DLL honest about mixing versions.
+    #
+    # Whether the chain is *required* depends on which OpenShim this is. Every
+    # release up to and including v1.0.0.29 is a single monolithic winmm.dll
+    # that needs no loader, and demanding one would make this installer refuse
+    # every version already published. A post-split bootstrap names bzloader.dll
+    # in its own image; a monolith never does. So ask the DLL rather than
+    # guessing from a version number, and stay fail-closed for the case that
+    # actually matters: a bootstrap whose runtime went missing.
+    $loader = $null
+    $plugin = $null
+    $needsChain = $false
+    if ($dllPath -and (Test-Path -LiteralPath $dllPath)) {
+        $dllBytes = [System.IO.File]::ReadAllBytes($dllPath)
+        $needsChain = [System.Text.Encoding]::Unicode.GetString($dllBytes) -match 'bzloader\.dll'
+        $dllDir = Split-Path -Parent (Resolve-Path -LiteralPath $dllPath).Path
+        foreach ($candidate in @((Join-Path $dllDir "bzloader.dll"),
+                                 (Join-Path $Root "bin\Release\bzloader.dll"),
+                                 (Join-Path $Root "bzloader.dll"))) {
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { $loader = $candidate; break }
+        }
+        foreach ($candidate in @((Join-Path $dllDir "plugins\openshim.dll"),
+                                 (Join-Path $Root "bin\Release\plugins\openshim.dll"),
+                                 (Join-Path $Root "plugins\openshim.dll"),
+                                 (Join-Path $Root "openshim.dll"))) {
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { $plugin = $candidate; break }
+        }
+    }
+
     $patches = Join-Path $Root "scripts\patches.json"
     if (-not (Test-Path -LiteralPath $patches)) {
         $patches = Join-Path $Root "patches.json"
     }
     $ini = Join-Path $Root "openshim.ini"
     $net = Join-Path $Root "net.ini"
+
+    if ($needsChain -and (-not $loader -or -not $plugin)) {
+        return $null
+    }
 
     if (-not $dllPath -or -not (Test-Path -LiteralPath $dllPath) -or
         -not (Test-Path -LiteralPath $patches) -or
@@ -203,6 +247,8 @@ function Get-ArtifactSet {
 
     return @{
         Dll = $dllPath
+        Loader = $loader
+        Plugin = $plugin
         Patches = $patches
         Ini = $ini
         Net = $net
@@ -426,7 +472,7 @@ try {
         $resolvedDll = (Resolve-Path -LiteralPath $env:OPENSHIM_DLL).ProviderPath
         $artifacts = Get-ArtifactSet -Root (Split-Path -Parent $resolvedDll) -DllOverride $resolvedDll
         if (-not $artifacts) {
-            throw "OPENSHIM_DLL requires patches.json, openshim.ini, and net.ini beside the DLL (or scripts\patches.json). Refusing to mix versions."
+            throw "OPENSHIM_DLL requires patches.json, openshim.ini, and net.ini beside the DLL (or scripts\patches.json), plus bzloader.dll and plugins\openshim.dll if that DLL is a post-split bootstrap. Refusing to mix versions."
         }
         Write-Host "Using OPENSHIM_DLL with matched companions: $($artifacts.Dll)"
     } elseif ($localRoot) {
@@ -451,7 +497,7 @@ try {
             $suiteRoot = Get-SuiteBundle -Base $base -TempRoot $tempRoot
             $artifacts = Get-ArtifactSet -Root $suiteRoot
             if (-not $artifacts) {
-                throw "The release bundle is missing one of winmm.dll, patches.json, openshim.ini, or net.ini."
+                throw "The release bundle is missing one of winmm.dll, bzloader.dll, plugins\openshim.dll, patches.json, openshim.ini, or net.ini."
             }
             if (-not $artifacts.RenderSource) {
                 throw "The release bundle carries no Enhanced renderer resource set. Refusing to deploy a bundle that would leave Enhanced unavailable."
@@ -476,11 +522,15 @@ try {
     }
 
     $dll = $artifacts.Dll
+    $loaderDll = $artifacts.Loader
+    $pluginDll = $artifacts.Plugin
     $patches = $artifacts.Patches
     $openshimIni = $artifacts.Ini
     $netIni = $artifacts.Net
 
     Assert-Hash -FilePath $dll -Expected $hashes["winmm.dll"]
+    if ($loaderDll) { Assert-Hash -FilePath $loaderDll -Expected $hashes["bzloader.dll"] }
+    if ($pluginDll) { Assert-Hash -FilePath $pluginDll -Expected $hashes["openshim.dll"] }
     Assert-Hash -FilePath $patches -Expected $hashes["patches.json"]
     Assert-Hash -FilePath $openshimIni -Expected $hashes["openshim.ini"]
     Assert-Hash -FilePath $netIni -Expected $hashes["net.ini"]
@@ -501,6 +551,16 @@ try {
         Write-Host "Installing OpenShim to: $gameDir"
         $destDll = Join-Path $gameDir "winmm.dll"
         Backup-ThenCopy -Source $dll -Dest $destDll -Stamp $stamp
+        # The rest of the load chain. bzloader.dll sits beside the bootstrap
+        # because that is the directory winmm.dll looks in, and the plugin goes
+        # under plugins\ because that is where the loader enumerates. Absent
+        # for a pre-split monolith, which carries no loader by design.
+        if ($loaderDll) {
+            Backup-ThenCopy -Source $loaderDll -Dest (Join-Path $gameDir "bzloader.dll") -Stamp $stamp
+        }
+        if ($pluginDll) {
+            Backup-ThenCopy -Source $pluginDll -Dest (Join-Path $gameDir "plugins\openshim.dll") -Stamp $stamp
+        }
         Backup-ThenCopy -Source $patches -Dest (Join-Path $gameDir "scripts\patches.json") -Stamp $stamp
         Deploy-PlayerIni -Source $openshimIni -GameDir $gameDir -Stamp $stamp -Reset $resetIni
         Backup-ThenCopy -Source $netIni -Dest (Join-Path $gameDir "net.ini") -Stamp $stamp
@@ -548,6 +608,24 @@ try {
         }
         if ($hashes["winmm.dll"]) {
             Assert-Hash -FilePath $destDll -Expected $hashes["winmm.dll"]
+        }
+
+        # Defender quarantines by heuristic, and the runtime is the biggest and
+        # most patch-like of the three. Checking only winmm.dll here would let
+        # a quarantined plugin pass as a clean install, which then looks like
+        # OpenShim silently having no features rather than a blocked file.
+        $chainLinks = @()
+        if ($loaderDll) { $chainLinks += @{ Rel = "bzloader.dll";         Key = "bzloader.dll" } }
+        if ($pluginDll) { $chainLinks += @{ Rel = "plugins\openshim.dll"; Key = "openshim.dll" } }
+        foreach ($link in $chainLinks) {
+            $linkPath = Join-Path $gameDir $link.Rel
+            if (-not (Test-Path -LiteralPath $linkPath)) {
+                Write-DefenderHelp -DllPath $linkPath
+                throw "$($link.Rel) vanished right after install in $gameDir - quarantined. Follow the steps above, then re-run."
+            }
+            if ($hashes[$link.Key]) {
+                Assert-Hash -FilePath $linkPath -Expected $hashes[$link.Key]
+            }
         }
     }
 

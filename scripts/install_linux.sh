@@ -193,6 +193,8 @@ is_openshim_dll() {
 find_artifact_set() {
     local root="$1" dll_override="${2:-}"
     DLL=""
+    LOADER_DLL=""
+    PLUGIN_DLL=""
     PATCHES=""
     OPENSHIM_INI=""
     NET_INI=""
@@ -205,6 +207,38 @@ find_artifact_set() {
         DLL="$root/bin/Release/winmm.dll"
     elif [[ -f "$root/winmm.dll" ]]; then
         DLL="$root/winmm.dll"
+    fi
+
+    # The rest of the load chain. winmm.dll is only the bootstrap: without
+    # bzloader.dll beside it and plugins/openshim.dll under that directory,
+    # the game runs with no OpenShim at all. Search relative to the DLL that
+    # was actually picked, so --dll cannot quietly mix versions.
+    #
+    # Whether the chain is *required* depends on which OpenShim this is. Every
+    # release up to and including v1.0.0.29 is a single monolithic winmm.dll,
+    # and demanding a loader would make this installer refuse every version
+    # already published. A post-split bootstrap names bzloader.dll inside its
+    # own image; a monolith never does. Stripping NULs turns the PE's UTF-16
+    # reference into plain text, so this needs nothing beyond tr and grep.
+    NEEDS_CHAIN=0
+    if [[ -n "$DLL" && -f "$DLL" ]]; then
+        if tr -d '\000' < "$DLL" | LC_ALL=C grep -qa 'bzloader\.dll'; then
+            NEEDS_CHAIN=1
+        fi
+        local dll_dir
+        dll_dir="$(cd "$(dirname "$DLL")" && pwd)"
+        local candidate
+        for candidate in "$dll_dir/bzloader.dll" \
+                         "$root/bin/Release/bzloader.dll" \
+                         "$root/bzloader.dll"; do
+            if [[ -f "$candidate" ]]; then LOADER_DLL="$candidate"; break; fi
+        done
+        for candidate in "$dll_dir/plugins/openshim.dll" \
+                         "$root/bin/Release/plugins/openshim.dll" \
+                         "$root/plugins/openshim.dll" \
+                         "$root/openshim.dll"; do
+            if [[ -f "$candidate" ]]; then PLUGIN_DLL="$candidate"; break; fi
+        done
     fi
 
     if [[ -f "$root/scripts/patches.json" ]]; then
@@ -232,6 +266,10 @@ find_artifact_set() {
         MANIFEST_SRC="$root/resources/openshim/OpenShimAssets.ini"
     else
         MANIFEST_SRC=""
+    fi
+
+    if [[ "$NEEDS_CHAIN" == "1" && ( -z "$LOADER_DLL" || -z "$PLUGIN_DLL" ) ]]; then
+        return 1
     fi
 
     [[ -n "$DLL" && -f "$DLL" && -n "$PATCHES" && -n "$OPENSHIM_INI" && -n "$NET_INI" ]]
@@ -341,6 +379,17 @@ deploy_matched() {
 
     echo "Installing OpenShim to: $game_dir"
     deploy_file "$DLL" "$game_dir/winmm.dll" "$stamp"
+    # bzloader.dll sits beside the bootstrap because that is the directory
+    # winmm.dll looks in; the plugin goes under plugins/ because that is where
+    # the loader enumerates, relative to its own module directory. Both are
+    # absent for a pre-split monolith, which carries no loader by design.
+    if [[ -n "$LOADER_DLL" ]]; then
+        deploy_file "$LOADER_DLL" "$game_dir/bzloader.dll" "$stamp"
+    fi
+    if [[ -n "$PLUGIN_DLL" ]]; then
+        mkdir -p "$game_dir/plugins"
+        deploy_file "$PLUGIN_DLL" "$game_dir/plugins/openshim.dll" "$stamp"
+    fi
     deploy_file "$PATCHES" "$game_dir/scripts/patches.json" "$stamp"
     deploy_player_ini "$OPENSHIM_INI" "$game_dir" "$stamp"
     deploy_file "$NET_INI" "$game_dir/net.ini" "$stamp"
@@ -460,7 +509,9 @@ if [[ -n "$DLL_PATH" ]]; then
     fi
     if ! find_artifact_set "$dll_dir" "$dll_dir/$(basename "$DLL_PATH")"; then
         echo "error: --dll requires a matched set: patches.json, openshim.ini, and net.ini" >&2
-        echo "beside the DLL (or scripts/patches.json). Refusing to mix versions." >&2
+        echo "beside the DLL (or scripts/patches.json), plus bzloader.dll and" >&2
+        echo "plugins/openshim.dll if that DLL is a post-split bootstrap." >&2
+        echo "Refusing to mix versions." >&2
         exit 1
     fi
     echo "Using explicit DLL with matched companions: $DLL"
