@@ -20,6 +20,14 @@
 
 namespace BZROpenShim
 {
+    // Defined at the bottom of this file. They used to be the exported
+    // OpenShim* symbols, which include/BZROpenShim.h declared for us; now the
+    // winmm.dll thunks own those names and these are the implementations
+    // behind them, so the forward declarations have to be local.
+    extern "C" int32_t __cdecl OpenShimImpl_CaptureDeveloperSnapshot(
+        OpenShimDeveloperSnapshot* outSnapshot);
+    extern "C" int32_t __cdecl OpenShimImpl_LogDeveloperSnapshot();
+
     namespace
     {
         constexpr size_t kEventQueueCapacity = 256;
@@ -119,12 +127,12 @@ namespace BZROpenShim
 
         static int32_t __cdecl ApiCaptureDeveloperSnapshot(OpenShimDeveloperSnapshot* outSnapshot)
         {
-            return OpenShimCaptureDeveloperSnapshot(outSnapshot);
+            return OpenShimImpl_CaptureDeveloperSnapshot(outSnapshot);
         }
 
         static int32_t __cdecl ApiLogDeveloperSnapshot()
         {
-            return OpenShimLogDeveloperSnapshot();
+            return OpenShimImpl_LogDeveloperSnapshot();
         }
 
         static const OpenShimNativeUiApiV1* __cdecl ApiGetNativeUiApi(uint32_t requestedVersion)
@@ -349,19 +357,19 @@ namespace BZROpenShim
         return true;
     }
 
-    extern "C" BZRO_API const OpenShimApiV2* __cdecl OpenShimGetApi(uint32_t requestedVersion)
+    extern "C" const OpenShimApiV2* __cdecl OpenShimImpl_GetApi(uint32_t requestedVersion)
     {
         if (requestedVersion != 0 && requestedVersion != SDK_API_V2)
             return nullptr;
         return &GetApiV2Table();
     }
 
-    extern "C" BZRO_API uint32_t __cdecl OpenShimGetBzrDistribution()
+    extern "C" uint32_t __cdecl OpenShimImpl_GetBzrDistribution()
     {
         return static_cast<uint32_t>(GetBzrDistribution());
     }
 
-    extern "C" BZRO_API int32_t __cdecl OpenShimCaptureDeveloperSnapshot(
+    extern "C" int32_t __cdecl OpenShimImpl_CaptureDeveloperSnapshot(
         OpenShimDeveloperSnapshot* outSnapshot)
     {
         if (!outSnapshot)
@@ -375,7 +383,7 @@ namespace BZROpenShim
         return 1;
     }
 
-    extern "C" BZRO_API int32_t __cdecl OpenShimLogDeveloperSnapshot()
+    extern "C" int32_t __cdecl OpenShimImpl_LogDeveloperSnapshot()
     {
         return LogDeveloperSnapshot() ? 1 : 0;
     }

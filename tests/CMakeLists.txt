@@ -427,6 +427,43 @@ add_test(NAME odf_item_prologue_tests COMMAND odf_item_prologue_tests)
 # by construction: the whole requested/supported/effective decision lives in
 # src/engine/render_effect_intent.cpp with no Windows, D3D11 or Ogre in it, and
 # the test drives it through a fake provider.
+# The published SDK export contract. Pure text over the repository, so it runs
+# on the Linux lane: winmm.def, the generated thunk list, and the recorded
+# export baseline of a shipped winmm.dll must all agree.
+add_executable(openshim_sdk_export_contract_tests
+    openshim_sdk_export_contract_tests.cpp
+)
+target_compile_features(openshim_sdk_export_contract_tests PRIVATE cxx_std_20)
+target_compile_definitions(openshim_sdk_export_contract_tests PRIVATE
+    BZR_WINMM_DEF="${CMAKE_CURRENT_SOURCE_DIR}/../src/winmm.def"
+    BZR_SDK_EXPORTS_INC="${CMAKE_CURRENT_SOURCE_DIR}/../include/openshim_sdk_exports.inc"
+    BZR_EXPORT_BASELINE="${CMAKE_CURRENT_SOURCE_DIR}/winmm_export_baseline.txt")
+if(MSVC)
+    target_compile_options(openshim_sdk_export_contract_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(openshim_sdk_export_contract_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME openshim_sdk_export_contract_tests COMMAND openshim_sdk_export_contract_tests)
+
+# Runtime behaviour of the generated export thunks. Windows-only: it links the
+# real thunks, which are Win32 calling conventions over Win32 types.
+if(WIN32 AND MSVC)
+    add_executable(openshim_sdk_thunk_tests
+        openshim_sdk_thunk_tests.cpp
+        ../src/engine/openshim_sdk_thunks.cpp
+        ../src/engine/openshim_sdk_bridge.cpp
+        ../src/engine/shim_log.cpp)
+    target_include_directories(openshim_sdk_thunk_tests PRIVATE ../include ../third_party)
+    target_compile_features(openshim_sdk_thunk_tests PRIVATE cxx_std_20)
+    # BZRO_API must be dllexport here, matching how the shim builds these
+    # translation units; otherwise the namespaced thunks are declared
+    # dllimport and defined locally.
+    target_compile_definitions(openshim_sdk_thunk_tests PRIVATE
+        BZROPENSHIM_EXPORTS _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(openshim_sdk_thunk_tests PRIVATE /W4 /WX)
+    add_test(NAME openshim_sdk_thunk_tests COMMAND openshim_sdk_thunk_tests)
+endif()
+
 add_executable(render_effect_intent_tests
     render_effect_intent_tests.cpp
     ../src/engine/render_effect_intent.cpp

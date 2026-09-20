@@ -195,6 +195,49 @@ said this is not one of them, so enumerating both known games is not a
 wildcard. This is why the standalone lifecycle test still works -- its plugin
 patches nothing and legitimately claims `BZ_GAME_MASK_ANY`.
 
+## The OpenShim SDK export boundary
+
+`docs/OPENSHIM_SDK_V2.md` tells companion DLLs to find OpenShim with
+`GetModuleHandleA("winmm.dll")` + `GetProcAddress`. That makes the *module
+name* part of the published ABI, not just the symbol names, so `winmm.dll` has
+to keep exporting all 71 `OpenShim*` names even once the implementations live
+in `plugins/openshim.dll`.
+
+`winmm.dll` therefore exports thunks. `include/openshim_sdk_exports.inc` is the
+single source of truth: the same list expands into the thunk bodies, into the
+`OpenShimSdkProviderTable` struct, and into the drift test. No signature is
+written twice, so none can disagree.
+
+A thunk reads the installed provider table and calls through. It never loads
+anything -- an export can be called on any thread at any time, including while
+someone else holds the loader lock, so a thunk that hit `LoadLibrary` would be
+a deadlock waiting to happen. With no provider installed it returns the
+documented unavailable value (`FALSE`, `0`, `0.0f`, `nullptr`) and counts the
+call. Resolution costs one `GetProcAddress` for the whole table, not one per
+export: the bootstrap calls `SdkBridge::InstallProviderFromModule` once against
+the already-loaded plugin, which fetches `OpenShimSdkProvider_GetTable`.
+
+The table follows the same append-only rules as the plugin ABI -- `structSize`
+says what is really there, fields are only added at the end, every read is
+guarded -- so an older provider paired with a newer bootstrap reports its
+shorter table and the newer exports read as unavailable instead of jumping
+through uninitialised memory. The table itself is built with C++20 designated
+initializers, which makes a mis-ordered slot a compile error rather than a
+silently swapped function.
+
+While the runtime still ships inside `winmm.dll`, the provider is installed
+directly from `DllMain` (a pointer store into a static table -- no allocation,
+no loader work), which keeps behaviour identical to calling the implementation
+directly. When the provider moves into the plugin that call is replaced by
+`InstallProviderFromModule`, and the window before the plugin loads becomes
+real -- which is exactly why the thunks fail safely and count.
+
+This is also what removed the `winmm_proxy.cpp -> bzr_hooks.cpp` dependency:
+the marshalling that needed `bzr_hooks` moved to
+`src/patches/openshim_sdk_provider.cpp` on the runtime side. Measured with the
+closure script, `winmm_proxy.cpp` went from reaching 52 translation units to
+reaching 2 (itself and `shim_log.cpp`).
+
 ## Path and loading security
 
 The proxy derives `bzloader.dll` from the proxy module address and calls

@@ -34,6 +34,7 @@
 #include "mp_ready_diagnostic.h"
 #include "BZROpenShim.h"
 #include "bzloader_bootstrap.h"
+#include "openshim_sdk_provider.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -271,6 +272,12 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
         // string copy - loader-lock safe.
         BZROpenShim::RenderProfiles::CaptureCommandLineSnapshot();
         BZROpenShim::Initialize();
+        // The OpenShim* exports are thunks now, so they need their provider
+        // before anything can call one. This is a pointer store into the
+        // bridge -- no allocation, no loader work. It disappears when the
+        // provider moves into plugins/openshim.dll and the bootstrap
+        // switches to SdkBridge::InstallProviderFromModule.
+        BZROpenShim::SdkProvider::InstallBuiltIn();
         BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "DLL_PROCESS_ATTACH hModule=0x%p reserved=0x%p shimVersion=%u", hModule, reserved, SHIM_VERSION);
         DisableThreadLibraryCalls(hModule);
 

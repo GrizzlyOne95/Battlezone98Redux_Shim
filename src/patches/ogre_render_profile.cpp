@@ -3687,42 +3687,42 @@ namespace BZROpenShim::RenderProfiles
 
 // ---- stable winmm bridge exports --------------------------------------------
 
-extern "C" UINT WINAPI OpenShimGetRenderApiVersion()
+extern "C" UINT WINAPI OpenShimImpl_GetRenderApiVersion()
 {
     return BZROpenShim::RenderProfiles::Exports::GetRenderApiVersion();
 }
 
-extern "C" DWORD WINAPI OpenShimRequestRenderProfile(DWORD profileRequest)
+extern "C" DWORD WINAPI OpenShimImpl_RequestRenderProfile(DWORD profileRequest)
 {
     return BZROpenShim::RenderProfiles::Exports::RequestRenderProfile(profileRequest);
 }
 
-extern "C" DWORD WINAPI OpenShimGetUserRenderProfile()
+extern "C" DWORD WINAPI OpenShimImpl_GetUserRenderProfile()
 {
     return BZROpenShim::RenderProfiles::Exports::GetUserRenderProfile();
 }
 
-extern "C" DWORD WINAPI OpenShimGetRequestedContentRenderProfile()
+extern "C" DWORD WINAPI OpenShimImpl_GetRequestedContentRenderProfile()
 {
     return BZROpenShim::RenderProfiles::Exports::GetRequestedContentRenderProfile();
 }
 
-extern "C" DWORD WINAPI OpenShimGetEffectiveRenderProfile()
+extern "C" DWORD WINAPI OpenShimImpl_GetEffectiveRenderProfile()
 {
     return BZROpenShim::RenderProfiles::Exports::GetEffectiveRenderProfile();
 }
 
-extern "C" DWORD WINAPI OpenShimGetActiveRendererBackend()
+extern "C" DWORD WINAPI OpenShimImpl_GetActiveRendererBackend()
 {
     return BZROpenShim::RenderProfiles::Exports::GetActiveBackend();
 }
 
-extern "C" DWORD WINAPI OpenShimGetRenderCapabilities()
+extern "C" DWORD WINAPI OpenShimImpl_GetRenderCapabilities()
 {
     return BZROpenShim::RenderProfiles::Exports::GetRenderCapabilities();
 }
 
-extern "C" BOOL WINAPI OpenShimSupportsRenderProfile(DWORD profile)
+extern "C" BOOL WINAPI OpenShimImpl_SupportsRenderProfile(DWORD profile)
 {
     return BZROpenShim::RenderProfiles::Exports::SupportsRenderProfile(profile)
         ? TRUE : FALSE;
