@@ -64,10 +64,26 @@ tint" setting collapses that distinction. Options:
 
 This changes the shape of the settings rows, so decide first.
 
-## Caution
+## Colour-order finding
 
-A HUD colour complaint is not automatically a colour-setting bug. CR's
-`sprites.material` routes every `BZSprite/*` material — including the HUD path,
-`AlphaHUDPixel` → `AlphaHUD` → `CR_UI_*` — through CR's own shaders, and those
-apply an `iColor.bgra` red/blue swap on the SM4 (DX11) path that the SM3 (DX9)
-path does not. Rule that out before attributing a wrong colour to a setting.
+The reported orange/blue inversion was not limited to a PDA preset and was not
+a reason to remove `iColor.bgra` from every stock/CR sprite shader. Two vertex
+producers share those shader families but do not share a packed-colour
+convention:
+
+- native BZR sprite/HUD vertices use the stock SM4 BGRA correction;
+- Ogre-generated TextArea and ParticleFX vertices have already passed through
+  Ogre's render-system `convertColourValue` and arrive in D3D11 RGBA order.
+
+Applying the native correction to the second category swaps red and blue a
+second time. The narrow fixes therefore live with the authored consumers:
+
+- CR's `CR_OverlayFont` uses an Ogre-TextArea vertex program that preserves
+  `iColor` order;
+- EXU's weather materials inherit stock blend/depth behavior through an
+  Ogre-particle vertex program that preserves `iColor` order.
+
+Do not globally remove the stock/CR `.bgra` paths without a separate native
+sprite qualification. Future generated overlays or billboards should select an
+Ogre-colour material explicitly instead of inheriting a native BZR sprite
+vertex program by accident.
