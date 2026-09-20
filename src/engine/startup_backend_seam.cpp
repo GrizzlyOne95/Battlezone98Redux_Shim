@@ -192,10 +192,33 @@ namespace BZROpenShim::RenderProfiles
 
         // Mirrors the seam's outcome into the POD record OpenShim reads. Called
         // once, after the transport has run, while the state lock is held.
+        uint32_t BackendToWire(RendererBackend backend)
+        {
+            switch (backend)
+            {
+            case RendererBackend::DX9:  return StartupSeam::kBackendDx9;
+            case RendererBackend::DX11: return StartupSeam::kBackendDx11;
+            default:                    return StartupSeam::kBackendAuto;
+            }
+        }
+
+        uint32_t SourceToWire(BackendSelection::RequestSource source)
+        {
+            switch (source)
+            {
+            case BackendSelection::RequestSource::Persistent:
+                return StartupSeam::kSourcePersistent;
+            case BackendSelection::RequestSource::CliOverride:
+                return StartupSeam::kSourceCliOverride;
+            default:
+                return StartupSeam::kSourceNone;
+            }
+        }
+
         void PublishResultLocked()
         {
-            s_result.requested = s_bootRequest.backend;
-            s_result.source = s_bootRequest.source;
+            s_result.requestedBackend = BackendToWire(s_bootRequest.backend);
+            s_result.requestSource = SourceToWire(s_bootRequest.source);
             s_result.dx9Present = s_dx9Present ? 1u : 0u;
             s_result.dx11Present = s_dx11Present ? 1u : 0u;
             s_result.transportWritten = s_transportWrittenThisBoot ? 1u : 0u;
@@ -565,6 +588,9 @@ namespace BZROpenShim::RenderProfiles
         bool FailStartupBackendSeamArm(BackendSeamArmStatus status)
         {
             s_seamArmStatus.store(status, std::memory_order_release);
+            // Published as a number so the runtime can render the text on its
+            // own side without a call back across the boundary.
+            s_result.armStatus = static_cast<uint32_t>(status);
             return false;
         }
 
@@ -743,6 +769,7 @@ namespace BZROpenShim::RenderProfiles
 
             s_seamInstalled.store(true, std::memory_order_release);
             s_result.seamArmed = 1u;
+            s_result.armStatus = StartupSeam::kArmArmed;
             s_seamArmStatus.store(
                 BackendSeamArmStatus::Armed, std::memory_order_release);
             return true;
@@ -906,10 +933,10 @@ namespace BZROpenShim::RenderProfiles
         ClearPendingMarker();
     }
 
-    const char* SeamArmStatusTextForPublication()
+    const char* SeamArmStatusTextForValue(uint32_t armStatus)
     {
         return BackendSeamArmStatusText(
-            s_seamArmStatus.load(std::memory_order_acquire));
+            static_cast<BackendSeamArmStatus>(armStatus));
     }
 
     void RunStartupSelectionForTestImpl()
@@ -929,9 +956,19 @@ namespace BZROpenShim::StartupSeam
         BZROpenShim::RenderProfiles::RunStartupSelectionForTestImpl();
     }
 
-    const StartupRendererResult* GetStartupRendererResult()
+    bool CopyStartupRendererResult(void* out, uint32_t capacity)
     {
-        return &BZROpenShim::RenderProfiles::SeamResultForPublication();
+        if (out == nullptr || capacity < sizeof(StartupRendererResult))
+            return false;
+        const StartupRendererResult& src =
+            BZROpenShim::RenderProfiles::SeamResultForPublication();
+        std::memcpy(out, &src, sizeof(StartupRendererResult));
+        return true;
+    }
+
+    const char* ArmStatusText(uint32_t armStatus)
+    {
+        return BZROpenShim::RenderProfiles::SeamArmStatusTextForValue(armStatus);
     }
 
     void ClearPendingMarker()
@@ -939,8 +976,4 @@ namespace BZROpenShim::StartupSeam
         BZROpenShim::RenderProfiles::ClearPendingMarkerFromRuntime();
     }
 
-    const char* ArmStatusText()
-    {
-        return BZROpenShim::RenderProfiles::SeamArmStatusTextForPublication();
-    }
 }

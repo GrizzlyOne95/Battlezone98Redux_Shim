@@ -188,7 +188,9 @@
     <ClCompile Include="src\patches\fog_wake_feature.cpp" />
     <ClCompile Include="src\patches\render_queue_trace.cpp" />
     <ClCompile Include="src\patches\mp_vehicle_preview_fix.cpp" />
-    <ClCompile Include="src\engine\shim_log.cpp" />
+    <ClCompile Include="src\engine\shim_log_sink.cpp" />
+    <ClCompile Include="src\engine\shim_log_client.cpp" />
+    <ClCompile Include="src\engine\openshim_bootstrap_api.cpp" />
     <ClCompile Include="src\engine\enhanced_light_selection.cpp" />
     <ClCompile Include="src\engine\winmm_proxy.cpp" />
     <ClCompile Include="src\engine\patcher.cpp" />
@@ -215,6 +217,8 @@
     <ClInclude Include="include\bzloader_bootstrap.h" />
     <ClInclude Include="include\bootstrap_file_io.h" />
     <ClInclude Include="include\startup_backend_seam.h" />
+    <ClInclude Include="include\openshim_bootstrap_api.h" />
+    <ClInclude Include="include\shim_log_sink.h" />
     <ClInclude Include="include\game_log_path.h" />
     <ClInclude Include="include\openshim_sdk_bridge.h" />
     <ClInclude Include="include\openshim_sdk_provider.h" />

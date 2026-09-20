@@ -107,15 +107,16 @@ int main()
 
     StartupSeam::RunStartupSelectionForTest();
 
-    const StartupSeam::StartupRendererResult* r =
-        StartupSeam::GetStartupRendererResult();
-    CHECK(r != nullptr);
-    CHECK(r->version == StartupSeam::kStartupRendererResultVersion);
-    CHECK(r->selectionRan != 0);
-    CHECK(r->requested == RenderProfiles::RendererBackend::DX11);
-    CHECK(r->source == BackendSelection::RequestSource::Persistent);
-    CHECK(r->transportWritten != 0);
-    CHECK(r->dx11Present != 0);
+    // The record is copied, and carries fixed-width wire values rather than
+    // C++ enums, because it crosses a module boundary after the DLL split.
+    StartupSeam::StartupRendererResult r = {};
+    CHECK(StartupSeam::CopyStartupRendererResult(&r, sizeof(r)));
+    CHECK(r.version == StartupSeam::kStartupRendererResultVersion);
+    CHECK(r.selectionRan != 0);
+    CHECK(r.requestedBackend == StartupSeam::kBackendDx11);
+    CHECK(r.requestSource == StartupSeam::kSourcePersistent);
+    CHECK(r.transportWritten != 0);
+    CHECK(r.dx11Present != 0);
     CHECK(RenderSystemLine(ReadText(cfg)) == "Direct3D11 Rendering Subsystem");
 
     // Every other byte of the file has to survive the rewrite.
@@ -128,8 +129,10 @@ int main()
     WriteText(cfg, stockCfg);
     std::filesystem::remove(dx11, ec);
     StartupSeam::RunStartupSelectionForTest();
-    CHECK(StartupSeam::GetStartupRendererResult()->dx11Present == 0);
-    CHECK(StartupSeam::GetStartupRendererResult()->transportWritten == 0);
+    StartupSeam::StartupRendererResult noPlugin = {};
+    CHECK(StartupSeam::CopyStartupRendererResult(&noPlugin, sizeof(noPlugin)));
+    CHECK(noPlugin.dx11Present == 0);
+    CHECK(noPlugin.transportWritten == 0);
     CHECK(RenderSystemLine(ReadText(cfg)) == "Direct3D9 Rendering Subsystem");
     MakePlugin(dx11);
 
@@ -137,23 +140,28 @@ int main()
     WriteText(ini, "[Graphics]\r\nRenderer=dx11\r\n[Startup]\r\nBackendTransport=0\r\n");
     WriteText(cfg, stockCfg);
     StartupSeam::RunStartupSelectionForTest();
-    CHECK(StartupSeam::GetStartupRendererResult()->transportWritten == 0);
+    StartupSeam::StartupRendererResult killSwitch = {};
+    CHECK(StartupSeam::CopyStartupRendererResult(&killSwitch, sizeof(killSwitch)));
+    CHECK(killSwitch.transportWritten == 0);
     CHECK(RenderSystemLine(ReadText(cfg)) == "Direct3D9 Rendering Subsystem");
 
     // ---- Auto is byte-identical stock behaviour --------------------------
     WriteText(ini, "[Graphics]\r\nRenderer=auto\r\n");
     WriteText(cfg, stockCfg);
     StartupSeam::RunStartupSelectionForTest();
-    CHECK(StartupSeam::GetStartupRendererResult()->requested ==
-          RenderProfiles::RendererBackend::Auto);
-    CHECK(StartupSeam::GetStartupRendererResult()->transportWritten == 0);
+    StartupSeam::StartupRendererResult autoCase = {};
+    CHECK(StartupSeam::CopyStartupRendererResult(&autoCase, sizeof(autoCase)));
+    CHECK(autoCase.requestedBackend == StartupSeam::kBackendAuto);
+    CHECK(autoCase.transportWritten == 0);
     CHECK(ReadText(cfg) == stockCfg);
 
     // ---- an absent openshim.ini is Auto, and touches nothing -------------
     std::filesystem::remove(ini, ec);
     WriteText(cfg, stockCfg);
     StartupSeam::RunStartupSelectionForTest();
-    CHECK(StartupSeam::GetStartupRendererResult()->transportWritten == 0);
+    StartupSeam::StartupRendererResult noIni = {};
+    CHECK(StartupSeam::CopyStartupRendererResult(&noIni, sizeof(noIni)));
+    CHECK(noIni.transportWritten == 0);
     CHECK(ReadText(cfg) == stockCfg);
 
     // ---- DX9 request rewrites too ----------------------------------------
@@ -162,9 +170,10 @@ int main()
               "Render System=Direct3D11 Rendering Subsystem\r\n"
               "\r\n[Direct3D11 Rendering Subsystem]\r\nFull Screen=No\r\n");
     StartupSeam::RunStartupSelectionForTest();
-    CHECK(StartupSeam::GetStartupRendererResult()->requested ==
-          RenderProfiles::RendererBackend::DX9);
-    CHECK(StartupSeam::GetStartupRendererResult()->transportWritten != 0);
+    StartupSeam::StartupRendererResult dx9Case = {};
+    CHECK(StartupSeam::CopyStartupRendererResult(&dx9Case, sizeof(dx9Case)));
+    CHECK(dx9Case.requestedBackend == StartupSeam::kBackendDx9);
+    CHECK(dx9Case.transportWritten != 0);
     CHECK(RenderSystemLine(ReadText(cfg)) == "Direct3D9 Rendering Subsystem");
 
     // ---- a missing Ogre.cfg is created, not skipped ----------------------

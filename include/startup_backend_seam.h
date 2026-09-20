@@ -10,12 +10,13 @@
 // about a second, well before any plugin could be hosted.
 //
 // So the bootstrap owns the whole startup decision and runs it self-
-// sufficiently, then publishes a POD record. OpenShim reads that record when
-// it initialises and seeds its runtime state from it rather than
-// recomputing what already happened.
+// sufficiently, then publishes a POD record. OpenShim copies that record when
+// it initialises and seeds its runtime state from it rather than recomputing
+// what already happened.
 //
 // This is OpenShim-bootstrap plumbing, deliberately NOT part of the BZLoader
-// plugin ABI: third-party plugins have no business depending on it.
+// plugin ABI: third-party plugins have no business depending on it. It
+// reaches OpenShim through OpenShimBootstrapApi (openshim_bootstrap_api.h).
 //
 // Copyright (C) 2026 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
@@ -24,25 +25,34 @@
 
 #include <cstdint>
 
-#include "backend_selection.h"
-#include "render_profile.h"
-
 namespace BZROpenShim::StartupSeam
 {
     inline constexpr uint32_t kStartupRendererResultVersion = 1u;
 
-    // Write-once snapshot of what the bootstrap decided and did. Plain data
-    // only: no std::string, no locks, no renderer-profile runtime state, and
-    // nothing with a destructor. Append-only, guarded by structSize on the
-    // same terms as the other tables in this codebase.
+    // Write-once snapshot of what the bootstrap decided and did.
+    //
+    // Every field is a fixed-width integer, on purpose. C++ enum types are
+    // perfectly correct while this is one binary, but this record crosses a
+    // DLL boundary: the two sides can be built at different times, and an
+    // enum whose underlying type or enumerator values drifted would corrupt
+    // the reading side silently. The numeric spaces below are the contract;
+    // OpenShim converts back to its own enums after copying.
+    //
+    // Append-only, guarded by structSize. No std::string, no locks, no
+    // renderer runtime state, nothing with a destructor.
     struct StartupRendererResult
     {
         uint32_t version;
         uint32_t structSize;
 
-        // The request this boot resolved to, and where it came from.
-        RenderProfiles::RendererBackend requested;
-        BackendSelection::RequestSource source;
+        // RenderProfiles::RendererBackend: 0=Auto, 1=DX9, 2=DX11.
+        uint32_t requestedBackend;
+        // BackendSelection::RequestSource: 0=None, 1=Persistent, 2=CliOverride.
+        uint32_t requestSource;
+        // Seam arm outcome, in the order BackendSeamArmStatus declares it.
+        // Carried as a number so the runtime renders its own diagnostic text
+        // instead of calling back into the bootstrap for a string.
+        uint32_t armStatus;
 
         uint8_t dx9Present;
         uint8_t dx11Present;
@@ -59,25 +69,50 @@ namespace BZROpenShim::StartupSeam
         // The call-site proof passed at the gate: return address, the six
         // post-SteamStub bytes, and an Ogre.cfg argument.
         uint8_t startupSiteValidated;
+        uint8_t reserved0;
+        uint8_t reserved1;
     };
 
-    // The record. Never null; fields are meaningless until selectionRan is 1.
-    const StartupRendererResult* GetStartupRendererResult();
+    static_assert(sizeof(StartupRendererResult) == 28,
+                  "StartupRendererResult is a fixed-layout cross-module POD");
+
+    // The numeric spaces above, named so both sides agree without sharing an
+    // enum definition.
+    inline constexpr uint32_t kBackendAuto = 0u;
+    inline constexpr uint32_t kBackendDx9 = 1u;
+    inline constexpr uint32_t kBackendDx11 = 2u;
+
+    inline constexpr uint32_t kSourceNone = 0u;
+    inline constexpr uint32_t kSourcePersistent = 1u;
+    inline constexpr uint32_t kSourceCliOverride = 2u;
+
+    inline constexpr uint32_t kArmNotAttempted = 0u;
+    inline constexpr uint32_t kArmArmed = 1u;
+
+    // Diagnostic text for an armStatus value. A pure mapping over the numeric
+    // space, so both modules compile it and nothing crosses the boundary just
+    // to render a log line.
+    const char* ArmStatusText(uint32_t armStatus);
+
+    // Copies the record into the caller's buffer. Returns false when that
+    // buffer is smaller than the mandatory prefix.
+    //
+    // A copy rather than a pointer into bootstrap memory: winmm.dll is pinned
+    // so a pointer would be safe, but copying makes the ownership obvious --
+    //   bootstrap decides -> publishes once -> plugin copies -> runtime owns.
+    bool CopyStartupRendererResult(void* out, uint32_t capacity);
 
     // Previous-boot evidence marker, owned by the bootstrap because the
     // bootstrap is what writes it. The runtime clears it once it has seen a
-    // renderer established.
+    // renderer established. This stays a real call back into the bootstrap.
     void ClearPendingMarker();
-
-    // Human-readable arm status for the runtime's diagnostics.
-    const char* ArmStatusText();
 
     // Runs the startup decision and the Ogre.cfg transport exactly as the
     // intercepted ConfigFile::load does, minus the call-site proof. The gate
-    // is the only production caller; this is exposed so the path that matters
+    // is the only production caller; this exists so the path that matters
     // most -- no plugin loaded, nothing else initialised -- can be exercised
-    // offline instead of only in a live game. Not idempotent: it performs the
-    // transport, so a test must control the working directory.
+    // offline. Bootstrap-internal: deliberately NOT part of the bootstrap API
+    // table. Not idempotent, because it performs the transport.
     void RunStartupSelectionForTest();
 }
 
@@ -86,6 +121,6 @@ namespace BZROpenShim::RenderProfiles
     // Bridges used by the seam's own public wrappers. Not for general use.
     const StartupSeam::StartupRendererResult& SeamResultForPublication();
     void ClearPendingMarkerFromRuntime();
-    const char* SeamArmStatusTextForPublication();
+    const char* SeamArmStatusTextForValue(uint32_t armStatus);
     void RunStartupSelectionForTestImpl();
 }
