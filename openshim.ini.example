@@ -690,6 +690,23 @@ FXAA = 1
 ;   OPENSHIM_DISABLE_ENHANCED_LIGHT_SELECTION_V2
 EnhancedLightSelectionV2 = 1
 
+; Phase A scene-depth qualification. A diagnostic, not a feature, and the
+; only key in this section that is not a rendering improvement: it records
+; which D3D11 depth resources exist, what depth-stencil views are built
+; over them, and which render targets are bound alongside, so the main
+; gameplay depth surface can be identified from evidence rather than from
+; API convention. That identification is what SSAO, depth haze and soft
+; particles are all blocked on.
+; Observation only: no resource description is modified, no view is
+; created and no binding is altered. It still hooks three device entry
+; points and the immediate context, so it is OFF in this reference INI and
+; belongs in a capture run rather than in normal play.
+; Accepted: boolean/integer flag; use 0/1. Default in this reference INI: OFF.
+; Applies only when RenderSystem_Direct3D11.dll is active. DX9 is untouched.
+; Not exposed on the OpenShim Settings page; this is a developer tool.
+; Environment override: OPENSHIM_DX11_SCENE_DEPTH_DIAG
+SceneDepthDiagnostic = 0
+
 
 [Display]
 
