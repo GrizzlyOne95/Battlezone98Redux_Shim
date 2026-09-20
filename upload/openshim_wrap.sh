@@ -56,7 +56,7 @@ CONF_FILE="$CONF_DIR/upload.conf"
 # check.  It was previously inlined in the meta.txt heredoc only, which is why
 # a tester running V4.91-harvest against a V4.92-arms repo went unnoticed until
 # somebody read a bundle's meta.txt after the fact (2026-08-12).
-WRAPPER_VERSION="OpenShim-upload-20260914"
+WRAPPER_VERSION="OpenShim-upload-20260920-coredump"
 
 # Discord's webhook attachment cap is ~10 MB for an unboosted server. Stay
 # under it with room for the multipart envelope.
@@ -353,7 +353,11 @@ steam_player_name() {
 # could exist until the bundle was already the only evidence.
 crash_capture_status() {
     local pattern
-    pattern="$(cat /proc/sys/kernel/core_pattern 2>/dev/null || true)"
+    if [[ -n "${OPENSHIM_CORE_PATTERN+x}" ]]; then
+        pattern="$OPENSHIM_CORE_PATTERN"
+    else
+        pattern="$(cat /proc/sys/kernel/core_pattern 2>/dev/null || true)"
+    fi
     case "$pattern" in
         *systemd-coredump*) echo "systemd-coredump" ;;
         \|*)                echo "piped:${pattern%% *}" ;;
@@ -366,6 +370,202 @@ crash_capture_status() {
             fi
             ;;
     esac
+}
+
+# systemd-coredump can be configured even when the wrapper cannot inspect it
+# (for example, coredumpctl is absent from a Steam sandbox). Keep that distinct
+# from a host where the kernel is not routing cores to systemd at all.
+coredump_capture_availability() {
+    if [[ "$(crash_capture_status)" != "systemd-coredump" ]]; then
+        echo "unavailable:not-systemd-coredump"
+    elif ! command -v "${OPENSHIM_COREDUMPCTL_BIN:-coredumpctl}" >/dev/null 2>&1; then
+        echo "unavailable:coredumpctl-not-found"
+    else
+        echo "available"
+    fi
+}
+
+coredump_permission_error() {
+    grep -Eqi 'permission denied|access denied|not permitted|insufficient permissions' "$1" 2>/dev/null
+}
+
+# Score coredumpctl's human-readable `info` output without accepting a generic
+# Wine crash on the same machine. The session time window is enforced by every
+# coredumpctl query; this adds process/executable identity. Exact game path is
+# strongest, the game executable name is still strong (Wine command lines use
+# Windows paths on some hosts), and the truncated Linux comm plus a Wine/Proton
+# executable is the conservative fallback.
+coredump_match_score() {
+    local info_file="$1" game_dir="$2" expected_uid="${3:-$(id -u)}" info_lower game_lower
+    if ! grep -Eq "^[[:space:]]*UID:[[:space:]]*$expected_uid([[:space:](]|$)" "$info_file" 2>/dev/null; then
+        echo 0
+        return 0
+    fi
+    info_lower="$(tr '[:upper:]' '[:lower:]' <"$info_file" 2>/dev/null || true)"
+    game_lower="$(printf '%s' "$game_dir" | tr '[:upper:]' '[:lower:]')"
+
+    if [[ -n "$game_lower" && "$info_lower" == *"$game_lower"* \
+       && "$info_lower" == *"battlezone98redux.exe"* ]]; then
+        echo 100
+    elif [[ "$info_lower" == *"battlezone98redux.exe"* ]]; then
+        echo 80
+    elif grep -Eqi '^[[:space:]]*PID:.*\(battlezone98r(edux)?' "$info_file" 2>/dev/null \
+      && grep -Eqi '^[[:space:]]*Executable:.*(wine|proton)' "$info_file" 2>/dev/null; then
+        echo 60
+    else
+        echo 0
+    fi
+}
+
+bounded_copy() {
+    local src="$1" dest="$2" limit="${3:-524288}" size
+    size="$(stat -c %s "$src" 2>/dev/null || echo 0)"
+    head -c "$limit" "$src" >"$dest" 2>/dev/null || cp -f "$src" "$dest"
+    if [[ "$size" =~ ^[0-9]+$ ]] && (( size > limit )); then
+        printf '\n[OpenShim: output truncated at %s bytes]\n' "$limit" >>"$dest"
+    fi
+}
+
+# Add coredump evidence for an abnormal just-finished session. No raw core is
+# exported: coredumpctl info and a bounded batch debugger trace are sufficient
+# for a support bundle and avoid turning one crash into a multi-gigabyte upload.
+collect_systemd_coredump() {
+    local bundle="$1" meta="$2" game_dir="$3" session_start="$4" session_end="$5" termination="$6"
+    local availability tool query_start query_until query_out query_err session_uid
+    availability="$(coredump_capture_availability)"
+    echo "coredump_capture=$availability" >>"$meta"
+
+    case "$termination" in
+        clean|clean-with-exception)
+            echo "coredump_match=not-attempted-clean-termination" >>"$meta"
+            echo "coredump_metadata=not-captured" >>"$meta"
+            echo "coredump_backtrace=not-attempted" >>"$meta"
+            return 0
+            ;;
+    esac
+
+    if [[ "$availability" != "available" ]]; then
+        echo "coredump_match=not-attempted-capture-unavailable" >>"$meta"
+        echo "coredump_metadata=not-captured" >>"$meta"
+        echo "coredump_backtrace=not-attempted" >>"$meta"
+        return 0
+    fi
+
+    tool="${OPENSHIM_COREDUMPCTL_BIN:-coredumpctl}"
+    query_start=$(( session_start > 5 ? session_start - 5 : 0 ))
+    query_until=$(( session_end + 15 ))
+    session_uid="$(id -u)"
+    query_out="$bundle/.coredump-pids"
+    query_err="$bundle/.coredump-query.err"
+    {
+        echo "query_since_epoch=$query_start"
+        echo "query_until_epoch=$query_until"
+        echo "query_uid=$session_uid"
+        echo "game_dir=$game_dir"
+        echo "termination_kind=$termination"
+    } >"$bundle/systemd-coredump.query.txt"
+    echo "coredump_query_since_epoch=$query_start" >>"$meta"
+    echo "coredump_query_until_epoch=$query_until" >>"$meta"
+
+    if ! LC_ALL=C clean_env "$tool" --no-pager --no-legend --reverse \
+            --since "@$query_start" --until "@$query_until" \
+            --field=COREDUMP_PID "COREDUMP_UID=$session_uid" >"$query_out" 2>"$query_err"; then
+        bounded_copy "$query_err" "$bundle/.coredump-query-bounded"
+        cat "$bundle/.coredump-query-bounded" >>"$bundle/systemd-coredump.query.txt"
+        if coredump_permission_error "$query_err"; then
+            echo "coredump_match=permission-denied" >>"$meta"
+        elif grep -Eqi 'no coredumps found|no matching.*core|no entries' "$query_err" 2>/dev/null; then
+            echo "coredump_match=no-matching-dump" >>"$meta"
+        else
+            echo "coredump_match=query-failed" >>"$meta"
+        fi
+        echo "coredump_metadata=not-captured" >>"$meta"
+        echo "coredump_backtrace=not-attempted" >>"$meta"
+        rm -f "$query_out" "$query_err" "$bundle/.coredump-query-bounded"
+        return 0
+    fi
+
+    if [[ ! -s "$query_out" ]]; then
+        echo "No coredumps were listed in the session time window." >>"$bundle/systemd-coredump.query.txt"
+        echo "coredump_match=no-matching-dump" >>"$meta"
+        echo "coredump_metadata=not-captured" >>"$meta"
+        echo "coredump_backtrace=not-attempted" >>"$meta"
+        rm -f "$query_out" "$query_err"
+        return 0
+    fi
+
+    local pid info_file info_err score best_score=0 best_pid="" best_info="" saw_permission=0
+    while IFS= read -r pid; do
+        [[ "$pid" =~ ^[0-9]+$ ]] || continue
+        info_file="$bundle/.coredump-info-$pid"
+        info_err="$bundle/.coredump-info-$pid.err"
+        if ! LC_ALL=C clean_env "$tool" --no-pager -1 --since "@$query_start" --until "@$query_until" \
+                info "COREDUMP_PID=$pid" >"$info_file" 2>"$info_err"; then
+            coredump_permission_error "$info_err" && saw_permission=1
+            rm -f "$info_file" "$info_err"
+            continue
+        fi
+        score="$(coredump_match_score "$info_file" "$game_dir" "$session_uid")"
+        if [[ "$score" =~ ^[0-9]+$ ]] && (( score > best_score )); then
+            best_score="$score"
+            best_pid="$pid"
+            best_info="$info_file"
+        fi
+        rm -f "$info_err"
+    done <"$query_out"
+
+    if [[ -z "$best_pid" ]]; then
+        if (( saw_permission )); then
+            echo "Some candidate metadata could not be read: permission denied." >>"$bundle/systemd-coredump.query.txt"
+            echo "coredump_match=permission-denied" >>"$meta"
+        else
+            echo "Candidates existed, but none matched Battlezone/Wine/Proton identity." >>"$bundle/systemd-coredump.query.txt"
+            echo "coredump_match=no-matching-dump" >>"$meta"
+        fi
+        echo "coredump_metadata=not-captured" >>"$meta"
+        echo "coredump_backtrace=not-attempted" >>"$meta"
+        rm -f "$query_out" "$query_err" "$bundle"/.coredump-info-*
+        return 0
+    fi
+
+    bounded_copy "$best_info" "$bundle/systemd-coredump.metadata.txt"
+    echo "matched_pid=$best_pid" >>"$bundle/systemd-coredump.query.txt"
+    echo "match_score=$best_score" >>"$bundle/systemd-coredump.query.txt"
+    echo "coredump_match=found" >>"$meta"
+    echo "coredump_pid=$best_pid" >>"$meta"
+    echo "coredump_match_score=$best_score" >>"$meta"
+    echo "coredump_metadata=captured" >>"$meta"
+
+    if grep -Eqi 'Stack trace of thread|(^|[[:space:]])#[0-9]+[[:space:]]' "$best_info" 2>/dev/null; then
+        echo "coredump_backtrace=captured" >>"$meta"
+        echo "coredump_backtrace_source=metadata" >>"$meta"
+    else
+        local bt_tmp="$bundle/.coredump-backtrace" bt_status bt_value
+        if LC_ALL=C clean_env "$tool" --no-pager --since "@$query_start" --until "@$query_until" \
+                --debugger-arguments="-batch -nx -ex 'set pagination off' -ex 'thread apply all bt'" \
+                debug "COREDUMP_PID=$best_pid" >"$bt_tmp" 2>&1; then
+            bt_status=0
+        else
+            bt_status=$?
+        fi
+        bounded_copy "$bt_tmp" "$bundle/systemd-coredump.backtrace.txt"
+        if grep -Eq '(^|[[:space:]])#[0-9]+[[:space:]]' "$bt_tmp" 2>/dev/null; then
+            bt_value="captured"
+        elif coredump_permission_error "$bt_tmp"; then
+            bt_value="permission-denied"
+        elif grep -Eqi 'core.*(not available|missing|not found)|no such file|cannot access.*core' "$bt_tmp" 2>/dev/null; then
+            bt_value="unavailable:core-not-accessible"
+        elif (( bt_status != 0 )); then
+            bt_value="unavailable:debugger-failed"
+        else
+            bt_value="unavailable:no-stack"
+        fi
+        echo "coredump_backtrace=$bt_value" >>"$meta"
+        echo "coredump_backtrace_source=debugger" >>"$meta"
+        rm -f "$bt_tmp"
+    fi
+
+    rm -f "$query_out" "$query_err" "$bundle"/.coredump-info-*
 }
 
 # The game directory is wherever the executable Steam handed us lives.
@@ -691,6 +891,8 @@ collect_and_upload() {
     termination_kind="$(classify_termination "$exit_code" "$bundle/BZLogger.txt" "$exception_evidence")"
     echo "termination_kind=$termination_kind" >>"$bundle/meta.txt"
     echo "exception_evidence=$exception_evidence" >>"$bundle/meta.txt"
+    collect_systemd_coredump "$bundle" "$bundle/meta.txt" "$game_dir" \
+        "${start_epoch:-$(date +%s)}" "$(date +%s)" "$termination_kind"
 
     case "$termination_kind" in
         clean) ;;
@@ -769,6 +971,12 @@ collect_and_upload() {
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────
+
+# The Linux regression tests source the helpers and replace coredumpctl with a
+# fixture. An executed/installed wrapper always follows the normal path below.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
 
 case "${1:-}" in
     --setup)  do_setup; exit $? ;;
