@@ -104,24 +104,101 @@ jobs:
           /p:GenerateFullPaths=true `
           /verbosity:minimal
 
-    # Verify the exact DLL that will be published before any release packaging.
+    # Same rule as the rest of this file: a tagged release is authoritative
+    # user-facing output, so it passes the gates a pull request passes. These
+    # two were only ever in build-win32.yml, which meant the release lane was
+    # the one lane that never proved the plugin ABI loads or that the public
+    # export table survived.
+    - name: Run BZLoader host lifecycle test
+      shell: pwsh
+      run: |
+        $exe = Join-Path $PWD "bin/Release/BZLoaderHostTest.exe"
+        $plugin = Join-Path $PWD "bin/Release/plugins/bzloader_test_plugin.dll"
+
+        foreach ($required in @($exe, $plugin)) {
+          if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+            throw "BZLoader lifecycle test prerequisite is missing: $required"
+          }
+        }
+
+        & $exe
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "--- bzloader.log ---"
+          Get-Content -LiteralPath (Join-Path $PWD "bin/Release/bzloader.log") -ErrorAction SilentlyContinue
+          throw "BZLoaderHostTest failed with exit code $LASTEXITCODE"
+        }
+
+    # docs/OPENSHIM_SDK_V2.md makes GetModuleHandleA("winmm.dll") the documented
+    # discovery path for ~65 exports, and they are forwarding thunks now. A
+    # dropped or re-decorated name breaks Extra Utilities silently at runtime,
+    # which is precisely the kind of thing a release must not be the first to
+    # discover.
+    - name: Verify winmm.dll export parity
+      shell: pwsh
+      run: |
+        $dumpbin = Get-ChildItem -LiteralPath "${env:VCToolsInstallDir}bin" -Filter dumpbin.exe -File -Recurse |
+          Where-Object { $_.FullName -like '*\x86\dumpbin.exe' } |
+          Select-Object -First 1
+        if (-not $dumpbin) {
+          $dumpbin = Get-ChildItem -LiteralPath "${env:ProgramFiles}\Microsoft Visual Studio" -Filter dumpbin.exe -File -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        }
+        if (-not $dumpbin) { throw "dumpbin.exe was not found" }
+
+        $dll = Join-Path $PWD "bin/Release/winmm.dll"
+        $raw = & $dumpbin.FullName /nologo /exports $dll
+        $actual = $raw |
+          Select-String -Pattern '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)(?:\s+=\s+(\S+))?' |
+          ForEach-Object {
+            $n = $_.Matches[0].Groups[1].Value
+            $decorated = $_.Matches[0].Groups[2].Value
+            # Pin the __stdcall stack size, but not which symbol /OPT:ICF
+            # folded the body onto -- that is a linker optimisation, not ABI.
+            if ($decorated -match '@(\d+)$') { "$n@$($Matches[1])" } else { $n }
+          } |
+          Sort-Object -Unique
+
+        $expected = Get-Content -LiteralPath (Join-Path $PWD "tests/winmm_export_baseline.txt") |
+          Where-Object { $_ -and -not $_.StartsWith("#") } |
+          Sort-Object -Unique
+
+        $missing = Compare-Object $expected $actual | Where-Object { $_.SideIndicator -eq "<=" }
+        if ($missing) {
+          $missing | ForEach-Object { Write-Host "MISSING EXPORT: $($_.InputObject)" }
+          throw "winmm.dll dropped or changed the ABI of $($missing.Count) export(s) that a shipped build provided"
+        }
+        "export parity OK: $($expected.Count) baseline exports all present"
+
+    # Verify the exact binaries that will be published before any release
+    # packaging. A tagged release that ships the bootstrap without its runtime
+    # is worse than a failed build: it installs cleanly and disables OpenShim.
+    - name: Verify the load chain is whole
+      shell: pwsh
+      run: ./scripts/Test-PackageShape.ps1 -Root . -Layout Build
+
     - name: Verify release output
       shell: pwsh
       run: |
-        $dll = Join-Path $PWD "bin/Release/winmm.dll"
-        if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
-          throw "Expected release output was not produced: $dll"
+        # Campaign Reimagined's staging refuses a bundled .pdb it cannot match
+        # to the binary, so a release without symbols cannot be packaged
+        # downstream. Fail here rather than at someone else's publish. All
+        # three modules ship symbols now: a crash can land in any of them.
+        $required = @(
+          "bin/Release/winmm.dll",
+          "bin/Release/winmm.pdb",
+          "bin/Release/bzloader.dll",
+          "bin/Release/bzloader.pdb",
+          "bin/Release/plugins/openshim.dll",
+          "bin/Release/plugins/openshim.pdb"
+        )
+        foreach ($rel in $required) {
+          $path = Join-Path $PWD $rel
+          if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Expected release output was not produced: $rel"
+          }
+          $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host ("{0,-34} SHA-256: {1}" -f $rel, $hash)
         }
-        $hash = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToLowerInvariant()
-        Write-Host "winmm.dll SHA-256: $hash"
-        # Campaign Reimagined's staging refuses a bundled winmm.pdb it cannot
-        # match to the binary, so a release without symbols cannot be packaged
-        # downstream. Fail here rather than at someone else's publish.
-        $pdb = Join-Path $PWD "bin/Release/winmm.pdb"
-        if (-not (Test-Path -LiteralPath $pdb -PathType Leaf)) {
-          throw "Expected release symbols were not produced: $pdb"
-        }
-        Write-Host ("winmm.pdb SHA-256: " + (Get-FileHash -LiteralPath $pdb -Algorithm SHA256).Hash.ToLowerInvariant())
 
     - name: Prepare standalone and immutable suite artifacts
       shell: pwsh
@@ -136,20 +213,35 @@ jobs:
         # Keep standalone assets convenient for manual installs while also
         # publishing one immutable suite archive for Campaign Reimagined. The
         # archive mirrors the repository paths consumed by its existing packager.
+        # Loose assets are flat because a GitHub release is flat. The three
+        # binaries keep distinct basenames, so SHA256SUMS.txt stays a flat map
+        # and verifies in either layout.
         Copy-Item -LiteralPath "bin\Release\winmm.dll" -Destination $releaseAssets -Force
         Copy-Item -LiteralPath "bin\Release\winmm.pdb" -Destination $releaseAssets -Force
+        Copy-Item -LiteralPath "bin\Release\bzloader.dll" -Destination $releaseAssets -Force
+        Copy-Item -LiteralPath "bin\Release\bzloader.pdb" -Destination $releaseAssets -Force
+        Copy-Item -LiteralPath "bin\Release\plugins\openshim.dll" -Destination $releaseAssets -Force
+        Copy-Item -LiteralPath "bin\Release\plugins\openshim.pdb" -Destination $releaseAssets -Force
         Copy-Item -LiteralPath "scripts\patches.json" -Destination $releaseAssets -Force
         Copy-Item -LiteralPath "openshim.ini" -Destination $releaseAssets -Force
         Copy-Item -LiteralPath "openshim.ini.example" -Destination $releaseAssets -Force
         Copy-Item -LiteralPath "net.ini" -Destination $releaseAssets -Force
 
-        New-Item -ItemType Directory -Path (Join-Path $suiteRoot "bin\Release") -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $suiteRoot "bin\Release\plugins") -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $suiteRoot "scripts") -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $suiteRoot "resources\renderer") -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $suiteRoot "resources\ui") -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $suiteRoot "resources\openshim") -Force | Out-Null
+        # The suite mirrors repository paths because that is what downstream
+        # packagers already consume. plugins\ sits under bin\Release for the
+        # same reason: it is where the build puts it and where bzloader.dll
+        # looks for it, relative to its own module directory.
         Copy-Item -LiteralPath "bin\Release\winmm.dll" -Destination (Join-Path $suiteRoot "bin\Release\winmm.dll") -Force
         Copy-Item -LiteralPath "bin\Release\winmm.pdb" -Destination (Join-Path $suiteRoot "bin\Release\winmm.pdb") -Force
+        Copy-Item -LiteralPath "bin\Release\bzloader.dll" -Destination (Join-Path $suiteRoot "bin\Release\bzloader.dll") -Force
+        Copy-Item -LiteralPath "bin\Release\bzloader.pdb" -Destination (Join-Path $suiteRoot "bin\Release\bzloader.pdb") -Force
+        Copy-Item -LiteralPath "bin\Release\plugins\openshim.dll" -Destination (Join-Path $suiteRoot "bin\Release\plugins\openshim.dll") -Force
+        Copy-Item -LiteralPath "bin\Release\plugins\openshim.pdb" -Destination (Join-Path $suiteRoot "bin\Release\plugins\openshim.pdb") -Force
         Copy-Item -LiteralPath "scripts\patches.json" -Destination (Join-Path $suiteRoot "scripts\patches.json") -Force
         Copy-Item -LiteralPath "openshim.ini" -Destination (Join-Path $suiteRoot "openshim.ini") -Force
         Copy-Item -LiteralPath "openshim.ini.example" -Destination (Join-Path $suiteRoot "openshim.ini.example") -Force
@@ -169,8 +261,15 @@ jobs:
         } | ConvertTo-Json -Depth 4 |
           Set-Content -LiteralPath (Join-Path $suiteRoot "release_metadata.json") -Encoding UTF8
 
+        # Every runtime-critical piece, not just the bootstrap. A checksum map
+        # that covers winmm.dll alone lets a user prove the one file that
+        # cannot deliver a working OpenShim by itself.
         $checksumEntries = @()
-        foreach ($relativePath in @("winmm.dll", "winmm.pdb", "patches.json", "openshim.ini", "openshim.ini.example", "net.ini")) {
+        foreach ($relativePath in @(
+            "winmm.dll", "winmm.pdb",
+            "bzloader.dll", "bzloader.pdb",
+            "openshim.dll", "openshim.pdb",
+            "patches.json", "openshim.ini", "openshim.ini.example", "net.ini")) {
           $filePath = Join-Path $releaseAssets $relativePath
           $hash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
           $checksumEntries += "$hash  $relativePath"
@@ -186,6 +285,38 @@ jobs:
         Get-Content -LiteralPath (Join-Path $releaseAssets "SHA256SUMS.txt")
         Get-Content -LiteralPath (Join-Path $releaseAssets "OpenShim-Suite.zip.sha256")
 
+    # Validate the archive that will actually be published, by extracting it
+    # rather than by trusting the staging tree it was built from. Compress-
+    # Archive silently produces a valid ZIP from an incomplete directory, so
+    # the only honest check is on the artifact itself.
+    - name: Validate the packaged suite
+      shell: pwsh
+      run: |
+        $extracted = Join-Path $env:RUNNER_TEMP "suite-verify"
+        Remove-Item -LiteralPath $extracted -Recurse -Force -ErrorAction SilentlyContinue
+        Expand-Archive -LiteralPath (Join-Path $PWD "release_assets\OpenShim-Suite.zip") `
+          -DestinationPath $extracted -Force
+        ./scripts/Test-PackageShape.ps1 -Root $extracted -Layout Suite
+
+        # Re-verify every file in the archive against the checksum map it
+        # carries, so a truncated or mismatched member cannot ship.
+        $sums = Get-Content -LiteralPath (Join-Path $extracted "SHA256SUMS.txt")
+        foreach ($line in $sums) {
+          if (-not $line.Trim()) { continue }
+          $parts = $line -split '\s+', 2
+          $expectedHash = $parts[0]
+          $name = $parts[1].Trim()
+          $found = Get-ChildItem -LiteralPath $extracted -Filter $name -File -Recurse |
+            Select-Object -First 1
+          if (-not $found) { throw "SHA256SUMS.txt names $name, which the suite does not contain" }
+          $actual = (Get-FileHash -LiteralPath $found.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expectedHash) {
+            throw "$name in the suite does not match its recorded checksum"
+          }
+          Write-Host "  verified $name"
+        }
+        "packaged suite verified: $($sums.Count) checksummed files, chain complete"
+
     - name: Create Release
       id: create_release
       uses: softprops/action-gh-release@v2
@@ -193,6 +324,10 @@ jobs:
         files: |
           release_assets/winmm.dll
           release_assets/winmm.pdb
+          release_assets/bzloader.dll
+          release_assets/bzloader.pdb
+          release_assets/openshim.dll
+          release_assets/openshim.pdb
           release_assets/patches.json
           release_assets/openshim.ini
           release_assets/openshim.ini.example
