@@ -90,6 +90,12 @@ jobs:
         shell: pwsh
         run: ./scripts/Test-EnhancedShaderCompile.ps1
 
+      # Ported from Campaign Reimagined, whose copy was orphaned when the
+      # Enhanced shaders moved here. See the header of the script.
+      - name: Validate Enhanced PSSM v2 math, isolation, and cost
+        shell: pwsh
+        run: ./scripts/Test-EnhancedPssmV2.ps1
+
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
