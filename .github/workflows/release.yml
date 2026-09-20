@@ -339,6 +339,50 @@ jobs:
         prerelease: false
         # Auto-generated notes prevent successful tagged releases from landing
         # with an empty body while keeping the release process deterministic.
+        # They are appended after this block.
         generate_release_notes: true
+        # OpenShim is three binaries as of the split, and the one way a user
+        # can still get it wrong is the way they have always installed it:
+        # copying winmm.dll on its own. That now yields a game that launches
+        # with no OpenShim in it and no error, so the load chain is stated
+        # before anything else on every release from here on.
+        body: |
+          ## OpenShim is now three files, not one
+
+          ```
+          battlezone98redux.exe -> winmm.dll -> bzloader.dll -> plugins/openshim.dll
+          ```
+
+          **Copying `winmm.dll` by itself no longer installs OpenShim.** It is
+          only the bootstrap now; without `bzloader.dll` beside it and
+          `plugins/openshim.dll` below it, the game starts normally with none
+          of OpenShim's features and reports no error. Deploy all three, and
+          keep `plugins/openshim.dll` in the `plugins` subfolder.
+
+          The supported installer and `OpenShim-Suite.zip` handle this for
+          you. Use one of those unless you have a reason not to:
+
+          ```powershell
+          irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_windows.ps1 | iex
+          ```
+
+          Manual and downstream installs need the whole set:
+
+          | file | destination |
+          | --- | --- |
+          | `winmm.dll` | game root |
+          | `bzloader.dll` | game root |
+          | `openshim.dll` | game root `plugins/` |
+          | `patches.json` | game root `scripts/` |
+          | `openshim.ini`, `net.ini` | game root |
+
+          `SHA256SUMS.txt` covers every one of these, and each module now
+          carries its own version resource, so a crash report names the
+          binary it came from.
+
+          Upgrading from 1.0.0.29 or earlier replaces a single monolithic
+          `winmm.dll`; the installer does this automatically and backs up
+          what it replaces.
+
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

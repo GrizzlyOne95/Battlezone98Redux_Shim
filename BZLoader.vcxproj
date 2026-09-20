@@ -27,5 +27,10 @@
   </ItemDefinitionGroup>
   <ItemGroup><ClCompile Include="src\loader\bzloader.cpp" /><ClCompile Include="src\loader\bzloader_catalog.cpp" /></ItemGroup>
   <ItemGroup><ClInclude Include="include\bzloader_plugin.h" /><ClInclude Include="include\bzloader_catalog.h" /></ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="src\engine\version.rc">
+      <PreprocessorDefinitions>OPENSHIM_MODULE_BZLOADER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
