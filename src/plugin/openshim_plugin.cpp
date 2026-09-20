@@ -34,6 +34,7 @@
 #include "autosave.h"
 #include "dx11_colorspace_diagnostic.h"
 #include "dx11_enhanced_fxaa.h"
+#include "dx11_scene_depth.h"
 #include "terrain_proxy.h"
 #include "ogre_animation_profiler.h"
 #include "native_cpu_sampler.h"
@@ -77,6 +78,10 @@ static unsigned __stdcall PatchThreadProc(void*)
     BZROpenShim::InitializeOgreAnimationProfiler();
     BZROpenShim::InitializeDx11ColorSpaceDiagnostic();
     BZROpenShim::InitializeDx11EnhancedFxaa();
+    // Phase A depth qualification: observation only, and off unless asked
+    // for. Starts after the FXAA path so that when both are enabled the
+    // creation-hook chain runs FXAA first, mirroring the shutdown order.
+    BZROpenShim::InitializeDx11SceneDepth();
     BZROpenShim::InstallCrashLogger();
     BZROpenShim::InitializeNetworkOptimizer();
     // Install BZRNet observation after the optimizer so it can chain through
@@ -204,6 +209,7 @@ namespace BZROpenShim
         BZROpenShim::ShutdownOgreAnimationProfiler();
         // Stop the mutating presentation experiment before the read-only DX11
         // observer it can chain with, then release its private D3D resources.
+        BZROpenShim::ShutdownDx11SceneDepth();
         BZROpenShim::ShutdownDx11EnhancedFxaa();
         BZROpenShim::ShutdownDx11ColorSpaceDiagnostic();
         BZROpenShim::ShutdownTerrainProxyPhase2();

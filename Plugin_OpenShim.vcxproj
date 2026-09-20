@@ -131,6 +131,7 @@
     <ClCompile Include="src\engine\openshim_sdk_v2.cpp" />
     <ClCompile Include="src\engine\patcher.cpp" />
     <ClCompile Include="src\engine\render_effect_intent.cpp" />
+    <ClCompile Include="src\engine\scene_depth_facts.cpp" />
     <ClCompile Include="src\engine\render_profile.cpp" />
     <ClCompile Include="src\engine\render_profile_resources.cpp" />
     <ClCompile Include="src\engine\resolve_table.cpp" />
@@ -147,6 +148,7 @@
     <ClCompile Include="src\patches\d3d_startup_hooks.cpp" />
     <ClCompile Include="src\patches\dx11_colorspace_diagnostic.cpp" />
     <ClCompile Include="src\patches\dx11_enhanced_fxaa.cpp" />
+    <ClCompile Include="src\patches\dx11_scene_depth.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
     <ClCompile Include="src\patches\fog_wake_feature.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
@@ -237,6 +239,8 @@
     <ClInclude Include="include\bzr_string.h" />
     <ClInclude Include="include\d3d_startup_hooks.h" />
     <ClInclude Include="include\dx11_colorspace_diagnostic.h" />
+    <ClInclude Include="include\dx11_scene_depth.h" />
+    <ClInclude Include="include\scene_depth_facts.h" />
     <ClInclude Include="include\dx11_enhanced_fxaa.h" />
     <ClInclude Include="include\dx11_enhanced_fxaa_resources.h" />
     <ClInclude Include="include\ogre_animation_profiler.h" />
