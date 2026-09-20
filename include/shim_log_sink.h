@@ -17,12 +17,21 @@
 
 #include <cstdint>
 
+// The sink pointer is an ABI detail shared with the C bootstrap table, so it
+// must be __cdecl on the shipping Win32 build. The Linux test lane compiles
+// these headers to run the engine-independent suites and has no such keyword.
+#ifdef _WIN32
+#define BZRO_SINK_CALL __cdecl
+#else
+#define BZRO_SINK_CALL
+#endif
+
 namespace BZROpenShim
 {
     // Receives one already-formatted, already-trimmed UTF-8 line. Levels are
     // the numeric LogLevel space (0=Debug, 1=Info, 2=Warn, 3=Error), so this
     // signature is usable straight from the C bootstrap API table.
-    using ShimLogSinkFn = void(__cdecl*)(
+    using ShimLogSinkFn = void(BZRO_SINK_CALL*)(
         uint32_t level, const char* component, const char* message);
 
     // Installs the sink the client routes to.
