@@ -35,6 +35,7 @@
 #include "BZROpenShim.h"
 #include "bzloader_bootstrap.h"
 #include "openshim_sdk_provider.h"
+#include "bootstrap_file_io.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -291,7 +292,14 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
 
         // The game creates BZLogger/Ogre logs immediately after process
         // attach, before the normal patch thread can reliably run.
-        BZROpenShim::ApplyEarlyGameLogHooks();
+        BZROpenShim::BootstrapFileIo::ApplyEarlyGameLogHooks();
+        // Runtime policy for that seam. Transitional, exactly like the SDK
+        // provider above: while OpenShim still ships inside winmm.dll this
+        // is a pointer store into a static table, so file opens behave
+        // identically to before the seam existed. Once OpenShim is
+        // plugins/openshim.dll this call moves to the plugin load, and the
+        // window before it is what the bootstrap wrappers already handle.
+        BZROpenShim::InstallFileIoProvider();
 
         // Seam A: arm ONLY the startup interception here (loader-lock-bounded
         // identity checks + one IAT pointer swap). The backend transport runs

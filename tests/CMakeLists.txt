@@ -18,6 +18,7 @@ target_compile_features(bzrnet_protocol_tests PRIVATE cxx_std_20)
 add_executable(shim_log_tests
     shim_log_tests.cpp
     ../src/engine/shim_log.cpp
+    ../src/engine/game_log_path.cpp
 )
 
 add_executable(bzloader_catalog_tests
@@ -50,10 +51,15 @@ target_include_directories(bzn_save_path_tests PRIVATE ../include)
 target_compile_features(bzn_save_path_tests PRIVATE cxx_std_20)
 
 if(WIN32 AND MSVC)
+    # file_io_hooks.cpp (included directly by the test) is the runtime half of
+    # the file-I/O seam, so the bootstrap half has to be linked with it. Note
+    # game_log_path.cpp is deliberately NOT linked: the test supplies its own
+    # GetGameLogPath stub, which keeps it from creating a real logs directory.
     add_executable(editor_save_dialog_win32_tests
         editor_save_dialog_win32_tests.cpp
         ../src/patches/trn_codec.cpp
-        ../src/patches/terrain_atlas_rect_repair.cpp)
+        ../src/patches/terrain_atlas_rect_repair.cpp
+        ../src/engine/bootstrap_file_io.cpp)
     target_include_directories(editor_save_dialog_win32_tests PRIVATE ../include)
     target_compile_features(editor_save_dialog_win32_tests PRIVATE cxx_std_20)
     target_compile_definitions(editor_save_dialog_win32_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
@@ -178,6 +184,7 @@ add_executable(openshim_assets_tests
     ../src/engine/openshim_assets.cpp
     ../src/engine/render_profile_resources.cpp
     ../src/engine/shim_log.cpp
+    ../src/engine/game_log_path.cpp
 )
 
 target_include_directories(shim_log_tests PRIVATE ../include)
@@ -452,7 +459,8 @@ if(WIN32 AND MSVC)
         openshim_sdk_thunk_tests.cpp
         ../src/engine/openshim_sdk_thunks.cpp
         ../src/engine/openshim_sdk_bridge.cpp
-        ../src/engine/shim_log.cpp)
+        ../src/engine/shim_log.cpp
+        ../src/engine/game_log_path.cpp)
     target_include_directories(openshim_sdk_thunk_tests PRIVATE ../include ../third_party)
     target_compile_features(openshim_sdk_thunk_tests PRIVATE cxx_std_20)
     # BZRO_API must be dllexport here, matching how the shim builds these
@@ -462,6 +470,22 @@ if(WIN32 AND MSVC)
         BZROPENSHIM_EXPORTS _CRT_SECURE_NO_WARNINGS)
     target_compile_options(openshim_sdk_thunk_tests PRIVATE /W4 /WX)
     add_test(NAME openshim_sdk_thunk_tests COMMAND openshim_sdk_thunk_tests)
+endif()
+
+# The bootstrap file-I/O seam, end to end and offline. Patches the test's own
+# import table with the real wrappers, then drives the lifecycle the game will
+# see: opens with no provider installed, then the same opens once OpenShim's
+# policy is in place. Windows-only -- it is Win32 import tables and handles.
+if(WIN32 AND MSVC)
+    add_executable(bootstrap_file_io_tests
+        bootstrap_file_io_tests.cpp
+        ../src/engine/bootstrap_file_io.cpp
+        ../src/engine/game_log_path.cpp)
+    target_include_directories(bootstrap_file_io_tests PRIVATE ../include)
+    target_compile_features(bootstrap_file_io_tests PRIVATE cxx_std_20)
+    target_compile_definitions(bootstrap_file_io_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(bootstrap_file_io_tests PRIVATE /W4 /WX)
+    add_test(NAME bootstrap_file_io_tests COMMAND bootstrap_file_io_tests)
 endif()
 
 add_executable(render_effect_intent_tests

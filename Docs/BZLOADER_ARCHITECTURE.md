@@ -238,6 +238,62 @@ the marshalling that needed `bzr_hooks` moved to
 closure script, `winmm_proxy.cpp` went from reaching 52 translation units to
 reaching 2 (itself and `shim_log.cpp`).
 
+## The bootstrap file-I/O seam
+
+The executable's `CreateFileA/W` import entries point at wrappers in
+`src/engine/bootstrap_file_io.cpp` for the whole life of the process. They are
+patched once, before the CRT runs, and nothing ever re-points them. What
+changes over the process lifetime is not the hook but the *policy* behind it.
+
+This is the shape the split needed, and it is not "early code versus runtime
+code". `ApplyEarlyGameLogHooks` was one function doing two unrelated jobs:
+rewriting five immediate log-path operands (self-contained, genuinely
+pre-main) and installing `CreateFile` handlers that carried the BZN, editor,
+TRN, shader-cache and UI-perf runtime. Only the second dragged
+`patcher`/`hook_engine`/`resolve_table` into the proxy.
+
+So the bootstrap keeps the hook, the original function pointers, the import
+patcher, the operand patches, and the early log routing -- and nothing else.
+With no provider installed a wrapper routes the stock logs, calls the real
+Win32 function, preserves `GetLastError`, and returns. That path has to work,
+because the game creates `BZLogger.txt` and its Ogre log almost immediately.
+
+OpenShim supplies the rest by installing a `Provider`: two optional path
+rewrites and two post-open notifications. It is a pointer store, never a
+`LoadLibrary` or a `GetProcAddress`, and the executable's import table is
+never rewritten again. The table is **internal**, deliberately not part of
+`BZPluginHostApi` v1: it is an implementation seam between the bootstrap and
+OpenShim, not something third-party plugins should bind to yet.
+
+Two details that are easy to get wrong:
+
+- **Both names are reported.** `onOpened` receives the caller's original name
+  *and* the path actually opened. They are not interchangeable: the `*.program`
+  shader-cache trigger and TRN write tracking key off what the caller asked
+  for, while editor-source detection and BZN load tracing follow what was
+  really opened. Collapsing them silently breaks one side or the other.
+- **The provider pointer is loaded once per call.** It is `std::atomic` with
+  release/acquire, and a wrapper that read it twice could route a path through
+  one provider and report the open to another.
+
+`GetGameLogPath`/`SanitizeLogFilename` moved to their own translation unit
+(`game_log_path.cpp`) rather than the bootstrap taking a dependency on
+`shim_log.cpp`. They are pure and stateless, so a module can compile them
+safely; the logging subsystem, which owns a file handle, an init-once and a
+lock, must exist exactly once and stays on the runtime side.
+
+Measured effect. `bootstrap_file_io.cpp` reaches **2** translation units
+(itself and `game_log_path.cpp`); the `file_io_hooks.cpp` it replaced in the
+bootstrap graph reached 58. Every remaining route from the bootstrap to the
+patch engine now runs through the renderer:
+
+```text
+patcher.cpp <- bzr_options_ui.cpp <- ogre_render_profile.cpp
+```
+
+The whole bootstrap minus the renderer seam is 10 of 78 translation units, so
+the renderer is the only major cut left.
+
 ## Path and loading security
 
 The proxy derives `bzloader.dll` from the proxy module address and calls
