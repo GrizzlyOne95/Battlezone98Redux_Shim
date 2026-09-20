@@ -4,9 +4,11 @@
 
 #include "render_profile_resources.h"
 
+#include <cctype>
 #include <cstddef>
 #include <cstring>
 #include <fstream>
+#include <string>
 
 namespace BZROpenShim::RenderProfiles
 {
@@ -115,6 +117,61 @@ namespace BZROpenShim::RenderProfiles
             {
                 outProblem = std::string("mandatory resource missing/empty: ") +
                              kRequiredEnhancedResources[i];
+                return false;
+            }
+        }
+
+        // Every file above being present is not the same as nothing else being
+        // there. Ogre adds this directory as a recursive resource location and
+        // parses every script in it, and the FIRST declaration of a program
+        // name wins -- so one leftover script declaring the same names shadows
+        // the whole payload, without Ogre reporting a conflict.
+        //
+        // That is not hypothetical. A v1 payload was once left beside a v3 one
+        // as "openshim_enhanced_base (1).program" and friends, courtesy of a
+        // Windows copy. "(1)" sorts before "." so the stale scripts parsed
+        // first and won, the version marker still read 3 because the canonical
+        // file was untouched, and the Enhanced terrain quietly ran a shader
+        // with a third fewer normal-mapping paths than the one on disk.
+        //
+        // Only parsed script types are rejected. A stray .hlsl or .glsl is
+        // inert unless a script names it, and failing the whole payload -- which
+        // drops the install to Redux -- would be out of proportion to that.
+        std::error_code scanEc;
+        for (std::filesystem::directory_iterator it(resourceDir, scanEc), end;
+             !scanEc && it != end; it.increment(scanEc))
+        {
+            std::error_code fileEc;
+            if (!it->is_regular_file(fileEc) || fileEc)
+            {
+                continue;
+            }
+
+            std::string ext = it->path().extension().string();
+            for (char& ch : ext)
+            {
+                ch = static_cast<char>(
+                    ::tolower(static_cast<unsigned char>(ch)));
+            }
+            if (ext != ".program" && ext != ".material")
+            {
+                continue;
+            }
+
+            const std::string name = it->path().filename().string();
+            bool expected = false;
+            for (size_t i = 0; i < RequiredEnhancedResourceCount(); ++i)
+            {
+                if (name == kRequiredEnhancedResources[i])
+                {
+                    expected = true;
+                    break;
+                }
+            }
+            if (!expected)
+            {
+                outProblem = std::string("unexpected script shadows the "
+                                         "payload: ") + name;
                 return false;
             }
         }
