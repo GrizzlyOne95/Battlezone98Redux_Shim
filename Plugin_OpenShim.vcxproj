@@ -286,7 +286,9 @@
     <ClInclude Include="include\ui_decor.h" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="src\engine\version.rc" />
+    <ResourceCompile Include="src\engine\version.rc">
+      <PreprocessorDefinitions>OPENSHIM_MODULE_PLUGIN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
     <ResourceCompile Include="dx11_enhanced_fxaa.rc" />
     <None Include="src\winmm.def" />
     <None Include="shaders\dx11_enhanced_fxaa.hlsl" />
