@@ -26,6 +26,7 @@
 
 namespace BZROpenShim
 {
+#ifdef _WIN32
 namespace
 {
     std::atomic<ShimLogSinkFn> g_Sink{nullptr};
@@ -83,12 +84,10 @@ namespace
         // is the window before BZPlugin_Load installs the bridge, and it is
         // deliberately not an error -- dropping a diagnostic is better than
         // a second module opening openshim.log behind the owner's back.
-#ifdef _WIN32
         char buffer[4608] = {};
         _snprintf_s(buffer, _TRUNCATE, "BZR-OpenShim [no-sink] [%s] %s\n",
                     component ? component : "shim", line.c_str());
         OutputDebugStringA(buffer);
-#endif
     }
 }
 
@@ -127,4 +126,16 @@ namespace
         LogShimVW(level, component, fmt, args);
         va_end(args);
     }
+#else
+    // Same shape as the pre-split shim_log.cpp: off-Windows there is no
+    // openshim.log, no debugger sink and no Win32 text conversion, so the
+    // whole client stubs out. The Linux lane builds these translation units
+    // only to run the engine-independent suites.
+    void SetShimLogSink(ShimLogSinkFn) {}
+    ShimLogSinkFn GetShimLogSink() { return nullptr; }
+    void LogShimVA(LogLevel, const char*, const char*, va_list) {}
+    void LogShimVW(LogLevel, const char*, const wchar_t*, va_list) {}
+    void LogShimA(LogLevel, const char*, const char*, ...) {}
+    void LogShimW(LogLevel, const char*, const wchar_t*, ...) {}
+#endif
 }
