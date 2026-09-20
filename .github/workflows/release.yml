@@ -274,13 +274,22 @@ jobs:
           $hash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
           $checksumEntries += "$hash  $relativePath"
         }
-        $checksumEntries | Set-Content -LiteralPath (Join-Path $releaseAssets "SHA256SUMS.txt") -Encoding ascii
+        # LF, explicitly. Set-Content writes CRLF, which makes every line of
+        # this file fail `sha256sum -c` on Linux and macOS: the trailing CR
+        # becomes part of the filename. The hashes were always right; the file
+        # was simply unusable by the standard tool, and this repository ships
+        # an install_linux.sh, so POSIX consumers are a real audience.
+        $sumsText = ($checksumEntries -join "`n") + "`n"
+        [System.IO.File]::WriteAllText(
+          (Join-Path $releaseAssets "SHA256SUMS.txt"), $sumsText, [System.Text.Encoding]::ASCII)
         Copy-Item -LiteralPath (Join-Path $releaseAssets "SHA256SUMS.txt") -Destination (Join-Path $suiteRoot "SHA256SUMS.txt") -Force
 
         $suiteZip = Join-Path $releaseAssets "OpenShim-Suite.zip"
         Compress-Archive -Path (Join-Path $suiteRoot "*") -DestinationPath $suiteZip -CompressionLevel Optimal -Force
         $suiteHash = (Get-FileHash -LiteralPath $suiteZip -Algorithm SHA256).Hash.ToLowerInvariant()
-        "$suiteHash  OpenShim-Suite.zip" | Set-Content -LiteralPath (Join-Path $releaseAssets "OpenShim-Suite.zip.sha256") -Encoding ascii
+        [System.IO.File]::WriteAllText(
+          (Join-Path $releaseAssets "OpenShim-Suite.zip.sha256"),
+          "$suiteHash  OpenShim-Suite.zip`n", [System.Text.Encoding]::ASCII)
 
         Get-Content -LiteralPath (Join-Path $releaseAssets "SHA256SUMS.txt")
         Get-Content -LiteralPath (Join-Path $releaseAssets "OpenShim-Suite.zip.sha256")
@@ -297,6 +306,23 @@ jobs:
         Expand-Archive -LiteralPath (Join-Path $PWD "release_assets\OpenShim-Suite.zip") `
           -DestinationPath $extracted -Force
         ./scripts/Test-PackageShape.ps1 -Root $extracted -Layout Suite
+
+        # A checksum manifest is consumed by `sha256sum -c`, which treats a
+        # trailing CR as part of the filename and fails every line. Check the
+        # bytes, not the parsed text: the PowerShell parse below calls Trim()
+        # and would silently accept a file no POSIX user can verify. This is
+        # how v1.0.0.30 shipped a manifest whose hashes were all correct and
+        # which `sha256sum -c` rejected in full.
+        foreach ($manifest in @(
+            (Join-Path $extracted "SHA256SUMS.txt"),
+            (Join-Path $PWD "release_assets\SHA256SUMS.txt"),
+            (Join-Path $PWD "release_assets\OpenShim-Suite.zip.sha256"))) {
+          $bytes = [System.IO.File]::ReadAllBytes($manifest)
+          if ($bytes -contains 13) {
+            throw "$(Split-Path -Leaf $manifest) contains CR: sha256sum -c will fail on every line"
+          }
+        }
+        "checksum manifests are LF-only"
 
         # Re-verify every file in the archive against the checksum map it
         # carries, so a truncated or mismatched member cannot ship.
