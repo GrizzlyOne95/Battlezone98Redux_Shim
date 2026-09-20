@@ -93,16 +93,31 @@ namespace
         return {std::istreambuf_iterator<char>(file), {}};
     }
 
+    // The CreateFile hook itself now belongs to the bootstrap seam
+    // (src/engine/bootstrap_file_io.cpp); what used to live inside
+    // Hooked_CreateFileA/W is the provider policy this file compiles. So the
+    // open goes straight to Win32 and the production post-open callback is
+    // driven with the same arguments the seam would pass: the requested name
+    // and the routed name, which are identical when nothing reroutes.
     void Observe(const std::filesystem::path& path, bool ansi)
     {
         using namespace BZROpenShim;
+        const std::string ansiPath = path.string();
         const auto handle = ansi
-            ? Hooked_CreateFileA(path.string().c_str(), GENERIC_READ, FILE_SHARE_READ,
+            ? ::CreateFileA(ansiPath.c_str(), GENERIC_READ, FILE_SHARE_READ,
                 nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)
-            : Hooked_CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+            : ::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
                 nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        Check(handle != INVALID_HANDLE_VALUE, "source file opened through production hook");
-        if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle);
+        Check(handle != INVALID_HANDLE_VALUE, "source file opened");
+        if (handle == INVALID_HANDLE_VALUE)
+            return;
+        if (ansi)
+            ProviderOnOpenedA(handle, ansiPath.c_str(), ansiPath.c_str(),
+                              GENERIC_READ, OPEN_EXISTING);
+        else
+            ProviderOnOpenedW(handle, path.c_str(), path.c_str(),
+                              GENERIC_READ, OPEN_EXISTING);
+        CloseHandle(handle);
     }
 
     bool Select(const std::filesystem::path& requested, std::string& chosen)
@@ -147,8 +162,6 @@ int main()
     const auto source = addon / L"pilot" / L"pilot.bzn";
     const auto trn = addon / L"pilot" / L"pilot.trn";
     SetEnvironmentVariableA("BZR_BZN_SAVE_SOURCE", "1");
-    g_RealCreateFileA = ::CreateFileA;
-    g_RealCreateFileW = ::CreateFileW;
     g_OriginalEditorSaveDialog = reinterpret_cast<EditorSaveDialog>(NativeSelection);
     Put(source); Put(trn); Put(addon / L"pilot" / L"pilot.hg2"); Put(addon / L"pilot" / L"pilot.mat");
     Observe(source, false); Observe(trn, true);

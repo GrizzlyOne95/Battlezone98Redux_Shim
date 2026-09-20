@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <string>
 
+#include "game_log_path.h"
+
 namespace BZROpenShim
 {
     enum class LogLevel : uint8_t
@@ -17,13 +19,9 @@ namespace BZROpenShim
     void InitializeShimLogger();
     void ShutdownShimLogger();
 
-    // Sanitizes log filenames against relative path traversal, invalid characters,
-    // control characters, Windows reserved device names, and trailing dots/spaces.
-    std::string SanitizeLogFilename(const char* fileName);
-
-    // Returns <game executable directory>\logs\<fileName>, creating the
-    // directory when possible and falling back to the game root on failure.
-    std::string GetGameLogPath(const char* fileName);
+    // SanitizeLogFilename and GetGameLogPath now live in game_log_path.h, so
+    // the bootstrap can route the stock game logs without compiling the
+    // logging subsystem. Included here so existing users keep working.
 
     void LogShimA(LogLevel level, const char* component, const char* fmt, ...);
     void LogShimW(LogLevel level, const char* component, const wchar_t* fmt, ...);

@@ -1,37 +1,33 @@
 // dllmain.cpp
-// BZR Open Shim - DLL entry point
+// BZR Open Shim - the bootstrap entry point.
+//
+// winmm.dll is boring infrastructure now. It forwards the real WinMM API,
+// arms the seams that genuinely have to exist before the CRT runs, owns
+// openshim.log, and starts BZLoader. Everything that used to happen on the
+// patch thread lives in plugins/openshim.dll behind BZPlugin_Load.
+//
+// What stays here does so for one reason only: it cannot wait for a plugin.
+//
+//   * the command-line snapshot, because stock's parser strtok()s the
+//     GetCommandLineA() buffer in place once main() starts;
+//   * the startup renderer seam, because the intercepted ConfigFile::load is
+//     the game's own read of Ogre.cfg and the decision point is gone once it
+//     returns (see startup_backend_seam.h);
+//   * the early file-I/O seam, because the game creates BZLogger.txt and its
+//     Ogre log almost immediately (see bootstrap_file_io.h);
+//   * the editor constructor fix and the CLI delimiter fix, because both
+//     patch sites run from the CRT's _initterm before main.
 //
 // Copyright (C) 2025 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
 
 #include "winmm_proxy.h"
-#include "bzr_hooks.h"
-#include "render_profile_runtime.h"
-#include "crash_logger.h"
-#include "net_optimizer.h"
-#include "bzrnet_instrumentation.h"
-#include "patcher.h"
-#include "hook_engine.h"
 #include "shim_log.h"
-#include "file_io_hooks.h"
+#include "bootstrap_file_io.h"
+#include "bzloader_bootstrap.h"
 #include "cli_multiparam_parser.h"
 #include "editor_view_order.h"
-#include "autosave.h"
-#include "dx11_colorspace_diagnostic.h"
-#include "dx11_enhanced_fxaa.h"
-#include "terrain_proxy.h"
-#include "ogre_animation_profiler.h"
-#include "native_cpu_sampler.h"
-#include "pilot_fp_animation_trace.h"
-#include "walker_cockpit_trace.h"
-#include "openshim_sdk_v2.h"
-#include "openshim_updater.h"
 #include "render_profile_runtime.h"
-#include "ui_performance.h"
-#include "ui_performance_hooks.h"
-#include "ui_file_scan_hooks.h"
-#include "mp_faction_restrict.h"
-#include "mp_ready_diagnostic.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -39,88 +35,6 @@
 #endif
 #include <Windows.h>
 #include <process.h>
-#include <cstdio>
-
-static constexpr uint32_t SHIM_VERSION = 5;
-static uintptr_t g_PatchThread = 0;
-
-static unsigned __stdcall PatchThreadProc(void*)
-{
-    BZROpenShim::UiPerf::Initialize();
-    BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread started");
-    // Start renderer diagnostics/features immediately so their workers can
-    // observe Ogre/D3D11 module creation before the renderer creates devices,
-    // swapchains, entities, or begins normal animation submission.
-    BZROpenShim::InitializePilotFpAnimationTrace();
-    BZROpenShim::InitializeWalkerCockpitTrace();
-    BZROpenShim::InitializeOgreAnimationProfiler();
-    BZROpenShim::InitializeDx11ColorSpaceDiagnostic();
-    BZROpenShim::InitializeDx11EnhancedFxaa();
-    BZROpenShim::InstallCrashLogger();
-    BZROpenShim::InitializeNetworkOptimizer();
-    // Install BZRNet observation after the optimizer so it can chain through
-    // the optimizer's existing IAT targets without changing network behavior.
-    BZROpenShim::InitializeBzrNetInstrumentation();
-    BZROpenShim::RunPatcher(SHIM_VERSION);
-
-    // Multiplayer starting-vehicle list faction policy. Installs after the
-    // patcher so scripts/patches.json resolves are loaded; the hook itself is
-    // inert until [Network] StockFactionsOnly is turned on, and the loader it
-    // intercepts only runs when a multiplayer screen builds its vehicle list.
-    BZROpenShim::MpFactionRestrict::InstallMpFactionRestrictIfPossible();
-
-    // Explains a "Not Ready" multiplayer entry on the main menu. Read-only: it
-    // reproduces the shell's own readiness decision from the same globals and
-    // logs which term failed, because the stock UI has no way to say. Its own
-    // worker waits for platform init, so ordering here is not significant.
-    BZROpenShim::InitializeMpReadyDiagnostic();
-
-    // Shell profiler detours must not touch SteamStub-managed executable pages
-    // before platform detection and code settlement. UiPerfHooks installs them
-    // immediately on GOG and defers Steam's writes until a live MainScreen is
-    // observed on the UI thread. File-scan hooks follow so trigger-file access
-    // is suppressed without classifying startup work as a menu transition.
-    BZROpenShim::UiPerfHooks::Install();
-    BZROpenShim::UiFileScan::Install();
-
-    // Renderer-profile ownership (backend observation, scheme-policy takeover,
-    // capability reporting) initializes after the compatibility gate so the
-    // takeover's address-dependent install sees the final gate verdict; its
-    // backend-observation thread still watches the render-system modules load
-    // well before the first mission.
-    BZROpenShim::RenderProfiles::InitializeOgreRenderProfiles();
-
-    // Phase 2 is safe to ask to initialize on every build: it is dormant by
-    // default and independently verifies exact executable/Ogre hashes before
-    // it resolves addresses or installs either terrain hook, so it does not
-    // need the version gate below.
-    BZROpenShim::InitializeTerrainProxyPhase2();
-
-    // AutoSave stacks its main-thread update hook after the normal patch set so
-    // it chains whichever world-update target (stock or OpenShim) is active.
-    // Never install version-specific runtime addresses if the core compatibility
-    // check failed.
-    if (BZROpenShim::IsCompatibleGameVersion())
-    {
-        if (!BZROpenShim::InitializeAutoSave())
-        {
-            BZROpenShim::LogShimA(
-                BZROpenShim::LogLevel::Warn,
-                "dllmain",
-                "Engine-level AutoSave initialization failed; normal manual saves remain available");
-        }
-    }
-
-    // The sampling CPU profiler starts last so its first thread enumeration
-    // sees the shim's own workers already running: they are threads of this
-    // process and their cost has to be visible in the capture rather than
-    // hidden from it. It is dormant unless OPENSHIM_PROFILE_NATIVE_CPU asks
-    // for it.
-    BZROpenShim::InitializeNativeCpuSampler();
-
-    BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");
-    return 0;
-}
 
 namespace BZROpenShim
 {
@@ -139,15 +53,11 @@ namespace BZROpenShim
         }
     }
 
-    // Pins this module for the life of the process. OpenShim spawns worker
-    // threads whose lifetimes are independent of any particular caller's
-    // reference count, so an undisciplined FreeLibrary must never be able to
-    // unmap code those threads are still executing. With the pin in place,
-    // FreeLibrary becomes reference-count noise: the executable pages stay
-    // mapped and a worker that outlives its join window keeps running in
-    // mapped code instead of unmapped memory. This is the same
-    // leak-rather-than-free policy the shutdown paths apply to shared buffers,
-    // extended to the module itself.
+    // Pins this module for the life of the process. The loader, the plugin and
+    // their workers all execute code that lives here, and their lifetimes are
+    // independent of any particular caller's reference count, so an
+    // undisciplined FreeLibrary must never be able to unmap it. With the pin
+    // in place FreeLibrary becomes reference-count noise.
     static void PinModuleForProcessLifetime(HINSTANCE hModule)
     {
         HMODULE pinned = nullptr;
@@ -162,94 +72,53 @@ namespace BZROpenShim
         }
     }
 
-    static bool g_PatchingComplete = false;
-    static uint32_t g_AppliedPatches = 0;
-    static bool g_CompatibleVersion = false;
-
-    BZRO_API uint32_t GetShimVersion() { return SHIM_VERSION; }
-    BZRO_API bool IsCompatibleGameVersion() { return g_CompatibleVersion; }
-    BZRO_API bool IsPatchingComplete() { return g_PatchingComplete; }
-    BZRO_API uint32_t GetAppliedPatchCount() { return g_AppliedPatches; }
-
-    void SetPatchingComplete(bool complete)
+    // Loads BZLoader, which in turn loads plugins/openshim.dll. Deliberately a
+    // worker: DllMain must never LoadLibrary, and the loader's own discovery,
+    // logging and filesystem work has no business running under the loader
+    // lock. The seams above are already armed by the time this runs, so a slow
+    // or missing plugin costs compatibility features, not correctness.
+    static unsigned __stdcall LoaderThreadProc(void*)
     {
-        const bool changed = g_PatchingComplete != complete;
-        g_PatchingComplete = complete;
-        if (changed)
+        LogShimA(LogLevel::Info, "dllmain", "Loader thread started");
+        if (!InitializeBZLoader())
         {
-            PublishOpenShimEvent(OpenShimEventType::PatchingCompleted,
-                                 complete ? 1u : 0u,
-                                 g_AppliedPatches,
-                                 complete ? "OpenShim patching completed" : "OpenShim patching reset");
+            LogShimA(LogLevel::Warn, "dllmain",
+                     "BZLoader unavailable; the bootstrap seams remain active but "
+                     "the OpenShim runtime did not load");
         }
+        return 0;
     }
 
-    void SetAppliedPatchCount(uint32_t count) { g_AppliedPatches = count; }
+    static uintptr_t g_LoaderThread = 0;
 
-    void SetCompatibleVersion(bool compatible)
+    BZRO_API void Initialize()
     {
-        const bool changed = g_CompatibleVersion != compatible;
-        g_CompatibleVersion = compatible;
-        if (changed)
-        {
-            PublishOpenShimEvent(OpenShimEventType::CompatibilityChanged,
-                                 compatible ? 1u : 0u,
-                                 SHIM_VERSION,
-                                 compatible ? "Compatible game build" : "Unsupported game build");
-        }
-    }
-
-    BZRO_API void Initialize() {
         static bool s_Initialized = false;
         if (s_Initialized) return;
-        BZROpenShim::InitializeShimLogger();
-        BZROpenShim::InitializeOpenShimSdkV2();
+        InitializeShimLogger();
         HMODULE hMod = GetModuleHandleA("winmm.dll");
-        if (hMod) BZROpenShim::SetupLibrarySearchPath(hMod);
+        if (hMod) SetupLibrarySearchPath(hMod);
         s_Initialized = true;
     }
 
-    // Full joined shutdown. This waits for the patch thread, the native CPU
-    // sampler and the network workers (up to 5 s and 1.5 s per worker), so it
-    // is only valid from a normal execution context. Never call this from
-    // DllMain: the detach path runs under the loader lock, where waiting for a
-    // worker that needs loader service can deadlock, and a timed-out worker
-    // would keep executing code from a module the caller is unloading.
-    //
-    // Unload contract: a host that intends to FreeLibrary this module must
-    // call Shutdown() first, from one of its own normal threads. If the module
-    // is unloaded without that call, DLL_PROCESS_DETACH only signals (never
-    // joins) and relies on the process-lifetime pin to keep mapped whatever
-    // the workers still touch.
-    BZRO_API void Shutdown() {
-        if (g_PatchThread)
+    // Full joined shutdown, and the only ordering that is correct:
+    // BZLoader calls BZPlugin_Shutdown so the runtime can drain its workers
+    // and still log while doing it, then the real WinMM is released, then the
+    // log file is closed. A host that intends to FreeLibrary this module calls
+    // this first, from one of its own normal threads. Never from DllMain: the
+    // detach path holds the loader lock, where waiting on a worker that needs
+    // loader service can deadlock.
+    BZRO_API void Shutdown()
+    {
+        if (g_LoaderThread)
         {
-            BZROpenShim::SignalPatcherShutdown();
-            WaitForSingleObject(reinterpret_cast<HANDLE>(g_PatchThread), 2000);
-            CloseHandle(reinterpret_cast<HANDLE>(g_PatchThread));
-            g_PatchThread = 0;
+            WaitForSingleObject(reinterpret_cast<HANDLE>(g_LoaderThread), 5000);
+            CloseHandle(reinterpret_cast<HANDLE>(g_LoaderThread));
+            g_LoaderThread = 0;
         }
-        BZROpenShim::UiPerfHooks::Shutdown();
-        BZROpenShim::UiFileScan::Shutdown();
-        BZROpenShim::ShutdownNativeCpuSampler();
-        BZROpenShim::ShutdownOpenShimUpdater();
-        BZROpenShim::ShutdownOpenShimSdkV2();
-        BZROpenShim::ShutdownWalkerCockpitTrace();
-        BZROpenShim::ShutdownPilotFpAnimationTrace();
-        BZROpenShim::ShutdownOgreAnimationProfiler();
-        // Stop the mutating presentation experiment before the read-only DX11
-        // observer it can chain with, then release its private D3D resources.
-        BZROpenShim::ShutdownDx11EnhancedFxaa();
-        BZROpenShim::ShutdownDx11ColorSpaceDiagnostic();
-        BZROpenShim::ShutdownTerrainProxyPhase2();
-        BZROpenShim::ShutdownAutoSave();
-        BZROpenShim::FlushChunkFragmentEventsForShutdown();
-        // Stop the upper observation layer before the lower Winsock optimizer
-        // it chains through, then let the existing optimizer flush its logs.
-        BZROpenShim::ShutdownBzrNetInstrumentation();
-        BZROpenShim::ShutdownNetworkOptimizer();
+        ShutdownBZLoader();
         FreeRealWinmm();
-        BZROpenShim::ShutdownShimLogger();
+        ShutdownShimLogger();
     }
 }
 
@@ -260,80 +129,76 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
     case DLL_PROCESS_ATTACH:
         // Capture the pristine command line BEFORE anything can run: stock's
         // parser strtok()s the GetCommandLineA() buffer in place once main()
-        // starts, and the backend-selection seam must still see /renderer:...
+        // starts, and the startup renderer seam must still see /renderer:...
         // tokens no matter which thread wins the startup race. Pure bounded
         // string copy - loader-lock safe.
         BZROpenShim::RenderProfiles::CaptureCommandLineSnapshot();
         BZROpenShim::Initialize();
-        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "DLL_PROCESS_ATTACH hModule=0x%p reserved=0x%p shimVersion=%u", hModule, reserved, SHIM_VERSION);
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain",
+                              "DLL_PROCESS_ATTACH hModule=0x%p reserved=0x%p",
+                              hModule, reserved);
         DisableThreadLibraryCalls(hModule);
 
         if (!LoadRealWinmm())
         {
-            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "dllmain", "LoadRealWinmm failed; aborting attach");
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "dllmain",
+                                  "LoadRealWinmm failed; aborting attach");
             return FALSE;
         }
 
         BZROpenShim::PinModuleForProcessLifetime(hModule);
 
         // The game creates BZLogger/Ogre logs immediately after process
-        // attach, before the normal patch thread can reliably run.
-        BZROpenShim::ApplyEarlyGameLogHooks();
+        // attach, long before any plugin could be hosted.
+        BZROpenShim::BootstrapFileIo::ApplyEarlyGameLogHooks();
 
-        // Seam A: arm ONLY the startup interception here (loader-lock-bounded
-        // identity checks + one IAT pointer swap). The backend transport runs
-        // later, on the game thread, inside the intercepted startup
-        // Ogre::ConfigFile::load — deterministic even when Steam reaches
-        // graphics initialization in ~1 s. Heavy work (INI parsing,
-        // filesystem, logging) must never run under the loader lock.
-        // Do not route the arm result through LogShimA here: its locks/CRT
-        // formatting are not safe under the loader lock. The seam records a
-        // fixed status enum and the patch thread reports it after attach.
+        // Arm ONLY the startup interception here (loader-lock-bounded identity
+        // checks plus one IAT pointer swap). The transport itself runs later,
+        // on the game thread, inside the intercepted startup
+        // Ogre::ConfigFile::load - deterministic even when Steam reaches
+        // graphics initialization in ~1 s. Heavy work must never run under the
+        // loader lock, and the arm result is a fixed status enum rather than a
+        // log call for the same reason.
         BZROpenShim::RenderProfiles::InstallStartupBackendSeam();
 
         // Both patch sites are global constructors that run from the CRT's
-        // _initterm before main, so this cannot wait for the patch thread.
+        // _initterm before main, so neither can wait for a worker.
         BZROpenShim::ApplyEditorOverheadPlacementOrderFix();
 
         // Stock's command-line parser runs from WinMain immediately after CRT
-        // startup, so the delimiter it tokenises with has to be corrected here
-        // rather than on the patch thread. Writes 4 bytes in .data only.
+        // startup, so the delimiter it tokenises with has to be corrected here.
+        // Writes 4 bytes in .data only.
         BZROpenShim::ApplyCliMultiParameterOptionFix();
 
         OutputDebugStringA("BZR-OpenShim: DLL_PROCESS_ATTACH\n");
 
-        g_PatchThread = _beginthreadex(nullptr, 0, PatchThreadProc, nullptr, 0, nullptr);
-        if (!g_PatchThread)
+        BZROpenShim::g_LoaderThread =
+            _beginthreadex(nullptr, 0, BZROpenShim::LoaderThreadProc, nullptr, 0, nullptr);
+        if (!BZROpenShim::g_LoaderThread)
         {
-            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "dllmain", "_beginthreadex failed (err=%lu)", GetLastError());
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "dllmain",
+                                  "_beginthreadex failed (err=%lu)", GetLastError());
             return FALSE;
         }
-        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread handle created: 0x%p", reinterpret_cast<void*>(g_PatchThread));
         break;
 
     case DLL_PROCESS_DETACH:
         if (reserved != nullptr)
         {
-            // Process termination (reserved is the termination flag, not an
-            // LPVOID). The OS has already terminated every other thread and
-            // the loader will not return here; joins are impossible and
-            // cleanup is unnecessary because the whole address space, handle
-            // table and kernel state are going away together. Do no work that
-            // could touch a lock or a runtime object another dying thread
-            // still held.
+            // Process termination. The OS has already terminated every other
+            // thread and the loader will not return here; joins are impossible
+            // and cleanup is unnecessary because the whole address space is
+            // going away together. Do no work that could touch a lock another
+            // dying thread still held.
             OutputDebugStringA("BZR-OpenShim: DLL_PROCESS_DETACH (process termination)\n");
             break;
         }
-        // Explicit FreeLibrary without a prior Shutdown() call. The detach
-        // thread owns the loader lock, so this path must not wait on workers
-        // (deadlock) and must not run logger/heap work that a live worker
-        // could be holding or feeding (lock-order cycle through the loader
-        // lock). Signal the patch loop to wind down -- a plain atomic store --
-        // and rely on the process-lifetime pin: the module's code pages stay
-        // mapped for the workers the caller chose not to drain.
-        OutputDebugStringA("BZR-OpenShim: DLL_PROCESS_DETACH (explicit unload without Shutdown(); "
-                           "workers left running in pinned module)\n");
-        BZROpenShim::SignalPatcherShutdown();
+        // Explicit FreeLibrary without a prior Shutdown(). The detach thread
+        // owns the loader lock, so this path must not wait on workers and must
+        // not run logger/heap work a live worker could be holding. Rely on the
+        // process-lifetime pin instead.
+        OutputDebugStringA("BZR-OpenShim: DLL_PROCESS_DETACH (explicit unload without "
+                           "Shutdown(); workers left running in pinned module)\n");
         break;
     }
     return TRUE;

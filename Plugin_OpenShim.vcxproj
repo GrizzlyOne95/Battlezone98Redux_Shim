@@ -13,8 +13,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</ProjectGuid>
-    <RootNamespace>BZROpenShim</RootNamespace>
+    <ProjectGuid>{5E2C1A77-9B34-4F21-8D6E-7C0A5B9D3E14}</ProjectGuid>
+    <RootNamespace>OpenShimPlugin</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -48,23 +48,23 @@
 
   <!-- Debug configuration -->
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <TargetName>winmm</TargetName>
-    <OutDir>$(SolutionDir)bin\Debug\</OutDir>
-    <IntDir>$(SolutionDir)obj\Debug\</IntDir>
+    <TargetName>openshim</TargetName>
+    <OutDir>$(SolutionDir)bin\Debug\plugins\</OutDir>
+    <IntDir>$(SolutionDir)obj\PluginOpenShim\Debug\</IntDir>
   </PropertyGroup>
 
   <!-- Release configuration -->
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <TargetName>winmm</TargetName>
-    <OutDir>$(SolutionDir)bin\Release\</OutDir>
-    <IntDir>$(SolutionDir)obj\Release\</IntDir>
+    <TargetName>openshim</TargetName>
+    <OutDir>$(SolutionDir)bin\Release\plugins\</OutDir>
+    <IntDir>$(SolutionDir)obj\PluginOpenShim\Release\</IntDir>
   </PropertyGroup>
 
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>BZROPENSHIM_EXPORTS;WIN32;_DEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions);WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BZROPENSHIM_EXPORTS;BZLOADER_PLUGIN_BUILD;WIN32;_DEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions);WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(ProjectDir)third_party\ogre-1.10.0-bzr;$(ProjectDir)third_party\ogre-1.10.0-bzr\_work\OgreMain\include;$(ProjectDir)third_party\ogre-1.10.0-bzr\_work\Components\Overlay\include;$(ProjectDir)include;$(ProjectDir)src;$(ProjectDir)third_party;$(ProjectDir)..\BZRModInterop\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -79,7 +79,6 @@
       <GenerateDebugInformation>DebugFull</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>Version.lib;ws2_32.lib;Gdiplus.lib;Psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <ModuleDefinitionFile>$(ProjectDir)src\winmm.def</ModuleDefinitionFile>
       <LargeAddressAware>true</LargeAddressAware>
       <DelayLoadDLLs>version.dll;gdiplus.dll;ws2_32.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
       <SupportUnloadOfDelayLoadedDLL>true</SupportUnloadOfDelayLoadedDLL>
@@ -92,7 +91,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>BZROPENSHIM_EXPORTS;WIN32;NDEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions);WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BZROPENSHIM_EXPORTS;BZLOADER_PLUGIN_BUILD;WIN32;NDEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions);WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(ProjectDir)third_party\ogre-1.10.0-bzr;$(ProjectDir)third_party\ogre-1.10.0-bzr\_work\OgreMain\include;$(ProjectDir)third_party\ogre-1.10.0-bzr\_work\Components\Overlay\include;$(ProjectDir)include;$(ProjectDir)src;$(ProjectDir)third_party;$(ProjectDir)..\BZRModInterop\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -109,7 +108,6 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>Version.lib;ws2_32.lib;Gdiplus.lib;Psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <ModuleDefinitionFile>$(ProjectDir)src\winmm.def</ModuleDefinitionFile>
       <LargeAddressAware>true</LargeAddressAware>
       <DelayLoadDLLs>version.dll;gdiplus.dll;ws2_32.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
       <SupportUnloadOfDelayLoadedDLL>true</SupportUnloadOfDelayLoadedDLL>
@@ -117,24 +115,86 @@
   </ItemDefinitionGroup>
 
   <ItemGroup>
-    <ClCompile Include="src\dllmain.cpp" />
     <ClCompile Include="src\engine\backend_selection.cpp" />
-    <ClCompile Include="src\engine\bootstrap_file_io.cpp" />
-    <ClCompile Include="src\engine\bzloader_bootstrap.cpp" />
+    <ClCompile Include="src\engine\crash_logger.cpp" />
+    <ClCompile Include="src\engine\dx11_legacy_material_compat.cpp" />
+    <ClCompile Include="src\engine\enhanced_light_selection.cpp" />
+    <ClCompile Include="src\engine\enhanced_resource_bootstrap.cpp" />
+    <ClCompile Include="src\engine\fog_wake.cpp" />
+    <ClCompile Include="src\engine\fog_wake_runtime.cpp" />
     <ClCompile Include="src\engine\game_log_path.cpp" />
-    <ClCompile Include="src\engine\openshim_bootstrap_api.cpp" />
-    <ClCompile Include="src\engine\openshim_sdk_bridge.cpp" />
-    <ClCompile Include="src\engine\openshim_sdk_legacy_thunks.cpp" />
-    <ClCompile Include="src\engine\openshim_sdk_thunks.cpp" />
+    <ClCompile Include="src\engine\hook_engine.cpp" />
+    <ClCompile Include="src\engine\native_ui.cpp" />
+    <ClCompile Include="src\engine\ogre_runtime.cpp" />
+    <ClCompile Include="src\engine\openshim_assets.cpp" />
+    <ClCompile Include="src\engine\openshim_assets_platform.cpp" />
+    <ClCompile Include="src\engine\openshim_sdk_v2.cpp" />
+    <ClCompile Include="src\engine\patcher.cpp" />
     <ClCompile Include="src\engine\render_effect_intent.cpp" />
     <ClCompile Include="src\engine\render_profile.cpp" />
+    <ClCompile Include="src\engine\render_profile_resources.cpp" />
+    <ClCompile Include="src\engine\resolve_table.cpp" />
     <ClCompile Include="src\engine\shim_log_client.cpp" />
-    <ClCompile Include="src\engine\shim_log_sink.cpp" />
-    <ClCompile Include="src\engine\startup_backend_seam.cpp" />
     <ClCompile Include="src\engine\startup_seam_wire.cpp" />
-    <ClCompile Include="src\engine\winmm_proxy.cpp" />
-    <ClCompile Include="src\patches\cli_multiparam_parser.cpp" />
-    <ClCompile Include="src\patches\editor_view_order.cpp" />
+    <ClCompile Include="src\engine\ui_decor.cpp" />
+    <ClCompile Include="src\patches\autosave.cpp" />
+    <ClCompile Include="src\patches\bzn_load_trace.cpp" />
+    <ClCompile Include="src\patches\bzr_hooks.cpp" />
+    <ClCompile Include="src\patches\bzr_options_ui.cpp" />
+    <ClCompile Include="src\patches\bzrnet_instrumentation.cpp" />
+    <ClCompile Include="src\patches\bzrnet_protocol.cpp" />
+    <ClCompile Include="src\patches\bzrnet_trace.cpp" />
+    <ClCompile Include="src\patches\d3d_startup_hooks.cpp" />
+    <ClCompile Include="src\patches\dx11_colorspace_diagnostic.cpp" />
+    <ClCompile Include="src\patches\dx11_enhanced_fxaa.cpp" />
+    <ClCompile Include="src\patches\file_io_hooks.cpp" />
+    <ClCompile Include="src\patches\fog_wake_feature.cpp" />
+    <ClCompile Include="src\patches\game_state.cpp" />
+    <ClCompile Include="src\patches\mp_faction_restrict.cpp" />
+    <ClCompile Include="src\patches\mp_ready_diagnostic.cpp" />
+    <ClCompile Include="src\patches\mp_vehicle_preview_fix.cpp" />
+    <ClCompile Include="src\patches\native_cpu_sampler.cpp" />
+    <ClCompile Include="src\patches\net_optimizer.cpp" />
+    <ClCompile Include="src\patches\netcode_hooks.cpp" />
+    <ClCompile Include="src\patches\numeric_locale_compat.cpp" />
+    <ClCompile Include="src\patches\odf_compat.cpp" />
+    <ClCompile Include="src\patches\odf_item_hooks.cpp" />
+    <ClCompile Include="src\patches\ogre_animation_profiler.cpp">
+      <LanguageStandard>stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile Include="src\patches\ogre_enhanced_light_selection.cpp" />
+    <ClCompile Include="src\patches\ogre_render_profile.cpp" />
+    <ClCompile Include="src\patches\ogre_shader_cache.cpp" />
+    <ClCompile Include="src\patches\openshim_env_config.cpp" />
+    <ClCompile Include="src\patches\openshim_events.cpp" />
+     <ClCompile Include="src\patches\openshim_ini.cpp" />
+    <ClCompile Include="src\patches\openshim_preset_migration.cpp" />
+    <ClCompile Include="src\patches\openshim_sdk_provider.cpp" />
+    <ClCompile Include="src\patches\openshim_update_manifest.cpp" />
+    <ClCompile Include="src\patches\openshim_updater.cpp" />
+    <ClCompile Include="src\patches\pilot_fp_animation_trace.cpp">
+      <LanguageStandard>stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile Include="src\patches\pond_class_label.cpp" />
+    <ClCompile Include="src\patches\redux_compatibility.cpp" />
+    <ClCompile Include="src\patches\render_effect_intent_exports.cpp" />
+    <ClCompile Include="src\patches\render_queue_trace.cpp" />
+    <ClCompile Include="src\patches\sun_flash.cpp" />
+    <ClCompile Include="src\patches\terrain_atlas_rect_repair.cpp" />
+    <ClCompile Include="src\patches\terrain_proxy.cpp" />
+    <ClCompile Include="src\patches\terrain_semantic.cpp" />
+    <ClCompile Include="src\patches\terrain_tile_blend.cpp" />
+    <ClCompile Include="src\patches\trampolines.cpp" />
+    <ClCompile Include="src\patches\trn_codec.cpp" />
+    <ClCompile Include="src\patches\ui_file_scan_hooks.cpp" />
+    <ClCompile Include="src\patches\ui_performance.cpp" />
+    <ClCompile Include="src\patches\ui_performance_hooks.cpp" />
+    <ClCompile Include="src\patches\walker_cockpit_trace.cpp">
+      <LanguageStandard>stdcpp14</LanguageStandard>
+    </ClCompile>
+    <ClCompile Include="src\plugin\openshim_plugin.cpp" />
+    <ClCompile Include="src\plugin\bootstrap_service_client.cpp" />
+    <ClCompile Include="src\plugin\startup_seam_client.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
