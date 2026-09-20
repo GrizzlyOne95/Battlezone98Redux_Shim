@@ -118,7 +118,8 @@ namespace
     {
         return name == "OpenShimSetWalkerCase" ||
                name == "OpenShimWalkerTraceSummary" ||
-               name == "OpenShimSdkProvider_GetTable";
+               name == "OpenShimSdkProvider_GetTable" ||
+               name == "OpenShimBootstrap_GetApi";
     }
 
     std::set<std::string> BaselineOpenShimExports(const std::string& text)

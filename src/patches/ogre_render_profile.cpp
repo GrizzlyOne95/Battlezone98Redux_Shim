@@ -190,6 +190,32 @@ namespace BZROpenShim::RenderProfiles
             return false;
         }
 
+        // Inverse of the seam's wire mapping. Kept explicit rather than
+        // casting: the numeric space is the contract, and a cast would
+        // silently follow an enum whose values drifted.
+        RendererBackend BackendFromWire(uint32_t wire)
+        {
+            switch (wire)
+            {
+            case StartupSeam::kBackendDx9:  return RendererBackend::DX9;
+            case StartupSeam::kBackendDx11: return RendererBackend::DX11;
+            default:                        return RendererBackend::Auto;
+            }
+        }
+
+        BackendSelection::RequestSource SourceFromWire(uint32_t wire)
+        {
+            switch (wire)
+            {
+            case StartupSeam::kSourcePersistent:
+                return BackendSelection::RequestSource::Persistent;
+            case StartupSeam::kSourceCliOverride:
+                return BackendSelection::RequestSource::CliOverride;
+            default:
+                return BackendSelection::RequestSource::None;
+            }
+        }
+
         void LoadConfigLocked()
         {
             std::string value;
@@ -2842,15 +2868,21 @@ namespace BZROpenShim::RenderProfiles
         // seam now (src/engine/startup_backend_seam.cpp); it has already run
         // by the time this executes. Read its published result rather than
         // recomputing what happened.
-        const StartupSeam::StartupRendererResult* startup =
-            StartupSeam::GetStartupRendererResult();
-        const char* armText = StartupSeam::ArmStatusText();
-        const bool armed = startup != nullptr && startup->seamArmed != 0;
+        // The arm and the whole startup transport belong to the bootstrap
+        // seam now. Copy its published record rather than holding a pointer
+        // into bootstrap memory, and convert the wire numbers back into our
+        // own enums here -- the record crosses a module boundary, so it
+        // carries fixed-width integers, not C++ enum types.
+        StartupSeam::StartupRendererResult startup = {};
+        const bool haveStartup = StartupSeam::CopyStartupRendererResult(
+            &startup, sizeof(startup));
+        const bool armed = haveStartup && startup.seamArmed != 0;
         LogShimA(
             armed ? LogLevel::Info : LogLevel::Warn,
             kLogTag,
             "backend seam arm status=%s; %s",
-            armText != nullptr ? armText : "unknown",
+            haveStartup ? StartupSeam::ArmStatusText(startup.armStatus)
+                        : "unavailable",
             armed ? "startup ConfigFile::load interception active"
                   : "stock renderer selection remains authoritative");
 
@@ -2860,11 +2892,11 @@ namespace BZROpenShim::RenderProfiles
         // bootstrap already decided and did. Seeding them from the record is
         // the whole point of the split: the runtime must not independently
         // re-derive a decision that was made before it existed.
-        if (startup != nullptr && startup->selectionRan != 0)
+        if (haveStartup && startup.selectionRan != 0)
         {
-            s_bootRequest.backend = startup->requested;
-            s_bootRequest.source = startup->source;
-            s_transportWrittenThisBoot = startup->transportWritten != 0;
+            s_bootRequest.backend = BackendFromWire(startup.requestedBackend);
+            s_bootRequest.source = SourceFromWire(startup.requestSource);
+            s_transportWrittenThisBoot = startup.transportWritten != 0;
         }
         s_resourcesValid = ValidateDeployedResourceSet();
         s_resourcesValidAtomic.store(s_resourcesValid, std::memory_order_release);

@@ -17,7 +17,8 @@ target_compile_features(bzrnet_protocol_tests PRIVATE cxx_std_20)
 
 add_executable(shim_log_tests
     shim_log_tests.cpp
-    ../src/engine/shim_log.cpp
+    ../src/engine/shim_log_sink.cpp
+    ../src/engine/shim_log_client.cpp
     ../src/engine/game_log_path.cpp
 )
 
@@ -183,7 +184,8 @@ add_executable(openshim_assets_tests
     openshim_assets_tests.cpp
     ../src/engine/openshim_assets.cpp
     ../src/engine/render_profile_resources.cpp
-    ../src/engine/shim_log.cpp
+    ../src/engine/shim_log_sink.cpp
+    ../src/engine/shim_log_client.cpp
     ../src/engine/game_log_path.cpp
 )
 
@@ -459,7 +461,8 @@ if(WIN32 AND MSVC)
         openshim_sdk_thunk_tests.cpp
         ../src/engine/openshim_sdk_thunks.cpp
         ../src/engine/openshim_sdk_bridge.cpp
-        ../src/engine/shim_log.cpp
+        ../src/engine/shim_log_sink.cpp
+    ../src/engine/shim_log_client.cpp
         ../src/engine/game_log_path.cpp)
     target_include_directories(openshim_sdk_thunk_tests PRIVATE ../include ../third_party)
     target_compile_features(openshim_sdk_thunk_tests PRIVATE cxx_std_20)
@@ -498,13 +501,33 @@ if(WIN32 AND MSVC)
         ../src/engine/startup_backend_seam.cpp
         ../src/engine/backend_selection.cpp
         ../src/engine/render_profile.cpp
-        ../src/engine/shim_log.cpp
+        ../src/engine/shim_log_sink.cpp
+    ../src/engine/shim_log_client.cpp
         ../src/engine/game_log_path.cpp)
     target_include_directories(startup_backend_seam_tests PRIVATE ../include)
     target_compile_features(startup_backend_seam_tests PRIVATE cxx_std_20)
     target_compile_definitions(startup_backend_seam_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_compile_options(startup_backend_seam_tests PRIVATE /W4 /WX)
     add_test(NAME startup_backend_seam_tests COMMAND startup_backend_seam_tests)
+endif()
+
+# The private bootstrap service table and the two bridges over it. After the
+# DLL split these are the only calls from the plugin back into winmm.dll.
+if(WIN32 AND MSVC)
+    add_executable(openshim_bootstrap_api_tests
+        openshim_bootstrap_api_tests.cpp
+        ../src/engine/openshim_bootstrap_api.cpp
+        ../src/engine/startup_backend_seam.cpp
+        ../src/engine/backend_selection.cpp
+        ../src/engine/render_profile.cpp
+        ../src/engine/shim_log_sink.cpp
+        ../src/engine/shim_log_client.cpp
+        ../src/engine/game_log_path.cpp)
+    target_include_directories(openshim_bootstrap_api_tests PRIVATE ../include)
+    target_compile_features(openshim_bootstrap_api_tests PRIVATE cxx_std_20)
+    target_compile_definitions(openshim_bootstrap_api_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(openshim_bootstrap_api_tests PRIVATE /W4 /WX)
+    add_test(NAME openshim_bootstrap_api_tests COMMAND openshim_bootstrap_api_tests)
 endif()
 
 add_executable(render_effect_intent_tests
