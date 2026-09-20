@@ -172,9 +172,27 @@ jobs:
     # Verify the exact binaries that will be published before any release
     # packaging. A tagged release that ships the bootstrap without its runtime
     # is worse than a failed build: it installs cleanly and disables OpenShim.
+    # The tag is the promise; the binaries have to keep it. v1.0.0.31 shipped
+    # binaries reporting 1.0.0.30 because the tag moved for a workflow-only
+    # fix and version.rc did not. With three independently identifiable
+    # binaries that is worth enforcing rather than remembering, so the
+    # expected version is derived from the tag and checked against both the
+    # string and numeric version fields plus each module's self-identification.
+    #
+    # workflow_dispatch has no version tag, so the version assertion is
+    # skipped there and the structural checks still run.
     - name: Verify the load chain is whole
       shell: pwsh
-      run: ./scripts/Test-PackageShape.ps1 -Root . -Layout Build
+      run: |
+        $ref = "${{ github.ref_name }}"
+        if ($ref -match '^v(\d+\.\d+\.\d+\.\d+)$') {
+          $expected = $Matches[1]
+          Write-Host "tag $ref requires binary version $expected"
+          ./scripts/Test-PackageShape.ps1 -Root . -Layout Build -ExpectedVersion $expected
+        } else {
+          Write-Host "::notice::ref '$ref' is not a version tag; skipping the version assertion"
+          ./scripts/Test-PackageShape.ps1 -Root . -Layout Build
+        }
 
     - name: Verify release output
       shell: pwsh
@@ -305,7 +323,17 @@ jobs:
         Remove-Item -LiteralPath $extracted -Recurse -Force -ErrorAction SilentlyContinue
         Expand-Archive -LiteralPath (Join-Path $PWD "release_assets\OpenShim-Suite.zip") `
           -DestinationPath $extracted -Force
-        ./scripts/Test-PackageShape.ps1 -Root $extracted -Layout Suite
+
+        # Same invariant on the packaged copy, plus the provenance the archive
+        # claims about itself: a release_metadata.json nobody checks is a
+        # comment, not a record.
+        $ref = "${{ github.ref_name }}"
+        if ($ref -match '^v(\d+\.\d+\.\d+\.\d+)$') {
+          ./scripts/Test-PackageShape.ps1 -Root $extracted -Layout Suite `
+            -ExpectedVersion $Matches[1] -ExpectedTag $ref -ExpectedCommit "${{ github.sha }}"
+        } else {
+          ./scripts/Test-PackageShape.ps1 -Root $extracted -Layout Suite
+        }
 
         # A checksum manifest is consumed by `sha256sum -c`, which treats a
         # trailing CR as part of the filename and fails every line. Check the
