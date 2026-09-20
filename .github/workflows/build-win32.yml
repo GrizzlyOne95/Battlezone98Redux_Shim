@@ -104,6 +104,29 @@ jobs:
             /p:GenerateFullPaths=true `
             /verbosity:minimal
 
+      # Turns the green check from "the loader compiles" into "Windows actually
+      # loaded another DLL through the plugin ABI and completed the lifecycle".
+      # The test clears bzloader.log and validates only the lines stamped with
+      # the session id of the run it started, so a stale log cannot pass it.
+      - name: Run BZLoader host lifecycle test
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD "bin/Release/BZLoaderHostTest.exe"
+          $plugin = Join-Path $PWD "bin/Release/plugins/bzloader_test_plugin.dll"
+
+          foreach ($required in @($exe, $plugin)) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+              throw "BZLoader lifecycle test prerequisite is missing: $required"
+            }
+          }
+
+          & $exe
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "--- bzloader.log ---"
+            Get-Content -LiteralPath (Join-Path $PWD "bin/Release/bzloader.log") -ErrorAction SilentlyContinue
+            throw "BZLoaderHostTest failed with exit code $LASTEXITCODE"
+          }
+
       - name: Verify build outputs
         shell: pwsh
         run: |

@@ -5,6 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#include <bcrypt.h>
 
 #include <algorithm>
 #include <cstdarg>
@@ -12,6 +13,8 @@
 #include <cstring>
 #include <string>
 #include <vector>
+
+#pragma comment(lib, "bcrypt.lib")
 
 namespace
 {
@@ -29,11 +32,21 @@ namespace
     std::wstring g_LoaderDirectory;
     std::wstring g_ExecutablePath;
     std::wstring g_LogPath;
-    char g_ExecutableBuildId[64] = {};
+    char g_ExecutableBuildHint[64] = {};
+    uint32_t g_ExecutableTimeDateStamp = 0;
+    uint32_t g_ExecutableSizeOfImage = 0;
+    // bzloader.log is append-only across runs, so every line carries the id of
+    // the run that wrote it. Without it a reader -- including the host
+    // integration test -- cannot tell this run's lifecycle from a previous
+    // run's, and a broken run inherits an old run's success.
+    char g_SessionId[24] = {};
+    char g_ExecutableSha256[65] = {};
+    bool g_ExecutableSha256Attempted = false;
     BZHostApi g_Host = {};
     std::vector<PluginModule> g_Plugins;
     SRWLOCK g_StateLock = SRWLOCK_INIT;
     SRWLOCK g_LogLock = SRWLOCK_INIT;
+    SRWLOCK g_ShaLock = SRWLOCK_INIT;
     bool g_Initialized = false;
 
     const char* LevelName(uint32_t level)
@@ -47,16 +60,33 @@ namespace
         }
     }
 
+    void BuildSessionId()
+    {
+        LARGE_INTEGER counter = {};
+        QueryPerformanceCounter(&counter);
+        FILETIME now = {};
+        GetSystemTimeAsFileTime(&now);
+        const uint64_t stamp =
+            (static_cast<uint64_t>(now.dwHighDateTime) << 32) | now.dwLowDateTime;
+        const uint64_t mixed =
+            stamp ^ (static_cast<uint64_t>(counter.QuadPart) << 16) ^
+            (static_cast<uint64_t>(GetCurrentProcessId()) << 48);
+        _snprintf_s(g_SessionId, _TRUNCATE, "%016llX",
+                    static_cast<unsigned long long>(mixed));
+    }
+
     void WriteLog(uint32_t level, const char* component, const char* message)
     {
         char line[2048] = {};
         SYSTEMTIME now = {};
         GetLocalTime(&now);
         _snprintf_s(line, _TRUNCATE,
-                    "%04u-%02u-%02u %02u:%02u:%02u.%03u [%s] [%s] %s\r\n",
+                    "%04u-%02u-%02u %02u:%02u:%02u.%03u [s=%s] [%s] [%s] %s\r\n",
                     now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute,
-                    now.wSecond, now.wMilliseconds, LevelName(level),
-                    component ? component : "host", message ? message : "");
+                    now.wSecond, now.wMilliseconds,
+                    g_SessionId[0] ? g_SessionId : "----------------",
+                    LevelName(level), component ? component : "host",
+                    message ? message : "");
         AcquireSRWLockExclusive(&g_LogLock);
         OutputDebugStringA(line);
 
@@ -88,6 +118,99 @@ namespace
         uint32_t level, const char* component, const char* message)
     {
         WriteLog(level, component, message);
+    }
+
+    bool ComputeFileSha256(const std::wstring& path, char (&outHex)[65])
+    {
+        HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
+                                  FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return false;
+
+        BCRYPT_ALG_HANDLE algorithm = nullptr;
+        BCRYPT_HASH_HANDLE hash = nullptr;
+        std::vector<UCHAR> hashObject;
+        UCHAR digest[32] = {};
+        bool ok = false;
+
+        do
+        {
+            if (!BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(
+                    &algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0)))
+                break;
+
+            DWORD objectSize = 0;
+            DWORD produced = 0;
+            if (!BCRYPT_SUCCESS(BCryptGetProperty(
+                    algorithm, BCRYPT_OBJECT_LENGTH,
+                    reinterpret_cast<PUCHAR>(&objectSize), sizeof(objectSize),
+                    &produced, 0)))
+                break;
+
+            hashObject.resize(objectSize);
+            if (!BCRYPT_SUCCESS(BCryptCreateHash(algorithm, &hash, hashObject.data(),
+                                                 objectSize, nullptr, 0, 0)))
+                break;
+
+            std::vector<UCHAR> buffer(64 * 1024);
+            bool readFailed = false;
+            for (;;)
+            {
+                DWORD read = 0;
+                if (!ReadFile(file, buffer.data(),
+                              static_cast<DWORD>(buffer.size()), &read, nullptr))
+                {
+                    readFailed = true;
+                    break;
+                }
+                if (read == 0) break;
+                if (!BCRYPT_SUCCESS(BCryptHashData(hash, buffer.data(), read, 0)))
+                {
+                    readFailed = true;
+                    break;
+                }
+            }
+            if (readFailed) break;
+
+            if (!BCRYPT_SUCCESS(BCryptFinishHash(hash, digest, sizeof(digest), 0)))
+                break;
+
+            for (size_t i = 0; i < sizeof(digest); ++i)
+                _snprintf_s(outHex + i * 2, 3, _TRUNCATE, "%02x", digest[i]);
+            ok = true;
+        } while (false);
+
+        if (hash) BCryptDestroyHash(hash);
+        if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+        CloseHandle(file);
+        return ok;
+    }
+
+    // Lazy: only a plugin that pins an exact image pays for reading the whole
+    // executable, and it is computed at most once per process either way.
+    const char* BZLOADER_CALL HostExecutableSha256()
+    {
+        AcquireSRWLockExclusive(&g_ShaLock);
+        if (!g_ExecutableSha256Attempted)
+        {
+            g_ExecutableSha256Attempted = true;
+            if (!ComputeFileSha256(g_ExecutablePath, g_ExecutableSha256))
+            {
+                g_ExecutableSha256[0] = '\0';
+                Logf(BZ_HOST_LOG_WARNING, "host",
+                     "Could not compute the executable SHA-256 (err=%lu); any "
+                     "plugin that pins an exact image will be refused",
+                     GetLastError());
+            }
+            else
+            {
+                Logf(BZ_HOST_LOG_INFO, "host", "Executable SHA-256 %s",
+                     g_ExecutableSha256);
+            }
+        }
+        const char* result = g_ExecutableSha256[0] ? g_ExecutableSha256 : nullptr;
+        ReleaseSRWLockExclusive(&g_ShaLock);
+        return result;
     }
 
     int32_t SafeQuery(BZPluginQueryFn query, BZPluginInfo* info, bool& raised)
@@ -167,12 +290,12 @@ namespace
         return BZ_GAME_UNKNOWN;
     }
 
-    void BuildExecutableId()
+    void BuildExecutableHint()
     {
         const auto base = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
         if (!base)
         {
-            strcpy_s(g_ExecutableBuildId, "unknown");
+            strcpy_s(g_ExecutableBuildHint, "unknown");
             return;
         }
 
@@ -182,16 +305,19 @@ namespace
             const auto nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
             if (dos->e_magic != IMAGE_DOS_SIGNATURE || nt->Signature != IMAGE_NT_SIGNATURE)
             {
-                strcpy_s(g_ExecutableBuildId, "unknown");
+                strcpy_s(g_ExecutableBuildHint, "unknown");
                 return;
             }
-            _snprintf_s(g_ExecutableBuildId, _TRUNCATE, "pe-%08X-%08X",
-                        nt->FileHeader.TimeDateStamp,
-                        nt->OptionalHeader.SizeOfImage);
+            g_ExecutableTimeDateStamp = nt->FileHeader.TimeDateStamp;
+            g_ExecutableSizeOfImage = nt->OptionalHeader.SizeOfImage;
+            _snprintf_s(g_ExecutableBuildHint, _TRUNCATE, "pe-%08X-%08X",
+                        g_ExecutableTimeDateStamp, g_ExecutableSizeOfImage);
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            strcpy_s(g_ExecutableBuildId, "unknown");
+            g_ExecutableTimeDateStamp = 0;
+            g_ExecutableSizeOfImage = 0;
+            strcpy_s(g_ExecutableBuildHint, "unknown");
         }
     }
 
@@ -268,6 +394,10 @@ namespace
             return false;
         }
 
+        // Zeroed, then handed to the plugin as a capacity. Anything the plugin
+        // is too old to fill stays zero rather than reading back as whatever
+        // happened to be in the host's own buffer.
+        result.info = {};
         result.info.structSize = sizeof(result.info);
         bool queryRaised = false;
         const int32_t queried = SafeQuery(query, &result.info, queryRaised);
@@ -304,7 +434,7 @@ namespace
             catalog.reserve(candidates.size());
             for (const auto& existing : candidates)
                 catalog.push_back({existing.path, existing.info.pluginId,
-                                   existing.info.loadPriority});
+                                   BZLoader::PluginLoadPriority(existing.info)});
             if (BZLoader::HasDuplicatePluginId(catalog, candidate.info.pluginId))
             {
                 RejectPlugin(candidate, "duplicate plugin ID");
@@ -316,8 +446,8 @@ namespace
         std::sort(candidates.begin(), candidates.end(),
                   [](const PluginModule& left, const PluginModule& right) {
             return BZLoader::CatalogLess(
-                {left.path, left.info.pluginId, left.info.loadPriority},
-                {right.path, right.info.pluginId, right.info.loadPriority});
+                {left.path, left.info.pluginId, BZLoader::PluginLoadPriority(left.info)},
+                {right.path, right.info.pluginId, BZLoader::PluginLoadPriority(right.info)});
         });
 
         for (auto& plugin : candidates)
@@ -337,15 +467,15 @@ namespace
             plugin.loaded = true;
             Logf(BZ_HOST_LOG_INFO, plugin.info.pluginId,
                  "Loaded %s %s (priority=%d)", plugin.info.pluginName,
-                 plugin.info.pluginVersion, plugin.info.loadPriority);
-            if (plugin.info.dependencies && *plugin.info.dependencies)
+                 plugin.info.pluginVersion, BZLoader::PluginLoadPriority(plugin.info));
+            const char* dependencies = BZLoader::PluginDependencies(plugin.info);
+            if (dependencies && *dependencies)
                 Logf(BZ_HOST_LOG_INFO, plugin.info.pluginId,
-                     "Declared dependencies (informational in ABI v1): %s",
-                     plugin.info.dependencies);
-            if (plugin.info.conflicts && *plugin.info.conflicts)
+                     "Declared dependencies (informational in ABI v1): %s", dependencies);
+            const char* conflicts = BZLoader::PluginConflicts(plugin.info);
+            if (conflicts && *conflicts)
                 Logf(BZ_HOST_LOG_INFO, plugin.info.pluginId,
-                     "Declared conflicts (informational in ABI v1): %s",
-                     plugin.info.conflicts);
+                     "Declared conflicts (informational in ABI v1): %s", conflicts);
             g_Plugins.push_back(std::move(plugin));
         }
     }
@@ -369,16 +499,32 @@ extern "C" __declspec(dllexport) int32_t __cdecl BZLoader_Initialize()
         return 0;
     }
     g_LogPath = g_LoaderDirectory + L"\\bzloader.log";
-    BuildExecutableId();
+    BuildSessionId();
+    BuildExecutableHint();
     g_Host = {sizeof(g_Host), BZLOADER_ABI_VERSION, BZLOADER_VERSION,
               DetectGame(g_ExecutablePath), g_LoaderDirectory.c_str(),
-              g_ExecutablePath.c_str(), g_ExecutableBuildId, HostLog};
+              g_ExecutablePath.c_str(), g_ExecutableBuildHint, HostLog,
+              g_ExecutableTimeDateStamp, g_ExecutableSizeOfImage,
+              HostExecutableSha256};
     g_Initialized = true;
-    Logf(BZ_HOST_LOG_INFO, "host", "BZLoader %u starting; ABI=%u build=%s game=%u",
-         BZLOADER_VERSION, BZLOADER_ABI_VERSION, g_ExecutableBuildId, g_Host.gameId);
+    Logf(BZ_HOST_LOG_INFO, "host",
+         "BZLoader %u starting; ABI=%u buildHint=%s game=%u",
+         BZLOADER_VERSION, BZLOADER_ABI_VERSION, g_ExecutableBuildHint, g_Host.gameId);
+    if (g_Host.gameId == BZ_GAME_UNKNOWN)
+        Logf(BZ_HOST_LOG_WARNING, "host",
+             "Host executable %ls was not recognised; only plugins declaring "
+             "BZ_GAME_MASK_ANY will be loaded",
+             g_ExecutablePath.c_str());
     DiscoverAndLoadPlugins();
     ReleaseSRWLockExclusive(&g_StateLock);
     return 1;
+}
+
+// The id stamped into every line this run writes to the append-only log.
+// Empty until BZLoader_Initialize has run.
+extern "C" __declspec(dllexport) const char* __cdecl BZLoader_GetSessionId()
+{
+    return g_SessionId;
 }
 
 extern "C" __declspec(dllexport) void __cdecl BZLoader_Shutdown()
