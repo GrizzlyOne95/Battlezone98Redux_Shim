@@ -34,3 +34,6 @@ jobs:
 
       - name: Run CTest suite
         run: ctest --test-dir build/tests --output-on-failure
+
+      - name: Test Linux coredump bundle collection
+        run: bash tests/openshim_wrap_coredump_tests.sh
