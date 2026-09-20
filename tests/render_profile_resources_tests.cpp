@@ -175,6 +175,45 @@ void TestVersionMarkerComparison()
     ExpectTrue(!VersionMarkerMatches("2\n", 2, "2"), "trailing newline rejected");
 }
 
+void TestLeftoverScriptShadowingPayloadFails()
+{
+    std::printf("TestLeftoverScriptShadowingPayloadFails\n");
+    // The real incident: a Windows copy left a whole previous payload beside
+    // the current one as "<name> (1).program". Every mandatory file was still
+    // present and the version marker still read correctly, so validation
+    // passed -- but Ogre parses this directory recursively, "(1)" sorts before
+    // "." so the stale scripts parsed first, and first declaration wins.
+    const auto dir = MakeScratchDir("leftover_script");
+    PopulateValidSet(dir);
+
+    std::string problem;
+    ExpectTrue(Validate(dir, problem), "clean set passes before the leftover");
+
+    {
+        std::ofstream stale(dir / "openshim_enhanced_terrain (1).program",
+                            std::ios::binary);
+        stale << "vertex_program OSE_TerrainHighPSSM_vertex unified\n{\n}\n";
+    }
+
+    problem.clear();
+    ExpectTrue(!Validate(dir, problem), "leftover .program is rejected");
+    ExpectContains(problem, "openshim_enhanced_terrain (1).program",
+                   "problem names the leftover script");
+
+    // An unreferenced shader source is inert: nothing parses it, so dropping
+    // the install to Redux over it would be out of proportion.
+    std::filesystem::remove(dir / "openshim_enhanced_terrain (1).program", g_errc);
+    {
+        std::ofstream stray(dir / "openshim_enhanced_terrain-sm4 (1).hlsl",
+                            std::ios::binary);
+        stray << "// inert";
+    }
+    problem.clear();
+    ExpectTrue(Validate(dir, problem), "stray .hlsl alone still validates");
+
+    std::filesystem::remove_all(dir, g_errc);
+}
+
 void TestAbsentDirectoryFails()
 {
     std::printf("TestAbsentDirectoryFails\n");
@@ -192,6 +231,7 @@ int main()
     TestEmptiedMandatoryFileFails();
     TestVersionMarkerContract();
     TestVersionMarkerComparison();
+    TestLeftoverScriptShadowingPayloadFails();
     TestAbsentDirectoryFails();
 
     if (g_failures != 0)
