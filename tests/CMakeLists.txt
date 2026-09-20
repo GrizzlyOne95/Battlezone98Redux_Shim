@@ -549,3 +549,21 @@ else()
     target_compile_options(render_effect_intent_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 add_test(NAME render_effect_intent_tests COMMAND render_effect_intent_tests)
+
+# Scene-depth qualification bookkeeping (Phase A of the DX11 scene-depth
+# work). The hooks live in src/patches/dx11_scene_depth.cpp and need D3D11;
+# the part that decides whether a COM address seen before is the same depth
+# surface or a recycled allocation does not, so it lives in src/engine and
+# runs on the host lane.
+add_executable(scene_depth_facts_tests
+    scene_depth_facts_tests.cpp
+    ../src/engine/scene_depth_facts.cpp
+)
+target_include_directories(scene_depth_facts_tests PRIVATE ../include)
+target_compile_features(scene_depth_facts_tests PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(scene_depth_facts_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(scene_depth_facts_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME scene_depth_facts_tests COMMAND scene_depth_facts_tests)
