@@ -127,6 +127,7 @@
     <ClCompile Include="src\engine\openshim_sdk_legacy_thunks.cpp" />
     <ClCompile Include="src\engine\openshim_sdk_thunks.cpp" />
     <ClCompile Include="src\engine\render_effect_intent.cpp" />
+    <ClCompile Include="src\engine\scene_depth_facts.cpp" />
     <ClCompile Include="src\engine\render_profile.cpp" />
     <ClCompile Include="src\engine\shim_log_client.cpp" />
     <ClCompile Include="src\engine\shim_log_sink.cpp" />
@@ -139,6 +140,7 @@
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
     <ClInclude Include="include\render_effect_intent.h" />
+    <ClInclude Include="include\scene_depth_facts.h" />
     <ClInclude Include="include\fog_wake.h" />
     <ClInclude Include="include\fog_wake_runtime.h" />
     <ClInclude Include="include\fog_wake_feature.h" />
