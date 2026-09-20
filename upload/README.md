@@ -78,14 +78,25 @@ On every wrapped exit it zips (Windows) or xz-compresses (Linux) and POSTs:
 - `multi.ini`
 - session-fresh buffer-capture files and `openshim_crash_*.dmp` minidumps
 - `openshim_wrap.log.tail.txt` (the last 200 wrapper diagnostics)
+- on abnormal Linux exits, the best matching `systemd-coredump` metadata and
+  a bounded `coredumpctl` backtrace when accessible (never the raw core)
 - `meta.txt` (UTC time, hostname, player name, exit code, termination kind,
-  exception-evidence flag, wrapper version)
+  exception-evidence flag, wrapper version, and explicit coredump availability,
+  match, metadata, and backtrace states)
 
 The upload headline distinguishes a clean exit, a handled exception, a
 signal/console interruption or termination, an unexplained abrupt exit, and a
 crash with non-empty OpenShim exception evidence. `openshim_crash.log` is
 created empty at every OpenShim startup; an empty file is therefore not treated
 as a crash.
+
+Linux coredump lookup is restricted to the wrapped session's time window and
+requires Battlezone executable/process evidence; an unrelated Wine or system
+crash is not attached merely because it is recent. Missing `coredumpctl`, a
+non-systemd core handler, journal permission errors, no matching dump, and an
+unavailable debugger/core are recorded in `meta.txt` and
+`systemd-coredump.query.txt` rather than silently omitted. This is unprivileged
+best-effort collection and does not require `sudo`.
 
 A bundle over the ~10 MB webhook cap is split; reassemble with
 `cat *.part* > bundle.tar.xz` or `copy /b` on Windows.
