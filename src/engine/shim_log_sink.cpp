@@ -1,4 +1,17 @@
+// shim_log_sink.cpp
+// BZR Open Shim - the openshim.log sink. See shim_log_sink.h for why the
+// logger is split: this file is the single owner of the log file, its lock,
+// and the session header and footer.
+//
+// winmm.dll compiles this. plugins/openshim.dll does not; it formats its own
+// lines and hands the finished text over through the bootstrap API.
+//
+// Copyright (C) 2025 BZR Open Shim contributors
+// SPDX-License-Identifier: MIT
+
 #include "shim_log.h"
+#include "shim_log_sink.h"
+#include "game_log_path.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -8,101 +21,12 @@
 #include <share.h>
 #endif
 
-#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <string>
 
 namespace BZROpenShim
 {
-    std::string SanitizeLogFilename(const char* fileName)
-    {
-        const char* safeName = (fileName && fileName[0]) ? fileName : "openshim.log";
-        if (const char* slash = std::strrchr(safeName, '\\'))
-            safeName = slash + 1;
-        if (const char* slash = std::strrchr(safeName, '/'))
-            safeName = slash + 1;
-
-        if (!safeName[0] ||
-            std::strcmp(safeName, ".") == 0 ||
-            std::strcmp(safeName, "..") == 0 ||
-            std::strpbrk(safeName, "\\/:*?\"<>|") != nullptr)
-        {
-            return "openshim.log";
-        }
-
-        const size_t len = std::strlen(safeName);
-        for (size_t i = 0; i < len; ++i)
-        {
-            if (static_cast<unsigned char>(safeName[i]) < 32)
-                return "openshim.log";
-        }
-
-        if (safeName[len - 1] == '.' || safeName[len - 1] == ' ')
-            return "openshim.log";
-
-        // Check for Windows reserved device names in the filename stem.
-        size_t stemLen = 0;
-        while (safeName[stemLen] && safeName[stemLen] != '.')
-            ++stemLen;
-
-        if (stemLen == 3 || stemLen == 4)
-        {
-            char stemUpper[5] = {};
-            for (size_t i = 0; i < stemLen; ++i)
-                stemUpper[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(safeName[i])));
-
-            if (stemLen == 3)
-            {
-                if (std::strcmp(stemUpper, "CON") == 0 ||
-                    std::strcmp(stemUpper, "PRN") == 0 ||
-                    std::strcmp(stemUpper, "AUX") == 0 ||
-                    std::strcmp(stemUpper, "NUL") == 0)
-                {
-                    return "openshim.log";
-                }
-            }
-            else if (stemLen == 4)
-            {
-                if ((std::strncmp(stemUpper, "COM", 3) == 0 || std::strncmp(stemUpper, "LPT", 3) == 0) &&
-                    stemUpper[3] >= '1' && stemUpper[3] <= '9')
-                {
-                    return "openshim.log";
-                }
-            }
-        }
-
-        return safeName;
-    }
-
-    std::string GetGameLogPath(const char* fileName)
-    {
-        const std::string safeName = SanitizeLogFilename(fileName);
-
-#ifdef _WIN32
-        char modulePath[MAX_PATH] = {};
-        if (GetModuleFileNameA(nullptr, modulePath, MAX_PATH) == 0)
-            return safeName;
-
-        char* lastSlash = std::strrchr(modulePath, '\\');
-        if (!lastSlash)
-            return safeName;
-
-        *(lastSlash + 1) = '\0';
-        const std::string gameRoot(modulePath);
-        const std::string logDirectory = gameRoot + "logs";
-        if (CreateDirectoryA(logDirectory.c_str(), nullptr) != FALSE ||
-            GetLastError() == ERROR_ALREADY_EXISTS)
-        {
-            return logDirectory + "\\" + safeName;
-        }
-
-        return gameRoot + safeName;
-#else
-        return safeName;
-#endif
-    }
-
 #ifdef _WIN32
 namespace
 {
@@ -126,12 +50,6 @@ namespace
     const char* SafeComponent(const char* component)
     {
         return (component && component[0]) ? component : "shim";
-    }
-
-    void TrimTrailingNewlines(std::string& text)
-    {
-        while (!text.empty() && (text.back() == '\r' || text.back() == '\n'))
-            text.pop_back();
     }
 
     int GetCurrentUtcOffsetMinutes()
@@ -278,51 +196,19 @@ namespace
         return g_LogFile != nullptr;
     }
 
-    std::string FormatWideToUtf8(const wchar_t* fmt, va_list args)
+}
+
+    void ShimLogSinkWrite(uint32_t level, const char* component, const char* message)
     {
-        if (!fmt)
-            return {};
-
-        wchar_t wideBuffer[4096] = {};
-        _vsnwprintf_s(wideBuffer, _countof(wideBuffer), _TRUNCATE, fmt, args);
-
-        const int bytesNeeded = WideCharToMultiByte(CP_UTF8, 0, wideBuffer, -1, nullptr, 0, nullptr, nullptr);
-        if (bytesNeeded <= 1)
-            return {};
-
-        std::string utf8(static_cast<size_t>(bytesNeeded), '\0');
-        WideCharToMultiByte(CP_UTF8, 0, wideBuffer, -1, utf8.data(), bytesNeeded, nullptr, nullptr);
-        utf8.pop_back();
-        return utf8;
-    }
-
-    std::string FormatAnsi(const char* fmt, va_list args)
-    {
-        if (!fmt)
-            return {};
-
-        char buffer[4096] = {};
-        _vsnprintf_s(buffer, _countof(buffer), _TRUNCATE, fmt, args);
-        return buffer;
-    }
-
-    void WriteFormattedMessage(LogLevel level, const char* component, const std::string& formatted)
-    {
-        std::string line = formatted;
-        TrimTrailingNewlines(line);
-        if (line.empty())
-            line = "<empty>";
-
+        const LogLevel typed = static_cast<LogLevel>(level);
         if (EnsureLoggerReady())
         {
             AcquireSRWLockExclusive(&g_LogLock);
-            WriteLineUnlocked(level, component, line.c_str());
+            WriteLineUnlocked(typed, component, message ? message : "");
             ReleaseSRWLockExclusive(&g_LogLock);
         }
-
-        WriteDebugMirror(level, component, line.c_str());
+        WriteDebugMirror(typed, component, message ? message : "");
     }
-} // namespace
 
     void InitializeShimLogger()
     {
@@ -341,39 +227,20 @@ namespace
         ReleaseSRWLockExclusive(&g_LogLock);
     }
 
-    void LogShimVA(LogLevel level, const char* component, const char* fmt, va_list args)
+namespace
+{
+    // Registers the sink during static initialisation, which for a DLL runs
+    // before our own DllMain body. The bootstrap is therefore already wired
+    // by the time anything in DLL_PROCESS_ATTACH logs.
+    struct SinkRegistration
     {
-        const std::string formatted = FormatAnsi(fmt, args);
-        WriteFormattedMessage(level, component, formatted);
-    }
-
-    void LogShimVW(LogLevel level, const char* component, const wchar_t* fmt, va_list args)
-    {
-        const std::string formatted = FormatWideToUtf8(fmt, args);
-        WriteFormattedMessage(level, component, formatted);
-    }
-
-    void LogShimA(LogLevel level, const char* component, const char* fmt, ...)
-    {
-        va_list args;
-        va_start(args, fmt);
-        LogShimVA(level, component, fmt, args);
-        va_end(args);
-    }
-
-    void LogShimW(LogLevel level, const char* component, const wchar_t* fmt, ...)
-    {
-        va_list args;
-        va_start(args, fmt);
-        LogShimVW(level, component, fmt, args);
-        va_end(args);
-    }
+        SinkRegistration() { SetShimLogSink(&ShimLogSinkWrite); }
+    };
+    const SinkRegistration g_SinkRegistration;
+}
 #else
+    void ShimLogSinkWrite(uint32_t, const char*, const char*) {}
     void InitializeShimLogger() {}
     void ShutdownShimLogger() {}
-    void LogShimVA(LogLevel, const char*, const char*, va_list) {}
-    void LogShimVW(LogLevel, const char*, const wchar_t*, va_list) {}
-    void LogShimA(LogLevel, const char*, const char*, ...) {}
-    void LogShimW(LogLevel, const char*, const wchar_t*, ...) {}
 #endif
 }
