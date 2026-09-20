@@ -52,12 +52,6 @@ namespace BZROpenShim::RenderProfiles
     // string before game main can run.
     char s_commandLineSnapshot[1200] = {};
 
-    const char* RequestedBackendName(RendererBackend backend)
-    {
-        return backend == RendererBackend::DX11 ? "DX11"
-               : backend == RendererBackend::DX9 ? "DX9"
-                                                 : "Auto";
-    }
 
     void CaptureCommandLineSnapshot()
     {
@@ -581,6 +575,12 @@ namespace BZROpenShim::RenderProfiles
             SlotWriteFaulted,
         };
 
+        // startup_seam_wire.cpp renders these by number, in both modules.
+        // If this enum is reordered, that table must move with it.
+        static_assert(static_cast<uint32_t>(BackendSeamArmStatus::NotAttempted) == 0u, "");
+        static_assert(static_cast<uint32_t>(BackendSeamArmStatus::Armed) == 1u, "");
+        static_assert(static_cast<uint32_t>(BackendSeamArmStatus::SlotWriteFaulted) == 12u, "");
+
         std::atomic<BackendSeamArmStatus> s_seamArmStatus {
             BackendSeamArmStatus::NotAttempted
         };
@@ -775,27 +775,6 @@ namespace BZROpenShim::RenderProfiles
             return true;
         }
 
-        const char* BackendSeamArmStatusText(BackendSeamArmStatus status)
-        {
-            switch (status)
-            {
-            case BackendSeamArmStatus::NotAttempted: return "not-attempted";
-            case BackendSeamArmStatus::Armed: return "armed";
-            case BackendSeamArmStatus::NoMainModule: return "no-main-module";
-            case BackendSeamArmStatus::UnsupportedExecutable: return "unsupported-executable";
-            case BackendSeamArmStatus::BadDosSignature: return "bad-dos-signature";
-            case BackendSeamArmStatus::BadNtSignature: return "bad-nt-signature";
-            case BackendSeamArmStatus::UnsupportedImageSize: return "unsupported-image-size";
-            case BackendSeamArmStatus::MarkerMismatch: return "marker-mismatch";
-            case BackendSeamArmStatus::OgreMainAbsent: return "ogremain-absent";
-            case BackendSeamArmStatus::ExportAbsent: return "config-load-export-absent";
-            case BackendSeamArmStatus::BindingMismatch: return "iat-binding-mismatch";
-            case BackendSeamArmStatus::ProtectFailed: return "iat-protect-failed";
-            case BackendSeamArmStatus::SlotWriteFaulted: return "iat-write-faulted";
-            }
-            return "unknown";
-        }
-
         bool ValidateStartupCallSite()
         {
             uint8_t bytes[6] = {};
@@ -933,12 +912,6 @@ namespace BZROpenShim::RenderProfiles
         ClearPendingMarker();
     }
 
-    const char* SeamArmStatusTextForValue(uint32_t armStatus)
-    {
-        return BackendSeamArmStatusText(
-            static_cast<BackendSeamArmStatus>(armStatus));
-    }
-
     void RunStartupSelectionForTestImpl()
     {
         AcquireSRWLockExclusive(&s_stateLock);
@@ -964,11 +937,6 @@ namespace BZROpenShim::StartupSeam
             BZROpenShim::RenderProfiles::SeamResultForPublication();
         std::memcpy(out, &src, sizeof(StartupRendererResult));
         return true;
-    }
-
-    const char* ArmStatusText(uint32_t armStatus)
-    {
-        return BZROpenShim::RenderProfiles::SeamArmStatusTextForValue(armStatus);
     }
 
     void ClearPendingMarker()

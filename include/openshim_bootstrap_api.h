@@ -60,6 +60,28 @@ typedef struct OpenShimBootstrapApiV1
     // Clears the previous-boot evidence marker, which the bootstrap owns
     // because the bootstrap is what writes it.
     void(__cdecl* clearStartupPendingMarker)(void);
+
+    // Installing a provider is itself a call into the bootstrap: the seams
+    // and the export bridge live in winmm.dll, and the runtime is what has
+    // the policy to give them. The tables are passed opaquely because their
+    // layouts are defined in headers both modules compile, not here.
+    //
+    // The caller must keep each table alive for the life of the process:
+    // there is no uninstall, and the seams keep calling through them.
+    int32_t(__cdecl* installFileIoProvider)(const void* provider);
+    int32_t(__cdecl* installSdkProvider)(const void* table);
+
+    // The bootstrap owns the import-table patcher because it has to run
+    // before anything else exists. The runtime reuses it for the modules that
+    // only appear later (msvcr120, ucrtbase) rather than carrying a copy.
+    int32_t(__cdecl* patchIatByFuncName)(
+        void* targetModule, const char* funcName, void* newFunc, void** oldFunc);
+    int32_t(__cdecl* patchCreateFileHooksForModule)(void* targetModule);
+
+    // Deferred corroboration of the pre-main CLI delimiter fix. The state it
+    // checks was recorded at process attach, so it belongs to the bootstrap;
+    // the runtime triggers it once .text is readable on both storefronts.
+    void(__cdecl* verifyCliMultiParameterOptionFix)(void);
 } OpenShimBootstrapApiV1;
 
 // The single export winmm.dll publishes for this. Returns NULL for a version

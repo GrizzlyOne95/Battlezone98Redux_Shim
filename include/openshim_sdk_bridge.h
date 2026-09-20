@@ -37,6 +37,16 @@ struct OpenShimSdkProviderTable
     ret(cc* impl) params;
 #include "openshim_sdk_exports.inc"
 #undef OPENSHIM_SDK_EXPORT
+
+    // Appended: the legacy v1 C++ API. winmm.dll exports these as mangled
+    // C++ symbols and has done since long before SDK v2, so they keep
+    // working -- but the values are runtime state, so they come from the
+    // plugin like everything else here. Guarded by structSize as usual.
+    uint32_t(__cdecl* legacyGetShimVersion)(void);
+    int32_t(__cdecl* legacyIsCompatibleGameVersion)(void);
+    int32_t(__cdecl* legacyIsPatchingComplete)(void);
+    uint32_t(__cdecl* legacyGetAppliedPatchCount)(void);
+    uint32_t(__cdecl* legacyGetBzrDistribution)(void);
 };
 
 #define OPENSHIM_SDK_TABLE_HAS(tablePtr, field) \
