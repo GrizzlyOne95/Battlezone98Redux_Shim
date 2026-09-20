@@ -294,6 +294,53 @@ patcher.cpp <- bzr_options_ui.cpp <- ogre_render_profile.cpp
 The whole bootstrap minus the renderer seam is 10 of 78 translation units, so
 the renderer is the only major cut left.
 
+## The bootstrap startup renderer seam
+
+Deliberately not built like the file-I/O seam, because the timing contract is
+different. There, a missing provider can mean "stock for now, the plugin
+catches up later". Here it cannot: the intercepted `Ogre::ConfigFile::load`
+*is* the game's read of `Ogre.cfg`, and the graphics bootstrap reads
+`getSetting("Render System")` immediately afterwards. If the decision is not
+made by the time that call returns, the decision point is gone for this boot,
+and a warm-cache Steam start reaches the load in about a second -- long before
+any plugin could be hosted.
+
+So the bootstrap owns the whole startup decision and runs it self-
+sufficiently, with no plugin loaded at all. It owns the command-line snapshot,
+the arm, the executable/IAT/call-site validation, the original
+`ConfigFile::load` pointer, the one-shot latch, minimal parsing of
+`[Graphics] Renderer` and `[Startup] BackendTransport`, CLI `/renderer:`
+resolution, the renderer-DLL presence check, and the atomic `Ogre.cfg`
+transport. Then it calls the original `ConfigFile::load` exactly as before.
+
+`backend_selection.cpp` is reused as the decision core rather than duplicated
+in spirit: it is already pure and free of Win32 and Ogre, and so is
+`render_profile.cpp`. Compiling those two into the bootstrap is fine. What the
+boundary keeps out is `hook_engine`, the patch registry, resolve tables and
+mutable renderer runtime state.
+
+The bootstrap publishes a POD `StartupRendererResult` -- no `std::string`, no
+locks, no patch-engine objects, nothing with a destructor. OpenShim reads it
+during its own initialisation and seeds `s_bootRequest` and
+`s_transportWrittenThisBoot` from it instead of re-deriving a decision that
+was made before it existed. Everything below the startup transport stays with
+OpenShim: active-backend observation, outcome classification, scheme takeover,
+Enhanced resources, DX11 compatibility, options UI, viewport work, profile
+requests.
+
+Like the file-I/O provider, this is OpenShim-bootstrap plumbing and is **not**
+part of the BZLoader plugin ABI.
+
+The call-site proof moved intact and should stay that way: the return-address
+gate, the six-byte post-SteamStub validation, the `Ogre.cfg` argument check,
+the one-shot latch and the SEH fail-to-stock behaviour are all load-bearing.
+
+Measured effect. The seam reaches **5** translation units; the whole bootstrap
+(excluding `dllmain.cpp`, which is still the monolith's entry point and gets
+split with the plugin) is **13 of 79**, down from 58 before the SDK, file-I/O
+and renderer cuts. `ogre_render_profile.cpp` moved from the bootstrap graph to
+the plugin side.
+
 ## Path and loading security
 
 The proxy derives `bzloader.dll` from the proxy module address and calls

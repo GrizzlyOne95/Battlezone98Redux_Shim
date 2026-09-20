@@ -488,6 +488,25 @@ if(WIN32 AND MSVC)
     add_test(NAME bootstrap_file_io_tests COMMAND bootstrap_file_io_tests)
 endif()
 
+# The bootstrap startup renderer seam with nothing else alive. This is the
+# case the renderer split exists for: the decision must be complete before the
+# intercepted ConfigFile::load returns, so "a plugin will supply it later" is
+# not an option. Windows-only: Win32 file APIs and the real transport.
+if(WIN32 AND MSVC)
+    add_executable(startup_backend_seam_tests
+        startup_backend_seam_tests.cpp
+        ../src/engine/startup_backend_seam.cpp
+        ../src/engine/backend_selection.cpp
+        ../src/engine/render_profile.cpp
+        ../src/engine/shim_log.cpp
+        ../src/engine/game_log_path.cpp)
+    target_include_directories(startup_backend_seam_tests PRIVATE ../include)
+    target_compile_features(startup_backend_seam_tests PRIVATE cxx_std_20)
+    target_compile_definitions(startup_backend_seam_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(startup_backend_seam_tests PRIVATE /W4 /WX)
+    add_test(NAME startup_backend_seam_tests COMMAND startup_backend_seam_tests)
+endif()
+
 add_executable(render_effect_intent_tests
     render_effect_intent_tests.cpp
     ../src/engine/render_effect_intent.cpp
