@@ -146,6 +146,13 @@ namespace BZROpenShim
         // game's archives and never change between sessions; mod shaders are
         // the ones users edit, and stale microcode after an edit would be
         // silently wrong, so their fingerprint keys the cache file.
+        //
+        // OpenShim's own Enhanced payload is scanned for the same reason and
+        // was missing from this list until 2026-09-20. It is not user content,
+        // but it is redeployed whenever the DLL ships new shaders, and a cache
+        // keyed only on mod content happily served microcode compiled from the
+        // previous payload across that swap -- silently wrong in exactly the
+        // way this fingerprint exists to prevent.
         // This scan is suppressed from the generic UiPerf file-scan counters:
         // it is reported separately as [UIPERF][SHADER] cache_init and must not
         // be misclassified as addon/Workshop menu scanning.
@@ -171,6 +178,8 @@ namespace BZROpenShim
                 root / L"packaged_mods",
                 // Steam install: workshop content sits outside the game root.
                 root / L".." / L".." / L"workshop" / L"content" / L"301650",
+                // OpenShim's own Enhanced shader payload.
+                root / L"openshim" / L"renderer" / L"enhanced",
             };
 
             size_t filesSeen = 0;
