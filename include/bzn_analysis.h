@@ -230,12 +230,33 @@ namespace BZROpenShim::BznAnalysis
                 return false;
 
             std::string copy(trimmed);
+            for (char& c : copy)
+            {
+                if (c >= 'A' && c <= 'Z')
+                    c = static_cast<char>(c - 'A' + 'a');
+            }
+
+            // Modern C runtimes commonly spell these as nan/inf. Older MSVC
+            // text formatting may emit 1.#INF / 1.#IND / 1.#QNAN instead.
+            if (copy == "nan" || copy == "+nan" || copy == "-nan" ||
+                copy == "inf" || copy == "+inf" || copy == "-inf" ||
+                copy == "infinity" || copy == "+infinity" || copy == "-infinity" ||
+                copy == "1.#inf" || copy == "+1.#inf" || copy == "-1.#inf" ||
+                copy == "1.#ind" || copy == "+1.#ind" || copy == "-1.#ind" ||
+                copy == "1.#qnan" || copy == "+1.#qnan" || copy == "-1.#qnan" ||
+                copy == "1.#snan" || copy == "+1.#snan" || copy == "-1.#snan")
+            {
+                return true;
+            }
+
             char* end = nullptr;
             errno = 0;
             const double parsed = std::strtod(copy.c_str(), &end);
-            if (end == copy.c_str() || !end || *end != '\0' || errno == ERANGE)
+            if (end == copy.c_str() || !end || *end != '\0')
                 return false;
 
+            // This also catches syntactically numeric overflow such as 1e9999:
+            // if the runtime converts it to infinity, it is unsafe spatial data.
             return !std::isfinite(parsed);
         }
 
