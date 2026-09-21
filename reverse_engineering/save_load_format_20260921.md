@@ -2,7 +2,8 @@
 
 Date: 2026-09-21
 Scope: exact `.sav` write/read structure, value list, Redux validation diffs,
-OpenShim vs EXU autosave mechanics. Later reference for save/load work.
+OpenShim vs EXU autosave mechanics. Repository-specific behavior is a snapshot
+of the 2026-09-21 code state; the recovered engine format is the durable reference.
 
 ## Sources and trust
 
