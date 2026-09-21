@@ -8,7 +8,8 @@
 // tests/native_save_flag_tests.cpp. autosave.cpp wraps the calls below in SEH
 // and does the actual pointer dereference.
 //
-// Why this matters: a direct SaveGame call must run with missionSave=0. When the
+// Why this matters: a direct SaveGame call must temporarily run with missionSave=0,
+// then restore the prior byte so an outer native mission-save operation keeps its state. When the
 // flag is set, FUN_004fd190 skips runType, saveGameDesc, the mission-status
 // block (FUN_004fd7e0), start_time and the whole [AiTasks] section
 // (FUN_00461d90), and the matching load path skips the post-load handle remap in
