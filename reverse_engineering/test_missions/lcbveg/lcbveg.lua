@@ -31,9 +31,112 @@ local MATERIAL_NAMES = {
     [3] = "river", [4] = "waterfall", [5] = "base", [7] = "ambiguous",
 }
 
+-- Campaign Reimagined's Workshop id. exu.dll, bzfile.dll and TerrainClutter.lua
+-- all live in its mod folder; exu.dll is also in the game root.
+local CR_WORKSHOP_ID = "3686673790"
+
+-- Extend the Lua search paths before requiring anything.
+--
+-- An addon mission gets neither the game root nor any mod folder on
+-- package.path/cpath, so `require("exu")` fails outright -- and EXU is not
+-- optional here, CreateStaticGeometry is a native export with no Lua
+-- equivalent. The first run of this mission placed nothing for exactly that
+-- reason, reporting "EXU StaticGeometry API is unavailable" five times.
+--
+-- Deriving the game directory from package.cpath is the community RequireFix
+-- technique (DivisionByZero, GrizzlyOne95, VTrider), which exists for this
+-- precise problem. Reimplemented compactly here rather than depending on
+-- another addon's copy of it.
+local pathNotes = {}
+local gameRoot = nil
+
+local function ExtendSearchPaths()
+    if type(package) ~= "table" or type(package.cpath) ~= "string" then
+        pathNotes[#pathNotes + 1] = "package.cpath unavailable; paths untouched"
+        return
+    end
+
+    local entries = {}
+    for entry in string.gmatch(package.cpath, "([^;]+)") do
+        entries[#entries + 1] = entry
+    end
+    -- RequireFix reads entry 2; fall back to the first that yields a directory
+    -- so this does not break if the engine ever reorders them.
+    local gameDir = nil
+    for _, index in ipairs({ 2, 1, 3 }) do
+        local entry = entries[index]
+        if entry then
+            local dir = string.match(entry, "(.*)\\%?")
+            if dir and dir ~= "" then
+                gameDir = dir
+                break
+            end
+        end
+    end
+    if not gameDir then
+        pathNotes[#pathNotes + 1] = "could not derive the game directory from package.cpath"
+        return
+    end
+
+    -- ORDER MATTERS, and getting it wrong is silent. There are two exu.dll on
+    -- a normal install: the game root ships one, and CR's mod folder ships the
+    -- one CR is actually built against. On this machine the root copy is
+    -- 886272 bytes and does NOT export CreateStaticGeometry, while CR's is
+    -- 907776 bytes and does. With the root searched first, require("exu")
+    -- SUCCEEDS and hands back a module missing the one function this mission
+    -- needs -- so nothing reports a load failure and five layers just quietly
+    -- refuse to build. CR's copy goes first.
+    local roots = {
+        gameDir .. "\\mods\\" .. CR_WORKSHOP_ID,
+        gameDir .. "\\packaged_mods\\" .. CR_WORKSHOP_ID,
+        gameDir,                                -- last resort, and often stale
+    }
+    -- PREPEND, not append. The game root is ALREADY on package.cpath -- that is
+    -- precisely how gameDir was derived above -- so appending leaves the root's
+    -- stale exu.dll earlier in the search order and it keeps winning. Position
+    -- within cpath is the whole mechanism; adding a path that is searched last
+    -- achieves nothing when a wrong answer is found first.
+    local dllPrefix, luaPrefix = "", ""
+    for i = 1, #roots do
+        dllPrefix = dllPrefix .. roots[i] .. "\\?.dll;"
+        luaPrefix = luaPrefix .. roots[i] .. "\\?.lua;"
+    end
+    package.cpath = dllPrefix .. package.cpath
+    package.path = luaPrefix .. package.path
+    gameRoot = gameDir
+    pathNotes[#pathNotes + 1] = "search paths extended from " .. gameDir
+end
+
+ExtendSearchPaths()
+
 local okExu, exu = pcall(require, "exu")
 if not okExu then
+    pathNotes[#pathNotes + 1] = "require('exu') failed: " .. tostring(exu)
     exu = nil
+elseif type(exu) ~= "table" or type(exu.CreateStaticGeometry) ~= "function" then
+    -- Loaded, but not the build we need. "require succeeded" and "the module
+    -- works" are different claims, and conflating them cost a round trip.
+    --
+    -- The usual cause is that something required exu before this script ran.
+    -- require() caches in package.loaded, and a cached module ignores any
+    -- later cpath change however it is ordered -- so prepending CR's folder
+    -- cannot help on its own. Drop the cached entry and ask again.
+    pathNotes[#pathNotes + 1] =
+        "exu had no CreateStaticGeometry (the game root ships a build that " ..
+        "predates it); dropping the cached module and reloading with CR's " ..
+        "copy first"
+    package.loaded.exu = nil
+    local okRetry, retry = pcall(require, "exu")
+    if okRetry and type(retry) == "table" and
+        type(retry.CreateStaticGeometry) == "function" then
+        exu = retry
+        pathNotes[#pathNotes + 1] = "reload gave a build with CreateStaticGeometry"
+    else
+        exu = (okRetry and type(retry) == "table") and retry or exu
+        pathNotes[#pathNotes + 1] =
+            "reload did NOT help -- the exu.dll in mods\\" .. CR_WORKSHOP_ID ..
+            " is the only one with CreateStaticGeometry, so check it is there"
+    end
 end
 
 local okBzfile, bzfile = pcall(require, "bzfile")
@@ -84,9 +187,21 @@ local function LoadMat(name)
     if not (bzfile and type(bzfile.Open) == "function") then
         return nil, "bzfile is unavailable"
     end
-    local handle = bzfile.Open(name, "rb")
+    local candidates = { name }
+    if gameRoot then
+        candidates[#candidates + 1] = gameRoot .. "\\addon\\lcbveg\\" .. name
+    end
+    local handle = nil
+    for i = 1, #candidates do
+        local opened = bzfile.Open(candidates[i], "rb")
+        if opened then
+            handle = opened
+            break
+        end
+    end
     if not handle then
-        return nil, "could not open " .. tostring(name)
+        return nil, "could not open " .. tostring(name) ..
+            " (tried " .. #candidates .. " path(s))"
     end
     local expected = MAT_DIM * MAT_DIM * 2
     local payload = handle:Read(expected)
@@ -104,11 +219,11 @@ end
 
 -- Fallback classifier, used when the .mat cannot be read.
 --
--- bzfile.dll and TerrainClutter.lua both live inside the Campaign Reimagined
--- mod folder, and an addon mission does not get a mod's Lua search path or its
--- native modules -- so on a direct launch neither is reachable, whatever is
--- installed. Rather than silently drop terrain filtering, reconstruct it from
--- the terrain itself.
+-- ExtendSearchPaths above should make bzfile reachable, but it depends on
+-- deriving the game directory from package.cpath and on CR being installed at
+-- the expected id. When either does not hold there is still no file I/O at
+-- all, so rather than silently drop terrain filtering, reconstruct it from the
+-- terrain itself.
 --
 -- This works because the map's materials were painted FROM elevation and slope
 -- in the first place (see paint_rules in Make-VegBenchTerrain.py), so the same
@@ -365,16 +480,23 @@ function Start()
     local okRequire, clutter = pcall(require, "TerrainClutter")
     if okRequire and type(clutter) == "table" and type(clutter.BuildLayer) == "function" then
         placer = function(profile)
+            -- CR wants an ARRAY of accepted types plus a lookup, where this
+            -- file carries a set. Convert on a copy: mutating the profile
+            -- would leave the built-in placer, which wants the set, unable to
+            -- retry the same profile.
+            local forCr = {}
+            for key, value in pairs(profile) do
+                forCr[key] = value
+            end
             if profile.terrainTypes then
-                -- CR wants an array of accepted types plus a lookup.
                 local list = {}
                 for value in pairs(profile.terrainTypes) do
                     list[#list + 1] = value
                 end
-                profile.terrainTypes = list
-                profile.terrainTypeAt = MaterialAt
+                forCr.terrainTypes = list
+                forCr.terrainTypeAt = MaterialAt
             end
-            return clutter.BuildLayer(profile)
+            return clutter.BuildLayer(forCr)
         end
         state.placement = "CR TerrainClutter"
     else
@@ -481,12 +603,32 @@ function Start()
         end
 
         local ok, info = placer(profile)
+
+        -- If CR's module placed nothing, try the built-in placer on the same
+        -- profile before giving up.
+        --
+        -- This is not belt-and-braces, it is a diagnostic. The two placers run
+        -- the same rejection sampling against the same terrain, so if CR's
+        -- reports "no valid terrain samples" and this one then succeeds at the
+        -- identical positions, the difference is not the terrain -- it is that
+        -- a require()d module does not see the mission's engine globals, so
+        -- CR's SampleTerrain finds no GetTerrainHeightAndNormal and rejects
+        -- every candidate. The log says plainly which one produced the grass.
+        local usedFallback = false
+        if not ok and placer ~= BuildLayerDirect then
+            local retryOk, retryInfo = BuildLayerDirect(profile)
+            if retryOk then
+                ok, info, usedFallback = retryOk, retryInfo, true
+            end
+        end
+
         local record = {
             name = profile.name,
             density = profile.density,
             radius = profile.radius,
             center = profile.center,
             count = 0,
+            fallback = usedFallback,
         }
         if ok then
             record.count = (type(info) == "table" and info.instanceCount) or 0
@@ -505,6 +647,9 @@ function Update(dt)
 
     Log("world=Achilles placement=" .. state.placement ..
         " terrain=" .. state.terrain)
+    for index = 1, #pathNotes do
+        Log("  " .. pathNotes[index])
+    end
     for index = 1, #state.notes do
         Log("  " .. state.notes[index])
     end
@@ -528,10 +673,11 @@ function Update(dt)
                 spacing = math.sqrt((math.pi * layer.radius * layer.radius) / layer.count)
             end
             Log(string.format(
-                "  %-20s density=%.3f radius=%.0f instances=%d spacing=%.2f at (%.0f, %.0f) on %s",
+                "  %-20s density=%.3f radius=%.0f instances=%d spacing=%.2f at (%.0f, %.0f) on %s%s",
                 layer.name, layer.density, layer.radius, layer.count, spacing,
                 layer.center.x, layer.center.z,
-                MATERIAL_NAMES[MaterialAt(layer.center) or -1] or "unknown"))
+                MATERIAL_NAMES[MaterialAt(layer.center) or -1] or "unknown",
+                layer.fallback and "  [CR placer found nothing here; built-in did]" or ""))
         end
     end
     Log(string.format("total instances=%d across %d layer(s)", total, #state.layers))
