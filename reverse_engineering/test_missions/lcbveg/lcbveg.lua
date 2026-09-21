@@ -153,6 +153,7 @@ local state = {
     refusal = nil,
     mat = nil,
     bands = nil,
+    diagnosed = false,
     minX = 0.0,
     minZ = 0.0,
 }
@@ -323,6 +324,93 @@ end
 local function SlopeDegrees(normal)
     local up = math.max(-1.0, math.min(1.0, normal.y))
     return math.acos(up) * 180.0 / math.pi
+end
+
+-- Report exactly what the terrain API returns at one known point.
+--
+-- Both placers reject every candidate while an offline reproduction of the
+-- same test over the same .hg2/.mat accepts ~99% of them, so the disagreement
+-- is about what the engine hands back, not about the ground. Guessing at that
+-- has now cost several round trips; this prints it.
+--
+-- The specific thing worth ruling out: CalibrateTerrainBands works and only
+-- ever reads the FIRST return value, while both placers need normal.y. If the
+-- engine returns the normal as three numbers rather than one vector, the
+-- height path succeeds and every slope test silently fails.
+local function DescribeTerrainApi(position)
+    if type(GetTerrainHeightAndNormal) ~= "function" then
+        return "GetTerrainHeightAndNormal is " .. type(GetTerrainHeightAndNormal)
+    end
+    local results = { pcall(GetTerrainHeightAndNormal, position) }
+    if not results[1] then
+        return "call raised: " .. tostring(results[2])
+    end
+    local parts = {}
+    for index = 2, #results do
+        local value = results[index]
+        local shown = type(value)
+        if type(value) == "number" then
+            shown = string.format("number(%.3f)", value)
+        elseif type(value) == "table" or type(value) == "userdata" then
+            -- Vectors here are userdata, so field access goes through a
+            -- metatable and may simply not be there. pcall it: the question
+            -- "is this indexable" must not itself throw.
+            local okIndex, x, y, z = pcall(function()
+                return value.x, value.y, value.z
+            end)
+            if okIndex then
+                shown = string.format("%s(x=%s y=%s z=%s)", type(value),
+                    tostring(x), tostring(y), tostring(z))
+            else
+                shown = type(value) .. "(not indexable: " .. tostring(x) .. ")"
+            end
+        end
+        parts[#parts + 1] = string.format("[%d]=%s", index - 1, shown)
+    end
+    return string.format("returned %d value(s): %s", #results - 1,
+        table.concat(parts, " "))
+end
+
+-- Why a layer placed nothing, one sample at a time.
+--
+-- Both placers reject every candidate while an offline reproduction of the
+-- same test over the same .hg2/.mat accepts ~99%. Narrowing that by hypothesis
+-- has cost several round trips, so this just prints each filter's input and
+-- verdict for a handful of points and lets the numbers say which one bites.
+local function DiagnoseLayer(profile, samples)
+    local random = NewRandom(profile.seed or 1)
+    local lines = {}
+    for attempt = 1, samples do
+        local radius = profile.radius * math.sqrt(random())
+        local angle = random() * math.pi * 2.0
+        local x = profile.center.x + math.cos(angle) * radius
+        local z = profile.center.z + math.sin(angle) * radius
+        local probe = SetVector(x, profile.center.y, z)
+
+        local okSample, height, normal = pcall(GetTerrainHeightAndNormal, probe)
+        local normalY, slope = nil, nil
+        if okSample and normal ~= nil then
+            local okY, value = pcall(function() return normal.y end)
+            if okY then normalY = value end
+            if type(normalY) == "number" then
+                local up = math.max(-1.0, math.min(1.0, normalY))
+                slope = math.acos(up) * 180.0 / math.pi
+            end
+        end
+        local material = MaterialAt(probe)
+        local wanted = profile.terrainTypes and
+            (material ~= nil and profile.terrainTypes[material] == true) or
+            (profile.terrainTypes == nil)
+
+        lines[#lines + 1] = string.format(
+            "(%.0f,%.0f) call=%s height=%s normal=%s normal.y=%s slope=%s material=%s typeOk=%s slopeOk=%s",
+            x, z, tostring(okSample), tostring(height), type(normal),
+            tostring(normalY),
+            slope and string.format("%.1f", slope) or "nil",
+            tostring(material), tostring(wanted),
+            tostring(slope ~= nil and slope <= (profile.slopeMax or 90.0)))
+    end
+    return lines
 end
 
 -- Used when CR's TerrainClutter is not reachable. Deliberately the same
@@ -526,10 +614,48 @@ function Start()
     end
     Note(string.format("spawn at (%.0f, %.0f) on %s", origin.x, origin.z,
         MATERIAL_NAMES[MaterialAt(origin) or -1] or "unknown terrain"))
+    Note("GetTerrainHeightAndNormal at spawn " .. DescribeTerrainApi(origin))
 
-    -- Along the player's facing, so the ladder is walked into rather than
-    -- hunted for. GetFront is guarded: a missing one should cost the
-    -- convenience, not the mission.
+    -- Direction for the ladder.
+    --
+    -- Facing is only a HINT. The spawn here looks straight down a wooded
+    -- corridor, and with terrainTypes restricted to grass that put all five
+    -- patches on ground the filter is obliged to reject -- five "no valid
+    -- terrain samples" and an empty field, with nothing actually wrong.
+    --
+    -- So score the candidate bearings by how much of the ladder footprint
+    -- lands on terrain the filter accepts, and only honour facing when it is
+    -- competitive. This keeps the bench working when the spawn, the terrain or
+    -- terrainTypes change, none of which should require re-aiming by hand.
+    local function ScoreDirection(fx, fz, distances)
+        local hits, total = 0, 0
+        for i = 1, #distances do
+            for offset = -1, 1 do
+                local along = distances[i]
+                local across = offset * 15.0
+                local x = origin.x + fx * along - fz * across
+                local z = origin.z + fz * along + fx * across
+                total = total + 1
+                local material = MaterialAt(SetVector(x, origin.y, z))
+                if material ~= nil and
+                    (allowed == nil or allowed[material] == true) then
+                    hits = hits + 1
+                end
+            end
+        end
+        return hits / math.max(1, total)
+    end
+
+    local scanDistances = {}
+    do
+        local first = Num("firstDistance", 70.0)
+        local spacing = Num("stepSpacing", 85.0)
+        local steps = math.max(1, math.min(12, Int("steps", 5)))
+        for index = 1, steps do
+            scanDistances[index] = first + (index - 1) * spacing
+        end
+    end
+
     local forward = { x = 1.0, z = 0.0 }
     if type(GetFront) == "function" then
         local okFront, front = pcall(GetFront, player)
@@ -538,6 +664,30 @@ function Start()
             if length > 0.001 then
                 forward = { x = front.x / length, z = front.z / length }
             end
+        end
+    end
+
+    if Int("aimAtAcceptableGround", 1) ~= 0 then
+        local facingScore = ScoreDirection(forward.x, forward.z, scanDistances)
+        local best, bestScore = forward, facingScore
+        for step = 0, 23 do
+            local angle = step * math.pi / 12.0
+            local fx, fz = math.cos(angle), math.sin(angle)
+            local score = ScoreDirection(fx, fz, scanDistances)
+            if score > bestScore then
+                best, bestScore = { x = fx, z = fz }, score
+            end
+        end
+        -- Prefer straight ahead when it is nearly as good: a ladder you have
+        -- to turn around to see is worse than a slightly patchier one in view.
+        if bestScore > facingScore + 0.05 then
+            Note(string.format(
+                "aimed away from facing: facing accepts %.0f percent of the ladder, chosen bearing accepts %.0f percent",
+                facingScore * 100.0, bestScore * 100.0))
+            forward = best
+        else
+            Note(string.format("using facing (accepts %.0f percent of the ladder)",
+                facingScore * 100.0))
         end
     end
 
@@ -579,9 +729,42 @@ function Start()
                 seed = 1000 + index,
             }
         end
+    elseif scenario == "closeup" then
+        -- Diagnostic scenario. Placement, the mesh, the material and the
+        -- shaders all report success while nothing appears on screen, so this
+        -- answers the two questions that separates in one launch:
+        --
+        --   is it drawn at all?   three fat patches at arm's length, at a
+        --                         scale that cannot be missed
+        --   is it buried?         the same three lifted 0.02, 3 and 10 units
+        --                         above the terrain height the engine reports
+        --
+        -- If none appear, the problem is the material or the render path. If
+        -- the lifted ones appear and the flush one does not, the height datum
+        -- the sampler returns is not the one the terrain renders at.
+        local lifts = { 0.02, 3.0, 10.0 }
+        for index = 1, #lifts do
+            local across = (index - 2) * 34.0
+            plan[index] = {
+                name = string.format("lcbveg_closeup_%d", index),
+                center = SetVector(origin.x + forward.x * 35.0 - forward.z * across,
+                                   origin.y,
+                                   origin.z + forward.z * 35.0 + forward.x * across),
+                radius = 14.0,
+                density = 1.2,
+                seed = 2000 + index,
+                baseOffset = lifts[index],
+                minScale = Num("closeupScale", 3.0),
+                maxScale = Num("closeupScale", 3.0) * 1.25,
+                -- No terrain filter: this is asking whether anything renders,
+                -- and a type rejection here would confuse that answer with a
+                -- placement one.
+                terrainTypes = false,
+            }
+        end
     else
         state.refusal = string.format(
-            "unknown scenario %s, expected single, ladder or off", scenario)
+            "unknown scenario %s, expected ladder, single, closeup or off", scenario)
         return
     end
 
@@ -594,7 +777,9 @@ function Start()
         end
         -- Each profile gets its own copy: the CR path rewrites terrainTypes
         -- from a set into an array, which would corrupt the next patch.
-        if allowed then
+        if profile.terrainTypes == false then
+            profile.terrainTypes = nil          -- explicitly unfiltered
+        elseif allowed then
             local copy = {}
             for value in pairs(allowed) do
                 copy[value] = true
@@ -615,10 +800,28 @@ function Start()
         -- CR's SampleTerrain finds no GetTerrainHeightAndNormal and rejects
         -- every candidate. The log says plainly which one produced the grass.
         local usedFallback = false
+        local fallbackError = nil
         if not ok and placer ~= BuildLayerDirect then
             local retryOk, retryInfo = BuildLayerDirect(profile)
             if retryOk then
                 ok, info, usedFallback = retryOk, retryInfo, true
+            else
+                -- Keep it. Discarding the second placer's error the first time
+                -- round meant the log could not distinguish "CR failed and the
+                -- fallback was never tried" from "both failed", which is
+                -- exactly the distinction that mattered.
+                fallbackError = tostring(retryInfo)
+            end
+        end
+
+        -- Both placers refused this layer. Dump a few samples once, for the
+        -- first such layer only: five identical dumps say nothing the first
+        -- does not.
+        if not ok and not state.diagnosed then
+            state.diagnosed = true
+            local lines = DiagnoseLayer(profile, 6)
+            for i = 1, #lines do
+                Note("sample " .. i .. ": " .. lines[i])
             end
         end
 
@@ -629,6 +832,7 @@ function Start()
             center = profile.center,
             count = 0,
             fallback = usedFallback,
+            fallbackError = fallbackError,
         }
         if ok then
             record.count = (type(info) == "table" and info.instanceCount) or 0
@@ -663,8 +867,11 @@ function Update(dt)
         local layer = state.layers[index]
         total = total + layer.count
         if layer.error then
-            Log(string.format("  %-20s density=%.3f radius=%.0f FAILED: %s",
-                layer.name, layer.density, layer.radius, layer.error))
+            Log(string.format("  %-20s density=%.3f radius=%.0f FAILED: %s%s",
+                layer.name, layer.density, layer.radius, layer.error,
+                layer.fallbackError and
+                    ("  | built-in placer also failed: " .. layer.fallbackError) or
+                    "  | built-in placer was not tried"))
         else
             -- Spacing is the number that actually predicts whether it reads as
             -- ground cover. Density is the knob; spacing is the outcome.
