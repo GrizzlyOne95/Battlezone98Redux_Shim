@@ -55,6 +55,16 @@ namespace BZROpenShim::BznFilenameIdentity
         return true;
     }
 
+    inline std::string_view Stem(std::string_view basename)
+    {
+        if (basename.size() >= 4 &&
+            EqualAsciiCaseInsensitive(basename.substr(basename.size() - 4), ".bzn"))
+        {
+            return basename.substr(0, basename.size() - 4);
+        }
+        return basename;
+    }
+
     inline Result Compare(std::string_view openedPath, std::string_view embeddedMsnFilename)
     {
         Result result;
@@ -72,6 +82,30 @@ namespace BZROpenShim::BznFilenameIdentity
         {
             result.matches =
                 EqualAsciiCaseInsensitive(result.openedBasename, embeddedMsnFilename);
+        }
+
+        return result;
+    }
+
+    inline Result CompareTerrainName(std::string_view openedPath, std::string_view terrainName)
+    {
+        Result result;
+        result.openedBasename = Stem(BaseName(openedPath));
+
+        // This is deliberately a relationship hint, not a validity rule.
+        // Battlezone permits a mission BZN to reuse terrain authored under a
+        // different name, so callers must not promote a mismatch to a
+        // structural error or silently rewrite TerrainName.
+        result.comparable =
+            !result.openedBasename.empty() &&
+            !terrainName.empty() &&
+            IsAscii(result.openedBasename) &&
+            IsAscii(terrainName);
+
+        if (result.comparable)
+        {
+            result.matches =
+                EqualAsciiCaseInsensitive(result.openedBasename, terrainName);
         }
 
         return result;
