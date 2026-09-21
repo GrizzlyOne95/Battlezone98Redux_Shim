@@ -44,6 +44,14 @@ namespace
         return out;
     }
 
+    size_t FindLine(const std::vector<std::string>& lines, const std::string& value)
+    {
+        const auto it = std::find(lines.begin(), lines.end(), value);
+        if (it == lines.end())
+            return static_cast<size_t>(-1);
+        return static_cast<size_t>(std::distance(lines.begin(), it));
+    }
+
     std::vector<std::string> SampleMission()
     {
         return {
@@ -99,6 +107,11 @@ namespace
             "0",
             "pointCount [1] =",
             "1",
+            "points [1] =",
+            "  x [1] =",
+            "10",
+            "  z [1] =",
+            "20",
             "[AiPath]",
             "old_ptr = 000000B9",
             "size [1] =",
@@ -106,6 +119,11 @@ namespace
             "label = cca_base",
             "pointCount [1] =",
             "1",
+            "points [1] =",
+            "  x [1] =",
+            "30",
+            "  z [1] =",
+            "40",
         };
     }
 }
@@ -144,7 +162,9 @@ int main()
         // Lines 24..31 sit inside object #1 (header at index 19), which is the
         // same relationship the real file had: the run began in the position
         // block of the object the engine then died on.
-        const std::string data = Build(SampleMission(), 24, 32);
+        const std::vector<std::string> lines = SampleMission();
+        const size_t lfBegin = FindLine(lines, "pos [1] =");
+        const std::string data = Build(lines, lfBegin, lfBegin + 8);
         const Result r = Analyze(data);
 
         Check(r.endings.unsafe(), "mixed: detected as unsafe");
@@ -152,7 +172,8 @@ int main()
         Check(r.endings.bareLf == 8, "mixed: counted the bare-LF lines");
         Check(r.endings.bareCr == 0, "mixed: no bare CR");
         Check(r.endings.crlf > 0, "mixed: still counted the CRLF lines");
-        Check(r.endings.firstUnsafeLine == 25, "mixed: located the first unsafe terminator (1-based)");
+        Check(r.endings.firstUnsafeLine == lfBegin + 1,
+              "mixed: located the first unsafe terminator (1-based)");
         Check(r.unsafeEnclosingObject == 1, "mixed: named the enclosing GameObject");
         Check(r.objects[r.unsafeEnclosingObject].prjId == "sfield",
               "mixed: enclosing object carries its ODF for the report");
@@ -185,10 +206,11 @@ int main()
     {
         const std::vector<std::string> lines = SampleMission();
         std::string data;
+        const size_t crBegin = FindLine(lines, "pos [1] =");
         for (size_t i = 0; i < lines.size(); ++i)
         {
             data += lines[i];
-            data += (i >= 24 && i < 26) ? "\r" : "\r\n";
+            data += (i >= crBegin && i < crBegin + 2) ? "\r" : "\r\n";
         }
 
         const Result r = Analyze(data);
@@ -196,7 +218,7 @@ int main()
         Check(r.endings.mixed(), "bare CR: mixed with CRLF");
         Check(r.endings.bareCr == 2, "bare CR: counted");
         Check(r.endings.bareLf == 0, "bare CR: no bare LF");
-        Check(r.endings.firstUnsafeLine == 25, "bare CR: first unsafe terminator located");
+        Check(r.endings.firstUnsafeLine == crBegin + 1, "bare CR: first unsafe terminator located");
         Check(r.unsafeEnclosingObject == 1, "bare CR: enclosing GameObject identified");
         Check(r.objects.size() == 3, "bare CR: parser still recovers all objects for diagnostics");
     }
@@ -204,7 +226,7 @@ int main()
     // --- GameObject count disagreeing with the blocks ----------------------
     {
         std::vector<std::string> lines = SampleMission();
-        lines[9] = "2";  // declared object count; the file still has 3 blocks
+        lines[FindLine(lines, "3")] = "2";  // declared object count; the file still has 3 blocks
         const Result r = Analyze(Build(lines));
 
         bool found = false;
@@ -214,7 +236,7 @@ int main()
     }
     {
         std::vector<std::string> lines = SampleMission();
-        lines[9] = "5";  // over-count is equally dangerous: LoadAll will read into the tail
+        lines[FindLine(lines, "3")] = "5";  // over-count is equally dangerous: LoadAll will read into the tail
         const Result r = Analyze(Build(lines));
 
         bool found = false;
@@ -288,10 +310,45 @@ int main()
         Check(found, "AOI count: under-block mismatch reported");
     }
 
+    // --- AiPath pointCount and serialized points must agree -----------------
+    {
+        const Result r = Analyze(Build(SampleMission()));
+        Check(r.paths.size() == 2, "path points: two path records captured");
+        Check(r.paths[0].pointCount == "1", "path points: pointCount captured");
+        Check(r.paths[0].declaredPoints == 1, "path points: points array count captured");
+        Check(r.paths[0].xComponents == 1 && r.paths[0].zComponents == 1,
+              "path points: complete coordinate pair counted");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstPointCount = FindLine(lines, "pointCount [1] =");
+        lines[firstPointCount + 1] = "2";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("AiPath #0 pointCount says 2 but points array declares 1") !=
+                                 std::string::npos;
+        Check(found, "path points: pointCount mismatch reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstPoints = FindLine(lines, "points [1] =");
+        lines[firstPoints] = "points [2] =";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("AiPath #0 points array declares 2 but file contains 1") !=
+                                 std::string::npos;
+        Check(found, "path points: serialized pair mismatch reported");
+    }
+
     // --- path count disagreeing with the blocks -----------------------------
     {
         std::vector<std::string> lines = SampleMission();
-        lines[45] = "5";  // the [AiPaths] count value; the file still has 2 blocks
+        const size_t aiPaths = FindLine(lines, "[AiPaths]");
+        lines[aiPaths + 2] = "5";  // the [AiPaths] count value; the file still has 2 blocks
         const std::string data = Build(lines);
         const Result r = Analyze(data);
 
@@ -304,7 +361,8 @@ int main()
     // --- duplicate labels ----------------------------------------------------
     {
         std::vector<std::string> lines = SampleMission();
-        lines[40] = "label = sfield1_scrapfield";  // clash with object #1
+        lines[FindLine(lines, "label = avfigh0_wingman")] =
+            "label = sfield1_scrapfield";  // clash with object #1
         const std::string data = Build(lines);
         const Result r = Analyze(data);
 
@@ -317,7 +375,8 @@ int main()
     // --- a pointer reference that resolves to nothing ------------------------
     {
         std::vector<std::string> lines = SampleMission();
-        lines[42] = "sObject = 0000007A";  // no obj_addr or old_ptr defines 7A
+        lines[FindLine(lines, "sObject = 00000002")] =
+            "sObject = 0000007A";  // no obj_addr or old_ptr defines 7A
         const std::string data = Build(lines);
         const Result r = Analyze(data);
 
@@ -330,7 +389,7 @@ int main()
     // --- a null sObject is not a dangling reference --------------------------
     {
         std::vector<std::string> lines = SampleMission();
-        lines[42] = "sObject = 00000000";
+        lines[FindLine(lines, "sObject = 00000002")] = "sObject = 00000000";
         const std::string data = Build(lines);
         const Result r = Analyze(data);
         for (const std::string& p : r.problems)
