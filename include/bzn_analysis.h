@@ -333,7 +333,6 @@ namespace BZROpenShim::BznAnalysis
                 result.endings.firstUnsafeLine = i + 1;
         }
 
-        std::unordered_set<std::string> ids;
         std::vector<std::string> sObjectRefs;
         std::unordered_map<std::string, int> labelCounts;
         std::unordered_map<std::string, int> seqCounts;
@@ -461,12 +460,7 @@ namespace BZROpenShim::BznAnalysis
             else if (key == "seq_count" && result.seqCount.empty())
                 result.seqCount = value;
 
-            if (key == "obj_addr" || key == "old_ptr")
-            {
-                if (!value.empty() && !ids.insert(value).second)
-                    result.problems.push_back("duplicate pointer id " + value);
-            }
-            else if (key == "sObject" && !value.empty())
+            if (key == "sObject" && !value.empty())
                 sObjectRefs.push_back(value);
 
             if (currentAoi && key == "undefptr" && currentAoi->pathRef.empty())
@@ -674,20 +668,65 @@ namespace BZROpenShim::BznAnalysis
                 result.problems.push_back("duplicate seqno " + entry.first + " on " +
                                           std::to_string(entry.second) + " objects");
         }
+        std::unordered_map<std::string, size_t> objectIdOwners;
+        for (const ObjectRecord& rec : result.objects)
+        {
+            if (rec.objAddr.empty())
+                continue;  // missing obj_addr is handled by the envelope check
+
+            if (rec.objAddr == "00000000")
+            {
+                result.problems.push_back(
+                    "GameObject #" + std::to_string(rec.index) +
+                    " obj_addr defines null pointer id 00000000");
+                continue;
+            }
+
+            const auto inserted = objectIdOwners.emplace(rec.objAddr, rec.index);
+            if (!inserted.second)
+            {
+                result.problems.push_back(
+                    "duplicate GameObject obj_addr " + rec.objAddr +
+                    " on objects #" + std::to_string(inserted.first->second) +
+                    " and #" + std::to_string(rec.index));
+            }
+        }
+
         for (const std::string& ref : sObjectRefs)
         {
             if (ref == "00000000")
                 continue;
-            if (ids.find(ref) == ids.end())
-                result.problems.push_back("sObject references undefined id " + ref);
+            if (objectIdOwners.find(ref) == objectIdOwners.end())
+                result.problems.push_back("sObject references undefined GameObject obj_addr " + ref);
+        }
+
+        std::unordered_map<std::string, size_t> aiPathIdOwners;
+        for (const PathRecord& path : result.paths)
+        {
+            if (path.oldPtr.empty())
+                continue;
+
+            if (path.oldPtr == "00000000")
+            {
+                result.problems.push_back(
+                    "AiPath #" + std::to_string(path.index) +
+                    " old_ptr defines null pointer id 00000000");
+                continue;
+            }
+
+            const auto inserted = aiPathIdOwners.emplace(path.oldPtr, path.index);
+            if (!inserted.second)
+            {
+                result.problems.push_back(
+                    "duplicate AiPath old_ptr " + path.oldPtr +
+                    " on paths #" + std::to_string(inserted.first->second) +
+                    " and #" + std::to_string(path.index));
+            }
         }
 
         std::unordered_set<std::string> aiPathIds;
-        for (const PathRecord& path : result.paths)
-        {
-            if (!path.oldPtr.empty() && path.oldPtr != "00000000")
-                aiPathIds.insert(path.oldPtr);
-        }
+        for (const auto& entry : aiPathIdOwners)
+            aiPathIds.insert(entry.first);
         for (const AoiRecord& aoi : result.aois)
         {
             if (aoi.pathRef.empty() || aoi.pathRef == "00000000")
