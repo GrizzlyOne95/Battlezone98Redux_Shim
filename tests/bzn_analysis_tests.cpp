@@ -520,7 +520,9 @@ int main()
 
         bool found = false;
         for (const std::string& p : r.problems)
-            found = found || p.find("sObject references undefined id 0000007A") != std::string::npos;
+            found = found ||
+                p.find("sObject references undefined GameObject obj_addr 0000007A") !=
+                    std::string::npos;
         Check(found, "dangling pointer: reported");
     }
 
