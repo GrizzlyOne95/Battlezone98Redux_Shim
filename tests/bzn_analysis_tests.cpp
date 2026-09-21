@@ -571,15 +571,27 @@ int main()
         size_t rightX = transform;
         while (rightX < lines.size() && lines[rightX] != "  right_x [1] =")
             ++rightX;
-        lines[rightX + 1] = "-inf";
+        lines[rightX + 1] = "-1.#INF";
         const Result r = Analyze(Build(lines));
 
         bool found = false;
         for (const std::string& p : r.problems)
             found = found ||
-                p.find("GameObject #0 transform.right_x is non-finite: -inf") !=
+                p.find("GameObject #0 transform.right_x is non-finite: -1.#INF") !=
                     std::string::npos;
-        Check(found, "finite floats: infinite transform component reported");
+        Check(found, "finite floats: legacy MSVC infinite transform reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "100")] = "1e9999";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 pos.x is non-finite: 1e9999") !=
+                    std::string::npos;
+        Check(found, "finite floats: numeric overflow to infinity reported");
     }
     {
         std::vector<std::string> lines = SampleMission();
