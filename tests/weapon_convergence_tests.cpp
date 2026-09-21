@@ -463,10 +463,15 @@ namespace
                 SolveResult::Converged,
             "Walker solver refused target B range");
 
-        RequireNear(AngleBetweenDegrees(Front(a.mountLocal), Front(b.mountLocal)),
-            0.0, 0.01,
-            "Walker convergence became dependent on target world bearing");
-        RequireNear(a.mountLocal.frontY, 0.0, 1e-6,
+        const Vec3 frontA = Front(a.mountLocal);
+        const Vec3 frontB = Front(b.mountLocal);
+        RequireNear(frontA.x, frontB.x, 1e-7,
+            "Walker convergence front.x became dependent on target world bearing");
+        RequireNear(frontA.y, frontB.y, 1e-7,
+            "Walker convergence front.y became dependent on target world bearing");
+        RequireNear(frontA.z, frontB.z, 1e-7,
+            "Walker convergence front.z became dependent on target world bearing");
+        RequireNear(frontA.y, 0.0, 1e-6,
             "Walker convergence added target elevation to the correction");
     }
 
