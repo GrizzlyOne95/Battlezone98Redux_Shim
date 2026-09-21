@@ -193,6 +193,10 @@ namespace BZROpenShim
                 BznFilenameIdentity::Compare(openedName, report.missionFilename);
             const bool missionFilenameMismatch =
                 report.ascii && filenameIdentity.comparable && !filenameIdentity.matches;
+            const auto terrainRelationship =
+                BznFilenameIdentity::CompareTerrainName(openedName, report.terrainName);
+            const bool terrainNameDiffers =
+                report.ascii && terrainRelationship.comparable && !terrainRelationship.matches;
 
             Log(L"[BZNLOAD] %s: %zu bytes, %zu lines, format=%hs version=%hs terrain=%hs msn_filename=%hs\n",
                 name, data.size(), report.lineCount,
@@ -232,6 +236,16 @@ namespace BZROpenShim
                 Log(L"[BZNLOAD] *** Redux overwrites its mission-name global from msn_filename during load; "
                     L"mission Lua lookup later derives the companion .lua name from that global.\n");
                 Log(L"[BZNLOAD] *** TerrainName is independent and may legitimately differ; it is not part of this check.\n");
+            }
+
+            if (terrainNameDiffers)
+            {
+                Log(L"[BZNLOAD] note: %s stem='%hs' differs from TerrainName='%hs'\n",
+                    name, terrainRelationship.openedBasename.data(), report.terrainName.c_str());
+                Log(L"[BZNLOAD] note: this can be intentional when a mission reuses existing terrain; "
+                    L"it is not a structural BZN error and is never auto-fixed.\n");
+                Log(L"[BZNLOAD] note: TerrainName selects the terrain resource identity; "
+                    L"verify that terrain payload if the mission fails to load.\n");
             }
 
             for (const std::string& problem : report.problems)
