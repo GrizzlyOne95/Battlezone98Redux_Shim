@@ -595,6 +595,32 @@ int main()
         Check(!trailing,
               "trailing data: EOF check suppressed when AiPath count is already invalid");
     }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t aiPaths = FindLine(lines, "[AiPaths]");
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(aiPaths + 3), lines.end());
+        lines[aiPaths + 2] = "0";
+        lines.push_back("garbage = 123");
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("unexpected trailing data after final AiPath") != std::string::npos;
+        Check(found, "trailing data: zero-path mission anchors EOF after count");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[3] = "true";  // binarySave
+        lines.push_back("extra_binary_payload_marker");
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("unexpected trailing data") != std::string::npos;
+        Check(!found,
+              "trailing data: binary BZN is excluded from ASCII EOF validation");
+    }
 
     // --- positions, path points, and transforms must remain finite -----------
     {
