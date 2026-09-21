@@ -81,38 +81,11 @@ foreach ($required in @($trnSource, $payloadSource)) {
     }
 }
 
-# The BZN is ASCII with CRLF line endings and names itself twice. Both lines
-# have to follow the rename or the engine loads lcbench's terrain under the
-# new mission -- which looks exactly like the world swap silently not working.
-# Rewritten as bytes: a hand-edited BZN that picks up one bare LF passes
-# git status and then kills the ASCII parser mid-object.
-function Set-BznIdentity {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$Basename
-    )
-
-    $bytes = [System.IO.File]::ReadAllBytes($Path)
-    $text = [System.Text.Encoding]::ASCII.GetString($bytes)
-
-    $text = [regex]::Replace($text, '(?m)^msn_filename = \S+', "msn_filename = $Basename.bzn")
-    $text = [regex]::Replace($text, '(?m)^TerrainName = \S+', "TerrainName = $Basename")
-
-    $rewritten = [System.Text.Encoding]::ASCII.GetBytes($text)
-    [System.IO.File]::WriteAllBytes($Path, $rewritten)
-
-    # Prove both fields took, and that nothing acquired a bare LF.
-    $check = [System.Text.Encoding]::ASCII.GetString(
-        [System.IO.File]::ReadAllBytes($Path))
-    if ($check -notmatch [regex]::Escape("msn_filename = $Basename.bzn") -or
-        $check -notmatch [regex]::Escape("TerrainName = $Basename")) {
-        throw "BZN identity rewrite did not take for $Basename"
-    }
-    $bareLf = ([regex]::Matches($check, "(?<!`r)`n")).Count
-    if ($bareLf -gt 0) {
-        throw "BZN $Basename gained $bareLf bare LF line ending(s)"
-    }
-}
+# Set-BznIdentity moved to scripts\BznIdentity.ps1 when a second installer
+# needed it. A .bzn names itself twice and both lines must follow a rename,
+# or the engine loads lcbench's terrain under the new mission -- which looks
+# exactly like the world swap silently not working.
+. (Join-Path $PSScriptRoot "BznIdentity.ps1")
 
 # Time= is the only value this script is allowed to touch in a .trn. Rewriting
 # it in place keeps everything else byte-identical to the committed fixture, so
