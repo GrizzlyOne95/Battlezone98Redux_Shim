@@ -240,8 +240,9 @@ namespace BZROpenShim
 
             if (terrainNameDiffers)
             {
+                const std::string openedStem(terrainRelationship.openedBasename);
                 Log(L"[BZNLOAD] note: %s stem='%hs' differs from TerrainName='%hs'\n",
-                    name, terrainRelationship.openedBasename.data(), report.terrainName.c_str());
+                    name, openedStem.c_str(), report.terrainName.c_str());
                 Log(L"[BZNLOAD] note: this can be intentional when a mission reuses existing terrain; "
                     L"it is not a structural BZN error and is never auto-fixed.\n");
                 Log(L"[BZNLOAD] note: TerrainName selects the terrain resource identity; "
