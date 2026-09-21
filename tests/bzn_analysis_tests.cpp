@@ -340,28 +340,36 @@ int main()
                   "object envelope: clean fixture has every required field");
     }
     {
-        std::vector<std::string> lines = SampleMission();
-        lines[FindLine(lines, "isUser [1] =")] = "missingIsUser [1] =";
-        const Result r = Analyze(Build(lines));
+        struct MissingCase
+        {
+            const char* serializedLine;
+            const char* fieldName;
+        };
+        const MissingCase cases[] = {
+            {"PrjID [1] =", "PrjID"},
+            {"seqno [1] =", "seqno"},
+            {"pos [1] =", "pos"},
+            {"team [1] =", "team"},
+            {"label = player-1_hover", "label"},
+            {"isUser [1] =", "isUser"},
+            {"obj_addr = 00000001", "obj_addr"},
+            {"transform [1] =", "transform"},
+        };
 
-        bool found = false;
-        for (const std::string& p : r.problems)
-            found = found || (p.find("GameObject #0 is missing required envelope field(s):") !=
-                                  std::string::npos &&
-                              p.find("isUser") != std::string::npos);
-        Check(found, "object envelope: missing isUser reported with object index");
-    }
-    {
-        std::vector<std::string> lines = SampleMission();
-        lines[FindLine(lines, "transform [1] =")] = "missingTransform [1] =";
-        const Result r = Analyze(Build(lines));
+        for (const MissingCase& test : cases)
+        {
+            std::vector<std::string> lines = SampleMission();
+            lines[FindLine(lines, test.serializedLine)] = "missing_envelope_field = 0";
+            const Result r = Analyze(Build(lines));
 
-        bool found = false;
-        for (const std::string& p : r.problems)
-            found = found || (p.find("GameObject #0 is missing required envelope field(s):") !=
-                                  std::string::npos &&
-                              p.find("transform") != std::string::npos);
-        Check(found, "object envelope: missing transform reported for modern BZN");
+            bool found = false;
+            for (const std::string& p : r.problems)
+                found = found ||
+                    (p.find("GameObject #0 is missing required envelope field(s):") !=
+                         std::string::npos &&
+                     p.find(test.fieldName) != std::string::npos);
+            Check(found, test.fieldName);
+        }
     }
     {
         std::vector<std::string> lines = SampleMission();
