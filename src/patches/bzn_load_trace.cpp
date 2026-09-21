@@ -11,6 +11,7 @@
 #include "bzn_load_trace.h"
 
 #include "bzn_analysis.h"
+#include "bzn_filename_identity.h"
 #include "bzr_options_ui.h"
 #include "patcher.h"
 
@@ -87,6 +88,29 @@ namespace BZROpenShim
             return slash ? slash + 1 : path;
         }
 
+        std::string NarrowAcp(const wchar_t* value)
+        {
+            if (!value || !value[0])
+                return {};
+
+            const int bytes = WideCharToMultiByte(
+                CP_ACP, 0, value, -1, nullptr, 0, nullptr, nullptr);
+            if (bytes <= 1)
+                return {};
+
+            std::string out(static_cast<size_t>(bytes), '\0');
+            BOOL usedDefaultChar = FALSE;
+            if (WideCharToMultiByte(
+                    CP_ACP, 0, value, -1, out.data(), bytes, nullptr, &usedDefaultChar) <= 0 ||
+                usedDefaultChar)
+            {
+                return {};
+            }
+
+            out.resize(static_cast<size_t>(bytes) - 1);
+            return out;
+        }
+
         bool ReadWholeFile(const wchar_t* path, std::vector<char>& out)
         {
             const HANDLE handle = CreateFileW(path, GENERIC_READ,
@@ -125,39 +149,38 @@ namespace BZROpenShim
         {
             const auto& endings = report.endings;
 
-            if (!endings.mixed())
+            if (!endings.unsafe())
             {
-                Log(L"[BZNLOAD] %s line endings uniform (%zu %hs)\n",
-                    name,
-                    endings.crlf ? endings.crlf : endings.bareLf,
-                    endings.crlf ? "CRLF" : "LF");
+                Log(L"[BZNLOAD] %s line endings safe (%zu CRLF lines)\n",
+                    name, endings.crlf);
                 return;
             }
 
-            Log(L"[BZNLOAD] *** %s HAS MIXED LINE ENDINGS: %zu CRLF lines, %zu bare-LF lines\n",
-                name, endings.crlf, endings.bareLf);
-            Log(L"[BZNLOAD] *** The engine reads this file as CRLF lines, so a bare-LF run collapses\n");
-            Log(L"[BZNLOAD] *** into one unparseable line and object loading stops there.\n");
+            Log(L"[BZNLOAD] *** %s HAS %hs LINE ENDINGS: %zu CRLF lines, %zu bare-LF lines, %zu bare-CR lines\n",
+                name,
+                endings.mixed() ? "MIXED/UNSAFE" : "UNSAFE",
+                endings.crlf, endings.bareLf, endings.bareCr);
+            Log(L"[BZNLOAD] *** ASCII BZN files must use CRLF exclusively. Bare LF or bare CR terminators\n");
+            Log(L"[BZNLOAD] *** can collapse or corrupt the engine's line-oriented parse and abort mission loading.\n");
 
-            if (report.mixedEnclosingObject != BznAnalysis::kNone)
+            if (report.unsafeEnclosingObject != BznAnalysis::kNone)
             {
-                const auto& rec = report.objects[report.mixedEnclosingObject];
-                Log(L"[BZNLOAD] *** First bare LF is line %zu, inside GameObject #%zu "
-                    L"(PrjID=%hs label=%hs). Expect the load to stop at obj #%zu.\n",
-                    endings.firstBareLine, rec.index,
+                const auto& rec = report.objects[report.unsafeEnclosingObject];
+                Log(L"[BZNLOAD] *** First non-CRLF terminator is line %zu, inside GameObject #%zu "
+                    L"(PrjID=%hs label=%hs). Expect loading to fail at or after obj #%zu.\n",
+                    endings.firstUnsafeLine, rec.index,
                     rec.prjId.empty() ? "?" : rec.prjId.c_str(),
                     rec.label.empty() ? "?" : rec.label.c_str(),
                     rec.index);
             }
             else
             {
-                Log(L"[BZNLOAD] *** First bare LF is line %zu, before the first GameObject.\n",
-                    endings.firstBareLine);
+                Log(L"[BZNLOAD] *** First non-CRLF terminator is line %zu, before the first GameObject.\n",
+                    endings.firstUnsafeLine);
             }
 
-            Log(L"[BZNLOAD] *** Fix: rewrite with uniform CRLF. Under git the file may still report\n");
-            Log(L"[BZNLOAD] *** as unmodified, because autocrlf normalizes it to the same blob --\n");
-            Log(L"[BZNLOAD] *** restore it with: rm <file> && git checkout -- <file>\n");
+            Log(L"[BZNLOAD] *** Fix: rewrite the entire ASCII BZN using uniform CRLF line endings.\n");
+            Log(L"[BZNLOAD] *** Git may still report the file clean because autocrlf can normalize the bytes.\n");
         }
 
         void EmitReport(const wchar_t* path, const std::vector<char>& data)
@@ -165,12 +188,25 @@ namespace BZROpenShim
             const wchar_t* name = BaseName(path);
             const BznAnalysis::Result report =
                 BznAnalysis::Analyze(std::string_view(data.data(), data.size()));
+            const std::string openedName = NarrowAcp(name);
+            const auto filenameIdentity =
+                BznFilenameIdentity::Compare(openedName, report.missionFilename);
+            const bool missionFilenameMismatch =
+                report.ascii && filenameIdentity.comparable && !filenameIdentity.matches;
+            const auto terrainRelationship =
+                BznFilenameIdentity::CompareTerrainName(openedName, report.terrainName);
+            const bool terrainNameDiffers =
+                report.ascii && terrainRelationship.comparable && !terrainRelationship.matches;
 
-            Log(L"[BZNLOAD] %s: %zu bytes, %zu lines, format=%hs version=%hs terrain=%hs\n",
+            Log(L"[BZNLOAD] %s: %zu bytes, %zu lines, format=%hs version=%hs terrain=%hs msn_filename=%hs\n",
                 name, data.size(), report.lineCount,
                 report.ascii ? "ascii" : "binary/unknown",
                 report.version.empty() ? "?" : report.version.c_str(),
-                report.terrainName.empty() ? "?" : report.terrainName.c_str());
+                report.terrainName.empty() ? "?" : report.terrainName.c_str(),
+                report.missionFilename.empty() ? "?" : report.missionFilename.c_str());
+
+            for (const std::string& problem : report.byteProblems)
+                Log(L"[BZNLOAD] *** %s: %hs\n", name, problem.c_str());
 
             if (!report.ascii)
             {
@@ -180,17 +216,44 @@ namespace BZROpenShim
                 return;
             }
 
-            Log(L"[BZNLOAD] %s: %zu GameObject blocks, %zu AiPath blocks (declared %hs), seq_count=%hs\n",
-                name, report.objects.size(), report.pathBlocks,
+            Log(L"[BZNLOAD] %s: %zu GameObject blocks (declared %hs), %zu AOI blocks (declared %hs), "
+                L"%zu AiPath blocks (declared %hs), seq_count=%hs max_seqno=%ld\n",
+                name, report.objects.size(),
+                report.declaredObjectCount.empty() ? "?" : report.declaredObjectCount.c_str(),
+                report.aoiBlocks,
+                report.declaredAoiCount.empty() ? "?" : report.declaredAoiCount.c_str(),
+                report.pathBlocks,
                 report.declaredPathCount.empty() ? "?" : report.declaredPathCount.c_str(),
-                report.seqCount.empty() ? "?" : report.seqCount.c_str());
+                report.seqCount.empty() ? "?" : report.seqCount.c_str(),
+                report.maxObjectSeqno);
 
             ReportLineEndings(report, name);
+
+            if (missionFilenameMismatch)
+            {
+                Log(L"[BZNLOAD] *** %s: embedded msn_filename='%hs' differs from opened BZN basename '%hs'\n",
+                    name, report.missionFilename.c_str(), openedName.c_str());
+                Log(L"[BZNLOAD] *** Redux overwrites its mission-name global from msn_filename during load; "
+                    L"mission Lua lookup later derives the companion .lua name from that global.\n");
+                Log(L"[BZNLOAD] *** TerrainName is independent and may legitimately differ; it is not part of this check.\n");
+            }
+
+            if (terrainNameDiffers)
+            {
+                const std::string openedStem(terrainRelationship.openedBasename);
+                Log(L"[BZNLOAD] note: %s stem='%hs' differs from TerrainName='%hs'\n",
+                    name, openedStem.c_str(), report.terrainName.c_str());
+                Log(L"[BZNLOAD] note: this can be intentional when a mission reuses existing terrain; "
+                    L"it is not a structural BZN error and is never auto-fixed.\n");
+                Log(L"[BZNLOAD] note: TerrainName selects the terrain resource identity; "
+                    L"verify that terrain payload if the mission fails to load.\n");
+            }
 
             for (const std::string& problem : report.problems)
                 Log(L"[BZNLOAD] *** %s: %hs\n", name, problem.c_str());
 
-            if (report.problems.empty() && !report.endings.mixed())
+            if (report.problems.empty() && report.byteProblems.empty() &&
+                !report.endings.unsafe() && !missionFilenameMismatch)
                 Log(L"[BZNLOAD] %s structural checks passed\n", name);
 
             if (!g_Verbose)
