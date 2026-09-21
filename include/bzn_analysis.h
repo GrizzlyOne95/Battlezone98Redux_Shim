@@ -70,6 +70,7 @@ namespace BZROpenShim::BznAnalysis
         std::string version;
         std::string terrainName;
         std::string seqCount;
+        std::string declaredObjectCount;
         std::string declaredPathCount;
         size_t pathBlocks = 0;
         size_t lineCount = 0;
@@ -219,6 +220,7 @@ namespace BZROpenShim::BznAnalysis
         std::unordered_map<std::string, int> seqCounts;
 
         ObjectRecord* current = nullptr;
+        bool seenFirstObject = false;
         bool inPaths = false;
         bool expectPathCount = false;
 
@@ -231,6 +233,7 @@ namespace BZROpenShim::BznAnalysis
 
             if (IsSection(text, "GameObject"))
             {
+                seenFirstObject = true;
                 ObjectRecord rec;
                 rec.index = result.objects.size();
                 rec.headerLine = i + 1;
@@ -267,7 +270,14 @@ namespace BZROpenShim::BznAnalysis
                 value.assign(Trim(following));
             }
 
-            if (inPaths && expectPathCount && key == "count")
+            if (!seenFirstObject && result.declaredObjectCount.empty() && key == "size")
+            {
+                // GameObject::SaveAll writes the object count immediately before
+                // the first [GameObject]. LoadAll trusts this count to decide
+                // exactly how many object records to consume.
+                result.declaredObjectCount = value;
+            }
+            else if (inPaths && expectPathCount && key == "count")
             {
                 result.declaredPathCount = value;
                 expectPathCount = false;
@@ -347,6 +357,17 @@ namespace BZROpenShim::BznAnalysis
                 continue;
             if (ids.find(ref) == ids.end())
                 result.problems.push_back("sObject references undefined id " + ref);
+        }
+
+        if (!result.declaredObjectCount.empty())
+        {
+            const long declared = std::strtol(result.declaredObjectCount.c_str(), nullptr, 10);
+            if (declared >= 0 && static_cast<size_t>(declared) != result.objects.size())
+            {
+                result.problems.push_back("GameObject size says " + result.declaredObjectCount +
+                                          " but the file has " + std::to_string(result.objects.size()) +
+                                          " [GameObject] blocks");
+            }
         }
 
         if (!result.declaredPathCount.empty())
