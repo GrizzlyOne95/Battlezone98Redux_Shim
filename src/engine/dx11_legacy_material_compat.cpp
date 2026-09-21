@@ -74,6 +74,17 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             { "simple_one_tex_vertex", "OSE_Compat_SimpleOneTex_vertex", "OSE_Compat_SimpleOneTex_fragment" },
             { "simple_one_tex_fragment", "OSE_Compat_SimpleOneTex_vertex", "OSE_Compat_SimpleOneTex_fragment" },
             { "simple_one_tex_pixel", "OSE_Compat_SimpleOneTex_vertex", "OSE_Compat_SimpleOneTex_fragment" },
+            // Unreachable in practice, and deliberately kept anyway.
+            // IsExcludedFromSynthesis() rejects the "ui_" needle on the
+            // program name, so every input that matches these three prefixes
+            // is declined as excluded-class and falls back to stock before it
+            // can be instantiated -- which is the correct outcome, because the
+            // stock UI family is exactly what these would be standing in for.
+            // They stay so the table is a complete statement of the family
+            // map, and so a future narrowing of the exclusion list does not
+            // silently leave UI materials with no adapter. Do not read a
+            // rendering symptom on a UI, HUD or radar surface as coming from
+            // here: check the log for "reason=excluded-class" first.
             { "ui_vertex", "OSE_Compat_Ui_vertex", "OSE_Compat_Ui_fragment" },
             { "ui_fragment", "OSE_Compat_Ui_vertex", "OSE_Compat_Ui_fragment" },
             { "ui_pixel", "OSE_Compat_Ui_vertex", "OSE_Compat_Ui_fragment" },
