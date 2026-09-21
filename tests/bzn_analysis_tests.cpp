@@ -530,6 +530,69 @@ int main()
             Check(p.find("sObject") == std::string::npos, "null sObject: not reported");
     }
 
+    // --- positions, path points, and transforms must remain finite -----------
+    {
+        const Result r = Analyze(Build(SampleMission()));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("non-finite") != std::string::npos;
+        Check(!found, "finite floats: clean fixture stays clean");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "100")] = "nan";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 pos.x is non-finite: nan") != std::string::npos;
+        Check(found, "finite floats: NaN object position reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstPoints = FindLine(lines, "points [1] =");
+        size_t zField = firstPoints;
+        while (zField < lines.size() && lines[zField] != "  z [1] =")
+            ++zField;
+        lines[zField + 1] = "inf";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("AiPath #0 points.z is non-finite: inf") != std::string::npos;
+        Check(found, "finite floats: infinite AiPath point reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t transform = FindLine(lines, "transform [1] =");
+        size_t rightX = transform;
+        while (rightX < lines.size() && lines[rightX] != "  right_x [1] =")
+            ++rightX;
+        lines[rightX + 1] = "-inf";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 transform.right_x is non-finite: -inf") !=
+                    std::string::npos;
+        Check(found, "finite floats: infinite transform component reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "100")] = "not-a-float";
+        const Result r = Analyze(Build(lines));
+
+        bool nonFinite = false;
+        for (const std::string& p : r.problems)
+            nonFinite = nonFinite || p.find("non-finite") != std::string::npos;
+        Check(!nonFinite,
+              "finite floats: malformed numeric text is left to later format validation");
+    }
+
     // --- isUser must be canonical and must not select multiple objects -------
     {
         const Result r = Analyze(Build(SampleMission()));
