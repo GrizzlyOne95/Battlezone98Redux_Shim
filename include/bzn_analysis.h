@@ -27,6 +27,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdlib>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -98,6 +99,9 @@ namespace BZROpenShim::BznAnalysis
         std::string version;
         std::string terrainName;
         std::string seqCount;
+        long maxObjectSeqno = -1;
+        long minimumSafeSeqCount = -1;
+        bool seqCountComparable = false;
         std::string declaredObjectCount;
         std::string declaredAoiCount;
         std::string declaredPathCount;
@@ -561,6 +565,74 @@ namespace BZROpenShim::BznAnalysis
                         " is missing required envelope field(s): " + fields +
                         " (PrjID=" + (rec.prjId.empty() ? "?" : rec.prjId) +
                         " label=" + (rec.label.empty() ? "?" : rec.label) + ")");
+                }
+            }
+        }
+
+        if (result.ascii && !result.objects.empty())
+        {
+            bool allSeqnosValid = true;
+            long maxSeqno = -1;
+
+            for (const ObjectRecord& rec : result.objects)
+            {
+                long seqno = 0;
+                if (!detail::ParseDecimalLong(rec.seqno, seqno))
+                {
+                    result.problems.push_back(
+                        "GameObject #" + std::to_string(rec.index) +
+                        " seqno is not a valid decimal integer: '" + rec.seqno + "'");
+                    allSeqnosValid = false;
+                    continue;
+                }
+                if (seqno < 0)
+                {
+                    result.problems.push_back(
+                        "GameObject #" + std::to_string(rec.index) +
+                        " seqno is negative: " + rec.seqno);
+                    allSeqnosValid = false;
+                    continue;
+                }
+                if (seqno > maxSeqno)
+                    maxSeqno = seqno;
+            }
+
+            if (allSeqnosValid && maxSeqno >= 0)
+            {
+                result.maxObjectSeqno = maxSeqno;
+
+                if (maxSeqno == (std::numeric_limits<long>::max)())
+                {
+                    result.problems.push_back(
+                        "maximum object seqno cannot be incremented safely; seq_count repair would overflow");
+                }
+                else
+                {
+                    result.minimumSafeSeqCount = maxSeqno + 1;
+
+                    long seqCount = 0;
+                    if (!detail::ParseDecimalLong(result.seqCount, seqCount))
+                    {
+                        result.problems.push_back(
+                            "seq_count is not a valid decimal integer: '" + result.seqCount + "'");
+                    }
+                    else if (seqCount < 0)
+                    {
+                        result.problems.push_back("seq_count is negative: " + result.seqCount);
+                    }
+                    else
+                    {
+                        result.seqCountComparable = true;
+                        if (seqCount <= maxSeqno)
+                        {
+                            result.problems.push_back(
+                                "seq_count " + result.seqCount +
+                                " is stale: maximum object seqno is " +
+                                std::to_string(maxSeqno) +
+                                "; minimum safe seq_count is " +
+                                std::to_string(result.minimumSafeSeqCount));
+                        }
+                    }
                 }
             }
         }
