@@ -10,7 +10,9 @@
 
 #include "bzn_analysis.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -43,6 +45,29 @@ namespace
         return out;
     }
 
+    size_t FindLine(const std::vector<std::string>& lines, const std::string& value)
+    {
+        const auto it = std::find(lines.begin(), lines.end(), value);
+        if (it == lines.end())
+            return static_cast<size_t>(-1);
+        return static_cast<size_t>(std::distance(lines.begin(), it));
+    }
+
+    size_t FindLineAfter(
+        const std::vector<std::string>& lines,
+        const std::string& value,
+        size_t after)
+    {
+        if (after >= lines.size())
+            return static_cast<size_t>(-1);
+
+        const auto begin = lines.begin() + static_cast<std::ptrdiff_t>(after + 1);
+        const auto it = std::find(begin, lines.end(), value);
+        if (it == lines.end())
+            return static_cast<size_t>(-1);
+        return static_cast<size_t>(std::distance(lines.begin(), it));
+    }
+
     std::vector<std::string> SampleMission()
     {
         return {
@@ -53,17 +78,29 @@ namespace
             "msn_filename = sample.bzn",
             "seq_count [1] =",
             "8",
+            "missionSave [1] =",
+            "true",
             "TerrainName = sample",
-            "[GameObject]",          // 8  -> object #0
+            "size [1] =",
+            "3",
+            "[GameObject]",          // 10 -> object #0
             "PrjID [1] =",
             "player",
             "seqno [1] =",
             "1",
+            "pos [1] =",
+            "  x [1] =",
+            "100",
             "team [1] =",
             "1",
             "label = player-1_hover",
+            "isUser [1] =",
+            "1",
             "obj_addr = 00000001",
-            "[GameObject]",          // 17 -> object #1
+            "transform [1] =",
+            "  right_x [1] =",
+            "1",
+            "[GameObject]",          // 19 -> object #1
             "PrjID [1] =",
             "sfield",
             "seqno [1] =",
@@ -76,16 +113,30 @@ namespace
             "team [1] =",
             "0",
             "label = sfield1_scrapfield",
+            "isUser [1] =",
+            "0",
             "obj_addr = 00000002",
-            "[GameObject]",          // 31 -> object #2
+            "transform [1] =",
+            "  right_x [1] =",
+            "1",
+            "[GameObject]",          // 33 -> object #2
             "PrjID [1] =",
             "avfigh",
             "seqno [1] =",
             "3",
+            "pos [1] =",
+            "  x [1] =",
+            "300",
             "team [1] =",
             "1",
             "label = avfigh0_wingman",
+            "isUser [1] =",
+            "0",
             "obj_addr = 00000003",
+            "transform [1] =",
+            "  right_x [1] =",
+            "1",
+            "name = LuaMission",
             "sObject = 00000002",
             "[AiPaths]",
             "count [1] =",
@@ -96,6 +147,12 @@ namespace
             "0",
             "pointCount [1] =",
             "1",
+            "points [1] =",
+            "  x [1] =",
+            "10",
+            "  z [1] =",
+            "20",
+            "pathType = 00000000",
             "[AiPath]",
             "old_ptr = 000000B9",
             "size [1] =",
@@ -103,6 +160,12 @@ namespace
             "label = cca_base",
             "pointCount [1] =",
             "1",
+            "points [1] =",
+            "  x [1] =",
+            "30",
+            "  z [1] =",
+            "40",
+            "pathType = 00000000",
         };
     }
 }
@@ -118,13 +181,17 @@ int main()
 
         Check(r.ascii, "clean: recognised as an ascii save");
         Check(r.version == "2016", "clean: version read");
+        Check(r.missionFilename == "sample.bzn", "clean: mission filename read");
         Check(r.terrainName == "sample", "clean: terrain name read");
         Check(r.seqCount == "8", "clean: seq_count read");
+        Check(r.declaredObjectCount == "3", "clean: declared GameObject count read");
         Check(r.objects.size() == 3, "clean: three GameObject blocks");
         Check(r.pathBlocks == 2, "clean: two AiPath blocks");
         Check(r.declaredPathCount == "2", "clean: declared path count read");
+        Check(!r.endings.unsafe(), "clean: CRLF-only endings are safe");
         Check(!r.endings.mixed(), "clean: line endings uniform");
         Check(r.endings.bareLf == 0, "clean: no bare LF");
+        Check(r.endings.bareCr == 0, "clean: no bare CR");
         Check(r.problems.empty(), "clean: no structural problems");
 
         Check(r.objects[1].prjId == "sfield", "clean: object #1 ODF");
@@ -135,18 +202,24 @@ int main()
 
     // --- the misn04 shape: a bare-LF run inside one object ------------------
     {
-        // Lines 22..29 sit inside object #1 (header at index 17), which is the
-        // same relationship the real file had: the run began in the position
-        // block of the object the engine then died on.
-        const std::string data = Build(SampleMission(), 22, 30);
+        // Target object #1 explicitly. The fixture now contains several
+        // GameObjects with their own pos fields, so a global first-match lookup
+        // would corrupt object #0 while this regression is about the sfield.
+        const std::vector<std::string> lines = SampleMission();
+        const size_t sfieldValue = FindLine(lines, "sfield");
+        const size_t lfBegin = FindLineAfter(lines, "pos [1] =", sfieldValue);
+        const std::string data = Build(lines, lfBegin, lfBegin + 8);
         const Result r = Analyze(data);
 
+        Check(r.endings.unsafe(), "mixed: detected as unsafe");
         Check(r.endings.mixed(), "mixed: detected as mixed");
         Check(r.endings.bareLf == 8, "mixed: counted the bare-LF lines");
+        Check(r.endings.bareCr == 0, "mixed: no bare CR");
         Check(r.endings.crlf > 0, "mixed: still counted the CRLF lines");
-        Check(r.endings.firstBareLine == 23, "mixed: located the first bare LF (1-based)");
-        Check(r.mixedEnclosingObject == 1, "mixed: named the enclosing GameObject");
-        Check(r.objects[r.mixedEnclosingObject].prjId == "sfield",
+        Check(r.endings.firstUnsafeLine == lfBegin + 1,
+              "mixed: located the first unsafe terminator (1-based)");
+        Check(r.unsafeEnclosingObject == 1, "mixed: named the enclosing GameObject");
+        Check(r.objects[r.unsafeEnclosingObject].prjId == "sfield",
               "mixed: enclosing object carries its ODF for the report");
     }
 
@@ -154,25 +227,285 @@ int main()
     {
         const std::string data = Build(SampleMission(), 1, 3);
         const Result r = Analyze(data);
-        Check(r.endings.mixed(), "header-mixed: detected");
-        Check(r.mixedEnclosingObject == kNone, "header-mixed: no enclosing object");
+        Check(r.endings.unsafe(), "header-mixed: detected as unsafe");
+        Check(r.endings.mixed(), "header-mixed: detected as mixed");
+        Check(r.unsafeEnclosingObject == kNone, "header-mixed: no enclosing object");
     }
 
-    // --- a uniformly LF file is not "mixed" ---------------------------------
+    // --- uniformly LF is unsafe even though it is not mixed ------------------
     {
         std::string data;
         for (const std::string& line : SampleMission())
             data += line + "\n";
         const Result r = Analyze(data);
-        Check(!r.endings.mixed(), "uniform LF: not reported as mixed");
+        Check(r.endings.unsafe(), "uniform LF: reported as unsafe");
+        Check(!r.endings.mixed(), "uniform LF: not falsely reported as mixed");
         Check(r.endings.crlf == 0, "uniform LF: no CRLF counted");
-        Check(r.objects.size() == 3, "uniform LF: still parses");
+        Check(r.endings.bareLf == SampleMission().size(), "uniform LF: every terminator counted");
+        Check(r.endings.firstUnsafeLine == 1, "uniform LF: first unsafe terminator is line 1");
+        Check(r.objects.size() == 3, "uniform LF: still parses for diagnostics");
+    }
+
+    // --- a bare CR amid CRLF is unsafe and mapped to its object ---------------
+    {
+        const std::vector<std::string> lines = SampleMission();
+        std::string data;
+        const size_t sfieldValue = FindLine(lines, "sfield");
+        const size_t crBegin = FindLineAfter(lines, "pos [1] =", sfieldValue);
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            data += lines[i];
+            data += (i >= crBegin && i < crBegin + 2) ? "\r" : "\r\n";
+        }
+
+        const Result r = Analyze(data);
+        Check(r.endings.unsafe(), "bare CR: detected as unsafe");
+        Check(r.endings.mixed(), "bare CR: mixed with CRLF");
+        Check(r.endings.bareCr == 2, "bare CR: counted");
+        Check(r.endings.bareLf == 0, "bare CR: no bare LF");
+        Check(r.endings.firstUnsafeLine == crBegin + 1, "bare CR: first unsafe terminator located");
+        Check(r.unsafeEnclosingObject == 1, "bare CR: enclosing GameObject identified");
+        Check(r.objects.size() == 3, "bare CR: parser still recovers all objects for diagnostics");
+    }
+
+    // --- GameObject count disagreeing with the blocks ----------------------
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "3")] = "2";  // declared object count; the file still has 3 blocks
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("GameObject size says 2 but the file has 3") != std::string::npos;
+        Check(found, "object count: under-count reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "3")] = "5";  // over-count is equally dangerous: LoadAll will read into the tail
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("GameObject size says 5 but the file has 3") != std::string::npos;
+        Check(found, "object count: over-count reported");
+    }
+
+    // --- AOI count disagreeing with the blocks ------------------------------
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "2",
+            "[AOI]",
+            "undefptr = 0000000B",
+            "team [1] =",
+            "1",
+            "[AOI]",
+            "undefptr = 000000B9",
+            "team [1] =",
+            "2",
+        });
+        const Result r = Analyze(Build(lines));
+
+        Check(r.declaredAoiCount == "2", "AOI count: declared size read");
+        Check(r.aoiBlocks == 2, "AOI count: two blocks counted");
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("[AOIs] size") != std::string::npos;
+        Check(!found, "AOI count: matching count stays clean");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "1",
+            "[AOI]",
+            "undefptr = 0000000B",
+            "[AOI]",
+            "undefptr = 000000B9",
+        });
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("[AOIs] size says 1 but the file has 2") != std::string::npos;
+        Check(found, "AOI count: over-block mismatch reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "3",
+            "[AOI]",
+            "undefptr = 0000000B",
+            "[AOI]",
+            "undefptr = 000000B9",
+        });
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("[AOIs] size says 3 but the file has 2") != std::string::npos;
+        Check(found, "AOI count: under-block mismatch reported");
+    }
+
+    // --- required GameObject envelope fields --------------------------------
+    {
+        const Result r = Analyze(Build(SampleMission()));
+        for (const std::string& p : r.problems)
+            Check(p.find("missing required envelope field") == std::string::npos,
+                  "object envelope: clean fixture has every required field");
+    }
+    {
+        struct MissingCase
+        {
+            const char* serializedLine;
+            const char* fieldName;
+        };
+        const MissingCase cases[] = {
+            {"PrjID [1] =", "PrjID"},
+            {"seqno [1] =", "seqno"},
+            {"pos [1] =", "pos"},
+            {"team [1] =", "team"},
+            {"label = player-1_hover", "label"},
+            {"isUser [1] =", "isUser"},
+            {"obj_addr = 00000001", "obj_addr"},
+            {"transform [1] =", "transform"},
+        };
+
+        for (const MissingCase& test : cases)
+        {
+            std::vector<std::string> lines = SampleMission();
+            lines[FindLine(lines, test.serializedLine)] = "missing_envelope_field = 0";
+            const Result r = Analyze(Build(lines));
+
+            const std::string needle =
+                std::string("GameObject #0 is missing required envelope field(s): ") +
+                test.fieldName;
+            bool found = false;
+            for (const std::string& p : r.problems)
+                found = found || p.find(needle) != std::string::npos;
+            Check(found, test.fieldName);
+        }
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "2016")] = "1001";
+        lines[FindLine(lines, "transform [1] =")] = "missingTransform [1] =";
+        const Result r = Analyze(Build(lines));
+
+        for (const std::string& p : r.problems)
+            Check(!(p.find("GameObject #0 is missing required envelope field(s):") !=
+                        std::string::npos &&
+                    p.find("transform") != std::string::npos),
+                  "object envelope: version 1001 does not require transform");
+    }
+
+    // --- structural counts must be valid non-negative decimals --------------
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "3")] = "not-a-number";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("GameObject size is not a valid decimal count") !=
+                                 std::string::npos;
+        Check(found, "count sanity: invalid GameObject size reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {"[AOIs]", "size [1] =", "-1"});
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("[AOIs] size is negative: -1") != std::string::npos;
+        Check(found, "count sanity: negative AOI size reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t aiPaths = FindLine(lines, "[AiPaths]");
+        lines[aiPaths + 2] = "999999";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || (p.find("[AiPaths] count says 999999") != std::string::npos &&
+                              p.find("count is impossible") != std::string::npos);
+        Check(found, "count sanity: impossible AiPath block count reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstPointCount = FindLine(lines, "pointCount [1] =");
+        lines[firstPointCount + 1] = "oops";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("AiPath #0 pointCount is not a valid decimal count") !=
+                                 std::string::npos;
+        Check(found, "count sanity: invalid pointCount reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstPoints = FindLine(lines, "points [1] =");
+        lines[firstPoints] = "points [-1] =";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("AiPath #0 points array count is negative: -1") !=
+                                 std::string::npos;
+        Check(found, "count sanity: negative points array count reported");
+    }
+
+    // --- AiPath pointCount and serialized points must agree -----------------
+    {
+        const Result r = Analyze(Build(SampleMission()));
+        Check(r.paths.size() == 2, "path points: two path records captured");
+        Check(r.paths[0].pointCount == "1", "path points: pointCount captured");
+        Check(r.paths[0].declaredPoints == 1, "path points: points array count captured");
+        Check(r.paths[0].xComponents == 1 && r.paths[0].zComponents == 1,
+              "path points: complete coordinate pair counted");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstPointCount = FindLine(lines, "pointCount [1] =");
+        lines[firstPointCount + 1] = "2";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("AiPath #0 pointCount says 2 but points array declares 1") !=
+                                 std::string::npos;
+        Check(found, "path points: pointCount mismatch reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstPoints = FindLine(lines, "points [1] =");
+        lines[firstPoints] = "points [2] =";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("AiPath #0 points array declares 2 but file contains 1") !=
+                                 std::string::npos;
+        Check(found, "path points: serialized pair mismatch reported");
     }
 
     // --- path count disagreeing with the blocks -----------------------------
     {
         std::vector<std::string> lines = SampleMission();
-        lines[43] = "5";  // the [AiPaths] count value; the file still has 2 blocks
+        const size_t aiPaths = FindLine(lines, "[AiPaths]");
+        lines[aiPaths + 2] = "5";  // the [AiPaths] count value; the file still has 2 blocks
         const std::string data = Build(lines);
         const Result r = Analyze(data);
 
@@ -185,7 +518,8 @@ int main()
     // --- duplicate labels ----------------------------------------------------
     {
         std::vector<std::string> lines = SampleMission();
-        lines[38] = "label = sfield1_scrapfield";  // clash with object #1
+        lines[FindLine(lines, "label = avfigh0_wingman")] =
+            "label = sfield1_scrapfield";  // clash with object #1
         const std::string data = Build(lines);
         const Result r = Analyze(data);
 
@@ -198,24 +532,734 @@ int main()
     // --- a pointer reference that resolves to nothing ------------------------
     {
         std::vector<std::string> lines = SampleMission();
-        lines[40] = "sObject = 0000007A";  // no obj_addr or old_ptr defines 7A
+        lines[FindLine(lines, "sObject = 00000002")] =
+            "sObject = 0000007A";  // no obj_addr or old_ptr defines 7A
         const std::string data = Build(lines);
         const Result r = Analyze(data);
 
         bool found = false;
         for (const std::string& p : r.problems)
-            found = found || p.find("sObject references undefined id 0000007A") != std::string::npos;
+            found = found ||
+                p.find("sObject references undefined GameObject obj_addr 0000007A") !=
+                    std::string::npos;
         Check(found, "dangling pointer: reported");
     }
 
     // --- a null sObject is not a dangling reference --------------------------
     {
         std::vector<std::string> lines = SampleMission();
-        lines[40] = "sObject = 00000000";
+        lines[FindLine(lines, "sObject = 00000002")] = "sObject = 00000000";
         const std::string data = Build(lines);
         const Result r = Analyze(data);
         for (const std::string& p : r.problems)
             Check(p.find("sObject") == std::string::npos, "null sObject: not reported");
+    }
+
+    // --- mission BZNs must not contain unexpected data after final AiPath ----
+    {
+        const Result r = Analyze(Build(SampleMission()));
+        Check(r.missionSave == "true", "trailing data: missionSave captured");
+        Check(r.paths.back().pathType == "00000000",
+              "trailing data: final pathType captured");
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("unexpected trailing data") != std::string::npos;
+        Check(!found, "trailing data: clean mission ends at final AiPath");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines.push_back("garbage = 123");
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("unexpected trailing data after final AiPath") != std::string::npos;
+        Check(found, "trailing data: extra token after final AiPath reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines.push_back("");
+        lines.push_back("   ");
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("unexpected trailing data") != std::string::npos;
+        Check(!found, "trailing data: blank lines after final AiPath are ignored");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t missionSave = FindLine(lines, "missionSave [1] =");
+        lines[missionSave + 1] = "false";
+        lines.push_back("aip_team_count [1] =");
+        lines.push_back("0");
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("unexpected trailing data") != std::string::npos;
+        Check(!found,
+              "trailing data: full saves are not checked against mission-save EOF");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t aiPaths = FindLine(lines, "[AiPaths]");
+        lines[aiPaths + 2] = "3";  // count mismatch makes terminal boundary ambiguous
+        lines.push_back("garbage = 123");
+        const Result r = Analyze(Build(lines));
+
+        bool trailing = false;
+        for (const std::string& p : r.problems)
+            trailing = trailing || p.find("unexpected trailing data") != std::string::npos;
+        Check(!trailing,
+              "trailing data: EOF check suppressed when AiPath count is already invalid");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t aiPaths = FindLine(lines, "[AiPaths]");
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(aiPaths + 3), lines.end());
+        lines[aiPaths + 2] = "0";
+        lines.push_back("garbage = 123");
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("unexpected trailing data after final AiPath") != std::string::npos;
+        Check(found, "trailing data: zero-path mission anchors EOF after count");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[3] = "true";  // binarySave
+        lines.push_back("extra_binary_payload_marker");
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("unexpected trailing data") != std::string::npos;
+        Check(!found,
+              "trailing data: binary BZN is excluded from ASCII EOF validation");
+    }
+
+    // --- positions, path points, and transforms must remain finite -----------
+    {
+        const Result r = Analyze(Build(SampleMission()));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("non-finite") != std::string::npos;
+        Check(!found, "finite floats: clean fixture stays clean");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "100")] = "nan";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 pos.x is non-finite: nan") != std::string::npos;
+        Check(found, "finite floats: NaN object position reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstPoints = FindLine(lines, "points [1] =");
+        size_t zField = firstPoints;
+        while (zField < lines.size() && lines[zField] != "  z [1] =")
+            ++zField;
+        lines[zField + 1] = "inf";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("AiPath #0 points.z is non-finite: inf") != std::string::npos;
+        Check(found, "finite floats: infinite AiPath point reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t transform = FindLine(lines, "transform [1] =");
+        size_t rightX = transform;
+        while (rightX < lines.size() && lines[rightX] != "  right_x [1] =")
+            ++rightX;
+        lines[rightX + 1] = "-1.#INF";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 transform.right_x is non-finite: -1.#INF") !=
+                    std::string::npos;
+        Check(found, "finite floats: legacy MSVC infinite transform reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "100")] = "1e9999";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 pos.x is non-finite: 1e9999") !=
+                    std::string::npos;
+        Check(found, "finite floats: numeric overflow to infinity reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "100")] = "not-a-float";
+        const Result r = Analyze(Build(lines));
+
+        bool nonFinite = false;
+        for (const std::string& p : r.problems)
+            nonFinite = nonFinite || p.find("non-finite") != std::string::npos;
+        Check(!nonFinite,
+              "finite floats: malformed numeric text is left to later format validation");
+    }
+
+    // --- isUser must be canonical and must not select multiple objects -------
+    {
+        const Result r = Analyze(Build(SampleMission()));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("isUser") != std::string::npos;
+        Check(!found, "isUser: canonical single-user fixture stays clean");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstIsUser = FindLine(lines, "isUser [1] =");
+        lines[firstIsUser + 1] = "2";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 has noncanonical isUser=2; engine treats any nonzero value as true") !=
+                    std::string::npos;
+        Check(found, "isUser: noncanonical nonzero value reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstIsUser = FindLine(lines, "isUser [1] =");
+        lines[firstIsUser + 1] = "oops";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 isUser is not a valid decimal integer: 'oops'") !=
+                    std::string::npos;
+        Check(found, "isUser: malformed integer reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t secondObject = FindLine(lines, "label = sfield1_scrapfield");
+        size_t secondIsUser = secondObject;
+        while (secondIsUser < lines.size() && lines[secondIsUser] != "isUser [1] =")
+            ++secondIsUser;
+        lines[secondIsUser + 1] = "1";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("multiple GameObjects have nonzero isUser: #0, #1") !=
+                    std::string::npos;
+        Check(found, "isUser: multiple effective user objects reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstIsUser = FindLine(lines, "isUser [1] =");
+        lines[firstIsUser + 1] = "0";
+        const Result r = Analyze(Build(lines));
+
+        bool inventedRequirement = false;
+        for (const std::string& p : r.problems)
+            inventedRequirement = inventedRequirement ||
+                p.find("no GameObject") != std::string::npos ||
+                p.find("missing user") != std::string::npos;
+        Check(!inventedRequirement, "isUser: zero-user mission is not rejected");
+    }
+
+    // --- defining pointer IDs must be non-zero and unique per namespace -----
+    {
+        const Result r = Analyze(Build(SampleMission()));
+        for (const std::string& p : r.problems)
+        {
+            Check(p.find("defines null pointer id") == std::string::npos,
+                  "pointer IDs: clean fixture has no null definitions");
+            Check(p.find("duplicate GameObject obj_addr") == std::string::npos,
+                  "pointer IDs: clean fixture has unique object IDs");
+            Check(p.find("duplicate AiPath old_ptr") == std::string::npos,
+                  "pointer IDs: clean fixture has unique path IDs");
+        }
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "obj_addr = 00000001")] = "obj_addr = 0";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 obj_addr defines null pointer id 0") !=
+                    std::string::npos;
+        Check(found, "pointer IDs: null GameObject obj_addr reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "obj_addr = 00000003")] = "obj_addr = 00000002";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("duplicate GameObject obj_addr 00000002 on objects #1 and #2") !=
+                    std::string::npos;
+        Check(found, "pointer IDs: duplicate GameObject obj_addr reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "old_ptr = 0000000B")] = "old_ptr = 00000000";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("AiPath #0 old_ptr defines null pointer id 00000000") !=
+                    std::string::npos;
+        Check(found, "pointer IDs: null AiPath old_ptr reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "old_ptr = 000000B9")] = "old_ptr = 0000000b";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("duplicate AiPath old_ptr 0000000b on paths #0 and #1") !=
+                    std::string::npos;
+        Check(found, "pointer IDs: duplicate AiPath old_ptr reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "old_ptr = 0000000B")] = "old_ptr = 0x1";
+        const Result r = Analyze(Build(lines));
+
+        bool falseDuplicate = false;
+        for (const std::string& p : r.problems)
+            falseDuplicate = falseDuplicate ||
+                p.find("duplicate GameObject obj_addr 00000001") != std::string::npos ||
+                p.find("duplicate AiPath old_ptr 00000001") != std::string::npos;
+        Check(!falseDuplicate,
+              "pointer IDs: same numeric text across object/path namespaces is allowed");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "sObject = 00000002")] = "sObject = 0000000B";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("sObject references undefined GameObject obj_addr 0000000B") !=
+                    std::string::npos;
+        Check(found, "pointer IDs: sObject resolves only against GameObject obj_addr");
+    }
+
+    // --- AOI path pointers must resolve to AiPath old_ptr --------------------
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "2",
+            "[AOI]",
+            "undefptr = 0000000B",
+            "team [1] =",
+            "1",
+            "interesting [1] =",
+            "false",
+            "inside [1] =",
+            "false",
+            "value [1] =",
+            "0",
+            "force [1] =",
+            "0",
+            "[AOI]",
+            "undefptr = 000000B9",
+            "team [1] =",
+            "2",
+            "interesting [1] =",
+            "false",
+            "inside [1] =",
+            "false",
+            "value [1] =",
+            "0",
+            "force [1] =",
+            "0",
+        });
+        const Result r = Analyze(Build(lines));
+
+        Check(r.aois.size() == 2, "AOI pointer: two AOIs captured");
+        Check(r.aois[0].pathRef == "0000000B", "AOI pointer: first undefptr captured");
+        Check(r.paths[0].oldPtr == "0000000B", "AOI pointer: AiPath old_ptr captured");
+
+        bool dangling = false;
+        for (const std::string& p : r.problems)
+            dangling = dangling || p.find("undefptr references missing AiPath") != std::string::npos;
+        Check(!dangling, "AOI pointer: valid references stay clean");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "1",
+            "[AOI]",
+            "undefptr = 0000DEAD",
+            "team [1] =",
+            "1",
+            "interesting [1] =",
+            "false",
+            "inside [1] =",
+            "false",
+            "value [1] =",
+            "0",
+            "force [1] =",
+            "0",
+        });
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("AOI #0 undefptr references missing AiPath old_ptr 0000DEAD") !=
+                    std::string::npos;
+        Check(found, "AOI pointer: dangling AiPath reference reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "1",
+            "[AOI]",
+            "undefptr = 00000000",
+            "team [1] =",
+            "1",
+            "interesting [1] =",
+            "false",
+            "inside [1] =",
+            "false",
+            "value [1] =",
+            "0",
+            "force [1] =",
+            "0",
+        });
+        const Result r = Analyze(Build(lines));
+
+        for (const std::string& p : r.problems)
+            Check(p.find("AOI #0 undefptr references missing AiPath") == std::string::npos,
+                  "AOI pointer: null pointer is allowed");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "1",
+            "[AOI]",
+            "undefptr = 00000001",
+            "team [1] =",
+            "1",
+            "interesting [1] =",
+            "false",
+            "inside [1] =",
+            "false",
+            "value [1] =",
+            "0",
+            "force [1] =",
+            "0",
+        });
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("AOI #0 undefptr references missing AiPath old_ptr 00000001") !=
+                    std::string::npos;
+        Check(found, "AOI pointer: GameObject obj_addr does not satisfy AiPath reference");
+    }
+
+    // --- seq_count must remain ahead of every object seqno ------------------
+    {
+        const Result r = Analyze(Build(SampleMission()));
+        Check(r.seqCountComparable, "seq_count: clean fixture comparable");
+        Check(r.maxObjectSeqno == 3, "seq_count: maximum object seqno captured");
+        Check(r.minimumSafeSeqCount == 4, "seq_count: minimum safe value is max + 1");
+
+        bool stale = false;
+        for (const std::string& p : r.problems)
+            stale = stale || p.find("seq_count") != std::string::npos;
+        Check(!stale, "seq_count: clean fixture stays clean");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t seqCountField = FindLine(lines, "seq_count [1] =");
+        lines[seqCountField + 1] = "3";  // equal to max object seqno: next ID would collide
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("seq_count 3 is stale: maximum object seqno is 3; minimum safe seq_count is 4") !=
+                    std::string::npos;
+        Check(found, "seq_count: equal-to-max stale value reported with safe repair");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t seqCountField = FindLine(lines, "seq_count [1] =");
+        lines[seqCountField + 1] = "oops";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("seq_count is not a valid decimal integer: 'oops'") !=
+                                 std::string::npos;
+        Check(found, "seq_count: non-numeric counter reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t seqnoField = FindLine(lines, "seqno [1] =");
+        lines[seqnoField + 1] = "oops";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 seqno is not a valid decimal integer: 'oops'") !=
+                    std::string::npos;
+        Check(found, "seq_count: invalid object seqno blocks comparison explicitly");
+        Check(!r.seqCountComparable, "seq_count: comparison suppressed when a seqno is invalid");
+    }
+
+
+    // --- fixed-buffer length risks ------------------------------------------
+    // Redux's ASCII string reader ignores its destination-size argument when
+    // scanning type-2 strings, so a payload exactly as large as the nominal
+    // buffer already writes the terminating NUL out of bounds. PrjID uses a
+    // separate 8-byte fixed-token reader and truncates instead of overflowing.
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t prj = FindLine(lines, "PrjID [1] =");
+        lines[prj + 1] = "12345678";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("GameObject #0 PrjID is") != std::string::npos;
+        Check(!found, "fixed buffers: 8-byte PrjID remains valid");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t prj = FindLine(lines, "PrjID [1] =");
+        lines[prj + 1] = "123456789";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 PrjID is 9 bytes; ASCII fixed-width reader keeps only 8 bytes") !=
+                    std::string::npos;
+        Check(found, "fixed buffers: overlong PrjID truncation risk reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "msn_filename = sample.bzn")] =
+            "msn_filename = " + std::string(15, 'm');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("msn_filename is") != std::string::npos;
+        Check(!found, "fixed buffers: 15-byte msn_filename is safe");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "msn_filename = sample.bzn")] =
+            "msn_filename = " + std::string(16, 'm');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("msn_filename is 16 bytes; Redux ASCII string reader writes the value plus NUL into a 16-byte buffer (safe maximum 15 bytes)") !=
+                    std::string::npos;
+        Check(found, "fixed buffers: msn_filename capacity overrun reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "TerrainName = sample")] =
+            "TerrainName = " + std::string(99, 't');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("TerrainName is") != std::string::npos;
+        Check(!found, "fixed buffers: 99-byte TerrainName is safe");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "TerrainName = sample")] =
+            "TerrainName = " + std::string(100, 't');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("TerrainName is 100 bytes; Redux ASCII string reader writes the value plus NUL into a 100-byte buffer (safe maximum 99 bytes)") !=
+                    std::string::npos;
+        Check(found, "fixed buffers: TerrainName capacity overrun reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "label = player-1_hover")] =
+            "label = " + std::string(39, 'l');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("GameObject #0 label is") != std::string::npos;
+        Check(!found, "fixed buffers: 39-byte GameObject label is safe");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "label = player-1_hover")] =
+            "label = " + std::string(40, 'l');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 label is 40 bytes; Redux ASCII string reader writes the value plus NUL into a 40-byte buffer (safe maximum 39 bytes)") !=
+                    std::string::npos;
+        Check(found, "fixed buffers: GameObject label capacity overrun reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "name = LuaMission")] =
+            "name = " + std::string(39, 'n');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("Rtime classname (name) is") != std::string::npos;
+        Check(!found, "fixed buffers: 39-byte Rtime classname is safe");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "name = LuaMission")] =
+            "name = " + std::string(40, 'n');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("Rtime classname (name) is 40 bytes; Redux ASCII string reader writes the value plus NUL into a 40-byte buffer (safe maximum 39 bytes)") !=
+                    std::string::npos;
+        Check(found, "fixed buffers: Rtime classname capacity overrun reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[3] = "true";
+        const size_t prj = FindLine(lines, "PrjID [1] =");
+        lines[prj + 1] = "123456789";
+        lines[FindLine(lines, "msn_filename = sample.bzn")] =
+            "msn_filename = " + std::string(32, 'm');
+        lines[FindLine(lines, "TerrainName = sample")] =
+            "TerrainName = " + std::string(128, 't');
+        lines[FindLine(lines, "label = player-1_hover")] =
+            "label = " + std::string(64, 'l');
+        lines[FindLine(lines, "name = LuaMission")] =
+            "name = " + std::string(64, 'n');
+        const Result r = Analyze(Build(lines));
+
+        bool fixedBufferFinding = false;
+        for (const std::string& p : r.problems)
+        {
+            fixedBufferFinding =
+                fixedBufferFinding ||
+                p.find("msn_filename is") != std::string::npos ||
+                p.find("TerrainName is") != std::string::npos ||
+                p.find("ASCII fixed-width reader keeps only 8 bytes") != std::string::npos ||
+                p.find("Rtime classname (name) is") != std::string::npos;
+        }
+        Check(!fixedBufferFinding, "fixed buffers: binary BZN skips ASCII length diagnostics");
+    }
+
+    // --- byte/encoding hazards ----------------------------------------------
+    {
+        std::string data = Build(SampleMission());
+        data.insert(0, "\xEF\xBB\xBF", 3);
+        const Result r = Analyze(data);
+
+        Check(r.utf8Bom, "byte hazards: UTF-8 BOM detected");
+        bool found = false;
+        for (const std::string& p : r.byteProblems)
+            found = found || p.find("UTF-8 BOM") != std::string::npos;
+        Check(found, "byte hazards: UTF-8 BOM reported");
+    }
+    {
+        const char raw[] = {
+            static_cast<char>(0xFF), static_cast<char>(0xFE),
+            'v', '\0', 'e', '\0', 'r', '\0', 's', '\0',
+            'i', '\0', 'o', '\0', 'n', '\0'
+        };
+        const std::string data(raw, sizeof(raw));
+        const Result r = Analyze(std::string_view(data.data(), data.size()));
+
+        Check(r.utf16LeBom, "byte hazards: UTF-16 LE BOM detected");
+        bool found = false;
+        for (const std::string& p : r.byteProblems)
+            found = found || p.find("UTF-16 LE BOM") != std::string::npos;
+        Check(found, "byte hazards: UTF-16 LE reported before text parsing");
+    }
+    {
+        const char raw[] = {
+            static_cast<char>(0xFE), static_cast<char>(0xFF),
+            '\0', 'v', '\0', 'e', '\0', 'r', '\0', 's',
+            '\0', 'i', '\0', 'o', '\0', 'n'
+        };
+        const std::string data(raw, sizeof(raw));
+        const Result r = Analyze(std::string_view(data.data(), data.size()));
+
+        Check(r.utf16BeBom, "byte hazards: UTF-16 BE BOM detected");
+        bool found = false;
+        for (const std::string& p : r.byteProblems)
+            found = found || p.find("UTF-16 BE BOM") != std::string::npos;
+        Check(found, "byte hazards: UTF-16 BE reported before text parsing");
+    }
+    {
+        std::string data = Build(SampleMission());
+        const size_t insertAt = data.find("label = player-1_hover");
+        data.insert(insertAt + 8, 1, '\0');
+        const Result r = Analyze(std::string_view(data.data(), data.size()));
+
+        Check(r.ascii, "byte hazards: embedded-NUL fixture remains identifiable as ASCII");
+        Check(r.embeddedNul, "byte hazards: embedded NUL detected");
+        Check(r.firstNulOffset != kNone, "byte hazards: first NUL offset recorded");
+        bool found = false;
+        for (const std::string& p : r.byteProblems)
+            found = found || p.find("embedded NUL byte at offset") != std::string::npos;
+        Check(found, "byte hazards: embedded NUL reported");
     }
 
     // --- a binary save is recognised and skipped -----------------------------
@@ -226,6 +1270,15 @@ int main()
         const Result r = Analyze(data);
         Check(!r.ascii, "binary: not treated as ascii");
         Check(r.sawBinarySaveField, "binary: binarySave field was seen");
+
+        std::string withNul = data;
+        withNul.push_back('\0');
+        withNul.push_back('\0');
+        const Result binaryWithNul = Analyze(std::string_view(withNul.data(), withNul.size()));
+        bool falsePositive = false;
+        for (const std::string& p : binaryWithNul.byteProblems)
+            falsePositive = falsePositive || p.find("embedded NUL") != std::string::npos;
+        Check(!falsePositive, "binary: payload NUL bytes are not reported as ASCII corruption");
     }
 
     // --- an empty file must not crash or invent findings ---------------------
