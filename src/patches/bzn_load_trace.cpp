@@ -179,8 +179,10 @@ namespace BZROpenShim
                 return;
             }
 
-            Log(L"[BZNLOAD] %s: %zu GameObject blocks, %zu AiPath blocks (declared %hs), seq_count=%hs\n",
-                name, report.objects.size(), report.pathBlocks,
+            Log(L"[BZNLOAD] %s: %zu GameObject blocks (declared %hs), %zu AiPath blocks (declared %hs), seq_count=%hs\n",
+                name, report.objects.size(),
+                report.declaredObjectCount.empty() ? "?" : report.declaredObjectCount.c_str(),
+                report.pathBlocks,
                 report.declaredPathCount.empty() ? "?" : report.declaredPathCount.c_str(),
                 report.seqCount.empty() ? "?" : report.seqCount.c_str());
 
