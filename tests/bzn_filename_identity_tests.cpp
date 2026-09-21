@@ -23,6 +23,7 @@ namespace
 int main()
 {
     using BZROpenShim::BznFilenameIdentity::Compare;
+    using BZROpenShim::BznFilenameIdentity::CompareTerrainName;
 
     {
         const auto r = Compare("sample.bzn", "sample.bzn");
@@ -51,6 +52,31 @@ int main()
     {
         const auto r = Compare("sample.bzn", "");
         Check(!r.comparable, "missing embedded field is not guessed");
+    }
+
+    // Filename/TerrainName is intentionally weaker than filename/msn_filename.
+    // A mismatch is useful context, but can be valid terrain reuse.
+    {
+        const auto r = CompareTerrainName("sample.bzn", "sample");
+        Check(r.comparable && r.matches, "terrain: matching mission stem accepted");
+    }
+    {
+        const auto r = CompareTerrainName("C:\\mods\\Sample.BZN", "sample");
+        Check(r.comparable && r.matches, "terrain: case-only difference accepted");
+        Check(r.openedBasename == "Sample", "terrain: .bzn extension removed before comparison");
+    }
+    {
+        const auto r = CompareTerrainName("pilot.bzn", "lcbench");
+        Check(r.comparable && !r.matches,
+              "terrain: intentional reuse remains a detectable relationship mismatch");
+    }
+    {
+        const auto r = CompareTerrainName("mission.v2.bzn", "mission.v2");
+        Check(r.comparable && r.matches, "terrain: only final .bzn extension stripped");
+    }
+    {
+        const auto r = CompareTerrainName("sample.bzn", "");
+        Check(!r.comparable, "terrain: missing TerrainName is not guessed");
     }
     {
         const std::string nonAscii = std::string("mission_") + static_cast<char>(0xE9) + ".bzn";
