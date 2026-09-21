@@ -90,6 +90,11 @@ namespace BZROpenShim::BznAnalysis
     {
         bool ascii = false;              // binarySave = false
         bool sawBinarySaveField = false;
+        bool utf8Bom = false;
+        bool utf16LeBom = false;
+        bool utf16BeBom = false;
+        bool embeddedNul = false;
+        size_t firstNulOffset = kNone;     // zero-based byte offset
         std::string version;
         std::string terrainName;
         std::string seqCount;
@@ -102,6 +107,7 @@ namespace BZROpenShim::BznAnalysis
         std::vector<ObjectRecord> objects;
         std::vector<PathRecord> paths;
         LineEndings endings;
+        std::vector<std::string> byteProblems;
         // Index of the GameObject the first non-CRLF terminator falls inside,
         // or kNone. This is the number the engine's own object log is likely
         // to stop on when the malformed run breaks parsing.
@@ -258,6 +264,42 @@ namespace BZROpenShim::BznAnalysis
         using namespace detail;
 
         Result result;
+
+        const auto byteAt = [&data](size_t offset) -> unsigned char
+        {
+            return static_cast<unsigned char>(data[offset]);
+        };
+
+        if (data.size() >= 3 &&
+            byteAt(0) == 0xEF && byteAt(1) == 0xBB && byteAt(2) == 0xBF)
+        {
+            result.utf8Bom = true;
+            result.byteProblems.push_back(
+                "UTF-8 BOM present at file start; ASCII BZN must begin directly with the first field");
+        }
+        if (data.size() >= 2 && byteAt(0) == 0xFF && byteAt(1) == 0xFE)
+        {
+            result.utf16LeBom = true;
+            result.byteProblems.push_back(
+                "UTF-16 LE BOM present; Battlezone ASCII BZN is not UTF-16");
+        }
+        else if (data.size() >= 2 && byteAt(0) == 0xFE && byteAt(1) == 0xFF)
+        {
+            result.utf16BeBom = true;
+            result.byteProblems.push_back(
+                "UTF-16 BE BOM present; Battlezone ASCII BZN is not UTF-16");
+        }
+
+        for (size_t i = 0; i < data.size(); ++i)
+        {
+            if (data[i] == '\0')
+            {
+                result.embeddedNul = true;
+                result.firstNulOffset = i;
+                break;
+            }
+        }
+
         std::vector<Line> lines;
         SplitLines(data, lines);
         result.lineCount = lines.size();
@@ -669,6 +711,16 @@ namespace BZROpenShim::BznAnalysis
 
         validateBlockCount(result.declaredPathCount, "[AiPaths] count",
                            result.pathBlocks, "[AiPath] blocks");
+
+        // Binary BZNs legitimately contain zero bytes in their binary payload,
+        // so NUL is only a text-file hazard after binarySave=false is proven.
+        if (result.ascii && result.embeddedNul &&
+            !result.utf16LeBom && !result.utf16BeBom)
+        {
+            result.byteProblems.push_back(
+                "embedded NUL byte at offset " + std::to_string(result.firstNulOffset) +
+                "; ASCII BZN text can be truncated or misparsed at NUL");
+        }
 
         return result;
     }
