@@ -110,6 +110,7 @@ namespace BZROpenShim::BznAnalysis
         bool embeddedNul = false;
         size_t firstNulOffset = kNone;     // zero-based byte offset
         std::string version;
+        std::string missionFilename;
         std::string terrainName;
         std::string missionSave;
         std::string seqCount;
@@ -422,6 +423,7 @@ namespace BZROpenShim::BznAnalysis
         }
 
         std::vector<std::string> sObjectRefs;
+        std::vector<std::string> rtimeClassNames;
         std::unordered_map<std::string, int> labelCounts;
         std::unordered_map<std::string, int> seqCounts;
 
@@ -438,10 +440,21 @@ namespace BZROpenShim::BznAnalysis
 
         std::string key;
         std::string value;
+        std::string previousFieldKey;
+        std::string previousFieldValue;
 
         for (size_t i = 0; i < lines.size(); ++i)
         {
             const std::string_view text(data.data() + lines[i].begin, lines[i].length);
+            const std::string_view trimmedText = Trim(text);
+            if (!trimmedText.empty() && trimmedText.front() == '[')
+            {
+                // Rtime serializes its fixed 40-byte classname as `name`
+                // immediately followed by `sObject`. A section boundary
+                // invalidates that adjacency.
+                previousFieldKey.clear();
+                previousFieldValue.clear();
+            }
 
             if (IsSection(text, "GameObject"))
             {
@@ -533,6 +546,14 @@ namespace BZROpenShim::BznAnalysis
                 value.assign(Trim(following));
             }
 
+            if (key == "sObject" && previousFieldKey == "name" &&
+                !previousFieldValue.empty())
+            {
+                rtimeClassNames.push_back(previousFieldValue);
+            }
+            previousFieldKey = key;
+            previousFieldValue = value;
+
             if (!seenFirstObject && result.declaredObjectCount.empty() && key == "size")
             {
                 // GameObject::SaveAll writes the object count immediately before
@@ -558,6 +579,8 @@ namespace BZROpenShim::BznAnalysis
                 result.sawBinarySaveField = true;
                 result.ascii = (value == "false");
             }
+            else if (key == "msn_filename" && result.missionFilename.empty())
+                result.missionFilename = value;
             else if (key == "TerrainName" && result.terrainName.empty())
                 result.terrainName = value;
             else if (key == "missionSave" && result.missionSave.empty())
@@ -714,6 +737,55 @@ namespace BZROpenShim::BznAnalysis
                 else
                     break;
             }
+        }
+
+        if (result.ascii)
+        {
+            // Redux's ASCII type-2 reader (FUN_004ce2f0) receives the fixed
+            // destination size, but parses with:
+            //
+            //   sscanf(line, "%*s = %[^\\n]s", dst)
+            //
+            // There is no scanset width. The terminating NUL therefore writes
+            // one byte past the destination as soon as payload length reaches
+            // the nominal capacity. Binary input uses the typed-size path and
+            // is deliberately excluded from these text-only checks.
+            const auto reportAsciiStringCapacity =
+                [&result](const std::string& field, const std::string& raw, size_t capacity)
+                {
+                    if (raw.size() < capacity)
+                        return;
+
+                    result.problems.push_back(
+                        field + " is " + std::to_string(raw.size()) +
+                        " bytes; Redux ASCII string reader writes the value plus NUL into a " +
+                        std::to_string(capacity) + "-byte buffer (safe maximum " +
+                        std::to_string(capacity - 1) + " bytes)");
+                };
+
+            reportAsciiStringCapacity("msn_filename", result.missionFilename, 16);
+            reportAsciiStringCapacity("TerrainName", result.terrainName, 100);
+
+            for (const ObjectRecord& rec : result.objects)
+            {
+                // PrjID is a different primitive: the ASCII type-7 reader
+                // copies at most eight non-whitespace bytes. It stays in-bounds
+                // but silently truncates an overlong class identifier.
+                if (rec.prjId.size() > 8)
+                {
+                    result.problems.push_back(
+                        "GameObject #" + std::to_string(rec.index) +
+                        " PrjID is " + std::to_string(rec.prjId.size()) +
+                        " bytes; ASCII fixed-width reader keeps only 8 bytes");
+                }
+
+                reportAsciiStringCapacity(
+                    "GameObject #" + std::to_string(rec.index) + " label",
+                    rec.label, 40);
+            }
+
+            for (const std::string& className : rtimeClassNames)
+                reportAsciiStringCapacity("Rtime classname (name)", className, 40);
         }
 
         if (result.ascii)
