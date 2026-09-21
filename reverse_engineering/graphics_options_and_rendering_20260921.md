@@ -5,8 +5,9 @@ Scope: stock Redux graphics only — options UI screen, what each control toggle
 and when, shadow/material-scheme primitive `FUN_00680fe0`, Glow compositor
 pipeline (`FUN_0044d2a0` / `FUN_00663aa0` + listeners), material-scheme
 architecture, view-mode `DAT_008fe240`, per-view record, sibling-compositor
-survey. Legacy 1.5 material is baseline context only. OpenShim/EXU appear
-solely in the appendix.
+survey, listener callbacks, shader equations, missing-scheme fallback, resource
+lifecycle. Legacy 1.5 material is baseline context only. OpenShim/EXU appear
+solely in the appendix (§10) and the invariant list (§15).
 
 Provenance key used throughout: **Proven** = literal decomp bytes or on-disk
 resource text. **Inferred** = consistent single-source mapping. **Unresolved**
@@ -86,7 +87,7 @@ options address range (Proven negative).
   `DAT_009455b0/b4 = FUN_00822ea0()+20000` deadline; reconciler `FUN_007ae480`
   (flush path, per-frame deadline path clearing the timer, ESC path) restores
   or stamps fallback tiers and re-invokes `FUN_00680fe0()` (mechanism Proven;
-  exact branch trigger mapping Medium-Low — preserved literally, see §3.5).
+  exact branch trigger mapping Medium-Low).
 
 ## 3. `FUN_00680fe0()` — shadow + material-scheme re-apply (Proven)
 
@@ -151,7 +152,7 @@ if (!FUN_00684ce0(0)) return;                    // frame gate (mutually recursi
 enable = (profile+0x28 == 1) && (DAT_008fe240 == 1) && (viewport->getVisibilityMask() == 1);
 if (runningState /*DAT_008e706c*/ != 9 /*loading, Medium*/ && (cached != enable || (!inited && !enable))) {
   if (!inited) {
-    inst = CompositorManager::addCompositor(viewport, Name /*"Glow", §5*/, 0);
+    inst = CompositorManager::addCompositor(viewport, Name /*"Glow", §4.3*/, 0);
     if (inst) {
       setCompositorEnabled(viewport, name, enable);
       +0x44 = new MatListener();                 // FUN_00662f60
@@ -189,33 +190,61 @@ program `StdQuad_Tex2a_vp` (`stdQuad.program`); fragment programs
 (glsles/glsl/HLSL4/HLSL/unified) — no per-RS techniques needed. The `glow`
 scheme (`BZBase.material:915-938`): ambient/diffuse = `$glow`, emissiveMap
 only — the glow mask is the emissive channel. `Glow/Null` is a *material*,
-`glow` a *scheme*, `glowMap` a *texture* — three distinct entities.
+`glow` a *scheme*, `glowMap` a *texture* — three distinct entities. Terrain's
+`glow` technique differs: `TerrainGlow_vertex/fragment`,
+`scene_blend alpha_blend`, `depth_func less_equal`
+(`BZTerrainBase.material:1068-1095`).
 
-### 4.4 Listeners (Proven)
+### 4.4 Listeners (Proven structure, Unresolved bodies)
 
-- `FUN_00662f60` → MatListener: pins material `Glow/Null` to
-  self-illumination black (reference no-glow state; further callbacks
-  untraced — Unresolved).
-- `FUN_00663210` → RTListener (CompositorInstance::Listener +
-  RenderTargetListener + RenderQueueListener, one vftable): resolves the
-  instance's `glowMap` texture, locks HardwarePixelBuffer 0 (pointer kept at
-  `+0x18`), registers on the target (`+0x70`) and hooks the RQ subobject into
-  `(*FUN_0044d2a0()+8)->vft+800` (scene-side dispatcher — method unpinned).
-  CPU bridge into the glow mask; `notify*` bodies untraced (Unresolved).
+RTTI + vftables (PDB `symbols.csv`, IMPORTED): `MatListener` one vftable
+(`8986632`), base `Ogre::MaterialManager::Listener`; `RTListener` three
+vftables (`8987156/180/232`, one per subobject), bases
+`CompositorInstance::Listener` + `RenderTargetListener` (+ second COL) —
+and the ctor explicitly constructs exactly those three bases.
+
+- `FUN_00662f60` is the **MatListener constructor** (Proven): caller
+  `00663aa0` does `operator_new(0xc)` first and keeps the pointer at record
+  `+0x44`. It pins material `Glow/Null` (`getByName`, self-illumination
+  forced black) and registers via the **two-argument
+  `MaterialManager::addListener(listener, schemeName)`**
+  (`OgreMaterialManager.h:281`, committed 1.10 header) with the string at
+  `DAT_00892124` — sized and placed exactly for `"glow\0"` (Medium-High).
+  Destructor path `FUN_006630c0` (vftable reset + `removeListener`,
+  `OgreMaterialManager.h:287`) ← deleting dtor `FUN_006631c0`, which has
+  **no callers** tree-wide — the listener is never unregistered
+  (Proven negative).
+- `MaterialManager::Listener` carries exactly **one** virtual,
+  `handleSchemeNotFound(schemeIndex, schemeName, originalMaterial, lodIndex,
+  rend)` (`OgreMaterialManager.h:103`). `MatListener` must implement it to
+  instantiate (Proven at interface level; body unmapped). Its only consistent
+  return, given the pinned black `Glow/Null`, is that technique
+  (Medium-High inference) — see §13 for the resulting fallback semantics.
+- `FUN_00663210` (RTListener ctor) resolves the instance's `glowMap` texture
+  (`getTextureInstanceName(...,0)` → `getByName`), takes buffer `(0,0)`,
+  retains `vft+0x40(0)` at `+0x18`, registers the RT subobject onward
+  (`+0x70`) and hooks the RQ subobject into
+  `(*FUN_0044d2a0()+8)->vft+800`. Whether `vft+0x40(0)` is a CPU lock
+  (`HBL_NORMAL=0` fits) is contradicted by `+0x18` being dereferenced as an
+  object — both readings recorded, neither closable statically. **No unlock,
+  no pixel read/modify, and no material/queue/parameter writes occur in the
+  ctor** (Proven). `notify*` override bodies are unmapped (Unresolved); Ogre
+  invocation timing follows the bound `glowMap` target by ABI (background,
+  not stock-observed).
 
 ## 5. Material-scheme architecture (Proven from script text)
 
 Defined in `common\BZ_MATERIALS\BZBase.material` + `BZTerrainBase.material`
 (the only two files declaring these schemes, full-tree `findstr`). One
-`abstract pass` per family × tier:
+`abstract pass` per family × tier (`BZBase.material:1-559`):
 
 `high/medium/low/lowest` × `pssm/plain/noshadow` → `Base<Tier><PSSM|Shadow|
-NoShadow>_vertex/fragment` shader pairs (12 pairs, `:1-559`). Every scheme
+NoShadow>_vertex/fragment` shader pairs (12 pairs). Every scheme
 has 3 LOD techniques (`lod_index 0` tier-native, 1/2 stepping down to cheaper
 `*NoShadow` passes). Plain vs `-noshadow` vs `-pssm` = different shader pairs
 (sampler sets); tiers = different pairs + shorter LOD chains. Materials
 without a scheme technique fall back to scheme-less techniques (Ogre fallback
-imports present; stock relies on it forwarm materials). `BZBaseCockpit`:
+imports present; stock relies on it for addon materials). `BZBaseCockpit`:
 `receive_shadows off`, all schemes mapped to `*NoShadow` — cockpit is
 shadow-invariant (only file with that flag). Switching schemes reselects
 techniques (compile-on-first-use hitch possible); stock does it live on every
@@ -280,3 +309,76 @@ Descriptive only — what stock demonstrably supports:
    scene exists (only precondition: live SceneManager).
 6. Hard limits: one viewport per view-record, one compositor instance per view
    (no removal path), shadow setup replaced wholesale per call.
+
+## 12. Shader equations (Proven — `pc/programs` sources)
+
+- **Downsample** (`downsample`, `dx9/glow.hlsl:18-29`): single tap at
+  `uv + invMapSize.xy`, then **`rgb *= rgb`** — squaring suppresses dim
+  pixels (threshold-by-squaring in render-target space; no threshold uniform).
+- **BlurH/V** (`blurH`/`blurV`, `:31-63`): 13-tap separable Gaussian, weights
+  `0.002216 … 0.199471 … 0.002216` (sum ≈ 1.0, normalized), offsets
+  `(i−6)·scaleGlowOffset` (`=2`) + 0.5 half-texel on the pass axis,
+  `invMapSize` auto-param. Symmetric kernel, no directional bias.
+- **Combine** (`main_ps`, `:65-75`): `scene + blur·glowPower`,
+  `glowPower = 2`. Pure additive on all four channels (alpha included); no
+  lerp, multiply, or tonemap in-shader.
+- **Glow-raster path**: `Textured_vertex` (wvp transform + depth varying) /
+  `Textured_fragment` (`diffuseTex·diffuseColor`, fog lerp to black —
+  `dx9/textured.hlsl`); single emissiveMap unit feeds `s0` by order.
+  Terrain variant `TerrainGlow_*` adds `y = heightOffset` displacement,
+  vertex-color alpha passthrough, `alpha_blend` + `less_equal` depth
+  (`dx9/terrain_glow.hlsl`, technique `BZTerrainBase.material:1068-1095`).
+- Quads share `StdQuad_Tex2a_vp` (`stdQuad.program`: SM4/SM3/GLSL/GLSLES
+  sources). All math is in render-target space with no encode/decode passes
+  (Inferred color-space note). Unresolved nit: the `$glow` ambient/diffuse
+  tint knobs have no visible shader consumer (`diffuseColor` unset
+  in-technique) — emissive texture dominates; tint efficacy unproven.
+
+## 13. Missing-`glow`-scheme fallback, definitive (Proven mechanism)
+
+1. Material **has** `scheme glow` → renders it, emissive-only (Proven).
+2. No `glow` scheme but normal techniques exist → Ogre scheme resolution
+   fails → `MatListener::handleSchemeNotFound` fires (interface-Proven,
+   §4.4) → `Glow/Null` (black, unlit, fog none) → contributes nothing to the
+   mask (role Medium-High, body Unresolved).
+3. No compatible technique at all → identical scheme-miss path → identical
+   black result. Cases 2 and 3 are indistinguishable by design.
+
+Net: arbitrary scene objects can never bloom incorrectly — worst case they
+render black into `glowMap`. The emissive-only design plus the black fallback
+is the complete answer.
+
+## 14. Resource lifecycle (Proven, no benchmarking)
+
+- Targets: `rt_output` + `glowMap` full-res, `rt0`/`rt1` half-res, all
+  `PF_R8G8B8` (~2.5× one framebuffer).
+- Per Glow-enabled frame: **2 scene renders** (main + `glowMap` re-render,
+  queues 10–90, shadows off) + **4 fullscreen quads**. Mask fill is bounded
+  (emissive-only shaders, shadowless, queue-clipped).
+- Allocated once on first `addCompositor` (guarded by record `+0x41`);
+  toggling reallocates nothing; listeners `new`'d once per view-record;
+  `removeCompositor` never called.
+- No pixel-readback sequence exists in evidence → no demonstrable GPU→CPU
+  synchronization. The `+0x18` buffer retention is registration bookkeeping
+  with two static readings (CPU-lock vs target-facet object) — Unresolved,
+  claimed by neither.
+
+## 15. Facts OpenShim must preserve
+
+1. Exactly one stock compositor exists (`Glow`); `addCompositor` /
+   `setCompositorEnabled` occur only in `FUN_00663aa0`, and nothing ever
+   removes it.
+2. Glow enablement is a three-way AND: profile `+0x28==1`, view-mode `==1`,
+   viewport mask `==1` — evaluated per view, cached, idempotent.
+3. Scheme-not-found fallback is global per scheme name (`addListener` with
+   `"glow"`), returning black — any new scheme name needs its own listener
+   or it falls back to scheme-less techniques.
+4. `FUN_00680fe0` may be re-invoked whenever a scene exists; viewport half
+   self-skips windowless.
+5. `FUN_0044d2a0()` carries no observable contract — never gate new work
+   on it.
+6. `MatListener` is never destroyed; registering a second same-scheme
+   listener would stack, not replace.
+7. Combine is additive with `glowPower=2`; any extension compositing into
+   `target_output` must preserve the `scene + blur·2` identity when Glow
+   is on.
