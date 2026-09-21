@@ -10,6 +10,7 @@
 
 #include "bzn_analysis.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -220,6 +221,71 @@ int main()
         for (const std::string& p : r.problems)
             found = found || p.find("GameObject size says 5 but the file has 3") != std::string::npos;
         Check(found, "object count: over-count reported");
+    }
+
+    // --- AOI count disagreeing with the blocks ------------------------------
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "2",
+            "[AOI]",
+            "undefptr = 0000000B",
+            "team [1] =",
+            "1",
+            "[AOI]",
+            "undefptr = 000000B9",
+            "team [1] =",
+            "2",
+        });
+        const Result r = Analyze(Build(lines));
+
+        Check(r.declaredAoiCount == "2", "AOI count: declared size read");
+        Check(r.aoiBlocks == 2, "AOI count: two blocks counted");
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("[AOIs] size") != std::string::npos;
+        Check(!found, "AOI count: matching count stays clean");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "1",
+            "[AOI]",
+            "undefptr = 0000000B",
+            "[AOI]",
+            "undefptr = 000000B9",
+        });
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("[AOIs] size says 1 but the file has 2") != std::string::npos;
+        Check(found, "AOI count: over-block mismatch reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "3",
+            "[AOI]",
+            "undefptr = 0000000B",
+            "[AOI]",
+            "undefptr = 000000B9",
+        });
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("[AOIs] size says 3 but the file has 2") != std::string::npos;
+        Check(found, "AOI count: under-block mismatch reported");
     }
 
     // --- path count disagreeing with the blocks -----------------------------
