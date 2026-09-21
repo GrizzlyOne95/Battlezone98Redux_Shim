@@ -275,9 +275,11 @@
     },
     {
       "name": "obj_rel_parent_matrix",
+      "pattern": "55 8B EC",
       "fallback": "0x0062E070",
       "prefer": "fallback",
-      "identity": "obj_rel_parent_matrix(MAT_3D* out, _OBJ76* object, _OBJ76* parent) on exact GOG Redux 2.2.301. Walker::UpdateWeaponAim 0x0060F320 calls it once per populated weapon slot with weapon+0x14 (hard) and craft+0xF4 (obj76), then consumes the returned matrix translation X/Z in the proven correction (-hardX,0,targetDistance-hardZ). HoverCraft::UpdateWeaponAim 0x005F0930, Wingman::UpdateWeaponAim 0x004EB590, and TurretTank::UpdateWeaponAim 0x005F27B0 independently call the same address with the same weapon hardpoint/craft-parent argument shape. BSim also maps legacy obj_rel_parent_matrix 0x004ECCA6 to Redux 0x0062E070."
+      "require_unique": true,
+      "identity": "obj_rel_parent_matrix(MAT_3D* out, _OBJ76* object, _OBJ76* parent) on exact GOG Redux 2.2.301. Walker::UpdateWeaponAim 0x0060F320 calls 0x0062E070 once per populated weapon slot with weapon+0x14 (hard) and craft+0xF4 (obj76), then consumes the returned matrix translation X/Z in the proven correction (-hardX,0,targetDistance-hardZ). HoverCraft::UpdateWeaponAim 0x005F0930, Wingman::UpdateWeaponAim 0x004EB590, and TurretTank::UpdateWeaponAim 0x005F27B0 independently call the same address with the same weapon hardpoint/craft-parent argument shape. BSim also maps legacy obj_rel_parent_matrix 0x004ECCA6 to Redux 0x0062E070. The deliberately generic prologue pattern is non-selecting under require_unique and exists only because the resolve schema requires a pattern; this entry is intentionally pinned to the qualified GOG fallback until an independently verified unique signature is recorded."
     },
     {
       "name": "Team::EnemyP(int)",
