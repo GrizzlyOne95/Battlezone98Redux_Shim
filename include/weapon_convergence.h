@@ -222,6 +222,49 @@ namespace BZROpenShim::WeaponConvergence
         return true;
     }
 
+    // Exact host-side equivalent of Redux Build_Directinal_Matrix
+    // (0x0081FA10): normalize front, derive right from world +Y unless nearly
+    // vertical, then up = front x right. This is the helper Walker uses for
+    // its local hardpoint correction matrix.
+    inline bool BuildDirectionalMatrix(
+        const Vec3& origin,
+        Vec3 direction,
+        Matrix& outMatrix)
+    {
+        if (!Normalize(direction))
+            return false;
+
+        Vec3 right = {};
+        const float horizontalLengthSquared =
+            direction.x * direction.x + direction.z * direction.z;
+        if (horizontalLengthSquared >= 0.02f)
+        {
+            right = Cross({ 0.0f, 1.0f, 0.0f }, direction);
+            if (!Normalize(right))
+                return false;
+        }
+        else
+        {
+            right = { 1.0f, 0.0f, 0.0f };
+        }
+
+        const Vec3 up = Cross(direction, right);
+        outMatrix = Identity();
+        outMatrix.rightX = right.x;
+        outMatrix.rightY = right.y;
+        outMatrix.rightZ = right.z;
+        outMatrix.upX = up.x;
+        outMatrix.upY = up.y;
+        outMatrix.upZ = up.z;
+        outMatrix.frontX = direction.x;
+        outMatrix.frontY = direction.y;
+        outMatrix.frontZ = direction.z;
+        outMatrix.positionX = origin.x;
+        outMatrix.positionY = origin.y;
+        outMatrix.positionZ = origin.z;
+        return IsFinite(outMatrix) && IsRotationOrthonormal(outMatrix);
+    }
+
     // Minimal-arc rotation carrying `from` onto `to`, in the same row-vector
     // convention as the engine matrices: v * result == to when v == from.
     // Rotating the whole existing basis by this keeps the barrel's roll and up
@@ -374,107 +417,71 @@ namespace BZROpenShim::WeaponConvergence
 
     // Walker-style convergence used by stock BZ1/BZR target convergence.
     //
-    // The explicit target supplies RANGE, not a world-space gimbal point.
-    // Walker::UpdateWeaponAim builds its correction from the hardpoint's
-    // lateral/forward offsets in the current stock aim frame:
+    // Redux 0x0060F320 preserves the BZ1 1.5 algorithm exactly. The explicit
+    // target contributes only center-to-center RANGE. The per-weapon correction
+    // consumes X/Z directly from:
     //
-    //     direction = (-hardpointX, 0, targetDistance - hardpointZ)
+    //   obj_rel_parent_matrix(weapon->hard, craft->obj)
     //
-    // In other words, the stock aim still decides where the craft is pointing;
-    // convergence only toes each fixed barrel inward so the horizontally
-    // separated hardpoints meet at the requested range. The Y component is
-    // intentionally left alone. This is why Walker convergence does not feel
-    // like magnetic aim toward the selected object's center.
+    // and builds:
+    //
+    //   direction = (-hardpointRelativeX, 0,
+    //                convergenceRange - hardpointRelativeZ)
+    //
+    // Build_Directinal_Matrix creates a zero-origin correction matrix from that
+    // vector, then Walker left-multiplies it into the stock weapon transform:
+    //
+    //   converged = correction * stockMountLocal
+    //
+    // This function deliberately does not derive offsets from the composed
+    // muzzle or use a world-space aim point. That was the pre-audit
+    // approximation and is not stock Walker geometry.
     inline SolveResult SolveWalkerStyleRange(
-        const Matrix& mountLocal,
-        const Matrix& mountWorld,
-        const Vec3& shooterPosition,
+        const Matrix& stockMountLocal,
+        float hardpointRelativeX,
+        float hardpointRelativeZ,
         float convergenceRange,
         Solution& outSolution)
     {
-        if (!IsFinite(mountWorld) || !IsRotationOrthonormal(mountWorld) ||
-            !IsFinite(mountLocal) || !IsRotationOrthonormal(mountLocal) ||
-            !std::isfinite(shooterPosition.x) ||
-            !std::isfinite(shooterPosition.y) ||
-            !std::isfinite(shooterPosition.z) ||
+        if (!IsFinite(stockMountLocal) ||
+            !IsRotationOrthonormal(stockMountLocal) ||
+            !std::isfinite(hardpointRelativeX) ||
+            !std::isfinite(hardpointRelativeZ) ||
             !std::isfinite(convergenceRange))
         {
             return SolveResult::DegenerateInput;
         }
 
-        if (convergenceRange < kMinTargetDistance)
-            return SolveResult::TargetTooClose;
-
-        const Matrix world = Multiply(mountLocal, mountWorld);
-        const Vec3 muzzle = Position(world);
-        Vec3 stockRight = { world.rightX, world.rightY, world.rightZ };
-        Vec3 stockFront = Front(world);
-        const Vec3 stockUp = Up(world);
-        if (!Normalize(stockRight) || !Normalize(stockFront))
-            return SolveResult::DegenerateInput;
-
-        const Vec3 shooterToMuzzle = {
-            muzzle.x - shooterPosition.x,
-            muzzle.y - shooterPosition.y,
-            muzzle.z - shooterPosition.z,
+        Vec3 correctionDirection = {
+            -hardpointRelativeX,
+            0.0f,
+            convergenceRange - hardpointRelativeZ,
         };
 
-        const float lateralOffset = Dot(shooterToMuzzle, stockRight);
-        const float forwardOffset = Dot(shooterToMuzzle, stockFront);
-        if (!std::isfinite(lateralOffset) || !std::isfinite(forwardOffset))
-            return SolveResult::DegenerateInput;
-
-        // Exact world-space equivalent of Walker's local
-        // (-hardpointX, 0, targetDistance-hardpointZ) vector.
-        Vec3 desired = {
-            stockRight.x * -lateralOffset +
-                stockFront.x * (convergenceRange - forwardOffset),
-            stockRight.y * -lateralOffset +
-                stockFront.y * (convergenceRange - forwardOffset),
-            stockRight.z * -lateralOffset +
-                stockFront.z * (convergenceRange - forwardOffset),
-        };
-
-        const float distanceSquared = Dot(desired, desired);
-        if (!std::isfinite(distanceSquared) ||
-            distanceSquared < kMinTargetDistance * kMinTargetDistance ||
-            !Normalize(desired))
+        Matrix correction = {};
+        if (!BuildDirectionalMatrix({ 0.0f, 0.0f, 0.0f },
+                                    correctionDirection,
+                                    correction))
         {
             return SolveResult::TargetTooClose;
         }
 
-        const float deviationCos = Dot(stockFront, desired);
-        if (!std::isfinite(deviationCos) || deviationCos < kMaxDeviationCos)
-            return SolveResult::ExceedsDeviationLimit;
-
-        Matrix arc = {};
-        if (!BuildArcRotation(stockFront, desired, stockUp, arc))
-            return SolveResult::DegenerateInput;
-
-        Matrix convergedWorld = Multiply(world, arc);
-        convergedWorld.positionX = world.positionX;
-        convergedWorld.positionY = world.positionY;
-        convergedWorld.positionZ = world.positionZ;
-
-        Matrix converged = Multiply(convergedWorld, Invert(mountWorld));
+        Matrix converged = Multiply(correction, stockMountLocal);
         if (!IsFinite(converged) || !IsRotationOrthonormal(converged))
             return SolveResult::DegenerateInput;
 
-        converged.positionX = mountLocal.positionX;
-        converged.positionY = mountLocal.positionY;
-        converged.positionZ = mountLocal.positionZ;
-
-        const Matrix verifyWorld = Multiply(converged, mountWorld);
-        float verifyCos = Dot(Front(verifyWorld), desired);
-        if (verifyCos > 1.0f)
-            verifyCos = 1.0f;
-        if (verifyCos < -1.0f)
-            verifyCos = -1.0f;
+        // A zero-origin correction left-multiplied into stockMountLocal leaves
+        // the stock translation unchanged. Reassert it explicitly so this
+        // contract stays obvious and regression-testable.
+        converged.positionX = stockMountLocal.positionX;
+        converged.positionY = stockMountLocal.positionY;
+        converged.positionZ = stockMountLocal.positionZ;
 
         outSolution.mountLocal = converged;
-        outSolution.muzzle = muzzle;
-        outSolution.residualDegrees =
-            std::acos(verifyCos) * (180.0f / 3.14159265358979f);
+        // Walker's correction is local-space and has no world-muzzle concept.
+        // Keep this zero rather than mislabel a mount-local point as world.
+        outSolution.muzzle = {};
+        outSolution.residualDegrees = 0.0f;
         return SolveResult::Converged;
     }
 
