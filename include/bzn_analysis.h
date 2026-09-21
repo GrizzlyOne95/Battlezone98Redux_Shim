@@ -46,6 +46,14 @@ namespace BZROpenShim::BznAnalysis
         std::string team;
         std::string seqno;
         std::string objAddr;
+        bool hasPrjId = false;
+        bool hasSeqno = false;
+        bool hasPos = false;
+        bool hasTeam = false;
+        bool hasLabel = false;
+        bool hasIsUser = false;
+        bool hasObjAddr = false;
+        bool hasTransform = false;
     };
 
     struct PathRecord
@@ -415,24 +423,50 @@ namespace BZROpenShim::BznAnalysis
             if (!current)
                 continue;
 
-            if (key == "PrjID" && current->prjId.empty())
-                current->prjId = value;
-            else if (key == "label" && current->label.empty())
+            if (key == "PrjID")
             {
-                current->label = value;
-                if (!value.empty())
-                    labelCounts[value]++;
+                current->hasPrjId = true;
+                if (current->prjId.empty())
+                    current->prjId = value;
             }
-            else if (key == "team" && current->team.empty())
-                current->team = value;
-            else if (key == "seqno" && current->seqno.empty())
+            else if (key == "seqno")
             {
-                current->seqno = value;
-                if (!value.empty())
-                    seqCounts[value]++;
+                current->hasSeqno = true;
+                if (current->seqno.empty())
+                {
+                    current->seqno = value;
+                    if (!value.empty())
+                        seqCounts[value]++;
+                }
             }
-            else if (key == "obj_addr" && current->objAddr.empty())
-                current->objAddr = value;
+            else if (key == "pos")
+                current->hasPos = true;
+            else if (key == "team")
+            {
+                current->hasTeam = true;
+                if (current->team.empty())
+                    current->team = value;
+            }
+            else if (key == "label")
+            {
+                current->hasLabel = true;
+                if (current->label.empty())
+                {
+                    current->label = value;
+                    if (!value.empty())
+                        labelCounts[value]++;
+                }
+            }
+            else if (key == "isUser")
+                current->hasIsUser = true;
+            else if (key == "obj_addr")
+            {
+                current->hasObjAddr = true;
+                if (current->objAddr.empty())
+                    current->objAddr = value;
+            }
+            else if (key == "transform")
+                current->hasTransform = true;
         }
 
         // Which object does the first non-CRLF terminator fall inside? Naming
@@ -446,6 +480,43 @@ namespace BZROpenShim::BznAnalysis
                     result.unsafeEnclosingObject = rec.index;
                 else
                     break;
+            }
+        }
+
+        if (result.ascii)
+        {
+            long parsedVersion = 0;
+            const bool versionKnown = detail::ParseDecimalLong(result.version, parsedVersion);
+            const bool requireTransform = versionKnown && parsedVersion > 1001;
+
+            for (const ObjectRecord& rec : result.objects)
+            {
+                std::vector<std::string> missing;
+                if (!rec.hasPrjId) missing.push_back("PrjID");
+                if (!rec.hasSeqno) missing.push_back("seqno");
+                if (!rec.hasPos) missing.push_back("pos");
+                if (!rec.hasTeam) missing.push_back("team");
+                if (!rec.hasLabel) missing.push_back("label");
+                if (!rec.hasIsUser) missing.push_back("isUser");
+                if (!rec.hasObjAddr) missing.push_back("obj_addr");
+                if (requireTransform && !rec.hasTransform) missing.push_back("transform");
+
+                if (!missing.empty())
+                {
+                    std::string fields;
+                    for (size_t i = 0; i < missing.size(); ++i)
+                    {
+                        if (i != 0)
+                            fields += ", ";
+                        fields += missing[i];
+                    }
+
+                    result.problems.push_back(
+                        "GameObject #" + std::to_string(rec.index) +
+                        " is missing required envelope field(s): " + fields +
+                        " (PrjID=" + (rec.prjId.empty() ? "?" : rec.prjId) +
+                        " label=" + (rec.label.empty() ? "?" : rec.label) + ")");
+                }
             }
         }
 
