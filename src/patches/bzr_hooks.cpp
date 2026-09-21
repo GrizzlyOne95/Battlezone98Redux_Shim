@@ -237,6 +237,7 @@ namespace BZROpenShim
     using FnRefreshWeaponTransform = void(__cdecl*)(void* weaponObject, void* transform);
     using FnObjRelParentMatrix = void* (__cdecl*)(void* outMatrix, void* object, void* parent);
     using FnGameObjectGetTarget = void* (__thiscall*)(void* craft);
+    using FnDistributedGetPosition = const float* (__thiscall*)(void* distributedSubobject);
     // Redux's ArtilleryProcess::DoAttack is not the zero-stack-argument method
     // described by the legacy 1.5 PDB. At the machine ABI it consumes four
     // stack words (the first is the hidden/result destination) and returns with
@@ -670,6 +671,7 @@ namespace BZROpenShim
         // GetClassLabel returns is the gameplay category ("wingman", "tank"...),
         // which has no faction prefix -- do not use it here.
         constexpr size_t kGameObjectClassSubObjOffset = 0x18;
+        constexpr size_t kGameObjectDistributedObjectOffset = 0x18;
         constexpr size_t kGameObjectClassOdfNameOffset = 0x30;
         constexpr size_t kGameObjectClassOdfNameMax = 8;
         constexpr uintptr_t kHudSpriteNameCountAddr = 0x00920F00;
@@ -14514,6 +14516,57 @@ namespace BZROpenShim
                     : "LAYOUT MISMATCH -- convergence offsets need re-deriving");
         }
 
+        // Exact position source used by Walker::UpdateWeaponAim:
+        // GameObject+0x18 is the DistributedObject interface, and vtable slot
+        // 3 (+0x0C) is GetPosition(). BZ1 1.5's imported signature confirms
+        // this virtual returns VECTOR_3D*. Calling through the interface keeps
+        // convergence range semantics aligned with stock instead of assuming
+        // the root OBJ76 translation is always interchangeable.
+        static bool TryGetWalkerGameObjectPosition(
+            void* gameObject,
+            float (&outPosition)[3])
+        {
+            outPosition[0] = 0.0f;
+            outPosition[1] = 0.0f;
+            outPosition[2] = 0.0f;
+            if (!gameObject)
+                return false;
+
+            __try
+            {
+                void* distributedSubobject =
+                    reinterpret_cast<uint8_t*>(gameObject) +
+                    kGameObjectDistributedObjectOffset;
+                void** vtable =
+                    *reinterpret_cast<void***>(distributedSubobject);
+                if (!vtable || !vtable[3])
+                    return false;
+
+                auto getPosition =
+                    reinterpret_cast<FnDistributedGetPosition>(vtable[3]);
+                const float* position = getPosition(distributedSubobject);
+                if (!position ||
+                    !std::isfinite(position[0]) ||
+                    !std::isfinite(position[1]) ||
+                    !std::isfinite(position[2]))
+                {
+                    return false;
+                }
+
+                outPosition[0] = position[0];
+                outPosition[1] = position[1];
+                outPosition[2] = position[2];
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outPosition[0] = 0.0f;
+                outPosition[1] = 0.0f;
+                outPosition[2] = 0.0f;
+                return false;
+            }
+        }
+
         struct ConvergenceRangeSample
         {
             float range = 0.0f;
@@ -14536,7 +14589,7 @@ namespace BZROpenShim
             }
 
             float shooterRaw[3] = {};
-            if (!TryGetGameObjectWorldPosition(craft, shooterRaw))
+            if (!TryGetWalkerGameObjectPosition(craft, shooterRaw))
                 return false;
 
             const float dx = reference.x - shooterRaw[0];
@@ -14581,7 +14634,7 @@ namespace BZROpenShim
                     return false;
 
                 float targetPosition[3] = {};
-                if (!TryGetGameObjectWorldPosition(target, targetPosition))
+                if (!TryGetWalkerGameObjectPosition(target, targetPosition))
                     return false;
 
                 return TryBuildConvergenceRangeSample(
@@ -14613,7 +14666,7 @@ namespace BZROpenShim
                 if (selectObject)
                 {
                     float objectPosition[3] = {};
-                    if (!TryGetGameObjectWorldPosition(selectObject, objectPosition))
+                    if (!TryGetWalkerGameObjectPosition(selectObject, objectPosition))
                         return false;
 
                     return TryBuildConvergenceRangeSample(
