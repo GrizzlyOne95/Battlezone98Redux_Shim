@@ -140,7 +140,7 @@ int main()
 
     // --- the misn04 shape: a bare-LF run inside one object ------------------
     {
-        // Lines 22..29 sit inside object #1 (header at index 17), which is the
+        // Lines 24..31 sit inside object #1 (header at index 19), which is the
         // same relationship the real file had: the run began in the position
         // block of the object the engine then died on.
         const std::string data = Build(SampleMission(), 24, 32);
