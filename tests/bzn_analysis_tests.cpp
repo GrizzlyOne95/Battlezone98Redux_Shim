@@ -530,6 +530,55 @@ int main()
             Check(p.find("sObject") == std::string::npos, "null sObject: not reported");
     }
 
+    // --- byte/encoding hazards ----------------------------------------------
+    {
+        std::string data = Build(SampleMission());
+        data.insert(0, "\xEF\xBB\xBF", 3);
+        const Result r = Analyze(data);
+
+        Check(r.utf8Bom, "byte hazards: UTF-8 BOM detected");
+        bool found = false;
+        for (const std::string& p : r.byteProblems)
+            found = found || p.find("UTF-8 BOM") != std::string::npos;
+        Check(found, "byte hazards: UTF-8 BOM reported");
+    }
+    {
+        std::string data("\xFF\xFE", 2);
+        data += "v\0e\0r\0s\0i\0o\0n\0";
+        const Result r = Analyze(data);
+
+        Check(r.utf16LeBom, "byte hazards: UTF-16 LE BOM detected");
+        bool found = false;
+        for (const std::string& p : r.byteProblems)
+            found = found || p.find("UTF-16 LE BOM") != std::string::npos;
+        Check(found, "byte hazards: UTF-16 LE reported before text parsing");
+    }
+    {
+        std::string data("\xFE\xFF", 2);
+        data += "\0v\0e\0r\0s\0i\0o\0n";
+        const Result r = Analyze(data);
+
+        Check(r.utf16BeBom, "byte hazards: UTF-16 BE BOM detected");
+        bool found = false;
+        for (const std::string& p : r.byteProblems)
+            found = found || p.find("UTF-16 BE BOM") != std::string::npos;
+        Check(found, "byte hazards: UTF-16 BE reported before text parsing");
+    }
+    {
+        std::string data = Build(SampleMission());
+        const size_t insertAt = data.find("label = player-1_hover");
+        data.insert(insertAt + 8, 1, '\0');
+        const Result r = Analyze(std::string_view(data.data(), data.size()));
+
+        Check(r.ascii, "byte hazards: embedded-NUL fixture remains identifiable as ASCII");
+        Check(r.embeddedNul, "byte hazards: embedded NUL detected");
+        Check(r.firstNulOffset != kNone, "byte hazards: first NUL offset recorded");
+        bool found = false;
+        for (const std::string& p : r.byteProblems)
+            found = found || p.find("embedded NUL byte at offset") != std::string::npos;
+        Check(found, "byte hazards: embedded NUL reported");
+    }
+
     // --- a binary save is recognised and skipped -----------------------------
     {
         std::vector<std::string> lines = SampleMission();
@@ -538,6 +587,15 @@ int main()
         const Result r = Analyze(data);
         Check(!r.ascii, "binary: not treated as ascii");
         Check(r.sawBinarySaveField, "binary: binarySave field was seen");
+
+        std::string withNul = data;
+        withNul.push_back('\0');
+        withNul.push_back('\0');
+        const Result binaryWithNul = Analyze(std::string_view(withNul.data(), withNul.size()));
+        bool falsePositive = false;
+        for (const std::string& p : binaryWithNul.byteProblems)
+            falsePositive = falsePositive || p.find("embedded NUL") != std::string::npos;
+        Check(!falsePositive, "binary: payload NUL bytes are not reported as ASCII corruption");
     }
 
     // --- an empty file must not crash or invent findings ---------------------
