@@ -311,6 +311,66 @@ int main()
         Check(found, "AOI count: under-block mismatch reported");
     }
 
+    // --- structural counts must be valid non-negative decimals --------------
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "3")] = "not-a-number";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("GameObject size is not a valid decimal count") !=
+                                 std::string::npos;
+        Check(found, "count sanity: invalid GameObject size reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {"[AOIs]", "size [1] =", "-1"});
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("[AOIs] size is negative: -1") != std::string::npos;
+        Check(found, "count sanity: negative AOI size reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t aiPaths = FindLine(lines, "[AiPaths]");
+        lines[aiPaths + 2] = "999999";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || (p.find("[AiPaths] count says 999999") != std::string::npos &&
+                              p.find("count is impossible") != std::string::npos);
+        Check(found, "count sanity: impossible AiPath block count reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstPointCount = FindLine(lines, "pointCount [1] =");
+        lines[firstPointCount + 1] = "oops";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("AiPath #0 pointCount is not a valid decimal count") !=
+                                 std::string::npos;
+        Check(found, "count sanity: invalid pointCount reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstPoints = FindLine(lines, "points [1] =");
+        lines[firstPoints] = "points [-1] =";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("AiPath #0 points array count is negative: -1") !=
+                                 std::string::npos;
+        Check(found, "count sanity: negative points array count reported");
+    }
+
     // --- AiPath pointCount and serialized points must agree -----------------
     {
         const Result r = Analyze(Build(SampleMission()));
