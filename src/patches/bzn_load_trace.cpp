@@ -99,8 +99,10 @@ namespace BZROpenShim
                 return {};
 
             std::string out(static_cast<size_t>(bytes), '\0');
+            BOOL usedDefaultChar = FALSE;
             if (WideCharToMultiByte(
-                    CP_ACP, 0, value, -1, out.data(), bytes, nullptr, nullptr) <= 0)
+                    CP_ACP, 0, value, -1, out.data(), bytes, nullptr, &usedDefaultChar) <= 0 ||
+                usedDefaultChar)
             {
                 return {};
             }
