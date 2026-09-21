@@ -41,7 +41,23 @@ void fixedfunc_vertex(
     oPosition = mul(wvpMat, iPosition);
     // Vertex diffuse * material diffuse. Fixed-function modulate semantics:
     // both contribute, alpha flows through for alpha-blended particles.
-    vColor = iColor * diffuseColor;
+    //
+    // iColor.bgra, not iColor. Every consumer of this entry point is NATIVE
+    // BZR geometry, whose vertex colours are ARGB DWORDs that D3D11 reads back
+    // in RGBA order. Every stock SM4 family that reads vertex colour corrects
+    // for that -- ui, uitexmat, untextured, sky, effect, simple_one_tex and
+    // terrain all ship `iColor.bgra`. These programs stand in for those
+    // families, so they must agree with them; without the correction a blue
+    // legacy material renders orange.
+    //
+    // The opposite rule holds for Ogre-generated vertices (TextArea,
+    // ParticleFX), which have already passed through the render system's
+    // convertColourValue and arrive in RGBA order -- correcting those swaps
+    // them a second time. This file does not have to tell the two apart:
+    // IsExcludedFromSynthesis() in dx11_legacy_material_compat.cpp rejects
+    // overlay, font, cursor, sprite, compositor and rtt materials before
+    // anything can reach these programs.
+    vColor = iColor.bgra * diffuseColor;
     // Texture matrix carries scroll_anim / rotate / scale from the source
     // pass without touching mod files on disk.
     vTexCoord = mul(texMatrix, float4(iTexCoord, 0.0, 1.0)).xy;
@@ -112,7 +128,8 @@ void fixedfunc_untextured_vertex(
 )
 {
     oPosition = mul(wvpMat, iPosition);
-    vColor = iColor * diffuseColor;
+    // Native BGRA correction, for the reason spelled out in fixedfunc_vertex.
+    vColor = iColor.bgra * diffuseColor;
     vDepth = oPosition.z;
 }
 
