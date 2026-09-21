@@ -545,13 +545,13 @@ int main()
     }
     {
         std::vector<std::string> lines = SampleMission();
-        lines[FindLine(lines, "obj_addr = 00000001")] = "obj_addr = 00000000";
+        lines[FindLine(lines, "obj_addr = 00000001")] = "obj_addr = 0";
         const Result r = Analyze(Build(lines));
 
         bool found = false;
         for (const std::string& p : r.problems)
             found = found ||
-                p.find("GameObject #0 obj_addr defines null pointer id 00000000") !=
+                p.find("GameObject #0 obj_addr defines null pointer id 0") !=
                     std::string::npos;
         Check(found, "pointer IDs: null GameObject obj_addr reported");
     }
@@ -581,19 +581,19 @@ int main()
     }
     {
         std::vector<std::string> lines = SampleMission();
-        lines[FindLine(lines, "old_ptr = 000000B9")] = "old_ptr = 0000000B";
+        lines[FindLine(lines, "old_ptr = 000000B9")] = "old_ptr = 0000000b";
         const Result r = Analyze(Build(lines));
 
         bool found = false;
         for (const std::string& p : r.problems)
             found = found ||
-                p.find("duplicate AiPath old_ptr 0000000B on paths #0 and #1") !=
+                p.find("duplicate AiPath old_ptr 0000000b on paths #0 and #1") !=
                     std::string::npos;
         Check(found, "pointer IDs: duplicate AiPath old_ptr reported");
     }
     {
         std::vector<std::string> lines = SampleMission();
-        lines[FindLine(lines, "old_ptr = 0000000B")] = "old_ptr = 00000001";
+        lines[FindLine(lines, "old_ptr = 0000000B")] = "old_ptr = 0x1";
         const Result r = Analyze(Build(lines));
 
         bool falseDuplicate = false;
