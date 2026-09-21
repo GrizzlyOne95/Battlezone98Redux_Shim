@@ -235,6 +235,7 @@ namespace BZROpenShim
     using FnUpdateWeaponAim = void(__thiscall*)(void* craft, float dt);
     using FnCarrierGetWeapon = void* (__thiscall*)(void* carrier, int slot);
     using FnRefreshWeaponTransform = void(__cdecl*)(void* weaponObject, void* transform);
+    using FnObjRelParentMatrix = void* (__cdecl*)(void* outMatrix, void* object, void* parent);
     // Redux's ArtilleryProcess::DoAttack is not the zero-stack-argument method
     // described by the legacy 1.5 PDB. At the machine ABI it consumes four
     // stack words (the first is the hidden/result destination) and returns with
@@ -1396,6 +1397,7 @@ namespace BZROpenShim
         // `mov ecx,[this+0x1A0]` / `call 0x00417F60`).
         constexpr size_t kCraftCarrierOffset = 0x1A0;
         constexpr size_t kWeaponObjectOffset = 0x10;
+        constexpr size_t kWeaponHardpointOffset = 0x14;
         // The weapon's _OBJ76 carries its MAT_3D at kObj76TransformOffset, not
         // at the object head. Stock pushes obj+0x20 into RefreshWeaponTransform
         // at 0x005F0A38.
@@ -14520,6 +14522,17 @@ namespace BZROpenShim
             auto refreshWeaponTransform =
                 reinterpret_cast<FnRefreshWeaponTransform>(kRefreshWeaponTransformAddr);
 
+            static FnObjRelParentMatrix objRelParentMatrix = nullptr;
+            if (!objRelParentMatrix)
+            {
+                const uint32_t address =
+                    HookEngine::ResolveNamedAddress("obj_rel_parent_matrix");
+                if (address == 0)
+                    return;
+                objRelParentMatrix =
+                    reinterpret_cast<FnObjRelParentMatrix>(address);
+            }
+
             __try
             {
                 if (*reinterpret_cast<void**>(kLocalUserObjectPtrAddr) != craft)
@@ -14527,19 +14540,15 @@ namespace BZROpenShim
 
                 void* carrier = *reinterpret_cast<void**>(
                     reinterpret_cast<uint8_t*>(craft) + kCraftCarrierOffset);
-                if (!carrier)
+                void* craftObject = *reinterpret_cast<void**>(
+                    reinterpret_cast<uint8_t*>(craft) + kGameObjectObjOffset);
+                if (!carrier || !craftObject)
                     return;
 
-                // Reticle convergence is intentionally the same gameplay model
-                // as Walker target convergence. The reticle supplies the RANGE
-                // at which fixed hardpoints toe inward; it does not turn each
-                // barrel into a magnetic world-point gimbal.
-                //
-                // Match Reticle::Simulate's source precedence so the range is
-                // current: an object under the crosshair wins, otherwise use
-                // the current terrain hit. An object's center is used only to
-                // measure range, exactly as Walker uses its explicit target's
-                // position for Dist3D -- we never aim the barrels at that center.
+                // Reticle convergence uses the exact stock Walker geometry.
+                // Only the RANGE source differs: an explicit Walker target gets
+                // its range from GetTarget/GetPosition, while this feature gets
+                // the range from the smart reticle without requiring a lock.
                 ConvergenceVec3 rangeReference = {};
                 const char* rangeSource = "ground";
                 void* selectObject =
@@ -14558,9 +14567,6 @@ namespace BZROpenShim
                 }
                 else
                 {
-                    // No object under the crosshair and no ground hit this
-                    // frame means there is no trustworthy reticle range. gPos
-                    // is stale in that state, so retain stock aim.
                     if (*reinterpret_cast<const int*>(kSmartReticleGroundHitAddr) == 0)
                     {
                         LogPlayerConvergenceSkyStandDownOnce();
@@ -14580,30 +14586,19 @@ namespace BZROpenShim
                 float shooterRaw[3] = {};
                 if (!TryGetGameObjectWorldPosition(craft, shooterRaw))
                     return;
-                const ConvergenceVec3 shooterPosition = {
-                    shooterRaw[0],
-                    shooterRaw[1],
-                    shooterRaw[2],
-                };
 
-                const float rangeDx = rangeReference.x - shooterPosition.x;
-                const float rangeDy = rangeReference.y - shooterPosition.y;
-                const float rangeDz = rangeReference.z - shooterPosition.z;
+                const float rangeDx = rangeReference.x - shooterRaw[0];
+                const float rangeDy = rangeReference.y - shooterRaw[1];
+                const float rangeDz = rangeReference.z - shooterRaw[2];
                 const float rangeSquared =
                     rangeDx * rangeDx + rangeDy * rangeDy + rangeDz * rangeDz;
-                if (!std::isfinite(rangeSquared) ||
-                    rangeSquared <
-                        WeaponConvergence::kMinTargetDistance *
-                        WeaponConvergence::kMinTargetDistance)
-                {
+                if (!std::isfinite(rangeSquared) || rangeSquared < 0.0f)
                     return;
-                }
                 const float convergenceRange = std::sqrt(rangeSquared);
 
                 int retargeted = 0;
-                int clamped = 0;
-                ConvergenceVec3 lastMuzzle = {};
-                float lastResidualDegrees = 0.0f;
+                float lastHardpointX = 0.0f;
+                float lastHardpointZ = 0.0f;
                 for (int slot = 0; slot < kConvergenceWeaponSlotCount; ++slot)
                 {
                     void* weapon = carrierGetWeapon(carrier, slot);
@@ -14612,22 +14607,27 @@ namespace BZROpenShim
 
                     void* weaponObject = *reinterpret_cast<void**>(
                         reinterpret_cast<uint8_t*>(weapon) + kWeaponObjectOffset);
-                    if (!weaponObject)
+                    void* hardpoint = *reinterpret_cast<void**>(
+                        reinterpret_cast<uint8_t*>(weapon) + kWeaponHardpointOffset);
+                    if (!weaponObject || !hardpoint)
                         continue;
 
-                    const ConvergenceMatrix mountWorld =
-                        *reinterpret_cast<const ConvergenceMatrix*>(
-                            reinterpret_cast<const uint8_t*>(weapon) +
-                            kWeaponMountWorldMatrixOffset);
-                    if (!WeaponConvergence::IsFinite(mountWorld) ||
-                        !WeaponConvergence::IsRotationOrthonormal(mountWorld))
+                    // Exact Redux Walker input:
+                    // obj_rel_parent_matrix(weapon->hard, craft->obj).
+                    ConvergenceMatrix hardpointRelative = {};
+                    objRelParentMatrix(
+                        &hardpointRelative,
+                        hardpoint,
+                        craftObject);
+                    const float hardpointX =
+                        static_cast<float>(hardpointRelative.positionX);
+                    const float hardpointZ =
+                        static_cast<float>(hardpointRelative.positionZ);
+                    if (!std::isfinite(hardpointX) ||
+                        !std::isfinite(hardpointZ))
                     {
-                        LogPlayerConvergenceMountFault(weapon, slot, mountWorld);
                         continue;
                     }
-
-                    LogPlayerConvergenceLayoutCrossCheck(
-                        weapon, WeaponConvergence::Invert(mountWorld));
 
                     auto* transform = reinterpret_cast<ConvergenceMatrix*>(
                         reinterpret_cast<uint8_t*>(weaponObject) +
@@ -14637,22 +14637,17 @@ namespace BZROpenShim
                     const WeaponConvergence::SolveResult result =
                         WeaponConvergence::SolveWalkerStyleRange(
                             *transform,
-                            mountWorld,
-                            shooterPosition,
+                            hardpointX,
+                            hardpointZ,
                             convergenceRange,
                             solution);
-                    if (result == WeaponConvergence::SolveResult::ExceedsDeviationLimit)
-                    {
-                        ++clamped;
-                        continue;
-                    }
                     if (result != WeaponConvergence::SolveResult::Converged)
                         continue;
 
                     *transform = solution.mountLocal;
                     refreshWeaponTransform(weaponObject, transform);
-                    lastResidualDegrees = solution.residualDegrees;
-                    lastMuzzle = solution.muzzle;
+                    lastHardpointX = hardpointX;
+                    lastHardpointZ = hardpointZ;
                     ++retargeted;
                 }
 
@@ -14667,20 +14662,17 @@ namespace BZROpenShim
                     {
                         g_PlayerReticleConvergenceLastLogTick = now;
                         ++g_PlayerReticleConvergenceLogCount;
-                        Log(L"[CONVERGE] player Walker-style reticle convergence applied to %d hardpoint(s) "
-                            L"(clamped=%d) rangeSource=%hs muzzle=(%.1f, %.1f, %.1f) "
-                            L"rangeReference=(%.1f, %.1f, %.1f) range=%.1f residualError=%.3fdeg\n",
+                        Log(L"[CONVERGE] player exact-Walker reticle convergence applied to %d hardpoint(s) "
+                            L"rangeSource=%hs rangeReference=(%.1f, %.1f, %.1f) "
+                            L"range=%.1f lastHardpointXZ=(%.3f, %.3f)\n",
                             retargeted,
-                            clamped,
                             rangeSource,
-                            static_cast<double>(lastMuzzle.x),
-                            static_cast<double>(lastMuzzle.y),
-                            static_cast<double>(lastMuzzle.z),
                             static_cast<double>(rangeReference.x),
                             static_cast<double>(rangeReference.y),
                             static_cast<double>(rangeReference.z),
                             static_cast<double>(convergenceRange),
-                            static_cast<double>(lastResidualDegrees));
+                            static_cast<double>(lastHardpointX),
+                            static_cast<double>(lastHardpointZ));
                     }
                 }
             }
