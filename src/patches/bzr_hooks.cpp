@@ -14574,19 +14574,26 @@ namespace BZROpenShim
                     reinterpret_cast<FnGameObjectGetTarget>(address);
             }
 
-            void* target = gameObjectGetTarget(craft);
-            if (!target)
-                return false;
+            __try
+            {
+                void* target = gameObjectGetTarget(craft);
+                if (!target)
+                    return false;
 
-            float targetPosition[3] = {};
-            if (!TryGetGameObjectWorldPosition(target, targetPosition))
-                return false;
+                float targetPosition[3] = {};
+                if (!TryGetGameObjectWorldPosition(target, targetPosition))
+                    return false;
 
-            return TryBuildConvergenceRangeSample(
-                craft,
-                { targetPosition[0], targetPosition[1], targetPosition[2] },
-                "target",
-                outSample);
+                return TryBuildConvergenceRangeSample(
+                    craft,
+                    { targetPosition[0], targetPosition[1], targetPosition[2] },
+                    "target",
+                    outSample);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
         }
 
         static bool TryGetReticleConvergenceRange(
@@ -14596,40 +14603,48 @@ namespace BZROpenShim
             if (!craft)
                 return false;
 
-            if (*reinterpret_cast<void**>(kLocalUserObjectPtrAddr) != craft)
-                return false;
-
-            void* selectObject =
-                *reinterpret_cast<void* const*>(kSmartReticleSelectObjectAddr);
-            if (selectObject)
+            __try
             {
-                float objectPosition[3] = {};
-                if (!TryGetGameObjectWorldPosition(selectObject, objectPosition))
+                if (*reinterpret_cast<void**>(kLocalUserObjectPtrAddr) != craft)
                     return false;
+
+                void* selectObject =
+                    *reinterpret_cast<void* const*>(kSmartReticleSelectObjectAddr);
+                if (selectObject)
+                {
+                    float objectPosition[3] = {};
+                    if (!TryGetGameObjectWorldPosition(selectObject, objectPosition))
+                        return false;
+
+                    return TryBuildConvergenceRangeSample(
+                        craft,
+                        { objectPosition[0], objectPosition[1], objectPosition[2] },
+                        "reticle-object",
+                        outSample);
+                }
+
+                // No object under the crosshair and no ground hit this frame
+                // means gPos is stale. Stand down rather than reuse an old range.
+                if (*reinterpret_cast<const int*>(kSmartReticleGroundHitAddr) == 0)
+                {
+                    LogPlayerConvergenceSkyStandDownOnce();
+                    return false;
+                }
 
                 return TryBuildConvergenceRangeSample(
                     craft,
-                    { objectPosition[0], objectPosition[1], objectPosition[2] },
-                    "reticle-object",
+                    *reinterpret_cast<const ConvergenceVec3*>(
+                        kSmartReticlePositionAddr),
+                    "reticle-ground",
                     outSample);
             }
-
-            // No object under the crosshair and no ground hit this frame means
-            // gPos is stale. Stand down rather than reuse an old range.
-            if (*reinterpret_cast<const int*>(kSmartReticleGroundHitAddr) == 0)
+            __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                LogPlayerConvergenceSkyStandDownOnce();
                 return false;
             }
-
-            return TryBuildConvergenceRangeSample(
-                craft,
-                *reinterpret_cast<const ConvergenceVec3*>(kSmartReticlePositionAddr),
-                "reticle-ground",
-                outSample);
         }
 
-        // Shared exact-Walker hardpoint post-pass.
+        // Shared exact-Walker hardpoint post-pass.        // Shared exact-Walker hardpoint post-pass.
         //
         // This is the convergence mechanism for both public features. The only
         // intended distinction is the provider of ConvergenceRangeSample:
