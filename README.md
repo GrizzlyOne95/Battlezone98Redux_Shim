@@ -301,7 +301,7 @@ openshim.ini
 including:
 
 - smart reticle range
-- weapon and player reticle convergence
+- weapon convergence on explicitly targeted craft, plus targetless smart-reticle convergence
 - improved scavenger targeting
 - turret aim-pitch limits
 - turbo behavior
