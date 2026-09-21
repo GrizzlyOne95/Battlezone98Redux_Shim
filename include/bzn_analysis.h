@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -222,6 +223,30 @@ namespace BZROpenShim::BznAnalysis
             return true;
         }
 
+        inline bool IsNonFiniteNumber(std::string_view text)
+        {
+            const std::string_view trimmed = Trim(text);
+            if (trimmed.empty())
+                return false;
+
+            std::string copy(trimmed);
+            char* end = nullptr;
+            errno = 0;
+            const double parsed = std::strtod(copy.c_str(), &end);
+            if (end == copy.c_str() || !end || *end != '\0' || errno == ERANGE)
+                return false;
+
+            return !std::isfinite(parsed);
+        }
+
+        inline bool IsTransformComponent(std::string_view key)
+        {
+            return key == "right_x" || key == "right_y" || key == "right_z" ||
+                   key == "up_x" || key == "up_y" || key == "up_z" ||
+                   key == "front_x" || key == "front_y" || key == "front_z" ||
+                   key == "posit_x" || key == "posit_y" || key == "posit_z";
+        }
+
         inline bool ParsePointerId(std::string_view text, uint32_t& value)
         {
             const std::string_view trimmed = Trim(text);
@@ -382,6 +407,8 @@ namespace BZROpenShim::BznAnalysis
         bool inAois = false;
         bool expectAoiCount = false;
         bool inPaths = false;
+        bool inObjectPosition = false;
+        bool inObjectTransform = false;
         bool expectPathCount = false;
 
         std::string key;
@@ -403,6 +430,8 @@ namespace BZROpenShim::BznAnalysis
                 currentPath = nullptr;
                 inAois = false;
                 inPaths = false;
+                inObjectPosition = false;
+                inObjectTransform = false;
                 continue;
             }
             if (IsSection(text, "AOIs"))
@@ -413,6 +442,8 @@ namespace BZROpenShim::BznAnalysis
                 inAois = true;
                 expectAoiCount = true;
                 inPaths = false;
+                inObjectPosition = false;
+                inObjectTransform = false;
                 continue;
             }
             if (IsSection(text, "AOI"))
@@ -424,6 +455,8 @@ namespace BZROpenShim::BznAnalysis
                 result.aois.push_back(rec);
                 currentAoi = &result.aois.back();
                 currentPath = nullptr;
+                inObjectPosition = false;
+                inObjectTransform = false;
                 result.aoiBlocks++;
                 continue;
             }
@@ -434,6 +467,8 @@ namespace BZROpenShim::BznAnalysis
                 currentPath = nullptr;
                 inAois = false;
                 inPaths = true;
+                inObjectPosition = false;
+                inObjectTransform = false;
                 expectPathCount = true;
                 continue;
             }
@@ -446,6 +481,8 @@ namespace BZROpenShim::BznAnalysis
                 rec.headerLine = i + 1;
                 result.paths.push_back(rec);
                 currentPath = &result.paths.back();
+                inObjectPosition = false;
+                inObjectTransform = false;
                 result.pathBlocks++;
                 continue;
             }
@@ -454,6 +491,8 @@ namespace BZROpenShim::BznAnalysis
                 current = nullptr;
                 currentAoi = nullptr;
                 currentPath = nullptr;
+                inObjectPosition = false;
+                inObjectTransform = false;
                 continue;
             }
 
@@ -504,6 +543,41 @@ namespace BZROpenShim::BznAnalysis
             if (currentAoi && key == "undefptr" && currentAoi->pathRef.empty())
                 currentAoi->pathRef = value;
 
+            if (current)
+            {
+                if (key == "pos")
+                {
+                    inObjectPosition = true;
+                    inObjectTransform = false;
+                }
+                else if (key == "team" || key == "label" || key == "isUser" ||
+                         key == "obj_addr")
+                {
+                    inObjectPosition = false;
+                }
+                else if (key == "transform")
+                {
+                    inObjectPosition = false;
+                    inObjectTransform = true;
+                }
+
+                if (inObjectPosition && (key == "x" || key == "y" || key == "z") &&
+                    detail::IsNonFiniteNumber(value))
+                {
+                    result.problems.push_back(
+                        "GameObject #" + std::to_string(current->index) +
+                        " pos." + key + " is non-finite: " + value);
+                }
+
+                if (inObjectTransform && detail::IsTransformComponent(key) &&
+                    detail::IsNonFiniteNumber(value))
+                {
+                    result.problems.push_back(
+                        "GameObject #" + std::to_string(current->index) +
+                        " transform." + key + " is non-finite: " + value);
+                }
+            }
+
             if (currentPath)
             {
                 if (key == "old_ptr" && currentPath->oldPtr.empty())
@@ -518,9 +592,25 @@ namespace BZROpenShim::BznAnalysis
                         currentPath->declaredPoints = bracketCount;
                 }
                 else if (currentPath->sawPoints && key == "x")
+                {
                     currentPath->xComponents++;
+                    if (detail::IsNonFiniteNumber(value))
+                    {
+                        result.problems.push_back(
+                            "AiPath #" + std::to_string(currentPath->index) +
+                            " points.x is non-finite: " + value);
+                    }
+                }
                 else if (currentPath->sawPoints && key == "z")
+                {
                     currentPath->zComponents++;
+                    if (detail::IsNonFiniteNumber(value))
+                    {
+                        result.problems.push_back(
+                            "AiPath #" + std::to_string(currentPath->index) +
+                            " points.z is non-finite: " + value);
+                    }
+                }
             }
 
             if (!current)
