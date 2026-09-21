@@ -7,6 +7,13 @@
 // off     - no clutter. The control: what Achilles looks like bare.
 scenario = "ladder"
 
+// closeup is the diagnostic: three fat patches at arm's length, lifted 0.02, 3
+// and 10 units above the terrain height the engine reports, with no terrain
+// filter. If none appear, the problem is the material or the render path; if
+// the lifted ones appear and the flush one does not, the sampled height is not
+// the datum the terrain renders at.
+closeupScale = 3.0
+
 // Supplied by Campaign Reimagined. The mission logs a clear refusal and
 // carries on if they are not loaded, rather than failing to start.
 mesh = "crgrass.mesh"
@@ -31,7 +38,17 @@ firstDistance = 70.0
 // says the ground is one of terrainTypes -- so grass stays out of the river
 // and off the rock. Turn it off to see what slope-only placement does.
 restrictToTerrainTypes = 1
-terrainTypes = "0"
+// Achilles type 1 is WOODED ground, not tree geometry -- grass belongs on it
+// just as much as on type 0. Restricting this to "0" is what made the first
+// working build place nothing: the spawn faces a wooded corridor, so all five
+// patches landed on type 1 and were correctly rejected.
+terrainTypes = "0 1"
+
+// Scan for a bearing whose ladder footprint actually lands on terrainTypes,
+// rather than trusting where the player happens to be looking. Facing wins
+// when it is within 5 percentage points, so the ladder stays in view when it
+// can. Set to 0 to always use facing.
+aimAtAcceptableGround = 1
 matFile = "lcbveg.mat"
 
 // bzfile.dll and TerrainClutter.lua both live inside the Campaign Reimagined
