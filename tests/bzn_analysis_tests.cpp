@@ -123,8 +123,10 @@ int main()
         Check(r.objects.size() == 3, "clean: three GameObject blocks");
         Check(r.pathBlocks == 2, "clean: two AiPath blocks");
         Check(r.declaredPathCount == "2", "clean: declared path count read");
+        Check(!r.endings.unsafe(), "clean: CRLF-only endings are safe");
         Check(!r.endings.mixed(), "clean: line endings uniform");
         Check(r.endings.bareLf == 0, "clean: no bare LF");
+        Check(r.endings.bareCr == 0, "clean: no bare CR");
         Check(r.problems.empty(), "clean: no structural problems");
 
         Check(r.objects[1].prjId == "sfield", "clean: object #1 ODF");
@@ -141,12 +143,14 @@ int main()
         const std::string data = Build(SampleMission(), 22, 30);
         const Result r = Analyze(data);
 
+        Check(r.endings.unsafe(), "mixed: detected as unsafe");
         Check(r.endings.mixed(), "mixed: detected as mixed");
         Check(r.endings.bareLf == 8, "mixed: counted the bare-LF lines");
+        Check(r.endings.bareCr == 0, "mixed: no bare CR");
         Check(r.endings.crlf > 0, "mixed: still counted the CRLF lines");
-        Check(r.endings.firstBareLine == 23, "mixed: located the first bare LF (1-based)");
-        Check(r.mixedEnclosingObject == 1, "mixed: named the enclosing GameObject");
-        Check(r.objects[r.mixedEnclosingObject].prjId == "sfield",
+        Check(r.endings.firstUnsafeLine == 23, "mixed: located the first unsafe terminator (1-based)");
+        Check(r.unsafeEnclosingObject == 1, "mixed: named the enclosing GameObject");
+        Check(r.objects[r.unsafeEnclosingObject].prjId == "sfield",
               "mixed: enclosing object carries its ODF for the report");
     }
 
@@ -154,19 +158,43 @@ int main()
     {
         const std::string data = Build(SampleMission(), 1, 3);
         const Result r = Analyze(data);
-        Check(r.endings.mixed(), "header-mixed: detected");
-        Check(r.mixedEnclosingObject == kNone, "header-mixed: no enclosing object");
+        Check(r.endings.unsafe(), "header-mixed: detected as unsafe");
+        Check(r.endings.mixed(), "header-mixed: detected as mixed");
+        Check(r.unsafeEnclosingObject == kNone, "header-mixed: no enclosing object");
     }
 
-    // --- a uniformly LF file is not "mixed" ---------------------------------
+    // --- uniformly LF is unsafe even though it is not mixed ------------------
     {
         std::string data;
         for (const std::string& line : SampleMission())
             data += line + "\n";
         const Result r = Analyze(data);
-        Check(!r.endings.mixed(), "uniform LF: not reported as mixed");
+        Check(r.endings.unsafe(), "uniform LF: reported as unsafe");
+        Check(!r.endings.mixed(), "uniform LF: not falsely reported as mixed");
         Check(r.endings.crlf == 0, "uniform LF: no CRLF counted");
-        Check(r.objects.size() == 3, "uniform LF: still parses");
+        Check(r.endings.bareLf == SampleMission().size(), "uniform LF: every terminator counted");
+        Check(r.endings.firstUnsafeLine == 1, "uniform LF: first unsafe terminator is line 1");
+        Check(r.objects.size() == 3, "uniform LF: still parses for diagnostics");
+    }
+
+    // --- a bare CR amid CRLF is unsafe and mapped to its object ---------------
+    {
+        const std::vector<std::string> lines = SampleMission();
+        std::string data;
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            data += lines[i];
+            data += (i >= 22 && i < 24) ? "\r" : "\r\n";
+        }
+
+        const Result r = Analyze(data);
+        Check(r.endings.unsafe(), "bare CR: detected as unsafe");
+        Check(r.endings.mixed(), "bare CR: mixed with CRLF");
+        Check(r.endings.bareCr == 2, "bare CR: counted");
+        Check(r.endings.bareLf == 0, "bare CR: no bare LF");
+        Check(r.endings.firstUnsafeLine == 23, "bare CR: first unsafe terminator located");
+        Check(r.unsafeEnclosingObject == 1, "bare CR: enclosing GameObject identified");
+        Check(r.objects.size() == 3, "bare CR: parser still recovers all objects for diagnostics");
     }
 
     // --- path count disagreeing with the blocks -----------------------------
