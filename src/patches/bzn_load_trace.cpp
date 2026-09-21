@@ -125,39 +125,38 @@ namespace BZROpenShim
         {
             const auto& endings = report.endings;
 
-            if (!endings.mixed())
+            if (!endings.unsafe())
             {
-                Log(L"[BZNLOAD] %s line endings uniform (%zu %hs)\n",
-                    name,
-                    endings.crlf ? endings.crlf : endings.bareLf,
-                    endings.crlf ? "CRLF" : "LF");
+                Log(L"[BZNLOAD] %s line endings safe (%zu CRLF lines)\n",
+                    name, endings.crlf);
                 return;
             }
 
-            Log(L"[BZNLOAD] *** %s HAS MIXED LINE ENDINGS: %zu CRLF lines, %zu bare-LF lines\n",
-                name, endings.crlf, endings.bareLf);
-            Log(L"[BZNLOAD] *** The engine reads this file as CRLF lines, so a bare-LF run collapses\n");
-            Log(L"[BZNLOAD] *** into one unparseable line and object loading stops there.\n");
+            Log(L"[BZNLOAD] *** %s HAS %hs LINE ENDINGS: %zu CRLF lines, %zu bare-LF lines, %zu bare-CR lines\n",
+                name,
+                endings.mixed() ? "MIXED/UNSAFE" : "UNSAFE",
+                endings.crlf, endings.bareLf, endings.bareCr);
+            Log(L"[BZNLOAD] *** ASCII BZN files must use CRLF exclusively. Bare LF or bare CR terminators\n");
+            Log(L"[BZNLOAD] *** can collapse or corrupt the engine's line-oriented parse and abort mission loading.\n");
 
-            if (report.mixedEnclosingObject != BznAnalysis::kNone)
+            if (report.unsafeEnclosingObject != BznAnalysis::kNone)
             {
-                const auto& rec = report.objects[report.mixedEnclosingObject];
-                Log(L"[BZNLOAD] *** First bare LF is line %zu, inside GameObject #%zu "
-                    L"(PrjID=%hs label=%hs). Expect the load to stop at obj #%zu.\n",
-                    endings.firstBareLine, rec.index,
+                const auto& rec = report.objects[report.unsafeEnclosingObject];
+                Log(L"[BZNLOAD] *** First non-CRLF terminator is line %zu, inside GameObject #%zu "
+                    L"(PrjID=%hs label=%hs). Expect loading to fail at or after obj #%zu.\n",
+                    endings.firstUnsafeLine, rec.index,
                     rec.prjId.empty() ? "?" : rec.prjId.c_str(),
                     rec.label.empty() ? "?" : rec.label.c_str(),
                     rec.index);
             }
             else
             {
-                Log(L"[BZNLOAD] *** First bare LF is line %zu, before the first GameObject.\n",
-                    endings.firstBareLine);
+                Log(L"[BZNLOAD] *** First non-CRLF terminator is line %zu, before the first GameObject.\n",
+                    endings.firstUnsafeLine);
             }
 
-            Log(L"[BZNLOAD] *** Fix: rewrite with uniform CRLF. Under git the file may still report\n");
-            Log(L"[BZNLOAD] *** as unmodified, because autocrlf normalizes it to the same blob --\n");
-            Log(L"[BZNLOAD] *** restore it with: rm <file> && git checkout -- <file>\n");
+            Log(L"[BZNLOAD] *** Fix: rewrite the entire ASCII BZN using uniform CRLF line endings.\n");
+            Log(L"[BZNLOAD] *** Git may still report the file clean because autocrlf can normalize the bytes.\n");
         }
 
         void EmitReport(const wchar_t* path, const std::vector<char>& data)
@@ -190,7 +189,7 @@ namespace BZROpenShim
             for (const std::string& problem : report.problems)
                 Log(L"[BZNLOAD] *** %s: %hs\n", name, problem.c_str());
 
-            if (report.problems.empty() && !report.endings.mixed())
+            if (report.problems.empty() && !report.endings.unsafe())
                 Log(L"[BZNLOAD] %s structural checks passed\n", name);
 
             if (!g_Verbose)
