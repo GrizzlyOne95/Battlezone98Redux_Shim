@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <limits>
 #include <string>
@@ -215,6 +216,42 @@ namespace BZROpenShim::BznAnalysis
             const long parsed = std::strtol(copy.c_str(), &end, 10);
             if (end == copy.c_str() || !end || *end != '\0' || errno == ERANGE)
                 return false;
+
+            value = parsed;
+            return true;
+        }
+
+        inline bool ParsePointerId(std::string_view text, uint32_t& value)
+        {
+            const std::string_view trimmed = Trim(text);
+            if (trimmed.empty())
+                return false;
+
+            size_t begin = 0;
+            if (trimmed.size() > 2 && trimmed[0] == '0' &&
+                (trimmed[1] == 'x' || trimmed[1] == 'X'))
+            {
+                begin = 2;
+            }
+            if (begin == trimmed.size() || (trimmed.size() - begin) > 8)
+                return false;
+
+            uint32_t parsed = 0;
+            for (size_t i = begin; i < trimmed.size(); ++i)
+            {
+                const char c = trimmed[i];
+                uint32_t digit = 0;
+                if (c >= '0' && c <= '9')
+                    digit = static_cast<uint32_t>(c - '0');
+                else if (c >= 'a' && c <= 'f')
+                    digit = static_cast<uint32_t>(c - 'a' + 10);
+                else if (c >= 'A' && c <= 'F')
+                    digit = static_cast<uint32_t>(c - 'A' + 10);
+                else
+                    return false;
+
+                parsed = (parsed << 4) | digit;
+            }
 
             value = parsed;
             return true;
@@ -668,21 +705,25 @@ namespace BZROpenShim::BznAnalysis
                 result.problems.push_back("duplicate seqno " + entry.first + " on " +
                                           std::to_string(entry.second) + " objects");
         }
-        std::unordered_map<std::string, size_t> objectIdOwners;
+        std::unordered_map<uint32_t, size_t> objectIdOwners;
         for (const ObjectRecord& rec : result.objects)
         {
             if (rec.objAddr.empty())
                 continue;  // missing obj_addr is handled by the envelope check
 
-            if (rec.objAddr == "00000000")
+            uint32_t id = 0;
+            if (!detail::ParsePointerId(rec.objAddr, id))
+                continue;  // pointer text-format validation is outside this check
+
+            if (id == 0)
             {
                 result.problems.push_back(
                     "GameObject #" + std::to_string(rec.index) +
-                    " obj_addr defines null pointer id 00000000");
+                    " obj_addr defines null pointer id " + rec.objAddr);
                 continue;
             }
 
-            const auto inserted = objectIdOwners.emplace(rec.objAddr, rec.index);
+            const auto inserted = objectIdOwners.emplace(id, rec.index);
             if (!inserted.second)
             {
                 result.problems.push_back(
@@ -694,27 +735,32 @@ namespace BZROpenShim::BznAnalysis
 
         for (const std::string& ref : sObjectRefs)
         {
-            if (ref == "00000000")
+            uint32_t id = 0;
+            if (!detail::ParsePointerId(ref, id) || id == 0)
                 continue;
-            if (objectIdOwners.find(ref) == objectIdOwners.end())
+            if (objectIdOwners.find(id) == objectIdOwners.end())
                 result.problems.push_back("sObject references undefined GameObject obj_addr " + ref);
         }
 
-        std::unordered_map<std::string, size_t> aiPathIdOwners;
+        std::unordered_map<uint32_t, size_t> aiPathIdOwners;
         for (const PathRecord& path : result.paths)
         {
             if (path.oldPtr.empty())
                 continue;
 
-            if (path.oldPtr == "00000000")
+            uint32_t id = 0;
+            if (!detail::ParsePointerId(path.oldPtr, id))
+                continue;
+
+            if (id == 0)
             {
                 result.problems.push_back(
                     "AiPath #" + std::to_string(path.index) +
-                    " old_ptr defines null pointer id 00000000");
+                    " old_ptr defines null pointer id " + path.oldPtr);
                 continue;
             }
 
-            const auto inserted = aiPathIdOwners.emplace(path.oldPtr, path.index);
+            const auto inserted = aiPathIdOwners.emplace(id, path.index);
             if (!inserted.second)
             {
                 result.problems.push_back(
@@ -724,14 +770,12 @@ namespace BZROpenShim::BznAnalysis
             }
         }
 
-        std::unordered_set<std::string> aiPathIds;
-        for (const auto& entry : aiPathIdOwners)
-            aiPathIds.insert(entry.first);
         for (const AoiRecord& aoi : result.aois)
         {
-            if (aoi.pathRef.empty() || aoi.pathRef == "00000000")
+            uint32_t id = 0;
+            if (!detail::ParsePointerId(aoi.pathRef, id) || id == 0)
                 continue;
-            if (aiPathIds.find(aoi.pathRef) == aiPathIds.end())
+            if (aiPathIdOwners.find(id) == aiPathIdOwners.end())
             {
                 result.problems.push_back(
                     "AOI #" + std::to_string(aoi.index) +
