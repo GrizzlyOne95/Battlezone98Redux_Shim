@@ -53,6 +53,21 @@ namespace
         return static_cast<size_t>(std::distance(lines.begin(), it));
     }
 
+    size_t FindLineAfter(
+        const std::vector<std::string>& lines,
+        const std::string& value,
+        size_t after)
+    {
+        if (after >= lines.size())
+            return static_cast<size_t>(-1);
+
+        const auto begin = lines.begin() + static_cast<std::ptrdiff_t>(after + 1);
+        const auto it = std::find(begin, lines.end(), value);
+        if (it == lines.end())
+            return static_cast<size_t>(-1);
+        return static_cast<size_t>(std::distance(lines.begin(), it));
+    }
+
     std::vector<std::string> SampleMission()
     {
         return {
@@ -187,11 +202,12 @@ int main()
 
     // --- the misn04 shape: a bare-LF run inside one object ------------------
     {
-        // Lines 24..31 sit inside object #1 (header at index 19), which is the
-        // same relationship the real file had: the run began in the position
-        // block of the object the engine then died on.
+        // Target object #1 explicitly. The fixture now contains several
+        // GameObjects with their own pos fields, so a global first-match lookup
+        // would corrupt object #0 while this regression is about the sfield.
         const std::vector<std::string> lines = SampleMission();
-        const size_t lfBegin = FindLine(lines, "pos [1] =");
+        const size_t sfieldValue = FindLine(lines, "sfield");
+        const size_t lfBegin = FindLineAfter(lines, "pos [1] =", sfieldValue);
         const std::string data = Build(lines, lfBegin, lfBegin + 8);
         const Result r = Analyze(data);
 
@@ -234,7 +250,8 @@ int main()
     {
         const std::vector<std::string> lines = SampleMission();
         std::string data;
-        const size_t crBegin = FindLine(lines, "pos [1] =");
+        const size_t sfieldValue = FindLine(lines, "sfield");
+        const size_t crBegin = FindLineAfter(lines, "pos [1] =", sfieldValue);
         for (size_t i = 0; i < lines.size(); ++i)
         {
             data += lines[i];
