@@ -54,7 +54,9 @@ namespace
             "seq_count [1] =",
             "8",
             "TerrainName = sample",
-            "[GameObject]",          // 8  -> object #0
+            "size [1] =",
+            "3",
+            "[GameObject]",          // 10 -> object #0
             "PrjID [1] =",
             "player",
             "seqno [1] =",
@@ -63,7 +65,7 @@ namespace
             "1",
             "label = player-1_hover",
             "obj_addr = 00000001",
-            "[GameObject]",          // 17 -> object #1
+            "[GameObject]",          // 19 -> object #1
             "PrjID [1] =",
             "sfield",
             "seqno [1] =",
@@ -77,7 +79,7 @@ namespace
             "0",
             "label = sfield1_scrapfield",
             "obj_addr = 00000002",
-            "[GameObject]",          // 31 -> object #2
+            "[GameObject]",          // 33 -> object #2
             "PrjID [1] =",
             "avfigh",
             "seqno [1] =",
@@ -120,6 +122,7 @@ int main()
         Check(r.version == "2016", "clean: version read");
         Check(r.terrainName == "sample", "clean: terrain name read");
         Check(r.seqCount == "8", "clean: seq_count read");
+        Check(r.declaredObjectCount == "3", "clean: declared GameObject count read");
         Check(r.objects.size() == 3, "clean: three GameObject blocks");
         Check(r.pathBlocks == 2, "clean: two AiPath blocks");
         Check(r.declaredPathCount == "2", "clean: declared path count read");
@@ -140,7 +143,7 @@ int main()
         // Lines 22..29 sit inside object #1 (header at index 17), which is the
         // same relationship the real file had: the run began in the position
         // block of the object the engine then died on.
-        const std::string data = Build(SampleMission(), 22, 30);
+        const std::string data = Build(SampleMission(), 24, 32);
         const Result r = Analyze(data);
 
         Check(r.endings.unsafe(), "mixed: detected as unsafe");
@@ -148,7 +151,7 @@ int main()
         Check(r.endings.bareLf == 8, "mixed: counted the bare-LF lines");
         Check(r.endings.bareCr == 0, "mixed: no bare CR");
         Check(r.endings.crlf > 0, "mixed: still counted the CRLF lines");
-        Check(r.endings.firstUnsafeLine == 23, "mixed: located the first unsafe terminator (1-based)");
+        Check(r.endings.firstUnsafeLine == 25, "mixed: located the first unsafe terminator (1-based)");
         Check(r.unsafeEnclosingObject == 1, "mixed: named the enclosing GameObject");
         Check(r.objects[r.unsafeEnclosingObject].prjId == "sfield",
               "mixed: enclosing object carries its ODF for the report");
@@ -184,7 +187,7 @@ int main()
         for (size_t i = 0; i < lines.size(); ++i)
         {
             data += lines[i];
-            data += (i >= 22 && i < 24) ? "\r" : "\r\n";
+            data += (i >= 24 && i < 26) ? "\r" : "\r\n";
         }
 
         const Result r = Analyze(data);
@@ -192,15 +195,37 @@ int main()
         Check(r.endings.mixed(), "bare CR: mixed with CRLF");
         Check(r.endings.bareCr == 2, "bare CR: counted");
         Check(r.endings.bareLf == 0, "bare CR: no bare LF");
-        Check(r.endings.firstUnsafeLine == 23, "bare CR: first unsafe terminator located");
+        Check(r.endings.firstUnsafeLine == 25, "bare CR: first unsafe terminator located");
         Check(r.unsafeEnclosingObject == 1, "bare CR: enclosing GameObject identified");
         Check(r.objects.size() == 3, "bare CR: parser still recovers all objects for diagnostics");
+    }
+
+    // --- GameObject count disagreeing with the blocks ----------------------
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[9] = "2";  // declared object count; the file still has 3 blocks
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("GameObject size says 2 but the file has 3") != std::string::npos;
+        Check(found, "object count: under-count reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[9] = "5";  // over-count is equally dangerous: LoadAll will read into the tail
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("GameObject size says 5 but the file has 3") != std::string::npos;
+        Check(found, "object count: over-count reported");
     }
 
     // --- path count disagreeing with the blocks -----------------------------
     {
         std::vector<std::string> lines = SampleMission();
-        lines[43] = "5";  // the [AiPaths] count value; the file still has 2 blocks
+        lines[45] = "5";  // the [AiPaths] count value; the file still has 2 blocks
         const std::string data = Build(lines);
         const Result r = Analyze(data);
 
@@ -213,7 +238,7 @@ int main()
     // --- duplicate labels ----------------------------------------------------
     {
         std::vector<std::string> lines = SampleMission();
-        lines[38] = "label = sfield1_scrapfield";  // clash with object #1
+        lines[40] = "label = sfield1_scrapfield";  // clash with object #1
         const std::string data = Build(lines);
         const Result r = Analyze(data);
 
@@ -226,7 +251,7 @@ int main()
     // --- a pointer reference that resolves to nothing ------------------------
     {
         std::vector<std::string> lines = SampleMission();
-        lines[40] = "sObject = 0000007A";  // no obj_addr or old_ptr defines 7A
+        lines[42] = "sObject = 0000007A";  // no obj_addr or old_ptr defines 7A
         const std::string data = Build(lines);
         const Result r = Analyze(data);
 
@@ -239,7 +264,7 @@ int main()
     // --- a null sObject is not a dangling reference --------------------------
     {
         std::vector<std::string> lines = SampleMission();
-        lines[40] = "sObject = 00000000";
+        lines[42] = "sObject = 00000000";
         const std::string data = Build(lines);
         const Result r = Analyze(data);
         for (const std::string& p : r.problems)
