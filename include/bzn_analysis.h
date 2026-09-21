@@ -615,7 +615,7 @@ namespace BZROpenShim::BznAnalysis
                 else if (key == "pathType" && currentPath->pathType.empty())
                 {
                     currentPath->pathType = value;
-                    currentPath->endLine = i + 1;
+                    currentPath->endLine = i + 1 + (next ? 1 : 0);
                 }
                 else if (key == "points")
                 {
@@ -1083,6 +1083,11 @@ namespace BZROpenShim::BznAnalysis
         validateBlockCount(result.declaredPathCount, "[AiPaths] count",
                            result.pathBlocks, "[AiPath] blocks");
 
+        // Only ASCII mission-save BZNs have a terminal boundary we can prove
+        // cheaply here. Full saves write ScriptUtils state after AiPaths.
+        // BZNTools also documents an odd zero VEC2D after some BZ1 files,
+        // notably version-2016 binary data; binary files are deliberately
+        // excluded from this text-only EOF check.
         if (result.ascii && result.missionSave == "true")
         {
             long declaredPaths = -1;
