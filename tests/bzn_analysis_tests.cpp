@@ -530,6 +530,93 @@ int main()
             Check(p.find("sObject") == std::string::npos, "null sObject: not reported");
     }
 
+    // --- defining pointer IDs must be non-zero and unique per namespace -----
+    {
+        const Result r = Analyze(Build(SampleMission()));
+        for (const std::string& p : r.problems)
+        {
+            Check(p.find("defines null pointer id") == std::string::npos,
+                  "pointer IDs: clean fixture has no null definitions");
+            Check(p.find("duplicate GameObject obj_addr") == std::string::npos,
+                  "pointer IDs: clean fixture has unique object IDs");
+            Check(p.find("duplicate AiPath old_ptr") == std::string::npos,
+                  "pointer IDs: clean fixture has unique path IDs");
+        }
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "obj_addr = 00000001")] = "obj_addr = 00000000";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 obj_addr defines null pointer id 00000000") !=
+                    std::string::npos;
+        Check(found, "pointer IDs: null GameObject obj_addr reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "obj_addr = 00000003")] = "obj_addr = 00000002";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("duplicate GameObject obj_addr 00000002 on objects #1 and #2") !=
+                    std::string::npos;
+        Check(found, "pointer IDs: duplicate GameObject obj_addr reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "old_ptr = 0000000B")] = "old_ptr = 00000000";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("AiPath #0 old_ptr defines null pointer id 00000000") !=
+                    std::string::npos;
+        Check(found, "pointer IDs: null AiPath old_ptr reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "old_ptr = 000000B9")] = "old_ptr = 0000000B";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("duplicate AiPath old_ptr 0000000B on paths #0 and #1") !=
+                    std::string::npos;
+        Check(found, "pointer IDs: duplicate AiPath old_ptr reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "old_ptr = 0000000B")] = "old_ptr = 00000001";
+        const Result r = Analyze(Build(lines));
+
+        bool falseDuplicate = false;
+        for (const std::string& p : r.problems)
+            falseDuplicate = falseDuplicate ||
+                p.find("duplicate GameObject obj_addr 00000001") != std::string::npos ||
+                p.find("duplicate AiPath old_ptr 00000001") != std::string::npos;
+        Check(!falseDuplicate,
+              "pointer IDs: same numeric text across object/path namespaces is allowed");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "sObject = 00000002")] = "sObject = 0000000B";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("sObject references undefined GameObject obj_addr 0000000B") !=
+                    std::string::npos;
+        Check(found, "pointer IDs: sObject resolves only against GameObject obj_addr");
+    }
+
     // --- AOI path pointers must resolve to AiPath old_ptr --------------------
     {
         std::vector<std::string> lines = SampleMission();
