@@ -32,6 +32,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+. (Join-Path $PSScriptRoot "BznIdentity.ps1")
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $repoRoot "reverse_engineering\test_missions\lcbveg"
 $fixture = Join-Path $repoRoot "reverse_engineering\test_missions\live_combat_scaling"
@@ -106,7 +108,14 @@ if (-not (Test-Path -LiteralPath $bzn -PathType Leaf)) {
     Write-Host "Missing fixture: $bzn" -ForegroundColor Red
     exit 1
 }
-Copy-Item -LiteralPath $bzn -Destination (Join-Path $destination "lcbveg.bzn") -Force
+$bznTarget = Join-Path $destination "lcbveg.bzn"
+Copy-Item -LiteralPath $bzn -Destination $bznTarget -Force
+
+# Renaming the file is NOT enough. The .bzn names itself in msn_filename and
+# TerrainName, and a straight copy leaves both saying "lcbench" -- so the engine
+# hunts for lcbench.trn/.hg2/.mat/.lgt beside this mission, does not find them,
+# and the mission does not launch at all.
+Set-BznIdentity -Path $bznTarget -Basename "lcbveg"
 $copied++
 
 Write-Host ""
