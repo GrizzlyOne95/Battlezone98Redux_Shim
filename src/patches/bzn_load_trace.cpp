@@ -11,6 +11,7 @@
 #include "bzn_load_trace.h"
 
 #include "bzn_analysis.h"
+#include "bzn_filename_identity.h"
 #include "bzr_options_ui.h"
 #include "patcher.h"
 
@@ -85,6 +86,27 @@ namespace BZROpenShim
             if (fwd && (!slash || fwd > slash))
                 slash = fwd;
             return slash ? slash + 1 : path;
+        }
+
+        std::string NarrowAcp(const wchar_t* value)
+        {
+            if (!value || !value[0])
+                return {};
+
+            const int bytes = WideCharToMultiByte(
+                CP_ACP, 0, value, -1, nullptr, 0, nullptr, nullptr);
+            if (bytes <= 1)
+                return {};
+
+            std::string out(static_cast<size_t>(bytes), '\0');
+            if (WideCharToMultiByte(
+                    CP_ACP, 0, value, -1, out.data(), bytes, nullptr, nullptr) <= 0)
+            {
+                return {};
+            }
+
+            out.resize(static_cast<size_t>(bytes) - 1);
+            return out;
         }
 
         bool ReadWholeFile(const wchar_t* path, std::vector<char>& out)
@@ -164,12 +186,18 @@ namespace BZROpenShim
             const wchar_t* name = BaseName(path);
             const BznAnalysis::Result report =
                 BznAnalysis::Analyze(std::string_view(data.data(), data.size()));
+            const std::string openedName = NarrowAcp(name);
+            const auto filenameIdentity =
+                BznFilenameIdentity::Compare(openedName, report.missionFilename);
+            const bool missionFilenameMismatch =
+                report.ascii && filenameIdentity.comparable && !filenameIdentity.matches;
 
-            Log(L"[BZNLOAD] %s: %zu bytes, %zu lines, format=%hs version=%hs terrain=%hs\n",
+            Log(L"[BZNLOAD] %s: %zu bytes, %zu lines, format=%hs version=%hs terrain=%hs msn_filename=%hs\n",
                 name, data.size(), report.lineCount,
                 report.ascii ? "ascii" : "binary/unknown",
                 report.version.empty() ? "?" : report.version.c_str(),
-                report.terrainName.empty() ? "?" : report.terrainName.c_str());
+                report.terrainName.empty() ? "?" : report.terrainName.c_str(),
+                report.missionFilename.empty() ? "?" : report.missionFilename.c_str());
 
             for (const std::string& problem : report.byteProblems)
                 Log(L"[BZNLOAD] *** %s: %hs\n", name, problem.c_str());
@@ -195,11 +223,20 @@ namespace BZROpenShim
 
             ReportLineEndings(report, name);
 
+            if (missionFilenameMismatch)
+            {
+                Log(L"[BZNLOAD] *** %s: embedded msn_filename='%hs' differs from opened BZN basename '%hs'\n",
+                    name, report.missionFilename.c_str(), openedName.c_str());
+                Log(L"[BZNLOAD] *** Redux overwrites its mission-name global from msn_filename during load; "
+                    L"mission Lua lookup later derives the companion .lua name from that global.\n");
+                Log(L"[BZNLOAD] *** TerrainName is independent and may legitimately differ; it is not part of this check.\n");
+            }
+
             for (const std::string& problem : report.problems)
                 Log(L"[BZNLOAD] *** %s: %hs\n", name, problem.c_str());
 
             if (report.problems.empty() && report.byteProblems.empty() &&
-                !report.endings.unsafe())
+                !report.endings.unsafe() && !missionFilenameMismatch)
                 Log(L"[BZNLOAD] %s structural checks passed\n", name);
 
             if (!g_Verbose)
