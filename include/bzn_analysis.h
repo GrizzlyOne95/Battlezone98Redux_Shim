@@ -49,8 +49,18 @@ namespace BZROpenShim::BznAnalysis
     {
         size_t crlf = 0;
         size_t bareLf = 0;
-        size_t firstBareLine = kNone;  // 1-based
-        bool mixed() const { return crlf > 0 && bareLf > 0; }
+        size_t bareCr = 0;
+        size_t firstUnsafeLine = kNone;  // 1-based
+
+        bool unsafe() const { return bareLf > 0 || bareCr > 0; }
+
+        bool mixed() const
+        {
+            const int kinds = (crlf > 0 ? 1 : 0) +
+                              (bareLf > 0 ? 1 : 0) +
+                              (bareCr > 0 ? 1 : 0);
+            return kinds > 1;
+        }
     };
 
     struct Result
@@ -65,9 +75,10 @@ namespace BZROpenShim::BznAnalysis
         size_t lineCount = 0;
         std::vector<ObjectRecord> objects;
         LineEndings endings;
-        // Index of the GameObject the first bare LF falls inside, or kNone.
-        // This is the number the engine's own object log will stop on.
-        size_t mixedEnclosingObject = kNone;
+        // Index of the GameObject the first non-CRLF terminator falls inside,
+        // or kNone. This is the number the engine's own object log is likely
+        // to stop on when the malformed run breaks parsing.
+        size_t unsafeEnclosingObject = kNone;
         std::vector<std::string> problems;
     };
 
@@ -78,6 +89,7 @@ namespace BZROpenShim::BznAnalysis
             size_t begin = 0;
             size_t length = 0;
             bool crlf = false;
+            bool bareCr = false;
             bool terminated = false;
         };
 
@@ -86,16 +98,39 @@ namespace BZROpenShim::BznAnalysis
             size_t start = 0;
             for (size_t i = 0; i < data.size(); ++i)
             {
-                if (data[i] != '\n')
+                if (data[i] == '\r')
+                {
+                    Line line;
+                    line.begin = start;
+                    line.length = i - start;
+                    line.terminated = true;
+
+                    if ((i + 1) < data.size() && data[i + 1] == '\n')
+                    {
+                        line.crlf = true;
+                        ++i;  // consume the LF half of CRLF
+                    }
+                    else
+                    {
+                        line.bareCr = true;
+                    }
+
+                    lines.push_back(line);
+                    start = i + 1;
                     continue;
-                Line line;
-                line.begin = start;
-                line.terminated = true;
-                line.crlf = (i > start) && (data[i - 1] == '\r');
-                line.length = (i - start) - (line.crlf ? 1u : 0u);
-                lines.push_back(line);
-                start = i + 1;
+                }
+
+                if (data[i] == '\n')
+                {
+                    Line line;
+                    line.begin = start;
+                    line.length = i - start;
+                    line.terminated = true;  // bare LF
+                    lines.push_back(line);
+                    start = i + 1;
+                }
             }
+
             if (start < data.size())
             {
                 Line line;
@@ -166,16 +201,16 @@ namespace BZROpenShim::BznAnalysis
         {
             if (!lines[i].terminated)
                 continue;  // a final line without a terminator says nothing
+
             if (lines[i].crlf)
-            {
                 result.endings.crlf++;
-            }
+            else if (lines[i].bareCr)
+                result.endings.bareCr++;
             else
-            {
                 result.endings.bareLf++;
-                if (result.endings.firstBareLine == kNone)
-                    result.endings.firstBareLine = i + 1;
-            }
+
+            if (!lines[i].crlf && result.endings.firstUnsafeLine == kNone)
+                result.endings.firstUnsafeLine = i + 1;
         }
 
         std::unordered_set<std::string> ids;
@@ -280,15 +315,15 @@ namespace BZROpenShim::BznAnalysis
                 current->objAddr = value;
         }
 
-        // Which object does the first bare LF fall inside? That index is what
-        // the engine's own "(Class) is loading (obj #N)" stream will stop on,
-        // so naming it here is the whole point of the check.
-        if (result.endings.mixed() && result.endings.firstBareLine != kNone)
+        // Which object does the first non-CRLF terminator fall inside? Naming
+        // it makes the diagnostic line up with the engine's own "(Class) is
+        // loading (obj #N)" stream when malformed line endings abort loading.
+        if (result.endings.unsafe() && result.endings.firstUnsafeLine != kNone)
         {
             for (const ObjectRecord& rec : result.objects)
             {
-                if (rec.headerLine <= result.endings.firstBareLine)
-                    result.mixedEnclosingObject = rec.index;
+                if (rec.headerLine <= result.endings.firstUnsafeLine)
+                    result.unsafeEnclosingObject = rec.index;
                 else
                     break;
             }
