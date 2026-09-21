@@ -12,6 +12,7 @@
 #include "autosave_gate.h"
 #include "BZROpenShim.h"
 #include "game_state.h"
+#include "native_save_flag.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -164,25 +165,19 @@ namespace BZROpenShim
             if (saveGame == nullptr)
                 return nullptr;
 
-            // SaveGame's stable signature contains:
-            //     movzx eax, byte ptr [missionSave]
-            // at entry +37, with the four-byte absolute global immediately
-            // following the 0F B6 05 opcode. Deriving the address from the
-            // already-qualified function keeps this build-specific global out
-            // of the autosave feature code and fails closed on drift.
+            // Deriving the address from the already-qualified function keeps
+            // this build-specific global out of the autosave feature code and
+            // fails closed on drift. The decode itself lives in
+            // native_save_flag.h so the host tests can cover the drift cases.
             const auto* entry = reinterpret_cast<const uint8_t*>(saveGame);
-            uint32_t flagAddress = 0;
             __try
             {
-                if (entry[37] != 0x0F || entry[38] != 0xB6 || entry[39] != 0x05)
-                    return nullptr;
-                std::memcpy(&flagAddress, entry + 40, sizeof(flagAddress));
+                const uint32_t flagAddress = NativeSaveFlag::ReadFlagAddress(entry);
                 if (flagAddress == 0)
                     return nullptr;
 
                 auto* flag = reinterpret_cast<MissionSaveFlag>(static_cast<uintptr_t>(flagAddress));
-                const uint8_t current = *flag;
-                if (current > 1)
+                if (!NativeSaveFlag::IsPlausibleValue(*flag))
                     return nullptr;
                 return flag;
             }
@@ -203,22 +198,33 @@ namespace BZROpenShim
             if (saveGame == nullptr || missionSaveFlag == nullptr)
                 return false;
 
+            // FUN_004fdc80, the stock normal-save wrapper, establishes
+            // missionSave=0 before calling SaveGame. Direct callers such as
+            // OpenShim must do the same because FUN_004fbe90 (mission save)
+            // leaves this global set after it returns.
+            //
+            // The prior value is restored rather than forced to 0, because
+            // FUN_004fbe90 sets the flag and only then opens a modal dialog
+            // (FUN_0056ad10 -> FUN_005d48c0 -> FUN_005d4690, which runs its own
+            // event loop). An autosave landing inside that window would
+            // otherwise clear a flag the engine is still relying on and silently
+            // downgrade the user's mission save to a normal one. The gate reads
+            // uiWrapperActive at 0x00918324, which that dialog path does not
+            // set, so the gate alone cannot be relied on to exclude it.
+            uint8_t previous = 0;
             __try
             {
-                // FUN_004fdc80, the stock normal-save wrapper, establishes
-                // missionSave=0 before calling SaveGame. Direct callers such
-                // as OpenShim must do the same because FUN_004fbe90 (mission
-                // save) leaves this global set after it returns.
+                previous = *missionSaveFlag;
                 *missionSaveFlag = 0;
                 const bool saved = saveGame(filename, saveType);
-                *missionSaveFlag = 0;
+                *missionSaveFlag = previous;
                 return saved;
             }
             __except (exceptionCode = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER)
             {
                 __try
                 {
-                    *missionSaveFlag = 0;
+                    *missionSaveFlag = previous;
                 }
                 __except (EXCEPTION_EXECUTE_HANDLER)
                 {
@@ -941,6 +947,7 @@ namespace BZROpenShim
         if (!g_hookInstalled && !InstallMainThreadHook())
         {
             g_nativeSaveGame = nullptr;
+            g_missionSaveFlag = nullptr;
             return false;
         }
 
@@ -981,6 +988,7 @@ namespace BZROpenShim
     {
         RestoreMainThreadHook();
         g_nativeSaveGame = nullptr;
+        g_missionSaveFlag = nullptr;
         ResetMissionState();
         InterlockedExchange(&g_saveInProgress, 0);
     }
