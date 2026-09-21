@@ -530,6 +530,135 @@ int main()
             Check(p.find("sObject") == std::string::npos, "null sObject: not reported");
     }
 
+    // --- AOI path pointers must resolve to AiPath old_ptr --------------------
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "2",
+            "[AOI]",
+            "undefptr = 0000000B",
+            "team [1] =",
+            "1",
+            "interesting [1] =",
+            "false",
+            "inside [1] =",
+            "false",
+            "value [1] =",
+            "0",
+            "force [1] =",
+            "0",
+            "[AOI]",
+            "undefptr = 000000B9",
+            "team [1] =",
+            "2",
+            "interesting [1] =",
+            "false",
+            "inside [1] =",
+            "false",
+            "value [1] =",
+            "0",
+            "force [1] =",
+            "0",
+        });
+        const Result r = Analyze(Build(lines));
+
+        Check(r.aois.size() == 2, "AOI pointer: two AOIs captured");
+        Check(r.aois[0].pathRef == "0000000B", "AOI pointer: first undefptr captured");
+        Check(r.paths[0].oldPtr == "0000000B", "AOI pointer: AiPath old_ptr captured");
+
+        bool dangling = false;
+        for (const std::string& p : r.problems)
+            dangling = dangling || p.find("undefptr references missing AiPath") != std::string::npos;
+        Check(!dangling, "AOI pointer: valid references stay clean");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "1",
+            "[AOI]",
+            "undefptr = 0000DEAD",
+            "team [1] =",
+            "1",
+            "interesting [1] =",
+            "false",
+            "inside [1] =",
+            "false",
+            "value [1] =",
+            "0",
+            "force [1] =",
+            "0",
+        });
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("AOI #0 undefptr references missing AiPath old_ptr 0000DEAD") !=
+                    std::string::npos;
+        Check(found, "AOI pointer: dangling AiPath reference reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "1",
+            "[AOI]",
+            "undefptr = 00000000",
+            "team [1] =",
+            "1",
+            "interesting [1] =",
+            "false",
+            "inside [1] =",
+            "false",
+            "value [1] =",
+            "0",
+            "force [1] =",
+            "0",
+        });
+        const Result r = Analyze(Build(lines));
+
+        for (const std::string& p : r.problems)
+            Check(p.find("AOI #0 undefptr references missing AiPath") == std::string::npos,
+                  "AOI pointer: null pointer is allowed");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const auto pos = std::find(lines.begin(), lines.end(), "[AiPaths]");
+        lines.insert(pos, {
+            "[AOIs]",
+            "size [1] =",
+            "1",
+            "[AOI]",
+            "undefptr = 00000001",
+            "team [1] =",
+            "1",
+            "interesting [1] =",
+            "false",
+            "inside [1] =",
+            "false",
+            "value [1] =",
+            "0",
+            "force [1] =",
+            "0",
+        });
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("AOI #0 undefptr references missing AiPath old_ptr 00000001") !=
+                    std::string::npos;
+        Check(found, "AOI pointer: GameObject obj_addr does not satisfy AiPath reference");
+    }
+
     // --- seq_count must remain ahead of every object seqno ------------------
     {
         const Result r = Analyze(Build(SampleMission()));
