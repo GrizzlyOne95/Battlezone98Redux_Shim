@@ -27,10 +27,10 @@
 //
 // So this reports two things when the game opens a mission:
 //
-//   1. Structural defects, always. Mixed line endings (with the enclosing
-//      GameObject index, which is the number the engine's own log stops on),
-//      count fields that disagree with the blocks they count, duplicate labels
-//      or sequence numbers, and pointer ids that resolve to nothing.
+//   1. Structural defects, always. Unsafe line endings (anything except CRLF,
+//      with the enclosing GameObject index for the first bad terminator), count
+//      fields that disagree with the blocks they count, duplicate labels or
+//      sequence numbers, and pointer ids that resolve to nothing.
 //
 //   2. The full object table, gated behind Diagnostics/TraceBznLoad, so
 //      "obj #114" can be read straight off as an ODF and a label without
