@@ -1,0 +1,51 @@
+[Vegetation]
+
+// single  - one patch centred on the player.
+// ladder  - `steps` patches ahead of the player, density stepping
+//           geometrically from densityMin to densityMax, so one screenshot
+//           shows the whole usable range instead of one guess from it.
+// off     - no clutter. The control: what Achilles looks like bare.
+scenario = "ladder"
+
+// Supplied by Campaign Reimagined. The mission logs a clear refusal and
+// carries on if they are not loaded, rather than failing to start.
+mesh = "crgrass.mesh"
+material = "CR/GrassPrototype"
+
+// --- single -----------------------------------------------------------------
+radius = 45.0
+density = 0.35
+seed = 1001
+
+// --- ladder -----------------------------------------------------------------
+steps = 5
+densityMin = 0.05
+densityMax = 0.80
+stepRadius = 30.0
+stepSpacing = 85.0
+firstDistance = 70.0
+
+// --- terrain type filtering ------------------------------------------------
+// Achilles numbers its materials 0 grass, 1 trees, 2 rocky rock, 3 river,
+// 4 waterfall, 5 base. With this on, a blade is only placed where the .mat
+// says the ground is one of terrainTypes -- so grass stays out of the river
+// and off the rock. Turn it off to see what slope-only placement does.
+restrictToTerrainTypes = 1
+terrainTypes = "0"
+matFile = "lcbveg.mat"
+// Must match [Size] MinX/MinZ in lcbveg.trn, or every lookup is offset.
+worldMinX = 0.0
+worldMinZ = 0.0
+
+// --- both -------------------------------------------------------------------
+minScale = 0.80
+maxScale = 1.40
+slopeMax = 22.0
+baseOffset = 0.02
+// 0 means never distance-cull. The .trn opens visibility to 700 for this
+// mission, so a stock 260 would cull the far end of the ladder and read as
+// "the density fix did not work".
+renderingDistance = 0.0
+castShadows = 0
+// Per patch, not per mission.
+maxInstances = 8192

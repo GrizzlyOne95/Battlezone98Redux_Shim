@@ -1,0 +1,182 @@
+[Size]
+MinX=0
+MinZ=0
+Width=5120
+Depth=5120
+Height=0
+
+[NormalView]
+Time=900
+// Achilles authors FogStart=150, FogEnd=250, VisibilityRange=250. Opened up
+// here and only here: a 150-unit fog start swallows most of a clutter ladder,
+// and this mission exists to look at ground content rather than to measure the
+// fog curve. lcbworld's lcbachil.trn keeps the authored numbers -- use that one
+// for renderer captures, not this one.
+FogStart= 400
+FogEnd= 700
+FogBreak=60
+VisibilityRange=700
+Intensity=40
+Ambient=0
+FlatRange=250
+ShadowLuma=0
+FogDirection=1
+TerrainShadowLuma=20
+CarAmbient=20
+
+[Atlases]
+MaterialName	= ac_detail_atlas
+
+
+[World]
+MusicTrack=5
+
+[Sky]
+SunTexture= sun.0
+SkyType= 0
+SkyHeight = 210
+SkyTexture= achilles.map
+
+BackdropTexture =
+BackdropDistance= 400
+BackdropWidth   = 800
+BackdropHeight  = 100
+
+[Clouds]
+Count    = 8
+Type     = 0
+TileSize = 1000
+
+Texture0 = acloud2.map
+Size0    = 500
+Height0  = 200
+
+Texture1 = acloud.map
+Size1    = 500
+Height1  = 190
+
+Texture2 = acloud2.map
+Size2    = 500
+Height2  = 180
+
+[Color]
+Palette=ACHILLES.ACT
+Luma=ACHILLES.LUM
+Translucency=ACHILLES.TBL
+Alpha=ACHILLES.ALB
+
+[TextureType0] // grass
+FlatColor= 128
+SolidA0        = ac00sA0.map
+SolidA1        = ac00sA1.map
+SolidA2        = ac00sA2.map
+SolidA3        = ac00sA3.map
+
+SolidB0        = ac00sA0.map
+SolidB1        = ac00sA1.map
+SolidB2        = ac00sA2.map
+SolidB3        = ac00sA3.map
+
+SolidC0        = ac00sA0.map
+SolidC1        = ac00sA1.map
+SolidC2        = ac00sA2.map
+SolidC3        = ac00sA3.map
+
+SolidD0        = ac00sB0.map
+SolidD1        = ac00sB1.map
+SolidD2        = ac00sB2.map
+SolidD3        = ac00sB3.map
+
+CapTo1_A0      = ac01cA0.map
+CapTo1_A1      = ac01cA1.map
+CapTo1_A2      = ac01cA2.map
+CapTo1_A3      = ac01cA3.map
+
+DiagonalTo1_A0 = ac01dA0.map
+DiagonalTo1_A1 = ac01dA1.map
+DiagonalTo1_A2 = ac01dA2.map
+DiagonalTo1_A3 = ac01dA3.map
+
+CapTo5_A0      = ac05cA0.map
+CapTo5_A1      = ac05cA1.map
+CapTo5_A2      = ac05cA2.map
+CapTo5_A3      = ac05cA3.map
+CapTo5_B0      = ac05cB0.map
+CapTo5_B1      = ac05cB1.map
+CapTo5_B2      = ac05cB2.map
+CapTo5_B3      = ac05cB3.map
+CapTo5_C0      = ac05cC0.map
+CapTo5_C1      = ac05cC1.map
+CapTo5_C2      = ac05cC2.map
+CapTo5_C3      = ac05cC3.map
+
+DiagonalTo5_A0 = ac05dA0.map
+DiagonalTo5_A1 = ac05dA1.map
+DiagonalTo5_A2 = ac05dA2.map
+DiagonalTo5_A3 = ac05dA3.map
+
+[TextureType1] // trees
+FlatColor= 192
+SolidA0        = ac11sa0.map
+SolidA1        = ac11sa1.map
+SolidA2        = ac11sa2.map
+SolidA3        = ac11sa3.map
+
+CapTo2_A0      = ac12ca0.map
+CapTo2_A1      = ac12ca1.map
+CapTo2_A2      = ac12ca2.map
+CapTo2_A3      = ac12ca3.map
+
+DiagonalTo2_A0 = ac12da0.map
+DiagonalTo2_A1 = ac12da1.map
+DiagonalTo2_A2 = ac12da2.map
+DiagonalTo2_A3 = ac12da3.map
+
+[TextureType2] // rocky rock
+FlatColor= 112
+SolidA0        = ac22sa0.map
+SolidA1        = ac22sa1.map
+SolidA2        = ac22sa2.map
+SolidA3        = ac22sa3.map
+
+[TextureType3] // river
+FlatColor= 122
+SolidA0        = ac00sc0.map
+SolidA1        = ac00sc1.map
+SolidA2        = ac00sc2.map
+SolidA3        = ac00sc3.map
+
+SolidB0        = ac00sD0.map
+SolidB1        = ac00sD1.map
+SolidB2        = ac00sD2.map
+SolidB3        = ac00sD3.map
+
+SolidC0        = ac00se0.map
+SolidC1        = ac00se1.map
+SolidC2        = ac00se2.map
+SolidC3        = ac00se3.map
+
+SolidD0        = ac00sg0.map
+SolidD1        = ac00sg1.map
+SolidD2        = ac00sg2.map
+SolidD3        = ac00sg3.map
+
+
+[TextureType4] // waterfall
+FlatColor= 86
+SolidA0        = ac00sf0.map
+SolidA1        = ac00sf1.map
+SolidA2        = ac00sf2.map
+SolidA3        = ac00sf3.map
+
+[TextureType5] // Base
+FlatColor= 103
+SolidA0        = ac55sa0.map
+SolidA1        = ac55sa1.map
+SolidA2        = ac55sa2.map
+SolidA3        = ac55sa3.map
+
+SolidB0        = ac55sB0.map
+SolidB1        = ac55sB1.map
+SolidB2        = ac55sB2.map
+SolidB3        = ac55sB3.map
