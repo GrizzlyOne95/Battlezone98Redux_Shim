@@ -57,10 +57,18 @@ namespace BZROpenShim::BznAnalysis
         bool hasTransform = false;
     };
 
+    struct AoiRecord
+    {
+        size_t index = 0;
+        size_t headerLine = 0;
+        std::string pathRef;
+    };
+
     struct PathRecord
     {
         size_t index = 0;
         size_t headerLine = 0;
+        std::string oldPtr;
         std::string pointCount;
         long declaredPoints = 0;
         bool pointsCountValid = false;
@@ -109,6 +117,7 @@ namespace BZROpenShim::BznAnalysis
         size_t pathBlocks = 0;
         size_t lineCount = 0;
         std::vector<ObjectRecord> objects;
+        std::vector<AoiRecord> aois;
         std::vector<PathRecord> paths;
         LineEndings endings;
         std::vector<std::string> byteProblems;
@@ -330,6 +339,7 @@ namespace BZROpenShim::BznAnalysis
         std::unordered_map<std::string, int> seqCounts;
 
         ObjectRecord* current = nullptr;
+        AoiRecord* currentAoi = nullptr;
         PathRecord* currentPath = nullptr;
         bool seenFirstObject = false;
         bool inAois = false;
@@ -352,6 +362,7 @@ namespace BZROpenShim::BznAnalysis
                 rec.headerLine = i + 1;
                 result.objects.push_back(rec);
                 current = &result.objects.back();
+                currentAoi = nullptr;
                 currentPath = nullptr;
                 inAois = false;
                 inPaths = false;
@@ -360,6 +371,7 @@ namespace BZROpenShim::BznAnalysis
             if (IsSection(text, "AOIs"))
             {
                 current = nullptr;
+                currentAoi = nullptr;
                 currentPath = nullptr;
                 inAois = true;
                 expectAoiCount = true;
@@ -369,6 +381,11 @@ namespace BZROpenShim::BznAnalysis
             if (IsSection(text, "AOI"))
             {
                 current = nullptr;
+                AoiRecord rec;
+                rec.index = result.aois.size();
+                rec.headerLine = i + 1;
+                result.aois.push_back(rec);
+                currentAoi = &result.aois.back();
                 currentPath = nullptr;
                 result.aoiBlocks++;
                 continue;
@@ -376,6 +393,7 @@ namespace BZROpenShim::BznAnalysis
             if (IsSection(text, "AiPaths"))
             {
                 current = nullptr;
+                currentAoi = nullptr;
                 currentPath = nullptr;
                 inAois = false;
                 inPaths = true;
@@ -385,6 +403,7 @@ namespace BZROpenShim::BznAnalysis
             if (IsSection(text, "AiPath"))
             {
                 current = nullptr;
+                currentAoi = nullptr;
                 PathRecord rec;
                 rec.index = result.paths.size();
                 rec.headerLine = i + 1;
@@ -396,6 +415,7 @@ namespace BZROpenShim::BznAnalysis
             if (!Trim(text).empty() && Trim(text).front() == '[')
             {
                 current = nullptr;
+                currentAoi = nullptr;
                 currentPath = nullptr;
                 continue;
             }
@@ -449,9 +469,14 @@ namespace BZROpenShim::BznAnalysis
             else if (key == "sObject" && !value.empty())
                 sObjectRefs.push_back(value);
 
+            if (currentAoi && key == "undefptr" && currentAoi->pathRef.empty())
+                currentAoi->pathRef = value;
+
             if (currentPath)
             {
-                if (key == "pointCount" && currentPath->pointCount.empty())
+                if (key == "old_ptr" && currentPath->oldPtr.empty())
+                    currentPath->oldPtr = value;
+                else if (key == "pointCount" && currentPath->pointCount.empty())
                     currentPath->pointCount = value;
                 else if (key == "points")
                 {
@@ -655,6 +680,24 @@ namespace BZROpenShim::BznAnalysis
                 continue;
             if (ids.find(ref) == ids.end())
                 result.problems.push_back("sObject references undefined id " + ref);
+        }
+
+        std::unordered_set<std::string> aiPathIds;
+        for (const PathRecord& path : result.paths)
+        {
+            if (!path.oldPtr.empty() && path.oldPtr != "00000000")
+                aiPathIds.insert(path.oldPtr);
+        }
+        for (const AoiRecord& aoi : result.aois)
+        {
+            if (aoi.pathRef.empty() || aoi.pathRef == "00000000")
+                continue;
+            if (aiPathIds.find(aoi.pathRef) == aiPathIds.end())
+            {
+                result.problems.push_back(
+                    "AOI #" + std::to_string(aoi.index) +
+                    " undefptr references missing AiPath old_ptr " + aoi.pathRef);
+            }
         }
 
         const auto validateBlockCount =
