@@ -1163,10 +1163,16 @@ int main()
     {
         std::vector<std::string> lines = SampleMission();
         lines[3] = "true";
+        const size_t prj = FindLine(lines, "PrjID [1] =");
+        lines[prj + 1] = "123456789";
         lines[FindLine(lines, "msn_filename = sample.bzn")] =
             "msn_filename = " + std::string(32, 'm');
         lines[FindLine(lines, "TerrainName = sample")] =
             "TerrainName = " + std::string(128, 't');
+        lines[FindLine(lines, "label = player-1_hover")] =
+            "label = " + std::string(64, 'l');
+        lines[FindLine(lines, "name = LuaMission")] =
+            "name = " + std::string(64, 'n');
         const Result r = Analyze(Build(lines));
 
         bool fixedBufferFinding = false;
