@@ -63,6 +63,8 @@ namespace
             "msn_filename = sample.bzn",
             "seq_count [1] =",
             "8",
+            "missionSave [1] =",
+            "true",
             "TerrainName = sample",
             "size [1] =",
             "3",
@@ -134,6 +136,7 @@ namespace
             "10",
             "  z [1] =",
             "20",
+            "pathType = 00000000",
             "[AiPath]",
             "old_ptr = 000000B9",
             "size [1] =",
@@ -146,6 +149,7 @@ namespace
             "30",
             "  z [1] =",
             "40",
+            "pathType = 00000000",
         };
     }
 }
@@ -528,6 +532,68 @@ int main()
         const Result r = Analyze(data);
         for (const std::string& p : r.problems)
             Check(p.find("sObject") == std::string::npos, "null sObject: not reported");
+    }
+
+    // --- mission BZNs must not contain unexpected data after final AiPath ----
+    {
+        const Result r = Analyze(Build(SampleMission()));
+        Check(r.missionSave == "true", "trailing data: missionSave captured");
+        Check(r.paths.back().pathType == "00000000",
+              "trailing data: final pathType captured");
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("unexpected trailing data") != std::string::npos;
+        Check(!found, "trailing data: clean mission ends at final AiPath");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines.push_back("garbage = 123");
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("unexpected trailing data after final AiPath") != std::string::npos;
+        Check(found, "trailing data: extra token after final AiPath reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines.push_back("");
+        lines.push_back("   ");
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("unexpected trailing data") != std::string::npos;
+        Check(!found, "trailing data: blank lines after final AiPath are ignored");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t missionSave = FindLine(lines, "missionSave [1] =");
+        lines[missionSave + 1] = "false";
+        lines.push_back("aip_team_count [1] =");
+        lines.push_back("0");
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("unexpected trailing data") != std::string::npos;
+        Check(!found,
+              "trailing data: full saves are not checked against mission-save EOF");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t aiPaths = FindLine(lines, "[AiPaths]");
+        lines[aiPaths + 2] = "3";  // count mismatch makes terminal boundary ambiguous
+        lines.push_back("garbage = 123");
+        const Result r = Analyze(Build(lines));
+
+        bool trailing = false;
+        for (const std::string& p : r.problems)
+            trailing = trailing || p.find("unexpected trailing data") != std::string::npos;
+        Check(!trailing,
+              "trailing data: EOF check suppressed when AiPath count is already invalid");
     }
 
     // --- positions, path points, and transforms must remain finite -----------
