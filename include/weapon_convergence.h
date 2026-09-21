@@ -371,4 +371,111 @@ namespace BZROpenShim::WeaponConvergence
             std::acos(verifyCos) * (180.0f / 3.14159265358979f);
         return SolveResult::Converged;
     }
+
+    // Walker-style convergence used by stock BZ1/BZR target convergence.
+    //
+    // The explicit target supplies RANGE, not a world-space gimbal point.
+    // Walker::UpdateWeaponAim builds its correction from the hardpoint's
+    // lateral/forward offsets in the current stock aim frame:
+    //
+    //     direction = (-hardpointX, 0, targetDistance - hardpointZ)
+    //
+    // In other words, the stock aim still decides where the craft is pointing;
+    // convergence only toes each fixed barrel inward so the horizontally
+    // separated hardpoints meet at the requested range. The Y component is
+    // intentionally left alone. This is why Walker convergence does not feel
+    // like magnetic aim toward the selected object's center.
+    inline SolveResult SolveWalkerStyleRange(
+        const Matrix& mountLocal,
+        const Matrix& mountWorld,
+        const Vec3& shooterPosition,
+        float convergenceRange,
+        Solution& outSolution)
+    {
+        if (!IsFinite(mountWorld) || !IsRotationOrthonormal(mountWorld) ||
+            !IsFinite(mountLocal) || !IsRotationOrthonormal(mountLocal) ||
+            !std::isfinite(shooterPosition.x) ||
+            !std::isfinite(shooterPosition.y) ||
+            !std::isfinite(shooterPosition.z) ||
+            !std::isfinite(convergenceRange))
+        {
+            return SolveResult::DegenerateInput;
+        }
+
+        if (convergenceRange < kMinTargetDistance)
+            return SolveResult::TargetTooClose;
+
+        const Matrix world = Multiply(mountLocal, mountWorld);
+        const Vec3 muzzle = Position(world);
+        Vec3 stockRight = { world.rightX, world.rightY, world.rightZ };
+        Vec3 stockFront = Front(world);
+        const Vec3 stockUp = Up(world);
+        if (!Normalize(stockRight) || !Normalize(stockFront))
+            return SolveResult::DegenerateInput;
+
+        const Vec3 shooterToMuzzle = {
+            muzzle.x - shooterPosition.x,
+            muzzle.y - shooterPosition.y,
+            muzzle.z - shooterPosition.z,
+        };
+
+        const float lateralOffset = Dot(shooterToMuzzle, stockRight);
+        const float forwardOffset = Dot(shooterToMuzzle, stockFront);
+        if (!std::isfinite(lateralOffset) || !std::isfinite(forwardOffset))
+            return SolveResult::DegenerateInput;
+
+        // Exact world-space equivalent of Walker's local
+        // (-hardpointX, 0, targetDistance-hardpointZ) vector.
+        Vec3 desired = {
+            stockRight.x * -lateralOffset +
+                stockFront.x * (convergenceRange - forwardOffset),
+            stockRight.y * -lateralOffset +
+                stockFront.y * (convergenceRange - forwardOffset),
+            stockRight.z * -lateralOffset +
+                stockFront.z * (convergenceRange - forwardOffset),
+        };
+
+        const float distanceSquared = Dot(desired, desired);
+        if (!std::isfinite(distanceSquared) ||
+            distanceSquared < kMinTargetDistance * kMinTargetDistance ||
+            !Normalize(desired))
+        {
+            return SolveResult::TargetTooClose;
+        }
+
+        const float deviationCos = Dot(stockFront, desired);
+        if (!std::isfinite(deviationCos) || deviationCos < kMaxDeviationCos)
+            return SolveResult::ExceedsDeviationLimit;
+
+        Matrix arc = {};
+        if (!BuildArcRotation(stockFront, desired, stockUp, arc))
+            return SolveResult::DegenerateInput;
+
+        Matrix convergedWorld = Multiply(world, arc);
+        convergedWorld.positionX = world.positionX;
+        convergedWorld.positionY = world.positionY;
+        convergedWorld.positionZ = world.positionZ;
+
+        Matrix converged = Multiply(convergedWorld, Invert(mountWorld));
+        if (!IsFinite(converged) || !IsRotationOrthonormal(converged))
+            return SolveResult::DegenerateInput;
+
+        converged.positionX = mountLocal.positionX;
+        converged.positionY = mountLocal.positionY;
+        converged.positionZ = mountLocal.positionZ;
+
+        const Matrix verifyWorld = Multiply(converged, mountWorld);
+        float verifyCos = Dot(Front(verifyWorld), desired);
+        if (verifyCos > 1.0f)
+            verifyCos = 1.0f;
+        if (verifyCos < -1.0f)
+            verifyCos = -1.0f;
+
+        outSolution.mountLocal = converged;
+        outSolution.muzzle = muzzle;
+        outSolution.residualDegrees =
+            std::acos(verifyCos) * (180.0f / 3.14159265358979f);
+        return SolveResult::Converged;
+    }
+
 }
