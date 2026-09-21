@@ -530,6 +530,58 @@ int main()
             Check(p.find("sObject") == std::string::npos, "null sObject: not reported");
     }
 
+    // --- seq_count must remain ahead of every object seqno ------------------
+    {
+        const Result r = Analyze(Build(SampleMission()));
+        Check(r.seqCountComparable, "seq_count: clean fixture comparable");
+        Check(r.maxObjectSeqno == 3, "seq_count: maximum object seqno captured");
+        Check(r.minimumSafeSeqCount == 4, "seq_count: minimum safe value is max + 1");
+
+        bool stale = false;
+        for (const std::string& p : r.problems)
+            stale = stale || p.find("seq_count") != std::string::npos;
+        Check(!stale, "seq_count: clean fixture stays clean");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t seqCountField = FindLine(lines, "seq_count [1] =");
+        lines[seqCountField + 1] = "3";  // equal to max object seqno: next ID would collide
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("seq_count 3 is stale: maximum object seqno is 3; minimum safe seq_count is 4") !=
+                    std::string::npos;
+        Check(found, "seq_count: equal-to-max stale value reported with safe repair");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t seqCountField = FindLine(lines, "seq_count [1] =");
+        lines[seqCountField + 1] = "oops";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("seq_count is not a valid decimal integer: 'oops'") !=
+                                 std::string::npos;
+        Check(found, "seq_count: non-numeric counter reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t seqnoField = FindLine(lines, "seqno [1] =");
+        lines[seqnoField + 1] = "oops";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 seqno is not a valid decimal integer: 'oops'") !=
+                    std::string::npos;
+        Check(found, "seq_count: invalid object seqno blocks comparison explicitly");
+        Check(!r.seqCountComparable, "seq_count: comparison suppressed when a seqno is invalid");
+    }
+
     // --- byte/encoding hazards ----------------------------------------------
     {
         std::string data = Build(SampleMission());
