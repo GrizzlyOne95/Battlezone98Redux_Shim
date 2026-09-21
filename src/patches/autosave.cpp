@@ -35,6 +35,7 @@ namespace BZROpenShim
     {
         using NativeSaveGameFn = bool(__cdecl*)(char*, int);
         using WorldUpdateRenderQueueFn = void(__thiscall*)(void*, void*);
+        using MissionSaveFlag = volatile uint8_t*;
 
         constexpr uintptr_t kIsNetGameAddr = 0x00917F7B;
         constexpr uintptr_t kUserObjectAddr = 0x00917AFC;
@@ -80,6 +81,7 @@ namespace BZROpenShim
 
         AutoSaveConfig g_config;
         NativeSaveGameFn g_nativeSaveGame = nullptr;
+        MissionSaveFlag g_missionSaveFlag = nullptr;
         WorldUpdateRenderQueueFn g_previousWorldUpdateRenderQueue = nullptr;
         bool g_hookInstalled = false;
         bool g_missionActive = false;
@@ -157,19 +159,70 @@ namespace BZROpenShim
             }
         }
 
-        bool InvokeNativeSaveGame(
+        MissionSaveFlag ResolveMissionSaveFlag(NativeSaveGameFn saveGame) noexcept
+        {
+            if (saveGame == nullptr)
+                return nullptr;
+
+            // SaveGame's stable signature contains:
+            //     movzx eax, byte ptr [missionSave]
+            // at entry +37, with the four-byte absolute global immediately
+            // following the 0F B6 05 opcode. Deriving the address from the
+            // already-qualified function keeps this build-specific global out
+            // of the autosave feature code and fails closed on drift.
+            const auto* entry = reinterpret_cast<const uint8_t*>(saveGame);
+            uint32_t flagAddress = 0;
+            __try
+            {
+                if (entry[37] != 0x0F || entry[38] != 0xB6 || entry[39] != 0x05)
+                    return nullptr;
+                std::memcpy(&flagAddress, entry + 40, sizeof(flagAddress));
+                if (flagAddress == 0)
+                    return nullptr;
+
+                auto* flag = reinterpret_cast<MissionSaveFlag>(static_cast<uintptr_t>(flagAddress));
+                const uint8_t current = *flag;
+                if (current > 1)
+                    return nullptr;
+                return flag;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        bool InvokeNativeNormalSaveGame(
             NativeSaveGameFn saveGame,
+            MissionSaveFlag missionSaveFlag,
             char* filename,
             int saveType,
             DWORD& exceptionCode) noexcept
         {
             exceptionCode = 0;
+            if (saveGame == nullptr || missionSaveFlag == nullptr)
+                return false;
+
             __try
             {
-                return saveGame(filename, saveType);
+                // FUN_004fdc80, the stock normal-save wrapper, establishes
+                // missionSave=0 before calling SaveGame. Direct callers such
+                // as OpenShim must do the same because FUN_004fbe90 (mission
+                // save) leaves this global set after it returns.
+                *missionSaveFlag = 0;
+                const bool saved = saveGame(filename, saveType);
+                *missionSaveFlag = 0;
+                return saved;
             }
             __except (exceptionCode = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER)
             {
+                __try
+                {
+                    *missionSaveFlag = 0;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
                 return false;
             }
         }
@@ -615,7 +668,12 @@ namespace BZROpenShim
                 {
                     std::string filename = g_autoSavePath.string();
                     DWORD exceptionCode = 0;
-                    const bool saved = InvokeNativeSaveGame(g_nativeSaveGame, filename.data(), 0, exceptionCode);
+                    const bool saved = InvokeNativeNormalSaveGame(
+                        g_nativeSaveGame,
+                        g_missionSaveFlag,
+                        filename.data(),
+                        0,
+                        exceptionCode);
 
                     if (exceptionCode != 0)
                     {
@@ -811,9 +869,11 @@ namespace BZROpenShim
         }
 
         g_nativeSaveGame = ResolveNativeSaveGame();
-        if (!g_nativeSaveGame || !InstallMainThreadHook())
+        g_missionSaveFlag = ResolveMissionSaveFlag(g_nativeSaveGame);
+        if (!g_nativeSaveGame || !g_missionSaveFlag || !InstallMainThreadHook())
         {
             g_nativeSaveGame = nullptr;
+            g_missionSaveFlag = nullptr;
             return false;
         }
 
@@ -871,10 +931,11 @@ namespace BZROpenShim
 
         // A game launched with AutoSave disabled never resolved SaveGame or
         // installed the recurring hook, so enabling it must finish setup live.
-        if (!g_nativeSaveGame)
+        if (!g_nativeSaveGame || !g_missionSaveFlag)
         {
             g_nativeSaveGame = ResolveNativeSaveGame();
-            if (!g_nativeSaveGame)
+            g_missionSaveFlag = ResolveMissionSaveFlag(g_nativeSaveGame);
+            if (!g_nativeSaveGame || !g_missionSaveFlag)
                 return false;
         }
         if (!g_hookInstalled && !InstallMainThreadHook())

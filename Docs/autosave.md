@@ -8,6 +8,10 @@ OpenShim can own single-player autosaving without requiring EXU or mission Lua.
 - Disabled automatically for network games.
 - Does not save while the pause/options/save/load/restart UI is active or while another cursor-driven shell screen is active. Terrain edit mode (`0x009454B8`) is **not** treated as a hard no-save condition: unscripted single-player / Instant Action missions can carry that flag while still allowing a manual SaveGame, so OpenShim only logs its state as diagnostic and leaves the save eligible. Dump `battlezone98redux.exe.38660.dmp` was taken with `editMode=1`, `wrapperActive=1`, `screenType=1` and showed the previous gate would have permanently suppressed the timer that had been armed at `09:38:20.698` with `initialDelay=10000ms`.
 - Uses BZR's native `SaveGame(char*, int)` serializer on the game/main thread.
+- Establishes the stock normal-save state (`missionSave=0`) around each direct
+  serializer call, including the exception path. This matters because Redux's
+  native mission-save command leaves that global set after it returns; without
+  this guard, a later autosave could omit normal runtime/task data.
 - Writes the established autosave path used by Campaign Reimagined and OpenShim's injected load button:
   - `Save\auto.sav`
   - `Save\auto.label.txt`
