@@ -33,6 +33,18 @@ firstDistance = 70.0
 restrictToTerrainTypes = 1
 terrainTypes = "0"
 matFile = "lcbveg.mat"
+
+// bzfile.dll and TerrainClutter.lua both live inside the Campaign Reimagined
+// mod folder, and an addon mission gets neither a mod's Lua search path nor its
+// native modules -- so on a direct launch the .mat cannot be read whatever is
+// installed. The mission then recovers the materials from elevation and slope,
+// which is what painted them in the first place, calibrating against the map's
+// own height range. These are the thresholds for that path; they do nothing
+// when the .mat is readable.
+calibrationSamples = 32
+riverFraction = 0.12
+treeFraction = 0.55
+rockSlopeDegrees = 26.0
 // Must match [Size] MinX/MinZ in lcbveg.trn, or every lookup is offset.
 worldMinX = 0.0
 worldMinZ = 0.0

@@ -119,6 +119,7 @@ foreach ($name in ($payload + @("lcbveg.bzn"))) {
 Write-Host ""
 Write-Host "Launch it with:  battlezone98redux.exe lcbveg" -ForegroundColor Cyan
 Write-Host "Tune it by editing addon\lcbveg\lcbvcfg.odf and relaunching."
-Write-Host "Campaign Reimagined must be active: the grass mesh and material are"
-Write-Host "CR's, and CR's TerrainClutter is what the bench is there to exercise."
+Write-Host "bzfile and TerrainClutter live inside the CR mod folder, which an addon"
+Write-Host "mission cannot require. The mission falls back to a built-in placer and to"
+Write-Host "classifying terrain from elevation and slope, and says which in the log."
 exit 0
