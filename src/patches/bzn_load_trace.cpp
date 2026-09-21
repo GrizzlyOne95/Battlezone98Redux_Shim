@@ -171,6 +171,9 @@ namespace BZROpenShim
                 report.version.empty() ? "?" : report.version.c_str(),
                 report.terrainName.empty() ? "?" : report.terrainName.c_str());
 
+            for (const std::string& problem : report.byteProblems)
+                Log(L"[BZNLOAD] *** %s: %hs\n", name, problem.c_str());
+
             if (!report.ascii)
             {
                 // A binary save has no line structure to check and no readable
@@ -194,7 +197,8 @@ namespace BZROpenShim
             for (const std::string& problem : report.problems)
                 Log(L"[BZNLOAD] *** %s: %hs\n", name, problem.c_str());
 
-            if (report.problems.empty() && !report.endings.unsafe())
+            if (report.problems.empty() && report.byteProblems.empty() &&
+                !report.endings.unsafe())
                 Log(L"[BZNLOAD] %s structural checks passed\n", name);
 
             if (!g_Verbose)
