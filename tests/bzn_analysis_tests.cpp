@@ -530,6 +530,71 @@ int main()
             Check(p.find("sObject") == std::string::npos, "null sObject: not reported");
     }
 
+    // --- isUser must be canonical and must not select multiple objects -------
+    {
+        const Result r = Analyze(Build(SampleMission()));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("isUser") != std::string::npos;
+        Check(!found, "isUser: canonical single-user fixture stays clean");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstIsUser = FindLine(lines, "isUser [1] =");
+        lines[firstIsUser + 1] = "2";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 has noncanonical isUser=2; engine treats any nonzero value as true") !=
+                    std::string::npos;
+        Check(found, "isUser: noncanonical nonzero value reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstIsUser = FindLine(lines, "isUser [1] =");
+        lines[firstIsUser + 1] = "oops";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 isUser is not a valid decimal integer: 'oops'") !=
+                    std::string::npos;
+        Check(found, "isUser: malformed integer reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t secondObject = FindLine(lines, "label = sfield1_scrapfield");
+        size_t secondIsUser = secondObject;
+        while (secondIsUser < lines.size() && lines[secondIsUser] != "isUser [1] =")
+            ++secondIsUser;
+        lines[secondIsUser + 1] = "1";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("multiple GameObjects have nonzero isUser: #0, #1") !=
+                    std::string::npos;
+        Check(found, "isUser: multiple effective user objects reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t firstIsUser = FindLine(lines, "isUser [1] =");
+        lines[firstIsUser + 1] = "0";
+        const Result r = Analyze(Build(lines));
+
+        bool inventedRequirement = false;
+        for (const std::string& p : r.problems)
+            inventedRequirement = inventedRequirement ||
+                p.find("no GameObject") != std::string::npos ||
+                p.find("missing user") != std::string::npos;
+        Check(!inventedRequirement, "isUser: zero-user mission is not rejected");
+    }
+
     // --- defining pointer IDs must be non-zero and unique per namespace -----
     {
         const Result r = Analyze(Build(SampleMission()));
