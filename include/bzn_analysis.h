@@ -24,6 +24,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cerrno>
 #include <cstddef>
 #include <cstdlib>
 #include <string>
@@ -52,7 +53,8 @@ namespace BZROpenShim::BznAnalysis
         size_t index = 0;
         size_t headerLine = 0;
         std::string pointCount;
-        long declaredPoints = -1;
+        long declaredPoints = 0;
+        bool pointsCountValid = false;
         size_t xComponents = 0;
         size_t zComponents = 0;
         bool sawPoints = false;
@@ -174,6 +176,23 @@ namespace BZROpenShim::BznAnalysis
                    t.substr(1, t.size() - 2) == name;
         }
 
+        inline bool ParseDecimalLong(std::string_view text, long& value)
+        {
+            const std::string_view trimmed = Trim(text);
+            if (trimmed.empty())
+                return false;
+
+            std::string copy(trimmed);
+            char* end = nullptr;
+            errno = 0;
+            const long parsed = std::strtol(copy.c_str(), &end, 10);
+            if (end == copy.c_str() || !end || *end != '\0' || errno == ERANGE)
+                return false;
+
+            value = parsed;
+            return true;
+        }
+
         inline bool ParseBracketCount(std::string_view text, std::string_view expectedKey, long& count)
         {
             const size_t eq = text.find('=');
@@ -192,14 +211,7 @@ namespace BZROpenShim::BznAnalysis
             if (number.empty())
                 return false;
 
-            std::string copy(number);
-            char* end = nullptr;
-            const long parsed = std::strtol(copy.c_str(), &end, 10);
-            if (!end || *end != '\0')
-                return false;
-
-            count = parsed;
-            return true;
+            return ParseDecimalLong(number, count);
         }
 
         // Returns false when the line is not "key = ..." at all.
@@ -390,6 +402,7 @@ namespace BZROpenShim::BznAnalysis
                 else if (key == "points")
                 {
                     currentPath->sawPoints = true;
+                    currentPath->pointsCountValid = hasBracketCount;
                     if (hasBracketCount)
                         currentPath->declaredPoints = bracketCount;
                 }
@@ -456,34 +469,109 @@ namespace BZROpenShim::BznAnalysis
                 result.problems.push_back("sObject references undefined id " + ref);
         }
 
-        if (!result.declaredObjectCount.empty())
-        {
-            const long declared = std::strtol(result.declaredObjectCount.c_str(), nullptr, 10);
-            if (declared >= 0 && static_cast<size_t>(declared) != result.objects.size())
+        const auto validateBlockCount =
+            [&result](const std::string& raw, const char* label, size_t observed,
+                      const char* blockName)
             {
-                result.problems.push_back("GameObject size says " + result.declaredObjectCount +
-                                          " but the file has " + std::to_string(result.objects.size()) +
-                                          " [GameObject] blocks");
-            }
-        }
+                if (raw.empty())
+                    return;
 
-        if (!result.declaredAoiCount.empty())
-        {
-            const long declared = std::strtol(result.declaredAoiCount.c_str(), nullptr, 10);
-            if (declared >= 0 && static_cast<size_t>(declared) != result.aoiBlocks)
-            {
-                result.problems.push_back("[AOIs] size says " + result.declaredAoiCount +
-                                          " but the file has " + std::to_string(result.aoiBlocks) +
-                                          " [AOI] blocks");
-            }
-        }
+                long declared = 0;
+                if (!detail::ParseDecimalLong(raw, declared))
+                {
+                    result.problems.push_back(std::string(label) +
+                                              " is not a valid decimal count: '" + raw + "'");
+                    return;
+                }
+                if (declared < 0)
+                {
+                    result.problems.push_back(std::string(label) + " is negative: " + raw);
+                    return;
+                }
+                if (static_cast<unsigned long>(declared) >
+                    static_cast<unsigned long>(result.lineCount))
+                {
+                    result.problems.push_back(std::string(label) + " says " + raw +
+                                              " but the file has only " +
+                                              std::to_string(result.lineCount) +
+                                              " lines; that count is impossible");
+                    return;
+                }
+                if (static_cast<size_t>(declared) != observed)
+                {
+                    result.problems.push_back(std::string(label) + " says " + raw +
+                                              " but the file has " +
+                                              std::to_string(observed) + " " + blockName);
+                }
+            };
+
+        validateBlockCount(result.declaredObjectCount, "GameObject size",
+                           result.objects.size(), "[GameObject] blocks");
+        validateBlockCount(result.declaredAoiCount, "[AOIs] size",
+                           result.aoiBlocks, "[AOI] blocks");
 
         for (const PathRecord& path : result.paths)
         {
-            if (!path.pointCount.empty() && path.sawPoints && path.declaredPoints >= 0)
+            long declaredPointCount = 0;
+            bool pointCountValid = true;
+            if (!path.pointCount.empty())
             {
-                const long declaredPointCount = std::strtol(path.pointCount.c_str(), nullptr, 10);
-                if (declaredPointCount >= 0 && declaredPointCount != path.declaredPoints)
+                if (!detail::ParseDecimalLong(path.pointCount, declaredPointCount))
+                {
+                    result.problems.push_back("AiPath #" + std::to_string(path.index) +
+                                              " pointCount is not a valid decimal count: '" +
+                                              path.pointCount + "'");
+                    pointCountValid = false;
+                }
+                else if (declaredPointCount < 0)
+                {
+                    result.problems.push_back("AiPath #" + std::to_string(path.index) +
+                                              " pointCount is negative: " + path.pointCount);
+                    pointCountValid = false;
+                }
+                else if (static_cast<unsigned long>(declaredPointCount) >
+                         static_cast<unsigned long>(result.lineCount))
+                {
+                    result.problems.push_back("AiPath #" + std::to_string(path.index) +
+                                              " pointCount says " + path.pointCount +
+                                              " but the file has only " +
+                                              std::to_string(result.lineCount) +
+                                              " lines; that count is impossible");
+                    pointCountValid = false;
+                }
+            }
+
+            bool pointsArrayValid = path.pointsCountValid;
+            if (path.sawPoints && !path.pointsCountValid)
+            {
+                result.problems.push_back("AiPath #" + std::to_string(path.index) +
+                                          " points array has an invalid [N] count");
+                pointsArrayValid = false;
+            }
+            else if (path.sawPoints && path.declaredPoints < 0)
+            {
+                result.problems.push_back("AiPath #" + std::to_string(path.index) +
+                                          " points array count is negative: " +
+                                          std::to_string(path.declaredPoints));
+                pointsArrayValid = false;
+            }
+            else if (path.sawPoints &&
+                     static_cast<unsigned long>(path.declaredPoints) >
+                     static_cast<unsigned long>(result.lineCount))
+            {
+                result.problems.push_back("AiPath #" + std::to_string(path.index) +
+                                          " points array declares " +
+                                          std::to_string(path.declaredPoints) +
+                                          " entries but the file has only " +
+                                          std::to_string(result.lineCount) +
+                                          " lines; that count is impossible");
+                pointsArrayValid = false;
+            }
+
+            if (!path.pointCount.empty() && path.sawPoints &&
+                pointCountValid && pointsArrayValid)
+            {
+                if (declaredPointCount != path.declaredPoints)
                 {
                     result.problems.push_back("AiPath #" + std::to_string(path.index) +
                                               " pointCount says " + path.pointCount +
@@ -505,16 +593,8 @@ namespace BZROpenShim::BznAnalysis
             }
         }
 
-        if (!result.declaredPathCount.empty())
-        {
-            const long declared = std::strtol(result.declaredPathCount.c_str(), nullptr, 10);
-            if (declared >= 0 && static_cast<size_t>(declared) != result.pathBlocks)
-            {
-                result.problems.push_back("[AiPaths] count says " + result.declaredPathCount +
-                                          " but the file has " + std::to_string(result.pathBlocks) +
-                                          " [AiPath] blocks");
-            }
-        }
+        validateBlockCount(result.declaredPathCount, "[AiPaths] count",
+                           result.pathBlocks, "[AiPath] blocks");
 
         return result;
     }
