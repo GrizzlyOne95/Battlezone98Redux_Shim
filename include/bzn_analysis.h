@@ -73,6 +73,8 @@ namespace BZROpenShim::BznAnalysis
         size_t headerLine = 0;
         std::string oldPtr;
         std::string pointCount;
+        std::string pathType;
+        size_t endLine = 0;  // 1-based line containing pathType
         long declaredPoints = 0;
         bool pointsCountValid = false;
         size_t xComponents = 0;
@@ -109,6 +111,7 @@ namespace BZROpenShim::BznAnalysis
         size_t firstNulOffset = kNone;     // zero-based byte offset
         std::string version;
         std::string terrainName;
+        std::string missionSave;
         std::string seqCount;
         long maxObjectSeqno = -1;
         long minimumSafeSeqCount = -1;
@@ -118,6 +121,7 @@ namespace BZROpenShim::BznAnalysis
         std::string declaredPathCount;
         size_t aoiBlocks = 0;
         size_t pathBlocks = 0;
+        size_t aiPathsCountEndLine = 0;
         size_t lineCount = 0;
         std::vector<ObjectRecord> objects;
         std::vector<AoiRecord> aois;
@@ -544,6 +548,7 @@ namespace BZROpenShim::BznAnalysis
             else if (inPaths && expectPathCount && key == "count")
             {
                 result.declaredPathCount = value;
+                result.aiPathsCountEndLine = next ? (i + 2) : (i + 1);
                 expectPathCount = false;
             }
             else if (key == "version" && result.version.empty())
@@ -555,6 +560,8 @@ namespace BZROpenShim::BznAnalysis
             }
             else if (key == "TerrainName" && result.terrainName.empty())
                 result.terrainName = value;
+            else if (key == "missionSave" && result.missionSave.empty())
+                result.missionSave = value;
             else if (key == "seq_count" && result.seqCount.empty())
                 result.seqCount = value;
 
@@ -605,6 +612,11 @@ namespace BZROpenShim::BznAnalysis
                     currentPath->oldPtr = value;
                 else if (key == "pointCount" && currentPath->pointCount.empty())
                     currentPath->pointCount = value;
+                else if (key == "pathType" && currentPath->pathType.empty())
+                {
+                    currentPath->pathType = value;
+                    currentPath->endLine = i + 1;
+                }
                 else if (key == "points")
                 {
                     currentPath->sawPoints = true;
@@ -1070,6 +1082,44 @@ namespace BZROpenShim::BznAnalysis
 
         validateBlockCount(result.declaredPathCount, "[AiPaths] count",
                            result.pathBlocks, "[AiPath] blocks");
+
+        if (result.ascii && result.missionSave == "true")
+        {
+            long declaredPaths = -1;
+            const bool countValid =
+                detail::ParseDecimalLong(result.declaredPathCount, declaredPaths) &&
+                declaredPaths >= 0 &&
+                static_cast<size_t>(declaredPaths) == result.paths.size();
+
+            size_t logicalEndLine = 0;
+            if (countValid && declaredPaths == 0)
+            {
+                logicalEndLine = result.aiPathsCountEndLine;
+            }
+            else if (countValid && declaredPaths > 0)
+            {
+                const PathRecord& finalPath = result.paths.back();
+                if (!finalPath.pathType.empty() && finalPath.endLine != 0)
+                    logicalEndLine = finalPath.endLine;
+            }
+
+            if (logicalEndLine != 0 && logicalEndLine < lines.size())
+            {
+                for (size_t lineIndex = logicalEndLine; lineIndex < lines.size(); ++lineIndex)
+                {
+                    const std::string_view trailing(
+                        data.data() + lines[lineIndex].begin, lines[lineIndex].length);
+                    if (detail::Trim(trailing).empty())
+                        continue;
+
+                    result.problems.push_back(
+                        "unexpected trailing data after final AiPath at line " +
+                        std::to_string(lineIndex + 1) + ": '" +
+                        std::string(detail::Trim(trailing)) + "'");
+                    break;
+                }
+            }
+        }
 
         // Binary BZNs legitimately contain zero bytes in their binary payload,
         // so NUL is only a text-file hazard after binarySave=false is proven.
