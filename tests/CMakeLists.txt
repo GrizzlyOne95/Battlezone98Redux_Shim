@@ -44,6 +44,12 @@ add_executable(bzn_analysis_tests
 target_include_directories(bzn_analysis_tests PRIVATE ../include)
 target_compile_features(bzn_analysis_tests PRIVATE cxx_std_20)
 
+add_executable(bzn_filename_identity_tests
+    bzn_filename_identity_tests.cpp
+)
+target_include_directories(bzn_filename_identity_tests PRIVATE ../include)
+target_compile_features(bzn_filename_identity_tests PRIVATE cxx_std_20)
+
 add_executable(bzn_save_path_tests
     bzn_save_path_tests.cpp
 )
@@ -235,6 +241,7 @@ if(MSVC)
     target_compile_options(trn_codec_tests PRIVATE /W4 /WX)
     target_compile_options(bzn_save_path_tests PRIVATE /W4 /WX)
     target_compile_options(bzn_analysis_tests PRIVATE /W4 /WX)
+    target_compile_options(bzn_filename_identity_tests PRIVATE /W4 /WX)
     target_compile_options(numeric_locale_compat_tests PRIVATE /W4 /WX)
     target_compile_options(native_ui_validation_tests PRIVATE /W4 /WX)
     target_compile_options(enhanced_light_selection_tests PRIVATE /W4 /WX)
@@ -260,6 +267,7 @@ else()
     target_compile_options(trn_codec_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(bzn_save_path_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(bzn_analysis_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(bzn_filename_identity_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(numeric_locale_compat_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(native_ui_validation_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(enhanced_light_selection_tests PRIVATE -Wall -Wextra -Werror)
@@ -286,6 +294,7 @@ add_test(NAME shadow_far_distance_tests COMMAND shadow_far_distance_tests)
 add_test(NAME trn_codec_tests COMMAND trn_codec_tests)
 add_test(NAME bzn_save_path_tests COMMAND bzn_save_path_tests)
 add_test(NAME bzn_analysis_tests COMMAND bzn_analysis_tests)
+add_test(NAME bzn_filename_identity_tests COMMAND bzn_filename_identity_tests)
 add_test(NAME numeric_locale_compat_tests COMMAND numeric_locale_compat_tests)
 add_test(NAME native_ui_validation_tests COMMAND native_ui_validation_tests)
 add_test(NAME enhanced_light_selection_tests COMMAND enhanced_light_selection_tests)
