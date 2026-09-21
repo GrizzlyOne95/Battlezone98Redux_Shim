@@ -1433,11 +1433,17 @@ StatsTracking = 1
 ; rendering only and cannot desync anything: see its own note at the end of
 ; this section for why standing it down online is the parity-correct choice.
 
-; Make hovercraft-derived AI craft converge fixed-weapon fire on the aim point.
+; Weapon convergence: make hover/wingman-style fixed weapons use the stock
+; Walker-style convergence behavior against the craft's explicit target.
+; From the player's perspective this requires manually targeting a unit.
 ; Accepted: boolean. Default: ON.
 WeaponConvergence = 1
 
-; Converge the local player's weapon hardpoints on the smart-reticle position.
+; Reticle convergence: use the same gameplay concept, but converge the local
+; player's weapon hardpoints on the smart-reticle world point instead of an
+; explicit target. No target lock is required: aiming at a unit or terrain is
+; enough; if the reticle has no valid world point (for example open sky), stock
+; aim is retained.
 ; Accepted: boolean. Default: ON.
 ; Legacy INI alias: SmartReticleConvergence
 PlayerReticleConvergence = 1
