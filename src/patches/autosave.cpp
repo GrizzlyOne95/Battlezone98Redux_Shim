@@ -12,6 +12,7 @@
 #include "autosave_gate.h"
 #include "BZROpenShim.h"
 #include "game_state.h"
+#include "native_save_flag.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -35,6 +36,7 @@ namespace BZROpenShim
     {
         using NativeSaveGameFn = bool(__cdecl*)(char*, int);
         using WorldUpdateRenderQueueFn = void(__thiscall*)(void*, void*);
+        using MissionSaveFlag = volatile uint8_t*;
 
         constexpr uintptr_t kIsNetGameAddr = 0x00917F7B;
         constexpr uintptr_t kUserObjectAddr = 0x00917AFC;
@@ -80,6 +82,7 @@ namespace BZROpenShim
 
         AutoSaveConfig g_config;
         NativeSaveGameFn g_nativeSaveGame = nullptr;
+        MissionSaveFlag g_missionSaveFlag = nullptr;
         WorldUpdateRenderQueueFn g_previousWorldUpdateRenderQueue = nullptr;
         bool g_hookInstalled = false;
         bool g_missionActive = false;
@@ -157,19 +160,75 @@ namespace BZROpenShim
             }
         }
 
-        bool InvokeNativeSaveGame(
+        MissionSaveFlag ResolveMissionSaveFlag(NativeSaveGameFn saveGame) noexcept
+        {
+            if (saveGame == nullptr)
+                return nullptr;
+
+            // Deriving the address from the already-qualified function keeps
+            // this build-specific global out of the autosave feature code and
+            // fails closed on drift. The decode itself lives in
+            // native_save_flag.h so the host tests can cover the drift cases.
+            const auto* entry = reinterpret_cast<const uint8_t*>(saveGame);
+            __try
+            {
+                const uint32_t flagAddress = NativeSaveFlag::ReadFlagAddress(entry);
+                if (flagAddress == 0)
+                    return nullptr;
+
+                auto* flag = reinterpret_cast<MissionSaveFlag>(static_cast<uintptr_t>(flagAddress));
+                if (!NativeSaveFlag::IsPlausibleValue(*flag))
+                    return nullptr;
+                return flag;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        bool InvokeNativeNormalSaveGame(
             NativeSaveGameFn saveGame,
+            MissionSaveFlag missionSaveFlag,
             char* filename,
             int saveType,
             DWORD& exceptionCode) noexcept
         {
             exceptionCode = 0;
+            if (saveGame == nullptr || missionSaveFlag == nullptr)
+                return false;
+
+            // FUN_004fdc80, the stock normal-save wrapper, establishes
+            // missionSave=0 before calling SaveGame. Direct callers such as
+            // OpenShim must do the same because FUN_004fbe90 (mission save)
+            // leaves this global set after it returns.
+            //
+            // The prior value is restored rather than forced to 0, because
+            // FUN_004fbe90 sets the flag and only then opens a modal dialog
+            // (FUN_0056ad10 -> FUN_005d48c0 -> FUN_005d4690, which runs its own
+            // event loop). An autosave landing inside that window would
+            // otherwise clear a flag the engine is still relying on and silently
+            // downgrade the user's mission save to a normal one. The gate reads
+            // uiWrapperActive at 0x00918324, which that dialog path does not
+            // set, so the gate alone cannot be relied on to exclude it.
+            uint8_t previous = 0;
             __try
             {
-                return saveGame(filename, saveType);
+                previous = *missionSaveFlag;
+                *missionSaveFlag = 0;
+                const bool saved = saveGame(filename, saveType);
+                *missionSaveFlag = previous;
+                return saved;
             }
             __except (exceptionCode = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER)
             {
+                __try
+                {
+                    *missionSaveFlag = previous;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
                 return false;
             }
         }
@@ -615,7 +674,12 @@ namespace BZROpenShim
                 {
                     std::string filename = g_autoSavePath.string();
                     DWORD exceptionCode = 0;
-                    const bool saved = InvokeNativeSaveGame(g_nativeSaveGame, filename.data(), 0, exceptionCode);
+                    const bool saved = InvokeNativeNormalSaveGame(
+                        g_nativeSaveGame,
+                        g_missionSaveFlag,
+                        filename.data(),
+                        0,
+                        exceptionCode);
 
                     if (exceptionCode != 0)
                     {
@@ -811,9 +875,11 @@ namespace BZROpenShim
         }
 
         g_nativeSaveGame = ResolveNativeSaveGame();
-        if (!g_nativeSaveGame || !InstallMainThreadHook())
+        g_missionSaveFlag = ResolveMissionSaveFlag(g_nativeSaveGame);
+        if (!g_nativeSaveGame || !g_missionSaveFlag || !InstallMainThreadHook())
         {
             g_nativeSaveGame = nullptr;
+            g_missionSaveFlag = nullptr;
             return false;
         }
 
@@ -871,15 +937,17 @@ namespace BZROpenShim
 
         // A game launched with AutoSave disabled never resolved SaveGame or
         // installed the recurring hook, so enabling it must finish setup live.
-        if (!g_nativeSaveGame)
+        if (!g_nativeSaveGame || !g_missionSaveFlag)
         {
             g_nativeSaveGame = ResolveNativeSaveGame();
-            if (!g_nativeSaveGame)
+            g_missionSaveFlag = ResolveMissionSaveFlag(g_nativeSaveGame);
+            if (!g_nativeSaveGame || !g_missionSaveFlag)
                 return false;
         }
         if (!g_hookInstalled && !InstallMainThreadHook())
         {
             g_nativeSaveGame = nullptr;
+            g_missionSaveFlag = nullptr;
             return false;
         }
 
@@ -920,6 +988,7 @@ namespace BZROpenShim
     {
         RestoreMainThreadHook();
         g_nativeSaveGame = nullptr;
+        g_missionSaveFlag = nullptr;
         ResetMissionState();
         InterlockedExchange(&g_saveInProgress, 0);
     }

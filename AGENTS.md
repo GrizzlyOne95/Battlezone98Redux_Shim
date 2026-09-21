@@ -17,6 +17,7 @@ Native `winmm.dll` shim for Battlezone 98 Redux. This repository owns low-level 
 - Private leaked-PDB hints: read `reverse_engineering/private_pdb_semantic_ranking.md`; never treat matching RVAs or leaked-build register/stack locations as released-build proof.
 - Any game launch or harness work: dot-source `reverse_engineering/BZRHarness.ps1`, which serializes launches machine-wide, and stop via `Stop-BZRGame` (prefer `-Id`). Never force-kill `battlezone98redux`; doing so with the fullscreen D3D device can hard-lock the workstation. Use `BZR_FORCE_WINDOWED=1` except for timing comparisons.
 - The shared Lua and platform documents must remain byte-identical across OpenShim, EXU, CR, and bzfile; update all four in one workstream if either changes.
+- Terrain format questions (`.trn`/`.hg2`/`.mat`/`.lgt`): consult `Battlezone98Redux_WorldBuilder`, especially `docs/MAT_FORMAT_VALIDATION.md` and `mat_codec.py`/`hg2_codec.py`, before inferring byte layout from hex dumps.
 
 ## Architecture guardrails
 
