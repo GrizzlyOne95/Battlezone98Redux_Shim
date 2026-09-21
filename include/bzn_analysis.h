@@ -423,50 +423,53 @@ namespace BZROpenShim::BznAnalysis
             if (!current)
                 continue;
 
-            if (key == "PrjID")
+            if (!current->hasTransform)
             {
-                current->hasPrjId = true;
-                if (current->prjId.empty())
-                    current->prjId = value;
-            }
-            else if (key == "seqno")
-            {
-                current->hasSeqno = true;
-                if (current->seqno.empty())
+                if (key == "PrjID")
                 {
-                    current->seqno = value;
-                    if (!value.empty())
-                        seqCounts[value]++;
+                    current->hasPrjId = true;
+                    if (current->prjId.empty())
+                        current->prjId = value;
                 }
-            }
-            else if (key == "pos")
-                current->hasPos = true;
-            else if (key == "team")
-            {
-                current->hasTeam = true;
-                if (current->team.empty())
-                    current->team = value;
-            }
-            else if (key == "label")
-            {
-                current->hasLabel = true;
-                if (current->label.empty())
+                else if (key == "seqno")
                 {
-                    current->label = value;
-                    if (!value.empty())
-                        labelCounts[value]++;
+                    current->hasSeqno = true;
+                    if (current->seqno.empty())
+                    {
+                        current->seqno = value;
+                        if (!value.empty())
+                            seqCounts[value]++;
+                    }
                 }
+                else if (key == "pos")
+                    current->hasPos = true;
+                else if (key == "team")
+                {
+                    current->hasTeam = true;
+                    if (current->team.empty())
+                        current->team = value;
+                }
+                else if (key == "label")
+                {
+                    current->hasLabel = true;
+                    if (current->label.empty())
+                    {
+                        current->label = value;
+                        if (!value.empty())
+                            labelCounts[value]++;
+                    }
+                }
+                else if (key == "isUser")
+                    current->hasIsUser = true;
+                else if (key == "obj_addr")
+                {
+                    current->hasObjAddr = true;
+                    if (current->objAddr.empty())
+                        current->objAddr = value;
+                }
+                else if (key == "transform")
+                    current->hasTransform = true;
             }
-            else if (key == "isUser")
-                current->hasIsUser = true;
-            else if (key == "obj_addr")
-            {
-                current->hasObjAddr = true;
-                if (current->objAddr.empty())
-                    current->objAddr = value;
-            }
-            else if (key == "transform")
-                current->hasTransform = true;
         }
 
         // Which object does the first non-CRLF terminator fall inside? Naming
