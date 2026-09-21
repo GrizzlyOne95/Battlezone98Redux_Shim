@@ -49,6 +49,7 @@ local state = {
     notes = {},
     refusal = nil,
     mat = nil,
+    bands = nil,
     minX = 0.0,
     minZ = 0.0,
 }
@@ -101,11 +102,72 @@ local function LoadMat(name)
     return payload
 end
 
+-- Fallback classifier, used when the .mat cannot be read.
+--
+-- bzfile.dll and TerrainClutter.lua both live inside the Campaign Reimagined
+-- mod folder, and an addon mission does not get a mod's Lua search path or its
+-- native modules -- so on a direct launch neither is reachable, whatever is
+-- installed. Rather than silently drop terrain filtering, reconstruct it from
+-- the terrain itself.
+--
+-- This works because the map's materials were painted FROM elevation and slope
+-- in the first place (see paint_rules in Make-VegBenchTerrain.py), so the same
+-- two quantities recover them. It self-calibrates against the map's own height
+-- range instead of carrying a raw-to-world height constant, which is the part
+-- that would otherwise have to be guessed.
+local function CalibrateTerrainBands(samples)
+    if type(GetTerrainHeightAndNormal) ~= "function" then
+        return nil
+    end
+    local step = WORLD_SIZE / samples
+    local low, high = nil, nil
+    for iz = 0, samples - 1 do
+        for ix = 0, samples - 1 do
+            local probe = SetVector(state.minX + (ix + 0.5) * step, 0.0,
+                                    state.minZ + (iz + 0.5) * step)
+            local ok, height = pcall(GetTerrainHeightAndNormal, probe)
+            if ok and IsFinite(height) then
+                if not low or height < low then low = height end
+                if not high or height > high then high = height end
+            end
+        end
+    end
+    if not low or not high or high <= low then
+        return nil
+    end
+    return { low = low, high = high, range = high - low }
+end
+
+local function ClassifyFromTerrain(position)
+    local bands = state.bands
+    if not bands then
+        return nil
+    end
+    local height, normal = nil, nil
+    local ok, h, n = pcall(GetTerrainHeightAndNormal, position)
+    if ok and IsFinite(h) and n and IsFinite(n.y) then
+        height, normal = h, n
+    else
+        return nil
+    end
+    if height <= bands.low + bands.riverFraction * bands.range then
+        return 3    -- river
+    end
+    local up = math.max(-1.0, math.min(1.0, normal.y))
+    if (math.acos(up) * 180.0 / math.pi) >= bands.rockSlope then
+        return 2    -- rocky rock
+    end
+    if height >= bands.low + bands.treeFraction * bands.range then
+        return 1    -- trees
+    end
+    return 0        -- grass
+end
+
 -- World position -> the Base material of the cell under it, or nil off-map.
 local function MaterialAt(position)
     local payload = state.mat
     if not payload then
-        return nil
+        return ClassifyFromTerrain(position)
     end
     local cellX = math.floor((position.x - state.minX) / UNITS_PER_CELL)
     local cellZ = math.floor((position.z - state.minZ) / UNITS_PER_CELL)
@@ -220,14 +282,20 @@ function Start()
     -- OpenODF is only safe once LuaMission startup has entered Start(), which
     -- is why none of this is read at module load.
     local config = OpenODF("lcbvcfg")
+    -- The parentheses are load-bearing. GetODF* return TWO values, the value
+    -- and whether the key was found. A bare `return GetODFInt(...)` propagates
+    -- both, and in a trailing argument position Lua expands both -- so
+    -- math.min(12, Int("steps", 5)) became math.min(12, 5, true) and threw
+    -- "bad argument #3 to 'min' (number expected, got boolean)". Truncating
+    -- here fixes every call site at once rather than one at a time.
     local function Str(key, fallback)
-        return GetODFString(config, "Vegetation", key, fallback)
+        return (GetODFString(config, "Vegetation", key, fallback))
     end
     local function Num(key, fallback)
-        return GetODFFloat(config, "Vegetation", key, fallback)
+        return (GetODFFloat(config, "Vegetation", key, fallback))
     end
     local function Int(key, fallback)
-        return GetODFInt(config, "Vegetation", key, fallback)
+        return (GetODFInt(config, "Vegetation", key, fallback))
     end
 
     state.minX = Num("worldMinX", 0.0)
@@ -249,8 +317,28 @@ function Start()
                 allowed[tonumber(token)] = true
             end
         else
-            state.terrain = "unavailable (" .. tostring(matError) .. ")"
-            Note("terrain-type filtering is OFF: " .. tostring(matError))
+            -- No .mat: recover the materials from elevation and slope, which
+            -- is what painted them in the first place.
+            local samples = math.max(8, math.min(64, Int("calibrationSamples", 32)))
+            local bands = CalibrateTerrainBands(samples)
+            if bands then
+                bands.riverFraction = Num("riverFraction", 0.12)
+                bands.treeFraction = Num("treeFraction", 0.55)
+                bands.rockSlope = Num("rockSlopeDegrees", 26.0)
+                state.bands = bands
+                allowed = {}
+                for token in string.gmatch(Str("terrainTypes", "0"), "%d+") do
+                    allowed[tonumber(token)] = true
+                end
+                state.terrain = string.format(
+                    "derived from terrain (%s; height %.1f..%.1f over %d samples)",
+                    tostring(matError), bands.low, bands.high, samples * samples)
+                Note("no .mat (" .. tostring(matError) ..
+                    "); classifying from elevation and slope instead")
+            else
+                state.terrain = "unavailable (" .. tostring(matError) .. ")"
+                Note("terrain-type filtering is OFF: " .. tostring(matError))
+            end
         end
     else
         state.terrain = "disabled by config"
@@ -354,7 +442,9 @@ function Start()
             local t = (steps > 1) and ((index - 1) / (steps - 1)) or 0.0
             local density = densityMin
             if densityMin > 0.0 and densityMax > 0.0 then
-                density = densityMin * math.pow(densityMax / densityMin, t)
+                -- `^` rather than math.pow: math.pow was removed in Lua
+                -- 5.3, and the operator works on every version.
+                density = densityMin * (densityMax / densityMin) ^ t
             end
             local distance = first + (index - 1) * spacing
             plan[index] = {

@@ -19,9 +19,26 @@ battlezone98redux.exe lcbveg
 Tune by editing `addon\lcbveg\lcbvcfg.odf` and relaunching. No rebuild, no
 redeploy — the same idiom as `lcbcfg.odf`.
 
-**Campaign Reimagined must be active.** The grass mesh and material are CR's,
-and CR's `TerrainClutter` is what the bench exists to exercise. Without it the
-mission still runs, on a built-in fallback placer, and says so in the log.
+### What an addon mission can and cannot reach
+
+**`bzfile.dll` and `TerrainClutter.lua` both live inside the CR mod folder, and
+an addon mission gets neither a mod's Lua search path nor its native modules.**
+So on a direct launch `require("bzfile")` and `require("TerrainClutter")` both
+fail no matter what is installed. An earlier version of this README claimed
+"CR must be active" and was wrong about the mechanism.
+
+The mission handles it rather than failing:
+
+- **Placement** falls back to a built-in placer that performs the same
+  rejection sampling CR does. The log always says which one ran.
+- **Terrain typing** falls back to classifying from elevation and slope, which
+  is what painted the materials in the first place, self-calibrating against
+  the map's own height range so no raw-to-world constant has to be guessed.
+
+Ogre *resources* are a separate question from Lua modules: `crgrass.mesh` and
+`CR/GrassPrototype` may still resolve from the mod's resource locations. If
+they do not, `CreateStaticGeometry` fails and the log names the layer and the
+error.
 
 ## Scenarios
 
@@ -34,6 +51,23 @@ mission still runs, on a built-in fallback placer, and says so in the log.
 Density is instances per square unit; the log reports the **spacing** each patch
 actually achieved, which is the number that predicts whether it reads as ground
 cover. Roughly: 7 units apart is bare ground, 1.7 is a grass field.
+
+## Testing it without the game
+
+```
+lua Test-LcbVeg.lua
+```
+
+Stubs the engine globals and runs `Start()`/`Update()` against a synthetic
+valley: checks the ladder builds, densities increase, nothing lands in the
+river channel, and the configured mesh and material are used.
+
+The stubs return **two** values from `GetODF*`, deliberately. The first live
+run died on `bad argument #3 to 'min' (number expected, got boolean)` — the Lua
+multiple-return trap, where a bare `return GetODFInt(...)` propagates both the
+value and the found flag, so `math.min(12, Int("steps", 5))` expanded to
+`math.min(12, 5, true)`. A harness whose stubs return one value cannot catch
+the bug the real engine exposes.
 
 ## Terrain-type filtering
 
@@ -119,6 +153,8 @@ its cells. This map sits at the same 2.6%.
   water mesh, and the only one on this machine belongs to a third-party BzE
   addon. The river here is painted terrain, not water geometry. Adding a real
   pond means authoring a water plane mesh first.
-- **The spawn point comes from `lcbench.bzn`** and is wherever that puts it. The
-  mission logs which material it landed on; if that is ever `river`, move the
-  patches rather than the spawn.
+- **The spawn point comes from `lcbench.bzn`**, which puts it at the map centre
+  (2560, 2560). On the current terrain that is wooded ground at raw height 876,
+  and all five default ladder patches land on grass just east of it. The
+  mission logs which material it landed on, so a terrain change that moves the
+  spawn into the water is visible immediately.
