@@ -14530,13 +14530,18 @@ namespace BZROpenShim
                 if (!carrier)
                     return;
 
-                // Mirror Reticle::Simulate's precedence: an object under the
-                // crosshair wins, and the terrain point is only the fallback.
-                // Taking gPos unconditionally would aim at stale ground every
-                // time the crosshair is over a unit -- exactly the case where
-                // convergence matters most.
-                ConvergenceVec3 target = {};
-                const char* targetSource = "ground";
+                // Reticle convergence is intentionally the same gameplay model
+                // as Walker target convergence. The reticle supplies the RANGE
+                // at which fixed hardpoints toe inward; it does not turn each
+                // barrel into a magnetic world-point gimbal.
+                //
+                // Match Reticle::Simulate's source precedence so the range is
+                // current: an object under the crosshair wins, otherwise use
+                // the current terrain hit. An object's center is used only to
+                // measure range, exactly as Walker uses its explicit target's
+                // position for Dist3D -- we never aim the barrels at that center.
+                ConvergenceVec3 rangeReference = {};
+                const char* rangeSource = "ground";
                 void* selectObject =
                     *reinterpret_cast<void* const*>(kSmartReticleSelectObjectAddr);
                 if (selectObject)
@@ -14544,26 +14549,56 @@ namespace BZROpenShim
                     float objectPosition[3] = {};
                     if (!TryGetGameObjectWorldPosition(selectObject, objectPosition))
                         return;
-                    target = { objectPosition[0], objectPosition[1], objectPosition[2] };
-                    targetSource = "object";
+                    rangeReference = {
+                        objectPosition[0],
+                        objectPosition[1],
+                        objectPosition[2],
+                    };
+                    rangeSource = "object";
                 }
                 else
                 {
                     // No object under the crosshair and no ground hit this
-                    // frame means there is no reticle point at all -- the
-                    // player is aiming at the sky. Stand down and leave the
-                    // stock aim, which already points straight down the sight,
-                    // instead of converging on a stale gPos.
+                    // frame means there is no trustworthy reticle range. gPos
+                    // is stale in that state, so retain stock aim.
                     if (*reinterpret_cast<const int*>(kSmartReticleGroundHitAddr) == 0)
                     {
                         LogPlayerConvergenceSkyStandDownOnce();
                         return;
                     }
-                    target = *reinterpret_cast<const ConvergenceVec3*>(kSmartReticlePositionAddr);
+                    rangeReference =
+                        *reinterpret_cast<const ConvergenceVec3*>(kSmartReticlePositionAddr);
                 }
 
-                if (!std::isfinite(target.x) || !std::isfinite(target.y) || !std::isfinite(target.z))
+                if (!std::isfinite(rangeReference.x) ||
+                    !std::isfinite(rangeReference.y) ||
+                    !std::isfinite(rangeReference.z))
+                {
                     return;
+                }
+
+                float shooterRaw[3] = {};
+                if (!TryGetGameObjectWorldPosition(craft, shooterRaw))
+                    return;
+                const ConvergenceVec3 shooterPosition = {
+                    shooterRaw[0],
+                    shooterRaw[1],
+                    shooterRaw[2],
+                };
+
+                const float rangeDx = rangeReference.x - shooterPosition.x;
+                const float rangeDy = rangeReference.y - shooterPosition.y;
+                const float rangeDz = rangeReference.z - shooterPosition.z;
+                const float rangeSquared =
+                    rangeDx * rangeDx + rangeDy * rangeDy + rangeDz * rangeDz;
+                if (!std::isfinite(rangeSquared) ||
+                    rangeSquared <
+                        WeaponConvergence::kMinTargetDistance *
+                        WeaponConvergence::kMinTargetDistance)
+                {
+                    return;
+                }
+                const float convergenceRange = std::sqrt(rangeSquared);
 
                 int retargeted = 0;
                 int clamped = 0;
@@ -14580,11 +14615,6 @@ namespace BZROpenShim
                     if (!weaponObject)
                         continue;
 
-                    // The mount frame the engine itself fires through. Reading
-                    // it (rather than composing the _OBJ76 parent chain here)
-                    // guarantees convergence solves the same equation the
-                    // ordnance spawn evaluates, even if Weapon::Control has not
-                    // refreshed M yet this frame.
                     const ConvergenceMatrix mountWorld =
                         *reinterpret_cast<const ConvergenceMatrix*>(
                             reinterpret_cast<const uint8_t*>(weapon) +
@@ -14600,11 +14630,17 @@ namespace BZROpenShim
                         weapon, WeaponConvergence::Invert(mountWorld));
 
                     auto* transform = reinterpret_cast<ConvergenceMatrix*>(
-                        reinterpret_cast<uint8_t*>(weaponObject) + kObj76TransformOffset);
+                        reinterpret_cast<uint8_t*>(weaponObject) +
+                        kObj76TransformOffset);
 
                     WeaponConvergence::Solution solution = {};
                     const WeaponConvergence::SolveResult result =
-                        WeaponConvergence::Solve(*transform, mountWorld, target, solution);
+                        WeaponConvergence::SolveWalkerStyleRange(
+                            *transform,
+                            mountWorld,
+                            shooterPosition,
+                            convergenceRange,
+                            solution);
                     if (result == WeaponConvergence::SolveResult::ExceedsDeviationLimit)
                     {
                         ++clamped;
@@ -14616,19 +14652,13 @@ namespace BZROpenShim
                     *transform = solution.mountLocal;
                     refreshWeaponTransform(weaponObject, transform);
                     lastResidualDegrees = solution.residualDegrees;
-
                     lastMuzzle = solution.muzzle;
                     ++retargeted;
                 }
 
-                // Breadcrumbs proving the feature reaches a weapon, and where it
-                // is pointing it. Spaced out and capped: a single sample taken
-                // on the first simulated frame says nothing useful, because the
-                // sight matrix has not settled yet, but a handful spread across
-                // the first minute of play shows whether the reticle point
-                // tracks the craft or runs off the map.
                 if (retargeted > 0 &&
-                    g_PlayerReticleConvergenceLogCount < kPlayerReticleConvergenceLogLimit)
+                    g_PlayerReticleConvergenceLogCount <
+                        kPlayerReticleConvergenceLogLimit)
                 {
                     const ULONGLONG now = GetTickCount64();
                     if (g_PlayerReticleConvergenceLastLogTick == 0 ||
@@ -14637,32 +14667,29 @@ namespace BZROpenShim
                     {
                         g_PlayerReticleConvergenceLastLogTick = now;
                         ++g_PlayerReticleConvergenceLogCount;
-                        const float dx = target.x - lastMuzzle.x;
-                        const float dy = target.y - lastMuzzle.y;
-                        const float dz = target.z - lastMuzzle.z;
-                        Log(L"[CONVERGE] player reticle convergence applied to %d hardpoint(s) (clamped=%d) source=%hs muzzle=(%.1f, %.1f, %.1f) target=(%.1f, %.1f, %.1f) distance=%.1f residualError=%.3fdeg\n",
+                        Log(L"[CONVERGE] player Walker-style reticle convergence applied to %d hardpoint(s) "
+                            L"(clamped=%d) rangeSource=%hs muzzle=(%.1f, %.1f, %.1f) "
+                            L"rangeReference=(%.1f, %.1f, %.1f) range=%.1f residualError=%.3fdeg\n",
                             retargeted,
                             clamped,
-                            targetSource,
+                            rangeSource,
                             static_cast<double>(lastMuzzle.x),
                             static_cast<double>(lastMuzzle.y),
                             static_cast<double>(lastMuzzle.z),
-                            static_cast<double>(target.x),
-                            static_cast<double>(target.y),
-                            static_cast<double>(target.z),
-                            static_cast<double>(std::sqrt(dx * dx + dy * dy + dz * dz)),
+                            static_cast<double>(rangeReference.x),
+                            static_cast<double>(rangeReference.y),
+                            static_cast<double>(rangeReference.z),
+                            static_cast<double>(convergenceRange),
                             static_cast<double>(lastResidualDegrees));
                     }
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                // Fail soft if a future build changes the carrier/weapon layout,
-                // but leave one breadcrumb instead of silently disabling the
-                // player-only feature forever.
                 if (!g_PlayerReticleConvergenceLayoutFaultLogged)
                 {
-                    Log(L"[CONVERGE] player reticle convergence faulted while reading craft/carrier/weapon layout (craft=0x%p carrierOffset=0x%X)\n",
+                    Log(L"[CONVERGE] player reticle convergence faulted while reading craft/carrier/weapon layout "
+                        L"(craft=0x%p carrierOffset=0x%X)\n",
                         craft,
                         static_cast<uint32_t>(kCraftCarrierOffset));
                     g_PlayerReticleConvergenceLayoutFaultLogged = true;
