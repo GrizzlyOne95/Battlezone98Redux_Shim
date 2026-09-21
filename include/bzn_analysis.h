@@ -47,6 +47,7 @@ namespace BZROpenShim::BznAnalysis
         std::string label;
         std::string team;
         std::string seqno;
+        std::string isUser;
         std::string objAddr;
         bool hasPrjId = false;
         bool hasSeqno = false;
@@ -562,7 +563,11 @@ namespace BZROpenShim::BznAnalysis
                     }
                 }
                 else if (key == "isUser")
+                {
                     current->hasIsUser = true;
+                    if (current->isUser.empty())
+                        current->isUser = value;
+                }
                 else if (key == "obj_addr")
                 {
                     current->hasObjAddr = true;
@@ -622,6 +627,51 @@ namespace BZROpenShim::BznAnalysis
                         " (PrjID=" + (rec.prjId.empty() ? "?" : rec.prjId) +
                         " label=" + (rec.label.empty() ? "?" : rec.label) + ")");
                 }
+            }
+        }
+
+        if (result.ascii)
+        {
+            std::vector<size_t> effectiveUsers;
+            for (const ObjectRecord& rec : result.objects)
+            {
+                if (!rec.hasIsUser)
+                    continue;  // missing field is handled by the envelope check
+
+                long isUser = 0;
+                if (!detail::ParseDecimalLong(rec.isUser, isUser))
+                {
+                    result.problems.push_back(
+                        "GameObject #" + std::to_string(rec.index) +
+                        " isUser is not a valid decimal integer: '" + rec.isUser + "'");
+                    continue;
+                }
+
+                if (isUser != 0)
+                    effectiveUsers.push_back(rec.index);
+
+                if (isUser != 0 && isUser != 1)
+                {
+                    result.problems.push_back(
+                        "GameObject #" + std::to_string(rec.index) +
+                        " has noncanonical isUser=" + rec.isUser +
+                        "; engine treats any nonzero value as true, canonical value is 1");
+                }
+            }
+
+            if (effectiveUsers.size() > 1)
+            {
+                std::string indices;
+                for (size_t i = 0; i < effectiveUsers.size(); ++i)
+                {
+                    if (i != 0)
+                        indices += ", ";
+                    indices += "#" + std::to_string(effectiveUsers[i]);
+                }
+
+                result.problems.push_back(
+                    "multiple GameObjects have nonzero isUser: " + indices +
+                    "; loader overwrites userObject for each and leaves the last loaded object active");
             }
         }
 
