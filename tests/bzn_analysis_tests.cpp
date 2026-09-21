@@ -71,10 +71,18 @@ namespace
             "player",
             "seqno [1] =",
             "1",
+            "pos [1] =",
+            "  x [1] =",
+            "100",
             "team [1] =",
             "1",
             "label = player-1_hover",
+            "isUser [1] =",
+            "1",
             "obj_addr = 00000001",
+            "transform [1] =",
+            "  right_x [1] =",
+            "1",
             "[GameObject]",          // 19 -> object #1
             "PrjID [1] =",
             "sfield",
@@ -88,16 +96,29 @@ namespace
             "team [1] =",
             "0",
             "label = sfield1_scrapfield",
+            "isUser [1] =",
+            "0",
             "obj_addr = 00000002",
+            "transform [1] =",
+            "  right_x [1] =",
+            "1",
             "[GameObject]",          // 33 -> object #2
             "PrjID [1] =",
             "avfigh",
             "seqno [1] =",
             "3",
+            "pos [1] =",
+            "  x [1] =",
+            "300",
             "team [1] =",
             "1",
             "label = avfigh0_wingman",
+            "isUser [1] =",
+            "0",
             "obj_addr = 00000003",
+            "transform [1] =",
+            "  right_x [1] =",
+            "1",
             "sObject = 00000002",
             "[AiPaths]",
             "count [1] =",
@@ -309,6 +330,50 @@ int main()
         for (const std::string& p : r.problems)
             found = found || p.find("[AOIs] size says 3 but the file has 2") != std::string::npos;
         Check(found, "AOI count: under-block mismatch reported");
+    }
+
+    // --- required GameObject envelope fields --------------------------------
+    {
+        const Result r = Analyze(Build(SampleMission()));
+        for (const std::string& p : r.problems)
+            Check(p.find("missing required envelope field") == std::string::npos,
+                  "object envelope: clean fixture has every required field");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "isUser [1] =")] = "missingIsUser [1] =";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || (p.find("GameObject #0 is missing required envelope field(s):") !=
+                                  std::string::npos &&
+                              p.find("isUser") != std::string::npos);
+        Check(found, "object envelope: missing isUser reported with object index");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "transform [1] =")] = "missingTransform [1] =";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || (p.find("GameObject #0 is missing required envelope field(s):") !=
+                                  std::string::npos &&
+                              p.find("transform") != std::string::npos);
+        Check(found, "object envelope: missing transform reported for modern BZN");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "2016")] = "1001";
+        lines[FindLine(lines, "transform [1] =")] = "missingTransform [1] =";
+        const Result r = Analyze(Build(lines));
+
+        for (const std::string& p : r.problems)
+            Check(!(p.find("GameObject #0 is missing required envelope field(s):") !=
+                        std::string::npos &&
+                    p.find("transform") != std::string::npos),
+                  "object envelope: version 1001 does not require transform");
     }
 
     // --- structural counts must be valid non-negative decimals --------------
