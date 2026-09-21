@@ -19,7 +19,12 @@
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\Test-EnhancedShaderCompile.ps1
 #
-# Exit codes: 0 all variants compile, 1 at least one failed, 2 fxc.exe not found.
+# It also enforces the payload's vertex colour order contract, which no amount
+# of compiling can catch: `iColor` and `iColor.bgra` both compile perfectly and
+# differ only in whether blue renders as blue or as orange.
+#
+# Exit codes: 0 all variants compile and the colour contract holds, 1 at least
+# one failed, 2 fxc.exe not found.
 
 [CmdletBinding()]
 param(
@@ -47,6 +52,66 @@ if (-not $PayloadDir) {
 if (-not (Test-Path -LiteralPath $PayloadDir -PathType Container)) {
     Write-Host "Payload directory not found: $PayloadDir" -ForegroundColor Red
     exit 2
+}
+
+# -----------------------------------------------------------------------------
+# Vertex colour order contract
+# -----------------------------------------------------------------------------
+# Native BZR geometry packs vertex colour as an ARGB DWORD, which D3D11 reads
+# back in RGBA order. Every stock SM4 family that consumes vertex colour
+# corrects for that -- ui, uitexmat, untextured, sky, effect, simple_one_tex
+# and terrain all ship `iColor.bgra`. Payload programs stand in for those
+# families and must agree with them, or a blue legacy material renders orange.
+#
+# The opposite rule governs Ogre-generated vertices (TextArea, ParticleFX):
+# they have already passed through convertColourValue and arrive in RGBA order,
+# so correcting them swaps them twice. None of them reach this payload --
+# IsExcludedFromSynthesis() in dx11_legacy_material_compat.cpp rejects overlay,
+# font, cursor, sprite, compositor and rtt materials first -- so inside this
+# directory the rule is unconditional.
+#
+# Scope: vertex entry points only, identified by writing SV_POSITION, that
+# declare a COLOR0 input. A fragment stage reads the interpolated value and is
+# not the producer, so it is not checked.
+
+$colorContractChecked = 0
+$colorContractViolations = @()
+foreach ($hlsl in (Get-ChildItem -LiteralPath $PayloadDir -Filter "*-sm4.hlsl" -File)) {
+    $src = Get-Content -Raw -LiteralPath $hlsl.FullName
+    # Strip line comments first, so prose about .bgra can never satisfy the
+    # contract and a commented-out assignment can never break it.
+    $code = [regex]::Replace($src, '//[^\r\n]*', '')
+    foreach ($m in [regex]::Matches($code, '(?s)\bvoid\s+(\w+)\s*\((.*?)\)\s*\{(.*?)\r?\n\}')) {
+        $entry  = $m.Groups[1].Value
+        $params = $m.Groups[2].Value
+        $body   = $m.Groups[3].Value
+        if ($params -notmatch ':\s*SV_POSITION') { continue }
+        $cm = [regex]::Match($params, '\bin\s+float4\s+(\w+)\s*:\s*COLOR0?\b')
+        if (-not $cm.Success) { continue }
+        $colorContractChecked++
+        $inColor = $cm.Groups[1].Value
+        if ($body -notmatch ('\b' + [regex]::Escape($inColor) + '\.bgra\b')) {
+            $colorContractViolations += [pscustomobject]@{
+                Source = $hlsl.Name; Entry = $entry; Input = $inColor
+            }
+        }
+    }
+}
+
+if ($colorContractViolations.Count -gt 0) {
+    Write-Host ""
+    Write-Host ("VERTEX COLOUR ORDER CONTRACT FAILED: {0} vertex entry point(s) read a COLOR0 input without the native .bgra correction." -f $colorContractViolations.Count) -ForegroundColor Red
+    foreach ($v in $colorContractViolations) {
+        Write-Host ("  {0}  entry={1}  input={2}" -f $v.Source, $v.Entry, $v.Input) -ForegroundColor Red
+    }
+    Write-Host "  Native BZR vertex colour is an ARGB DWORD. Read it as '<input>.bgra', or blue renders orange." -ForegroundColor Red
+    exit 1
+}
+
+if ($colorContractChecked -eq 0) {
+    Write-Host "vertex colour order: WARNING - no vertex entry point with a COLOR0 input was found; the contract checked nothing." -ForegroundColor Yellow
+} else {
+    Write-Host ("vertex colour order: contract holds ({0} vertex entry point(s) checked)." -f $colorContractChecked)
 }
 
 # -----------------------------------------------------------------------------
@@ -232,8 +297,22 @@ try {
         }
         $args += @("/Fo", (Join-Path $outDir ("v{0}.cso" -f $index)), $sourcePath)
 
-        $output = & $Fxc @args 2>&1
-        $code = $LASTEXITCODE
+        # fxc writes warnings to stderr and still exits 0. With the script-wide
+        # $ErrorActionPreference = "Stop" in force, PowerShell promotes any
+        # native stderr write to a terminating NativeCommandError, so ONE
+        # warning aborted the whole run -- openshim_enhanced_base-sm3.hlsl's
+        # X3078 loop-variable shadow killed it at variant 72 of 192, and the
+        # remaining 120 had never actually been compiled by this script. The
+        # exit code is the verdict here, not the presence of stderr output.
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            $output = & $Fxc @args 2>&1
+            $code = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $previousPreference
+        }
 
         if ($code -ne 0) {
             $failures += [pscustomobject]@{
