@@ -26,6 +26,8 @@ Before writing, reviewing, or changing BZR Lua behavior—or adding Lua-facing n
 
 Reference/tooling repos commonly available under `%USERPROFILE%\Documents\GIT` (reference, not default edit targets): `BZ98RBlenderToolKit`, `Battlezone98Redux_DedicatedServer`, `BZ1-GameWatcher`, `BZ1_Source`, `BZ2_Source`, `Battlezone_LobbyMonitor`, `BZNTools`, `Battlezone98Redux_AudioTool`, `Battlezone98Redux_WorldBuilder`, `Battlezone98Redux_ZFSSpecialist`. Rendering work may also consult local `ogre-1.10.0`.
 
+Terrain data formats (`.trn`/`.hg2`/`.mat`/`.lgt`) are documented, with working codecs, in `Battlezone98Redux_WorldBuilder` at `docs/MAT_FORMAT_VALIDATION.md` and `mat_codec.py`/`hg2_codec.py`. Read it before reasoning about terrain byte layout from a hex dump; it corrects easy mistakes such as which nibble holds the base material and which axis is zone-major.
+
 ## Architecture
 - `include/`: public SDK and internal engine headers.
 - `src/engine/`: generic hook engine, memory I/O, pattern scanning.
