@@ -339,6 +339,78 @@ namespace
         }
     }
 
+    void TestWalkerStyleRangeMatchesTargetConvergenceGeometry()
+    {
+        // Walker convergence uses the target only for distance. A weapon
+        // mounted right/high/forward of the craft should toe inward in the
+        // horizontal aim plane, but it must not pitch toward the craft center.
+        const Vec3 shooter = { 1000.0f, 20.0f, -500.0f };
+        const Matrix mountWorld = MakeYawMatrix(0.0f, shooter.x, shooter.y, shooter.z);
+        Matrix mountLocal = Identity();
+        mountLocal.positionX = 2.0;
+        mountLocal.positionY = 3.0;
+        mountLocal.positionZ = 1.0;
+
+        Solution solution = {};
+        Require(SolveWalkerStyleRange(
+                    mountLocal, mountWorld, shooter, 101.0f, solution) ==
+                SolveResult::Converged,
+            "Walker-style solver refused a normal convergence range");
+
+        const Matrix fireWorld = Multiply(solution.mountLocal, mountWorld);
+        Vec3 fired = Front(fireWorld);
+        Require(Normalize(fired), "Walker-style fire direction was degenerate");
+
+        // Exact BZ1/Redux Walker construction in this identity aim frame:
+        // (-hardpointX, 0, targetDistance-hardpointZ) = (-2, 0, 100).
+        Vec3 expected = { -2.0f, 0.0f, 100.0f };
+        Require(Normalize(expected), "Walker reference direction was degenerate");
+
+        RequireNear(AngleBetweenDegrees(fired, expected), 0.0, 0.05,
+            "Walker-style range solver did not match the stock correction vector");
+        RequireNear(fired.y, 0.0, 1e-5,
+            "Walker-style convergence incorrectly added vertical magnetic aim");
+        RequireNear(solution.mountLocal.positionX, mountLocal.positionX, 1e-9,
+            "Walker-style convergence moved the hardpoint in X");
+        RequireNear(solution.mountLocal.positionY, mountLocal.positionY, 1e-9,
+            "Walker-style convergence moved the hardpoint in Y");
+        RequireNear(solution.mountLocal.positionZ, mountLocal.positionZ, 1e-9,
+            "Walker-style convergence moved the hardpoint in Z");
+    }
+
+    void TestWalkerStyleRangeDoesNotAimAtOffAxisObjectCenter()
+    {
+        const Vec3 shooter = { 0.0f, 0.0f, 0.0f };
+        const Matrix mountWorld = Identity();
+        Matrix mountLocal = Identity();
+        mountLocal.positionX = 2.0;
+
+        // Imagine the reticle selected an object whose center sits well above
+        // and to the right of the actual sight line. Walker behavior should use
+        // only its distance, not steer the fixed barrels toward that center.
+        const Vec3 objectCenter = { 40.0f, 30.0f, 100.0f };
+        const float range = std::sqrt(Dot(objectCenter, objectCenter));
+
+        Solution walker = {};
+        Require(SolveWalkerStyleRange(
+                    mountLocal, mountWorld, shooter, range, walker) ==
+                SolveResult::Converged,
+            "Walker-style solver refused off-axis range source");
+
+        const Vec3 walkerFire = FireDirection(walker.mountLocal, mountWorld);
+        Require(std::fabs(walkerFire.y) < 1e-5f,
+            "Walker-style convergence pitched toward an off-axis object center");
+
+        Solution magnetic = {};
+        Require(Solve(mountLocal, mountWorld, objectCenter, magnetic) ==
+                SolveResult::Converged,
+            "direct world-point reference solve failed");
+        const Vec3 magneticFire = FireDirection(magnetic.mountLocal, mountWorld);
+
+        Require(AngleBetweenDegrees(walkerFire, magneticFire) > 10.0f,
+            "Walker-style and magnetic world-point convergence became indistinguishable");
+    }
+
     void TestSafetyStopsAndDegenerateInput()
     {
         const Matrix mountWorld = MakeYawMatrix(0.0f, 0.0, 0.0, 0.0);
@@ -379,6 +451,8 @@ int main()
     TestPreFixBehaviourIsRejected();
     TestTargetsAboveAndBelowThePlayer();
     TestRotatingCraftKeepsConvergenceExact();
+    TestWalkerStyleRangeMatchesTargetConvergenceGeometry();
+    TestWalkerStyleRangeDoesNotAimAtOffAxisObjectCenter();
     TestSafetyStopsAndDegenerateInput();
     std::printf("weapon_convergence_tests: all checks passed\n");
     return 0;
