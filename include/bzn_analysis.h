@@ -23,7 +23,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -43,6 +45,17 @@ namespace BZROpenShim::BznAnalysis
         std::string team;
         std::string seqno;
         std::string objAddr;
+    };
+
+    struct PathRecord
+    {
+        size_t index = 0;
+        size_t headerLine = 0;
+        std::string pointCount;
+        long declaredPoints = -1;
+        size_t xComponents = 0;
+        size_t zComponents = 0;
+        bool sawPoints = false;
     };
 
     struct LineEndings
@@ -77,6 +90,7 @@ namespace BZROpenShim::BznAnalysis
         size_t pathBlocks = 0;
         size_t lineCount = 0;
         std::vector<ObjectRecord> objects;
+        std::vector<PathRecord> paths;
         LineEndings endings;
         // Index of the GameObject the first non-CRLF terminator falls inside,
         // or kNone. This is the number the engine's own object log is likely
@@ -160,6 +174,34 @@ namespace BZROpenShim::BznAnalysis
                    t.substr(1, t.size() - 2) == name;
         }
 
+        inline bool ParseBracketCount(std::string_view text, std::string_view expectedKey, long& count)
+        {
+            const size_t eq = text.find('=');
+            if (eq == std::string_view::npos)
+                return false;
+
+            const std::string_view left = Trim(text.substr(0, eq));
+            const size_t open = left.find('[');
+            const size_t close = left.find(']', open == std::string_view::npos ? 0 : open + 1);
+            if (open == std::string_view::npos || close == std::string_view::npos)
+                return false;
+            if (Trim(left.substr(0, open)) != expectedKey)
+                return false;
+
+            const std::string_view number = Trim(left.substr(open + 1, close - open - 1));
+            if (number.empty())
+                return false;
+
+            std::string copy(number);
+            char* end = nullptr;
+            const long parsed = std::strtol(copy.c_str(), &end, 10);
+            if (!end || *end != '\0')
+                return false;
+
+            count = parsed;
+            return true;
+        }
+
         // Returns false when the line is not "key = ..." at all.
         inline bool ParseField(std::string_view text, std::string& key, std::string& value,
                                bool& valueOnNextLine)
@@ -222,6 +264,7 @@ namespace BZROpenShim::BznAnalysis
         std::unordered_map<std::string, int> seqCounts;
 
         ObjectRecord* current = nullptr;
+        PathRecord* currentPath = nullptr;
         bool seenFirstObject = false;
         bool inAois = false;
         bool expectAoiCount = false;
@@ -243,6 +286,7 @@ namespace BZROpenShim::BznAnalysis
                 rec.headerLine = i + 1;
                 result.objects.push_back(rec);
                 current = &result.objects.back();
+                currentPath = nullptr;
                 inAois = false;
                 inPaths = false;
                 continue;
@@ -250,6 +294,7 @@ namespace BZROpenShim::BznAnalysis
             if (IsSection(text, "AOIs"))
             {
                 current = nullptr;
+                currentPath = nullptr;
                 inAois = true;
                 expectAoiCount = true;
                 inPaths = false;
@@ -258,12 +303,14 @@ namespace BZROpenShim::BznAnalysis
             if (IsSection(text, "AOI"))
             {
                 current = nullptr;
+                currentPath = nullptr;
                 result.aoiBlocks++;
                 continue;
             }
             if (IsSection(text, "AiPaths"))
             {
                 current = nullptr;
+                currentPath = nullptr;
                 inAois = false;
                 inPaths = true;
                 expectPathCount = true;
@@ -272,18 +319,27 @@ namespace BZROpenShim::BznAnalysis
             if (IsSection(text, "AiPath"))
             {
                 current = nullptr;
+                PathRecord rec;
+                rec.index = result.paths.size();
+                rec.headerLine = i + 1;
+                result.paths.push_back(rec);
+                currentPath = &result.paths.back();
                 result.pathBlocks++;
                 continue;
             }
             if (!Trim(text).empty() && Trim(text).front() == '[')
             {
                 current = nullptr;
+                currentPath = nullptr;
                 continue;
             }
 
             bool next = false;
             if (!ParseField(text, key, value, next))
                 continue;
+
+            long bracketCount = -1;
+            const bool hasBracketCount = ParseBracketCount(text, key, bracketCount);
             if (next && (i + 1) < lines.size())
             {
                 const std::string_view following(data.data() + lines[i + 1].begin, lines[i + 1].length);
@@ -326,6 +382,22 @@ namespace BZROpenShim::BznAnalysis
             }
             else if (key == "sObject" && !value.empty())
                 sObjectRefs.push_back(value);
+
+            if (currentPath)
+            {
+                if (key == "pointCount" && currentPath->pointCount.empty())
+                    currentPath->pointCount = value;
+                else if (key == "points")
+                {
+                    currentPath->sawPoints = true;
+                    if (hasBracketCount)
+                        currentPath->declaredPoints = bracketCount;
+                }
+                else if (currentPath->sawPoints && key == "x")
+                    currentPath->xComponents++;
+                else if (currentPath->sawPoints && key == "z")
+                    currentPath->zComponents++;
+            }
 
             if (!current)
                 continue;
@@ -403,6 +475,33 @@ namespace BZROpenShim::BznAnalysis
                 result.problems.push_back("[AOIs] size says " + result.declaredAoiCount +
                                           " but the file has " + std::to_string(result.aoiBlocks) +
                                           " [AOI] blocks");
+            }
+        }
+
+        for (const PathRecord& path : result.paths)
+        {
+            if (!path.pointCount.empty() && path.sawPoints && path.declaredPoints >= 0)
+            {
+                const long declaredPointCount = std::strtol(path.pointCount.c_str(), nullptr, 10);
+                if (declaredPointCount >= 0 && declaredPointCount != path.declaredPoints)
+                {
+                    result.problems.push_back("AiPath #" + std::to_string(path.index) +
+                                              " pointCount says " + path.pointCount +
+                                              " but points array declares " +
+                                              std::to_string(path.declaredPoints));
+                }
+
+                const size_t completePairs = (std::min)(path.xComponents, path.zComponents);
+                if (static_cast<size_t>(path.declaredPoints) != completePairs ||
+                    path.xComponents != path.zComponents)
+                {
+                    result.problems.push_back("AiPath #" + std::to_string(path.index) +
+                                              " points array declares " +
+                                              std::to_string(path.declaredPoints) +
+                                              " but file contains " +
+                                              std::to_string(completePairs) +
+                                              " complete x/z point pairs");
+                }
             }
         }
 
