@@ -362,12 +362,12 @@ int main()
             lines[FindLine(lines, test.serializedLine)] = "missing_envelope_field = 0";
             const Result r = Analyze(Build(lines));
 
+            const std::string needle =
+                std::string("GameObject #0 is missing required envelope field(s): ") +
+                test.fieldName;
             bool found = false;
             for (const std::string& p : r.problems)
-                found = found ||
-                    (p.find("GameObject #0 is missing required envelope field(s):") !=
-                         std::string::npos &&
-                     p.find(test.fieldName) != std::string::npos);
+                found = found || p.find(needle) != std::string::npos;
             Check(found, test.fieldName);
         }
     }
