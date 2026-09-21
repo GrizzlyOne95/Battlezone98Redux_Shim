@@ -1,141 +1,41 @@
 # BZR-OpenShim
 
-Native `winmm.dll` shim for Battlezone 98 Redux. This repo owns low-level engine hooks/patches, SDK/native integration, patch trampolines, and reverse-engineering work.
+Native `winmm.dll` shim for Battlezone 98 Redux. This repository owns low-level engine hooks, patch policy, SDK/native integration, trampolines, and reverse engineering. Keep this root file short; read task-specific references only when their trigger applies.
 
-## Local Environment
-- Sibling Battlezone repos normally live under `%USERPROFILE%\Documents\GIT`. Prefer a local sibling checkout for reference when present; verify its `origin` before editing because historical folder names may differ from GitHub names.
-- Working game/test copy is the GOG install at `C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux`.
-- Campaign content/deployment rules belong to Campaign Reimagined's `AGENTS.md`. Never use Steam's Workshop download cache as a development deploy target.
+## Repository boundaries
 
-## BZR Bundle
-Core sibling repos:
-- **OpenShim** — `GrizzlyOne95/Battlezone98Redux_Shim` (this repo): low-level hooks, patches, RE, SDK/native engine integration.
-- **EXU / ExtraUtilities** — `GrizzlyOne95/ExtraUtilities`: reusable native/Lua-facing runtime features. **EXU always means this repository.**
-- **Campaign Reimagined / CR** — `GrizzlyOne95/Battlezone98Redux_CampaignReimagined`: addon content, Lua consumers, assets, packaging, and end-user integration/validation.
-- **bzfile** — `GrizzlyOne95/bzfile`: Lua-accessible file I/O and update/deployment support.
+- Sibling BZR repositories normally live under `%USERPROFILE%\Documents\GIT`; verify `origin` and branch before relying on them. Campaign Reimagined's only editable checkout is its Google Drive canonical tree.
+- Route reusable Lua/native runtime APIs to **EXU**, campaign content and packaging to **CR**, and Lua file/update primitives to **bzfile**. Read a sibling's `AGENTS.md` before editing it.
+- The GOG install at `C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux` is the normal test copy. Never use Steam's Workshop cache as a development target.
 
-Cross-repo reading is encouraged to avoid duplicate APIs or repeated RE. Do not edit another repo merely because it was consulted; read that repo's `AGENTS.md` before coordinated changes.
+## Load only when relevant
 
-## Shared BZR Lua Reference
-Before writing, reviewing, or changing BZR Lua behavior—or adding Lua-facing native APIs—read `Docs/BZR_LUA_AGENT_REFERENCE.md`. This document is mirrored across the four core BZR repos and should remain byte-identical. Repo-specific `AGENTS.md`/architecture docs still govern implementation ownership. When the shared reference changes, mirror the same content to OpenShim, EXU, Campaign Reimagined, and bzfile in the same workstream.
+- Lua behavior or Lua-facing APIs: read `Docs/BZR_LUA_AGENT_REFERENCE.md`.
+- Native loading, paths, filesystem/process behavior, discovery, installers, deployment, packaging, or updates: read `Docs/BZR_PLATFORM_COMPATIBILITY.md` and account for the full Windows/GOG, Windows/Steam, Proton, and Wine matrix.
+- Patch entries, named resolves, signatures, registration, test deployment, or patch-related CI: read `Docs/AGENT_PATCH_WORKFLOW.md`.
+- Binary analysis, Ghidra, debugger, PDB, signature investigation, or native-hook research: read `AGENT_TOOLING.md`. Read `AGENT_TOOLING_SETUP.md` only when installing or repairing that toolchain.
+- Private leaked-PDB hints: read `reverse_engineering/private_pdb_semantic_ranking.md`; never treat matching RVAs or leaked-build register/stack locations as released-build proof.
+- Any game launch or harness work: dot-source `reverse_engineering/BZRHarness.ps1`, which serializes launches machine-wide, and stop via `Stop-BZRGame` (prefer `-Id`). Never force-kill `battlezone98redux`; doing so with the fullscreen D3D device can hard-lock the workstation. Use `BZR_FORCE_WINDOWED=1` except for timing comparisons.
+- The shared Lua and platform documents must remain byte-identical across OpenShim, EXU, CR, and bzfile; update all four in one workstream if either changes.
 
-## Platform and Distribution Compatibility
-- Treat Windows/GOG, Windows/Steam, Linux/Steam via Proton, and Linux/GOG via a compatible Wine/Proton prefix as the supported runtime matrix. Read `Docs/BZR_PLATFORM_COMPATIBILITY.md` before changing native loading, paths, filesystem behavior, process launch, module/resource discovery, installers, deployment, packaging, or update behavior.
-- Compatibility is a standing review requirement. Do not infer Steam behavior from GOG alone or Proton/Wine behavior from native Windows alone; run the affected validation lanes, or explicitly record a lane as unverified and obtain tester validation before release.
-- `Docs/BZR_PLATFORM_COMPATIBILITY.md` is mirrored across OpenShim, EXU, Campaign Reimagined, and bzfile and should remain byte-identical. Update all four copies in the same workstream.
+## Architecture guardrails
 
-Reference/tooling repos commonly available under `%USERPROFILE%\Documents\GIT` (reference, not default edit targets): `BZ98RBlenderToolKit`, `Battlezone98Redux_DedicatedServer`, `BZ1-GameWatcher`, `BZ1_Source`, `BZ2_Source`, `Battlezone_LobbyMonitor`, `BZNTools`, `Battlezone98Redux_AudioTool`, `Battlezone98Redux_WorldBuilder`, `Battlezone98Redux_ZFSSpecialist`. Rendering work may also consult local `ogre-1.10.0`.
+- Put build-specific sites and addresses in `scripts/patches.json`; do not scatter raw addresses through feature code. Native hooks must fail closed when identity or build assumptions are not satisfied.
+- System DLLs such as `ws2_32.dll` and `gdiplus.dll` remain delay-loaded.
+- Preserve ownership and lifetime boundaries. Consult the relevant architecture document for the subsystem rather than loading unrelated historical research.
+- For Steam/GOG executable comparisons, allow SteamStub/runtime bytes to settle before declaring a mismatch. GOG remains valid for static reverse engineering unless concrete divergence is found.
 
-## Architecture
-- `include/`: public SDK and internal engine headers.
-- `src/engine/`: generic hook engine, memory I/O, pattern scanning.
-- `src/patches/`: Battlezone-specific hooks/trampolines.
-- `scripts/patches.json`: external patterns/offsets; prefer it over hardcoding patch addresses in feature code.
-  - `"patches"` / `"globals"`: sites the shim **overwrites**.
-  - `"resolves"`: addresses the shim only **calls or reads**, resolved via
-    `HookEngine::ResolveNamedAddress("Name")`. Use this instead of adding a new
-    `uint8_t` pattern/mask array pair to feature code. Fields: `pattern`
-    (IDA-style, `??` wildcards), `offset` (signed, match to anchor), `mode`
-    (`address` | `rel32_target`), `fallback` (known-good constant), `prefer`
-    (`scan` | `fallback`, default `scan`), `require_unique`, and a mandatory
-    `identity` note. Parsing lives in `src/engine/resolve_table.cpp` and is
-    covered by `tests/resolve_table_tests.cpp`, which checks the shipped file.
-- Signature discipline: a unique byte string is not proof of identity — it can
-  belong to a function you did not mean, and an anchor that misses by a couple
-  of bytes resolves to a plausible neighbour. Every `resolves` entry therefore
-  carries an `identity` note recording independent evidence (call site, xref,
-  decompile), and every resolution emits one `[RESOLVE]` log line with the
-  match count, scanned address, fallback, which source won, and whether the two
-  agree. Read that line before trusting a new signature; a signature generated
-  by a sigmaker such as Sigga is robust, not correct.
-- System DLLs such as `ws2_32.dll` and `gdiplus.dll` are delay-loaded for robustness.
-- Adding a patch takes **two** files, and one direction of forgetting is silent:
-  1. a signature in `scripts/patches.json` — `"patches"` for a scanned site,
-     `"globals"` for a direct address; and
-  2. an entry in the patch list in `include/patches.h`, which is what the
-     patcher actually walks.
+## Working and validation style
 
-  A patch that needs a hook target also needs a `p.name == "..."` branch in
-  `src/engine/patcher.cpp`, and any `HookEngine::ResolveNamedAddress("Name")` it
-  calls needs a matching `"resolves"` entry.
+- Inspect `git status -sb` and the relevant diff before editing. Preserve unrelated work.
+- Use one `agent/<short-description>` branch per workstream, normally from current `origin/main`. Do not reuse finished branches or mix unrelated follow-ups.
+- Start with the smallest implementation and targeted checks. Expand validation only when the change, a failure, or a release gate requires it. A green build does not replace the task-specific pre-build checks listed in `Docs/AGENT_PATCH_WORKFLOW.md`.
+- Stage only task-owned files. Never blanket-stage, clean, restore, or overwrite unrelated changes. Do not rewrite shared history or force-push unless explicitly requested.
+- Agents may commit and push coherent task-owned checkpoints. PR merges, releases/tags, Workshop publication, and public deployment require explicit user instruction.
+- Do not commit secrets, credentials, transient build/runtime output, crash dumps, or scratch reverse-engineering artifacts.
 
-  Registered in `patches.json` but missing from `patches.h`, a patch is never
-  walked: no `[PATCH-SCAN]`, no `[OK]`, no `[SKIP]`, no `[STALE-CONFIG]` —
-  nothing at all, which reads exactly like a signature that failed to match.
-  The reverse (in `patches.h`, absent from `patches.json`) resolves to address 0
-  and is reported at runtime as `[STALE-CONFIG]`.
-  `tests/patch_registration_tests.cpp` fails the build on either direction, so
-  run the test suite after touching `patches.json` or `patches.h`.
+## Publication routing
 
-## Deploying a test build
-- `winmm.dll` carries no patch addresses of its own. Every patch takes its
-  address from `scripts/patches.json`, which is deployed **separately and by
-  hand**. Copy both, always. A `patches.json` older than the DLL silently skips
-  every patch added since, and says so in one `[STALE-CONFIG]` line among forty.
-- **The suite updater will revert both.** The Workshop mod ships its own copy of
-  the shim, and OpenShim promotes it into the game root: `openshim_suite_*` in
-  `mods/<workshop id>/` is staged over `winmm.dll`, `net.ini` and
-  `scripts/patches.json`. Watch `logs/openshim_update.log` for
-  `Validating staged payload:` followed by `Promoting suite payload to:`. It
-  refuses a genuine downgrade, but a dev build carries the same `version.rc`
-  version as the release, so it is not seen as newer and is overwritten anyway.
-  A test run after that point measures the mod's bundled build, not yours, with
-  no other symptom. Re-deploy after the game exits and confirm before trusting a
-  result, or bump `src/engine/version.rc` so the existing downgrade guard
-  protects the build on its own.
-- `verify_windows.ps1 -GamePath <install>` checks all of this: that
-  `scripts/patches.json` is present, that it matches the source tree byte for
-  byte, and that the last session logged no `[STALE-CONFIG]`. Run it before
-  reporting that a patch does or does not work.
-
-## CI gates to run locally before pushing
-`.github/workflows/build-win32.yml` runs these *before* MSBuild, so a green
-local build proves nothing. Run the ones your change touches rather than
-discovering them on CI:
-
-| Change | Run |
-|---|---|
-| Any new/edited `openshim.ini` key | `./scripts/run_ini_tests.ps1` |
-| Anything under `src/patches/net_*`, `bzrnet_*`, `netcode_*` | `./tools/validate-network-baseline.ps1` |
-| Any new/edited test, or a change a test covers | `cmake -S tests -B build/tests -A Win32; cmake --build build/tests --config Release; ctest --test-dir build/tests -C Release --output-on-failure` |
-| `shaders/dx11_enhanced_fxaa.hlsl` | `fxc /T vs_5_0 /E VSMain` and `/T ps_5_0 /E PSMain` (see the workflow) |
-
-Two gates catch people repeatedly:
-
-- **`openshim.ini` ships conservative.** Every value that reads as enabled
-  (`1`, `true`, `on`, `yes`, `enabled`, `enhanced`, `auto`) fails the build
-  unless its `Section/Key` is in the allowlist at the top of
-  `scripts/run_ini_tests.ps1`. Default new settings to `0`. If a setting
-  genuinely must ship on, add it to that allowlist **with a comment saying
-  why** — the list is the record of those decisions, not a rubber stamp. The
-  same check requires `openshim.ini` and `openshim.ini.example` to stay in
-  sync, so edit both.
-- **Tests must be reproducible off this machine.** Anything touching real
-  paths must canonicalize them (`std::filesystem::canonical`): CI's `TEMP` is
-  an 8.3 short path, so `GetTempPathW` and `GetFinalPathNameByHandleW`
-  disagree there and nowhere locally. Reproduce by pointing `TEMP` at a short
-  path before blaming CI.
-
-## Git Workflow
-- Before editing, inspect `git status -sb` and the relevant diff; preserve pre-existing user changes.
-- Normal work goes on a task branch, usually `agent/<short-description>`, never directly on the default/protected branch.
-- Agents may commit and push coherent task-owned checkpoints without repeatedly asking. Prefer validated milestones; a clearly labeled `WIP:` checkpoint is acceptable when preserving valuable intermediate work.
-- Stage only task-owned files. Never blanket-stage, clean, restore, or otherwise absorb/destroy unrelated changes in a mixed worktree.
-- Do not rewrite shared history or force-push unless explicitly requested.
-- PR merges, releases/tags, Workshop publication, and other external release/deployment actions require explicit user instruction.
-- Do not commit secrets, machine credentials, transient build/runtime output, crash dumps, or scratch RE artifacts the repo does not intentionally track.
-
-## Running the Game Harness
-- **Never `Stop-Process -Force` on `battlezone98redux`.** Force-killing it while it owns an exclusive-fullscreen D3D device deadlocks the kernel display stack and hard-locks the workstation with no BSOD, no dump, and no WHEA entry. This happened three times between 2026-08-22 and 2026-08-24.
-- Any script that launches the game must dot-source `reverse_engineering/BZRHarness.ps1` and shut down via `Stop-BZRGame` (prefer `-Id` over name matching). Dot-sourcing also serializes launches machine-wide, so concurrent agents cannot collide mid-mode-set.
-- Set `$env:BZR_FORCE_WINDOWED = '1'` for stability or correctness runs; it removes the fullscreen mode-set entirely. Leave it unset for anything that reports timing — windowed and fullscreen FPS are not comparable.
-- If the machine hard-locks again, the absence of a crash dump is itself the finding. Capture what the harness was doing rather than power-cycling and retrying.
-- Full write-up: `docs/HARNESS_SAFETY.md`.
-
-## Task-Specific Guidance
-- **RE, binary analysis, Ghidra, debugger, PDB, signatures, or native-hook investigation:** read `AGENT_TOOLING.md` before that work. It is not required for ordinary docs/API/build tasks. Prefer stable `bzr-*` wrappers from `<USER_HOME>\bin`; the persistent Ghidra MCP model is documented there.
-- **Installing/repairing/reproducing the RE toolchain:** read `AGENT_TOOLING_SETUP.md` only for that task.
-- **Private leaked-PDB hints:** first read `reverse_engineering/private_pdb_semantic_ranking.md` and follow its validation policy. Never treat same-RVA equality as identity evidence; never transfer leaked-build stack/register locations as released-build facts.
-- **Steam/GOG executable comparison:** checked builds have matched after SteamStub/runtime bytes settle; GOG is acceptable for static RE unless a concrete mismatch is found. Account for settle delay before declaring Steam divergence.
-- **Roadmap / Workshop publication:** `Docs/STEAM_ROADMAP_BBCODE.txt` is the canonical source for the Steam Roadmap discussion at `https://steamcommunity.com/workshop/filedetails/discussion/3686673790/216888303627073611/`. Update it alongside normal release/changelog notes whenever roadmap-relevant OpenShim/EXU/runtime work changes status. For **every real Campaign Reimagined Workshop upload**, review/update this file and then synchronize the complete BBCode into the Steam discussion before the publication is considered complete. Dry-run publishes do not require a public Steam edit. Campaign Reimagined owns the full checklist in `docs/STEAM_PUBLISH_CHECKLIST.md`.
-- **Multiplayer map filtering/sorting:** keep the validated hop/refresh preservation behavior separate from the currently disabled clean-room filter/sort port unless that subsystem is explicitly being revisited.
+- `Docs/STEAM_ROADMAP_BBCODE.txt` is the canonical Roadmap source. Update it when roadmap-relevant OpenShim/EXU/runtime status changes.
+- CR owns the complete Workshop publication checklist. A real CR Workshop upload is incomplete until the Roadmap discussion is synchronized; dry runs are exempt.
+- Keep validated multiplayer map hop/refresh behavior separate from the disabled clean-room filter/sort port unless that subsystem is explicitly in scope.
