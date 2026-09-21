@@ -121,6 +121,7 @@ namespace
             "transform [1] =",
             "  right_x [1] =",
             "1",
+            "name = LuaMission",
             "sObject = 00000002",
             "[AiPaths]",
             "count [1] =",
@@ -165,6 +166,7 @@ int main()
 
         Check(r.ascii, "clean: recognised as an ascii save");
         Check(r.version == "2016", "clean: version read");
+        Check(r.missionFilename == "sample.bzn", "clean: mission filename read");
         Check(r.terrainName == "sample", "clean: terrain name read");
         Check(r.seqCount == "8", "clean: seq_count read");
         Check(r.declaredObjectCount == "3", "clean: declared GameObject count read");
@@ -1030,6 +1032,154 @@ int main()
                     std::string::npos;
         Check(found, "seq_count: invalid object seqno blocks comparison explicitly");
         Check(!r.seqCountComparable, "seq_count: comparison suppressed when a seqno is invalid");
+    }
+
+
+    // --- fixed-buffer length risks ------------------------------------------
+    // Redux's ASCII string reader ignores its destination-size argument when
+    // scanning type-2 strings, so a payload exactly as large as the nominal
+    // buffer already writes the terminating NUL out of bounds. PrjID uses a
+    // separate 8-byte fixed-token reader and truncates instead of overflowing.
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t prj = FindLine(lines, "PrjID [1] =");
+        lines[prj + 1] = "12345678";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("GameObject #0 PrjID is") != std::string::npos;
+        Check(!found, "fixed buffers: 8-byte PrjID remains valid");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        const size_t prj = FindLine(lines, "PrjID [1] =");
+        lines[prj + 1] = "123456789";
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 PrjID is 9 bytes; ASCII fixed-width reader keeps only 8 bytes") !=
+                    std::string::npos;
+        Check(found, "fixed buffers: overlong PrjID truncation risk reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "msn_filename = sample.bzn")] =
+            "msn_filename = " + std::string(15, 'm');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("msn_filename is") != std::string::npos;
+        Check(!found, "fixed buffers: 15-byte msn_filename is safe");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "msn_filename = sample.bzn")] =
+            "msn_filename = " + std::string(16, 'm');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("msn_filename is 16 bytes; Redux ASCII string reader writes the value plus NUL into a 16-byte buffer (safe maximum 15 bytes)") !=
+                    std::string::npos;
+        Check(found, "fixed buffers: msn_filename capacity overrun reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "TerrainName = sample")] =
+            "TerrainName = " + std::string(99, 't');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("TerrainName is") != std::string::npos;
+        Check(!found, "fixed buffers: 99-byte TerrainName is safe");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "TerrainName = sample")] =
+            "TerrainName = " + std::string(100, 't');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("TerrainName is 100 bytes; Redux ASCII string reader writes the value plus NUL into a 100-byte buffer (safe maximum 99 bytes)") !=
+                    std::string::npos;
+        Check(found, "fixed buffers: TerrainName capacity overrun reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "label = player-1_hover")] =
+            "label = " + std::string(39, 'l');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("GameObject #0 label is") != std::string::npos;
+        Check(!found, "fixed buffers: 39-byte GameObject label is safe");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "label = player-1_hover")] =
+            "label = " + std::string(40, 'l');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("GameObject #0 label is 40 bytes; Redux ASCII string reader writes the value plus NUL into a 40-byte buffer (safe maximum 39 bytes)") !=
+                    std::string::npos;
+        Check(found, "fixed buffers: GameObject label capacity overrun reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "name = LuaMission")] =
+            "name = " + std::string(39, 'n');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found || p.find("Rtime classname (name) is") != std::string::npos;
+        Check(!found, "fixed buffers: 39-byte Rtime classname is safe");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "name = LuaMission")] =
+            "name = " + std::string(40, 'n');
+        const Result r = Analyze(Build(lines));
+
+        bool found = false;
+        for (const std::string& p : r.problems)
+            found = found ||
+                p.find("Rtime classname (name) is 40 bytes; Redux ASCII string reader writes the value plus NUL into a 40-byte buffer (safe maximum 39 bytes)") !=
+                    std::string::npos;
+        Check(found, "fixed buffers: Rtime classname capacity overrun reported");
+    }
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[3] = "true";
+        lines[FindLine(lines, "msn_filename = sample.bzn")] =
+            "msn_filename = " + std::string(32, 'm');
+        lines[FindLine(lines, "TerrainName = sample")] =
+            "TerrainName = " + std::string(128, 't');
+        const Result r = Analyze(Build(lines));
+
+        bool fixedBufferFinding = false;
+        for (const std::string& p : r.problems)
+        {
+            fixedBufferFinding =
+                fixedBufferFinding ||
+                p.find("msn_filename is") != std::string::npos ||
+                p.find("TerrainName is") != std::string::npos ||
+                p.find("ASCII fixed-width reader keeps only 8 bytes") != std::string::npos ||
+                p.find("Rtime classname (name) is") != std::string::npos;
+        }
+        Check(!fixedBufferFinding, "fixed buffers: binary BZN skips ASCII length diagnostics");
     }
 
     // --- byte/encoding hazards ----------------------------------------------
