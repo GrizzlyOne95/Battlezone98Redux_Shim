@@ -71,7 +71,9 @@ namespace BZROpenShim::BznAnalysis
         std::string terrainName;
         std::string seqCount;
         std::string declaredObjectCount;
+        std::string declaredAoiCount;
         std::string declaredPathCount;
+        size_t aoiBlocks = 0;
         size_t pathBlocks = 0;
         size_t lineCount = 0;
         std::vector<ObjectRecord> objects;
@@ -221,6 +223,8 @@ namespace BZROpenShim::BznAnalysis
 
         ObjectRecord* current = nullptr;
         bool seenFirstObject = false;
+        bool inAois = false;
+        bool expectAoiCount = false;
         bool inPaths = false;
         bool expectPathCount = false;
 
@@ -239,12 +243,28 @@ namespace BZROpenShim::BznAnalysis
                 rec.headerLine = i + 1;
                 result.objects.push_back(rec);
                 current = &result.objects.back();
+                inAois = false;
                 inPaths = false;
+                continue;
+            }
+            if (IsSection(text, "AOIs"))
+            {
+                current = nullptr;
+                inAois = true;
+                expectAoiCount = true;
+                inPaths = false;
+                continue;
+            }
+            if (IsSection(text, "AOI"))
+            {
+                current = nullptr;
+                result.aoiBlocks++;
                 continue;
             }
             if (IsSection(text, "AiPaths"))
             {
                 current = nullptr;
+                inAois = false;
                 inPaths = true;
                 expectPathCount = true;
                 continue;
@@ -276,6 +296,11 @@ namespace BZROpenShim::BznAnalysis
                 // the first [GameObject]. LoadAll trusts this count to decide
                 // exactly how many object records to consume.
                 result.declaredObjectCount = value;
+            }
+            else if (inAois && expectAoiCount && key == "size")
+            {
+                result.declaredAoiCount = value;
+                expectAoiCount = false;
             }
             else if (inPaths && expectPathCount && key == "count")
             {
@@ -367,6 +392,17 @@ namespace BZROpenShim::BznAnalysis
                 result.problems.push_back("GameObject size says " + result.declaredObjectCount +
                                           " but the file has " + std::to_string(result.objects.size()) +
                                           " [GameObject] blocks");
+            }
+        }
+
+        if (!result.declaredAoiCount.empty())
+        {
+            const long declared = std::strtol(result.declaredAoiCount.c_str(), nullptr, 10);
+            if (declared >= 0 && static_cast<size_t>(declared) != result.aoiBlocks)
+            {
+                result.problems.push_back("[AOIs] size says " + result.declaredAoiCount +
+                                          " but the file has " + std::to_string(result.aoiBlocks) +
+                                          " [AOI] blocks");
             }
         }
 
