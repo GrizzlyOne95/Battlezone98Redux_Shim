@@ -543,9 +543,13 @@ int main()
         Check(found, "byte hazards: UTF-8 BOM reported");
     }
     {
-        std::string data("\xFF\xFE", 2);
-        data += "v\0e\0r\0s\0i\0o\0n\0";
-        const Result r = Analyze(data);
+        const char raw[] = {
+            static_cast<char>(0xFF), static_cast<char>(0xFE),
+            'v', '\0', 'e', '\0', 'r', '\0', 's', '\0',
+            'i', '\0', 'o', '\0', 'n', '\0'
+        };
+        const std::string data(raw, sizeof(raw));
+        const Result r = Analyze(std::string_view(data.data(), data.size()));
 
         Check(r.utf16LeBom, "byte hazards: UTF-16 LE BOM detected");
         bool found = false;
@@ -554,9 +558,13 @@ int main()
         Check(found, "byte hazards: UTF-16 LE reported before text parsing");
     }
     {
-        std::string data("\xFE\xFF", 2);
-        data += "\0v\0e\0r\0s\0i\0o\0n";
-        const Result r = Analyze(data);
+        const char raw[] = {
+            static_cast<char>(0xFE), static_cast<char>(0xFF),
+            '\0', 'v', '\0', 'e', '\0', 'r', '\0', 's',
+            '\0', 'i', '\0', 'o', '\0', 'n'
+        };
+        const std::string data(raw, sizeof(raw));
+        const Result r = Analyze(std::string_view(data.data(), data.size()));
 
         Check(r.utf16BeBom, "byte hazards: UTF-16 BE BOM detected");
         bool found = false;
