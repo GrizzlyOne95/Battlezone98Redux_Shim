@@ -442,6 +442,42 @@ namespace BZROpenShim
                 ? g_RealCreateTexture2D(device, desc, initialData, texture)
                 : E_FAIL;
 
+            if (FAILED(hr) && desc)
+            {
+                // Ogre reports these as bare "Error creating texture" with no
+                // dimensions, so a per-frame E_INVALIDARG loop (as seen at
+                // mission end) cannot be attributed from its log alone. This
+                // hook already observes every CreateTexture2D; log the first
+                // few failing descs so one run names the culprit by size,
+                // format, sample count and bind flags. Budgeted: failures can
+                // arrive at frame rate, and this instrument must never become
+                // a log-spam outage. POD-only locals; Interlocked-guarded.
+                static LONG s_createFailureBudget = 8;
+                if (InterlockedDecrement(&s_createFailureBudget) >= 0)
+                {
+                    const char* formatName =
+                        FormatName(static_cast<uint32_t>(desc->Format));
+                    char formatBuffer[32] = {};
+                    if (!formatName)
+                    {
+                        std::snprintf(formatBuffer, sizeof(formatBuffer),
+                            "format(%u)", static_cast<uint32_t>(desc->Format));
+                        formatName = formatBuffer;
+                    }
+
+                    LogShimA(LogLevel::Warn, kComponent,
+                        "[SceneDepth] CreateTexture2D FAILED hr=0x%08X %ux%u %s "
+                        "samples=%u/%u bind=0x%X misc=0x%X array=%u mips=%u usage=%u",
+                        static_cast<uint32_t>(hr),
+                        desc->Width, desc->Height,
+                        formatName,
+                        desc->SampleDesc.Count, desc->SampleDesc.Quality,
+                        desc->BindFlags, desc->MiscFlags, desc->ArraySize,
+                        desc->MipLevels, static_cast<uint32_t>(desc->Usage));
+                }
+                return hr;
+            }
+
             if (FAILED(hr) || !desc || !texture || !*texture
                 || g_ShutdownRequested.load(std::memory_order_acquire))
             {
