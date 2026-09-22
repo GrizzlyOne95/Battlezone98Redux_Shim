@@ -1310,24 +1310,26 @@ namespace BZROpenShim
         constexpr float kScrapRetargetPeriodDefault = 2.0f;
         constexpr float kScrapRetargetMinImprovementDefault = 25.0f;
         constexpr float kScrapRetargetPickupGuardDistance = 20.0f;
-        // Global convergence improvements formerly owned by EXU. Wingman has
-        // its own UpdateWeaponAim override, so the primary wrapper must live on
-        // the Wingman slot: it selects stock-vs-walker aim, then optionally
-        // redirects only the local player's weapons toward the smart reticle.
-        // Keep the Hovercraft slot wrapped as a fallback for craft that dispatch
-        // directly through the base Hovercraft implementation.
+        // Global convergence improvements formerly owned by EXU. Each class
+        // keeps its own stock UpdateWeaponAim implementation authoritative; the
+        // wrappers below add only the shared exact-Walker hardpoint convergence
+        // stage after native aiming has finished.
         constexpr uintptr_t kWingmanWeaponAimVtableSlotAddr = 0x0088A4FC;
-        constexpr uintptr_t kHovercraftWeaponAimVtableSlotAddr = 0x00889418;
-        // TurretTank::UpdateWeaponAim appears in both released TurretTank
-        // primary vtables. Data xrefs in the shipped GOG image independently
-        // identify these slots as the two consumers of 0x005F27B0.
+        // Redux RTTI/inventory identifies 0x005F0930 as
+        // TurretCraft::UpdateWeaponAim, not HoverCraft::UpdateWeaponAim. The
+        // second TurretCraft vtable begins at 0x00889380 and its +0x98
+        // UpdateWeaponAim slot is 0x00889418. TurretCraftClass is the native
+        // implementation behind classLabel="turret".
+        constexpr uintptr_t kTurretCraftWeaponAimVtableSlotAddr = 0x00889418;
+        // TurretTank::UpdateWeaponAim has two released consumers. The owner
+        // guard below verifies that a candidate slot still contains 0x005F27B0
+        // before replacing it, so derived consumers remain fail-closed.
         constexpr uintptr_t kTurretTankWeaponAimVtableSlotAddrs[] = {
             0x0087AE08,
             0x00889530,
         };
         constexpr uintptr_t kWingmanWeaponAimStockAddr = 0x004EB590;
-        constexpr uintptr_t kWalkerUpdateWeaponAimAddr = 0x0060F320;
-        constexpr uintptr_t kHovercraftUpdateWeaponAimAddr = 0x005F0930;
+        constexpr uintptr_t kTurretCraftUpdateWeaponAimAddr = 0x005F0930;
         constexpr uintptr_t kTurretTankUpdateWeaponAimAddr = 0x005F27B0;
         constexpr uintptr_t kCarrierGetWeaponAddr = 0x00417F60;
         constexpr uintptr_t kRefreshWeaponTransformAddr = 0x00681A00;
@@ -1904,7 +1906,7 @@ namespace BZROpenShim
         // enabling PlayerReticleConvergence alone does not make
         // WeaponConvergence report itself as active.
         static bool g_WingmanWeaponAimWrapperActive = false;
-        static bool g_PlayerReticleHovercraftPatchActive = false;
+        static bool g_TurretCraftWeaponAimWrapperActive = false;
         static bool g_TurretTankWeaponAimWrapperActive[2] = { false, false };
         static bool g_PlayerReticleConvergenceLayoutFaultLogged = false;
         static bool g_PlayerReticleConvergenceMountFaultLogged = false;
@@ -14857,13 +14859,22 @@ namespace BZROpenShim
             ApplyWalkerConvergencePostPass(craft, sample, false);
         }
 
-        static void __fastcall HovercraftUpdateWeaponAimForReticle(
+        static void __fastcall TurretCraftUpdateWeaponAimWithConvergence(
             void* craft,
             void* /*edx*/,
             float dt)
         {
-            reinterpret_cast<FnUpdateWeaponAim>(kHovercraftUpdateWeaponAimAddr)(craft, dt);
-            if (g_PlayerReticleShotConvergenceEnabled && ReadLocalPlayerNetIdValue() == 0)
+            const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
+
+            // Work Order 4: TurretCraft owns classLabel="turret". Preserve its
+            // native turret articulation / weapon transform construction, then
+            // add only Walker's hardpoint convergence stage by range.
+            reinterpret_cast<FnUpdateWeaponAim>(kTurretCraftUpdateWeaponAimAddr)(craft, dt);
+
+            if (g_ShotConvergenceEnabled && singlePlayer)
+                ApplyExplicitTargetWeaponConvergence(craft);
+
+            if (g_PlayerReticleShotConvergenceEnabled && singlePlayer)
                 ApplyLocalPlayerReticleConvergence(craft);
         }
 
@@ -14896,11 +14907,14 @@ namespace BZROpenShim
             float dt)
         {
             const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
-            const uintptr_t target =
-                (g_ShotConvergenceEnabled && singlePlayer)
-                    ? kWalkerUpdateWeaponAimAddr
-                    : kTurretTankUpdateWeaponAimAddr;
-            reinterpret_cast<FnUpdateWeaponAim>(target)(craft, dt);
+
+            // Work Order 4: never substitute Walker::UpdateWeaponAim here.
+            // TurretTank's own yaw/pitch mechanics and weapon transform setup
+            // remain authoritative; convergence is strictly a post-pass.
+            reinterpret_cast<FnUpdateWeaponAim>(kTurretTankUpdateWeaponAimAddr)(craft, dt);
+
+            if (g_ShotConvergenceEnabled && singlePlayer)
+                ApplyExplicitTargetWeaponConvergence(craft);
 
             if (g_PlayerReticleShotConvergenceEnabled && singlePlayer)
                 ApplyLocalPlayerReticleConvergence(craft);
@@ -14975,7 +14989,7 @@ namespace BZROpenShim
         static void RefreshShotConvergencePatchState()
         {
             const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
-            const bool wantWingmanWrapper =
+            const bool wantConvergenceWrapper =
                 singlePlayer &&
                 (g_ShotConvergenceEnabled || g_PlayerReticleShotConvergenceEnabled);
 
@@ -14983,16 +14997,16 @@ namespace BZROpenShim
                 kWingmanWeaponAimVtableSlotAddr,
                 kWingmanWeaponAimStockAddr,
                 reinterpret_cast<void*>(WingmanUpdateWeaponAimWithConvergence),
-                wantWingmanWrapper,
+                wantConvergenceWrapper,
                 g_WingmanWeaponAimWrapperActive,
                 L"wingman convergence dispatcher");
             RefreshConvergenceVtableSlot(
-                kHovercraftWeaponAimVtableSlotAddr,
-                kHovercraftUpdateWeaponAimAddr,
-                reinterpret_cast<void*>(HovercraftUpdateWeaponAimForReticle),
-                g_PlayerReticleShotConvergenceEnabled && singlePlayer,
-                g_PlayerReticleHovercraftPatchActive,
-                L"player smart-reticle convergence (hovercraft fallback)");
+                kTurretCraftWeaponAimVtableSlotAddr,
+                kTurretCraftUpdateWeaponAimAddr,
+                reinterpret_cast<void*>(TurretCraftUpdateWeaponAimWithConvergence),
+                wantConvergenceWrapper,
+                g_TurretCraftWeaponAimWrapperActive,
+                L"turret convergence dispatcher");
             for (size_t index = 0;
                  index < std::size(kTurretTankWeaponAimVtableSlotAddrs);
                  ++index)
@@ -15001,7 +15015,7 @@ namespace BZROpenShim
                     kTurretTankWeaponAimVtableSlotAddrs[index],
                     kTurretTankUpdateWeaponAimAddr,
                     reinterpret_cast<void*>(TurretTankUpdateWeaponAimWithConvergence),
-                    wantWingmanWrapper,
+                    wantConvergenceWrapper,
                     g_TurretTankWeaponAimWrapperActive[index],
                     index == 0
                         ? L"turrettank convergence dispatcher A"
