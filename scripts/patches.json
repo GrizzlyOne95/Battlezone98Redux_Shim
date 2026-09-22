@@ -274,6 +274,22 @@
       "identity": "Complete 45-byte thiscall leaf: returns slots[index] at [this+0x18+i*4] when bit index of the hardpoint mask at [this+0x2C] is set, else null. One int argument and RET 4, matching Carrier::GetWeapon(int) in the advisory Redux PDB. Distinct from the adjacent Carrier::GetSelected at 0x00417F90, which is a 17-byte leaf returning [this+0x30]."
     },
     {
+      "name": "obj_rel_parent_matrix",
+      "pattern": "55 8B EC",
+      "fallback": "0x0062E070",
+      "prefer": "fallback",
+      "require_unique": true,
+      "identity": "obj_rel_parent_matrix(MAT_3D* out, _OBJ76* object, _OBJ76* parent) on exact GOG Redux 2.2.301. Walker::UpdateWeaponAim 0x0060F320 calls 0x0062E070 once per populated weapon slot with weapon+0x14 (hard) and craft+0xF4 (obj76), then consumes the returned matrix translation X/Z in the proven correction (-hardX,0,targetDistance-hardZ). HoverCraft::UpdateWeaponAim 0x005F0930, Wingman::UpdateWeaponAim 0x004EB590, and TurretTank::UpdateWeaponAim 0x005F27B0 independently call the same address with the same weapon hardpoint/craft-parent argument shape. BSim also maps legacy obj_rel_parent_matrix 0x004ECCA6 to Redux 0x0062E070. The deliberately generic prologue pattern is non-selecting under require_unique and exists only because the resolve schema requires a pattern; this entry is intentionally pinned to the qualified GOG fallback until an independently verified unique signature is recorded."
+    },
+    {
+      "name": "GameObject::GetTarget",
+      "pattern": "55 8B EC 51 89 4D FC",
+      "fallback": "0x00462610",
+      "prefer": "fallback",
+      "require_unique": true,
+      "identity": "GameObject::GetTarget on exact GOG Redux 2.2.301. The complete decompile at 0x00462610 reads this+0x21C (the independently proven Redux target handle) and forwards it to GameObject::GetObj 0x004DA060. Walker::UpdateWeaponAim 0x0060F320 calls this helper immediately before its center-to-center GetPosition/Dist3D convergence-range calculation. The generic prologue pattern is deliberately non-selecting under require_unique; this resolve is intentionally pinned to the qualified GOG fallback until a separately verified unique signature is recorded."
+    },
+    {
       "name": "Team::EnemyP(int)",
       "pattern": "55 8B EC 83 EC 08 89 4D F8 83 7D 08 00 7E 1E B8 01 00 00 00 8B 4D 08 D3 E0 8B 4D F8 23 81 7C 01 00 00 75 09 C7 45 FC 01 00 00 00 EB 07 C7 45 FC 00 00 00 00 8A 45 FC 8B E5 5D C2 04 00",
       "offset": 0,
