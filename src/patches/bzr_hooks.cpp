@@ -14521,6 +14521,42 @@ namespace BZROpenShim
                     : "LAYOUT MISMATCH -- convergence offsets need re-deriving");
         }
 
+        // UAF guard for the indirect GetPosition call below. The smart-reticle
+        // selectObject global is read as a raw pointer; when the unit under
+        // the crosshair dies in the same frame the global dangles, the freed
+        // block gets recycled, and vtable[3] becomes arbitrary. A valid-looking
+        // but wrong target raises FAST_FAIL (e.g. via the CRT's abort), which
+        // bypasses __try/__except by design, so the vtable is validated BEFORE
+        // the call: it must be committed MEM_IMAGE owned by
+        // battlezone98redux.exe, and slot 3 must point at executable code in
+        // that same image. A recycled heap block fails the image/protect
+        // checks and the shot stands down instead of crashing.
+        // POD-only: called from inside __try below, so no C++ unwindables.
+        static bool IsExecutableMainImageAddress(const void* address)
+        {
+            if (!address)
+                return false;
+            const uintptr_t mainBase = GetMainModuleBase();
+            if (mainBase == 0)
+                return false;
+
+            MEMORY_BASIC_INFORMATION mbi = {};
+            if (VirtualQuery(address, &mbi, sizeof(mbi)) != sizeof(mbi))
+                return false;
+            if (mbi.State != MEM_COMMIT || mbi.Type != MEM_IMAGE)
+                return false;
+            if (reinterpret_cast<uintptr_t>(mbi.AllocationBase) != mainBase)
+                return false;
+            if ((mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
+                return false;
+
+            const DWORD protect = mbi.Protect & 0xFFu;
+            return protect == PAGE_EXECUTE ||
+                protect == PAGE_EXECUTE_READ ||
+                protect == PAGE_EXECUTE_READWRITE ||
+                protect == PAGE_EXECUTE_WRITECOPY;
+        }
+
         // Exact position source used by Walker::UpdateWeaponAim:
         // GameObject+0x18 is the DistributedObject interface, and vtable slot
         // 3 (+0x0C) is GetPosition(). BZ1 1.5's imported signature confirms
@@ -14537,6 +14573,12 @@ namespace BZROpenShim
             if (!gameObject)
                 return false;
 
+            // Positive GameObject-family identification first: slot 1 must be
+            // the known GameObject::GetTeam. Rejects abstract/_purecall tables
+            // and foreign objects without invoking anything through them.
+            if (!IsLikelyGameObjectEntry(gameObject))
+                return false;
+
             __try
             {
                 void* distributedSubobject =
@@ -14544,11 +14586,38 @@ namespace BZROpenShim
                     kGameObjectDistributedObjectOffset;
                 void** vtable =
                     *reinterpret_cast<void***>(distributedSubobject);
-                if (!vtable || !vtable[3])
+                if (!vtable)
+                    return false;
+
+                // Re-check the vtable mapping inside the guard: the entry check
+                // above ran before this read, and the object may have died
+                // between the two. A recycled heap block is MEM_PRIVATE, not
+                // MEM_IMAGE owned by the exe, so it fails here.
+                MEMORY_BASIC_INFORMATION vtableInfo = {};
+                if (VirtualQuery(vtable, &vtableInfo, sizeof(vtableInfo)) != sizeof(vtableInfo))
+                    return false;
+                if (vtableInfo.State != MEM_COMMIT || vtableInfo.Type != MEM_IMAGE)
+                    return false;
+                if (reinterpret_cast<uintptr_t>(vtableInfo.AllocationBase) != GetMainModuleBase())
+                    return false;
+                if (!IsReadableDataProtect(vtableInfo.Protect))
+                    return false;
+
+                // Slot 1 re-verified against the rebased expectation, then
+                // slot 3 must be executable exe code before the call.
+                const uintptr_t mainBase = GetMainModuleBase();
+                const uintptr_t expectedGetTeam = mainBase
+                    ? mainBase + (kGogGameObjectGetTeamAddr - kGogPreferredImageBase)
+                    : kGogGameObjectGetTeamAddr;
+                if (reinterpret_cast<uintptr_t>(vtable[kGameObjectGetTeamVtableOffset / sizeof(void*)]) != expectedGetTeam)
+                    return false;
+
+                void* getPositionTarget = vtable[3];
+                if (!getPositionTarget || !IsExecutableMainImageAddress(getPositionTarget))
                     return false;
 
                 auto getPosition =
-                    reinterpret_cast<FnDistributedGetPosition>(vtable[3]);
+                    reinterpret_cast<FnDistributedGetPosition>(getPositionTarget);
                 const float* position = getPosition(distributedSubobject);
                 if (!position ||
                     !std::isfinite(position[0]) ||
