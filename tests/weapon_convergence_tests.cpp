@@ -339,6 +339,142 @@ namespace
         }
     }
 
+    void TestWalkerStyleRangeMatchesExactReduxVector()
+    {
+        Matrix stock = Identity();
+        stock.positionX = 7.0;
+        stock.positionY = 8.0;
+        stock.positionZ = 9.0;
+
+        Solution solution = {};
+        Require(SolveWalkerStyleRange(stock, 2.0f, 1.0f, 101.0f, solution) ==
+                SolveResult::Converged,
+            "Walker-style solver refused normal hardpoint/range geometry");
+
+        const float denom = std::sqrt(10004.0f); // (-2,0,100)
+        const Vec3 expectedFront = { -2.0f / denom, 0.0f, 100.0f / denom };
+        const Vec3 expectedRight = { 100.0f / denom, 0.0f, 2.0f / denom };
+
+        RequireNear(solution.mountLocal.frontX, expectedFront.x, 1e-5,
+            "Walker front.x does not match (-hardX,0,range-hardZ)");
+        RequireNear(solution.mountLocal.frontY, expectedFront.y, 1e-5,
+            "Walker introduced vertical convergence");
+        RequireNear(solution.mountLocal.frontZ, expectedFront.z, 1e-5,
+            "Walker front.z does not match (-hardX,0,range-hardZ)");
+        RequireNear(solution.mountLocal.rightX, expectedRight.x, 1e-5,
+            "Walker right.x does not match Build_Directinal_Matrix");
+        RequireNear(solution.mountLocal.rightY, expectedRight.y, 1e-5,
+            "Walker right.y does not match Build_Directinal_Matrix");
+        RequireNear(solution.mountLocal.rightZ, expectedRight.z, 1e-5,
+            "Walker right.z does not match Build_Directinal_Matrix");
+
+        RequireNear(solution.mountLocal.positionX, stock.positionX, 1e-9,
+            "Walker correction moved stock translation X");
+        RequireNear(solution.mountLocal.positionY, stock.positionY, 1e-9,
+            "Walker correction moved stock translation Y");
+        RequireNear(solution.mountLocal.positionZ, stock.positionZ, 1e-9,
+            "Walker correction moved stock translation Z");
+    }
+
+    void TestWalkerStyleRangeUsesHardpointRelativeOffsetsNotWeaponTranslation()
+    {
+        Matrix stockA = Identity();
+        stockA.positionX = 2.0;
+        stockA.positionY = 0.5;
+        stockA.positionZ = 1.0;
+
+        Matrix stockB = stockA;
+        // The weapon object's local translation is deliberately unrelated to
+        // the hardpoint-relative X/Z supplied by obj_rel_parent_matrix.
+        stockB.positionX = 42.0;
+        stockB.positionY = -9.0;
+        stockB.positionZ = -17.0;
+
+        Solution a = {};
+        Solution b = {};
+        Require(SolveWalkerStyleRange(stockA, 2.0f, 1.0f, 120.0f, a) ==
+                SolveResult::Converged,
+            "Walker solver refused first translation fixture");
+        Require(SolveWalkerStyleRange(stockB, 2.0f, 1.0f, 120.0f, b) ==
+                SolveResult::Converged,
+            "Walker solver refused second translation fixture");
+
+        RequireNear(a.mountLocal.rightX, b.mountLocal.rightX, 1e-6,
+            "weapon local translation leaked into Walker correction right.x");
+        RequireNear(a.mountLocal.rightZ, b.mountLocal.rightZ, 1e-6,
+            "weapon local translation leaked into Walker correction right.z");
+        RequireNear(a.mountLocal.frontX, b.mountLocal.frontX, 1e-6,
+            "weapon local translation leaked into Walker correction front.x");
+        RequireNear(a.mountLocal.frontZ, b.mountLocal.frontZ, 1e-6,
+            "weapon local translation leaked into Walker correction front.z");
+    }
+
+    void TestWalkerStyleRangeCorrectionPreMultipliesStockAim()
+    {
+        Matrix stock = Multiply(
+            MakePitchMatrix(0.18f),
+            MakeYawMatrix(-0.33f, 4.0, 5.0, 6.0));
+
+        Matrix correction = {};
+        Vec3 direction = { -3.5f, 0.0f, 175.0f - 2.25f };
+        Require(BuildDirectionalMatrix({ 0.0f, 0.0f, 0.0f }, direction, correction),
+            "reference Walker correction matrix failed");
+        const Matrix expected = Multiply(correction, stock);
+
+        Solution solution = {};
+        Require(SolveWalkerStyleRange(stock, 3.5f, 2.25f, 175.0f, solution) ==
+                SolveResult::Converged,
+            "Walker solver refused composition-order fixture");
+
+        const float* actualRot = &solution.mountLocal.rightX;
+        const float* expectedRot = &expected.rightX;
+        for (int i = 0; i < 9; ++i)
+        {
+            RequireNear(actualRot[i], expectedRot[i], 1e-5,
+                "Walker correction matrix order differs from correction * stock");
+        }
+        RequireNear(solution.mountLocal.positionX, stock.positionX, 1e-9,
+            "Walker pre-multiply changed translation X");
+        RequireNear(solution.mountLocal.positionY, stock.positionY, 1e-9,
+            "Walker pre-multiply changed translation Y");
+        RequireNear(solution.mountLocal.positionZ, stock.positionZ, 1e-9,
+            "Walker pre-multiply changed translation Z");
+    }
+
+    void TestWalkerStyleRangeIgnoresOffAxisTargetBearing()
+    {
+        // Two very different target bearings at the same center-to-center range
+        // produce the same Walker correction because bearing/elevation are not
+        // inputs to this stage. Only range plus hardpoint-relative X/Z matter.
+        const Vec3 targetA = { 0.0f, 0.0f, 100.0f };
+        const Vec3 targetB = { 60.0f, 48.0f, 64.0f }; // also distance 100
+        RequireNear(std::sqrt(Dot(targetA, targetA)), 100.0, 1e-5,
+            "target A fixture range is wrong");
+        RequireNear(std::sqrt(Dot(targetB, targetB)), 100.0, 1e-5,
+            "target B fixture range is wrong");
+
+        const Matrix stock = Identity();
+        Solution a = {};
+        Solution b = {};
+        Require(SolveWalkerStyleRange(stock, 2.0f, 1.0f, 100.0f, a) ==
+                SolveResult::Converged,
+            "Walker solver refused target A range");
+        Require(SolveWalkerStyleRange(stock, 2.0f, 1.0f, 100.0f, b) ==
+                SolveResult::Converged,
+            "Walker solver refused target B range");
+
+        const Vec3 frontA = Front(a.mountLocal);
+        const Vec3 frontB = Front(b.mountLocal);
+        RequireNear(frontA.x, frontB.x, 1e-7,
+            "Walker convergence front.x became dependent on target world bearing");
+        RequireNear(frontA.y, frontB.y, 1e-7,
+            "Walker convergence front.y became dependent on target world bearing");
+        RequireNear(frontA.z, frontB.z, 1e-7,
+            "Walker convergence front.z became dependent on target world bearing");
+        RequireNear(frontA.y, 0.0, 1e-6,
+            "Walker convergence added target elevation to the correction");
+    }
+
     void TestSafetyStopsAndDegenerateInput()
     {
         const Matrix mountWorld = MakeYawMatrix(0.0f, 0.0, 0.0, 0.0);
@@ -379,6 +515,10 @@ int main()
     TestPreFixBehaviourIsRejected();
     TestTargetsAboveAndBelowThePlayer();
     TestRotatingCraftKeepsConvergenceExact();
+    TestWalkerStyleRangeMatchesExactReduxVector();
+    TestWalkerStyleRangeUsesHardpointRelativeOffsetsNotWeaponTranslation();
+    TestWalkerStyleRangeCorrectionPreMultipliesStockAim();
+    TestWalkerStyleRangeIgnoresOffAxisTargetBearing();
     TestSafetyStopsAndDegenerateInput();
     std::printf("weapon_convergence_tests: all checks passed\n");
     return 0;

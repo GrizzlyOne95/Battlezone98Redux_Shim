@@ -235,6 +235,9 @@ namespace BZROpenShim
     using FnUpdateWeaponAim = void(__thiscall*)(void* craft, float dt);
     using FnCarrierGetWeapon = void* (__thiscall*)(void* carrier, int slot);
     using FnRefreshWeaponTransform = void(__cdecl*)(void* weaponObject, void* transform);
+    using FnObjRelParentMatrix = void* (__cdecl*)(void* outMatrix, void* object, void* parent);
+    using FnGameObjectGetTarget = void* (__thiscall*)(void* craft);
+    using FnDistributedGetPosition = const float* (__thiscall*)(void* distributedSubobject);
     // Redux's ArtilleryProcess::DoAttack is not the zero-stack-argument method
     // described by the legacy 1.5 PDB. At the machine ABI it consumes four
     // stack words (the first is the hidden/result destination) and returns with
@@ -668,6 +671,10 @@ namespace BZROpenShim
         // GetClassLabel returns is the gameplay category ("wingman", "tank"...),
         // which has no faction prefix -- do not use it here.
         constexpr size_t kGameObjectClassSubObjOffset = 0x18;
+        constexpr size_t kGameObjectDistributedObjectOffset = 0x18;
+        static_assert(
+            kGameObjectDistributedObjectOffset == kGameObjectClassSubObjOffset,
+            "GameObject +0x18 interface aliases diverged");
         constexpr size_t kGameObjectClassOdfNameOffset = 0x30;
         constexpr size_t kGameObjectClassOdfNameMax = 8;
         constexpr uintptr_t kHudSpriteNameCountAddr = 0x00920F00;
@@ -1303,24 +1310,26 @@ namespace BZROpenShim
         constexpr float kScrapRetargetPeriodDefault = 2.0f;
         constexpr float kScrapRetargetMinImprovementDefault = 25.0f;
         constexpr float kScrapRetargetPickupGuardDistance = 20.0f;
-        // Global convergence improvements formerly owned by EXU. Wingman has
-        // its own UpdateWeaponAim override, so the primary wrapper must live on
-        // the Wingman slot: it selects stock-vs-walker aim, then optionally
-        // redirects only the local player's weapons toward the smart reticle.
-        // Keep the Hovercraft slot wrapped as a fallback for craft that dispatch
-        // directly through the base Hovercraft implementation.
+        // Global convergence improvements formerly owned by EXU. Each class
+        // keeps its own stock UpdateWeaponAim implementation authoritative; the
+        // wrappers below add only the shared exact-Walker hardpoint convergence
+        // stage after native aiming has finished.
         constexpr uintptr_t kWingmanWeaponAimVtableSlotAddr = 0x0088A4FC;
-        constexpr uintptr_t kHovercraftWeaponAimVtableSlotAddr = 0x00889418;
-        // TurretTank::UpdateWeaponAim appears in both released TurretTank
-        // primary vtables. Data xrefs in the shipped GOG image independently
-        // identify these slots as the two consumers of 0x005F27B0.
+        // Redux RTTI/inventory identifies 0x005F0930 as
+        // TurretCraft::UpdateWeaponAim, not HoverCraft::UpdateWeaponAim. The
+        // second TurretCraft vtable begins at 0x00889380 and its +0x98
+        // UpdateWeaponAim slot is 0x00889418. TurretCraftClass is the native
+        // implementation behind classLabel="turret".
+        constexpr uintptr_t kTurretCraftWeaponAimVtableSlotAddr = 0x00889418;
+        // TurretTank::UpdateWeaponAim has two released consumers. The owner
+        // guard below verifies that a candidate slot still contains 0x005F27B0
+        // before replacing it, so derived consumers remain fail-closed.
         constexpr uintptr_t kTurretTankWeaponAimVtableSlotAddrs[] = {
             0x0087AE08,
             0x00889530,
         };
         constexpr uintptr_t kWingmanWeaponAimStockAddr = 0x004EB590;
-        constexpr uintptr_t kWalkerUpdateWeaponAimAddr = 0x0060F320;
-        constexpr uintptr_t kHovercraftUpdateWeaponAimAddr = 0x005F0930;
+        constexpr uintptr_t kTurretCraftUpdateWeaponAimAddr = 0x005F0930;
         constexpr uintptr_t kTurretTankUpdateWeaponAimAddr = 0x005F27B0;
         constexpr uintptr_t kCarrierGetWeaponAddr = 0x00417F60;
         constexpr uintptr_t kRefreshWeaponTransformAddr = 0x00681A00;
@@ -1396,6 +1405,7 @@ namespace BZROpenShim
         // `mov ecx,[this+0x1A0]` / `call 0x00417F60`).
         constexpr size_t kCraftCarrierOffset = 0x1A0;
         constexpr size_t kWeaponObjectOffset = 0x10;
+        constexpr size_t kWeaponHardpointOffset = 0x14;
         // The weapon's _OBJ76 carries its MAT_3D at kObj76TransformOffset, not
         // at the object head. Stock pushes obj+0x20 into RefreshWeaponTransform
         // at 0x005F0A38.
@@ -1896,7 +1906,7 @@ namespace BZROpenShim
         // enabling PlayerReticleConvergence alone does not make
         // WeaponConvergence report itself as active.
         static bool g_WingmanWeaponAimWrapperActive = false;
-        static bool g_PlayerReticleHovercraftPatchActive = false;
+        static bool g_TurretCraftWeaponAimWrapperActive = false;
         static bool g_TurretTankWeaponAimWrapperActive[2] = { false, false };
         static bool g_PlayerReticleConvergenceLayoutFaultLogged = false;
         static bool g_PlayerReticleConvergenceMountFaultLogged = false;
@@ -14511,64 +14521,234 @@ namespace BZROpenShim
                     : "LAYOUT MISMATCH -- convergence offsets need re-deriving");
         }
 
-        static void ApplyLocalPlayerReticleConvergence(void* craft)
+        // Exact position source used by Walker::UpdateWeaponAim:
+        // GameObject+0x18 is the DistributedObject interface, and vtable slot
+        // 3 (+0x0C) is GetPosition(). BZ1 1.5's imported signature confirms
+        // this virtual returns VECTOR_3D*. Calling through the interface keeps
+        // convergence range semantics aligned with stock instead of assuming
+        // the root OBJ76 translation is always interchangeable.
+        static bool TryGetWalkerGameObjectPosition(
+            void* gameObject,
+            float (&outPosition)[3])
+        {
+            outPosition[0] = 0.0f;
+            outPosition[1] = 0.0f;
+            outPosition[2] = 0.0f;
+            if (!gameObject)
+                return false;
+
+            __try
+            {
+                void* distributedSubobject =
+                    reinterpret_cast<uint8_t*>(gameObject) +
+                    kGameObjectDistributedObjectOffset;
+                void** vtable =
+                    *reinterpret_cast<void***>(distributedSubobject);
+                if (!vtable || !vtable[3])
+                    return false;
+
+                auto getPosition =
+                    reinterpret_cast<FnDistributedGetPosition>(vtable[3]);
+                const float* position = getPosition(distributedSubobject);
+                if (!position ||
+                    !std::isfinite(position[0]) ||
+                    !std::isfinite(position[1]) ||
+                    !std::isfinite(position[2]))
+                {
+                    return false;
+                }
+
+                outPosition[0] = position[0];
+                outPosition[1] = position[1];
+                outPosition[2] = position[2];
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outPosition[0] = 0.0f;
+                outPosition[1] = 0.0f;
+                outPosition[2] = 0.0f;
+                return false;
+            }
+        }
+
+        struct ConvergenceRangeSample
+        {
+            float range = 0.0f;
+            ConvergenceVec3 reference = {};
+            const char* source = "unknown";
+        };
+
+        static bool TryBuildConvergenceRangeSample(
+            void* craft,
+            const ConvergenceVec3& reference,
+            const char* source,
+            ConvergenceRangeSample& outSample)
+        {
+            if (!craft ||
+                !std::isfinite(reference.x) ||
+                !std::isfinite(reference.y) ||
+                !std::isfinite(reference.z))
+            {
+                return false;
+            }
+
+            float shooterRaw[3] = {};
+            if (!TryGetWalkerGameObjectPosition(craft, shooterRaw))
+                return false;
+
+            const float dx = reference.x - shooterRaw[0];
+            const float dy = reference.y - shooterRaw[1];
+            const float dz = reference.z - shooterRaw[2];
+            const float distanceSquared = dx * dx + dy * dy + dz * dz;
+            if (!std::isfinite(distanceSquared) || distanceSquared < 0.0f)
+                return false;
+
+            const float range = std::sqrt(distanceSquared);
+            if (!std::isfinite(range))
+                return false;
+
+            outSample.range = range;
+            outSample.reference = reference;
+            outSample.source = source ? source : "unknown";
+            return true;
+        }
+
+        static bool TryGetExplicitTargetConvergenceRange(
+            void* craft,
+            ConvergenceRangeSample& outSample)
         {
             if (!craft)
-                return;
+                return false;
 
-            auto carrierGetWeapon = reinterpret_cast<FnCarrierGetWeapon>(kCarrierGetWeaponAddr);
-            auto refreshWeaponTransform =
-                reinterpret_cast<FnRefreshWeaponTransform>(kRefreshWeaponTransformAddr);
+            static FnGameObjectGetTarget gameObjectGetTarget = nullptr;
+            if (!gameObjectGetTarget)
+            {
+                const uint32_t address =
+                    HookEngine::ResolveNamedAddress("GameObject::GetTarget");
+                if (address == 0)
+                    return false;
+                gameObjectGetTarget =
+                    reinterpret_cast<FnGameObjectGetTarget>(address);
+            }
+
+            __try
+            {
+                void* target = gameObjectGetTarget(craft);
+                if (!target)
+                    return false;
+
+                float targetPosition[3] = {};
+                if (!TryGetWalkerGameObjectPosition(target, targetPosition))
+                    return false;
+
+                return TryBuildConvergenceRangeSample(
+                    craft,
+                    { targetPosition[0], targetPosition[1], targetPosition[2] },
+                    "target",
+                    outSample);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static bool TryGetReticleConvergenceRange(
+            void* craft,
+            ConvergenceRangeSample& outSample)
+        {
+            if (!craft)
+                return false;
 
             __try
             {
                 if (*reinterpret_cast<void**>(kLocalUserObjectPtrAddr) != craft)
-                    return;
+                    return false;
 
-                void* carrier = *reinterpret_cast<void**>(
-                    reinterpret_cast<uint8_t*>(craft) + kCraftCarrierOffset);
-                if (!carrier)
-                    return;
-
-                // Mirror Reticle::Simulate's precedence: an object under the
-                // crosshair wins, and the terrain point is only the fallback.
-                // Taking gPos unconditionally would aim at stale ground every
-                // time the crosshair is over a unit -- exactly the case where
-                // convergence matters most.
-                ConvergenceVec3 target = {};
-                const char* targetSource = "ground";
                 void* selectObject =
                     *reinterpret_cast<void* const*>(kSmartReticleSelectObjectAddr);
                 if (selectObject)
                 {
                     float objectPosition[3] = {};
-                    if (!TryGetGameObjectWorldPosition(selectObject, objectPosition))
-                        return;
-                    target = { objectPosition[0], objectPosition[1], objectPosition[2] };
-                    targetSource = "object";
+                    if (!TryGetWalkerGameObjectPosition(selectObject, objectPosition))
+                        return false;
+
+                    return TryBuildConvergenceRangeSample(
+                        craft,
+                        { objectPosition[0], objectPosition[1], objectPosition[2] },
+                        "reticle-object",
+                        outSample);
                 }
-                else
+
+                // No object under the crosshair and no ground hit this frame
+                // means gPos is stale. Stand down rather than reuse an old range.
+                if (*reinterpret_cast<const int*>(kSmartReticleGroundHitAddr) == 0)
                 {
-                    // No object under the crosshair and no ground hit this
-                    // frame means there is no reticle point at all -- the
-                    // player is aiming at the sky. Stand down and leave the
-                    // stock aim, which already points straight down the sight,
-                    // instead of converging on a stale gPos.
-                    if (*reinterpret_cast<const int*>(kSmartReticleGroundHitAddr) == 0)
-                    {
-                        LogPlayerConvergenceSkyStandDownOnce();
-                        return;
-                    }
-                    target = *reinterpret_cast<const ConvergenceVec3*>(kSmartReticlePositionAddr);
+                    LogPlayerConvergenceSkyStandDownOnce();
+                    return false;
                 }
 
-                if (!std::isfinite(target.x) || !std::isfinite(target.y) || !std::isfinite(target.z))
-                    return;
+                return TryBuildConvergenceRangeSample(
+                    craft,
+                    *reinterpret_cast<const ConvergenceVec3*>(
+                        kSmartReticlePositionAddr),
+                    "reticle-ground",
+                    outSample);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
 
-                int retargeted = 0;
-                int clamped = 0;
-                ConvergenceVec3 lastMuzzle = {};
-                float lastResidualDegrees = 0.0f;
+        // Shared exact-Walker hardpoint post-pass.
+        //
+        // This is the convergence mechanism for both public features. The only
+        // intended distinction is the provider of ConvergenceRangeSample:
+        //
+        //   Weapon Convergence  -> explicit GameObject target range
+        //   Reticle Convergence -> smart-reticle object/ground range
+        //
+        // Stock class-specific UpdateWeaponAim runs before this function. The
+        // post-pass then reproduces only Walker's proven convergence stage.
+        static int ApplyWalkerConvergencePostPass(
+            void* craft,
+            const ConvergenceRangeSample& sample,
+            bool logReticleApplication)
+        {
+            if (!craft || !std::isfinite(sample.range))
+                return 0;
+
+            auto carrierGetWeapon =
+                reinterpret_cast<FnCarrierGetWeapon>(kCarrierGetWeaponAddr);
+            auto refreshWeaponTransform =
+                reinterpret_cast<FnRefreshWeaponTransform>(kRefreshWeaponTransformAddr);
+
+            static FnObjRelParentMatrix objRelParentMatrix = nullptr;
+            if (!objRelParentMatrix)
+            {
+                const uint32_t address =
+                    HookEngine::ResolveNamedAddress("obj_rel_parent_matrix");
+                if (address == 0)
+                    return 0;
+                objRelParentMatrix =
+                    reinterpret_cast<FnObjRelParentMatrix>(address);
+            }
+
+            int converged = 0;
+            float lastHardpointX = 0.0f;
+            float lastHardpointZ = 0.0f;
+
+            __try
+            {
+                void* carrier = *reinterpret_cast<void**>(
+                    reinterpret_cast<uint8_t*>(craft) + kCraftCarrierOffset);
+                void* craftObject = *reinterpret_cast<void**>(
+                    reinterpret_cast<uint8_t*>(craft) + kGameObjectObjOffset);
+                if (!carrier || !craftObject)
+                    return 0;
+
                 for (int slot = 0; slot < kConvergenceWeaponSlotCount; ++slot)
                 {
                     void* weapon = carrierGetWeapon(carrier, slot);
@@ -14577,106 +14757,124 @@ namespace BZROpenShim
 
                     void* weaponObject = *reinterpret_cast<void**>(
                         reinterpret_cast<uint8_t*>(weapon) + kWeaponObjectOffset);
-                    if (!weaponObject)
+                    void* hardpoint = *reinterpret_cast<void**>(
+                        reinterpret_cast<uint8_t*>(weapon) + kWeaponHardpointOffset);
+                    if (!weaponObject || !hardpoint)
                         continue;
 
-                    // The mount frame the engine itself fires through. Reading
-                    // it (rather than composing the _OBJ76 parent chain here)
-                    // guarantees convergence solves the same equation the
-                    // ordnance spawn evaluates, even if Weapon::Control has not
-                    // refreshed M yet this frame.
-                    const ConvergenceMatrix mountWorld =
-                        *reinterpret_cast<const ConvergenceMatrix*>(
-                            reinterpret_cast<const uint8_t*>(weapon) +
-                            kWeaponMountWorldMatrixOffset);
-                    if (!WeaponConvergence::IsFinite(mountWorld) ||
-                        !WeaponConvergence::IsRotationOrthonormal(mountWorld))
+                    ConvergenceMatrix hardpointRelative = {};
+                    objRelParentMatrix(
+                        &hardpointRelative,
+                        hardpoint,
+                        craftObject);
+
+                    const float hardpointX =
+                        static_cast<float>(hardpointRelative.positionX);
+                    const float hardpointZ =
+                        static_cast<float>(hardpointRelative.positionZ);
+                    if (!std::isfinite(hardpointX) ||
+                        !std::isfinite(hardpointZ))
                     {
-                        LogPlayerConvergenceMountFault(weapon, slot, mountWorld);
                         continue;
                     }
-
-                    LogPlayerConvergenceLayoutCrossCheck(
-                        weapon, WeaponConvergence::Invert(mountWorld));
 
                     auto* transform = reinterpret_cast<ConvergenceMatrix*>(
-                        reinterpret_cast<uint8_t*>(weaponObject) + kObj76TransformOffset);
+                        reinterpret_cast<uint8_t*>(weaponObject) +
+                        kObj76TransformOffset);
 
                     WeaponConvergence::Solution solution = {};
-                    const WeaponConvergence::SolveResult result =
-                        WeaponConvergence::Solve(*transform, mountWorld, target, solution);
-                    if (result == WeaponConvergence::SolveResult::ExceedsDeviationLimit)
+                    if (WeaponConvergence::SolveWalkerStyleRange(
+                            *transform,
+                            hardpointX,
+                            hardpointZ,
+                            sample.range,
+                            solution) !=
+                        WeaponConvergence::SolveResult::Converged)
                     {
-                        ++clamped;
                         continue;
                     }
-                    if (result != WeaponConvergence::SolveResult::Converged)
-                        continue;
 
                     *transform = solution.mountLocal;
                     refreshWeaponTransform(weaponObject, transform);
-                    lastResidualDegrees = solution.residualDegrees;
-
-                    lastMuzzle = solution.muzzle;
-                    ++retargeted;
-                }
-
-                // Breadcrumbs proving the feature reaches a weapon, and where it
-                // is pointing it. Spaced out and capped: a single sample taken
-                // on the first simulated frame says nothing useful, because the
-                // sight matrix has not settled yet, but a handful spread across
-                // the first minute of play shows whether the reticle point
-                // tracks the craft or runs off the map.
-                if (retargeted > 0 &&
-                    g_PlayerReticleConvergenceLogCount < kPlayerReticleConvergenceLogLimit)
-                {
-                    const ULONGLONG now = GetTickCount64();
-                    if (g_PlayerReticleConvergenceLastLogTick == 0 ||
-                        now - g_PlayerReticleConvergenceLastLogTick >=
-                            kPlayerReticleConvergenceLogIntervalMs)
-                    {
-                        g_PlayerReticleConvergenceLastLogTick = now;
-                        ++g_PlayerReticleConvergenceLogCount;
-                        const float dx = target.x - lastMuzzle.x;
-                        const float dy = target.y - lastMuzzle.y;
-                        const float dz = target.z - lastMuzzle.z;
-                        Log(L"[CONVERGE] player reticle convergence applied to %d hardpoint(s) (clamped=%d) source=%hs muzzle=(%.1f, %.1f, %.1f) target=(%.1f, %.1f, %.1f) distance=%.1f residualError=%.3fdeg\n",
-                            retargeted,
-                            clamped,
-                            targetSource,
-                            static_cast<double>(lastMuzzle.x),
-                            static_cast<double>(lastMuzzle.y),
-                            static_cast<double>(lastMuzzle.z),
-                            static_cast<double>(target.x),
-                            static_cast<double>(target.y),
-                            static_cast<double>(target.z),
-                            static_cast<double>(std::sqrt(dx * dx + dy * dy + dz * dz)),
-                            static_cast<double>(lastResidualDegrees));
-                    }
+                    lastHardpointX = hardpointX;
+                    lastHardpointZ = hardpointZ;
+                    ++converged;
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                // Fail soft if a future build changes the carrier/weapon layout,
-                // but leave one breadcrumb instead of silently disabling the
-                // player-only feature forever.
                 if (!g_PlayerReticleConvergenceLayoutFaultLogged)
                 {
-                    Log(L"[CONVERGE] player reticle convergence faulted while reading craft/carrier/weapon layout (craft=0x%p carrierOffset=0x%X)\n",
+                    Log(L"[CONVERGE] shared Walker post-pass faulted while reading craft/carrier/weapon layout "
+                        L"(craft=0x%p carrierOffset=0x%X)\n",
                         craft,
                         static_cast<uint32_t>(kCraftCarrierOffset));
                     g_PlayerReticleConvergenceLayoutFaultLogged = true;
                 }
+                return 0;
             }
+
+            if (logReticleApplication &&
+                converged > 0 &&
+                g_PlayerReticleConvergenceLogCount <
+                    kPlayerReticleConvergenceLogLimit)
+            {
+                const ULONGLONG now = GetTickCount64();
+                if (g_PlayerReticleConvergenceLastLogTick == 0 ||
+                    now - g_PlayerReticleConvergenceLastLogTick >=
+                        kPlayerReticleConvergenceLogIntervalMs)
+                {
+                    g_PlayerReticleConvergenceLastLogTick = now;
+                    ++g_PlayerReticleConvergenceLogCount;
+                    Log(L"[CONVERGE] shared exact-Walker post-pass applied to %d hardpoint(s) "
+                        L"rangeSource=%hs rangeReference=(%.1f, %.1f, %.1f) "
+                        L"range=%.1f lastHardpointXZ=(%.3f, %.3f)\n",
+                        converged,
+                        sample.source,
+                        static_cast<double>(sample.reference.x),
+                        static_cast<double>(sample.reference.y),
+                        static_cast<double>(sample.reference.z),
+                        static_cast<double>(sample.range),
+                        static_cast<double>(lastHardpointX),
+                        static_cast<double>(lastHardpointZ));
+                }
+            }
+
+            return converged;
         }
 
-        static void __fastcall HovercraftUpdateWeaponAimForReticle(
+        static void ApplyLocalPlayerReticleConvergence(void* craft)
+        {
+            ConvergenceRangeSample sample = {};
+            if (!TryGetReticleConvergenceRange(craft, sample))
+                return;
+            ApplyWalkerConvergencePostPass(craft, sample, true);
+        }
+
+        static void ApplyExplicitTargetWeaponConvergence(void* craft)
+        {
+            ConvergenceRangeSample sample = {};
+            if (!TryGetExplicitTargetConvergenceRange(craft, sample))
+                return;
+            ApplyWalkerConvergencePostPass(craft, sample, false);
+        }
+
+        static void __fastcall TurretCraftUpdateWeaponAimWithConvergence(
             void* craft,
             void* /*edx*/,
             float dt)
         {
-            reinterpret_cast<FnUpdateWeaponAim>(kHovercraftUpdateWeaponAimAddr)(craft, dt);
-            if (g_PlayerReticleShotConvergenceEnabled && ReadLocalPlayerNetIdValue() == 0)
+            const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
+
+            // Work Order 4: TurretCraft owns classLabel="turret". Preserve its
+            // native turret articulation / weapon transform construction, then
+            // add only Walker's hardpoint convergence stage by range.
+            reinterpret_cast<FnUpdateWeaponAim>(kTurretCraftUpdateWeaponAimAddr)(craft, dt);
+
+            if (g_ShotConvergenceEnabled && singlePlayer)
+                ApplyExplicitTargetWeaponConvergence(craft);
+
+            if (g_PlayerReticleShotConvergenceEnabled && singlePlayer)
                 ApplyLocalPlayerReticleConvergence(craft);
         }
 
@@ -14686,15 +14884,19 @@ namespace BZROpenShim
             float dt)
         {
             const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
-            const uintptr_t target =
-                (g_ShotConvergenceEnabled && singlePlayer)
-                    ? kWalkerUpdateWeaponAimAddr
-                    : kWingmanWeaponAimStockAddr;
-            reinterpret_cast<FnUpdateWeaponAim>(target)(craft, dt);
 
-            // Normal player vehicles dispatch through Wingman's override rather
-            // than the Hovercraft base slot. Apply smart-reticle convergence
-            // here after the stock/walker aim update so the local reticle wins.
+            // Work Order 3: keep Wingman's class-specific stock aim setup, then
+            // apply only Walker's convergence stage through the common post-pass.
+            // The audit in PR #241 proved Wingman and Walker are identical up to
+            // the point where Walker adds that stage.
+            reinterpret_cast<FnUpdateWeaponAim>(kWingmanWeaponAimStockAddr)(craft, dt);
+
+            if (g_ShotConvergenceEnabled && singlePlayer)
+                ApplyExplicitTargetWeaponConvergence(craft);
+
+            // Preserve the existing ordering when both features are enabled:
+            // the reticle pass follows explicit-target convergence. Interaction
+            // policy is intentionally left for the later matrix work order.
             if (g_PlayerReticleShotConvergenceEnabled && singlePlayer)
                 ApplyLocalPlayerReticleConvergence(craft);
         }
@@ -14705,11 +14907,14 @@ namespace BZROpenShim
             float dt)
         {
             const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
-            const uintptr_t target =
-                (g_ShotConvergenceEnabled && singlePlayer)
-                    ? kWalkerUpdateWeaponAimAddr
-                    : kTurretTankUpdateWeaponAimAddr;
-            reinterpret_cast<FnUpdateWeaponAim>(target)(craft, dt);
+
+            // Work Order 4: never substitute Walker::UpdateWeaponAim here.
+            // TurretTank's own yaw/pitch mechanics and weapon transform setup
+            // remain authoritative; convergence is strictly a post-pass.
+            reinterpret_cast<FnUpdateWeaponAim>(kTurretTankUpdateWeaponAimAddr)(craft, dt);
+
+            if (g_ShotConvergenceEnabled && singlePlayer)
+                ApplyExplicitTargetWeaponConvergence(craft);
 
             if (g_PlayerReticleShotConvergenceEnabled && singlePlayer)
                 ApplyLocalPlayerReticleConvergence(craft);
@@ -14784,7 +14989,7 @@ namespace BZROpenShim
         static void RefreshShotConvergencePatchState()
         {
             const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
-            const bool wantWingmanWrapper =
+            const bool wantConvergenceWrapper =
                 singlePlayer &&
                 (g_ShotConvergenceEnabled || g_PlayerReticleShotConvergenceEnabled);
 
@@ -14792,16 +14997,16 @@ namespace BZROpenShim
                 kWingmanWeaponAimVtableSlotAddr,
                 kWingmanWeaponAimStockAddr,
                 reinterpret_cast<void*>(WingmanUpdateWeaponAimWithConvergence),
-                wantWingmanWrapper,
+                wantConvergenceWrapper,
                 g_WingmanWeaponAimWrapperActive,
                 L"wingman convergence dispatcher");
             RefreshConvergenceVtableSlot(
-                kHovercraftWeaponAimVtableSlotAddr,
-                kHovercraftUpdateWeaponAimAddr,
-                reinterpret_cast<void*>(HovercraftUpdateWeaponAimForReticle),
-                g_PlayerReticleShotConvergenceEnabled && singlePlayer,
-                g_PlayerReticleHovercraftPatchActive,
-                L"player smart-reticle convergence (hovercraft fallback)");
+                kTurretCraftWeaponAimVtableSlotAddr,
+                kTurretCraftUpdateWeaponAimAddr,
+                reinterpret_cast<void*>(TurretCraftUpdateWeaponAimWithConvergence),
+                wantConvergenceWrapper,
+                g_TurretCraftWeaponAimWrapperActive,
+                L"turret convergence dispatcher");
             for (size_t index = 0;
                  index < std::size(kTurretTankWeaponAimVtableSlotAddrs);
                  ++index)
@@ -14810,7 +15015,7 @@ namespace BZROpenShim
                     kTurretTankWeaponAimVtableSlotAddrs[index],
                     kTurretTankUpdateWeaponAimAddr,
                     reinterpret_cast<void*>(TurretTankUpdateWeaponAimWithConvergence),
-                    wantWingmanWrapper,
+                    wantConvergenceWrapper,
                     g_TurretTankWeaponAimWrapperActive[index],
                     index == 0
                         ? L"turrettank convergence dispatcher A"
