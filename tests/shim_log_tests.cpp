@@ -6,6 +6,11 @@
 #include <cstdio>
 #include <string>
 
+#ifdef _WIN32
+#include <Windows.h>
+#include <share.h>
+#endif
+
 using BZROpenShim::SanitizeLogFilename;
 
 namespace
@@ -20,6 +25,15 @@ namespace
             return;
         ++g_Failures;
         std::printf("FAIL %s\n  expected: %s\n  actual:   %s\n", name, expected.c_str(), actual.c_str());
+    }
+
+    void Check(bool condition, const char* name)
+    {
+        ++g_Checks;
+        if (condition)
+            return;
+        ++g_Failures;
+        std::printf("FAIL %s\n", name);
     }
 }
 
@@ -85,6 +99,42 @@ int main()
 #ifndef _WIN32
     CheckEq(BZROpenShim::GetGameLogPath("logs/custom.log"), "custom.log", "linux game log path strips to leaf");
     CheckEq(BZROpenShim::GetGameLogPath(".."), "openshim.log", "linux game log path rejects traversal");
+#endif
+
+#ifdef _WIN32
+    // Reproduce a second game process starting while the first still owns the
+    // shared log. Its BZN diagnostics must go to a process-specific file.
+    const std::string primaryPath = BZROpenShim::GetGameLogPath("openshim.log");
+    FILE* owner = _fsopen(primaryPath.c_str(), "w", _SH_DENYWR);
+    Check(owner != nullptr, "open primary log as first process");
+    if (owner)
+    {
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "test", "fallback marker");
+        BZROpenShim::ShutdownShimLogger();
+        std::fclose(owner);
+
+        char fallbackName[64] = {};
+        _snprintf_s(fallbackName, _TRUNCATE, "openshim-%lu.log",
+                    static_cast<unsigned long>(GetCurrentProcessId()));
+        const std::string fallbackPath = BZROpenShim::GetGameLogPath(fallbackName);
+        FILE* fallback = nullptr;
+        fopen_s(&fallback, fallbackPath.c_str(), "rb");
+        Check(fallback != nullptr, "process log created while primary is locked");
+        if (fallback)
+        {
+            std::string contents;
+            char buffer[512] = {};
+            while (const size_t count = std::fread(buffer, 1, sizeof(buffer), fallback))
+                contents.append(buffer, count);
+            std::fclose(fallback);
+            Check(contents.find("fallback marker") != std::string::npos,
+                  "diagnostic preserved in process log");
+            Check(contents.find("Primary openshim.log unavailable") != std::string::npos,
+                  "fallback reason recorded");
+        }
+        std::remove(fallbackPath.c_str());
+        std::remove(primaryPath.c_str());
+    }
 #endif
 
     std::printf("%d checks, %d failures\n", g_Checks, g_Failures);

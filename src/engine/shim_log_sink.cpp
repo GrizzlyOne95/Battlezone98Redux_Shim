@@ -153,14 +153,29 @@ namespace
 
     BOOL CALLBACK InitLoggerOnce(PINIT_ONCE, PVOID, PVOID*)
     {
-        const std::string logPath = BuildLogPath();
-        strncpy_s(g_LogPath, logPath.c_str(), _TRUNCATE);
+        const std::string primaryPath = BuildLogPath();
+        std::string logPath = primaryPath;
 
         // _SH_DENYWR instead of fopen_s's deny-all sharing so the log can be
         // tailed by external tools while the game is running.
         g_LogFile = _fsopen(logPath.c_str(), "w", _SH_DENYWR);
+        const bool usingFallback = g_LogFile == nullptr;
+        if (usingFallback)
+        {
+            // An earlier game process may still own openshim.log. Keep this
+            // process's diagnostics instead of silently dropping every line.
+            char fallbackName[64] = {};
+            _snprintf_s(fallbackName, _TRUNCATE, "openshim-%lu.log",
+                        static_cast<unsigned long>(GetCurrentProcessId()));
+            logPath = GetGameLogPath(fallbackName);
+            g_LogFile = _fsopen(logPath.c_str(), "w", _SH_DENYWR);
+        }
         if (!g_LogFile)
+        {
+            WriteDebugMirror(LogLevel::Error, "logger", "Could not open primary or process log file");
             return TRUE;
+        }
+        strncpy_s(g_LogPath, logPath.c_str(), _TRUNCATE);
 
         // UCRT rejects line-buffered mode with a zero-sized buffer here and
         // fail-fast triggers during DllMain. Leave the default buffering in
@@ -187,6 +202,9 @@ namespace
             localBuffer,
             utcOffsetMinutes);
         WriteLineUnlocked(LogLevel::Info, "logger", clockLine);
+        if (usingFallback)
+            WriteLineUnlocked(LogLevel::Warn, "logger",
+                              "Primary openshim.log unavailable; writing to process log instead");
         return TRUE;
     }
 
