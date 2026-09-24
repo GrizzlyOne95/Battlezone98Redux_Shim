@@ -11,13 +11,16 @@
 #include "bzn_load_trace.h"
 
 #include "bzn_analysis.h"
+#include "bzn_failure_log.h"
 #include "bzn_filename_identity.h"
 #include "bzr_options_ui.h"
+#include "game_log_path.h"
 #include "patcher.h"
 
 #include <Windows.h>
 
 #include <algorithm>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -36,6 +39,7 @@ namespace BZROpenShim
         // The per-object table is the large part of the output. Cap it so an
         // unexpectedly large mission cannot produce a multi-megabyte log.
         constexpr size_t kMaxObjectRows = 4096;
+        constexpr size_t kMaxGameLogTail = 512u * 1024u;
 
         bool g_ConfigLoaded = false;
         bool g_Verbose = false;
@@ -51,6 +55,49 @@ namespace BZROpenShim
         // Per-thread so a background open cannot mask a real one on the main
         // thread.
         thread_local bool t_InTrace = false;
+
+        struct MissionSnapshot
+        {
+            std::wstring path;
+            std::vector<BznAnalysis::ObjectRecord> objects;
+        };
+        std::mutex g_MissionSnapshotMutex;
+        MissionSnapshot g_MissionSnapshot;
+
+        bool ReadGameLogTail(std::string& out)
+        {
+            const std::string path = GetGameLogPath("BZLogger.txt");
+            const HANDLE file = CreateFileA(path.c_str(), GENERIC_READ,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file == INVALID_HANDLE_VALUE)
+                return false;
+
+            LARGE_INTEGER size{};
+            if (!GetFileSizeEx(file, &size) || size.QuadPart < 0)
+            {
+                CloseHandle(file);
+                return false;
+            }
+
+            const LONGLONG start = (std::max)(0LL,
+                size.QuadPart - static_cast<LONGLONG>(kMaxGameLogTail));
+            LARGE_INTEGER position{};
+            position.QuadPart = start;
+            if (!SetFilePointerEx(file, position, nullptr, FILE_BEGIN))
+            {
+                CloseHandle(file);
+                return false;
+            }
+
+            out.resize(static_cast<size_t>(size.QuadPart - start));
+            DWORD read = 0;
+            const bool ok = out.empty() ||
+                (ReadFile(file, out.data(), static_cast<DWORD>(out.size()), &read, nullptr) &&
+                 read == out.size());
+            CloseHandle(file);
+            return ok;
+        }
 
         void LoadConfig()
         {
@@ -188,6 +235,11 @@ namespace BZROpenShim
             const wchar_t* name = BaseName(path);
             const BznAnalysis::Result report =
                 BznAnalysis::Analyze(std::string_view(data.data(), data.size()));
+            {
+                std::lock_guard<std::mutex> lock(g_MissionSnapshotMutex);
+                g_MissionSnapshot.path = path;
+                g_MissionSnapshot.objects = report.objects;
+            }
             const std::string openedName = NarrowAcp(name);
             const auto filenameIdentity =
                 BznFilenameIdentity::Compare(openedName, report.missionFilename);
@@ -296,6 +348,54 @@ namespace BZROpenShim
     {
         LoadConfig();
         return g_Verbose;
+    }
+
+    void BznLoadTraceOnMissionQuit() noexcept
+    {
+        try
+        {
+            std::string gameLog;
+            if (!ReadGameLogTail(gameLog))
+            {
+                Log(L"[BZNLOAD] Mission quit: BZLogger.txt could not be read; load-failure correlation unavailable\n");
+                return;
+            }
+
+            const BznFailureLog::Result failure = BznFailureLog::Parse(gameLog);
+            if (!failure.failed)
+                return;
+
+            MissionSnapshot snapshot;
+            {
+                std::lock_guard<std::mutex> lock(g_MissionSnapshotMutex);
+                snapshot = g_MissionSnapshot;
+            }
+            if (!failure.hasObjectIndex)
+            {
+                Log(L"[BZNLOAD] *** Redux reported 'failed to load game files'; stock log did not name an object\n");
+                return;
+            }
+            if (failure.objectIndex >= snapshot.objects.size())
+            {
+                Log(L"[BZNLOAD] *** Redux load failed after obj #%zu; BZN object table unavailable (mission=%s)\n",
+                    failure.objectIndex,
+                    snapshot.path.empty() ? L"?" : BaseName(snapshot.path.c_str()));
+                return;
+            }
+
+            const auto& object = snapshot.objects[failure.objectIndex];
+            Log(L"[BZNLOAD] *** Redux load failed while loading %s obj #%zu: PrjID=%hs label=%hs team=%hs seqno=%hs (last object named by stock logger)\n",
+                BaseName(snapshot.path.c_str()), object.index,
+                object.prjId.empty() ? "?" : object.prjId.c_str(),
+                object.label.empty() ? "?" : object.label.c_str(),
+                object.team.empty() ? "?" : object.team.c_str(),
+                object.seqno.empty() ? "?" : object.seqno.c_str());
+            Log(L"[BZNLOAD] *** Inspect this object's ODF and dependencies; the stock message does not identify the underlying file or parse error.\n");
+        }
+        catch (...)
+        {
+            // Diagnostics must never affect the game's mission transition.
+        }
     }
 
     void BznLoadTraceOnOpenA(const char* absolutePath, uint32_t desiredAccess) noexcept

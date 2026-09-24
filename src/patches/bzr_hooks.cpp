@@ -32,6 +32,7 @@
 #include "ui_performance.h"
 #include "openshim_events.h"
 #include "player_kill_trace.h"
+#include "bzn_load_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
 #include "../engine/native_ui_validation.h"
@@ -17457,6 +17458,7 @@ namespace BZROpenShim
         constexpr uintptr_t kBzrRunStateAddr = 0x008E706C;
         constexpr uintptr_t kBzrRunStateNameTableAddr = 0x00871690;
         constexpr int kBzrRunStateStarted = 5;
+        constexpr int kBzrRunStateWasQuit = 2;
         constexpr int kBzrRunStateUnknown = -1;
 
         using FnBzrSetRunning = void(__cdecl*)(int);
@@ -17568,6 +17570,8 @@ namespace BZROpenShim
                     BzrRunStateName(previous), previous,
                     BzrRunStateName(current), current,
                     g_MissionTransitionCount);
+                if (current == kBzrRunStateWasQuit)
+                    BznLoadTraceOnMissionQuit();
                 // clearScene / destroyAllMovableObjects never fire for this
                 // in-process transition. Deactivate chunk proxies now, while
                 // setVisible and node updates are still safe; otherwise Ogre's
