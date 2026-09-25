@@ -172,9 +172,12 @@ add_executable(openshim_update_manifest_tests
 # The non-throwing scripts/patches.json readers the patch thread relies on.
 # Pure nlohmann over the document, so it runs on the Linux host lane, and it
 # walks the shipped patches.json to prove the readers accept every entry.
+# resolve_table.cpp supplies the IDA pattern parser the fallback-site checks
+# feed with the shipped patterns.
 add_executable(patch_config_parse_tests
     patch_config_parse_tests.cpp
     ../src/engine/patch_config_parse.cpp
+    ../src/engine/resolve_table.cpp
 )
 target_include_directories(patch_config_parse_tests PRIVATE ../include)
 target_compile_features(patch_config_parse_tests PRIVATE cxx_std_20)

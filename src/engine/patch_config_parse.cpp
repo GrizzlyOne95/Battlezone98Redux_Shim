@@ -5,6 +5,9 @@
 
 #include "patch_config_parse.h"
 
+#include <algorithm>
+#include <cstdio>
+
 namespace BZROpenShim::PatchConfig
 {
     namespace
@@ -201,6 +204,50 @@ namespace BZROpenShim::PatchConfig
         if (address == 0 && Member(node, "fallback") && !ReadHex(node, "fallback", address, error)) return false;
         entry.fallback = address;
         out = std::move(entry);
+        return true;
+    }
+
+    bool VerifyFallbackSite(const std::vector<uint16_t>& pattern, uint32_t fallback, uint32_t offset,
+                            uint32_t expectedSize, const MemoryReader& read,
+                            std::vector<uint8_t>& guard, std::string& error)
+    {
+        if (fallback == 0) { error = "no fallback address recorded"; return false; }
+        if (pattern.empty()) { error = "pattern is empty or unparseable"; return false; }
+        if (expectedSize == 0) { error = "expected_size is 0, so nothing would guard the write"; return false; }
+        if (offset > fallback) { error = "offset reaches below address 0"; return false; }
+
+        // Everything the pattern covers plus the guard window, whichever
+        // reaches further; the scan path reads the same span from its
+        // region buffer.
+        const uint32_t site = fallback - offset;
+        const uint64_t needed = std::max<uint64_t>(pattern.size(), static_cast<uint64_t>(offset) + expectedSize);
+        if (static_cast<uint64_t>(site) + needed > 0x100000000ull)
+        {
+            error = "guard window runs past the end of the address space";
+            return false;
+        }
+
+        char text[128];
+        std::vector<uint8_t> bytes;
+        if (!read(site, static_cast<size_t>(needed), bytes) || bytes.size() < needed)
+        {
+            std::snprintf(text, sizeof text, "%u byte(s) at 0x%08X could not be read",
+                          static_cast<unsigned>(needed), site);
+            error = text;
+            return false;
+        }
+        for (size_t j = 0; j < pattern.size(); ++j)
+        {
+            if (pattern[j] >= 0x100) continue;
+            if (bytes[j] == static_cast<uint8_t>(pattern[j])) continue;
+            std::snprintf(text, sizeof text, "pattern byte %u is %02X but 0x%08X holds %02X",
+                          static_cast<unsigned>(j), static_cast<unsigned>(pattern[j]),
+                          static_cast<uint32_t>(site + j), static_cast<unsigned>(bytes[j]));
+            error = text;
+            return false;
+        }
+        const auto first = bytes.begin() + static_cast<std::ptrdiff_t>(offset);
+        guard.assign(first, first + static_cast<std::ptrdiff_t>(expectedSize));
         return true;
     }
 }
