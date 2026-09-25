@@ -2,6 +2,7 @@
 // BZR Open Shim - runtime patcher implementation
 #include "patcher.h"
 #include "hook_engine.h"
+#include "patch_config_parse.h"
 #include "patches.h"
 #include "odf_item_hooks.h"
 #include "scroll_helper.h"
@@ -51,35 +52,30 @@ namespace BZROpenShim
             } catch (...) {}
             return false;
         }
+        // Both readers are non-throwing (patch_config_parse.h). A hand-edited
+        // patches.json with a non-string or non-hex "address" used to throw
+        // out of the patch thread and take the game down; an unusable entry
+        // is now named in the log and the in-code default applies, which is
+        // what a missing entry already did.
         uint32_t GetStaticPointer(const std::string& name, uint32_t defaultVal = 0) {
-            // A hand-edited patches.json with a non-string or non-hex
-            // "address" used to throw out of the patch thread and take the
-            // game down; treat it as "entry absent" like every other accessor.
-            try {
-                if (data.contains("static_pointers")) {
-                    for (const auto& p : data["static_pointers"]) {
-                        if (p.contains("name") && p["name"] == name) {
-                            if (!p.contains("address") || !p["address"].is_string()) return defaultVal;
-                            return static_cast<uint32_t>(std::stoul(p["address"].get<std::string>(), nullptr, 16));
-                        }
-                    }
-                }
-            } catch (...) {}
-            return defaultVal;
+            uint32_t value = 0; std::string error;
+            switch (PatchConfig::ReadStaticPointer(data, name, value, error)) {
+            case PatchConfig::LookupStatus::Found: return value;
+            case PatchConfig::LookupStatus::Malformed:
+                Log(L"[CONFIG] static_pointers '%hs': %hs; using default 0x%08X\n", name.c_str(), error.c_str(), defaultVal);
+                return defaultVal;
+            default: return defaultVal;
+            }
         }
         bool GetBool(const std::string& name, bool defaultVal = false) {
-            try {
-                if (data.contains("features")) {
-                    const auto& features = data["features"];
-                    if (features.contains(name) && features[name].is_boolean()) {
-                        return features[name].get<bool>();
-                    }
-                }
-                if (data.contains(name) && data[name].is_boolean()) {
-                    return data[name].get<bool>();
-                }
-            } catch (...) {}
-            return defaultVal;
+            bool value = false; std::string error;
+            switch (PatchConfig::ReadFeatureBool(data, name, value, error)) {
+            case PatchConfig::LookupStatus::Found: return value;
+            case PatchConfig::LookupStatus::Malformed:
+                Log(L"[CONFIG] feature '%hs': %hs; using default %hs\n", name.c_str(), error.c_str(), defaultVal ? "true" : "false");
+                return defaultVal;
+            default: return defaultVal;
+            }
         }
     };
     static PatcherConfig g_Config;
@@ -563,8 +559,12 @@ namespace BZROpenShim
     }
 
     static bool ScanForSoundChannelOverrideTargets(SoundChannelOverrideTargets& outTargets) {
-        outTargets = {}; if (!g_Config.data.contains("audio_gas_pattern")) return false;
-        auto pVec = HookEngine::ParseIdaPattern(g_Config.data["audio_gas_pattern"]["pattern"]);
+        outTargets = {};
+        std::string patternText; std::string error;
+        const auto status = PatchConfig::ReadSectionPattern(g_Config.data, "audio_gas_pattern", patternText, error);
+        if (status == PatchConfig::LookupStatus::Malformed) Log(L"[CONFIG] audio_gas_pattern: %hs; scan skipped\n", error.c_str());
+        if (status != PatchConfig::LookupStatus::Found) return false;
+        auto pVec = HookEngine::ParseIdaPattern(patternText);
         // An unparseable pattern yields an empty vector, which would otherwise
         // "match" at the first byte of the first region.
         if (pVec.empty()) return false;
@@ -827,13 +827,24 @@ namespace BZROpenShim
     // is what separates a stale deploy from a signature that did not match.
     static bool PatchNameHasJsonEntry(const char* name) {
         if (!name) return false;
-        try {
-            if (!g_Config.data.contains("patches")) return false;
-            for (const auto& p : g_Config.data["patches"]) {
-                if (p["name"].get<std::string>() == name) return true;
+        // A patch is registered in either array (see patch_registration_tests),
+        // so a "globals" entry that resolved to 0 -- or was ignored as
+        // malformed -- must not be reported as a missing entry.
+        for (const char* group : { "patches", "globals" }) {
+            const nlohmann::json* section = PatchConfig::ArraySection(g_Config.data, group);
+            if (!section) continue;
+            for (const auto& p : *section) {
+                if (PatchConfig::EntryName(p) == name) return true;
             }
-        } catch (...) {}
+        }
         return false;
+    }
+
+    // What the log calls a patches.json element whose "name" may itself be
+    // the malformed part.
+    static std::string ConfigEntryLabel(const nlohmann::json& node) {
+        const std::string name = PatchConfig::EntryName(node);
+        return name.empty() ? std::string("<unnamed>") : name;
     }
 
     // A retry pass re-scans only what is still unresolved. This used to be
@@ -847,32 +858,46 @@ namespace BZROpenShim
         bool unresolvedOnly = false,
         bool missesAreProvisional = false) {
         std::vector<HookEngine::ScanTarget> targets;
-        try {
-            if (g_Config.data.contains("patches")) {
-                for (const auto& p : g_Config.data["patches"]) {
-                    const std::string name = p["name"].get<std::string>();
-                    // Two independent skips: a retry pass scans only patches
-                    // that are still unverified, and no pass ever scans a
-                    // pattern whose patch the distribution/runtime filters
-                    // already dropped from the list.
-                    const bool active = std::any_of(patches.begin(), patches.end(), [&name, unresolvedOnly](const HookEngine::PatchDef& patch) {
-                        return patch.name == name && (!unresolvedOnly || !patch.verified);
-                    });
-                    if (!active) continue;
-                    HookEngine::ScanTarget t; t.name = name; t.ida_pattern = p["pattern"]; t.offset = p["offset"]; t.expected_size = p["expected_size"]; t.fallback_addr = std::stoul(p["fallback"].get<std::string>(), nullptr, 16); t.require_unique = p.value("require_unique", false); targets.push_back(t);
+        // Each element is validated on its own (patch_config_parse.h), so one
+        // malformed entry in a hand-edited patches.json costs that one patch
+        // and is named in the log. It used to throw out of this function,
+        // silently dropping every entry after it, and a missing key was an
+        // out-of-bounds read rather than an exception at all. The Steam
+        // settle loop re-enters here up to ten times, so the complaint is
+        // logged on the first pass only.
+        const bool logMalformed = !unresolvedOnly;
+        if (const nlohmann::json* section = PatchConfig::ArraySection(g_Config.data, "patches")) {
+            for (const auto& p : *section) {
+                PatchConfig::ScanEntry entry; std::string error;
+                if (!PatchConfig::ParseScanEntry(p, entry, error)) {
+                    if (logMalformed) Log(L"[CONFIG] patches entry '%hs': %hs; entry ignored\n", ConfigEntryLabel(p).c_str(), error.c_str());
+                    continue;
                 }
+                // Two independent skips: a retry pass scans only patches
+                // that are still unverified, and no pass ever scans a
+                // pattern whose patch the distribution/runtime filters
+                // already dropped from the list.
+                const bool active = std::any_of(patches.begin(), patches.end(), [&entry, unresolvedOnly](const HookEngine::PatchDef& patch) {
+                    return patch.name == entry.name && (!unresolvedOnly || !patch.verified);
+                });
+                if (!active) continue;
+                HookEngine::ScanTarget t; t.name = entry.name; t.ida_pattern = entry.pattern; t.offset = entry.offset; t.expected_size = entry.expectedSize; t.fallback_addr = entry.fallback; t.require_unique = entry.requireUnique; targets.push_back(t);
             }
-            if (!unresolvedOnly && g_Config.data.contains("globals")) {
-                for (const auto& g : g_Config.data["globals"]) {
-                    uint32_t fb = 0; if (isSteam && g.contains("fallback_steam")) fb = std::stoul(g["fallback_steam"].get<std::string>(), nullptr, 16);
-                    else if (!isSteam && g.contains("fallback_gog")) fb = std::stoul(g["fallback_gog"].get<std::string>(), nullptr, 16);
-                    if (fb == 0 && g.contains("fallback")) fb = std::stoul(g["fallback"].get<std::string>(), nullptr, 16);
-                    auto expVec = HookEngine::ParseIdaPattern(g["expected_original"]);
+        }
+        if (!unresolvedOnly) {
+            if (const nlohmann::json* section = PatchConfig::ArraySection(g_Config.data, "globals")) {
+                for (const auto& g : *section) {
+                    PatchConfig::GlobalEntry entry; std::string error;
+                    if (!PatchConfig::ParseGlobalEntry(g, isSteam, entry, error)) {
+                        if (logMalformed) Log(L"[CONFIG] globals entry '%hs': %hs; entry ignored\n", ConfigEntryLabel(g).c_str(), error.c_str());
+                        continue;
+                    }
+                    auto expVec = HookEngine::ParseIdaPattern(entry.expectedOriginal);
                     std::vector<uint8_t> exp; for (auto v : expVec) exp.push_back(static_cast<uint8_t>(v));
-                    for (auto& p : patches) { if (p.name == g["name"].get<std::string>()) { p.address = fb; p.verified = (fb != 0); p.expected_original = exp; } }
+                    for (auto& p : patches) { if (p.name == entry.name) { p.address = entry.fallback; p.verified = (entry.fallback != 0); p.expected_original = exp; } }
                 }
             }
-        } catch (...) {}
+        }
         HookEngine::ScanForPatterns("", patches, targets, missesAreProvisional);
         for (const auto& t : targets) {
             for (auto& p : patches) {
@@ -1127,7 +1152,7 @@ namespace BZROpenShim
         }
     }
 
-    void RunPatcher(uint32_t shimVersion) {
+    static void RunPatcherUnguarded(uint32_t shimVersion) {
         g_Config.Load();
         // Preset migration must happen before normal player configuration is
         // fully applied, or the loader must explicitly reload the migrated
@@ -1136,8 +1161,18 @@ namespace BZROpenShim
         // any TryGetUserConfigBool / GetSoundChannelOverrideConfig reads.
         // Documented in openshim_preset_migration.h.
         {
-            auto mr = TryMigratePlayerPresetOnStartup();
-            (void)mr;
+            // The migration parses a user-editable openshim.ini and walks
+            // the filesystem; the header promises it never corrupts the
+            // source file on failure, and an abort here would be worse than
+            // a skipped migration.
+            try {
+                auto mr = TryMigratePlayerPresetOnStartup();
+                (void)mr;
+            } catch (const std::exception& e) {
+                Log(L"[CONFIG] preset migration threw %hs; openshim.ini used as found\n", e.what());
+            } catch (...) {
+                Log(L"[CONFIG] preset migration threw a non-standard exception; openshim.ini used as found\n");
+            }
             // If migration migrated or failed, subsequent config reads will
             // either see the new file or (for quarantined settings) the
             // fail-closed in-memory fallback. No further reload is needed
@@ -1286,6 +1321,22 @@ namespace BZROpenShim
                 Sleep(100);
                 RetryDeferredRuntimeHooks();
             }
+        }
+    }
+
+    // Last-resort barrier for the patch thread. A C++ exception escaping it
+    // is std::terminate: the game dies at launch with nothing in the log to
+    // say why. Everything that reads patches.json above is non-throwing by
+    // construction (patch_config_parse.h), so what this catches is the
+    // remainder -- a library throw, std::bad_alloc -- and the cost is the
+    // rest of the patch set for this session, not the process.
+    void RunPatcher(uint32_t shimVersion) {
+        try {
+            RunPatcherUnguarded(shimVersion);
+        } catch (const std::exception& e) {
+            Log(L"[PATCHER] aborted by exception: %hs; patches after this point were not applied\n", e.what());
+        } catch (...) {
+            Log(L"[PATCHER] aborted by a non-standard exception; patches after this point were not applied\n");
         }
     }
 }
