@@ -21,12 +21,15 @@
 // caught before it silently dropped a real entry at runtime.
 
 #include "patch_config_parse.h"
+#include "resolve_table.h"
 
 #include <cstdio>
 #include <fstream>
 #include <string>
+#include <vector>
 
 using namespace BZROpenShim::PatchConfig;
+using BZROpenShim::ParseIdaPatternText;
 using nlohmann::json;
 
 namespace
@@ -275,6 +278,153 @@ namespace
         Check(EntryName((*ArraySection(root, "patches"))[2]).empty(), "EntryName: a non-object is empty");
     }
 
+    // ---- VerifyFallbackSite ---------------------------------------------
+
+    // A fake 32-bit image: `bytes` live at `base`, anything outside is
+    // unreadable, the way ReadProcessMemory fails on an unmapped page. The
+    // last request is recorded so a test can pin where the reader looked.
+    struct FakeImage
+    {
+        uint32_t base = 0;
+        std::vector<uint8_t> bytes;
+        mutable uint32_t lastAddress = 0;
+        mutable size_t lastLength = 0;
+
+        MemoryReader Reader() const
+        {
+            return [this](uint32_t address, size_t length, std::vector<uint8_t>& out) {
+                lastAddress = address;
+                lastLength = length;
+                if (address < base) return false;
+                const size_t start = static_cast<size_t>(address - base);
+                if (start > bytes.size() || length > bytes.size() - start) return false;
+                out.assign(bytes.begin() + static_cast<std::ptrdiff_t>(start),
+                           bytes.begin() + static_cast<std::ptrdiff_t>(start + length));
+                return true;
+            };
+        }
+    };
+
+    // Concrete bytes that satisfy `pattern`: literals as written, each
+    // wildcard a distinctive non-zero byte (0xA0 + index), so a guard that
+    // demanded 0x00 for a wildcard would be caught.
+    std::vector<uint8_t> Instantiate(const std::vector<uint16_t>& pattern)
+    {
+        std::vector<uint8_t> out;
+        for (size_t j = 0; j < pattern.size(); ++j)
+            out.push_back(pattern[j] < 0x100 ? static_cast<uint8_t>(pattern[j]) : static_cast<uint8_t>(0xA0 + j));
+        return out;
+    }
+
+    void TestFallbackSite()
+    {
+        // The shipped "HoverCraft Engine Flame Emit Hook 1/2" entry: offset 17
+        // lands on the rel32 operand of the E8, four wildcards. The old code
+        // guarded the fallback with pattern bytes 0..3 (0F 11 04 24), which
+        // the operand can never equal.
+        const auto hover1 = ParseIdaPatternText(
+            "0F 11 04 24 8D 85 ?? ?? ?? ?? 50 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 3D ?? ?? ?? ?? 00 0F 84");
+        Check(hover1.size() == 30, "fallback: hover1 pattern parses to 30 bytes");
+        FakeImage image;
+        image.base = 0x004EAD67;
+        image.bytes = Instantiate(hover1);
+        const uint32_t fallback = image.base + 17;   // 0x004EAD78, as shipped
+
+        std::vector<uint8_t> guard;
+        std::string error;
+        Check(VerifyFallbackSite(hover1, fallback, 17, 4, image.Reader(), guard, error),
+              "fallback: hover1 is accepted when its pattern is present at fallback - offset");
+        Check(image.lastAddress == image.base && image.lastLength == 30,
+              "fallback: hover1 reads the whole pattern starting at fallback - offset");
+        Check(guard == std::vector<uint8_t>{ 0xB1, 0xB2, 0xB3, 0xB4 },
+              "fallback: hover1 guard is the observed operand, not 0F 11 04 24 and not 00 00 00 00");
+
+        // "2/2": offset 13, wildcards at pattern index 2-3, so the old guard
+        // was 8D 95 00 00. The guard must be the four bytes at offset 13.
+        const auto hover2 = ParseIdaPatternText(
+            "8D 95 ?? ?? ?? ?? 52 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? E9 ?? ?? ?? ?? 83 BD ?? ?? ?? ?? 00 0F 8E");
+        FakeImage image2;
+        image2.base = 0x004EAFD2;
+        image2.bytes = Instantiate(hover2);
+        guard.clear();
+        Check(VerifyFallbackSite(hover2, image2.base + 13, 13, 4, image2.Reader(), guard, error),
+              "fallback: hover2 is accepted");
+        Check(guard == std::vector<uint8_t>{ 0xAD, 0xAE, 0xAF, 0xB0 },
+              "fallback: hover2 guard is the observed operand, not 8D 95 00 00");
+
+        // A wildcard position may hold anything, including zero; a zero that
+        // was observed is guarded as zero.
+        FakeImage wild = image;
+        wild.bytes[6] = 0x00;
+        wild.bytes[17] = 0x00;
+        guard.clear();
+        Check(VerifyFallbackSite(hover1, fallback, 17, 4, wild.Reader(), guard, error),
+              "fallback: wildcard bytes are not compared");
+        Check(guard.size() == 4 && guard[0] == 0x00 && guard[1] == 0xB2,
+              "fallback: an observed zero operand byte is guarded as observed");
+
+        // One literal byte off: the site is not the one the entry describes.
+        FakeImage wrong = image;
+        wrong.bytes[0] = 0x0E;
+        guard.clear();
+        error.clear();
+        Check(!VerifyFallbackSite(hover1, fallback, 17, 4, wrong.Reader(), guard, error),
+              "fallback: a literal mismatch is refused");
+        Check(error.find("pattern byte 0 is 0F but 0x004EAD67 holds 0E") != std::string::npos,
+              "fallback: the refusal names the byte, its address and what was found");
+        Check(guard.empty(), "fallback: a refused site leaves no guard");
+        FakeImage wrongTail = image;
+        wrongTail.bytes[29] = 0x85;
+        Check(!VerifyFallbackSite(hover1, fallback, 17, 4, wrongTail.Reader(), guard, error) &&
+                  error.find("pattern byte 29") != std::string::npos,
+              "fallback: a literal past the guard window is still compared");
+
+        // Unreadable memory, and a pattern that runs into unmapped memory.
+        FakeImage unmapped;
+        unmapped.base = 0x00400000;
+        error.clear();
+        Check(!VerifyFallbackSite(hover1, fallback, 17, 4, unmapped.Reader(), guard, error) &&
+                  error.find("30 byte(s) at 0x004EAD67 could not be read") != std::string::npos,
+              "fallback: an unreadable site is refused");
+        FakeImage truncated = image;
+        truncated.bytes.resize(20);
+        Check(!VerifyFallbackSite(hover1, fallback, 17, 4, truncated.Reader(), guard, error) &&
+                  error.find("could not be read") != std::string::npos,
+              "fallback: a pattern that runs into unmapped memory is refused");
+
+        // The bookkeeping refusals.
+        Check(!VerifyFallbackSite(hover1, 0, 17, 4, image.Reader(), guard, error) &&
+                  error.find("no fallback") != std::string::npos,
+              "fallback: address 0 is refused");
+        Check(!VerifyFallbackSite({}, fallback, 17, 4, image.Reader(), guard, error) &&
+                  error.find("pattern is empty") != std::string::npos,
+              "fallback: an empty pattern is refused");
+        Check(!VerifyFallbackSite(hover1, fallback, 17, 0, image.Reader(), guard, error) &&
+                  error.find("expected_size is 0") != std::string::npos,
+              "fallback: expected_size 0 is refused rather than written unguarded");
+        Check(!VerifyFallbackSite(hover1, 0x00000010, 17, 4, image.Reader(), guard, error) &&
+                  error.find("below address 0") != std::string::npos,
+              "fallback: an offset larger than the fallback is refused");
+        Check(!VerifyFallbackSite(hover1, 0xFFFFFFF0, 0, 4, image.Reader(), guard, error) &&
+                  error.find("address space") != std::string::npos,
+              "fallback: a window past the end of the address space is refused");
+
+        // A guard window that reaches past the pattern is read from memory
+        // too, as the scan path reads it from its region buffer.
+        const auto prologue = ParseIdaPatternText("55 8B EC");
+        FakeImage tail;
+        tail.base = 0x00500000;
+        tail.bytes = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10, 0x53, 0x56 };
+        guard.clear();
+        Check(VerifyFallbackSite(prologue, tail.base + 2, 2, 5, tail.Reader(), guard, error),
+              "fallback: a window past the pattern is accepted when readable");
+        Check(tail.lastLength == 7 && guard == std::vector<uint8_t>{ 0xEC, 0x83, 0xEC, 0x10, 0x53 },
+              "fallback: a window past the pattern is read from the site");
+        tail.bytes.resize(6);
+        Check(!VerifyFallbackSite(prologue, tail.base + 2, 2, 5, tail.Reader(), guard, error),
+              "fallback: a window past the pattern that is unreadable is refused");
+    }
+
     // The shipped file must pass every reader without a complaint; a stricter
     // reader than the old std::stoul path would otherwise drop a real entry.
     void TestShippedPatchesJson()
@@ -308,6 +458,28 @@ namespace
                 if (!ParseScanEntry(node, entry, error))
                 {
                     std::fprintf(stderr, "FAIL: shipped patches entry '%s': %s\n", EntryName(node).c_str(), error.c_str());
+                    ++g_Failures;
+                    continue;
+                }
+                if (entry.requireUnique) continue;
+                // Every entry that can take the fallback must be able to:
+                // with its pattern present at fallback - offset, the site
+                // verifies and the guard covers expected_size bytes. The two
+                // HoverCraft entries, whose window is a rel32 operand, are why
+                // the guard comes from the observed bytes and not the pattern.
+                const auto pattern = ParseIdaPatternText(entry.pattern);
+                FakeImage image;
+                image.base = entry.fallback - entry.offset;
+                image.bytes = Instantiate(pattern);
+                while (image.bytes.size() < static_cast<size_t>(entry.offset) + entry.expectedSize)
+                    image.bytes.push_back(0xCC);
+                std::vector<uint8_t> guard;
+                error.clear();
+                if (!VerifyFallbackSite(pattern, entry.fallback, entry.offset, entry.expectedSize, image.Reader(), guard, error) ||
+                    guard.size() != entry.expectedSize)
+                {
+                    std::fprintf(stderr, "FAIL: shipped patches entry '%s' cannot take its fallback: %s\n",
+                                 entry.name.c_str(), error.c_str());
                     ++g_Failures;
                 }
             }
@@ -365,6 +537,7 @@ int main()
     TestScanEntry();
     TestGlobalEntry();
     TestHelpers();
+    TestFallbackSite();
     TestShippedPatchesJson();
 
     if (g_Failures != 0)
