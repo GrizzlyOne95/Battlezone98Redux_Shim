@@ -4,7 +4,7 @@ Native `winmm.dll` shim for Battlezone 98 Redux. This repository owns low-level 
 
 ## Repository boundaries
 
-- Sibling BZR repositories normally live under `%USERPROFILE%\Documents\GIT`; verify `origin` and branch before relying on them. Campaign Reimagined's only editable checkout is its Google Drive canonical tree.
+- Sibling BZR repositories normally live under `%USERPROFILE%\Documents\GIT`; verify `origin` and branch before relying on them. Campaign Reimagined's only editable checkout is `%USERPROFILE%\Documents\GIT\Campaign-Reimagined`.
 - Route reusable Lua/native runtime APIs to **EXU**, campaign content and packaging to **CR**, and Lua file/update primitives to **bzfile**. Read a sibling's `AGENTS.md` before editing it.
 - The GOG install at `C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux` is the normal test copy. Never use Steam's Workshop cache as a development target.
 
