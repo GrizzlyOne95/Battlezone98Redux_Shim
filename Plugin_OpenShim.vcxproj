@@ -129,6 +129,7 @@
     <ClCompile Include="src\engine\openshim_assets.cpp" />
     <ClCompile Include="src\engine\openshim_assets_platform.cpp" />
     <ClCompile Include="src\engine\openshim_sdk_v2.cpp" />
+    <ClCompile Include="src\engine\patch_config_parse.cpp" />
     <ClCompile Include="src\engine\patcher.cpp" />
     <ClCompile Include="src\engine\render_effect_intent.cpp" />
     <ClCompile Include="src\engine\scene_depth_facts.cpp" />
