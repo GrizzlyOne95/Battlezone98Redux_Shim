@@ -1,5 +1,6 @@
 #include "net_optimizer.h"
 #include "netcode_hooks.h"
+#include "bzrnet_protocol.h"
 #include "shim_log.h"
 
 #include <winsock2.h>
