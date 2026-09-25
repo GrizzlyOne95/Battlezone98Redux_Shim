@@ -150,6 +150,20 @@ target_compile_definitions(patch_registration_tests PRIVATE
     BZR_PATCHER_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/engine/patcher.cpp"
     BZR_BZR_HOOKS_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/bzr_hooks.cpp")
 
+# Pins the x86-32 length decoder that InstallInlineDetour32 uses to refuse
+# steals that split an instruction. Pure byte tables, no engine code.
+add_executable(x86_length_tests
+    x86_length_tests.cpp
+    ../src/engine/x86_length.cpp
+)
+target_include_directories(x86_length_tests PRIVATE ../include)
+target_compile_features(x86_length_tests PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(x86_length_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(x86_length_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+
 add_executable(openshim_update_manifest_tests
     openshim_update_manifest_tests.cpp
     ../src/patches/openshim_update_manifest.cpp
@@ -333,6 +347,7 @@ add_test(NAME ai_range_policy_tests COMMAND ai_range_policy_tests)
 add_test(NAME lcbench_safety_policy_tests COMMAND lcbench_safety_policy_tests)
 add_test(NAME autosave_gate_tests COMMAND autosave_gate_tests)
 add_test(NAME native_save_flag_tests COMMAND native_save_flag_tests)
+add_test(NAME x86_length_tests COMMAND x86_length_tests)
 
 target_include_directories(render_profile_tests PRIVATE ../include)
 target_compile_features(render_profile_tests PRIVATE cxx_std_20)

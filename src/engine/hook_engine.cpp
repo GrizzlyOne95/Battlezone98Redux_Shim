@@ -52,6 +52,18 @@ namespace HookEngine
 
         if (!patch.expected_original.empty())
         {
+            // A guard shorter than the payload verifies nothing about the
+            // bytes past it; refuse rather than overwrite them blind.
+            if (patch.expected_original.size() < patch.payload.size())
+            {
+                BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "PATCH",
+                    "%s: guard covers %u of %u payload bytes at 0x%08X; not applied",
+                    patch.name.c_str(),
+                    static_cast<unsigned>(patch.expected_original.size()),
+                    static_cast<unsigned>(patch.payload.size()),
+                    patch.address);
+                return false;
+            }
             std::vector<uint8_t> current(patch.expected_original.size());
             if (!ReadMemory(patch.address, current.data(), current.size())) return false;
             if (memcmp(current.data(), patch.expected_original.data(), current.size()) != 0) return false;
