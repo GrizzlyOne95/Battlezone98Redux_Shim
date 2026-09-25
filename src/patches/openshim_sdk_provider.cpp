@@ -376,6 +376,24 @@ extern "C" BOOL WINAPI OpenShimImpl_SetMusicTrack(int index)
     typedef void (__cdecl* StartMusicFn)(long, int);
     static StartMusicFn pStartMusic = reinterpret_cast<StartMusicFn>(0x00406670);
 
+    // Fail closed: StartMusic is a fixed v2.2.301 address with no signature
+    // resolve of its own, so it must never be called on a build the patcher
+    // did not positively identify. Every other bridge into engine code gates
+    // on the same predicate.
+    if (!BZROpenShim::IsCompatibleGameVersion())
+    {
+        static bool s_refused = false;
+        if (!s_refused)
+        {
+            s_refused = true;
+            BZROpenShim::LogShimA(
+                BZROpenShim::LogLevel::Warn,
+                "music",
+                "OpenShimSetMusicTrack refused: unsupported game build");
+        }
+        return FALSE;
+    }
+
     BZROpenShim::LogShimA(
         BZROpenShim::LogLevel::Info,
         "music",

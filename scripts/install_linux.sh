@@ -222,7 +222,12 @@ find_artifact_set() {
     # reference into plain text, so this needs nothing beyond tr and grep.
     NEEDS_CHAIN=0
     if [[ -n "$DLL" && -f "$DLL" ]]; then
-        if tr -d '\000' < "$DLL" | LC_ALL=C grep -qa 'bzloader\.dll'; then
+        # No `grep -q` here: with `set -o pipefail` a quiet grep closes the
+        # pipe as soon as it matches, tr dies with SIGPIPE (141), the pipeline
+        # is reported as failed, and NEEDS_CHAIN stays 0 -- which silently
+        # disables the fail-closed loader/plugin check below. Let grep consume
+        # the whole stream instead.
+        if tr -d '\000' < "$DLL" | LC_ALL=C grep -a 'bzloader\.dll' > /dev/null; then
             NEEDS_CHAIN=1
         fi
         local dll_dir

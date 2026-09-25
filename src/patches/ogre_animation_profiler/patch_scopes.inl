@@ -192,37 +192,66 @@
             const int32_t hookRelative = static_cast<int32_t>(hookDelta);
             std::memcpy(replacement.data() + 1, &hookRelative, sizeof(hookRelative));
 
-            SuspendedThreadSet suspended(static_cast<uint8_t*>(target), patchLength);
-            if (!suspended.ready || std::memcmp(target, expectedBytes, patchLength) != 0)
+            // Nothing inside this block may allocate, take a lock, or log:
+            // every other thread in the process is suspended for its duration,
+            // and any of them may be holding the heap lock, the log sink's SRW
+            // lock or the CRT FILE lock. LogShimA does all three, so the
+            // outcome is captured into plain locals here and reported only
+            // after the SuspendedThreadSet destructor has resumed the threads.
+            bool suspendReady = false;
+            bool bytesStillMatch = false;
+            DWORD suspendError = 0;
+            DWORD blockingThreadId = 0;
+            uintptr_t blockingInstruction = 0;
+            bool protectFailed = false;
             {
-                g_EntryInstallRetryRequested = !suspended.ready &&
-                    std::memcmp(target, expectedBytes, patchLength) == 0;
+                SuspendedThreadSet suspended(static_cast<uint8_t*>(target), patchLength);
+                suspendReady = suspended.ready;
+                bytesStillMatch = std::memcmp(target, expectedBytes, patchLength) == 0;
+                suspendError = suspended.failureError;
+                blockingThreadId = suspended.blockingThreadId;
+                blockingInstruction = static_cast<uintptr_t>(suspended.blockingInstruction);
+                if (suspendReady && bytesStillMatch)
+                {
+                    DWORD oldProtection = 0;
+                    if (VirtualProtect(target, patchLength, PAGE_EXECUTE_READWRITE, &oldProtection))
+                    {
+                        std::memcpy(detour.original.data(), target, patchLength);
+                        std::memcpy(target, replacement.data(), patchLength);
+                        FlushInstructionCache(GetCurrentProcess(), target, patchLength);
+                        DWORD restoredProtection = 0;
+                        VirtualProtect(target, patchLength, oldProtection, &restoredProtection);
+                    }
+                    else
+                    {
+                        protectFailed = true;
+                    }
+                }
+            }
+
+            if (!suspendReady || !bytesStillMatch)
+            {
+                g_EntryInstallRetryRequested = !suspendReady && bytesStillMatch;
                 LogShimA(
                     LogLevel::Warn,
                     kComponent,
                     "[OgreProfile] deferred %s entry observer target=0x%p suspendReady=%s error=%lu blockingThread=%lu blockingEip=0x%p bytesStillMatch=%s",
                     label,
                     target,
-                    suspended.ready ? "yes" : "no",
-                    suspended.failureError,
-                    suspended.blockingThreadId,
-                    reinterpret_cast<void*>(suspended.blockingInstruction),
-                    std::memcmp(target, expectedBytes, patchLength) == 0 ? "yes" : "no");
+                    suspendReady ? "yes" : "no",
+                    suspendError,
+                    blockingThreadId,
+                    reinterpret_cast<void*>(blockingInstruction),
+                    bytesStillMatch ? "yes" : "no");
                 VirtualFree(trampoline, 0, MEM_RELEASE);
                 return false;
             }
 
-            DWORD oldProtection = 0;
-            if (!VirtualProtect(target, patchLength, PAGE_EXECUTE_READWRITE, &oldProtection))
+            if (protectFailed)
             {
                 VirtualFree(trampoline, 0, MEM_RELEASE);
                 return false;
             }
-            std::memcpy(detour.original.data(), target, patchLength);
-            std::memcpy(target, replacement.data(), patchLength);
-            FlushInstructionCache(GetCurrentProcess(), target, patchLength);
-            DWORD restoredProtection = 0;
-            VirtualProtect(target, patchLength, oldProtection, &restoredProtection);
 
             detour.target = static_cast<uint8_t*>(target);
             detour.hook = hook;

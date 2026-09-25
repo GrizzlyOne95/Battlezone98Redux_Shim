@@ -25,11 +25,6 @@ namespace std
 
 namespace BZROpenShim
 {
-    // Returns true when the Ogre animation/render profiler is enabled. The
-    // diagnostic build defaults it on; OPENSHIM_PROFILE_OGRE_ANIMATION or
-    // [Diagnostics] ProfileOgreAnimation can explicitly override that default.
-    bool IsOgreAnimationProfilerRequested();
-
     // Starts the read-only profiler. The profiler observes Ogre animation and
     // render submission plus bounded DX9/DX11 draw and state activity. It does not
     // change animation state, culling decisions, materials, or render state.

@@ -15,6 +15,18 @@
 #include <Windows.h>
 #include <bcrypt.h>
 
+namespace
+{
+    // std::filesystem::exists throws std::filesystem_error on a path the OS
+    // refuses to stat (bad share, ACL, malformed drive). Migration runs on the
+    // patch thread with no exception barrier, so use the error_code overload.
+    bool PathExists(const std::filesystem::path& path) noexcept
+    {
+        std::error_code ec;
+        return std::filesystem::exists(path, ec);
+    }
+}
+
 // bcrypt.lib is not yet in the default link; pragma pulls it for both
 // the DLL and the offline test builds without editing every vcxproj
 // configuration by hand.
@@ -178,7 +190,7 @@ namespace BZROpenShim
         bool BackupExistingFile(const std::filesystem::path& existing,
                                 const std::filesystem::path& backup)
         {
-            if (std::filesystem::exists(backup))
+            if (PathExists(backup))
             {
                 // Do not destroy an existing migration backup without a
                 // reason. The first backup already holds the original bad
@@ -239,7 +251,12 @@ namespace BZROpenShim
             }
             if (num.empty())
                 return false;
-            // Ignore trailing spaces / comments after number.
+            // Ignore trailing spaces / comments after number. The digit run
+            // comes from a user-editable comment line, so it can be longer
+            // than an int: std::stoi would throw out of the patch thread and
+            // abort the game at launch. Treat an overlong run as "no marker".
+            if (num.size() > 9)
+                return false;
             out = std::stoi(num);
             return true;
         }
@@ -616,7 +633,7 @@ namespace BZROpenShim
         result.toRevision = kCurrentPresetRevision;
 
         if (existingPath.empty() ||
-            !std::filesystem::exists(existingPath))
+            !PathExists(existingPath))
         {
             // No file: creation-from-preset behavior, if any, lives
             // elsewhere. Migration has nothing to do.
@@ -742,7 +759,7 @@ namespace BZROpenShim
                     existingPath.parent_path() /
                     BuildPremigrateBackupFileName(existingRev);
                 BackupExistingFile(existingPath, backupPath);
-                result.backupCreated = std::filesystem::exists(backupPath);
+                result.backupCreated = PathExists(backupPath);
                 if (result.backupCreated)
                     result.backupPath = backupPath.string();
                 BOOL moved = MoveFileExA(tmpPathStr.c_str(),
@@ -988,7 +1005,7 @@ namespace BZROpenShim
                 // Not fatal if backup fails? But we already wrote temp; we
                 // should still proceed? The spec doesn't require backup for
                 // surgical, but we attempt it best-effort.
-                result.backupCreated = std::filesystem::exists(backupPath);
+                result.backupCreated = PathExists(backupPath);
                 if (result.backupCreated)
                     result.backupPath = backupPath.string();
             }
@@ -1076,7 +1093,7 @@ namespace BZROpenShim
         };
         for (auto& cand : candidates)
         {
-            if (std::filesystem::exists(cand))
+            if (PathExists(cand))
             {
                 canonicalPath = cand;
                 foundCanonical = true;

@@ -314,14 +314,14 @@ extern "C" BZLOADER_API int32_t BZLOADER_CALL BZPlugin_Load(const BZHostApi* hos
                           "OpenShim runtime loaded by BZLoader (game=%u)",
                           host->gameId);
 
-    // Providers for the two bootstrap seams, then the public SDK surface that
-    // winmm.dll's export thunks forward into.
-    BZROpenShim::InstallFileIoProvider();
-    BZROpenShim::SdkProvider::InstallBuiltIn();
-
-    BZROpenShim::InitializeOpenShimSdkV2();
-
-    g_PatchThread = _beginthreadex(nullptr, 0, PatchThreadProc, nullptr, 0, nullptr);
+    // Create the worker before anything is installed into winmm.dll, but do
+    // not let it run yet. The provider tables below hand winmm.dll function
+    // pointers that live inside this module; once they are installed the load
+    // can no longer be undone, because a host that unloads us after a failed
+    // BZPlugin_Load would leave the executable's CreateFile IAT entries
+    // routed through unmapped memory. Making thread creation the last
+    // fallible step keeps "return 0" transactional again.
+    g_PatchThread = _beginthreadex(nullptr, 0, PatchThreadProc, nullptr, CREATE_SUSPENDED, nullptr);
     if (!g_PatchThread)
     {
         BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "plugin",
@@ -330,6 +330,15 @@ extern "C" BZLOADER_API int32_t BZLOADER_CALL BZPlugin_Load(const BZHostApi* hos
         BZROpenShim::SetShimLogSink(nullptr);
         return 0;
     }
+
+    // Providers for the two bootstrap seams, then the public SDK surface that
+    // winmm.dll's export thunks forward into.
+    BZROpenShim::InstallFileIoProvider();
+    BZROpenShim::SdkProvider::InstallBuiltIn();
+
+    BZROpenShim::InitializeOpenShimSdkV2();
+
+    ResumeThread(reinterpret_cast<HANDLE>(g_PatchThread));
     return 1;
 }
 
