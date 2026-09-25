@@ -5,10 +5,6 @@
 namespace BZROpenShim
 {
     // Returns true when the first-person pilot Ogre animation trace is enabled.
-    // The trace defaults on through [Diagnostics] TracePilotFPAnimations and can
-    // be disabled with either the INI key or OPENSHIM_TRACE_PILOT_FP_ANIMATIONS=0.
-    bool IsPilotFpAnimationTraceRequested();
-
     // Starts the local-Person / first-person entity tracker. The worker waits for
     // OgreMain.dll, resolves the retail Ogre exports by semantic name, and binds
     // AnimationState traffic for two targets:

@@ -149,19 +149,6 @@ namespace
         };
     }
 
-    std::vector<std::string> MakeBadR1LinesNoMarkerButBadValues()
-    {
-        // No revision marker: should be treated as custom (Case C) even
-        // though values match old defaults, because we cannot reliably
-        // identify the old revision without a marker or hash.
-        return {
-            "[Display]",
-            "ScrapPilotHud = Legacy",
-            "[SinglePlayer]",
-            "AttackRevealPerceivedTeam = 1",
-        };
-    }
-
     fs::path MakeTempDir()
     {
         auto base = fs::temp_directory_path() / "openshim_migration_tests";

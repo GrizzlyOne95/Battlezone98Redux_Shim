@@ -34,7 +34,6 @@
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
-#include "../engine/native_ui_validation.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -547,7 +546,6 @@ namespace BZROpenShim
                                                 const float* velocity,
                                                 uint8_t preserveFlag);
 
-    static void InstallArtilleryDoAttackHookIfPossible();
     static bool SetStockScrapPilotPanelsVisible(bool visible);
 
     namespace
@@ -567,7 +565,6 @@ namespace BZROpenShim
         constexpr float kAutoSaveLoadButtonH = 58.0f;
         constexpr uint32_t kAutoSaveLoadButtonFlags = 0x22;
         constexpr int kBanScanMaxSessionId = 64;
-        constexpr int kLoadQueuedState = 5;
         constexpr int kRestartMissionState = 6;
         constexpr int kLoadSaveState = 8;
         constexpr int kQueuedLoadNameBufferLen = 16;
@@ -700,8 +697,6 @@ namespace BZROpenShim
         constexpr ULONGLONG kHudSpriteFallbackDiscoveryRetryMs = 5000;
         constexpr size_t kGameObjectClassOffset = 0xF8;
         constexpr size_t kGameObjectObjOffset = 0xF4;
-        constexpr size_t kObjectClassOdfOffset = 0x20;
-        constexpr size_t kObjectClassOdfLen = 16;
         constexpr size_t kObj76TransformOffset = 0x20;
         constexpr size_t kObj76GameObjectOffset = 0x8C;
         static_assert(kGameObjectObjOffset == ObjectLayout::kGameObjectObj76,
@@ -757,8 +752,6 @@ namespace BZROpenShim
         constexpr size_t kMagnetMineArmingTimerOffset = 0x238;
         constexpr size_t kMagnetMineSoundHandleOffset = 0x230;
         constexpr size_t kProximityMineArmingTimerOffset = 0x240;
-        constexpr size_t kMineOwnerOffset = 0x17C;
-        constexpr size_t kMagnetMineClassSoundNameOffset = 0x150;
         constexpr size_t kMagnetMineClassTotalLifeOffset = 0x160;
         constexpr size_t kMagnetMineClassArmingDelayOffset = 0x168;
         constexpr size_t kMagnetMineClassRangeOffset = 0x16C;
@@ -789,7 +782,6 @@ namespace BZROpenShim
         // image; nothing about the DAMAGE layout is assumed beyond the two
         // fields SetDamageFlags itself reads ([0] damager, [1] dmg_source).
         constexpr uintptr_t kGogSetDamageFlagsAddr = 0x004DC130;
-        constexpr uintptr_t kGogResolveObj76GameObjectAddr = 0x00479F30;
         constexpr uintptr_t kGogGameObjectEnemyPAddr = 0x004DB5B0;
         constexpr uintptr_t kGogGameObjectAddVelocityAddr = 0x004A75B0;
         constexpr uintptr_t kGogMatrixInverseAddr = 0x008203F0;
@@ -1092,7 +1084,6 @@ namespace BZROpenShim
         // its non-numeric branch, matching the 1.5 decomp. Previous 0x00514610 was WRONG
         // (mid-instruction, same failure class as the fixed GetObjByHandle).
         constexpr uintptr_t kGogGetPlayerHandleAddr = 0x005C7FB0;
-        constexpr uintptr_t kGogGameObjectGetObjByHandleAddr = 0x0046B160;
         // NetPlayer::RecordDeath(int killedTeam, int killerTeam) on the live
         // 2.2.301 exe (advisory-PDB VA 0x004D9210 had drifted; re-derived via
         // the "NetPlayer::SetTeam team=%d" debug-string xref cluster and
@@ -1125,8 +1116,6 @@ namespace BZROpenShim
         // a live single-player mission" (autosave.cpp IsSinglePlayerMissionActive).
         constexpr uint16_t kLocalPlayerNetIdUnreadable = 0xFFFFu;
         constexpr uintptr_t kUiWrapperActiveAddr = 0x00918324;
-        constexpr uintptr_t kGogArtilleryDoAttackEntryAddr = 0x0042AF10;
-        constexpr size_t kArtilleryDoAttackDetourLen = 10;
         constexpr size_t kPersonSimulateDetourLen = 10;
         constexpr size_t kRecordDeathDetourLen = 6;
         constexpr ULONGLONG kCareerStatsMpHookRetryMs = 1000;
@@ -1435,8 +1424,6 @@ namespace BZROpenShim
         // by the whole mount transform, and its position field is a mount-local
         // offset that stock deliberately preserves (Hovercraft::UpdateWeaponAim
         // saves it at 0x005F0930 and restores it after RefreshWeaponTransform).
-        constexpr size_t kWeaponMountWorldMatrixOffset = 0x28;
-        constexpr size_t kWeaponMountInverseMatrixOffset = 0x68;
         constexpr int kConvergenceWeaponSlotCount = 5;
         // The convergence tuning constants (minimum target distance, maximum
         // deviation from the stock aim) live alongside the math in
@@ -1909,9 +1896,7 @@ namespace BZROpenShim
         static bool g_TurretCraftWeaponAimWrapperActive = false;
         static bool g_TurretTankWeaponAimWrapperActive[2] = { false, false };
         static bool g_PlayerReticleConvergenceLayoutFaultLogged = false;
-        static bool g_PlayerReticleConvergenceMountFaultLogged = false;
         static bool g_PlayerReticleConvergenceSkyStandDownLogged = false;
-        static bool g_PlayerReticleConvergenceLayoutCheckLogged = false;
         static constexpr int kPlayerReticleConvergenceLogLimit = 6;
         static constexpr ULONGLONG kPlayerReticleConvergenceLogIntervalMs = 10000;
         static int g_PlayerReticleConvergenceLogCount = 0;
@@ -4182,26 +4167,6 @@ namespace BZROpenShim
                 }
 
                 return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-
-            return false;
-        }
-
-        static bool HudSpriteUvBlockMatches(const uint8_t* address, const HudSpriteKnownSample& sample)
-        {
-            if (!address)
-                return false;
-
-            __try
-            {
-                const float* uv = reinterpret_cast<const float*>(address);
-                return HudSpriteUvNearlyEqual(uv[0], sample.u0) &&
-                       HudSpriteUvNearlyEqual(uv[1], sample.v0) &&
-                       HudSpriteUvNearlyEqual(uv[2], sample.u1) &&
-                       HudSpriteUvNearlyEqual(uv[3], sample.v1);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -6613,22 +6578,6 @@ namespace BZROpenShim
             return fallbackCamera;
         }
 
-        static bool TryProcessQueuedUpdatesSafe(FnOgreProcessQueuedUpdates processQueuedUpdates)
-        {
-            if (!processQueuedUpdates)
-                return false;
-
-            __try
-            {
-                processQueuedUpdates();
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
         // A chunk mesh has a handful of sub-entities. A destroyed Entity whose
         // allocation has been recycled usually does not fault on this read --
         // it just returns whatever the reused memory holds. Freeze
@@ -6680,41 +6629,6 @@ namespace BZROpenShim
             __try
             {
                 return getSubEntity(entity, index);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return nullptr;
-            }
-        }
-
-        static uint16_t TryGetChunkProxyNumAttachedObjectsSafe(
-            void* sceneNode,
-            FnOgreNumAttachedObjects numAttachedObjects)
-        {
-            if (!sceneNode || !numAttachedObjects)
-                return 0;
-
-            __try
-            {
-                return numAttachedObjects(sceneNode);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return 0;
-            }
-        }
-
-        static void* TryGetChunkProxyAttachedObjectSafe(
-            void* sceneNode,
-            uint16_t index,
-            FnOgreGetAttachedObjectByIndex getAttachedObject)
-        {
-            if (!sceneNode || !getAttachedObject)
-                return nullptr;
-
-            __try
-            {
-                return getAttachedObject(sceneNode, index);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -9039,75 +8953,6 @@ namespace BZROpenShim
                 UpdateChunkProxySlotPosition(*freeSlot);
         }
 
-        static void TrackCreateChunkTargetForProxy(
-            const uint8_t* objectBytes,
-            const ChunkEffectActiveEntry* /*createdEntry*/)
-        {
-            if ((!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy) || !objectBytes)
-                return;
-
-            const void* geomRef = nullptr;
-            char geomName[64] = {};
-            TryReadChunkGeomIdentity(objectBytes, geomRef, geomName, sizeof(geomName));
-
-            const ChunkResolvedBindingEntry* binding =
-                FindChunkResolvedBindingEntryForGeom(objectBytes, geomName);
-            const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
-
-            float positionX = 0.0f;
-            float positionY = 0.0f;
-            float positionZ = 0.0f;
-            bool havePosition = false;
-            const void* resolvedPositionObject = nullptr;
-            havePosition = TryResolveChunkProxyPositionFromCandidates(
-                objectBytes,
-                binding,
-                &bridgeSnapshot,
-                positionX,
-                positionY,
-                positionZ,
-                &resolvedPositionObject);
-            if (!havePosition)
-            {
-                if (binding && binding->payloadMeshName[0] && AcquireChunkLogSlot())
-                {
-                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] defer obj=0x%08X geom=0x%08X geomName=%hs mesh=%hs root=0x%08X rootGameObj=0x%08X ownerObj=0x%08X reason=no-position\n",
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)),
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(geomRef)),
-                        GetChunkGeomNameForLog(geomName),
-                        binding->payloadMeshName,
-                        binding->sourceRootObjectPtr,
-                        binding->sourceRootGameObjectPtr,
-                        binding->sourceOwnerObjPtr);
-                }
-                return;
-            }
-
-            if (binding && binding->payloadMeshName[0] && AcquireChunkLogSlot())
-            {
-                LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] live-track obj=0x%08X geom=0x%08X geomName=%hs mesh=%hs posSrc=0x%08X root=0x%08X rootGameObj=0x%08X ownerObj=0x%08X pos=(%.4f, %.4f, %.4f)\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(geomRef)),
-                    GetChunkGeomNameForLog(geomName),
-                    binding->payloadMeshName,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(resolvedPositionObject)),
-                    binding->sourceRootObjectPtr,
-                    binding->sourceRootGameObjectPtr,
-                    binding->sourceOwnerObjPtr,
-                    static_cast<double>(positionX),
-                    static_cast<double>(positionY),
-                    static_cast<double>(positionZ));
-            }
-
-            TrackChunkProxyDebugEntry(
-                objectBytes,
-                geomRef,
-                geomName,
-                positionX,
-                positionY,
-                positionZ);
-        }
-
         static void TrackChunkProxyDebugObject(
             const uint8_t* objectBytes,
             uint32_t objectType,
@@ -10094,8 +9939,18 @@ namespace BZROpenShim
             return IsMultiplayerPauseMenuOpen();
         }
 
+        // [Career] StatsTracking. Read by InitializeCareerStatsConfig below and
+        // honoured by every recording path, including the multiplayer session
+        // worker: with tracking off the worker must neither touch
+        // career_stats.cfg nor call engine accessors off the game thread.
+        static constexpr bool kCareerStatsEnabledDefault = true;
+        static bool g_CareerStatsEnabled = kCareerStatsEnabledDefault;
+
         static void PollMultiplayerCareerSession()
         {
+            if (!g_CareerStatsEnabled)
+                return;
+
             const ULONGLONG nowMs = GetTickCount64();
             const bool active = IsMultiplayerCareerSessionActive();
 
@@ -10180,7 +10035,7 @@ namespace BZROpenShim
 
         static void RecordMultiplayerCareerStats(int killedTeam, int killerTeam)
         {
-            if (!g_BzrFn_GetPlayerHandle || !g_BzrFn_GetTeamNum)
+            if (!g_CareerStatsEnabled || !g_BzrFn_GetPlayerHandle || !g_BzrFn_GetTeamNum)
                 return;
 
             const int playerHandle = g_BzrFn_GetPlayerHandle();
@@ -12975,8 +12830,8 @@ namespace BZROpenShim
         // both would inflate every multiplayer session. The split is enforced
         // in CareerRecordDerivedKill / the TeamDeath sink case below.
 
-        static constexpr bool kCareerStatsEnabledDefault = true;
-        static bool g_CareerStatsEnabled = kCareerStatsEnabledDefault;
+        // kCareerStatsEnabledDefault / g_CareerStatsEnabled are defined above
+        // the multiplayer session worker, which is the earliest reader.
         static bool g_CareerStatsSinkRegistered = false;
 
         // GameObject::GetHandle. Already relied on by GameObjectFromHandleGog
@@ -14445,80 +14300,6 @@ namespace BZROpenShim
             g_PlayerReticleConvergenceSkyStandDownLogged = true;
             Log(L"[CONVERGE] player reticle convergence stood down: no object and no ground hit "
                 L"(Reticle+0xA8 == 0), so gPos is stale; stock aim retained\n");
-        }
-
-        // One breadcrumb per session if the mount frame at weapon+0x28 does not
-        // look like the orthonormal MAT_3D Weapon::Control writes there. That is
-        // the single assumption the whole convergence solution rests on, so it
-        // gets its own diagnostic rather than being folded into the generic
-        // layout fault below.
-        static void LogPlayerConvergenceMountFault(
-            void* weapon,
-            int slot,
-            const ConvergenceMatrix& mountWorld)
-        {
-            if (g_PlayerReticleConvergenceMountFaultLogged)
-                return;
-            g_PlayerReticleConvergenceMountFaultLogged = true;
-            Log(L"[CONVERGE] player reticle convergence rejected weapon=0x%p slot=%d: mount frame at +0x%X is not an orthonormal MAT_3D "
-                L"(right=(%.3f, %.3f, %.3f) up=(%.3f, %.3f, %.3f) front=(%.3f, %.3f, %.3f) pos=(%.1f, %.1f, %.1f))\n",
-                weapon,
-                slot,
-                static_cast<uint32_t>(kWeaponMountWorldMatrixOffset),
-                static_cast<double>(mountWorld.rightX),
-                static_cast<double>(mountWorld.rightY),
-                static_cast<double>(mountWorld.rightZ),
-                static_cast<double>(mountWorld.upX),
-                static_cast<double>(mountWorld.upY),
-                static_cast<double>(mountWorld.upZ),
-                static_cast<double>(mountWorld.frontX),
-                static_cast<double>(mountWorld.frontY),
-                static_cast<double>(mountWorld.frontZ),
-                mountWorld.positionX,
-                mountWorld.positionY,
-                mountWorld.positionZ);
-        }
-
-        // Weapon::Control caches Matrix_Inverse(M) at weapon+0x68 right after it
-        // writes M at weapon+0x28. Comparing our own inverse against that cached
-        // one, once per session, is a direct assertion that both offsets really
-        // are the fields the decompile says they are -- if the layout ever
-        // shifts, this prints a mismatch instead of the feature silently aiming
-        // through a garbage frame.
-        static void LogPlayerConvergenceLayoutCrossCheck(
-            void* weapon,
-            const ConvergenceMatrix& computedInverse)
-        {
-            if (g_PlayerReticleConvergenceLayoutCheckLogged)
-                return;
-            g_PlayerReticleConvergenceLayoutCheckLogged = true;
-
-            const ConvergenceMatrix cached = *reinterpret_cast<const ConvergenceMatrix*>(
-                reinterpret_cast<const uint8_t*>(weapon) + kWeaponMountInverseMatrixOffset);
-
-            float worstRotation = 0.0f;
-            const float* lhs = &computedInverse.rightX;
-            const float* rhs = &cached.rightX;
-            for (int i = 0; i < 9; ++i)
-            {
-                const float delta = std::fabs(lhs[i] - rhs[i]);
-                if (delta > worstRotation)
-                    worstRotation = delta;
-            }
-            const double worstPosition = (std::max)(
-                (std::max)(std::fabs(computedInverse.positionX - cached.positionX),
-                           std::fabs(computedInverse.positionY - cached.positionY)),
-                std::fabs(computedInverse.positionZ - cached.positionZ));
-
-            Log(L"[CONVERGE] weapon layout cross-check weapon=0x%p M@+0x%X I@+0x%X worstRotationDelta=%.6f worstPositionDelta=%.4f (%hs)\n",
-                weapon,
-                static_cast<uint32_t>(kWeaponMountWorldMatrixOffset),
-                static_cast<uint32_t>(kWeaponMountInverseMatrixOffset),
-                static_cast<double>(worstRotation),
-                worstPosition,
-                (worstRotation <= 0.01f && worstPosition <= 0.5)
-                    ? "layout confirmed"
-                    : "LAYOUT MISMATCH -- convergence offsets need re-deriving");
         }
 
         // UAF guard for the indirect GetPosition call below. The smart-reticle
@@ -22846,9 +22627,6 @@ namespace BZROpenShim
             }
         }
 
-        // Forward decl for legacy helpers
-        static bool IsBuildingStub(void* target) { (void)target; return false; } // TODO: sited IsBuilding(0x??) if needed for non-legacy path
-
         void __fastcall AttackTaskDoStateTuningHook(void* taskPtr, void* /*edx*/)
         {
             if (!g_BzrFn_AttackTaskDoState || !taskPtr)
@@ -27850,18 +27628,6 @@ namespace BZROpenShim
             }
 
             return originalManager;
-        }
-
-        static bool ShouldTraceArtilleryMask()
-        {
-            static int s_cached = -1;
-            if (s_cached < 0)
-            {
-                s_cached =
-                    (EnvFlagEnabled("OPENSHIM_TRACE_ARTILLERY_MASK") ||
-                     EnvFlagEnabled("OPENSHIM_TRACE_WEAPON_MASK")) ? 1 : 0;
-            }
-            return s_cached != 0;
         }
 
         static int FilterVehicleAssetDebugException(
@@ -35833,13 +35599,20 @@ namespace BZROpenShim
             return name[0] ? name : "unknown";
         }
 
+        // g_TelemetryLines budgets only the log lines below. It must not gate
+        // the functional re-apply: the stock game re-issues its own
+        // setShadowFarDistance on every mission load and quality change, and
+        // an override that stopped re-applying after sixteen of those would
+        // silently hand the 128 m stock clip back mid-session.
+        static bool TelemetryBudgetLeft()
+        {
+            return g_TelemetryLines < kMaxTelemetryLines;
+        }
+
         void ApplyAfterStock()
         {
-            if (g_OverrideDistance <= 0.0f ||
-                g_TelemetryLines >= kMaxTelemetryLines)
-            {
+            if (g_OverrideDistance <= 0.0f)
                 return;
-            }
 
             __try
             {
@@ -35862,9 +35635,12 @@ namespace BZROpenShim
                 void* sceneManager = GetOgreSceneManagerRuntime();
                 if (!sceneManager)
                 {
-                    LogShimA(LogLevel::Warn, "SHADOWFAR",
-                        "no SceneManager runtime pointer; override not applied");
-                    ++g_TelemetryLines;
+                    if (TelemetryBudgetLeft())
+                    {
+                        LogShimA(LogLevel::Warn, "SHADOWFAR",
+                            "no SceneManager runtime pointer; override not applied");
+                        ++g_TelemetryLines;
+                    }
                     return;
                 }
 
@@ -35880,9 +35656,12 @@ namespace BZROpenShim
                     || reinterpret_cast<uintptr_t>(setFar) < ogreBegin
                     || reinterpret_cast<uintptr_t>(setFar) >= ogreEnd)
                 {
-                    LogShimA(LogLevel::Warn, "SHADOWFAR",
-                        "vtable slots outside OgreMain; override not applied");
-                    ++g_TelemetryLines;
+                    if (TelemetryBudgetLeft())
+                    {
+                        LogShimA(LogLevel::Warn, "SHADOWFAR",
+                            "vtable slots outside OgreMain; override not applied");
+                        ++g_TelemetryLines;
+                    }
                     return;
                 }
 
@@ -35895,7 +35674,8 @@ namespace BZROpenShim
                     // -1 during early applies. Log the first two, then stay
                     // quiet so later applies (after a runtime quality change)
                     // keep telemetry budget.
-                    ++g_TelemetryLines;
+                    if (TelemetryBudgetLeft())
+                        ++g_TelemetryLines;
                     if (g_TelemetryLines <= 2)
                     {
                         LogShimA(LogLevel::Info, "SHADOWFAR",
@@ -35914,41 +35694,50 @@ namespace BZROpenShim
                 }
                 if (stock != kStockFarDistance)
                 {
-                    LogShimA(LogLevel::Warn, "SHADOWFAR",
-                        "requested=%.2f stock=%.2f override=%.2f applied=0 "
-                        "effective=%.2f renderer=%hs quality=%d pssm=%hs "
-                        "action=skipped reason=unexpected-stock-value",
-                        static_cast<double>(stock),
-                        static_cast<double>(stock),
-                        static_cast<double>(g_OverrideDistance),
-                        static_cast<double>(stock),
-                        ActiveRendererName(), quality,
-                        pssm ? "yes" : "no");
-                    ++g_TelemetryLines;
+                    if (TelemetryBudgetLeft())
+                    {
+                        LogShimA(LogLevel::Warn, "SHADOWFAR",
+                            "requested=%.2f stock=%.2f override=%.2f applied=0 "
+                            "effective=%.2f renderer=%hs quality=%d pssm=%hs "
+                            "action=skipped reason=unexpected-stock-value",
+                            static_cast<double>(stock),
+                            static_cast<double>(stock),
+                            static_cast<double>(g_OverrideDistance),
+                            static_cast<double>(stock),
+                            ActiveRendererName(), quality,
+                            pssm ? "yes" : "no");
+                        ++g_TelemetryLines;
+                    }
                     return;
                 }
 
                 reinterpret_cast<FnSetFarDistance>(setFar)(
                     sceneManager, g_OverrideDistance);
-                const float effective = reinterpret_cast<FnGetFarDistance>(
-                    const_cast<void*>(getFar))(sceneManager);
-                LogShimA(LogLevel::Info, "SHADOWFAR",
-                    "requested=%.2f stock=%.2f override=%.2f applied=%.2f "
-                    "effective=%.2f renderer=%hs quality=%d pssm=%hs "
-                    "action=applied",
-                    static_cast<double>(stock),
-                    static_cast<double>(stock),
-                    static_cast<double>(g_OverrideDistance),
-                    static_cast<double>(g_OverrideDistance),
-                    static_cast<double>(effective),
-                    ActiveRendererName(), quality, pssm ? "yes" : "no");
-                ++g_TelemetryLines;
+                if (TelemetryBudgetLeft())
+                {
+                    const float effective = reinterpret_cast<FnGetFarDistance>(
+                        const_cast<void*>(getFar))(sceneManager);
+                    LogShimA(LogLevel::Info, "SHADOWFAR",
+                        "requested=%.2f stock=%.2f override=%.2f applied=%.2f "
+                        "effective=%.2f renderer=%hs quality=%d pssm=%hs "
+                        "action=applied",
+                        static_cast<double>(stock),
+                        static_cast<double>(stock),
+                        static_cast<double>(g_OverrideDistance),
+                        static_cast<double>(g_OverrideDistance),
+                        static_cast<double>(effective),
+                        ActiveRendererName(), quality, pssm ? "yes" : "no");
+                    ++g_TelemetryLines;
+                }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                LogShimA(LogLevel::Warn, "SHADOWFAR",
-                    "exception while applying override; stock state retained");
-                ++g_TelemetryLines;
+                if (TelemetryBudgetLeft())
+                {
+                    LogShimA(LogLevel::Warn, "SHADOWFAR",
+                        "exception while applying override; stock state retained");
+                    ++g_TelemetryLines;
+                }
             }
         }
 
@@ -36072,19 +35861,9 @@ namespace BZROpenShim
         BzrStringInitEmpty(&g_BzrnetLabel4);
     }
 
-    void PrimeUnderAttackAlertConfig()
-    {
-        InitializeUnderAttackAlertConfig();
-    }
-
     bool SetUnderAttackAlertModeFromBridge(int mode)
     {
         return SetUnderAttackAlertModeInternal(ClampUnderAttackAlertMode(mode), true);
-    }
-
-    void PrimeTargetReticlePopupConfig()
-    {
-        InitializeTargetReticlePopupConfig();
     }
 
     bool SetTargetReticlePopupModeFromBridge(int mode)
@@ -37378,22 +37157,7 @@ namespace BZROpenShim
 
     namespace
     {
-        struct CarrierView
-        {
-            void* owner;
-            void* hardpoint[5];
-            void* weapon[5];
-            uint32_t existant;
-            uint32_t selected;
-            uint32_t enabled;
-            int32_t special;
-            float weaponTriggerTillTime;
-        };
 
-        constexpr size_t kGameObjectCarrierOffset = 0x198;
-        constexpr size_t kGameObjectWeaponMaskOffset = 0x210;
-        constexpr size_t kUnitProcessMeOffset = 44;
-        constexpr size_t kWeaponIndexOffset = 0xAC;
         constexpr size_t kCraftDeployStateOffset = 0x228;
         constexpr int32_t kCraftDeployedState = 2;
 
@@ -37401,139 +37165,6 @@ namespace BZROpenShim
         constexpr uint32_t kHowitzerVftSecondary = 0x0087AE1C;
         constexpr uint32_t kMinelayerVftPrimary = 0x0087D790;
         constexpr uint32_t kMinelayerVftSecondary = 0x0087D83C;
-
-        bool IsHowitzerCraft(const void* craft)
-        {
-            if (!craft)
-                return false;
-
-            const uint32_t vft = *reinterpret_cast<const uint32_t*>(craft);
-            return vft == kHowitzerVftPrimary ||
-                vft == kHowitzerVftSecondary;
-        }
-
-        bool IsWeaponMaskCarrierBiasCraft(const void* craft)
-        {
-            if (!craft)
-                return false;
-
-            const uint32_t vft = *reinterpret_cast<const uint32_t*>(craft);
-            return vft == kMinelayerVftPrimary ||
-                vft == kMinelayerVftSecondary;
-        }
-
-        int FindPreferredWeaponSlot(const void* craft)
-        {
-            const auto* craftBytes = reinterpret_cast<const uint8_t*>(craft);
-            const uint32_t rawMask = *reinterpret_cast<const uint32_t*>(craftBytes + kGameObjectWeaponMaskOffset);
-            const uint32_t decodedMask = rawMask ^ 0x33333333u;
-
-            if (decodedMask != 0 && (decodedMask & (decodedMask - 1u)) == 0)
-            {
-                for (int slot = 0; slot < 5; ++slot)
-                {
-                    if (decodedMask == (1u << slot))
-                        return slot;
-                }
-            }
-
-            const uint32_t activeSlot = *reinterpret_cast<const uint32_t*>(craftBytes + 0x1CC);
-            return activeSlot < 5 ? static_cast<int>(activeSlot) : -1;
-        }
-
-        int FindWeaponArrayIndexForSlot(const CarrierView* carrier, int desiredSlot)
-        {
-            if (!carrier)
-                return -1;
-
-            for (int index = 0; index < 5; ++index)
-            {
-                const auto* weapon = reinterpret_cast<const uint8_t*>(carrier->weapon[index]);
-                if (!weapon)
-                    continue;
-
-                if (*reinterpret_cast<const int32_t*>(weapon + kWeaponIndexOffset) == desiredSlot)
-                    return index;
-            }
-
-            if (desiredSlot >= 0 && desiredSlot < 5 && carrier->weapon[desiredSlot] != nullptr)
-                return desiredSlot;
-
-            return -1;
-        }
-
-        void SwapCarrierBits(uint32_t& bits, int a, int b)
-        {
-            const uint32_t bitA = (bits >> a) & 1u;
-            const uint32_t bitB = (bits >> b) & 1u;
-            if (bitA == bitB)
-                return;
-
-            bits ^= (1u << a);
-            bits ^= (1u << b);
-        }
-
-        struct CarrierSnapshot
-        {
-            void* hardpoint[5];
-            void* weapon[5];
-            uint32_t existant;
-            uint32_t selected;
-            uint32_t enabled;
-        };
-
-        void SnapshotCarrierState(const CarrierView* carrier, CarrierSnapshot* snapshot)
-        {
-            if (!carrier || !snapshot)
-                return;
-
-            memcpy(snapshot->hardpoint, carrier->hardpoint, sizeof(snapshot->hardpoint));
-            memcpy(snapshot->weapon, carrier->weapon, sizeof(snapshot->weapon));
-            snapshot->existant = carrier->existant;
-            snapshot->selected = carrier->selected;
-            snapshot->enabled = carrier->enabled;
-        }
-
-        void RestoreCarrierState(CarrierView* carrier, const CarrierSnapshot& snapshot)
-        {
-            if (!carrier)
-                return;
-
-            memcpy(carrier->hardpoint, snapshot.hardpoint, sizeof(snapshot.hardpoint));
-            memcpy(carrier->weapon, snapshot.weapon, sizeof(snapshot.weapon));
-            carrier->existant = snapshot.existant;
-            carrier->selected = snapshot.selected;
-            carrier->enabled = snapshot.enabled;
-        }
-
-        void MoveCarrierWeaponIndexToFront(CarrierView* carrier, int desiredIndex)
-        {
-            if (!carrier || desiredIndex <= 0 || desiredIndex >= 5)
-                return;
-
-            std::swap(carrier->hardpoint[0], carrier->hardpoint[desiredIndex]);
-            std::swap(carrier->weapon[0], carrier->weapon[desiredIndex]);
-            SwapCarrierBits(carrier->existant, 0, desiredIndex);
-            SwapCarrierBits(carrier->selected, 0, desiredIndex);
-            SwapCarrierBits(carrier->enabled, 0, desiredIndex);
-        }
-
-        int CollectCarrierVolleyIndices(const CarrierView* carrier, int* outIndices, int maxCount)
-        {
-            if (!carrier || !outIndices || maxCount <= 0)
-                return 0;
-
-            int count = 0;
-            for (int index = 0; index < 5 && count < maxCount; ++index)
-            {
-                if (!carrier->weapon[index])
-                    continue;
-
-                outIndices[count++] = index;
-            }
-
-            return count;
-        }
 
     }
 
@@ -38001,178 +37632,6 @@ namespace BZROpenShim
                 L"volleyMask=0x%02X primarySlot=%d triggers=%d weapon=%p carrier=%p craft=%p\n",
                 volley ? "yes" : "no", wMask, existant, enabled, selected,
                 volleyMask, primarySlot, fired, weapon, carrier, craft);
-        }
-    }
-
-    void __cdecl TraceArtilleryMaskFromProcess(void* process)
-    {
-        if (!process)
-            return;
-
-        __try
-        {
-            auto* processBytes = reinterpret_cast<uint8_t*>(process);
-            void* craft = *reinterpret_cast<void**>(processBytes + 44);
-            ApplyWeaponMaskCarrierBiasForCraft(craft);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-        }
-
-        if (!ShouldTraceArtilleryMask())
-            return;
-
-        const long remaining = InterlockedDecrement(&g_ArtilleryMaskTraceBudget);
-        if (remaining < 0)
-            return;
-
-        const uint32_t processAddr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(process));
-
-        __try
-        {
-            auto* processBytes = reinterpret_cast<uint8_t*>(process);
-            void* craft = *reinterpret_cast<void**>(processBytes + 44);
-            const uint32_t craftAddr = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft));
-            const uint32_t processVft = *reinterpret_cast<const uint32_t*>(process);
-            const uint32_t craftVft = craft ? *reinterpret_cast<const uint32_t*>(craft) : 0;
-
-            uint32_t rawMask = 0;
-            uint32_t decodedMask = 0;
-            uint32_t enabledMask = 0;
-            uint32_t activeSlot = 0xFFFFFFFFu;
-
-            if (craft)
-            {
-                auto* craftBytes = reinterpret_cast<uint8_t*>(craft);
-                rawMask = *reinterpret_cast<const uint32_t*>(craftBytes + 0x210);
-                decodedMask = rawMask ^ 0x33333333u;
-                enabledMask = *reinterpret_cast<const uint32_t*>(craftBytes + 0x1C8);
-                activeSlot = *reinterpret_cast<const uint32_t*>(craftBytes + 0x1CC);
-            }
-
-            Log(L"[ARTYMASK] process=0x%08X procVft=0x%08X craft=0x%08X craftVft=0x%08X raw=0x%08X decoded=0x%08X enabled=0x%08X active=%u remaining=%ld\n",
-                processAddr,
-                processVft,
-                craftAddr,
-                craftVft,
-                rawMask,
-                decodedMask,
-                enabledMask,
-                activeSlot,
-                remaining);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            Log(L"[ARTYMASK] exception while inspecting process=0x%08X remaining=%ld\n",
-                processAddr,
-                remaining);
-        }
-    }
-
-    static bool TryPrepareArtilleryVolley(void* process,
-                                          void** outCraft,
-                                          CarrierView** outCarrier,
-                                          CarrierSnapshot* outSnapshot,
-                                          int* outIndices,
-                                          int* outCount)
-    {
-        if (!process || !outCraft || !outCarrier || !outSnapshot || !outIndices || !outCount)
-            return false;
-
-        __try
-        {
-            auto* processBytes = reinterpret_cast<uint8_t*>(process);
-            void* craft = *reinterpret_cast<void**>(processBytes + kUnitProcessMeOffset);
-            if (!IsHowitzerCraft(craft))
-                return false;
-
-            auto* craftBytes = reinterpret_cast<uint8_t*>(craft);
-            auto* carrier = *reinterpret_cast<CarrierView**>(craftBytes + kGameObjectCarrierOffset);
-            if (!carrier)
-                return false;
-
-            const int volleyCount = CollectCarrierVolleyIndices(carrier, outIndices, 5);
-            if (volleyCount <= 1)
-                return false;
-
-            SnapshotCarrierState(carrier, outSnapshot);
-            *outCraft = craft;
-            *outCarrier = carrier;
-            *outCount = volleyCount;
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return false;
-        }
-    }
-
-    uint32_t __fastcall ArtilleryDoAttackHook(void* process,
-                                              void* /*edx*/,
-                                              uint32_t arg0,
-                                              uint32_t arg1,
-                                              uint32_t arg2,
-                                              uint32_t arg3)
-	    {
-	        if (!g_BzrFn_ArtilleryDoAttackOriginal)
-	            return 0;
-
-	        return g_BzrFn_ArtilleryDoAttackOriginal(
-	            process, arg0, arg1, arg2, arg3);
-    }
-
-    static void InstallArtilleryDoAttackHookIfPossible()
-    {
-        if (g_ArtilleryDoAttackHookInstalled)
-            return;
-
-        if (g_ArtilleryDoAttackDetour.trampoline)
-        {
-            g_BzrFn_ArtilleryDoAttackOriginal =
-                reinterpret_cast<FnArtilleryDoAttack>(g_ArtilleryDoAttackDetour.trampoline);
-            g_ArtilleryDoAttackHookInstalled =
-                (g_BzrFn_ArtilleryDoAttackOriginal != nullptr);
-            return;
-        }
-
-        // Settled Redux 2.2.301 ArtilleryProcess::DoAttack prologue. This full
-        // signature is unique in the captured GOG runtime and the settled Steam
-        // image uses the same address/bytes.
-        static const uint8_t kExpectedArtilleryDoAttackBytes[kArtilleryDoAttackDetourLen] =
-        {
-            0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0xB0, 0x56, 0x84, 0x00
-        };
-
-        if (!ExpectedBytesMatchAt(kGogArtilleryDoAttackEntryAddr,
-                                  kExpectedArtilleryDoAttackBytes,
-                                  sizeof(kExpectedArtilleryDoAttackBytes)))
-        {
-            Log(L"[ARTYVOLLEY] ArtilleryProcess::DoAttack bytes mismatch at 0x%08X; hook disabled\n",
-                static_cast<uint32_t>(kGogArtilleryDoAttackEntryAddr));
-            return;
-        }
-
-        if (!InstallInlineDetour32(g_ArtilleryDoAttackDetour,
-                                   kGogArtilleryDoAttackEntryAddr,
-                                   reinterpret_cast<void*>(ArtilleryDoAttackHook),
-                                   kArtilleryDoAttackDetourLen,
-                                   kExpectedArtilleryDoAttackBytes,
-                                   sizeof(kExpectedArtilleryDoAttackBytes)))
-        {
-            Log(L"[ARTYVOLLEY] Failed installing ArtilleryProcess::DoAttack hook at 0x%08X\n",
-                static_cast<uint32_t>(kGogArtilleryDoAttackEntryAddr));
-            return;
-        }
-
-        g_BzrFn_ArtilleryDoAttackOriginal =
-            reinterpret_cast<FnArtilleryDoAttack>(g_ArtilleryDoAttackDetour.trampoline);
-        g_ArtilleryDoAttackHookInstalled =
-            (g_BzrFn_ArtilleryDoAttackOriginal != nullptr);
-        if (g_ArtilleryDoAttackHookInstalled)
-        {
-            Log(L"[ARTYVOLLEY] Installed ArtilleryProcess::DoAttack hook entry=0x%08X trampoline=0x%08X\n",
-                static_cast<uint32_t>(kGogArtilleryDoAttackEntryAddr),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_ArtilleryDoAttackDetour.trampoline)));
         }
     }
 
@@ -41513,7 +40972,6 @@ namespace BZROpenShim
         // for the pair -- overran the 56px of clearance before the Ban button.
         // Keep the retail 18:19 aspect but size the pair to the stock Redux
         // button instead, and give the cluster its own room (see the call sites).
-        constexpr float kBz15UiScale = 2.25f;
         constexpr float kFlagArrowWidth = kFlagButtonSize;                 // 48
         constexpr float kFlagArrowHeight = kFlagButtonSize * (19.0f / 18.0f); // ~50.7
         constexpr float kFlagArrowGap = 4.0f;

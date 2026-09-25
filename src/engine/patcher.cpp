@@ -52,11 +52,19 @@ namespace BZROpenShim
             return false;
         }
         uint32_t GetStaticPointer(const std::string& name, uint32_t defaultVal = 0) {
-            if (data.contains("static_pointers")) {
-                for (const auto& p : data["static_pointers"]) {
-                    if (p["name"] == name) return std::stoul(p["address"].get<std::string>(), nullptr, 16);
+            // A hand-edited patches.json with a non-string or non-hex
+            // "address" used to throw out of the patch thread and take the
+            // game down; treat it as "entry absent" like every other accessor.
+            try {
+                if (data.contains("static_pointers")) {
+                    for (const auto& p : data["static_pointers"]) {
+                        if (p.contains("name") && p["name"] == name) {
+                            if (!p.contains("address") || !p["address"].is_string()) return defaultVal;
+                            return static_cast<uint32_t>(std::stoul(p["address"].get<std::string>(), nullptr, 16));
+                        }
+                    }
                 }
-            }
+            } catch (...) {}
             return defaultVal;
         }
         bool GetBool(const std::string& name, bool defaultVal = false) {
@@ -245,20 +253,6 @@ namespace BZROpenShim
         }
 
         s_cached = allow ? 0 : 1;
-        return s_cached != 0;
-    }
-
-    static bool ShouldEnableArtilleryMaskTracePatch() {
-        static int s_cached = -1;
-        if (s_cached < 0) {
-            char value[8] = {};
-            DWORD len = GetEnvironmentVariableA("OPENSHIM_TRACE_ARTILLERY_MASK", value, static_cast<DWORD>(sizeof(value)));
-            if (!(len > 0 && len < sizeof(value) && value[0] != '0')) {
-                ZeroMemory(value, sizeof(value));
-                len = GetEnvironmentVariableA("OPENSHIM_TRACE_WEAPON_MASK", value, static_cast<DWORD>(sizeof(value)));
-            }
-            s_cached = (len > 0 && len < sizeof(value) && value[0] != '0') ? 1 : 0;
-        }
         return s_cached != 0;
     }
 
