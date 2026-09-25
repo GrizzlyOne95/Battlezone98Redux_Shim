@@ -1849,6 +1849,7 @@ namespace BZROpenShim
         static InlineDetour32 g_PersonSimulateDetour = {};
         static bool g_JumpSnipeProbeInstallAttempted = false;
         static bool g_JumpSnipeProbeInstalled = false;
+        static bool g_JumpSnipeProbeMismatchLogged = false;
         static JumpSnipeProbeLogState g_JumpSnipeProbeLogState = {};
         // Desired state starts from the INI baseline and may be overridden by
         // the EXU bridge for scripted content. The refresh gate keeps it out
@@ -15837,6 +15838,7 @@ namespace BZROpenShim
         static float g_RadarSizeScale = 1.0f;
         static float g_RadarSizeScaleBaseline = 1.0f;
         static bool g_RadarSizeScaleWriteFailureLogged = false;
+        static bool g_RadarSizeScaleWriteRefusedLogged = false;
 
         static float ClampRadarSizeScaleSetting(float scale)
         {
@@ -15864,6 +15866,21 @@ namespace BZROpenShim
             // The correction hook has to be live before the scale is visible,
             // otherwise the backdrop scales and the projection does not.
             InstallRadarLayoutHookIfPossible();
+
+            // The byte-guarded builder is also the identity proof for the
+            // neighbouring globals. Without it 0x008E77B0 is just an address:
+            // writing it on a build where the guard failed scales whatever
+            // lives there, and the SEH below only catches an unmapped page.
+            if (!g_RadarLayoutHookInstalled)
+            {
+                if (!g_RadarSizeScaleWriteRefusedLogged)
+                {
+                    g_RadarSizeScaleWriteRefusedLogged = true;
+                    Log(L"[RADAR] size scale %.3f not written: the layout hook is not installed on this build\n",
+                        static_cast<double>(desired));
+                }
+                return;
+            }
 
             __try
             {
@@ -17500,10 +17517,6 @@ namespace BZROpenShim
                 return;
             }
 
-            g_BzrFn_GetPlayerHandle = reinterpret_cast<FnGetPlayerHandle>(kGogGetPlayerHandleAddr);
-            g_BzrFn_GameObjectGetObjByHandle =
-                &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
-
             // push ebp; mov ebp,esp; push -1; push 0x84C1D6; (SEH frame setup).
             // 10 bytes lands on the instruction boundary after the push imm32.
             static const uint8_t kExpectedPersonSimulateBytes[kPersonSimulateDetourLen] =
@@ -17515,8 +17528,25 @@ namespace BZROpenShim
                                       kExpectedPersonSimulateBytes,
                                       sizeof(kExpectedPersonSimulateBytes)))
             {
+                // Called every sim tick until the probe installs, so say it once.
+                if (!g_JumpSnipeProbeMismatchLogged)
+                {
+                    g_JumpSnipeProbeMismatchLogged = true;
+                    Log(L"[JUMPSNIPE] Person::Simulate entry at 0x%08X does not match; probe and player-handle lookup stand down\n",
+                        static_cast<uint32_t>(kGogPersonSimulateEntryAddr));
+                }
                 return;
             }
+
+            // The entry bytes just checked (an SEH frame naming this build's
+            // handler) are the identity proof for the GOG constants, so they
+            // are published only now. They used to be written before the
+            // check, so a build that then failed it still handed every later
+            // consumer -- career stats, the kill trace,
+            // TryGetLocalPlayerWorldPosition -- an unverified address.
+            g_BzrFn_GetPlayerHandle = reinterpret_cast<FnGetPlayerHandle>(kGogGetPlayerHandleAddr);
+            g_BzrFn_GameObjectGetObjByHandle =
+                &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
 
             if (!InstallInlineDetour32(g_PersonSimulateDetour,
                                        kGogPersonSimulateEntryAddr,
@@ -36208,6 +36238,10 @@ namespace BZROpenShim
 
     float GetRadarSizeScaleFromBridge()
     {
+        // Until the byte-guarded layout hook has identified this build, the
+        // engine global is only an address; answer with the shim's own value.
+        if (!g_RadarLayoutHookInstalled)
+            return g_RadarSizeScale;
         __try
         {
             const float current = *reinterpret_cast<const float*>(kRadarSizeScaleAddr);
@@ -36227,8 +36261,17 @@ namespace BZROpenShim
             return false;
 
         const float clamped = ClampRadarSizeScaleSetting(scale);
-        g_RadarSizeScale = clamped;
         InstallRadarLayoutHookIfPossible();
+        // Same identity rule as RefreshRadarSizeScaleState: no verified
+        // builder, no write. The shim's own value is left alone too, so a
+        // later read does not claim a scale that never reached the engine.
+        if (!g_RadarLayoutHookInstalled)
+        {
+            Log(L"[MISSIONHOOK] radar size requested=%.3f refused: the layout hook is not installed on this build\n",
+                static_cast<double>(scale));
+            return false;
+        }
+        g_RadarSizeScale = clamped;
         __try
         {
             *reinterpret_cast<float*>(kRadarSizeScaleAddr) = clamped;
