@@ -16,7 +16,9 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -80,4 +82,27 @@ namespace BZROpenShim::PatchConfig
     // fallback_steam (Steam) or fallback_gog (GOG) when present and non-zero,
     // otherwise from fallback; any of them that is present must be valid hex.
     bool ParseGlobalEntry(const nlohmann::json& node, bool isSteam, GlobalEntry& out, std::string& error);
+
+    // Fills `out` with `length` bytes read at `address`; false when the memory
+    // cannot be read. The patcher passes HookEngine::ReadMemory, the host
+    // tests a fake image.
+    using MemoryReader = std::function<bool(uint32_t address, size_t length, std::vector<uint8_t>& out)>;
+
+    // The byte guard for a "patches" entry that takes its fallback address
+    // because the signature scan found nothing.
+    //
+    // The fallback is trusted only when the entry's own pattern (wildcards
+    // encoded as values >= 0x100, as ParseIdaPatternText emits them) is
+    // present at fallback - offset, i.e. the recorded address really is the
+    // site the signature describes. The guard is then the expected_size
+    // bytes observed at the fallback address, exactly as the scan path
+    // records them, so a wildcard in that window (a rel32 operand, say) is
+    // guarded by the bytes this build has there rather than by a demand for
+    // 0x00. Returns false with the reason in `error` when the fallback is 0,
+    // the pattern is empty, expected_size is 0, offset reaches below address
+    // 0, the window runs past the address space, the bytes cannot be read, or
+    // a literal pattern byte differs from the byte at the site. Never throws.
+    bool VerifyFallbackSite(const std::vector<uint16_t>& pattern, uint32_t fallback, uint32_t offset,
+                            uint32_t expectedSize, const MemoryReader& read,
+                            std::vector<uint8_t>& guard, std::string& error);
 }

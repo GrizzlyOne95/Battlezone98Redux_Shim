@@ -899,12 +899,34 @@ namespace BZROpenShim
             }
         }
         HookEngine::ScanForPatterns("", patches, targets, missesAreProvisional);
+        // A signature miss takes the recorded fallback only when the entry's
+        // own pattern is present at fallback - offset, and the guard is then
+        // the bytes observed at the site, as the scan path records them
+        // (PatchConfig::VerifyFallbackSite). The old loop took the fallback
+        // blind and built the guard from pattern index 0 with "??" as 0x00: a
+        // site at a non-zero offset got a guard for the wrong bytes, so the
+        // two HoverCraft rel32 hooks could never apply from their fallback,
+        // and a guard that did happen to match proved nothing about the bytes
+        // about to be overwritten. A rejected fallback leaves the patch
+        // unresolved, so the Steam settle loop retries it and the tail report
+        // names it under [SIGNATURE]; the rejection is logged once, on the
+        // pass whose miss is final.
+        const PatchConfig::MemoryReader readSite = [](uint32_t address, size_t length, std::vector<uint8_t>& out) {
+            out.resize(length);
+            return HookEngine::ReadMemory(address, out.data(), length);
+        };
         for (const auto& t : targets) {
+            if (t.require_unique) continue;
             for (auto& p : patches) {
-                if (!p.verified && p.name == t.name && !t.require_unique) {
-                    p.address = t.fallback_addr; p.verified = true;
-                    auto ida = HookEngine::ParseIdaPattern(t.ida_pattern);
-                    if (t.expected_size > 0) { p.expected_original.clear(); for (size_t j = 0; j < t.expected_size && j < ida.size(); ++j) p.expected_original.push_back(static_cast<uint8_t>(ida[j])); }
+                if (p.verified || p.name != t.name) continue;
+                std::vector<uint8_t> guard; std::string why;
+                if (PatchConfig::VerifyFallbackSite(HookEngine::ParseIdaPattern(t.ida_pattern), t.fallback_addr, t.offset, t.expected_size, readSite, guard, why)) {
+                    p.address = t.fallback_addr; p.verified = true; p.expected_original = guard;
+                    Log(L"[FALLBACK] %hs: signature not found by the scan; pattern verified at fallback 0x%08X, guarding %u byte(s)\n",
+                        p.name.c_str(), p.address, static_cast<unsigned>(guard.size()));
+                } else if (!missesAreProvisional) {
+                    Log(L"[FALLBACK] %hs: fallback 0x%08X rejected (%hs); patch stands down\n",
+                        p.name.c_str(), t.fallback_addr, why.c_str());
                 }
             }
         }
@@ -1272,8 +1294,9 @@ namespace BZROpenShim
         Log(L"[DONE] Applied=%d of %u\n", app, static_cast<unsigned>(patches.size()));
         // A patch this build knows about that still sits at address 0 either had
         // no scripts/patches.json entry (a deploy where winmm.dll moved and the
-        // json did not) or had one whose require_unique signature never matched
-        // (that path takes no fallback, so it also lands on 0). Those are wholly
+        // json did not) or had one whose signature never matched (require_unique
+        // takes no fallback, and a fallback whose site does not carry the
+        // pattern is refused, so both land on 0). Those are wholly
         // different faults -- one is fixed by redeploying a file, the other by
         // revisiting a signature -- and reporting both as a stale json sent
         // readers to the wrong place. Separate them by whether an entry exists.
