@@ -155,6 +155,18 @@ add_executable(openshim_update_manifest_tests
     ../src/patches/openshim_update_manifest.cpp
 )
 
+# The non-throwing scripts/patches.json readers the patch thread relies on.
+# Pure nlohmann over the document, so it runs on the Linux host lane, and it
+# walks the shipped patches.json to prove the readers accept every entry.
+add_executable(patch_config_parse_tests
+    patch_config_parse_tests.cpp
+    ../src/engine/patch_config_parse.cpp
+)
+target_include_directories(patch_config_parse_tests PRIVATE ../include)
+target_compile_features(patch_config_parse_tests PRIVATE cxx_std_20)
+target_compile_definitions(patch_config_parse_tests PRIVATE
+    BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json")
+
 add_executable(ai_range_policy_tests
     ai_range_policy_tests.cpp
 )
@@ -316,6 +328,7 @@ add_test(NAME resolve_table_tests COMMAND resolve_table_tests)
 add_test(NAME object_layout_tests COMMAND object_layout_tests)
 add_test(NAME patch_registration_tests COMMAND patch_registration_tests)
 add_test(NAME openshim_update_manifest_tests COMMAND openshim_update_manifest_tests)
+add_test(NAME patch_config_parse_tests COMMAND patch_config_parse_tests)
 add_test(NAME ai_range_policy_tests COMMAND ai_range_policy_tests)
 add_test(NAME lcbench_safety_policy_tests COMMAND lcbench_safety_policy_tests)
 add_test(NAME autosave_gate_tests COMMAND autosave_gate_tests)

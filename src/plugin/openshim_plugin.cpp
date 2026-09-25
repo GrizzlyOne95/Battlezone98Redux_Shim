@@ -58,13 +58,41 @@
 #include <process.h>
 #include <atomic>
 #include <cstdio>
+#include <exception>
 
 static constexpr uint32_t SHIM_VERSION = 5;
 static uintptr_t g_PatchThread = 0;
 
+// One stage of the patch thread under its own exception barrier. A C++
+// exception escaping the thread is std::terminate, which takes the game down
+// at launch with nothing in the log to say why. The stages below are
+// independent installers that each check their own preconditions, so a stage
+// that throws (a library error in an initializer, a malformed config file it
+// parses) is logged by name and the later stages still run. SEH faults are
+// not C++ exceptions and stay with the crash logger.
+template <typename Fn>
+static void RunPatchStage(const char* stage, Fn&& fn)
+{
+    try
+    {
+        fn();
+    }
+    catch (const std::exception& e)
+    {
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "plugin",
+            "Patch stage %s threw %s; later stages continue", stage, e.what());
+    }
+    catch (...)
+    {
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "plugin",
+            "Patch stage %s threw a non-standard exception; later stages continue", stage);
+    }
+}
+#define PATCH_STAGE(call) RunPatchStage(#call, [&] { call; })
+
 static unsigned __stdcall PatchThreadProc(void*)
 {
-    BZROpenShim::UiPerf::Initialize();
+    PATCH_STAGE(BZROpenShim::UiPerf::Initialize());
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "plugin", "Patch thread started");
     // BZLoader is emphatically not started from here any more. The loader owns
     // this module's lifecycle -- it is what called BZPlugin_Load to get us
@@ -73,61 +101,61 @@ static unsigned __stdcall PatchThreadProc(void*)
     // Start renderer diagnostics/features immediately so their workers can
     // observe Ogre/D3D11 module creation before the renderer creates devices,
     // swapchains, entities, or begins normal animation submission.
-    BZROpenShim::InitializePilotFpAnimationTrace();
-    BZROpenShim::InitializeWalkerCockpitTrace();
-    BZROpenShim::InitializeOgreAnimationProfiler();
-    BZROpenShim::InitializeDx11ColorSpaceDiagnostic();
-    BZROpenShim::InitializeDx11EnhancedFxaa();
+    PATCH_STAGE(BZROpenShim::InitializePilotFpAnimationTrace());
+    PATCH_STAGE(BZROpenShim::InitializeWalkerCockpitTrace());
+    PATCH_STAGE(BZROpenShim::InitializeOgreAnimationProfiler());
+    PATCH_STAGE(BZROpenShim::InitializeDx11ColorSpaceDiagnostic());
+    PATCH_STAGE(BZROpenShim::InitializeDx11EnhancedFxaa());
     // Phase A depth qualification: observation only, and off unless asked
     // for. Starts after the FXAA path so that when both are enabled the
     // creation-hook chain runs FXAA first, mirroring the shutdown order.
-    BZROpenShim::InitializeDx11SceneDepth();
-    BZROpenShim::InstallCrashLogger();
-    BZROpenShim::InitializeNetworkOptimizer();
+    PATCH_STAGE(BZROpenShim::InitializeDx11SceneDepth());
+    PATCH_STAGE(BZROpenShim::InstallCrashLogger());
+    PATCH_STAGE(BZROpenShim::InitializeNetworkOptimizer());
     // Install BZRNet observation after the optimizer so it can chain through
     // the optimizer's existing IAT targets without changing network behavior.
-    BZROpenShim::InitializeBzrNetInstrumentation();
-    BZROpenShim::RunPatcher(SHIM_VERSION);
+    PATCH_STAGE(BZROpenShim::InitializeBzrNetInstrumentation());
+    PATCH_STAGE(BZROpenShim::RunPatcher(SHIM_VERSION));
 
     // Multiplayer starting-vehicle list faction policy. Installs after the
     // patcher so scripts/patches.json resolves are loaded; the hook itself is
     // inert until [Network] StockFactionsOnly is turned on, and the loader it
     // intercepts only runs when a multiplayer screen builds its vehicle list.
-    BZROpenShim::MpFactionRestrict::InstallMpFactionRestrictIfPossible();
+    PATCH_STAGE(BZROpenShim::MpFactionRestrict::InstallMpFactionRestrictIfPossible());
 
     // Explains a "Not Ready" multiplayer entry on the main menu. Read-only: it
     // reproduces the shell's own readiness decision from the same globals and
     // logs which term failed, because the stock UI has no way to say. Its own
     // worker waits for platform init, so ordering here is not significant.
-    BZROpenShim::InitializeMpReadyDiagnostic();
+    PATCH_STAGE(BZROpenShim::InitializeMpReadyDiagnostic());
 
     // Shell profiler detours must not touch SteamStub-managed executable pages
     // before platform detection and code settlement. UiPerfHooks installs them
     // immediately on GOG and defers Steam's writes until a live MainScreen is
     // observed on the UI thread. File-scan hooks follow so trigger-file access
     // is suppressed without classifying startup work as a menu transition.
-    BZROpenShim::UiPerfHooks::Install();
-    BZROpenShim::UiFileScan::Install();
+    PATCH_STAGE(BZROpenShim::UiPerfHooks::Install());
+    PATCH_STAGE(BZROpenShim::UiFileScan::Install());
 
     // Renderer-profile ownership (backend observation, scheme-policy takeover,
     // capability reporting) initializes after the compatibility gate so the
     // takeover's address-dependent install sees the final gate verdict; its
     // backend-observation thread still watches the render-system modules load
     // well before the first mission.
-    BZROpenShim::RenderProfiles::InitializeOgreRenderProfiles();
+    PATCH_STAGE(BZROpenShim::RenderProfiles::InitializeOgreRenderProfiles());
 
     // Phase 2 is safe to ask to initialize on every build: it is dormant by
     // default and independently verifies exact executable/Ogre hashes before
     // it resolves addresses or installs either terrain hook, so it does not
     // need the version gate below.
-    BZROpenShim::InitializeTerrainProxyPhase2();
+    PATCH_STAGE(BZROpenShim::InitializeTerrainProxyPhase2());
 
     // AutoSave stacks its main-thread update hook after the normal patch set so
     // it chains whichever world-update target (stock or OpenShim) is active.
     // Never install version-specific runtime addresses if the core compatibility
     // check failed.
-    if (BZROpenShim::IsCompatibleGameVersion())
-    {
+    RunPatchStage("BZROpenShim::InitializeAutoSave()", [] {
+        if (!BZROpenShim::IsCompatibleGameVersion()) return;
         if (!BZROpenShim::InitializeAutoSave())
         {
             BZROpenShim::LogShimA(
@@ -135,14 +163,14 @@ static unsigned __stdcall PatchThreadProc(void*)
                 "dllmain",
                 "Engine-level AutoSave initialization failed; normal manual saves remain available");
         }
-    }
+    });
 
     // The sampling CPU profiler starts last so its first thread enumeration
     // sees the shim's own workers already running: they are threads of this
     // process and their cost has to be visible in the capture rather than
     // hidden from it. It is dormant unless OPENSHIM_PROFILE_NATIVE_CPU asks
     // for it.
-    BZROpenShim::InitializeNativeCpuSampler();
+    PATCH_STAGE(BZROpenShim::InitializeNativeCpuSampler());
 
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");
     return 0;
