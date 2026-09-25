@@ -13,6 +13,7 @@
 #include "render_queue_trace.h"
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
+#include "x86_length.h"
 #include "ogre_shader_cache.h"
 #include "ogre_enhanced_light_selection.h"
 #include "render_effect_intent.h"
@@ -26113,11 +26114,12 @@ namespace BZROpenShim
             if (g_MpauthHooksInstalled)
                 return;
             {
-                static const uint8_t kExpectedDwSim[3] = { 0x55, 0x8B, 0xEC };
+                // push ebp; mov ebp,esp; sub esp,0x4C: steal all three (GOG 2.2.301).
+                static const uint8_t kExpectedDwSim[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x4C };
                 if (ExpectedBytesMatchAt(kGogDayWreckerSimulateAddr, kExpectedDwSim, sizeof(kExpectedDwSim)))
                 {
                     if (InstallInlineDetour32(g_DayWreckerSimulateDetour, kGogDayWreckerSimulateAddr,
-                        reinterpret_cast<void*>(MpauthDwSimulateHook), 5, kExpectedDwSim, sizeof(kExpectedDwSim)))
+                        reinterpret_cast<void*>(MpauthDwSimulateHook), sizeof(kExpectedDwSim), kExpectedDwSim, sizeof(kExpectedDwSim)))
                     {
                         g_MpauthDwSimOrig = reinterpret_cast<FnMpauthDwSim>(g_DayWreckerSimulateDetour.trampoline);
                         Log(L"[MPAUTH] Installed DayWrecker::Simulate hook at 0x%08X tramp=0x%08X\n",
@@ -26134,11 +26136,11 @@ namespace BZROpenShim
                 }
             }
             {
-                static const uint8_t kExpectedDwExplode[3] = { 0x55, 0x8B, 0xEC };
+                static const uint8_t kExpectedDwExplode[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x4C };
                 if (ExpectedBytesMatchAt(kGogDayWreckerExplodeAddr, kExpectedDwExplode, sizeof(kExpectedDwExplode)))
                 {
                     if (InstallInlineDetour32(g_DayWreckerExplodeDetour, kGogDayWreckerExplodeAddr,
-                        reinterpret_cast<void*>(MpauthDwExplodeHook), 5, kExpectedDwExplode, sizeof(kExpectedDwExplode)))
+                        reinterpret_cast<void*>(MpauthDwExplodeHook), sizeof(kExpectedDwExplode), kExpectedDwExplode, sizeof(kExpectedDwExplode)))
                     {
                         g_MpauthDwExplodeOrig = reinterpret_cast<FnMpauthDwExplode>(g_DayWreckerExplodeDetour.trampoline);
                         Log(L"[MPAUTH] Installed DayWrecker::Explode hook at 0x%08X tramp=0x%08X\n",
@@ -26149,11 +26151,11 @@ namespace BZROpenShim
                     Log(L"[MPAUTH] DayWrecker::Explode bytes mismatch at 0x%08X\n", (uint32_t)kGogDayWreckerExplodeAddr);
             }
             {
-                static const uint8_t kExpectedGoRemove[3] = { 0x55, 0x8B, 0xEC };
+                static const uint8_t kExpectedGoRemove[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x38 };
                 if (ExpectedBytesMatchAt(kGogGameObjectRemoveAddr, kExpectedGoRemove, sizeof(kExpectedGoRemove)))
                 {
                     if (InstallInlineDetour32(g_GameObjectRemoveDetour, kGogGameObjectRemoveAddr,
-                        reinterpret_cast<void*>(MpauthGoRemoveHook), 5, kExpectedGoRemove, sizeof(kExpectedGoRemove)))
+                        reinterpret_cast<void*>(MpauthGoRemoveHook), sizeof(kExpectedGoRemove), kExpectedGoRemove, sizeof(kExpectedGoRemove)))
                     {
                         g_MpauthGoRemoveOrig = reinterpret_cast<FnMpauthGoRemove>(g_GameObjectRemoveDetour.trampoline);
                         Log(L"[MPAUTH] Installed GameObject::Remove hook at 0x%08X\n", (uint32_t)kGogGameObjectRemoveAddr);
@@ -26163,11 +26165,11 @@ namespace BZROpenShim
                     Log(L"[MPAUTH] GameObject::Remove bytes mismatch at 0x%08X\n", (uint32_t)kGogGameObjectRemoveAddr);
             }
             {
-                static const uint8_t kExpectedSetRemote[3] = { 0x55, 0x8B, 0xEC };
+                static const uint8_t kExpectedSetRemote[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x20 };
                 if (ExpectedBytesMatchAt(kGogDayWreckerSetRemoteAddr, kExpectedSetRemote, sizeof(kExpectedSetRemote)))
                 {
                     if (InstallInlineDetour32(g_DistributedCreateDetour, kGogDayWreckerSetRemoteAddr,
-                        reinterpret_cast<void*>(MpauthSetRemoteHook), 5, kExpectedSetRemote, sizeof(kExpectedSetRemote)))
+                        reinterpret_cast<void*>(MpauthSetRemoteHook), sizeof(kExpectedSetRemote), kExpectedSetRemote, sizeof(kExpectedSetRemote)))
                     {
                         g_MpauthSetRemoteOrig = reinterpret_cast<FnMpauthSetRemote>(g_DistributedCreateDetour.trampoline);
                         Log(L"[MPAUTH] Installed SetRemote hook at 0x%08X\n", (uint32_t)kGogDayWreckerSetRemoteAddr);
@@ -26177,11 +26179,12 @@ namespace BZROpenShim
                     Log(L"[MPAUTH] SetRemote bytes mismatch at 0x%08X\n", (uint32_t)kGogDayWreckerSetRemoteAddr);
             }
             {
-                static const uint8_t kExpectedOrdnRecv[4] = { 0x55, 0x8B, 0xEC, 0x83 };
+                // push ebp; mov ebp,esp; sub esp,0x150 (imm32 form): boundary at 9.
+                static const uint8_t kExpectedOrdnRecv[9] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x50, 0x01, 0x00, 0x00 };
                 if (ExpectedBytesMatchAt(kGogOrdnanceReceiverAddr, kExpectedOrdnRecv, sizeof(kExpectedOrdnRecv)))
                 {
                     if (InstallInlineDetour32(g_OrdnanceReceiverDetour, kGogOrdnanceReceiverAddr,
-                        reinterpret_cast<void*>(MpauthOrdnanceReceiverHook), 6, kExpectedOrdnRecv, sizeof(kExpectedOrdnRecv)))
+                        reinterpret_cast<void*>(MpauthOrdnanceReceiverHook), sizeof(kExpectedOrdnRecv), kExpectedOrdnRecv, sizeof(kExpectedOrdnRecv)))
                     {
                         g_MpauthOrdnReceiveOrig = reinterpret_cast<FnMpauthOrdnReceive>(g_OrdnanceReceiverDetour.trampoline);
                         Log(L"[MPAUTH] Installed Ordnance_Receive hook at 0x%08X\n", (uint32_t)kGogOrdnanceReceiverAddr);
@@ -26195,11 +26198,11 @@ namespace BZROpenShim
                 }
             }
             {
-                static const uint8_t kExpectedHit[3] = { 0x55, 0x8B, 0xEC };
+                static const uint8_t kExpectedHit[9] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x08, 0x03, 0x00, 0x00 };
                 if (ExpectedBytesMatchAt(kGogSprayBombHitAddr, kExpectedHit, sizeof(kExpectedHit)))
                 {
                     if (InstallInlineDetour32(g_SprayBombHitDetour, kGogSprayBombHitAddr,
-                        reinterpret_cast<void*>(MpauthSprayBombHitHook), 5, kExpectedHit, sizeof(kExpectedHit)))
+                        reinterpret_cast<void*>(MpauthSprayBombHitHook), sizeof(kExpectedHit), kExpectedHit, sizeof(kExpectedHit)))
                     {
                         g_MpauthSprayHitOrig = reinterpret_cast<FnMpauthSprayHit>(g_SprayBombHitDetour.trampoline);
                         Log(L"[MPAUTH] Installed SprayBomb::Hit hook at 0x%08X\n", (uint32_t)kGogSprayBombHitAddr);
@@ -26209,11 +26212,11 @@ namespace BZROpenShim
                     Log(L"[MPAUTH] SprayBomb::Hit bytes mismatch at 0x%08X\n", (uint32_t)kGogSprayBombHitAddr);
             }
             {
-                static const uint8_t kExpectedSim[3] = { 0x55, 0x8B, 0xEC };
+                static const uint8_t kExpectedSim[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08 };
                 if (ExpectedBytesMatchAt(kGogSprayBombSimulateAddr, kExpectedSim, sizeof(kExpectedSim)))
                 {
                     if (InstallInlineDetour32(g_SprayBombSimulateDetour, kGogSprayBombSimulateAddr,
-                        reinterpret_cast<void*>(MpauthSprayBombSimulateHook), 5, kExpectedSim, sizeof(kExpectedSim)))
+                        reinterpret_cast<void*>(MpauthSprayBombSimulateHook), sizeof(kExpectedSim), kExpectedSim, sizeof(kExpectedSim)))
                     {
                         g_MpauthSpraySimOrig = reinterpret_cast<FnMpauthSpraySim>(g_SprayBombSimulateDetour.trampoline);
                         Log(L"[MPAUTH] Installed SprayBomb::Simulate hook at 0x%08X\n", (uint32_t)kGogSprayBombSimulateAddr);
@@ -26224,12 +26227,12 @@ namespace BZROpenShim
             }
             // Ordinary state reader (004B8590) — daywrecker revive path, GOG 2.2.301 only
             {
-                static const uint8_t kExpectedOrdinary[4] = { 0x55, 0x8B, 0xEC, 0x83 };
-                // First bytes are push ebp; mov ebp,esp; sub esp, ? — check at least 55 8B EC
-                if (ExpectedBytesMatchAt(kGogOrdinaryStateReaderAddr, kExpectedOrdinary, 3))
+                // push ebp; mov ebp,esp; sub esp,0x160 (imm32 form): boundary at 9.
+                static const uint8_t kExpectedOrdinary[9] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x60, 0x01, 0x00, 0x00 };
+                if (ExpectedBytesMatchAt(kGogOrdinaryStateReaderAddr, kExpectedOrdinary, sizeof(kExpectedOrdinary)))
                 {
                     if (InstallInlineDetour32(g_OrdinaryStateReaderDetour, kGogOrdinaryStateReaderAddr,
-                        reinterpret_cast<void*>(MpauthOrdinaryStateReaderHook), 5, kExpectedOrdinary, 3))
+                        reinterpret_cast<void*>(MpauthOrdinaryStateReaderHook), sizeof(kExpectedOrdinary), kExpectedOrdinary, sizeof(kExpectedOrdinary)))
                     {
                         g_MpauthOrdinaryReaderOrig = reinterpret_cast<FnMpauthOrdinaryReader>(g_OrdinaryStateReaderDetour.trampoline);
                         Log(L"[MPAUTH] Installed ordinary state reader hook at 0x%08X\n", (uint32_t)kGogOrdinaryStateReaderAddr);
@@ -26240,11 +26243,11 @@ namespace BZROpenShim
             }
             // Permanent state reader (004B8FA0)
             {
-                static const uint8_t kExpectedPermanent[3] = { 0x55, 0x8B, 0xEC };
+                static const uint8_t kExpectedPermanent[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x68 };
                 if (ExpectedBytesMatchAt(kGogPermanentStateReaderAddr, kExpectedPermanent, sizeof(kExpectedPermanent)))
                 {
                     if (InstallInlineDetour32(g_PermanentStateReaderDetour, kGogPermanentStateReaderAddr,
-                        reinterpret_cast<void*>(MpauthPermanentStateReaderHook), 5, kExpectedPermanent, sizeof(kExpectedPermanent)))
+                        reinterpret_cast<void*>(MpauthPermanentStateReaderHook), sizeof(kExpectedPermanent), kExpectedPermanent, sizeof(kExpectedPermanent)))
                     {
                         g_MpauthPermanentReaderOrig = reinterpret_cast<FnMpauthPermanentReader>(g_PermanentStateReaderDetour.trampoline);
                         Log(L"[MPAUTH] Installed permanent state reader hook at 0x%08X\n", (uint32_t)kGogPermanentStateReaderAddr);
@@ -34037,6 +34040,29 @@ namespace BZROpenShim
         return allowed;
     }
 
+    // Retry loops call the installer every 100 ms; log each refused site once.
+    static void LogDetourStealRefusal(uintptr_t target, size_t patchLen,
+                                      const BZROpenShim::X86StealPlan& plan,
+                                      const uint8_t* bytes, size_t byteCount)
+    {
+        static volatile LONG s_loggedTargets[64] = {};
+        for (auto& slot : s_loggedTargets)
+        {
+            const LONG seen = InterlockedCompareExchange(&slot, static_cast<LONG>(target), 0);
+            if (seen == 0) break;
+            if (seen == static_cast<LONG>(target)) return;
+        }
+        char hex[3 * kInlineDetourMaxPatchLen + 1] = {};
+        size_t n = 0;
+        for (size_t i = 0; i < byteCount && i < kInlineDetourMaxPatchLen && n + 3 < sizeof(hex); ++i)
+            n += static_cast<size_t>(snprintf(hex + n, sizeof(hex) - n, "%02X ", bytes[i]));
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "DETOUR",
+            "refused %u-byte steal at 0x%08X: %s at +%u (boundary %u, %u instr) bytes=%s",
+            static_cast<unsigned>(patchLen), static_cast<unsigned>(target),
+            BZROpenShim::X86StealStatusName(plan.status), static_cast<unsigned>(plan.failOffset),
+            static_cast<unsigned>(plan.boundary), static_cast<unsigned>(plan.instructionCount), hex);
+    }
+
     bool InstallInlineDetour32(InlineDetour32& detour,
                                       uintptr_t target,
                                       void* hook,
@@ -34057,6 +34083,27 @@ namespace BZROpenShim
                 return false;
         }
 
+        // The stolen range must end on an instruction boundary and contain
+        // nothing that changes meaning at the trampoline address. Read past
+        // patchLen so an instruction straddling the boundary can be sized;
+        // if that read fails (page end) fall back to the exact range.
+        uint8_t probe[kInlineDetourMaxPatchLen + 15] = {};
+        size_t probeLen = patchLen + 15;
+        SIZE_T probeRead = 0;
+        if (!ReadProcessMemory(GetCurrentProcess(), targetBytes, probe, probeLen, &probeRead) || probeRead != probeLen)
+        {
+            probeLen = patchLen;
+            probeRead = 0;
+            if (!ReadProcessMemory(GetCurrentProcess(), targetBytes, probe, probeLen, &probeRead) || probeRead != probeLen)
+                return false;
+        }
+        const BZROpenShim::X86StealPlan plan = BZROpenShim::PlanDetourSteal32(probe, probeLen, patchLen);
+        if (plan.status != BZROpenShim::X86StealStatus::Ok)
+        {
+            LogDetourStealRefusal(target, patchLen, plan, probe, probeLen);
+            return false;
+        }
+
         auto* trampolineBytes = reinterpret_cast<uint8_t*>(
             VirtualAlloc(nullptr, patchLen + 5, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
         if (!trampolineBytes)
@@ -34064,6 +34111,17 @@ namespace BZROpenShim
 
         memcpy(detour.original.data(), targetBytes, patchLen);
         memcpy(trampolineBytes, targetBytes, patchLen);
+
+        // rel32 call/jmp/jcc inside the stolen range keep their absolute
+        // destination once re-based by the copy distance.
+        for (size_t r = 0; r < plan.rel32Count; ++r)
+        {
+            const size_t at = plan.rel32Offsets[r];
+            int32_t rel = 0;
+            memcpy(&rel, trampolineBytes + at, sizeof(rel));
+            rel += static_cast<int32_t>(target - reinterpret_cast<uintptr_t>(trampolineBytes));
+            memcpy(trampolineBytes + at, &rel, sizeof(rel));
+        }
 
         const uintptr_t resumeAddr = target + patchLen;
         trampolineBytes[patchLen] = 0xE9;

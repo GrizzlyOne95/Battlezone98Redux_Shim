@@ -661,12 +661,12 @@
     {
       "name": "Under Attack Alert Hook 1/2",
       "fallback": "0x00494D35",
-      "expected_original": "0F 2F 05 D0 73"
+      "expected_original": "0F 2F 05 D0 73 91 00 76 2B 6A 00 6A 00 6A 00 68 20 72 87 00 E8 E2 5C FA FF 83 C4 10 F3 0F 10 85 48 FE FF FF F3 0F 58 05 04 26 8A 00 F3 0F 11 05 D0 73 91 00"
     },
     {
       "name": "Under Attack Alert Hook 2/2",
       "fallback": "0x0050E6DD",
-      "expected_original": "0F 2F 05 D0 73"
+      "expected_original": "0F 2F 05 D0 73 91 00 76 2B 6A 00 6A 00 6A 00 68 20 72 87 00 E8 3A C3 F2 FF 83 C4 10 F3 0F 10 85 30 FE FF FF F3 0F 58 05 04 26 8A 00 F3 0F 11 05 D0 73 91 00"
     },
     {
       "name": "Map Filters 1/8",
