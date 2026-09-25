@@ -29,10 +29,9 @@ $repo = Split-Path -Parent $PSScriptRoot
 $openShimDir = Join-Path $repo "resources\renderer\enhanced"
 
 if (-not $CampaignReimaginedRoot) {
-    $candidates = @(
-        (Join-Path (Split-Path -Parent $repo) "Battlezone98Redux_CampaignReimagined"),
-        "$env:USERPROFILE\Documents\Google Drive\Ian Files\Battlezone Files\Redux Maps\Open Patch - CampaignReimagined"
-    )
+    $candidates = @()
+    if ($env:BZR_CAMPAIGN_REPO) { $candidates += $env:BZR_CAMPAIGN_REPO }
+    $candidates += Join-Path (Split-Path -Parent $repo) "Campaign-Reimagined"
     $CampaignReimaginedRoot = $candidates | Where-Object { Test-Path -LiteralPath (Join-Path $_ "Shaders") } | Select-Object -First 1
 }
 
