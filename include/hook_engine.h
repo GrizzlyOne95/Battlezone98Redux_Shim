@@ -47,7 +47,6 @@ namespace HookEngine
     // "wrong signature", and logging it as a failure sends readers hunting
     // for a build difference that is not there.
     void ScanForPatterns(const std::string& moduleName, std::vector<PatchDef>& patches, const std::vector<ScanTarget>& targets, bool missesAreProvisional = false);
-    std::vector<uint8_t> ParseHexPattern(const std::string& hex);
     std::vector<uint16_t> ParseIdaPattern(const std::string& hex);
 
     // Declarative address resolution ("resolves" in scripts/patches.json).

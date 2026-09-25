@@ -349,15 +349,25 @@ function Update-WrapperFiles {
             $localUpload = $candidate
         }
     }
+    # Fetch every wrapper into a staging file first and only then swap it in.
+    # Removing the live wrapper before the download made a failed download
+    # leave the Steam launch option pointing at a missing .bat, so the game
+    # would not start at all until the tester re-ran the installer.
     foreach ($wf in @("openshim_wrap.ps1", "openshim_wrap.bat")) {
         $wfDest = Join-Path $WrapDir $wf
-        Remove-Item -Force -ErrorAction SilentlyContinue $wfDest
+        $wfTemp = "$wfDest.download"
+        Remove-Item -Force -ErrorAction SilentlyContinue $wfTemp
         if ($localUpload) {
-            Copy-Item -LiteralPath (Join-Path $localUpload $wf) -Destination $wfDest -Force
+            Copy-Item -LiteralPath (Join-Path $localUpload $wf) -Destination $wfTemp -Force
         } else {
             $wu = "https://raw.githubusercontent.com/$repoSlug/$ref/upload/$wf"
-            Invoke-WebRequest -Uri $wu -UseBasicParsing -OutFile $wfDest
+            Invoke-WebRequest -Uri $wu -UseBasicParsing -OutFile $wfTemp
         }
+        if (-not (Test-Path -LiteralPath $wfTemp -PathType Leaf) -or (Get-Item -LiteralPath $wfTemp).Length -eq 0) {
+            Remove-Item -Force -ErrorAction SilentlyContinue $wfTemp
+            throw "Uploader wrapper download produced no file for $wf; existing wrapper left untouched."
+        }
+        Move-Item -LiteralPath $wfTemp -Destination $wfDest -Force
     }
     $new = Get-WrapperVersion -Path $dest
     if ($old -eq $new) {

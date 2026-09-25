@@ -70,7 +70,12 @@ namespace BZROpenShim
             "BZR_DISABLE_DX11_SKIN_SOURCE_SHADOW_FIX";
         constexpr char kIniSection[] = "Diagnostics";
         constexpr char kIniKey[] = "ProfileOgreAnimation";
-        constexpr int kDefaultProfilerEnabled = 1;
+        // Opt-in. openshim.ini, openshim.ini.example and the profiler docs all
+        // describe the profiler as off unless [Diagnostics] ProfileOgreAnimation
+        // or the environment variable asks for it; the build default must agree,
+        // otherwise an ini without the key silently turns on seven detours, the
+        // D3D vtable observers and a CSV beside the executable.
+        constexpr int kDefaultProfilerEnabled = 0;
         constexpr DWORD kPollSleepMs = 25;
         constexpr ULONGLONG kReportIntervalMs = 1000;
         constexpr size_t kBloomWords = 1024; // 65536 bits; low collision rate for BZR-scale scenes.

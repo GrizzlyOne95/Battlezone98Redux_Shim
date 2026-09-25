@@ -1024,7 +1024,10 @@ namespace BZROpenShim
             return;
         }
 
-        if (ObserveExternalAutoSave(now) || now < g_nextSaveTick)
+        // Deadline first: ObserveExternalAutoSave stats Save\auto.sav, and
+        // evaluating it before the cheap tick compare made every frame of a
+        // mission pay for a filesystem call.
+        if (now < g_nextSaveTick || ObserveExternalAutoSave(now))
             return;
 
         // Keep the deadline expired while paused/in shell UI or after a fault.

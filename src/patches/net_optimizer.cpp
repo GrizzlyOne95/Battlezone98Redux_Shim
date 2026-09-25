@@ -1859,7 +1859,12 @@ namespace
         if (!g_RelayControlLog || !IsRelayControlMessageType(type))
             return;
 
-        std::string compact = message;
+        // Authorization messages carry the Steam/GOG app ticket and the lobby
+        // password verbatim. The structured BZRNet trace already strips them
+        // through SanitizeBzrNetJson; the raw relay capture must not be the
+        // one place they still land on disk. privateForensic keeps identities
+        // and endpoints intact, which is what a two-client relay capture needs.
+        std::string compact = SanitizeBzrNetJson(message, true).json;
         std::replace(compact.begin(), compact.end(), '\r', ' ');
         std::replace(compact.begin(), compact.end(), '\n', ' ');
 
@@ -3974,6 +3979,11 @@ namespace
             LogRouteEvent("WSASendTo", s, to, toLen, false, err, true);
         }
         LogSocketError("WSASendTo", s, rc, &SocketState::lastSendToError);
+        // The logging above calls getpeername/getsockname, which overwrite the
+        // thread's last WSA error (WSAENOTCONN on an unconnected UDP socket);
+        // hand the game the error the real call produced, as Hook_WSASend does.
+        if (rc == SOCKET_ERROR && g_RealWSASetLastError)
+            g_RealWSASetLastError(err);
         return rc;
     }
 
@@ -4042,6 +4052,8 @@ namespace
             LogRouteEvent("sendto", s, to, toLen, false, err, true);
         }
         LogSocketError("sendto", s, rc, &SocketState::lastSendToError);
+        if (rc == SOCKET_ERROR && g_RealWSASetLastError)
+            g_RealWSASetLastError(err);
         return rc;
     }
 

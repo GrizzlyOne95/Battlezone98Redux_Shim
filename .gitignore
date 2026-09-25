@@ -103,3 +103,12 @@ tmp/dx11-hardening-fxc/
 .bilby/
 upload.conf
 **/upload.conf
+
+# ---------------------------------------------------------------------------
+# Scratch build products and tool lock files that must never be tracked
+# ---------------------------------------------------------------------------
+tmp/*.exe
+tmp/*.obj
+*.lock
+*.lock~
+~index.dat

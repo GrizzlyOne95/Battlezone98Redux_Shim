@@ -461,7 +461,17 @@ namespace
             }
             if (!loaded)
             {
-                RejectPlugin(plugin, "BZPlugin_Load failed");
+                // Unlike a Query rejection, a failed Load is not known to be
+                // side-effect free: the plugin may already have installed
+                // process-wide state (IAT providers, hooks, callbacks) before
+                // it failed or raised. Unmapping it now would turn a rejected
+                // plugin into a crash on the next call through that state, so
+                // the module stays pinned for process lifetime and is simply
+                // not tracked as loaded.
+                Logf(BZ_HOST_LOG_WARNING, plugin.info.pluginId,
+                     "Skipping plugin %ls: BZPlugin_Load failed (module left mapped)",
+                     plugin.path.c_str());
+                plugin.module = nullptr;
                 continue;
             }
             plugin.loaded = true;

@@ -155,11 +155,6 @@
         }
     }
 
-    bool IsOgreAnimationProfilerRequested()
-    {
-        return ProfilerRequested();
-    }
-
     void InitializeOgreAnimationProfiler()
     {
         const bool profilerRequested = ProfilerRequested();

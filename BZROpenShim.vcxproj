@@ -81,7 +81,7 @@
       <AdditionalDependencies>Version.lib;ws2_32.lib;Gdiplus.lib;Psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>$(ProjectDir)src\winmm.def</ModuleDefinitionFile>
       <LargeAddressAware>true</LargeAddressAware>
-      <DelayLoadDLLs>version.dll;gdiplus.dll;ws2_32.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <DelayLoadDLLs>gdiplus.dll;ws2_32.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
       <SupportUnloadOfDelayLoadedDLL>true</SupportUnloadOfDelayLoadedDLL>
     </Link>
   </ItemDefinitionGroup>
@@ -111,7 +111,7 @@
       <AdditionalDependencies>Version.lib;ws2_32.lib;Gdiplus.lib;Psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <ModuleDefinitionFile>$(ProjectDir)src\winmm.def</ModuleDefinitionFile>
       <LargeAddressAware>true</LargeAddressAware>
-      <DelayLoadDLLs>version.dll;gdiplus.dll;ws2_32.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
+      <DelayLoadDLLs>gdiplus.dll;ws2_32.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
       <SupportUnloadOfDelayLoadedDLL>true</SupportUnloadOfDelayLoadedDLL>
     </Link>
   </ItemDefinitionGroup>
