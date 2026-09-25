@@ -115,7 +115,6 @@ namespace BZROpenShim
     void __fastcall DamageRevealProbeHook(void* victim, void* edx, void* damage);
     void SetSprayEmitterBuildOriginal(void* original);
     void* SprayEmitterBuildOwnerHook();
-    void PrimeUnderAttackAlertConfig();
     bool SetUnderAttackAlertModeFromBridge(int mode);
     bool SetBomberAiRangeEnabledFromBridge(bool enabled);
     bool SetHowitzerVolleyEnabledFromBridge(bool enabled);
@@ -171,7 +170,6 @@ namespace BZROpenShim
     bool IsMissionSimulationActiveFromBridge();
     float __fastcall TargetReticlePopupRecentHitGetterHook(void* objectPtr, void* edx);
     void __cdecl RevealProcessOwnerPerceivedTeamOnAttackStateEntry(void* processPtr);
-    void PrimeTargetReticlePopupConfig();
     bool SetTargetReticlePopupModeFromBridge(int mode);
     uint32_t GetUnitVoThrottleFromBridge();
     bool SetUnitVoThrottleFromBridge(uint32_t milliseconds);
@@ -200,7 +198,6 @@ namespace BZROpenShim
     void __cdecl MapFilters1Rebuild(void* listPtr);
     void __cdecl MapFilters2Filter(void* listPtr, BzrString* filter);
     void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* craft);
-    void __cdecl TraceArtilleryMaskFromProcess(void* process);
     // AI weapon-mask hardpoint selection. Each replaces one call to a
     // __thiscall engine routine; the trampolines supply the third argument from
     // the patched routine's own stack frame.

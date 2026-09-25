@@ -90,30 +90,6 @@ namespace BZROpenShim
             return true;
         }
 
-        static bool TrySetUiTexture(void* widget, const char* textureName, FnUiSetStr setter)
-        {
-            if (!widget || !setter || !textureName || !*textureName)
-                return false;
-            if (!IsUiTextureFileAvailable(textureName))
-            {
-                static bool s_logged = false;
-                if (!s_logged)
-                {
-                    s_logged = true;
-                    Log(L"[SETTINGSUI] Custom UI tile not found, using fallback for %hs\n", textureName);
-                }
-                // For CustomWidgets tiles, skip the custom texture and keep the
-                // widget's default (stock) appearance so the page remains readable.
-                // For stock textures we still attempt the set above (handled in IsUiTextureFileAvailable).
-                std::string lower = textureName;
-                std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return (char)std::tolower(c); });
-                if (lower == "uiline.png" || lower == "uiplate.png" || lower == "uibtn.png" || lower == "uibtnhv.png")
-                    return false;
-            }
-            setter(widget, textureName);
-            return true;
-        }
-
         // The shipped GOG PDB public-symbol addresses for cUI_OptionsInput methods
         // are not reliable function-entry hooks against the current Redux binary.
         // The stock input screen constructor was recovered from string xrefs instead.
@@ -2001,7 +1977,7 @@ namespace BZROpenShim
                 { slots.contentMask, "ContentMask", "blackui.png", layout.contentMask },
             };
             // blackui.png is stock; if CustomWidgets tiles are missing we still want the
-            // Settings page to be readable. The TrySetUiTexture helper will handle fallback.
+            // Settings page to be readable.
 
             char controlName[96] = {};
             for (const BackgroundLayer& layer : layers)

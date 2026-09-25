@@ -157,7 +157,6 @@
     <ClCompile Include="src\patches\mp_vehicle_preview_fix.cpp" />
     <ClCompile Include="src\patches\native_cpu_sampler.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
-    <ClCompile Include="src\patches\netcode_hooks.cpp" />
     <ClCompile Include="src\patches\numeric_locale_compat.cpp" />
     <ClCompile Include="src\patches\odf_compat.cpp" />
     <ClCompile Include="src\patches\odf_item_hooks.cpp" />

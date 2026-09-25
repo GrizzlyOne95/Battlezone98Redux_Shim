@@ -1671,11 +1671,6 @@ namespace BZROpenShim
         }
     }
 
-    bool IsPilotFpAnimationTraceRequested()
-    {
-        return TraceRequested();
-    }
-
     void InitializePilotFpAnimationTrace()
     {
         if (g_WorkerThread)

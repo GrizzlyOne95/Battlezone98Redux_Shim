@@ -24,18 +24,6 @@ namespace HookEngine
         return BZROpenShim::ParseIdaPatternText(hex);
     }
 
-    std::vector<uint8_t> ParseHexPattern(const std::string& hex)
-    {
-        std::vector<uint8_t> bytes;
-        std::stringstream ss(hex);
-        std::string item;
-        while (ss >> item)
-        {
-            bytes.push_back(static_cast<uint8_t>(std::stoul(item, nullptr, 16)));
-        }
-        return bytes;
-    }
-
     bool ReadMemory(uint32_t address, void* buffer, size_t len)
     {
         SIZE_T read = 0;
