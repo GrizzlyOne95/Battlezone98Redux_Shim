@@ -145,6 +145,12 @@ namespace BZROpenShim
             // than the immediate alone, so a build whose layout moved cannot land
             // this on some other instruction's operand.
             { 0, HookEngine::PatchType::BYTES, { 0x68, 0x88, 0x81, 0x01, 0x00 }, "Music Buffer Global Focus", false, {} },
+            // SetPlatform writes the engine's input-smoothing bypass flag
+            // (0x009198F4) as 1 only for the iOS platform and 0 otherwise.
+            // Rewriting the whole else-branch `mov dword [0x9198F4], 0` to store
+            // 1 makes every call leave UserProcess's steer/pitch/throttle/strafe
+            // low-pass off -- BZCC's "Control Smoothing: Off". Opt-in.
+            { 0, HookEngine::PatchType::BYTES, { 0xC7, 0x05, 0xF4, 0x98, 0x91, 0x00, 0x01, 0x00, 0x00, 0x00 }, "Disable Control Smoothing", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Chunk Render Resolve Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Producer Build Menu Root Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Target Reticle Popup Recent-Hit Getter Hook", false, {} },

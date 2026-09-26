@@ -17,6 +17,7 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -53,6 +54,12 @@ namespace BZROpenShim
         {
             HCRYPTHASH handle = 0;
             ~CryptHash() { if (handle) CryptDestroyHash(handle); }
+        };
+
+        struct ScopedFile
+        {
+            HANDLE handle = INVALID_HANDLE_VALUE;
+            ~ScopedFile() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
         };
 
         struct RuntimePayload
@@ -314,28 +321,43 @@ namespace BZROpenShim
             return true;
         }
 
-        bool ComputeSha256(const std::filesystem::path& path,
+        // Opens for reading while denying writers and deleters, so the bytes
+        // hashed through the handle are the bytes still on disk for as long as
+        // the handle stays open.
+        bool OpenForHashing(const std::filesystem::path& path,
+                            ScopedFile& file,
+                            std::string& error)
+        {
+            file.handle = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                                      nullptr);
+            if (file.handle == INVALID_HANDLE_VALUE)
+            {
+                const DWORD code = GetLastError();
+                error = "could not open " + path.filename().string() + ": " +
+                    std::error_code(static_cast<int>(code), std::system_category()).message();
+                return false;
+            }
+            return true;
+        }
+
+        bool ComputeSha256(HANDLE file,
+                           const std::string& name,
                            std::string& output,
                            uint64_t& fileSize,
                            std::string& error)
         {
             output.clear();
             fileSize = 0;
-            std::ifstream input(path, std::ios::binary);
-            if (!input.is_open())
+            LARGE_INTEGER size = {};
+            LARGE_INTEGER origin = {};
+            if (!GetFileSizeEx(file, &size) || size.QuadPart < 0 ||
+                !SetFilePointerEx(file, origin, nullptr, FILE_BEGIN))
             {
-                error = "could not open " + path.filename().string();
+                error = "could not read " + name + " size";
                 return false;
             }
-            input.seekg(0, std::ios::end);
-            const std::streamoff size = input.tellg();
-            if (size < 0)
-            {
-                error = "could not read " + path.filename().string() + " size";
-                return false;
-            }
-            fileSize = static_cast<uint64_t>(size);
-            input.seekg(0, std::ios::beg);
+            fileSize = static_cast<uint64_t>(size.QuadPart);
 
             CryptProvider provider;
             CryptHash hash;
@@ -347,18 +369,30 @@ namespace BZROpenShim
                 return false;
             }
 
-            std::array<char, 64 * 1024> buffer = {};
-            while (input.good())
+            std::array<BYTE, 64 * 1024> buffer = {};
+            uint64_t hashed = 0;
+            for (;;)
             {
-                input.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-                const std::streamsize read = input.gcount();
-                if (read > 0 && !CryptHashData(
-                    hash.handle, reinterpret_cast<const BYTE*>(buffer.data()),
-                    static_cast<DWORD>(read), 0))
+                DWORD read = 0;
+                if (!ReadFile(file, buffer.data(), static_cast<DWORD>(buffer.size()),
+                              &read, nullptr))
+                {
+                    error = "could not read " + name;
+                    return false;
+                }
+                if (read == 0)
+                    break;
+                if (!CryptHashData(hash.handle, buffer.data(), read, 0))
                 {
                     error = "Windows SHA-256 update failed";
                     return false;
                 }
+                hashed += read;
+            }
+            if (hashed != fileSize)
+            {
+                error = name + " changed while it was being hashed";
+                return false;
             }
 
             std::array<BYTE, 32> digest = {};
@@ -377,14 +411,29 @@ namespace BZROpenShim
             return true;
         }
 
-        bool ValidateX86Dll(const std::filesystem::path& path, std::string& error)
+        bool ComputeSha256(const std::filesystem::path& path,
+                           std::string& output,
+                           uint64_t& fileSize,
+                           std::string& error)
         {
+            ScopedFile file;
+            if (!OpenForHashing(path, file, error))
+                return false;
+            return ComputeSha256(file.handle, path.filename().string(),
+                                 output, fileSize, error);
+        }
+
+        bool ValidateX86Image(const std::filesystem::path& path,
+                              bool expectDll,
+                              std::string& error)
+        {
+            const char* const what = expectDll ? "OpenShim payload" : "replacement helper";
             std::ifstream input(path, std::ios::binary);
             IMAGE_DOS_HEADER dos = {};
             input.read(reinterpret_cast<char*>(&dos), sizeof(dos));
             if (!input || dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew <= 0)
             {
-                error = "OpenShim payload has an invalid DOS header";
+                error = std::string(what) + " has an invalid DOS header";
                 return false;
             }
             input.seekg(dos.e_lfanew, std::ios::beg);
@@ -392,11 +441,14 @@ namespace BZROpenShim
             IMAGE_FILE_HEADER file = {};
             input.read(reinterpret_cast<char*>(&signature), sizeof(signature));
             input.read(reinterpret_cast<char*>(&file), sizeof(file));
+            const bool isDll = (file.Characteristics & IMAGE_FILE_DLL) != 0;
             if (!input || signature != IMAGE_NT_SIGNATURE ||
                 file.Machine != IMAGE_FILE_MACHINE_I386 ||
-                (file.Characteristics & IMAGE_FILE_DLL) == 0)
+                (file.Characteristics & IMAGE_FILE_EXECUTABLE_IMAGE) == 0 ||
+                isDll != expectDll)
             {
-                error = "OpenShim payload is not an x86 DLL";
+                error = std::string(what) +
+                    (expectDll ? " is not an x86 DLL" : " is not an x86 executable");
                 return false;
             }
             return true;
@@ -421,44 +473,6 @@ namespace BZROpenShim
                  << '.' << HIWORD(info->dwFileVersionLS) << '.' << LOWORD(info->dwFileVersionLS);
             version = text.str();
             return true;
-        }
-
-        bool ParseVersion(const std::string& text, std::vector<uint32_t>& parts)
-        {
-            parts.clear();
-            size_t begin = 0;
-            while (begin < text.size())
-            {
-                const size_t end = text.find('.', begin);
-                const std::string part = text.substr(begin,
-                    end == std::string::npos ? std::string::npos : end - begin);
-                if (part.empty() || !std::all_of(part.begin(), part.end(), [](unsigned char ch)
-                    { return std::isdigit(ch) != 0; }))
-                    return false;
-                try { parts.push_back(static_cast<uint32_t>(std::stoul(part))); }
-                catch (...) { return false; }
-                if (end == std::string::npos)
-                    break;
-                begin = end + 1;
-            }
-            return !parts.empty();
-        }
-
-        int CompareVersions(const std::string& left, const std::string& right)
-        {
-            std::vector<uint32_t> leftParts;
-            std::vector<uint32_t> rightParts;
-            if (!ParseVersion(left, leftParts) || !ParseVersion(right, rightParts))
-                return 0;
-            const size_t count = (std::max)(leftParts.size(), rightParts.size());
-            for (size_t index = 0; index < count; ++index)
-            {
-                const uint32_t lhs = index < leftParts.size() ? leftParts[index] : 0;
-                const uint32_t rhs = index < rightParts.size() ? rightParts[index] : 0;
-                if (lhs < rhs) return -1;
-                if (lhs > rhs) return 1;
-            }
-            return 0;
         }
 
         std::wstring QuoteCommandLineArgument(const std::wstring& value)
@@ -560,19 +574,39 @@ namespace BZROpenShim
                 hash == payload.manifest->sha256 && size == payload.manifest->size;
         }
 
+        bool HelperMatchesManifest(HANDLE file,
+                                   const RuntimePayload& helper,
+                                   std::string& error)
+        {
+            std::string hash;
+            uint64_t size = 0;
+            if (!ComputeSha256(file, helper.source.filename().string(), hash, size, error))
+                return false;
+            if (hash != helper.manifest->sha256 || size != helper.manifest->size)
+            {
+                error = helper.source.filename().string() +
+                    " does not match the Workshop manifest metadata";
+                return false;
+            }
+            return true;
+        }
+
         bool StageSuite(const std::filesystem::path& itemDirectory,
                         const OpenShimUpdateManifest& manifest,
                         std::array<RuntimePayload, 3>& payloads,
+                        const RuntimePayload& helper,
                         std::string& error)
         {
-            const std::filesystem::path helper = itemDirectory / L"bzfile_replace_helper.exe";
-            std::error_code fileError;
-            if (!std::filesystem::is_regular_file(helper, fileError) || fileError)
-            {
-                error = "bzfile_replace_helper.exe is missing from the Workshop item";
+            // The helper is the process that will rewrite winmm.dll, so the
+            // bytes verified here must be the bytes that run. The handle
+            // denies writers and deleters from this hash until CreateProcess
+            // has mapped the image; it closes when this function returns.
+            ScopedFile helperFile;
+            if (!OpenForHashing(helper.source, helperFile, error) ||
+                !HelperMatchesManifest(helperFile.handle, helper, error))
                 return false;
-            }
 
+            std::error_code fileError;
             HANDLE existingMutex = OpenMutexW(SYNCHRONIZE, FALSE,
                                                 L"Local\\BZR_OpenShim_Update");
             if (existingMutex)
@@ -624,7 +658,7 @@ namespace BZROpenShim
             }
 
             WriteInstallerStatus(status, "staged", manifest.sha256, "suite verified by OpenShim");
-            if (!LaunchHiddenProcess(helper, arguments, error))
+            if (!LaunchHiddenProcess(helper.source, arguments, error))
             {
                 for (const auto& payload : payloads)
                 {
@@ -638,14 +672,14 @@ namespace BZROpenShim
             return true;
         }
 
-        unsigned __stdcall ValidationThreadProc(void*)
+        void RunValidation()
         {
             std::filesystem::path itemDirectory;
             std::string error;
             if (!FindWorkshopItemDirectory(itemDirectory, error))
             {
                 SetState(OpenShimUpdateState::Failed, "Update check failed: " + error + ".");
-                return 0;
+                return;
             }
 
             const std::string manifestText =
@@ -654,13 +688,19 @@ namespace BZROpenShim
             if (manifestText.empty() ||
                 !ParseOpenShimUpdateManifest(manifestText, manifest, error))
             {
+                if (manifestText.empty())
+                    error = "the Workshop OpenShim manifest is missing or unreadable";
                 SetState(OpenShimUpdateState::Failed,
-                         "Update check failed: the Workshop OpenShim manifest is invalid.");
+                         "Update check failed: " + error + ".");
                 LogShimA(LogLevel::Error, kComponent,
                          "Manifest validation failed at %ls: %s",
                          itemDirectory.c_str(), error.c_str());
-                return 0;
+                return;
             }
+            LogShimA(LogLevel::Info, kComponent,
+                     "Workshop manifest offers OpenShim %s (winmm %.12s, helper %.12s)",
+                     manifest.version.c_str(), manifest.sha256.c_str(),
+                     manifest.helper.sha256.c_str());
 
             const std::filesystem::path gameRoot = GetGameRoot();
             std::array<RuntimePayload, 3> payloads = {{
@@ -673,22 +713,50 @@ namespace BZROpenShim
                   gameRoot / L"scripts" / L"patches.json.previous" },
             }};
 
+            const RuntimePayload helper = {
+                &manifest.helper, itemDirectory / L"bzfile_replace_helper.exe", {}, {}, {} };
+
             for (const auto& payload : payloads)
             {
                 if (g_ShutdownRequested.load(std::memory_order_acquire))
-                    return 0;
+                    return;
                 if (!ValidatePayload(payload, error))
                 {
                     SetState(OpenShimUpdateState::Failed,
                              "Update check failed: " + error + ".");
                     LogShimA(LogLevel::Error, kComponent, "%s", error.c_str());
-                    return 0;
+                    return;
                 }
             }
-            if (!ValidateX86Dll(payloads[0].source, error))
+            if (!ValidatePayload(helper, error) ||
+                !ValidateX86Image(payloads[0].source, true, error) ||
+                !ValidateX86Image(helper.source, false, error))
             {
                 SetState(OpenShimUpdateState::Failed, "Update check failed: " + error + ".");
-                return 0;
+                LogShimA(LogLevel::Error, kComponent, "%s", error.c_str());
+                return;
+            }
+
+            // The manifest's version string is only trusted once the payload
+            // DLL's own version resource says the same thing; otherwise the
+            // downgrade guard below would be comparing against a free-form
+            // string.
+            std::string payloadVersion;
+            int order = 0;
+            if (!ReadFileVersion(payloads[0].source, payloadVersion))
+            {
+                error = "the Workshop winmm.dll has no readable version resource";
+                SetState(OpenShimUpdateState::Failed, "Update check failed: " + error + ".");
+                LogShimA(LogLevel::Error, kComponent, "%s", error.c_str());
+                return;
+            }
+            if (!CompareOpenShimVersions(payloadVersion, manifest.version, order) || order != 0)
+            {
+                error = "the Workshop winmm.dll reports version " + payloadVersion +
+                    " but its manifest says " + manifest.version;
+                SetState(OpenShimUpdateState::Failed, "Update check failed: " + error + ".");
+                LogShimA(LogLevel::Error, kComponent, "%s", error.c_str());
+                return;
             }
 
             const bool allCurrent = std::all_of(payloads.begin(), payloads.end(),
@@ -697,25 +765,41 @@ namespace BZROpenShim
             {
                 SetState(OpenShimUpdateState::UpToDate,
                          "OpenShim " + manifest.version + " is up to date.");
-                return 0;
+                return;
             }
 
+            // Downgrade guard. Both versions must parse, or nothing is staged:
+            // an unreadable installed version is not a licence to overwrite it.
             std::string installedVersion;
-            if (ReadFileVersion(payloads[0].destination, installedVersion) &&
-                CompareVersions(installedVersion, manifest.version) > 0)
+            if (!ReadFileVersion(payloads[0].destination, installedVersion))
+            {
+                error = "the installed winmm.dll has no readable version resource; nothing was staged over it";
+                SetState(OpenShimUpdateState::Failed, "Update check failed: " + error + ".");
+                LogShimA(LogLevel::Error, kComponent, "%s", error.c_str());
+                return;
+            }
+            if (!CompareOpenShimVersions(installedVersion, manifest.version, order))
+            {
+                error = "installed OpenShim " + installedVersion + " and Workshop " +
+                    manifest.version + " could not be compared; nothing was staged";
+                SetState(OpenShimUpdateState::Failed, "Update check failed: " + error + ".");
+                LogShimA(LogLevel::Error, kComponent, "%s", error.c_str());
+                return;
+            }
+            if (order > 0)
             {
                 SetState(OpenShimUpdateState::UpToDate,
                          "Installed OpenShim " + installedVersion +
                          " is newer than Workshop " + manifest.version + "; no downgrade was staged.");
-                return 0;
+                return;
             }
 
-            if (!StageSuite(itemDirectory, manifest, payloads, error))
+            if (!StageSuite(itemDirectory, manifest, payloads, helper, error))
             {
                 SetState(OpenShimUpdateState::Failed,
                          "Update staging failed: " + error + ". See openshim_update.log.");
                 LogShimA(LogLevel::Error, kComponent, "Suite staging failed: %s", error.c_str());
-                return 0;
+                return;
             }
 
             if (g_State.load(std::memory_order_acquire) != OpenShimUpdateState::Staged)
@@ -727,6 +811,32 @@ namespace BZROpenShim
             LogShimA(LogLevel::Info, kComponent,
                      "OpenShim suite %s staged from Workshop item %s",
                      manifest.version.c_str(), kWorkshopItemId);
+        }
+
+        // The worker parses untrusted text with std::regex, builds paths and
+        // copies files; any C++ exception that escaped would take the game
+        // down. Nothing here touches engine memory, so a C++ barrier is the
+        // right shape (an SEH fault would still be a bug, not a bad package).
+        unsigned __stdcall ValidationThreadProc(void*)
+        {
+            try
+            {
+                RunValidation();
+            }
+            catch (const std::exception& e)
+            {
+                LogShimA(LogLevel::Error, kComponent,
+                         "Validation worker raised a C++ exception: %s", e.what());
+                SetState(OpenShimUpdateState::Failed,
+                         "Update check failed: internal error. See openshim.log.");
+            }
+            catch (...)
+            {
+                LogShimA(LogLevel::Error, kComponent,
+                         "Validation worker raised an unknown C++ exception");
+                SetState(OpenShimUpdateState::Failed,
+                         "Update check failed: internal error. See openshim.log.");
+            }
             return 0;
         }
 
