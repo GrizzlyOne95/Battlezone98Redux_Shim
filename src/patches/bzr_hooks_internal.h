@@ -14,6 +14,9 @@ namespace BZROpenShim
 {
     // Set by ResolveBzrHooks from its isSteam argument.
     extern bool g_IsSteamExe;
+    // GameObject::GetHandle, resolved by ResolveBzrHooks from patches.json;
+    // 0 until then, and every caller stands down on 0.
+    extern uintptr_t g_GameObjectGetHandleAddr;
 
     namespace Hooks
     {
@@ -127,6 +130,7 @@ namespace BZROpenShim
         inline constexpr char kUserConfigSinglePlayerSection[] = "SinglePlayer";
         inline constexpr char kUserConfigDisplaySection[] = "Display";
         uint16_t ReadLocalPlayerNetIdValue();
+        bool TryGetEnvFloat(const char* name, float& outValue);
 
         // --- Engine state (bzr_hooks.cpp) ------------------------------------
         uintptr_t GetMainModuleBase();
@@ -188,6 +192,13 @@ namespace BZROpenShim
         void HeadlightNotifyMissionRunStateChanged(bool enteringSimulation);
         void InstallEmissionLightFixIfPossible();
         void VerifyExpectedOgreExportsIfPossible();
+
+        // --- Global and unit turbo (global_turbo.cpp) ------------------------
+        extern bool g_GlobalTurboConfigInitialized;
+        void InitializeGlobalTurboConfig();
+        void InstallUnitTurboHooksIfPossible();
+        void RefreshGlobalTurboPatchState();
+        void RevertGlobalTurboToBaseline();
 
         // --- Unit VO queue policy (unit_vo.cpp) ------------------------------
         extern bool g_UnitVoConfigInitialized;
