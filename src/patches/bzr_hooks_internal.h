@@ -240,6 +240,9 @@ namespace BZROpenShim
     using FnUiTextEntryAppendChar = uint8_t (__thiscall*)(void*, uint8_t);
     extern FnUiTextEntryAppendChar g_BzrFn_TextEntryAppendChar;
 
+    using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    extern FnPersonSimulate g_BzrFn_PersonSimulate;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -1308,6 +1311,40 @@ namespace BZROpenShim
         // --- Lobby screen hooks (lobby_screen_hooks.cpp) -----------------------
         void InstallNicknameTextEntryInputHookIfPossible();
         void InstallMultiCreatePreviewFixIfPossible();
+
+        // --- Jump-sniping probe (diag_jump_snipe_probe.cpp) --------------------
+        // GetPlayerHandle() — int __cdecl(). Verified on live GOG exe: reads
+        // GameObject::userObject (via 0x417C70) + playerHandle global (0x02CC2BDC),
+        // round-trips through GameObjectHandle::GetObj (0x462630) / GameObject::GetHandle
+        // (0x477590). This is the inner void-overload the Lua wrapper (0x4FFCD0) calls on
+        // its non-numeric branch, matching the 1.5 decomp. Previous 0x00514610 was WRONG
+        // (mid-instruction, same failure class as the fixed GetObjByHandle).
+        inline constexpr uintptr_t kGogGetPlayerHandleAddr = 0x005C7FB0;
+        struct JumpSnipeProbeSnapshot
+        {
+            bool valid = false;
+            int playerHandle = 0;
+            void* person = nullptr;
+            void* obj = nullptr;
+            float velY = 0.0f;
+            uint32_t animState = 0;   // on-foot anim FSM state (0..3)
+            bool grounded = false;    // vhcl ground-contact flag bit
+            long curAnim = 0;
+            int animHandle = 0;
+            uint32_t selectedMask = 0;
+            int selectedSlot = -1;
+            uint32_t selectedSig = 0;
+            char selectedOdf[17] = {};
+            bool sniperSelected = false;
+        };
+        struct JumpSnipeProbeLogState
+        {
+            bool initialized = false;
+            JumpSnipeProbeSnapshot last = {};
+        };
+        extern bool g_JumpSnipeProbeInstalled;
+        extern JumpSnipeProbeLogState g_JumpSnipeProbeLogState;
+        void InstallJumpSnipingProbeIfRequested();
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
