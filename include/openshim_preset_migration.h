@@ -65,7 +65,9 @@ namespace BZROpenShim
     constexpr int kCurrentPresetRevision = 3;
     constexpr int kLegacyBadPresetRevision = 1;
 
-    // SHA-256 of the exact e81d8b0a player preset (151 lines, LF, no BOM).
+    // SHA-256 of the exact e81d8b0a player preset as a Windows checkout
+    // holds it: 151 lines, CRLF, no BOM (the git blob is LF; see
+    // tests/fixtures/openshim_preset_revision1.inl for the byte-exact vector).
     // Computed with:  Get-FileHash -Algorithm SHA256
     // This is the "known bad" payload that the migration framework recognizes
     // for full-replacement (Case A). It is NOT a publicly shipped Workshop
@@ -159,6 +161,17 @@ namespace BZROpenShim
     // should be invoked early enough that corrected values are used for the
     // current startup where practical (patcher or early bzr_hooks init).
     MigrationResult TryMigratePlayerPresetOnStartup();
+
+    // The directory-level half of the startup entry point, with the module
+    // directory supplied so tests can drive it. Looks for the installer's
+    // openshim.ini.canonical (or openshim.ini.new) beside openshim.ini; when
+    // neither exists the migration runs with no canonical at all, so an exact
+    // known-bad file is repaired surgically rather than re-emitted as its own
+    // replacement. openshim.ini.example is never a canonical: it is the
+    // developer reference whose defaults deliberately differ from the player
+    // preset.
+    MigrationResult TryMigratePlayerPresetInDirectory(
+        const std::filesystem::path& moduleDir);
 
     // Test helper: render the canonical preset lines (for idempotency checks).
     // In production this reads the embedded/adjacent canonical file; in tests

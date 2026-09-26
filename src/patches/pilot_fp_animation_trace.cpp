@@ -1,4 +1,5 @@
 #include "pilot_fp_animation_trace.h"
+#include "engine_globals.h"
 #include "BZROpenShim.h"
 #include "ogre_runtime.h"
 #include "shim_log.h"
@@ -62,6 +63,12 @@ namespace BZROpenShim
         constexpr char kManipAnimIniKey[] = "PilotFPAnimManipAnim";
         constexpr char kManipModeIniKey[] = "PilotFPAnimManipMode";
         constexpr DWORD kPollSleepMs = 25;
+        // A forced refresh (the SDK export) still never walks the scene more
+        // than ten times a second. The export used to force a full walk on
+        // every call, so a caller polling every frame walked the scene every
+        // frame; a target is now at most this old when the export hands it
+        // out, and RefreshWorldTarget still runs on every call.
+        constexpr DWORD kFpForcedEnumerateIntervalMs = 100;
         constexpr DWORD kInventoryPollIntervalMs = 1500;
         constexpr DWORD kFpEnumerateIntervalMs = 1500;
         constexpr size_t kMaxBindings = 64;
@@ -72,17 +79,15 @@ namespace BZROpenShim
 
         // Verified current Redux layout already used by OpenShim's local-player,
         // headlight, satellite-visibility and jump-snipe diagnostics:
-        //   main + 0x00517AFC -> GameObject::userObject
+        //   EngineGlobals::UserObjectSlot (0x00917AFC) -> GameObject::userObject
         //   Person + 0x0F0    -> render bridge
         //   bridge + 0x094    -> Ogre::Entity
-        constexpr uintptr_t kUserObjectRva = 0x00517AFC;
         constexpr size_t kPersonRenderBridgeOffset = 0x0F0;
         constexpr size_t kRenderBridgeOgreEntityOffset = 0x094;
 
-        // SceneManager global structure verified in bzr_hooks.cpp:2042 (same build)
-        //   0x00920EA0 -> structure, +0x08 -> SceneManager*
-        // Used to obtain SceneManager* without relying on SceneManager::createEntity import.
-        constexpr uintptr_t kOgreSceneManagerStructureAddr = 0x00920EA0;
+        // SceneManager global structure (EngineGlobals::RenderGlobals, 0x00920EA0
+        // on GOG) -> structure, +0x08 -> SceneManager*. Used to obtain
+        // SceneManager* without relying on SceneManager::createEntity import.
         constexpr uintptr_t kOgreSceneManagerOffset = 0x08;
 
         using FnEntityGetAnimationState = void* (__thiscall*)(void*, const std::string&);
@@ -385,13 +390,13 @@ namespace BZROpenShim
                 className[0] = '\0';
             if (!IsPatchingComplete() || !IsCompatibleGameVersion())
                 return nullptr;
-            HMODULE module = GetModuleHandleA(nullptr);
-            if (!module)
+            auto* const userObjectSlot =
+                reinterpret_cast<void* const*>(EngineGlobals::UserObjectSlot());
+            if (!userObjectSlot)
                 return nullptr;
-            const auto* base = reinterpret_cast<const uint8_t*>(module);
             __try
             {
-                void* person = *reinterpret_cast<void* const*>(base + kUserObjectRva);
+                void* person = *userObjectSlot;
                 if (!person || !IsPersonObject(person, className, classNameSize))
                     return nullptr;
                 void* renderBridge = *reinterpret_cast<void* const*>(
@@ -420,7 +425,11 @@ namespace BZROpenShim
             void* sm = nullptr;
             __try
             {
-                auto* structure = *reinterpret_cast<uint8_t**>(kOgreSceneManagerStructureAddr);
+                auto* const renderGlobalsSlot =
+                    reinterpret_cast<uint8_t**>(EngineGlobals::RenderGlobals());
+                if (!renderGlobalsSlot)
+                    return nullptr;
+                auto* structure = *renderGlobalsSlot;
                 if (!structure)
                     return nullptr;
                 sm = *reinterpret_cast<void**>(structure + kOgreSceneManagerOffset);
@@ -783,7 +792,10 @@ namespace BZROpenShim
         void RefreshFpTargetViaEnumeration(bool force = false)
         {
             DWORD now = GetTickCount();
-            if (!force && now - g_LastFpEnumerateTick < kFpEnumerateIntervalMs)
+            // "force" shortens the interval; it never removes it.
+            const DWORD minimumInterval =
+                force ? kFpForcedEnumerateIntervalMs : kFpEnumerateIntervalMs;
+            if (now - g_LastFpEnumerateTick < minimumInterval)
                 return;
             g_LastFpEnumerateTick = now;
 
@@ -1600,8 +1612,8 @@ namespace BZROpenShim
                 // Verify exe does NOT import createEntity (expected per dumpbin /imports)
                 LogShimA(LogLevel::Info, kComponent, "[FPAnim] verified: exe does NOT import SceneManager::createEntity (dumpbin /imports) — creation hook not used; enumeration is primary resolver");
                 // Document SceneManager global structure used for retrieval
-                LogShimA(LogLevel::Info, kComponent, "[FPAnim] SceneManager retrieval: global structure 0x%08X +0x%X (same as bzr_hooks.cpp:2042)",
-                    static_cast<unsigned>(kOgreSceneManagerStructureAddr), static_cast<unsigned>(kOgreSceneManagerOffset));
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim] SceneManager retrieval: global structure 0x%08X +0x%X (patches.json RenderGlobals)",
+                    static_cast<unsigned>(EngineGlobals::RenderGlobals()), static_cast<unsigned>(kOgreSceneManagerOffset));
             }
             RefreshManipConfig();
             if (g_ManipEnabled.load(std::memory_order_acquire))
@@ -1634,6 +1646,9 @@ namespace BZROpenShim
             return true;
         }
 
+        // Runs only while the trace is on (see InitializePilotFpAnimationTrace):
+        // with it off this loop had nothing left to do after its one Ogre
+        // check, and polled at 40 Hz for the life of the process anyway.
         unsigned __stdcall TraceThreadProc(void*)
         {
             LogShimA(LogLevel::Info, kComponent, "[PilotFP] tracker waiting for OgreMain.dll and local Person entity; trace=%u",
@@ -1654,7 +1669,8 @@ namespace BZROpenShim
                 // 1.5 s with the trace off, which is how a tracer's use-after-free
                 // became everyone's crash. Nothing outside this file needs the
                 // polled state -- the exported ResolveLocalFirstPersonEntity
-                // resolves on demand and is unaffected by this gate.
+                // resolves on demand (it resolves the tracker exports itself)
+                // and is unaffected by this gate or by this thread's absence.
                 if (g_TrackerExportsReady.load(std::memory_order_acquire) &&
                     g_Enabled.load(std::memory_order_acquire))
                 {
@@ -1677,8 +1693,17 @@ namespace BZROpenShim
             return;
         g_ShutdownRequested.store(false, std::memory_order_release);
         g_Enabled.store(TraceRequested(), std::memory_order_release);
-        if (g_Enabled.load(std::memory_order_acquire))
-            RefreshManipConfig();
+        if (!g_Enabled.load(std::memory_order_acquire))
+        {
+            // The tracker thread only serves the trace: it installs the
+            // animation observers and runs the inventory/candidate poll. The
+            // companion-facing resolver needs none of that, so with the trace
+            // off no thread is started at all.
+            LogShimA(LogLevel::Info, kComponent,
+                "[PilotFP] trace off; no tracker thread (ResolveLocalFirstPersonEntity resolves on demand)");
+            return;
+        }
+        RefreshManipConfig();
         g_WorkerThread = _beginthreadex(nullptr, 0, TraceThreadProc, nullptr, 0, nullptr);
         if (!g_WorkerThread)
         {
@@ -1700,6 +1725,10 @@ namespace BZROpenShim
         if (!ResolveTrackerExports())
             return false;
         RefreshWorldTarget();
+        // Forced, but rate-limited (kFpForcedEnumerateIntervalMs): the world
+        // pilot check above runs on every call and releases the target when
+        // the local player stops being a Person; the scene walk that
+        // revalidates membership runs at most ten times a second.
         RefreshFpTargetViaEnumeration(true);
         outEntity = g_Fp.entity.load(std::memory_order_acquire);
         outGeneration = g_Fp.generation.load(std::memory_order_acquire);

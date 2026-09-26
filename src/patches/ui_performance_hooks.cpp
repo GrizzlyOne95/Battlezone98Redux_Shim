@@ -888,7 +888,17 @@ namespace BZROpenShim::UiPerfHooks
                     "[UIPERF][HARNESS] trigger=%s detected", p);
                 if (strcmp(p, "__BACK__") == 0)
                 {
-                    auto* backFn = reinterpret_cast<FnShellBack>(g_ShellBackHook.trampoline ? g_ShellBackHook.trampoline : reinterpret_cast<void*>(0x007C79A0));
+                    // Only through the trampoline: it exists only when the
+                    // ShellBack site resolved and passed its byte guard. The
+                    // raw 0x007C79A0 fallback this replaced called the site
+                    // precisely when that guard had refused it.
+                    auto* backFn = reinterpret_cast<FnShellBack>(g_ShellBackHook.trampoline);
+                    if (!backFn)
+                    {
+                        LogShimA(LogLevel::Warn, "uiperf-harness",
+                            "[UIPERF][HARNESS] __BACK__ ignored: ShellBack hook not installed");
+                        return;
+                    }
                     void* wrapper = *reinterpret_cast<void**>(0x00918320);
                     if (backFn && wrapper)
                     {
@@ -1925,14 +1935,19 @@ namespace BZROpenShim::UiPerfHooks
                     // own update loop, so cross-thread write is racy but likely
                     // okay for profiling (worst case missed request). We add a
                     // Sleep to let update loop pick it up.
-                    auto* fn = reinterpret_cast<FnShellRequest>(g_ShellRequestHook.trampoline ? g_ShellRequestHook.trampoline : reinterpret_cast<void*>(0x007C7930));
+                    // Trampoline only; see the __BACK__ trigger above.
+                    auto* fn = reinterpret_cast<FnShellRequest>(g_ShellRequestHook.trampoline);
                     if (fn && g_ShellManager)
                     {
                         __try { fn(g_ShellManager, step.id); } __except (EXCEPTION_EXECUTE_HANDLER) {
                             LogShimA(LogLevel::Warn, "uiperf-automatrix", "exception in synthetic request 0x%02X", step.id);
                         }
                     }
-                    else if (!g_ShellManager)
+                    else if (!fn)
+                    {
+                        LogShimA(LogLevel::Warn, "uiperf-automatrix", "ShellRequest hook not installed; skipping request 0x%02X", step.id);
+                    }
+                    else
                     {
                         LogShimA(LogLevel::Warn, "uiperf-automatrix", "no manager for request 0x%02X", step.id);
                     }
@@ -2004,19 +2019,26 @@ namespace BZROpenShim::UiPerfHooks
             return;
         }
 
-        uint32_t reqAddr = HookEngine::ResolveNamedAddress("ShellRequest");
-        if (!reqAddr) reqAddr = 0x007C7930;
-        uint32_t transAddr = HookEngine::ResolveNamedAddress("ShellTransition");
-        if (!transAddr) transAddr = 0x007C7070;
-        uint32_t backAddr = HookEngine::ResolveNamedAddress("ShellBack");
-        if (!backAddr) backAddr = 0x007C79A0;
+        // The three shell sites come from scripts/patches.json (a signature
+        // scan with a verified fallback). A name the table cannot supply
+        // stands the shell hooks down; the timing and trigger machinery
+        // below does not depend on them.
+        const uint32_t reqAddr = HookEngine::ResolveNamedAddress("ShellRequest");
+        const uint32_t transAddr = HookEngine::ResolveNamedAddress("ShellTransition");
+        const uint32_t backAddr = HookEngine::ResolveNamedAddress("ShellBack");
 
         g_ShellRequestAddr = reqAddr;
         g_ShellTransitionAddr = transAddr;
         g_ShellBackAddr = backAddr;
 
         const BzrDistribution distribution = GetBzrDistribution();
-        if (distribution == BzrDistribution::Steam)
+        if (!reqAddr || !transAddr || !backAddr)
+        {
+            LogShimA(LogLevel::Warn, "uiperf-hooks",
+                "Shell hooks not installed: unresolved site(s) request=0x%08X transition=0x%08X back=0x%08X",
+                reqAddr, transAddr, backAddr);
+        }
+        else if (distribution == BzrDistribution::Steam)
         {
             LogShimA(LogLevel::Info, "uiperf-hooks",
                 "Steam shell hooks deferred until settled live MainScreen; request=0x%08X transition=0x%08X back=0x%08X",

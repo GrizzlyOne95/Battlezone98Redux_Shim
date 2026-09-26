@@ -23,12 +23,12 @@ namespace BZROpenShim
         constexpr size_t kBuildClassDetourLength = 5;
         constexpr size_t kBuildingGetRankDetourLength = 6;
 
-        // Redux 2.2.301 Building compatibility anchors. The string16 helper is
-        // called by BuildingClass while its ParameterDB scope is live, making
-        // it the safe point to query an additional BuildingClass key.
-        constexpr uintptr_t kBuildingClassString16Address = 0x0047B6C0u;
-        constexpr uintptr_t kBuildingCtorAddress = 0x0047E9C0u;
-        constexpr uintptr_t kParameterDbGetIntAddress = 0x005896C0u;
+        // Redux 2.2.301 Building compatibility anchors, resolved through
+        // scripts/patches.json: "BuildingClass::String16" (0x0047B6C0 on GOG),
+        // "Building::Building" (0x0047E9C0) and "ParameterDB::GetInt"
+        // (0x005896C0). The string16 helper is called by BuildingClass while
+        // its ParameterDB scope is live, making it the safe point to query an
+        // additional BuildingClass key.
         constexpr size_t kBuildingString16DetourLength = 6;
         constexpr size_t kTuggableCtorDetourLength = 5;
 
@@ -246,16 +246,34 @@ namespace BZROpenShim
                 return true;
             }
 
+            const uintptr_t parameterDbGetIntAddress =
+                HookEngine::ResolveNamedAddress("ParameterDB::GetInt");
+            const uintptr_t buildingClassString16Address =
+                HookEngine::ResolveNamedAddress("BuildingClass::String16");
+            const uintptr_t buildingCtorAddress =
+                HookEngine::ResolveNamedAddress("Building::Building");
+            if (!parameterDbGetIntAddress || !buildingClassString16Address ||
+                !buildingCtorAddress)
+            {
+                return false;
+            }
+
+            // Known mismatch, kept fail-closed: on GOG 2.2.301 the string16
+            // helper is __thiscall (push ecx; ... ret 0x10) and begins
+            // 55 8B EC 51 89 4D FC, and ParameterDB::GetInt is __thiscall too,
+            // while the hook and FnParameterDbGetInt are declared __cdecl. This
+            // guard therefore refuses the detour, and tuggable=1 support stays
+            // off on that build rather than unbalancing the stack.
             static const uint8_t string16Prologue[kBuildingString16DetourLength] =
                 { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x14 };
             static const uint8_t ctorPrologue[kTuggableCtorDetourLength] =
                 { 0x55, 0x8B, 0xEC, 0x6A, 0xFF };
             static const uint8_t parameterDbPrologue[] =
-                { 0x55, 0x8B, 0xEC };
+                { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x89, 0x4D, 0xF8 };
 
             uint8_t parameterDbBytes[sizeof(parameterDbPrologue)] = {};
             if (!HookEngine::ReadMemory(
-                    static_cast<uint32_t>(kParameterDbGetIntAddress),
+                    static_cast<uint32_t>(parameterDbGetIntAddress),
                     parameterDbBytes, sizeof(parameterDbBytes)) ||
                 std::memcmp(parameterDbBytes, parameterDbPrologue,
                             sizeof(parameterDbPrologue)) != 0)
@@ -263,12 +281,12 @@ namespace BZROpenShim
                 return false;
             }
             g_ParameterDbGetInt = reinterpret_cast<FnParameterDbGetInt>(
-                kParameterDbGetIntAddress);
+                parameterDbGetIntAddress);
 
             if (!g_BuildingClassString16Detour.trampoline &&
                 !InstallInlineDetour32(
                     g_BuildingClassString16Detour,
-                    kBuildingClassString16Address,
+                    buildingClassString16Address,
                     reinterpret_cast<void*>(&TuggableBuildingClassString16Hook),
                     kBuildingString16DetourLength,
                     string16Prologue,
@@ -283,7 +301,7 @@ namespace BZROpenShim
             if (!g_BuildingCtorDetour.trampoline &&
                 !InstallInlineDetour32(
                     g_BuildingCtorDetour,
-                    kBuildingCtorAddress,
+                    buildingCtorAddress,
                     reinterpret_cast<void*>(&TuggableBuildingCtorHook),
                     kTuggableCtorDetourLength,
                     ctorPrologue,
