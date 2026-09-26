@@ -47,6 +47,16 @@ namespace BZROpenShim
 
     void InstallShadowFarOverrideIfPossible();
 
+    using FnEngineFlameAddFlame = void(__thiscall*)(void* self, const void* transform, float scale);
+    using FnEngineFlameControl = void(__thiscall*)(void* self);
+    using FnEngineFlameSubmit = void(__thiscall*)(void* self, void* camera);
+    using FnEngineFlameResolveTexture = int(__cdecl*)(BzrString* textureName);
+    using FnExuGetTeamEngineFlameColor = int(__cdecl*)(int team);
+    extern FnEngineFlameAddFlame g_BzrFn_EngineFlameAddFlame;
+    extern FnEngineFlameControl g_BzrFn_EngineFlameControl;
+    extern FnEngineFlameResolveTexture g_BzrFn_EngineFlameResolveTexture;
+    extern FnEngineFlameSubmit g_BzrFn_EngineFlameSubmit;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -535,6 +545,44 @@ namespace BZROpenShim
         bool ResolveRawMouseInputPreference(const char*& outSource);
 
         // --- Shadow far distance correction (shadow_far_distance_hook.cpp) -----
+
+        // --- Engine flames (engine_flames.cpp) ---------------------------------
+        inline constexpr size_t kEngineFlameObjectSize = 0x1250;
+        // GameObject -> ODF name chain, verified on the live GOG exe from GetOdf
+        // (0x004FFFD0): the class accessor is a virtual on the sub-object at
+        // GameObject+0x18 (vtable[0] returns GameObjectClass*), and the ODF name
+        // is an INLINE char[8] buffer at GameObjectClass+0x30 (read by address,
+        // not a pointer). The unit's faction is the first character of that name
+        // (a=NSDF, s=CCA, c=CRA, b=Black Dog). Note: the char* at class+0x18 that
+        // GetClassLabel returns is the gameplay category ("wingman", "tank"...),
+        // which has no faction prefix -- do not use it here.
+        inline constexpr size_t kGameObjectClassSubObjOffset = 0x18;
+        inline constexpr size_t kGameObjectClassOdfNameMax = 8;
+        // Faction jet flames (openshim.ini [Display] JetFlames). A global cosmetic
+        // preference: when on, a unit's engine flame is tinted by its faction
+        // (first char of the ODF label) for any team an EXU script has NOT already
+        // colored. Purely visual/local, so it applies everywhere including MP.
+        inline constexpr bool kJetFlamesEnabledDefault = false;
+        void TickChunkProxyDebug(
+            void* currentCamera = nullptr,
+            bool allowManualSubmit = true);
+        bool TryGetGameObjectWorldPosition(void* gameObject, float (&outPosition)[3]);
+        extern int g_EngineFlamePrimaryBlackDogTexture;
+        extern int g_EngineFlamePrimaryBlueTexture;
+        extern int g_EngineFlamePrimaryGreenTexture;
+        extern void* g_EngineFlamePrimaryManager;
+        extern int g_EngineFlamePrimaryOrangeTexture;
+        extern int g_EngineFlamePrimaryRedTexture;
+        extern void* g_EngineFlameSecondaryManager;
+        extern bool g_EngineFlameVariantsInitAttempted;
+        extern bool g_EngineFlameVariantsInitialized;
+        extern bool g_EngineFlameVtableHooksInstalled;
+        extern bool g_JetFlamesConfigInitialized;
+        extern bool g_LoggedEngineFlameTargetFailure;
+        extern bool g_LoggedEngineFlameVtableHook;
+        void ResolveEngineFlameRuntimeTargets();
+        bool TryGetCraftOdfName(void* craftPtr, char* out, size_t outSize);
+        void InitializeJetFlamesConfig();
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
