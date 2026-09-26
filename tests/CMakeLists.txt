@@ -616,3 +616,19 @@ else()
     target_compile_options(scene_depth_facts_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 add_test(NAME scene_depth_facts_tests COMMAND scene_depth_facts_tests)
+
+# The frustum-cull / restored-bounds table (audit P1-3): an entry leaves when
+# its mesh is destroyed, a reused address with a different identity starts
+# over, and deletion is backward-shift so probe chains and headroom survive.
+# Header-only and engine-free, so it runs on both lanes.
+add_executable(remembered_mesh_bounds_table_tests
+    remembered_mesh_bounds_table_tests.cpp
+)
+target_include_directories(remembered_mesh_bounds_table_tests PRIVATE ../include)
+target_compile_features(remembered_mesh_bounds_table_tests PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(remembered_mesh_bounds_table_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(remembered_mesh_bounds_table_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME remembered_mesh_bounds_table_tests COMMAND remembered_mesh_bounds_table_tests)
