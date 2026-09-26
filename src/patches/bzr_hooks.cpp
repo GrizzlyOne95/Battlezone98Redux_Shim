@@ -351,6 +351,9 @@ namespace BZROpenShim
     static FnGetPlayerHandle g_BzrFn_GetPlayerHandle = nullptr;
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
     static volatile long g_StaleGameObjectHandleLogBudget = 16;
+    // GameObject::GetHandle, resolved by ResolveBzrHooks from scripts/patches.json
+    // ("GameObject::GetHandle"); 0 until then, and every caller stands down on 0.
+    static uintptr_t g_GameObjectGetHandleAddr = 0;
 
     // Correct GOG handle->object conversion. The engine's GameObject pool is a
     // fixed 0x1000-slot table based at 0x0260DB20 with a 0x400-byte stride; a
@@ -369,9 +372,11 @@ namespace BZROpenShim
         void* obj = reinterpret_cast<void*>(
             static_cast<uintptr_t>(slot) * 0x400u + 0x0260DB20u);
         using GetHandleThiscallFn = uint32_t(__thiscall*)(void*);
+        if (g_GameObjectGetHandleAddr == 0)
+            return nullptr;
         __try
         {
-            if (reinterpret_cast<GetHandleThiscallFn>(0x00462380u)(obj) ==
+            if (reinterpret_cast<GetHandleThiscallFn>(g_GameObjectGetHandleAddr)(obj) ==
                 static_cast<uint32_t>(handle))
                 return obj;
         }
@@ -490,8 +495,9 @@ namespace BZROpenShim
     static FnGameObjectClassBuild g_BzrFn_SprayEmitterBuildOriginal = nullptr;
     static FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate = nullptr;
     using FnResolveObj76GameObject = void*(__cdecl*)(void*);
-    static FnResolveObj76GameObject g_BzrFn_ResolveObj76GameObject =
-        reinterpret_cast<FnResolveObj76GameObject>(0x00479F30);
+    // Resolved by ResolveBzrHooks from scripts/patches.json
+    // ("GameObject::FromObj76"); null until then, and every caller checks.
+    static FnResolveObj76GameObject g_BzrFn_ResolveObj76GameObject = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectFriendP = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectEnemyP = nullptr;
     static FnMatrixInverse g_BzrFn_MatrixInverse = nullptr;
@@ -2745,8 +2751,9 @@ namespace BZROpenShim
         static constexpr const char* kChunkPayloadModRelativeDirName = "chunkMeshes";
         static constexpr const char* kChunkPayloadModRelativeDirNameAlt = "Chunks";
         static constexpr const char* kChunkPayloadResourceLocationType = "FileSystem";
-        static FnPlayGlobalSound g_BzrFn_PlayGlobalSound =
-            reinterpret_cast<FnPlayGlobalSound>(0x0043AA30);
+        // Resolved by ResolveBzrHooks from scripts/patches.json
+        // ("PlayGlobalSound"); null until then, and the caller checks.
+        static FnPlayGlobalSound g_BzrFn_PlayGlobalSound = nullptr;
         static bool g_TargetReticlePopupConfigInitialized = false;
         static TargetReticlePopupMode g_TargetReticlePopupMode = TargetReticlePopupMode::Default;
         // User-config baseline (see under-attack alert note above).
@@ -12925,9 +12932,8 @@ namespace BZROpenShim
         // the multiplayer session worker, which is the earliest reader.
         static bool g_CareerStatsSinkRegistered = false;
 
-        // GameObject::GetHandle. Already relied on by GameObjectFromHandleGog
-        // above, which round-trips through it to reject stale pool slots.
-        static constexpr uintptr_t kGogGameObjectGetHandleAddr = 0x00462380;
+        // GameObject::GetHandle comes from g_GameObjectGetHandleAddr, the same
+        // resolve GameObjectFromHandleGog above round-trips through.
         static constexpr size_t kGameObjectHealthRatioOffset = 0x200;
         // complete+0xF4 is the object-state pointer; see
         // GameObjectHandleGetObjHardened above, which reads the same field.
@@ -12974,14 +12980,14 @@ namespace BZROpenShim
         static bool TryGetGameObjectHandleValue(void* objectPtr, int& outHandle)
         {
             outHandle = 0;
-            if (!objectPtr)
+            if (!objectPtr || g_GameObjectGetHandleAddr == 0)
                 return false;
 
             using GetHandleThiscallFn = uint32_t(__thiscall*)(void*);
             __try
             {
                 outHandle = static_cast<int>(
-                    reinterpret_cast<GetHandleThiscallFn>(kGogGameObjectGetHandleAddr)(objectPtr));
+                    reinterpret_cast<GetHandleThiscallFn>(g_GameObjectGetHandleAddr)(objectPtr));
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -18170,7 +18176,6 @@ namespace BZROpenShim
         static constexpr uint8_t kUnitTurboEndHookExpected[9] = {
             0x8B, 0x55, 0x90, 0x8B, 0x85, 0x78, 0xFF, 0xFF, 0xFF
         };
-        static constexpr uintptr_t kGameObjectGetHandleAddr = 0x00462380;
         static constexpr bool kGlobalTurboEnabledDefault = false;
 
         // The comiss operand is redirected to this constant (EXU uses 0.9f). Must
@@ -18709,12 +18714,12 @@ namespace BZROpenShim
         static bool TryGetTurboObjectHandle(void* object, uint32_t& outHandle)
         {
             outHandle = 0;
-            if (!object)
+            if (!object || g_GameObjectGetHandleAddr == 0)
                 return false;
             __try
             {
                 outHandle = reinterpret_cast<FnGameObjectGetHandle>(
-                    kGameObjectGetHandleAddr)(object);
+                    g_GameObjectGetHandleAddr)(object);
                 return outHandle != 0;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -34674,7 +34679,8 @@ namespace BZROpenShim
         g_BzrFn_UiSetActive = reinterpret_cast<FnUiSetActive>(0x007D3310);
         g_BzrFn_AddChild = reinterpret_cast<FnUiAddChild>(0x007D2110);
         g_BzrFn_UiDialogSetEnabled = reinterpret_cast<FnUiDialogAction>(0x007C9170);
-        g_BzrFn_UiDialogAdvance = reinterpret_cast<FnUiDialogAction>(0x007C7930);
+        g_BzrFn_UiDialogAdvance = reinterpret_cast<FnUiDialogAction>(
+            HookEngine::ResolveNamedAddress("ShellRequest")); // the same site ui_performance_hooks resolves
         g_BzrFn_KeyConfigSetKey = reinterpret_cast<FnKeyConfigSetKey>(kGogKeyConfigSetKeyAddr);
         g_BzrFn_WriteInputMapKey = reinterpret_cast<FnWriteInputMapKey>(kGogWriteInputMapKeyAddr);
         g_BzrFn_MapKeyNameFromCode = reinterpret_cast<FnMapKeyNameFromCode>(kGogMapKeyNameFromCodeAddr);
@@ -34707,10 +34713,20 @@ namespace BZROpenShim
         g_BzrFn_VehicleFixOrig = reinterpret_cast<void*>(0x00481AF0);
         // The live Redux runtime maps these multiplayer flag helpers at the
         // same settled addresses on current GOG and Steam builds.
-        g_BzrFn_GetLocalPlayerNetId = reinterpret_cast<FnGetLocalPlayerNetId>(0x00572D90);
+        g_BzrFn_GetLocalPlayerNetId = reinterpret_cast<FnGetLocalPlayerNetId>(
+            HookEngine::ResolveNamedAddress("GetLocalPlayerNetId"));
         g_BzrFn_NetPlayerSetData = reinterpret_cast<FnNetPlayerSetData>(0x00575570);
         g_BzrFn_NetPlayerSetFlagBuffer = reinterpret_cast<FnNetPlayerSetFlagBuffer>(0x00575810);
         g_BzrFn_SetMyFlag = reinterpret_cast<FnSetMyFlag>(0x0056FA50);
+        // Called addresses that used to be literals in this file (audit P1-1,
+        // first slice). The table's scan verifies each fallback; a miss
+        // leaves the pointer null or the address 0, and every caller treats
+        // that as "stand down".
+        g_BzrFn_ResolveObj76GameObject = reinterpret_cast<FnResolveObj76GameObject>(
+            HookEngine::ResolveNamedAddress("GameObject::FromObj76"));
+        g_BzrFn_PlayGlobalSound = reinterpret_cast<FnPlayGlobalSound>(
+            HookEngine::ResolveNamedAddress("PlayGlobalSound"));
+        g_GameObjectGetHandleAddr = HookEngine::ResolveNamedAddress("GameObject::GetHandle");
 
         // Steam's wrapped executable still maps these helpers at the same live
         // runtime addresses as GOG on the current 2.2.301 build.
