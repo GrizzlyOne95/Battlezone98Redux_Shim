@@ -154,6 +154,7 @@ using FnOgreProcessVisibleObject =
     void(__thiscall*)(void*, void*, void*, bool, void*);
 using FnOgreEntityUpdateRenderQueueBody = void(__thiscall*)(void*, void*);
 using FnOgreMeshSetBounds = void(__thiscall*)(void*, const void*, bool);
+using FnOgreMeshDestructor = void(__thiscall*)(void*);
 using FnOgreCameraIsVisibleBox = bool(__thiscall*)(void*, const void*, void*);
 using FnOgreMovableGetWorldBoundingBox = const void*(__thiscall*)(void*, bool);
 using FnOgreMovableGetFullTransform = const void*(__thiscall*)(const void*);
@@ -169,9 +170,11 @@ using FnOgreSceneNodeGetWorldAabb = const void*(__thiscall*)(const void*);
 static InlineDetour32 g_ProcessVisibleObjectDetour;
 static InlineDetour32 g_EntityUpdateRenderQueueDetour;
 static InlineDetour32 g_MeshSetBoundsDetour;
+static InlineDetour32 g_MeshDestructorDetour;
 static FnOgreProcessVisibleObject g_OgreFn_ProcessVisibleObjectOriginal = nullptr;
 static FnOgreEntityUpdateRenderQueueBody g_OgreFn_EntityUpdateRenderQueueOriginal = nullptr;
 static FnOgreMeshSetBounds g_OgreFn_MeshSetBoundsOriginal = nullptr;
+static FnOgreMeshDestructor g_OgreFn_MeshDestructorOriginal = nullptr;
 static FnOgreCameraIsVisibleBox g_OgreFn_CameraIsVisibleBox = nullptr;
 static FnOgreMovableGetWorldBoundingBox g_OgreFn_MovableGetWorldBoundingBox = nullptr;
 static FnOgreMovableGetFullTransform g_OgreFn_MovableGetFullTransform = nullptr;
@@ -216,114 +219,78 @@ constexpr uint8_t kBoundsTracePerMeshLimit = 3;
 
 // --------------------------------------------- remembered asset bounds ------
 //
-// Fixed capacity, no allocation on any hot path, no unbounded growth. A mesh
-// that does not fit simply never gets a recovered box, so its entities are
-// submitted exactly as they are today.
-
-struct RememberedMeshBounds
-{
-    const void* mesh = nullptr;
-    // The most recent finite box the mesh was given. Redux rewrites this on
-    // every spawn (see the asset box below), so it is a working value and not a
-    // statement about the asset.
-    float minimum[3] = {};
-    float maximum[3] = {};
-    // The *first* finite box the mesh was given, which is the one
-    // MeshSerializerImpl::readBoundsInfo set straight out of M_MESH_BOUNDS.
-    // Every restored-bounds policy is derived from this and never from the
-    // working value, because Redux's own per-spawn scale(2,2,2) compounds.
-    float assetMinimum[3] = {};
-    float assetMaximum[3] = {};
-    bool haveAsset = false;
-    // Cached "is this mesh only ever a first-person view model" verdict, so the
-    // name test runs once per mesh rather than once per _setBounds call.
-    bool restoreClassified = false;
-    bool restoreExcluded = false;
-    // Per-mesh trace budget. Without it a 16x16 terrain grid spends the whole
-    // global budget before a single craft has spawned.
-    uint8_t tracedFinite = 0;
-    uint8_t tracedInfinite = 0;
-    // Set the first time this mesh is handed an EXTENT_INFINITE box. Nothing is
-    // repaired until that has happened, so meshes the defect never touched --
-    // terrain clusters, buildings, ordnance, effects -- keep bit-identical
-    // bounds and cannot be culled differently than they are today.
-    bool sawInfinite = false;
-};
-
-// Open-addressed, power-of-two, linear probe. A linear scan was measured to
-// cost real frame time once a mission has a few hundred meshes loaded: the
-// lookup runs for every infinitely-bounded entity on every camera traversal.
-constexpr uint32_t kRememberedMeshBoundsCapacity = 1024;   // must stay a power of two
-static_assert(
-    (kRememberedMeshBoundsCapacity & (kRememberedMeshBoundsCapacity - 1)) == 0,
-    "remembered-bounds table must be a power of two");
-
-static RememberedMeshBounds g_RememberedMeshBounds[kRememberedMeshBoundsCapacity];
-static uint32_t g_RememberedMeshBoundsUsed = 0;
-static uint64_t g_RememberedMeshBoundsDropped = 0;
-
-static uint32_t RememberedMeshBoundsSlot(const void* mesh)
-{
-    // Mesh pointers are allocator-aligned, so the low bits carry no entropy.
-    uint32_t hash = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mesh) >> 4);
-    hash *= 2654435761u;
-    return hash & (kRememberedMeshBoundsCapacity - 1);
-}
+// The table itself lives in include/remembered_mesh_bounds_table.h so its
+// probing, identity reset and deletion are host-tested. Fixed capacity, no
+// allocation on any hot path, no unbounded growth: a mesh that does not fit
+// simply never gets a recovered box, so its entities are submitted exactly as
+// they are today. An entry leaves the table when its mesh is destroyed (the
+// Mesh::~Mesh detour below), so an address the allocator hands to a later
+// mesh never inherits an earlier mesh's asset box; and a remember whose name
+// hash differs from the record's starts the record over, in case it ever did.
+constexpr uint32_t kRememberedMeshBoundsCapacity = 1024;
+static RememberedMeshBoundsTable<kRememberedMeshBoundsCapacity> g_RememberedMeshBounds;
 
 static const RememberedMeshBounds* FindRememberedMeshBounds(const void* mesh)
 {
-    uint32_t slot = RememberedMeshBoundsSlot(mesh);
-    for (uint32_t probe = 0; probe < kRememberedMeshBoundsCapacity; ++probe)
-    {
-        const RememberedMeshBounds& candidate = g_RememberedMeshBounds[slot];
-        if (!candidate.mesh)
-            return nullptr;
-        if (candidate.mesh == mesh)
-            return &candidate;
-        slot = (slot + 1) & (kRememberedMeshBoundsCapacity - 1);
-    }
-    return nullptr;
+    return g_RememberedMeshBounds.Find(mesh);
 }
 
 static RememberedMeshBounds* FindRememberedMeshBoundsMutable(const void* mesh)
 {
-    return const_cast<RememberedMeshBounds*>(FindRememberedMeshBounds(mesh));
+    return g_RememberedMeshBounds.FindMutable(mesh);
+}
+
+// FNV-1a of the resource name: the identity a record is checked against on
+// every remember, so a mesh that reuses a freed address starts its record over
+// even if the destructor detour never ran for the old one. 0 when the name is
+// unavailable, which the table treats as "unknown", never as a mismatch.
+static uint32_t MeshIdentityHash(const void* mesh)
+{
+    if (!g_OgreFn_ResourceGetName)
+        return 0;
+    __try
+    {
+        const std::string& name = g_OgreFn_ResourceGetName(mesh);
+        uint32_t hash = 2166136261u;
+        for (size_t i = 0; i < name.size(); ++i)
+        {
+            hash ^= static_cast<unsigned char>(name[i]);
+            hash *= 16777619u;
+        }
+        return hash ? hash : 1u;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return 0;
+    }
 }
 
 static void RememberMeshBounds(const void* mesh, const float* box)
 {
     if (!mesh)
         return;
-    // Leave headroom so probing always terminates on an empty slot.
-    if (g_RememberedMeshBoundsUsed >= (kRememberedMeshBoundsCapacity * 3) / 4)
+    g_RememberedMeshBounds.Remember(mesh, box, MeshIdentityHash(mesh));
+}
+
+// Mesh::~Mesh. The record goes before the object does, so an address the
+// allocator hands to a later mesh never inherits this one's asset box. The
+// table is ours and cannot fault; the original runs exactly as before.
+static uint64_t g_RememberedMeshBoundsForgottenLogged = 0;
+static void __fastcall MeshDestructorHook(void* mesh, void* /*unusedEdx*/)
+{
+    if (g_RememberedMeshBounds.Forget(mesh) && g_RememberedMeshBoundsForgottenLogged == 0)
     {
-        ++g_RememberedMeshBoundsDropped;
-        return;
+        g_RememberedMeshBoundsForgottenLogged = 1;
+        LogShimA(
+            LogLevel::Info,
+            "frustumcull",
+            "[FRUSTUMCULL] first remembered mesh destroyed at %p; its record is forgotten "
+            "(live=%u)",
+            mesh,
+            g_RememberedMeshBounds.Live());
     }
-    uint32_t slot = RememberedMeshBoundsSlot(mesh);
-    for (uint32_t probe = 0; probe < kRememberedMeshBoundsCapacity; ++probe)
-    {
-        RememberedMeshBounds& candidate = g_RememberedMeshBounds[slot];
-        if (!candidate.mesh)
-        {
-            candidate.mesh = mesh;
-            ++g_RememberedMeshBoundsUsed;
-        }
-        if (candidate.mesh == mesh)
-        {
-            std::memcpy(candidate.minimum, box, sizeof(float) * 3);
-            std::memcpy(candidate.maximum, box + 3, sizeof(float) * 3);
-            if (!candidate.haveAsset)
-            {
-                std::memcpy(candidate.assetMinimum, box, sizeof(float) * 3);
-                std::memcpy(candidate.assetMaximum, box + 3, sizeof(float) * 3);
-                candidate.haveAsset = true;
-            }
-            return;
-        }
-        slot = (slot + 1) & (kRememberedMeshBoundsCapacity - 1);
-    }
-    ++g_RememberedMeshBoundsDropped;
+    if (g_OgreFn_MeshDestructorOriginal)
+        g_OgreFn_MeshDestructorOriginal(mesh);
 }
 
 // ------------------------------------------------------------- resolving ----
@@ -1150,7 +1117,7 @@ static void ReportRestoreBoundsIfDue()
         static_cast<unsigned long long>(g_RestoreBoundsPinned),
         static_cast<unsigned long long>(g_RestoreBoundsExcluded),
         static_cast<unsigned long long>(g_RestoreBoundsUnknownAsset),
-        g_RememberedMeshBoundsUsed,
+        g_RememberedMeshBounds.Live(),
         g_RestoreCraftBoundsScale,
         g_RestoreCraftBoundsAllMeshes ? "all" : "shared",
         g_RestoreCraftBoundsObserveOnly
@@ -1273,7 +1240,7 @@ static void ReportFrustumCullIntervalIfDue()
         static_cast<unsigned long long>(unrecoverable),
         static_cast<unsigned long long>(nonEntity),
         static_cast<unsigned long long>(shadowSkipped),
-        g_RememberedMeshBoundsUsed,
+        g_RememberedMeshBounds.Live(),
         g_FrustumCullMargin);
 
     if (g_FrustumCullCensusEnabled)
@@ -1393,6 +1360,7 @@ static void InstallEntityFrustumCullingIfEnabled()
         "?_updateRenderQueue@Entity@Ogre@@UAEXPAVRenderQueue@2@@Z");
     void* const meshSetBoundsBody = ResolveOgreExportBody(
         "?_setBounds@Mesh@Ogre@@QAEXABVAxisAlignedBox@2@_N@Z");
+    void* const meshDestructorBody = ResolveOgreExportBody("??1Mesh@Ogre@@UAE@XZ");
     g_OgreFn_CameraIsVisibleBox = reinterpret_cast<FnOgreCameraIsVisibleBox>(
         ResolveOgreExportBody(
             "?isVisible@Camera@Ogre@@UBE_NABVAxisAlignedBox@2@PAW4FrustumPlane@2@@Z"));
@@ -1443,18 +1411,20 @@ static void InstallEntityFrustumCullingIfEnabled()
         g_EntityFrustumCullStoodDown = true;
         return;
     }
-    if (!meshSetBoundsBody || (g_EntityFrustumCullEnabled && !cullExportsReady))
+    if (!meshSetBoundsBody || !meshDestructorBody ||
+        (g_EntityFrustumCullEnabled && !cullExportsReady))
     {
         g_EntityFrustumCullStoodDown = true;
         LogShimA(
             LogLevel::Warn,
             "frustumcull",
             "[FRUSTUMCULL] required Ogre exports unavailable (process=%s entityRq=%s "
-            "setBounds=%s isVisible=%s worldAabb=%s transform=%s getMesh=%s); "
+            "setBounds=%s meshDtor=%s isVisible=%s worldAabb=%s transform=%s getMesh=%s); "
             "culling stood down",
             processVisibleObjectBody ? "yes" : "no",
             entityUpdateRenderQueueBody ? "yes" : "no",
             meshSetBoundsBody ? "yes" : "no",
+            meshDestructorBody ? "yes" : "no",
             g_OgreFn_CameraIsVisibleBox ? "yes" : "no",
             g_OgreFn_MovableGetWorldBoundingBox ? "yes" : "no",
             g_OgreFn_MovableGetFullTransform ? "yes" : "no",
@@ -1481,6 +1451,13 @@ static void InstallEntityFrustumCullingIfEnabled()
     {
         0x55, 0x8B, 0xEC, 0x8B, 0x55, 0x08
     };
+    // push ebp; mov ebp,esp; push -1 (EH prologue start)  -- 5 bytes; the same
+    // shape the scene-teardown detours guard on destroyAllMovableObjects.
+    // Verified on the shipped OgreMain.dll (GOG and Steam carry the same file).
+    static const uint8_t kExpectedMeshDestructor[] =
+    {
+        0x55, 0x8B, 0xEC, 0x6A, 0xFF
+    };
 
     struct DetourRequest
     {
@@ -1491,14 +1468,18 @@ static void InstallEntityFrustumCullingIfEnabled()
         const uint8_t* expected;
         size_t expectedLength;
     };
-    // Mesh::_setBounds is needed by both features. The other two exist only
-    // to suppress submissions, so with restoration alone they are not patched
-    // and the render traversal keeps its stock instruction stream.
+    // Mesh::_setBounds and Mesh::~Mesh are needed by both features: one fills
+    // the remembered-bounds table, the other empties it. The last two exist
+    // only to suppress submissions, so with restoration alone they are not
+    // patched and the render traversal keeps its stock instruction stream.
     const DetourRequest allRequests[] =
     {
         { "Mesh::_setBounds", &g_MeshSetBoundsDetour, meshSetBoundsBody,
           reinterpret_cast<void*>(MeshSetBoundsHook),
           kExpectedMeshSetBounds, sizeof(kExpectedMeshSetBounds) },
+        { "Mesh::~Mesh", &g_MeshDestructorDetour, meshDestructorBody,
+          reinterpret_cast<void*>(MeshDestructorHook),
+          kExpectedMeshDestructor, sizeof(kExpectedMeshDestructor) },
         { "Entity::_updateRenderQueue", &g_EntityUpdateRenderQueueDetour,
           entityUpdateRenderQueueBody,
           reinterpret_cast<void*>(EntityUpdateRenderQueueHook),
@@ -1508,7 +1489,7 @@ static void InstallEntityFrustumCullingIfEnabled()
           reinterpret_cast<void*>(ProcessVisibleObjectHook),
           kExpectedProcessVisibleObject, sizeof(kExpectedProcessVisibleObject) },
     };
-    const size_t requestCount = g_EntityFrustumCullEnabled ? 3u : 1u;
+    const size_t requestCount = g_EntityFrustumCullEnabled ? 4u : 2u;
 
     for (size_t index = 0; index < requestCount; ++index)
     {
@@ -1539,6 +1520,8 @@ static void InstallEntityFrustumCullingIfEnabled()
 
     g_OgreFn_MeshSetBoundsOriginal = reinterpret_cast<FnOgreMeshSetBounds>(
         g_MeshSetBoundsDetour.trampoline);
+    g_OgreFn_MeshDestructorOriginal = reinterpret_cast<FnOgreMeshDestructor>(
+        g_MeshDestructorDetour.trampoline);
     if (g_EntityFrustumCullEnabled)
     {
         g_OgreFn_EntityUpdateRenderQueueOriginal =
@@ -1555,7 +1538,7 @@ static void InstallEntityFrustumCullingIfEnabled()
         "[FRUSTUMCULL] installed privateCull=%s restoreBounds=%s margin=%.2f "
         "restoreScale=%.2f restoreScope=%s restoreMode=%s trace=%s "
         "processVisibleObject=0x%p entityUpdateRenderQueue=0x%p meshSetBounds=0x%p "
-        "optOut=OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING",
+        "meshDtor=0x%p optOut=OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING",
         g_EntityFrustumCullEnabled ? "on" : "off",
         g_RestoreCraftBoundsEnabled ? "on" : "off",
         g_FrustumCullMargin,
@@ -1567,5 +1550,6 @@ static void InstallEntityFrustumCullingIfEnabled()
         g_BoundsTraceEnabled ? "on" : "off",
         g_EntityFrustumCullEnabled ? processVisibleObjectBody : nullptr,
         g_EntityFrustumCullEnabled ? entityUpdateRenderQueueBody : nullptr,
-        meshSetBoundsBody);
+        meshSetBoundsBody,
+        meshDestructorBody);
 }
