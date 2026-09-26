@@ -284,11 +284,29 @@ namespace BZROpenShim
             }
         }
 
+        // Asked once per renderable per frame from the light-list hook; the
+        // module set only changes at startup, so answer from a one-second
+        // cache instead of a loader lookup per renderable.
+        bool Dx11RenderSystemLoaded()
+        {
+            static std::atomic<ULONGLONG> s_checkedTick{ 0 };
+            static std::atomic<bool> s_loaded{ false };
+            const ULONGLONG now = GetTickCount64();
+            const ULONGLONG last = s_checkedTick.load(std::memory_order_relaxed);
+            if (last == 0 || now - last >= 1000)
+            {
+                s_loaded.store(GetModuleHandleA("RenderSystem_Direct3D11.dll") != nullptr,
+                               std::memory_order_relaxed);
+                s_checkedTick.store(now != 0 ? now : 1, std::memory_order_relaxed);
+            }
+            return s_loaded.load(std::memory_order_relaxed);
+        }
+
         bool GetEnhancedScheme(void* sceneManager, char* schemeBuffer,
                                std::size_t schemeBufferSize, std::size_t* outBudget)
         {
             if (!sceneManager || !schemeBuffer || schemeBufferSize == 0 || !outBudget
-                || !GetModuleHandleA("RenderSystem_Direct3D11.dll"))
+                || !Dx11RenderSystemLoaded())
             {
                 return false;
             }
