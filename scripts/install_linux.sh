@@ -402,7 +402,9 @@ deploy_matched() {
     if [[ -n "$RENDER_SRC" ]]; then
         local render_target="$game_dir/openshim/renderer/enhanced"
         mkdir -p "$render_target"
-        cp -f "$RENDER_SRC"/* "$render_target/"
+        # Recursive, like Copy-Item -Recurse on Windows: a subdirectory in the
+        # payload would otherwise abort the deploy half way under set -e.
+        cp -Rf "$RENDER_SRC"/. "$render_target/"
         echo "  deployed Enhanced renderer resources"
     fi
 
@@ -502,6 +504,8 @@ fi
 # Only a checkout that supplied its own steam_game_paths.sh counts as a local
 # repo; a piped run resolves script_dir to the caller's cwd, which is not one.
 repo_root=""
+# The extracted release bundle, when that is where the artifacts came from.
+suite_root=""
 if [[ -n "$script_dir" && "$src" == "$script_dir" ]]; then
     repo_root="$(cd "$script_dir/.." 2>/dev/null && pwd || true)"
 fi
@@ -531,6 +535,7 @@ elif [[ -n "$repo_root" ]] && find_artifact_set "$repo_root"; then
         echo "The Enhanced renderer will stay unavailable in this install." >&2
     fi
 elif download_suite "$work/bundle" && find_artifact_set "$work/bundle/suite"; then
+    suite_root="$work/bundle/suite"
     echo "Using verified release bundle: $DLL"
     if [[ -z "$RENDER_SRC" ]]; then
         echo "error: the release bundle carries no Enhanced renderer resource set." >&2
@@ -570,15 +575,36 @@ done
 wrapper_ready=0
 wrapper_dir="${XDG_DATA_HOME:-$HOME/.local/share}/openshim"
 conf_dir="${XDG_CONFIG_HOME:-$HOME/.config}/openshim"
+# The wrapper comes from, best first: a local checkout; upload/ inside the
+# release bundle, which the bundle's published SHA-256 already verified; a raw
+# download pinned to the commit that bundle names (bundles published before
+# they carried the wrapper). Only with no bundle at all does the download
+# follow $REF, and then it says the file is unverified. This is the twin of
+# Update-WrapperFiles in install_windows.ps1; keep the two in step.
 wrapper_src=""
 if [[ -n "$repo_root" && -f "$repo_root/upload/openshim_wrap.sh" ]]; then
     wrapper_src="$repo_root/upload/openshim_wrap.sh"
+elif [[ -n "$suite_root" && -s "$suite_root/upload/openshim_wrap.sh" ]]; then
+    wrapper_src="$suite_root/upload/openshim_wrap.sh"
+    echo "Uploader wrapper taken from the verified release bundle."
 elif [[ -n "${OPENSHIM_WEBHOOK:-}" || -f "$wrapper_dir/openshim_wrap.sh" ]]; then
-    if download_to "https://raw.githubusercontent.com/${REPO_SLUG}/${REF}/upload/openshim_wrap.sh" \
+    wrapper_ref="$REF"
+    suite_commit=""
+    if [[ -n "$suite_root" && -f "$suite_root/release_metadata.json" ]]; then
+        suite_commit="$(sed -n 's/.*"Commit"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F]\{40\}\)".*/\1/p' \
+            "$suite_root/release_metadata.json" | head -n 1)"
+    fi
+    if [[ -n "$suite_commit" ]]; then
+        wrapper_ref="$suite_commit"
+        echo "Uploader wrapper pinned to release commit ${suite_commit:0:8} (bundle predates shipping it)."
+    else
+        echo "Warning: uploader wrapper fetched from $REPO_SLUG@$REF with no release bundle to pin or verify it against." >&2
+    fi
+    if download_to "https://raw.githubusercontent.com/${REPO_SLUG}/${wrapper_ref}/upload/openshim_wrap.sh" \
             "$work/openshim_wrap.sh" && [[ -s "$work/openshim_wrap.sh" ]]; then
         wrapper_src="$work/openshim_wrap.sh"
     else
-        echo "Warning: could not fetch upload/openshim_wrap.sh from $REPO_SLUG@$REF." >&2
+        echo "Warning: could not fetch upload/openshim_wrap.sh from $REPO_SLUG@$wrapper_ref." >&2
     fi
 fi
 wrapper_ver_of() {

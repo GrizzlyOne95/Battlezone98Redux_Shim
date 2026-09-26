@@ -147,8 +147,7 @@ target_compile_features(patch_registration_tests PRIVATE cxx_std_20)
 target_compile_definitions(patch_registration_tests PRIVATE
     BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json"
     BZR_PATCHES_H="${CMAKE_CURRENT_SOURCE_DIR}/../include/patches.h"
-    BZR_PATCHER_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/engine/patcher.cpp"
-    BZR_BZR_HOOKS_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/bzr_hooks.cpp")
+    BZR_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../src")
 
 # Pins the x86-32 length decoder that InstallInlineDetour32 uses to refuse
 # steals that split an instruction. Pure byte tables, no engine code.
@@ -481,6 +480,25 @@ else()
     target_compile_options(odf_item_prologue_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 add_test(NAME odf_item_prologue_tests COMMAND odf_item_prologue_tests)
+
+# Lock arithmetic of the ODF item detours against a fake engine (audit P1-7):
+# a cached UseItem hit must still reach the engine, so the one-for-one
+# UnlockItem forwards never drive its lock count below zero, and every holder
+# served while a feature is armed has a record to release. Windows-only: the
+# detours are __cdecl over SEH-guarded engine calls.
+if(WIN32 AND MSVC)
+    add_executable(odf_item_hooks_tests
+        odf_item_hooks_tests.cpp
+        ../src/patches/odf_item_hooks.cpp
+        ../src/patches/odf_compat.cpp
+        ../src/engine/shim_log_sink.cpp
+        ../src/engine/shim_log_client.cpp)
+    target_include_directories(odf_item_hooks_tests PRIVATE ../include)
+    target_compile_features(odf_item_hooks_tests PRIVATE cxx_std_20)
+    target_compile_definitions(odf_item_hooks_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(odf_item_hooks_tests PRIVATE /W4 /WX)
+    add_test(NAME odf_item_hooks_tests COMMAND odf_item_hooks_tests)
+endif()
 # Render-effect intent (the EXU-facing renderer boundary). Engine-independent
 # by construction: the whole requested/supported/effective decision lives in
 # src/engine/render_effect_intent.cpp with no Windows, D3D11 or Ogre in it, and
@@ -522,6 +540,21 @@ if(WIN32 AND MSVC)
         BZROPENSHIM_EXPORTS _CRT_SECURE_NO_WARNINGS)
     target_compile_options(openshim_sdk_thunk_tests PRIVATE /W4 /WX)
     add_test(NAME openshim_sdk_thunk_tests COMMAND openshim_sdk_thunk_tests)
+endif()
+
+# The SDK record copy honours the caller's declared capacity (audit P1-8):
+# pollEvent and captureDeveloperSnapshot must never write past the record the
+# caller's header defined and must say how much they filled. Pins the v2
+# layouts (120 / 96 bytes). Windows-only because include/BZROpenShim.h
+# carries __declspec.
+if(WIN32 AND MSVC)
+    add_executable(openshim_sdk_record_copy_tests
+        openshim_sdk_record_copy_tests.cpp)
+    target_include_directories(openshim_sdk_record_copy_tests PRIVATE ../include)
+    target_compile_features(openshim_sdk_record_copy_tests PRIVATE cxx_std_20)
+    target_compile_definitions(openshim_sdk_record_copy_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(openshim_sdk_record_copy_tests PRIVATE /W4 /WX)
+    add_test(NAME openshim_sdk_record_copy_tests COMMAND openshim_sdk_record_copy_tests)
 endif()
 
 # The bootstrap file-I/O seam, end to end and offline. Patches the test's own
@@ -616,3 +649,19 @@ else()
     target_compile_options(scene_depth_facts_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 add_test(NAME scene_depth_facts_tests COMMAND scene_depth_facts_tests)
+
+# The frustum-cull / restored-bounds table (audit P1-3): an entry leaves when
+# its mesh is destroyed, a reused address with a different identity starts
+# over, and deletion is backward-shift so probe chains and headroom survive.
+# Header-only and engine-free, so it runs on both lanes.
+add_executable(remembered_mesh_bounds_table_tests
+    remembered_mesh_bounds_table_tests.cpp
+)
+target_include_directories(remembered_mesh_bounds_table_tests PRIVATE ../include)
+target_compile_features(remembered_mesh_bounds_table_tests PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(remembered_mesh_bounds_table_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(remembered_mesh_bounds_table_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME remembered_mesh_bounds_table_tests COMMAND remembered_mesh_bounds_table_tests)
