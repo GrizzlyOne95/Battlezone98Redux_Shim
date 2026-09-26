@@ -1393,6 +1393,107 @@ namespace BZROpenShim
         void RevertRegisteredFeaturesToBaseline();
         void TickMpGateReconcile();
 
+        // --- Chunk payload resolution (chunk_payload_resolve.cpp) --------------
+        struct ChunkObjectLinkProbe;
+        struct ChunkCreateSourceTreeProbe;
+        struct ChunkObjectLinkProbe
+        {
+            const uint8_t* objectBytes = nullptr;
+            char objectId[16] = {};
+            uint32_t classId = 0;
+            uint32_t flags = 0;
+            void* geomRef = nullptr;
+            char geomName[64] = {};
+            char cachedMeshName[48] = {};
+            char vdfCandidates[128] = {};
+        };
+        struct ChunkCreateSourceTreeProbe
+        {
+            bool valid = false;
+            ChunkObjectLinkProbe source = {};
+            ChunkObjectLinkProbe parent = {};
+            ChunkObjectLinkProbe sibling = {};
+            ChunkObjectLinkProbe child = {};
+            // The game-side tagENTITY for the owning craft. NOT an Ogre object:
+            // it is only good for reading names off fixed offsets.
+            void* ownerEntity = nullptr;
+            // The craft's Ogre::Entity, reached through the render bridge. This
+            // is the one that accepts Ogre calls (getSkeleton, setVisible, ...).
+            void* ownerOgreEntity = nullptr;
+            char ownerEntityBaseName[32] = {};
+            char ownerOgreFilename[32] = {};
+            char ownerResolvedMeshName[48] = {};
+        };
+        struct ChunkVdfRecord
+        {
+            char name[16] = {};
+            char parent[16] = {};
+            uint32_t type = 0;
+            uint32_t flags = 0;
+        };
+        struct ChunkVdfAssetInfo
+        {
+            bool attempted = false;
+            bool loaded = false;
+            std::vector<ChunkVdfRecord> records = {};
+        };
+        struct ChunkVdfMeshRef
+        {
+            char meshBase[48] = {};
+            uint32_t type = 0;
+        };
+        inline constexpr const char* kChunkPayloadResourceRootName = "OpenShimChunkPayloads";
+        inline constexpr const char* kChunkPayloadModRelativeDirName = "chunkMeshes";
+        inline constexpr const char* kChunkPayloadModRelativeDirNameAlt = "Chunks";
+        bool AcquireChunkLogSlot();
+        void LogChunkDiagnostic(const char* component, const wchar_t* fmt, ...);
+        extern char g_ActiveFragmentSourceOdfName[16];
+        extern std::unordered_map<std::string, bool> g_ChunkPayloadMeshExistsCache;
+        extern std::unordered_set<std::string> g_ChunkPayloadResolveFailureLogCache;
+        extern std::vector<std::filesystem::path> g_ChunkPayloadResourceDirectories;
+        extern bool g_EnableChunkMeshProxy;
+        extern bool g_TraceChunkEffectRuntime;
+        extern bool g_TraceChunkRender;
+        std::filesystem::path GetChunkPayloadStockResourceDirectory();
+        void RefreshChunkPayloadResourceDirectories();
+        std::string NormalizeChunkPayloadComponentName(const char* value);
+        bool TryResolveChunkPayloadMeshResource(
+            const ChunkObjectLinkProbe& probe,
+            const char* preferredMeshName,
+            const char* explicitGeomName,
+            char* outMeshName,
+            size_t outMeshNameCapacity);
+        ChunkVdfAssetInfo& GetChunkVdfAssetInfoForMesh(const char* meshName);
+        bool BuildChunkVdfSourceCandidateList(
+            const char* meshName,
+            const ChunkObjectLinkProbe& source,
+            const ChunkObjectLinkProbe& parent,
+            const ChunkObjectLinkProbe& sibling,
+            const ChunkObjectLinkProbe& child,
+            char* outText,
+            size_t outTextCapacity);
+        void PopulateChunkVdfCandidates(const char* meshName, ChunkObjectLinkProbe& probe);
+        bool TryInferChunkMeshNameFromGeom(
+            const char* geomName,
+            uint32_t classId,
+            char* outMeshName,
+            size_t outMeshNameCapacity);
+        void AppendAllChunkMeshBasesForGeom(
+            const char* geomName,
+            uint32_t classId,
+            std::vector<std::string>& outMeshCandidates);
+        bool ResolveChunkCreateMeshContext(
+            const ChunkCreateSourceTreeProbe& probe,
+            char* outMeshName,
+            size_t outMeshNameCapacity);
+        bool TryInferChunkMeshNameFromTree(
+            const ChunkObjectLinkProbe& source,
+            const ChunkObjectLinkProbe& parent,
+            const ChunkObjectLinkProbe& sibling,
+            const ChunkObjectLinkProbe& child,
+            char* outMeshName,
+            size_t outMeshNameCapacity);
+
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
         extern float g_SatelliteZoomOutMultiplierBaseline;
