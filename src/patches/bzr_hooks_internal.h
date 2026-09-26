@@ -157,6 +157,35 @@ namespace BZROpenShim
                                                       void* existingObject);
     extern FnGameObjectClassBuild g_BzrFn_SprayEmitterBuildOriginal;
 
+    using FnGameObjectRelation = bool(__thiscall*)(void* thisPtr, void* other);
+    using FnGameObjectGetObjByHandle = void* (__cdecl*)(int handle);
+    using FnShieldTowerSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnMagnetMineSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnProximityMineSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnShieldTowerPowerUpdate = void(__fastcall*)(void* thisPtr);
+    using FnMatrixInverse = void(__cdecl*)(void* outMatrix, const void* inMatrix);
+    using FnVectorTransform = void(__cdecl*)(float* dst, const float* src, int count, const void* matrix);
+    using FnRangeSearch = void(__thiscall*)(void* rangeSearch,
+                                            double minX,
+                                            double minZ,
+                                            double maxX,
+                                            double maxZ,
+                                            void* outResults);
+    using FnRangeResultsGetNext = uint32_t(__thiscall*)(void* results, uint32_t** outHandlePtr);
+    extern FnShieldTowerSimulate g_BzrFn_BuildingSimulate;
+    extern FnRangeSearch g_BzrFn_CollisionRangeSearch;
+    extern FnGameObjectRelation g_BzrFn_GameObjectEnemyP;
+    extern FnGameObjectRelation g_BzrFn_GameObjectFriendP;
+    extern FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle;
+    extern FnMagnetMineSimulate g_BzrFn_MagnetMineSimulateOriginal;
+    extern FnMatrixInverse g_BzrFn_MatrixInverse;
+    extern FnProximityMineSimulate g_BzrFn_MineSimulate;
+    extern FnProximityMineSimulate g_BzrFn_ProximityMineSimulateOriginal;
+    extern FnRangeResultsGetNext g_BzrFn_RangeResultsGetNext;
+    extern FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate;
+    extern FnShieldTowerSimulate g_BzrFn_ShieldTowerSimulateOriginal;
+    extern FnVectorTransform g_BzrFn_VectorTransform;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -974,6 +1003,66 @@ namespace BZROpenShim
         bool TryReadBzrRunState(int& value);
         void InstallMissionTransitionSeamIfPossible();
         void PinDirect3DModulesForShutdown();
+
+        // --- Shield tower and mine team filters (team_filter_mines.cpp) --------
+        inline constexpr uintptr_t kGogBuildingSimulateAddr = 0x0047FCB0;
+        struct TeamFilterConfig;
+        struct TeamFilterCache;
+        struct TeamFilterConfig
+        {
+            bool parsed = false;
+            bool affectAllies = true;
+            bool affectEnemies = true;
+        };
+        struct TeamFilterCache
+        {
+            bool initialized = false;
+            std::unordered_map<std::string, TeamFilterConfig> odfEntries = {};
+        };
+        struct ListNodePtrValue
+        {
+            ListNodePtrValue* next = nullptr;
+            ListNodePtrValue* prev = nullptr;
+            void* value = nullptr;
+        };
+        struct LegacyMat3
+        {
+            float right_x;
+            float right_y;
+            float right_z;
+            float up_x;
+            float up_y;
+            float up_z;
+            float front_x;
+            float front_y;
+            float front_z;
+            uint32_t padding;
+            double posit_x;
+            double posit_y;
+            double posit_z;
+        };
+        ProducerBuildMenuEntry NormalizeQuotedOdfToken(const char* value);
+        const float* TryCallEntityGetPosition(void* gameObject);
+        bool TryGetObjectWorldPositionFromObj76(void* obj76, float (&outPosition)[3]);
+        bool TryNormalizeQuotedStringValue(const char* value,
+                                                  char* out,
+                                                  size_t outSize);
+        bool TryParseBoolValue(const char* value, bool& out);
+        bool TryResolveOdfFilePath(const char* odfToken, std::filesystem::path& outPath);
+        extern bool g_MagnetMineSimulateHookInstalled;
+        extern TeamFilterCache g_MagnetMineTeamFilterCache;
+        extern bool g_MagnetZeroRangeGuardEnabled;
+        extern volatile long g_MagnetZeroRangeLogBudget;
+        extern bool g_ProximityMineSimulateHookInstalled;
+        extern TeamFilterCache g_ProximityMineTeamFilterCache;
+        extern bool g_ShieldTowerSimulateHookInstalled;
+        extern TeamFilterCache g_ShieldTowerTeamFilterCache;
+        void InstallShieldTowerTeamFilterHookIfPossible();
+        void InstallMineTeamFilterHooksIfPossible();
+        bool TryGetTeamFilterForObject(void* objectPtr, TeamFilterConfig& outConfig, TeamFilterCache& cache, const char* logTag);
+        void RunShieldTowerFilteredSimulate(void* shieldTowerPtr, float dt);
+        void RunMagnetMineFilteredSimulate(void* magnetMinePtr, float dt);
+        void RunProximityMineFilteredSimulate(void* proximityMinePtr, float dt);
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
