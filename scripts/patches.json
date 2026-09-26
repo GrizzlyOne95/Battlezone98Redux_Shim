@@ -156,6 +156,15 @@
       "identity": "Second null-carrier crash site, sibling of Pilot Carrier Null Guard. A five-slot loop (i < 5) loads Person+0x1A0 into ECX and calls Carrier::GetWeapon at 0x00417F60 without testing it, so a pilot whose ODF misplaces weaponHard1 outside [GameObjectClass] -- and therefore never allocated a Carrier -- faults at the callee's AND EAX,[ECX+0x2C]. Observed on GOG Redux 2.2.301 loading the Hell Gate II addon mission, whose sshg01.odf (unitName \"Player\") declares its hardpoints under [CraftClass]: EIP 0x00417F74, ECX=0, read=0x2C, return 0x005A1387, on the first simulation frame. The caller stores the result and immediately branches on null at 0x005A138D, so returning null is a path it already handles."
     },
     {
+      "name": "Person Sniper Scan Weapon Null Guard",
+      "pattern": "8B 8D C0 FC FF FF 8B 89 A0 01 00 00 E8 ?? ?? ?? ?? 89 85 4C FB FF FF 8B 95 4C FB FF FF 8B 42 08 81 78 0C 50 49 4E 53",
+      "offset": 13,
+      "expected_size": 4,
+      "fallback": "0x0059D7C4",
+      "require_unique": true,
+      "identity": "Third Carrier::GetWeapon site in Person::Simulate (0x0059D340), sibling of Pilot Carrier Null Guard (0x0059D76D, same function). The loop at 0x0059D777 walks slots 0-4 of the selected mask returned by Carrier::GetSelected, calls Carrier::GetWeapon (0x00417F60) at 0x0059D7C3 for every set bit, and dereferences the result unconditionally: mov eax,[edx+8] at 0x0059D7D4, then cmp [eax+0xC],'SNIP' to set the crouch flag at [ebp-0x351]. GetWeapon returns null when the hardpoint mask at [carrier+0x2C] lacks that bit, so a selected-mask bit on an empty hardpoint faults. Observed on GOG Redux 2.2.301 in ISDF Chronicles isdfms10 (dump battlezone98redux.exe.54600.dmp): a jak person whose Lua removed its only weapon with GiveWeapon(h, nil, 0) kept selected=1 at [carrier+0x30] with hardpoint mask 0, EIP 0x0059D7D4 reading [0+8]. The result at [ebp-0x4B4] is read only by that SNIP test, so the guard returns a static non-SNIP stand-in for an empty slot. The earlier GetWeapon call at 0x0059D3F0 already null-checks and is left stock. Pattern verified single-match by whole-image scan on 2026-09-26."
+    },
+    {
       "name": "Neutral Attack Order Target Hook",
       "pattern": "8B 8D 8C FD FF FF 83 C1 18 8B 85 8C FD FF FF 8B 50 18 8B 42 04 FF D0 50 8B 8D 80 FD FF FF E8 ?? ?? ?? ?? 0F B6 C8 85 C9 75 05 E9 ?? ?? ?? ??",
       "offset": 31,
