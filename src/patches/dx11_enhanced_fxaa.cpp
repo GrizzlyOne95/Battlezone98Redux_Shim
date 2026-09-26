@@ -792,6 +792,15 @@ namespace BZROpenShim
                 return true;
             }
 
+            // A failed attempt that was not a permanent fault (a shader or a
+            // state object the device refused) used to be retried on the very
+            // next Present, recompiling both shaders each time. Back off for a
+            // second between attempts.
+            static ULONGLONG s_nextAttemptTick = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (now < s_nextAttemptTick)
+                return false;
+
             g_Runtime.Reset();
             device->AddRef();
             g_Runtime.device = device;
@@ -799,9 +808,11 @@ namespace BZROpenShim
             if (!g_Runtime.context || !CreateDeviceResources(device))
             {
                 g_Runtime.Reset();
+                s_nextAttemptTick = now + 1000;
                 return false;
             }
 
+            s_nextAttemptTick = 0;
             return true;
         }
 

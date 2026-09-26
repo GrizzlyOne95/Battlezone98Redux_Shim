@@ -343,6 +343,37 @@ namespace
 #endif
     }
 
+    void TestAbs32OperandMode()
+    {
+        const char* const json = R"JSON({ "resolves": [
+            { "name": "data-global", "pattern": "A1 ?? ?? ?? ?? 5D C3", "offset": 1,
+              "mode": "abs32_operand", "fallback": "0x00917AFC", "identity": "x" }
+        ] })JSON";
+        std::string error;
+        const auto targets = ParseResolveTable(json, &error);
+        Check(error.empty(), "abs32_operand is a known mode");
+        const ResolveTarget* global = Find(targets, "data-global");
+        Check(global && global->mode == ResolveMode::Abs32Operand, "abs32_operand parses");
+        Check(global && global->offset == 1, "abs32_operand keeps its operand offset");
+
+        // mov eax,[0x00917AFC]: the operand bytes as they sit in the image.
+        const uint8_t operand[] = { 0xFC, 0x7A, 0x91, 0x00 };
+        uint32_t address = 0;
+        Check(DecodeAbs32Operand(operand, 0x00400000u, 0x02F00000u, address) &&
+                  address == 0x00917AFCu,
+              "the operand decodes little-endian");
+        Check(!DecodeAbs32Operand(operand, 0x00400000u, 0x00900000u, address) && address == 0,
+              "a value past the image end is refused");
+        Check(!DecodeAbs32Operand(operand, 0x00A00000u, 0x02F00000u, address) && address == 0,
+              "a value below the image base is refused");
+        // An anchor one byte late reads 7A 91 00 5D = 0x5D00917A: outside.
+        const uint8_t shifted[] = { 0x7A, 0x91, 0x00, 0x5D };
+        Check(!DecodeAbs32Operand(shifted, 0x00400000u, 0x02F00000u, address),
+              "a misplaced anchor reads a value outside the image and is refused");
+        Check(!DecodeAbs32Operand(nullptr, 0x00400000u, 0x02F00000u, address),
+              "no bytes, no address");
+    }
+
     void TestUnparseablePatternFailsWhole()
     {
         // Fail closed: a typo must not leave a shorter pattern that still
@@ -363,6 +394,7 @@ int main()
     TestAnchorsAndSourcesSurvive();
     TestBadEntriesAreRejectedIndividually();
     TestUnparseablePatternFailsWhole();
+    TestAbs32OperandMode();
     TestShippedTableMatchesTheOriginalArrays();
 
     if (g_Failures != 0)

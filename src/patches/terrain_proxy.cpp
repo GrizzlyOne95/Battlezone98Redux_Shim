@@ -1,4 +1,5 @@
 #include "terrain_proxy.h"
+#include "engine_globals.h"
 
 #include "terrain_semantic.h"
 
@@ -1392,7 +1393,11 @@ namespace BZROpenShim
         {
             __try
             {
-                void* structure = *reinterpret_cast<void**>(Rebase(0x00920EA0));
+                auto* const renderGlobalsSlot =
+                    reinterpret_cast<void**>(EngineGlobals::RenderGlobals());
+                if (!renderGlobalsSlot)
+                    return nullptr;
+                void* structure = *renderGlobalsSlot;
                 return structure
                     ? *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(structure) + 8)
                     : nullptr;
@@ -4801,8 +4806,23 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 constructedZone = g_originalZoneConstruct(zone, a, b, c, d);
             if (!g_active.load(std::memory_order_acquire) || g_shutdown.load())
                 return constructedZone;
-            std::lock_guard<std::mutex> lock(g_mutex);
-            ObserveZone(zone);
+            // The observation allocates zone records; an allocation failure
+            // must not leave the engine's zone constructor as a C++ throw.
+            try
+            {
+                std::lock_guard<std::mutex> lock(g_mutex);
+                ObserveZone(zone);
+            }
+            catch (...)
+            {
+                static std::atomic<uint32_t> s_count{0};
+                if (s_count.fetch_add(1, std::memory_order_relaxed) == 0)
+                {
+                    LogShimA(LogLevel::Warn, "terrain-proxy",
+                             "[TERRAIN-PROXY] zone observation threw a C++ exception; dropped, "
+                             "later occurrences are counted silently");
+                }
+            }
             return constructedZone;
         }
 

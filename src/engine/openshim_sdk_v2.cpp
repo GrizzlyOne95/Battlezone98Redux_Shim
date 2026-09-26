@@ -2,6 +2,7 @@
 // read-only developer snapshot surface.
 
 #include "openshim_sdk_v2.h"
+#include "openshim_sdk_record_copy.h"
 
 #include "bzr_hooks.h"
 #include "native_ui.h"
@@ -15,6 +16,7 @@
 
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 
@@ -31,6 +33,34 @@ namespace BZROpenShim
     namespace
     {
         constexpr size_t kEventQueueCapacity = 256;
+
+        // The v2 layouts pollEvent and captureDeveloperSnapshot promise. A
+        // revision that appends fields raises sizeof() and adds a minimum of
+        // its own for its own callers; these two stay, because a v2 caller's
+        // record is exactly this long and must never be written past.
+        constexpr uint32_t kOpenShimEventV2Size = 120u;
+        constexpr uint32_t kOpenShimDeveloperSnapshotV2Size = 96u;
+        static_assert(sizeof(OpenShimEvent) == kOpenShimEventV2Size,
+                      "OpenShimEvent's v2 layout is 120 bytes; appending fields means a "
+                      "new minimum for the new callers, not a changed one");
+        static_assert(sizeof(OpenShimDeveloperSnapshot) == kOpenShimDeveloperSnapshotV2Size,
+                      "OpenShimDeveloperSnapshot's v2 layout is 96 bytes; appending fields "
+                      "means a new minimum for the new callers, not a changed one");
+        static_assert(offsetof(OpenShimEvent, structSize) == 0 &&
+                          offsetof(OpenShimDeveloperSnapshot, structSize) == 0,
+                      "structSize leads every SDK record");
+
+        void WarnShortRecordOnce(bool& warned, const char* api, uint32_t capacity,
+                                 uint32_t minimum)
+        {
+            if (warned)
+                return;
+            warned = true;
+            LogShimA(LogLevel::Warn, "sdk_v2",
+                     "%s: the caller's record declares %u bytes but the v2 layout is %u; "
+                     "refused (that is the caller's structSize, not a shim limit)",
+                     api, capacity, minimum);
+        }
 
         SRWLOCK g_EventQueueLock = SRWLOCK_INIT;
         std::array<OpenShimEvent, kEventQueueCapacity> g_EventQueue = {};
@@ -62,6 +92,16 @@ namespace BZROpenShim
         {
             if (!outEvent)
                 return 0;
+            // The caller's structSize is its capacity (openshim_sdk_record_copy.h).
+            // A record shorter than the v2 layout is refused before the queue
+            // is touched, so the event stays for a caller that can hold it.
+            const uint32_t capacity = SdkRecord::DeclaredCapacity(outEvent);
+            if (capacity < kOpenShimEventV2Size)
+            {
+                static bool s_warned = false;
+                WarnShortRecordOnce(s_warned, "pollEvent", capacity, kOpenShimEventV2Size);
+                return 0;
+            }
 
             AcquireSRWLockExclusive(&g_EventQueueLock);
             if (g_EventQueueCount == 0)
@@ -70,11 +110,18 @@ namespace BZROpenShim
                 return 0;
             }
 
-            *outEvent = g_EventQueue[g_EventQueueHead];
-            g_EventQueueHead = (g_EventQueueHead + 1) % kEventQueueCapacity;
-            --g_EventQueueCount;
+            // Writes at most the caller's capacity and leaves the bytes
+            // filled in its structSize; the event is consumed only once it
+            // has been handed over.
+            const uint32_t written = SdkRecord::CopyToCaller(
+                outEvent, g_EventQueue[g_EventQueueHead], kOpenShimEventV2Size);
+            if (written != 0)
+            {
+                g_EventQueueHead = (g_EventQueueHead + 1) % kEventQueueCapacity;
+                --g_EventQueueCount;
+            }
             ReleaseSRWLockExclusive(&g_EventQueueLock);
-            return 1;
+            return written != 0 ? 1 : 0;
         }
 
         static uint32_t __cdecl ApiGetPendingEventCount()
@@ -374,13 +421,26 @@ namespace BZROpenShim
     {
         if (!outSnapshot)
             return 0;
+        // The caller's structSize is its capacity (openshim_sdk_record_copy.h).
+        const uint32_t capacity = SdkRecord::DeclaredCapacity(outSnapshot);
+        if (capacity < kOpenShimDeveloperSnapshotV2Size)
+        {
+            static bool s_warned = false;
+            WarnShortRecordOnce(s_warned, "captureDeveloperSnapshot", capacity,
+                                kOpenShimDeveloperSnapshotV2Size);
+            return 0;
+        }
 
         OpenShimDeveloperSnapshot snapshot = {};
         if (!CaptureDeveloperSnapshot(snapshot))
             return 0;
 
-        *outSnapshot = snapshot;
-        return 1;
+        // Writes at most the caller's capacity and leaves the bytes filled
+        // in its structSize.
+        return SdkRecord::CopyToCaller(outSnapshot, snapshot,
+                                       kOpenShimDeveloperSnapshotV2Size) != 0
+                   ? 1
+                   : 0;
     }
 
     extern "C" int32_t __cdecl OpenShimImpl_LogDeveloperSnapshot()
