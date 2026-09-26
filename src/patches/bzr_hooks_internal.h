@@ -12,6 +12,9 @@
 
 namespace BZROpenShim
 {
+    // Set by ResolveBzrHooks from its isSteam argument.
+    extern bool g_IsSteamExe;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -124,7 +127,22 @@ namespace BZROpenShim
         inline constexpr char kUserConfigSinglePlayerSection[] = "SinglePlayer";
         uint16_t ReadLocalPlayerNetIdValue();
 
-        // --- Headlights (bzr_hooks.cpp) --------------------------------------
+        // --- Engine state (bzr_hooks.cpp) ------------------------------------
+        uintptr_t GetMainModuleBase();
+        bool IsExuModuleLoaded();
+        // True once the SetRunning mission seam is hooked; its enter/exit
+        // callbacks then drive the per-world baseline resets.
+        extern bool g_MissionSeamInstalled;
+        inline constexpr size_t kGameObjectArenaSlotCapacity = 4096;
+
+        // --- Headlights (headlights.cpp) -------------------------------------
+        inline constexpr size_t kHeadlightObjectSlotCount = 4096;
+        static_assert(kGameObjectArenaSlotCapacity == kHeadlightObjectSlotCount,
+                      "arena capacity forward constant out of sync");
+        inline constexpr size_t kHeadlightObjectSlotSize = 0x400;
+        // Redux's verified handle mapping (mirrors EXU GameObject::GetObj):
+        // object = arena + (handle >> 20) * 0x400, the arena being
+        // EngineGlobals::GameObjectArena (0x0260DB20 on GOG).
         struct HeadlightOgreApi
         {
             FnOgreGetLightColour getDiffuse = nullptr;
@@ -155,6 +173,16 @@ namespace BZROpenShim
         void HueToHeadlightRgb(float hue, float& r, float& g, float& b);
         bool IsLiveHeadlightObjectSlot(void* gameObject);
         void* TryGetHeadlightPlayerObject();
+        void InitializeHeadlightConfig();
+        void RefreshHeadlightState();
+        void RevertHeadlightsToBaseline();
+        void ReapplyHeadlightConfigFromUserConfig();
+        // The headlight baselines are stamped with a world generation that the
+        // SetRunning mission seam advances, so baseline invalidation never has
+        // to infer a world change from allocator behavior.
+        void HeadlightNotifyMissionRunStateChanged(bool enteringSimulation);
+        void InstallEmissionLightFixIfPossible();
+        void VerifyExpectedOgreExportsIfPossible();
 
         // --- Player pilot flashlight (pilot_flashlight.cpp) ------------------
         extern bool g_PilotFlashlightConfigInitialized;
