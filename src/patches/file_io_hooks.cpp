@@ -884,16 +884,38 @@ namespace BZROpenShim
         static thread_local std::wstring g_RoutedPathW;
         static thread_local std::string g_RoutedPathA;
 
+        // The seam calls these from inside the game's own CreateFile. It has
+        // a last-resort catch of its own now, but nothing here may throw in
+        // the first place: an allocation failure declines the route or drops
+        // the observation, and the first occurrence is logged.
+        static void NoteProviderCallbackThrew(const wchar_t* which)
+        {
+            static bool s_logged = false;
+            if (s_logged)
+                return;
+            s_logged = true;
+            Log(L"[FILEIO] %s threw a C++ exception inside the game's CreateFile; declined, later occurrences are silent\n",
+                which);
+        }
+
         static const wchar_t* __cdecl ProviderRoutePathW(
             const wchar_t* path, DWORD desiredAccess, DWORD creationDisposition)
         {
             if (!path)
                 return nullptr;
-            std::wstring routed = RouteTerrainAtlasPath(path, desiredAccess, creationDisposition);
-            if (routed == path)
-                return nullptr;  // nothing to say; let the seam use its own path
-            g_RoutedPathW = std::move(routed);
-            return g_RoutedPathW.c_str();
+            try
+            {
+                std::wstring routed = RouteTerrainAtlasPath(path, desiredAccess, creationDisposition);
+                if (routed == path)
+                    return nullptr;  // nothing to say; let the seam use its own path
+                g_RoutedPathW = std::move(routed);
+                return g_RoutedPathW.c_str();
+            }
+            catch (...)
+            {
+                NoteProviderCallbackThrew(L"routePathW");
+                return nullptr;
+            }
         }
 
         static const char* __cdecl ProviderRoutePathA(
@@ -901,36 +923,51 @@ namespace BZROpenShim
         {
             if (!path)
                 return nullptr;
-            std::string routed = RouteTerrainAtlasPath(std::string(path), desiredAccess, creationDisposition);
-            if (routed == path)
+            try
+            {
+                std::string routed = RouteTerrainAtlasPath(std::string(path), desiredAccess, creationDisposition);
+                if (routed == path)
+                    return nullptr;
+                g_RoutedPathA = std::move(routed);
+                return g_RoutedPathA.c_str();
+            }
+            catch (...)
+            {
+                NoteProviderCallbackThrew(L"routePathA");
                 return nullptr;
-            g_RoutedPathA = std::move(routed);
-            return g_RoutedPathA.c_str();
+            }
         }
 
         static void __cdecl ProviderOnOpenedW(
             HANDLE handle, const wchar_t* requested, const wchar_t* routed,
             DWORD desiredAccess, DWORD creationDisposition)
         {
-            // TRN write tracking keys off the name the caller asked for.
-            if (!g_InTrnNormalization)
-                MaybeTrackOpenedTrnHandle(handle, requested ? requested : L"", desiredAccess, creationDisposition);
-            // Editor-source detection and load tracing follow what was really
-            // opened, which is not the same string once a path is rerouted.
-            const std::wstring routedPath = routed ? routed : L"";
-            if (IsEditorSourcePath(routedPath))
-                RememberOpenedBznSource(handle, desiredAccess, creationDisposition);
-            BznLoadTraceOnOpen(routedPath.c_str(), desiredAccess);
-
-            // Ogre parses the mod's *.program scripts (and then compiles the
-            // enhanced-lighting shaders) right after this open succeeds. Prime
-            // the microcode cache on this exact thread so a prior session's
-            // compiled shaders are available before compilation begins.
-            if (PathEndsWithProgramW(requested))
+            try
             {
-                OgreShaderCacheOnProgramScriptOpen();
-                if (UiPerf::IsEnabled())
-                    UiPerf::RecordShaderCache(0, 0, 0.0); // marker: program open triggered cache
+                // TRN write tracking keys off the name the caller asked for.
+                if (!g_InTrnNormalization)
+                    MaybeTrackOpenedTrnHandle(handle, requested ? requested : L"", desiredAccess, creationDisposition);
+                // Editor-source detection and load tracing follow what was really
+                // opened, which is not the same string once a path is rerouted.
+                const std::wstring routedPath = routed ? routed : L"";
+                if (IsEditorSourcePath(routedPath))
+                    RememberOpenedBznSource(handle, desiredAccess, creationDisposition);
+                BznLoadTraceOnOpen(routedPath.c_str(), desiredAccess);
+
+                // Ogre parses the mod's *.program scripts (and then compiles the
+                // enhanced-lighting shaders) right after this open succeeds. Prime
+                // the microcode cache on this exact thread so a prior session's
+                // compiled shaders are available before compilation begins.
+                if (PathEndsWithProgramW(requested))
+                {
+                    OgreShaderCacheOnProgramScriptOpen();
+                    if (UiPerf::IsEnabled())
+                        UiPerf::RecordShaderCache(0, 0, 0.0); // marker: program open triggered cache
+                }
+            }
+            catch (...)
+            {
+                NoteProviderCallbackThrew(L"onOpenedW");
             }
         }
 
@@ -938,18 +975,25 @@ namespace BZROpenShim
             HANDLE handle, const char* requested, const char* routed,
             DWORD desiredAccess, DWORD creationDisposition)
         {
-            if (!g_InTrnNormalization)
-                MaybeTrackOpenedTrnHandle(handle, ResolveAbsolutePathFromAnsi(requested), desiredAccess, creationDisposition);
-            const std::wstring wideRouted = AnsiPathToWide(routed ? routed : "");
-            if (IsEditorSourcePath(wideRouted))
-                RememberOpenedBznSource(handle, desiredAccess, creationDisposition);
-            BznLoadTraceOnOpenA(routed ? routed : "", desiredAccess);
-
-            if (PathEndsWithProgramA(requested))
+            try
             {
-                OgreShaderCacheOnProgramScriptOpen();
-                if (UiPerf::IsEnabled())
-                    UiPerf::RecordShaderCache(0, 0, 0.0);
+                if (!g_InTrnNormalization)
+                    MaybeTrackOpenedTrnHandle(handle, ResolveAbsolutePathFromAnsi(requested), desiredAccess, creationDisposition);
+                const std::wstring wideRouted = AnsiPathToWide(routed ? routed : "");
+                if (IsEditorSourcePath(wideRouted))
+                    RememberOpenedBznSource(handle, desiredAccess, creationDisposition);
+                BznLoadTraceOnOpenA(routed ? routed : "", desiredAccess);
+
+                if (PathEndsWithProgramA(requested))
+                {
+                    OgreShaderCacheOnProgramScriptOpen();
+                    if (UiPerf::IsEnabled())
+                        UiPerf::RecordShaderCache(0, 0, 0.0);
+                }
+            }
+            catch (...)
+            {
+                NoteProviderCallbackThrew(L"onOpenedA");
             }
         }
 

@@ -589,8 +589,12 @@ namespace BZROpenShim::RenderProfiles
         {
             s_seamArmStatus.store(status, std::memory_order_release);
             // Published as a number so the runtime can render the text on its
-            // own side without a call back across the boundary.
+            // own side without a call back across the boundary. Every write
+            // to s_result goes under the state lock, so a copy taken from
+            // another thread is never torn.
+            AcquireSRWLockExclusive(&s_stateLock);
             s_result.armStatus = static_cast<uint32_t>(status);
+            ReleaseSRWLockExclusive(&s_stateLock);
             return false;
         }
 
@@ -768,8 +772,10 @@ namespace BZROpenShim::RenderProfiles
             }
 
             s_seamInstalled.store(true, std::memory_order_release);
+            AcquireSRWLockExclusive(&s_stateLock);
             s_result.seamArmed = 1u;
             s_result.armStatus = StartupSeam::kArmArmed;
+            ReleaseSRWLockExclusive(&s_stateLock);
             s_seamArmStatus.store(
                 BackendSeamArmStatus::Armed, std::memory_order_release);
             return true;
@@ -902,9 +908,15 @@ namespace BZROpenShim::RenderProfiles
 
     // Small bridges so the plugin half can reach bootstrap-owned state
     // without reaching into the seam's internals.
-    const StartupSeam::StartupRendererResult& SeamResultForPublication()
+    void CopySeamResultLocked(StartupSeam::StartupRendererResult& out)
     {
-        return s_result;
+        // Shared against the exclusive publish in the ConfigFile::load
+        // interception: the game thread writes the record field by field
+        // there, and the runtime copies from its patch thread, which on a GOG
+        // boot runs seconds earlier and on a warm Steam boot can run later.
+        AcquireSRWLockShared(&s_stateLock);
+        out = s_result;
+        ReleaseSRWLockShared(&s_stateLock);
     }
 
     void ClearPendingMarkerFromRuntime()
@@ -933,9 +945,9 @@ namespace BZROpenShim::StartupSeam
     {
         if (out == nullptr || capacity < sizeof(StartupRendererResult))
             return false;
-        const StartupRendererResult& src =
-            BZROpenShim::RenderProfiles::SeamResultForPublication();
-        std::memcpy(out, &src, sizeof(StartupRendererResult));
+        StartupRendererResult snapshot = {};
+        BZROpenShim::RenderProfiles::CopySeamResultLocked(snapshot);
+        std::memcpy(out, &snapshot, sizeof(StartupRendererResult));
         return true;
     }
 

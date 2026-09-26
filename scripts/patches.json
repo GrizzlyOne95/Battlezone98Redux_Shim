@@ -126,7 +126,8 @@
       "offset": 0,
       "expected_size": 5,
       "fallback": "0x00786E5F",
-      "require_unique": true
+      "require_unique": true,
+      "identity": "Push of the \"w\" mode string at 0x00786E5F inside the TRN writer FUN_00786C80 (GOG 8D71F56C; Steam settled bytes match). The immediate is redirected to a shim-owned \"wb\" so MSVCR120 stops expanding LF to CRLF on top of the codec's own CRLF serialization. Paired with the Canonical Fwrite Hook below; either failing stands both down."
     },
     {
       "name": "Redux TRN Canonical Fwrite Hook",
@@ -134,7 +135,8 @@
       "offset": 17,
       "expected_size": 6,
       "fallback": "0x00786E9A",
-      "require_unique": true
+      "require_unique": true,
+      "identity": "The single fwrite(buffer, 1, size, FILE*) at 0x00786E9A inside the TRN writer FUN_00786C80 (GOG 8D71F56C; Steam settled bytes match). Disassembly of 0x00786E38-0x00786EF1 on 2026-09-25: the raw loader at 0x00829130 returns the whole existing TRN in one buffer with its size in [ebp-0x20C4]; fopen at 0x00786E6B; this one fwrite; a return-value check against the size; fclose at 0x00786EC6; the buffer is freed. No loop and no second write, so the hook may apply the whole-file codec (encoding decision, trailing-LF rule) to this call's payload. That is the only reason per-call canonicalization is correct here; a writer that split a file across calls would need the accumulate-until-close design instead."
     },
     {
       "name": "Pilot Carrier Null Guard",
