@@ -141,6 +141,14 @@ jobs:
         shell: pwsh
         run: ./scripts/Test-PackageShape.ps1 -Root . -Layout Build
 
+      # The uninstaller has to undo exactly what the installer does. The
+      # fixture holds every file the installer writes plus the residue the
+      # Workshop updater and the installer's own backups leave behind, and a
+      # foreign winmm.dll that must survive.
+      - name: Test the Windows uninstaller against a fixture install
+        shell: pwsh
+        run: ./tests/uninstall_windows_tests.ps1
+
       - name: Verify build outputs
         shell: pwsh
         run: |

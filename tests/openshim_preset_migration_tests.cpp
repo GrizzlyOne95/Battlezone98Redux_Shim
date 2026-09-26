@@ -20,6 +20,8 @@
 #include "openshim_preset_migration.h"
 #include "openshim_ini.h"
 
+#include "fixtures/openshim_preset_revision1.inl"
+
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -561,6 +563,83 @@ int main()
         TryComputeFileSha256Hex(empty, hempty);
         CheckEqStr(hempty, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
                    "empty file SHA-256 matches known");
+    }
+
+    // 13. Exact-hash Case A with the real e81d8b0a payload (audit P1-5).
+    // The startup path used to hand Case A the bad file as its own canonical
+    // when no openshim.ini.canonical sat beside the DLL, which re-emitted the
+    // bad values under the current marker and froze them in. Both halves are
+    // checked: the file-level guard against a self-referential canonical,
+    // and the directory-level lookup that no longer manufactures one.
+    {
+        fs::path dir = tmpRoot / "case_a_real";
+        fs::create_directories(dir);
+        fs::path bad = dir / "openshim.ini";
+        WriteLines(bad, MakeRevision1PayloadLines());
+        std::string hash;
+        CheckTrue(TryComputeFileSha256Hex(bad, hash) && hash == kLegacyRevision1Sha256,
+                  "13a: the committed revision-1 payload hashes to kLegacyRevision1Sha256");
+        CheckTrue(FileContains(bad, "AttackRevealPerceivedTeam = 1") &&
+                      FileContains(bad, "ScrapPilotHud = Legacy"),
+                  "13a: payload carries the bad defaults");
+
+        // File-level: the file as its own canonical is refused, surgical runs.
+        auto r = MigratePresetFileIfNeeded(bad, bad);
+        CheckTrue(r.action == MigrationAction::FullReplaced,
+                  "13b: self-referential canonical still migrates (surgical fallback)");
+        CheckTrue(FileContains(bad, "AttackRevealPerceivedTeam = 0"),
+                  "13b: AttackRevealPerceivedTeam corrected, not re-emitted");
+        CheckTrue(FileContains(bad, "ScrapPilotHud = Stock"),
+                  "13b: ScrapPilotHud corrected, not re-emitted");
+        CheckTrue(FileContains(bad, "; " + CurrentRevisionMarker()),
+                  "13b: current revision marker stamped");
+        CheckTrue(FileContains(bad, "OpenShim Player Configuration"),
+                  "13b: the rest of the document is preserved");
+        CheckTrue(r.backupCreated && fs::exists(r.backupPath),
+                  "13b: premigrate backup written");
+        CheckTrue(MigratePresetFileIfNeeded(bad, bad).action == MigrationAction::None,
+                  "13b: second run is a no-op");
+
+        // File-level: an empty canonical path takes the same surgical route.
+        WriteLines(bad, MakeRevision1PayloadLines());
+        r = MigratePresetFileIfNeeded(bad, fs::path());
+        CheckTrue(r.action == MigrationAction::FullReplaced &&
+                      FileContains(bad, "AttackRevealPerceivedTeam = 0") &&
+                      FileContains(bad, "ScrapPilotHud = Stock"),
+                  "13c: empty canonical repairs the exact-hash file surgically");
+
+        // Directory-level: no canonical beside the DLL, only the developer
+        // reference. The reference must not be used as the canonical and the
+        // file must still be repaired.
+        WriteLines(bad, MakeRevision1PayloadLines());
+        std::vector<std::string> example = MakeCanonicalLines();
+        example.insert(example.begin(), "; DEVELOPER REFERENCE - must never become the player file");
+        example.push_back("[Diagnostics]");
+        example.push_back("TraceEverything = 1");
+        WriteLines(dir / "openshim.ini.example", example);
+        r = TryMigratePlayerPresetInDirectory(dir);
+        CheckTrue(r.action == MigrationAction::FullReplaced,
+                  "13d: directory-level migration without a canonical repairs the file");
+        CheckTrue(!FileContains(bad, "DEVELOPER REFERENCE") && !FileContains(bad, "TraceEverything"),
+                  "13d: openshim.ini.example was not used as the canonical");
+        CheckTrue(FileContains(bad, "AttackRevealPerceivedTeam = 0") &&
+                      FileContains(bad, "ScrapPilotHud = Stock"),
+                  "13d: bad defaults corrected via the surgical table");
+        CheckTrue(TryMigratePlayerPresetInDirectory(dir).action == MigrationAction::None,
+                  "13d: second directory-level run is a no-op");
+
+        // Directory-level: the installer's canonical present means full
+        // replacement from it.
+        WriteLines(bad, MakeRevision1PayloadLines());
+        WriteLines(dir / "openshim.ini.canonical", MakeCanonicalLines());
+        r = TryMigratePlayerPresetInDirectory(dir);
+        CheckTrue(r.action == MigrationAction::FullReplaced,
+                  "13e: canonical beside the DLL gives full replacement");
+        CheckTrue(FileContains(bad, "test canonical") &&
+                      !FileContains(bad, "Every first-class openshim.ini setting"),
+                  "13e: the file now carries the canonical content, not the payload");
+        CheckTrue(FileContains(bad, "; " + CurrentRevisionMarker()),
+                  "13e: current revision marker present after full replacement");
     }
 
     std::printf("%d checks, %d failures\n", g_Checks, g_Failures);
