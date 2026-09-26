@@ -23,16 +23,29 @@
 // shape a stale deployed patches.json takes. Catching it here too makes it a
 // build failure instead of something found on someone's machine.
 //
+// The "globals" array has the silent direction too: a direct-address entry is
+// applied only to a patch-list entry of the same name, so a global that
+// patches.h never lists is read, parsed and then dropped without a line in the
+// log. Eleven were in that state when the check was added (the map filter
+// port and three superseded version-notice sites). An entry that is meant to
+// sit unwalked says so with a "parked" key giving the reason; one that is
+// parked AND listed is a stale marker and fails as well.
+//
 // The "resolves" array has the same hazard from a different direction:
 // HookEngine::ResolveNamedAddress takes a string, so a typo or a missing entry
-// shows up only as a silent fallback at runtime.
+// shows up only as a silent fallback at runtime. Every file under src/ is
+// scanned for calls, since a hand-kept list of callers is itself the thing
+// that goes stale: the three shell names in ui_performance_hooks.cpp had no
+// entry for as long as that file was not on the list.
 //
 // These are text checks over the repository's own sources rather than anything
 // clever. That is deliberate: the failure being prevented is a name present in
 // one file and absent from another, so comparing the names as text is exactly
 // the right shape.
 
+#include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <set>
 #include <sstream>
@@ -143,24 +156,136 @@ namespace
         return names;
     }
 
-    // Every literal handed to HookEngine::ResolveNamedAddress in the sources.
-    std::set<std::string> ResolveNamedAddressCallSites(const std::vector<std::string>& sources)
+    // The index one past the ')' that closes the '(' at `open`, skipping string
+    // and character literals; npos when the text ends first.
+    size_t MatchingParen(const std::string& text, size_t open)
+    {
+        int depth = 0;
+        char quote = 0;
+        bool escaped = false;
+        for (size_t i = open; i < text.size(); ++i)
+        {
+            const char c = text[i];
+            if (quote)
+            {
+                if (escaped)            escaped = false;
+                else if (c == '\\')     escaped = true;
+                else if (c == quote)    quote = 0;
+                continue;
+            }
+            if (c == '"' || c == '\'') { quote = c; continue; }
+            if (c == '(') ++depth;
+            else if (c == ')' && --depth == 0) return i + 1;
+        }
+        return std::string::npos;
+    }
+
+    // Every string literal in a stretch of source, without its quotes.
+    std::vector<std::string> StringLiterals(const std::string& text)
+    {
+        std::vector<std::string> out;
+        size_t pos = 0;
+        while ((pos = text.find('"', pos)) != std::string::npos)
+        {
+            std::string value;
+            size_t i = pos + 1;
+            for (; i < text.size() && text[i] != '"'; ++i)
+            {
+                if (text[i] == '\\' && i + 1 < text.size()) ++i;
+                value += text[i];
+            }
+            out.push_back(value);
+            pos = i + 1;
+        }
+        return out;
+    }
+
+    struct SourceFile
+    {
+        std::string path;   // relative to src/, forward slashes
+        std::string text;
+    };
+
+    // Every C++ source and header under `root`, in a stable order.
+    std::vector<SourceFile> SourceTree(const std::filesystem::path& root, bool& ok)
+    {
+        std::vector<SourceFile> files;
+        std::error_code ec;
+        ok = std::filesystem::is_directory(root, ec);
+        if (!ok) return files;
+        for (std::filesystem::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec))
+        {
+            if (!it->is_regular_file(ec)) continue;
+            const std::string ext = it->path().extension().string();
+            if (ext != ".cpp" && ext != ".h" && ext != ".hpp" && ext != ".inl") continue;
+            bool readOk = false;
+            SourceFile file;
+            file.path = std::filesystem::relative(it->path(), root, ec).generic_string();
+            file.text = ReadFile(it->path().string().c_str(), readOk);
+            if (!readOk) { ok = false; continue; }
+            files.push_back(std::move(file));
+        }
+        if (ec) ok = false;
+        std::sort(files.begin(), files.end(),
+                  [](const SourceFile& a, const SourceFile& b) { return a.path < b.path; });
+        return files;
+    }
+
+    // Every name handed to HookEngine::ResolveNamedAddress anywhere in the
+    // tree. The argument is read up to its closing parenthesis, so a call
+    // split across lines and a conditional choosing between two names both
+    // count. A call whose argument holds no literal cannot be checked here
+    // and its file lands in `unchecked`; only the function's own signature
+    // may take a variable.
+    std::set<std::string> ResolveNamedAddressCallSites(const std::vector<SourceFile>& files,
+                                                       std::set<std::string>& callers,
+                                                       std::set<std::string>& unchecked)
     {
         std::set<std::string> names;
-        const std::string needle = "ResolveNamedAddress(\"";
-        for (const std::string& text : sources)
+        const std::string needle = "ResolveNamedAddress(";
+        for (const SourceFile& file : files)
         {
             size_t pos = 0;
-            while ((pos = text.find(needle, pos)) != std::string::npos)
+            while ((pos = file.text.find(needle, pos)) != std::string::npos)
             {
-                const size_t open = pos + needle.size();
-                const size_t close = text.find('"', open);
+                const size_t open = pos + needle.size() - 1;
+                const size_t close = MatchingParen(file.text, open);
                 if (close == std::string::npos) break;
-                names.insert(text.substr(open, close - open));
+                const std::string argument = file.text.substr(open + 1, close - open - 2);
                 pos = close;
+                if (argument.find("const char*") != std::string::npos) continue;   // the signature itself
+                const std::vector<std::string> literals = StringLiterals(argument);
+                if (literals.empty()) { unchecked.insert(file.path); continue; }
+                callers.insert(file.path);
+                names.insert(literals.begin(), literals.end());
             }
         }
         return names;
+    }
+
+    // Each top-level object of one array section, braces included.
+    std::vector<std::string> ArrayObjects(const std::string& section)
+    {
+        std::vector<std::string> out;
+        int depth = 0;
+        bool inString = false;
+        bool escaped = false;
+        size_t start = 0;
+        for (size_t i = 0; i < section.size(); ++i)
+        {
+            const char c = section[i];
+            if (inString)
+            {
+                if (escaped)            escaped = false;
+                else if (c == '\\')     escaped = true;
+                else if (c == '"')      inString = false;
+                continue;
+            }
+            if (c == '"') { inString = true; continue; }
+            if (c == '{') { if (depth++ == 0) start = i; }
+            else if (c == '}' && --depth == 0) out.push_back(section.substr(start, i - start + 1));
+        }
+        return out;
     }
 
     std::string Join(const std::set<std::string>& values)
@@ -177,8 +302,7 @@ namespace
 
 int main()
 {
-#if !defined(BZR_PATCHES_JSON) || !defined(BZR_PATCHES_H) || !defined(BZR_PATCHER_CPP) || \
-    !defined(BZR_BZR_HOOKS_CPP)
+#if !defined(BZR_PATCHES_JSON) || !defined(BZR_PATCHES_H) || !defined(BZR_SRC_DIR)
     std::printf("patch_registration_tests: source paths not configured; skipped\n");
     return 0;
 #else
@@ -188,35 +312,9 @@ int main()
     bool headerOk = false;
     const std::string header = ReadFile(BZR_PATCHES_H, headerOk);
     Check(headerOk, "include/patches.h must be readable at " BZR_PATCHES_H);
-    bool patcherOk = false;
-    const std::string patcher = ReadFile(BZR_PATCHER_CPP, patcherOk);
-    Check(patcherOk, "src/engine/patcher.cpp must be readable at " BZR_PATCHER_CPP);
-    bool hooksOk = false;
-    const std::string hooks = ReadFile(BZR_BZR_HOOKS_CPP, hooksOk);
-    Check(hooksOk, "src/patches/bzr_hooks.cpp must be readable at " BZR_BZR_HOOKS_CPP);
-    // Every other translation unit that calls ResolveNamedAddress. The three
-    // shell names in ui_performance_hooks.cpp had no entry for as long as the
-    // file was not on this list, and fell back to their literals in silence.
-    struct ResolveCaller
-    {
-        const char* label;
-        const char* path;
-    };
-    const ResolveCaller resolveCallers[] = {
-        {"src/patches/ui_performance_hooks.cpp", BZR_UI_PERFORMANCE_HOOKS_CPP},
-        {"src/patches/file_io_hooks.cpp", BZR_FILE_IO_HOOKS_CPP},
-        {"src/patches/mp_faction_restrict.cpp", BZR_MP_FACTION_RESTRICT_CPP},
-        {"src/patches/openshim_updater.cpp", BZR_OPENSHIM_UPDATER_CPP},
-        {"src/patches/pond_class_label.cpp", BZR_POND_CLASS_LABEL_CPP},
-        {"src/patches/terrain_tile_blend.cpp", BZR_TERRAIN_TILE_BLEND_CPP},
-    };
-    std::vector<std::string> resolveSources = {patcher, hooks};
-    for (const ResolveCaller& caller : resolveCallers)
-    {
-        bool callerOk = false;
-        resolveSources.push_back(ReadFile(caller.path, callerOk));
-        Check(callerOk, (std::string(caller.label) + " must be readable at " + caller.path).c_str());
-    }
+    bool treeOk = false;
+    const std::vector<SourceFile> sources = SourceTree(BZR_SRC_DIR, treeOk);
+    Check(treeOk, "every source under src/ must be readable at " BZR_SRC_DIR);
 
     if (g_Failures)
     {
@@ -280,9 +378,46 @@ int main()
         }
     }
 
-    // --- a resolve name with no definition -----------------------------------
+    // --- a global nobody walks ------------------------------------------------
+    // A "globals" address is applied only to a patch-list entry of the same
+    // name, so an unlisted one is dropped without a log line.
+    size_t parkedCount = 0;
     {
-        const std::set<std::string> used = ResolveNamedAddressCallSites(resolveSources);
+        std::set<std::string> orphaned, staleParked;
+        for (const std::string& entry : ArrayObjects(globalsSection))
+        {
+            const std::set<std::string> names = NameValues(entry);
+            if (names.empty()) continue;
+            const std::string& name = *names.begin();
+            const bool parked = entry.find("\"parked\"") != std::string::npos;
+            const bool isListed = listed.find(name) != listed.end();
+            if (parked) ++parkedCount;
+            if (!parked && !isListed) orphaned.insert(name);
+            if (parked && isListed) staleParked.insert(name);
+        }
+        if (!orphaned.empty())
+        {
+            Fail("scripts/patches.json defines globals that include/patches.h never lists, so "
+                 "their addresses are read and then dropped without a log line: " + Join(orphaned) +
+                 " -- list each in include/patches.h, or give the entry a \"parked\" key saying "
+                 "why it is kept unwalked");
+        }
+        if (!staleParked.empty())
+        {
+            Fail("scripts/patches.json marks globals \"parked\" that include/patches.h lists and "
+                 "the patcher therefore applies: " + Join(staleParked) +
+                 " -- drop the \"parked\" key");
+        }
+    }
+
+    // --- a resolve name with no definition -----------------------------------
+    std::set<std::string> resolveCallers;
+    {
+        std::set<std::string> unchecked;
+        const std::set<std::string> used = ResolveNamedAddressCallSites(sources, resolveCallers, unchecked);
+        // An empty result means the walk or the parse broke, not that nothing
+        // resolves: the patcher alone resolves the AI names.
+        Check(!used.empty(), "no ResolveNamedAddress call with a literal name was found under src/");
         std::set<std::string> undefined;
         for (const std::string& name : used)
             if (jsonResolves.find(name) == jsonResolves.end()) undefined.insert(name);
@@ -292,13 +427,20 @@ int main()
                  "define, so they silently fall back: " + Join(undefined) +
                  " -- add each to the \"resolves\" array");
         }
+        if (!unchecked.empty())
+        {
+            Fail("ResolveNamedAddress is called without a literal name in: " + Join(unchecked) +
+                 " -- pass the name as a string literal so this test can check it");
+        }
     }
 
     if (g_Failures == 0)
     {
         std::printf("patch_registration_tests: %zu patch-list entries cross-checked "
-                    "(%zu signature, %zu global), %zu resolves\n",
-                    listed.size(), jsonPatches.size(), jsonGlobals.size(), jsonResolves.size());
+                    "(%zu signature, %zu global, %zu global(s) parked), %zu resolves used from "
+                    "%zu of %zu source file(s)\n",
+                    listed.size(), jsonPatches.size(), jsonGlobals.size(), parkedCount,
+                    jsonResolves.size(), resolveCallers.size(), sources.size());
         return 0;
     }
     std::fprintf(stderr, "patch_registration_tests: %d failure(s)\n", g_Failures);

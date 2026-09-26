@@ -563,18 +563,21 @@
     },
     {
       "name": "Version Notice 1/2 OpenShim",
+      "parked": "Same site as \"Main Menu Version Text OpenShim\", which is the entry the patch list walks.",
       "fallback_gog": "0x0078DD4E",
       "fallback_steam": "0x004B022B",
       "expected_original": "E4 84 87 00"
     },
     {
       "name": "Version Notice 2/2 OpenShim",
+      "parked": "A further reference to the version string recorded with the original research. include/patches.h does not list it, so only the main-menu site carries the OpenShim version.",
       "fallback_gog": "0x00618C2F",
       "fallback_steam": "0x004B0247",
       "expected_original": "E4 84 87 00"
     },
     {
       "name": "Version Notice 3/3 OpenShim",
+      "parked": "A further reference to the version string recorded with the original research. include/patches.h does not list it, so only the main-menu site carries the OpenShim version.",
       "fallback_steam": "0x005091F4",
       "expected_original": "E4 84 87 00"
     },
@@ -740,41 +743,49 @@
     },
     {
       "name": "Map Filters 1/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x007A31D9",
       "expected_original": "68 E0 B3 89 00"
     },
     {
       "name": "Map Filters 2/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x00752A82",
       "expected_original": "E8 49 04 00 00"
     },
     {
       "name": "Map Filters 3/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x0079D6B1",
       "expected_original": "8B EC 8B 0D 64"
     },
     {
       "name": "Map Filters 4/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x0079D691",
       "expected_original": "8B EC 8B 0D 64"
     },
     {
       "name": "Map Filters 5/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x00799116",
       "expected_original": "52 6A 20 6A 00"
     },
     {
       "name": "Map Filters 6/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x0079920A",
       "expected_original": "92 23 03 00"
     },
     {
       "name": "Map Filters 7/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x007998AB",
       "expected_original": "8B 45 BC 8B 88"
     },
     {
       "name": "Map Filters 8/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x007997A9",
       "expected_original": "8B 45 F8 8B 88"
     },

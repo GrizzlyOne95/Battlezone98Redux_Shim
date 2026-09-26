@@ -80,9 +80,11 @@ namespace BZROpenShim
     };
     static PatcherConfig g_Config;
 
-    // Main-menu version notice. The three "Version Notice"/"Main Menu"
-    // globals in patches.json point the game's version string pointer at
-    // this buffer, so whatever it holds is what the shell prints.
+    // Main-menu version notice. The "Main Menu Version Text OpenShim" global
+    // in patches.json points the game's version string pointer at this
+    // buffer, so whatever it holds is what the shell prints. (The three
+    // "Version Notice" globals beside it are parked: the patch list does
+    // not walk them.)
     //
     // It carries the shim's own build version so a player can read back
     // which DLL is actually loaded. That matters because winmm.dll and
