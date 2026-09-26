@@ -57,6 +57,31 @@ namespace BZROpenShim
     extern FnEngineFlameResolveTexture g_BzrFn_EngineFlameResolveTexture;
     extern FnEngineFlameSubmit g_BzrFn_EngineFlameSubmit;
 
+    using FnCarrierGetSelectedMask = uint32_t(__thiscall*)(void* carrier);
+    using FnTeamEnemyPInt = bool(__thiscall*)(void* team, int targetTeam);
+    // PREREQ_WhatIs(itemName) -> prereq id, 0 when the name is not in the
+    // strategic AI's enumerated unit/building universe.
+    using FnPrereqWhatIs = uint16_t(__cdecl*)(const char*);
+    // Multi-producer maker registration. InitObjectClasses walks the build
+    // trees of every load-time root; FindObjectClass keys the resulting list on
+    // the built class alone, so a class reachable from two producers keeps only
+    // the first producer it was seen under, and SetMaker writes that one into
+    // makers[0]. Collect the pairs FindObjectClass rejects, and append them
+    // after Units_Init has filled makers[0] for every accepted pair.
+    using FnAiFindObjectClass = uint32_t(__cdecl*)(void* objClass, void* buildClass);
+    using FnAiUnitsInit = void(__cdecl*)();
+    using FnAiIsBuilding = uint8_t(__cdecl*)(void* objClass);
+    using FnAiClass2UnitType = void*(__cdecl*)(void* objClass);
+    using FnAiClass2BuildingType = void*(__cdecl*)(void* objClass, int zero);
+    using FnAiGetPrereq = uint16_t(__cdecl*)(void* objClass);
+    struct AiExtraMakerPair { void* objClass; void* buildClass; };
+    extern std::vector<AiExtraMakerPair> g_AiExtraMakerPairs;
+    extern volatile long g_AiMultiProducerMakerLogBudget;
+    extern volatile long g_AipPrereqCensusEmitted;
+    extern volatile long g_AipResolveTraceBudget;
+    extern volatile long g_NeutralAttackOrderLogBudget;
+    extern std::unordered_set<uintptr_t> g_PilotCarrierNullLoggedObjects;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -583,6 +608,12 @@ namespace BZROpenShim
         void ResolveEngineFlameRuntimeTargets();
         bool TryGetCraftOdfName(void* craftPtr, char* out, size_t outSize);
         void InitializeJetFlamesConfig();
+
+        // --- AI and unit fixes (ai_unit_fixes.cpp) -----------------------------
+        inline constexpr size_t kPersonCarrierOffset = 0x1A0;      // PDB 0x198
+        extern bool g_AiMultiProducerMakersEnabled;
+        extern bool g_AipResolveTraceEnabled;
+        extern bool g_AllowNeutralAttackOrders;
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
