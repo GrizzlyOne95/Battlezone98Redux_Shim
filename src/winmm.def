@@ -6,6 +6,12 @@
 LIBRARY winmm
 
 EXPORTS
+    OpenShimConfigureFogWake
+    OpenShimUpdateFogWake
+    OpenShimObserveFogWake
+    OpenShimRemoveFogWakeEmitter
+    OpenShimResetFogWake
+    OpenShimGetFogWakeStatus
     OpenShimGetApi
     OpenShimGetBzrDistribution
     OpenShimCaptureDeveloperSnapshot

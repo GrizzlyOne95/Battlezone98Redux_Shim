@@ -17379,14 +17379,14 @@ namespace BZROpenShim
                 DeactivateAllChunkProxySceneResources(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);
                 PilotFlashlightNotifyMissionRunStateChanged(false);
-                FogWakeNotifyMissionRunStateChanged(false);
+                FogWakeNotifyMissionRunStateChanged(false, GetOgreSceneManagerRuntime());
                 RenderQueueTraceShutdown();
                 NotifyExuMissionSimulationState(false);
             }
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
             {
                 HeadlightNotifyMissionRunStateChanged(true);
-                FogWakeNotifyMissionRunStateChanged(true);
+                FogWakeNotifyMissionRunStateChanged(true, GetOgreSceneManagerRuntime());
                 PilotFlashlightNotifyMissionRunStateChanged(true);
                 ApplyTerrainTileBlendForCurrentMission();
                 NotifyExuMissionSimulationState(true);
@@ -39061,7 +39061,7 @@ namespace BZROpenShim
         // This runs once per camera. The fog wake runtime steps a fixed cadence
         // off a monotonic clock, so the extra calls cost a clock read rather
         // than extra simulation.
-        FogWakeRenderFrameTick();
+        FogWakeRenderFrameTick(GetOgreSceneManagerRuntime());
     }
 
     static volatile long g_ChunkGeomDumpFragmentBudget = 8;

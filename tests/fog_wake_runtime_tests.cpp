@@ -272,6 +272,23 @@ int main()
         Check(runtime.AdvanceTo(1.0, {inf, 0}) == 0, "an infinite wind simulates nothing");
     }
 
+    // Slower observation cadence must not turn real vehicle motion into jumps.
+    {
+        Runtime runtime;
+        runtime.Configure(MakeConfig());
+        runtime.BeginSession(0);
+        runtime.Observe(CraftA(), {-10.5, 0.5}, 0);
+        runtime.AdvanceTo(0.125, {});
+        runtime.Observe(CraftA(), {1.5, 0.5}, 0.5); // 24 m/s, limit 40.
+        runtime.AdvanceTo(0.5, {});
+        Check(runtime.GetStats().teleports == 0, "low observation cadence uses elapsed observation time");
+        Check(runtime.GetField().Sample({-4.5, 0.5}) > 0.9, "slow observations still carve a swept corridor");
+        Check(!runtime.Observe(CraftA(), {20, 0}, 0.25), "out-of-order observations refused");
+        runtime.AdvanceTo(-1, {});
+        Check(runtime.TrackedEmitters() == 0, "backwards clock discards vehicle history");
+        Check(runtime.GetField().Sample({-4.5, 0.5}) == 0, "backwards clock discards old wakes");
+    }
+
     // --- shutdown ------------------------------------------------------------
     {
         Runtime runtime;
