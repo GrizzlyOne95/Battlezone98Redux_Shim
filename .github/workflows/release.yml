@@ -267,6 +267,13 @@ jobs:
         Copy-Item -LiteralPath "resources\renderer\enhanced" -Destination (Join-Path $suiteRoot "resources\renderer\enhanced") -Recurse -Force
         Copy-Item -LiteralPath "resources\ui\custom_widgets" -Destination (Join-Path $suiteRoot "resources\ui\custom_widgets") -Recurse -Force
         Copy-Item -LiteralPath "resources\openshim\OpenShimAssets.ini" -Destination (Join-Path $suiteRoot "resources\openshim\OpenShimAssets.ini") -Force
+        # The opt-in log uploader wrappers. The installers used to fetch them
+        # from main by raw URL, unpinned and unhashed, beside a bundle that is
+        # hash-verified; inside the bundle they are covered by the same hash.
+        New-Item -ItemType Directory -Path (Join-Path $suiteRoot "upload") -Force | Out-Null
+        foreach ($wrapper in @("openshim_wrap.ps1", "openshim_wrap.bat", "openshim_wrap.sh")) {
+          Copy-Item -LiteralPath (Join-Path "upload" $wrapper) -Destination (Join-Path $suiteRoot "upload\$wrapper") -Force
+        }
 
         # Record the exact source identity inside the archive so downstream
         # packagers can prove which qualified OpenShim commit they consumed.

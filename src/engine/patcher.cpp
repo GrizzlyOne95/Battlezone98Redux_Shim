@@ -80,9 +80,11 @@ namespace BZROpenShim
     };
     static PatcherConfig g_Config;
 
-    // Main-menu version notice. The three "Version Notice"/"Main Menu"
-    // globals in patches.json point the game's version string pointer at
-    // this buffer, so whatever it holds is what the shell prints.
+    // Main-menu version notice. The "Main Menu Version Text OpenShim" global
+    // in patches.json points the game's version string pointer at this
+    // buffer, so whatever it holds is what the shell prints. (The three
+    // "Version Notice" globals beside it are parked: the patch list does
+    // not walk them.)
     //
     // It carries the shim's own build version so a player can read back
     // which DLL is actually loaded. That matters because winmm.dll and
@@ -1282,8 +1284,14 @@ namespace BZROpenShim
         patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& patch) {
             return IsReduxCompatibilityPatchName(patch.name.c_str());
         }), patches.end());
-        for (const auto& p : patches) {
-            if (HookEngine::ApplyPatch(p)) {
+        // One suspension of the other threads covers the whole list (see
+        // HookEngine::ApplyPatches); applying them one by one cost a thread
+        // snapshot and a suspension round per patch, which put four seconds
+        // between the game reaching this point and its critical fixes.
+        const std::vector<bool> applied = HookEngine::ApplyPatches(patches);
+        for (size_t i = 0; i < patches.size(); ++i) {
+            const auto& p = patches[i];
+            if (applied[i]) {
                 app++;
                 if (p.name == "Sun Screen Flash Contribution Hook") SunFlash::SetPatchInstalled(true);
                 Log(L"[OK]   %hs wrote %u bytes to 0x%08X\n", p.name.c_str(), static_cast<unsigned>(p.payload.size()), p.address);

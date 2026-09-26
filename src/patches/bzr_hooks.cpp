@@ -1,5 +1,6 @@
 #include "bzr_hooks.h"
 #include "bzr_object_layout.h"
+#include "engine_globals.h"
 #include "game_state.h"
 #include "openshim_ini.h"
 #include "openshim_preset_migration.h"
@@ -7,6 +8,7 @@
 #include "terrain_proxy.h"
 #include "terrain_tile_blend.h"
 #include "bzr_options_ui.h"
+#include "remembered_mesh_bounds_table.h"
 #include "patches.h"
 #include "patcher.h"
 #include "fog_wake_feature.h"
@@ -350,9 +352,58 @@ namespace BZROpenShim
     static FnGetPlayerHandle g_BzrFn_GetPlayerHandle = nullptr;
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
     static volatile long g_StaleGameObjectHandleLogBudget = 16;
+    // GameObject::GetHandle, resolved by ResolveBzrHooks from scripts/patches.json
+    // ("GameObject::GetHandle"); 0 until then, and every caller stands down on 0.
+    static uintptr_t g_GameObjectGetHandleAddr = 0;
+
+    // Trace switches consulted on per-unit, per-tick AI paths (the DoSubTask
+    // path read three of them per unit per tick). EnvFlagEnabled reads the
+    // process environment, which nothing changes after startup, so each is
+    // read once and latched.
+    static bool TraceLegacyAiEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI");
+        return s_value;
+    }
+    static bool TraceAiRangeEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE");
+        return s_value;
+    }
+    static bool TraceAiUnitTuningEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_AI_UNIT_TUNING");
+        return s_value;
+    }
+    static bool TraceBomberRangeEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_BOMBER_RANGE");
+        return s_value;
+    }
+    static bool TraceAttackRevealEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_ATTACK_REVEAL");
+        return s_value;
+    }
+    static bool TraceAttackRevealLegacyEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("BZR_TRACE_ATTACK_REVEAL");
+        return s_value;
+    }
+    static bool TraceArtilleryMaskEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_ARTILLERY_MASK");
+        return s_value;
+    }
+    static bool TraceWeaponMaskEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_WEAPON_MASK");
+        return s_value;
+    }
 
     // Correct GOG handle->object conversion. The engine's GameObject pool is a
-    // fixed 0x1000-slot table based at 0x0260DB20 with a 0x400-byte stride; a
+    // fixed 0x1000-slot table (patches.json "GameObject::Arena", 0x0260DB20 on
+    // GOG) with a 0x400-byte stride; a
     // handle's slot index is its top 12 bits (handle >> 0x14). Verified live: a
     // craft pointer satisfies (ptr - 0x0260DB20) == slot * 0x400 exactly. The
     // former binding (kGogGameObjectGetObjByHandleAddr = 0x0046B160) actually
@@ -364,13 +415,18 @@ namespace BZROpenShim
     {
         if (handle == 0)
             return nullptr;
+        const uintptr_t arena = EngineGlobals::GameObjectArena();
+        if (arena == 0)
+            return nullptr;
         const uint32_t slot = (static_cast<uint32_t>(handle) >> 0x14) & 0xFFFu;
         void* obj = reinterpret_cast<void*>(
-            static_cast<uintptr_t>(slot) * 0x400u + 0x0260DB20u);
+            static_cast<uintptr_t>(slot) * 0x400u + arena);
         using GetHandleThiscallFn = uint32_t(__thiscall*)(void*);
+        if (g_GameObjectGetHandleAddr == 0)
+            return nullptr;
         __try
         {
-            if (reinterpret_cast<GetHandleThiscallFn>(0x00462380u)(obj) ==
+            if (reinterpret_cast<GetHandleThiscallFn>(g_GameObjectGetHandleAddr)(obj) ==
                 static_cast<uint32_t>(handle))
                 return obj;
         }
@@ -489,8 +545,9 @@ namespace BZROpenShim
     static FnGameObjectClassBuild g_BzrFn_SprayEmitterBuildOriginal = nullptr;
     static FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate = nullptr;
     using FnResolveObj76GameObject = void*(__cdecl*)(void*);
-    static FnResolveObj76GameObject g_BzrFn_ResolveObj76GameObject =
-        reinterpret_cast<FnResolveObj76GameObject>(0x00479F30);
+    // Resolved by ResolveBzrHooks from scripts/patches.json
+    // ("GameObject::FromObj76"); null until then, and every caller checks.
+    static FnResolveObj76GameObject g_BzrFn_ResolveObj76GameObject = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectFriendP = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectEnemyP = nullptr;
     static FnMatrixInverse g_BzrFn_MatrixInverse = nullptr;
@@ -764,6 +821,26 @@ namespace BZROpenShim
         constexpr size_t kMagnetMineClassOrdRotPullOffset = 0x184;
         constexpr size_t kProximityMineClassRangeOffset = 0x168;
         constexpr size_t kProximityMineClassScanPeriodOffset = 0x16C;
+        constexpr size_t kProximityMineClassExplosionOffset = 0x170;
+        constexpr size_t kProximityMinePositionOffset = 0x108;
+        // Calls in stock ProximityMine::Simulate's detonation block
+        // (FUN_005b0e40, 0x005B1067-0x005B1247), read from the GOG image.
+        // Debris: thiscall on the global at 0x00950190 (const double pos[3],
+        // const float vel[3], int 0), ret 0xC, run 20 times.
+        constexpr uintptr_t kGogProximityMineDebrisAddr = 0x004927D0;
+        constexpr uintptr_t kGogProximityMineDebrisOwnerAddr = 0x00950190;
+        // cdecl (float x, float z, float 3.0).
+        constexpr uintptr_t kGogProximityMineGroundFxAddr = 0x007809D0;
+        // double cdecl (double x, double z): terrain height; stock stores it
+        // into obj+0x50 before building the explosion.
+        constexpr uintptr_t kGogTerrainHeightAtAddr = 0x007855E0;
+        // thiscall (mine): the damage owner, or null.
+        constexpr uintptr_t kGogGameObjectDamageOwnerAddr = 0x004B0400;
+        // ExplosionClass::Build, thiscall (explosionClass, obj+0x20, owner obj), ret 8.
+        constexpr uintptr_t kGogExplosionClassBuildAddr = 0x004CB7B0;
+        // Returns a global flag; when set, stock calls the next one on mine+0x18.
+        constexpr uintptr_t kGogProximityMineNetFlagAddr = 0x00571C40;
+        constexpr uintptr_t kGogProximityMineNetNotifyAddr = 0x004B8460;
         constexpr uintptr_t kCollisionRangeSearchAddr = 0x006A3E10;
         constexpr uintptr_t kGogShieldTowerSimulateAddr = 0x005D0D80;
         constexpr uintptr_t kGogBuildingSimulateAddr = 0x0047FCB0;
@@ -1323,7 +1400,6 @@ namespace BZROpenShim
         constexpr uintptr_t kTurretTankUpdateWeaponAimAddr = 0x005F27B0;
         constexpr uintptr_t kCarrierGetWeaponAddr = 0x00417F60;
         constexpr uintptr_t kRefreshWeaponTransformAddr = 0x00681A00;
-        constexpr uintptr_t kLocalUserObjectPtrAddr = 0x00917AFC;
         // The global Reticle lives at 0x025CE6D0 (its ctor at 0x005BA170 is
         // called with that `this` from 0x0040B013). Member addresses below come
         // from the class layout; nothing references them absolutely from inside
@@ -1631,6 +1707,19 @@ namespace BZROpenShim
         constexpr size_t kAttackTaskCloseSqOffset = 0x9C;
         constexpr size_t kAttackTaskRangeSqOffset = 0xA0;
         constexpr int kAttackTaskFiringState = 5;
+        // AttackTask flee (state 9) and blast (state 10), and the stuck sample
+        // IsStuck (FUN_006027f0) keeps on the task: FUN_00602920 rewrites the
+        // sample time to now + 5 and the sample position to the craft's
+        // position whenever the window has elapsed.
+        constexpr int kAttackTaskFleeState = 9;
+        constexpr int kAttackTaskBlastState = 10;
+        constexpr size_t kAttackTaskStuckSampleTimeOffset = 0x84;
+        constexpr size_t kAttackTaskStuckSamplePosOffset = 0x88;
+        constexpr size_t kCraftVehicleOffset = 0x230;
+        constexpr size_t kVehicleStuckFlagsOffset = 0x114;
+        // IsStuck's first test: bool __cdecl(const float* position), true on
+        // terrain cell types 5 and 6. It only reads the terrain.
+        constexpr uintptr_t kGogTerrainBlocksCraftAddr = 0x00466D40;
         // Current Redux 2.2.301 process vtables, re-derived via RTTI. Slot 11
         // owns the target-acquisition state method which schedules the stock
         // 7-10 second retry after a failed enemy search.
@@ -2690,7 +2779,6 @@ namespace BZROpenShim
         static float g_UnderAttackAlertBaselineCooldownSeconds = 1.0f;
         static constexpr const char* kUnderAttackAlertConfigName = "campaignReimagined_settings.cfg";
         static constexpr uintptr_t kUnderAttackAlertSoundAddr = 0x00877220;
-        static constexpr uintptr_t kOgreSceneManagerStructureAddr = 0x00920EA0;
         static constexpr uintptr_t kOgreSceneManagerOffset = 0x08;
         static constexpr uintptr_t kChunkEffectActiveCountOffset = 0x8028;
         static constexpr uintptr_t kChunkEffectGateOffset = 0x802C;
@@ -2715,7 +2803,7 @@ namespace BZROpenShim
         // The advisory-PDB object-list/userObject/userTeam globals that used
         // to live here (0x50D2F0/F8/E4) landed in string data on the live exe
         // and were removed 2026-07-18. Verified replacements: userObject
-        // global 0x00917AFC (kHeadlightUserObjectRva, accessor 0x417C70),
+        // global 0x00917AFC (EngineGlobals::UserObjectSlot, accessor 0x417C70),
         // object enumeration via the 0x0260DB20 arena
         // (CollectLiveGameObjectsFromArena), team via
         // GetGameObjectActualTeam(userObject).
@@ -2744,8 +2832,9 @@ namespace BZROpenShim
         static constexpr const char* kChunkPayloadModRelativeDirName = "chunkMeshes";
         static constexpr const char* kChunkPayloadModRelativeDirNameAlt = "Chunks";
         static constexpr const char* kChunkPayloadResourceLocationType = "FileSystem";
-        static FnPlayGlobalSound g_BzrFn_PlayGlobalSound =
-            reinterpret_cast<FnPlayGlobalSound>(0x0043AA30);
+        // Resolved by ResolveBzrHooks from scripts/patches.json
+        // ("PlayGlobalSound"); null until then, and the caller checks.
+        static FnPlayGlobalSound g_BzrFn_PlayGlobalSound = nullptr;
         static bool g_TargetReticlePopupConfigInitialized = false;
         static TargetReticlePopupMode g_TargetReticlePopupMode = TargetReticlePopupMode::Default;
         // User-config baseline (see under-attack alert note above).
@@ -3322,6 +3411,34 @@ namespace BZROpenShim
             if (VirtualQuery(candidate, &mbi, sizeof(mbi)) != sizeof(mbi))
                 return false;
             if (mbi.State != MEM_COMMIT || !IsReadableDataProtect(mbi.Protect))
+                return false;
+
+            uintptr_t vtable = 0;
+            __try
+            {
+                vtable = *reinterpret_cast<const uintptr_t*>(candidate);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+
+            return vtable >= ogreBase && vtable < ogreEnd;
+        }
+
+        // LooksLikeOgreObject without the VirtualQuery, for per-tick sweeps
+        // over many objects. The guarded read already turns an unmapped page
+        // into "no"; the query only added a syscall per object. The identity
+        // test is the same: a vtable inside OgreMain.dll.
+        static bool LooksLikeOgreObjectInPlace(const void* candidate)
+        {
+            const uintptr_t address = reinterpret_cast<uintptr_t>(candidate);
+            if (address < 0x00010000 || (address % sizeof(void*)) != 0)
+                return false;
+
+            uintptr_t ogreBase = 0;
+            uintptr_t ogreEnd = 0;
+            if (!TryGetOgreModuleRange(ogreBase, ogreEnd))
                 return false;
 
             uintptr_t vtable = 0;
@@ -4042,6 +4159,7 @@ namespace BZROpenShim
             };
 
             uint32_t count = 0;
+            bool lookupRaised = false;
             if (TryReadHudSpriteNameCount(count))
             {
                 LogShimA(
@@ -4056,6 +4174,7 @@ namespace BZROpenShim
                 int index = 0;
                 if (!SehScanHudSpriteTable(name, count, found, index))
                 {
+                    lookupRaised = true;
                     LogShimA(
                         LogLevel::Warn,
                         "hudlookup",
@@ -4092,6 +4211,7 @@ namespace BZROpenShim
                 int id = 0;
                 if (!SehCallHudSpriteLookupFn(name, id))
                 {
+                    lookupRaised = true;
                     LogShimA(
                         LogLevel::Warn,
                         "hudlookup",
@@ -4118,7 +4238,11 @@ namespace BZROpenShim
                 "hudlookup",
                 "sprite=%s not found by any lookup path",
                 name);
-            return 0;
+            // A miss against a readable table, with no lookup faulting, is as
+            // final as a hit: the table is static for the process. Memoise it,
+            // so the next refresh tick neither rescans the table nor logs the
+            // same miss again. An unreadable table or a fault is retried.
+            return (count > 0 && !lookupRaised) ? rememberHit(0) : 0;
         }
 
         static bool HudSpriteUvNearlyEqual(float a, float b)
@@ -5826,8 +5950,11 @@ namespace BZROpenShim
         {
             __try
             {
-                auto* sceneManagerStructure =
-                    *reinterpret_cast<uint8_t**>(kOgreSceneManagerStructureAddr);
+                auto* const renderGlobalsSlot =
+                    reinterpret_cast<uint8_t**>(EngineGlobals::RenderGlobals());
+                if (!renderGlobalsSlot)
+                    return nullptr;
+                auto* sceneManagerStructure = *renderGlobalsSlot;
                 if (!sceneManagerStructure)
                     return nullptr;
 
@@ -5856,6 +5983,52 @@ namespace BZROpenShim
             TrySetChunkProxyBillboardPosition(billboard, setPosition, 0.0f, kChunkProxyHiddenY, 0.0f);
         }
 
+        // --- Ogre call guards ------------------------------------------------
+        //
+        // Every Ogre call in the chunk proxy runs under __try, because the
+        // object it is handed may have been destroyed by a scene teardown the
+        // shim did not observe, and only SEH stops the access violation that
+        // follows. But Ogre also throws C++ exceptions as a matter of course:
+        // a missing mesh or material, a name collision in createEntity, an
+        // out-of-range getSubEntity, a codec error. An
+        // __except(EXCEPTION_EXECUTE_HANDLER) caught those too, as the MSVC
+        // C++ exception code, and executing an SEH handler for a C++ throw
+        // skips every destructor between the throw and that frame: OgreMain's
+        // mutex guards stayed held, a half-registered object stayed in the
+        // movable-object map, the exception object leaked. So each guard now
+        // has two halves. The C++ half (CatchOgreThrow) runs the call inside
+        // try/catch, which lets the throw unwind OgreMain's frames before it
+        // is caught. The SEH half keeps only the hardware faults and hands a
+        // C++ exception back to the unwinder (OgreCallSehFilter), so it can
+        // never again be swallowed on this path.
+        constexpr unsigned long kMsvcCppExceptionCode = 0xE06D7363UL;
+
+        static int OgreCallSehFilter(unsigned long code)
+        {
+            return code == kMsvcCppExceptionCode ? EXCEPTION_CONTINUE_SEARCH : EXCEPTION_EXECUTE_HANDLER;
+        }
+
+        // Runs `call` and reports a C++ throw as false. The lambda is its own
+        // function, so the caller's __try frame stays free of objects that
+        // need unwinding (C2712). The log budget is per site and small: these
+        // guards sit on the per-slot render tick.
+        template <typename Call>
+        static bool CatchOgreThrow(const char* site, Call&& call)
+        {
+            try
+            {
+                call();
+                return true;
+            }
+            catch (...)
+            {
+                static volatile LONG s_budget = 8;
+                if (InterlockedDecrement(&s_budget) >= 0)
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Ogre threw in %hs; call abandoned\n", site);
+                return false;
+            }
+        }
+
         static bool TryCreateChunkProxyBillboardSet(
             void* sceneManager,
             FnOgreGetRootSceneNode getRootSceneNode,
@@ -5870,11 +6043,17 @@ namespace BZROpenShim
 
             __try
             {
-                outRootNode = getRootSceneNode(sceneManager);
-                if (outRootNode)
-                    outBillboardSet = createBillboardSet(sceneManager, g_ChunkProxyCapacity);
+                if (!CatchOgreThrow("createBillboardSet", [&] {
+                        outRootNode = getRootSceneNode(sceneManager);
+                        if (outRootNode)
+                            outBillboardSet = createBillboardSet(sceneManager, g_ChunkProxyCapacity);
+                    }))
+                {
+                    outRootNode = nullptr;
+                    outBillboardSet = nullptr;
+                }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 outRootNode = nullptr;
                 outBillboardSet = nullptr;
@@ -5895,12 +6074,13 @@ namespace BZROpenShim
 
             __try
             {
-                setBillboardsInWorldSpace(billboardSet, true);
-                setDefaultDimensions(billboardSet, g_ChunkProxyDebugSize, g_ChunkProxyDebugSize);
-                attachObject(rootNode, billboardSet);
-                return true;
+                return CatchOgreThrow("setupBillboardSet", [&] {
+                    setBillboardsInWorldSpace(billboardSet, true);
+                    setDefaultDimensions(billboardSet, g_ChunkProxyDebugSize, g_ChunkProxyDebugSize);
+                    attachObject(rootNode, billboardSet);
+                });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -5911,11 +6091,18 @@ namespace BZROpenShim
             if (!billboardSet || !createBillboard)
                 return nullptr;
 
+            void* billboard = nullptr;
             __try
             {
-                return createBillboard(billboardSet, 0.0f, kChunkProxyHiddenY, 0.0f, color);
+                if (!CatchOgreThrow("createBillboard", [&] {
+                        billboard = createBillboard(billboardSet, 0.0f, kChunkProxyHiddenY, 0.0f, color);
+                    }))
+                {
+                    billboard = nullptr;
+                }
+                return billboard;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return nullptr;
             }
@@ -5933,10 +6120,9 @@ namespace BZROpenShim
 
             __try
             {
-                setPosition(billboard, x, y, z);
-                return true;
+                return CatchOgreThrow("setBillboardPosition", [&] { setPosition(billboard, x, y, z); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -5949,9 +6135,9 @@ namespace BZROpenShim
 
             __try
             {
-                setVisible(entity, false);
+                CatchOgreThrow("hideEntity", [&] { setVisible(entity, false); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
             }
         }
@@ -5966,11 +6152,13 @@ namespace BZROpenShim
 
             __try
             {
-                setPosition(sceneNode, 0.0f, kChunkProxyHiddenY, 0.0f);
-                if (setOrientation)
-                    setOrientation(sceneNode, 1.0f, 0.0f, 0.0f, 0.0f);
+                CatchOgreThrow("resetNode", [&] {
+                    setPosition(sceneNode, 0.0f, kChunkProxyHiddenY, 0.0f);
+                    if (setOrientation)
+                        setOrientation(sceneNode, 1.0f, 0.0f, 0.0f, 0.0f);
+                });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
             }
         }
@@ -6006,18 +6194,24 @@ namespace BZROpenShim
             const OgreQuaternion identity = { 1.0f, 0.0f, 0.0f, 0.0f };
             __try
             {
-                outSceneNode = createChildSceneNode(rootNode, zeroPos, identity);
-                if (outSceneNode)
+                if (!CatchOgreThrow("createMeshProxy", [&] {
+                        outSceneNode = createChildSceneNode(rootNode, zeroPos, identity);
+                        if (outSceneNode)
+                        {
+                            outEntity = CreateChunkMeshProxyEntity(sceneManager, createEntity, meshName);
+                            if (outEntity)
+                            {
+                                attachObject(outSceneNode, outEntity);
+                                setVisible(outEntity, false);
+                            }
+                        }
+                    }))
                 {
-                    outEntity = CreateChunkMeshProxyEntity(sceneManager, createEntity, meshName);
-                    if (outEntity)
-                    {
-                        attachObject(outSceneNode, outEntity);
-                        setVisible(outEntity, false);
-                    }
+                    outSceneNode = nullptr;
+                    outEntity = nullptr;
                 }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 outSceneNode = nullptr;
                 outEntity = nullptr;
@@ -6033,11 +6227,14 @@ namespace BZROpenShim
             if (!sceneManager || !getRootSceneNode)
                 return nullptr;
 
+            void* rootNode = nullptr;
             __try
             {
-                return getRootSceneNode(sceneManager);
+                if (!CatchOgreThrow("rootSceneNode", [&] { rootNode = getRootSceneNode(sceneManager); }))
+                    rootNode = nullptr;
+                return rootNode;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return nullptr;
             }
@@ -6153,20 +6350,21 @@ namespace BZROpenShim
 
             __try
             {
-                setNodePosition(sceneNode, transform.x, transform.y, transform.z);
-                if (setNodeOrientation)
-                {
-                    setNodeOrientation(
-                        sceneNode,
-                        transform.orientation.w,
-                        transform.orientation.x,
-                        transform.orientation.y,
-                        transform.orientation.z);
-                }
-                setVisible(entity, true);
-                return true;
+                return CatchOgreThrow("updateMeshProxyTransform", [&] {
+                    setNodePosition(sceneNode, transform.x, transform.y, transform.z);
+                    if (setNodeOrientation)
+                    {
+                        setNodeOrientation(
+                            sceneNode,
+                            transform.orientation.w,
+                            transform.orientation.x,
+                            transform.orientation.y,
+                            transform.orientation.z);
+                    }
+                    setVisible(entity, true);
+                });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -6572,23 +6770,26 @@ namespace BZROpenShim
             if (!sceneManager || !getCurrentViewport)
                 return fallbackCamera;
 
+            void* viewportCamera = nullptr;
             __try
             {
-                void* viewport = getCurrentViewport(sceneManager);
-                if (outViewport)
-                    *outViewport = viewport;
-                if (viewport && getViewportCamera)
+                if (!CatchOgreThrow("viewportCamera", [&] {
+                        void* viewport = getCurrentViewport(sceneManager);
+                        if (outViewport)
+                            *outViewport = viewport;
+                        if (viewport && getViewportCamera)
+                            viewportCamera = getViewportCamera(viewport);
+                    }))
                 {
-                    void* viewportCamera = getViewportCamera(viewport);
-                    if (viewportCamera)
-                        return viewportCamera;
+                    viewportCamera = nullptr;
                 }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
+                viewportCamera = nullptr;
             }
 
-            return fallbackCamera;
+            return viewportCamera ? viewportCamera : fallbackCamera;
         }
 
         // A chunk mesh has a handful of sub-entities. A destroyed Entity whose
@@ -6614,9 +6815,14 @@ namespace BZROpenShim
             uint32_t count = 0;
             __try
             {
-                count = getNumSubEntities(entity);
+                if (!CatchOgreThrow("numSubEntities", [&] { count = getNumSubEntities(entity); }))
+                {
+                    if (faulted)
+                        *faulted = true;
+                    return 0;
+                }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 if (faulted)
                     *faulted = true;
@@ -6639,11 +6845,14 @@ namespace BZROpenShim
             if (!entity || !getSubEntity)
                 return nullptr;
 
+            void* subEntity = nullptr;
             __try
             {
-                return getSubEntity(entity, index);
+                if (!CatchOgreThrow("subEntity", [&] { subEntity = getSubEntity(entity, index); }))
+                    subEntity = nullptr;
+                return subEntity;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return nullptr;
             }
@@ -6664,10 +6873,9 @@ namespace BZROpenShim
 
             __try
             {
-                notifyCurrentCamera(entity, camera);
-                return true;
+                return CatchOgreThrow("notifyCurrentCamera", [&] { notifyCurrentCamera(entity, camera); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -6679,11 +6887,14 @@ namespace BZROpenShim
             if (!entity || !isVisible)
                 return 1;
 
+            int visible = -1;
             __try
             {
-                return isVisible(entity) ? 1 : 0;
+                if (!CatchOgreThrow("isVisible", [&] { visible = isVisible(entity) ? 1 : 0; }))
+                    visible = -1;
+                return visible;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return -1;
             }
@@ -6699,10 +6910,9 @@ namespace BZROpenShim
 
             __try
             {
-                updateRenderQueue(entity, renderQueue);
-                return true;
+                return CatchOgreThrow("updateRenderQueue", [&] { updateRenderQueue(entity, renderQueue); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -6753,10 +6963,9 @@ namespace BZROpenShim
 
             __try
             {
-                addRenderablePriority(renderQueue, renderable, groupId, priority);
-                return true;
+                return CatchOgreThrow("addRenderable", [&] { addRenderablePriority(renderQueue, renderable, groupId, priority); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -6772,11 +6981,18 @@ namespace BZROpenShim
             if (!entity || !getRenderQueueGroup)
                 return 50u;
 
+            uint8_t group = 50u;
             __try
             {
-                return getRenderQueueGroup(entity);
+                if (!CatchOgreThrow("renderQueueGroup", [&] { group = getRenderQueueGroup(entity); }))
+                {
+                    if (outFaulted)
+                        *outFaulted = true;
+                    return 50u;
+                }
+                return group;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 if (outFaulted)
                     *outFaulted = true;
@@ -6796,10 +7012,9 @@ namespace BZROpenShim
 
             __try
             {
-                outPos = getCameraDerivedPosition(camera);
-                return true;
+                return CatchOgreThrow("cameraPosition", [&] { outPos = getCameraDerivedPosition(camera); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -11988,6 +12203,80 @@ namespace BZROpenShim
             }
         }
 
+        // Main image extent from its PE headers, read once.
+        static bool TryGetMainImageRange(uintptr_t& outBase, uintptr_t& outEnd)
+        {
+            static uintptr_t s_base = 0;
+            static uintptr_t s_end = 0;
+            if (s_end == 0)
+            {
+                const uintptr_t base = GetMainModuleBase();
+                if (base == 0)
+                    return false;
+                __try
+                {
+                    const auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+                    const auto* ntHeaders =
+                        reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dosHeader->e_lfanew);
+                    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE ||
+                        ntHeaders->Signature != IMAGE_NT_SIGNATURE ||
+                        ntHeaders->OptionalHeader.SizeOfImage == 0)
+                        return false;
+                    s_base = base;
+                    s_end = base + ntHeaders->OptionalHeader.SizeOfImage;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+            }
+            outBase = s_base;
+            outEnd = s_end;
+            return true;
+        }
+
+        // TryGetGameObjectFieldBase for arena slots, without its two
+        // VirtualQuery calls. The arena lives in the exe's own .data, so the
+        // slot is always mapped, and a vtable that lies inside the main image
+        // is always readable; anything else is rejected before it is touched.
+        // The identity proof is unchanged: slot 1 must be GameObject::GetTeam.
+        // SyncSatelliteVisibility runs this for every live object every tick.
+        static bool TryGetArenaGameObjectFieldBase(void* objectPtr, uint8_t*& outBase)
+        {
+            outBase = nullptr;
+            const auto address = reinterpret_cast<uintptr_t>(objectPtr);
+            if (address < 0x00010000 || (address % sizeof(void*)) != 0)
+                return false;
+
+            uintptr_t imageBase = 0;
+            uintptr_t imageEnd = 0;
+            if (!TryGetMainImageRange(imageBase, imageEnd))
+                return false;
+
+            __try
+            {
+                auto* bytes = reinterpret_cast<uint8_t*>(objectPtr);
+                auto** vtable = *reinterpret_cast<void***>(bytes + kGameObjectInterfaceOffset);
+                const auto vtableAddress = reinterpret_cast<uintptr_t>(vtable);
+                constexpr size_t kGetTeamSlot = kGameObjectGetTeamVtableOffset / sizeof(void*);
+                if (vtableAddress < imageBase ||
+                    vtableAddress + (kGetTeamSlot + 1) * sizeof(void*) > imageEnd)
+                    return false;
+
+                const uintptr_t expected =
+                    imageBase + (kGogGameObjectGetTeamAddr - kGogPreferredImageBase);
+                if (reinterpret_cast<uintptr_t>(vtable[kGetTeamSlot]) != expected)
+                    return false;
+
+                outBase = bytes;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         static bool IsLikelyGameObjectEntry(void* objectPtr)
         {
             uint8_t* base = nullptr;
@@ -12684,6 +12973,7 @@ namespace BZROpenShim
         // SEH-guarded helpers. Each lives in its own function because MSVC
         // prohibits __try in any function that requires C++ object unwinding,
         // and the main sync function uses std::unordered_map.
+        // Both readers below take arena slots (CollectLiveGameObjectsFromArena).
         static bool TryReadObjectIlluminationAndEntity(void* objectPtr,
                                                        float& outIllumination,
                                                        void*& outEntity)
@@ -12691,7 +12981,7 @@ namespace BZROpenShim
             outIllumination = 0.0f;
             outEntity = nullptr;
             uint8_t* bytes = nullptr;
-            if (!TryGetGameObjectFieldBase(objectPtr, bytes))
+            if (!TryGetArenaGameObjectFieldBase(objectPtr, bytes))
                 return false;
             __try
             {
@@ -12715,7 +13005,7 @@ namespace BZROpenShim
         {
             outEntity = nullptr;
             uint8_t* bytes = nullptr;
-            if (!TryGetGameObjectFieldBase(objectPtr, bytes))
+            if (!TryGetArenaGameObjectFieldBase(objectPtr, bytes))
                 return false;
             __try
             {
@@ -12852,9 +13142,8 @@ namespace BZROpenShim
         // the multiplayer session worker, which is the earliest reader.
         static bool g_CareerStatsSinkRegistered = false;
 
-        // GameObject::GetHandle. Already relied on by GameObjectFromHandleGog
-        // above, which round-trips through it to reject stale pool slots.
-        static constexpr uintptr_t kGogGameObjectGetHandleAddr = 0x00462380;
+        // GameObject::GetHandle comes from g_GameObjectGetHandleAddr, the same
+        // resolve GameObjectFromHandleGog above round-trips through.
         static constexpr size_t kGameObjectHealthRatioOffset = 0x200;
         // complete+0xF4 is the object-state pointer; see
         // GameObjectHandleGetObjHardened above, which reads the same field.
@@ -12901,14 +13190,14 @@ namespace BZROpenShim
         static bool TryGetGameObjectHandleValue(void* objectPtr, int& outHandle)
         {
             outHandle = 0;
-            if (!objectPtr)
+            if (!objectPtr || g_GameObjectGetHandleAddr == 0)
                 return false;
 
             using GetHandleThiscallFn = uint32_t(__thiscall*)(void*);
             __try
             {
                 outHandle = static_cast<int>(
-                    reinterpret_cast<GetHandleThiscallFn>(kGogGameObjectGetHandleAddr)(objectPtr));
+                    reinterpret_cast<GetHandleThiscallFn>(g_GameObjectGetHandleAddr)(objectPtr));
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -13795,7 +14084,7 @@ namespace BZROpenShim
                 void* entity = nullptr;
                 if (!TryResolveEntityFromGameObject(obj, entity))
                     continue;
-                if (!LooksLikeOgreObject(entity))
+                if (!LooksLikeOgreObjectInPlace(entity))
                     continue;
                 if (g_SatVisTestPreHidden.count(entity) != 0)
                     continue;
@@ -13892,7 +14181,7 @@ namespace BZROpenShim
 
                     // Re-vet before dispatching a virtual: an entity freed and
                     // its allocation reused would otherwise be called through.
-                    if (!LooksLikeOgreObject(currentEntity))
+                    if (!LooksLikeOgreObjectInPlace(currentEntity))
                         continue;
 
                     bool now = false;
@@ -13962,7 +14251,7 @@ namespace BZROpenShim
                 if (!TryReadObjectIlluminationAndEntity(obj, illumination, entity))
                     continue;
 
-                if (!LooksLikeOgreObject(entity))
+                if (!LooksLikeOgreObjectInPlace(entity))
                     continue;
 
                 if (it == g_SatelliteVisibilityState.end())
@@ -14112,7 +14401,7 @@ namespace BZROpenShim
                 float illumination = 0.0f;
                 void* entity = nullptr;
                 if (!TryReadObjectIlluminationAndEntity(obj, illumination, entity) ||
-                    !LooksLikeOgreObject(entity))
+                    !LooksLikeOgreObjectInPlace(entity))
                 {
                     ++row.ogreUnreadable;
                     continue;
@@ -14531,7 +14820,9 @@ namespace BZROpenShim
 
             __try
             {
-                if (*reinterpret_cast<void**>(kLocalUserObjectPtrAddr) != craft)
+                auto* const userObjectSlot =
+                    reinterpret_cast<void* const*>(EngineGlobals::UserObjectSlot());
+                if (!userObjectSlot || *userObjectSlot != craft)
                     return false;
 
                 void* selectObject =
@@ -16940,7 +17231,6 @@ namespace BZROpenShim
         constexpr uintptr_t kUiEnsureManualObjectAddr = 0x007D2B70;
         constexpr size_t kUiManualObjectPtrOffset = 0x120;
         constexpr size_t kUiWidgetNameOffset = 0x20;
-        constexpr uintptr_t kBzrSceneRootPtrAddr = 0x00920EA0;
 
         struct UiOgreSharedPtr
         {
@@ -16987,7 +17277,9 @@ namespace BZROpenShim
                         *reinterpret_cast<const std::string*>(bytes + kUiWidgetNameOffset);
                     if (name == "Top Screen")
                     {
-                        void* sceneRoot = *reinterpret_cast<void**>(kBzrSceneRootPtrAddr);
+                        auto* const renderGlobalsSlot =
+                            reinterpret_cast<void**>(EngineGlobals::RenderGlobals());
+                        void* sceneRoot = renderGlobalsSlot ? *renderGlobalsSlot : nullptr;
                         void* sceneManager = sceneRoot
                             ? *reinterpret_cast<void**>(
                                 reinterpret_cast<uint8_t*>(sceneRoot) + 8)
@@ -18097,7 +18389,6 @@ namespace BZROpenShim
         static constexpr uint8_t kUnitTurboEndHookExpected[9] = {
             0x8B, 0x55, 0x90, 0x8B, 0x85, 0x78, 0xFF, 0xFF, 0xFF
         };
-        static constexpr uintptr_t kGameObjectGetHandleAddr = 0x00462380;
         static constexpr bool kGlobalTurboEnabledDefault = false;
 
         // The comiss operand is redirected to this constant (EXU uses 0.9f). Must
@@ -18619,6 +18910,14 @@ namespace BZROpenShim
 
         static FnExuUpdateCullingForUnit ResolveExuCullingCallback()
         {
+            // Two loader lookups per unit per tick added up. The module set
+            // only changes at load time, so re-probe once a second and answer
+            // from the cache in between.
+            static ULONGLONG s_nextProbeTick = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (now < s_nextProbeTick)
+                return g_ExuFn_UpdateCullingForUnit;
+            s_nextProbeTick = now + 1000;
             HMODULE module = GetModuleHandleA("exu.dll");
             if (!module)
                 module = GetModuleHandleA("ExtraUtilities.dll");
@@ -18636,12 +18935,12 @@ namespace BZROpenShim
         static bool TryGetTurboObjectHandle(void* object, uint32_t& outHandle)
         {
             outHandle = 0;
-            if (!object)
+            if (!object || g_GameObjectGetHandleAddr == 0)
                 return false;
             __try
             {
                 outHandle = reinterpret_cast<FnGameObjectGetHandle>(
-                    kGameObjectGetHandleAddr)(object);
+                    g_GameObjectGetHandleAddr)(object);
                 return outHandle != 0;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -18919,9 +19218,8 @@ namespace BZROpenShim
                       "arena capacity forward constant out of sync");
         static constexpr size_t kHeadlightObjectSlotSize = 0x400;
         // Redux's verified handle mapping (mirrors EXU GameObject::GetObj):
-        // object = 0x0260DB20 + (handle >> 20) * 0x400.
-        static constexpr uintptr_t kHeadlightObjectArenaRva = 0x0220DB20;
-        static constexpr uintptr_t kHeadlightUserObjectRva = 0x00517AFC;
+        // object = arena + (handle >> 20) * 0x400, the arena being
+        // EngineGlobals::GameObjectArena (0x0260DB20 on GOG).
         // LightRenderClass::Simulate iterates the Ogre lights emitted by
         // draw_light particle records. Stock deletes a renderer when its
         // active flag clears, which means an empty craft's running lights can
@@ -19413,7 +19711,9 @@ namespace BZROpenShim
         {
             __try
             {
-                return *ResolveMainModulePtr<void*>(kHeadlightUserObjectRva);
+                auto* const userObjectSlot =
+                    reinterpret_cast<void* const*>(EngineGlobals::UserObjectSlot());
+                return userObjectSlot ? *userObjectSlot : nullptr;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -19994,7 +20294,7 @@ namespace BZROpenShim
             if (player)
                 applyObject(player, true);
 
-            auto* arena = ResolveMainModulePtr<uint8_t>(kHeadlightObjectArenaRva);
+            auto* arena = reinterpret_cast<uint8_t*>(EngineGlobals::GameObjectArena());
             if (arena)
             {
                 for (size_t i = 0; i < kHeadlightObjectSlotCount; ++i)
@@ -22674,6 +22974,114 @@ namespace BZROpenShim
             }
         }
 
+        // Entity::GetPosition, vtable slot 3 of the interface at object+0x18.
+        // Stock IsStuck and ProximityMine::Simulate both read positions this way.
+        using FnEntityGetPosition = const float*(__thiscall*)(void* entity);
+        static const float* TryCallEntityGetPosition(void* gameObject)
+        {
+            if (!gameObject)
+                return nullptr;
+            __try
+            {
+                void* entity = reinterpret_cast<uint8_t*>(gameObject) + 0x18;
+                void** vtable = *reinterpret_cast<void***>(entity);
+                if (!vtable || !vtable[3])
+                    return nullptr;
+                return reinterpret_cast<FnEntityGetPosition>(vtable[3])(entity);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        static bool TryReadAttackTaskStuckSample(uint8_t* taskBytes, float& outTime, float (&outPos)[3])
+        {
+            if (!taskBytes)
+                return false;
+            __try
+            {
+                outTime = *reinterpret_cast<float*>(taskBytes + kAttackTaskStuckSampleTimeOffset);
+                const auto* pos = reinterpret_cast<float*>(taskBytes + kAttackTaskStuckSamplePosOffset);
+                outPos[0] = pos[0];
+                outPos[1] = pos[1];
+                outPos[2] = pos[2];
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Stock flee (FUN_00478a50, state 9) leaves for blast either because
+        // IsStuck returned true or because the 3 s timeout ran out. Work out
+        // which after the fact, without calling IsStuck again: a second call
+        // would take a fresh stuck sample. If the sample window elapsed during
+        // the stock call, IsStuck compared the old sample with the new one
+        // (stuck when under 5 m). If it did not, only its terrain test could
+        // have said stuck, and that test has no side effects, so repeat it.
+        // Returns false when the verdict cannot be read; the caller then keeps
+        // stock behaviour.
+        static bool TryJudgeLegacyFleeExitWasStuck(uint8_t* taskBytes,
+                                                   void* craft,
+                                                   float sampleTimeBefore,
+                                                   const float (&samplePosBefore)[3],
+                                                   bool& outStuck)
+        {
+            outStuck = true;
+            float sampleTimeAfter = 0.0f;
+            float samplePosAfter[3] = {};
+            if (!TryReadAttackTaskStuckSample(taskBytes, sampleTimeAfter, samplePosAfter))
+                return false;
+
+            if (sampleTimeAfter != sampleTimeBefore)
+            {
+                const float dx = samplePosAfter[0] - samplePosBefore[0];
+                const float dy = samplePosAfter[1] - samplePosBefore[1];
+                const float dz = samplePosAfter[2] - samplePosBefore[2];
+                outStuck = (dx * dx + dy * dy + dz * dz) < 25.0f;
+                return true;
+            }
+
+            static int s_terrainTestVerified = -1;
+            if (s_terrainTestVerified < 0)
+            {
+                static const uint8_t kExpected[] = { 0x55, 0x8B, 0xEC, 0x51, 0x8B, 0x45, 0x08, 0x51 };
+                s_terrainTestVerified =
+                    ExpectedBytesMatchAt(kGogTerrainBlocksCraftAddr, kExpected, sizeof(kExpected)) ? 1 : 0;
+                if (!s_terrainTestVerified)
+                    Log(L"[LEGACY] D3 disabled: terrain test at 0x%08X does not match; legacy flee follows stock\n",
+                        static_cast<uint32_t>(kGogTerrainBlocksCraftAddr));
+            }
+            if (!s_terrainTestVerified)
+                return false;
+
+            __try
+            {
+                void* vehicle = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(craft) + kCraftVehicleOffset);
+                if (!vehicle)
+                    return false;
+                const uint32_t flags = *reinterpret_cast<uint32_t*>(
+                    reinterpret_cast<uint8_t*>(vehicle) + kVehicleStuckFlagsOffset);
+                if ((flags & 4) != 0)
+                {
+                    outStuck = false;
+                    return true;
+                }
+                const float* position = TryCallEntityGetPosition(craft);
+                if (!position)
+                    return false;
+                using FnTerrainBlocksCraft = bool(__cdecl*)(const float* position);
+                outStuck = reinterpret_cast<FnTerrainBlocksCraft>(kGogTerrainBlocksCraftAddr)(position);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         void __fastcall AttackTaskDoStateTuningHook(void* taskPtr, void* /*edx*/)
         {
             if (!g_BzrFn_AttackTaskDoState || !taskPtr)
@@ -22708,9 +23116,24 @@ namespace BZROpenShim
             // Legacy-only fast path (no kite tuning, but legacy flag set)
             if (isLegacyCraft && !hasKiteTuning)
             {
+                // The port is partial, and a modder who sets legacyAI=1 should
+                // be able to read which parts of 1.4 they are getting.
+                static volatile LONG s_legacyPartialLogged = 0;
+                if (InterlockedCompareExchange(&s_legacyPartialLogged, 1, 0) == 0)
+                {
+                    Log(L"[LEGACY] 1.4 AI profile active (first craft 0x%08X): D1 (able-to-hit -> slide), "
+                        L"D3 (flee without the 3 s cap) and D4 (stand timeout -> slide) apply; D2 (slide exit) "
+                        L"is not ported, so slide exits follow stock Redux\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
+                }
                 int curBefore = 0, nextBefore = 0;
                 float startBefore = 0.0f;
                 TryGetTaskState(taskBytes, curBefore, nextBefore, startBefore);
+                float stuckSampleTimeBefore = 0.0f;
+                float stuckSamplePosBefore[3] = {};
+                const bool haveStuckSample =
+                    curBefore == kAttackTaskFleeState &&
+                    TryReadAttackTaskStuckSample(taskBytes, stuckSampleTimeBefore, stuckSamplePosBefore);
                 g_BzrFn_AttackTaskDoState(taskPtr);
                 int curAfter = 0, nextAfter = 0;
                 float startAfter = 0.0f;
@@ -22721,7 +23144,7 @@ namespace BZROpenShim
                 {
                     // Stock 1.5/Redux goes to blast; 1.4 goes to slide
                     *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 7;
-                    if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI") || EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+                    if (TraceLegacyAiEnabled() || TraceAiRangeEnabled())
                     {
                         Log(L"[LEGACY] D1 override craft=0x%08X cur=2 next 10->7\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                     }
@@ -22745,37 +23168,30 @@ namespace BZROpenShim
                     if (!isFreshHit)
                     {
                         *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 7;
-                        if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI"))
+                        if (TraceLegacyAiEnabled())
                             Log(L"[LEGACY] D4 override craft=0x%08X 8->9 => 8->7 (timeout)\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                     }
                 }
-                // D3: case 9 flee bounded 3s -> uncapped. Suppress time->10
-                if (curBefore == 9 && nextAfter == 10)
+                // D3: 1.4 flee has no 3 s bound. Stock leaves flee (9) for blast
+                // (10) on IsStuck or on the timeout; keep only the stuck exit so
+                // a stuck legacy craft still gets out. Leaving the 75 m band
+                // (9 -> 7) is untouched.
+                if (curBefore == kAttackTaskFleeState && nextAfter == kAttackTaskBlastState && haveStuckSample)
                 {
-                    bool suppress = false;
-                    __try
+                    bool stuck = true;
+                    if (TryJudgeLegacyFleeExitWasStuck(taskBytes, craft, stuckSampleTimeBefore,
+                                                       stuckSamplePosBefore, stuck) &&
+                        !stuck)
                     {
-                        float now = 0.0f;
-                        // Use GetTickCount as fallback for Get_Time if not available; for now use task start + 3.0 check
-                        float* taskStart = reinterpret_cast<float*>(taskBytes + 0x100);
-                        // Heuristic: if next was 10 due to timeout, it will be 3s after start. Check that start+3 < now (approx)
-                        // We approximate by checking that distance to target is still <5625 and not stuck, so the only remaining exit is timeout.
-                        // For now, suppress if not stuck and still within 75u (5625) - simplistic
-                        // Read stuck via TryRead? Use placeholder: suppress always for legacy 9->10 unless stuck
-                        suppress = true;
-                        // TODO: refine with actual distance/IsStuck check
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER) {}
-                    if (suppress)
-                    {
-                        *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 9; // stay in flee
-                        if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI"))
-                            Log(L"[LEGACY] D3 suppress craft=0x%08X 9->10 blocked, stay 9\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
+                        *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = kAttackTaskFleeState;
+                        if (TraceLegacyAiEnabled())
+                            Log(L"[LEGACY] D3 override craft=0x%08X 9->10 => stay 9 (timeout, not stuck)\n",
+                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                     }
                 }
                 // D2: case 7 slide-exit enemy state {2,5,7} uncapped vs IsBuilding+10s
                 // TODO: implement enemy task state read: handle at +0x14 -> object -> +0x30 -> state at +0x08
-                // For now, log that D2 would apply if enemy state were 7
+                // Not ported: slide exits follow stock Redux.
                 return;
             }
 
@@ -22797,7 +23213,7 @@ namespace BZROpenShim
                     TryRaiseAttackTaskRangeSq(
                         taskBytes, engageSq, previousRangeSq, rangeChanged) &&
                     rangeChanged &&
-                    (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
+                    (TraceAiRangeEnabled() ||
                      EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE")))
                 {
                     const long remaining = InterlockedDecrement(
@@ -22965,7 +23381,7 @@ namespace BZROpenShim
 
             if ((wasRetreating != state.retreating || (applied && !reverseLos)) &&
                 (EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE") ||
-                 EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE")))
+                 TraceAiRangeEnabled()))
             {
                 const long remaining = InterlockedDecrement(&g_CombatKiteTraceBudget);
                 if (remaining >= 0)
@@ -23664,7 +24080,7 @@ namespace BZROpenShim
             const float originalRange = *range;
             const float originalCloseRange = closeRange ? *closeRange : -1.0f;
 
-            if (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+            if (TraceAiRangeEnabled())
             {
                 static volatile long s_CalcRangeProbeBudget = 24;
                 const long remaining = InterlockedDecrement(&s_CalcRangeProbeBudget);
@@ -23783,7 +24199,7 @@ namespace BZROpenShim
                 hasUnitOuterRangeFloor || hasUnitCloseRangeFloor;
 
             if (hasOdfTuning && hasOdfRangePolicy &&
-                EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+                TraceAiRangeEnabled())
             {
                 static volatile long s_OdfRangeTraceBudget = 24;
                 const long remaining = InterlockedDecrement(&s_OdfRangeTraceBudget);
@@ -23809,8 +24225,8 @@ namespace BZROpenShim
             if (unitTuning &&
                 hasUnitRangePolicy &&
                 (policyResult.rangeChanged || policyResult.closeRangeChanged) &&
-                (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
-                 EnvFlagEnabled("OPENSHIM_TRACE_AI_UNIT_TUNING")))
+                (TraceAiRangeEnabled() ||
+                 TraceAiUnitTuningEnabled()))
             {
                 const long remaining = InterlockedDecrement(&g_AiUnitTuningTraceBudget);
                 if (remaining >= 0)
@@ -23832,8 +24248,8 @@ namespace BZROpenShim
             }
 
             if (tuning.bomberAiRole &&
-                (EnvFlagEnabled("OPENSHIM_TRACE_BOMBER_RANGE") ||
-                 EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE")))
+                (TraceBomberRangeEnabled() ||
+                 TraceAiRangeEnabled()))
             {
                 const long remaining = InterlockedDecrement(&g_BomberRangeTraceBudget);
                 if (remaining >= 0)
@@ -23870,7 +24286,7 @@ namespace BZROpenShim
             if (!objectPtr)
                 return;
 
-            if (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+            if (TraceAiRangeEnabled())
             {
                 static volatile long s_RetargetProbeBudget = 24;
                 const long remaining = InterlockedDecrement(&s_RetargetProbeBudget);
@@ -23950,8 +24366,8 @@ namespace BZROpenShim
 
         static bool ShouldTraceAttackReveal()
         {
-            return EnvFlagEnabled("OPENSHIM_TRACE_ATTACK_REVEAL") ||
-                   EnvFlagEnabled("BZR_TRACE_ATTACK_REVEAL");
+            return TraceAttackRevealEnabled() ||
+                   TraceAttackRevealLegacyEnabled();
         }
 
         static void TraceAttackRevealEvent(const char* action,
@@ -24148,8 +24564,8 @@ namespace BZROpenShim
 			}
 
 			if (suppressed &&
-				(EnvFlagEnabled("OPENSHIM_TRACE_ARTILLERY_MASK") ||
-				 EnvFlagEnabled("OPENSHIM_TRACE_WEAPON_MASK")))
+				(TraceArtilleryMaskEnabled() ||
+				 TraceWeaponMaskEnabled()))
 			{
 				const long remaining = InterlockedDecrement(&g_ArtilleryMaskTraceBudget);
 				if (remaining >= 0)
@@ -27188,6 +27604,14 @@ namespace BZROpenShim
 
         static FnExuGetTeamEngineFlameColor ResolveExuTeamEngineFlameColor()
         {
+            // Asked once per craft per frame (SelectEngineFlameManager). The
+            // module set only changes at load time, so re-probe once a second
+            // and answer from the cache in between (null means not loaded).
+            static ULONGLONG s_nextProbeTick = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (now < s_nextProbeTick)
+                return g_ExuFn_GetTeamEngineFlameColor;
+            s_nextProbeTick = now + 1000;
             HMODULE exuModule = GetModuleHandleA("exu.dll");
             if (!exuModule)
                 exuModule = GetModuleHandleA("ExtraUtilities.dll");
@@ -31238,7 +31662,7 @@ namespace BZROpenShim
         {
             if (!object)
                 return;
-            auto* arena = ResolveMainModulePtr<uint8_t>(kHeadlightObjectArenaRva);
+            auto* arena = reinterpret_cast<uint8_t*>(EngineGlobals::GameObjectArena());
             if (!arena)
                 return;
             const uintptr_t arenaLow = reinterpret_cast<uintptr_t>(arena);
@@ -31308,7 +31732,7 @@ namespace BZROpenShim
         {
             if (!outObjects || capacity == 0)
                 return 0;
-            auto* arena = ResolveMainModulePtr<uint8_t>(kHeadlightObjectArenaRva);
+            auto* arena = reinterpret_cast<uint8_t*>(EngineGlobals::GameObjectArena());
             if (!arena)
                 return 0;
             size_t count = 0;
@@ -32491,7 +32915,9 @@ namespace BZROpenShim
             {
                 auto* mineBytes = reinterpret_cast<uint8_t*>(magnetMinePtr);
                 void* mineClass = *reinterpret_cast<void**>(mineBytes + kGameObjectClassOffset);
-                if (!mineClass) return;
+                // No class, no attraction, but the base Mine::Simulate below
+                // still has to run: it is what expires and removes the mine.
+                if (!mineClass) __leave;
 
                 float armingTimer = *reinterpret_cast<float*>(mineBytes + kMagnetMineArmingTimerOffset);
                 float totalLife = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kMagnetMineClassTotalLifeOffset);
@@ -32500,12 +32926,6 @@ namespace BZROpenShim
                 float elapsed = totalLife - armingTimer;
                 if (elapsed >= armingDelay)
                 {
-                    if (*reinterpret_cast<int*>(mineBytes + kMagnetMineSoundHandleOffset) == 0)
-                    {
-                        // Logic for starting ambient sound could be added here if needed,
-                        // but we primarily care about the simulation loop.
-                    }
-
                     float range = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kMagnetMineClassRangeOffset);
                     float minePos[3] = {
                         *reinterpret_cast<float*>(mineBytes + 0x108),
@@ -32612,6 +33032,96 @@ namespace BZROpenShim
                 g_BzrFn_MineSimulate(magnetMinePtr, dt);
         }
 
+        // Resolved once: the filtered path reproduces stock's detonation block
+        // and must not run it on an image where those calls have moved.
+        static bool ProximityMineDetonationSitesVerified()
+        {
+            static int s_verified = -1;
+            if (s_verified >= 0)
+                return s_verified != 0;
+
+            struct Site { uintptr_t address; uint8_t bytes[8]; };
+            static const Site kSites[] = {
+                { kGogProximityMineDebrisAddr,    { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xB8, 0x00, 0x00 } },
+                { kGogProximityMineGroundFxAddr,  { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x30, 0x83, 0x3D } },
+                { kGogTerrainHeightAtAddr,        { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x2C, 0xF3, 0x0F } },
+                { kGogGameObjectDamageOwnerAddr,  { 0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x8B } },
+                { kGogExplosionClassBuildAddr,    { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10, 0x89, 0x4D } },
+                { kGogProximityMineNetFlagAddr,   { 0x55, 0x8B, 0xEC, 0xA0, 0x7B, 0x7F, 0x91, 0x00 } },
+                { kGogProximityMineNetNotifyAddr, { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14, 0x89, 0x4D } },
+            };
+            s_verified = 1;
+            for (const Site& site : kSites)
+            {
+                if (!ExpectedBytesMatchAt(site.address, site.bytes, sizeof(site.bytes)))
+                {
+                    Log(L"[PROXODF] teamFilter disabled: detonation call 0x%08X does not match; "
+                        L"filtered proximity mines use stock targeting\n",
+                        static_cast<uint32_t>(site.address));
+                    s_verified = 0;
+                    break;
+                }
+            }
+            return s_verified != 0;
+        }
+
+        // Stock ProximityMine::Simulate's detonation block, call for call.
+        static void DetonateProximityMineLikeStock(void* proximityMinePtr)
+        {
+            using FnDebris = void(__thiscall*)(void* owner, const void* position, const float* velocity, int flags);
+            using FnGroundFx = void(__cdecl*)(float x, float z, float radius);
+            using FnTerrainHeightAt = double(__cdecl*)(double x, double z);
+            using FnDamageOwner = void*(__thiscall*)(void* gameObject);
+            using FnOwnerObj = void*(__thiscall*)(void* entity);
+            using FnExplosionBuild = void(__thiscall*)(void* explosionClass, void* matrix, void* ownerObj);
+            using FnNetFlag = bool(__cdecl*)();
+            using FnNetNotify = void(__thiscall*)(void* entity);
+
+            __try
+            {
+                auto* mineBytes = reinterpret_cast<uint8_t*>(proximityMinePtr);
+                auto* obj = *reinterpret_cast<uint8_t**>(mineBytes + kGameObjectObjOffset);
+                auto* mineClass = *reinterpret_cast<uint8_t**>(mineBytes + kGameObjectClassOffset);
+                if (!obj || !mineClass)
+                    return;
+
+                double position[3] = {};
+                std::memcpy(position, obj + 0x48, sizeof(position));
+                const float debrisVelocity[3] = { 0.0f, 15.0f, 0.0f };
+                auto debris = reinterpret_cast<FnDebris>(kGogProximityMineDebrisAddr);
+                for (int i = 0; i < 20; ++i)
+                    debris(reinterpret_cast<void*>(kGogProximityMineDebrisOwnerAddr), position, debrisVelocity, 0);
+
+                const double x = *reinterpret_cast<double*>(obj + 0x48);
+                const double z = *reinterpret_cast<double*>(obj + 0x58);
+                reinterpret_cast<FnGroundFx>(kGogProximityMineGroundFxAddr)(
+                    static_cast<float>(x), static_cast<float>(z), 3.0f);
+                *reinterpret_cast<double*>(obj + 0x50) =
+                    reinterpret_cast<FnTerrainHeightAt>(kGogTerrainHeightAtAddr)(x, z);
+
+                void* ownerObj = obj;
+                auto* damageOwner = static_cast<uint8_t*>(
+                    reinterpret_cast<FnDamageOwner>(kGogGameObjectDamageOwnerAddr)(proximityMinePtr));
+                if (damageOwner)
+                {
+                    void* entity = damageOwner + 0x18;
+                    void** vtable = *reinterpret_cast<void***>(entity);
+                    ownerObj = reinterpret_cast<FnOwnerObj>(vtable[0x30 / sizeof(void*)])(entity);
+                }
+
+                void* explosionClass = *reinterpret_cast<void**>(mineClass + kProximityMineClassExplosionOffset);
+                if (explosionClass)
+                    reinterpret_cast<FnExplosionBuild>(kGogExplosionClassBuildAddr)(explosionClass, obj + 0x20, ownerObj);
+
+                *reinterpret_cast<uint32_t*>(obj + 0x14) |= 0x280;
+                if (reinterpret_cast<FnNetFlag>(kGogProximityMineNetFlagAddr)())
+                    reinterpret_cast<FnNetNotify>(kGogProximityMineNetNotifyAddr)(mineBytes + 0x18);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
         static void RunProximityMineFilteredSimulate(void* proximityMinePtr, float dt)
         {
             if (!proximityMinePtr || !g_BzrFn_GameObjectGetObjByHandle || !g_BzrFn_GameObjectFriendP || !g_BzrFn_GameObjectEnemyP)
@@ -32630,98 +33140,92 @@ namespace BZROpenShim
                 return;
             }
 
-            bool shouldDetonate = false;
+            if (!ProximityMineDetonationSitesVerified())
+            {
+                if (g_BzrFn_ProximityMineSimulateOriginal)
+                    g_BzrFn_ProximityMineSimulateOriginal(proximityMinePtr, dt);
+                return;
+            }
 
+            // Stock ProximityMine::Simulate with the team filter in place of
+            // its friend test. Stock: every scan period, a friend in range
+            // holds fire, and any other object in range that is moving away
+            // from the mine (offset . velocity > 0) sets it off. Here, an
+            // object the filter affects can set it off, and an object it
+            // spares holds fire only where stock would (a friend).
+            bool detonate = false;
             __try
             {
                 auto* mineBytes = reinterpret_cast<uint8_t*>(proximityMinePtr);
-                float* armingTimer = reinterpret_cast<float*>(mineBytes + kProximityMineArmingTimerOffset);
-                *armingTimer -= dt;
-
-                if (*armingTimer <= 0.0f && *armingTimer != 0.0f)
+                float* scanTimer = reinterpret_cast<float*>(mineBytes + kProximityMineArmingTimerOffset);
+                *scanTimer -= dt;
+                auto* mineObj = *reinterpret_cast<uint8_t**>(mineBytes + kGameObjectObjOffset);
+                auto* mineClass = *reinterpret_cast<uint8_t**>(mineBytes + kGameObjectClassOffset);
+                if (*scanTimer <= 0.0f && *scanTimer != 0.0f && mineObj && mineClass &&
+                    (*reinterpret_cast<uint32_t*>(mineObj + 0x14) & 0x200) == 0)
                 {
-                    void* mineObj = *reinterpret_cast<void**>(mineBytes + kGameObjectObjOffset);
-                    if (mineObj && (*reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(mineObj) + 0x14) & 0x200) == 0)
+                    *scanTimer += *reinterpret_cast<float*>(mineClass + kProximityMineClassScanPeriodOffset);
+                    const float range = *reinterpret_cast<float*>(mineClass + kProximityMineClassRangeOffset);
+                    const float rangeSq = range * range;
+                    const float* minePos = reinterpret_cast<float*>(mineBytes + kProximityMinePositionOffset);
+
+                    void* collisionRangeSearch = *reinterpret_cast<void**>(kCollisionRangeSearchAddr);
+                    if (collisionRangeSearch && g_BzrFn_CollisionRangeSearch && g_BzrFn_RangeResultsGetNext)
                     {
-                        void* mineClass = *reinterpret_cast<void**>(mineBytes + kGameObjectClassOffset);
-                        if (mineClass)
+                        ShieldTowerRangeSearchResults results = {};
+                        g_BzrFn_CollisionRangeSearch(
+                            collisionRangeSearch,
+                            static_cast<double>(minePos[0] - range),
+                            static_cast<double>(minePos[2] - range),
+                            static_cast<double>(minePos[0] + range),
+                            static_cast<double>(minePos[2] + range),
+                            &results);
+
+                        uint32_t* handlePtr = nullptr;
+                        while (g_BzrFn_RangeResultsGetNext(&results, &handlePtr) != 0)
                         {
-                            *armingTimer += *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kProximityMineClassScanPeriodOffset);
-                            float range = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kProximityMineClassRangeOffset);
-                            float rangeSq = range * range;
-
-                            float minePos[3] = {
-                                *reinterpret_cast<float*>(mineBytes + 0x108),
-                                *reinterpret_cast<float*>(mineBytes + 0x10C),
-                                *reinterpret_cast<float*>(mineBytes + 0x110)
+                            if (!handlePtr)
+                                continue;
+                            auto* target = static_cast<uint8_t*>(
+                                g_BzrFn_GameObjectGetObjByHandle(static_cast<int>(*handlePtr)));
+                            if (!target || target == mineBytes)
+                                continue;
+                            auto* targetObj = *reinterpret_cast<uint8_t**>(target + kGameObjectObjOffset);
+                            if (!targetObj || (*reinterpret_cast<uint32_t*>(targetObj + 0x14) & 0x200) != 0)
+                                continue;
+                            const float* targetPos = TryCallEntityGetPosition(target);
+                            if (!targetPos)
+                                continue;
+                            const float offset[3] = {
+                                targetPos[0] - minePos[0],
+                                targetPos[1] - minePos[1],
+                                targetPos[2] - minePos[2]
                             };
+                            if (offset[0] * offset[0] + offset[1] * offset[1] + offset[2] * offset[2] > rangeSq)
+                                continue;
 
-                            void* collisionRangeSearch = *reinterpret_cast<void**>(kCollisionRangeSearchAddr);
-                            if (collisionRangeSearch && g_BzrFn_CollisionRangeSearch && g_BzrFn_RangeResultsGetNext)
+                            if (TeamFilterShouldAffectObject(proximityMinePtr, target, filter))
                             {
-                                ShieldTowerRangeSearchResults results = {};
-                                g_BzrFn_CollisionRangeSearch(
-                                    collisionRangeSearch,
-                                    static_cast<double>(minePos[0] - range),
-                                    static_cast<double>(minePos[2] - range),
-                                    static_cast<double>(minePos[0] + range),
-                                    static_cast<double>(minePos[2] + range),
-                                    &results);
-
-                                uint32_t* handlePtr = nullptr;
-                                while (g_BzrFn_RangeResultsGetNext(&results, &handlePtr) != 0)
-                                {
-                                    if (!handlePtr) continue;
-                                    void* target = g_BzrFn_GameObjectGetObjByHandle(static_cast<int>(*handlePtr));
-                                    if (!target || target == proximityMinePtr) continue;
-
-                                    // Team Filter check replaces the hardcoded enemy check.
-                                    if (!TeamFilterShouldAffectObject(proximityMinePtr, target, filter))
-                                        continue;
-
-                                    float targetPos[3] = {};
-                                    if (TryGetGameObjectWorldPosition(target, targetPos))
-                                    {
-                                        float dx = targetPos[0] - minePos[0];
-                                        float dy = targetPos[1] - minePos[1];
-                                        float dz = targetPos[2] - minePos[2];
-                                        float distSq = dx * dx + dy * dy + dz * dz;
-
-                                        if (distSq <= rangeSq)
-                                        {
-                                            shouldDetonate = true;
-                                            break;
-                                        }
-                                    }
-                                }
+                                const float* velocity = reinterpret_cast<float*>(target + kGameObjectVelocityOffset);
+                                if (offset[0] * velocity[0] + offset[1] * velocity[1] + offset[2] * velocity[2] > 0.0f)
+                                    detonate = true;
+                            }
+                            else if (g_BzrFn_GameObjectFriendP(proximityMinePtr, target))
+                            {
+                                detonate = false;
+                                break;
                             }
                         }
-                    }
-                }
-
-                if (shouldDetonate)
-                {
-                    // Call detonation logic: ordnance spawn and self-destruct flags.
-                    // This mirrors the logic at the end of ProximityMine::Simulate.
-                    void* mineObj = *reinterpret_cast<void**>(mineBytes + kGameObjectObjOffset);
-                    if (mineObj)
-                    {
-                        // Spawn explosion ordnance, set removed flags etc.
-                        // For simplicity and correctness, we might want to jump back into
-                        // the original Simulate if we detect a detonation condition,
-                        // but ProximityMine::Simulate is simple enough to mirror.
-
-                        // Set removed flags (0x280)
-                        *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(mineObj) + 0x14) |= 0x280;
-
-                        // We could also call the original simulation with a huge dt or force state,
-                        // but setting the flags and letting the engine handle it is closer to how it works.
                     }
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
+                detonate = false;
             }
+
+            if (detonate)
+                DetonateProximityMineLikeStock(proximityMinePtr);
 
             if (g_BzrFn_MineSimulate)
                 g_BzrFn_MineSimulate(proximityMinePtr, dt);
@@ -34119,6 +34623,13 @@ namespace BZROpenShim
         if (!target || !hook || patchLen < 5 || patchLen > detour.original.size())
             return false;
 
+        // Held from the "already installed" check through the write: the
+        // patch thread's settle loop and a game-thread SDK bridge can both
+        // arrive here for one site, and the loser used to see the other's
+        // half-written jump as a prologue mismatch, or copy it into its own
+        // trampoline.
+        HookEngine::CodePatchLock lock;
+
         if (detour.trampoline)
             return true;
 
@@ -34176,25 +34687,24 @@ namespace BZROpenShim
             static_cast<int32_t>(reinterpret_cast<uintptr_t>(trampolineBytes + patchLen) + 5);
         memcpy(trampolineBytes + patchLen + 1, &trampolineRel, sizeof(trampolineRel));
 
-        DWORD oldProtect = 0;
-        if (!VirtualProtect(targetBytes, patchLen, PAGE_EXECUTE_READWRITE, &oldProtect))
+        // The whole jump goes in through one WriteMemory call, which holds
+        // every other thread off the site while the bytes land and flushes
+        // the instruction cache. It used to be stored a byte at a time,
+        // opcode first and rel32 after, on code the game thread may have
+        // been executing.
+        uint8_t patchImage[kInlineDetourMaxPatchLen] = {};
+        patchImage[0] = 0xE9;
+        const int32_t hookRel =
+            static_cast<int32_t>(reinterpret_cast<uintptr_t>(hook)) -
+            static_cast<int32_t>(target + 5);
+        memcpy(patchImage + 1, &hookRel, sizeof(hookRel));
+        for (size_t i = 5; i < patchLen; ++i)
+            patchImage[i] = 0x90;
+        if (!HookEngine::WriteMemory(static_cast<uint32_t>(target), patchImage, patchLen))
         {
             VirtualFree(trampolineBytes, 0, MEM_RELEASE);
             return false;
         }
-
-        targetBytes[0] = 0xE9;
-        const int32_t hookRel =
-            static_cast<int32_t>(reinterpret_cast<uintptr_t>(hook)) -
-            static_cast<int32_t>(target + 5);
-        memcpy(targetBytes + 1, &hookRel, sizeof(hookRel));
-        for (size_t i = 5; i < patchLen; ++i)
-            targetBytes[i] = 0x90;
-
-        FlushInstructionCache(GetCurrentProcess(), targetBytes, patchLen);
-
-        DWORD restoreProtect = 0;
-        VirtualProtect(targetBytes, patchLen, oldProtect, &restoreProtect);
 
         detour.target = target;
         detour.hook = hook;
@@ -34595,7 +35105,8 @@ namespace BZROpenShim
         g_BzrFn_UiSetActive = reinterpret_cast<FnUiSetActive>(0x007D3310);
         g_BzrFn_AddChild = reinterpret_cast<FnUiAddChild>(0x007D2110);
         g_BzrFn_UiDialogSetEnabled = reinterpret_cast<FnUiDialogAction>(0x007C9170);
-        g_BzrFn_UiDialogAdvance = reinterpret_cast<FnUiDialogAction>(0x007C7930);
+        g_BzrFn_UiDialogAdvance = reinterpret_cast<FnUiDialogAction>(
+            HookEngine::ResolveNamedAddress("ShellRequest")); // the same site ui_performance_hooks resolves
         g_BzrFn_KeyConfigSetKey = reinterpret_cast<FnKeyConfigSetKey>(kGogKeyConfigSetKeyAddr);
         g_BzrFn_WriteInputMapKey = reinterpret_cast<FnWriteInputMapKey>(kGogWriteInputMapKeyAddr);
         g_BzrFn_MapKeyNameFromCode = reinterpret_cast<FnMapKeyNameFromCode>(kGogMapKeyNameFromCodeAddr);
@@ -34628,10 +35139,20 @@ namespace BZROpenShim
         g_BzrFn_VehicleFixOrig = reinterpret_cast<void*>(0x00481AF0);
         // The live Redux runtime maps these multiplayer flag helpers at the
         // same settled addresses on current GOG and Steam builds.
-        g_BzrFn_GetLocalPlayerNetId = reinterpret_cast<FnGetLocalPlayerNetId>(0x00572D90);
+        g_BzrFn_GetLocalPlayerNetId = reinterpret_cast<FnGetLocalPlayerNetId>(
+            HookEngine::ResolveNamedAddress("GetLocalPlayerNetId"));
         g_BzrFn_NetPlayerSetData = reinterpret_cast<FnNetPlayerSetData>(0x00575570);
         g_BzrFn_NetPlayerSetFlagBuffer = reinterpret_cast<FnNetPlayerSetFlagBuffer>(0x00575810);
         g_BzrFn_SetMyFlag = reinterpret_cast<FnSetMyFlag>(0x0056FA50);
+        // Called addresses that used to be literals in this file (audit P1-1,
+        // first slice). The table's scan verifies each fallback; a miss
+        // leaves the pointer null or the address 0, and every caller treats
+        // that as "stand down".
+        g_BzrFn_ResolveObj76GameObject = reinterpret_cast<FnResolveObj76GameObject>(
+            HookEngine::ResolveNamedAddress("GameObject::FromObj76"));
+        g_BzrFn_PlayGlobalSound = reinterpret_cast<FnPlayGlobalSound>(
+            HookEngine::ResolveNamedAddress("PlayGlobalSound"));
+        g_GameObjectGetHandleAddr = HookEngine::ResolveNamedAddress("GameObject::GetHandle");
 
         // Steam's wrapped executable still maps these helpers at the same live
         // runtime addresses as GOG on the current 2.2.301 build.
@@ -34814,7 +35335,8 @@ namespace BZROpenShim
         InstallParticleTemplateDedupeHookIfPossible();
         InstallUiManualObjectDedupeHookIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
-        InstallEntityFrustumCullingIfEnabled();
+        // InstallEntityFrustumCullingIfEnabled runs further down, once its
+        // two switches have been read; here it saw both false and did nothing.
         InstallMissionTransitionSeamIfPossible();
         PinDirect3DModulesForShutdown();
         InstallMultiplayerFlagRenderHookIfPossible();
@@ -34971,6 +35493,11 @@ namespace BZROpenShim
         {
             g_EntityFrustumCullEnabled = false;
         }
+        // Both switches are known now. The earlier call in this function ran
+        // before they were computed and did nothing, leaving the deferred
+        // retry to install the feature; installing here keeps the retry as
+        // the OgreMain-not-yet-loaded fallback it is meant to be.
+        InstallEntityFrustumCullingIfEnabled();
         // Diagnostic/regression seam, not a gameplay policy. It exists so the
         // batch-failure fallback can be proven at runtime rather than argued
         // from the source; see RehydrateGenericChunkBatchSlotsToEntities().
@@ -35439,8 +35966,8 @@ namespace BZROpenShim
             static_cast<unsigned long>(g_SatelliteVisibilityLogIntervalMs),
             g_SatelliteVisibilityObjectLimit,
             static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva),
-            static_cast<uint32_t>(GetMainModuleBase() + kHeadlightUserObjectRva),
-            static_cast<uint32_t>(GetMainModuleBase() + kHeadlightObjectArenaRva));
+            static_cast<uint32_t>(EngineGlobals::UserObjectSlot()),
+            static_cast<uint32_t>(EngineGlobals::GameObjectArena()));
         // Record the layout the sample lines were produced with, so a captured
         // log stays interpretable if these offsets are ever revised again.
         Log(L"[SATVIS]   offsets illum=+0x%03X isVisible=+0x%03X seen=+0x%03X team=+0x%03X perceivedTeam=+0x%03X objective=+0x%03X currentView=%ld expects=%ld\n",
@@ -35909,6 +36436,11 @@ namespace BZROpenShim
 
     void RetryDeferredRuntimeHooks()
     {
+        // Called from the patch thread's settle loop and from SDK bridges on
+        // the game thread. The installers below latch on plain bools, so two
+        // callers used to be able to pass one latch together; under the lock
+        // the second caller finds the first one's work done.
+        HookEngine::CodePatchLock lock;
         InstallPondClassLabelSupportIfPossible();
         InstallEnhancedLightSelectionIfPossible();
         InstallShadowFarOverrideIfPossible();

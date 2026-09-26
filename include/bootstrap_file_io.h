@@ -97,4 +97,16 @@ namespace BZROpenShim::BootstrapFileIo
     // bypass the imports. Safe during process attach, before the game opens
     // its stock logger files.
     void ApplyEarlyGameLogHooks();
+
+    // The stock-log test the wrappers run on every open: allocation-free and
+    // unable to throw. A bare file name (no directory, no drive) whose
+    // extension is ".log", or BZLogger.txt, case-insensitively, is routed
+    // under logs\; everything else passes through untouched.
+    bool IsBareGameLogNameW(const wchar_t* fileName);
+    bool IsBareGameLogNameA(const char* fileName);
+
+    // Provider callbacks promise never to throw. A C++ exception that reaches
+    // a wrapper anyway is swallowed and counted here, and the open proceeds
+    // as if the provider had declined.
+    uint32_t ProviderExceptionCount();
 }
