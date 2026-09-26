@@ -2809,8 +2809,15 @@ namespace BZROpenShim::RenderProfiles
 
         const Profile effective = static_cast<Profile>(
             s_effectiveProfileAtomic.load(std::memory_order_acquire));
-        const bool glowTarget = (effective != Profile::Retro);
+        // Retro owns the Glow compositor's off state and re-asserts it because
+        // the engine re-enables Glow when it rebuilds a viewport. Any other
+        // profile only restores what Retro suppressed; the engine's own state
+        // is otherwise left alone, like a foreign scheme. Runs on the engine
+        // thread (the deferred apply inside the scheme hook).
+        static bool s_glowSuppressedByRetro = false;
+        const GlowAction glowAction = DecideGlowCompositor(effective, s_glowSuppressedByRetro);
         bool changedAny = false;
+        size_t foreignCount = 0;
 
         for (size_t i = 0; i < count; ++i)
         {
@@ -2819,32 +2826,47 @@ namespace BZROpenShim::RenderProfiles
             {
                 continue;
             }
-            const std::string_view modernBase =
-                NormalizeModernMaterialScheme(current, {});
-
-            char buffer[48] = {};
-            if (BuildMaterialSchemeForProfile(effective, modernBase, buffer, sizeof(buffer)))
+            // Same fail-open rule as the setMaterialScheme hook: a foreign or
+            // custom scheme is left exactly as found (render_profile.h).
+            const ViewportReapplyDecision decision =
+                DecideViewportSchemeReapply(effective, current, LastModernBase());
+            if (decision.foreignScheme)
             {
-                const std::string target(buffer);
-                if (target != current)
-                {
-                    WriteViewportScheme(viewports[i], target);
-                    changedAny = true;
-                }
+                ++foreignCount;
             }
-            // Retro suppresses the Glow compositor (legacy CR/EXU behavior);
-            // the engine re-enables Glow when it rebuilds a viewport, so the
-            // desired state is asserted on every explicit reapply.
-            SetGlowCompositorEnabled(viewports[i], glowTarget);
+            else if (decision.rewriteScheme)
+            {
+                WriteViewportScheme(viewports[i], std::string(decision.scheme));
+                changedAny = true;
+            }
+            if (glowAction == GlowAction::Disable)
+            {
+                SetGlowCompositorEnabled(viewports[i], false);
+            }
+            else if (glowAction == GlowAction::Restore)
+            {
+                SetGlowCompositorEnabled(viewports[i], true);
+            }
+        }
+        if (glowAction == GlowAction::Disable)
+        {
+            s_glowSuppressedByRetro = true;
+        }
+        else if (glowAction == GlowAction::Restore)
+        {
+            s_glowSuppressedByRetro = false;
         }
 
         LogShimA(LogLevel::Info, kLogTag,
-                 "reapply (%s): viewports=%zu effective=%s changed=%d glow=%s",
+                 "reapply (%s): viewports=%zu effective=%s changed=%d foreign=%zu glow=%s",
                  context != nullptr ? context : "?",
                  count,
                  ProfileName(effective),
                  changedAny ? 1 : 0,
-                 glowTarget ? "on" : "off");
+                 foreignCount,
+                 glowAction == GlowAction::Disable    ? "off"
+                 : glowAction == GlowAction::Restore  ? "restored"
+                                                      : "engine");
         return true;
     }
 
