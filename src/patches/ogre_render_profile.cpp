@@ -43,6 +43,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace BZROpenShim::RenderProfiles
@@ -1363,6 +1364,28 @@ namespace BZROpenShim::RenderProfiles
             }
         }
 
+        // Compares without copying, so the per-draw negative-cache check below
+        // allocates nothing.
+        __declspec(noinline) static bool GuardedResourceNameEquals(
+            const void* material, const std::string& expected, bool* outEqual)
+        {
+            __try
+            {
+                const OgreCompatPassApi& api = CompatPassApi();
+                if (material == nullptr || outEqual == nullptr ||
+                    api.getResourceName == nullptr)
+                {
+                    return false;
+                }
+                *outEqual = (api.getResourceName(material) == expected);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         struct CompatProbeState
         {
             std::mutex lock;
@@ -1989,58 +2012,16 @@ namespace BZROpenShim::RenderProfiles
             }
         }
 
-        void* ProbeDx11LegacyCompat(const std::string& schemeName,
-                                    void* material,
-                                    unsigned short lodIndex)
+        // The DX11 compat ladder proper. Its answer for a given material,
+        // scheme and LOD does not change while the material keeps the same
+        // techniques: every non-native decision is already pinned by
+        // NoteCompatCacheKey, and a native-supported source stays native.
+        void* RunDx11LegacyCompatLadder(const std::string& schemeName,
+                                        void* material,
+                                        unsigned short lodIndex,
+                                        const Dx11Compat::CompatConfig& config,
+                                        const OgreTechniqueApi& techApi)
         {
-            // DX9 untouched by construction.
-            if (!s_detectedDx11Atomic.load(std::memory_order_acquire))
-            {
-                return nullptr;
-            }
-            const Dx11Compat::CompatConfig config = CurrentCompatConfig();
-            if (!config.compatEnabled && !config.guardEnabled)
-            {
-                return nullptr;
-            }
-            const bool filesValid =
-                s_resourcesValidAtomic.load(std::memory_order_acquire);
-            const bool bootstrapReady = EnhancedResourcesAvailable();
-            if (!filesValid || !bootstrapReady)
-            {
-                CompatProbeState& state = ProbeState();
-                if (!state.resourcesWarned.exchange(true,
-                                                    std::memory_order_acq_rel))
-                {
-                    LogShimA(LogLevel::Warn, kLogTag,
-                             "[DX11COMPAT] probe disabled: renderer files=%s "
-                             "OSE-bootstrap=%s; failing closed to stock fallback",
-                             filesValid ? "valid" : "invalid",
-                             Boot::BootstrapStateName(
-                                 static_cast<Boot::BootstrapState>(
-                                     s_enhancedBootstrapState.load(
-                                         std::memory_order_acquire))));
-                }
-                return nullptr;
-            }
-
-            const OgreTechniqueApi& techApi = TechniqueApi();
-            if (!techApi.Valid())
-            {
-                return nullptr;
-            }
-            if (!CompatPassApi().CanInspect())
-            {
-                CompatProbeState& state = ProbeState();
-                if (!state.apiWarned.exchange(true, std::memory_order_acq_rel))
-                {
-                    LogShimA(LogLevel::Warn, kLogTag,
-                             "[DX11COMPAT] pass-inspection ABI unavailable; "
-                             "compat probe fails closed to stock fallback");
-                }
-                return nullptr;
-            }
-
             std::string materialName(kUnknownMaterial);
             {
                 std::string probed;
@@ -2221,6 +2202,121 @@ namespace BZROpenShim::RenderProfiles
                 break;
             }
             return nullptr;
+        }
+
+        void* ProbeDx11LegacyCompat(const std::string& schemeName,
+                                    void* material,
+                                    unsigned short lodIndex)
+        {
+            // DX9 untouched by construction.
+            if (!s_detectedDx11Atomic.load(std::memory_order_acquire))
+            {
+                return nullptr;
+            }
+            const Dx11Compat::CompatConfig config = CurrentCompatConfig();
+            if (!config.compatEnabled && !config.guardEnabled)
+            {
+                return nullptr;
+            }
+            const bool filesValid =
+                s_resourcesValidAtomic.load(std::memory_order_acquire);
+            const bool bootstrapReady = EnhancedResourcesAvailable();
+            if (!filesValid || !bootstrapReady)
+            {
+                CompatProbeState& state = ProbeState();
+                if (!state.resourcesWarned.exchange(true,
+                                                    std::memory_order_acq_rel))
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "[DX11COMPAT] probe disabled: renderer files=%s "
+                             "OSE-bootstrap=%s; failing closed to stock fallback",
+                             filesValid ? "valid" : "invalid",
+                             Boot::BootstrapStateName(
+                                 static_cast<Boot::BootstrapState>(
+                                     s_enhancedBootstrapState.load(
+                                         std::memory_order_acquire))));
+                }
+                return nullptr;
+            }
+
+            const OgreTechniqueApi& techApi = TechniqueApi();
+            if (!techApi.Valid())
+            {
+                return nullptr;
+            }
+            if (!CompatPassApi().CanInspect())
+            {
+                CompatProbeState& state = ProbeState();
+                if (!state.apiWarned.exchange(true, std::memory_order_acq_rel))
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "[DX11COMPAT] pass-inspection ABI unavailable; "
+                             "compat probe fails closed to stock fallback");
+                }
+                return nullptr;
+            }
+
+            // Ogre asks again on every draw of a material it has no technique
+            // for, and never caches a null answer. Remember the declines here,
+            // ahead of the ladder, which copies strings, builds a candidate
+            // vector, makes three guarded calls and takes a mutex. An entry is
+            // trusted only while the pointer still names the same material
+            // (compared in place) with the same technique count, so a freed
+            // and reused address or a reloaded material is judged afresh.
+            struct DeclinedMiss
+            {
+                const void* material = nullptr;
+                std::string scheme;
+                unsigned short lod = 0;
+                unsigned short techniqueCount = 0;
+                std::string materialName;
+            };
+            thread_local std::unordered_multimap<size_t, DeclinedMiss> t_declined;
+            constexpr size_t kDeclinedMissCap = 4096;
+
+            const unsigned short techniqueCount = techApi.getNumTechniques(material);
+            const size_t missKey =
+                std::hash<std::string_view>()(std::string_view(schemeName)) ^
+                (reinterpret_cast<size_t>(material) * 31u) ^ lodIndex;
+            const auto range = t_declined.equal_range(missKey);
+            for (auto it = range.first; it != range.second; ++it)
+            {
+                const DeclinedMiss& entry = it->second;
+                if (entry.material != material || entry.lod != lodIndex ||
+                    entry.scheme != schemeName)
+                {
+                    continue;
+                }
+                bool sameName = false;
+                if (entry.techniqueCount == techniqueCount &&
+                    GuardedResourceNameEquals(material, entry.materialName, &sameName) &&
+                    sameName)
+                {
+                    return nullptr;
+                }
+                t_declined.erase(it);
+                break;
+            }
+
+            void* const generated =
+                RunDx11LegacyCompatLadder(schemeName, material, lodIndex, config, techApi);
+            if (generated == nullptr)
+            {
+                DeclinedMiss entry;
+                if (GuardedCopyResourceName(material, &entry.materialName))
+                {
+                    if (t_declined.size() >= kDeclinedMissCap)
+                    {
+                        t_declined.clear();
+                    }
+                    entry.material = material;
+                    entry.scheme = schemeName;
+                    entry.lod = lodIndex;
+                    entry.techniqueCount = techniqueCount;
+                    t_declined.emplace(missKey, std::move(entry));
+                }
+            }
+            return generated;
         }
 
         class EnhancedSchemeFallbackListener

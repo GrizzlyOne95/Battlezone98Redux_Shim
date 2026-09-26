@@ -3379,6 +3379,34 @@ namespace BZROpenShim
             return vtable >= ogreBase && vtable < ogreEnd;
         }
 
+        // LooksLikeOgreObject without the VirtualQuery, for per-tick sweeps
+        // over many objects. The guarded read already turns an unmapped page
+        // into "no"; the query only added a syscall per object. The identity
+        // test is the same: a vtable inside OgreMain.dll.
+        static bool LooksLikeOgreObjectInPlace(const void* candidate)
+        {
+            const uintptr_t address = reinterpret_cast<uintptr_t>(candidate);
+            if (address < 0x00010000 || (address % sizeof(void*)) != 0)
+                return false;
+
+            uintptr_t ogreBase = 0;
+            uintptr_t ogreEnd = 0;
+            if (!TryGetOgreModuleRange(ogreBase, ogreEnd))
+                return false;
+
+            uintptr_t vtable = 0;
+            __try
+            {
+                vtable = *reinterpret_cast<const uintptr_t*>(candidate);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+
+            return vtable >= ogreBase && vtable < ogreEnd;
+        }
+
         // Some render-queue helpers are inlined or unexported from the shipped
         // OgreMain.dll; resolve those by raw image offset from the module base.
         template<typename T>
@@ -12024,6 +12052,80 @@ namespace BZROpenShim
             }
         }
 
+        // Main image extent from its PE headers, read once.
+        static bool TryGetMainImageRange(uintptr_t& outBase, uintptr_t& outEnd)
+        {
+            static uintptr_t s_base = 0;
+            static uintptr_t s_end = 0;
+            if (s_end == 0)
+            {
+                const uintptr_t base = GetMainModuleBase();
+                if (base == 0)
+                    return false;
+                __try
+                {
+                    const auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+                    const auto* ntHeaders =
+                        reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dosHeader->e_lfanew);
+                    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE ||
+                        ntHeaders->Signature != IMAGE_NT_SIGNATURE ||
+                        ntHeaders->OptionalHeader.SizeOfImage == 0)
+                        return false;
+                    s_base = base;
+                    s_end = base + ntHeaders->OptionalHeader.SizeOfImage;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+            }
+            outBase = s_base;
+            outEnd = s_end;
+            return true;
+        }
+
+        // TryGetGameObjectFieldBase for arena slots, without its two
+        // VirtualQuery calls. The arena lives in the exe's own .data, so the
+        // slot is always mapped, and a vtable that lies inside the main image
+        // is always readable; anything else is rejected before it is touched.
+        // The identity proof is unchanged: slot 1 must be GameObject::GetTeam.
+        // SyncSatelliteVisibility runs this for every live object every tick.
+        static bool TryGetArenaGameObjectFieldBase(void* objectPtr, uint8_t*& outBase)
+        {
+            outBase = nullptr;
+            const auto address = reinterpret_cast<uintptr_t>(objectPtr);
+            if (address < 0x00010000 || (address % sizeof(void*)) != 0)
+                return false;
+
+            uintptr_t imageBase = 0;
+            uintptr_t imageEnd = 0;
+            if (!TryGetMainImageRange(imageBase, imageEnd))
+                return false;
+
+            __try
+            {
+                auto* bytes = reinterpret_cast<uint8_t*>(objectPtr);
+                auto** vtable = *reinterpret_cast<void***>(bytes + kGameObjectInterfaceOffset);
+                const auto vtableAddress = reinterpret_cast<uintptr_t>(vtable);
+                constexpr size_t kGetTeamSlot = kGameObjectGetTeamVtableOffset / sizeof(void*);
+                if (vtableAddress < imageBase ||
+                    vtableAddress + (kGetTeamSlot + 1) * sizeof(void*) > imageEnd)
+                    return false;
+
+                const uintptr_t expected =
+                    imageBase + (kGogGameObjectGetTeamAddr - kGogPreferredImageBase);
+                if (reinterpret_cast<uintptr_t>(vtable[kGetTeamSlot]) != expected)
+                    return false;
+
+                outBase = bytes;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         static bool IsLikelyGameObjectEntry(void* objectPtr)
         {
             uint8_t* base = nullptr;
@@ -12720,6 +12822,7 @@ namespace BZROpenShim
         // SEH-guarded helpers. Each lives in its own function because MSVC
         // prohibits __try in any function that requires C++ object unwinding,
         // and the main sync function uses std::unordered_map.
+        // Both readers below take arena slots (CollectLiveGameObjectsFromArena).
         static bool TryReadObjectIlluminationAndEntity(void* objectPtr,
                                                        float& outIllumination,
                                                        void*& outEntity)
@@ -12727,7 +12830,7 @@ namespace BZROpenShim
             outIllumination = 0.0f;
             outEntity = nullptr;
             uint8_t* bytes = nullptr;
-            if (!TryGetGameObjectFieldBase(objectPtr, bytes))
+            if (!TryGetArenaGameObjectFieldBase(objectPtr, bytes))
                 return false;
             __try
             {
@@ -12751,7 +12854,7 @@ namespace BZROpenShim
         {
             outEntity = nullptr;
             uint8_t* bytes = nullptr;
-            if (!TryGetGameObjectFieldBase(objectPtr, bytes))
+            if (!TryGetArenaGameObjectFieldBase(objectPtr, bytes))
                 return false;
             __try
             {
@@ -13831,7 +13934,7 @@ namespace BZROpenShim
                 void* entity = nullptr;
                 if (!TryResolveEntityFromGameObject(obj, entity))
                     continue;
-                if (!LooksLikeOgreObject(entity))
+                if (!LooksLikeOgreObjectInPlace(entity))
                     continue;
                 if (g_SatVisTestPreHidden.count(entity) != 0)
                     continue;
@@ -13928,7 +14031,7 @@ namespace BZROpenShim
 
                     // Re-vet before dispatching a virtual: an entity freed and
                     // its allocation reused would otherwise be called through.
-                    if (!LooksLikeOgreObject(currentEntity))
+                    if (!LooksLikeOgreObjectInPlace(currentEntity))
                         continue;
 
                     bool now = false;
@@ -13998,7 +14101,7 @@ namespace BZROpenShim
                 if (!TryReadObjectIlluminationAndEntity(obj, illumination, entity))
                     continue;
 
-                if (!LooksLikeOgreObject(entity))
+                if (!LooksLikeOgreObjectInPlace(entity))
                     continue;
 
                 if (it == g_SatelliteVisibilityState.end())
@@ -14148,7 +14251,7 @@ namespace BZROpenShim
                 float illumination = 0.0f;
                 void* entity = nullptr;
                 if (!TryReadObjectIlluminationAndEntity(obj, illumination, entity) ||
-                    !LooksLikeOgreObject(entity))
+                    !LooksLikeOgreObjectInPlace(entity))
                 {
                     ++row.ogreUnreadable;
                     continue;
