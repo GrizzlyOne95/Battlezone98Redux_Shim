@@ -3359,10 +3359,13 @@ namespace BZROpenShim
 
             if (!s_attempted)
             {
-                s_attempted = true;
                 // Image size straight off the PE headers, so this needs no psapi.
+                // Only a mapped module settles it: asking before OgreMain loads
+                // is timing, not an answer, and used to latch "not Ogre" for
+                // the life of the process.
                 if (const HMODULE ogreMain = GetModuleHandleA("OgreMain.dll"))
                 {
+                    s_attempted = true;
                     __try
                     {
                         const auto* moduleBytes = reinterpret_cast<const uint8_t*>(ogreMain);
@@ -4624,19 +4627,26 @@ namespace BZROpenShim
                 {
                 }
 
+                // _snprintf_s returns -1 once it truncates; adding that would
+                // step `written` backwards over the previous piece.
+                if (written < 0)
+                    break;
+
+                int piece = 0;
                 if (!readOk)
                 {
-                    written += _snprintf_s(
+                    piece = _snprintf_s(
                         line + written,
                         _countof(line) - written,
                         _TRUNCATE,
                         " | %s#%d=<fault>",
                         sample.name ? sample.name : "?",
                         sample.id);
+                    written = piece < 0 ? -1 : written + piece;
                     continue;
                 }
 
-                written += _snprintf_s(
+                piece = _snprintf_s(
                     line + written,
                     _countof(line) - written,
                     _TRUNCATE,
@@ -4647,6 +4657,7 @@ namespace BZROpenShim
                     static_cast<double>(record.v0),
                     static_cast<double>(record.u1),
                     static_cast<double>(record.v1));
+                written = piece < 0 ? -1 : written + piece;
             }
 
             LogShimA(LogLevel::Info, "huddiscover", "%s", line);
@@ -9846,6 +9857,9 @@ namespace BZROpenShim
             }
         }
 
+        // `capacity` is the size of outBuffer, terminator included, so at most
+        // capacity - 1 characters are read. It used to read `capacity` and then
+        // write the terminator one past the end.
         static size_t ReadInlineAsciiBufferRaw(uintptr_t address, char* outBuffer, size_t capacity)
         {
             if (!outBuffer || capacity == 0)
@@ -9857,7 +9871,7 @@ namespace BZROpenShim
             __try
             {
                 const char* buffer = reinterpret_cast<const char*>(address);
-                for (size_t i = 0; i < capacity; ++i)
+                for (size_t i = 0; i + 1 < capacity; ++i)
                 {
                     const char ch = buffer[i];
                     if (ch == '\0')
@@ -9879,8 +9893,10 @@ namespace BZROpenShim
             if (capacity == 0)
                 return {};
 
-            std::string value(capacity, '\0');
-            const size_t length = ReadInlineAsciiBufferRaw(address, value.data(), capacity);
+            // One extra byte so an engine buffer filled to `capacity` with no
+            // NUL still comes back whole.
+            std::string value(capacity + 1, '\0');
+            const size_t length = ReadInlineAsciiBufferRaw(address, value.data(), capacity + 1);
             value.resize(length);
             return value;
         }
