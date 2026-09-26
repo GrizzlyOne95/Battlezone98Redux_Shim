@@ -65,11 +65,6 @@
 
 namespace BZROpenShim
 {
-    // ---------------------------------------------------------------------
-    // Global state used by hooks/trampolines
-    // ---------------------------------------------------------------------
-    void* g_VehicleListContext = nullptr;
-    void* g_VehicleListParam   = nullptr;
 
     void* g_BzrnetHostObj   = nullptr;
     void* g_BzrnetClientObj = nullptr;
@@ -98,13 +93,6 @@ namespace BZROpenShim
     BzrString g_BzrnetLabel3 = {};
     BzrString g_BzrnetLabel4 = {};
 
-    // ---------------------------------------------------------------------
-    // BZR function pointers (GOG v2.2.301 addresses)
-    // ---------------------------------------------------------------------
-    using FnVehicleListSet = void(__thiscall*)(void* thisPtr, BzrString a, BzrString b);
-    using FnVehicleListLoad = void(__thiscall*)(void* thisPtr, BzrString* name);
-    using FnVehicleListStep = void(__thiscall*)(void* thisPtr);
-    using FnVehicleListFinalize = void(__thiscall*)(void* thisPtr);
 
 
     using FnAutoLoadShellGame = int(__cdecl*)();
@@ -207,19 +195,19 @@ namespace BZROpenShim
                                                           const float* velocity,
                                                           uint8_t preserveFlag);
 
-    static void** g_BzrPtr_945478 = nullptr;
-    static void** g_BzrPtr_94548C = nullptr;
-    static void** g_BzrPtr_94555C = nullptr;
+    void** g_BzrPtr_945478 = nullptr;
+    void** g_BzrPtr_94548C = nullptr;
+    void** g_BzrPtr_94555C = nullptr;
     void** g_BzrPtr_9456D0 = nullptr;
     void** g_BzrPtr_94557C = nullptr;
     void** g_BzrPtr_920168 = nullptr;
     uint8_t* g_BzrPtr_CurrentUser = nullptr;
 
-    static FnVehicleListSet g_BzrFn_VehicleListSet = nullptr;      // 0x0076B7A0
-    static FnVehicleListFinalize g_BzrFn_VehicleListFinalize = nullptr; // 0x0076BA00
-    static FnVehicleListLoad g_BzrFn_VehicleListLoad = nullptr;    // 0x00766900
-    static FnVehicleListStep g_BzrFn_VehicleListRefresh1 = nullptr; // 0x007A3F80
-    static FnVehicleListStep g_BzrFn_VehicleListRefresh2 = nullptr; // 0x007A4070
+    FnVehicleListSet g_BzrFn_VehicleListSet = nullptr;      // 0x0076B7A0
+    FnVehicleListFinalize g_BzrFn_VehicleListFinalize = nullptr; // 0x0076BA00
+    FnVehicleListLoad g_BzrFn_VehicleListLoad = nullptr;    // 0x00766900
+    FnVehicleListStep g_BzrFn_VehicleListRefresh1 = nullptr; // 0x007A3F80
+    FnVehicleListStep g_BzrFn_VehicleListRefresh2 = nullptr; // 0x007A4070
 
     FnUiButtonCtor g_BzrFn_ButtonCtor = nullptr; // 0x007C2480
     FnUiLabelCtor g_BzrFn_LabelCtor  = nullptr; // 0x007CC390
@@ -519,10 +507,6 @@ namespace BZROpenShim
     {
         static void InstallNicknameTextEntryInputHookIfPossible();
 
-        constexpr DWORD kDbgPrintExceptionAnsi = 0x40010006u;
-        constexpr DWORD kDbgPrintExceptionWide = 0x4001000Au;
-        constexpr DWORD kVehicleAssetRetryDelayMs = 1500u;
-        constexpr size_t kVehicleAssetExceptionCacheSize = 8;
         constexpr float kAutoSaveLoadButtonX = 135.0f;
         constexpr float kAutoSaveLoadButtonY = 180.0f + (10.0f * 68.0f);
         constexpr float kAutoSaveLoadButtonW = 1100.0f;
@@ -1380,12 +1364,6 @@ namespace BZROpenShim
         bool g_FlagPayloadReady = false;
         bool g_FlagApplyPending = false;
 
-        struct VehicleAssetExceptionCacheEntry
-        {
-            char assetName[64];
-            DWORD suppressUntil;
-            DWORD lastSkipLogTick;
-        };
 
         struct BzrGeoEntry
         {
@@ -1645,7 +1623,6 @@ namespace BZROpenShim
         static std::unordered_map<std::string, std::vector<ChunkVdfMeshRef>> g_ChunkVdfGeomReverseIndex = {};
         static volatile long g_ArtilleryMaskTraceBudget = 400;
         static volatile long g_BomberRangeTraceBudget = 200;
-        static VehicleAssetExceptionCacheEntry g_VehicleAssetExceptionCache[kVehicleAssetExceptionCacheSize] = {};
         static ProducerBuildMenuConfig g_ProducerBuildMenuConfig = {};
         static AiTuningCache g_AiTuningCache = {};
         static TeamFilterCache g_ShieldTowerTeamFilterCache = {};
@@ -14026,73 +14003,6 @@ namespace BZROpenShim
             }
         }
 
-        static int FilterVehicleAssetDebugException(
-            unsigned int code,
-            const char* stage,
-            const BzrString* assetName)
-        {
-            if (code == kDbgPrintExceptionAnsi || code == kDbgPrintExceptionWide)
-            {
-                Log(L"[VEHICLE] Swallowed debug-print exception during %hs for asset '%hs' (code=0x%08X)\n",
-                    stage ? stage : "unknown",
-                    assetName ? BzrStringData(assetName) : "",
-                    code);
-                return EXCEPTION_EXECUTE_HANDLER;
-            }
-
-            return EXCEPTION_CONTINUE_SEARCH;
-        }
-
-        static bool CopyVehicleAssetName(
-            const BzrString* assetName,
-            char (&buffer)[64])
-        {
-            buffer[0] = '\0';
-            if (!assetName)
-                return false;
-
-            const char* name = BzrStringData(assetName);
-            if (!name || !name[0])
-                return false;
-
-            strncpy_s(buffer, name, _TRUNCATE);
-            return buffer[0] != '\0';
-        }
-
-        static bool TickIsBefore(DWORD lhs, DWORD rhs)
-        {
-            return static_cast<long>(lhs - rhs) < 0;
-        }
-
-        static VehicleAssetExceptionCacheEntry* FindVehicleAssetExceptionEntry(const char* assetName)
-        {
-            if (!assetName || !assetName[0])
-                return nullptr;
-
-            for (auto& entry : g_VehicleAssetExceptionCache)
-            {
-                if (entry.assetName[0] && _stricmp(entry.assetName, assetName) == 0)
-                    return &entry;
-            }
-
-            return nullptr;
-        }
-
-        static VehicleAssetExceptionCacheEntry* GetVehicleAssetExceptionSlot()
-        {
-            VehicleAssetExceptionCacheEntry* oldest = &g_VehicleAssetExceptionCache[0];
-            for (auto& entry : g_VehicleAssetExceptionCache)
-            {
-                if (!entry.assetName[0])
-                    return &entry;
-                if (TickIsBefore(entry.suppressUntil, oldest->suppressUntil))
-                    oldest = &entry;
-            }
-            return oldest;
-        }
-
-
-
         static std::string ReadFixedAsciiField(const uint8_t* bytes, size_t length)
         {
             if (!bytes || length == 0)
@@ -19607,66 +19517,6 @@ namespace BZROpenShim
                 previousQueuedPath);
         }
 
-        static void RememberVehicleAssetDebugException(const BzrString* assetName)
-        {
-            char assetNameBuffer[64] = {};
-            if (!CopyVehicleAssetName(assetName, assetNameBuffer))
-                return;
-
-            VehicleAssetExceptionCacheEntry* entry = FindVehicleAssetExceptionEntry(assetNameBuffer);
-            if (!entry)
-                entry = GetVehicleAssetExceptionSlot();
-            if (!entry)
-                return;
-
-            strncpy_s(entry->assetName, assetNameBuffer, _TRUNCATE);
-            entry->suppressUntil = GetTickCount() + kVehicleAssetRetryDelayMs;
-            entry->lastSkipLogTick = 0;
-        }
-
-        static bool ShouldSuppressVehicleAssetLoad(const BzrString* assetName, const char* stage)
-        {
-            char assetNameBuffer[64] = {};
-            if (!CopyVehicleAssetName(assetName, assetNameBuffer))
-                return false;
-
-            VehicleAssetExceptionCacheEntry* entry = FindVehicleAssetExceptionEntry(assetNameBuffer);
-            if (!entry)
-                return false;
-
-            const DWORD now = GetTickCount();
-            if (!TickIsBefore(now, entry->suppressUntil))
-                return false;
-
-            if (entry->lastSkipLogTick == 0 || !TickIsBefore(now, entry->lastSkipLogTick + 500u))
-            {
-                Log(L"[VEHICLE] Suppressed retry during %hs for recent-miss asset '%hs'\n",
-                    stage ? stage : "unknown",
-                    assetNameBuffer);
-                entry->lastSkipLogTick = now;
-            }
-
-            return true;
-        }
-
-        static void CallVehicleListLoadSafely(void* mgrThis, BzrString* assetName, const char* stage)
-        {
-            if (!g_BzrFn_VehicleListLoad || !mgrThis || !assetName)
-                return;
-
-            if (ShouldSuppressVehicleAssetLoad(assetName, stage))
-                return;
-
-            __try
-            {
-                g_BzrFn_VehicleListLoad(mgrThis, assetName);
-            }
-            __except (FilterVehicleAssetDebugException(GetExceptionCode(), stage, assetName))
-            {
-                RememberVehicleAssetDebugException(assetName);
-            }
-        }
-
     }
     using namespace Hooks;
 
@@ -21865,145 +21715,6 @@ namespace BZROpenShim
         g_BzrFn_ProducerModeCallOriginal = reinterpret_cast<FnProducerModeCall>(target);
         Log(L"[PRODMENU] Original producer helper target=0x%08X\n",
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(target)));
-    }
-
-    static uint8_t* VehicleEntryAt(void* context, uint32_t index)
-    {
-        if (!context) return nullptr;
-        auto table = *reinterpret_cast<uint8_t**>(reinterpret_cast<uint8_t*>(context) + 0x18);
-        if (!table) return nullptr;
-        uint32_t bucket = *reinterpret_cast<uint32_t*>(table + 0x0C);
-        uint32_t mask = *reinterpret_cast<uint32_t*>(table + 0x08);
-        if (mask == 0) return nullptr;
-        mask -= 1;
-        uint32_t base = *reinterpret_cast<uint32_t*>(table + 0x04);
-        return *reinterpret_cast<uint8_t**>(base + ((bucket + index) & mask) * 4);
-    }
-
-    static void VehicleListModFix_Select(const BzrString* name)
-    {
-        if (!g_VehicleListContext || !name)
-            return;
-
-        auto ctx = reinterpret_cast<uint8_t*>(g_VehicleListContext);
-        *reinterpret_cast<int*>(ctx + 0x38) = -1;
-
-        uint8_t* match = nullptr;
-        auto table = *reinterpret_cast<uint8_t**>(ctx + 0x18);
-        if (table)
-        {
-            uint32_t count = *reinterpret_cast<uint32_t*>(table + 0x10);
-            if (count)
-            {
-                uint32_t bucket = *reinterpret_cast<uint32_t*>(table + 0x0C);
-                uint32_t mask = *reinterpret_cast<uint32_t*>(table + 0x08);
-                uint32_t base = *reinterpret_cast<uint32_t*>(table + 0x04);
-                if (mask)
-                {
-                    mask -= 1;
-                    for (uint32_t i = 0; i < count; ++i)
-                    {
-                        auto entry = *reinterpret_cast<uint8_t**>(base + ((bucket + i) & mask) * 4);
-                        if (!entry)
-                            continue;
-                        auto entryStr = reinterpret_cast<const BzrString*>(entry);
-                        if (BzrStringEquals(entryStr, name))
-                        {
-                            match = entry;
-                            *reinterpret_cast<uint32_t*>(ctx + 0x38) = i;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        BzrString title;
-        BzrString subtitle;
-        BzrStringInitEmpty(&title);
-        BzrStringInitEmpty(&subtitle);
-        if (match)
-        {
-            BzrStringCopy(&title, reinterpret_cast<const BzrString*>(match));
-            BzrStringCopy(&subtitle, reinterpret_cast<const BzrString*>(match + 0x3C));
-        }
-
-        void* listThis = (g_BzrPtr_945478 && *g_BzrPtr_945478) ? *g_BzrPtr_945478 : nullptr;
-        if (g_BzrFn_VehicleListSet && listThis)
-            g_BzrFn_VehicleListSet(listThis, title, subtitle);
-
-        BzrString file;
-        BzrStringInitEmpty(&file);
-        BzrStringCopy(&file, name);
-        BzrStringAppend(&file, ".vxt", 4);
-
-        void* mgrThis = (g_BzrPtr_94548C && *g_BzrPtr_94548C) ? *g_BzrPtr_94548C : nullptr;
-        if (mgrThis)
-            CallVehicleListLoadSafely(mgrThis, &file, "VehicleListModFix_Select");
-
-        if (g_BzrFn_VehicleListRefresh1 && g_VehicleListContext)
-            g_BzrFn_VehicleListRefresh1(g_VehicleListContext);
-        if (g_BzrFn_VehicleListRefresh2 && g_VehicleListContext)
-            g_BzrFn_VehicleListRefresh2(g_VehicleListContext);
-        if (g_BzrFn_VehicleListFinalize && listThis)
-            g_BzrFn_VehicleListFinalize(listThis);
-
-        BzrStringFree(&title);
-        BzrStringFree(&subtitle);
-        BzrStringFree(&file);
-    }
-
-    void __fastcall VehicleListModFix2(void* thisPtr, void* /*edx*/, BzrString* name)
-    {
-        g_VehicleListContext = thisPtr;
-        VehicleListModFix_Select(name);
-    }
-
-    void VehicleListModFix4Helper()
-    {
-        if (!g_BzrPtr_94555C || !*g_BzrPtr_94555C)
-            return;
-
-        auto root = reinterpret_cast<uint8_t*>(*g_BzrPtr_94555C);
-        g_VehicleListContext = *reinterpret_cast<void**>(root + 0x1C8);
-        if (!g_VehicleListContext)
-            return;
-
-        auto ctx = reinterpret_cast<uint8_t*>(g_VehicleListContext);
-        int index = *reinterpret_cast<int*>(ctx + 0x38);
-        BzrString title;
-        BzrString subtitle;
-        BzrStringInitEmpty(&title);
-        BzrStringInitEmpty(&subtitle);
-
-        if (index >= 0)
-        {
-            auto entry = VehicleEntryAt(g_VehicleListContext, static_cast<uint32_t>(index));
-            if (entry)
-            {
-                BzrStringCopy(&title, reinterpret_cast<const BzrString*>(entry));
-                BzrStringCopy(&subtitle, reinterpret_cast<const BzrString*>(entry + 0x3C));
-            }
-        }
-
-        void* listThis = (g_BzrPtr_945478 && *g_BzrPtr_945478) ? *g_BzrPtr_945478 : nullptr;
-        if (g_BzrFn_VehicleListSet && listThis)
-            g_BzrFn_VehicleListSet(listThis, title, subtitle);
-
-        void* mgrThis = (g_BzrPtr_94548C && *g_BzrPtr_94548C) ? *g_BzrPtr_94548C : nullptr;
-        if (mgrThis && g_VehicleListParam)
-        {
-            CallVehicleListLoadSafely(
-                mgrThis,
-                reinterpret_cast<BzrString*>(g_VehicleListParam),
-                "VehicleListModFix4Helper");
-        }
-
-        if (g_BzrFn_VehicleListFinalize && listThis)
-            g_BzrFn_VehicleListFinalize(listThis);
-
-        BzrStringFree(&title);
-        BzrStringFree(&subtitle);
     }
 
     void* __cdecl ProducerBuildMenuCallHook(void* producerPtr, int slot, int flags)
