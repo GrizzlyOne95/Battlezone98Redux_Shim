@@ -966,6 +966,15 @@ namespace BZROpenShim
         bool ShouldTraceAttackReveal();
         void RevealProcessOwnerPerceivedTeam(void* processPtr, const char* sourceTag);
 
+        // --- Lifecycle seams (lifecycle_seams.cpp) -----------------------------
+        inline constexpr int kBzrRunStateStarted = 5;
+        inline constexpr int kBzrRunStateUnknown = -1;
+        void DeactivateAllChunkProxySceneResources(const wchar_t* reason);
+        void InstallSceneTeardownForgetHooksIfPossible();
+        bool TryReadBzrRunState(int& value);
+        void InstallMissionTransitionSeamIfPossible();
+        void PinDirect3DModulesForShutdown();
+
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
         extern float g_SatelliteZoomOutMultiplierBaseline;
