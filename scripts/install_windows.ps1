@@ -89,8 +89,9 @@ function Get-SteamRoots {
         } catch { }
     }
     foreach ($fallback in @(
-        (Join-Path ${env:ProgramFiles(x86)} "Steam"),
-        (Join-Path $env:PROGRAMFILES "Steam")
+        ${env:ProgramFiles(x86)}, $env:PROGRAMFILES |
+            Where-Object { $_ } |
+            ForEach-Object { Join-Path $_ "Steam" }
     )) {
         if ($fallback) { $roots.Add($fallback) }
     }
@@ -146,8 +147,9 @@ function Get-GamePaths {
     }
 
     foreach ($candidate in @(
-        (Join-Path ${env:ProgramFiles(x86)} "GOG Galaxy\Games\Battlezone 98 Redux"),
-        (Join-Path $env:PROGRAMFILES "GOG Galaxy\Games\Battlezone 98 Redux")
+        ${env:ProgramFiles(x86)}, $env:PROGRAMFILES |
+            Where-Object { $_ } |
+            ForEach-Object { Join-Path $_ "GOG Galaxy\Games\Battlezone 98 Redux" }
     )) {
         if (Test-BzrGameDir $candidate) { Add-UniquePath -List $paths -Path $candidate }
     }
