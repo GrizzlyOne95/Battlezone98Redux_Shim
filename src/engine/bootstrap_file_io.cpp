@@ -38,56 +38,105 @@ namespace BZROpenShim::BootstrapFileIo
         char g_Crc32HostLogPath[] = "logs\\crc32host.log";
         char g_Crc32MissionLogPath[] = "logs\\crc32mission.log";
 
-        std::wstring ToLowerWide(std::wstring value)
+        template <typename CharT>
+        CharT LowerAscii(CharT ch)
         {
-            for (wchar_t& ch : value)
-                ch = static_cast<wchar_t>(::towlower(ch));
-            return value;
+            return (ch >= CharT('A') && ch <= CharT('Z'))
+                       ? static_cast<CharT>(ch + (CharT('a') - CharT('A')))
+                       : ch;
         }
 
-        bool ShouldRouteGameLog(const std::filesystem::path& path)
+        // The stock-log test, run on every CreateFile the game makes. It
+        // allocates nothing and cannot throw: a bare name (no directory
+        // separator, no drive) whose extension is ".log", or BZLogger.txt,
+        // case-insensitively. This is what std::filesystem::path answered
+        // before, minus the four to six allocations and the exceptions a
+        // path conversion or an exhausted heap could raise inside the
+        // game's own call.
+        template <typename CharT>
+        bool IsBareGameLogNameImpl(const CharT* name)
         {
-            if (path.empty() || path.has_parent_path())
+            if (name == nullptr || *name == 0)
                 return false;
-
-            const std::wstring fileName = ToLowerWide(path.filename().wstring());
-            const std::wstring extension = ToLowerWide(path.extension().wstring());
-            return extension == L".log" || fileName == L"bzlogger.txt";
+            size_t length = 0;
+            size_t lastDot = SIZE_MAX;
+            for (; name[length] != 0; ++length)
+            {
+                const CharT ch = name[length];
+                if (ch == CharT('\\') || ch == CharT('/') || ch == CharT(':'))
+                    return false;
+                if (ch == CharT('.'))
+                    lastDot = length;
+            }
+            constexpr char kLogger[] = "bzlogger.txt";
+            constexpr size_t kLoggerLength = sizeof(kLogger) - 1;
+            if (length == kLoggerLength)
+            {
+                bool same = true;
+                for (size_t i = 0; i < length && same; ++i)
+                    same = LowerAscii(name[i]) == static_cast<CharT>(kLogger[i]);
+                if (same)
+                    return true;
+            }
+            // As std::filesystem::path::extension() has it: a leading dot is
+            // not an extension, so ".log" on its own is not a log.
+            if (lastDot == SIZE_MAX || lastDot == 0 || length - lastDot != 4)
+                return false;
+            return LowerAscii(name[lastDot + 1]) == CharT('l') &&
+                   LowerAscii(name[lastDot + 2]) == CharT('o') &&
+                   LowerAscii(name[lastDot + 3]) == CharT('g');
         }
 
-        std::string RouteGameLogPath(LPCSTR fileName)
+        // Only a stock log pays for the conversion and the directory probe.
+        // A failure there (a conversion error, an exhausted heap) leaves the
+        // caller's own name in force instead of leaving the game's CreateFile
+        // through a C++ exception. `out` is written only on success.
+        bool RouteGameLogPath(LPCSTR fileName, std::string& out)
         {
-            if (!fileName || !*fileName || !ShouldRouteGameLog(std::filesystem::path(fileName)))
-                return fileName ? fileName : "";
-            return GetGameLogPath(fileName);
+            if (!IsBareGameLogNameImpl(fileName))
+                return false;
+            try
+            {
+                out = GetGameLogPath(fileName);
+                return !out.empty();
+            }
+            catch (...)
+            {
+                return false;
+            }
         }
 
-        std::wstring RouteGameLogPath(LPCWSTR fileName)
+        bool RouteGameLogPath(LPCWSTR fileName, std::wstring& out)
         {
-            if (!fileName || !*fileName || !ShouldRouteGameLog(std::filesystem::path(fileName)))
-                return fileName ? fileName : L"";
+            if (!IsBareGameLogNameImpl(fileName))
+                return false;
+            try
+            {
+                const int byteCount = WideCharToMultiByte(
+                    CP_UTF8, 0, fileName, -1, nullptr, 0, nullptr, nullptr);
+                if (byteCount <= 1)
+                    return false;
 
-            const std::wstring leaf = std::filesystem::path(fileName).filename().wstring();
-            const int byteCount = WideCharToMultiByte(
-                CP_UTF8, 0, leaf.c_str(), -1, nullptr, 0, nullptr, nullptr);
-            if (byteCount <= 1)
-                return fileName;
+                std::string utf8(static_cast<size_t>(byteCount), '\0');
+                WideCharToMultiByte(
+                    CP_UTF8, 0, fileName, -1, utf8.data(), byteCount, nullptr, nullptr);
+                utf8.pop_back();
+                const std::string routed = GetGameLogPath(utf8.c_str());
 
-            std::string utf8(static_cast<size_t>(byteCount), '\0');
-            WideCharToMultiByte(
-                CP_UTF8, 0, leaf.c_str(), -1, utf8.data(), byteCount, nullptr, nullptr);
-            utf8.pop_back();
-            const std::string routed = GetGameLogPath(utf8.c_str());
+                const int wideCount = MultiByteToWideChar(
+                    CP_UTF8, 0, routed.c_str(), -1, nullptr, 0);
+                if (wideCount <= 1)
+                    return false;
 
-            const int wideCount = MultiByteToWideChar(
-                CP_UTF8, 0, routed.c_str(), -1, nullptr, 0);
-            if (wideCount <= 1)
-                return fileName;
-
-            std::wstring wide(static_cast<size_t>(wideCount), L'\0');
-            MultiByteToWideChar(CP_UTF8, 0, routed.c_str(), -1, wide.data(), wideCount);
-            wide.pop_back();
-            return wide;
+                out.assign(static_cast<size_t>(wideCount), L'\0');
+                MultiByteToWideChar(CP_UTF8, 0, routed.c_str(), -1, out.data(), wideCount);
+                out.pop_back();
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
         }
 
         template <typename Fn>
@@ -95,6 +144,16 @@ namespace BZROpenShim::BootstrapFileIo
         {
             return provider && provider->structSize >= fieldEnd &&
                    (provider->*member) != nullptr;
+        }
+
+        // A provider promises not to throw. One that does anyway is treated
+        // as having declined, the count is kept for the tests and for a
+        // later diagnostic, and the game's CreateFile never sees the throw.
+        std::atomic<uint32_t> g_ProviderExceptions{0};
+
+        void NoteProviderException()
+        {
+            g_ProviderExceptions.fetch_add(1, std::memory_order_relaxed);
         }
 
         bool PatchPushStringOperand(uintptr_t instructionAddress,
@@ -140,9 +199,13 @@ namespace BZROpenShim::BootstrapFileIo
                 return INVALID_HANDLE_VALUE;
 
             // Bootstrap-owned and unconditional: the stock logs have to reach
-            // logs\ whether or not OpenShim ever loads.
-            const std::wstring logRouted = RouteGameLogPath(fileName);
-            const wchar_t* path = logRouted.c_str();
+            // logs\ whether or not OpenShim ever loads. Nothing is allocated
+            // unless the name is a stock log; every other open passes the
+            // caller's own pointer straight through.
+            const wchar_t* path = fileName ? fileName : L"";
+            std::wstring logRouted;
+            if (RouteGameLogPath(fileName, logRouted))
+                path = logRouted.c_str();
 
             // One load. Everything below uses this same provider instance.
             const Provider* provider = g_Provider.load(std::memory_order_acquire);
@@ -150,9 +213,16 @@ namespace BZROpenShim::BootstrapFileIo
             if (ProviderHas(provider, &Provider::routePathW,
                             offsetof(Provider, routePathW) + sizeof(provider->routePathW)))
             {
-                if (const wchar_t* routed =
-                        provider->routePathW(path, desiredAccess, creationDisposition))
-                    path = routed;
+                try
+                {
+                    if (const wchar_t* routed =
+                            provider->routePathW(path, desiredAccess, creationDisposition))
+                        path = routed;
+                }
+                catch (...)
+                {
+                    NoteProviderException();
+                }
             }
 
             const HANDLE handle = real(
@@ -164,8 +234,15 @@ namespace BZROpenShim::BootstrapFileIo
                 ProviderHas(provider, &Provider::onOpenedW,
                             offsetof(Provider, onOpenedW) + sizeof(provider->onOpenedW)))
             {
-                provider->onOpenedW(handle, fileName ? fileName : L"", path,
-                                    desiredAccess, creationDisposition);
+                try
+                {
+                    provider->onOpenedW(handle, fileName ? fileName : L"", path,
+                                        desiredAccess, creationDisposition);
+                }
+                catch (...)
+                {
+                    NoteProviderException();
+                }
             }
 
             SetLastError(openError);
@@ -185,17 +262,26 @@ namespace BZROpenShim::BootstrapFileIo
             if (!real)
                 return INVALID_HANDLE_VALUE;
 
-            const std::string logRouted = RouteGameLogPath(fileName);
-            const char* path = logRouted.c_str();
+            const char* path = fileName ? fileName : "";
+            std::string logRouted;
+            if (RouteGameLogPath(fileName, logRouted))
+                path = logRouted.c_str();
 
             const Provider* provider = g_Provider.load(std::memory_order_acquire);
 
             if (ProviderHas(provider, &Provider::routePathA,
                             offsetof(Provider, routePathA) + sizeof(provider->routePathA)))
             {
-                if (const char* routed =
-                        provider->routePathA(path, desiredAccess, creationDisposition))
-                    path = routed;
+                try
+                {
+                    if (const char* routed =
+                            provider->routePathA(path, desiredAccess, creationDisposition))
+                        path = routed;
+                }
+                catch (...)
+                {
+                    NoteProviderException();
+                }
             }
 
             const HANDLE handle = real(
@@ -207,13 +293,35 @@ namespace BZROpenShim::BootstrapFileIo
                 ProviderHas(provider, &Provider::onOpenedA,
                             offsetof(Provider, onOpenedA) + sizeof(provider->onOpenedA)))
             {
-                provider->onOpenedA(handle, fileName ? fileName : "", path,
-                                    desiredAccess, creationDisposition);
+                try
+                {
+                    provider->onOpenedA(handle, fileName ? fileName : "", path,
+                                        desiredAccess, creationDisposition);
+                }
+                catch (...)
+                {
+                    NoteProviderException();
+                }
             }
 
             SetLastError(openError);
             return handle;
         }
+    }
+
+    bool IsBareGameLogNameW(const wchar_t* fileName)
+    {
+        return IsBareGameLogNameImpl(fileName);
+    }
+
+    bool IsBareGameLogNameA(const char* fileName)
+    {
+        return IsBareGameLogNameImpl(fileName);
+    }
+
+    uint32_t ProviderExceptionCount()
+    {
+        return g_ProviderExceptions.load(std::memory_order_relaxed);
     }
 
     bool PatchIATByFuncName(HMODULE targetModule, const char* funcName, void* newFunc, void** oldFunc)
