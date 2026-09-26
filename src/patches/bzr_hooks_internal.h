@@ -45,6 +45,8 @@ namespace BZROpenShim
     extern FnRecordDeath g_BzrFn_RecordDeath;
     extern FnResolveObj76GameObject g_BzrFn_ResolveObj76GameObject;
 
+    void InstallShadowFarOverrideIfPossible();
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -531,6 +533,8 @@ namespace BZROpenShim
         bool RawMouseInputSignaturesMatch();
         void InstallRawMouseInputProcessHookIfPossible();
         bool ResolveRawMouseInputPreference(const char*& outSource);
+
+        // --- Shadow far distance correction (shadow_far_distance_hook.cpp) -----
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
