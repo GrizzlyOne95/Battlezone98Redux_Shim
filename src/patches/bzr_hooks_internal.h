@@ -243,6 +243,43 @@ namespace BZROpenShim
     using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
     extern FnPersonSimulate g_BzrFn_PersonSimulate;
     extern float g_TurretAimPitchMultiplierEnhanced;
+    void* __fastcall ChunkEffectCreateChunkHook(void* thisPtr,
+                                                void* /*edx*/,
+                                                void* objectPtr,
+                                                const float* velocity,
+                                                uint8_t preserveFlag);
+    void __fastcall ChunkEffectCreateChunkletHook(void* thisPtr,
+                                                  void* /*edx*/,
+                                                  const void* positionVec,
+                                                  const float* velocity,
+                                                  uint8_t preserveFlag);
+    void __fastcall ChunkEffectPartialFragmentHook(void* thisPtr,
+                                                   void* /*edx*/,
+                                                   void* objectPtr,
+                                                   const float* velocity,
+                                                   uint8_t preserveFlag);
+    void __fastcall ChunkEffectFullFragmentHook(void* thisPtr,
+                                                void* /*edx*/,
+                                                void* objectPtr,
+                                                const float* velocity,
+                                                uint8_t preserveFlag);
+
+    using FnChunkEffectCreateChunk = void* (__thiscall*)(void* thisPtr,
+                                                         void* objectPtr,
+                                                         const float* velocity,
+                                                         uint8_t preserveFlag);
+    using FnChunkEffectCreateChunklet = void(__thiscall*)(void* thisPtr,
+                                                          const void* positionVec,
+                                                          const float* velocity,
+                                                          uint8_t preserveFlag);
+    using FnChunkEffectFragmentObject = void(__thiscall*)(void* thisPtr,
+                                                          void* objectPtr,
+                                                          const float* velocity,
+                                                          uint8_t preserveFlag);
+    extern FnChunkEffectCreateChunk g_BzrFn_ChunkEffectCreateChunk;
+    extern FnChunkEffectCreateChunklet g_BzrFn_ChunkEffectCreateChunklet;
+    extern FnChunkEffectFragmentObject g_BzrFn_ChunkEffectFullFragment;
+    extern FnChunkEffectFragmentObject g_BzrFn_ChunkEffectPartialFragment;
 
     namespace Hooks
     {
@@ -1593,6 +1630,141 @@ namespace BZROpenShim
             const uint8_t*& outSibling,
             const uint8_t*& outChild);
         void RefreshChunkObjectIdentityCacheIfNeeded();
+
+        // --- Chunk proxy rendering (chunk_proxy_render.cpp) --------------------
+        inline constexpr uintptr_t kGogChunkEffectCreateChunkAddr = 0x00492AA0;
+        inline constexpr uintptr_t kGogChunkEffectCreateChunkletAddr = 0x004927D0;
+        struct BzrGeoEntry
+        {
+            uint32_t packedKey;
+            void* handle;
+            uint32_t unk8;
+            uint32_t unkC;
+        };
+        struct BzrGeoLookup
+        {
+            uint32_t count;
+            uint32_t unk4;
+            uint32_t cachedKey;
+            BzrGeoEntry* entries;
+        };
+        struct ChunkProxyTransform
+        {
+            float x = 0.0f;
+            float y = 0.0f;
+            float z = 0.0f;
+            OgreQuaternion orientation = { 1.0f, 0.0f, 0.0f, 0.0f };
+            OgreVector3 scale = { 1.0f, 1.0f, 1.0f };
+        };
+        struct ChunkProxySlot
+        {
+            const uint8_t* objectBytes = nullptr;
+            const void* geomRef = nullptr;
+            char geomName[64] = {};
+            void* ownerEntity = nullptr;
+            char ownerEntityBaseName[32] = {};
+            char ownerOgreFilename[32] = {};
+            char proofMeshName[128] = {};
+            float positionX = 0.0f;
+            float positionY = 0.0f;
+            float positionZ = 0.0f;
+            bool useEntryPosition = false;
+            void* billboard = nullptr;
+            void* sceneNode = nullptr;
+            void* entity = nullptr;
+            void* sceneManager = nullptr;
+            void* sourceRootObject = nullptr;
+            void* ownerObj = nullptr;
+            void* sourceGameObject = nullptr;
+            void* sourceRootGameObject = nullptr;
+            DWORD lastSeenTick = 0;
+            uint16_t cameraNotifyCount = 0;
+            uint16_t entityUpdateQueueCount = 0;
+            uint16_t renderQueueAddCount = 0;
+            ChunkProxyTransform genericBatchTransform = {};
+            uint8_t genericBatchKind = 0;
+            bool active = false;
+            bool billboardAssigned = false;
+            bool meshAssigned = false;
+            bool genericBatchTransformReady = false;
+        };
+        inline constexpr uint32_t kClassIdChunk = 53;
+        extern bool g_AllowUnsafeSteamChunkCreateHooks;
+        extern InlineDetour32 g_ChunkEffectCreateChunkDetour;
+        extern InlineDetour32 g_ChunkEffectCreateChunkletDetour;
+        extern bool g_ChunkEffectCreateHooksInstalled;
+        extern bool g_ChunkEffectCreateHooksLogged;
+        extern bool g_ChunkEffectCreateHooksMismatchLogged;
+        extern ULONGLONG g_ChunkEffectCreateHooksReadyTick;
+        extern bool g_ChunkEffectCreateHooksWaitLogged;
+        extern bool g_ChunkEffectFragmentHooksInstalled;
+        extern InlineDetour32 g_ChunkEffectFullFragmentDetour;
+        extern InlineDetour32 g_ChunkEffectPartialFragmentDetour;
+        extern bool g_ChunkMeshProxyFailureLogged;
+        extern bool g_ChunkMeshProxyInitLogged;
+        extern DWORD g_ChunkMeshProxyLastRetryTick;
+        extern bool g_ChunkMeshProxyWaitLogged;
+        extern std::unordered_map<uintptr_t, uint32_t> g_ChunkObservedClassIds;
+        extern bool g_ChunkPayloadResourceLocationsAttempted;
+        extern bool g_ChunkPayloadResourceLocationsFailureLogged;
+        extern bool g_ChunkPayloadResourceLocationsLogged;
+        extern bool g_ChunkPayloadResourceLocationsReady;
+        extern void* g_ChunkProxyBillboardSet;
+        extern uint32_t g_ChunkProxyCapacity;
+        extern float g_ChunkProxyDebugSize;
+        extern bool g_ChunkProxyFailureLogged;
+        extern bool g_ChunkProxyInitLogged;
+        extern DWORD g_ChunkProxyLastRetryTick;
+        extern std::vector<ChunkProxySlot> g_ChunkProxySlots;
+        extern bool g_ChunkProxyWaitLogged;
+        extern uint32_t g_ChunkTraceEntryLimit;
+        extern bool g_EnableGenericChunkBatch;
+        extern bool g_ForceGenericChunkBatchFailure;
+        extern bool g_ForceGenericChunkNonUnitScale;
+        extern std::string g_GenericChunkBatchBuiltMaterial;
+        extern uint64_t g_GenericChunkBatchBuiltVersion;
+        extern int g_GenericChunkBatchEligibility[2];
+        extern DWORD g_GenericChunkBatchLastLogTick;
+        extern void* g_GenericChunkBatchManualObject;
+        extern bool g_GenericChunkBatchRateDiagnostics;
+        extern bool g_GenericChunkBatchReuseEnabled;
+        extern bool g_GenericChunkBatchReuseObserveOnly;
+        extern bool g_GenericChunkBatchRuntimeAvailable;
+        extern void* g_GenericChunkBatchSceneManager;
+        extern void* g_GenericChunkBatchSceneNode;
+        extern bool g_GenericChunkBatchSectionCreated;
+        extern bool g_GenericChunkBatchVisible;
+        extern uint32_t g_LastChunkEffectLoggedCount;
+        extern bool g_TraceChunkRenderVerbose;
+        int FindChunkGeoEntryByKey(const BzrGeoLookup* lookup, uint32_t key);
+        int FindFirstChunkGeoEntryWithHandle(const BzrGeoLookup* lookup);
+        void MaybeLogDx11EnhancedLightingState();
+        void SubmitChunkProxiesToRenderQueue(void* renderQueue);
+        void TrackChunkProxyDebugObject(
+            const uint8_t* objectBytes,
+            uint32_t objectType,
+            const void* activeHandle,
+            const BzrGeoLookup* lookup);
+        bool TryReadChunkEffectEntry(
+            const uint8_t* thisBytes,
+            uint32_t index,
+            ChunkEffectActiveEntry& outEntry);
+        void LogChunkEffectRuntimeSample(void* thisPtr, float dt);
+        void TrackChunkEffectActiveEntries(void* thisPtr);
+        void NoteChunkClassTransition(const uint8_t* objectBytes, uint32_t classId);
+        void LogChunkResolveSnapshot(
+            const char* stage,
+            const char* reason,
+            const uint8_t* objectBytes,
+            uint32_t variant,
+            uint32_t stockResolved,
+            const void* activeBefore,
+            const void* activeAfter,
+            const BzrGeoLookup* lookup,
+            int selectedIndex,
+            uint32_t selectedKey);
+        void InstallChunkEffectCreateHooksIfRequested();
+        void InstallChunkFragmentWalkHooksIfRequested();
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
