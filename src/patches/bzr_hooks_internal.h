@@ -10,6 +10,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "bzr_hooks.h"
 #include "bzr_object_layout.h"
@@ -24,6 +27,10 @@ namespace BZROpenShim
     using FnPlayGlobalSound = int(__cdecl*)(const char* filename, uint32_t arg1, uint32_t arg2, uint32_t arg3);
 
     using FnCarrierGetWeapon = void* (__thiscall*)(void* carrier, int slot);
+
+    using FnHudSpriteLookup = int(__cdecl*)(const char* spriteName);
+    extern FnHudSpriteLookup g_BzrFn_HudSpriteLookup;
+    bool SetStockScrapPilotPanelsVisible(bool visible);
 
     namespace Hooks
     {
@@ -267,6 +274,37 @@ namespace BZROpenShim
         void RefreshSmartReticleRangeState();
         void RevertShotConvergenceToBaseline();
         void RevertSmartReticleRangeToBaseline();
+
+        // --- HUD sprite rect table (hud_sprite_rects.cpp) ----------------------
+        struct HudSpriteRectRecord
+        {
+            int16_t x = 0;
+            int16_t y = 0;
+            int16_t w = 0;
+            int16_t h = 0;
+            float u0 = 0.0f;
+            float v0 = 0.0f;
+            float u1 = 0.0f;
+            float v1 = 0.0f;
+            uint32_t flags18 = 0;
+            uint32_t textureRef1C = 0;
+            uint32_t textureRef20 = 0;
+        };
+        extern std::vector<uintptr_t> g_HudSpriteCachedPanelAddresses;
+        extern bool g_HudSpriteFallbackDiscoveryAttempted;
+        extern ULONGLONG g_HudSpriteFallbackDiscoveryBackoffMs;
+        extern ULONGLONG g_HudSpriteFallbackDiscoveryLastTick;
+        extern std::unordered_set<uintptr_t> g_HudSpriteHiddenAddresses;
+        extern std::unordered_map<int, HudSpriteRectRecord> g_HudSpriteHiddenEntries;
+        extern std::unordered_map<int, HudSpriteRectRecord> g_HudSpriteOriginalEntries;
+        extern std::unordered_map<uintptr_t, HudSpriteRectRecord> g_HudSpriteOriginalEntriesByAddress;
+        extern HudSpriteRectRecord* g_HudSpriteRectTableBase;
+        extern bool g_HudSpriteRectTableDiscoveryAttempted;
+        extern ULONGLONG g_HudSpriteRectTableDiscoveryBackoffMs;
+        extern ULONGLONG g_HudSpriteRectTableDiscoveryLastTick;
+        extern bool g_ScrapPilotHudPanelOverrideActive;
+        extern bool g_ScrapPilotHudPanelOverrideVisible;
+        bool TryGetHudSpriteCurrentRecord(int spriteId, HudSpriteRectRecord& outRecord);
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
