@@ -34555,6 +34555,68 @@ namespace BZROpenShim
         return nullptr;
     }
 
+    // Production patch: the THIRD Carrier::GetWeapon site in Person::Simulate.
+    //
+    // Person::Simulate (0x0059D340) decides whether a person crouches by
+    // walking the selected-weapon mask:
+    //
+    //     mask = carrier->GetSelected();            // Pilot Carrier Null Guard
+    //     for (i = 0; i < 5; i++)
+    //         if (mask & (1 << i))
+    //             if (carrier->GetWeapon(i)->cls->sig == 'SNIP')  // no null test
+    //                 sniper = true;
+    //
+    // GetWeapon returns null when the hardpoint mask at [carrier+0x2C] lacks
+    // the bit, but nothing keeps the selected mask at [carrier+0x30] inside
+    // the hardpoint mask. Lua GiveWeapon(h, nil, slot) empties a hardpoint
+    // and leaves its selected bit set, so the next frame reads [null+8] at
+    // 0x0059D7D4. Found in ISDF Chronicles isdfms10: wildlife.lua mounts a
+    // bite weapon on a jak person in range and removes it again past range.
+    //
+    // The caller keeps the result only for that one SNIP test (the local at
+    // [ebp-0x4B4] has no other reader), so an empty slot gets a static
+    // stand-in whose class signature is zero. "Not a sniper weapon" is the
+    // accurate answer for an empty hardpoint, and the stock loop continues.
+    namespace
+    {
+        struct SniperScanEmptyWeaponClass
+        {
+            uint8_t bytes[0x10];            // +0x0C: signature, zero here
+        };
+        struct SniperScanEmptyWeapon
+        {
+            void* unused0;
+            void* unused4;
+            const SniperScanEmptyWeaponClass* cls;  // +0x08
+        };
+        const SniperScanEmptyWeaponClass g_SniperScanEmptyClass = {};
+        const SniperScanEmptyWeapon g_SniperScanEmptyWeapon = {
+            nullptr, nullptr, &g_SniperScanEmptyClass };
+        static_assert(offsetof(SniperScanEmptyWeapon, cls) == 0x08,
+            "Person::Simulate reads the weapon class at +0x08");
+        volatile long g_SniperScanEmptyLogBudget = 8;
+    }
+
+    void* __fastcall PersonSniperScanGetWeaponGuard(void* carrier, void* /*edx*/, int slot)
+    {
+        void* weapon = (carrier && g_BzrFn_CarrierGetWeapon)
+            ? g_BzrFn_CarrierGetWeapon(carrier, slot)
+            : nullptr;
+        if (weapon)
+            return weapon;
+
+        if (InterlockedDecrement(&g_SniperScanEmptyLogBudget) >= 0)
+        {
+            Log(L"[PILOTSAFE] carrier=%p selects empty slot %d in the sniper "
+                L"scan; treating it as not a sniper weapon. A script most "
+                L"likely removed the selected weapon without clearing the "
+                L"weapon mask.\n",
+                carrier,
+                slot);
+        }
+        return const_cast<SniperScanEmptyWeapon*>(&g_SniperScanEmptyWeapon);
+    }
+
     // Compatibility toggle: neutral-unit attack/order asymmetry.
     // Stock 1.5 and Redux both exclude team 0 from the UI attack-target list.
     // ControlPanel::Render enumerates candidates and keeps only those where
