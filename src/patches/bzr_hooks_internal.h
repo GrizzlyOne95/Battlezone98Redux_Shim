@@ -834,6 +834,37 @@ namespace BZROpenShim
         void InitializeMpauthConfig();
         void InstallMpauthHooksIfPossible();
 
+        // --- Vehicle skinning diagnostic (diag_vehicle_skinning.cpp) -----------
+        struct ChunkBridgeSnapshot
+        {
+            void* directBridgeRoot = nullptr;
+            void* directOgreEntity = nullptr;
+            void* directOgreLight = nullptr;
+            bool directProbeOk = false;
+            void* legacyOwner = nullptr;
+            void* ownerBridgeRoot = nullptr;
+            void* ownerOgreEntity = nullptr;
+            void* ownerOgreLight = nullptr;
+            void* ownerObj = nullptr;
+            void* ownerEntity = nullptr;
+            void* gameObject = nullptr;
+            bool ownerProbeOk = false;
+            char ownerEntityBaseName[32] = {};
+            char ownerOgreFilename[32] = {};
+            char ownerResolvedMeshName[48] = {};
+            bool ownerNameProbeOk = false;
+        };
+        inline constexpr size_t kChunkObjectIdentityMaxObjectsPerRefresh = 1024;
+        ChunkBridgeSnapshot CaptureChunkBridgeSnapshot(const uint8_t* objectBytes);
+        bool TryGetGameObjectMeshName(void* gameObject, char* outMeshName, size_t outMeshNameCapacity);
+        bool TryGetGameObjectObj76(void* gameObject, void*& outObj76);
+        extern volatile long g_VehicleSkinningTraceBudget;
+        extern bool g_VehicleSkinningTraceEnabled;
+        extern std::unordered_set<std::string> g_VehicleSkinningTraceFingerprints;
+        extern DWORD g_VehicleSkinningTraceIntervalMs;
+        extern DWORD g_VehicleSkinningTraceLastTick;
+        void RefreshVehicleSkinningDiagnosticsIfNeeded();
+
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
         extern float g_SatelliteZoomOutMultiplierBaseline;
