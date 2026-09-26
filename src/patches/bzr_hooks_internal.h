@@ -306,6 +306,33 @@ namespace BZROpenShim
         extern bool g_ScrapPilotHudPanelOverrideVisible;
         bool TryGetHudSpriteCurrentRecord(int spriteId, HudSpriteRectRecord& outRecord);
 
+        // --- Scrap/pilot HUD legacy layout (scrap_pilot_hud.cpp) ---------------
+        inline constexpr size_t kScrapPilotHudPointCount = 6;
+        inline constexpr size_t kScrapPilotHudValueCount = kScrapPilotHudPointCount * 2;
+        // BZ 1.5's plates, taken from the shipped 1.5 asset: spritea.stb in
+        // bzone152.zfs places scrap_panel at (0,94) 58x34 and pilot_panel at
+        // (70,102) 58x26 inside scrncut.map. Every pixel in both regions is one
+        // of exactly two ARGB4444 values -- 0xF000 opaque black or 0x0000
+        // transparent -- so the art carries no texture detail at all and these
+        // run tables reproduce the silhouettes pixel for pixel (1534 and 1299
+        // solid pixels respectively).
+        struct ScrapPilotHudPlateRun
+        {
+            uint8_t y0;
+            uint8_t y1;
+            uint8_t x0;
+            uint8_t x1;
+        };
+        struct ScrapPilotHudPlate
+        {
+            const ScrapPilotHudPlateRun* runs;
+            size_t runCount;
+        };
+        extern ULONGLONG g_ScrapPilotHudLastRefreshTick;
+        extern bool g_ScrapPilotHudLegacyLayoutEnabled;
+        void RefreshScrapPilotHudLayout();
+        void RevertScrapPilotHudToBaseline();
+
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
         extern float g_SatelliteZoomOutMultiplierBaseline;
