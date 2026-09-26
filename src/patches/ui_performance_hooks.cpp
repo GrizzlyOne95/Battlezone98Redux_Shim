@@ -2004,19 +2004,26 @@ namespace BZROpenShim::UiPerfHooks
             return;
         }
 
-        uint32_t reqAddr = HookEngine::ResolveNamedAddress("ShellRequest");
-        if (!reqAddr) reqAddr = 0x007C7930;
-        uint32_t transAddr = HookEngine::ResolveNamedAddress("ShellTransition");
-        if (!transAddr) transAddr = 0x007C7070;
-        uint32_t backAddr = HookEngine::ResolveNamedAddress("ShellBack");
-        if (!backAddr) backAddr = 0x007C79A0;
+        // The three shell sites come from scripts/patches.json (a signature
+        // scan with a verified fallback). A name the table cannot supply
+        // stands the shell hooks down; the timing and trigger machinery
+        // below does not depend on them.
+        const uint32_t reqAddr = HookEngine::ResolveNamedAddress("ShellRequest");
+        const uint32_t transAddr = HookEngine::ResolveNamedAddress("ShellTransition");
+        const uint32_t backAddr = HookEngine::ResolveNamedAddress("ShellBack");
 
         g_ShellRequestAddr = reqAddr;
         g_ShellTransitionAddr = transAddr;
         g_ShellBackAddr = backAddr;
 
         const BzrDistribution distribution = GetBzrDistribution();
-        if (distribution == BzrDistribution::Steam)
+        if (!reqAddr || !transAddr || !backAddr)
+        {
+            LogShimA(LogLevel::Warn, "uiperf-hooks",
+                "Shell hooks not installed: unresolved site(s) request=0x%08X transition=0x%08X back=0x%08X",
+                reqAddr, transAddr, backAddr);
+        }
+        else if (distribution == BzrDistribution::Steam)
         {
             LogShimA(LogLevel::Info, "uiperf-hooks",
                 "Steam shell hooks deferred until settled live MainScreen; request=0x%08X transition=0x%08X back=0x%08X",
