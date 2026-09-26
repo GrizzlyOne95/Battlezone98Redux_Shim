@@ -815,6 +815,25 @@ namespace BZROpenShim
         // --- AutoSave load button and restart mission (autosave_restart.cpp) ---
         void ForgetAllChunkProxySceneResources(const wchar_t* reason);
 
+        // --- MPAUTH diagnostic (diag_mpauth_trace.cpp) -------------------------
+        inline constexpr size_t kOrdnanceObjOffset = 0x14;
+        // Budgets for MPAUTH traces (opt-in).
+        inline constexpr long kMpauthDwTraceBudgetDefault = 256;
+        inline constexpr long kMpauthSplTraceBudgetDefault = 256;
+        inline constexpr size_t kObjStateFlagsOffset = 0x14;
+        const char* BoolText(bool value);
+        bool TryGetEnvLong(const char* name, long& outValue);
+        extern bool g_MpauthEnabled;
+        extern bool g_MpauthHooksInstalled;
+        extern thread_local bool g_MpauthInOrdnanceReceive;
+        extern volatile long g_MpauthInstallRetryBudget;
+        extern std::unordered_map<uint32_t, int> g_MpauthSplHitCounts;
+        extern std::unordered_set<uint32_t> g_MpauthRecentDwRemovedIds;
+        extern std::unordered_map<uint32_t, uint64_t> g_MpauthDwRemoveTick;
+        extern std::unordered_map<uint32_t, int> g_MpauthDwDeletedRecord;
+        void InitializeMpauthConfig();
+        void InstallMpauthHooksIfPossible();
+
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
         extern float g_SatelliteZoomOutMultiplierBaseline;
