@@ -82,6 +82,18 @@ namespace BZROpenShim
     extern volatile long g_NeutralAttackOrderLogBudget;
     extern std::unordered_set<uintptr_t> g_PilotCarrierNullLoggedObjects;
 
+    using FnCommandHandler = void(__cdecl*)(uint16_t id, const char* cmd);
+    using FnHelpLog = void(__cdecl*)(void* obj, const char* text);
+    using FnHelpUi = void(__cdecl*)(int channel, const char* text);
+    using FnBanLookup = void* (__cdecl*)(uint16_t id);
+    using FnIsHost = int(__cdecl*)();
+    extern FnBanLookup g_BzrFn_BanLookup;
+    extern FnCommandHandler g_BzrFn_CommandHandler;
+    extern FnHelpLog g_BzrFn_HelpLog;
+    extern FnHelpUi g_BzrFn_HelpUi;
+    extern FnIsHost g_BzrFn_IsHost;
+    extern void** g_BzrPtr_920168;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -639,6 +651,19 @@ namespace BZROpenShim
         void RevertAiWeaponMaskArtilleryToBaseline();
         void RefreshAiWeaponMaskMinelayerState();
         void RevertAiWeaponMaskMinelayerToBaseline();
+
+        // --- Multiplayer moderation (moderation.cpp) ---------------------------
+        struct BanRecord
+        {
+            std::string id;
+            std::string name;
+        };
+        void SyncNicknameEntriesFromAuthoritativeValue(const char* value);
+        extern std::vector<BanRecord> g_BanRecords;
+        std::filesystem::path GetBansConfigPath();
+        void EnsureBansConfigLoaded();
+        bool AddBanConfigEntry(const char* stableId, const BzrString* name, const char* source);
+        void KickBannedPlayers(const char* source, uint32_t lobby, uint32_t member, int changes);
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
