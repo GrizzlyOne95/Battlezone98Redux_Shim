@@ -281,6 +281,9 @@ namespace BZROpenShim
     extern FnChunkEffectFragmentObject g_BzrFn_ChunkEffectFullFragment;
     extern FnChunkEffectFragmentObject g_BzrFn_ChunkEffectPartialFragment;
 
+    using FnChunkResolve = uint32_t(__cdecl*)(void* objectPtr, uint32_t variant);
+    extern FnChunkResolve g_BzrFn_ChunkResolve;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -1765,6 +1768,10 @@ namespace BZROpenShim
             uint32_t selectedKey);
         void InstallChunkEffectCreateHooksIfRequested();
         void InstallChunkFragmentWalkHooksIfRequested();
+
+        // --- Chunk engine hooks (chunk_engine_hooks.cpp) -----------------------
+        extern bool g_EnableChunkRenderFallback;
+        extern bool g_EnablePartialFragmentBoneCollapse;
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
