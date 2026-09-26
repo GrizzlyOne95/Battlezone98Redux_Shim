@@ -126,6 +126,43 @@ namespace BZROpenShim::RenderProfiles
         }
     }
 
+    ViewportReapplyDecision DecideViewportSchemeReapply(Profile effective,
+                                                        std::string_view current,
+                                                        std::string_view lastModern)
+    {
+        ViewportReapplyDecision decision;
+        // Same ownership rule as the setMaterialScheme hook: only the engine's
+        // native quality names and our own prefixes carry policy. Everything
+        // else stays exactly as found, so a Workshop material script keeps
+        // its own technique selection through a boot, an ini reload or an
+        // EXU request.
+        const bool oursOrNative = IsModernMaterialScheme(current) ||
+                                  current.starts_with("en-") ||
+                                  current.starts_with("og-");
+        if (!oursOrNative)
+        {
+            decision.foreignScheme = true;
+            return decision;
+        }
+        const std::string_view modernBase = NormalizeModernMaterialScheme(current, lastModern);
+        if (!BuildMaterialSchemeForProfile(effective, modernBase, decision.scheme,
+                                           sizeof(decision.scheme)))
+        {
+            return decision; // nothing buildable: leave the viewport alone
+        }
+        decision.rewriteScheme = (std::string_view(decision.scheme) != current);
+        return decision;
+    }
+
+    GlowAction DecideGlowCompositor(Profile effective, bool suppressedByRetro)
+    {
+        if (effective == Profile::Retro)
+        {
+            return GlowAction::Disable;
+        }
+        return suppressedByRetro ? GlowAction::Restore : GlowAction::LeaveAlone;
+    }
+
     uint32_t CapabilitiesForBackend(ActiveBackend backend)
     {
         // Both backends carry the distance-faded normal-map sharpening and the
