@@ -468,6 +468,46 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "The `call FUN_00766900` that loads the map-supplied starting-vehicle pool `<mission>.vxt`, inside FUN_007A3E60 on exact GOG Redux 2.2.301. FUN_007A3E60 rewrites the mission filename's last four characters to \".vxt\" and loads it; FUN_00766900 falls back to \"netveh.odf\" when that file is absent, so this call site is where host/map pool authority enters. Anchored on the CALL; the trailing `mov edx,[ebp-0x2C] / mov dword [edx+0x38],-1` selection reset distinguishes it from the netveh site."
+    },
+    {
+      "name": "Music::SelectTrack",
+      "pattern": "55 8B EC 8B 45 08 3B 05 ?? ?? ?? ?? 74 05 E8 ?? ?? ?? ?? 8B 4D 0C 89 0D ?? ?? ?? ?? 8B 55 10 89 15 ?? ?? ?? ?? 8B 45 14 A3 ?? ?? ?? ?? 8B 4D 08 89 0D ?? ?? ?? ?? 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004377C0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Redux soundtrack track/loop selector, void __cdecl (int track, int loopFirst, int loopSkip, int loopLast), on exact GOG Redux 2.2.301. The world loader FUN_00780160 reads [World] MusicTrack/MusicLoopFirst/MusicLoopSkip/MusicLoopLast from the .trn and passes them here in that order; the shell (FUN_007BEFD0, FUN_004341C0) calls it with one track in every slot to loop a single track. It calls Music::Stop (0x00437A70) only when the track differs from the current one, then stores the four values; the end-of-track advancer FUN_00437B00 consumes them. Selects only: playback starts in Music::Start. Unique on the GOG image with every absolute and rel32 operand wildcarded."
+    },
+    {
+      "name": "Music::Start",
+      "pattern": "55 8B EC 83 EC 2C A1 ?? ?? ?? ?? 33 C5 89 45 FC 83 3D ?? ?? ?? ?? 00 74 05 E9 ?? ?? ?? ?? A1 ?? ?? ?? ?? 50 68 ?? ?? ?? ?? 8D 4D DC 51 FF 15 ?? ?? ?? ?? 83 C4 0C 8D 55 DC 52 E8 ?? ?? ?? ?? 83 C4 04",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004378F0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Redux soundtrack start, void __cdecl (void), on exact GOG Redux 2.2.301 -- the real playback entry, not the legacy _StartMusic 0x00406670, which is a dead identity stub on this build (live_scan_findings_20260706.md #17). If nothing is playing it formats the selected track with \"%02d.ogg\", sizes and loads it through the resource layer (0x00481A60/0x00481AF0), opens it through the thunk 0x0043F9B0 to OggManager::Setup (0x0043F050, which logs \"Starting Music Playback Index %d\"), and when the options music volume byte is non-zero sets the playing flag and calls the thunk 0x0043F9E0 to OggManager::Play (0x0043F320) and the volume setter FUN_00437800. Called by the mission start FUN_00617110, the shell FUN_007BEFD0 and the advancer FUN_00437B00. A no-op while music is already playing. Unique on the GOG image with every absolute and rel32 operand wildcarded."
+    },
+    {
+      "name": "Music::Stop",
+      "pattern": "55 8B EC 83 EC 24 A1 ?? ?? ?? ?? 33 C5 89 45 FC 83 3D ?? ?? ?? ?? FF 74 ?? 83 3D ?? ?? ?? ?? 00 74 ?? A1 ?? ?? ?? ?? 50 E8 ?? ?? ?? ?? 83 C4 04 8B 0D ?? ?? ?? ?? 51 E8 ?? ?? ?? ?? 83 C4 04 8B 15 ?? ?? ?? ?? 52 68 ?? ?? ?? ?? 8D 45 DC 50 FF 15",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00437A70",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Redux soundtrack stop, void __cdecl (void), on exact GOG Redux 2.2.301 -- the real stop, not the legacy _StopMusic 0x004068E0 stub. If an Ogg slot is open it calls the thunk 0x0043FA20 to OggManager::Pause (0x0043F5C0) while playing, then the thunk 0x0043FA60 to OggManager::Release (0x0043F780), releases the \"%02d.ogg\" resource (0x00481990), and clears the slot, playing and paused flags. Called by Music::SelectTrack on a track change, by the mission teardown FUN_00618370 and FUN_00439FB0, and by the advancer before moving to the next track. Idempotent. Unique on the GOG image with every absolute and rel32 operand wildcarded."
+    },
+    {
+      "name": "Music::ResourceSize",
+      "pattern": "55 8B EC 83 EC 2C A1 ?? ?? ?? ?? 33 C5 89 45 FC 83 3D ?? ?? ?? ?? 00 74 05 E9 ?? ?? ?? ?? A1 ?? ?? ?? ?? 50 68 ?? ?? ?? ?? 8D 4D DC 51 FF 15 ?? ?? ?? ?? 83 C4 0C 8D 55 DC 52 E8 ?? ?? ?? ?? 83 C4 04",
+      "offset": 58,
+      "mode": "rel32_target",
+      "fallback": "0x00481A60",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Resource-layer file size query, int __cdecl (const char* name), on exact GOG Redux 2.2.301, taken from the first call in Music::Start, which passes the formatted \"%02d.ogg\" name and gives up on the track when the result is below 1. It forwards to FUN_00481A80(nullptr, name), which returns the cached entry's size (+0x10) or the on-disk size and has no side effects; the same query sizes wave files elsewhere. OpenShimSetMusicTrack uses it to refuse a track that does not exist before touching the engine's music state."
     }
   ],
   "globals": [
