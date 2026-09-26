@@ -155,6 +155,7 @@
     <ClCompile Include="src\patches\hud_sprite_rects.cpp" />
     <ClCompile Include="src\patches\jump_snipe_crouch.cpp" />
     <ClCompile Include="src\patches\lobby_ui.cpp" />
+    <ClCompile Include="src\patches\map_filter_port.cpp" />
     <ClCompile Include="src\patches\moderation.cpp" />
     <ClCompile Include="src\patches\ogre_dedupe_crash_fixes.cpp" />
     <ClCompile Include="src\patches\ordnance_velocity.cpp" />
