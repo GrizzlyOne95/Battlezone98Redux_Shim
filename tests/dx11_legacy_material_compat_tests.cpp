@@ -500,8 +500,192 @@ void TestSynthesisExclusions()
                "an empty name is not excluded here (the caller rejects it)");
 }
 
+std::string ReadTextFile(const char* path)
+{
+    std::string text;
+    std::FILE* f = std::fopen(path, "rb");
+    if (f == nullptr)
+    {
+        return text;
+    }
+    char buf[4096];
+    size_t n = 0;
+    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0)
+    {
+        text.append(buf, n);
+    }
+    std::fclose(f);
+    return text;
+}
+
+// The block of a "vertex_program <name> hlsl" declaration, or "" if absent.
+std::string ProgramBlock(const std::string& script, const std::string& name)
+{
+    const std::string header = "vertex_program " + name + " hlsl";
+    size_t at = 0;
+    while ((at = script.find(header, at)) != std::string::npos)
+    {
+        const size_t after = at + header.size();
+        // Reject a longer name that merely starts with this one.
+        if (after < script.size() && script[after] != '\r' &&
+            script[after] != '\n' && script[after] != ' ')
+        {
+            at = after;
+            continue;
+        }
+        const size_t close = script.find("\n}", after);
+        return script.substr(at, close == std::string::npos
+                                     ? std::string::npos
+                                     : close - at);
+    }
+    return std::string();
+}
+
+void TestVertexInputFit()
+{
+    std::printf("TestVertexInputFit\n");
+    std::string vs;
+
+    // ISDF Chronicles prop.mesh: POSITION/NORMAL/TANGENT/TEXCOORD0, no
+    // DIFFUSE. The full-input program made D3D11 throw per draw; this is
+    // the exact case that quit isdfms10 under DX11.
+    VertexInputs noColour;
+    noColour.known = true;
+    noColour.position = true;
+    noColour.diffuse = false;
+    noColour.texcoord0 = true;
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex",
+                                        noColour, vs) ==
+                       VertexInputFit::Adapted &&
+                   vs == "OSE_FixedFunc_Textured_vertex_novc",
+               "textured fixed function on a mesh without DIFFUSE drops COLOR0");
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Untextured_vertex",
+                                        noColour, vs) ==
+                       VertexInputFit::Adapted &&
+                   vs == "OSE_FixedFunc_Untextured_vertex_novc",
+               "untextured fixed function on a mesh without DIFFUSE drops COLOR0");
+    // Family adapters share the entry points, so they take the same variant.
+    ExpectTrue(FitVertexProgramToInputs("OSE_Compat_Effect_vertex", noColour,
+                                        vs) == VertexInputFit::Adapted &&
+                   vs == "OSE_FixedFunc_Textured_vertex_novc",
+               "a textured-entry family adapter adapts to the generic variant");
+    ExpectTrue(FitVertexProgramToInputs("OSE_Compat_Untextured_vertex",
+                                        noColour, vs) ==
+                       VertexInputFit::Adapted &&
+                   vs == "OSE_FixedFunc_Untextured_vertex_novc",
+               "the untextured family keeps the untextured entry");
+
+    // Native BZR geometry (mire foliage: POSITION/NORMAL/DIFFUSE/TEXCOORD0)
+    // keeps the program that was resolved, family name and all.
+    VertexInputs full;
+    full.known = true;
+    full.diffuse = true;
+    full.texcoord0 = true;
+    ExpectTrue(FitVertexProgramToInputs("OSE_Compat_Effect_vertex", full, vs) ==
+                       VertexInputFit::Unchanged &&
+                   vs == "OSE_Compat_Effect_vertex",
+               "a mesh with every input keeps the resolved program");
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Untextured_vertex",
+                                        full, vs) == VertexInputFit::Unchanged &&
+                   vs == "OSE_FixedFunc_Untextured_vertex",
+               "untextured with DIFFUSE is unchanged");
+
+    VertexInputs noUv = full;
+    noUv.texcoord0 = false;
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex", noUv,
+                                        vs) == VertexInputFit::Adapted &&
+                   vs == "OSE_FixedFunc_Textured_vertex_nouv",
+               "textured program on a mesh without TEXCOORD0 drops the UV input");
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Untextured_vertex",
+                                        noUv, vs) == VertexInputFit::Unchanged,
+               "the untextured entry never needed TEXCOORD0");
+    VertexInputs bare;
+    bare.known = true;
+    bare.diffuse = false;
+    bare.texcoord0 = false;
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex", bare,
+                                        vs) == VertexInputFit::Adapted &&
+                   vs == "OSE_FixedFunc_Textured_vertex_novc_nouv",
+               "position-only mesh gets the position-only textured variant");
+
+    VertexInputs noPosition = full;
+    noPosition.position = false;
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex",
+                                        noPosition, vs) ==
+                       VertexInputFit::Unsatisfiable && vs.empty(),
+               "no POSITION is unsatisfiable and fails closed");
+
+    // Unknown declaration: never require COLOR0 (fatal if absent), keep UVs.
+    VertexInputs unknown;
+    ExpectTrue(!unknown.known, "default VertexInputs is unknown");
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex",
+                                        unknown, vs) ==
+                       VertexInputFit::Adapted &&
+                   vs == "OSE_FixedFunc_Textured_vertex_novc",
+               "unknown inputs take the no-colour variant");
+    unknown.diffuse = true; // ignored while known == false
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex",
+                                        unknown, vs) ==
+                       VertexInputFit::Adapted &&
+                   vs == "OSE_FixedFunc_Textured_vertex_novc",
+               "an unverified diffuse flag is not trusted");
+
+    // Programs this layer does not own are never touched.
+    ExpectTrue(FitVertexProgramToInputs("BaseHighPSSM_vertexSM4", noColour,
+                                        vs) == VertexInputFit::Unchanged &&
+                   vs == "BaseHighPSSM_vertexSM4",
+               "foreign programs are left alone");
+
+    ExpectTrue(DescribeVertexInputs(VertexInputs{}) == "unknown",
+               "unknown inputs describe as unknown");
+    ExpectTrue(DescribeVertexInputs(noColour) == "position,texcoord0",
+               "prop.mesh inputs describe as position,texcoord0");
+    ExpectTrue(std::strcmp(VertexInputFitName(VertexInputFit::Adapted),
+                           "adapted") == 0,
+               "fit names");
+
+    // Every variant the fitter can emit must be declared by the shipped
+    // .program with the matching entry point and defines, or the runtime's
+    // program-absent guard would silently decline every adaptation.
+    const std::string script = ReadTextFile(BZR_FIXEDFUNC_PROGRAM);
+    const std::string hlsl = ReadTextFile(BZR_FIXEDFUNC_HLSL);
+    ExpectTrue(!script.empty() && !hlsl.empty(), "payload files readable");
+    struct Expected
+    {
+        const char* name;
+        const char* entry;
+        bool noColour;
+        bool noUv;
+    };
+    const Expected expected[] = {
+        { "OSE_FixedFunc_Textured_vertex_novc", "fixedfunc_vertex", true, false },
+        { "OSE_FixedFunc_Textured_vertex_nouv", "fixedfunc_vertex", false, true },
+        { "OSE_FixedFunc_Textured_vertex_novc_nouv", "fixedfunc_vertex", true, true },
+        { "OSE_FixedFunc_Untextured_vertex_novc", "fixedfunc_untextured_vertex", true, false },
+    };
+    for (const Expected& e : expected)
+    {
+        const std::string block = ProgramBlock(script, e.name);
+        ExpectContains(block, "vs_4_0", e.name);
+        // "entry_point fixedfunc_vertex" is not a substring of the
+        // untextured entry's line, so this distinguishes the two.
+        ExpectContains(block, (std::string("entry_point ") + e.entry).c_str(),
+                       e.name);
+        const bool hasNoColour =
+            block.find("COMPAT_NO_VERTEX_COLOUR") != std::string::npos;
+        const bool hasNoUv = block.find("COMPAT_NO_TEXCOORD") != std::string::npos;
+        ExpectTrue(hasNoColour == e.noColour && hasNoUv == e.noUv, e.name);
+        ExpectContains(block, "wvpMat worldviewproj_matrix", e.name);
+    }
+    ExpectContains(hlsl, "#ifndef COMPAT_NO_VERTEX_COLOUR",
+                   "hlsl guards the COLOR0 input");
+    ExpectContains(hlsl, "#ifndef COMPAT_NO_TEXCOORD",
+                   "hlsl guards the TEXCOORD0 input");
+}
+
 int main()
 {
+    TestVertexInputFit();
     TestSynthesisExclusions();
     TestSupportedTargets();
     TestParseCompatFlag();

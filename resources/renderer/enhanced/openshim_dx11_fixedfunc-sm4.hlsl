@@ -19,6 +19,26 @@
 // touching the resolver.
 
 // ---------------------------------------------------------------------------
+// Vertex input variants
+// ---------------------------------------------------------------------------
+//
+// D3D11 matches every element of a vertex shader's INPUT signature against
+// the mesh's vertex declaration and throws "Unable to set D3D11 vertex
+// declaration" on the first miss -- per draw, every frame, which the game
+// treats as a render failure and eventually quits on. Fixed function never
+// had that problem: a mesh without a diffuse element simply drew white.
+// Blender/OgreXML exports routinely carry no DIFFUSE element (ISDF
+// Chronicles' prop.mesh is POSITION/NORMAL/TANGENT/TEXCOORD0 only), so the
+// vertex entry points below compile in input-reduced variants:
+//
+//   COMPAT_NO_VERTEX_COLOUR  no COLOR0 input; vertex colour reads as white
+//   COMPAT_NO_TEXCOORD       no TEXCOORD0 input; UV reads as (0,0)
+//
+// Output signatures never change, so any variant pairs with the fragment
+// program its full-input sibling pairs with. The runtime picks the variant
+// from the renderable's declaration (FitVertexProgramToInputs).
+
+// ---------------------------------------------------------------------------
 // Textured path (1 texture unit)
 // ---------------------------------------------------------------------------
 
@@ -28,8 +48,12 @@ void fixedfunc_vertex(
     uniform float4 diffuseColor,
 
     in float4 iPosition : POSITION,
+#ifndef COMPAT_NO_VERTEX_COLOUR
     in float4 iColor : COLOR0,
+#endif
+#ifndef COMPAT_NO_TEXCOORD
     in float2 iTexCoord : TEXCOORD0,
+#endif
 
     out float4 vColor : COLOR0,
     out float2 vTexCoord : TEXCOORD0,
@@ -57,9 +81,16 @@ void fixedfunc_vertex(
     // IsExcludedFromSynthesis() in dx11_legacy_material_compat.cpp rejects
     // overlay, font, cursor, sprite, compositor and rtt materials before
     // anything can reach these programs.
+#ifdef COMPAT_NO_VERTEX_COLOUR
+    vColor = diffuseColor;
+#else
     vColor = iColor.bgra * diffuseColor;
+#endif
     // Texture matrix carries scroll_anim / rotate / scale from the source
     // pass without touching mod files on disk.
+#ifdef COMPAT_NO_TEXCOORD
+    float2 iTexCoord = float2(0.0, 0.0);
+#endif
     vTexCoord = mul(texMatrix, float4(iTexCoord, 0.0, 1.0)).xy;
     vDepth = oPosition.z;
 }
@@ -119,7 +150,9 @@ void fixedfunc_untextured_vertex(
     uniform float4 diffuseColor,
 
     in float4 iPosition : POSITION,
+#ifndef COMPAT_NO_VERTEX_COLOUR
     in float4 iColor : COLOR0,
+#endif
 
     out float4 vColor : COLOR0,
     out float vDepth : TEXCOORD1,
@@ -128,8 +161,12 @@ void fixedfunc_untextured_vertex(
 )
 {
     oPosition = mul(wvpMat, iPosition);
+#ifdef COMPAT_NO_VERTEX_COLOUR
+    vColor = diffuseColor;
+#else
     // Native BGRA correction, for the reason spelled out in fixedfunc_vertex.
     vColor = iColor.bgra * diffuseColor;
+#endif
     vDepth = oPosition.z;
 }
 

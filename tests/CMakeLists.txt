@@ -359,6 +359,10 @@ target_include_directories(render_profile_resources_tests PRIVATE ../include)
 target_compile_features(render_profile_resources_tests PRIVATE cxx_std_20)
 target_include_directories(dx11_legacy_material_compat_tests PRIVATE ../include)
 target_compile_features(dx11_legacy_material_compat_tests PRIVATE cxx_std_20)
+target_compile_definitions(dx11_legacy_material_compat_tests PRIVATE
+    _CRT_SECURE_NO_WARNINGS
+    BZR_FIXEDFUNC_PROGRAM="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_dx11_fixedfunc.program"
+    BZR_FIXEDFUNC_HLSL="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_dx11_fixedfunc-sm4.hlsl")
 target_include_directories(openshim_assets_tests PRIVATE ../include)
 target_compile_features(openshim_assets_tests PRIVATE cxx_std_20)
 
