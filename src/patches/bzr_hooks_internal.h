@@ -1270,6 +1270,38 @@ namespace BZROpenShim
         bool ShouldTraceConstructorRemoteBuildFix();
         void InstallConstructorRemoteBuildFixIfPossible();
 
+        // --- UI and camera fixes (ui_camera_fixes.cpp) -------------------------
+        inline constexpr int32_t kMultiRenderCountMax = 256;
+        // Post-load quake replay fade (#57) helpers. All calls run on the game
+        // thread: the arm hook replaces PostLoadScriptUtils' StartQuake call
+        // and the fade tick runs from the EarthQuake::Simulate entry detour.
+        using FnEarthQuakeSimulate = void(__fastcall*)(void* thisPtr, void* edx, float dt);
+        extern bool g_BriefingScrollFixEnabled;
+        extern bool g_BriefingScrollFixInstalled;
+        extern bool g_CinematicSatelliteZoomFixEnabled;
+        extern bool g_CinematicSatelliteZoomFixInstalled;
+        extern volatile long g_CinematicSatelliteZoomLogBudget;
+        extern InlineDetour32 g_EarthQuakeSimulateDetour;
+        extern bool g_MultiRenderCountClampEnabled;
+        extern bool g_MultiRenderCountClampInstalled;
+        extern volatile long g_MultiRenderCountClampLogBudget;
+        extern volatile long g_QuakeReplayArmed;
+        extern bool g_QuakeReplayFadeEnabled;
+        extern bool g_QuakeReplayFadeInstalled;
+        extern long g_QuakeReplayFadeSeconds;
+        extern bool g_TargetCamSatelliteFixEnabled;
+        extern bool g_TargetCamSatelliteFixInstalled;
+        extern volatile long g_TargetCamSatelliteLogBudget;
+        extern bool g_ThumbnailBmpGuardEnabled;
+        extern bool g_ThumbnailBmpGuardInstalled;
+        void InstallBriefingScrollFixIfPossible();
+        void InstallMultiRenderCountClampIfPossible();
+        void InstallThumbnailBmpGuardIfPossible();
+        extern FnEarthQuakeSimulate g_BzrFn_EarthQuakeSimulateOriginal;
+        void InstallQuakeReplayFadeIfPossible();
+        void InstallTargetCamSatelliteFixIfPossible();
+        void InstallCinematicSatelliteZoomFixIfPossible();
+
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
         extern float g_SatelliteZoomOutMultiplierBaseline;
