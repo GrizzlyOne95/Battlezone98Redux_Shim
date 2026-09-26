@@ -1,4 +1,5 @@
 #include "terrain_tile_blend.h"
+#include "engine_globals.h"
 
 #include "hook_engine.h"
 #include "shim_log.h"
@@ -26,7 +27,6 @@ namespace BZROpenShim
 
         constexpr std::ptrdiff_t kManagerGpuBufferSharedPtrOffset = 0x04;
         constexpr std::ptrdiff_t kManagerCpuVertexBufferOffset = 0x80;
-        constexpr uintptr_t kReleasedCurrentTrnName = 0x02CC40C0;
 
         constexpr char kTrnSection[] = "OpenShim";
         constexpr char kTrnKey[] = "TerrainTileBlend";
@@ -124,8 +124,8 @@ namespace BZROpenShim
         bool ReadCurrentTrnName(char (&name)[MAX_PATH])
         {
             name[0] = '\0';
-            const auto* source = reinterpret_cast<const char*>(kReleasedCurrentTrnName);
-            if (!MemoryRangeHasAccess(source, MAX_PATH, false))
+            const auto* source = reinterpret_cast<const char*>(EngineGlobals::CurrentTrnName());
+            if (!source || !MemoryRangeHasAccess(source, MAX_PATH, false))
                 return false;
 
             __try

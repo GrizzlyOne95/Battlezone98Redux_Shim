@@ -9,6 +9,7 @@
 // reverse-engineering/testing. OpenShim does not link or require EXU/Lua.
 
 #include "autosave.h"
+#include "engine_globals.h"
 #include "autosave_gate.h"
 #include "BZROpenShim.h"
 #include "game_state.h"
@@ -39,7 +40,6 @@ namespace BZROpenShim
         using MissionSaveFlag = volatile uint8_t*;
 
         constexpr uintptr_t kIsNetGameAddr = 0x00917F7B;
-        constexpr uintptr_t kUserObjectAddr = 0x00917AFC;
         constexpr uintptr_t kEditModeAddr = 0x009454B8;
         constexpr uintptr_t kQueuedLoadNameBufferAddr = 0x00915540;
         constexpr size_t kQueuedLoadNameBufferLen = 16;
@@ -463,7 +463,7 @@ namespace BZROpenShim
             void* userObject = nullptr;
             const ShellUiState ui = ReadShellUiState();
             if (!SafeReadByte(kIsNetGameAddr, isNetGame) ||
-                !SafeReadPointer(kUserObjectAddr, userObject) ||
+                !SafeReadPointer(EngineGlobals::UserObjectSlot(), userObject) ||
                 !ui.readable)
             {
                 return state;
