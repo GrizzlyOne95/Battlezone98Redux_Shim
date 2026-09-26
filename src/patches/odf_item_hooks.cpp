@@ -312,36 +312,80 @@ void* __cdecl OdfUseItemDetour(const char* name)
 
     std::lock_guard<std::recursive_mutex> lock(g_OdfMutex);
     const std::string key = LowerName(name);
-    auto it = g_OdfItems.find(key);
-    if (it != g_OdfItems.end() && it->second.refcount > 0)
-    {
-        ++it->second.refcount;
-        return it->second.changed ? it->second.patchedBuf : it->second.originalPtr;
-    }
 
-    void* originalPtr = nullptr;
-    size_t originalSize = 0;
+    // Lock arithmetic. Every UseItem the engine would have seen still reaches
+    // it, cached hit or not, so its own lock count rises once per holder and
+    // the unconditional forward in OdfUnlockItemDetour stays one-for-one.
+    // Serving a cached copy without this call left the engine holding one
+    // lock for N holders: the first UnlockItem released the item under the
+    // other N-1 (a dangling originalPtr for a passthrough record) and the
+    // remaining forwards drove the engine's count below zero.
     bool faulted = false;
-    originalPtr = SafeCallUseItem(name, faulted);
+    void* originalPtr = SafeCallUseItem(name, faulted);
     if (faulted)
     {
         LogShimA(LogLevel::Error, "odf", "UseItem(%s): engine call faulted; serving null", name);
         return nullptr;
     }
-    if (originalPtr && g_OriginalGetItemSize)
+    if (!originalPtr)
+        return nullptr; // the engine has no such item and took no lock; nothing to count
+
+    auto it = g_OdfItems.find(key);
+    if (it != g_OdfItems.end() && it->second.refcount > 0)
+    {
+        if (originalPtr != it->second.originalPtr)
+        {
+            // Not expected while the engine holds a lock on our behalf; say
+            // so rather than keep serving a pointer the engine has dropped.
+            LogShimA(LogLevel::Warn, "odf",
+                      "UseItem(%s): engine moved a locked item %p -> %p; record refreshed", name,
+                      it->second.originalPtr, originalPtr);
+            it->second.originalPtr = originalPtr;
+        }
+        ++it->second.refcount;
+        static bool s_firstHitLogged = false;
+        if (!s_firstHitLogged)
+        {
+            // One line per process, so a live run shows the shared-record
+            // path ran at all; the lock arithmetic itself is pinned by
+            // tests/odf_item_hooks_tests.cpp.
+            s_firstHitLogged = true;
+            LogShimA(LogLevel::Info, "odf",
+                      "UseItem(%s): first repeat use served from the record (holders=%d)", name,
+                      it->second.refcount);
+        }
+        return it->second.changed ? it->second.patchedBuf : it->second.originalPtr;
+    }
+
+    // First holder. The record exists from here on whichever bytes end up
+    // served, so every later UnlockItem for this name finds it and the
+    // refcount counts every holder. A stock-served holder with no record
+    // would otherwise decrement a record a later holder created and free
+    // that holder's patched copy early.
+    ItemRecord rec;
+    rec.originalPtr = originalPtr;
+    rec.refcount = 1;
+
+    size_t originalSize = 0;
+    if (g_OriginalGetItemSize)
         originalSize = SafeCallGetItemSize(name, faulted);
     if (faulted)
     {
         LogShimA(LogLevel::Error, "odf", "UseItem(%s): size query faulted; serving stock", name);
+        g_OdfItems[key] = rec;
         return originalPtr;
     }
-    if (!originalPtr || originalSize == 0 || originalSize > kMaxPatchedBytes)
+    rec.originalSize = originalSize;
+    if (originalSize == 0 || originalSize > kMaxPatchedBytes)
+    {
+        g_OdfItems[key] = rec;
         return originalPtr;
-
+    }
     void* copy = SafeCopyEngineBytes(originalPtr, originalSize);
     if (!copy)
     {
         LogShimA(LogLevel::Error, "odf", "UseItem(%s): unreadable item bytes; serving stock", name);
+        g_OdfItems[key] = rec;
         return originalPtr;
     }
     std::string bytes(static_cast<const char*>(copy), originalSize);
@@ -350,10 +394,6 @@ void* __cdecl OdfUseItemDetour(const char* name)
     OdfCompat::ProcessResult result =
         OdfCompat::ProcessOdfText(name, bytes.data(), bytes.size(), g_OdfOptions);
     LogOdfEvents(result);
-    ItemRecord rec;
-    rec.originalPtr = originalPtr;
-    rec.originalSize = originalSize;
-    rec.refcount = 1;
     if (!result.changed)
     {
         g_OdfItems[key] = rec;
@@ -426,5 +466,50 @@ void __cdecl OdfUnlockItemDetour(const char* name)
         g_OdfItems.erase(it);
     }
 }
+
+namespace OdfItemHookTest
+{
+
+void ResetCache()
+{
+    std::lock_guard<std::recursive_mutex> lock(g_OdfMutex);
+    for (auto& entry : g_OdfItems)
+        std::free(entry.second.patchedBuf);
+    g_OdfItems.clear();
+    g_LoggedUnknowns.clear();
+}
+
+void SetEngine(UseItemFn useItem, GetItemSizeFn getItemSize, UnlockItemFn unlockItem)
+{
+    std::lock_guard<std::recursive_mutex> lock(g_OdfMutex);
+    ResetCache();
+    g_OriginalUseItem = useItem;
+    g_OriginalGetItemSize = getItemSize;
+    g_OriginalUnlockItem = unlockItem;
+}
+
+void SetOptions(bool remapLegacySections, bool logUnknownSections, bool guardCrashValues)
+{
+    std::lock_guard<std::recursive_mutex> lock(g_OdfMutex);
+    g_OdfConfigRead = true; // the ini is not consulted after this
+    g_OdfOptions.remapLegacySections = remapLegacySections;
+    g_OdfOptions.logUnknownSections = logUnknownSections;
+    g_OdfOptions.guardCrashValues = guardCrashValues;
+}
+
+size_t CachedItemCount()
+{
+    std::lock_guard<std::recursive_mutex> lock(g_OdfMutex);
+    return g_OdfItems.size();
+}
+
+int CachedRefcount(const char* name)
+{
+    std::lock_guard<std::recursive_mutex> lock(g_OdfMutex);
+    auto it = g_OdfItems.find(LowerName(name));
+    return it == g_OdfItems.end() ? -1 : it->second.refcount;
+}
+
+} // namespace OdfItemHookTest
 
 } // namespace BZROpenShim

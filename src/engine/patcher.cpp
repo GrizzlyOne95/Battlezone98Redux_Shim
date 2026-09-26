@@ -1284,8 +1284,14 @@ namespace BZROpenShim
         patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& patch) {
             return IsReduxCompatibilityPatchName(patch.name.c_str());
         }), patches.end());
-        for (const auto& p : patches) {
-            if (HookEngine::ApplyPatch(p)) {
+        // One suspension of the other threads covers the whole list (see
+        // HookEngine::ApplyPatches); applying them one by one cost a thread
+        // snapshot and a suspension round per patch, which put four seconds
+        // between the game reaching this point and its critical fixes.
+        const std::vector<bool> applied = HookEngine::ApplyPatches(patches);
+        for (size_t i = 0; i < patches.size(); ++i) {
+            const auto& p = patches[i];
+            if (applied[i]) {
                 app++;
                 if (p.name == "Sun Screen Flash Contribution Hook") SunFlash::SetPatchInstalled(true);
                 Log(L"[OK]   %hs wrote %u bytes to 0x%08X\n", p.name.c_str(), static_cast<unsigned>(p.payload.size()), p.address);
