@@ -156,6 +156,15 @@
       "identity": "Second null-carrier crash site, sibling of Pilot Carrier Null Guard. A five-slot loop (i < 5) loads Person+0x1A0 into ECX and calls Carrier::GetWeapon at 0x00417F60 without testing it, so a pilot whose ODF misplaces weaponHard1 outside [GameObjectClass] -- and therefore never allocated a Carrier -- faults at the callee's AND EAX,[ECX+0x2C]. Observed on GOG Redux 2.2.301 loading the Hell Gate II addon mission, whose sshg01.odf (unitName \"Player\") declares its hardpoints under [CraftClass]: EIP 0x00417F74, ECX=0, read=0x2C, return 0x005A1387, on the first simulation frame. The caller stores the result and immediately branches on null at 0x005A138D, so returning null is a path it already handles."
     },
     {
+      "name": "Person Sniper Scan Weapon Null Guard",
+      "pattern": "8B 8D C0 FC FF FF 8B 89 A0 01 00 00 E8 ?? ?? ?? ?? 89 85 4C FB FF FF 8B 95 4C FB FF FF 8B 42 08 81 78 0C 50 49 4E 53",
+      "offset": 13,
+      "expected_size": 4,
+      "fallback": "0x0059D7C4",
+      "require_unique": true,
+      "identity": "Third Carrier::GetWeapon site in Person::Simulate (0x0059D340), sibling of Pilot Carrier Null Guard (0x0059D76D, same function). The loop at 0x0059D777 walks slots 0-4 of the selected mask returned by Carrier::GetSelected, calls Carrier::GetWeapon (0x00417F60) at 0x0059D7C3 for every set bit, and dereferences the result unconditionally: mov eax,[edx+8] at 0x0059D7D4, then cmp [eax+0xC],'SNIP' to set the crouch flag at [ebp-0x351]. GetWeapon returns null when the hardpoint mask at [carrier+0x2C] lacks that bit, so a selected-mask bit on an empty hardpoint faults. Observed on GOG Redux 2.2.301 in ISDF Chronicles isdfms10 (dump battlezone98redux.exe.54600.dmp): a jak person whose Lua removed its only weapon with GiveWeapon(h, nil, 0) kept selected=1 at [carrier+0x30] with hardpoint mask 0, EIP 0x0059D7D4 reading [0+8]. The result at [ebp-0x4B4] is read only by that SNIP test, so the guard returns a static non-SNIP stand-in for an empty slot. The earlier GetWeapon call at 0x0059D3F0 already null-checks and is left stock. Pattern verified single-match by whole-image scan on 2026-09-26."
+    },
+    {
       "name": "Neutral Attack Order Target Hook",
       "pattern": "8B 8D 8C FD FF FF 83 C1 18 8B 85 8C FD FF FF 8B 50 18 8B 42 04 FF D0 50 8B 8D 80 FD FF FF E8 ?? ?? ?? ?? 0F B6 C8 85 C9 75 05 E9 ?? ?? ?? ??",
       "offset": 31,
@@ -699,7 +708,7 @@
       "fallback": "0x005896C0",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "ParameterDB integer reader on exact GOG Redux 2.2.301, reached through the call at 0x0048F9EB in FUN_0048f940, which pushes section hash 0x9260EA63 and key hash 0x6DBF0BC4 and passes its ParameterDB scope in ecx. The target (8 callers) looks the key up through FUN_00589620, stores the default on a miss, parses a 0x prefix with sscanf %x and anything else with %d, and returns with ret 0x10: it is __thiscall, not the __cdecl pond_class_label.cpp declares. Its own entry is not unique (sibling readers differ only in their format-string pushes), hence the caller anchor. pond_class_label.cpp checked only 55 8B EC before."
+      "identity": "ParameterDB integer reader on exact GOG Redux 2.2.301, reached through the call at 0x0048F9EB in FUN_0048f940, which pushes section hash 0x9260EA63 and key hash 0x6DBF0BC4 and passes its ParameterDB scope in ecx. The target (8 callers) looks the key up through FUN_00589620, stores the default on a miss, parses a 0x prefix with sscanf %x and anything else with %d, and returns found in AL with ret 0x10 (__thiscall); pond_class_label.cpp calls it with the String16 wrapper's ParameterDB this and guards its 55 8B EC 83 EC 08 89 4D F8 prologue. Its own entry is not unique (sibling readers differ only in their format-string pushes), hence the caller anchor."
     },
     {
       "name": "BuildingClass::String16",
@@ -709,7 +718,7 @@
       "fallback": "0x0047B6C0",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "BuildingClass string16 ParameterDB wrapper on exact GOG Redux 2.2.301: forwards (section, key, out, default) to FUN_00589a10 with length 0x10 and its own ecx, ret 0x10 (__thiscall). BuildingClass::BuildingClass reads soundAmbient through it inside its live ParameterDB scope (Docs: reverse_engineering/building_tuggable_odf_20260913.md). pond_class_label.cpp's detour guard expects 55 8B EC 8B 45 14 and so refuses this site; tuggable=1 support is off on this build."
+      "identity": "BuildingClass string16 ParameterDB wrapper on exact GOG Redux 2.2.301: forwards (section, key, out, default) to FUN_00589a10 with length 0x10 and its own ecx, ret 0x10 (__thiscall). BuildingClass::BuildingClass reads soundAmbient through it inside its live ParameterDB scope (Docs: reverse_engineering/building_tuggable_odf_20260913.md). The soundAmbient call is at 0x0048004F with ecx = the local ParameterDB scope at [ebp-0x14]. pond_class_label.cpp detours it as a __fastcall thiscall shim with a 7-byte steal guarded on 55 8B EC 51 89 4D FC."
     },
     {
       "name": "Building::Building",
@@ -719,7 +728,47 @@
       "fallback": "0x0047E9C0",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "Building::Building on exact GOG Redux 2.2.301: after the base constructor (FUN_004da0b0) it stores Building::vftable at this+0 and this+0x18 (the two C7 stores the pattern ends near), then compares the class ODF name against abstor to set the tuggable handle at +0x220 (reverse_engineering/building_tuggable_odf_20260913.md). pond_class_label.cpp detours it after stock construction."
+      "identity": "Building::Building on exact GOG Redux 2.2.301: after the base constructor (FUN_004da0b0) it stores Building::vftable at this+0 and this+0x18 (the two C7 stores the pattern ends near), then compares the class ODF name against abstor to set the tuggable handle at +0x220 (reverse_engineering/building_tuggable_odf_20260913.md). The hitch value stock stores is the virtual GetHandle (0x0046CFE0) on this+0x18, i.e. [this+0xF4]; pond_class_label.cpp detours it after stock construction and copies that same value for opted-in ODFs."
+    },
+    {
+      "name": "Music::SelectTrack",
+      "pattern": "55 8B EC 8B 45 08 3B 05 ?? ?? ?? ?? 74 05 E8 ?? ?? ?? ?? 8B 4D 0C 89 0D ?? ?? ?? ?? 8B 55 10 89 15 ?? ?? ?? ?? 8B 45 14 A3 ?? ?? ?? ?? 8B 4D 08 89 0D ?? ?? ?? ?? 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004377C0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Redux soundtrack track/loop selector, void __cdecl (int track, int loopFirst, int loopSkip, int loopLast), on exact GOG Redux 2.2.301. The world loader FUN_00780160 reads [World] MusicTrack/MusicLoopFirst/MusicLoopSkip/MusicLoopLast from the .trn and passes them here in that order; the shell (FUN_007BEFD0, FUN_004341C0) calls it with one track in every slot to loop a single track. It calls Music::Stop (0x00437A70) only when the track differs from the current one, then stores the four values; the end-of-track advancer FUN_00437B00 consumes them. Selects only: playback starts in Music::Start. Unique on the GOG image with every absolute and rel32 operand wildcarded."
+    },
+    {
+      "name": "Music::Start",
+      "pattern": "55 8B EC 83 EC 2C A1 ?? ?? ?? ?? 33 C5 89 45 FC 83 3D ?? ?? ?? ?? 00 74 05 E9 ?? ?? ?? ?? A1 ?? ?? ?? ?? 50 68 ?? ?? ?? ?? 8D 4D DC 51 FF 15 ?? ?? ?? ?? 83 C4 0C 8D 55 DC 52 E8 ?? ?? ?? ?? 83 C4 04",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004378F0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Redux soundtrack start, void __cdecl (void), on exact GOG Redux 2.2.301 -- the real playback entry, not the legacy _StartMusic 0x00406670, which is a dead identity stub on this build (live_scan_findings_20260706.md #17). If nothing is playing it formats the selected track with \"%02d.ogg\", sizes and loads it through the resource layer (0x00481A60/0x00481AF0), opens it through the thunk 0x0043F9B0 to OggManager::Setup (0x0043F050, which logs \"Starting Music Playback Index %d\"), and when the options music volume byte is non-zero sets the playing flag and calls the thunk 0x0043F9E0 to OggManager::Play (0x0043F320) and the volume setter FUN_00437800. Called by the mission start FUN_00617110, the shell FUN_007BEFD0 and the advancer FUN_00437B00. A no-op while music is already playing. Unique on the GOG image with every absolute and rel32 operand wildcarded."
+    },
+    {
+      "name": "Music::Stop",
+      "pattern": "55 8B EC 83 EC 24 A1 ?? ?? ?? ?? 33 C5 89 45 FC 83 3D ?? ?? ?? ?? FF 74 ?? 83 3D ?? ?? ?? ?? 00 74 ?? A1 ?? ?? ?? ?? 50 E8 ?? ?? ?? ?? 83 C4 04 8B 0D ?? ?? ?? ?? 51 E8 ?? ?? ?? ?? 83 C4 04 8B 15 ?? ?? ?? ?? 52 68 ?? ?? ?? ?? 8D 45 DC 50 FF 15",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00437A70",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Redux soundtrack stop, void __cdecl (void), on exact GOG Redux 2.2.301 -- the real stop, not the legacy _StopMusic 0x004068E0 stub. If an Ogg slot is open it calls the thunk 0x0043FA20 to OggManager::Pause (0x0043F5C0) while playing, then the thunk 0x0043FA60 to OggManager::Release (0x0043F780), releases the \"%02d.ogg\" resource (0x00481990), and clears the slot, playing and paused flags. Called by Music::SelectTrack on a track change, by the mission teardown FUN_00618370 and FUN_00439FB0, and by the advancer before moving to the next track. Idempotent. Unique on the GOG image with every absolute and rel32 operand wildcarded."
+    },
+    {
+      "name": "Music::ResourceSize",
+      "pattern": "55 8B EC 83 EC 2C A1 ?? ?? ?? ?? 33 C5 89 45 FC 83 3D ?? ?? ?? ?? 00 74 05 E9 ?? ?? ?? ?? A1 ?? ?? ?? ?? 50 68 ?? ?? ?? ?? 8D 4D DC 51 FF 15 ?? ?? ?? ?? 83 C4 0C 8D 55 DC 52 E8 ?? ?? ?? ?? 83 C4 04",
+      "offset": 58,
+      "mode": "rel32_target",
+      "fallback": "0x00481A60",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Resource-layer file size query, int __cdecl (const char* name), on exact GOG Redux 2.2.301, taken from the first call in Music::Start, which passes the formatted \"%02d.ogg\" name and gives up on the track when the result is below 1. It forwards to FUN_00481A80(nullptr, name), which returns the cached entry's size (+0x10) or the on-disk size and has no side effects; the same query sizes wave files elsewhere. OpenShimSetMusicTrack uses it to refuse a track that does not exist before touching the engine's music state."
     }
   ],
   "globals": [
@@ -975,6 +1024,16 @@
       "name": "Music Buffer Global Focus",
       "fallback": "0x0043F20C",
       "expected_original": "68 88 01 01 00"
+    },
+    {
+      "name": "Disable Control Smoothing",
+      "pattern": "55 8B EC 8B 45 08 A3 ?? ?? ?? ?? 83 7D 08 02 75 16 C7 05 ?? ?? ?? ?? 01 00 00 00 C7 05 F4 98 91 00 01 00 00 00 EB 0A C7 05 F4 98 91 00 00 00 00 00",
+      "offset": 39,
+      "expected_size": 10,
+      "fallback": "0x004344D7",
+      "expected_original": "C7 05 F4 98 91 00 00 00 00 00",
+      "require_unique": true,
+      "identity": "SetPlatform(int) at 0x004344B0 in GOG battlezone98redux.exe SHA256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413: stores the platform (0 pc, 1 osx, 2 ios) and writes 1 to the input-smoothing bypass flag 0x009198F4 only for ios, 0 otherwise (0x004344D7). Called from window init (0x00618D02) and the -platform command-line parser (0x007D5536); these are the flag's only writers. UserProcess::Execute (0x0060ABxx-0x0060B5xx) tests it at ten sites (0x60AEC5 .. 0x60B50C) to assign steer/pitch/throttle/strafe targets directly instead of low-passing them ((target-cur)*dt*5 analog, *1 keyboard; the BZ 1.5 decompile shows the same filter). BZCC exposes the same choice as options.play.smoothing. Pattern is a unique whole-image match on 2026-09-26; the payload rewrites the else-branch immediate so every SetPlatform call leaves smoothing off."
     },
     {
       "name": "Artillery Weapon Mask Select Hook",
