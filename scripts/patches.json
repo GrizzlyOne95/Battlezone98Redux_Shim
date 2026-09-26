@@ -470,6 +470,76 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "The `call FUN_00766900` that loads the map-supplied starting-vehicle pool `<mission>.vxt`, inside FUN_007A3E60 on exact GOG Redux 2.2.301. FUN_007A3E60 rewrites the mission filename's last four characters to \".vxt\" and loads it; FUN_00766900 falls back to \"netveh.odf\" when that file is absent, so this call site is where host/map pool authority enters. Anchored on the CALL; the trailing `mov edx,[ebp-0x2C] / mov dword [edx+0x38],-1` selection reset distinguishes it from the netveh site."
+    },
+    {
+      "name": "ShellRequest",
+      "pattern": "55 8B EC 51 89 4D FC 8B 45 FC C6 40 27 01 8D 4D 08 51 8B 4D FC 83 C1 2C E8 ?? ?? ?? ?? 8B E5 5D C2 04 00",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x007C7930",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Shell manager request entry on exact GOG Redux 2.2.301 (ui_performance_hooks FUN_007c7930). __thiscall with one stack argument (ret 4): stores 1 at this+0x27, the transition-pending byte ShellBack sets the same way, then calls the shell state helper at this+0x2C with the address of the requested-screen argument; the one rel32 is wildcarded. The UI performance hooks detour it with a 7-byte steal over the push ebp / mov ebp,esp / push ecx / mov [ebp-4],ecx prologue this pattern begins with, and the Steam settle check compares the same body bytes at +0x0E and +0x1D. Until this entry existed the name never resolved and the code fell back to the literal."
+    },
+    {
+      "name": "ShellTransition",
+      "pattern": "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 51 83 EC 2C 53 56 57 A1 ?? ?? ?? ?? 33 C5 50 8D 45 F4 64 A3 00 00 00 00 89 65 F0 A1 ?? ?? ?? ?? 8B 0D ?? ?? ?? ?? 8B 51 0C 8B 12 8B 48 0C 8B 82 88 00 00 00 FF D0",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x007C7070",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Shell transition body on exact GOG Redux 2.2.301 (ui_performance_hooks FUN_007c7070): an EH-framed function that loads the render-globals structure at 0x00920EA0 (the pointer terrain_proxy and the pilot trace read for the SceneManager) into eax and ecx, takes its +0x0C member and makes a vtable +0x88 call on it. The EH handler, the security cookie and the two global loads are wildcarded so the shape carries the identity, not the addresses. Detoured with a 5-byte steal over the push ebp / mov ebp,esp / push -1 prologue; the Steam settle check compares its body at +0x05. Until this entry existed the name never resolved and the code fell back to the literal."
+    },
+    {
+      "name": "ShellBack",
+      "pattern": "55 8B EC 51 89 4D FC 8B 4D FC 83 C1 2C E8 ?? ?? ?? ?? 0F B6 C0 85 C0 75 0B 8B 4D FC 83 C1 2C E8 ?? ?? ?? ?? 8B 4D FC C6 41 27 01 8B E5 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x007C79A0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Shell back entry on exact GOG Redux 2.2.301 (ui_performance_hooks FUN_007c79a0): calls the shell state helper at this+0x2C, tests the bool result, calls a second this+0x2C helper when it is false, then stores 1 at this+0x27 exactly as ShellRequest does; both rel32 operands are wildcarded. Detoured with the same 7-byte thiscall-prologue steal as ShellRequest; the Steam settle check compares its body at +0x07. Until this entry existed the name never resolved and the code fell back to the literal."
+    },
+    {
+      "name": "GameObject::FromObj76",
+      "pattern": "55 8B EC 83 7D 08 00 74 0D 8B 45 08 8B 80 8C 00 00 00 EB 04 EB 02 33 C0 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00479F30",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The obj76 to GameObject accessor on exact GOG Redux 2.2.301: returns [obj76+0x8C], or null for a null argument, in a six-instruction body the pattern covers byte for byte. GameObject::SetDamageFlags at 0x004DC130 resolves both DAMAGE fields (damager, dmg_source) through it, which is how the shim's damage hook identified it; bzr_hooks.cpp used to hold the address as a static initialiser."
+    },
+    {
+      "name": "PlayGlobalSound",
+      "pattern": "55 8B EC 51 83 3D 94 55 91 00 00 75 04 33 C0 EB 51 6A 00 8B 45 10 50 8B 4D 0C 51 8B 55 08 52 E8",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0043AA30",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Global sound entry on exact GOG Redux 2.2.301, __cdecl(filename, arg1, arg2, arg3): returns 0 while GAS_GMStorage (0x00915594, the static_pointers entry of the same name, kept in the pattern as the identity) is null, otherwise pushes the three leading arguments to the loader call and forwards its result with arg3 to the play call through that storage pointer. The under-attack alert plays its shipped cue through it; bzr_hooks.cpp used to hold the address as a static initialiser."
+    },
+    {
+      "name": "GetLocalPlayerNetId",
+      "pattern": "55 8B EC 66 A1 D4 80 91 00 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00572D90",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Local player net id accessor on exact GOG Redux 2.2.301: an 11-byte leaf that returns the 16-bit global at 0x009180D4 in AX (callers movzx it). Bound alongside NetPlayer::SetData 0x00575570, NetPlayer::SetFlagBuffer 0x00575810 and SetMyFlag 0x0056FA50, which the multiplayer flag helpers compare against it; the ban lookup and the career kill trace consult it as well."
+    },
+    {
+      "name": "GameObject::GetHandle",
+      "pattern": "55 8B EC 83 EC 08 89 4D F8 8B 45 F8 83 B8 5C 01 00 00 00 75 04 33 C0 EB 3E 8B 4D F8 8B 91 60 01 00 00 81 E2 FF 0F 00 00 C1 E2 14 8B 45 FC 25 FF FF 0F 00 0B C2 89 45 FC",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00462380",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GameObject::GetHandle on exact GOG Redux 2.2.301: returns 0 when [this+0x15C] is null, otherwise composes the handle from ([this+0x160] & 0xFFF) << 20 and the low 20 bits of the local copy (the and / shl / and / or sequence the pattern ends on). GameObjectFromHandleGog round-trips every pool slot through it to reject stale handles; the career-stats and unit-turbo hooks call it under SEH. bzr_hooks.cpp defined the address three times as a literal."
     }
   ],
   "globals": [

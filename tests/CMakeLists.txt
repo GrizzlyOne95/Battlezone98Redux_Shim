@@ -148,7 +148,13 @@ target_compile_definitions(patch_registration_tests PRIVATE
     BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json"
     BZR_PATCHES_H="${CMAKE_CURRENT_SOURCE_DIR}/../include/patches.h"
     BZR_PATCHER_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/engine/patcher.cpp"
-    BZR_BZR_HOOKS_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/bzr_hooks.cpp")
+    BZR_BZR_HOOKS_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/bzr_hooks.cpp"
+    BZR_UI_PERFORMANCE_HOOKS_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/ui_performance_hooks.cpp"
+    BZR_FILE_IO_HOOKS_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/file_io_hooks.cpp"
+    BZR_MP_FACTION_RESTRICT_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/mp_faction_restrict.cpp"
+    BZR_OPENSHIM_UPDATER_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/openshim_updater.cpp"
+    BZR_POND_CLASS_LABEL_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/pond_class_label.cpp"
+    BZR_TERRAIN_TILE_BLEND_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/terrain_tile_blend.cpp")
 
 # Pins the x86-32 length decoder that InstallInlineDetour32 uses to refuse
 # steals that split an instruction. Pure byte tables, no engine code.
