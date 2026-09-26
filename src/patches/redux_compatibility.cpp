@@ -232,6 +232,21 @@ namespace BZROpenShim
             return language;
         }
 
+        // CanonicalizeTrnBytes is a whole-file transform (it decides the
+        // encoding once and forces exactly one trailing LF), and this hook
+        // applies it to a single fwrite payload. That is only correct because
+        // the hooked writer (FUN_00786C80) raw-loads the whole existing TRN
+        // into one buffer and emits it with exactly one
+        // fwrite(buffer, 1, size, FILE*) between its fopen and fclose: the
+        // disassembly of 0x00786E38-0x00786EF1 (GOG 8D71F56C, 2026-09-25)
+        // shows loader call, fopen, this fwrite, a return check against the
+        // size, fclose, free -- no loop, no second write. The patch entry's
+        // identity text records the same proof, and the exact-hash build gate
+        // in PrepareReduxCompatibilityGate is what keeps it true. A writer
+        // that split a file across calls would get blank records or split
+        // keys at the boundaries (trn_codec_tests pins that the codec is not
+        // chunk-safe), so a build with a different writer needs the
+        // accumulate-until-close design, not a copy of this hook.
         size_t __cdecl ReduxTrnCanonicalFwrite(
             const void* buffer, size_t elementSize, size_t elementCount, void* stream)
         {
