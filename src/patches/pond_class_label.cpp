@@ -145,10 +145,11 @@ namespace BZROpenShim
         //   ecx=its ParameterDB scope, section=BuildingClass,
         //   key=soundAmbient, out=this+0x150, default=parent+0x150.
         // Intercepting only that exact call lets OpenShim query `tuggable`
-        // while Redux's own ParameterDB scope is definitely active. Deriving
-        // current/parent class pointers from those two field addresses also
-        // gives the new key normal baseName-style inheritance without adding
-        // storage to the native class object.
+        // while Redux's own ParameterDB scope is definitely active. The
+        // current class pointer is derived from the out address. `parent` is
+        // the BuildClass `this`, which GameObjectClass::Find (0x004E0F70)
+        // always takes from the registered descriptor list, never another ODF,
+        // so the parent check below can only ever default the key to off.
         // The wrapper is __thiscall, so the hook is __fastcall with the unused
         // edx slot; the ParameterDB `this` is forwarded to GetInt as well.
         uint32_t __fastcall TuggableBuildingClassString16Hook(void* parameterDb,
