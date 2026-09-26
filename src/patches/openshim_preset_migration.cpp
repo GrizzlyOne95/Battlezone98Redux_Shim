@@ -687,8 +687,28 @@ namespace BZROpenShim
             existingRev = kLegacyBadPresetRevision;
             result.fromRevision = existingRev;
 
-            // Load canonical lines.
-            auto canonicalLines = LoadCanonicalPresetLines(canonicalPresetPath);
+            // Load canonical lines. A canonical that is the file being
+            // migrated (or points at it) would re-emit the bad values under
+            // the current revision marker and freeze them in for good, so
+            // it counts as no canonical and the surgical fallback runs.
+            std::vector<std::string> canonicalLines;
+            {
+                std::error_code equivalentError;
+                const bool selfReferential =
+                    !canonicalPresetPath.empty() &&
+                    std::filesystem::equivalent(existingPath, canonicalPresetPath,
+                                                equivalentError) &&
+                    !equivalentError;
+                if (selfReferential)
+                {
+                    LogShimA(LogLevel::Warn, "config",
+                             "[CONFIG] canonical preset path is the file under migration; ignoring it");
+                }
+                else
+                {
+                    canonicalLines = LoadCanonicalPresetLines(canonicalPresetPath);
+                }
+            }
             if (canonicalLines.empty())
             {
                 // No canonical payload available alongside the DLL (standalone
@@ -1047,12 +1067,52 @@ namespace BZROpenShim
         return result;
     }
 
+    MigrationResult TryMigratePlayerPresetInDirectory(
+        const std::filesystem::path& moduleDir)
+    {
+        const auto existingPath = moduleDir / kPlayerPresetFileName;
+
+        // The canonical is the preset this build would have installed as
+        // openshim.ini had no file existed. The installers drop it beside the
+        // DLL as openshim.ini.canonical on every run (openshim.ini.new is the
+        // older name). When neither is present, migration runs with an
+        // empty canonical: Case A then repairs a known-bad file surgically
+        // instead of full replacement. Passing the file's own path here, as
+        // this function once did, made Case A rewrite the bad values under
+        // the current revision marker and never look at them again.
+        //
+        // openshim.ini.example is deliberately not a candidate. It is the
+        // developer reference, three times the size of the player preset,
+        // with conservative and diagnostic defaults the player file is
+        // allowed to differ from (run_ini_tests checks key presence, not
+        // values, for exactly that reason).
+        std::filesystem::path canonicalPath;
+        for (const char* name : { "openshim.ini.canonical", "openshim.ini.new" })
+        {
+            const auto candidate = moduleDir / name;
+            if (PathExists(candidate))
+            {
+                canonicalPath = candidate;
+                break;
+            }
+        }
+
+        MigrationResult r = MigratePresetFileIfNeeded(existingPath, canonicalPath);
+        // Future: if migration succeeded, reload config caches so the current
+        // boot uses the corrected values immediately. The individual
+        // Initialize* callers are idempotent and read the file anew, so a
+        // subsequent re-initialization will pick up the new values. For now
+        // we document ordering: call this before InitializeGlobalImprovementConfig
+        // etc., so no reload is needed.
+        return r;
+    }
+
     MigrationResult TryMigratePlayerPresetOnStartup()
     {
         // Migration must happen before normal player configuration is fully
         // applied, or the loader must explicitly reload the migrated file
         // before using its values. This function is intended to be called
-        // early – from the patcher thread before any TryGetUserConfigBool –
+        // early - from the patcher thread before any TryGetUserConfigBool -
         // so that the corrected file is used for the current startup where
         // practical.
         const std::string modDirStr = GetCurrentModuleDirectory();
@@ -1064,63 +1124,7 @@ namespace BZROpenShim
             LogShimA(LogLevel::Warn, "config", "%s", r.logMessage.c_str());
             return r;
         }
-        std::filesystem::path modDir(modDirStr);
-        const auto existingPath = modDir / kPlayerPresetFileName;
-
-        // Locate canonical: beside the DLL if a reference exists, otherwise
-        // use the same path we are migrating (fallback to surgical-only).
-        // For standalone releases the canonical content is embedded in the
-        // DLL's resource? Simpler: we ship openshim.ini alongside winmm.dll;
-        // after an update the game directory already contains the new DLL but
-        // the old ini. The canonical we need is the content that the new DLL
-        // would have installed as openshim.ini if no file existed. Since we
-        // cannot fetch it from disk when the existing file is the same name,
-        // we must have it embedded. For now we try to locate a sibling
-        // "openshim.ini.canonical" payload that the release process may drop,
-        // falling back to the existing file's directory + ".reference" etc.
-        // In practice the DLL build embeds the preset, so this lookup is
-        // primarily for tests; production will have the embedded fallback.
-        std::filesystem::path canonicalPath = existingPath;
-        bool foundCanonical = false;
-
-        // Preferred: embedded canonical generated at build time as
-        // openshim.ini.payload beside the DLL (if release tooling drops it).
-        // Try several candidates.
-        std::vector<std::filesystem::path> candidates = {
-            modDir / "openshim.ini.canonical",
-            modDir / "openshim.ini.new",
-            modDir / "openshim.ini.example", // last resort, differs in a few defaults
-        };
-        for (auto& cand : candidates)
-        {
-            if (PathExists(cand))
-            {
-                canonicalPath = cand;
-                foundCanonical = true;
-                break;
-            }
-        }
-
-        // If no payload found, we still proceed with surgical migration which
-        // does not need the full canonical. For full-replacement we will log
-        // and fail closed (safe defaults) without destroying the original.
-        if (!foundCanonical)
-        {
-            // For surgical cases we can still proceed by using existingPath as
-            // canonical (we won't use it for Case A anyway without canonical).
-            // Pass existingPath; Case A will detect empty canonical and fail
-            // gracefully.
-            canonicalPath = existingPath;
-        }
-
-        MigrationResult r = MigratePresetFileIfNeeded(existingPath, canonicalPath);
-        // Future: if migration succeeded, reload config caches so the current
-        // boot uses the corrected values immediately. The individual
-        // Initialize* callers are idempotent and read the file anew, so a
-        // subsequent re-initialization will pick up the new values. For now
-        // we document ordering: call this before InitializeGlobalImprovementConfig
-        // etc., so no reload is needed.
-        return r;
+        return TryMigratePlayerPresetInDirectory(std::filesystem::path(modDirStr));
     }
 
 } // namespace BZROpenShim
