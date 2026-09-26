@@ -150,6 +150,7 @@
     <ClCompile Include="src\patches\autosave_restart.cpp" />
     <ClCompile Include="src\patches\bzrnet_settings.cpp" />
     <ClCompile Include="src\patches\career_stats.cpp" />
+    <ClCompile Include="src\patches\diag_mpauth_trace.cpp" />
     <ClCompile Include="src\patches\engine_flames.cpp" />
     <ClCompile Include="src\patches\global_turbo.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
