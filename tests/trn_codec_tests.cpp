@@ -82,6 +82,31 @@ int main()
     Expect(corrupt.logicalLf == Bytes("A=1\nB=2\n"),
         "one corrupted terminator does not create a blank logical record");
 
+    // The codec is a whole-file transform, not a chunk filter. The producer
+    // hook in redux_compatibility.cpp applies it per fwrite only because the
+    // game's TRN writer issues exactly one fwrite per file; this pins why that
+    // proof matters, so a writer that splits a file is never paired with this
+    // codec unchanged. Splitting inside a CRLF adds a blank record; splitting
+    // inside a line splits the key from its value.
+    {
+        const std::vector<uint8_t> whole = Bytes("[A]\r\nX=1\r\nY=2\r\n");
+        const auto canonicalizeSplit = [&whole](size_t at)
+        {
+            const std::vector<uint8_t> head(whole.begin(), whole.begin() + static_cast<std::ptrdiff_t>(at));
+            const std::vector<uint8_t> tail(whole.begin() + static_cast<std::ptrdiff_t>(at), whole.end());
+            std::vector<uint8_t> joined = BZROpenShim::CanonicalizeTrnBytes(head).serializedCrLf;
+            const std::vector<uint8_t> rest = BZROpenShim::CanonicalizeTrnBytes(tail).serializedCrLf;
+            joined.insert(joined.end(), rest.begin(), rest.end());
+            return joined;
+        };
+        Expect(BZROpenShim::CanonicalizeTrnBytes(whole).serializedCrLf == whole,
+            "the whole sample is already canonical");
+        Expect(canonicalizeSplit(4) == Bytes("[A]\r\n\r\nX=1\r\nY=2\r\n"),
+            "chunking inside a CRLF yields a blank record: the codec is whole-file only");
+        Expect(canonicalizeSplit(7) == Bytes("[A]\r\nX=\r\n1\r\nY=2\r\n"),
+            "chunking inside a line splits the key: the codec is whole-file only");
+    }
+
     if (g_failures != 0)
         return EXIT_FAILURE;
     std::cout << "TRN codec regression matrix passed\n";

@@ -194,6 +194,29 @@ int main()
     bool hooksOk = false;
     const std::string hooks = ReadFile(BZR_BZR_HOOKS_CPP, hooksOk);
     Check(hooksOk, "src/patches/bzr_hooks.cpp must be readable at " BZR_BZR_HOOKS_CPP);
+    // Every other translation unit that calls ResolveNamedAddress. The three
+    // shell names in ui_performance_hooks.cpp had no entry for as long as the
+    // file was not on this list, and fell back to their literals in silence.
+    struct ResolveCaller
+    {
+        const char* label;
+        const char* path;
+    };
+    const ResolveCaller resolveCallers[] = {
+        {"src/patches/ui_performance_hooks.cpp", BZR_UI_PERFORMANCE_HOOKS_CPP},
+        {"src/patches/file_io_hooks.cpp", BZR_FILE_IO_HOOKS_CPP},
+        {"src/patches/mp_faction_restrict.cpp", BZR_MP_FACTION_RESTRICT_CPP},
+        {"src/patches/openshim_updater.cpp", BZR_OPENSHIM_UPDATER_CPP},
+        {"src/patches/pond_class_label.cpp", BZR_POND_CLASS_LABEL_CPP},
+        {"src/patches/terrain_tile_blend.cpp", BZR_TERRAIN_TILE_BLEND_CPP},
+    };
+    std::vector<std::string> resolveSources = {patcher, hooks};
+    for (const ResolveCaller& caller : resolveCallers)
+    {
+        bool callerOk = false;
+        resolveSources.push_back(ReadFile(caller.path, callerOk));
+        Check(callerOk, (std::string(caller.label) + " must be readable at " + caller.path).c_str());
+    }
 
     if (g_Failures)
     {
@@ -259,7 +282,7 @@ int main()
 
     // --- a resolve name with no definition -----------------------------------
     {
-        const std::set<std::string> used = ResolveNamedAddressCallSites({patcher, hooks});
+        const std::set<std::string> used = ResolveNamedAddressCallSites(resolveSources);
         std::set<std::string> undefined;
         for (const std::string& name : used)
             if (jsonResolves.find(name) == jsonResolves.end()) undefined.insert(name);

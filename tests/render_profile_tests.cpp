@@ -212,6 +212,47 @@ void TestSchemePolicyMapping()
     ExpectTrue(NormalizeModernMaterialScheme("weird") == DefaultModernMaterialScheme(), "unknown -> default");
 }
 
+// The explicit viewport reapply (boot, ini reload, EXU request) must follow
+// the same fail-open rule as the setMaterialScheme hook: a scheme that is
+// neither engine-native nor ours is left alone, and the Glow compositor is
+// only ever switched off by Retro or switched back on after Retro.
+void TestViewportReapplyFailsOpen()
+{
+    std::printf("TestViewportReapplyFailsOpen\n");
+
+    for (const Profile profile : { Profile::Redux, Profile::Enhanced, Profile::Retro })
+    {
+        const ViewportReapplyDecision custom = DecideViewportSchemeReapply(profile, "my-cool-mod", "high-pssm");
+        ExpectTrue(custom.foreignScheme && !custom.rewriteScheme, "a custom scheme is left alone");
+        const ViewportReapplyDecision empty = DecideViewportSchemeReapply(profile, "", "high-pssm");
+        ExpectTrue(empty.foreignScheme && !empty.rewriteScheme, "an empty scheme is left alone");
+        const ViewportReapplyDecision ogreDefault = DecideViewportSchemeReapply(profile, "Default", {});
+        ExpectTrue(ogreDefault.foreignScheme && !ogreDefault.rewriteScheme, "Ogre's Default scheme is left alone");
+    }
+
+    ViewportReapplyDecision d = DecideViewportSchemeReapply(Profile::Enhanced, "high-pssm", {});
+    ExpectTrue(!d.foreignScheme && d.rewriteScheme && std::string(d.scheme) == "en-high-pssm", "enhanced prefixes a native base");
+    d = DecideViewportSchemeReapply(Profile::Enhanced, "en-high-pssm", {});
+    ExpectTrue(!d.foreignScheme && !d.rewriteScheme, "already enhanced: nothing to write");
+    d = DecideViewportSchemeReapply(Profile::Redux, "en-medium-noshadow", {});
+    ExpectTrue(d.rewriteScheme && std::string(d.scheme) == "medium-noshadow", "redux strips our prefix");
+    d = DecideViewportSchemeReapply(Profile::Redux, "high-pssm", {});
+    ExpectTrue(!d.foreignScheme && !d.rewriteScheme, "redux on a native base: nothing to write");
+    d = DecideViewportSchemeReapply(Profile::Retro, "medium-noshadow", {});
+    ExpectTrue(d.rewriteScheme && std::string(d.scheme) == "og-medium-noshadow", "retro prefixes a native base");
+    d = DecideViewportSchemeReapply(Profile::Enhanced, "og-low", {});
+    ExpectTrue(d.rewriteScheme && std::string(d.scheme) == "en-low", "retro to enhanced swaps the prefix");
+    d = DecideViewportSchemeReapply(Profile::Enhanced, "en-weird", "medium-pssm");
+    ExpectTrue(d.rewriteScheme && std::string(d.scheme) == "en-medium-pssm", "our prefix on an unknown base falls back to the last modern base");
+
+    ExpectEq(static_cast<uint32_t>(DecideGlowCompositor(Profile::Retro, false)), static_cast<uint32_t>(GlowAction::Disable), "retro disables glow");
+    ExpectEq(static_cast<uint32_t>(DecideGlowCompositor(Profile::Retro, true)), static_cast<uint32_t>(GlowAction::Disable), "retro keeps glow off");
+    ExpectEq(static_cast<uint32_t>(DecideGlowCompositor(Profile::Redux, true)), static_cast<uint32_t>(GlowAction::Restore), "leaving retro restores glow");
+    ExpectEq(static_cast<uint32_t>(DecideGlowCompositor(Profile::Enhanced, true)), static_cast<uint32_t>(GlowAction::Restore), "enhanced after retro restores glow");
+    ExpectEq(static_cast<uint32_t>(DecideGlowCompositor(Profile::Redux, false)), static_cast<uint32_t>(GlowAction::LeaveAlone), "redux leaves the engine's glow alone");
+    ExpectEq(static_cast<uint32_t>(DecideGlowCompositor(Profile::Enhanced, false)), static_cast<uint32_t>(GlowAction::LeaveAlone), "enhanced leaves the engine's glow alone");
+}
+
 void TestMandatoryResourceLossFallsBackToRedux()
 {
     std::printf("TestMandatoryResourceLossFallsBackToRedux\n");
@@ -331,6 +372,7 @@ int main()
     TestOverrideClearReturnsToUser();
     TestInvalidInputsResolveDeterministically();
     TestSchemePolicyMapping();
+    TestViewportReapplyFailsOpen();
     TestStableAbiRoundTrip();
 
     if (g_failures != 0)

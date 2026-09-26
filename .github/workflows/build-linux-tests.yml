@@ -37,3 +37,6 @@ jobs:
 
       - name: Test Linux coredump bundle collection
         run: bash tests/openshim_wrap_coredump_tests.sh
+
+      - name: Test the Linux uninstaller against a fixture install
+        run: bash tests/uninstall_linux_tests.sh

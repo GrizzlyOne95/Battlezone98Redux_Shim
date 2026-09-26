@@ -4801,8 +4801,23 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 constructedZone = g_originalZoneConstruct(zone, a, b, c, d);
             if (!g_active.load(std::memory_order_acquire) || g_shutdown.load())
                 return constructedZone;
-            std::lock_guard<std::mutex> lock(g_mutex);
-            ObserveZone(zone);
+            // The observation allocates zone records; an allocation failure
+            // must not leave the engine's zone constructor as a C++ throw.
+            try
+            {
+                std::lock_guard<std::mutex> lock(g_mutex);
+                ObserveZone(zone);
+            }
+            catch (...)
+            {
+                static std::atomic<uint32_t> s_count{0};
+                if (s_count.fetch_add(1, std::memory_order_relaxed) == 0)
+                {
+                    LogShimA(LogLevel::Warn, "terrain-proxy",
+                             "[TERRAIN-PROXY] zone observation threw a C++ exception; dropped, "
+                             "later occurrences are counted silently");
+                }
+            }
             return constructedZone;
         }
 
