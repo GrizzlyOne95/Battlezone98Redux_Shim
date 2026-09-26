@@ -22,7 +22,7 @@ Adding a patch normally requires both:
 
 If the patch needs a hook target, add its `p.name == "..."` branch in `src/engine/patcher.cpp`. Every `HookEngine::ResolveNamedAddress("Name")` call also needs a matching `resolves` entry.
 
-An entry present only in `patches.json` is never walked and produces no runtime diagnostic. An entry present only in `patches.h` resolves to zero and logs `[STALE-CONFIG]`. `tests/patch_registration_tests.cpp` checks both directions; run the test suite after changing either file.
+An entry present only in `patches.json` is never walked and produces no runtime diagnostic. An entry present only in `patches.h` resolves to zero and logs `[STALE-CONFIG]`. `tests/patch_registration_tests.cpp` checks both directions for `patches` and `globals` entries, and every `ResolveNamedAddress` literal anywhere under `src/`; run the test suite after changing either file. A `globals` entry kept deliberately unwalked carries a `"parked"` key giving the reason (the map filter port, the superseded version-notice sites); the test fails if a parked entry is also listed.
 
 ## Deploying a test build
 
