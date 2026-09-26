@@ -90,6 +90,25 @@ globals or the `%02d.ogg` format-string xref) before exposing to Lua. This confi
 note's recommendation to expose the OggManager soundtrack manager rather than generic .ogg
 through StartSound.
 
+**Re-derived 2026-09-26** from the `%02d.ogg` xrefs. The layer the engine actually calls
+sits one level above OggManager, and every function is `__cdecl`:
+
+| Function | GOG 2.2.301 | Role |
+|---|---|---|
+| select | `0x004377C0` `(track, loopFirst, loopSkip, loopLast)` | stops on a track change, stores the four; the `.trn` `[World] MusicTrack/MusicLoop*` loader FUN_00780160 calls it |
+| start | `0x004378F0` `(void)` | `%02d.ogg` → size/load → OggManager::Setup `0x0043F050` → Play `0x0043F320`; no-op while playing or at music volume 0 |
+| stop | `0x00437A70` `(void)` | OggManager::Pause `0x0043F5C0` + Release `0x0043F780`, frees the resource, clears flags |
+| pause / resume | `0x004379D0` / `0x00437A20` | toggle the paused flag through OggManager Pause/Resume |
+| advance | `0x00437B00` | per-frame end-of-track step: next track, skip, wrap to loopFirst |
+| volume | `0x00437800` `(int)` | called with the options music-volume byte |
+
+Globals: selected track `0x008E75F4`, Ogg slot `0x008E75F8` (-1 = none), loop
+first/skip/last `0x008E7600`/`0x008E75F0`/`0x008E75FC`, playing `0x00915580`, single-file
+loop `0x00915584`, paused `0x00915588`. The first three are the resolves `Music::SelectTrack`,
+`Music::Start` and `Music::Stop` in `scripts/patches.json`, plus `Music::ResourceSize`
+(`0x00481A60`). `OpenShimSetMusicTrack`/`OpenShimStopMusic` use them (see
+`docs/OPENSHIM_SDK_V2.md`, "Soundtrack exports"). Pause, resume and read-back are not wired yet.
+
 ## #27 — Nickname live-update — Steam-only path, limited on GOG (verified)
 
 The nickname/user machinery found in the PDB is Steam-centric: `cUser` (vftable 0x00655254

@@ -145,6 +145,12 @@ namespace BZROpenShim
             // than the immediate alone, so a build whose layout moved cannot land
             // this on some other instruction's operand.
             { 0, HookEngine::PatchType::BYTES, { 0x68, 0x88, 0x81, 0x01, 0x00 }, "Music Buffer Global Focus", false, {} },
+            // SetPlatform writes the engine's input-smoothing bypass flag
+            // (0x009198F4) as 1 only for the iOS platform and 0 otherwise.
+            // Rewriting the whole else-branch `mov dword [0x9198F4], 0` to store
+            // 1 makes every call leave UserProcess's steer/pitch/throttle/strafe
+            // low-pass off -- BZCC's "Control Smoothing: Off". Opt-in.
+            { 0, HookEngine::PatchType::BYTES, { 0xC7, 0x05, 0xF4, 0x98, 0x91, 0x00, 0x01, 0x00, 0x00, 0x00 }, "Disable Control Smoothing", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Chunk Render Resolve Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Producer Build Menu Root Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Target Reticle Popup Recent-Hit Getter Hook", false, {} },
@@ -156,6 +162,10 @@ namespace BZROpenShim
             // five-slot loop calls Carrier::GetWeapon without checking
             // Person+0x1A0, so guarding GetSelected alone left this live.
             { 0, HookEngine::PatchType::REL32, {}, "Pilot Carrier Weapon Null Guard", false, {} },
+            // Person::Simulate's sniper-crouch scan dereferences every
+            // Carrier::GetWeapon result for the selected mask; an empty
+            // selected hardpoint gets a non-SNIP stand-in instead of null.
+            { 0, HookEngine::PatchType::REL32, {}, "Person Sniper Scan Weapon Null Guard", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "World Builder Save Destination Dialog", false, {} },
             // ControlPanel target-list EnemyP call: an opt-in local order
             // authoring relaxation. The global EnemyP implementation stays stock.

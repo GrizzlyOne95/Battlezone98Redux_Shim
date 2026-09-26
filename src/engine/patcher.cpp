@@ -287,6 +287,20 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
+    // UserProcess::Execute low-passes every steer/pitch/throttle/strafe input
+    // toward its target ((target - current) * dt * 5 for analog and mouse, * 1
+    // for keys), which is the drag on mouse aim. The engine already has a flag
+    // that assigns the target directly, but only the iOS platform sets it.
+    // Opt-in, matching BZCC's "Control Smoothing" option: it applies to every
+    // axis and to keyboard as well as mouse.
+    static bool ShouldEnableDisableControlSmoothing() {
+        static int s_cached = -1;
+        if (s_cached < 0) {
+            s_cached = EnvFlagEnabledByName("OPENSHIM_DISABLE_CONTROL_SMOOTHING") || EnvFlagEnabledByName("BZR_DISABLE_CONTROL_SMOOTHING") ? 1 : 0;
+        }
+        return s_cached != 0;
+    }
+
     static bool ShouldEnableProducerBuildMenuExperiment() {
         static int s_cached = -1;
         if (s_cached < 0) {
@@ -385,6 +399,8 @@ namespace BZROpenShim
     static bool IsProducerBuildMenuExperimentPatchName(const char* name) { return name && strcmp(name, "Producer Build Menu Root Hook") == 0; }
 
     static bool IsMusicBufferGlobalFocusPatchName(const char* name) { return name && strcmp(name, "Music Buffer Global Focus") == 0; }
+
+    static bool IsDisableControlSmoothingPatchName(const char* name) { return name && strcmp(name, "Disable Control Smoothing") == 0; }
 
     static bool IsLobbyBzrnetIntegrationPatchName(const char* name) {
         if (!name) return false;
@@ -492,6 +508,9 @@ namespace BZROpenShim
         }
         if (!ShouldEnableMusicBufferGlobalFocus()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsMusicBufferGlobalFocusPatchName(p.name.c_str()); }), patches.end());
+        }
+        if (!ShouldEnableDisableControlSmoothing()) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsDisableControlSmoothingPatchName(p.name.c_str()); }), patches.end());
         }
     }
 
@@ -999,6 +1018,22 @@ namespace BZROpenShim
                 SetPersonCarrierGetWeaponOriginal(original);
                 target = static_cast<uint32_t>(
                     reinterpret_cast<uintptr_t>(PersonCarrierGetWeaponGuard));
+            }
+            else if (p.name == "Person Sniper Scan Weapon Null Guard") {
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                const uint32_t expected =
+                    HookEngine::ResolveNamedAddress("Carrier::GetWeapon");
+                if (!original || expected == 0 ||
+                    reinterpret_cast<uintptr_t>(original) != expected) {
+                    Log(L"[PILOTSAFE] sniper-scan call identity failed site=0x%08X original=%p expected=0x%08X; leaving stock call\n",
+                        p.address - 1, original, expected);
+                    continue;
+                }
+                SetPersonCarrierGetWeaponOriginal(original);
+                target = static_cast<uint32_t>(
+                    reinterpret_cast<uintptr_t>(PersonSniperScanGetWeaponGuard));
             }
             else if (p.name == "Pilot Carrier Null Guard") {
                 void* original = isSteam

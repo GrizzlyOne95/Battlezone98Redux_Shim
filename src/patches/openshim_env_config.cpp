@@ -208,6 +208,11 @@ namespace
         }
         if (Equals(name, "OPENSHIM_DISABLE_MUSIC_GLOBAL_FOCUS"))
             return TryReadMappedBool(mainIni, "General", "MusicGlobalFocus", true, out);
+        if (Equals(name, "OPENSHIM_DISABLE_CONTROL_SMOOTHING") ||
+            Equals(name, "BZR_DISABLE_CONTROL_SMOOTHING"))
+        {
+            return TryReadMappedBool(mainIni, "General", "DisableControlSmoothing", false, out);
+        }
 
         // [Fixes]: confirmed Redux engine defects OpenShim corrects. These are
         // ON by default and stay on for normal play -- they are bug fixes, not

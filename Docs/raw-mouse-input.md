@@ -33,7 +33,7 @@ against the GOG copy.
 | `0x00435400` | `ProcessMouseMessages(uMsg, wParam, lParam)` — the legacy path. |
 | `0x02CEBCA0` / `0x02CEBCA4` | Look delta accumulators, X and Y. |
 | `0x02CEBCA8` / `0x02CEBCAC` | Mouse button state / edge masks. |
-| `0x00623AC0` | Look consumer — applies sensitivity, then drains the accumulators. |
+| `0x00623B20` | Look consumer (`giddi_read_channels`) — applies sensitivity, then drains the accumulators. `0x00623AC0` is the neighbouring `giddi_reset`. |
 
 Three properties of this design matter, and together they satisfy most of what a
 raw-input feature normally has to build by hand.
@@ -59,7 +59,7 @@ if (raw->lLastX || raw->lLastY) {
 }
 ```
 
-Every packet is summed, and the consumer at `0x00623AC0` drains the accumulators
+Every packet is summed, and the consumer at `0x00623B20` drains the accumulators
 to zero once per look update. Motion that arrives between two updates is
 therefore preserved rather than dropped, which is what keeps a high polling-rate
 mouse from behaving differently to a 125 Hz one, and what keeps sensitivity
@@ -146,10 +146,20 @@ flag. None of them are fatal and none of them disable the mouse.
 Controller and keyboard input are not touched by any of this. The flag is read
 only by the three mouse sites listed above.
 
+## What raw input does not change
+
+Raw input only changes how movement is *read*. The look consumer integrates the
+deltas into a clamped virtual-stick position (±0x10000) plus a rate, and
+`UserProcess::Execute` then eases each control toward that target every frame:
+`ctrl += (target - ctrl) * dt * 5` for analog/mouse, `* 1` for keys. That
+low-pass is the drag felt on mouse aim, and it runs the same on both paths. It
+is switched off separately by `[General] DisableControlSmoothing`; see
+`Docs/control-smoothing.md`.
+
 ## Configuration
 
 `[General] RawMouseInput` in `openshim.ini`, boolean, default OFF, restart
-required. Set it to `1` to bypass the legacy smoothed/Windows-accelerated
+required. Set it to `1` to bypass the legacy Windows-accelerated
 mouse-message path; set it to `0` to retain stock mouse input.
 
 Precedence, most specific first:
