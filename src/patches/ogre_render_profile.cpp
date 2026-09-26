@@ -1917,7 +1917,8 @@ namespace BZROpenShim::RenderProfiles
             unsigned short lodIndex,
             Dx11Compat::CompatPath path,
             const Dx11Compat::LegacyPassDesc& desc,
-            const std::string& materialName)
+            const std::string& materialName,
+            const Dx11Compat::VertexInputs& inputs)
         {
             if (material == nullptr || sourceTechnique == nullptr)
             {
@@ -1964,6 +1965,39 @@ namespace BZROpenShim::RenderProfiles
             if (!IsSynthesisTarget(materialName, desc, "instantiate"))
             {
                 return nullptr;
+            }
+
+            // D3D11 needs every input the vertex shader declares to exist in
+            // the mesh's vertex declaration, or every draw throws out of
+            // renderOneFrame (getILayoutByShader) and the game eventually
+            // quits with "complete render failure". Bind the variant whose
+            // inputs the renderable actually supplies.
+            {
+                std::string fittedVs;
+                const Dx11Compat::VertexInputFit fit =
+                    Dx11Compat::FitVertexProgramToInputs(targetVs, inputs,
+                                                         fittedVs);
+                if (fit == Dx11Compat::VertexInputFit::Unsatisfiable)
+                {
+                    LogCompatOnce("[DX11COMPAT] instantiate declined material=" +
+                                      materialName +
+                                      " reason=vertex-inputs inputs=" +
+                                      Dx11Compat::DescribeVertexInputs(inputs) +
+                                      " vs=" + targetVs +
+                                      " action=stock-fallback",
+                                  LogLevel::Warn);
+                    return nullptr;
+                }
+                if (fit == Dx11Compat::VertexInputFit::Adapted)
+                {
+                    LogCompatOnce("[DX11COMPAT] material=" + materialName +
+                                      " vertex-inputs=" +
+                                      Dx11Compat::DescribeVertexInputs(inputs) +
+                                      " fit=adapted vs=" + targetVs + " -> " +
+                                      fittedVs,
+                                  LogLevel::Info);
+                    targetVs = fittedVs;
+                }
             }
             if (!GuardedProgramExists(&targetVs) ||
                 !GuardedProgramExists(&targetPs))
@@ -2062,7 +2096,8 @@ namespace BZROpenShim::RenderProfiles
                                         void* material,
                                         unsigned short lodIndex,
                                         const Dx11Compat::CompatConfig& config,
-                                        const OgreTechniqueApi& techApi)
+                                        const OgreTechniqueApi& techApi,
+                                        const Dx11Compat::VertexInputs& inputs)
         {
             std::string materialName(kUnknownMaterial);
             {
@@ -2169,7 +2204,7 @@ namespace BZROpenShim::RenderProfiles
                               LogLevel::Info);
                 void* generated = InstantiateDx11CompatTechnique(
                     material, sourceTechnique, schemeName, lodIndex, path, desc,
-                    materialName);
+                    materialName, inputs);
                 if (generated != nullptr)
                 {
                     LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
@@ -2189,7 +2224,7 @@ namespace BZROpenShim::RenderProfiles
                 state.fixedFunc.fetch_add(1, std::memory_order_relaxed);
                 void* generated = InstantiateDx11CompatTechnique(
                     material, sourceTechnique, schemeName, lodIndex, path, desc,
-                    materialName);
+                    materialName, inputs);
                 if (generated != nullptr)
                 {
                     LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
@@ -2246,13 +2281,137 @@ namespace BZROpenShim::RenderProfiles
             return nullptr;
         }
 
+        // ---- renderable vertex-input probe ---------------------------------
+        //
+        // The generated technique's vertex shader must only read elements the
+        // mesh supplies (see Dx11Compat::VertexInputs). handleSchemeNotFound
+        // hands us the Renderable that asked; its RenderOperation carries the
+        // VertexData whose declaration D3D11 will match the shader against.
+        //
+        // ABI, verified against the shipped OgreMain.dll 1.10 vtables
+        // (SubEntity, SimpleRenderable, StaticGeometry::GeometryBucket):
+        //   Renderable vtable slot 3 = getRenderOperation(RenderOperation&)
+        //   RenderOperation: +0 VertexData*, +4 operationType, +8 useIndexes,
+        //     +12 IndexData*, +16 srcRenderable, +20 numberOfInstances,
+        //     +24 renderToVertexBuffer, +25 useGlobalInstancing...
+        //   VertexData: +0 HardwareBufferManagerBase* mMgr,
+        //     +4 VertexDeclaration* vertexDeclaration
+        // Any fault leaves inputs.known=false, which the pure policy treats as
+        // "no vertex colour" -- the variant that cannot fail to bind on a mesh
+        // with positions and UVs.
+        using FnRenderableGetRenderOperation = void(__thiscall*)(void*, void*);
+        using FnVertexDeclarationFindElementBySemantic =
+            const void* (__thiscall*)(const void*, int, unsigned short);
+
+        constexpr int kVesPosition = 1;
+        constexpr int kVesDiffuse = 5;
+        constexpr int kVesTextureCoordinates = 7;
+        constexpr size_t kRenderableGetRenderOperationSlot = 3;
+
+        FnVertexDeclarationFindElementBySemantic FindElementBySemanticExport()
+        {
+            static const FnVertexDeclarationFindElementBySemantic fn =
+                ResolveOgreExport<FnVertexDeclarationFindElementBySemantic>(
+                    "?findElementBySemantic@VertexDeclaration@Ogre@@UBEPBVVertexElement"
+                    "@2@W4VertexElementSemantic@2@G@Z");
+            return fn;
+        }
+
+        __declspec(noinline) static bool GuardedReadRenderableInputs(
+            const void* renderable,
+            FnVertexDeclarationFindElementBySemantic findElement,
+            Dx11Compat::VertexInputs* out)
+        {
+            __try
+            {
+                if (renderable == nullptr || findElement == nullptr ||
+                    out == nullptr)
+                {
+                    return false;
+                }
+                void* const* vtable = *static_cast<void* const* const*>(renderable);
+                if (vtable == nullptr ||
+                    vtable[kRenderableGetRenderOperationSlot] == nullptr)
+                {
+                    return false;
+                }
+                const auto getRenderOperation =
+                    reinterpret_cast<FnRenderableGetRenderOperation>(
+                        vtable[kRenderableGetRenderOperationSlot]);
+
+                // RenderOperation's constructor defaults, laid out by hand so
+                // nothing here depends on Ogre headers. Oversized on purpose.
+                alignas(8) unsigned char op[64] = {};
+                *reinterpret_cast<int*>(op + 4) = 4;          // OT_TRIANGLE_LIST
+                op[8] = 1;                                    // useIndexes
+                *reinterpret_cast<size_t*>(op + 20) = 1;      // numberOfInstances
+                op[25] = 1;                                   // useGlobalInstancing...
+                getRenderOperation(const_cast<void*>(renderable), op);
+
+                const void* vertexData = *reinterpret_cast<void* const*>(op);
+                if (vertexData == nullptr)
+                {
+                    return false;
+                }
+                const void* declaration =
+                    static_cast<void* const*>(vertexData)[1];
+                if (declaration == nullptr)
+                {
+                    return false;
+                }
+                out->position =
+                    findElement(declaration, kVesPosition, 0) != nullptr;
+                out->diffuse = findElement(declaration, kVesDiffuse, 0) != nullptr;
+                out->texcoord0 =
+                    findElement(declaration, kVesTextureCoordinates, 0) != nullptr;
+                out->known = true;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Entity::getRenderOperation can evaluate hardware animation, which
+        // asks every sub-entity for its technique -- straight back into
+        // handleSchemeNotFound for the material being probed. The nested
+        // call answers "no technique" (Ogre's own answer before this layer
+        // existed) and decides nothing, so it cannot poison either cache.
+        thread_local bool t_readingRenderableInputs = false;
+
+        Dx11Compat::VertexInputs ReadRenderableInputs(const void* renderable)
+        {
+            Dx11Compat::VertexInputs inputs;
+            if (renderable == nullptr || t_readingRenderableInputs)
+            {
+                return inputs;
+            }
+            t_readingRenderableInputs = true;
+            Dx11Compat::VertexInputs read;
+            if (GuardedReadRenderableInputs(renderable,
+                                            FindElementBySemanticExport(),
+                                            &read))
+            {
+                inputs = read;
+            }
+            t_readingRenderableInputs = false;
+            return inputs;
+        }
+
         void* ProbeDx11LegacyCompat(const std::string& schemeName,
                                     void* material,
-                                    unsigned short lodIndex)
+                                    unsigned short lodIndex,
+                                    const void* renderable)
         {
             // DX9 untouched by construction.
             if (!s_detectedDx11Atomic.load(std::memory_order_acquire))
             {
+                return nullptr;
+            }
+            if (t_readingRenderableInputs)
+            {
+                // Re-entered from inside our own getRenderOperation probe.
                 return nullptr;
             }
             const Dx11Compat::CompatConfig config = CurrentCompatConfig();
@@ -2340,8 +2499,9 @@ namespace BZROpenShim::RenderProfiles
                 break;
             }
 
-            void* const generated =
-                RunDx11LegacyCompatLadder(schemeName, material, lodIndex, config, techApi);
+            const Dx11Compat::VertexInputs inputs = ReadRenderableInputs(renderable);
+            void* const generated = RunDx11LegacyCompatLadder(
+                schemeName, material, lodIndex, config, techApi, inputs);
             if (generated == nullptr)
             {
                 DeclinedMiss entry;
@@ -2376,7 +2536,7 @@ namespace BZROpenShim::RenderProfiles
                                                const std::string& schemeName,
                                                void* originalMaterial,
                                                unsigned short lodIndex,
-                                               const void* /*renderable*/)
+                                               const void* renderable)
             {
                 void* base = ResolveBaseSchemeTechnique(schemeName,
                                                         originalMaterial,
@@ -2392,7 +2552,7 @@ namespace BZROpenShim::RenderProfiles
                 // may synthesize one cached SM4 Technique and return it
                 // directly, matching Ogre RTSS's handleSchemeNotFound pattern.
                 return ProbeDx11LegacyCompat(schemeName, originalMaterial,
-                                             lodIndex);
+                                             lodIndex, renderable);
             }
 
             virtual bool afterIlluminationPassesCreated(void* /*technique*/)
