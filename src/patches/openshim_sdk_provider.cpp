@@ -15,6 +15,7 @@
 #include "winmm_proxy.h"
 #include "bzr_hooks.h"
 #include "shim_log.h"
+#include "hook_engine.h"
 #include <cstdio>
 
 namespace
@@ -371,63 +372,221 @@ extern "C" BOOL WINAPI OpenShimImpl_RestoreAllHudSprites()
     return result;
 }
 
+namespace
+{
+    // Redux's soundtrack layer on GOG 2.2.301. The legacy _StartMusic and
+    // _StopMusic wrappers (0x00406670 / 0x004068E0) are dead stubs on this
+    // build; these are the functions the world loader, the shell and the
+    // mission lifecycle actually call. See the Music::* entries in
+    // scripts/patches.json for identity evidence.
+    typedef void(__cdecl* MusicSelectTrackFn)(int track, int loopFirst, int loopSkip, int loopLast);
+    typedef void(__cdecl* MusicVoidFn)();
+    typedef int(__cdecl* ResourceSizeFn)(const char* name);
+
+    struct MusicEntryPoints
+    {
+        MusicSelectTrackFn selectTrack = nullptr;
+        MusicVoidFn start = nullptr;
+        MusicVoidFn stop = nullptr;
+        ResourceSizeFn resourceSize = nullptr;
+
+        bool Complete() const
+        {
+            return selectTrack && start && stop && resourceSize;
+        }
+    };
+
+    // Resolved once and latched either way: a miss logs its [RESOLVE] lines
+    // on the first call and every later call refuses without rescanning.
+    const MusicEntryPoints& GetMusicEntryPoints()
+    {
+        static const MusicEntryPoints s_entryPoints = []
+        {
+            MusicEntryPoints entryPoints;
+            entryPoints.selectTrack = reinterpret_cast<MusicSelectTrackFn>(
+                static_cast<uintptr_t>(HookEngine::ResolveNamedAddress("Music::SelectTrack")));
+            entryPoints.start = reinterpret_cast<MusicVoidFn>(
+                static_cast<uintptr_t>(HookEngine::ResolveNamedAddress("Music::Start")));
+            entryPoints.stop = reinterpret_cast<MusicVoidFn>(
+                static_cast<uintptr_t>(HookEngine::ResolveNamedAddress("Music::Stop")));
+            entryPoints.resourceSize = reinterpret_cast<ResourceSizeFn>(
+                static_cast<uintptr_t>(HookEngine::ResolveNamedAddress("Music::ResourceSize")));
+            if (!entryPoints.Complete())
+            {
+                BZROpenShim::LogShimA(
+                    BZROpenShim::LogLevel::Warn,
+                    "music",
+                    "Music entry points unresolved (select=%p start=%p stop=%p size=%p); "
+                    "the OpenShim music exports will refuse every call",
+                    reinterpret_cast<void*>(entryPoints.selectTrack),
+                    reinterpret_cast<void*>(entryPoints.start),
+                    reinterpret_cast<void*>(entryPoints.stop),
+                    reinterpret_cast<void*>(entryPoints.resourceSize));
+            }
+            return entryPoints;
+        }();
+        return s_entryPoints;
+    }
+
+    // Fail closed: the entry points are only trusted on a build the patcher
+    // positively identified, the same predicate every other bridge into
+    // engine code gates on.
+    const MusicEntryPoints* AcquireMusicEntryPoints(const char* exportName)
+    {
+        if (!BZROpenShim::IsCompatibleGameVersion())
+        {
+            static bool s_refused = false;
+            if (!s_refused)
+            {
+                s_refused = true;
+                BZROpenShim::LogShimA(
+                    BZROpenShim::LogLevel::Warn,
+                    "music",
+                    "%s refused: unsupported game build",
+                    exportName);
+            }
+            return nullptr;
+        }
+
+        const MusicEntryPoints& entryPoints = GetMusicEntryPoints();
+        return entryPoints.Complete() ? &entryPoints : nullptr;
+    }
+
+    bool TryQueryResourceSize(ResourceSizeFn resourceSize, const char* name, int& outSize)
+    {
+        __try
+        {
+            outSize = resourceSize(name);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    bool TrySelectAndStartTrack(const MusicEntryPoints& entryPoints, int index)
+    {
+        __try
+        {
+            // One track in every slot is how the shell loops a single track:
+            // the end-of-track advancer steps past loopLast and wraps back to
+            // loopFirst. A skip of -1 never matches.
+            entryPoints.selectTrack(index, index, -1, index);
+            entryPoints.start();
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    bool TryStopMusic(MusicVoidFn stop)
+    {
+        __try
+        {
+            stop();
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+}
+
+// Plays music track <index> ("%02d.ogg", e.g. 7 -> 07.ogg) and loops it,
+// replacing the mission's own track and loop range. Returns FALSE on an
+// unsupported build, when the entry points did not resolve, for a negative
+// index, or when the resource layer cannot find the file; in each case the
+// current music is left untouched. TRUE means the engine accepted the track:
+// it stays silent if the player's music volume is 0, and requesting the track
+// that is already playing lets it continue rather than restarting it.
 extern "C" BOOL WINAPI OpenShimImpl_SetMusicTrack(int index)
 {
-    typedef void (__cdecl* StartMusicFn)(long, int);
-    static StartMusicFn pStartMusic = reinterpret_cast<StartMusicFn>(0x00406670);
+    const MusicEntryPoints* entryPoints = AcquireMusicEntryPoints("OpenShimSetMusicTrack");
+    if (!entryPoints)
+        return FALSE;
 
-    // Fail closed: StartMusic is a fixed v2.2.301 address with no signature
-    // resolve of its own, so it must never be called on a build the patcher
-    // did not positively identify. Every other bridge into engine code gates
-    // on the same predicate.
-    if (!BZROpenShim::IsCompatibleGameVersion())
+    if (index < 0)
     {
-        static bool s_refused = false;
-        if (!s_refused)
-        {
-            s_refused = true;
-            BZROpenShim::LogShimA(
-                BZROpenShim::LogLevel::Warn,
-                "music",
-                "OpenShimSetMusicTrack refused: unsupported game build");
-        }
+        BZROpenShim::LogShimA(
+            BZROpenShim::LogLevel::Warn,
+            "music",
+            "OpenShimSetMusicTrack refused: negative index %d",
+            index);
+        return FALSE;
+    }
+
+    // Music::Start clears the selected track to -1 when the file is missing,
+    // after Music::SelectTrack has already stopped whatever was playing.
+    // Checking first keeps a bad index from silencing the mission.
+    char name[16] = {};
+    std::snprintf(name, sizeof(name), "%02d.ogg", index);
+    int size = 0;
+    if (!TryQueryResourceSize(entryPoints->resourceSize, name, size))
+    {
+        BZROpenShim::LogShimA(
+            BZROpenShim::LogLevel::Error,
+            "music",
+            "OpenShimSetMusicTrack faulted querying %s",
+            name);
+        return FALSE;
+    }
+    if (size < 1)
+    {
+        BZROpenShim::LogShimA(
+            BZROpenShim::LogLevel::Warn,
+            "music",
+            "OpenShimSetMusicTrack refused: %s not found",
+            name);
+        return FALSE;
+    }
+
+    if (!TrySelectAndStartTrack(*entryPoints, index))
+    {
+        BZROpenShim::LogShimA(
+            BZROpenShim::LogLevel::Error,
+            "music",
+            "OpenShimSetMusicTrack faulted starting %s",
+            name);
         return FALSE;
     }
 
     BZROpenShim::LogShimA(
         BZROpenShim::LogLevel::Info,
         "music",
-        "OpenShimSetMusicTrack index=%d",
-        index);
+        "OpenShimSetMusicTrack index=%d (%s, %d bytes)",
+        index,
+        name,
+        size);
+    return TRUE;
+}
 
-    __try
-    {
-        pStartMusic(0, index);
-        return TRUE;
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER)
+// Stops the soundtrack and releases its stream. Idempotent: TRUE when nothing
+// was playing. The mission does not restart it on its own; the next
+// OpenShimSetMusicTrack, mission start or shell visit does.
+extern "C" BOOL WINAPI OpenShimImpl_StopMusic()
+{
+    const MusicEntryPoints* entryPoints = AcquireMusicEntryPoints("OpenShimStopMusic");
+    if (!entryPoints)
+        return FALSE;
+
+    if (!TryStopMusic(entryPoints->stop))
     {
         BZROpenShim::LogShimA(
             BZROpenShim::LogLevel::Error,
             "music",
-            "OpenShimSetMusicTrack failed to call StartMusic (index=%d)",
-            index);
+            "OpenShimStopMusic faulted");
         return FALSE;
     }
-}
 
-extern "C" BOOL WINAPI OpenShimImpl_StopMusic()
-{
-    static bool logged = false;
-    if (!logged)
-    {
-        logged = true;
-        BZROpenShim::LogShimA(
-            BZROpenShim::LogLevel::Info,
-            "music",
-            "OpenShimStopMusic: stub/fail closed");
-    }
-    return FALSE;
+    BZROpenShim::LogShimA(
+        BZROpenShim::LogLevel::Info,
+        "music",
+        "OpenShimStopMusic");
+    return TRUE;
 }
 
 extern "C" BOOL WINAPI OpenShimImpl_PauseMusic()
