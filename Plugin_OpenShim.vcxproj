@@ -136,6 +136,7 @@
     <ClCompile Include="src\engine\render_profile.cpp" />
     <ClCompile Include="src\engine\render_profile_resources.cpp" />
     <ClCompile Include="src\engine\resolve_table.cpp" />
+    <ClCompile Include="src\engine\engine_globals.cpp" />
     <ClCompile Include="src\engine\x86_length.cpp" />
     <ClCompile Include="src\engine\shim_log_client.cpp" />
     <ClCompile Include="src\engine\startup_seam_wire.cpp" />
@@ -266,6 +267,7 @@
     <ClInclude Include="include\patches.h" />
     <ClInclude Include="include\patcher.h" />
     <ClInclude Include="include\hook_engine.h" />
+    <ClInclude Include="include\engine_globals.h" />
     <ClInclude Include="include\iat_patch.h" />
     <ClInclude Include="include\mp_faction_restrict.h" />
     <ClInclude Include="include\mp_ready_diagnostic.h" />

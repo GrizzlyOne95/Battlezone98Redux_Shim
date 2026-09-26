@@ -349,6 +349,17 @@ namespace HookEngine
                 return true;
             }
 
+            if (target.mode == BZROpenShim::ResolveMode::Abs32Operand)
+            {
+                if (anchor + 4 > end)
+                    return false;
+                return BZROpenShim::DecodeAbs32Operand(
+                    anchor,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(base)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(end)),
+                    outAddress);
+            }
+
             // Rel32Target: the anchor must actually be the CALL.
             if (anchor + 5 > end || anchor[0] != 0xE8)
                 return false;

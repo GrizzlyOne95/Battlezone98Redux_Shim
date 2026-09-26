@@ -1,4 +1,5 @@
 #include "terrain_proxy.h"
+#include "engine_globals.h"
 
 #include "terrain_semantic.h"
 
@@ -1392,7 +1393,11 @@ namespace BZROpenShim
         {
             __try
             {
-                void* structure = *reinterpret_cast<void**>(Rebase(0x00920EA0));
+                auto* const renderGlobalsSlot =
+                    reinterpret_cast<void**>(EngineGlobals::RenderGlobals());
+                if (!renderGlobalsSlot)
+                    return nullptr;
+                void* structure = *renderGlobalsSlot;
                 return structure
                     ? *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(structure) + 8)
                     : nullptr;
