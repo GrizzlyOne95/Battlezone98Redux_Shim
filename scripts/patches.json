@@ -697,7 +697,7 @@
       "fallback": "0x005896C0",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "ParameterDB integer reader on exact GOG Redux 2.2.301, reached through the call at 0x0048F9EB in FUN_0048f940, which pushes section hash 0x9260EA63 and key hash 0x6DBF0BC4 and passes its ParameterDB scope in ecx. The target (8 callers) looks the key up through FUN_00589620, stores the default on a miss, parses a 0x prefix with sscanf %x and anything else with %d, and returns with ret 0x10: it is __thiscall, not the __cdecl pond_class_label.cpp declares. Its own entry is not unique (sibling readers differ only in their format-string pushes), hence the caller anchor. pond_class_label.cpp checked only 55 8B EC before."
+      "identity": "ParameterDB integer reader on exact GOG Redux 2.2.301, reached through the call at 0x0048F9EB in FUN_0048f940, which pushes section hash 0x9260EA63 and key hash 0x6DBF0BC4 and passes its ParameterDB scope in ecx. The target (8 callers) looks the key up through FUN_00589620, stores the default on a miss, parses a 0x prefix with sscanf %x and anything else with %d, and returns found in AL with ret 0x10 (__thiscall); pond_class_label.cpp calls it with the String16 wrapper's ParameterDB this and guards its 55 8B EC 83 EC 08 89 4D F8 prologue. Its own entry is not unique (sibling readers differ only in their format-string pushes), hence the caller anchor."
     },
     {
       "name": "BuildingClass::String16",
@@ -707,7 +707,7 @@
       "fallback": "0x0047B6C0",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "BuildingClass string16 ParameterDB wrapper on exact GOG Redux 2.2.301: forwards (section, key, out, default) to FUN_00589a10 with length 0x10 and its own ecx, ret 0x10 (__thiscall). BuildingClass::BuildingClass reads soundAmbient through it inside its live ParameterDB scope (Docs: reverse_engineering/building_tuggable_odf_20260913.md). pond_class_label.cpp's detour guard expects 55 8B EC 8B 45 14 and so refuses this site; tuggable=1 support is off on this build."
+      "identity": "BuildingClass string16 ParameterDB wrapper on exact GOG Redux 2.2.301: forwards (section, key, out, default) to FUN_00589a10 with length 0x10 and its own ecx, ret 0x10 (__thiscall). BuildingClass::BuildingClass reads soundAmbient through it inside its live ParameterDB scope (Docs: reverse_engineering/building_tuggable_odf_20260913.md). The soundAmbient call is at 0x0048004F with ecx = the local ParameterDB scope at [ebp-0x14]. pond_class_label.cpp detours it as a __fastcall thiscall shim with a 7-byte steal guarded on 55 8B EC 51 89 4D FC."
     },
     {
       "name": "Building::Building",
@@ -717,7 +717,7 @@
       "fallback": "0x0047E9C0",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "Building::Building on exact GOG Redux 2.2.301: after the base constructor (FUN_004da0b0) it stores Building::vftable at this+0 and this+0x18 (the two C7 stores the pattern ends near), then compares the class ODF name against abstor to set the tuggable handle at +0x220 (reverse_engineering/building_tuggable_odf_20260913.md). pond_class_label.cpp detours it after stock construction."
+      "identity": "Building::Building on exact GOG Redux 2.2.301: after the base constructor (FUN_004da0b0) it stores Building::vftable at this+0 and this+0x18 (the two C7 stores the pattern ends near), then compares the class ODF name against abstor to set the tuggable handle at +0x220 (reverse_engineering/building_tuggable_odf_20260913.md). The hitch value stock stores is the virtual GetHandle (0x0046CFE0) on this+0x18, i.e. [this+0xF4]; pond_class_label.cpp detours it after stock construction and copies that same value for opted-in ODFs."
     }
   ],
   "globals": [
