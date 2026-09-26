@@ -47,6 +47,10 @@ namespace
     // push ebp; mov ebp,esp; sub esp,imm32 (Ordnance_Receive, SprayBomb::Hit, ordinary reader).
     const std::vector<uint8_t> kSubImm32Prologue =
         { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x50, 0x01, 0x00, 0x00, 0xA1, 0x00, 0x70, 0x8E, 0x00, 0x33, 0xC5 };
+    // push ebp; mov ebp,esp; push ecx; mov [ebp-4],ecx: the __thiscall
+    // BuildingClass::String16 wrapper at 0x0047B6C0 (tuggable ODF hook).
+    const std::vector<uint8_t> kThiscallSpillPrologue =
+        { 0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x8B, 0x45, 0x14, 0x50, 0x6A, 0x10, 0x8B, 0x4D, 0x10 };
     // Under Attack Alert Hook 1/2: the full 52-byte block the JMP5 replaces.
     const std::vector<uint8_t> kUnderAttackBlock =
         { 0x0F, 0x2F, 0x05, 0xD0, 0x73, 0x91, 0x00, 0x76, 0x2B, 0x6A, 0x00, 0x6A, 0x00, 0x6A, 0x00,
@@ -144,6 +148,16 @@ int main()
         const X86StealPlan nine = Plan(kSubImm32Prologue, 9);
         Check(nine.status == X86StealStatus::Ok && nine.instructionCount == 3,
               "sub esp,imm32 prologue: 9-byte steal ok");
+    }
+    {
+        Check(Plan(kThiscallSpillPrologue, 5).status == X86StealStatus::NotOnBoundary,
+              "thiscall spill prologue: 5-byte steal splits mov [ebp-4],ecx");
+        Check(Plan(kThiscallSpillPrologue, 6).status == X86StealStatus::NotOnBoundary,
+              "thiscall spill prologue: 6-byte steal splits mov [ebp-4],ecx");
+        const X86StealPlan seven = Plan(kThiscallSpillPrologue, 7);
+        Check(seven.status == X86StealStatus::Ok && seven.instructionCount == 4 &&
+              seven.boundary == 7 && seven.rel32Count == 0,
+              "thiscall spill prologue: 7-byte steal ok, four instructions");
     }
     {
         // The Under Attack block has a jbe rel8 at +7, which is why that patch

@@ -213,6 +213,8 @@ Change track
 Fade/change music state
 [/code]
 
+[b]In progress:[/b] change track and stop now drive the real soundtrack in OpenShim, through EXU's [code]SetMusicTrack[/code]/[code]StopMusic[/code]. Pause, resume, read-back and fades are still to do.
+
 [h3]Higher-Level Environment Presets[/h3]
 
 EXU already exposes terrain materials/textures, fog, ambient/sun light, time of day, sky, gravity, shadows, and visibility. A later preset layer could apply complete environment states such as [code]MarsNight[/code], [code]EuropaStorm[/code], etc.
