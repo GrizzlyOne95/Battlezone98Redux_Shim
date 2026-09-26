@@ -155,6 +155,7 @@
     <ClCompile Include="src\patches\radar_layout.cpp" />
     <ClCompile Include="src\patches\satellite_view_limits.cpp" />
     <ClCompile Include="src\patches\unit_vo.cpp" />
+    <ClCompile Include="src\patches\weapon_convergence_hooks.cpp" />
     <ClCompile Include="src\patches\bzr_options_ui.cpp" />
     <ClCompile Include="src\patches\bzrnet_instrumentation.cpp" />
     <ClCompile Include="src\patches\bzrnet_protocol.cpp" />

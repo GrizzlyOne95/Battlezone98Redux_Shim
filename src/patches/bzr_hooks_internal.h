@@ -23,6 +23,8 @@ namespace BZROpenShim
     extern uintptr_t g_GameObjectGetHandleAddr;
     using FnPlayGlobalSound = int(__cdecl*)(const char* filename, uint32_t arg1, uint32_t arg2, uint32_t arg3);
 
+    using FnCarrierGetWeapon = void* (__thiscall*)(void* carrier, int slot);
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -218,6 +220,53 @@ namespace BZROpenShim
         void HeadlightNotifyMissionRunStateChanged(bool enteringSimulation);
         void InstallEmissionLightFixIfPossible();
         void VerifyExpectedOgreExportsIfPossible();
+
+        // --- Weapon convergence and smart reticle (weapon_convergence_hooks.cpp) ---
+        inline constexpr size_t kGameObjectDistributedObjectOffset = 0x18;
+        inline constexpr size_t kGameObjectObjOffset = 0xF4;
+        inline constexpr size_t kObj76TransformOffset = 0x20;
+        struct SmartReticleRangeSite
+        {
+            uintptr_t instructionAddr;
+            uint8_t opcode[4];
+            uint8_t opcodeLen;
+        };
+        inline constexpr float kSmartReticleRangeStock = 200.0f;
+        inline constexpr size_t kGameObjectGetTeamVtableOffset = 0x4;
+        // Identifies a raw arena entry as a live GameObject WITHOUT calling
+        // anything through its vtable.
+        //
+        // The arena hands back entries that are not GameObjects at all --
+        // including objects whose vtable is an abstract base table. One such
+        // table is 0x00878E94, whose slots 0, 1 and 3 all point at 0x0083E98E,
+        // the import thunk for msvcr120!_purecall. Calling slot 1 there reaches
+        // _purecall -> abort -> __fastfail(7), which raises 0xC0000409 with
+        // subcode 7. __fastfail bypasses SEH entirely, so the __try below (and
+        // any other handler) cannot contain it: the process dies immediately.
+        // That is the crash captured in battlezone98redux.exe.23280.dmp.
+        //
+        // So the vtable is used only as a type tag -- compared, never invoked.
+        // Slot 1 of every GameObject-family vtable in .rdata is the same
+        // GameObject::GetTeam (0x00462450), which makes an exact pointer
+        // compare a positive identification rather than a heuristic, and
+        // rejects abstract/_purecall tables and foreign objects alike.
+        inline constexpr uintptr_t kGogGameObjectGetTeamAddr = 0x00462450;
+        inline constexpr uintptr_t kGogPreferredImageBase = 0x00400000;
+        bool IsLikelyGameObjectEntry(void* objectPtr);
+        bool IsReadableDataProtect(DWORD protect);
+        bool WritePointerValue(uintptr_t address, void* value);
+        extern bool g_PlayerReticleShotConvergenceBaselineEnabled;
+        extern bool g_PlayerReticleShotConvergenceEnabled;
+        extern bool g_ShotConvergenceBaselineEnabled;
+        extern bool g_ShotConvergenceEnabled;
+        extern float g_SmartReticleRange;
+        extern float g_SmartReticleRangeBaseline;
+        extern bool g_SmartReticleRangeOwnedByBridge;
+        void RefreshShotConvergencePatchState();
+        float ClampSmartReticleRange(float range);
+        void RefreshSmartReticleRangeState();
+        void RevertShotConvergenceToBaseline();
+        void RevertSmartReticleRangeToBaseline();
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
