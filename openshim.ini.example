@@ -140,7 +140,22 @@ MusicGlobalFocus = 1
 ; Diagnostics: set OPENSHIM_TRACE_RAW_INPUT=1 to log raw packet flags and
 ; deltas to logs\; the [RAWINPUT] startup lines report whether the path
 ; verified and engaged.
+; Raw input changes how mouse movement is read, not how it is applied: the
+; drag on mouse aim is the control smoothing below, which it does not remove.
 RawMouseInput = 0
+
+; Turn off the engine's control smoothing (BZ2's "Control Smoothing: Off").
+; Accepted: boolean. Default: OFF. Restart required.
+; Every frame Redux eases the steer, pitch, throttle and strafe controls toward
+; the input's target -- (target - current) * dt * 5 for mouse and joystick,
+; * 1 for keys -- which is the drag felt when aiming with the mouse. The engine
+; already carries a switch that applies the target directly, but only its iOS
+; platform path sets it; ON sets it on PC.
+; Like BZ2's option this is global: it affects mouse, joystick and keyboard, so
+; keyboard steering and throttle snap to full instead of ramping up.
+; Exposed on the OpenShim Settings page as "Unsmoothed Controls".
+; Env aliases: OPENSHIM_DISABLE_CONTROL_SMOOTHING, BZR_DISABLE_CONTROL_SMOOTHING
+DisableControlSmoothing = 0
 
 ; Prevent duplicate Ogre material declarations from escaping script parsing as
 ; ERR_DUPLICATE_ITEM and terminating the game.
