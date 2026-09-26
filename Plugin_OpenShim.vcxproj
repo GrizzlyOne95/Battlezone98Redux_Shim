@@ -147,6 +147,7 @@
     <ClCompile Include="src\patches\alert_reticle_modes.cpp" />
     <ClCompile Include="src\patches\bzrnet_settings.cpp" />
     <ClCompile Include="src\patches\career_stats.cpp" />
+    <ClCompile Include="src\patches\engine_flames.cpp" />
     <ClCompile Include="src\patches\global_turbo.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
     <ClCompile Include="src\patches\hud_sprite_rects.cpp" />
