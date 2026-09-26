@@ -39,6 +39,10 @@ namespace BZROpenShim
         char g_DumpDirectory[MAX_PATH] = {};
         uintptr_t g_SeenFirstChanceEips[64] = {};
         volatile LONG g_SeenFirstChanceCount = 0;
+        // Read at install: the unhandled filter must not call
+        // GetEnvironmentVariableA, which takes the PEB lock a faulting thread
+        // may already hold.
+        bool g_CrashDumpDisabled = false;
 
         bool EnvDisabled(const char* name)
         {
@@ -287,7 +291,7 @@ namespace BZROpenShim
             AppendRegisters(buffer, sizeof(buffer), offset, pointers->ContextRecord);
             AppendStackScan(buffer, sizeof(buffer), offset, pointers->ContextRecord);
             WriteToCrashLog(buffer, offset);
-            if (withDump && !EnvDisabled("OPENSHIM_DISABLE_CRASH_DUMP"))
+            if (withDump && !g_CrashDumpDisabled)
                 WriteMinidump(pointers);
         }
 
@@ -306,6 +310,11 @@ namespace BZROpenShim
         {
             const EXCEPTION_RECORD* record = pointers->ExceptionRecord;
             if (!IsFatalExceptionCode(record->ExceptionCode))
+                return EXCEPTION_CONTINUE_SEARCH;
+            // A first-chance report runs on the overflowed stack: the file
+            // write and region scan double-fault and lose the unhandled report
+            // and minidump that would otherwise follow.
+            if (record->ExceptionCode == EXCEPTION_STACK_OVERFLOW)
                 return EXCEPTION_CONTINUE_SEARCH;
             if (g_FirstChanceBudget <= 0)
                 return EXCEPTION_CONTINUE_SEARCH;
@@ -363,7 +372,19 @@ namespace BZROpenShim
         if (freshLog != INVALID_HANDLE_VALUE)
             CloseHandle(freshLog);
 
-        HMODULE dbghelp = LoadLibraryA("dbghelp.dll");
+        g_CrashDumpDisabled = EnvDisabled("OPENSHIM_DISABLE_CRASH_DUMP");
+
+        // From the system directory, not by bare name: the proxy's search-path
+        // setup puts the game directory ahead of System32, where a stray
+        // dbghelp.dll would load into the crash path.
+        HMODULE dbghelp = nullptr;
+        char dbghelpPath[MAX_PATH] = {};
+        const UINT systemDirLength = GetSystemDirectoryA(dbghelpPath, MAX_PATH);
+        if (systemDirLength > 0 && systemDirLength < MAX_PATH - 14)
+        {
+            lstrcatA(dbghelpPath, "\\dbghelp.dll");
+            dbghelp = LoadLibraryA(dbghelpPath);
+        }
         if (dbghelp)
             g_MiniDumpWriteDump = reinterpret_cast<FnMiniDumpWriteDump>(
                 GetProcAddress(dbghelp, "MiniDumpWriteDump"));

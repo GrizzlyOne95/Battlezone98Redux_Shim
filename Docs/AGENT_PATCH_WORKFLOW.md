@@ -8,7 +8,7 @@ Read this document for work that changes OpenShim patch sites, named address res
 
 - `patches` and `globals` describe sites the shim overwrites.
 - `resolves` describes addresses the shim only calls or reads. Resolve these with `HookEngine::ResolveNamedAddress("Name")` instead of adding feature-local pattern/mask arrays.
-- A resolve supports `pattern` (IDA syntax with `??` wildcards), signed `offset`, `mode` (`address` or `rel32_target`), `fallback`, `prefer` (`scan` by default or `fallback`), `require_unique`, and a mandatory `identity` note.
+- A resolve supports `pattern` (IDA syntax with `??` wildcards), signed `offset`, `mode` (`address`, `rel32_target`, or `abs32_operand` for a data global read out of a code site that uses it; `include/engine_globals.h` is where feature code gets those), `fallback`, `prefer` (`scan` by default or `fallback`), `require_unique`, and a mandatory `identity` note.
 - A `patches` entry without `require_unique` takes its `fallback` after a signature miss only when its own pattern is present at `fallback - offset`; the byte guard is then the `expected_size` bytes observed there, so the window may sit on wildcards such as a rel32 operand. The `[FALLBACK]` line reports the verdict. `require_unique` entries never fall back.
 
 A unique byte sequence is not identity proof. Record independent evidence such as a call site, xref, or decompile in `identity`, then inspect the emitted `[RESOLVE]` line for match count, scanned address, fallback, selected source, and agreement. A sigmaker can produce a robust signature for the wrong function.

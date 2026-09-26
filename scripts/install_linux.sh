@@ -402,7 +402,9 @@ deploy_matched() {
     if [[ -n "$RENDER_SRC" ]]; then
         local render_target="$game_dir/openshim/renderer/enhanced"
         mkdir -p "$render_target"
-        cp -f "$RENDER_SRC"/* "$render_target/"
+        # Recursive, like Copy-Item -Recurse on Windows: a subdirectory in the
+        # payload would otherwise abort the deploy half way under set -e.
+        cp -Rf "$RENDER_SRC"/. "$render_target/"
         echo "  deployed Enhanced renderer resources"
     fi
 
