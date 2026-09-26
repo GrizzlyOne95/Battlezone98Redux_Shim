@@ -521,6 +521,17 @@ namespace BZROpenShim
         void InstallParticleTemplateDedupeHookIfPossible();
         void InstallUiManualObjectDedupeHookIfPossible();
 
+        // --- Raw mouse input (raw_mouse_input.cpp) -----------------------------
+        inline constexpr uintptr_t kRawMouseInputEnabledAddr = 0x00918424;
+        inline constexpr uintptr_t kRawMouseInputProcessAddr = 0x004357D0;
+        extern bool g_RawMouseInputSignaturesMatch;
+        extern bool g_RawMouseInputProcessHookInstalled;
+        extern long g_RawMouseInputTraceBudget;
+        bool ShouldTraceRawMouseInput();
+        bool RawMouseInputSignaturesMatch();
+        void InstallRawMouseInputProcessHookIfPossible();
+        bool ResolveRawMouseInputPreference(const char*& outSource);
+
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
         extern float g_SatelliteZoomOutMultiplierBaseline;

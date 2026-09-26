@@ -156,6 +156,7 @@
     <ClCompile Include="src\patches\pilot_flashlight.cpp" />
     <ClCompile Include="src\patches\pilot_team_restore.cpp" />
     <ClCompile Include="src\patches\radar_layout.cpp" />
+    <ClCompile Include="src\patches\raw_mouse_input.cpp" />
     <ClCompile Include="src\patches\satellite_visibility.cpp" />
     <ClCompile Include="src\patches\satellite_view_limits.cpp" />
     <ClCompile Include="src\patches\scrap_pilot_hud.cpp" />
