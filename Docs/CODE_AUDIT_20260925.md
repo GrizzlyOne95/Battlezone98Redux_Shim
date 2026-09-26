@@ -133,16 +133,16 @@ Severity/confidence as rated by the reviewer and re-checked where noted.
 
 | ID | Item | Worksheet |
 |----|------|-----------|
-| P2-1 | Split `bzr_hooks.cpp` (section 7). | C, D, E, F |
+| P2-1 | Split `bzr_hooks.cpp` (section 7). **In progress 2026-09-26.** Step 1 is PR #285 (`agent/split-bzr-hooks-1`): the file-level anonymous namespaces become `BZROpenShim::Hooks` (all ten must be renamed together; see section 7, "Mechanics"), `src/patches/bzr_hooks_internal.h` holds the shared Ogre types and helper declarations, and the player pilot flashlight moved to `src/patches/pilot_flashlight.cpp` (43,023 -> 41,997 lines). Remaining steps and the procedure are in section 7. | C, D, E, F |
 | P2-2 | Concluded diagnostics to move to a diagnostics-only build or remove: `render_queue_trace.cpp` (question answered in `FOG_COMPOSITOR_QUALIFICATION_20260908.md`), the trace/manipulation half of `pilot_fp_animation_trace.cpp` (only the ~500-line resolver is production), the Ogre profiler proper once the chunk-shadow and DX11 skin-source-shadow policies move out of its TU, the scene-teardown Ogre detours the file itself documents never fire (17310-17433), the parked map-filter port (12 trampolines + `MapFilters6Rel32`, `Trampoline_VersionNotice`), `Prime*`/carrier-bias/artillery remnants (partly removed here; `ApplyWeaponMaskCarrierBiasForCraft` remains an empty function reached by two live patches and `g_ArtilleryDoAttackDetour` is reset in `ResolveBzrHooks` for a detour that is never installed). | D, F, K |
 | P2-3 | Duplicated helpers to consolidate: WebSocket parser and ~8 helpers between `net_optimizer.cpp` and `bzrnet_instrumentation.cpp` (with divergent JSON escaping); `PatchComVtableEntry`/IAT walkers across 11 files; `MemoryRangeHasAccess`/`IsExecutableAddress` in three files; six copy-pasted bool-token parsers; `FindExportsContaining` x3, `TryGetRttiClassName` x2, four `IsTruthy` variants in the profiler TUs; duplicated headlight preset tables and ban/mute config loaders. | G, H1, H2, I, K |
-| P2-4 | Diagnostics-framework API with no callers: `UiPerf::ScopedTransition`, `ScopedPhase::Annotate/Dismiss`, `EmitSummary`, `SetStallThresholdMs`, `Flush`, `LogVerbose`, `TicksToUs`, the `OnOgre*/OnModDiscovery/OnWorkshopScan/OnShellRequest/OnMultiplayerShutdown` header API and shell detour scaffolding in `ui_performance_hooks`; `scroll_helper.h` `ConsumeSavedScrollDelta`, `SelectHopFix3DeltaFromFrame`, `HopFix2_Helper`, `SelectHopFix2This`; `BzrNetTraceSocketGeneration`, `GetBzrNetCaptureId`, `IsBzrNetPrivateForensicTrace`; `FormatAssetStatusForLog`; `InstallProviderFromModule`; `DescribeEventType`, `GetInProcessEventStats`, `ResetInProcessEventQueue`; `TriggerAutoSaveNow`; `LegacyPassKindName`; sun-flash counters. Decide keep-as-API or delete; left in place here because several read as intentional surface. | G, I, J, K |
+| P2-4 | Diagnostics-framework API with no callers: `UiPerf::ScopedTransition`, `ScopedPhase::Annotate/Dismiss`, `EmitSummary`, `SetStallThresholdMs`, `Flush`, `LogVerbose`, `TicksToUs`, the `OnOgre*/OnModDiscovery/OnWorkshopScan/OnShellRequest/OnMultiplayerShutdown` header API and shell detour scaffolding in `ui_performance_hooks`; `scroll_helper.h` `ConsumeSavedScrollDelta`, `SelectHopFix3DeltaFromFrame`, `HopFix2_Helper`, `SelectHopFix2This`; `BzrNetTraceSocketGeneration`, `GetBzrNetCaptureId`, `IsBzrNetPrivateForensicTrace`; `FormatAssetStatusForLog`; `InstallProviderFromModule`; `DescribeEventType`, `GetInProcessEventStats`, `ResetInProcessEventQueue`; `TriggerAutoSaveNow`; `LegacyPassKindName`; sun-flash counters. Decide keep-as-API or delete; left in place here because several read as intentional surface. **Decision 2026-09-26: kept as API for now** (user); not to be deleted in the split. | G, I, J, K |
 | P2-5 | INI keys read by code but undocumented in `openshim.ini.example`: `[Diagnostics] ChunkBatchReuse`, `ChunkBatchReuseObserve`, `HeadlightLightTrace`, `PilotFlashlightTrace`, `TraceMpAuth`/`TraceMpAuthDW`/`TraceMpAuthSPL`, `UiPerformanceAutoMatrix`; whole `[NativeUiDiagnostics]` section; env-only `OPENSHIM_LOG_OPTIONS_TREE`, `OPENSHIM_CAREER_TRACE`, `OPENSHIM_UI_PERFORMANCE_AUTOMATRIX`. | I |
 | P2-6 | `winmm.dll` compiles `render_effect_intent.cpp`, `scene_depth_facts.cpp` and `dx11_enhanced_fxaa.rc` although no bootstrap source uses them (the FXAA code loads its RCDATA from `openshim.dll`); the architecture doc says 18 TUs / 6 shared, the project has 19 / 7. | A, L |
 | P2-7 | Tests: `backend_selection_tests` and `ui_decor_tests` run in no CI lane; `ogre_profiler_algorithms_tests` is MSVC-script-only; 47 of 55 test files hand-roll the same `Check`/`Require` macros; `CMakeLists.txt` repeats the include/feature/warning triple ~45 times. Largest untested engine-independent sources: `openshim_sdk_provider.cpp`, `openshim_env_config.cpp`, `terrain_semantic.cpp`. | L |
 | P2-8 | CI: `release.yml` skips `Test-EnhancedPssmV2` and duplicates ~70 lines of `build-win32.yml`; `bzrnet-instrumentation.yml` triggers on a branch that no longer exists; `README.md` line 181 still calls the DLL-only layout a supported install. | L |
-| P2-9 | Hygiene left for a decision: `battlezone98redux.pdb` (38 MB) is tracked at the repository root and `AGENTS.md` describes it as a private leaked PDB; it should not be in a public repository. Not removed here because tooling scripts may reference it. | L |
-| P2-10 | Low-severity items recorded in the worksheets and not repeated here: bare-name `LoadLibraryA("dbghelp.dll")` in the crash logger, `FORWARD` macro calling a null pointer when a real WinMM export is missing, 1200-byte command-line snapshot, `ReadInlineAsciiBufferRaw` writing `outBuffer[capacity]`, `_snprintf_s` -1 accumulation, `TryGetOgreModuleRange` latching failure before OgreMain loads, reorder path dropping >1500-byte datagrams, stale WSABUF pointers in pending-IO maps, `ShutdownBzrNetTrace` INFINITE wait, D3D11 deferred-context observers, `QuerySemanticBinding` spurious Warn, SharedPtr leak on `AddSharedReference` failure, sampler TID-reuse pin, unbounded CSV/sampler files, non-recursive shadow-script scan, `Join-Path` on undefined `ProgramFiles(x86)`. | A, C, G, H1, H2, K, L |
+| P2-9 | Hygiene left for a decision: `battlezone98redux.pdb` (38 MB) is tracked at the repository root and `AGENTS.md` describes it as a private leaked PDB; it should not be in a public repository. Not removed here because tooling scripts may reference it. **Resolved 2026-09-26** (#281): the PDB is untracked and git-ignored at the root; the private `Battlezone_Source` repository carries the identical file as `BZ1/Redux/bzrpdb.zip`, and `AGENTS.md` and `tools/dump-main-ui-pdb.ps1` point there. The blob stays in this repository's history until a history rewrite (still owed, together with the decompile corpus). | L |
+| P2-10 | Low-severity items recorded in the worksheets and not repeated here: bare-name `LoadLibraryA("dbghelp.dll")` in the crash logger, `FORWARD` macro calling a null pointer when a real WinMM export is missing, 1200-byte command-line snapshot, `ReadInlineAsciiBufferRaw` writing `outBuffer[capacity]`, `_snprintf_s` -1 accumulation, `TryGetOgreModuleRange` latching failure before OgreMain loads, reorder path dropping >1500-byte datagrams, stale WSABUF pointers in pending-IO maps, `ShutdownBzrNetTrace` INFINITE wait, D3D11 deferred-context observers, `QuerySemanticBinding` spurious Warn, SharedPtr leak on `AddSharedReference` failure, sampler TID-reuse pin, unbounded CSV/sampler files, non-recursive shadow-script scan, `Join-Path` on undefined `ProgramFiles(x86)`. **Partly resolved 2026-09-26** (#279): winmm typed forwarders fail closed on a missing export; crash logger loads dbghelp from System32, reads the dump opt-out at install and skips first-chance stack overflows; `ReadInlineAsciiBufferRaw` terminator; `_snprintf_s` truncation; `TryGetOgreModuleRange` no longer latches before OgreMain loads; bzrnet trace shutdown bounded; Linux installer copies the renderer tree recursively (the `ProgramFiles(x86)` item was already fixed by #257). Still open: `QuerySemanticBinding` wording, the headlight falloff log set, sampler TID reuse, the reorder path's 1500-byte limit, stale WSABUF pointers, D3D11 deferred-context observers, the `AddSharedReference` leak, unbounded CSV/sampler files, the non-recursive shadow-script scan, the 1200-byte command-line snapshot. | A, C, G, H1, H2, K, L |
 
 ## 5. Hardening and build notes
 
@@ -228,6 +228,43 @@ separate PR with the Win32 build and `patch_registration_tests` as the gate:
    tree.
 6. **Frustum cull** `.inl` becomes a `.cpp` with a four-function header;
    **WMASK** and its retired neighbours move together.
+
+### Progress
+
+| Step | Content | State |
+|---|---|---|
+| 1 | Named `Hooks` namespace, `bzr_hooks_internal.h`, player pilot flashlight -> `pilot_flashlight.cpp` | PR #285 (open; validated: build, ctest 50/50, GOG boot lines match main) |
+| next | Remaining step-4 features first (headlights, turbo, unit VO, pilot team restore, satellite fix, convergence, HUD/radar, career stats, BZRNet), then the lobby UI (step 3), then the chunk proxy (step 2), then the spine (step 1 of the plan above) | not started |
+
+### Mechanics (established in step 1)
+
+- **Namespace.** Every anonymous namespace directly inside `BZROpenShim` in
+  `bzr_hooks.cpp` is now `namespace Hooks`, with `using namespace Hooks;`
+  after the first. All of a file's anonymous namespaces are one namespace,
+  so they must be renamed together: renaming only the first one breaks
+  forward declarations whose definitions sit in a later block (C2668
+  ambiguous call). Anonymous namespaces nested in other named namespaces
+  (for example inside `ShadowFarOverride`) are separate and stay as they are.
+- **What moves where.** A feature block moves verbatim into its own
+  `src/patches/<feature>.cpp` inside `namespace BZROpenShim { namespace Hooks {`.
+  Its entry points that the rest of `bzr_hooks.cpp` calls, and the helpers it
+  calls there, lose `static` and are declared in `bzr_hooks_internal.h`;
+  their old `static` forward declarations are deleted (a `static`
+  redeclaration of an external function is an error). Types and aliases it
+  shares move into the header; templates move whole. Everything else stays
+  `static`. Add the file to `Plugin_OpenShim.vcxproj`.
+- **Finding the cut.** List the names the block defines and uses outside it
+  and the names it uses from outside (a token scan is enough to start;
+  compile errors find the rest -- `bzr_hooks.cpp` compiles in about six
+  seconds on its own with `msbuild Plugin_OpenShim.vcxproj`). Missing
+  includes in the new file (`patcher.h` for `Log`, feature headers) show up
+  as C3861/C2653.
+- **Proving it is a move.** Diff the block from `main` against the new file:
+  only the intended `static` removals may differ. Then Release build (no new
+  warnings), ctest, and one GOG dx11 boot whose log lines for the moved
+  feature match a `main` boot exactly (`OPENSHIM_SATVIS_VALIDATE=1` also
+  exercises the arena readers). One feature group per PR, each on current
+  `main`, because every step edits `bzr_hooks.cpp` and `bzr_hooks_internal.h`.
 
 All 18 non-static hooks in the 22000-33000 range are referenced only from this
 file's installers and should become `static` as they move.
