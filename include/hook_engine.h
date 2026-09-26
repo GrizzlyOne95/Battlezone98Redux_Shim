@@ -35,8 +35,32 @@ namespace HookEngine
 
     // Core Memory Utilities
     bool ApplyPatch(const PatchDef& patch);
+    // ApplyPatch for a whole list under one suspension of the other threads
+    // instead of one per patch. Returns each patch's outcome in order, so the
+    // caller logs after the threads are running again.
+    std::vector<bool> ApplyPatches(const std::vector<PatchDef>& patches);
+    // A write into an executable page is committed with every other thread
+    // of the process held and none of them executing inside the site, then
+    // the instruction cache is flushed; a site some thread keeps running
+    // through is left untouched and reported. A write into data is plain.
     bool WriteMemory(uint32_t address, const void* data, size_t len);
     bool ReadMemory(uint32_t address, void* buffer, size_t len);
+
+    // Serialises every code write (ApplyPatch, WriteMemory, the inline-detour
+    // installer) and the deferred-hook retry across threads: the patch
+    // thread's settle loop and the game thread's SDK bridges both install
+    // hooks, and two installers on one site used to race between the
+    // "already installed" check and the write. Recursive, because
+    // RetryDeferredRuntimeHooks holds it while the installers it fans out to
+    // take it again.
+    class CodePatchLock
+    {
+    public:
+        CodePatchLock();
+        ~CodePatchLock();
+        CodePatchLock(const CodePatchLock&) = delete;
+        CodePatchLock& operator=(const CodePatchLock&) = delete;
+    };
 
     // Pattern Scanning.
     //

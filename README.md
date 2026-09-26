@@ -62,6 +62,8 @@ Uninstall:
 irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/uninstall_windows.ps1 | iex
 ```
 
+That removes everything the installer deployed and keeps your `openshim.ini`, `net.ini` and logs. Run `$env:OPENSHIM_PURGE_CONFIG=1` first to remove `openshim.ini` as well, or `$env:OPENSHIM_DRY_RUN=1` to see the plan without deleting anything.
+
 ### Linux (Proton)
 
 Native Steam or Flatpak — paste in a terminal:
@@ -88,7 +90,13 @@ Quotes are required; a bare `;` splits the command. Drop `dsound=n,b` if you are
 
 If you have both Steam flavours, paste both install commands and set the launch options in each Steam you actually launch from.
 
-Uninstall: remove `winmm.dll` from the game folder and clear the launch options.
+Uninstall, with the same flavour flag you installed with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/uninstall_linux.sh | bash -s -- --native
+```
+
+Then clear the launch options. That removes everything the installer deployed and keeps `openshim.ini`, `net.ini` and logs (`--purge-config` removes `openshim.ini` as well; `--dry-run` shows the plan without deleting anything).
 
 ## Test crew: session logging (opt-in)
 
