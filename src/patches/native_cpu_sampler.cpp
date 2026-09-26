@@ -92,9 +92,12 @@ namespace BZROpenShim
         // The first calibration run pinned a 128 cap, which would have silently
         // excluded any thread that became busy after the cap was reached.
         constexpr uint32_t kMaxThreads = 512;
-        // The frame walk never reads further above ESP than this. A Redux
-        // thread stack is 1 MB by default; the cap only has to be generous
-        // enough that a legitimate chain is never truncated by it.
+        // The frame walk is bounded above by the sampled thread's own
+        // NT_TIB::StackBase, read from its TEB once at discovery (see
+        // QueryThreadStackBase). This window is the depth cap on top of that,
+        // and the only bound for a thread whose TEB could not be read or whose
+        // ESP lies outside its recorded stack: never further above ESP than
+        // this. A Redux thread stack is 1 MB by default.
         constexpr uint32_t kStackWindowBytes = 4u * 1024u * 1024u;
 
         constexpr uint32_t kTagModule = 0x4C444F4Du;   // 'MODL'
@@ -113,10 +116,71 @@ namespace BZROpenShim
             uintptr_t end;
         };
 
+        // NT_TIB::StackBase of another thread, through its TEB. Read once at
+        // discovery and never inside the suspend window, so the frame walk is
+        // bounded by the thread's own stack rather than by ESP plus a fixed
+        // window: a garbage EBP can then never lead the walk out of that stack
+        // and into another thread's, guard page included. Returns 0 when the
+        // bounds could not be read, in which case the walk keeps the window.
+        struct ThreadBasicInformationX86
+        {
+            LONG exitStatus;
+            void* tebBaseAddress;
+            void* uniqueProcess;
+            void* uniqueThread;
+            ULONG_PTR affinityMask;
+            LONG priority;
+            LONG basePriority;
+        };
+        using FnNtQueryInformationThread =
+            LONG(NTAPI*)(HANDLE, int, void*, ULONG, ULONG*);
+
+        uintptr_t QueryThreadStackBase(HANDLE thread) noexcept
+        {
+            static const FnNtQueryInformationThread s_query = []() {
+                HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+                return ntdll ? reinterpret_cast<FnNtQueryInformationThread>(
+                                   GetProcAddress(ntdll, "NtQueryInformationThread"))
+                             : nullptr;
+            }();
+            if (!s_query)
+            {
+                return 0;
+            }
+            ThreadBasicInformationX86 info{};
+            ULONG returned = 0;
+            if (s_query(thread, 0 /* ThreadBasicInformation */, &info, sizeof(info), &returned) < 0 ||
+                !info.tebBaseAddress)
+            {
+                return 0;
+            }
+            // x86 NT_TIB: ExceptionList +0, StackBase +4, StackLimit +8. Read
+            // through ReadProcessMemory so a TEB that vanished with its thread
+            // between the query and the read cannot fault this thread.
+            const auto* tib = static_cast<const uint8_t*>(info.tebBaseAddress);
+            uintptr_t bounds[2] = { 0, 0 };
+            SIZE_T read = 0;
+            if (!ReadProcessMemory(GetCurrentProcess(), tib + 4, bounds, sizeof(bounds), &read) ||
+                read != sizeof(bounds))
+            {
+                return 0;
+            }
+            const uintptr_t base = bounds[0];
+            const uintptr_t limit = bounds[1];
+            if (base == 0 || base <= limit)
+            {
+                return 0;
+            }
+            return base;
+        }
+
         struct ThreadEntry
         {
             DWORD tid;
             HANDLE handle;
+            // The top of the thread's own stack from its TEB; 0 when it could
+            // not be read, in which case the walk uses the fixed window only.
+            uintptr_t stackBase;
             uint64_t creationFileTime;
             uint64_t lastCpu100ns;
             uint64_t totalCpu100ns;
@@ -361,6 +425,7 @@ namespace BZROpenShim
 #pragma warning(pop)
 
         uint32_t WalkFrames(const CONTEXT& context,
+                            uintptr_t stackBase,
                             uint32_t* addresses,
                             uint32_t maxDepth,
                             uint8_t& outFlags) noexcept
@@ -374,7 +439,16 @@ namespace BZROpenShim
             }
 
             const uintptr_t stackLow = context.Esp;
-            const uintptr_t stackHigh = stackLow + kStackWindowBytes;
+            // The thread's own stack top bounds the walk when ESP lies within
+            // the window below it. Otherwise (TEB unreadable, or the thread is
+            // running on some other stack) the fixed window is the only bound,
+            // exactly as before: reaching up to a StackBase that is not above
+            // ESP's own stack could span other threads' stacks.
+            uintptr_t stackHigh = stackLow + kStackWindowBytes;
+            if (stackBase > stackLow && stackBase < stackHigh)
+            {
+                stackHigh = stackBase;
+            }
             uintptr_t frame = context.Ebp;
             uintptr_t previousFrame = 0;
 
@@ -478,6 +552,7 @@ namespace BZROpenShim
                     ThreadEntry tracked{};
                     tracked.tid = entry.th32ThreadID;
                     tracked.handle = handle;
+                    tracked.stackBase = QueryThreadStackBase(handle);
                     FILETIME creation{}, exitTime{}, kernel{}, user{};
                     if (GetThreadTimes(handle, &creation, &exitTime, &kernel, &user))
                     {
@@ -565,7 +640,7 @@ namespace BZROpenShim
             const uint64_t suspendStart = ReadQpc();
             if (GetThreadContext(tracked.handle, &context))
             {
-                depth = WalkFrames(context, addresses, depthLimit, flags);
+                depth = WalkFrames(context, tracked.stackBase, addresses, depthLimit, flags);
             }
             else
             {
@@ -639,11 +714,16 @@ namespace BZROpenShim
                 elapsedSeconds > 0.0 ? (suspendMs / (elapsedSeconds * 1000.0)) * 100.0 : 0.0;
 
             size_t sampledThreads = 0;
+            size_t stackBoundsKnown = 0;
             for (const ThreadEntry& tracked : threads)
             {
                 if (tracked.sampled)
                 {
                     ++sampledThreads;
+                }
+                if (tracked.stackBase != 0)
+                {
+                    ++stackBoundsKnown;
                 }
             }
 
@@ -651,7 +731,8 @@ namespace BZROpenShim
                      kComponent,
                      "[Health] elapsed=%.1fs ticksRequested=%llu ticksServiced=%llu "
                      "achievedHz=%.1f requestedHz=%u samples=%llu frames=%llu "
-                     "threadsTracked=%zu threadsSampled=%zu suspendFailures=%llu "
+                     "threadsTracked=%zu threadsSampled=%zu stackBoundsKnown=%zu "
+                     "suspendFailures=%llu "
                      "contextFailures=%llu leafOutsideModules=%llu depthCapped=%llu "
                      "suspendWindowMs=%.1f suspendOverheadPercent=%.2f bytesWritten=%llu",
                      elapsedSeconds,
@@ -663,6 +744,7 @@ namespace BZROpenShim
                      static_cast<unsigned long long>(g_FramesRecorded),
                      threads.size(),
                      sampledThreads,
+                     stackBoundsKnown,
                      static_cast<unsigned long long>(g_SuspendFailures),
                      static_cast<unsigned long long>(g_ContextFailures),
                      static_cast<unsigned long long>(g_LeafOutsideModules),
