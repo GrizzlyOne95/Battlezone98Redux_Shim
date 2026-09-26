@@ -7,6 +7,7 @@
 
 #include "autosave.h"
 #include "bzr_hooks.h"
+#include "native_ui.h"
 #include "openshim_assets.h"
 #include "openshim_ini.h"
 #include "openshim_updater.h"
@@ -5341,6 +5342,26 @@ namespace BZROpenShim
         static void* g_CareerUiBlankedText[32] = {};
         static size_t g_CareerUiBlankedTextCount = 0;
 
+        static void ResetCareerUiState();
+        static void* ReadMainScreenSingleton();
+
+        // The cached widget pointers are meaningful only while the title
+        // screen they were taken from is the live singleton: the constructor
+        // stores it and the destructor clears it. Between a teardown and the
+        // destructor listener or the next setup pass, a recycled heap address
+        // must not be mistaken for a page widget or a blanked caption.
+        static bool CareerUiCacheIsLive()
+        {
+            if (!g_CareerUiMainScreen)
+                return false;
+            if (ReadMainScreenSingleton() == g_CareerUiMainScreen)
+                return true;
+            Log(L"[CAREERUI] title screen 0x%08X is no longer the live singleton; dropping cached widgets\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CareerUiMainScreen)));
+            ResetCareerUiState();
+            return false;
+        }
+
         // cUI_Button::SetLabel and cUI_Text::SetText. Both are
         // void __thiscall(this, const char*), and both open with
         //   55 8B EC 51 89 4D FC          push ebp / mov ebp,esp / push ecx /
@@ -5717,7 +5738,7 @@ namespace BZROpenShim
         // with the rest while the page is up.
         static bool IsCareerUiPageWidget(void* view)
         {
-            if (!view)
+            if (!view || !CareerUiCacheIsLive())
                 return false;
             if (view == g_CareerUiPlate || view == g_CareerUiTitleLabel ||
                 view == g_CareerUiBackButton)
@@ -5900,7 +5921,7 @@ namespace BZROpenShim
         // once was not enough -- it reappeared over the page seconds later.
         static bool IsCareerUiBlankedView(void* view)
         {
-            if (!g_CareerUiPageActive || !view)
+            if (!g_CareerUiPageActive || !view || !CareerUiCacheIsLive())
                 return false;
             for (size_t i = 0; i < g_CareerUiBlankedTextCount; ++i)
                 if (g_CareerUiBlankedText[i] == view)
@@ -6324,6 +6345,21 @@ namespace BZROpenShim
             g_CareerUiPageActive = false;
         }
 
+        // Runs from the MainScreen destructor detour after the engine's
+        // destructor has returned: the singleton is already null and every
+        // child is gone. Drops the cached pointers at the moment they die
+        // rather than at the next setup pass, so a heap address recycled in
+        // between can never be mistaken for one of them.
+        static void OnMainScreenDestroyedForCareerUi(void* screen)
+        {
+            if (!g_CareerUiMainScreen)
+                return;
+            Log(L"[CAREERUI] title screen 0x%08X destroyed; dropping cached widgets%hs\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
+                g_CareerUiPageActive ? " (the page was open)" : "");
+            ResetCareerUiState();
+        }
+
         // Is `child` still in `parent`'s child vector? The MainScreen singleton
         // outlives its own menu: navigating to Options and back rebuilds the
         // overlay's children while the screen pointer stays the same, so a
@@ -6665,6 +6701,18 @@ namespace BZROpenShim
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_MainScreenCtorDetour.trampoline)));
 
         InstallCareerUiTextRecorders();
+        // The cached widgets die with the screen; learn about it from the
+        // destructor rather than from the next setup pass.
+        if (EnsureMainScreenDestroyedHook() &&
+            AddMainScreenDestroyedListener(&OnMainScreenDestroyedForCareerUi))
+        {
+            Log(L"[CAREERUI] MainScreen destructor listener registered\n");
+        }
+        else
+        {
+            Log(L"[CAREERUI] MainScreen destructor hook unavailable; cached widgets are "
+                L"checked against the live singleton instead\n");
+        }
     }
 
     // Observation-only detours on the two string setters. They record what the

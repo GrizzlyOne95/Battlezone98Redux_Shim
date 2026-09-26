@@ -23,6 +23,7 @@
 // Copyright (C) 2026 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
 
+#include <cstddef>
 #include <cstdint>
 
 namespace BZROpenShim
@@ -40,5 +41,23 @@ bool OdfInstallUnlockItemHook(uint32_t siteAddress);
 void* __cdecl OdfUseItemDetour(const char* name);
 size_t __cdecl OdfGetItemSizeDetour(const char* name);
 void __cdecl OdfUnlockItemDetour(const char* name);
+
+// Test seams. The engine trio, the [ODF] switches and the item cache are
+// globals of the detour translation unit; a host test stands in for the
+// engine here and reads the cache back. Nothing in the shim calls these.
+namespace OdfItemHookTest
+{
+using UseItemFn = void*(__cdecl*)(const char* name);
+using GetItemSizeFn = size_t(__cdecl*)(const char* name);
+using UnlockItemFn = void(__cdecl*)(const char* name);
+
+// Replaces the original-call trampolines and empties the cache.
+void SetEngine(UseItemFn useItem, GetItemSizeFn getItemSize, UnlockItemFn unlockItem);
+// Fixes the [ODF] switches without reading openshim.ini.
+void SetOptions(bool remapLegacySections, bool logUnknownSections, bool guardCrashValues);
+size_t CachedItemCount();
+int CachedRefcount(const char* name); // -1 when the name has no record
+void ResetCache();
+} // namespace OdfItemHookTest
 
 } // namespace BZROpenShim
