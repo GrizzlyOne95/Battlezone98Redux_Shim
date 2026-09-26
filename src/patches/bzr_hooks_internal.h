@@ -127,6 +127,15 @@ namespace BZROpenShim
     extern void** g_BzrPtr_94548C;
     extern void** g_BzrPtr_94555C;
 
+    struct BuildItem;
+    using FnBuildItemInit = void(__cdecl*)(BuildItem& item, int64_t token);
+    using FnBuildItemCleanup = void(__cdecl*)(BuildItem& item);
+    using FnProducerModeCall = void* (__cdecl*)(void* producerPtr, int slot, int flags);
+    extern BuildItem* g_BzrBuildMenuRoot;
+    extern FnBuildItemCleanup g_BzrFn_CleanupBuildItem;
+    extern FnBuildItemInit g_BzrFn_InitBuildItem;
+    extern FnProducerModeCall g_BzrFn_ProducerModeCallOriginal;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -761,6 +770,34 @@ namespace BZROpenShim
             DWORD suppressUntil;
             DWORD lastSkipLogTick;
         };
+
+        // --- Producer build menu (producer_build_menu.cpp) ---------------------
+        inline constexpr size_t kProducerBuildMenuTokenLen = 8;
+        struct ProducerBuildMenuEntry
+        {
+            bool hasValue = false;
+            char token[kProducerBuildMenuTokenLen + 1] = {};
+            int64_t packedToken = 0;
+        };
+        struct ProducerBuildMenuConfig
+        {
+            bool initialized = false;
+            bool enabled = false;
+            ProducerBuildMenuEntry fallbackRoot = {};
+            ProducerBuildMenuEntry recycler = {};
+            ProducerBuildMenuEntry factory = {};
+            ProducerBuildMenuEntry armory = {};
+            ProducerBuildMenuEntry constructionRig = {};
+            std::unordered_map<std::string, ProducerBuildMenuEntry> odfOverrides = {};
+            std::unordered_map<std::string, ProducerBuildMenuEntry> odfFileEntries = {};
+        };
+        std::vector<std::filesystem::path> GetProducerOdfDirectoryCandidates();
+        bool TryGetObjectOdfToken(void* objectPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1]);
+        extern bool g_HasAppliedProducerBuildMenu;
+        extern int64_t g_LastAppliedProducerBuildMenu;
+        extern uint32_t g_LastUnknownProducerVft;
+        extern ProducerBuildMenuConfig g_ProducerBuildMenuConfig;
+        ProducerBuildMenuEntry NormalizeProducerBuildMenuToken(const char* value);
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
