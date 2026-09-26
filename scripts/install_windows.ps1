@@ -338,10 +338,30 @@ function Get-WrapperVersion {
     return "unversioned"
 }
 
-# Copy or download openshim_wrap.* into $WrapDir. Prefer a sibling checkout so
-# a fork install does not wait on a GitHub raw URL that is not on main yet.
+# The commit a verified release bundle says it was built from, or $null.
+function Get-SuiteCommit {
+    param([string]$SuiteRoot)
+    if (-not $SuiteRoot) { return $null }
+    $metadata = Join-Path $SuiteRoot "release_metadata.json"
+    if (-not (Test-Path -LiteralPath $metadata)) { return $null }
+    $m = [regex]::Match((Get-Content -LiteralPath $metadata -Raw), '"Commit"\s*:\s*"([0-9a-fA-F]{40})"')
+    if ($m.Success) { return $m.Groups[1].Value.ToLowerInvariant() }
+    return $null
+}
+
+# Copy or download openshim_wrap.* into $WrapDir. Where they come from, best
+# first:
+#   1. a sibling checkout, so a fork install does not wait on a release;
+#   2. upload\ inside the release bundle, which the bundle's published SHA-256
+#      has already verified along with the DLLs;
+#   3. a raw download pinned to the commit that bundle names, for bundles
+#      published before they carried the wrappers.
+# Only with no bundle at all (an OPENSHIM_DLL override run from a pipe) does
+# the download follow $ref, and then it says the file is unverified. The
+# wrapper runs with the game's launch rights, so it should not be the one
+# unverified file in an otherwise hash-checked install.
 function Update-WrapperFiles {
-    param([string]$WrapDir)
+    param([string]$WrapDir, [string]$SuiteRoot)
     $dest = Join-Path $WrapDir "openshim_wrap.ps1"
     $old = Get-WrapperVersion -Path $dest
     $localUpload = $null
@@ -349,6 +369,24 @@ function Update-WrapperFiles {
         $candidate = Join-Path (Split-Path -Parent $PSScriptRoot) "upload"
         if (Test-Path -LiteralPath (Join-Path $candidate "openshim_wrap.ps1")) {
             $localUpload = $candidate
+        }
+    }
+    if (-not $localUpload -and $SuiteRoot) {
+        $candidate = Join-Path $SuiteRoot "upload"
+        if ((Test-Path -LiteralPath (Join-Path $candidate "openshim_wrap.ps1") -PathType Leaf) -and
+            (Test-Path -LiteralPath (Join-Path $candidate "openshim_wrap.bat") -PathType Leaf)) {
+            $localUpload = $candidate
+            Write-Host "  uploader wrapper taken from the verified release bundle"
+        }
+    }
+    $rawRef = $ref
+    if (-not $localUpload) {
+        $suiteCommit = Get-SuiteCommit -SuiteRoot $SuiteRoot
+        if ($suiteCommit) {
+            $rawRef = $suiteCommit
+            Write-Host "  uploader wrapper pinned to release commit $($suiteCommit.Substring(0, 8)) (bundle predates shipping it)"
+        } else {
+            Write-Warning "Uploader wrapper fetched from $repoSlug@$ref with no release bundle to pin or verify it against."
         }
     }
     # Fetch every wrapper into a staging file first and only then swap it in.
@@ -362,7 +400,7 @@ function Update-WrapperFiles {
         if ($localUpload) {
             Copy-Item -LiteralPath (Join-Path $localUpload $wf) -Destination $wfTemp -Force
         } else {
-            $wu = "https://raw.githubusercontent.com/$repoSlug/$ref/upload/$wf"
+            $wu = "https://raw.githubusercontent.com/$repoSlug/$rawRef/upload/$wf"
             Invoke-WebRequest -Uri $wu -UseBasicParsing -OutFile $wfTemp
         }
         if (-not (Test-Path -LiteralPath $wfTemp -PathType Leaf) -or (Get-Item -LiteralPath $wfTemp).Length -eq 0) {
@@ -476,6 +514,7 @@ if ($PSScriptRoot) {
 
 try {
     $artifacts = $null
+    $suiteRoot = $null
     $hashes = @{}
 
     if ($env:OPENSHIM_DLL -and (Test-Path -LiteralPath $env:OPENSHIM_DLL)) {
@@ -670,7 +709,7 @@ try {
         } else {
             try {
                 New-Item -ItemType Directory -Force -Path $wrapDir | Out-Null
-                Update-WrapperFiles -WrapDir $wrapDir
+                Update-WrapperFiles -WrapDir $wrapDir -SuiteRoot $suiteRoot
                 $confDir = Join-Path $env:APPDATA "openshim"
                 New-Item -ItemType Directory -Force -Path $confDir | Out-Null
                 $player = if ($env:OPENSHIM_PLAYER) { $env:OPENSHIM_PLAYER } else { "" }
@@ -690,7 +729,7 @@ try {
         }
     } elseif (Test-Path -LiteralPath (Join-Path $wrapDir "openshim_wrap.ps1")) {
         try {
-            Update-WrapperFiles -WrapDir $wrapDir
+            Update-WrapperFiles -WrapDir $wrapDir -SuiteRoot $suiteRoot
             $wrapperReady = $true
         } catch {
             Write-Warning "Could not refresh the existing upload wrapper: $_"
