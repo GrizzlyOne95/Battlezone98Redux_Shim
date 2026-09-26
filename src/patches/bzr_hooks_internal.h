@@ -400,6 +400,123 @@ namespace BZROpenShim
         void TickCareerSessionState();
         void InstallCareerStatsMpHookIfPossible();
 
+        // --- Satellite visibility fix (satellite_visibility.cpp) ---------------
+        inline constexpr size_t kGameObjectClassOffset = 0xF8;
+        inline constexpr size_t kObjectClassTypeOffset = 0x1C;
+        // Live GOG 2.2.301 View_Record. The previous value 0x004FD770 (VA
+        // 0x008FD770) has *zero* cross-references anywhere in .text -- the
+        // satellite gate below was reading unreferenced memory, so every
+        // [SATVIS] sample taken before 2026-08-17 is void. The real record is
+        // written by the satellite view setter (0x0061BD20) at 0x0061BE27:
+        //   mov [0x008EAAD4], 0            ; previous view
+        //   mov [0x008EAAD8], 3            ; Current_View = OVER_VIEW
+        //   mov [0x008EACB8], ecx          ; overview object
+        //   mov [0x008EAAD0], 0x0061BC90   ; Update_Camera = Set_Satellite_View
+        // Base 0x008EAAD0 + kPresetViewCurrentViewOffset (0x8) lands on
+        // 0x008EAAD8, which matches the independently derived
+        // kGogViewModeAddr used by the target-camera fix.
+        inline constexpr uintptr_t kViewRecordRva = 0x004EAAD0;
+        inline constexpr bool kHopOutAttackAlertFixEnabledDefault = false;
+        // SelectionDisplay::Render carries the complete Redux GameObject pointer,
+        // while the inherited GameObject interface (whose slot +4 is GetTeam)
+        // begins at +0x18. Calling slot +4 from the complete-object vtable was
+        // the crash-prone behavior in the original NEUTRAL_ONLY experiment.
+        inline constexpr size_t kGameObjectInterfaceOffset = 0x18;
+        // CORRECTED 2026-08-17. 0x00462450 is NOT GetPerceivedTeam -- it is
+        // GameObject::GetTeam, and it returns the *actual* team. It occupies
+        // slot 1 of the interface vtable in all twelve GameObject-family
+        // vtables in .rdata, beside GetClass/SetTeam/GetPosition. The
+        // non-virtual GetPerceivedTeam is 0x004625B0, it reads
+        // [complete+0x180], and it appears in no vtable at all.
+        //
+        // Because 0x00462450 runs on the interface subobject (complete+0x18),
+        // its [this+0x15C] resolves to complete+0x174 -- the actual team, a
+        // different field 0xC below perceivedTeam. Reading that operand as if
+        // it were perceivedTeam is what produced the bogus "save base is
+        // complete-0xC" rule that shifted every visibility offset below.
+        //
+        // The save walker's base register IS the complete object. Two
+        // independent confirmations:
+        //   * SetPerceivedTeam (0x004DB4F0) writes [this+0x180] and is called
+        //     with the complete pointer from Craft::AbandonPilot (0x004ADF20)
+        //     and SetDamageFlags (0x004DC29C).
+        //   * WeaponMine::Simulate reads the mine position at complete+0x108 /
+        //     +0x10C / +0x110, and the walker records "pos" size=12 at +0x108.
+        inline constexpr size_t kGameObjectActualTeamOffset = 0x174;
+        inline constexpr size_t kGameObjectPerceivedTeamOffset = 0x180;
+        inline constexpr int kGameTeamMin = 0;
+        inline constexpr int kGameTeamMax = 15;
+        inline constexpr size_t kGameObjectIlluminationOffset = 0xE8;
+        inline constexpr size_t kGameObjectIsObjectiveOffset = 0x189;
+        inline constexpr size_t kGameObjectIsVisibleOffset = 0x18C;
+        inline constexpr size_t kGameObjectSeenOffset = 0x190;
+        // CORRECTED 2026-09-19, and no longer advisory. This was 0x214, which
+        // is where BZ 1.5 keeps targetHandle -- the Redux shift was never
+        // applied. In Redux 0x214 is maxAmmo, stored XOR-obfuscated with
+        // 0x33333333 (GameObject::GetMaxAmmo 0x0046D060 reads [this+0x214] and
+        // unscrambles it), so the [SATVIS] `target` column has been printing a
+        // scrambled ammo count for its whole life. Every value it recorded
+        // before this commit should be discarded rather than reinterpreted.
+        //
+        // The real field comes from the engine's own accessor pair, the same
+        // way the owner handle below it does:
+        //   GameObject::SetTarget 0x0049F450 -- 0x0049F479 `mov [eax+0x21C],ecx`
+        //   GameObject::GetTarget 0x00462610 -- 0x0046261A `mov ecx,[eax+0x21C]`
+        //                                       then GetObj 0x004DA060
+        // reached from the Lua bindings at .rdata 0x0087C4CC "SetTarget" /
+        // 0x0087C4D8 "GetTarget" (table slots 0x00871D18 / 0x00871D20, the two
+        // immediately above SetOwner).
+        //
+        // Complete-object relative and non-virtual, so it shares a base with
+        // the fields above: the call site at 0x005AA94E does `sub ecx,0x18`
+        // before calling GetTarget and re-adds 0x18 to the result, and neither
+        // accessor appears anywhere in .rdata.
+        //
+        // BZ 1.5's PDB struct corroborates the ordering: targetHandle 0x214,
+        // hitch 0x218, ownerHandle 0x21C -- the same three fields adjacent in
+        // the same order, uniformly +0x8 here.
+        inline constexpr size_t kGameObjectTargetHandleOffset = 0x21C;
+        inline constexpr long kCameraTypeOverView = 3;
+        // Some render-queue helpers are inlined or unexported from the shipped
+        // OgreMain.dll; resolve those by raw image offset from the module base.
+        template<typename T>
+        T ResolveOgreProcByOffset(uintptr_t offset)
+        {
+            if (!offset)
+                return nullptr;
+
+            static HMODULE ogreMain = nullptr;
+            if (!ogreMain)
+                ogreMain = GetModuleHandleA("OgreMain.dll");
+            if (!ogreMain)
+                return nullptr;
+
+            return reinterpret_cast<T>(reinterpret_cast<uint8_t*>(ogreMain) + offset);
+        }
+        inline constexpr long kSatVisValidateBudgetDefault = 240;
+        inline constexpr DWORD kSatVisValidateIntervalMs = 1000;
+        size_t CollectLiveGameObjectsFromArena(void** outObjects, size_t capacity);
+        bool LooksLikeOgreObject(const void* candidate);
+        extern DWORD g_SatelliteVisibilityLastTick;
+        extern volatile long g_SatelliteVisibilityLogBudget;
+        extern DWORD g_SatelliteVisibilityLogIntervalMs;
+        extern uint32_t g_SatelliteVisibilityObjectLimit;
+        extern bool g_TraceSatelliteVisibility;
+        bool IsSatelliteOverviewActive();
+        void InitializeHopOutAttackAlertConfig();
+        void RefreshSatelliteVisibilityFixState();
+        void InitializeSatelliteVisibilityFixConfig(bool resetTracking);
+        extern bool g_SatVisTestPreHideEnabled;
+        extern int g_SatVisTestPreHideTeam;
+        extern std::unordered_set<void*> g_SatVisTestPreHidden;
+        extern bool g_SatVisValidateEnabled;
+        extern volatile long g_SatVisValidateBudget;
+        extern DWORD g_SatVisValidateLastTick;
+        void MaybeSuppressStaleHopOutAttackAlert();
+        void MaybeLogSatelliteVisibilitySample();
+        void SyncSatelliteVisibility();
+        void LogSatelliteVisibilityValidationSample();
+
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
         extern float g_SatelliteZoomOutMultiplierBaseline;
