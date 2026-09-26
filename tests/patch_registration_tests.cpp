@@ -178,7 +178,7 @@ namespace
 int main()
 {
 #if !defined(BZR_PATCHES_JSON) || !defined(BZR_PATCHES_H) || !defined(BZR_PATCHER_CPP) || \
-    !defined(BZR_BZR_HOOKS_CPP)
+    !defined(BZR_BZR_HOOKS_CPP) || !defined(BZR_SDK_PROVIDER_CPP)
     std::printf("patch_registration_tests: source paths not configured; skipped\n");
     return 0;
 #else
@@ -194,6 +194,9 @@ int main()
     bool hooksOk = false;
     const std::string hooks = ReadFile(BZR_BZR_HOOKS_CPP, hooksOk);
     Check(hooksOk, "src/patches/bzr_hooks.cpp must be readable at " BZR_BZR_HOOKS_CPP);
+    bool providerOk = false;
+    const std::string provider = ReadFile(BZR_SDK_PROVIDER_CPP, providerOk);
+    Check(providerOk, "src/patches/openshim_sdk_provider.cpp must be readable at " BZR_SDK_PROVIDER_CPP);
 
     if (g_Failures)
     {
@@ -259,7 +262,7 @@ int main()
 
     // --- a resolve name with no definition -----------------------------------
     {
-        const std::set<std::string> used = ResolveNamedAddressCallSites({patcher, hooks});
+        const std::set<std::string> used = ResolveNamedAddressCallSites({patcher, hooks, provider});
         std::set<std::string> undefined;
         for (const std::string& name : used)
             if (jsonResolves.find(name) == jsonResolves.end()) undefined.insert(name);
