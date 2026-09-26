@@ -144,6 +144,7 @@
     <ClCompile Include="src\patches\autosave.cpp" />
     <ClCompile Include="src\patches\bzn_load_trace.cpp" />
     <ClCompile Include="src\patches\bzr_hooks.cpp" />
+    <ClCompile Include="src\patches\bzrnet_settings.cpp" />
     <ClCompile Include="src\patches\global_turbo.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
     <ClCompile Include="src\patches\pilot_flashlight.cpp" />
