@@ -47,10 +47,68 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         FixedFuncUntextured,
         AggressiveGeneric,
         SkipShaderless,
+        // Two texture units, both on UV set 0: stage 0 modulate, stage 1
+        // modulate/add/alpha_blend (see IsSupportedTwoStageCombo).
+        FixedFuncTextured2,
+        // A true fixed-function pass this layer cannot express, on a material
+        // whose every fallback is shaderless too. Returning nothing there
+        // does not skip the draw: Ogre falls back to the fixed-function
+        // technique and D3D11 throws "without both vertex and fragment
+        // shaders" per draw. The pass is instead bound to a program pair that
+        // clips everything, so nothing is drawn and nothing throws.
+        SuppressPass,
     };
 
     const char* LegacyPassKindName(LegacyPassKind kind) noexcept;
     const char* CompatPathName(CompatPath path) noexcept;
+
+    // Ogre::LayerBlendOperationEx / LayerBlendSource values (OgreBlendMode.h,
+    // Ogre 1.10). The runtime reads them from TextureUnitState's
+    // LayerBlendModeEx; tests use them directly.
+    namespace BlendOpEx
+    {
+        constexpr int Source1 = 0;
+        constexpr int Source2 = 1;
+        constexpr int Modulate = 2;
+        constexpr int Add = 5;
+        constexpr int BlendTextureAlpha = 10;
+    }
+    namespace BlendSource
+    {
+        constexpr int Current = 0;
+        constexpr int Texture = 1;
+    }
+
+    // One fixed-function texture stage as the fixed pipeline would run it.
+    // known=false when the runtime could not read it; such a stage never
+    // counts as supported.
+    struct TextureStageDesc
+    {
+        bool known = false;
+        int colourOp = -1;
+        int colourSrc1 = -1;
+        int colourSrc2 = -1;
+        int alphaOp = -1;
+        int alphaSrc1 = -1;
+        int alphaSrc2 = -1;
+        unsigned texCoordSet = 0;
+    };
+
+    // The four material-script colour_op shorthands, recognised from the
+    // expanded operation Ogre stores (TextureUnitState::setColourOperation).
+    enum class StageCombine : uint8_t
+    {
+        Modulate = 0,       // colour_op modulate (the default)
+        Add,                // colour_op add
+        Replace,            // colour_op replace
+        AlphaBlendTexture,  // colour_op alpha_blend: lerp(current, tex, tex.a)
+        Unsupported,
+    };
+
+    const char* StageCombineName(StageCombine combine) noexcept;
+    StageCombine ClassifyStageColour(const TextureStageDesc& stage) noexcept;
+    // Alpha is only supported in its default form, texture * current.
+    bool IsDefaultStageAlpha(const TextureStageDesc& stage) noexcept;
 
     // Minimal programmable-pass description. The runtime fills this from the
     // narrow Ogre ABI (hasVertexProgram/hasFragmentProgram + program names +
@@ -68,7 +126,23 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         // color ops below, anything else is logged once as unsupported.
         int textureUnits = 0;
         std::string colorOp0; // modulate|replace|add|alpha_blend (any case)
+        // Per-stage combine state as read from the pass. Consulted for
+        // multi-texture decisions; the single-unit path keeps its historical
+        // modulate assumption so existing content does not change path.
+        std::vector<TextureStageDesc> stages;
+        // Pass count of the source technique. Synthesis clones one-pass
+        // techniques only; suppression covers any count.
+        int passCount = 1;
+        // True when every technique Ogre could fall back to still contains a
+        // shaderless pass, i.e. declining would leave a draw D3D11 throws on.
+        bool fallbackShaderless = false;
     };
+
+    // Two units, both known, both on UV set 0, default alpha on both, stage 0
+    // modulate, stage 1 modulate/add/alpha_blend. Covers the ISDF Chronicles
+    // rain family (xrain, xrainL, xrainR, acidrain, rainbox) and the ported
+    // BZBase emissive-overlay passes (unit 1 = EmissiveMap, default modulate).
+    bool IsSupportedTwoStageCombo(const LegacyPassDesc& desc) noexcept;
 
     struct CompatConfig
     {
@@ -140,6 +214,45 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
     const char* FixedFuncTexturedFragment() noexcept;
     const char* FixedFuncUntexturedVertex() noexcept;
     const char* FixedFuncUntexturedFragment() noexcept;
+    const char* FixedFuncTextured2Vertex() noexcept;
+    // Fragment program for the stage-1 combine, or nullptr if unsupported.
+    const char* FixedFuncTextured2Fragment(StageCombine stage1) noexcept;
+    const char* FixedFuncSuppressVertex() noexcept;
+    const char* FixedFuncSuppressFragment() noexcept;
+
+    // Stock (natively DX11) materials whose vertex program reads an input
+    // its output never depends on. The glow compositor draws every
+    // non-glowing object with Glow/Null: Untextured_vertex, which reads
+    // COLOR0, multiplied by a black pass diffuse. On a mesh without DIFFUSE
+    // (ISDF Chronicles prop.mesh) D3D11 throws "Unable to set D3D11 vertex
+    // declaration" on that draw every frame. That stayed hidden while the
+    // shaderless xrain draw aborted the frame first. Rebinding the
+    // POSITION-only OSE variant gives the same black output on any mesh.
+    // The runtime applies a guard only when the pass still names both
+    // expected programs and its diffuse RGB is zero.
+    struct NativeInputGuard
+    {
+        const char* material;
+        const char* expectVertex;
+        const char* expectFragment;
+        const char* replacementVertex;
+        const char* reason;
+    };
+
+    const NativeInputGuard* FindNativeInputGuard(std::string_view material) noexcept;
+    size_t NativeInputGuardCount() noexcept;
+    const NativeInputGuard* NativeInputGuardAt(size_t index) noexcept;
+
+    // "[DX11COMPAT] material=<m> native-input-guard vs=<from> -> <to>
+    //  reason=<r> action=<applied|skipped:<why>>"
+    std::string FormatNativeInputGuardLog(const NativeInputGuard& guard,
+                                          std::string_view action);
+
+    // "[DX11COMPAT] material=<m> path=suppress reason=<r> passes=<n>
+    //  stages=<ops> action=skip-draw" -- once per material.
+    std::string FormatSuppressedLog(std::string_view material,
+                                    std::string_view reason,
+                                    const LegacyPassDesc& desc);
 
     LegacyPassKind ClassifyLegacyPass(const LegacyPassDesc& desc) noexcept;
 

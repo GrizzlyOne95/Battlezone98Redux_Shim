@@ -683,8 +683,257 @@ void TestVertexInputFit()
                    "hlsl guards the TEXCOORD0 input");
 }
 
+TextureStageDesc Stage(int colourOp, int src1 = BlendSource::Texture,
+                       int src2 = BlendSource::Current, unsigned uvSet = 0)
+{
+    TextureStageDesc s;
+    s.known = true;
+    s.colourOp = colourOp;
+    s.colourSrc1 = src1;
+    s.colourSrc2 = src2;
+    s.alphaOp = BlendOpEx::Modulate;
+    s.alphaSrc1 = BlendSource::Texture;
+    s.alphaSrc2 = BlendSource::Current;
+    s.texCoordSet = uvSet;
+    return s;
+}
+
+LegacyPassDesc TwoStageDesc(const TextureStageDesc& s0, const TextureStageDesc& s1)
+{
+    LegacyPassDesc d;
+    d.textureUnits = 2;
+    d.stages = { s0, s1 };
+    return d;
+}
+
+void TestTwoStageFixedFunction()
+{
+    std::printf("TestTwoStageFixedFunction\n");
+    const CompatConfig config = DefaultCompatConfig();
+    std::string vs;
+    std::string ps;
+
+    // colour_op shorthands as TextureUnitState::setColourOperation stores them.
+    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::Modulate)) ==
+                   StageCombine::Modulate, "modulate");
+    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::Add)) == StageCombine::Add,
+               "add");
+    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::Source1)) ==
+                   StageCombine::Replace, "replace");
+    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::BlendTextureAlpha)) ==
+                   StageCombine::AlphaBlendTexture, "alpha_blend");
+    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::BlendTextureAlpha,
+                                         BlendSource::Current,
+                                         BlendSource::Texture)) ==
+                   StageCombine::Unsupported,
+               "reversed texture-alpha blend is not colour_op alpha_blend");
+    ExpectTrue(ClassifyStageColour(Stage(9 /* blend_diffuse_alpha */)) ==
+                   StageCombine::Unsupported, "exotic ops unsupported");
+    ExpectTrue(ClassifyStageColour(TextureStageDesc{}) ==
+                   StageCombine::Unsupported, "unread stage unsupported");
+
+    // ISDF Chronicles xrain: unit 0 default, unit 1 colour_op alpha_blend.
+    LegacyPassDesc xrain = TwoStageDesc(Stage(BlendOpEx::Modulate),
+                                        Stage(BlendOpEx::BlendTextureAlpha));
+    ExpectTrue(ClassifyLegacyPass(xrain) == LegacyPassKind::TrueFixedFunction,
+               "xrain is true fixed function");
+    ExpectTrue(IsSupportedTwoStageCombo(xrain), "xrain combo supported");
+    ExpectTrue(DecideCompatPath(ClassifyLegacyPass(xrain), xrain, config) ==
+                   CompatPath::FixedFuncTextured2,
+               "xrain takes the two-stage path");
+    ExpectTrue(ResolveCompatPrograms(CompatPath::FixedFuncTextured2, xrain, vs,
+                                     ps) &&
+                   vs == "OSE_FixedFunc_Textured2_vertex" &&
+                   ps == "OSE_FixedFunc_Textured2_fragment_alphablend",
+               "xrain binds the alpha-blend two-stage pair");
+
+    // Ported BZBase emissive overlay: unit 1 default modulate.
+    LegacyPassDesc emissive = TwoStageDesc(Stage(BlendOpEx::Modulate),
+                                           Stage(BlendOpEx::Modulate));
+    ExpectTrue(ResolveCompatPrograms(CompatPath::FixedFuncTextured2, emissive,
+                                     vs, ps) &&
+                   ps == "OSE_FixedFunc_Textured2_fragment_modulate",
+               "emissive overlay binds the modulate two-stage pair");
+    LegacyPassDesc added = TwoStageDesc(Stage(BlendOpEx::Modulate),
+                                        Stage(BlendOpEx::Add));
+    ExpectTrue(ResolveCompatPrograms(CompatPath::FixedFuncTextured2, added, vs,
+                                     ps) &&
+                   ps == "OSE_FixedFunc_Textured2_fragment_add",
+               "add on stage 1");
+
+    // Outside the support set.
+    LegacyPassDesc uv1 = TwoStageDesc(Stage(BlendOpEx::Modulate),
+                                      Stage(BlendOpEx::Modulate,
+                                            BlendSource::Texture,
+                                            BlendSource::Current, 1));
+    ExpectTrue(!IsSupportedTwoStageCombo(uv1), "second UV set unsupported");
+    LegacyPassDesc replace1 = TwoStageDesc(Stage(BlendOpEx::Modulate),
+                                           Stage(BlendOpEx::Source1));
+    ExpectTrue(!IsSupportedTwoStageCombo(replace1), "stage-1 replace unsupported");
+    LegacyPassDesc add0 = TwoStageDesc(Stage(BlendOpEx::Add),
+                                       Stage(BlendOpEx::Modulate));
+    ExpectTrue(!IsSupportedTwoStageCombo(add0), "stage-0 add unsupported");
+    TextureStageDesc oddAlpha = Stage(BlendOpEx::Modulate);
+    oddAlpha.alphaOp = BlendOpEx::Source1;
+    ExpectTrue(!IsSupportedTwoStageCombo(
+                   TwoStageDesc(Stage(BlendOpEx::Modulate), oddAlpha)),
+               "non-default alpha op unsupported");
+    LegacyPassDesc unread = TwoStageDesc(Stage(BlendOpEx::Modulate),
+                                         TextureStageDesc{});
+    ExpectTrue(!IsSupportedTwoStageCombo(unread), "unread stage unsupported");
+    ExpectTrue(!ResolveCompatPrograms(CompatPath::FixedFuncTextured2, unread, vs,
+                                      ps),
+               "resolver refuses an unsupported two-stage pass");
+
+    // Unsupported + shaderless fallback: suppress. Programmable fallback:
+    // keep the historical decline. Aggressive still wins when enabled.
+    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, uv1, config) ==
+                   CompatPath::SkipShaderless,
+               "unsupported with a programmable fallback declines");
+    uv1.fallbackShaderless = true;
+    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, uv1, config) ==
+                   CompatPath::SuppressPass,
+               "unsupported with only shaderless fallbacks is suppressed");
+    CompatConfig aggressive = config;
+    aggressive.aggressiveEnabled = true;
+    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, uv1,
+                                aggressive) == CompatPath::AggressiveGeneric,
+               "aggressive mode still takes precedence");
+    CompatConfig off = config;
+    off.compatEnabled = false;
+    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, uv1, off) ==
+                   CompatPath::SkipShaderless,
+               "compat disabled never suppresses");
+    ExpectTrue(ResolveCompatPrograms(CompatPath::SuppressPass, uv1, vs, ps) &&
+                   vs == "OSE_FixedFunc_Suppress_vertex" &&
+                   ps == "OSE_FixedFunc_Suppress_fragment",
+               "suppress pair");
+
+    LegacyPassDesc multi = FixedFuncDesc(1);
+    multi.passCount = 2;
+    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, multi,
+                                config) == CompatPath::SkipShaderless,
+               "multi-pass with a programmable fallback declines");
+    multi.fallbackShaderless = true;
+    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, multi,
+                                config) == CompatPath::SuppressPass,
+               "multi-pass with only shaderless fallbacks is suppressed");
+
+    // A pass this layer already converted in place is native on the next
+    // miss, not "unsupported custom" (the runtime never reads targets).
+    ExpectTrue(ClassifyLegacyPass(ProgramDesc("OSE_FixedFunc_Textured2_vertex", "",
+                                              "OSE_FixedFunc_Textured2_fragment_alphablend",
+                                              "")) == LegacyPassKind::NativeDx11,
+               "converted OSE pass classifies native");
+    ExpectTrue(ClassifyLegacyPass(ProgramDesc("OSE_FixedFunc_Textured_vertex", "",
+                                              "Effect_fragment", "")) !=
+                   LegacyPassKind::NativeDx11,
+               "a half-converted pass is still legacy");
+
+    // Single-unit behaviour is unchanged by the stage data.
+    LegacyPassDesc one = FixedFuncDesc(1);
+    one.stages = { Stage(9) };
+    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, one, config) ==
+                   CompatPath::FixedFuncTextured,
+               "one-unit path keeps its modulate assumption");
+
+    // Vertex-input fitting for the new programs.
+    VertexInputs noColour;
+    noColour.known = true;
+    noColour.diffuse = false;
+    noColour.texcoord0 = true;
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex",
+                                        noColour, vs) ==
+                       VertexInputFit::Adapted &&
+                   vs == "OSE_FixedFunc_Textured2_vertex_novc",
+               "two-stage vertex drops COLOR0");
+    VertexInputs full;
+    full.known = true;
+    full.diffuse = true;
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex", full,
+                                        vs) == VertexInputFit::Unchanged,
+               "two-stage vertex unchanged with every input");
+    VertexInputs noUv = full;
+    noUv.texcoord0 = false;
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex", noUv,
+                                        vs) == VertexInputFit::Unsatisfiable,
+               "two-stage vertex cannot bind without TEXCOORD0");
+    VertexInputs bare;
+    bare.known = true;
+    bare.diffuse = false;
+    bare.texcoord0 = false;
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Suppress_vertex", bare,
+                                        vs) == VertexInputFit::Unchanged,
+               "suppress binds on position only");
+
+    const std::string line = FormatSuppressedLog("xrain_test",
+                                                 "unsupported-texture-stages",
+                                                 uv1);
+    ExpectContains(line, "[DX11COMPAT] material=xrain_test path=suppress",
+                   "suppress log prefix");
+    ExpectContains(line, "stages=modulate,modulate@uv1", "suppress log stages");
+    ExpectContains(line, "action=skip-draw", "suppress log action");
+    ExpectTrue(std::strcmp(CompatPathName(CompatPath::FixedFuncTextured2),
+                           "fixedfunc-textured2") == 0 &&
+                   std::strcmp(CompatPathName(CompatPath::SuppressPass),
+                               "suppress") == 0,
+               "path names");
+
+    // Every program the resolver or fitter can emit is declared.
+    const std::string script = ReadTextFile(BZR_FIXEDFUNC_PROGRAM);
+    const char* declared[] = {
+        "vertex_program OSE_FixedFunc_Textured2_vertex hlsl",
+        "vertex_program OSE_FixedFunc_Textured2_vertex_novc hlsl",
+        "fragment_program OSE_FixedFunc_Textured2_fragment_modulate hlsl",
+        "fragment_program OSE_FixedFunc_Textured2_fragment_add hlsl",
+        "fragment_program OSE_FixedFunc_Textured2_fragment_alphablend hlsl",
+        "vertex_program OSE_FixedFunc_Suppress_vertex hlsl",
+        "fragment_program OSE_FixedFunc_Suppress_fragment hlsl",
+    };
+    for (const char* d : declared)
+    {
+        ExpectContains(script, d, "program declared");
+    }
+    ExpectContains(script, "param_named_auto texMatrix1 texture_matrix 1",
+                   "stage 1 keeps its own texture matrix");
+}
+
+void TestNativeInputGuards()
+{
+    std::printf("TestNativeInputGuards\n");
+    const NativeInputGuard* glow = FindNativeInputGuard("Glow/Null");
+    ExpectTrue(glow != nullptr, "Glow/Null has a guard");
+    if (glow != nullptr)
+    {
+        ExpectTrue(std::strcmp(glow->expectVertex, "Untextured_vertex") == 0 &&
+                       std::strcmp(glow->expectFragment, "Untextured_fragment") == 0,
+                   "guard pins the stock programs it replaces");
+        // The replacement must keep the stock fragment's inputs (COLOR0,
+        // TEXCOORD1) and read POSITION only: the untextured no-colour variant.
+        ExpectTrue(std::strcmp(glow->replacementVertex,
+                               "OSE_FixedFunc_Untextured_vertex_novc") == 0,
+                   "Glow/Null takes the POSITION-only untextured variant");
+        const std::string line = FormatNativeInputGuardLog(*glow, "applied");
+        ExpectContains(line, "[DX11COMPAT] material=Glow/Null native-input-guard",
+                       "guard log prefix");
+        ExpectContains(line, "action=applied", "guard log action");
+    }
+    ExpectTrue(FindNativeInputGuard("glow/null") == nullptr,
+               "guards match Ogre's case-sensitive material names exactly");
+    ExpectTrue(FindNativeInputGuard("BaseWhite") == nullptr,
+               "no guard for unrelated materials");
+    ExpectTrue(NativeInputGuardCount() >= 1 && NativeInputGuardAt(0) != nullptr &&
+                   NativeInputGuardAt(NativeInputGuardCount()) == nullptr,
+               "guard table bounds");
+    const std::string hlsl = ReadTextFile(BZR_FIXEDFUNC_HLSL);
+    ExpectContains(hlsl, "out float vDepth : TEXCOORD1",
+                   "untextured variant still outputs the depth the stock fragment reads");
+}
+
 int main()
 {
+    TestNativeInputGuards();
+    TestTwoStageFixedFunction();
     TestVertexInputFit();
     TestSynthesisExclusions();
     TestSupportedTargets();

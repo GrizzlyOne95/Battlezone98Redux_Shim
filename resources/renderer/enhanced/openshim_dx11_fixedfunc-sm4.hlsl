@@ -189,3 +189,121 @@ void fixedfunc_untextured_fragment(
 
     oColor.a = vColor.a;
 }
+
+// ---------------------------------------------------------------------------
+// Two-stage textured path (2 texture units, both on UV set 0)
+// ---------------------------------------------------------------------------
+//
+// Fixed function ran stage 0 as texture0 * vertex colour and then combined
+// stage 1 with that result ("current"). The support set is the one shipped
+// content uses (IsSupportedTwoStageCombo):
+//
+//   COMPAT_OP1_MODULATE    current * texture1         (colour_op modulate)
+//   COMPAT_OP1_ADD         current + texture1         (colour_op add)
+//   COMPAT_OP1_ALPHABLEND  lerp(current, texture1, texture1.a)
+//                                                    (colour_op alpha_blend)
+//
+// Alpha is the default on both stages: texture alpha times current alpha,
+// so a mask on stage 1 attenuates the pass the way it did under DX9 (the
+// ISDF Chronicles rain family: xrain, xrainL/R, acidrain, rainbox).
+// Each stage keeps its own texture matrix, so stage 0's scroll_anim does not
+// drag the stage 1 mask with it.
+
+void fixedfunc2_vertex(
+    uniform float4x4 wvpMat,
+    uniform float4x4 texMatrix,
+    uniform float4x4 texMatrix1,
+    uniform float4 diffuseColor,
+
+    in float4 iPosition : POSITION,
+#ifndef COMPAT_NO_VERTEX_COLOUR
+    in float4 iColor : COLOR0,
+#endif
+    in float2 iTexCoord : TEXCOORD0,
+
+    out float4 vColor : COLOR0,
+    out float2 vTexCoord : TEXCOORD0,
+    out float vDepth : TEXCOORD1,
+    out float2 vTexCoord1 : TEXCOORD2,
+
+    out float4 oPosition : SV_POSITION
+)
+{
+    oPosition = mul(wvpMat, iPosition);
+#ifdef COMPAT_NO_VERTEX_COLOUR
+    vColor = diffuseColor;
+#else
+    // Native BGRA correction, for the reason spelled out in fixedfunc_vertex.
+    vColor = iColor.bgra * diffuseColor;
+#endif
+    vTexCoord = mul(texMatrix, float4(iTexCoord, 0.0, 1.0)).xy;
+    vTexCoord1 = mul(texMatrix1, float4(iTexCoord, 0.0, 1.0)).xy;
+    vDepth = oPosition.z;
+}
+
+void fixedfunc2_fragment(
+    uniform Texture2D diffuseMap : register(t0),
+    uniform SamplerState diffuseSam : register(s0),
+    uniform Texture2D stage1Map : register(t1),
+    uniform SamplerState stage1Sam : register(s1),
+
+    uniform float4 sceneAmbient,
+    uniform float4 fogColour,
+    uniform float4 fogParams,
+
+    in float4 vColor : COLOR0,
+    in float2 vTexCoord : TEXCOORD0,
+    in float vDepth : TEXCOORD1,
+    in float2 vTexCoord1 : TEXCOORD2,
+
+    out float4 oColor : SV_TARGET
+)
+{
+    float4 tex0 = diffuseMap.Sample(diffuseSam, vTexCoord);
+    float4 tex1 = stage1Map.Sample(stage1Sam, vTexCoord1);
+
+    // Stage 0: modulate.
+    float3 current = vColor.xyz * tex0.xyz;
+    float alpha = vColor.a * tex0.a;
+
+    // Stage 1.
+#if defined(COMPAT_OP1_ADD)
+    current = current + tex1.xyz;
+#elif defined(COMPAT_OP1_ALPHABLEND)
+    current = lerp(current, tex1.xyz, tex1.a);
+#else
+    current = current * tex1.xyz;
+#endif
+    alpha = alpha * tex1.a;
+
+    // Same ambient floor and fog as the one-stage path.
+    current += sceneAmbient.xyz * 0.25;
+    float fogValue = saturate((vDepth - fogParams.y) * fogParams.w);
+    oColor.xyz = lerp(current, fogColour.xyz, fogValue);
+    oColor.a = alpha;
+}
+
+// ---------------------------------------------------------------------------
+// Suppress path
+// ---------------------------------------------------------------------------
+//
+// Bound to a fixed-function pass this layer cannot express when every
+// technique Ogre could fall back to is shaderless as well. D3D11 cannot draw
+// without shaders and throws on every such draw; this pair keeps the draw
+// legal and produces nothing: every vertex lands outside the clip volume
+// (w = 1, z = 2), and the fragment stage discards should anything survive.
+// POSITION is the only input, so it binds on any vertex declaration.
+
+void suppress_vertex(
+    in float4 iPosition : POSITION,
+    out float4 oPosition : SV_POSITION
+)
+{
+    oPosition = float4(0.0, 0.0, 2.0, 1.0) + iPosition * 0.0;
+}
+
+float4 suppress_fragment(in float4 iPosition : SV_POSITION) : SV_TARGET
+{
+    discard;
+    return float4(0.0, 0.0, 0.0, 0.0);
+}
