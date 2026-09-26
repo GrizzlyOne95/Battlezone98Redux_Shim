@@ -6,6 +6,7 @@
 #endif
 #include <Windows.h>
 #include <psapi.h>
+#include <tlhelp32.h>
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -13,9 +14,184 @@
 #include <map>
 #include <mutex>
 #include <sstream>
+#include <vector>
 
 namespace HookEngine
 {
+    namespace
+    {
+        std::recursive_mutex g_CodePatchMutex;
+
+        // How many times a code write waits for a thread to leave the site
+        // before giving up; each wait is a millisecond.
+        constexpr int kBusySiteAttempts = 20;
+
+        bool IsExecutableProtection(DWORD protect)
+        {
+            return (protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+        }
+
+        // The other threads of this process. They are enumerated and opened
+        // before anything is suspended: the snapshot allocates, and nothing
+        // may allocate, log or take a lock while another thread is held,
+        // since that thread may own the heap or the logger.
+        class OtherThreads
+        {
+        public:
+            OtherThreads()
+            {
+                HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+                if (snapshot == INVALID_HANDLE_VALUE)
+                    return;
+                const DWORD processId = GetCurrentProcessId();
+                const DWORD self = GetCurrentThreadId();
+                THREADENTRY32 entry = {};
+                entry.dwSize = sizeof(entry);
+                if (Thread32First(snapshot, &entry))
+                {
+                    do
+                    {
+                        if (entry.th32OwnerProcessID != processId || entry.th32ThreadID == self)
+                            continue;
+                        HANDLE handle = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, entry.th32ThreadID);
+                        if (handle)
+                            m_threads.push_back({ handle, entry.th32ThreadID, false, 0 });
+                    } while (Thread32Next(snapshot, &entry));
+                }
+                CloseHandle(snapshot);
+            }
+
+            ~OtherThreads()
+            {
+                Resume();
+                for (const Entry& thread : m_threads)
+                    CloseHandle(thread.handle);
+            }
+
+            OtherThreads(const OtherThreads&) = delete;
+            OtherThreads& operator=(const OtherThreads&) = delete;
+
+            // Suspends every thread and records where each one will resume.
+            // GetThreadContext does not return until the suspension has taken
+            // effect, so the pointer it reports is the instruction the thread
+            // is about to execute.
+            void Suspend()
+            {
+                for (Entry& thread : m_threads)
+                {
+                    thread.ip = 0;
+                    thread.suspended = SuspendThread(thread.handle) != static_cast<DWORD>(-1);
+                    if (!thread.suspended)
+                        continue;
+                    CONTEXT context = {};
+                    context.ContextFlags = CONTEXT_CONTROL;
+                    if (!GetThreadContext(thread.handle, &context))
+                        continue;
+#if defined(_M_IX86)
+                    thread.ip = context.Eip;
+#else
+                    thread.ip = static_cast<uintptr_t>(context.Rip);
+#endif
+                }
+            }
+
+            // After Suspend(): the id of a thread about to execute inside
+            // [begin, end), or 0 when the site is clear.
+            DWORD ThreadInside(uintptr_t begin, uintptr_t end) const
+            {
+                for (const Entry& thread : m_threads)
+                {
+                    if (thread.suspended && thread.ip >= begin && thread.ip < end)
+                        return thread.id;
+                }
+                return 0;
+            }
+
+            // Suspend() plus the check for one site. A thread inside the site
+            // means the write cannot land safely: everything is resumed again
+            // and its id is reported.
+            bool SuspendOutside(uintptr_t begin, uintptr_t end, DWORD& busyThread)
+            {
+                Suspend();
+                const DWORD busy = ThreadInside(begin, end);
+                if (busy == 0)
+                    return true;
+                busyThread = busy;
+                Resume();
+                return false;
+            }
+
+            void Resume()
+            {
+                for (Entry& thread : m_threads)
+                {
+                    if (!thread.suspended)
+                        continue;
+                    ResumeThread(thread.handle);
+                    thread.suspended = false;
+                }
+            }
+
+        private:
+            struct Entry
+            {
+                HANDLE handle;
+                DWORD id;
+                bool suspended;
+                uintptr_t ip;
+            };
+            std::vector<Entry> m_threads;
+        };
+    }
+
+    namespace
+    {
+        // The thread snapshot is system-wide and costs tens of milliseconds
+        // (measured at ~40 ms a write on the dev box, four seconds over a
+        // launch), so one is shared by every write that follows within
+        // kSnapshotMaxAgeMs, across lock scopes: the patcher's startup writes
+        // arrive one call apart and would otherwise each take their own. It
+        // is renewed once it is older than that, so a thread started in the
+        // meantime is still seen, and dropped at the last unlock once stale.
+        // Only the lock holder touches these, so the mutex is their guard.
+        constexpr ULONGLONG kSnapshotMaxAgeMs = 250;
+        int g_LockDepth = 0;
+        OtherThreads* g_Threads = nullptr;
+        ULONGLONG g_ThreadsStamp = 0;
+
+        void DropThreadSnapshot()
+        {
+            delete g_Threads;
+            g_Threads = nullptr;
+        }
+
+        // Requires the lock to be held by the calling thread.
+        OtherThreads& CurrentThreads()
+        {
+            const ULONGLONG now = GetTickCount64();
+            if (g_Threads && now - g_ThreadsStamp > kSnapshotMaxAgeMs)
+                DropThreadSnapshot();
+            if (!g_Threads)
+            {
+                g_Threads = new OtherThreads();
+                g_ThreadsStamp = now;
+            }
+            return *g_Threads;
+        }
+    }
+
+    CodePatchLock::CodePatchLock()
+    {
+        g_CodePatchMutex.lock();
+        ++g_LockDepth;
+    }
+
+    CodePatchLock::~CodePatchLock()
+    {
+        if (--g_LockDepth == 0 && g_Threads && GetTickCount64() - g_ThreadsStamp > kSnapshotMaxAgeMs)
+            DropThreadSnapshot();
+        g_CodePatchMutex.unlock();
+    }
 
     std::vector<uint16_t> ParseIdaPattern(const std::string& hex)
     {
@@ -32,6 +208,13 @@ namespace HookEngine
 
     bool WriteMemory(uint32_t address, const void* data, size_t len)
     {
+        // Nothing to write is not a write that succeeded: ApplyPatch relies
+        // on this to report a patch whose payload was never filled as a
+        // [SKIP], which is what the zero-length VirtualProtect used to do.
+        if (len == 0)
+            return false;
+
+        CodePatchLock lock;
         HANDLE hProc = GetCurrentProcess();
         DWORD oldProtect = 0;
         void* ptr = reinterpret_cast<void*>(address);
@@ -39,37 +222,184 @@ namespace HookEngine
         if (!VirtualProtect(ptr, len, PAGE_EXECUTE_READWRITE, &oldProtect))
             return false;
 
-        SIZE_T written = 0;
-        BOOL ok = WriteProcessMemory(hProc, ptr, data, len, &written);
+        bool ok = false;
+        DWORD busyThread = 0;
+        if (!IsExecutableProtection(oldProtect))
+        {
+            // Data, not code: nothing executes it, so a plain copy is enough.
+            SIZE_T written = 0;
+            ok = WriteProcessMemory(hProc, ptr, data, len, &written) && written == len;
+        }
+        else
+        {
+            // Code the game may be running this instant. WriteProcessMemory
+            // is a plain copy, not an atomic store, and most sites replace
+            // several instructions with one jump: a thread whose instruction
+            // pointer is inside the site when the bytes land executes half of
+            // the old code and half of the new. So every other thread is held
+            // while the bytes go in, after a check that none of them is inside
+            // the site; one that is gets a moment to move on and the write is
+            // tried again.
+            OtherThreads& threads = CurrentThreads();
+            for (int attempt = 0; attempt < kBusySiteAttempts; ++attempt)
+            {
+                if (attempt > 0)
+                    Sleep(1);
+                if (!threads.SuspendOutside(address, address + len, busyThread))
+                    continue;
+                SIZE_T written = 0;
+                ok = WriteProcessMemory(hProc, ptr, data, len, &written) && written == len;
+                FlushInstructionCache(hProc, ptr, len);
+                threads.Resume();
+                busyThread = 0;
+                break;
+            }
+        }
 
-        VirtualProtect(ptr, len, oldProtect, &oldProtect);
-        return ok && written == len;
+        DWORD restoreProtect = 0;
+        VirtualProtect(ptr, len, oldProtect, &restoreProtect);
+
+        if (busyThread != 0)
+        {
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "PATCH",
+                "site 0x%08X (%u bytes) not written: thread %lu kept executing inside it",
+                address, static_cast<unsigned>(len), static_cast<unsigned long>(busyThread));
+        }
+        return ok;
+    }
+
+    namespace
+    {
+        // The guard half of ApplyPatch: false when the site is 0, the payload
+        // was never filled, the guard is shorter than the payload, or the
+        // bytes at the site are not the ones the guard expects.
+        bool PatchGuardPasses(const PatchDef& patch)
+        {
+            if (patch.address == 0 || patch.payload.empty()) return false;
+
+            if (!patch.expected_original.empty())
+            {
+                // A guard shorter than the payload verifies nothing about the
+                // bytes past it; refuse rather than overwrite them blind.
+                if (patch.expected_original.size() < patch.payload.size())
+                {
+                    BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "PATCH",
+                        "%s: guard covers %u of %u payload bytes at 0x%08X; not applied",
+                        patch.name.c_str(),
+                        static_cast<unsigned>(patch.expected_original.size()),
+                        static_cast<unsigned>(patch.payload.size()),
+                        patch.address);
+                    return false;
+                }
+                std::vector<uint8_t> current(patch.expected_original.size());
+                if (!ReadMemory(patch.address, current.data(), current.size())) return false;
+                if (memcmp(current.data(), patch.expected_original.data(), current.size()) != 0) return false;
+            }
+            return true;
+        }
     }
 
     bool ApplyPatch(const PatchDef& patch)
     {
-        if (patch.address == 0) return false;
+        // Held across the guard check and the write so nobody rewrites the
+        // site in between.
+        CodePatchLock lock;
+        if (!PatchGuardPasses(patch)) return false;
+        return WriteMemory(patch.address, patch.payload.data(), patch.payload.size());
+    }
 
-        if (!patch.expected_original.empty())
+    std::vector<bool> ApplyPatches(const std::vector<PatchDef>& patches)
+    {
+        std::vector<bool> applied(patches.size(), false);
+        CodePatchLock lock;
+
+        // Guards and protections first, while every thread still runs:
+        // ReadMemory, VirtualProtect and the logger are all off limits once
+        // the threads are held, since a held thread may own the heap or the
+        // log lock.
+        struct Site
         {
-            // A guard shorter than the payload verifies nothing about the
-            // bytes past it; refuse rather than overwrite them blind.
-            if (patch.expected_original.size() < patch.payload.size())
-            {
-                BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "PATCH",
-                    "%s: guard covers %u of %u payload bytes at 0x%08X; not applied",
-                    patch.name.c_str(),
-                    static_cast<unsigned>(patch.expected_original.size()),
-                    static_cast<unsigned>(patch.payload.size()),
-                    patch.address);
-                return false;
-            }
-            std::vector<uint8_t> current(patch.expected_original.size());
-            if (!ReadMemory(patch.address, current.data(), current.size())) return false;
-            if (memcmp(current.data(), patch.expected_original.data(), current.size()) != 0) return false;
+            size_t index;
+            void* ptr;
+            size_t len;
+            DWORD oldProtect;
+            bool executable;
+            bool pending;
+            DWORD busyThread;
+        };
+        std::vector<Site> sites;
+        sites.reserve(patches.size());
+        for (size_t i = 0; i < patches.size(); ++i)
+        {
+            const PatchDef& patch = patches[i];
+            if (!PatchGuardPasses(patch)) continue;
+            Site site{ i, reinterpret_cast<void*>(patch.address), patch.payload.size(), 0, false, true, 0 };
+            if (!VirtualProtect(site.ptr, site.len, PAGE_EXECUTE_READWRITE, &site.oldProtect)) continue;
+            site.executable = IsExecutableProtection(site.oldProtect);
+            sites.push_back(site);
         }
 
-        return WriteMemory(patch.address, patch.payload.data(), patch.payload.size());
+        HANDLE hProc = GetCurrentProcess();
+        size_t codePending = 0;
+        for (Site& site : sites)
+        {
+            if (site.executable)
+            {
+                ++codePending;
+                continue;
+            }
+            // Data: nothing executes it, a plain copy is enough.
+            SIZE_T written = 0;
+            applied[site.index] = WriteProcessMemory(hProc, site.ptr, patches[site.index].payload.data(), site.len, &written) && written == site.len;
+            site.pending = false;
+        }
+
+        if (codePending > 0)
+        {
+            // One suspension for every code site. A site some thread is about
+            // to execute stays pending for this round; the threads get a
+            // moment to move on and the round repeats for what is left.
+            OtherThreads& threads = CurrentThreads();
+            for (int attempt = 0; attempt < kBusySiteAttempts && codePending > 0; ++attempt)
+            {
+                if (attempt > 0)
+                    Sleep(1);
+                threads.Suspend();
+                for (Site& site : sites)
+                {
+                    if (!site.pending) continue;
+                    const uintptr_t begin = reinterpret_cast<uintptr_t>(site.ptr);
+                    const DWORD busy = threads.ThreadInside(begin, begin + site.len);
+                    if (busy != 0)
+                    {
+                        site.busyThread = busy;
+                        continue;
+                    }
+                    SIZE_T written = 0;
+                    applied[site.index] = WriteProcessMemory(hProc, site.ptr, patches[site.index].payload.data(), site.len, &written) && written == site.len;
+                    FlushInstructionCache(hProc, site.ptr, site.len);
+                    site.pending = false;
+                    site.busyThread = 0;
+                    --codePending;
+                }
+                threads.Resume();
+            }
+        }
+
+        for (const Site& site : sites)
+        {
+            DWORD restoreProtect = 0;
+            VirtualProtect(site.ptr, site.len, site.oldProtect, &restoreProtect);
+        }
+        for (const Site& site : sites)
+        {
+            if (!site.pending) continue;
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "PATCH",
+                "%s: site 0x%08X (%u bytes) not written: thread %lu kept executing inside it",
+                patches[site.index].name.c_str(), patches[site.index].address,
+                static_cast<unsigned>(site.len), static_cast<unsigned long>(site.busyThread));
+        }
+        return applied;
     }
 
     void* ResolveRelCallTarget(uint32_t instrAddr)
