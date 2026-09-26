@@ -206,6 +206,10 @@ namespace BZROpenShim
         void InstallUnitVoQueueHooksIfPossible();
         void RevertUnitVoToBaseline();
 
+        // --- Pilot team restore on boarding (pilot_team_restore.cpp) ----------
+        void RefreshPilotTeamRestoreState();
+        void RevertPilotTeamRestoreToBaseline();
+
         // --- Player pilot flashlight (pilot_flashlight.cpp) ------------------
         extern bool g_PilotFlashlightConfigInitialized;
         void InitializePilotFlashlightConfig();
