@@ -193,6 +193,25 @@ Start with a bounded support set and expand based on real mod telemetry:
 
 Log unsupported combinations once per material/pass instead of guessing.
 
+#### Vertex-input variants (2026-09-26)
+
+Fixed function tolerated any vertex layout; D3D11 does not. `D3D11VertexDeclaration::getILayoutByShader` requires every element of the bound vertex shader's input signature to exist in the mesh's vertex declaration and throws `Unable to set D3D11 vertex declaration` on each draw otherwise. That exception escapes `Root::renderOneFrame`; the game's catch at `0x007C7340` asks `0x007AE480` to lower graphics quality and, when it cannot, logs `Closing application due to complete render failure` and exits.
+
+ISDF Chronicles `isdfms10` hit this on load: `prop.mesh` (object #1) is a Blender export with `POSITION/NORMAL/TANGENT/TEXCOORD0` and no `DIFFUSE`, while `OSE_FixedFunc_Textured_vertex` read `COLOR0`. Its `foliage` and `water` materials took the fixed-function path and every draw threw. Native BZR geometry such as the mire foliage meshes carries `DIFFUSE` and was unaffected.
+
+The vertex entry points therefore compile in input-reduced variants (`COMPAT_NO_VERTEX_COLOUR`, `COMPAT_NO_TEXCOORD`):
+
+```text
+OSE_FixedFunc_Textured_vertex_novc       POSITION, TEXCOORD0
+OSE_FixedFunc_Textured_vertex_nouv       POSITION, COLOR0
+OSE_FixedFunc_Textured_vertex_novc_nouv  POSITION
+OSE_FixedFunc_Untextured_vertex_novc     POSITION
+```
+
+`handleSchemeNotFound` passes the requesting `Renderable`. The runtime reads its `RenderOperation` vertex declaration (vtable slot 3, SEH-guarded, re-entrancy-guarded) and `Dx11Compat::FitVertexProgramToInputs` swaps the resolved vertex program, OSE_Compat family adapters included, for the variant whose inputs the mesh supplies. Output signatures are unchanged, so the paired fragment program stays the same. The swap is logged once as `[DX11COMPAT] material=<m> vertex-inputs=<list> fit=adapted vs=<from> -> <to>`. A mesh without `POSITION` is declined with `reason=vertex-inputs` and falls back to stock. An unreadable declaration counts as "no vertex colour": dropping a tint is cosmetic, while requiring a missing `COLOR0` is fatal.
+
+Limitation: the generated technique belongs to the material, so the first renderable to miss decides the variant. A material shared between a mesh with `DIFFUSE` and one without still works as long as the mesh without it is the one that decides, because the `_novc` variant binds on both. If the mesh with `DIFFUSE` decides first, the other mesh gets the `COLOR0`-reading program.
+
 ### Level 3 - optional RTSS-generated fallback
 
 Ogre's RT Shader System is designed to generate shaders for fixed-function material state. Redux already exposes evidence of `ShaderGeneratorDefaultScheme` in runtime behaviour, so RTSS may be available in some form.

@@ -464,6 +464,102 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         }
     }
 
+    const char* VertexInputFitName(VertexInputFit fit) noexcept
+    {
+        switch (fit)
+        {
+        case VertexInputFit::Unchanged: return "unchanged";
+        case VertexInputFit::Adapted: return "adapted";
+        case VertexInputFit::Unsatisfiable: return "unsatisfiable";
+        }
+        return "unsatisfiable";
+    }
+
+    VertexInputFit FitVertexProgramToInputs(std::string_view resolvedVertex,
+                                            const VertexInputs& inputs,
+                                            std::string& outVertex)
+    {
+        outVertex.assign(resolvedVertex.data(), resolvedVertex.size());
+        const std::string lower = ToLowerCopy(TrimAscii(resolvedVertex));
+        // Only our own adapters have known input signatures. Anything else
+        // (a native delegate, a future program) is left exactly as resolved.
+        if (!StartsWithLower(lower, "ose_fixedfunc_") &&
+            !StartsWithLower(lower, "ose_compat_"))
+        {
+            return VertexInputFit::Unchanged;
+        }
+        if (!inputs.position)
+        {
+            // Every variant reads POSITION; nothing can bind.
+            outVertex.clear();
+            return VertexInputFit::Unsatisfiable;
+        }
+
+        // Two entry points back every adapter (openshim_dx11_fixedfunc-sm4.hlsl):
+        // fixedfunc_untextured_vertex reads POSITION+COLOR0, fixedfunc_vertex
+        // reads POSITION+COLOR0+TEXCOORD0. The Untextured family is the only
+        // one on the untextured entry; the family define is informational, so
+        // an input-reduced generic variant is an exact stand-in.
+        const bool untexturedEntry = ContainsLower(lower, "untextured");
+        const bool diffuse = inputs.known && inputs.diffuse;
+        const bool texcoord = !inputs.known || inputs.texcoord0;
+
+        const char* variant = nullptr;
+        if (untexturedEntry)
+        {
+            if (diffuse)
+            {
+                return VertexInputFit::Unchanged;
+            }
+            variant = "OSE_FixedFunc_Untextured_vertex_novc";
+        }
+        else
+        {
+            if (diffuse && texcoord)
+            {
+                return VertexInputFit::Unchanged;
+            }
+            if (!diffuse && texcoord)
+            {
+                variant = "OSE_FixedFunc_Textured_vertex_novc";
+            }
+            else if (diffuse)
+            {
+                variant = "OSE_FixedFunc_Textured_vertex_nouv";
+            }
+            else
+            {
+                variant = "OSE_FixedFunc_Textured_vertex_novc_nouv";
+            }
+        }
+        outVertex.assign(variant);
+        return VertexInputFit::Adapted;
+    }
+
+    std::string DescribeVertexInputs(const VertexInputs& inputs)
+    {
+        if (!inputs.known)
+        {
+            return "unknown";
+        }
+        std::string out;
+        auto add = [&out](bool present, const char* name) {
+            if (!present)
+            {
+                return;
+            }
+            if (!out.empty())
+            {
+                out += ',';
+            }
+            out += name;
+        };
+        add(inputs.position, "position");
+        add(inputs.diffuse, "diffuse");
+        add(inputs.texcoord0, "texcoord0");
+        return out.empty() ? std::string("none") : out;
+    }
+
     LegacyPassKind ClassifyLegacyPass(const LegacyPassDesc& desc) noexcept
     {
         if (!desc.hasVertexRef && !desc.hasFragmentRef)
