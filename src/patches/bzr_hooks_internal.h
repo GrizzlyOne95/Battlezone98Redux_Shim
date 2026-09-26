@@ -218,6 +218,25 @@ namespace BZROpenShim
     extern FnTerrainGetIntersection g_BzrFn_TerrainGetIntersection;
     extern FnProcessDoSubTask g_BzrFn_TurretTankProcessDoSubTask;
 
+    using FnSprayBuildingSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnTugPostLoad = bool(__thiscall*)(void* thisPtr);
+    using FnRigProcessCleanUState2 = void(__thiscall*)(void* process);
+    using FnGameObjectHandleGetObj = void*(__cdecl*)(uint32_t handle);
+    using FnScriptProducerPredicate = bool(__cdecl*)(int handle);
+    using FnAIUnitRemove = void(__cdecl*)(void* unitPtr);
+    using FnAIBuildConstructionEnd = void(__cdecl*)(int teamId, int constructType);
+    using FnAIBuildReservedAreaRemove = void(__cdecl*)(int teamId, int reservedArea);
+    using FnAISpentCreditRefund = void(__cdecl*)(int teamId, void* buildingPtr, void* unitPtr);
+    using FnUnitsSOrderStop = void(__cdecl*)(void* unitPtr);
+    using FnAIBuildUnassignedCCAdd = void(__cdecl*)(void* teamPtr, void* unitPtr);
+    extern FnAIBuildConstructionEnd g_BzrFn_AIBuildConstructionEnd;
+    extern FnAIBuildReservedAreaRemove g_BzrFn_AIBuildReservedAreaRemove;
+    extern FnAIBuildUnassignedCCAdd g_BzrFn_AIBuildUnassignedCCAdd;
+    extern FnAISpentCreditRefund g_BzrFn_AISpentCreditRefund;
+    extern FnAIUnitRemove g_BzrFn_AIUnitRemove;
+    extern FnSprayBuildingSimulate g_BzrFn_SprayBuildingSimulateOriginal;
+    extern FnUnitsSOrderStop g_BzrFn_UnitsSOrderStop;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -1213,6 +1232,43 @@ namespace BZROpenShim
         extern bool g_SmartScavengerPathingEnabled;
         bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig);
         void InstallAiTuningHooksIfPossible();
+
+        // --- Unit behaviour fixes (unit_behavior_fixes.cpp) --------------------
+        inline constexpr uintptr_t kGogAIUnitRemoveEntryAddr = 0x0068FC60;
+        extern bool g_ApcAlliedTargetDeployFixEnabled;
+        extern bool g_ApcAlliedTargetDeployFixInstalled;
+        extern FnScriptProducerPredicate g_BzrFn_ScriptCanBuildOriginal;
+        extern FnScriptProducerPredicate g_BzrFn_ScriptIsBusyOriginal;
+        extern bool g_ConstructorRecycleStaleTargetFixActive;
+        extern bool g_ConstructorRecycleStaleTargetFixEnabled;
+        extern bool g_ConstructorRecycleStaleTargetFixInstalled;
+        extern volatile long g_ConstructorRecycleStaleTargetLogBudget;
+        extern bool g_ConstructorRecycleStaleTargetMismatchLogged;
+        extern bool g_ConstructorRemoteBuildFixActive;
+        extern bool g_ConstructorRemoteBuildFixEnabled;
+        extern bool g_ConstructorRemoteBuildFixInstalled;
+        extern bool g_ConstructorRemoteBuildFixMismatchLogged;
+        extern volatile long g_ConstructorRemoteBuildTraceBudget;
+        extern bool g_ProducerScriptPredicateHooksEnabled;
+        extern bool g_ProducerScriptPredicateHooksInstalled;
+        extern InlineDetour32 g_ScriptCanBuildDetour;
+        extern InlineDetour32 g_ScriptIsBusyDetour;
+        extern bool g_SplinterUndeadFixActive;
+        extern bool g_SplinterUndeadFixEnabled;
+        extern volatile long g_SplinterUndeadTraceBudget;
+        extern bool g_SprayBuildingSimulateHookInstalled;
+        extern bool g_TugCargoPostLoadFixActive;
+        extern bool g_TugCargoPostLoadFixEnabled;
+        extern bool g_TugCargoPostLoadFixInstalled;
+        extern volatile long g_TugCargoPostLoadLogBudget;
+        void InstallProducerScriptPredicateHooksIfPossible();
+        void InstallSplinterUndeadFixIfPossible();
+        void InstallConstructorRecycleStaleTargetFixIfPossible();
+        void InstallTugCargoPostLoadFixIfPossible();
+        void RefreshApcAlliedTargetDeployFixState();
+        void InstallApcAlliedTargetDeployFixIfPossible();
+        bool ShouldTraceConstructorRemoteBuildFix();
+        void InstallConstructorRemoteBuildFixIfPossible();
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
