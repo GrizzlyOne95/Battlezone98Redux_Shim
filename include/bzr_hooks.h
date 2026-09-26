@@ -39,6 +39,7 @@ namespace BZROpenShim
     void SetPersonCarrierGetSelectedOriginal(void* target);
     void SetPersonCarrierGetWeaponOriginal(void* target);
     void* __fastcall PersonCarrierGetWeaponGuard(void* carrier, void* edx, int slot);
+    void* __fastcall PersonSniperScanGetWeaponGuard(void* carrier, void* edx, int slot);
     void SetControlPanelEnemyPOriginal(void* target);
     uint32_t __fastcall PersonCarrierGetSelectedGuard(void* carrier, void* person);
     bool __fastcall ControlPanelEnemyPAttackOrderHook(

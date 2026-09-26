@@ -162,6 +162,10 @@ namespace BZROpenShim
             // five-slot loop calls Carrier::GetWeapon without checking
             // Person+0x1A0, so guarding GetSelected alone left this live.
             { 0, HookEngine::PatchType::REL32, {}, "Pilot Carrier Weapon Null Guard", false, {} },
+            // Person::Simulate's sniper-crouch scan dereferences every
+            // Carrier::GetWeapon result for the selected mask; an empty
+            // selected hardpoint gets a non-SNIP stand-in instead of null.
+            { 0, HookEngine::PatchType::REL32, {}, "Person Sniper Scan Weapon Null Guard", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "World Builder Save Destination Dialog", false, {} },
             // ControlPanel target-list EnemyP call: an opt-in local order
             // authoring relaxation. The global EnemyP implementation stays stock.
