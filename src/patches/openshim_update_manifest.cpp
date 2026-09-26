@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <exception>
 #include <regex>
 
 namespace BZROpenShim
@@ -118,15 +119,41 @@ namespace BZROpenShim
             payload.architecture = match[6].matched ? UnescapeLuaString(match[6].str()) : std::string();
             return true;
         }
+
+        // A tool entry attests a file the updater runs rather than installs:
+        // { source = "...", sha256 = "...", size = N } with no destination.
+        bool ReadTool(const std::string& text,
+                      const char* name,
+                      OpenShimUpdatePayloadManifest& tool)
+        {
+            const std::string pattern =
+                std::string("(?:^|[\\r\\n])\\s*") + name +
+                R"MANIFEST(\s*=\s*\{\s*source\s*=\s*"([^"]+)"\s*,\s*sha256\s*=\s*"([0-9A-Fa-f]{64})"\s*,\s*size\s*=\s*([0-9]+)\s*\}\s*,?)MANIFEST";
+            std::smatch match;
+            if (!std::regex_search(text, match, std::regex(pattern)))
+                return false;
+
+            tool.source = UnescapeLuaString(match[1].str());
+            tool.destination.clear();
+            tool.sha256 = Lower(UnescapeLuaString(match[2].str()));
+            try
+            {
+                tool.size = std::stoull(match[3].str());
+            }
+            catch (...)
+            {
+                return false;
+            }
+            tool.version.clear();
+            tool.architecture.clear();
+            return true;
+        }
     }
 
-    bool ParseOpenShimUpdateManifest(const std::string& text,
-                                     OpenShimUpdateManifest& manifest,
-                                     std::string& error)
+    static bool ParseManifestText(const std::string& text,
+                                  OpenShimUpdateManifest& manifest,
+                                  std::string& error)
     {
-        manifest = {};
-        error.clear();
-
         uint64_t formatVersion = 0;
         if (!ReadUnsigned(text, "formatVersion", formatVersion) || formatVersion != 2)
         {
@@ -146,6 +173,14 @@ namespace BZROpenShim
             error = "manifest is missing a required field or payload";
             return false;
         }
+        if (!ReadTool(text, "helper", manifest.helper))
+        {
+            // Packages built before the helper was attested parse fine
+            // otherwise; name the real reason so the log line is actionable.
+            error = "manifest does not attest bzfile_replace_helper.exe; "
+                    "the Workshop package predates this OpenShim";
+            return false;
+        }
 
         manifest.sha256 = Lower(manifest.sha256);
         if (!IsSha256(manifest.sha256) || manifest.architecture != "x86" ||
@@ -160,12 +195,86 @@ namespace BZROpenShim
             manifest.winmm.version != manifest.version ||
             manifest.winmm.architecture != "x86" ||
             !IsSha256(manifest.network.sha256) ||
-            !IsSha256(manifest.patches.sha256))
+            !IsSha256(manifest.patches.sha256) ||
+            manifest.helper.source != "bzfile_replace_helper.exe" ||
+            !IsSha256(manifest.helper.sha256) ||
+            manifest.helper.size == 0)
         {
             error = "manifest identity or payload metadata is invalid";
             return false;
         }
 
+        return true;
+    }
+
+    bool ParseOpenShimUpdateManifest(const std::string& text,
+                                     OpenShimUpdateManifest& manifest,
+                                     std::string& error)
+    {
+        manifest = {};
+        error.clear();
+        // std::regex can throw on pathological input (MSVC's matcher is
+        // recursive and reports error_stack / error_complexity), and the
+        // manifest is untrusted text from a Workshop download.
+        try
+        {
+            return ParseManifestText(text, manifest, error);
+        }
+        catch (const std::exception&)
+        {
+            manifest = {};
+            error = "manifest could not be parsed";
+            return false;
+        }
+    }
+
+    bool ParseOpenShimVersion(const std::string& text, std::vector<uint32_t>& parts)
+    {
+        parts.clear();
+        size_t begin = 0;
+        while (begin < text.size())
+        {
+            const size_t end = text.find('.', begin);
+            const std::string part = text.substr(begin,
+                end == std::string::npos ? std::string::npos : end - begin);
+            if (part.empty() || part.size() > 9 ||
+                !std::all_of(part.begin(), part.end(), [](unsigned char ch)
+                    { return std::isdigit(ch) != 0; }))
+            {
+                parts.clear();
+                return false;
+            }
+            uint32_t value = 0;
+            for (const char ch : part)
+                value = value * 10 + static_cast<uint32_t>(ch - '0');
+            parts.push_back(value);
+            if (end == std::string::npos)
+                return true;
+            begin = end + 1;
+        }
+        // Empty text, or text ending in a separator ("1.0.").
+        parts.clear();
+        return false;
+    }
+
+    bool CompareOpenShimVersions(const std::string& left,
+                                 const std::string& right,
+                                 int& order)
+    {
+        std::vector<uint32_t> leftParts;
+        std::vector<uint32_t> rightParts;
+        if (!ParseOpenShimVersion(left, leftParts) ||
+            !ParseOpenShimVersion(right, rightParts))
+            return false;
+        const size_t count = (std::max)(leftParts.size(), rightParts.size());
+        order = 0;
+        for (size_t index = 0; index < count; ++index)
+        {
+            const uint32_t lhs = index < leftParts.size() ? leftParts[index] : 0;
+            const uint32_t rhs = index < rightParts.size() ? rightParts[index] : 0;
+            if (lhs < rhs) { order = -1; return true; }
+            if (lhs > rhs) { order = 1; return true; }
+        }
         return true;
     }
 }
