@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 
 #include "bzr_hooks.h"
@@ -20,6 +21,7 @@ namespace BZROpenShim
     // GameObject::GetHandle, resolved by ResolveBzrHooks from patches.json;
     // 0 until then, and every caller stands down on 0.
     extern uintptr_t g_GameObjectGetHandleAddr;
+    using FnPlayGlobalSound = int(__cdecl*)(const char* filename, uint32_t arg1, uint32_t arg2, uint32_t arg3);
 
     namespace Hooks
     {
@@ -159,6 +161,12 @@ namespace BZROpenShim
         bool IsSinglePlayerSession();
         bool TryGetGameObjectFieldBase(void* objectPtr, uint8_t*& outBase);
         bool TryGetGameObjectFromObj76(void* obj76, void*& outGameObject);
+        bool IsNeutralTeamObject(void* objectPtr);
+        // Directory of the game executable; legacy per-mod cfg files live there.
+        std::filesystem::path GetConfigModuleDirectory();
+        char* TrimAsciiInPlace(char* text);
+        // Resolved by ResolveBzrHooks from patches.json ("PlayGlobalSound").
+        extern FnPlayGlobalSound g_BzrFn_PlayGlobalSound;
         // Engine viewport height global (the scrap/pilot HUD and radar layout read it).
         inline constexpr uintptr_t kScrapPilotHudViewportHeightAddr = 0x02CECEE4;
 
@@ -210,6 +218,14 @@ namespace BZROpenShim
         void HeadlightNotifyMissionRunStateChanged(bool enteringSimulation);
         void InstallEmissionLightFixIfPossible();
         void VerifyExpectedOgreExportsIfPossible();
+
+        // --- Under-attack alert and reticle popup (alert_reticle_modes.cpp) --
+        extern bool g_UnderAttackAlertConfigInitialized;
+        extern bool g_TargetReticlePopupConfigInitialized;
+        void InitializeUnderAttackAlertConfig();
+        void RevertUnderAttackAlertToBaseline();
+        void InitializeTargetReticlePopupConfig();
+        void RevertTargetReticlePopupToBaseline();
 
         // --- Ordnance velocity inheritance (ordnance_velocity.cpp) -----------
         extern bool g_OrdnanceVelocityInheritanceEnabled;
