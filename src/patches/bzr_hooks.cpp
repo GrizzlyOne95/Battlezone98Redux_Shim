@@ -1849,6 +1849,7 @@ namespace BZROpenShim
         static InlineDetour32 g_PersonSimulateDetour = {};
         static bool g_JumpSnipeProbeInstallAttempted = false;
         static bool g_JumpSnipeProbeInstalled = false;
+        static bool g_JumpSnipeProbeMismatchLogged = false;
         static JumpSnipeProbeLogState g_JumpSnipeProbeLogState = {};
         // Desired state starts from the INI baseline and may be overridden by
         // the EXU bridge for scripted content. The refresh gate keeps it out
@@ -5844,6 +5845,52 @@ namespace BZROpenShim
             TrySetChunkProxyBillboardPosition(billboard, setPosition, 0.0f, kChunkProxyHiddenY, 0.0f);
         }
 
+        // --- Ogre call guards ------------------------------------------------
+        //
+        // Every Ogre call in the chunk proxy runs under __try, because the
+        // object it is handed may have been destroyed by a scene teardown the
+        // shim did not observe, and only SEH stops the access violation that
+        // follows. But Ogre also throws C++ exceptions as a matter of course:
+        // a missing mesh or material, a name collision in createEntity, an
+        // out-of-range getSubEntity, a codec error. An
+        // __except(EXCEPTION_EXECUTE_HANDLER) caught those too, as the MSVC
+        // C++ exception code, and executing an SEH handler for a C++ throw
+        // skips every destructor between the throw and that frame: OgreMain's
+        // mutex guards stayed held, a half-registered object stayed in the
+        // movable-object map, the exception object leaked. So each guard now
+        // has two halves. The C++ half (CatchOgreThrow) runs the call inside
+        // try/catch, which lets the throw unwind OgreMain's frames before it
+        // is caught. The SEH half keeps only the hardware faults and hands a
+        // C++ exception back to the unwinder (OgreCallSehFilter), so it can
+        // never again be swallowed on this path.
+        constexpr unsigned long kMsvcCppExceptionCode = 0xE06D7363UL;
+
+        static int OgreCallSehFilter(unsigned long code)
+        {
+            return code == kMsvcCppExceptionCode ? EXCEPTION_CONTINUE_SEARCH : EXCEPTION_EXECUTE_HANDLER;
+        }
+
+        // Runs `call` and reports a C++ throw as false. The lambda is its own
+        // function, so the caller's __try frame stays free of objects that
+        // need unwinding (C2712). The log budget is per site and small: these
+        // guards sit on the per-slot render tick.
+        template <typename Call>
+        static bool CatchOgreThrow(const char* site, Call&& call)
+        {
+            try
+            {
+                call();
+                return true;
+            }
+            catch (...)
+            {
+                static volatile LONG s_budget = 8;
+                if (InterlockedDecrement(&s_budget) >= 0)
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Ogre threw in %hs; call abandoned\n", site);
+                return false;
+            }
+        }
+
         static bool TryCreateChunkProxyBillboardSet(
             void* sceneManager,
             FnOgreGetRootSceneNode getRootSceneNode,
@@ -5858,11 +5905,17 @@ namespace BZROpenShim
 
             __try
             {
-                outRootNode = getRootSceneNode(sceneManager);
-                if (outRootNode)
-                    outBillboardSet = createBillboardSet(sceneManager, g_ChunkProxyCapacity);
+                if (!CatchOgreThrow("createBillboardSet", [&] {
+                        outRootNode = getRootSceneNode(sceneManager);
+                        if (outRootNode)
+                            outBillboardSet = createBillboardSet(sceneManager, g_ChunkProxyCapacity);
+                    }))
+                {
+                    outRootNode = nullptr;
+                    outBillboardSet = nullptr;
+                }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 outRootNode = nullptr;
                 outBillboardSet = nullptr;
@@ -5883,12 +5936,13 @@ namespace BZROpenShim
 
             __try
             {
-                setBillboardsInWorldSpace(billboardSet, true);
-                setDefaultDimensions(billboardSet, g_ChunkProxyDebugSize, g_ChunkProxyDebugSize);
-                attachObject(rootNode, billboardSet);
-                return true;
+                return CatchOgreThrow("setupBillboardSet", [&] {
+                    setBillboardsInWorldSpace(billboardSet, true);
+                    setDefaultDimensions(billboardSet, g_ChunkProxyDebugSize, g_ChunkProxyDebugSize);
+                    attachObject(rootNode, billboardSet);
+                });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -5899,11 +5953,18 @@ namespace BZROpenShim
             if (!billboardSet || !createBillboard)
                 return nullptr;
 
+            void* billboard = nullptr;
             __try
             {
-                return createBillboard(billboardSet, 0.0f, kChunkProxyHiddenY, 0.0f, color);
+                if (!CatchOgreThrow("createBillboard", [&] {
+                        billboard = createBillboard(billboardSet, 0.0f, kChunkProxyHiddenY, 0.0f, color);
+                    }))
+                {
+                    billboard = nullptr;
+                }
+                return billboard;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return nullptr;
             }
@@ -5921,10 +5982,9 @@ namespace BZROpenShim
 
             __try
             {
-                setPosition(billboard, x, y, z);
-                return true;
+                return CatchOgreThrow("setBillboardPosition", [&] { setPosition(billboard, x, y, z); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -5937,9 +5997,9 @@ namespace BZROpenShim
 
             __try
             {
-                setVisible(entity, false);
+                CatchOgreThrow("hideEntity", [&] { setVisible(entity, false); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
             }
         }
@@ -5954,11 +6014,13 @@ namespace BZROpenShim
 
             __try
             {
-                setPosition(sceneNode, 0.0f, kChunkProxyHiddenY, 0.0f);
-                if (setOrientation)
-                    setOrientation(sceneNode, 1.0f, 0.0f, 0.0f, 0.0f);
+                CatchOgreThrow("resetNode", [&] {
+                    setPosition(sceneNode, 0.0f, kChunkProxyHiddenY, 0.0f);
+                    if (setOrientation)
+                        setOrientation(sceneNode, 1.0f, 0.0f, 0.0f, 0.0f);
+                });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
             }
         }
@@ -5994,18 +6056,24 @@ namespace BZROpenShim
             const OgreQuaternion identity = { 1.0f, 0.0f, 0.0f, 0.0f };
             __try
             {
-                outSceneNode = createChildSceneNode(rootNode, zeroPos, identity);
-                if (outSceneNode)
+                if (!CatchOgreThrow("createMeshProxy", [&] {
+                        outSceneNode = createChildSceneNode(rootNode, zeroPos, identity);
+                        if (outSceneNode)
+                        {
+                            outEntity = CreateChunkMeshProxyEntity(sceneManager, createEntity, meshName);
+                            if (outEntity)
+                            {
+                                attachObject(outSceneNode, outEntity);
+                                setVisible(outEntity, false);
+                            }
+                        }
+                    }))
                 {
-                    outEntity = CreateChunkMeshProxyEntity(sceneManager, createEntity, meshName);
-                    if (outEntity)
-                    {
-                        attachObject(outSceneNode, outEntity);
-                        setVisible(outEntity, false);
-                    }
+                    outSceneNode = nullptr;
+                    outEntity = nullptr;
                 }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 outSceneNode = nullptr;
                 outEntity = nullptr;
@@ -6021,11 +6089,14 @@ namespace BZROpenShim
             if (!sceneManager || !getRootSceneNode)
                 return nullptr;
 
+            void* rootNode = nullptr;
             __try
             {
-                return getRootSceneNode(sceneManager);
+                if (!CatchOgreThrow("rootSceneNode", [&] { rootNode = getRootSceneNode(sceneManager); }))
+                    rootNode = nullptr;
+                return rootNode;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return nullptr;
             }
@@ -6141,20 +6212,21 @@ namespace BZROpenShim
 
             __try
             {
-                setNodePosition(sceneNode, transform.x, transform.y, transform.z);
-                if (setNodeOrientation)
-                {
-                    setNodeOrientation(
-                        sceneNode,
-                        transform.orientation.w,
-                        transform.orientation.x,
-                        transform.orientation.y,
-                        transform.orientation.z);
-                }
-                setVisible(entity, true);
-                return true;
+                return CatchOgreThrow("updateMeshProxyTransform", [&] {
+                    setNodePosition(sceneNode, transform.x, transform.y, transform.z);
+                    if (setNodeOrientation)
+                    {
+                        setNodeOrientation(
+                            sceneNode,
+                            transform.orientation.w,
+                            transform.orientation.x,
+                            transform.orientation.y,
+                            transform.orientation.z);
+                    }
+                    setVisible(entity, true);
+                });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -6560,23 +6632,26 @@ namespace BZROpenShim
             if (!sceneManager || !getCurrentViewport)
                 return fallbackCamera;
 
+            void* viewportCamera = nullptr;
             __try
             {
-                void* viewport = getCurrentViewport(sceneManager);
-                if (outViewport)
-                    *outViewport = viewport;
-                if (viewport && getViewportCamera)
+                if (!CatchOgreThrow("viewportCamera", [&] {
+                        void* viewport = getCurrentViewport(sceneManager);
+                        if (outViewport)
+                            *outViewport = viewport;
+                        if (viewport && getViewportCamera)
+                            viewportCamera = getViewportCamera(viewport);
+                    }))
                 {
-                    void* viewportCamera = getViewportCamera(viewport);
-                    if (viewportCamera)
-                        return viewportCamera;
+                    viewportCamera = nullptr;
                 }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
+                viewportCamera = nullptr;
             }
 
-            return fallbackCamera;
+            return viewportCamera ? viewportCamera : fallbackCamera;
         }
 
         // A chunk mesh has a handful of sub-entities. A destroyed Entity whose
@@ -6602,9 +6677,14 @@ namespace BZROpenShim
             uint32_t count = 0;
             __try
             {
-                count = getNumSubEntities(entity);
+                if (!CatchOgreThrow("numSubEntities", [&] { count = getNumSubEntities(entity); }))
+                {
+                    if (faulted)
+                        *faulted = true;
+                    return 0;
+                }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 if (faulted)
                     *faulted = true;
@@ -6627,11 +6707,14 @@ namespace BZROpenShim
             if (!entity || !getSubEntity)
                 return nullptr;
 
+            void* subEntity = nullptr;
             __try
             {
-                return getSubEntity(entity, index);
+                if (!CatchOgreThrow("subEntity", [&] { subEntity = getSubEntity(entity, index); }))
+                    subEntity = nullptr;
+                return subEntity;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return nullptr;
             }
@@ -6652,10 +6735,9 @@ namespace BZROpenShim
 
             __try
             {
-                notifyCurrentCamera(entity, camera);
-                return true;
+                return CatchOgreThrow("notifyCurrentCamera", [&] { notifyCurrentCamera(entity, camera); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -6667,11 +6749,14 @@ namespace BZROpenShim
             if (!entity || !isVisible)
                 return 1;
 
+            int visible = -1;
             __try
             {
-                return isVisible(entity) ? 1 : 0;
+                if (!CatchOgreThrow("isVisible", [&] { visible = isVisible(entity) ? 1 : 0; }))
+                    visible = -1;
+                return visible;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return -1;
             }
@@ -6687,10 +6772,9 @@ namespace BZROpenShim
 
             __try
             {
-                updateRenderQueue(entity, renderQueue);
-                return true;
+                return CatchOgreThrow("updateRenderQueue", [&] { updateRenderQueue(entity, renderQueue); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -6741,10 +6825,9 @@ namespace BZROpenShim
 
             __try
             {
-                addRenderablePriority(renderQueue, renderable, groupId, priority);
-                return true;
+                return CatchOgreThrow("addRenderable", [&] { addRenderablePriority(renderQueue, renderable, groupId, priority); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -6760,11 +6843,18 @@ namespace BZROpenShim
             if (!entity || !getRenderQueueGroup)
                 return 50u;
 
+            uint8_t group = 50u;
             __try
             {
-                return getRenderQueueGroup(entity);
+                if (!CatchOgreThrow("renderQueueGroup", [&] { group = getRenderQueueGroup(entity); }))
+                {
+                    if (outFaulted)
+                        *outFaulted = true;
+                    return 50u;
+                }
+                return group;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 if (outFaulted)
                     *outFaulted = true;
@@ -6784,10 +6874,9 @@ namespace BZROpenShim
 
             __try
             {
-                outPos = getCameraDerivedPosition(camera);
-                return true;
+                return CatchOgreThrow("cameraPosition", [&] { outPos = getCameraDerivedPosition(camera); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -15837,6 +15926,7 @@ namespace BZROpenShim
         static float g_RadarSizeScale = 1.0f;
         static float g_RadarSizeScaleBaseline = 1.0f;
         static bool g_RadarSizeScaleWriteFailureLogged = false;
+        static bool g_RadarSizeScaleWriteRefusedLogged = false;
 
         static float ClampRadarSizeScaleSetting(float scale)
         {
@@ -15864,6 +15954,21 @@ namespace BZROpenShim
             // The correction hook has to be live before the scale is visible,
             // otherwise the backdrop scales and the projection does not.
             InstallRadarLayoutHookIfPossible();
+
+            // The byte-guarded builder is also the identity proof for the
+            // neighbouring globals. Without it 0x008E77B0 is just an address:
+            // writing it on a build where the guard failed scales whatever
+            // lives there, and the SEH below only catches an unmapped page.
+            if (!g_RadarLayoutHookInstalled)
+            {
+                if (!g_RadarSizeScaleWriteRefusedLogged)
+                {
+                    g_RadarSizeScaleWriteRefusedLogged = true;
+                    Log(L"[RADAR] size scale %.3f not written: the layout hook is not installed on this build\n",
+                        static_cast<double>(desired));
+                }
+                return;
+            }
 
             __try
             {
@@ -17500,10 +17605,6 @@ namespace BZROpenShim
                 return;
             }
 
-            g_BzrFn_GetPlayerHandle = reinterpret_cast<FnGetPlayerHandle>(kGogGetPlayerHandleAddr);
-            g_BzrFn_GameObjectGetObjByHandle =
-                &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
-
             // push ebp; mov ebp,esp; push -1; push 0x84C1D6; (SEH frame setup).
             // 10 bytes lands on the instruction boundary after the push imm32.
             static const uint8_t kExpectedPersonSimulateBytes[kPersonSimulateDetourLen] =
@@ -17515,8 +17616,25 @@ namespace BZROpenShim
                                       kExpectedPersonSimulateBytes,
                                       sizeof(kExpectedPersonSimulateBytes)))
             {
+                // Called every sim tick until the probe installs, so say it once.
+                if (!g_JumpSnipeProbeMismatchLogged)
+                {
+                    g_JumpSnipeProbeMismatchLogged = true;
+                    Log(L"[JUMPSNIPE] Person::Simulate entry at 0x%08X does not match; probe and player-handle lookup stand down\n",
+                        static_cast<uint32_t>(kGogPersonSimulateEntryAddr));
+                }
                 return;
             }
+
+            // The entry bytes just checked (an SEH frame naming this build's
+            // handler) are the identity proof for the GOG constants, so they
+            // are published only now. They used to be written before the
+            // check, so a build that then failed it still handed every later
+            // consumer -- career stats, the kill trace,
+            // TryGetLocalPlayerWorldPosition -- an unverified address.
+            g_BzrFn_GetPlayerHandle = reinterpret_cast<FnGetPlayerHandle>(kGogGetPlayerHandleAddr);
+            g_BzrFn_GameObjectGetObjByHandle =
+                &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
 
             if (!InstallInlineDetour32(g_PersonSimulateDetour,
                                        kGogPersonSimulateEntryAddr,
@@ -36219,6 +36337,10 @@ namespace BZROpenShim
 
     float GetRadarSizeScaleFromBridge()
     {
+        // Until the byte-guarded layout hook has identified this build, the
+        // engine global is only an address; answer with the shim's own value.
+        if (!g_RadarLayoutHookInstalled)
+            return g_RadarSizeScale;
         __try
         {
             const float current = *reinterpret_cast<const float*>(kRadarSizeScaleAddr);
@@ -36238,8 +36360,17 @@ namespace BZROpenShim
             return false;
 
         const float clamped = ClampRadarSizeScaleSetting(scale);
-        g_RadarSizeScale = clamped;
         InstallRadarLayoutHookIfPossible();
+        // Same identity rule as RefreshRadarSizeScaleState: no verified
+        // builder, no write. The shim's own value is left alone too, so a
+        // later read does not claim a scale that never reached the engine.
+        if (!g_RadarLayoutHookInstalled)
+        {
+            Log(L"[MISSIONHOOK] radar size requested=%.3f refused: the layout hook is not installed on this build\n",
+                static_cast<double>(scale));
+            return false;
+        }
+        g_RadarSizeScale = clamped;
         __try
         {
             *reinterpret_cast<float*>(kRadarSizeScaleAddr) = clamped;
