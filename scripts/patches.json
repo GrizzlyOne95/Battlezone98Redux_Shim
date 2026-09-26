@@ -126,7 +126,8 @@
       "offset": 0,
       "expected_size": 5,
       "fallback": "0x00786E5F",
-      "require_unique": true
+      "require_unique": true,
+      "identity": "Push of the \"w\" mode string at 0x00786E5F inside the TRN writer FUN_00786C80 (GOG 8D71F56C; Steam settled bytes match). The immediate is redirected to a shim-owned \"wb\" so MSVCR120 stops expanding LF to CRLF on top of the codec's own CRLF serialization. Paired with the Canonical Fwrite Hook below; either failing stands both down."
     },
     {
       "name": "Redux TRN Canonical Fwrite Hook",
@@ -134,7 +135,8 @@
       "offset": 17,
       "expected_size": 6,
       "fallback": "0x00786E9A",
-      "require_unique": true
+      "require_unique": true,
+      "identity": "The single fwrite(buffer, 1, size, FILE*) at 0x00786E9A inside the TRN writer FUN_00786C80 (GOG 8D71F56C; Steam settled bytes match). Disassembly of 0x00786E38-0x00786EF1 on 2026-09-25: the raw loader at 0x00829130 returns the whole existing TRN in one buffer with its size in [ebp-0x20C4]; fopen at 0x00786E6B; this one fwrite; a return-value check against the size; fclose at 0x00786EC6; the buffer is freed. No loop and no second write, so the hook may apply the whole-file codec (encoding decision, trailing-LF rule) to this call's payload. That is the only reason per-call canonicalization is correct here; a writer that split a file across calls would need the accumulate-until-close design instead."
     },
     {
       "name": "Pilot Carrier Null Guard",
@@ -743,18 +745,21 @@
     },
     {
       "name": "Version Notice 1/2 OpenShim",
+      "parked": "Same site as \"Main Menu Version Text OpenShim\", which is the entry the patch list walks.",
       "fallback_gog": "0x0078DD4E",
       "fallback_steam": "0x004B022B",
       "expected_original": "E4 84 87 00"
     },
     {
       "name": "Version Notice 2/2 OpenShim",
+      "parked": "A further reference to the version string recorded with the original research. include/patches.h does not list it, so only the main-menu site carries the OpenShim version.",
       "fallback_gog": "0x00618C2F",
       "fallback_steam": "0x004B0247",
       "expected_original": "E4 84 87 00"
     },
     {
       "name": "Version Notice 3/3 OpenShim",
+      "parked": "A further reference to the version string recorded with the original research. include/patches.h does not list it, so only the main-menu site carries the OpenShim version.",
       "fallback_steam": "0x005091F4",
       "expected_original": "E4 84 87 00"
     },
@@ -920,41 +925,49 @@
     },
     {
       "name": "Map Filters 1/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x007A31D9",
       "expected_original": "68 E0 B3 89 00"
     },
     {
       "name": "Map Filters 2/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x00752A82",
       "expected_original": "E8 49 04 00 00"
     },
     {
       "name": "Map Filters 3/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x0079D6B1",
       "expected_original": "8B EC 8B 0D 64"
     },
     {
       "name": "Map Filters 4/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x0079D691",
       "expected_original": "8B EC 8B 0D 64"
     },
     {
       "name": "Map Filters 5/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x00799116",
       "expected_original": "52 6A 20 6A 00"
     },
     {
       "name": "Map Filters 6/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x0079920A",
       "expected_original": "92 23 03 00"
     },
     {
       "name": "Map Filters 7/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x007998AB",
       "expected_original": "8B 45 BC 8B 88"
     },
     {
       "name": "Map Filters 8/8",
+      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
       "fallback": "0x007997A9",
       "expected_original": "8B 45 F8 8B 88"
     },
