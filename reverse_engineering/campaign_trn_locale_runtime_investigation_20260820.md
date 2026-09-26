@@ -403,6 +403,8 @@ FUN_00829130 raw file load
 
 The precise writer mode site is VA `0x00786E5F` (`push "w"`), followed by `fopen` at `0x00786E6B`. Candidate surrounding bytes are `68 5C 67 87 00 8D 85 7C EF FF FF 50 FF 15 E0 94 86 00`. A minimal operand redirect to the existing `"wb"` string stops CR growth but intentionally is not the complete canonical serializer described above.
 
+**Addendum 2026-09-25 (audit P0-9):** the writer issues exactly one `fwrite` per file. Disassembly of `0x00786E38`-`0x00786EF1` (GOG `8D71F56C`): the raw loader at `0x00829130` returns the whole existing TRN in one buffer and its size in `[ebp-0x20C4]`; `fopen` at `0x00786E6B`; one `fwrite(buffer, 1, size, FILE*)` at `0x00786E9A`; the return value is compared with the size (an error string is logged on mismatch); `fclose` at `0x00786EC6`; the buffer is freed through `0x0062F240`. No loop, no second write. OpenShim's producer hook applies the whole-file codec to that single call on the strength of this; the proof is recorded in the two TRN entries' `identity` text in `scripts/patches.json`.
+
 ### Existing compatibility hook boundary
 
 `src/patches/file_io_hooks.cpp` already tracks TRN writes through file APIs and normalizes on close. It remains useful as a safety net, but it is not the primary correction point:
