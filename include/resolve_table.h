@@ -30,6 +30,11 @@ namespace BZROpenShim
         Address,
         // The anchor is an E8 CALL rel32; the address is its call target.
         Rel32Target,
+        // The anchor is the 4-byte absolute address an instruction carries
+        // (mov eax,[imm32]; push imm32; add ecx,imm32; ...); the address is
+        // that value. How an engine data global is found: through a code
+        // site that is known to use it, not by its own bytes.
+        Abs32Operand,
     };
 
     // Which source wins when a scan and a fallback constant are both usable.
@@ -74,4 +79,13 @@ namespace BZROpenShim
     // neither "?"/"??" nor a hex byte yields an empty result, so a typo fails
     // the whole pattern closed instead of matching something shorter.
     std::vector<uint16_t> ParseIdaPatternText(const std::string& hex);
+
+    // Abs32Operand decode: reads the little-endian address at `operand` and
+    // accepts it only when it lies inside [imageBase, imageEnd). A data
+    // global always does; an anchor that is off by a byte or two reads a
+    // spliced value that almost never lands in the image.
+    bool DecodeAbs32Operand(const uint8_t* operand,
+                            uint32_t imageBase,
+                            uint32_t imageEnd,
+                            uint32_t& outAddress);
 }

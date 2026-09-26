@@ -204,6 +204,46 @@ int main()
             "three-decimal source keeps three decimals");
     }
 
+    // --- more decimals than a double carries --------------------------------
+    {
+        // A 20-decimal token used to be scaled by 1e20 and cast to long long,
+        // which is undefined and came back as a wrong value. The coordinate
+        // cannot be written back faithfully, so it is left alone: with no
+        // other off-grid row the file is reported and not rewritten.
+        const std::string longTail =
+            ",0,0,0.125,0.125\r\n"
+            "L00SA0.MAP,0.125,0,0.125,0.125\r\n"
+            "L00SB0.MAP,0.25,0,0.125,0.125\r\n"
+            "L00SC0.MAP,0.375,0,0.125,0.125\r\n"
+            "L01CA0.MAP,0.5,0,0.125,0.125\r\n"
+            "L02CA0.MAP,0.625,0,0.125,0.125\r\n"
+            "L04CA0.MAP,0.75,0,0.125,0.125\r\n"
+            "L01DA0.MAP,0.82500000000000000000,0,0.125,0.125\r\n";
+        std::string out = "sentinel";
+        RepairReport report;
+        Check(!RepairAtlasCsv(longTail, out, report), "a 20-decimal token is not rewritten");
+        Check(report.outcome == RepairOutcome::OffGridButAmbiguous,
+            "a 20-decimal token is reported as off-grid but not repairable");
+        Check(report.repairs.empty(), "no repair is recorded for a coordinate that was not written");
+
+        // Fifteen places is the most a double carries exactly at this scale,
+        // and those still round-trip.
+        const std::string fifteen =
+            ",0.000000000000000,0,0.125,0.125\r\n"
+            "F00SA0.MAP,0.125000000000000,0,0.125,0.125\r\n"
+            "F00SB0.MAP,0.250000000000000,0,0.125,0.125\r\n"
+            "F00SC0.MAP,0.375000000000000,0,0.125,0.125\r\n"
+            "F01CA0.MAP,0.500000000000000,0,0.125,0.125\r\n"
+            "F02CA0.MAP,0.625000000000000,0,0.125,0.125\r\n"
+            "F04CA0.MAP,0.750000000000000,0,0.125,0.125\r\n"
+            "F01DA0.MAP,0.825000000000000,0,0.125,0.125\r\n";
+        std::string repaired;
+        RepairReport fifteenReport;
+        Check(RepairAtlasCsv(fifteen, repaired, fifteenReport), "a 15-decimal token is repaired");
+        Check(Contains(repaired, "F01DA0.MAP,0.875000000000000,0,0.125,0.125\r\n"),
+            "a 15-decimal token keeps fifteen decimals");
+    }
+
     // --- repairing twice is a no-op ----------------------------------------
     {
         std::string once;
