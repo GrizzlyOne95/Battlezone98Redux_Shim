@@ -1,3 +1,6 @@
+# battlezone98redux.pdb is not tracked here: extract it from the private
+# Battlezone_Source repository (BZ1/Redux/bzrpdb.zip) and pass -PdbPath,
+# or drop it in the repository root, where it is git-ignored.
 param(
     [string]$PdbPath = "battlezone98redux.pdb",
     [string]$OutputDirectory = "artifacts/main-ui-re"
