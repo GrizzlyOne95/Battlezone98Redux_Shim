@@ -95,6 +95,8 @@ Each record contains:
 
 When the queue is full, the oldest event is discarded and `droppedEventCount` increments. This keeps the newest runtime state bounded without hiding overflow.
 
+`pollEvent` and `captureDeveloperSnapshot` treat the `structSize` of the record you pass in as its capacity: they write at most that many bytes and set `structSize` to the number written, so a consumer compiled against a longer record can tell which appended fields were filled. A record shorter than the v2 layout (120 bytes for `OpenShimEvent`, 96 for `OpenShimDeveloperSnapshot`) is refused with `0`, and a refused `pollEvent` leaves the event queued. Value-initialising the record as in the examples declares the right capacity.
+
 Example:
 
 ```cpp
@@ -177,6 +179,39 @@ Live Redux validation should confirm:
 4. A snapshot in a mission reports a plausible player position.
 5. An unsupported build can still query SDK status while version-specific player inspection stands down.
 6. Repeated polling/snapshot calls do not alter gameplay or renderer state.
+
+## Soundtrack exports
+
+`OpenShimSetMusicTrack(int index)` and `OpenShimStopMusic()` drive Redux's
+real soundtrack layer: the track selector, start and stop functions that the
+world loader, the shell and the mission lifecycle call. They resolve those
+functions through the `Music::*` entries in `scripts/patches.json`. The
+signatures are unchanged. Before this change, `OpenShimSetMusicTrack` called
+the legacy `_StartMusic` at `0x00406670`, which is a dead stub on 2.2.301: it
+returned `TRUE` and nothing played. `OpenShimStopMusic` was a stub that always
+returned `FALSE`.
+
+`OpenShimSetMusicTrack(index)`:
+
+- plays `music\NN.ogg`, where `NN` is `index` formatted as `%02d` (so 7 plays
+  `07.ogg`), and loops that single track. This replaces the mission's own
+  track and its `[World] MusicLoopFirst/Skip/Last` range until the next
+  mission start.
+- returns `FALSE` and leaves the current music alone on an unsupported build,
+  when the entry points did not resolve, for a negative index, or when the
+  engine's resource layer cannot find the file.
+- returns `TRUE` when the engine accepted the track. A player music volume of
+  0 still keeps it silent, because the engine does not start playback then.
+  Requesting the track that is already playing lets it continue rather than
+  restarting it.
+
+`OpenShimStopMusic()` stops the soundtrack and releases its stream. It returns
+`TRUE` when the call ran, including when nothing was playing, and `FALSE` on an
+unsupported build or when the entry points did not resolve. The music stays
+stopped until the next `OpenShimSetMusicTrack`, mission start or shell visit.
+
+`OpenShimPauseMusic`, `OpenShimResumeMusic` and `OpenShimGetMusicTrack` are
+still stubs that return `FALSE`.
 
 ## Storefront-gated patches
 

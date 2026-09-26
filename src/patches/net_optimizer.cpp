@@ -307,6 +307,16 @@ namespace
         int lastRecvFromError = 0;
         std::string lastRouteKey;
         uint32_t reorderBypassLogMask = 0;
+        // Raw peer memos behind remoteAddress and lastRouteKey, so neither is
+        // rebuilt for a datagram that names the same peer as the last one
+        // (see RememberDatagramPeerLocked and RouteMayHaveChanged).
+        uint8_t lastPeerRaw[sizeof(SOCKADDR_STORAGE)] = {};
+        size_t lastPeerSpan = 0;
+        uint8_t lastRouteRaw[sizeof(SOCKADDR_STORAGE)] = {};
+        size_t lastRouteSpan = 0;
+        int lastRouteType = 0;
+        int lastRouteProtocol = 0;
+        char lastRouteApi[16] = {};
     };
 
     using SocketFn = SOCKET (WSAAPI*)(int, int, int);
@@ -2117,13 +2127,86 @@ namespace
             FormatSockaddr(addr, addrLen).c_str());
     }
 
+    // The bytes of a sockaddr that its formatted text depends on: family, port
+    // and address (IPv4: 8 bytes; IPv6: the whole sockaddr_in6). Anything past
+    // that (sin_zero, caller padding) may differ between calls that name the
+    // same peer.
+    size_t SockaddrCompareSpan(const sockaddr* addr, int addrLen)
+    {
+        if (!addr || addrLen <= 0)
+            return 0;
+        const size_t len = static_cast<size_t>(addrLen);
+        if (addr->sa_family == AF_INET)
+            return std::min<size_t>(len, 8);
+        if (addr->sa_family == AF_INET6)
+            return std::min<size_t>(len, sizeof(sockaddr_in6));
+        return std::min<size_t>(len, sizeof(SOCKADDR_STORAGE));
+    }
+
+    // Called with g_SocketLock held exclusively. Re-formats remoteAddress only
+    // when the datagram names a different peer from the last one; the
+    // formatting cost two allocations on every send and receive before.
+    void RememberDatagramPeerLocked(SocketState& state, const sockaddr* addr, int addrLen)
+    {
+        const size_t span = SockaddrCompareSpan(addr, addrLen);
+        if (span == 0)
+            return;
+        if (state.lastPeerSpan == span && std::memcmp(state.lastPeerRaw, addr, span) == 0)
+            return;
+        std::memcpy(state.lastPeerRaw, addr, span);
+        state.lastPeerSpan = span;
+        std::string formatted = FormatSockaddr(addr, addrLen);
+        if (!formatted.empty())
+            state.remoteAddress = formatted;
+    }
+
+    // The cheap half of LogRouteEvent's change detection for its per-datagram
+    // callers. The route key is api|class|endpoint: the class depends on the
+    // peer and the socket's type and protocol, the endpoint on the peer alone.
+    // The same api, peer bytes, type and protocol as the last call on this
+    // socket cannot have produced a different key, so those calls return
+    // here, ahead of the two socket calls, the snapshot (four string copies)
+    // and the key building that used to run for every datagram. Returns true
+    // when the key may differ and the full comparison must run.
+    bool RouteMayHaveChanged(SOCKET s, const char* api, const sockaddr* addr, int addrLen)
+    {
+        const size_t span = SockaddrCompareSpan(addr, addrLen);
+        if (span == 0 || !api)
+            return true;
+        bool changed = true;
+        AcquireSRWLockExclusive(&g_SocketLock);
+        auto it = g_Sockets.find(s);
+        if (it != g_Sockets.end())
+        {
+            SocketState& state = it->second;
+            changed = state.lastRouteSpan != span ||
+                      state.lastRouteType != state.type ||
+                      state.lastRouteProtocol != state.protocol ||
+                      std::memcmp(state.lastRouteRaw, addr, span) != 0 ||
+                      std::strncmp(state.lastRouteApi, api, sizeof(state.lastRouteApi)) != 0;
+            if (changed)
+            {
+                std::memcpy(state.lastRouteRaw, addr, span);
+                state.lastRouteSpan = span;
+                state.lastRouteType = state.type;
+                state.lastRouteProtocol = state.protocol;
+                strncpy_s(state.lastRouteApi, api, _TRUNCATE);
+            }
+        }
+        ReleaseSRWLockExclusive(&g_SocketLock);
+        return changed;
+    }
+
     void LogPacketActivity(const char* api, SOCKET s, bool outbound, int bytes, const sockaddr* addr, int addrLen)
     {
         // Ahead of the sampling and the socket-table lookup below, both of which
         // can return early.
         LogRelayDatagram(api, s, outbound, bytes, addr, addrLen);
 
-        SocketState snapshot = {};
+        // Under the lock: the counters and the peer memo. Nothing here
+        // allocates unless the peer changed.
+        uint32_t packetCount = 0;
+        uint64_t byteCount = 0;
         bool found = false;
 
         AcquireSRWLockExclusive(&g_SocketLock);
@@ -2131,23 +2214,21 @@ namespace
         if (it != g_Sockets.end())
         {
             SocketState& state = it->second;
-            if (addr)
-            {
-                std::string formatted = FormatSockaddr(addr, addrLen);
-                if (!formatted.empty())
-                    state.remoteAddress = formatted;
-            }
+            RememberDatagramPeerLocked(state, addr, addrLen);
             if (outbound)
             {
                 state.bytesSent += static_cast<uint64_t>(bytes);
                 ++state.packetsSent;
+                packetCount = state.packetsSent;
+                byteCount = state.bytesSent;
             }
             else
             {
                 state.bytesRecv += static_cast<uint64_t>(bytes);
                 ++state.packetsRecv;
+                packetCount = state.packetsRecv;
+                byteCount = state.bytesRecv;
             }
-            snapshot = state;
             found = true;
         }
         ReleaseSRWLockExclusive(&g_SocketLock);
@@ -2155,13 +2236,16 @@ namespace
         if (!found)
             return;
 
-        RefreshSocketAddresses(s);
-        if (!LookupSocket(s, snapshot))
+        // Everything from here only produces one log line. The sampling
+        // decision needs nothing but the count taken above, so it now comes
+        // before the two socket calls, the snapshot (four string copies) and
+        // the formatting that used to run for every datagram, sampled or not.
+        if (!g_Config.logging || !ShouldLogPacket(packetCount))
             return;
 
-        const uint32_t packetCount = outbound ? snapshot.packetsSent : snapshot.packetsRecv;
-        const uint64_t byteCount = outbound ? snapshot.bytesSent : snapshot.bytesRecv;
-        if (!ShouldLogPacket(packetCount))
+        RefreshSocketAddresses(s);
+        SocketState snapshot = {};
+        if (!LookupSocket(s, snapshot))
             return;
 
         const std::string endpoint = addr ? FormatSockaddr(addr, addrLen) : snapshot.remoteAddress;
@@ -2227,6 +2311,11 @@ namespace
     void LogRouteEvent(const char* api, SOCKET s, const sockaddr* addr, int addrLen, bool success, int err, bool onlyOnChange)
     {
         if (!g_Config.logging)
+            return;
+
+        // A per-datagram caller whose route cannot have changed returns here;
+        // the full key comparison below would have said "unchanged" too.
+        if (onlyOnChange && !RouteMayHaveChanged(s, api, addr, addrLen))
             return;
 
         RefreshSocketAddresses(s);
