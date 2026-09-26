@@ -148,6 +148,7 @@
     <ClCompile Include="src\patches\bzrnet_settings.cpp" />
     <ClCompile Include="src\patches\global_turbo.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
+    <ClCompile Include="src\patches\hud_sprite_rects.cpp" />
     <ClCompile Include="src\patches\jump_snipe_crouch.cpp" />
     <ClCompile Include="src\patches\ordnance_velocity.cpp" />
     <ClCompile Include="src\patches\pilot_flashlight.cpp" />
