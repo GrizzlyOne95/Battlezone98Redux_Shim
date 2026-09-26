@@ -219,6 +219,12 @@ namespace BZROpenShim
         void InstallEmissionLightFixIfPossible();
         void VerifyExpectedOgreExportsIfPossible();
 
+        // --- Jump-snipe crouch fix (jump_snipe_crouch.cpp) -------------------
+        extern bool g_JumpSnipeCrouchEnabled;
+        extern bool g_JumpSnipeCrouchBaselineEnabled;
+        void RefreshJumpSnipeCrouchPatchState();
+        void RevertJumpSnipeCrouchToBaseline();
+
         // --- Under-attack alert and reticle popup (alert_reticle_modes.cpp) --
         extern bool g_UnderAttackAlertConfigInitialized;
         extern bool g_TargetReticlePopupConfigInitialized;
