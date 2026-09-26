@@ -24,6 +24,60 @@
             }
         }
 
+        // A foreign hook (an overlay, a capture tool) can own the draw slot.
+        // PatchComVtableEntry refuses to displace it, rightly, and says so;
+        // said on every submission that was about 1,500 warnings a frame,
+        // and the install was reported as a success regardless. The DX11
+        // twin does not retry a slot it cannot own. Remember the foreign
+        // owner and retry only when the slot changes hands.
+        std::atomic<void*> g_D3D9ForeignDrawOwner{ nullptr };
+
+        bool RefreshD3D9DrawObserver(IDirect3DDevice9* device)
+        {
+            void* current = nullptr;
+            __try
+            {
+                void** vtable = *reinterpret_cast<void***>(device);
+                current = vtable ? vtable[82] : nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            if (current == reinterpret_cast<void*>(&HookD3D9DrawIndexedPrimitive))
+                return true;
+            if (current != nullptr &&
+                current == g_D3D9ForeignDrawOwner.load(std::memory_order_acquire))
+            {
+                return false; // still the owner already reported; nothing to do
+            }
+            InstallD3D9DeviceHooks(device);
+            void* after = nullptr;
+            __try
+            {
+                void** vtable = *reinterpret_cast<void***>(device);
+                after = vtable ? vtable[82] : nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            if (after == reinterpret_cast<void*>(&HookD3D9DrawIndexedPrimitive))
+            {
+                g_D3D9ForeignDrawOwner.store(nullptr, std::memory_order_release);
+                g_ContextVtableRefreshes.fetch_add(1, std::memory_order_relaxed);
+                return true;
+            }
+            g_D3D9ForeignDrawOwner.store(after, std::memory_order_release);
+            LogShimA(
+                LogLevel::Warn,
+                kComponent,
+                "[OgreProfile] D3D9 DrawIndexedPrimitive slot vtable[82]=0x%p is owned by another hook; "
+                "draw attribution stays off for this device until the slot changes hands",
+                after);
+            return false;
+        }
+
         void __fastcall HookD3D9RenderSystemRender(
             void* self,
             void*,
@@ -47,20 +101,24 @@
                     const uintptr_t identity = reinterpret_cast<uintptr_t>(device);
                     const uintptr_t previous =
                         g_RenderContextIdentity.load(std::memory_order_relaxed);
-                    if (identity != previous || drawObserverMissing)
+                    if (identity != previous)
                     {
+                        // A new device: forget any foreign owner recorded on
+                        // the old one and install the full observer set.
+                        g_D3D9ForeignDrawOwner.store(nullptr, std::memory_order_release);
                         InstallD3D9DeviceHooks(device);
                         g_RenderContextIdentity.store(identity, std::memory_order_release);
-                        if (identity != previous)
-                        {
-                            LogShimA(
-                                LogLevel::Info,
-                                kComponent,
-                                "[OgreProfile] captured active D3D9 device=0x%p previous=0x%p drawObserverWasMissing=%s",
-                                device,
-                                reinterpret_cast<void*>(previous),
-                                drawObserverMissing ? "yes" : "no");
-                        }
+                        LogShimA(
+                            LogLevel::Info,
+                            kComponent,
+                            "[OgreProfile] captured active D3D9 device=0x%p previous=0x%p drawObserverWasMissing=%s",
+                            device,
+                            reinterpret_cast<void*>(previous),
+                            drawObserverMissing ? "yes" : "no");
+                    }
+                    else if (drawObserverMissing)
+                    {
+                        RefreshD3D9DrawObserver(device);
                     }
                 }
             }
@@ -87,12 +145,7 @@
                         observerInstalled = false;
                     }
                     if (!observerInstalled)
-                    {
-                        InstallD3D9DeviceHooks(observedDevice);
-                        g_ContextVtableRefreshes.fetch_add(
-                            1, std::memory_order_relaxed);
-                        observerInstalled = true;
-                    }
+                        observerInstalled = RefreshD3D9DrawObserver(observedDevice);
                 }
             }
 
