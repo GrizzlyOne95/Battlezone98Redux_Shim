@@ -1,4 +1,5 @@
 #include "mp_vehicle_preview_fix.h"
+#include "engine_globals.h"
 
 #include "bzr_options_ui.h"
 #include "ogre_runtime.h"
@@ -25,8 +26,6 @@ namespace BZROpenShim
         // mask 0x08, matching exactly what FUN_007A9590 configures) rather than
         // by offset arithmetic alone. +0x20 is the in-game sniper viewport and
         // is null on this screen.
-        constexpr uintptr_t kPreferredImageBase = 0x00400000;
-        constexpr uintptr_t kRenderGlobalsAddr = 0x00920EA0;
         constexpr uintptr_t kVehiclePreviewViewportOffset = 0x24;
 
         using FnViewportGetScheme = const std::string*(__thiscall*)(const void*);
@@ -133,12 +132,9 @@ namespace BZROpenShim
 
         const void* ReadPreviewViewport()
         {
-            const uintptr_t mainBase =
-                reinterpret_cast<uintptr_t>(::GetModuleHandleW(nullptr));
-            if (!mainBase)
+            const uintptr_t globalsSlot = EngineGlobals::RenderGlobals();
+            if (!globalsSlot)
                 return nullptr;
-            const uintptr_t globalsSlot =
-                mainBase + (kRenderGlobalsAddr - kPreferredImageBase);
 
             __try
             {
