@@ -34191,6 +34191,13 @@ namespace BZROpenShim
         if (!target || !hook || patchLen < 5 || patchLen > detour.original.size())
             return false;
 
+        // Held from the "already installed" check through the write: the
+        // patch thread's settle loop and a game-thread SDK bridge can both
+        // arrive here for one site, and the loser used to see the other's
+        // half-written jump as a prologue mismatch, or copy it into its own
+        // trampoline.
+        HookEngine::CodePatchLock lock;
+
         if (detour.trampoline)
             return true;
 
@@ -34248,25 +34255,24 @@ namespace BZROpenShim
             static_cast<int32_t>(reinterpret_cast<uintptr_t>(trampolineBytes + patchLen) + 5);
         memcpy(trampolineBytes + patchLen + 1, &trampolineRel, sizeof(trampolineRel));
 
-        DWORD oldProtect = 0;
-        if (!VirtualProtect(targetBytes, patchLen, PAGE_EXECUTE_READWRITE, &oldProtect))
+        // The whole jump goes in through one WriteMemory call, which holds
+        // every other thread off the site while the bytes land and flushes
+        // the instruction cache. It used to be stored a byte at a time,
+        // opcode first and rel32 after, on code the game thread may have
+        // been executing.
+        uint8_t patchImage[kInlineDetourMaxPatchLen] = {};
+        patchImage[0] = 0xE9;
+        const int32_t hookRel =
+            static_cast<int32_t>(reinterpret_cast<uintptr_t>(hook)) -
+            static_cast<int32_t>(target + 5);
+        memcpy(patchImage + 1, &hookRel, sizeof(hookRel));
+        for (size_t i = 5; i < patchLen; ++i)
+            patchImage[i] = 0x90;
+        if (!HookEngine::WriteMemory(static_cast<uint32_t>(target), patchImage, patchLen))
         {
             VirtualFree(trampolineBytes, 0, MEM_RELEASE);
             return false;
         }
-
-        targetBytes[0] = 0xE9;
-        const int32_t hookRel =
-            static_cast<int32_t>(reinterpret_cast<uintptr_t>(hook)) -
-            static_cast<int32_t>(target + 5);
-        memcpy(targetBytes + 1, &hookRel, sizeof(hookRel));
-        for (size_t i = 5; i < patchLen; ++i)
-            targetBytes[i] = 0x90;
-
-        FlushInstructionCache(GetCurrentProcess(), targetBytes, patchLen);
-
-        DWORD restoreProtect = 0;
-        VirtualProtect(targetBytes, patchLen, oldProtect, &restoreProtect);
 
         detour.target = target;
         detour.hook = hook;
@@ -35981,6 +35987,11 @@ namespace BZROpenShim
 
     void RetryDeferredRuntimeHooks()
     {
+        // Called from the patch thread's settle loop and from SDK bridges on
+        // the game thread. The installers below latch on plain bools, so two
+        // callers used to be able to pass one latch together; under the lock
+        // the second caller finds the first one's work done.
+        HookEngine::CodePatchLock lock;
         InstallPondClassLabelSupportIfPossible();
         InstallEnhancedLightSelectionIfPossible();
         InstallShadowFarOverrideIfPossible();
