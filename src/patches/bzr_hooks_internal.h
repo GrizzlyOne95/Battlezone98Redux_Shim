@@ -94,6 +94,23 @@ namespace BZROpenShim
     extern FnIsHost g_BzrFn_IsHost;
     extern void** g_BzrPtr_920168;
 
+    using FnGetSelected = void* (__thiscall*)(void* list);
+    using FnNetPlayerSetData = void(__thiscall*)(void* thisPtr, uint32_t slot, uint8_t* data, uint32_t len);
+    using FnNetPlayerSetFlagBuffer = void(__thiscall*)(void* thisPtr, const uint8_t* data, uint32_t len);
+    using FnSetMyFlag = void(__cdecl*)();
+    using FnUiTextEntryClear = void (__thiscall*)(void*);
+    extern FnGetSelected g_BzrFn_GetSelected;
+    extern FnNetPlayerSetData g_BzrFn_NetPlayerSetData;
+    extern FnNetPlayerSetFlagBuffer g_BzrFn_NetPlayerSetFlagBuffer;
+    extern FnSetMyFlag g_BzrFn_SetMyFlag;
+    extern FnUiSetStr g_BzrFn_TextEntryAppendText;
+    extern FnUiTextEntryClear g_BzrFn_TextEntryClear;
+    extern void** g_BzrPtr_94557C;
+    extern void** g_BzrPtr_9456D0;
+    extern uint8_t* g_BzrPtr_CurrentUser;
+
+    extern void (__thiscall* g_BzrFn_TextEntrySetInputLimit)(void*, int);
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -664,6 +681,62 @@ namespace BZROpenShim
         void EnsureBansConfigLoaded();
         bool AddBanConfigEntry(const char* stableId, const BzrString* name, const char* source);
         void KickBannedPlayers(const char* source, uint32_t lobby, uint32_t member, int changes);
+
+        // --- Multiplayer lobby UI (lobby_ui.cpp) -------------------------------
+        inline constexpr int kFlagPreviewWidth = 64;
+        inline constexpr int kFlagPreviewHeight = 32;
+        // 1.5 put the flag in a titled panel. Redux has no resizable frame
+        // widget to borrow: its lobby panels ("Rooms", "Games", "Chat") are
+        // whole pre-rendered panels packed into ui/Multiplayer/multipe_center.png
+        // and multipc_center.png, sized for the slots they occupy. So the panel
+        // is drawn into the generated PNG instead, matching that art's own edge
+        // profile -- sampled off multipe_center.png at 1440x1080, which is the
+        // canvas the widget is placed on, so these are 1:1 screen pixels:
+        //   border   3px (0,42,0) | 2px (0,127,0) | 2px (0,84,0) | 2px (0,42,0)
+        //   header   fill (0,42,0), then 4px (0,127,0) | 3px (0,84,0) | 2px dark
+        //   field    1.5-style red with the one-bit emblem rendered black
+        inline constexpr int kFlagPanelBorder = 9;
+        inline constexpr int kFlagPanelHeaderHeight = 49;
+        // Leave a real gutter before the stock W/M buttons. The old 240px plate
+        // ended only a few pixels before their hit rectangles and its bright
+        // border visibly covered their left edge.
+        inline constexpr int kFlagPanelWidth = 224;
+        inline constexpr int kFlagPreviewFieldScale = 3;
+        inline constexpr uint32_t kLegacyFlagDataSlot = 0x0Du;
+        inline constexpr int kLegacyFlagWidth = 64;
+        inline constexpr int kLegacyFlagHeight = 32;
+        inline constexpr size_t kLegacyFlagPayloadBytes = 0x100;
+        inline constexpr size_t kLegacyFlagRowBytes = 8;
+        struct FlagCatalogEntry
+        {
+            std::string fileName;
+            std::string displayName;
+            std::filesystem::path sourcePath;
+        };
+        void AppendUniquePath(std::vector<std::filesystem::path>& paths, const std::filesystem::path& candidate);
+        std::vector<std::filesystem::path> GetCampaignContentRootCandidates(
+            const std::filesystem::path& gameDir);
+        bool RedirectCallTarget(uintptr_t callAddress,
+                                       uintptr_t originalTarget,
+                                       uintptr_t desiredTarget);
+        bool ShouldEnableMultiplayerFlagUi();
+        extern void* g_ActiveNicknameEntry;
+        extern void* g_ActiveNicknameParent;
+        extern bool g_FlagApplyPending;
+        extern bool g_FlagPayloadReady;
+        extern bool g_LobbyNicknameInputHookInstalled;
+        extern void* g_NicknameEnterDispatchEntry;
+        extern void* g_PendingNicknameConfirmationEntry;
+        extern BzrNetNicknameResult g_PendingNicknameConfirmationResult;
+        extern bool g_ReplaceNicknameOnNextInput;
+        std::filesystem::path GetGeneratedFlagsDirectoryPath();
+        bool TryGetLocalPlayerForFlags(void*& outPlayer);
+        bool TryApplySelectedFlagThroughEngine(const char* source);
+        bool TryApplyCachedFlagPayload(const char* source);
+        void InstallBzrNetRouteObserverIfPossible();
+        bool IsWidgetLiveChildOfParent(void* parent, void* widget);
+        const char* EnsureInvalidThumbnailTextureName();
+        void ShowNicknameApplyConfirmation(void* entry, BzrNetNicknameResult result);
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
