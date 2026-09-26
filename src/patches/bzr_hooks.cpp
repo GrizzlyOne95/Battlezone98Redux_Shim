@@ -351,6 +351,51 @@ namespace BZROpenShim
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
     static volatile long g_StaleGameObjectHandleLogBudget = 16;
 
+    // Trace switches consulted on per-unit, per-tick AI paths (the DoSubTask
+    // path read three of them per unit per tick). EnvFlagEnabled reads the
+    // process environment, which nothing changes after startup, so each is
+    // read once and latched.
+    static bool TraceLegacyAiEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI");
+        return s_value;
+    }
+    static bool TraceAiRangeEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE");
+        return s_value;
+    }
+    static bool TraceAiUnitTuningEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_AI_UNIT_TUNING");
+        return s_value;
+    }
+    static bool TraceBomberRangeEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_BOMBER_RANGE");
+        return s_value;
+    }
+    static bool TraceAttackRevealEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_ATTACK_REVEAL");
+        return s_value;
+    }
+    static bool TraceAttackRevealLegacyEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("BZR_TRACE_ATTACK_REVEAL");
+        return s_value;
+    }
+    static bool TraceArtilleryMaskEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_ARTILLERY_MASK");
+        return s_value;
+    }
+    static bool TraceWeaponMaskEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_WEAPON_MASK");
+        return s_value;
+    }
+
     // Correct GOG handle->object conversion. The engine's GameObject pool is a
     // fixed 0x1000-slot table based at 0x0260DB20 with a 0x400-byte stride; a
     // handle's slot index is its top 12 bits (handle >> 0x14). Verified live: a
@@ -4039,6 +4084,7 @@ namespace BZROpenShim
             };
 
             uint32_t count = 0;
+            bool lookupRaised = false;
             if (TryReadHudSpriteNameCount(count))
             {
                 LogShimA(
@@ -4053,6 +4099,7 @@ namespace BZROpenShim
                 int index = 0;
                 if (!SehScanHudSpriteTable(name, count, found, index))
                 {
+                    lookupRaised = true;
                     LogShimA(
                         LogLevel::Warn,
                         "hudlookup",
@@ -4089,6 +4136,7 @@ namespace BZROpenShim
                 int id = 0;
                 if (!SehCallHudSpriteLookupFn(name, id))
                 {
+                    lookupRaised = true;
                     LogShimA(
                         LogLevel::Warn,
                         "hudlookup",
@@ -4115,7 +4163,11 @@ namespace BZROpenShim
                 "hudlookup",
                 "sprite=%s not found by any lookup path",
                 name);
-            return 0;
+            // A miss against a readable table, with no lookup faulting, is as
+            // final as a hit: the table is static for the process. Memoise it,
+            // so the next refresh tick neither rescans the table nor logs the
+            // same miss again. An unreadable table or a fault is retried.
+            return (count > 0 && !lookupRaised) ? rememberHit(0) : 0;
         }
 
         static bool HudSpriteUvNearlyEqual(float a, float b)
@@ -18603,6 +18655,14 @@ namespace BZROpenShim
 
         static FnExuUpdateCullingForUnit ResolveExuCullingCallback()
         {
+            // Two loader lookups per unit per tick added up. The module set
+            // only changes at load time, so re-probe once a second and answer
+            // from the cache in between.
+            static ULONGLONG s_nextProbeTick = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (now < s_nextProbeTick)
+                return g_ExuFn_UpdateCullingForUnit;
+            s_nextProbeTick = now + 1000;
             HMODULE module = GetModuleHandleA("exu.dll");
             if (!module)
                 module = GetModuleHandleA("ExtraUtilities.dll");
@@ -22705,7 +22765,7 @@ namespace BZROpenShim
                 {
                     // Stock 1.5/Redux goes to blast; 1.4 goes to slide
                     *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 7;
-                    if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI") || EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+                    if (TraceLegacyAiEnabled() || TraceAiRangeEnabled())
                     {
                         Log(L"[LEGACY] D1 override craft=0x%08X cur=2 next 10->7\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                     }
@@ -22729,7 +22789,7 @@ namespace BZROpenShim
                     if (!isFreshHit)
                     {
                         *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 7;
-                        if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI"))
+                        if (TraceLegacyAiEnabled())
                             Log(L"[LEGACY] D4 override craft=0x%08X 8->9 => 8->7 (timeout)\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                     }
                 }
@@ -22753,7 +22813,7 @@ namespace BZROpenShim
                     if (suppress)
                     {
                         *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 9; // stay in flee
-                        if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI"))
+                        if (TraceLegacyAiEnabled())
                             Log(L"[LEGACY] D3 suppress craft=0x%08X 9->10 blocked, stay 9\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                     }
                 }
@@ -22781,7 +22841,7 @@ namespace BZROpenShim
                     TryRaiseAttackTaskRangeSq(
                         taskBytes, engageSq, previousRangeSq, rangeChanged) &&
                     rangeChanged &&
-                    (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
+                    (TraceAiRangeEnabled() ||
                      EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE")))
                 {
                     const long remaining = InterlockedDecrement(
@@ -22949,7 +23009,7 @@ namespace BZROpenShim
 
             if ((wasRetreating != state.retreating || (applied && !reverseLos)) &&
                 (EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE") ||
-                 EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE")))
+                 TraceAiRangeEnabled()))
             {
                 const long remaining = InterlockedDecrement(&g_CombatKiteTraceBudget);
                 if (remaining >= 0)
@@ -23648,7 +23708,7 @@ namespace BZROpenShim
             const float originalRange = *range;
             const float originalCloseRange = closeRange ? *closeRange : -1.0f;
 
-            if (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+            if (TraceAiRangeEnabled())
             {
                 static volatile long s_CalcRangeProbeBudget = 24;
                 const long remaining = InterlockedDecrement(&s_CalcRangeProbeBudget);
@@ -23767,7 +23827,7 @@ namespace BZROpenShim
                 hasUnitOuterRangeFloor || hasUnitCloseRangeFloor;
 
             if (hasOdfTuning && hasOdfRangePolicy &&
-                EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+                TraceAiRangeEnabled())
             {
                 static volatile long s_OdfRangeTraceBudget = 24;
                 const long remaining = InterlockedDecrement(&s_OdfRangeTraceBudget);
@@ -23793,8 +23853,8 @@ namespace BZROpenShim
             if (unitTuning &&
                 hasUnitRangePolicy &&
                 (policyResult.rangeChanged || policyResult.closeRangeChanged) &&
-                (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
-                 EnvFlagEnabled("OPENSHIM_TRACE_AI_UNIT_TUNING")))
+                (TraceAiRangeEnabled() ||
+                 TraceAiUnitTuningEnabled()))
             {
                 const long remaining = InterlockedDecrement(&g_AiUnitTuningTraceBudget);
                 if (remaining >= 0)
@@ -23816,8 +23876,8 @@ namespace BZROpenShim
             }
 
             if (tuning.bomberAiRole &&
-                (EnvFlagEnabled("OPENSHIM_TRACE_BOMBER_RANGE") ||
-                 EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE")))
+                (TraceBomberRangeEnabled() ||
+                 TraceAiRangeEnabled()))
             {
                 const long remaining = InterlockedDecrement(&g_BomberRangeTraceBudget);
                 if (remaining >= 0)
@@ -23854,7 +23914,7 @@ namespace BZROpenShim
             if (!objectPtr)
                 return;
 
-            if (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+            if (TraceAiRangeEnabled())
             {
                 static volatile long s_RetargetProbeBudget = 24;
                 const long remaining = InterlockedDecrement(&s_RetargetProbeBudget);
@@ -23934,8 +23994,8 @@ namespace BZROpenShim
 
         static bool ShouldTraceAttackReveal()
         {
-            return EnvFlagEnabled("OPENSHIM_TRACE_ATTACK_REVEAL") ||
-                   EnvFlagEnabled("BZR_TRACE_ATTACK_REVEAL");
+            return TraceAttackRevealEnabled() ||
+                   TraceAttackRevealLegacyEnabled();
         }
 
         static void TraceAttackRevealEvent(const char* action,
@@ -24132,8 +24192,8 @@ namespace BZROpenShim
 			}
 
 			if (suppressed &&
-				(EnvFlagEnabled("OPENSHIM_TRACE_ARTILLERY_MASK") ||
-				 EnvFlagEnabled("OPENSHIM_TRACE_WEAPON_MASK")))
+				(TraceArtilleryMaskEnabled() ||
+				 TraceWeaponMaskEnabled()))
 			{
 				const long remaining = InterlockedDecrement(&g_ArtilleryMaskTraceBudget);
 				if (remaining >= 0)
@@ -27172,6 +27232,14 @@ namespace BZROpenShim
 
         static FnExuGetTeamEngineFlameColor ResolveExuTeamEngineFlameColor()
         {
+            // Asked once per craft per frame (SelectEngineFlameManager). The
+            // module set only changes at load time, so re-probe once a second
+            // and answer from the cache in between (null means not loaded).
+            static ULONGLONG s_nextProbeTick = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (now < s_nextProbeTick)
+                return g_ExuFn_GetTeamEngineFlameColor;
+            s_nextProbeTick = now + 1000;
             HMODULE exuModule = GetModuleHandleA("exu.dll");
             if (!exuModule)
                 exuModule = GetModuleHandleA("ExtraUtilities.dll");
