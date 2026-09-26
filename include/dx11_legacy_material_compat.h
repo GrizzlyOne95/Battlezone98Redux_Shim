@@ -166,6 +166,50 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
                                std::string& outVertex,
                                std::string& outFragment);
 
+    // Vertex elements the renderable that triggered synthesis actually
+    // supplies. D3D11 builds an input layout by matching every element of the
+    // bound vertex shader's input signature against the mesh's vertex
+    // declaration, and throws (D3D11VertexDeclaration::getILayoutByShader,
+    // "Unable to set D3D11 vertex declaration") on the first one it cannot
+    // find. That exception escapes Root::renderOneFrame every frame; the game
+    // answers each one by stepping a quality level down (0x007AE480) and quits
+    // with "complete render failure" once there is nothing left to lower.
+    //
+    // known=false means the runtime could not read the declaration (no
+    // renderable, or the read faulted). The safe reading of "unknown" is "no
+    // vertex colour": dropping COLOR0 only loses a tint, while requiring it on
+    // a mesh without it is fatal. TEXCOORD0 is assumed present when unknown,
+    // because a textured pass on untextured geometry is not something a
+    // fixed-function author ships and dropping it would blank every texture.
+    struct VertexInputs
+    {
+        bool known = false;
+        bool position = true;
+        bool diffuse = false;
+        bool texcoord0 = true;
+    };
+
+    enum class VertexInputFit : uint8_t
+    {
+        Unchanged = 0,  // the resolved vertex program already matches
+        Adapted,        // swapped for an input-reduced OSE_FixedFunc variant
+        Unsatisfiable,  // no variant can bind (no POSITION): fail closed
+    };
+
+    const char* VertexInputFitName(VertexInputFit fit) noexcept;
+
+    // Rewrites a resolved compat vertex program (OSE_FixedFunc_* or
+    // OSE_Compat_*) to the variant whose input signature is a subset of the
+    // renderable's elements. Every variant keeps the output signature of the
+    // entry point it stands in for, so the paired fragment program is never
+    // touched. Programs this layer does not own come back Unchanged.
+    VertexInputFit FitVertexProgramToInputs(std::string_view resolvedVertex,
+                                            const VertexInputs& inputs,
+                                            std::string& outVertex);
+
+    // "position,diffuse,texcoord0" / "unknown" -- for [DX11COMPAT] lines.
+    std::string DescribeVertexInputs(const VertexInputs& inputs);
+
     // Pure policy: which resolver path a classified pass takes.
     // resourcesAvailable=false forces SkipShaderless for every non-native
     // pass (fail closed to guard + one startup warning, never a half-working

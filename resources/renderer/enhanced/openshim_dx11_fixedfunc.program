@@ -100,6 +100,74 @@ fragment_program OSE_FixedFunc_Untextured_fragment hlsl
 }
 
 // ---------------------------------------------------------------------------
+// Input-reduced vertex variants.
+// D3D11 throws per draw when a vertex shader reads an element the mesh does
+// not supply. These stand in for any OSE_FixedFunc_*/OSE_Compat_* vertex
+// program of the same entry point when the renderable lacks a vertex colour
+// (_novc) or a first UV set (_nouv). Output signatures are unchanged, so the
+// fragment program of the original pairing still links.
+// ---------------------------------------------------------------------------
+
+vertex_program OSE_FixedFunc_Textured_vertex_novc hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_vertex
+
+    preprocessor_defines COMPAT_NO_VERTEX_COLOUR
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto texMatrix texture_matrix 0
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+vertex_program OSE_FixedFunc_Textured_vertex_nouv hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_vertex
+
+    preprocessor_defines COMPAT_NO_TEXCOORD
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto texMatrix texture_matrix 0
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+vertex_program OSE_FixedFunc_Textured_vertex_novc_nouv hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_vertex
+
+    preprocessor_defines COMPAT_NO_VERTEX_COLOUR;COMPAT_NO_TEXCOORD
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto texMatrix texture_matrix 0
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+vertex_program OSE_FixedFunc_Untextured_vertex_novc hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc_untextured_vertex
+
+    preprocessor_defines COMPAT_NO_VERTEX_COLOUR
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Known legacy family adapters (all SM4, all DX11-only).
 // Each carries its family name so diagnostics stay attributable while the
 // implementation is shared until corpus telemetry justifies divergence.
