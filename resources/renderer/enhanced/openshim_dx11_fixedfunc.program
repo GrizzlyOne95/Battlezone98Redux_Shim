@@ -411,3 +411,103 @@ fragment_program OSE_Compat_Terrain_fragment hlsl
         param_named_auto fogParams fog_params
     }
 }
+
+// ---------------------------------------------------------------------------
+// Two-stage fixed function (2 texture units on UV set 0).
+// Stage 0 modulate; the fragment variant carries the stage 1 combine.
+// ---------------------------------------------------------------------------
+
+vertex_program OSE_FixedFunc_Textured2_vertex hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc2_vertex
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto texMatrix texture_matrix 0
+        param_named_auto texMatrix1 texture_matrix 1
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+vertex_program OSE_FixedFunc_Textured2_vertex_novc hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point fixedfunc2_vertex
+
+    preprocessor_defines COMPAT_NO_VERTEX_COLOUR
+    default_params
+    {
+        param_named_auto wvpMat worldviewproj_matrix
+        param_named_auto texMatrix texture_matrix 0
+        param_named_auto texMatrix1 texture_matrix 1
+        param_named_auto diffuseColor surface_diffuse_colour
+    }
+}
+
+fragment_program OSE_FixedFunc_Textured2_fragment_modulate hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc2_fragment
+
+    preprocessor_defines COMPAT_OP1_MODULATE
+    default_params
+    {
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+fragment_program OSE_FixedFunc_Textured2_fragment_add hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc2_fragment
+
+    preprocessor_defines COMPAT_OP1_ADD
+    default_params
+    {
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+fragment_program OSE_FixedFunc_Textured2_fragment_alphablend hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc2_fragment
+
+    preprocessor_defines COMPAT_OP1_ALPHABLEND
+    default_params
+    {
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Suppress pair: draws nothing, binds on any vertex declaration. Bound only
+// to fixed-function passes that cannot be expressed and have no programmable
+// fallback, so D3D11 never sees a shaderless draw.
+// ---------------------------------------------------------------------------
+
+vertex_program OSE_FixedFunc_Suppress_vertex hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target vs_4_0
+    entry_point suppress_vertex
+}
+
+fragment_program OSE_FixedFunc_Suppress_fragment hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point suppress_fragment
+}

@@ -179,8 +179,88 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         case CompatPath::FixedFuncUntextured: return "fixedfunc-untextured";
         case CompatPath::AggressiveGeneric: return "aggressive-generic";
         case CompatPath::SkipShaderless: return "skip";
+        case CompatPath::FixedFuncTextured2: return "fixedfunc-textured2";
+        case CompatPath::SuppressPass: return "suppress";
         }
         return "skip";
+    }
+
+    const char* StageCombineName(StageCombine combine) noexcept
+    {
+        switch (combine)
+        {
+        case StageCombine::Modulate: return "modulate";
+        case StageCombine::Add: return "add";
+        case StageCombine::Replace: return "replace";
+        case StageCombine::AlphaBlendTexture: return "alpha_blend";
+        case StageCombine::Unsupported: return "unsupported";
+        }
+        return "unsupported";
+    }
+
+    StageCombine ClassifyStageColour(const TextureStageDesc& stage) noexcept
+    {
+        if (!stage.known)
+        {
+            return StageCombine::Unsupported;
+        }
+        const bool texOverCurrent = stage.colourSrc1 == BlendSource::Texture &&
+                                    stage.colourSrc2 == BlendSource::Current;
+        const bool currentOverTex = stage.colourSrc1 == BlendSource::Current &&
+                                    stage.colourSrc2 == BlendSource::Texture;
+        switch (stage.colourOp)
+        {
+        case BlendOpEx::Modulate:
+            // Commutative, so either operand order is the same combine.
+            return (texOverCurrent || currentOverTex) ? StageCombine::Modulate
+                                                      : StageCombine::Unsupported;
+        case BlendOpEx::Add:
+            return (texOverCurrent || currentOverTex) ? StageCombine::Add
+                                                      : StageCombine::Unsupported;
+        case BlendOpEx::Source1:
+            return stage.colourSrc1 == BlendSource::Texture
+                ? StageCombine::Replace
+                : StageCombine::Unsupported;
+        case BlendOpEx::BlendTextureAlpha:
+            // src1 * tex.a + src2 * (1 - tex.a); only the texture-over-current
+            // order is what colour_op alpha_blend produces.
+            return texOverCurrent ? StageCombine::AlphaBlendTexture
+                                  : StageCombine::Unsupported;
+        default:
+            return StageCombine::Unsupported;
+        }
+    }
+
+    bool IsDefaultStageAlpha(const TextureStageDesc& stage) noexcept
+    {
+        return stage.known && stage.alphaOp == BlendOpEx::Modulate &&
+               ((stage.alphaSrc1 == BlendSource::Texture &&
+                 stage.alphaSrc2 == BlendSource::Current) ||
+                (stage.alphaSrc1 == BlendSource::Current &&
+                 stage.alphaSrc2 == BlendSource::Texture));
+    }
+
+    bool IsSupportedTwoStageCombo(const LegacyPassDesc& desc) noexcept
+    {
+        if (desc.textureUnits != 2 || desc.stages.size() != 2)
+        {
+            return false;
+        }
+        const TextureStageDesc& s0 = desc.stages[0];
+        const TextureStageDesc& s1 = desc.stages[1];
+        if (!s0.known || !s1.known || s0.texCoordSet != 0 || s1.texCoordSet != 0)
+        {
+            return false;
+        }
+        if (!IsDefaultStageAlpha(s0) || !IsDefaultStageAlpha(s1))
+        {
+            return false;
+        }
+        if (ClassifyStageColour(s0) != StageCombine::Modulate)
+        {
+            return false;
+        }
+        return FixedFuncTextured2Fragment(ClassifyStageColour(s1)) != nullptr;
     }
 
     CompatConfig DefaultCompatConfig() noexcept
@@ -457,11 +537,157 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             outFragment.assign(ffFragment);
             return true;
 
+        case CompatPath::FixedFuncTextured2:
+        {
+            if (!IsSupportedTwoStageCombo(desc))
+            {
+                return false;
+            }
+            const char* fragment =
+                FixedFuncTextured2Fragment(ClassifyStageColour(desc.stages[1]));
+            outVertex.assign(FixedFuncTextured2Vertex());
+            outFragment.assign(fragment);
+            return true;
+        }
+
+        case CompatPath::SuppressPass:
+            outVertex.assign(FixedFuncSuppressVertex());
+            outFragment.assign(FixedFuncSuppressFragment());
+            return true;
+
         case CompatPath::KeepNative:
         case CompatPath::SkipShaderless:
         default:
             return false;
         }
+    }
+
+    const char* FixedFuncTextured2Vertex() noexcept
+    {
+        return "OSE_FixedFunc_Textured2_vertex";
+    }
+
+    const char* FixedFuncTextured2Fragment(StageCombine stage1) noexcept
+    {
+        switch (stage1)
+        {
+        case StageCombine::Modulate: return "OSE_FixedFunc_Textured2_fragment_modulate";
+        case StageCombine::Add: return "OSE_FixedFunc_Textured2_fragment_add";
+        case StageCombine::AlphaBlendTexture: return "OSE_FixedFunc_Textured2_fragment_alphablend";
+        case StageCombine::Replace:
+        case StageCombine::Unsupported:
+        default:
+            // Replace on stage 1 discards stage 0 entirely; no shipped
+            // material does it, so it stays out of the support set.
+            return nullptr;
+        }
+    }
+
+    const char* FixedFuncSuppressVertex() noexcept
+    {
+        return "OSE_FixedFunc_Suppress_vertex";
+    }
+
+    const char* FixedFuncSuppressFragment() noexcept
+    {
+        return "OSE_FixedFunc_Suppress_fragment";
+    }
+
+    namespace
+    {
+        constexpr NativeInputGuard kNativeInputGuards[] = {
+            { "Glow/Null", "Untextured_vertex", "Untextured_fragment",
+              "OSE_FixedFunc_Untextured_vertex_novc", "black-glow-mask" },
+        };
+    }
+
+    size_t NativeInputGuardCount() noexcept
+    {
+        return sizeof(kNativeInputGuards) / sizeof(kNativeInputGuards[0]);
+    }
+
+    const NativeInputGuard* NativeInputGuardAt(size_t index) noexcept
+    {
+        return index < NativeInputGuardCount() ? &kNativeInputGuards[index]
+                                               : nullptr;
+    }
+
+    const NativeInputGuard* FindNativeInputGuard(std::string_view material) noexcept
+    {
+        for (const NativeInputGuard& guard : kNativeInputGuards)
+        {
+            if (material == guard.material)
+            {
+                return &guard;
+            }
+        }
+        return nullptr;
+    }
+
+    std::string FormatNativeInputGuardLog(const NativeInputGuard& guard,
+                                          std::string_view action)
+    {
+        std::string act(action);
+        if (act.empty())
+        {
+            act = "applied";
+        }
+        char buf[512] = {};
+        std::snprintf(buf, sizeof(buf),
+                      "[DX11COMPAT] material=%s native-input-guard vs=%s -> %s reason=%s action=%s",
+                      guard.material, guard.expectVertex, guard.replacementVertex,
+                      guard.reason, act.c_str());
+        return std::string(buf);
+    }
+
+    std::string FormatSuppressedLog(std::string_view material,
+                                    std::string_view reason,
+                                    const LegacyPassDesc& desc)
+    {
+        std::string mat(material);
+        if (mat.empty())
+        {
+            mat = "<unknown>";
+        }
+        std::string stages;
+        for (const TextureStageDesc& s : desc.stages)
+        {
+            if (!stages.empty())
+            {
+                stages += ',';
+            }
+            if (!s.known)
+            {
+                stages += "unread";
+                continue;
+            }
+            stages += StageCombineName(ClassifyStageColour(s));
+            if (!IsDefaultStageAlpha(s))
+            {
+                stages += "+alpha";
+            }
+            if (s.texCoordSet != 0)
+            {
+                char uv[16] = {};
+                std::snprintf(uv, sizeof(uv), "@uv%u", s.texCoordSet);
+                stages += uv;
+            }
+        }
+        if (stages.empty())
+        {
+            stages = "none";
+        }
+        std::string why(reason);
+        if (why.empty())
+        {
+            why = "unsupported";
+        }
+        char buf[768] = {};
+        std::snprintf(buf, sizeof(buf),
+                      "[DX11COMPAT] material=%s path=suppress reason=%s passes=%d units=%d stages=%s action=skip-draw",
+                      mat.c_str(), why.c_str(), desc.passCount,
+                      desc.textureUnits, stages.c_str());
+        return std::string(buf);
     }
 
     const char* VertexInputFitName(VertexInputFit fit) noexcept
@@ -503,6 +729,28 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         const bool untexturedEntry = ContainsLower(lower, "untextured");
         const bool diffuse = inputs.known && inputs.diffuse;
         const bool texcoord = !inputs.known || inputs.texcoord0;
+
+        // The suppress pair reads POSITION only and binds on anything.
+        if (StartsWithLower(lower, "ose_fixedfunc_suppress"))
+        {
+            return VertexInputFit::Unchanged;
+        }
+        // Two-stage entry: both stages sample UV set 0, so there is no
+        // meaningful UV-less variant. Without TEXCOORD0 it cannot bind.
+        if (StartsWithLower(lower, "ose_fixedfunc_textured2"))
+        {
+            if (!texcoord)
+            {
+                outVertex.clear();
+                return VertexInputFit::Unsatisfiable;
+            }
+            if (diffuse)
+            {
+                return VertexInputFit::Unchanged;
+            }
+            outVertex.assign("OSE_FixedFunc_Textured2_vertex_novc");
+            return VertexInputFit::Adapted;
+        }
 
         const char* variant = nullptr;
         if (untexturedEntry)
@@ -574,9 +822,23 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         bool anyUnsupported = false;
         bool anyKnownFamily = false;
 
+        // The runtime does not resolve targets, so a pass this layer already
+        // converted (OSE_FixedFunc_*/OSE_Compat_*, all vs_4_0/ps_4_0) would
+        // otherwise read as "unsupported custom" on the next scheme miss.
+        auto ownProgram = [](const std::string& name, const std::string& target) {
+            if (!target.empty())
+            {
+                return false;
+            }
+            const std::string lower = ToLowerCopy(TrimAscii(name));
+            return StartsWithLower(lower, "ose_fixedfunc_") ||
+                   StartsWithLower(lower, "ose_compat_");
+        };
+
         if (desc.hasVertexRef)
         {
-            const bool targetOk = IsDx11SupportedShaderTarget(desc.vertexTarget);
+            const bool targetOk = IsDx11SupportedShaderTarget(desc.vertexTarget) ||
+                                  ownProgram(desc.vertexProgram, desc.vertexTarget);
             std::string mapped;
             // Map check is case-insensitive and also verifies the name is
             // not already a native OSE_*/SM4 delegate.
@@ -593,7 +855,8 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         }
         if (desc.hasFragmentRef)
         {
-            const bool targetOk = IsDx11SupportedShaderTarget(desc.fragmentTarget);
+            const bool targetOk = IsDx11SupportedShaderTarget(desc.fragmentTarget) ||
+                                  ownProgram(desc.fragmentProgram, desc.fragmentTarget);
             const bool known = IsKnownLegacyFamilyProgram(desc.fragmentProgram);
             if (!targetOk || known)
             {
@@ -669,6 +932,14 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             {
                 return CompatPath::SkipShaderless;
             }
+            // Synthesis retargets one-pass techniques only. A multi-pass
+            // fixed-function technique is suppressed when that is the only
+            // way to keep it from drawing shaderless.
+            if (desc.passCount > 1)
+            {
+                return desc.fallbackShaderless ? CompatPath::SuppressPass
+                                               : CompatPath::SkipShaderless;
+            }
             if (desc.textureUnits <= 0)
             {
                 return CompatPath::FixedFuncUntextured;
@@ -677,10 +948,21 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             {
                 return CompatPath::FixedFuncTextured;
             }
+            if (IsSupportedTwoStageCombo(desc))
+            {
+                return CompatPath::FixedFuncTextured2;
+            }
             // Unsupported combine: aggressive generic is the only
-            // best-effort left; otherwise fail closed to the guard.
-            return config.aggressiveEnabled ? CompatPath::AggressiveGeneric
-                                            : CompatPath::SkipShaderless;
+            // best-effort render left. Failing that, declining is only safe
+            // when Ogre has a programmable technique to fall back to; if
+            // every fallback is shaderless the draw must be suppressed, or
+            // D3D11 throws on it every frame.
+            if (config.aggressiveEnabled)
+            {
+                return CompatPath::AggressiveGeneric;
+            }
+            return desc.fallbackShaderless ? CompatPath::SuppressPass
+                                           : CompatPath::SkipShaderless;
         case LegacyPassKind::UnknownCustom:
             return config.aggressiveEnabled ? CompatPath::AggressiveGeneric
                                             : CompatPath::SkipShaderless;
