@@ -111,6 +111,22 @@ namespace BZROpenShim
 
     extern void (__thiscall* g_BzrFn_TextEntrySetInputLimit)(void*, int);
 
+    // ---------------------------------------------------------------------
+    // BZR function pointers (GOG v2.2.301 addresses)
+    // ---------------------------------------------------------------------
+    using FnVehicleListSet = void(__thiscall*)(void* thisPtr, BzrString a, BzrString b);
+    using FnVehicleListLoad = void(__thiscall*)(void* thisPtr, BzrString* name);
+    using FnVehicleListStep = void(__thiscall*)(void* thisPtr);
+    using FnVehicleListFinalize = void(__thiscall*)(void* thisPtr);
+    extern FnVehicleListFinalize g_BzrFn_VehicleListFinalize;
+    extern FnVehicleListLoad g_BzrFn_VehicleListLoad;
+    extern FnVehicleListStep g_BzrFn_VehicleListRefresh1;
+    extern FnVehicleListStep g_BzrFn_VehicleListRefresh2;
+    extern FnVehicleListSet g_BzrFn_VehicleListSet;
+    extern void** g_BzrPtr_945478;
+    extern void** g_BzrPtr_94548C;
+    extern void** g_BzrPtr_94555C;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -737,6 +753,14 @@ namespace BZROpenShim
         bool IsWidgetLiveChildOfParent(void* parent, void* widget);
         const char* EnsureInvalidThumbnailTextureName();
         void ShowNicknameApplyConfirmation(void* entry, BzrNetNicknameResult result);
+
+        // --- Vehicle list mod fix (vehicle_list_mod_fix.cpp) -------------------
+        struct VehicleAssetExceptionCacheEntry
+        {
+            char assetName[64];
+            DWORD suppressUntil;
+            DWORD lastSkipLogTick;
+        };
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
