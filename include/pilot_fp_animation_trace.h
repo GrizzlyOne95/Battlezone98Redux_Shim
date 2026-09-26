@@ -27,15 +27,18 @@ namespace BZROpenShim
     // via hasSkeleton + hasAnimationState("stand2Kneel"/"idle"), generation-based
     // lifetime with acquired/released/reacquired logging, and split
     // [FPAnim] vs [FPAnim][FP] + [MANIP][WORLD]/[MANIP][FP] attribution.
-    // Tracking is always active because companion APIs depend on its lifetime
-    // checks. Animation call-site hooks and verbose inventory/candidate logging
-    // remain controlled by TracePilotFPAnimations.
+    // The tracker thread (observer installation, inventory/candidate poll)
+    // runs only while TracePilotFPAnimations is on. The companion-facing
+    // ResolveLocalFirstPersonEntity below is self-contained: it resolves the
+    // Ogre exports it needs and revalidates on demand, so it needs no thread.
     void InitializePilotFpAnimationTrace();
 
     // Resolves a fresh snapshot of the local player's dedicated first-person
-    // pilot Ogre Entity. The tracker revalidates SceneManager membership and the
-    // local world Person before returning. Callers must not cache the pointer
-    // beyond one immediate operation; generation changes on release/reacquire.
+    // pilot Ogre Entity. The resolver revalidates the local world Person on
+    // every call and SceneManager membership at most ten times a second (a
+    // full scene walk), so a target is never more than 100 ms stale. Callers
+    // must not cache the pointer beyond one immediate operation; generation
+    // changes on release/reacquire.
     bool ResolveLocalFirstPersonEntity(void*& outEntity, uint64_t& outGeneration);
 
     // Stops trace collection. Installed process-lifetime observers become
