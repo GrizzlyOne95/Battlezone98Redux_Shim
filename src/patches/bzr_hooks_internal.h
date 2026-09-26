@@ -16,6 +16,7 @@
 
 #include "bzr_hooks.h"
 #include "bzr_object_layout.h"
+#include "bzr_options_ui.h"
 
 namespace BZROpenShim
 {
@@ -31,6 +32,18 @@ namespace BZROpenShim
     using FnHudSpriteLookup = int(__cdecl*)(const char* spriteName);
     extern FnHudSpriteLookup g_BzrFn_HudSpriteLookup;
     bool SetStockScrapPilotPanelsVisible(bool visible);
+
+    using FnGetLocalPlayerNetId = uint16_t(__cdecl*)();
+    using FnGetTeamNum = int(__cdecl*)(int handle);
+    using FnGetPlayerHandle = int(__cdecl*)();
+    using FnRecordDeath = void(__cdecl*)(int killedTeam, int killerTeam);
+    using FnResolveObj76GameObject = void*(__cdecl*)(void*);
+    void* __cdecl GameObjectFromHandleGog(int handle);
+    extern FnGetLocalPlayerNetId g_BzrFn_GetLocalPlayerNetId;
+    extern FnGetPlayerHandle g_BzrFn_GetPlayerHandle;
+    extern FnGetTeamNum g_BzrFn_GetTeamNum;
+    extern FnRecordDeath g_BzrFn_RecordDeath;
+    extern FnResolveObj76GameObject g_BzrFn_ResolveObj76GameObject;
 
     namespace Hooks
     {
@@ -332,6 +345,60 @@ namespace BZROpenShim
         extern bool g_ScrapPilotHudLegacyLayoutEnabled;
         void RefreshScrapPilotHudLayout();
         void RevertScrapPilotHudToBaseline();
+
+        // --- Career statistics and PKTRACE (career_stats.cpp) ------------------
+        inline constexpr int kQueuedLoadNameBufferLen = 16;
+        inline constexpr uintptr_t kQueuedLoadPathBufferAddr = 0x00945708;
+        inline constexpr uintptr_t kQueuedLoadNameBufferAddr = 0x00915540;
+        inline constexpr uintptr_t kNetPlayerByTeamAddr = 0x009180E8;
+        struct CareerPendingVictim
+        {
+            bool inUse = false;
+            int victimHandle = 0;
+            int damagerHandle = 0;
+            // Sampled at damage time and sticky thereafter. See the note on
+            // SimKill in BZROpenShim.h: GetPlayerHandle moves the instant the
+            // player's craft dies, so this cannot be re-derived at kill time.
+            bool victimWasLocalPlayer = false;
+            bool damagerWasLocalPlayer = false;
+            uint64_t firstSeenMs = 0;
+            uint64_t lastDamageMs = 0;
+            // Research extension for player-kill correlation: retain teams,
+            // and enough attacker history to tell a clean last-hit from a
+            // genuine multi-attacker window.
+            int victimTeam = 0;
+            int damagerTeam = 0;
+            uint32_t damageSequence = 0;
+            // There is one slot per victim, so a second attacker overwrites
+            // the first. Count the changeovers instead of trying to recover
+            // them from the table afterwards, which cannot work.
+            int distinctDamagers = 0;
+            uint64_t lastDistinctDamagerMs = 0;
+        };
+        int GetGameObjectActualTeam(void* objectPtr);
+        bool SatelliteWorldIsLive();
+        bool TryGetGameObjectHandleValue(void* objectPtr, int& outHandle);
+        extern ULONGLONG g_CareerStatsMpHookFirstAttemptTick;
+        extern bool g_CareerStatsMpHookInstallAttempted;
+        extern bool g_CareerStatsMpHookInstalled;
+        extern ULONGLONG g_CareerStatsMpHookLastAttemptTick;
+        extern bool g_CareerStatsMpHookMismatchLogged;
+        extern bool g_DistributedRecordDeathIntHookInstalled;
+        extern volatile long g_PlayerKillTraceBudget;
+        extern InlineDetour32 g_RecordDeathDetour;
+        extern bool g_TracePlayerKills;
+        extern char g_LastKnownQueuedMissionName[kQueuedLoadNameBufferLen + 1];
+        void RememberQueuedMissionName(const char* name);
+        void StartCareerStatsMpSessionWorker();
+        void ClearCareerPendingVictims();
+        void PublishDamageForCareerStatsFromProbe(void* victim, void* damage);
+        bool ShouldTracePlayerKills();
+        void TickCareerPendingVictims();
+        void InstallDistributedRecordDeathIntHookIfPossible();
+        void InitializeCareerStatsConfig();
+        void RevertCareerStatsToBaseline();
+        void TickCareerSessionState();
+        void InstallCareerStatsMpHookIfPossible();
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
