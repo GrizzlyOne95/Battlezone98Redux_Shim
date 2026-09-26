@@ -73,6 +73,13 @@ function Add-UniquePath {
     if ($List -notcontains $full) { $List.Add($full) }
 }
 
+# ${env:ProgramFiles(x86)} is undefined on 32-bit Windows, and Join-Path
+# refuses an empty root, so filter the roots before joining. Mirrored in
+# uninstall_windows.ps1; keep the two discoveries identical.
+function Get-ProgramFilesRoots {
+    @(${env:ProgramFiles(x86)}, $env:PROGRAMFILES) | Where-Object { $_ } | Select-Object -Unique
+}
+
 function Get-SteamRoots {
     $roots = New-Object System.Collections.Generic.List[string]
     foreach ($location in @(
@@ -88,11 +95,8 @@ function Get-SteamRoots {
             }
         } catch { }
     }
-    foreach ($fallback in @(
-        (Join-Path ${env:ProgramFiles(x86)} "Steam"),
-        (Join-Path $env:PROGRAMFILES "Steam")
-    )) {
-        if ($fallback) { $roots.Add($fallback) }
+    foreach ($programFiles in Get-ProgramFilesRoots) {
+        $roots.Add((Join-Path $programFiles "Steam"))
     }
     $roots | Where-Object { $_ } | Select-Object -Unique
 }
@@ -145,10 +149,8 @@ function Get-GamePaths {
         }
     }
 
-    foreach ($candidate in @(
-        (Join-Path ${env:ProgramFiles(x86)} "GOG Galaxy\Games\Battlezone 98 Redux"),
-        (Join-Path $env:PROGRAMFILES "GOG Galaxy\Games\Battlezone 98 Redux")
-    )) {
+    foreach ($programFiles in Get-ProgramFilesRoots) {
+        $candidate = Join-Path $programFiles "GOG Galaxy\Games\Battlezone 98 Redux"
         if (Test-BzrGameDir $candidate) { Add-UniquePath -List $paths -Path $candidate }
     }
 
