@@ -26,16 +26,16 @@ OpenShim adds one opt-in integer key:
 tuggable = 1
 ```
 
-Numeric `0` disables the OpenShim opt-in. If the key is absent, a configured
-`baseName` can pass its OpenShim tuggability value down through the normal class
-inheritance chain; otherwise the default is off. The key is intentionally
+Numeric `0` disables the OpenShim opt-in, and an absent key is off. Redux has
+no ODF-to-ODF class inheritance for the key to follow (see "No ODF
+inheritance" below). The key is intentionally
 scoped to the Building inheritance path, so placing it on a non-Building ODF
 has no effect.
 
 The stock `abstor` special case is not removed or replaced. `abstor` remains
 tuggable without the new key, preserving stock Strategy/CTF and legacy mission
-behavior. The legacy filename special case itself is not inherited by a child
-ODF unless the parent also opts into the new data-driven key.
+behavior. The legacy filename special case applies only to the exact name
+`abstor`.
 
 ## Implementation
 
@@ -49,13 +49,12 @@ ODF files independently:
    ParameterDB scope is proven active.
 3. The hook queries section hash `0x91E9360F` (`buildingclass`) and key hash
    `0x93392C60` (`tuggable`) through Redux's integer `ParameterDB::Get` path,
-   using the parent BuildingClass opt-in as the default when a `baseName` class
-   is present.
+   defaulting to off.
 4. The resolved value is associated with Redux's packed eight-character ODF
    identity.
 5. After stock `Building::Building` runs, an opted-in ODF receives the exact
-   same native state stock gives `abstor`: the already-created object handle at
-   `+0xDC` is copied to `+0x220`.
+   same native state stock gives `abstor`: the value of GetHandle on the `+0x18`
+   interface (complete-object `+0xF4`) is copied to `+0x220`.
 6. Tug's own pickup scan is untouched, including its dying and already-attached
    rejection logic.
 
@@ -66,9 +65,28 @@ context. The implementation deliberately reuses the live native scope instead.
 
 The cache is keyed by packed ODF name rather than class pointers, avoiding stale
 native pointers across mission teardown. An explicit `tuggable = 0`, or an
-unconfigured class with no configured parent, removes any earlier opt-in for the
+absent key, removes any earlier opt-in for the
 same packed name; this prevents addon shadowing from leaking state across
 missions.
+
+## No ODF inheritance (GOG 2.2.301, verified 2026-09-26)
+
+The first draft of this note promised `baseName`-style inheritance. Redux has
+none. In `[GameObjectClass]`, `basename` names the geometry (AbsoZero's battery
+sets `basename = "abstor"` for the mesh). `GameObjectClass::Find` (`0x004E0F70`):
+
+1. returns an already-built class whose packed name at `+0x30/+0x34` matches;
+2. otherwise opens `%.8s.odf`, reads `[GameObjectClass] classLabel` (through
+   the same String16 wrapper, a section the hook ignores), walks the
+   *registered descriptor* vector, and calls the matching descriptor's
+   `BuildClass` (vtable `+8`);
+3. logs an error and returns null when no descriptor label matches.
+
+`BuildingClass::BuildClass` (`0x00480110`) passes its own `this`, the
+descriptor, to the constructor as the parent. So the `default` argument at the
+soundAmbient read always points into a registered descriptor, never into
+another ODF's class. The hook still looks the parent up in the opt-in cache,
+but that lookup can only produce off.
 
 ## Calling conventions and offsets (GOG 2.2.301, verified 2026-09-26)
 
@@ -101,8 +119,7 @@ Live check: `reverse_engineering/run_lctug.ps1` (fixture in
 
 - Numeric `1` enables the extension.
 - Numeric `0` disables the OpenShim opt-in.
-- Missing key inherits an explicitly configured baseName value when one exists;
-  otherwise it is off.
+- Missing key is off.
 - Exact stock `abstor` behavior remains active regardless of the new key.
 - The extension changes only Building-derived objects and only the native
   tuggability field already consumed by Tug.
@@ -115,11 +132,10 @@ Live check: `reverse_engineering/run_lctug.ps1` (fixture in
 |---|---|
 | Stock `abstor`, no key | Tuggable exactly as Redux stock |
 | Custom PowerPlant `azspow`, `tuggable = 1` | Tuggable and still a PowerPlant |
-| Same `azspow`, key absent and no configured parent | Not tuggable |
+| Same `azspow`, key absent | Not tuggable |
 | Same `azspow`, `tuggable = 0` | Not tuggable |
-| Child Building ODF, key absent, configured parent has `tuggable = 1` | Inherits tuggable |
 | Non-Building ODF with `tuggable = 1` | No effect |
-| Mission/addon transition: same ODF name changes `1 -> 0/absent` with no configured parent | New class load is not tuggable |
+| Mission/addon transition: same ODF name changes `1 -> 0/absent` | New class load is not tuggable |
 
 The high-value live acceptance case is the AbsoZero battery gimmick: give the
 custom PowerPlant ODF its own filename plus `[BuildingClass] tuggable = 1`, tow

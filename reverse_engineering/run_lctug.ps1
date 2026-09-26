@@ -4,7 +4,7 @@ Live check for the OpenShim [BuildingClass] tuggable = 1 ODF key.
 
 .DESCRIPTION
 Deploys the lcbench world plus the lcbench_tug fixture (rmtug.lua, tugpow.odf,
-tugctl.odf), launches lcbench.bzn windowed, waits for the fixture's DONE marker,
+tugzro.odf, tugctl.odf), launches lcbench.bzn windowed, waits for the fixture's DONE marker,
 and reports its [TUGFIX] RESULT lines next to the [TUGODF] lines from
 openshim.log. Deploy the build under test with scripts/Deploy-OpenShim.ps1
 first; the script prints the deployed openshim.dll hash before and after.
@@ -12,7 +12,9 @@ first; the script prints the deployed openshim.dll hash before and after.
 Expected on a working build:
   [TUGODF] installed ...                         (openshim.log)
   [TUGODF] ODF tugpow BuildingClass tuggable=1   (openshim.log)
+  [TUGODF] ODF tugzro BuildingClass tuggable=0   (openshim.log)
   RESULT POW odf=tugpow picked_up=true  ... PASS
+  RESULT ZRO odf=tugzro picked_up=false ... PASS
   RESULT CTL odf=tugctl picked_up=false ... PASS
   RESULT STK odf=abstor picked_up=true  ... PASS
 
@@ -60,7 +62,7 @@ $deploy = @()
 foreach ($src in (Get-ChildItem -LiteralPath $worldSource -File)) {
     $deploy += @{ Source = $src.FullName; Name = $src.Name }
 }
-foreach ($name in @("tugpow.odf", "tugctl.odf")) {
+foreach ($name in @("tugpow.odf", "tugzro.odf", "tugctl.odf")) {
     $deploy += @{ Source = (Join-Path $fixtureRoot $name); Name = $name }
 }
 $deploy += @{ Source = (Join-Path $fixtureRoot "rmtug.lua"); Name = "lcbench.lua" }

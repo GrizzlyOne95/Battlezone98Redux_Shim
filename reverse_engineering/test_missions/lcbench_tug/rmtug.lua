@@ -3,17 +3,23 @@
 -- Deploy as addon/lcbench/lcbench.lua next to tugpow.odf and tugctl.odf, then
 -- launch `battlezone98redux.exe lcbench.bzn` (see run_lctug.ps1).
 --
--- tugpow and tugctl are AbsoZero's battery PowerPlant (addon/AbsoZero/
+-- tugpow, tugzro and tugctl are AbsoZero's battery PowerPlant (addon/AbsoZero/
 -- abstor.odf, minus its 10 s lifespan) under their own names. tugpow adds
--- `tuggable = 1`; tugctl does not. Stock `abstor` is the positive control:
--- Building::Building hard-codes it tuggable by filename.
+-- `tuggable = 1`, tugzro adds `tuggable = 0`, and tugctl has no key. Stock
+-- `abstor` is the positive control: Building::Building hard-codes it
+-- tuggable by filename.
 --
--- One Tug runs three phases in order, and HasCargo/GetCargo are the witness:
+-- Four phases run in order, each with a freshly spawned Tug so a Tug left
+-- stuck on a refused pickup cannot fail the next phase. HasCargo/GetCargo are
+-- the witness:
 --   POW  Pickup(tug, tugpow)  -- expected: picked up (the extension works)
+--   ZRO  Pickup(tug, tugzro)  -- expected: never picked up (explicit 0)
 --   CTL  Pickup(tug, tugctl)  -- expected: never picked up (no key, no effect)
 --   STK  Pickup(tug, abstor)  -- expected: picked up (stock behaviour intact)
 -- A phase ends as soon as cargo appears or after PHASE_TIMEOUT seconds; a
--- picked-up building is dropped off before the next phase starts.
+-- picked-up building is dropped off before the next phase starts. TICK lines
+-- carry the Tug-to-target distance and command, so a timeout can be told apart
+-- from a Tug that never reached its target.
 --
 -- Lua 5.1 (no goto, no io/os/debug).
 
@@ -27,6 +33,7 @@ local tug = nil
 local targets = {}
 local phases = {
     { key = "POW", odf = "tugpow", expect = true },
+    { key = "ZRO", odf = "tugzro", expect = false },
     { key = "CTL", odf = "tugctl", expect = false },
     { key = "STK", odf = "abstor", expect = true },
 }
@@ -98,6 +105,12 @@ local function StartPhase(index)
         StartPhase(index + 1)
         return
     end
+    tug = Spawn(TUG_ODF, 20.0, "TUG_" .. phase.key)
+    if tug == nil then
+        Marker(string.format("RESULT %s odf=%s SKIPPED: no tug", phase.key, phase.odf))
+        StartPhase(index + 1)
+        return
+    end
     local ok = pcall(Pickup, tug, target, 1)
     phaseState = "ordered"
     Marker(string.format("ORDER %s Pickup(tug, %s) ok=%s", phase.key, phase.odf, tostring(ok)))
@@ -113,14 +126,10 @@ function Update(dt)
 
     if not spawned and elapsed >= 2.0 then
         spawned = true
-        tug = Spawn(TUG_ODF, 20.0, "TUG")
         targets.tugpow = Spawn("tugpow", 45.0, "TUGPOW")
-        targets.tugctl = Spawn("tugctl", 70.0, "TUGCTL")
+        targets.tugzro = Spawn("tugzro", 60.0, "TUGZRO")
+        targets.tugctl = Spawn("tugctl", 75.0, "TUGCTL")
         targets.abstor = Spawn("abstor", 95.0, "ABSTOR")
-        if tug == nil then
-            finished = true
-            Marker("ABORT no tug")
-        end
         return
     end
 
@@ -158,6 +167,13 @@ function Update(dt)
 
     if elapsed >= nextHeartbeat then
         nextHeartbeat = elapsed + 5.0
-        Marker(string.format("TICK phase=%s state=%s cargo=%s", phase.key, phaseState, OdfOf(Cargo())))
+        local target = targets[phase.odf]
+        local dist = -1
+        if tug ~= nil and IsValid(tug) and target ~= nil and IsValid(target) then
+            dist = Safe(GetDistance, tug, target) or -1
+        end
+        local cmd = tug ~= nil and IsValid(tug) and Safe(GetCurrentCommand, tug) or nil
+        Marker(string.format("TICK phase=%s state=%s cargo=%s dist=%.1f cmd=%s",
+            phase.key, phaseState, OdfOf(Cargo()), dist, tostring(cmd)))
     end
 end
