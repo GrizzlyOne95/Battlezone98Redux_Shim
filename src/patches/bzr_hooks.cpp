@@ -7,6 +7,7 @@
 #include "terrain_proxy.h"
 #include "terrain_tile_blend.h"
 #include "bzr_options_ui.h"
+#include "remembered_mesh_bounds_table.h"
 #include "patches.h"
 #include "patcher.h"
 #include "fog_wake_feature.h"
@@ -350,6 +351,54 @@ namespace BZROpenShim
     static FnGetPlayerHandle g_BzrFn_GetPlayerHandle = nullptr;
     static FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle = nullptr;
     static volatile long g_StaleGameObjectHandleLogBudget = 16;
+    // GameObject::GetHandle, resolved by ResolveBzrHooks from scripts/patches.json
+    // ("GameObject::GetHandle"); 0 until then, and every caller stands down on 0.
+    static uintptr_t g_GameObjectGetHandleAddr = 0;
+
+    // Trace switches consulted on per-unit, per-tick AI paths (the DoSubTask
+    // path read three of them per unit per tick). EnvFlagEnabled reads the
+    // process environment, which nothing changes after startup, so each is
+    // read once and latched.
+    static bool TraceLegacyAiEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI");
+        return s_value;
+    }
+    static bool TraceAiRangeEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE");
+        return s_value;
+    }
+    static bool TraceAiUnitTuningEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_AI_UNIT_TUNING");
+        return s_value;
+    }
+    static bool TraceBomberRangeEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_BOMBER_RANGE");
+        return s_value;
+    }
+    static bool TraceAttackRevealEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_ATTACK_REVEAL");
+        return s_value;
+    }
+    static bool TraceAttackRevealLegacyEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("BZR_TRACE_ATTACK_REVEAL");
+        return s_value;
+    }
+    static bool TraceArtilleryMaskEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_ARTILLERY_MASK");
+        return s_value;
+    }
+    static bool TraceWeaponMaskEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_WEAPON_MASK");
+        return s_value;
+    }
 
     // Correct GOG handle->object conversion. The engine's GameObject pool is a
     // fixed 0x1000-slot table based at 0x0260DB20 with a 0x400-byte stride; a
@@ -368,9 +417,11 @@ namespace BZROpenShim
         void* obj = reinterpret_cast<void*>(
             static_cast<uintptr_t>(slot) * 0x400u + 0x0260DB20u);
         using GetHandleThiscallFn = uint32_t(__thiscall*)(void*);
+        if (g_GameObjectGetHandleAddr == 0)
+            return nullptr;
         __try
         {
-            if (reinterpret_cast<GetHandleThiscallFn>(0x00462380u)(obj) ==
+            if (reinterpret_cast<GetHandleThiscallFn>(g_GameObjectGetHandleAddr)(obj) ==
                 static_cast<uint32_t>(handle))
                 return obj;
         }
@@ -489,8 +540,9 @@ namespace BZROpenShim
     static FnGameObjectClassBuild g_BzrFn_SprayEmitterBuildOriginal = nullptr;
     static FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate = nullptr;
     using FnResolveObj76GameObject = void*(__cdecl*)(void*);
-    static FnResolveObj76GameObject g_BzrFn_ResolveObj76GameObject =
-        reinterpret_cast<FnResolveObj76GameObject>(0x00479F30);
+    // Resolved by ResolveBzrHooks from scripts/patches.json
+    // ("GameObject::FromObj76"); null until then, and every caller checks.
+    static FnResolveObj76GameObject g_BzrFn_ResolveObj76GameObject = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectFriendP = nullptr;
     static FnGameObjectRelation g_BzrFn_GameObjectEnemyP = nullptr;
     static FnMatrixInverse g_BzrFn_MatrixInverse = nullptr;
@@ -2777,8 +2829,9 @@ namespace BZROpenShim
         static constexpr const char* kChunkPayloadModRelativeDirName = "chunkMeshes";
         static constexpr const char* kChunkPayloadModRelativeDirNameAlt = "Chunks";
         static constexpr const char* kChunkPayloadResourceLocationType = "FileSystem";
-        static FnPlayGlobalSound g_BzrFn_PlayGlobalSound =
-            reinterpret_cast<FnPlayGlobalSound>(0x0043AA30);
+        // Resolved by ResolveBzrHooks from scripts/patches.json
+        // ("PlayGlobalSound"); null until then, and the caller checks.
+        static FnPlayGlobalSound g_BzrFn_PlayGlobalSound = nullptr;
         static bool g_TargetReticlePopupConfigInitialized = false;
         static TargetReticlePopupMode g_TargetReticlePopupMode = TargetReticlePopupMode::Default;
         // User-config baseline (see under-attack alert note above).
@@ -3352,6 +3405,34 @@ namespace BZROpenShim
             if (VirtualQuery(candidate, &mbi, sizeof(mbi)) != sizeof(mbi))
                 return false;
             if (mbi.State != MEM_COMMIT || !IsReadableDataProtect(mbi.Protect))
+                return false;
+
+            uintptr_t vtable = 0;
+            __try
+            {
+                vtable = *reinterpret_cast<const uintptr_t*>(candidate);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+
+            return vtable >= ogreBase && vtable < ogreEnd;
+        }
+
+        // LooksLikeOgreObject without the VirtualQuery, for per-tick sweeps
+        // over many objects. The guarded read already turns an unmapped page
+        // into "no"; the query only added a syscall per object. The identity
+        // test is the same: a vtable inside OgreMain.dll.
+        static bool LooksLikeOgreObjectInPlace(const void* candidate)
+        {
+            const uintptr_t address = reinterpret_cast<uintptr_t>(candidate);
+            if (address < 0x00010000 || (address % sizeof(void*)) != 0)
+                return false;
+
+            uintptr_t ogreBase = 0;
+            uintptr_t ogreEnd = 0;
+            if (!TryGetOgreModuleRange(ogreBase, ogreEnd))
                 return false;
 
             uintptr_t vtable = 0;
@@ -4072,6 +4153,7 @@ namespace BZROpenShim
             };
 
             uint32_t count = 0;
+            bool lookupRaised = false;
             if (TryReadHudSpriteNameCount(count))
             {
                 LogShimA(
@@ -4086,6 +4168,7 @@ namespace BZROpenShim
                 int index = 0;
                 if (!SehScanHudSpriteTable(name, count, found, index))
                 {
+                    lookupRaised = true;
                     LogShimA(
                         LogLevel::Warn,
                         "hudlookup",
@@ -4122,6 +4205,7 @@ namespace BZROpenShim
                 int id = 0;
                 if (!SehCallHudSpriteLookupFn(name, id))
                 {
+                    lookupRaised = true;
                     LogShimA(
                         LogLevel::Warn,
                         "hudlookup",
@@ -4148,7 +4232,11 @@ namespace BZROpenShim
                 "hudlookup",
                 "sprite=%s not found by any lookup path",
                 name);
-            return 0;
+            // A miss against a readable table, with no lookup faulting, is as
+            // final as a hit: the table is static for the process. Memoise it,
+            // so the next refresh tick neither rescans the table nor logs the
+            // same miss again. An unreadable table or a fault is retried.
+            return (count > 0 && !lookupRaised) ? rememberHit(0) : 0;
         }
 
         static bool HudSpriteUvNearlyEqual(float a, float b)
@@ -5878,6 +5966,52 @@ namespace BZROpenShim
             TrySetChunkProxyBillboardPosition(billboard, setPosition, 0.0f, kChunkProxyHiddenY, 0.0f);
         }
 
+        // --- Ogre call guards ------------------------------------------------
+        //
+        // Every Ogre call in the chunk proxy runs under __try, because the
+        // object it is handed may have been destroyed by a scene teardown the
+        // shim did not observe, and only SEH stops the access violation that
+        // follows. But Ogre also throws C++ exceptions as a matter of course:
+        // a missing mesh or material, a name collision in createEntity, an
+        // out-of-range getSubEntity, a codec error. An
+        // __except(EXCEPTION_EXECUTE_HANDLER) caught those too, as the MSVC
+        // C++ exception code, and executing an SEH handler for a C++ throw
+        // skips every destructor between the throw and that frame: OgreMain's
+        // mutex guards stayed held, a half-registered object stayed in the
+        // movable-object map, the exception object leaked. So each guard now
+        // has two halves. The C++ half (CatchOgreThrow) runs the call inside
+        // try/catch, which lets the throw unwind OgreMain's frames before it
+        // is caught. The SEH half keeps only the hardware faults and hands a
+        // C++ exception back to the unwinder (OgreCallSehFilter), so it can
+        // never again be swallowed on this path.
+        constexpr unsigned long kMsvcCppExceptionCode = 0xE06D7363UL;
+
+        static int OgreCallSehFilter(unsigned long code)
+        {
+            return code == kMsvcCppExceptionCode ? EXCEPTION_CONTINUE_SEARCH : EXCEPTION_EXECUTE_HANDLER;
+        }
+
+        // Runs `call` and reports a C++ throw as false. The lambda is its own
+        // function, so the caller's __try frame stays free of objects that
+        // need unwinding (C2712). The log budget is per site and small: these
+        // guards sit on the per-slot render tick.
+        template <typename Call>
+        static bool CatchOgreThrow(const char* site, Call&& call)
+        {
+            try
+            {
+                call();
+                return true;
+            }
+            catch (...)
+            {
+                static volatile LONG s_budget = 8;
+                if (InterlockedDecrement(&s_budget) >= 0)
+                    LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Ogre threw in %hs; call abandoned\n", site);
+                return false;
+            }
+        }
+
         static bool TryCreateChunkProxyBillboardSet(
             void* sceneManager,
             FnOgreGetRootSceneNode getRootSceneNode,
@@ -5892,11 +6026,17 @@ namespace BZROpenShim
 
             __try
             {
-                outRootNode = getRootSceneNode(sceneManager);
-                if (outRootNode)
-                    outBillboardSet = createBillboardSet(sceneManager, g_ChunkProxyCapacity);
+                if (!CatchOgreThrow("createBillboardSet", [&] {
+                        outRootNode = getRootSceneNode(sceneManager);
+                        if (outRootNode)
+                            outBillboardSet = createBillboardSet(sceneManager, g_ChunkProxyCapacity);
+                    }))
+                {
+                    outRootNode = nullptr;
+                    outBillboardSet = nullptr;
+                }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 outRootNode = nullptr;
                 outBillboardSet = nullptr;
@@ -5917,12 +6057,13 @@ namespace BZROpenShim
 
             __try
             {
-                setBillboardsInWorldSpace(billboardSet, true);
-                setDefaultDimensions(billboardSet, g_ChunkProxyDebugSize, g_ChunkProxyDebugSize);
-                attachObject(rootNode, billboardSet);
-                return true;
+                return CatchOgreThrow("setupBillboardSet", [&] {
+                    setBillboardsInWorldSpace(billboardSet, true);
+                    setDefaultDimensions(billboardSet, g_ChunkProxyDebugSize, g_ChunkProxyDebugSize);
+                    attachObject(rootNode, billboardSet);
+                });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -5933,11 +6074,18 @@ namespace BZROpenShim
             if (!billboardSet || !createBillboard)
                 return nullptr;
 
+            void* billboard = nullptr;
             __try
             {
-                return createBillboard(billboardSet, 0.0f, kChunkProxyHiddenY, 0.0f, color);
+                if (!CatchOgreThrow("createBillboard", [&] {
+                        billboard = createBillboard(billboardSet, 0.0f, kChunkProxyHiddenY, 0.0f, color);
+                    }))
+                {
+                    billboard = nullptr;
+                }
+                return billboard;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return nullptr;
             }
@@ -5955,10 +6103,9 @@ namespace BZROpenShim
 
             __try
             {
-                setPosition(billboard, x, y, z);
-                return true;
+                return CatchOgreThrow("setBillboardPosition", [&] { setPosition(billboard, x, y, z); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -5971,9 +6118,9 @@ namespace BZROpenShim
 
             __try
             {
-                setVisible(entity, false);
+                CatchOgreThrow("hideEntity", [&] { setVisible(entity, false); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
             }
         }
@@ -5988,11 +6135,13 @@ namespace BZROpenShim
 
             __try
             {
-                setPosition(sceneNode, 0.0f, kChunkProxyHiddenY, 0.0f);
-                if (setOrientation)
-                    setOrientation(sceneNode, 1.0f, 0.0f, 0.0f, 0.0f);
+                CatchOgreThrow("resetNode", [&] {
+                    setPosition(sceneNode, 0.0f, kChunkProxyHiddenY, 0.0f);
+                    if (setOrientation)
+                        setOrientation(sceneNode, 1.0f, 0.0f, 0.0f, 0.0f);
+                });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
             }
         }
@@ -6028,18 +6177,24 @@ namespace BZROpenShim
             const OgreQuaternion identity = { 1.0f, 0.0f, 0.0f, 0.0f };
             __try
             {
-                outSceneNode = createChildSceneNode(rootNode, zeroPos, identity);
-                if (outSceneNode)
+                if (!CatchOgreThrow("createMeshProxy", [&] {
+                        outSceneNode = createChildSceneNode(rootNode, zeroPos, identity);
+                        if (outSceneNode)
+                        {
+                            outEntity = CreateChunkMeshProxyEntity(sceneManager, createEntity, meshName);
+                            if (outEntity)
+                            {
+                                attachObject(outSceneNode, outEntity);
+                                setVisible(outEntity, false);
+                            }
+                        }
+                    }))
                 {
-                    outEntity = CreateChunkMeshProxyEntity(sceneManager, createEntity, meshName);
-                    if (outEntity)
-                    {
-                        attachObject(outSceneNode, outEntity);
-                        setVisible(outEntity, false);
-                    }
+                    outSceneNode = nullptr;
+                    outEntity = nullptr;
                 }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 outSceneNode = nullptr;
                 outEntity = nullptr;
@@ -6055,11 +6210,14 @@ namespace BZROpenShim
             if (!sceneManager || !getRootSceneNode)
                 return nullptr;
 
+            void* rootNode = nullptr;
             __try
             {
-                return getRootSceneNode(sceneManager);
+                if (!CatchOgreThrow("rootSceneNode", [&] { rootNode = getRootSceneNode(sceneManager); }))
+                    rootNode = nullptr;
+                return rootNode;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return nullptr;
             }
@@ -6175,20 +6333,21 @@ namespace BZROpenShim
 
             __try
             {
-                setNodePosition(sceneNode, transform.x, transform.y, transform.z);
-                if (setNodeOrientation)
-                {
-                    setNodeOrientation(
-                        sceneNode,
-                        transform.orientation.w,
-                        transform.orientation.x,
-                        transform.orientation.y,
-                        transform.orientation.z);
-                }
-                setVisible(entity, true);
-                return true;
+                return CatchOgreThrow("updateMeshProxyTransform", [&] {
+                    setNodePosition(sceneNode, transform.x, transform.y, transform.z);
+                    if (setNodeOrientation)
+                    {
+                        setNodeOrientation(
+                            sceneNode,
+                            transform.orientation.w,
+                            transform.orientation.x,
+                            transform.orientation.y,
+                            transform.orientation.z);
+                    }
+                    setVisible(entity, true);
+                });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -6594,23 +6753,26 @@ namespace BZROpenShim
             if (!sceneManager || !getCurrentViewport)
                 return fallbackCamera;
 
+            void* viewportCamera = nullptr;
             __try
             {
-                void* viewport = getCurrentViewport(sceneManager);
-                if (outViewport)
-                    *outViewport = viewport;
-                if (viewport && getViewportCamera)
+                if (!CatchOgreThrow("viewportCamera", [&] {
+                        void* viewport = getCurrentViewport(sceneManager);
+                        if (outViewport)
+                            *outViewport = viewport;
+                        if (viewport && getViewportCamera)
+                            viewportCamera = getViewportCamera(viewport);
+                    }))
                 {
-                    void* viewportCamera = getViewportCamera(viewport);
-                    if (viewportCamera)
-                        return viewportCamera;
+                    viewportCamera = nullptr;
                 }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
+                viewportCamera = nullptr;
             }
 
-            return fallbackCamera;
+            return viewportCamera ? viewportCamera : fallbackCamera;
         }
 
         // A chunk mesh has a handful of sub-entities. A destroyed Entity whose
@@ -6636,9 +6798,14 @@ namespace BZROpenShim
             uint32_t count = 0;
             __try
             {
-                count = getNumSubEntities(entity);
+                if (!CatchOgreThrow("numSubEntities", [&] { count = getNumSubEntities(entity); }))
+                {
+                    if (faulted)
+                        *faulted = true;
+                    return 0;
+                }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 if (faulted)
                     *faulted = true;
@@ -6661,11 +6828,14 @@ namespace BZROpenShim
             if (!entity || !getSubEntity)
                 return nullptr;
 
+            void* subEntity = nullptr;
             __try
             {
-                return getSubEntity(entity, index);
+                if (!CatchOgreThrow("subEntity", [&] { subEntity = getSubEntity(entity, index); }))
+                    subEntity = nullptr;
+                return subEntity;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return nullptr;
             }
@@ -6686,10 +6856,9 @@ namespace BZROpenShim
 
             __try
             {
-                notifyCurrentCamera(entity, camera);
-                return true;
+                return CatchOgreThrow("notifyCurrentCamera", [&] { notifyCurrentCamera(entity, camera); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -6701,11 +6870,14 @@ namespace BZROpenShim
             if (!entity || !isVisible)
                 return 1;
 
+            int visible = -1;
             __try
             {
-                return isVisible(entity) ? 1 : 0;
+                if (!CatchOgreThrow("isVisible", [&] { visible = isVisible(entity) ? 1 : 0; }))
+                    visible = -1;
+                return visible;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return -1;
             }
@@ -6721,10 +6893,9 @@ namespace BZROpenShim
 
             __try
             {
-                updateRenderQueue(entity, renderQueue);
-                return true;
+                return CatchOgreThrow("updateRenderQueue", [&] { updateRenderQueue(entity, renderQueue); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -6775,10 +6946,9 @@ namespace BZROpenShim
 
             __try
             {
-                addRenderablePriority(renderQueue, renderable, groupId, priority);
-                return true;
+                return CatchOgreThrow("addRenderable", [&] { addRenderablePriority(renderQueue, renderable, groupId, priority); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -6794,11 +6964,18 @@ namespace BZROpenShim
             if (!entity || !getRenderQueueGroup)
                 return 50u;
 
+            uint8_t group = 50u;
             __try
             {
-                return getRenderQueueGroup(entity);
+                if (!CatchOgreThrow("renderQueueGroup", [&] { group = getRenderQueueGroup(entity); }))
+                {
+                    if (outFaulted)
+                        *outFaulted = true;
+                    return 50u;
+                }
+                return group;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 if (outFaulted)
                     *outFaulted = true;
@@ -6818,10 +6995,9 @@ namespace BZROpenShim
 
             __try
             {
-                outPos = getCameraDerivedPosition(camera);
-                return true;
+                return CatchOgreThrow("cameraPosition", [&] { outPos = getCameraDerivedPosition(camera); });
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -12005,6 +12181,80 @@ namespace BZROpenShim
             }
         }
 
+        // Main image extent from its PE headers, read once.
+        static bool TryGetMainImageRange(uintptr_t& outBase, uintptr_t& outEnd)
+        {
+            static uintptr_t s_base = 0;
+            static uintptr_t s_end = 0;
+            if (s_end == 0)
+            {
+                const uintptr_t base = GetMainModuleBase();
+                if (base == 0)
+                    return false;
+                __try
+                {
+                    const auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+                    const auto* ntHeaders =
+                        reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dosHeader->e_lfanew);
+                    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE ||
+                        ntHeaders->Signature != IMAGE_NT_SIGNATURE ||
+                        ntHeaders->OptionalHeader.SizeOfImage == 0)
+                        return false;
+                    s_base = base;
+                    s_end = base + ntHeaders->OptionalHeader.SizeOfImage;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+            }
+            outBase = s_base;
+            outEnd = s_end;
+            return true;
+        }
+
+        // TryGetGameObjectFieldBase for arena slots, without its two
+        // VirtualQuery calls. The arena lives in the exe's own .data, so the
+        // slot is always mapped, and a vtable that lies inside the main image
+        // is always readable; anything else is rejected before it is touched.
+        // The identity proof is unchanged: slot 1 must be GameObject::GetTeam.
+        // SyncSatelliteVisibility runs this for every live object every tick.
+        static bool TryGetArenaGameObjectFieldBase(void* objectPtr, uint8_t*& outBase)
+        {
+            outBase = nullptr;
+            const auto address = reinterpret_cast<uintptr_t>(objectPtr);
+            if (address < 0x00010000 || (address % sizeof(void*)) != 0)
+                return false;
+
+            uintptr_t imageBase = 0;
+            uintptr_t imageEnd = 0;
+            if (!TryGetMainImageRange(imageBase, imageEnd))
+                return false;
+
+            __try
+            {
+                auto* bytes = reinterpret_cast<uint8_t*>(objectPtr);
+                auto** vtable = *reinterpret_cast<void***>(bytes + kGameObjectInterfaceOffset);
+                const auto vtableAddress = reinterpret_cast<uintptr_t>(vtable);
+                constexpr size_t kGetTeamSlot = kGameObjectGetTeamVtableOffset / sizeof(void*);
+                if (vtableAddress < imageBase ||
+                    vtableAddress + (kGetTeamSlot + 1) * sizeof(void*) > imageEnd)
+                    return false;
+
+                const uintptr_t expected =
+                    imageBase + (kGogGameObjectGetTeamAddr - kGogPreferredImageBase);
+                if (reinterpret_cast<uintptr_t>(vtable[kGetTeamSlot]) != expected)
+                    return false;
+
+                outBase = bytes;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         static bool IsLikelyGameObjectEntry(void* objectPtr)
         {
             uint8_t* base = nullptr;
@@ -12701,6 +12951,7 @@ namespace BZROpenShim
         // SEH-guarded helpers. Each lives in its own function because MSVC
         // prohibits __try in any function that requires C++ object unwinding,
         // and the main sync function uses std::unordered_map.
+        // Both readers below take arena slots (CollectLiveGameObjectsFromArena).
         static bool TryReadObjectIlluminationAndEntity(void* objectPtr,
                                                        float& outIllumination,
                                                        void*& outEntity)
@@ -12708,7 +12959,7 @@ namespace BZROpenShim
             outIllumination = 0.0f;
             outEntity = nullptr;
             uint8_t* bytes = nullptr;
-            if (!TryGetGameObjectFieldBase(objectPtr, bytes))
+            if (!TryGetArenaGameObjectFieldBase(objectPtr, bytes))
                 return false;
             __try
             {
@@ -12732,7 +12983,7 @@ namespace BZROpenShim
         {
             outEntity = nullptr;
             uint8_t* bytes = nullptr;
-            if (!TryGetGameObjectFieldBase(objectPtr, bytes))
+            if (!TryGetArenaGameObjectFieldBase(objectPtr, bytes))
                 return false;
             __try
             {
@@ -12869,9 +13120,8 @@ namespace BZROpenShim
         // the multiplayer session worker, which is the earliest reader.
         static bool g_CareerStatsSinkRegistered = false;
 
-        // GameObject::GetHandle. Already relied on by GameObjectFromHandleGog
-        // above, which round-trips through it to reject stale pool slots.
-        static constexpr uintptr_t kGogGameObjectGetHandleAddr = 0x00462380;
+        // GameObject::GetHandle comes from g_GameObjectGetHandleAddr, the same
+        // resolve GameObjectFromHandleGog above round-trips through.
         static constexpr size_t kGameObjectHealthRatioOffset = 0x200;
         // complete+0xF4 is the object-state pointer; see
         // GameObjectHandleGetObjHardened above, which reads the same field.
@@ -12918,14 +13168,14 @@ namespace BZROpenShim
         static bool TryGetGameObjectHandleValue(void* objectPtr, int& outHandle)
         {
             outHandle = 0;
-            if (!objectPtr)
+            if (!objectPtr || g_GameObjectGetHandleAddr == 0)
                 return false;
 
             using GetHandleThiscallFn = uint32_t(__thiscall*)(void*);
             __try
             {
                 outHandle = static_cast<int>(
-                    reinterpret_cast<GetHandleThiscallFn>(kGogGameObjectGetHandleAddr)(objectPtr));
+                    reinterpret_cast<GetHandleThiscallFn>(g_GameObjectGetHandleAddr)(objectPtr));
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -13812,7 +14062,7 @@ namespace BZROpenShim
                 void* entity = nullptr;
                 if (!TryResolveEntityFromGameObject(obj, entity))
                     continue;
-                if (!LooksLikeOgreObject(entity))
+                if (!LooksLikeOgreObjectInPlace(entity))
                     continue;
                 if (g_SatVisTestPreHidden.count(entity) != 0)
                     continue;
@@ -13909,7 +14159,7 @@ namespace BZROpenShim
 
                     // Re-vet before dispatching a virtual: an entity freed and
                     // its allocation reused would otherwise be called through.
-                    if (!LooksLikeOgreObject(currentEntity))
+                    if (!LooksLikeOgreObjectInPlace(currentEntity))
                         continue;
 
                     bool now = false;
@@ -13979,7 +14229,7 @@ namespace BZROpenShim
                 if (!TryReadObjectIlluminationAndEntity(obj, illumination, entity))
                     continue;
 
-                if (!LooksLikeOgreObject(entity))
+                if (!LooksLikeOgreObjectInPlace(entity))
                     continue;
 
                 if (it == g_SatelliteVisibilityState.end())
@@ -14129,7 +14379,7 @@ namespace BZROpenShim
                 float illumination = 0.0f;
                 void* entity = nullptr;
                 if (!TryReadObjectIlluminationAndEntity(obj, illumination, entity) ||
-                    !LooksLikeOgreObject(entity))
+                    !LooksLikeOgreObjectInPlace(entity))
                 {
                     ++row.ogreUnreadable;
                     continue;
@@ -18114,7 +18364,6 @@ namespace BZROpenShim
         static constexpr uint8_t kUnitTurboEndHookExpected[9] = {
             0x8B, 0x55, 0x90, 0x8B, 0x85, 0x78, 0xFF, 0xFF, 0xFF
         };
-        static constexpr uintptr_t kGameObjectGetHandleAddr = 0x00462380;
         static constexpr bool kGlobalTurboEnabledDefault = false;
 
         // The comiss operand is redirected to this constant (EXU uses 0.9f). Must
@@ -18636,6 +18885,14 @@ namespace BZROpenShim
 
         static FnExuUpdateCullingForUnit ResolveExuCullingCallback()
         {
+            // Two loader lookups per unit per tick added up. The module set
+            // only changes at load time, so re-probe once a second and answer
+            // from the cache in between.
+            static ULONGLONG s_nextProbeTick = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (now < s_nextProbeTick)
+                return g_ExuFn_UpdateCullingForUnit;
+            s_nextProbeTick = now + 1000;
             HMODULE module = GetModuleHandleA("exu.dll");
             if (!module)
                 module = GetModuleHandleA("ExtraUtilities.dll");
@@ -18653,12 +18910,12 @@ namespace BZROpenShim
         static bool TryGetTurboObjectHandle(void* object, uint32_t& outHandle)
         {
             outHandle = 0;
-            if (!object)
+            if (!object || g_GameObjectGetHandleAddr == 0)
                 return false;
             __try
             {
                 outHandle = reinterpret_cast<FnGameObjectGetHandle>(
-                    kGameObjectGetHandleAddr)(object);
+                    g_GameObjectGetHandleAddr)(object);
                 return outHandle != 0;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -22861,7 +23118,7 @@ namespace BZROpenShim
                 {
                     // Stock 1.5/Redux goes to blast; 1.4 goes to slide
                     *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 7;
-                    if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI") || EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+                    if (TraceLegacyAiEnabled() || TraceAiRangeEnabled())
                     {
                         Log(L"[LEGACY] D1 override craft=0x%08X cur=2 next 10->7\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                     }
@@ -22885,7 +23142,7 @@ namespace BZROpenShim
                     if (!isFreshHit)
                     {
                         *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 7;
-                        if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI"))
+                        if (TraceLegacyAiEnabled())
                             Log(L"[LEGACY] D4 override craft=0x%08X 8->9 => 8->7 (timeout)\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                     }
                 }
@@ -22901,7 +23158,7 @@ namespace BZROpenShim
                         !stuck)
                     {
                         *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = kAttackTaskFleeState;
-                        if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI"))
+                        if (TraceLegacyAiEnabled())
                             Log(L"[LEGACY] D3 override craft=0x%08X 9->10 => stay 9 (timeout, not stuck)\n",
                                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                     }
@@ -22930,7 +23187,7 @@ namespace BZROpenShim
                     TryRaiseAttackTaskRangeSq(
                         taskBytes, engageSq, previousRangeSq, rangeChanged) &&
                     rangeChanged &&
-                    (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
+                    (TraceAiRangeEnabled() ||
                      EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE")))
                 {
                     const long remaining = InterlockedDecrement(
@@ -23098,7 +23355,7 @@ namespace BZROpenShim
 
             if ((wasRetreating != state.retreating || (applied && !reverseLos)) &&
                 (EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE") ||
-                 EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE")))
+                 TraceAiRangeEnabled()))
             {
                 const long remaining = InterlockedDecrement(&g_CombatKiteTraceBudget);
                 if (remaining >= 0)
@@ -23797,7 +24054,7 @@ namespace BZROpenShim
             const float originalRange = *range;
             const float originalCloseRange = closeRange ? *closeRange : -1.0f;
 
-            if (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+            if (TraceAiRangeEnabled())
             {
                 static volatile long s_CalcRangeProbeBudget = 24;
                 const long remaining = InterlockedDecrement(&s_CalcRangeProbeBudget);
@@ -23916,7 +24173,7 @@ namespace BZROpenShim
                 hasUnitOuterRangeFloor || hasUnitCloseRangeFloor;
 
             if (hasOdfTuning && hasOdfRangePolicy &&
-                EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+                TraceAiRangeEnabled())
             {
                 static volatile long s_OdfRangeTraceBudget = 24;
                 const long remaining = InterlockedDecrement(&s_OdfRangeTraceBudget);
@@ -23942,8 +24199,8 @@ namespace BZROpenShim
             if (unitTuning &&
                 hasUnitRangePolicy &&
                 (policyResult.rangeChanged || policyResult.closeRangeChanged) &&
-                (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
-                 EnvFlagEnabled("OPENSHIM_TRACE_AI_UNIT_TUNING")))
+                (TraceAiRangeEnabled() ||
+                 TraceAiUnitTuningEnabled()))
             {
                 const long remaining = InterlockedDecrement(&g_AiUnitTuningTraceBudget);
                 if (remaining >= 0)
@@ -23965,8 +24222,8 @@ namespace BZROpenShim
             }
 
             if (tuning.bomberAiRole &&
-                (EnvFlagEnabled("OPENSHIM_TRACE_BOMBER_RANGE") ||
-                 EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE")))
+                (TraceBomberRangeEnabled() ||
+                 TraceAiRangeEnabled()))
             {
                 const long remaining = InterlockedDecrement(&g_BomberRangeTraceBudget);
                 if (remaining >= 0)
@@ -24003,7 +24260,7 @@ namespace BZROpenShim
             if (!objectPtr)
                 return;
 
-            if (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+            if (TraceAiRangeEnabled())
             {
                 static volatile long s_RetargetProbeBudget = 24;
                 const long remaining = InterlockedDecrement(&s_RetargetProbeBudget);
@@ -24083,8 +24340,8 @@ namespace BZROpenShim
 
         static bool ShouldTraceAttackReveal()
         {
-            return EnvFlagEnabled("OPENSHIM_TRACE_ATTACK_REVEAL") ||
-                   EnvFlagEnabled("BZR_TRACE_ATTACK_REVEAL");
+            return TraceAttackRevealEnabled() ||
+                   TraceAttackRevealLegacyEnabled();
         }
 
         static void TraceAttackRevealEvent(const char* action,
@@ -24281,8 +24538,8 @@ namespace BZROpenShim
 			}
 
 			if (suppressed &&
-				(EnvFlagEnabled("OPENSHIM_TRACE_ARTILLERY_MASK") ||
-				 EnvFlagEnabled("OPENSHIM_TRACE_WEAPON_MASK")))
+				(TraceArtilleryMaskEnabled() ||
+				 TraceWeaponMaskEnabled()))
 			{
 				const long remaining = InterlockedDecrement(&g_ArtilleryMaskTraceBudget);
 				if (remaining >= 0)
@@ -27321,6 +27578,14 @@ namespace BZROpenShim
 
         static FnExuGetTeamEngineFlameColor ResolveExuTeamEngineFlameColor()
         {
+            // Asked once per craft per frame (SelectEngineFlameManager). The
+            // module set only changes at load time, so re-probe once a second
+            // and answer from the cache in between (null means not loaded).
+            static ULONGLONG s_nextProbeTick = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (now < s_nextProbeTick)
+                return g_ExuFn_GetTeamEngineFlameColor;
+            s_nextProbeTick = now + 1000;
             HMODULE exuModule = GetModuleHandleA("exu.dll");
             if (!exuModule)
                 exuModule = GetModuleHandleA("ExtraUtilities.dll");
@@ -34332,6 +34597,13 @@ namespace BZROpenShim
         if (!target || !hook || patchLen < 5 || patchLen > detour.original.size())
             return false;
 
+        // Held from the "already installed" check through the write: the
+        // patch thread's settle loop and a game-thread SDK bridge can both
+        // arrive here for one site, and the loser used to see the other's
+        // half-written jump as a prologue mismatch, or copy it into its own
+        // trampoline.
+        HookEngine::CodePatchLock lock;
+
         if (detour.trampoline)
             return true;
 
@@ -34389,25 +34661,24 @@ namespace BZROpenShim
             static_cast<int32_t>(reinterpret_cast<uintptr_t>(trampolineBytes + patchLen) + 5);
         memcpy(trampolineBytes + patchLen + 1, &trampolineRel, sizeof(trampolineRel));
 
-        DWORD oldProtect = 0;
-        if (!VirtualProtect(targetBytes, patchLen, PAGE_EXECUTE_READWRITE, &oldProtect))
+        // The whole jump goes in through one WriteMemory call, which holds
+        // every other thread off the site while the bytes land and flushes
+        // the instruction cache. It used to be stored a byte at a time,
+        // opcode first and rel32 after, on code the game thread may have
+        // been executing.
+        uint8_t patchImage[kInlineDetourMaxPatchLen] = {};
+        patchImage[0] = 0xE9;
+        const int32_t hookRel =
+            static_cast<int32_t>(reinterpret_cast<uintptr_t>(hook)) -
+            static_cast<int32_t>(target + 5);
+        memcpy(patchImage + 1, &hookRel, sizeof(hookRel));
+        for (size_t i = 5; i < patchLen; ++i)
+            patchImage[i] = 0x90;
+        if (!HookEngine::WriteMemory(static_cast<uint32_t>(target), patchImage, patchLen))
         {
             VirtualFree(trampolineBytes, 0, MEM_RELEASE);
             return false;
         }
-
-        targetBytes[0] = 0xE9;
-        const int32_t hookRel =
-            static_cast<int32_t>(reinterpret_cast<uintptr_t>(hook)) -
-            static_cast<int32_t>(target + 5);
-        memcpy(targetBytes + 1, &hookRel, sizeof(hookRel));
-        for (size_t i = 5; i < patchLen; ++i)
-            targetBytes[i] = 0x90;
-
-        FlushInstructionCache(GetCurrentProcess(), targetBytes, patchLen);
-
-        DWORD restoreProtect = 0;
-        VirtualProtect(targetBytes, patchLen, oldProtect, &restoreProtect);
 
         detour.target = target;
         detour.hook = hook;
@@ -34808,7 +35079,8 @@ namespace BZROpenShim
         g_BzrFn_UiSetActive = reinterpret_cast<FnUiSetActive>(0x007D3310);
         g_BzrFn_AddChild = reinterpret_cast<FnUiAddChild>(0x007D2110);
         g_BzrFn_UiDialogSetEnabled = reinterpret_cast<FnUiDialogAction>(0x007C9170);
-        g_BzrFn_UiDialogAdvance = reinterpret_cast<FnUiDialogAction>(0x007C7930);
+        g_BzrFn_UiDialogAdvance = reinterpret_cast<FnUiDialogAction>(
+            HookEngine::ResolveNamedAddress("ShellRequest")); // the same site ui_performance_hooks resolves
         g_BzrFn_KeyConfigSetKey = reinterpret_cast<FnKeyConfigSetKey>(kGogKeyConfigSetKeyAddr);
         g_BzrFn_WriteInputMapKey = reinterpret_cast<FnWriteInputMapKey>(kGogWriteInputMapKeyAddr);
         g_BzrFn_MapKeyNameFromCode = reinterpret_cast<FnMapKeyNameFromCode>(kGogMapKeyNameFromCodeAddr);
@@ -34841,10 +35113,20 @@ namespace BZROpenShim
         g_BzrFn_VehicleFixOrig = reinterpret_cast<void*>(0x00481AF0);
         // The live Redux runtime maps these multiplayer flag helpers at the
         // same settled addresses on current GOG and Steam builds.
-        g_BzrFn_GetLocalPlayerNetId = reinterpret_cast<FnGetLocalPlayerNetId>(0x00572D90);
+        g_BzrFn_GetLocalPlayerNetId = reinterpret_cast<FnGetLocalPlayerNetId>(
+            HookEngine::ResolveNamedAddress("GetLocalPlayerNetId"));
         g_BzrFn_NetPlayerSetData = reinterpret_cast<FnNetPlayerSetData>(0x00575570);
         g_BzrFn_NetPlayerSetFlagBuffer = reinterpret_cast<FnNetPlayerSetFlagBuffer>(0x00575810);
         g_BzrFn_SetMyFlag = reinterpret_cast<FnSetMyFlag>(0x0056FA50);
+        // Called addresses that used to be literals in this file (audit P1-1,
+        // first slice). The table's scan verifies each fallback; a miss
+        // leaves the pointer null or the address 0, and every caller treats
+        // that as "stand down".
+        g_BzrFn_ResolveObj76GameObject = reinterpret_cast<FnResolveObj76GameObject>(
+            HookEngine::ResolveNamedAddress("GameObject::FromObj76"));
+        g_BzrFn_PlayGlobalSound = reinterpret_cast<FnPlayGlobalSound>(
+            HookEngine::ResolveNamedAddress("PlayGlobalSound"));
+        g_GameObjectGetHandleAddr = HookEngine::ResolveNamedAddress("GameObject::GetHandle");
 
         // Steam's wrapped executable still maps these helpers at the same live
         // runtime addresses as GOG on the current 2.2.301 build.
@@ -35027,7 +35309,8 @@ namespace BZROpenShim
         InstallParticleTemplateDedupeHookIfPossible();
         InstallUiManualObjectDedupeHookIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
-        InstallEntityFrustumCullingIfEnabled();
+        // InstallEntityFrustumCullingIfEnabled runs further down, once its
+        // two switches have been read; here it saw both false and did nothing.
         InstallMissionTransitionSeamIfPossible();
         PinDirect3DModulesForShutdown();
         InstallMultiplayerFlagRenderHookIfPossible();
@@ -35184,6 +35467,11 @@ namespace BZROpenShim
         {
             g_EntityFrustumCullEnabled = false;
         }
+        // Both switches are known now. The earlier call in this function ran
+        // before they were computed and did nothing, leaving the deferred
+        // retry to install the feature; installing here keeps the retry as
+        // the OgreMain-not-yet-loaded fallback it is meant to be.
+        InstallEntityFrustumCullingIfEnabled();
         // Diagnostic/regression seam, not a gameplay policy. It exists so the
         // batch-failure fallback can be proven at runtime rather than argued
         // from the source; see RehydrateGenericChunkBatchSlotsToEntities().
@@ -36122,6 +36410,11 @@ namespace BZROpenShim
 
     void RetryDeferredRuntimeHooks()
     {
+        // Called from the patch thread's settle loop and from SDK bridges on
+        // the game thread. The installers below latch on plain bools, so two
+        // callers used to be able to pass one latch together; under the lock
+        // the second caller finds the first one's work done.
+        HookEngine::CodePatchLock lock;
         InstallPondClassLabelSupportIfPossible();
         InstallEnhancedLightSelectionIfPossible();
         InstallShadowFarOverrideIfPossible();

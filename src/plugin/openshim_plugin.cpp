@@ -223,8 +223,29 @@ namespace BZROpenShim
         if (g_PatchThread)
         {
             BZROpenShim::SignalPatcherShutdown();
-            WaitForSingleObject(reinterpret_cast<HANDLE>(g_PatchThread), 2000);
-            CloseHandle(reinterpret_cast<HANDLE>(g_PatchThread));
+            // The patch thread polls the shutdown flag inside every retry
+            // loop, so it leaves on its own within one poll interval of the
+            // signal; the two seconds are only when to say it has not. Every
+            // Shutdown* below tears down what that thread installs, so giving
+            // up and proceeding was a use-after-teardown, not a timeout. This
+            // runs on the host's normal thread (BZLoader_Shutdown), never
+            // under the loader lock, so an unbounded wait cannot deadlock.
+            HANDLE patchThread = reinterpret_cast<HANDLE>(g_PatchThread);
+            DWORD wait = WaitForSingleObject(patchThread, 2000);
+            if (wait == WAIT_TIMEOUT)
+            {
+                BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "plugin",
+                                      "Patch thread still running 2 s after the shutdown signal; "
+                                      "waiting for it before tearing down");
+                wait = WaitForSingleObject(patchThread, INFINITE);
+            }
+            if (wait != WAIT_OBJECT_0)
+            {
+                BZROpenShim::LogShimA(BZROpenShim::LogLevel::Error, "plugin",
+                                      "Patch thread join failed (wait=%lu err=%lu); tearing down anyway",
+                                      wait, GetLastError());
+            }
+            CloseHandle(patchThread);
             g_PatchThread = 0;
         }
         BZROpenShim::UiPerfHooks::Shutdown();
