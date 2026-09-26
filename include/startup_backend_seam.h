@@ -119,7 +119,7 @@ namespace BZROpenShim::StartupSeam
 namespace BZROpenShim::RenderProfiles
 {
     // Bridges used by the seam's own public wrappers. Not for general use.
-    const StartupSeam::StartupRendererResult& SeamResultForPublication();
+    void CopySeamResultLocked(StartupSeam::StartupRendererResult& out);
     void ClearPendingMarkerFromRuntime();
     void RunStartupSelectionForTestImpl();
 }
