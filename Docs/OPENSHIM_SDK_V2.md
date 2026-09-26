@@ -95,6 +95,8 @@ Each record contains:
 
 When the queue is full, the oldest event is discarded and `droppedEventCount` increments. This keeps the newest runtime state bounded without hiding overflow.
 
+`pollEvent` and `captureDeveloperSnapshot` treat the `structSize` of the record you pass in as its capacity: they write at most that many bytes and set `structSize` to the number written, so a consumer compiled against a longer record can tell which appended fields were filled. A record shorter than the v2 layout (120 bytes for `OpenShimEvent`, 96 for `OpenShimDeveloperSnapshot`) is refused with `0`, and a refused `pollEvent` leaves the event queued. Value-initialising the record as in the examples declares the right capacity.
+
 Example:
 
 ```cpp
