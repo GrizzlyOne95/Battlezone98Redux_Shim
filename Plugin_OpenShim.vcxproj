@@ -168,6 +168,7 @@
     <ClCompile Include="src\patches\scrap_pilot_hud.cpp" />
     <ClCompile Include="src\patches\shadow_far_distance_hook.cpp" />
     <ClCompile Include="src\patches\unit_vo.cpp" />
+    <ClCompile Include="src\patches\vehicle_list_mod_fix.cpp" />
     <ClCompile Include="src\patches\weapon_convergence_hooks.cpp" />
     <ClCompile Include="src\patches\bzr_options_ui.cpp" />
     <ClCompile Include="src\patches\bzrnet_instrumentation.cpp" />
