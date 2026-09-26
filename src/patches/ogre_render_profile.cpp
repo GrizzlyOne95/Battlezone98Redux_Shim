@@ -1486,12 +1486,105 @@ namespace BZROpenShim::RenderProfiles
             return config;
         }
 
+        // ---- texture-stage combine state -----------------------------------
+        //
+        // Pass::getTextureUnitState(unsigned short) and TextureUnitState's
+        // getColourBlendMode / getAlphaBlendMode / getTextureCoordSet, all
+        // exported by the shipped OgreMain.dll (1.10). Proven against that
+        // binary (2026-09-26): the getters are `lea eax,[ecx+0x38]`,
+        // `lea eax,[ecx+0x7C]` and `mov eax,[ecx+0x18]`, and
+        // setColourOperationEx stores operation/source1/source2 at
+        // +0x3C/+0x40/+0x44 -- i.e. LayerBlendModeEx +4/+8/+12, behind
+        // blendType at +0 (OgreBlendMode.h). blendType doubles as a layout
+        // canary (0 colour, 1 alpha): a mismatch leaves the stage unknown,
+        // and an unknown stage is never supported.
+        using FnPassGetTextureUnitState =
+            void* (__thiscall*)(void*, unsigned short);
+        using FnTusGetBlendMode = const void* (__thiscall*)(const void*);
+        using FnTusGetTextureCoordSet = unsigned int(__thiscall*)(const void*);
+
+        struct OgreTextureStageApi
+        {
+            FnPassGetTextureUnitState getTextureUnitState = nullptr;
+            FnTusGetBlendMode getColourBlendMode = nullptr;
+            FnTusGetBlendMode getAlphaBlendMode = nullptr;
+            FnTusGetTextureCoordSet getTextureCoordSet = nullptr;
+
+            bool Valid() const
+            {
+                return getTextureUnitState != nullptr &&
+                       getColourBlendMode != nullptr &&
+                       getAlphaBlendMode != nullptr &&
+                       getTextureCoordSet != nullptr;
+            }
+        };
+
+        const OgreTextureStageApi& TextureStageApi()
+        {
+            static const OgreTextureStageApi api = [] {
+                OgreTextureStageApi resolved;
+                resolved.getTextureUnitState =
+                    ResolveOgreExport<FnPassGetTextureUnitState>(
+                        "?getTextureUnitState@Pass@Ogre@@QAEPAVTextureUnitState@2@G@Z");
+                resolved.getColourBlendMode = ResolveOgreExport<FnTusGetBlendMode>(
+                    "?getColourBlendMode@TextureUnitState@Ogre@@QBEABVLayerBlendModeEx@2@XZ");
+                resolved.getAlphaBlendMode = ResolveOgreExport<FnTusGetBlendMode>(
+                    "?getAlphaBlendMode@TextureUnitState@Ogre@@QBEABVLayerBlendModeEx@2@XZ");
+                resolved.getTextureCoordSet =
+                    ResolveOgreExport<FnTusGetTextureCoordSet>(
+                        "?getTextureCoordSet@TextureUnitState@Ogre@@QBEIXZ");
+                return resolved;
+            }();
+            return api;
+        }
+
+        __declspec(noinline) static bool GuardedReadTextureStage(
+            const OgreTextureStageApi* api, void* pass, unsigned short index,
+            Dx11Compat::TextureStageDesc* out)
+        {
+            __try
+            {
+                if (api == nullptr || pass == nullptr || out == nullptr)
+                {
+                    return false;
+                }
+                const void* tus = api->getTextureUnitState(pass, index);
+                if (tus == nullptr)
+                {
+                    return false;
+                }
+                const int* colour =
+                    static_cast<const int*>(api->getColourBlendMode(tus));
+                const int* alpha =
+                    static_cast<const int*>(api->getAlphaBlendMode(tus));
+                if (colour == nullptr || alpha == nullptr ||
+                    colour[0] != 0 /* LBT_COLOUR */ ||
+                    alpha[0] != 1 /* LBT_ALPHA */)
+                {
+                    return false;
+                }
+                out->colourOp = colour[1];
+                out->colourSrc1 = colour[2];
+                out->colourSrc2 = colour[3];
+                out->alphaOp = alpha[1];
+                out->alphaSrc1 = alpha[2];
+                out->alphaSrc2 = alpha[3];
+                out->texCoordSet = api->getTextureCoordSet(tus);
+                out->known = true;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         // Best-effort legacy description for the FIRST pass of the source
-        // technique. Texture color-op is not resolved through the narrow ABI
-        // (TextureUnitState combine reads need a wider, proven surface), so
-        // single-texture passes assume the overwhelmingly common modulate
-        // combine; multi-texture passes are reported as-is and the pure
-        // policy marks 2+ units unsupported pending corpus telemetry.
+        // technique. Single-texture passes keep assuming the overwhelmingly
+        // common modulate combine (colorOp0), so existing content keeps its
+        // path. Two-unit passes additionally get their real per-stage combine
+        // state read into desc.stages, which the pure policy checks against
+        // the bounded two-unit set; wider passes stay unsupported.
         Dx11Compat::LegacyPassDesc DescribeFirstPass(void* technique)
         {
             Dx11Compat::LegacyPassDesc desc;
@@ -1532,6 +1625,16 @@ namespace BZROpenShim::RenderProfiles
             if (desc.textureUnits == 1)
             {
                 desc.colorOp0 = "modulate";
+            }
+            const OgreTextureStageApi& stageApi = TextureStageApi();
+            if (desc.textureUnits == 2 && stageApi.Valid())
+            {
+                for (unsigned short i = 0; i < 2; ++i)
+                {
+                    Dx11Compat::TextureStageDesc stage;
+                    GuardedReadTextureStage(&stageApi, pass, i, &stage);
+                    desc.stages.push_back(stage);
+                }
             }
             return desc;
         }
@@ -2220,6 +2323,7 @@ namespace BZROpenShim::RenderProfiles
             }
             case Dx11Compat::CompatPath::FixedFuncTextured:
             case Dx11Compat::CompatPath::FixedFuncUntextured:
+            case Dx11Compat::CompatPath::FixedFuncTextured2:
             {
                 state.fixedFunc.fetch_add(1, std::memory_order_relaxed);
                 void* generated = InstantiateDx11CompatTechnique(
