@@ -125,11 +125,16 @@ namespace BZROpenShim
 
         // --- Settings --------------------------------------------------------
         inline constexpr char kUserConfigSinglePlayerSection[] = "SinglePlayer";
+        inline constexpr char kUserConfigDisplaySection[] = "Display";
         uint16_t ReadLocalPlayerNetIdValue();
 
         // --- Engine state (bzr_hooks.cpp) ------------------------------------
         uintptr_t GetMainModuleBase();
         bool IsExuModuleLoaded();
+        // VirtualProtect + memcpy + flush; false if the page cannot be made writable.
+        bool WritePatchBytes(uintptr_t address, const uint8_t* bytes, size_t len);
+        // Target of the E8 call at callInstr; 0 when it is not an E8.
+        uint32_t ResolveRel32Target(uint8_t* callInstr);
         // True once the SetRunning mission seam is hooked; its enter/exit
         // callbacks then drive the per-world baseline resets.
         extern bool g_MissionSeamInstalled;
@@ -183,6 +188,12 @@ namespace BZROpenShim
         void HeadlightNotifyMissionRunStateChanged(bool enteringSimulation);
         void InstallEmissionLightFixIfPossible();
         void VerifyExpectedOgreExportsIfPossible();
+
+        // --- Unit VO queue policy (unit_vo.cpp) ------------------------------
+        extern bool g_UnitVoConfigInitialized;
+        void InitializeUnitVoConfig();
+        void InstallUnitVoQueueHooksIfPossible();
+        void RevertUnitVoToBaseline();
 
         // --- Player pilot flashlight (pilot_flashlight.cpp) ------------------
         extern bool g_PilotFlashlightConfigInitialized;
