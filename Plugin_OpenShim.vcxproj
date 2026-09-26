@@ -151,6 +151,7 @@
     <ClCompile Include="src\patches\headlights.cpp" />
     <ClCompile Include="src\patches\hud_sprite_rects.cpp" />
     <ClCompile Include="src\patches\jump_snipe_crouch.cpp" />
+    <ClCompile Include="src\patches\ogre_dedupe_crash_fixes.cpp" />
     <ClCompile Include="src\patches\ordnance_velocity.cpp" />
     <ClCompile Include="src\patches\pilot_flashlight.cpp" />
     <ClCompile Include="src\patches\pilot_team_restore.cpp" />
