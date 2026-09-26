@@ -11,6 +11,7 @@
 #include <string>
 
 #include "bzr_hooks.h"
+#include "bzr_object_layout.h"
 
 namespace BZROpenShim
 {
@@ -148,6 +149,16 @@ namespace BZROpenShim
         // callbacks then drive the per-world baseline resets.
         extern bool g_MissionSeamInstalled;
         inline constexpr size_t kGameObjectArenaSlotCapacity = 4096;
+        inline constexpr size_t kGameObjectVelocityOffset = 0x12C; // world velocity vec3
+        // Confirmed on the shipped image: Ordnance::Init stores its owner obj76
+        // argument ([ebp+0xC]) here at 0x00585292, and zeroes the paired handle
+        // at +0xDC (0x005852A4) when that argument is null.
+        inline constexpr size_t kOrdnanceOwnerObjOffset = 0xD8;
+        static_assert(kOrdnanceOwnerObjOffset == ObjectLayout::kOrdnanceOwnerObj,
+                      "ordnance owner obj76 disagrees with bzr_object_layout.h");
+        bool IsSinglePlayerSession();
+        bool TryGetGameObjectFieldBase(void* objectPtr, uint8_t*& outBase);
+        bool TryGetGameObjectFromObj76(void* obj76, void*& outGameObject);
         // Engine viewport height global (the scrap/pilot HUD and radar layout read it).
         inline constexpr uintptr_t kScrapPilotHudViewportHeightAddr = 0x02CECEE4;
 
@@ -199,6 +210,12 @@ namespace BZROpenShim
         void HeadlightNotifyMissionRunStateChanged(bool enteringSimulation);
         void InstallEmissionLightFixIfPossible();
         void VerifyExpectedOgreExportsIfPossible();
+
+        // --- Ordnance velocity inheritance (ordnance_velocity.cpp) -----------
+        extern bool g_OrdnanceVelocityInheritanceEnabled;
+        extern bool g_OrdnanceVelocityInheritanceBaselineEnabled;
+        void RefreshOrdnanceVelocityInheritanceState();
+        void RevertOrdnanceVelocityInheritanceToBaseline();
 
         // --- Radar layout and size scale (radar_layout.cpp) ------------------
         extern bool g_RadarLayoutHookInstalled;

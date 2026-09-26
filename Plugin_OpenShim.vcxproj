@@ -147,6 +147,7 @@
     <ClCompile Include="src\patches\bzrnet_settings.cpp" />
     <ClCompile Include="src\patches\global_turbo.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
+    <ClCompile Include="src\patches\ordnance_velocity.cpp" />
     <ClCompile Include="src\patches\pilot_flashlight.cpp" />
     <ClCompile Include="src\patches\pilot_team_restore.cpp" />
     <ClCompile Include="src\patches\radar_layout.cpp" />
