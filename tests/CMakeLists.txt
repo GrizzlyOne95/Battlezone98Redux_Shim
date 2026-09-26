@@ -481,6 +481,25 @@ else()
     target_compile_options(odf_item_prologue_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 add_test(NAME odf_item_prologue_tests COMMAND odf_item_prologue_tests)
+
+# Lock arithmetic of the ODF item detours against a fake engine (audit P1-7):
+# a cached UseItem hit must still reach the engine, so the one-for-one
+# UnlockItem forwards never drive its lock count below zero, and every holder
+# served while a feature is armed has a record to release. Windows-only: the
+# detours are __cdecl over SEH-guarded engine calls.
+if(WIN32 AND MSVC)
+    add_executable(odf_item_hooks_tests
+        odf_item_hooks_tests.cpp
+        ../src/patches/odf_item_hooks.cpp
+        ../src/patches/odf_compat.cpp
+        ../src/engine/shim_log_sink.cpp
+        ../src/engine/shim_log_client.cpp)
+    target_include_directories(odf_item_hooks_tests PRIVATE ../include)
+    target_compile_features(odf_item_hooks_tests PRIVATE cxx_std_20)
+    target_compile_definitions(odf_item_hooks_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(odf_item_hooks_tests PRIVATE /W4 /WX)
+    add_test(NAME odf_item_hooks_tests COMMAND odf_item_hooks_tests)
+endif()
 # Render-effect intent (the EXU-facing renderer boundary). Engine-independent
 # by construction: the whole requested/supported/effective decision lives in
 # src/engine/render_effect_intent.cpp with no Windows, D3D11 or Ogre in it, and
