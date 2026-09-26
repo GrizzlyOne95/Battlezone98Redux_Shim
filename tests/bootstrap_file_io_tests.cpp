@@ -13,8 +13,12 @@
 #include "bootstrap_file_io.h"
 #include "game_log_path.h"
 
+#include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <new>
+#include <stdexcept>
 #include <filesystem>
 #include <string>
 
@@ -106,6 +110,42 @@ namespace
     }
 }
 
+namespace
+{
+    std::atomic<size_t> g_allocations{0};
+    std::atomic<bool> g_throwingProviderCalled{false};
+
+    // A provider that breaks its promise: the seam must swallow the throw,
+    // count it, and open on the unrouted path.
+    const wchar_t* __cdecl ThrowingRoutePathW(const wchar_t*, DWORD, DWORD)
+    {
+        g_throwingProviderCalled = true;
+        throw std::bad_alloc();
+    }
+    void __cdecl ThrowingOnOpenedW(HANDLE, const wchar_t*, const wchar_t*, DWORD, DWORD)
+    {
+        g_throwingProviderCalled = true;
+        throw std::runtime_error("provider misbehaved");
+    }
+}
+
+// Counts every allocation this process makes through the C++ heap, so the
+// wrappers' common path (an open that is not a stock log) can be shown to
+// make none. The wrappers are linked into this executable, so their
+// allocations land here; the real CreateFile in kernel32 does not use it.
+void* operator new(std::size_t size)
+{
+    g_allocations.fetch_add(1, std::memory_order_relaxed);
+    if (void* p = std::malloc(size ? size : 1))
+        return p;
+    throw std::bad_alloc();
+}
+void* operator new[](std::size_t size) { return operator new(size); }
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+void operator delete[](void* p) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+
 int wmain()
 {
     const std::filesystem::path exeDir = ExeDirectory();
@@ -121,6 +161,35 @@ int wmain()
     const std::wstring plain = (exeDir / L"bootstrap_seam_plain.tmp").wstring();
     CHECK(WriteThrough(plain));
     CHECK(std::filesystem::exists(plain));
+
+    // ---- the common path allocates nothing and the predicate is exact ----
+    // Every open the game makes runs the stock-log test; only a stock log may
+    // pay for a std::string, and nothing on the way may throw. (Audit P1-15.)
+    {
+        const size_t before = g_allocations.load();
+        const HANDLE h = ::CreateFileW(plain.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        const size_t after = g_allocations.load();
+        CHECK(h != INVALID_HANDLE_VALUE);
+        if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+        CHECK(after == before);
+    }
+    CHECK(BootstrapFileIo::IsBareGameLogNameW(L"BZOgreLogfile.log"));
+    CHECK(BootstrapFileIo::IsBareGameLogNameW(L"x.LOG"));
+    CHECK(BootstrapFileIo::IsBareGameLogNameW(L"BZLogger.txt"));
+    CHECK(BootstrapFileIo::IsBareGameLogNameW(L"bzlogger.TXT"));
+    CHECK(!BootstrapFileIo::IsBareGameLogNameW(L"logs\\x.log"));
+    CHECK(!BootstrapFileIo::IsBareGameLogNameW(L"logs/x.log"));
+    CHECK(!BootstrapFileIo::IsBareGameLogNameW(L"C:x.log"));
+    CHECK(!BootstrapFileIo::IsBareGameLogNameW(L".log"));
+    CHECK(!BootstrapFileIo::IsBareGameLogNameW(L"x.logs"));
+    CHECK(!BootstrapFileIo::IsBareGameLogNameW(L"x.log."));
+    CHECK(!BootstrapFileIo::IsBareGameLogNameW(L"bzlogger.txt2"));
+    CHECK(!BootstrapFileIo::IsBareGameLogNameW(L""));
+    CHECK(!BootstrapFileIo::IsBareGameLogNameW(nullptr));
+    CHECK(BootstrapFileIo::IsBareGameLogNameA("crc32host.log"));
+    CHECK(!BootstrapFileIo::IsBareGameLogNameA("data\\crc32host.log"));
+    CHECK(!BootstrapFileIo::IsBareGameLogNameA(nullptr));
 
     // ...and GetLastError survives the wrapper's own bookkeeping.
     SetLastError(ERROR_SUCCESS);
@@ -211,6 +280,21 @@ int wmain()
     CHECK(g_Seen.routeCalledA);
     CHECK(g_Seen.openedCalledA);
     CHECK(g_Seen.lastRequestedA == ansi);
+
+    // ---- a provider that throws cannot take CreateFile down with it ------
+    // The seam swallows and counts the exception and opens on the unrouted
+    // path; the handle still comes back. (Audit P1-15.)
+    BootstrapFileIo::Provider throwing = {};
+    throwing.structSize = sizeof(throwing);
+    throwing.routePathW = ThrowingRoutePathW;
+    throwing.onOpenedW = ThrowingOnOpenedW;
+    CHECK(BootstrapFileIo::InstallProvider(&throwing));
+    const uint32_t exceptionsBefore = BootstrapFileIo::ProviderExceptionCount();
+    g_throwingProviderCalled = false;
+    CHECK(WriteThrough(plain));
+    CHECK(g_throwingProviderCalled.load());
+    CHECK(BootstrapFileIo::ProviderExceptionCount() == exceptionsBefore + 2);
+    CHECK(BootstrapFileIo::InstallProvider(&provider));
 
     // A failed open must not be reported as an open.
     g_Seen = Observation{};
