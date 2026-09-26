@@ -22692,6 +22692,16 @@ namespace BZROpenShim
             // Legacy-only fast path (no kite tuning, but legacy flag set)
             if (isLegacyCraft && !hasKiteTuning)
             {
+                // The port is partial, and a modder who sets legacyAI=1 should
+                // be able to read which parts of 1.4 they are getting.
+                static volatile LONG s_legacyPartialLogged = 0;
+                if (InterlockedCompareExchange(&s_legacyPartialLogged, 1, 0) == 0)
+                {
+                    Log(L"[LEGACY] 1.4 AI profile active (first craft 0x%08X): D1 (able-to-hit -> slide) and "
+                        L"D4 (stand timeout -> slide) apply; D2 (slide exit) and D3 (uncapped flee) are not "
+                        L"ported, so those exits follow stock Redux\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
+                }
                 int curBefore = 0, nextBefore = 0;
                 float startBefore = 0.0f;
                 TryGetTaskState(taskBytes, curBefore, nextBefore, startBefore);
@@ -22733,33 +22743,19 @@ namespace BZROpenShim
                             Log(L"[LEGACY] D4 override craft=0x%08X 8->9 => 8->7 (timeout)\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                     }
                 }
-                // D3: case 9 flee bounded 3s -> uncapped. Suppress time->10
-                if (curBefore == 9 && nextAfter == 10)
-                {
-                    bool suppress = false;
-                    __try
-                    {
-                        float now = 0.0f;
-                        // Use GetTickCount as fallback for Get_Time if not available; for now use task start + 3.0 check
-                        float* taskStart = reinterpret_cast<float*>(taskBytes + 0x100);
-                        // Heuristic: if next was 10 due to timeout, it will be 3s after start. Check that start+3 < now (approx)
-                        // We approximate by checking that distance to target is still <5625 and not stuck, so the only remaining exit is timeout.
-                        // For now, suppress if not stuck and still within 75u (5625) - simplistic
-                        // Read stuck via TryRead? Use placeholder: suppress always for legacy 9->10 unless stuck
-                        suppress = true;
-                        // TODO: refine with actual distance/IsStuck check
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER) {}
-                    if (suppress)
-                    {
-                        *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 9; // stay in flee
-                        if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI"))
-                            Log(L"[LEGACY] D3 suppress craft=0x%08X 9->10 blocked, stay 9\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
-                    }
-                }
+                // D3 (1.4 flee has no 3 s bound) is not ported. It used to rewrite
+                // every 9 -> 10 back to 9, but stock Redux leaves flee for blast
+                // on two conditions, not one: IsStuck (FUN_006027f0) and the
+                // 3 s timeout (task+0x100 + 3.0 < GetGameTime), both inside the
+                // 75 m (5625 sq) band. Suppressing both pinned a stuck legacy
+                // craft in flee for good. Finishing it means suppressing only the
+                // timeout, which needs the stuck verdict without calling
+                // FUN_006027f0 a second time: that call resets the stuck sample
+                // (FUN_00602920 rewrites task+0x84/+0x88) whenever its window has
+                // elapsed. Decompile: FUN_00478a50, switch index = state - 2.
                 // D2: case 7 slide-exit enemy state {2,5,7} uncapped vs IsBuilding+10s
                 // TODO: implement enemy task state read: handle at +0x14 -> object -> +0x30 -> state at +0x08
-                // For now, log that D2 would apply if enemy state were 7
+                // Not ported: slide exits follow stock Redux.
                 return;
             }
 
@@ -32475,7 +32471,9 @@ namespace BZROpenShim
             {
                 auto* mineBytes = reinterpret_cast<uint8_t*>(magnetMinePtr);
                 void* mineClass = *reinterpret_cast<void**>(mineBytes + kGameObjectClassOffset);
-                if (!mineClass) return;
+                // No class, no attraction, but the base Mine::Simulate below
+                // still has to run: it is what expires and removes the mine.
+                if (!mineClass) __leave;
 
                 float armingTimer = *reinterpret_cast<float*>(mineBytes + kMagnetMineArmingTimerOffset);
                 float totalLife = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kMagnetMineClassTotalLifeOffset);
@@ -32484,12 +32482,6 @@ namespace BZROpenShim
                 float elapsed = totalLife - armingTimer;
                 if (elapsed >= armingDelay)
                 {
-                    if (*reinterpret_cast<int*>(mineBytes + kMagnetMineSoundHandleOffset) == 0)
-                    {
-                        // Logic for starting ambient sound could be added here if needed,
-                        // but we primarily care about the simulation loop.
-                    }
-
                     float range = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kMagnetMineClassRangeOffset);
                     float minePos[3] = {
                         *reinterpret_cast<float*>(mineBytes + 0x108),
@@ -32614,101 +32606,31 @@ namespace BZROpenShim
                 return;
             }
 
-            bool shouldDetonate = false;
-
-            __try
+            // A team filter on a proximity mine is not honoured yet: the mine
+            // runs stock ProximityMine::Simulate, so it still explodes, on
+            // stock targeting. The custom path this replaced detected a target
+            // through the filter and then only OR-ed 0x280 into the removal
+            // flags, so a filtered mine vanished without exploding.
+            //
+            // Finishing it means reproducing stock's detonation block in
+            // FUN_005b0e40, not just its flags: it snaps obj+0x50 to the
+            // terrain height (FUN_007855e0), calls FUN_004927d0 twenty times
+            // and FUN_007809d0, resolves the damage owner (FUN_004b0400, else
+            // the mine's own obj), builds the class's explosion when
+            // class+0x170 is set (ExplosionClass::Build, FUN_004cb7b0, this =
+            // that explosion class, args obj+0x20 and the owner), then sets
+            // 0x280 and, when FUN_00571c40 says so, calls FUN_004b8460. Its scan
+            // also refuses to fire while FUN_004db510 holds for an object in
+            // range, which a filter would have to replace rather than bypass.
+            static volatile LONG s_filterIgnoredLogged = 0;
+            if (InterlockedCompareExchange(&s_filterIgnoredLogged, 1, 0) == 0)
             {
-                auto* mineBytes = reinterpret_cast<uint8_t*>(proximityMinePtr);
-                float* armingTimer = reinterpret_cast<float*>(mineBytes + kProximityMineArmingTimerOffset);
-                *armingTimer -= dt;
-
-                if (*armingTimer <= 0.0f && *armingTimer != 0.0f)
-                {
-                    void* mineObj = *reinterpret_cast<void**>(mineBytes + kGameObjectObjOffset);
-                    if (mineObj && (*reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(mineObj) + 0x14) & 0x200) == 0)
-                    {
-                        void* mineClass = *reinterpret_cast<void**>(mineBytes + kGameObjectClassOffset);
-                        if (mineClass)
-                        {
-                            *armingTimer += *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kProximityMineClassScanPeriodOffset);
-                            float range = *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(mineClass) + kProximityMineClassRangeOffset);
-                            float rangeSq = range * range;
-
-                            float minePos[3] = {
-                                *reinterpret_cast<float*>(mineBytes + 0x108),
-                                *reinterpret_cast<float*>(mineBytes + 0x10C),
-                                *reinterpret_cast<float*>(mineBytes + 0x110)
-                            };
-
-                            void* collisionRangeSearch = *reinterpret_cast<void**>(kCollisionRangeSearchAddr);
-                            if (collisionRangeSearch && g_BzrFn_CollisionRangeSearch && g_BzrFn_RangeResultsGetNext)
-                            {
-                                ShieldTowerRangeSearchResults results = {};
-                                g_BzrFn_CollisionRangeSearch(
-                                    collisionRangeSearch,
-                                    static_cast<double>(minePos[0] - range),
-                                    static_cast<double>(minePos[2] - range),
-                                    static_cast<double>(minePos[0] + range),
-                                    static_cast<double>(minePos[2] + range),
-                                    &results);
-
-                                uint32_t* handlePtr = nullptr;
-                                while (g_BzrFn_RangeResultsGetNext(&results, &handlePtr) != 0)
-                                {
-                                    if (!handlePtr) continue;
-                                    void* target = g_BzrFn_GameObjectGetObjByHandle(static_cast<int>(*handlePtr));
-                                    if (!target || target == proximityMinePtr) continue;
-
-                                    // Team Filter check replaces the hardcoded enemy check.
-                                    if (!TeamFilterShouldAffectObject(proximityMinePtr, target, filter))
-                                        continue;
-
-                                    float targetPos[3] = {};
-                                    if (TryGetGameObjectWorldPosition(target, targetPos))
-                                    {
-                                        float dx = targetPos[0] - minePos[0];
-                                        float dy = targetPos[1] - minePos[1];
-                                        float dz = targetPos[2] - minePos[2];
-                                        float distSq = dx * dx + dy * dy + dz * dz;
-
-                                        if (distSq <= rangeSq)
-                                        {
-                                            shouldDetonate = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (shouldDetonate)
-                {
-                    // Call detonation logic: ordnance spawn and self-destruct flags.
-                    // This mirrors the logic at the end of ProximityMine::Simulate.
-                    void* mineObj = *reinterpret_cast<void**>(mineBytes + kGameObjectObjOffset);
-                    if (mineObj)
-                    {
-                        // Spawn explosion ordnance, set removed flags etc.
-                        // For simplicity and correctness, we might want to jump back into
-                        // the original Simulate if we detect a detonation condition,
-                        // but ProximityMine::Simulate is simple enough to mirror.
-
-                        // Set removed flags (0x280)
-                        *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(mineObj) + 0x14) |= 0x280;
-
-                        // We could also call the original simulation with a huge dt or force state,
-                        // but setting the flags and letting the engine handle it is closer to how it works.
-                    }
-                }
+                Log(L"[PROXODF] teamFilter on a ProximityMine is not supported yet (first mine 0x%08X); "
+                    L"filtered proximity mines use stock targeting so they still explode\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(proximityMinePtr)));
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-
-            if (g_BzrFn_MineSimulate)
-                g_BzrFn_MineSimulate(proximityMinePtr, dt);
+            if (g_BzrFn_ProximityMineSimulateOriginal)
+                g_BzrFn_ProximityMineSimulateOriginal(proximityMinePtr, dt);
         }
         static ProducerBuildMenuEntry TryReadProducerBuildMenuEntryFromOdfFile(const char* producerOdf)
         {
