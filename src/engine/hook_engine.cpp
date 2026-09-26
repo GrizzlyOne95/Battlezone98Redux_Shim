@@ -490,6 +490,53 @@ namespace HookEngine
         }
     }
 
+    // The pattern scan reads the module's own executable pages in place, under
+    // SEH, instead of copying every region into a buffer first. The copies were
+    // the dominant cost of the scan: each region once per target per pass in
+    // ScanForPatterns, and once per name in ResolveNamedAddress. A leaf with
+    // raw pointers only, because __try cannot share a function with objects
+    // that need unwinding (C2712). Returns true with outOffset set to the first
+    // match at or after startOffset; false at the end of the region or when a
+    // read faulted (outFaulted), after which the region is treated as
+    // unreadable from that point, as a short ReadProcessMemory was before.
+    static bool FindPatternInPlace(const uint8_t* region,
+                                   size_t regionSize,
+                                   const uint16_t* pattern,
+                                   size_t patternSize,
+                                   size_t startOffset,
+                                   size_t& outOffset,
+                                   bool& outFaulted) noexcept
+    {
+        outFaulted = false;
+        if (!region || patternSize == 0 || regionSize < patternSize)
+            return false;
+        __try
+        {
+            const size_t last = regionSize - patternSize;
+            for (size_t i = startOffset; i <= last; ++i)
+            {
+                size_t j = 0;
+                while (j < patternSize &&
+                       (pattern[j] >= 0x100 ||
+                        region[i + j] == static_cast<uint8_t>(pattern[j])))
+                {
+                    ++j;
+                }
+                if (j == patternSize)
+                {
+                    outOffset = i;
+                    return true;
+                }
+            }
+            return false;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            outFaulted = true;
+            return false;
+        }
+    }
+
     void ScanForPatterns(const std::string& moduleName, std::vector<PatchDef>& patches, const std::vector<ScanTarget>& targets, bool missesAreProvisional)
     {
         std::vector<std::pair<uint8_t*, size_t>> regions;
@@ -520,39 +567,36 @@ namespace HookEngine
             std::vector<uint8_t> matchedExpected;
             for (const auto& region : regions)
             {
-                std::vector<uint8_t> buf(region.second);
-                SIZE_T read = 0;
-                if (!ReadProcessMemory(hProc, region.first, buf.data(), region.second, &read) || read == 0)
-                    continue;
-                if (read < idaPattern.size())
-                    continue;
-
-                for (size_t i = 0; i <= read - idaPattern.size(); i++)
+                size_t next = 0;
+                size_t i = 0;
+                bool faulted = false;
+                while (FindPatternInPlace(region.first, region.second,
+                                          idaPattern.data(), idaPattern.size(),
+                                          next, i, faulted))
                 {
-                    bool match = true;
-                    for (size_t j = 0; j < idaPattern.size(); j++)
+                    ++matchCount;
+                    if (matchCount == 1)
                     {
-                        if (idaPattern[j] < 0x100 && buf[i + j] != static_cast<uint8_t>(idaPattern[j]))
+                        matchedAddress = static_cast<uint32_t>(
+                            reinterpret_cast<uintptr_t>(region.first + i + target.offset));
+                        // The bytes the patch verifies before it writes: still
+                        // copied out (a few bytes), bounded by the region.
+                        matchedExpected.clear();
+                        const size_t site = i + target.offset;
+                        const size_t available = site < region.second ? region.second - site : 0;
+                        const size_t wanted = std::min<size_t>(target.expected_size, available);
+                        if (wanted > 0)
                         {
-                            match = false;
-                            break;
+                            matchedExpected.resize(wanted);
+                            SIZE_T read = 0;
+                            if (!ReadProcessMemory(hProc, region.first + site, matchedExpected.data(), wanted, &read))
+                                read = 0;
+                            matchedExpected.resize(read);
                         }
                     }
-
-                    if (match)
-                    {
-                        ++matchCount;
-                        if (matchCount == 1)
-                        {
-                            matchedAddress = static_cast<uint32_t>(
-                                reinterpret_cast<uintptr_t>(region.first + i + target.offset));
-                            matchedExpected.clear();
-                            for (size_t j = 0; j < target.expected_size && (i + target.offset + j) < read; ++j)
-                                matchedExpected.push_back(buf[i + target.offset + j]);
-                        }
-                        if (!target.require_unique)
-                            break;
-                    }
+                    if (!target.require_unique)
+                        break;
+                    next = i + 1;
                 }
                 if (matchCount > 0 && !target.require_unique)
                     break;
@@ -733,30 +777,15 @@ namespace HookEngine
 
         if (moduleReady && !pattern.empty())
         {
-            HANDLE hProc = GetCurrentProcess();
             for (const auto& region : regions)
             {
-                std::vector<uint8_t> buf(region.second);
-                SIZE_T read = 0;
-                if (!ReadProcessMemory(hProc, region.first, buf.data(), region.second, &read) || read == 0)
-                    continue;
-                if (read < pattern.size())
-                    continue;
-
-                for (size_t i = 0; i <= read - pattern.size(); i++)
+                size_t next = 0;
+                size_t i = 0;
+                bool faulted = false;
+                while (FindPatternInPlace(region.first, region.second,
+                                          pattern.data(), pattern.size(),
+                                          next, i, faulted))
                 {
-                    bool match = true;
-                    for (size_t j = 0; j < pattern.size(); j++)
-                    {
-                        if (pattern[j] < 0x100 && buf[i + j] != static_cast<uint8_t>(pattern[j]))
-                        {
-                            match = false;
-                            break;
-                        }
-                    }
-                    if (!match)
-                        continue;
-
                     // Always count every hit, even when the first one will be
                     // taken: an ambiguous signature that happens to work is
                     // still worth seeing in the log before it stops working.
@@ -769,6 +798,7 @@ namespace HookEngine
                         else
                             matchCount = 0; // anchor rejected; keep looking
                     }
+                    next = i + 1;
                 }
             }
         }
