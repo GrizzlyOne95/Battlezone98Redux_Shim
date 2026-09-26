@@ -219,6 +219,15 @@ namespace BZROpenShim
         void InstallEmissionLightFixIfPossible();
         void VerifyExpectedOgreExportsIfPossible();
 
+        // --- Satellite view limits (satellite_view_limits.cpp) ---------------
+        extern float g_SatelliteZoomOutMultiplier;
+        extern float g_SatelliteZoomOutMultiplierBaseline;
+        extern float g_SatellitePanSpeedMultiplier;
+        extern float g_SatellitePanSpeedMultiplierBaseline;
+        float ClampSatelliteMultiplier(float value);
+        void RefreshSatelliteViewState();
+        void RevertSatelliteViewToBaseline();
+
         // --- Jump-snipe crouch fix (jump_snipe_crouch.cpp) -------------------
         extern bool g_JumpSnipeCrouchEnabled;
         extern bool g_JumpSnipeCrouchBaselineEnabled;
