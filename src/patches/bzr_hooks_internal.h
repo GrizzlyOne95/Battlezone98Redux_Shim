@@ -136,6 +136,19 @@ namespace BZROpenShim
     extern FnBuildItemInit g_BzrFn_InitBuildItem;
     extern FnProducerModeCall g_BzrFn_ProducerModeCallOriginal;
 
+    using FnLoadScreenPrep = void(__cdecl*)();
+    using FnSetShellState = void(__cdecl*)(int state);
+    using FnBzrStringCtorFromCStr = void(__thiscall*)(BzrString* self, const char* text);
+    using FnBzrStringDtor = void(__thiscall*)(BzrString* self);
+    using FnLoadScreenClearSelection = void(__cdecl*)(BzrString* text);
+    extern FnBzrStringCtorFromCStr g_BzrFn_BzrStringCtorFromCStr;
+    extern FnBzrStringDtor g_BzrFn_BzrStringDtor;
+    extern FnLoadScreenClearSelection g_BzrFn_LoadScreenClearSelection;
+    extern FnLoadScreenPrep g_BzrFn_LoadScreenPrep;
+    extern FnSetShellState g_BzrFn_SetShellState;
+    extern FnUiDialogAction g_BzrFn_UiDialogAdvance;
+    extern FnUiDialogAction g_BzrFn_UiDialogSetEnabled;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -798,6 +811,9 @@ namespace BZROpenShim
         extern uint32_t g_LastUnknownProducerVft;
         extern ProducerBuildMenuConfig g_ProducerBuildMenuConfig;
         ProducerBuildMenuEntry NormalizeProducerBuildMenuToken(const char* value);
+
+        // --- AutoSave load button and restart mission (autosave_restart.cpp) ---
+        void ForgetAllChunkProxySceneResources(const wchar_t* reason);
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;

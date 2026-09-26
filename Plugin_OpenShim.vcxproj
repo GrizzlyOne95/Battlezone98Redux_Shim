@@ -147,6 +147,7 @@
     <ClCompile Include="src\patches\ai_unit_fixes.cpp" />
     <ClCompile Include="src\patches\ai_weapon_mask.cpp" />
     <ClCompile Include="src\patches\alert_reticle_modes.cpp" />
+    <ClCompile Include="src\patches\autosave_restart.cpp" />
     <ClCompile Include="src\patches\bzrnet_settings.cpp" />
     <ClCompile Include="src\patches\career_stats.cpp" />
     <ClCompile Include="src\patches\engine_flames.cpp" />
