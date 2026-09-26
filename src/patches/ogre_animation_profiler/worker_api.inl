@@ -69,6 +69,23 @@
                     nextOgreAttempt = loopNow + 100;
                 }
 
+                // With diagnostics off this thread exists only to finish that
+                // installation: the renderer observers and the report are
+                // collection-only. Once it is done (or given up) the thread
+                // ends instead of polling at 40 Hz for the life of the process.
+                if (!collectProfilerData &&
+                    (ogreInstallFinished || ogreAttempts >= 50 ||
+                     g_OgreHooksInstalled.load(std::memory_order_acquire)))
+                {
+                    LogShimA(
+                        LogLevel::Info,
+                        kComponent,
+                        "[OgreProfile] runtime policy installation finished (attempts=%u entryObservers=%d); worker exiting, nothing to report with diagnostics off",
+                        ogreAttempts,
+                        g_OgreHooksInstalled.load(std::memory_order_acquire) ? 1 : 0);
+                    return 0;
+                }
+
                 if (collectProfilerData && observeD3D11 && !dx11CreationAttempted)
                 {
                     HMODULE renderer = GetModuleHandleA("RenderSystem_Direct3D11.dll");
