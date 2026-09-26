@@ -2,6 +2,7 @@
 #include "netcode_hooks.h"
 #include "bzrnet_protocol.h"
 #include "shim_log.h"
+#include "engine_globals.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -86,7 +87,8 @@ namespace
     constexpr uint32_t kAutokickMsMax = 600000;
     constexpr uint32_t kAutokickPingMax = 60000;
     constexpr uint32_t kAutokickLossMax = 100000;
-    static uint32_t* const kGovRateAddr = reinterpret_cast<uint32_t*>(0x008e8d14);
+    // The governor's current rate (0x008E8D14 on GOG) resolves through
+    // patches.json "Net::GovernorRate"; kGovSig below still gates the build.
     constexpr uint8_t kGovSig[15] =
     {
         0x68, 0xA0, 0x0F, 0x00, 0x00,
@@ -157,9 +159,11 @@ namespace
     // trio), so each range is wide enough to admit every value the entry has
     // legitimately been observed holding and narrow enough to reject a pointer,
     // a zero, or garbage.
+    // Addresses resolve through patches.json ("Net::<name>", read out of the
+    // net.ini parser); the GOG values are in the comments.
     struct NetGlobalDef
     {
-        uintptr_t address;
+        EngineGlobals::NetTunable id;
         const char* name;
         uint32_t plausibleMin;
         uint32_t plausibleMax;
@@ -167,16 +171,16 @@ namespace
 
     constexpr NetGlobalDef kNetGlobals[] =
     {
-        { 0x008e8cf4, "MinBandwidth",  500,  100000 },
-        { 0x008e8d08, "MaxBandwidth", 1000, 4000000 },
-        { 0x008e8cf0, "UpCount",         1,  100000 },
-        { 0x008e8d10, "DownCount",       1,  100000 },
-        { 0x008e8cec, "MaxPing",        50,   60000 },
-        { 0x008e8cfc, "MaxPingsLost",    1,  100000 },
-        { 0x008e8d0c, "AutoKickStart", 1000,  600000 },
-        { 0x008e8cf8, "AutoKickPing",    50,   60000 },
-        { 0x008e8bfc, "AutoKickLoss",     1,  100000 },
-        { 0x008e8ce4, "AutoKickTime", 1000,  600000 },
+        { EngineGlobals::NetTunable::MinBandwidth,  "MinBandwidth",  500,  100000 }, // 0x008e8cf4
+        { EngineGlobals::NetTunable::MaxBandwidth,  "MaxBandwidth", 1000, 4000000 }, // 0x008e8d08
+        { EngineGlobals::NetTunable::UpCount,       "UpCount",         1,  100000 }, // 0x008e8cf0
+        { EngineGlobals::NetTunable::DownCount,     "DownCount",       1,  100000 }, // 0x008e8d10
+        { EngineGlobals::NetTunable::MaxPing,       "MaxPing",        50,   60000 }, // 0x008e8cec
+        { EngineGlobals::NetTunable::MaxPingsLost,  "MaxPingsLost",    1,  100000 }, // 0x008e8cfc
+        { EngineGlobals::NetTunable::AutoKickStart, "AutoKickStart", 1000,  600000 }, // 0x008e8d0c
+        { EngineGlobals::NetTunable::AutoKickPing,  "AutoKickPing",    50,   60000 }, // 0x008e8cf8
+        { EngineGlobals::NetTunable::AutoKickLoss,  "AutoKickLoss",     1,  100000 }, // 0x008e8bfc
+        { EngineGlobals::NetTunable::AutoKickTime,  "AutoKickTime", 1000,  600000 }, // 0x008e8ce4
     };
 
     enum NetGlobalIndex : size_t
@@ -3237,8 +3241,16 @@ namespace
             return 0;
         }
 
+        uint32_t* const govRate = reinterpret_cast<uint32_t*>(
+            EngineGlobals::NetTunableAddress(EngineGlobals::NetTunable::GovernorRate));
+        if (!govRate)
+        {
+            Logf("[OpenShimNet] governor_patch: Net::GovernorRate unresolved; disabled");
+            return 0;
+        }
+
         Logf("[OpenShimNet] governor_patch: version confirmed; watching 0x%08lX coldStart=%u target=%u",
-            static_cast<unsigned long>(reinterpret_cast<uintptr_t>(kGovRateAddr)),
+            static_cast<unsigned long>(reinterpret_cast<uintptr_t>(govRate)),
             kGovColdStart,
             g_Config.govStart);
 
@@ -3248,7 +3260,7 @@ namespace
         uint32_t windowMin = 0xFFFFFFFFu;
         uint32_t windowMax = 0;
         uint32_t windowSamples = 0;
-        uint32_t lastObserved = *kGovRateAddr;
+        uint32_t lastObserved = *govRate;
         // The value held before the most recent change, and how long it was held
         // for. The poll runs ~20x faster than the governor adjusts, so comparing
         // against the previous poll alone would see "unchanged" almost every time
@@ -3270,7 +3282,7 @@ namespace
         while (InterlockedCompareExchange(&g_GovStop, 0, 0) == 0)
         {
             const uint64_t nowMs = GetTickCount64();
-            const uint32_t observed = *kGovRateAddr;
+            const uint32_t observed = *govRate;
             const uint32_t previousPoll = lastObserved;
 
             if (observed != previousPoll)
@@ -3325,8 +3337,8 @@ namespace
 
             if (observed == kGovColdStart && (!descentArrival || rescueDue))
             {
-                *kGovRateAddr = g_Config.govStart;
-                const uint32_t readback = *kGovRateAddr;
+                *govRate = g_Config.govStart;
+                const uint32_t readback = *govRate;
                 if (descentArrival)
                 {
                     ++rescues;
@@ -3390,6 +3402,7 @@ namespace
         {
             const NetGlobalDef* def;
             uint32_t want;
+            uint32_t* address;
             uint32_t seen;
             bool gated;
             bool vetoed;
@@ -3397,16 +3410,16 @@ namespace
 
         Slot slots[kNgCount] =
         {
-            { &kNetGlobals[kNgMinBandwidth], g_Config.netMinBandwidth, 0, false, false },
-            { &kNetGlobals[kNgMaxBandwidth], g_Config.netMaxBandwidth, 0, false, false },
-            { &kNetGlobals[kNgUpCount],      g_Config.netUpCount,      0, false, false },
-            { &kNetGlobals[kNgDownCount],    g_Config.netDownCount,    0, false, false },
-            { &kNetGlobals[kNgMaxPing],      g_Config.netMaxPing,      0, false, false },
-            { &kNetGlobals[kNgMaxPingsLost], g_Config.netMaxPingsLost, 0, false, false },
-            { &kNetGlobals[kNgAutoKickStart], g_Config.autoKickStart,  0, false, false },
-            { &kNetGlobals[kNgAutoKickPing],  g_Config.autoKickPing,   0, false, false },
-            { &kNetGlobals[kNgAutoKickLoss],  g_Config.autoKickLoss,   0, false, false },
-            { &kNetGlobals[kNgAutoKickTime],  g_Config.autoKickTime,   0, false, false },
+            { &kNetGlobals[kNgMinBandwidth], g_Config.netMinBandwidth, nullptr, 0, false, false },
+            { &kNetGlobals[kNgMaxBandwidth], g_Config.netMaxBandwidth, nullptr, 0, false, false },
+            { &kNetGlobals[kNgUpCount],      g_Config.netUpCount, nullptr, 0, false, false },
+            { &kNetGlobals[kNgDownCount],    g_Config.netDownCount, nullptr, 0, false, false },
+            { &kNetGlobals[kNgMaxPing],      g_Config.netMaxPing, nullptr, 0, false, false },
+            { &kNetGlobals[kNgMaxPingsLost], g_Config.netMaxPingsLost, nullptr, 0, false, false },
+            { &kNetGlobals[kNgAutoKickStart], g_Config.autoKickStart, nullptr, 0, false, false },
+            { &kNetGlobals[kNgAutoKickPing],  g_Config.autoKickPing, nullptr, 0, false, false },
+            { &kNetGlobals[kNgAutoKickLoss],  g_Config.autoKickLoss, nullptr, 0, false, false },
+            { &kNetGlobals[kNgAutoKickTime],  g_Config.autoKickTime, nullptr, 0, false, false },
         };
 
         // Never write something the sanity gate would reject on read-back anyway:
@@ -3440,6 +3453,19 @@ namespace
             return 0;
         }
 
+        for (Slot& slot : slots)
+        {
+            if (slot.want == 0)
+                continue;
+            slot.address = reinterpret_cast<uint32_t*>(
+                EngineGlobals::NetTunableAddress(slot.def->id));
+            if (!slot.address)
+            {
+                Logf("[OpenShimNet] net_globals: Net::%s unresolved; leaving it alone", slot.def->name);
+                slot.want = 0;
+            }
+        }
+
         Logf("[OpenShimNet] net_globals: version confirmed; asserting "
             "MinBandwidth=%u MaxBandwidth=%u UpCount=%u DownCount=%u MaxPing=%u MaxPingsLost=%u "
             "AutoKickStart=%u AutoKickPing=%u AutoKickLoss=%u AutoKickTime=%u (0 = leave alone)",
@@ -3461,7 +3487,7 @@ namespace
                 if (slot.want == 0 || slot.vetoed)
                     continue;
 
-                uint32_t* const address = reinterpret_cast<uint32_t*>(slot.def->address);
+                uint32_t* const address = slot.address;
                 const uint32_t live = *address;
 
                 if (!slot.gated)
@@ -3477,7 +3503,7 @@ namespace
                         slot.vetoed = true;
                         Logf("[OpenShimNet] net_globals: %s vetoed; 0x%08lX holds %u, outside %u..%u",
                             slot.def->name,
-                            static_cast<unsigned long>(slot.def->address),
+                            static_cast<unsigned long>(reinterpret_cast<uintptr_t>(address)),
                             live,
                             slot.def->plausibleMin,
                             slot.def->plausibleMax);
@@ -3487,7 +3513,7 @@ namespace
                         slot.def->name,
                         live,
                         slot.want,
-                        static_cast<unsigned long>(slot.def->address));
+                        static_cast<unsigned long>(reinterpret_cast<uintptr_t>(address)));
                 }
 
                 if (live != slot.want)
