@@ -43,6 +43,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace BZROpenShim::RenderProfiles
@@ -95,6 +96,9 @@ namespace BZROpenShim::RenderProfiles
         // Compat techniques fail closed when the deployed set is broken.
         std::atomic<bool> s_resourcesValidAtomic { false };
         bool s_transportWrittenThisBoot = false;
+        // Set once the seam's record has been copied with selectionRan set;
+        // until then s_bootRequest holds only what this module read itself.
+        bool s_seededFromSeam = false;
         Profile s_userProfile = Profile::Redux;
         ContentRequest s_contentRequest = ContentRequest::Inherit;
         bool s_contentOverridePresent = false;
@@ -404,6 +408,42 @@ namespace BZROpenShim::RenderProfiles
         // fault anywhere in the gate/transport degrades to stock behavior.
 
 
+        // Seeds this boot's request from the seam's published record. Call
+        // with s_stateLock held. The copy is taken under the seam's own lock,
+        // so it is never torn, but it only carries the decision once the
+        // intercepted ConfigFile::load has run, and on a GOG boot that is
+        // about five seconds after InitializeOgreRenderProfiles first copied
+        // it. Every reader of s_bootRequest therefore seeds on the way in,
+        // and the first copy that carries selectionRan holds for the boot.
+        // Returns true when this call did the seeding.
+        bool SeedBootRequestFromSeamLocked(const char* when)
+        {
+            if (s_seededFromSeam)
+            {
+                return false;
+            }
+            StartupSeam::StartupRendererResult startup = {};
+            if (!StartupSeam::CopyStartupRendererResult(&startup, sizeof(startup)) ||
+                startup.selectionRan == 0)
+            {
+                return false;
+            }
+            s_bootRequest.backend = BackendFromWire(startup.requestedBackend);
+            s_bootRequest.source = SourceFromWire(startup.requestSource);
+            s_transportWrittenThisBoot = startup.transportWritten != 0;
+            s_seededFromSeam = true;
+            LogShimA(LogLevel::Info, kLogTag,
+                     "backend.boot record seeded at %s: requested=%s source=%s transport=%s",
+                     when, RequestedBackendName(s_bootRequest.backend),
+                     s_bootRequest.source == BackendSelection::RequestSource::CliOverride
+                         ? "cli-override"
+                     : s_bootRequest.source == BackendSelection::RequestSource::Persistent
+                         ? "persistent"
+                         : "none",
+                     s_transportWrittenThisBoot ? "written" : "not-written");
+            return true;
+        }
+
         // Post-establishment classification. Runs on the observation worker
         // after the active render system was identified (or after the window
         // closed without identification). Pure reporting: never mutates Ogre.
@@ -412,6 +452,7 @@ namespace BZROpenShim::RenderProfiles
         void ReportSelectionOutcome(bool identified, bool effectiveIsDx11)
         {
             AcquireSRWLockExclusive(&s_stateLock);
+            SeedBootRequestFromSeamLocked("outcome report");
             const BackendSelection::BootRequest boot = s_bootRequest;
             const bool transportWritten = s_transportWrittenThisBoot;
             ReleaseSRWLockExclusive(&s_stateLock);
@@ -571,6 +612,8 @@ namespace BZROpenShim::RenderProfiles
             static uint32_t s_lastMask = 0;
             static BackendSelection::BootRequest s_lastBootReported {};
             static bool s_haveLast = false;
+
+            SeedBootRequestFromSeamLocked("diagnostics");
 
             if (s_haveLast &&
                 s_lastReported.effectiveProfile == s_effective.effectiveProfile &&
@@ -1363,6 +1406,28 @@ namespace BZROpenShim::RenderProfiles
             }
         }
 
+        // Compares without copying, so the per-draw negative-cache check below
+        // allocates nothing.
+        __declspec(noinline) static bool GuardedResourceNameEquals(
+            const void* material, const std::string& expected, bool* outEqual)
+        {
+            __try
+            {
+                const OgreCompatPassApi& api = CompatPassApi();
+                if (material == nullptr || outEqual == nullptr ||
+                    api.getResourceName == nullptr)
+                {
+                    return false;
+                }
+                *outEqual = (api.getResourceName(material) == expected);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         struct CompatProbeState
         {
             std::mutex lock;
@@ -1989,58 +2054,16 @@ namespace BZROpenShim::RenderProfiles
             }
         }
 
-        void* ProbeDx11LegacyCompat(const std::string& schemeName,
-                                    void* material,
-                                    unsigned short lodIndex)
+        // The DX11 compat ladder proper. Its answer for a given material,
+        // scheme and LOD does not change while the material keeps the same
+        // techniques: every non-native decision is already pinned by
+        // NoteCompatCacheKey, and a native-supported source stays native.
+        void* RunDx11LegacyCompatLadder(const std::string& schemeName,
+                                        void* material,
+                                        unsigned short lodIndex,
+                                        const Dx11Compat::CompatConfig& config,
+                                        const OgreTechniqueApi& techApi)
         {
-            // DX9 untouched by construction.
-            if (!s_detectedDx11Atomic.load(std::memory_order_acquire))
-            {
-                return nullptr;
-            }
-            const Dx11Compat::CompatConfig config = CurrentCompatConfig();
-            if (!config.compatEnabled && !config.guardEnabled)
-            {
-                return nullptr;
-            }
-            const bool filesValid =
-                s_resourcesValidAtomic.load(std::memory_order_acquire);
-            const bool bootstrapReady = EnhancedResourcesAvailable();
-            if (!filesValid || !bootstrapReady)
-            {
-                CompatProbeState& state = ProbeState();
-                if (!state.resourcesWarned.exchange(true,
-                                                    std::memory_order_acq_rel))
-                {
-                    LogShimA(LogLevel::Warn, kLogTag,
-                             "[DX11COMPAT] probe disabled: renderer files=%s "
-                             "OSE-bootstrap=%s; failing closed to stock fallback",
-                             filesValid ? "valid" : "invalid",
-                             Boot::BootstrapStateName(
-                                 static_cast<Boot::BootstrapState>(
-                                     s_enhancedBootstrapState.load(
-                                         std::memory_order_acquire))));
-                }
-                return nullptr;
-            }
-
-            const OgreTechniqueApi& techApi = TechniqueApi();
-            if (!techApi.Valid())
-            {
-                return nullptr;
-            }
-            if (!CompatPassApi().CanInspect())
-            {
-                CompatProbeState& state = ProbeState();
-                if (!state.apiWarned.exchange(true, std::memory_order_acq_rel))
-                {
-                    LogShimA(LogLevel::Warn, kLogTag,
-                             "[DX11COMPAT] pass-inspection ABI unavailable; "
-                             "compat probe fails closed to stock fallback");
-                }
-                return nullptr;
-            }
-
             std::string materialName(kUnknownMaterial);
             {
                 std::string probed;
@@ -2221,6 +2244,121 @@ namespace BZROpenShim::RenderProfiles
                 break;
             }
             return nullptr;
+        }
+
+        void* ProbeDx11LegacyCompat(const std::string& schemeName,
+                                    void* material,
+                                    unsigned short lodIndex)
+        {
+            // DX9 untouched by construction.
+            if (!s_detectedDx11Atomic.load(std::memory_order_acquire))
+            {
+                return nullptr;
+            }
+            const Dx11Compat::CompatConfig config = CurrentCompatConfig();
+            if (!config.compatEnabled && !config.guardEnabled)
+            {
+                return nullptr;
+            }
+            const bool filesValid =
+                s_resourcesValidAtomic.load(std::memory_order_acquire);
+            const bool bootstrapReady = EnhancedResourcesAvailable();
+            if (!filesValid || !bootstrapReady)
+            {
+                CompatProbeState& state = ProbeState();
+                if (!state.resourcesWarned.exchange(true,
+                                                    std::memory_order_acq_rel))
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "[DX11COMPAT] probe disabled: renderer files=%s "
+                             "OSE-bootstrap=%s; failing closed to stock fallback",
+                             filesValid ? "valid" : "invalid",
+                             Boot::BootstrapStateName(
+                                 static_cast<Boot::BootstrapState>(
+                                     s_enhancedBootstrapState.load(
+                                         std::memory_order_acquire))));
+                }
+                return nullptr;
+            }
+
+            const OgreTechniqueApi& techApi = TechniqueApi();
+            if (!techApi.Valid())
+            {
+                return nullptr;
+            }
+            if (!CompatPassApi().CanInspect())
+            {
+                CompatProbeState& state = ProbeState();
+                if (!state.apiWarned.exchange(true, std::memory_order_acq_rel))
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "[DX11COMPAT] pass-inspection ABI unavailable; "
+                             "compat probe fails closed to stock fallback");
+                }
+                return nullptr;
+            }
+
+            // Ogre asks again on every draw of a material it has no technique
+            // for, and never caches a null answer. Remember the declines here,
+            // ahead of the ladder, which copies strings, builds a candidate
+            // vector, makes three guarded calls and takes a mutex. An entry is
+            // trusted only while the pointer still names the same material
+            // (compared in place) with the same technique count, so a freed
+            // and reused address or a reloaded material is judged afresh.
+            struct DeclinedMiss
+            {
+                const void* material = nullptr;
+                std::string scheme;
+                unsigned short lod = 0;
+                unsigned short techniqueCount = 0;
+                std::string materialName;
+            };
+            thread_local std::unordered_multimap<size_t, DeclinedMiss> t_declined;
+            constexpr size_t kDeclinedMissCap = 4096;
+
+            const unsigned short techniqueCount = techApi.getNumTechniques(material);
+            const size_t missKey =
+                std::hash<std::string_view>()(std::string_view(schemeName)) ^
+                (reinterpret_cast<size_t>(material) * 31u) ^ lodIndex;
+            const auto range = t_declined.equal_range(missKey);
+            for (auto it = range.first; it != range.second; ++it)
+            {
+                const DeclinedMiss& entry = it->second;
+                if (entry.material != material || entry.lod != lodIndex ||
+                    entry.scheme != schemeName)
+                {
+                    continue;
+                }
+                bool sameName = false;
+                if (entry.techniqueCount == techniqueCount &&
+                    GuardedResourceNameEquals(material, entry.materialName, &sameName) &&
+                    sameName)
+                {
+                    return nullptr;
+                }
+                t_declined.erase(it);
+                break;
+            }
+
+            void* const generated =
+                RunDx11LegacyCompatLadder(schemeName, material, lodIndex, config, techApi);
+            if (generated == nullptr)
+            {
+                DeclinedMiss entry;
+                if (GuardedCopyResourceName(material, &entry.materialName))
+                {
+                    if (t_declined.size() >= kDeclinedMissCap)
+                    {
+                        t_declined.clear();
+                    }
+                    entry.material = material;
+                    entry.scheme = schemeName;
+                    entry.lod = lodIndex;
+                    entry.techniqueCount = techniqueCount;
+                    t_declined.emplace(missKey, std::move(entry));
+                }
+            }
+            return generated;
         }
 
         class EnhancedSchemeFallbackListener
@@ -2767,8 +2905,15 @@ namespace BZROpenShim::RenderProfiles
 
         const Profile effective = static_cast<Profile>(
             s_effectiveProfileAtomic.load(std::memory_order_acquire));
-        const bool glowTarget = (effective != Profile::Retro);
+        // Retro owns the Glow compositor's off state and re-asserts it because
+        // the engine re-enables Glow when it rebuilds a viewport. Any other
+        // profile only restores what Retro suppressed; the engine's own state
+        // is otherwise left alone, like a foreign scheme. Runs on the engine
+        // thread (the deferred apply inside the scheme hook).
+        static bool s_glowSuppressedByRetro = false;
+        const GlowAction glowAction = DecideGlowCompositor(effective, s_glowSuppressedByRetro);
         bool changedAny = false;
+        size_t foreignCount = 0;
 
         for (size_t i = 0; i < count; ++i)
         {
@@ -2777,32 +2922,47 @@ namespace BZROpenShim::RenderProfiles
             {
                 continue;
             }
-            const std::string_view modernBase =
-                NormalizeModernMaterialScheme(current, {});
-
-            char buffer[48] = {};
-            if (BuildMaterialSchemeForProfile(effective, modernBase, buffer, sizeof(buffer)))
+            // Same fail-open rule as the setMaterialScheme hook: a foreign or
+            // custom scheme is left exactly as found (render_profile.h).
+            const ViewportReapplyDecision decision =
+                DecideViewportSchemeReapply(effective, current, LastModernBase());
+            if (decision.foreignScheme)
             {
-                const std::string target(buffer);
-                if (target != current)
-                {
-                    WriteViewportScheme(viewports[i], target);
-                    changedAny = true;
-                }
+                ++foreignCount;
             }
-            // Retro suppresses the Glow compositor (legacy CR/EXU behavior);
-            // the engine re-enables Glow when it rebuilds a viewport, so the
-            // desired state is asserted on every explicit reapply.
-            SetGlowCompositorEnabled(viewports[i], glowTarget);
+            else if (decision.rewriteScheme)
+            {
+                WriteViewportScheme(viewports[i], std::string(decision.scheme));
+                changedAny = true;
+            }
+            if (glowAction == GlowAction::Disable)
+            {
+                SetGlowCompositorEnabled(viewports[i], false);
+            }
+            else if (glowAction == GlowAction::Restore)
+            {
+                SetGlowCompositorEnabled(viewports[i], true);
+            }
+        }
+        if (glowAction == GlowAction::Disable)
+        {
+            s_glowSuppressedByRetro = true;
+        }
+        else if (glowAction == GlowAction::Restore)
+        {
+            s_glowSuppressedByRetro = false;
         }
 
         LogShimA(LogLevel::Info, kLogTag,
-                 "reapply (%s): viewports=%zu effective=%s changed=%d glow=%s",
+                 "reapply (%s): viewports=%zu effective=%s changed=%d foreign=%zu glow=%s",
                  context != nullptr ? context : "?",
                  count,
                  ProfileName(effective),
                  changedAny ? 1 : 0,
-                 glowTarget ? "on" : "off");
+                 foreignCount,
+                 glowAction == GlowAction::Disable    ? "off"
+                 : glowAction == GlowAction::Restore  ? "restored"
+                                                      : "engine");
         return true;
     }
 
@@ -2891,12 +3051,15 @@ namespace BZROpenShim::RenderProfiles
         // s_bootRequest and s_transportWrittenThisBoot describe what the
         // bootstrap already decided and did. Seeding them from the record is
         // the whole point of the split: the runtime must not independently
-        // re-derive a decision that was made before it existed.
-        if (haveStartup && startup.selectionRan != 0)
+        // re-derive a decision that was made before it existed. The record
+        // is usually not published yet here (the intercepted
+        // ConfigFile::load runs seconds later on a GOG boot), so every
+        // reader seeds again on the way in; see SeedBootRequestFromSeamLocked.
+        if (!SeedBootRequestFromSeamLocked("runtime init"))
         {
-            s_bootRequest.backend = BackendFromWire(startup.requestedBackend);
-            s_bootRequest.source = SourceFromWire(startup.requestSource);
-            s_transportWrittenThisBoot = startup.transportWritten != 0;
+            LogShimA(LogLevel::Info, kLogTag,
+                     "backend.boot record not published yet at runtime init; "
+                     "the diagnostics and the outcome report seed from it once the seam has fired");
         }
         s_resourcesValid = ValidateDeployedResourceSet();
         s_resourcesValidAtomic.store(s_resourcesValid, std::memory_order_release);
