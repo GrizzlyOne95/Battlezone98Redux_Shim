@@ -209,6 +209,7 @@ int main()
         {"src/patches/openshim_updater.cpp", BZR_OPENSHIM_UPDATER_CPP},
         {"src/patches/pond_class_label.cpp", BZR_POND_CLASS_LABEL_CPP},
         {"src/patches/terrain_tile_blend.cpp", BZR_TERRAIN_TILE_BLEND_CPP},
+        {"src/engine/engine_globals.cpp", BZR_ENGINE_GLOBALS_CPP},
     };
     std::vector<std::string> resolveSources = {patcher, hooks};
     for (const ResolveCaller& caller : resolveCallers)

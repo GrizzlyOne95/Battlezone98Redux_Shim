@@ -154,7 +154,8 @@ target_compile_definitions(patch_registration_tests PRIVATE
     BZR_MP_FACTION_RESTRICT_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/mp_faction_restrict.cpp"
     BZR_OPENSHIM_UPDATER_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/openshim_updater.cpp"
     BZR_POND_CLASS_LABEL_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/pond_class_label.cpp"
-    BZR_TERRAIN_TILE_BLEND_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/terrain_tile_blend.cpp")
+    BZR_TERRAIN_TILE_BLEND_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/patches/terrain_tile_blend.cpp"
+    BZR_ENGINE_GLOBALS_CPP="${CMAKE_CURRENT_SOURCE_DIR}/../src/engine/engine_globals.cpp")
 
 # Pins the x86-32 length decoder that InstallInlineDetour32 uses to refuse
 # steals that split an instruction. Pure byte tables, no engine code.

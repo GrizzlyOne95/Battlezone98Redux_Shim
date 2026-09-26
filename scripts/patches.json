@@ -538,6 +538,46 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "GameObject::GetHandle on exact GOG Redux 2.2.301: returns 0 when [this+0x15C] is null, otherwise composes the handle from ([this+0x160] & 0xFFF) << 20 and the low 20 bits of the local copy (the and / shl / and / or sequence the pattern ends on). GameObjectFromHandleGog round-trips every pool slot through it to reject stale handles; the career-stats and unit-turbo hooks call it under SEH. bzr_hooks.cpp defined the address three times as a literal."
+    },
+    {
+      "name": "GameObject::Arena",
+      "pattern": "81 C1 ?? ?? ?? ?? 89 4D F8 8B 55 FC 81 E2 FF FF",
+      "offset": 2,
+      "mode": "abs32_operand",
+      "fallback": "0x0260DB20",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GameObject pool base on exact GOG Redux 2.2.301, read from the add ecx,imm32 at 0x004DA085 inside FUN_004da060, the engine's handle-to-object lookup: slot = handle >> 0x14, object = base + slot * 0x400, rejected unless [object+0x15C] equals handle & 0xFFFFF. The pool initializer FUN_004d9f20 walks the same 0x1000 slots of 0x400 bytes. GameObjectFromHandleGog and the arena walks (satellite visibility, headlights, MP flags) index it; bzr_hooks.cpp carried it as the literal 0x0260DB20 and as the RVA 0x0220DB20."
+    },
+    {
+      "name": "GameObject::userObject",
+      "pattern": "55 8B EC A1 ?? ?? ?? ?? 5D C3 CC CC CC CC CC CC 55 8B EC 51 89 4D FC 8B",
+      "offset": 4,
+      "mode": "abs32_operand",
+      "fallback": "0x00917AFC",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GameObject::userObject on exact GOG Redux 2.2.301, read from the mov eax,[imm32] of FUN_00417c70, a leaf accessor whose whole body returns it; FlagDisplay::Submit uses that accessor for its skip-own-craft compare. The pattern runs into the int3 padding and the next function's prologue because the accessor alone is not unique. Five files carried it as 0x00917AFC or the RVA 0x00517AFC."
+    },
+    {
+      "name": "RenderGlobals",
+      "pattern": "A3 ?? ?? ?? ?? 83 EC 18 8B CC 89 65 CC 8B 55",
+      "offset": 1,
+      "mode": "abs32_operand",
+      "fallback": "0x00920EA0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Renderer globals pointer on exact GOG Redux 2.2.301, read from the mov [imm32],eax at 0x0067C887 in FUN_0067c830, the renderer init that stores FUN_0044d2a0()'s result there and then logs \"Onyx2015 Renderer initialized!\" through the Ogre::Log* at +0x28 of the same structure. The SceneManager* sits at +0x08 (scene root, pilot FP and cockpit traces) and the MP preview viewport at +0x24. Five files carried it as the literal 0x00920EA0."
+    },
+    {
+      "name": "CurrentTrnName",
+      "pattern": "68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 C4 04 85 C0 75 19 68 ?? ?? ?? ?? 68 ?? ?? ?? ?? E8",
+      "offset": 1,
+      "mode": "abs32_operand",
+      "fallback": "0x02CC40C0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Current TRN path buffer on exact GOG Redux 2.2.301, read from the push imm32 at 0x00780177 in FUN_00780160, the world loader: it opens that path (FUN_00829390) and on failure pushes it again for \"Could not load terrain %s\", then reads [World] MusicTrack and the MusicLoop keys from it. The terrain loaders FUN_007859d0/FUN_00786340 read Width/Depth from the same buffer. terrain_tile_blend.cpp carried it as the literal 0x02CC40C0."
     }
   ],
   "globals": [

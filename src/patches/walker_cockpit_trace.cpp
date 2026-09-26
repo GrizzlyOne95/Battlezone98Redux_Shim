@@ -27,8 +27,8 @@
 //     chain directly.
 //
 // Verified live GOG 2.2.301 seams reused here:
-//   main + 0x00517AFC        -> GameObject::userObject   (bzr_hooks kHeadlightUserObjectRva 0x00917AFC)
-//   0x00920EA0 + 0x08        -> Ogre::SceneManager*      (bzr_hooks.cpp:2042)
+//   EngineGlobals::UserObjectSlot         -> GameObject::userObject   (0x00917AFC on GOG)
+//   EngineGlobals::RenderGlobals + 0x08   -> Ogre::SceneManager*      (0x00920EA0 on GOG)
 //   MSVC RTTI complete-object-locator walk for class identity (pilot_fp_animation_trace.cpp)
 //
 // Ogre binding rule: OpenShim does not link OgreMain.lib. Virtual methods are
@@ -37,6 +37,7 @@
 // Calling a non-virtual Ogre method through the header is a link error.
 
 #include "walker_cockpit_trace.h"
+#include "engine_globals.h"
 #include "ogre_runtime.h"
 #include "shim_log.h"
 
@@ -86,8 +87,6 @@ namespace BZROpenShim
         constexpr char kIniKey[] = "WalkerCockpitTrace";
         constexpr char kEnvSwitch[] = "OPENSHIM_WALKER_TRACE";
 
-        constexpr uintptr_t kUserObjectRva = 0x00517AFC;
-        constexpr uintptr_t kSceneManagerStructureAddr = 0x00920EA0;
         constexpr size_t kSceneManagerOffset = 0x08;
 
         // Field-scan windows for object -> bridge -> Entity discovery. Person is
@@ -443,7 +442,9 @@ namespace BZROpenShim
         {
             void* structure = nullptr;
             void* manager = nullptr;
-            if (!SafeReadPtr(reinterpret_cast<const void*>(kSceneManagerStructureAddr), &structure))
+            const uintptr_t renderGlobalsSlot = EngineGlobals::RenderGlobals();
+            if (!renderGlobalsSlot ||
+                !SafeReadPtr(reinterpret_cast<const void*>(renderGlobalsSlot), &structure))
                 return nullptr;
             if (!structure)
                 return nullptr;
@@ -456,11 +457,11 @@ namespace BZROpenShim
 
         void* SafeGetUserObject()
         {
-            HMODULE module = GetModuleHandleA(nullptr);
-            if (!module)
+            const uintptr_t userObjectSlot = EngineGlobals::UserObjectSlot();
+            if (!userObjectSlot)
                 return nullptr;
             void* object = nullptr;
-            if (!SafeReadPtr(reinterpret_cast<const uint8_t*>(module) + kUserObjectRva, &object))
+            if (!SafeReadPtr(reinterpret_cast<const void*>(userObjectSlot), &object))
                 return nullptr;
             return object;
         }
