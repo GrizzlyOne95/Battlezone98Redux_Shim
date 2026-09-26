@@ -45,6 +45,204 @@ namespace BZROpenShim
     extern FnRecordDeath g_BzrFn_RecordDeath;
     extern FnResolveObj76GameObject g_BzrFn_ResolveObj76GameObject;
 
+    void InstallShadowFarOverrideIfPossible();
+
+    using FnEngineFlameAddFlame = void(__thiscall*)(void* self, const void* transform, float scale);
+    using FnEngineFlameControl = void(__thiscall*)(void* self);
+    using FnEngineFlameSubmit = void(__thiscall*)(void* self, void* camera);
+    using FnEngineFlameResolveTexture = int(__cdecl*)(BzrString* textureName);
+    using FnExuGetTeamEngineFlameColor = int(__cdecl*)(int team);
+    extern FnEngineFlameAddFlame g_BzrFn_EngineFlameAddFlame;
+    extern FnEngineFlameControl g_BzrFn_EngineFlameControl;
+    extern FnEngineFlameResolveTexture g_BzrFn_EngineFlameResolveTexture;
+    extern FnEngineFlameSubmit g_BzrFn_EngineFlameSubmit;
+
+    using FnCarrierGetSelectedMask = uint32_t(__thiscall*)(void* carrier);
+    using FnTeamEnemyPInt = bool(__thiscall*)(void* team, int targetTeam);
+    // PREREQ_WhatIs(itemName) -> prereq id, 0 when the name is not in the
+    // strategic AI's enumerated unit/building universe.
+    using FnPrereqWhatIs = uint16_t(__cdecl*)(const char*);
+    // Multi-producer maker registration. InitObjectClasses walks the build
+    // trees of every load-time root; FindObjectClass keys the resulting list on
+    // the built class alone, so a class reachable from two producers keeps only
+    // the first producer it was seen under, and SetMaker writes that one into
+    // makers[0]. Collect the pairs FindObjectClass rejects, and append them
+    // after Units_Init has filled makers[0] for every accepted pair.
+    using FnAiFindObjectClass = uint32_t(__cdecl*)(void* objClass, void* buildClass);
+    using FnAiUnitsInit = void(__cdecl*)();
+    using FnAiIsBuilding = uint8_t(__cdecl*)(void* objClass);
+    using FnAiClass2UnitType = void*(__cdecl*)(void* objClass);
+    using FnAiClass2BuildingType = void*(__cdecl*)(void* objClass, int zero);
+    using FnAiGetPrereq = uint16_t(__cdecl*)(void* objClass);
+    struct AiExtraMakerPair { void* objClass; void* buildClass; };
+    extern std::vector<AiExtraMakerPair> g_AiExtraMakerPairs;
+    extern volatile long g_AiMultiProducerMakerLogBudget;
+    extern volatile long g_AipPrereqCensusEmitted;
+    extern volatile long g_AipResolveTraceBudget;
+    extern volatile long g_NeutralAttackOrderLogBudget;
+    extern std::unordered_set<uintptr_t> g_PilotCarrierNullLoggedObjects;
+
+    using FnCommandHandler = void(__cdecl*)(uint16_t id, const char* cmd);
+    using FnHelpLog = void(__cdecl*)(void* obj, const char* text);
+    using FnHelpUi = void(__cdecl*)(int channel, const char* text);
+    using FnBanLookup = void* (__cdecl*)(uint16_t id);
+    using FnIsHost = int(__cdecl*)();
+    extern FnBanLookup g_BzrFn_BanLookup;
+    extern FnCommandHandler g_BzrFn_CommandHandler;
+    extern FnHelpLog g_BzrFn_HelpLog;
+    extern FnHelpUi g_BzrFn_HelpUi;
+    extern FnIsHost g_BzrFn_IsHost;
+    extern void** g_BzrPtr_920168;
+
+    using FnGetSelected = void* (__thiscall*)(void* list);
+    using FnNetPlayerSetData = void(__thiscall*)(void* thisPtr, uint32_t slot, uint8_t* data, uint32_t len);
+    using FnNetPlayerSetFlagBuffer = void(__thiscall*)(void* thisPtr, const uint8_t* data, uint32_t len);
+    using FnSetMyFlag = void(__cdecl*)();
+    using FnUiTextEntryClear = void (__thiscall*)(void*);
+    extern FnGetSelected g_BzrFn_GetSelected;
+    extern FnNetPlayerSetData g_BzrFn_NetPlayerSetData;
+    extern FnNetPlayerSetFlagBuffer g_BzrFn_NetPlayerSetFlagBuffer;
+    extern FnSetMyFlag g_BzrFn_SetMyFlag;
+    extern FnUiSetStr g_BzrFn_TextEntryAppendText;
+    extern FnUiTextEntryClear g_BzrFn_TextEntryClear;
+    extern void** g_BzrPtr_94557C;
+    extern void** g_BzrPtr_9456D0;
+    extern uint8_t* g_BzrPtr_CurrentUser;
+
+    extern void (__thiscall* g_BzrFn_TextEntrySetInputLimit)(void*, int);
+
+    // ---------------------------------------------------------------------
+    // BZR function pointers (GOG v2.2.301 addresses)
+    // ---------------------------------------------------------------------
+    using FnVehicleListSet = void(__thiscall*)(void* thisPtr, BzrString a, BzrString b);
+    using FnVehicleListLoad = void(__thiscall*)(void* thisPtr, BzrString* name);
+    using FnVehicleListStep = void(__thiscall*)(void* thisPtr);
+    using FnVehicleListFinalize = void(__thiscall*)(void* thisPtr);
+    extern FnVehicleListFinalize g_BzrFn_VehicleListFinalize;
+    extern FnVehicleListLoad g_BzrFn_VehicleListLoad;
+    extern FnVehicleListStep g_BzrFn_VehicleListRefresh1;
+    extern FnVehicleListStep g_BzrFn_VehicleListRefresh2;
+    extern FnVehicleListSet g_BzrFn_VehicleListSet;
+    extern void** g_BzrPtr_945478;
+    extern void** g_BzrPtr_94548C;
+    extern void** g_BzrPtr_94555C;
+
+    struct BuildItem;
+    using FnBuildItemInit = void(__cdecl*)(BuildItem& item, int64_t token);
+    using FnBuildItemCleanup = void(__cdecl*)(BuildItem& item);
+    using FnProducerModeCall = void* (__cdecl*)(void* producerPtr, int slot, int flags);
+    extern BuildItem* g_BzrBuildMenuRoot;
+    extern FnBuildItemCleanup g_BzrFn_CleanupBuildItem;
+    extern FnBuildItemInit g_BzrFn_InitBuildItem;
+    extern FnProducerModeCall g_BzrFn_ProducerModeCallOriginal;
+
+    using FnLoadScreenPrep = void(__cdecl*)();
+    using FnSetShellState = void(__cdecl*)(int state);
+    using FnBzrStringCtorFromCStr = void(__thiscall*)(BzrString* self, const char* text);
+    using FnBzrStringDtor = void(__thiscall*)(BzrString* self);
+    using FnLoadScreenClearSelection = void(__cdecl*)(BzrString* text);
+    extern FnBzrStringCtorFromCStr g_BzrFn_BzrStringCtorFromCStr;
+    extern FnBzrStringDtor g_BzrFn_BzrStringDtor;
+    extern FnLoadScreenClearSelection g_BzrFn_LoadScreenClearSelection;
+    extern FnLoadScreenPrep g_BzrFn_LoadScreenPrep;
+    extern FnSetShellState g_BzrFn_SetShellState;
+    extern FnUiDialogAction g_BzrFn_UiDialogAdvance;
+    extern FnUiDialogAction g_BzrFn_UiDialogSetEnabled;
+
+    using FnGameObjectClassBuild = void*(__thiscall*)(void* objectClass,
+                                                      void* transform,
+                                                      int team,
+                                                      int independent,
+                                                      int seqNo,
+                                                      void* existingObject);
+    extern FnGameObjectClassBuild g_BzrFn_SprayEmitterBuildOriginal;
+
+    using FnGameObjectRelation = bool(__thiscall*)(void* thisPtr, void* other);
+    using FnGameObjectGetObjByHandle = void* (__cdecl*)(int handle);
+    using FnShieldTowerSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnMagnetMineSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnProximityMineSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnShieldTowerPowerUpdate = void(__fastcall*)(void* thisPtr);
+    using FnMatrixInverse = void(__cdecl*)(void* outMatrix, const void* inMatrix);
+    using FnVectorTransform = void(__cdecl*)(float* dst, const float* src, int count, const void* matrix);
+    using FnRangeSearch = void(__thiscall*)(void* rangeSearch,
+                                            double minX,
+                                            double minZ,
+                                            double maxX,
+                                            double maxZ,
+                                            void* outResults);
+    using FnRangeResultsGetNext = uint32_t(__thiscall*)(void* results, uint32_t** outHandlePtr);
+    extern FnShieldTowerSimulate g_BzrFn_BuildingSimulate;
+    extern FnRangeSearch g_BzrFn_CollisionRangeSearch;
+    extern FnGameObjectRelation g_BzrFn_GameObjectEnemyP;
+    extern FnGameObjectRelation g_BzrFn_GameObjectFriendP;
+    extern FnGameObjectGetObjByHandle g_BzrFn_GameObjectGetObjByHandle;
+    extern FnMagnetMineSimulate g_BzrFn_MagnetMineSimulateOriginal;
+    extern FnMatrixInverse g_BzrFn_MatrixInverse;
+    extern FnProximityMineSimulate g_BzrFn_MineSimulate;
+    extern FnProximityMineSimulate g_BzrFn_ProximityMineSimulateOriginal;
+    extern FnRangeResultsGetNext g_BzrFn_RangeResultsGetNext;
+    extern FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate;
+    extern FnShieldTowerSimulate g_BzrFn_ShieldTowerSimulateOriginal;
+    extern FnVectorTransform g_BzrFn_VectorTransform;
+
+    using FnCalcRangeCraft = void(__cdecl*)(void* craft,
+                                            float* closeRange,
+                                            float* range,
+                                            float* time,
+                                            void** weapon);
+    using FnAttackTaskDoState = void(__thiscall*)(void* thisPtr);
+    using FnTerrainGetIntersection = int(__cdecl*)(double startX,
+                                                   double startY,
+                                                   double startZ,
+                                                   float diffX,
+                                                   float diffY,
+                                                   float diffZ,
+                                                   float* fraction,
+                                                   void* outNormal);
+    using FnProcessDoSubTask = bool(__thiscall*)(void* thisPtr);
+    using FnGetGameTime = float(__cdecl*)();
+    using FnFindPlanForObject = void* (__cdecl*)(void* objectPtr, float x, float z);
+    using FnAiPathGetLength = float(__thiscall*)(void* pathPtr);
+    using FnAiPathDelete = void* (__thiscall*)(void* pathPtr, uint32_t flags);
+    using FnRecycleTaskDoGotoScrap = void(__thiscall*)(void* recycleTask);
+    extern FnAiPathDelete g_BzrFn_AiPathDelete;
+    extern FnAiPathGetLength g_BzrFn_AiPathGetLength;
+    extern FnAttackTaskDoState g_BzrFn_AttackTaskDoState;
+    extern FnCalcRangeCraft g_BzrFn_CalcRangeCraft;
+    extern FnFindPlanForObject g_BzrFn_FindPlanForObject;
+    extern FnGetGameTime g_BzrFn_GetGameTime;
+    extern FnProcessDoSubTask g_BzrFn_GunTowerProcessDoSubTask;
+    extern FnProcessDoSubTask g_BzrFn_OffensiveProcessDoSubTask;
+    extern FnRecycleTaskDoGotoScrap g_BzrFn_RecycleTaskDoGotoScrap;
+    extern FnTerrainGetIntersection g_BzrFn_TerrainGetIntersection;
+    extern FnProcessDoSubTask g_BzrFn_TurretTankProcessDoSubTask;
+
+    using FnSprayBuildingSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    using FnTugPostLoad = bool(__thiscall*)(void* thisPtr);
+    using FnRigProcessCleanUState2 = void(__thiscall*)(void* process);
+    using FnGameObjectHandleGetObj = void*(__cdecl*)(uint32_t handle);
+    using FnScriptProducerPredicate = bool(__cdecl*)(int handle);
+    using FnAIUnitRemove = void(__cdecl*)(void* unitPtr);
+    using FnAIBuildConstructionEnd = void(__cdecl*)(int teamId, int constructType);
+    using FnAIBuildReservedAreaRemove = void(__cdecl*)(int teamId, int reservedArea);
+    using FnAISpentCreditRefund = void(__cdecl*)(int teamId, void* buildingPtr, void* unitPtr);
+    using FnUnitsSOrderStop = void(__cdecl*)(void* unitPtr);
+    using FnAIBuildUnassignedCCAdd = void(__cdecl*)(void* teamPtr, void* unitPtr);
+    extern FnAIBuildConstructionEnd g_BzrFn_AIBuildConstructionEnd;
+    extern FnAIBuildReservedAreaRemove g_BzrFn_AIBuildReservedAreaRemove;
+    extern FnAIBuildUnassignedCCAdd g_BzrFn_AIBuildUnassignedCCAdd;
+    extern FnAISpentCreditRefund g_BzrFn_AISpentCreditRefund;
+    extern FnAIUnitRemove g_BzrFn_AIUnitRemove;
+    extern FnSprayBuildingSimulate g_BzrFn_SprayBuildingSimulateOriginal;
+    extern FnUnitsSOrderStop g_BzrFn_UnitsSOrderStop;
+
+    using FnUiTextEntryAppendChar = uint8_t (__thiscall*)(void*, uint8_t);
+    extern FnUiTextEntryAppendChar g_BzrFn_TextEntryAppendChar;
+
+    using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
+    extern FnPersonSimulate g_BzrFn_PersonSimulate;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -531,6 +729,622 @@ namespace BZROpenShim
         bool RawMouseInputSignaturesMatch();
         void InstallRawMouseInputProcessHookIfPossible();
         bool ResolveRawMouseInputPreference(const char*& outSource);
+
+        // --- Shadow far distance correction (shadow_far_distance_hook.cpp) -----
+
+        // --- Engine flames (engine_flames.cpp) ---------------------------------
+        inline constexpr size_t kEngineFlameObjectSize = 0x1250;
+        // GameObject -> ODF name chain, verified on the live GOG exe from GetOdf
+        // (0x004FFFD0): the class accessor is a virtual on the sub-object at
+        // GameObject+0x18 (vtable[0] returns GameObjectClass*), and the ODF name
+        // is an INLINE char[8] buffer at GameObjectClass+0x30 (read by address,
+        // not a pointer). The unit's faction is the first character of that name
+        // (a=NSDF, s=CCA, c=CRA, b=Black Dog). Note: the char* at class+0x18 that
+        // GetClassLabel returns is the gameplay category ("wingman", "tank"...),
+        // which has no faction prefix -- do not use it here.
+        inline constexpr size_t kGameObjectClassSubObjOffset = 0x18;
+        inline constexpr size_t kGameObjectClassOdfNameMax = 8;
+        // Faction jet flames (openshim.ini [Display] JetFlames). A global cosmetic
+        // preference: when on, a unit's engine flame is tinted by its faction
+        // (first char of the ODF label) for any team an EXU script has NOT already
+        // colored. Purely visual/local, so it applies everywhere including MP.
+        inline constexpr bool kJetFlamesEnabledDefault = false;
+        void TickChunkProxyDebug(
+            void* currentCamera = nullptr,
+            bool allowManualSubmit = true);
+        bool TryGetGameObjectWorldPosition(void* gameObject, float (&outPosition)[3]);
+        extern int g_EngineFlamePrimaryBlackDogTexture;
+        extern int g_EngineFlamePrimaryBlueTexture;
+        extern int g_EngineFlamePrimaryGreenTexture;
+        extern void* g_EngineFlamePrimaryManager;
+        extern int g_EngineFlamePrimaryOrangeTexture;
+        extern int g_EngineFlamePrimaryRedTexture;
+        extern void* g_EngineFlameSecondaryManager;
+        extern bool g_EngineFlameVariantsInitAttempted;
+        extern bool g_EngineFlameVariantsInitialized;
+        extern bool g_EngineFlameVtableHooksInstalled;
+        extern bool g_JetFlamesConfigInitialized;
+        extern bool g_LoggedEngineFlameTargetFailure;
+        extern bool g_LoggedEngineFlameVtableHook;
+        void ResolveEngineFlameRuntimeTargets();
+        bool TryGetCraftOdfName(void* craftPtr, char* out, size_t outSize);
+        void InitializeJetFlamesConfig();
+
+        // --- AI and unit fixes (ai_unit_fixes.cpp) -----------------------------
+        inline constexpr size_t kPersonCarrierOffset = 0x1A0;      // PDB 0x198
+        extern bool g_AiMultiProducerMakersEnabled;
+        extern bool g_AipResolveTraceEnabled;
+        extern bool g_AllowNeutralAttackOrders;
+
+        // --- AI weapon-mask selection (ai_weapon_mask.cpp) ---------------------
+        // Makes artillery / lay-mines AI honour weaponMask, firing every
+        // fitted hardpoint the mask names as one synchronized volley.
+        //
+        // These are enhancements, not restorations -- BZ 1.5 ignores the mask
+        // on both paths exactly as stock Redux does -- and under the volley
+        // policy they are not no-ops even for content that authors no mask:
+        // the stock default 11111 means "every fitted hardpoint", so a stock
+        // howitzer with four mortar hardpoints fires four rounds instead of
+        // one. Both therefore default OFF, and both are gated to single
+        // player because they change simulation outcomes.
+        //
+        // Split per craft type so the artillery volley can be enabled without
+        // the lay-mines one and vice versa.
+        inline constexpr bool kAiWeaponMaskArtilleryEnabledDefault = false;
+        inline constexpr bool kAiWeaponMaskMinelayerEnabledDefault = false;
+        extern bool g_AiWeaponMaskArtilleryEnabled;
+        extern bool g_AiWeaponMaskMinelayerEnabled;
+        extern bool g_HowitzerVolleyEnabled;
+        extern bool g_WeaponMaskCarrierBiasEnabled;
+        void RefreshAiWeaponMaskArtilleryState();
+        void RevertAiWeaponMaskArtilleryToBaseline();
+        void RefreshAiWeaponMaskMinelayerState();
+        void RevertAiWeaponMaskMinelayerToBaseline();
+
+        // --- Multiplayer moderation (moderation.cpp) ---------------------------
+        struct BanRecord
+        {
+            std::string id;
+            std::string name;
+        };
+        void SyncNicknameEntriesFromAuthoritativeValue(const char* value);
+        extern std::vector<BanRecord> g_BanRecords;
+        std::filesystem::path GetBansConfigPath();
+        void EnsureBansConfigLoaded();
+        bool AddBanConfigEntry(const char* stableId, const BzrString* name, const char* source);
+        void KickBannedPlayers(const char* source, uint32_t lobby, uint32_t member, int changes);
+
+        // --- Multiplayer lobby UI (lobby_ui.cpp) -------------------------------
+        inline constexpr int kFlagPreviewWidth = 64;
+        inline constexpr int kFlagPreviewHeight = 32;
+        // 1.5 put the flag in a titled panel. Redux has no resizable frame
+        // widget to borrow: its lobby panels ("Rooms", "Games", "Chat") are
+        // whole pre-rendered panels packed into ui/Multiplayer/multipe_center.png
+        // and multipc_center.png, sized for the slots they occupy. So the panel
+        // is drawn into the generated PNG instead, matching that art's own edge
+        // profile -- sampled off multipe_center.png at 1440x1080, which is the
+        // canvas the widget is placed on, so these are 1:1 screen pixels:
+        //   border   3px (0,42,0) | 2px (0,127,0) | 2px (0,84,0) | 2px (0,42,0)
+        //   header   fill (0,42,0), then 4px (0,127,0) | 3px (0,84,0) | 2px dark
+        //   field    1.5-style red with the one-bit emblem rendered black
+        inline constexpr int kFlagPanelBorder = 9;
+        inline constexpr int kFlagPanelHeaderHeight = 49;
+        // Leave a real gutter before the stock W/M buttons. The old 240px plate
+        // ended only a few pixels before their hit rectangles and its bright
+        // border visibly covered their left edge.
+        inline constexpr int kFlagPanelWidth = 224;
+        inline constexpr int kFlagPreviewFieldScale = 3;
+        inline constexpr uint32_t kLegacyFlagDataSlot = 0x0Du;
+        inline constexpr int kLegacyFlagWidth = 64;
+        inline constexpr int kLegacyFlagHeight = 32;
+        inline constexpr size_t kLegacyFlagPayloadBytes = 0x100;
+        inline constexpr size_t kLegacyFlagRowBytes = 8;
+        struct FlagCatalogEntry
+        {
+            std::string fileName;
+            std::string displayName;
+            std::filesystem::path sourcePath;
+        };
+        void AppendUniquePath(std::vector<std::filesystem::path>& paths, const std::filesystem::path& candidate);
+        std::vector<std::filesystem::path> GetCampaignContentRootCandidates(
+            const std::filesystem::path& gameDir);
+        bool RedirectCallTarget(uintptr_t callAddress,
+                                       uintptr_t originalTarget,
+                                       uintptr_t desiredTarget);
+        bool ShouldEnableMultiplayerFlagUi();
+        extern void* g_ActiveNicknameEntry;
+        extern void* g_ActiveNicknameParent;
+        extern bool g_FlagApplyPending;
+        extern bool g_FlagPayloadReady;
+        extern bool g_LobbyNicknameInputHookInstalled;
+        extern void* g_NicknameEnterDispatchEntry;
+        extern void* g_PendingNicknameConfirmationEntry;
+        extern BzrNetNicknameResult g_PendingNicknameConfirmationResult;
+        extern bool g_ReplaceNicknameOnNextInput;
+        std::filesystem::path GetGeneratedFlagsDirectoryPath();
+        bool TryGetLocalPlayerForFlags(void*& outPlayer);
+        bool TryApplySelectedFlagThroughEngine(const char* source);
+        bool TryApplyCachedFlagPayload(const char* source);
+        void InstallBzrNetRouteObserverIfPossible();
+        bool IsWidgetLiveChildOfParent(void* parent, void* widget);
+        const char* EnsureInvalidThumbnailTextureName();
+        void ShowNicknameApplyConfirmation(void* entry, BzrNetNicknameResult result);
+
+        // --- Vehicle list mod fix (vehicle_list_mod_fix.cpp) -------------------
+        struct VehicleAssetExceptionCacheEntry
+        {
+            char assetName[64];
+            DWORD suppressUntil;
+            DWORD lastSkipLogTick;
+        };
+
+        // --- Producer build menu (producer_build_menu.cpp) ---------------------
+        inline constexpr size_t kProducerBuildMenuTokenLen = 8;
+        struct ProducerBuildMenuEntry
+        {
+            bool hasValue = false;
+            char token[kProducerBuildMenuTokenLen + 1] = {};
+            int64_t packedToken = 0;
+        };
+        struct ProducerBuildMenuConfig
+        {
+            bool initialized = false;
+            bool enabled = false;
+            ProducerBuildMenuEntry fallbackRoot = {};
+            ProducerBuildMenuEntry recycler = {};
+            ProducerBuildMenuEntry factory = {};
+            ProducerBuildMenuEntry armory = {};
+            ProducerBuildMenuEntry constructionRig = {};
+            std::unordered_map<std::string, ProducerBuildMenuEntry> odfOverrides = {};
+            std::unordered_map<std::string, ProducerBuildMenuEntry> odfFileEntries = {};
+        };
+        std::vector<std::filesystem::path> GetProducerOdfDirectoryCandidates();
+        bool TryGetObjectOdfToken(void* objectPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1]);
+        extern bool g_HasAppliedProducerBuildMenu;
+        extern int64_t g_LastAppliedProducerBuildMenu;
+        extern uint32_t g_LastUnknownProducerVft;
+        extern ProducerBuildMenuConfig g_ProducerBuildMenuConfig;
+        ProducerBuildMenuEntry NormalizeProducerBuildMenuToken(const char* value);
+
+        // --- AutoSave load button and restart mission (autosave_restart.cpp) ---
+        void ForgetAllChunkProxySceneResources(const wchar_t* reason);
+
+        // --- MPAUTH diagnostic (diag_mpauth_trace.cpp) -------------------------
+        inline constexpr size_t kOrdnanceObjOffset = 0x14;
+        // Budgets for MPAUTH traces (opt-in).
+        inline constexpr long kMpauthDwTraceBudgetDefault = 256;
+        inline constexpr long kMpauthSplTraceBudgetDefault = 256;
+        inline constexpr size_t kObjStateFlagsOffset = 0x14;
+        const char* BoolText(bool value);
+        bool TryGetEnvLong(const char* name, long& outValue);
+        extern bool g_MpauthEnabled;
+        extern bool g_MpauthHooksInstalled;
+        extern thread_local bool g_MpauthInOrdnanceReceive;
+        extern volatile long g_MpauthInstallRetryBudget;
+        extern std::unordered_map<uint32_t, int> g_MpauthSplHitCounts;
+        extern std::unordered_set<uint32_t> g_MpauthRecentDwRemovedIds;
+        extern std::unordered_map<uint32_t, uint64_t> g_MpauthDwRemoveTick;
+        extern std::unordered_map<uint32_t, int> g_MpauthDwDeletedRecord;
+        void InitializeMpauthConfig();
+        void InstallMpauthHooksIfPossible();
+
+        // --- Vehicle skinning diagnostic (diag_vehicle_skinning.cpp) -----------
+        struct ChunkBridgeSnapshot
+        {
+            void* directBridgeRoot = nullptr;
+            void* directOgreEntity = nullptr;
+            void* directOgreLight = nullptr;
+            bool directProbeOk = false;
+            void* legacyOwner = nullptr;
+            void* ownerBridgeRoot = nullptr;
+            void* ownerOgreEntity = nullptr;
+            void* ownerOgreLight = nullptr;
+            void* ownerObj = nullptr;
+            void* ownerEntity = nullptr;
+            void* gameObject = nullptr;
+            bool ownerProbeOk = false;
+            char ownerEntityBaseName[32] = {};
+            char ownerOgreFilename[32] = {};
+            char ownerResolvedMeshName[48] = {};
+            bool ownerNameProbeOk = false;
+        };
+        inline constexpr size_t kChunkObjectIdentityMaxObjectsPerRefresh = 1024;
+        ChunkBridgeSnapshot CaptureChunkBridgeSnapshot(const uint8_t* objectBytes);
+        bool TryGetGameObjectMeshName(void* gameObject, char* outMeshName, size_t outMeshNameCapacity);
+        bool TryGetGameObjectObj76(void* gameObject, void*& outObj76);
+        extern volatile long g_VehicleSkinningTraceBudget;
+        extern bool g_VehicleSkinningTraceEnabled;
+        extern std::unordered_set<std::string> g_VehicleSkinningTraceFingerprints;
+        extern DWORD g_VehicleSkinningTraceIntervalMs;
+        extern DWORD g_VehicleSkinningTraceLastTick;
+        void RefreshVehicleSkinningDiagnosticsIfNeeded();
+
+        // --- Multiplayer vehicle flags (multiplayer_vehicle_flags.cpp) ---------
+        // Ogre::Vector3 global holding the per-map render origin (terrain
+        // center); every engine sim->render conversion subtracts it and
+        // mirrors Z (render = simX-o.x, simY-o.y, -simZ-o.z).
+        inline constexpr uintptr_t kGogWorldRenderOriginAddr = 0x025F8E4C;
+        using FnFlagDisplaySubmit = void(__thiscall*)(void*, void*);
+        struct MultiplayerFlagRenderSet
+        {
+            uint64_t payloadHash = 0;
+            std::string materialName;
+            std::string resourceGroup;
+            std::filesystem::path resourceDirectory;
+            bool resourcesReady = false;
+            void* sceneManager = nullptr;
+            void* billboardSet = nullptr;
+            std::vector<void*> billboards;
+            size_t usedBillboards = 0;
+        };
+        int GetGameObjectTeamForLog(void* objectPtr);
+        bool HasTerrainLineOfSight(double startX,
+                                          double startY,
+                                          double startZ,
+                                          double endX,
+                                          double endY,
+                                          double endZ);
+        extern FnFlagDisplaySubmit g_BzrFn_FlagDisplaySubmitOriginal;
+        extern bool g_MultiplayerFlagRenderHookFailureLogged;
+        extern bool g_MultiplayerFlagRenderHookInstalled;
+        extern std::unordered_map<uint64_t, MultiplayerFlagRenderSet> g_MultiplayerFlagRenderSets;
+        extern bool g_MultiplayerFlagRendererLoggedReady;
+        void ForgetMultiplayerFlagSceneResources(const wchar_t* reason);
+        void RenderMultiplayerFlags(void* /*camera*/);
+        void MaybeDriveMultiplayerFlagRenderFallback();
+        void InstallMultiplayerFlagRenderHookIfPossible();
+
+        // --- Perceived-team reveal (perceived_team_reveal.cpp) -----------------
+        // Fail-closed safe default: the perceived-team reveal tail is an
+        // enhancement, not proven legacy parity, and its hook sites are
+        // quarantined from normal registration on main. Shipping a default
+        // of false ensures a failed or missing migration cannot leave the
+        // experimental behavior enabled for this boot; a user who explicitly
+        // wants it can still set AttackRevealPerceivedTeam=1.
+        inline constexpr bool kAttackRevealEnabledDefault = false;
+        // CORRECTED 2026-09-19. This was 0x220, which is a different field in
+        // the tug/cargo path, so the owner walk below never once resolved an
+        // owner and PreserveSprayEmitterOwner wrote a craft handle into live
+        // engine state. The owner field is +0x224, taken from the engine's own
+        // accessor pair rather than from inline stores that merely look like
+        // one:
+        //
+        //   GameObject::SetOwner 0x0046FC40
+        //     0x0046FC50 call 0x00462380 (GetHandle) on the argument
+        //     0x0046FC58 mov [ecx+0x224], eax
+        //     0x0046FC63 mov [edx+0x224], 0        (null owner branch)
+        //   GameObject::GetOwner 0x004B0400
+        //     0x004B040A mov ecx, [eax+0x224]
+        //     0x004B0411 call 0x004DA060 (GetObj)
+        //
+        // Reached from the Lua bindings: the "SetOwner"/"GetOwner" name
+        // literals at .rdata 0x0087C4E4/0x0087C4F0 are entries 0 and 1 of the
+        // table at 0x00871D28, whose function pointers are 0x00500820 and
+        // 0x00500860; those tail into the handle-level pair 0x005C89D0 /
+        // 0x005C8A10, which call the two addresses above.
+        //
+        // Complete-object relative, unlike the GetTeam family: the call site at
+        // 0x005AA91C does `mov ecx, this` / `sub ecx, 0x18` before calling
+        // GetOwner, and re-adds 0x18 to the returned pointer before using it as
+        // an interface. So this offset shares the base of
+        // kGameObjectPerceivedTeamOffset and needs no rebasing.
+        //
+        // What +0x220 actually is: a tug/cargo claim handle. At 0x004A8229 the
+        // engine tests it for zero, lazily fills it with the object's *own*
+        // GetHandle when the carrier slot +0xFC is empty (0x004A8255), and
+        // clears it again at 0x004A828A when the carrier at +0xF8 is not class
+        // 'TUG ' (0x54554700). Writing a foreign handle there both fails to
+        // record an owner and suppresses that initialization.
+        inline constexpr size_t kGameObjectOwnerHandleOffset = 0x224;
+        inline constexpr size_t kProcessOwnerObjectOffset = 0x34;
+        void LogArenaPointerFields(const wchar_t* tag, void* object, size_t scanBytes);
+        extern bool g_AttackRevealEnabled;
+        extern volatile long g_AttackRevealTraceBudget;
+        extern volatile long g_DamageRevealTraceBudget;
+        extern bool g_OwnedObjectRevealFixActive;
+        extern bool g_OwnedObjectRevealFixEnabled;
+        extern volatile long g_OwnedObjectRevealTraceBudget;
+        extern bool g_TraceDamageReveal;
+        void RefreshAttackRevealState();
+        void RevertAttackRevealToBaseline();
+        void RefreshOwnedObjectRevealFixState();
+        bool ShouldTraceOwnedObjectReveal();
+        bool ShouldTraceAttackReveal();
+        void RevealProcessOwnerPerceivedTeam(void* processPtr, const char* sourceTag);
+
+        // --- Lifecycle seams (lifecycle_seams.cpp) -----------------------------
+        inline constexpr int kBzrRunStateStarted = 5;
+        inline constexpr int kBzrRunStateUnknown = -1;
+        void DeactivateAllChunkProxySceneResources(const wchar_t* reason);
+        void InstallSceneTeardownForgetHooksIfPossible();
+        bool TryReadBzrRunState(int& value);
+        void InstallMissionTransitionSeamIfPossible();
+        void PinDirect3DModulesForShutdown();
+
+        // --- Shield tower and mine team filters (team_filter_mines.cpp) --------
+        inline constexpr uintptr_t kGogBuildingSimulateAddr = 0x0047FCB0;
+        struct TeamFilterConfig;
+        struct TeamFilterCache;
+        struct TeamFilterConfig
+        {
+            bool parsed = false;
+            bool affectAllies = true;
+            bool affectEnemies = true;
+        };
+        struct TeamFilterCache
+        {
+            bool initialized = false;
+            std::unordered_map<std::string, TeamFilterConfig> odfEntries = {};
+        };
+        struct ListNodePtrValue
+        {
+            ListNodePtrValue* next = nullptr;
+            ListNodePtrValue* prev = nullptr;
+            void* value = nullptr;
+        };
+        struct LegacyMat3
+        {
+            float right_x;
+            float right_y;
+            float right_z;
+            float up_x;
+            float up_y;
+            float up_z;
+            float front_x;
+            float front_y;
+            float front_z;
+            uint32_t padding;
+            double posit_x;
+            double posit_y;
+            double posit_z;
+        };
+        ProducerBuildMenuEntry NormalizeQuotedOdfToken(const char* value);
+        const float* TryCallEntityGetPosition(void* gameObject);
+        bool TryGetObjectWorldPositionFromObj76(void* obj76, float (&outPosition)[3]);
+        bool TryNormalizeQuotedStringValue(const char* value,
+                                                  char* out,
+                                                  size_t outSize);
+        bool TryParseBoolValue(const char* value, bool& out);
+        bool TryResolveOdfFilePath(const char* odfToken, std::filesystem::path& outPath);
+        extern bool g_MagnetMineSimulateHookInstalled;
+        extern TeamFilterCache g_MagnetMineTeamFilterCache;
+        extern bool g_MagnetZeroRangeGuardEnabled;
+        extern volatile long g_MagnetZeroRangeLogBudget;
+        extern bool g_ProximityMineSimulateHookInstalled;
+        extern TeamFilterCache g_ProximityMineTeamFilterCache;
+        extern bool g_ShieldTowerSimulateHookInstalled;
+        extern TeamFilterCache g_ShieldTowerTeamFilterCache;
+        void InstallShieldTowerTeamFilterHookIfPossible();
+        void InstallMineTeamFilterHooksIfPossible();
+        bool TryGetTeamFilterForObject(void* objectPtr, TeamFilterConfig& outConfig, TeamFilterCache& cache, const char* logTag);
+        void RunShieldTowerFilteredSimulate(void* shieldTowerPtr, float dt);
+        void RunMagnetMineFilteredSimulate(void* magnetMinePtr, float dt);
+        void RunProximityMineFilteredSimulate(void* proximityMinePtr, float dt);
+
+        // --- AI ODF tuning (ai_odf_tuning.cpp) ---------------------------------
+        inline constexpr float kScrapRetargetPeriodDefault = 2.0f;
+        inline constexpr float kScrapRetargetMinImprovementDefault = 25.0f;
+        inline constexpr uintptr_t kGogTerrainGetIntersectionAddr = 0x00784620;
+        struct RetargetPeriodState
+        {
+            float appliedDeadline = 0.0f;
+            float period = 0.0f;
+        };
+        struct ScrapPathFailureState
+        {
+            float retryAfter = 0.0f;
+            float x = 0.0f;
+            float z = 0.0f;
+        };
+        struct ScrapRetargetState
+        {
+            uintptr_t owner = 0;
+            float nextCheck = 0.0f;
+            float pendingUntil = 0.0f;
+            int incumbentHandle = 0;
+            bool rescorePending = false;
+        };
+        struct AiTuningConfig;
+        struct AiTuningConfig
+        {
+            bool parsed = false;
+            bool bomberAiRole = false;
+            bool legacyAiRole = false;
+            bool hasEngageRangeAI = false;
+            float engageRangeAI = 0.0f;
+            bool hasWeaponRangeMinAI = false;
+            float weaponRangeMinAI = 0.0f;
+            bool derivedBomberWeaponRangeAI = false;
+            bool hasRetargetPeriodAI = false;
+            float retargetPeriodAI = 0.0f;
+            bool hasStuckCheckPeriodAI = false;
+            float stuckCheckPeriodAI = 0.0f;
+            bool hasStuckReverseTimeAI = false;
+            float stuckReverseTimeAI = 0.0f;
+            bool hasStuckStrafeTimeAI = false;
+            float stuckStrafeTimeAI = 0.0f;
+            bool scrapPathingAI = false;
+            bool hasScrapPathingAI = false;
+            bool hasScrapPathLengthWeightAI = false;
+            float scrapPathLengthWeightAI = 1.0f;
+            bool hasScrapStraightDistanceWeightAI = false;
+            float scrapStraightDistanceWeightAI = 0.05f;
+            bool hasScrapPathFailPenaltyAI = false;
+            float scrapPathFailPenaltyAI = 250.0f;
+            bool hasScrapHardToGetCooldownAI = false;
+            float scrapHardToGetCooldownAI = 10.0f;
+            bool hasScrapSearchRadiusAI = false;
+            float scrapSearchRadiusAI = 0.0f;
+            bool hasScrapRetargetPeriodAI = false;
+            float scrapRetargetPeriodAI = kScrapRetargetPeriodDefault;
+            bool hasScrapRetargetMinImprovementAI = false;
+            float scrapRetargetMinImprovementAI = kScrapRetargetMinImprovementDefault;
+        };
+        struct AiTuningCache
+        {
+            bool initialized = false;
+            std::unordered_map<std::string, AiTuningConfig> odfEntries = {};
+        };
+        // Per-unit AI tuning override set at runtime through the EXU bridge.
+        // Keyed by GameObject pointer; wins over ODF-level AiTuningConfig and
+        // applies regardless of the g_AiOdfGameplayTuningEnabled master toggle
+        // because each entry is an explicit script request for that unit.
+        struct AiUnitTuningOverride
+        {
+            bool hasLegacyAi = false;
+            bool legacyAi = false;
+            bool hasEngageRange = false;
+            float engageRange = 0.0f;
+            bool hasWeaponRangeMin = false;
+            float weaponRangeMin = 0.0f;
+            bool hasRetargetPeriod = false;
+            float retargetPeriod = 0.0f;
+            bool hasKiteRanges = false;
+            float kiteDesiredRange = 0.0f;
+            float kiteEnterRange = 0.0f;
+            float kiteExitRange = 0.0f;
+            bool kitePreserveLos = false;
+            float kiteStrafe = 0.0f;
+            float kiteSwitchPeriod = 0.0f;
+        };
+        struct CombatKiteState
+        {
+            bool retreating = false;
+            uintptr_t target = 0;
+            int strafeDirection = 1;
+            ULONGLONG nextStrafeSwitchMs = 0;
+        };
+        bool TryParseFloatValue(const char* value, float& out);
+        bool VtableTypeNameMatches(uintptr_t vtableAddress, const char* expectedName);
+        extern bool g_AiOdfGameplayTuningActive;
+        extern AiTuningCache g_AiTuningCache;
+        extern std::unordered_map<uintptr_t, AiUnitTuningOverride> g_AiUnitTuningOverridesByObject;
+        extern volatile long g_AiUnitTuningTraceBudget;
+        extern InlineDetour32 g_AttackTaskDoStateDetour;
+        extern bool g_AttackTaskDoStateHookInstalled;
+        extern bool g_BomberAiRangeActive;
+        extern bool g_CalcRangeCraftHookInstalled;
+        extern std::unordered_map<uintptr_t, CombatKiteState> g_CombatKiteStateByObject;
+        extern volatile long g_CombatKiteTraceBudget;
+        extern bool g_HowitzerUndeployedRetaliationFixActive;
+        extern InlineDetour32 g_RecycleTaskDoGotoScrapDetour;
+        extern bool g_RetargetPeriodHooksInstalled;
+        extern std::unordered_map<uintptr_t, RetargetPeriodState> g_RetargetPeriodStateByProcess;
+        extern std::unordered_map<uintptr_t, ScrapPathFailureState> g_ScrapPathFailuresByObject;
+        extern bool g_ScrapPathScoreHookInstalled;
+        extern volatile long g_ScrapPathTraceBudget;
+        extern bool g_ScrapRetargetHookInstalled;
+        extern std::unordered_map<uintptr_t, ScrapRetargetState> g_ScrapRetargetStateByTask;
+        extern bool g_SmartScavengerPathingEnabled;
+        bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig);
+        void InstallAiTuningHooksIfPossible();
+
+        // --- Unit behaviour fixes (unit_behavior_fixes.cpp) --------------------
+        inline constexpr uintptr_t kGogAIUnitRemoveEntryAddr = 0x0068FC60;
+        extern bool g_ApcAlliedTargetDeployFixEnabled;
+        extern bool g_ApcAlliedTargetDeployFixInstalled;
+        extern FnScriptProducerPredicate g_BzrFn_ScriptCanBuildOriginal;
+        extern FnScriptProducerPredicate g_BzrFn_ScriptIsBusyOriginal;
+        extern bool g_ConstructorRecycleStaleTargetFixActive;
+        extern bool g_ConstructorRecycleStaleTargetFixEnabled;
+        extern bool g_ConstructorRecycleStaleTargetFixInstalled;
+        extern volatile long g_ConstructorRecycleStaleTargetLogBudget;
+        extern bool g_ConstructorRecycleStaleTargetMismatchLogged;
+        extern bool g_ConstructorRemoteBuildFixActive;
+        extern bool g_ConstructorRemoteBuildFixEnabled;
+        extern bool g_ConstructorRemoteBuildFixInstalled;
+        extern bool g_ConstructorRemoteBuildFixMismatchLogged;
+        extern volatile long g_ConstructorRemoteBuildTraceBudget;
+        extern bool g_ProducerScriptPredicateHooksEnabled;
+        extern bool g_ProducerScriptPredicateHooksInstalled;
+        extern InlineDetour32 g_ScriptCanBuildDetour;
+        extern InlineDetour32 g_ScriptIsBusyDetour;
+        extern bool g_SplinterUndeadFixActive;
+        extern bool g_SplinterUndeadFixEnabled;
+        extern volatile long g_SplinterUndeadTraceBudget;
+        extern bool g_SprayBuildingSimulateHookInstalled;
+        extern bool g_TugCargoPostLoadFixActive;
+        extern bool g_TugCargoPostLoadFixEnabled;
+        extern bool g_TugCargoPostLoadFixInstalled;
+        extern volatile long g_TugCargoPostLoadLogBudget;
+        void InstallProducerScriptPredicateHooksIfPossible();
+        void InstallSplinterUndeadFixIfPossible();
+        void InstallConstructorRecycleStaleTargetFixIfPossible();
+        void InstallTugCargoPostLoadFixIfPossible();
+        void RefreshApcAlliedTargetDeployFixState();
+        void InstallApcAlliedTargetDeployFixIfPossible();
+        bool ShouldTraceConstructorRemoteBuildFix();
+        void InstallConstructorRemoteBuildFixIfPossible();
+
+        // --- UI and camera fixes (ui_camera_fixes.cpp) -------------------------
+        inline constexpr int32_t kMultiRenderCountMax = 256;
+        // Post-load quake replay fade (#57) helpers. All calls run on the game
+        // thread: the arm hook replaces PostLoadScriptUtils' StartQuake call
+        // and the fade tick runs from the EarthQuake::Simulate entry detour.
+        using FnEarthQuakeSimulate = void(__fastcall*)(void* thisPtr, void* edx, float dt);
+        extern bool g_BriefingScrollFixEnabled;
+        extern bool g_BriefingScrollFixInstalled;
+        extern bool g_CinematicSatelliteZoomFixEnabled;
+        extern bool g_CinematicSatelliteZoomFixInstalled;
+        extern volatile long g_CinematicSatelliteZoomLogBudget;
+        extern InlineDetour32 g_EarthQuakeSimulateDetour;
+        extern bool g_MultiRenderCountClampEnabled;
+        extern bool g_MultiRenderCountClampInstalled;
+        extern volatile long g_MultiRenderCountClampLogBudget;
+        extern volatile long g_QuakeReplayArmed;
+        extern bool g_QuakeReplayFadeEnabled;
+        extern bool g_QuakeReplayFadeInstalled;
+        extern long g_QuakeReplayFadeSeconds;
+        extern bool g_TargetCamSatelliteFixEnabled;
+        extern bool g_TargetCamSatelliteFixInstalled;
+        extern volatile long g_TargetCamSatelliteLogBudget;
+        extern bool g_ThumbnailBmpGuardEnabled;
+        extern bool g_ThumbnailBmpGuardInstalled;
+        void InstallBriefingScrollFixIfPossible();
+        void InstallMultiRenderCountClampIfPossible();
+        void InstallThumbnailBmpGuardIfPossible();
+        extern FnEarthQuakeSimulate g_BzrFn_EarthQuakeSimulateOriginal;
+        void InstallQuakeReplayFadeIfPossible();
+        void InstallTargetCamSatelliteFixIfPossible();
+        void InstallCinematicSatelliteZoomFixIfPossible();
+
+        // --- Lobby screen hooks (lobby_screen_hooks.cpp) -----------------------
+        void InstallNicknameTextEntryInputHookIfPossible();
+        void InstallMultiCreatePreviewFixIfPossible();
+
+        // --- Jump-sniping probe (diag_jump_snipe_probe.cpp) --------------------
+        // GetPlayerHandle() — int __cdecl(). Verified on live GOG exe: reads
+        // GameObject::userObject (via 0x417C70) + playerHandle global (0x02CC2BDC),
+        // round-trips through GameObjectHandle::GetObj (0x462630) / GameObject::GetHandle
+        // (0x477590). This is the inner void-overload the Lua wrapper (0x4FFCD0) calls on
+        // its non-numeric branch, matching the 1.5 decomp. Previous 0x00514610 was WRONG
+        // (mid-instruction, same failure class as the fixed GetObjByHandle).
+        inline constexpr uintptr_t kGogGetPlayerHandleAddr = 0x005C7FB0;
+        struct JumpSnipeProbeSnapshot
+        {
+            bool valid = false;
+            int playerHandle = 0;
+            void* person = nullptr;
+            void* obj = nullptr;
+            float velY = 0.0f;
+            uint32_t animState = 0;   // on-foot anim FSM state (0..3)
+            bool grounded = false;    // vhcl ground-contact flag bit
+            long curAnim = 0;
+            int animHandle = 0;
+            uint32_t selectedMask = 0;
+            int selectedSlot = -1;
+            uint32_t selectedSig = 0;
+            char selectedOdf[17] = {};
+            bool sniperSelected = false;
+        };
+        struct JumpSnipeProbeLogState
+        {
+            bool initialized = false;
+            JumpSnipeProbeSnapshot last = {};
+        };
+        extern bool g_JumpSnipeProbeInstalled;
+        extern JumpSnipeProbeLogState g_JumpSnipeProbeLogState;
+        void InstallJumpSnipingProbeIfRequested();
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
