@@ -390,8 +390,11 @@ void ShutdownBzrNetTrace()
         DWORD wait = WaitForSingleObject(g_WriterThread, 5000);
         if (wait != WAIT_OBJECT_0)
         {
-            LogShimA(LogLevel::Warn, "bzrnet", "[BZRNetTrace] writer exceeded graceful shutdown window wait=%lu; waiting for bounded queue drain", wait);
-            wait = WaitForSingleObject(g_WriterThread, INFINITE);
+            // Producers stopped at g_Stop (IsBzrNetTraceEnabled checks it),
+            // so only what was already queued is left to drain. Bounded all
+            // the same: a stuck writer leaves the unclean-shutdown path below.
+            LogShimA(LogLevel::Warn, "bzrnet", "[BZRNetTrace] writer exceeded graceful shutdown window wait=%lu; waiting up to 30 s for the queue to drain", wait);
+            wait = WaitForSingleObject(g_WriterThread, 30000);
         }
         if (wait == WAIT_OBJECT_0)
         {
@@ -401,9 +404,10 @@ void ShutdownBzrNetTrace()
         else
         {
             // Do not close resources that a still-running writer could touch.
-            // This path is only expected for a broken OS handle; process teardown
-            // will reclaim them and the session records an unclean shutdown.
-            LogShimA(LogLevel::Error, "bzrnet", "[BZRNetTrace] writer wait failed wait=%lu err=%lu", wait, GetLastError());
+            // Reached on a broken OS handle or a writer stuck past the bounded
+            // drain; process teardown reclaims them and the session records an
+            // unclean shutdown.
+            LogShimA(LogLevel::Error, "bzrnet", "[BZRNetTrace] writer did not stop wait=%lu err=%lu; leaving its resources to process teardown", wait, GetLastError());
         }
     }
 
@@ -430,7 +434,11 @@ void ShutdownBzrNetTrace()
 
 bool IsBzrNetTraceEnabled()
 {
-    return InterlockedCompareExchange(&g_Initialized, 0, 0) != 0 && g_Config.enabled;
+    // False from the moment shutdown starts, so game threads still sending on
+    // a traced socket cannot keep refilling the queue the writer is draining.
+    return InterlockedCompareExchange(&g_Initialized, 0, 0) != 0 &&
+           InterlockedCompareExchange(&g_Stop, 0, 0) == 0 &&
+           g_Config.enabled;
 }
 
 bool IsBzrNetPrivateForensicTrace()
