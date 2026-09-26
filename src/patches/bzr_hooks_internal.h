@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <string>
 
+#include "bzr_hooks.h"
+
 namespace BZROpenShim
 {
     // Set by ResolveBzrHooks from its isSteam argument.
@@ -129,8 +131,11 @@ namespace BZROpenShim
         // --- Settings --------------------------------------------------------
         inline constexpr char kUserConfigSinglePlayerSection[] = "SinglePlayer";
         inline constexpr char kUserConfigDisplaySection[] = "Display";
+        inline constexpr char kUserConfigNetworkSection[] = "Network";
         uint16_t ReadLocalPlayerNetIdValue();
         bool TryGetEnvFloat(const char* name, float& outValue);
+        std::string ToLowerAscii(std::string value);
+        bool TryReadSteam64Value(uint64_t& outValue);
 
         // --- Engine state (bzr_hooks.cpp) ------------------------------------
         uintptr_t GetMainModuleBase();
@@ -192,6 +197,17 @@ namespace BZROpenShim
         void HeadlightNotifyMissionRunStateChanged(bool enteringSimulation);
         void InstallEmissionLightFixIfPossible();
         void VerifyExpectedOgreExportsIfPossible();
+
+        // --- BZRNet route, UDP port and nickname (bzrnet_settings.cpp) -------
+        inline constexpr size_t kBzrNetNicknameCapacity = 0x80; // last byte kept NUL
+        void InitializeBzrNetConfig();
+        int GetBzrNetUdpPort();
+        bool IsBzrNetForceRelayActive();
+        bool ReadBzrNetNickname(char* out, size_t outSize);
+        BzrNetNicknameResult ApplyBzrNetNicknameAuthoritative(
+            const char* requestedValue, const char* source);
+        const char* BzrNetNicknameResultName(BzrNetNicknameResult result);
+        bool IsAcceptedBzrNetNicknameResult(BzrNetNicknameResult result);
 
         // --- Global and unit turbo (global_turbo.cpp) ------------------------
         extern bool g_GlobalTurboConfigInitialized;
