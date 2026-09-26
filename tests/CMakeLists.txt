@@ -524,6 +524,21 @@ if(WIN32 AND MSVC)
     add_test(NAME openshim_sdk_thunk_tests COMMAND openshim_sdk_thunk_tests)
 endif()
 
+# The SDK record copy honours the caller's declared capacity (audit P1-8):
+# pollEvent and captureDeveloperSnapshot must never write past the record the
+# caller's header defined and must say how much they filled. Pins the v2
+# layouts (120 / 96 bytes). Windows-only because include/BZROpenShim.h
+# carries __declspec.
+if(WIN32 AND MSVC)
+    add_executable(openshim_sdk_record_copy_tests
+        openshim_sdk_record_copy_tests.cpp)
+    target_include_directories(openshim_sdk_record_copy_tests PRIVATE ../include)
+    target_compile_features(openshim_sdk_record_copy_tests PRIVATE cxx_std_20)
+    target_compile_definitions(openshim_sdk_record_copy_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(openshim_sdk_record_copy_tests PRIVATE /W4 /WX)
+    add_test(NAME openshim_sdk_record_copy_tests COMMAND openshim_sdk_record_copy_tests)
+endif()
+
 # The bootstrap file-I/O seam, end to end and offline. Patches the test's own
 # import table with the real wrappers, then drives the lifecycle the game will
 # see: opens with no provider installed, then the same opens once OpenShim's
