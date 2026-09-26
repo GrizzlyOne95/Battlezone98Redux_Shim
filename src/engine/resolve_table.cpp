@@ -61,6 +61,24 @@ namespace BZROpenShim
         }
     }
 
+    bool DecodeAbs32Operand(const uint8_t* operand,
+                            uint32_t imageBase,
+                            uint32_t imageEnd,
+                            uint32_t& outAddress)
+    {
+        outAddress = 0;
+        if (!operand || imageEnd <= imageBase)
+            return false;
+        const uint32_t value = static_cast<uint32_t>(operand[0]) |
+                               (static_cast<uint32_t>(operand[1]) << 8) |
+                               (static_cast<uint32_t>(operand[2]) << 16) |
+                               (static_cast<uint32_t>(operand[3]) << 24);
+        if (value < imageBase || value >= imageEnd)
+            return false;
+        outAddress = value;
+        return true;
+    }
+
     std::vector<uint16_t> ParseIdaPatternText(const std::string& hex)
     {
         std::vector<uint16_t> pattern;
@@ -175,6 +193,8 @@ namespace BZROpenShim
                     target.mode = ResolveMode::Address;
                 else if (mode == "rel32_target")
                     target.mode = ResolveMode::Rel32Target;
+                else if (mode == "abs32_operand")
+                    target.mode = ResolveMode::Abs32Operand;
                 else
                 {
                     AppendError(error, where + " (" + target.name + ") has an unknown mode");

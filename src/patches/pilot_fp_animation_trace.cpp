@@ -1,4 +1,5 @@
 #include "pilot_fp_animation_trace.h"
+#include "engine_globals.h"
 #include "BZROpenShim.h"
 #include "ogre_runtime.h"
 #include "shim_log.h"
@@ -78,17 +79,15 @@ namespace BZROpenShim
 
         // Verified current Redux layout already used by OpenShim's local-player,
         // headlight, satellite-visibility and jump-snipe diagnostics:
-        //   main + 0x00517AFC -> GameObject::userObject
+        //   EngineGlobals::UserObjectSlot (0x00917AFC) -> GameObject::userObject
         //   Person + 0x0F0    -> render bridge
         //   bridge + 0x094    -> Ogre::Entity
-        constexpr uintptr_t kUserObjectRva = 0x00517AFC;
         constexpr size_t kPersonRenderBridgeOffset = 0x0F0;
         constexpr size_t kRenderBridgeOgreEntityOffset = 0x094;
 
-        // SceneManager global structure verified in bzr_hooks.cpp:2042 (same build)
-        //   0x00920EA0 -> structure, +0x08 -> SceneManager*
-        // Used to obtain SceneManager* without relying on SceneManager::createEntity import.
-        constexpr uintptr_t kOgreSceneManagerStructureAddr = 0x00920EA0;
+        // SceneManager global structure (EngineGlobals::RenderGlobals, 0x00920EA0
+        // on GOG) -> structure, +0x08 -> SceneManager*. Used to obtain
+        // SceneManager* without relying on SceneManager::createEntity import.
         constexpr uintptr_t kOgreSceneManagerOffset = 0x08;
 
         using FnEntityGetAnimationState = void* (__thiscall*)(void*, const std::string&);
@@ -391,13 +390,13 @@ namespace BZROpenShim
                 className[0] = '\0';
             if (!IsPatchingComplete() || !IsCompatibleGameVersion())
                 return nullptr;
-            HMODULE module = GetModuleHandleA(nullptr);
-            if (!module)
+            auto* const userObjectSlot =
+                reinterpret_cast<void* const*>(EngineGlobals::UserObjectSlot());
+            if (!userObjectSlot)
                 return nullptr;
-            const auto* base = reinterpret_cast<const uint8_t*>(module);
             __try
             {
-                void* person = *reinterpret_cast<void* const*>(base + kUserObjectRva);
+                void* person = *userObjectSlot;
                 if (!person || !IsPersonObject(person, className, classNameSize))
                     return nullptr;
                 void* renderBridge = *reinterpret_cast<void* const*>(
@@ -426,7 +425,11 @@ namespace BZROpenShim
             void* sm = nullptr;
             __try
             {
-                auto* structure = *reinterpret_cast<uint8_t**>(kOgreSceneManagerStructureAddr);
+                auto* const renderGlobalsSlot =
+                    reinterpret_cast<uint8_t**>(EngineGlobals::RenderGlobals());
+                if (!renderGlobalsSlot)
+                    return nullptr;
+                auto* structure = *renderGlobalsSlot;
                 if (!structure)
                     return nullptr;
                 sm = *reinterpret_cast<void**>(structure + kOgreSceneManagerOffset);
@@ -1609,8 +1612,8 @@ namespace BZROpenShim
                 // Verify exe does NOT import createEntity (expected per dumpbin /imports)
                 LogShimA(LogLevel::Info, kComponent, "[FPAnim] verified: exe does NOT import SceneManager::createEntity (dumpbin /imports) — creation hook not used; enumeration is primary resolver");
                 // Document SceneManager global structure used for retrieval
-                LogShimA(LogLevel::Info, kComponent, "[FPAnim] SceneManager retrieval: global structure 0x%08X +0x%X (same as bzr_hooks.cpp:2042)",
-                    static_cast<unsigned>(kOgreSceneManagerStructureAddr), static_cast<unsigned>(kOgreSceneManagerOffset));
+                LogShimA(LogLevel::Info, kComponent, "[FPAnim] SceneManager retrieval: global structure 0x%08X +0x%X (patches.json RenderGlobals)",
+                    static_cast<unsigned>(EngineGlobals::RenderGlobals()), static_cast<unsigned>(kOgreSceneManagerOffset));
             }
             RefreshManipConfig();
             if (g_ManipEnabled.load(std::memory_order_acquire))

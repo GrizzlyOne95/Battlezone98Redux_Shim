@@ -1,5 +1,6 @@
 #include "bzr_hooks.h"
 #include "bzr_object_layout.h"
+#include "engine_globals.h"
 #include "game_state.h"
 #include "openshim_ini.h"
 #include "openshim_preset_migration.h"
@@ -401,7 +402,8 @@ namespace BZROpenShim
     }
 
     // Correct GOG handle->object conversion. The engine's GameObject pool is a
-    // fixed 0x1000-slot table based at 0x0260DB20 with a 0x400-byte stride; a
+    // fixed 0x1000-slot table (patches.json "GameObject::Arena", 0x0260DB20 on
+    // GOG) with a 0x400-byte stride; a
     // handle's slot index is its top 12 bits (handle >> 0x14). Verified live: a
     // craft pointer satisfies (ptr - 0x0260DB20) == slot * 0x400 exactly. The
     // former binding (kGogGameObjectGetObjByHandleAddr = 0x0046B160) actually
@@ -413,9 +415,12 @@ namespace BZROpenShim
     {
         if (handle == 0)
             return nullptr;
+        const uintptr_t arena = EngineGlobals::GameObjectArena();
+        if (arena == 0)
+            return nullptr;
         const uint32_t slot = (static_cast<uint32_t>(handle) >> 0x14) & 0xFFFu;
         void* obj = reinterpret_cast<void*>(
-            static_cast<uintptr_t>(slot) * 0x400u + 0x0260DB20u);
+            static_cast<uintptr_t>(slot) * 0x400u + arena);
         using GetHandleThiscallFn = uint32_t(__thiscall*)(void*);
         if (g_GameObjectGetHandleAddr == 0)
             return nullptr;
@@ -1395,7 +1400,6 @@ namespace BZROpenShim
         constexpr uintptr_t kTurretTankUpdateWeaponAimAddr = 0x005F27B0;
         constexpr uintptr_t kCarrierGetWeaponAddr = 0x00417F60;
         constexpr uintptr_t kRefreshWeaponTransformAddr = 0x00681A00;
-        constexpr uintptr_t kLocalUserObjectPtrAddr = 0x00917AFC;
         // The global Reticle lives at 0x025CE6D0 (its ctor at 0x005BA170 is
         // called with that `this` from 0x0040B013). Member addresses below come
         // from the class layout; nothing references them absolutely from inside
@@ -2775,7 +2779,6 @@ namespace BZROpenShim
         static float g_UnderAttackAlertBaselineCooldownSeconds = 1.0f;
         static constexpr const char* kUnderAttackAlertConfigName = "campaignReimagined_settings.cfg";
         static constexpr uintptr_t kUnderAttackAlertSoundAddr = 0x00877220;
-        static constexpr uintptr_t kOgreSceneManagerStructureAddr = 0x00920EA0;
         static constexpr uintptr_t kOgreSceneManagerOffset = 0x08;
         static constexpr uintptr_t kChunkEffectActiveCountOffset = 0x8028;
         static constexpr uintptr_t kChunkEffectGateOffset = 0x802C;
@@ -2800,7 +2803,7 @@ namespace BZROpenShim
         // The advisory-PDB object-list/userObject/userTeam globals that used
         // to live here (0x50D2F0/F8/E4) landed in string data on the live exe
         // and were removed 2026-07-18. Verified replacements: userObject
-        // global 0x00917AFC (kHeadlightUserObjectRva, accessor 0x417C70),
+        // global 0x00917AFC (EngineGlobals::UserObjectSlot, accessor 0x417C70),
         // object enumeration via the 0x0260DB20 arena
         // (CollectLiveGameObjectsFromArena), team via
         // GetGameObjectActualTeam(userObject).
@@ -5936,8 +5939,11 @@ namespace BZROpenShim
         {
             __try
             {
-                auto* sceneManagerStructure =
-                    *reinterpret_cast<uint8_t**>(kOgreSceneManagerStructureAddr);
+                auto* const renderGlobalsSlot =
+                    reinterpret_cast<uint8_t**>(EngineGlobals::RenderGlobals());
+                if (!renderGlobalsSlot)
+                    return nullptr;
+                auto* sceneManagerStructure = *renderGlobalsSlot;
                 if (!sceneManagerStructure)
                     return nullptr;
 
@@ -14798,7 +14804,9 @@ namespace BZROpenShim
 
             __try
             {
-                if (*reinterpret_cast<void**>(kLocalUserObjectPtrAddr) != craft)
+                auto* const userObjectSlot =
+                    reinterpret_cast<void* const*>(EngineGlobals::UserObjectSlot());
+                if (!userObjectSlot || *userObjectSlot != craft)
                     return false;
 
                 void* selectObject =
@@ -17207,7 +17215,6 @@ namespace BZROpenShim
         constexpr uintptr_t kUiEnsureManualObjectAddr = 0x007D2B70;
         constexpr size_t kUiManualObjectPtrOffset = 0x120;
         constexpr size_t kUiWidgetNameOffset = 0x20;
-        constexpr uintptr_t kBzrSceneRootPtrAddr = 0x00920EA0;
 
         struct UiOgreSharedPtr
         {
@@ -17254,7 +17261,9 @@ namespace BZROpenShim
                         *reinterpret_cast<const std::string*>(bytes + kUiWidgetNameOffset);
                     if (name == "Top Screen")
                     {
-                        void* sceneRoot = *reinterpret_cast<void**>(kBzrSceneRootPtrAddr);
+                        auto* const renderGlobalsSlot =
+                            reinterpret_cast<void**>(EngineGlobals::RenderGlobals());
+                        void* sceneRoot = renderGlobalsSlot ? *renderGlobalsSlot : nullptr;
                         void* sceneManager = sceneRoot
                             ? *reinterpret_cast<void**>(
                                 reinterpret_cast<uint8_t*>(sceneRoot) + 8)
@@ -19193,9 +19202,8 @@ namespace BZROpenShim
                       "arena capacity forward constant out of sync");
         static constexpr size_t kHeadlightObjectSlotSize = 0x400;
         // Redux's verified handle mapping (mirrors EXU GameObject::GetObj):
-        // object = 0x0260DB20 + (handle >> 20) * 0x400.
-        static constexpr uintptr_t kHeadlightObjectArenaRva = 0x0220DB20;
-        static constexpr uintptr_t kHeadlightUserObjectRva = 0x00517AFC;
+        // object = arena + (handle >> 20) * 0x400, the arena being
+        // EngineGlobals::GameObjectArena (0x0260DB20 on GOG).
         // LightRenderClass::Simulate iterates the Ogre lights emitted by
         // draw_light particle records. Stock deletes a renderer when its
         // active flag clears, which means an empty craft's running lights can
@@ -19687,7 +19695,9 @@ namespace BZROpenShim
         {
             __try
             {
-                return *ResolveMainModulePtr<void*>(kHeadlightUserObjectRva);
+                auto* const userObjectSlot =
+                    reinterpret_cast<void* const*>(EngineGlobals::UserObjectSlot());
+                return userObjectSlot ? *userObjectSlot : nullptr;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -20268,7 +20278,7 @@ namespace BZROpenShim
             if (player)
                 applyObject(player, true);
 
-            auto* arena = ResolveMainModulePtr<uint8_t>(kHeadlightObjectArenaRva);
+            auto* arena = reinterpret_cast<uint8_t*>(EngineGlobals::GameObjectArena());
             if (arena)
             {
                 for (size_t i = 0; i < kHeadlightObjectSlotCount; ++i)
@@ -31636,7 +31646,7 @@ namespace BZROpenShim
         {
             if (!object)
                 return;
-            auto* arena = ResolveMainModulePtr<uint8_t>(kHeadlightObjectArenaRva);
+            auto* arena = reinterpret_cast<uint8_t*>(EngineGlobals::GameObjectArena());
             if (!arena)
                 return;
             const uintptr_t arenaLow = reinterpret_cast<uintptr_t>(arena);
@@ -31706,7 +31716,7 @@ namespace BZROpenShim
         {
             if (!outObjects || capacity == 0)
                 return 0;
-            auto* arena = ResolveMainModulePtr<uint8_t>(kHeadlightObjectArenaRva);
+            auto* arena = reinterpret_cast<uint8_t*>(EngineGlobals::GameObjectArena());
             if (!arena)
                 return 0;
             size_t count = 0;
@@ -35940,8 +35950,8 @@ namespace BZROpenShim
             static_cast<unsigned long>(g_SatelliteVisibilityLogIntervalMs),
             g_SatelliteVisibilityObjectLimit,
             static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva),
-            static_cast<uint32_t>(GetMainModuleBase() + kHeadlightUserObjectRva),
-            static_cast<uint32_t>(GetMainModuleBase() + kHeadlightObjectArenaRva));
+            static_cast<uint32_t>(EngineGlobals::UserObjectSlot()),
+            static_cast<uint32_t>(EngineGlobals::GameObjectArena()));
         // Record the layout the sample lines were produced with, so a captured
         // log stays interpretable if these offsets are ever revised again.
         Log(L"[SATVIS]   offsets illum=+0x%03X isVisible=+0x%03X seen=+0x%03X team=+0x%03X perceivedTeam=+0x%03X objective=+0x%03X currentView=%ld expects=%ld\n",
