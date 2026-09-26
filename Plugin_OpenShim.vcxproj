@@ -144,6 +144,9 @@
     <ClCompile Include="src\patches\autosave.cpp" />
     <ClCompile Include="src\patches\bzn_load_trace.cpp" />
     <ClCompile Include="src\patches\bzr_hooks.cpp" />
+    <ClCompile Include="src\patches\headlights.cpp" />
+    <ClCompile Include="src\patches\pilot_flashlight.cpp" />
+    <ClCompile Include="src\patches\unit_vo.cpp" />
     <ClCompile Include="src\patches\bzr_options_ui.cpp" />
     <ClCompile Include="src\patches\bzrnet_instrumentation.cpp" />
     <ClCompile Include="src\patches\bzrnet_protocol.cpp" />
@@ -281,6 +284,7 @@
     <ClInclude Include="include\patches.h" />
     <ClInclude Include="include\patcher.h" />
     <ClInclude Include="include\hook_engine.h" />
+    <ClInclude Include="src\patches\bzr_hooks_internal.h" />
     <ClInclude Include="include\engine_globals.h" />
     <ClInclude Include="include\iat_patch.h" />
     <ClInclude Include="include\mp_faction_restrict.h" />
