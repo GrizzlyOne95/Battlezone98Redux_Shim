@@ -1017,6 +1017,16 @@
       "expected_original": "68 88 01 01 00"
     },
     {
+      "name": "Disable Control Smoothing",
+      "pattern": "55 8B EC 8B 45 08 A3 ?? ?? ?? ?? 83 7D 08 02 75 16 C7 05 ?? ?? ?? ?? 01 00 00 00 C7 05 F4 98 91 00 01 00 00 00 EB 0A C7 05 F4 98 91 00 00 00 00 00",
+      "offset": 39,
+      "expected_size": 10,
+      "fallback": "0x004344D7",
+      "expected_original": "C7 05 F4 98 91 00 00 00 00 00",
+      "require_unique": true,
+      "identity": "SetPlatform(int) at 0x004344B0 in GOG battlezone98redux.exe SHA256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413: stores the platform (0 pc, 1 osx, 2 ios) and writes 1 to the input-smoothing bypass flag 0x009198F4 only for ios, 0 otherwise (0x004344D7). Called from window init (0x00618D02) and the -platform command-line parser (0x007D5536); these are the flag's only writers. UserProcess::Execute (0x0060ABxx-0x0060B5xx) tests it at ten sites (0x60AEC5 .. 0x60B50C) to assign steer/pitch/throttle/strafe targets directly instead of low-passing them ((target-cur)*dt*5 analog, *1 keyboard; the BZ 1.5 decompile shows the same filter). BZCC exposes the same choice as options.play.smoothing. Pattern is a unique whole-image match on 2026-09-26; the payload rewrites the else-branch immediate so every SetPlatform call leaves smoothing off."
+    },
+    {
       "name": "Artillery Weapon Mask Select Hook",
       "fallback": "0x00475DDC",
       "expected_original": "80 21 FA FF"
