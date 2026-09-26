@@ -355,6 +355,51 @@ namespace BZROpenShim
     // ("GameObject::GetHandle"); 0 until then, and every caller stands down on 0.
     static uintptr_t g_GameObjectGetHandleAddr = 0;
 
+    // Trace switches consulted on per-unit, per-tick AI paths (the DoSubTask
+    // path read three of them per unit per tick). EnvFlagEnabled reads the
+    // process environment, which nothing changes after startup, so each is
+    // read once and latched.
+    static bool TraceLegacyAiEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI");
+        return s_value;
+    }
+    static bool TraceAiRangeEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE");
+        return s_value;
+    }
+    static bool TraceAiUnitTuningEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_AI_UNIT_TUNING");
+        return s_value;
+    }
+    static bool TraceBomberRangeEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_BOMBER_RANGE");
+        return s_value;
+    }
+    static bool TraceAttackRevealEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_ATTACK_REVEAL");
+        return s_value;
+    }
+    static bool TraceAttackRevealLegacyEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("BZR_TRACE_ATTACK_REVEAL");
+        return s_value;
+    }
+    static bool TraceArtilleryMaskEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_ARTILLERY_MASK");
+        return s_value;
+    }
+    static bool TraceWeaponMaskEnabled()
+    {
+        static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_WEAPON_MASK");
+        return s_value;
+    }
+
     // Correct GOG handle->object conversion. The engine's GameObject pool is a
     // fixed 0x1000-slot table based at 0x0260DB20 with a 0x400-byte stride; a
     // handle's slot index is its top 12 bits (handle >> 0x14). Verified live: a
@@ -3342,6 +3387,34 @@ namespace BZROpenShim
             return vtable >= ogreBase && vtable < ogreEnd;
         }
 
+        // LooksLikeOgreObject without the VirtualQuery, for per-tick sweeps
+        // over many objects. The guarded read already turns an unmapped page
+        // into "no"; the query only added a syscall per object. The identity
+        // test is the same: a vtable inside OgreMain.dll.
+        static bool LooksLikeOgreObjectInPlace(const void* candidate)
+        {
+            const uintptr_t address = reinterpret_cast<uintptr_t>(candidate);
+            if (address < 0x00010000 || (address % sizeof(void*)) != 0)
+                return false;
+
+            uintptr_t ogreBase = 0;
+            uintptr_t ogreEnd = 0;
+            if (!TryGetOgreModuleRange(ogreBase, ogreEnd))
+                return false;
+
+            uintptr_t vtable = 0;
+            __try
+            {
+                vtable = *reinterpret_cast<const uintptr_t*>(candidate);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+
+            return vtable >= ogreBase && vtable < ogreEnd;
+        }
+
         // Some render-queue helpers are inlined or unexported from the shipped
         // OgreMain.dll; resolve those by raw image offset from the module base.
         template<typename T>
@@ -4047,6 +4120,7 @@ namespace BZROpenShim
             };
 
             uint32_t count = 0;
+            bool lookupRaised = false;
             if (TryReadHudSpriteNameCount(count))
             {
                 LogShimA(
@@ -4061,6 +4135,7 @@ namespace BZROpenShim
                 int index = 0;
                 if (!SehScanHudSpriteTable(name, count, found, index))
                 {
+                    lookupRaised = true;
                     LogShimA(
                         LogLevel::Warn,
                         "hudlookup",
@@ -4097,6 +4172,7 @@ namespace BZROpenShim
                 int id = 0;
                 if (!SehCallHudSpriteLookupFn(name, id))
                 {
+                    lookupRaised = true;
                     LogShimA(
                         LogLevel::Warn,
                         "hudlookup",
@@ -4123,7 +4199,11 @@ namespace BZROpenShim
                 "hudlookup",
                 "sprite=%s not found by any lookup path",
                 name);
-            return 0;
+            // A miss against a readable table, with no lookup faulting, is as
+            // final as a hit: the table is static for the process. Memoise it,
+            // so the next refresh tick neither rescans the table nor logs the
+            // same miss again. An unreadable table or a fault is retried.
+            return (count > 0 && !lookupRaised) ? rememberHit(0) : 0;
         }
 
         static bool HudSpriteUvNearlyEqual(float a, float b)
@@ -12068,6 +12148,80 @@ namespace BZROpenShim
             }
         }
 
+        // Main image extent from its PE headers, read once.
+        static bool TryGetMainImageRange(uintptr_t& outBase, uintptr_t& outEnd)
+        {
+            static uintptr_t s_base = 0;
+            static uintptr_t s_end = 0;
+            if (s_end == 0)
+            {
+                const uintptr_t base = GetMainModuleBase();
+                if (base == 0)
+                    return false;
+                __try
+                {
+                    const auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+                    const auto* ntHeaders =
+                        reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dosHeader->e_lfanew);
+                    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE ||
+                        ntHeaders->Signature != IMAGE_NT_SIGNATURE ||
+                        ntHeaders->OptionalHeader.SizeOfImage == 0)
+                        return false;
+                    s_base = base;
+                    s_end = base + ntHeaders->OptionalHeader.SizeOfImage;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+            }
+            outBase = s_base;
+            outEnd = s_end;
+            return true;
+        }
+
+        // TryGetGameObjectFieldBase for arena slots, without its two
+        // VirtualQuery calls. The arena lives in the exe's own .data, so the
+        // slot is always mapped, and a vtable that lies inside the main image
+        // is always readable; anything else is rejected before it is touched.
+        // The identity proof is unchanged: slot 1 must be GameObject::GetTeam.
+        // SyncSatelliteVisibility runs this for every live object every tick.
+        static bool TryGetArenaGameObjectFieldBase(void* objectPtr, uint8_t*& outBase)
+        {
+            outBase = nullptr;
+            const auto address = reinterpret_cast<uintptr_t>(objectPtr);
+            if (address < 0x00010000 || (address % sizeof(void*)) != 0)
+                return false;
+
+            uintptr_t imageBase = 0;
+            uintptr_t imageEnd = 0;
+            if (!TryGetMainImageRange(imageBase, imageEnd))
+                return false;
+
+            __try
+            {
+                auto* bytes = reinterpret_cast<uint8_t*>(objectPtr);
+                auto** vtable = *reinterpret_cast<void***>(bytes + kGameObjectInterfaceOffset);
+                const auto vtableAddress = reinterpret_cast<uintptr_t>(vtable);
+                constexpr size_t kGetTeamSlot = kGameObjectGetTeamVtableOffset / sizeof(void*);
+                if (vtableAddress < imageBase ||
+                    vtableAddress + (kGetTeamSlot + 1) * sizeof(void*) > imageEnd)
+                    return false;
+
+                const uintptr_t expected =
+                    imageBase + (kGogGameObjectGetTeamAddr - kGogPreferredImageBase);
+                if (reinterpret_cast<uintptr_t>(vtable[kGetTeamSlot]) != expected)
+                    return false;
+
+                outBase = bytes;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         static bool IsLikelyGameObjectEntry(void* objectPtr)
         {
             uint8_t* base = nullptr;
@@ -12764,6 +12918,7 @@ namespace BZROpenShim
         // SEH-guarded helpers. Each lives in its own function because MSVC
         // prohibits __try in any function that requires C++ object unwinding,
         // and the main sync function uses std::unordered_map.
+        // Both readers below take arena slots (CollectLiveGameObjectsFromArena).
         static bool TryReadObjectIlluminationAndEntity(void* objectPtr,
                                                        float& outIllumination,
                                                        void*& outEntity)
@@ -12771,7 +12926,7 @@ namespace BZROpenShim
             outIllumination = 0.0f;
             outEntity = nullptr;
             uint8_t* bytes = nullptr;
-            if (!TryGetGameObjectFieldBase(objectPtr, bytes))
+            if (!TryGetArenaGameObjectFieldBase(objectPtr, bytes))
                 return false;
             __try
             {
@@ -12795,7 +12950,7 @@ namespace BZROpenShim
         {
             outEntity = nullptr;
             uint8_t* bytes = nullptr;
-            if (!TryGetGameObjectFieldBase(objectPtr, bytes))
+            if (!TryGetArenaGameObjectFieldBase(objectPtr, bytes))
                 return false;
             __try
             {
@@ -13874,7 +14029,7 @@ namespace BZROpenShim
                 void* entity = nullptr;
                 if (!TryResolveEntityFromGameObject(obj, entity))
                     continue;
-                if (!LooksLikeOgreObject(entity))
+                if (!LooksLikeOgreObjectInPlace(entity))
                     continue;
                 if (g_SatVisTestPreHidden.count(entity) != 0)
                     continue;
@@ -13971,7 +14126,7 @@ namespace BZROpenShim
 
                     // Re-vet before dispatching a virtual: an entity freed and
                     // its allocation reused would otherwise be called through.
-                    if (!LooksLikeOgreObject(currentEntity))
+                    if (!LooksLikeOgreObjectInPlace(currentEntity))
                         continue;
 
                     bool now = false;
@@ -14041,7 +14196,7 @@ namespace BZROpenShim
                 if (!TryReadObjectIlluminationAndEntity(obj, illumination, entity))
                     continue;
 
-                if (!LooksLikeOgreObject(entity))
+                if (!LooksLikeOgreObjectInPlace(entity))
                     continue;
 
                 if (it == g_SatelliteVisibilityState.end())
@@ -14191,7 +14346,7 @@ namespace BZROpenShim
                 float illumination = 0.0f;
                 void* entity = nullptr;
                 if (!TryReadObjectIlluminationAndEntity(obj, illumination, entity) ||
-                    !LooksLikeOgreObject(entity))
+                    !LooksLikeOgreObjectInPlace(entity))
                 {
                     ++row.ogreUnreadable;
                     continue;
@@ -18697,6 +18852,14 @@ namespace BZROpenShim
 
         static FnExuUpdateCullingForUnit ResolveExuCullingCallback()
         {
+            // Two loader lookups per unit per tick added up. The module set
+            // only changes at load time, so re-probe once a second and answer
+            // from the cache in between.
+            static ULONGLONG s_nextProbeTick = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (now < s_nextProbeTick)
+                return g_ExuFn_UpdateCullingForUnit;
+            s_nextProbeTick = now + 1000;
             HMODULE module = GetModuleHandleA("exu.dll");
             if (!module)
                 module = GetModuleHandleA("ExtraUtilities.dll");
@@ -22799,7 +22962,7 @@ namespace BZROpenShim
                 {
                     // Stock 1.5/Redux goes to blast; 1.4 goes to slide
                     *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 7;
-                    if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI") || EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+                    if (TraceLegacyAiEnabled() || TraceAiRangeEnabled())
                     {
                         Log(L"[LEGACY] D1 override craft=0x%08X cur=2 next 10->7\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                     }
@@ -22823,7 +22986,7 @@ namespace BZROpenShim
                     if (!isFreshHit)
                     {
                         *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 7;
-                        if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI"))
+                        if (TraceLegacyAiEnabled())
                             Log(L"[LEGACY] D4 override craft=0x%08X 8->9 => 8->7 (timeout)\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                     }
                 }
@@ -22847,7 +23010,7 @@ namespace BZROpenShim
                     if (suppress)
                     {
                         *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 9; // stay in flee
-                        if (EnvFlagEnabled("OPENSHIM_TRACE_LEGACY_AI"))
+                        if (TraceLegacyAiEnabled())
                             Log(L"[LEGACY] D3 suppress craft=0x%08X 9->10 blocked, stay 9\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                     }
                 }
@@ -22875,7 +23038,7 @@ namespace BZROpenShim
                     TryRaiseAttackTaskRangeSq(
                         taskBytes, engageSq, previousRangeSq, rangeChanged) &&
                     rangeChanged &&
-                    (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
+                    (TraceAiRangeEnabled() ||
                      EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE")))
                 {
                     const long remaining = InterlockedDecrement(
@@ -23043,7 +23206,7 @@ namespace BZROpenShim
 
             if ((wasRetreating != state.retreating || (applied && !reverseLos)) &&
                 (EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE") ||
-                 EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE")))
+                 TraceAiRangeEnabled()))
             {
                 const long remaining = InterlockedDecrement(&g_CombatKiteTraceBudget);
                 if (remaining >= 0)
@@ -23742,7 +23905,7 @@ namespace BZROpenShim
             const float originalRange = *range;
             const float originalCloseRange = closeRange ? *closeRange : -1.0f;
 
-            if (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+            if (TraceAiRangeEnabled())
             {
                 static volatile long s_CalcRangeProbeBudget = 24;
                 const long remaining = InterlockedDecrement(&s_CalcRangeProbeBudget);
@@ -23861,7 +24024,7 @@ namespace BZROpenShim
                 hasUnitOuterRangeFloor || hasUnitCloseRangeFloor;
 
             if (hasOdfTuning && hasOdfRangePolicy &&
-                EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+                TraceAiRangeEnabled())
             {
                 static volatile long s_OdfRangeTraceBudget = 24;
                 const long remaining = InterlockedDecrement(&s_OdfRangeTraceBudget);
@@ -23887,8 +24050,8 @@ namespace BZROpenShim
             if (unitTuning &&
                 hasUnitRangePolicy &&
                 (policyResult.rangeChanged || policyResult.closeRangeChanged) &&
-                (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE") ||
-                 EnvFlagEnabled("OPENSHIM_TRACE_AI_UNIT_TUNING")))
+                (TraceAiRangeEnabled() ||
+                 TraceAiUnitTuningEnabled()))
             {
                 const long remaining = InterlockedDecrement(&g_AiUnitTuningTraceBudget);
                 if (remaining >= 0)
@@ -23910,8 +24073,8 @@ namespace BZROpenShim
             }
 
             if (tuning.bomberAiRole &&
-                (EnvFlagEnabled("OPENSHIM_TRACE_BOMBER_RANGE") ||
-                 EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE")))
+                (TraceBomberRangeEnabled() ||
+                 TraceAiRangeEnabled()))
             {
                 const long remaining = InterlockedDecrement(&g_BomberRangeTraceBudget);
                 if (remaining >= 0)
@@ -23948,7 +24111,7 @@ namespace BZROpenShim
             if (!objectPtr)
                 return;
 
-            if (EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE"))
+            if (TraceAiRangeEnabled())
             {
                 static volatile long s_RetargetProbeBudget = 24;
                 const long remaining = InterlockedDecrement(&s_RetargetProbeBudget);
@@ -24028,8 +24191,8 @@ namespace BZROpenShim
 
         static bool ShouldTraceAttackReveal()
         {
-            return EnvFlagEnabled("OPENSHIM_TRACE_ATTACK_REVEAL") ||
-                   EnvFlagEnabled("BZR_TRACE_ATTACK_REVEAL");
+            return TraceAttackRevealEnabled() ||
+                   TraceAttackRevealLegacyEnabled();
         }
 
         static void TraceAttackRevealEvent(const char* action,
@@ -24226,8 +24389,8 @@ namespace BZROpenShim
 			}
 
 			if (suppressed &&
-				(EnvFlagEnabled("OPENSHIM_TRACE_ARTILLERY_MASK") ||
-				 EnvFlagEnabled("OPENSHIM_TRACE_WEAPON_MASK")))
+				(TraceArtilleryMaskEnabled() ||
+				 TraceWeaponMaskEnabled()))
 			{
 				const long remaining = InterlockedDecrement(&g_ArtilleryMaskTraceBudget);
 				if (remaining >= 0)
@@ -27266,6 +27429,14 @@ namespace BZROpenShim
 
         static FnExuGetTeamEngineFlameColor ResolveExuTeamEngineFlameColor()
         {
+            // Asked once per craft per frame (SelectEngineFlameManager). The
+            // module set only changes at load time, so re-probe once a second
+            // and answer from the cache in between (null means not loaded).
+            static ULONGLONG s_nextProbeTick = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (now < s_nextProbeTick)
+                return g_ExuFn_GetTeamEngineFlameColor;
+            s_nextProbeTick = now + 1000;
             HMODULE exuModule = GetModuleHandleA("exu.dll");
             if (!exuModule)
                 exuModule = GetModuleHandleA("ExtraUtilities.dll");
