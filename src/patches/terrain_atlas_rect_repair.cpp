@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <utility>
 
 namespace BZROpenShim::TerrainAtlas
 {
@@ -98,11 +99,26 @@ namespace BZROpenShim::TerrainAtlas
             return true;
         }
 
-        std::string FormatWithDecimals(double value, int decimals)
+        // The most decimal places FormatWithDecimals will write. 10^15 is the
+        // largest power of ten below 2^53, so a value in 0..1 scaled by it is
+        // still an exact integer in a double and fits a long long; one more
+        // place and the scale itself stops being exact.
+        constexpr int kMaxFormattedDecimals = 15;
+
+        // False, with `result` untouched, when the value cannot be written back
+        // with that many decimals and read again as itself.
+        bool FormatWithDecimals(double value, int decimals, std::string& result)
         {
             // %.*f is locale-sensitive for the decimal point, so format the
             // integer and fractional halves separately and join with a literal
-            // '.'. Values here are in 0..1 with at most a handful of places.
+            // '.'. Values here are in 0..1 with at most a handful of places,
+            // but the place count comes from a mod's CSV token: a long tail
+            // used to overflow the long long below, which is undefined and
+            // wrote back a wrong coordinate.
+            if (decimals < 0 || decimals > kMaxFormattedDecimals)
+                return false;
+            if (!(value > -2.0 && value < 2.0))
+                return false;  // also rejects NaN; atlas coordinates are 0..1
             const bool negative = value < 0.0;
             const double magnitude = negative ? -value : value;
             double scale = 1.0;
@@ -114,21 +130,32 @@ namespace BZROpenShim::TerrainAtlas
             const long long whole = decimals > 0 ? rounded / static_cast<long long>(scale) : rounded;
             const long long frac = decimals > 0 ? rounded % static_cast<long long>(scale) : 0;
 
-            std::string result;
+            std::string text;
             if (negative)
-                result.push_back('-');
-            result += std::to_string(whole);
+                text.push_back('-');
+            text += std::to_string(whole);
 
             if (decimals > 0)
             {
-                result.push_back('.');
+                text.push_back('.');
                 const std::string fraction = std::to_string(frac);
                 const std::size_t width = static_cast<std::size_t>(decimals);
                 if (fraction.size() < width)
-                    result.append(width - fraction.size(), '0');
-                result += fraction;
+                    text.append(width - fraction.size(), '0');
+                text += fraction;
             }
-            return result;
+
+            // Read it back the way the file will be read and require the same
+            // value to within the last written place.
+            double reread = 0.0;
+            int rereadDecimals = 0;
+            if (!ParseDotDecimal(text, 0, text.size(), reread, rereadDecimals) ||
+                rereadDecimals != decimals ||
+                std::fabs(reread - value) > 0.5 / scale + kEpsilon)
+                return false;
+
+            result = std::move(text);
+            return true;
         }
 
         bool IsOnGrid(double coordinate, double cell)
@@ -330,19 +357,22 @@ namespace BZROpenShim::TerrainAtlas
         };
         std::vector<Edit> edits;
 
+        // A coordinate that cannot be written back faithfully in its source
+        // token's precision is treated like one that cannot be snapped safely.
         for (const ParsedRow* row : offGrid)
         {
             double snapped = 0.0;
-            if (!IsOnGrid(row->u.value, cellW) && TrySnap(row->u.value, cellW, snapped))
+            std::string replacement;
+            if (!IsOnGrid(row->u.value, cellW) && TrySnap(row->u.value, cellW, snapped) &&
+                FormatWithDecimals(snapped, row->u.decimals, replacement))
             {
-                edits.push_back({ row->u.offset, row->u.length,
-                                  FormatWithDecimals(snapped, row->u.decimals) });
+                edits.push_back({ row->u.offset, row->u.length, std::move(replacement) });
                 report.repairs.push_back({ row->lineNumber, row->name, 'u', row->u.value, snapped });
             }
-            if (!IsOnGrid(row->v.value, cellH) && TrySnap(row->v.value, cellH, snapped))
+            if (!IsOnGrid(row->v.value, cellH) && TrySnap(row->v.value, cellH, snapped) &&
+                FormatWithDecimals(snapped, row->v.decimals, replacement))
             {
-                edits.push_back({ row->v.offset, row->v.length,
-                                  FormatWithDecimals(snapped, row->v.decimals) });
+                edits.push_back({ row->v.offset, row->v.length, std::move(replacement) });
                 report.repairs.push_back({ row->lineNumber, row->name, 'v', row->v.value, snapped });
             }
         }
