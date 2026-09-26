@@ -1490,6 +1490,24 @@ namespace BZROpenShim
             }
         }
 
+        // The vtable hooks run inside the game's own D3D and DXGI calls. The
+        // observations they add allocate (bounded key sets, log formatting,
+        // context hook tables); an allocation failure there must not leave a
+        // COM method as a C++ exception, so every observation runs behind
+        // this barrier and the real call's result is returned as it came.
+        void NoteObservationThrew(const char* which)
+        {
+            static std::atomic<uint32_t> s_count{0};
+            if (s_count.fetch_add(1, std::memory_order_relaxed) == 0)
+            {
+                LogShimA(LogLevel::Warn,
+                         kComponent,
+                         "[DX11 ColorSpace] %s observation threw a C++ exception; dropped, later "
+                         "occurrences are counted silently",
+                         which);
+            }
+        }
+
         HRESULT STDMETHODCALLTYPE HookCreateTexture2D(
             ID3D11Device* self,
             const D3D11_TEXTURE2D_DESC* desc,
@@ -1498,21 +1516,28 @@ namespace BZROpenShim
         {
             const HRESULT hr = g_RealCreateTexture2D(self, desc, initialData, texture);
 
-            if (SUCCEEDED(hr) && texture && *texture && desc)
+            try
             {
-                uint64_t key = MixKey(
-                    PointerKey(*texture),
-                    static_cast<uint64_t>(desc->Format));
-
-                if (InsertBounded(
-                        g_TextureCreateKeys,
-                        key,
-                        kMaxTextureCreateLogs,
-                        g_TextureCreateLimitLogged,
-                        "Texture2D creation"))
+                if (SUCCEEDED(hr) && texture && *texture && desc)
                 {
-                    LogTextureCreated(*texture, *desc);
+                    uint64_t key = MixKey(
+                        PointerKey(*texture),
+                        static_cast<uint64_t>(desc->Format));
+
+                    if (InsertBounded(
+                            g_TextureCreateKeys,
+                            key,
+                            kMaxTextureCreateLogs,
+                            g_TextureCreateLimitLogged,
+                            "Texture2D creation"))
+                    {
+                        LogTextureCreated(*texture, *desc);
+                    }
                 }
+            }
+            catch (...)
+            {
+                NoteObservationThrew("CreateTexture2D");
             }
 
             return hr;
@@ -1525,8 +1550,15 @@ namespace BZROpenShim
             ID3D11ShaderResourceView** srv)
         {
             const HRESULT hr = g_RealCreateSRV(self, resource, desc, srv);
-            if (SUCCEEDED(hr) && srv && *srv)
-                LogSrvRecord(0, *srv, false);
+            try
+            {
+                if (SUCCEEDED(hr) && srv && *srv)
+                    LogSrvRecord(0, *srv, false);
+            }
+            catch (...)
+            {
+                NoteObservationThrew("CreateShaderResourceView");
+            }
             return hr;
         }
 
@@ -1537,8 +1569,15 @@ namespace BZROpenShim
             ID3D11RenderTargetView** rtv)
         {
             const HRESULT hr = g_RealCreateRTV(self, resource, desc, rtv);
-            if (SUCCEEDED(hr) && rtv && *rtv)
-                LogRenderTargetView(*rtv, 0, "create");
+            try
+            {
+                if (SUCCEEDED(hr) && rtv && *rtv)
+                    LogRenderTargetView(*rtv, 0, "create");
+            }
+            catch (...)
+            {
+                NoteObservationThrew("CreateRenderTargetView");
+            }
             return hr;
         }
 
@@ -1549,8 +1588,15 @@ namespace BZROpenShim
             ID3D11DepthStencilView** dsv)
         {
             const HRESULT hr = g_RealCreateDSV(self, resource, desc, dsv);
-            if (SUCCEEDED(hr) && dsv && *dsv)
-                LogDepthStencilView(*dsv, "create");
+            try
+            {
+                if (SUCCEEDED(hr) && dsv && *dsv)
+                    LogDepthStencilView(*dsv, "create");
+            }
+            catch (...)
+            {
+                NoteObservationThrew("CreateDepthStencilView");
+            }
             return hr;
         }
 
@@ -1563,15 +1609,22 @@ namespace BZROpenShim
                 self,
                 contextFlags,
                 deferredContext);
-            if (SUCCEEDED(hr) && deferredContext && *deferredContext)
+            try
             {
-                InstallContextHooks(*deferredContext);
-                LogShimA(
-                    LogLevel::Info,
-                    kComponent,
-                    "[TERRAIN-PROBE] installed observers on newly-created deferred context=0x%p flags=0x%X",
-                    *deferredContext,
-                    contextFlags);
+                if (SUCCEEDED(hr) && deferredContext && *deferredContext)
+                {
+                    InstallContextHooks(*deferredContext);
+                    LogShimA(
+                        LogLevel::Info,
+                        kComponent,
+                        "[TERRAIN-PROBE] installed observers on newly-created deferred context=0x%p flags=0x%X",
+                        *deferredContext,
+                        contextFlags);
+                }
+            }
+            catch (...)
+            {
+                NoteObservationThrew("CreateDeferredContext");
             }
             return hr;
         }
@@ -1587,8 +1640,15 @@ namespace BZROpenShim
             if (!views)
                 return;
 
-            for (UINT i = 0; i < numViews; ++i)
-                LogSrvRecord(startSlot + i, views[i], true);
+            try
+            {
+                for (UINT i = 0; i < numViews; ++i)
+                    LogSrvRecord(startSlot + i, views[i], true);
+            }
+            catch (...)
+            {
+                NoteObservationThrew("PSSetShaderResources");
+            }
         }
 
         void STDMETHODCALLTYPE HookOMSetRenderTargets(
@@ -1599,14 +1659,21 @@ namespace BZROpenShim
         {
             g_RealOMSetRenderTargets(self, numViews, views, dsv);
 
-            if (views)
+            try
             {
-                for (UINT i = 0; i < numViews; ++i)
-                    LogRenderTargetView(views[i], i, "bind");
-            }
+                if (views)
+                {
+                    for (UINT i = 0; i < numViews; ++i)
+                        LogRenderTargetView(views[i], i, "bind");
+                }
 
-            LogDepthStencilView(dsv, "bind");
-            LogCurrentViewports(self, "OMSetRenderTargets");
+                LogDepthStencilView(dsv, "bind");
+                LogCurrentViewports(self, "OMSetRenderTargets");
+            }
+            catch (...)
+            {
+                NoteObservationThrew("OMSetRenderTargets");
+            }
         }
 
         void STDMETHODCALLTYPE HookDrawIndexed(
@@ -1615,11 +1682,18 @@ namespace BZROpenShim
             UINT startIndexLocation,
             INT baseVertexLocation)
         {
-            ObserveTerrainState(
-                self,
-                indexCount,
-                startIndexLocation,
-                baseVertexLocation);
+            try
+            {
+                ObserveTerrainState(
+                    self,
+                    indexCount,
+                    startIndexLocation,
+                    baseVertexLocation);
+            }
+            catch (...)
+            {
+                NoteObservationThrew("DrawIndexed");
+            }
             g_RealDrawIndexed(
                 self,
                 indexCount,
@@ -1638,11 +1712,18 @@ namespace BZROpenShim
                 // index buffers before selecting topology. Inspecting that
                 // completed IA state avoids depending on which draw entry the
                 // renderer ultimately uses.
-                ObserveTerrainState(
-                    self,
-                    kTerrainExpectedIndexCount,
-                    0,
-                    0);
+                try
+                {
+                    ObserveTerrainState(
+                        self,
+                        kTerrainExpectedIndexCount,
+                        0,
+                        0);
+                }
+                catch (...)
+                {
+                    NoteObservationThrew("IASetPrimitiveTopology");
+                }
             }
         }
 
@@ -1654,21 +1735,28 @@ namespace BZROpenShim
         {
             const HRESULT hr = g_RealFactoryCreateSwapChain(self, device, desc, swapChain);
 
-            if (SUCCEEDED(hr))
+            try
             {
-                ID3D11Device* d3dDevice = nullptr;
-                if (device &&
-                    SUCCEEDED(device->QueryInterface(
-                        __uuidof(ID3D11Device),
-                        reinterpret_cast<void**>(&d3dDevice))) &&
-                    d3dDevice)
+                if (SUCCEEDED(hr))
                 {
-                    InstallDeviceHooks(d3dDevice);
-                    d3dDevice->Release();
-                }
+                    ID3D11Device* d3dDevice = nullptr;
+                    if (device &&
+                        SUCCEEDED(device->QueryInterface(
+                            __uuidof(ID3D11Device),
+                            reinterpret_cast<void**>(&d3dDevice))) &&
+                        d3dDevice)
+                    {
+                        InstallDeviceHooks(d3dDevice);
+                        d3dDevice->Release();
+                    }
 
-                if (swapChain && *swapChain)
-                    CaptureSwapChain(*swapChain, "IDXGIFactory::CreateSwapChain");
+                    if (swapChain && *swapChain)
+                        CaptureSwapChain(*swapChain, "IDXGIFactory::CreateSwapChain");
+                }
+            }
+            catch (...)
+            {
+                NoteObservationThrew("IDXGIFactory::CreateSwapChain");
             }
 
             return hr;
@@ -1690,19 +1778,26 @@ namespace BZROpenShim
                 newFormat,
                 swapChainFlags);
 
-            LogShimA(
-                SUCCEEDED(hr) ? LogLevel::Info : LogLevel::Warn,
-                kComponent,
-                "[DX11 ColorSpace] ResizeBuffers result=0x%08X requestedFormat=%s(%u) size=%ux%u buffers=%u",
-                static_cast<unsigned>(hr),
-                DxgiFormatName(newFormat),
-                static_cast<unsigned>(newFormat),
-                width,
-                height,
-                bufferCount);
+            try
+            {
+                LogShimA(
+                    SUCCEEDED(hr) ? LogLevel::Info : LogLevel::Warn,
+                    kComponent,
+                    "[DX11 ColorSpace] ResizeBuffers result=0x%08X requestedFormat=%s(%u) size=%ux%u buffers=%u",
+                    static_cast<unsigned>(hr),
+                    DxgiFormatName(newFormat),
+                    static_cast<unsigned>(newFormat),
+                    width,
+                    height,
+                    bufferCount);
 
-            if (SUCCEEDED(hr))
-                CaptureSwapChain(self, "ResizeBuffers");
+                if (SUCCEEDED(hr))
+                    CaptureSwapChain(self, "ResizeBuffers");
+            }
+            catch (...)
+            {
+                NoteObservationThrew("ResizeBuffers");
+            }
 
             return hr;
         }
@@ -1713,14 +1808,21 @@ namespace BZROpenShim
         {
             const HRESULT hr = g_RealSetColorSpace1(self, colorSpace);
 
-            LogShimA(
-                SUCCEEDED(hr) ? LogLevel::Info : LogLevel::Warn,
-                kComponent,
-                "[DX11 ColorSpace] SwapChain SetColorSpace1 requested=%s(%u) result=0x%08X%s",
-                ColorSpaceName(colorSpace),
-                static_cast<unsigned>(colorSpace),
-                static_cast<unsigned>(hr),
-                SUCCEEDED(hr) ? " state-now-requested-value" : " state-unchanged-or-unknown");
+            try
+            {
+                LogShimA(
+                    SUCCEEDED(hr) ? LogLevel::Info : LogLevel::Warn,
+                    kComponent,
+                    "[DX11 ColorSpace] SwapChain SetColorSpace1 requested=%s(%u) result=0x%08X%s",
+                    ColorSpaceName(colorSpace),
+                    static_cast<unsigned>(colorSpace),
+                    static_cast<unsigned>(hr),
+                    SUCCEEDED(hr) ? " state-now-requested-value" : " state-unchanged-or-unknown");
+            }
+            catch (...)
+            {
+                NoteObservationThrew("SetColorSpace1");
+            }
 
             return hr;
         }

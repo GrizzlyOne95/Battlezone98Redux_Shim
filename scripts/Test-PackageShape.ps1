@@ -200,6 +200,19 @@ if ($Layout -eq 'Suite') {
         }
     }
 
+    # The log uploader wrappers. The installers take them from here rather
+    # than an unverified raw URL; they fall back to a download pinned to the
+    # bundle's commit, so a missing wrapper degrades rather than breaks an
+    # install, but a release should not ship without them.
+    foreach ($wrapper in @('openshim_wrap.ps1', 'openshim_wrap.bat', 'openshim_wrap.sh')) {
+        $rel = Join-Path 'upload' $wrapper
+        if (-not (Test-Path -LiteralPath (Join-Path $Root $rel) -PathType Leaf)) {
+            Add-Failure "suite is missing $rel (the opt-in log uploader)"
+        } else {
+            Add-Pass "suite carries $rel"
+        }
+    }
+
     # Provenance: the archive states which tag and commit produced it, and
     # that claim is only worth something if something checks it.
     $metaPath = Join-Path $Root 'release_metadata.json'

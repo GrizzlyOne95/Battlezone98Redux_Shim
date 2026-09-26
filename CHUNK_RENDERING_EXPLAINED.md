@@ -155,8 +155,11 @@ The supported Windows uninstall command is:
 irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/uninstall_windows.ps1 | iex
 ```
 
-The uninstaller removes the deployed OpenShim proxy DLL and its co-deployed
-`patches.json`; it intentionally leaves user configuration and logs alone.
+The uninstaller removes everything the installer deployed: the three-binary
+load chain, `patches.json`, the Enhanced renderer resources and asset manifest,
+the UI widget tiles, and the installer's own backups. It intentionally leaves
+`openshim.ini`, `net.ini`, and logs alone. `scripts/uninstall_linux.sh` is the
+Proton twin.
 
 There is no `PersistentConfig.Initialize -> EnsureBundledOpenShimInstalled` mission
 path anymore, and no mission restart is required just to stage a bundled DLL. The
