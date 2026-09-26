@@ -381,10 +381,10 @@ void InstallMpFactionRestrictIfPossible()
     g_ClearBucket = clearFn;
 
     // Rewrite each `call rel32` to reach our interceptor, verifying the exact
-    // original five bytes first so a different build fails closed.
-    auto patchCallSite = [](uint32_t site) -> bool
+    // original five bytes first so a different build fails closed. The stock
+    // bytes are handed back so a site can be put back if the other one fails.
+    auto patchCallSite = [](uint32_t site, uint8_t (&original)[5]) -> bool
     {
-        uint8_t original[5] = {};
         if (!HookEngine::ReadMemory(site, original, sizeof(original)) || original[0] != 0xE8)
             return false;
 
@@ -404,13 +404,36 @@ void InstallMpFactionRestrictIfPossible()
         return HookEngine::ApplyPatch(def);
     };
 
-    if (!patchCallSite(netvehCall) || !patchCallSite(missionCall))
+    uint8_t netvehOriginal[5] = {};
+    uint8_t missionOriginal[5] = {};
+    if (!patchCallSite(netvehCall, netvehOriginal))
     {
         LogShimA(LogLevel::Warn, kComponent,
-                 "[FACTION] failed to rewrite loader call sites (netveh=0x%08X mission=0x%08X)",
-                 netvehCall, missionCall);
+                 "[FACTION] failed to rewrite the netveh loader call site 0x%08X; hook disabled",
+                 netvehCall);
         g_OrigLoad = nullptr;
         g_ClearBucket = nullptr;
+        return;
+    }
+    if (!patchCallSite(missionCall, missionOriginal))
+    {
+        // The netveh site already reaches the interceptor. Put its stock call
+        // back so neither site is hooked: a lone hooked site whose original
+        // had been cleared would return without loading, and Create Game would
+        // show an empty vehicle list. Should the restore itself fail, the
+        // original is kept so the interceptor still delegates.
+        const bool restored = HookEngine::WriteMemory(netvehCall, netvehOriginal, sizeof(netvehOriginal));
+        void* netvehNow = HookEngine::ResolveRelCallTarget(netvehCall);
+        LogShimA(LogLevel::Warn, kComponent,
+                 "[FACTION] failed to rewrite the mission loader call site 0x%08X; netveh site 0x%08X %s (call -> %p); hook disabled",
+                 missionCall, netvehCall,
+                 restored ? "restored to stock" : "could not be restored, interceptor keeps delegating",
+                 netvehNow);
+        if (restored)
+        {
+            g_OrigLoad = nullptr;
+            g_ClearBucket = nullptr;
+        }
         return;
     }
 
