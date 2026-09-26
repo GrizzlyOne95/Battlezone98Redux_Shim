@@ -615,6 +615,31 @@ namespace BZROpenShim
         extern bool g_AipResolveTraceEnabled;
         extern bool g_AllowNeutralAttackOrders;
 
+        // --- AI weapon-mask selection (ai_weapon_mask.cpp) ---------------------
+        // Makes artillery / lay-mines AI honour weaponMask, firing every
+        // fitted hardpoint the mask names as one synchronized volley.
+        //
+        // These are enhancements, not restorations -- BZ 1.5 ignores the mask
+        // on both paths exactly as stock Redux does -- and under the volley
+        // policy they are not no-ops even for content that authors no mask:
+        // the stock default 11111 means "every fitted hardpoint", so a stock
+        // howitzer with four mortar hardpoints fires four rounds instead of
+        // one. Both therefore default OFF, and both are gated to single
+        // player because they change simulation outcomes.
+        //
+        // Split per craft type so the artillery volley can be enabled without
+        // the lay-mines one and vice versa.
+        inline constexpr bool kAiWeaponMaskArtilleryEnabledDefault = false;
+        inline constexpr bool kAiWeaponMaskMinelayerEnabledDefault = false;
+        extern bool g_AiWeaponMaskArtilleryEnabled;
+        extern bool g_AiWeaponMaskMinelayerEnabled;
+        extern bool g_HowitzerVolleyEnabled;
+        extern bool g_WeaponMaskCarrierBiasEnabled;
+        void RefreshAiWeaponMaskArtilleryState();
+        void RevertAiWeaponMaskArtilleryToBaseline();
+        void RefreshAiWeaponMaskMinelayerState();
+        void RevertAiWeaponMaskMinelayerToBaseline();
+
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
         extern float g_SatelliteZoomOutMultiplierBaseline;
