@@ -865,6 +865,41 @@ namespace BZROpenShim
         extern DWORD g_VehicleSkinningTraceLastTick;
         void RefreshVehicleSkinningDiagnosticsIfNeeded();
 
+        // --- Multiplayer vehicle flags (multiplayer_vehicle_flags.cpp) ---------
+        // Ogre::Vector3 global holding the per-map render origin (terrain
+        // center); every engine sim->render conversion subtracts it and
+        // mirrors Z (render = simX-o.x, simY-o.y, -simZ-o.z).
+        inline constexpr uintptr_t kGogWorldRenderOriginAddr = 0x025F8E4C;
+        using FnFlagDisplaySubmit = void(__thiscall*)(void*, void*);
+        struct MultiplayerFlagRenderSet
+        {
+            uint64_t payloadHash = 0;
+            std::string materialName;
+            std::string resourceGroup;
+            std::filesystem::path resourceDirectory;
+            bool resourcesReady = false;
+            void* sceneManager = nullptr;
+            void* billboardSet = nullptr;
+            std::vector<void*> billboards;
+            size_t usedBillboards = 0;
+        };
+        int GetGameObjectTeamForLog(void* objectPtr);
+        bool HasTerrainLineOfSight(double startX,
+                                          double startY,
+                                          double startZ,
+                                          double endX,
+                                          double endY,
+                                          double endZ);
+        extern FnFlagDisplaySubmit g_BzrFn_FlagDisplaySubmitOriginal;
+        extern bool g_MultiplayerFlagRenderHookFailureLogged;
+        extern bool g_MultiplayerFlagRenderHookInstalled;
+        extern std::unordered_map<uint64_t, MultiplayerFlagRenderSet> g_MultiplayerFlagRenderSets;
+        extern bool g_MultiplayerFlagRendererLoggedReady;
+        void ForgetMultiplayerFlagSceneResources(const wchar_t* reason);
+        void RenderMultiplayerFlags(void* /*camera*/);
+        void MaybeDriveMultiplayerFlagRenderFallback();
+        void InstallMultiplayerFlagRenderHookIfPossible();
+
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
         extern float g_SatelliteZoomOutMultiplierBaseline;
