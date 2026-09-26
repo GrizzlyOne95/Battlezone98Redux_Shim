@@ -28,8 +28,9 @@ namespace BZROpenShim
         // "Building::Building" (0x0047E9C0) and "ParameterDB::GetInt"
         // (0x005896C0). The string16 helper is called by BuildingClass while
         // its ParameterDB scope is live, making it the safe point to query an
-        // additional BuildingClass key.
-        constexpr size_t kBuildingString16DetourLength = 6;
+        // additional BuildingClass key. Its prologue is
+        // push ebp; mov ebp,esp; push ecx; mov [ebp-4],ecx (1+2+1+3 bytes).
+        constexpr size_t kBuildingString16DetourLength = 7;
         constexpr size_t kTuggableCtorDetourLength = 5;
 
         // ParameterDB hashes are FNV-1a/32 over lowercase names.
@@ -39,7 +40,11 @@ namespace BZROpenShim
 
         constexpr size_t kGameObjectClassPackedNameOffset = 0x30;
         constexpr size_t kBuildingClassSoundAmbientOffset = 0x150;
-        constexpr size_t kGameObjectHandleOffset = 0xDC;
+        // Stock Building::Building fills +0x220 (hitch) with the virtual
+        // GetHandle (0x0046CFE0) called on the +0x18 interface subobject,
+        // which returns [interface+0xDC], i.e. complete-object +0xF4.
+        constexpr size_t kGameObjectInterfaceOffset = 0x18;
+        constexpr size_t kGameObjectInterfaceHandleOffset = 0xDC;
         constexpr size_t kBuildingTuggableHandleOffset = 0x220;
 
         constexpr char kBuildingClassLabel[] = "i76building";
@@ -49,8 +54,10 @@ namespace BZROpenShim
         using FnBuildingBuildClass = void* (__thiscall*)(void*, uint32_t, uint32_t);
         using FnBuildingGetRank = float (__thiscall*)(void*, float, float);
         using FnGetObjectClass = void* (__thiscall*)(void*);
-        using FnParameterDbGetInt = int (__cdecl*)(uint32_t, uint32_t, int*, int);
-        using FnBuildingClassString16 = void (__cdecl*)(uint32_t, uint32_t, void*, void*);
+        // Both ParameterDB readers are __thiscall on the live ParameterDB scope
+        // and pop four stack arguments (ret 0x10). GetInt returns found in AL.
+        using FnParameterDbGetInt = bool (__thiscall*)(void*, uint32_t, uint32_t, int*, int);
+        using FnBuildingClassString16 = uint32_t (__thiscall*)(void*, uint32_t, uint32_t, void*, void*);
         using FnBuildingCtor = void* (__thiscall*)(void*, void*, void*);
 
         InlineDetour32 g_BuildClassDetour;
@@ -134,22 +141,26 @@ namespace BZROpenShim
         }
 
         // BuildingClass::BuildingClass opens its ODF, then calls this shared
-        // string16 reader for soundAmbient with:
-        //   section=BuildingClass, key=soundAmbient,
-        //   out=this+0x150, default=parent+0x150.
+        // string16 reader for soundAmbient (0x0048004F) with:
+        //   ecx=its ParameterDB scope, section=BuildingClass,
+        //   key=soundAmbient, out=this+0x150, default=parent+0x150.
         // Intercepting only that exact call lets OpenShim query `tuggable`
         // while Redux's own ParameterDB scope is definitely active. Deriving
         // current/parent class pointers from those two field addresses also
         // gives the new key normal baseName-style inheritance without adding
         // storage to the native class object.
-        void __cdecl TuggableBuildingClassString16Hook(uint32_t sectionHash,
-                                                       uint32_t keyHash,
-                                                       void* outValue,
-                                                       void* defaultValue)
+        // The wrapper is __thiscall, so the hook is __fastcall with the unused
+        // edx slot; the ParameterDB `this` is forwarded to GetInt as well.
+        uint32_t __fastcall TuggableBuildingClassString16Hook(void* parameterDb,
+                                                              void* /*edx*/,
+                                                              uint32_t sectionHash,
+                                                              uint32_t keyHash,
+                                                              void* outValue,
+                                                              void* defaultValue)
         {
             if (sectionHash == kBuildingClassSectionHash &&
                 keyHash == kBuildingSoundAmbientKeyHash &&
-                outValue && g_ParameterDbGetInt)
+                parameterDb && outValue && g_ParameterDbGetInt)
             {
                 auto* objectClass = reinterpret_cast<uint8_t*>(outValue) -
                     kBuildingClassSoundAmbientOffset;
@@ -176,10 +187,11 @@ namespace BZROpenShim
 
                     int enabled = inherited;
                     const bool explicitKey =
-                        g_ParameterDbGetInt(kBuildingClassSectionHash,
+                        g_ParameterDbGetInt(parameterDb,
+                                            kBuildingClassSectionHash,
                                             kTuggableKeyHash,
                                             &enabled,
-                                            inherited) != 0;
+                                            inherited);
                     SetOdfTuggable(odfNameLo, odfNameHi, enabled != 0);
 
                     if (explicitKey)
@@ -193,9 +205,11 @@ namespace BZROpenShim
                 }
             }
 
-            if (g_OriginalBuildingClassString16)
-                g_OriginalBuildingClassString16(sectionHash, keyHash,
-                                                outValue, defaultValue);
+            // The detour is only installed after the trampoline exists, so
+            // the original is always present here.
+            return g_OriginalBuildingClassString16(parameterDb, sectionHash,
+                                                   keyHash, outValue,
+                                                   defaultValue);
         }
 
         // Stock Building::Building sets +0x220 to GetHandle() only when the
@@ -225,7 +239,8 @@ namespace BZROpenShim
             {
                 auto* objectBytes = reinterpret_cast<uint8_t*>(result);
                 const uint32_t handle = *reinterpret_cast<const uint32_t*>(
-                    objectBytes + kGameObjectHandleOffset);
+                    objectBytes + kGameObjectInterfaceOffset +
+                    kGameObjectInterfaceHandleOffset);
                 *reinterpret_cast<uint32_t*>(
                     objectBytes + kBuildingTuggableHandleOffset) = handle;
             }
@@ -258,14 +273,11 @@ namespace BZROpenShim
                 return false;
             }
 
-            // Known mismatch, kept fail-closed: on GOG 2.2.301 the string16
-            // helper is __thiscall (push ecx; ... ret 0x10) and begins
-            // 55 8B EC 51 89 4D FC, and ParameterDB::GetInt is __thiscall too,
-            // while the hook and FnParameterDbGetInt are declared __cdecl. This
-            // guard therefore refuses the detour, and tuggable=1 support stays
-            // off on that build rather than unbalancing the stack.
+            // Both calling conventions above depend on these exact prologues
+            // (GOG 2.2.301): the string16 wrapper spills ecx at [ebp-4] and
+            // GetInt spills it at [ebp-8]. Any other shape fails closed.
             static const uint8_t string16Prologue[kBuildingString16DetourLength] =
-                { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x14 };
+                { 0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC };
             static const uint8_t ctorPrologue[kTuggableCtorDetourLength] =
                 { 0x55, 0x8B, 0xEC, 0x6A, 0xFF };
             static const uint8_t parameterDbPrologue[] =

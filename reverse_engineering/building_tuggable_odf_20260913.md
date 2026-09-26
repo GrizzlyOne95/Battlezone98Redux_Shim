@@ -70,6 +70,33 @@ unconfigured class with no configured parent, removes any earlier opt-in for the
 same packed name; this prevents addon shadowing from leaking state across
 missions.
 
+## Calling conventions and offsets (GOG 2.2.301, verified 2026-09-26)
+
+The first implementation never installed on this build: it declared both
+ParameterDB readers `__cdecl`, and its prologue guard (`55 8B EC 8B 45 14`)
+did not match, so the detour refused and the key was silently inert.
+
+- `BuildingClass::String16` (`0x0047B6C0`) is `__thiscall`:
+  `55 8B EC 51 89 4D FC` (push ebp; mov ebp,esp; push ecx; mov [ebp-4],ecx),
+  forwards (section, key, out, default) plus its own ecx to `0x00589A10`, and
+  returns with `ret 0x10`. At the soundAmbient call (`0x0048004F`) ecx is the
+  BuildingClass constructor's local ParameterDB scope (`lea ecx,[ebp-0x14]`,
+  built by `0x00589430`). The hook is a `__fastcall` shim
+  (`this, edx, section, key, out, default`) with a 7-byte steal, guarded on
+  those seven bytes; `tests/x86_length_tests.cpp` pins the decoder's verdict.
+- `ParameterDB::GetInt` (`0x005896C0`) is `__thiscall` on that same scope,
+  returns found/not-found in AL, and pops four arguments (`ret 0x10`). The hook
+  passes the wrapper's ecx through as its `this`.
+- `Building::Building` (`0x0047E9C0`, `ret 8`) stores into `+0x220` the result
+  of the virtual GetHandle (`0x0046CFE0`, `mov eax,[ecx+0xDC]`) called on the
+  `+0x18` interface, i.e. complete-object `+0xF4`, which the GameObject
+  constructor fills from its first argument (`0x004DA14B`). The first
+  implementation copied complete-object `+0xDC` instead; the hook now reads
+  `+0x18+0xDC` like stock.
+
+Live check: `reverse_engineering/run_lctug.ps1` (fixture in
+`reverse_engineering/test_missions/lcbench_tug/`).
+
 ## Compatibility contract
 
 - Numeric `1` enables the extension.
