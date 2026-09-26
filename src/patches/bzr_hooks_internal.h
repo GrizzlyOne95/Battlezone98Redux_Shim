@@ -186,6 +186,38 @@ namespace BZROpenShim
     extern FnShieldTowerSimulate g_BzrFn_ShieldTowerSimulateOriginal;
     extern FnVectorTransform g_BzrFn_VectorTransform;
 
+    using FnCalcRangeCraft = void(__cdecl*)(void* craft,
+                                            float* closeRange,
+                                            float* range,
+                                            float* time,
+                                            void** weapon);
+    using FnAttackTaskDoState = void(__thiscall*)(void* thisPtr);
+    using FnTerrainGetIntersection = int(__cdecl*)(double startX,
+                                                   double startY,
+                                                   double startZ,
+                                                   float diffX,
+                                                   float diffY,
+                                                   float diffZ,
+                                                   float* fraction,
+                                                   void* outNormal);
+    using FnProcessDoSubTask = bool(__thiscall*)(void* thisPtr);
+    using FnGetGameTime = float(__cdecl*)();
+    using FnFindPlanForObject = void* (__cdecl*)(void* objectPtr, float x, float z);
+    using FnAiPathGetLength = float(__thiscall*)(void* pathPtr);
+    using FnAiPathDelete = void* (__thiscall*)(void* pathPtr, uint32_t flags);
+    using FnRecycleTaskDoGotoScrap = void(__thiscall*)(void* recycleTask);
+    extern FnAiPathDelete g_BzrFn_AiPathDelete;
+    extern FnAiPathGetLength g_BzrFn_AiPathGetLength;
+    extern FnAttackTaskDoState g_BzrFn_AttackTaskDoState;
+    extern FnCalcRangeCraft g_BzrFn_CalcRangeCraft;
+    extern FnFindPlanForObject g_BzrFn_FindPlanForObject;
+    extern FnGetGameTime g_BzrFn_GetGameTime;
+    extern FnProcessDoSubTask g_BzrFn_GunTowerProcessDoSubTask;
+    extern FnProcessDoSubTask g_BzrFn_OffensiveProcessDoSubTask;
+    extern FnRecycleTaskDoGotoScrap g_BzrFn_RecycleTaskDoGotoScrap;
+    extern FnTerrainGetIntersection g_BzrFn_TerrainGetIntersection;
+    extern FnProcessDoSubTask g_BzrFn_TurretTankProcessDoSubTask;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -1063,6 +1095,124 @@ namespace BZROpenShim
         void RunShieldTowerFilteredSimulate(void* shieldTowerPtr, float dt);
         void RunMagnetMineFilteredSimulate(void* magnetMinePtr, float dt);
         void RunProximityMineFilteredSimulate(void* proximityMinePtr, float dt);
+
+        // --- AI ODF tuning (ai_odf_tuning.cpp) ---------------------------------
+        inline constexpr float kScrapRetargetPeriodDefault = 2.0f;
+        inline constexpr float kScrapRetargetMinImprovementDefault = 25.0f;
+        inline constexpr uintptr_t kGogTerrainGetIntersectionAddr = 0x00784620;
+        struct RetargetPeriodState
+        {
+            float appliedDeadline = 0.0f;
+            float period = 0.0f;
+        };
+        struct ScrapPathFailureState
+        {
+            float retryAfter = 0.0f;
+            float x = 0.0f;
+            float z = 0.0f;
+        };
+        struct ScrapRetargetState
+        {
+            uintptr_t owner = 0;
+            float nextCheck = 0.0f;
+            float pendingUntil = 0.0f;
+            int incumbentHandle = 0;
+            bool rescorePending = false;
+        };
+        struct AiTuningConfig;
+        struct AiTuningConfig
+        {
+            bool parsed = false;
+            bool bomberAiRole = false;
+            bool legacyAiRole = false;
+            bool hasEngageRangeAI = false;
+            float engageRangeAI = 0.0f;
+            bool hasWeaponRangeMinAI = false;
+            float weaponRangeMinAI = 0.0f;
+            bool derivedBomberWeaponRangeAI = false;
+            bool hasRetargetPeriodAI = false;
+            float retargetPeriodAI = 0.0f;
+            bool hasStuckCheckPeriodAI = false;
+            float stuckCheckPeriodAI = 0.0f;
+            bool hasStuckReverseTimeAI = false;
+            float stuckReverseTimeAI = 0.0f;
+            bool hasStuckStrafeTimeAI = false;
+            float stuckStrafeTimeAI = 0.0f;
+            bool scrapPathingAI = false;
+            bool hasScrapPathingAI = false;
+            bool hasScrapPathLengthWeightAI = false;
+            float scrapPathLengthWeightAI = 1.0f;
+            bool hasScrapStraightDistanceWeightAI = false;
+            float scrapStraightDistanceWeightAI = 0.05f;
+            bool hasScrapPathFailPenaltyAI = false;
+            float scrapPathFailPenaltyAI = 250.0f;
+            bool hasScrapHardToGetCooldownAI = false;
+            float scrapHardToGetCooldownAI = 10.0f;
+            bool hasScrapSearchRadiusAI = false;
+            float scrapSearchRadiusAI = 0.0f;
+            bool hasScrapRetargetPeriodAI = false;
+            float scrapRetargetPeriodAI = kScrapRetargetPeriodDefault;
+            bool hasScrapRetargetMinImprovementAI = false;
+            float scrapRetargetMinImprovementAI = kScrapRetargetMinImprovementDefault;
+        };
+        struct AiTuningCache
+        {
+            bool initialized = false;
+            std::unordered_map<std::string, AiTuningConfig> odfEntries = {};
+        };
+        // Per-unit AI tuning override set at runtime through the EXU bridge.
+        // Keyed by GameObject pointer; wins over ODF-level AiTuningConfig and
+        // applies regardless of the g_AiOdfGameplayTuningEnabled master toggle
+        // because each entry is an explicit script request for that unit.
+        struct AiUnitTuningOverride
+        {
+            bool hasLegacyAi = false;
+            bool legacyAi = false;
+            bool hasEngageRange = false;
+            float engageRange = 0.0f;
+            bool hasWeaponRangeMin = false;
+            float weaponRangeMin = 0.0f;
+            bool hasRetargetPeriod = false;
+            float retargetPeriod = 0.0f;
+            bool hasKiteRanges = false;
+            float kiteDesiredRange = 0.0f;
+            float kiteEnterRange = 0.0f;
+            float kiteExitRange = 0.0f;
+            bool kitePreserveLos = false;
+            float kiteStrafe = 0.0f;
+            float kiteSwitchPeriod = 0.0f;
+        };
+        struct CombatKiteState
+        {
+            bool retreating = false;
+            uintptr_t target = 0;
+            int strafeDirection = 1;
+            ULONGLONG nextStrafeSwitchMs = 0;
+        };
+        bool TryParseFloatValue(const char* value, float& out);
+        bool VtableTypeNameMatches(uintptr_t vtableAddress, const char* expectedName);
+        extern bool g_AiOdfGameplayTuningActive;
+        extern AiTuningCache g_AiTuningCache;
+        extern std::unordered_map<uintptr_t, AiUnitTuningOverride> g_AiUnitTuningOverridesByObject;
+        extern volatile long g_AiUnitTuningTraceBudget;
+        extern InlineDetour32 g_AttackTaskDoStateDetour;
+        extern bool g_AttackTaskDoStateHookInstalled;
+        extern bool g_BomberAiRangeActive;
+        extern bool g_CalcRangeCraftHookInstalled;
+        extern std::unordered_map<uintptr_t, CombatKiteState> g_CombatKiteStateByObject;
+        extern volatile long g_CombatKiteTraceBudget;
+        extern bool g_HowitzerUndeployedRetaliationFixActive;
+        extern InlineDetour32 g_RecycleTaskDoGotoScrapDetour;
+        extern bool g_RetargetPeriodHooksInstalled;
+        extern std::unordered_map<uintptr_t, RetargetPeriodState> g_RetargetPeriodStateByProcess;
+        extern std::unordered_map<uintptr_t, ScrapPathFailureState> g_ScrapPathFailuresByObject;
+        extern bool g_ScrapPathScoreHookInstalled;
+        extern volatile long g_ScrapPathTraceBudget;
+        extern bool g_ScrapRetargetHookInstalled;
+        extern std::unordered_map<uintptr_t, ScrapRetargetState> g_ScrapRetargetStateByTask;
+        extern bool g_SmartScavengerPathingEnabled;
+        bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig);
+        void InstallAiTuningHooksIfPossible();
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
