@@ -159,6 +159,7 @@
     <ClCompile Include="src\patches\hud_sprite_rects.cpp" />
     <ClCompile Include="src\patches\jump_snipe_crouch.cpp" />
     <ClCompile Include="src\patches\lifecycle_seams.cpp" />
+    <ClCompile Include="src\patches\lobby_screen_hooks.cpp" />
     <ClCompile Include="src\patches\lobby_ui.cpp" />
     <ClCompile Include="src\patches\map_filter_port.cpp" />
     <ClCompile Include="src\patches\moderation.cpp" />

@@ -237,6 +237,9 @@ namespace BZROpenShim
     extern FnSprayBuildingSimulate g_BzrFn_SprayBuildingSimulateOriginal;
     extern FnUnitsSOrderStop g_BzrFn_UnitsSOrderStop;
 
+    using FnUiTextEntryAppendChar = uint8_t (__thiscall*)(void*, uint8_t);
+    extern FnUiTextEntryAppendChar g_BzrFn_TextEntryAppendChar;
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -1301,6 +1304,10 @@ namespace BZROpenShim
         void InstallQuakeReplayFadeIfPossible();
         void InstallTargetCamSatelliteFixIfPossible();
         void InstallCinematicSatelliteZoomFixIfPossible();
+
+        // --- Lobby screen hooks (lobby_screen_hooks.cpp) -----------------------
+        void InstallNicknameTextEntryInputHookIfPossible();
+        void InstallMultiCreatePreviewFixIfPossible();
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
