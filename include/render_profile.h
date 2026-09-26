@@ -198,6 +198,34 @@ namespace BZROpenShim::RenderProfiles
     // unprefixed modern names report Redux (the engine-native baseline).
     Profile ProfileForMaterialScheme(std::string_view scheme);
 
+    // What an explicit reapply may do to one viewport's scheme. Mirrors the
+    // setMaterialScheme hook's fail-open rule: the engine's native bases and
+    // our own prefixes carry the policy; a foreign scheme (a mod's own name,
+    // an unconfigured viewport's "Default", an empty name) is reported and
+    // left exactly as found. `scheme` is meaningful only when rewriteScheme
+    // is set.
+    struct ViewportReapplyDecision
+    {
+        bool rewriteScheme = false;
+        bool foreignScheme = false;
+        char scheme[48] = {};
+    };
+    ViewportReapplyDecision DecideViewportSchemeReapply(Profile effective,
+                                                        std::string_view current,
+                                                        std::string_view lastModern);
+
+    // The Glow compositor. Retro owns its off state (legacy CR/EXU behaviour)
+    // and re-asserts it because the engine re-enables Glow when it rebuilds a
+    // viewport. Any other profile only restores what Retro suppressed; it
+    // never asserts a state the engine chose on its own.
+    enum class GlowAction : uint8_t
+    {
+        LeaveAlone = 0,
+        Disable = 1,
+        Restore = 2,
+    };
+    GlowAction DecideGlowCompositor(Profile effective, bool suppressedByRetro);
+
     // --- stable companion-DLL ABI ------------------------------------------
     //
     // Mirrored independently by ExtraUtilities' src/OpenShimBridge.h; do not
