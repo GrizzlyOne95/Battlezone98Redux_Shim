@@ -151,8 +151,7 @@ namespace BZROpenShim
     FnUiSelectlistSetItem g_BzrFn_SelectlistSetItem = nullptr; // 0x007CABF0
     FnUiSetCb g_BzrFn_TextEntrySetEnterCb = nullptr; // 0x007CF940
     FnUiSetStr g_BzrFn_TextEntryAppendText = nullptr; // 0x007CF980
-    using FnUiTextEntryAppendChar = uint8_t (__thiscall*)(void*, uint8_t);
-    static FnUiTextEntryAppendChar g_BzrFn_TextEntryAppendChar = nullptr; // 0x007CFA70
+    FnUiTextEntryAppendChar g_BzrFn_TextEntryAppendChar = nullptr; // 0x007CFA70
     FnUiTextEntryClear g_BzrFn_TextEntryClear = nullptr; // 0x007CF9F0
     void (__thiscall* g_BzrFn_TextEntrySetInputLimit)(void*, int) = nullptr; // 0x00795BD0
     FnUiSetCb g_BzrFn_SelectlistSetOnSelect = nullptr; // 0x007CB3E0
@@ -392,7 +391,6 @@ namespace BZROpenShim
     // file-local is `static`.
     namespace Hooks
     {
-        static void InstallNicknameTextEntryInputHookIfPossible();
 
         constexpr uintptr_t kBuildMenuRootAddr = 0x009174C4;
         static_assert(
@@ -871,10 +869,7 @@ namespace BZROpenShim
         bool g_EngineFlameVtableHooksInstalled = false;
         InlineDetour32 g_RecordDeathDetour = {};
         bool g_DistributedRecordDeathIntHookInstalled = false;
-        static InlineDetour32 g_TextEntryAppendCharDetour = {};
-        static FnUiTextEntryAppendChar g_BzrFn_TextEntryAppendCharOriginal = nullptr;
         bool g_LobbyNicknameInputHookInstalled = false;
-        static bool g_LobbyNicknameInputHookFailureLogged = false;
         void* g_ActiveNicknameEntry = nullptr;
         void* g_ActiveNicknameParent = nullptr;
         void* g_NicknameEnterDispatchEntry = nullptr;
@@ -882,7 +877,6 @@ namespace BZROpenShim
         BzrNetNicknameResult g_PendingNicknameConfirmationResult =
             BzrNetNicknameResult::StoredForNextConnection;
         bool g_ReplaceNicknameOnNextInput = false;
-        static volatile long g_NicknameInputTraceBudget = 16;
         bool g_CareerStatsMpHookInstalled = false;
         bool g_CareerStatsMpHookInstallAttempted = false;
         bool g_CareerStatsMpHookMismatchLogged = false;
@@ -10256,269 +10250,6 @@ namespace BZROpenShim
                     outObjects[count++] = object;
             }
             return count;
-        }
-
-        // Lobby screens route keyboard characters to their own stock chat
-        // entries through cUI_TextEntry::AppendChar (0x007CFA70), but they do
-        // not share one reliable screen-level OnChar target. Intercept the
-        // common append operation instead. The detour is inert unless the
-        // player explicitly activated our live nickname entry.
-        static uint8_t __fastcall TextEntryAppendCharNicknameHook(
-            void* thisPtr,
-            void* /*unusedEdx*/,
-            uint8_t character)
-        {
-            void* const entry = g_ActiveNicknameEntry;
-            void* const parent = g_ActiveNicknameParent;
-            if (entry && parent && g_BzrFn_TextEntryAppendChar &&
-                IsWidgetLiveChildOfParent(parent, entry))
-            {
-                // A click means "replace" when a configured nickname is
-                // already displayed. Keep it visible until the first actual
-                // edit so clicking and pressing Enter remains a no-op update.
-                if (g_ReplaceNicknameOnNextInput && character != '\r' && character != '\n')
-                {
-                    if (g_BzrFn_TextEntryClear)
-                        g_BzrFn_TextEntryClear(entry);
-                    g_ReplaceNicknameOnNextInput = false;
-                }
-                if (InterlockedDecrement(&g_NicknameInputTraceBudget) >= 0)
-                    Log(L"[BZRNET] Nickname input routed (enter=%hs)\n",
-                        (character == '\r' || character == '\n') ? "yes" : "no");
-                const bool isEnter = (character == '\r' || character == '\n');
-                if (isEnter)
-                    g_NicknameEnterDispatchEntry = entry;
-                const uint8_t result = g_BzrFn_TextEntryAppendCharOriginal
-                    ? g_BzrFn_TextEntryAppendCharOriginal(entry, character)
-                    : 0;
-                if (isEnter)
-                {
-                    g_NicknameEnterDispatchEntry = nullptr;
-                    // AppendChar rebuilds the rendered text after invoking its
-                    // Enter callback. Paint confirmation only after it returns
-                    // so the rebuild cannot immediately erase the message.
-                    if (g_PendingNicknameConfirmationEntry == entry)
-                    {
-                        g_PendingNicknameConfirmationEntry = nullptr;
-                        ShowNicknameApplyConfirmation(
-                            entry, g_PendingNicknameConfirmationResult);
-                    }
-                }
-                return result;
-            }
-
-            if (entry || parent)
-            {
-                // A rebuilt lobby invalidates injected children. Drop edit
-                // mode before falling back so stale pointers receive no input.
-                g_ActiveNicknameEntry = nullptr;
-                g_ActiveNicknameParent = nullptr;
-                g_NicknameEnterDispatchEntry = nullptr;
-                g_ReplaceNicknameOnNextInput = false;
-            }
-            return g_BzrFn_TextEntryAppendCharOriginal
-                ? g_BzrFn_TextEntryAppendCharOriginal(thisPtr, character)
-                : 0;
-        }
-
-        static void InstallNicknameTextEntryInputHookIfPossible()
-        {
-            if (g_LobbyNicknameInputHookInstalled)
-                return;
-
-            constexpr uintptr_t kTextEntryAppendCharAddr = 0x007CFA70;
-            // push ebp; mov ebp,esp; push -1 -- complete instructions only.
-            static constexpr uint8_t kExpectedBytes[] =
-            {
-                0x55, 0x8B, 0xEC, 0x6A, 0xFF
-            };
-
-            if (!InstallInlineDetour32(
-                    g_TextEntryAppendCharDetour,
-                    kTextEntryAppendCharAddr,
-                    reinterpret_cast<void*>(TextEntryAppendCharNicknameHook),
-                    sizeof(kExpectedBytes),
-                    kExpectedBytes,
-                    sizeof(kExpectedBytes)))
-            {
-                if (!g_LobbyNicknameInputHookFailureLogged)
-                {
-                    Log(L"[BZRNET] TextEntry AppendChar bytes mismatch at 0x%08X; nickname editing disabled\n",
-                        static_cast<uint32_t>(kTextEntryAppendCharAddr));
-                    g_LobbyNicknameInputHookFailureLogged = true;
-                }
-                return;
-            }
-
-            g_BzrFn_TextEntryAppendCharOriginal =
-                reinterpret_cast<FnUiTextEntryAppendChar>(g_TextEntryAppendCharDetour.trampoline);
-            g_LobbyNicknameInputHookInstalled =
-                (g_BzrFn_TextEntryAppendCharOriginal != nullptr);
-            if (g_LobbyNicknameInputHookInstalled)
-                Log(L"[BZRNET] Installed TextEntry nickname input routing hook at 0x%08X\n",
-                    static_cast<uint32_t>(kTextEntryAppendCharAddr));
-        }
-
-        // ---- Multiplayer create-screen "Map Layout" preview overflow fix ----
-        //
-        // cUI_Multiplayer_Create (ctor 0x00796880) builds the preview as a
-        // 200x200 UI-unit image widget ("MapPreview", image ctor 0x007D1CC0),
-        // but the first selection update rewrites the widget's design size to
-        // the wire texture's pixel size (500x500), so the quad overflows the
-        // "Map Layout" frame at every resolution. The quad geometry is built
-        // only once (later texture changes just swap the Ogre material), so
-        // the fix clamps the design size back to 200x200, re-runs the
-        // engine's own layout pass, and rebuilds the quad using the same
-        // beginUpdate/rebuild/end sequence the video-texture path uses
-        // (0x7D3C92..0x7D3CEA). Driven from the screen's per-frame update
-        // virtual (vftable 0x0089EBE0 slot 13, live-verified as the only
-        // per-frame slot), so only this screen ever dispatches the hook.
-        constexpr uintptr_t kMultiCreateUpdateVtblSlotAddr = 0x0089EC14;
-        constexpr uintptr_t kMultiCreateUpdateFnAddr = 0x0079CDA0;
-        constexpr uintptr_t kMultiMapComponentPtrAddr = 0x00945574;
-        constexpr uintptr_t kUiImageWidgetVftableAddr = 0x008A0B94;
-        constexpr uintptr_t kUiWidgetLayoutFnAddr = 0x007D14B0;
-        constexpr uintptr_t kUiImageRebuildGeometryFnAddr = 0x007D2E20;
-        constexpr float kMultiMapPreviewDesignSize = 200.0f;
-
-        using FnScreenUpdate = void(__thiscall*)(void*);
-        using FnWidgetLayout = void(__thiscall*)(void*, float, float, float, float);
-        using FnImageRebuildGeometry = void(__thiscall*)(void*);
-        using FnManualObjectBeginUpdate = void(__thiscall*)(void*, uint32_t);
-        using FnManualObjectEnd = void(__thiscall*)(void*);
-
-        static FnScreenUpdate g_BzrFn_MultiCreateUpdateOriginal = nullptr;
-        static bool g_MultiCreatePreviewHookInstalled = false;
-        static bool g_MultiCreatePreviewHookFailureLogged = false;
-        static bool g_MultiCreatePreviewClampLogged = false;
-
-        static bool ShouldEnableMapPreviewFix()
-        {
-            static int s_cached = -1;
-            if (s_cached < 0)
-            {
-                s_cached =
-                    (EnvFlagEnabled("OPENSHIM_DISABLE_MAP_PREVIEW_FIX") ||
-                     EnvFlagEnabled("BZR_DISABLE_MAP_PREVIEW_FIX")) ? 0 : 1;
-            }
-            return s_cached != 0;
-        }
-
-        static void ClampMultiCreateMapPreviewIfNeeded()
-        {
-            __try
-            {
-                uint8_t* component = *reinterpret_cast<uint8_t**>(kMultiMapComponentPtrAddr);
-                if (!component)
-                    return;
-                uint8_t* widget = *reinterpret_cast<uint8_t**>(component + 0x1C);
-                if (!widget ||
-                    *reinterpret_cast<uintptr_t*>(widget) != kUiImageWidgetVftableAddr)
-                    return;
-
-                float* designW = reinterpret_cast<float*>(widget + 0xF4);
-                float* designH = reinterpret_cast<float*>(widget + 0xF8);
-                if (*designW == kMultiMapPreviewDesignSize &&
-                    *designH == kMultiMapPreviewDesignSize)
-                    return;
-
-                if (!g_MultiCreatePreviewClampLogged)
-                {
-                    g_MultiCreatePreviewClampLogged = true;
-                    Log(L"[MAPPREVIEW] clamping oversized map preview design %.0fx%.0f -> %.0fx%.0f\n",
-                        static_cast<double>(*designW),
-                        static_cast<double>(*designH),
-                        static_cast<double>(kMultiMapPreviewDesignSize),
-                        static_cast<double>(kMultiMapPreviewDesignSize));
-                }
-
-                *designW = kMultiMapPreviewDesignSize;
-                *designH = kMultiMapPreviewDesignSize;
-                const float designX = *reinterpret_cast<float*>(widget + 0xEC);
-                const float designY = *reinterpret_cast<float*>(widget + 0xF0);
-                reinterpret_cast<FnWidgetLayout>(kUiWidgetLayoutFnAddr)(
-                    widget,
-                    designX,
-                    designY,
-                    kMultiMapPreviewDesignSize,
-                    kMultiMapPreviewDesignSize);
-
-                void* manualObject = *reinterpret_cast<void**>(widget + 0x120);
-                if (manualObject)
-                {
-                    uintptr_t* vtbl = *reinterpret_cast<uintptr_t**>(manualObject);
-                    reinterpret_cast<FnManualObjectBeginUpdate>(vtbl[0x118 / 4])(manualObject, 0);
-                    reinterpret_cast<FnImageRebuildGeometry>(kUiImageRebuildGeometryFnAddr)(widget);
-                    reinterpret_cast<FnManualObjectEnd>(vtbl[0x16C / 4])(manualObject);
-                }
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                if (!g_MultiCreatePreviewHookFailureLogged)
-                {
-                    g_MultiCreatePreviewHookFailureLogged = true;
-                    Log(L"[MAPPREVIEW] clamp faulted code=0x%08X; leaving preview untouched\n",
-                        static_cast<uint32_t>(GetExceptionCode()));
-                }
-            }
-        }
-
-        static void __fastcall MultiCreateUpdateHook(void* screen, void* /*unusedEdx*/)
-        {
-            if (g_BzrFn_MultiCreateUpdateOriginal)
-                g_BzrFn_MultiCreateUpdateOriginal(screen);
-            if (ShouldEnableMapPreviewFix())
-                ClampMultiCreateMapPreviewIfNeeded();
-        }
-
-        static void InstallMultiCreatePreviewFixIfPossible()
-        {
-            if (!ShouldEnableMapPreviewFix() || g_MultiCreatePreviewHookInstalled)
-                return;
-
-            __try
-            {
-                void* current = *reinterpret_cast<void**>(kMultiCreateUpdateVtblSlotAddr);
-                if (current == reinterpret_cast<void*>(MultiCreateUpdateHook))
-                {
-                    g_MultiCreatePreviewHookInstalled = true;
-                    return;
-                }
-                if (current != reinterpret_cast<void*>(kMultiCreateUpdateFnAddr))
-                {
-                    if (!g_MultiCreatePreviewHookFailureLogged)
-                    {
-                        Log(L"[MAPPREVIEW] update hook skipped: slot=0x%08X current=0x%08X expected=0x%08X\n",
-                            static_cast<uint32_t>(kMultiCreateUpdateVtblSlotAddr),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
-                            static_cast<uint32_t>(kMultiCreateUpdateFnAddr));
-                        g_MultiCreatePreviewHookFailureLogged = true;
-                    }
-                    return;
-                }
-
-                g_BzrFn_MultiCreateUpdateOriginal =
-                    reinterpret_cast<FnScreenUpdate>(current);
-                if (!WritePointerValue(
-                        kMultiCreateUpdateVtblSlotAddr,
-                        reinterpret_cast<void*>(MultiCreateUpdateHook)))
-                {
-                    return;
-                }
-                g_MultiCreatePreviewHookInstalled = true;
-                Log(L"[MAPPREVIEW] Installed multi-create map preview fix slot=0x%08X original=0x%08X\n",
-                    static_cast<uint32_t>(kMultiCreateUpdateVtblSlotAddr),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)));
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                if (!g_MultiCreatePreviewHookFailureLogged)
-                {
-                    Log(L"[MAPPREVIEW] update hook install fault code=0x%08X\n",
-                        static_cast<uint32_t>(GetExceptionCode()));
-                    g_MultiCreatePreviewHookFailureLogged = true;
-                }
-            }
         }
 
     }
