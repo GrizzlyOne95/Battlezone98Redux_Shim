@@ -7,6 +7,7 @@
 #include "terrain_proxy.h"
 #include "terrain_tile_blend.h"
 #include "bzr_options_ui.h"
+#include "remembered_mesh_bounds_table.h"
 #include "patches.h"
 #include "patcher.h"
 #include "fog_wake_feature.h"
@@ -34798,7 +34799,8 @@ namespace BZROpenShim
         InstallParticleTemplateDedupeHookIfPossible();
         InstallUiManualObjectDedupeHookIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
-        InstallEntityFrustumCullingIfEnabled();
+        // InstallEntityFrustumCullingIfEnabled runs further down, once its
+        // two switches have been read; here it saw both false and did nothing.
         InstallMissionTransitionSeamIfPossible();
         PinDirect3DModulesForShutdown();
         InstallMultiplayerFlagRenderHookIfPossible();
@@ -34955,6 +34957,11 @@ namespace BZROpenShim
         {
             g_EntityFrustumCullEnabled = false;
         }
+        // Both switches are known now. The earlier call in this function ran
+        // before they were computed and did nothing, leaving the deferred
+        // retry to install the feature; installing here keeps the retry as
+        // the OgreMain-not-yet-loaded fallback it is meant to be.
+        InstallEntityFrustumCullingIfEnabled();
         // Diagnostic/regression seam, not a gameplay policy. It exists so the
         // batch-failure fallback can be proven at runtime rather than argued
         // from the source; see RehydrateGenericChunkBatchSlotsToEntities().
