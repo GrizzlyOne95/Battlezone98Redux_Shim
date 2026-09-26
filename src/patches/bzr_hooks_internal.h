@@ -148,6 +148,8 @@ namespace BZROpenShim
         // callbacks then drive the per-world baseline resets.
         extern bool g_MissionSeamInstalled;
         inline constexpr size_t kGameObjectArenaSlotCapacity = 4096;
+        // Engine viewport height global (the scrap/pilot HUD and radar layout read it).
+        inline constexpr uintptr_t kScrapPilotHudViewportHeightAddr = 0x02CECEE4;
 
         // --- Headlights (headlights.cpp) -------------------------------------
         inline constexpr size_t kHeadlightObjectSlotCount = 4096;
@@ -197,6 +199,15 @@ namespace BZROpenShim
         void HeadlightNotifyMissionRunStateChanged(bool enteringSimulation);
         void InstallEmissionLightFixIfPossible();
         void VerifyExpectedOgreExportsIfPossible();
+
+        // --- Radar layout and size scale (radar_layout.cpp) ------------------
+        extern bool g_RadarLayoutHookInstalled;
+        extern float g_RadarSizeScale;
+        extern float g_RadarSizeScaleBaseline;
+        void InstallRadarLayoutHookIfPossible();
+        float ClampRadarSizeScaleSetting(float scale);
+        void RefreshRadarSizeScaleState();
+        void RevertRadarSizeScaleToBaseline();
 
         // --- BZRNet route, UDP port and nickname (bzrnet_settings.cpp) -------
         inline constexpr size_t kBzrNetNicknameCapacity = 0x80; // last byte kept NUL
