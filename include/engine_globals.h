@@ -29,5 +29,25 @@ namespace BZROpenShim
         // The current TRN path, a char array the terrain loader fills.
         // patches.json "CurrentTrnName".
         uintptr_t CurrentTrnName();
+
+        // The [Net] tunables the game reads from net.ini (FUN_0056fd20), and
+        // the bandwidth governor's current rate it seeds from MinBandwidth.
+        // patches.json "Net::<name>"; all eleven share one signature over the
+        // parser's key-read run and differ only in offset.
+        enum class NetTunable
+        {
+            MinBandwidth,
+            MaxBandwidth,
+            UpCount,
+            DownCount,
+            MaxPing,
+            MaxPingsLost,
+            AutoKickStart,
+            AutoKickPing,
+            AutoKickLoss,
+            AutoKickTime,
+            GovernorRate,
+        };
+        uintptr_t NetTunableAddress(NetTunable which);
     }
 }
