@@ -107,13 +107,6 @@ namespace BZROpenShim
         void(__thiscall*)(void* renderQueue, void* renderable, uint8_t queueGroup);
     using FnLegacyWorldUpdateRenderQueue = void(__thiscall*)(void* self, void* renderQueue);
     using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
-	using FnSprayBuildingSimulate = void(__thiscall*)(void* thisPtr, float dt);
-	using FnTugPostLoad = bool(__thiscall*)(void* thisPtr);
-	using FnRigProcessCleanUState2 = void(__thiscall*)(void* process);
-	using FnGameObjectHandleGetObj = void*(__cdecl*)(uint32_t handle);
-	using FnCraftUndeploy = void(__fastcall*)(void* craft);
-    using FnScriptProducerPredicate = bool(__cdecl*)(int handle);
-    using FnProducerPredicate = bool(__thiscall*)(void* thisPtr);
     // Redux's ArtilleryProcess::DoAttack is not the zero-stack-argument method
     // described by the legacy 1.5 PDB. At the machine ABI it consumes four
     // stack words (the first is the hidden/result destination) and returns with
@@ -123,12 +116,6 @@ namespace BZROpenShim
                                                       uint32_t arg1,
                                                       uint32_t arg2,
                                                       uint32_t arg3);
-    using FnAIUnitRemove = void(__cdecl*)(void* unitPtr);
-    using FnAIBuildConstructionEnd = void(__cdecl*)(int teamId, int constructType);
-    using FnAIBuildReservedAreaRemove = void(__cdecl*)(int teamId, int reservedArea);
-    using FnAISpentCreditRefund = void(__cdecl*)(int teamId, void* buildingPtr, void* unitPtr);
-    using FnUnitsSOrderStop = void(__cdecl*)(void* unitPtr);
-    using FnAIBuildUnassignedCCAdd = void(__cdecl*)(void* teamPtr, void* unitPtr);
     using FnChunkEffectCreateChunk = void* (__thiscall*)(void* thisPtr,
                                                          void* objectPtr,
                                                          const float* velocity,
@@ -335,10 +322,7 @@ namespace BZROpenShim
     FnMagnetMineSimulate g_BzrFn_MagnetMineSimulateOriginal = nullptr;
     FnProximityMineSimulate g_BzrFn_ProximityMineSimulateOriginal = nullptr;
     FnProximityMineSimulate g_BzrFn_MineSimulate = nullptr;
-	static FnSprayBuildingSimulate g_BzrFn_SprayBuildingSimulateOriginal = nullptr;
-	static FnTugPostLoad g_BzrFn_TugPostLoadOriginal = nullptr;
-	static FnRigProcessCleanUState2 g_BzrFn_RigProcessCleanUState2Original = nullptr;
-	static FnGameObjectHandleGetObj g_BzrFn_GameObjectHandleGetObj = nullptr;
+	FnSprayBuildingSimulate g_BzrFn_SprayBuildingSimulateOriginal = nullptr;
     FnGameObjectClassBuild g_BzrFn_SprayEmitterBuildOriginal = nullptr;
     FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate = nullptr;
     // Resolved by ResolveBzrHooks from scripts/patches.json
@@ -366,12 +350,12 @@ namespace BZROpenShim
     FnAiPathGetLength g_BzrFn_AiPathGetLength = nullptr;
     FnAiPathDelete g_BzrFn_AiPathDelete = nullptr;
     FnRecycleTaskDoGotoScrap g_BzrFn_RecycleTaskDoGotoScrap = nullptr;
-    static FnAIUnitRemove g_BzrFn_AIUnitRemove = nullptr;
-    static FnAIBuildConstructionEnd g_BzrFn_AIBuildConstructionEnd = nullptr;
-    static FnAIBuildReservedAreaRemove g_BzrFn_AIBuildReservedAreaRemove = nullptr;
-    static FnAISpentCreditRefund g_BzrFn_AISpentCreditRefund = nullptr;
-    static FnUnitsSOrderStop g_BzrFn_UnitsSOrderStop = nullptr;
-    static FnAIBuildUnassignedCCAdd g_BzrFn_AIBuildUnassignedCCAdd = nullptr;
+    FnAIUnitRemove g_BzrFn_AIUnitRemove = nullptr;
+    FnAIBuildConstructionEnd g_BzrFn_AIBuildConstructionEnd = nullptr;
+    FnAIBuildReservedAreaRemove g_BzrFn_AIBuildReservedAreaRemove = nullptr;
+    FnAISpentCreditRefund g_BzrFn_AISpentCreditRefund = nullptr;
+    FnUnitsSOrderStop g_BzrFn_UnitsSOrderStop = nullptr;
+    FnAIBuildUnassignedCCAdd g_BzrFn_AIBuildUnassignedCCAdd = nullptr;
     static FnChunkEffectCreateChunk g_BzrFn_ChunkEffectCreateChunk = nullptr;
     static FnChunkEffectCreateChunklet g_BzrFn_ChunkEffectCreateChunklet = nullptr;
     static FnChunkEffectFragmentObject g_BzrFn_ChunkEffectPartialFragment = nullptr;
@@ -421,16 +405,6 @@ namespace BZROpenShim
         static_assert(kObj76GameObjectOffset == ObjectLayout::kObj76GameObject,
                       "obj76 back-pointer disagrees with bzr_object_layout.h");
         constexpr size_t kMagnetMineSoundHandleOffset = 0x230;
-        // ScriptUtils::CanBuild/IsBusy accept the four legacy producer
-        // signatures but omit the base Producer signature (PROD). The two
-        // functions are adjacent in settled Redux 2.2.301 and are identical
-        // on GOG and the settled Steam image.
-        constexpr uintptr_t kGogScriptCanBuildAddr = 0x005CB4E0;
-        constexpr uintptr_t kGogScriptIsBusyAddr = 0x005CB550;
-        constexpr uintptr_t kGogProducerCanBuildAddr = 0x004738B0;
-        constexpr uintptr_t kGogProducerIsBusyAddr = 0x004723D0;
-        constexpr uint32_t kProducerClassSignature = 0x50524F44u; // 'PROD'
-        constexpr size_t kScriptProducerPredicateDetourLen = 9;
         // Mission briefing and mission archive callbacks use the unguarded
         // scrolling methods. Redirect just those four calls to the guarded
         // variants already used by the lobby/chat UI so the final partial page
@@ -479,14 +453,6 @@ namespace BZROpenShim
         // be produced -- "UI" is the stock chrome material, so an entry that
         // falls back to it shows button art in the thumbnail slot.
         static const char kUiMaterialSubstituteName[] = "UI";
-        // Splinter (spraybomb) undead bug (#46). SprayBuilding::Simulate keeps
-        // spinning its payload fire loop after the deployed splinter is damaged
-        // below zero because it overrides Building::Simulate without preserving
-        // the base destroyed/remove gate. GOG addresses re-derived via RTTI on
-        // the live 2.2.301 exe (advisory-PDB VA 0x005242F0 had drifted): the
-        // SprayBuilding vtable is 0x008881EC and Simulate is slot 15.
-        constexpr uintptr_t kGogSprayBuildingSimulateAddr = 0x005DA6E0;
-		constexpr uintptr_t kSprayBuildingSimulateVtableSlotAddr = 0x00888228;
         constexpr uintptr_t kGogDayWreckerCtorAddr = 0x004B0420;
         constexpr uintptr_t kDayWreckerSimulateVtableSlotAddr = 0x00878544;
         constexpr uintptr_t kDayWreckerExplodeVtableSlotAddr = 0x00878588;
@@ -496,54 +462,7 @@ namespace BZROpenShim
         constexpr uintptr_t kGogDistributedCreateAddr = 0x004B9350;
         constexpr uintptr_t kGogOrdnanceBundledDispatchAddr = 0x00570500;
         constexpr uintptr_t kGogOrdnanceRemoveCheckAddr = 0x00583DC0;
-		// Tug::PostLoad restores the cargo relationship but does not reconcile a
-		// newly created/loaded tug's deployment state.  With cargo attached and
-		// state==UNDEPLOYED, a later Deploy command starts the *load* transition
-		// instead of the drop transition.  This is the native equivalent of the
-		// long-standing Lua workaround `if HasCargo(tug) then Deploy(tug) end`.
-		// Current Redux 2.2.301 Tug primary vtable: 0x00889008; PostLoad is slot 22.
-		constexpr uintptr_t kGogTugPostLoadAddr = 0x005EC430;
-		constexpr uintptr_t kTugVtableAddr = 0x00889008;
-		constexpr uintptr_t kTugPostLoadVtableSlotAddr = 0x00889060;
-		constexpr size_t kTugDeployStateOffset = 0x228;
-		constexpr size_t kTugControlBlockOffset = 0x230;
-		constexpr size_t kTugControlDeployOffset = 0xE0;
-		constexpr size_t kTugCargoOffset = 0x300;
-		// Constructor recycle leaves the losing rig permanently deployed. Two
-		// Constructors ordered onto the same building each run their own unbuild
-		// countdown; the first to expire deletes the building, and the other is
-		// left deployed for the rest of the mission, accepting orders it can never
-		// act on.
-		//
-		// The only undeploy on the recycle path is in UnBuild::DoNear's completion
-		// branch (0x0049EC50), reached when ConstructionRig::IsUnbuilding goes
-		// false. A rig whose target died first never reaches it: the task reports
-		// itself done on the next AI tick, RigProcess leaves the unbuild state, and
-		// RigProcess::CleanUState2 (0x0049EE10) destroys the task before DoNear is
-		// ticked again. CleanUState2 calls ConstructionRig::CancelUnbuild
-		// (0x0049CDB0), so the unbuild handle is cleared correctly -- but nothing
-		// undeploys the craft.
-		//
-		// The detour asks for the undeploy that the completion branch would have
-		// asked for, and only when the recycle target no longer resolves, so every
-		// other way of leaving this state stays stock.
-		//
-		// Reproduced with controls by reverse_engineering/run_lcroad_recycle.ps1.
-		constexpr uintptr_t kGogRigProcessCleanUState2Addr = 0x0049EE10;
-		constexpr uintptr_t kGogGameObjectHandleGetObjAddr = 0x00462630;
-		constexpr size_t kRigProcessCleanUState2DetourLen = 6;
-		constexpr size_t kRigProcessCraftOffset = 0x34;
-		constexpr size_t kRigProcessUnbuildTargetHandleOffset = 0x3C;
-		// Craft deploy state, same field as kCraftDeployStateOffset further down
-		// this file; declared here because this fix sits above that declaration.
-		constexpr size_t kCraftDeployStateOffsetEarly = 0x228;
 		constexpr uint32_t kCraftDeployStateUndeployed = 0;
-		constexpr uint32_t kCraftDeployStateDeploying = 1;
-		constexpr uint32_t kCraftDeployStateDeployed = 2;
-		// Craft::Undeploy, vtable byte offset 0x64 (index 25). Confirmed live: the
-		// slot resolves to 0x004AE330, which asks the control block for an undeploy
-		// only while the craft is deployed (2) or still deploying (1).
-		constexpr size_t kCraftUndeployVtableIndex = 0x64 / sizeof(void*);
 		// Earthquake/dayquake save replay bug (#57). Quake ordnance (QuakeBlast,
 		// the "dayquake"/quake-weapon effects) drives the global EarthQuake
 		// object: Init starts it, Simulate decays it, Cleanup stops it.
@@ -601,26 +520,6 @@ namespace BZROpenShim
 		constexpr uintptr_t kGogCockpitFovBitsAddr = 0x0087256C;
 		constexpr uintptr_t kGogCockpitZoomBitsAddr = 0x008A2604;
 		constexpr size_t kGogCameraRecordDwords = 0x76;
-		// APC::Simulate checks a selected target before its existing nearby-enemy
-		// scan.  If that target is allied, both relation failures jump straight to
-		// the "cannot deploy" result.  Retarget those two stock branches to the
-		// existing no-target scan so a selected ally does not mask nearby enemies.
-		constexpr uintptr_t kGogApcTargetActualTeamRejectBranchAddr = 0x004700E6;
-		constexpr uintptr_t kGogApcTargetPerceivedTeamRejectBranchAddr = 0x00470108;
-		constexpr uint8_t kGogApcTargetActualTeamRejectOriginal[6] =
-			{ 0x0F, 0x84, 0xA5, 0x00, 0x00, 0x00 };
-		constexpr uint8_t kGogApcTargetActualTeamRejectPatched[6] =
-			{ 0x0F, 0x84, 0xC0, 0x00, 0x00, 0x00 };
-		constexpr uint8_t kGogApcTargetPerceivedTeamRejectOriginal[6] =
-			{ 0x0F, 0x84, 0x83, 0x00, 0x00, 0x00 };
-		constexpr uint8_t kGogApcTargetPerceivedTeamRejectPatched[6] =
-			{ 0x0F, 0x84, 0x9E, 0x00, 0x00, 0x00 };
-        // Building::Simulate reads flags at [[this+0xF4]+0x14] and early-outs on
-        // destroyed (0x1000000) / marked-for-remove (0x200) by dispatching the
-        // stock explode/remove virtuals.
-        constexpr size_t kBuildingStateBlockOffset = 0xF4;
-        constexpr size_t kBuildingStateFlagsOffset = 0x14;
-        constexpr uint32_t kBuildingDestroyedOrRemoveMask = 0x01000200u;
         constexpr bool kSplinterUndeadFixEnabledDefault = true;
         constexpr long kSplinterUndeadTraceBudgetDefault = 32;
         // Redux's FlagDisplay inherits a 0x28-byte GameFeature base. The old
@@ -686,8 +585,6 @@ namespace BZROpenShim
         constexpr uintptr_t kGogChunkEffectFullFragmentAddr = 0x00492640;
         constexpr size_t kChunkEffectFragmentDetourLen = 6;
         constexpr ULONGLONG kSteamChunkCreateHookSettleDelayMs = 15000;
-        constexpr uintptr_t kGogAIUnitRemoveEntryAddr = 0x0068FC60;
-        constexpr size_t kAIUnitRemoveDetourLen = 11;
         constexpr uintptr_t kGogAIBuildConstructionEndAddr = 0x006905D0;
         constexpr uintptr_t kGogAIBuildReservedAreaRemoveAddr = 0x00690920;
         constexpr uintptr_t kGogAISpentCreditRefundAddr = 0x00690020;
@@ -698,19 +595,6 @@ namespace BZROpenShim
         constexpr uintptr_t kGogMapKeyNameFromCodeAddr = 0x00434F60;
         constexpr uintptr_t kGogReloadGameKeyMapAddr = 0x00620980;
         constexpr uintptr_t kGogUiOverlayCtorAddr = 0x007D1CC0;
-        constexpr uintptr_t kAiGameInitialisedAddr = 0x00930F08;
-        constexpr uintptr_t kAiTeamTableAddr = 0x00920F04;
-        constexpr uintptr_t kAiTeamDataBaseAddr = 0x02CE9B18;
-        constexpr size_t kAiTeamDataStride = 0x1E0;
-        constexpr size_t kUnitTypeOffset = 0x08;
-        constexpr size_t kUnitTeamOffset = 0x10;
-        constexpr size_t kUnitTypeAbilitiesOffset = 0x70;
-        constexpr size_t kUnitAiConstructTypeOffset = 0x30;
-        constexpr size_t kUnitAiConstructCostOffset = 0x34;
-        constexpr size_t kUnitAiConstructingOffset = 0x38;
-        constexpr size_t kUnitAiReservedAreaOffset = 0x3C;
-        constexpr size_t kUnitAiAccountOffset = 0x40;
-        constexpr uint32_t kConstructorAbilityMask = 0x2;
         constexpr bool kConstructorRemoteBuildFixEnabledDefault = true;
         constexpr long kConstructorRemoteBuildTraceBudgetDefault = 32;
 
@@ -749,16 +633,6 @@ namespace BZROpenShim
             JumpSnipeProbeSnapshot last = {};
         };
 
-        struct ConstructorCleanupSnapshot
-        {
-            int teamId = 0;
-            void* teamPtr = nullptr;
-            uint32_t constructType = 0;
-            uint32_t constructCost = 0;
-            uint32_t constructing = 0;
-            uint32_t reservedArea = 0;
-            uint32_t account = 0;
-        };
 
         struct ChunkObjectLinkProbe;
         struct ChunkCreateSourceTreeProbe;
@@ -1127,8 +1001,6 @@ namespace BZROpenShim
         static bool g_ArtilleryDoAttackHookInstalled = false;
         bool g_RetargetPeriodHooksInstalled = false;
         volatile long g_AttackRevealTraceBudget = 64;
-        static InlineDetour32 g_AIUnitRemoveDetour = {};
-        static InlineDetour32 g_RigProcessCleanUState2Detour = {};
         static InlineDetour32 g_DynamicGeometryPrepareDetour = {};
         static InlineDetour32 g_DynamicGeometrySetSquaredViewDepthDetour = {};
         static bool g_DynamicAlphaDepthBatchingEnabled = true;
@@ -1162,20 +1034,20 @@ namespace BZROpenShim
         static bool g_ChunkEffectCreateHooksMismatchLogged = false;
         static ULONGLONG g_ChunkEffectCreateHooksReadyTick = 0;
         bool g_ShieldTowerSimulateHookInstalled = false;
-        static bool g_ConstructorRemoteBuildFixInstalled = false;
-        static bool g_ConstructorRemoteBuildFixMismatchLogged = false;
+        bool g_ConstructorRemoteBuildFixInstalled = false;
+        bool g_ConstructorRemoteBuildFixMismatchLogged = false;
         bool g_MagnetMineSimulateHookInstalled = false;
         bool g_ProximityMineSimulateHookInstalled = false;
-        static InlineDetour32 g_ScriptCanBuildDetour = {};
-        static InlineDetour32 g_ScriptIsBusyDetour = {};
-        static FnScriptProducerPredicate g_BzrFn_ScriptCanBuildOriginal = nullptr;
-        static FnScriptProducerPredicate g_BzrFn_ScriptIsBusyOriginal = nullptr;
-        static bool g_ProducerScriptPredicateHooksInstalled = false;
+        InlineDetour32 g_ScriptCanBuildDetour = {};
+        InlineDetour32 g_ScriptIsBusyDetour = {};
+        FnScriptProducerPredicate g_BzrFn_ScriptCanBuildOriginal = nullptr;
+        FnScriptProducerPredicate g_BzrFn_ScriptIsBusyOriginal = nullptr;
+        bool g_ProducerScriptPredicateHooksInstalled = false;
         // [Fixes] ProducerScriptPredicates. Extends the script-facing CanBuild /
         // IsBusy predicates to base producers. Default on; switchable because it
         // changes what mission Lua observes, in single-player and multiplayer
         // alike, and it had no opt-out at all before.
-        static bool g_ProducerScriptPredicateHooksEnabled = true;
+        bool g_ProducerScriptPredicateHooksEnabled = true;
         static bool g_BriefingScrollFixInstalled = false;
         static bool g_BriefingScrollFixEnabled = true;
         static bool g_MultiRenderCountClampInstalled = false;
@@ -1201,20 +1073,20 @@ namespace BZROpenShim
         static bool g_CinematicSatelliteZoomFixInstalled = false;
         static bool g_CinematicSatelliteZoomFixEnabled = true;
         static volatile long g_CinematicSatelliteZoomLogBudget = 8;
-		static bool g_SprayBuildingSimulateHookInstalled = false;
-		static bool g_TugCargoPostLoadFixInstalled = false;
-		static bool g_TugCargoPostLoadFixEnabled = true;
-		static volatile long g_TugCargoPostLoadLogBudget = 16;
-		static bool g_ApcAlliedTargetDeployFixInstalled = false;
-		static bool g_ApcAlliedTargetDeployFixEnabled = true;
-		static bool g_ConstructorRecycleStaleTargetFixInstalled = false;
-		static bool g_ConstructorRecycleStaleTargetFixEnabled = true;
-		static bool g_ConstructorRecycleStaleTargetMismatchLogged = false;
-		static volatile long g_ConstructorRecycleStaleTargetLogBudget = 16;
-        static bool g_SplinterUndeadFixEnabled = kSplinterUndeadFixEnabledDefault;
-        static volatile long g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
-        static bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
-        static volatile long g_ConstructorRemoteBuildTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
+		bool g_SprayBuildingSimulateHookInstalled = false;
+		bool g_TugCargoPostLoadFixInstalled = false;
+		bool g_TugCargoPostLoadFixEnabled = true;
+		volatile long g_TugCargoPostLoadLogBudget = 16;
+		bool g_ApcAlliedTargetDeployFixInstalled = false;
+		bool g_ApcAlliedTargetDeployFixEnabled = true;
+		bool g_ConstructorRecycleStaleTargetFixInstalled = false;
+		bool g_ConstructorRecycleStaleTargetFixEnabled = true;
+		bool g_ConstructorRecycleStaleTargetMismatchLogged = false;
+		volatile long g_ConstructorRecycleStaleTargetLogBudget = 16;
+        bool g_SplinterUndeadFixEnabled = kSplinterUndeadFixEnabledDefault;
+        volatile long g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
+        bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
+        volatile long g_ConstructorRemoteBuildTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
 
         // MPAUTH diagnostic traces (Redux receiver replay). Opt-in, cheap, no gameplay change.
         bool g_MpauthEnabled = false;
@@ -1233,11 +1105,10 @@ namespace BZROpenShim
         // by the feature registry, and it is what each hook body tests. Install
         // is deliberately NOT gated on Active: the hook has to already be in
         // place when a mission goes from single-player to a network game.
-        static bool g_TugCargoPostLoadFixActive = true;
-        static bool g_ConstructorRecycleStaleTargetFixActive = true;
-        static bool g_ApcAlliedTargetDeployPatchActive = false;
-        static bool g_SplinterUndeadFixActive = kSplinterUndeadFixEnabledDefault;
-        static bool g_ConstructorRemoteBuildFixActive = kConstructorRemoteBuildFixEnabledDefault;
+        bool g_TugCargoPostLoadFixActive = true;
+        bool g_ConstructorRecycleStaleTargetFixActive = true;
+        bool g_SplinterUndeadFixActive = kSplinterUndeadFixEnabledDefault;
+        bool g_ConstructorRemoteBuildFixActive = kConstructorRemoteBuildFixEnabledDefault;
         std::unordered_map<uintptr_t, RetargetPeriodState> g_RetargetPeriodStateByProcess = {};
         std::unordered_map<uintptr_t, ScrapPathFailureState> g_ScrapPathFailuresByObject = {};
         std::unordered_map<uintptr_t, ScrapRetargetState> g_ScrapRetargetStateByTask = {};
@@ -7401,7 +7272,6 @@ namespace BZROpenShim
                 g_ConstructorRemoteBuildFixEnabled && IsSinglePlayerSession();
         }
 
-        static void RefreshApcAlliedTargetDeployFixState();
 
         static void InitializeGlobalImprovementConfig()
         {
@@ -8395,157 +8265,6 @@ namespace BZROpenShim
 
         // SEH leaves used by AttackTaskDoStateTuningHook. Keep all checked
         // STL iterators/RAII in the caller so Debug builds do not hit C2712.
-        static bool TryGetGameObjectClassSignature(void* objectPtr, uint32_t& outSignature)
-        {
-            outSignature = 0;
-            if (!objectPtr)
-                return false;
-
-            using FnGetObjectClass = void* (__thiscall*)(void* classInterface);
-            __try
-            {
-                void* classInterface =
-                    reinterpret_cast<uint8_t*>(objectPtr) + 0x18;
-                void** vtable = *reinterpret_cast<void***>(classInterface);
-                if (!vtable || !vtable[0])
-                    return false;
-
-                void* objectClass =
-                    reinterpret_cast<FnGetObjectClass>(vtable[0])(classInterface);
-                if (!objectClass)
-                    return false;
-
-                outSignature = *reinterpret_cast<const uint32_t*>(
-                    reinterpret_cast<const uint8_t*>(objectClass) + 0x14);
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
-        static bool CallProducerPredicateForBaseProducer(int handle,
-                                                         FnProducerPredicate predicate)
-        {
-            if (!predicate)
-                return false;
-
-            void* objectPtr = GameObjectFromHandleGog(handle);
-            uint32_t signature = 0;
-            if (!objectPtr ||
-                !TryGetGameObjectClassSignature(objectPtr, signature) ||
-                signature != kProducerClassSignature)
-            {
-                return false;
-            }
-
-            __try
-            {
-                return predicate(objectPtr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
-        static bool __cdecl ScriptCanBuildProducerHook(int handle)
-        {
-            if (g_BzrFn_ScriptCanBuildOriginal &&
-                g_BzrFn_ScriptCanBuildOriginal(handle))
-            {
-                return true;
-            }
-
-            return CallProducerPredicateForBaseProducer(
-                handle,
-                reinterpret_cast<FnProducerPredicate>(kGogProducerCanBuildAddr));
-        }
-
-        static bool __cdecl ScriptIsBusyProducerHook(int handle)
-        {
-            if (g_BzrFn_ScriptIsBusyOriginal &&
-                g_BzrFn_ScriptIsBusyOriginal(handle))
-            {
-                return true;
-            }
-
-            return CallProducerPredicateForBaseProducer(
-                handle,
-                reinterpret_cast<FnProducerPredicate>(kGogProducerIsBusyAddr));
-        }
-
-        static void InstallProducerScriptPredicateHooksIfPossible()
-        {
-            if (!g_ProducerScriptPredicateHooksEnabled)
-                return;
-
-            if (g_ProducerScriptPredicateHooksInstalled)
-                return;
-
-            static const uint8_t kExpectedPredicateEntry[
-                kScriptProducerPredicateDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x8B, 0x45, 0x08
-            };
-            static const uint8_t kExpectedCanBuildMethod[9] =
-            {
-                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x89, 0x4D, 0xFC
-            };
-            static const uint8_t kExpectedIsBusyMethod[7] =
-            {
-                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
-            };
-
-            if (!ExpectedBytesMatchAt(kGogProducerCanBuildAddr,
-                                      kExpectedCanBuildMethod,
-                                      sizeof(kExpectedCanBuildMethod)) ||
-                !ExpectedBytesMatchAt(kGogProducerIsBusyAddr,
-                                      kExpectedIsBusyMethod,
-                                      sizeof(kExpectedIsBusyMethod)))
-            {
-                return;
-            }
-
-            if (!g_ScriptCanBuildDetour.trampoline &&
-                !InstallInlineDetour32(g_ScriptCanBuildDetour,
-                                       kGogScriptCanBuildAddr,
-                                       reinterpret_cast<void*>(ScriptCanBuildProducerHook),
-                                       kScriptProducerPredicateDetourLen,
-                                       kExpectedPredicateEntry,
-                                       sizeof(kExpectedPredicateEntry)))
-            {
-                return;
-            }
-            g_BzrFn_ScriptCanBuildOriginal =
-                reinterpret_cast<FnScriptProducerPredicate>(
-                    g_ScriptCanBuildDetour.trampoline);
-
-            if (!g_ScriptIsBusyDetour.trampoline &&
-                !InstallInlineDetour32(g_ScriptIsBusyDetour,
-                                       kGogScriptIsBusyAddr,
-                                       reinterpret_cast<void*>(ScriptIsBusyProducerHook),
-                                       kScriptProducerPredicateDetourLen,
-                                       kExpectedPredicateEntry,
-                                       sizeof(kExpectedPredicateEntry)))
-            {
-                return;
-            }
-            g_BzrFn_ScriptIsBusyOriginal =
-                reinterpret_cast<FnScriptProducerPredicate>(
-                    g_ScriptIsBusyDetour.trampoline);
-
-            g_ProducerScriptPredicateHooksInstalled =
-                g_BzrFn_ScriptCanBuildOriginal && g_BzrFn_ScriptIsBusyOriginal;
-            if (g_ProducerScriptPredicateHooksInstalled)
-            {
-                Log(L"[PRODSCRIPT] Added PROD support to ScriptUtils CanBuild/IsBusy canBuild=0x%08X isBusy=0x%08X\n",
-                    static_cast<uint32_t>(kGogScriptCanBuildAddr),
-                    static_cast<uint32_t>(kGogScriptIsBusyAddr));
-            }
-        }
-
         bool RedirectCallTarget(uintptr_t callAddress,
                                        uintptr_t originalTarget,
                                        uintptr_t desiredTarget)
@@ -9279,728 +8998,6 @@ namespace BZROpenShim
                 Log(L"[CINECAM] Cinematic zoom fix call redirect incomplete mission=%hs script=%hs\n",
                     missionCall ? "ok" : "failed",
                     scriptCall ? "ok" : "failed");
-            }
-        }
-
-        static bool ShouldTraceSplinterUndeadFix()
-        {
-            return EnvFlagEnabled("OPENSHIM_TRACE_SPLINTER_UNDEAD") ||
-                   EnvFlagEnabled("BZR_TRACE_SPLINTER_UNDEAD");
-        }
-
-        // Splinter (spraybomb) undead fix (#46): a deployed splinter that has
-        // been damaged below zero is still marked dead by Building::DamageAlloc
-        // (flags |= 0x1000200), but SprayBuilding::Simulate overrides
-        // Building::Simulate without preserving the base destroyed/remove gate,
-        // so it keeps spawning payload ordnance until ammo depletion. Restore the
-        // missing gate: when the object is destroyed/marked-for-remove, route the
-        // frame through stock Building::Simulate (which dispatches the explode /
-        // remove virtuals and returns) instead of the payload fire loop.
-        static void RunSprayBuildingSimulateWithDeadGate(void* sprayPtr, float dt)
-        {
-            if (!sprayPtr || !g_BzrFn_SprayBuildingSimulateOriginal)
-            {
-                if (g_BzrFn_SprayBuildingSimulateOriginal)
-                    g_BzrFn_SprayBuildingSimulateOriginal(sprayPtr, dt);
-                return;
-            }
-
-            bool routeToBase = false;
-            if (g_SplinterUndeadFixActive && g_BzrFn_BuildingSimulate)
-            {
-                __try
-                {
-                    auto* stateBlock = *reinterpret_cast<void* const*>(
-                        reinterpret_cast<const uint8_t*>(sprayPtr) + kBuildingStateBlockOffset);
-                    if (stateBlock)
-                    {
-                        const uint32_t flags = *reinterpret_cast<const uint32_t*>(
-                            reinterpret_cast<const uint8_t*>(stateBlock) + kBuildingStateFlagsOffset);
-                        routeToBase = (flags & kBuildingDestroyedOrRemoveMask) != 0;
-                    }
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    routeToBase = false;
-                }
-            }
-
-            if (routeToBase)
-            {
-                if (ShouldTraceSplinterUndeadFix())
-                {
-                    const long remaining = InterlockedDecrement(&g_SplinterUndeadTraceBudget);
-                    if (remaining >= 0)
-                        Log(L"[SPLINTER] Dead splinter routed to base Building::Simulate remaining=%ld unit=0x%08X\n",
-                            remaining,
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sprayPtr)));
-                }
-                g_BzrFn_BuildingSimulate(sprayPtr, dt);
-                return;
-            }
-
-            g_BzrFn_SprayBuildingSimulateOriginal(sprayPtr, dt);
-        }
-
-        void __fastcall SprayBuildingSimulateUndeadFixHook(void* thisPtr, void* /*edx*/, float dt)
-        {
-            RunSprayBuildingSimulateWithDeadGate(thisPtr, dt);
-        }
-
-		static void InstallSplinterUndeadFixIfPossible()
-        {
-            if (!g_SplinterUndeadFixEnabled)
-                return;
-            if (g_SprayBuildingSimulateHookInstalled)
-                return;
-
-            if (!g_BzrFn_SprayBuildingSimulateOriginal)
-                g_BzrFn_SprayBuildingSimulateOriginal =
-                    reinterpret_cast<FnSprayBuildingSimulate>(kGogSprayBuildingSimulateAddr);
-            if (!g_BzrFn_BuildingSimulate)
-                g_BzrFn_BuildingSimulate =
-                    reinterpret_cast<FnShieldTowerSimulate>(kGogBuildingSimulateAddr);
-
-            void* current = nullptr;
-            __try
-            {
-                current = *reinterpret_cast<void**>(kSprayBuildingSimulateVtableSlotAddr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                current = nullptr;
-            }
-
-            if (current != reinterpret_cast<void*>(SprayBuildingSimulateUndeadFixHook) &&
-                current != reinterpret_cast<void*>(kGogSprayBuildingSimulateAddr))
-            {
-                Log(L"[SPLINTER] SprayBuilding::Simulate vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
-                    static_cast<uint32_t>(kSprayBuildingSimulateVtableSlotAddr),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
-                    static_cast<uint32_t>(kGogSprayBuildingSimulateAddr));
-                return;
-            }
-
-            const bool patched =
-                (current == reinterpret_cast<void*>(SprayBuildingSimulateUndeadFixHook)) ||
-                WritePointerValue(kSprayBuildingSimulateVtableSlotAddr,
-                                  reinterpret_cast<void*>(SprayBuildingSimulateUndeadFixHook));
-            g_SprayBuildingSimulateHookInstalled =
-                patched &&
-                g_BzrFn_SprayBuildingSimulateOriginal &&
-                g_BzrFn_BuildingSimulate;
-
-            if (g_SprayBuildingSimulateHookInstalled)
-            {
-                Log(L"[SPLINTER] Installed splinter undead fix slot=0x%08X original=0x%08X base=0x%08X trace=%hs\n",
-                    static_cast<uint32_t>(kSprayBuildingSimulateVtableSlotAddr),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_SprayBuildingSimulateOriginal)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_BuildingSimulate)),
-                    BoolText(ShouldTraceSplinterUndeadFix()));
-            }
-		}
-
-		bool __fastcall TugPostLoadCargoDeployFixHook(void* thisPtr, void* /*edx*/)
-		{
-			const bool loaded = g_BzrFn_TugPostLoadOriginal
-				? g_BzrFn_TugPostLoadOriginal(thisPtr)
-				: false;
-
-			if (!loaded || !g_TugCargoPostLoadFixActive || !thisPtr)
-				return loaded;
-
-			bool armedDeploy = false;
-			__try
-			{
-				auto* tug = static_cast<uint8_t*>(thisPtr);
-				const bool hasCargo =
-					*reinterpret_cast<void**>(tug + kTugCargoOffset) != nullptr;
-				const uint32_t state =
-					*reinterpret_cast<const uint32_t*>(tug + kTugDeployStateOffset);
-				auto* control =
-					*reinterpret_cast<uint8_t**>(tug + kTugControlBlockOffset);
-
-				// Craft::Deploy only arms control.deploy while UNDEPLOYED (state 0).
-				// Let Tug::Simulate perform the stock animation and state transition.
-				if (hasCargo && state == 0 && control)
-				{
-					*reinterpret_cast<uint32_t*>(control + kTugControlDeployOffset) = 1;
-					armedDeploy = true;
-				}
-			}
-			__except (EXCEPTION_EXECUTE_HANDLER)
-			{
-				armedDeploy = false;
-			}
-
-			if (armedDeploy)
-			{
-				const long remaining = InterlockedDecrement(&g_TugCargoPostLoadLogBudget);
-				if (remaining >= 0)
-					Log(L"[TUGCARGO] Armed stock deploy transition after cargo PostLoad remaining=%ld tug=0x%08X\n",
-						remaining,
-						static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)));
-			}
-
-			return loaded;
-		}
-
-		// RigProcess::CleanUState2. Runs whenever the constructor leaves its
-		// unbuild state. Stock cancels the unbuild here but never undeploys, and
-		// the only undeploy on the recycle path lives in UnBuild::DoNear's
-		// completion branch -- which a rig whose target died first never reaches,
-		// because this teardown removes its task before it is ticked again.
-		//
-		// Scoped deliberately to the one case that is broken: the recycle target
-		// no longer resolves. Every other way of leaving this state -- finishing
-		// the unbuild, or the player replacing the order -- is left stock.
-		void __fastcall RigProcessCleanUState2FixHook(void* process)
-		{
-			bool undeployed = false;
-			uint32_t targetHandle = 0;
-			void* rig = nullptr;
-
-			if (g_ConstructorRecycleStaleTargetFixActive && process &&
-				g_BzrFn_GameObjectHandleGetObj)
-			{
-				__try
-				{
-					auto* bytes = static_cast<uint8_t*>(process);
-					rig = *reinterpret_cast<void**>(bytes + kRigProcessCraftOffset);
-					targetHandle = *reinterpret_cast<uint32_t*>(
-						bytes + kRigProcessUnbuildTargetHandleOffset);
-
-					if (rig && targetHandle != 0 &&
-						g_BzrFn_GameObjectHandleGetObj(targetHandle) == nullptr)
-					{
-						const uint32_t deployState = *reinterpret_cast<uint32_t*>(
-							static_cast<uint8_t*>(rig) + kCraftDeployStateOffsetEarly);
-
-						// Only a rig that is deployed or still deploying has an
-						// undeploy to ask for. One already undeploying (3) or
-						// undeployed (0) is left alone, so the rig that finished
-						// its unbuild normally is never touched.
-						if (deployState == kCraftDeployStateDeployed ||
-							deployState == kCraftDeployStateDeploying)
-						{
-							auto** vtable = *reinterpret_cast<void***>(rig);
-							auto undeploy = reinterpret_cast<FnCraftUndeploy>(
-								vtable[kCraftUndeployVtableIndex]);
-							undeploy(rig);
-							undeployed = true;
-						}
-					}
-				}
-				__except (EXCEPTION_EXECUTE_HANDLER)
-				{
-					undeployed = false;
-				}
-			}
-
-			if (g_BzrFn_RigProcessCleanUState2Original)
-				g_BzrFn_RigProcessCleanUState2Original(process);
-
-			if (undeployed)
-			{
-				const long remaining =
-					InterlockedDecrement(&g_ConstructorRecycleStaleTargetLogBudget);
-				if (remaining >= 0)
-					Log(L"[RIGRECYCLE] Undeployed constructor whose recycle target vanished remaining=%ld process=0x%08X rig=0x%08X handle=0x%08X\n",
-						remaining,
-						static_cast<uint32_t>(reinterpret_cast<uintptr_t>(process)),
-						static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rig)),
-						targetHandle);
-			}
-		}
-
-		static void InstallConstructorRecycleStaleTargetFixIfPossible()
-		{
-			if (!g_ConstructorRecycleStaleTargetFixEnabled ||
-				g_ConstructorRecycleStaleTargetFixInstalled)
-				return;
-
-			// Guard on instructions, not on the operands they carry. The entry
-			// prologue alone is shared by thousands of functions, so identity
-			// comes from the body: the load of the craft at +0x34 feeding the
-			// call to ConstructionRig::CancelUnbuild, and the load of the task
-			// pointer at +0x38 that this function exists to destroy.
-			static const uint8_t kExpectedEntryBytes[kRigProcessCleanUState2DetourLen] =
-			{
-				0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10
-			};
-			// mov ecx,[eax+0x34] ; call ConstructionRig::CancelUnbuild (0x0049CDB0)
-			static const uint8_t kExpectedCancelUnbuildCallBytes[] =
-			{
-				0x8B, 0x48, 0x34, 0xE8, 0x8C, 0xDF, 0xFF, 0xFF
-			};
-			// mov edx,[ecx+0x38]  -- the UnBuild task about to be deleted
-			static const uint8_t kExpectedTaskLoadBytes[] =
-			{
-				0x8B, 0x51, 0x38
-			};
-			// GameObjectHandle::GetObj prologue: push ebp; mov ebp,esp; push ecx;
-			// mov eax,[ebp+8]; push eax  -- __cdecl, one stack argument.
-			static const uint8_t kExpectedGetObjBytes[] =
-			{
-				0x55, 0x8B, 0xEC, 0x51, 0x8B, 0x45, 0x08, 0x50
-			};
-
-			const uintptr_t entry = kGogRigProcessCleanUState2Addr;
-			if (!ExpectedBytesMatchAt(entry, kExpectedEntryBytes, sizeof(kExpectedEntryBytes)) ||
-				!ExpectedBytesMatchAt(entry + 0x0C, kExpectedCancelUnbuildCallBytes, sizeof(kExpectedCancelUnbuildCallBytes)) ||
-				!ExpectedBytesMatchAt(entry + 0x17, kExpectedTaskLoadBytes, sizeof(kExpectedTaskLoadBytes)) ||
-				!ExpectedBytesMatchAt(kGogGameObjectHandleGetObjAddr, kExpectedGetObjBytes, sizeof(kExpectedGetObjBytes)))
-			{
-				if (!g_ConstructorRecycleStaleTargetMismatchLogged)
-				{
-					Log(L"[RIGRECYCLE] RigProcess::CleanUState2 bytes not settled at 0x%08X; deferring recycle undeploy fix\n",
-						static_cast<uint32_t>(entry));
-					g_ConstructorRecycleStaleTargetMismatchLogged = true;
-				}
-				return;
-			}
-
-			if (!g_BzrFn_GameObjectHandleGetObj)
-				g_BzrFn_GameObjectHandleGetObj =
-					reinterpret_cast<FnGameObjectHandleGetObj>(kGogGameObjectHandleGetObjAddr);
-
-			if (!InstallInlineDetour32(g_RigProcessCleanUState2Detour,
-									   entry,
-									   reinterpret_cast<void*>(RigProcessCleanUState2FixHook),
-									   kRigProcessCleanUState2DetourLen,
-									   kExpectedEntryBytes,
-									   sizeof(kExpectedEntryBytes)))
-			{
-				Log(L"[RIGRECYCLE] Failed installing RigProcess::CleanUState2 detour at 0x%08X\n",
-					static_cast<uint32_t>(entry));
-				return;
-			}
-
-			g_BzrFn_RigProcessCleanUState2Original =
-				reinterpret_cast<FnRigProcessCleanUState2>(
-					g_RigProcessCleanUState2Detour.trampoline);
-			g_ConstructorRecycleStaleTargetFixInstalled =
-				(g_BzrFn_RigProcessCleanUState2Original != nullptr);
-
-			if (g_ConstructorRecycleStaleTargetFixInstalled)
-			{
-				g_ConstructorRecycleStaleTargetMismatchLogged = false;
-				Log(L"[RIGRECYCLE] Installed constructor recycle undeploy fix entry=0x%08X trampoline=0x%08X getObj=0x%08X\n",
-					static_cast<uint32_t>(entry),
-					static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
-						g_RigProcessCleanUState2Detour.trampoline)),
-					static_cast<uint32_t>(kGogGameObjectHandleGetObjAddr));
-			}
-		}
-
-		static void InstallTugCargoPostLoadFixIfPossible()
-		{
-			if (!g_TugCargoPostLoadFixEnabled || g_TugCargoPostLoadFixInstalled)
-				return;
-
-			if (!VtableTypeNameMatches(kTugVtableAddr, ".?AVTug@@"))
-			{
-				Log(L"[TUGCARGO] Tug RTTI mismatch vtable=0x%08X; cargo PostLoad fix skipped\n",
-					static_cast<uint32_t>(kTugVtableAddr));
-				return;
-			}
-
-			void* current = nullptr;
-			__try { current = *reinterpret_cast<void**>(kTugPostLoadVtableSlotAddr); }
-			__except (EXCEPTION_EXECUTE_HANDLER) { current = nullptr; }
-
-			if (current != reinterpret_cast<void*>(TugPostLoadCargoDeployFixHook) &&
-				current != reinterpret_cast<void*>(kGogTugPostLoadAddr))
-			{
-				Log(L"[TUGCARGO] Tug::PostLoad vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
-					static_cast<uint32_t>(kTugPostLoadVtableSlotAddr),
-					static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
-					static_cast<uint32_t>(kGogTugPostLoadAddr));
-				return;
-			}
-
-			if (!g_BzrFn_TugPostLoadOriginal)
-				g_BzrFn_TugPostLoadOriginal =
-					reinterpret_cast<FnTugPostLoad>(kGogTugPostLoadAddr);
-
-			g_TugCargoPostLoadFixInstalled =
-				(current == reinterpret_cast<void*>(TugPostLoadCargoDeployFixHook)) ||
-				WritePointerValue(kTugPostLoadVtableSlotAddr,
-					reinterpret_cast<void*>(TugPostLoadCargoDeployFixHook));
-
-			if (g_TugCargoPostLoadFixInstalled)
-			{
-				Log(L"[TUGCARGO] Installed cargo PostLoad deploy-state fix slot=0x%08X original=0x%08X\n",
-					static_cast<uint32_t>(kTugPostLoadVtableSlotAddr),
-					static_cast<uint32_t>(kGogTugPostLoadAddr));
-			}
-		}
-
-		// Writes both APC relation branches together. A half-applied pair leaves
-		// one relation test rewritten and the other stock, which is neither the
-		// fixed behaviour nor the stock one, so both writes are reported as one.
-		static bool WriteApcAlliedTargetDeployBranches(bool patched)
-		{
-			const bool firstOk = WritePatchBytes(
-				kGogApcTargetActualTeamRejectBranchAddr,
-				patched ? kGogApcTargetActualTeamRejectPatched
-				        : kGogApcTargetActualTeamRejectOriginal,
-				sizeof(kGogApcTargetActualTeamRejectPatched));
-			const bool secondOk = WritePatchBytes(
-				kGogApcTargetPerceivedTeamRejectBranchAddr,
-				patched ? kGogApcTargetPerceivedTeamRejectPatched
-				        : kGogApcTargetPerceivedTeamRejectOriginal,
-				sizeof(kGogApcTargetPerceivedTeamRejectPatched));
-
-			if (firstOk && secondOk)
-				return true;
-
-			Log(L"[APCDEPLOY] Failed writing allied-target deployment branches patched=%hs first=%hs second=%hs\n",
-				BoolText(patched), BoolText(firstOk), BoolText(secondOk));
-			return false;
-		}
-
-		// Multiplayer gate. Unlike the other four [Fixes] entries this one is two
-		// rewritten branch displacements rather than a flag inside a hook, so the
-		// stock bytes have to go back for the duration of a network game. Only
-		// touches .text when the wanted state actually differs.
-		static void RefreshApcAlliedTargetDeployFixState()
-		{
-			if (!g_ApcAlliedTargetDeployFixInstalled)
-				return;
-
-			const bool wantActive =
-				g_ApcAlliedTargetDeployFixEnabled && IsSinglePlayerSession();
-			if (wantActive == g_ApcAlliedTargetDeployPatchActive)
-				return;
-
-			if (!WriteApcAlliedTargetDeployBranches(wantActive))
-				return;
-
-			g_ApcAlliedTargetDeployPatchActive = wantActive;
-			Log(L"[APCDEPLOY] Allied-target deployment branches %hs (%hs)\n",
-				wantActive ? "applied" : "reverted to stock",
-				wantActive ? "single-player" : "network game");
-		}
-
-		static void InstallApcAlliedTargetDeployFixIfPossible()
-		{
-			if (!g_ApcAlliedTargetDeployFixEnabled || g_ApcAlliedTargetDeployFixInstalled)
-				return;
-
-			const bool firstOriginal = ExpectedBytesMatchAt(
-				kGogApcTargetActualTeamRejectBranchAddr,
-				kGogApcTargetActualTeamRejectOriginal,
-				sizeof(kGogApcTargetActualTeamRejectOriginal));
-			const bool firstPatched = ExpectedBytesMatchAt(
-				kGogApcTargetActualTeamRejectBranchAddr,
-				kGogApcTargetActualTeamRejectPatched,
-				sizeof(kGogApcTargetActualTeamRejectPatched));
-			const bool secondOriginal = ExpectedBytesMatchAt(
-				kGogApcTargetPerceivedTeamRejectBranchAddr,
-				kGogApcTargetPerceivedTeamRejectOriginal,
-				sizeof(kGogApcTargetPerceivedTeamRejectOriginal));
-			const bool secondPatched = ExpectedBytesMatchAt(
-				kGogApcTargetPerceivedTeamRejectBranchAddr,
-				kGogApcTargetPerceivedTeamRejectPatched,
-				sizeof(kGogApcTargetPerceivedTeamRejectPatched));
-
-			if ((!firstOriginal && !firstPatched) || (!secondOriginal && !secondPatched))
-			{
-				Log(L"[APCDEPLOY] APC::Simulate relation branches drifted; allied-target fix skipped first=0x%08X second=0x%08X\n",
-					static_cast<uint32_t>(kGogApcTargetActualTeamRejectBranchAddr),
-					static_cast<uint32_t>(kGogApcTargetPerceivedTeamRejectBranchAddr));
-				return;
-			}
-
-			// Both guards passed, so the site is ours to drive. Seed the active
-			// flag from what the bytes already say before handing the write to the
-			// gate: a re-resolve with the patch already in place must not read as
-			// "not applied yet" and then skip the revert a network game needs.
-			g_ApcAlliedTargetDeployPatchActive = firstPatched && secondPatched;
-			g_ApcAlliedTargetDeployFixInstalled = true;
-			RefreshApcAlliedTargetDeployFixState();
-			if (g_ApcAlliedTargetDeployPatchActive)
-			{
-				Log(L"[APCDEPLOY] Allied targets now fall through to stock nearby-enemy deployment scan (SP-only)\n");
-			}
-		}
-
-        static bool ShouldTraceConstructorRemoteBuildFix()
-        {
-            return EnvFlagEnabled("OPENSHIM_TRACE_CONSTRUCTOR_REMOTE_BUILD") ||
-                   EnvFlagEnabled("OPENSHIM_TRACE_CONSTRUCTOR_BUILD_CLEANUP") ||
-                   EnvFlagEnabled("BZR_TRACE_CONSTRUCTOR_REMOTE_BUILD");
-        }
-
-        static void TraceConstructorRemoteBuildEvent(const char* action,
-                                                     const char* reason,
-                                                     void* unitPtr,
-                                                     const ConstructorCleanupSnapshot* snapshot)
-        {
-            if (!ShouldTraceConstructorRemoteBuildFix())
-                return;
-
-            const long remaining = InterlockedDecrement(&g_ConstructorRemoteBuildTraceBudget);
-            if (remaining < 0)
-                return;
-
-            const ConstructorCleanupSnapshot empty = {};
-            const ConstructorCleanupSnapshot& current = snapshot ? *snapshot : empty;
-            Log(L"[AICONSTRUCT] trace remaining=%ld action=%hs reason=%hs team=%d teamPtr=0x%08X unit=0x%08X constructType=%u cost=%u constructing=%u account=%u reservedArea=%u helpers=end:%hs reserved:%hs refund:%hs add:%hs stop:%hs\n",
-                remaining,
-                action ? action : "unknown",
-                reason ? reason : "unspecified",
-                current.teamId,
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current.teamPtr)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(unitPtr)),
-                current.constructType,
-                current.constructCost,
-                current.constructing,
-                current.account,
-                current.reservedArea,
-                BoolText(g_BzrFn_AIBuildConstructionEnd != nullptr),
-                BoolText(g_BzrFn_AIBuildReservedAreaRemove != nullptr),
-                BoolText(g_BzrFn_AISpentCreditRefund != nullptr),
-                BoolText(g_BzrFn_AIBuildUnassignedCCAdd != nullptr),
-                BoolText(g_BzrFn_UnitsSOrderStop != nullptr));
-        }
-
-        static bool TryCaptureConstructorCleanupSnapshot(void* unitPtr,
-                                                        ConstructorCleanupSnapshot& outSnapshot,
-                                                        const char** outReason)
-        {
-            outSnapshot = {};
-            if (outReason)
-                *outReason = "unknown";
-            if (!unitPtr)
-            {
-                if (outReason)
-                    *outReason = "null_unit";
-                return false;
-            }
-
-            __try
-            {
-                if (*reinterpret_cast<const uint32_t*>(kAiGameInitialisedAddr) == 0)
-                {
-                    if (outReason)
-                        *outReason = "ai_not_ready";
-                    return false;
-                }
-
-                auto* unitBytes = reinterpret_cast<const uint8_t*>(unitPtr);
-                const int teamId =
-                    static_cast<int>(*reinterpret_cast<const int8_t*>(unitBytes + kUnitTeamOffset));
-                if (teamId < 0)
-                {
-                    if (outReason)
-                        *outReason = "team_invalid";
-                    return false;
-                }
-
-                auto* teamAicontrol =
-                    reinterpret_cast<const uint8_t*>(kAiTeamDataBaseAddr + (teamId * kAiTeamDataStride));
-                if (*teamAicontrol == 0)
-                {
-                    if (outReason)
-                        *outReason = "team_not_ai";
-                    return false;
-                }
-
-                auto* teamTable = reinterpret_cast<void* const*>(kAiTeamTableAddr);
-                outSnapshot.teamPtr = teamTable[teamId];
-                if (!outSnapshot.teamPtr)
-                {
-                    if (outReason)
-                        *outReason = "team_ptr_missing";
-                    return false;
-                }
-
-                void* typePtr = *reinterpret_cast<void* const*>(unitBytes + kUnitTypeOffset);
-                if (!typePtr)
-                {
-                    if (outReason)
-                        *outReason = "missing_type";
-                    return false;
-                }
-
-                const uint32_t abilities =
-                    *reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(typePtr) +
-                                                       kUnitTypeAbilitiesOffset);
-                if ((abilities & kConstructorAbilityMask) == 0)
-                {
-                    if (outReason)
-                        *outReason = "not_constructor";
-                    return false;
-                }
-
-                outSnapshot.teamId = teamId;
-                outSnapshot.constructType =
-                    *reinterpret_cast<const uint32_t*>(unitBytes + kUnitAiConstructTypeOffset);
-                outSnapshot.constructCost =
-                    *reinterpret_cast<const uint32_t*>(unitBytes + kUnitAiConstructCostOffset);
-                outSnapshot.constructing =
-                    *reinterpret_cast<const uint32_t*>(unitBytes + kUnitAiConstructingOffset);
-                outSnapshot.reservedArea =
-                    *reinterpret_cast<const uint32_t*>(unitBytes + kUnitAiReservedAreaOffset);
-                outSnapshot.account =
-                    *reinterpret_cast<const uint32_t*>(unitBytes + kUnitAiAccountOffset);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                outSnapshot = {};
-                if (outReason)
-                    *outReason = "access_fault";
-                return false;
-            }
-
-            if (outReason)
-                *outReason = "eligible";
-            return true;
-        }
-
-        static bool TryApplyConstructorRemoteBuildDeathCleanup(void* unitPtr,
-                                                               ConstructorCleanupSnapshot& outSnapshot,
-                                                               const char** outReason)
-        {
-            outSnapshot = {};
-            if (outReason)
-                *outReason = "unknown";
-
-            if (!g_ConstructorRemoteBuildFixActive ||
-                !g_BzrFn_AIBuildConstructionEnd ||
-                !g_BzrFn_AIBuildReservedAreaRemove ||
-                !g_BzrFn_AISpentCreditRefund ||
-                !g_BzrFn_AIBuildUnassignedCCAdd ||
-                !unitPtr)
-            {
-                if (outReason)
-                    *outReason = !g_ConstructorRemoteBuildFixActive
-                        ? (g_ConstructorRemoteBuildFixEnabled ? "network_game" : "fix_disabled")
-                        : (!unitPtr ? "null_unit" : "helpers_missing");
-                return false;
-            }
-
-            if (!TryCaptureConstructorCleanupSnapshot(unitPtr, outSnapshot, outReason))
-                return false;
-
-            if (outSnapshot.constructType == 0)
-            {
-                if (outReason)
-                    *outReason = "construct_type_zero";
-                return false;
-            }
-
-            if (outSnapshot.constructing == 0)
-            {
-                if (outReason)
-                    *outReason = "constructing_zero";
-                return false;
-            }
-
-            g_BzrFn_AIBuildConstructionEnd(outSnapshot.teamId, static_cast<int>(outSnapshot.constructType));
-            g_BzrFn_AIBuildReservedAreaRemove(outSnapshot.teamId, static_cast<int>(outSnapshot.reservedArea));
-            g_BzrFn_AISpentCreditRefund(outSnapshot.teamId, nullptr, unitPtr);
-            if (outSnapshot.teamPtr)
-                g_BzrFn_AIBuildUnassignedCCAdd(outSnapshot.teamPtr, unitPtr);
-            if (g_BzrFn_UnitsSOrderStop)
-                g_BzrFn_UnitsSOrderStop(unitPtr);
-
-            auto* unitBytes = reinterpret_cast<uint8_t*>(unitPtr);
-            *reinterpret_cast<uint32_t*>(unitBytes + kUnitAiConstructTypeOffset) = 0;
-            *reinterpret_cast<uint32_t*>(unitBytes + kUnitAiConstructCostOffset) = 0;
-            *reinterpret_cast<uint32_t*>(unitBytes + kUnitAiConstructingOffset) = 0;
-            *reinterpret_cast<uint32_t*>(unitBytes + kUnitAiAccountOffset) = 0;
-            *reinterpret_cast<uint32_t*>(unitBytes + kUnitAiReservedAreaOffset) = 0;
-
-            Log(L"[AICONSTRUCT] Applied constructor death cleanup action=death_cleanup team=%d teamPtr=0x%08X unit=0x%08X constructType=%u cost=%u constructing=%u account=%u reservedArea=%u end=0x%08X reserved=0x%08X refund=0x%08X add=0x%08X stop=0x%08X\n",
-                outSnapshot.teamId,
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(outSnapshot.teamPtr)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(unitPtr)),
-                outSnapshot.constructType,
-                outSnapshot.constructCost,
-                outSnapshot.constructing,
-                outSnapshot.account,
-                outSnapshot.reservedArea,
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_AIBuildConstructionEnd)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_AIBuildReservedAreaRemove)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_AISpentCreditRefund)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_AIBuildUnassignedCCAdd)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_UnitsSOrderStop)));
-
-            if (outReason)
-                *outReason = "applied";
-            TraceConstructorRemoteBuildEvent("death_cleanup", "applied", unitPtr, &outSnapshot);
-
-            return true;
-        }
-
-        void __cdecl AIUnitRemoveConstructorCleanupHook(void* unitPtr)
-        {
-            ConstructorCleanupSnapshot snapshot = {};
-            const char* reason = nullptr;
-            const bool applied = TryApplyConstructorRemoteBuildDeathCleanup(unitPtr, snapshot, &reason);
-
-            TraceConstructorRemoteBuildEvent(applied ? "forward_after_cleanup" : "fallback", reason, unitPtr, &snapshot);
-            if (g_BzrFn_AIUnitRemove)
-                g_BzrFn_AIUnitRemove(unitPtr);
-        }
-
-        static void InstallConstructorRemoteBuildFixIfPossible()
-        {
-            if (!g_ConstructorRemoteBuildFixEnabled)
-                return;
-
-            if (g_ConstructorRemoteBuildFixInstalled)
-                return;
-
-            if (g_AIUnitRemoveDetour.trampoline && g_BzrFn_AIUnitRemove)
-            {
-                g_ConstructorRemoteBuildFixInstalled = true;
-                return;
-            }
-
-            static const uint8_t kExpectedAIUnitRemoveBytes[kAIUnitRemoveDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x51, 0x83, 0x3D, 0x08, 0x0F, 0x93, 0x00, 0x00
-            };
-
-            if (!ExpectedBytesMatchAt(kGogAIUnitRemoveEntryAddr,
-                                      kExpectedAIUnitRemoveBytes,
-                                      sizeof(kExpectedAIUnitRemoveBytes)))
-            {
-                if (!g_ConstructorRemoteBuildFixMismatchLogged)
-                {
-                    Log(L"[AICONSTRUCT] AI_UnitRemove entry bytes not settled at 0x%08X; deferring constructor death cleanup hook\n",
-                        static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr));
-                    g_ConstructorRemoteBuildFixMismatchLogged = true;
-                }
-                return;
-            }
-
-            if (!InstallInlineDetour32(g_AIUnitRemoveDetour,
-                                       kGogAIUnitRemoveEntryAddr,
-                                       reinterpret_cast<void*>(AIUnitRemoveConstructorCleanupHook),
-                                       kAIUnitRemoveDetourLen,
-                                       kExpectedAIUnitRemoveBytes,
-                                       sizeof(kExpectedAIUnitRemoveBytes)))
-            {
-                Log(L"[AICONSTRUCT] Failed installing AI_UnitRemove cleanup hook at 0x%08X\n",
-                    static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr));
-                return;
-            }
-
-            g_BzrFn_AIUnitRemove =
-                reinterpret_cast<FnAIUnitRemove>(g_AIUnitRemoveDetour.trampoline);
-            g_ConstructorRemoteBuildFixInstalled = (g_BzrFn_AIUnitRemove != nullptr);
-            if (g_ConstructorRemoteBuildFixInstalled)
-            {
-                g_ConstructorRemoteBuildFixMismatchLogged = false;
-                Log(L"[AICONSTRUCT] Installed AI_UnitRemove cleanup hook entry=0x%08X trampoline=0x%08X trace=%hs\n",
-                    static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_AIUnitRemoveDetour.trampoline)),
-                    BoolText(ShouldTraceConstructorRemoteBuildFix()));
             }
         }
 
