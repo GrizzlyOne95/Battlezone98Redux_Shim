@@ -18,6 +18,16 @@
 --
 -- Lua 5.1 (no goto, no io/os/debug).
 
+-- lcbench is a bare addon mission, so CR's mod folder -- where exu.dll lives
+-- on the GOG test install -- is not on the C module path. Derive the game
+-- root from the default cpath entry and add it.
+local CR_WORKSHOP_ID = "3686673790"
+do
+    local root = string.match(package.cpath, "([^;]*)loadall%.dll")
+    if root ~= nil then
+        package.cpath = package.cpath .. ";" .. root .. "mods\\" .. CR_WORKSHOP_ID .. "\\?.dll"
+    end
+end
 local exu = require("exu")
 
 local elapsed = 0.0
