@@ -517,6 +517,10 @@ namespace BZROpenShim
         void SyncSatelliteVisibility();
         void LogSatelliteVisibilityValidationSample();
 
+        // --- Ogre dedupe crash fixes (ogre_dedupe_crash_fixes.cpp) -------------
+        void InstallParticleTemplateDedupeHookIfPossible();
+        void InstallUiManualObjectDedupeHookIfPossible();
+
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
         extern float g_SatelliteZoomOutMultiplierBaseline;
