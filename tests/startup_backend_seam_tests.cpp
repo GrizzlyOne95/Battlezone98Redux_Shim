@@ -24,11 +24,13 @@
 #endif
 #include <Windows.h>
 
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
 
 namespace
 {
@@ -90,6 +92,20 @@ int main()
 
     std::error_code ec;
     for (const auto& p : {ini, cfg, dx11, dx9}) std::filesystem::remove(p, ec);
+
+    // ---- the record before any selection ran ----------------------------
+    // The runtime copies this from its patch thread; on a GOG boot that is
+    // seconds before the intercepted ConfigFile::load publishes, so the copy
+    // must be complete and must say plainly that nothing has been decided.
+    {
+        StartupSeam::StartupRendererResult early = {};
+        CHECK(StartupSeam::CopyStartupRendererResult(&early, sizeof(early)));
+        CHECK(early.version == StartupSeam::kStartupRendererResultVersion);
+        CHECK(early.structSize == sizeof(StartupSeam::StartupRendererResult));
+        CHECK(early.selectionRan == 0);
+        CHECK(early.seamArmed == 0);
+        CHECK(early.transportWritten == 0);
+    }
 
     const std::string stockCfg =
         "Render System=Direct3D9 Rendering Subsystem\r\n"
@@ -187,6 +203,46 @@ int main()
     const std::string tmpName =
         BackendSelection::MakeTransportTempFileName(GetCurrentProcessId());
     CHECK(!std::filesystem::exists(dir / tmpName));
+
+    // ---- a copy never observes a half-published record -------------------
+    // The publish writes seven fields under the seam's lock; the runtime
+    // copies from another thread. selectionRan is written before
+    // startupSiteValidated, so a torn copy would show the first without the
+    // second. Publish repeatedly while copying continuously.
+    {
+        WriteText(ini, "[Graphics]\r\nRenderer=dx11\r\n");
+        WriteText(cfg, stockCfg);
+        MakePlugin(dx11);
+        MakePlugin(dx9);
+        std::atomic<bool> done{false};
+        std::atomic<int> torn{0};
+        std::atomic<int> copies{0};
+        std::thread copier([&] {
+            while (!done.load(std::memory_order_acquire))
+            {
+                StartupSeam::StartupRendererResult r = {};
+                if (!StartupSeam::CopyStartupRendererResult(&r, sizeof(r)))
+                {
+                    torn.fetch_add(1);
+                    continue;
+                }
+                if (r.version != StartupSeam::kStartupRendererResultVersion ||
+                    r.structSize != sizeof(StartupSeam::StartupRendererResult) ||
+                    (r.selectionRan != 0 && r.startupSiteValidated == 0) ||
+                    r.requestedBackend > StartupSeam::kBackendDx11 ||
+                    r.requestSource > StartupSeam::kSourceCliOverride)
+                {
+                    torn.fetch_add(1);
+                }
+                copies.fetch_add(1);
+            }
+        });
+        for (int i = 0; i < 200; ++i) StartupSeam::RunStartupSelectionForTest();
+        done.store(true, std::memory_order_release);
+        copier.join();
+        CHECK(torn.load() == 0);
+        CHECK(copies.load() > 0);
+    }
 
     for (const auto& p : {ini, cfg, dx11, dx9}) std::filesystem::remove(p, ec);
     std::filesystem::remove(dir / "openshim_backend_pending.marker", ec);
