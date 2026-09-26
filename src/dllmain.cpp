@@ -112,8 +112,28 @@ namespace BZROpenShim
     {
         if (g_LoaderThread)
         {
-            WaitForSingleObject(reinterpret_cast<HANDLE>(g_LoaderThread), 5000);
-            CloseHandle(reinterpret_cast<HANDLE>(g_LoaderThread));
+            // Joined means joined. The loader thread returns on its own once
+            // BZLoader has loaded the plugin, and everything below tears down
+            // what it may still be building, so a wait that gave up after
+            // five seconds left ShutdownBZLoader racing InitializeBZLoader.
+            // The five seconds are now only the point at which to say so.
+            // This runs on a host's normal thread, never under the loader
+            // lock (see DllMain), so an unbounded wait cannot deadlock.
+            HANDLE loaderThread = reinterpret_cast<HANDLE>(g_LoaderThread);
+            DWORD wait = WaitForSingleObject(loaderThread, 5000);
+            if (wait == WAIT_TIMEOUT)
+            {
+                LogShimA(LogLevel::Warn, "dllmain",
+                         "Loader thread still running after 5 s; waiting for it before tearing down");
+                wait = WaitForSingleObject(loaderThread, INFINITE);
+            }
+            if (wait != WAIT_OBJECT_0)
+            {
+                LogShimA(LogLevel::Error, "dllmain",
+                         "Loader thread join failed (wait=%lu err=%lu); tearing down anyway",
+                         wait, GetLastError());
+            }
+            CloseHandle(loaderThread);
             g_LoaderThread = 0;
         }
         ShutdownBZLoader();
