@@ -109,6 +109,11 @@ namespace BZROpenShim
         bool g_MainMenuDiagnosticsEnabled = false;
         bool g_MainScreenHooksInstalled = false;
         bool g_MainScreenHookMismatchLogged = false;
+        bool g_MainScreenDtorMismatchLogged = false;
+        constexpr size_t kMainScreenDestroyedListenerCapacity = 4;
+        MainScreenDestroyedListener
+            g_MainScreenDestroyedListeners[kMainScreenDestroyedListenerCapacity] = {};
+        size_t g_MainScreenDestroyedListenerCount = 0;
         std::atomic<uint64_t> g_MainScreenGeneration{0};
         std::atomic<uint32_t> g_MainMenuDiagnosticHoverCount{0};
         std::atomic<uint32_t> g_MainMenuDiagnosticActionCount{0};
@@ -1315,40 +1320,41 @@ namespace BZROpenShim
 
         void __fastcall MainScreenDtorHook(void* self, void* /*edx*/)
         {
-            OnMainScreenDestroyed(self);
+            if (g_MainMenuDiagnosticsEnabled)
+                OnMainScreenDestroyed(self);
             if (g_MainScreenDtorOriginal)
                 g_MainScreenDtorOriginal(self);
+            // After the engine's destructor: the singleton is cleared and the
+            // children are gone, so a listener that drops cached widget
+            // pointers cannot race the teardown it is reacting to. `self` is
+            // an identity token from here on.
+            for (size_t i = 0; i < g_MainScreenDestroyedListenerCount; ++i)
+                g_MainScreenDestroyedListeners[i](self);
         }
 
-        void InstallMainScreenDiagnosticHooks()
+        // The destructor detour on its own. Idempotent; logs a mismatch once.
+        bool InstallMainScreenDtorHookIfPossible()
         {
-            if (g_MainScreenHooksInstalled)
-                return;
-
+            if (g_MainScreenDtorOriginal)
+                return true;
             const uint8_t expectedDtor[kMainScreenDetourLen] =
             {
                 0x55, 0x8B, 0xEC, 0x6A, 0xFF,
                 0x68, 0xC8, 0xE6, 0x85, 0x00,
             };
-            const uint8_t expectedCtor[kMainScreenDetourLen] =
+            if (!ExpectedBytesMatchAt(kMainScreenDtorAddr, expectedDtor, sizeof(expectedDtor)))
             {
-                0x55, 0x8B, 0xEC, 0x6A, 0xFF,
-                0x68, 0x54, 0xEC, 0x85, 0x00,
-            };
-
-            if (!ExpectedBytesMatchAt(kMainScreenDtorAddr, expectedDtor, sizeof(expectedDtor)) ||
-                !ExpectedBytesMatchAt(kMainScreenCtorAddr, expectedCtor, sizeof(expectedCtor)))
-            {
-                if (!g_MainScreenHookMismatchLogged)
+                if (!g_MainScreenDtorMismatchLogged)
                 {
+                    g_MainScreenDtorMismatchLogged = true;
                     LogShimA(LogLevel::Warn,
-                             "native_ui_probe",
-                             "MainScreen ctor/dtor bytes mismatch; diagnostic probe disabled");
-                    g_MainScreenHookMismatchLogged = true;
+                             "native_ui",
+                             "MainScreen destructor bytes mismatch at 0x%08X; title-screen "
+                             "teardown will not be observed",
+                             static_cast<unsigned>(kMainScreenDtorAddr));
                 }
-                return;
+                return false;
             }
-
             if (!InstallInlineDetour32(g_MainScreenDtorDetour,
                                        kMainScreenDtorAddr,
                                        reinterpret_cast<void*>(MainScreenDtorHook),
@@ -1356,13 +1362,55 @@ namespace BZROpenShim
                                        expectedDtor,
                                        sizeof(expectedDtor)))
             {
-                LogShimA(LogLevel::Warn,
-                         "native_ui_probe",
-                         "Failed installing MainScreen destructor hook; probe disabled");
-                return;
+                if (!g_MainScreenDtorMismatchLogged)
+                {
+                    g_MainScreenDtorMismatchLogged = true;
+                    LogShimA(LogLevel::Warn,
+                             "native_ui",
+                             "Failed installing MainScreen destructor hook at 0x%08X",
+                             static_cast<unsigned>(kMainScreenDtorAddr));
+                }
+                return false;
             }
             g_MainScreenDtorOriginal =
                 reinterpret_cast<FnMainScreenDtor>(g_MainScreenDtorDetour.trampoline);
+            LogShimA(LogLevel::Info,
+                     "native_ui",
+                     "MainScreen destructor hook installed at 0x%08X",
+                     static_cast<unsigned>(kMainScreenDtorAddr));
+            return true;
+        }
+
+        void InstallMainScreenDiagnosticHooks()
+        {
+            if (g_MainScreenHooksInstalled)
+                return;
+
+            const uint8_t expectedCtor[kMainScreenDetourLen] =
+            {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF,
+                0x68, 0x54, 0xEC, 0x85, 0x00,
+            };
+
+            if (!ExpectedBytesMatchAt(kMainScreenCtorAddr, expectedCtor, sizeof(expectedCtor)))
+            {
+                if (!g_MainScreenHookMismatchLogged)
+                {
+                    LogShimA(LogLevel::Warn,
+                             "native_ui_probe",
+                             "MainScreen ctor bytes mismatch; diagnostic probe disabled");
+                    g_MainScreenHookMismatchLogged = true;
+                }
+                return;
+            }
+
+            if (!InstallMainScreenDtorHookIfPossible())
+            {
+                LogShimA(LogLevel::Warn,
+                         "native_ui_probe",
+                         "MainScreen destructor hook unavailable; probe disabled");
+                return;
+            }
 
             if (!InstallInlineDetour32(g_MainScreenCtorDetour,
                                        kMainScreenCtorAddr,
@@ -1407,6 +1455,30 @@ namespace BZROpenShim
 
         g_MainMenuDiagnosticsEnabled = true;
         InstallMainScreenDiagnosticHooks();
+    }
+
+    bool EnsureMainScreenDestroyedHook()
+    {
+        // The site is build knowledge for the compatible executable; the byte
+        // guard inside stands the hook down on anything else.
+        if (!IsCompatibleGameVersion())
+            return false;
+        return InstallMainScreenDtorHookIfPossible();
+    }
+
+    bool AddMainScreenDestroyedListener(MainScreenDestroyedListener listener)
+    {
+        if (listener == nullptr)
+            return false;
+        for (size_t i = 0; i < g_MainScreenDestroyedListenerCount; ++i)
+        {
+            if (g_MainScreenDestroyedListeners[i] == listener)
+                return true;
+        }
+        if (g_MainScreenDestroyedListenerCount >= kMainScreenDestroyedListenerCapacity)
+            return false;
+        g_MainScreenDestroyedListeners[g_MainScreenDestroyedListenerCount++] = listener;
+        return true;
     }
 
     void ShutdownNativeUi()
