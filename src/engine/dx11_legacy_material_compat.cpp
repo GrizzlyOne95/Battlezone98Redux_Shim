@@ -179,8 +179,93 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         case CompatPath::FixedFuncUntextured: return "fixedfunc-untextured";
         case CompatPath::AggressiveGeneric: return "aggressive-generic";
         case CompatPath::SkipShaderless: return "skip";
+        case CompatPath::FixedFuncTextured2: return "fixedfunc-textured2";
         }
         return "skip";
+    }
+
+    const char* StageCombineName(StageCombine combine) noexcept
+    {
+        switch (combine)
+        {
+        case StageCombine::Modulate: return "modulate";
+        case StageCombine::Add: return "add";
+        case StageCombine::Replace: return "replace";
+        case StageCombine::AlphaBlendTexture: return "alpha_blend";
+        case StageCombine::Unsupported: return "unsupported";
+        }
+        return "unsupported";
+    }
+
+    StageCombine ClassifyStageColour(const TextureStageDesc& stage) noexcept
+    {
+        if (!stage.known)
+        {
+            return StageCombine::Unsupported;
+        }
+        // setColourOperation stores every shorthand as (op, texture, current).
+        // modulate and add are commutative, so the swapped order a
+        // colour_op_ex author might write means the same thing.
+        const bool texCurrent = stage.colourSrc1 == BlendSource::Texture &&
+                                stage.colourSrc2 == BlendSource::Current;
+        const bool currentTex = stage.colourSrc1 == BlendSource::Current &&
+                                stage.colourSrc2 == BlendSource::Texture;
+        switch (stage.colourOp)
+        {
+        case BlendOpEx::Modulate:
+            return (texCurrent || currentTex) ? StageCombine::Modulate
+                                              : StageCombine::Unsupported;
+        case BlendOpEx::Add:
+            return (texCurrent || currentTex) ? StageCombine::Add
+                                              : StageCombine::Unsupported;
+        case BlendOpEx::Source1:
+            return stage.colourSrc1 == BlendSource::Texture
+                       ? StageCombine::Replace
+                       : StageCombine::Unsupported;
+        case BlendOpEx::BlendTextureAlpha:
+            // Arg1 * tex.a + Arg2 * (1 - tex.a): order matters here.
+            return texCurrent ? StageCombine::AlphaBlendTexture
+                              : StageCombine::Unsupported;
+        default:
+            return StageCombine::Unsupported;
+        }
+    }
+
+    bool IsDefaultStageAlpha(const TextureStageDesc& stage) noexcept
+    {
+        if (!stage.known || stage.alphaOp != BlendOpEx::Modulate)
+        {
+            return false;
+        }
+        return (stage.alphaSrc1 == BlendSource::Texture &&
+                stage.alphaSrc2 == BlendSource::Current) ||
+               (stage.alphaSrc1 == BlendSource::Current &&
+                stage.alphaSrc2 == BlendSource::Texture);
+    }
+
+    bool IsSupportedTwoStageCombo(const LegacyPassDesc& desc) noexcept
+    {
+        if (desc.textureUnits != 2 || desc.stages.size() != 2)
+        {
+            return false;
+        }
+        for (const TextureStageDesc& stage : desc.stages)
+        {
+            // Unit 1 reads the same TEXCOORD0 as unit 0 through its own
+            // texture matrix. A second UV set would need TEXCOORD1 in the
+            // vertex input fitting; no shipped content asks for it yet.
+            if (!stage.known || stage.texCoordSet != 0 ||
+                !IsDefaultStageAlpha(stage))
+            {
+                return false;
+            }
+        }
+        if (ClassifyStageColour(desc.stages[0]) != StageCombine::Modulate)
+        {
+            return false;
+        }
+        return FixedFuncTextured2Fragment(ClassifyStageColour(desc.stages[1])) !=
+               nullptr;
     }
 
     CompatConfig DefaultCompatConfig() noexcept
@@ -392,6 +477,24 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         return "OSE_FixedFunc_Untextured_fragment";
     }
 
+    const char* FixedFuncTextured2Vertex() noexcept
+    {
+        return "OSE_FixedFunc_Textured2_vertex";
+    }
+
+    const char* FixedFuncTextured2Fragment(StageCombine stage1) noexcept
+    {
+        switch (stage1)
+        {
+        case StageCombine::Modulate:
+            return "OSE_FixedFunc_Textured2_fragment_modulate";
+        case StageCombine::AlphaBlendTexture:
+            return "OSE_FixedFunc_Textured2_fragment_alphablend";
+        default:
+            return nullptr;
+        }
+    }
+
     bool ResolveCompatPrograms(CompatPath path,
                                const LegacyPassDesc& desc,
                                std::string& outVertex,
@@ -449,6 +552,23 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             outFragment.assign(FixedFuncUntexturedFragment());
             return true;
 
+        case CompatPath::FixedFuncTextured2:
+        {
+            if (!IsSupportedTwoStageCombo(desc))
+            {
+                return false;
+            }
+            const char* fragment =
+                FixedFuncTextured2Fragment(ClassifyStageColour(desc.stages[1]));
+            if (fragment == nullptr)
+            {
+                return false;
+            }
+            outVertex.assign(FixedFuncTextured2Vertex());
+            outFragment.assign(fragment);
+            return true;
+        }
+
         case CompatPath::AggressiveGeneric:
             // Unknown custom semantics: the generic adapter is an explicit
             // approximation, so it follows the observed texturing rather than
@@ -495,14 +615,34 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             return VertexInputFit::Unsatisfiable;
         }
 
+        const bool diffuse = inputs.known && inputs.diffuse;
+        const bool texcoord = !inputs.known || inputs.texcoord0;
+
+        // The two-stage entry (fixedfunc2_vertex) has its own output
+        // signature, so it only ever trades for its own no-colour variant.
+        // It needs TEXCOORD0: both stages sample through it, and a two-unit
+        // pass on geometry without UVs is not something to approximate.
+        if (StartsWithLower(lower, "ose_fixedfunc_textured2_"))
+        {
+            if (!texcoord)
+            {
+                outVertex.clear();
+                return VertexInputFit::Unsatisfiable;
+            }
+            if (diffuse)
+            {
+                return VertexInputFit::Unchanged;
+            }
+            outVertex.assign("OSE_FixedFunc_Textured2_vertex_novc");
+            return VertexInputFit::Adapted;
+        }
+
         // Two entry points back every adapter (openshim_dx11_fixedfunc-sm4.hlsl):
         // fixedfunc_untextured_vertex reads POSITION+COLOR0, fixedfunc_vertex
         // reads POSITION+COLOR0+TEXCOORD0. The Untextured family is the only
         // one on the untextured entry; the family define is informational, so
         // an input-reduced generic variant is an exact stand-in.
         const bool untexturedEntry = ContainsLower(lower, "untextured");
-        const bool diffuse = inputs.known && inputs.diffuse;
-        const bool texcoord = !inputs.known || inputs.texcoord0;
 
         const char* variant = nullptr;
         if (untexturedEntry)
@@ -676,6 +816,10 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             if (IsSupportedFixedFuncCombo(desc.textureUnits, desc.colorOp0))
             {
                 return CompatPath::FixedFuncTextured;
+            }
+            if (IsSupportedTwoStageCombo(desc))
+            {
+                return CompatPath::FixedFuncTextured2;
             }
             // Unsupported combine: aggressive generic is the only
             // best-effort left; otherwise fail closed to the guard.

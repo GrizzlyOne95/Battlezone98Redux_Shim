@@ -47,10 +47,61 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         FixedFuncUntextured,
         AggressiveGeneric,
         SkipShaderless,
+        // Two texture units sharing UV set 0: stage 0 modulate, stage 1
+        // modulate or alpha_blend (IsSupportedTwoStageCombo). Appended so the
+        // existing values keep their meaning.
+        FixedFuncTextured2,
     };
 
     const char* LegacyPassKindName(LegacyPassKind kind) noexcept;
     const char* CompatPathName(CompatPath path) noexcept;
+
+    // Ogre::LayerBlendOperationEx / LayerBlendSource values (OgreBlendMode.h,
+    // Ogre 1.10). The runtime reads them from a TextureUnitState's
+    // LayerBlendModeEx; tests use them directly.
+    namespace BlendOpEx
+    {
+        constexpr int Source1 = 0;
+        constexpr int Modulate = 2;
+        constexpr int Add = 5;
+        constexpr int BlendTextureAlpha = 10;
+    }
+    namespace BlendSource
+    {
+        constexpr int Current = 0;
+        constexpr int Texture = 1;
+    }
+
+    // One fixed-function texture stage as the fixed pipeline ran it.
+    // known=false when the runtime could not read it; an unknown stage is
+    // never supported.
+    struct TextureStageDesc
+    {
+        bool known = false;
+        int colourOp = -1;
+        int colourSrc1 = -1;
+        int colourSrc2 = -1;
+        int alphaOp = -1;
+        int alphaSrc1 = -1;
+        int alphaSrc2 = -1;
+        unsigned texCoordSet = 0;
+    };
+
+    // The material-script colour_op shorthands, recognised from the expanded
+    // operation Ogre stores (TextureUnitState::setColourOperation).
+    enum class StageCombine : uint8_t
+    {
+        Modulate = 0,       // colour_op modulate (the default)
+        Add,                // colour_op add
+        Replace,            // colour_op replace
+        AlphaBlendTexture,  // colour_op alpha_blend: lerp(current, tex, tex.a)
+        Unsupported,
+    };
+
+    const char* StageCombineName(StageCombine combine) noexcept;
+    StageCombine ClassifyStageColour(const TextureStageDesc& stage) noexcept;
+    // Alpha is supported only in its default form, texture * current.
+    bool IsDefaultStageAlpha(const TextureStageDesc& stage) noexcept;
 
     // Minimal programmable-pass description. The runtime fills this from the
     // narrow Ogre ABI (hasVertexProgram/hasFragmentProgram + program names +
@@ -68,7 +119,19 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         // color ops below, anything else is logged once as unsupported.
         int textureUnits = 0;
         std::string colorOp0; // modulate|replace|add|alpha_blend (any case)
+        // Per-stage combine state read from the pass. Drives the two-unit
+        // decision; the one-unit path keeps its historical modulate
+        // assumption (colorOp0) so existing content does not change path.
+        std::vector<TextureStageDesc> stages;
     };
+
+    // The bounded two-unit support set: exactly two stages, both read, both
+    // on UV set 0, default alpha on both, stage 0 modulate, stage 1 modulate
+    // or alpha_blend. That is what shipped content uses: ISDF Chronicles'
+    // rain family (xrain, xrainL/R: a scrolling streak texture masked by
+    // colour_op alpha_blend) and plain detail/overlay modulation. Anything
+    // else stays declined rather than guessed.
+    bool IsSupportedTwoStageCombo(const LegacyPassDesc& desc) noexcept;
 
     struct CompatConfig
     {
@@ -140,13 +203,17 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
     const char* FixedFuncTexturedFragment() noexcept;
     const char* FixedFuncUntexturedVertex() noexcept;
     const char* FixedFuncUntexturedFragment() noexcept;
+    const char* FixedFuncTextured2Vertex() noexcept;
+    // Fragment program for a supported stage-1 combine, else nullptr.
+    const char* FixedFuncTextured2Fragment(StageCombine stage1) noexcept;
 
     LegacyPassKind ClassifyLegacyPass(const LegacyPassDesc& desc) noexcept;
 
     // Bounded fixed-function support set for Phase 2. 0 units always
     // supported; 1 unit for modulate/replace/add/alpha_blend (case-insensitive,
-    // alpha_blend covers the common alpha cases). Multi-texture and exotic
-    // combine ops return false so the caller logs once instead of guessing.
+    // alpha_blend covers the common alpha cases). 2+ units and exotic
+    // combine ops return false here; the two-unit path is decided from the
+    // stages read off the pass instead (IsSupportedTwoStageCombo).
     bool IsSupportedFixedFuncCombo(int textureUnits,
                                    std::string_view colorOp0) noexcept;
 
