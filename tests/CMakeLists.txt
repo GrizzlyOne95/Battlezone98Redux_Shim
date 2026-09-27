@@ -75,6 +75,16 @@ if(WIN32 AND MSVC)
     add_test(NAME editor_save_dialog_win32_tests COMMAND editor_save_dialog_win32_tests)
 endif()
 
+if(WIN32 AND MSVC)
+    # The shared import-table and COM-vtable patchers. The IAT cases patch this
+    # executable's own GetTickCount import and call through it.
+    add_executable(hook_patch_win32_tests hook_patch_win32_tests.cpp)
+    target_include_directories(hook_patch_win32_tests PRIVATE ../include)
+    target_compile_features(hook_patch_win32_tests PRIVATE cxx_std_20)
+    target_compile_options(hook_patch_win32_tests PRIVATE /W4 /WX)
+    add_test(NAME hook_patch_win32_tests COMMAND hook_patch_win32_tests)
+endif()
+
 add_executable(numeric_locale_compat_tests
     numeric_locale_compat_tests.cpp
     ../src/patches/numeric_locale_compat.cpp
@@ -127,6 +137,10 @@ add_executable(bool_token_tests
 
 add_executable(memory_access_tests
     memory_access_tests.cpp
+)
+
+add_executable(stable_id_list_tests
+    stable_id_list_tests.cpp
 )
 
 add_executable(terrain_tile_blend_tests
@@ -262,6 +276,8 @@ target_include_directories(bool_token_tests PRIVATE ../include)
 target_compile_features(bool_token_tests PRIVATE cxx_std_20)
 target_include_directories(memory_access_tests PRIVATE ../include)
 target_compile_features(memory_access_tests PRIVATE cxx_std_20)
+target_include_directories(stable_id_list_tests PRIVATE ../include)
+target_compile_features(stable_id_list_tests PRIVATE cxx_std_20)
 target_include_directories(terrain_tile_blend_tests PRIVATE ../include)
 target_compile_features(terrain_tile_blend_tests PRIVATE cxx_std_20)
 target_include_directories(terrain_atlas_rect_repair_tests PRIVATE ../include)
@@ -306,6 +322,7 @@ if(MSVC)
     target_compile_options(env_switch_table_tests PRIVATE /W4 /WX)
     target_compile_options(bool_token_tests PRIVATE /W4 /WX)
     target_compile_options(memory_access_tests PRIVATE /W4 /WX)
+    target_compile_options(stable_id_list_tests PRIVATE /W4 /WX)
     target_compile_options(terrain_tile_blend_tests PRIVATE /W4 /WX)
     target_compile_options(terrain_atlas_rect_repair_tests PRIVATE /W4 /WX)
     target_compile_options(resolve_table_tests PRIVATE /W4 /WX)
@@ -335,6 +352,7 @@ else()
     target_compile_options(env_switch_table_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(bool_token_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(memory_access_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(stable_id_list_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(terrain_tile_blend_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(terrain_atlas_rect_repair_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(resolve_table_tests PRIVATE -Wall -Wextra -Werror)
@@ -365,6 +383,7 @@ add_test(NAME sun_flash_tests COMMAND sun_flash_tests)
 add_test(NAME env_switch_table_tests COMMAND env_switch_table_tests)
 add_test(NAME bool_token_tests COMMAND bool_token_tests)
 add_test(NAME memory_access_tests COMMAND memory_access_tests)
+add_test(NAME stable_id_list_tests COMMAND stable_id_list_tests)
 add_test(NAME terrain_tile_blend_tests COMMAND terrain_tile_blend_tests)
 add_test(NAME terrain_atlas_rect_repair_tests COMMAND terrain_atlas_rect_repair_tests)
 add_test(NAME resolve_table_tests COMMAND resolve_table_tests)
