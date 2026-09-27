@@ -13,6 +13,7 @@
 #include "autosave_gate.h"
 #include "BZROpenShim.h"
 #include "game_state.h"
+#include "memory_access.h"
 #include "native_save_flag.h"
 #include "shim_log.h"
 
@@ -233,65 +234,18 @@ namespace BZROpenShim
             }
         }
 
-        bool IsExecutableAddress(const void* address) noexcept
-        {
-            if (!address)
-                return false;
-
-            MEMORY_BASIC_INFORMATION mbi{};
-            if (VirtualQuery(address, &mbi, sizeof(mbi)) != sizeof(mbi) || mbi.State != MEM_COMMIT)
-                return false;
-
-            if ((mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
-                return false;
-
-            const DWORD protect = mbi.Protect & 0xFF;
-            return protect == PAGE_EXECUTE ||
-                   protect == PAGE_EXECUTE_READ ||
-                   protect == PAGE_EXECUTE_READWRITE ||
-                   protect == PAGE_EXECUTE_WRITECOPY;
-        }
-
-        bool IsReadableAddress(const void* address, size_t length) noexcept
-        {
-            if (!address || length == 0)
-                return false;
-
-            MEMORY_BASIC_INFORMATION mbi{};
-            if (VirtualQuery(address, &mbi, sizeof(mbi)) != sizeof(mbi) || mbi.State != MEM_COMMIT)
-                return false;
-
-            if ((mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
-                return false;
-
-            const DWORD protect = mbi.Protect & 0xFF;
-            const bool readable =
-                protect == PAGE_READONLY ||
-                protect == PAGE_READWRITE ||
-                protect == PAGE_WRITECOPY ||
-                protect == PAGE_EXECUTE_READ ||
-                protect == PAGE_EXECUTE_READWRITE ||
-                protect == PAGE_EXECUTE_WRITECOPY;
-            if (!readable)
-                return false;
-
-            const auto regionEnd =
-                reinterpret_cast<uintptr_t>(mbi.BaseAddress) + static_cast<uintptr_t>(mbi.RegionSize);
-            return reinterpret_cast<uintptr_t>(address) + length <= regionEnd;
-        }
-
         // A non-null global is not proof that the object behind it was ever
         // constructed. SaveGame walks the mission through virtual calls, so the
         // cheapest honest check is that the pointer looks like a live C++
         // object: readable storage, a readable vtable, and code at slot 0.
         bool IsPlausiblePolymorphicObject(void* object) noexcept
         {
-            if (!IsReadableAddress(object, sizeof(void*)))
+            if (!BZROpenShim::MemoryAccess::IsReadable(object, sizeof(void*)))
                 return false;
 
             void* vtable = nullptr;
             if (!SafeReadPointer(reinterpret_cast<uintptr_t>(object), vtable) ||
-                !IsReadableAddress(vtable, sizeof(void*)))
+                !BZROpenShim::MemoryAccess::IsReadable(vtable, sizeof(void*)))
             {
                 return false;
             }
@@ -300,7 +254,7 @@ namespace BZROpenShim
             if (!SafeReadPointer(reinterpret_cast<uintptr_t>(vtable), firstVirtual))
                 return false;
 
-            return IsExecutableAddress(firstVirtual);
+            return BZROpenShim::MemoryAccess::IsExecutable(firstVirtual);
         }
 
         std::filesystem::path GetGameDirectory()
@@ -774,7 +728,7 @@ namespace BZROpenShim
                 g_hookInstalled = true;
                 return true;
             }
-            if (!current || !IsExecutableAddress(current))
+            if (!current || !BZROpenShim::MemoryAccess::IsExecutable(current))
             {
                 LogShimA(LogLevel::Error, "autosave", "World-update vtable target is invalid (%p)", current);
                 return false;
