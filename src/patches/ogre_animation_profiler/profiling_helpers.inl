@@ -1459,58 +1459,7 @@
                 GetModuleHandleA("OgreMain.dll"), exportAddress, label);
         }
 
-        std::vector<ExportMatch> FindExportsContaining(const char* token)
-        {
-            std::vector<ExportMatch> matches;
-            if (!token || !*token)
-                return matches;
-
-            HMODULE module = GetModuleHandleA("OgreMain.dll");
-            if (!module)
-                return matches;
-
-            auto* base = reinterpret_cast<uint8_t*>(module);
-            auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-            if (dos->e_magic != IMAGE_DOS_SIGNATURE)
-                return matches;
-            auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-            if (nt->Signature != IMAGE_NT_SIGNATURE)
-                return matches;
-
-            const IMAGE_DATA_DIRECTORY& directory =
-                nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-            if (!directory.VirtualAddress || !directory.Size)
-                return matches;
-
-            auto* exports = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(base + directory.VirtualAddress);
-            auto* names = reinterpret_cast<DWORD*>(base + exports->AddressOfNames);
-            auto* ordinals = reinterpret_cast<WORD*>(base + exports->AddressOfNameOrdinals);
-            auto* functions = reinterpret_cast<DWORD*>(base + exports->AddressOfFunctions);
-
-            for (DWORD i = 0; i < exports->NumberOfNames; ++i)
-            {
-                const char* name = reinterpret_cast<const char*>(base + names[i]);
-                if (!name || std::strstr(name, token) == nullptr)
-                    continue;
-
-                const WORD ordinal = ordinals[i];
-                if (ordinal >= exports->NumberOfFunctions)
-                    continue;
-                const DWORD functionRva = functions[ordinal];
-
-                // Ignore forwarded exports.
-                if (functionRva >= directory.VirtualAddress &&
-                    functionRva < directory.VirtualAddress + directory.Size)
-                {
-                    continue;
-                }
-
-                void* address = base + functionRva;
-                if (OgreRuntime::ContainsAddress(address))
-                    matches.push_back({ name, address });
-            }
-            return matches;
-        }
+        using OgreRuntime::FindExportsContaining;
 
         void* FindUniqueFunctionExport(const char* token, const char* label)
         {

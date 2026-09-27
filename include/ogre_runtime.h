@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace BZROpenShim
 {
@@ -25,5 +27,17 @@ namespace BZROpenShim
         // Returns true only when address lies inside the currently loaded
         // OgreMain.dll image.
         bool ContainsAddress(const void* address) noexcept;
+
+        struct ExportMatch
+        {
+            std::string name;
+            void* address = nullptr;
+        };
+
+        // Every OgreMain.dll export whose decorated name contains `token`,
+        // skipping forwarded exports and any address outside the image. The
+        // diagnostic instruments use it to find a member by a fragment of its
+        // mangled name and then insist on exactly one match.
+        std::vector<ExportMatch> FindExportsContaining(const char* token);
     }
 }
