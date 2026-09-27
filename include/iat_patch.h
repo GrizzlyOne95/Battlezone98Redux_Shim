@@ -149,7 +149,8 @@ namespace IatPatch
             const char* functionName,
             FARPROC targetProc,
             void* replacement,
-            void** original)
+            void** original,
+            void*** outSlot)
         {
             __try
             {
@@ -181,8 +182,9 @@ namespace IatPatch
                     if (!descriptor.Name)
                         break;
 
+                    // A null importedDll searches every descriptor.
                     const char* dllName = view.StringAt(descriptor.Name);
-                    if (!dllName || _stricmp(dllName, importedDll) != 0)
+                    if (!dllName || (importedDll && _stricmp(dllName, importedDll) != 0))
                         continue;
 
                     auto* firstThunk =
@@ -236,7 +238,11 @@ namespace IatPatch
                         auto** entry =
                             reinterpret_cast<void**>(&firstThunk->u1.Function);
                         if (*entry == replacement)
+                        {
+                            if (outSlot)
+                                *outSlot = entry;
                             return Result::Patched;
+                        }
 
                         DWORD oldProtect = 0;
                         if (!VirtualProtect(
@@ -257,6 +263,8 @@ namespace IatPatch
                         VirtualProtect(entry, sizeof(void*), oldProtect, &ignored);
                         FlushInstructionCache(
                             GetCurrentProcess(), entry, sizeof(void*));
+                        if (outSlot)
+                            *outSlot = entry;
                         return Result::Patched;
                     }
                 }
@@ -272,13 +280,15 @@ namespace IatPatch
 
     // Redirect one imported function in `module` to `replacement`, recording the
     // previous value in `*original` if it is still null. Never throws, never
-    // faults the process.
+    // faults the process. `outSlot`, when given, receives the patched IAT entry
+    // (only on Patched), for callers that restore it later.
     inline Result PatchImport(
         HMODULE module,
         const char* importedDll,
         const char* functionName,
         void* replacement,
-        void** original)
+        void** original,
+        void*** outSlot = nullptr)
     {
         if (!module || !importedDll || !functionName || !replacement)
             return Result::NotFound;
@@ -292,7 +302,30 @@ namespace IatPatch
             targetProc = GetProcAddress(importedModule, functionName);
 
         return Detail::PatchImportGuarded(
-            view, importedDll, functionName, targetProc, replacement, original);
+            view, importedDll, functionName, targetProc, replacement, original, outSlot);
+    }
+
+    // As PatchImport, for a function whose importing DLL name is not fixed
+    // (kernel32 versus an api-ms-win-* set, a CRT version): the first
+    // descriptor that imports `functionName` by name is patched. Descriptors
+    // without an import-name table are skipped, since there is no single
+    // export address to match them by.
+    inline Result PatchImportFromAnyDll(
+        HMODULE module,
+        const char* functionName,
+        void* replacement,
+        void** original,
+        void*** outSlot = nullptr)
+    {
+        if (!module || !functionName || !replacement)
+            return Result::NotFound;
+
+        Detail::MappedImageView view;
+        if (!Detail::TryGetMappedImageView(module, view))
+            return Result::Faulted;
+
+        return Detail::PatchImportGuarded(
+            view, nullptr, functionName, nullptr, replacement, original, outSlot);
     }
 
     // Block until the loader has finished with `module`.
