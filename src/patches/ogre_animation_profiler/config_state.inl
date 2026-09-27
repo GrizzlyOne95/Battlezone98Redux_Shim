@@ -245,12 +245,6 @@ namespace BZROpenShim
             void* original = nullptr;
         };
 
-        struct ExportMatch
-        {
-            std::string name;
-            void* address = nullptr;
-        };
-
         struct EntityProfileSlot
         {
             std::atomic<uintptr_t> key{ 0 };
