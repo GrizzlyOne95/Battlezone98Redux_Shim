@@ -1,4 +1,5 @@
 #include "dx11_enhanced_fxaa.h"
+#include "com_vtable_patch.h"
 #include "diagnostic_switch.h"
 #include "dx11_enhanced_fxaa_resources.h"
 #include "shim_log.h"
@@ -161,51 +162,21 @@ namespace BZROpenShim
         }
 
         template <typename T>
-        bool PatchComVtableEntry(
-            void* object,
-            size_t index,
-            T hook,
-            T& original,
-            const char* label)
+        bool PatchComVtableEntry(void* object, size_t index, T hook, T& original, const char* label)
         {
-            if (!object || !hook)
-                return false;
-
+            // Preserve the first predecessor and overwrite whatever wraps the
+            // entry now, so this instrument stays attached alongside the other
+            // D3D observers regardless of which reached the vtable first.
             std::lock_guard<std::mutex> lock(g_HookMutex);
-
-            auto*** objectAsVtable = reinterpret_cast<void***>(object);
-            if (!objectAsVtable || !*objectAsVtable)
-                return false;
-
-            void** vtable = *objectAsVtable;
-            void* current = vtable[index];
-            if (current == reinterpret_cast<void*>(hook))
-                return true;
-
-            DWORD oldProtect = 0;
-            if (!VirtualProtect(&vtable[index], sizeof(void*), PAGE_EXECUTE_READWRITE, &oldProtect))
+            const ComVtablePatch::Result result = ComVtablePatch::PatchEntry(
+                object, index, hook, original, ComVtablePatch::OnForeignWrapper::Overwrite);
+            if (result == ComVtablePatch::Result::NotWritable)
             {
-                LogShimA(
-                    LogLevel::Warn,
-                    kComponent,
+                LogShimA(LogLevel::Warn, kComponent,
                     "[DX11 Enhanced FXAA] failed to make %s vtable entry writable (err=%lu)",
-                    label,
-                    GetLastError());
-                return false;
+                    label, GetLastError());
             }
-
-            // Preserve the first predecessor in the hook chain. This lets the
-            // color-space observer and FXAA coexist regardless of which one
-            // reached the shared D3D/DXGI vtable first.
-            if (!original)
-                original = reinterpret_cast<T>(current);
-
-            vtable[index] = reinterpret_cast<void*>(hook);
-
-            DWORD ignored = 0;
-            VirtualProtect(&vtable[index], sizeof(void*), oldProtect, &ignored);
-            FlushInstructionCache(GetCurrentProcess(), &vtable[index], sizeof(void*));
-            return true;
+            return ComVtablePatch::Succeeded(result);
         }
 
         bool PatchIatFunction(
