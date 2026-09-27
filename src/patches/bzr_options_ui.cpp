@@ -1763,7 +1763,10 @@ namespace BZROpenShim
                                                void* onClick,
                                                void* onHover = nullptr)
         {
-            if (!parent || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild)
+            // The engine calls a child button's hover/click slots; a button
+            // built without them crashes the screen.
+            if (!parent || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild ||
+                !g_BzrFn_SetOnClick || !g_BzrFn_SetOnHover)
                 return false;
 
             if (!slot)
@@ -5068,7 +5071,8 @@ namespace BZROpenShim
         // of clipping off the bottom.
         static void EnsureShimSettingsMenuButton(void* parentScreen)
         {
-            if (!parentScreen || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild)
+            if (!parentScreen || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild ||
+                !g_BzrFn_SetOnClick || !g_BzrFn_SetOnHover)
                 return;
 
             if (g_ParentScreenBinding.constructed != parentScreen)

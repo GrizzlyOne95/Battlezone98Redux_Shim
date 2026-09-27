@@ -370,7 +370,10 @@ namespace BZROpenShim
 
     static void AutoSaveLoadButtonCreate(void* parent, void* screen)
     {
-        if (!parent || !screen || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild)
+        // The engine calls a child button's hover/click slots; a button built
+        // without them crashes the dialog, so both setters are required.
+        if (!parent || !screen || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild ||
+            !g_BzrFn_SetOnClick || !g_BzrFn_SetOnHover)
             return;
 
         if (!AutoSaveFileExists())
