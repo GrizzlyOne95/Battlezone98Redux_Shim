@@ -1494,6 +1494,106 @@ namespace BZROpenShim
             char* outMeshName,
             size_t outMeshNameCapacity);
 
+        // --- Chunk identity (chunk_identity.cpp) -------------------------------
+        struct ChunkEffectActiveEntry
+        {
+            const uint8_t* objectBytes = nullptr;
+            uint32_t reserved = 0;
+            float timer = 0.0f;
+            float velocityX = 0.0f;
+            float velocityY = 0.0f;
+            float velocityZ = 0.0f;
+            float omegaX = 0.0f;
+            float omegaY = 0.0f;
+            float omegaZ = 0.0f;
+        };
+        struct ChunkObjectIdentityCacheEntry
+        {
+            char meshName[48] = {};
+            char vdfCandidates[128] = {};
+            char geomName[64] = {};
+            uint32_t classId = 0;
+        };
+        struct ChunkResolvedBindingEntry
+        {
+            char meshName[48] = {};
+            char payloadMeshName[128] = {};
+            char vdfCandidates[128] = {};
+            uint32_t sourceClassId = 0;
+            uint32_t sourceRootObjectPtr = 0;
+            uint32_t sourceOwnerEntityPtr = 0;
+            uint32_t sourceOwnerObjPtr = 0;
+            uint32_t sourceGameObjectPtr = 0;
+            uint32_t sourceRootGameObjectPtr = 0;
+            char sourceGeomName[64] = {};
+            DWORD bindTick = 0;
+            DWORD lastSeenTick = 0;
+        };
+        inline constexpr uintptr_t kChunkEffectActiveCountOffset = 0x8028;
+        bool TryGetChunkProxyPosition(const uint8_t* objectBytes, float& outX, float& outY, float& outZ);
+        extern char g_ActiveFragmentSourceMeshName[48];
+        extern std::unordered_map<uintptr_t, ChunkResolvedBindingEntry> g_ChunkResolvedBindingCache;
+        extern DWORD g_ChunkResolvedBindingLastPruneTick;
+        extern bool g_EnableChunkProxyDebug;
+        bool TryReadInlineAsciiBuffer(
+            const void* address,
+            size_t maxInlineBytes,
+            char* outText,
+            size_t outTextCapacity);
+        bool TryReadOwnerEntityNames(
+            const void* ownerEntity,
+            char* outEntityBaseName,
+            size_t outEntityBaseNameCapacity,
+            char* outOgreFilename,
+            size_t outOgreFilenameCapacity,
+            char* outResolvedMeshName,
+            size_t outResolvedMeshNameCapacity);
+        bool TryReadChunkGeomIdentity(
+            const uint8_t* objectBytes,
+            const void*& outGeomRef,
+            char* outGeomName,
+            size_t outGeomNameCapacity);
+        bool TryReadChunkObjectSummary(
+            const uint8_t* objectBytes,
+            uint32_t& outClassId,
+            uint32_t& outFlags,
+            void*& outGeomRef,
+            char* outGeomName,
+            size_t outGeomNameCapacity,
+            void*& outOwner);
+        bool CaptureChunkObjectLinkProbe(const uint8_t* objectBytes, ChunkObjectLinkProbe& outProbe);
+        void EraseChunkResolvedBinding(const uint8_t* objectBytes);
+        const ChunkResolvedBindingEntry* FindChunkResolvedBindingEntryForGeom(
+            const uint8_t* objectBytes,
+            const char* liveGeomName);
+        void StoreChunkResolvedBinding(
+            const uint8_t* objectBytes,
+            const ChunkCreateSourceTreeProbe& sourceTreeProbe);
+        void TouchChunkResolvedBinding(const uint8_t* objectBytes);
+        void PruneChunkResolvedBindingsIfNeeded();
+        void PopulateChunkObjectLinkProbeFromIdentityCache(ChunkObjectLinkProbe& probe);
+        bool CaptureChunkCreateSourceTreeProbe(
+            const uint8_t* sourceBytes,
+            ChunkCreateSourceTreeProbe& outProbe);
+        bool TryReadChunkEffectCount(const uint8_t* thisBytes, uint32_t& outCount);
+        void LogChunkCreateLifecycle(
+            const wchar_t* tag,
+            void* thisPtr,
+            const uint8_t* sourceBytes,
+            const float* positionVec,
+            const float* velocityVec,
+            uint8_t preserveFlag,
+            uint32_t countBefore,
+            uint32_t countAfter,
+            const ChunkEffectActiveEntry* createdEntry,
+            const ChunkCreateSourceTreeProbe* sourceTreeProbe);
+        bool TryReadChunkObjectLinks(
+            const uint8_t* objectBytes,
+            const uint8_t*& outParent,
+            const uint8_t*& outSibling,
+            const uint8_t*& outChild);
+        void RefreshChunkObjectIdentityCacheIfNeeded();
+
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
         extern float g_SatelliteZoomOutMultiplierBaseline;
