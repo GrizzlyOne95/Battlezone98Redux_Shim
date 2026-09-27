@@ -203,6 +203,7 @@
     <ClCompile Include="src\patches\game_state.cpp" />
     <ClCompile Include="src\patches\mp_faction_restrict.cpp" />
     <ClCompile Include="src\patches\mp_ready_diagnostic.cpp" />
+    <ClCompile Include="src\patches\mp_map_filter_extras.cpp" />
     <ClCompile Include="src\patches\mp_vehicle_preview_fix.cpp" />
     <ClCompile Include="src\patches\native_cpu_sampler.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
