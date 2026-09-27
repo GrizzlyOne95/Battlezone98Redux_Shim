@@ -214,6 +214,35 @@ void TestLeftoverScriptShadowingPayloadFails()
     std::filesystem::remove_all(dir, g_errc);
 }
 
+void TestLeftoverScriptInSubdirectoryFails()
+{
+    std::printf("TestLeftoverScriptInSubdirectoryFails\n");
+    // Ogre registers the location recursively, so a script one folder down
+    // is parsed as well -- including a copy that keeps a mandatory name.
+    const auto dir = MakeScratchDir("leftover_subdir");
+    PopulateValidSet(dir);
+    std::filesystem::create_directories(dir / "old");
+    {
+        std::ofstream stale(dir / "old" / RequiredEnhancedResourceAt(0), std::ios::binary);
+        stale << "stale copy";
+    }
+
+    std::string problem;
+    ExpectTrue(!Validate(dir, problem), "script in a subdirectory is rejected");
+    ExpectContains(problem, "old/", "problem names the subdirectory path");
+
+    std::filesystem::remove_all(dir / "old", g_errc);
+    std::filesystem::create_directories(dir / "shaders");
+    {
+        std::ofstream inert(dir / "shaders" / "anything.hlsl", std::ios::binary);
+        inert << "// inert";
+    }
+    problem.clear();
+    ExpectTrue(Validate(dir, problem), "shader source in a subdirectory still validates");
+
+    std::filesystem::remove_all(dir, g_errc);
+}
+
 void TestAbsentDirectoryFails()
 {
     std::printf("TestAbsentDirectoryFails\n");
@@ -232,6 +261,7 @@ int main()
     TestVersionMarkerContract();
     TestVersionMarkerComparison();
     TestLeftoverScriptShadowingPayloadFails();
+    TestLeftoverScriptInSubdirectoryFails();
     TestAbsentDirectoryFails();
 
     if (g_failures != 0)
