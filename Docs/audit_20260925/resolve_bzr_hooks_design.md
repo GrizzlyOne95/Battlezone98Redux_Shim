@@ -66,7 +66,7 @@ The precedence rules for each switch get a pure helper with a unit test under `t
 | PR | Change | Behavior change |
 |---|---|---|
 | R1 | Move C (dynamic alpha batching, profiler detour and IAT hook) into `dynamic_geometry_hooks.cpp`, verbatim. | none |
-| R2 | Extract A as `ResetBzrHookRuntimeState()` and F as `LogBzrHookStatus()`, verbatim, in new files. | none |
+| R2 | Extract A as `ResetBzrHookRuntimeState()` and F (the contiguous log block) as `LogBzrHookStatus(rawInputActive, rawInputSource)`, verbatim. Both stay in `bzr_hooks.cpp`: moving them out would carry 127 (reset) and 6 (status) feature-state definitions into files named for the reset and the log. Those definitions only stayed in the spine because the reset touches them; their real homes are the feature files (see decision 2). | none |
 | R3 | Switch table for E, plus the precedence unit test. Every env name and ini key is preserved; the status log must match main byte for byte. | none |
 | R4 | Address table in C++ (`{name, address, void** target}`) replacing the ~90 assignments. Values unchanged; log `[ADDR] bound N of M`. | none |
 | R5 | Move the table into `scripts/patches.json` with a prologue `expected_original` per function, so a mismatch leaves the pointer null (fail closed). Needs a null-safety audit of every caller first, because some call unconditionally (for example `native_ui.cpp:1064` after a check at :153, while others don't check). | **yes**: pointers can now be null |
