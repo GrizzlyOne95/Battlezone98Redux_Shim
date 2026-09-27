@@ -90,6 +90,12 @@ jobs:
       shell: pwsh
       run: ./scripts/Test-EnhancedShaderCompile.ps1
 
+    # Same gate as build-win32.yml: a release must not ship shaders the
+    # branch build would have rejected.
+    - name: Validate Enhanced PSSM v2 math, isolation, and cost
+      shell: pwsh
+      run: ./scripts/Test-EnhancedPssmV2.ps1
+
     - name: Add MSBuild to PATH
       uses: microsoft/setup-msbuild@v2
 
