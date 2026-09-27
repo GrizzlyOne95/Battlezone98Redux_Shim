@@ -37,6 +37,7 @@
 // Calling a non-virtual Ogre method through the header is a link error.
 
 #include "walker_cockpit_trace.h"
+#include "diagnostic_switch.h"
 #include "engine_globals.h"
 #include "memory_access.h"
 #include "ogre_runtime.h"
@@ -264,32 +265,11 @@ namespace BZROpenShim
 
         // ================= low-level safe access =========================
 
-        bool IsTruthy(const char* v)
-        {
-            if (!v || !*v)
-                return false;
-            return !(std::strcmp(v, "0") == 0 || _stricmp(v, "false") == 0 ||
-                _stricmp(v, "no") == 0 || _stricmp(v, "off") == 0);
-        }
-
         bool Requested()
         {
-            char env[64] = {};
-            const DWORD len = GetEnvironmentVariableA(kEnvSwitch, env, sizeof(env));
-            if (len > 0 && len < sizeof(env))
-                return IsTruthy(env);
-            char path[MAX_PATH] = {};
-            if (GetModuleFileNameA(nullptr, path, MAX_PATH) > 0)
-            {
-                char* slash = std::strrchr(path, '\\');
-                if (slash)
-                    *(slash + 1) = '\0';
-                std::string ini = std::string(path) + "openshim.ini";
-                // Fail-closed: this is an investigation instrument, not a shipped
-                // feature. It must never run on a normal player's machine.
-                return GetPrivateProfileIntA(kIniSection, kIniKey, 0, ini.c_str()) != 0;
-            }
-            return false;
+            // Fail-closed: this is an investigation instrument, not a shipped
+            // feature. It must never run on a normal player's machine.
+            return BZROpenShim::DiagnosticSwitch::Requested(kEnvSwitch, kIniSection, kIniKey);
         }
 
         // No C++ objects requiring unwind may appear in a function using SEH.
