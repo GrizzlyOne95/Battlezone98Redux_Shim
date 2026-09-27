@@ -1,4 +1,5 @@
 #include "dx11_enhanced_fxaa.h"
+#include "diagnostic_switch.h"
 #include "dx11_enhanced_fxaa_resources.h"
 #include "shim_log.h"
 
@@ -81,47 +82,9 @@ namespace BZROpenShim
             }
         }
 
-        bool StringIsTruthy(const char* value)
-        {
-            if (!value || !*value)
-                return false;
-
-            std::string v(value);
-            for (char& c : v)
-                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
-            return v != "0" && v != "false" && v != "no" && v != "off" && v != "disabled";
-        }
-
-        std::string GetOpenShimIniPath()
-        {
-            char path[MAX_PATH] = {};
-            const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-            if (length == 0 || length >= MAX_PATH)
-                return "openshim.ini";
-
-            char* slash = std::strrchr(path, '\\');
-            if (slash)
-                *(slash + 1) = '\0';
-            else
-                path[0] = '\0';
-
-            return std::string(path) + "openshim.ini";
-        }
-
         bool FxaaRequested()
         {
-            char envValue[64] = {};
-            const DWORD envLength = GetEnvironmentVariableA(
-                kEnvironmentSwitch,
-                envValue,
-                static_cast<DWORD>(sizeof(envValue)));
-
-            if (envLength > 0 && envLength < sizeof(envValue))
-                return StringIsTruthy(envValue);
-
-            const std::string iniPath = GetOpenShimIniPath();
-            return GetPrivateProfileIntA(kIniSection, kIniKey, 0, iniPath.c_str()) != 0;
+            return BZROpenShim::DiagnosticSwitch::Requested(kEnvironmentSwitch, kIniSection, kIniKey);
         }
 
         HMODULE GetThisModule()

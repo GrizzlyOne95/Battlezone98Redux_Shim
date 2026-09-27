@@ -94,5 +94,33 @@ namespace BoolToken
     {
         return TryParse(text.data(), text.size(), out);
     }
+
+    // The reading for an opt-in switch such as OPENSHIM_TRACE_X: a set,
+    // non-blank value turns it on unless it is one of the false words, so
+    // OPENSHIM_TRACE_X=2 or =verbose also turns it on. Blank is off.
+    inline bool IsTruthy(const char* text, size_t length)
+    {
+        if (!text)
+            return false;
+        bool value = false;
+        if (TryParse(text, length, value))
+            return value;
+        for (size_t i = 0; i < length; ++i)
+        {
+            if (!Detail::IsAsciiSpace(text[i]))
+                return true;
+        }
+        return false;
+    }
+
+    inline bool IsTruthy(const char* text)
+    {
+        return text != nullptr && IsTruthy(text, std::strlen(text));
+    }
+
+    inline bool IsTruthy(const std::string& text)
+    {
+        return IsTruthy(text.data(), text.size());
+    }
 }
 }

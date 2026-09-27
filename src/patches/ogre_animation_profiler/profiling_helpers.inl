@@ -1,11 +1,3 @@
-            char* slash = std::strrchr(path, '\\');
-            if (slash)
-                *(slash + 1) = '\0';
-            else
-                path[0] = '\0';
-            return std::string(path) + "openshim.ini";
-        }
-
         enum class ConfiguredRenderer
         {
             Unknown,

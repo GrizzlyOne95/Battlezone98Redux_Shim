@@ -42,6 +42,7 @@
 #include <string>
 
 #include "dx11_scene_depth.h"
+#include "diagnostic_switch.h"
 #include "scene_depth_facts.h"
 #include "shim_log.h"
 
@@ -144,42 +145,9 @@ namespace BZROpenShim
         // Gating
         // ------------------------------------------------------------------
 
-        bool StringIsTruthy(const char* value)
-        {
-            if (!value || !*value)
-                return false;
-            return value[0] == '1' || value[0] == 'y' || value[0] == 'Y'
-                || value[0] == 't' || value[0] == 'T'
-                || value[0] == 'o' || value[0] == 'O';
-        }
-
-        std::string GetOpenShimIniPath()
-        {
-            char path[MAX_PATH] = {};
-            const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-            if (length == 0 || length >= MAX_PATH)
-                return "openshim.ini";
-
-            char* lastSlash = std::strrchr(path, '\\');
-            if (!lastSlash)
-                return "openshim.ini";
-
-            *(lastSlash + 1) = '\0';
-            std::string iniPath(path);
-            iniPath += "openshim.ini";
-            return iniPath;
-        }
-
         bool DiagnosticRequested()
         {
-            char envValue[64] = {};
-            const DWORD envLength = GetEnvironmentVariableA(
-                kEnvironmentSwitch, envValue, static_cast<DWORD>(sizeof(envValue)));
-            if (envLength > 0 && envLength < sizeof(envValue))
-                return StringIsTruthy(envValue);
-
-            const std::string iniPath = GetOpenShimIniPath();
-            return GetPrivateProfileIntA(kIniSection, kIniKey, 0, iniPath.c_str()) != 0;
+            return BZROpenShim::DiagnosticSwitch::Requested(kEnvironmentSwitch, kIniSection, kIniKey);
         }
 
         // ------------------------------------------------------------------
