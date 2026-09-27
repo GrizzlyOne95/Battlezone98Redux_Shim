@@ -94,7 +94,7 @@ That is what the design doc meant by existing hooks being references, not proof.
 
 A third point does exist. `?addRenderQueueListener@SceneManager@Ogre@@UAEXPAVRenderQueueListener@2@@Z`
 is exported, and a listener attaches and runs correctly on the shipped OgreMain.
-`src/patches/render_queue_trace.cpp` implements one with a **hand-built vtable**
+`src/patches/render_queue_trace.cpp` (removed 2026-09-27 once this question was answered; see git history) implemented one with a **hand-built vtable**
 rather than by inheriting from the repo's copy of the 1.10 header, so the ABI
 assumption is explicit and each slot reports its own index. It reads cleanly,
 which qualifies the interface as well as the insertion point.
