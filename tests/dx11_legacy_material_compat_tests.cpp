@@ -518,10 +518,11 @@ std::string ReadTextFile(const char* path)
     return text;
 }
 
-// The block of a "vertex_program <name> hlsl" declaration, or "" if absent.
-std::string ProgramBlock(const std::string& script, const std::string& name)
+// The block of a "<kind> <name> hlsl" declaration, or "" if absent.
+std::string ProgramBlock(const std::string& script, const std::string& name,
+                         const char* kind = "vertex_program")
 {
-    const std::string header = "vertex_program " + name + " hlsl";
+    const std::string header = std::string(kind) + " " + name + " hlsl";
     size_t at = 0;
     while ((at = script.find(header, at)) != std::string::npos)
     {
@@ -683,9 +684,235 @@ void TestVertexInputFit()
                    "hlsl guards the TEXCOORD0 input");
 }
 
+namespace
+{
+    // As TextureUnitState::setColourOperation stores the shorthands.
+    TextureStageDesc Stage(int colourOp, int src1 = BlendSource::Texture,
+                           int src2 = BlendSource::Current)
+    {
+        TextureStageDesc stage;
+        stage.known = true;
+        stage.colourOp = colourOp;
+        stage.colourSrc1 = src1;
+        stage.colourSrc2 = src2;
+        stage.alphaOp = BlendOpEx::Modulate;
+        stage.alphaSrc1 = BlendSource::Texture;
+        stage.alphaSrc2 = BlendSource::Current;
+        stage.texCoordSet = 0;
+        return stage;
+    }
+
+    // ISDF Chronicles xrain.material: unit 0 xrain.dds (scroll_anim, default
+    // modulate), unit 1 xrainmask.dds with colour_op alpha_blend.
+    LegacyPassDesc XrainDesc()
+    {
+        LegacyPassDesc d;
+        d.textureUnits = 2;
+        d.stages.push_back(Stage(BlendOpEx::Modulate));
+        d.stages.push_back(Stage(BlendOpEx::BlendTextureAlpha));
+        return d;
+    }
+}
+
+void TestTwoStageFixedFunction()
+{
+    std::printf("TestTwoStageFixedFunction\n");
+
+    // Stage colour classification from the expanded LayerBlendModeEx.
+    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::Modulate)) ==
+                   StageCombine::Modulate,
+               "modulate");
+    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::Modulate,
+                                         BlendSource::Current,
+                                         BlendSource::Texture)) ==
+                   StageCombine::Modulate,
+               "modulate is commutative");
+    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::Add)) == StageCombine::Add,
+               "add");
+    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::Source1)) ==
+                   StageCombine::Replace,
+               "replace");
+    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::BlendTextureAlpha)) ==
+                   StageCombine::AlphaBlendTexture,
+               "alpha_blend");
+    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::BlendTextureAlpha,
+                                         BlendSource::Current,
+                                         BlendSource::Texture)) ==
+                   StageCombine::Unsupported,
+               "alpha_blend with swapped operands is a different combine");
+    ExpectTrue(ClassifyStageColour(Stage(13 /* LBX_DOTPRODUCT */)) ==
+                   StageCombine::Unsupported,
+               "dotproduct unsupported");
+    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::Modulate, 2 /* diffuse */,
+                                         BlendSource::Current)) ==
+                   StageCombine::Unsupported,
+               "non-texture source unsupported");
+    TextureStageDesc unread = Stage(BlendOpEx::Modulate);
+    unread.known = false;
+    ExpectTrue(ClassifyStageColour(unread) == StageCombine::Unsupported,
+               "unread stage is unsupported");
+    ExpectTrue(IsDefaultStageAlpha(Stage(BlendOpEx::Add)), "default alpha");
+    TextureStageDesc replaceAlpha = Stage(BlendOpEx::Modulate);
+    replaceAlpha.alphaOp = BlendOpEx::Source1;
+    ExpectTrue(!IsDefaultStageAlpha(replaceAlpha),
+               "alpha_op_ex source1 is not default");
+    ExpectTrue(std::strcmp(StageCombineName(StageCombine::AlphaBlendTexture),
+                           "alpha_blend") == 0,
+               "stage combine names");
+
+    // The support set.
+    ExpectTrue(IsSupportedTwoStageCombo(XrainDesc()), "xrain is supported");
+    LegacyPassDesc modulate2 = XrainDesc();
+    modulate2.stages[1] = Stage(BlendOpEx::Modulate);
+    ExpectTrue(IsSupportedTwoStageCombo(modulate2),
+               "modulate/modulate supported");
+
+    LegacyPassDesc d = XrainDesc();
+    d.stages[1] = Stage(BlendOpEx::Add);
+    ExpectTrue(!IsSupportedTwoStageCombo(d),
+               "stage 1 add is outside the bounded set");
+    d = XrainDesc();
+    d.stages[0] = Stage(BlendOpEx::Source1);
+    ExpectTrue(!IsSupportedTwoStageCombo(d), "stage 0 must modulate");
+    d = XrainDesc();
+    d.stages[1].texCoordSet = 1;
+    ExpectTrue(!IsSupportedTwoStageCombo(d), "a second UV set is declined");
+    d = XrainDesc();
+    d.stages[1].known = false;
+    ExpectTrue(!IsSupportedTwoStageCombo(d), "an unread stage is declined");
+    d = XrainDesc();
+    d.stages[0].alphaOp = BlendOpEx::Source1;
+    ExpectTrue(!IsSupportedTwoStageCombo(d), "non-default alpha is declined");
+    d = XrainDesc();
+    d.stages.pop_back();
+    ExpectTrue(!IsSupportedTwoStageCombo(d),
+               "stage count must match the units");
+    d = XrainDesc();
+    d.textureUnits = 3;
+    d.stages.push_back(Stage(BlendOpEx::Modulate));
+    ExpectTrue(!IsSupportedTwoStageCombo(d), "three units are declined");
+    ExpectTrue(!IsSupportedTwoStageCombo(FixedFuncDesc(2, "modulate")),
+               "two units with no stage state (ABI unavailable) are declined");
+
+    // Decision ladder.
+    CompatConfig on;
+    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, XrainDesc(),
+                                on) == CompatPath::FixedFuncTextured2,
+               "xrain takes the two-stage path");
+    CompatConfig off = on;
+    off.compatEnabled = false;
+    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, XrainDesc(),
+                                off) == CompatPath::SkipShaderless,
+               "compat off still skips");
+    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, XrainDesc(),
+                                on, false) == CompatPath::SkipShaderless,
+               "missing resources still fail closed");
+    d = XrainDesc();
+    d.stages[1].texCoordSet = 1;
+    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, d, on) ==
+                   CompatPath::SkipShaderless,
+               "unsupported two-unit pass still skips");
+    ExpectTrue(std::strcmp(CompatPathName(CompatPath::FixedFuncTextured2),
+                           "fixedfunc-textured2") == 0,
+               "path name");
+
+    // Program resolution follows the stage 1 combine.
+    std::string vs;
+    std::string ps;
+    ExpectTrue(ResolveCompatPrograms(CompatPath::FixedFuncTextured2,
+                                     XrainDesc(), vs, ps) &&
+                   vs == "OSE_FixedFunc_Textured2_vertex" &&
+                   ps == "OSE_FixedFunc_Textured2_fragment_alphablend",
+               "xrain resolves to the alpha_blend pair");
+    ExpectTrue(ResolveCompatPrograms(CompatPath::FixedFuncTextured2, modulate2,
+                                     vs, ps) &&
+                   ps == "OSE_FixedFunc_Textured2_fragment_modulate",
+               "modulate/modulate resolves to the modulate pair");
+    ExpectTrue(!ResolveCompatPrograms(CompatPath::FixedFuncTextured2,
+                                      FixedFuncDesc(2, "modulate"), vs, ps) &&
+                   vs.empty() && ps.empty(),
+               "an unsupported desc never half-resolves");
+
+    // Vertex-input fitting: own entry, own variant, TEXCOORD0 required.
+    VertexInputs full;
+    full.known = true;
+    full.diffuse = true;
+    full.texcoord0 = true;
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex", full,
+                                        vs) == VertexInputFit::Unchanged &&
+                   vs == "OSE_FixedFunc_Textured2_vertex",
+               "full inputs keep the two-stage program");
+    VertexInputs noColour = full;
+    noColour.diffuse = false;
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex",
+                                        noColour, vs) ==
+                       VertexInputFit::Adapted &&
+                   vs == "OSE_FixedFunc_Textured2_vertex_novc",
+               "no DIFFUSE takes the two-stage no-colour variant, not the "
+               "one-stage one");
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex",
+                                        VertexInputs{}, vs) ==
+                       VertexInputFit::Adapted &&
+                   vs == "OSE_FixedFunc_Textured2_vertex_novc",
+               "unknown inputs take the two-stage no-colour variant");
+    VertexInputs noUv = full;
+    noUv.texcoord0 = false;
+    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex", noUv,
+                                        vs) == VertexInputFit::Unsatisfiable &&
+                   vs.empty(),
+               "no TEXCOORD0 is unsatisfiable for two stages");
+
+    // Every name the policy can emit is declared by the shipped payload with
+    // the two-stage entry points.
+    const std::string script = ReadTextFile(BZR_FIXEDFUNC_PROGRAM);
+    const std::string hlsl = ReadTextFile(BZR_FIXEDFUNC_HLSL);
+    struct Expected
+    {
+        const char* kind;
+        const char* name;
+        const char* entry;
+        const char* define;
+    };
+    const Expected expected[] = {
+        { "vertex_program", "OSE_FixedFunc_Textured2_vertex",
+          "fixedfunc2_vertex", nullptr },
+        { "vertex_program", "OSE_FixedFunc_Textured2_vertex_novc",
+          "fixedfunc2_vertex", "COMPAT_NO_VERTEX_COLOUR" },
+        { "fragment_program", "OSE_FixedFunc_Textured2_fragment_modulate",
+          "fixedfunc2_fragment", "COMPAT_OP1_MODULATE" },
+        { "fragment_program", "OSE_FixedFunc_Textured2_fragment_alphablend",
+          "fixedfunc2_fragment", "COMPAT_OP1_ALPHABLEND" },
+    };
+    for (const Expected& e : expected)
+    {
+        const std::string block = ProgramBlock(script, e.name, e.kind);
+        ExpectContains(block, (std::string("entry_point ") + e.entry).c_str(),
+                       e.name);
+        if (e.define != nullptr)
+        {
+            ExpectContains(block, e.define, e.name);
+        }
+        else
+        {
+            ExpectTrue(!block.empty() &&
+                           block.find("preprocessor_defines") ==
+                               std::string::npos,
+                       e.name);
+        }
+    }
+    ExpectContains(ProgramBlock(script, "OSE_FixedFunc_Textured2_vertex"),
+                   "texMatrix1 texture_matrix 1",
+                   "stage 1 keeps its own texture matrix");
+    ExpectContains(hlsl, "void fixedfunc2_vertex(", "two-stage vertex entry");
+    ExpectContains(hlsl, "void fixedfunc2_fragment(",
+                   "two-stage fragment entry");
+    ExpectContains(hlsl, "register(t1)", "stage 1 samples texture slot 1");
+}
+
 int main()
 {
     TestVertexInputFit();
+    TestTwoStageFixedFunction();
     TestSynthesisExclusions();
     TestSupportedTargets();
     TestParseCompatFlag();
