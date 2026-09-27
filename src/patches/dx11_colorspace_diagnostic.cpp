@@ -1110,7 +1110,7 @@ namespace BZROpenShim
             return ComVtablePatch::Succeeded(result);
         }
 
-        void InstallContextHooks(ID3D11DeviceContext* context);
+        unsigned InstallContextHooks(ID3D11DeviceContext* context);
         void InstallDeviceHooks(ID3D11Device* device);
         void InstallFactoryHooks(IDXGIFactory* factory);
         void CaptureSwapChain(IDXGISwapChain* swapChain, const char* source);
@@ -1122,6 +1122,13 @@ namespace BZROpenShim
             INT baseVertexLocation)
         {
             if (!g_TerrainProbeEnabled.load(std::memory_order_acquire))
+                return;
+
+            // The snapshot below copies to a staging buffer and maps it for
+            // read. On a deferred context the copy would be recorded into the
+            // game's command list and the read map would fail, so the probe
+            // stays read-only by observing immediate contexts only.
+            if (!context || context->GetType() == D3D11_DEVICE_CONTEXT_DEFERRED)
                 return;
 
             const unsigned captureLimit = g_TerrainProbeConfig.selectedCluster >= 0
@@ -1496,13 +1503,17 @@ namespace BZROpenShim
             {
                 if (SUCCEEDED(hr) && deferredContext && *deferredContext)
                 {
-                    InstallContextHooks(*deferredContext);
+                    // A deferred context is usually a different class with its
+                    // own vtable, so the observers normally refuse it; say so
+                    // rather than claiming they attached.
+                    const unsigned attached = InstallContextHooks(*deferredContext);
                     LogShimA(
                         LogLevel::Info,
                         kComponent,
-                        "[TERRAIN-PROBE] installed observers on newly-created deferred context=0x%p flags=0x%X",
+                        "[TERRAIN-PROBE] deferred context=0x%p flags=0x%X observers attached=%u",
                         *deferredContext,
-                        contextFlags);
+                        contextFlags,
+                        attached);
                 }
             }
             catch (...)
@@ -1710,47 +1721,51 @@ namespace BZROpenShim
             return hr;
         }
 
-        void InstallContextHooks(ID3D11DeviceContext* context)
+        // Returns how many observers are attached to this context's vtable.
+        unsigned InstallContextHooks(ID3D11DeviceContext* context)
         {
             if (!context)
-                return;
+                return 0;
+
+            unsigned attached = 0;
 
             // Public ID3D11DeviceContext COM ABI ordinals from d3d11.h.
             if (g_ColorSpaceDiagnosticEnabled.load(std::memory_order_acquire))
             {
-                PatchComVtableEntry(
+                attached += PatchComVtableEntry(
                     context,
                     8,
                     &HookPSSetShaderResources,
                     g_RealPSSetShaderResources,
-                    "ID3D11DeviceContext::PSSetShaderResources");
+                    "ID3D11DeviceContext::PSSetShaderResources") ? 1u : 0u;
 
-                PatchComVtableEntry(
+                attached += PatchComVtableEntry(
                     context,
                     33,
                     &HookOMSetRenderTargets,
                     g_RealOMSetRenderTargets,
-                    "ID3D11DeviceContext::OMSetRenderTargets");
+                    "ID3D11DeviceContext::OMSetRenderTargets") ? 1u : 0u;
 
                 LogCurrentViewports(context, "device-capture");
             }
 
             if (g_TerrainProbeEnabled.load(std::memory_order_acquire))
             {
-                PatchComVtableEntry(
+                attached += PatchComVtableEntry(
                     context,
                     12,
                     &HookDrawIndexed,
                     g_RealDrawIndexed,
-                    "ID3D11DeviceContext::DrawIndexed (terrain probe)");
+                    "ID3D11DeviceContext::DrawIndexed (terrain probe)") ? 1u : 0u;
 
-                PatchComVtableEntry(
+                attached += PatchComVtableEntry(
                     context,
                     24,
                     &HookIASetPrimitiveTopology,
                     g_RealIASetPrimitiveTopology,
-                    "ID3D11DeviceContext::IASetPrimitiveTopology (terrain probe)");
+                    "ID3D11DeviceContext::IASetPrimitiveTopology (terrain probe)") ? 1u : 0u;
             }
+            return attached;
         }
 
         void InstallFactoryHooks(IDXGIFactory* factory)
