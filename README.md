@@ -186,7 +186,7 @@ OpenShim DLL + compatible assets
     └── full supported feature set
 ```
 
-* The DLL itself has no hard dependency on Workshop content. Placing only `winmm.dll` (and `openshim.ini`) into a stock install is a deliberately supported degraded configuration.
+* The binaries have no hard dependency on Workshop content. The DLL-only layout is the whole load chain without the asset pack: `winmm.dll`, `bzloader.dll`, `plugins\openshim.dll` and `scripts\patches.json` (plus `openshim.ini`) in a stock install. That is a deliberately supported degraded configuration. `winmm.dll` on its own is not: without `bzloader.dll` and the plugin the game starts with no OpenShim at all, and without a matching `patches.json` the address-dependent patches stand down.
 * Asset-dependent features — such as `Death Chunk Meshes` (`chunkMeshes`), Enhanced renderer resources (`openshim/renderer/enhanced`), and other visual payloads — require the separate asset package. When those resources are absent, OpenShim suppresses the dependent feature, emits a single concise diagnostic, and continues running. No crash, no invalid Ogre/resource access, and no repeated per-frame load attempts occur.
 * A copied `openshim.ini` that enables an asset-backed feature (for example `ChunkMeshes=1`) cannot bypass this protection: the feature also requires verified asset availability and remains unavailable until compatible assets are detected.
 * The native **OpenShim Settings** page reports asset-pack status directly:
@@ -220,9 +220,9 @@ See `resources/openshim/OpenShimAssets.ini` (shipped with the asset pack) and `i
 
 ## What is OpenShim?
 
-OpenShim is a standalone `winmm.dll` proxy loaded automatically when Battlezone 98 Redux starts.
+OpenShim loads through a small `winmm.dll` proxy that Battlezone 98 Redux picks up automatically when it starts.
 
-It forwards the normal Windows Multimedia API calls to the real system `winmm.dll`, then initializes OpenShim inside the game process.
+The proxy forwards the normal Windows Multimedia API calls to the real system `winmm.dll`, then loads the BZLoader plugin host (`bzloader.dll`), which loads the OpenShim runtime (`plugins\openshim.dll`) inside the game process.
 
 This allows the project to safely hook or patch native Redux behavior at runtime without modifying the game executable on disk.
 
@@ -230,18 +230,19 @@ This allows the project to safely hook or patch native Redux behavior at runtime
 Battlezone 98 Redux
         │
         ▼
-    winmm.dll
-    (OpenShim)
+    winmm.dll  (bootstrap proxy)
         │
         ├── Forwards WinMM calls to Windows
         │
-        └── Starts OpenShim
+        └── bzloader.dll  (plugin host)
                 │
-                ├── Detects Steam/GOG build
-                ├── Validates expected game code
-                ├── Installs native hooks
-                ├── Applies runtime fixes
-                └── Loads OpenShim configuration
+                └── plugins\openshim.dll  (runtime)
+                        │
+                        ├── Detects Steam/GOG build
+                        ├── Validates expected game code (scripts\patches.json)
+                        ├── Installs native hooks
+                        ├── Applies runtime fixes
+                        └── Loads OpenShim configuration
 ```
 
 OpenShim is a clean-room implementation and runs independently of any closed-source patch DLL.
@@ -468,10 +469,13 @@ Build:
 Release | Win32
 ```
 
-Output:
+Output (all three ship together, with `scripts\patches.json`; use
+`scripts\Deploy-OpenShim.ps1` to copy the whole chain into a test install):
 
 ```text
 bin\Release\winmm.dll
+bin\Release\bzloader.dll
+bin\Release\plugins\openshim.dll
 ```
 
 Redux is a 32-bit application, so OpenShim must also be built as **32-bit**.
