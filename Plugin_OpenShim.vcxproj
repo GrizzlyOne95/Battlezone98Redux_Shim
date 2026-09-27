@@ -151,6 +151,7 @@
     <ClCompile Include="src\patches\autosave_restart.cpp" />
     <ClCompile Include="src\patches\bzrnet_settings.cpp" />
     <ClCompile Include="src\patches\career_stats.cpp" />
+    <ClCompile Include="src\patches\chunk_identity.cpp" />
     <ClCompile Include="src\patches\chunk_payload_resolve.cpp" />
     <ClCompile Include="src\patches\diag_jump_snipe_probe.cpp" />
     <ClCompile Include="src\patches\diag_mpauth_trace.cpp" />
