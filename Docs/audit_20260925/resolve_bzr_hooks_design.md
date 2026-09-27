@@ -70,7 +70,7 @@ The precedence rules for each switch get a pure helper with a unit test under `t
 | R3 | Switch tables for E, plus a unit test. As landed there are two tables: the eleven `[Fixes]` kill switches (read as one block ahead of their installs; each `Refresh*State()` reads only its own flag) and the four frustum/bounds switches. The other env reads are interleaved with logic that depends on them (the generic batch needs the mesh proxy gate, raw input and the budgets clamp), so they stay as written. Every env name is preserved, and the status log must match main exactly. | none |
 | R4 | Address table in C++ (`{name, address, void** target}`) replacing the ~90 assignments. Values unchanged; log `[ADDR] bound N of M`. | none |
 | R5 | Move the table into `scripts/patches.json` with a prologue `expected_original` per function, so a mismatch leaves the pointer null (fail closed). Needs a null-safety audit of every caller first, because some call unconditionally (for example `native_ui.cpp:1064` after a check at :153, while others don't check). | **yes**: pointers can now be null |
-| R6 | Ordered init-step table for D, with constraints 1-7 written beside the steps. | none |
+| R6 | Ordered init-step tables for D, with constraints 1-7 written beside the steps. As landed there are three tables (13 early installs, 12 fix installs, 15 late configs and scaffolds). Calls that stand alone, take arguments or sit between order-dependent reads stay as written. | none |
 
 Validation for each PR is what the split used: Release build, ctest, one GOG dx11 boot compared to main. For R3-R6 the comparison adds a diff of the F block and the `[RESOLVE]`/`[DONE]` lines, since those lines expose any change in order or value.
 
