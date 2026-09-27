@@ -75,6 +75,16 @@ if(WIN32 AND MSVC)
     add_test(NAME editor_save_dialog_win32_tests COMMAND editor_save_dialog_win32_tests)
 endif()
 
+if(WIN32 AND MSVC)
+    # The shared import-table and COM-vtable patchers. The IAT cases patch this
+    # executable's own GetTickCount import and call through it.
+    add_executable(hook_patch_win32_tests hook_patch_win32_tests.cpp)
+    target_include_directories(hook_patch_win32_tests PRIVATE ../include)
+    target_compile_features(hook_patch_win32_tests PRIVATE cxx_std_20)
+    target_compile_options(hook_patch_win32_tests PRIVATE /W4 /WX)
+    add_test(NAME hook_patch_win32_tests COMMAND hook_patch_win32_tests)
+endif()
+
 add_executable(numeric_locale_compat_tests
     numeric_locale_compat_tests.cpp
     ../src/patches/numeric_locale_compat.cpp
