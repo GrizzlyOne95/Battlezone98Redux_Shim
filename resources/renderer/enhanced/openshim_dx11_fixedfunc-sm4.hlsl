@@ -9,7 +9,8 @@
 //
 // Texture-stage combine operations that the fixed pipeline executed are
 // represented here for the bounded support set (0 units; 1 unit with
-// modulate/replace/add/alpha_blend). Multi-texture and exotic combines are
+// modulate/replace/add/alpha_blend; 2 units on UV set 0 with stage 0
+// modulate and stage 1 modulate/alpha_blend). Anything wider is
 // intentionally NOT guessed: the engine policy marks them unsupported and
 // logs once so corpus telemetry can expand coverage (Level 4).
 //
@@ -188,4 +189,98 @@ void fixedfunc_untextured_fragment(
     oColor.xyz = lerp(oColor.xyz, fogColour.xyz, fogValue);
 
     oColor.a = vColor.a;
+}
+
+// ---------------------------------------------------------------------------
+// Two-stage textured path (2 texture units, both on UV set 0)
+// ---------------------------------------------------------------------------
+//
+// The fixed pipeline ran stage 0 as texture0 * vertex colour, then combined
+// stage 1 with that result ("current"). The bounded support set
+// (IsSupportedTwoStageCombo) is:
+//
+//   stage 0   modulate                          current = vColor * tex0
+//   stage 1   modulate      (default)           current * tex1
+//             alpha_blend   (COMPAT_OP1_ALPHABLEND)
+//                           lerp(current, tex1, tex1.a)  -- D3DTOP_BLENDTEXTUREALPHA
+//
+// Alpha is the default on both stages (texture * current), so a stage 1 mask
+// attenuates the whole pass the way it did under DX9 -- ISDF Chronicles'
+// xrain: a scrolling streak texture on stage 0, xrainmask.dds on stage 1.
+// Both stages read TEXCOORD0 through their own texture matrix, so stage 0's
+// scroll_anim does not drag the stage 1 mask along with it.
+//
+// Only the COMPAT_NO_VERTEX_COLOUR input reduction applies: this entry needs
+// TEXCOORD0, and FitVertexProgramToInputs declines geometry without it.
+
+void fixedfunc2_vertex(
+    uniform float4x4 wvpMat,
+    uniform float4x4 texMatrix,
+    uniform float4x4 texMatrix1,
+    uniform float4 diffuseColor,
+
+    in float4 iPosition : POSITION,
+#ifndef COMPAT_NO_VERTEX_COLOUR
+    in float4 iColor : COLOR0,
+#endif
+    in float2 iTexCoord : TEXCOORD0,
+
+    out float4 vColor : COLOR0,
+    out float2 vTexCoord : TEXCOORD0,
+    out float vDepth : TEXCOORD1,
+    out float2 vTexCoord1 : TEXCOORD2,
+
+    out float4 oPosition : SV_POSITION
+)
+{
+    oPosition = mul(wvpMat, iPosition);
+#ifdef COMPAT_NO_VERTEX_COLOUR
+    vColor = diffuseColor;
+#else
+    // Native BGRA correction, for the reason spelled out in fixedfunc_vertex.
+    vColor = iColor.bgra * diffuseColor;
+#endif
+    vTexCoord = mul(texMatrix, float4(iTexCoord, 0.0, 1.0)).xy;
+    vTexCoord1 = mul(texMatrix1, float4(iTexCoord, 0.0, 1.0)).xy;
+    vDepth = oPosition.z;
+}
+
+void fixedfunc2_fragment(
+    uniform Texture2D diffuseMap : register(t0),
+    uniform SamplerState diffuseSam : register(s0),
+    uniform Texture2D stage1Map : register(t1),
+    uniform SamplerState stage1Sam : register(s1),
+
+    uniform float4 sceneAmbient,
+    uniform float4 fogColour,
+    uniform float4 fogParams,
+
+    in float4 vColor : COLOR0,
+    in float2 vTexCoord : TEXCOORD0,
+    in float vDepth : TEXCOORD1,
+    in float2 vTexCoord1 : TEXCOORD2,
+
+    out float4 oColor : SV_TARGET
+)
+{
+    float4 tex0 = diffuseMap.Sample(diffuseSam, vTexCoord);
+    float4 tex1 = stage1Map.Sample(stage1Sam, vTexCoord1);
+
+    // Stage 0: modulate.
+    float3 current = vColor.xyz * tex0.xyz;
+    float alpha = vColor.a * tex0.a;
+
+    // Stage 1.
+#if defined(COMPAT_OP1_ALPHABLEND)
+    current = lerp(current, tex1.xyz, tex1.a);
+#else
+    current = current * tex1.xyz;
+#endif
+    alpha = alpha * tex1.a;
+
+    // Same ambient floor and fog as the one-stage path.
+    current += sceneAmbient.xyz * 0.25;
+    float fogValue = saturate((vDepth - fogParams.y) * fogParams.w);
+    oColor.xyz = lerp(current, fogColour.xyz, fogValue);
+    oColor.a = alpha;
 }
