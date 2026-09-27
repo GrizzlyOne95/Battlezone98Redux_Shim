@@ -102,15 +102,6 @@ namespace BZROpenShim
     using FnMapFilterScroll = void(__thiscall*)(void* self);
     using FnGameObjectGetTeam = int(__thiscall*)(void* thisPtr);
     using FnChunkEffectSimulate = void(__thiscall*)(void* self, float dt);
-    // Redux's ArtilleryProcess::DoAttack is not the zero-stack-argument method
-    // described by the legacy 1.5 PDB. At the machine ABI it consumes four
-    // stack words (the first is the hidden/result destination) and returns with
-    // `ret 0x10`. Preserve all four words when replaying the stock routine.
-    using FnArtilleryDoAttack = uint32_t(__thiscall*)(void* thisPtr,
-                                                      uint32_t arg0,
-                                                      uint32_t arg1,
-                                                      uint32_t arg2,
-                                                      uint32_t arg3);
 
     void** g_BzrPtr_945478 = nullptr;
     void** g_BzrPtr_94548C = nullptr;
@@ -546,9 +537,6 @@ namespace BZROpenShim
         bool g_ScrapRetargetHookInstalled = false;
         InlineDetour32 g_AttackTaskDoStateDetour = {};
         bool g_AttackTaskDoStateHookInstalled = false;
-        static InlineDetour32 g_ArtilleryDoAttackDetour = {};
-        static FnArtilleryDoAttack g_BzrFn_ArtilleryDoAttackOriginal = nullptr;
-        static bool g_ArtilleryDoAttackHookInstalled = false;
         bool g_RetargetPeriodHooksInstalled = false;
         volatile long g_AttackRevealTraceBudget = 64;
         InlineDetour32 g_ChunkEffectCreateChunkDetour = {};
@@ -2206,11 +2194,6 @@ namespace BZROpenShim
             : nullptr;
         g_AttackTaskDoStateHookInstalled =
             g_BzrFn_AttackTaskDoState && g_BzrFn_TerrainGetIntersection;
-        g_BzrFn_ArtilleryDoAttackOriginal = g_ArtilleryDoAttackDetour.trampoline
-            ? reinterpret_cast<FnArtilleryDoAttack>(g_ArtilleryDoAttackDetour.trampoline)
-            : nullptr;
-        g_ArtilleryDoAttackHookInstalled =
-            (g_BzrFn_ArtilleryDoAttackOriginal != nullptr);
         g_RetargetPeriodHooksInstalled = false;
         g_ConstructorRemoteBuildFixMismatchLogged = false;
         g_BzrFn_OffensiveProcessDoSubTask = nullptr;
