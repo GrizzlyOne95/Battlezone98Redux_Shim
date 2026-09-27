@@ -1,4 +1,5 @@
 #include "pilot_fp_animation_trace.h"
+#include "diagnostic_switch.h"
 #include "engine_globals.h"
 #include "BZROpenShim.h"
 #include "ogre_runtime.h"
@@ -184,58 +185,22 @@ namespace BZROpenShim
             "aspilo_fp", "bspilo_fp", "sspilo_fp", "cspilo_fp", "bsheav_fp"
         };
 
-        bool StringIsTruthy(const char* value)
-        {
-            if (!value || !*value)
-                return false;
-            std::string v(value);
-            for (char& ch : v)
-                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            return v != "0" && v != "false" && v != "no" && v != "off" && v != "disabled";
-        }
-
-        std::string GetOpenShimIniPath()
-        {
-            char path[MAX_PATH] = {};
-            const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-            if (length == 0 || length >= MAX_PATH)
-                return "openshim.ini";
-            char* slash = std::strrchr(path, '\\');
-            if (slash)
-                *(slash + 1) = '\0';
-            else
-                path[0] = '\0';
-            return std::string(path) + "openshim.ini";
-        }
-
         bool TraceRequested()
         {
-            char envValue[64] = {};
-            const DWORD envLength = GetEnvironmentVariableA(
-                kEnvironmentSwitch, envValue, static_cast<DWORD>(sizeof(envValue)));
-            if (envLength > 0 && envLength < sizeof(envValue))
-                return StringIsTruthy(envValue);
-            const std::string iniPath = GetOpenShimIniPath();
             // Ships off. This is a capture tool for animation investigation, and
             // every document that uses it says to set the key to 1 first.
-            return GetPrivateProfileIntA(kIniSection, kIniKey, 0, iniPath.c_str()) != 0;
+            return BZROpenShim::DiagnosticSwitch::Requested(kEnvironmentSwitch, kIniSection, kIniKey);
         }
 
         bool ManipRequested()
         {
-            char envValue[64] = {};
-            const DWORD envLength = GetEnvironmentVariableA(
-                kManipEnvironmentSwitch, envValue, static_cast<DWORD>(sizeof(envValue)));
-            if (envLength > 0 && envLength < sizeof(envValue))
-                return StringIsTruthy(envValue);
-            const std::string iniPath = GetOpenShimIniPath();
-            return GetPrivateProfileIntA(kIniSection, kManipIniKey, 0, iniPath.c_str()) != 0;
+            return BZROpenShim::DiagnosticSwitch::Requested(kManipEnvironmentSwitch, kIniSection, kManipIniKey);
         }
 
         void RefreshManipConfig()
         {
             g_ManipEnabled.store(ManipRequested(), std::memory_order_release);
-            const std::string iniPath = GetOpenShimIniPath();
+            const std::string iniPath = BZROpenShim::DiagnosticSwitch::OpenShimIniPath();
             char animName[64] = {};
             GetPrivateProfileStringA(kIniSection, kManipAnimIniKey, "stand2Kneel", animName, sizeof(animName), iniPath.c_str());
             if (animName[0])

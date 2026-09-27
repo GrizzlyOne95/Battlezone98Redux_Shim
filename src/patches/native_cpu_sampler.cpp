@@ -37,6 +37,7 @@
 // ESP" is a correctness requirement here rather than a plausibility check.
 
 #include "native_cpu_sampler.h"
+#include "bool_token.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -267,19 +268,6 @@ namespace BZROpenShim
                 return fallback;
             }
             return static_cast<uint32_t>(parsed);
-        }
-
-        bool IsTruthy(const std::string& text)
-        {
-            if (text.empty())
-            {
-                return false;
-            }
-            if (text == "0" || text == "false" || text == "FALSE" || text == "off")
-            {
-                return false;
-            }
-            return true;
         }
 
         // ---------------------------------------------------------------
@@ -1045,7 +1033,7 @@ namespace BZROpenShim
         {
             return false;
         }
-        return IsTruthy(value);
+        return BZROpenShim::BoolToken::IsTruthy(value);
     }
 
     void InitializeNativeCpuSampler()

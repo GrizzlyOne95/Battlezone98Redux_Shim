@@ -1,4 +1,5 @@
 #include "dx11_colorspace_diagnostic.h"
+#include "diagnostic_switch.h"
 #include "iat_patch.h"
 #include "shim_log.h"
 
@@ -226,73 +227,20 @@ namespace BZROpenShim
             return true;
         }
 
-        bool StringIsTruthy(const char* value)
-        {
-            if (!value || !*value)
-                return false;
-
-            std::string v(value);
-            std::transform(
-                v.begin(), v.end(), v.begin(),
-                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-            return v != "0" && v != "false" && v != "no" && v != "off";
-        }
-
-        std::string GetOpenShimIniPath()
-        {
-            char path[MAX_PATH] = {};
-            const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-            if (length == 0 || length >= MAX_PATH)
-                return "openshim.ini";
-
-            char* slash = std::strrchr(path, '\\');
-            if (slash)
-                *(slash + 1) = '\0';
-            else
-                path[0] = '\0';
-
-            return std::string(path) + "openshim.ini";
-        }
-
         bool DiagnosticRequested()
         {
-            char envValue[64] = {};
-            const DWORD envLength = GetEnvironmentVariableA(
-                kEnvironmentSwitch,
-                envValue,
-                static_cast<DWORD>(sizeof(envValue)));
-
-            if (envLength > 0 && envLength < sizeof(envValue))
-                return StringIsTruthy(envValue);
-
-            const std::string iniPath = GetOpenShimIniPath();
-            return GetPrivateProfileIntA(kIniSection, kIniKey, 0, iniPath.c_str()) != 0;
+            return BZROpenShim::DiagnosticSwitch::Requested(kEnvironmentSwitch, kIniSection, kIniKey);
         }
 
         bool TerrainProbeRequested()
         {
-            char envValue[64] = {};
-            const DWORD envLength = GetEnvironmentVariableA(
-                kTerrainEnvironmentSwitch,
-                envValue,
-                static_cast<DWORD>(sizeof(envValue)));
-
-            if (envLength > 0 && envLength < sizeof(envValue))
-                return StringIsTruthy(envValue);
-
-            const std::string iniPath = GetOpenShimIniPath();
-            return GetPrivateProfileIntA(
-                       kIniSection,
-                       kTerrainIniKey,
-                       0,
-                       iniPath.c_str()) != 0;
+            return BZROpenShim::DiagnosticSwitch::Requested(kTerrainEnvironmentSwitch, kIniSection, kTerrainIniKey);
         }
 
         TerrainProbeConfig ReadTerrainProbeConfig()
         {
             TerrainProbeConfig config;
-            const std::string iniPath = GetOpenShimIniPath();
+            const std::string iniPath = BZROpenShim::DiagnosticSwitch::OpenShimIniPath();
 
             const int requestedMax = GetPrivateProfileIntA(
                 kIniSection,
@@ -322,7 +270,7 @@ namespace BZROpenShim
 
         std::string GetExecutableDirectory()
         {
-            std::string iniPath = GetOpenShimIniPath();
+            std::string iniPath = BZROpenShim::DiagnosticSwitch::OpenShimIniPath();
             const size_t slash = iniPath.find_last_of("\\/");
             if (slash == std::string::npos)
                 return {};
