@@ -1,9 +1,6 @@
 name: BZRNet instrumentation validation
 
 on:
-  push:
-    branches:
-      - agent/bzrnet-native-instrumentation
   pull_request:
     paths:
       - 'include/bzrnet_*'

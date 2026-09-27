@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace BZROpenShim
 {
@@ -75,4 +76,38 @@ namespace BZROpenShim
     // whose payload begins with the marker; callers should pass the marker
     // offset they have already established.
     BzrUdpControlInfo DecodeBzrUdpControl(const uint8_t* data, size_t length);
+
+    // Passive reassembly of one direction of a WebSocket connection, as seen
+    // by the socket hooks. The HTTP upgrade exchange is skipped up to its
+    // blank line; after that, frames are unmasked and fragmented messages
+    // joined. Only text (0x1) and binary (0x2) messages are returned; control
+    // frames are consumed silently. Anything larger than `maxBytes`, buffered
+    // or declared, drops the direction's buffered state rather than growing.
+    //
+    // The relay capture in net_optimizer and the structured BZRNet trace each
+    // had a copy of this parser (audit P2-3).
+    struct WebSocketStreamState
+    {
+        bool handshakeComplete = false;
+        uint8_t fragmentedOpcode = 0;
+        std::vector<uint8_t> pending;
+        std::vector<uint8_t> fragmented;
+    };
+
+    struct WebSocketMessage
+    {
+        uint8_t opcode = 0;
+        std::vector<uint8_t> payload;
+    };
+
+    // Offset just past the first "\r\n\r\n", or std::string::npos.
+    size_t FindHttpHeaderEnd(const std::vector<uint8_t>& data);
+
+    // Appends every message completed by `bytes` to `out`, in order.
+    void FeedWebSocketStream(
+        WebSocketStreamState& state,
+        const uint8_t* bytes,
+        size_t length,
+        size_t maxBytes,
+        std::vector<WebSocketMessage>& out);
 }
