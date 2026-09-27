@@ -1,4 +1,5 @@
 #include "bzrnet_trace.h"
+#include "json_escape.h"
 #include "bzrnet_protocol.h"
 #include "openshim_preset_migration.h"
 #include "shim_log.h"
@@ -63,38 +64,6 @@ namespace
     uint64_t g_StartFileTime = 0;
     uint64_t g_StopFileTime = 0;
 
-    std::string JsonEscape(const std::string& input)
-    {
-        std::string out;
-        out.reserve(input.size() + 8);
-        for (const unsigned char c : input)
-        {
-            switch (c)
-            {
-                case '"': out += "\\\""; break;
-                case '\\': out += "\\\\"; break;
-                case '\b': out += "\\b"; break;
-                case '\f': out += "\\f"; break;
-                case '\n': out += "\\n"; break;
-                case '\r': out += "\\r"; break;
-                case '\t': out += "\\t"; break;
-                default:
-                    if (c < 0x20)
-                    {
-                        char escaped[7] = {};
-                        _snprintf_s(escaped, _TRUNCATE, "\\u%04x", static_cast<unsigned>(c));
-                        out += escaped;
-                    }
-                    else
-                    {
-                        out.push_back(static_cast<char>(c));
-                    }
-                    break;
-            }
-        }
-        return out;
-    }
-
     uint64_t FileTimeNow()
     {
         FILETIME ft = {};
@@ -137,10 +106,10 @@ namespace
     {
         if (!g_TraceFile)
             return;
-        const std::string layer = JsonEscape(record.layer);
-        const std::string event = JsonEscape(record.event);
-        const std::string direction = JsonEscape(record.direction);
-        const std::string type = JsonEscape(record.messageType);
+        const std::string layer = EscapeJsonString(record.layer);
+        const std::string event = EscapeJsonString(record.event);
+        const std::string direction = EscapeJsonString(record.direction);
+        const std::string type = EscapeJsonString(record.messageType);
         const char* details = record.detailsJson.empty() ? "{}" : record.detailsJson.c_str();
         std::fprintf(
             g_TraceFile,
