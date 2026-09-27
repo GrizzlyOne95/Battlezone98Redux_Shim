@@ -661,6 +661,7 @@ namespace HookEngine
         std::mutex g_ResolveMutex;
         bool g_ResolveTableLoaded = false;
         std::vector<BZROpenShim::ResolveTarget> g_ResolveTable;
+        std::vector<BZROpenShim::EngineAddressEntry> g_EngineAddressTable;
         // Only successes are cached. A failure is usually "the module is not
         // mapped yet", and callers are expected to ask again.
         std::map<std::string, uint32_t> g_ResolveCache;
@@ -687,6 +688,14 @@ namespace HookEngine
             catch (...)
             {
                 text.clear();
+            }
+
+            std::string engineError;
+            g_EngineAddressTable = BZROpenShim::ParseEngineAddressTable(text, &engineError);
+            if (!engineError.empty())
+            {
+                BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "resolve",
+                    "[ADDR] engine address table has rejected rows: %s", engineError.c_str());
             }
 
             std::string error;
@@ -855,6 +864,50 @@ namespace HookEngine
         if (chosen != 0)
             g_ResolveCache[key] = chosen;
         return chosen;
+    }
+
+    EngineAddressStatus ResolveEngineAddress(const char* name, uint32_t& outAddress)
+    {
+        outAddress = 0;
+        if (!name || !name[0]) return EngineAddressStatus::Missing;
+
+        const BZROpenShim::EngineAddressEntry* entry = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(g_ResolveMutex);
+            LoadResolveTableLocked();
+            for (const auto& candidate : g_EngineAddressTable)
+            {
+                if (candidate.name == name)
+                {
+                    entry = &candidate;
+                    break;
+                }
+            }
+        }
+        // The table is loaded once and never modified, so the entry outlives
+        // the lock.
+        if (!entry) return EngineAddressStatus::Missing;
+
+        if (entry->isData)
+        {
+            outAddress = entry->address;
+            return EngineAddressStatus::BoundData;
+        }
+
+        std::vector<uint8_t> actual(entry->expected.size());
+        SIZE_T read = 0;
+        if (!ReadProcessMemory(GetCurrentProcess(),
+                               reinterpret_cast<LPCVOID>(static_cast<uintptr_t>(entry->address)),
+                               actual.data(), actual.size(), &read) ||
+            read != actual.size())
+        {
+            return EngineAddressStatus::Unreadable;
+        }
+        if (!BZROpenShim::EngineAddressBytesMatch(entry->expected, actual.data(), actual.size()))
+            return EngineAddressStatus::Mismatch;
+
+        outAddress = entry->address;
+        return EngineAddressStatus::Bound;
     }
 
 }
