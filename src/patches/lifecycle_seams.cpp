@@ -218,13 +218,22 @@ namespace BZROpenShim
 
         // --- mission lifetime seam -------------------------------------------
         //
-        // The scene teardown hooks above never fire. The shipped executable
-        // contains no call to Ogre::SceneManager::clearScene or
-        // destroyAllMovableObjects at all -- it creates one SceneManager and
-        // keeps it for the life of the process, and a mission change is torn
-        // down by the terrain zone destructor destroying only the objects it
-        // created. Every "forget our Ogre references" path that hangs off those
-        // two hooks is therefore dead code in practice, which is how chunk proxy
+        // The scene teardown hooks above never fire at a mission change. The
+        // shipped executable contains no call to Ogre::SceneManager::clearScene
+        // or destroyAllMovableObjects -- it creates one SceneManager and keeps
+        // it for the life of the process, and a mission change is torn down by
+        // the terrain zone destructor destroying only the objects it created.
+        //
+        // They DO fire at process exit, and they must stay. Redux shuts Ogre
+        // down cleanly, and the SceneManager destructor calls clearScene, which
+        // calls destroyAllMovableObjects: a GOG boot-and-exit on 2026-09-27
+        // logged both hooks, twice each, on the main thread. That is where
+        // they drop our chunk proxy, pilot light, flag and terrain proxy
+        // references before Ogre frees those objects. Do not remove them as
+        // dead code (the 2026-09-25 audit listed them as such; it was wrong).
+        //
+        // For mission changes, then, the forget paths that hang off those two
+        // hooks never run, which is how chunk proxy
         // slots kept entities from a previous mission: on the next mission the
         // manual submit path called getSubEntity on freed memory, the
         // __try/__except swallowed the access violation, and the render loop
