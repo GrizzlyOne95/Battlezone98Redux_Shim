@@ -345,16 +345,17 @@ the plugin side.
 
 ```text
 Battlezone98Redux.exe
-  -> winmm.dll                 18 TUs   bootstrap
+  -> winmm.dll                 17 TUs   bootstrap
      -> bzloader.dll                    plugin host
         -> plugins/openshim.dll  74 TUs  runtime
 ```
 
 `winmm.dll` is 213 KB where the monolith was 3.0 MB. It compiles twelve
-translation units of its own plus six that are pure enough to share
-(`backend_selection`, `render_profile`, `render_effect_intent`,
-`game_log_path`, `shim_log_client`, `startup_seam_wire`) -- stateless mappings
-where a second copy cannot disagree with the first.
+translation units of its own plus five that are pure enough to share
+(`backend_selection`, `render_profile`, `game_log_path`, `shim_log_client`,
+`startup_seam_wire`) -- stateless mappings where a second copy cannot disagree
+with the first. The render-effect intent table, the scene-depth facts and the
+FXAA shader resource are plugin-only; nothing in the bootstrap uses them.
 
 ### What the plugin may and may not do
 

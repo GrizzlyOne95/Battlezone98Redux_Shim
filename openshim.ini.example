@@ -1162,6 +1162,61 @@ RelayLoggingQueueRecords = 4096
 UiPerformanceLogging = 0
 UiPerformanceVerbose = 0
 
+; The development switches below (through TraceMpauthSpl) are shown commented
+; out: they are not player settings, so the shipped openshim.ini preset does
+; not carry them. Uncomment one to use it; the value shown is the default.
+
+; Drive the shell through a fixed round of screen changes by itself (Main ->
+; Multiplayer -> Main -> Instant Action -> Main -> Campaign -> Main) once the
+; main menu has settled, so UiPerformanceLogging can time each transition
+; without anyone clicking. It changes screens on its own, so leave it off in
+; normal play. Does nothing unless UiPerformanceLogging is on.
+; Accepted: boolean. Default: OFF.
+; Env: OPENSHIM_UI_PERFORMANCE_AUTOMATRIX=1 (the env var can only turn it on)
+; UiPerformanceAutoMatrix = 0
+
+; Death-chunk batch reuse. When a generic chunk batch's state version has not
+; changed, the geometry it already emitted is reused instead of being emitted
+; again on every traversal. ChunkBatchReuse = 0 restores the old
+; emit-every-time path; ChunkBatchReuseObserve = 1 makes the reuse decision and
+; counts it without acting on it, so the baseline and the saving can be
+; measured from one build. The [CHUNKBATCH] startup line reports both.
+; Unlike most keys in this section, ChunkBatchReuse changes the work done
+; each frame (meant to draw the same image for less); it sits here because
+; it is a measurement switch, not a player setting.
+; Accepted: boolean. Defaults: ChunkBatchReuse ON, ChunkBatchReuseObserve OFF.
+; These keys win over the env when present.
+; Env: OPENSHIM_DISABLE_CHUNK_BATCH_REUSE, OPENSHIM_CHUNK_BATCH_REUSE_OBSERVE
+;      (and their BZR_* aliases)
+; ChunkBatchReuse = 1
+; ChunkBatchReuseObserve = 0
+
+; Log the player headlight's Ogre light parameters before OpenShim changes
+; them, as [HEADLIGHT-PROBE] lines. Development only; at most 40 records.
+; Accepted: boolean. Default: OFF.
+; Env: OPENSHIM_TRACE_HEADLIGHT_LIGHT=1 (the env var can only turn it on)
+; HeadlightLightTrace = 0
+
+; Log how the pilot flashlight finds the pilot and attaches its light, as
+; [PILOTLIGHT] eval lines. Development only; at most 40 records.
+; Accepted: boolean. Default: OFF.
+; Env: OPENSHIM_TRACE_PILOT_FLASHLIGHT=1 (the env var can only turn it on)
+; PilotFlashlightTrace = 0
+
+; Multiplayer authority tracing for two weapons whose effect is decided on one
+; machine and replayed on the others: Daywrecker detonations
+; ([MPAUTH_DW_*]) and Splinter shots ([MPAUTH_SPL_*]). Read-only; no gameplay
+; or authority change. TraceMpauth = 1 turns on both; TraceMpauthDw or
+; TraceMpauthSpl alone turns on just that one. 256 records each by default.
+; Accepted: boolean. Default: OFF.
+; Env: OPENSHIM_TRACE_MPAUTH, OPENSHIM_TRACE_MPAUTH_DW,
+;      OPENSHIM_TRACE_MPAUTH_SPL (and BZR_* aliases) can only turn them on;
+;      OPENSHIM_TRACE_MPAUTH_BUDGET / _DW_BUDGET / _SPL_BUDGET set the record
+;      budgets (0-4096).
+; TraceMpauth = 0
+; TraceMpauthDw = 0
+; TraceMpauthSpl = 0
+
 
 
 ; Read-only probe: log what GameObject::SetDamageFlags actually reveals.
@@ -1849,6 +1904,16 @@ SatelliteVisibilityFix = 1
 ; Default 0. See Docs/INTERACTIVE_FOG_WAKES.md for the remaining milestones.
 InteractiveFogWakes = 0
 
+[NativeUiDiagnostics]
+; Development only; shown commented out for the same reason as the
+; [Diagnostics] development switches above.
+; Adds a test button ("OPENSHIM PROBE") to the Redux main menu so the native
+; UI API can be checked end to end: it logs one hover and one click under the
+; native_ui_probe component, then deactivates. Development only. Only on the
+; compatible game version.
+; Accepted: boolean. Default: OFF.
+; MainMenuProbe = 0
+
 [Environment]
 ; BZN/TRN editor source-folder routing with actual-target overwrite confirmation.
 ; Exact 1 enables; default 0. Restart required; use backed-up qualification maps.
@@ -1865,6 +1930,14 @@ InteractiveFogWakes = 0
 ; reverse-engineering probes.
 ;
 ; Common raw-only examples (leave commented unless intentionally testing):
+;
+; UI tracing:
+; OPENSHIM_LOG_OPTIONS_TREE = 1
+;   Log the Options screen's widget tree on every open, not only the first of
+;   the session (the first is always logged).
+; OPENSHIM_CAREER_TRACE -- NOT read from this section. Set it in the real
+;   process environment; any value, even 0, turns it on. Logs [CAREERTRACE]
+;   lines for career-page captions (up to 400).
 ;
 ; Route forcing / migration:
 ; OPENSHIM_FORCE_PUBLIC_ROUTE = 1

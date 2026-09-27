@@ -4,6 +4,7 @@
 // The dispatchers that drive them stay there; shared helpers come from
 // bzr_hooks_internal.h.
 #include "bzr_hooks.h"
+#include "light_colour_presets.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "engine_globals.h"
@@ -900,29 +901,8 @@ namespace BZROpenShim
                 return true;
             }
 
-            struct Preset { const char* name; float r; float g; float b; };
-            static constexpr Preset presets[] = {
-                { "white",   5.0f, 5.0f, 5.0f },
-                { "red",     5.0f, 1.0f, 1.0f },
-                { "green",   1.0f, 5.0f, 1.0f },
-                { "blue",    1.0f, 1.0f, 5.0f },
-                { "yellow",  5.0f, 5.0f, 1.0f },
-                { "cyan",    1.0f, 5.0f, 5.0f },
-                { "magenta", 5.0f, 1.0f, 5.0f },
-                { "orange",  5.0f, 2.5f, 1.0f },
-                { "purple",  2.5f, 1.0f, 5.0f },
-                { "teal",    1.0f, 5.0f, 2.5f },
-            };
-            for (const auto& preset : presets)
-            {
-                if (value == preset.name)
-                {
-                    g_HeadlightColourR = preset.r;
-                    g_HeadlightColourG = preset.g;
-                    g_HeadlightColourB = preset.b;
-                    return true;
-                }
-            }
+            if (LightColourPresets::TryFind(value.c_str(), g_HeadlightColourR, g_HeadlightColourG, g_HeadlightColourB))
+                return true;
 
             float r = 0.0f;
             float g = 0.0f;
