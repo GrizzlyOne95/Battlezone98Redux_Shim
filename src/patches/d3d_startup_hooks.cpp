@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "d3d_startup_hooks.h"
+#include "iat_patch.h"
 #include "patcher.h"
 
 #include <Windows.h>
@@ -57,65 +58,10 @@ namespace BZROpenShim
 
         static bool PatchIAT(HMODULE targetModule, const char* moduleName, const char* funcName, void* newFunc, void** oldFunc)
         {
-            if (!targetModule)
-                return false;
-
-            auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(targetModule);
-            if (dos->e_magic != IMAGE_DOS_SIGNATURE)
-                return false;
-
-            auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(reinterpret_cast<uint8_t*>(targetModule) + dos->e_lfanew);
-            if (nt->Signature != IMAGE_NT_SIGNATURE)
-                return false;
-
-            const DWORD importRva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-            if (!importRva)
-                return false;
-
-            auto* importDesc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(reinterpret_cast<uint8_t*>(targetModule) + importRva);
-            while (importDesc->Name)
-            {
-                const char* importedModule = reinterpret_cast<const char*>(targetModule) + importDesc->Name;
-                if (_stricmp(importedModule, moduleName) == 0)
-                {
-                    auto* origThunk = reinterpret_cast<IMAGE_THUNK_DATA*>(
-                        reinterpret_cast<uint8_t*>(targetModule) +
-                        (importDesc->OriginalFirstThunk ? importDesc->OriginalFirstThunk : importDesc->FirstThunk));
-                    auto* thunk = reinterpret_cast<IMAGE_THUNK_DATA*>(
-                        reinterpret_cast<uint8_t*>(targetModule) + importDesc->FirstThunk);
-
-                    while (origThunk->u1.AddressOfData)
-                    {
-                        if (!IMAGE_SNAP_BY_ORDINAL(origThunk->u1.Ordinal))
-                        {
-                            auto* importByName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(
-                                reinterpret_cast<uint8_t*>(targetModule) + origThunk->u1.AddressOfData);
-                            if (strcmp(reinterpret_cast<const char*>(importByName->Name), funcName) == 0)
-                            {
-                                DWORD oldProtect = 0;
-                                auto** iatEntry = reinterpret_cast<void**>(&thunk->u1.Function);
-                                if (!VirtualProtect(iatEntry, sizeof(void*), PAGE_READWRITE, &oldProtect))
-                                    return false;
-
-                                if (oldFunc)
-                                    *oldFunc = *iatEntry;
-                                *iatEntry = newFunc;
-                                VirtualProtect(iatEntry, sizeof(void*), oldProtect, &oldProtect);
-                                return true;
-                            }
-                        }
-
-                        ++origThunk;
-                        ++thunk;
-                    }
-
-                    return false;
-                }
-
-                ++importDesc;
-            }
-
-            return false;
+            // The previous entry is kept only the first time. A second pass over the
+            // same module would otherwise record our own hook as the "real" function.
+            return IatPatch::PatchImport(targetModule, moduleName, funcName, newFunc, oldFunc) ==
+                IatPatch::Result::Patched;
         }
 
         static IDirect3D9* WINAPI Hooked_Direct3DCreate9(UINT sdkVersion)
