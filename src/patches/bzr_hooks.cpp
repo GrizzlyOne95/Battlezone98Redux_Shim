@@ -2614,6 +2614,21 @@ namespace BZROpenShim
             *row.slot = reinterpret_cast<void*>(row.address);
     }
 
+    // One entry in an ordered list of init calls. The name is for reading
+    // (and a debugger); RunInitSteps calls the entries in table order.
+    struct InitStep
+    {
+        const char* name;
+        void (*run)();
+    };
+
+    template <size_t N>
+    void RunInitSteps(const InitStep (&steps)[N])
+    {
+        for (const InitStep& step : steps)
+            step.run();
+    }
+
     void ResolveBzrHooks(bool isSteam)
     {
         g_IsSteamExe = isSteam;
@@ -2661,21 +2676,26 @@ namespace BZROpenShim
             HookEngine::ResolveNamedAddress("GetTeamNum"));
         InstallDynamicGeometryHooks();
 
-        InstallJumpSnipingProbeIfRequested();
-        InstallCareerStatsMpHookIfPossible();
-        InstallUnitVoQueueHooksIfPossible();
-        InstallParticleTemplateDedupeHookIfPossible();
-        InstallUiManualObjectDedupeHookIfPossible();
-        InstallSceneTeardownForgetHooksIfPossible();
-        // InstallEntityFrustumCullingIfEnabled runs further down, once its
-        // two switches have been read; here it saw both false and did nothing.
-        InstallMissionTransitionSeamIfPossible();
-        PinDirect3DModulesForShutdown();
-        InstallMultiplayerFlagRenderHookIfPossible();
-        InstallNicknameTextEntryInputHookIfPossible();
-        StartCareerStatsMpSessionWorker();
-        InstallShieldTowerTeamFilterHookIfPossible();
-        InstallMineTeamFilterHooksIfPossible();
+        // Init-time hooks that need nothing from the switches read below.
+        // InstallEntityFrustumCullingIfEnabled is not here: it runs further
+        // down, once its two switches have been read (here it saw both false
+        // and did nothing).
+        static const InitStep kEarlyInstallSteps[] = {
+            {"InstallJumpSnipingProbeIfRequested", &InstallJumpSnipingProbeIfRequested},
+            {"InstallCareerStatsMpHookIfPossible", &InstallCareerStatsMpHookIfPossible},
+            {"InstallUnitVoQueueHooksIfPossible", &InstallUnitVoQueueHooksIfPossible},
+            {"InstallParticleTemplateDedupeHookIfPossible", &InstallParticleTemplateDedupeHookIfPossible},
+            {"InstallUiManualObjectDedupeHookIfPossible", &InstallUiManualObjectDedupeHookIfPossible},
+            {"InstallSceneTeardownForgetHooksIfPossible", &InstallSceneTeardownForgetHooksIfPossible},
+            {"InstallMissionTransitionSeamIfPossible", &InstallMissionTransitionSeamIfPossible},
+            {"PinDirect3DModulesForShutdown", &PinDirect3DModulesForShutdown},
+            {"InstallMultiplayerFlagRenderHookIfPossible", &InstallMultiplayerFlagRenderHookIfPossible},
+            {"InstallNicknameTextEntryInputHookIfPossible", &InstallNicknameTextEntryInputHookIfPossible},
+            {"StartCareerStatsMpSessionWorker", &StartCareerStatsMpSessionWorker},
+            {"InstallShieldTowerTeamFilterHookIfPossible", &InstallShieldTowerTeamFilterHookIfPossible},
+            {"InstallMineTeamFilterHooksIfPossible", &InstallMineTeamFilterHooksIfPossible},
+        };
+        RunInitSteps(kEarlyInstallSteps);
         // Kill switches for the gameplay fixes: each is on unless either
         // name is set. Read here, ahead of the Install* calls below; each
         // Refresh*State() reads only its own flag.
@@ -2734,18 +2754,25 @@ namespace BZROpenShim
 			}
 			g_QuakeReplayFadeSeconds = quakeFadeSeconds;
 		}
-		InstallProducerScriptPredicateHooksIfPossible();
-		InstallBriefingScrollFixIfPossible();
-		InstallMultiRenderCountClampIfPossible();
-		InstallThumbnailBmpGuardIfPossible();
-		InstallSplinterUndeadFixIfPossible();
-		InstallMpauthHooksIfPossible();
-		InstallTugCargoPostLoadFixIfPossible();
-		InstallConstructorRecycleStaleTargetFixIfPossible();
-		InstallApcAlliedTargetDeployFixIfPossible();
-		InstallQuakeReplayFadeIfPossible();
-		InstallTargetCamSatelliteFixIfPossible();
-		InstallCinematicSatelliteZoomFixIfPossible();
+        // The gameplay-fix installs. Each reads its enable flag, so these run
+        // after the kill-switch table above. InstallSplinterUndeadFixIfPossible
+        // sees the splinter default here; its env override is read further
+        // down and applied by RefreshSplinterUndeadFixState().
+        static const InitStep kFixInstallSteps[] = {
+            {"InstallProducerScriptPredicateHooksIfPossible", &InstallProducerScriptPredicateHooksIfPossible},
+            {"InstallBriefingScrollFixIfPossible", &InstallBriefingScrollFixIfPossible},
+            {"InstallMultiRenderCountClampIfPossible", &InstallMultiRenderCountClampIfPossible},
+            {"InstallThumbnailBmpGuardIfPossible", &InstallThumbnailBmpGuardIfPossible},
+            {"InstallSplinterUndeadFixIfPossible", &InstallSplinterUndeadFixIfPossible},
+            {"InstallMpauthHooksIfPossible", &InstallMpauthHooksIfPossible},
+            {"InstallTugCargoPostLoadFixIfPossible", &InstallTugCargoPostLoadFixIfPossible},
+            {"InstallConstructorRecycleStaleTargetFixIfPossible", &InstallConstructorRecycleStaleTargetFixIfPossible},
+            {"InstallApcAlliedTargetDeployFixIfPossible", &InstallApcAlliedTargetDeployFixIfPossible},
+            {"InstallQuakeReplayFadeIfPossible", &InstallQuakeReplayFadeIfPossible},
+            {"InstallTargetCamSatelliteFixIfPossible", &InstallTargetCamSatelliteFixIfPossible},
+            {"InstallCinematicSatelliteZoomFixIfPossible", &InstallCinematicSatelliteZoomFixIfPossible},
+        };
+        RunInitSteps(kFixInstallSteps);
 
         // Retry for whichever of the three resolved to 0 above. This used to
         // be gated on g_IsSteamExe, from when the scan was Steam's path and
@@ -3245,23 +3272,28 @@ namespace BZROpenShim
             SetRawMouseInputEnabledFromBridge(false);
         }
         LogBzrHookStatus(rawInputActive, rawInputSource);
-        InitializeUnderAttackAlertConfig();
-        InitializeTargetReticlePopupConfig();
-        InitializeGlobalTurboConfig();
-        InitializeHeadlightConfig();
-        InitializePilotFlashlightConfig();
-        InstallEmissionLightFixIfPossible();
-        VerifyExpectedOgreExportsIfPossible();
-        InitializeJetFlamesConfig();
-        InitializeUnitVoConfig();
-        // Must run before the game reaches BZRNet init: the requested UDP port
-        // is only honoured while the P2P socket is still closed.
-        InitializeBzrNetConfig();
-        InstallBzrNetRouteObserverIfPossible();
-        EnsureInputBindingPopulateHookScaffold();
-        EnsureOptionsParentCtorHookScaffold();
-        EnsureNativeUiMainMenuDiagnosticScaffold();
-        LogShimSettingsUiStatus();
+        // Late per-feature configuration and the UI scaffolds, after the
+        // status log.
+        static const InitStep kLateInitSteps[] = {
+            {"InitializeUnderAttackAlertConfig", &InitializeUnderAttackAlertConfig},
+            {"InitializeTargetReticlePopupConfig", &InitializeTargetReticlePopupConfig},
+            {"InitializeGlobalTurboConfig", &InitializeGlobalTurboConfig},
+            {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
+            {"InitializePilotFlashlightConfig", &InitializePilotFlashlightConfig},
+            {"InstallEmissionLightFixIfPossible", &InstallEmissionLightFixIfPossible},
+            {"VerifyExpectedOgreExportsIfPossible", &VerifyExpectedOgreExportsIfPossible},
+            {"InitializeJetFlamesConfig", &InitializeJetFlamesConfig},
+            {"InitializeUnitVoConfig", &InitializeUnitVoConfig},
+            // Must run before the game reaches BZRNet init: the requested UDP port
+            // is only honoured while the P2P socket is still closed.
+            {"InitializeBzrNetConfig", &InitializeBzrNetConfig},
+            {"InstallBzrNetRouteObserverIfPossible", &InstallBzrNetRouteObserverIfPossible},
+            {"EnsureInputBindingPopulateHookScaffold", &EnsureInputBindingPopulateHookScaffold},
+            {"EnsureOptionsParentCtorHookScaffold", &EnsureOptionsParentCtorHookScaffold},
+            {"EnsureNativeUiMainMenuDiagnosticScaffold", &EnsureNativeUiMainMenuDiagnosticScaffold},
+            {"LogShimSettingsUiStatus", &LogShimSettingsUiStatus},
+        };
+        RunInitSteps(kLateInitSteps);
         Log(L"[MAPTRACE] Map refresh trace: %hs\n",
             (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
              EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH")) ? "enabled" : "disabled");
