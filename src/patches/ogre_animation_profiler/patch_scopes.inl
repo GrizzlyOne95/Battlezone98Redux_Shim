@@ -364,26 +364,13 @@
         }
 
         template <typename T>
-        bool PatchComVtableEntry(
-            void* object,
-            size_t index,
-            T hook,
-            T& original,
-            const char* label)
+        bool PatchComVtableEntry(void* object, size_t index, T hook, T& original, const char* label)
         {
-            if (!object)
-                return false;
-
             std::lock_guard<std::mutex> lock(g_PatchMutex);
-            void*** objectVtable = reinterpret_cast<void***>(object);
-            if (!objectVtable || !*objectVtable)
-                return false;
-            void** vtable = *objectVtable;
-            void* current = vtable[index];
-            if (current == reinterpret_cast<void*>(hook))
-                return true;
-
-            if (original && current != reinterpret_cast<void*>(original))
+            void** slot = nullptr;
+            const ComVtablePatch::Result result = ComVtablePatch::PatchEntry(
+                object, index, hook, original, ComVtablePatch::OnForeignWrapper::Refuse, &slot);
+            if (result == ComVtablePatch::Result::ForeignWrapper)
             {
                 LogShimA(
                     LogLevel::Warn,
@@ -392,13 +379,10 @@
                     label);
                 return false;
             }
+            if (result != ComVtablePatch::Result::Patched)
+                return result == ComVtablePatch::Result::AlreadyHooked;
 
-            if (!original)
-                original = reinterpret_cast<T>(current);
-            if (!WritePointer(&vtable[index], reinterpret_cast<void*>(hook)))
-                return false;
-            g_PointerPatches.push_back({ &vtable[index], reinterpret_cast<void*>(original) });
-
+            g_PointerPatches.push_back({ slot, reinterpret_cast<void*>(original) });
             LogShimA(
                 LogLevel::Info,
                 kComponent,

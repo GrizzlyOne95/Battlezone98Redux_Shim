@@ -1,4 +1,5 @@
 #include "dx11_colorspace_diagnostic.h"
+#include "com_vtable_patch.h"
 #include "diagnostic_switch.h"
 #include "iat_patch.h"
 #include "shim_log.h"
@@ -1115,64 +1116,29 @@ namespace BZROpenShim
         }
 
         template <typename T>
-        bool PatchComVtableEntry(
-            void* object,
-            size_t index,
-            T hook,
-            T& original,
-            const char* label)
+        bool PatchComVtableEntry(void* object, size_t index, T hook, T& original, const char* label)
         {
-            if (!object)
-                return false;
-
             std::lock_guard<std::mutex> lock(g_HookMutex);
-
-            void*** objectVtable = reinterpret_cast<void***>(object);
-            if (!objectVtable || !*objectVtable)
-                return false;
-
-            void** vtable = *objectVtable;
-            void* current = vtable[index];
-
-            if (current == reinterpret_cast<void*>(hook))
-                return true;
-
-            if (original && current != reinterpret_cast<void*>(original))
+            const ComVtablePatch::Result result = ComVtablePatch::PatchEntry(
+                object, index, hook, original, ComVtablePatch::OnForeignWrapper::Refuse);
+            if (result == ComVtablePatch::Result::ForeignWrapper)
             {
                 LogShimA(
                     LogLevel::Warn,
                     kComponent,
                     "[DX11 ColorSpace] %s vtable differs from already-hooked implementation; leaving it untouched",
                     label);
-                return false;
             }
-
-            DWORD oldProtect = 0;
-            if (!VirtualProtect(
-                    &vtable[index],
-                    sizeof(void*),
-                    PAGE_EXECUTE_READWRITE,
-                    &oldProtect))
+            else if (result == ComVtablePatch::Result::Patched)
             {
-                return false;
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[DX11 ColorSpace] installed %s observer (vtable[%u])",
+                    label,
+                    static_cast<unsigned>(index));
             }
-
-            if (!original)
-                original = reinterpret_cast<T>(current);
-
-            vtable[index] = reinterpret_cast<void*>(hook);
-
-            DWORD ignored = 0;
-            VirtualProtect(&vtable[index], sizeof(void*), oldProtect, &ignored);
-            FlushInstructionCache(GetCurrentProcess(), &vtable[index], sizeof(void*));
-
-            LogShimA(
-                LogLevel::Info,
-                kComponent,
-                "[DX11 ColorSpace] installed %s observer (vtable[%u])",
-                label,
-                static_cast<unsigned>(index));
-            return true;
+            return ComVtablePatch::Succeeded(result);
         }
 
         void InstallContextHooks(ID3D11DeviceContext* context);
