@@ -284,6 +284,13 @@ namespace BZROpenShim
     using FnChunkResolve = uint32_t(__cdecl*)(void* objectPtr, uint32_t variant);
     extern FnChunkResolve g_BzrFn_ChunkResolve;
 
+    using FnDynamicGeometryPrepare = void(__thiscall*)(void* self);
+    using FnLegacyWorldUpdateRenderQueue = void(__thiscall*)(void* self, void* renderQueue);
+    extern FnDynamicGeometryPrepare g_BzrFn_DynamicGeometryPrepare;
+    extern FnLegacyWorldUpdateRenderQueue g_BzrFn_LegacyWorldUpdateRenderQueue;
+    void InstallDynamicGeometryHooks();
+    bool RunLegacyWorldQueueWithDynamicGeometryCounters(void* thisPtr, void* renderQueue);
+
     namespace Hooks
     {
         // --- Ogre ABI value types -----------------------------------------
@@ -1772,6 +1779,9 @@ namespace BZROpenShim
         // --- Chunk engine hooks (chunk_engine_hooks.cpp) -----------------------
         extern bool g_EnableChunkRenderFallback;
         extern bool g_EnablePartialFragmentBoneCollapse;
+
+        // --- DynamicGeometry hooks (dynamic_geometry_hooks.cpp) ----------------
+        extern InlineDetour32 g_DynamicGeometryPrepareDetour;
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
