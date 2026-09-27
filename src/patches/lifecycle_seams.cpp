@@ -18,7 +18,6 @@
 #include "patches.h"
 #include "patcher.h"
 #include "fog_wake_feature.h"
-#include "render_queue_trace.h"
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
 #include "x86_length.h"
@@ -356,7 +355,6 @@ namespace BZROpenShim
                 HeadlightNotifyMissionRunStateChanged(false);
                 PilotFlashlightNotifyMissionRunStateChanged(false);
                 FogWakeNotifyMissionRunStateChanged(false);
-                RenderQueueTraceShutdown();
                 NotifyExuMissionSimulationState(false);
             }
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
