@@ -2141,9 +2141,12 @@ namespace BZROpenShim
     }
 
 
-    void ResolveBzrHooks(bool isSteam)
+    // Puts every piece of per-process hook state back to its resting value
+    // before ResolveBzrHooks binds addresses and reads configuration.
+    // Also re-derives the pointers that come from already-installed detour
+    // trampolines. Runs after g_IsSteamExe is set.
+    void ResetBzrHookRuntimeState()
     {
-        g_IsSteamExe = isSteam;
         g_BzrFn_EngineFlameAddFlame = nullptr;
         g_BzrFn_EngineFlameControl = nullptr;
         g_BzrFn_EngineFlameSubmit = nullptr;
@@ -2383,6 +2386,134 @@ namespace BZROpenShim
         g_VehicleSkinningTraceLastTick = 0;
         g_VehicleSkinningTraceBudget = kVehicleSkinningTraceBudgetDefault;
         g_VehicleSkinningTraceFingerprints.clear();
+    }
+
+    // The per-feature state lines ResolveBzrHooks logs once configuration
+    // has been read and the init-time hooks installed.
+    void LogBzrHookStatus(bool rawInputActive, const char* rawInputSource)
+    {
+        LogChunkDiagnostic("chunk", L"[CHUNK] Force-first-geo fallback: %hs\n",
+            g_EnableChunkRenderFallback ? "enabled" : "disabled");
+        LogChunkDiagnostic("chunk", L"[CHUNK] Trace logging: %hs%s budget=%ld entryLimit=%u\n",
+            g_TraceChunkRender ? "enabled" : "disabled",
+            g_TraceChunkRenderVerbose ? " verbose" : "",
+            static_cast<long>(g_ChunkRenderLogBudget),
+            g_ChunkTraceEntryLimit);
+        LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] Placeholder proxy debug: %hs cap=%u size=%.2f\n",
+            g_EnableChunkProxyDebug ? "enabled" : "disabled",
+            g_ChunkProxyCapacity,
+            g_ChunkProxyDebugSize);
+        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Chunk mesh proxy: %hs genericBatch=%hs stockRoot=%hs modRelative=%hs|%hs\n",
+            g_EnableChunkMeshProxy ? "enabled" : "disabled",
+            g_EnableGenericChunkBatch ? "enabled" : "disabled",
+            GetChunkPayloadStockResourceDirectory().string().c_str(),
+            kChunkPayloadModRelativeDirName,
+            kChunkPayloadModRelativeDirNameAlt);
+        // Terrain HD: explicit AssetFeature::TerrainHd now exists for UI/diagnostics.
+        // LoadTerrainHdManifest() remains the complete filesystem gate (soft-fails to stock atlas),
+        // so no live behavior change is required; this log proves the centralized probe agrees.
+        {
+            const auto caps = Assets::GetAssetCapabilities();
+            Log(L"[TERRAIN] HD terrain capability terrainHd=%d scanMs=%llu problem=%hs\n",
+                caps.terrainHd ? 1 : 0,
+                (unsigned long long)caps.lastScanDurationMs,
+                caps.problem.c_str());
+        }
+        Log(L"[SKINNING] Vehicle diagnostics: %hs interval=%lums detailBudget=%ld optIn=OPENSHIM_TRACE_VEHICLE_SKINNING\n",
+            g_VehicleSkinningTraceEnabled ? "enabled" : "disabled",
+            static_cast<unsigned long>(g_VehicleSkinningTraceIntervalMs),
+            static_cast<long>(g_VehicleSkinningTraceBudget));
+        LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT] Runtime manager trace: %hs vtableSlot=0x%08X orig=0x%08X\n",
+            g_TraceChunkEffectRuntime ? "enabled" : "disabled",
+            static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
+            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ChunkEffectSimulate)));
+        LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Create-path hooks: %hs create=0x%08X chunklet=0x%08X\n",
+            g_ChunkEffectCreateHooksInstalled ? "enabled" : "disabled",
+            static_cast<uint32_t>(kGogChunkEffectCreateChunkAddr),
+            static_cast<uint32_t>(kGogChunkEffectCreateChunkletAddr));
+        if (g_IsSteamExe && !g_AllowUnsafeSteamChunkCreateHooks)
+        {
+            LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Steam safety gate active; creator hooks will install after settled-byte verification and delay\n");
+        }
+        Log(L"[SATVIS] Satellite visibility trace: %hs budget=%ld interval=%lums objectLimit=%u viewRecord=0x%08X userObject=0x%08X arena=0x%08X\n",
+            g_TraceSatelliteVisibility ? "enabled" : "disabled",
+            g_SatelliteVisibilityLogBudget,
+            static_cast<unsigned long>(g_SatelliteVisibilityLogIntervalMs),
+            g_SatelliteVisibilityObjectLimit,
+            static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva),
+            static_cast<uint32_t>(EngineGlobals::UserObjectSlot()),
+            static_cast<uint32_t>(EngineGlobals::GameObjectArena()));
+        // Record the layout the sample lines were produced with, so a captured
+        // log stays interpretable if these offsets are ever revised again.
+        Log(L"[SATVIS]   offsets illum=+0x%03X isVisible=+0x%03X seen=+0x%03X team=+0x%03X perceivedTeam=+0x%03X objective=+0x%03X currentView=%ld expects=%ld\n",
+            static_cast<unsigned>(kGameObjectIlluminationOffset),
+            static_cast<unsigned>(kGameObjectIsVisibleOffset),
+            static_cast<unsigned>(kGameObjectSeenOffset),
+            static_cast<unsigned>(kGameObjectActualTeamOffset),
+            static_cast<unsigned>(kGameObjectPerceivedTeamOffset),
+            static_cast<unsigned>(kGameObjectIsObjectiveOffset),
+            IsSatelliteOverviewActive() ? kCameraTypeOverView : -1L,
+            kCameraTypeOverView);
+        Log(L"[MAGNET] Zero/non-finite range guard: %hs hook=%hs\n",
+            g_MagnetZeroRangeGuardEnabled ? "enabled" : "disabled",
+            g_MagnetMineSimulateHookInstalled ? "installed" : "pending");
+        Log(L"[RAWINPUT] Raw mouse input: %hs source=%hs signatures=%hs guard=%hs trace=%hs\n"
+            L"[RAWINPUT]   flag=0x%08X process=0x%08X (stock command-line tokens: rawinput/norawinput)\n",
+            rawInputActive ? "enabled" : "disabled",
+            rawInputSource,
+            g_RawMouseInputSignaturesMatch ? "verified" : "mismatch",
+            g_RawMouseInputProcessHookInstalled ? "installed" : "absent",
+            ShouldTraceRawMouseInput() ? "enabled" : "disabled",
+            static_cast<uint32_t>(kRawMouseInputEnabledAddr),
+            static_cast<uint32_t>(kRawMouseInputProcessAddr));
+        Log(L"[PRODSCRIPT] PROD CanBuild/IsBusy fix: %hs\n",
+            g_ProducerScriptPredicateHooksInstalled ? "installed" : "pending");
+		Log(L"[ARTYDEPLOY] Undeployed howitzer sniper-retaliation fix: %hs offensiveSubTaskHook=%hs\n",
+			g_HowitzerUndeployedRetaliationFixEnabled ? "enabled" : "disabled",
+			g_RetargetPeriodHooksInstalled ? "installed" : "pending");
+        Log(L"[BRIEFSCROLL] Mission briefing/archive scroll fix: %hs hook=%hs\n",
+            g_BriefingScrollFixEnabled ? "enabled" : "disabled",
+            g_BriefingScrollFixInstalled ? "installed" : "pending");
+        Log(L"[RENDERCOUNT] draw_multi renderCount clamp: %hs hook=%hs max=%d\n",
+            g_MultiRenderCountClampEnabled ? "enabled" : "disabled",
+            g_MultiRenderCountClampInstalled ? "installed" : "pending",
+            kMultiRenderCountMax);
+        Log(L"[BMPFIX] Undecodable thumbnail guard: %hs hook=%hs optOut=OPENSHIM_DISABLE_BMP_GUARD\n",
+            g_ThumbnailBmpGuardEnabled ? "enabled" : "disabled",
+            g_ThumbnailBmpGuardInstalled ? "installed" : "pending");
+        Log(L"[QUAKEFADE] Post-load quake replay fade: %hs hook=%hs fadeSeconds=%ld\n",
+            g_QuakeReplayFadeEnabled ? "enabled" : "disabled",
+            g_QuakeReplayFadeInstalled ? "installed" : "pending",
+            g_QuakeReplayFadeSeconds);
+        Log(L"[TARGETCAM] Satellite/F9 stale target camera fix: %hs hook=%hs\n",
+            g_TargetCamSatelliteFixEnabled ? "enabled" : "disabled",
+            g_TargetCamSatelliteFixInstalled ? "installed" : "pending");
+        Log(L"[CINECAM] Cinematic-from-satellite zoom fix: %hs hook=%hs\n",
+            g_CinematicSatelliteZoomFixEnabled ? "enabled" : "disabled",
+            g_CinematicSatelliteZoomFixInstalled ? "installed" : "pending");
+        Log(L"[TURRET] Aim pitch multiplier: %.3f%s\n",
+            static_cast<double>(g_TurretAimPitchMultiplier),
+            g_TurretAimPitchMultiplier >= 0.999f ? " (full range)" : "");
+        Log(L"[AICONSTRUCT] Constructor death cleanup fix: %hs entry=0x%08X trace=%hs budget=%ld\n",
+            g_ConstructorRemoteBuildFixEnabled ? "enabled" : "disabled",
+            static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr),
+            ShouldTraceConstructorRemoteBuildFix() ? "enabled" : "disabled",
+            g_ConstructorRemoteBuildTraceBudget);
+        Log(L"[AGGRO] Attack reveal fix: %hs trace=%hs budget=%ld\n",
+            g_AttackRevealEnabled ? "enabled" : "disabled",
+            ShouldTraceAttackReveal() ? "enabled" : "disabled",
+            g_AttackRevealTraceBudget);
+        Log(L"[OWNREVEAL] owned-object reveal fix: configured=%hs active=%hs trace=%hs budget=%ld\n",
+            BoolText(g_OwnedObjectRevealFixEnabled),
+            BoolText(g_OwnedObjectRevealFixActive),
+            BoolText(ShouldTraceOwnedObjectReveal()),
+            g_OwnedObjectRevealTraceBudget);
+    }
+
+    void ResolveBzrHooks(bool isSteam)
+    {
+        g_IsSteamExe = isSteam;
+        ResetBzrHookRuntimeState();
 
         g_BzrPtr_945478 = reinterpret_cast<void**>(0x00945478);
         g_BzrPtr_94548C = reinterpret_cast<void**>(0x0094548C);
@@ -3104,122 +3235,7 @@ namespace BZROpenShim
             // so reaching here means an env or ini opt-out has to undo it.
             SetRawMouseInputEnabledFromBridge(false);
         }
-        LogChunkDiagnostic("chunk", L"[CHUNK] Force-first-geo fallback: %hs\n",
-            g_EnableChunkRenderFallback ? "enabled" : "disabled");
-        LogChunkDiagnostic("chunk", L"[CHUNK] Trace logging: %hs%s budget=%ld entryLimit=%u\n",
-            g_TraceChunkRender ? "enabled" : "disabled",
-            g_TraceChunkRenderVerbose ? " verbose" : "",
-            static_cast<long>(g_ChunkRenderLogBudget),
-            g_ChunkTraceEntryLimit);
-        LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] Placeholder proxy debug: %hs cap=%u size=%.2f\n",
-            g_EnableChunkProxyDebug ? "enabled" : "disabled",
-            g_ChunkProxyCapacity,
-            g_ChunkProxyDebugSize);
-        LogChunkDiagnostic("chunkmesh", L"[CHUNKMESH] Chunk mesh proxy: %hs genericBatch=%hs stockRoot=%hs modRelative=%hs|%hs\n",
-            g_EnableChunkMeshProxy ? "enabled" : "disabled",
-            g_EnableGenericChunkBatch ? "enabled" : "disabled",
-            GetChunkPayloadStockResourceDirectory().string().c_str(),
-            kChunkPayloadModRelativeDirName,
-            kChunkPayloadModRelativeDirNameAlt);
-        // Terrain HD: explicit AssetFeature::TerrainHd now exists for UI/diagnostics.
-        // LoadTerrainHdManifest() remains the complete filesystem gate (soft-fails to stock atlas),
-        // so no live behavior change is required; this log proves the centralized probe agrees.
-        {
-            const auto caps = Assets::GetAssetCapabilities();
-            Log(L"[TERRAIN] HD terrain capability terrainHd=%d scanMs=%llu problem=%hs\n",
-                caps.terrainHd ? 1 : 0,
-                (unsigned long long)caps.lastScanDurationMs,
-                caps.problem.c_str());
-        }
-        Log(L"[SKINNING] Vehicle diagnostics: %hs interval=%lums detailBudget=%ld optIn=OPENSHIM_TRACE_VEHICLE_SKINNING\n",
-            g_VehicleSkinningTraceEnabled ? "enabled" : "disabled",
-            static_cast<unsigned long>(g_VehicleSkinningTraceIntervalMs),
-            static_cast<long>(g_VehicleSkinningTraceBudget));
-        LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT] Runtime manager trace: %hs vtableSlot=0x%08X orig=0x%08X\n",
-            g_TraceChunkEffectRuntime ? "enabled" : "disabled",
-            static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
-            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ChunkEffectSimulate)));
-        LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Create-path hooks: %hs create=0x%08X chunklet=0x%08X\n",
-            g_ChunkEffectCreateHooksInstalled ? "enabled" : "disabled",
-            static_cast<uint32_t>(kGogChunkEffectCreateChunkAddr),
-            static_cast<uint32_t>(kGogChunkEffectCreateChunkletAddr));
-        if (g_IsSteamExe && !g_AllowUnsafeSteamChunkCreateHooks)
-        {
-            LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Steam safety gate active; creator hooks will install after settled-byte verification and delay\n");
-        }
-        Log(L"[SATVIS] Satellite visibility trace: %hs budget=%ld interval=%lums objectLimit=%u viewRecord=0x%08X userObject=0x%08X arena=0x%08X\n",
-            g_TraceSatelliteVisibility ? "enabled" : "disabled",
-            g_SatelliteVisibilityLogBudget,
-            static_cast<unsigned long>(g_SatelliteVisibilityLogIntervalMs),
-            g_SatelliteVisibilityObjectLimit,
-            static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva),
-            static_cast<uint32_t>(EngineGlobals::UserObjectSlot()),
-            static_cast<uint32_t>(EngineGlobals::GameObjectArena()));
-        // Record the layout the sample lines were produced with, so a captured
-        // log stays interpretable if these offsets are ever revised again.
-        Log(L"[SATVIS]   offsets illum=+0x%03X isVisible=+0x%03X seen=+0x%03X team=+0x%03X perceivedTeam=+0x%03X objective=+0x%03X currentView=%ld expects=%ld\n",
-            static_cast<unsigned>(kGameObjectIlluminationOffset),
-            static_cast<unsigned>(kGameObjectIsVisibleOffset),
-            static_cast<unsigned>(kGameObjectSeenOffset),
-            static_cast<unsigned>(kGameObjectActualTeamOffset),
-            static_cast<unsigned>(kGameObjectPerceivedTeamOffset),
-            static_cast<unsigned>(kGameObjectIsObjectiveOffset),
-            IsSatelliteOverviewActive() ? kCameraTypeOverView : -1L,
-            kCameraTypeOverView);
-        Log(L"[MAGNET] Zero/non-finite range guard: %hs hook=%hs\n",
-            g_MagnetZeroRangeGuardEnabled ? "enabled" : "disabled",
-            g_MagnetMineSimulateHookInstalled ? "installed" : "pending");
-        Log(L"[RAWINPUT] Raw mouse input: %hs source=%hs signatures=%hs guard=%hs trace=%hs\n"
-            L"[RAWINPUT]   flag=0x%08X process=0x%08X (stock command-line tokens: rawinput/norawinput)\n",
-            rawInputActive ? "enabled" : "disabled",
-            rawInputSource,
-            g_RawMouseInputSignaturesMatch ? "verified" : "mismatch",
-            g_RawMouseInputProcessHookInstalled ? "installed" : "absent",
-            ShouldTraceRawMouseInput() ? "enabled" : "disabled",
-            static_cast<uint32_t>(kRawMouseInputEnabledAddr),
-            static_cast<uint32_t>(kRawMouseInputProcessAddr));
-        Log(L"[PRODSCRIPT] PROD CanBuild/IsBusy fix: %hs\n",
-            g_ProducerScriptPredicateHooksInstalled ? "installed" : "pending");
-		Log(L"[ARTYDEPLOY] Undeployed howitzer sniper-retaliation fix: %hs offensiveSubTaskHook=%hs\n",
-			g_HowitzerUndeployedRetaliationFixEnabled ? "enabled" : "disabled",
-			g_RetargetPeriodHooksInstalled ? "installed" : "pending");
-        Log(L"[BRIEFSCROLL] Mission briefing/archive scroll fix: %hs hook=%hs\n",
-            g_BriefingScrollFixEnabled ? "enabled" : "disabled",
-            g_BriefingScrollFixInstalled ? "installed" : "pending");
-        Log(L"[RENDERCOUNT] draw_multi renderCount clamp: %hs hook=%hs max=%d\n",
-            g_MultiRenderCountClampEnabled ? "enabled" : "disabled",
-            g_MultiRenderCountClampInstalled ? "installed" : "pending",
-            kMultiRenderCountMax);
-        Log(L"[BMPFIX] Undecodable thumbnail guard: %hs hook=%hs optOut=OPENSHIM_DISABLE_BMP_GUARD\n",
-            g_ThumbnailBmpGuardEnabled ? "enabled" : "disabled",
-            g_ThumbnailBmpGuardInstalled ? "installed" : "pending");
-        Log(L"[QUAKEFADE] Post-load quake replay fade: %hs hook=%hs fadeSeconds=%ld\n",
-            g_QuakeReplayFadeEnabled ? "enabled" : "disabled",
-            g_QuakeReplayFadeInstalled ? "installed" : "pending",
-            g_QuakeReplayFadeSeconds);
-        Log(L"[TARGETCAM] Satellite/F9 stale target camera fix: %hs hook=%hs\n",
-            g_TargetCamSatelliteFixEnabled ? "enabled" : "disabled",
-            g_TargetCamSatelliteFixInstalled ? "installed" : "pending");
-        Log(L"[CINECAM] Cinematic-from-satellite zoom fix: %hs hook=%hs\n",
-            g_CinematicSatelliteZoomFixEnabled ? "enabled" : "disabled",
-            g_CinematicSatelliteZoomFixInstalled ? "installed" : "pending");
-        Log(L"[TURRET] Aim pitch multiplier: %.3f%s\n",
-            static_cast<double>(g_TurretAimPitchMultiplier),
-            g_TurretAimPitchMultiplier >= 0.999f ? " (full range)" : "");
-        Log(L"[AICONSTRUCT] Constructor death cleanup fix: %hs entry=0x%08X trace=%hs budget=%ld\n",
-            g_ConstructorRemoteBuildFixEnabled ? "enabled" : "disabled",
-            static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr),
-            ShouldTraceConstructorRemoteBuildFix() ? "enabled" : "disabled",
-            g_ConstructorRemoteBuildTraceBudget);
-        Log(L"[AGGRO] Attack reveal fix: %hs trace=%hs budget=%ld\n",
-            g_AttackRevealEnabled ? "enabled" : "disabled",
-            ShouldTraceAttackReveal() ? "enabled" : "disabled",
-            g_AttackRevealTraceBudget);
-        Log(L"[OWNREVEAL] owned-object reveal fix: configured=%hs active=%hs trace=%hs budget=%ld\n",
-            BoolText(g_OwnedObjectRevealFixEnabled),
-            BoolText(g_OwnedObjectRevealFixActive),
-            BoolText(ShouldTraceOwnedObjectReveal()),
-            g_OwnedObjectRevealTraceBudget);
+        LogBzrHookStatus(rawInputActive, rawInputSource);
         InitializeUnderAttackAlertConfig();
         InitializeTargetReticlePopupConfig();
         InitializeGlobalTurboConfig();
