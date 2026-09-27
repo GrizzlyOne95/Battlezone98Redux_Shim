@@ -242,6 +242,7 @@ namespace BZROpenShim
 
     using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
     extern FnPersonSimulate g_BzrFn_PersonSimulate;
+    extern float g_TurretAimPitchMultiplierEnhanced;
 
     namespace Hooks
     {
@@ -1352,6 +1353,45 @@ namespace BZROpenShim
         extern bool g_JumpSnipeProbeInstalled;
         extern JumpSnipeProbeLogState g_JumpSnipeProbeLogState;
         void InstallJumpSnipingProbeIfRequested();
+
+        // --- Global feature configuration (global_feature_config.cpp) ----------
+        inline constexpr bool kSplinterUndeadFixEnabledDefault = true;
+        inline constexpr float kSmartReticleRangeDefault = 500.0f;
+        inline constexpr bool kConstructorRemoteBuildFixEnabledDefault = true;
+        inline constexpr bool kBomberAiRangeEnabledDefault = false;
+        inline constexpr bool kHowitzerUndeployedRetaliationFixEnabledDefault = true;
+        // Master switch for the ODF-authored AI tuning keys (engageRangeAI,
+        // weaponRangeMinAI, retargetPeriodAI, scrapPathingAI and friends).
+        // Defaults ON: every path it gates additionally requires the ODF to
+        // declare one of those keys, so content that does not author them --
+        // the stock campaign included -- is completely unaffected.
+        inline constexpr bool kAiOdfGameplayTuningEnabledDefault = true;
+        inline constexpr bool kTurretAimPitchEnabledDefault = true;
+        inline constexpr bool kAllowNeutralAttackOrdersDefault = false;
+        // Pure instrumentation for the AIP construction program. Off by default
+        // because it prints one line per AIP item name plus a one-shot dump of
+        // the whole prereq universe; nothing about the game changes either way.
+        inline constexpr bool kAipResolveTraceDefault = false;
+        // Always-on fix: give a built class every producer that can make it,
+        // instead of only the first one InitObjectClasses happened to reach.
+        inline constexpr bool kAiMultiProducerMakersDefault = true;
+        inline constexpr char kUserConfigFixesSection[] = "Fixes";
+        extern bool g_AiOdfGameplayTuningEnabled;
+        extern bool g_BomberAiRangeBaselineEnabled;
+        extern bool g_BomberAiRangeEnabled;
+        extern bool g_HowitzerUndeployedRetaliationFixEnabled;
+        extern bool g_TurretAimPitchEnabled;
+        void RefreshTurretAimPitchState();
+        void RefreshAiOdfGameplayTuningState();
+        void RefreshBomberAiRangeState();
+        void RefreshSplinterUndeadFixState();
+        void RefreshTugCargoPostLoadFixState();
+        void RefreshConstructorRecycleStaleTargetFixState();
+        void RefreshHowitzerUndeployedRetaliationFixState();
+        void RefreshConstructorRemoteBuildFixState();
+        void InitializeGlobalImprovementConfig();
+        void RevertRegisteredFeaturesToBaseline();
+        void TickMpGateReconcile();
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;
