@@ -15,7 +15,6 @@
 #include "patches.h"
 #include "patcher.h"
 #include "fog_wake_feature.h"
-#include "render_queue_trace.h"
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
 #include "x86_length.h"
@@ -3687,11 +3686,6 @@ namespace BZROpenShim
         // Sample after the stock world queue update, when Ogre has evaluated
         // the entity materials and its hardware-animation decision is current.
         RefreshVehicleSkinningDiagnosticsIfNeeded();
-
-        // Opt-in render queue structure trace. Attaches once, on the first
-        // frame a world is rendered, and is inert unless
-        // [Diagnostics] TraceRenderQueues is set.
-        RenderQueueTraceTick(GetOgreSceneManagerRuntime());
 
         // Repairs the multiplayer Create Game vehicle preview, which renders
         // black on DX11 because its viewport keeps Ogre's default scheme and
