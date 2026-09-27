@@ -49,8 +49,10 @@ namespace BZROpenShim::RenderProfiles
     // Command-line snapshot. Stock's parser (FUN_007D5120) strtok()s the
     // GetCommandLineA() buffer in place, so tokens after the first NUL it
     // inserts vanish for any later reader; DllMain captures the pristine
-    // string before game main can run.
-    char s_commandLineSnapshot[1200] = {};
+    // string before game main can run. Sized for the longest command line
+    // Windows accepts (32,767 characters), so Steam launch options after a
+    // long quoted path cannot push a /renderer: token past the end.
+    char s_commandLineSnapshot[32768] = {};
 
 
     void CaptureCommandLineSnapshot()

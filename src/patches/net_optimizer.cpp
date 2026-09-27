@@ -397,7 +397,10 @@ namespace
         LPWSAOVERLAPPED_COMPLETION_ROUTINE originalCompletionRoutine = nullptr;
         uint32_t requestedLength = 0;
         bool capturedImmediate = false;
+        uint64_t registeredMs = 0;
     };
+
+    constexpr size_t kMaxPendingCaptureIo = 4096;
 
     using WebSocketDirectionState = WebSocketStreamState;
 
@@ -2743,8 +2746,25 @@ namespace
         pending.fromLen = fromLen;
         pending.originalCompletionRoutine = originalCompletionRoutine;
         pending.requestedLength = GetRequestedWsabufBytes(buffers, bufferCount);
+        pending.registeredMs = GetTickCount64();
 
         AcquireSRWLockExclusive(&g_PendingCaptureLock);
+        // Completions that arrive by a route the hooks do not see
+        // (WSAGetOverlappedResult, event waits, GetQueuedCompletionStatusEx)
+        // leave their entry behind, holding the game's WSABUF pointers. Bound
+        // the map: at the cap, the oldest registration goes first. No age
+        // limit on lookup, since a receive can legitimately pend for minutes.
+        if (g_PendingCaptureIo.size() >= kMaxPendingCaptureIo &&
+            g_PendingCaptureIo.find(overlapped) == g_PendingCaptureIo.end())
+        {
+            auto oldest = g_PendingCaptureIo.begin();
+            for (auto it = g_PendingCaptureIo.begin(); it != g_PendingCaptureIo.end(); ++it)
+            {
+                if (it->second.registeredMs < oldest->second.registeredMs)
+                    oldest = it;
+            }
+            g_PendingCaptureIo.erase(oldest);
+        }
         g_PendingCaptureIo[overlapped] = std::move(pending);
         ReleaseSRWLockExclusive(&g_PendingCaptureLock);
         return true;
