@@ -1,4 +1,6 @@
 #include "bzrnet_instrumentation.h"
+#include "json_escape.h"
+#include "bool_token.h"
 #include "bzrnet_protocol.h"
 #include "bzrnet_trace.h"
 #include "net_optimizer.h"
@@ -39,13 +41,7 @@ namespace
         uint32_t queueRecords = 4096;
     };
 
-    struct WsDirection
-    {
-        bool handshakeComplete = false;
-        uint8_t fragmentedOpcode = 0;
-        std::vector<uint8_t> pending;
-        std::vector<uint8_t> fragmented;
-    };
+    using WsDirection = WebSocketStreamState;
 
     struct WsState
     {
@@ -65,7 +61,10 @@ namespace
         int connectedPeerLen = 0;
         LPWSAOVERLAPPED_COMPLETION_ROUTINE originalCompletion = nullptr;
         bool capturedImmediate = false;
+        uint64_t registeredMs = 0;
     };
+
+    constexpr size_t kMaxPendingIo = 4096;
 
     struct SocketIdentity
     {
@@ -125,8 +124,10 @@ namespace
         char value[32] = {};
         const DWORD n = GetEnvironmentVariableA(name, value, static_cast<DWORD>(sizeof(value)));
         if (!n || n >= sizeof(value)) return false;
-        return _stricmp(value, "1") == 0 || _stricmp(value, "true") == 0 ||
-            _stricmp(value, "yes") == 0 || _stricmp(value, "on") == 0;
+        // Read like net_optimizer reads the same variables: set and not a false
+        // word. BZ_RELAY_CAPTURE=2 used to start the relay capture there but not
+        // the structured trace here.
+        return BoolToken::IsTruthy(value, n);
     }
 
     uint32_t EnvUint(const char* name, uint32_t fallback)
@@ -257,25 +258,6 @@ namespace
         return getpeername(s, reinterpret_cast<sockaddr*>(&peer), &peerLen) == 0;
     }
 
-    std::string JsonEscape(const std::string& input)
-    {
-        std::string out;
-        out.reserve(input.size() + 8);
-        for (const unsigned char c : input)
-        {
-            switch (c)
-            {
-                case '"': out += "\\\""; break;
-                case '\\': out += "\\\\"; break;
-                case '\n': out += "\\n"; break;
-                case '\r': out += "\\r"; break;
-                case '\t': out += "\\t"; break;
-                default: out.push_back(c < 0x20 ? '?' : static_cast<char>(c)); break;
-            }
-        }
-        return out;
-    }
-
     uint64_t Fnv1a64(const uint8_t* data, size_t length)
     {
         uint64_t hash = 1469598103934665603ull;
@@ -337,7 +319,7 @@ namespace
         if (!control.recognized && length >= 20) control = DecodeBzrUdpControl(data + 18, length - 18);
         const size_t capturedLength = WireCaptureBytes(length);
         std::string details = "{\"transport\":\"udp\",\"port\":" + std::to_string(port) +
-            ",\"endpoint\":\"" + JsonEscape(endpointText) + "\",\"payloadLength\":" + std::to_string(length) +
+            ",\"endpoint\":\"" + EscapeJsonString(endpointText) + "\",\"payloadLength\":" + std::to_string(length) +
             ",\"capturedPayloadLength\":" + std::to_string(capturedLength) +
             ",\"payloadTruncated\":" + (capturedLength < length ? "true" : "false") +
             ",\"fnv1a64\":\"" + hash + "\",\"payloadPrefixHex\":\"" + HexPrefix(data, length) + "\",\"pending\":" +
@@ -345,8 +327,8 @@ namespace
         if (length >= 18) details += ",\"commonKind\":" + std::to_string(data[1] & 0x0f);
         if (control.recognized)
         {
-            details += ",\"controlMarker\":\"" + JsonEscape(control.marker) + "\",\"controlMeaning\":\"" +
-                JsonEscape(control.likelyMeaning) + "\",\"controlEvidence\":\"" + BzrNetEvidenceName(control.evidence) + "\"";
+            details += ",\"controlMarker\":\"" + EscapeJsonString(control.marker) + "\",\"controlMeaning\":\"" +
+                EscapeJsonString(control.likelyMeaning) + "\",\"controlEvidence\":\"" + BzrNetEvidenceName(control.evidence) + "\"";
             if (control.fieldCount)
             {
                 const uint32_t fields[5] = {control.field0, control.field1, control.field2, control.field3, control.field4};
@@ -379,78 +361,18 @@ namespace
         if (safe.passwordRedacted) details += ",\"password\":{\"redacted\":true,\"length\":" + std::to_string(safe.passwordLength) + '}';
         if (hasReason) details += ",\"reasonCode\":" + std::to_string(reasonCode);
         if (hasSuccess) details += ",\"success\":" + std::string(success ? "true" : "false");
-        details += ",\"messageJson\":\"" + JsonEscape(safe.json) + "\"}";
+        details += ",\"messageJson\":\"" + EscapeJsonString(safe.json) + "\"}";
         const SocketIdentity socket = SocketFor(s);
         EmitBzrNetTrace("websocket", outbound ? "BZR_WS_TX" : "BZR_WS_RX", outbound ? "outbound" : "inbound",
             socket.id, socket.generation, hasType ? type.c_str() : "<unknown>", details);
     }
 
-    size_t HeaderEnd(const std::vector<uint8_t>& data)
-    {
-        static const uint8_t delimiter[] = {'\r','\n','\r','\n'};
-        const auto it = std::search(data.begin(), data.end(), std::begin(delimiter), std::end(delimiter));
-        return it == data.end() ? std::string::npos : static_cast<size_t>(it - data.begin()) + sizeof(delimiter);
-    }
-
     void ProcessWsDirection(SOCKET s, bool outbound, WsDirection& state, const uint8_t* bytes, size_t length)
     {
-        if (!bytes || !length) return;
-        if (state.pending.size() + length > kMaxWsBytes)
-        {
-            state.pending.clear(); state.fragmented.clear(); state.fragmentedOpcode = 0; return;
-        }
-        state.pending.insert(state.pending.end(), bytes, bytes + length);
-        if (!state.handshakeComplete)
-        {
-            const size_t end = HeaderEnd(state.pending);
-            if (end == std::string::npos) { if (state.pending.size() > 64 * 1024) state.pending.clear(); return; }
-            state.pending.erase(state.pending.begin(), state.pending.begin() + end);
-            state.handshakeComplete = true;
-        }
-        while (state.pending.size() >= 2)
-        {
-            const uint8_t first = state.pending[0], second = state.pending[1];
-            const bool fin = (first & 0x80u) != 0, masked = (second & 0x80u) != 0;
-            const uint8_t opcode = first & 0x0fu;
-            uint64_t payloadLength = second & 0x7fu;
-            size_t headerLength = 2;
-            if (payloadLength == 126)
-            {
-                if (state.pending.size() < 4) return;
-                payloadLength = (static_cast<uint64_t>(state.pending[2]) << 8) | state.pending[3]; headerLength = 4;
-            }
-            else if (payloadLength == 127)
-            {
-                if (state.pending.size() < 10) return;
-                payloadLength = 0; for (size_t i = 2; i < 10; ++i) payloadLength = (payloadLength << 8) | state.pending[i]; headerLength = 10;
-            }
-            if (payloadLength > kMaxWsBytes) { state.pending.clear(); state.fragmented.clear(); state.fragmentedOpcode = 0; return; }
-            uint8_t mask[4] = {};
-            if (masked)
-            {
-                if (state.pending.size() < headerLength + 4) return;
-                std::memcpy(mask, state.pending.data() + headerLength, 4); headerLength += 4;
-            }
-            if (state.pending.size() < headerLength + static_cast<size_t>(payloadLength)) return;
-            std::vector<uint8_t> payload(static_cast<size_t>(payloadLength));
-            for (size_t i = 0; i < payload.size(); ++i)
-            {
-                payload[i] = state.pending[headerLength + i]; if (masked) payload[i] ^= mask[i % 4];
-            }
-            state.pending.erase(state.pending.begin(), state.pending.begin() + headerLength + static_cast<size_t>(payloadLength));
-            if (opcode == 0x0)
-            {
-                if (!state.fragmentedOpcode || state.fragmented.size() + payload.size() > kMaxWsBytes)
-                { state.fragmented.clear(); state.fragmentedOpcode = 0; continue; }
-                state.fragmented.insert(state.fragmented.end(), payload.begin(), payload.end());
-                if (fin) { ProcessWsMessage(s, outbound, state.fragmentedOpcode, state.fragmented); state.fragmented.clear(); state.fragmentedOpcode = 0; }
-            }
-            else if (opcode == 0x1 || opcode == 0x2)
-            {
-                if (fin) ProcessWsMessage(s, outbound, opcode, payload);
-                else { state.fragmentedOpcode = opcode; state.fragmented = std::move(payload); }
-            }
-        }
+        std::vector<WebSocketMessage> messages;
+        FeedWebSocketStream(state, bytes, length, kMaxWsBytes, messages);
+        for (const WebSocketMessage& message : messages)
+            ProcessWsMessage(s, outbound, message.opcode, message.payload);
     }
 
     void FeedWs(SOCKET s, bool outbound, const uint8_t* data, size_t length)
@@ -474,7 +396,23 @@ namespace
         io.kind = kind; io.socket = s; io.buffers.assign(buffers, buffers + count); io.from = from; io.fromLen = fromLen; io.originalCompletion = completion;
         if (kind == PendingKind::ConnectedDatagram &&
             !TryGetConnectedPeer(s, io.connectedPeer, io.connectedPeerLen)) return false;
+        io.registeredMs = GetTickCount64();
         AcquireSRWLockExclusive(&g_PendingLock);
+        // Completions that arrive by a route the hooks do not see
+        // (WSAGetOverlappedResult, event waits, GetQueuedCompletionStatusEx)
+        // leave their entry behind, holding the game's WSABUF pointers. Bound
+        // the map: at the cap, the oldest registration goes first. No age
+        // limit on lookup, since a receive can legitimately pend for minutes.
+        if (g_Pending.size() >= kMaxPendingIo && g_Pending.find(overlapped) == g_Pending.end())
+        {
+            auto oldest = g_Pending.begin();
+            for (auto it = g_Pending.begin(); it != g_Pending.end(); ++it)
+            {
+                if (it->second.registeredMs < oldest->second.registeredMs)
+                    oldest = it;
+            }
+            g_Pending.erase(oldest);
+        }
         g_Pending[overlapped] = std::move(io);
         ReleaseSRWLockExclusive(&g_PendingLock);
         return true;

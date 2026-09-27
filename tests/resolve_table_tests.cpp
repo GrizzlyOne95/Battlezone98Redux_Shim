@@ -386,6 +386,81 @@ namespace
         Check(parsed.size() == 4 && parsed[1] == 0x100 && parsed[3] == 0x100,
               "?? and ? both mark a wildcard");
     }
+    void TestEngineAddressRows()
+    {
+        const char* json = R"({
+            "engine_addresses": [
+                { "name": "Good", "address": "0x0076B7A0", "expected": "55 8B EC ?? FF" },
+                { "name": "Slot", "address": "0x00945478", "kind": "data" },
+                { "name": "NoBytes", "address": "0x00401000" },
+                { "name": "BadBytes", "address": "0x00401000", "expected": "55 ZZ" },
+                { "name": "DataWithBytes", "address": "0x00401000", "kind": "data", "expected": "55" },
+                { "name": "ZeroAddress", "address": "0x0", "expected": "55" },
+                { "name": "BadKind", "address": "0x00401000", "kind": "stack", "expected": "55" },
+                { "name": "Good", "address": "0x00401000", "expected": "C3" },
+                { "address": "0x00401000", "expected": "C3" }
+            ]
+        })";
+        std::string error;
+        const auto rows = ParseEngineAddressTable(json, &error);
+        Check(rows.size() == 2, "only the two well-formed rows survive");
+        Check(!error.empty(), "each rejected row is reported");
+        if (rows.size() == 2)
+        {
+            Check(rows[0].name == "Good" && rows[0].address == 0x0076B7A0u && !rows[0].isData,
+                  "a code row keeps its name and address");
+            Check(rows[0].expected.size() == 5 && rows[0].expected[3] == 0x100,
+                  "a code row keeps its guard bytes, wildcards included");
+            Check(rows[1].name == "Slot" && rows[1].isData && rows[1].expected.empty(),
+                  "a data row carries no guard");
+        }
+        Check(error.find("repeats an earlier name") != std::string::npos,
+              "a duplicate name is rejected, not merged");
+
+        std::string none;
+        Check(ParseEngineAddressTable(R"({"patches": []})", &none).empty() && none.empty(),
+              "a file without the section yields no rows and no error");
+    }
+
+    void TestEngineAddressBytesMatch()
+    {
+        const std::vector<uint16_t> expected = ParseIdaPatternText("55 8B EC ?? FF");
+        const uint8_t same[] = {0x55, 0x8B, 0xEC, 0x12, 0xFF, 0x90};
+        const uint8_t differs[] = {0x55, 0x8B, 0xEC, 0x12, 0xFE};
+        Check(EngineAddressBytesMatch(expected, same, sizeof(same)), "literal bytes match, wildcard ignored");
+        Check(!EngineAddressBytesMatch(expected, differs, sizeof(differs)), "one differing byte fails the guard");
+        Check(!EngineAddressBytesMatch(expected, same, 4), "too few bytes read fails the guard");
+        Check(!EngineAddressBytesMatch({}, same, sizeof(same)), "an empty guard never matches");
+    }
+
+    void TestShippedEngineAddressTable()
+    {
+#ifndef BZR_PATCHES_JSON
+        std::printf("resolve_table_tests: shipped patches.json path not configured; skipped\n");
+#else
+        std::ifstream file(BZR_PATCHES_JSON, std::ios::binary);
+        Check(file.is_open(), "scripts/patches.json must be readable at " BZR_PATCHES_JSON);
+        if (!file.is_open()) return;
+        const std::string text((std::istreambuf_iterator<char>(file)),
+                               std::istreambuf_iterator<char>());
+
+        std::string error;
+        const auto rows = ParseEngineAddressTable(text, &error);
+        Check(error.empty(), "the shipped engine address table must have no rejected rows");
+        Check(rows.size() == 84, "the shipped table carries all 84 engine addresses");
+        size_t data = 0;
+        for (const auto& row : rows)
+        {
+            if (row.isData)
+            {
+                ++data;
+                continue;
+            }
+            Check(row.expected.size() >= 8, "every code row guards at least 8 bytes");
+        }
+        Check(data == 9, "exactly the nine data globals are unguarded");
+#endif
+    }
 }
 
 int main()
@@ -396,6 +471,9 @@ int main()
     TestUnparseablePatternFailsWhole();
     TestAbs32OperandMode();
     TestShippedTableMatchesTheOriginalArrays();
+    TestEngineAddressRows();
+    TestEngineAddressBytesMatch();
+    TestShippedEngineAddressTable();
 
     if (g_Failures != 0)
     {

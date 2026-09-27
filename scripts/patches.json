@@ -771,6 +771,428 @@
       "identity": "Resource-layer file size query, int __cdecl (const char* name), on exact GOG Redux 2.2.301, taken from the first call in Music::Start, which passes the formatted \"%02d.ogg\" name and gives up on the track when the result is below 1. It forwards to FUN_00481A80(nullptr, name), which returns the cached entry's size (+0x10) or the on-disk size and has no side effects; the same query sizes wave files elsewhere. OpenShimSetMusicTrack uses it to refuse a track that does not exist before touching the engine's music state."
     }
   ],
+  "engine_addresses": [
+    {
+      "name": "VehicleListSelection",
+      "address": "0x00945478",
+      "kind": "data"
+    },
+    {
+      "name": "VehicleListManager",
+      "address": "0x0094548C",
+      "kind": "data"
+    },
+    {
+      "name": "MapListObject",
+      "address": "0x0094555C",
+      "kind": "data"
+    },
+    {
+      "name": "LobbyHostPlayerList",
+      "address": "0x009456D0",
+      "kind": "data"
+    },
+    {
+      "name": "LobbyClientPlayerList",
+      "address": "0x0094557C",
+      "kind": "data"
+    },
+    {
+      "name": "HelpObject",
+      "address": "0x00920168",
+      "kind": "data"
+    },
+    {
+      "name": "CurrentUser",
+      "address": "0x009C8F60",
+      "kind": "data"
+    },
+    {
+      "name": "VehicleListSet",
+      "address": "0x0076B7A0",
+      "expected": "55 8B EC 6A FF 68 0B D8 85 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "VehicleListFinalize",
+      "address": "0x0076BA00",
+      "expected": "55 8B EC 51 89 4D FC 83 3D 68 55 91 00 00 74 02"
+    },
+    {
+      "name": "VehicleListLoad",
+      "address": "0x00766900",
+      "expected": "55 8B EC 6A FF 68 4B D2 85 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "VehicleListRefresh1",
+      "address": "0x007A3F80",
+      "expected": "55 8B EC 6A FF 68 40 03 86 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "VehicleListRefresh2",
+      "address": "0x007A4070",
+      "expected": "55 8B EC 6A FF 68 48 E2 84 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "ButtonCtor",
+      "address": "0x007C2480",
+      "expected": "55 8B EC 6A FF 68 E0 1D 86 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "LabelCtor",
+      "address": "0x007CC390",
+      "expected": "55 8B EC 51 89 4D FC 51 F3 0F 10 45 24 F3 0F 11"
+    },
+    {
+      "name": "OverlayCtor",
+      "address": "0x007D1CC0",
+      "expected": "55 8B EC 6A FF 68 92 2A 86 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "TextEntryCtor",
+      "address": "0x007CF410",
+      "expected": "55 8B EC 6A FF 68 7A 28 86 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "SelectlistCtor",
+      "address": "0x007C9DE0",
+      "expected": "55 8B EC 6A FF 68 8C 24 86 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "SelectlistSetItem",
+      "address": "0x007CABF0",
+      "expected": "55 8B EC 6A FF 68 18 25 86 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "TextEntrySetEnterCb",
+      "address": "0x007CF940",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 4D 08 89 88 4C"
+    },
+    {
+      "name": "TextEntryAppendText",
+      "address": "0x007CF980",
+      "expected": "55 8B EC 83 EC 18 89 4D E8 C7 45 F4 00 00 00 00"
+    },
+    {
+      "name": "TextEntryAppendChar",
+      "address": "0x007CFA70",
+      "expected": "55 8B EC 6A FF 68 E8 28 86 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "TextEntryClear",
+      "address": "0x007CF9F0",
+      "expected": "55 8B EC 51 89 4D FC 68 D8 1A 8A 00 8B 4D FC 81"
+    },
+    {
+      "name": "TextEntrySetInputLimit",
+      "address": "0x00795BD0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 4D 08 89 88 64"
+    },
+    {
+      "name": "SelectlistSetOnSelect",
+      "address": "0x007CB3E0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 4D 08 89 88 44"
+    },
+    {
+      "name": "SetTextureOff",
+      "address": "0x007D2870",
+      "expected": "55 8B EC 6A FF 68 20 2B 86 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "SetTextureOver",
+      "address": "0x007C2F10",
+      "expected": "55 8B EC 6A FF 68 68 DB 84 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "SetTextureOn",
+      "address": "0x007C2E80",
+      "expected": "55 8B EC 6A FF 68 68 DB 84 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "SetButtonLabel",
+      "address": "0x007C2950",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 08 50 8B 4D FC 8B 91"
+    },
+    {
+      "name": "SetButtonTextScale",
+      "address": "0x007C30E0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 44 01 00 00"
+    },
+    {
+      "name": "SetTooltip",
+      "address": "0x007CC660",
+      "expected": "55 8B EC 51 89 4D FC 68 D0 07 00 00 8B 45 08 50"
+    },
+    {
+      "name": "LabelState",
+      "address": "0x007CC5C0",
+      "expected": "55 8B EC 51 89 4D FC 0F B6 45 08 85 C0 74 1A 8B"
+    },
+    {
+      "name": "SetOnClick",
+      "address": "0x007C23E0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 4D 08 89 88 54"
+    },
+    {
+      "name": "SetOnHover",
+      "address": "0x007C23C0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 4D 08 89 88 50"
+    },
+    {
+      "name": "UiSetActive",
+      "address": "0x007D3310",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 20 01 00 00"
+    },
+    {
+      "name": "AddChild",
+      "address": "0x007D2110",
+      "expected": "55 8B EC 83 EC 18 89 4D F8 83 7D 0C 00 0F 84 84"
+    },
+    {
+      "name": "UiDialogSetEnabled",
+      "address": "0x007C9170",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC C6 40 24 01 8B 4D"
+    },
+    {
+      "name": "KeyConfigSetKey",
+      "address": "0x0081C440",
+      "expected": "55 8B EC 83 EC 3C 89 4D F0 C7 45 F4 00 00 00 00"
+    },
+    {
+      "name": "WriteInputMapKey",
+      "address": "0x0061F1C0",
+      "expected": "55 8B EC 81 EC C8 03 00 00 A1 00 70 8E 00 33 C5"
+    },
+    {
+      "name": "MapKeyNameFromCode",
+      "address": "0x00434F60",
+      "expected": "55 8B EC 83 EC 10 83 7D 08 00 74 09 81 7D 08 80"
+    },
+    {
+      "name": "ReloadGameKeyMap",
+      "address": "0x00620980",
+      "expected": "55 8B EC B8 78 11 00 00 E8 B3 39 22 00 A1 00 70"
+    },
+    {
+      "name": "GetSelected",
+      "address": "0x007CB1A0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 4C 01 00 00"
+    },
+    {
+      "name": "CommandHandler",
+      "address": "0x006247A0",
+      "expected": "55 8B EC 81 EC 90 05 00 00 A1 00 70 8E 00 33 C5"
+    },
+    {
+      "name": "HelpLog",
+      "address": "0x00821390",
+      "expected": "55 8B EC 51 8B 45 08 8B 48 08 89 4D FC 8B 55 FC"
+    },
+    {
+      "name": "HelpUi",
+      "address": "0x007A47B0",
+      "expected": "55 8B EC 83 EC 20 A1 00 70 8E 00 33 C5 89 45 FC"
+    },
+    {
+      "name": "BanLookup",
+      "address": "0x005771B0",
+      "expected": "55 8B EC 83 EC 08 8D 45 08 50 8D 4D FC 51 B9 B8"
+    },
+    {
+      "name": "IsHost",
+      "address": "0x00572A60",
+      "expected": "55 8B EC E8 C8 F1 FF FF 0F B6 C0 5D C3 CC CC CC"
+    },
+    {
+      "name": "AutoLoadShellGame",
+      "address": "0x004FDAB0",
+      "expected": "55 8B EC 83 EC 6C A1 00 70 8E 00 33 C5 89 45 FC"
+    },
+    {
+      "name": "LoadGameByPath",
+      "address": "0x004FDFE0",
+      "expected": "55 8B EC 81 EC 3C 01 00 00 A1 00 70 8E 00 33 C5"
+    },
+    {
+      "name": "LoadScreenPrep",
+      "address": "0x0078BB00",
+      "expected": "55 8B EC 51 F3 0F 10 05 70 28 8A 00 F3 0F 11 04"
+    },
+    {
+      "name": "FinalizeQueuedLoad",
+      "address": "0x005D4980",
+      "expected": "55 8B EC 51 83 3D 20 83 91 00 00 0F 85 C8 00 00"
+    },
+    {
+      "name": "SetShellState",
+      "address": "0x00434170",
+      "expected": "55 8B EC 83 3D 6C 70 8E 00 09 75 02 EB 38 A1 6C"
+    },
+    {
+      "name": "BzrStringCtorFromCStr",
+      "address": "0x00416EF0",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 8D 4D FF E8 1F F9 FF"
+    },
+    {
+      "name": "BzrStringDtor",
+      "address": "0x00416F30",
+      "expected": "55 8B EC 51 89 4D FC 6A 00 6A 01 8B 4D FC E8 9D"
+    },
+    {
+      "name": "MapFilterPredicate",
+      "address": "0x00752A50",
+      "expected": "55 8B EC 6A FF 68 48 C1 85 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "MapFilterAppendCall",
+      "address": "0x00752CD0",
+      "expected": "E8 FB 00 00 00 E9 C6 FD FF FF C6 45 FC 00 8D 4D"
+    },
+    {
+      "name": "MapDequePushBack",
+      "address": "0x00752DD0",
+      "expected": "55 8B EC 83 EC 10 56 89 4D F8 8B 4D F8 FF 15 E8"
+    },
+    {
+      "name": "MapFilterKeysBuilt",
+      "address": "0x007A35C0",
+      "expected": "8B 85 3C FE FF FF 8B 4D 0C 89 48 3C 8B 95 3C FE"
+    },
+    {
+      "name": "VectorStringPushBack",
+      "address": "0x006CF320",
+      "expected": "55 8B EC 83 EC 0C 89 4D F8 8B 45 08 50 E8 4E 84"
+    },
+    {
+      "name": "MapManagerSlot",
+      "address": "0x00945478",
+      "kind": "data"
+    },
+    {
+      "name": "LoadScreenClearSelection",
+      "address": "0x00482860",
+      "expected": "55 8B EC 8B 45 08 50 B9 E0 FE 94 00 E8 9F CE F9"
+    },
+    {
+      "name": "MapFilter6",
+      "address": "0x004200B0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 4D FC 8B 40 04"
+    },
+    {
+      "name": "ChunkResolve",
+      "address": "0x004E3620",
+      "expected": "55 8B EC 83 EC 14 8B 45 08 83 C0 68 89 45 FC 8D"
+    },
+    {
+      "name": "MapFilter8Check",
+      "address": "0x007D3360",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8A 80 E9 00 00 00"
+    },
+    {
+      "name": "MapFilterCreate",
+      "address": "0x007C9DE0",
+      "expected": "55 8B EC 6A FF 68 8C 24 86 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "MapFilterScrollUp",
+      "address": "0x007CB500",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 50 01 00 00"
+    },
+    {
+      "name": "MapFilterScrollDown",
+      "address": "0x007CB540",
+      "expected": "55 8B EC 51 56 89 4D FC 8B 4D FC 81 C1 68 01 00"
+    },
+    {
+      "name": "Localize",
+      "address": "0x0081CB40",
+      "expected": "55 8B EC 83 EC 44 A1 00 70 8E 00 33 C5 89 45 FC"
+    },
+    {
+      "name": "VehicleFixPre",
+      "address": "0x00481EA0",
+      "expected": "55 8B EC 8B 45 08 50 6A 00 E8 12 00 00 00 83 C4"
+    },
+    {
+      "name": "VehicleFixOrig",
+      "address": "0x00481AF0",
+      "expected": "55 8B EC 8B 45 08 50 6A 00 E8 12 00 00 00 83 C4"
+    },
+    {
+      "name": "NetPlayerSetData",
+      "address": "0x00575570",
+      "expected": "55 8B EC 6A FF 68 AB B8 84 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "NetPlayerSetFlagBuffer",
+      "address": "0x00575810",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 78 1C 00 74 1A"
+    },
+    {
+      "name": "SetMyFlag",
+      "address": "0x0056FA50",
+      "expected": "55 8B EC 6A FF 68 94 B6 84 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "EngineFlameControl",
+      "address": "0x004C88A0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 C0 28 8B 4D FC"
+    },
+    {
+      "name": "EngineFlameSubmit",
+      "address": "0x004C88C0",
+      "expected": "55 8B EC 81 EC 14 03 00 00 A1 00 70 8E 00 33 C5"
+    },
+    {
+      "name": "ChunkEffectSimulate",
+      "address": "0x004917F0",
+      "expected": "55 8B EC 81 EC DC 01 00 00 A1 00 70 8E 00 33 C5"
+    },
+    {
+      "name": "LegacyWorldUpdateRenderQueue",
+      "address": "0x00679570",
+      "expected": "55 8B EC 83 EC 14 89 4D FC 8B 4D FC E8 2F 01 00"
+    },
+    {
+      "name": "AIBuildConstructionEnd",
+      "address": "0x006905D0",
+      "expected": "55 8B EC 8B 45 08 8B 0C 85 C0 0F 93 00 8B 55 0C"
+    },
+    {
+      "name": "AIBuildReservedAreaRemove",
+      "address": "0x00690920",
+      "expected": "55 8B EC 83 7D 0C 00 7C 17 83 7D 0C 20 7D 11 8B"
+    },
+    {
+      "name": "AISpentCreditRefund",
+      "address": "0x00690020",
+      "expected": "55 8B EC 83 EC 10 8B 45 08 8B 0D 04 0F 92 00 8B"
+    },
+    {
+      "name": "UnitsSOrderStop",
+      "address": "0x00416280",
+      "expected": "55 8B EC 5D C3 CC CC CC CC CC CC CC CC CC CC CC"
+    },
+    {
+      "name": "AIBuildUnassignedCCAdd",
+      "address": "0x00690770",
+      "expected": "55 8B EC 8B 45 0C 8B 08 51 8B 55 08 8B 02 50 68"
+    },
+    {
+      "name": "InitBuildItem",
+      "address": "0x0049F5C0",
+      "expected": "55 8B EC 6A FF 68 D0 95 84 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "CleanupBuildItem",
+      "address": "0x0049F880",
+      "expected": "55 8B EC 51 8B 45 08 83 78 18 00 74 49 C7 45 FC"
+    },
+    {
+      "name": "BuildMenuRoot",
+      "address": "0x009174C4",
+      "kind": "data"
+    }
+  ],
   "globals": [
     {
       "name": "Map Sorting",
@@ -896,16 +1318,6 @@
       "name": "Legacy World Update RenderQueue VTable Hook",
       "fallback": "0x00892728",
       "expected_original": "70 95 67 00"
-    },
-    {
-      "name": "Decoded Weapon Mask Carrier Bias Hook",
-      "fallback": "0x00417C80",
-      "expected_original": "55 8B EC 51 89"
-    },
-    {
-      "name": "Raw Weapon Mask Carrier Bias Hook",
-      "fallback": "0x0046DD70",
-      "expected_original": "55 8B EC 51 89"
     },
     {
       "name": "Lobby BZRNET Integration HOST",

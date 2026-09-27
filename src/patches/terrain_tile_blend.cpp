@@ -2,6 +2,7 @@
 #include "engine_globals.h"
 
 #include "hook_engine.h"
+#include "memory_access.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -42,61 +43,6 @@ namespace BZROpenShim
         bool g_seamMaskCaptured = false;
         std::uint8_t g_currentEdgeAlpha = 0;
 
-        bool MemoryRangeHasAccess(const void* address, std::size_t length, bool write)
-        {
-            if (!address || length == 0)
-                return false;
-
-            const auto start = reinterpret_cast<uintptr_t>(address);
-            const auto end = start + length;
-            if (end < start)
-                return false;
-
-            uintptr_t cursor = start;
-            while (cursor < end)
-            {
-                MEMORY_BASIC_INFORMATION info = {};
-                if (VirtualQuery(reinterpret_cast<const void*>(cursor), &info,
-                                 sizeof(info)) != sizeof(info) ||
-                    info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD) != 0 ||
-                    (info.Protect & PAGE_NOACCESS) != 0)
-                {
-                    return false;
-                }
-
-                const DWORD protection = info.Protect & 0xFFu;
-                if (write && protection != PAGE_READWRITE &&
-                    protection != PAGE_WRITECOPY &&
-                    protection != PAGE_EXECUTE_READWRITE &&
-                    protection != PAGE_EXECUTE_WRITECOPY)
-                {
-                    return false;
-                }
-
-                const auto regionStart = reinterpret_cast<uintptr_t>(info.BaseAddress);
-                const auto regionEnd = regionStart + info.RegionSize;
-                if (regionEnd <= cursor)
-                    return false;
-                cursor = regionEnd;
-            }
-            return true;
-        }
-
-        bool IsExecutableAddress(const void* address)
-        {
-            MEMORY_BASIC_INFORMATION info = {};
-            if (!address || VirtualQuery(address, &info, sizeof(info)) != sizeof(info) ||
-                info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD) != 0)
-            {
-                return false;
-            }
-
-            const DWORD protection = info.Protect & 0xFFu;
-            return protection == PAGE_EXECUTE || protection == PAGE_EXECUTE_READ ||
-                protection == PAGE_EXECUTE_READWRITE ||
-                protection == PAGE_EXECUTE_WRITECOPY;
-        }
-
         bool CaptureSeamMask(std::uint8_t* vertices)
         {
             std::size_t seamCount = 0;
@@ -125,7 +71,7 @@ namespace BZROpenShim
         {
             name[0] = '\0';
             const auto* source = reinterpret_cast<const char*>(EngineGlobals::CurrentTrnName());
-            if (!source || !MemoryRangeHasAccess(source, MAX_PATH, false))
+            if (!source || !BZROpenShim::MemoryAccess::IsReadable(source, MAX_PATH))
                 return false;
 
             __try
@@ -142,7 +88,7 @@ namespace BZROpenShim
 
         bool UploadTerrainVertices(void* gpuBuffer, const void* vertices)
         {
-            if (!MemoryRangeHasAccess(gpuBuffer, sizeof(void*), false))
+            if (!BZROpenShim::MemoryAccess::IsReadable(gpuBuffer, sizeof(void*)))
                 return false;
 
             void** vtable = nullptr;
@@ -154,11 +100,11 @@ namespace BZROpenShim
             {
                 return false;
             }
-            if (!MemoryRangeHasAccess(vtable, 7 * sizeof(void*), false))
+            if (!BZROpenShim::MemoryAccess::IsReadable(vtable, 7 * sizeof(void*)))
                 return false;
 
             const auto writeData = reinterpret_cast<FnWriteData>(vtable[6]);
-            if (!IsExecutableAddress(reinterpret_cast<const void*>(writeData)))
+            if (!BZROpenShim::MemoryAccess::IsExecutable(reinterpret_cast<const void*>(writeData)))
                 return false;
 
             __try
@@ -180,8 +126,8 @@ namespace BZROpenShim
         const auto getFloatAddress =
             HookEngine::ResolveNamedAddress("Terrain::GetFloat");
         if (!managerAddress || !getFloatAddress ||
-            !IsExecutableAddress(reinterpret_cast<const void*>(managerAddress)) ||
-            !IsExecutableAddress(reinterpret_cast<const void*>(getFloatAddress)))
+            !BZROpenShim::MemoryAccess::IsExecutable(reinterpret_cast<const void*>(managerAddress)) ||
+            !BZROpenShim::MemoryAccess::IsExecutable(reinterpret_cast<const void*>(getFloatAddress)))
         {
             LogShimA(LogLevel::Warn, "terrain-blend",
                 "[TERRAIN-BLEND] required released terrain helpers unresolved; stock seams retained");
@@ -213,7 +159,7 @@ namespace BZROpenShim
             return;
         }
 
-        if (!manager || !MemoryRangeHasAccess(manager, 0x84, false))
+        if (!manager || !BZROpenShim::MemoryAccess::IsReadable(manager, 0x84))
             return;
 
         std::uint8_t* vertices = nullptr;
@@ -230,7 +176,7 @@ namespace BZROpenShim
             return;
         }
 
-        if (!MemoryRangeHasAccess(vertices, kTerrainVertexBytes, true))
+        if (!BZROpenShim::MemoryAccess::IsWritable(vertices, kTerrainVertexBytes))
             return;
         if (!g_seamMaskCaptured && !CaptureSeamMask(vertices))
         {

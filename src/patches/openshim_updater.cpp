@@ -3,6 +3,7 @@
 #include "BZROpenShim.h"
 #include "bzr_string.h"
 #include "hook_engine.h"
+#include "memory_access.h"
 #include "openshim_update_manifest.h"
 #include "shim_log.h"
 
@@ -115,21 +116,6 @@ namespace BZROpenShim
             }
         }
 
-        bool IsExecutableAddress(void* address)
-        {
-            if (!address)
-                return false;
-            MEMORY_BASIC_INFORMATION info = {};
-            if (VirtualQuery(address, &info, sizeof(info)) != sizeof(info) ||
-                info.State != MEM_COMMIT)
-                return false;
-            const DWORD protection = info.Protect & 0xFFu;
-            return protection == PAGE_EXECUTE ||
-                protection == PAGE_EXECUTE_READ ||
-                protection == PAGE_EXECUTE_READWRITE ||
-                protection == PAGE_EXECUTE_WRITECOPY;
-        }
-
         bool ResolveWorkshopMethods(void*& manager,
                                     FnEnsureWorkshopItem& ensureItem,
                                     FnIsWorkshopItemReady& isReady,
@@ -142,7 +128,7 @@ namespace BZROpenShim
             const uint32_t getterAddress =
                 HookEngine::ResolveNamedAddress("Workshop::GetManager");
             if (getterAddress == 0 ||
-                !IsExecutableAddress(reinterpret_cast<void*>(getterAddress)))
+                !BZROpenShim::MemoryAccess::IsExecutable(reinterpret_cast<void*>(getterAddress)))
             {
                 error = "the Battlezone Workshop manager could not be resolved";
                 return false;
@@ -158,8 +144,8 @@ namespace BZROpenShim
                 }
 
                 void** vtable = *reinterpret_cast<void***>(manager);
-                if (!vtable || !IsExecutableAddress(vtable[1]) ||
-                    !IsExecutableAddress(vtable[3]))
+                if (!vtable || !BZROpenShim::MemoryAccess::IsExecutable(vtable[1]) ||
+                    !BZROpenShim::MemoryAccess::IsExecutable(vtable[3]))
                 {
                     error = "the Battlezone Workshop interface failed validation";
                     return false;
