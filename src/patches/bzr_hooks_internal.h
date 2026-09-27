@@ -1312,6 +1312,13 @@ namespace BZROpenShim
         void InstallNicknameTextEntryInputHookIfPossible();
         void InstallMultiCreatePreviewFixIfPossible();
 
+        // --- Craft bounds and frustum cull (ogre_entity_frustum_cull.cpp) ------
+        extern bool g_EntityFrustumCullEnabled;
+        extern bool g_FrustumCullCensusEnabled;
+        extern bool g_RestoreCraftBoundsEnabled;
+        extern bool g_BoundsTraceEnabled;
+        void InstallEntityFrustumCullingIfEnabled();
+
         // --- Jump-sniping probe (diag_jump_snipe_probe.cpp) --------------------
         // GetPlayerHandle() — int __cdecl(). Verified on live GOG exe: reads
         // GameObject::userObject (via 0x417C70) + playerHandle global (0x02CC2BDC),

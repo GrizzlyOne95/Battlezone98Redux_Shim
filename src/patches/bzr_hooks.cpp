@@ -598,7 +598,6 @@ namespace BZROpenShim
         };
 
 #include "chunk_proxy_generic_meshes.inl"
-#include "ogre_entity_frustum_cull.inl"
 
         struct ChunkProxySlot
         {
