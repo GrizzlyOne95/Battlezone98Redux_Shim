@@ -42,6 +42,7 @@
 #include <string>
 
 #include "dx11_scene_depth.h"
+#include "iat_patch.h"
 #include "com_vtable_patch.h"
 #include "diagnostic_switch.h"
 #include "scene_depth_facts.h"
@@ -682,79 +683,10 @@ namespace BZROpenShim
             HMODULE module, const char* importedDll, const char* functionName,
             void* replacement, void** original)
         {
-            if (!module || !importedDll || !functionName || !replacement || !original)
+            if (!original)
                 return false;
-
-            auto* base = reinterpret_cast<unsigned char*>(module);
-            auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-            if (dos->e_magic != IMAGE_DOS_SIGNATURE)
-                return false;
-
-            auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-            if (nt->Signature != IMAGE_NT_SIGNATURE)
-                return false;
-
-            const IMAGE_DATA_DIRECTORY& imports =
-                nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-            if (!imports.VirtualAddress || !imports.Size)
-                return false;
-
-            FARPROC targetProc = nullptr;
-            if (HMODULE importedModule = GetModuleHandleA(importedDll))
-                targetProc = GetProcAddress(importedModule, functionName);
-
-            auto* descriptor = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + imports.VirtualAddress);
-            for (; descriptor->Name; ++descriptor)
-            {
-                const char* dllName = reinterpret_cast<const char*>(base + descriptor->Name);
-                if (_stricmp(dllName, importedDll) != 0)
-                    continue;
-
-                auto* firstThunk = reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->FirstThunk);
-                IMAGE_THUNK_DATA* nameThunk = descriptor->OriginalFirstThunk
-                    ? reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->OriginalFirstThunk)
-                    : nullptr;
-
-                for (; firstThunk->u1.Function; ++firstThunk)
-                {
-                    bool matches = false;
-                    if (nameThunk && nameThunk->u1.AddressOfData
-                        && !IMAGE_SNAP_BY_ORDINAL(nameThunk->u1.Ordinal))
-                    {
-                        auto* byName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(
-                            base + nameThunk->u1.AddressOfData);
-                        matches = std::strcmp(reinterpret_cast<const char*>(byName->Name), functionName) == 0;
-                    }
-
-                    if (!matches && targetProc)
-                    {
-                        matches = reinterpret_cast<FARPROC>(firstThunk->u1.Function) == targetProc;
-                    }
-
-                    if (matches)
-                    {
-                        DWORD oldProtect = 0;
-                        if (!VirtualProtect(&firstThunk->u1.Function, sizeof(void*),
-                                PAGE_READWRITE, &oldProtect))
-                        {
-                            return false;
-                        }
-
-                        if (!*original)
-                            *original = reinterpret_cast<void*>(firstThunk->u1.Function);
-                        firstThunk->u1.Function = reinterpret_cast<ULONG_PTR>(replacement);
-
-                        DWORD ignored = 0;
-                        VirtualProtect(&firstThunk->u1.Function, sizeof(void*), oldProtect, &ignored);
-                        return true;
-                    }
-
-                    if (nameThunk)
-                        ++nameThunk;
-                }
-            }
-
-            return false;
+            return IatPatch::PatchImport(module, importedDll, functionName, replacement, original) ==
+                IatPatch::Result::Patched;
         }
 
         void PatchRendererImports(HMODULE renderer)
