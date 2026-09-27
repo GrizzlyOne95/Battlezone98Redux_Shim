@@ -353,6 +353,7 @@ namespace BZROpenShim
         using FnGetMaterialName = const std::string* (__thiscall*)(void*);
         using FnSetMaterialName = void(__thiscall*)(void*, const std::string&, const std::string&);
         using FnGetBuffer = const OgreSharedPtr* (__thiscall*)(void*, uint16_t);
+        using FnIsBufferBound = bool(__thiscall*)(void*, uint16_t);
         using FnGetVertexSize = uint32_t(__thiscall*)(void*);
         using FnGetNumVertices = uint32_t(__thiscall*)(void*);
         using FnGetIndexSize = uint32_t(__thiscall*)(void*);
@@ -466,6 +467,7 @@ namespace BZROpenShim
             FnGetMaterialName getMaterialName = nullptr;
             FnSetMaterialName setMaterialName = nullptr;
             FnGetBuffer getBuffer = nullptr;
+            FnIsBufferBound isBufferBound = nullptr; // optional
             FnGetVertexSize getVertexSize = nullptr;
             FnGetNumVertices getNumVertices = nullptr;
             FnGetIndexSize getIndexSize = nullptr;
@@ -1082,6 +1084,8 @@ namespace BZROpenShim
                 "?setMaterialName@Entity@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@0@Z");
             g_ogre.getBuffer = Resolve<FnGetBuffer>(module,
                 "?getBuffer@VertexBufferBinding@Ogre@@UBEABVHardwareVertexBufferSharedPtr@2@G@Z");
+            g_ogre.isBufferBound = Resolve<FnIsBufferBound>(module,
+                "?isBufferBound@VertexBufferBinding@Ogre@@UBE_NG@Z");
             g_ogre.getVertexSize = Resolve<FnGetVertexSize>(module, "?getVertexSize@HardwareVertexBuffer@Ogre@@QBEIXZ");
             g_ogre.getNumVertices = Resolve<FnGetNumVertices>(module, "?getNumVertices@HardwareVertexBuffer@Ogre@@QBEIXZ");
             g_ogre.getIndexSize = Resolve<FnGetIndexSize>(module, "?getIndexSize@HardwareIndexBuffer@Ogre@@QBEIXZ");
@@ -1498,6 +1502,11 @@ namespace BZROpenShim
         {
             buffer = nullptr;
             if (!operation.vertexData || !operation.vertexData->binding)
+                return false;
+            // getBuffer throws ITEM_NOT_FOUND for an unbound slot, and the
+            // callers' catch then reports a failed query instead of "slot
+            // absent". Ask first when the export is there.
+            if (g_ogre.isBufferBound && !g_ogre.isBufferBound(operation.vertexData->binding, slot))
                 return false;
             const OgreSharedPtr* pointer = g_ogre.getBuffer(operation.vertexData->binding, slot);
             if (!pointer || !pointer->rep)
@@ -3270,6 +3279,12 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         g_ogre.setVertexProgramParameters(pass, oldParameters);
                         ReleaseCloneHandoff(oldParameters);
                     }
+                    else
+                    {
+                        // Still drop the getter's reference. ReleaseCloneHandoff
+                        // never releases the last one, so this cannot free.
+                        ReleaseCloneHandoff(oldParameters);
+                    }
                     const OgreSharedPtr* bound = g_ogre.getVertexProgram(pass);
                     const std::string* boundName =
                         bound && bound->rep
@@ -3297,6 +3312,10 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         AddSharedReference(oldParameters))
                     {
                         g_ogre.setFragmentProgramParameters(pass, oldParameters);
+                        ReleaseCloneHandoff(oldParameters);
+                    }
+                    else
+                    {
                         ReleaseCloneHandoff(oldParameters);
                     }
                     const OgreSharedPtr* bound = g_ogre.getFragmentProgram(pass);
