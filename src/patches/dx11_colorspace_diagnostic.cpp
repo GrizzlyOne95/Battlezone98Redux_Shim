@@ -1,4 +1,5 @@
 #include "dx11_colorspace_diagnostic.h"
+#include "json_escape.h"
 #include "com_vtable_patch.h"
 #include "diagnostic_switch.h"
 #include "iat_patch.h"
@@ -443,38 +444,6 @@ namespace BZROpenShim
             return std::string(buffer.data());
         }
 
-        std::string JsonEscape(const std::string& value)
-        {
-            std::ostringstream escaped;
-            for (const unsigned char c : value)
-            {
-                switch (c)
-                {
-                case '"': escaped << "\\\""; break;
-                case '\\': escaped << "\\\\"; break;
-                case '\b': escaped << "\\b"; break;
-                case '\f': escaped << "\\f"; break;
-                case '\n': escaped << "\\n"; break;
-                case '\r': escaped << "\\r"; break;
-                case '\t': escaped << "\\t"; break;
-                default:
-                    if (c < 0x20)
-                    {
-                        escaped << "\\u"
-                                << std::hex << std::setw(4) << std::setfill('0')
-                                << static_cast<unsigned>(c)
-                                << std::dec << std::setfill(' ');
-                    }
-                    else
-                    {
-                        escaped << static_cast<char>(c);
-                    }
-                    break;
-                }
-            }
-            return escaped.str();
-        }
-
         struct TerrainTextureRecord
         {
             UINT slot = 0;
@@ -661,8 +630,8 @@ namespace BZROpenShim
             {
                 const TerrainTextureRecord& record = resources[i];
                 output << "    {\"slot\":" << record.slot
-                       << ",\"viewName\":\"" << JsonEscape(record.viewName)
-                       << "\",\"resourceName\":\"" << JsonEscape(record.resourceName)
+                       << ",\"viewName\":\"" << EscapeJsonString(record.viewName)
+                       << "\",\"resourceName\":\"" << EscapeJsonString(record.resourceName)
                        << "\",\"format\":\"" << DxgiFormatName(record.format)
                        << "\",\"width\":" << record.width
                        << ",\"height\":" << record.height << "}";
