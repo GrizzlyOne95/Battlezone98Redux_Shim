@@ -519,7 +519,6 @@ namespace BZROpenShim
         inline constexpr uintptr_t kGogGameObjectGetTeamAddr = 0x00462450;
         inline constexpr uintptr_t kGogPreferredImageBase = 0x00400000;
         bool IsLikelyGameObjectEntry(void* objectPtr);
-        bool IsReadableDataProtect(DWORD protect);
         bool WritePointerValue(uintptr_t address, void* value);
         extern bool g_PlayerReticleShotConvergenceBaselineEnabled;
         extern bool g_PlayerReticleShotConvergenceEnabled;

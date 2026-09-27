@@ -35,6 +35,7 @@
 #include "ai_range_policy.h"
 #include "lcbench_safety_policy.h"
 #include "hook_engine.h"
+#include "memory_access.h"
 #include "ui_performance.h"
 #include "openshim_events.h"
 #include "player_kill_trace.h"
@@ -885,7 +886,7 @@ namespace BZROpenShim
             MEMORY_BASIC_INFORMATION mbi = {};
             if (VirtualQuery(candidate, &mbi, sizeof(mbi)) != sizeof(mbi))
                 return false;
-            if (mbi.State != MEM_COMMIT || !IsReadableDataProtect(mbi.Protect))
+            if (mbi.State != MEM_COMMIT || !BZROpenShim::MemoryAccess::ProtectionAllows(mbi.Protect, BZROpenShim::MemoryAccess::Access::Read))
                 return false;
 
             uintptr_t vtable = 0;
@@ -1206,7 +1207,7 @@ namespace BZROpenShim
             MEMORY_BASIC_INFORMATION mbi = {};
             if (VirtualQuery(objectPtr, &mbi, sizeof(mbi)) != sizeof(mbi))
                 return false;
-            if (mbi.State != MEM_COMMIT || !IsReadableDataProtect(mbi.Protect))
+            if (mbi.State != MEM_COMMIT || !BZROpenShim::MemoryAccess::ProtectionAllows(mbi.Protect, BZROpenShim::MemoryAccess::Access::Read))
                 return false;
 
             __try
@@ -1219,7 +1220,7 @@ namespace BZROpenShim
                 MEMORY_BASIC_INFORMATION vtableInfo = {};
                 if (VirtualQuery(vtable, &vtableInfo, sizeof(vtableInfo)) != sizeof(vtableInfo))
                     return false;
-                if (vtableInfo.State != MEM_COMMIT || !IsReadableDataProtect(vtableInfo.Protect))
+                if (vtableInfo.State != MEM_COMMIT || !BZROpenShim::MemoryAccess::ProtectionAllows(vtableInfo.Protect, BZROpenShim::MemoryAccess::Access::Read))
                     return false;
 
                 // Absolute VA, matching kGogGameObjectFriendPAddr and the rest

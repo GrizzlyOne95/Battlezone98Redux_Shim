@@ -38,6 +38,7 @@
 
 #include "walker_cockpit_trace.h"
 #include "engine_globals.h"
+#include "memory_access.h"
 #include "ogre_runtime.h"
 #include "shim_log.h"
 
@@ -368,31 +369,10 @@ namespace BZROpenShim
             }
         }
 
-        bool IsReadableRegion(const void* p, size_t bytes)
-        {
-            if (!p)
-                return false;
-            MEMORY_BASIC_INFORMATION mbi = {};
-            if (VirtualQuery(p, &mbi, sizeof(mbi)) != sizeof(mbi))
-                return false;
-            if (mbi.State != MEM_COMMIT)
-                return false;
-            const DWORD readable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
-                PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
-            if ((mbi.Protect & readable) == 0)
-                return false;
-            if (mbi.Protect & PAGE_GUARD)
-                return false;
-            const auto* start = reinterpret_cast<const uint8_t*>(mbi.BaseAddress);
-            const auto* end = start + mbi.RegionSize;
-            const auto* q = reinterpret_cast<const uint8_t*>(p);
-            return q + bytes <= end;
-        }
-
         bool LooksLikeOgreObject(const void* object)
         {
             void* vptr = nullptr;
-            if (!object || !IsReadableRegion(object, sizeof(void*)))
+            if (!object || !BZROpenShim::MemoryAccess::IsReadable(object, sizeof(void*)))
                 return false;
             if (!SafeReadPtr(object, &vptr))
                 return false;
@@ -1008,7 +988,7 @@ namespace BZROpenShim
         {
             if (!object || entities.empty())
                 return false;
-            if (!IsReadableRegion(object, kObjectScanBytes))
+            if (!BZROpenShim::MemoryAccess::IsReadable(object, kObjectScanBytes))
                 return false;
 
             std::vector<void*> wanted;
@@ -1040,7 +1020,7 @@ namespace BZROpenShim
                 void* candidate = fields[i];
                 if (!candidate || MainModuleContains(candidate))
                     continue;
-                if (!IsReadableRegion(candidate, kBridgeScanBytes))
+                if (!BZROpenShim::MemoryAccess::IsReadable(candidate, kBridgeScanBytes))
                     continue;
                 if (ScanFieldsForPointer(reinterpret_cast<const uint8_t*>(candidate), kBridgeScanBytes,
                     wanted.data(), wanted.size(), &offset, &found))
