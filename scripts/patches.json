@@ -1038,6 +1038,36 @@
       "expected": "55 8B EC 51 89 4D FC 6A 00 6A 01 8B 4D FC E8 9D"
     },
     {
+      "name": "MapFilterPredicate",
+      "address": "0x00752A50",
+      "expected": "55 8B EC 6A FF 68 48 C1 85 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "MapFilterAppendCall",
+      "address": "0x00752CD0",
+      "expected": "E8 FB 00 00 00 E9 C6 FD FF FF C6 45 FC 00 8D 4D"
+    },
+    {
+      "name": "MapDequePushBack",
+      "address": "0x00752DD0",
+      "expected": "55 8B EC 83 EC 10 56 89 4D F8 8B 4D F8 FF 15 E8"
+    },
+    {
+      "name": "MapFilterKeysBuilt",
+      "address": "0x007A35C0",
+      "expected": "8B 85 3C FE FF FF 8B 4D 0C 89 48 3C 8B 95 3C FE"
+    },
+    {
+      "name": "VectorStringPushBack",
+      "address": "0x006CF320",
+      "expected": "55 8B EC 83 EC 0C 89 4D F8 8B 45 08 50 E8 4E 84"
+    },
+    {
+      "name": "MapManagerSlot",
+      "address": "0x00945478",
+      "kind": "data"
+    },
+    {
       "name": "LoadScreenClearSelection",
       "address": "0x00482860",
       "expected": "55 8B EC 8B 45 08 50 B9 E0 FE 94 00 E8 9F CE F9"
