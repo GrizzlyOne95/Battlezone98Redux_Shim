@@ -249,4 +249,118 @@ namespace BZROpenShim
 
         return targets;
     }
+
+    bool EngineAddressBytesMatch(const std::vector<uint16_t>& expected,
+                                 const uint8_t* actual,
+                                 size_t actualLen)
+    {
+        if (expected.empty() || !actual || actualLen < expected.size())
+            return false;
+        for (size_t i = 0; i < expected.size(); ++i)
+        {
+            if (expected[i] < 0x100 && actual[i] != static_cast<uint8_t>(expected[i]))
+                return false;
+        }
+        return true;
+    }
+
+    std::vector<EngineAddressEntry> ParseEngineAddressTable(const std::string& jsonText,
+                                                            std::string* error)
+    {
+        std::vector<EngineAddressEntry> entries;
+
+        nlohmann::json root;
+        try
+        {
+            root = nlohmann::json::parse(jsonText);
+        }
+        catch (const std::exception& e)
+        {
+            AppendError(error, std::string("patches.json did not parse: ") + e.what());
+            return entries;
+        }
+
+        if (!root.is_object() || !root.contains("engine_addresses"))
+            return entries;
+
+        const nlohmann::json& rows = root["engine_addresses"];
+        if (!rows.is_array())
+        {
+            AppendError(error, "\"engine_addresses\" must be an array");
+            return entries;
+        }
+
+        size_t index = 0;
+        for (const auto& row : rows)
+        {
+            const std::string where = "engine_addresses[" + std::to_string(index++) + "]";
+
+            if (!row.is_object())
+            {
+                AppendError(error, where + " is not an object");
+                continue;
+            }
+
+            EngineAddressEntry entry;
+            if (!row.contains("name") || !row["name"].is_string() ||
+                row["name"].get<std::string>().empty())
+            {
+                AppendError(error, where + " has no \"name\"");
+                continue;
+            }
+            entry.name = row["name"].get<std::string>();
+
+            bool duplicate = false;
+            for (const auto& existing : entries)
+                duplicate = duplicate || existing.name == entry.name;
+            if (duplicate)
+            {
+                AppendError(error, where + " (" + entry.name + ") repeats an earlier name");
+                continue;
+            }
+
+            bool ok = false;
+            if (row.contains("address") && row["address"].is_string())
+                entry.address = ParseHexAddress(row["address"].get<std::string>(), ok);
+            if (!ok || entry.address == 0)
+            {
+                AppendError(error, where + " (" + entry.name + ") has no valid \"address\"");
+                continue;
+            }
+
+            std::string kind = "code";
+            if (row.contains("kind"))
+                kind = row["kind"].is_string() ? row["kind"].get<std::string>() : std::string();
+            if (kind != "code" && kind != "data")
+            {
+                AppendError(error, where + " (" + entry.name + ") has an unknown kind");
+                continue;
+            }
+            entry.isData = (kind == "data");
+
+            const bool hasExpected = row.contains("expected");
+            if (entry.isData)
+            {
+                if (hasExpected)
+                {
+                    AppendError(error, where + " (" + entry.name + ") is data but carries \"expected\"");
+                    continue;
+                }
+            }
+            else
+            {
+                if (hasExpected && row["expected"].is_string())
+                    entry.expected = ParseIdaPatternText(row["expected"].get<std::string>());
+                if (entry.expected.empty())
+                {
+                    AppendError(error, where + " (" + entry.name + ") has no parseable \"expected\"");
+                    continue;
+                }
+            }
+
+            entries.push_back(std::move(entry));
+        }
+
+        return entries;
+    }
 }

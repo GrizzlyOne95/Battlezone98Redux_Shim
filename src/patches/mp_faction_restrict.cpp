@@ -73,6 +73,7 @@
 // but prunes nothing, so behaviour is bit-identical to stock Redux.
 
 #include "mp_faction_restrict.h"
+#include "bool_token.h"
 #include "hook_engine.h"
 #include "shim_log.h"
 
@@ -162,14 +163,8 @@ bool ReadShimBool(const char* name, bool defaultValue)
     if (len == 0 || len >= sizeof(raw))
         return defaultValue;
 
-    std::string value(raw, len);
-    while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) value.erase(value.begin());
-    while (!value.empty() && (value.back()  == ' ' || value.back()  == '\t')) value.pop_back();
-    for (auto& c : value) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-
-    if (value == "1" || value == "true" || value == "on"  || value == "yes" || value == "enabled")  return true;
-    if (value == "0" || value == "false"|| value == "off" || value == "no"  || value == "disabled") return false;
-    return defaultValue;
+    bool value = defaultValue;
+    return BZROpenShim::BoolToken::TryParse(raw, len, value) ? value : defaultValue;
 }
 
 uint8_t* BucketAt(void* self, int nation)

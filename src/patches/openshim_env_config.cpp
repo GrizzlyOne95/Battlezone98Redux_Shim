@@ -1,4 +1,5 @@
 #include "openshim_env_config.h"
+#include "bool_token.h"
 
 // This translation unit is itself compiled with openshim_env_config.h forced in.
 // Undefine the redirect here so the final fallback reaches the real Win32 API.
@@ -48,33 +49,7 @@ namespace
 
     bool ParseBool(const std::string& raw, bool& out)
     {
-        std::string value = raw;
-        value.erase(value.begin(), std::find_if(value.begin(), value.end(), [](unsigned char ch)
-        {
-            return !std::isspace(ch);
-        }));
-        value.erase(std::find_if(value.rbegin(), value.rend(), [](unsigned char ch)
-        {
-            return !std::isspace(ch);
-        }).base(), value.end());
-        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch)
-        {
-            return static_cast<char>(std::tolower(ch));
-        });
-
-        if (value == "1" || value == "true" || value == "on" ||
-            value == "yes" || value == "enabled")
-        {
-            out = true;
-            return true;
-        }
-        if (value == "0" || value == "false" || value == "off" ||
-            value == "no" || value == "disabled")
-        {
-            out = false;
-            return true;
-        }
-        return false;
+        return BZROpenShim::BoolToken::TryParse(raw, out);
     }
 
     bool TryReadMappedBool(const std::filesystem::path& configPath,
@@ -180,8 +155,6 @@ namespace
             return TryReadMappedBool(mainIni, "Diagnostics", "TraceBznLoad", false, out);
         if (Equals(name, "OPENSHIM_INTERACTIVE_FOG_WAKES"))
             return TryReadMappedBool(mainIni, "Experimental", "InteractiveFogWakes", false, out);
-        if (Equals(name, "OPENSHIM_TRACE_RENDER_QUEUES"))
-            return TryReadMappedBool(mainIni, "Diagnostics", "TraceRenderQueues", false, out);
 
         // Working runtime features use positive INI keys; legacy DISABLE_*
         // environment names are inverted here so old call-site semantics remain

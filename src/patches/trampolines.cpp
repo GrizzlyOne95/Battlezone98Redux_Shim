@@ -1505,31 +1505,6 @@ void __declspec(naked) __cdecl Trampoline_EngineFlameHoverCraftEmit()
     }
 }
 
-void __declspec(naked) __cdecl Trampoline_DecodedWeaponMaskBias()
-{
-    __asm
-    {
-        push ecx
-        call ApplyWeaponMaskCarrierBiasForCraft
-        pop  ecx
-        mov  eax, [ecx + 0x210]
-        xor  eax, 0x33333333
-        ret
-    }
-}
-
-void __declspec(naked) __cdecl Trampoline_RawWeaponMaskBias()
-{
-    __asm
-    {
-        push ecx
-        call ApplyWeaponMaskCarrierBiasForCraft
-        pop  ecx
-        mov  eax, [ecx + 0x210]
-        ret
-    }
-}
-
 // ---------------------------------------------------------------------------
 // AI weapon-mask hardpoint selection.
 //

@@ -1,4 +1,5 @@
 #include "openshim_assets.h"
+#include "bool_token.h"
 #include "render_profile_resources.h"
 #include "shim_log.h"
 
@@ -199,20 +200,7 @@ bool ParseAssetManifestKeyValue(const std::string& line,
 
 static bool ParseBoolToken(const std::string& raw, bool& out)
 {
-    std::string v = TrimAssetString(raw);
-    std::transform(v.begin(), v.end(), v.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    if (v == "1" || v == "true" || v == "on" || v == "yes" || v == "enabled")
-    {
-        out = true;
-        return true;
-    }
-    if (v == "0" || v == "false" || v == "off" || v == "no" || v == "disabled")
-    {
-        out = false;
-        return true;
-    }
-    return false;
+    return BZROpenShim::BoolToken::TryParse(raw, out);
 }
 
 bool ParseAssetManifestContent(const std::string& text,

@@ -1,4 +1,6 @@
+#include "com_vtable_patch.h"
 #include "iat_patch.h"
+#include "memory_access.h"
 
 #include "ogre_animation_profiler/config_state.inl"
 #include "ogre_animation_profiler/profiling_helpers.inl"

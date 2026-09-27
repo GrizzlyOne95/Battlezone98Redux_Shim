@@ -106,7 +106,7 @@ combat), different endpoints:
 - `c0000005` null read in `OgreMain!...operator delete`; the deleted
   object carries three vptrs `008A0790/008A074C/008A0768`, and the third
   table contains `00417C60/004178A0`, flanking the known Carrier site
-  `00417C80` (openshim "Decoded Weapon Mask Carrier Bias Hook"). The
+  `00417C80` (formerly hooked by openshim's "Decoded Weapon Mask Carrier Bias Hook", removed 2026-09-27). The
   deleted object is a **Carrier**. Partial stack:
   `... 0x22BB46 -> 0x22BC28 -> 0xDE9BC -> 0xDAE04 -> 0x19CEED ->
   0x1A37A5 -> 0x19CF56(Person::vftable writer, i.e. Person ctor path) ->

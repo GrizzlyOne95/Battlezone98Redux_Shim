@@ -1,4 +1,5 @@
 #include "net_optimizer.h"
+#include "bool_token.h"
 #include "netcode_hooks.h"
 #include "bzrnet_protocol.h"
 #include "shim_log.h"
@@ -396,15 +397,12 @@ namespace
         LPWSAOVERLAPPED_COMPLETION_ROUTINE originalCompletionRoutine = nullptr;
         uint32_t requestedLength = 0;
         bool capturedImmediate = false;
+        uint64_t registeredMs = 0;
     };
 
-    struct WebSocketDirectionState
-    {
-        bool handshakeComplete = false;
-        uint8_t fragmentedOpcode = 0;
-        std::vector<uint8_t> pending;
-        std::vector<uint8_t> fragmented;
-    };
+    constexpr size_t kMaxPendingCaptureIo = 4096;
+
+    using WebSocketDirectionState = WebSocketStreamState;
 
     struct WebSocketCaptureState
     {
@@ -591,19 +589,10 @@ namespace
 
     bool EnvValueEnabled(const char* value)
     {
-        if (!value || value[0] == '\0')
-            return false;
-
-        char lower[16] = {};
-        size_t len = std::strlen(value);
-        len = (std::min)(len, sizeof(lower) - 1);
-        for (size_t i = 0; i < len; ++i)
-            lower[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(value[i])));
-
-        return std::strcmp(lower, "0") != 0 &&
-            std::strcmp(lower, "false") != 0 &&
-            std::strcmp(lower, "no") != 0 &&
-            std::strcmp(lower, "off") != 0;
+        // A set value turns the switch on unless it is a false word; see
+        // BoolToken::IsTruthy. The BZRNet trace reads the same variables the
+        // same way.
+        return BoolToken::IsTruthy(value);
     }
 
     std::string TrimString(const std::string& value)
@@ -1913,13 +1902,6 @@ namespace
             WriteRelayControlMessage(s, outbound, type, json);
     }
 
-    size_t FindHttpHeaderEnd(const std::vector<uint8_t>& data)
-    {
-        static const uint8_t delimiter[] = { '\r', '\n', '\r', '\n' };
-        const auto it = std::search(data.begin(), data.end(), std::begin(delimiter), std::end(delimiter));
-        return it == data.end() ? std::string::npos : static_cast<size_t>(it - data.begin()) + sizeof(delimiter);
-    }
-
     void ProcessWebSocketDirection(
         SOCKET s,
         bool outbound,
@@ -1927,119 +1909,10 @@ namespace
         const uint8_t* bytes,
         size_t length)
     {
-        if (!bytes || length == 0)
-            return;
-        if (state.pending.size() + length > kRelayCaptureMaxWebSocketBytes)
-        {
-            state.pending.clear();
-            state.fragmented.clear();
-            state.fragmentedOpcode = 0;
-            return;
-        }
-
-        state.pending.insert(state.pending.end(), bytes, bytes + length);
-        if (!state.handshakeComplete)
-        {
-            const size_t headerEnd = FindHttpHeaderEnd(state.pending);
-            if (headerEnd == std::string::npos)
-            {
-                if (state.pending.size() > 64 * 1024)
-                    state.pending.clear();
-                return;
-            }
-            state.pending.erase(state.pending.begin(), state.pending.begin() + headerEnd);
-            state.handshakeComplete = true;
-        }
-
-        while (state.pending.size() >= 2)
-        {
-            const uint8_t first = state.pending[0];
-            const uint8_t second = state.pending[1];
-            const bool fin = (first & 0x80u) != 0;
-            const uint8_t opcode = first & 0x0Fu;
-            const bool masked = (second & 0x80u) != 0;
-            uint64_t payloadLength = second & 0x7Fu;
-            size_t headerLength = 2;
-
-            if (payloadLength == 126)
-            {
-                if (state.pending.size() < 4)
-                    return;
-                payloadLength = (static_cast<uint64_t>(state.pending[2]) << 8) |
-                    static_cast<uint64_t>(state.pending[3]);
-                headerLength = 4;
-            }
-            else if (payloadLength == 127)
-            {
-                if (state.pending.size() < 10)
-                    return;
-                payloadLength = 0;
-                for (size_t i = 2; i < 10; ++i)
-                    payloadLength = (payloadLength << 8) | state.pending[i];
-                headerLength = 10;
-            }
-
-            if (payloadLength > kRelayCaptureMaxWebSocketBytes)
-            {
-                state.pending.clear();
-                state.fragmented.clear();
-                state.fragmentedOpcode = 0;
-                return;
-            }
-
-            uint8_t mask[4] = {};
-            if (masked)
-            {
-                if (state.pending.size() < headerLength + sizeof(mask))
-                    return;
-                std::memcpy(mask, state.pending.data() + headerLength, sizeof(mask));
-                headerLength += sizeof(mask);
-            }
-
-            if (state.pending.size() < headerLength + static_cast<size_t>(payloadLength))
-                return;
-
-            std::vector<uint8_t> payload(static_cast<size_t>(payloadLength));
-            for (size_t i = 0; i < payload.size(); ++i)
-            {
-                payload[i] = state.pending[headerLength + i];
-                if (masked)
-                    payload[i] ^= mask[i % 4];
-            }
-            state.pending.erase(
-                state.pending.begin(),
-                state.pending.begin() + headerLength + static_cast<size_t>(payloadLength));
-
-            if (opcode == 0x0)
-            {
-                if (state.fragmentedOpcode == 0 ||
-                    state.fragmented.size() + payload.size() > kRelayCaptureMaxWebSocketBytes)
-                {
-                    state.fragmented.clear();
-                    state.fragmentedOpcode = 0;
-                    continue;
-                }
-                state.fragmented.insert(state.fragmented.end(), payload.begin(), payload.end());
-                if (fin)
-                {
-                    ProcessWebSocketMessage(s, outbound, state.fragmentedOpcode, state.fragmented);
-                    state.fragmented.clear();
-                    state.fragmentedOpcode = 0;
-                }
-            }
-            else if (opcode == 0x1 || opcode == 0x2)
-            {
-                if (fin)
-                {
-                    ProcessWebSocketMessage(s, outbound, opcode, payload);
-                }
-                else
-                {
-                    state.fragmentedOpcode = opcode;
-                    state.fragmented = std::move(payload);
-                }
-            }
-        }
+        std::vector<WebSocketMessage> messages;
+        FeedWebSocketStream(state, bytes, length, kRelayCaptureMaxWebSocketBytes, messages);
+        for (const WebSocketMessage& message : messages)
+            ProcessWebSocketMessage(s, outbound, message.opcode, message.payload);
     }
 
     void FeedWebSocketCapture(SOCKET s, bool outbound, const uint8_t* bytes, size_t length)
@@ -2873,8 +2746,25 @@ namespace
         pending.fromLen = fromLen;
         pending.originalCompletionRoutine = originalCompletionRoutine;
         pending.requestedLength = GetRequestedWsabufBytes(buffers, bufferCount);
+        pending.registeredMs = GetTickCount64();
 
         AcquireSRWLockExclusive(&g_PendingCaptureLock);
+        // Completions that arrive by a route the hooks do not see
+        // (WSAGetOverlappedResult, event waits, GetQueuedCompletionStatusEx)
+        // leave their entry behind, holding the game's WSABUF pointers. Bound
+        // the map: at the cap, the oldest registration goes first. No age
+        // limit on lookup, since a receive can legitimately pend for minutes.
+        if (g_PendingCaptureIo.size() >= kMaxPendingCaptureIo &&
+            g_PendingCaptureIo.find(overlapped) == g_PendingCaptureIo.end())
+        {
+            auto oldest = g_PendingCaptureIo.begin();
+            for (auto it = g_PendingCaptureIo.begin(); it != g_PendingCaptureIo.end(); ++it)
+            {
+                if (it->second.registeredMs < oldest->second.registeredMs)
+                    oldest = it;
+            }
+            g_PendingCaptureIo.erase(oldest);
+        }
         g_PendingCaptureIo[overlapped] = std::move(pending);
         ReleaseSRWLockExclusive(&g_PendingCaptureLock);
         return true;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bool_token.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -41,24 +43,7 @@ namespace OgreProfilerAlgorithms
 
     inline bool StringIsTruthy(const char* value)
     {
-        if (!value || !*value)
-            return false;
-
-        char normalized[8] = {};
-        std::size_t length = 0;
-        while (value[length] && length + 1 < sizeof(normalized))
-        {
-            normalized[length] = static_cast<char>(
-                std::tolower(static_cast<unsigned char>(value[length])));
-            ++length;
-        }
-        if (value[length] != '\0')
-            return true;
-        normalized[length] = '\0';
-        return std::strcmp(normalized, "0") != 0 &&
-            std::strcmp(normalized, "false") != 0 &&
-            std::strcmp(normalized, "no") != 0 &&
-            std::strcmp(normalized, "off") != 0;
+        return BoolToken::IsTruthy(value);
     }
 
     inline bool ContainsAsciiCaseInsensitive(const char* text, const char* token)

@@ -316,74 +316,29 @@
             if (!module || !importedDll || !functionName || !replacement || !original)
                 return false;
 
-            auto* base = reinterpret_cast<uint8_t*>(module);
-            auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-            if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+            std::lock_guard<std::mutex> lock(g_PatchMutex);
+            void** slot = nullptr;
+            if (IatPatch::PatchImport(module, importedDll, functionName, replacement, original, &slot) !=
+                IatPatch::Result::Patched)
                 return false;
-            auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-            if (nt->Signature != IMAGE_NT_SIGNATURE)
-                return false;
-
-            const IMAGE_DATA_DIRECTORY& imports =
-                nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-            if (!imports.VirtualAddress)
-                return false;
-
-            auto* descriptor = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + imports.VirtualAddress);
-            for (; descriptor->Name; ++descriptor)
+            // Record each slot once, so shutdown can put the original back.
+            for (const auto& patch : g_PointerPatches)
             {
-                const char* dllName = reinterpret_cast<const char*>(base + descriptor->Name);
-                if (_stricmp(dllName, importedDll) != 0)
-                    continue;
-                if (!descriptor->OriginalFirstThunk)
-                    return false;
-
-                auto* names = reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->OriginalFirstThunk);
-                auto* thunks = reinterpret_cast<IMAGE_THUNK_DATA*>(base + descriptor->FirstThunk);
-                for (; names->u1.AddressOfData && thunks->u1.Function; ++names, ++thunks)
-                {
-                    if (IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal))
-                        continue;
-                    auto* byName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(base + names->u1.AddressOfData);
-                    if (std::strcmp(reinterpret_cast<const char*>(byName->Name), functionName) != 0)
-                        continue;
-
-                    void** slot = reinterpret_cast<void**>(&thunks->u1.Function);
-                    std::lock_guard<std::mutex> lock(g_PatchMutex);
-                    if (*slot == replacement)
-                        return true;
-                    if (*original == nullptr)
-                        *original = *slot;
-                    if (!WritePointer(slot, replacement))
-                        return false;
-                    g_PointerPatches.push_back({ slot, *original });
+                if (patch.slot == slot)
                     return true;
-                }
             }
-            return false;
+            g_PointerPatches.push_back({ slot, *original });
+            return true;
         }
 
         template <typename T>
-        bool PatchComVtableEntry(
-            void* object,
-            size_t index,
-            T hook,
-            T& original,
-            const char* label)
+        bool PatchComVtableEntry(void* object, size_t index, T hook, T& original, const char* label)
         {
-            if (!object)
-                return false;
-
             std::lock_guard<std::mutex> lock(g_PatchMutex);
-            void*** objectVtable = reinterpret_cast<void***>(object);
-            if (!objectVtable || !*objectVtable)
-                return false;
-            void** vtable = *objectVtable;
-            void* current = vtable[index];
-            if (current == reinterpret_cast<void*>(hook))
-                return true;
-
-            if (original && current != reinterpret_cast<void*>(original))
+            void** slot = nullptr;
+            const ComVtablePatch::Result result = ComVtablePatch::PatchEntry(
+                object, index, hook, original, ComVtablePatch::OnForeignWrapper::Refuse, &slot);
+            if (result == ComVtablePatch::Result::ForeignWrapper)
             {
                 LogShimA(
                     LogLevel::Warn,
@@ -392,13 +347,10 @@
                     label);
                 return false;
             }
+            if (result != ComVtablePatch::Result::Patched)
+                return result == ComVtablePatch::Result::AlreadyHooked;
 
-            if (!original)
-                original = reinterpret_cast<T>(current);
-            if (!WritePointer(&vtable[index], reinterpret_cast<void*>(hook)))
-                return false;
-            g_PointerPatches.push_back({ &vtable[index], reinterpret_cast<void*>(original) });
-
+            g_PointerPatches.push_back({ slot, reinterpret_cast<void*>(original) });
             LogShimA(
                 LogLevel::Info,
                 kComponent,

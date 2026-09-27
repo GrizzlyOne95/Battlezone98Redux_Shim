@@ -1,5 +1,6 @@
 #include "ogre_animation_profiler.h"
 #include "ogre_profiler_algorithms.h"
+#include "diagnostic_switch.h"
 #include "ogre_runtime.h"
 #include "shim_log.h"
 
@@ -242,12 +243,6 @@ namespace BZROpenShim
         {
             void** slot = nullptr;
             void* original = nullptr;
-        };
-
-        struct ExportMatch
-        {
-            std::string name;
-            void* address = nullptr;
         };
 
         struct EntityProfileSlot
@@ -712,8 +707,5 @@ namespace BZROpenShim
 
         std::string GetOpenShimIniPath()
         {
-            char path[MAX_PATH] = {};
-            const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-            if (length == 0 || length >= MAX_PATH)
-                return "openshim.ini";
-
+            return DiagnosticSwitch::OpenShimIniPath();
+        }

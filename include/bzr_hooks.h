@@ -31,6 +31,13 @@ namespace BZROpenShim
     // Runtime-resolved BZR pointers and helpers.
     void ResolveBzrHooks(bool isSteam);
     void RetryDeferredRuntimeHooks();
+    // For a patch whose trampoline or hook depends on engine addresses from
+    // the engine address table (scripts/patches.json "engine_addresses"):
+    // the name of the first one that failed to bind, or nullptr when the
+    // patch may be written. The patcher removes such patches before filling
+    // payloads, so no trampoline calls through a null pointer and no vtable
+    // or REL32 hook replaces a stock call it cannot forward.
+    const char* FindUnboundEngineHelperForPatch(const char* patchName);
     bool AreInputBindingUiHooksInstalled();
     bool AreRequiredDeferredRuntimeHooksInstalled();
     void InitBzrHookStrings();
@@ -198,7 +205,6 @@ namespace BZROpenShim
     void __fastcall MapFilterOnScrollDown(void* thisPtr);
     void __cdecl MapFilters1Rebuild(void* listPtr);
     void __cdecl MapFilters2Filter(void* listPtr, BzrString* filter);
-    void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* craft);
     // AI weapon-mask hardpoint selection. Each replaces one call to a
     // __thiscall engine routine; the trampolines supply the third argument from
     // the patched routine's own stack frame.

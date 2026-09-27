@@ -4,6 +4,7 @@
 // inline-detour machinery, openshim.ini helpers, live feature re-apply) is
 // declared in bzr_options_ui.h and implemented by bzr_hooks.cpp.
 #include "bzr_options_ui.h"
+#include "bool_token.h"
 
 #include "autosave.h"
 #include "bzr_hooks.h"
@@ -1763,7 +1764,10 @@ namespace BZROpenShim
                                                void* onClick,
                                                void* onHover = nullptr)
         {
-            if (!parent || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild)
+            // The engine calls a child button's hover/click slots; a button
+            // built without them crashes the screen.
+            if (!parent || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild ||
+                !g_BzrFn_SetOnClick || !g_BzrFn_SetOnHover)
                 return false;
 
             if (!slot)
@@ -2924,6 +2928,10 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
               "Multiplayer map-list refresh and selection-preservation fixes. Restart required." },
+            { "Map Filters+", "General", "MapFilterExtras", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::RestartRequired,
+              "Adds 5+ Players and Stock Maps to the Create Game map filter. Restart required." },
             { "Editor Placement", "General", "EditorOverheadPlacementOrder", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
@@ -3228,24 +3236,11 @@ namespace BZROpenShim
             }
 
             // Boolean rows also accept the parser's synonym set.
-            if (setting.values == kShimSettingsOnOffValues)
-            {
-                if (normalized == "1" || normalized == "true" || normalized == "on" ||
-                    normalized == "yes" || normalized == "enabled")
-                    return 0;
-                if (normalized == "0" || normalized == "false" || normalized == "off" ||
-                    normalized == "no" || normalized == "disabled")
-                    return 1;
-            }
-            else if (setting.values == kShimSettingsUnitVoValues)
-            {
-                if (normalized == "1" || normalized == "true" || normalized == "on" ||
-                    normalized == "yes" || normalized == "enabled")
-                    return 0;
-                if (normalized == "0" || normalized == "false" || normalized == "off" ||
-                    normalized == "no" || normalized == "disabled")
-                    return 2;
-            }
+            bool token = false;
+            if (setting.values == kShimSettingsOnOffValues && BZROpenShim::BoolToken::TryParse(normalized, token))
+                return token ? 0 : 1;
+            if (setting.values == kShimSettingsUnitVoValues && BZROpenShim::BoolToken::TryParse(normalized, token))
+                return token ? 0 : 2;
 
             return setting.defaultIndex;
         }
@@ -5068,7 +5063,8 @@ namespace BZROpenShim
         // of clipping off the bottom.
         static void EnsureShimSettingsMenuButton(void* parentScreen)
         {
-            if (!parentScreen || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild)
+            if (!parentScreen || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild ||
+                !g_BzrFn_SetOnClick || !g_BzrFn_SetOnHover)
                 return;
 
             if (g_ParentScreenBinding.constructed != parentScreen)
