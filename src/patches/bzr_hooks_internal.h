@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "bzr_hooks.h"
+#include "stable_id_list.h"
 #include "bzr_object_layout.h"
 #include "bzr_options_ui.h"
 
@@ -849,11 +850,7 @@ namespace BZROpenShim
         void RevertAiWeaponMaskMinelayerToBaseline();
 
         // --- Multiplayer moderation (moderation.cpp) ---------------------------
-        struct BanRecord
-        {
-            std::string id;
-            std::string name;
-        };
+        using BanRecord = StableIdList::Record;
         void SyncNicknameEntriesFromAuthoritativeValue(const char* value);
         extern std::vector<BanRecord> g_BanRecords;
         std::filesystem::path GetBansConfigPath();
