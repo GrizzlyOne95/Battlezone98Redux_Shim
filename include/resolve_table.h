@@ -88,4 +88,35 @@ namespace BZROpenShim
                             uint32_t imageBase,
                             uint32_t imageEnd,
                             uint32_t& outAddress);
+
+    // One element of the "engine_addresses" array in patches.json: a fixed
+    // engine address the shim calls or reads, with the bytes that must be
+    // at it. Unlike "resolves" nothing is scanned; the address is taken as
+    // recorded and trusted only when the guard bytes match, so a different
+    // build leaves the pointer null instead of calling into the wrong code.
+    struct EngineAddressEntry
+    {
+        std::string name;
+        uint32_t address = 0;
+        // Code rows: the bytes that must be at `address`, parsed from IDA
+        // text (0x100 = wildcard). Empty for data rows.
+        std::vector<uint16_t> expected;
+        // A data global (a pointer slot the engine fills at runtime) has no
+        // stable bytes to guard. Its row is taken as recorded.
+        bool isData = false;
+    };
+
+    // Parses the "engine_addresses" array. A row needs a unique non-empty
+    // "name" and a non-zero hex "address"; a code row (the default, or
+    // "kind": "code") needs a parseable non-empty "expected"; a "kind": "data"
+    // row must not carry one. Bad rows are reported and skipped individually.
+    std::vector<EngineAddressEntry> ParseEngineAddressTable(const std::string& jsonText,
+                                                            std::string* error = nullptr);
+
+    // True when `actual` is at least as long as `expected` and every literal
+    // byte of `expected` equals the byte at the same index. An empty
+    // `expected` never matches.
+    bool EngineAddressBytesMatch(const std::vector<uint16_t>& expected,
+                                 const uint8_t* actual,
+                                 size_t actualLen);
 }

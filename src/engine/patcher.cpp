@@ -1309,6 +1309,14 @@ namespace BZROpenShim
         ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Probe Refresh Path MapFilter1"), findAddr("Map List Fix Support 1/3"), findAddr("Probe MapListFix2"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"), isSteam);
         ResolveStaticReturnPointers();
         ResolveBzrHooks(isSteam); InitBzrHookStrings(); SuppressStartupShellAutoLoad();
+        // Fail closed on engine addresses that did not bind: drop every patch
+        // whose trampoline or hook needs one before any payload is filled.
+        patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& patch) {
+            const char* missing = FindUnboundEngineHelperForPatch(patch.name.c_str());
+            if (!missing) return false;
+            Log(L"[ADDR] %hs stands down: engine helper %hs is unbound\n", patch.name.c_str(), missing);
+            return true;
+        }), patches.end());
         FillJmp5Payloads(patches); FillVersionNoticePayloads(patches); FillRel32Payloads(patches, isSteam); FillArtilleryVolleyPayloads(patches); WaitForExpectedBytes(patches, isSteam);
         // Apply critical patches (JMP5 hooks, version notice, etc.) BEFORE the
         // deferred-hook retry loop. The retry loop can take ~25 seconds for
