@@ -1,4 +1,5 @@
 #include "bzr_hooks.h"
+#include "env_switch_table.h"
 #include "bzr_object_layout.h"
 #include "bzr_hooks_internal.h"
 #include "engine_globals.h"
@@ -2662,33 +2663,37 @@ namespace BZROpenShim
         StartCareerStatsMpSessionWorker();
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallMineTeamFilterHooksIfPossible();
-        g_MagnetZeroRangeGuardEnabled =
-            !(EnvFlagEnabled("OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX") ||
-              EnvFlagEnabled("BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"));
-		g_BriefingScrollFixEnabled =
-			!(EnvFlagEnabled("OPENSHIM_DISABLE_BRIEFING_SCROLL_FIX") ||
-			  EnvFlagEnabled("BZR_DISABLE_BRIEFING_SCROLL_FIX"));
-		g_MultiRenderCountClampEnabled =
-			!(EnvFlagEnabled("OPENSHIM_DISABLE_RENDERCOUNT_CLAMP") ||
-			  EnvFlagEnabled("BZR_DISABLE_RENDERCOUNT_CLAMP"));
-		g_ThumbnailBmpGuardEnabled =
-			!(EnvFlagEnabled("OPENSHIM_DISABLE_BMP_GUARD") ||
-			  EnvFlagEnabled("BZR_DISABLE_BMP_GUARD"));
-		g_ProducerScriptPredicateHooksEnabled =
-			!(EnvFlagEnabled("OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||
-			  EnvFlagEnabled("BZR_DISABLE_PRODUCER_SCRIPT_PREDICATES"));
-		g_TugCargoPostLoadFixEnabled =
-			!(EnvFlagEnabled("OPENSHIM_DISABLE_TUG_CARGO_FIX") ||
-			  EnvFlagEnabled("BZR_DISABLE_TUG_CARGO_FIX"));
-		RefreshTugCargoPostLoadFixState();
-		g_ConstructorRecycleStaleTargetFixEnabled =
-			!(EnvFlagEnabled("OPENSHIM_DISABLE_CONSTRUCTOR_RECYCLE_FIX") ||
-			  EnvFlagEnabled("BZR_DISABLE_CONSTRUCTOR_RECYCLE_FIX"));
-		RefreshConstructorRecycleStaleTargetFixState();
-		g_ApcAlliedTargetDeployFixEnabled =
-			!(EnvFlagEnabled("OPENSHIM_DISABLE_APC_DEPLOY_FIX") ||
-			  EnvFlagEnabled("BZR_DISABLE_APC_DEPLOY_FIX"));
-		RefreshApcAlliedTargetDeployFixState();
+        // Kill switches for the gameplay fixes: each is on unless either
+        // name is set. Read here, ahead of the Install* calls below; each
+        // Refresh*State() reads only its own flag.
+        static const EnvSwitches::EnvSwitch kFixKillSwitches[] = {
+            {&g_MagnetZeroRangeGuardEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX", "BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"},
+            {&g_BriefingScrollFixEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_BRIEFING_SCROLL_FIX", "BZR_DISABLE_BRIEFING_SCROLL_FIX"},
+            {&g_MultiRenderCountClampEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_RENDERCOUNT_CLAMP", "BZR_DISABLE_RENDERCOUNT_CLAMP"},
+            {&g_ThumbnailBmpGuardEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_BMP_GUARD", "BZR_DISABLE_BMP_GUARD"},
+            {&g_ProducerScriptPredicateHooksEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES", "BZR_DISABLE_PRODUCER_SCRIPT_PREDICATES"},
+            {&g_TugCargoPostLoadFixEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_TUG_CARGO_FIX", "BZR_DISABLE_TUG_CARGO_FIX"},
+            {&g_ConstructorRecycleStaleTargetFixEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_CONSTRUCTOR_RECYCLE_FIX", "BZR_DISABLE_CONSTRUCTOR_RECYCLE_FIX"},
+            {&g_ApcAlliedTargetDeployFixEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_APC_DEPLOY_FIX", "BZR_DISABLE_APC_DEPLOY_FIX"},
+            {&g_QuakeReplayFadeEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_QUAKE_FADE", "BZR_DISABLE_QUAKE_FADE"},
+            {&g_TargetCamSatelliteFixEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_TARGETCAM_FIX", "BZR_DISABLE_TARGETCAM_FIX"},
+            {&g_CinematicSatelliteZoomFixEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_CINECAM_FIX", "BZR_DISABLE_CINECAM_FIX"},
+        };
+        EnvSwitches::Apply(kFixKillSwitches, EnvFlagEnabled);
+        RefreshTugCargoPostLoadFixState();
+        RefreshConstructorRecycleStaleTargetFixState();
+        RefreshApcAlliedTargetDeployFixState();
 
         g_OwnedObjectRevealFixEnabled = kOwnedObjectRevealFixEnabledDefault;
         bool ownedObjectRevealConfig = kOwnedObjectRevealFixEnabledDefault;
@@ -2705,15 +2710,6 @@ namespace BZROpenShim
         }
         RefreshOwnedObjectRevealFixState();
         g_OwnedObjectRevealTraceBudget = kOwnedObjectRevealTraceBudgetDefault;
-		g_QuakeReplayFadeEnabled =
-			!(EnvFlagEnabled("OPENSHIM_DISABLE_QUAKE_FADE") ||
-			  EnvFlagEnabled("BZR_DISABLE_QUAKE_FADE"));
-		g_TargetCamSatelliteFixEnabled =
-			!(EnvFlagEnabled("OPENSHIM_DISABLE_TARGETCAM_FIX") ||
-			  EnvFlagEnabled("BZR_DISABLE_TARGETCAM_FIX"));
-		g_CinematicSatelliteZoomFixEnabled =
-			!(EnvFlagEnabled("OPENSHIM_DISABLE_CINECAM_FIX") ||
-			  EnvFlagEnabled("BZR_DISABLE_CINECAM_FIX"));
 		{
 			long quakeFadeSeconds = kQuakeReplayFadeSecondsDefault;
 			if (TryGetEnvLong("OPENSHIM_QUAKE_FADE_SECONDS", quakeFadeSeconds))
@@ -2784,27 +2780,27 @@ namespace BZROpenShim
             g_EnableChunkMeshProxy &&
             !(EnvFlagEnabled("OPENSHIM_DISABLE_GENERIC_CHUNK_BATCH") ||
               EnvFlagEnabled("BZR_DISABLE_GENERIC_CHUNK_BATCH"));
-        // Restores the per-object frustum test that Redux's DefaultSceneManager
-        // never performs. Measured: 20 tanks 50 m behind the camera cost exactly
-        // as many main-view submissions as 20 tanks in front of it.
-        g_EntityFrustumCullEnabled =
-            !(EnvFlagEnabled("OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING") ||
-              EnvFlagEnabled("BZR_DISABLE_ENTITY_FRUSTUM_CULLING"));
-        g_FrustumCullCensusEnabled =
-            EnvFlagEnabled("OPENSHIM_FRUSTUM_CULL_CENSUS") ||
-            EnvFlagEnabled("BZR_FRUSTUM_CULL_CENSUS");
-
-        // Second, independent repair experiment: restore finite Ogre bounds on
-        // the shared craft meshes instead of emulating the frustum test
-        // privately. Opt-in, and it stands the private cull down by default so
-        // the two mechanisms are never measured on top of each other. Set
-        // OPENSHIM_FRUSTUM_CULL_WITH_RESTORE=1 to run both deliberately.
-        g_RestoreCraftBoundsEnabled =
-            EnvFlagEnabled("OPENSHIM_RESTORE_CRAFT_BOUNDS") ||
-            EnvFlagEnabled("BZR_RESTORE_CRAFT_BOUNDS");
-        g_BoundsTraceEnabled =
-            EnvFlagEnabled("OPENSHIM_BOUNDS_TRACE") ||
-            EnvFlagEnabled("BZR_BOUNDS_TRACE");
+        static const EnvSwitches::EnvSwitch kFrustumSwitches[] = {
+            // Restores the per-object frustum test that Redux's
+            // DefaultSceneManager never performs. Measured: 20 tanks 50 m
+            // behind the camera cost exactly as many main-view submissions
+            // as 20 tanks in front of it.
+            {&g_EntityFrustumCullEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING", "BZR_DISABLE_ENTITY_FRUSTUM_CULLING"},
+            {&g_FrustumCullCensusEnabled, EnvSwitches::Kind::OptIn,
+             "OPENSHIM_FRUSTUM_CULL_CENSUS", "BZR_FRUSTUM_CULL_CENSUS"},
+            // Second, independent repair experiment: restore finite Ogre
+            // bounds on the shared craft meshes instead of emulating the
+            // frustum test privately. Opt-in, and it stands the private cull
+            // down by default so the two mechanisms are never measured on
+            // top of each other. Set OPENSHIM_FRUSTUM_CULL_WITH_RESTORE=1 to
+            // run both deliberately.
+            {&g_RestoreCraftBoundsEnabled, EnvSwitches::Kind::OptIn,
+             "OPENSHIM_RESTORE_CRAFT_BOUNDS", "BZR_RESTORE_CRAFT_BOUNDS"},
+            {&g_BoundsTraceEnabled, EnvSwitches::Kind::OptIn,
+             "OPENSHIM_BOUNDS_TRACE", "BZR_BOUNDS_TRACE"},
+        };
+        EnvSwitches::Apply(kFrustumSwitches, EnvFlagEnabled);
         if (g_RestoreCraftBoundsEnabled &&
             !(EnvFlagEnabled("OPENSHIM_FRUSTUM_CULL_WITH_RESTORE") ||
               EnvFlagEnabled("BZR_FRUSTUM_CULL_WITH_RESTORE")))
