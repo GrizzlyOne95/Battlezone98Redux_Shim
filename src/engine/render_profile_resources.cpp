@@ -137,8 +137,17 @@ namespace BZROpenShim::RenderProfiles
         // Only parsed script types are rejected. A stray .hlsl or .glsl is
         // inert unless a script names it, and failing the whole payload -- which
         // drops the install to Redux -- would be out of proportion to that.
+        //
+        // The scan walks subdirectories because Ogre registers the location
+        // recursively: a script one folder down is parsed just the same. The
+        // mandatory names are only expected at the top level, so a copy of
+        // one inside a subdirectory is a shadow too.
         std::error_code scanEc;
-        for (std::filesystem::directory_iterator it(resourceDir, scanEc), end;
+        for (std::filesystem::recursive_directory_iterator it(
+                 resourceDir,
+                 std::filesystem::directory_options::skip_permission_denied,
+                 scanEc),
+             end;
              !scanEc && it != end; it.increment(scanEc))
         {
             std::error_code fileEc;
@@ -160,7 +169,7 @@ namespace BZROpenShim::RenderProfiles
 
             const std::string name = it->path().filename().string();
             bool expected = false;
-            for (size_t i = 0; i < RequiredEnhancedResourceCount(); ++i)
+            for (size_t i = 0; it.depth() == 0 && i < RequiredEnhancedResourceCount(); ++i)
             {
                 if (name == kRequiredEnhancedResources[i])
                 {
@@ -170,8 +179,12 @@ namespace BZROpenShim::RenderProfiles
             }
             if (!expected)
             {
+                std::error_code relativeEc;
+                const std::filesystem::path relative =
+                    std::filesystem::relative(it->path(), resourceDir, relativeEc);
                 outProblem = std::string("unexpected script shadows the "
-                                         "payload: ") + name;
+                                         "payload: ") +
+                             (relativeEc ? name : relative.generic_string());
                 return false;
             }
         }
