@@ -121,6 +121,10 @@ add_executable(env_switch_table_tests
     env_switch_table_tests.cpp
 )
 
+add_executable(bool_token_tests
+    bool_token_tests.cpp
+)
+
 add_executable(memory_access_tests
     memory_access_tests.cpp
 )
@@ -254,6 +258,8 @@ target_include_directories(sun_flash_tests PRIVATE ../include)
 target_compile_features(sun_flash_tests PRIVATE cxx_std_20)
 target_include_directories(env_switch_table_tests PRIVATE ../include)
 target_compile_features(env_switch_table_tests PRIVATE cxx_std_20)
+target_include_directories(bool_token_tests PRIVATE ../include)
+target_compile_features(bool_token_tests PRIVATE cxx_std_20)
 target_include_directories(memory_access_tests PRIVATE ../include)
 target_compile_features(memory_access_tests PRIVATE cxx_std_20)
 target_include_directories(terrain_tile_blend_tests PRIVATE ../include)
@@ -298,6 +304,7 @@ if(MSVC)
     target_compile_options(chunk_batch_invalidation_tests PRIVATE /W4 /WX)
     target_compile_options(sun_flash_tests PRIVATE /W4 /WX)
     target_compile_options(env_switch_table_tests PRIVATE /W4 /WX)
+    target_compile_options(bool_token_tests PRIVATE /W4 /WX)
     target_compile_options(memory_access_tests PRIVATE /W4 /WX)
     target_compile_options(terrain_tile_blend_tests PRIVATE /W4 /WX)
     target_compile_options(terrain_atlas_rect_repair_tests PRIVATE /W4 /WX)
@@ -326,6 +333,7 @@ else()
     target_compile_options(chunk_batch_invalidation_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(sun_flash_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(env_switch_table_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(bool_token_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(memory_access_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(terrain_tile_blend_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(terrain_atlas_rect_repair_tests PRIVATE -Wall -Wextra -Werror)
@@ -355,6 +363,7 @@ add_test(NAME headlight_falloff_tests COMMAND headlight_falloff_tests)
 add_test(NAME chunk_batch_invalidation_tests COMMAND chunk_batch_invalidation_tests)
 add_test(NAME sun_flash_tests COMMAND sun_flash_tests)
 add_test(NAME env_switch_table_tests COMMAND env_switch_table_tests)
+add_test(NAME bool_token_tests COMMAND bool_token_tests)
 add_test(NAME memory_access_tests COMMAND memory_access_tests)
 add_test(NAME terrain_tile_blend_tests COMMAND terrain_tile_blend_tests)
 add_test(NAME terrain_atlas_rect_repair_tests COMMAND terrain_atlas_rect_repair_tests)

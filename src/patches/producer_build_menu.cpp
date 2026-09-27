@@ -3,6 +3,7 @@
 // overrides from producer_build_menu.ini and ODF tokens, applied through
 // the producer mode call hook, split out of bzr_hooks.cpp.
 #include "bzr_hooks.h"
+#include "bool_token.h"
 #include "bzr_object_layout.h"
 #include "bzr_hooks_internal.h"
 #include "engine_globals.h"
@@ -107,39 +108,8 @@ namespace BZROpenShim
 
         static bool IsIniBoolTrue(const char* value, bool fallback)
         {
-            if (!value || !*value)
-                return fallback;
-
-            char normalized[16] = {};
-            size_t out = 0;
-            for (const char* cursor = value; *cursor && out + 1 < sizeof(normalized); ++cursor)
-            {
-                if (std::isspace(static_cast<unsigned char>(*cursor)))
-                    continue;
-                normalized[out++] = static_cast<char>(std::tolower(static_cast<unsigned char>(*cursor)));
-            }
-            normalized[out] = '\0';
-
-            if (normalized[0] == '\0')
-                return fallback;
-
-            if (strcmp(normalized, "1") == 0 ||
-                strcmp(normalized, "true") == 0 ||
-                strcmp(normalized, "yes") == 0 ||
-                strcmp(normalized, "on") == 0)
-            {
-                return true;
-            }
-
-            if (strcmp(normalized, "0") == 0 ||
-                strcmp(normalized, "false") == 0 ||
-                strcmp(normalized, "no") == 0 ||
-                strcmp(normalized, "off") == 0)
-            {
-                return false;
-            }
-
-            return fallback;
+            bool parsed = fallback;
+            return BZROpenShim::BoolToken::TryParse(value, parsed) ? parsed : fallback;
         }
 
         static int64_t PackProducerBuildMenuToken(const char* token)

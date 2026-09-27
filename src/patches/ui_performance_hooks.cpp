@@ -12,6 +12,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "ui_performance_hooks.h"
+#include "bool_token.h"
 #include "ui_performance.h"
 #include "ui_file_scan_hooks.h"
 #include "hook_engine.h"
@@ -1996,15 +1997,16 @@ namespace BZROpenShim::UiPerfHooks
                 char* slash = strrchr(gameDir, '\\');
                 if (slash) { *(slash+1) = '\0'; std::string ini = std::string(gameDir) + "openshim.ini"; char val[16] = {}; GetPrivateProfileStringA("Diagnostics", "UiPerformanceAutoMatrix", "__unset__", val, sizeof(val), ini.c_str());
                     if (strcmp(val, "__unset__") != 0) {
-                        std::string v(val); for(char&c:v) c=tolower((unsigned char)c);
-                        autoMat = (v=="1"||v=="true"||v=="on"||v=="yes"||v=="enabled");
+                        bool parsed = false;
+                        autoMat = BZROpenShim::BoolToken::TryParse(val, parsed) && parsed;
                     }
                 }
             }
             if (!autoMat)
             {
                 DWORD len = GetEnvironmentVariableA("OPENSHIM_UI_PERFORMANCE_AUTOMATRIX", buf, sizeof(buf));
-                if (len>0 && len < sizeof(buf)) { std::string v(buf,len); for(char&c:v) c=tolower((unsigned char)c); autoMat = (v=="1"||v=="true"||v=="on"||v=="yes"); }
+                bool parsed = false;
+                if (len>0 && len < sizeof(buf)) autoMat = BZROpenShim::BoolToken::TryParse(buf, len, parsed) && parsed;
             }
             g_AutoMatrixEnabled.store(autoMat, std::memory_order_relaxed);
             if (autoMat) LogShimA(LogLevel::Info, "uiperf-hooks", "UiPerf auto-matrix enabled");

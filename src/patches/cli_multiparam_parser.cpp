@@ -80,6 +80,7 @@
 // sites are checked as best-effort corroboration that is logged, not required.
 
 #include "cli_multiparam_parser.h"
+#include "bool_token.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -246,12 +247,9 @@ namespace BZROpenShim
             if (value[0] == '\0' || std::strcmp(value, kUnsetSentinel) == 0)
                 return kFixEnabledDefault;
 
-            for (char* c = value; *c != '\0'; ++c)
-                *c = static_cast<char>(std::tolower(static_cast<unsigned char>(*c)));
-
-            return !(std::strcmp(value, "0") == 0 || std::strcmp(value, "false") == 0 ||
-                     std::strcmp(value, "off") == 0 || std::strcmp(value, "no") == 0 ||
-                     std::strcmp(value, "disabled") == 0);
+            // Only a recognized off word turns the fix off.
+            bool enabled = true;
+            return !BZROpenShim::BoolToken::TryParse(value, enabled) || enabled;
         }
     }
 
