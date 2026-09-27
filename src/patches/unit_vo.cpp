@@ -3,6 +3,7 @@
 // of bzr_hooks.cpp. Installed and configured from there; shared helpers
 // come from bzr_hooks_internal.h.
 #include "bzr_hooks.h"
+#include "bool_token.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
@@ -386,15 +387,17 @@ namespace BZROpenShim
                     queueDepth = kUnitVoReducedQueueDepth;
                     queueStaleMs = kUnitVoReducedQueueStaleMs;
                 }
-                else if (normalized == "none" || normalized == "off" || normalized == "0" ||
-                         normalized == "false" || normalized == "no" || normalized == "disabled")
+                else if (normalized == "none")
                 {
                     feedbackEnabled = false;
                 }
-                else if (normalized == "normal" || normalized == "on" || normalized == "1" ||
-                         normalized == "true" || normalized == "yes" || normalized == "enabled")
+                else if (normalized == "normal")
                 {
                     feedbackEnabled = true;
+                }
+                else
+                {
+                    BZROpenShim::BoolToken::TryParse(normalized, feedbackEnabled);
                 }
             }
 

@@ -4,6 +4,7 @@
 // inline-detour machinery, openshim.ini helpers, live feature re-apply) is
 // declared in bzr_options_ui.h and implemented by bzr_hooks.cpp.
 #include "bzr_options_ui.h"
+#include "bool_token.h"
 
 #include "autosave.h"
 #include "bzr_hooks.h"
@@ -3231,24 +3232,11 @@ namespace BZROpenShim
             }
 
             // Boolean rows also accept the parser's synonym set.
-            if (setting.values == kShimSettingsOnOffValues)
-            {
-                if (normalized == "1" || normalized == "true" || normalized == "on" ||
-                    normalized == "yes" || normalized == "enabled")
-                    return 0;
-                if (normalized == "0" || normalized == "false" || normalized == "off" ||
-                    normalized == "no" || normalized == "disabled")
-                    return 1;
-            }
-            else if (setting.values == kShimSettingsUnitVoValues)
-            {
-                if (normalized == "1" || normalized == "true" || normalized == "on" ||
-                    normalized == "yes" || normalized == "enabled")
-                    return 0;
-                if (normalized == "0" || normalized == "false" || normalized == "off" ||
-                    normalized == "no" || normalized == "disabled")
-                    return 2;
-            }
+            bool token = false;
+            if (setting.values == kShimSettingsOnOffValues && BZROpenShim::BoolToken::TryParse(normalized, token))
+                return token ? 0 : 1;
+            if (setting.values == kShimSettingsUnitVoValues && BZROpenShim::BoolToken::TryParse(normalized, token))
+                return token ? 0 : 2;
 
             return setting.defaultIndex;
         }
