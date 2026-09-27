@@ -1395,19 +1395,8 @@
 
         bool IsExecutableModuleAddress(HMODULE module, const void* address)
         {
-            if (!ModuleContainsAddress(module, address))
-                return false;
-            MEMORY_BASIC_INFORMATION mbi{};
-            if (VirtualQuery(address, &mbi, sizeof(mbi)) != sizeof(mbi) ||
-                mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD) != 0)
-            {
-                return false;
-            }
-            const DWORD protection = mbi.Protect & 0xffu;
-            return protection == PAGE_EXECUTE ||
-                protection == PAGE_EXECUTE_READ ||
-                protection == PAGE_EXECUTE_READWRITE ||
-                protection == PAGE_EXECUTE_WRITECOPY;
+            return ModuleContainsAddress(module, address) &&
+                BZROpenShim::MemoryAccess::IsExecutable(address);
         }
 
         bool IsExecutableOgreAddress(const void* address)
