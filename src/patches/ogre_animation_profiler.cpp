@@ -1,3 +1,4 @@
+#include "com_vtable_patch.h"
 #include "iat_patch.h"
 #include "memory_access.h"
 
