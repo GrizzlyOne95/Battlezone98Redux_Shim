@@ -1,5 +1,6 @@
 #include "bzr_hooks.h"
 #include "env_switch_table.h"
+#include "bool_token.h"
 #include "bzr_object_layout.h"
 #include "bzr_hooks_internal.h"
 #include "engine_globals.h"
@@ -1545,40 +1546,7 @@ namespace BZROpenShim
 
         bool TryParseBoolValue(const char* value, bool& out)
         {
-            if (!value)
-                return false;
-
-            char normalized[16] = {};
-            size_t i = 0;
-            for (const char* p = value; *p && i + 1 < sizeof(normalized); ++p)
-            {
-                if (std::isspace(static_cast<unsigned char>(*p)))
-                    continue;
-
-                normalized[i++] = static_cast<char>(
-                    std::tolower(static_cast<unsigned char>(*p)));
-            }
-            normalized[i] = '\0';
-
-            if (strcmp(normalized, "1") == 0 ||
-                strcmp(normalized, "true") == 0 ||
-                strcmp(normalized, "yes") == 0 ||
-                strcmp(normalized, "on") == 0)
-            {
-                out = true;
-                return true;
-            }
-
-            if (strcmp(normalized, "0") == 0 ||
-                strcmp(normalized, "false") == 0 ||
-                strcmp(normalized, "no") == 0 ||
-                strcmp(normalized, "off") == 0)
-            {
-                out = false;
-                return true;
-            }
-
-            return false;
+            return BZROpenShim::BoolToken::TryParse(value, out);
         }
 
         bool TryGetObjectOdfToken(void* objectPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1])
@@ -1886,27 +1854,11 @@ namespace BZROpenShim
 
     // Tri-state boolean read over TryGetUserConfigString: returns false when
     // the key is absent OR present-but-unparseable (both mean "no opinion").
-    // Accepts 1/0, true/false, on/off, yes/no, enabled/disabled (any case).
+    // Accepts the words in bool_token.h.
     bool TryGetUserConfigBool(const char* section, const char* key, bool& out)
     {
         std::string value;
-        if (!TryGetUserConfigString(section, key, value))
-            return false;
-        for (char& c : value)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (value == "1" || value == "true" || value == "on" ||
-            value == "yes" || value == "enabled")
-        {
-            out = true;
-            return true;
-        }
-        if (value == "0" || value == "false" || value == "off" ||
-            value == "no" || value == "disabled")
-        {
-            out = false;
-            return true;
-        }
-        return false;
+        return TryGetUserConfigString(section, key, value) && BZROpenShim::BoolToken::TryParse(value, out);
     }
 
     // Retry loops call the installer every 100 ms; log each refused site once.

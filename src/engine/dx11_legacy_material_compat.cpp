@@ -2,6 +2,7 @@
 // process state: deterministic functions of their inputs for unit tests.
 
 #include "dx11_legacy_material_compat.h"
+#include "bool_token.h"
 
 #include <cctype>
 #include <cstdio>
@@ -190,27 +191,8 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
 
     bool ParseCompatFlag(std::string_view raw, bool defaultValue) noexcept
     {
-        const std::string_view text = TrimAscii(raw);
-        if (text.empty())
-        {
-            return defaultValue;
-        }
-        std::string lower;
-        lower.reserve(text.size());
-        for (char c : text)
-        {
-            lower.push_back(ToLowerChar(c));
-        }
-        const std::string_view v(lower);
-        if (v == "1" || v == "true" || v == "on" || v == "yes" || v == "enabled")
-        {
-            return true;
-        }
-        if (v == "0" || v == "false" || v == "off" || v == "no" || v == "disabled")
-        {
-            return false;
-        }
-        return defaultValue;
+        bool value = defaultValue;
+        return BZROpenShim::BoolToken::TryParse(raw.data(), raw.size(), value) ? value : defaultValue;
     }
 
     bool IsDx11SupportedShaderTarget(std::string_view target) noexcept
