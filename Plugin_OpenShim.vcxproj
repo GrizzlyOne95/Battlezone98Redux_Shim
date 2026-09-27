@@ -155,6 +155,7 @@
     <ClCompile Include="src\patches\diag_mpauth_trace.cpp" />
     <ClCompile Include="src\patches\diag_vehicle_skinning.cpp" />
     <ClCompile Include="src\patches\engine_flames.cpp" />
+    <ClCompile Include="src\patches\global_feature_config.cpp" />
     <ClCompile Include="src\patches\global_turbo.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
     <ClCompile Include="src\patches\hud_sprite_rects.cpp" />
