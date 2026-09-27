@@ -956,6 +956,10 @@ namespace BZROpenShim
         // restore paths refuse to write through their stored pointers.
         void HeadlightNotifyMissionRunStateChanged(bool enteringSimulation)
         {
+            // Ogre reuses light allocations across missions, so an address
+            // logged last mission may be a different light now. Forget them,
+            // which also keeps the set from growing for the whole process.
+            g_HeadlightFalloffPlanLogged.clear();
             if (!g_HeadlightRuntimeActive && g_HeadlightOriginalStates.empty())
                 return;
             ++s_HeadlightWorldGeneration;
