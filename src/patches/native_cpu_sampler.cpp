@@ -519,12 +519,28 @@ namespace BZROpenShim
                         continue;
                     }
                     live.push_back(entry.th32ThreadID);
-                    const bool known = std::any_of(
+                    const auto known = std::find_if(
                         threads.begin(), threads.end(),
                         [&](const ThreadEntry& tracked) {
                             return tracked.tid == entry.th32ThreadID;
                         });
-                    if (known || threads.size() >= kMaxThreads)
+                    if (known != threads.end())
+                    {
+                        // Windows reuses thread ids. If the tracked thread
+                        // has exited, this id now names a new thread: drop
+                        // the old handle, which otherwise keeps the dead
+                        // thread's object alive with a frozen CPU total and
+                        // hides the new thread for the rest of the capture.
+                        DWORD exitCode = 0;
+                        if (!GetExitCodeThread(known->handle, &exitCode) ||
+                            exitCode == STILL_ACTIVE)
+                        {
+                            continue;
+                        }
+                        CloseHandle(known->handle);
+                        threads.erase(known);
+                    }
+                    if (threads.size() >= kMaxThreads)
                     {
                         continue;
                     }
