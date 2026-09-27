@@ -14,6 +14,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "ui_file_scan_hooks.h"
+#include "iat_patch.h"
 #include "ui_performance.h"
 #include "ui_performance_hooks.h"
 #include "shim_log.h"
@@ -134,36 +135,9 @@ namespace BZROpenShim::UiFileScan
             else if (ext == L".ini") ++agg.ini;
         }
 
-        // IAT patch helper (same as file_io_hooks.cpp, trimmed).
         bool PatchIAT(HMODULE mod, const char* func, void* replacement, void** original)
         {
-            if (!mod || !func || !replacement) return false;
-            auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(mod);
-            if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
-            auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(reinterpret_cast<uint8_t*>(mod) + dos->e_lfanew);
-            if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
-            const DWORD rva = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
-            if (!rva) return false;
-            auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(reinterpret_cast<uint8_t*>(mod) + rva);
-            for (; desc->Name; ++desc)
-            {
-                auto* origThunk = reinterpret_cast<IMAGE_THUNK_DATA*>(reinterpret_cast<uint8_t*>(mod) + (desc->OriginalFirstThunk ? desc->OriginalFirstThunk : desc->FirstThunk));
-                auto* thunk = reinterpret_cast<IMAGE_THUNK_DATA*>(reinterpret_cast<uint8_t*>(mod) + desc->FirstThunk);
-                for (; origThunk->u1.AddressOfData; ++origThunk, ++thunk)
-                {
-                    if (IMAGE_SNAP_BY_ORDINAL(origThunk->u1.Ordinal)) continue;
-                    auto* byName = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(reinterpret_cast<uint8_t*>(mod) + origThunk->u1.AddressOfData);
-                    if (std::strcmp(reinterpret_cast<const char*>(byName->Name), func) != 0) continue;
-                    auto** iat = reinterpret_cast<void**>(&thunk->u1.Function);
-                    DWORD old = 0;
-                    if (!VirtualProtect(iat, sizeof(void*), PAGE_READWRITE, &old)) return false;
-                    if (original && *original == nullptr) *original = *iat;
-                    *iat = replacement;
-                    VirtualProtect(iat, sizeof(void*), old, &old);
-                    return true;
-                }
-            }
-            return false;
+            return IatPatch::PatchImportFromAnyDll(mod, func, replacement, original) == IatPatch::Result::Patched;
         }
 
         // Re-entrancy guard: hooks must not re-enter themselves via helper
