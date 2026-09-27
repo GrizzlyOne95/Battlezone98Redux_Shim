@@ -18,7 +18,6 @@
 #include "patches.h"
 #include "patcher.h"
 #include "fog_wake_feature.h"
-#include "render_queue_trace.h"
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
 #include "x86_length.h"
@@ -126,10 +125,13 @@ namespace BZROpenShim
         return true;
     }
 
-    // Retired. This helper reordered Carrier::weapon[]/hardpoint[] and the
+    // Retired, and removed on 2026-09-27 together with its two getter hooks
+    // (0x00417C80, 0x0046DD70), which only called it and then redid the stock
+    // getter. It reordered Carrier::weapon[]/hardpoint[] and the
     // existant/selected/enabled bitfields to trick the stock "first slot" AI
-    // into picking a different weapon. It is kept only as a symbol for the two
-    // never-installed bias trampolines and the hovercraft-refresh call site.
+    // into picking a different weapon. The setter above remains only because
+    // OpenShimSetWeaponMaskCarrierBiasEnabled is a published export; the flag
+    // it sets has no reader.
     //
     // It must not be revived as written. Three reasons, in order of severity:
     //
@@ -149,9 +151,6 @@ namespace BZROpenShim
     //
     // The supported replacement selects the weapon at the point of use without
     // writing to the carrier -- see ResolveAiPreferredHardpoint below.
-    void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* /*craft*/)
-    {
-    }
 
     namespace Hooks
     {

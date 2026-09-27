@@ -18,7 +18,6 @@
 #include "patches.h"
 #include "patcher.h"
 #include "fog_wake_feature.h"
-#include "render_queue_trace.h"
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
 #include "x86_length.h"
@@ -89,24 +88,32 @@ namespace BZROpenShim
 
         static std::string NormalizeBanId(const char* value)
         {
-            std::string normalized;
-            if (!value)
-                return normalized;
+            return StableIdList::NormalizeId(value);
+        }
 
-            normalized.reserve(32);
-            for (const char* cursor = value; *cursor; ++cursor)
-            {
-                if (*cursor == '#' || *cursor == ';' ||
-                    std::isspace(static_cast<unsigned char>(*cursor)))
-                {
-                    break;
-                }
+        // bans.cfg and mutes.cfg are read and written whole. Text mode, as
+        // the fgets/fprintf loops these replace used.
+        static bool ReadStableIdListFile(const std::string& path, std::string& out)
+        {
+            out.clear();
+            FILE* file = nullptr;
+            if (fopen_s(&file, path.c_str(), "r") != 0 || !file)
+                return false;
+            char buffer[4096];
+            size_t read = 0;
+            while ((read = std::fread(buffer, 1, sizeof(buffer), file)) > 0)
+                out.append(buffer, read);
+            std::fclose(file);
+            return true;
+        }
 
-                normalized.push_back(
-                    static_cast<char>(std::toupper(static_cast<unsigned char>(*cursor))));
-            }
-
-            return normalized;
+        static bool WriteStableIdListFile(const std::string& path, const std::string& text)
+        {
+            FILE* file = nullptr;
+            if (fopen_s(&file, path.c_str(), "w") != 0 || !file)
+                return false;
+            const bool wrote = std::fwrite(text.data(), 1, text.size(), file) == text.size();
+            return std::fclose(file) == 0 && wrote;
         }
 
         std::filesystem::path GetBansConfigPath()
@@ -152,51 +159,14 @@ namespace BZROpenShim
 
             const auto configPath = GetBansConfigPath();
             const std::string configPathString = configPath.string();
-            FILE* file = nullptr;
-            if (fopen_s(&file, configPathString.c_str(), "r") != 0 || !file)
+            std::string text;
+            if (!ReadStableIdListFile(configPathString, text))
             {
                 Log(L"[BAN] No bans config found at path=%hs\n", configPathString.c_str());
                 return;
             }
 
-            char line[512] = {};
-            while (std::fgets(line, static_cast<int>(sizeof(line)), file))
-            {
-                char* trimmed = TrimAsciiInPlace(line);
-                if (*trimmed == '\0' || *trimmed == '#' || *trimmed == ';')
-                    continue;
-
-                char* split = trimmed;
-                while (*split && !std::isspace(static_cast<unsigned char>(*split)))
-                    ++split;
-
-                char saved = *split;
-                *split = '\0';
-                std::string id = NormalizeBanId(trimmed);
-                *split = saved;
-                if (id.empty())
-                    continue;
-
-                char* name = (*split != '\0') ? TrimAsciiInPlace(split + 1) : split;
-                auto existing = std::find_if(
-                    g_BanRecords.begin(),
-                    g_BanRecords.end(),
-                    [&id](const BanRecord& entry) { return entry.id == id; });
-                if (existing != g_BanRecords.end())
-                {
-                    if (existing->name.empty() && name && *name)
-                        existing->name = name;
-                    continue;
-                }
-
-                BanRecord entry = {};
-                entry.id = std::move(id);
-                if (name && *name)
-                    entry.name = name;
-                g_BanRecords.push_back(std::move(entry));
-            }
-
-            std::fclose(file);
+            g_BanRecords = StableIdList::Parse(text);
             Log(L"[BAN] Loaded bans config path=%hs entries=%u\n",
                 configPathString.c_str(),
                 static_cast<unsigned>(g_BanRecords.size()));
@@ -206,24 +176,13 @@ namespace BZROpenShim
         {
             const auto configPath = GetBansConfigPath();
             const std::string configPathString = configPath.string();
-            FILE* file = nullptr;
-            if (fopen_s(&file, configPathString.c_str(), "w") != 0 || !file)
+            if (!WriteStableIdListFile(configPathString,
+                    StableIdList::Format(g_BanRecords, "OpenShim ban list", "<stable_id> [display name]")))
             {
                 Log(L"[BAN] Failed to write bans config path=%hs\n", configPathString.c_str());
                 return false;
             }
 
-            std::fprintf(file, "; OpenShim ban list\n");
-            std::fprintf(file, "; Format: <stable_id> [display name]\n");
-            for (const BanRecord& entry : g_BanRecords)
-            {
-                if (entry.name.empty())
-                    std::fprintf(file, "%s\n", entry.id.c_str());
-                else
-                    std::fprintf(file, "%s %s\n", entry.id.c_str(), entry.name.c_str());
-            }
-
-            std::fclose(file);
             Log(L"[BAN] Wrote bans config path=%hs entries=%u\n",
                 configPathString.c_str(),
                 static_cast<unsigned>(g_BanRecords.size()));
@@ -335,11 +294,7 @@ namespace BZROpenShim
             return true;
         }
 
-        struct MuteRecord
-        {
-            std::string id;
-            std::string name;
-        };
+        using MuteRecord = StableIdList::Record;
 
         static bool g_MutesConfigLoaded = false;
         static std::vector<MuteRecord> g_MuteRecords;
@@ -359,51 +314,14 @@ namespace BZROpenShim
 
             const auto configPath = GetMutesConfigPath();
             const std::string configPathString = configPath.string();
-            FILE* file = nullptr;
-            if (fopen_s(&file, configPathString.c_str(), "r") != 0 || !file)
+            std::string text;
+            if (!ReadStableIdListFile(configPathString, text))
             {
                 Log(L"[MUTE] No mutes config found at path=%hs\n", configPathString.c_str());
                 return;
             }
 
-            char line[512] = {};
-            while (std::fgets(line, static_cast<int>(sizeof(line)), file))
-            {
-                char* trimmed = TrimAsciiInPlace(line);
-                if (*trimmed == '\0' || *trimmed == '#' || *trimmed == ';')
-                    continue;
-
-                char* split = trimmed;
-                while (*split && !std::isspace(static_cast<unsigned char>(*split)))
-                    ++split;
-
-                char saved = *split;
-                *split = '\0';
-                std::string id = NormalizeBanId(trimmed);
-                *split = saved;
-                if (id.empty())
-                    continue;
-
-                char* name = (*split != '\0') ? TrimAsciiInPlace(split + 1) : split;
-                auto existing = std::find_if(
-                    g_MuteRecords.begin(),
-                    g_MuteRecords.end(),
-                    [&id](const MuteRecord& entry) { return entry.id == id; });
-                if (existing != g_MuteRecords.end())
-                {
-                    if (existing->name.empty() && name && *name)
-                        existing->name = name;
-                    continue;
-                }
-
-                MuteRecord entry = {};
-                entry.id = std::move(id);
-                if (name && *name)
-                    entry.name = name;
-                g_MuteRecords.push_back(std::move(entry));
-            }
-
-            std::fclose(file);
+            g_MuteRecords = StableIdList::Parse(text);
             Log(L"[MUTE] Loaded mutes config path=%hs entries=%u\n",
                 configPathString.c_str(),
                 static_cast<unsigned>(g_MuteRecords.size()));
@@ -413,24 +331,13 @@ namespace BZROpenShim
         {
             const auto configPath = GetMutesConfigPath();
             const std::string configPathString = configPath.string();
-            FILE* file = nullptr;
-            if (fopen_s(&file, configPathString.c_str(), "w") != 0 || !file)
+            if (!WriteStableIdListFile(configPathString,
+                    StableIdList::Format(g_MuteRecords, "OpenShim persistent mute list", "<stable_id> [last display name]")))
             {
                 Log(L"[MUTE] Failed to write mutes config path=%hs\n", configPathString.c_str());
                 return false;
             }
 
-            std::fprintf(file, "; OpenShim persistent mute list\n");
-            std::fprintf(file, "; Format: <stable_id> [last display name]\n");
-            for (const MuteRecord& entry : g_MuteRecords)
-            {
-                if (entry.name.empty())
-                    std::fprintf(file, "%s\n", entry.id.c_str());
-                else
-                    std::fprintf(file, "%s %s\n", entry.id.c_str(), entry.name.c_str());
-            }
-
-            std::fclose(file);
             Log(L"[MUTE] Wrote mutes config path=%hs entries=%u\n",
                 configPathString.c_str(),
                 static_cast<unsigned>(g_MuteRecords.size()));

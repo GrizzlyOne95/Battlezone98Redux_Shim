@@ -37,6 +37,7 @@
 // ESP" is a correctness requirement here rather than a plausibility check.
 
 #include "native_cpu_sampler.h"
+#include "bool_token.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -267,19 +268,6 @@ namespace BZROpenShim
                 return fallback;
             }
             return static_cast<uint32_t>(parsed);
-        }
-
-        bool IsTruthy(const std::string& text)
-        {
-            if (text.empty())
-            {
-                return false;
-            }
-            if (text == "0" || text == "false" || text == "FALSE" || text == "off")
-            {
-                return false;
-            }
-            return true;
         }
 
         // ---------------------------------------------------------------
@@ -531,12 +519,28 @@ namespace BZROpenShim
                         continue;
                     }
                     live.push_back(entry.th32ThreadID);
-                    const bool known = std::any_of(
+                    const auto known = std::find_if(
                         threads.begin(), threads.end(),
                         [&](const ThreadEntry& tracked) {
                             return tracked.tid == entry.th32ThreadID;
                         });
-                    if (known || threads.size() >= kMaxThreads)
+                    if (known != threads.end())
+                    {
+                        // Windows reuses thread ids. If the tracked thread
+                        // has exited, this id now names a new thread: drop
+                        // the old handle, which otherwise keeps the dead
+                        // thread's object alive with a frozen CPU total and
+                        // hides the new thread for the rest of the capture.
+                        DWORD exitCode = 0;
+                        if (!GetExitCodeThread(known->handle, &exitCode) ||
+                            exitCode == STILL_ACTIVE)
+                        {
+                            continue;
+                        }
+                        CloseHandle(known->handle);
+                        threads.erase(known);
+                    }
+                    if (threads.size() >= kMaxThreads)
                     {
                         continue;
                     }
@@ -1045,7 +1049,7 @@ namespace BZROpenShim
         {
             return false;
         }
-        return IsTruthy(value);
+        return BZROpenShim::BoolToken::IsTruthy(value);
     }
 
     void InitializeNativeCpuSampler()

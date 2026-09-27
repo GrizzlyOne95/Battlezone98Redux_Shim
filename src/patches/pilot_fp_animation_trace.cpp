@@ -1,4 +1,6 @@
 #include "pilot_fp_animation_trace.h"
+#include "diagnostic_switch.h"
+#include "trace_introspection.h"
 #include "engine_globals.h"
 #include "BZROpenShim.h"
 #include "ogre_runtime.h"
@@ -98,12 +100,6 @@ namespace BZROpenShim
         using FnAnimationSetWeight = void(__thiscall*)(void*, float);
         using FnAnimationAddTime = void(__thiscall*)(void*, float);
 
-        struct ExportMatch
-        {
-            std::string name;
-            void* address = nullptr;
-        };
-
         struct TraceBinding
         {
             void* state = nullptr;
@@ -184,58 +180,22 @@ namespace BZROpenShim
             "aspilo_fp", "bspilo_fp", "sspilo_fp", "cspilo_fp", "bsheav_fp"
         };
 
-        bool StringIsTruthy(const char* value)
-        {
-            if (!value || !*value)
-                return false;
-            std::string v(value);
-            for (char& ch : v)
-                ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-            return v != "0" && v != "false" && v != "no" && v != "off" && v != "disabled";
-        }
-
-        std::string GetOpenShimIniPath()
-        {
-            char path[MAX_PATH] = {};
-            const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-            if (length == 0 || length >= MAX_PATH)
-                return "openshim.ini";
-            char* slash = std::strrchr(path, '\\');
-            if (slash)
-                *(slash + 1) = '\0';
-            else
-                path[0] = '\0';
-            return std::string(path) + "openshim.ini";
-        }
-
         bool TraceRequested()
         {
-            char envValue[64] = {};
-            const DWORD envLength = GetEnvironmentVariableA(
-                kEnvironmentSwitch, envValue, static_cast<DWORD>(sizeof(envValue)));
-            if (envLength > 0 && envLength < sizeof(envValue))
-                return StringIsTruthy(envValue);
-            const std::string iniPath = GetOpenShimIniPath();
             // Ships off. This is a capture tool for animation investigation, and
             // every document that uses it says to set the key to 1 first.
-            return GetPrivateProfileIntA(kIniSection, kIniKey, 0, iniPath.c_str()) != 0;
+            return BZROpenShim::DiagnosticSwitch::Requested(kEnvironmentSwitch, kIniSection, kIniKey);
         }
 
         bool ManipRequested()
         {
-            char envValue[64] = {};
-            const DWORD envLength = GetEnvironmentVariableA(
-                kManipEnvironmentSwitch, envValue, static_cast<DWORD>(sizeof(envValue)));
-            if (envLength > 0 && envLength < sizeof(envValue))
-                return StringIsTruthy(envValue);
-            const std::string iniPath = GetOpenShimIniPath();
-            return GetPrivateProfileIntA(kIniSection, kManipIniKey, 0, iniPath.c_str()) != 0;
+            return BZROpenShim::DiagnosticSwitch::Requested(kManipEnvironmentSwitch, kIniSection, kManipIniKey);
         }
 
         void RefreshManipConfig()
         {
             g_ManipEnabled.store(ManipRequested(), std::memory_order_release);
-            const std::string iniPath = GetOpenShimIniPath();
+            const std::string iniPath = BZROpenShim::DiagnosticSwitch::OpenShimIniPath();
             char animName[64] = {};
             GetPrivateProfileStringA(kIniSection, kManipAnimIniKey, "stand2Kneel", animName, sizeof(animName), iniPath.c_str());
             if (animName[0])
@@ -273,42 +233,9 @@ namespace BZROpenShim
                 (g_ManipScope == ManipScope::Fp && kind == TargetKind::Fp);
         }
 
-        void CopyText(char* destination, size_t destinationSize, const char* source)
-        {
-            if (!destination || destinationSize == 0)
-                return;
-            destination[0] = '\0';
-            if (!source)
-                return;
-            strncpy_s(destination, destinationSize, source, _TRUNCATE);
-        }
-
-        bool MainModuleContains(const void* address)
-        {
-            if (!address)
-                return false;
-            HMODULE module = GetModuleHandleA(nullptr);
-            if (!module)
-                return false;
-            const auto* base = reinterpret_cast<const uint8_t*>(module);
-            const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-            if (dos->e_magic != IMAGE_DOS_SIGNATURE)
-                return false;
-            const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-            if (nt->Signature != IMAGE_NT_SIGNATURE)
-                return false;
-            const auto* pointer = reinterpret_cast<const uint8_t*>(address);
-            return pointer >= base && pointer < base + nt->OptionalHeader.SizeOfImage;
-        }
-
-        uintptr_t CallerRva(void* returnAddress, bool& outIsMainModule)
-        {
-            outIsMainModule = MainModuleContains(returnAddress);
-            if (!outIsMainModule)
-                return 0;
-            HMODULE module = GetModuleHandleA(nullptr);
-            return reinterpret_cast<uintptr_t>(returnAddress) - reinterpret_cast<uintptr_t>(module);
-        }
+        using TraceIntrospection::CallerRva;
+        using TraceIntrospection::CopyText;
+        using TraceIntrospection::MainModuleContains;
 
         void* ReadPointer(const void* address)
         {
@@ -333,52 +260,9 @@ namespace BZROpenShim
             return OgreRuntime::ContainsAddress(ReadPointer(object));
         }
 
-        bool TryGetRttiClassName(const void* object, char* buffer, size_t bufferSize)
-        {
-            if (!object || !buffer || bufferSize == 0)
-                return false;
-            buffer[0] = '\0';
-            __try
-            {
-                auto** vtable = *reinterpret_cast<void*** const*>(object);
-                if (!vtable || !MainModuleContains(vtable))
-                    return false;
-                const auto* completeObjectLocator =
-                    reinterpret_cast<const uint8_t*>(vtable[-1]);
-                if (!MainModuleContains(completeObjectLocator) ||
-                    !MainModuleContains(completeObjectLocator + 15))
-                    return false;
-                const auto* typeDescriptor =
-                    *reinterpret_cast<const uint8_t* const*>(completeObjectLocator + 12);
-                if (!MainModuleContains(typeDescriptor) ||
-                    !MainModuleContains(typeDescriptor + 8))
-                    return false;
-                const char* decoratedName =
-                    reinterpret_cast<const char*>(typeDescriptor + 8);
-                size_t length = 0;
-                while (length + 1 < bufferSize)
-                {
-                    const char* current = decoratedName + length;
-                    if (!MainModuleContains(current))
-                        return false;
-                    const char ch = *current;
-                    buffer[length++] = ch;
-                    if (ch == '\0')
-                        return true;
-                }
-                buffer[bufferSize - 1] = '\0';
-                return true;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                buffer[0] = '\0';
-                return false;
-            }
-        }
-
         bool IsPersonObject(const void* object, char* className, size_t classNameSize)
         {
-            if (!TryGetRttiClassName(object, className, classNameSize))
+            if (!TraceIntrospection::TryGetMainModuleRttiName(object, className, classNameSize))
                 return false;
             return std::strstr(className, "Person") != nullptr;
         }
@@ -1005,47 +889,7 @@ namespace BZROpenShim
             }
         }
 
-        std::vector<ExportMatch> FindExportsContaining(const char* token)
-        {
-            std::vector<ExportMatch> matches;
-            if (!token || !*token)
-                return matches;
-            HMODULE module = GetModuleHandleA("OgreMain.dll");
-            if (!module)
-                return matches;
-            auto* base = reinterpret_cast<uint8_t*>(module);
-            auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-            if (dos->e_magic != IMAGE_DOS_SIGNATURE)
-                return matches;
-            auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-            if (nt->Signature != IMAGE_NT_SIGNATURE)
-                return matches;
-            const IMAGE_DATA_DIRECTORY& directory =
-                nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-            if (!directory.VirtualAddress || !directory.Size)
-                return matches;
-            auto* exports = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(base + directory.VirtualAddress);
-            auto* names = reinterpret_cast<DWORD*>(base + exports->AddressOfNames);
-            auto* ordinals = reinterpret_cast<WORD*>(base + exports->AddressOfNameOrdinals);
-            auto* functions = reinterpret_cast<DWORD*>(base + exports->AddressOfFunctions);
-            for (DWORD i = 0; i < exports->NumberOfNames; ++i)
-            {
-                const char* name = reinterpret_cast<const char*>(base + names[i]);
-                if (!name || std::strstr(name, token) == nullptr)
-                    continue;
-                const WORD ordinal = ordinals[i];
-                if (ordinal >= exports->NumberOfFunctions)
-                    continue;
-                const DWORD functionRva = functions[ordinal];
-                if (functionRva >= directory.VirtualAddress &&
-                    functionRva < directory.VirtualAddress + directory.Size)
-                    continue;
-                void* address = base + functionRva;
-                if (OgreRuntime::ContainsAddress(address))
-                    matches.push_back({ name, address });
-            }
-            return matches;
-        }
+        using OgreRuntime::FindExportsContaining;
 
         void* FindUniqueFunctionExport(const char* token, const char* label)
         {

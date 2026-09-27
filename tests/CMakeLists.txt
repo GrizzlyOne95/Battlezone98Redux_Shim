@@ -7,55 +7,56 @@ project(BzrNetProtocolTests LANGUAGES CXX)
 #   cmake -S tests -B tests/build && cmake --build tests/build -j && ctest --test-dir tests/build --output-on-failure
 enable_testing()
 
-add_executable(bzrnet_protocol_tests
+# The common case: the listed sources, ../include, one C++ standard, warnings
+# as errors on both compilers, and a CTest entry named after the target.
+# Targets that need anything else (definitions, libraries, a Windows-only
+# guard) are written out in full below.
+function(openshim_add_test name)
+    cmake_parse_arguments(ARG "" "STD" "SOURCES" ${ARGN})
+    add_executable(${name} ${ARG_SOURCES})
+    target_include_directories(${name} PRIVATE ../include)
+    target_compile_features(${name} PRIVATE cxx_std_${ARG_STD})
+    if(MSVC)
+        target_compile_options(${name} PRIVATE /W4 /WX)
+    else()
+        target_compile_options(${name} PRIVATE -Wall -Wextra -Werror)
+    endif()
+    add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+openshim_add_test(bzrnet_protocol_tests STD 20 SOURCES
     bzrnet_protocol_tests.cpp
     ../src/patches/bzrnet_protocol.cpp
 )
 
-target_include_directories(bzrnet_protocol_tests PRIVATE ../include)
-target_compile_features(bzrnet_protocol_tests PRIVATE cxx_std_20)
-
-add_executable(shim_log_tests
+openshim_add_test(shim_log_tests STD 20 SOURCES
     shim_log_tests.cpp
     ../src/engine/shim_log_sink.cpp
     ../src/engine/shim_log_client.cpp
     ../src/engine/game_log_path.cpp
 )
 
-add_executable(bzloader_catalog_tests
+openshim_add_test(bzloader_catalog_tests STD 20 SOURCES
     bzloader_catalog_tests.cpp
     ../src/loader/bzloader_catalog.cpp
 )
-target_include_directories(bzloader_catalog_tests PRIVATE ../include)
-target_compile_features(bzloader_catalog_tests PRIVATE cxx_std_20)
 
-add_executable(trn_codec_tests
+openshim_add_test(trn_codec_tests STD 20 SOURCES
     trn_codec_tests.cpp
     ../src/patches/trn_codec.cpp
 )
 
-target_include_directories(trn_codec_tests PRIVATE ../include)
-target_compile_features(trn_codec_tests PRIVATE cxx_std_20)
-
-add_executable(bzn_analysis_tests
+openshim_add_test(bzn_analysis_tests STD 20 SOURCES
     bzn_analysis_tests.cpp
 )
 
-target_include_directories(bzn_analysis_tests PRIVATE ../include)
-target_compile_features(bzn_analysis_tests PRIVATE cxx_std_20)
-
-add_executable(bzn_filename_identity_tests
+openshim_add_test(bzn_filename_identity_tests STD 20 SOURCES
     bzn_filename_identity_tests.cpp
 )
-target_include_directories(bzn_filename_identity_tests PRIVATE ../include)
-target_compile_features(bzn_filename_identity_tests PRIVATE cxx_std_20)
 
-add_executable(bzn_save_path_tests
+openshim_add_test(bzn_save_path_tests STD 20 SOURCES
     bzn_save_path_tests.cpp
 )
-
-target_include_directories(bzn_save_path_tests PRIVATE ../include)
-target_compile_features(bzn_save_path_tests PRIVATE cxx_std_20)
 
 if(WIN32 AND MSVC)
     # file_io_hooks.cpp (included directly by the test) is the runtime half of
@@ -75,19 +76,26 @@ if(WIN32 AND MSVC)
     add_test(NAME editor_save_dialog_win32_tests COMMAND editor_save_dialog_win32_tests)
 endif()
 
-add_executable(numeric_locale_compat_tests
+if(WIN32 AND MSVC)
+    # The shared import-table and COM-vtable patchers. The IAT cases patch this
+    # executable's own GetTickCount import and call through it.
+    add_executable(hook_patch_win32_tests hook_patch_win32_tests.cpp)
+    target_include_directories(hook_patch_win32_tests PRIVATE ../include)
+    target_compile_features(hook_patch_win32_tests PRIVATE cxx_std_20)
+    target_compile_options(hook_patch_win32_tests PRIVATE /W4 /WX)
+    add_test(NAME hook_patch_win32_tests COMMAND hook_patch_win32_tests)
+endif()
+
+openshim_add_test(numeric_locale_compat_tests STD 20 SOURCES
     numeric_locale_compat_tests.cpp
     ../src/patches/numeric_locale_compat.cpp
 )
-
-target_include_directories(numeric_locale_compat_tests PRIVATE ../include)
-target_compile_features(numeric_locale_compat_tests PRIVATE cxx_std_20)
 
 add_executable(native_ui_validation_tests
     native_ui_validation_tests.cpp
 )
 
-add_executable(enhanced_light_selection_tests
+openshim_add_test(enhanced_light_selection_tests STD 20 SOURCES
     enhanced_light_selection_tests.cpp
     ../src/engine/enhanced_light_selection.cpp
 )
@@ -97,11 +105,11 @@ add_executable(enhanced_light_selection_bench
     ../src/engine/enhanced_light_selection.cpp
 )
 
-add_executable(weapon_convergence_tests
+openshim_add_test(weapon_convergence_tests STD 20 SOURCES
     weapon_convergence_tests.cpp
 )
 
-add_executable(headlight_falloff_tests
+openshim_add_test(headlight_falloff_tests STD 20 SOURCES
     headlight_falloff_tests.cpp
 )
 
@@ -109,19 +117,56 @@ add_executable(shadow_far_distance_tests
     shadow_far_distance_tests.cpp
 )
 
-add_executable(chunk_batch_invalidation_tests
+openshim_add_test(chunk_batch_invalidation_tests STD 20 SOURCES
     chunk_batch_invalidation_tests.cpp
 )
 
-add_executable(sun_flash_tests
+openshim_add_test(sun_flash_tests STD 20 SOURCES
     sun_flash_tests.cpp
 )
 
-add_executable(terrain_tile_blend_tests
+openshim_add_test(env_switch_table_tests STD 20 SOURCES
+    env_switch_table_tests.cpp
+)
+
+openshim_add_test(terrain_semantic_tests STD 20 SOURCES
+    terrain_semantic_tests.cpp
+    ../src/patches/terrain_semantic.cpp
+)
+
+# These three used to run only from scripts/run_*_tests.ps1, which no CI lane
+# calls (audit P2-7).
+openshim_add_test(backend_selection_tests STD 20 SOURCES
+    backend_selection_tests.cpp
+    ../src/engine/backend_selection.cpp
+)
+
+openshim_add_test(ui_decor_tests STD 20 SOURCES
+    ui_decor_tests.cpp
+    ../src/engine/ui_decor.cpp
+)
+
+openshim_add_test(ogre_profiler_algorithms_tests STD 17 SOURCES
+    ogre_profiler_algorithms_tests.cpp
+)
+
+openshim_add_test(bool_token_tests STD 20 SOURCES
+    bool_token_tests.cpp
+)
+
+openshim_add_test(memory_access_tests STD 20 SOURCES
+    memory_access_tests.cpp
+)
+
+openshim_add_test(stable_id_list_tests STD 20 SOURCES
+    stable_id_list_tests.cpp
+)
+
+openshim_add_test(terrain_tile_blend_tests STD 20 SOURCES
     terrain_tile_blend_tests.cpp
 )
 
-add_executable(terrain_atlas_rect_repair_tests
+openshim_add_test(terrain_atlas_rect_repair_tests STD 20 SOURCES
     terrain_atlas_rect_repair_tests.cpp
     ../src/patches/terrain_atlas_rect_repair.cpp
 )
@@ -133,7 +178,7 @@ add_executable(resolve_table_tests
 
 # Pins the GameObject/Ordnance field offsets that the runtime hooks read. Pure
 # header constants, so it needs no engine code and runs on the Linux host lane.
-add_executable(object_layout_tests
+openshim_add_test(object_layout_tests STD 20 SOURCES
     object_layout_tests.cpp
 )
 
@@ -151,19 +196,12 @@ target_compile_definitions(patch_registration_tests PRIVATE
 
 # Pins the x86-32 length decoder that InstallInlineDetour32 uses to refuse
 # steals that split an instruction. Pure byte tables, no engine code.
-add_executable(x86_length_tests
+openshim_add_test(x86_length_tests STD 20 SOURCES
     x86_length_tests.cpp
     ../src/engine/x86_length.cpp
 )
-target_include_directories(x86_length_tests PRIVATE ../include)
-target_compile_features(x86_length_tests PRIVATE cxx_std_20)
-if(MSVC)
-    target_compile_options(x86_length_tests PRIVATE /W4 /WX)
-else()
-    target_compile_options(x86_length_tests PRIVATE -Wall -Wextra -Werror)
-endif()
 
-add_executable(openshim_update_manifest_tests
+openshim_add_test(openshim_update_manifest_tests STD 20 SOURCES
     openshim_update_manifest_tests.cpp
     ../src/patches/openshim_update_manifest.cpp
 )
@@ -183,32 +221,32 @@ target_compile_features(patch_config_parse_tests PRIVATE cxx_std_20)
 target_compile_definitions(patch_config_parse_tests PRIVATE
     BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json")
 
-add_executable(ai_range_policy_tests
+openshim_add_test(ai_range_policy_tests STD 20 SOURCES
     ai_range_policy_tests.cpp
 )
 
-add_executable(lcbench_safety_policy_tests
+openshim_add_test(lcbench_safety_policy_tests STD 20 SOURCES
     lcbench_safety_policy_tests.cpp
 )
 
-add_executable(autosave_gate_tests
+openshim_add_test(autosave_gate_tests STD 20 SOURCES
     autosave_gate_tests.cpp
 )
 
-add_executable(native_save_flag_tests
+openshim_add_test(native_save_flag_tests STD 20 SOURCES
     native_save_flag_tests.cpp
 )
 
-add_executable(render_profile_tests
+openshim_add_test(render_profile_tests STD 20 SOURCES
     render_profile_tests.cpp
     ../src/engine/render_profile.cpp
 )
 
-add_executable(request_apply_tracker_tests
+openshim_add_test(request_apply_tracker_tests STD 20 SOURCES
     request_apply_tracker_tests.cpp
 )
 
-add_executable(render_profile_resources_tests
+openshim_add_test(render_profile_resources_tests STD 20 SOURCES
     render_profile_resources_tests.cpp
     ../src/engine/render_profile_resources.cpp
 )
@@ -218,7 +256,7 @@ add_executable(dx11_legacy_material_compat_tests
     ../src/engine/dx11_legacy_material_compat.cpp
 )
 
-add_executable(openshim_assets_tests
+openshim_add_test(openshim_assets_tests STD 20 SOURCES
     openshim_assets_tests.cpp
     ../src/engine/openshim_assets.cpp
     ../src/engine/render_profile_resources.cpp
@@ -227,41 +265,13 @@ add_executable(openshim_assets_tests
     ../src/engine/game_log_path.cpp
 )
 
-target_include_directories(shim_log_tests PRIVATE ../include)
-target_compile_features(shim_log_tests PRIVATE cxx_std_20)
 target_compile_features(native_ui_validation_tests PRIVATE cxx_std_20)
-target_include_directories(enhanced_light_selection_tests PRIVATE ../include)
 target_include_directories(enhanced_light_selection_bench PRIVATE ../include)
-target_compile_features(enhanced_light_selection_tests PRIVATE cxx_std_20)
 target_compile_features(enhanced_light_selection_bench PRIVATE cxx_std_20)
-target_include_directories(weapon_convergence_tests PRIVATE ../include)
-target_compile_features(weapon_convergence_tests PRIVATE cxx_std_20)
-target_include_directories(headlight_falloff_tests PRIVATE ../include)
-target_compile_features(headlight_falloff_tests PRIVATE cxx_std_20)
 target_include_directories(shadow_far_distance_tests PRIVATE ../include)
 target_compile_features(shadow_far_distance_tests PRIVATE cxx_std_20)
-target_include_directories(chunk_batch_invalidation_tests PRIVATE ../include)
-target_compile_features(chunk_batch_invalidation_tests PRIVATE cxx_std_20)
-target_include_directories(sun_flash_tests PRIVATE ../include)
-target_compile_features(sun_flash_tests PRIVATE cxx_std_20)
-target_include_directories(terrain_tile_blend_tests PRIVATE ../include)
-target_compile_features(terrain_tile_blend_tests PRIVATE cxx_std_20)
-target_include_directories(terrain_atlas_rect_repair_tests PRIVATE ../include)
-target_compile_features(terrain_atlas_rect_repair_tests PRIVATE cxx_std_20)
 target_include_directories(resolve_table_tests PRIVATE ../include ../third_party)
 target_compile_features(resolve_table_tests PRIVATE cxx_std_20)
-target_include_directories(object_layout_tests PRIVATE ../include)
-target_compile_features(object_layout_tests PRIVATE cxx_std_20)
-target_include_directories(openshim_update_manifest_tests PRIVATE ../include)
-target_compile_features(openshim_update_manifest_tests PRIVATE cxx_std_20)
-target_include_directories(ai_range_policy_tests PRIVATE ../include)
-target_compile_features(ai_range_policy_tests PRIVATE cxx_std_20)
-target_include_directories(lcbench_safety_policy_tests PRIVATE ../include)
-target_compile_features(lcbench_safety_policy_tests PRIVATE cxx_std_20)
-target_include_directories(autosave_gate_tests PRIVATE ../include)
-target_compile_features(autosave_gate_tests PRIVATE cxx_std_20)
-target_include_directories(native_save_flag_tests PRIVATE ../include)
-target_compile_features(native_save_flag_tests PRIVATE cxx_std_20)
 # Point the test at the patches.json the game will actually load, so the
 # migrated signatures are checked against the shipped artifact and not only
 # against a copy embedded in the test.
@@ -269,122 +279,38 @@ target_compile_definitions(resolve_table_tests PRIVATE
     BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json")
 
 if(MSVC)
-    target_compile_options(bzrnet_protocol_tests PRIVATE /W4 /WX)
-    target_compile_options(shim_log_tests PRIVATE /W4 /WX)
-    target_compile_options(bzloader_catalog_tests PRIVATE /W4 /WX)
-    target_compile_options(trn_codec_tests PRIVATE /W4 /WX)
-    target_compile_options(bzn_save_path_tests PRIVATE /W4 /WX)
-    target_compile_options(bzn_analysis_tests PRIVATE /W4 /WX)
-    target_compile_options(bzn_filename_identity_tests PRIVATE /W4 /WX)
-    target_compile_options(numeric_locale_compat_tests PRIVATE /W4 /WX)
     target_compile_options(native_ui_validation_tests PRIVATE /W4 /WX)
-    target_compile_options(enhanced_light_selection_tests PRIVATE /W4 /WX)
     target_compile_options(enhanced_light_selection_bench PRIVATE /W4 /WX)
-    target_compile_options(weapon_convergence_tests PRIVATE /W4 /WX)
-    target_compile_options(headlight_falloff_tests PRIVATE /W4 /WX)
     target_compile_options(shadow_far_distance_tests PRIVATE /W4 /WX)
-    target_compile_options(chunk_batch_invalidation_tests PRIVATE /W4 /WX)
-    target_compile_options(sun_flash_tests PRIVATE /W4 /WX)
-    target_compile_options(terrain_tile_blend_tests PRIVATE /W4 /WX)
-    target_compile_options(terrain_atlas_rect_repair_tests PRIVATE /W4 /WX)
     target_compile_options(resolve_table_tests PRIVATE /W4 /WX)
-    target_compile_options(object_layout_tests PRIVATE /W4 /WX)
     target_compile_options(patch_registration_tests PRIVATE /W4 /WX)
-    target_compile_options(openshim_update_manifest_tests PRIVATE /W4 /WX)
-    target_compile_options(ai_range_policy_tests PRIVATE /W4 /WX)
-    target_compile_options(lcbench_safety_policy_tests PRIVATE /W4 /WX)
-    target_compile_options(autosave_gate_tests PRIVATE /W4 /WX)
-    target_compile_options(native_save_flag_tests PRIVATE /W4 /WX)
 else()
-    target_compile_options(bzrnet_protocol_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(shim_log_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(bzloader_catalog_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(trn_codec_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(bzn_save_path_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(bzn_analysis_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(bzn_filename_identity_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(numeric_locale_compat_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(native_ui_validation_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(enhanced_light_selection_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(enhanced_light_selection_bench PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(weapon_convergence_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(headlight_falloff_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(chunk_batch_invalidation_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(sun_flash_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(terrain_tile_blend_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(terrain_atlas_rect_repair_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(resolve_table_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(object_layout_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(patch_registration_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(openshim_update_manifest_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(ai_range_policy_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(lcbench_safety_policy_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(autosave_gate_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(native_save_flag_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 
-add_test(NAME bzrnet_protocol_tests COMMAND bzrnet_protocol_tests)
-add_test(NAME shim_log_tests COMMAND shim_log_tests)
-add_test(NAME bzloader_catalog_tests COMMAND bzloader_catalog_tests)
 add_test(NAME shadow_far_distance_tests COMMAND shadow_far_distance_tests)
-add_test(NAME trn_codec_tests COMMAND trn_codec_tests)
-add_test(NAME bzn_save_path_tests COMMAND bzn_save_path_tests)
-add_test(NAME bzn_analysis_tests COMMAND bzn_analysis_tests)
-add_test(NAME bzn_filename_identity_tests COMMAND bzn_filename_identity_tests)
-add_test(NAME numeric_locale_compat_tests COMMAND numeric_locale_compat_tests)
 add_test(NAME native_ui_validation_tests COMMAND native_ui_validation_tests)
-add_test(NAME enhanced_light_selection_tests COMMAND enhanced_light_selection_tests)
-add_test(NAME weapon_convergence_tests COMMAND weapon_convergence_tests)
-add_test(NAME headlight_falloff_tests COMMAND headlight_falloff_tests)
-add_test(NAME chunk_batch_invalidation_tests COMMAND chunk_batch_invalidation_tests)
-add_test(NAME sun_flash_tests COMMAND sun_flash_tests)
-add_test(NAME terrain_tile_blend_tests COMMAND terrain_tile_blend_tests)
-add_test(NAME terrain_atlas_rect_repair_tests COMMAND terrain_atlas_rect_repair_tests)
 add_test(NAME resolve_table_tests COMMAND resolve_table_tests)
-add_test(NAME object_layout_tests COMMAND object_layout_tests)
 add_test(NAME patch_registration_tests COMMAND patch_registration_tests)
-add_test(NAME openshim_update_manifest_tests COMMAND openshim_update_manifest_tests)
 add_test(NAME patch_config_parse_tests COMMAND patch_config_parse_tests)
-add_test(NAME ai_range_policy_tests COMMAND ai_range_policy_tests)
-add_test(NAME lcbench_safety_policy_tests COMMAND lcbench_safety_policy_tests)
-add_test(NAME autosave_gate_tests COMMAND autosave_gate_tests)
-add_test(NAME native_save_flag_tests COMMAND native_save_flag_tests)
-add_test(NAME x86_length_tests COMMAND x86_length_tests)
 
-target_include_directories(render_profile_tests PRIVATE ../include)
-target_compile_features(render_profile_tests PRIVATE cxx_std_20)
-target_include_directories(request_apply_tracker_tests PRIVATE ../include)
-target_compile_features(request_apply_tracker_tests PRIVATE cxx_std_20)
-target_include_directories(render_profile_resources_tests PRIVATE ../include)
-target_compile_features(render_profile_resources_tests PRIVATE cxx_std_20)
 target_include_directories(dx11_legacy_material_compat_tests PRIVATE ../include)
 target_compile_features(dx11_legacy_material_compat_tests PRIVATE cxx_std_20)
 target_compile_definitions(dx11_legacy_material_compat_tests PRIVATE
     _CRT_SECURE_NO_WARNINGS
     BZR_FIXEDFUNC_PROGRAM="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_dx11_fixedfunc.program"
     BZR_FIXEDFUNC_HLSL="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_dx11_fixedfunc-sm4.hlsl")
-target_include_directories(openshim_assets_tests PRIVATE ../include)
-target_compile_features(openshim_assets_tests PRIVATE cxx_std_20)
 
 if(MSVC)
-    target_compile_options(render_profile_tests PRIVATE /W4 /WX)
-    target_compile_options(request_apply_tracker_tests PRIVATE /W4 /WX)
-    target_compile_options(render_profile_resources_tests PRIVATE /W4 /WX)
     target_compile_options(dx11_legacy_material_compat_tests PRIVATE /W4 /WX)
-    target_compile_options(openshim_assets_tests PRIVATE /W4 /WX)
 else()
-    target_compile_options(render_profile_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(request_apply_tracker_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(render_profile_resources_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(dx11_legacy_material_compat_tests PRIVATE -Wall -Wextra -Werror)
-    target_compile_options(openshim_assets_tests PRIVATE -Wall -Wextra -Werror)
 endif()
 
-add_test(NAME render_profile_tests COMMAND render_profile_tests)
-add_test(NAME request_apply_tracker_tests COMMAND request_apply_tracker_tests)
-add_test(NAME render_profile_resources_tests COMMAND render_profile_resources_tests)
 add_test(NAME dx11_legacy_material_compat_tests COMMAND dx11_legacy_material_compat_tests)
-add_test(NAME openshim_assets_tests COMMAND openshim_assets_tests)
 
 # CLI parser parity defect model (PR #69). This test is engine-independent:
 # it models Redux's strtok comma defect and the pristine-snapshot repair
@@ -403,87 +329,38 @@ else()
 endif()
 add_test(NAME cli_parser_tests COMMAND cli_parser_tests)
 
-add_executable(player_kill_trace_tests
+openshim_add_test(player_kill_trace_tests STD 20 SOURCES
     player_kill_trace_tests.cpp
 )
-target_compile_features(player_kill_trace_tests PRIVATE cxx_std_20)
-target_include_directories(player_kill_trace_tests PRIVATE ../include)
-if(MSVC)
-    target_compile_options(player_kill_trace_tests PRIVATE /W4 /WX)
-else()
-    target_compile_options(player_kill_trace_tests PRIVATE -Wall -Wextra -Werror)
-endif()
-add_test(NAME player_kill_trace_tests COMMAND player_kill_trace_tests)
 
-add_executable(fog_wake_tests
+openshim_add_test(fog_wake_tests STD 20 SOURCES
     fog_wake_tests.cpp
     ../src/engine/fog_wake.cpp
 )
-target_compile_features(fog_wake_tests PRIVATE cxx_std_20)
-target_include_directories(fog_wake_tests PRIVATE ../include)
-if(MSVC)
-    target_compile_options(fog_wake_tests PRIVATE /W4 /WX)
-else()
-    target_compile_options(fog_wake_tests PRIVATE -Wall -Wextra -Werror)
-endif()
-add_test(NAME fog_wake_tests COMMAND fog_wake_tests)
 
-add_executable(fog_wake_runtime_tests
+openshim_add_test(fog_wake_runtime_tests STD 20 SOURCES
     fog_wake_runtime_tests.cpp
     ../src/engine/fog_wake_runtime.cpp
     ../src/engine/fog_wake.cpp
 )
-target_compile_features(fog_wake_runtime_tests PRIVATE cxx_std_20)
-target_include_directories(fog_wake_runtime_tests PRIVATE ../include)
-if(MSVC)
-    target_compile_options(fog_wake_runtime_tests PRIVATE /W4 /WX)
-else()
-    target_compile_options(fog_wake_runtime_tests PRIVATE -Wall -Wextra -Werror)
-endif()
-add_test(NAME fog_wake_runtime_tests COMMAND fog_wake_runtime_tests)
 
-add_executable(odf_compat_tests
+openshim_add_test(odf_compat_tests STD 20 SOURCES
     odf_compat_tests.cpp
     ../src/patches/odf_compat.cpp
 )
-target_compile_features(odf_compat_tests PRIVATE cxx_std_20)
-target_include_directories(odf_compat_tests PRIVATE ../include)
-if(MSVC)
-    target_compile_options(odf_compat_tests PRIVATE /W4 /WX)
-else()
-    target_compile_options(odf_compat_tests PRIVATE -Wall -Wextra -Werror)
-endif()
-add_test(NAME odf_compat_tests COMMAND odf_compat_tests)
 
-add_executable(enhanced_resource_bootstrap_tests
+openshim_add_test(enhanced_resource_bootstrap_tests STD 20 SOURCES
     enhanced_resource_bootstrap_tests.cpp
     ../src/engine/enhanced_resource_bootstrap.cpp
 )
-
-target_include_directories(enhanced_resource_bootstrap_tests PRIVATE ../include)
-target_compile_features(enhanced_resource_bootstrap_tests PRIVATE cxx_std_20)
-if(MSVC)
-    target_compile_options(enhanced_resource_bootstrap_tests PRIVATE /W4 /WX)
-else()
-    target_compile_options(enhanced_resource_bootstrap_tests PRIVATE -Wall -Wextra -Werror)
-endif()
-add_test(NAME enhanced_resource_bootstrap_tests COMMAND enhanced_resource_bootstrap_tests)
 
 # Regression: the ODF item-hook trampoline must relocate whole instructions.
 # Relocating five bytes split `mov eax,[ebp+8]` and made the trampoline eat its
 # own return jump, which broke every engine item read and stopped the game
 # loading any mission. Header-only and engine-free, so it runs anywhere.
-add_executable(odf_item_prologue_tests
+openshim_add_test(odf_item_prologue_tests STD 20 SOURCES
     odf_item_prologue_tests.cpp
 )
-target_include_directories(odf_item_prologue_tests PRIVATE ../include)
-target_compile_features(odf_item_prologue_tests PRIVATE cxx_std_20)
-if(MSVC)
-    target_compile_options(odf_item_prologue_tests PRIVATE /W4 /WX)
-else()
-    target_compile_options(odf_item_prologue_tests PRIVATE -Wall -Wextra -Werror)
-endif()
-add_test(NAME odf_item_prologue_tests COMMAND odf_item_prologue_tests)
 
 # Lock arithmetic of the ODF item detours against a fake engine (audit P1-7):
 # a cached UseItem hit must still reach the engine, so the one-for-one
@@ -623,49 +500,25 @@ if(WIN32 AND MSVC)
     add_test(NAME openshim_bootstrap_api_tests COMMAND openshim_bootstrap_api_tests)
 endif()
 
-add_executable(render_effect_intent_tests
+openshim_add_test(render_effect_intent_tests STD 20 SOURCES
     render_effect_intent_tests.cpp
     ../src/engine/render_effect_intent.cpp
 )
-target_include_directories(render_effect_intent_tests PRIVATE ../include)
-target_compile_features(render_effect_intent_tests PRIVATE cxx_std_20)
-if(MSVC)
-    target_compile_options(render_effect_intent_tests PRIVATE /W4 /WX)
-else()
-    target_compile_options(render_effect_intent_tests PRIVATE -Wall -Wextra -Werror)
-endif()
-add_test(NAME render_effect_intent_tests COMMAND render_effect_intent_tests)
 
 # Scene-depth qualification bookkeeping (Phase A of the DX11 scene-depth
 # work). The hooks live in src/patches/dx11_scene_depth.cpp and need D3D11;
 # the part that decides whether a COM address seen before is the same depth
 # surface or a recycled allocation does not, so it lives in src/engine and
 # runs on the host lane.
-add_executable(scene_depth_facts_tests
+openshim_add_test(scene_depth_facts_tests STD 20 SOURCES
     scene_depth_facts_tests.cpp
     ../src/engine/scene_depth_facts.cpp
 )
-target_include_directories(scene_depth_facts_tests PRIVATE ../include)
-target_compile_features(scene_depth_facts_tests PRIVATE cxx_std_20)
-if(MSVC)
-    target_compile_options(scene_depth_facts_tests PRIVATE /W4 /WX)
-else()
-    target_compile_options(scene_depth_facts_tests PRIVATE -Wall -Wextra -Werror)
-endif()
-add_test(NAME scene_depth_facts_tests COMMAND scene_depth_facts_tests)
 
 # The frustum-cull / restored-bounds table (audit P1-3): an entry leaves when
 # its mesh is destroyed, a reused address with a different identity starts
 # over, and deletion is backward-shift so probe chains and headroom survive.
 # Header-only and engine-free, so it runs on both lanes.
-add_executable(remembered_mesh_bounds_table_tests
+openshim_add_test(remembered_mesh_bounds_table_tests STD 20 SOURCES
     remembered_mesh_bounds_table_tests.cpp
 )
-target_include_directories(remembered_mesh_bounds_table_tests PRIVATE ../include)
-target_compile_features(remembered_mesh_bounds_table_tests PRIVATE cxx_std_20)
-if(MSVC)
-    target_compile_options(remembered_mesh_bounds_table_tests PRIVATE /W4 /WX)
-else()
-    target_compile_options(remembered_mesh_bounds_table_tests PRIVATE -Wall -Wextra -Werror)
-endif()
-add_test(NAME remembered_mesh_bounds_table_tests COMMAND remembered_mesh_bounds_table_tests)

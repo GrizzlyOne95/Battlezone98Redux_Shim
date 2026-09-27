@@ -151,10 +151,16 @@
     <ClCompile Include="src\patches\autosave_restart.cpp" />
     <ClCompile Include="src\patches\bzrnet_settings.cpp" />
     <ClCompile Include="src\patches\career_stats.cpp" />
+    <ClCompile Include="src\patches\chunk_engine_hooks.cpp" />
+    <ClCompile Include="src\patches\dynamic_geometry_hooks.cpp" />
+    <ClCompile Include="src\patches\chunk_identity.cpp" />
+    <ClCompile Include="src\patches\chunk_payload_resolve.cpp" />
+    <ClCompile Include="src\patches\chunk_proxy_render.cpp" />
     <ClCompile Include="src\patches\diag_jump_snipe_probe.cpp" />
     <ClCompile Include="src\patches\diag_mpauth_trace.cpp" />
     <ClCompile Include="src\patches\diag_vehicle_skinning.cpp" />
     <ClCompile Include="src\patches\engine_flames.cpp" />
+    <ClCompile Include="src\patches\global_feature_config.cpp" />
     <ClCompile Include="src\patches\global_turbo.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
     <ClCompile Include="src\patches\hud_sprite_rects.cpp" />
@@ -166,6 +172,7 @@
     <ClCompile Include="src\patches\moderation.cpp" />
     <ClCompile Include="src\patches\multiplayer_vehicle_flags.cpp" />
     <ClCompile Include="src\patches\ogre_dedupe_crash_fixes.cpp" />
+    <ClCompile Include="src\patches\ogre_entity_frustum_cull.cpp" />
     <ClCompile Include="src\patches\ordnance_velocity.cpp" />
     <ClCompile Include="src\patches\perceived_team_reveal.cpp" />
     <ClCompile Include="src\patches\pilot_flashlight.cpp" />
@@ -234,7 +241,6 @@
     <ClCompile Include="src\patches\pond_class_label.cpp" />
     <ClCompile Include="src\patches\redux_compatibility.cpp" />
     <ClCompile Include="src\patches\render_effect_intent_exports.cpp" />
-    <ClCompile Include="src\patches\render_queue_trace.cpp" />
     <ClCompile Include="src\patches\sun_flash.cpp" />
     <ClCompile Include="src\patches\terrain_atlas_rect_repair.cpp" />
     <ClCompile Include="src\patches\terrain_proxy.cpp" />
@@ -259,7 +265,6 @@
     <ClInclude Include="include\fog_wake.h" />
     <ClInclude Include="include\fog_wake_runtime.h" />
     <ClInclude Include="include\fog_wake_feature.h" />
-    <ClInclude Include="include\render_queue_trace.h" />
     <ClInclude Include="include\mp_vehicle_preview_fix.h" />
     <ClInclude Include="include\bzn_save_path.h" />
     <ClInclude Include="include\bzloader_bootstrap.h" />

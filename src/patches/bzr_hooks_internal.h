@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "bzr_hooks.h"
+#include "stable_id_list.h"
 #include "bzr_object_layout.h"
 #include "bzr_options_ui.h"
 
@@ -242,6 +243,54 @@ namespace BZROpenShim
 
     using FnPersonSimulate = void(__thiscall*)(void* thisPtr, float dt);
     extern FnPersonSimulate g_BzrFn_PersonSimulate;
+    extern float g_TurretAimPitchMultiplierEnhanced;
+    void* __fastcall ChunkEffectCreateChunkHook(void* thisPtr,
+                                                void* /*edx*/,
+                                                void* objectPtr,
+                                                const float* velocity,
+                                                uint8_t preserveFlag);
+    void __fastcall ChunkEffectCreateChunkletHook(void* thisPtr,
+                                                  void* /*edx*/,
+                                                  const void* positionVec,
+                                                  const float* velocity,
+                                                  uint8_t preserveFlag);
+    void __fastcall ChunkEffectPartialFragmentHook(void* thisPtr,
+                                                   void* /*edx*/,
+                                                   void* objectPtr,
+                                                   const float* velocity,
+                                                   uint8_t preserveFlag);
+    void __fastcall ChunkEffectFullFragmentHook(void* thisPtr,
+                                                void* /*edx*/,
+                                                void* objectPtr,
+                                                const float* velocity,
+                                                uint8_t preserveFlag);
+
+    using FnChunkEffectCreateChunk = void* (__thiscall*)(void* thisPtr,
+                                                         void* objectPtr,
+                                                         const float* velocity,
+                                                         uint8_t preserveFlag);
+    using FnChunkEffectCreateChunklet = void(__thiscall*)(void* thisPtr,
+                                                          const void* positionVec,
+                                                          const float* velocity,
+                                                          uint8_t preserveFlag);
+    using FnChunkEffectFragmentObject = void(__thiscall*)(void* thisPtr,
+                                                          void* objectPtr,
+                                                          const float* velocity,
+                                                          uint8_t preserveFlag);
+    extern FnChunkEffectCreateChunk g_BzrFn_ChunkEffectCreateChunk;
+    extern FnChunkEffectCreateChunklet g_BzrFn_ChunkEffectCreateChunklet;
+    extern FnChunkEffectFragmentObject g_BzrFn_ChunkEffectFullFragment;
+    extern FnChunkEffectFragmentObject g_BzrFn_ChunkEffectPartialFragment;
+
+    using FnChunkResolve = uint32_t(__cdecl*)(void* objectPtr, uint32_t variant);
+    extern FnChunkResolve g_BzrFn_ChunkResolve;
+
+    using FnDynamicGeometryPrepare = void(__thiscall*)(void* self);
+    using FnLegacyWorldUpdateRenderQueue = void(__thiscall*)(void* self, void* renderQueue);
+    extern FnDynamicGeometryPrepare g_BzrFn_DynamicGeometryPrepare;
+    extern FnLegacyWorldUpdateRenderQueue g_BzrFn_LegacyWorldUpdateRenderQueue;
+    void InstallDynamicGeometryHooks();
+    bool RunLegacyWorldQueueWithDynamicGeometryCounters(void* thisPtr, void* renderQueue);
 
     namespace Hooks
     {
@@ -471,7 +520,6 @@ namespace BZROpenShim
         inline constexpr uintptr_t kGogGameObjectGetTeamAddr = 0x00462450;
         inline constexpr uintptr_t kGogPreferredImageBase = 0x00400000;
         bool IsLikelyGameObjectEntry(void* objectPtr);
-        bool IsReadableDataProtect(DWORD protect);
         bool WritePointerValue(uintptr_t address, void* value);
         extern bool g_PlayerReticleShotConvergenceBaselineEnabled;
         extern bool g_PlayerReticleShotConvergenceEnabled;
@@ -802,11 +850,7 @@ namespace BZROpenShim
         void RevertAiWeaponMaskMinelayerToBaseline();
 
         // --- Multiplayer moderation (moderation.cpp) ---------------------------
-        struct BanRecord
-        {
-            std::string id;
-            std::string name;
-        };
+        using BanRecord = StableIdList::Record;
         void SyncNicknameEntriesFromAuthoritativeValue(const char* value);
         extern std::vector<BanRecord> g_BanRecords;
         std::filesystem::path GetBansConfigPath();
@@ -1312,6 +1356,13 @@ namespace BZROpenShim
         void InstallNicknameTextEntryInputHookIfPossible();
         void InstallMultiCreatePreviewFixIfPossible();
 
+        // --- Craft bounds and frustum cull (ogre_entity_frustum_cull.cpp) ------
+        extern bool g_EntityFrustumCullEnabled;
+        extern bool g_FrustumCullCensusEnabled;
+        extern bool g_RestoreCraftBoundsEnabled;
+        extern bool g_BoundsTraceEnabled;
+        void InstallEntityFrustumCullingIfEnabled();
+
         // --- Jump-sniping probe (diag_jump_snipe_probe.cpp) --------------------
         // GetPlayerHandle() — int __cdecl(). Verified on live GOG exe: reads
         // GameObject::userObject (via 0x417C70) + playerHandle global (0x02CC2BDC),
@@ -1345,6 +1396,388 @@ namespace BZROpenShim
         extern bool g_JumpSnipeProbeInstalled;
         extern JumpSnipeProbeLogState g_JumpSnipeProbeLogState;
         void InstallJumpSnipingProbeIfRequested();
+
+        // --- Global feature configuration (global_feature_config.cpp) ----------
+        inline constexpr bool kSplinterUndeadFixEnabledDefault = true;
+        inline constexpr float kSmartReticleRangeDefault = 500.0f;
+        inline constexpr bool kConstructorRemoteBuildFixEnabledDefault = true;
+        inline constexpr bool kBomberAiRangeEnabledDefault = false;
+        inline constexpr bool kHowitzerUndeployedRetaliationFixEnabledDefault = true;
+        // Master switch for the ODF-authored AI tuning keys (engageRangeAI,
+        // weaponRangeMinAI, retargetPeriodAI, scrapPathingAI and friends).
+        // Defaults ON: every path it gates additionally requires the ODF to
+        // declare one of those keys, so content that does not author them --
+        // the stock campaign included -- is completely unaffected.
+        inline constexpr bool kAiOdfGameplayTuningEnabledDefault = true;
+        inline constexpr bool kTurretAimPitchEnabledDefault = true;
+        inline constexpr bool kAllowNeutralAttackOrdersDefault = false;
+        // Pure instrumentation for the AIP construction program. Off by default
+        // because it prints one line per AIP item name plus a one-shot dump of
+        // the whole prereq universe; nothing about the game changes either way.
+        inline constexpr bool kAipResolveTraceDefault = false;
+        // Always-on fix: give a built class every producer that can make it,
+        // instead of only the first one InitObjectClasses happened to reach.
+        inline constexpr bool kAiMultiProducerMakersDefault = true;
+        inline constexpr char kUserConfigFixesSection[] = "Fixes";
+        extern bool g_AiOdfGameplayTuningEnabled;
+        extern bool g_BomberAiRangeBaselineEnabled;
+        extern bool g_BomberAiRangeEnabled;
+        extern bool g_HowitzerUndeployedRetaliationFixEnabled;
+        extern bool g_TurretAimPitchEnabled;
+        void RefreshTurretAimPitchState();
+        void RefreshAiOdfGameplayTuningState();
+        void RefreshBomberAiRangeState();
+        void RefreshSplinterUndeadFixState();
+        void RefreshTugCargoPostLoadFixState();
+        void RefreshConstructorRecycleStaleTargetFixState();
+        void RefreshHowitzerUndeployedRetaliationFixState();
+        void RefreshConstructorRemoteBuildFixState();
+        void InitializeGlobalImprovementConfig();
+        void RevertRegisteredFeaturesToBaseline();
+        void TickMpGateReconcile();
+
+        // --- Chunk payload resolution (chunk_payload_resolve.cpp) --------------
+        struct ChunkObjectLinkProbe;
+        struct ChunkCreateSourceTreeProbe;
+        struct ChunkObjectLinkProbe
+        {
+            const uint8_t* objectBytes = nullptr;
+            char objectId[16] = {};
+            uint32_t classId = 0;
+            uint32_t flags = 0;
+            void* geomRef = nullptr;
+            char geomName[64] = {};
+            char cachedMeshName[48] = {};
+            char vdfCandidates[128] = {};
+        };
+        struct ChunkCreateSourceTreeProbe
+        {
+            bool valid = false;
+            ChunkObjectLinkProbe source = {};
+            ChunkObjectLinkProbe parent = {};
+            ChunkObjectLinkProbe sibling = {};
+            ChunkObjectLinkProbe child = {};
+            // The game-side tagENTITY for the owning craft. NOT an Ogre object:
+            // it is only good for reading names off fixed offsets.
+            void* ownerEntity = nullptr;
+            // The craft's Ogre::Entity, reached through the render bridge. This
+            // is the one that accepts Ogre calls (getSkeleton, setVisible, ...).
+            void* ownerOgreEntity = nullptr;
+            char ownerEntityBaseName[32] = {};
+            char ownerOgreFilename[32] = {};
+            char ownerResolvedMeshName[48] = {};
+        };
+        struct ChunkVdfRecord
+        {
+            char name[16] = {};
+            char parent[16] = {};
+            uint32_t type = 0;
+            uint32_t flags = 0;
+        };
+        struct ChunkVdfAssetInfo
+        {
+            bool attempted = false;
+            bool loaded = false;
+            std::vector<ChunkVdfRecord> records = {};
+        };
+        struct ChunkVdfMeshRef
+        {
+            char meshBase[48] = {};
+            uint32_t type = 0;
+        };
+        inline constexpr const char* kChunkPayloadResourceRootName = "OpenShimChunkPayloads";
+        inline constexpr const char* kChunkPayloadModRelativeDirName = "chunkMeshes";
+        inline constexpr const char* kChunkPayloadModRelativeDirNameAlt = "Chunks";
+        bool AcquireChunkLogSlot();
+        void LogChunkDiagnostic(const char* component, const wchar_t* fmt, ...);
+        extern char g_ActiveFragmentSourceOdfName[16];
+        extern std::unordered_map<std::string, bool> g_ChunkPayloadMeshExistsCache;
+        extern std::unordered_set<std::string> g_ChunkPayloadResolveFailureLogCache;
+        extern std::vector<std::filesystem::path> g_ChunkPayloadResourceDirectories;
+        extern bool g_EnableChunkMeshProxy;
+        extern bool g_TraceChunkEffectRuntime;
+        extern bool g_TraceChunkRender;
+        std::filesystem::path GetChunkPayloadStockResourceDirectory();
+        void RefreshChunkPayloadResourceDirectories();
+        std::string NormalizeChunkPayloadComponentName(const char* value);
+        bool TryResolveChunkPayloadMeshResource(
+            const ChunkObjectLinkProbe& probe,
+            const char* preferredMeshName,
+            const char* explicitGeomName,
+            char* outMeshName,
+            size_t outMeshNameCapacity);
+        ChunkVdfAssetInfo& GetChunkVdfAssetInfoForMesh(const char* meshName);
+        bool BuildChunkVdfSourceCandidateList(
+            const char* meshName,
+            const ChunkObjectLinkProbe& source,
+            const ChunkObjectLinkProbe& parent,
+            const ChunkObjectLinkProbe& sibling,
+            const ChunkObjectLinkProbe& child,
+            char* outText,
+            size_t outTextCapacity);
+        void PopulateChunkVdfCandidates(const char* meshName, ChunkObjectLinkProbe& probe);
+        bool TryInferChunkMeshNameFromGeom(
+            const char* geomName,
+            uint32_t classId,
+            char* outMeshName,
+            size_t outMeshNameCapacity);
+        void AppendAllChunkMeshBasesForGeom(
+            const char* geomName,
+            uint32_t classId,
+            std::vector<std::string>& outMeshCandidates);
+        bool ResolveChunkCreateMeshContext(
+            const ChunkCreateSourceTreeProbe& probe,
+            char* outMeshName,
+            size_t outMeshNameCapacity);
+        bool TryInferChunkMeshNameFromTree(
+            const ChunkObjectLinkProbe& source,
+            const ChunkObjectLinkProbe& parent,
+            const ChunkObjectLinkProbe& sibling,
+            const ChunkObjectLinkProbe& child,
+            char* outMeshName,
+            size_t outMeshNameCapacity);
+
+        // --- Chunk identity (chunk_identity.cpp) -------------------------------
+        struct ChunkEffectActiveEntry
+        {
+            const uint8_t* objectBytes = nullptr;
+            uint32_t reserved = 0;
+            float timer = 0.0f;
+            float velocityX = 0.0f;
+            float velocityY = 0.0f;
+            float velocityZ = 0.0f;
+            float omegaX = 0.0f;
+            float omegaY = 0.0f;
+            float omegaZ = 0.0f;
+        };
+        struct ChunkObjectIdentityCacheEntry
+        {
+            char meshName[48] = {};
+            char vdfCandidates[128] = {};
+            char geomName[64] = {};
+            uint32_t classId = 0;
+        };
+        struct ChunkResolvedBindingEntry
+        {
+            char meshName[48] = {};
+            char payloadMeshName[128] = {};
+            char vdfCandidates[128] = {};
+            uint32_t sourceClassId = 0;
+            uint32_t sourceRootObjectPtr = 0;
+            uint32_t sourceOwnerEntityPtr = 0;
+            uint32_t sourceOwnerObjPtr = 0;
+            uint32_t sourceGameObjectPtr = 0;
+            uint32_t sourceRootGameObjectPtr = 0;
+            char sourceGeomName[64] = {};
+            DWORD bindTick = 0;
+            DWORD lastSeenTick = 0;
+        };
+        inline constexpr uintptr_t kChunkEffectActiveCountOffset = 0x8028;
+        bool TryGetChunkProxyPosition(const uint8_t* objectBytes, float& outX, float& outY, float& outZ);
+        extern char g_ActiveFragmentSourceMeshName[48];
+        extern std::unordered_map<uintptr_t, ChunkResolvedBindingEntry> g_ChunkResolvedBindingCache;
+        extern DWORD g_ChunkResolvedBindingLastPruneTick;
+        extern bool g_EnableChunkProxyDebug;
+        bool TryReadInlineAsciiBuffer(
+            const void* address,
+            size_t maxInlineBytes,
+            char* outText,
+            size_t outTextCapacity);
+        bool TryReadOwnerEntityNames(
+            const void* ownerEntity,
+            char* outEntityBaseName,
+            size_t outEntityBaseNameCapacity,
+            char* outOgreFilename,
+            size_t outOgreFilenameCapacity,
+            char* outResolvedMeshName,
+            size_t outResolvedMeshNameCapacity);
+        bool TryReadChunkGeomIdentity(
+            const uint8_t* objectBytes,
+            const void*& outGeomRef,
+            char* outGeomName,
+            size_t outGeomNameCapacity);
+        bool TryReadChunkObjectSummary(
+            const uint8_t* objectBytes,
+            uint32_t& outClassId,
+            uint32_t& outFlags,
+            void*& outGeomRef,
+            char* outGeomName,
+            size_t outGeomNameCapacity,
+            void*& outOwner);
+        bool CaptureChunkObjectLinkProbe(const uint8_t* objectBytes, ChunkObjectLinkProbe& outProbe);
+        void EraseChunkResolvedBinding(const uint8_t* objectBytes);
+        const ChunkResolvedBindingEntry* FindChunkResolvedBindingEntryForGeom(
+            const uint8_t* objectBytes,
+            const char* liveGeomName);
+        void StoreChunkResolvedBinding(
+            const uint8_t* objectBytes,
+            const ChunkCreateSourceTreeProbe& sourceTreeProbe);
+        void TouchChunkResolvedBinding(const uint8_t* objectBytes);
+        void PruneChunkResolvedBindingsIfNeeded();
+        void PopulateChunkObjectLinkProbeFromIdentityCache(ChunkObjectLinkProbe& probe);
+        bool CaptureChunkCreateSourceTreeProbe(
+            const uint8_t* sourceBytes,
+            ChunkCreateSourceTreeProbe& outProbe);
+        bool TryReadChunkEffectCount(const uint8_t* thisBytes, uint32_t& outCount);
+        void LogChunkCreateLifecycle(
+            const wchar_t* tag,
+            void* thisPtr,
+            const uint8_t* sourceBytes,
+            const float* positionVec,
+            const float* velocityVec,
+            uint8_t preserveFlag,
+            uint32_t countBefore,
+            uint32_t countAfter,
+            const ChunkEffectActiveEntry* createdEntry,
+            const ChunkCreateSourceTreeProbe* sourceTreeProbe);
+        bool TryReadChunkObjectLinks(
+            const uint8_t* objectBytes,
+            const uint8_t*& outParent,
+            const uint8_t*& outSibling,
+            const uint8_t*& outChild);
+        void RefreshChunkObjectIdentityCacheIfNeeded();
+
+        // --- Chunk proxy rendering (chunk_proxy_render.cpp) --------------------
+        inline constexpr uintptr_t kGogChunkEffectCreateChunkAddr = 0x00492AA0;
+        inline constexpr uintptr_t kGogChunkEffectCreateChunkletAddr = 0x004927D0;
+        struct BzrGeoEntry
+        {
+            uint32_t packedKey;
+            void* handle;
+            uint32_t unk8;
+            uint32_t unkC;
+        };
+        struct BzrGeoLookup
+        {
+            uint32_t count;
+            uint32_t unk4;
+            uint32_t cachedKey;
+            BzrGeoEntry* entries;
+        };
+        struct ChunkProxyTransform
+        {
+            float x = 0.0f;
+            float y = 0.0f;
+            float z = 0.0f;
+            OgreQuaternion orientation = { 1.0f, 0.0f, 0.0f, 0.0f };
+            OgreVector3 scale = { 1.0f, 1.0f, 1.0f };
+        };
+        struct ChunkProxySlot
+        {
+            const uint8_t* objectBytes = nullptr;
+            const void* geomRef = nullptr;
+            char geomName[64] = {};
+            void* ownerEntity = nullptr;
+            char ownerEntityBaseName[32] = {};
+            char ownerOgreFilename[32] = {};
+            char proofMeshName[128] = {};
+            float positionX = 0.0f;
+            float positionY = 0.0f;
+            float positionZ = 0.0f;
+            bool useEntryPosition = false;
+            void* billboard = nullptr;
+            void* sceneNode = nullptr;
+            void* entity = nullptr;
+            void* sceneManager = nullptr;
+            void* sourceRootObject = nullptr;
+            void* ownerObj = nullptr;
+            void* sourceGameObject = nullptr;
+            void* sourceRootGameObject = nullptr;
+            DWORD lastSeenTick = 0;
+            uint16_t cameraNotifyCount = 0;
+            uint16_t entityUpdateQueueCount = 0;
+            uint16_t renderQueueAddCount = 0;
+            ChunkProxyTransform genericBatchTransform = {};
+            uint8_t genericBatchKind = 0;
+            bool active = false;
+            bool billboardAssigned = false;
+            bool meshAssigned = false;
+            bool genericBatchTransformReady = false;
+        };
+        inline constexpr uint32_t kClassIdChunk = 53;
+        extern bool g_AllowUnsafeSteamChunkCreateHooks;
+        extern InlineDetour32 g_ChunkEffectCreateChunkDetour;
+        extern InlineDetour32 g_ChunkEffectCreateChunkletDetour;
+        extern bool g_ChunkEffectCreateHooksInstalled;
+        extern bool g_ChunkEffectCreateHooksLogged;
+        extern bool g_ChunkEffectCreateHooksMismatchLogged;
+        extern ULONGLONG g_ChunkEffectCreateHooksReadyTick;
+        extern bool g_ChunkEffectCreateHooksWaitLogged;
+        extern bool g_ChunkEffectFragmentHooksInstalled;
+        extern InlineDetour32 g_ChunkEffectFullFragmentDetour;
+        extern InlineDetour32 g_ChunkEffectPartialFragmentDetour;
+        extern bool g_ChunkMeshProxyFailureLogged;
+        extern bool g_ChunkMeshProxyInitLogged;
+        extern DWORD g_ChunkMeshProxyLastRetryTick;
+        extern bool g_ChunkMeshProxyWaitLogged;
+        extern std::unordered_map<uintptr_t, uint32_t> g_ChunkObservedClassIds;
+        extern bool g_ChunkPayloadResourceLocationsAttempted;
+        extern bool g_ChunkPayloadResourceLocationsFailureLogged;
+        extern bool g_ChunkPayloadResourceLocationsLogged;
+        extern bool g_ChunkPayloadResourceLocationsReady;
+        extern void* g_ChunkProxyBillboardSet;
+        extern uint32_t g_ChunkProxyCapacity;
+        extern float g_ChunkProxyDebugSize;
+        extern bool g_ChunkProxyFailureLogged;
+        extern bool g_ChunkProxyInitLogged;
+        extern DWORD g_ChunkProxyLastRetryTick;
+        extern std::vector<ChunkProxySlot> g_ChunkProxySlots;
+        extern bool g_ChunkProxyWaitLogged;
+        extern uint32_t g_ChunkTraceEntryLimit;
+        extern bool g_EnableGenericChunkBatch;
+        extern bool g_ForceGenericChunkBatchFailure;
+        extern bool g_ForceGenericChunkNonUnitScale;
+        extern std::string g_GenericChunkBatchBuiltMaterial;
+        extern uint64_t g_GenericChunkBatchBuiltVersion;
+        extern int g_GenericChunkBatchEligibility[2];
+        extern DWORD g_GenericChunkBatchLastLogTick;
+        extern void* g_GenericChunkBatchManualObject;
+        extern bool g_GenericChunkBatchRateDiagnostics;
+        extern bool g_GenericChunkBatchReuseEnabled;
+        extern bool g_GenericChunkBatchReuseObserveOnly;
+        extern bool g_GenericChunkBatchRuntimeAvailable;
+        extern void* g_GenericChunkBatchSceneManager;
+        extern void* g_GenericChunkBatchSceneNode;
+        extern bool g_GenericChunkBatchSectionCreated;
+        extern bool g_GenericChunkBatchVisible;
+        extern uint32_t g_LastChunkEffectLoggedCount;
+        extern bool g_TraceChunkRenderVerbose;
+        int FindChunkGeoEntryByKey(const BzrGeoLookup* lookup, uint32_t key);
+        int FindFirstChunkGeoEntryWithHandle(const BzrGeoLookup* lookup);
+        void MaybeLogDx11EnhancedLightingState();
+        void SubmitChunkProxiesToRenderQueue(void* renderQueue);
+        void TrackChunkProxyDebugObject(
+            const uint8_t* objectBytes,
+            uint32_t objectType,
+            const void* activeHandle,
+            const BzrGeoLookup* lookup);
+        bool TryReadChunkEffectEntry(
+            const uint8_t* thisBytes,
+            uint32_t index,
+            ChunkEffectActiveEntry& outEntry);
+        void LogChunkEffectRuntimeSample(void* thisPtr, float dt);
+        void TrackChunkEffectActiveEntries(void* thisPtr);
+        void NoteChunkClassTransition(const uint8_t* objectBytes, uint32_t classId);
+        void LogChunkResolveSnapshot(
+            const char* stage,
+            const char* reason,
+            const uint8_t* objectBytes,
+            uint32_t variant,
+            uint32_t stockResolved,
+            const void* activeBefore,
+            const void* activeAfter,
+            const BzrGeoLookup* lookup,
+            int selectedIndex,
+            uint32_t selectedKey);
+        void InstallChunkEffectCreateHooksIfRequested();
+        void InstallChunkFragmentWalkHooksIfRequested();
+
+        // --- Chunk engine hooks (chunk_engine_hooks.cpp) -----------------------
+        extern bool g_EnableChunkRenderFallback;
+        extern bool g_EnablePartialFragmentBoneCollapse;
+
+        // --- DynamicGeometry hooks (dynamic_geometry_hooks.cpp) ----------------
+        extern InlineDetour32 g_DynamicGeometryPrepareDetour;
 
         // --- Satellite view limits (satellite_view_limits.cpp) ---------------
         extern float g_SatelliteZoomOutMultiplier;

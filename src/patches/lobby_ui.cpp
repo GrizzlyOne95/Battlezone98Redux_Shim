@@ -20,7 +20,6 @@
 #include "patches.h"
 #include "patcher.h"
 #include "fog_wake_feature.h"
-#include "render_queue_trace.h"
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
 #include "x86_length.h"
@@ -2249,7 +2248,10 @@ namespace BZROpenShim
             void* onClickRight,
             void* onHover)
         {
-            if (!parent || !outButton || !outLabel || !g_BzrFn_ButtonCtor || !g_BzrFn_LabelCtor || !g_BzrFn_AddChild)
+            // Both callback slots must be set on an active dialog child (see
+            // below), so the setters are required up front.
+            if (!parent || !outButton || !outLabel || !g_BzrFn_ButtonCtor || !g_BzrFn_LabelCtor || !g_BzrFn_AddChild ||
+                !g_BzrFn_SetOnClick || !g_BzrFn_SetOnHover)
                 return;
 
             EnsureFlagCatalogLoaded();
@@ -2758,7 +2760,8 @@ namespace BZROpenShim
             void* onRefresh,
             void* onHover)
         {
-            if (!parent || !g_BzrFn_AddChild || !ShouldEnableLobbyReadouts())
+            if (!parent || !g_BzrFn_AddChild || !ShouldEnableLobbyReadouts() ||
+                !g_BzrFn_SetOnClick || !g_BzrFn_SetOnHover)
                 return;
 
             // Draw first so the interactive children are above it in the
@@ -3112,7 +3115,8 @@ namespace BZROpenShim
 
     void BanButtonCreateHost()
     {
-        if (!g_BzrFn_ButtonCtor || !g_BzrFn_LabelCtor || !g_BzrFn_AddChild || !g_BanParentHost)
+        if (!g_BzrFn_ButtonCtor || !g_BzrFn_LabelCtor || !g_BzrFn_AddChild || !g_BanParentHost ||
+            !g_BzrFn_SetOnClick || !g_BzrFn_SetOnHover)
             return;
 
         void* parent = g_BanParentHost;
@@ -3229,7 +3233,8 @@ namespace BZROpenShim
 
     void BanButtonCreateClient()
     {
-        if (!g_BzrFn_ButtonCtor || !g_BzrFn_LabelCtor || !g_BzrFn_AddChild || !g_BanParentClient)
+        if (!g_BzrFn_ButtonCtor || !g_BzrFn_LabelCtor || !g_BzrFn_AddChild || !g_BanParentClient ||
+            !g_BzrFn_SetOnClick || !g_BzrFn_SetOnHover)
             return;
 
         void* parent = g_BanParentClient;

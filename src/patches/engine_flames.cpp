@@ -18,7 +18,6 @@
 #include "patches.h"
 #include "patcher.h"
 #include "fog_wake_feature.h"
-#include "render_queue_trace.h"
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
 #include "x86_length.h"
@@ -248,16 +247,13 @@ namespace BZROpenShim
             const size_t controlIndex = kEngineFlameControlVtableOffset / sizeof(void*);
             const size_t submitIndex = kEngineFlameSubmitVtableOffset / sizeof(void*);
 
-            if (!g_BzrFn_EngineFlameControl)
-            {
-                g_BzrFn_EngineFlameControl =
-                    reinterpret_cast<FnEngineFlameControl>(vtable[controlIndex]);
-            }
-            if (!g_BzrFn_EngineFlameSubmit)
-            {
-                g_BzrFn_EngineFlameSubmit =
-                    reinterpret_cast<FnEngineFlameSubmit>(vtable[submitIndex]);
-            }
+            // The originals come from the verified engine address table. When
+            // either failed its guard, the hooks stay out: copying the vtable
+            // slot instead would bind an unverified value, and once the DWORD
+            // vtable patch has run that slot holds our own hook, which would
+            // then call itself.
+            if (!g_BzrFn_EngineFlameControl || !g_BzrFn_EngineFlameSubmit)
+                return;
 
             using EngineFlameControlHookFn = void (__fastcall*)(void*, void*);
             using EngineFlameSubmitHookFn = void (__fastcall*)(void*, void*, void*);
@@ -842,8 +838,6 @@ namespace BZROpenShim
 
         if (!g_BzrFn_EngineFlameAddFlame || !managerPtr || !transform)
             return;
-
-        ApplyWeaponMaskCarrierBiasForCraft(craftPtr);
 
         // Interactive fog wakes: a hovercraft under power is exactly the emitter
         // that should carve ground fog. This only records a position -- the

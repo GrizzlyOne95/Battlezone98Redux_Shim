@@ -124,10 +124,77 @@
 
 // ---------------------------------------------------------------- state -----
 
-static bool g_EntityFrustumCullEnabled = false;
+#include "bzr_hooks.h"
+#include "bzr_object_layout.h"
+#include "bzr_hooks_internal.h"
+#include "engine_globals.h"
+#include "game_state.h"
+#include "openshim_ini.h"
+#include "openshim_preset_migration.h"
+#include "openshim_assets.h"
+#include "terrain_proxy.h"
+#include "terrain_tile_blend.h"
+#include "bzr_options_ui.h"
+#include "remembered_mesh_bounds_table.h"
+#include "patches.h"
+#include "patcher.h"
+#include "fog_wake_feature.h"
+#include "mp_vehicle_preview_fix.h"
+#include "shim_log.h"
+#include "x86_length.h"
+#include "ogre_shader_cache.h"
+#include "ogre_enhanced_light_selection.h"
+#include "render_effect_intent.h"
+#include "render_profile_runtime.h"
+#include "native_ui.h"
+#include "../engine/native_ui_validation.h"
+#include "ogre_animation_profiler.h"
+#include "ogre_profiler_algorithms.h"
+#include "weapon_convergence.h"
+#include "headlight_falloff.h"
+#include "shadow_far_distance.h"
+#include "sun_flash.h"
+#include "chunk_batch_invalidation.h"
+#include "ai_range_policy.h"
+#include "lcbench_safety_policy.h"
+#include "hook_engine.h"
+#include "ui_performance.h"
+#include "openshim_events.h"
+#include "player_kill_trace.h"
+#include "net_optimizer.h"
+#include "pond_class_label.h"
+#include <Windows.h>
+#include <objidl.h>
+#include <gdiplus.h>
+#include <array>
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <intrin.h>
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <climits>
+#include <exception>
+#include <filesystem>
+#include <fstream>
+#include <mutex>
+#include <new>
+#include <string>
+#include <string_view>
+#include <unordered_set>
+#include <unordered_map>
+#include <vector>
+
+namespace BZROpenShim
+{
+    namespace Hooks
+    {
+bool g_EntityFrustumCullEnabled = false;
 static bool g_EntityFrustumCullInstalled = false;
 static bool g_EntityFrustumCullStoodDown = false;
-static bool g_FrustumCullCensusEnabled = false;
+bool g_FrustumCullCensusEnabled = false;
 static float g_FrustumCullMargin = 0.25f;
 
 // ------------------------------------------------ restored craft bounds -----
@@ -135,7 +202,7 @@ static float g_FrustumCullMargin = 0.25f;
 // Independent, opt-in experiment: instead of emulating culling privately,
 // repair the renderer state that made culling impossible. See the block comment
 // above MeshSetBoundsHook for the located call site and the reasoning.
-static bool g_RestoreCraftBoundsEnabled = false;
+bool g_RestoreCraftBoundsEnabled = false;
 static float g_RestoreCraftBoundsScale = 2.0f;
 static bool g_RestoreCraftBoundsAllMeshes = false;
 static bool g_RestoreCraftBoundsPin = true;
@@ -143,7 +210,7 @@ static bool g_RestoreCraftBoundsPin = true;
 // Redux asked for. This is how the stock call site was characterised without
 // perturbing the behaviour being characterised.
 static bool g_RestoreCraftBoundsObserveOnly = false;
-static bool g_BoundsTraceEnabled = false;
+bool g_BoundsTraceEnabled = false;
 
 // Set only while the original processVisibleObject runs for an object this pass
 // decided to cull. Thread-local because Ogre's render traversal is not
@@ -1315,7 +1382,7 @@ static void __fastcall ProcessVisibleObjectHook(
 
 // -------------------------------------------------------------- install -----
 
-static void InstallEntityFrustumCullingIfEnabled()
+void InstallEntityFrustumCullingIfEnabled()
 {
     if (g_EntityFrustumCullInstalled)
         return;
@@ -1552,4 +1619,6 @@ static void InstallEntityFrustumCullingIfEnabled()
         g_EntityFrustumCullEnabled ? entityUpdateRenderQueueBody : nullptr,
         meshSetBoundsBody,
         meshDestructorBody);
+}
+    }
 }

@@ -1,4 +1,7 @@
 #include "dx11_colorspace_diagnostic.h"
+#include "json_escape.h"
+#include "com_vtable_patch.h"
+#include "diagnostic_switch.h"
 #include "iat_patch.h"
 #include "shim_log.h"
 
@@ -226,73 +229,20 @@ namespace BZROpenShim
             return true;
         }
 
-        bool StringIsTruthy(const char* value)
-        {
-            if (!value || !*value)
-                return false;
-
-            std::string v(value);
-            std::transform(
-                v.begin(), v.end(), v.begin(),
-                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-            return v != "0" && v != "false" && v != "no" && v != "off";
-        }
-
-        std::string GetOpenShimIniPath()
-        {
-            char path[MAX_PATH] = {};
-            const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-            if (length == 0 || length >= MAX_PATH)
-                return "openshim.ini";
-
-            char* slash = std::strrchr(path, '\\');
-            if (slash)
-                *(slash + 1) = '\0';
-            else
-                path[0] = '\0';
-
-            return std::string(path) + "openshim.ini";
-        }
-
         bool DiagnosticRequested()
         {
-            char envValue[64] = {};
-            const DWORD envLength = GetEnvironmentVariableA(
-                kEnvironmentSwitch,
-                envValue,
-                static_cast<DWORD>(sizeof(envValue)));
-
-            if (envLength > 0 && envLength < sizeof(envValue))
-                return StringIsTruthy(envValue);
-
-            const std::string iniPath = GetOpenShimIniPath();
-            return GetPrivateProfileIntA(kIniSection, kIniKey, 0, iniPath.c_str()) != 0;
+            return BZROpenShim::DiagnosticSwitch::Requested(kEnvironmentSwitch, kIniSection, kIniKey);
         }
 
         bool TerrainProbeRequested()
         {
-            char envValue[64] = {};
-            const DWORD envLength = GetEnvironmentVariableA(
-                kTerrainEnvironmentSwitch,
-                envValue,
-                static_cast<DWORD>(sizeof(envValue)));
-
-            if (envLength > 0 && envLength < sizeof(envValue))
-                return StringIsTruthy(envValue);
-
-            const std::string iniPath = GetOpenShimIniPath();
-            return GetPrivateProfileIntA(
-                       kIniSection,
-                       kTerrainIniKey,
-                       0,
-                       iniPath.c_str()) != 0;
+            return BZROpenShim::DiagnosticSwitch::Requested(kTerrainEnvironmentSwitch, kIniSection, kTerrainIniKey);
         }
 
         TerrainProbeConfig ReadTerrainProbeConfig()
         {
             TerrainProbeConfig config;
-            const std::string iniPath = GetOpenShimIniPath();
+            const std::string iniPath = BZROpenShim::DiagnosticSwitch::OpenShimIniPath();
 
             const int requestedMax = GetPrivateProfileIntA(
                 kIniSection,
@@ -322,7 +272,7 @@ namespace BZROpenShim
 
         std::string GetExecutableDirectory()
         {
-            std::string iniPath = GetOpenShimIniPath();
+            std::string iniPath = BZROpenShim::DiagnosticSwitch::OpenShimIniPath();
             const size_t slash = iniPath.find_last_of("\\/");
             if (slash == std::string::npos)
                 return {};
@@ -492,38 +442,6 @@ namespace BZROpenShim
 
             buffer.back() = '\0';
             return std::string(buffer.data());
-        }
-
-        std::string JsonEscape(const std::string& value)
-        {
-            std::ostringstream escaped;
-            for (const unsigned char c : value)
-            {
-                switch (c)
-                {
-                case '"': escaped << "\\\""; break;
-                case '\\': escaped << "\\\\"; break;
-                case '\b': escaped << "\\b"; break;
-                case '\f': escaped << "\\f"; break;
-                case '\n': escaped << "\\n"; break;
-                case '\r': escaped << "\\r"; break;
-                case '\t': escaped << "\\t"; break;
-                default:
-                    if (c < 0x20)
-                    {
-                        escaped << "\\u"
-                                << std::hex << std::setw(4) << std::setfill('0')
-                                << static_cast<unsigned>(c)
-                                << std::dec << std::setfill(' ');
-                    }
-                    else
-                    {
-                        escaped << static_cast<char>(c);
-                    }
-                    break;
-                }
-            }
-            return escaped.str();
         }
 
         struct TerrainTextureRecord
@@ -712,8 +630,8 @@ namespace BZROpenShim
             {
                 const TerrainTextureRecord& record = resources[i];
                 output << "    {\"slot\":" << record.slot
-                       << ",\"viewName\":\"" << JsonEscape(record.viewName)
-                       << "\",\"resourceName\":\"" << JsonEscape(record.resourceName)
+                       << ",\"viewName\":\"" << EscapeJsonString(record.viewName)
+                       << "\",\"resourceName\":\"" << EscapeJsonString(record.resourceName)
                        << "\",\"format\":\"" << DxgiFormatName(record.format)
                        << "\",\"width\":" << record.width
                        << ",\"height\":" << record.height << "}";
@@ -1167,67 +1085,32 @@ namespace BZROpenShim
         }
 
         template <typename T>
-        bool PatchComVtableEntry(
-            void* object,
-            size_t index,
-            T hook,
-            T& original,
-            const char* label)
+        bool PatchComVtableEntry(void* object, size_t index, T hook, T& original, const char* label)
         {
-            if (!object)
-                return false;
-
             std::lock_guard<std::mutex> lock(g_HookMutex);
-
-            void*** objectVtable = reinterpret_cast<void***>(object);
-            if (!objectVtable || !*objectVtable)
-                return false;
-
-            void** vtable = *objectVtable;
-            void* current = vtable[index];
-
-            if (current == reinterpret_cast<void*>(hook))
-                return true;
-
-            if (original && current != reinterpret_cast<void*>(original))
+            const ComVtablePatch::Result result = ComVtablePatch::PatchEntry(
+                object, index, hook, original, ComVtablePatch::OnForeignWrapper::Refuse);
+            if (result == ComVtablePatch::Result::ForeignWrapper)
             {
                 LogShimA(
                     LogLevel::Warn,
                     kComponent,
                     "[DX11 ColorSpace] %s vtable differs from already-hooked implementation; leaving it untouched",
                     label);
-                return false;
             }
-
-            DWORD oldProtect = 0;
-            if (!VirtualProtect(
-                    &vtable[index],
-                    sizeof(void*),
-                    PAGE_EXECUTE_READWRITE,
-                    &oldProtect))
+            else if (result == ComVtablePatch::Result::Patched)
             {
-                return false;
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[DX11 ColorSpace] installed %s observer (vtable[%u])",
+                    label,
+                    static_cast<unsigned>(index));
             }
-
-            if (!original)
-                original = reinterpret_cast<T>(current);
-
-            vtable[index] = reinterpret_cast<void*>(hook);
-
-            DWORD ignored = 0;
-            VirtualProtect(&vtable[index], sizeof(void*), oldProtect, &ignored);
-            FlushInstructionCache(GetCurrentProcess(), &vtable[index], sizeof(void*));
-
-            LogShimA(
-                LogLevel::Info,
-                kComponent,
-                "[DX11 ColorSpace] installed %s observer (vtable[%u])",
-                label,
-                static_cast<unsigned>(index));
-            return true;
+            return ComVtablePatch::Succeeded(result);
         }
 
-        void InstallContextHooks(ID3D11DeviceContext* context);
+        unsigned InstallContextHooks(ID3D11DeviceContext* context);
         void InstallDeviceHooks(ID3D11Device* device);
         void InstallFactoryHooks(IDXGIFactory* factory);
         void CaptureSwapChain(IDXGISwapChain* swapChain, const char* source);
@@ -1239,6 +1122,13 @@ namespace BZROpenShim
             INT baseVertexLocation)
         {
             if (!g_TerrainProbeEnabled.load(std::memory_order_acquire))
+                return;
+
+            // The snapshot below copies to a staging buffer and maps it for
+            // read. On a deferred context the copy would be recorded into the
+            // game's command list and the read map would fail, so the probe
+            // stays read-only by observing immediate contexts only.
+            if (!context || context->GetType() == D3D11_DEVICE_CONTEXT_DEFERRED)
                 return;
 
             const unsigned captureLimit = g_TerrainProbeConfig.selectedCluster >= 0
@@ -1613,13 +1503,17 @@ namespace BZROpenShim
             {
                 if (SUCCEEDED(hr) && deferredContext && *deferredContext)
                 {
-                    InstallContextHooks(*deferredContext);
+                    // A deferred context is usually a different class with its
+                    // own vtable, so the observers normally refuse it; say so
+                    // rather than claiming they attached.
+                    const unsigned attached = InstallContextHooks(*deferredContext);
                     LogShimA(
                         LogLevel::Info,
                         kComponent,
-                        "[TERRAIN-PROBE] installed observers on newly-created deferred context=0x%p flags=0x%X",
+                        "[TERRAIN-PROBE] deferred context=0x%p flags=0x%X observers attached=%u",
                         *deferredContext,
-                        contextFlags);
+                        contextFlags,
+                        attached);
                 }
             }
             catch (...)
@@ -1827,47 +1721,51 @@ namespace BZROpenShim
             return hr;
         }
 
-        void InstallContextHooks(ID3D11DeviceContext* context)
+        // Returns how many observers are attached to this context's vtable.
+        unsigned InstallContextHooks(ID3D11DeviceContext* context)
         {
             if (!context)
-                return;
+                return 0;
+
+            unsigned attached = 0;
 
             // Public ID3D11DeviceContext COM ABI ordinals from d3d11.h.
             if (g_ColorSpaceDiagnosticEnabled.load(std::memory_order_acquire))
             {
-                PatchComVtableEntry(
+                attached += PatchComVtableEntry(
                     context,
                     8,
                     &HookPSSetShaderResources,
                     g_RealPSSetShaderResources,
-                    "ID3D11DeviceContext::PSSetShaderResources");
+                    "ID3D11DeviceContext::PSSetShaderResources") ? 1u : 0u;
 
-                PatchComVtableEntry(
+                attached += PatchComVtableEntry(
                     context,
                     33,
                     &HookOMSetRenderTargets,
                     g_RealOMSetRenderTargets,
-                    "ID3D11DeviceContext::OMSetRenderTargets");
+                    "ID3D11DeviceContext::OMSetRenderTargets") ? 1u : 0u;
 
                 LogCurrentViewports(context, "device-capture");
             }
 
             if (g_TerrainProbeEnabled.load(std::memory_order_acquire))
             {
-                PatchComVtableEntry(
+                attached += PatchComVtableEntry(
                     context,
                     12,
                     &HookDrawIndexed,
                     g_RealDrawIndexed,
-                    "ID3D11DeviceContext::DrawIndexed (terrain probe)");
+                    "ID3D11DeviceContext::DrawIndexed (terrain probe)") ? 1u : 0u;
 
-                PatchComVtableEntry(
+                attached += PatchComVtableEntry(
                     context,
                     24,
                     &HookIASetPrimitiveTopology,
                     g_RealIASetPrimitiveTopology,
-                    "ID3D11DeviceContext::IASetPrimitiveTopology (terrain probe)");
+                    "ID3D11DeviceContext::IASetPrimitiveTopology (terrain probe)") ? 1u : 0u;
             }
+            return attached;
         }
 
         void InstallFactoryHooks(IDXGIFactory* factory)

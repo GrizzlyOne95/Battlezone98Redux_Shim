@@ -7,6 +7,7 @@
 #include "bzr_options_ui.h"
 #include "engine_globals.h"
 #include "hook_engine.h"
+#include "memory_access.h"
 #include "patcher.h"
 #include "shim_log.h"
 
@@ -75,25 +76,6 @@ namespace BZROpenShim
             if (value > static_cast<int>(SHRT_MAX))
                 return SHRT_MAX;
             return static_cast<int16_t>(value);
-        }
-
-        bool IsReadableDataProtect(DWORD protect)
-        {
-            if ((protect & PAGE_GUARD) != 0 || (protect & PAGE_NOACCESS) != 0)
-                return false;
-
-            switch (protect & 0xFFu)
-            {
-            case PAGE_READONLY:
-            case PAGE_READWRITE:
-            case PAGE_WRITECOPY:
-            case PAGE_EXECUTE_READ:
-            case PAGE_EXECUTE_READWRITE:
-            case PAGE_EXECUTE_WRITECOPY:
-                return true;
-            default:
-                return false;
-            }
         }
 
         static bool TryReadHudSpriteNameCount(uint32_t& outCount)
@@ -692,7 +674,7 @@ namespace BZROpenShim
 
         static bool IsLikelyHudSpriteRectRegion(const MEMORY_BASIC_INFORMATION& mbi)
         {
-            if (mbi.State != MEM_COMMIT || !IsReadableDataProtect(mbi.Protect))
+            if (mbi.State != MEM_COMMIT || !BZROpenShim::MemoryAccess::ProtectionAllows(mbi.Protect, BZROpenShim::MemoryAccess::Access::Read))
                 return false;
 
             // The stock scrap/pilot rect records are runtime heap data

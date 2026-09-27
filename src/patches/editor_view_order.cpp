@@ -45,6 +45,7 @@
 // its commands within the frame. That is documented alongside the key.
 
 #include "editor_view_order.h"
+#include "bool_token.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -141,12 +142,9 @@ namespace BZROpenShim
             if (value[0] == '\0' || std::strcmp(value, kUnsetSentinel) == 0)
                 return kEditorPlacementOrderEnabledDefault;
 
-            for (char* c = value; *c != '\0'; ++c)
-                *c = static_cast<char>(std::tolower(static_cast<unsigned char>(*c)));
-
-            return std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0 ||
-                   std::strcmp(value, "on") == 0 || std::strcmp(value, "yes") == 0 ||
-                   std::strcmp(value, "enabled") == 0;
+            // An unrecognized value turns the fix off.
+            bool enabled = false;
+            return BZROpenShim::BoolToken::TryParse(value, enabled) && enabled;
         }
     }
 

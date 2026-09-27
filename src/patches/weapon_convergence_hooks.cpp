@@ -7,6 +7,7 @@
 #include "bzr_options_ui.h"
 #include "engine_globals.h"
 #include "hook_engine.h"
+#include "memory_access.h"
 #include "patcher.h"
 #include "shim_log.h"
 #include "weapon_convergence.h"
@@ -257,14 +258,8 @@ namespace BZROpenShim
                 return false;
             if (reinterpret_cast<uintptr_t>(mbi.AllocationBase) != mainBase)
                 return false;
-            if ((mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
-                return false;
-
-            const DWORD protect = mbi.Protect & 0xFFu;
-            return protect == PAGE_EXECUTE ||
-                protect == PAGE_EXECUTE_READ ||
-                protect == PAGE_EXECUTE_READWRITE ||
-                protect == PAGE_EXECUTE_WRITECOPY;
+            return BZROpenShim::MemoryAccess::ProtectionAllows(
+                mbi.Protect, BZROpenShim::MemoryAccess::Access::Execute);
         }
 
         // Exact position source used by Walker::UpdateWeaponAim:
@@ -310,7 +305,7 @@ namespace BZROpenShim
                     return false;
                 if (reinterpret_cast<uintptr_t>(vtableInfo.AllocationBase) != GetMainModuleBase())
                     return false;
-                if (!IsReadableDataProtect(vtableInfo.Protect))
+                if (!BZROpenShim::MemoryAccess::ProtectionAllows(vtableInfo.Protect, BZROpenShim::MemoryAccess::Access::Read))
                     return false;
 
                 // Slot 1 re-verified against the rebased expectation, then

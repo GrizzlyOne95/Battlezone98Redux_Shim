@@ -82,6 +82,25 @@ namespace HookEngine
     // count, the scanned address, the fallback, and the entry's identity note.
     uint32_t ResolveNamedAddress(const char* name);
 
+    // Fixed engine addresses ("engine_addresses" in scripts/patches.json).
+    //
+    // Looks the name up and, for a code row, compares the guard bytes with
+    // what is mapped at the address now. Bound means the address may be used;
+    // BoundData means a data row, taken as recorded; every other status
+    // returns 0 in outAddress, so the caller's pointer stays null and the
+    // feature built on it stands down. Nothing is cached: a Mismatch on Steam
+    // can be "SteamStub has not settled this page yet", so callers may ask
+    // again. Logs nothing; the caller reports.
+    enum class EngineAddressStatus
+    {
+        Bound,
+        BoundData,
+        Missing,    // no row with that name (or no patches.json)
+        Mismatch,   // the guard bytes differ from what is mapped
+        Unreadable, // the address could not be read
+    };
+    EngineAddressStatus ResolveEngineAddress(const char* name, uint32_t& outAddress);
+
     // Locates scripts/patches.json: working directory first, then the exe's
     // own directory, since the game is routinely launched from elsewhere.
     // Empty when neither exists.

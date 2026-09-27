@@ -12,6 +12,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "ui_performance.h"
+#include "bool_token.h"
 #include "shim_log.h"
 
 #include <Windows.h>
@@ -288,11 +289,7 @@ namespace BZROpenShim::UiPerf
         auto readBoolEnv = [&](const char* name, bool& out) -> bool {
             const DWORD len = GetEnvironmentVariableA(name, buf, sizeof(buf));
             if (len == 0 || len >= sizeof(buf)) return false;
-            std::string v(buf, len);
-            for (char& c : v) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
-            if (v == "1" || v == "true" || v == "on" || v == "yes" || v == "enabled") { out = true; return true; }
-            if (v == "0" || v == "false" || v == "off" || v == "no" || v == "disabled") { out = false; return true; }
-            return false;
+            return BZROpenShim::BoolToken::TryParse(buf, len, out);
         };
 
         // Friendly INI keys live in [Diagnostics] directly; check them first.
@@ -310,10 +307,7 @@ namespace BZROpenShim::UiPerf
             GetPrivateProfileStringA("Diagnostics", "UiPerformanceLogging", "__unset__", val, sizeof(val), iniPath.c_str());
             if (strcmp(val, "__unset__") != 0)
             {
-                std::string v(val);
-                for (char& c : v) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
-                if (v == "1" || v == "true" || v == "on" || v == "yes" || v == "enabled") enabled = true;
-                else if (v == "0" || v == "false" || v == "off" || v == "no" || v == "disabled") enabled = false;
+                BZROpenShim::BoolToken::TryParse(val, enabled);
                 // Also allow direct env probing to win if ini absent.
             }
             else
@@ -324,10 +318,7 @@ namespace BZROpenShim::UiPerf
             GetPrivateProfileStringA("Diagnostics", "UiPerformanceVerbose", "__unset__", val, sizeof(val), iniPath.c_str());
             if (strcmp(val, "__unset__") != 0)
             {
-                std::string v(val);
-                for (char& c : v) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
-                if (v == "1" || v == "true" || v == "on" || v == "yes" || v == "enabled") verbose = true;
-                else if (v == "0" || v == "false" || v == "off" || v == "no" || v == "disabled") verbose = false;
+                BZROpenShim::BoolToken::TryParse(val, verbose);
             }
             else
             {
