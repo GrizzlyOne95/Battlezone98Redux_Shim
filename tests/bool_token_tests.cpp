@@ -88,8 +88,39 @@ namespace
     }
 }
 
+namespace
+{
+    using BZROpenShim::BoolToken::IsTruthy;
+
+    void TestTruthyFollowsTheWords()
+    {
+        for (const char* word : {"1", "true", "ON", "yes", "Enabled"})
+            CHECK(IsTruthy(word));
+        for (const char* word : {"0", "false", "OFF", "No", "disabled", " off "})
+            CHECK(!IsTruthy(word));
+    }
+
+    void TestTruthyTreatsOtherTextAsOn()
+    {
+        CHECK(IsTruthy("2"));
+        CHECK(IsTruthy("verbose"));
+        CHECK(IsTruthy("offf"));
+    }
+
+    void TestTruthyTreatsBlankAsOff()
+    {
+        CHECK(!IsTruthy(static_cast<const char*>(nullptr)));
+        CHECK(!IsTruthy(""));
+        CHECK(!IsTruthy(" \t"));
+        CHECK(!IsTruthy(std::string()));
+    }
+}
+
 int main()
 {
+    TestTruthyFollowsTheWords();
+    TestTruthyTreatsOtherTextAsOn();
+    TestTruthyTreatsBlankAsOff();
     TestEveryWord();
     TestCaseAndSurroundingWhitespaceAreIgnored();
     TestOtherTextIsUnrecognized();
