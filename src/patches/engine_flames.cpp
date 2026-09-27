@@ -840,8 +840,6 @@ namespace BZROpenShim
         if (!g_BzrFn_EngineFlameAddFlame || !managerPtr || !transform)
             return;
 
-        ApplyWeaponMaskCarrierBiasForCraft(craftPtr);
-
         // Interactive fog wakes: a hovercraft under power is exactly the emitter
         // that should carve ground fog. This only records a position -- the
         // simulation is advanced on its own cadence -- so it is safe here even
