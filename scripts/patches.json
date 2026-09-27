@@ -1290,16 +1290,6 @@
       "expected_original": "70 95 67 00"
     },
     {
-      "name": "Decoded Weapon Mask Carrier Bias Hook",
-      "fallback": "0x00417C80",
-      "expected_original": "55 8B EC 51 89"
-    },
-    {
-      "name": "Raw Weapon Mask Carrier Bias Hook",
-      "fallback": "0x0046DD70",
-      "expected_original": "55 8B EC 51 89"
-    },
-    {
       "name": "Lobby BZRNET Integration HOST",
       "fallback": "0x00743C05",
       "expected_original": "8D 85 00 FF FF"
