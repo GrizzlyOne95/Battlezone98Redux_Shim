@@ -131,6 +131,11 @@ add_executable(env_switch_table_tests
     env_switch_table_tests.cpp
 )
 
+add_executable(terrain_semantic_tests
+    terrain_semantic_tests.cpp
+    ../src/patches/terrain_semantic.cpp
+)
+
 # These three used to run only from scripts/run_*_tests.ps1, which no CI lane
 # calls (audit P2-7).
 add_executable(backend_selection_tests
@@ -288,6 +293,8 @@ target_include_directories(sun_flash_tests PRIVATE ../include)
 target_compile_features(sun_flash_tests PRIVATE cxx_std_20)
 target_include_directories(env_switch_table_tests PRIVATE ../include)
 target_compile_features(env_switch_table_tests PRIVATE cxx_std_20)
+target_include_directories(terrain_semantic_tests PRIVATE ../include)
+target_compile_features(terrain_semantic_tests PRIVATE cxx_std_20)
 target_include_directories(backend_selection_tests PRIVATE ../include)
 target_compile_features(backend_selection_tests PRIVATE cxx_std_20)
 target_include_directories(ui_decor_tests PRIVATE ../include)
@@ -342,6 +349,7 @@ if(MSVC)
     target_compile_options(chunk_batch_invalidation_tests PRIVATE /W4 /WX)
     target_compile_options(sun_flash_tests PRIVATE /W4 /WX)
     target_compile_options(env_switch_table_tests PRIVATE /W4 /WX)
+    target_compile_options(terrain_semantic_tests PRIVATE /W4 /WX)
     target_compile_options(backend_selection_tests PRIVATE /W4 /WX)
     target_compile_options(ui_decor_tests PRIVATE /W4 /WX)
     target_compile_options(ogre_profiler_algorithms_tests PRIVATE /W4 /WX)
@@ -375,6 +383,7 @@ else()
     target_compile_options(chunk_batch_invalidation_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(sun_flash_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(env_switch_table_tests PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(terrain_semantic_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(backend_selection_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(ui_decor_tests PRIVATE -Wall -Wextra -Werror)
     target_compile_options(ogre_profiler_algorithms_tests PRIVATE -Wall -Wextra -Werror)
@@ -409,6 +418,7 @@ add_test(NAME headlight_falloff_tests COMMAND headlight_falloff_tests)
 add_test(NAME chunk_batch_invalidation_tests COMMAND chunk_batch_invalidation_tests)
 add_test(NAME sun_flash_tests COMMAND sun_flash_tests)
 add_test(NAME env_switch_table_tests COMMAND env_switch_table_tests)
+add_test(NAME terrain_semantic_tests COMMAND terrain_semantic_tests)
 add_test(NAME backend_selection_tests COMMAND backend_selection_tests)
 add_test(NAME ui_decor_tests COMMAND ui_decor_tests)
 add_test(NAME ogre_profiler_algorithms_tests COMMAND ogre_profiler_algorithms_tests)
