@@ -2511,107 +2511,169 @@ namespace BZROpenShim
             g_OwnedObjectRevealTraceBudget);
     }
 
-    // The fixed engine addresses ResolveBzrHooks binds: one row per pointer,
-    // stored as-is. Nothing here is verified yet; slice R5 of the refactor
-    // (Docs/audit_20260925/resolve_bzr_hooks_design.md) moves the table into
-    // scripts/patches.json with a prologue check per row. Every slot is a
-    // pointer-sized global, so each row writes through void**.
+    // The fixed engine addresses ResolveBzrHooks binds. The addresses and the
+    // bytes that must be at them live in the "engine_addresses" array of
+    // scripts/patches.json; this table only maps each row name to the
+    // pointer it fills. A code row whose guard bytes do not match, or a name
+    // with no row, leaves its pointer null, and every feature built on it
+    // stands down (fail closed). Every slot is a pointer-sized global, so
+    // each row writes through void**.
     struct EngineAddressRow
     {
         const char* name;
-        uintptr_t address;
         void** slot;
     };
 
     void BindEngineAddresses()
     {
         static const EngineAddressRow kRows[] = {
-            {"VehicleListSelection", 0x00945478, reinterpret_cast<void**>(&g_BzrPtr_945478)},
-            {"VehicleListManager", 0x0094548C, reinterpret_cast<void**>(&g_BzrPtr_94548C)},
-            {"MapListObject", 0x0094555C, reinterpret_cast<void**>(&g_BzrPtr_94555C)},
-            {"LobbyHostPlayerList", 0x009456D0, reinterpret_cast<void**>(&g_BzrPtr_9456D0)},
-            {"LobbyClientPlayerList", 0x0094557C, reinterpret_cast<void**>(&g_BzrPtr_94557C)},
-            {"HelpObject", 0x00920168, reinterpret_cast<void**>(&g_BzrPtr_920168)},
-            {"CurrentUser", 0x009C8F60, reinterpret_cast<void**>(&g_BzrPtr_CurrentUser)},
-            {"VehicleListSet", 0x0076B7A0, reinterpret_cast<void**>(&g_BzrFn_VehicleListSet)},
-            {"VehicleListFinalize", 0x0076BA00, reinterpret_cast<void**>(&g_BzrFn_VehicleListFinalize)},
-            {"VehicleListLoad", 0x00766900, reinterpret_cast<void**>(&g_BzrFn_VehicleListLoad)},
-            {"VehicleListRefresh1", 0x007A3F80, reinterpret_cast<void**>(&g_BzrFn_VehicleListRefresh1)},
-            {"VehicleListRefresh2", 0x007A4070, reinterpret_cast<void**>(&g_BzrFn_VehicleListRefresh2)},
-            {"ButtonCtor", 0x007C2480, reinterpret_cast<void**>(&g_BzrFn_ButtonCtor)},
-            {"LabelCtor", 0x007CC390, reinterpret_cast<void**>(&g_BzrFn_LabelCtor)},
-            {"OverlayCtor", kGogUiOverlayCtorAddr, reinterpret_cast<void**>(&g_BzrFn_OverlayCtor)},
-            {"TextEntryCtor", 0x007CF410, reinterpret_cast<void**>(&g_BzrFn_TextEntryCtor)},
-            {"SelectlistCtor", 0x007C9DE0, reinterpret_cast<void**>(&g_BzrFn_SelectlistCtor)},
-            {"SelectlistSetItem", 0x007CABF0, reinterpret_cast<void**>(&g_BzrFn_SelectlistSetItem)},
-            {"TextEntrySetEnterCb", 0x007CF940, reinterpret_cast<void**>(&g_BzrFn_TextEntrySetEnterCb)},
-            {"TextEntryAppendText", 0x007CF980, reinterpret_cast<void**>(&g_BzrFn_TextEntryAppendText)},
-            {"TextEntryAppendChar", 0x007CFA70, reinterpret_cast<void**>(&g_BzrFn_TextEntryAppendChar)},
-            {"TextEntryClear", 0x007CF9F0, reinterpret_cast<void**>(&g_BzrFn_TextEntryClear)},
-            {"TextEntrySetInputLimit", 0x00795BD0, reinterpret_cast<void**>(&g_BzrFn_TextEntrySetInputLimit)},
-            {"SelectlistSetOnSelect", 0x007CB3E0, reinterpret_cast<void**>(&g_BzrFn_SelectlistSetOnSelect)},
-            {"SetTextureOff", 0x007D2870, reinterpret_cast<void**>(&g_BzrFn_SetTextureOff)},
-            {"SetTextureOver", 0x007C2F10, reinterpret_cast<void**>(&g_BzrFn_SetTextureOver)},
-            {"SetTextureOn", 0x007C2E80, reinterpret_cast<void**>(&g_BzrFn_SetTextureOn)},
-            {"SetButtonLabel", 0x007C2950, reinterpret_cast<void**>(&g_BzrFn_SetButtonLabel)},
-            {"SetButtonTextScale", 0x007C30E0, reinterpret_cast<void**>(&g_BzrFn_SetButtonTextScale)},
-            {"SetTooltip", 0x007CC660, reinterpret_cast<void**>(&g_BzrFn_SetTooltip)},
-            {"LabelState", 0x007CC5C0, reinterpret_cast<void**>(&g_BzrFn_LabelState)},
-            {"SetOnClick", 0x007C23E0, reinterpret_cast<void**>(&g_BzrFn_SetOnClick)},
-            {"SetOnHover", 0x007C23C0, reinterpret_cast<void**>(&g_BzrFn_SetOnHover)},
-            {"UiSetActive", 0x007D3310, reinterpret_cast<void**>(&g_BzrFn_UiSetActive)},
-            {"AddChild", 0x007D2110, reinterpret_cast<void**>(&g_BzrFn_AddChild)},
-            {"UiDialogSetEnabled", 0x007C9170, reinterpret_cast<void**>(&g_BzrFn_UiDialogSetEnabled)},
-            {"KeyConfigSetKey", kGogKeyConfigSetKeyAddr, reinterpret_cast<void**>(&g_BzrFn_KeyConfigSetKey)},
-            {"WriteInputMapKey", kGogWriteInputMapKeyAddr, reinterpret_cast<void**>(&g_BzrFn_WriteInputMapKey)},
-            {"MapKeyNameFromCode", kGogMapKeyNameFromCodeAddr, reinterpret_cast<void**>(&g_BzrFn_MapKeyNameFromCode)},
-            {"ReloadGameKeyMap", kGogReloadGameKeyMapAddr, reinterpret_cast<void**>(&g_BzrFn_ReloadGameKeyMap)},
-            {"GetSelected", 0x007CB1A0, reinterpret_cast<void**>(&g_BzrFn_GetSelected)},
-            {"CommandHandler", 0x006247A0, reinterpret_cast<void**>(&g_BzrFn_CommandHandler)},
-            {"HelpLog", 0x00821390, reinterpret_cast<void**>(&g_BzrFn_HelpLog)},
-            {"HelpUi", 0x007A47B0, reinterpret_cast<void**>(&g_BzrFn_HelpUi)},
-            {"BanLookup", 0x005771B0, reinterpret_cast<void**>(&g_BzrFn_BanLookup)},
-            {"IsHost", 0x00572A60, reinterpret_cast<void**>(&g_BzrFn_IsHost)},
-            {"AutoLoadShellGame", 0x004FDAB0, reinterpret_cast<void**>(&g_BzrFn_AutoLoadShellGame)},
-            {"LoadGameByPath", 0x004FDFE0, reinterpret_cast<void**>(&g_BzrFn_LoadGameByPath)},
-            {"LoadScreenPrep", 0x0078BB00, reinterpret_cast<void**>(&g_BzrFn_LoadScreenPrep)},
-            {"FinalizeQueuedLoad", 0x005D4980, reinterpret_cast<void**>(&g_BzrFn_FinalizeQueuedLoad)},
-            {"SetShellState", 0x00434170, reinterpret_cast<void**>(&g_BzrFn_SetShellState)},
-            {"BzrStringCtorFromCStr", 0x00416EF0, reinterpret_cast<void**>(&g_BzrFn_BzrStringCtorFromCStr)},
-            {"BzrStringDtor", 0x00416F30, reinterpret_cast<void**>(&g_BzrFn_BzrStringDtor)},
-            {"LoadScreenClearSelection", 0x00482860, reinterpret_cast<void**>(&g_BzrFn_LoadScreenClearSelection)},
-            {"MapFilter6", 0x004200B0, reinterpret_cast<void**>(&g_BzrFn_MapFilter6)},
-            {"ChunkResolve", 0x004E3620, reinterpret_cast<void**>(&g_BzrFn_ChunkResolve)},
-            {"MapFilter8Check", 0x007D3360, reinterpret_cast<void**>(&g_BzrFn_MapFilter8Check)},
-            {"MapFilterCreate", 0x007C9DE0, reinterpret_cast<void**>(&g_BzrFn_MapFilterCreate)},
-            {"MapFilterScrollUp", 0x007CB500, reinterpret_cast<void**>(&g_BzrFn_MapFilterScrollUp)},
-            {"MapFilterScrollDown", 0x007CB540, reinterpret_cast<void**>(&g_BzrFn_MapFilterScrollDown)},
-            {"Localize", 0x0081CB40, reinterpret_cast<void**>(&g_BzrFn_Localize)},
-            {"VehicleFixPre", 0x00481EA0, reinterpret_cast<void**>(&g_BzrFn_VehicleFixPre)},
-            {"VehicleFixOrig", 0x00481AF0, reinterpret_cast<void**>(&g_BzrFn_VehicleFixOrig)},
+            {"VehicleListSelection", reinterpret_cast<void**>(&g_BzrPtr_945478)},
+            {"VehicleListManager", reinterpret_cast<void**>(&g_BzrPtr_94548C)},
+            {"MapListObject", reinterpret_cast<void**>(&g_BzrPtr_94555C)},
+            {"LobbyHostPlayerList", reinterpret_cast<void**>(&g_BzrPtr_9456D0)},
+            {"LobbyClientPlayerList", reinterpret_cast<void**>(&g_BzrPtr_94557C)},
+            {"HelpObject", reinterpret_cast<void**>(&g_BzrPtr_920168)},
+            {"CurrentUser", reinterpret_cast<void**>(&g_BzrPtr_CurrentUser)},
+            {"VehicleListSet", reinterpret_cast<void**>(&g_BzrFn_VehicleListSet)},
+            {"VehicleListFinalize", reinterpret_cast<void**>(&g_BzrFn_VehicleListFinalize)},
+            {"VehicleListLoad", reinterpret_cast<void**>(&g_BzrFn_VehicleListLoad)},
+            {"VehicleListRefresh1", reinterpret_cast<void**>(&g_BzrFn_VehicleListRefresh1)},
+            {"VehicleListRefresh2", reinterpret_cast<void**>(&g_BzrFn_VehicleListRefresh2)},
+            {"ButtonCtor", reinterpret_cast<void**>(&g_BzrFn_ButtonCtor)},
+            {"LabelCtor", reinterpret_cast<void**>(&g_BzrFn_LabelCtor)},
+            {"OverlayCtor", reinterpret_cast<void**>(&g_BzrFn_OverlayCtor)},
+            {"TextEntryCtor", reinterpret_cast<void**>(&g_BzrFn_TextEntryCtor)},
+            {"SelectlistCtor", reinterpret_cast<void**>(&g_BzrFn_SelectlistCtor)},
+            {"SelectlistSetItem", reinterpret_cast<void**>(&g_BzrFn_SelectlistSetItem)},
+            {"TextEntrySetEnterCb", reinterpret_cast<void**>(&g_BzrFn_TextEntrySetEnterCb)},
+            {"TextEntryAppendText", reinterpret_cast<void**>(&g_BzrFn_TextEntryAppendText)},
+            {"TextEntryAppendChar", reinterpret_cast<void**>(&g_BzrFn_TextEntryAppendChar)},
+            {"TextEntryClear", reinterpret_cast<void**>(&g_BzrFn_TextEntryClear)},
+            {"TextEntrySetInputLimit", reinterpret_cast<void**>(&g_BzrFn_TextEntrySetInputLimit)},
+            {"SelectlistSetOnSelect", reinterpret_cast<void**>(&g_BzrFn_SelectlistSetOnSelect)},
+            {"SetTextureOff", reinterpret_cast<void**>(&g_BzrFn_SetTextureOff)},
+            {"SetTextureOver", reinterpret_cast<void**>(&g_BzrFn_SetTextureOver)},
+            {"SetTextureOn", reinterpret_cast<void**>(&g_BzrFn_SetTextureOn)},
+            {"SetButtonLabel", reinterpret_cast<void**>(&g_BzrFn_SetButtonLabel)},
+            {"SetButtonTextScale", reinterpret_cast<void**>(&g_BzrFn_SetButtonTextScale)},
+            {"SetTooltip", reinterpret_cast<void**>(&g_BzrFn_SetTooltip)},
+            {"LabelState", reinterpret_cast<void**>(&g_BzrFn_LabelState)},
+            {"SetOnClick", reinterpret_cast<void**>(&g_BzrFn_SetOnClick)},
+            {"SetOnHover", reinterpret_cast<void**>(&g_BzrFn_SetOnHover)},
+            {"UiSetActive", reinterpret_cast<void**>(&g_BzrFn_UiSetActive)},
+            {"AddChild", reinterpret_cast<void**>(&g_BzrFn_AddChild)},
+            {"UiDialogSetEnabled", reinterpret_cast<void**>(&g_BzrFn_UiDialogSetEnabled)},
+            {"KeyConfigSetKey", reinterpret_cast<void**>(&g_BzrFn_KeyConfigSetKey)},
+            {"WriteInputMapKey", reinterpret_cast<void**>(&g_BzrFn_WriteInputMapKey)},
+            {"MapKeyNameFromCode", reinterpret_cast<void**>(&g_BzrFn_MapKeyNameFromCode)},
+            {"ReloadGameKeyMap", reinterpret_cast<void**>(&g_BzrFn_ReloadGameKeyMap)},
+            {"GetSelected", reinterpret_cast<void**>(&g_BzrFn_GetSelected)},
+            {"CommandHandler", reinterpret_cast<void**>(&g_BzrFn_CommandHandler)},
+            {"HelpLog", reinterpret_cast<void**>(&g_BzrFn_HelpLog)},
+            {"HelpUi", reinterpret_cast<void**>(&g_BzrFn_HelpUi)},
+            {"BanLookup", reinterpret_cast<void**>(&g_BzrFn_BanLookup)},
+            {"IsHost", reinterpret_cast<void**>(&g_BzrFn_IsHost)},
+            {"AutoLoadShellGame", reinterpret_cast<void**>(&g_BzrFn_AutoLoadShellGame)},
+            {"LoadGameByPath", reinterpret_cast<void**>(&g_BzrFn_LoadGameByPath)},
+            {"LoadScreenPrep", reinterpret_cast<void**>(&g_BzrFn_LoadScreenPrep)},
+            {"FinalizeQueuedLoad", reinterpret_cast<void**>(&g_BzrFn_FinalizeQueuedLoad)},
+            {"SetShellState", reinterpret_cast<void**>(&g_BzrFn_SetShellState)},
+            {"BzrStringCtorFromCStr", reinterpret_cast<void**>(&g_BzrFn_BzrStringCtorFromCStr)},
+            {"BzrStringDtor", reinterpret_cast<void**>(&g_BzrFn_BzrStringDtor)},
+            {"LoadScreenClearSelection", reinterpret_cast<void**>(&g_BzrFn_LoadScreenClearSelection)},
+            {"MapFilter6", reinterpret_cast<void**>(&g_BzrFn_MapFilter6)},
+            {"ChunkResolve", reinterpret_cast<void**>(&g_BzrFn_ChunkResolve)},
+            {"MapFilter8Check", reinterpret_cast<void**>(&g_BzrFn_MapFilter8Check)},
+            {"MapFilterCreate", reinterpret_cast<void**>(&g_BzrFn_MapFilterCreate)},
+            {"MapFilterScrollUp", reinterpret_cast<void**>(&g_BzrFn_MapFilterScrollUp)},
+            {"MapFilterScrollDown", reinterpret_cast<void**>(&g_BzrFn_MapFilterScrollDown)},
+            {"Localize", reinterpret_cast<void**>(&g_BzrFn_Localize)},
+            {"VehicleFixPre", reinterpret_cast<void**>(&g_BzrFn_VehicleFixPre)},
+            {"VehicleFixOrig", reinterpret_cast<void**>(&g_BzrFn_VehicleFixOrig)},
             // The multiplayer flag helpers map at the same settled addresses on
             // current GOG and Steam builds.
-            {"NetPlayerSetData", 0x00575570, reinterpret_cast<void**>(&g_BzrFn_NetPlayerSetData)},
-            {"NetPlayerSetFlagBuffer", 0x00575810, reinterpret_cast<void**>(&g_BzrFn_NetPlayerSetFlagBuffer)},
-            {"SetMyFlag", 0x0056FA50, reinterpret_cast<void**>(&g_BzrFn_SetMyFlag)},
-            {"EngineFlameControl", 0x004C88A0, reinterpret_cast<void**>(&g_BzrFn_EngineFlameControl)},
-            {"EngineFlameSubmit", 0x004C88C0, reinterpret_cast<void**>(&g_BzrFn_EngineFlameSubmit)},
-            {"ChunkEffectSimulate", 0x004917F0, reinterpret_cast<void**>(&g_BzrFn_ChunkEffectSimulate)},
+            {"NetPlayerSetData", reinterpret_cast<void**>(&g_BzrFn_NetPlayerSetData)},
+            {"NetPlayerSetFlagBuffer", reinterpret_cast<void**>(&g_BzrFn_NetPlayerSetFlagBuffer)},
+            {"SetMyFlag", reinterpret_cast<void**>(&g_BzrFn_SetMyFlag)},
+            {"EngineFlameControl", reinterpret_cast<void**>(&g_BzrFn_EngineFlameControl)},
+            {"EngineFlameSubmit", reinterpret_cast<void**>(&g_BzrFn_EngineFlameSubmit)},
+            {"ChunkEffectSimulate", reinterpret_cast<void**>(&g_BzrFn_ChunkEffectSimulate)},
             // FUN_00679570: _updateRenderQueue override of the game's world
             // renderable container — the only exe-side caller of
             // Ogre::RenderQueue::addRenderable. Vtable slot 0x00892728.
-            {"LegacyWorldUpdateRenderQueue", 0x00679570, reinterpret_cast<void**>(&g_BzrFn_LegacyWorldUpdateRenderQueue)},
-            {"AIBuildConstructionEnd", kGogAIBuildConstructionEndAddr, reinterpret_cast<void**>(&g_BzrFn_AIBuildConstructionEnd)},
-            {"AIBuildReservedAreaRemove", kGogAIBuildReservedAreaRemoveAddr, reinterpret_cast<void**>(&g_BzrFn_AIBuildReservedAreaRemove)},
-            {"AISpentCreditRefund", kGogAISpentCreditRefundAddr, reinterpret_cast<void**>(&g_BzrFn_AISpentCreditRefund)},
-            {"UnitsSOrderStop", kGogUnitsSOrderStopAddr, reinterpret_cast<void**>(&g_BzrFn_UnitsSOrderStop)},
-            {"AIBuildUnassignedCCAdd", kGogAIBuildUnassignedCCAddAddr, reinterpret_cast<void**>(&g_BzrFn_AIBuildUnassignedCCAdd)},
-            {"InitBuildItem", 0x0049F5C0, reinterpret_cast<void**>(&g_BzrFn_InitBuildItem)},
-            {"CleanupBuildItem", 0x0049F880, reinterpret_cast<void**>(&g_BzrFn_CleanupBuildItem)},
-            {"BuildMenuRoot", kBuildMenuRootAddr, reinterpret_cast<void**>(&g_BzrBuildMenuRoot)},
+            {"LegacyWorldUpdateRenderQueue", reinterpret_cast<void**>(&g_BzrFn_LegacyWorldUpdateRenderQueue)},
+            {"AIBuildConstructionEnd", reinterpret_cast<void**>(&g_BzrFn_AIBuildConstructionEnd)},
+            {"AIBuildReservedAreaRemove", reinterpret_cast<void**>(&g_BzrFn_AIBuildReservedAreaRemove)},
+            {"AISpentCreditRefund", reinterpret_cast<void**>(&g_BzrFn_AISpentCreditRefund)},
+            {"UnitsSOrderStop", reinterpret_cast<void**>(&g_BzrFn_UnitsSOrderStop)},
+            {"AIBuildUnassignedCCAdd", reinterpret_cast<void**>(&g_BzrFn_AIBuildUnassignedCCAdd)},
+            {"InitBuildItem", reinterpret_cast<void**>(&g_BzrFn_InitBuildItem)},
+            {"CleanupBuildItem", reinterpret_cast<void**>(&g_BzrFn_CleanupBuildItem)},
+            {"BuildMenuRoot", reinterpret_cast<void**>(&g_BzrBuildMenuRoot)},
         };
-        for (const EngineAddressRow& row : kRows)
-            *row.slot = reinterpret_cast<void*>(row.address);
+        constexpr size_t kRowCount = sizeof(kRows) / sizeof(kRows[0]);
+        HookEngine::EngineAddressStatus status[kRowCount] = {};
+
+        const auto bind = [&](size_t i) {
+            uint32_t address = 0;
+            status[i] = HookEngine::ResolveEngineAddress(kRows[i].name, address);
+            *kRows[i].slot = reinterpret_cast<void*>(static_cast<uintptr_t>(address));
+        };
+        for (size_t i = 0; i < kRowCount; ++i)
+            bind(i);
+
+        // On Steam a mismatch can be SteamStub still rewriting the page, so a
+        // mismatched row gets a bounded second look (about one second) before
+        // it counts as failed. GOG maps its image once; there is nothing to
+        // wait for.
+        if (g_IsSteamExe)
+        {
+            for (int attempt = 0; attempt < 100; ++attempt)
+            {
+                bool pending = false;
+                for (size_t i = 0; i < kRowCount; ++i)
+                    pending = pending || status[i] == HookEngine::EngineAddressStatus::Mismatch;
+                if (!pending)
+                    break;
+                Sleep(10);
+                for (size_t i = 0; i < kRowCount; ++i)
+                {
+                    if (status[i] == HookEngine::EngineAddressStatus::Mismatch)
+                        bind(i);
+                }
+            }
+        }
+
+        unsigned bound = 0;
+        unsigned data = 0;
+        unsigned failed = 0;
+        for (size_t i = 0; i < kRowCount; ++i)
+        {
+            switch (status[i])
+            {
+            case HookEngine::EngineAddressStatus::Bound:
+                ++bound;
+                break;
+            case HookEngine::EngineAddressStatus::BoundData:
+                ++data;
+                break;
+            default:
+            {
+                ++failed;
+                const char* why =
+                    status[i] == HookEngine::EngineAddressStatus::Missing ? "has no engine_addresses row" :
+                    status[i] == HookEngine::EngineAddressStatus::Mismatch ? "guard bytes differ" :
+                    "is unreadable";
+                LogShimA(LogLevel::Warn, "resolve",
+                    "[ADDR] %s %s; pointer left null, dependent features stand down",
+                    kRows[i].name, why);
+                break;
+            }
+            }
+        }
+        LogShimA(failed ? LogLevel::Warn : LogLevel::Info, "resolve",
+            "[ADDR] engine addresses: verified=%u data=%u failed=%u of %u",
+            bound, data, failed, static_cast<unsigned>(kRowCount));
     }
 
     // One entry in an ordered list of init calls. The name is for reading
@@ -2627,6 +2689,59 @@ namespace BZROpenShim
     {
         for (const InitStep& step : steps)
             step.run();
+    }
+
+    const char* FindUnboundEngineHelperForPatch(const char* patchName)
+    {
+        if (!patchName)
+            return nullptr;
+        struct Need
+        {
+            const char* label;
+            const void* pointer;
+        };
+        const auto firstMissing = [](std::initializer_list<Need> needs) -> const char* {
+            for (const Need& need : needs)
+            {
+                if (!need.pointer)
+                    return need.label;
+            }
+            return nullptr;
+        };
+        const std::string_view name(patchName);
+        // The map filter patches share state (5/8 fills the list pointer the
+        // scroll callbacks use, 7/8 sets the flag 8/8 reads), so the family
+        // stands down as a unit. 5/8 and 8/8 call through the first two
+        // pointers from naked asm with no check.
+        if (name.rfind("Map Filters ", 0) == 0)
+        {
+            return firstMissing({{"MapFilterCreate", g_BzrFn_MapFilterCreate},
+                                 {"MapFilter8Check", g_BzrFn_MapFilter8Check},
+                                 {"MapFilter6", reinterpret_cast<const void*>(g_BzrFn_MapFilter6)}});
+        }
+        // 1/4's trampoline calls both helpers unchecked; the four parts are
+        // one fix and are not applied piecemeal.
+        if (name.rfind("Vehicle List Mod Fix ", 0) == 0)
+        {
+            return firstMissing({{"VehicleFixPre", g_BzrFn_VehicleFixPre},
+                                 {"VehicleFixOrig", g_BzrFn_VehicleFixOrig}});
+        }
+        // Hooks that replace a stock call and forward to the original.
+        if (name == "Chunk Render Resolve Hook")
+            return firstMissing({{"ChunkResolve", reinterpret_cast<const void*>(g_BzrFn_ChunkResolve)}});
+        if (name == "Engine Flame Control VTable Hook" || name == "Engine Flame Submit VTable Hook")
+        {
+            return firstMissing({{"EngineFlameControl", reinterpret_cast<const void*>(g_BzrFn_EngineFlameControl)},
+                                 {"EngineFlameSubmit", reinterpret_cast<const void*>(g_BzrFn_EngineFlameSubmit)}});
+        }
+        if (name == "Chunk Effect Simulate VTable Hook")
+            return firstMissing({{"ChunkEffectSimulate", reinterpret_cast<const void*>(g_BzrFn_ChunkEffectSimulate)}});
+        if (name == "Legacy World Update RenderQueue VTable Hook")
+        {
+            return firstMissing({{"LegacyWorldUpdateRenderQueue",
+                                  reinterpret_cast<const void*>(g_BzrFn_LegacyWorldUpdateRenderQueue)}});
+        }
+        return nullptr;
     }
 
     void ResolveBzrHooks(bool isSteam)
