@@ -910,6 +910,7 @@ namespace BZROpenShim
         bool TryApplySelectedFlagThroughEngine(const char* source);
         bool TryApplyCachedFlagPayload(const char* source);
         void InstallBzrNetRouteObserverIfPossible();
+        void InstallMapFilterExtrasIfEnabled();
         bool IsWidgetLiveChildOfParent(void* parent, void* widget);
         const char* EnsureInvalidThumbnailTextureName();
         void ShowNicknameApplyConfirmation(void* entry, BzrNetNicknameResult result);
