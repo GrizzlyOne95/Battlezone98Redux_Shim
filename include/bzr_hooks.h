@@ -205,7 +205,6 @@ namespace BZROpenShim
     void __fastcall MapFilterOnScrollDown(void* thisPtr);
     void __cdecl MapFilters1Rebuild(void* listPtr);
     void __cdecl MapFilters2Filter(void* listPtr, BzrString* filter);
-    void __cdecl ApplyWeaponMaskCarrierBiasForCraft(void* craft);
     // AI weapon-mask hardpoint selection. Each replaces one call to a
     // __thiscall engine routine; the trampolines supply the third argument from
     // the patched routine's own stack frame.
