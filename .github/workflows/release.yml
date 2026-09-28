@@ -1,22 +1,28 @@
 name: Build and Release
 
+# A push of a v* tag builds, packages and publishes a GitHub release.
+#
+# workflow_dispatch is the dry run: from a branch it runs the identical build,
+# gates and packaging, uploads the release assets as a workflow artifact, and
+# stops. It cannot publish: the publish job is skipped unless the ref is a
+# refs/tags/v* tag, and it is the only job holding a write token. Neither job
+# creates or moves a tag. Dispatching on an existing v* tag publishes that
+# tag's release, exactly as the tag push would have.
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: windows-2022
     timeout-minutes: 25
-
-    # softprops/action-gh-release creates the release through the REST API with
-    # GITHUB_TOKEN. This repository's default workflow token is read-only, so
-    # without this the build succeeds and Create Release fails with
-    # "Resource not accessible by integration".
     permissions:
-      contents: write
+      contents: read
 
     steps:
     - name: Checkout repository
@@ -24,205 +30,12 @@ jobs:
       with:
         submodules: recursive
 
-    # A tagged release is authoritative user-facing output, so it must pass the
-    # same safety/config/regression gates as normal main and pull-request builds.
-    - name: Validate network safety baseline
-      shell: pwsh
-      run: ./tools/validate-network-baseline.ps1
-
-    # The Ogre reference headers are an untracked sparse checkout, so a fresh
-    # CI checkout has no OgreEntity.h. This step is idempotent and commit-pinned.
-    - name: Fetch pinned Ogre reference headers
-      shell: pwsh
-      run: ./setup-dev.ps1
-
-    - name: Run Ogre profiler algorithm tests
-      shell: pwsh
-      run: ./scripts/run_ogre_profiler_tests.ps1
-
-    - name: Run INI/config tests
-      shell: pwsh
-      run: ./scripts/run_ini_tests.ps1
-
-    - name: Run full CTest regression suite
-      shell: pwsh
-      run: |
-        cmake -S tests -B build/tests -A Win32
-        cmake --build build/tests --config Release
-        ctest --test-dir build/tests -C Release --output-on-failure
-
-    - name: Validate DX11 Enhanced FXAA shader
-      shell: pwsh
-      run: |
-        $kitsBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
-        $fxc = Get-ChildItem -LiteralPath $kitsBin -Filter fxc.exe -File -Recurse |
-          Where-Object { $_.FullName -match '\\x86\\fxc\.exe$' } |
-          Sort-Object FullName -Descending |
-          Select-Object -First 1
-
-        if (-not $fxc) {
-          throw "Windows SDK fxc.exe was not found under $kitsBin"
-        }
-
-        $shader = Join-Path $PWD "shaders\dx11_enhanced_fxaa.hlsl"
-        $includeDir = Join-Path $PWD "reverse_engineering\prerelease_2016\removed_files"
-        $vsOut = Join-Path $env:RUNNER_TEMP "dx11_enhanced_fxaa_vs.cso"
-        $psOut = Join-Path $env:RUNNER_TEMP "dx11_enhanced_fxaa_ps.cso"
-
-        & $fxc.FullName /nologo /Ges /O3 /I $includeDir /T vs_5_0 /E VSMain /Fo $vsOut $shader
-        if ($LASTEXITCODE -ne 0) {
-          throw "DX11 Enhanced FXAA VSMain / vs_5_0 compilation failed"
-        }
-
-        & $fxc.FullName /nologo /Ges /O3 /I $includeDir /T ps_5_0 /E PSMain /Fo $psOut $shader
-        if ($LASTEXITCODE -ne 0) {
-          throw "DX11 Enhanced FXAA PSMain / ps_5_0 compilation failed"
-        }
-
-        "FXAA 3.11 HLSL5 validation passed using $($fxc.FullName)"
-
-    # The FXAA step above validates one shader. This validates the canonical
-    # Enhanced payload -- every HLSL variant its .program scripts declare, at
-    # the exact defines Ogre will compile them with. A broken OSE_* variant is
-    # invisible on a Campaign Reimagined install, because CR's own programs are
-    # what the scheme resolves to there; it reaches users without CR installed.
-    - name: Validate Enhanced payload shader variants
-      shell: pwsh
-      run: ./scripts/Test-EnhancedShaderCompile.ps1
-
-    # Same gate as build-win32.yml: a release must not ship shaders the
-    # branch build would have rejected.
-    - name: Validate Enhanced PSSM v2 math, isolation, and cost
-      shell: pwsh
-      run: ./scripts/Test-EnhancedPssmV2.ps1
-
-    - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v2
-
-    - name: Build Shim
-      shell: pwsh
-      run: |
-        msbuild BZROpenShim.sln `
-          /m `
-          /t:Build `
-          /p:Configuration=Release `
-          /p:Platform=Win32 `
-          /p:GenerateFullPaths=true `
-          /verbosity:minimal
-
-    # Same rule as the rest of this file: a tagged release is authoritative
-    # user-facing output, so it passes the gates a pull request passes. These
-    # two were only ever in build-win32.yml, which meant the release lane was
-    # the one lane that never proved the plugin ABI loads or that the public
-    # export table survived.
-    - name: Run BZLoader host lifecycle test
-      shell: pwsh
-      run: |
-        $exe = Join-Path $PWD "bin/Release/BZLoaderHostTest.exe"
-        $plugin = Join-Path $PWD "bin/Release/plugins/bzloader_test_plugin.dll"
-
-        foreach ($required in @($exe, $plugin)) {
-          if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
-            throw "BZLoader lifecycle test prerequisite is missing: $required"
-          }
-        }
-
-        & $exe
-        if ($LASTEXITCODE -ne 0) {
-          Write-Host "--- bzloader.log ---"
-          Get-Content -LiteralPath (Join-Path $PWD "bin/Release/bzloader.log") -ErrorAction SilentlyContinue
-          throw "BZLoaderHostTest failed with exit code $LASTEXITCODE"
-        }
-
-    # docs/OPENSHIM_SDK_V2.md makes GetModuleHandleA("winmm.dll") the documented
-    # discovery path for ~65 exports, and they are forwarding thunks now. A
-    # dropped or re-decorated name breaks Extra Utilities silently at runtime,
-    # which is precisely the kind of thing a release must not be the first to
-    # discover.
-    - name: Verify winmm.dll export parity
-      shell: pwsh
-      run: |
-        $dumpbin = Get-ChildItem -LiteralPath "${env:VCToolsInstallDir}bin" -Filter dumpbin.exe -File -Recurse |
-          Where-Object { $_.FullName -like '*\x86\dumpbin.exe' } |
-          Select-Object -First 1
-        if (-not $dumpbin) {
-          $dumpbin = Get-ChildItem -LiteralPath "${env:ProgramFiles}\Microsoft Visual Studio" -Filter dumpbin.exe -File -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        }
-        if (-not $dumpbin) { throw "dumpbin.exe was not found" }
-
-        $dll = Join-Path $PWD "bin/Release/winmm.dll"
-        $raw = & $dumpbin.FullName /nologo /exports $dll
-        $actual = $raw |
-          Select-String -Pattern '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)(?:\s+=\s+(\S+))?' |
-          ForEach-Object {
-            $n = $_.Matches[0].Groups[1].Value
-            $decorated = $_.Matches[0].Groups[2].Value
-            # Pin the __stdcall stack size, but not which symbol /OPT:ICF
-            # folded the body onto -- that is a linker optimisation, not ABI.
-            if ($decorated -match '@(\d+)$') { "$n@$($Matches[1])" } else { $n }
-          } |
-          Sort-Object -Unique
-
-        $expected = Get-Content -LiteralPath (Join-Path $PWD "tests/winmm_export_baseline.txt") |
-          Where-Object { $_ -and -not $_.StartsWith("#") } |
-          Sort-Object -Unique
-
-        $missing = Compare-Object $expected $actual | Where-Object { $_.SideIndicator -eq "<=" }
-        if ($missing) {
-          $missing | ForEach-Object { Write-Host "MISSING EXPORT: $($_.InputObject)" }
-          throw "winmm.dll dropped or changed the ABI of $($missing.Count) export(s) that a shipped build provided"
-        }
-        "export parity OK: $($expected.Count) baseline exports all present"
-
-    # Verify the exact binaries that will be published before any release
-    # packaging. A tagged release that ships the bootstrap without its runtime
-    # is worse than a failed build: it installs cleanly and disables OpenShim.
-    # The tag is the promise; the binaries have to keep it. v1.0.0.31 shipped
-    # binaries reporting 1.0.0.30 because the tag moved for a workflow-only
-    # fix and version.rc did not. With three independently identifiable
-    # binaries that is worth enforcing rather than remembering, so the
-    # expected version is derived from the tag and checked against both the
-    # string and numeric version fields plus each module's self-identification.
-    #
-    # workflow_dispatch has no version tag, so the version assertion is
-    # skipped there and the structural checks still run.
-    - name: Verify the load chain is whole
-      shell: pwsh
-      run: |
-        $ref = "${{ github.ref_name }}"
-        if ($ref -match '^v(\d+\.\d+\.\d+\.\d+)$') {
-          $expected = $Matches[1]
-          Write-Host "tag $ref requires binary version $expected"
-          ./scripts/Test-PackageShape.ps1 -Root . -Layout Build -ExpectedVersion $expected
-        } else {
-          Write-Host "::notice::ref '$ref' is not a version tag; skipping the version assertion"
-          ./scripts/Test-PackageShape.ps1 -Root . -Layout Build
-        }
-
-    - name: Verify release output
-      shell: pwsh
-      run: |
-        # Campaign Reimagined's staging refuses a bundled .pdb it cannot match
-        # to the binary, so a release without symbols cannot be packaged
-        # downstream. Fail here rather than at someone else's publish. All
-        # three modules ship symbols now: a crash can land in any of them.
-        $required = @(
-          "bin/Release/winmm.dll",
-          "bin/Release/winmm.pdb",
-          "bin/Release/bzloader.dll",
-          "bin/Release/bzloader.pdb",
-          "bin/Release/plugins/openshim.dll",
-          "bin/Release/plugins/openshim.pdb"
-        )
-        foreach ($rel in $required) {
-          $path = Join-Path $PWD $rel
-          if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-            throw "Expected release output was not produced: $rel"
-          }
-          $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-          Write-Host ("{0,-34} SHA-256: {1}" -f $rel, $hash)
-        }
+    # Every gate, the build, and every post-build check are the composite
+    # action build-win32.yml runs on each pull request and main push, so a
+    # release is built and verified exactly as PR CI does. On a v<a.b.c.d>
+    # tag the action also asserts that all three binaries carry that version.
+    - name: Build and verify Win32
+      uses: ./.github/actions/build-win32
 
     - name: Prepare standalone and immutable suite artifacts
       shell: pwsh
@@ -383,6 +196,48 @@ jobs:
           Write-Host "  verified $name"
         }
         "packaged suite verified: $($sums.Count) checksummed files, chain complete"
+
+    # The exact bytes the publish job will attach, and on a dry run the whole
+    # point of the run: download this artifact to inspect a release before
+    # tagging it.
+    - name: Upload release assets
+      uses: actions/upload-artifact@v4
+      with:
+        name: OpenShim-Release-Assets
+        if-no-files-found: error
+        retention-days: 14
+        path: release_assets/
+
+  publish:
+    needs: build
+    # The only way anything is published. A branch dispatch never gets here.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # softprops/action-gh-release creates the release through the REST API with
+    # GITHUB_TOKEN. This repository's default workflow token is read-only, so
+    # without this the build succeeds and Create Release fails with
+    # "Resource not accessible by integration".
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download release assets
+      uses: actions/download-artifact@v4
+      with:
+        name: OpenShim-Release-Assets
+        path: release_assets
+
+    # The build job verified these bytes before uploading them; check that
+    # the artifact hand-off delivered the same bytes, with the standard POSIX
+    # tool the manifests are written for.
+    - name: Re-verify the hand-off against the manifests
+      shell: bash
+      working-directory: release_assets
+      run: |
+        sha256sum -c SHA256SUMS.txt
+        sha256sum -c OpenShim-Suite.zip.sha256
 
     - name: Create Release
       id: create_release
