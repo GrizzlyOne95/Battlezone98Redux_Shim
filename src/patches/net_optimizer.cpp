@@ -2,6 +2,7 @@
 #include "bool_token.h"
 #include "netcode_hooks.h"
 #include "bzrnet_protocol.h"
+#include "net_reorder_core.h"
 #include "shim_log.h"
 #include "engine_globals.h"
 
@@ -19,6 +20,8 @@
 #include <cstring>
 #include <cwchar>
 #include <iterator>
+#include <memory>
+#include <new>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -48,7 +51,9 @@ namespace
     constexpr uint32_t kReorderSeqMinPayloadBytes = 17;
     constexpr uint32_t kReorderSlotCount = 8;
     constexpr uint32_t kReorderMaxPeers = 32;
-    constexpr uint32_t kReorderMaxPacketBytes = 1500;
+    // Bytes one reorder slot (and one send-dup entry) holds. Larger datagrams
+    // bypass both: see NetReorder::ClassifyDatagram and DupEnqueue.
+    constexpr uint32_t kReorderMaxPacketBytes = NetReorder::kSlotBytes;
     constexpr uint32_t kBufferLogMagic = 0x474C5A42u; // 'BZLG'
     constexpr uint32_t kBufferLogVersion = 2;
     constexpr uint32_t kDefaultBufferLogPayloadBytes = 32;
@@ -2291,23 +2296,20 @@ namespace
         return FormatSockaddr(reinterpret_cast<const sockaddr*>(&addr), static_cast<int>(sizeof(addr)));
     }
 
-    uint32_t ScatterCopy(LPWSABUF buffers, DWORD bufferCount, const uint8_t* source, uint32_t sourceLength)
+    // One datagram handed to the game by the reorder path. `truncated` means
+    // the caller's buffers were smaller than the datagram: the hook then
+    // reports WSAEMSGSIZE, as Winsock itself does for a short UDP receive,
+    // instead of returning the cut-down datagram as a success.
+    struct ReorderDelivery
     {
-        uint32_t copied = 0;
-        for (DWORD i = 0; i < bufferCount && copied < sourceLength; ++i)
-        {
-            if (!buffers[i].buf || buffers[i].len == 0)
-                continue;
+        uint32_t delivered = 0;
+        uint32_t datagramBytes = 0;
+        uint32_t capacity = 0;
+        bool truncated = false;
+        sockaddr_in source = {};
+    };
 
-            uint32_t chunk = sourceLength - copied;
-            chunk = (std::min)(chunk, static_cast<uint32_t>(buffers[i].len));
-            std::memcpy(buffers[i].buf, source + copied, chunk);
-            copied += chunk;
-        }
-        return copied;
-    }
-
-    uint32_t CopyPacketToCaller(
+    ReorderDelivery CopyPacketToCaller(
         LPWSABUF buffers,
         DWORD bufferCount,
         LPDWORD bytesRecv,
@@ -2316,21 +2318,29 @@ namespace
         LPINT fromLen,
         const uint8_t* data,
         uint32_t dataLength,
-        const sockaddr_in* source)
+        const sockaddr_in& source)
     {
-        const uint32_t copied = ScatterCopy(buffers, bufferCount, data, dataLength);
+        const NetReorder::ScatterResult scatter = NetReorder::ScatterDatagram(
+            buffers, static_cast<uint32_t>(bufferCount), data, dataLength);
         if (bytesRecv)
-            *bytesRecv = copied;
+            *bytesRecv = scatter.copied;
         if (flags)
             *flags = 0;
-        if (source && from && fromLen)
+        if (from && fromLen)
         {
-            const int copyBytes = (std::min)(*fromLen, static_cast<int>(sizeof(*source)));
+            const int copyBytes = (std::min)(*fromLen, static_cast<int>(sizeof(source)));
             if (copyBytes > 0)
-                std::memcpy(from, source, static_cast<size_t>(copyBytes));
-            *fromLen = static_cast<int>(sizeof(*source));
+                std::memcpy(from, &source, static_cast<size_t>(copyBytes));
+            *fromLen = static_cast<int>(sizeof(source));
         }
-        return copied;
+
+        ReorderDelivery delivery;
+        delivery.delivered = scatter.copied;
+        delivery.datagramBytes = dataLength;
+        delivery.capacity = scatter.capacity;
+        delivery.truncated = scatter.truncated;
+        delivery.source = source;
+        return delivery;
     }
 
     PeerBuf* FindOrCreatePeerBufLocked(SOCKET s, const sockaddr_in& from)
@@ -2404,66 +2414,56 @@ namespace
         peer.lastAdjustMs = nowMs;
     }
 
-    void InsertPacketLocked(PeerBuf& peer, uint32_t sequence, uint64_t timestampMs, const sockaddr_in& from, const uint8_t* data, uint32_t dataLength)
+    // Returns false when the datagram was not taken into the ring; the caller
+    // then delivers it immediately. ProcessReceivedDatagram only offers
+    // datagrams that fit a slot, so the size check is a last line of defence
+    // against cutting one down, never the normal path.
+    bool InsertPacketLocked(PeerBuf& peer, uint32_t sequence, uint64_t timestampMs, const sockaddr_in& from, const uint8_t* data, uint32_t dataLength)
     {
-        for (uint32_t i = 0; i < g_Config.reorderDepth; ++i)
-        {
-            ReorderSlot& slot = peer.slots[i];
-            if (slot.used && slot.sequence == sequence)
-            {
-                LogReorderf("[OpenShimNet] sid=%u reorder duplicate dropped sock=0x%08X peer=%s seq=%u filled=%u",
-                    GetSocketId(peer.socket),
-                    static_cast<unsigned>(peer.socket),
-                    FormatIpv4Peer(from).c_str(),
-                    sequence,
-                    peer.filled);
-                return;
-            }
-        }
+        if (dataLength > sizeof(peer.slots[0].data))
+            return false;
 
-        for (uint32_t i = 0; i < g_Config.reorderDepth; ++i)
+        const NetReorder::InsertPlan plan =
+            NetReorder::PlanInsert(peer.slots, g_Config.reorderDepth, sequence);
+        switch (plan.kind)
         {
-            ReorderSlot& slot = peer.slots[i];
-            if (slot.used)
-                continue;
+        case NetReorder::InsertKind::Rejected:
+            return false;
 
-            slot.used = 1;
-            slot.sequence = sequence;
-            slot.timestampMs = timestampMs;
-            slot.from = from;
-            slot.length = (std::min)(dataLength, kReorderMaxPacketBytes);
-            std::memcpy(slot.data, data, slot.length);
-            ++peer.filled;
-            LogReorderf("[OpenShimNet] sid=%u reorder buffered sock=0x%08X peer=%s seq=%u bytes=%u filled=%u",
+        case NetReorder::InsertKind::Duplicate:
+            LogReorderf("[OpenShimNet] sid=%u reorder duplicate dropped sock=0x%08X peer=%s seq=%u filled=%u",
                 GetSocketId(peer.socket),
                 static_cast<unsigned>(peer.socket),
                 FormatIpv4Peer(from).c_str(),
                 sequence,
-                slot.length,
                 peer.filled);
-            return;
+            return true;
+
+        case NetReorder::InsertKind::Free:
+        case NetReorder::InsertKind::EvictOldest:
+            break;
         }
 
-        ReorderSlot* oldest = &peer.slots[0];
-        for (uint32_t i = 1; i < g_Config.reorderDepth; ++i)
-        {
-            if (peer.slots[i].used && peer.slots[i].timestampMs < oldest->timestampMs)
-                oldest = &peer.slots[i];
-        }
-
-        oldest->used = 1;
-        oldest->sequence = sequence;
-        oldest->timestampMs = timestampMs;
-        oldest->from = from;
-        oldest->length = (std::min)(dataLength, kReorderMaxPacketBytes);
-        std::memcpy(oldest->data, data, oldest->length);
-        LogReorderf("[OpenShimNet] sid=%u reorder evicted oldest sock=0x%08X peer=%s newSeq=%u bytes=%u filled=%u",
+        const bool evicting = plan.kind == NetReorder::InsertKind::EvictOldest;
+        ReorderSlot& slot = peer.slots[plan.index];
+        slot.used = 1;
+        slot.sequence = sequence;
+        slot.timestampMs = timestampMs;
+        slot.from = from;
+        slot.length = dataLength;
+        std::memcpy(slot.data, data, dataLength);
+        if (!evicting)
+            ++peer.filled;
+        LogReorderf(evicting
+                ? "[OpenShimNet] sid=%u reorder evicted oldest sock=0x%08X peer=%s newSeq=%u bytes=%u filled=%u"
+                : "[OpenShimNet] sid=%u reorder buffered sock=0x%08X peer=%s seq=%u bytes=%u filled=%u",
             GetSocketId(peer.socket),
             static_cast<unsigned>(peer.socket),
             FormatIpv4Peer(from).c_str(),
             sequence,
-            oldest->length,
+            slot.length,
             peer.filled);
+        return true;
     }
 
     int PickReadySlotLocked(PeerBuf& peer, uint64_t nowMs)
@@ -2472,38 +2472,13 @@ namespace
             return -1;
 
         DecayReorderWindow(peer, nowMs);
-
-        if (peer.seqInitialized)
-        {
-            const uint32_t expected = peer.lastSequence + 1;
-            for (uint32_t i = 0; i < g_Config.reorderDepth; ++i)
-            {
-                if (peer.slots[i].used && peer.slots[i].sequence == expected)
-                    return static_cast<int>(i);
-            }
-        }
-
-        int lowestIndex = -1;
-        for (uint32_t i = 0; i < g_Config.reorderDepth; ++i)
-        {
-            if (!peer.slots[i].used)
-                continue;
-
-            if (lowestIndex < 0 || peer.slots[i].sequence < peer.slots[lowestIndex].sequence)
-                lowestIndex = static_cast<int>(i);
-        }
-
-        if (lowestIndex < 0)
-            return -1;
-
-        if (!peer.seqInitialized)
-            return lowestIndex;
-
-        const ReorderSlot& slot = peer.slots[lowestIndex];
-        if (nowMs >= slot.timestampMs && (nowMs - slot.timestampMs) >= peer.windowMs)
-            return lowestIndex;
-
-        return -1;
+        return NetReorder::PickReadySlot(
+            peer.slots,
+            g_Config.reorderDepth,
+            peer.seqInitialized != 0,
+            peer.lastSequence,
+            peer.windowMs,
+            nowMs);
     }
 
     bool TryDeliverBufferedPacket(
@@ -2514,11 +2489,9 @@ namespace
         LPDWORD flags,
         sockaddr* from,
         LPINT fromLen,
-        uint32_t& outDelivered,
-        sockaddr_in& outSource)
+        ReorderDelivery& outDelivery)
     {
-        outDelivered = 0;
-        std::memset(&outSource, 0, sizeof(outSource));
+        outDelivery = ReorderDelivery{};
 
         AcquireSRWLockExclusive(&g_ReorderLock);
 
@@ -2546,8 +2519,7 @@ namespace
             return false;
         }
 
-        outSource = selectedSlot->from;
-        outDelivered = CopyPacketToCaller(buffers, bufferCount, bytesRecv, flags, from, fromLen, selectedSlot->data, selectedSlot->length, &selectedSlot->from);
+        outDelivery = CopyPacketToCaller(buffers, bufferCount, bytesRecv, flags, from, fromLen, selectedSlot->data, selectedSlot->length, selectedSlot->from);
         selectedPeer->lastSequence = selectedSlot->sequence;
         selectedPeer->seqInitialized = 1;
         selectedSlot->used = 0;
@@ -2557,9 +2529,9 @@ namespace
         LogReorderf("[OpenShimNet] sid=%u reorder delivered sock=0x%08X peer=%s seq=%u bytes=%u remaining=%u windowMs=%u",
             GetSocketId(s),
             static_cast<unsigned>(s),
-            FormatIpv4Peer(outSource).c_str(),
+            FormatIpv4Peer(outDelivery.source).c_str(),
             selectedPeer->lastSequence,
-            outDelivered,
+            outDelivery.delivered,
             selectedPeer->filled,
             selectedPeer->windowMs);
 
@@ -3516,22 +3488,29 @@ namespace
         const sockaddr_in& packetSource,
         const uint8_t* packetData,
         uint32_t packetLength,
-        uint32_t& outDelivered,
-        sockaddr_in& outDeliveredSource)
+        ReorderDelivery& outDelivery)
     {
-        outDelivered = 0;
-        std::memset(&outDeliveredSource, 0, sizeof(outDeliveredSource));
+        outDelivery = ReorderDelivery{};
 
-        if (packetSource.sin_family != AF_INET || packetLength < kReorderSeqMinPayloadBytes)
+        // A datagram that cannot carry a sequence, or that is larger than a
+        // reorder slot, is handed over at once in arrival order. Oversized
+        // datagrams used to be cut to the slot size; they are now never
+        // buffered, so nothing is truncated on the game's behalf.
+        const NetReorder::Admission admission = NetReorder::ClassifyDatagram(
+            packetSource.sin_family == AF_INET,
+            packetLength,
+            kReorderSeqMinPayloadBytes,
+            kReorderMaxPacketBytes);
+        if (admission != NetReorder::Admission::Reorder)
         {
-            outDeliveredSource = packetSource;
-            outDelivered = CopyPacketToCaller(buffers, bufferCount, bytesRecv, flags, from, fromLen, packetData, packetLength, &packetSource);
-            LogReorderf("[OpenShimNet] sid=%u reorder bypass immediate sock=0x%08X peer=%s family=%d bytes=%u",
+            outDelivery = CopyPacketToCaller(buffers, bufferCount, bytesRecv, flags, from, fromLen, packetData, packetLength, packetSource);
+            LogReorderf("[OpenShimNet] sid=%u reorder bypass immediate sock=0x%08X peer=%s family=%d bytes=%u reason=%s",
                 GetSocketId(s),
                 static_cast<unsigned>(s),
                 FormatIpv4Peer(packetSource).c_str(),
                 static_cast<int>(packetSource.sin_family),
-                packetLength);
+                packetLength,
+                NetReorder::AdmissionReason(admission));
             return true;
         }
 
@@ -3540,26 +3519,27 @@ namespace
 
         AcquireSRWLockExclusive(&g_ReorderLock);
         PeerBuf* peer = FindOrCreatePeerBufLocked(s, packetSource);
-        if (!peer)
+        bool buffered = false;
+        if (peer)
         {
-            ReleaseSRWLockExclusive(&g_ReorderLock);
-            outDeliveredSource = packetSource;
-            outDelivered = CopyPacketToCaller(buffers, bufferCount, bytesRecv, flags, from, fromLen, packetData, packetLength, &packetSource);
-            LogReorderf("[OpenShimNet] sid=%u reorder fallback immediate sock=0x%08X peer=%s seq=%u bytes=%u reason=peer_table_full",
-                GetSocketId(s),
-                static_cast<unsigned>(s),
-                FormatIpv4Peer(packetSource).c_str(),
-                sequence,
-                packetLength);
-            return true;
+            const uint64_t arrivalMs = GetTickCount64();
+            AdaptReorderWindowOnArrival(*peer, sequence, arrivalMs);
+            buffered = InsertPacketLocked(*peer, sequence, arrivalMs, packetSource, packetData, packetLength);
         }
-
-        const uint64_t arrivalMs = GetTickCount64();
-        AdaptReorderWindowOnArrival(*peer, sequence, arrivalMs);
-        InsertPacketLocked(*peer, sequence, arrivalMs, packetSource, packetData, packetLength);
         ReleaseSRWLockExclusive(&g_ReorderLock);
 
-        return false;
+        if (buffered)
+            return false;
+
+        outDelivery = CopyPacketToCaller(buffers, bufferCount, bytesRecv, flags, from, fromLen, packetData, packetLength, packetSource);
+        LogReorderf("[OpenShimNet] sid=%u reorder fallback immediate sock=0x%08X peer=%s seq=%u bytes=%u reason=%s",
+            GetSocketId(s),
+            static_cast<unsigned>(s),
+            FormatIpv4Peer(packetSource).c_str(),
+            sequence,
+            packetLength,
+            peer ? "slot_rejected" : "peer_table_full");
+        return true;
     }
 
     void SetSocketIntOption(SOCKET s, int level, int optName, int value, const char* optLabel)
@@ -3975,10 +3955,16 @@ namespace
         {
             LogPacketActivity("WSASendTo", s, true, static_cast<int>(*bytesSent), to, toLen);
             LogRouteEvent("WSASendTo", s, to, toLen, true, 0, true);
-            uint8_t dupData[kReorderMaxPacketBytes] = {};
-            const uint32_t dupLength = GatherWsabufPayload(buffers, bufferCount, dupData, kReorderMaxPacketBytes);
-            if (dupLength > 0)
-                DupEnqueue(s, dupData, dupLength, to, toLen);
+            // A duplicate is only ever the whole datagram. One larger than a
+            // dup slot is not duplicated at all (gathering the first
+            // kReorderMaxPacketBytes would send the peer a truncated copy).
+            if (g_Config.sendDup && *bytesSent > 0 && *bytesSent <= kReorderMaxPacketBytes)
+            {
+                uint8_t dupData[kReorderMaxPacketBytes] = {};
+                const uint32_t dupLength = GatherWsabufPayload(buffers, bufferCount, dupData, static_cast<uint32_t>(*bytesSent));
+                if (dupLength == *bytesSent)
+                    DupEnqueue(s, dupData, dupLength, to, toLen);
+            }
         }
         else if (rc == SOCKET_ERROR)
         {
@@ -4051,7 +4037,7 @@ namespace
             LogPacketActivity("sendto", s, true, rc, to, toLen);
             LogRouteEvent("sendto", s, to, toLen, true, 0, true);
             if (buffer && rc > 0)
-                DupEnqueue(s, reinterpret_cast<const uint8_t*>(buffer), static_cast<uint32_t>((std::min)(rc, static_cast<int>(kReorderMaxPacketBytes))), to, toLen);
+                DupEnqueue(s, reinterpret_cast<const uint8_t*>(buffer), static_cast<uint32_t>(rc), to, toLen);
         }
         else
         {
@@ -4102,6 +4088,68 @@ namespace
             payloadLength);
     }
 
+    // Private per-thread receive buffer for the reorder path, large enough for
+    // any IPv4 UDP datagram. Heap-allocated once per receiving thread rather
+    // than taking 64 KiB of the game thread's stack. nullptr only when the
+    // allocation failed; the hook then stands down for that call.
+    uint8_t* AcquireReorderReceiveBuffer()
+    {
+        thread_local std::unique_ptr<uint8_t[]> buffer;
+        if (!buffer)
+            buffer.reset(new (std::nothrow) uint8_t[NetReorder::kReceiveBufferBytes]);
+        return buffer.get();
+    }
+
+    // Finishes a WSARecvFrom the reorder path satisfied itself. A datagram
+    // larger than the caller's buffers is reported the way Winsock reports it
+    // for UDP: the buffers hold the leading bytes, *bytesRecv says how many,
+    // and the call fails with WSAEMSGSIZE. The buffer-log payload is gathered
+    // across every WSABUF the datagram was scattered into, not read from
+    // buffers[0] alone.
+    int CompleteReorderDelivery(SOCKET s, LPWSABUF buffers, DWORD bufferCount, const ReorderDelivery& delivery)
+    {
+        const int err = delivery.truncated ? WSAEMSGSIZE : 0;
+        if (delivery.truncated)
+        {
+            LogReorderf("[OpenShimNet] sid=%u reorder delivery truncated sock=0x%08X peer=%s datagram=%u capacity=%u delivered=%u result=WSAEMSGSIZE",
+                GetSocketId(s),
+                static_cast<unsigned>(s),
+                FormatIpv4Peer(delivery.source).c_str(),
+                delivery.datagramBytes,
+                delivery.capacity,
+                delivery.delivered);
+        }
+
+        if (g_BufferLogEnabled)
+        {
+            uint8_t capture[kRelayCapturePayloadBytes] = {};
+            const uint32_t captured = GatherWsabufPayload(
+                buffers,
+                bufferCount,
+                capture,
+                (std::min)(delivery.delivered, static_cast<uint32_t>(sizeof(capture))));
+            CaptureRecvPathEvent(
+                kBufferLogEventWSARecvFrom,
+                s,
+                reinterpret_cast<const sockaddr*>(&delivery.source),
+                0,
+                GetRequestedWsabufBytes(buffers, bufferCount),
+                delivery.delivered,
+                static_cast<uint32_t>(err),
+                captured > 0 ? capture : nullptr);
+        }
+        LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(delivery.delivered), reinterpret_cast<const sockaddr*>(&delivery.source), static_cast<int>(sizeof(delivery.source)));
+
+        // The logging above may call getpeername/getsockname, which overwrite
+        // the thread's WSA error; set the result last.
+        if (g_RealWSASetLastError)
+            g_RealWSASetLastError(err);
+        if (!delivery.truncated)
+            return 0;
+        LogSocketError("WSARecvFrom", s, SOCKET_ERROR, &SocketState::lastRecvFromError);
+        return SOCKET_ERROR;
+    }
+
     bool MarkReorderBypassReasonForLog(SOCKET s, uint32_t reasonBit)
     {
         bool first = false;
@@ -4121,13 +4169,15 @@ namespace
     int WSAAPI Hook_WSARecvFrom(SOCKET s, LPWSABUF buffers, DWORD bufferCount, LPDWORD bytesRecv, LPDWORD flags, sockaddr* from, LPINT fromLen, LPWSAOVERLAPPED overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completionRoutine)
     {
         EnsureSocketOptions(s);
-        const bool canReorder =
+        const bool reorderArgsOk =
             g_Config.enablePacketReorder &&
             IsUdpSocket(s) &&
             overlapped == nullptr &&
             completionRoutine == nullptr &&
             buffers != nullptr &&
             bufferCount > 0;
+        uint8_t* const reorderBuffer = reorderArgsOk ? AcquireReorderReceiveBuffer() : nullptr;
+        const bool canReorder = reorderBuffer != nullptr;
 
         if (!canReorder)
         {
@@ -4154,6 +4204,11 @@ namespace
                 {
                     reason = "bad_args";
                     reasonBit = 1u << 4;
+                }
+                else
+                {
+                    reason = "no_receive_buffer";
+                    reasonBit = 1u << 5;
                 }
 
                 // A disabled reorder path is the normal default and can run
@@ -4216,36 +4271,24 @@ namespace
 
         g_ReorderSocket = s;
         g_LastRecvCallMs = GetTickCount64();
-        uint32_t delivered = 0;
-        sockaddr_in deliveredSource = {};
-        if (TryDeliverBufferedPacket(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, delivered, deliveredSource))
+        ReorderDelivery delivery;
+        if (TryDeliverBufferedPacket(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, delivery))
         {
-            if (g_RealWSASetLastError)
-                g_RealWSASetLastError(0);
             LogReorderf("[OpenShimNet] sid=%u reorder satisfied from buffer before recv sock=0x%08X bytes=%u peer=%s",
                 GetSocketId(s),
                 static_cast<unsigned>(s),
-                delivered,
-                FormatIpv4Peer(deliveredSource).c_str());
-            CaptureRecvPathEvent(
-                kBufferLogEventWSARecvFrom,
-                s,
-                reinterpret_cast<const sockaddr*>(&deliveredSource),
-                0,
-                GetRequestedWsabufBytes(buffers, bufferCount),
-                delivered,
-                0,
-                buffers && bufferCount > 0 && buffers[0].buf
-                    ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
-                    : nullptr);
-            LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(delivered), reinterpret_cast<const sockaddr*>(&deliveredSource), static_cast<int>(sizeof(deliveredSource)));
-            return 0;
+                delivery.delivered,
+                FormatIpv4Peer(delivery.source).c_str());
+            return CompleteReorderDelivery(s, buffers, bufferCount, delivery);
         }
 
-        uint8_t packetBuffer[kReorderMaxPacketBytes] = {};
+        // The hook's own receive buffer holds any IPv4 UDP datagram, so the
+        // kernel never cuts one short here; whether it fits the game's buffers
+        // is decided when it is handed over (CopyPacketToCaller).
         WSABUF packetWsabuf = {};
-        packetWsabuf.buf = reinterpret_cast<char*>(packetBuffer);
-        packetWsabuf.len = kReorderMaxPacketBytes;
+        packetWsabuf.buf = reinterpret_cast<char*>(reorderBuffer);
+        packetWsabuf.len = NetReorder::kReceiveBufferBytes;
+        const uint8_t* const packetBuffer = reorderBuffer;
 
         DWORD firstBytes = 0;
         DWORD firstFlags = 0;
@@ -4270,28 +4313,14 @@ namespace
                 rc,
                 err);
             if (err == WSAEWOULDBLOCK &&
-                TryDeliverBufferedPacket(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, delivered, deliveredSource))
+                TryDeliverBufferedPacket(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, delivery))
             {
-                if (g_RealWSASetLastError)
-                    g_RealWSASetLastError(0);
                 LogReorderf("[OpenShimNet] sid=%u reorder late buffer deliver after wouldblock sock=0x%08X bytes=%u peer=%s",
                     GetSocketId(s),
                     static_cast<unsigned>(s),
-                    delivered,
-                    FormatIpv4Peer(deliveredSource).c_str());
-                CaptureRecvPathEvent(
-                    kBufferLogEventWSARecvFrom,
-                    s,
-                    reinterpret_cast<const sockaddr*>(&deliveredSource),
-                    0,
-                    GetRequestedWsabufBytes(buffers, bufferCount),
-                    delivered,
-                    0,
-                    buffers && bufferCount > 0 && buffers[0].buf
-                        ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
-                        : nullptr);
-                LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(delivered), reinterpret_cast<const sockaddr*>(&deliveredSource), static_cast<int>(sizeof(deliveredSource)));
-                return 0;
+                    delivery.delivered,
+                    FormatIpv4Peer(delivery.source).c_str());
+                return CompleteReorderDelivery(s, buffers, bufferCount, delivery);
             }
 
             if (g_RealWSASetLastError)
@@ -4305,24 +4334,8 @@ namespace
             LogReorderf("[OpenShimNet] sid=%u reorder wake packet consumed sock=0x%08X",
                 GetSocketId(s),
                 static_cast<unsigned>(s));
-            if (TryDeliverBufferedPacket(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, delivered, deliveredSource))
-            {
-                if (g_RealWSASetLastError)
-                    g_RealWSASetLastError(0);
-                CaptureRecvPathEvent(
-                    kBufferLogEventWSARecvFrom,
-                    s,
-                    reinterpret_cast<const sockaddr*>(&deliveredSource),
-                    0,
-                    GetRequestedWsabufBytes(buffers, bufferCount),
-                    delivered,
-                    0,
-                    buffers && bufferCount > 0 && buffers[0].buf
-                        ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
-                        : nullptr);
-                LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(delivered), reinterpret_cast<const sockaddr*>(&deliveredSource), static_cast<int>(sizeof(deliveredSource)));
-                return 0;
-            }
+            if (TryDeliverBufferedPacket(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, delivery))
+                return CompleteReorderDelivery(s, buffers, bufferCount, delivery);
 
             if (g_RealWSASetLastError)
                 g_RealWSASetLastError(WSAEWOULDBLOCK);
@@ -4336,28 +4349,14 @@ namespace
             static_cast<unsigned long>(firstBytes),
             static_cast<unsigned long>(firstFlags));
 
-        if (ProcessReceivedDatagram(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, firstSource, packetBuffer, firstBytes, delivered, deliveredSource))
+        if (ProcessReceivedDatagram(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, firstSource, packetBuffer, firstBytes, delivery))
         {
-            if (g_RealWSASetLastError)
-                g_RealWSASetLastError(0);
             LogReorderf("[OpenShimNet] sid=%u reorder delivered immediate after first recv sock=0x%08X bytes=%u peer=%s",
                 GetSocketId(s),
                 static_cast<unsigned>(s),
-                delivered,
-                FormatIpv4Peer(deliveredSource).c_str());
-            CaptureRecvPathEvent(
-                kBufferLogEventWSARecvFrom,
-                s,
-                reinterpret_cast<const sockaddr*>(&deliveredSource),
-                0,
-                GetRequestedWsabufBytes(buffers, bufferCount),
-                delivered,
-                0,
-                buffers && bufferCount > 0 && buffers[0].buf
-                    ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
-                    : nullptr);
-            LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(delivered), reinterpret_cast<const sockaddr*>(&deliveredSource), static_cast<int>(sizeof(deliveredSource)));
-            return 0;
+                delivery.delivered,
+                FormatIpv4Peer(delivery.source).c_str());
+            return CompleteReorderDelivery(s, buffers, bufferCount, delivery);
         }
 
         uint32_t drainedPackets = 1;
@@ -4406,55 +4405,27 @@ namespace
                 static_cast<unsigned long>(drainBytes),
                 static_cast<unsigned long>(drainFlags));
 
-            if (ProcessReceivedDatagram(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, drainSource, packetBuffer, drainBytes, delivered, deliveredSource))
+            if (ProcessReceivedDatagram(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, drainSource, packetBuffer, drainBytes, delivery))
             {
-                if (g_RealWSASetLastError)
-                    g_RealWSASetLastError(0);
                 LogReorderf("[OpenShimNet] sid=%u reorder delivered during drain sock=0x%08X drained=%u bytes=%u peer=%s",
                     GetSocketId(s),
                     static_cast<unsigned>(s),
                     drainedPackets,
-                    delivered,
-                    FormatIpv4Peer(deliveredSource).c_str());
-                CaptureRecvPathEvent(
-                    kBufferLogEventWSARecvFrom,
-                    s,
-                    reinterpret_cast<const sockaddr*>(&deliveredSource),
-                    0,
-                    GetRequestedWsabufBytes(buffers, bufferCount),
-                    delivered,
-                    0,
-                    buffers && bufferCount > 0 && buffers[0].buf
-                        ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
-                        : nullptr);
-                LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(delivered), reinterpret_cast<const sockaddr*>(&deliveredSource), static_cast<int>(sizeof(deliveredSource)));
-                return 0;
+                    delivery.delivered,
+                    FormatIpv4Peer(delivery.source).c_str());
+                return CompleteReorderDelivery(s, buffers, bufferCount, delivery);
             }
         }
 
-        if (TryDeliverBufferedPacket(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, delivered, deliveredSource))
+        if (TryDeliverBufferedPacket(s, buffers, bufferCount, bytesRecv, flags, from, fromLen, delivery))
         {
-            if (g_RealWSASetLastError)
-                g_RealWSASetLastError(0);
             LogReorderf("[OpenShimNet] sid=%u reorder delivered after drain sock=0x%08X drained=%u bytes=%u peer=%s",
                 GetSocketId(s),
                 static_cast<unsigned>(s),
                 drainedPackets,
-                delivered,
-                FormatIpv4Peer(deliveredSource).c_str());
-            CaptureRecvPathEvent(
-                kBufferLogEventWSARecvFrom,
-                s,
-                reinterpret_cast<const sockaddr*>(&deliveredSource),
-                0,
-                GetRequestedWsabufBytes(buffers, bufferCount),
-                delivered,
-                0,
-                buffers && bufferCount > 0 && buffers[0].buf
-                    ? reinterpret_cast<const uint8_t*>(buffers[0].buf)
-                    : nullptr);
-            LogPacketActivity("WSARecvFrom", s, false, static_cast<int>(delivered), reinterpret_cast<const sockaddr*>(&deliveredSource), static_cast<int>(sizeof(deliveredSource)));
-            return 0;
+                delivery.delivered,
+                FormatIpv4Peer(delivery.source).c_str());
+            return CompleteReorderDelivery(s, buffers, bufferCount, delivery);
         }
 
         if (g_RealWSASetLastError)
