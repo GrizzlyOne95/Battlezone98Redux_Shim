@@ -5,21 +5,17 @@
 
 #include <cstdio>
 #include <string>
+#include "test_check.h"
 
 using BZROpenShim::SanitizeLogFilename;
 
 namespace
 {
-    int g_Failures = 0;
-    int g_Checks = 0;
-
     void CheckEq(const std::string& actual, const std::string& expected, const char* name)
     {
-        ++g_Checks;
-        if (actual == expected)
+        if (OpenShimTest::Check(actual == expected, name))
             return;
-        ++g_Failures;
-        std::printf("FAIL %s\n  expected: %s\n  actual:   %s\n", name, expected.c_str(), actual.c_str());
+        std::fprintf(stderr, "  expected: %s\n  actual:   %s\n", expected.c_str(), actual.c_str());
     }
 }
 
@@ -87,6 +83,6 @@ int main()
     CheckEq(BZROpenShim::GetGameLogPath(".."), "openshim.log", "linux game log path rejects traversal");
 #endif
 
-    std::printf("%d checks, %d failures\n", g_Checks, g_Failures);
-    return g_Failures == 0 ? 0 : 1;
+    std::printf("%d checks, %d failures\n", OpenShimTest::CheckCount(), OpenShimTest::FailureCount());
+    return OpenShimTest::ExitCode();
 }

@@ -1,21 +1,12 @@
 #include "lcbench_safety_policy.h"
 
 #include <cstdio>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim;
 
-namespace
-{
-    int g_Failures = 0;
-
-    void Check(bool condition, const char* message)
-    {
-        if (condition)
-            return;
-        std::fprintf(stderr, "FAIL: %s\n", message);
-        ++g_Failures;
-    }
-}
 
 int main()
 {
@@ -35,6 +26,6 @@ int main()
     Check(AllowExplicitAttackTarget(true, 0, true),
           "an existing stock-eligible result must never be suppressed");
 
-    std::printf("lcbench safety policy tests: %d failure(s)\n", g_Failures);
-    return g_Failures == 0 ? 0 : 1;
+    std::printf("lcbench safety policy tests: %d failure(s)\n", OpenShimTest::FailureCount());
+    return OpenShimTest::ExitCode();
 }

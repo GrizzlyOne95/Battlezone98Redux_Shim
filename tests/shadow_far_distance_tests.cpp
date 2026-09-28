@@ -15,21 +15,13 @@
 #include <initializer_list>
 #include <cstdlib>
 #include <clocale>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 namespace
 {
     using namespace openshim::shadow;
-
-    int g_failures = 0;
-
-    void Require(bool condition, const char* message)
-    {
-        if (!condition)
-        {
-            std::fprintf(stderr, "shadow_far_distance_tests: %s\n", message);
-            ++g_failures;
-        }
-    }
 
     void RequireDecision(const char* configured,
                          float expectedDistance,
@@ -39,14 +31,11 @@ namespace
         const FarDistanceDecision actual = DecideFarDistance(configured);
         if (actual.distance != expectedDistance || actual.source != expectedSource)
         {
-            std::fprintf(stderr,
-                "shadow_far_distance_tests: %s (input=%s actual=%.3f/%s "
-                "expected=%.3f/%s)\n",
+            OpenShimTest::Fail("%s (input=%s actual=%.3f/%s expected=%.3f/%s)",
                 message,
                 configured ? configured : "<null>",
                 static_cast<double>(actual.distance), SourceName(actual.source),
                 static_cast<double>(expectedDistance), SourceName(expectedSource));
-            ++g_failures;
         }
     }
 
@@ -61,10 +50,10 @@ namespace
                         "empty configuration must default to the outer split");
 
         const FarDistanceDecision decision = DecideFarDistance(nullptr);
-        Require(decision.ShouldOverride(),
-                "the default must actually re-issue the setter");
-        Require(kOuterSplitDistance > kStockFarDistance,
-                "the default must be further than the stock clip, or it fixes nothing");
+        Check(decision.ShouldOverride(),
+              "the default must actually re-issue the setter");
+        Check(kOuterSplitDistance > kStockFarDistance,
+              "the default must be further than the stock clip, or it fixes nothing");
     }
 
     void TestOptOutRestoresStock()
@@ -79,8 +68,8 @@ namespace
         RequireDecision("128.0", 0.0f, FarDistanceSource::OptedOut,
                         "the stock distance must be treated as an opt-out");
 
-        Require(!DecideFarDistance("stock").ShouldOverride(),
-                "an opt-out must not re-issue the setter");
+        Check(!DecideFarDistance("stock").ShouldOverride(),
+              "an opt-out must not re-issue the setter");
     }
 
     void TestExplicitDistances()
@@ -107,8 +96,8 @@ namespace
         // A rejected value must fail closed to stock, never to the default:
         // silently applying the fix after refusing what the user asked for
         // would make the refusal invisible.
-        Require(!DecideFarDistance("nonsense").ShouldOverride(),
-                "a rejected value must not fall through to the default");
+        Check(!DecideFarDistance("nonsense").ShouldOverride(),
+              "a rejected value must not fall through to the default");
     }
 
     // strtof would read "256,5" as 256 under a comma-decimal locale and as a
@@ -143,9 +132,9 @@ int main()
     TestLocaleIndependence();
     std::printf("TestLocaleIndependence\n");
 
-    if (g_failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::fprintf(stderr, "shadow_far_distance_tests: %d failure(s)\n", g_failures);
+        std::fprintf(stderr, "shadow_far_distance_tests: %d failure(s)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("\nshadow_far_distance_tests passed\n");

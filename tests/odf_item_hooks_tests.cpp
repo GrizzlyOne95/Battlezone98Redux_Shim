@@ -30,6 +30,9 @@
 #include <map>
 #include <string>
 #include <vector>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 namespace BZROpenShim
 {
@@ -50,16 +53,6 @@ namespace
 {
 using namespace BZROpenShim;
 
-int g_failures = 0;
-
-void Require(bool condition, const char* message)
-{
-    if (!condition)
-    {
-        std::fprintf(stderr, "odf_item_hooks_tests: FAIL %s\n", message);
-        ++g_failures;
-    }
-}
 
 std::string Lower(const char* name)
 {
@@ -171,25 +164,25 @@ void TestCachedHitStillLocksTheEngine()
     void* second = OdfUseItemDetour("magnet.odf");
     void* third = OdfUseItemDetour("MAGNET.ODF"); // the record key is case-folded
 
-    Require(first != nullptr && first != stock, "first use serves a processed copy, not the engine's bytes");
-    Require(second == first && third == first, "every holder gets the same copy");
-    Require(item.useCalls == 3, "the engine saw one UseItem per holder (cached hits used to skip it)");
-    Require(item.locks == 3, "the engine holds one lock per holder");
-    Require(OdfItemHookTest::CachedRefcount("magnet.odf") == 3, "the record counts three holders");
-    Require(OdfGetItemSizeDetour("magnet.odf") == std::strlen(kLegacyMagnet) + 4,
-            "size reports the processed length");
-    Require(std::memcmp(first, "[GameObjectClass]", 17) == 0, "the copy is the processed text");
+    Check(first != nullptr && first != stock, "first use serves a processed copy, not the engine's bytes");
+    Check(second == first && third == first, "every holder gets the same copy");
+    Check(item.useCalls == 3, "the engine saw one UseItem per holder (cached hits used to skip it)");
+    Check(item.locks == 3, "the engine holds one lock per holder");
+    Check(OdfItemHookTest::CachedRefcount("magnet.odf") == 3, "the record counts three holders");
+    Check(OdfGetItemSizeDetour("magnet.odf") == std::strlen(kLegacyMagnet) + 4,
+          "size reports the processed length");
+    Check(std::memcmp(first, "[GameObjectClass]", 17) == 0, "the copy is the processed text");
 
     OdfUnlockItemDetour("magnet.odf");
-    Require(item.locks == 2 && OdfItemHookTest::CachedRefcount("magnet.odf") == 2,
-            "one release drops both counts by one");
-    Require(std::memcmp(first, "[GameObjectClass]", 17) == 0, "the copy survives while holders remain");
+    Check(item.locks == 2 && OdfItemHookTest::CachedRefcount("magnet.odf") == 2,
+          "one release drops both counts by one");
+    Check(std::memcmp(first, "[GameObjectClass]", 17) == 0, "the copy survives while holders remain");
     OdfUnlockItemDetour("magnet.odf");
     OdfUnlockItemDetour("magnet.odf");
-    Require(item.unlockCalls == 3, "the engine saw one UnlockItem per holder");
-    Require(item.locks == 0, "the engine's lock count returns to zero");
-    Require(item.minLocks == 0, "the engine's lock count never went negative (it used to end at -2)");
-    Require(OdfItemHookTest::CachedItemCount() == 0, "the last release drops the record");
+    Check(item.unlockCalls == 3, "the engine saw one UnlockItem per holder");
+    Check(item.locks == 0, "the engine's lock count returns to zero");
+    Check(item.minLocks == 0, "the engine's lock count never went negative (it used to end at -2)");
+    Check(OdfItemHookTest::CachedItemCount() == 0, "the last release drops the record");
 }
 
 void TestPassthroughRecordCountsEveryHolder()
@@ -200,15 +193,15 @@ void TestPassthroughRecordCountsEveryHolder()
 
     void* a = OdfUseItemDetour("wingman.odf");
     void* b = OdfUseItemDetour("wingman.odf");
-    Require(a == item.bytes.data() && b == a, "an unchanged item is served from the engine's own bytes");
-    Require(item.useCalls == 2 && item.locks == 2, "the engine locked once per holder");
-    Require(OdfItemHookTest::CachedRefcount("wingman.odf") == 2, "the passthrough record counts holders");
-    Require(OdfGetItemSizeDetour("wingman.odf") == item.bytes.size(), "size is the stock length");
+    Check(a == item.bytes.data() && b == a, "an unchanged item is served from the engine's own bytes");
+    Check(item.useCalls == 2 && item.locks == 2, "the engine locked once per holder");
+    Check(OdfItemHookTest::CachedRefcount("wingman.odf") == 2, "the passthrough record counts holders");
+    Check(OdfGetItemSizeDetour("wingman.odf") == item.bytes.size(), "size is the stock length");
 
     OdfUnlockItemDetour("wingman.odf");
     OdfUnlockItemDetour("wingman.odf");
-    Require(item.locks == 0 && item.minLocks == 0 && item.unlockCalls == 2, "passthrough releases balance");
-    Require(OdfItemHookTest::CachedItemCount() == 0, "passthrough record released");
+    Check(item.locks == 0 && item.minLocks == 0 && item.unlockCalls == 2, "passthrough releases balance");
+    Check(OdfItemHookTest::CachedItemCount() == 0, "passthrough record released");
 }
 
 void TestUnarmedForwardsEverything()
@@ -219,14 +212,14 @@ void TestUnarmedForwardsEverything()
 
     void* a = OdfUseItemDetour("magnet.odf");
     void* b = OdfUseItemDetour("magnet.odf");
-    Require(a == item.bytes.data() && b == a, "no feature armed: stock bytes");
-    Require(item.useCalls == 2, "unarmed: the engine is called per use");
-    Require(OdfItemHookTest::CachedItemCount() == 0, "unarmed: no record");
-    Require(OdfGetItemSizeDetour("magnet.odf") == item.bytes.size(), "unarmed: stock size");
+    Check(a == item.bytes.data() && b == a, "no feature armed: stock bytes");
+    Check(item.useCalls == 2, "unarmed: the engine is called per use");
+    Check(OdfItemHookTest::CachedItemCount() == 0, "unarmed: no record");
+    Check(OdfGetItemSizeDetour("magnet.odf") == item.bytes.size(), "unarmed: stock size");
 
     OdfUnlockItemDetour("magnet.odf");
     OdfUnlockItemDetour("magnet.odf");
-    Require(item.locks == 0 && item.minLocks == 0, "unarmed releases balance");
+    Check(item.locks == 0 && item.minLocks == 0, "unarmed releases balance");
 }
 
 void TestNonOdfNamesBypassTheCache()
@@ -236,12 +229,12 @@ void TestNonOdfNamesBypassTheCache()
     FakeItem& item = AddItem("spritea.st", "not an odf");
 
     void* a = OdfUseItemDetour("spritea.st");
-    Require(a == item.bytes.data(), "a sprite table passes through");
-    Require(OdfItemHookTest::CachedItemCount() == 0, "no record for a non-odf");
-    Require(OdfGetItemSizeDetour("spritea.st") == item.bytes.size(), "non-odf: stock size");
+    Check(a == item.bytes.data(), "a sprite table passes through");
+    Check(OdfItemHookTest::CachedItemCount() == 0, "no record for a non-odf");
+    Check(OdfGetItemSizeDetour("spritea.st") == item.bytes.size(), "non-odf: stock size");
 
     OdfUnlockItemDetour("spritea.st");
-    Require(item.locks == 0 && item.useCalls == 1 && item.unlockCalls == 1, "non-odf: one lock, one unlock");
+    Check(item.locks == 0 && item.useCalls == 1 && item.unlockCalls == 1, "non-odf: one lock, one unlock");
 }
 
 void TestUnknownAndNullNames()
@@ -249,15 +242,15 @@ void TestUnknownAndNullNames()
     ResetEngine();
     OdfItemHookTest::SetOptions(true, false, false);
 
-    Require(OdfUseItemDetour("missing.odf") == nullptr, "an item the engine lacks is null");
-    Require(OdfItemHookTest::CachedItemCount() == 0, "a null answer leaves no record");
+    Check(OdfUseItemDetour("missing.odf") == nullptr, "an item the engine lacks is null");
+    Check(OdfItemHookTest::CachedItemCount() == 0, "a null answer leaves no record");
     OdfUnlockItemDetour("missing.odf");
-    Require(g_unknownUnlocks == 1, "an unlock for an unknown name still reaches the engine");
+    Check(g_unknownUnlocks == 1, "an unlock for an unknown name still reaches the engine");
 
-    Require(OdfUseItemDetour(nullptr) == nullptr, "a null name is null");
-    Require(OdfGetItemSizeDetour(nullptr) == 0, "a null name has size zero");
+    Check(OdfUseItemDetour(nullptr) == nullptr, "a null name is null");
+    Check(OdfGetItemSizeDetour(nullptr) == 0, "a null name has size zero");
     OdfUnlockItemDetour(nullptr);
-    Require(g_unknownUnlocks == 1, "a null name is not forwarded to UnlockItem");
+    Check(g_unknownUnlocks == 1, "a null name is not forwarded to UnlockItem");
 }
 
 void TestUnreadableBytesStillTakeARecord()
@@ -265,25 +258,25 @@ void TestUnreadableBytesStillTakeARecord()
     ResetEngine();
     OdfItemHookTest::SetOptions(true, false, false);
     void* guarded = VirtualAlloc(nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_NOACCESS);
-    Require(guarded != nullptr, "guard page allocated");
+    Check(guarded != nullptr, "guard page allocated");
     FakeItem& item = AddItem("broken.odf", "");
     item.servePtr = guarded;
     item.serveSize = 64;
 
     void* a = OdfUseItemDetour("broken.odf");
-    Require(a == guarded, "unreadable bytes are served as the engine gave them");
-    Require(LogContains("unreadable item bytes"), "the unreadable copy is logged");
-    Require(OdfItemHookTest::CachedRefcount("broken.odf") == 1, "a stock-served holder still has a record");
+    Check(a == guarded, "unreadable bytes are served as the engine gave them");
+    Check(LogContains("unreadable item bytes"), "the unreadable copy is logged");
+    Check(OdfItemHookTest::CachedRefcount("broken.odf") == 1, "a stock-served holder still has a record");
 
     void* b = OdfUseItemDetour("broken.odf");
-    Require(b == guarded, "the second holder is served the same way");
-    Require(OdfItemHookTest::CachedRefcount("broken.odf") == 2 && item.useCalls == 2,
-            "the second holder is counted and locked");
+    Check(b == guarded, "the second holder is served the same way");
+    Check(OdfItemHookTest::CachedRefcount("broken.odf") == 2 && item.useCalls == 2,
+          "the second holder is counted and locked");
 
     OdfUnlockItemDetour("broken.odf");
     OdfUnlockItemDetour("broken.odf");
-    Require(item.locks == 0 && item.minLocks == 0, "stock-served releases balance");
-    Require(OdfItemHookTest::CachedItemCount() == 0, "stock-served record released");
+    Check(item.locks == 0 && item.minLocks == 0, "stock-served releases balance");
+    Check(OdfItemHookTest::CachedItemCount() == 0, "stock-served record released");
     VirtualFree(guarded, 0, MEM_RELEASE);
 }
 
@@ -294,15 +287,15 @@ void TestEngineNullOnAHitIsMirrored()
     FakeItem& item = AddItem("magnet.odf", kLegacyMagnet);
 
     void* a = OdfUseItemDetour("magnet.odf");
-    Require(a != nullptr, "first use succeeds");
+    Check(a != nullptr, "first use succeeds");
     item.vanished = true;
-    Require(OdfUseItemDetour("magnet.odf") == nullptr, "when the engine answers null so does the detour");
-    Require(OdfItemHookTest::CachedRefcount("magnet.odf") == 1 && item.locks == 1,
-            "a null answer takes no lock and adds no holder");
+    Check(OdfUseItemDetour("magnet.odf") == nullptr, "when the engine answers null so does the detour");
+    Check(OdfItemHookTest::CachedRefcount("magnet.odf") == 1 && item.locks == 1,
+          "a null answer takes no lock and adds no holder");
     item.vanished = false;
 
     OdfUnlockItemDetour("magnet.odf");
-    Require(item.locks == 0 && OdfItemHookTest::CachedItemCount() == 0, "the one real holder releases");
+    Check(item.locks == 0 && OdfItemHookTest::CachedItemCount() == 0, "the one real holder releases");
 }
 
 } // namespace
@@ -320,7 +313,7 @@ int main()
     TestEngineNullOnAHitIsMirrored();
 
     OdfItemHookTest::ResetCache();
-    if (g_failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
         std::printf("odf_item_hooks_tests: all checks passed\n");
-    return g_failures == 0 ? 0 : 1;
+    return OpenShimTest::ExitCode();
 }

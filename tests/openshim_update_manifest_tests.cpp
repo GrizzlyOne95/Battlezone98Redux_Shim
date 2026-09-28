@@ -3,21 +3,14 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim;
 
 namespace
 {
-    int g_Failures = 0;
-
-    void Check(bool condition, const char* message)
-    {
-        if (condition)
-            return;
-        std::fprintf(stderr, "FAIL: %s\n", message);
-        ++g_Failures;
-    }
-
     const char* const kValidManifest = R"LUA(
 return {
     formatVersion = 2,
@@ -128,9 +121,8 @@ return {
         for (const char* text : rejected)
         {
             const bool parsed = ParseOpenShimVersion(text, parts);
-            if (parsed)
-                std::fprintf(stderr, "FAIL: '%s' should not parse as a version\n", text);
-            Check(!parsed && parts.empty(), "rejected versions leave no components behind");
+            if (!Check(!parsed && parts.empty(), "rejected versions leave no components behind"))
+                std::fprintf(stderr, "  input '%s' (parsed=%d)\n", text, parsed ? 1 : 0);
         }
     }
 
@@ -164,7 +156,7 @@ int main()
     TestVersionParsing();
     TestVersionComparison();
 
-    if (g_Failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
         std::puts("openshim_update_manifest_tests: PASS");
-    return g_Failures == 0 ? 0 : 1;
+    return OpenShimTest::ExitCode();
 }
