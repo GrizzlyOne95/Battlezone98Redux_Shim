@@ -6,30 +6,21 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim::RenderProfiles::Dx11Compat;
 
 namespace
 {
-    int g_failures = 0;
-
-    void ExpectTrue(bool condition, const char* what)
-    {
-        if (!condition)
-        {
-            std::printf("  FAIL: %s\n", what);
-            ++g_failures;
-        }
-    }
-
     void ExpectContains(const std::string& haystack, const char* needle,
                         const char* what)
     {
         if (haystack.find(needle) == std::string::npos)
         {
-            std::printf("  FAIL: %s ('%s' missing '%s')\n", what,
+            OpenShimTest::Fail("%s ('%s' missing '%s')", what,
                         haystack.c_str(), needle);
-            ++g_failures;
         }
     }
 
@@ -64,139 +55,139 @@ namespace
 void TestSupportedTargets()
 {
     std::printf("TestSupportedTargets\n");
-    ExpectTrue(IsDx11SupportedShaderTarget("vs_4_0"), "vs_4_0 supported");
-    ExpectTrue(IsDx11SupportedShaderTarget("ps_4_0"), "ps_4_0 supported");
-    ExpectTrue(IsDx11SupportedShaderTarget("vs_5_0"), "vs_5_0 supported");
-    ExpectTrue(IsDx11SupportedShaderTarget("ps_5_0"), "ps_5_0 supported");
-    ExpectTrue(IsDx11SupportedShaderTarget("VS_4_0"), "case-insensitive");
-    ExpectTrue(IsDx11SupportedShaderTarget("vs_4_0_level_9_1"), "fl9.1 vs");
-    ExpectTrue(IsDx11SupportedShaderTarget("ps_4_0_level_9_3"), "fl9.3 ps");
-    ExpectTrue(!IsDx11SupportedShaderTarget("vs_3_0"), "vs_3_0 legacy");
-    ExpectTrue(!IsDx11SupportedShaderTarget("ps_3_0"), "ps_3_0 legacy");
-    ExpectTrue(!IsDx11SupportedShaderTarget("vs_2_0"), "vs_2_0 legacy");
-    ExpectTrue(!IsDx11SupportedShaderTarget("arbvp1"), "arbvp legacy");
-    ExpectTrue(!IsDx11SupportedShaderTarget("cg"), "cg legacy");
-    ExpectTrue(!IsDx11SupportedShaderTarget(""), "empty unsupported");
-    ExpectTrue(!IsDx11SupportedShaderTarget("glsl"), "glsl not an HLSL target");
+    Check(IsDx11SupportedShaderTarget("vs_4_0"), "vs_4_0 supported");
+    Check(IsDx11SupportedShaderTarget("ps_4_0"), "ps_4_0 supported");
+    Check(IsDx11SupportedShaderTarget("vs_5_0"), "vs_5_0 supported");
+    Check(IsDx11SupportedShaderTarget("ps_5_0"), "ps_5_0 supported");
+    Check(IsDx11SupportedShaderTarget("VS_4_0"), "case-insensitive");
+    Check(IsDx11SupportedShaderTarget("vs_4_0_level_9_1"), "fl9.1 vs");
+    Check(IsDx11SupportedShaderTarget("ps_4_0_level_9_3"), "fl9.3 ps");
+    Check(!IsDx11SupportedShaderTarget("vs_3_0"), "vs_3_0 legacy");
+    Check(!IsDx11SupportedShaderTarget("ps_3_0"), "ps_3_0 legacy");
+    Check(!IsDx11SupportedShaderTarget("vs_2_0"), "vs_2_0 legacy");
+    Check(!IsDx11SupportedShaderTarget("arbvp1"), "arbvp legacy");
+    Check(!IsDx11SupportedShaderTarget("cg"), "cg legacy");
+    Check(!IsDx11SupportedShaderTarget(""), "empty unsupported");
+    Check(!IsDx11SupportedShaderTarget("glsl"), "glsl not an HLSL target");
 }
 
 void TestParseCompatFlag()
 {
     std::printf("TestParseCompatFlag\n");
-    ExpectTrue(ParseCompatFlag("1", false), "1 true");
-    ExpectTrue(ParseCompatFlag("true", false), "true");
-    ExpectTrue(ParseCompatFlag("ON", false), "on case-insensitive");
-    ExpectTrue(ParseCompatFlag(" yes ", false), "trimmed yes");
-    ExpectTrue(ParseCompatFlag("enabled", false), "enabled");
-    ExpectTrue(!ParseCompatFlag("0", true), "0 false");
-    ExpectTrue(!ParseCompatFlag("off", true), "off");
-    ExpectTrue(!ParseCompatFlag("No", true), "no");
-    ExpectTrue(!ParseCompatFlag("disabled", true), "disabled");
-    ExpectTrue(ParseCompatFlag("bogus", true), "unknown keeps true default");
-    ExpectTrue(!ParseCompatFlag("bogus", false), "unknown keeps false default");
-    ExpectTrue(ParseCompatFlag("", true), "empty keeps default");
+    Check(ParseCompatFlag("1", false), "1 true");
+    Check(ParseCompatFlag("true", false), "true");
+    Check(ParseCompatFlag("ON", false), "on case-insensitive");
+    Check(ParseCompatFlag(" yes ", false), "trimmed yes");
+    Check(ParseCompatFlag("enabled", false), "enabled");
+    Check(!ParseCompatFlag("0", true), "0 false");
+    Check(!ParseCompatFlag("off", true), "off");
+    Check(!ParseCompatFlag("No", true), "no");
+    Check(!ParseCompatFlag("disabled", true), "disabled");
+    Check(ParseCompatFlag("bogus", true), "unknown keeps true default");
+    Check(!ParseCompatFlag("bogus", false), "unknown keeps false default");
+    Check(ParseCompatFlag("", true), "empty keeps default");
     const CompatConfig defaults = DefaultCompatConfig();
-    ExpectTrue(defaults.compatEnabled, "compat default on");
-    ExpectTrue(defaults.guardEnabled, "guard default on");
-    ExpectTrue(!defaults.aggressiveEnabled, "aggressive default off");
+    Check(defaults.compatEnabled, "compat default on");
+    Check(defaults.guardEnabled, "guard default on");
+    Check(!defaults.aggressiveEnabled, "aggressive default off");
 }
 
 void TestFamilyMapping()
 {
     std::printf("TestFamilyMapping\n");
     std::string out;
-    ExpectTrue(MapLegacyFamilyProgram("Effect_vertexHLSL", out) &&
-                   out == "OSE_Compat_Effect_vertex",
-               "effect vs maps");
-    ExpectTrue(MapLegacyFamilyProgram("Effect_fragmentHLSL", out) &&
-                   out == "OSE_Compat_Effect_fragment",
-               "effect ps maps");
-    ExpectTrue(MapLegacyFamilyProgram("TEXTURED_VERTEXHLSL", out) &&
-                   out == "OSE_Compat_Textured_vertex",
-               "case-insensitive textured vs");
-    ExpectTrue(MapLegacyFamilyProgram("untextured_fragmenthlsl", out) &&
-                   out == "OSE_Compat_Untextured_fragment",
-               "untextured ps maps");
-    ExpectTrue(MapLegacyFamilyProgram("Sky_vertexHLSL", out) &&
-                   out == "OSE_Compat_Sky_vertex",
-               "sky vs maps");
-    ExpectTrue(MapLegacyFamilyProgram("simple_one_tex_fragmentHLSL", out) &&
-                   out == "OSE_Compat_SimpleOneTex_fragment",
-               "simple_one_tex ps maps");
-    ExpectTrue(MapLegacyFamilyProgram("UI_vertexHLSL", out) &&
-                   out == "OSE_Compat_Ui_vertex",
-               "ui vs maps");
-    ExpectTrue(MapLegacyFamilyProgram("Base_pixelHLSL", out) &&
-                   out == "OSE_Compat_Base_fragment",
-               "base pixel alias maps to fragment");
-    ExpectTrue(IsKnownLegacyFamilyProgram("Effect_vertexHLSL"),
-               "known family recognized");
-    ExpectTrue(!IsKnownLegacyFamilyProgram("ModWaterVS"),
-               "unknown custom not known");
+    Check(MapLegacyFamilyProgram("Effect_vertexHLSL", out) &&
+              out == "OSE_Compat_Effect_vertex",
+          "effect vs maps");
+    Check(MapLegacyFamilyProgram("Effect_fragmentHLSL", out) &&
+              out == "OSE_Compat_Effect_fragment",
+          "effect ps maps");
+    Check(MapLegacyFamilyProgram("TEXTURED_VERTEXHLSL", out) &&
+              out == "OSE_Compat_Textured_vertex",
+          "case-insensitive textured vs");
+    Check(MapLegacyFamilyProgram("untextured_fragmenthlsl", out) &&
+              out == "OSE_Compat_Untextured_fragment",
+          "untextured ps maps");
+    Check(MapLegacyFamilyProgram("Sky_vertexHLSL", out) &&
+              out == "OSE_Compat_Sky_vertex",
+          "sky vs maps");
+    Check(MapLegacyFamilyProgram("simple_one_tex_fragmentHLSL", out) &&
+              out == "OSE_Compat_SimpleOneTex_fragment",
+          "simple_one_tex ps maps");
+    Check(MapLegacyFamilyProgram("UI_vertexHLSL", out) &&
+              out == "OSE_Compat_Ui_vertex",
+          "ui vs maps");
+    Check(MapLegacyFamilyProgram("Base_pixelHLSL", out) &&
+              out == "OSE_Compat_Base_fragment",
+          "base pixel alias maps to fragment");
+    Check(IsKnownLegacyFamilyProgram("Effect_vertexHLSL"),
+          "known family recognized");
+    Check(!IsKnownLegacyFamilyProgram("ModWaterVS"),
+          "unknown custom not known");
     // Native delegates must never remap: they are already DX11-usable.
-    ExpectTrue(!MapLegacyFamilyProgram("OSE_Compat_Effect_vertex", out),
-               "own compat output not remapped");
-    ExpectTrue(!MapLegacyFamilyProgram("OSE_BaseHighNoShadow_vertexHLSL4", out),
-               "native HLSL4 not remapped");
-    ExpectTrue(!MapLegacyFamilyProgram("ModWaterVS", out),
-               "unknown custom not remapped");
-    ExpectTrue(!MapLegacyFamilyProgram("", out), "empty not remapped");
+    Check(!MapLegacyFamilyProgram("OSE_Compat_Effect_vertex", out),
+          "own compat output not remapped");
+    Check(!MapLegacyFamilyProgram("OSE_BaseHighNoShadow_vertexHLSL4", out),
+          "native HLSL4 not remapped");
+    Check(!MapLegacyFamilyProgram("ModWaterVS", out),
+          "unknown custom not remapped");
+    Check(!MapLegacyFamilyProgram("", out), "empty not remapped");
 }
 
 void TestClassification()
 {
     std::printf("TestClassification\n");
-    ExpectTrue(ClassifyLegacyPass(FixedFuncDesc(0)) ==
-                   LegacyPassKind::TrueFixedFunction,
-               "no programs is fixed function");
-    ExpectTrue(ClassifyLegacyPass(FixedFuncDesc(1)) ==
-                   LegacyPassKind::TrueFixedFunction,
-               "texture state alone is still fixed function");
-    ExpectTrue(ClassifyLegacyPass(ProgramDesc("Effect_vertexHLSL", "vs_3_0",
-                                              "Effect_fragmentHLSL",
-                                              "ps_3_0")) ==
-                   LegacyPassKind::KnownLegacyFamily,
-               "sm3 effect family classifies as known");
-    ExpectTrue(ClassifyLegacyPass(ProgramDesc("Effect_vertexHLSL", "",
-                                              "Effect_fragmentHLSL", "")) ==
-                   LegacyPassKind::KnownLegacyFamily,
-               "known names classify even without targets");
-    ExpectTrue(ClassifyLegacyPass(ProgramDesc("ModWaterVS", "vs_3_0",
-                                              "ModWaterPS", "ps_3_0")) ==
-                   LegacyPassKind::UnknownCustom,
-               "unknown sm3 classifies custom");
-    ExpectTrue(ClassifyLegacyPass(ProgramDesc("OSE_BaseHighNoShadow_vertexHLSL4",
-                                              "vs_4_0",
-                                              "OSE_BaseHighNoShadow_fragmentHLSL4",
-                                              "ps_4_0")) ==
-                   LegacyPassKind::NativeDx11,
-               "sm4 native classifies native");
+    Check(ClassifyLegacyPass(FixedFuncDesc(0)) ==
+              LegacyPassKind::TrueFixedFunction,
+          "no programs is fixed function");
+    Check(ClassifyLegacyPass(FixedFuncDesc(1)) ==
+              LegacyPassKind::TrueFixedFunction,
+          "texture state alone is still fixed function");
+    Check(ClassifyLegacyPass(ProgramDesc("Effect_vertexHLSL", "vs_3_0",
+                                         "Effect_fragmentHLSL",
+                                         "ps_3_0")) ==
+              LegacyPassKind::KnownLegacyFamily,
+          "sm3 effect family classifies as known");
+    Check(ClassifyLegacyPass(ProgramDesc("Effect_vertexHLSL", "",
+                                         "Effect_fragmentHLSL", "")) ==
+              LegacyPassKind::KnownLegacyFamily,
+          "known names classify even without targets");
+    Check(ClassifyLegacyPass(ProgramDesc("ModWaterVS", "vs_3_0",
+                                         "ModWaterPS", "ps_3_0")) ==
+              LegacyPassKind::UnknownCustom,
+          "unknown sm3 classifies custom");
+    Check(ClassifyLegacyPass(ProgramDesc("OSE_BaseHighNoShadow_vertexHLSL4",
+                                         "vs_4_0",
+                                         "OSE_BaseHighNoShadow_fragmentHLSL4",
+                                         "ps_4_0")) ==
+              LegacyPassKind::NativeDx11,
+          "sm4 native classifies native");
     // Half-bound passes are never native on D3D11 (needs BOTH shaders).
-    ExpectTrue(ClassifyLegacyPass(ProgramDesc("Effect_vertexHLSL", "vs_3_0",
-                                              nullptr, nullptr)) !=
-                   LegacyPassKind::NativeDx11,
-               "vertex-only is not native");
-    ExpectTrue(ClassifyLegacyPass(ProgramDesc("ModWaterVS", "vs_3_0", nullptr,
-                                              nullptr)) ==
-                   LegacyPassKind::UnknownCustom,
-               "single unknown stage is custom");
+    Check(ClassifyLegacyPass(ProgramDesc("Effect_vertexHLSL", "vs_3_0",
+                                         nullptr, nullptr)) !=
+              LegacyPassKind::NativeDx11,
+          "vertex-only is not native");
+    Check(ClassifyLegacyPass(ProgramDesc("ModWaterVS", "vs_3_0", nullptr,
+                                         nullptr)) ==
+              LegacyPassKind::UnknownCustom,
+          "single unknown stage is custom");
 }
 
 void TestFixedFuncSupport()
 {
     std::printf("TestFixedFuncSupport\n");
-    ExpectTrue(IsSupportedFixedFuncCombo(0, ""), "0 units always");
-    ExpectTrue(IsSupportedFixedFuncCombo(0, "weird"), "0 units ignores op");
-    ExpectTrue(IsSupportedFixedFuncCombo(1, "modulate"), "modulate");
-    ExpectTrue(IsSupportedFixedFuncCombo(1, "MODULATE"), "case-insensitive");
-    ExpectTrue(IsSupportedFixedFuncCombo(1, "replace"), "replace");
-    ExpectTrue(IsSupportedFixedFuncCombo(1, "add"), "add");
-    ExpectTrue(IsSupportedFixedFuncCombo(1, "alpha_blend"), "alpha_blend");
-    ExpectTrue(IsSupportedFixedFuncCombo(1, ""), "empty op defaults");
-    ExpectTrue(!IsSupportedFixedFuncCombo(1, "dotproduct"),
-               "exotic combine unsupported");
-    ExpectTrue(!IsSupportedFixedFuncCombo(2, "modulate"), "multi-texture out");
-    ExpectTrue(!IsSupportedFixedFuncCombo(-1, ""), "negative rejected");
+    Check(IsSupportedFixedFuncCombo(0, ""), "0 units always");
+    Check(IsSupportedFixedFuncCombo(0, "weird"), "0 units ignores op");
+    Check(IsSupportedFixedFuncCombo(1, "modulate"), "modulate");
+    Check(IsSupportedFixedFuncCombo(1, "MODULATE"), "case-insensitive");
+    Check(IsSupportedFixedFuncCombo(1, "replace"), "replace");
+    Check(IsSupportedFixedFuncCombo(1, "add"), "add");
+    Check(IsSupportedFixedFuncCombo(1, "alpha_blend"), "alpha_blend");
+    Check(IsSupportedFixedFuncCombo(1, ""), "empty op defaults");
+    Check(!IsSupportedFixedFuncCombo(1, "dotproduct"),
+          "exotic combine unsupported");
+    Check(!IsSupportedFixedFuncCombo(2, "modulate"), "multi-texture out");
+    Check(!IsSupportedFixedFuncCombo(-1, ""), "negative rejected");
 }
 
 void TestDecidePaths()
@@ -210,82 +201,82 @@ void TestDecidePaths()
     LegacyPassDesc native;
     native.hasVertexRef = true;
     native.hasFragmentRef = true;
-    ExpectTrue(DecideCompatPath(LegacyPassKind::NativeDx11, native, on) ==
-                   CompatPath::KeepNative,
-               "native keeps native");
+    Check(DecideCompatPath(LegacyPassKind::NativeDx11, native, on) ==
+              CompatPath::KeepNative,
+          "native keeps native");
 
     LegacyPassDesc prog;
     prog.hasVertexRef = true;
     prog.hasFragmentRef = true;
-    ExpectTrue(DecideCompatPath(LegacyPassKind::KnownLegacyFamily, prog, on) ==
-                   CompatPath::FamilyRemap,
-               "known family remaps when enabled");
+    Check(DecideCompatPath(LegacyPassKind::KnownLegacyFamily, prog, on) ==
+              CompatPath::FamilyRemap,
+          "known family remaps when enabled");
     CompatConfig off = on;
     off.compatEnabled = false;
-    ExpectTrue(DecideCompatPath(LegacyPassKind::KnownLegacyFamily, prog, off) ==
-                   CompatPath::SkipShaderless,
-               "known family skips when compat off");
+    Check(DecideCompatPath(LegacyPassKind::KnownLegacyFamily, prog, off) ==
+              CompatPath::SkipShaderless,
+          "known family skips when compat off");
 
-    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction,
-                                FixedFuncDesc(0), on) ==
-                   CompatPath::FixedFuncUntextured,
-               "0 units untextured");
-    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction,
-                                FixedFuncDesc(1, "modulate"), on) ==
-                   CompatPath::FixedFuncTextured,
-               "1 unit modulate textured");
-    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction,
-                                FixedFuncDesc(2, "modulate"), on) ==
-                   CompatPath::SkipShaderless,
-               "multi-texture skips without aggressive");
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction,
+                           FixedFuncDesc(0), on) ==
+              CompatPath::FixedFuncUntextured,
+          "0 units untextured");
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction,
+                           FixedFuncDesc(1, "modulate"), on) ==
+              CompatPath::FixedFuncTextured,
+          "1 unit modulate textured");
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction,
+                           FixedFuncDesc(2, "modulate"), on) ==
+              CompatPath::SkipShaderless,
+          "multi-texture skips without aggressive");
     CompatConfig aggro = on;
     aggro.aggressiveEnabled = true;
-    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction,
-                                FixedFuncDesc(2, "modulate"), aggro) ==
-                   CompatPath::AggressiveGeneric,
-               "multi-texture aggressive fallback");
-    ExpectTrue(DecideCompatPath(LegacyPassKind::UnknownCustom, prog, on) ==
-                   CompatPath::SkipShaderless,
-               "unknown skips by default");
-    ExpectTrue(DecideCompatPath(LegacyPassKind::UnknownCustom, prog, aggro) ==
-                   CompatPath::AggressiveGeneric,
-               "unknown aggressive fallback when enabled");
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction,
+                           FixedFuncDesc(2, "modulate"), aggro) ==
+              CompatPath::AggressiveGeneric,
+          "multi-texture aggressive fallback");
+    Check(DecideCompatPath(LegacyPassKind::UnknownCustom, prog, on) ==
+              CompatPath::SkipShaderless,
+          "unknown skips by default");
+    Check(DecideCompatPath(LegacyPassKind::UnknownCustom, prog, aggro) ==
+              CompatPath::AggressiveGeneric,
+          "unknown aggressive fallback when enabled");
     // Missing resources fail closed for every non-native pass.
-    ExpectTrue(DecideCompatPath(LegacyPassKind::KnownLegacyFamily, prog, aggro,
-                                false) == CompatPath::SkipShaderless,
-               "no resources fails closed");
-    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction,
-                                FixedFuncDesc(0), aggro,
-                                false) == CompatPath::SkipShaderless,
-               "fixedfunc without resources fails closed");
-    ExpectTrue(DecideCompatPath(LegacyPassKind::NativeDx11, native, aggro,
-                                false) == CompatPath::KeepNative,
-               "native unaffected by missing resources");
+    Check(DecideCompatPath(LegacyPassKind::KnownLegacyFamily, prog, aggro,
+                           false) == CompatPath::SkipShaderless,
+          "no resources fails closed");
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction,
+                           FixedFuncDesc(0), aggro,
+                           false) == CompatPath::SkipShaderless,
+          "fixedfunc without resources fails closed");
+    Check(DecideCompatPath(LegacyPassKind::NativeDx11, native, aggro,
+                           false) == CompatPath::KeepNative,
+          "native unaffected by missing resources");
 }
 
 void TestSourceSelection()
 {
     std::printf("TestSourceSelection\n");
-    ExpectTrue(SelectSourceTechniqueIndex({}, "high-pssm", 0) ==
-                   kNoSourceTechnique,
-               "empty has no source");
+    Check(SelectSourceTechniqueIndex({}, "high-pssm", 0) ==
+              kNoSourceTechnique,
+          "empty has no source");
     const std::vector<TechniqueCandidate> candidates = {
         { "high-pssm", 0, 0, false },
         { "high-pssm", 1, 1, false },
         { "", 0, 2, false },
         { "default", 0, 3, false },
     };
-    ExpectTrue(SelectSourceTechniqueIndex(candidates, "high-pssm", 0) == 0,
-               "exact scheme+lod wins");
-    ExpectTrue(SelectSourceTechniqueIndex(candidates, "high-pssm", 3) == 1,
-               "exact scheme closest lod wins");
-    ExpectTrue(SelectSourceTechniqueIndex(candidates, "medium", 0) == 2,
-               "blank scheme fallback");
+    Check(SelectSourceTechniqueIndex(candidates, "high-pssm", 0) == 0,
+          "exact scheme+lod wins");
+    Check(SelectSourceTechniqueIndex(candidates, "high-pssm", 3) == 1,
+          "exact scheme closest lod wins");
+    Check(SelectSourceTechniqueIndex(candidates, "medium", 0) == 2,
+          "blank scheme fallback");
     const std::vector<TechniqueCandidate> onlyForeign = {
         { "weird-scheme", 5, 7, false },
     };
-    ExpectTrue(SelectSourceTechniqueIndex(onlyForeign, "high-pssm", 0) == 7,
-               "first technique as last resort");
+    Check(SelectSourceTechniqueIndex(onlyForeign, "high-pssm", 0) == 7,
+          "first technique as last resort");
 }
 
 void TestCacheKeys()
@@ -295,19 +286,19 @@ void TestCacheKeys()
         BuildCompatCacheKey("xrain", "high-pssm", 0, 0, "fixedfunc-textured");
     const std::string b =
         BuildCompatCacheKey("xrain", "high-pssm", 0, 0, "fixedfunc-textured");
-    ExpectTrue(a == b, "keys stable");
-    ExpectTrue(a != BuildCompatCacheKey("xrain", "high-pssm", 0, 0,
-                                        "fixedfunc-untextured"),
-               "variant distinguishes keys");
-    ExpectTrue(a != BuildCompatCacheKey("White_Clouds", "high-pssm", 0, 0,
-                                        "fixedfunc-textured"),
-               "material distinguishes keys");
-    ExpectTrue(a.find("xrain") != std::string::npos, "material survives");
+    Check(a == b, "keys stable");
+    Check(a != BuildCompatCacheKey("xrain", "high-pssm", 0, 0,
+                                   "fixedfunc-untextured"),
+          "variant distinguishes keys");
+    Check(a != BuildCompatCacheKey("White_Clouds", "high-pssm", 0, 0,
+                                   "fixedfunc-textured"),
+          "material distinguishes keys");
+    Check(a.find("xrain") != std::string::npos, "material survives");
     const std::string weird =
         BuildCompatCacheKey("a/b c", "s", 0, 0, "v");
-    ExpectTrue(weird.find('/') == std::string::npos &&
-                   weird.find(' ') == std::string::npos,
-               "keys sanitized");
+    Check(weird.find('/') == std::string::npos &&
+              weird.find(' ') == std::string::npos,
+          "keys sanitized");
 }
 
 void TestLogFormats()
@@ -349,37 +340,37 @@ void TestStageMapping()
 
     // The heuristic form reads the stage out of the name; the stage-explicit
     // form ignores the name entirely. Both agree when the name is explicit.
-    ExpectTrue(MapLegacyFamilyProgramForStage("Effect_vertexHLSL", true, out) &&
-                   out == "OSE_Compat_Effect_vertex",
-               "explicit vertex stage");
-    ExpectTrue(MapLegacyFamilyProgramForStage("Effect_fragmentHLSL", false,
-                                              out) &&
-                   out == "OSE_Compat_Effect_fragment",
-               "explicit fragment stage");
+    Check(MapLegacyFamilyProgramForStage("Effect_vertexHLSL", true, out) &&
+              out == "OSE_Compat_Effect_vertex",
+          "explicit vertex stage");
+    Check(MapLegacyFamilyProgramForStage("Effect_fragmentHLSL", false,
+                                         out) &&
+              out == "OSE_Compat_Effect_fragment",
+          "explicit fragment stage");
 
     // The point of the stage-explicit form: a name carrying one stage still
     // answers for the other. ResolveCompatPrograms relies on this to pair a
     // missing stage off the family the surviving stage names.
-    ExpectTrue(MapLegacyFamilyProgramForStage("Effect_fragmentHLSL", true,
-                                              out) &&
-                   out == "OSE_Compat_Effect_vertex",
-               "asked stage beats the spelled stage");
-    ExpectTrue(MapLegacyFamilyProgramForStage("Sky_vertexHLSL", false, out) &&
-                   out == "OSE_Compat_Sky_fragment",
-               "vertex-spelled name answers for fragment");
+    Check(MapLegacyFamilyProgramForStage("Effect_fragmentHLSL", true,
+                                         out) &&
+              out == "OSE_Compat_Effect_vertex",
+          "asked stage beats the spelled stage");
+    Check(MapLegacyFamilyProgramForStage("Sky_vertexHLSL", false, out) &&
+              out == "OSE_Compat_Sky_fragment",
+          "vertex-spelled name answers for fragment");
 
     // A family name with no stage hint at all stays refused in both forms.
     // The table declines to guess rather than binding a coin-flip adapter.
-    ExpectTrue(!MapLegacyFamilyProgram("simple_one_tex", out),
-               "unhinted family name is refused by the heuristic form");
-    ExpectTrue(!MapLegacyFamilyProgramForStage("simple_one_tex", true, out),
-               "unhinted family name is refused stage-explicitly too");
+    Check(!MapLegacyFamilyProgram("simple_one_tex", out),
+          "unhinted family name is refused by the heuristic form");
+    Check(!MapLegacyFamilyProgramForStage("simple_one_tex", true, out),
+          "unhinted family name is refused stage-explicitly too");
 
-    ExpectTrue(!MapLegacyFamilyProgramForStage("ModWaterVS", true, out) &&
-                   out.empty(),
-               "unknown family resolves no stage");
-    ExpectTrue(!MapLegacyFamilyProgramForStage("", false, out),
-               "empty name resolves no stage");
+    Check(!MapLegacyFamilyProgramForStage("ModWaterVS", true, out) &&
+              out.empty(),
+          "unknown family resolves no stage");
+    Check(!MapLegacyFamilyProgramForStage("", false, out),
+          "empty name resolves no stage");
 }
 
 void TestResolveCompatPrograms()
@@ -390,23 +381,23 @@ void TestResolveCompatPrograms()
 
     // Paths that synthesize nothing must refuse, so the runtime never
     // mutates a material it had no plan for.
-    ExpectTrue(!ResolveCompatPrograms(CompatPath::KeepNative,
-                                      ProgramDesc("A", "vs_4_0", "B", "ps_4_0"),
-                                      vs, ps),
-               "KeepNative resolves nothing");
-    ExpectTrue(!ResolveCompatPrograms(CompatPath::SkipShaderless,
-                                      FixedFuncDesc(1), vs, ps),
-               "SkipShaderless resolves nothing");
+    Check(!ResolveCompatPrograms(CompatPath::KeepNative,
+                                 ProgramDesc("A", "vs_4_0", "B", "ps_4_0"),
+                                 vs, ps),
+          "KeepNative resolves nothing");
+    Check(!ResolveCompatPrograms(CompatPath::SkipShaderless,
+                                 FixedFuncDesc(1), vs, ps),
+          "SkipShaderless resolves nothing");
 
     // Both stages remapped from the family table.
     LegacyPassDesc effect =
         ProgramDesc("Effect_vertexHLSL", "vs_3_0", "Effect_fragmentHLSL",
                     "ps_3_0");
     effect.textureUnits = 1;
-    ExpectTrue(ResolveCompatPrograms(CompatPath::FamilyRemap, effect, vs, ps) &&
-                   vs == "OSE_Compat_Effect_vertex" &&
-                   ps == "OSE_Compat_Effect_fragment",
-               "family remap fills both stages");
+    Check(ResolveCompatPrograms(CompatPath::FamilyRemap, effect, vs, ps) &&
+              vs == "OSE_Compat_Effect_vertex" &&
+              ps == "OSE_Compat_Effect_fragment",
+          "family remap fills both stages");
 
     // Half a remap is the failure this exists to prevent: a pass with only a
     // fragment reference still has to come back with a vertex program bound,
@@ -414,46 +405,46 @@ void TestResolveCompatPrograms()
     LegacyPassDesc psOnly = ProgramDesc(nullptr, nullptr, "Effect_fragmentHLSL",
                                         "ps_3_0");
     psOnly.textureUnits = 1;
-    ExpectTrue(ResolveCompatPrograms(CompatPath::FamilyRemap, psOnly, vs, ps) &&
-                   vs == "OSE_Compat_Effect_vertex" &&
-                   ps == "OSE_Compat_Effect_fragment",
-               "missing vertex stage pairs off the fragment's family");
+    Check(ResolveCompatPrograms(CompatPath::FamilyRemap, psOnly, vs, ps) &&
+              vs == "OSE_Compat_Effect_vertex" &&
+              ps == "OSE_Compat_Effect_fragment",
+          "missing vertex stage pairs off the fragment's family");
 
     // An unknown name on one stage is the same hole, reached differently.
     LegacyPassDesc mixed =
         ProgramDesc("ModWaterVS", "vs_3_0", "Effect_fragmentHLSL", "ps_3_0");
-    ExpectTrue(ResolveCompatPrograms(CompatPath::FamilyRemap, mixed, vs, ps) &&
-                   vs == "OSE_Compat_Effect_vertex" &&
-                   ps == "OSE_Compat_Effect_fragment",
-               "unmappable vertex stage pairs off the fragment's family");
+    Check(ResolveCompatPrograms(CompatPath::FamilyRemap, mixed, vs, ps) &&
+              vs == "OSE_Compat_Effect_vertex" &&
+              ps == "OSE_Compat_Effect_fragment",
+          "unmappable vertex stage pairs off the fragment's family");
 
     // Only when neither stage names a family does the generic adapter stand
     // in, and then texturing picks which one.
     LegacyPassDesc unknownBoth =
         ProgramDesc("ModWaterVS", "vs_3_0", "ModWaterPS", "ps_3_0");
     unknownBoth.textureUnits = 1;
-    ExpectTrue(ResolveCompatPrograms(CompatPath::FamilyRemap, unknownBoth, vs,
-                                     ps) &&
-                   vs == "OSE_FixedFunc_Textured_vertex" &&
-                   ps == "OSE_FixedFunc_Textured_fragment",
-               "no family on either stage falls back on texturing");
+    Check(ResolveCompatPrograms(CompatPath::FamilyRemap, unknownBoth, vs,
+                                ps) &&
+              vs == "OSE_FixedFunc_Textured_vertex" &&
+              ps == "OSE_FixedFunc_Textured_fragment",
+          "no family on either stage falls back on texturing");
 
-    ExpectTrue(ResolveCompatPrograms(CompatPath::FixedFuncTextured,
-                                     FixedFuncDesc(1), vs, ps) &&
-                   vs == "OSE_FixedFunc_Textured_vertex" &&
-                   ps == "OSE_FixedFunc_Textured_fragment",
-               "textured fixed function pair");
-    ExpectTrue(ResolveCompatPrograms(CompatPath::FixedFuncUntextured,
-                                     FixedFuncDesc(0), vs, ps) &&
-                   vs == "OSE_FixedFunc_Untextured_vertex" &&
-                   ps == "OSE_FixedFunc_Untextured_fragment",
-               "untextured fixed function pair");
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncTextured,
+                                FixedFuncDesc(1), vs, ps) &&
+              vs == "OSE_FixedFunc_Textured_vertex" &&
+              ps == "OSE_FixedFunc_Textured_fragment",
+          "textured fixed function pair");
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncUntextured,
+                                FixedFuncDesc(0), vs, ps) &&
+              vs == "OSE_FixedFunc_Untextured_vertex" &&
+              ps == "OSE_FixedFunc_Untextured_fragment",
+          "untextured fixed function pair");
 
-    ExpectTrue(ResolveCompatPrograms(CompatPath::AggressiveGeneric,
-                                     FixedFuncDesc(2), vs, ps) &&
-                   vs == "OSE_FixedFunc_Textured_vertex" &&
-                   ps == "OSE_FixedFunc_Textured_fragment",
-               "aggressive generic follows texturing");
+    Check(ResolveCompatPrograms(CompatPath::AggressiveGeneric,
+                                FixedFuncDesc(2), vs, ps) &&
+              vs == "OSE_FixedFunc_Textured_vertex" &&
+              ps == "OSE_FixedFunc_Textured_fragment",
+          "aggressive generic follows texturing");
 }
 
 void TestSynthesisExclusions()
@@ -465,39 +456,39 @@ void TestSynthesisExclusions()
     // or the program name must be enough to refuse it.
     LegacyPassDesc ui = ProgramDesc("UI_vertex", "vs_3_0", "UI_fragment",
                                     "ps_3_0");
-    ExpectTrue(IsExcludedFromSynthesis("SomeMenuThing", ui),
-               "UI program family is excluded on program name alone");
-    ExpectTrue(IsExcludedFromSynthesis("UI_Background", FixedFuncDesc(1)),
-               "UI material name is excluded on name alone");
+    Check(IsExcludedFromSynthesis("SomeMenuThing", ui),
+          "UI program family is excluded on program name alone");
+    Check(IsExcludedFromSynthesis("UI_Background", FixedFuncDesc(1)),
+          "UI material name is excluded on name alone");
 
-    ExpectTrue(IsExcludedFromSynthesis("overlay_frame", FixedFuncDesc(1)),
-               "overlays excluded");
-    ExpectTrue(IsExcludedFromSynthesis("bzfont", FixedFuncDesc(1)),
-               "font surfaces excluded");
-    ExpectTrue(IsExcludedFromSynthesis("avtank_cockpit", FixedFuncDesc(1)),
-               "cockpit excluded");
-    ExpectTrue(IsExcludedFromSynthesis("Scope_overlay", FixedFuncDesc(1)),
-               "scope excluded");
-    ExpectTrue(IsExcludedFromSynthesis("Ogre/Compositor/StdQuad",
-                                       FixedFuncDesc(0)),
-               "compositor quad excluded");
-    ExpectTrue(IsExcludedFromSynthesis("sprites", FixedFuncDesc(1)),
-               "sprite sheets excluded");
+    Check(IsExcludedFromSynthesis("overlay_frame", FixedFuncDesc(1)),
+          "overlays excluded");
+    Check(IsExcludedFromSynthesis("bzfont", FixedFuncDesc(1)),
+          "font surfaces excluded");
+    Check(IsExcludedFromSynthesis("avtank_cockpit", FixedFuncDesc(1)),
+          "cockpit excluded");
+    Check(IsExcludedFromSynthesis("Scope_overlay", FixedFuncDesc(1)),
+          "scope excluded");
+    Check(IsExcludedFromSynthesis("Ogre/Compositor/StdQuad",
+                                  FixedFuncDesc(0)),
+          "compositor quad excluded");
+    Check(IsExcludedFromSynthesis("sprites", FixedFuncDesc(1)),
+          "sprite sheets excluded");
 
     // Ordinary scene content must still be eligible, or the exclusion would
     // quietly disable the whole feature.
     LegacyPassDesc tank = ProgramDesc("BaseHighPSSM_vertex", "vs_3_0",
                                       "BaseHighPSSM_fragment", "ps_3_0");
-    ExpectTrue(!IsExcludedFromSynthesis("avltnk00", tank),
-               "a vehicle material is eligible");
-    ExpectTrue(!IsExcludedFromSynthesis("abstor", tank),
-               "a building material is eligible");
+    Check(!IsExcludedFromSynthesis("avltnk00", tank),
+          "a vehicle material is eligible");
+    Check(!IsExcludedFromSynthesis("abstor", tank),
+          "a building material is eligible");
     LegacyPassDesc terrain = ProgramDesc("TerrainHighPSSM_vertex", "vs_3_0",
                                          "TerrainHighPSSM_fragment", "ps_3_0");
-    ExpectTrue(!IsExcludedFromSynthesis("MN_DETAIL_ATLAS", terrain),
-               "a terrain atlas is eligible");
-    ExpectTrue(!IsExcludedFromSynthesis("", FixedFuncDesc(0)),
-               "an empty name is not excluded here (the caller rejects it)");
+    Check(!IsExcludedFromSynthesis("MN_DETAIL_ATLAS", terrain),
+          "a terrain atlas is eligible");
+    Check(!IsExcludedFromSynthesis("", FixedFuncDesc(0)),
+          "an empty name is not excluded here (the caller rejects it)");
 }
 
 std::string ReadTextFile(const char* path)
@@ -555,26 +546,26 @@ void TestVertexInputFit()
     noColour.position = true;
     noColour.diffuse = false;
     noColour.texcoord0 = true;
-    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex",
-                                        noColour, vs) ==
-                       VertexInputFit::Adapted &&
-                   vs == "OSE_FixedFunc_Textured_vertex_novc",
-               "textured fixed function on a mesh without DIFFUSE drops COLOR0");
-    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Untextured_vertex",
-                                        noColour, vs) ==
-                       VertexInputFit::Adapted &&
-                   vs == "OSE_FixedFunc_Untextured_vertex_novc",
-               "untextured fixed function on a mesh without DIFFUSE drops COLOR0");
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex",
+                                   noColour, vs) ==
+                  VertexInputFit::Adapted &&
+              vs == "OSE_FixedFunc_Textured_vertex_novc",
+          "textured fixed function on a mesh without DIFFUSE drops COLOR0");
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Untextured_vertex",
+                                   noColour, vs) ==
+                  VertexInputFit::Adapted &&
+              vs == "OSE_FixedFunc_Untextured_vertex_novc",
+          "untextured fixed function on a mesh without DIFFUSE drops COLOR0");
     // Family adapters share the entry points, so they take the same variant.
-    ExpectTrue(FitVertexProgramToInputs("OSE_Compat_Effect_vertex", noColour,
-                                        vs) == VertexInputFit::Adapted &&
-                   vs == "OSE_FixedFunc_Textured_vertex_novc",
-               "a textured-entry family adapter adapts to the generic variant");
-    ExpectTrue(FitVertexProgramToInputs("OSE_Compat_Untextured_vertex",
-                                        noColour, vs) ==
-                       VertexInputFit::Adapted &&
-                   vs == "OSE_FixedFunc_Untextured_vertex_novc",
-               "the untextured family keeps the untextured entry");
+    Check(FitVertexProgramToInputs("OSE_Compat_Effect_vertex", noColour,
+                                   vs) == VertexInputFit::Adapted &&
+              vs == "OSE_FixedFunc_Textured_vertex_novc",
+          "a textured-entry family adapter adapts to the generic variant");
+    Check(FitVertexProgramToInputs("OSE_Compat_Untextured_vertex",
+                                   noColour, vs) ==
+                  VertexInputFit::Adapted &&
+              vs == "OSE_FixedFunc_Untextured_vertex_novc",
+          "the untextured family keeps the untextured entry");
 
     // Native BZR geometry (mire foliage: POSITION/NORMAL/DIFFUSE/TEXCOORD0)
     // keeps the program that was resolved, family name and all.
@@ -582,75 +573,75 @@ void TestVertexInputFit()
     full.known = true;
     full.diffuse = true;
     full.texcoord0 = true;
-    ExpectTrue(FitVertexProgramToInputs("OSE_Compat_Effect_vertex", full, vs) ==
-                       VertexInputFit::Unchanged &&
-                   vs == "OSE_Compat_Effect_vertex",
-               "a mesh with every input keeps the resolved program");
-    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Untextured_vertex",
-                                        full, vs) == VertexInputFit::Unchanged &&
-                   vs == "OSE_FixedFunc_Untextured_vertex",
-               "untextured with DIFFUSE is unchanged");
+    Check(FitVertexProgramToInputs("OSE_Compat_Effect_vertex", full, vs) ==
+                  VertexInputFit::Unchanged &&
+              vs == "OSE_Compat_Effect_vertex",
+          "a mesh with every input keeps the resolved program");
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Untextured_vertex",
+                                   full, vs) == VertexInputFit::Unchanged &&
+              vs == "OSE_FixedFunc_Untextured_vertex",
+          "untextured with DIFFUSE is unchanged");
 
     VertexInputs noUv = full;
     noUv.texcoord0 = false;
-    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex", noUv,
-                                        vs) == VertexInputFit::Adapted &&
-                   vs == "OSE_FixedFunc_Textured_vertex_nouv",
-               "textured program on a mesh without TEXCOORD0 drops the UV input");
-    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Untextured_vertex",
-                                        noUv, vs) == VertexInputFit::Unchanged,
-               "the untextured entry never needed TEXCOORD0");
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex", noUv,
+                                   vs) == VertexInputFit::Adapted &&
+              vs == "OSE_FixedFunc_Textured_vertex_nouv",
+          "textured program on a mesh without TEXCOORD0 drops the UV input");
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Untextured_vertex",
+                                   noUv, vs) == VertexInputFit::Unchanged,
+          "the untextured entry never needed TEXCOORD0");
     VertexInputs bare;
     bare.known = true;
     bare.diffuse = false;
     bare.texcoord0 = false;
-    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex", bare,
-                                        vs) == VertexInputFit::Adapted &&
-                   vs == "OSE_FixedFunc_Textured_vertex_novc_nouv",
-               "position-only mesh gets the position-only textured variant");
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex", bare,
+                                   vs) == VertexInputFit::Adapted &&
+              vs == "OSE_FixedFunc_Textured_vertex_novc_nouv",
+          "position-only mesh gets the position-only textured variant");
 
     VertexInputs noPosition = full;
     noPosition.position = false;
-    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex",
-                                        noPosition, vs) ==
-                       VertexInputFit::Unsatisfiable && vs.empty(),
-               "no POSITION is unsatisfiable and fails closed");
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex",
+                                   noPosition, vs) ==
+                  VertexInputFit::Unsatisfiable && vs.empty(),
+          "no POSITION is unsatisfiable and fails closed");
 
     // Unknown declaration: never require COLOR0 (fatal if absent), keep UVs.
     VertexInputs unknown;
-    ExpectTrue(!unknown.known, "default VertexInputs is unknown");
-    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex",
-                                        unknown, vs) ==
-                       VertexInputFit::Adapted &&
-                   vs == "OSE_FixedFunc_Textured_vertex_novc",
-               "unknown inputs take the no-colour variant");
+    Check(!unknown.known, "default VertexInputs is unknown");
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex",
+                                   unknown, vs) ==
+                  VertexInputFit::Adapted &&
+              vs == "OSE_FixedFunc_Textured_vertex_novc",
+          "unknown inputs take the no-colour variant");
     unknown.diffuse = true; // ignored while known == false
-    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex",
-                                        unknown, vs) ==
-                       VertexInputFit::Adapted &&
-                   vs == "OSE_FixedFunc_Textured_vertex_novc",
-               "an unverified diffuse flag is not trusted");
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Textured_vertex",
+                                   unknown, vs) ==
+                  VertexInputFit::Adapted &&
+              vs == "OSE_FixedFunc_Textured_vertex_novc",
+          "an unverified diffuse flag is not trusted");
 
     // Programs this layer does not own are never touched.
-    ExpectTrue(FitVertexProgramToInputs("BaseHighPSSM_vertexSM4", noColour,
-                                        vs) == VertexInputFit::Unchanged &&
-                   vs == "BaseHighPSSM_vertexSM4",
-               "foreign programs are left alone");
+    Check(FitVertexProgramToInputs("BaseHighPSSM_vertexSM4", noColour,
+                                   vs) == VertexInputFit::Unchanged &&
+              vs == "BaseHighPSSM_vertexSM4",
+          "foreign programs are left alone");
 
-    ExpectTrue(DescribeVertexInputs(VertexInputs{}) == "unknown",
-               "unknown inputs describe as unknown");
-    ExpectTrue(DescribeVertexInputs(noColour) == "position,texcoord0",
-               "prop.mesh inputs describe as position,texcoord0");
-    ExpectTrue(std::strcmp(VertexInputFitName(VertexInputFit::Adapted),
-                           "adapted") == 0,
-               "fit names");
+    Check(DescribeVertexInputs(VertexInputs{}) == "unknown",
+          "unknown inputs describe as unknown");
+    Check(DescribeVertexInputs(noColour) == "position,texcoord0",
+          "prop.mesh inputs describe as position,texcoord0");
+    Check(std::strcmp(VertexInputFitName(VertexInputFit::Adapted),
+                      "adapted") == 0,
+          "fit names");
 
     // Every variant the fitter can emit must be declared by the shipped
     // .program with the matching entry point and defines, or the runtime's
     // program-absent guard would silently decline every adaptation.
     const std::string script = ReadTextFile(BZR_FIXEDFUNC_PROGRAM);
     const std::string hlsl = ReadTextFile(BZR_FIXEDFUNC_HLSL);
-    ExpectTrue(!script.empty() && !hlsl.empty(), "payload files readable");
+    Check(!script.empty() && !hlsl.empty(), "payload files readable");
     struct Expected
     {
         const char* name;
@@ -675,7 +666,7 @@ void TestVertexInputFit()
         const bool hasNoColour =
             block.find("COMPAT_NO_VERTEX_COLOUR") != std::string::npos;
         const bool hasNoUv = block.find("COMPAT_NO_TEXCOORD") != std::string::npos;
-        ExpectTrue(hasNoColour == e.noColour && hasNoUv == e.noUv, e.name);
+        Check(hasNoColour == e.noColour && hasNoUv == e.noUv, e.name);
         ExpectContains(block, "wvpMat worldviewproj_matrix", e.name);
     }
     ExpectContains(hlsl, "#ifndef COMPAT_NO_VERTEX_COLOUR",
@@ -719,16 +710,16 @@ void TestNativeInputGuards()
     std::printf("TestNativeInputGuards\n");
 
     const NativeInputGuard* glow = FindNativeInputGuard("Glow/Null");
-    ExpectTrue(glow != nullptr, "Glow/Null has a native input guard");
+    Check(glow != nullptr, "Glow/Null has a native input guard");
     if (glow != nullptr)
     {
-        ExpectTrue(std::strcmp(glow->expectVertex, "Untextured_vertex") == 0 &&
-                       std::strcmp(glow->expectFragment,
-                                   "Untextured_fragment") == 0,
-                   "guard pins the stock program pair");
-        ExpectTrue(std::strcmp(glow->replacementVertex,
-                               "OSE_FixedFunc_Untextured_vertex_novc") == 0,
-                   "guard uses the POSITION-only untextured variant");
+        Check(std::strcmp(glow->expectVertex, "Untextured_vertex") == 0 &&
+                  std::strcmp(glow->expectFragment,
+                              "Untextured_fragment") == 0,
+              "guard pins the stock program pair");
+        Check(std::strcmp(glow->replacementVertex,
+                          "OSE_FixedFunc_Untextured_vertex_novc") == 0,
+              "guard uses the POSITION-only untextured variant");
 
         const std::string line = FormatNativeInputGuardLog(*glow, "applied");
         ExpectContains(line,
@@ -739,14 +730,14 @@ void TestNativeInputGuards()
                        "action=applied", "empty action defaults to applied");
     }
 
-    ExpectTrue(FindNativeInputGuard("glow/null") == nullptr,
-               "guard names follow Ogre's case-sensitive lookup");
-    ExpectTrue(FindNativeInputGuard("BaseWhite") == nullptr,
-               "unrelated materials have no guard");
-    ExpectTrue(NativeInputGuardCount() == 1 &&
-                   NativeInputGuardAt(0) != nullptr &&
-                   NativeInputGuardAt(NativeInputGuardCount()) == nullptr,
-               "guard table bounds");
+    Check(FindNativeInputGuard("glow/null") == nullptr,
+          "guard names follow Ogre's case-sensitive lookup");
+    Check(FindNativeInputGuard("BaseWhite") == nullptr,
+          "unrelated materials have no guard");
+    Check(NativeInputGuardCount() == 1 &&
+              NativeInputGuardAt(0) != nullptr &&
+              NativeInputGuardAt(NativeInputGuardCount()) == nullptr,
+          "guard table bounds");
 }
 
 void TestTwoStageFixedFunction()
@@ -754,148 +745,148 @@ void TestTwoStageFixedFunction()
     std::printf("TestTwoStageFixedFunction\n");
 
     // Stage colour classification from the expanded LayerBlendModeEx.
-    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::Modulate)) ==
-                   StageCombine::Modulate,
-               "modulate");
-    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::Modulate,
-                                         BlendSource::Current,
-                                         BlendSource::Texture)) ==
-                   StageCombine::Modulate,
-               "modulate is commutative");
-    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::Add)) == StageCombine::Add,
-               "add");
-    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::Source1)) ==
-                   StageCombine::Replace,
-               "replace");
-    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::BlendTextureAlpha)) ==
-                   StageCombine::AlphaBlendTexture,
-               "alpha_blend");
-    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::BlendTextureAlpha,
-                                         BlendSource::Current,
-                                         BlendSource::Texture)) ==
-                   StageCombine::Unsupported,
-               "alpha_blend with swapped operands is a different combine");
-    ExpectTrue(ClassifyStageColour(Stage(13 /* LBX_DOTPRODUCT */)) ==
-                   StageCombine::Unsupported,
-               "dotproduct unsupported");
-    ExpectTrue(ClassifyStageColour(Stage(BlendOpEx::Modulate, 2 /* diffuse */,
-                                         BlendSource::Current)) ==
-                   StageCombine::Unsupported,
-               "non-texture source unsupported");
+    Check(ClassifyStageColour(Stage(BlendOpEx::Modulate)) ==
+              StageCombine::Modulate,
+          "modulate");
+    Check(ClassifyStageColour(Stage(BlendOpEx::Modulate,
+                                    BlendSource::Current,
+                                    BlendSource::Texture)) ==
+              StageCombine::Modulate,
+          "modulate is commutative");
+    Check(ClassifyStageColour(Stage(BlendOpEx::Add)) == StageCombine::Add,
+          "add");
+    Check(ClassifyStageColour(Stage(BlendOpEx::Source1)) ==
+              StageCombine::Replace,
+          "replace");
+    Check(ClassifyStageColour(Stage(BlendOpEx::BlendTextureAlpha)) ==
+              StageCombine::AlphaBlendTexture,
+          "alpha_blend");
+    Check(ClassifyStageColour(Stage(BlendOpEx::BlendTextureAlpha,
+                                    BlendSource::Current,
+                                    BlendSource::Texture)) ==
+              StageCombine::Unsupported,
+          "alpha_blend with swapped operands is a different combine");
+    Check(ClassifyStageColour(Stage(13 /* LBX_DOTPRODUCT */)) ==
+              StageCombine::Unsupported,
+          "dotproduct unsupported");
+    Check(ClassifyStageColour(Stage(BlendOpEx::Modulate, 2 /* diffuse */,
+                                    BlendSource::Current)) ==
+              StageCombine::Unsupported,
+          "non-texture source unsupported");
     TextureStageDesc unread = Stage(BlendOpEx::Modulate);
     unread.known = false;
-    ExpectTrue(ClassifyStageColour(unread) == StageCombine::Unsupported,
-               "unread stage is unsupported");
-    ExpectTrue(IsDefaultStageAlpha(Stage(BlendOpEx::Add)), "default alpha");
+    Check(ClassifyStageColour(unread) == StageCombine::Unsupported,
+          "unread stage is unsupported");
+    Check(IsDefaultStageAlpha(Stage(BlendOpEx::Add)), "default alpha");
     TextureStageDesc replaceAlpha = Stage(BlendOpEx::Modulate);
     replaceAlpha.alphaOp = BlendOpEx::Source1;
-    ExpectTrue(!IsDefaultStageAlpha(replaceAlpha),
-               "alpha_op_ex source1 is not default");
-    ExpectTrue(std::strcmp(StageCombineName(StageCombine::AlphaBlendTexture),
-                           "alpha_blend") == 0,
-               "stage combine names");
+    Check(!IsDefaultStageAlpha(replaceAlpha),
+          "alpha_op_ex source1 is not default");
+    Check(std::strcmp(StageCombineName(StageCombine::AlphaBlendTexture),
+                      "alpha_blend") == 0,
+          "stage combine names");
 
     // The support set.
-    ExpectTrue(IsSupportedTwoStageCombo(XrainDesc()), "xrain is supported");
+    Check(IsSupportedTwoStageCombo(XrainDesc()), "xrain is supported");
     LegacyPassDesc modulate2 = XrainDesc();
     modulate2.stages[1] = Stage(BlendOpEx::Modulate);
-    ExpectTrue(IsSupportedTwoStageCombo(modulate2),
-               "modulate/modulate supported");
+    Check(IsSupportedTwoStageCombo(modulate2),
+          "modulate/modulate supported");
 
     LegacyPassDesc d = XrainDesc();
     d.stages[1] = Stage(BlendOpEx::Add);
-    ExpectTrue(!IsSupportedTwoStageCombo(d),
-               "stage 1 add is outside the bounded set");
+    Check(!IsSupportedTwoStageCombo(d),
+          "stage 1 add is outside the bounded set");
     d = XrainDesc();
     d.stages[0] = Stage(BlendOpEx::Source1);
-    ExpectTrue(!IsSupportedTwoStageCombo(d), "stage 0 must modulate");
+    Check(!IsSupportedTwoStageCombo(d), "stage 0 must modulate");
     d = XrainDesc();
     d.stages[1].texCoordSet = 1;
-    ExpectTrue(!IsSupportedTwoStageCombo(d), "a second UV set is declined");
+    Check(!IsSupportedTwoStageCombo(d), "a second UV set is declined");
     d = XrainDesc();
     d.stages[1].known = false;
-    ExpectTrue(!IsSupportedTwoStageCombo(d), "an unread stage is declined");
+    Check(!IsSupportedTwoStageCombo(d), "an unread stage is declined");
     d = XrainDesc();
     d.stages[0].alphaOp = BlendOpEx::Source1;
-    ExpectTrue(!IsSupportedTwoStageCombo(d), "non-default alpha is declined");
+    Check(!IsSupportedTwoStageCombo(d), "non-default alpha is declined");
     d = XrainDesc();
     d.stages.pop_back();
-    ExpectTrue(!IsSupportedTwoStageCombo(d),
-               "stage count must match the units");
+    Check(!IsSupportedTwoStageCombo(d),
+          "stage count must match the units");
     d = XrainDesc();
     d.textureUnits = 3;
     d.stages.push_back(Stage(BlendOpEx::Modulate));
-    ExpectTrue(!IsSupportedTwoStageCombo(d), "three units are declined");
-    ExpectTrue(!IsSupportedTwoStageCombo(FixedFuncDesc(2, "modulate")),
-               "two units with no stage state (ABI unavailable) are declined");
+    Check(!IsSupportedTwoStageCombo(d), "three units are declined");
+    Check(!IsSupportedTwoStageCombo(FixedFuncDesc(2, "modulate")),
+          "two units with no stage state (ABI unavailable) are declined");
 
     // Decision ladder.
     CompatConfig on;
-    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, XrainDesc(),
-                                on) == CompatPath::FixedFuncTextured2,
-               "xrain takes the two-stage path");
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, XrainDesc(),
+                           on) == CompatPath::FixedFuncTextured2,
+          "xrain takes the two-stage path");
     CompatConfig off = on;
     off.compatEnabled = false;
-    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, XrainDesc(),
-                                off) == CompatPath::SkipShaderless,
-               "compat off still skips");
-    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, XrainDesc(),
-                                on, false) == CompatPath::SkipShaderless,
-               "missing resources still fail closed");
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, XrainDesc(),
+                           off) == CompatPath::SkipShaderless,
+          "compat off still skips");
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, XrainDesc(),
+                           on, false) == CompatPath::SkipShaderless,
+          "missing resources still fail closed");
     d = XrainDesc();
     d.stages[1].texCoordSet = 1;
-    ExpectTrue(DecideCompatPath(LegacyPassKind::TrueFixedFunction, d, on) ==
-                   CompatPath::SkipShaderless,
-               "unsupported two-unit pass still skips");
-    ExpectTrue(std::strcmp(CompatPathName(CompatPath::FixedFuncTextured2),
-                           "fixedfunc-textured2") == 0,
-               "path name");
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, d, on) ==
+              CompatPath::SkipShaderless,
+          "unsupported two-unit pass still skips");
+    Check(std::strcmp(CompatPathName(CompatPath::FixedFuncTextured2),
+                      "fixedfunc-textured2") == 0,
+          "path name");
 
     // Program resolution follows the stage 1 combine.
     std::string vs;
     std::string ps;
-    ExpectTrue(ResolveCompatPrograms(CompatPath::FixedFuncTextured2,
-                                     XrainDesc(), vs, ps) &&
-                   vs == "OSE_FixedFunc_Textured2_vertex" &&
-                   ps == "OSE_FixedFunc_Textured2_fragment_alphablend",
-               "xrain resolves to the alpha_blend pair");
-    ExpectTrue(ResolveCompatPrograms(CompatPath::FixedFuncTextured2, modulate2,
-                                     vs, ps) &&
-                   ps == "OSE_FixedFunc_Textured2_fragment_modulate",
-               "modulate/modulate resolves to the modulate pair");
-    ExpectTrue(!ResolveCompatPrograms(CompatPath::FixedFuncTextured2,
-                                      FixedFuncDesc(2, "modulate"), vs, ps) &&
-                   vs.empty() && ps.empty(),
-               "an unsupported desc never half-resolves");
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncTextured2,
+                                XrainDesc(), vs, ps) &&
+              vs == "OSE_FixedFunc_Textured2_vertex" &&
+              ps == "OSE_FixedFunc_Textured2_fragment_alphablend",
+          "xrain resolves to the alpha_blend pair");
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncTextured2, modulate2,
+                                vs, ps) &&
+              ps == "OSE_FixedFunc_Textured2_fragment_modulate",
+          "modulate/modulate resolves to the modulate pair");
+    Check(!ResolveCompatPrograms(CompatPath::FixedFuncTextured2,
+                                 FixedFuncDesc(2, "modulate"), vs, ps) &&
+              vs.empty() && ps.empty(),
+          "an unsupported desc never half-resolves");
 
     // Vertex-input fitting: own entry, own variant, TEXCOORD0 required.
     VertexInputs full;
     full.known = true;
     full.diffuse = true;
     full.texcoord0 = true;
-    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex", full,
-                                        vs) == VertexInputFit::Unchanged &&
-                   vs == "OSE_FixedFunc_Textured2_vertex",
-               "full inputs keep the two-stage program");
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex", full,
+                                   vs) == VertexInputFit::Unchanged &&
+              vs == "OSE_FixedFunc_Textured2_vertex",
+          "full inputs keep the two-stage program");
     VertexInputs noColour = full;
     noColour.diffuse = false;
-    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex",
-                                        noColour, vs) ==
-                       VertexInputFit::Adapted &&
-                   vs == "OSE_FixedFunc_Textured2_vertex_novc",
-               "no DIFFUSE takes the two-stage no-colour variant, not the "
-               "one-stage one");
-    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex",
-                                        VertexInputs{}, vs) ==
-                       VertexInputFit::Adapted &&
-                   vs == "OSE_FixedFunc_Textured2_vertex_novc",
-               "unknown inputs take the two-stage no-colour variant");
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex",
+                                   noColour, vs) ==
+                  VertexInputFit::Adapted &&
+              vs == "OSE_FixedFunc_Textured2_vertex_novc",
+          "no DIFFUSE takes the two-stage no-colour variant, not the "
+          "one-stage one");
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex",
+                                   VertexInputs{}, vs) ==
+                  VertexInputFit::Adapted &&
+              vs == "OSE_FixedFunc_Textured2_vertex_novc",
+          "unknown inputs take the two-stage no-colour variant");
     VertexInputs noUv = full;
     noUv.texcoord0 = false;
-    ExpectTrue(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex", noUv,
-                                        vs) == VertexInputFit::Unsatisfiable &&
-                   vs.empty(),
-               "no TEXCOORD0 is unsatisfiable for two stages");
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Textured2_vertex", noUv,
+                                   vs) == VertexInputFit::Unsatisfiable &&
+              vs.empty(),
+          "no TEXCOORD0 is unsatisfiable for two stages");
 
     // Every name the policy can emit is declared by the shipped payload with
     // the two-stage entry points.
@@ -929,10 +920,10 @@ void TestTwoStageFixedFunction()
         }
         else
         {
-            ExpectTrue(!block.empty() &&
-                           block.find("preprocessor_defines") ==
-                               std::string::npos,
-                       e.name);
+            Check(!block.empty() &&
+                      block.find("preprocessor_defines") ==
+                          std::string::npos,
+                  e.name);
         }
     }
     ExpectContains(ProgramBlock(script, "OSE_FixedFunc_Textured2_vertex"),
@@ -962,10 +953,10 @@ int main()
     TestCacheKeys();
     TestLogFormats();
 
-    if (g_failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
         std::printf("\ndx11_legacy_material_compat_tests FAILED (%d)\n",
-                    g_failures);
+                    OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("\ndx11_legacy_material_compat_tests passed\n");

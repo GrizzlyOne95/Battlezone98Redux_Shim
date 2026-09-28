@@ -3,24 +3,12 @@
 
 #include "odf_compat.h"
 
-#include <cassert>
 #include <cstdio>
 #include <string>
+#include "test_check.h"
 
 namespace
 {
-int g_failures = 0;
-
-void Check(bool cond, const char* what, int line)
-{
-    if (!cond)
-    {
-        ++g_failures;
-        std::printf("FAIL %d: %s\n", line, what);
-    }
-}
-#define CHECK(c) Check((c), #c, __LINE__)
-
 using BZROpenShim::OdfCompat::Options;
 using BZROpenShim::OdfCompat::ProcessResult;
 using BZROpenShim::OdfCompat::ProcessOdfText;
@@ -188,7 +176,7 @@ int main()
         CHECK(r.text.empty() && !r.changed);
     }
 
-    if (g_failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
         std::printf("odf_compat_tests: all passed\n");
-    return g_failures == 0 ? 0 : 1;
+    return OpenShimTest::ExitCode();
 }

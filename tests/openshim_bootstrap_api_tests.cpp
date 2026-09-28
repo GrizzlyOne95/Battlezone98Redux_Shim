@@ -20,21 +20,12 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "test_check.h"
 
 namespace
 {
     using namespace BZROpenShim;
 
-    int g_Failures = 0;
-
-    void Check(bool condition, const char* what, int line)
-    {
-        if (condition) return;
-        std::printf("FAIL line %d: %s\n", line, what);
-        ++g_Failures;
-    }
-
-#define CHECK(c) Check((c), #c, __LINE__)
 
     struct Captured
     {
@@ -153,9 +144,9 @@ int main()
     // ---- the marker clear is a real call back into the bootstrap ----------
     api->clearStartupPendingMarker();   // must be safe with no marker present
 
-    if (g_Failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::printf("openshim bootstrap api tests FAILED (%d)\n", g_Failures);
+        std::printf("openshim bootstrap api tests FAILED (%d)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("openshim bootstrap api tests passed\n");

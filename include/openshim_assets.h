@@ -195,6 +195,5 @@ bool ShouldEnableAssetFeature(bool configEnabled, AssetFeature feature);
 // Convenience for UI
 std::string FormatAssetStatusForUi(const AssetCapabilities& caps);
 std::string FormatAssetCapabilitiesDetail(const AssetCapabilities& caps);
-std::string FormatAssetStatusForLog(const AssetCapabilities& caps);
 
 } // namespace BZROpenShim::Assets

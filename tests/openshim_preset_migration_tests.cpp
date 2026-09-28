@@ -40,6 +40,9 @@
 // logging. Provide a no-op implementation so the test binary does not have
 // to link the full shim_log.cpp and its Windows dependencies.
 #include "shim_log.h"
+#include "test_check.h"
+using OpenShimTest::Check;
+
 namespace BZROpenShim
 {
     void LogShimA(LogLevel, const char*, const char*, ...) {}
@@ -55,25 +58,11 @@ using namespace BZROpenShim;
 
 namespace
 {
-    int g_Failures = 0;
-    int g_Checks = 0;
-
-    void CheckTrue(bool cond, const char* name)
-    {
-        ++g_Checks;
-        if (cond)
-            return;
-        ++g_Failures;
-        std::printf("FAIL %s\n", name);
-    }
-
     void CheckEqStr(const std::string& actual, const std::string& expected, const char* name)
     {
-        ++g_Checks;
-        if (actual == expected)
+        if (Check(actual == expected, name))
             return;
-        ++g_Failures;
-        std::printf("FAIL %s\n  expected: |%s|\n  actual:   |%s|\n", name, expected.c_str(), actual.c_str());
+        std::fprintf(stderr, "  expected: |%s|\n  actual:   |%s|\n", expected.c_str(), actual.c_str());
     }
 
     std::vector<std::string> ReadLines(const fs::path& p)
@@ -204,10 +193,10 @@ int main()
         // Ensure missing does not exist
         fs::remove(missing);
         auto r = MigratePresetFileIfNeeded(missing, canonical);
-        CheckTrue(r.action == MigrationAction::None,
-                  "1: missing file -> None");
-        CheckTrue(!fs::exists(missing),
-                  "1: missing file not created by migration");
+        Check(r.action == MigrationAction::None,
+              "1: missing file -> None");
+        Check(!fs::exists(missing),
+              "1: missing file not created by migration");
     }
 
     // 2. current revision -> no change
@@ -218,13 +207,13 @@ int main()
         WriteLines(cur, MakeCanonicalLines());
         auto before = ReadFileString(cur);
         auto r = MigratePresetFileIfNeeded(cur, canonical);
-        CheckTrue(r.action == MigrationAction::None,
-                  "2: current revision -> None");
+        Check(r.action == MigrationAction::None,
+              "2: current revision -> None");
         auto after = ReadFileString(cur);
-        CheckTrue(before == after,
-                  "2: current file untouched");
-        CheckTrue(!r.backupCreated,
-                  "2: current file no backup");
+        Check(before == after,
+              "2: current file untouched");
+        Check(!r.backupCreated,
+              "2: current file no backup");
     }
 
     // 3. exact known bad preset -> full replacement (exercised via marker path)
@@ -237,18 +226,18 @@ int main()
         WriteLines(canonical, MakeCanonicalLines());
         WriteLines(bad, MakeBadR1Lines());
         auto r = MigratePresetFileIfNeeded(bad, canonical);
-        CheckTrue(r.action == MigrationAction::SurgicalFixed ||
-                  r.action == MigrationAction::FullReplaced,
-                  "3: exact bad (marker) triggers migration");
-        CheckTrue(r.wroteNewFile,
-                  "3: exact bad wrote new file");
+        Check(r.action == MigrationAction::SurgicalFixed ||
+              r.action == MigrationAction::FullReplaced,
+              "3: exact bad (marker) triggers migration");
+        Check(r.wroteNewFile,
+              "3: exact bad wrote new file");
         // Verify the corrected values are present.
-        CheckTrue(FileContains(bad, "ScrapPilotHud = Stock"),
-                  "3: ScrapPilotHud fixed to Stock");
-        CheckTrue(FileContains(bad, "AttackRevealPerceivedTeam = 0"),
-                  "3: AttackReveal fixed to 0");
-        CheckTrue(FileContains(bad, CurrentRevisionMarker()),
-                  "3: revision bumped to current");
+        Check(FileContains(bad, "ScrapPilotHud = Stock"),
+              "3: ScrapPilotHud fixed to Stock");
+        Check(FileContains(bad, "AttackRevealPerceivedTeam = 0"),
+              "3: AttackReveal fixed to 0");
+        Check(FileContains(bad, CurrentRevisionMarker()),
+              "3: revision bumped to current");
     }
 
     // 4. exact bad preset receives backup
@@ -261,24 +250,24 @@ int main()
         fs::path backup = bad.parent_path() / BuildPremigrateBackupFileName(1);
         fs::remove(backup);
         auto r = MigratePresetFileIfNeeded(bad, canonical);
-        CheckTrue(fs::exists(backup) || r.backupCreated,
-                  "4: backup created for R1 migration");
+        Check(fs::exists(backup) || r.backupCreated,
+              "4: backup created for R1 migration");
         if (fs::exists(backup))
         {
-            CheckTrue(FileContains(backup, "ScrapPilotHud = Legacy"),
-                      "4: backup contains original Legacy value");
-            CheckTrue(FileContains(backup, "AttackRevealPerceivedTeam = 1"),
-                      "4: backup contains original 1");
+            Check(FileContains(backup, "ScrapPilotHud = Legacy"),
+                  "4: backup contains original Legacy value");
+            Check(FileContains(backup, "AttackRevealPerceivedTeam = 1"),
+                  "4: backup contains original 1");
         }
         // Second migration must not overwrite the backup.
         auto backupBefore = ReadFileString(backup);
         auto r2 = MigratePresetFileIfNeeded(bad, canonical);
         // bad is now revision 2, so second call should be None.
-        CheckTrue(r2.action == MigrationAction::None,
-                  "4: second migration idempotent (no overwrite)");
+        Check(r2.action == MigrationAction::None,
+              "4: second migration idempotent (no overwrite)");
         auto backupAfter = ReadFileString(backup);
-        CheckTrue(backupBefore == backupAfter,
-                  "4: existing backup not destroyed on second run");
+        Check(backupBefore == backupAfter,
+              "4: existing backup not destroyed on second run");
     }
 
     // 5. modified old preset retaining historical bad default -> only that default updated
@@ -294,12 +283,12 @@ int main()
                 l = "AttackRevealPerceivedTeam = 0";
         WriteLines(mod, lines);
         auto r = MigratePresetFileIfNeeded(mod, canonical);
-        CheckTrue(r.action == MigrationAction::SurgicalFixed,
-                  "5: modified R1 with one bad default -> SurgicalFixed");
-        CheckTrue(FileContains(mod, "ScrapPilotHud = Stock"),
-                  "5: retained bad ScrapPilotHud fixed");
-        CheckTrue(FileContains(mod, "AttackRevealPerceivedTeam = 0"),
-                  "5: user-fixed AttackReveal preserved as 0");
+        Check(r.action == MigrationAction::SurgicalFixed,
+              "5: modified R1 with one bad default -> SurgicalFixed");
+        Check(FileContains(mod, "ScrapPilotHud = Stock"),
+              "5: retained bad ScrapPilotHud fixed");
+        Check(FileContains(mod, "AttackRevealPerceivedTeam = 0"),
+              "5: user-fixed AttackReveal preserved as 0");
     }
 
     // 6. modified old preset with user override -> override preserved
@@ -323,14 +312,14 @@ int main()
         WriteLines(mod, lines);
         auto r = MigratePresetFileIfNeeded(mod, canonical);
         // Even though no table entry matched old, the marker still migrates.
-        CheckTrue(FileContains(mod, "ScrapPilotHud = Stock"),
-                  "6: user Stock preserved");
-        CheckTrue(FileContains(mod, "AttackRevealPerceivedTeam = 0"),
-                  "6: user 0 preserved");
-        CheckTrue(FileContains(mod, "CustomUserValue = 12345"),
-                  "6: custom unknown key preserved");
-        CheckTrue(FileContains(mod, CurrentRevisionMarker()),
-                  "6: marker still bumped even when values already correct");
+        Check(FileContains(mod, "ScrapPilotHud = Stock"),
+              "6: user Stock preserved");
+        Check(FileContains(mod, "AttackRevealPerceivedTeam = 0"),
+              "6: user 0 preserved");
+        Check(FileContains(mod, "CustomUserValue = 12345"),
+              "6: custom unknown key preserved");
+        Check(FileContains(mod, CurrentRevisionMarker()),
+              "6: marker still bumped even when values already correct");
     }
 
     // 6b. revision 2 -> 3: the settings doors are reopened.
@@ -359,18 +348,18 @@ int main()
             "AttackRevealPerceivedTeam = 0",
         });
         auto r = MigratePresetFileIfNeeded(r2, canonical);
-        CheckTrue(r.action == MigrationAction::SurgicalFixed,
-                  "6b: revision 2 file is migrated, not skipped");
-        CheckTrue(r.fromRevision == 2,
-                  "6b: reports migrating from revision 2");
-        CheckTrue(FileContains(r2, "SettingsUi = 1"),
-                  "6b: SettingsUi reopened");
-        CheckTrue(FileContains(r2, "CustomBindsUi = 1"),
-                  "6b: CustomBindsUi reopened");
-        CheckTrue(FileContains(r2, "SoundChannels = 256"),
-                  "6b: unrelated key preserved");
-        CheckTrue(FileContains(r2, CurrentRevisionMarker()),
-                  "6b: revision bumped to current");
+        Check(r.action == MigrationAction::SurgicalFixed,
+              "6b: revision 2 file is migrated, not skipped");
+        Check(r.fromRevision == 2,
+              "6b: reports migrating from revision 2");
+        Check(FileContains(r2, "SettingsUi = 1"),
+              "6b: SettingsUi reopened");
+        Check(FileContains(r2, "CustomBindsUi = 1"),
+              "6b: CustomBindsUi reopened");
+        Check(FileContains(r2, "SoundChannels = 256"),
+              "6b: unrelated key preserved");
+        Check(FileContains(r2, CurrentRevisionMarker()),
+              "6b: revision bumped to current");
     }
 
     // 6c. revision 2 -> 3 does not override a value the player chose.
@@ -390,12 +379,12 @@ int main()
             "CustomBindsUi = 0",
         });
         MigratePresetFileIfNeeded(r2, canonical);
-        CheckTrue(FileContains(r2, "SettingsUi = 1"),
-                  "6c: already-on SettingsUi left alone");
-        CheckTrue(FileContains(r2, "CustomBindsUi = 1"),
-                  "6c: off CustomBindsUi still reopened");
-        CheckTrue(FileContains(r2, CurrentRevisionMarker()),
-                  "6c: revision bumped to current");
+        Check(FileContains(r2, "SettingsUi = 1"),
+              "6c: already-on SettingsUi left alone");
+        Check(FileContains(r2, "CustomBindsUi = 1"),
+              "6c: off CustomBindsUi still reopened");
+        Check(FileContains(r2, CurrentRevisionMarker()),
+              "6c: revision bumped to current");
     }
 
     // 7. unknown/custom file -> untouched
@@ -414,11 +403,11 @@ int main()
         WriteLines(custom, customLines);
         auto before = ReadFileString(custom);
         auto r = MigratePresetFileIfNeeded(custom, canonical);
-        CheckTrue(r.action == MigrationAction::CustomUnrecognized,
-                  "7: unknown/custom without marker -> CustomUnrecognized");
+        Check(r.action == MigrationAction::CustomUnrecognized,
+              "7: unknown/custom without marker -> CustomUnrecognized");
         auto after = ReadFileString(custom);
-        CheckTrue(before == after,
-                  "7: custom file untouched");
+        Check(before == after,
+              "7: custom file untouched");
     }
 
     // 8. comments/unknown keys preserved during surgical migration
@@ -429,13 +418,13 @@ int main()
         auto lines = MakeBadR1Lines(); // contains comment and SomeUnknownKey=42
         WriteLines(mod, lines);
         auto r = MigratePresetFileIfNeeded(mod, canonical);
-        CheckTrue(FileContains(mod, "; user comment must survive") ||
-                  FileContains(mod, "user comment must survive"),
-                  "8: user comment preserved");
-        CheckTrue(FileContains(mod, "SomeUnknownKey = 42"),
-                  "8: unknown key preserved");
-        CheckTrue(FileContains(mod, "OPENSHIM_TRACE_HITS = 1"),
-                  "8: [Environment] raw variable preserved");
+        Check(FileContains(mod, "; user comment must survive") ||
+              FileContains(mod, "user comment must survive"),
+              "8: user comment preserved");
+        Check(FileContains(mod, "SomeUnknownKey = 42"),
+              "8: unknown key preserved");
+        Check(FileContains(mod, "OPENSHIM_TRACE_HITS = 1"),
+              "8: [Environment] raw variable preserved");
     }
 
     // 9. migration is idempotent
@@ -448,10 +437,10 @@ int main()
         auto after1 = ReadFileString(bad);
         auto r2 = MigratePresetFileIfNeeded(bad, canonical);
         auto after2 = ReadFileString(bad);
-        CheckTrue(r2.action == MigrationAction::None,
-                  "9: second run is no-op");
-        CheckTrue(after1 == after2,
-                  "9: file identical after second run");
+        Check(r2.action == MigrationAction::None,
+              "9: second run is no-op");
+        Check(after1 == after2,
+              "9: file identical after second run");
     }
 
     // 10. failure path cannot truncate/destroy the source file
@@ -474,17 +463,17 @@ int main()
         auto after = ReadFileString(bad);
         // Even in the fallback path we either succeed (file corrected) or
         // fail closed (file untouched). Neither truncates to empty.
-        CheckTrue(!after.empty(),
-                  "10: file not truncated on failure path");
-        CheckTrue(after.size() >= beforeSize / 2,
-                  "10: file size not collapsed");
+        Check(!after.empty(),
+              "10: file not truncated on failure path");
+        Check(after.size() >= beforeSize / 2,
+              "10: file size not collapsed");
         // If migration succeeded via fallback, the file is corrected;
         // if it had failed, it would be identical. Either is acceptable here
         // because the "cannot truncate" property is the invariant.
         bool ok = (r.action == MigrationAction::FullReplaced ||
                    r.action == MigrationAction::SurgicalFixed ||
                    r.action == MigrationAction::Failed);
-        CheckTrue(ok, "10: result is one of expected actions");
+        Check(ok, "10: result is one of expected actions");
     }
 
     // 11. player preset and reference still contain the same first-class setting set
@@ -504,7 +493,7 @@ int main()
         std::string detail;
         bool ok = PresetHasCompleteFirstClassSet(
             ReadLines(canonical), reference, detail);
-        CheckTrue(ok, "11+12: canonical preset has complete first-class set (marker ignored)");
+        Check(ok, "11+12: canonical preset has complete first-class set (marker ignored)");
         if (!ok)
             std::printf("  detail: %s\n", detail.c_str());
 
@@ -522,7 +511,7 @@ int main()
         // The live marker should be treated as not first-class, so the sets
         // still match? Actually if live marker is present, our filter will
         // ignore it, so the check should still pass.
-        CheckTrue(ok2, "12: live OpenShimPresetRevision not counted as first-class");
+        Check(ok2, "12: live OpenShimPresetRevision not counted as first-class");
         if (!ok2)
             std::printf("  detail2: %s\n", detail.c_str());
         // Negative: a real missing first-class key should be detected.
@@ -532,7 +521,7 @@ int main()
                                         [](const std::string& s){ return s.find("Turbo =") != std::string::npos; }),
                          missingKey.end());
         bool ok3 = PresetHasCompleteFirstClassSet(missingKey, reference, detail);
-        CheckTrue(!ok3, "11: missing first-class key detected");
+        Check(!ok3, "11: missing first-class key detected");
     }
 
     // Hash helper sanity: computing SHA-256 twice yields same result, and
@@ -547,14 +536,14 @@ int main()
         bool ok1 = TryComputeFileSha256Hex(a, ha1);
         bool ok2 = TryComputeFileSha256Hex(a, ha2);
         bool ok3 = TryComputeFileSha256Hex(b, hb);
-        CheckTrue(ok1 && ok2 && ok3, "hash helper succeeds");
-        CheckTrue(ha1 == ha2, "hash stable");
-        CheckTrue(ha1 != hb, "hash differs for different content");
+        Check(ok1 && ok2 && ok3, "hash helper succeeds");
+        Check(ha1 == ha2, "hash stable");
+        Check(ha1 != hb, "hash differs for different content");
         CheckEqStr(ha1.substr(0, 8), ha1.substr(0,8), "hash lower-hex sanity");
         // Verify hash is lower hex.
         bool lower = true;
         for (char c : ha1) if (std::isupper(static_cast<unsigned char>(c))) lower = false;
-        CheckTrue(lower, "hash is lower-hex");
+        Check(lower, "hash is lower-hex");
 
         // Check that known empty hash matches well-known value (sanity of algorithm).
         fs::path empty = tmpRoot / "empty.ini";
@@ -577,36 +566,36 @@ int main()
         fs::path bad = dir / "openshim.ini";
         WriteLines(bad, MakeRevision1PayloadLines());
         std::string hash;
-        CheckTrue(TryComputeFileSha256Hex(bad, hash) && hash == kLegacyRevision1Sha256,
-                  "13a: the committed revision-1 payload hashes to kLegacyRevision1Sha256");
-        CheckTrue(FileContains(bad, "AttackRevealPerceivedTeam = 1") &&
-                      FileContains(bad, "ScrapPilotHud = Legacy"),
-                  "13a: payload carries the bad defaults");
+        Check(TryComputeFileSha256Hex(bad, hash) && hash == kLegacyRevision1Sha256,
+              "13a: the committed revision-1 payload hashes to kLegacyRevision1Sha256");
+        Check(FileContains(bad, "AttackRevealPerceivedTeam = 1") &&
+                  FileContains(bad, "ScrapPilotHud = Legacy"),
+              "13a: payload carries the bad defaults");
 
         // File-level: the file as its own canonical is refused, surgical runs.
         auto r = MigratePresetFileIfNeeded(bad, bad);
-        CheckTrue(r.action == MigrationAction::FullReplaced,
-                  "13b: self-referential canonical still migrates (surgical fallback)");
-        CheckTrue(FileContains(bad, "AttackRevealPerceivedTeam = 0"),
-                  "13b: AttackRevealPerceivedTeam corrected, not re-emitted");
-        CheckTrue(FileContains(bad, "ScrapPilotHud = Stock"),
-                  "13b: ScrapPilotHud corrected, not re-emitted");
-        CheckTrue(FileContains(bad, "; " + CurrentRevisionMarker()),
-                  "13b: current revision marker stamped");
-        CheckTrue(FileContains(bad, "OpenShim Player Configuration"),
-                  "13b: the rest of the document is preserved");
-        CheckTrue(r.backupCreated && fs::exists(r.backupPath),
-                  "13b: premigrate backup written");
-        CheckTrue(MigratePresetFileIfNeeded(bad, bad).action == MigrationAction::None,
-                  "13b: second run is a no-op");
+        Check(r.action == MigrationAction::FullReplaced,
+              "13b: self-referential canonical still migrates (surgical fallback)");
+        Check(FileContains(bad, "AttackRevealPerceivedTeam = 0"),
+              "13b: AttackRevealPerceivedTeam corrected, not re-emitted");
+        Check(FileContains(bad, "ScrapPilotHud = Stock"),
+              "13b: ScrapPilotHud corrected, not re-emitted");
+        Check(FileContains(bad, "; " + CurrentRevisionMarker()),
+              "13b: current revision marker stamped");
+        Check(FileContains(bad, "OpenShim Player Configuration"),
+              "13b: the rest of the document is preserved");
+        Check(r.backupCreated && fs::exists(r.backupPath),
+              "13b: premigrate backup written");
+        Check(MigratePresetFileIfNeeded(bad, bad).action == MigrationAction::None,
+              "13b: second run is a no-op");
 
         // File-level: an empty canonical path takes the same surgical route.
         WriteLines(bad, MakeRevision1PayloadLines());
         r = MigratePresetFileIfNeeded(bad, fs::path());
-        CheckTrue(r.action == MigrationAction::FullReplaced &&
-                      FileContains(bad, "AttackRevealPerceivedTeam = 0") &&
-                      FileContains(bad, "ScrapPilotHud = Stock"),
-                  "13c: empty canonical repairs the exact-hash file surgically");
+        Check(r.action == MigrationAction::FullReplaced &&
+                  FileContains(bad, "AttackRevealPerceivedTeam = 0") &&
+                  FileContains(bad, "ScrapPilotHud = Stock"),
+              "13c: empty canonical repairs the exact-hash file surgically");
 
         // Directory-level: no canonical beside the DLL, only the developer
         // reference. The reference must not be used as the canonical and the
@@ -618,30 +607,30 @@ int main()
         example.push_back("TraceEverything = 1");
         WriteLines(dir / "openshim.ini.example", example);
         r = TryMigratePlayerPresetInDirectory(dir);
-        CheckTrue(r.action == MigrationAction::FullReplaced,
-                  "13d: directory-level migration without a canonical repairs the file");
-        CheckTrue(!FileContains(bad, "DEVELOPER REFERENCE") && !FileContains(bad, "TraceEverything"),
-                  "13d: openshim.ini.example was not used as the canonical");
-        CheckTrue(FileContains(bad, "AttackRevealPerceivedTeam = 0") &&
-                      FileContains(bad, "ScrapPilotHud = Stock"),
-                  "13d: bad defaults corrected via the surgical table");
-        CheckTrue(TryMigratePlayerPresetInDirectory(dir).action == MigrationAction::None,
-                  "13d: second directory-level run is a no-op");
+        Check(r.action == MigrationAction::FullReplaced,
+              "13d: directory-level migration without a canonical repairs the file");
+        Check(!FileContains(bad, "DEVELOPER REFERENCE") && !FileContains(bad, "TraceEverything"),
+              "13d: openshim.ini.example was not used as the canonical");
+        Check(FileContains(bad, "AttackRevealPerceivedTeam = 0") &&
+                  FileContains(bad, "ScrapPilotHud = Stock"),
+              "13d: bad defaults corrected via the surgical table");
+        Check(TryMigratePlayerPresetInDirectory(dir).action == MigrationAction::None,
+              "13d: second directory-level run is a no-op");
 
         // Directory-level: the installer's canonical present means full
         // replacement from it.
         WriteLines(bad, MakeRevision1PayloadLines());
         WriteLines(dir / "openshim.ini.canonical", MakeCanonicalLines());
         r = TryMigratePlayerPresetInDirectory(dir);
-        CheckTrue(r.action == MigrationAction::FullReplaced,
-                  "13e: canonical beside the DLL gives full replacement");
-        CheckTrue(FileContains(bad, "test canonical") &&
-                      !FileContains(bad, "Every first-class openshim.ini setting"),
-                  "13e: the file now carries the canonical content, not the payload");
-        CheckTrue(FileContains(bad, "; " + CurrentRevisionMarker()),
-                  "13e: current revision marker present after full replacement");
+        Check(r.action == MigrationAction::FullReplaced,
+              "13e: canonical beside the DLL gives full replacement");
+        Check(FileContains(bad, "test canonical") &&
+                  !FileContains(bad, "Every first-class openshim.ini setting"),
+              "13e: the file now carries the canonical content, not the payload");
+        Check(FileContains(bad, "; " + CurrentRevisionMarker()),
+              "13e: current revision marker present after full replacement");
     }
 
-    std::printf("%d checks, %d failures\n", g_Checks, g_Failures);
-    return g_Failures == 0 ? 0 : 1;
+    std::printf("%d checks, %d failures\n", OpenShimTest::CheckCount(), OpenShimTest::FailureCount());
+    return OpenShimTest::ExitCode();
 }

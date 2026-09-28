@@ -410,16 +410,6 @@ bool IsBzrNetTraceEnabled()
            g_Config.enabled;
 }
 
-bool IsBzrNetPrivateForensicTrace()
-{
-    return g_Config.privateForensic;
-}
-
-const std::string& GetBzrNetCaptureId()
-{
-    return g_CaptureId;
-}
-
 uint32_t BzrNetTraceRememberSocket(uintptr_t socketHandle)
 {
     if (!IsBzrNetTraceEnabled() || socketHandle == static_cast<uintptr_t>(-1))
@@ -435,17 +425,6 @@ uint32_t BzrNetTraceRememberSocket(uintptr_t socketHandle)
     const uint32_t generation = static_cast<uint32_t>(InterlockedIncrement(&g_NextSocketGeneration));
     g_SocketGenerations.emplace(socketHandle, generation);
     ReleaseSRWLockExclusive(&g_SocketGenerationLock);
-    return generation;
-}
-
-uint32_t BzrNetTraceSocketGeneration(uintptr_t socketHandle)
-{
-    if (!IsBzrNetTraceEnabled())
-        return 0;
-    AcquireSRWLockShared(&g_SocketGenerationLock);
-    const auto it = g_SocketGenerations.find(socketHandle);
-    const uint32_t generation = it == g_SocketGenerations.end() ? 0 : it->second;
-    ReleaseSRWLockShared(&g_SocketGenerationLock);
     return generation;
 }
 

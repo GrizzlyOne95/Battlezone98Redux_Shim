@@ -4,22 +4,10 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "test_check.h"
 
 namespace
 {
-    int g_failures = 0;
-
-    void Check(bool cond, const char* what, int line)
-    {
-        if (!cond)
-        {
-            ++g_failures;
-            std::printf("FAIL %d: %s\n", line, what);
-        }
-    }
-
-#define CHECK(c) Check((c), #c, __LINE__)
-
     using BZROpenShim::StableIdList::Format;
     using BZROpenShim::StableIdList::NormalizeId;
     using BZROpenShim::StableIdList::Parse;
@@ -120,7 +108,7 @@ int main()
     TestParseSkipsLinesWithoutAnId();
     TestFormatRoundTrips();
     TestLightColourPresets();
-    if (g_failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
         std::printf("stable_id_list_tests: all passed\n");
-    return g_failures == 0 ? 0 : 1;
+    return OpenShimTest::ExitCode();
 }

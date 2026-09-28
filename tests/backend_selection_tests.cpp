@@ -8,6 +8,9 @@
 #include <cstring>
 #include <string>
 #include <string_view>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim::BackendSelection;
 using namespace std::string_literals;
@@ -16,24 +19,12 @@ using BZROpenShim::RenderProfiles::RendererBackend;
 
 namespace
 {
-    int g_failures = 0;
-
-    void ExpectTrue(bool condition, const char* what)
-    {
-        if (!condition)
-        {
-            std::printf("  FAIL: %s\n", what);
-            ++g_failures;
-        }
-    }
-
     void ExpectToken(RendererToken actual, RendererToken expected, const char* what)
     {
         if (actual != expected)
         {
-            std::printf("  FAIL: %s (actual=%u expected=%u)\n", what,
+            OpenShimTest::Fail("%s (actual=%u expected=%u)", what,
                         static_cast<unsigned>(actual), static_cast<unsigned>(expected));
-            ++g_failures;
         }
     }
 
@@ -41,9 +32,8 @@ namespace
     {
         if (actual != expected)
         {
-            std::printf("  FAIL: %s (actual=%s expected=%s)\n", what,
+            OpenShimTest::Fail("%s (actual=%s expected=%s)", what,
                         ReasonName(actual), ReasonName(expected));
-            ++g_failures;
         }
     }
 
@@ -51,10 +41,9 @@ namespace
     {
         if (actual != expected)
         {
-            std::printf("  FAIL: %s (actual='%.*s' expected='%.*s')\n", what,
+            OpenShimTest::Fail("%s (actual='%.*s' expected='%.*s')", what,
                         static_cast<int>(actual.size()), actual.data(),
                         static_cast<int>(expected.size()), expected.data());
-            ++g_failures;
         }
     }
 }
@@ -117,46 +106,46 @@ void TestBootRequestResolution()
     std::printf("TestBootRequestResolution\n");
     const BootRequest stock =
         ResolveBootRequest(RendererBackend::Auto, RendererToken::None);
-    ExpectTrue(stock.backend == RendererBackend::Auto &&
-                   stock.source == RequestSource::None,
-               "auto+no-cli -> stock");
+    Check(stock.backend == RendererBackend::Auto &&
+              stock.source == RequestSource::None,
+          "auto+no-cli -> stock");
 
     const BootRequest persistent =
         ResolveBootRequest(RendererBackend::DX11, RendererToken::None);
-    ExpectTrue(persistent.backend == RendererBackend::DX11 &&
-                   persistent.source == RequestSource::Persistent,
-               "persistent wins over no cli");
+    Check(persistent.backend == RendererBackend::DX11 &&
+              persistent.source == RequestSource::Persistent,
+          "persistent wins over no cli");
 
     const BootRequest cli =
         ResolveBootRequest(RendererBackend::DX11, RendererToken::Dx9);
-    ExpectTrue(cli.backend == RendererBackend::DX9 &&
-                   cli.source == RequestSource::CliOverride,
-               "cli beats persistent for this boot");
+    Check(cli.backend == RendererBackend::DX9 &&
+              cli.source == RequestSource::CliOverride,
+          "cli beats persistent for this boot");
 
     // GL is explicit but unsupported by the resolver space -> stock.
     const BootRequest gl =
         ResolveBootRequest(RendererBackend::Auto, RendererToken::Gl);
-    ExpectTrue(gl.backend == RendererBackend::Auto && gl.source == RequestSource::None,
-               "gl cli collapses to stock");
+    Check(gl.backend == RendererBackend::Auto && gl.source == RequestSource::None,
+          "gl cli collapses to stock");
 
     const BootRequest glOverPersistent =
         ResolveBootRequest(RendererBackend::DX9, RendererToken::Gl);
-    ExpectTrue(glOverPersistent.backend == RendererBackend::Auto,
-                "gl cli over persistent still yields stock this boot");
+    Check(glOverPersistent.backend == RendererBackend::Auto,
+           "gl cli over persistent still yields stock this boot");
 
     // Case B contract: a /renderer:gl boot must not consume or alter the
     // persistent preference — this boot collapses to stock selection and the
     // next normal boot re-asserts the stored request.
     const BootRequest glOverDx11 =
         ResolveBootRequest(RendererBackend::DX11, RendererToken::Gl);
-    ExpectTrue(glOverDx11.backend == RendererBackend::Auto &&
-                   glOverDx11.source == RequestSource::None,
-               "gl cli over persistent dx11: stock this boot");
+    Check(glOverDx11.backend == RendererBackend::Auto &&
+              glOverDx11.source == RequestSource::None,
+          "gl cli over persistent dx11: stock this boot");
     const BootRequest bootAfterGl =
         ResolveBootRequest(RendererBackend::DX11, RendererToken::None);
-    ExpectTrue(bootAfterGl.backend == RendererBackend::DX11 &&
-                   bootAfterGl.source == RequestSource::Persistent,
-               "persistent dx11 reasserted on the boot after gl");
+    Check(bootAfterGl.backend == RendererBackend::DX11 &&
+              bootAfterGl.source == RequestSource::Persistent,
+          "persistent dx11 reasserted on the boot after gl");
 }
 
 void TestSubsystemNames()
@@ -166,15 +155,15 @@ void TestSubsystemNames()
               "Direct3D9 Rendering Subsystem", "dx9 subsystem name");
     ExpectStr(SubsystemNameFor(RendererBackend::DX11),
               "Direct3D11 Rendering Subsystem", "dx11 subsystem name");
-    ExpectTrue(SubsystemNameFor(RendererBackend::Auto) == nullptr,
-               "auto has no subsystem name");
+    Check(SubsystemNameFor(RendererBackend::Auto) == nullptr,
+          "auto has no subsystem name");
 
     RendererBackend parsed = RendererBackend::Auto;
-    ExpectTrue(BackendFromSubsystemName("Direct3D11 Rendering Subsystem", parsed) &&
-                   parsed == RendererBackend::DX11,
-               "inverse map dx11");
-    ExpectTrue(BackendFromSubsystemName("OpenGL Rendering Subsystem", parsed) == false,
-               "gl not transportable");
+    Check(BackendFromSubsystemName("Direct3D11 Rendering Subsystem", parsed) &&
+              parsed == RendererBackend::DX11,
+          "inverse map dx11");
+    Check(BackendFromSubsystemName("OpenGL Rendering Subsystem", parsed) == false,
+          "gl not transportable");
 }
 
 void TestTransportImage()
@@ -187,38 +176,38 @@ void TestTransportImage()
         "\r\n"
         "[Direct3D9 Rendering Subsystem]\r\n"
         "Full Screen=Yes\r\n";
-    ExpectTrue(ApplyTransportToConfigImage(crlf, "Direct3D11 Rendering Subsystem"),
-               "crlf replace succeeds");
-    ExpectTrue(crlf ==
-               "Render System=Direct3D11 Rendering Subsystem\r\n"
-               "\r\n"
-               "[Direct3D9 Rendering Subsystem]\r\n"
-               "Full Screen=Yes\r\n",
-               "only the Render System line changed (CRLF preserved)");
+    Check(ApplyTransportToConfigImage(crlf, "Direct3D11 Rendering Subsystem"),
+          "crlf replace succeeds");
+    Check(crlf ==
+          "Render System=Direct3D11 Rendering Subsystem\r\n"
+          "\r\n"
+          "[Direct3D9 Rendering Subsystem]\r\n"
+          "Full Screen=Yes\r\n",
+          "only the Render System line changed (CRLF preserved)");
 
     // LF-only file.
     std::string lf = "Render System=A\nOther=1\n";
-    ExpectTrue(ApplyTransportToConfigImage(lf, "B"), "lf replace succeeds");
+    Check(ApplyTransportToConfigImage(lf, "B"), "lf replace succeeds");
     ExpectStr(lf, "Render System=B\nOther=1\n", "lf preserved");
 
     // No trailing newline on the target line.
     std::string nonl = "[Section]\nRender System=Old";
-    ExpectTrue(ApplyTransportToConfigImage(nonl, "New"), "final-line replace");
+    Check(ApplyTransportToConfigImage(nonl, "New"), "final-line replace");
     ExpectStr(nonl, "[Section]\nRender System=New", "final-line content");
 
     // Absent key: prepend minimal keyed line.
     std::string absent = "[Sections only]\nKey=V";
-    ExpectTrue(ApplyTransportToConfigImage(absent, "Direct3D9 Rendering Subsystem"),
-               "absent key prepend");
+    Check(ApplyTransportToConfigImage(absent, "Direct3D9 Rendering Subsystem"),
+          "absent key prepend");
     ExpectStr(absent,
               "Render System=Direct3D9 Rendering Subsystem\r\n[Sections only]\nKey=V",
               "prepended keyed line keeps document");
 
     // Refuse-to-touch cases.
     std::string empty;
-    ExpectTrue(!ApplyTransportToConfigImage(empty, "X"), "empty refused");
+    Check(!ApplyTransportToConfigImage(empty, "X"), "empty refused");
     std::string binary = "Render System=X\x00\xFF"s + "tail";
-    ExpectTrue(!ApplyTransportToConfigImage(binary, "Y"), "non-ASCII refused");
+    Check(!ApplyTransportToConfigImage(binary, "Y"), "non-ASCII refused");
     ExpectStr(binary, "Render System=X\x00\xFF"s + "tail", "refused input untouched");
 
     // Extraction round-trip.
@@ -298,9 +287,9 @@ void TestMinimalConfigImage()
 
     // And a second transport pass on the image is idempotent.
     std::string again = dx11;
-    ExpectTrue(ApplyTransportToConfigImage(again,
-                                           "Direct3D9 Rendering Subsystem"),
-               "minimal image is rewritable");
+    Check(ApplyTransportToConfigImage(again,
+                                      "Direct3D9 Rendering Subsystem"),
+          "minimal image is rewritable");
     ExpectStr(again, "Render System=Direct3D9 Rendering Subsystem\r\n",
               "rewritten minimal image");
 
@@ -312,51 +301,51 @@ void TestTransportTempFileName()
     std::printf("TestTransportTempFileName\n");
     const std::string a = MakeTransportTempFileName(1234u);
     ExpectStr(a, "Ogre.cfg.openshim-1234.tmp", "pid 1234 format");
-    ExpectTrue(MakeTransportTempFileName(0u) == "Ogre.cfg.openshim-0.tmp",
-               "pid 0 format");
-    ExpectTrue(MakeTransportTempFileName(4294967295u) ==
-                   "Ogre.cfg.openshim-4294967295.tmp",
-               "max pid format");
+    Check(MakeTransportTempFileName(0u) == "Ogre.cfg.openshim-0.tmp",
+          "pid 0 format");
+    Check(MakeTransportTempFileName(4294967295u) ==
+              "Ogre.cfg.openshim-4294967295.tmp",
+          "max pid format");
     // Distinct processes must never share a temp file.
-    ExpectTrue(MakeTransportTempFileName(1u) != MakeTransportTempFileName(2u),
-               "distinct pids disjoint");
-    ExpectTrue(a.find("Ogre.cfg") == 0, "name anchored to Ogre.cfg prefix");
-    ExpectTrue(a.ends_with(".tmp"), "tmp suffix present");
+    Check(MakeTransportTempFileName(1u) != MakeTransportTempFileName(2u),
+          "distinct pids disjoint");
+    Check(a.find("Ogre.cfg") == 0, "name anchored to Ogre.cfg prefix");
+    Check(a.ends_with(".tmp"), "tmp suffix present");
 }
 
 void TestParseTransportEnabled()
 {
     std::printf("TestParseTransportEnabled\n");
-    ExpectTrue(ParseTransportEnabled(""), "empty enables");
-    ExpectTrue(ParseTransportEnabled("1"), "1 enables");
-    ExpectTrue(ParseTransportEnabled("yes"), "yes enables");
-    ExpectTrue(ParseTransportEnabled("true"), "true enables");
-    ExpectTrue(ParseTransportEnabled("on"), "on enables");
-    ExpectTrue(ParseTransportEnabled("garbage"), "garbage enables (fail-open)");
-    ExpectTrue(ParseTransportEnabled(" ENABLED "), "whitespace + unknown word enables");
-    ExpectTrue(!ParseTransportEnabled(" FALSE "), "whitespace + case-insensitive false disables");
-    ExpectTrue(!ParseTransportEnabled("0"), "0 disables");
-    ExpectTrue(!ParseTransportEnabled("false"), "false disables");
-    ExpectTrue(!ParseTransportEnabled("No"), "No disables");
-    ExpectTrue(!ParseTransportEnabled("OFF"), "OFF disables");
-    ExpectTrue(!ParseTransportEnabled("\toff\t"), "surrounding tabs tolerated");
+    Check(ParseTransportEnabled(""), "empty enables");
+    Check(ParseTransportEnabled("1"), "1 enables");
+    Check(ParseTransportEnabled("yes"), "yes enables");
+    Check(ParseTransportEnabled("true"), "true enables");
+    Check(ParseTransportEnabled("on"), "on enables");
+    Check(ParseTransportEnabled("garbage"), "garbage enables (fail-open)");
+    Check(ParseTransportEnabled(" ENABLED "), "whitespace + unknown word enables");
+    Check(!ParseTransportEnabled(" FALSE "), "whitespace + case-insensitive false disables");
+    Check(!ParseTransportEnabled("0"), "0 disables");
+    Check(!ParseTransportEnabled("false"), "false disables");
+    Check(!ParseTransportEnabled("No"), "No disables");
+    Check(!ParseTransportEnabled("OFF"), "OFF disables");
+    Check(!ParseTransportEnabled("\toff\t"), "surrounding tabs tolerated");
 }
 
 void TestStartupFilenameRecognition()
 {
     std::printf("TestStartupFilenameRecognition\n");
-    ExpectTrue(IsStartupConfigFilename("Ogre.cfg"), "bare name");
-    ExpectTrue(IsStartupConfigFilename("ogre.cfg"), "case-insensitive bare");
-    ExpectTrue(IsStartupConfigFilename(R"(C:\Games\BZR\Ogre.cfg)"),
-               "windows absolute path");
-    ExpectTrue(IsStartupConfigFilename("/game/root/ogre.CFG"),
-               "slash path, mixed case");
-    ExpectTrue(!IsStartupConfigFilename("bz_resources.cfg"),
-               "other config rejected");
-    ExpectTrue(!IsStartupConfigFilename(""), "empty rejected");
-    ExpectTrue(!IsStartupConfigFilename("Ogre.cfg.bak"), "suffix trap");
-    ExpectTrue(!IsStartupConfigFilename("myOgre.cfg"), "prefix trap");
-    ExpectTrue(!IsStartupConfigFilename("Ogre.cf"), "truncated rejected");
+    Check(IsStartupConfigFilename("Ogre.cfg"), "bare name");
+    Check(IsStartupConfigFilename("ogre.cfg"), "case-insensitive bare");
+    Check(IsStartupConfigFilename(R"(C:\Games\BZR\Ogre.cfg)"),
+          "windows absolute path");
+    Check(IsStartupConfigFilename("/game/root/ogre.CFG"),
+          "slash path, mixed case");
+    Check(!IsStartupConfigFilename("bz_resources.cfg"),
+          "other config rejected");
+    Check(!IsStartupConfigFilename(""), "empty rejected");
+    Check(!IsStartupConfigFilename("Ogre.cfg.bak"), "suffix trap");
+    Check(!IsStartupConfigFilename("myOgre.cfg"), "prefix trap");
+    Check(!IsStartupConfigFilename("Ogre.cf"), "truncated rejected");
 }
 
 int main()
@@ -373,9 +362,9 @@ int main()
     TestTransportTempFileName();
     TestParseTransportEnabled();
     TestStartupFilenameRecognition();
-    if (g_failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::printf("FAILED: %d assertion(s)\n", g_failures);
+        std::printf("FAILED: %d assertion(s)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("all backend selection tests passed\n");

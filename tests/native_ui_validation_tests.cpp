@@ -2,18 +2,9 @@
 
 #include <cstdlib>
 #include <iostream>
+#include "test_check.h"
 
-namespace
-{
-    void Require(bool condition, const char* message)
-    {
-        if (!condition)
-        {
-            std::cerr << "FAIL: " << message << '\n';
-            std::exit(1);
-        }
-    }
-}
+using OpenShimTest::Require;
 
 int main()
 {

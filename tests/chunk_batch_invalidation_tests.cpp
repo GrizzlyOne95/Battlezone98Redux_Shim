@@ -12,22 +12,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+#include "test_check.h"
+
+using OpenShimTest::Require;
 
 namespace
 {
     using namespace BZROpenShim::ChunkBatchInvalidation;
-
-    [[noreturn]] void Fail(const char* message)
-    {
-        std::fprintf(stderr, "chunk_batch_invalidation_tests: %s\n", message);
-        std::exit(1);
-    }
-
-    void Require(bool condition, const char* message)
-    {
-        if (!condition)
-            Fail(message);
-    }
 
     SlotState MakeSlot(std::uint8_t kind = 1)
     {
@@ -98,10 +89,7 @@ namespace
             mutation.apply(mutated[0]);
             if (VersionOf(mutated) == reference)
             {
-                std::fprintf(stderr,
-                    "chunk_batch_invalidation_tests: field '%s' did not change the version\n",
-                    mutation.name);
-                std::exit(1);
+                OpenShimTest::Abort("field '%s' did not change the version", mutation.name);
             }
         }
     }
@@ -212,10 +200,7 @@ namespace
             const Reason reason = DecideRebuild(state, version, false);
             if (reason != testCase.expected || !ShouldRebuild(reason))
             {
-                std::fprintf(stderr,
-                    "chunk_batch_invalidation_tests: '%s' gave reason %s, expected %s\n",
-                    testCase.name, ReasonName(reason), ReasonName(testCase.expected));
-                std::exit(1);
+                OpenShimTest::Abort("'%s' gave reason %s, expected %s", testCase.name, ReasonName(reason), ReasonName(testCase.expected));
             }
         }
 
