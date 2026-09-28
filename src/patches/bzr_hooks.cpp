@@ -86,7 +86,6 @@ namespace BZROpenShim
     using FnAutoLoadShellGame = int(__cdecl*)();
     using FnLoadGameByPath = int(__cdecl*)(const char* path, char* outName, int outNameLen);
     using FnFinalizeQueuedLoad = void(__cdecl*)();
-    using FnGameObjectGetTeam = int(__thiscall*)(void* thisPtr);
     using FnChunkEffectSimulate = void(__thiscall*)(void* self, float dt);
 
     void** g_BzrPtr_945478 = nullptr;
@@ -185,50 +184,16 @@ namespace BZROpenShim
     namespace Hooks
     {
 
-        constexpr uintptr_t kBuildMenuRootAddr = 0x009174C4;
-        constexpr size_t kMagnetMineSoundHandleOffset = 0x230;
-        constexpr uintptr_t kGogDayWreckerCtorAddr = 0x004B0420;
-        constexpr uintptr_t kDayWreckerSimulateVtableSlotAddr = 0x00878544;
-        constexpr uintptr_t kDayWreckerExplodeVtableSlotAddr = 0x00878588;
-        constexpr uintptr_t kGogDayWreckerRemoveBookkeepingAddr = 0x004B7AB0;
-        constexpr uintptr_t kGogDayWreckerDeletedIdAddr = 0x004B7BD0;
-        constexpr uintptr_t kGogDistributedDtorAddr = 0x004B79F0;
-        constexpr uintptr_t kGogDistributedCreateAddr = 0x004B9350;
-        constexpr uintptr_t kGogOrdnanceBundledDispatchAddr = 0x00570500;
-        constexpr uintptr_t kGogOrdnanceRemoveCheckAddr = 0x00583DC0;
-		constexpr uint32_t kCraftDeployStateUndeployed = 0;
 		constexpr long kQuakeReplayFadeSecondsMin = 1;
 		constexpr long kQuakeReplayFadeSecondsMax = 60;
-        // Redux's FlagDisplay inherits a 0x28-byte GameFeature base. The old
-        // BZ1 layout used +0x10/+0x14; writing those offsets in Redux corrupts
-        // the base object. Redux's surviving fields are at +0x28/+0x2C.
-        constexpr size_t kFlagDisplayFlagIndexOffset = 0x28;
-        constexpr size_t kMultiplayerFlagMaxObjects = 512;
-
-        // The convergence tuning constants (minimum target distance, maximum
-        // deviation from the stock aim) live alongside the math in
-        // include/weapon_convergence.h.
 
         constexpr ULONGLONG kSteamChunkCreateHookSettleDelayMs = 15000;
-        constexpr uintptr_t kGogAIBuildConstructionEndAddr = 0x006905D0;
-        constexpr uintptr_t kGogAIBuildReservedAreaRemoveAddr = 0x00690920;
-        constexpr uintptr_t kGogAISpentCreditRefundAddr = 0x00690020;
-        constexpr uintptr_t kGogUnitsSOrderStopAddr = 0x00416280;
-        constexpr uintptr_t kGogAIBuildUnassignedCCAddAddr = 0x00690770;
-        constexpr uintptr_t kGogKeyConfigSetKeyAddr = 0x0081C440;
-        constexpr uintptr_t kGogWriteInputMapKeyAddr = 0x0061F1C0;
-        constexpr uintptr_t kGogMapKeyNameFromCodeAddr = 0x00434F60;
-        constexpr uintptr_t kGogReloadGameKeyMapAddr = 0x00620980;
-        constexpr uintptr_t kGogUiOverlayCtorAddr = 0x007D1CC0;
 
         static constexpr uintptr_t kChunkEffectVtableSimulateSlotAddr = 0x0087708C;
         static constexpr DWORD kVehicleSkinningTraceIntervalMsDefault = 5000;
         static constexpr DWORD kVehicleSkinningTraceIntervalMsMin = 100;
         static constexpr DWORD kVehicleSkinningTraceIntervalMsMax = 60000;
         static constexpr long kVehicleSkinningTraceBudgetDefault = 64;
-        static constexpr const char* kChunkProxyBillboardSetName = "OpenShimChunkProxyDebug";
-        static constexpr const char* kChunkProxyMaterialName = "BaseWhiteNoLighting";
-        static constexpr const char* kChunkProxyMaterialGroup = "General";
         // Resolved by ResolveBzrHooks from scripts/patches.json
         // ("PlayGlobalSound"); null until then, and the caller checks.
         FnPlayGlobalSound g_BzrFn_PlayGlobalSound = nullptr;
@@ -1621,19 +1586,6 @@ namespace BZROpenShim
         BzrStringInitEmpty(&g_BzrnetLabel2);
         BzrStringInitEmpty(&g_BzrnetLabel3);
         BzrStringInitEmpty(&g_BzrnetLabel4);
-    }
-
-    namespace Hooks
-    {
-
-        constexpr size_t kCraftDeployStateOffset = 0x228;
-        constexpr int32_t kCraftDeployedState = 2;
-
-        constexpr uint32_t kHowitzerVftPrimary = 0x0087AD70;
-        constexpr uint32_t kHowitzerVftSecondary = 0x0087AE1C;
-        constexpr uint32_t kMinelayerVftPrimary = 0x0087D790;
-        constexpr uint32_t kMinelayerVftSecondary = 0x0087D83C;
-
     }
 
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* /*edx*/, void* renderQueue)
