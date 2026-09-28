@@ -207,6 +207,30 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
     // Fragment program for a supported stage-1 combine, else nullptr.
     const char* FixedFuncTextured2Fragment(StageCombine stage1) noexcept;
 
+    // Stock DX11 materials whose vertex program requires an input that their
+    // output provably does not depend on. Glow/Null multiplies COLOR0 by a
+    // black diffuse value, yet the stock Untextured_vertex still requires
+    // COLOR0 and therefore fails on meshes without DIFFUSE. The runtime only
+    // applies a guard when the material shape, program pair, and black diffuse
+    // invariant all still match.
+    struct NativeInputGuard
+    {
+        const char* material;
+        const char* expectVertex;
+        const char* expectFragment;
+        const char* replacementVertex;
+        const char* reason;
+    };
+
+    const NativeInputGuard* FindNativeInputGuard(std::string_view material) noexcept;
+    size_t NativeInputGuardCount() noexcept;
+    const NativeInputGuard* NativeInputGuardAt(size_t index) noexcept;
+
+    // "[DX11COMPAT] material=<m> native-input-guard vs=<from> -> <to>
+    //  reason=<r> action=<applied|skipped:<why>>"
+    std::string FormatNativeInputGuardLog(const NativeInputGuard& guard,
+                                          std::string_view action);
+
     LegacyPassKind ClassifyLegacyPass(const LegacyPassDesc& desc) noexcept;
 
     // Bounded fixed-function support set for Phase 2. 0 units always
