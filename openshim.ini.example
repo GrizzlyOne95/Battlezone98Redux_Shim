@@ -1052,6 +1052,15 @@ TraceSatelliteVisibility = 1
 ; Legacy env alias: OPENSHIM_PROFILE_OGRE_ANIMATION
 ProfileOgreAnimation = 0
 
+; Size cap for the profiler's openshim_ogre_profile.csv (beside openshim.ini;
+; one row per second, appended across sessions).
+; Accepted: whole MiB; 0 = no cap. Default: 64.
+; At the cap the file is rotated once to openshim_ogre_profile.prev.csv
+; (replacing an older one) and restarted; if the rotation fails, CSV output
+; stops for the session with one log line.
+; Env override (checked first): OPENSHIM_PROFILE_OGRE_CSV_MAX_MB
+; ProfileOgreCsvMaxMB = 64
+
 ; Read-only DX11 terrain-construction capture.
 ; Accepted: boolean/integer flag; use 0/1. Default: 0.
 ; Legacy env alias: OPENSHIM_TERRAIN_RENDER_PROBE
@@ -1948,6 +1957,19 @@ InteractiveFogWakes = 0
 ; OPENSHIM_FORCE_P2P_ROUTE = 1
 ; OPENSHIM_FORCE_NET_INTERFACE = 192.168.1.10
 ; OPENSHIM_MIGRATE_NETWORK_INI = 1
+;
+; Native CPU sampler (process-wide stack sampler; suspends threads, so frame
+; times from a sampled run are not evidence). Writes
+; logs\openshim_cpu_samples_<label>_<pid>.bin.
+; OPENSHIM_PROFILE_NATIVE_CPU = 1
+; OPENSHIM_PROFILE_NATIVE_CPU_HZ = 1000         (50..4000)
+; OPENSHIM_PROFILE_NATIVE_CPU_DEPTH = 48        (1..64)
+; OPENSHIM_PROFILE_NATIVE_CPU_DELAY = 0         seconds before sampling
+; OPENSHIM_PROFILE_NATIVE_CPU_DURATION = 0      seconds of sampling; 0 = until exit
+; OPENSHIM_PROFILE_NATIVE_CPU_LABEL = run
+; OPENSHIM_PROFILE_NATIVE_CPU_MAX_MB = 256      sample-file cap, whole MiB;
+;   0 = no cap. At the cap the sampling window closes and the file is
+;   finalised normally (about 150 KB/s at the defaults: ~30 minutes).
 ;
 ; Shader-cache emergency opt-out:
 ; OPENSHIM_DISABLE_SHADER_CACHE = 1

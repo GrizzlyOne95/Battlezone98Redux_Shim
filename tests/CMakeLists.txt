@@ -113,6 +113,16 @@ openshim_add_test(headlight_falloff_tests STD 20 SOURCES
     headlight_falloff_tests.cpp
 )
 
+# Built as C++14: the reorder core and the output-cap header are shared with
+# translation units that must stay C++14-compatible.
+openshim_add_test(net_reorder_core_tests STD 14 SOURCES
+    net_reorder_core_tests.cpp
+)
+
+openshim_add_test(diagnostic_output_cap_tests STD 14 SOURCES
+    diagnostic_output_cap_tests.cpp
+)
+
 add_executable(shadow_far_distance_tests
     shadow_far_distance_tests.cpp
 )

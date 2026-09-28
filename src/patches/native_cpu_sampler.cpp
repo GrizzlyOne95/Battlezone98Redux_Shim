@@ -38,6 +38,7 @@
 
 #include "native_cpu_sampler.h"
 #include "bool_token.h"
+#include "diagnostic_output_cap.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -70,6 +71,9 @@ namespace BZROpenShim
         constexpr char kEnvironmentDelay[] = "OPENSHIM_PROFILE_NATIVE_CPU_DELAY";
         constexpr char kEnvironmentDuration[] = "OPENSHIM_PROFILE_NATIVE_CPU_DURATION";
         constexpr char kEnvironmentLabel[] = "OPENSHIM_PROFILE_NATIVE_CPU_LABEL";
+        // Size cap for the sample file, whole MiB; 0 = no cap. Default:
+        // DiagnosticOutputCap::kDefaultCpuSamplerCapMiB.
+        constexpr char kEnvironmentMaxMiB[] = "OPENSHIM_PROFILE_NATIVE_CPU_MAX_MB";
 
         constexpr uint32_t kDefaultHz = 1000;
         constexpr uint32_t kMinHz = 50;
@@ -202,6 +206,7 @@ namespace BZROpenShim
         uint32_t g_RequestedDepth = kDefaultDepth;
         uint32_t g_DelaySeconds = 0;
         uint32_t g_DurationSeconds = 0;
+        uint64_t g_MaxOutputBytes = 0;
 
         // Read by the sampler thread only; published before sampling starts.
         ModuleRange g_Modules[kMaxModules];
@@ -800,6 +805,7 @@ namespace BZROpenShim
                         label.c_str(),
                         GetCurrentProcessId());
             g_OutputPath = GetGameLogPath(fileName);
+            g_BytesWritten = 0;
             g_OutputFile = CreateFileA(g_OutputPath.c_str(),
                                        GENERIC_WRITE,
                                        FILE_SHARE_READ,
@@ -922,10 +928,11 @@ namespace BZROpenShim
             LogShimA(LogLevel::Warn,
                      kComponent,
                      "ACTIVE requestedHz=%u depth=%u delaySeconds=%u durationSeconds=%u "
-                     "highResolutionTimer=%d output='%s'. This capture suspends and "
-                     "resumes process threads; frame times from a sampled run are not "
-                     "evidence.",
+                     "maxBytes=%llu highResolutionTimer=%d output='%s'. This capture "
+                     "suspends and resumes process threads; frame times from a sampled "
+                     "run are not evidence.",
                      g_RequestedHz, depthLimit, g_DelaySeconds, g_DurationSeconds,
+                     static_cast<unsigned long long>(g_MaxOutputBytes),
                      highResolutionTimer ? 1 : 0, g_OutputPath.c_str());
 
             std::vector<ThreadEntry> threads;
@@ -1009,6 +1016,22 @@ namespace BZROpenShim
                 }
                 FlushBuffer(false);
 
+                // Size cap: close the window like DURATION does, so the file
+                // still ends with its stats and end chunks and stays
+                // parseable. It can overshoot by at most one flush threshold
+                // plus those final chunks.
+                if (DiagnosticOutputCap::ReachedCap(
+                        g_BytesWritten + g_Buffer.size(), g_MaxOutputBytes))
+                {
+                    LogShimA(LogLevel::Warn, kComponent,
+                             "Sampling window closed: sample file reached its size cap "
+                             "(%llu of %llu bytes; %s, 0 = no cap)",
+                             static_cast<unsigned long long>(g_BytesWritten + g_Buffer.size()),
+                             static_cast<unsigned long long>(g_MaxOutputBytes),
+                             kEnvironmentMaxMiB);
+                    break;
+                }
+
                 if ((nowQpc - lastReportQpc) >
                     (frequency * kReportIntervalMs) / 1000u)
                 {
@@ -1069,6 +1092,14 @@ namespace BZROpenShim
             ReadEnvironmentUnsigned(kEnvironmentDepth, kDefaultDepth), 1u, kMaxDepth);
         g_DelaySeconds = ReadEnvironmentUnsigned(kEnvironmentDelay, 0);
         g_DurationSeconds = ReadEnvironmentUnsigned(kEnvironmentDuration, 0);
+        {
+            std::string maxText;
+            const bool haveMax = ReadEnvironmentValue(kEnvironmentMaxMiB, maxText);
+            g_MaxOutputBytes = DiagnosticOutputCap::ResolveCapBytes(
+                haveMax ? maxText.c_str() : nullptr,
+                nullptr,
+                DiagnosticOutputCap::kDefaultCpuSamplerCapMiB);
+        }
 
         g_WakeEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         if (!g_WakeEvent)
