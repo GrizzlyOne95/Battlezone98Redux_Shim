@@ -70,6 +70,25 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        bool g_BriefingScrollFixInstalled = false;
+        bool g_BriefingScrollFixEnabled = true;
+        bool g_MultiRenderCountClampInstalled = false;
+        bool g_MultiRenderCountClampEnabled = true;
+        volatile long g_MultiRenderCountClampLogBudget = 8;
+        bool g_ThumbnailBmpGuardEnabled = true;
+        bool g_ThumbnailBmpGuardInstalled = false;
+        bool g_QuakeReplayFadeInstalled = false;
+        bool g_QuakeReplayFadeEnabled = true;
+        long g_QuakeReplayFadeSeconds = kQuakeReplayFadeSecondsDefault;
+        InlineDetour32 g_EarthQuakeSimulateDetour = {};
+        volatile long g_QuakeReplayArmed = 0;
+        bool g_TargetCamSatelliteFixInstalled = false;
+        bool g_TargetCamSatelliteFixEnabled = true;
+        volatile long g_TargetCamSatelliteLogBudget = 8;
+        bool g_CinematicSatelliteZoomFixInstalled = false;
+        bool g_CinematicSatelliteZoomFixEnabled = true;
+        volatile long g_CinematicSatelliteZoomLogBudget = 8;
+
         // Mission briefing and mission archive callbacks use the unguarded
         // scrolling methods. Redirect just those four calls to the guarded
         // variants already used by the lobby/chat UI so the final partial page

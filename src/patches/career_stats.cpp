@@ -70,8 +70,24 @@
 
 namespace BZROpenShim
 {
+    FnRecordDeath g_BzrFn_RecordDeath = nullptr;
+
     namespace Hooks
     {
+        InlineDetour32 g_RecordDeathDetour = {};
+        bool g_DistributedRecordDeathIntHookInstalled = false;
+        bool g_CareerStatsMpHookInstalled = false;
+        bool g_CareerStatsMpHookInstallAttempted = false;
+        bool g_CareerStatsMpHookMismatchLogged = false;
+        ULONGLONG g_CareerStatsMpHookFirstAttemptTick = 0;
+        ULONGLONG g_CareerStatsMpHookLastAttemptTick = 0;
+        // Player-kill research trace (PR 107 phase 2-3). Opt-in only.
+        // Default OFF. When enabled, each authoritative multiplayer death
+        // emits one compact diagnostic record with candidate controller fields
+        // for victim and damager. No career-stats behavior is changed.
+        bool g_TracePlayerKills = false;
+        volatile long g_PlayerKillTraceBudget = 0;
+
         // ====================================================================
         // CAREER STATISTICS ON THE NATIVE EVENT LAYER
         // ====================================================================

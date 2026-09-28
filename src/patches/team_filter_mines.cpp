@@ -67,8 +67,30 @@
 
 namespace BZROpenShim
 {
+    FnShieldTowerSimulate g_BzrFn_ShieldTowerSimulateOriginal = nullptr;
+    FnShieldTowerSimulate g_BzrFn_BuildingSimulate = nullptr;
+    FnMagnetMineSimulate g_BzrFn_MagnetMineSimulateOriginal = nullptr;
+    FnProximityMineSimulate g_BzrFn_ProximityMineSimulateOriginal = nullptr;
+    FnProximityMineSimulate g_BzrFn_MineSimulate = nullptr;
+    FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate = nullptr;
+    FnGameObjectRelation g_BzrFn_GameObjectFriendP = nullptr;
+    FnGameObjectRelation g_BzrFn_GameObjectEnemyP = nullptr;
+    FnMatrixInverse g_BzrFn_MatrixInverse = nullptr;
+    FnVectorTransform g_BzrFn_VectorTransform = nullptr;
+    FnRangeSearch g_BzrFn_CollisionRangeSearch = nullptr;
+    FnRangeResultsGetNext g_BzrFn_RangeResultsGetNext = nullptr;
+
     namespace Hooks
     {
+        TeamFilterCache g_ShieldTowerTeamFilterCache = {};
+        TeamFilterCache g_MagnetMineTeamFilterCache = {};
+        TeamFilterCache g_ProximityMineTeamFilterCache = {};
+        bool g_ShieldTowerSimulateHookInstalled = false;
+        bool g_MagnetMineSimulateHookInstalled = false;
+        bool g_ProximityMineSimulateHookInstalled = false;
+        bool g_MagnetZeroRangeGuardEnabled = true;
+        volatile long g_MagnetZeroRangeLogBudget = 8;
+
         constexpr size_t kOrdnanceSpeedOffset = 0x20;
 
         constexpr size_t kOrdnanceInvSpeedOffset = 0x24;
