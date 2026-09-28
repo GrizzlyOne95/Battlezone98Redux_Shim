@@ -165,6 +165,7 @@
     <ClCompile Include="src\patches\global_feature_config.cpp" />
     <ClCompile Include="src\patches\global_turbo.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
+    <ClCompile Include="src\patches\hook_patch_helpers.cpp" />
     <ClCompile Include="src\patches\hud_sprite_rects.cpp" />
     <ClCompile Include="src\patches\jump_snipe_crouch.cpp" />
     <ClCompile Include="src\patches\lifecycle_seams.cpp" />
