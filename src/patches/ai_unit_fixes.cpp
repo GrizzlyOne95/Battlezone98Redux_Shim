@@ -68,6 +68,13 @@
 
 namespace BZROpenShim
 {
+    std::unordered_set<uintptr_t> g_PilotCarrierNullLoggedObjects = {};
+    volatile long g_NeutralAttackOrderLogBudget = 16;
+    volatile long g_AipResolveTraceBudget = 512;
+    volatile long g_AipPrereqCensusEmitted = 0;
+    std::vector<AiExtraMakerPair> g_AiExtraMakerPairs = {};
+    volatile long g_AiMultiProducerMakerLogBudget = 64;
+
     static FnCarrierGetSelectedMask g_BzrFn_CarrierGetSelectedMask = nullptr;
 
     // Carrier::GetWeapon(int) at 0x00417F60 -- see FnCarrierGetWeapon above,

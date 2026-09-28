@@ -68,6 +68,18 @@
 
 namespace BZROpenShim
 {
+    FnCalcRangeCraft g_BzrFn_CalcRangeCraft = nullptr;
+    FnAttackTaskDoState g_BzrFn_AttackTaskDoState = nullptr;
+    FnTerrainGetIntersection g_BzrFn_TerrainGetIntersection = nullptr;
+    FnProcessDoSubTask g_BzrFn_OffensiveProcessDoSubTask = nullptr;
+    FnProcessDoSubTask g_BzrFn_GunTowerProcessDoSubTask = nullptr;
+    FnProcessDoSubTask g_BzrFn_TurretTankProcessDoSubTask = nullptr;
+    FnGetGameTime g_BzrFn_GetGameTime = nullptr;
+    FnFindPlanForObject g_BzrFn_FindPlanForObject = nullptr;
+    FnAiPathGetLength g_BzrFn_AiPathGetLength = nullptr;
+    FnAiPathDelete g_BzrFn_AiPathDelete = nullptr;
+    FnRecycleTaskDoGotoScrap g_BzrFn_RecycleTaskDoGotoScrap = nullptr;
+
     // Trace switches consulted on per-unit, per-tick AI paths (the DoSubTask
     // path read three of them per unit per tick). EnvFlagEnabled reads the
     // process environment, which nothing changes after startup, so each is
@@ -110,6 +122,23 @@ namespace BZROpenShim
 
     namespace Hooks
     {
+        AiTuningCache g_AiTuningCache = {};
+        bool g_CalcRangeCraftHookInstalled = false;
+        bool g_ScrapPathScoreHookInstalled = false;
+        InlineDetour32 g_RecycleTaskDoGotoScrapDetour = {};
+        bool g_ScrapRetargetHookInstalled = false;
+        InlineDetour32 g_AttackTaskDoStateDetour = {};
+        bool g_AttackTaskDoStateHookInstalled = false;
+        bool g_RetargetPeriodHooksInstalled = false;
+        std::unordered_map<uintptr_t, RetargetPeriodState> g_RetargetPeriodStateByProcess = {};
+        std::unordered_map<uintptr_t, ScrapPathFailureState> g_ScrapPathFailuresByObject = {};
+        std::unordered_map<uintptr_t, ScrapRetargetState> g_ScrapRetargetStateByTask = {};
+        std::unordered_map<uintptr_t, AiUnitTuningOverride> g_AiUnitTuningOverridesByObject = {};
+        std::unordered_map<uintptr_t, CombatKiteState> g_CombatKiteStateByObject = {};
+        volatile long g_AiUnitTuningTraceBudget = 64;
+        volatile long g_CombatKiteTraceBudget = 256;
+        volatile long g_ScrapPathTraceBudget = 128;
+
         constexpr size_t kCalcRangeCraftDetourLen = 9;
 
         // RecycleTask::InitLookingForScrap computes a stock squared-distance

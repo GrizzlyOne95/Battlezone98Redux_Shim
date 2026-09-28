@@ -70,6 +70,18 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        bool g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
+        bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
+        // Configured value AND'd with the single-player gate, same contract as
+        // g_AiOdfGameplayTuningActive below. This feature changes stock content
+        // (it raises bomber engagement range from the craft's own weapon ODFs),
+        // so it must never reach a network game.
+        bool g_BomberAiRangeActive = false;
+        bool g_HowitzerUndeployedRetaliationFixEnabled =
+            kHowitzerUndeployedRetaliationFixEnabledDefault;
+        bool g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
+        bool g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
+
         bool g_ShotConvergenceEnabled = true;
 
         bool g_ShotConvergenceBaselineEnabled = true;

@@ -70,6 +70,12 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        FnFlagDisplaySubmit g_BzrFn_FlagDisplaySubmitOriginal = nullptr;
+        bool g_MultiplayerFlagRenderHookInstalled = false;
+        bool g_MultiplayerFlagRenderHookFailureLogged = false;
+        bool g_MultiplayerFlagRendererLoggedReady = false;
+        std::unordered_map<uint64_t, MultiplayerFlagRenderSet> g_MultiplayerFlagRenderSets = {};
+
         // Master switch for the whole multiplayer vehicle-flag feature: the
         // flag-selection UI, the payload upload and the Ogre renderer hook.
         // [Display] MultiplayerFlags in openshim.ini, defaulting OFF so a

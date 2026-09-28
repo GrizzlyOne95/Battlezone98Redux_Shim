@@ -150,7 +150,6 @@ namespace BZROpenShim
     FnSetMyFlag g_BzrFn_SetMyFlag = nullptr;
     FnBuildItemInit g_BzrFn_InitBuildItem = nullptr; // 0x0049F5C0
     FnBuildItemCleanup g_BzrFn_CleanupBuildItem = nullptr; // 0x0049F880
-    FnProducerModeCall g_BzrFn_ProducerModeCallOriginal = nullptr;
     FnEngineFlameAddFlame g_BzrFn_EngineFlameAddFlame = nullptr;
     FnEngineFlameControl g_BzrFn_EngineFlameControl = nullptr;
     FnEngineFlameSubmit g_BzrFn_EngineFlameSubmit = nullptr;
@@ -163,58 +162,18 @@ namespace BZROpenShim
     // ("GameObject::GetHandle"); 0 until then, and every caller stands down on 0.
     uintptr_t g_GameObjectGetHandleAddr = 0;
 
-    FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
-
-    std::unordered_set<uintptr_t> g_PilotCarrierNullLoggedObjects = {};
-    volatile long g_NeutralAttackOrderLogBudget = 16;
-    volatile long g_AipResolveTraceBudget = 512;
-    volatile long g_AipPrereqCensusEmitted = 0;
-
-    std::vector<AiExtraMakerPair> g_AiExtraMakerPairs = {};
-    volatile long g_AiMultiProducerMakerLogBudget = 64;
-    FnShieldTowerSimulate g_BzrFn_ShieldTowerSimulateOriginal = nullptr;
-    FnShieldTowerSimulate g_BzrFn_BuildingSimulate = nullptr;
-    FnMagnetMineSimulate g_BzrFn_MagnetMineSimulateOriginal = nullptr;
-    FnProximityMineSimulate g_BzrFn_ProximityMineSimulateOriginal = nullptr;
-    FnProximityMineSimulate g_BzrFn_MineSimulate = nullptr;
-	FnSprayBuildingSimulate g_BzrFn_SprayBuildingSimulateOriginal = nullptr;
-    FnGameObjectClassBuild g_BzrFn_SprayEmitterBuildOriginal = nullptr;
-    FnShieldTowerPowerUpdate g_BzrFn_ShieldTowerPowerUpdate = nullptr;
     // Resolved by ResolveBzrHooks from scripts/patches.json
     // ("GameObject::FromObj76"); null until then, and every caller checks.
     FnResolveObj76GameObject g_BzrFn_ResolveObj76GameObject = nullptr;
-    FnGameObjectRelation g_BzrFn_GameObjectFriendP = nullptr;
-    FnGameObjectRelation g_BzrFn_GameObjectEnemyP = nullptr;
-    FnMatrixInverse g_BzrFn_MatrixInverse = nullptr;
-    FnVectorTransform g_BzrFn_VectorTransform = nullptr;
-    FnRangeSearch g_BzrFn_CollisionRangeSearch = nullptr;
-    FnRangeResultsGetNext g_BzrFn_RangeResultsGetNext = nullptr;
     FnKeyConfigSetKey g_BzrFn_KeyConfigSetKey = nullptr;
     static FnWriteInputMapKey g_BzrFn_WriteInputMapKey = nullptr;
     FnMapKeyNameFromCode g_BzrFn_MapKeyNameFromCode = nullptr;
     FnReloadGameKeyMap g_BzrFn_ReloadGameKeyMap = nullptr;
-    FnRecordDeath g_BzrFn_RecordDeath = nullptr;
-    FnCalcRangeCraft g_BzrFn_CalcRangeCraft = nullptr;
-    FnAttackTaskDoState g_BzrFn_AttackTaskDoState = nullptr;
-    FnTerrainGetIntersection g_BzrFn_TerrainGetIntersection = nullptr;
-    FnProcessDoSubTask g_BzrFn_OffensiveProcessDoSubTask = nullptr;
-    FnProcessDoSubTask g_BzrFn_GunTowerProcessDoSubTask = nullptr;
-    FnProcessDoSubTask g_BzrFn_TurretTankProcessDoSubTask = nullptr;
-    FnGetGameTime g_BzrFn_GetGameTime = nullptr;
-    FnFindPlanForObject g_BzrFn_FindPlanForObject = nullptr;
-    FnAiPathGetLength g_BzrFn_AiPathGetLength = nullptr;
-    FnAiPathDelete g_BzrFn_AiPathDelete = nullptr;
-    FnRecycleTaskDoGotoScrap g_BzrFn_RecycleTaskDoGotoScrap = nullptr;
-    FnAIUnitRemove g_BzrFn_AIUnitRemove = nullptr;
     FnAIBuildConstructionEnd g_BzrFn_AIBuildConstructionEnd = nullptr;
     FnAIBuildReservedAreaRemove g_BzrFn_AIBuildReservedAreaRemove = nullptr;
     FnAISpentCreditRefund g_BzrFn_AISpentCreditRefund = nullptr;
     FnUnitsSOrderStop g_BzrFn_UnitsSOrderStop = nullptr;
     FnAIBuildUnassignedCCAdd g_BzrFn_AIBuildUnassignedCCAdd = nullptr;
-    FnChunkEffectCreateChunk g_BzrFn_ChunkEffectCreateChunk = nullptr;
-    FnChunkEffectCreateChunklet g_BzrFn_ChunkEffectCreateChunklet = nullptr;
-    FnChunkEffectFragmentObject g_BzrFn_ChunkEffectPartialFragment = nullptr;
-    FnChunkEffectFragmentObject g_BzrFn_ChunkEffectFullFragment = nullptr;
     BuildItem* g_BzrBuildMenuRoot = nullptr;
     bool g_IsSteamExe = false;
 
@@ -227,7 +186,6 @@ namespace BZROpenShim
     {
 
         constexpr uintptr_t kBuildMenuRootAddr = 0x009174C4;
-        constexpr size_t kHudSpriteRectEntrySize = 0x24;
         constexpr size_t kMagnetMineSoundHandleOffset = 0x230;
         constexpr uintptr_t kGogDayWreckerCtorAddr = 0x004B0420;
         constexpr uintptr_t kDayWreckerSimulateVtableSlotAddr = 0x00878544;
@@ -239,10 +197,8 @@ namespace BZROpenShim
         constexpr uintptr_t kGogOrdnanceBundledDispatchAddr = 0x00570500;
         constexpr uintptr_t kGogOrdnanceRemoveCheckAddr = 0x00583DC0;
 		constexpr uint32_t kCraftDeployStateUndeployed = 0;
-		constexpr long kQuakeReplayFadeSecondsDefault = 5;
 		constexpr long kQuakeReplayFadeSecondsMin = 1;
 		constexpr long kQuakeReplayFadeSecondsMax = 60;
-        constexpr long kSplinterUndeadTraceBudgetDefault = 32;
         // Redux's FlagDisplay inherits a 0x28-byte GameFeature base. The old
         // BZ1 layout used +0x10/+0x14; writing those offsets in Redux corrupts
         // the base object. Redux's surviving fields are at +0x28/+0x2C.
@@ -264,190 +220,7 @@ namespace BZROpenShim
         constexpr uintptr_t kGogMapKeyNameFromCodeAddr = 0x00434F60;
         constexpr uintptr_t kGogReloadGameKeyMapAddr = 0x00620980;
         constexpr uintptr_t kGogUiOverlayCtorAddr = 0x007D1CC0;
-        constexpr long kConstructorRemoteBuildTraceBudgetDefault = 32;
 
-        static_assert(sizeof(HudSpriteRectRecord) == kHudSpriteRectEntrySize, "Unexpected HUD sprite rect record size");
-
-        static bool g_JumpSnipeProbeInstallAttempted = false;
-        bool g_JumpSnipeProbeInstalled = false;
-        JumpSnipeProbeLogState g_JumpSnipeProbeLogState = {};
-        HudSpriteRectRecord* g_HudSpriteRectTableBase = nullptr;
-        bool g_HudSpriteRectTableDiscoveryAttempted = false;
-        ULONGLONG g_HudSpriteRectTableDiscoveryLastTick = 0;
-        std::unordered_map<int, HudSpriteRectRecord> g_HudSpriteOriginalEntries;
-        std::unordered_map<int, HudSpriteRectRecord> g_HudSpriteHiddenEntries;
-        std::unordered_map<uintptr_t, HudSpriteRectRecord> g_HudSpriteOriginalEntriesByAddress;
-        std::unordered_set<uintptr_t> g_HudSpriteHiddenAddresses;
-        std::vector<uintptr_t> g_HudSpriteCachedPanelAddresses;
-        bool g_HudSpriteFallbackDiscoveryAttempted = false;
-        ULONGLONG g_HudSpriteFallbackDiscoveryLastTick = 0;
-        // Full-memory scans cost seconds on the UI thread, so failed attempts
-        // back off exponentially (reset on success or mission-state reset).
-        ULONGLONG g_HudSpriteRectTableDiscoveryBackoffMs = 0;
-        ULONGLONG g_HudSpriteFallbackDiscoveryBackoffMs = 0;
-
-        std::vector<BanRecord> g_BanRecords;
-
-        bool g_EnableChunkRenderFallback = false;
-        bool g_EnableChunkProxyDebug = false;
-        bool g_EnableChunkMeshProxy = false;
-        bool g_EnableGenericChunkBatch = false;
-        bool g_EnablePartialFragmentBoneCollapse = false;
-        bool g_TraceChunkRender = false;
-        bool g_TraceChunkRenderVerbose = false;
-        bool g_TraceChunkEffectRuntime = false;
-        bool g_TraceSatelliteVisibility = false;
-        uint32_t g_LastChunkEffectLoggedCount = UINT32_MAX;
-        static volatile long g_ChunkRenderLogBudget = 12;
-        // 8 was sized for an opt-in probe and burns out after 8 seconds of
-        // cumulative satellite viewing -- far too few to walk the validation
-        // matrix now that the trace defaults on. Budget is consumed only while
-        // the overview is actually open and is rate-limited to one sample per
-        // g_SatelliteVisibilityLogIntervalMs.
-        volatile long g_SatelliteVisibilityLogBudget = 120;
-        uint32_t g_ChunkTraceEntryLimit = 32;
-        // 96 slots exhaust in multi-craft battles (each death emits ~10 geo
-        // pieces plus impact chunklets); once full, new chunks are silently
-        // dropped until a slot expires.
-        uint32_t g_ChunkProxyCapacity = 256;
-        float g_ChunkProxyDebugSize = 2.5f;
-        uint32_t g_SatelliteVisibilityObjectLimit = 96;
-        DWORD g_SatelliteVisibilityLastTick = 0;
-        DWORD g_SatelliteVisibilityLogIntervalMs = 1000;
-        std::unordered_map<uintptr_t, uint32_t> g_ChunkObservedClassIds = {};
-
-        std::unordered_map<uintptr_t, ChunkResolvedBindingEntry> g_ChunkResolvedBindingCache = {};
-        std::unordered_map<std::string, bool> g_ChunkPayloadMeshExistsCache = {};
-        std::unordered_set<std::string> g_ChunkPayloadResolveFailureLogCache = {};
-        DWORD g_ChunkResolvedBindingLastPruneTick = 0;
-        bool g_VehicleSkinningTraceEnabled = false;
-        DWORD g_VehicleSkinningTraceIntervalMs = 5000;
-        DWORD g_VehicleSkinningTraceLastTick = 0;
-        volatile long g_VehicleSkinningTraceBudget = 64;
-        std::unordered_set<std::string> g_VehicleSkinningTraceFingerprints = {};
-
-        ProducerBuildMenuConfig g_ProducerBuildMenuConfig = {};
-        AiTuningCache g_AiTuningCache = {};
-        TeamFilterCache g_ShieldTowerTeamFilterCache = {};
-        TeamFilterCache g_MagnetMineTeamFilterCache = {};
-        TeamFilterCache g_ProximityMineTeamFilterCache = {};
-        bool g_HasAppliedProducerBuildMenu = false;
-        int64_t g_LastAppliedProducerBuildMenu = 0;
-        uint32_t g_LastUnknownProducerVft = 0;
-        bool g_LoggedEngineFlameTargetFailure = false;
-        bool g_LoggedEngineFlameVtableHook = false;
-        bool g_EngineFlameVariantsInitialized = false;
-        bool g_EngineFlameVariantsInitAttempted = false;
-        bool g_EngineFlameVtableHooksInstalled = false;
-        InlineDetour32 g_RecordDeathDetour = {};
-        bool g_DistributedRecordDeathIntHookInstalled = false;
-        bool g_LobbyNicknameInputHookInstalled = false;
-        void* g_ActiveNicknameEntry = nullptr;
-        void* g_ActiveNicknameParent = nullptr;
-        void* g_NicknameEnterDispatchEntry = nullptr;
-        void* g_PendingNicknameConfirmationEntry = nullptr;
-        BzrNetNicknameResult g_PendingNicknameConfirmationResult =
-            BzrNetNicknameResult::StoredForNextConnection;
-        bool g_ReplaceNicknameOnNextInput = false;
-        bool g_CareerStatsMpHookInstalled = false;
-        bool g_CareerStatsMpHookInstallAttempted = false;
-        bool g_CareerStatsMpHookMismatchLogged = false;
-        ULONGLONG g_CareerStatsMpHookFirstAttemptTick = 0;
-        ULONGLONG g_CareerStatsMpHookLastAttemptTick = 0;
-        bool g_CalcRangeCraftHookInstalled = false;
-        bool g_ScrapPathScoreHookInstalled = false;
-        InlineDetour32 g_RecycleTaskDoGotoScrapDetour = {};
-        bool g_ScrapRetargetHookInstalled = false;
-        InlineDetour32 g_AttackTaskDoStateDetour = {};
-        bool g_AttackTaskDoStateHookInstalled = false;
-        bool g_RetargetPeriodHooksInstalled = false;
-        volatile long g_AttackRevealTraceBudget = 64;
-        InlineDetour32 g_ChunkEffectCreateChunkDetour = {};
-        InlineDetour32 g_ChunkEffectCreateChunkletDetour = {};
-        bool g_ChunkEffectCreateHooksInstalled = false;
-        bool g_ChunkEffectCreateHooksLogged = false;
-        InlineDetour32 g_ChunkEffectPartialFragmentDetour = {};
-        InlineDetour32 g_ChunkEffectFullFragmentDetour = {};
-        bool g_ChunkEffectFragmentHooksInstalled = false;
-        bool g_AllowUnsafeSteamChunkCreateHooks = false;
-        bool g_ChunkEffectCreateHooksWaitLogged = false;
-        bool g_ChunkEffectCreateHooksMismatchLogged = false;
-        ULONGLONG g_ChunkEffectCreateHooksReadyTick = 0;
-        bool g_ShieldTowerSimulateHookInstalled = false;
-        bool g_ConstructorRemoteBuildFixInstalled = false;
-        bool g_ConstructorRemoteBuildFixMismatchLogged = false;
-        bool g_MagnetMineSimulateHookInstalled = false;
-        bool g_ProximityMineSimulateHookInstalled = false;
-        InlineDetour32 g_ScriptCanBuildDetour = {};
-        InlineDetour32 g_ScriptIsBusyDetour = {};
-        FnScriptProducerPredicate g_BzrFn_ScriptCanBuildOriginal = nullptr;
-        FnScriptProducerPredicate g_BzrFn_ScriptIsBusyOriginal = nullptr;
-        bool g_ProducerScriptPredicateHooksInstalled = false;
-        // [Fixes] ProducerScriptPredicates. Extends the script-facing CanBuild /
-        // IsBusy predicates to base producers. Default on; switchable because it
-        // changes what mission Lua observes, in single-player and multiplayer
-        // alike, and it had no opt-out at all before.
-        bool g_ProducerScriptPredicateHooksEnabled = true;
-        bool g_BriefingScrollFixInstalled = false;
-        bool g_BriefingScrollFixEnabled = true;
-        bool g_MultiRenderCountClampInstalled = false;
-        bool g_MultiRenderCountClampEnabled = true;
-        volatile long g_MultiRenderCountClampLogBudget = 8;
-        bool g_MagnetZeroRangeGuardEnabled = true;
-        volatile long g_MagnetZeroRangeLogBudget = 8;
-        bool g_ThumbnailBmpGuardEnabled = true;
-        bool g_ThumbnailBmpGuardInstalled = false;
-        bool g_QuakeReplayFadeInstalled = false;
-        bool g_QuakeReplayFadeEnabled = true;
-        long g_QuakeReplayFadeSeconds = kQuakeReplayFadeSecondsDefault;
-        InlineDetour32 g_EarthQuakeSimulateDetour = {};
-        volatile long g_QuakeReplayArmed = 0;
-        bool g_TargetCamSatelliteFixInstalled = false;
-        bool g_TargetCamSatelliteFixEnabled = true;
-        volatile long g_TargetCamSatelliteLogBudget = 8;
-        bool g_CinematicSatelliteZoomFixInstalled = false;
-        bool g_CinematicSatelliteZoomFixEnabled = true;
-        volatile long g_CinematicSatelliteZoomLogBudget = 8;
-		bool g_SprayBuildingSimulateHookInstalled = false;
-		bool g_TugCargoPostLoadFixInstalled = false;
-		bool g_TugCargoPostLoadFixEnabled = true;
-		volatile long g_TugCargoPostLoadLogBudget = 16;
-		bool g_ApcAlliedTargetDeployFixInstalled = false;
-		bool g_ApcAlliedTargetDeployFixEnabled = true;
-		bool g_ConstructorRecycleStaleTargetFixInstalled = false;
-		bool g_ConstructorRecycleStaleTargetFixEnabled = true;
-		bool g_ConstructorRecycleStaleTargetMismatchLogged = false;
-		volatile long g_ConstructorRecycleStaleTargetLogBudget = 16;
-        bool g_SplinterUndeadFixEnabled = kSplinterUndeadFixEnabledDefault;
-        volatile long g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
-        bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
-        volatile long g_ConstructorRemoteBuildTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
-
-        // MPAUTH diagnostic traces (Redux receiver replay). Opt-in, cheap, no gameplay change.
-        bool g_MpauthEnabled = false;
-        bool g_MpauthHooksInstalled = false;
-        volatile long g_MpauthInstallRetryBudget = 8;
-        thread_local bool g_MpauthInOrdnanceReceive = false;
-        std::unordered_map<uint32_t, int> g_MpauthSplHitCounts = {};
-
-        std::unordered_map<uintptr_t, RetargetPeriodState> g_RetargetPeriodStateByProcess = {};
-        std::unordered_map<uintptr_t, ScrapPathFailureState> g_ScrapPathFailuresByObject = {};
-        std::unordered_map<uintptr_t, ScrapRetargetState> g_ScrapRetargetStateByTask = {};
-        std::unordered_map<uintptr_t, AiUnitTuningOverride> g_AiUnitTuningOverridesByObject = {};
-        std::unordered_map<uintptr_t, CombatKiteState> g_CombatKiteStateByObject = {};
-        volatile long g_AiUnitTuningTraceBudget = 64;
-        volatile long g_CombatKiteTraceBudget = 256;
-        volatile long g_ScrapPathTraceBudget = 128;
-
-        int g_EngineFlamePrimaryRedTexture = 0;
-        int g_EngineFlamePrimaryBlueTexture = 0;
-        int g_EngineFlamePrimaryGreenTexture = 0;
-        int g_EngineFlamePrimaryOrangeTexture = 0;
-        int g_EngineFlamePrimaryBlackDogTexture = 0;
-        void* g_EngineFlamePrimaryManager = nullptr;
-        void* g_EngineFlameSecondaryManager = nullptr;
-
-        bool g_JetFlamesConfigInitialized = false;
         static constexpr uintptr_t kChunkEffectVtableSimulateSlotAddr = 0x0087708C;
         static constexpr DWORD kVehicleSkinningTraceIntervalMsDefault = 5000;
         static constexpr DWORD kVehicleSkinningTraceIntervalMsMin = 100;
@@ -459,96 +232,6 @@ namespace BZROpenShim
         // Resolved by ResolveBzrHooks from scripts/patches.json
         // ("PlayGlobalSound"); null until then, and the caller checks.
         FnPlayGlobalSound g_BzrFn_PlayGlobalSound = nullptr;
-        // Confirmed Redux defect: damage from a GameObject-owned child reveals
-        // only that immediate child, leaving its owning craft disguised.
-        // This restores the ownership walk for landed hits. It is gated out of
-        // network games because perceivedTeam participates in simulation.
-        static constexpr bool kOwnedObjectRevealFixEnabledDefault = true;
-        static constexpr long kOwnedObjectRevealTraceBudgetDefault = 96;
-        bool g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
-        bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
-        // Configured value AND'd with the single-player gate, same contract as
-        // g_AiOdfGameplayTuningActive below. This feature changes stock content
-        // (it raises bomber engagement range from the craft's own weapon ODFs),
-        // so it must never reach a network game.
-        bool g_BomberAiRangeActive = false;
-        bool g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
-        bool g_HowitzerUndeployedRetaliationFixEnabled =
-            kHowitzerUndeployedRetaliationFixEnabledDefault;
-        bool g_OwnedObjectRevealFixEnabled =
-            kOwnedObjectRevealFixEnabledDefault;
-        bool g_OwnedObjectRevealFixActive =
-            kOwnedObjectRevealFixEnabledDefault;
-        volatile long g_OwnedObjectRevealTraceBudget =
-            kOwnedObjectRevealTraceBudgetDefault;
-        bool g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
-        bool g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
-        bool g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
-        bool g_AttackRevealEnabled = kAttackRevealEnabledDefault;
-
-        DWORD g_ChunkProxyLastRetryTick = 0;
-        bool g_ChunkProxyInitLogged = false;
-        bool g_ChunkProxyFailureLogged = false;
-        bool g_ChunkProxyWaitLogged = false;
-        DWORD g_ChunkMeshProxyLastRetryTick = 0;
-        bool g_ChunkMeshProxyInitLogged = false;
-        bool g_ChunkMeshProxyFailureLogged = false;
-        bool g_ChunkMeshProxyWaitLogged = false;
-        bool g_ChunkPayloadResourceLocationsAttempted = false;
-        bool g_ChunkPayloadResourceLocationsReady = false;
-        bool g_ChunkPayloadResourceLocationsLogged = false;
-        bool g_ChunkPayloadResourceLocationsFailureLogged = false;
-        std::vector<std::filesystem::path> g_ChunkPayloadResourceDirectories = {};
-        void* g_ChunkProxyBillboardSet = nullptr;
-        std::vector<ChunkProxySlot> g_ChunkProxySlots = {};
-        void* g_GenericChunkBatchManualObject = nullptr;
-        void* g_GenericChunkBatchSceneNode = nullptr;
-        void* g_GenericChunkBatchSceneManager = nullptr;
-        bool g_GenericChunkBatchSectionCreated = false;
-        bool g_GenericChunkBatchRuntimeAvailable = true;
-        int g_GenericChunkBatchEligibility[2] = { -1, -1 };
-        DWORD g_GenericChunkBatchLastLogTick = 0;
-        // Bounded diagnostics for the per-frame submission question: the game
-        // drives its _updateRenderQueue override more than once per frame (one
-        // traversal per active material scheme), and the ManualObject is also
-        // attached to the scene graph, so the number of rebuilds and the number
-        // of render-queue submissions per frame must be counted, not assumed.
-        bool g_GenericChunkBatchRateDiagnostics = false;
-        // State-version reuse. The batch is re-submitted to every camera/scheme
-        // traversal, but the geometry is only re-emitted when the slot state it
-        // is built from actually differs. See include/chunk_batch_invalidation.h
-        // for why the version is derived from the source rather than declared by
-        // its mutators.
-        bool g_GenericChunkBatchReuseEnabled = true;
-        // Observer mode: take the decision and count it, then rebuild anyway.
-        // This is how the pre-optimization baseline and the dedup opportunity
-        // are measured from the same binary, without changing what is drawn.
-        bool g_GenericChunkBatchReuseObserveOnly = false;
-        uint64_t g_GenericChunkBatchBuiltVersion =
-            ChunkBatchInvalidation::kUnbuiltVersion;
-        std::string g_GenericChunkBatchBuiltMaterial = {};
-        // Last visibility written to the batch object, so setVisible is only
-        // called on a transition. Without this the empty path would push
-        // setVisible(false) three times per frame for as long as there is no
-        // debris, which is most of a normal mission.
-        bool g_GenericChunkBatchVisible = false;
-        // TEST/DIAGNOSTIC seam only. Set by the environment gate below and
-        // never by gameplay: RebuildAndSubmitGenericChunkBatch() reports
-        // failure once the slots are already classified batch-ready, which is
-        // precisely the window the per-Entity fallback has to cover.
-        bool g_ForceGenericChunkBatchFailure = false;
-        // TEST/DIAGNOSTIC seam only. ChunkProxyTransform::scale is structurally
-        // unit today (the legacy basis vectors are normalised when the
-        // quaternion is built), so the unit-scale gate below has no natural
-        // trigger. This forces a non-unit scale on tracked generic chunks so
-        // the rejection and per-Entity fallback can actually be exercised.
-        bool g_ForceGenericChunkNonUnitScale = false;
-
-        FnFlagDisplaySubmit g_BzrFn_FlagDisplaySubmitOriginal = nullptr;
-        bool g_MultiplayerFlagRenderHookInstalled = false;
-        bool g_MultiplayerFlagRenderHookFailureLogged = false;
-        bool g_MultiplayerFlagRendererLoggedReady = false;
-        std::unordered_map<uint64_t, MultiplayerFlagRenderSet> g_MultiplayerFlagRenderSets = {};
 
         static uint32_t ClampChunkProxyCapacity(long value)
         {
@@ -577,21 +260,6 @@ namespace BZROpenShim
             return static_cast<uint32_t>(value);
         }
 
-        void LogChunkDiagnostic(const char* component, const wchar_t* fmt, ...)
-        {
-            if (!fmt || !*fmt)
-                return;
-
-            wchar_t buffer[4096] = {};
-            va_list args;
-            va_start(args, fmt);
-            _vsnwprintf_s(buffer, _countof(buffer), _TRUNCATE, fmt, args);
-            va_end(args);
-
-            Log(L"%ls", buffer);
-            LogShimW(LogLevel::Info, component, L"%ls", buffer);
-        }
-
         static uint32_t ClampSatelliteVisibilityObjectLimit(long value)
         {
             if (value < 8)
@@ -610,24 +278,8 @@ namespace BZROpenShim
             return static_cast<DWORD>(value);
         }
 
-        bool AcquireChunkLogSlot()
-        {
-            if (g_TraceChunkRenderVerbose)
-                return true;
-
-            return InterlockedDecrement(&g_ChunkRenderLogBudget) >= 0;
-        }
-
-        bool g_TraceDamageReveal = false;
-        volatile long g_DamageRevealTraceBudget = 0;
         static constexpr long kDamageRevealTraceBudgetDefault = 400;
 
-        // Player-kill research trace (PR 107 phase 2-3). Opt-in only.
-        // Default OFF. When enabled, each authoritative multiplayer death
-        // emits one compact diagnostic record with candidate controller fields
-        // for victim and damager. No career-stats behavior is changed.
-        bool g_TracePlayerKills = false;
-        volatile long g_PlayerKillTraceBudget = 0;
         static constexpr long kPlayerKillTraceBudgetDefault = 256;
         static constexpr long kPlayerKillTraceBudgetMax = 4096;
 

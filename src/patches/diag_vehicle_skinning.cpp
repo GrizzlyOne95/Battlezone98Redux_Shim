@@ -69,6 +69,12 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        bool g_VehicleSkinningTraceEnabled = false;
+        DWORD g_VehicleSkinningTraceIntervalMs = 5000;
+        DWORD g_VehicleSkinningTraceLastTick = 0;
+        volatile long g_VehicleSkinningTraceBudget = 64;
+        std::unordered_set<std::string> g_VehicleSkinningTraceFingerprints = {};
+
         struct VehicleSkinningProbeResult
         {
             bool initialized = false;

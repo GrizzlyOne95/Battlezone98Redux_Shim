@@ -1102,6 +1102,13 @@ namespace BZROpenShim
 
         inline constexpr long kAttackRevealTraceBudgetDefault = 64;
 
+        // Confirmed Redux defect: damage from a GameObject-owned child reveals
+        // only that immediate child, leaving its owning craft disguised.
+        // This restores the ownership walk for landed hits. It is gated out of
+        // network games because perceivedTeam participates in simulation.
+        inline constexpr bool kOwnedObjectRevealFixEnabledDefault = true;
+        inline constexpr long kOwnedObjectRevealTraceBudgetDefault = 96;
+
         // --- Lifecycle seams (lifecycle_seams.cpp) -----------------------------
         inline constexpr int kBzrRunStateStarted = 5;
         inline constexpr int kBzrRunStateUnknown = -1;
@@ -1326,6 +1333,9 @@ namespace BZROpenShim
         bool ShouldTraceConstructorRemoteBuildFix();
         void InstallConstructorRemoteBuildFixIfPossible();
 
+        inline constexpr long kSplinterUndeadTraceBudgetDefault = 32;
+        inline constexpr long kConstructorRemoteBuildTraceBudgetDefault = 32;
+
         // --- UI and camera fixes (ui_camera_fixes.cpp) -------------------------
         inline constexpr int32_t kMultiRenderCountMax = 256;
         // Post-load quake replay fade (#57) helpers. All calls run on the game
@@ -1357,6 +1367,8 @@ namespace BZROpenShim
         void InstallQuakeReplayFadeIfPossible();
         void InstallTargetCamSatelliteFixIfPossible();
         void InstallCinematicSatelliteZoomFixIfPossible();
+
+        inline constexpr long kQuakeReplayFadeSecondsDefault = 5;
 
         // --- Lobby screen hooks (lobby_screen_hooks.cpp) -----------------------
         void InstallNicknameTextEntryInputHookIfPossible();
@@ -1777,6 +1789,8 @@ namespace BZROpenShim
             uint32_t selectedKey);
         void InstallChunkEffectCreateHooksIfRequested();
         void InstallChunkFragmentWalkHooksIfRequested();
+
+        extern volatile long g_ChunkRenderLogBudget;
 
         // --- Chunk engine hooks (chunk_engine_hooks.cpp) -----------------------
         extern bool g_EnableChunkRenderFallback;
