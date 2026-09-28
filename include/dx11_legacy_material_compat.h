@@ -53,7 +53,6 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         FixedFuncTextured2,
     };
 
-    const char* LegacyPassKindName(LegacyPassKind kind) noexcept;
     const char* CompatPathName(CompatPath path) noexcept;
 
     // Ogre::LayerBlendOperationEx / LayerBlendSource values (OgreBlendMode.h,

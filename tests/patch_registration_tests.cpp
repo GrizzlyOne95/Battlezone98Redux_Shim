@@ -27,7 +27,8 @@
 // applied only to a patch-list entry of the same name, so a global that
 // patches.h never lists is read, parsed and then dropped without a line in the
 // log. Eleven were in that state when the check was added (the map filter
-// port and three superseded version-notice sites). An entry that is meant to
+// port and three superseded version-notice sites; all eleven were deleted
+// with the port on 2026-09-27). An entry that is meant to
 // sit unwalked says so with a "parked" key giving the reason; one that is
 // parked AND listed is a stale marker and fails as well.
 //
