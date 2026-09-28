@@ -104,13 +104,19 @@ ChunkMeshes = 1
 ;                     BZR_DISABLE_MAP_REFRESH_FIXES
 MapRefreshFixes = 1
 
-; Extra entries in the multiplayer Create Game map filter list, alongside
-; the stock ones: "5+ Players" (maps that seat five or more) and "Stock Maps"
-; (maps shipped with the game, no Workshop content). Each is offered only
-; when at least one installed map matches it. The stock filter function does
-; the filtering; the extras only drop entries it would otherwise add, so the
-; list, its selection and its preview behave exactly as they do for a stock
-; filter. Byte-guarded on all five engine sites; a mismatch stands it down.
+; Multiplayer Create Game map list additions:
+;  - "5+ Players" (maps that seat five or more) and "Stock Maps" (maps
+;    shipped with the game, no Workshop content) in the filter list, each
+;    offered only when at least one installed map matches it. If the filter
+;    dropdown has more entries than rows, the rest scroll instead of being
+;    dropped.
+;  - A search box above the list (click it, type, Enter or Escape to stop
+;    typing). It narrows the current filter by map title or file name; a
+;    search that matches nothing leaves the list unsearched.
+; The stock filter function does the filtering; these only drop entries it
+; would otherwise add, so the list, its selection and its preview behave as
+; they do for a stock filter. Byte-guarded on every engine site; a mismatch
+; stands the feature down.
 ; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Map Filters+"; restart required.
 ; Env override to enable: OPENSHIM_MAP_FILTER_EXTRAS
