@@ -1073,39 +1073,9 @@
       "expected": "55 8B EC 8B 45 08 50 B9 E0 FE 94 00 E8 9F CE F9"
     },
     {
-      "name": "MapFilter6",
-      "address": "0x004200B0",
-      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 4D FC 8B 40 04"
-    },
-    {
       "name": "ChunkResolve",
       "address": "0x004E3620",
       "expected": "55 8B EC 83 EC 14 8B 45 08 83 C0 68 89 45 FC 8D"
-    },
-    {
-      "name": "MapFilter8Check",
-      "address": "0x007D3360",
-      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8A 80 E9 00 00 00"
-    },
-    {
-      "name": "MapFilterCreate",
-      "address": "0x007C9DE0",
-      "expected": "55 8B EC 6A FF 68 8C 24 86 00 64 A1 00 00 00 00"
-    },
-    {
-      "name": "MapFilterScrollUp",
-      "address": "0x007CB500",
-      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 50 01 00 00"
-    },
-    {
-      "name": "MapFilterScrollDown",
-      "address": "0x007CB540",
-      "expected": "55 8B EC 51 56 89 4D FC 8B 4D FC 81 C1 68 01 00"
-    },
-    {
-      "name": "Localize",
-      "address": "0x0081CB40",
-      "expected": "55 8B EC 83 EC 44 A1 00 70 8E 00 33 C5 89 45 FC"
     },
     {
       "name": "VehicleFixPre",
@@ -1212,26 +1182,6 @@
     {
       "name": "Main Menu Version Text OpenShim",
       "fallback": "0x0078DD4E",
-      "expected_original": "E4 84 87 00"
-    },
-    {
-      "name": "Version Notice 1/2 OpenShim",
-      "parked": "Same site as \"Main Menu Version Text OpenShim\", which is the entry the patch list walks.",
-      "fallback_gog": "0x0078DD4E",
-      "fallback_steam": "0x004B022B",
-      "expected_original": "E4 84 87 00"
-    },
-    {
-      "name": "Version Notice 2/2 OpenShim",
-      "parked": "A further reference to the version string recorded with the original research. include/patches.h does not list it, so only the main-menu site carries the OpenShim version.",
-      "fallback_gog": "0x00618C2F",
-      "fallback_steam": "0x004B0247",
-      "expected_original": "E4 84 87 00"
-    },
-    {
-      "name": "Version Notice 3/3 OpenShim",
-      "parked": "A further reference to the version string recorded with the original research. include/patches.h does not list it, so only the main-menu site carries the OpenShim version.",
-      "fallback_steam": "0x005091F4",
       "expected_original": "E4 84 87 00"
     },
     {
@@ -1385,54 +1335,6 @@
       "expected_original": "0F 2F 05 D0 73 91 00 76 2B 6A 00 6A 00 6A 00 68 20 72 87 00 E8 3A C3 F2 FF 83 C4 10 F3 0F 10 85 30 FE FF FF F3 0F 58 05 04 26 8A 00 F3 0F 11 05 D0 73 91 00"
     },
     {
-      "name": "Map Filters 1/8",
-      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
-      "fallback": "0x007A31D9",
-      "expected_original": "68 E0 B3 89 00"
-    },
-    {
-      "name": "Map Filters 2/8",
-      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
-      "fallback": "0x00752A82",
-      "expected_original": "E8 49 04 00 00"
-    },
-    {
-      "name": "Map Filters 3/8",
-      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
-      "fallback": "0x0079D6B1",
-      "expected_original": "8B EC 8B 0D 64"
-    },
-    {
-      "name": "Map Filters 4/8",
-      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
-      "fallback": "0x0079D691",
-      "expected_original": "8B EC 8B 0D 64"
-    },
-    {
-      "name": "Map Filters 5/8",
-      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
-      "fallback": "0x00799116",
-      "expected_original": "52 6A 20 6A 00"
-    },
-    {
-      "name": "Map Filters 6/8",
-      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
-      "fallback": "0x0079920A",
-      "expected_original": "92 23 03 00"
-    },
-    {
-      "name": "Map Filters 7/8",
-      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
-      "fallback": "0x007998AB",
-      "expected_original": "8B 45 BC 8B 88"
-    },
-    {
-      "name": "Map Filters 8/8",
-      "parked": "The disabled clean-room map filter/sort port, kept apart from the validated hop/refresh fixes. include/patches.h does not list it, so this address is never applied.",
-      "fallback": "0x007997A9",
-      "expected_original": "8B 45 F8 8B 88"
-    },
-    {
       "name": "Music Buffer Global Focus",
       "fallback": "0x0043F20C",
       "expected_original": "68 88 01 01 00"
@@ -1531,42 +1433,6 @@
     {
       "name": "StartupShellAutoLoadFlag",
       "address": "0x008EAAA8"
-    },
-    {
-      "name": "RetAddr_MapFilters1",
-      "address": "0x007A35C0"
-    },
-    {
-      "name": "RetAddr_MapFilters2",
-      "address": "0x00752D00"
-    },
-    {
-      "name": "RetAddr_MapFilters3",
-      "address": "0x0079D6B9"
-    },
-    {
-      "name": "RetAddr_MapFilters4",
-      "address": "0x0079D699"
-    },
-    {
-      "name": "RetAddr_MapFilters5",
-      "address": "0x0079916B"
-    },
-    {
-      "name": "RetAddr_MapFilters7",
-      "address": "0x007998B4"
-    },
-    {
-      "name": "RetAddr_MapFilters8_A",
-      "address": "0x007997B2"
-    },
-    {
-      "name": "RetAddr_MapFilters8_B",
-      "address": "0x007997B7"
-    },
-    {
-      "name": "RetAddr_MapFilters8_C",
-      "address": "0x0079987C"
     },
     {
       "name": "RetAddr_VehicleListModFix1",
