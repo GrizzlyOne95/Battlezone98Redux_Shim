@@ -165,6 +165,15 @@
       "identity": "Third Carrier::GetWeapon site in Person::Simulate (0x0059D340), sibling of Pilot Carrier Null Guard (0x0059D76D, same function). The loop at 0x0059D777 walks slots 0-4 of the selected mask returned by Carrier::GetSelected, calls Carrier::GetWeapon (0x00417F60) at 0x0059D7C3 for every set bit, and dereferences the result unconditionally: mov eax,[edx+8] at 0x0059D7D4, then cmp [eax+0xC],'SNIP' to set the crouch flag at [ebp-0x351]. GetWeapon returns null when the hardpoint mask at [carrier+0x2C] lacks that bit, so a selected-mask bit on an empty hardpoint faults. Observed on GOG Redux 2.2.301 in ISDF Chronicles isdfms10 (dump battlezone98redux.exe.54600.dmp): a jak person whose Lua removed its only weapon with GiveWeapon(h, nil, 0) kept selected=1 at [carrier+0x30] with hardpoint mask 0, EIP 0x0059D7D4 reading [0+8]. The result at [ebp-0x4B4] is read only by that SNIP test, so the guard returns a static non-SNIP stand-in for an empty slot. The earlier GetWeapon call at 0x0059D3F0 already null-checks and is left stock. Pattern verified single-match by whole-image scan on 2026-09-26."
     },
     {
+      "name": "HoverCraft Turbo Sound Stop Guard",
+      "pattern": "8B 85 20 FF FF FF 8B 88 F4 00 00 00 51 8B 95 1C FF FF FF 81 C2 B0 05 00 00 52 E8 ?? ?? ?? ?? 83 C4 08 89 85 E0 FE FF FF 8B 85 E0 FE FF FF 50 E8 ?? ?? ?? ?? 83 C4 04 8B 8D 20 FF FF FF C7 81 C4 02 00 00 00 00 00 00",
+      "offset": 27,
+      "expected_size": 4,
+      "fallback": "0x004EEED6",
+      "require_unique": true,
+      "identity": "Turbo-sound stop branch of HoverCraft::UpdateSounds (0x004EEA20; called at 0x004EE855 right after HoverCraft::Simulate 0x004EA300). The function starts three looping sounds and caches them on the craft: thrust at +0x2C0 (class+0x5A0 soundThrust), turbo at +0x2C4 (class+0x5B0 soundTurbo), third at +0x2CC. When the smoothed throttle at +0x2BC drops under the turbo gate it does not stop its cached +0x2C4 sound: it calls Sound::Find(soundTurbo, craft+0xF4 owner) at 0x004EEED5, stops whatever that returns (0x004EEEEA) and nulls +0x2C4. Sound::Find returns the first live sound with that owner and filename, so an ODF whose soundThrust and soundTurbo name the same wav (ISDF Chronicles ivmisl.odf: itank01h.wav for both, and about 40 other ISDFC units) gets its THRUST loop freed while +0x2C0 still points at it. The orphaned turbo loop keeps playing, and every later frame 0x004EECEF calls SetSoundParams (0x0043AE50) on the freed +0x2C0 record, writing volume to +0x40, flags|=0x40/0x80 at +0x14 and frequency to +0x48. Observed on GOG Redux 2.2.301 in ISDFC isdfms01 (dump battlezone98redux.exe.6812.dmp): the freed 0x84-byte sound block was reused for a fresh Ogre SubMesh, whose parent at +0x40 became 9, and the render path faulted reading [9+0x19D] in OgreMain; the wingman had +0x2C0 dangling, +0x2C4 null and exactly one live itank01h.wav loop (flags 0x4803) owned by it. The pattern anchors on the E8 opcode's rel32 operand (offset 27) and spans the whole branch from mov eax,[ebp-0xE0] (the craft this) to the +0x2C4 null store; the hook reads the craft from [ebp-0xE0] of this frame. Pattern verified single-match by whole-image scan on 2026-09-27."
+    },
+    {
       "name": "Neutral Attack Order Target Hook",
       "pattern": "8B 8D 8C FD FF FF 83 C1 18 8B 85 8C FD FF FF 8B 50 18 8B 42 04 FF D0 50 8B 8D 80 FD FF FF E8 ?? ?? ?? ?? 0F B6 C8 85 C9 75 05 E9 ?? ?? ?? ??",
       "offset": 31,
@@ -273,6 +282,26 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Carrier selected-mask getter called by Person::Simulate at 0x0059D76C in exact GOG Redux 2.2.301. The function is the complete 17-byte thiscall leaf that returns [this+0x30]. Five lcbench pilot-ordering dumps fault at its mov eax,[eax+0x30] when Person+0x1A0 is null; the caller independently identifies the selected-mask use before the five-slot SNIP scan."
+    },
+    {
+      "name": "Sound::Find",
+      "pattern": "55 8B EC 51 E8 ?? ?? ?? ?? 89 45 FC EB 08 8B 45 FC 8B 08 89 4D FC 83 7D FC 00 74 32 8B 55 FC 8B 42 58 3B 45 0C 74 02 EB E5 83 7D 08 00 74 18 8B 4D 08 51 8B 55 FC 83 C2 04 52 FF 15 ?? ?? ?? ?? 83 C4 08 85 C0 75 05 8B 45 FC EB 04 EB C0 33 C0 8B E5 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0043AC70",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Complete 84-byte cdecl leaf Sound::Find(const char* name, void* owner) on exact GOG Redux 2.2.301: walks the live sound list from Sound::ListHead (0x0043BC50) through next at +0x00, skips records whose owner at +0x58 differs, and with a non-null name compares it against the inline filename at +0x04 through the CRT case-insensitive compare import at [0x008694A4]; returns the first match or null. Called by the Lua StopSound binding 0x004FFA90 (then Sound::Stop 0x0043AAA0 on the result) and by HoverCraft::UpdateSounds 0x004EEA20 / its teardown 0x004EE8F0 with class+0x5A0/0x5B0/0x5C0 sound names and craft+0xF4 owner."
+    },
+    {
+      "name": "Sound::ListHead",
+      "pattern": "55 8B EC 51 E8 ?? ?? ?? ?? 89 45 FC EB 08 8B 45 FC 8B 08 89 4D FC 83 7D FC 00 74 32 8B 55 FC 8B 42 58 3B 45 0C 74 02 EB E5",
+      "offset": 4,
+      "mode": "rel32_target",
+      "fallback": "0x0043BC50",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Target of the first CALL in Sound::Find (0x0043AC74 -> 0x0043BC50): a 10-byte cdecl leaf returning the live sound list head [0x00915598]. The audio update 0x0043A170 and StopAll 0x0043A570 walk the same list from it with next at +0x00 (Sound::Next 0x00439CC0). The anchor is the E8 opcode, not its rel32 operand."
     },
     {
       "name": "Carrier::GetWeapon",
