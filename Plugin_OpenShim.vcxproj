@@ -153,15 +153,15 @@
     <ClCompile Include="src\patches\career_stats.cpp" />
     <ClCompile Include="src\patches\chunk_engine_hooks.cpp" />
     <ClCompile Include="src\patches\dynamic_geometry_hooks.cpp" />
-    <ClCompile Include="src\patches\game_object_helpers.cpp" />
-    <ClCompile Include="src\patches\odf_helpers.cpp" />
     <ClCompile Include="src\patches\chunk_identity.cpp" />
     <ClCompile Include="src\patches\chunk_payload_resolve.cpp" />
     <ClCompile Include="src\patches\chunk_proxy_render.cpp" />
+    <ClCompile Include="src\patches\config_helpers.cpp" />
     <ClCompile Include="src\patches\diag_jump_snipe_probe.cpp" />
     <ClCompile Include="src\patches\diag_mpauth_trace.cpp" />
     <ClCompile Include="src\patches\diag_vehicle_skinning.cpp" />
     <ClCompile Include="src\patches\engine_flames.cpp" />
+    <ClCompile Include="src\patches\game_object_helpers.cpp" />
     <ClCompile Include="src\patches\global_feature_config.cpp" />
     <ClCompile Include="src\patches\global_turbo.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
@@ -172,6 +172,7 @@
     <ClCompile Include="src\patches\lobby_ui.cpp" />
     <ClCompile Include="src\patches\moderation.cpp" />
     <ClCompile Include="src\patches\multiplayer_vehicle_flags.cpp" />
+    <ClCompile Include="src\patches\odf_helpers.cpp" />
     <ClCompile Include="src\patches\ogre_dedupe_crash_fixes.cpp" />
     <ClCompile Include="src\patches\ogre_entity_frustum_cull.cpp" />
     <ClCompile Include="src\patches\ordnance_velocity.cpp" />
