@@ -82,9 +82,7 @@ namespace BZROpenShim
 
     // Main-menu version notice. The "Main Menu Version Text OpenShim" global
     // in patches.json points the game's version string pointer at this
-    // buffer, so whatever it holds is what the shell prints. (The three
-    // "Version Notice" globals beside it are parked: the patch list does
-    // not walk them.)
+    // buffer, so whatever it holds is what the shell prints.
     //
     // It carries the shim's own build version so a player can read back
     // which DLL is actually loaded. That matters because winmm.dll and
@@ -758,7 +756,7 @@ namespace BZROpenShim
         return reinterpret_cast<void*>(fb);
     }
 
-    static void ResolvePointers(uint32_t mapS, uint32_t h1, uint32_t h2, uint32_t h3, uint32_t pF1, uint32_t pL1, uint32_t pL2, uint32_t tc, uint32_t tt, uint32_t ua1, uint32_t ua2, uint32_t oa, uint32_t tta, bool isSteam) {
+    static void ResolvePointers(uint32_t mapS, uint32_t h1, uint32_t h2, uint32_t h3, uint32_t pL1, uint32_t tc, uint32_t tt, uint32_t ua1, uint32_t ua2, uint32_t oa, uint32_t tta, bool isSteam) {
         if (h1) { g_RetAddr_HopFix1 = reinterpret_cast<void*>(h1 + g_Config.GetStaticPointer("RetAddr_HopFix1_Offset", 0x0E)); g_BZRFnPtr_HopFix1 = reinterpret_cast<void(*)()>(ResolveCallTargetWithFallback(h1 + 9, isSteam, "HopFix1Call_Fallback", 0x005D4260, "Hop-Fix 1")); }
         if (h2) {
             g_RetAddr_HopFix2 = reinterpret_cast<void*>(h2 + g_Config.GetStaticPointer("RetAddr_HopFix2_Offset", 0x13));
@@ -774,9 +772,7 @@ namespace BZROpenShim
         if (h3) g_RetAddr_HopFix3 = reinterpret_cast<void*>(h3 + g_Config.GetStaticPointer("RetAddr_HopFix3_Offset", 0x07));
         g_BZRFnPtr_HopFix3Step = reinterpret_cast<void(*)()>(g_Config.GetStaticPointer("HopFix3Step_Fallback", 0x007A3130));
         if (mapS) g_RetAddr_Probe_MapSorting = reinterpret_cast<void*>(mapS + g_Config.GetStaticPointer("RetAddr_HopFix3_Offset", 0x07));
-        if (pF1) g_RetAddr_Probe_MapFilter1 = reinterpret_cast<void*>(pF1 + g_Config.GetStaticPointer("RetAddr_Probe_MapFilter1_Offset", 0x05));
         if (pL1) { g_RetAddr_MapListFixSupport1 = reinterpret_cast<void*>(pL1 + g_Config.GetStaticPointer("RetAddr_MapListFixSupport1_Offset", 0x15)); g_BZRFn_MapListFixSupport1 = reinterpret_cast<void(*)()>(g_Config.GetStaticPointer("MapListFixSupport1_Fallback", 0x007A3BD0)); }
-        if (pL2) g_RetAddr_Probe_MapListFix2 = reinterpret_cast<void*>(pL2 + g_Config.GetStaticPointer("RetAddr_Probe_MapFilter1_Offset", 0x05));
         if (tc) g_RetAddr_TurretCraftAimPitchMultiplier = reinterpret_cast<void*>(tc + g_Config.GetStaticPointer("RetAddr_TurretCraft_Offset", 0x08));
         if (tt) g_RetAddr_TurretTankAimPitchMultiplier = reinterpret_cast<void*>(tt + g_Config.GetStaticPointer("RetAddr_TurretCraft_Offset", 0x08));
         if (ua1) g_RetAddr_UnderAttackAlertHook1 = reinterpret_cast<void*>(ua1 + g_Config.GetStaticPointer("RetAddr_UnderAttack1_Offset", 0x34));
@@ -821,15 +817,6 @@ namespace BZROpenShim
             return reinterpret_cast<void*>(g_Config.GetStaticPointer(name, fallback));
         };
 
-        g_RetAddr_MapFilters1 = ptr("RetAddr_MapFilters1", 0x007A35C0);
-        g_RetAddr_MapFilters2 = ptr("RetAddr_MapFilters2", 0x00752D00);
-        g_RetAddr_MapFilters3 = ptr("RetAddr_MapFilters3", 0x0079D6B9);
-        g_RetAddr_MapFilters4 = ptr("RetAddr_MapFilters4", 0x0079D699);
-        g_RetAddr_MapFilters5 = ptr("RetAddr_MapFilters5", 0x0079916B);
-        g_RetAddr_MapFilters7 = ptr("RetAddr_MapFilters7", 0x007998B4);
-        g_RetAddr_MapFilters8_A = ptr("RetAddr_MapFilters8_A", 0x007997B2);
-        g_RetAddr_MapFilters8_B = ptr("RetAddr_MapFilters8_B", 0x007997B7);
-        g_RetAddr_MapFilters8_C = ptr("RetAddr_MapFilters8_C", 0x0079987C);
         g_RetAddr_VehicleListModFix1 = ptr("RetAddr_VehicleListModFix1", 0x00766C52);
         g_RetAddr_VehicleListModFix4 = ptr("RetAddr_VehicleListModFix4", 0x00798BE6);
         g_RetAddr_BzrnetHost = ptr("RetAddr_BzrnetHost", 0x00743C30);
@@ -955,7 +942,7 @@ namespace BZROpenShim
 
     static void FillJmp5Payloads(std::vector<HookEngine::PatchDef>& patches) {
         struct M { const char* n; void* f; } m[] = {
-            {"ODF UseItem Hook", (void*)OdfUseItemDetour}, {"ODF GetItemSize Hook", (void*)OdfGetItemSizeDetour}, {"ODF UnlockItem Hook", (void*)OdfUnlockItemDetour}, {"Map Sorting", (void*)Trampoline_Probe_MapSorting}, {"GameObject Handle Stale Slot Guard", (void*)GameObjectHandleGetObjHardened}, {"Map List Rewrite for Hop-Fix 1/3", (void*)Trampoline_HopFix1}, {"Map List Rewrite for Hop-Fix 2/3", (void*)Trampoline_HopFix2}, {"Map List Rewrite for Hop-Fix 3/3", (void*)Trampoline_HopFix3}, {"Map List Fix Support 1/3", (void*)Trampoline_MapListFixSupport1}, {"Probe Refresh Path MapFilter1", (void*)Trampoline_Probe_MapFilter1}, {"Probe MapListFix1", (void*)Trampoline_Probe_MapListFix1}, {"Probe MapListFix2", (void*)Trampoline_Probe_MapListFix2}, {"Map Filters 1/8", (void*)Trampoline_MapFilters1}, {"Map Filters 2/8", (void*)Trampoline_MapFilters2}, {"Map Filters 3/8", (void*)Trampoline_MapFilters3}, {"Map Filters 4/8", (void*)Trampoline_MapFilters4}, {"Map Filters 5/8", (void*)Trampoline_MapFilters5}, {"Map Filters 7/8", (void*)Trampoline_MapFilters7}, {"Map Filters 8/8", (void*)Trampoline_MapFilters8}, {"Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", (void*)Trampoline_VehicleListModFix1}, {"Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", (void*)Trampoline_VehicleListModFix4}, {"Lobby BZRNET Integration HOST", (void*)Trampoline_BzrnetHost}, {"Lobby BZRNET Integration CLIENT", (void*)Trampoline_BzrnetClient}, {"Custom Command /help Handler", (void*)Trampoline_CommandHelp}, {"Joiner Event Hook", (void*)Trampoline_JoinerEventHook}, {"Ban Button Hook 1/2", (void*)Trampoline_BanButtonHook1}, {"Ban Button Hook 2/2", (void*)Trampoline_BanButtonHook2}, {"AutoSave Load Button Hook", (void*)Trampoline_AutoSaveLoadButtonHook}, {"Restart Mission Hook Pause", (void*)Trampoline_RestartMissionPauseHook}, {"Restart Mission Hook Failure", (void*)Trampoline_RestartMissionFailureHook}, {"TurretCraft Aim Pitch Multiplier", (void*)Trampoline_TurretCraftAimPitchMultiplier}, {"TurretTank Aim Pitch Multiplier", (void*)Trampoline_TurretTankAimPitchMultiplier}, {"Under Attack Alert Hook 1/2", (void*)Trampoline_UnderAttackAlertHook1}, {"Under Attack Alert Hook 2/2", (void*)Trampoline_UnderAttackAlertHook2}, {"Offensive Attack Reveal Hook", (void*)Trampoline_OffensiveAttackRevealHook}, {"TurretTank Attack Reveal Hook", (void*)Trampoline_TurretTankAttackRevealHook},
+            {"ODF UseItem Hook", (void*)OdfUseItemDetour}, {"ODF GetItemSize Hook", (void*)OdfGetItemSizeDetour}, {"ODF UnlockItem Hook", (void*)OdfUnlockItemDetour}, {"Map Sorting", (void*)Trampoline_Probe_MapSorting}, {"GameObject Handle Stale Slot Guard", (void*)GameObjectHandleGetObjHardened}, {"Map List Rewrite for Hop-Fix 1/3", (void*)Trampoline_HopFix1}, {"Map List Rewrite for Hop-Fix 2/3", (void*)Trampoline_HopFix2}, {"Map List Rewrite for Hop-Fix 3/3", (void*)Trampoline_HopFix3}, {"Map List Fix Support 1/3", (void*)Trampoline_MapListFixSupport1}, {"Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", (void*)Trampoline_VehicleListModFix1}, {"Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", (void*)Trampoline_VehicleListModFix4}, {"Lobby BZRNET Integration HOST", (void*)Trampoline_BzrnetHost}, {"Lobby BZRNET Integration CLIENT", (void*)Trampoline_BzrnetClient}, {"Custom Command /help Handler", (void*)Trampoline_CommandHelp}, {"Joiner Event Hook", (void*)Trampoline_JoinerEventHook}, {"Ban Button Hook 1/2", (void*)Trampoline_BanButtonHook1}, {"Ban Button Hook 2/2", (void*)Trampoline_BanButtonHook2}, {"AutoSave Load Button Hook", (void*)Trampoline_AutoSaveLoadButtonHook}, {"Restart Mission Hook Pause", (void*)Trampoline_RestartMissionPauseHook}, {"Restart Mission Hook Failure", (void*)Trampoline_RestartMissionFailureHook}, {"TurretCraft Aim Pitch Multiplier", (void*)Trampoline_TurretCraftAimPitchMultiplier}, {"TurretTank Aim Pitch Multiplier", (void*)Trampoline_TurretTankAimPitchMultiplier}, {"Under Attack Alert Hook 1/2", (void*)Trampoline_UnderAttackAlertHook1}, {"Under Attack Alert Hook 2/2", (void*)Trampoline_UnderAttackAlertHook2}, {"Offensive Attack Reveal Hook", (void*)Trampoline_OffensiveAttackRevealHook}, {"TurretTank Attack Reveal Hook", (void*)Trampoline_TurretTankAttackRevealHook},
         };
         for (auto& p : patches) {
             if (p.type != HookEngine::PatchType::JMP5 || !p.verified) continue;
@@ -993,7 +980,6 @@ namespace BZROpenShim
             if (p.type != HookEngine::PatchType::REL32 || !p.verified) continue;
             uint32_t target = 0;
             if (p.name.find("Vehicle List Mod Fix 2/4") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(VehicleListModFix2));
-            else if (p.name == "Map Filters 6/8") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(MapFilters6Rel32));
             else if (p.name == "Chunk Render Resolve Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ChunkRenderResolveHook));
             else if (p.name == "Producer Build Menu Root Hook") {
                 void* orig = isSteam ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10) : HookEngine::ResolveRelCallTarget(p.address - 1);
@@ -1175,7 +1161,7 @@ namespace BZROpenShim
         }
     }
 
-    static void FillVersionNoticePayloads(std::vector<HookEngine::PatchDef>& patches) {
+    static void FillDwordPayloads(std::vector<HookEngine::PatchDef>& patches) {
         const uint32_t tag = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(GetOpenShimVersionTag()));
         const uint32_t flameC = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(EngineFlameControlHook));
         const uint32_t flameS = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(EngineFlameSubmitHook));
@@ -1184,7 +1170,7 @@ namespace BZROpenShim
         for (auto& p : patches) {
             if (p.type != HookEngine::PatchType::DWORD) continue;
             uint32_t val = 0;
-            if (p.name.find("Version Notice") != std::string::npos || p.name.find("Main Menu") != std::string::npos) val = tag;
+            if (p.name.find("Main Menu") != std::string::npos) val = tag;
             else if (p.name == "Engine Flame Control VTable Hook") val = flameC;
             else if (p.name == "Engine Flame Submit VTable Hook") val = flameS;
             else if (p.name == "Chunk Effect Simulate VTable Hook") val = chunkE;
@@ -1200,8 +1186,7 @@ namespace BZROpenShim
             bool all = true;
             for (const auto& p : patches) {
                 if (p.address == 0 || p.expected_original.empty()) continue;
-                if (p.name.find("Version Notice") == std::string::npos &&
-                    p.name.find("Offensive Attack") == std::string::npos &&
+                if (p.name.find("Offensive Attack") == std::string::npos &&
                     !IsBanFeaturePatchName(p.name.c_str()) &&
                     !IsVehicleListModFixPatchName(p.name.c_str())) continue;
                 std::vector<uint8_t> cur(p.expected_original.size()); SIZE_T r;
@@ -1306,7 +1291,7 @@ namespace BZROpenShim
             }
         }
         auto findAddr = [&patches](const char* n) -> uint32_t { for (const auto& p : patches) { if (p.name == n) return p.address; } return 0; };
-        ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Probe Refresh Path MapFilter1"), findAddr("Map List Fix Support 1/3"), findAddr("Probe MapListFix2"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"), isSteam);
+        ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Map List Fix Support 1/3"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"), isSteam);
         ResolveStaticReturnPointers();
         ResolveBzrHooks(isSteam); InitBzrHookStrings(); SuppressStartupShellAutoLoad();
         // Fail closed on engine addresses that did not bind: drop every patch
@@ -1317,7 +1302,7 @@ namespace BZROpenShim
             Log(L"[ADDR] %hs stands down: engine helper %hs is unbound\n", patch.name.c_str(), missing);
             return true;
         }), patches.end());
-        FillJmp5Payloads(patches); FillVersionNoticePayloads(patches); FillRel32Payloads(patches, isSteam); FillArtilleryVolleyPayloads(patches); WaitForExpectedBytes(patches, isSteam);
+        FillJmp5Payloads(patches); FillDwordPayloads(patches); FillRel32Payloads(patches, isSteam); FillArtilleryVolleyPayloads(patches); WaitForExpectedBytes(patches, isSteam);
         // Apply critical patches (JMP5 hooks, version notice, etc.) BEFORE the
         // deferred-hook retry loop. The retry loop can take ~25 seconds for
         // Steam input binding UI hooks, and the game may crash during that

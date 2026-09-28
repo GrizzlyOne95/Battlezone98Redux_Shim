@@ -23,29 +23,21 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 namespace
 {
 using namespace BZROpenShim::OdfPrologue;
 
-int g_failures = 0;
-
-void Require(bool condition, const char* message)
-{
-    if (!condition)
-    {
-        std::fprintf(stderr, "odf_item_prologue_tests: %s\n", message);
-        ++g_failures;
-    }
-}
 
 void RequireEqual(std::size_t actual, std::size_t expected, const char* message)
 {
     if (actual != expected)
     {
-        std::fprintf(stderr, "odf_item_prologue_tests: %s (expected %zu, got %zu)\n", message,
+        OpenShimTest::Fail("%s (expected %zu, got %zu)", message,
                      expected, actual);
-        ++g_failures;
     }
 }
 
@@ -58,8 +50,8 @@ void TestRelocatesSixNotFive()
 {
     const std::size_t n = TrampolineCopyLength(kRealSite, sizeof(kRealSite));
     RequireEqual(n, 6, "the real site must relocate six bytes");
-    Require(n != 5, "relocating five bytes is the shipped bug, not an acceptable answer");
-    Require(n >= kDetourSize, "the relocated span must cover the whole detour");
+    Check(n != 5, "relocating five bytes is the shipped bug, not an acceptable answer");
+    Check(n >= kDetourSize, "the relocated span must cover the whole detour");
 }
 
 // The property that actually matters: the byte after the relocated span must
@@ -67,7 +59,7 @@ void TestRelocatesSixNotFive()
 void TestResumePointIsAnInstructionBoundary()
 {
     const std::size_t n = TrampolineCopyLength(kRealSite, sizeof(kRealSite));
-    Require(n < sizeof(kRealSite), "resume point is inside the sample");
+    Check(n < sizeof(kRealSite), "resume point is inside the sample");
     RequireEqual(kRealSite[n], 0x50, "execution must resume on `push eax`");
     // And the five-byte answer must NOT be a boundary - this is what made the
     // original trampoline swallow its own jump.
@@ -77,21 +69,21 @@ void TestResumePointIsAnInstructionBoundary()
 void TestRejectsUnknownPrologues()
 {
     const std::uint8_t wrongOpcode[] = {0x53, 0x8B, 0xEC, 0x8B, 0x45, 0x08};
-    Require(TrampolineCopyLength(wrongOpcode, sizeof(wrongOpcode)) == 0,
-            "a different first opcode is refused");
+    Check(TrampolineCopyLength(wrongOpcode, sizeof(wrongOpcode)) == 0,
+          "a different first opcode is refused");
 
     // A plausible near-miss: same shape but a different displacement, i.e. a
     // function reading a different argument slot.
     const std::uint8_t wrongDisp[] = {0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x0C};
-    Require(TrampolineCopyLength(wrongDisp, sizeof(wrongDisp)) == 0,
-            "a different displacement is refused rather than relocated blindly");
+    Check(TrampolineCopyLength(wrongDisp, sizeof(wrongDisp)) == 0,
+          "a different displacement is refused rather than relocated blindly");
 
     const std::uint8_t truncated[] = {0x55, 0x8B, 0xEC, 0x8B, 0x45};
-    Require(TrampolineCopyLength(truncated, sizeof(truncated)) == 0,
-            "fewer bytes than the prologue needs is refused");
+    Check(TrampolineCopyLength(truncated, sizeof(truncated)) == 0,
+          "fewer bytes than the prologue needs is refused");
 
-    Require(TrampolineCopyLength(nullptr, 16) == 0, "a null pointer is refused");
-    Require(TrampolineCopyLength(kRealSite, 0) == 0, "a zero-length buffer is refused");
+    Check(TrampolineCopyLength(nullptr, 16) == 0, "a null pointer is refused");
+    Check(TrampolineCopyLength(kRealSite, 0) == 0, "a zero-length buffer is refused");
 }
 
 // Build the trampoline image the way BuildTrampoline does and assert the jump
@@ -109,7 +101,7 @@ void TestTrampolineImageKeepsItsJump()
     RequireEqual(tramp[n], 0xE9, "the return jump opcode is present");
     // With the old five-byte relocation the JMP would have landed at index 5,
     // which is the `mov`'s displacement slot.
-    Require(n != 5, "the jump must not occupy a displacement slot");
+    Check(n != 5, "the jump must not occupy a displacement slot");
     RequireEqual(tramp[3], 0x8B, "mov opcode intact");
     RequireEqual(tramp[4], 0x45, "modrm intact");
     RequireEqual(tramp[5], 0x08, "displacement intact - this is the byte the old code lost");
@@ -123,9 +115,9 @@ int main()
     TestRejectsUnknownPrologues();
     TestTrampolineImageKeepsItsJump();
 
-    if (g_failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::fprintf(stderr, "odf_item_prologue_tests: %d failure(s)\n", g_failures);
+        std::fprintf(stderr, "odf_item_prologue_tests: %d failure(s)\n", OpenShimTest::FailureCount());
         return EXIT_FAILURE;
     }
     std::puts("odf_item_prologue_tests: all checks passed");

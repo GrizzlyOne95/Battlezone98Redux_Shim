@@ -41,10 +41,7 @@ namespace BZROpenShim
         // lock acquisition on a per-damage-application code path.
         volatile LONG g_SinkCount = 0;
 
-        uint64_t g_Enqueued = 0;
-        uint64_t g_Dispatched = 0;
         uint64_t g_Dropped = 0;
-        uint32_t g_HighWaterMark = 0;
 
         // Drop reporting is throttled so a pathological frame cannot turn the
         // log into the bottleneck it is warning about.
@@ -78,9 +75,6 @@ namespace BZROpenShim
                 (g_Head + g_Count) % static_cast<uint32_t>(kInProcessEventQueueCapacity);
             g_Ring[tail] = event;
             ++g_Count;
-            ++g_Enqueued;
-            if (g_Count > g_HighWaterMark)
-                g_HighWaterMark = g_Count;
             stored = true;
         }
         else
@@ -270,7 +264,6 @@ namespace BZROpenShim
             if (g_Sinks[i].sink)
                 sinks[sinkCount++] = g_Sinks[i];
         }
-        g_Dispatched += batchCount;
         ReleaseSRWLockExclusive(&g_DispatchLock);
 
         // Sinks run with no lock held, so one of them publishing (which the
@@ -291,22 +284,6 @@ namespace BZROpenShim
         return InterlockedCompareExchange(&g_SinkCount, 0, 0) != 0;
     }
 
-    OpenShimEventStats GetInProcessEventStats() noexcept
-    {
-        OpenShimEventStats stats = {};
-        AcquireSRWLockShared(&g_DispatchLock);
-        stats.enqueued = g_Enqueued;
-        stats.dispatched = g_Dispatched;
-        stats.dropped = g_Dropped;
-        stats.queueDepth = g_Count;
-        stats.highWaterMark = g_HighWaterMark;
-        for (size_t i = 0; i < kMaxSinks; ++i)
-            if (g_Sinks[i].sink)
-                ++stats.subscribers;
-        ReleaseSRWLockShared(&g_DispatchLock);
-        return stats;
-    }
-
     void ResetInProcessEventQueue() noexcept
     {
         uint32_t discarded = 0;
@@ -318,25 +295,5 @@ namespace BZROpenShim
 
         if (discarded != 0)
             Log(L"[EVENTS] Reset dispatch ring, discarded %u pending event(s)\n", discarded);
-    }
-
-    const char* DescribeEventType(OpenShimEventType type) noexcept
-    {
-        switch (type)
-        {
-        case OpenShimEventType::None:                      return "None";
-        case OpenShimEventType::ShimInitialized:           return "ShimInitialized";
-        case OpenShimEventType::CompatibilityChanged:      return "CompatibilityChanged";
-        case OpenShimEventType::PatchingCompleted:         return "PatchingCompleted";
-        case OpenShimEventType::ShutdownStarted:           return "ShutdownStarted";
-        case OpenShimEventType::DeveloperSnapshotCaptured: return "DeveloperSnapshotCaptured";
-        case OpenShimEventType::NativeUiAction:            return "NativeUiAction";
-        case OpenShimEventType::SimSessionStarted:         return "SimSessionStarted";
-        case OpenShimEventType::SimSessionEnded:           return "SimSessionEnded";
-        case OpenShimEventType::SimDamage:                 return "SimDamage";
-        case OpenShimEventType::SimKill:                   return "SimKill";
-        case OpenShimEventType::SimTeamDeath:              return "SimTeamDeath";
-        default:                                           return "Unknown";
-        }
     }
 }

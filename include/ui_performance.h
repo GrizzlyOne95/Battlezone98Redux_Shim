@@ -6,6 +6,8 @@
 // transitions.  Default OFF (zero overhead path).  When enabled via
 //   [Diagnostics] UiPerformanceLogging=true
 //   [Diagnostics] UiPerformanceVerbose=false
+// (UiPerformanceVerbose is still read and echoed on the init line, but no
+// output depends on it since the unused verbose-buffer API was removed.)
 // it records:
 //   - wall-clock durations for every major shell/UI transition
 //   - nested sub-phase timings (ModDiscovery, OgreResourceGroups, Shader, etc.)
@@ -28,12 +30,10 @@ namespace BZROpenShim::UiPerf
     // Called once at startup to read openshim.ini [Diagnostics].
     void Initialize();
     bool IsEnabled() noexcept;
-    bool IsVerbose() noexcept;
 
     // High-resolution monotonic timestamp (QPC ticks) and helpers.
     uint64_t NowTicks() noexcept;
     double TicksToMs(uint64_t ticks) noexcept;
-    double TicksToUs(uint64_t ticks) noexcept;
 
     // ------------------------------------------------------------------
     // Hierarchical scoped timers.  Use RAII: BEGIN on construction, END on
@@ -52,15 +52,6 @@ namespace BZROpenShim::UiPerf
         ScopedPhase(const ScopedPhase&) = delete;
         ScopedPhase& operator=(const ScopedPhase&) = delete;
 
-        // Annotate current phase with a key=value string (verbose only buffered).
-        void Annotate(const char* key, const char* value);
-        void Annotate(const char* key, int64_t value);
-        void Annotate(const char* key, uint64_t value);
-        void Annotate(const char* key, double valueMs);
-
-        // Mark this phase as not logging its END line (for long-lived probes).
-        void Dismiss() noexcept { m_dismissed = true; }
-
     private:
         const char* m_name = nullptr;
         std::string m_owned;
@@ -68,36 +59,7 @@ namespace BZROpenShim::UiPerf
         uint64_t m_start = 0;
         int m_depth = 0;
         bool m_active = false;
-        bool m_dismissed = false;
         bool m_hasCategory = false;
-    };
-
-    // ------------------------------------------------------------------
-    // Transition-level API: bracket a full UI transition (e.g. "MainMenu ->
-    // Multiplayer") so a [UIPERF][SUMMARY] line is always emitted.
-    // ------------------------------------------------------------------
-    class ScopedTransition
-    {
-    public:
-        explicit ScopedTransition(const char* label);
-        explicit ScopedTransition(const std::string& label);
-        ~ScopedTransition();
-
-        ScopedTransition(const ScopedTransition&) = delete;
-        ScopedTransition& operator=(const ScopedTransition&) = delete;
-
-        // Allow sub-phases to contribute their elapsed to a coarse category
-        // bucket.  Category names are free-form but the summary groups them.
-        void AddCategoryTime(const char* category, double ms) noexcept;
-        void AddCategoryTime(const char* category, uint64_t ticks) noexcept;
-
-        // Attach a free-form note to the summary.
-        void Note(const char* fmt, ...);
-
-    private:
-        std::string m_label;
-        uint64_t m_start = 0;
-        bool m_active = false;
     };
 
     // Immediate counters that can be emitted even without a surrounding phase.
@@ -145,20 +107,10 @@ namespace BZROpenShim::UiPerf
     // name of the last completed marker.  If the gap since the previous call
     // exceeds the stall threshold a [UIPERF][STALL] line is emitted.
     void Heartbeat(const char* marker) noexcept;
-    void SetStallThresholdMs(double ms) noexcept;
 
-    // Emit a summary line for the most recent (or active) transition.  Used
-    // when a transition is driven by native code without an explicit
-    // ScopedTransition wrapper.
-    void EmitSummary(const char* transitionLabel, uint64_t startTicks, uint64_t endTicks) noexcept;
-
-    // Low-level log helpers (component="uiperf").  These respect the global
-    // enable flag; LogVerbose* additionally requires UiPerformanceVerbose.
+    // Low-level log helper (component="uiperf").  Respects the global enable
+    // flag.
     void Log(const char* fmt, ...) noexcept;
-    void LogVerbose(const char* fmt, ...) noexcept;
-
-    // Flush any buffered verbose lines.  Called automatically at transition End.
-    void Flush() noexcept;
 
     // Shell/menu gate helpers: these wrap the native shell request/history
     // seam so transitions are auto-timed even without per-screen instrumentation.

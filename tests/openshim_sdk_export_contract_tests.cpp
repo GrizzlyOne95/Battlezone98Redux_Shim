@@ -21,25 +21,18 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 namespace
 {
-    int g_Failures = 0;
-
-    void Check(bool condition, const std::string& what)
-    {
-        if (condition) return;
-        std::printf("FAIL: %s\n", what.c_str());
-        ++g_Failures;
-    }
-
     std::string Slurp(const char* path)
     {
         std::ifstream in(path, std::ios::binary);
         if (!in)
         {
-            std::printf("FAIL: could not open %s\n", path);
-            ++g_Failures;
+            OpenShimTest::Fail("could not open %s", path);
             return {};
         }
         std::ostringstream ss;
@@ -150,8 +143,7 @@ namespace
                             std::back_inserter(only));
         for (const auto& n : only)
         {
-            std::printf("FAIL: %s: %s\n", label, n.c_str());
-            ++g_Failures;
+            OpenShimTest::Fail("%s: %s", label, n.c_str());
         }
     }
 }
@@ -181,9 +173,9 @@ int main()
     ReportDifference("present in the shipped export baseline but dropped from winmm.def",
                      baseline, def);
 
-    if (g_Failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::printf("openshim sdk export contract tests FAILED (%d)\n", g_Failures);
+        std::printf("openshim sdk export contract tests FAILED (%d)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("openshim sdk export contract tests passed (%zu exports)\n",

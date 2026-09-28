@@ -6,22 +6,10 @@
 #include "iat_patch.h"
 
 #include <cstdio>
+#include "test_check.h"
 
 namespace
 {
-    int g_failures = 0;
-
-    void Check(bool cond, const char* what, int line)
-    {
-        if (!cond)
-        {
-            ++g_failures;
-            std::printf("FAIL %d: %s\n", line, what);
-        }
-    }
-
-#define CHECK(c) Check((c), #c, __LINE__)
-
     using BZROpenShim::IatPatch::PatchImport;
     using BZROpenShim::IatPatch::PatchImportFromAnyDll;
     using IatResult = BZROpenShim::IatPatch::Result;
@@ -196,7 +184,7 @@ int main()
     TestVtablePatchSavesOriginalOnce();
     TestVtablePatchForeignWrapperPolicy();
     TestVtablePatchTypedOverloadAndNulls();
-    if (g_failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
         std::printf("hook_patch_win32_tests: all passed\n");
-    return g_failures == 0 ? 0 : 1;
+    return OpenShimTest::ExitCode();
 }

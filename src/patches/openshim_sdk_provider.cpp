@@ -1,10 +1,8 @@
 // OpenShim SDK provider.
 //
 // This is the runtime side of the export boundary: winmm.dll exports thunks,
-// and this table is what they forward to. It belongs with the OpenShim
-// runtime, so when the runtime moves to plugins/openshim.dll this file moves
-// with it and the bootstrap picks the table up through
-// OpenShimSdkProvider_GetTable instead of the direct call below.
+// and this table is what they forward to. It lives with the OpenShim runtime
+// in plugins/openshim.dll, which installs it through InstallBuiltIn below.
 //
 // The 52 bodies below were lifted verbatim out of winmm_proxy.cpp, which now
 // holds only real WinMM forwarding. That is what breaks the
@@ -685,8 +683,9 @@ namespace
 {
     // Static, so installing it is a pointer store with no allocation and no
     // loader work -- safe to do from DllMain while this TU still ships
-    // inside winmm.dll.
-    const OpenShimSdkProviderTable g_ProviderTable = {
+    // inside winmm.dll. constexpr so the completeness checks below run at
+    // compile time; it also guarantees constant initialization.
+    constexpr OpenShimSdkProviderTable g_ProviderTable = {
         .structSize = sizeof(OpenShimSdkProviderTable),
         .OpenShimImpl_CaptureDeveloperSnapshot = BZROpenShim::OpenShimImpl_CaptureDeveloperSnapshot,
         .OpenShimImpl_ClearAiUnitTuning = OpenShimImpl_ClearAiUnitTuning,
@@ -765,6 +764,23 @@ namespace
         .legacyGetAppliedPatchCount = LegacyGetAppliedPatchCount,
         .legacyGetBzrDistribution = LegacyGetBzrDistribution,
     };
+
+    // Designated initializers enforce order but not completeness: a slot left
+    // out is silently null, and its export then returns the unavailable value
+    // on every call. Every export in openshim_sdk_exports.inc, and every
+    // legacy slot, has to be filled.
+    static_assert(g_ProviderTable.structSize == sizeof(OpenShimSdkProviderTable),
+                  "the built-in provider must report its full size");
+#define OPENSHIM_SDK_EXPORT(ret, cc, name, impl, params, args, unavail) \
+    static_assert(g_ProviderTable.impl != nullptr, #impl " is missing from the provider table");
+#include "openshim_sdk_exports.inc"
+#undef OPENSHIM_SDK_EXPORT
+    static_assert(g_ProviderTable.legacyGetShimVersion != nullptr &&
+                      g_ProviderTable.legacyIsCompatibleGameVersion != nullptr &&
+                      g_ProviderTable.legacyIsPatchingComplete != nullptr &&
+                      g_ProviderTable.legacyGetAppliedPatchCount != nullptr &&
+                      g_ProviderTable.legacyGetBzrDistribution != nullptr,
+                  "a legacy slot is missing from the provider table");
 }
 
 extern "C" __declspec(dllexport) const OpenShimSdkProviderTable* __cdecl
@@ -775,10 +791,10 @@ OpenShimSdkProvider_GetTable(void)
 
 namespace BZROpenShim::SdkProvider
 {
-    // Transitional: the provider is still linked into winmm.dll, so the
-    // bootstrap installs it directly. Once this file ships in
-    // plugins/openshim.dll, delete this and have the bootstrap call
-    // SdkBridge::InstallProviderFromModule(plugin) after the plugin loads.
+    // Called from BZPlugin_Load in plugins/openshim.dll. In the plugin,
+    // SdkBridge::InstallProvider forwards through the bootstrap API table
+    // (bootstrap_service_client.cpp) into winmm.dll's bridge, so the plugin
+    // pushes its table rather than the bootstrap pulling it.
     bool InstallBuiltIn()
     {
         return BZROpenShim::SdkBridge::InstallProvider(&g_ProviderTable);

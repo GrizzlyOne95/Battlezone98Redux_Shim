@@ -168,7 +168,6 @@
     <ClCompile Include="src\patches\lifecycle_seams.cpp" />
     <ClCompile Include="src\patches\lobby_screen_hooks.cpp" />
     <ClCompile Include="src\patches\lobby_ui.cpp" />
-    <ClCompile Include="src\patches\map_filter_port.cpp" />
     <ClCompile Include="src\patches\moderation.cpp" />
     <ClCompile Include="src\patches\multiplayer_vehicle_flags.cpp" />
     <ClCompile Include="src\patches\ogre_dedupe_crash_fixes.cpp" />
@@ -229,6 +228,7 @@
     <ClCompile Include="src\patches\ogre_render_profile.cpp" />
     <ClCompile Include="src\patches\ogre_shader_cache.cpp" />
     <ClCompile Include="src\patches\openshim_env_config.cpp" />
+    <ClCompile Include="src\patches\openshim_env_mapping.cpp" />
     <ClCompile Include="src\patches\openshim_events.cpp" />
      <ClCompile Include="src\patches\openshim_ini.cpp" />
     <ClCompile Include="src\patches\openshim_preset_migration.cpp" />
@@ -347,6 +347,7 @@
     <ClInclude Include="include\openshim_ini.h" />
     <ClInclude Include="include\openshim_preset_migration.h" />
     <ClInclude Include="include\openshim_env_config.h" />
+    <ClInclude Include="include\openshim_env_mapping.h" />
     <ClInclude Include="include\openshim_update_manifest.h" />
     <ClInclude Include="include\openshim_updater.h" />
     <ClInclude Include="include\ui_performance.h" />
