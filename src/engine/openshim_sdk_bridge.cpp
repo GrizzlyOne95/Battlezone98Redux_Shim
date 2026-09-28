@@ -50,42 +50,6 @@ namespace BZROpenShim::SdkBridge
         return true;
     }
 
-    bool InstallProviderFromModule(HMODULE pluginModule)
-    {
-        if (!pluginModule)
-        {
-            LogShimA(LogLevel::Error, "sdkbridge",
-                     "No plugin module handle; OpenShim exports stay unavailable");
-            return false;
-        }
-
-        // Deliberately GetProcAddress and never LoadLibrary. An export thunk
-        // can run on any thread at any time, including while the loader lock
-        // is held by someone else, so nothing on this path may load a module.
-        // The caller passes a module that is already loaded.
-        using GetTableFn = const OpenShimSdkProviderTable*(__cdecl*)();
-        const auto getTable = reinterpret_cast<GetTableFn>(
-            GetProcAddress(pluginModule, "OpenShimSdkProvider_GetTable"));
-        if (!getTable)
-        {
-            LogShimA(LogLevel::Error, "sdkbridge",
-                     "Plugin does not export OpenShimSdkProvider_GetTable (err=%lu)",
-                     GetLastError());
-            return false;
-        }
-
-        // One call fetches all of the entries at once, so no individual export
-        // ever has to resolve itself and nothing is looked up per call.
-        const OpenShimSdkProviderTable* table = getTable();
-        if (!table)
-        {
-            LogShimA(LogLevel::Error, "sdkbridge",
-                     "OpenShimSdkProvider_GetTable returned no table");
-            return false;
-        }
-        return InstallProvider(table);
-    }
-
     const OpenShimSdkProviderTable* Provider()
     {
         return g_Provider.load(std::memory_order_acquire);

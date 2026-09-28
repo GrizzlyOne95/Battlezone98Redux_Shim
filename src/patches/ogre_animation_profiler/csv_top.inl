@@ -1,3 +1,32 @@
+        // CSV size cap: OPENSHIM_PROFILE_OGRE_CSV_MAX_MB, then [Diagnostics]
+        // ProfileOgreCsvMaxMB, then the build default. Whole MiB; 0 = no cap.
+        uint64_t ResolveOgreCsvCapBytes(const std::string& iniPath)
+        {
+            char envValue[64] = {};
+            const DWORD envLength = ReadProcessEnvironmentValue(
+                kCsvCapEnvironment,
+                envValue,
+                static_cast<DWORD>(sizeof(envValue)));
+            const char* envText =
+                (envLength > 0 && envLength < sizeof(envValue)) ? envValue : nullptr;
+
+            char iniValue[64] = {};
+            const DWORD iniLength = GetPrivateProfileStringA(
+                kIniSection,
+                kCsvCapIniKey,
+                "",
+                iniValue,
+                static_cast<DWORD>(sizeof(iniValue)),
+                iniPath.c_str());
+            const char* iniText =
+                (iniLength > 0 && iniLength < sizeof(iniValue)) ? iniValue : nullptr;
+
+            return DiagnosticOutputCap::ResolveCapBytes(
+                envText,
+                iniText,
+                DiagnosticOutputCap::kDefaultOgreCsvCapMiB);
+        }
+
         void AppendCsvRow(
             ULONGLONG tickMs,
             double fps,
@@ -30,19 +59,78 @@
             uint64_t drawInstancedCalls,
             uint64_t drawIndexedInstancedCalls)
         {
+            // The CSV is appended across sessions. Once it reaches the cap it
+            // is rotated once to openshim_ogre_profile.prev.csv (replacing any
+            // older one) and restarted, so the two files together never exceed
+            // twice the cap. If the rotation fails, CSV output stops with one
+            // log line rather than growing past the cap.
+            static bool s_csvStopped = false;
+            static bool s_csvCapLogged = false;
+            if (s_csvStopped)
+                return;
+
             const std::string iniPath = GetOpenShimIniPath();
             const size_t slash = iniPath.find_last_of("\\/");
-            const std::string csvPath =
-                (slash == std::string::npos)
-                    ? "openshim_ogre_profile.csv"
-                    : iniPath.substr(0, slash + 1) + "openshim_ogre_profile.csv";
+            const std::string csvDirectory =
+                (slash == std::string::npos) ? std::string() : iniPath.substr(0, slash + 1);
+            const std::string csvPath = csvDirectory + "openshim_ogre_profile.csv";
+
+            static const uint64_t s_csvCapBytes = ResolveOgreCsvCapBytes(iniPath);
+            if (!s_csvCapLogged)
+            {
+                s_csvCapLogged = true;
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[OgreProfile] CSV '%s' capBytes=%llu (0 = no cap; %s / [%s] %s)",
+                    csvPath.c_str(),
+                    static_cast<unsigned long long>(s_csvCapBytes),
+                    kCsvCapEnvironment,
+                    kIniSection,
+                    kCsvCapIniKey);
+            }
 
             FILE* file = nullptr;
             if (fopen_s(&file, csvPath.c_str(), "a+") != 0 || !file)
                 return;
 
-            fseek(file, 0, SEEK_END);
-            const long size = ftell(file);
+            _fseeki64(file, 0, SEEK_END);
+            long long size = _ftelli64(file);
+            if (size > 0 &&
+                DiagnosticOutputCap::ReachedCap(static_cast<uint64_t>(size), s_csvCapBytes))
+            {
+                std::fclose(file);
+                file = nullptr;
+                const std::string previousPath = csvDirectory + "openshim_ogre_profile.prev.csv";
+                if (!MoveFileExA(csvPath.c_str(), previousPath.c_str(), MOVEFILE_REPLACE_EXISTING))
+                {
+                    s_csvStopped = true;
+                    LogShimA(
+                        LogLevel::Warn,
+                        kComponent,
+                        "[OgreProfile] CSV '%s' reached its cap (%lld of %llu bytes) and could not be rotated to '%s' (error %lu); CSV output stopped for this session",
+                        csvPath.c_str(),
+                        size,
+                        static_cast<unsigned long long>(s_csvCapBytes),
+                        previousPath.c_str(),
+                        GetLastError());
+                    return;
+                }
+
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[OgreProfile] CSV '%s' reached its cap (%lld of %llu bytes); rotated to '%s' and restarted",
+                    csvPath.c_str(),
+                    size,
+                    static_cast<unsigned long long>(s_csvCapBytes),
+                    previousPath.c_str());
+                if (fopen_s(&file, csvPath.c_str(), "a+") != 0 || !file)
+                    return;
+                _fseeki64(file, 0, SEEK_END);
+                size = _ftelli64(file);
+            }
+
             if (size == 0)
             {
                 std::fprintf(file, "%s\n", OgreProfilerAlgorithms::kCsvHeader);
