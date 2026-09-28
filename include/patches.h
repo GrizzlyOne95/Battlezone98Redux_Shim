@@ -141,6 +141,10 @@ namespace BZROpenShim
             // Carrier::GetWeapon result for the selected mask; an empty
             // selected hardpoint gets a non-SNIP stand-in instead of null.
             { 0, HookEngine::PatchType::REL32, {}, "Person Sniper Scan Weapon Null Guard", false, {} },
+            // HoverCraft::UpdateSounds' turbo-stop lookup: stop the craft's
+            // own cached turbo loop, never the thrust loop that shares its
+            // filename (which left +0x2C0 dangling and heap-corrupting).
+            { 0, HookEngine::PatchType::REL32, {}, "HoverCraft Turbo Sound Stop Guard", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "World Builder Save Destination Dialog", false, {} },
             // ControlPanel target-list EnemyP call: an opt-in local order
             // authoring relaxation. The global EnemyP implementation stays stock.

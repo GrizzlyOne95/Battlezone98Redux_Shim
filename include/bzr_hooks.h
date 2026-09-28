@@ -47,6 +47,10 @@ namespace BZROpenShim
     void SetPersonCarrierGetWeaponOriginal(void* target);
     void* __fastcall PersonCarrierGetWeaponGuard(void* carrier, void* edx, int slot);
     void* __fastcall PersonSniperScanGetWeaponGuard(void* carrier, void* edx, int slot);
+    void SetHoverCraftTurboSoundResolves(void* soundFind, void* soundListHead);
+    // REL32 target at HoverCraft::UpdateSounds' turbo-stop Sound::Find call.
+    // Naked: reads the craft from the caller's frame, cdecl (name, owner) args.
+    void HoverCraftTurboSoundStopFindThunk();
     void SetControlPanelEnemyPOriginal(void* target);
     uint32_t __fastcall PersonCarrierGetSelectedGuard(void* carrier, void* person);
     bool __fastcall ControlPanelEnemyPAttackOrderHook(
