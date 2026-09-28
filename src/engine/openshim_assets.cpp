@@ -1045,22 +1045,4 @@ std::string FormatAssetCapabilitiesDetail(const AssetCapabilities& caps)
     return caps.problem;
 }
 
-std::string FormatAssetStatusForLog(const AssetCapabilities& caps)
-{
-    return std::string(AssetPackStateName(caps.state)) +
-           " manifestDetected=" + (caps.manifestDetected ? "1" : "0") +
-           " packDetected=" + (caps.packDetected ? "1" : "0") +
-           " formatCompat=" + (caps.formatCompatible ? "1" : "0") +
-           " compatCompat=" + (caps.compatibilityCompatible ? "1" : "0") +
-           " installedFmt=" + caps.installedFormatVersion +
-           " installedCompat=" + caps.installedCompatibilityVersion +
-           " expectedFmt=" + caps.expectedFormatVersion +
-           " expectedCompat=" + caps.expectedCompatibilityVersion +
-           " destructionChunks=" + (caps.destructionChunks ? "1" : "0") +
-           " enhancedResources=" + (caps.enhancedResources ? "1" : "0") +
-           " terrainHd=" + (caps.terrainHd ? "1" : "0") +
-           " problem=" + caps.problem +
-           " scanMs=" + std::to_string(caps.lastScanDurationMs);
-}
-
 } // namespace BZROpenShim::Assets
