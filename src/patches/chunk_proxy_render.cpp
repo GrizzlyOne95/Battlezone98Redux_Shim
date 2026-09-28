@@ -69,8 +69,120 @@
 
 namespace BZROpenShim
 {
+    FnChunkEffectCreateChunk g_BzrFn_ChunkEffectCreateChunk = nullptr;
+    FnChunkEffectCreateChunklet g_BzrFn_ChunkEffectCreateChunklet = nullptr;
+    FnChunkEffectFragmentObject g_BzrFn_ChunkEffectPartialFragment = nullptr;
+    FnChunkEffectFragmentObject g_BzrFn_ChunkEffectFullFragment = nullptr;
+
     namespace Hooks
     {
+        bool g_EnableChunkProxyDebug = false;
+        bool g_EnableChunkMeshProxy = false;
+        bool g_EnableGenericChunkBatch = false;
+        bool g_TraceChunkRender = false;
+        bool g_TraceChunkRenderVerbose = false;
+        bool g_TraceChunkEffectRuntime = false;
+        uint32_t g_LastChunkEffectLoggedCount = UINT32_MAX;
+        volatile long g_ChunkRenderLogBudget = 12;
+        uint32_t g_ChunkTraceEntryLimit = 32;
+        // 96 slots exhaust in multi-craft battles (each death emits ~10 geo
+        // pieces plus impact chunklets); once full, new chunks are silently
+        // dropped until a slot expires.
+        uint32_t g_ChunkProxyCapacity = 256;
+        float g_ChunkProxyDebugSize = 2.5f;
+        std::unordered_map<uintptr_t, uint32_t> g_ChunkObservedClassIds = {};
+        InlineDetour32 g_ChunkEffectCreateChunkDetour = {};
+        InlineDetour32 g_ChunkEffectCreateChunkletDetour = {};
+        bool g_ChunkEffectCreateHooksInstalled = false;
+        bool g_ChunkEffectCreateHooksLogged = false;
+        InlineDetour32 g_ChunkEffectPartialFragmentDetour = {};
+        InlineDetour32 g_ChunkEffectFullFragmentDetour = {};
+        bool g_ChunkEffectFragmentHooksInstalled = false;
+        bool g_AllowUnsafeSteamChunkCreateHooks = false;
+        bool g_ChunkEffectCreateHooksWaitLogged = false;
+        bool g_ChunkEffectCreateHooksMismatchLogged = false;
+        ULONGLONG g_ChunkEffectCreateHooksReadyTick = 0;
+        DWORD g_ChunkProxyLastRetryTick = 0;
+        bool g_ChunkProxyInitLogged = false;
+        bool g_ChunkProxyFailureLogged = false;
+        bool g_ChunkProxyWaitLogged = false;
+        DWORD g_ChunkMeshProxyLastRetryTick = 0;
+        bool g_ChunkMeshProxyInitLogged = false;
+        bool g_ChunkMeshProxyFailureLogged = false;
+        bool g_ChunkMeshProxyWaitLogged = false;
+        bool g_ChunkPayloadResourceLocationsAttempted = false;
+        bool g_ChunkPayloadResourceLocationsReady = false;
+        bool g_ChunkPayloadResourceLocationsLogged = false;
+        bool g_ChunkPayloadResourceLocationsFailureLogged = false;
+        std::vector<std::filesystem::path> g_ChunkPayloadResourceDirectories = {};
+        void* g_ChunkProxyBillboardSet = nullptr;
+        std::vector<ChunkProxySlot> g_ChunkProxySlots = {};
+        void* g_GenericChunkBatchManualObject = nullptr;
+        void* g_GenericChunkBatchSceneNode = nullptr;
+        void* g_GenericChunkBatchSceneManager = nullptr;
+        bool g_GenericChunkBatchSectionCreated = false;
+        bool g_GenericChunkBatchRuntimeAvailable = true;
+        int g_GenericChunkBatchEligibility[2] = { -1, -1 };
+        DWORD g_GenericChunkBatchLastLogTick = 0;
+        // Bounded diagnostics for the per-frame submission question: the game
+        // drives its _updateRenderQueue override more than once per frame (one
+        // traversal per active material scheme), and the ManualObject is also
+        // attached to the scene graph, so the number of rebuilds and the number
+        // of render-queue submissions per frame must be counted, not assumed.
+        bool g_GenericChunkBatchRateDiagnostics = false;
+        // State-version reuse. The batch is re-submitted to every camera/scheme
+        // traversal, but the geometry is only re-emitted when the slot state it
+        // is built from actually differs. See include/chunk_batch_invalidation.h
+        // for why the version is derived from the source rather than declared by
+        // its mutators.
+        bool g_GenericChunkBatchReuseEnabled = true;
+        // Observer mode: take the decision and count it, then rebuild anyway.
+        // This is how the pre-optimization baseline and the dedup opportunity
+        // are measured from the same binary, without changing what is drawn.
+        bool g_GenericChunkBatchReuseObserveOnly = false;
+        uint64_t g_GenericChunkBatchBuiltVersion =
+            ChunkBatchInvalidation::kUnbuiltVersion;
+        std::string g_GenericChunkBatchBuiltMaterial = {};
+        // Last visibility written to the batch object, so setVisible is only
+        // called on a transition. Without this the empty path would push
+        // setVisible(false) three times per frame for as long as there is no
+        // debris, which is most of a normal mission.
+        bool g_GenericChunkBatchVisible = false;
+        // TEST/DIAGNOSTIC seam only. Set by the environment gate below and
+        // never by gameplay: RebuildAndSubmitGenericChunkBatch() reports
+        // failure once the slots are already classified batch-ready, which is
+        // precisely the window the per-Entity fallback has to cover.
+        bool g_ForceGenericChunkBatchFailure = false;
+        // TEST/DIAGNOSTIC seam only. ChunkProxyTransform::scale is structurally
+        // unit today (the legacy basis vectors are normalised when the
+        // quaternion is built), so the unit-scale gate below has no natural
+        // trigger. This forces a non-unit scale on tracked generic chunks so
+        // the rejection and per-Entity fallback can actually be exercised.
+        bool g_ForceGenericChunkNonUnitScale = false;
+
+        void LogChunkDiagnostic(const char* component, const wchar_t* fmt, ...)
+        {
+            if (!fmt || !*fmt)
+                return;
+
+            wchar_t buffer[4096] = {};
+            va_list args;
+            va_start(args, fmt);
+            _vsnwprintf_s(buffer, _countof(buffer), _TRUNCATE, fmt, args);
+            va_end(args);
+
+            Log(L"%ls", buffer);
+            LogShimW(LogLevel::Info, component, L"%ls", buffer);
+        }
+
+        bool AcquireChunkLogSlot()
+        {
+            if (g_TraceChunkRenderVerbose)
+                return true;
+
+            return InterlockedDecrement(&g_ChunkRenderLogBudget) >= 0;
+        }
+
 #include "chunk_proxy_generic_meshes.inl"
 
         constexpr size_t kChunkEffectCreateChunkDetourLen = 9;

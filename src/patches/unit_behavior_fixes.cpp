@@ -68,6 +68,9 @@
 
 namespace BZROpenShim
 {
+	FnSprayBuildingSimulate g_BzrFn_SprayBuildingSimulateOriginal = nullptr;
+    FnAIUnitRemove g_BzrFn_AIUnitRemove = nullptr;
+
 	using FnCraftUndeploy = void(__fastcall*)(void* craft);
 
     using FnProducerPredicate = bool(__thiscall*)(void* thisPtr);
@@ -80,6 +83,33 @@ namespace BZROpenShim
 
     namespace Hooks
     {
+        bool g_ConstructorRemoteBuildFixInstalled = false;
+        bool g_ConstructorRemoteBuildFixMismatchLogged = false;
+        InlineDetour32 g_ScriptCanBuildDetour = {};
+        InlineDetour32 g_ScriptIsBusyDetour = {};
+        FnScriptProducerPredicate g_BzrFn_ScriptCanBuildOriginal = nullptr;
+        FnScriptProducerPredicate g_BzrFn_ScriptIsBusyOriginal = nullptr;
+        bool g_ProducerScriptPredicateHooksInstalled = false;
+        // [Fixes] ProducerScriptPredicates. Extends the script-facing CanBuild /
+        // IsBusy predicates to base producers. Default on; switchable because it
+        // changes what mission Lua observes, in single-player and multiplayer
+        // alike, and it had no opt-out at all before.
+        bool g_ProducerScriptPredicateHooksEnabled = true;
+		bool g_SprayBuildingSimulateHookInstalled = false;
+		bool g_TugCargoPostLoadFixInstalled = false;
+		bool g_TugCargoPostLoadFixEnabled = true;
+		volatile long g_TugCargoPostLoadLogBudget = 16;
+		bool g_ApcAlliedTargetDeployFixInstalled = false;
+		bool g_ApcAlliedTargetDeployFixEnabled = true;
+		bool g_ConstructorRecycleStaleTargetFixInstalled = false;
+		bool g_ConstructorRecycleStaleTargetFixEnabled = true;
+		bool g_ConstructorRecycleStaleTargetMismatchLogged = false;
+		volatile long g_ConstructorRecycleStaleTargetLogBudget = 16;
+        bool g_SplinterUndeadFixEnabled = kSplinterUndeadFixEnabledDefault;
+        volatile long g_SplinterUndeadTraceBudget = kSplinterUndeadTraceBudgetDefault;
+        bool g_ConstructorRemoteBuildFixEnabled = kConstructorRemoteBuildFixEnabledDefault;
+        volatile long g_ConstructorRemoteBuildTraceBudget = kConstructorRemoteBuildTraceBudgetDefault;
+
         // ScriptUtils::CanBuild/IsBusy accept the four legacy producer
         // signatures but omit the base Producer signature (PROD). The two
         // functions are adjacent in settled Redux 2.2.301 and are identical

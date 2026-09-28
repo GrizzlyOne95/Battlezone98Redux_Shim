@@ -70,6 +70,44 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        FnFlagDisplaySubmit g_BzrFn_FlagDisplaySubmitOriginal = nullptr;
+        bool g_MultiplayerFlagRenderHookInstalled = false;
+        bool g_MultiplayerFlagRenderHookFailureLogged = false;
+        bool g_MultiplayerFlagRendererLoggedReady = false;
+        std::unordered_map<uint64_t, MultiplayerFlagRenderSet> g_MultiplayerFlagRenderSets = {};
+
+        // Master switch for the whole multiplayer vehicle-flag feature: the
+        // flag-selection UI, the payload upload and the Ogre renderer hook.
+        // [Display] MultiplayerFlags in openshim.ini, defaulting OFF so a
+        // missing key does not grow widgets onto BZP/BZP-T's faction-only
+        // waiting room. The legacy disable variables remain an override.
+        // Latched, because the renderer hook is a vtable write that is only
+        // attempted while the feature is on.
+        bool ShouldEnableMultiplayerFlagUi()
+        {
+            static int s_cached = -1;
+            if (s_cached < 0)
+            {
+                bool enabled = false;
+                bool iniValue = false;
+                if (EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAG_UI") ||
+                    EnvFlagEnabled("OPENSHIM_DISABLE_MULTIPLAYER_FLAG_UI") ||
+                    EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAGS") ||
+                    EnvFlagEnabled("BZR_DISABLE_MP_FLAG_UI"))
+                {
+                    enabled = false;
+                }
+                else if (TryGetUserConfigBool("Display", "MultiplayerFlags", iniValue))
+                {
+                    enabled = iniValue;
+                }
+                s_cached = enabled ? 1 : 0;
+                Log(L"[FLAG] multiplayer vehicle flags: %hs\n",
+                    enabled ? "enabled" : "disabled");
+            }
+            return s_cached != 0;
+        }
+
         constexpr uintptr_t kFlagDisplaySubmitVtableSlotAddr = 0x008799A4;
 
         constexpr uintptr_t kFlagDisplaySubmitAddr = 0x004D1C80;

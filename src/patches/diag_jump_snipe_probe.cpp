@@ -68,8 +68,14 @@
 
 namespace BZROpenShim
 {
+    FnPersonSimulate g_BzrFn_PersonSimulate = nullptr;
+
     namespace Hooks
     {
+        static bool g_JumpSnipeProbeInstallAttempted = false;
+        bool g_JumpSnipeProbeInstalled = false;
+        JumpSnipeProbeLogState g_JumpSnipeProbeLogState = {};
+
         // Real GOG Person::Simulate. The old 0x004F4370 was a version/string
         // builder (advisory-PDB drift); relocated by content (SNIP sig compare
         // + anim FSM). Prologue: 55 8B EC 6A FF 68 D6 C1 84 00.

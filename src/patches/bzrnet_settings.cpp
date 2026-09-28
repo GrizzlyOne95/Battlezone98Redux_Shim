@@ -587,4 +587,27 @@ namespace BZROpenShim
                 g_BzrNetGlobalsVerified ? "ok" : "failed");
         }
     }
+
+    using namespace Hooks;
+
+    BzrNetNicknameResult SetBzrNetNicknameFromBridge(const char* nickname)
+    {
+        const BzrNetNicknameResult result = ApplyBzrNetNicknameAuthoritative(
+            nickname, "external_bridge");
+        if (IsAcceptedBzrNetNicknameResult(result))
+        {
+            const std::string normalized = TrimAsciiCopy(nickname ? nickname : "");
+            SyncNicknameEntriesFromAuthoritativeValue(normalized.c_str());
+            NetRouteRefreshHost();
+            NetRouteRefreshClient();
+        }
+        return result;
+    }
+}
+
+// Optional high-level bridge used by EXU and other companion DLLs. BZRNet/native
+// details remain entirely inside OpenShim; callers receive only a stable status.
+extern "C" DWORD WINAPI OpenShimImpl_SetBZRNetNickname(LPCSTR nickname)
+{
+    return static_cast<DWORD>(BZROpenShim::SetBzrNetNicknameFromBridge(nickname));
 }
