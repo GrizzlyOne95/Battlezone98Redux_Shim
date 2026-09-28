@@ -16,22 +16,15 @@
 #include <cstdio>
 #include <cstring>
 #include <vector>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 namespace
 {
     using BZROpenShim::RememberedMeshBounds;
     using BZROpenShim::RememberedMeshBoundsTable;
 
-    int g_failures = 0;
-
-    void Require(bool condition, const char* message)
-    {
-        if (!condition)
-        {
-            std::fprintf(stderr, "remembered_mesh_bounds_table_tests: FAIL %s\n", message);
-            ++g_failures;
-        }
-    }
 
     const void* Ptr(uintptr_t value)
     {
@@ -51,20 +44,20 @@ namespace
     {
         RememberedMeshBoundsTable<1024> table;
         const void* mesh = Ptr(0x10010000u);
-        Require(table.Find(mesh) == nullptr, "an unknown mesh is not found");
+        Check(table.Find(mesh) == nullptr, "an unknown mesh is not found");
         RememberedMeshBounds* entry = table.Remember(mesh, kBoxTank, 0x1234u);
-        Require(entry != nullptr && table.Find(mesh) == entry, "a remembered mesh is found");
-        Require(entry->haveAsset && BoxIs(entry->assetMinimum, kBoxTank) &&
-                    BoxIs(entry->assetMaximum, kBoxTank + 3),
-                "the first finite box is the asset box");
-        Require(table.Remember(mesh, kBoxDoubled, 0x1234u) == entry, "a later box updates in place");
-        Require(BoxIs(entry->minimum, kBoxDoubled) && BoxIs(entry->maximum, kBoxDoubled + 3),
-                "the working box follows the latest write");
-        Require(BoxIs(entry->assetMinimum, kBoxTank), "the asset box keeps the first write");
-        Require(table.Live() == 1, "one live entry");
-        Require(table.Remember(nullptr, kBoxTank, 1u) == nullptr, "a null mesh is refused");
-        Require(table.Remember(mesh, nullptr, 1u) == nullptr, "a null box is refused");
-        Require(table.Find(nullptr) == nullptr && !table.Forget(nullptr), "null lookups are harmless");
+        Check(entry != nullptr && table.Find(mesh) == entry, "a remembered mesh is found");
+        Check(entry->haveAsset && BoxIs(entry->assetMinimum, kBoxTank) &&
+                  BoxIs(entry->assetMaximum, kBoxTank + 3),
+              "the first finite box is the asset box");
+        Check(table.Remember(mesh, kBoxDoubled, 0x1234u) == entry, "a later box updates in place");
+        Check(BoxIs(entry->minimum, kBoxDoubled) && BoxIs(entry->maximum, kBoxDoubled + 3),
+              "the working box follows the latest write");
+        Check(BoxIs(entry->assetMinimum, kBoxTank), "the asset box keeps the first write");
+        Check(table.Live() == 1, "one live entry");
+        Check(table.Remember(nullptr, kBoxTank, 1u) == nullptr, "a null mesh is refused");
+        Check(table.Remember(mesh, nullptr, 1u) == nullptr, "a null box is refused");
+        Check(table.Find(nullptr) == nullptr && !table.Forget(nullptr), "null lookups are harmless");
     }
 
     void TestChangedIdentityStartsOver()
@@ -78,23 +71,23 @@ namespace
         // The same address, now another mesh: its own first box must become
         // the asset box, and nothing decided about the old mesh may survive.
         RememberedMeshBounds* second = table.Remember(address, kBoxTank, 0xBBBBu);
-        Require(second == first, "the slot is reused in place");
-        Require(BoxIs(second->assetMinimum, kBoxTank) && BoxIs(second->assetMaximum, kBoxTank + 3),
-                "a changed identity re-captures the asset box (the old, smaller one is gone)");
-        Require(!second->sawInfinite && !second->restoreClassified && !second->restoreExcluded,
-                "a changed identity clears the old verdicts");
-        Require(second->identity == 0xBBBBu, "the new identity is recorded");
-        Require(table.IdentityResets() == 1 && table.Live() == 1, "one reset, still one entry");
+        Check(second == first, "the slot is reused in place");
+        Check(BoxIs(second->assetMinimum, kBoxTank) && BoxIs(second->assetMaximum, kBoxTank + 3),
+              "a changed identity re-captures the asset box (the old, smaller one is gone)");
+        Check(!second->sawInfinite && !second->restoreClassified && !second->restoreExcluded,
+              "a changed identity clears the old verdicts");
+        Check(second->identity == 0xBBBBu, "the new identity is recorded");
+        Check(table.IdentityResets() == 1 && table.Live() == 1, "one reset, still one entry");
         // An unknown identity (0) never resets, and is filled in when it
         // becomes known.
         RememberedMeshBounds* third = table.Remember(address, kBoxDoubled, 0u);
-        Require(third == second && BoxIs(third->assetMinimum, kBoxTank), "identity 0 keeps the record");
+        Check(third == second && BoxIs(third->assetMinimum, kBoxTank), "identity 0 keeps the record");
         RememberedMeshBoundsTable<1024> late;
         RememberedMeshBounds* unknown = late.Remember(address, kBoxSmall, 0u);
-        Require(unknown->identity == 0, "an unknown identity stays 0");
-        Require(late.Remember(address, kBoxSmall, 0xCCCCu)->identity == 0xCCCCu &&
-                    late.IdentityResets() == 0,
-                "a late identity is adopted without a reset");
+        Check(unknown->identity == 0, "an unknown identity stays 0");
+        Check(late.Remember(address, kBoxSmall, 0xCCCCu)->identity == 0xCCCCu &&
+                  late.IdentityResets() == 0,
+              "a late identity is adopted without a reset");
     }
 
     void TestForgetThenReuse()
@@ -102,15 +95,15 @@ namespace
         RememberedMeshBoundsTable<1024> table;
         const void* address = Ptr(0x10030000u);
         table.Remember(address, kBoxSmall, 0xAAAAu);
-        Require(table.Forget(address), "a remembered mesh can be forgotten");
-        Require(table.Find(address) == nullptr && table.Live() == 0 && table.Forgotten() == 1,
-                "a forgotten mesh is gone");
-        Require(!table.Forget(address), "forgetting twice reports nothing to forget");
+        Check(table.Forget(address), "a remembered mesh can be forgotten");
+        Check(table.Find(address) == nullptr && table.Live() == 0 && table.Forgotten() == 1,
+              "a forgotten mesh is gone");
+        Check(!table.Forget(address), "forgetting twice reports nothing to forget");
         // The allocator hands the address to a new mesh with the same name
         // hash: the record still starts fresh, because destruction emptied it.
         RememberedMeshBounds* fresh = table.Remember(address, kBoxTank, 0xAAAAu);
-        Require(fresh != nullptr && BoxIs(fresh->assetMinimum, kBoxTank) && !fresh->sawInfinite,
-                "a reused address after destruction starts a fresh record");
+        Check(fresh != nullptr && BoxIs(fresh->assetMinimum, kBoxTank) && !fresh->sawInfinite,
+              "a reused address after destruction starts a fresh record");
     }
 
     // Addresses that all hash to the same slot of a 16-entry table, so the
@@ -134,33 +127,33 @@ namespace
         for (size_t i = 0; i < meshes.size(); ++i)
         {
             const float box[6] = { static_cast<float>(i), 0.0f, 0.0f, static_cast<float>(i) + 1.0f, 1.0f, 1.0f };
-            Require(table.Remember(meshes[i], box, 0u) != nullptr, "cluster member remembered");
+            Check(table.Remember(meshes[i], box, 0u) != nullptr, "cluster member remembered");
         }
-        Require(table.Live() == 5, "five colliding entries");
+        Check(table.Live() == 5, "five colliding entries");
 
-        Require(table.Forget(meshes[2]), "the middle of the cluster is forgotten");
+        Check(table.Forget(meshes[2]), "the middle of the cluster is forgotten");
         for (size_t i = 0; i < meshes.size(); ++i)
         {
             const RememberedMeshBounds* entry = table.Find(meshes[i]);
             if (i == 2)
             {
-                Require(entry == nullptr, "the forgotten member is gone");
+                Check(entry == nullptr, "the forgotten member is gone");
                 continue;
             }
-            Require(entry != nullptr && entry->minimum[0] == static_cast<float>(i),
-                    "the others stay reachable with their own boxes after a middle deletion");
+            Check(entry != nullptr && entry->minimum[0] == static_cast<float>(i),
+                  "the others stay reachable with their own boxes after a middle deletion");
         }
-        Require(table.Forget(meshes[0]), "the head of the cluster is forgotten");
-        Require(table.Find(meshes[1]) != nullptr && table.Find(meshes[3]) != nullptr &&
-                    table.Find(meshes[4]) != nullptr,
-                "the others stay reachable after a head deletion");
-        Require(table.Find(meshes[0]) == nullptr, "the head is gone");
+        Check(table.Forget(meshes[0]), "the head of the cluster is forgotten");
+        Check(table.Find(meshes[1]) != nullptr && table.Find(meshes[3]) != nullptr &&
+                  table.Find(meshes[4]) != nullptr,
+              "the others stay reachable after a head deletion");
+        Check(table.Find(meshes[0]) == nullptr, "the head is gone");
 
         const std::vector<const void*> more = CollidingAddresses(slot, 7);
         const float box[6] = { 9.0f, 0.0f, 0.0f, 10.0f, 1.0f, 1.0f };
-        Require(table.Remember(more[6], box, 0u) != nullptr && table.Find(more[6])->minimum[0] == 9.0f,
-                "a new colliding entry lands after the deletions");
-        Require(table.Live() == 4, "live count tracks the deletions");
+        Check(table.Remember(more[6], box, 0u) != nullptr && table.Find(more[6])->minimum[0] == 9.0f,
+              "a new colliding entry lands after the deletions");
+        Check(table.Live() == 4, "live count tracks the deletions");
     }
 
     void TestBackwardShiftKeepsClusters()
@@ -176,18 +169,18 @@ namespace
         for (uintptr_t value = 0x30000000u; meshes.size() < 13; value += 16u)
             meshes.push_back(Ptr(value));
         for (size_t i = 0; i < 12; ++i)
-            Require(table.Remember(meshes[i], kBoxTank, 0u) != nullptr, "entries up to the headroom are kept");
-        Require(table.Live() == 12 && table.Dropped() == 0, "twelve live entries in a sixteen-slot table");
-        Require(table.Remember(meshes[12], kBoxTank, 0u) == nullptr && table.Dropped() == 1,
-                "a new mesh past the headroom is dropped");
-        Require(table.Remember(meshes[0], kBoxDoubled, 0u) != nullptr,
-                "a known mesh is still updated at the headroom");
-        Require(table.Forget(meshes[5]), "one entry is forgotten");
-        Require(table.Remember(meshes[12], kBoxTank, 0u) != nullptr,
-                "forgetting frees real capacity (no tombstone is left behind)");
-        Require(table.Live() == 12, "live count is back at the headroom");
+            Check(table.Remember(meshes[i], kBoxTank, 0u) != nullptr, "entries up to the headroom are kept");
+        Check(table.Live() == 12 && table.Dropped() == 0, "twelve live entries in a sixteen-slot table");
+        Check(table.Remember(meshes[12], kBoxTank, 0u) == nullptr && table.Dropped() == 1,
+              "a new mesh past the headroom is dropped");
+        Check(table.Remember(meshes[0], kBoxDoubled, 0u) != nullptr,
+              "a known mesh is still updated at the headroom");
+        Check(table.Forget(meshes[5]), "one entry is forgotten");
+        Check(table.Remember(meshes[12], kBoxTank, 0u) != nullptr,
+              "forgetting frees real capacity (no tombstone is left behind)");
+        Check(table.Live() == 12, "live count is back at the headroom");
         table.Clear();
-        Require(table.Live() == 0 && table.Find(meshes[0]) == nullptr, "clear empties the table");
+        Check(table.Live() == 0 && table.Find(meshes[0]) == nullptr, "clear empties the table");
     }
 }
 
@@ -199,7 +192,7 @@ int main()
     TestBackwardShiftKeepsClusters();
     TestHeadroomIsReclaimed();
 
-    if (g_failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
         std::printf("remembered_mesh_bounds_table_tests: all checks passed\n");
-    return g_failures == 0 ? 0 : 1;
+    return OpenShimTest::ExitCode();
 }

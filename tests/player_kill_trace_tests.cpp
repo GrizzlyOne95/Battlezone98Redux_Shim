@@ -16,21 +16,14 @@
 
 #include <cstdio>
 #include <cstring>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 namespace
 {
     using namespace BZROpenShim::PlayerKillTrace;
 
-    int g_failures = 0;
-
-    void Require(bool condition, const char* message)
-    {
-        if (!condition)
-        {
-            std::fprintf(stderr, "player_kill_trace_tests: %s\n", message);
-            ++g_failures;
-        }
-    }
 
     void RequireController(const ControllerFields& fields,
                            Controller expected,
@@ -39,12 +32,9 @@ namespace
         const Controller actual = ClassifyController(fields);
         if (actual != expected)
         {
-            std::fprintf(stderr,
-                         "player_kill_trace_tests: %s (expected %s, got %s)\n",
-                         message,
+            OpenShimTest::Fail("%s (expected %s, got %s)", message,
                          DescribeController(expected),
                          DescribeController(actual));
-            ++g_failures;
         }
     }
 
@@ -55,12 +45,9 @@ namespace
         const Correlation actual = ClassifyCorrelation(in);
         if (actual != expected)
         {
-            std::fprintf(stderr,
-                         "player_kill_trace_tests: %s (expected %s, got %s)\n",
-                         message,
+            OpenShimTest::Fail("%s (expected %s, got %s)", message,
                          DescribeCorrelation(expected),
                          DescribeCorrelation(actual));
-            ++g_failures;
         }
     }
 
@@ -86,8 +73,8 @@ namespace
         RequireController(human, Controller::HumanByActivNet,
                           "owned craft matching its team's NetPlayer id");
 
-        Require(ClassifyController(wingman) != ClassifyController(human),
-                "wingman and human on one team must not classify alike");
+        Check(ClassifyController(wingman) != ClassifyController(human),
+              "wingman and human on one team must not classify alike");
     }
 
     // The unowned sentinel has to be checked before the team fallback.
@@ -213,16 +200,16 @@ namespace
     // scripts that read them back, so they are part of the contract.
     void TestDescriptionsAreStable()
     {
-        Require(std::strcmp(DescribeController(Controller::LocalHuman), "local-human") == 0,
-                "local-human label");
-        Require(std::strcmp(DescribeController(Controller::HumanByActivNet), "human-by-activnet") == 0,
-                "human-by-activnet label");
-        Require(std::strcmp(DescribeController(Controller::AiUnowned), "ai-unowned") == 0,
-                "ai-unowned label");
-        Require(std::strcmp(DescribeCorrelation(Correlation::AmbiguousMulti), "ambiguous-multi") == 0,
-                "ambiguous-multi label");
-        Require(std::strcmp(DescribeCorrelation(Correlation::TeamMismatch), "mismatch-team-ambiguous") == 0,
-                "mismatch-team-ambiguous label");
+        Check(std::strcmp(DescribeController(Controller::LocalHuman), "local-human") == 0,
+              "local-human label");
+        Check(std::strcmp(DescribeController(Controller::HumanByActivNet), "human-by-activnet") == 0,
+              "human-by-activnet label");
+        Check(std::strcmp(DescribeController(Controller::AiUnowned), "ai-unowned") == 0,
+              "ai-unowned label");
+        Check(std::strcmp(DescribeCorrelation(Correlation::AmbiguousMulti), "ambiguous-multi") == 0,
+              "ambiguous-multi label");
+        Check(std::strcmp(DescribeCorrelation(Correlation::TeamMismatch), "mismatch-team-ambiguous") == 0,
+              "mismatch-team-ambiguous label");
     }
 }
 
@@ -237,9 +224,9 @@ int main()
     TestMissingAndMismatchedPending();
     TestDescriptionsAreStable();
 
-    if (g_failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::fprintf(stderr, "player_kill_trace_tests: %d failure(s)\n", g_failures);
+        std::fprintf(stderr, "player_kill_trace_tests: %d failure(s)\n", OpenShimTest::FailureCount());
         return 1;
     }
 

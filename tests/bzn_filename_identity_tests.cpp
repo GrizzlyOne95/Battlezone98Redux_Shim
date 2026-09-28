@@ -5,20 +5,10 @@
 
 #include <cstdio>
 #include <string>
+#include "test_check.h"
 
-namespace
-{
-    int g_Failures = 0;
+using OpenShimTest::Check;
 
-    void Check(bool condition, const char* what)
-    {
-        if (!condition)
-        {
-            std::printf("FAIL: %s\n", what);
-            ++g_Failures;
-        }
-    }
-}
 
 int main()
 {
@@ -84,12 +74,12 @@ int main()
         Check(!r.comparable, "non-ASCII filename comparison fails closed");
     }
 
-    if (g_Failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
     {
         std::printf("bzn_filename_identity_tests: all checks passed\n");
         return 0;
     }
 
-    std::printf("bzn_filename_identity_tests: %d failure(s)\n", g_Failures);
+    std::printf("bzn_filename_identity_tests: %d failure(s)\n", OpenShimTest::FailureCount());
     return 1;
 }

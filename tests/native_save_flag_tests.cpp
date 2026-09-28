@@ -18,22 +18,14 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim::NativeSaveFlag;
 
 namespace
 {
-    int g_failures = 0;
-
-    void Expect(bool condition, const std::string& what)
-    {
-        if (!condition)
-        {
-            ++g_failures;
-            std::cerr << "FAIL: " << what << '\n';
-        }
-    }
-
     // The real bytes at battlezone98redux.exe VA 0x004FD190 (GOG 2.2.301),
     // truncated to the region the decode reads. Byte 37 begins 0F B6 05 and the
     // operand that follows is 0x009173B7, the missionSave global.
@@ -50,7 +42,7 @@ namespace
     void TestDecodesTheShippingPrologue()
     {
         const auto prologue = RealPrologue();
-        Expect(
+        Check(
             ReadFlagAddress(prologue.data()) == 0x009173B7u,
             "the shipping SaveGame prolog decodes to the missionSave global");
     }
@@ -58,16 +50,16 @@ namespace
     void TestOpcodeOffsetIsWhereTheSignaturePinsIt()
     {
         const auto prologue = RealPrologue();
-        Expect(kOpcodeOffset == 37, "the movzx sits at entry +37");
-        Expect(prologue[37] == 0x0F, "entry +37 is 0F");
-        Expect(prologue[38] == 0xB6, "entry +38 is B6");
-        Expect(prologue[39] == 0x05, "entry +39 is 05");
-        Expect(kOperandOffset == 40, "the operand starts at entry +40");
+        Check(kOpcodeOffset == 37, "the movzx sits at entry +37");
+        Check(prologue[37] == 0x0F, "entry +37 is 0F");
+        Check(prologue[38] == 0xB6, "entry +38 is B6");
+        Check(prologue[39] == 0x05, "entry +39 is 05");
+        Check(kOperandOffset == 40, "the operand starts at entry +40");
     }
 
     void TestNullEntryFailsClosed()
     {
-        Expect(ReadFlagAddress(nullptr) == 0, "a null entry decodes to 0");
+        Check(ReadFlagAddress(nullptr) == 0, "a null entry decodes to 0");
     }
 
     // Each of these is a build drifting out from under the signature. None may
@@ -78,7 +70,7 @@ namespace
         {
             auto prologue = RealPrologue();
             prologue[kOpcodeOffset + byte] ^= 0xFF;
-            Expect(
+            Check(
                 ReadFlagAddress(prologue.data()) == 0,
                 "a corrupted movzx opcode byte " + std::to_string(byte) + " decodes to 0");
         }
@@ -92,7 +84,7 @@ namespace
         const auto real = RealPrologue();
         std::array<uint8_t, kProbeSize> shifted{};
         std::memcpy(shifted.data() + 1, real.data(), shifted.size() - 1);
-        Expect(
+        Check(
             ReadFlagAddress(shifted.data()) == 0,
             "a prolog shifted by one byte decodes to 0");
     }
@@ -101,7 +93,7 @@ namespace
     {
         auto prologue = RealPrologue();
         std::memset(prologue.data() + kOperandOffset, 0, sizeof(uint32_t));
-        Expect(
+        Check(
             ReadFlagAddress(prologue.data()) == 0,
             "a null operand decodes to 0 so callers treat it as failure");
     }
@@ -113,18 +105,18 @@ namespace
         prologue[kOperandOffset + 1] = 0x56;
         prologue[kOperandOffset + 2] = 0x34;
         prologue[kOperandOffset + 3] = 0x12;
-        Expect(
+        Check(
             ReadFlagAddress(prologue.data()) == 0x12345678u,
             "the absolute operand is decoded little-endian");
     }
 
     void TestOnlyBooleanFlagValuesAreAccepted()
     {
-        Expect(IsPlausibleValue(0), "missionSave=0 is plausible");
-        Expect(IsPlausibleValue(1), "missionSave=1 is plausible");
-        Expect(!IsPlausibleValue(2), "missionSave=2 is rejected");
-        Expect(!IsPlausibleValue(0xCD), "uninitialised fill is rejected");
-        Expect(!IsPlausibleValue(0xFF), "missionSave=0xFF is rejected");
+        Check(IsPlausibleValue(0), "missionSave=0 is plausible");
+        Check(IsPlausibleValue(1), "missionSave=1 is plausible");
+        Check(!IsPlausibleValue(2), "missionSave=2 is rejected");
+        Check(!IsPlausibleValue(0xCD), "uninitialised fill is rejected");
+        Check(!IsPlausibleValue(0xFF), "missionSave=0xFF is rejected");
     }
 }
 
@@ -139,9 +131,9 @@ int main()
     TestOperandIsReadLittleEndian();
     TestOnlyBooleanFlagValuesAreAccepted();
 
-    if (g_failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::cerr << g_failures << " missionSave decode check(s) failed\n";
+        std::cerr << OpenShimTest::FailureCount() << " missionSave decode check(s) failed\n";
         return EXIT_FAILURE;
     }
 

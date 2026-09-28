@@ -2,22 +2,10 @@
 
 #include <cstdio>
 #include <vector>
+#include "test_check.h"
 
 namespace
 {
-    int g_failures = 0;
-
-    void Check(bool cond, const char* what, int line)
-    {
-        if (!cond)
-        {
-            ++g_failures;
-            std::printf("FAIL %d: %s\n", line, what);
-        }
-    }
-
-#define CHECK(c) Check((c), #c, __LINE__)
-
     using BZROpenShim::MemoryAccess::Access;
     using BZROpenShim::MemoryAccess::kMemCommit;
     using BZROpenShim::MemoryAccess::ProtectionAllows;
@@ -167,7 +155,7 @@ int main()
     TestRangeAcrossRegionsChecksEach();
     TestUncommittedAndGuardedRegionsAreRefused();
     TestZeroSizedRegionDoesNotLoop();
-    if (g_failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
         std::printf("memory_access_tests: all passed\n");
-    return g_failures == 0 ? 0 : 1;
+    return OpenShimTest::ExitCode();
 }

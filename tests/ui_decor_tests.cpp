@@ -2,26 +2,12 @@
 
 #include <cstdio>
 #include <cstring>
+#include "test_check.h"
 
 using namespace BZROpenShim;
 
 namespace
 {
-    // Not assert(): the CTest build is Release, where assert() compiles out
-    // and every check would pass without running.
-    int g_failures = 0;
-
-    void Check(bool cond, const char* what, int line)
-    {
-        if (!cond)
-        {
-            ++g_failures;
-            std::printf("FAIL %d: %s\n", line, what);
-        }
-    }
-
-#define CHECK(c) Check((c), #c, __LINE__)
-
     constexpr float kLogicalWidth = 1440.0f;
     constexpr float kLogicalHeight = 1080.0f;
     constexpr float kPageCenterX = kLogicalWidth * 0.5f;
@@ -284,7 +270,7 @@ int main()
     CHECK(Right(tallest.contentMask) <= kLogicalWidth);
     CHECK(Bottom(tallest.contentMask) <= kLogicalHeight);
 
-    if (g_failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
         std::printf("ui_decor_tests: all passed\n");
-    return g_failures == 0 ? 0 : 1;
+    return OpenShimTest::ExitCode();
 }
