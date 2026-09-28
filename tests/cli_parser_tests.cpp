@@ -27,6 +27,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <algorithm>
+#include "test_check.h"
 
 // Portable case-insensitive compare helpers: MSVC uses _strnicmp/_stricmp
 // while POSIX (g++ test harness) provides strncasecmp/strcasecmp.
@@ -36,19 +37,10 @@
 #define strcasecmp _stricmp
 #endif
 
+using OpenShimTest::Check;
+
 namespace
 {
-    int g_failures = 0;
-
-    void ExpectTrue(bool condition, const char* message)
-    {
-        if (!condition)
-        {
-            std::cerr << "FAIL: " << message << std::endl;
-            ++g_failures;
-        }
-    }
-
     // The stock delimiter set at 0x008F068C (" ,\t") and the repaired one the
     // production patch writes there (" \t"). \r and \n are not stock
     // delimiters; a Windows command line never contains them.
@@ -151,10 +143,10 @@ void TestStockParserDefect()
 {
     const ParseState stock = SimulateParse("-shellmap:216,178 -disablemods", kStockDelims);
 
-    ExpectTrue(stock.shellmapMode == 1, "stock: shellmap recognised (mode 1)");
-    ExpectTrue(Width(stock) == 216, "stock: width parses as 216");
-    ExpectTrue(Height(stock) == 216, "stock DEFECT: height truncated to 216, not 178");
-    ExpectTrue(stock.disableMods, "stock: later switches still parse");
+    Check(stock.shellmapMode == 1, "stock: shellmap recognised (mode 1)");
+    Check(Width(stock) == 216, "stock: width parses as 216");
+    Check(Height(stock) == 216, "stock DEFECT: height truncated to 216, not 178");
+    Check(stock.disableMods, "stock: later switches still parse");
 
     std::cout << "[PASS] TestStockParserDefect (-shellmap:216,178 -> W=" << Width(stock)
               << " H=" << Height(stock) << ")" << std::endl;
@@ -168,11 +160,11 @@ void TestStockOrphanTokenCollateral()
 {
     const ParseState stock = SimulateParse("-shellmap:216,178", kStockDelims);
 
-    ExpectTrue(HasPositional(stock, "178"), "stock DEFECT: '178' orphaned into the positional branch");
-    ExpectTrue(stock.mapName == "178", "stock DEFECT: orphan overwrites DAT_00915540 (shellmap map name)");
-    ExpectTrue(stock.missionPath == "178", "stock DEFECT: orphan overwrites DAT_00945708 (mission path)");
-    ExpectTrue(stock.runState == 5, "stock DEFECT: orphan calls SetRunning(5)");
-    ExpectTrue(stock.missionRequested, "stock DEFECT: orphan sets DAT_0091556C");
+    Check(HasPositional(stock, "178"), "stock DEFECT: '178' orphaned into the positional branch");
+    Check(stock.mapName == "178", "stock DEFECT: orphan overwrites DAT_00915540 (shellmap map name)");
+    Check(stock.missionPath == "178", "stock DEFECT: orphan overwrites DAT_00945708 (mission path)");
+    Check(stock.runState == 5, "stock DEFECT: orphan calls SetRunning(5)");
+    Check(stock.missionRequested, "stock DEFECT: orphan sets DAT_0091556C");
 
     std::cout << "[PASS] TestStockOrphanTokenCollateral (orphan corrupts map name, mission path, run state)"
               << std::endl;
@@ -185,18 +177,18 @@ void TestRepairedDelimitersFixShellmap()
 {
     const ParseState fixed = SimulateParse("-shellmap:216,178 -disablemods", kRepairedDelims);
 
-    ExpectTrue(fixed.shellmapMode == 1, "repaired: mode stays 1 (mode is not a dimension)");
-    ExpectTrue(Width(fixed) == 216, "repaired: width 216");
-    ExpectTrue(Height(fixed) == 178, "repaired: height 178");
-    ExpectTrue(fixed.shellmapPacked == 0x00B200D8u, "repaired: packed value 0x00B200D8");
-    ExpectTrue(fixed.disableMods, "repaired: later switches unaffected");
+    Check(fixed.shellmapMode == 1, "repaired: mode stays 1 (mode is not a dimension)");
+    Check(Width(fixed) == 216, "repaired: width 216");
+    Check(Height(fixed) == 178, "repaired: height 178");
+    Check(fixed.shellmapPacked == 0x00B200D8u, "repaired: packed value 0x00B200D8");
+    Check(fixed.disableMods, "repaired: later switches unaffected");
 
     // No split means no orphan means no collateral.
-    ExpectTrue(fixed.positionalTokens.empty(), "repaired: no orphan token produced");
-    ExpectTrue(fixed.mapName.empty(), "repaired: map name left as the caller initialised it");
-    ExpectTrue(fixed.missionPath.empty(), "repaired: mission path untouched");
-    ExpectTrue(fixed.runState == 0, "repaired: run state untouched");
-    ExpectTrue(!fixed.missionRequested, "repaired: DAT_0091556C untouched");
+    Check(fixed.positionalTokens.empty(), "repaired: no orphan token produced");
+    Check(fixed.mapName.empty(), "repaired: map name left as the caller initialised it");
+    Check(fixed.missionPath.empty(), "repaired: mission path untouched");
+    Check(fixed.runState == 0, "repaired: run state untouched");
+    Check(!fixed.missionRequested, "repaired: DAT_0091556C untouched");
 
     std::cout << "[PASS] TestRepairedDelimitersFixShellmap (216x178, packed 0x"
               << std::hex << fixed.shellmapPacked << std::dec << ", no collateral)" << std::endl;
@@ -208,23 +200,23 @@ void TestRepairedPreservesSingleValueOptions()
 {
     {
         const ParseState s = SimulateParse("-shellmap:216", kRepairedDelims);
-        ExpectTrue(Width(s) == 216 && Height(s) == 216, "repaired: -shellmap:216 keeps the square fallback");
+        Check(Width(s) == 216 && Height(s) == 216, "repaired: -shellmap:216 keeps the square fallback");
     }
     {
         const ParseState stock = SimulateParse("-largemap:16 -disablemods", kStockDelims);
         const ParseState fixed = SimulateParse("-largemap:16 -disablemods", kRepairedDelims);
-        ExpectTrue(fixed.shellmapMode == 2 && fixed.shellmapPacked == 16u, "repaired: -largemap:16 parses");
-        ExpectTrue(stock.shellmapMode == fixed.shellmapMode &&
-                   stock.shellmapPacked == fixed.shellmapPacked &&
-                   stock.disableMods == fixed.disableMods,
-                   "repaired: single-value options byte-for-byte identical to stock");
+        Check(fixed.shellmapMode == 2 && fixed.shellmapPacked == 16u, "repaired: -largemap:16 parses");
+        Check(stock.shellmapMode == fixed.shellmapMode &&
+              stock.shellmapPacked == fixed.shellmapPacked &&
+              stock.disableMods == fixed.disableMods,
+              "repaired: single-value options byte-for-byte identical to stock");
     }
     {
         const ParseState stock = SimulateParse("-disablemods -nointro /win +multi", kStockDelims);
         const ParseState fixed = SimulateParse("-disablemods -nointro /win +multi", kRepairedDelims);
-        ExpectTrue(stock.disableMods && fixed.disableMods, "repaired: -disablemods still parses");
-        ExpectTrue(stock.positionalTokens == fixed.positionalTokens,
-                   "repaired: space-separated switch lists tokenise identically");
+        Check(stock.disableMods && fixed.disableMods, "repaired: -disablemods still parses");
+        Check(stock.positionalTokens == fixed.positionalTokens,
+              "repaired: space-separated switch lists tokenise identically");
     }
 
     std::cout << "[PASS] TestRepairedPreservesSingleValueOptions" << std::endl;
@@ -236,15 +228,15 @@ void TestRepairedPreservesPositionalArgument()
 {
     const ParseState fixed = SimulateParse("-shellmap:216,178 fun.bzn", kRepairedDelims);
 
-    ExpectTrue(Width(fixed) == 216 && Height(fixed) == 178, "repaired: dimensions still correct");
-    ExpectTrue(fixed.positionalTokens.size() == 1, "repaired: exactly one positional token");
-    ExpectTrue(fixed.mapName == "fun.bzn", "repaired: the real positional token wins");
-    ExpectTrue(fixed.missionRequested, "repaired: mission request still raised");
+    Check(Width(fixed) == 216 && Height(fixed) == 178, "repaired: dimensions still correct");
+    Check(fixed.positionalTokens.size() == 1, "repaired: exactly one positional token");
+    Check(fixed.mapName == "fun.bzn", "repaired: the real positional token wins");
+    Check(fixed.missionRequested, "repaired: mission request still raised");
 
     // Ordering must not matter.
     const ParseState reordered = SimulateParse("fun.bzn -shellmap:216,178", kRepairedDelims);
-    ExpectTrue(Width(reordered) == 216 && Height(reordered) == 178 && reordered.mapName == "fun.bzn",
-               "repaired: option order does not change the result");
+    Check(Width(reordered) == 216 && Height(reordered) == 178 && reordered.mapName == "fun.bzn",
+          "repaired: option order does not change the result");
 
     std::cout << "[PASS] TestRepairedPreservesPositionalArgument" << std::endl;
 }
@@ -283,15 +275,14 @@ void TestMalformedShellmapValues()
     for (const Case& c : cases)
     {
         const ParseState s = SimulateParse(c.cmdline, kRepairedDelims);
-        ExpectTrue(s.shellmapMode == 1, c.why);
+        Check(s.shellmapMode == 1, c.why);
         if (Width(s) != c.width || Height(s) != c.height)
         {
-            std::cerr << "FAIL: " << c.cmdline << " -> " << Width(s) << "x" << Height(s)
-                      << ", expected " << c.width << "x" << c.height << " (" << c.why << ")" << std::endl;
-            ++g_failures;
+            OpenShimTest::Fail("%s -> %dx%d, expected %dx%d (%s)", c.cmdline,
+                               Width(s), Height(s), c.width, c.height, c.why);
         }
         // No malformed value may leak into the positional branch.
-        ExpectTrue(s.positionalTokens.empty(), "malformed shellmap value produces no positional token");
+        Check(s.positionalTokens.empty(), "malformed shellmap value produces no positional token");
     }
 
     std::cout << "[PASS] TestMalformedShellmapValues (" << (sizeof(cases) / sizeof(cases[0]))
@@ -305,30 +296,30 @@ void TestSurroundingArgumentsUnaffected()
 {
     {
         const ParseState s = SimulateParse("-disablemods -shellmap:216,178 -nointro", kRepairedDelims);
-        ExpectTrue(Width(s) == 216 && Height(s) == 178, "repaired: value survives between switches");
-        ExpectTrue(s.disableMods, "repaired: preceding switch parses");
-        ExpectTrue(s.positionalTokens.empty(), "repaired: no positional fallout between switches");
+        Check(Width(s) == 216 && Height(s) == 178, "repaired: value survives between switches");
+        Check(s.disableMods, "repaired: preceding switch parses");
+        Check(s.positionalTokens.empty(), "repaired: no positional fallout between switches");
     }
     {
         // Tab is a stock delimiter and stays one.
         const ParseState s = SimulateParse("-disablemods\t-shellmap:216,178\t-nointro", kRepairedDelims);
-        ExpectTrue(Width(s) == 216 && Height(s) == 178, "repaired: tab still separates arguments");
-        ExpectTrue(s.disableMods, "repaired: tab-separated switch parses");
+        Check(Width(s) == 216 && Height(s) == 178, "repaired: tab still separates arguments");
+        Check(s.disableMods, "repaired: tab-separated switch parses");
     }
     {
         // An unrelated comma-bearing argument is not rewritten; it simply stops
         // being split, which is the whole point.
         const ParseState s = SimulateParse("-someunknownopt:a,b -disablemods", kRepairedDelims);
-        ExpectTrue(s.disableMods, "repaired: unknown comma-bearing option does not break the rest");
-        ExpectTrue(s.positionalTokens.empty(), "repaired: unknown option's tail is not orphaned");
+        Check(s.disableMods, "repaired: unknown comma-bearing option does not break the rest");
+        Check(s.positionalTokens.empty(), "repaired: unknown option's tail is not orphaned");
     }
     {
         // A path containing spaces is quoted by the shell but strtok has no
         // quote awareness, in stock or repaired. Documented, not claimed fixed.
         const ParseState stock = SimulateParse("\"my map.bzn\"", kStockDelims);
         const ParseState fixed = SimulateParse("\"my map.bzn\"", kRepairedDelims);
-        ExpectTrue(stock.positionalTokens == fixed.positionalTokens,
-                   "repaired: quoted-path handling is unchanged from stock (still split on space)");
+        Check(stock.positionalTokens == fixed.positionalTokens,
+              "repaired: quoted-path handling is unchanged from stock (still split on space)");
     }
 
     std::cout << "[PASS] TestSurroundingArgumentsUnaffected" << std::endl;
@@ -342,12 +333,12 @@ void TestAcceptedTradeOffCommaAsSeparator()
     const ParseState stock = SimulateParse("-disablemods,-shellmap:216", kStockDelims);
     const ParseState fixed = SimulateParse("-disablemods,-shellmap:216", kRepairedDelims);
 
-    ExpectTrue(stock.disableMods && stock.shellmapMode == 1,
-               "stock: comma separated two options");
-    ExpectTrue(!fixed.disableMods && fixed.shellmapMode == 0,
-               "repaired: comma no longer separates options (accepted trade-off)");
-    ExpectTrue(fixed.positionalTokens.empty(),
-               "repaired: the unmatched token is a switch, so it is not taken as a mission");
+    Check(stock.disableMods && stock.shellmapMode == 1,
+          "stock: comma separated two options");
+    Check(!fixed.disableMods && fixed.shellmapMode == 0,
+          "repaired: comma no longer separates options (accepted trade-off)");
+    Check(fixed.positionalTokens.empty(),
+          "repaired: the unmatched token is a switch, so it is not taken as a mission");
 
     std::cout << "[PASS] TestAcceptedTradeOffCommaAsSeparator (documented behaviour change)" << std::endl;
 }
@@ -365,9 +356,9 @@ int main()
     TestSurroundingArgumentsUnaffected();
     TestAcceptedTradeOffCommaAsSeparator();
 
-    if (g_failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::cerr << g_failures << " check(s) failed." << std::endl;
+        std::cerr << OpenShimTest::FailureCount() << " check(s) failed." << std::endl;
         return 1;
     }
 

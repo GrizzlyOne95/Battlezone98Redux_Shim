@@ -683,8 +683,9 @@ namespace
 {
     // Static, so installing it is a pointer store with no allocation and no
     // loader work -- safe to do from DllMain while this TU still ships
-    // inside winmm.dll.
-    const OpenShimSdkProviderTable g_ProviderTable = {
+    // inside winmm.dll. constexpr so the completeness checks below run at
+    // compile time; it also guarantees constant initialization.
+    constexpr OpenShimSdkProviderTable g_ProviderTable = {
         .structSize = sizeof(OpenShimSdkProviderTable),
         .OpenShimImpl_CaptureDeveloperSnapshot = BZROpenShim::OpenShimImpl_CaptureDeveloperSnapshot,
         .OpenShimImpl_ClearAiUnitTuning = OpenShimImpl_ClearAiUnitTuning,
@@ -763,6 +764,23 @@ namespace
         .legacyGetAppliedPatchCount = LegacyGetAppliedPatchCount,
         .legacyGetBzrDistribution = LegacyGetBzrDistribution,
     };
+
+    // Designated initializers enforce order but not completeness: a slot left
+    // out is silently null, and its export then returns the unavailable value
+    // on every call. Every export in openshim_sdk_exports.inc, and every
+    // legacy slot, has to be filled.
+    static_assert(g_ProviderTable.structSize == sizeof(OpenShimSdkProviderTable),
+                  "the built-in provider must report its full size");
+#define OPENSHIM_SDK_EXPORT(ret, cc, name, impl, params, args, unavail) \
+    static_assert(g_ProviderTable.impl != nullptr, #impl " is missing from the provider table");
+#include "openshim_sdk_exports.inc"
+#undef OPENSHIM_SDK_EXPORT
+    static_assert(g_ProviderTable.legacyGetShimVersion != nullptr &&
+                      g_ProviderTable.legacyIsCompatibleGameVersion != nullptr &&
+                      g_ProviderTable.legacyIsPatchingComplete != nullptr &&
+                      g_ProviderTable.legacyGetAppliedPatchCount != nullptr &&
+                      g_ProviderTable.legacyGetBzrDistribution != nullptr,
+                  "a legacy slot is missing from the provider table");
 }
 
 extern "C" __declspec(dllexport) const OpenShimSdkProviderTable* __cdecl

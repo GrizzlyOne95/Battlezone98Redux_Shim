@@ -11,20 +11,10 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "test_check.h"
 
 namespace
 {
-    int g_Failures = 0;
-
-    void Check(bool condition, const char* expression, int line)
-    {
-        if (condition) return;
-        std::printf("FAIL line %d: %s\n", line, expression);
-        ++g_Failures;
-    }
-
-#define CHECK(c) Check((c), #c, __LINE__)
-
     // A fixed digest the fake host reports, so an exact-image gate can be
     // exercised without touching the filesystem.
     const char* const kHostSha =
@@ -68,8 +58,8 @@ namespace
         const auto status = BZLoader::ValidateMetadata(host, plugin, reason);
         // Every rejection has to explain itself; a silent skip is unreadable
         // in a user's log.
-        Check(status == BZLoader::MetadataStatus::Ok ? reason.empty() : !reason.empty(),
-              "rejection carries a reason", __LINE__);
+        OpenShimTest::CheckAt(status == BZLoader::MetadataStatus::Ok ? reason.empty() : !reason.empty(),
+                              "rejection carries a reason", __LINE__);
         return status;
     }
 }
@@ -234,9 +224,9 @@ int main()
     CHECK(BZLoader::GetPluginDirectory(L"C:\\Game\\bzloader.dll") == L"C:\\Game\\plugins");
     CHECK(BZLoader::GetPluginDirectory(L"bzloader.dll") == L"plugins");
 
-    if (g_Failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::printf("bzloader catalog tests FAILED (%d)\n", g_Failures);
+        std::printf("bzloader catalog tests FAILED (%d)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("bzloader catalog tests passed\n");

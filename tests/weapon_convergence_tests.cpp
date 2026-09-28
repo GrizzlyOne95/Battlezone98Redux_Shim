@@ -11,31 +11,19 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include "test_check.h"
+
+using OpenShimTest::Require;
 
 namespace
 {
     using namespace BZROpenShim::WeaponConvergence;
 
-    [[noreturn]] void Fail(const char* message)
-    {
-        std::fprintf(stderr, "weapon_convergence_tests: %s\n", message);
-        std::exit(1);
-    }
-
-    void Require(bool condition, const char* message)
-    {
-        if (!condition)
-            Fail(message);
-    }
-
     void RequireNear(double actual, double expected, double tolerance, const char* message)
     {
         if (!(std::fabs(actual - expected) <= tolerance))
         {
-            std::fprintf(stderr,
-                "weapon_convergence_tests: %s (actual=%.6f expected=%.6f)\n",
-                message, actual, expected);
-            std::exit(1);
+            OpenShimTest::Abort("%s (actual=%.6f expected=%.6f)", message, actual, expected);
         }
     }
 

@@ -16,30 +16,19 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim;
 
 namespace
 {
-    int g_Failures = 0;
-
-    void Check(bool condition, const char* message)
-    {
-        if (!condition)
-        {
-            std::fprintf(stderr, "sun_flash_tests: %s\n", message);
-            ++g_Failures;
-        }
-    }
-
     void CheckNear(double actual, double expected, double tolerance, const char* message)
     {
         if (!(std::fabs(actual - expected) <= tolerance))
         {
-            std::fprintf(stderr,
-                         "sun_flash_tests: %s (actual=%.6f expected=%.6f)\n",
-                         message, actual, expected);
-            ++g_Failures;
+            OpenShimTest::Fail("%s (actual=%.6f expected=%.6f)", message, actual, expected);
         }
     }
 
@@ -135,9 +124,9 @@ int main()
     TestFlashSaturatesOnRealisticPixelCounts();
     TestPatchTargetsAreTheOnesDocumented();
 
-    if (g_Failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::fprintf(stderr, "sun_flash_tests: %d check(s) failed\n", g_Failures);
+        std::fprintf(stderr, "sun_flash_tests: %d check(s) failed\n", OpenShimTest::FailureCount());
         return EXIT_FAILURE;
     }
     std::printf("sun_flash_tests: all checks passed\n");
