@@ -158,6 +158,18 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         }
     } // namespace
 
+    const char* LegacyPassKindName(LegacyPassKind kind) noexcept
+    {
+        switch (kind)
+        {
+        case LegacyPassKind::NativeDx11: return "native";
+        case LegacyPassKind::TrueFixedFunction: return "fixedfunc";
+        case LegacyPassKind::KnownLegacyFamily: return "family-remap";
+        case LegacyPassKind::UnknownCustom: return "unknown-custom";
+        }
+        return "unknown";
+    }
+
     const char* CompatPathName(CompatPath path) noexcept
     {
         switch (path)
@@ -169,6 +181,7 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         case CompatPath::AggressiveGeneric: return "aggressive-generic";
         case CompatPath::SkipShaderless: return "skip";
         case CompatPath::FixedFuncTextured2: return "fixedfunc-textured2";
+        case CompatPath::SuppressPass: return "suppress";
         }
         return "skip";
     }
@@ -458,11 +471,25 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         {
         case StageCombine::Modulate:
             return "OSE_FixedFunc_Textured2_fragment_modulate";
+        case StageCombine::Add:
+            return "OSE_FixedFunc_Textured2_fragment_add";
         case StageCombine::AlphaBlendTexture:
             return "OSE_FixedFunc_Textured2_fragment_alphablend";
         default:
+            // Replace on stage 1 discards stage 0 entirely; no shipped
+            // material does it, so it stays out of the support set.
             return nullptr;
         }
+    }
+
+    const char* FixedFuncSuppressVertex() noexcept
+    {
+        return "OSE_FixedFunc_Suppress_vertex";
+    }
+
+    const char* FixedFuncSuppressFragment() noexcept
+    {
+        return "OSE_FixedFunc_Suppress_fragment";
     }
 
     namespace
@@ -511,6 +538,58 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             "[DX11COMPAT] material=%s native-input-guard vs=%s -> %s reason=%s action=%s",
             guard.material, guard.expectVertex, guard.replacementVertex,
             guard.reason, appliedAction.c_str());
+        return std::string(buf);
+    }
+
+    std::string FormatSuppressedLog(std::string_view material,
+                                    std::string_view reason,
+                                    const LegacyPassDesc& desc)
+    {
+        std::string mat(material);
+        if (mat.empty())
+        {
+            mat = "<unknown>";
+        }
+        std::string stages;
+        for (const TextureStageDesc& stage : desc.stages)
+        {
+            if (!stages.empty())
+            {
+                stages += ',';
+            }
+            if (!stage.known)
+            {
+                stages += "unread";
+                continue;
+            }
+            stages += StageCombineName(ClassifyStageColour(stage));
+            if (!IsDefaultStageAlpha(stage))
+            {
+                stages += "+alpha";
+            }
+            if (stage.texCoordSet != 0)
+            {
+                char uv[16] = {};
+                std::snprintf(uv, sizeof(uv), "@uv%u", stage.texCoordSet);
+                stages += uv;
+            }
+        }
+        if (stages.empty())
+        {
+            stages = "none";
+        }
+        std::string why(reason);
+        if (why.empty())
+        {
+            why = "unsupported";
+        }
+
+        char buf[768] = {};
+        std::snprintf(
+            buf, sizeof(buf),
+            "[DX11COMPAT] material=%s path=suppress reason=%s passes=%d units=%d stages=%s action=skip-draw",
+            mat.c_str(), why.c_str(), desc.passCount, desc.textureUnits,
+            stages.c_str());
         return std::string(buf);
     }
 
@@ -596,6 +675,11 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             outFragment.assign(ffFragment);
             return true;
 
+        case CompatPath::SuppressPass:
+            outVertex.assign(FixedFuncSuppressVertex());
+            outFragment.assign(FixedFuncSuppressFragment());
+            return true;
+
         case CompatPath::KeepNative:
         case CompatPath::SkipShaderless:
         default:
@@ -636,6 +720,12 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
 
         const bool diffuse = inputs.known && inputs.diffuse;
         const bool texcoord = !inputs.known || inputs.texcoord0;
+
+        // The suppress pair reads POSITION only and binds on anything.
+        if (StartsWithLower(lower, "ose_fixedfunc_suppress_"))
+        {
+            return VertexInputFit::Unchanged;
+        }
 
         // The two-stage entry (fixedfunc2_vertex) has its own output
         // signature, so it only ever trades for its own no-colour variant.
@@ -733,9 +823,23 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         bool anyUnsupported = false;
         bool anyKnownFamily = false;
 
+        // The runtime does not resolve targets, so a pass this layer already
+        // converted (OSE_FixedFunc_*/OSE_Compat_*, all vs_4_0/ps_4_0) would
+        // otherwise read as "unsupported custom" on the next scheme miss.
+        auto ownProgram = [](const std::string& name, const std::string& target) {
+            if (!target.empty())
+            {
+                return false;
+            }
+            const std::string lower = ToLowerCopy(TrimAscii(name));
+            return StartsWithLower(lower, "ose_fixedfunc_") ||
+                   StartsWithLower(lower, "ose_compat_");
+        };
+
         if (desc.hasVertexRef)
         {
-            const bool targetOk = IsDx11SupportedShaderTarget(desc.vertexTarget);
+            const bool targetOk = IsDx11SupportedShaderTarget(desc.vertexTarget) ||
+                                  ownProgram(desc.vertexProgram, desc.vertexTarget);
             std::string mapped;
             // Map check is case-insensitive and also verifies the name is
             // not already a native OSE_*/SM4 delegate.
@@ -752,7 +856,8 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         }
         if (desc.hasFragmentRef)
         {
-            const bool targetOk = IsDx11SupportedShaderTarget(desc.fragmentTarget);
+            const bool targetOk = IsDx11SupportedShaderTarget(desc.fragmentTarget) ||
+                                  ownProgram(desc.fragmentProgram, desc.fragmentTarget);
             const bool known = IsKnownLegacyFamilyProgram(desc.fragmentProgram);
             if (!targetOk || known)
             {
@@ -828,6 +933,14 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             {
                 return CompatPath::SkipShaderless;
             }
+            // Synthesis retargets one-pass techniques only. A multi-pass
+            // fixed-function technique is suppressed when that is the only
+            // way to keep it from drawing shaderless.
+            if (desc.passCount > 1)
+            {
+                return desc.fallbackShaderless ? CompatPath::SuppressPass
+                                               : CompatPath::SkipShaderless;
+            }
             if (desc.textureUnits <= 0)
             {
                 return CompatPath::FixedFuncUntextured;
@@ -841,9 +954,16 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
                 return CompatPath::FixedFuncTextured2;
             }
             // Unsupported combine: aggressive generic is the only
-            // best-effort left; otherwise fail closed to the guard.
-            return config.aggressiveEnabled ? CompatPath::AggressiveGeneric
-                                            : CompatPath::SkipShaderless;
+            // best-effort render left. Failing that, declining is only safe
+            // when Ogre has a programmable technique to fall back to; if
+            // every fallback is shaderless the draw must be suppressed, or
+            // D3D11 throws on it every frame.
+            if (config.aggressiveEnabled)
+            {
+                return CompatPath::AggressiveGeneric;
+            }
+            return desc.fallbackShaderless ? CompatPath::SuppressPass
+                                           : CompatPath::SkipShaderless;
         case LegacyPassKind::UnknownCustom:
             return config.aggressiveEnabled ? CompatPath::AggressiveGeneric
                                             : CompatPath::SkipShaderless;
