@@ -69,6 +69,8 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        bool g_LobbyNicknameInputHookInstalled = false;
+
         static InlineDetour32 g_TextEntryAppendCharDetour = {};
 
         static FnUiTextEntryAppendChar g_BzrFn_TextEntryAppendCharOriginal = nullptr;
@@ -87,6 +89,11 @@ namespace BZROpenShim
             void* /*unusedEdx*/,
             uint8_t character)
         {
+            // The Create Game map search box, while it is being edited.
+            uint8_t routed = 0;
+            if (TryRouteMapSearchChar(character, g_BzrFn_TextEntryAppendCharOriginal, routed))
+                return routed;
+
             void* const entry = g_ActiveNicknameEntry;
             void* const parent = g_ActiveNicknameParent;
             if (entry && parent && g_BzrFn_TextEntryAppendChar &&

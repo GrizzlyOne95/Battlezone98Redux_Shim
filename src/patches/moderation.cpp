@@ -70,6 +70,8 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        std::vector<BanRecord> g_BanRecords;
+
         constexpr int kBanScanMaxSessionId = 64;
 
         constexpr char kBansConfigName[] = "bans.cfg";

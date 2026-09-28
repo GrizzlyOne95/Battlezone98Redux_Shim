@@ -70,6 +70,17 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        bool g_TraceSatelliteVisibility = false;
+        // 8 was sized for an opt-in probe and burns out after 8 seconds of
+        // cumulative satellite viewing -- far too few to walk the validation
+        // matrix now that the trace defaults on. Budget is consumed only while
+        // the overview is actually open and is rate-limited to one sample per
+        // g_SatelliteVisibilityLogIntervalMs.
+        volatile long g_SatelliteVisibilityLogBudget = 120;
+        uint32_t g_SatelliteVisibilityObjectLimit = 96;
+        DWORD g_SatelliteVisibilityLastTick = 0;
+        DWORD g_SatelliteVisibilityLogIntervalMs = 1000;
+
         static constexpr size_t kGameObjectEnemyShotOffset = 0x1E8;
 
         // CockpitRadar::Render's "a friendly is under attack" cooldown, the
