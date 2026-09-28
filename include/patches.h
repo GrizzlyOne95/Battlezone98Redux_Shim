@@ -76,7 +76,7 @@ namespace BZROpenShim
     inline void (*g_BZRFnPtr_JoinerEventOriginal)() = nullptr;
     inline void** g_MapListObject = nullptr;
 
-    // Helper functions (implemented in trampolines.cpp or bzr_hooks.cpp)
+    // Helper functions (implemented in trampolines.cpp and the src/patches hook files)
     void SetProducerBuildMenuOriginal(void* original);
     void InstallBriefingAssetOverrides();
     void InstallOgreMaterialCollisionGuard();
