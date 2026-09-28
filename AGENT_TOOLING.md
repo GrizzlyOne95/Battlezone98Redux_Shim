@@ -18,6 +18,8 @@ Prefer the stable `bzr-*` wrappers on `PATH` instead of package-specific install
 - **x32dbg, Cutter, Process Explorer, ReClass.NET, API Monitor** — primarily human-assisted surfaces; use only when they add value beyond the autonomous tools above.
 
 ## Useful Repo Surfaces
+The decompiler corpus (`reverse_engineering/repo_corpora/bzr_gog_best_effort/`), the PDB-derived corpus zips (`reverse_engineering/corpus_artifacts/`) and the 2016 prerelease executables are git-ignored here and never committed: this repository is public. They live in the private `Battlezone_Source` repository under `BZ1/Redux/openshim_re_corpus/`; run `reverse_engineering/Restore-ReCorpus.ps1` to copy them into a checkout.
+
 Before writing one-off tooling, check whether these already cover the task:
 - `scripts/ghidra_mcp_bz98.py` — Battlezone Ghidra/MCP wrapper.
 - `scripts/redux_debug_bridge.py` — debugger launch/read/probe/terminate + MCP bridge.

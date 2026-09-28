@@ -16,20 +16,12 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 namespace
 {
-    int g_Failures = 0;
-
-    void Check(bool condition, const char* what)
-    {
-        if (!condition)
-        {
-            std::printf("FAIL: %s\n", what);
-            g_Failures++;
-        }
-    }
-
     // Builds a small but structurally faithful mission. Lines are joined with
     // CRLF except those whose index falls in [lfBegin, lfEnd), which get a bare
     // LF -- the corruption shape this module exists to catch.
@@ -1289,11 +1281,11 @@ int main()
         Check(!r.endings.mixed(), "empty: not mixed");
     }
 
-    if (g_Failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
     {
         std::printf("bzn_analysis_tests: all checks passed\n");
         return 0;
     }
-    std::printf("bzn_analysis_tests: %d failure(s)\n", g_Failures);
+    std::printf("bzn_analysis_tests: %d failure(s)\n", OpenShimTest::FailureCount());
     return 1;
 }

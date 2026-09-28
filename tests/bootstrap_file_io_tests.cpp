@@ -21,21 +21,12 @@
 #include <stdexcept>
 #include <filesystem>
 #include <string>
+#include "test_check.h"
 
 namespace
 {
     using namespace BZROpenShim;
 
-    int g_Failures = 0;
-
-    void Check(bool condition, const char* what, int line)
-    {
-        if (condition) return;
-        std::printf("FAIL line %d: %s\n", line, what);
-        ++g_Failures;
-    }
-
-#define CHECK(c) Check((c), #c, __LINE__)
 
     // --- provider observations -----------------------------------------
     struct Observation
@@ -339,9 +330,9 @@ int wmain()
         std::filesystem::remove(logsDir / leaf, ec);
     }
 
-    if (g_Failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::printf("bootstrap file io tests FAILED (%d)\n", g_Failures);
+        std::printf("bootstrap file io tests FAILED (%d)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("bootstrap file io tests passed\n");

@@ -201,14 +201,8 @@ namespace BZROpenShim
     bool __cdecl HandleCommandHelpBan(uint16_t id, const char* cmd);
     void __cdecl HandleJoinerEvent(uint32_t lobby, uint32_t member, int changes);
 
-    // Map filter helpers (rel32 patch target).
-    uint32_t __fastcall MapFilters6Rel32(void* thisPtr, void* edx);
     uint32_t __cdecl ChunkRenderResolveHook(void* objectPtr, uint32_t variant);
     void* __cdecl ProducerBuildMenuCallHook(void* producerPtr, int slot, int flags);
-    void __fastcall MapFilterOnScrollUp(void* thisPtr);
-    void __fastcall MapFilterOnScrollDown(void* thisPtr);
-    void __cdecl MapFilters1Rebuild(void* listPtr);
-    void __cdecl MapFilters2Filter(void* listPtr, BzrString* filter);
     // AI weapon-mask hardpoint selection. Each replaces one call to a
     // __thiscall engine routine; the trampolines supply the third argument from
     // the patched routine's own stack frame.
@@ -238,14 +232,6 @@ namespace BZROpenShim
     extern float g_BanX;
     extern float g_BanY;
     extern float g_TurretAimPitchMultiplier;
-
-    // Map filter state flags recovered from BZR.exe create-screen analysis.
-    extern uint8_t g_MapFilterFlag11;
-    extern uint8_t g_MapFilterFlag12;
-    extern void* g_BzrFn_MapFilter8Check;
-    extern void* g_BzrFn_MapFilterCreate;
-    extern void* g_MapFilterListPtr;
-    extern const char* (__cdecl* g_BzrFn_Localize)(const char* section, const char* key);
 
     // Direct call targets for Vehicle Mod Fix 1/4 stub.
     extern void* g_BzrFn_VehicleFixPre;

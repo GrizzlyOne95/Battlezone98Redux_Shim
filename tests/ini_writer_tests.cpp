@@ -7,6 +7,9 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using BZROpenShim::IniLineIsSectionHeader;
 using BZROpenShim::IniLineMatchesKey;
@@ -14,30 +17,16 @@ using BZROpenShim::UpdateIniDocumentValueLossless;
 
 namespace
 {
-    int g_Failures = 0;
-    int g_Checks = 0;
-
     void CheckEq(const std::vector<std::string>& actual,
                  const std::vector<std::string>& expected,
                  const char* name)
     {
-        ++g_Checks;
-        if (actual == expected)
+        if (Check(actual == expected, name))
             return;
-        ++g_Failures;
-        std::printf("FAIL %s\n  expected (%zu lines):\n", name, expected.size());
-        for (const auto& l : expected) std::printf("    |%s|\n", l.c_str());
-        std::printf("  actual (%zu lines):\n", actual.size());
-        for (const auto& l : actual) std::printf("    |%s|\n", l.c_str());
-    }
-
-    void CheckTrue(bool condition, const char* name)
-    {
-        ++g_Checks;
-        if (condition)
-            return;
-        ++g_Failures;
-        std::printf("FAIL %s\n", name);
+        std::fprintf(stderr, "  expected (%zu lines):\n", expected.size());
+        for (const auto& l : expected) std::fprintf(stderr, "    |%s|\n", l.c_str());
+        std::fprintf(stderr, "  actual (%zu lines):\n", actual.size());
+        for (const auto& l : actual) std::fprintf(stderr, "    |%s|\n", l.c_str());
     }
 
     void Update(std::vector<std::string>& lines,
@@ -53,21 +42,21 @@ int main()
     // --- line parsers ----------------------------------------------------
     {
         std::string name;
-        CheckTrue(IniLineIsSectionHeader("[Display]", name) && name == "Display",
-                  "section header parses");
-        CheckTrue(IniLineIsSectionHeader("   [ Spaced ]  ; trailing", name) && name == " Spaced ",
-                  "indented header parses verbatim inside brackets");
-        CheckTrue(!IniLineIsSectionHeader("Display]", name), "missing open bracket rejected");
-        CheckTrue(!IniLineIsSectionHeader("; [Display]", name), "commented header rejected");
-        CheckTrue(!IniLineIsSectionHeader("[Display", name), "unterminated header rejected");
+        Check(IniLineIsSectionHeader("[Display]", name) && name == "Display",
+              "section header parses");
+        Check(IniLineIsSectionHeader("   [ Spaced ]  ; trailing", name) && name == " Spaced ",
+              "indented header parses verbatim inside brackets");
+        Check(!IniLineIsSectionHeader("Display]", name), "missing open bracket rejected");
+        Check(!IniLineIsSectionHeader("; [Display]", name), "commented header rejected");
+        Check(!IniLineIsSectionHeader("[Display", name), "unterminated header rejected");
 
-        CheckTrue(IniLineMatchesKey("JetFlames = 1", "JetFlames"), "simple key matches");
-        CheckTrue(IniLineMatchesKey("  jetflames=0", "JetFlames"), "case-insensitive + indent matches");
-        CheckTrue(IniLineMatchesKey("JetFlames\t = 1", "JetFlames"), "whitespace before = matches");
-        CheckTrue(!IniLineMatchesKey("; JetFlames = 1", "JetFlames"), "comment ; not matched");
-        CheckTrue(!IniLineMatchesKey("# JetFlames = 1", "JetFlames"), "comment # not matched");
-        CheckTrue(!IniLineMatchesKey("JetFlamesX = 1", "JetFlames"), "prefix key not matched");
-        CheckTrue(!IniLineMatchesKey("JetFlames", "JetFlames"), "no '=' not matched");
+        Check(IniLineMatchesKey("JetFlames = 1", "JetFlames"), "simple key matches");
+        Check(IniLineMatchesKey("  jetflames=0", "JetFlames"), "case-insensitive + indent matches");
+        Check(IniLineMatchesKey("JetFlames\t = 1", "JetFlames"), "whitespace before = matches");
+        Check(!IniLineMatchesKey("; JetFlames = 1", "JetFlames"), "comment ; not matched");
+        Check(!IniLineMatchesKey("# JetFlames = 1", "JetFlames"), "comment # not matched");
+        Check(!IniLineMatchesKey("JetFlamesX = 1", "JetFlames"), "prefix key not matched");
+        Check(!IniLineMatchesKey("JetFlames", "JetFlames"), "no '=' not matched");
     }
 
     // --- update existing key preserves everything else --------------------
@@ -248,6 +237,6 @@ int main()
         }, "repeated cycling never duplicates lines");
     }
 
-    std::printf("%d checks, %d failures\n", g_Checks, g_Failures);
-    return g_Failures == 0 ? 0 : 1;
+    std::printf("%d checks, %d failures\n", OpenShimTest::CheckCount(), OpenShimTest::FailureCount());
+    return OpenShimTest::ExitCode();
 }

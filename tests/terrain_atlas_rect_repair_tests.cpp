@@ -2,21 +2,14 @@
 
 #include <cstdio>
 #include <string>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim::TerrainAtlas;
 
 namespace
 {
-    int g_failures = 0;
-
-    void Check(bool condition, const char* what)
-    {
-        if (condition)
-            return;
-        std::fprintf(stderr, "FAIL: %s\n", what);
-        ++g_failures;
-    }
-
     // The first 16 rows of the shipped el_detail_atlas.csv, byte for byte,
     // including its CRLF terminators and its bare "0" fields. Rows 7 and 15
     // (0-based) carry the 0.825 typo.
@@ -255,7 +248,7 @@ int main()
         Check(second.outcome == RepairOutcome::AlreadyCorrect, "repair is idempotent");
     }
 
-    if (g_failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
         std::puts("terrain atlas rect repair tests passed");
-    return g_failures == 0 ? 0 : 1;
+    return OpenShimTest::ExitCode();
 }

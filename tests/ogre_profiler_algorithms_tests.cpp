@@ -6,27 +6,18 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include "test_check.h"
+
+using OpenShimTest::Require;
 
 namespace
 {
     using namespace BZROpenShim::OgreProfilerAlgorithms;
 
-    [[noreturn]] void Fail(const char* message)
-    {
-        std::fprintf(stderr, "ogre_profiler_algorithms_tests: %s\n", message);
-        std::exit(1);
-    }
-
-    void Require(bool condition, const char* message)
-    {
-        if (!condition)
-            Fail(message);
-    }
-
     void RequireNear(double actual, double expected, const char* message)
     {
         if (std::fabs(actual - expected) > 0.00001)
-            Fail(message);
+            OpenShimTest::Abort("%s", message);
     }
 
     void TestHistogramAndFrameBuckets()
