@@ -2932,7 +2932,7 @@ namespace BZROpenShim
             { "Map Filters+", "General", "MapFilterExtras", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
               ShimSettingApplyGroup::RestartRequired,
-              "Adds 5+ Players and Stock Maps to the Create Game map filter. Restart required." },
+              "Create Game map list: 5+ Players and Stock Maps filters, plus a search box. Restart required." },
             { "Editor Placement", "General", "EditorOverheadPlacementOrder", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,

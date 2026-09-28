@@ -914,6 +914,9 @@ namespace BZROpenShim
         bool TryApplyCachedFlagPayload(const char* source);
         void InstallBzrNetRouteObserverIfPossible();
         void InstallMapFilterExtrasIfEnabled();
+        // Hands a character to the Create Game map search box while it is
+        // being edited; false leaves it to the caller. mp_map_filter_extras.cpp.
+        bool TryRouteMapSearchChar(uint8_t character, FnUiTextEntryAppendChar original, uint8_t& result);
         bool IsWidgetLiveChildOfParent(void* parent, void* widget);
         const char* EnsureInvalidThumbnailTextureName();
         void ShowNicknameApplyConfirmation(void* entry, BzrNetNicknameResult result);

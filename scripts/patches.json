@@ -1068,6 +1068,36 @@
       "kind": "data"
     },
     {
+      "name": "MultiCreateFactoryCall",
+      "address": "0x007C8591",
+      "expected": "E8 EA E2 FC FF 89 85 A4 FC FF FF EB 0A C7 85 A4"
+    },
+    {
+      "name": "MultiCreateScreenCtor",
+      "address": "0x00796880",
+      "expected": "55 8B EC 6A FF 68 78 F5 85 00 64 A1 00 00 00 00"
+    },
+    {
+      "name": "MapFilterRefresh",
+      "address": "0x007A4460",
+      "expected": "55 8B EC 83 EC 28 89 4D FC C7 45 F8 00 00 00 00"
+    },
+    {
+      "name": "SelectlistSelectedText",
+      "address": "0x007CB0C0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 4C 01 00 00"
+    },
+    {
+      "name": "MapComponentSelectedEntry",
+      "address": "0x007A4220",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 78 38 00 7C 27"
+    },
+    {
+      "name": "MultiCreateScreenSlot",
+      "address": "0x0094555C",
+      "kind": "data"
+    },
+    {
       "name": "LoadScreenClearSelection",
       "address": "0x00482860",
       "expected": "55 8B EC 8B 45 08 50 B9 E0 FE 94 00 E8 9F CE F9"
