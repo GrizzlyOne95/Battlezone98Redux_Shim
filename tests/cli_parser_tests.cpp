@@ -27,12 +27,12 @@
 #include <cstdlib>
 #include <cstdint>
 #include <algorithm>
+#include "test_check.h"
 
 // Portable case-insensitive compare helpers: MSVC uses _strnicmp/_stricmp
 // while POSIX (g++ test harness) provides strncasecmp/strcasecmp.
 #if defined(_MSC_VER)
 #include <string.h>
-#include "test_check.h"
 #define strncasecmp _strnicmp
 #define strcasecmp _stricmp
 #endif
