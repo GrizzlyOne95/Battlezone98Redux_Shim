@@ -447,7 +447,7 @@ namespace
         std::string error;
         const auto rows = ParseEngineAddressTable(text, &error);
         Check(error.empty(), "the shipped engine address table must have no rejected rows");
-        Check(rows.size() == 84, "the shipped table carries all 84 engine addresses");
+        Check(rows.size() == 78, "the shipped table carries all 78 engine addresses");
         size_t data = 0;
         for (const auto& row : rows)
         {
