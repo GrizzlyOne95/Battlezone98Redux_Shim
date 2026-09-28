@@ -1,0 +1,15 @@
+# Historical dry-run proposal; review scope before an authorized rewrite.
+# Tier 1 - leaked PDB and derived corpora
+battlezone98redux.pdb
+reverse_engineering/decompilation_from_1.5_exe-pdb/Redux/
+reverse_engineering/decompilation_from_1.5_exe-pdb/1.5/
+reverse_engineering/repo_corpora/
+reverse_engineering/corpus_artifacts/
+tmp/ghidra_inventory_live/
+# Tier 2 - third-party / prerelease binaries and build output
+reverse_engineering/prerelease_2016/exes/
+reverse_engineering/prerelease_2016/removed_files/MakeSTB.exe
+reverse_engineering/prerelease_2016/removed_files/strlkup.dll
+reverse_engineering/workshop/
+tmp/load_test.exe
+tmp/load_test.obj
