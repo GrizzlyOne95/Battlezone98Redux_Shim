@@ -68,6 +68,8 @@
 
 namespace BZROpenShim
 {
+    FnGameObjectClassBuild g_BzrFn_SprayEmitterBuildOriginal = nullptr;
+
     static bool TraceAttackRevealEnabled()
     {
         static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_ATTACK_REVEAL");
@@ -82,6 +84,17 @@ namespace BZROpenShim
 
     namespace Hooks
     {
+        volatile long g_AttackRevealTraceBudget = 64;
+        bool g_OwnedObjectRevealFixEnabled =
+            kOwnedObjectRevealFixEnabledDefault;
+        bool g_OwnedObjectRevealFixActive =
+            kOwnedObjectRevealFixEnabledDefault;
+        volatile long g_OwnedObjectRevealTraceBudget =
+            kOwnedObjectRevealTraceBudgetDefault;
+        bool g_AttackRevealEnabled = kAttackRevealEnabledDefault;
+        bool g_TraceDamageReveal = false;
+        volatile long g_DamageRevealTraceBudget = 0;
+
         // GameObject::SetDamageFlags, and the obj76 -> GameObject accessor it
         // uses itself (0x00479F30). Both are read straight from the shipped
         // image; nothing about the DAMAGE layout is assumed beyond the two

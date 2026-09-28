@@ -70,6 +70,9 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        std::unordered_map<uintptr_t, ChunkResolvedBindingEntry> g_ChunkResolvedBindingCache = {};
+        DWORD g_ChunkResolvedBindingLastPruneTick = 0;
+
         static std::unordered_map<uintptr_t, ChunkObjectIdentityCacheEntry> g_ChunkObjectIdentityCache = {};
 
         static DWORD g_ChunkObjectIdentityLastRefreshTick = 0;

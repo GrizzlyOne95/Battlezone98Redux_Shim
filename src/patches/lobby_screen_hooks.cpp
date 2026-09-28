@@ -69,6 +69,8 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        bool g_LobbyNicknameInputHookInstalled = false;
+
         static InlineDetour32 g_TextEntryAppendCharDetour = {};
 
         static FnUiTextEntryAppendChar g_BzrFn_TextEntryAppendCharOriginal = nullptr;

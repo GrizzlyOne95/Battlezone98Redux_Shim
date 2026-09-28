@@ -1,7 +1,9 @@
 #pragma once
-// Internal surface between bzr_hooks.cpp (engine bindings, detour machinery,
-// openshim.ini helpers, live feature re-apply) and bzr_options_ui.cpp (the
-// injected input-binding + OpenShim settings pages). Not a public API.
+// Internal surface between the hook layer (engine bindings in bzr_hooks.cpp,
+// detour machinery in hook_patch_helpers.cpp, openshim.ini helpers in
+// config_helpers.cpp, live feature re-apply in global_feature_config.cpp) and
+// bzr_options_ui.cpp (the injected input-binding + OpenShim settings pages).
+// Not a public API.
 
 #include <array>
 #include <cstddef>
@@ -118,7 +120,7 @@ namespace BZROpenShim
     extern FnMapKeyNameFromCode g_BzrFn_MapKeyNameFromCode;
     extern FnReloadGameKeyMap g_BzrFn_ReloadGameKeyMap;
 
-    // --- inline-detour machinery (implemented in bzr_hooks.cpp) ---
+    // --- inline-detour machinery (implemented in hook_patch_helpers.cpp) ---
     inline constexpr size_t kInlineDetourMaxPatchLen = 16;
 
     struct InlineDetour32
@@ -140,7 +142,7 @@ namespace BZROpenShim
                               const uint8_t* expectedBytes,
                               size_t expectedLen);
 
-    // --- openshim.ini / environment helpers (implemented in bzr_hooks.cpp) ---
+    // --- openshim.ini / environment helpers (implemented in config_helpers.cpp) ---
     inline constexpr char kUserConfigFileName[] = "openshim.ini";
     bool EnvFlagEnabled(const char* name);
     std::filesystem::path GetMainModuleDirectory();

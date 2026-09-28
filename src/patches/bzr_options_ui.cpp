@@ -2,7 +2,8 @@
 // sub-pages injected over cUI_OptionsInput / cUI_OptionsParent). Split out of
 // bzr_hooks.cpp; the shared engine-binding surface (resolved fn pointers,
 // inline-detour machinery, openshim.ini helpers, live feature re-apply) is
-// declared in bzr_options_ui.h and implemented by bzr_hooks.cpp.
+// declared in bzr_options_ui.h and implemented by bzr_hooks.cpp and the
+// helper files split out of it.
 #include "bzr_options_ui.h"
 #include "bool_token.h"
 
