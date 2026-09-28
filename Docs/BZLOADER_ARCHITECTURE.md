@@ -213,9 +213,10 @@ anything -- an export can be called on any thread at any time, including while
 someone else holds the loader lock, so a thunk that hit `LoadLibrary` would be
 a deadlock waiting to happen. With no provider installed it returns the
 documented unavailable value (`FALSE`, `0`, `0.0f`, `nullptr`) and counts the
-call. Resolution costs one `GetProcAddress` for the whole table, not one per
-export: the bootstrap calls `SdkBridge::InstallProviderFromModule` once against
-the already-loaded plugin, which fetches `OpenShimSdkProvider_GetTable`.
+call. No export resolves itself: the plugin installs the whole table once,
+from `BZPlugin_Load`, by calling `SdkProvider::InstallBuiltIn`, whose
+`SdkBridge::InstallProvider` call forwards through the private bootstrap API
+(`installSdkProvider`) into the bridge in `winmm.dll`.
 
 The table follows the same append-only rules as the plugin ABI -- `structSize`
 says what is really there, fields are only added at the end, every read is
@@ -225,12 +226,12 @@ through uninitialised memory. The table itself is built with C++20 designated
 initializers, which makes a mis-ordered slot a compile error rather than a
 silently swapped function.
 
-While the runtime still ships inside `winmm.dll`, the provider is installed
-directly from `DllMain` (a pointer store into a static table -- no allocation,
-no loader work), which keeps behaviour identical to calling the implementation
-directly. When the provider moves into the plugin that call is replaced by
-`InstallProviderFromModule`, and the window before the plugin loads becomes
-real -- which is exactly why the thunks fail safely and count.
+Installing is a pointer store into a static table -- no allocation, no loader
+work. The window before the plugin loads is real, which is exactly why the
+thunks fail safely and count. (A pull-style `InstallProviderFromModule`, which
+would have had the bootstrap `GetProcAddress` the plugin's
+`OpenShimSdkProvider_GetTable`, was written for the split but never called;
+it was deleted on 2026-09-27, audit P2-4. The getter export stays.)
 
 This is also what removed the `winmm_proxy.cpp -> bzr_hooks.cpp` dependency:
 the marshalling that needed `bzr_hooks` moved to
@@ -389,9 +390,9 @@ leaves the process as it was.
 `winmm.dll` still exports 271 symbols: every `OpenShim*` SDK name, the seven
 mangled v1 C++ symbols, and the WinMM forwarders. Exactly three left, all
 predicted and none of them published API -- `OpenShimSdkProvider_GetTable`
-(the plugin's own getter, which the bootstrap now resolves *from* the plugin)
-and the two `walker_cockpit_trace.cpp` debug hooks that were never in
-`winmm.def`.
+(the plugin's own getter, now exported from the plugin; nothing resolves it
+today because the plugin pushes its table instead) and the two
+`walker_cockpit_trace.cpp` debug hooks that were never in `winmm.def`.
 
 ## Path and loading security
 

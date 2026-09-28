@@ -6,7 +6,6 @@
 //  - Hierarchical depth tracked thread-local; indentation derived from depth.
 //  - Summary buckets accumulated per transition and emitted at transition End.
 //  - QPC-based monotonic timer.
-//  - Verbose lines are buffered and flushed as a block to avoid log interleaving.
 //  - All public entry points are noexcept and never throw.
 //
 // SPDX-License-Identifier: MIT
@@ -32,13 +31,10 @@ namespace BZROpenShim::UiPerf
     namespace
     {
         constexpr const char* kComponent = "uiperf";
-        constexpr double kDefaultStallThresholdMs = 250.0;
-        constexpr size_t kMaxBufferedLines = 4096;
+        constexpr double kStallThresholdMs = 250.0;
 
         std::atomic<bool> g_Enabled{ false };
-        std::atomic<bool> g_Verbose{ false };
         std::atomic<bool> g_Initialized{ false };
-        std::atomic<double> g_StallThresholdMs{ kDefaultStallThresholdMs };
 
         // QPC frequency cached at first use.
         uint64_t QpcFrequency() noexcept
@@ -57,8 +53,6 @@ namespace BZROpenShim::UiPerf
             int depth = 0;
             uint64_t lastHeartbeatTicks = 0;
             const char* lastMarker = nullptr;
-            std::vector<std::string> verboseBuffer;
-            bool bufferActive = false;
         };
         thread_local ThreadState t_state;
 
@@ -75,7 +69,7 @@ namespace BZROpenShim::UiPerf
         thread_local std::vector<CatStackEntry> t_catStack;
 
         // Transition-level aggregation (protected by mutex because shell
-        // notifications may come from a different path than ScopedTransition).
+        // notifications and the scan/Ogre recorders can run on other threads).
         struct CategoryBucket
         {
             double totalMs = 0.0; // exclusive for percentages
@@ -86,7 +80,6 @@ namespace BZROpenShim::UiPerf
         std::unordered_map<std::string, CategoryBucket> g_CategoryBuckets;
         std::string g_ActiveTransitionLabel;
         uint64_t g_ActiveTransitionStart = 0;
-        std::vector<std::string> g_ActiveNotes;
         bool g_TransitionActive = false;
 
         static void AddLeafCategoryTimeLocked(const char* category, double ms) noexcept
@@ -103,11 +96,6 @@ namespace BZROpenShim::UiPerf
             b.totalMs += ms;
             b.inclusiveMs += ms;
             b.calls += 1;
-        }
-
-        static void PushCategoryLocked(const std::string& cat, uint64_t start) noexcept
-        {
-            t_catStack.push_back(CatStackEntry{cat, start, 0.0});
         }
 
         static void PopCategoryLocked(const std::string& cat, uint64_t end) noexcept
@@ -155,23 +143,9 @@ namespace BZROpenShim::UiPerf
             return std::string(static_cast<size_t>(depth * 2), ' ');
         }
 
-        void BufferOrEmitVerbose(const std::string& line) noexcept
-        {
-            if (t_state.bufferActive)
-            {
-                if (t_state.verboseBuffer.size() < kMaxBufferedLines)
-                    t_state.verboseBuffer.push_back(line);
-            }
-            else
-            {
-                EmitLocked(line.c_str());
-            }
-        }
-
         void ResetCategoryBucketsLocked() noexcept
         {
             g_CategoryBuckets.clear();
-            g_ActiveNotes.clear();
             t_catStack.clear();
         }
 
@@ -222,14 +196,6 @@ namespace BZROpenShim::UiPerf
                         "  unattributed=%.2fms", unattributed);
                     out += "\n";
                     out += line;
-                }
-            }
-            if (!g_ActiveNotes.empty())
-            {
-                for (const auto& n : g_ActiveNotes)
-                {
-                    out += "\n  note: ";
-                    out += n;
                 }
             }
             return out;
@@ -337,7 +303,6 @@ namespace BZROpenShim::UiPerf
         if (readBoolEnv("OPENSHIM_UI_PERFORMANCE_VERBOSE", envEnabled)) verbose = envEnabled;
 
         g_Enabled.store(enabled, std::memory_order_relaxed);
-        g_Verbose.store(verbose, std::memory_order_relaxed);
 
         LogShimA(LogLevel::Info, kComponent,
             "UiPerformance init enabled=%d verbose=%d ini=%s",
@@ -345,7 +310,6 @@ namespace BZROpenShim::UiPerf
     }
 
     bool IsEnabled() noexcept { return g_Enabled.load(std::memory_order_relaxed); }
-    bool IsVerbose() noexcept { return g_Verbose.load(std::memory_order_relaxed); }
 
     uint64_t NowTicks() noexcept
     {
@@ -359,13 +323,6 @@ namespace BZROpenShim::UiPerf
         const uint64_t freq = QpcFrequency();
         if (freq == 0) return 0.0;
         return (static_cast<double>(ticks) * 1000.0) / static_cast<double>(freq);
-    }
-
-    double TicksToUs(uint64_t ticks) noexcept
-    {
-        const uint64_t freq = QpcFrequency();
-        if (freq == 0) return 0.0;
-        return (static_cast<double>(ticks) * 1'000'000.0) / static_cast<double>(freq);
     }
 
     // ------------------------------------------------------------------
@@ -392,12 +349,6 @@ namespace BZROpenShim::UiPerf
             "[UIPERF] %sBEGIN %s", indent.c_str(), m_name ? m_name : "<unnamed>");
         EmitLocked(line);
         ++t_state.depth;
-        // Enable verbose buffering if requested.
-        if (IsVerbose() && !t_state.bufferActive)
-        {
-            t_state.bufferActive = true;
-            t_state.verboseBuffer.clear();
-        }
     }
 
     ScopedPhase::ScopedPhase(const std::string& name, const char* category)
@@ -420,16 +371,11 @@ namespace BZROpenShim::UiPerf
             "[UIPERF] %sBEGIN %s", indent.c_str(), m_name);
         EmitLocked(line);
         ++t_state.depth;
-        if (IsVerbose() && !t_state.bufferActive)
-        {
-            t_state.bufferActive = true;
-            t_state.verboseBuffer.clear();
-        }
     }
 
     ScopedPhase::~ScopedPhase()
     {
-        if (!m_active || m_dismissed) return;
+        if (!m_active) return;
         const uint64_t end = NowTicks();
         const double ms = TicksToMs(end - m_start);
         if (m_hasCategory)
@@ -444,157 +390,6 @@ namespace BZROpenShim::UiPerf
         _snprintf_s(line, _countof(line), _TRUNCATE,
             "[UIPERF] %sEND %s %.2fms", indent.c_str(), m_name ? m_name : "<unnamed>", ms);
         EmitLocked(line);
-
-        // If this was the outermost phase, flush verbose buffer.
-        if (t_state.depth == 0 && t_state.bufferActive)
-        {
-            for (const auto& v : t_state.verboseBuffer)
-                EmitLocked(v.c_str());
-            t_state.verboseBuffer.clear();
-            t_state.bufferActive = false;
-        }
-    }
-
-    void ScopedPhase::Annotate(const char* key, const char* value)
-    {
-        if (!m_active || !IsVerbose()) return;
-        const std::string indent = IndentForDepth(m_depth + 1);
-        char line[640] = {};
-        _snprintf_s(line, _countof(line), _TRUNCATE,
-            "[UIPERF] %s%s=%s", indent.c_str(), key ? key : "?", value ? value : "");
-        BufferOrEmitVerbose(line);
-    }
-
-    void ScopedPhase::Annotate(const char* key, int64_t value)
-    {
-        if (!m_active || !IsVerbose()) return;
-        const std::string indent = IndentForDepth(m_depth + 1);
-        char line[640] = {};
-        _snprintf_s(line, _countof(line), _TRUNCATE,
-            "[UIPERF] %s%s=%lld", indent.c_str(), key ? key : "?", static_cast<long long>(value));
-        BufferOrEmitVerbose(line);
-    }
-
-    void ScopedPhase::Annotate(const char* key, uint64_t value)
-    {
-        if (!m_active || !IsVerbose()) return;
-        const std::string indent = IndentForDepth(m_depth + 1);
-        char line[640] = {};
-        _snprintf_s(line, _countof(line), _TRUNCATE,
-            "[UIPERF] %s%s=%llu", indent.c_str(), key ? key : "?", static_cast<unsigned long long>(value));
-        BufferOrEmitVerbose(line);
-    }
-
-    void ScopedPhase::Annotate(const char* key, double valueMs)
-    {
-        if (!m_active || !IsVerbose()) return;
-        const std::string indent = IndentForDepth(m_depth + 1);
-        char line[640] = {};
-        _snprintf_s(line, _countof(line), _TRUNCATE,
-            "[UIPERF] %s%s=%.2fms", indent.c_str(), key ? key : "?", valueMs);
-        BufferOrEmitVerbose(line);
-    }
-
-    // ------------------------------------------------------------------
-    // ScopedTransition
-    // ------------------------------------------------------------------
-    ScopedTransition::ScopedTransition(const char* label)
-        : m_label(label ? label : "<unknown>")
-        , m_start(NowTicks())
-        , m_active(IsEnabled())
-    {
-        if (!m_active) return;
-        {
-            std::lock_guard<std::mutex> lock(g_Mutex);
-            g_ActiveTransitionLabel = m_label;
-            g_ActiveTransitionStart = m_start;
-            g_TransitionActive = true;
-            ResetCategoryBucketsLocked();
-        }
-        char line[512] = {};
-        _snprintf_s(line, _countof(line), _TRUNCATE,
-            "[UIPERF] transition begin %s", m_label.c_str());
-        EmitLocked(line);
-        // Start stall heartbeat baseline.
-        t_state.lastHeartbeatTicks = m_start;
-        t_state.lastMarker = "transition_begin";
-    }
-
-    ScopedTransition::ScopedTransition(const std::string& label)
-        : m_label(label)
-        , m_start(NowTicks())
-        , m_active(IsEnabled())
-    {
-        if (!m_active) return;
-        {
-            std::lock_guard<std::mutex> lock(g_Mutex);
-            g_ActiveTransitionLabel = m_label;
-            g_ActiveTransitionStart = m_start;
-            g_TransitionActive = true;
-            ResetCategoryBucketsLocked();
-        }
-        char line[512] = {};
-        _snprintf_s(line, _countof(line), _TRUNCATE,
-            "[UIPERF] transition begin %s", m_label.c_str());
-        EmitLocked(line);
-        t_state.lastHeartbeatTicks = m_start;
-        t_state.lastMarker = "transition_begin";
-    }
-
-    ScopedTransition::~ScopedTransition()
-    {
-        if (!m_active) return;
-        const uint64_t end = NowTicks();
-        const double totalMs = TicksToMs(end - m_start);
-        char line[256] = {};
-        _snprintf_s(line, _countof(line), _TRUNCATE,
-            "[UIPERF] transition end   %s elapsed=%.2fms",
-            m_label.c_str(), totalMs);
-        EmitLocked(line);
-
-        std::string summary;
-        {
-            std::lock_guard<std::mutex> lock(g_Mutex);
-            summary = FormatSummaryLocked(m_label.c_str(), totalMs);
-            g_TransitionActive = false;
-        }
-        EmitLocked(summary.c_str());
-
-        // Flush verbose buffer if any.
-        if (t_state.bufferActive)
-        {
-            for (const auto& v : t_state.verboseBuffer)
-                EmitLocked(v.c_str());
-            t_state.verboseBuffer.clear();
-            t_state.bufferActive = false;
-        }
-        t_state.depth = 0;
-    }
-
-    void ScopedTransition::AddCategoryTime(const char* category, double ms) noexcept
-    {
-        if (!m_active || !category) return;
-        std::lock_guard<std::mutex> lock(g_Mutex);
-        auto& b = g_CategoryBuckets[category];
-        b.totalMs += ms;
-        b.calls += 1;
-    }
-
-    void ScopedTransition::AddCategoryTime(const char* category, uint64_t ticks) noexcept
-    {
-        AddCategoryTime(category, TicksToMs(ticks));
-    }
-
-    void ScopedTransition::Note(const char* fmt, ...)
-    {
-        if (!m_active || !fmt) return;
-        char buf[512] = {};
-        va_list args;
-        va_start(args, fmt);
-        _vsnprintf_s(buf, _countof(buf), _TRUNCATE, fmt, args);
-        va_end(args);
-        std::lock_guard<std::mutex> lock(g_Mutex);
-        g_ActiveNotes.emplace_back(buf);
     }
 
     // ------------------------------------------------------------------
@@ -687,8 +482,7 @@ namespace BZROpenShim::UiPerf
             return;
         }
         const double gapMs = TicksToMs(now - t_state.lastHeartbeatTicks);
-        const double threshold = g_StallThresholdMs.load(std::memory_order_relaxed);
-        if (gapMs >= threshold)
+        if (gapMs >= kStallThresholdMs)
         {
             char line[512] = {};
             _snprintf_s(line, _countof(line), _TRUNCATE,
@@ -702,29 +496,6 @@ namespace BZROpenShim::UiPerf
         t_state.lastMarker = marker;
     }
 
-    void SetStallThresholdMs(double ms) noexcept
-    {
-        if (ms < 1.0) ms = 1.0;
-        g_StallThresholdMs.store(ms, std::memory_order_relaxed);
-    }
-
-    void EmitSummary(const char* label, uint64_t startTicks, uint64_t endTicks) noexcept
-    {
-        if (!IsEnabled()) return;
-        const double totalMs = TicksToMs(endTicks - startTicks);
-        char line[256] = {};
-        _snprintf_s(line, _countof(line), _TRUNCATE,
-            "[UIPERF] transition end   %s elapsed=%.2fms (emit)",
-            label ? label : "<unknown>", totalMs);
-        EmitLocked(line);
-        std::string summary;
-        {
-            std::lock_guard<std::mutex> lock(g_Mutex);
-            summary = FormatSummaryLocked(label, totalMs);
-        }
-        EmitLocked(summary.c_str());
-    }
-
     void Log(const char* fmt, ...) noexcept
     {
         if (!IsEnabled()) return;
@@ -732,33 +503,6 @@ namespace BZROpenShim::UiPerf
         va_start(args, fmt);
         LogLocked(LogLevel::Info, fmt, args);
         va_end(args);
-    }
-
-    void LogVerbose(const char* fmt, ...) noexcept
-    {
-        if (!IsEnabled() || !IsVerbose()) return;
-        char buf[768] = {};
-        va_list args;
-        va_start(args, fmt);
-        _vsnprintf_s(buf, _countof(buf), _TRUNCATE, fmt, args);
-        va_end(args);
-        const int depth = t_state.depth;
-        const std::string indent = IndentForDepth(depth);
-        std::string line = "[UIPERF] ";
-        line += indent;
-        line += buf;
-        BufferOrEmitVerbose(line);
-    }
-
-    void Flush() noexcept
-    {
-        if (t_state.bufferActive)
-        {
-            for (const auto& v : t_state.verboseBuffer)
-                EmitLocked(v.c_str());
-            t_state.verboseBuffer.clear();
-            t_state.bufferActive = false;
-        }
     }
 
     void NotifyShellRequest(int screenId) noexcept
