@@ -1035,6 +1035,25 @@ namespace BZROpenShim
                 target = static_cast<uint32_t>(
                     reinterpret_cast<uintptr_t>(PersonSniperScanGetWeaponGuard));
             }
+            else if (p.name == "HoverCraft Turbo Sound Stop Guard") {
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                const uint32_t expected =
+                    HookEngine::ResolveNamedAddress("Sound::Find");
+                const uint32_t listHead =
+                    HookEngine::ResolveNamedAddress("Sound::ListHead");
+                if (!original || expected == 0 || listHead == 0 ||
+                    reinterpret_cast<uintptr_t>(original) != expected) {
+                    Log(L"[SNDFIX] turbo-stop call identity failed site=0x%08X original=%p expected=0x%08X listHead=0x%08X; leaving stock call\n",
+                        p.address - 1, original, expected, listHead);
+                    continue;
+                }
+                SetHoverCraftTurboSoundResolves(
+                    original, reinterpret_cast<void*>(static_cast<uintptr_t>(listHead)));
+                target = static_cast<uint32_t>(
+                    reinterpret_cast<uintptr_t>(HoverCraftTurboSoundStopFindThunk));
+            }
             else if (p.name == "Pilot Carrier Null Guard") {
                 void* original = isSteam
                     ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
