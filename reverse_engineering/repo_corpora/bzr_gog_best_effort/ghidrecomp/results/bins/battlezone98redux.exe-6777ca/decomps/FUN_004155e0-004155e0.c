@@ -1,8 +1,0 @@
-
-void FUN_004155e0(void)
-
-{
-  FUN_00417460();
-  return;
-}
-

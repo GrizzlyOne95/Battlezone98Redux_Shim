@@ -2,22 +2,10 @@
 
 #include <cstdio>
 #include <string>
+#include "test_check.h"
 
 namespace
 {
-    int g_failures = 0;
-
-    void Check(bool cond, const char* what, int line)
-    {
-        if (!cond)
-        {
-            ++g_failures;
-            std::printf("FAIL %d: %s\n", line, what);
-        }
-    }
-
-#define CHECK(c) Check((c), #c, __LINE__)
-
     using BZROpenShim::BoolToken::TryParse;
 
     // 1 = parses true, 0 = parses false, -1 = unrecognized.
@@ -127,7 +115,7 @@ int main()
     TestUnrecognizedLeavesOutputAlone();
     TestLengthIsHonored();
     TestStringOverload();
-    if (g_failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
         std::printf("bool_token_tests: all passed\n");
-    return g_failures == 0 ? 0 : 1;
+    return OpenShimTest::ExitCode();
 }

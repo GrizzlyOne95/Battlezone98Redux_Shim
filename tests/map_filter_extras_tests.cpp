@@ -2,22 +2,10 @@
 
 #include <cstdio>
 #include <initializer_list>
+#include "test_check.h"
 
 namespace
 {
-    int g_failures = 0;
-
-    void Check(bool cond, const char* what, int line)
-    {
-        if (!cond)
-        {
-            ++g_failures;
-            std::printf("FAIL %d: %s\n", line, what);
-        }
-    }
-
-#define CHECK(c) Check((c), #c, __LINE__)
-
     using namespace BZROpenShim::MapFilterExtras;
 
     void TestKeysRoundTripAndStockKeysAreNotExtras()
@@ -77,9 +65,9 @@ int main()
     TestStockMeansWorkshopIdZero();
     TestNoneKeepsEverything();
     TestSearch();
-    if (g_failures)
+    if (OpenShimTest::FailureCount())
     {
-        std::printf("%d failure(s)\n", g_failures);
+        std::printf("%d failure(s)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("map_filter_extras_tests: ok\n");

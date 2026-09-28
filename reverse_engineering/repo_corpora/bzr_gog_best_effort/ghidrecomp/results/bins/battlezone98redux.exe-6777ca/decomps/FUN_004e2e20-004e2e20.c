@@ -1,8 +1,0 @@
-
-void __fastcall FUN_004e2e20(int param_1)
-
-{
-  *(undefined1 *)(param_1 + 0x239) = 1;
-  return;
-}
-
