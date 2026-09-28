@@ -1,5 +1,6 @@
 #include "ogre_animation_profiler.h"
 #include "ogre_profiler_algorithms.h"
+#include "diagnostic_output_cap.h"
 #include "diagnostic_switch.h"
 #include "ogre_runtime.h"
 #include "shim_log.h"
@@ -77,6 +78,11 @@ namespace BZROpenShim
         // otherwise an ini without the key silently turns on seven detours, the
         // D3D vtable observers and a CSV beside the executable.
         constexpr int kDefaultProfilerEnabled = 0;
+        // Size cap for openshim_ogre_profile.csv, in MiB (0 = no cap). The
+        // environment wins over [Diagnostics], as for the enable switch.
+        // Default: DiagnosticOutputCap::kDefaultOgreCsvCapMiB.
+        constexpr char kCsvCapEnvironment[] = "OPENSHIM_PROFILE_OGRE_CSV_MAX_MB";
+        constexpr char kCsvCapIniKey[] = "ProfileOgreCsvMaxMB";
         constexpr DWORD kPollSleepMs = 25;
         constexpr ULONGLONG kReportIntervalMs = 1000;
         constexpr size_t kBloomWords = 1024; // 65536 bits; low collision rate for BZR-scale scenes.
