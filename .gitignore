@@ -59,7 +59,10 @@ battlezone98redux.exe.unpacked.exe
 
 # ---------------------------------------------------------------------------
 # Reverse-engineering generated corpora and scratch output
-# Keep intentional repo_corpora/bzr_gog_best_effort content tracked.
+# Decompiler output, PDB-derived data and game binaries never go in this public
+# repository. The RE corpus lives in the private Battlezone_Source repository
+# (BZ1/Redux/openshim_re_corpus); reverse_engineering/Restore-ReCorpus.ps1
+# copies it into the ignored paths below.
 # ---------------------------------------------------------------------------
 architecture_reference.md
 reverse_engineering/asset_audit/
@@ -79,7 +82,12 @@ reverse_engineering/decompilation_from_1.5_exe-pdb/ghidra*/
 reverse_engineering/decompilation_from_1.5_exe-pdb/pdb/
 reverse_engineering/decompilation_from_1.5_exe-pdb/pe/
 reverse_engineering/decompilation_from_1.5_exe-pdb/*.java
-reverse_engineering/corpus_artifacts/legacy_15227_clean_pdb_c.zip
+reverse_engineering/corpus_artifacts/
+reverse_engineering/repo_corpora/
+reverse_engineering/prerelease_2016/exes/
+reverse_engineering/prerelease_2016/removed_files/*.exe
+reverse_engineering/prerelease_2016/removed_files/*.dll
+tmp/ghidra_inventory_live/
 reverse_engineering/bzr_audio_re*/
 reverse_engineering/badlands/
 .ghidra_tmp/
