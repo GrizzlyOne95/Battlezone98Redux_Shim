@@ -164,8 +164,6 @@ namespace BZROpenShim::SunFlash
     // Drops the latch and re-reads. g_SunFlashSuppress is sampled by the thunk
     // on every flash, so a settings-page write takes effect on the next frame.
     void ReloadConfig();
-    bool IsSuppressionEnabled();
-    bool IsTraceEnabled();
 
     // Instruction-anchored check that the CALL at kAddFlashCallOpcodeAddr is
     // still a CALL rel32 resolving to ScreenFlash::AddFlash. Must return true
@@ -176,12 +174,6 @@ namespace BZROpenShim::SunFlash
     bool VerifyCallSite(int maxAttempts, unsigned delayMs);
     void* ThunkAddress();
 
+    // Logs the installed state and the arm the thunk will take.
     void SetPatchInstalled(bool installed);
-    bool IsPatchInstalled();
-
-    // What the arm actually did. A suppressed count of zero after a session
-    // spent looking at the sun means the arm never engaged, not that
-    // suppression made no difference.
-    long SuppressedCallCount();
-    long PassedThroughCallCount();
 }

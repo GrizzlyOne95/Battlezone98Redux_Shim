@@ -27,7 +27,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -54,11 +53,6 @@ namespace BZROpenShim::UiPerfHooks
         std::mutex g_ActiveMutex;
         std::unordered_map<std::string, ActiveOp> g_ActiveOps;
 
-        // Re-entrancy guard for discovery scopes.
-        thread_local int t_modDiscoveryDepth = 0;
-        thread_local uint64_t t_modDiscoveryStart = 0;
-        std::string g_ModDiscoveryContext;
-
         // Shell hook trampolines and state.
         struct ShellHook
         {
@@ -79,7 +73,6 @@ namespace BZROpenShim::UiPerfHooks
         ShellHook g_MultiplayerLobbyCtorHook;
         ShellHook g_MultiplayerLobbyDtorHook;
         std::atomic<int> g_ShellHookInstallState{ 0 }; // 0=waiting, 1=installing, 2=finished
-        std::atomic<uint64_t> g_ShellRequestStart{ 0 };
         std::atomic<int> g_PendingScreenId{ -1 };
         std::atomic<bool> g_ShellTransitionInFlight{ false };
 
@@ -447,53 +440,11 @@ namespace BZROpenShim::UiPerfHooks
             return ms;
         }
 
-        // Shell detour state.
-        void* g_OrigShellRequest = nullptr;      // FUN_007c7930
-        void* g_OrigShellTransition = nullptr;   // FUN_007c7070
-        void* g_OrigShellBack = nullptr;         // FUN_007c79a0
-
-        // Preserve original bytes so detour can trampoline.
-        uint8_t g_ShellRequestPatch[5] = {};
-        uint8_t g_ShellRequestOrig[5] = {};
-        uint8_t g_ShellTransitionPatch[5] = {};
-        uint8_t g_ShellTransitionOrig[5] = {};
+        // Shell sites (FUN_007c7930 request, FUN_007c7070 transition,
+        // FUN_007c79a0 back), resolved through scripts/patches.json.
         uintptr_t g_ShellRequestAddr = 0;
         uintptr_t g_ShellTransitionAddr = 0;
         uintptr_t g_ShellBackAddr = 0;
-
-        // Minimal 5-byte JMP detour (relative).  Reads/writes are done with
-        // VirtualProtect + FlushInstructionCache.
-        bool InstallJmp5(uintptr_t target, void* detour, uint8_t* outOrig)
-        {
-            if (!target || !detour) return false;
-            DWORD old = 0;
-            if (!VirtualProtect(reinterpret_cast<void*>(target), 5, PAGE_EXECUTE_READWRITE, &old))
-                return false;
-            if (outOrig)
-                memcpy(outOrig, reinterpret_cast<void*>(target), 5);
-            const int32_t rel = static_cast<int32_t>(reinterpret_cast<uintptr_t>(detour) - (target + 5));
-            uint8_t patch[5] = { 0xE9, 0,0,0,0 };
-            memcpy(patch+1, &rel, 4);
-            memcpy(reinterpret_cast<void*>(target), patch, 5);
-            FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void*>(target), 5);
-            DWORD ign = 0;
-            VirtualProtect(reinterpret_cast<void*>(target), 5, old, &ign);
-            return true;
-        }
-
-        // Forward decls for detour thunks (naked trampolines delegate to C++ helpers).
-        void OnShellRequestDetour(int screenId);
-        void OnShellTransitionDetour();
-        void OnShellBackDetour();
-
-        // Ogre ResourceGroupManager detours via IAT-style vtable patching is
-        // deferred: the startup path resolves OgreMain exports and patches the
-        // import table entries that the game uses to call them.  For the initial
-        // profiling cut we rely on the explicit Begin/End helpers called from
-        // existing hook sites (collision guard, flag preview, shader cache) plus
-        // a polling observer that samples ResourceGroupManager::isResourceGroupInUse.
-        // This keeps the first commit safe while still producing [UIPERF][OGRE]
-        // attribution from the paths the game actually exercises.
     } // namespace
 
     void OnOgreInitialiseResourceGroup_Begin(const char* group)
@@ -515,100 +466,11 @@ namespace BZROpenShim::UiPerfHooks
         UiPerf::Heartbeat("OgreInitialise_End");
     }
 
-    void OnOgreLoadResourceGroup_Begin(const char* group)  { BeginOp("loadResourceGroup", group); }
-    void OnOgreLoadResourceGroup_End(const char* group)
-    {
-        const char* ag = nullptr; const double ms = EndOp("loadResourceGroup", &ag);
-        UiPerf::RecordOgreResourceOp("loadResourceGroup", group ? group : (ag?ag:"<none>"), ms);
-    }
-    void OnOgreUnloadResourceGroup_Begin(const char* group)  { BeginOp("unloadResourceGroup", group); }
-    void OnOgreUnloadResourceGroup_End(const char* group)
-    {
-        const char* ag = nullptr; const double ms = EndOp("unloadResourceGroup", &ag);
-        UiPerf::RecordOgreResourceOp("unloadResourceGroup", group ? group : (ag?ag:"<none>"), ms);
-    }
     void OnOgreClearResourceGroup_Begin(const char* group)  { BeginOp("clearResourceGroup", group); }
     void OnOgreClearResourceGroup_End(const char* group)
     {
         const char* ag = nullptr; const double ms = EndOp("clearResourceGroup", &ag);
         UiPerf::RecordOgreResourceOp("clearResourceGroup", group ? group : (ag?ag:"<none>"), ms);
-    }
-    void OnOgreDestroyResourceGroup_Begin(const char* group)  { BeginOp("destroyResourceGroup", group); }
-    void OnOgreDestroyResourceGroup_End(const char* group)
-    {
-        const char* ag = nullptr; const double ms = EndOp("destroyResourceGroup", &ag);
-        UiPerf::RecordOgreResourceOp("destroyResourceGroup", group ? group : (ag?ag:"<none>"), ms);
-    }
-    void OnOgreParseScripts_Begin(const char* group)  { BeginOp("parseResourceGroupScripts", group); }
-    void OnOgreParseScripts_End(const char* group, uint32_t scriptsParsed)
-    {
-        const char* ag = nullptr; const double ms = EndOp("parseResourceGroupScripts", &ag);
-        const char* g = group ? group : (ag?ag:"<none>");
-        UiPerf::RecordOgreResourceOp("parseResourceGroupScripts", g, ms);
-        if (scriptsParsed)
-            UiPerf::RecordOgreScriptStats({scriptsParsed, 0, 0, ms});
-    }
-
-    void OnModDiscovery_Begin(const char* context)
-    {
-        if (!UiPerf::IsEnabled()) return;
-        if (t_modDiscoveryDepth++ == 0)
-        {
-            t_modDiscoveryStart = UiPerf::NowTicks();
-            g_ModDiscoveryContext = context ? context : "ModDiscovery";
-            UiPerf::Log("[UIPERF] BEGIN %s", g_ModDiscoveryContext.c_str());
-        }
-    }
-
-    void OnModDiscovery_End()
-    {
-        if (!UiPerf::IsEnabled()) return;
-        if (--t_modDiscoveryDepth == 0 && t_modDiscoveryStart != 0)
-        {
-            const double ms = UiPerf::TicksToMs(UiPerf::NowTicks() - t_modDiscoveryStart);
-            UiPerf::Log("[UIPERF] END %s %.2fms", g_ModDiscoveryContext.c_str(), ms);
-            t_modDiscoveryStart = 0;
-        }
-        if (t_modDiscoveryDepth < 0) t_modDiscoveryDepth = 0;
-    }
-
-    void OnWorkshopScan_Begin()
-    {
-        if (!UiPerf::IsEnabled()) return;
-        BeginOp("WorkshopScan", "workshop/content/301650");
-        UiPerf::Log("[UIPERF] BEGIN WorkshopScan");
-    }
-
-    void OnWorkshopScan_End()
-    {
-        if (!UiPerf::IsEnabled()) return;
-        const char* ag = nullptr; const double ms = EndOp("WorkshopScan", &ag);
-        UiPerf::Log("[UIPERF] END WorkshopScan %.2fms", ms);
-    }
-
-    void OnShellRequest(int screenId)
-    {
-        UiPerf::NotifyShellRequest(screenId);
-    }
-
-    void OnShellTransitionUpdate()
-    {
-        // Heartbeat at each shell update tick; stall detection will flag long gaps.
-        UiPerf::Heartbeat("ShellUpdate");
-    }
-
-    void OnMultiplayerShutdown_Begin(const char* phase)
-    {
-        BeginOp(phase ? phase : "mp_shutdown", phase);
-        if (UiPerf::IsEnabled())
-            UiPerf::Log("[UIPERF] BEGIN MultiplayerShutdown phase=%s", phase ? phase : "<unknown>");
-    }
-
-    void OnMultiplayerShutdown_End(const char* phase)
-    {
-        const char* ag = nullptr; const double ms = EndOp(phase ? phase : "mp_shutdown", &ag);
-        if (UiPerf::IsEnabled())
-            UiPerf::Log("[UIPERF] END MultiplayerShutdown phase=%s %.2fms", phase ? phase : "<unknown>", ms);
     }
 
     namespace
@@ -733,7 +595,6 @@ namespace BZROpenShim::UiPerfHooks
             {
                 if (!g_ShellManager) g_ShellManager = ecx; // capture valid dialog/manager
                 g_PendingScreenId.store(screenId, std::memory_order_relaxed);
-                g_ShellRequestStart.store(UiPerf::NowTicks(), std::memory_order_relaxed);
                 UiFileScan::BeginTransition();
                 UiPerf::NotifyShellRequest(screenId);
                 LogShimA(LogLevel::Info, "uiperf-hooks",
@@ -1027,7 +888,6 @@ namespace BZROpenShim::UiPerfHooks
             if (UiPerf::IsEnabled())
             {
                 g_PendingScreenId.store(0x100, std::memory_order_relaxed);
-                g_ShellRequestStart.store(UiPerf::NowTicks(), std::memory_order_relaxed);
                 UiFileScan::BeginTransition();
                 UiPerf::NotifyShellRequest(0x100);
                 LogShimA(LogLevel::Info, "uiperf-hooks", "[UIPERF] ShellBack");

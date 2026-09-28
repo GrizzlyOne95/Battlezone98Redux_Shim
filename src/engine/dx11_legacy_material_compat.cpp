@@ -158,18 +158,6 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         }
     } // namespace
 
-    const char* LegacyPassKindName(LegacyPassKind kind) noexcept
-    {
-        switch (kind)
-        {
-        case LegacyPassKind::NativeDx11: return "native";
-        case LegacyPassKind::TrueFixedFunction: return "fixedfunc";
-        case LegacyPassKind::KnownLegacyFamily: return "family-remap";
-        case LegacyPassKind::UnknownCustom: return "unknown-custom";
-        }
-        return "unknown";
-    }
-
     const char* CompatPathName(CompatPath path) noexcept
     {
         switch (path)

@@ -95,24 +95,10 @@ namespace BZROpenShim
     // enqueueing short-circuits before taking the lock.
     bool HasEventSubscribers() noexcept;
 
-    struct OpenShimEventStats
-    {
-        uint64_t enqueued = 0;
-        uint64_t dispatched = 0;
-        uint64_t dropped = 0;
-        uint32_t queueDepth = 0;
-        uint32_t highWaterMark = 0;
-        uint32_t subscribers = 0;
-    };
-
-    OpenShimEventStats GetInProcessEventStats() noexcept;
-
     // Drops everything queued. Called on mission teardown and on the patch
     // baseline reset so a record from a dead world cannot be delivered against
     // the next one.
     void ResetInProcessEventQueue() noexcept;
-
-    const char* DescribeEventType(OpenShimEventType type) noexcept;
 
     // Capacity is fixed at compile time so the dispatch ring never allocates.
     inline constexpr size_t kInProcessEventQueueCapacity = 256;
