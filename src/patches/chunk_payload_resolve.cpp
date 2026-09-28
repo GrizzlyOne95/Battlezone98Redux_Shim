@@ -69,6 +69,9 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        std::unordered_map<std::string, bool> g_ChunkPayloadMeshExistsCache = {};
+        std::unordered_set<std::string> g_ChunkPayloadResolveFailureLogCache = {};
+
         static std::unordered_map<std::string, ChunkVdfAssetInfo> g_ChunkVdfAssetCache = {};
 
         // Distributable replacement for shipping the stock VDF/SDF files:

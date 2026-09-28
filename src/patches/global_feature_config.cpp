@@ -70,6 +70,18 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        bool g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
+        bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
+        // Configured value AND'd with the single-player gate, same contract as
+        // g_AiOdfGameplayTuningActive below. This feature changes stock content
+        // (it raises bomber engagement range from the craft's own weapon ODFs),
+        // so it must never reach a network game.
+        bool g_BomberAiRangeActive = false;
+        bool g_HowitzerUndeployedRetaliationFixEnabled =
+            kHowitzerUndeployedRetaliationFixEnabledDefault;
+        bool g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
+        bool g_TurretAimPitchEnabled = kTurretAimPitchEnabledDefault;
+
         bool g_ShotConvergenceEnabled = true;
 
         bool g_ShotConvergenceBaselineEnabled = true;
@@ -667,4 +679,63 @@ namespace BZROpenShim
         }
     }
 
+    using namespace Hooks;
+
+    // Re-apply the feature behind a settings row from the freshly written
+    // ini. Latched initializers get their latch cleared and re-run, which
+    // deliberately preserves the documented precedence chain (legacy cfg and
+    // env overrides still win over the ini baseline).
+    void ApplyShimSettingLive(ShimSettingApplyGroup group)
+    {
+        switch (group)
+        {
+        case ShimSettingApplyGroup::GlobalImprovement:
+            InitializeGlobalImprovementConfig();
+            break;
+        case ShimSettingApplyGroup::UnderAttackAlert:
+            g_UnderAttackAlertConfigInitialized = false;
+            InitializeUnderAttackAlertConfig();
+            break;
+        case ShimSettingApplyGroup::TargetReticle:
+            g_TargetReticlePopupConfigInitialized = false;
+            InitializeTargetReticlePopupConfig();
+            break;
+        case ShimSettingApplyGroup::JetFlames:
+            g_JetFlamesConfigInitialized = false;
+            InitializeJetFlamesConfig();
+            break;
+        case ShimSettingApplyGroup::UnitVo:
+            g_UnitVoConfigInitialized = false;
+            InitializeUnitVoConfig();
+            break;
+        case ShimSettingApplyGroup::GlobalTurbo:
+            g_GlobalTurboConfigInitialized = false;
+            InitializeGlobalTurboConfig();
+            break;
+        case ShimSettingApplyGroup::Headlights:
+            ReapplyHeadlightConfigFromUserConfig();
+            break;
+        case ShimSettingApplyGroup::PilotFlashlight:
+            g_PilotFlashlightConfigInitialized = false;
+            InitializePilotFlashlightConfig();
+            break;
+        case ShimSettingApplyGroup::BzrNetRoute:
+            // Only the route preference re-applies live; the port is latched on
+            // the first pass because the engine overwrites that variable with
+            // the port it actually bound.
+            InitializeBzrNetConfig();
+            break;
+        case ShimSettingApplyGroup::RenderProfile:
+            RenderProfiles::ReloadRenderProfileConfig();
+            break;
+        case ShimSettingApplyGroup::LiveEngineToggle:
+            InitializeHopOutAttackAlertConfig();
+            InitializeSatelliteVisibilityFixConfig(false);
+            SunFlash::ReloadConfig();
+            break;
+        case ShimSettingApplyGroup::ReadOnNextUse:
+        case ShimSettingApplyGroup::RestartRequired:
+            break;
+        }
+    }
 }

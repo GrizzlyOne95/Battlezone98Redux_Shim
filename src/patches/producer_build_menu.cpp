@@ -68,8 +68,15 @@
 
 namespace BZROpenShim
 {
+    FnProducerModeCall g_BzrFn_ProducerModeCallOriginal = nullptr;
+
     namespace Hooks
     {
+        ProducerBuildMenuConfig g_ProducerBuildMenuConfig = {};
+        bool g_HasAppliedProducerBuildMenu = false;
+        int64_t g_LastAppliedProducerBuildMenu = 0;
+        uint32_t g_LastUnknownProducerVft = 0;
+
         constexpr char kProducerBuildMenuIniName[] = "openshim_producer_build_menus.ini";
 
         constexpr char kProducerBuildMenuSection[] = "ProducerBuildMenus";

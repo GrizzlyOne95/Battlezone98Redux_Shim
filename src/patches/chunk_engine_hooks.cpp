@@ -70,6 +70,9 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        bool g_EnableChunkRenderFallback = false;
+        bool g_EnablePartialFragmentBoneCollapse = false;
+
         // Guards against a craft mesh with an implausible bone count being walked.
         static constexpr uint16_t kMaxOwnerSkeletonBones = 1024;
 

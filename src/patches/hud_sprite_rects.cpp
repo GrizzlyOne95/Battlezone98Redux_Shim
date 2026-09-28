@@ -30,6 +30,24 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        constexpr size_t kHudSpriteRectEntrySize = 0x24;
+        static_assert(sizeof(HudSpriteRectRecord) == kHudSpriteRectEntrySize, "Unexpected HUD sprite rect record size");
+
+        HudSpriteRectRecord* g_HudSpriteRectTableBase = nullptr;
+        bool g_HudSpriteRectTableDiscoveryAttempted = false;
+        ULONGLONG g_HudSpriteRectTableDiscoveryLastTick = 0;
+        std::unordered_map<int, HudSpriteRectRecord> g_HudSpriteOriginalEntries;
+        std::unordered_map<int, HudSpriteRectRecord> g_HudSpriteHiddenEntries;
+        std::unordered_map<uintptr_t, HudSpriteRectRecord> g_HudSpriteOriginalEntriesByAddress;
+        std::unordered_set<uintptr_t> g_HudSpriteHiddenAddresses;
+        std::vector<uintptr_t> g_HudSpriteCachedPanelAddresses;
+        bool g_HudSpriteFallbackDiscoveryAttempted = false;
+        ULONGLONG g_HudSpriteFallbackDiscoveryLastTick = 0;
+        // Full-memory scans cost seconds on the UI thread, so failed attempts
+        // back off exponentially (reset on success or mission-state reset).
+        ULONGLONG g_HudSpriteRectTableDiscoveryBackoffMs = 0;
+        ULONGLONG g_HudSpriteFallbackDiscoveryBackoffMs = 0;
+
         constexpr uintptr_t kHudSpriteNameCountAddr = 0x00920F00;
 
         constexpr uintptr_t kHudSpriteNameTableAddr = 0x00920F08;

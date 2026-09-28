@@ -134,6 +134,14 @@ namespace BZROpenShim
 
     namespace Hooks
     {
+        void* g_ActiveNicknameEntry = nullptr;
+        void* g_ActiveNicknameParent = nullptr;
+        void* g_NicknameEnterDispatchEntry = nullptr;
+        void* g_PendingNicknameConfirmationEntry = nullptr;
+        BzrNetNicknameResult g_PendingNicknameConfirmationResult =
+            BzrNetNicknameResult::StoredForNextConnection;
+        bool g_ReplaceNicknameOnNextInput = false;
+
         constexpr char kFlagsConfigName[] = "flags.cfg";
 
         constexpr char kFlagsDirectoryName[] = "flags";
