@@ -38,7 +38,6 @@ namespace
     constexpr long kTraceBudget = 1200;
 
     bool g_ConfigLoaded = false;
-    bool g_PatchInstalled = false;
     long g_TraceRecords = 0;
 }
 
@@ -47,11 +46,6 @@ namespace
 // thunk, which is why plain volatile bytes are enough.
 extern "C" volatile unsigned char g_SunFlashSuppress = kSuppressDefault ? 1u : 0u;
 extern "C" volatile unsigned char g_SunFlashTrace = 0u;
-
-// Counts what the arm actually did, so a run where suppression never engaged is
-// distinguishable from a run where it engaged and changed nothing.
-extern "C" volatile long g_SunFlashSuppressedCalls = 0;
-extern "C" volatile long g_SunFlashPassedThroughCalls = 0;
 
 // Filled in by VerifyCallSite with the stock callee the operand used to select.
 // The thunk jumps through this, so a failed verify fails closed: the REL32
@@ -161,10 +155,8 @@ extern "C" void __declspec(naked) SunFlashAddThunk()
     no_trace:
         cmp     byte ptr [g_SunFlashSuppress], 0
         jne     do_suppress
-        inc     dword ptr [g_SunFlashPassedThroughCalls]
         jmp     dword ptr [g_SunFlashStockAddFlash] // tail call: ECX and stack intact
     do_suppress:
-        inc     dword ptr [g_SunFlashSuppressedCalls]
         ret     4                                   // consume the callee-cleaned argument
     }
 }
@@ -228,16 +220,6 @@ namespace BZROpenShim::SunFlash
         LoadConfig();
     }
 
-    bool IsSuppressionEnabled()
-    {
-        return g_SunFlashSuppress != 0u;
-    }
-
-    bool IsTraceEnabled()
-    {
-        return g_SunFlashTrace != 0u;
-    }
-
     // Instruction-anchored identity check, run before the REL32 payload is
     // built. Guarding the operand alone would only say "these four bytes still
     // read E8 14 FA FF"; this also insists the byte in front is a CALL rel32
@@ -268,25 +250,9 @@ namespace BZROpenShim::SunFlash
 
     void SetPatchInstalled(bool installed)
     {
-        g_PatchInstalled = installed;
         Log(L"[SUNFLASH] installed=%d suppress=%d trace=%d\n",
             installed ? 1 : 0,
             static_cast<int>(g_SunFlashSuppress),
             static_cast<int>(g_SunFlashTrace));
-    }
-
-    bool IsPatchInstalled()
-    {
-        return g_PatchInstalled;
-    }
-
-    long SuppressedCallCount()
-    {
-        return g_SunFlashSuppressedCalls;
-    }
-
-    long PassedThroughCallCount()
-    {
-        return g_SunFlashPassedThroughCalls;
     }
 }

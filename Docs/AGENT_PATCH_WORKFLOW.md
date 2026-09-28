@@ -39,7 +39,7 @@ Run the lanes touched by the change during iteration; run the complete applicabl
 | New or edited `openshim.ini` key | `./scripts/run_ini_tests.ps1` |
 | `src/patches/net_*`, `bzrnet_*`, or `netcode_*` | `./tools/validate-network-baseline.ps1` |
 | New/edited test or covered behavior | `cmake -S tests -B build/tests -A Win32`; build Release; `ctest --test-dir build/tests -C Release --output-on-failure` |
-| `shaders/dx11_enhanced_fxaa.hlsl` | Compile `VSMain` and `PSMain` with `fxc` as shown in `.github/workflows/build-win32.yml` |
+| `shaders/dx11_enhanced_fxaa.hlsl` | Compile `VSMain` and `PSMain` with `fxc` as shown in `.github/actions/build-win32/action.yml` (shared by `build-win32.yml` and `release.yml`) |
 
 `openshim.ini` ships conservatively. Values that read as enabled fail validation unless their `Section/Key` is in the documented allowlist in `scripts/run_ini_tests.ps1`; default new settings to disabled, or add an explained allowlist entry. Keep `openshim.ini` and `openshim.ini.example` synchronized.
 

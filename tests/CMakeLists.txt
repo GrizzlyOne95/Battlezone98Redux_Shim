@@ -113,6 +113,16 @@ openshim_add_test(headlight_falloff_tests STD 20 SOURCES
     headlight_falloff_tests.cpp
 )
 
+# Built as C++14: the reorder core and the output-cap header are shared with
+# translation units that must stay C++14-compatible.
+openshim_add_test(net_reorder_core_tests STD 14 SOURCES
+    net_reorder_core_tests.cpp
+)
+
+openshim_add_test(diagnostic_output_cap_tests STD 14 SOURCES
+    diagnostic_output_cap_tests.cpp
+)
+
 add_executable(shadow_far_distance_tests
     shadow_far_distance_tests.cpp
 )
@@ -525,4 +535,14 @@ openshim_add_test(scene_depth_facts_tests STD 20 SOURCES
 # Header-only and engine-free, so it runs on both lanes.
 openshim_add_test(remembered_mesh_bounds_table_tests STD 20 SOURCES
     remembered_mesh_bounds_table_tests.cpp
+)
+
+# Shared BZR document pin. Docs/BZR_LUA_AGENT_REFERENCE.md and
+# Docs/BZR_PLATFORM_COMPATIBILITY.md must stay byte-identical across
+# ExtraUtilities, OpenShim, Campaign Reimagined and bzfile; this fails when the
+# local copies drift from the hashes every repository pins. A CMake script, so
+# it runs on both CI lanes without a compiler or extra interpreter.
+add_test(NAME shared_bzr_docs_check
+    COMMAND ${CMAKE_COMMAND} -DREPO_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/..
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/shared_bzr_docs_check.cmake
 )
