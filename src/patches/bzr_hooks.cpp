@@ -459,15 +459,12 @@ namespace BZROpenShim
         // Resolved by ResolveBzrHooks from scripts/patches.json
         // ("PlayGlobalSound"); null until then, and the caller checks.
         FnPlayGlobalSound g_BzrFn_PlayGlobalSound = nullptr;
-        static constexpr bool kHowitzerVolleyEnabledDefault = false;
         // Confirmed Redux defect: damage from a GameObject-owned child reveals
         // only that immediate child, leaving its owning craft disguised.
         // This restores the ownership walk for landed hits. It is gated out of
         // network games because perceivedTeam participates in simulation.
         static constexpr bool kOwnedObjectRevealFixEnabledDefault = true;
         static constexpr long kOwnedObjectRevealTraceBudgetDefault = 96;
-        static constexpr bool kWeaponMaskCarrierBiasEnabledDefault = false;
-        static constexpr long kAttackRevealTraceBudgetDefault = 64;
         bool g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
         bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
         // Configured value AND'd with the single-player gate, same contract as
@@ -552,38 +549,6 @@ namespace BZROpenShim
         bool g_MultiplayerFlagRenderHookFailureLogged = false;
         bool g_MultiplayerFlagRendererLoggedReady = false;
         std::unordered_map<uint64_t, MultiplayerFlagRenderSet> g_MultiplayerFlagRenderSets = {};
-
-        // Master switch for the whole multiplayer vehicle-flag feature: the
-        // flag-selection UI, the payload upload and the Ogre renderer hook.
-        // [Display] MultiplayerFlags in openshim.ini, defaulting OFF so a
-        // missing key does not grow widgets onto BZP/BZP-T's faction-only
-        // waiting room. The legacy disable variables remain an override.
-        // Latched, because the renderer hook is a vtable write that is only
-        // attempted while the feature is on.
-        bool ShouldEnableMultiplayerFlagUi()
-        {
-            static int s_cached = -1;
-            if (s_cached < 0)
-            {
-                bool enabled = false;
-                bool iniValue = false;
-                if (EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAG_UI") ||
-                    EnvFlagEnabled("OPENSHIM_DISABLE_MULTIPLAYER_FLAG_UI") ||
-                    EnvFlagEnabled("OPENSHIM_DISABLE_MP_FLAGS") ||
-                    EnvFlagEnabled("BZR_DISABLE_MP_FLAG_UI"))
-                {
-                    enabled = false;
-                }
-                else if (TryGetUserConfigBool("Display", "MultiplayerFlags", iniValue))
-                {
-                    enabled = iniValue;
-                }
-                s_cached = enabled ? 1 : 0;
-                Log(L"[FLAG] multiplayer vehicle flags: %hs\n",
-                    enabled ? "enabled" : "disabled");
-            }
-            return s_cached != 0;
-        }
 
         static uint32_t ClampChunkProxyCapacity(long value)
         {
@@ -678,64 +643,6 @@ namespace BZROpenShim
 
     }
     using namespace Hooks;
-
-    // Re-apply the feature behind a settings row from the freshly written
-    // ini. Latched initializers get their latch cleared and re-run, which
-    // deliberately preserves the documented precedence chain (legacy cfg and
-    // env overrides still win over the ini baseline).
-    void ApplyShimSettingLive(ShimSettingApplyGroup group)
-    {
-        switch (group)
-        {
-        case ShimSettingApplyGroup::GlobalImprovement:
-            InitializeGlobalImprovementConfig();
-            break;
-        case ShimSettingApplyGroup::UnderAttackAlert:
-            g_UnderAttackAlertConfigInitialized = false;
-            InitializeUnderAttackAlertConfig();
-            break;
-        case ShimSettingApplyGroup::TargetReticle:
-            g_TargetReticlePopupConfigInitialized = false;
-            InitializeTargetReticlePopupConfig();
-            break;
-        case ShimSettingApplyGroup::JetFlames:
-            g_JetFlamesConfigInitialized = false;
-            InitializeJetFlamesConfig();
-            break;
-        case ShimSettingApplyGroup::UnitVo:
-            g_UnitVoConfigInitialized = false;
-            InitializeUnitVoConfig();
-            break;
-        case ShimSettingApplyGroup::GlobalTurbo:
-            g_GlobalTurboConfigInitialized = false;
-            InitializeGlobalTurboConfig();
-            break;
-        case ShimSettingApplyGroup::Headlights:
-            ReapplyHeadlightConfigFromUserConfig();
-            break;
-        case ShimSettingApplyGroup::PilotFlashlight:
-            g_PilotFlashlightConfigInitialized = false;
-            InitializePilotFlashlightConfig();
-            break;
-        case ShimSettingApplyGroup::BzrNetRoute:
-            // Only the route preference re-applies live; the port is latched on
-            // the first pass because the engine overwrites that variable with
-            // the port it actually bound.
-            InitializeBzrNetConfig();
-            break;
-        case ShimSettingApplyGroup::RenderProfile:
-            RenderProfiles::ReloadRenderProfileConfig();
-            break;
-        case ShimSettingApplyGroup::LiveEngineToggle:
-            InitializeHopOutAttackAlertConfig();
-            InitializeSatelliteVisibilityFixConfig(false);
-            SunFlash::ReloadConfig();
-            break;
-        case ShimSettingApplyGroup::ReadOnNextUse:
-        case ShimSettingApplyGroup::RestartRequired:
-            break;
-        }
-    }
 
     // Puts every piece of per-process hook state back to its resting value
     // before ResolveBzrHooks binds addresses and reads configuration.
@@ -2064,178 +1971,6 @@ namespace BZROpenShim
         BzrStringInitEmpty(&g_BzrnetLabel4);
     }
 
-    bool SetBomberAiRangeEnabledFromBridge(bool enabled)
-    {
-        RetryDeferredRuntimeHooks();
-        g_BomberAiRangeEnabled = enabled;
-        RefreshBomberAiRangeState();
-        Log(L"[MISSIONHOOK] bomber AI range override %hs (active=%hs)\n",
-            enabled ? "enabled" : "disabled",
-            BoolText(g_BomberAiRangeActive));
-        return true;
-    }
-
-    bool SetAiOdfGameplayTuningEnabledFromBridge(bool enabled)
-    {
-        RetryDeferredRuntimeHooks();
-        g_AiOdfGameplayTuningEnabled = enabled;
-        RefreshAiOdfGameplayTuningState();
-        if (!enabled)
-        {
-            g_ScrapPathFailuresByObject.clear();
-            g_ScrapRetargetStateByTask.clear();
-        }
-        Log(L"[MISSIONHOOK] AI ODF gameplay tuning %hs\n", enabled ? "enabled" : "disabled");
-        return true;
-    }
-
-    bool SetAiUnitTuningFromBridge(void* objectPtr,
-                                   float engageRange,
-                                   float weaponRangeMin,
-                                   float retargetPeriod,
-                                   float kiteDesiredRange,
-                                   float kiteEnterRange,
-                                   float kiteExitRange,
-                                   bool kitePreserveLos,
-                                   float kiteStrafe,
-                                   float kiteSwitchPeriod)
-    {
-        if (!objectPtr)
-            return false;
-
-        // The range/retarget detours are usually installed by mission setup, but a
-        // per-unit call can arrive first; retry once if neither hook is live yet.
-        if (!g_CalcRangeCraftHookInstalled ||
-            !g_RetargetPeriodHooksInstalled ||
-            !g_AttackTaskDoStateHookInstalled)
-            RetryDeferredRuntimeHooks();
-
-        AiUnitTuningOverride entry = {};
-        if (std::isfinite(engageRange) && engageRange > 0.0f)
-        {
-            entry.hasEngageRange = true;
-            entry.engageRange = engageRange;
-        }
-        if (std::isfinite(weaponRangeMin) && weaponRangeMin > 0.0f)
-        {
-            entry.hasWeaponRangeMin = true;
-            entry.weaponRangeMin = weaponRangeMin;
-        }
-        if (std::isfinite(retargetPeriod) && retargetPeriod > 0.0f)
-        {
-            entry.hasRetargetPeriod = true;
-            entry.retargetPeriod = retargetPeriod;
-        }
-        if (std::isfinite(kiteDesiredRange) && kiteDesiredRange > 0.0f &&
-            std::isfinite(kiteEnterRange) && kiteEnterRange > 0.0f &&
-            std::isfinite(kiteExitRange) && kiteExitRange > kiteEnterRange &&
-            kiteDesiredRange > kiteEnterRange && kiteDesiredRange < kiteExitRange)
-        {
-            entry.hasKiteRanges = true;
-            entry.kiteDesiredRange = kiteDesiredRange;
-            entry.kiteEnterRange = kiteEnterRange;
-            entry.kiteExitRange = kiteExitRange;
-            entry.kitePreserveLos = kitePreserveLos;
-            if (std::isfinite(kiteStrafe) && kiteStrafe > 0.0f)
-                entry.kiteStrafe = (std::min)(kiteStrafe, 1.0f);
-            if (std::isfinite(kiteSwitchPeriod) && kiteSwitchPeriod > 0.0f)
-                entry.kiteSwitchPeriod = kiteSwitchPeriod;
-        }
-
-        const uintptr_t key = reinterpret_cast<uintptr_t>(objectPtr);
-        if (!entry.hasEngageRange && !entry.hasWeaponRangeMin &&
-            !entry.hasRetargetPeriod && !entry.hasKiteRanges)
-        {
-            g_AiUnitTuningOverridesByObject.erase(key);
-            g_CombatKiteStateByObject.erase(key);
-            return true;
-        }
-
-        g_AiUnitTuningOverridesByObject[key] = entry;
-        if (!entry.hasKiteRanges)
-            g_CombatKiteStateByObject.erase(key);
-        return true;
-    }
-
-    bool ClearAiUnitTuningFromBridge(void* objectPtr)
-    {
-        if (!objectPtr)
-            return false;
-        const uintptr_t key = reinterpret_cast<uintptr_t>(objectPtr);
-        g_AiUnitTuningOverridesByObject.erase(key);
-        g_CombatKiteStateByObject.erase(key);
-        return true;
-    }
-
-    bool ClearAllAiUnitTuningFromBridge()
-    {
-        if (!g_AiUnitTuningOverridesByObject.empty())
-        {
-            Log(L"[AIUNIT] cleared %u per-unit tuning overrides\n",
-                static_cast<uint32_t>(g_AiUnitTuningOverridesByObject.size()));
-        }
-        g_AiUnitTuningOverridesByObject.clear();
-        g_CombatKiteStateByObject.clear();
-        return true;
-    }
-
-    bool SetTurretAimPitchEnabledFromBridge(bool enabled)
-    {
-        g_TurretAimPitchEnabled = enabled;
-        RefreshTurretAimPitchState();
-        Log(L"[MISSIONHOOK] turret aim pitch override %hs active=%.3f\n",
-            enabled ? "enabled" : "disabled",
-            static_cast<double>(g_TurretAimPitchMultiplier));
-        return true;
-    }
-
-    bool ResetMissionHookOverridesFromBridge()
-    {
-        RetryDeferredRuntimeHooks();
-        g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
-        // Content render-profile requests are mission/session scoped: the
-        // authoritative lifecycle seam clears them so an EXU override from one
-        // mission can never leak into the shell or unrelated content.
-        RenderProfiles::ClearContentRenderProfileOverride("mission reset");
-        // Renderer-effect intent is mission scoped for the same reason:
-        // a mission that asked for SSAO must not leave it asked-for in the
-        // shell or in whatever loads next. Clearing here rather than
-        // relying on the companion means a script that crashes or forgets
-        // to tear down still cannot leak a request.
-        RenderEffects::Reset();
-        g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
-        g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
-        g_AttackRevealEnabled = kAttackRevealEnabledDefault;
-        g_AttackRevealTraceBudget = kAttackRevealTraceBudgetDefault;
-        g_PilotCarrierNullLoggedObjects.clear();
-        g_NeutralAttackOrderLogBudget = 16;
-        g_AipResolveTraceBudget = 512;
-        g_AipPrereqCensusEmitted = 0;
-        g_AiExtraMakerPairs.clear();
-        g_AiMultiProducerMakerLogBudget = 64;
-        g_AiUnitTuningOverridesByObject.clear();
-        g_CombatKiteStateByObject.clear();
-        g_ScrapPathFailuresByObject.clear();
-        g_ScrapRetargetStateByTask.clear();
-        g_AiUnitTuningTraceBudget = 64;
-        g_CombatKiteTraceBudget = 256;
-        g_ScrapPathTraceBudget = 128;
-        // Registered features revert to their resting state. Gameplay features
-        // drop to their INI baseline + re-apply the MP gate; Display
-        // preferences revert to the user's openshim.ini baseline, not a hardcoded
-        // default, so global config still governs the next mission / Instant
-        // Action once a script-set mission ends.
-        RevertRegisteredFeaturesToBaseline();
-        Log(L"[MISSIONHOOK] restored mission hook overrides to defaults\n");
-        return true;
-    }
-
-    bool IsMissionSimulationActiveFromBridge()
-    {
-        int state = kBzrRunStateUnknown;
-        return TryReadBzrRunState(state) && state == kBzrRunStateStarted;
-    }
-
     namespace Hooks
     {
 
@@ -2383,25 +2118,4 @@ namespace BZROpenShim
         }
     }
 
-    BzrNetNicknameResult SetBzrNetNicknameFromBridge(const char* nickname)
-    {
-        const BzrNetNicknameResult result = ApplyBzrNetNicknameAuthoritative(
-            nickname, "external_bridge");
-        if (IsAcceptedBzrNetNicknameResult(result))
-        {
-            const std::string normalized = TrimAsciiCopy(nickname ? nickname : "");
-            SyncNicknameEntriesFromAuthoritativeValue(normalized.c_str());
-            NetRouteRefreshHost();
-            NetRouteRefreshClient();
-        }
-        return result;
-    }
-
-}
-
-// Optional high-level bridge used by EXU and other companion DLLs. BZRNet/native
-// details remain entirely inside OpenShim; callers receive only a stable status.
-extern "C" DWORD WINAPI OpenShimImpl_SetBZRNetNickname(LPCSTR nickname)
-{
-    return static_cast<DWORD>(BZROpenShim::SetBzrNetNicknameFromBridge(nickname));
 }

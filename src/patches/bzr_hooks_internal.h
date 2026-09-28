@@ -849,6 +849,9 @@ namespace BZROpenShim
         void RefreshAiWeaponMaskMinelayerState();
         void RevertAiWeaponMaskMinelayerToBaseline();
 
+        inline constexpr bool kHowitzerVolleyEnabledDefault = false;
+        inline constexpr bool kWeaponMaskCarrierBiasEnabledDefault = false;
+
         // --- Multiplayer moderation (moderation.cpp) ---------------------------
         using BanRecord = StableIdList::Record;
         void SyncNicknameEntriesFromAuthoritativeValue(const char* value);
@@ -1096,6 +1099,8 @@ namespace BZROpenShim
         bool ShouldTraceOwnedObjectReveal();
         bool ShouldTraceAttackReveal();
         void RevealProcessOwnerPerceivedTeam(void* processPtr, const char* sourceTag);
+
+        inline constexpr long kAttackRevealTraceBudgetDefault = 64;
 
         // --- Lifecycle seams (lifecycle_seams.cpp) -----------------------------
         inline constexpr int kBzrRunStateStarted = 5;
