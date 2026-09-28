@@ -3,13 +3,12 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim::FogWake;
 namespace {
-    int failures = 0;
-    void Check(bool value, const char* message) {
-        if (!value) { std::fprintf(stderr, "FAIL: %s\n", message); ++failures; }
-    }
     bool Near(double a, double b) { return std::abs(a-b) < 1e-5; }
 }
 int main()
@@ -58,6 +57,6 @@ int main()
         return std::isfinite(v)&&v>=0&&v<=1;}), "fractional transport stays finite and bounded");
     f.Reset();
     Check(f.Sample({0.5,0.5})==0, "session reset clears all history");
-    if (!failures) std::puts("fog wake tests passed");
-    return failures ? 1 : 0;
+    if (!OpenShimTest::FailureCount()) std::puts("fog wake tests passed");
+    return OpenShimTest::ExitCode();
 }

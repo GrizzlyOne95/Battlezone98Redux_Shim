@@ -17,33 +17,22 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 namespace
 {
     using namespace BZROpenShim::RenderEffects;
 
-    int g_failures = 0;
-
-    void Require(bool condition, const char* message)
-    {
-        if (!condition)
-        {
-            std::fprintf(stderr, "render_effect_intent_tests: %s\n", message);
-            ++g_failures;
-        }
-    }
 
     void RequireEqual(uint32_t actual, uint32_t expected, const char* message)
     {
         if (actual != expected)
         {
-            std::fprintf(
-                stderr,
-                "render_effect_intent_tests: %s (expected %u, got %u)\n",
-                message,
+            OpenShimTest::Fail("%s (expected %u, got %u)", message,
                 expected,
                 actual);
-            ++g_failures;
         }
     }
 
@@ -51,13 +40,9 @@ namespace
     {
         if (!(std::fabs(actual - expected) < 1e-5f))
         {
-            std::fprintf(
-                stderr,
-                "render_effect_intent_tests: %s (expected %f, got %f)\n",
-                message,
+            OpenShimTest::Fail("%s (expected %f, got %f)", message,
                 static_cast<double>(expected),
                 static_cast<double>(actual));
-            ++g_failures;
         }
     }
 
@@ -124,7 +109,7 @@ namespace
     {
         Abi::StatusV1 status{};
         status.size = sizeof(Abi::StatusV1);
-        Require(GetStatus(effectId, &status), "GetStatus should succeed for a sized struct");
+        Check(GetStatus(effectId, &status), "GetStatus should succeed for a sized struct");
         return status;
     }
 
@@ -211,12 +196,12 @@ namespace
     {
         ResetForTesting();
         FakeProvider fake;
-        Require(RegisterProvider(Abi::kEffectSsao, MakeProvider(fake)),
+        Check(RegisterProvider(Abi::kEffectSsao, MakeProvider(fake)),
             "a complete provider registers");
 
         RequireEqual(SetEnabled(Abi::kEffectSsao, true), Abi::kResultAccepted,
             "enabling is accepted");
-        Require(fake.lastEnabled, "the provider was told to turn on");
+        Check(fake.lastEnabled, "the provider was told to turn on");
 
         RequireEqual(SetFloat(Abi::kEffectSsao, Abi::kParamStrength, 0.65f),
             Abi::kResultAccepted, "a tuning value is accepted");
@@ -245,7 +230,7 @@ namespace
         RegisterProvider(Abi::kEffectSsao, MakeProvider(fake));
 
         SetEnabled(Abi::kEffectSsao, true);
-        Require(fake.enabledCalls == 0,
+        Check(fake.enabledCalls == 0,
             "an unsupported provider is never pushed intent");
 
         const Abi::StatusV1 status = QueryStatus(Abi::kEffectSsao);
@@ -316,9 +301,9 @@ namespace
         FakeProvider fake;
         RegisterProvider(Abi::kEffectSsao, MakeProvider(fake));
 
-        Require(fake.enabledCalls == 1, "the stored enable was replayed on registration");
-        Require(fake.lastEnabled, "and it was replayed as on");
-        Require(fake.floatCalls == 1, "the stored parameter was replayed too");
+        Check(fake.enabledCalls == 1, "the stored enable was replayed on registration");
+        Check(fake.lastEnabled, "and it was replayed as on");
+        Check(fake.floatCalls == 1, "the stored parameter was replayed too");
         RequireEqual(fake.lastParamId, Abi::kParamRadius, "with the right parameter id");
         RequireNear(fake.lastValue, 1.25f, "and the right value");
     }
@@ -330,7 +315,7 @@ namespace
 
         Provider partial = MakeProvider(fake);
         partial.IsEffective = nullptr;
-        Require(!RegisterProvider(Abi::kEffectSsao, partial),
+        Check(!RegisterProvider(Abi::kEffectSsao, partial),
             "a provider missing a callback is refused rather than half-registered");
 
         const Abi::StatusV1 status = QueryStatus(Abi::kEffectSsao);
@@ -345,7 +330,7 @@ namespace
         RegisterProvider(Abi::kEffectSsao, MakeProvider(fake));
         SetEnabled(Abi::kEffectSsao, true);
 
-        Require(UnregisterProvider(Abi::kEffectSsao), "unregister succeeds");
+        Check(UnregisterProvider(Abi::kEffectSsao), "unregister succeeds");
 
         Abi::StatusV1 status = QueryStatus(Abi::kEffectSsao);
         RequireEqual(static_cast<uint32_t>(status.requested), 1u,
@@ -356,7 +341,7 @@ namespace
         // Re-registering must pick the request back up.
         FakeProvider second;
         RegisterProvider(Abi::kEffectSsao, MakeProvider(second));
-        Require(second.lastEnabled, "the surviving request is replayed into the new provider");
+        Check(second.lastEnabled, "the surviving request is replayed into the new provider");
     }
 
     // Mission scoping: this is what stops one mission's SSAO request following
@@ -371,7 +356,7 @@ namespace
 
         Reset();
 
-        Require(!fake.lastEnabled, "the provider was told to turn off");
+        Check(!fake.lastEnabled, "the provider was told to turn off");
 
         const Abi::StatusV1 status = QueryStatus(Abi::kEffectSsao);
         RequireEqual(static_cast<uint32_t>(status.requested), 0u, "the request is cleared");
@@ -384,8 +369,8 @@ namespace
         // And the cleared parameters must not be replayed by a later re-register.
         FakeProvider second;
         RegisterProvider(Abi::kEffectSsao, MakeProvider(second));
-        Require(second.floatCalls == 0, "cleared parameters are not replayed");
-        Require(!second.lastEnabled, "and the effect comes back off");
+        Check(second.floatCalls == 0, "cleared parameters are not replayed");
+        Check(!second.lastEnabled, "and the effect comes back off");
     }
 
     void TestEffectsAreIndependent()
@@ -411,18 +396,18 @@ namespace
     void TestStatusRejectsBadBuffers()
     {
         ResetForTesting();
-        Require(!GetStatus(Abi::kEffectSsao, nullptr), "a null status pointer is refused");
+        Check(!GetStatus(Abi::kEffectSsao, nullptr), "a null status pointer is refused");
 
         Abi::StatusV1 undersized{};
         undersized.size = sizeof(Abi::StatusV1) - 1;
-        Require(!GetStatus(Abi::kEffectSsao, &undersized),
+        Check(!GetStatus(Abi::kEffectSsao, &undersized),
             "a caller claiming a smaller struct than V1 is refused");
 
         // A caller from a future, larger V2 is fine: it says it has more room
         // than we need, and gets a V1 written into the front of it.
         Abi::StatusV1 oversized{};
         oversized.size = sizeof(Abi::StatusV1) + 64;
-        Require(GetStatus(Abi::kEffectSsao, &oversized),
+        Check(GetStatus(Abi::kEffectSsao, &oversized),
             "a caller with a larger struct is accepted");
         RequireEqual(oversized.version, Abi::kStatusVersion,
             "and is told which version it actually got");
@@ -432,10 +417,10 @@ namespace
     {
         RequireEqual(GetApiVersion(), Abi::kRenderEffectApiVersion,
             "the API version is reported");
-        Require(IsKnownEffect(Abi::kEffectSoftParticles), "soft particles is a known effect");
-        Require(!IsKnownEffect(4u), "effect 4 is not allocated yet");
-        Require(IsKnownParameter(Abi::kParamQuality), "quality is a known parameter");
-        Require(!IsKnownParameter(6u), "parameter 6 is not allocated yet");
+        Check(IsKnownEffect(Abi::kEffectSoftParticles), "soft particles is a known effect");
+        Check(!IsKnownEffect(4u), "effect 4 is not allocated yet");
+        Check(IsKnownParameter(Abi::kParamQuality), "quality is a known parameter");
+        Check(!IsKnownParameter(6u), "parameter 6 is not allocated yet");
     }
 }
 
@@ -459,9 +444,9 @@ int main()
     TestStatusRejectsBadBuffers();
     TestApiVersion();
 
-    if (g_failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::fprintf(stderr, "render_effect_intent_tests: %d failure(s)\n", g_failures);
+        std::fprintf(stderr, "render_effect_intent_tests: %d failure(s)\n", OpenShimTest::FailureCount());
         return EXIT_FAILURE;
     }
 

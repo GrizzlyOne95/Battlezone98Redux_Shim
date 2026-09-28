@@ -4,21 +4,14 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim;
 
 namespace
 {
-    int g_Checks = 0;
-    int g_Failures = 0;
-    void Check(bool value, const char* name)
-    {
-        ++g_Checks;
-        if (value) return;
-        ++g_Failures;
-        std::printf("FAIL %s\n", name);
-    }
-
     std::vector<uint8_t> Bytes(const std::string& text)
     {
         return std::vector<uint8_t>(text.begin(), text.end());
@@ -244,6 +237,6 @@ int main()
     TestWebSocketStream();
     TestJsonEscape();
 
-    std::printf("%d checks, %d failures\n", g_Checks, g_Failures);
-    return g_Failures ? 1 : 0;
+    std::printf("%d checks, %d failures\n", OpenShimTest::CheckCount(), OpenShimTest::FailureCount());
+    return OpenShimTest::ExitCode();
 }

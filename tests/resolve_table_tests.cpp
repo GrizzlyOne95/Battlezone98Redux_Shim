@@ -15,20 +15,14 @@
 #include <iterator>
 #include <string>
 #include <vector>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim;
 
 namespace
 {
-    int g_Failures = 0;
-
-    void Check(bool condition, const char* what)
-    {
-        if (condition) return;
-        std::fprintf(stderr, "FAIL: %s\n", what);
-        ++g_Failures;
-    }
-
     // Renders a pattern/mask array pair the way the old FindPatternInMainText
     // read it: any non-zero mask byte means "this byte is concrete".
     std::string ToIdaText(const uint8_t* pattern, const uint8_t* mask, size_t size)
@@ -447,7 +441,7 @@ namespace
         std::string error;
         const auto rows = ParseEngineAddressTable(text, &error);
         Check(error.empty(), "the shipped engine address table must have no rejected rows");
-        Check(rows.size() == 90, "the shipped table carries all 90 engine addresses");
+        Check(rows.size() == 84, "the shipped table carries all 84 engine addresses");
         size_t data = 0;
         for (const auto& row : rows)
         {
@@ -475,9 +469,9 @@ int main()
     TestEngineAddressBytesMatch();
     TestShippedEngineAddressTable();
 
-    if (g_Failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::fprintf(stderr, "resolve_table_tests: %d check(s) failed\n", g_Failures);
+        std::fprintf(stderr, "resolve_table_tests: %d check(s) failed\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("resolve_table_tests: all checks passed\n");

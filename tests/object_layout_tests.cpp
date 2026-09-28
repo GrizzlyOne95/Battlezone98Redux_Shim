@@ -18,30 +18,20 @@
 
 #include <cstddef>
 #include <cstdio>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim::ObjectLayout;
 
 namespace
 {
-    int g_Failures = 0;
-
     void CheckOffset(const char* field, std::size_t actual, std::size_t expected,
                      const char* evidence)
     {
         if (actual == expected)
             return;
-        std::fprintf(stderr,
-                     "FAIL: %s is 0x%zX, expected 0x%zX\n      evidence: %s\n",
-                     field, actual, expected, evidence);
-        ++g_Failures;
-    }
-
-    void Check(bool condition, const char* what)
-    {
-        if (condition)
-            return;
-        std::fprintf(stderr, "FAIL: %s\n", what);
-        ++g_Failures;
+        OpenShimTest::Fail("%s is 0x%zX, expected 0x%zX\n      evidence: %s", field, actual, expected, evidence);
     }
 }
 
@@ -105,7 +95,7 @@ int main()
     Check(kGameObjectPerceivedTeam == kGameObjectActualTeam + 0xC,
           "perceivedTeam sits 0xC above the actual team field");
 
-    if (g_Failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
         std::printf("object_layout_tests: all checks passed\n");
-    return g_Failures == 0 ? 0 : 1;
+    return OpenShimTest::ExitCode();
 }

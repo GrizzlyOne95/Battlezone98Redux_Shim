@@ -31,21 +31,12 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include "test_check.h"
 
 namespace
 {
     using namespace BZROpenShim;
 
-    int g_Failures = 0;
-
-    void Check(bool condition, const char* what, int line)
-    {
-        if (condition) return;
-        std::printf("FAIL line %d: %s\n", line, what);
-        ++g_Failures;
-    }
-
-#define CHECK(c) Check((c), #c, __LINE__)
 
     std::filesystem::path ExeDir()
     {
@@ -247,9 +238,9 @@ int main()
     for (const auto& p : {ini, cfg, dx11, dx9}) std::filesystem::remove(p, ec);
     std::filesystem::remove(dir / "openshim_backend_pending.marker", ec);
 
-    if (g_Failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::printf("startup backend seam tests FAILED (%d)\n", g_Failures);
+        std::printf("startup backend seam tests FAILED (%d)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("startup backend seam tests passed\n");

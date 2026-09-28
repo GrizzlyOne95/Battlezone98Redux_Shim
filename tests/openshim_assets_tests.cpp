@@ -5,6 +5,9 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim::Assets;
 using namespace BZROpenShim::RenderProfiles;
@@ -24,25 +27,13 @@ AssetRuntimeEnvironment ResolveAssetRuntimeEnvironment()
 
 namespace
 {
-int g_failures = 0;
-
-void ExpectTrue(bool cond, const char* what)
-{
-    if (!cond)
-    {
-        std::printf("  FAIL: %s\n", what);
-        ++g_failures;
-    }
-}
-
-void ExpectFalse(bool cond, const char* what) { ExpectTrue(!cond, what); }
+void ExpectFalse(bool cond, const char* what) { Check(!cond, what); }
 
 void ExpectEqStr(const std::string& a, const std::string& b, const char* what)
 {
     if (a != b)
     {
-        std::printf("  FAIL: %s (got '%s' expected '%s')\n", what, a.c_str(), b.c_str());
-        ++g_failures;
+        OpenShimTest::Fail("%s (got '%s' expected '%s')", what, a.c_str(), b.c_str());
     }
 }
 
@@ -50,8 +41,7 @@ void ExpectContains(const std::string& haystack, const char* needle, const char*
 {
     if (haystack.find(needle) == std::string::npos)
     {
-        std::printf("  FAIL: %s (missing '%s' in '%s')\n", what, needle, haystack.c_str());
-        ++g_failures;
+        OpenShimTest::Fail("%s (missing '%s' in '%s')", what, needle, haystack.c_str());
     }
 }
 
@@ -107,14 +97,14 @@ void TestTrimAndParse()
 {
     std::printf("TestTrimAndParse\n");
     ExpectEqStr(TrimAssetString("  hello  "), "hello", "trim");
-    ExpectTrue(AssetStringEqualsNoCase("Hello", "hello"), "case insensitive");
+    Check(AssetStringEqualsNoCase("Hello", "hello"), "case insensitive");
     ExpectFalse(AssetStringEqualsNoCase("hello", "world"), "not equal");
 
     std::string k, v;
-    ExpectTrue(ParseAssetManifestKeyValue("Version=1", k, v), "parse Version=1");
+    Check(ParseAssetManifestKeyValue("Version=1", k, v), "parse Version=1");
     ExpectEqStr(k, "Version", "key");
     ExpectEqStr(v, "1", "value");
-    ExpectTrue(ParseAssetManifestKeyValue(" ChunkMeshes = 1 ; comment", k, v), "parse with comment");
+    Check(ParseAssetManifestKeyValue(" ChunkMeshes = 1 ; comment", k, v), "parse with comment");
     ExpectEqStr(k, "ChunkMeshes", "key2");
     ExpectEqStr(v, "1", "value2");
     ExpectFalse(ParseAssetManifestKeyValue("# comment", k, v), "comment");
@@ -128,17 +118,17 @@ void TestManifestValid()
     const std::string text = "[OpenShimAssets]\nVersion=1\nChunkMeshes=1\nEnhancedResources=1\nCustomUI=1\n";
     AssetCapabilities caps;
     std::string prob;
-    ExpectTrue(ParseAssetManifestContent(text, caps, prob), "valid manifest parses");
-    ExpectTrue(caps.manifestDetected, "manifestDetected");
-    ExpectTrue(caps.packDetected, "packDetected");
-    ExpectTrue(caps.versionCompatible, "versionCompatible");
-    ExpectTrue(caps.formatCompatible, "formatCompat");
-    ExpectTrue(caps.compatibilityCompatible, "compatCompat");
+    Check(ParseAssetManifestContent(text, caps, prob), "valid manifest parses");
+    Check(caps.manifestDetected, "manifestDetected");
+    Check(caps.packDetected, "packDetected");
+    Check(caps.versionCompatible, "versionCompatible");
+    Check(caps.formatCompatible, "formatCompat");
+    Check(caps.compatibilityCompatible, "compatCompat");
     ExpectEqStr(caps.installedVersion, "1", "installed");
-    ExpectTrue(caps.destructionChunks, "chunks");
-    ExpectTrue(caps.enhancedResources, "enhanced");
-    ExpectTrue(caps.customUiAssets, "custom");
-    ExpectTrue(prob.empty(), "no problem");
+    Check(caps.destructionChunks, "chunks");
+    Check(caps.enhancedResources, "enhanced");
+    Check(caps.customUiAssets, "custom");
+    Check(prob.empty(), "no problem");
 }
 
 void TestManifestMissingVersion()
@@ -183,8 +173,8 @@ void TestManifestPartial()
     const std::string text = "[OpenShimAssets]\nVersion=1\nChunkMeshes=1\nEnhancedResources=0\n";
     AssetCapabilities caps;
     std::string prob;
-    ExpectTrue(ParseAssetManifestContent(text, caps, prob), "partial valid");
-    ExpectTrue(caps.destructionChunks, "chunks true");
+    Check(ParseAssetManifestContent(text, caps, prob), "partial valid");
+    Check(caps.destructionChunks, "chunks true");
     ExpectFalse(caps.enhancedResources, "enhanced false");
 }
 
@@ -204,8 +194,8 @@ void TestProbeDestructionChunksPresent()
     auto dir = MakeScratchDir("chunk_present");
     PopulateChunkPayload(dir);
     std::string prob;
-    ExpectTrue(ProbeDestructionChunksAt(dir, prob), "present -> true");
-    ExpectTrue(prob.empty(), "no problem");
+    Check(ProbeDestructionChunksAt(dir, prob), "present -> true");
+    Check(prob.empty(), "no problem");
     std::filesystem::remove_all(dir, g_ec);
 }
 
@@ -226,8 +216,8 @@ void TestProbeEnhancedPresent()
     PopulateValidEnhancedSet(dir / "mods" / "3686673790");
     std::string prob;
     std::filesystem::path resolved;
-    ExpectTrue(ProbeEnhancedResourcesAt(dir, prob, &resolved), "present -> true");
-    ExpectTrue(prob.empty(), "no problem");
+    Check(ProbeEnhancedResourcesAt(dir, prob, &resolved), "present -> true");
+    Check(prob.empty(), "no problem");
     ExpectEqStr(resolved.lexically_normal().string(),
                 (dir / kEnhancedResourceDirRel).lexically_normal().string(),
                 "game-root deployment is preferred over a mod copy");
@@ -245,9 +235,9 @@ void TestProbeEnhancedPresentInLocalModRoots()
 
         std::string prob;
         std::filesystem::path resolved;
-        ExpectTrue(ProbeEnhancedResourcesAt(dir, prob, &resolved),
-                   "mod-root Enhanced set -> true");
-        ExpectTrue(prob.empty(), "mod-root probe has no problem");
+        Check(ProbeEnhancedResourcesAt(dir, prob, &resolved),
+              "mod-root Enhanced set -> true");
+        Check(prob.empty(), "mod-root probe has no problem");
         ExpectEqStr(resolved.lexically_normal().string(),
                     (modRoot / kEnhancedResourceDirRel).lexically_normal().string(),
                     "mod-root probe returns the compatible directory");
@@ -267,9 +257,9 @@ void TestProbeEnhancedPresentInSteamWorkshop()
 
     std::string prob;
     std::filesystem::path resolved;
-    ExpectTrue(ProbeEnhancedResourcesAt(gameDir, prob, &resolved),
-               "Workshop Enhanced set -> true");
-    ExpectTrue(prob.empty(), "Workshop probe has no problem");
+    Check(ProbeEnhancedResourcesAt(gameDir, prob, &resolved),
+          "Workshop Enhanced set -> true");
+    Check(prob.empty(), "Workshop probe has no problem");
     ExpectEqStr(resolved.lexically_normal().string(),
                 (modRoot / kEnhancedResourceDirRel).lexically_normal().string(),
                 "Workshop probe returns the compatible directory");
@@ -289,8 +279,8 @@ void TestProbeEnhancedFallsBackFromInvalidGameRootToMod()
 
     std::string prob;
     std::filesystem::path resolved;
-    ExpectTrue(ProbeEnhancedResourcesAt(dir, prob, &resolved),
-               "valid mod set wins after invalid game-root set");
+    Check(ProbeEnhancedResourcesAt(dir, prob, &resolved),
+          "valid mod set wins after invalid game-root set");
     ExpectEqStr(resolved.lexically_normal().string(),
                 (modRoot / kEnhancedResourceDirRel).lexically_normal().string(),
                 "fallback reports mod resource directory");
@@ -317,7 +307,7 @@ void TestEvaluateNoManifestNone()
     std::printf("TestEvaluateNoManifestNone\n");
     auto dir = MakeScratchDir("eval_none");
     auto caps = EvaluateAssetCapabilitiesAt(dir);
-    ExpectTrue(caps.state == AssetPackState::NotDetected, "NotDetected");
+    Check(caps.state == AssetPackState::NotDetected, "NotDetected");
     ExpectFalse(caps.packDetected, "not detected");
     ExpectFalse(caps.versionCompatible, "not compatible");
     ExpectFalse(caps.destructionChunks, "no chunks");
@@ -334,11 +324,11 @@ void TestEvaluateNoManifestFull()
     auto caps = EvaluateAssetCapabilitiesAt(dir);
     // No manifest: pack identity separate from capability. Pack remains NotDetected
     // even though compatible resources exist via filesystem probing.
-    ExpectTrue(caps.state == AssetPackState::NotDetected, "NotDetected when no manifest even with resources");
+    Check(caps.state == AssetPackState::NotDetected, "NotDetected when no manifest even with resources");
     ExpectFalse(caps.packDetected, "packDetected false without manifest");
     ExpectFalse(caps.manifestDetected, "manifestDetected false");
-    ExpectTrue(caps.destructionChunks, "chunks true via probe");
-    ExpectTrue(caps.enhancedResources, "enhanced true via probe");
+    Check(caps.destructionChunks, "chunks true via probe");
+    Check(caps.enhancedResources, "enhanced true via probe");
     std::filesystem::remove_all(dir, g_ec);
 }
 
@@ -349,9 +339,9 @@ void TestEvaluateNoManifestPartial()
     PopulateChunkPayload(dir);
     // no enhanced
     auto caps = EvaluateAssetCapabilitiesAt(dir);
-    ExpectTrue(caps.state == AssetPackState::NotDetected, "NotDetected even if partial resources without manifest");
+    Check(caps.state == AssetPackState::NotDetected, "NotDetected even if partial resources without manifest");
     ExpectFalse(caps.packDetected, "pack false");
-    ExpectTrue(caps.destructionChunks, "chunks true");
+    Check(caps.destructionChunks, "chunks true");
     ExpectFalse(caps.enhancedResources, "enhanced false");
     ExpectContains(caps.problem, "chunks", "problem mentions chunks");
     std::filesystem::remove_all(dir, g_ec);
@@ -365,9 +355,9 @@ void TestEvaluateWithManifestValidFull()
     PopulateValidEnhancedSet(dir);
     const std::string manifest = "[OpenShimAssets]\nVersion=1\nChunkMeshes=1\nEnhancedResources=1\n";
     auto caps = EvaluateAssetCapabilitiesAtWithManifest(dir, manifest);
-    ExpectTrue(caps.state == AssetPackState::Detected, "Detected");
-    ExpectTrue(caps.destructionChunks, "chunks");
-    ExpectTrue(caps.enhancedResources, "enhanced");
+    Check(caps.state == AssetPackState::Detected, "Detected");
+    Check(caps.destructionChunks, "chunks");
+    Check(caps.enhancedResources, "enhanced");
     std::filesystem::remove_all(dir, g_ec);
 }
 
@@ -378,7 +368,7 @@ void TestEvaluateWithManifestValidButFilesMissing()
     // manifest claims chunks but no files
     const std::string manifest = "[OpenShimAssets]\nVersion=1\nChunkMeshes=1\nEnhancedResources=1\n";
     auto caps = EvaluateAssetCapabilitiesAtWithManifest(dir, manifest);
-    ExpectTrue(caps.state == AssetPackState::Detected, "Detected even partial");
+    Check(caps.state == AssetPackState::Detected, "Detected even partial");
     ExpectFalse(caps.destructionChunks, "chunks false because files missing");
     ExpectFalse(caps.enhancedResources, "enhanced false");
     ExpectContains(caps.problem, "ChunkMeshes", "problem");
@@ -393,7 +383,7 @@ void TestEvaluateWithManifestMismatch()
     PopulateValidEnhancedSet(dir);
     const std::string manifest = "[OpenShimAssets]\nVersion=999\nChunkMeshes=1\n";
     auto caps = EvaluateAssetCapabilitiesAtWithManifest(dir, manifest);
-    ExpectTrue(caps.state == AssetPackState::Incompatible, "Incompatible");
+    Check(caps.state == AssetPackState::Incompatible, "Incompatible");
     ExpectFalse(caps.versionCompatible, "not compatible");
     ExpectFalse(caps.destructionChunks, "chunks false on mismatch");
     std::filesystem::remove_all(dir, g_ec);
@@ -406,7 +396,7 @@ void TestEvaluateWithManifestMalformed()
     PopulateChunkPayload(dir);
     const std::string manifest = "garbage without section\nVersion=1\n";
     auto caps = EvaluateAssetCapabilitiesAtWithManifest(dir, manifest);
-    ExpectTrue(caps.state == AssetPackState::Incompatible, "Incompatible malformed");
+    Check(caps.state == AssetPackState::Incompatible, "Incompatible malformed");
     std::filesystem::remove_all(dir, g_ec);
 }
 
@@ -416,7 +406,7 @@ void TestMissingManifestBehavior()
     auto dir = MakeScratchDir("missing_manifest");
     // No manifest file at all, plus no payloads -> NotDetected
     auto caps = EvaluateAssetCapabilitiesAt(dir);
-    ExpectTrue(caps.state == AssetPackState::NotDetected, "NotDetected when no manifest and no payloads");
+    Check(caps.state == AssetPackState::NotDetected, "NotDetected when no manifest and no payloads");
     std::filesystem::remove_all(dir, g_ec);
 }
 
@@ -432,10 +422,10 @@ void TestFeatureGating()
     good.destructionChunks = true;
     good.enhancedResources = true;
     SetAssetCapabilitiesForTesting(good);
-    ExpectTrue(IsAssetFeatureAvailable(AssetFeature::DestructionChunks), "chunks available when good");
-    ExpectTrue(ShouldEnableAssetFeature(true, AssetFeature::DestructionChunks), "config true && available -> true");
+    Check(IsAssetFeatureAvailable(AssetFeature::DestructionChunks), "chunks available when good");
+    Check(ShouldEnableAssetFeature(true, AssetFeature::DestructionChunks), "config true && available -> true");
     ExpectFalse(ShouldEnableAssetFeature(false, AssetFeature::DestructionChunks), "config false -> false even if available");
-    ExpectTrue(ShouldEnableAssetFeature(true, AssetFeature::EnhancedRenderer), "enhanced true");
+    Check(ShouldEnableAssetFeature(true, AssetFeature::EnhancedRenderer), "enhanced true");
     // Simulate missing pack
     AssetCapabilities bad;
     bad.state = AssetPackState::NotDetected;
@@ -466,9 +456,9 @@ void TestFeatureGating()
     partial.destructionChunks = true;
     partial.enhancedResources = false;
     SetAssetCapabilitiesForTesting(partial);
-    ExpectTrue(IsAssetFeatureAvailable(AssetFeature::DestructionChunks), "partial chunks available");
+    Check(IsAssetFeatureAvailable(AssetFeature::DestructionChunks), "partial chunks available");
     ExpectFalse(IsAssetFeatureAvailable(AssetFeature::EnhancedRenderer), "partial enhanced not");
-    ExpectTrue(ShouldEnableAssetFeature(true, AssetFeature::DestructionChunks), "chunks true");
+    Check(ShouldEnableAssetFeature(true, AssetFeature::DestructionChunks), "chunks true");
     ExpectFalse(ShouldEnableAssetFeature(true, AssetFeature::EnhancedRenderer), "enhanced false");
     // Unknown should fail closed
     AssetCapabilities unknown;
@@ -490,9 +480,9 @@ void TestFormatVersionVsCompatibility()
     const std::string text1 = "[OpenShimAssets]\nFormatVersion=1\nCompatibilityVersion=1\nChunkMeshes=1\n";
     AssetCapabilities caps;
     std::string prob;
-    ExpectTrue(ParseAssetManifestContent(text1, caps, prob), "both versions 1 parses");
-    ExpectTrue(caps.formatCompatible, "format");
-    ExpectTrue(caps.compatibilityCompatible, "compat");
+    Check(ParseAssetManifestContent(text1, caps, prob), "both versions 1 parses");
+    Check(caps.formatCompatible, "format");
+    Check(caps.compatibilityCompatible, "compat");
 
     const std::string text2 = "[OpenShimAssets]\nFormatVersion=999\nCompatibilityVersion=1\nChunkMeshes=1\n";
     ExpectFalse(ParseAssetManifestContent(text2, caps, prob), "bad format fails");
@@ -504,8 +494,8 @@ void TestFormatVersionVsCompatibility()
 
     // Legacy Version= alias still works
     const std::string text4 = "[OpenShimAssets]\nVersion=1\nChunkMeshes=1\n";
-    ExpectTrue(ParseAssetManifestContent(text4, caps, prob), "legacy Version still works");
-    ExpectTrue(caps.compatibilityCompatible, "legacy compat true");
+    Check(ParseAssetManifestContent(text4, caps, prob), "legacy Version still works");
+    Check(caps.compatibilityCompatible, "legacy compat true");
 }
 
 void TestPackageVsCapabilitySeparation()
@@ -515,14 +505,14 @@ void TestPackageVsCapabilitySeparation()
     PopulateChunkPayload(dir);
     // No manifest, no enhanced -> compatible chunk resources available but pack not detected
     auto caps = EvaluateAssetCapabilitiesAt(dir);
-    ExpectTrue(caps.state == AssetPackState::NotDetected, "pack NotDetected");
+    Check(caps.state == AssetPackState::NotDetected, "pack NotDetected");
     ExpectFalse(caps.packDetected, "pack false");
     ExpectFalse(caps.manifestDetected, "manifest false");
-    ExpectTrue(caps.destructionChunks, "chunks available via unrelated mod probe");
+    Check(caps.destructionChunks, "chunks available via unrelated mod probe");
     ExpectFalse(caps.enhancedResources, "enhanced not");
     // But feature should still be available via capability, even though pack not detected
     SetAssetCapabilitiesForTesting(caps);
-    ExpectTrue(IsAssetFeatureAvailable(AssetFeature::DestructionChunks), "chunks available even without pack");
+    Check(IsAssetFeatureAvailable(AssetFeature::DestructionChunks), "chunks available even without pack");
     ExpectFalse(IsAssetFeatureAvailable(AssetFeature::EnhancedRenderer), "enhanced not");
     // UI truthfulness: FormatAssetStatusForUi should still say Not Detected, Detail shows per-group
     ExpectContains(FormatAssetStatusForUi(caps), "Not Detected", "ui pack not detected");
@@ -544,13 +534,13 @@ void TestTerrainHdCapability()
         std::ofstream f(dir / "terrain_hd_tiles.json", std::ios::binary);
         f << "{\"tiles\":[]}";
     }
-    ExpectTrue(ProbeTerrainHdAt(dir, kDefaultTerrainHdManifest, prob), "terrain now available");
+    Check(ProbeTerrainHdAt(dir, kDefaultTerrainHdManifest, prob), "terrain now available");
 
     // Manifest claiming TerrainHd=1 but file missing -> capability false
     const std::string manifest = "[OpenShimAssets]\nFormatVersion=1\nCompatibilityVersion=1\nTerrainHd=1\n";
     auto caps = EvaluateAssetCapabilitiesAtWithManifest(dir, manifest);
     // dir has terrain file now, so should be true
-    ExpectTrue(caps.terrainHd, "terrain true when manifest claims and file exists");
+    Check(caps.terrainHd, "terrain true when manifest claims and file exists");
 
     // Remove file, re-evaluate -> false
     std::filesystem::remove(dir / "terrain_hd_tiles.json", g_ec);
@@ -568,7 +558,7 @@ void TestTerrainHdCapability()
     good.versionCompatible = true;
     good.terrainHd = true;
     SetAssetCapabilitiesForTesting(good);
-    ExpectTrue(IsAssetFeatureAvailable(AssetFeature::TerrainHd), "terrain available");
+    Check(IsAssetFeatureAvailable(AssetFeature::TerrainHd), "terrain available");
     good.terrainHd = false;
     SetAssetCapabilitiesForTesting(good);
     ExpectFalse(IsAssetFeatureAvailable(AssetFeature::TerrainHd), "terrain not");
@@ -592,8 +582,8 @@ void TestTerrainHdConfiguredManifestPath()
     }
     ExpectFalse(ProbeTerrainHdAt(dir, kDefaultTerrainHdManifest, prob),
                 "default name absent");
-    ExpectTrue(ProbeTerrainHdAt(dir, "openshim/custom_hd.json", prob),
-               "configured relative manifest honored");
+    Check(ProbeTerrainHdAt(dir, "openshim/custom_hd.json", prob),
+          "configured relative manifest honored");
 
     // An absolute configured manifest is used verbatim, outside the game dir.
     auto other = MakeScratchDir("terrain_hd_absolute");
@@ -602,8 +592,8 @@ void TestTerrainHdConfiguredManifestPath()
         std::ofstream f(absolute, std::ios::binary);
         f << "{}";
     }
-    ExpectTrue(ProbeTerrainHdAt(dir, absolute.string(), prob),
-               "configured absolute manifest honored");
+    Check(ProbeTerrainHdAt(dir, absolute.string(), prob),
+          "configured absolute manifest honored");
     ExpectEqStr(ResolveTerrainHdManifestPathAt(dir, absolute.string()).string(),
                 absolute.lexically_normal().string(),
                 "absolute path resolves verbatim");
@@ -613,7 +603,7 @@ void TestTerrainHdConfiguredManifestPath()
 
     // An empty configured value means HD terrain has no manifest at all, which
     // is a distinct problem from "the file is missing".
-    ExpectTrue(ResolveTerrainHdManifestPathAt(dir, "").empty(), "empty configured -> empty path");
+    Check(ResolveTerrainHdManifestPathAt(dir, "").empty(), "empty configured -> empty path");
     ExpectFalse(ProbeTerrainHdAt(dir, "", prob), "empty configured not available");
     ExpectContains(prob, "not configured", "empty configured problem is specific");
 
@@ -627,7 +617,7 @@ void TestTerrainHdConfiguredManifestPath()
     const std::string manifest =
         "[OpenShimAssets]\nFormatVersion=1\nCompatibilityVersion=1\nTerrainHd=1\n";
     auto caps = EvaluateAssetCapabilitiesAtWithManifest(dir, manifest, "openshim/custom_hd.json");
-    ExpectTrue(caps.terrainHd, "evaluate honors configured manifest");
+    Check(caps.terrainHd, "evaluate honors configured manifest");
     caps = EvaluateAssetCapabilitiesAtWithManifest(dir, manifest, kDefaultTerrainHdManifest);
     ExpectFalse(caps.terrainHd, "evaluate reports missing default manifest");
 
@@ -657,15 +647,15 @@ void TestCapabilitySnapshotSurvivesRefresh()
     // must still be readable and unchanged.
     const AssetCapabilities snapshot = GetAssetCapabilities();
     RefreshAssetCapabilitiesAt(dir, kDefaultTerrainHdManifest);
-    ExpectTrue(snapshot.state == AssetPackState::Detected, "snapshot keeps its state");
-    ExpectTrue(snapshot.destructionChunks, "snapshot keeps its capability bits");
+    Check(snapshot.state == AssetPackState::Detected, "snapshot keeps its state");
+    Check(snapshot.destructionChunks, "snapshot keeps its capability bits");
     ExpectEqStr(snapshot.problem,
                 "a problem string long enough to own a heap allocation",
                 "snapshot keeps its string storage");
 
     // The cache itself moved on: the empty scratch dir has no pack.
     const AssetCapabilities refreshed = GetAssetCapabilities();
-    ExpectTrue(refreshed.state == AssetPackState::NotDetected, "refresh replaced the cache");
+    Check(refreshed.state == AssetPackState::NotDetected, "refresh replaced the cache");
     ExpectFalse(refreshed.destructionChunks, "refreshed has no chunks");
 
     ResetAssetCapabilitiesForTesting();
@@ -683,7 +673,7 @@ void TestPerMeshPartialSafety()
     // manifest claims chunks
     const std::string manifest = "[OpenShimAssets]\nFormatVersion=1\nCompatibilityVersion=1\nChunkMeshes=1\n";
     auto caps = EvaluateAssetCapabilitiesAtWithManifest(dir, manifest);
-    ExpectTrue(caps.destructionChunks, "global chunks true");
+    Check(caps.destructionChunks, "global chunks true");
     // Now remove the specific mesh that would be requested (simulate partial)
     std::filesystem::remove(dir / "addon" / "ModA" / "chunkMeshes" / "chunk1" / "chunk1.mesh", g_ec);
     std::filesystem::remove(dir / "addon" / "ModA" / "chunkMeshes" / "generic" / "iechunk1.mesh", g_ec);
@@ -713,8 +703,8 @@ void TestSemanticCleanupFxaa()
     ExpectFalse(IsAssetFeatureAvailable(AssetFeature::Dx11LocalLights), "local lights false");
     caps.enhancedResources = true;
     SetAssetCapabilitiesForTesting(caps);
-    ExpectTrue(IsAssetFeatureAvailable(AssetFeature::Dx11Fxaa), "fxaa true when enhanced available even without pack");
-    ExpectTrue(IsAssetFeatureAvailable(AssetFeature::Dx11LocalLights), "local lights true");
+    Check(IsAssetFeatureAvailable(AssetFeature::Dx11Fxaa), "fxaa true when enhanced available even without pack");
+    Check(IsAssetFeatureAvailable(AssetFeature::Dx11LocalLights), "local lights true");
     ResetAssetCapabilitiesForTesting();
 }
 
@@ -775,9 +765,9 @@ int main()
     TestSemanticCleanupFxaa();
     TestUiFormatting();
 
-    if (g_failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::printf("\nopenshim_assets_tests FAILED (%d)\n", g_failures);
+        std::printf("\nopenshim_assets_tests FAILED (%d)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("\nopenshim_assets_tests passed\n");

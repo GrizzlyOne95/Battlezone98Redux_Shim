@@ -16,36 +16,25 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 namespace
 {
     using namespace BZROpenShim;
     using namespace BZROpenShim::AutoSaveGate;
 
-    int g_failures = 0;
-
-    void Require(bool condition, const char* message)
-    {
-        if (!condition)
-        {
-            std::fprintf(stderr, "autosave_gate_tests: %s\n", message);
-            ++g_failures;
-        }
-    }
 
     void RequireDecision(const ObservedState& state, Decision expected, const char* message)
     {
         const GateResult result = Evaluate(state);
         if (result.decision != expected)
         {
-            std::fprintf(
-                stderr,
-                "autosave_gate_tests: %s (expected %s, got %s: \"%s\")\n",
-                message,
+            OpenShimTest::Fail("%s (expected %s, got %s: \"%s\")", message,
                 DescribeDecision(expected),
                 DescribeDecision(result.decision),
                 result.reason);
-            ++g_failures;
         }
     }
 
@@ -113,7 +102,7 @@ namespace
             state.uiScreenPresent = true;
             state.uiScreenType = screenType;
             RequireDecision(state, Decision::UiBusy, "classified shell screen must block");
-            Require(
+            Check(
                 IsNonGameplayScreenType(screenType), "classified screen must be non-gameplay");
         }
     }
@@ -200,9 +189,9 @@ namespace
     void TestReasonsAreAlwaysReportable()
     {
         ObservedState state = LiveMission();
-        Require(Evaluate(state).reason != nullptr, "a save decision must carry a reason");
-        Require(Evaluate(AbortedLoadScreen()).reason != nullptr, "a refusal must carry a reason");
-        Require(
+        Check(Evaluate(state).reason != nullptr, "a save decision must carry a reason");
+        Check(Evaluate(AbortedLoadScreen()).reason != nullptr, "a refusal must carry a reason");
+        Check(
             DescribeScreenType(kScreenTypeLoading) == Evaluate(AbortedLoadScreen()).reason,
             "a classified refusal must name the screen");
     }
@@ -219,9 +208,9 @@ int main()
     TestFaultLatches();
     TestReasonsAreAlwaysReportable();
 
-    if (g_failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::fprintf(stderr, "autosave_gate_tests: %d failure(s)\n", g_failures);
+        std::fprintf(stderr, "autosave_gate_tests: %d failure(s)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("autosave_gate_tests: all checks passed\n");
