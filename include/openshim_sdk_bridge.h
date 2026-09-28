@@ -49,6 +49,47 @@ struct OpenShimSdkProviderTable
     uint32_t(__cdecl* legacyGetBzrDistribution)(void);
 };
 
+// Layout pins. The thunks in winmm.dll and the provider in the plugin read the
+// same table from two separately built modules, so its shape is ABI: a
+// uint32_t structSize at offset 0, then one pointer per export in .inc order
+// with no padding between them, then the legacy block directly after the last
+// export. Any other member, or a reordering that moved the legacy block, fails
+// here instead of misrouting calls at runtime.
+namespace BZROpenShim::SdkBridge::Detail
+{
+    constexpr size_t kExportSlotCount = 0
+#define OPENSHIM_SDK_EXPORT(ret, cc, name, impl, params, args, unavail) + 1
+#include "openshim_sdk_exports.inc"
+#undef OPENSHIM_SDK_EXPORT
+        ;
+    constexpr size_t kLegacySlotCount = 5;
+    constexpr size_t kSlotSize = sizeof(void (*)(void));
+    // structSize, padded up to pointer alignment.
+    constexpr size_t kFirstSlotOffset =
+        (sizeof(uint32_t) + alignof(void (*)(void)) - 1) / alignof(void (*)(void)) * alignof(void (*)(void));
+    constexpr size_t kLegacyOffset = kFirstSlotOffset + kExportSlotCount * kSlotSize;
+}
+
+static_assert(offsetof(OpenShimSdkProviderTable, structSize) == 0,
+              "structSize must stay the first field of the provider table");
+static_assert(offsetof(OpenShimSdkProviderTable, legacyGetShimVersion) ==
+                  BZROpenShim::SdkBridge::Detail::kLegacyOffset,
+              "the legacy block must follow the last export slot directly");
+static_assert(offsetof(OpenShimSdkProviderTable, legacyGetBzrDistribution) ==
+                  BZROpenShim::SdkBridge::Detail::kLegacyOffset +
+                      (BZROpenShim::SdkBridge::Detail::kLegacySlotCount - 1) * BZROpenShim::SdkBridge::Detail::kSlotSize,
+              "the five legacy slots must stay contiguous and in order");
+static_assert(sizeof(OpenShimSdkProviderTable) ==
+                  BZROpenShim::SdkBridge::Detail::kLegacyOffset +
+                      BZROpenShim::SdkBridge::Detail::kLegacySlotCount * BZROpenShim::SdkBridge::Detail::kSlotSize,
+              "the provider table must be structSize plus one pointer per slot, nothing else");
+// The shipped Win32 build: a 4-byte structSize, then 4-byte pointers.
+static_assert(sizeof(void*) != 4 ||
+                  sizeof(OpenShimSdkProviderTable) ==
+                      4 + 4 * (BZROpenShim::SdkBridge::Detail::kExportSlotCount +
+                               BZROpenShim::SdkBridge::Detail::kLegacySlotCount),
+              "the Win32 provider table layout changed");
+
 #define OPENSHIM_SDK_TABLE_HAS(tablePtr, field) \
     ((tablePtr)->structSize >= \
          (uint32_t)(offsetof(OpenShimSdkProviderTable, field) + \

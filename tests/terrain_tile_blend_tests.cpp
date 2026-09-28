@@ -2,21 +2,12 @@
 
 #include <cstdio>
 #include <limits>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim;
 
-namespace
-{
-    int g_failures = 0;
-
-    void Check(bool condition, const char* what)
-    {
-        if (condition)
-            return;
-        std::fprintf(stderr, "FAIL: %s\n", what);
-        ++g_failures;
-    }
-}
 
 int main()
 {
@@ -28,7 +19,7 @@ int main()
     Check(TerrainTileBlendEdgeAlpha(0.5f) == 128, "half blend rounds to alpha 128");
     Check(TerrainTileBlendEdgeAlpha(1.0f) == 0, "one blend preserves stock zero edge alpha");
 
-    if (g_failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
         std::puts("terrain tile blend tests passed");
-    return g_failures == 0 ? 0 : 1;
+    return OpenShimTest::ExitCode();
 }

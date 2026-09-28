@@ -14,20 +14,10 @@
 
 #include <cstdio>
 #include <cstring>
+#include "test_check.h"
 
 namespace
 {
-    int g_Failures = 0;
-
-    void Check(bool condition, const char* what, int line)
-    {
-        if (condition) return;
-        std::printf("FAIL line %d: %s\n", line, what);
-        ++g_Failures;
-    }
-
-#define CHECK(c) Check((c), #c, __LINE__)
-
     // --- synthetic implementations -------------------------------------
     bool g_ClearAllCalled = false;
     DWORD g_LastThrottle = 0;
@@ -144,9 +134,9 @@ int main()
     CHECK(!BZROpenShim::SdkBridge::InstallProvider(&degenerate));
     CHECK(!BZROpenShim::SdkBridge::InstallProvider(nullptr));
 
-    if (g_Failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::printf("openshim sdk thunk tests FAILED (%d)\n", g_Failures);
+        std::printf("openshim sdk thunk tests FAILED (%d)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("openshim sdk thunk tests passed\n");

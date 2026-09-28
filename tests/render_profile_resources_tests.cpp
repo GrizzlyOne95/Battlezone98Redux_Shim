@@ -9,28 +9,19 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim::RenderProfiles;
 
 namespace
 {
-    int g_failures = 0;
-
-    void ExpectTrue(bool condition, const char* what)
-    {
-        if (!condition)
-        {
-            std::printf("  FAIL: %s\n", what);
-            ++g_failures;
-        }
-    }
-
     void ExpectContains(const std::string& haystack, const char* needle, const char* what)
     {
         if (haystack.find(needle) == std::string::npos)
         {
-            std::printf("  FAIL: %s ('%s' missing '%s')\n", what, haystack.c_str(), needle);
-            ++g_failures;
+            OpenShimTest::Fail("%s ('%s' missing '%s')", what, haystack.c_str(), needle);
         }
     }
 
@@ -70,8 +61,8 @@ void TestCompleteSetValidates()
     const auto dir = MakeScratchDir("valid");
     PopulateValidSet(dir);
     std::string problem;
-    ExpectTrue(Validate(dir, problem), "complete valid set passes");
-    ExpectTrue(problem.empty(), "no problem reported");
+    Check(Validate(dir, problem), "complete valid set passes");
+    Check(problem.empty(), "no problem reported");
     std::filesystem::remove_all(dir, g_errc);
 }
 
@@ -90,9 +81,7 @@ void TestSingleRemovedMandatoryFileFails()
         const bool ok = Validate(dir, problem);
         if (ok)
         {
-            std::printf("  FAIL: removal of %s not detected\n",
-                        RequiredEnhancedResourceAt(victim));
-            ++g_failures;
+            OpenShimTest::Fail("removal of %s not detected", RequiredEnhancedResourceAt(victim));
         }
         else
         {
@@ -114,7 +103,7 @@ void TestEmptiedMandatoryFileFails()
                            std::ios::binary | std::ios::trunc);
     truncate.close();
     std::string problem;
-    ExpectTrue(!Validate(dir, problem), "empty payload rejected");
+    Check(!Validate(dir, problem), "empty payload rejected");
     ExpectContains(problem, RequiredEnhancedResourceAt(0), "problem names emptied file");
     std::filesystem::remove_all(dir, g_errc);
 }
@@ -130,7 +119,7 @@ void TestVersionMarkerContract()
         marker << "999";
         marker.close();
         std::string problem;
-        ExpectTrue(!Validate(dir, problem), "stale version rejected");
+        Check(!Validate(dir, problem), "stale version rejected");
         ExpectContains(problem, "version", "problem mentions version");
     }
     {
@@ -142,12 +131,12 @@ void TestVersionMarkerContract()
         longer << expected << "0";
         longer.close();
         std::string problem;
-        ExpectTrue(!Validate(dir, problem), "superstring-of-version rejected");
+        Check(!Validate(dir, problem), "superstring-of-version rejected");
     }
     {
         std::filesystem::remove(dir / kEnhancedResourceVersionFile, g_errc);
         std::string problem;
-        ExpectTrue(!Validate(dir, problem), "missing marker rejected");
+        Check(!Validate(dir, problem), "missing marker rejected");
     }
     std::filesystem::remove_all(dir, g_errc);
 }
@@ -156,23 +145,23 @@ void TestVersionMarkerComparison()
 {
     std::printf("TestVersionMarkerComparison\n");
 
-    ExpectTrue(VersionMarkerMatches("2", 1, "2"), "exact single-char matches");
-    ExpectTrue(VersionMarkerMatches("12", 2, "12"), "exact multi-char matches");
+    Check(VersionMarkerMatches("2", 1, "2"), "exact single-char matches");
+    Check(VersionMarkerMatches("12", 2, "12"), "exact multi-char matches");
 
     // The regression this comparison exists for: a marker that is a strict
     // prefix of the expectation. A compare limited to the marker's own length
     // reports a match here, so a v1 payload would validate against a v12 DLL.
-    ExpectTrue(!VersionMarkerMatches("1", 1, "12"), "prefix marker rejected");
-    ExpectTrue(!VersionMarkerMatches("12", 2, "123"), "longer prefix rejected");
+    Check(!VersionMarkerMatches("1", 1, "12"), "prefix marker rejected");
+    Check(!VersionMarkerMatches("12", 2, "123"), "longer prefix rejected");
 
     // And the mirror: the expectation as a prefix of the marker.
-    ExpectTrue(!VersionMarkerMatches("12", 2, "1"), "superstring marker rejected");
+    Check(!VersionMarkerMatches("12", 2, "1"), "superstring marker rejected");
 
-    ExpectTrue(!VersionMarkerMatches("", 0, "2"), "empty marker rejected");
-    ExpectTrue(!VersionMarkerMatches(nullptr, 0, "2"), "null marker rejected");
+    Check(!VersionMarkerMatches("", 0, "2"), "empty marker rejected");
+    Check(!VersionMarkerMatches(nullptr, 0, "2"), "null marker rejected");
 
     // The marker is raw bytes: trailing whitespace is a different version.
-    ExpectTrue(!VersionMarkerMatches("2\n", 2, "2"), "trailing newline rejected");
+    Check(!VersionMarkerMatches("2\n", 2, "2"), "trailing newline rejected");
 }
 
 void TestLeftoverScriptShadowingPayloadFails()
@@ -187,7 +176,7 @@ void TestLeftoverScriptShadowingPayloadFails()
     PopulateValidSet(dir);
 
     std::string problem;
-    ExpectTrue(Validate(dir, problem), "clean set passes before the leftover");
+    Check(Validate(dir, problem), "clean set passes before the leftover");
 
     {
         std::ofstream stale(dir / "openshim_enhanced_terrain (1).program",
@@ -196,7 +185,7 @@ void TestLeftoverScriptShadowingPayloadFails()
     }
 
     problem.clear();
-    ExpectTrue(!Validate(dir, problem), "leftover .program is rejected");
+    Check(!Validate(dir, problem), "leftover .program is rejected");
     ExpectContains(problem, "openshim_enhanced_terrain (1).program",
                    "problem names the leftover script");
 
@@ -209,7 +198,7 @@ void TestLeftoverScriptShadowingPayloadFails()
         stray << "// inert";
     }
     problem.clear();
-    ExpectTrue(Validate(dir, problem), "stray .hlsl alone still validates");
+    Check(Validate(dir, problem), "stray .hlsl alone still validates");
 
     std::filesystem::remove_all(dir, g_errc);
 }
@@ -228,7 +217,7 @@ void TestLeftoverScriptInSubdirectoryFails()
     }
 
     std::string problem;
-    ExpectTrue(!Validate(dir, problem), "script in a subdirectory is rejected");
+    Check(!Validate(dir, problem), "script in a subdirectory is rejected");
     ExpectContains(problem, "old/", "problem names the subdirectory path");
 
     std::filesystem::remove_all(dir / "old", g_errc);
@@ -238,7 +227,7 @@ void TestLeftoverScriptInSubdirectoryFails()
         inert << "// inert";
     }
     problem.clear();
-    ExpectTrue(Validate(dir, problem), "shader source in a subdirectory still validates");
+    Check(Validate(dir, problem), "shader source in a subdirectory still validates");
 
     std::filesystem::remove_all(dir, g_errc);
 }
@@ -249,7 +238,7 @@ void TestAbsentDirectoryFails()
     const auto dir = MakeScratchDir("absent");
     std::filesystem::remove_all(dir, g_errc); // guarantee absence
     std::string problem;
-    ExpectTrue(!Validate(dir, problem), "absent directory rejected");
+    Check(!Validate(dir, problem), "absent directory rejected");
     std::filesystem::remove_all(dir, g_errc);
 }
 
@@ -264,9 +253,9 @@ int main()
     TestLeftoverScriptInSubdirectoryFails();
     TestAbsentDirectoryFails();
 
-    if (g_failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::printf("\nrender_profile_resources_tests FAILED (%d)\n", g_failures);
+        std::printf("\nrender_profile_resources_tests FAILED (%d)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("\nrender_profile_resources_tests passed\n");

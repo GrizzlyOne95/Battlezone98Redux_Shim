@@ -51,20 +51,16 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 namespace
 {
-    int g_Failures = 0;
-
+    // The messages here are built by concatenation, so take a std::string.
     void Fail(const std::string& what)
     {
-        std::fprintf(stderr, "FAIL: %s\n", what.c_str());
-        ++g_Failures;
-    }
-
-    void Check(bool condition, const std::string& what)
-    {
-        if (!condition) Fail(what);
+        OpenShimTest::Fail("%s", what.c_str());
     }
 
     std::string ReadFile(const char* path, bool& ok)
@@ -316,9 +312,9 @@ int main()
     const std::vector<SourceFile> sources = SourceTree(BZR_SRC_DIR, treeOk);
     Check(treeOk, "every source under src/ must be readable at " BZR_SRC_DIR);
 
-    if (g_Failures)
+    if (OpenShimTest::FailureCount())
     {
-        std::fprintf(stderr, "patch_registration_tests: %d failure(s)\n", g_Failures);
+        std::fprintf(stderr, "patch_registration_tests: %d failure(s)\n", OpenShimTest::FailureCount());
         return 1;
     }
 
@@ -329,9 +325,9 @@ int main()
     Check(hasPatches, "patches.json must contain a \"patches\" array");
     Check(hasResolves, "patches.json must contain a \"resolves\" array");
     Check(hasGlobals, "patches.json must contain a \"globals\" array");
-    if (g_Failures)
+    if (OpenShimTest::FailureCount())
     {
-        std::fprintf(stderr, "patch_registration_tests: %d failure(s)\n", g_Failures);
+        std::fprintf(stderr, "patch_registration_tests: %d failure(s)\n", OpenShimTest::FailureCount());
         return 1;
     }
 
@@ -434,7 +430,7 @@ int main()
         }
     }
 
-    if (g_Failures == 0)
+    if (OpenShimTest::FailureCount() == 0)
     {
         std::printf("patch_registration_tests: %zu patch-list entries cross-checked "
                     "(%zu signature, %zu global, %zu global(s) parked), %zu resolves used from "
@@ -443,7 +439,7 @@ int main()
                     jsonResolves.size(), resolveCallers.size(), sources.size());
         return 0;
     }
-    std::fprintf(stderr, "patch_registration_tests: %d failure(s)\n", g_Failures);
+    std::fprintf(stderr, "patch_registration_tests: %d failure(s)\n", OpenShimTest::FailureCount());
     return 1;
 #endif
 }

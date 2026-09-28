@@ -7,6 +7,9 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 namespace
 {
@@ -15,7 +18,6 @@ namespace
     std::wstring g_prompt;
     int g_answer = IDCANCEL;
     int g_prompts = 0;
-    int g_failures = 0;
     bool g_dialogResult = true;
     bool g_abiOk = false;
 
@@ -31,8 +33,8 @@ namespace
     {
         ++g_prompts;
         g_prompt = text;
-        if ((flags & MB_TYPEMASK) == MB_OKCANCEL && (flags & MB_DEFMASK) != MB_DEFBUTTON2)
-            ++g_failures;
+        Check((flags & MB_TYPEMASK) != MB_OKCANCEL || (flags & MB_DEFMASK) == MB_DEFBUTTON2,
+              "an OK/Cancel prompt defaults to Cancel");
         return g_answer;
     }
 }
@@ -68,11 +70,6 @@ namespace HookEngine
 
 namespace
 {
-    void Check(bool condition, const char* message)
-    {
-        if (!condition) { ++g_failures; std::cerr << "FAIL: " << message << '\n'; }
-    }
-
     bool __fastcall NativeSelection(void* self, void*, char* filename, bool missionSave)
     {
         g_abiOk = self == reinterpret_cast<void*>(0x1234) && missionSave;
@@ -213,6 +210,6 @@ int main()
         g_fixture.filename().wstring().find(L"bzr-editor-save-") != 0)
         return EXIT_FAILURE;
     std::filesystem::remove_all(g_fixture);
-    std::cout << "editor_save_dialog_win32_tests: " << (g_failures ? "FAIL" : "PASS") << '\n';
-    return g_failures ? EXIT_FAILURE : EXIT_SUCCESS;
+    std::cout << "editor_save_dialog_win32_tests: " << (OpenShimTest::FailureCount() ? "FAIL" : "PASS") << '\n';
+    return OpenShimTest::FailureCount() ? EXIT_FAILURE : EXIT_SUCCESS;
 }
