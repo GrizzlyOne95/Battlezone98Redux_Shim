@@ -2503,6 +2503,237 @@ namespace BZROpenShim::RenderProfiles
             return inputs;
         }
 
+        // ---- native DX11 input guards -------------------------------------
+        //
+        // Glow/Null is the stock glow listener's black fallback. Its stock
+        // vertex program requires COLOR0 even though the black pass diffuse
+        // makes that input irrelevant. Rebind only that proven shape to the
+        // POSITION-only OpenShim variant. This runs from the viewport scheme
+        // hook on the render thread, so it does not depend on some unrelated
+        // material reaching the legacy scheme-miss ladder first.
+        using FnMaterialManagerGetByName = void* (__thiscall*)(
+            void*, void* /* returned SharedPtr */, const std::string&,
+            const std::string&);
+        using FnPassGetDiffuse = const float* (__thiscall*)(const void*);
+
+        struct OgreSharedPtrRaw
+        {
+            void* rep = nullptr;
+            void* info = nullptr;
+        };
+
+        __declspec(noinline) static bool GuardedGetMaterialByName(
+            FnMaterialManagerGetByName getByName,
+            void* manager,
+            const std::string* materialName,
+            const std::string* groupName,
+            OgreSharedPtrRaw* out)
+        {
+            __try
+            {
+                if (getByName == nullptr || manager == nullptr ||
+                    materialName == nullptr || groupName == nullptr ||
+                    out == nullptr)
+                {
+                    return false;
+                }
+                getByName(manager, out, *materialName, *groupName);
+                return out->rep != nullptr && out->info != nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        __declspec(noinline) static bool GuardedPassDiffuseIsBlack(
+            FnPassGetDiffuse getDiffuse, const void* pass)
+        {
+            __try
+            {
+                const float* colour =
+                    (getDiffuse != nullptr && pass != nullptr)
+                        ? getDiffuse(pass)
+                        : nullptr;
+                return colour != nullptr && colour[0] == 0.0f &&
+                       colour[1] == 0.0f && colour[2] == 0.0f;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // True means the guard reached a final answer. False means the stock
+        // material is not loaded yet and the render-thread caller should retry.
+        bool ApplyNativeInputGuard(const Dx11Compat::NativeInputGuard& guard,
+                                   OgreSharedPtrRaw* retainedMaterial)
+        {
+            static const FnMaterialManagerGetSingletonPtr getManager =
+                ResolveOgreExport<FnMaterialManagerGetSingletonPtr>(
+                    "?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
+            static const FnMaterialManagerGetByName getByName =
+                ResolveOgreExport<FnMaterialManagerGetByName>(
+                    "?getByName@MaterialManager@Ogre@@QAE?AV?$SharedPtr@VMaterial@Ogre@@@2@ABV?$"
+                    "basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@0@Z");
+            static const FnPassGetDiffuse getDiffuse =
+                ResolveOgreExport<FnPassGetDiffuse>(
+                    "?getDiffuse@Pass@Ogre@@QBEABVColourValue@2@XZ");
+
+            auto finish = [&guard](const char* action) {
+                LogCompatOnce(
+                    Dx11Compat::FormatNativeInputGuardLog(guard, action),
+                    LogLevel::Info);
+                return true;
+            };
+
+            const OgreTechniqueApi& techniqueApi = TechniqueApi();
+            const OgreCompatPassApi& passApi = CompatPassApi();
+            const OgreCompatMutationApi& mutationApi = CompatMutationApi();
+            if (getManager == nullptr || getByName == nullptr ||
+                getDiffuse == nullptr ||
+                techniqueApi.getNumTechniques == nullptr ||
+                techniqueApi.getTechnique == nullptr ||
+                !passApi.CanInspect() ||
+                mutationApi.setVertexProgram == nullptr ||
+                mutationApi.loadResource == nullptr)
+            {
+                return finish("skipped:abi-unavailable");
+            }
+
+            const std::string replacement(guard.replacementVertex);
+            if (!GuardedProgramExists(&replacement))
+            {
+                return finish("skipped:program-absent");
+            }
+
+            void* manager = getManager();
+            if (manager == nullptr)
+            {
+                return false;
+            }
+
+            static const std::string autodetectGroup("Autodetect");
+            const std::string materialName(guard.material);
+            if (retainedMaterial == nullptr)
+            {
+                return finish("skipped:no-retention-slot");
+            }
+            *retainedMaterial = {};
+            if (!GuardedGetMaterialByName(getByName, manager, &materialName,
+                                          &autodetectGroup, retainedMaterial))
+            {
+                return false;
+            }
+
+            const char* action = "applied";
+            try
+            {
+                void* technique =
+                    techniqueApi.getNumTechniques(retainedMaterial->rep) == 1
+                        ? techniqueApi.getTechnique(retainedMaterial->rep, 0)
+                        : nullptr;
+                void* pass =
+                    technique != nullptr &&
+                            GuardedGetNumPasses(passApi.getNumPasses,
+                                                technique) == 1
+                        ? GuardedGetPass(passApi.getPass, technique, 0)
+                        : nullptr;
+                std::string vertexProgram;
+                std::string fragmentProgram;
+                if (pass == nullptr)
+                {
+                    action = "skipped:shape-changed";
+                }
+                else if (!GuardedHasProgram(true, pass, false) ||
+                         !GuardedHasProgram(false, pass, false) ||
+                         !GuardedCopyProgramName(true, pass, &vertexProgram) ||
+                         !GuardedCopyProgramName(false, pass,
+                                                 &fragmentProgram) ||
+                         vertexProgram != guard.expectVertex ||
+                         fragmentProgram != guard.expectFragment)
+                {
+                    action = "skipped:programs-changed";
+                }
+                else if (!GuardedPassDiffuseIsBlack(getDiffuse, pass))
+                {
+                    action = "skipped:diffuse-not-black";
+                }
+                else
+                {
+                    mutationApi.setVertexProgram(pass, replacement, true);
+                    mutationApi.loadResource(retainedMaterial->rep, false);
+                }
+            }
+            catch (...)
+            {
+                action = "failed:exception";
+            }
+
+            // Keep the one returned SharedPtr for process lifetime. The game
+            // already pins Glow/Null for the compositor, and retaining this
+            // bounded table entry avoids guessing at the shipped Ogre build's
+            // private SharedPtrInfo layout during release.
+            return finish(action);
+        }
+
+        void EnsureNativeInputGuards()
+        {
+            if (!s_detectedDx11Atomic.load(std::memory_order_acquire) ||
+                !CurrentCompatConfig().compatEnabled ||
+                !s_resourcesValidAtomic.load(std::memory_order_acquire) ||
+                !EnhancedResourcesAvailable())
+            {
+                return;
+            }
+
+            static bool settled = false;
+            static int attemptsLeft = 64;
+            static bool settledGuard[8] = {};
+            static OgreSharedPtrRaw retainedMaterial[8] = {};
+            if (settled)
+            {
+                return;
+            }
+            if (attemptsLeft-- <= 0)
+            {
+                for (size_t i = 0;
+                     i < Dx11Compat::NativeInputGuardCount() && i < 8; ++i)
+                {
+                    if (!settledGuard[i])
+                    {
+                        const Dx11Compat::NativeInputGuard* guard =
+                            Dx11Compat::NativeInputGuardAt(i);
+                        if (guard != nullptr)
+                        {
+                            LogCompatOnce(
+                                Dx11Compat::FormatNativeInputGuardLog(
+                                    *guard, "skipped:material-unavailable"),
+                                LogLevel::Info);
+                        }
+                    }
+                }
+                settled = true;
+                return;
+            }
+
+            bool allSettled = Dx11Compat::NativeInputGuardCount() <= 8;
+            for (size_t i = 0;
+                 i < Dx11Compat::NativeInputGuardCount() && i < 8; ++i)
+            {
+                if (!settledGuard[i])
+                {
+                    const Dx11Compat::NativeInputGuard* guard =
+                        Dx11Compat::NativeInputGuardAt(i);
+                    settledGuard[i] =
+                        guard == nullptr ||
+                        ApplyNativeInputGuard(*guard, &retainedMaterial[i]);
+                }
+                allSettled = allSettled && settledGuard[i];
+            }
+            settled = allSettled;
+        }
+
         void* ProbeDx11LegacyCompat(const std::string& schemeName,
                                     void* material,
                                     unsigned short lodIndex,
@@ -2757,6 +2988,7 @@ namespace BZROpenShim::RenderProfiles
             // viewport creation and on the ~1 Hz reassert loop, which is
             // exactly where Ogre state may be touched safely.
             EnsureEnhancedSchemeFallbackInstalled();
+            EnsureNativeInputGuards();
 
             const char* incomingRaw = (scheme != nullptr) ? scheme->c_str() : "";
             const std::string_view incoming(incomingRaw);

@@ -714,6 +714,41 @@ namespace
     }
 }
 
+void TestNativeInputGuards()
+{
+    std::printf("TestNativeInputGuards\n");
+
+    const NativeInputGuard* glow = FindNativeInputGuard("Glow/Null");
+    ExpectTrue(glow != nullptr, "Glow/Null has a native input guard");
+    if (glow != nullptr)
+    {
+        ExpectTrue(std::strcmp(glow->expectVertex, "Untextured_vertex") == 0 &&
+                       std::strcmp(glow->expectFragment,
+                                   "Untextured_fragment") == 0,
+                   "guard pins the stock program pair");
+        ExpectTrue(std::strcmp(glow->replacementVertex,
+                               "OSE_FixedFunc_Untextured_vertex_novc") == 0,
+                   "guard uses the POSITION-only untextured variant");
+
+        const std::string line = FormatNativeInputGuardLog(*glow, "applied");
+        ExpectContains(line,
+                       "[DX11COMPAT] material=Glow/Null native-input-guard",
+                       "guard log prefix");
+        ExpectContains(line, "action=applied", "guard log action");
+        ExpectContains(FormatNativeInputGuardLog(*glow, ""),
+                       "action=applied", "empty action defaults to applied");
+    }
+
+    ExpectTrue(FindNativeInputGuard("glow/null") == nullptr,
+               "guard names follow Ogre's case-sensitive lookup");
+    ExpectTrue(FindNativeInputGuard("BaseWhite") == nullptr,
+               "unrelated materials have no guard");
+    ExpectTrue(NativeInputGuardCount() == 1 &&
+                   NativeInputGuardAt(0) != nullptr &&
+                   NativeInputGuardAt(NativeInputGuardCount()) == nullptr,
+               "guard table bounds");
+}
+
 void TestTwoStageFixedFunction()
 {
     std::printf("TestTwoStageFixedFunction\n");
@@ -911,6 +946,7 @@ void TestTwoStageFixedFunction()
 
 int main()
 {
+    TestNativeInputGuards();
     TestVertexInputFit();
     TestTwoStageFixedFunction();
     TestSynthesisExclusions();
