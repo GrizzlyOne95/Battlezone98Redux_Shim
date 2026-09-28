@@ -10,6 +10,7 @@ Native `winmm.dll` shim for Battlezone 98 Redux. This repository owns low-level 
 
 ## Load only when relevant
 
+- CodebaseAudit continuation or session recovery: read `Docs/AUDIT_BACKLOG_STATUS.md`.
 - Lua behavior or Lua-facing APIs: read `Docs/BZR_LUA_AGENT_REFERENCE.md`.
 - Native loading, paths, filesystem/process behavior, discovery, installers, deployment, packaging, or updates: read `Docs/BZR_PLATFORM_COMPATIBILITY.md` and account for the full Windows/GOG, Windows/Steam, Proton, and Wine matrix.
 - Patch entries, named resolves, signatures, registration, test deployment, or patch-related CI: read `Docs/AGENT_PATCH_WORKFLOW.md`.
