@@ -76,14 +76,6 @@ namespace BZROpenShim
     float g_TurretAimPitchMultiplier = 0.5f;
     float g_TurretAimPitchMultiplierEnhanced = 0.95f;
 
-    uint8_t g_MapFilterFlag11 = 0;
-    uint8_t g_MapFilterFlag12 = 0;
-
-    void* g_BzrFn_MapFilter8Check = nullptr;
-    void* g_BzrFn_MapFilterCreate = nullptr;
-    void* g_MapFilterListPtr = nullptr;
-    const char* (__cdecl* g_BzrFn_Localize)(const char* section, const char* key) = nullptr;
-
     void* g_BzrFn_VehicleFixPre = nullptr;
     void* g_BzrFn_VehicleFixOrig = nullptr;
 
@@ -97,8 +89,6 @@ namespace BZROpenShim
     using FnAutoLoadShellGame = int(__cdecl*)();
     using FnLoadGameByPath = int(__cdecl*)(const char* path, char* outName, int outNameLen);
     using FnFinalizeQueuedLoad = void(__cdecl*)();
-    using FnMapFilter6 = uint32_t(__thiscall*)(void* thisPtr);
-    using FnMapFilterScroll = void(__thiscall*)(void* self);
     using FnGameObjectGetTeam = int(__thiscall*)(void* thisPtr);
     using FnChunkEffectSimulate = void(__thiscall*)(void* self, float dt);
 
@@ -156,10 +146,7 @@ namespace BZROpenShim
     FnBzrStringCtorFromCStr g_BzrFn_BzrStringCtorFromCStr = nullptr; // 0x00416EF0
     FnBzrStringDtor g_BzrFn_BzrStringDtor = nullptr; // 0x00416F30
     FnLoadScreenClearSelection g_BzrFn_LoadScreenClearSelection = nullptr; // 0x00482860
-    static FnMapFilter6 g_BzrFn_MapFilter6 = nullptr; // 0x004200B0
     FnChunkResolve g_BzrFn_ChunkResolve = nullptr; // 0x004E3620
-    static FnMapFilterScroll g_BzrFn_MapFilterScrollUp = nullptr; // 0x007CB500
-    static FnMapFilterScroll g_BzrFn_MapFilterScrollDown = nullptr; // 0x007CB540
     FnGetLocalPlayerNetId g_BzrFn_GetLocalPlayerNetId = nullptr;
     FnNetPlayerSetData g_BzrFn_NetPlayerSetData = nullptr;
     FnNetPlayerSetFlagBuffer g_BzrFn_NetPlayerSetFlagBuffer = nullptr;
@@ -2516,13 +2503,7 @@ namespace BZROpenShim
             {"BzrStringCtorFromCStr", reinterpret_cast<void**>(&g_BzrFn_BzrStringCtorFromCStr)},
             {"BzrStringDtor", reinterpret_cast<void**>(&g_BzrFn_BzrStringDtor)},
             {"LoadScreenClearSelection", reinterpret_cast<void**>(&g_BzrFn_LoadScreenClearSelection)},
-            {"MapFilter6", reinterpret_cast<void**>(&g_BzrFn_MapFilter6)},
             {"ChunkResolve", reinterpret_cast<void**>(&g_BzrFn_ChunkResolve)},
-            {"MapFilter8Check", reinterpret_cast<void**>(&g_BzrFn_MapFilter8Check)},
-            {"MapFilterCreate", reinterpret_cast<void**>(&g_BzrFn_MapFilterCreate)},
-            {"MapFilterScrollUp", reinterpret_cast<void**>(&g_BzrFn_MapFilterScrollUp)},
-            {"MapFilterScrollDown", reinterpret_cast<void**>(&g_BzrFn_MapFilterScrollDown)},
-            {"Localize", reinterpret_cast<void**>(&g_BzrFn_Localize)},
             {"VehicleFixPre", reinterpret_cast<void**>(&g_BzrFn_VehicleFixPre)},
             {"VehicleFixOrig", reinterpret_cast<void**>(&g_BzrFn_VehicleFixOrig)},
             // The multiplayer flag helpers map at the same settled addresses on
@@ -2644,16 +2625,6 @@ namespace BZROpenShim
             return nullptr;
         };
         const std::string_view name(patchName);
-        // The map filter patches share state (5/8 fills the list pointer the
-        // scroll callbacks use, 7/8 sets the flag 8/8 reads), so the family
-        // stands down as a unit. 5/8 and 8/8 call through the first two
-        // pointers from naked asm with no check.
-        if (name.rfind("Map Filters ", 0) == 0)
-        {
-            return firstMissing({{"MapFilterCreate", g_BzrFn_MapFilterCreate},
-                                 {"MapFilter8Check", g_BzrFn_MapFilter8Check},
-                                 {"MapFilter6", reinterpret_cast<const void*>(g_BzrFn_MapFilter6)}});
-        }
         // 1/4's trampoline calls both helpers unchecked; the four parts are
         // one fix and are not applied piecemeal.
         if (name.rfind("Vehicle List Mod Fix ", 0) == 0)
@@ -3610,43 +3581,6 @@ namespace BZROpenShim
         constexpr uint32_t kMinelayerVftPrimary = 0x0087D790;
         constexpr uint32_t kMinelayerVftSecondary = 0x0087D83C;
 
-    }
-
-    uint32_t __fastcall MapFilters6Rel32(void* thisPtr, void* /*edx*/)
-    {
-        if (!thisPtr || !g_BzrFn_MapFilter6)
-            return 0;
-
-        auto target = reinterpret_cast<uint8_t*>(thisPtr) + 0x168;
-        return g_BzrFn_MapFilter6(target);
-    }
-
-    void __fastcall MapFilterOnScrollUp(void* thisPtr)
-    {
-        void* list = g_MapFilterListPtr ? g_MapFilterListPtr : thisPtr;
-        if (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
-            EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH"))
-        {
-            Log(L"[MAPTRACE] MapFilterOnScrollUp list=0x%08X this=0x%08X\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(list)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)));
-        }
-        if (list && g_BzrFn_MapFilterScrollUp)
-            g_BzrFn_MapFilterScrollUp(list);
-    }
-
-    void __fastcall MapFilterOnScrollDown(void* thisPtr)
-    {
-        void* list = g_MapFilterListPtr ? g_MapFilterListPtr : thisPtr;
-        if (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
-            EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH"))
-        {
-            Log(L"[MAPTRACE] MapFilterOnScrollDown list=0x%08X this=0x%08X\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(list)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(thisPtr)));
-        }
-        if (list && g_BzrFn_MapFilterScrollDown)
-            g_BzrFn_MapFilterScrollDown(list);
     }
 
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* /*edx*/, void* renderQueue)
