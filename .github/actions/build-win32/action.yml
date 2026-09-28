@@ -1,0 +1,239 @@
+name: Build and verify OpenShim Win32
+description: >
+  The single definition of how OpenShim is gated, built and verified on
+  Windows. build-win32.yml (pull requests and main) and release.yml (tags and
+  dry runs) both run exactly these steps, so a release is built the way the
+  pull request that preceded it was. The caller checks the repository out
+  first; everything after checkout and before upload/packaging lives here.
+  Outputs are left where MSBuild puts them (bin/Release, bin/Release/plugins)
+  plus build-summary.txt at the repository root.
+
+runs:
+  using: composite
+  steps:
+    # A tagged release is authoritative user-facing output, so it must pass the
+    # same safety/config/regression gates as normal main and pull-request builds.
+    - name: Validate network safety baseline
+      shell: pwsh
+      run: ./tools/validate-network-baseline.ps1
+
+    # The Ogre reference headers are an untracked sparse checkout, so a fresh
+    # CI checkout has no OgreEntity.h. This step is idempotent and commit-pinned.
+    - name: Fetch pinned Ogre reference headers
+      shell: pwsh
+      run: ./setup-dev.ps1
+
+    - name: Run Ogre profiler algorithm tests
+      shell: pwsh
+      run: ./scripts/run_ogre_profiler_tests.ps1
+
+    - name: Run INI/config tests
+      shell: pwsh
+      run: ./scripts/run_ini_tests.ps1
+
+    # Run the complete engine-independent regression suite on every build so
+    # feature-specific tests cannot silently drift while MSBuild stays green.
+    - name: Run full CTest regression suite
+      shell: pwsh
+      run: |
+        cmake -S tests -B build/tests -A Win32
+        cmake --build build/tests --config Release
+        ctest --test-dir build/tests -C Release --output-on-failure
+
+    - name: Validate DX11 Enhanced FXAA shader
+      shell: pwsh
+      run: |
+        $kitsBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+        $fxc = Get-ChildItem -LiteralPath $kitsBin -Filter fxc.exe -File -Recurse |
+          Where-Object { $_.FullName -match '\\x86\\fxc\.exe$' } |
+          Sort-Object FullName -Descending |
+          Select-Object -First 1
+
+        if (-not $fxc) {
+          throw "Windows SDK fxc.exe was not found under $kitsBin"
+        }
+
+        $shader = Join-Path $PWD "shaders\dx11_enhanced_fxaa.hlsl"
+        $includeDir = Join-Path $PWD "reverse_engineering\prerelease_2016\removed_files"
+        $vsOut = Join-Path $env:RUNNER_TEMP "dx11_enhanced_fxaa_vs.cso"
+        $psOut = Join-Path $env:RUNNER_TEMP "dx11_enhanced_fxaa_ps.cso"
+
+        & $fxc.FullName /nologo /Ges /O3 /I $includeDir /T vs_5_0 /E VSMain /Fo $vsOut $shader
+        if ($LASTEXITCODE -ne 0) {
+          throw "DX11 Enhanced FXAA VSMain / vs_5_0 compilation failed"
+        }
+
+        & $fxc.FullName /nologo /Ges /O3 /I $includeDir /T ps_5_0 /E PSMain /Fo $psOut $shader
+        if ($LASTEXITCODE -ne 0) {
+          throw "DX11 Enhanced FXAA PSMain / ps_5_0 compilation failed"
+        }
+
+        "FXAA 3.11 HLSL5 validation passed using $($fxc.FullName)"
+
+    # The FXAA step above validates one shader. This validates the canonical
+    # Enhanced payload -- every HLSL variant its .program scripts declare, at
+    # the exact defines Ogre will compile them with. A broken OSE_* variant is
+    # invisible on a Campaign Reimagined install, because CR's own programs are
+    # what the scheme resolves to there; it reaches users without CR installed.
+    - name: Validate Enhanced payload shader variants
+      shell: pwsh
+      run: ./scripts/Test-EnhancedShaderCompile.ps1
+
+    # Ported from Campaign Reimagined, whose copy was orphaned when the
+    # Enhanced shaders moved here. See the header of the script.
+    - name: Validate Enhanced PSSM v2 math, isolation, and cost
+      shell: pwsh
+      run: ./scripts/Test-EnhancedPssmV2.ps1
+
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Build BZROpenShim
+      shell: pwsh
+      run: |
+        msbuild BZROpenShim.sln `
+          /m `
+          /t:Build `
+          /p:Configuration=Release `
+          /p:Platform=Win32 `
+          /p:GenerateFullPaths=true `
+          /verbosity:minimal
+
+    # Turns the green check from "the loader compiles" into "Windows actually
+    # loaded another DLL through the plugin ABI and completed the lifecycle".
+    # The test clears bzloader.log and validates only the lines stamped with
+    # the session id of the run it started, so a stale log cannot pass it.
+    - name: Run BZLoader host lifecycle test
+      shell: pwsh
+      run: |
+        $exe = Join-Path $PWD "bin/Release/BZLoaderHostTest.exe"
+        $plugin = Join-Path $PWD "bin/Release/plugins/bzloader_test_plugin.dll"
+
+        foreach ($required in @($exe, $plugin)) {
+          if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+            throw "BZLoader lifecycle test prerequisite is missing: $required"
+          }
+        }
+
+        & $exe
+        if ($LASTEXITCODE -ne 0) {
+          Write-Host "--- bzloader.log ---"
+          Get-Content -LiteralPath (Join-Path $PWD "bin/Release/bzloader.log") -ErrorAction SilentlyContinue
+          throw "BZLoaderHostTest failed with exit code $LASTEXITCODE"
+        }
+
+    # OpenShim is three binaries now, and they are a set. A missing plugin is
+    # deliberately survivable at runtime, which is exactly why packaging has
+    # to be strict about it: an artifact carrying winmm.dll alone installs
+    # clean and reaches a user as "OpenShim's features don't work".
+    #
+    # The tag is the promise; the binaries have to keep it. v1.0.0.31 shipped
+    # binaries reporting 1.0.0.30 because the tag moved for a workflow-only
+    # fix and version.rc did not. On a v<a.b.c.d> tag the expected version is
+    # derived from the tag and checked against both the string and numeric
+    # version fields plus each module's self-identification. Pull requests,
+    # main and release dry runs have no version tag, so the version assertion
+    # is skipped there and the structural checks still run. The ref name is
+    # passed through the environment, never interpolated into the script.
+    - name: Verify the load chain is whole
+      shell: pwsh
+      env:
+        OPENSHIM_REF_NAME: ${{ github.ref_name }}
+        OPENSHIM_REF_TYPE: ${{ github.ref_type }}
+      run: |
+        $ref = $env:OPENSHIM_REF_NAME
+        if ($env:OPENSHIM_REF_TYPE -eq 'tag' -and $ref -match '^v(\d+\.\d+\.\d+\.\d+)$') {
+          $expected = $Matches[1]
+          Write-Host "tag $ref requires binary version $expected"
+          ./scripts/Test-PackageShape.ps1 -Root . -Layout Build -ExpectedVersion $expected
+        } else {
+          Write-Host "::notice::ref '$ref' is not a version tag; skipping the version assertion"
+          ./scripts/Test-PackageShape.ps1 -Root . -Layout Build
+        }
+
+    # The uninstaller has to undo exactly what the installer does. The
+    # fixture holds every file the installer writes plus the residue the
+    # Workshop updater and the installer's own backups leave behind, and a
+    # foreign winmm.dll that must survive.
+    - name: Test the Windows uninstaller against a fixture install
+      shell: pwsh
+      run: ./tests/uninstall_windows_tests.ps1
+
+    # Campaign Reimagined's staging refuses a bundled .pdb it cannot match to
+    # the binary, so a release without symbols cannot be packaged downstream.
+    # All three modules ship symbols: a crash can land in any of them. Every
+    # build is held to the release rule, so a pull request that loses a .pdb
+    # fails here rather than at the next tag.
+    - name: Verify build outputs
+      shell: pwsh
+      run: |
+        $required = [ordered]@{
+          "winmm.dll"            = "bin/Release/winmm.dll"
+          "winmm.pdb"            = "bin/Release/winmm.pdb"
+          "bzloader.dll"         = "bin/Release/bzloader.dll"
+          "bzloader.pdb"         = "bin/Release/bzloader.pdb"
+          "plugins/openshim.dll" = "bin/Release/plugins/openshim.dll"
+          "plugins/openshim.pdb" = "bin/Release/plugins/openshim.pdb"
+        }
+
+        Remove-Item -LiteralPath build-summary.txt -Force -ErrorAction SilentlyContinue
+
+        foreach ($name in $required.Keys) {
+          $path = Join-Path $PWD $required[$name]
+          if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "Expected build output was not produced: $($required[$name])"
+          }
+          $info = Get-Item -LiteralPath $path
+          $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$name size: $($info.Length) bytes" | Tee-Object -FilePath build-summary.txt -Append
+          "$name SHA-256: $hash" | Tee-Object -FilePath build-summary.txt -Append
+        }
+
+        Get-Content -LiteralPath build-summary.txt
+
+    # The OpenShim* exports are forwarding thunks now, so the one thing that
+    # must never drift is the export table itself: docs/OPENSHIM_SDK_V2.md
+    # makes GetModuleHandleA("winmm.dll") the documented discovery path, and a
+    # dropped or re-decorated name breaks Extra Utilities silently at runtime.
+    # The Linux lane checks the .def as text; this checks the real binary.
+    - name: Verify winmm.dll export parity
+      shell: pwsh
+      run: |
+        $dumpbin = Get-ChildItem -LiteralPath "${env:VCToolsInstallDir}bin" -Filter dumpbin.exe -File -Recurse |
+          Where-Object { $_.FullName -like '*\x86\dumpbin.exe' } |
+          Select-Object -First 1
+        if (-not $dumpbin) {
+          $dumpbin = Get-ChildItem -LiteralPath "${env:ProgramFiles}\Microsoft Visual Studio" -Filter dumpbin.exe -File -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        }
+        if (-not $dumpbin) { throw "dumpbin.exe was not found" }
+
+        $dll = Join-Path $PWD "bin/Release/winmm.dll"
+        $raw = & $dumpbin.FullName /nologo /exports $dll
+        $actual = $raw |
+          Select-String -Pattern '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]{8}\s+(\S+)(?:\s+=\s+(\S+))?' |
+          ForEach-Object {
+            $n = $_.Matches[0].Groups[1].Value
+            $decorated = $_.Matches[0].Groups[2].Value
+            # Pin the __stdcall stack size, but not which symbol /OPT:ICF
+            # folded the body onto -- that is a linker optimisation, not ABI.
+            if ($decorated -match '@(\d+)$') { "$n@$($Matches[1])" } else { $n }
+          } |
+          Sort-Object -Unique
+
+        $expected = Get-Content -LiteralPath (Join-Path $PWD "tests/winmm_export_baseline.txt") |
+          Where-Object { $_ -and -not $_.StartsWith("#") } |
+          Sort-Object -Unique
+
+        $missing = Compare-Object $expected $actual | Where-Object { $_.SideIndicator -eq "<=" }
+        $added   = Compare-Object $expected $actual | Where-Object { $_.SideIndicator -eq "=>" }
+
+        if ($missing) {
+          $missing | ForEach-Object { Write-Host "MISSING EXPORT: $($_.InputObject)" }
+          throw "winmm.dll dropped or changed the ABI of $($missing.Count) export(s) that a shipped build provided"
+        }
+        if ($added) {
+          $added | ForEach-Object { Write-Host "new export: $($_.InputObject)" }
+          Write-Host "::notice::winmm.dll gained $($added.Count) export(s); update tests/winmm_export_baseline.txt if intended"
+        }
+        "export parity OK: $($expected.Count) baseline exports all present"
