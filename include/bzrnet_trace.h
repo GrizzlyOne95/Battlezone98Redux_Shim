@@ -17,14 +17,11 @@ namespace BZROpenShim
     bool InitializeBzrNetTrace(const BzrNetTraceConfig& config);
     void ShutdownBzrNetTrace();
     bool IsBzrNetTraceEnabled();
-    bool IsBzrNetPrivateForensicTrace();
-    const std::string& GetBzrNetCaptureId();
 
     // A Windows SOCKET value may be recycled after closesocket(). The trace
     // generation makes each lifetime unique even when the numeric handle is
     // reused later in the process.
     uint32_t BzrNetTraceRememberSocket(uintptr_t socketHandle);
-    uint32_t BzrNetTraceSocketGeneration(uintptr_t socketHandle);
     void BzrNetTraceForgetSocket(uintptr_t socketHandle);
 
     // detailsJson must be a complete JSON object. Producer threads only enqueue
