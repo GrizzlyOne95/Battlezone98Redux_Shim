@@ -477,6 +477,55 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         }
     }
 
+    namespace
+    {
+        constexpr NativeInputGuard kNativeInputGuards[] = {
+            { "Glow/Null", "Untextured_vertex", "Untextured_fragment",
+              "OSE_FixedFunc_Untextured_vertex_novc", "black-glow-mask" },
+        };
+    }
+
+    size_t NativeInputGuardCount() noexcept
+    {
+        return sizeof(kNativeInputGuards) / sizeof(kNativeInputGuards[0]);
+    }
+
+    const NativeInputGuard* NativeInputGuardAt(size_t index) noexcept
+    {
+        return index < NativeInputGuardCount() ? &kNativeInputGuards[index]
+                                               : nullptr;
+    }
+
+    const NativeInputGuard* FindNativeInputGuard(std::string_view material) noexcept
+    {
+        for (const NativeInputGuard& guard : kNativeInputGuards)
+        {
+            if (material == guard.material)
+            {
+                return &guard;
+            }
+        }
+        return nullptr;
+    }
+
+    std::string FormatNativeInputGuardLog(const NativeInputGuard& guard,
+                                          std::string_view action)
+    {
+        std::string appliedAction(action);
+        if (appliedAction.empty())
+        {
+            appliedAction = "applied";
+        }
+
+        char buf[512] = {};
+        std::snprintf(
+            buf, sizeof(buf),
+            "[DX11COMPAT] material=%s native-input-guard vs=%s -> %s reason=%s action=%s",
+            guard.material, guard.expectVertex, guard.replacementVertex,
+            guard.reason, appliedAction.c_str());
+        return std::string(buf);
+    }
+
     bool ResolveCompatPrograms(CompatPath path,
                                const LegacyPassDesc& desc,
                                std::string& outVertex,

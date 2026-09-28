@@ -212,6 +212,12 @@ OSE_FixedFunc_Untextured_vertex_novc     POSITION
 
 Limitation: the generated technique belongs to the material, so the first renderable to miss decides the variant. A material shared between a mesh with `DIFFUSE` and one without still works as long as the mesh without it is the one that decides, because the `_novc` variant binds on both. If the mesh with `DIFFUSE` decides first, the other mesh gets the `COLOR0`-reading program.
 
+#### Stock `Glow/Null` input guard (2026-09-27)
+
+The glow compositor draws non-glowing objects with the stock `Glow/Null` material. Its `Untextured_vertex` program reads `COLOR0`, although the pass's black diffuse value makes that input irrelevant. On meshes without `DIFFUSE`, including ISDF Chronicles' `prop.mesh`, D3D11 therefore throws `Unable to set D3D11 vertex declaration` during the glow pass.
+
+On the render thread, after the OpenShim shader payload is available, the runtime looks up `Glow/Null` and verifies that it still has exactly one technique and one pass, still uses the stock `Untextured_vertex` / `Untextured_fragment` pair, and still has black diffuse RGB. Only when every invariant matches, it rebinds the vertex stage to `OSE_FixedFunc_Untextured_vertex_novc`. That variant reads `POSITION` only and preserves the outputs consumed by the stock fragment program, so the pass remains black without requiring `COLOR0`. Any changed shape, program, diffuse value, missing export, or missing replacement program leaves the material untouched and emits one diagnostic. The single returned material reference is retained for process lifetime rather than releasing through an assumed private Ogre `SharedPtrInfo` layout.
+
 ### Level 3 - optional RTSS-generated fallback
 
 Ogre's RT Shader System is designed to generate shaders for fixed-function material state. Redux already exposes evidence of `ShaderGeneratorDefaultScheme` in runtime behaviour, so RTSS may be available in some form.
