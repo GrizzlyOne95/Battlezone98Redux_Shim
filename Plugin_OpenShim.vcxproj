@@ -168,7 +168,6 @@
     <ClCompile Include="src\patches\lifecycle_seams.cpp" />
     <ClCompile Include="src\patches\lobby_screen_hooks.cpp" />
     <ClCompile Include="src\patches\lobby_ui.cpp" />
-    <ClCompile Include="src\patches\map_filter_port.cpp" />
     <ClCompile Include="src\patches\moderation.cpp" />
     <ClCompile Include="src\patches\multiplayer_vehicle_flags.cpp" />
     <ClCompile Include="src\patches\ogre_dedupe_crash_fixes.cpp" />
@@ -320,8 +319,10 @@
     <ClInclude Include="include\terrain_semantic.h" />
     <ClInclude Include="include\ogre_runtime.h" />
     <ClInclude Include="include\game_state.h" />
+    <ClInclude Include="include\diagnostic_output_cap.h" />
     <ClInclude Include="include\native_cpu_sampler.h" />
     <ClInclude Include="include\net_optimizer.h" />
+    <ClInclude Include="include\net_reorder_core.h" />
     <ClInclude Include="include\shim_log.h" />
     <ClInclude Include="include\winmm_proxy.h" />
     <ClInclude Include="include\patches.h" />

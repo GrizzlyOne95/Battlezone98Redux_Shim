@@ -1011,28 +1011,4 @@ namespace BZROpenShim
         const ULONGLONG base = GetTickCount64();
         g_nextSaveTick = base + (PerformAutoSave(gateState) ? g_config.intervalMs : g_config.retryMs);
     }
-
-    bool TriggerAutoSaveNow()
-    {
-        if (!g_config.enabled || !g_nativeSaveGame)
-            return false;
-
-        const AutoSaveGate::ObservedState gateState = ObserveState();
-        const AutoSaveGate::GateResult gate = AutoSaveGate::Evaluate(gateState);
-        if (!gate.MaySave())
-        {
-            LogShimA(
-                LogLevel::Info,
-                "autosave",
-                "Manual autosave request refused (%s): %s",
-                AutoSaveGate::DescribeDecision(gate.decision),
-                gate.reason);
-            return false;
-        }
-
-        const bool saved = PerformAutoSave(gateState);
-        const ULONGLONG now = GetTickCount64();
-        g_nextSaveTick = now + (saved ? g_config.intervalMs : g_config.retryMs);
-        return saved;
-    }
 }

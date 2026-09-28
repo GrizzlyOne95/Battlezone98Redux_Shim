@@ -125,6 +125,11 @@ detailed chunk/renderer histograms remain in the one-second log rows. The CSV
 schema is centralized in `include/ogre_profiler_algorithms.h` and protected by
 unit tests.
 
+The CSV is capped at 64 MiB by default (`[Diagnostics] ProfileOgreCsvMaxMB`,
+env `OPENSHIM_PROFILE_OGRE_CSV_MAX_MB`, whole MiB, 0 = no cap). At the cap it is
+rotated once to `openshim_ogre_profile.prev.csv` and restarted with a fresh
+header; the profiler logs the cap once per session and each rotation.
+
 `animCPU` contains nested blend work, so it must not be added to `swCPU`.
 Approximate unique counts use a 65,536-bit pointer bloom set and are labelled
 with `~` in logs.

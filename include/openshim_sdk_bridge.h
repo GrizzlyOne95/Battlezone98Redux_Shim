@@ -104,12 +104,6 @@ namespace BZROpenShim::SdkBridge
     // winmm.dll.
     bool InstallProvider(const OpenShimSdkProviderTable* table);
 
-    // The post-extraction path: one GetProcAddress against an already-loaded
-    // plugins/openshim.dll for "OpenShimSdkProvider_GetTable", then install
-    // what it returns. All 71 pointers arrive in that single call, so no
-    // export ever resolves itself. Never calls LoadLibrary.
-    bool InstallProviderFromModule(HMODULE pluginModule);
-
     const OpenShimSdkProviderTable* Provider();
 
     // Number of export calls that found no provider or no table slot. Stays

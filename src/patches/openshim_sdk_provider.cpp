@@ -1,10 +1,8 @@
 // OpenShim SDK provider.
 //
 // This is the runtime side of the export boundary: winmm.dll exports thunks,
-// and this table is what they forward to. It belongs with the OpenShim
-// runtime, so when the runtime moves to plugins/openshim.dll this file moves
-// with it and the bootstrap picks the table up through
-// OpenShimSdkProvider_GetTable instead of the direct call below.
+// and this table is what they forward to. It lives with the OpenShim runtime
+// in plugins/openshim.dll, which installs it through InstallBuiltIn below.
 //
 // The 52 bodies below were lifted verbatim out of winmm_proxy.cpp, which now
 // holds only real WinMM forwarding. That is what breaks the
@@ -793,10 +791,10 @@ OpenShimSdkProvider_GetTable(void)
 
 namespace BZROpenShim::SdkProvider
 {
-    // Transitional: the provider is still linked into winmm.dll, so the
-    // bootstrap installs it directly. Once this file ships in
-    // plugins/openshim.dll, delete this and have the bootstrap call
-    // SdkBridge::InstallProviderFromModule(plugin) after the plugin loads.
+    // Called from BZPlugin_Load in plugins/openshim.dll. In the plugin,
+    // SdkBridge::InstallProvider forwards through the bootstrap API table
+    // (bootstrap_service_client.cpp) into winmm.dll's bridge, so the plugin
+    // pushes its table rather than the bootstrap pulling it.
     bool InstallBuiltIn()
     {
         return BZROpenShim::SdkBridge::InstallProvider(&g_ProviderTable);
