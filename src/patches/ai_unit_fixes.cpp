@@ -574,6 +574,141 @@ namespace BZROpenShim
         return const_cast<SniperScanEmptyWeapon*>(&g_SniperScanEmptyWeapon);
     }
 
+    // Production patch: HoverCraft::UpdateSounds' turbo-stop lookup.
+    //
+    // HoverCraft::UpdateSounds (0x004EEA20) starts three looping sounds and
+    // caches them on the craft:
+    //
+    //     craft+0x2C0  thrust  (class soundThrust)
+    //     craft+0x2C4  turbo   (class soundTurbo)
+    //     craft+0x2CC  third loop
+    //
+    // When the throttle drops under the turbo gate it does not stop its own
+    // +0x2C4 sound. It stops Sound::Find(soundTurbo, owner) and nulls +0x2C4.
+    // Sound::Find returns the first live sound with that owner and filename,
+    // so when soundThrust and soundTurbo name the same wav it frees the THRUST
+    // loop. +0x2C0 is left dangling, the turbo loop plays on orphaned, and the
+    // next frame's SetSoundParams writes volume/flags/frequency into freed heap.
+    // ISDF Chronicles ships about 40 units with a shared thrust/turbo wav, and
+    // global turbo makes craft cross the gate constantly. Dump
+    // battlezone98redux.exe.6812.dmp shows the result: the freed 0x84-byte
+    // record was reused for an Ogre SubMesh whose parent became 9.
+    //
+    // The guard answers the lookup with the craft's cached turbo sound while
+    // it is still in the live list. Otherwise it gives the stock first match,
+    // skipping the craft's thrust loop. If the list walk faults it falls back
+    // to stock Sound::Find.
+    namespace Hooks
+    {
+        using FnSoundFind = void*(__cdecl*)(const char* name, void* owner);
+        using FnSoundListHead = uint8_t*(__cdecl*)();
+        static FnSoundFind g_BzrFn_SoundFind = nullptr;
+        static FnSoundListHead g_BzrFn_SoundListHead = nullptr;
+        constexpr size_t kHoverCraftThrustSoundOffset = 0x2C0;
+        constexpr size_t kHoverCraftTurboSoundOffset = 0x2C4;
+        constexpr size_t kSoundNameOffset = 0x04;
+        constexpr size_t kSoundOwnerOffset = 0x58;
+        constexpr size_t kMaxLiveSoundWalk = 4096;
+        static volatile long g_TurboSoundStopLogBudget = 8;
+
+        struct TurboSoundStopScan
+        {
+            uint8_t* stockFirst;    // what stock Sound::Find would return
+            uint8_t* safeFirst;     // first match that is not the thrust loop
+            bool turboLive;
+        };
+
+        // No C++ objects in this frame: __try cannot coexist with unwinding.
+        static bool ScanLiveSoundsForTurboStop(
+            const char* name,
+            const void* owner,
+            const uint8_t* thrust,
+            const uint8_t* turbo,
+            TurboSoundStopScan* out)
+        {
+            __try
+            {
+                size_t walked = 0;
+                for (uint8_t* sound = g_BzrFn_SoundListHead();
+                     sound && walked < kMaxLiveSoundWalk;
+                     sound = *reinterpret_cast<uint8_t**>(sound), ++walked)
+                {
+                    if (sound == turbo)
+                        out->turboLive = true;
+                    if (*reinterpret_cast<void**>(sound + kSoundOwnerOffset) != owner)
+                        continue;
+                    if (name && _stricmp(reinterpret_cast<const char*>(sound + kSoundNameOffset), name) != 0)
+                        continue;
+                    if (!out->stockFirst)
+                        out->stockFirst = sound;
+                    if (!out->safeFirst && sound != thrust)
+                        out->safeFirst = sound;
+                }
+                return walked < kMaxLiveSoundWalk;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+    }
+
+    void SetHoverCraftTurboSoundResolves(void* soundFind, void* soundListHead)
+    {
+        g_BzrFn_SoundFind = reinterpret_cast<FnSoundFind>(soundFind);
+        g_BzrFn_SoundListHead = reinterpret_cast<FnSoundListHead>(soundListHead);
+    }
+
+    static void* __cdecl HoverCraftTurboSoundStopFind(
+        const char* name, void* owner, const uint8_t* craft)
+    {
+        if (!craft || !g_BzrFn_SoundListHead)
+            return g_BzrFn_SoundFind ? g_BzrFn_SoundFind(name, owner) : nullptr;
+
+        const uint8_t* const thrust =
+            *reinterpret_cast<uint8_t* const*>(craft + kHoverCraftThrustSoundOffset);
+        const uint8_t* const turbo =
+            *reinterpret_cast<uint8_t* const*>(craft + kHoverCraftTurboSoundOffset);
+
+        TurboSoundStopScan scan = {};
+        if (!ScanLiveSoundsForTurboStop(name, owner, thrust, turbo, &scan))
+            return g_BzrFn_SoundFind ? g_BzrFn_SoundFind(name, owner) : nullptr;
+
+        void* const result = (turbo && scan.turboLive)
+            ? const_cast<uint8_t*>(turbo)
+            : scan.safeFirst;
+
+        if (thrust && scan.stockFirst == thrust &&
+            InterlockedDecrement(&g_TurboSoundStopLogBudget) >= 0)
+        {
+            Log(L"[SNDFIX] craft=%p turbo stop: stock lookup of '%hs' would have "
+                L"freed the thrust loop %p; stopping turbo %p instead. The ODF "
+                L"uses one wav for soundThrust and soundTurbo.\n",
+                craft,
+                name ? name : "<null>",
+                thrust,
+                result);
+        }
+        return result;
+    }
+
+    // Replaces the E8 at the turbo-stop Sound::Find call. The stock caller
+    // pushed (owner, name) and cleans them itself; the craft is the caller's
+    // `this` at [ebp-0xE0], which the patch pattern pins.
+    __declspec(naked) void HoverCraftTurboSoundStopFindThunk()
+    {
+        __asm
+        {
+            mov eax, [ebp - 0xE0]
+            push eax                        // craft
+            push dword ptr [esp + 0x0C]     // owner
+            push dword ptr [esp + 0x0C]     // name
+            call HoverCraftTurboSoundStopFind
+            add esp, 0x0C
+            ret
+        }
+    }
+
     // Compatibility toggle: neutral-unit attack/order asymmetry.
     // Stock 1.5 and Redux both exclude team 0 from the UI attack-target list.
     // ControlPanel::Render enumerates candidates and keeps only those where
