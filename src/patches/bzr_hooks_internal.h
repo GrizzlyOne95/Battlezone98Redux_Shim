@@ -409,7 +409,7 @@ namespace BZROpenShim
         std::string ToLowerAscii(std::string value);
         bool TryReadSteam64Value(uint64_t& outValue);
 
-        // --- Engine state (bzr_hooks.cpp) ------------------------------------
+        // --- Shared helpers and engine state (the *_helpers.cpp files, bzr_hooks.cpp) --
         uintptr_t GetMainModuleBase();
         bool IsExuModuleLoaded();
         // VirtualProtect + memcpy + flush; false if the page cannot be made writable.
