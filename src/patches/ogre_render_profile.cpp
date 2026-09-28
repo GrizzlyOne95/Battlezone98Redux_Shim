@@ -1579,12 +1579,57 @@ namespace BZROpenShim::RenderProfiles
             }
         }
 
+        bool PassIsShaderless(void* pass)
+        {
+            return !GuardedHasProgram(true, pass, true) &&
+                   !GuardedHasProgram(false, pass, true);
+        }
+
+        // Would declining leave Ogre with only shaderless draws? Ogre falls
+        // back to some supported technique of the material (or, with none,
+        // to BaseWhite, which is fixed function too). If every supported
+        // technique still has a pass with neither program, any fallback
+        // throws on D3D11. Unreadable state answers "no", which keeps the
+        // historical decline.
+        bool MaterialFallbackIsShaderless(void* material)
+        {
+            const OgreTechniqueApi& techApi = TechniqueApi();
+            const OgreCompatPassApi& inspect = CompatPassApi();
+            if (material == nullptr || !techApi.Valid() || !inspect.CanInspect())
+            {
+                return false;
+            }
+            const unsigned short count = techApi.getNumTechniques(material);
+            for (unsigned short t = 0; t < count; ++t)
+            {
+                void* technique = techApi.getTechnique(material, t);
+                if (technique == nullptr || !techApi.isSupported(technique))
+                {
+                    continue;
+                }
+                const unsigned short passes =
+                    GuardedGetNumPasses(inspect.getNumPasses, technique);
+                bool anyShaderless = passes == 0;
+                for (unsigned short p = 0; p < passes && !anyShaderless; ++p)
+                {
+                    void* pass = GuardedGetPass(inspect.getPass, technique, p);
+                    anyShaderless = pass == nullptr || PassIsShaderless(pass);
+                }
+                if (!anyShaderless)
+                {
+                    // A programmable fallback exists; declining is safe.
+                    return false;
+                }
+            }
+            return true;
+        }
+
         // Best-effort legacy description for the FIRST pass of the source
         // technique. Single-texture passes keep assuming the overwhelmingly
         // common modulate combine (colorOp0), so existing content keeps its
-        // path. Two-unit passes additionally get their real per-stage combine
-        // state read into desc.stages, which the pure policy checks against
-        // the bounded two-unit set; wider passes stay unsupported.
+        // path. Every stage's real combine state is read into desc.stages,
+        // which the pure policy checks against the bounded two-unit set and
+        // the suppress log reports; wider passes stay unsupported.
         Dx11Compat::LegacyPassDesc DescribeFirstPass(void* technique)
         {
             Dx11Compat::LegacyPassDesc desc;
@@ -1592,6 +1637,8 @@ namespace BZROpenShim::RenderProfiles
             {
                 return desc;
             }
+            desc.passCount = static_cast<int>(
+                GuardedGetNumPasses(CompatPassApi().getNumPasses, technique));
             void* pass = GuardedGetPass(CompatPassApi().getPass, technique, 0);
             if (pass == nullptr)
             {
@@ -1627,9 +1674,10 @@ namespace BZROpenShim::RenderProfiles
                 desc.colorOp0 = "modulate";
             }
             const OgreTextureStageApi& stageApi = TextureStageApi();
-            if (desc.textureUnits == 2 && stageApi.Valid())
+            if (stageApi.Valid() && desc.textureUnits > 0 && desc.textureUnits <= 8)
             {
-                for (unsigned short i = 0; i < 2; ++i)
+                for (unsigned short i = 0;
+                     i < static_cast<unsigned short>(desc.textureUnits); ++i)
                 {
                     Dx11Compat::TextureStageDesc stage;
                     GuardedReadTextureStage(&stageApi, pass, i, &stage);
@@ -2041,7 +2089,12 @@ namespace BZROpenShim::RenderProfiles
             // is deep, so all render state and texture units survive unchanged;
             // multi-pass conversion needs per-pass classification before it is
             // safe to retarget and is deliberately left for the next slice.
-            if (GuardedGetNumPasses(inspect.getNumPasses, sourceTechnique) != 1)
+            // Suppression is the exception: it binds the same draw-nothing
+            // pair on every pass, which needs no per-pass classification.
+            const bool suppress = path == Dx11Compat::CompatPath::SuppressPass;
+            const unsigned short sourcePasses =
+                GuardedGetNumPasses(inspect.getNumPasses, sourceTechnique);
+            if (sourcePasses == 0 || (!suppress && sourcePasses != 1))
             {
                 return nullptr;
             }
@@ -2141,16 +2194,25 @@ namespace BZROpenShim::RenderProfiles
                 mutate.setLodIndex(generated, lodIndex);
                 stage = kStageLodSet;
 
-                void* pass = GuardedGetPass(inspect.getPass, generated, 0);
-                if (pass == nullptr)
+                const unsigned short generatedPasses =
+                    GuardedGetNumPasses(inspect.getNumPasses, generated);
+                if (generatedPasses != sourcePasses)
                 {
                     RestoreMaterialAfterCompatFailure(material, createdIndex);
                     return nullptr;
                 }
-
-                stage = kStagePassFetched;
-                mutate.setVertexProgram(pass, targetVs, true);
-                mutate.setFragmentProgram(pass, targetPs, true);
+                for (unsigned short p = 0; p < generatedPasses; ++p)
+                {
+                    void* pass = GuardedGetPass(inspect.getPass, generated, p);
+                    if (pass == nullptr)
+                    {
+                        RestoreMaterialAfterCompatFailure(material, createdIndex);
+                        return nullptr;
+                    }
+                    stage = kStagePassFetched;
+                    mutate.setVertexProgram(pass, targetVs, true);
+                    mutate.setFragmentProgram(pass, targetPs, true);
+                }
                 stage = kStagePrograms;
 
                 // setSchemeName/setProgram call _notifyNeedsRecompile(), which
@@ -2188,6 +2250,148 @@ namespace BZROpenShim::RenderProfiles
                                   " lastStage=" + SynthStageName(stage),
                               LogLevel::Warn);
                 return nullptr;
+            }
+        }
+
+        // Scheme misses are the only door into the ladder, but a fixed-
+        // function technique that MATCHES the active scheme never misses: Ogre
+        // draws it as-is and D3D11 throws "without both vertex and fragment
+        // shaders". ISDF Chronicles `water` is the live case. Its only
+        // technique sits in `scheme glow`, so the main scene misses and gets a
+        // synthesized clone, but the glow compositor pass matches the original
+        // and drew it shaderless every frame (hidden until xrain stopped
+        // aborting the frame first).
+        //
+        // Once a material has proven itself true fixed function on a miss,
+        // every other fully shaderless technique it owns is converted in
+        // place with the same policy. There is no fixed pipeline to preserve
+        // on D3D11, and a technique that cannot be expressed is suppressed
+        // rather than left to throw. Refusals leave the technique untouched.
+        void ConvertShaderlessSiblingTechniques(void* material,
+                                                void* generated,
+                                                const Dx11Compat::CompatConfig& config,
+                                                const Dx11Compat::VertexInputs& inputs,
+                                                const std::string& materialName)
+        {
+            const OgreTechniqueApi& techApi = TechniqueApi();
+            const OgreCompatPassApi& inspect = CompatPassApi();
+            const OgreCompatMutationApi& mutate = CompatMutationApi();
+            if (material == nullptr || !techApi.Valid() || !inspect.CanInspect() ||
+                !mutate.CanInstantiate())
+            {
+                return;
+            }
+
+            bool changed = false;
+            const unsigned short count = techApi.getNumTechniques(material);
+            for (unsigned short t = 0; t < count; ++t)
+            {
+                void* technique = techApi.getTechnique(material, t);
+                if (technique == nullptr || technique == generated)
+                {
+                    continue;
+                }
+                const unsigned short passes =
+                    GuardedGetNumPasses(inspect.getNumPasses, technique);
+                bool allShaderless = passes > 0;
+                for (unsigned short p = 0; p < passes && allShaderless; ++p)
+                {
+                    void* pass = GuardedGetPass(inspect.getPass, technique, p);
+                    allShaderless = pass != nullptr && PassIsShaderless(pass);
+                }
+                if (!allShaderless)
+                {
+                    continue;
+                }
+
+                Dx11Compat::LegacyPassDesc desc = DescribeFirstPass(technique);
+                // This technique is drawn natively whenever its scheme is
+                // active, so declining always means a shaderless draw.
+                desc.fallbackShaderless = true;
+                const Dx11Compat::CompatPath path = Dx11Compat::DecideCompatPath(
+                    Dx11Compat::ClassifyLegacyPass(desc), desc, config, true);
+                const std::string scheme(techApi.getSchemeName(technique));
+                char label[256] = {};
+                snprintf(label, sizeof(label), "technique=%u scheme=%s",
+                         static_cast<unsigned>(t),
+                         scheme.empty() ? "Default" : scheme.c_str());
+
+                std::string vs;
+                std::string ps;
+                const bool multiPassOk =
+                    passes == 1 || path == Dx11Compat::CompatPath::SuppressPass;
+                if (!multiPassOk ||
+                    !Dx11Compat::ResolveCompatPrograms(path, desc, vs, ps))
+                {
+                    LogCompatOnce("[DX11COMPAT] material=" + materialName +
+                                      " in-place declined " + label + " path=" +
+                                      Dx11Compat::CompatPathName(path),
+                                  LogLevel::Warn);
+                    continue;
+                }
+                // Same exclusions the clone path applies, per technique.
+                if (!IsSynthesisTarget(materialName, desc, "in-place"))
+                {
+                    continue;
+                }
+                std::string fitted;
+                const Dx11Compat::VertexInputFit fit =
+                    Dx11Compat::FitVertexProgramToInputs(vs, inputs, fitted);
+                if (fit == Dx11Compat::VertexInputFit::Unsatisfiable)
+                {
+                    LogCompatOnce("[DX11COMPAT] material=" + materialName +
+                                      " in-place declined " + label +
+                                      " reason=vertex-inputs",
+                                  LogLevel::Warn);
+                    continue;
+                }
+                if (fit == Dx11Compat::VertexInputFit::Adapted)
+                {
+                    vs = fitted;
+                }
+                if (!GuardedProgramExists(&vs) || !GuardedProgramExists(&ps))
+                {
+                    LogCompatOnce("[DX11COMPAT] material=" + materialName +
+                                      " in-place declined " + label +
+                                      " reason=program-absent vs=" + vs + " ps=" + ps,
+                                  LogLevel::Warn);
+                    continue;
+                }
+                try
+                {
+                    for (unsigned short p = 0; p < passes; ++p)
+                    {
+                        void* pass = GuardedGetPass(inspect.getPass, technique, p);
+                        if (pass == nullptr)
+                        {
+                            continue;
+                        }
+                        mutate.setVertexProgram(pass, vs, true);
+                        mutate.setFragmentProgram(pass, ps, true);
+                    }
+                    changed = true;
+                    LogCompatOnce("[DX11COMPAT] material=" + materialName +
+                                      " converted-in-place " + label + " path=" +
+                                      Dx11Compat::CompatPathName(path) + " vs=" + vs +
+                                      " ps=" + ps,
+                                  LogLevel::Info);
+                }
+                catch (...)
+                {
+                    LogCompatOnce("[DX11COMPAT] material=" + materialName +
+                                      " in-place failed " + label,
+                                  LogLevel::Warn);
+                }
+            }
+            if (changed)
+            {
+                try
+                {
+                    mutate.loadResource(material, false);
+                }
+                catch (...)
+                {
+                }
             }
         }
 
@@ -2258,6 +2462,10 @@ namespace BZROpenShim::RenderProfiles
             Dx11Compat::LegacyPassDesc desc = DescribeFirstPass(sourceTechnique);
             const Dx11Compat::LegacyPassKind kind =
                 Dx11Compat::ClassifyLegacyPass(desc);
+            if (kind == Dx11Compat::LegacyPassKind::TrueFixedFunction)
+            {
+                desc.fallbackShaderless = MaterialFallbackIsShaderless(material);
+            }
             const Dx11Compat::CompatPath path =
                 Dx11Compat::DecideCompatPath(kind, desc, config, true);
 
@@ -2321,6 +2529,33 @@ namespace BZROpenShim::RenderProfiles
                     LogLevel::Warn);
                 break;
             }
+            case Dx11Compat::CompatPath::SuppressPass:
+            {
+                state.skipped.fetch_add(1, std::memory_order_relaxed);
+                LogCompatOnce(Dx11Compat::FormatSuppressedLog(
+                                  materialName,
+                                  desc.passCount > 1 ? "multi-pass-fixedfunc"
+                                                     : "unsupported-texture-stages",
+                                  desc),
+                              LogLevel::Warn);
+                void* generated = InstantiateDx11CompatTechnique(
+                    material, sourceTechnique, schemeName, lodIndex, path, desc,
+                    materialName, inputs);
+                if (generated != nullptr)
+                {
+                    LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
+                                      materialName, sourceLabel, path, false),
+                                  LogLevel::Info);
+                    ConvertShaderlessSiblingTechniques(material, generated, config,
+                                                       inputs, materialName);
+                    return generated;
+                }
+                LogCompatOnce(
+                    "[DX11COMPAT] instantiation failed material=" + materialName +
+                        " path=suppress action=stock-fallback",
+                    LogLevel::Warn);
+                break;
+            }
             case Dx11Compat::CompatPath::FixedFuncTextured:
             case Dx11Compat::CompatPath::FixedFuncUntextured:
             case Dx11Compat::CompatPath::FixedFuncTextured2:
@@ -2334,6 +2569,8 @@ namespace BZROpenShim::RenderProfiles
                     LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
                                       materialName, sourceLabel, path, false),
                                   LogLevel::Info);
+                    ConvertShaderlessSiblingTechniques(material, generated, config,
+                                                       inputs, materialName);
                     return generated;
                 }
                 LogCompatOnce(

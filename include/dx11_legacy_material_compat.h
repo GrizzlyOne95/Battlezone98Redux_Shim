@@ -48,11 +48,19 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         AggressiveGeneric,
         SkipShaderless,
         // Two texture units sharing UV set 0: stage 0 modulate, stage 1
-        // modulate or alpha_blend (IsSupportedTwoStageCombo). Appended so the
-        // existing values keep their meaning.
+        // modulate, add or alpha_blend (IsSupportedTwoStageCombo). Appended so
+        // the existing values keep their meaning.
         FixedFuncTextured2,
+        // A true fixed-function pass this layer cannot express, on a material
+        // whose every fallback is shaderless too. Declining does not skip the
+        // draw there: Ogre falls back to a fixed-function technique and D3D11
+        // throws "without both vertex and fragment shaders" per draw. The
+        // pass is instead bound to a program pair that clips everything, so
+        // nothing is drawn and nothing throws.
+        SuppressPass,
     };
 
+    const char* LegacyPassKindName(LegacyPassKind kind) noexcept;
     const char* CompatPathName(CompatPath path) noexcept;
 
     // Ogre::LayerBlendOperationEx / LayerBlendSource values (OgreBlendMode.h,
@@ -122,14 +130,21 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         // decision; the one-unit path keeps its historical modulate
         // assumption (colorOp0) so existing content does not change path.
         std::vector<TextureStageDesc> stages;
+        // Pass count of the source technique. Synthesis clones one-pass
+        // techniques only; suppression covers any count.
+        int passCount = 1;
+        // True when every technique Ogre could fall back to still contains a
+        // shaderless pass, i.e. declining would leave a draw D3D11 throws on.
+        bool fallbackShaderless = false;
     };
 
     // The bounded two-unit support set: exactly two stages, both read, both
-    // on UV set 0, default alpha on both, stage 0 modulate, stage 1 modulate
-    // or alpha_blend. That is what shipped content uses: ISDF Chronicles'
+    // on UV set 0, default alpha on both, stage 0 modulate, stage 1 modulate,
+    // add or alpha_blend. That is what shipped content uses: ISDF Chronicles'
     // rain family (xrain, xrainL/R: a scrolling streak texture masked by
-    // colour_op alpha_blend) and plain detail/overlay modulation. Anything
-    // else stays declined rather than guessed.
+    // colour_op alpha_blend), the ported BZBase emissive overlays (unit 1
+    // colour_op add) and plain detail/overlay modulation. Anything else stays
+    // declined rather than guessed.
     bool IsSupportedTwoStageCombo(const LegacyPassDesc& desc) noexcept;
 
     struct CompatConfig
@@ -205,6 +220,9 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
     const char* FixedFuncTextured2Vertex() noexcept;
     // Fragment program for a supported stage-1 combine, else nullptr.
     const char* FixedFuncTextured2Fragment(StageCombine stage1) noexcept;
+    // Draw-nothing pair bound by CompatPath::SuppressPass. POSITION only.
+    const char* FixedFuncSuppressVertex() noexcept;
+    const char* FixedFuncSuppressFragment() noexcept;
 
     // Stock DX11 materials whose vertex program requires an input that their
     // output provably does not depend on. Glow/Null multiplies COLOR0 by a
@@ -229,6 +247,12 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
     //  reason=<r> action=<applied|skipped:<why>>"
     std::string FormatNativeInputGuardLog(const NativeInputGuard& guard,
                                           std::string_view action);
+
+    // "[DX11COMPAT] material=<m> path=suppress reason=<r> passes=<n>
+    //  units=<n> stages=<ops> action=skip-draw" -- once per material.
+    std::string FormatSuppressedLog(std::string_view material,
+                                    std::string_view reason,
+                                    const LegacyPassDesc& desc);
 
     LegacyPassKind ClassifyLegacyPass(const LegacyPassDesc& desc) noexcept;
 

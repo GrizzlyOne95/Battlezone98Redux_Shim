@@ -793,10 +793,15 @@ void TestTwoStageFixedFunction()
     Check(IsSupportedTwoStageCombo(modulate2),
           "modulate/modulate supported");
 
+    LegacyPassDesc add2 = XrainDesc();
+    add2.stages[1] = Stage(BlendOpEx::Add);
+    Check(IsSupportedTwoStageCombo(add2),
+          "modulate/add supported (BZBase emissive overlay)");
+
     LegacyPassDesc d = XrainDesc();
-    d.stages[1] = Stage(BlendOpEx::Add);
+    d.stages[1] = Stage(BlendOpEx::Source1);
     Check(!IsSupportedTwoStageCombo(d),
-          "stage 1 add is outside the bounded set");
+          "stage 1 replace is outside the bounded set");
     d = XrainDesc();
     d.stages[0] = Stage(BlendOpEx::Source1);
     Check(!IsSupportedTwoStageCombo(d), "stage 0 must modulate");
@@ -854,6 +859,9 @@ void TestTwoStageFixedFunction()
                                 vs, ps) &&
               ps == "OSE_FixedFunc_Textured2_fragment_modulate",
           "modulate/modulate resolves to the modulate pair");
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncTextured2, add2, vs, ps) &&
+              ps == "OSE_FixedFunc_Textured2_fragment_add",
+          "modulate/add resolves to the add pair");
     Check(!ResolveCompatPrograms(CompatPath::FixedFuncTextured2,
                                  FixedFuncDesc(2, "modulate"), vs, ps) &&
               vs.empty() && ps.empty(),
@@ -906,8 +914,14 @@ void TestTwoStageFixedFunction()
           "fixedfunc2_vertex", "COMPAT_NO_VERTEX_COLOUR" },
         { "fragment_program", "OSE_FixedFunc_Textured2_fragment_modulate",
           "fixedfunc2_fragment", "COMPAT_OP1_MODULATE" },
+        { "fragment_program", "OSE_FixedFunc_Textured2_fragment_add",
+          "fixedfunc2_fragment", "COMPAT_OP1_ADD" },
         { "fragment_program", "OSE_FixedFunc_Textured2_fragment_alphablend",
           "fixedfunc2_fragment", "COMPAT_OP1_ALPHABLEND" },
+        { "vertex_program", "OSE_FixedFunc_Suppress_vertex",
+          "suppress_vertex", nullptr },
+        { "fragment_program", "OSE_FixedFunc_Suppress_fragment",
+          "suppress_fragment", nullptr },
     };
     for (const Expected& e : expected)
     {
@@ -933,6 +947,108 @@ void TestTwoStageFixedFunction()
     ExpectContains(hlsl, "void fixedfunc2_fragment(",
                    "two-stage fragment entry");
     ExpectContains(hlsl, "register(t1)", "stage 1 samples texture slot 1");
+    ExpectContains(hlsl, "#if defined(COMPAT_OP1_ADD)", "stage 1 add combine");
+    ExpectContains(hlsl, "void suppress_vertex(", "suppress vertex entry");
+    ExpectContains(hlsl, "float4 suppress_fragment(", "suppress fragment entry");
+}
+
+void TestSuppressAndInPlace()
+{
+    std::printf("TestSuppressAndInPlace\n");
+    CompatConfig on;
+    std::string vs;
+    std::string ps;
+
+    // Unsupported two-unit pass: decline while a programmable fallback
+    // exists, suppress when every fallback is shaderless too.
+    LegacyPassDesc uv1 = XrainDesc();
+    uv1.stages[1] = Stage(BlendOpEx::Modulate);
+    uv1.stages[1].texCoordSet = 1;
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, uv1, on) ==
+              CompatPath::SkipShaderless,
+          "unsupported with a programmable fallback declines");
+    uv1.fallbackShaderless = true;
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, uv1, on) ==
+              CompatPath::SuppressPass,
+          "unsupported with only shaderless fallbacks is suppressed");
+    CompatConfig aggressive = on;
+    aggressive.aggressiveEnabled = true;
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, uv1,
+                           aggressive) == CompatPath::AggressiveGeneric,
+          "aggressive mode still takes precedence");
+    CompatConfig off = on;
+    off.compatEnabled = false;
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, uv1, off) ==
+              CompatPath::SkipShaderless,
+          "compat disabled never suppresses");
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, uv1, on,
+                           false) == CompatPath::SkipShaderless,
+          "missing resources never suppress");
+    Check(ResolveCompatPrograms(CompatPath::SuppressPass, uv1, vs, ps) &&
+              vs == "OSE_FixedFunc_Suppress_vertex" &&
+              ps == "OSE_FixedFunc_Suppress_fragment",
+          "suppress pair");
+
+    // Multi-pass fixed function is never synthesized; it is suppressed only
+    // when nothing programmable remains.
+    LegacyPassDesc multi = FixedFuncDesc(1);
+    multi.passCount = 2;
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, multi, on) ==
+              CompatPath::SkipShaderless,
+          "multi-pass with a programmable fallback declines");
+    multi.fallbackShaderless = true;
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, multi, on) ==
+              CompatPath::SuppressPass,
+          "multi-pass with only shaderless fallbacks is suppressed");
+
+    // A supported pass is synthesized whatever its fallbacks are.
+    LegacyPassDesc xrain = XrainDesc();
+    xrain.fallbackShaderless = true;
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, xrain, on) ==
+              CompatPath::FixedFuncTextured2,
+          "a supported pass is never suppressed");
+
+    // A pass already converted in place is native on the next miss, not
+    // "unsupported custom": the runtime never reads targets.
+    Check(ClassifyLegacyPass(ProgramDesc(
+              "OSE_FixedFunc_Textured2_vertex", "",
+              "OSE_FixedFunc_Textured2_fragment_alphablend", "")) ==
+              LegacyPassKind::NativeDx11,
+          "converted OSE pass classifies native");
+    Check(ClassifyLegacyPass(ProgramDesc("OSE_FixedFunc_Textured_vertex", "",
+                                         "Effect_fragment", "")) !=
+              LegacyPassKind::NativeDx11,
+          "a half-converted pass is still legacy");
+    Check(ClassifyLegacyPass(ProgramDesc("OSE_FixedFunc_Textured_vertex",
+                                         "vs_2_0",
+                                         "OSE_FixedFunc_Textured_fragment",
+                                         "ps_2_0")) !=
+              LegacyPassKind::NativeDx11,
+          "an explicit legacy target is still legacy");
+
+    VertexInputs bare;
+    bare.known = true;
+    bare.diffuse = false;
+    bare.texcoord0 = false;
+    Check(FitVertexProgramToInputs("OSE_FixedFunc_Suppress_vertex", bare,
+                                   vs) == VertexInputFit::Unchanged &&
+              vs == "OSE_FixedFunc_Suppress_vertex",
+          "suppress binds on position only");
+
+    const std::string line = FormatSuppressedLog(
+        "xrain_test", "unsupported-texture-stages", uv1);
+    ExpectContains(line, "[DX11COMPAT] material=xrain_test path=suppress",
+                   "suppress log prefix");
+    ExpectContains(line, "passes=1 units=2", "suppress log counts");
+    ExpectContains(line, "stages=modulate,modulate@uv1",
+                   "suppress log stages");
+    ExpectContains(line, "action=skip-draw", "suppress log action");
+    Check(std::strcmp(CompatPathName(CompatPath::SuppressPass), "suppress") ==
+              0,
+          "path name");
+    Check(std::strcmp(LegacyPassKindName(LegacyPassKind::TrueFixedFunction),
+                      "fixedfunc") == 0,
+          "pass kind name");
 }
 
 int main()
@@ -940,6 +1056,7 @@ int main()
     TestNativeInputGuards();
     TestVertexInputFit();
     TestTwoStageFixedFunction();
+    TestSuppressAndInPlace();
     TestSynthesisExclusions();
     TestSupportedTargets();
     TestParseCompatFlag();
