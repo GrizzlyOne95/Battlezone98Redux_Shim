@@ -10,7 +10,7 @@
 // Texture-stage combine operations that the fixed pipeline executed are
 // represented here for the bounded support set (0 units; 1 unit with
 // modulate/replace/add/alpha_blend; 2 units on UV set 0 with stage 0
-// modulate and stage 1 modulate/alpha_blend). Anything wider is
+// modulate and stage 1 modulate/add/alpha_blend). Anything wider is
 // intentionally NOT guessed: the engine policy marks them unsupported and
 // logs once so corpus telemetry can expand coverage (Level 4).
 //
@@ -201,6 +201,7 @@ void fixedfunc_untextured_fragment(
 //
 //   stage 0   modulate                          current = vColor * tex0
 //   stage 1   modulate      (default)           current * tex1
+//             add           (COMPAT_OP1_ADD)    current + tex1
 //             alpha_blend   (COMPAT_OP1_ALPHABLEND)
 //                           lerp(current, tex1, tex1.a)  -- D3DTOP_BLENDTEXTUREALPHA
 //
@@ -271,7 +272,9 @@ void fixedfunc2_fragment(
     float alpha = vColor.a * tex0.a;
 
     // Stage 1.
-#if defined(COMPAT_OP1_ALPHABLEND)
+#if defined(COMPAT_OP1_ADD)
+    current = current + tex1.xyz;
+#elif defined(COMPAT_OP1_ALPHABLEND)
     current = lerp(current, tex1.xyz, tex1.a);
 #else
     current = current * tex1.xyz;
@@ -283,4 +286,29 @@ void fixedfunc2_fragment(
     float fogValue = saturate((vDepth - fogParams.y) * fogParams.w);
     oColor.xyz = lerp(current, fogColour.xyz, fogValue);
     oColor.a = alpha;
+}
+
+// ---------------------------------------------------------------------------
+// Suppress path
+// ---------------------------------------------------------------------------
+//
+// Bound to a fixed-function pass this layer cannot express when every
+// technique Ogre could fall back to is shaderless as well. D3D11 cannot draw
+// without shaders and throws on every such draw; this pair keeps the draw
+// legal and produces nothing: every vertex lands outside the clip volume
+// (w = 1, z = 2), and the fragment stage discards should anything survive.
+// POSITION is the only input, so it binds on any vertex declaration.
+
+void suppress_vertex(
+    in float4 iPosition : POSITION,
+    out float4 oPosition : SV_POSITION
+)
+{
+    oPosition = float4(0.0, 0.0, 2.0, 1.0) + iPosition * 0.0;
+}
+
+float4 suppress_fragment(in float4 iPosition : SV_POSITION) : SV_TARGET
+{
+    discard;
+    return float4(0.0, 0.0, 0.0, 0.0);
 }
