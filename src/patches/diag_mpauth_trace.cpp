@@ -69,6 +69,13 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        // MPAUTH diagnostic traces (Redux receiver replay). Opt-in, cheap, no gameplay change.
+        bool g_MpauthEnabled = false;
+        bool g_MpauthHooksInstalled = false;
+        volatile long g_MpauthInstallRetryBudget = 8;
+        thread_local bool g_MpauthInOrdnanceReceive = false;
+        std::unordered_map<uint32_t, int> g_MpauthSplHitCounts = {};
+
         // MPAUTH instrumentation (Redux 2.2.301) — diagnostic only, no authority patch.
         // Daywrecker: shared consumed byte at +0x230 (complete) / +0x218 (adjusted).
         // Splinter: payload bSend at +0x80, source at +0x7C, ordid at +0x7E.

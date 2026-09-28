@@ -70,6 +70,9 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
+        bool g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
+        bool g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
+
         // Configured value AND'd with the single-player gate. Every call
         // redirect stays installed either way; when the matching flag is false
         // each one passes straight through to the stock engine routine, so the

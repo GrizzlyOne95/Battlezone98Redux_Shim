@@ -74,6 +74,20 @@ namespace BZROpenShim
 
     namespace Hooks
     {
+        bool g_LoggedEngineFlameTargetFailure = false;
+        bool g_LoggedEngineFlameVtableHook = false;
+        bool g_EngineFlameVariantsInitialized = false;
+        bool g_EngineFlameVariantsInitAttempted = false;
+        bool g_EngineFlameVtableHooksInstalled = false;
+        int g_EngineFlamePrimaryRedTexture = 0;
+        int g_EngineFlamePrimaryBlueTexture = 0;
+        int g_EngineFlamePrimaryGreenTexture = 0;
+        int g_EngineFlamePrimaryOrangeTexture = 0;
+        int g_EngineFlamePrimaryBlackDogTexture = 0;
+        void* g_EngineFlamePrimaryManager = nullptr;
+        void* g_EngineFlameSecondaryManager = nullptr;
+        bool g_JetFlamesConfigInitialized = false;
+
         constexpr size_t kEngineFlameFlamePtrOffset = 0x1228;
 
         constexpr size_t kEngineFlameFlameTextureOffset = 0x123C;
