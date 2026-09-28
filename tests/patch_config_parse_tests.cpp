@@ -27,6 +27,9 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim::PatchConfig;
 using BZROpenShim::ParseIdaPatternText;
@@ -34,26 +37,13 @@ using nlohmann::json;
 
 namespace
 {
-    int g_Failures = 0;
-
-    void Check(bool condition, const char* what)
-    {
-        if (!condition)
-        {
-            std::fprintf(stderr, "FAIL: %s\n", what);
-            ++g_Failures;
-        }
-    }
-
     void ExpectHex(const char* text, uint32_t expected)
     {
         uint32_t value = 0;
         const bool ok = ParseHexAddress32(text, value);
         if (!ok || value != expected)
         {
-            std::fprintf(stderr, "FAIL: ParseHexAddress32(\"%s\") -> ok=%d value=0x%08X, expected 0x%08X\n",
-                         text, ok ? 1 : 0, value, expected);
-            ++g_Failures;
+            OpenShimTest::Fail("ParseHexAddress32(\"%s\") -> ok=%d value=0x%08X, expected 0x%08X", text, ok ? 1 : 0, value, expected);
         }
     }
 
@@ -62,8 +52,7 @@ namespace
         uint32_t value = 0;
         if (ParseHexAddress32(text, value))
         {
-            std::fprintf(stderr, "FAIL: ParseHexAddress32(\"%s\") accepted as 0x%08X\n", text, value);
-            ++g_Failures;
+            OpenShimTest::Fail("ParseHexAddress32(\"%s\") accepted as 0x%08X", text, value);
         }
     }
 
@@ -208,8 +197,7 @@ namespace
             error.clear();
             if (ParseScanEntry(json::parse(text), entry, error) || error.empty())
             {
-                std::fprintf(stderr, "FAIL: patches entry accepted or unexplained: %s\n", text);
-                ++g_Failures;
+                OpenShimTest::Fail("patches entry accepted or unexplained: %s", text);
             }
         }
     }
@@ -259,8 +247,7 @@ namespace
             error.clear();
             if (ParseGlobalEntry(json::parse(text), false, entry, error) || error.empty())
             {
-                std::fprintf(stderr, "FAIL: globals entry accepted or unexplained: %s\n", text);
-                ++g_Failures;
+                OpenShimTest::Fail("globals entry accepted or unexplained: %s", text);
             }
         }
     }
@@ -433,16 +420,14 @@ namespace
         std::ifstream f(BZR_PATCHES_JSON, std::ios::binary);
         if (!f.is_open())
         {
-            std::fprintf(stderr, "FAIL: cannot open %s\n", BZR_PATCHES_JSON);
-            ++g_Failures;
+            OpenShimTest::Fail("cannot open %s", BZR_PATCHES_JSON);
             return;
         }
         json root;
         try { root = json::parse(f); }
         catch (const std::exception& e)
         {
-            std::fprintf(stderr, "FAIL: %s does not parse: %s\n", BZR_PATCHES_JSON, e.what());
-            ++g_Failures;
+            OpenShimTest::Fail("%s does not parse: %s", BZR_PATCHES_JSON, e.what());
             return;
         }
 
@@ -457,8 +442,7 @@ namespace
                 error.clear();
                 if (!ParseScanEntry(node, entry, error))
                 {
-                    std::fprintf(stderr, "FAIL: shipped patches entry '%s': %s\n", EntryName(node).c_str(), error.c_str());
-                    ++g_Failures;
+                    OpenShimTest::Fail("shipped patches entry '%s': %s", EntryName(node).c_str(), error.c_str());
                     continue;
                 }
                 if (entry.requireUnique) continue;
@@ -478,9 +462,7 @@ namespace
                 if (!VerifyFallbackSite(pattern, entry.fallback, entry.offset, entry.expectedSize, image.Reader(), guard, error) ||
                     guard.size() != entry.expectedSize)
                 {
-                    std::fprintf(stderr, "FAIL: shipped patches entry '%s' cannot take its fallback: %s\n",
-                                 entry.name.c_str(), error.c_str());
-                    ++g_Failures;
+                    OpenShimTest::Fail("shipped patches entry '%s' cannot take its fallback: %s", entry.name.c_str(), error.c_str());
                 }
             }
         }
@@ -496,9 +478,7 @@ namespace
                     error.clear();
                     if (!ParseGlobalEntry(node, steam, entry, error))
                     {
-                        std::fprintf(stderr, "FAIL: shipped globals entry '%s' (%s): %s\n",
-                                     EntryName(node).c_str(), steam ? "steam" : "gog", error.c_str());
-                        ++g_Failures;
+                        OpenShimTest::Fail("shipped globals entry '%s' (%s): %s", EntryName(node).c_str(), steam ? "steam" : "gog", error.c_str());
                     }
                 }
             }
@@ -513,8 +493,7 @@ namespace
                 error.clear();
                 if (ReadStaticPointer(root, EntryName(node), value, error) != LookupStatus::Found)
                 {
-                    std::fprintf(stderr, "FAIL: shipped static pointer '%s': %s\n", EntryName(node).c_str(), error.c_str());
-                    ++g_Failures;
+                    OpenShimTest::Fail("shipped static pointer '%s': %s", EntryName(node).c_str(), error.c_str());
                 }
             }
         }
@@ -540,9 +519,9 @@ int main()
     TestFallbackSite();
     TestShippedPatchesJson();
 
-    if (g_Failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::fprintf(stderr, "%d failure(s)\n", g_Failures);
+        std::fprintf(stderr, "%d failure(s)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("patch_config_parse_tests: all checks passed\n");

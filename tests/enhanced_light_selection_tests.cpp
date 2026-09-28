@@ -8,22 +8,13 @@
 #include <span>
 #include <unordered_set>
 #include <vector>
+#include "test_check.h"
+
+using OpenShimTest::Require;
 
 namespace
 {
     using namespace BZROpenShim::EnhancedLights;
-
-    [[noreturn]] void Fail(const char* message)
-    {
-        std::fprintf(stderr, "enhanced_light_selection_tests: %s\n", message);
-        std::exit(1);
-    }
-
-    void Require(bool condition, const char* message)
-    {
-        if (!condition)
-            Fail(message);
-    }
 
     Candidate MakePoint(std::uint64_t id, float x, float intensity,
                         float range = 200.0f, float quadratic = 0.01f)

@@ -3,21 +3,14 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim;
 
 namespace
 {
-    int g_Failures = 0;
-
-    void Check(bool condition, const char* what)
-    {
-        if (condition)
-            return;
-        std::fprintf(stderr, "FAIL: %s\n", what);
-        ++g_Failures;
-    }
-
     bool Near(float actual, float expected)
     {
         return std::fabs(actual - expected) <= 0.001f;
@@ -137,9 +130,9 @@ int main()
     TestCombinedPolicyAndBomberCompatibility();
     TestInvalidFloorsFailClosed();
 
-    if (g_Failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::fprintf(stderr, "ai_range_policy_tests: %d check(s) failed\n", g_Failures);
+        std::fprintf(stderr, "ai_range_policy_tests: %d check(s) failed\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("ai_range_policy_tests: all checks passed\n");

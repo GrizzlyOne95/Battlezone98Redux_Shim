@@ -13,27 +13,20 @@
 #include <cstdio>
 #include <initializer_list>
 #include <vector>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim;
 
 namespace
 {
-    int g_Failures = 0;
-
-    void Check(bool condition, const char* what)
-    {
-        if (condition) return;
-        std::fprintf(stderr, "FAIL: %s\n", what);
-        ++g_Failures;
-    }
-
     void ExpectLength(std::initializer_list<uint8_t> bytes, size_t expected, const char* what)
     {
         const std::vector<uint8_t> code(bytes);
         const size_t got = X86InstructionLength32(code.data(), code.size());
         if (got == expected) return;
-        std::fprintf(stderr, "FAIL: %s: expected length %zu, got %zu\n", what, expected, got);
-        ++g_Failures;
+        OpenShimTest::Fail("%s: expected length %zu, got %zu", what, expected, got);
     }
 
     X86StealPlan Plan(const std::vector<uint8_t>& code, size_t patchLen)
@@ -209,9 +202,9 @@ int main()
     }
     Check(X86StealStatusName(X86StealStatus::NotOnBoundary)[0] == 'n', "status names are populated");
 
-    if (g_Failures)
+    if (OpenShimTest::FailureCount())
     {
-        std::fprintf(stderr, "%d failure(s)\n", g_Failures);
+        std::fprintf(stderr, "%d failure(s)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("x86_length_tests: all checks passed\n");

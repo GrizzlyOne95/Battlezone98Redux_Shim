@@ -220,6 +220,15 @@ openshim_add_test(openshim_update_manifest_tests STD 20 SOURCES
     ../src/patches/openshim_update_manifest.cpp
 )
 
+# The OPENSHIM_*/BZR_* environment redirect: which openshim.ini key each
+# legacy name reads, how values are normalised, and the INI-before-launch-
+# environment order (audit P2-7). The Win32 readers stay in
+# openshim_env_config.cpp; this links only the decision half.
+openshim_add_test(openshim_env_mapping_tests STD 20 SOURCES
+    openshim_env_mapping_tests.cpp
+    ../src/patches/openshim_env_mapping.cpp
+)
+
 # The non-throwing scripts/patches.json readers the patch thread relies on.
 # Pure nlohmann over the document, so it runs on the Linux host lane, and it
 # walks the shipped patches.json to prove the readers accept every entry.

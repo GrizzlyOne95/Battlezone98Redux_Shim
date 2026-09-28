@@ -6,28 +6,19 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include "test_check.h"
+
+using OpenShimTest::Check;
 
 using namespace BZROpenShim::RenderProfiles;
 
 namespace
 {
-    int g_failures = 0;
-
-    void ExpectTrue(bool condition, const char* what)
-    {
-        if (!condition)
-        {
-            std::printf("  FAIL: %s\n", what);
-            ++g_failures;
-        }
-    }
-
     void ExpectEq(uint32_t actual, uint32_t expected, const char* what)
     {
         if (actual != expected)
         {
-            std::printf("  FAIL: %s (actual=%u expected=%u)\n", what, actual, expected);
-            ++g_failures;
+            OpenShimTest::Fail("%s (actual=%u expected=%u)", what, actual, expected);
         }
     }
 
@@ -35,8 +26,7 @@ namespace
     {
         if (std::strstr(result.reason, needle) == nullptr)
         {
-            std::printf("  FAIL: reason '%s' missing substring '%s'\n", result.reason, needle);
-            ++g_failures;
+            OpenShimTest::Fail("reason '%s' missing substring '%s'", result.reason, needle);
         }
     }
 
@@ -58,7 +48,7 @@ void TestCleanReduxBaseline()
 {
     std::printf("TestCleanReduxBaseline\n");
     const ResolverResult result = ResolveRenderProfile(Baseline());
-    ExpectTrue(!result.fellBack, "no fallback");
+    Check(!result.fellBack, "no fallback");
     ExpectEq(static_cast<uint32_t>(result.effectiveProfile), static_cast<uint32_t>(Profile::Redux), "profile");
     ExpectEq(static_cast<uint32_t>(result.effectiveBackend), static_cast<uint32_t>(ActiveBackend::DX11), "backend");
 }
@@ -79,7 +69,7 @@ void TestContentOverrideWinsOverUser()
     inverse.contentOverride = ContentRequest::Redux;
     const ResolverResult inverseResult = ResolveRenderProfile(inverse);
     ExpectEq(static_cast<uint32_t>(inverseResult.effectiveProfile), static_cast<uint32_t>(Profile::Redux), "redux override wins over user enhanced");
-    ExpectTrue(!inverseResult.fellBack, "override is intent honored, not a fallback");
+    Check(!inverseResult.fellBack, "override is intent honored, not a fallback");
 }
 
 void TestInheritFollowsUserPreference()
@@ -119,9 +109,9 @@ void TestDx9EnhancedIsCapabilityDependentNotFallback()
     // than silently degrading to Redux. The capability report is where the
     // reduced feature set is visible (sharpening yes, modern pssm no).
     ExpectEq(static_cast<uint32_t>(legacy.effectiveProfile), static_cast<uint32_t>(Profile::Enhanced), "dx9 enhanced stays effective");
-    ExpectTrue(HasCapability(dx9.capabilityMask, CapNormalSharpening), "legacy sharpening bit present");
-    ExpectTrue(!HasCapability(dx9.capabilityMask, CapModernPssm), "modern pssm bit absent on dx9");
-    ExpectTrue(!HasCapability(dx9.capabilityMask, CapLinearLighting), "linear lighting bit absent on dx9");
+    Check(HasCapability(dx9.capabilityMask, CapNormalSharpening), "legacy sharpening bit present");
+    Check(!HasCapability(dx9.capabilityMask, CapModernPssm), "modern pssm bit absent on dx9");
+    Check(!HasCapability(dx9.capabilityMask, CapLinearLighting), "linear lighting bit absent on dx9");
 
     // A mission requesting Enhanced on DX9 gets the same treatment as the
     // user preference path: effective Enhanced with the legacy feature set.
@@ -139,7 +129,7 @@ void TestSchemeLayerLossFallsBackWithReason()
     input.capabilityMask &= ~static_cast<uint32_t>(CapSchemeRewrite);
     const ResolverResult result = ResolveRenderProfile(input);
     ExpectEq(static_cast<uint32_t>(result.effectiveProfile), static_cast<uint32_t>(Profile::Redux), "falls back to redux");
-    ExpectTrue(result.fellBack, "fallback reported");
+    Check(result.fellBack, "fallback reported");
     ExpectReason(result, "scheme policy layer inactive");
 }
 
@@ -150,7 +140,7 @@ void TestRequestedBackendMismatchIsReportedNotApplied()
     input.requestedBackend = RendererBackend::DX9; // player picked DX9, session on DX11
     const ResolverResult result = ResolveRenderProfile(input);
     ExpectEq(static_cast<uint32_t>(result.effectiveBackend), static_cast<uint32_t>(ActiveBackend::DX11), "session backend unchanged");
-    ExpectTrue(result.fellBack, "restart-required divergence reported");
+    Check(result.fellBack, "restart-required divergence reported");
     ExpectReason(result, "restart required");
 }
 
@@ -182,7 +172,7 @@ void TestInvalidInputsResolveDeterministically()
     const ResolverResult result = ResolveRenderProfile(garbage);
     ExpectEq(static_cast<uint32_t>(result.effectiveProfile), static_cast<uint32_t>(Profile::Redux), "garbage profile -> redux");
     ExpectEq(static_cast<uint32_t>(result.effectiveBackend), static_cast<uint32_t>(ActiveBackend::DX9), "garbage backend -> dx9 baseline");
-    ExpectTrue(result.fellBack, "corrupt state explained");
+    Check(result.fellBack, "corrupt state explained");
 }
 
 void TestSchemePolicyMapping()
@@ -190,26 +180,26 @@ void TestSchemePolicyMapping()
     std::printf("TestSchemePolicyMapping\n");
     char buffer[64] = {};
 
-    ExpectTrue(BuildMaterialSchemeForProfile(Profile::Redux, "high-pssm", buffer, sizeof(buffer)), "redux build");
-    ExpectTrue(std::string(buffer) == "high-pssm", "redux passthrough");
-    ExpectTrue(BuildMaterialSchemeForProfile(Profile::Enhanced, "high-pssm", buffer, sizeof(buffer)), "enhanced build");
-    ExpectTrue(std::string(buffer) == "en-high-pssm", "enhanced prefix");
-    ExpectTrue(BuildMaterialSchemeForProfile(Profile::Retro, "low-noshadow", buffer, sizeof(buffer)), "retro build");
-    ExpectTrue(std::string(buffer) == "og-low-noshadow", "retro prefix");
+    Check(BuildMaterialSchemeForProfile(Profile::Redux, "high-pssm", buffer, sizeof(buffer)), "redux build");
+    Check(std::string(buffer) == "high-pssm", "redux passthrough");
+    Check(BuildMaterialSchemeForProfile(Profile::Enhanced, "high-pssm", buffer, sizeof(buffer)), "enhanced build");
+    Check(std::string(buffer) == "en-high-pssm", "enhanced prefix");
+    Check(BuildMaterialSchemeForProfile(Profile::Retro, "low-noshadow", buffer, sizeof(buffer)), "retro build");
+    Check(std::string(buffer) == "og-low-noshadow", "retro prefix");
 
-    ExpectTrue(IsModernMaterialScheme("medium"), "medium is modern");
-    ExpectTrue(!IsModernMaterialScheme("en-medium"), "prefixed not modern");
-    ExpectTrue(!IsModernMaterialScheme("my-cool-mod"), "custom not modern");
+    Check(IsModernMaterialScheme("medium"), "medium is modern");
+    Check(!IsModernMaterialScheme("en-medium"), "prefixed not modern");
+    Check(!IsModernMaterialScheme("my-cool-mod"), "custom not modern");
 
     ExpectEq(static_cast<uint32_t>(ProfileForMaterialScheme("en-high")), static_cast<uint32_t>(Profile::Enhanced), "classify en");
     ExpectEq(static_cast<uint32_t>(ProfileForMaterialScheme("og-high")), static_cast<uint32_t>(Profile::Retro), "classify og");
     ExpectEq(static_cast<uint32_t>(ProfileForMaterialScheme("high")), static_cast<uint32_t>(Profile::Redux), "classify modern");
 
-    ExpectTrue(NormalizeModernMaterialScheme("en-medium-pssm") == "medium-pssm", "strip en prefix");
-    ExpectTrue(NormalizeModernMaterialScheme("og-low") == "low", "strip og prefix");
-    ExpectTrue(NormalizeModernMaterialScheme("") == DefaultModernMaterialScheme(), "empty -> default");
-    ExpectTrue(NormalizeModernMaterialScheme("", "lowest") == "lowest", "empty -> lastModern");
-    ExpectTrue(NormalizeModernMaterialScheme("weird") == DefaultModernMaterialScheme(), "unknown -> default");
+    Check(NormalizeModernMaterialScheme("en-medium-pssm") == "medium-pssm", "strip en prefix");
+    Check(NormalizeModernMaterialScheme("og-low") == "low", "strip og prefix");
+    Check(NormalizeModernMaterialScheme("") == DefaultModernMaterialScheme(), "empty -> default");
+    Check(NormalizeModernMaterialScheme("", "lowest") == "lowest", "empty -> lastModern");
+    Check(NormalizeModernMaterialScheme("weird") == DefaultModernMaterialScheme(), "unknown -> default");
 }
 
 // The explicit viewport reapply (boot, ini reload, EXU request) must follow
@@ -223,27 +213,27 @@ void TestViewportReapplyFailsOpen()
     for (const Profile profile : { Profile::Redux, Profile::Enhanced, Profile::Retro })
     {
         const ViewportReapplyDecision custom = DecideViewportSchemeReapply(profile, "my-cool-mod", "high-pssm");
-        ExpectTrue(custom.foreignScheme && !custom.rewriteScheme, "a custom scheme is left alone");
+        Check(custom.foreignScheme && !custom.rewriteScheme, "a custom scheme is left alone");
         const ViewportReapplyDecision empty = DecideViewportSchemeReapply(profile, "", "high-pssm");
-        ExpectTrue(empty.foreignScheme && !empty.rewriteScheme, "an empty scheme is left alone");
+        Check(empty.foreignScheme && !empty.rewriteScheme, "an empty scheme is left alone");
         const ViewportReapplyDecision ogreDefault = DecideViewportSchemeReapply(profile, "Default", {});
-        ExpectTrue(ogreDefault.foreignScheme && !ogreDefault.rewriteScheme, "Ogre's Default scheme is left alone");
+        Check(ogreDefault.foreignScheme && !ogreDefault.rewriteScheme, "Ogre's Default scheme is left alone");
     }
 
     ViewportReapplyDecision d = DecideViewportSchemeReapply(Profile::Enhanced, "high-pssm", {});
-    ExpectTrue(!d.foreignScheme && d.rewriteScheme && std::string(d.scheme) == "en-high-pssm", "enhanced prefixes a native base");
+    Check(!d.foreignScheme && d.rewriteScheme && std::string(d.scheme) == "en-high-pssm", "enhanced prefixes a native base");
     d = DecideViewportSchemeReapply(Profile::Enhanced, "en-high-pssm", {});
-    ExpectTrue(!d.foreignScheme && !d.rewriteScheme, "already enhanced: nothing to write");
+    Check(!d.foreignScheme && !d.rewriteScheme, "already enhanced: nothing to write");
     d = DecideViewportSchemeReapply(Profile::Redux, "en-medium-noshadow", {});
-    ExpectTrue(d.rewriteScheme && std::string(d.scheme) == "medium-noshadow", "redux strips our prefix");
+    Check(d.rewriteScheme && std::string(d.scheme) == "medium-noshadow", "redux strips our prefix");
     d = DecideViewportSchemeReapply(Profile::Redux, "high-pssm", {});
-    ExpectTrue(!d.foreignScheme && !d.rewriteScheme, "redux on a native base: nothing to write");
+    Check(!d.foreignScheme && !d.rewriteScheme, "redux on a native base: nothing to write");
     d = DecideViewportSchemeReapply(Profile::Retro, "medium-noshadow", {});
-    ExpectTrue(d.rewriteScheme && std::string(d.scheme) == "og-medium-noshadow", "retro prefixes a native base");
+    Check(d.rewriteScheme && std::string(d.scheme) == "og-medium-noshadow", "retro prefixes a native base");
     d = DecideViewportSchemeReapply(Profile::Enhanced, "og-low", {});
-    ExpectTrue(d.rewriteScheme && std::string(d.scheme) == "en-low", "retro to enhanced swaps the prefix");
+    Check(d.rewriteScheme && std::string(d.scheme) == "en-low", "retro to enhanced swaps the prefix");
     d = DecideViewportSchemeReapply(Profile::Enhanced, "en-weird", "medium-pssm");
-    ExpectTrue(d.rewriteScheme && std::string(d.scheme) == "en-medium-pssm", "our prefix on an unknown base falls back to the last modern base");
+    Check(d.rewriteScheme && std::string(d.scheme) == "en-medium-pssm", "our prefix on an unknown base falls back to the last modern base");
 
     ExpectEq(static_cast<uint32_t>(DecideGlowCompositor(Profile::Retro, false)), static_cast<uint32_t>(GlowAction::Disable), "retro disables glow");
     ExpectEq(static_cast<uint32_t>(DecideGlowCompositor(Profile::Retro, true)), static_cast<uint32_t>(GlowAction::Disable), "retro keeps glow off");
@@ -265,7 +255,7 @@ void TestMandatoryResourceLossFallsBackToRedux()
     const ResolverResult result = ResolveRenderProfile(input);
     ExpectEq(static_cast<uint32_t>(result.effectiveProfile),
              static_cast<uint32_t>(Profile::Redux), "falls back to redux");
-    ExpectTrue(result.fellBack, "fallback reported");
+    Check(result.fellBack, "fallback reported");
     ExpectReason(result, "resource");
 
     // Same contract for a mission override: content cannot resurrect the
@@ -308,7 +298,7 @@ void TestOptionalIblIsIndependentOfEnhancedGate()
     const ResolverResult result = ResolveRenderProfile(input);
     ExpectEq(static_cast<uint32_t>(result.effectiveProfile),
              static_cast<uint32_t>(Profile::Enhanced), "enhanced survives ibl loss");
-    ExpectTrue(!result.fellBack, "ibl loss is not a fallback");
+    Check(!result.fellBack, "ibl loss is not a fallback");
 }
 
 void TestProfileRequirementsMetSharedGate()
@@ -321,12 +311,12 @@ void TestProfileRequirementsMetSharedGate()
 
     // The shared gate used by BOTH ResolveRenderProfile and the runtime's
     // SupportsRenderProfile must keep the two in exact agreement.
-    ExpectTrue(ProfileRequirementsMet(Profile::Enhanced, full), "enhanced needs both");
-    ExpectTrue(!ProfileRequirementsMet(Profile::Enhanced, noResources), "enhanced rejects missing resources");
-    ExpectTrue(!ProfileRequirementsMet(Profile::Enhanced, noScheme), "enhanced rejects missing scheme layer");
-    ExpectTrue(ProfileRequirementsMet(Profile::Retro, noResources), "retro needs only scheme layer");
-    ExpectTrue(!ProfileRequirementsMet(Profile::Retro, noScheme), "retro rejects missing scheme layer");
-    ExpectTrue(ProfileRequirementsMet(Profile::Redux, 0u), "redux always available");
+    Check(ProfileRequirementsMet(Profile::Enhanced, full), "enhanced needs both");
+    Check(!ProfileRequirementsMet(Profile::Enhanced, noResources), "enhanced rejects missing resources");
+    Check(!ProfileRequirementsMet(Profile::Enhanced, noScheme), "enhanced rejects missing scheme layer");
+    Check(ProfileRequirementsMet(Profile::Retro, noResources), "retro needs only scheme layer");
+    Check(!ProfileRequirementsMet(Profile::Retro, noScheme), "retro rejects missing scheme layer");
+    Check(ProfileRequirementsMet(Profile::Redux, 0u), "redux always available");
 }
 
 void TestStableAbiRoundTrip()
@@ -338,15 +328,15 @@ void TestStableAbiRoundTrip()
     ExpectEq(Abi::kRequestEnhanced, 3u, "enhanced abi value frozen");
 
     Profile profile = Profile::Redux;
-    ExpectTrue(Abi::ProfileFromAbi(Abi::kProfileEnhanced, profile), "parse enhanced");
+    Check(Abi::ProfileFromAbi(Abi::kProfileEnhanced, profile), "parse enhanced");
     ExpectEq(static_cast<uint32_t>(profile), static_cast<uint32_t>(Profile::Enhanced), "parsed value");
 
     uint32_t abi = 0;
-    ExpectTrue(Abi::ProfileToAbi(Profile::Retro, abi) && abi == Abi::kProfileRetro, "roundtrip retro");
-    ExpectTrue(!Abi::ProfileFromAbi(42u, profile), "reject unknown profile");
+    Check(Abi::ProfileToAbi(Profile::Retro, abi) && abi == Abi::kProfileRetro, "roundtrip retro");
+    Check(!Abi::ProfileFromAbi(42u, profile), "reject unknown profile");
     ContentRequest request = ContentRequest::Inherit;
-    ExpectTrue(!Abi::RequestFromAbi(999u, request), "reject unknown request");
-    ExpectTrue(Abi::RequestFromAbi(3u, request) && request == ContentRequest::Enhanced, "parse request enhanced");
+    Check(!Abi::RequestFromAbi(999u, request), "reject unknown request");
+    Check(Abi::RequestFromAbi(3u, request) && request == ContentRequest::Enhanced, "parse request enhanced");
 
     // Request-status values are frozen ABI: AppliedLive=0 keeps the
     // "success" reading older companions may assume; the others must not
@@ -375,9 +365,9 @@ int main()
     TestViewportReapplyFailsOpen();
     TestStableAbiRoundTrip();
 
-    if (g_failures != 0)
+    if (OpenShimTest::FailureCount() != 0)
     {
-        std::printf("\nrender_profile_tests FAILED (%d)\n", g_failures);
+        std::printf("\nrender_profile_tests FAILED (%d)\n", OpenShimTest::FailureCount());
         return 1;
     }
     std::printf("\nrender_profile_tests passed\n");
