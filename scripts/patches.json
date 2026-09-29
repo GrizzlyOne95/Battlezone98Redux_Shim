@@ -1265,7 +1265,7 @@
     },
     {
       "name": "Producer Build Menu Root Hook",
-      "parked": "No valid site. The old fallback 0x004FFA9F was the luaL_checklstring call inside the Lua StopSound binding (0x004FFA90, luaL_Reg 0x00871BF8), not Producer::UpdateModeList: it is the leaked PDB's segment offset 0xFFA90 plus 0x400000. Producer::UpdateModeList is 0x005AE660 (vtable slot 23, GOG and Steam). Every call in it is a thiscall on this+0x1A4, so the hook's cdecl (producer, slot, flags) contract fits none of them. The address is removed so that re-listing the entry installs nothing. See reverse_engineering/producer_build_menu_notes.md.",
+      "parked": "No valid site. The old fallback 0x004FFA9F was the luaL_checklstring call inside the Lua StopSound binding (0x004FFA90, luaL_Reg 0x00871BF8), not Producer::UpdateModeList: it is the leaked PDB's segment offset 0xFFA90 plus 0x400000. Producer::UpdateModeList is 0x005AE660 (vtable slot 23, GOG and Steam). Every call in it is a thiscall on this+0x1A4, so the hook's cdecl (producer, slot, flags) contract fits none of them. A working bridge needs a new hook pair, the UpdateModeList (slot 23) and SetActiveMode (slot 11) vtable entries per producer class. The address is removed so that re-listing the entry installs nothing. See reverse_engineering/producer_build_menu_notes.md.",
       "expected_original": "B6 BF 32 00"
     },
     {
