@@ -22,7 +22,8 @@ param(
     [string]$GameRoot='C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux',
     [string]$ShimRepo,
     [ValidateSet('dx9','dx11')][string]$Renderer='dx11',
-    [ValidatePattern('^[A-Za-z0-9_-]+\.bzn$')][string]$Mission='misn02b.bzn'
+    [ValidatePattern('^[A-Za-z0-9_-]+\.bzn$')][string]$Mission='misn02b.bzn',
+    [switch]$SetupOnly
 )
 $ErrorActionPreference='Stop'
 $GameRoot=(Resolve-Path -LiteralPath $GameRoot).Path.TrimEnd('\')
@@ -58,6 +59,7 @@ try {
     if(Get-Process battlezone98redux -ErrorAction SilentlyContinue){throw 'Another game session is active'}
     foreach($file in Get-ChildItem -LiteralPath $auditSaveRoot -File -Recurse){Save-AuditFile $file.FullName}
     foreach($relative in @('openshim.ini','net.ini','modEnabled.dat','campaignReimagined_settings.cfg','career_stats.cfg','winmm.dll','bzloader.dll','plugins\openshim.dll','scripts\patches.json','openshim\OpenShimAssets.ini',
+        'openshim_update.status','winmm.dll.previous','bzloader.dll.previous','plugins\openshim.dll.previous','net.ini.previous','scripts\patches.json.previous',
         'mods\3686673790\winmm.dll','mods\3686673790\exu.dll','mods\3686673790\bzfile.dll','mods\3686673790\bzfile_replace_helper.exe')){
         Save-AuditFile (Join-Path $GameRoot $relative)
     }
@@ -90,13 +92,18 @@ try {
     for($i=0;$i -lt 20;$i++){
         Start-Sleep -Seconds 2
         $auditProc.Refresh()
-        if($auditProc.HasExited){throw 'Game exited before the 40-second smoke completed'}
+        if($auditProc.HasExited){throw "Game exited before the 40-second smoke completed (exit $($auditProc.ExitCode))"}
     }
     $auditModules=@($auditProc.Modules | Where-Object ModuleName -Match 'winmm|bzloader|openshim|exu|bzfile|RenderSystem' | Select-Object ModuleName,FileName)
     $auditModules | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $auditRoot 'modules.json')
     Stop-BZRGame -Id $auditProc.Id
     $auditProc=$null
-    foreach($name in @('BZLogger.txt','openshim.log','exu.log','BZOgreLogfile.log','openshim_crash.log')){
+    foreach($helper in @(Get-Process bzfile_replace_helper -ErrorAction SilentlyContinue)){
+        if($helper.StartTime -ge $auditStarted){Wait-Process -Id $helper.Id -Timeout 45 -ErrorAction Stop}
+    }
+    $status=Join-Path $GameRoot 'openshim_update.status'
+    if(Test-Path -LiteralPath $status){Copy-Item -LiteralPath $status -Destination (Join-Path $auditRoot 'openshim_update.status')}
+    foreach($name in @('BZLogger.txt','openshim.log','exu.log','BZOgreLogfile.log','openshim_crash.log','openpatch_setup.log','openshim_update.log')){
         $path=Join-Path (Join-Path $GameRoot 'logs') $name
         if(Test-Path -LiteralPath $path){Copy-Item -LiteralPath $path -Destination (Join-Path $auditRoot $name)}
     }
@@ -105,11 +112,12 @@ try {
     foreach($artifact in $auditArtifacts){
         if((Get-FileHash -LiteralPath (Join-Path $GameRoot $artifact.Path)).Hash -ne $artifact.Sha256){throw "Artifact changed during test: $($artifact.Path)"}
     }
-    foreach($native in @('exu.dll','bzfile.dll')){
+    $nativeModules=if($SetupOnly){@('bzfile.dll')}else{@('exu.dll','bzfile.dll')}
+    foreach($native in $nativeModules){
         $expected=[IO.Path]::GetFullPath((Join-Path $GameRoot ('mods\3686673790\'+$native)))
         if(-not ($auditModules | Where-Object { $_.ModuleName -ieq $native -and [IO.Path]::GetFullPath($_.FileName) -ieq $expected })){throw "Campaign native module not loaded from the campaign folder: $native"}
     }
-    foreach($required in @('bzloader.dll','openshim.dll','exu.dll','bzfile.dll')){
+    foreach($required in (@('bzloader.dll','openshim.dll')+$nativeModules)){
         if($auditModules.ModuleName -notcontains $required){throw "Required module did not load: $required"}
     }
     $bzlog=Join-Path $auditRoot 'BZLogger.txt'
