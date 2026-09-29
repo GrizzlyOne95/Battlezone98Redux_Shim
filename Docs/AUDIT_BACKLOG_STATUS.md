@@ -9,9 +9,12 @@ are not a claim that every release qualification lane has run.
 
 The interrupted audit implementation is now merged. The subsequent
 [Campaign Reimagined validation](CAMPAIGN_REIMAGINED_VALIDATION_20260929.md)
-passes a real GOG campaign startup/exit smoke on DX9 and DX11, but does **not**
-approve a release: the CR package/updater still omits the split loader/plugin,
-and the later release-validation checkout contains separate uncommitted work.
+passes a real GOG campaign startup/exit smoke on DX9 and DX11. The later
+[complete-suite candidate](CR_SUITE_RELEASE_20260929.md) closes the package and
+updater's missing loader/plugin work and passes in-game Setup replacement.
+Candidate source checkpoints are pushed in OpenShim #382, bzfile #25 and CR
+#111. Public release and supported-platform qualification remain separate
+gates; the primary checkout's uncommitted LensFlare prototype is excluded.
 
 ## Recovered sessions
 

@@ -155,7 +155,7 @@ namespace BZROpenShim
                                   std::string& error)
     {
         uint64_t formatVersion = 0;
-        if (!ReadUnsigned(text, "formatVersion", formatVersion) || formatVersion != 2)
+        if (!ReadUnsigned(text, "formatVersion", formatVersion) || formatVersion != 3)
         {
             error = "unsupported or missing manifest formatVersion";
             return false;
@@ -167,6 +167,8 @@ namespace BZROpenShim
             !ReadUnsigned(text, "size", manifest.size) ||
             !ReadQuoted(text, "architecture", manifest.architecture) ||
             !ReadPayload(text, "winmm", manifest.winmm) ||
+            !ReadPayload(text, "loader", manifest.loader) ||
+            !ReadPayload(text, "plugin", manifest.plugin) ||
             !ReadPayload(text, "network", manifest.network) ||
             !ReadPayload(text, "patches", manifest.patches))
         {
@@ -186,6 +188,16 @@ namespace BZROpenShim
         if (!IsSha256(manifest.sha256) || manifest.architecture != "x86" ||
             manifest.winmm.source != "winmm.dll" ||
             manifest.winmm.destination != "winmm.dll" ||
+            manifest.loader.source != "bzloader.dll" ||
+            manifest.loader.destination != "bzloader.dll" ||
+            manifest.plugin.source != "openshim.dll" ||
+            manifest.plugin.destination != "plugins\\openshim.dll" ||
+            manifest.loader.version != manifest.version ||
+            manifest.plugin.version != manifest.version ||
+            manifest.loader.architecture != "x86" ||
+            manifest.plugin.architecture != "x86" ||
+            manifest.winmm.size == 0 || manifest.loader.size == 0 ||
+            manifest.plugin.size == 0 || manifest.network.size == 0 || manifest.patches.size == 0 ||
             manifest.network.source != "openshim_net.ini.payload" ||
             manifest.network.destination != "net.ini" ||
             manifest.patches.source != "openshim_patches.json.payload" ||
