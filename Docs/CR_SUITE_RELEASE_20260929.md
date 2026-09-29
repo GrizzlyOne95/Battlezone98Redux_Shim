@@ -26,5 +26,7 @@ preserved outside this candidate. It has not been qualified for this release.
 The verifier fix is recovered into this branch with its fixture tests.
 
 Final package identities, runtime results and publication handoff are recorded
-in Campaign Reimagined's release candidate document. Public tags, merges,
+in [Campaign Reimagined's release candidate document](https://github.com/GrizzlyOne95/Battlezone98Redux_CampaignReimagined/blob/agent/cr-suite-release-20260929/Docs/RELEASE_CANDIDATE_20260929.md),
+with campaign source in [CR #111](https://github.com/GrizzlyOne95/Battlezone98Redux_CampaignReimagined/pull/111).
+Public tags, merges,
 Workshop upload and Roadmap synchronization are separate authorized actions.
