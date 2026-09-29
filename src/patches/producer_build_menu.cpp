@@ -1,7 +1,7 @@
 // producer_build_menu.cpp
-// BZR Open Shim - producer build menu (PRODMENU): per-producer build menu
-// overrides from producer_build_menu.ini and ODF tokens, applied through
-// the producer mode call hook, split out of bzr_hooks.cpp.
+// BZR Open Shim - producer nested build menus (PRODMENU): Recycler, Factory
+// and ConstructionRig pages driven by a [Builder] ODF tree, through vtable
+// replacements for UpdateModeList / SetActiveMode / Deselect.
 #include "bzr_hooks.h"
 #include "bool_token.h"
 #include "bzr_object_layout.h"
@@ -49,6 +49,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <malloc.h>
 #include <intrin.h>
 #include <cstddef>
 #include <cstdio>
@@ -68,54 +69,95 @@
 
 namespace BZROpenShim
 {
-    FnProducerModeCall g_BzrFn_ProducerModeCallOriginal = nullptr;
+    // Redux's BuildItem, as InitBuildItem (0x0049F5C0) lays it out: 0x20 bytes,
+    // ten children per [Builder] from calloc(10, 0x20). A child whose ODF has no
+    // [Builder] section is a leaf naming a GameObjectClass. A leaf copies its
+    // parent's team, so a root needs a parent even though it is never shown.
+    struct BuildItem
+    {
+        BuildItem* parent;
+        char name[16];      // buildName for a [Builder], unitName for a leaf
+        int32_t team;
+        BuildItem* menu;    // children, or null for a leaf
+        void* item;         // GameObjectClass* for a leaf
+    };
+    static_assert(sizeof(BuildItem) == 0x20, "BuildItem must match the engine's 0x20-byte layout");
+
+    FnModeListUpdate g_BzrFn_ProducerUpdateModeList = nullptr;
+    FnSetActiveMode g_BzrFn_ProducerSetActiveMode = nullptr;
+    FnObjectDeselect g_BzrFn_GameObjectDeselect = nullptr;
+    FnModeListUpdate g_BzrFn_ConstructionRigUpdateModeList = nullptr;
+    FnSetActiveMode g_BzrFn_ConstructionRigSetActiveMode = nullptr;
+    FnObjectDeselect g_BzrFn_ConstructionRigDeselect = nullptr;
+    FnControlPanelLifecycle g_BzrFn_ControlPanelPostLoad = nullptr;
+    FnControlPanelLifecycle g_BzrFn_ControlPanelCleanup = nullptr;
+    FnModeListSetMode g_BzrFn_ModeListSetMode = nullptr;
+    void* g_BzrVtbl_Producer = nullptr;
+    void* g_BzrVtbl_Recycler = nullptr;
+    void* g_BzrVtbl_Factory = nullptr;
+    void* g_BzrVtbl_ConstructionRig = nullptr;
+    uint8_t* g_BzrPtr_ClassLoadAssetsFlag = nullptr;
 
     namespace Hooks
     {
         ProducerBuildMenuConfig g_ProducerBuildMenuConfig = {};
-        bool g_HasAppliedProducerBuildMenu = false;
-        int64_t g_LastAppliedProducerBuildMenu = 0;
-        uint32_t g_LastUnknownProducerVft = 0;
 
         constexpr char kProducerBuildMenuIniName[] = "openshim_producer_build_menus.ini";
 
         constexpr char kProducerBuildMenuSection[] = "ProducerBuildMenus";
 
-        constexpr char kProducerBuildMenuDefaultRoot[] = "build";
+        // How the stock mode-list code reads a producer (Producer::
+        // UpdateModeList 0x005AE660, ConstructionRig::UpdateModeList
+        // 0x0049D550; reverse_engineering/producer_build_menu_notes.md).
+        // +0x228 is the Craft deploy state: 0 mobile, 1 deploying, 2
+        // deployed, 3 packing up.
+        constexpr uintptr_t kCraftDeployStateOffset = 0x228;
+        constexpr uintptr_t kObjectClassOffset = 0xF8;
+        constexpr uintptr_t kProducerClassBuildListOffset = 0x608;
+        constexpr size_t kProducerClassBuildListCount = 9;
+        constexpr uintptr_t kObjectModeListOffset = 0x1A4;
 
-        // These are not Redux vtables. Each is a leaked-PDB .rdata segment
-        // offset plus 0x400000, so on GOG it points into .text and no object
-        // ever matches. The RTTI-located primary vtables (GOG and Steam) are
-        // listed in reverse_engineering/producer_build_menu_notes.md. Left as
-        // is while the hook is parked.
-        constexpr uint32_t kRecyclerDistributedVft = 0x00417D74;
+        // Mode values up to 0x1A are the engine's named modes; anything larger
+        // is drawn and dispatched as a GameObjectClass*. 0x16 is "Back".
+        constexpr int kModeBack = 0x16;
+        constexpr uint32_t kModeLastNamed = 0x1A;
 
-        constexpr uint32_t kRecyclerAttachableVft = 0x00417DCC;
+        constexpr size_t kVtableDeselectIndex = 9;
+        constexpr size_t kVtableSetActiveModeIndex = 11;
+        constexpr size_t kVtableUpdateModeListIndex = 23;
+        constexpr size_t kControlPanelCleanupIndex = 7;
 
-        constexpr uint32_t kRecyclerFriendVft = 0x00417F68;
+        constexpr size_t kBuildItemChildCount = 10;
 
-        constexpr uint32_t kRecyclerEnemyVft = 0x00417F9C;
-
-        constexpr uint32_t kFactoryDistributedVft = 0x0040B71C;
-
-        constexpr uint32_t kFactoryAttachableVft = 0x0040B774;
-
-        constexpr uint32_t kArmoryDistributedVft = 0x004089C0;
-
-        constexpr uint32_t kArmoryAttachableVft = 0x00408A18;
-
-        constexpr uint32_t kConstructionRigDistributedVft = 0x0040A158;
-
-        constexpr uint32_t kConstructionRigAttachableVft = 0x0040A1B0;
+        // A submenu button is a GameObjectClass-shaped block. The mode panel
+        // reads only the label at +0x64 (through the "names" lookup) and the
+        // scrap and pilot costs at +0x48 and +0x50, which stay zero.
+        constexpr size_t kMenuStubSize = 0x200;
+        constexpr uintptr_t kMenuStubLabelOffset = 0x64;
+        constexpr size_t kMenuStubLabelMax = 31;
 
         enum class ProducerBuildMenuKind
         {
-            Unknown,
+            Producer,
             Recycler,
             Factory,
-            Armory,
             ConstructionRig,
         };
+
+        // Where each family puts its build page. The producer family shows its
+        // list in slots 1..9 once it starts deploying and builds when deployed;
+        // the rig shows slots 3..9 in every state and builds while mobile. Slot
+        // 10 (Pack Up / Cancel / Recycle) is never touched, and a page below the
+        // root gives its last position to Back.
+        struct ProducerMenuLayout
+        {
+            int firstSlot;
+            size_t capacity;
+            int buildState;
+            bool listShownWhenMobile;
+        };
+        constexpr ProducerMenuLayout kProducerFamilyLayout = {1, 9, 2, false};
+        constexpr ProducerMenuLayout kConstructionRigLayout = {3, 7, 0, true};
 
         static bool IsIniBoolTrue(const char* value, bool fallback)
         {
@@ -186,50 +228,6 @@ namespace BZROpenShim
             entry.hasValue = entry.token[0] != '\0';
             entry.packedToken = entry.hasValue ? PackProducerBuildMenuToken(entry.token) : 0;
             return entry;
-        }
-
-        static ProducerBuildMenuKind ClassifyProducerBuildMenuKind(void* producerPtr)
-        {
-            if (!producerPtr)
-                return ProducerBuildMenuKind::Unknown;
-
-            const uint32_t vft = *reinterpret_cast<const uint32_t*>(producerPtr);
-            switch (vft)
-            {
-            case kRecyclerDistributedVft:
-            case kRecyclerAttachableVft:
-            case kRecyclerFriendVft:
-            case kRecyclerEnemyVft:
-                return ProducerBuildMenuKind::Recycler;
-            case kFactoryDistributedVft:
-            case kFactoryAttachableVft:
-                return ProducerBuildMenuKind::Factory;
-            case kArmoryDistributedVft:
-            case kArmoryAttachableVft:
-                return ProducerBuildMenuKind::Armory;
-            case kConstructionRigDistributedVft:
-            case kConstructionRigAttachableVft:
-                return ProducerBuildMenuKind::ConstructionRig;
-            default:
-                if (vft != g_LastUnknownProducerVft)
-                {
-                    g_LastUnknownProducerVft = vft;
-                    Log(L"[PRODMENU] Unknown producer vft=0x%08X\n", vft);
-                }
-                return ProducerBuildMenuKind::Unknown;
-            }
-        }
-
-        static const char* ProducerBuildMenuKindName(ProducerBuildMenuKind kind)
-        {
-            switch (kind)
-            {
-            case ProducerBuildMenuKind::Recycler: return "Recycler";
-            case ProducerBuildMenuKind::Factory: return "Factory";
-            case ProducerBuildMenuKind::Armory: return "Armory";
-            case ProducerBuildMenuKind::ConstructionRig: return "ConstructionRig";
-            default: return "Producer";
-            }
         }
 
         static ProducerBuildMenuEntry ReadProducerBuildMenuEntry(const char* key)
@@ -426,25 +424,12 @@ namespace BZROpenShim
             return result;
         }
 
-        static bool TryGetProducerOdfToken(void* producerPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1])
-        {
-            return TryGetObjectOdfToken(producerPtr, outToken);
-        }
-
         static void LoadProducerBuildMenuConfig()
         {
             if (g_ProducerBuildMenuConfig.initialized)
                 return;
 
             g_ProducerBuildMenuConfig.initialized = true;
-            g_ProducerBuildMenuConfig.fallbackRoot =
-                NormalizeProducerBuildMenuToken(kProducerBuildMenuDefaultRoot);
-
-            if (g_IsSteamExe)
-            {
-                Log(L"[PRODMENU] Disabled on Steam until the producer hook site is revalidated there\n");
-                return;
-            }
 
             const auto moduleDir = GetMainModuleDirectory();
             if (moduleDir.empty())
@@ -473,135 +458,625 @@ namespace BZROpenShim
 
             g_ProducerBuildMenuConfig.recycler = ReadProducerBuildMenuEntry("Recycler");
             g_ProducerBuildMenuConfig.factory = ReadProducerBuildMenuEntry("Factory");
-            g_ProducerBuildMenuConfig.armory = ReadProducerBuildMenuEntry("Armory");
             g_ProducerBuildMenuConfig.constructionRig = ReadProducerBuildMenuEntry("ConstructionRig");
-            ProducerBuildMenuEntry fallbackEntry = ReadProducerBuildMenuEntry("Fallback");
-            if (!fallbackEntry.hasValue)
-                fallbackEntry = ReadProducerBuildMenuEntry("Default");
-            if (fallbackEntry.hasValue)
-                g_ProducerBuildMenuConfig.fallbackRoot = fallbackEntry;
             if (!g_ProducerBuildMenuConfig.constructionRig.hasValue)
-            {
                 g_ProducerBuildMenuConfig.constructionRig = ReadProducerBuildMenuEntry("Constructor");
-            }
             LoadProducerBuildMenuOdfOverrides(configPath);
 
-            const bool hasAnyEntry =
-                !g_ProducerBuildMenuConfig.odfOverrides.empty() ||
-                g_ProducerBuildMenuConfig.recycler.hasValue ||
-                g_ProducerBuildMenuConfig.factory.hasValue ||
-                g_ProducerBuildMenuConfig.armory.hasValue ||
-                g_ProducerBuildMenuConfig.constructionRig.hasValue;
-            g_ProducerBuildMenuConfig.enabled = IsIniBoolTrue(enabledBuffer, true) && hasAnyEntry;
+            // The Armory keeps its own category pages, and a stock Builder
+            // root is no longer applied to producers nobody configured.
+            for (const char* ignored : {"Armory", "Fallback", "Default"})
+            {
+                if (ReadProducerBuildMenuEntry(ignored).hasValue)
+                    Log(L"[PRODMENU] %hs= is ignored: only Recycler, Factory, ConstructionRig and per-ODF keys select a menu root\n", ignored);
+            }
 
-            Log(L"[PRODMENU] Config %hs loaded enabled=%hs fallback=%hs recycler=%hs factory=%hs armory=%hs constrig=%hs odfOverrides=%u\n",
+            // ODF-local buildMenuRoot keys need no mapping here, so the file's
+            // Enabled switch alone turns the feature on.
+            g_ProducerBuildMenuConfig.enabled = IsIniBoolTrue(enabledBuffer, true);
+
+            Log(L"[PRODMENU] Config %hs loaded enabled=%hs recycler=%hs factory=%hs constrig=%hs odfOverrides=%u\n",
                 configPathString.c_str(),
                 g_ProducerBuildMenuConfig.enabled ? "true" : "false",
-                g_ProducerBuildMenuConfig.fallbackRoot.hasValue ? g_ProducerBuildMenuConfig.fallbackRoot.token : "-",
                 g_ProducerBuildMenuConfig.recycler.hasValue ? g_ProducerBuildMenuConfig.recycler.token : "-",
                 g_ProducerBuildMenuConfig.factory.hasValue ? g_ProducerBuildMenuConfig.factory.token : "-",
-                g_ProducerBuildMenuConfig.armory.hasValue ? g_ProducerBuildMenuConfig.armory.token : "-",
                 g_ProducerBuildMenuConfig.constructionRig.hasValue ? g_ProducerBuildMenuConfig.constructionRig.token : "-",
                 static_cast<unsigned>(g_ProducerBuildMenuConfig.odfOverrides.size()));
         }
 
-        static ProducerBuildMenuEntry SelectProducerBuildMenuEntry(void* producerPtr, ProducerBuildMenuKind kind)
+        // Root precedence: the producer ODF's own [ProducerClass]
+        // buildMenuRoot, then a per-ODF INI override, then the type mapping.
+        // A producer that none of them names keeps its stock flat list.
+        static ProducerBuildMenuEntry SelectProducerBuildMenuEntry(const char* producerOdf, ProducerBuildMenuKind kind)
         {
-            char producerOdf[kProducerBuildMenuTokenLen + 1] = {};
-            if (TryGetProducerOdfToken(producerPtr, producerOdf))
-            {
-                ProducerBuildMenuEntry odfFileEntry = TryReadProducerBuildMenuEntryFromOdfFile(producerOdf);
-                if (odfFileEntry.hasValue)
-                    return odfFileEntry;
+            ProducerBuildMenuEntry odfFileEntry = TryReadProducerBuildMenuEntryFromOdfFile(producerOdf);
+            if (odfFileEntry.hasValue)
+                return odfFileEntry;
 
-                ProducerBuildMenuEntry odfEntry = TryGetProducerBuildMenuEntryForOdf(producerOdf);
-                if (odfEntry.hasValue)
-                    return odfEntry;
-            }
+            ProducerBuildMenuEntry odfEntry = TryGetProducerBuildMenuEntryForOdf(producerOdf);
+            if (odfEntry.hasValue)
+                return odfEntry;
 
             switch (kind)
             {
             case ProducerBuildMenuKind::Recycler:
-                if (g_ProducerBuildMenuConfig.recycler.hasValue)
-                    return g_ProducerBuildMenuConfig.recycler;
-                break;
+                return g_ProducerBuildMenuConfig.recycler;
             case ProducerBuildMenuKind::Factory:
-                if (g_ProducerBuildMenuConfig.factory.hasValue)
-                    return g_ProducerBuildMenuConfig.factory;
-                break;
-            case ProducerBuildMenuKind::Armory:
-                if (g_ProducerBuildMenuConfig.armory.hasValue)
-                    return g_ProducerBuildMenuConfig.armory;
-                break;
+                return g_ProducerBuildMenuConfig.factory;
             case ProducerBuildMenuKind::ConstructionRig:
-                if (g_ProducerBuildMenuConfig.constructionRig.hasValue)
-                    return g_ProducerBuildMenuConfig.constructionRig;
-                break;
+                return g_ProducerBuildMenuConfig.constructionRig;
             default:
-                break;
+                return {};
             }
-
-            return g_ProducerBuildMenuConfig.fallbackRoot;
         }
 
-        static void MaybeApplyProducerBuildMenu(void* producerPtr)
+        // --- Menu trees ---------------------------------------------------------
+        //
+        // One tree per root token, built with the engine's own InitBuildItem so
+        // [Builder] files resolve exactly as the arcade build panel resolves
+        // them (including *_mp.odf in a net game). Leaves hold GameObjectClass
+        // pointers, which the engine frees between missions, so the trees live
+        // only between ControlPanel::PostLoad and ControlPanel::Cleanup -- the
+        // same span the engine gives its own buildMenu tree.
+
+        struct ProducerMenuTree
         {
-            if (!g_BzrFn_InitBuildItem || !g_BzrFn_CleanupBuildItem || !g_BzrBuildMenuRoot)
-                return;
+            BuildItem anchor;   // the root's parent; never shown
+            BuildItem root;
+            char token[kProducerBuildMenuTokenLen + 1];
+        };
 
-            LoadProducerBuildMenuConfig();
-            if (!g_ProducerBuildMenuConfig.enabled)
-                return;
+        // A null value records a root that failed to build, so it is not
+        // retried every frame.
+        static std::unordered_map<std::string, ProducerMenuTree*> g_ProducerMenuTrees;
+        // Objects below their root page; an object at the root has no entry.
+        static std::unordered_map<void*, const BuildItem*> g_ProducerMenuCursors;
+        static bool g_ProducerMenuSessionActive = false;
 
-            const ProducerBuildMenuKind kind = ClassifyProducerBuildMenuKind(producerPtr);
-            const ProducerBuildMenuEntry entry = SelectProducerBuildMenuEntry(producerPtr, kind);
-            if (!entry.hasValue)
-                return;
+        // Submenu stubs. A stub is never freed: a stale mode value may still
+        // name one after its tree is gone, and SetActiveMode must recognise it
+        // then too, so it can never reach the stock build command.
+        static std::unordered_map<const BuildItem*, uint8_t*> g_ProducerMenuNodeStubs;
+        static std::unordered_map<uintptr_t, const BuildItem*> g_ProducerMenuStubNodes;
+        static std::unordered_set<uintptr_t> g_ProducerMenuAllStubs;
+        static std::vector<uint8_t*> g_ProducerMenuFreeStubs;
+        static std::unordered_set<const BuildItem*> g_ProducerMenuOverflowLogged;
 
-            if (g_HasAppliedProducerBuildMenu && g_LastAppliedProducerBuildMenu == entry.packedToken)
-                return;
-
+        static bool InitBuildItemGuarded(BuildItem* item, int64_t token)
+        {
             __try
             {
-                char producerOdf[kProducerBuildMenuTokenLen + 1] = {};
-                TryGetProducerOdfToken(producerPtr, producerOdf);
-                g_BzrFn_CleanupBuildItem(*g_BzrBuildMenuRoot);
-                g_BzrFn_InitBuildItem(*g_BzrBuildMenuRoot, entry.packedToken);
-                g_HasAppliedProducerBuildMenu = true;
-                g_LastAppliedProducerBuildMenu = entry.packedToken;
-                Log(L"[PRODMENU] Applied %hs root=%hs producer=0x%08X odf=%hs\n",
-                    ProducerBuildMenuKindName(kind),
-                    entry.token,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(producerPtr)),
-                    producerOdf[0] ? producerOdf : "-");
+                g_BzrFn_InitBuildItem(*item, token);
+                return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                char producerOdf[kProducerBuildMenuTokenLen + 1] = {};
-                TryGetProducerOdfToken(producerPtr, producerOdf);
-                Log(L"[PRODMENU] Failed applying root=%hs producer=0x%08X\n",
-                    entry.token,
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(producerPtr)));
+                // A [Builder] that lists itself recurses until the stack runs
+                // out; the guard page has to be restored before continuing.
+                if (GetExceptionCode() == EXCEPTION_STACK_OVERFLOW)
+                    _resetstkoflw();
+                return false;
             }
+        }
+
+        static bool CleanupBuildItemGuarded(BuildItem* item)
+        {
+            __try
+            {
+                g_BzrFn_CleanupBuildItem(*item);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void CountProducerMenuTree(const BuildItem* node, unsigned depth,
+                                          unsigned& leaves, unsigned& menus, unsigned& maxDepth)
+        {
+            if (!node || !node->menu)
+                return;
+            maxDepth = (std::max)(maxDepth, depth);
+            for (size_t i = 0; i < kBuildItemChildCount; ++i)
+            {
+                const BuildItem& child = node->menu[i];
+                if (child.menu)
+                {
+                    ++menus;
+                    CountProducerMenuTree(&child, depth + 1, leaves, menus, maxDepth);
+                }
+                else if (child.item)
+                {
+                    ++leaves;
+                }
+            }
+        }
+
+        static ProducerMenuTree* BuildProducerMenuTree(const ProducerBuildMenuEntry& rootEntry)
+        {
+            auto* tree = new (std::nothrow) ProducerMenuTree{};
+            if (!tree)
+                return nullptr;
+            strncpy_s(tree->token, rootEntry.token, _TRUNCATE);
+            tree->root.parent = &tree->anchor;
+
+            // Build as ControlPanel::PostLoad does: with the class loader's
+            // asset preload off, so a mid-mission build does not load meshes.
+            const uint8_t savedPreload = *g_BzrPtr_ClassLoadAssetsFlag;
+            *g_BzrPtr_ClassLoadAssetsFlag = 0;
+            const bool built = InitBuildItemGuarded(&tree->root, rootEntry.packedToken);
+            *g_BzrPtr_ClassLoadAssetsFlag = savedPreload;
+
+            if (!built)
+            {
+                // The engine's allocations may be half made; leak them rather
+                // than free a tree of unknown shape.
+                Log(L"[PRODMENU] Menu root %hs faulted while loading (a [Builder] that contains itself?); producers using it keep their stock list\n",
+                    tree->token);
+                return nullptr;
+            }
+            if (!tree->root.menu)
+            {
+                Log(L"[PRODMENU] Menu root %hs is not a [Builder] ODF; producers using it keep their stock list\n",
+                    tree->token);
+                delete tree;
+                return nullptr;
+            }
+
+            unsigned leaves = 0;
+            unsigned menus = 0;
+            unsigned depth = 0;
+            CountProducerMenuTree(&tree->root, 1, leaves, menus, depth);
+            Log(L"[PRODMENU] Menu root %hs loaded: %u buildable, %u submenus, depth %u\n",
+                tree->token, leaves, menus, depth);
+            return tree;
+        }
+
+        static void ReleaseProducerMenuTrees()
+        {
+            for (auto& entry : g_ProducerMenuTrees)
+            {
+                ProducerMenuTree* tree = entry.second;
+                if (!tree)
+                    continue;
+                CleanupBuildItemGuarded(&tree->root);
+                delete tree;
+            }
+            g_ProducerMenuTrees.clear();
+            g_ProducerMenuCursors.clear();
+            g_ProducerMenuOverflowLogged.clear();
+
+            for (auto& entry : g_ProducerMenuNodeStubs)
+            {
+                memset(entry.second, 0, kMenuStubSize);
+                g_ProducerMenuFreeStubs.push_back(entry.second);
+            }
+            g_ProducerMenuNodeStubs.clear();
+            g_ProducerMenuStubNodes.clear();
+        }
+
+        static uint8_t* GetProducerMenuStub(const BuildItem* node)
+        {
+            const auto found = g_ProducerMenuNodeStubs.find(node);
+            if (found != g_ProducerMenuNodeStubs.end())
+                return found->second;
+
+            uint8_t* stub = nullptr;
+            if (!g_ProducerMenuFreeStubs.empty())
+            {
+                stub = g_ProducerMenuFreeStubs.back();
+                g_ProducerMenuFreeStubs.pop_back();
+            }
+            else
+            {
+                stub = static_cast<uint8_t*>(HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, kMenuStubSize));
+                if (!stub)
+                    return nullptr;
+                g_ProducerMenuAllStubs.insert(reinterpret_cast<uintptr_t>(stub));
+            }
+
+            char* label = reinterpret_cast<char*>(stub + kMenuStubLabelOffset);
+            const size_t nameLength = strnlen(node->name, sizeof(node->name));
+            if (nameLength == 0)
+                memcpy(label, "Menu", 5);
+            else
+                memcpy(label, node->name, (std::min)(nameLength, kMenuStubLabelMax));
+
+            g_ProducerMenuNodeStubs[node] = stub;
+            g_ProducerMenuStubNodes[reinterpret_cast<uintptr_t>(stub)] = node;
+            return stub;
+        }
+
+        static bool IsProducerMenuStub(int mode)
+        {
+            const uint32_t value = static_cast<uint32_t>(mode);
+            return value > kModeLastNamed &&
+                g_ProducerMenuAllStubs.count(static_cast<uintptr_t>(value)) != 0;
+        }
+
+        // --- Objects ------------------------------------------------------------
+
+        static void* const* ObjectVtable(void* self)
+        {
+            return *static_cast<void* const* const*>(self);
+        }
+
+        static bool VtableSlotIs(void* self, size_t index, const void* expected)
+        {
+            return ObjectVtable(self)[index] == expected;
+        }
+
+        static ProducerBuildMenuKind ClassifyProducerBuildMenuKind(void* self)
+        {
+            const void* vtable = ObjectVtable(self);
+            if (vtable == g_BzrVtbl_Recycler)
+                return ProducerBuildMenuKind::Recycler;
+            if (vtable == g_BzrVtbl_Factory)
+                return ProducerBuildMenuKind::Factory;
+            if (vtable == g_BzrVtbl_ConstructionRig)
+                return ProducerBuildMenuKind::ConstructionRig;
+            return ProducerBuildMenuKind::Producer;
+        }
+
+        static void** ProducerBuildList(void* self)
+        {
+            uint8_t* const producerClass =
+                *reinterpret_cast<uint8_t**>(static_cast<uint8_t*>(self) + kObjectClassOffset);
+            if (!producerClass)
+                return nullptr;
+            return reinterpret_cast<void**>(producerClass + kProducerClassBuildListOffset);
+        }
+
+        static int ProducerDeployState(void* self)
+        {
+            return *reinterpret_cast<const int*>(static_cast<uint8_t*>(self) + kCraftDeployStateOffset);
+        }
+
+        static ProducerMenuTree* ProducerMenuTreeFor(void* self)
+        {
+            LoadProducerBuildMenuConfig();
+            if (!g_ProducerBuildMenuConfig.enabled)
+                return nullptr;
+
+            char producerOdf[kProducerBuildMenuTokenLen + 1] = {};
+            if (!TryGetObjectOdfToken(self, producerOdf))
+                return nullptr;
+
+            const ProducerBuildMenuEntry rootEntry =
+                SelectProducerBuildMenuEntry(producerOdf, ClassifyProducerBuildMenuKind(self));
+            if (!rootEntry.hasValue)
+                return nullptr;
+
+            const auto found = g_ProducerMenuTrees.find(rootEntry.token);
+            if (found != g_ProducerMenuTrees.end())
+                return found->second;
+
+            ProducerMenuTree* tree = BuildProducerMenuTree(rootEntry);
+            g_ProducerMenuTrees[rootEntry.token] = tree;
+            if (tree)
+                Log(L"[PRODMENU] %hs uses menu root %hs\n", producerOdf, tree->token);
+            return tree;
+        }
+
+        static bool ProducerMenuTreeContains(const ProducerMenuTree* tree, const BuildItem* node)
+        {
+            for (const BuildItem* at = node; at; at = at->parent)
+            {
+                if (at == &tree->root)
+                    return true;
+            }
+            return false;
+        }
+
+        // The page an object is on; a stale cursor (another tree, or an object
+        // at a reused address) falls back to the root.
+        static const BuildItem* ProducerMenuNodeFor(void* self, const ProducerMenuTree* tree)
+        {
+            const auto found = g_ProducerMenuCursors.find(self);
+            if (found == g_ProducerMenuCursors.end())
+                return &tree->root;
+            if (ProducerMenuTreeContains(tree, found->second))
+                return found->second;
+            g_ProducerMenuCursors.erase(found);
+            return &tree->root;
+        }
+
+        static void SetProducerMenuNode(void* self, const ProducerMenuTree* tree, const BuildItem* node)
+        {
+            if (node == &tree->root)
+                g_ProducerMenuCursors.erase(self);
+            else
+                g_ProducerMenuCursors[self] = node;
+        }
+
+        // --- Pages --------------------------------------------------------------
+
+        struct ProducerMenuPage
+        {
+            bool atRoot = true;
+            bool browsable = false;
+            void* classes[kProducerClassBuildListCount] = {};
+            uint8_t* stubs[kProducerClassBuildListCount] = {};
+        };
+
+        // Lays out one page: children in file order with empty entries
+        // skipped, leaves as their class and submenus as their stub. Returns
+        // false when the object keeps its stock list.
+        static bool TryComposeProducerMenuPage(void* self, const ProducerMenuLayout& layout,
+                                               const void* setActiveModeHook, ProducerMenuPage& page)
+        {
+            if (!g_ProducerMenuSessionActive)
+                return false;
+            // Only emit stubs where this class's SetActiveMode is ours: the
+            // stock one would turn a stub into a build order.
+            if (!VtableSlotIs(self, kVtableSetActiveModeIndex, setActiveModeHook))
+                return false;
+
+            const int state = ProducerDeployState(self);
+            if (state == 0 && !layout.listShownWhenMobile)
+                return false;
+
+            ProducerMenuTree* tree = ProducerMenuTreeFor(self);
+            if (!tree)
+                return false;
+
+            const BuildItem* node = ProducerMenuNodeFor(self, tree);
+            page.atRoot = (node == &tree->root);
+            page.browsable = (state == layout.buildState);
+
+            const size_t positions = page.atRoot ? layout.capacity : layout.capacity - 1;
+            size_t used = 0;
+            size_t dropped = 0;
+            for (size_t i = 0; i < kBuildItemChildCount; ++i)
+            {
+                const BuildItem& child = node->menu[i];
+                const bool isMenu = child.menu != nullptr;
+                if (!isMenu && !child.item)
+                    continue;
+                if (used == positions)
+                {
+                    ++dropped;
+                    continue;
+                }
+                if (isMenu)
+                {
+                    uint8_t* stub = GetProducerMenuStub(&child);
+                    if (!stub)
+                        continue;
+                    page.stubs[used] = stub;
+                }
+                else
+                {
+                    page.classes[used] = child.item;
+                }
+                ++used;
+            }
+
+            if (dropped && g_ProducerMenuOverflowLogged.insert(node).second)
+            {
+                Log(L"[PRODMENU] Menu %hs page \"%.16hs\" has %u more entries than the %u buttons it gets; the extra ones are not shown\n",
+                    tree->token, node->name, static_cast<unsigned>(dropped), static_cast<unsigned>(positions));
+            }
+            return true;
+        }
+
+        // Runs the stock UpdateModeList with the page's classes standing in for
+        // the class's flat build list, so the stock code prices and enables
+        // every leaf. The list belongs to the class, shared by every producer of
+        // that ODF, and is put back before anything else can read it.
+        static void RunUpdateModeListWithPage(FnModeListUpdate original, void* self, void** buildList,
+                                              void* const* pageClasses)
+        {
+            void* saved[kProducerClassBuildListCount];
+            memcpy(saved, buildList, sizeof(saved));
+            memcpy(buildList, pageClasses, sizeof(saved));
+            __try
+            {
+                original(self);
+            }
+            __finally
+            {
+                memcpy(buildList, saved, sizeof(saved));
+            }
+        }
+
+        static void OverlayProducerMenuPage(void* self, const ProducerMenuLayout& layout, const ProducerMenuPage& page)
+        {
+            void* const modeList = static_cast<uint8_t*>(self) + kObjectModeListOffset;
+            const int enabled = page.browsable ? 1 : 0;
+            for (size_t i = 0; i < layout.capacity; ++i)
+            {
+                if (page.stubs[i])
+                {
+                    g_BzrFn_ModeListSetMode(modeList, layout.firstSlot + static_cast<int>(i),
+                        static_cast<int>(reinterpret_cast<uintptr_t>(page.stubs[i])), enabled);
+                }
+            }
+            if (!page.atRoot)
+            {
+                g_BzrFn_ModeListSetMode(modeList, layout.firstSlot + static_cast<int>(layout.capacity) - 1,
+                    kModeBack, enabled);
+            }
+        }
+
+        static void RunProducerMenuUpdateModeList(void* self, const ProducerMenuLayout& layout,
+                                                  FnModeListUpdate original, const void* setActiveModeHook)
+        {
+            if (!original)
+                return;
+            ProducerMenuPage page;
+            void** const buildList = ProducerBuildList(self);
+            if (!buildList || !TryComposeProducerMenuPage(self, layout, setActiveModeHook, page))
+            {
+                original(self);
+                return;
+            }
+            RunUpdateModeListWithPage(original, self, buildList, page.classes);
+            OverlayProducerMenuPage(self, layout, page);
+        }
+
+        static void RefreshProducerModeList(void* self)
+        {
+            const auto update = reinterpret_cast<FnModeListUpdate>(ObjectVtable(self)[kVtableUpdateModeListIndex]);
+            update(self);
+        }
+
+        // Handles the menu's own buttons. Returns true when the mode was a
+        // menu action, which SetActiveMode then reports as false so the panel
+        // stays open, as the Armory's category pages do.
+        static bool TryHandleProducerMenuMode(void* self, int mode)
+        {
+            if (IsProducerMenuStub(mode))
+            {
+                const auto found = g_ProducerMenuStubNodes.find(static_cast<uintptr_t>(static_cast<uint32_t>(mode)));
+                if (found == g_ProducerMenuStubNodes.end() || !g_ProducerMenuSessionActive)
+                    return true;
+                ProducerMenuTree* tree = ProducerMenuTreeFor(self);
+                if (!tree || !ProducerMenuTreeContains(tree, found->second))
+                    return true;
+                SetProducerMenuNode(self, tree, found->second);
+                RefreshProducerModeList(self);
+                Log(L"[PRODMENU] Opened \"%.16hs\" in menu %hs\n", found->second->name, tree->token);
+                return true;
+            }
+
+            if (mode == kModeBack && g_ProducerMenuSessionActive)
+            {
+                ProducerMenuTree* tree = ProducerMenuTreeFor(self);
+                if (!tree)
+                    return false;
+                const BuildItem* node = ProducerMenuNodeFor(self, tree);
+                if (node == &tree->root)
+                    return false;
+                SetProducerMenuNode(self, tree, node->parent);
+                RefreshProducerModeList(self);
+                return true;
+            }
+            return false;
+        }
+
+        void ResetProducerBuildMenuRuntime()
+        {
+            g_ProducerMenuSessionActive = false;
+            ReleaseProducerMenuTrees();
         }
     }
 
     using namespace Hooks;
 
-    void SetProducerBuildMenuOriginal(void* target)
+    void __fastcall ProducerUpdateModeListHook(void* self, void* /*edx*/)
     {
-        g_BzrFn_ProducerModeCallOriginal = reinterpret_cast<FnProducerModeCall>(target);
-        Log(L"[PRODMENU] Original producer helper target=0x%08X\n",
-            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(target)));
+        RunProducerMenuUpdateModeList(self, kProducerFamilyLayout, g_BzrFn_ProducerUpdateModeList,
+            reinterpret_cast<const void*>(&ProducerSetActiveModeHook));
     }
 
-    void* __cdecl ProducerBuildMenuCallHook(void* producerPtr, int slot, int flags)
+    bool __fastcall ProducerSetActiveModeHook(void* self, void* /*edx*/, int mode)
     {
-        MaybeApplyProducerBuildMenu(producerPtr);
+        if (TryHandleProducerMenuMode(self, mode))
+            return false;
+        return g_BzrFn_ProducerSetActiveMode ? g_BzrFn_ProducerSetActiveMode(self, mode) : true;
+    }
 
-        if (!g_BzrFn_ProducerModeCallOriginal)
-            return nullptr;
+    void __fastcall ProducerDeselectHook(void* self, void* /*edx*/)
+    {
+        g_ProducerMenuCursors.erase(self);
+        if (g_BzrFn_GameObjectDeselect)
+            g_BzrFn_GameObjectDeselect(self);
+    }
 
-        return g_BzrFn_ProducerModeCallOriginal(producerPtr, slot, flags);
+    void __fastcall ConstructionRigUpdateModeListHook(void* self, void* /*edx*/)
+    {
+        RunProducerMenuUpdateModeList(self, kConstructionRigLayout, g_BzrFn_ConstructionRigUpdateModeList,
+            reinterpret_cast<const void*>(&ConstructionRigSetActiveModeHook));
+    }
+
+    bool __fastcall ConstructionRigSetActiveModeHook(void* self, void* /*edx*/, int mode)
+    {
+        if (TryHandleProducerMenuMode(self, mode))
+            return false;
+        return g_BzrFn_ConstructionRigSetActiveMode ? g_BzrFn_ConstructionRigSetActiveMode(self, mode) : true;
+    }
+
+    void __fastcall ConstructionRigDeselectHook(void* self, void* /*edx*/)
+    {
+        g_ProducerMenuCursors.erase(self);
+        if (g_BzrFn_ConstructionRigDeselect)
+            g_BzrFn_ConstructionRigDeselect(self);
+    }
+
+    void __fastcall ControlPanelPostLoadHook(void* self, void* /*edx*/)
+    {
+        if (g_BzrFn_ControlPanelPostLoad)
+            g_BzrFn_ControlPanelPostLoad(self);
+        // Trees from a mission whose Cleanup never ran would name freed classes.
+        ReleaseProducerMenuTrees();
+        // Without the Cleanup hook nothing would drop the trees before the
+        // engine frees their classes, so the menus stay off.
+        g_ProducerMenuSessionActive =
+            VtableSlotIs(self, kControlPanelCleanupIndex, reinterpret_cast<const void*>(&ControlPanelCleanupHook));
+        Log(L"[PRODMENU] Mission menus %hs\n",
+            g_ProducerMenuSessionActive ? "open" : "stay closed: the ControlPanel cleanup slot is not hooked");
+    }
+
+    void __fastcall ControlPanelCleanupHook(void* self, void* /*edx*/)
+    {
+        if (g_ProducerMenuSessionActive)
+            Log(L"[PRODMENU] Mission menus closed; %u tree(s) released\n",
+                static_cast<unsigned>(g_ProducerMenuTrees.size()));
+        g_ProducerMenuSessionActive = false;
+        ReleaseProducerMenuTrees();
+        if (g_BzrFn_ControlPanelCleanup)
+            g_BzrFn_ControlPanelCleanup(self);
+    }
+
+    namespace
+    {
+        struct ProducerMenuPatchRow
+        {
+            const char* name;
+            const void* hook;
+        };
+
+        const ProducerMenuPatchRow* ProducerMenuPatchRows(size_t& count)
+        {
+            static const ProducerMenuPatchRow kRows[] = {
+                {"Producer UpdateModeList VTable Hook", reinterpret_cast<const void*>(&ProducerUpdateModeListHook)},
+                {"Recycler UpdateModeList VTable Hook", reinterpret_cast<const void*>(&ProducerUpdateModeListHook)},
+                {"Factory UpdateModeList VTable Hook", reinterpret_cast<const void*>(&ProducerUpdateModeListHook)},
+                {"Producer SetActiveMode VTable Hook", reinterpret_cast<const void*>(&ProducerSetActiveModeHook)},
+                {"Recycler SetActiveMode VTable Hook", reinterpret_cast<const void*>(&ProducerSetActiveModeHook)},
+                {"Factory SetActiveMode VTable Hook", reinterpret_cast<const void*>(&ProducerSetActiveModeHook)},
+                {"Producer Deselect VTable Hook", reinterpret_cast<const void*>(&ProducerDeselectHook)},
+                {"Recycler Deselect VTable Hook", reinterpret_cast<const void*>(&ProducerDeselectHook)},
+                {"Factory Deselect VTable Hook", reinterpret_cast<const void*>(&ProducerDeselectHook)},
+                {"ConstructionRig UpdateModeList VTable Hook", reinterpret_cast<const void*>(&ConstructionRigUpdateModeListHook)},
+                {"ConstructionRig SetActiveMode VTable Hook", reinterpret_cast<const void*>(&ConstructionRigSetActiveModeHook)},
+                {"ConstructionRig Deselect VTable Hook", reinterpret_cast<const void*>(&ConstructionRigDeselectHook)},
+                {"ControlPanel PostLoad VTable Hook", reinterpret_cast<const void*>(&ControlPanelPostLoadHook)},
+                {"ControlPanel Cleanup VTable Hook", reinterpret_cast<const void*>(&ControlPanelCleanupHook)},
+            };
+            count = sizeof(kRows) / sizeof(kRows[0]);
+            return kRows;
+        }
+    }
+
+    bool IsProducerBuildMenuPatchName(const char* name)
+    {
+        return ProducerBuildMenuPatchTarget(name) != 0;
+    }
+
+    uint32_t ProducerBuildMenuPatchTarget(const char* name)
+    {
+        if (!name)
+            return 0;
+        size_t count = 0;
+        const ProducerMenuPatchRow* rows = ProducerMenuPatchRows(count);
+        for (size_t i = 0; i < count; ++i)
+        {
+            if (strcmp(rows[i].name, name) == 0)
+                return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(rows[i].hook));
+        }
+        return 0;
     }
 }
