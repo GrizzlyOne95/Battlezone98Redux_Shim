@@ -1,5 +1,11 @@
 # Producer nested build-menu live test
 
+> **Blocked since 2026-09-28.** `Producer Build Menu Root Hook` is parked. Its
+> only recorded site was the Lua `StopSound` binding, not
+> `Producer::UpdateModeList`, and no call in the real function fits the hook.
+> With the hook parked, the procedure below produces no `[PRODMENU]` lines.
+> See "Hook site audit" in `reverse_engineering/producer_build_menu_notes.md`.
+
 This is the smallest useful runtime test for the existing producer `BuildItem` bridge.
 
 The goal is to answer one question before adding more hooks:

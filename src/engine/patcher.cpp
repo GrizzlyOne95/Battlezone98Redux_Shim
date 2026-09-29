@@ -981,6 +981,11 @@ namespace BZROpenShim
             uint32_t target = 0;
             if (p.name.find("Vehicle List Mod Fix 2/4") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(VehicleListModFix2));
             else if (p.name == "Chunk Render Resolve Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ChunkRenderResolveHook));
+            // Unreachable while the entry is parked in patches.json. Its only
+            // recorded site was the Lua StopSound binding, and this cdecl
+            // (producer, slot, flags) hook fits no call in the real
+            // Producer::UpdateModeList. A new site needs a new hook, not just
+            // an address (reverse_engineering/producer_build_menu_notes.md).
             else if (p.name == "Producer Build Menu Root Hook") {
                 void* orig = isSteam ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10) : HookEngine::ResolveRelCallTarget(p.address - 1);
                 if (!orig) continue; SetProducerBuildMenuOriginal(orig); target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ProducerBuildMenuCallHook));
