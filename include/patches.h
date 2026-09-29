@@ -77,7 +77,6 @@ namespace BZROpenShim
     inline void** g_MapListObject = nullptr;
 
     // Helper functions (implemented in trampolines.cpp and the src/patches hook files)
-    void SetProducerBuildMenuOriginal(void* original);
     void InstallBriefingAssetOverrides();
     void InstallOgreMaterialCollisionGuard();
 
@@ -196,6 +195,22 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::DWORD, {}, "Engine Flame Submit VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Chunk Effect Simulate VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Legacy World Update RenderQueue VTable Hook", false, {} },
+            // Producer nested build menus (producer_build_menu.cpp): each
+            // entry swaps one stock vtable slot, guarded by its stock pointer.
+            { 0, HookEngine::PatchType::DWORD, {}, "Producer UpdateModeList VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Recycler UpdateModeList VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Factory UpdateModeList VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Producer SetActiveMode VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Recycler SetActiveMode VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Factory SetActiveMode VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Producer Deselect VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Recycler Deselect VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Factory Deselect VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "ConstructionRig UpdateModeList VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "ConstructionRig SetActiveMode VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "ConstructionRig Deselect VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "ControlPanel PostLoad VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "ControlPanel Cleanup VTable Hook", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", false, {} },

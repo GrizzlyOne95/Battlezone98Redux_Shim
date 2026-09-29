@@ -41,7 +41,6 @@ namespace BZROpenShim
     bool AreInputBindingUiHooksInstalled();
     bool AreRequiredDeferredRuntimeHooksInstalled();
     void InitBzrHookStrings();
-    void SetProducerBuildMenuOriginal(void* target);
     // Exact-call-site guards installed by the generic patch registry.
     void SetPersonCarrierGetSelectedOriginal(void* target);
     void SetPersonCarrierGetWeaponOriginal(void* target);
@@ -202,7 +201,20 @@ namespace BZROpenShim
     void __cdecl HandleJoinerEvent(uint32_t lobby, uint32_t member, int changes);
 
     uint32_t __cdecl ChunkRenderResolveHook(void* objectPtr, uint32_t variant);
-    void* __cdecl ProducerBuildMenuCallHook(void* producerPtr, int slot, int flags);
+    // Producer nested build menus: vtable replacements for the producer
+    // family's UpdateModeList / SetActiveMode / Deselect, the ConstructionRig's
+    // three, and the ControlPanel lifecycle pair that bounds the menu trees.
+    bool IsProducerBuildMenuPatchName(const char* name);
+    // The hook a producer-menu DWORD patch writes, or 0 for any other name.
+    uint32_t ProducerBuildMenuPatchTarget(const char* name);
+    void __fastcall ProducerUpdateModeListHook(void* self, void* edx);
+    bool __fastcall ProducerSetActiveModeHook(void* self, void* edx, int mode);
+    void __fastcall ProducerDeselectHook(void* self, void* edx);
+    void __fastcall ConstructionRigUpdateModeListHook(void* self, void* edx);
+    bool __fastcall ConstructionRigSetActiveModeHook(void* self, void* edx, int mode);
+    void __fastcall ConstructionRigDeselectHook(void* self, void* edx);
+    void __fastcall ControlPanelPostLoadHook(void* self, void* edx);
+    void __fastcall ControlPanelCleanupHook(void* self, void* edx);
     // AI weapon-mask hardpoint selection. Each replaces one call to a
     // __thiscall engine routine; the trampolines supply the third argument from
     // the patched routine's own stack frame.
