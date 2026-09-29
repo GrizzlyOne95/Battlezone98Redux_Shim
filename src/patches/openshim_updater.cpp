@@ -579,7 +579,7 @@ namespace BZROpenShim
 
         bool StageSuite(const std::filesystem::path& itemDirectory,
                         const OpenShimUpdateManifest& manifest,
-                        std::array<RuntimePayload, 3>& payloads,
+                        std::array<RuntimePayload, 5>& payloads,
                         const RuntimePayload& helper,
                         std::string& error)
         {
@@ -631,7 +631,7 @@ namespace BZROpenShim
             const std::filesystem::path status = gameRoot / L"openshim_update.status";
             const std::filesystem::path log = GetGameLogPath("openshim_update.log");
             std::vector<std::wstring> arguments = {
-                L"--suite", std::to_wstring(GetCurrentProcessId()),
+                L"--suite-v3", std::to_wstring(GetCurrentProcessId()),
                 log.wstring(), status.wstring()
             };
             for (const auto& payload : payloads)
@@ -689,7 +689,7 @@ namespace BZROpenShim
                      manifest.helper.sha256.c_str());
 
             const std::filesystem::path gameRoot = GetGameRoot();
-            std::array<RuntimePayload, 3> payloads = {{
+            std::array<RuntimePayload, 5> payloads = {{
                 { &manifest.winmm, itemDirectory / L"winmm.dll",
                   gameRoot / L"winmm.dll", {}, gameRoot / L"winmm.dll.previous" },
                 { &manifest.network, itemDirectory / L"openshim_net.ini.payload",
@@ -697,6 +697,11 @@ namespace BZROpenShim
                 { &manifest.patches, itemDirectory / L"openshim_patches.json.payload",
                   gameRoot / L"scripts" / L"patches.json", {},
                   gameRoot / L"scripts" / L"patches.json.previous" },
+                { &manifest.loader, itemDirectory / L"bzloader.dll",
+                  gameRoot / L"bzloader.dll", {}, gameRoot / L"bzloader.dll.previous" },
+                { &manifest.plugin, itemDirectory / L"openshim.dll",
+                  gameRoot / L"plugins" / L"openshim.dll", {},
+                  gameRoot / L"plugins" / L"openshim.dll.previous" },
             }};
 
             const RuntimePayload helper = {
@@ -716,6 +721,8 @@ namespace BZROpenShim
             }
             if (!ValidatePayload(helper, error) ||
                 !ValidateX86Image(payloads[0].source, true, error) ||
+                !ValidateX86Image(payloads[3].source, true, error) ||
+                !ValidateX86Image(payloads[4].source, true, error) ||
                 !ValidateX86Image(helper.source, false, error))
             {
                 SetState(OpenShimUpdateState::Failed, "Update check failed: " + error + ".");
@@ -743,6 +750,17 @@ namespace BZROpenShim
                 SetState(OpenShimUpdateState::Failed, "Update check failed: " + error + ".");
                 LogShimA(LogLevel::Error, kComponent, "%s", error.c_str());
                 return;
+            }
+
+            for (size_t index : { size_t(3), size_t(4) })
+            {
+                if (!ReadFileVersion(payloads[index].source, payloadVersion) ||
+                    !CompareOpenShimVersions(payloadVersion, manifest.version, order) || order != 0)
+                {
+                    error = "the Workshop load-chain DLL version does not match its manifest";
+                    SetState(OpenShimUpdateState::Failed, "Update check failed: " + error + ".");
+                    return;
+                }
             }
 
             const bool allCurrent = std::all_of(payloads.begin(), payloads.end(),
