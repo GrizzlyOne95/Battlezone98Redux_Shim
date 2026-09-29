@@ -324,16 +324,11 @@ identical vtables and slot contents:
 | ConstructionRig | `0x00877994` | `0x0049D550` (override) |
 | GameObject | `0x00879ED4` | `0x00417C60` (base) |
 
-Three slots (11, 13 and 23) hold a Producer function that Recycler and Factory
-inherit and that Armory and ConstructionRig both override. That matches the
-PDB, where those two, and not Recycler or Factory, define `UpdateModeList` and
-`SetActiveMode`. Slots 11 and 13 take one argument (`ret 4`) and return a bool
-in `al`, the `SetActiveMode(int)` shape. Slot 23 takes no arguments (plain
-`ret`) and is a stub in GameObject. Its body settles the question: it switches
-on `this+0x228` (menu level) and fills the
-mode list at `this+0x1A4` through the thiscall `0x0046FA60(slot, a, b)`. At
-levels 1 and 2 it loops over the producer class's flat build list at
-`[this+0xF8]+0x608`.
+Slot 23 takes no arguments (plain `ret`) and is a no-op stub in GameObject. It
+fills the mode list at `this+0x1A4` through the thiscall
+`ModeList::SetMode` (`0x0046FA60(slot, value, enabled)`). Slot 11 is
+`SetActiveMode` and slot 13 is `GetCommand(GameObject*)`. The next section has
+the full map.
 
 ### Why the fix is not just a new address
 
@@ -343,16 +338,112 @@ levels 1 and 2 it loops over the producer class's flat build list at
   contract fits the `StopSound` call it was modelled on, not any producer call.
 - Armory and ConstructionRig override `UpdateModeList`, so a site inside
   `0x005AE660` never runs for them.
-- The global root at `0x009174C4` is read only by `FUN_004a08e0` (at
-  `0x004A1BE1`) and `FUN_00594950` (at `0x005949FD`), besides its own
-  initialisation in `FUN_004a0160` and cleanup in `FUN_004a06c0`. `Producer::UpdateModeList` builds its menu
-  from `ProducerClass+0x608`, so swapping that root is not shown to change a
-  producer menu at all.
+- The `BuildItem` tree at `buildMenu` (`0x009174C4`) is the **arcade-mode** build
+  panel, not the producer menu. `ControlPanel::Render` walks it only when
+  `UserPref_arcadeMode()` (`0x00451DE0`) is true, and it spawns leaves directly
+  at the reticle with no scrap charge. Swapping that root can never change what
+  a Recycler or Factory offers.
 
-A future attempt needs a thiscall shim at a site proven to run for each
-producer type, and the RTTI vtables above. It also needs proof that the
-producer UI reads the `BuildItem` tree before any root swap is worth
-installing.
+## Where producer nested menus have to hook (2026-09-28 follow-up)
+
+Sources:
+- the BZ 1.5 symbol decompile
+  (`Battlezone_Source\BZ1\1.5\all_decompiled.c`, with `bzint.pdb`);
+- a capstone map of the GOG Redux executable;
+- a Steam `.rdata` cross-check of every vtable slot below.
+
+Every address and byte in this section was re-read with capstone.
+
+### How the stock producer menu works
+
+1. `this+0x228` is the Craft **deploy state**, not a menu level: 0 = mobile,
+   1 = deploying, 2 = deployed, 3 = packing up.
+   - `Producer::Simulate` steps it, and `Craft::IsDeployed` tests `== 2`.
+   - Recycler, Factory and Producer have no menu pages. They have one flat
+     9-entry build list.
+2. `UpdateModeList` (vtable `+0x5C`, slot 23) is **not** called by the UI.
+   - Craft's per-frame function calls it for every craft on the user team, at
+     `0x004AC08C` (`8B 42 5C FF D0`).
+   - `GameObject::SetTeam` also calls it, at `0x004DB761`.
+3. `ModeList` sits at `obj+0x1A4`: 11 values, then `enabledMask` at `+0x2C`, then
+   `activeSlot` at `+0x30`.
+   - `ControlPanel::Render` (`0x004A08E0`, vtable slot 6 of the ControlPanel at
+     `0x00978E20`) copies the first selected object's list every frame
+     (`rep movsd`, 13 dwords at `0x004A2DC4`) and intersects the others
+     (`0x004A2E33`).
+   - Only slots 1..10 are shown. Slot 10 is the fixed Pack Up / Cancel /
+     Recycle button, so a page holds 9 entries.
+4. How a mode value is drawn:
+
+   | Value | Treatment | Evidence |
+   |---|---|---|
+   | `<= 0x1A` | Built-in mode, labelled from the `names` table at `0x008E7B00`. 0x12..0x15 are Cannons/Rockets/Mortars/Specials, 0x16 Back, 0x17 Cancel, 0x18/0x19 Cloak/Decloak. Never emit 0x1A: its table entry is garbage. | `83 BD 74 FD FF FF 1A 0F 86` at `0x004A51A9` |
+   | `> 0x1A` | A `GameObjectClass*`. The label is `class+0x64` passed through the `names` lookup `0x0081CB40`, which appears to return the key itself when no entry exists. The scrap cost comes from `class+0x48` and the pilot cost from `class+0x50`. | label read at `0x004A51C8` |
+
+   Both value tests are unsigned (`jbe`), so the large-address-aware image can
+   hold stub classes above 2 GB.
+5. A button press goes through `ControlPanel::BroadcastMode` (`0x004A7140`),
+   which calls `SetActiveMode` through vtable `+0x2C` at `0x004A71A3`
+   (`8B 42 2C FF D0`).
+   - If every commandable selected object returns true, the panel closes with
+     SelectNone.
+   - Returning **false** keeps the panel open. The Armory uses this for its
+     category pages.
+6. `Producer::SetActiveMode` (`0x005AEAB0`) handles the special values first:
+   0xB is geyser, 3 is pack up, 0x17 is stop. A value `> 0x1A` gives
+   `SetCommand(CMD_BUILD=0x15, value, 0)` at `0x005AEB0B`. The process then
+   calls `Producer::StartBuild` (`0x005AECB0`), which charges scrap and pilots.
+   Nothing checks that the class is in the producer's list.
+7. **The Armory already has nested pages.**
+   - `Armory::SetActiveMode` (`0x00472C10`) keeps the page in `this+0x378`. Modes
+     0x12..0x15 choose a page, 0x16 goes back, and all return false.
+   - `Armory::UpdateModeList` (`0x00472780`) reads page arrays at
+     `class+0x608/0x660/0x684/0x6A8/0x6CC`.
+   - This is the stock template for producer submenus.
+
+### Hook sites
+
+| Target | Site | Original | Role |
+|---|---|---|---|
+| Producer/Recycler/Factory `UpdateModeList` | vtable slot 23 at `0x00886120`, `0x008864B0`, `0x008793E4` | `60 E6 5A 00` (→ `0x005AE660`) | Call the original, then, when `[this+0x228]==2` and a tree node is active, rewrite slots 1..9 with `SetMode`. Put Back (`0x16`) in a fixed slot below the root. |
+| Producer/Recycler/Factory `SetActiveMode` | vtable slot 11 at `0x008860F0`, `0x00886480`, `0x008793B4` | `B0 EA 5A 00` (→ `0x005AEAB0`) | A submenu stub or `0x16` updates the node, re-runs `UpdateModeList` and returns false. Anything else chains to the original, so a leaf goes through the stock `CMD_BUILD` path. |
+| Armory | slot 23 `0x00875D0C` / slot 11 `0x00875CDC` | `80 27 47 00` / `10 2C 47 00` | Same pair. Page state already lives at `this+0x378`. |
+| ConstructionRig | slot 23 `0x008779F0` / slot 11 `0x008779C0` | `50 D5 49 00` / `E0 D0 49 00` | Same pair. The rig builds while mobile (state 0), in slots 3..9 (7 entries). A leaf means "select, then place" (`this+0x370` = class). |
+| Optional: reuse the stock enable/cost logic | state-2 array load at `0x005AE893` | `8B 88 F8 00 00 00 81 C1 08 06 00 00` | Substitute the node's 9 class pointers for `class+0x608`. Entries must be real classes, because they are dereferenced at `0x005AE915` and by the cost functions. |
+
+Slot swaps are the best fit:
+- they cover each class separately;
+- they need no code bytes, only a guarded 4-byte `.rdata` write (with
+  `VirtualProtect`) whose guard is the stock target;
+- the slot contents are identical on Steam.
+
+The old `__cdecl` hook, the PDB vtable constants and the `buildMenu` root swap do
+not carry over. The INI/ODF root selection code does carry over.
+
+### Rules a producer submenu implementation must keep
+
+- **Submenu entries.** A submenu entry must be a `GameObjectClass`-shaped stub,
+  allocated once and never freed:
+  - at least `0x150` bytes, zeroed;
+  - label at `+0x64`;
+  - costs `+0x48` and `+0x50` = 0;
+  - the two category fields read at `0x005AE915`/`0x005AE927` = -1.
+
+  It must never reach `SetCommand`: the Armory's and ConstructionRig's
+  `GetCommand` and the save code dereference the active value as a real class.
+  The renderer will print a "00" cost for a stub unless the cost block is
+  detoured.
+- **State.** Keep the per-object node in a side table. Reset it on deselect and
+  on `SetTeam`. No page state is saved, just as the Armory's is not.
+- **Multi-select and multiplayer.** Share one stub per node so `Intersect` keeps
+  a matching entry when several producers are selected. Only `CMD_BUILD` with a
+  real class crosses the network.
+- **Leaf filtering.** Leaves loaded from a `[Builder]` tree must pass the same
+  net-game filters that `ProducerClass`/`ArmoryClass` apply to `buildItemN`.
+  The Armory caches its reload and repair items from its flat list.
+- **Live validation.** Everything here is static. The label fallback in the
+  `names` lookup and the one-frame refresh after a page change still need a
+  live check.
 
 ### Re-verifying
 
