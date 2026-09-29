@@ -127,7 +127,6 @@ namespace BZROpenShim
             // low-pass off -- BZCC's "Control Smoothing: Off". Opt-in.
             { 0, HookEngine::PatchType::BYTES, { 0xC7, 0x05, 0xF4, 0x98, 0x91, 0x00, 0x01, 0x00, 0x00, 0x00 }, "Disable Control Smoothing", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Chunk Render Resolve Hook", false, {} },
-            { 0, HookEngine::PatchType::REL32, {}, "Producer Build Menu Root Hook", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Target Reticle Popup Recent-Hit Getter Hook", false, {} },
             // Person::Simulate selected-mask call: substitute only the carrier
             // getter so a malformed pilot with no carrier gets mask 0 and the

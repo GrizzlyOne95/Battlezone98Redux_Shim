@@ -83,6 +83,11 @@ namespace BZROpenShim
 
         constexpr char kProducerBuildMenuDefaultRoot[] = "build";
 
+        // These are not Redux vtables. Each is a leaked-PDB .rdata segment
+        // offset plus 0x400000, so on GOG it points into .text and no object
+        // ever matches. The RTTI-located primary vtables (GOG and Steam) are
+        // listed in reverse_engineering/producer_build_menu_notes.md. Left as
+        // is while the hook is parked.
         constexpr uint32_t kRecyclerDistributedVft = 0x00417D74;
 
         constexpr uint32_t kRecyclerAttachableVft = 0x00417DCC;
