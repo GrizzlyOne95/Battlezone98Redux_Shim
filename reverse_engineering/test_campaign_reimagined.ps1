@@ -92,7 +92,7 @@ try {
     for($i=0;$i -lt 20;$i++){
         Start-Sleep -Seconds 2
         $auditProc.Refresh()
-        if($auditProc.HasExited){throw 'Game exited before the 40-second smoke completed'}
+        if($auditProc.HasExited){throw "Game exited before the 40-second smoke completed (exit $($auditProc.ExitCode))"}
     }
     $auditModules=@($auditProc.Modules | Where-Object ModuleName -Match 'winmm|bzloader|openshim|exu|bzfile|RenderSystem' | Select-Object ModuleName,FileName)
     $auditModules | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $auditRoot 'modules.json')
