@@ -1,11 +1,17 @@
 # CodebaseAudit recovery and stopping point
 
-Updated 2026-09-28. This is the committed, combined OpenShim/EXU handoff. It
+Updated 2026-09-29. This is the committed, combined OpenShim/EXU handoff. It
 supersedes the untracked working tracker in the older primary OpenShim checkout.
 The detailed findings remain in [OpenShim's audit](CODE_AUDIT_20260925.md) and
 [EXU's audit](https://github.com/GrizzlyOne95/ExtraUtilities/blob/main/Docs/CODE_AUDIT_20260927.md).
 Historical "resolved" entries can retain explicitly deferred follow-ups; they
 are not a claim that every release qualification lane has run.
+
+The interrupted audit implementation is now merged. The subsequent
+[Campaign Reimagined validation](CAMPAIGN_REIMAGINED_VALIDATION_20260929.md)
+passes a real GOG campaign startup/exit smoke on DX9 and DX11, but does **not**
+approve a release: the CR package/updater still omits the split loader/plugin,
+and the later release-validation checkout contains separate uncommitted work.
 
 ## Recovered sessions
 
@@ -30,14 +36,21 @@ checked directly; the pasted handoff was older than the remote state.
 | Tuggable thiscall hooks | [OpenShim #278](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/pull/278) merged on September 26 | No recovery work remains on this feature |
 | OpenShim P2-1 split finish | [#374](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/pull/374) is pushed and merged; head `6da82eaa`, merge `8fe41543`. CI passed, with the existing 64/64 CTest, export, and function-inventory evidence in its PR | Complete; do not reopen the finished branch |
 | EXU address catalog / engine save directory | [#71](https://github.com/GrizzlyOne95/ExtraUtilities/pull/71) merged as `839acbd` | Complete |
-| EXU P1-15 / P2-2 boundary safety | [#72](https://github.com/GrizzlyOne95/ExtraUtilities/pull/72), head `19be9fc`, is fully committed and pushed. The two interrupted merges are complete, the worktree is clean, and local/static/GOG validation passes | Review final-head CI, then obtain the owner's merge instruction for this session |
-| Map Filters+ search / dropdown completion | [OpenShim #365](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/pull/365) remains open; head `3d8ac727` already incorporates current main | Owner's Create Game screen test and merge decision; checklist is in the PR |
+| EXU P1-15 / P2-2 boundary safety | [#72](https://github.com/GrizzlyOne95/ExtraUtilities/pull/72), head `19be9fc`, merged on September 28 as `773ee2b`; final-head CI passed. The interrupted merges and validation notes are committed and pushed | Recovery complete; retain the documented follow-ups and platform limits |
+| Map Filters+ search / dropdown completion | [OpenShim #365](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/pull/365) merged on September 28 | No recovery merge remains; this campaign smoke does not repeat the Create Game screen acceptance test |
 | Repository history cleanup | PDB/corpus untracking and private archival are merged (#281, #373; private corpus PRs #5/#6). The history rewrite was only dry-run | Follow [the preserved history plan](AUDIT_HISTORY_REWRITE_HANDOFF.md); force-push/protection changes remain unapproved |
 
 The September 27 coordinator's automatic-merge permission explicitly said to
-confirm again in a new session. This recovery therefore finishes and pushes
-the reviewable work without merging #72 or #365, rewriting history, tagging,
-releasing, or publishing Workshop content.
+confirm again in a new session. This recovery pushed its reviewable checkpoints;
+#72, #365, and the first handoff (#375) subsequently merged in another workstream.
+This validation performs no merge, history rewrite, tag, release, or Workshop
+publication.
+
+The post-split GOG comparison completed on September 28: both the installed
+baseline and `6da82eaa` reached simulation initialization on `play01.bzn`,
+resolved 64 code / 8 data addresses with zero failures, applied the same patch
+set, and produced no new dump. All 30 temporarily deployed paths were restored.
+That stock-mission check is separate from the real CR test linked above.
 
 ## EXU recovery evidence
 
@@ -70,9 +83,9 @@ host CI is not a substitute for those lanes.
 
 ## Deliberate follow-ups
 
-- #365 still needs the actual Create Game screen pass. Preserve the working
-  stock-filter extension and map hop/refresh behavior. The deleted clean-room
-  filter/sort port stays deleted.
+- #365 is merged. Preserve the working stock-filter extension and map
+  hop/refresh behavior. The campaign smoke does not establish multiplayer UI
+  acceptance; the deleted clean-room filter/sort port stays deleted.
 - EXU's native naked-thunk callbacks still need C++ barriers (H-12), and
   allocation-only Lua failures with live C++ objects remain outside #72.
 - EXU `LuaHelpers::PushMatrix` and ContinuityApi `PushNativeMatrix` disagree
@@ -95,7 +108,13 @@ Other open work at recovery time is separately owned: OpenShim #165 (fog),
 #290 (DX11 fixed-function compatibility), #367 (turbo sound); EXU #73-#76
 (first-person/animation APIs). No edits were made to those branches.
 
-## Local repository state
+## Local repository state at the September 28 recovery checkpoint
+
+This table is historical. By September 29 the primary OpenShim, EXU, CR, and
+bzfile checkouts had moved to `agent/release-validation-20260928`. See the
+[current validation report](CAMPAIGN_REIMAGINED_VALIDATION_20260929.md) for their
+revisions, uncommitted work, and the isolated validation branch. Do not reset
+those primary checkouts to the older states below.
 
 Normal root: `%USERPROFILE%\Documents\GIT`. Origins were verified before use.
 
