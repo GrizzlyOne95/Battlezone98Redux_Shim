@@ -9,6 +9,13 @@ backups are never overwritten. Only CR is enabled during the test. Use a
 mission basename; the engine's map-name buffer truncates directory paths.
 This is a startup/exit smoke, not a campaign playthrough or release gate.
 Ogre warnings require review in the captured BZOgreLogfile.log.
+For direct Steam launches with the client running, set SteamAppId, SteamGameId
+and SteamOverlayGameId to 301650 in the calling process. Stock Steam engine
+logs can remain at the game root; both log locations are captured.
+Use -ModContainer packaged_mods for a local candidate under the Steam game.
+With -MenuStart, activate the local candidate and select the mission through
+the game menu. The harness allows five minutes for selection, then requires
+40 seconds of simulation before applying the same native-path checks.
 .EXAMPLE
 pwsh -NoProfile -File reverse_engineering/test_campaign_reimagined.ps1 `
   -Label main-dx11 -EvidenceDirectory C:\Temp\cr-validation `
@@ -20,13 +27,16 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9_-]+$')][string]$Label,
     [Parameter(Mandatory)][string]$EvidenceDirectory,
     [string]$GameRoot='C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux',
+    [ValidateSet('mods','addon','packaged_mods')][string]$ModContainer='mods',
     [string]$ShimRepo,
     [ValidateSet('dx9','dx11')][string]$Renderer='dx11',
     [ValidatePattern('^[A-Za-z0-9_-]+\.bzn$')][string]$Mission='misn02b.bzn',
-    [switch]$SetupOnly
+    [switch]$SetupOnly,
+    [switch]$MenuStart
 )
 $ErrorActionPreference='Stop'
 $GameRoot=(Resolve-Path -LiteralPath $GameRoot).Path.TrimEnd('\')
+$auditCampaignRoot=Join-Path $GameRoot ($ModContainer+'\3686673790')
 $auditRoot=Join-Path ([IO.Path]::GetFullPath($EvidenceDirectory)) $Label
 if($auditRoot.StartsWith($GameRoot+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Evidence must be outside the game installation'}
 if(Test-Path -LiteralPath $auditRoot){throw 'Use a new label; never overwrite evidence'}
@@ -49,6 +59,14 @@ function Save-AuditFile([string]$Path) {
     }
     $auditSnapshot.Add($canonical,[pscustomobject]@{Path=$canonical;Relative=$relative;Backup=$backup;Existed=$exists;Hash=$(if($exists){(Get-FileHash -LiteralPath $canonical).Hash}else{$null})})
 }
+function Copy-AuditLogs([string[]]$Names) {
+    foreach($name in $Names){
+        $paths=@((Join-Path (Join-Path $GameRoot 'logs') $name),(Join-Path $GameRoot $name))
+        $file=@(foreach($path in $paths){if(Test-Path -LiteralPath $path -PathType Leaf){Get-Item -LiteralPath $path}}) |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if($file){Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $auditRoot $name) -Force}
+    }
+}
 if(Get-Process battlezone98redux -ErrorAction SilentlyContinue){throw 'Another game session is active'}
 $env:BZR_FORCE_WINDOWED='1'
 $env:OPENSHIM_FORCE_STARTUP_AUTOLOAD='1'
@@ -60,7 +78,7 @@ try {
     foreach($file in Get-ChildItem -LiteralPath $auditSaveRoot -File -Recurse){Save-AuditFile $file.FullName}
     foreach($relative in @('openshim.ini','net.ini','modEnabled.dat','campaignReimagined_settings.cfg','career_stats.cfg','winmm.dll','bzloader.dll','plugins\openshim.dll','scripts\patches.json','openshim\OpenShimAssets.ini',
         'openshim_update.status','winmm.dll.previous','bzloader.dll.previous','plugins\openshim.dll.previous','net.ini.previous','scripts\patches.json.previous',
-        'mods\3686673790\winmm.dll','mods\3686673790\exu.dll','mods\3686673790\bzfile.dll','mods\3686673790\bzfile_replace_helper.exe')){
+        "$ModContainer\3686673790\winmm.dll","$ModContainer\3686673790\exu.dll","$ModContainer\3686673790\bzfile.dll","$ModContainer\3686673790\bzfile_replace_helper.exe")){
         Save-AuditFile (Join-Path $GameRoot $relative)
     }
     if($ShimRepo){
@@ -69,7 +87,7 @@ try {
         }
     }
     @($auditSnapshot.Values) | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $auditRoot 'before.json')
-    [IO.File]::WriteAllText((Join-Path $GameRoot 'modEnabled.dat'),(Join-Path $GameRoot 'mods\3686673790')+"`r`n",[Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $GameRoot 'modEnabled.dat'),$auditCampaignRoot+"`r`n",[Text.UTF8Encoding]::new($false))
     if($ShimRepo){
         & pwsh -NoProfile -File (Join-Path $ShimRepo 'scripts\Deploy-OpenShim.ps1') -GameDir $GameRoot *> (Join-Path $auditRoot 'deploy.log')
         if($LASTEXITCODE -ne 0){throw 'Complete-chain deployment failed'}
@@ -77,18 +95,35 @@ try {
     $ogre=Join-Path $GameRoot 'ogre.cfg'
     $renderName=if($Renderer -eq 'dx11'){'Direct3D11 Rendering Subsystem'}else{'Direct3D9 Rendering Subsystem'}
     [IO.File]::WriteAllText($ogre,([IO.File]::ReadAllText($ogre)-replace '(?m)^Render System=.*$',"Render System=$renderName"))
-    $auditArtifacts=@(foreach($relative in @('battlezone98redux.exe','winmm.dll','bzloader.dll','plugins\openshim.dll','scripts\patches.json','mods\3686673790\exu.dll','mods\3686673790\bzfile.dll')){
+    $auditArtifacts=@(foreach($relative in @('battlezone98redux.exe','winmm.dll','bzloader.dll','plugins\openshim.dll','scripts\patches.json',"$ModContainer\3686673790\exu.dll","$ModContainer\3686673790\bzfile.dll")){
         $p=Join-Path $GameRoot $relative
         [pscustomobject]@{Path=$relative;Sha256=(Get-FileHash -LiteralPath $p).Hash}
     })
     $auditArtifacts | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $auditRoot 'artifacts.json')
     $auditDumpsBefore=@(Get-ChildItem -LiteralPath (Join-Path $GameRoot 'logs') -Filter '*.dmp' -File | ForEach-Object FullName)
     $auditStarted=Get-Date
-    $auditProc=Start-Process -FilePath (Join-Path $GameRoot 'battlezone98redux.exe') -ArgumentList $Mission,"/renderer:$Renderer" -WorkingDirectory $GameRoot -WindowStyle Hidden -PassThru
+    $launchArguments=if($MenuStart){@('/nointro',"/renderer:$Renderer")}else{@($Mission,'/nointro',"/renderer:$Renderer")}
+    $auditProc=Start-Process -FilePath (Join-Path $GameRoot 'battlezone98redux.exe') -ArgumentList $launchArguments -WorkingDirectory $GameRoot -WindowStyle Hidden -PassThru
     $auditGameLaunched=$true
-    [pscustomobject]@{Pid=$auditProc.Id;Started=$auditStarted.ToString('o');Mission=$Mission;Renderer=$Renderer;ShimRepo=$ShimRepo;EnabledMod=(Join-Path $GameRoot 'mods\3686673790')} |
+    [pscustomobject]@{Pid=$auditProc.Id;Started=$auditStarted.ToString('o');Mission=$Mission;Renderer=$Renderer;ShimRepo=$ShimRepo;EnabledMod=$auditCampaignRoot;MenuStart=[bool]$MenuStart} |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $auditRoot 'run.json')
     Write-Output "Started $Label PID=$($auditProc.Id) mission=$Mission renderer=$Renderer"
+    if($MenuStart){
+        Write-Output 'Activate the intended local campaign and select its mission in the game menu (five-minute limit).'
+        $simulationObserved=$false
+        for($i=0;$i -lt 150;$i++){
+            Start-Sleep -Seconds 2
+            $auditProc.Refresh()
+            if($auditProc.HasExited){throw "Game exited during menu selection (exit $($auditProc.ExitCode))"}
+            foreach($path in @((Join-Path $GameRoot 'BZLogger.txt'),(Join-Path $GameRoot 'logs\BZLogger.txt'))){
+                if((Test-Path -LiteralPath $path) -and (Get-Item -LiteralPath $path).LastWriteTime -ge $auditStarted -and
+                    (Select-String -LiteralPath $path -SimpleMatch 'Game Simulation Initialized' -Quiet)){$simulationObserved=$true;break}
+            }
+            if($simulationObserved){break}
+        }
+        if(-not $simulationObserved){throw 'No simulation was selected within five minutes.'}
+        (Get-Date).ToString('o') | Set-Content -LiteralPath (Join-Path $auditRoot 'simulation-observed.txt')
+    }
     for($i=0;$i -lt 20;$i++){
         Start-Sleep -Seconds 2
         $auditProc.Refresh()
@@ -103,10 +138,7 @@ try {
     }
     $status=Join-Path $GameRoot 'openshim_update.status'
     if(Test-Path -LiteralPath $status){Copy-Item -LiteralPath $status -Destination (Join-Path $auditRoot 'openshim_update.status')}
-    foreach($name in @('BZLogger.txt','openshim.log','exu.log','BZOgreLogfile.log','openshim_crash.log','openpatch_setup.log','openshim_update.log')){
-        $path=Join-Path (Join-Path $GameRoot 'logs') $name
-        if(Test-Path -LiteralPath $path){Copy-Item -LiteralPath $path -Destination (Join-Path $auditRoot $name)}
-    }
+    Copy-AuditLogs @('BZLogger.txt','openshim.log','exu.log','BZOgreLogfile.log','openshim_crash.log','openpatch_setup.log','openshim_update.log')
     $auditNewDumps=@(Get-ChildItem -LiteralPath (Join-Path $GameRoot 'logs') -Filter '*.dmp' -File | Where-Object { $auditDumpsBefore -notcontains $_.FullName })
     @($auditNewDumps.FullName) | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $auditRoot 'new-dumps.json')
     foreach($artifact in $auditArtifacts){
@@ -114,7 +146,7 @@ try {
     }
     $nativeModules=if($SetupOnly){@('bzfile.dll')}else{@('exu.dll','bzfile.dll')}
     foreach($native in $nativeModules){
-        $expected=[IO.Path]::GetFullPath((Join-Path $GameRoot ('mods\3686673790\'+$native)))
+        $expected=[IO.Path]::GetFullPath((Join-Path $auditCampaignRoot $native))
         if(-not ($auditModules | Where-Object { $_.ModuleName -ieq $native -and [IO.Path]::GetFullPath($_.FileName) -ieq $expected })){throw "Campaign native module not loaded from the campaign folder: $native"}
     }
     foreach($required in (@('bzloader.dll','openshim.dll')+$nativeModules)){
@@ -136,10 +168,7 @@ try {
         if($auditProc -and -not $auditProc.HasExited){Stop-BZRGame -Id $auditProc.Id}
         if($auditGameLaunched){
             # Keep fresh logs even when startup failed before the normal capture.
-            foreach($name in @('BZLogger.txt','openshim.log','exu.log','BZOgreLogfile.log','openshim_crash.log')){
-                $path=Join-Path (Join-Path $GameRoot 'logs') $name
-                if(Test-Path -LiteralPath $path){Copy-Item -LiteralPath $path -Destination (Join-Path $auditRoot $name) -Force}
-            }
+            Copy-AuditLogs @('BZLogger.txt','openshim.log','exu.log','BZOgreLogfile.log','openshim_crash.log')
             $newDumps=@(Get-ChildItem -LiteralPath (Join-Path $GameRoot 'logs') -Filter '*.dmp' -File | Where-Object { $auditDumpsBefore -notcontains $_.FullName })
             @($newDumps.FullName) | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $auditRoot 'new-dumps.json')
         }
