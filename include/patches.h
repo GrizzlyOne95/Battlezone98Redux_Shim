@@ -46,6 +46,8 @@ namespace BZROpenShim
         void __cdecl Trampoline_LayMinesWeaponSelect();
         void __cdecl Trampoline_LayMinesSetSelected();
         void __cdecl Trampoline_ArtilleryTriggerVolley();
+        void __cdecl Trampoline_LensFlareMatMgrGuard1();
+        void __cdecl Trampoline_LensFlareMatMgrGuard2();
     }
 
     // -----------------------------------------------------------------------
@@ -75,6 +77,19 @@ namespace BZROpenShim
     inline void* g_RetAddr_TurretTankAttackRevealHook = nullptr;
     inline void (*g_BZRFnPtr_JoinerEventOriginal)() = nullptr;
     inline void** g_MapListObject = nullptr;
+
+    // -----------------------------------------------------------------------
+    // LensFlare::~LensFlare singleton guards.
+    //
+    // Each holds the address of its own detour site in BZR.exe. The stolen
+    // bytes are exactly the two instructions the trampoline replays, so the
+    // trampolines derive both of their destinations from this one value:
+    // site+5 resumes after the replay, site+13 skips the virtual call. The
+    // two sites have identical relative layout, so no other address is baked
+    // into the guards. See scripts/patches.json for the scanned sites.
+    // -----------------------------------------------------------------------
+    inline void* g_Site_LensFlareMatMgrGuard1 = nullptr;
+    inline void* g_Site_LensFlareMatMgrGuard2 = nullptr;
 
     // Helper functions (implemented in trampolines.cpp and the src/patches hook files)
     void SetProducerBuildMenuOriginal(void* original);
@@ -140,6 +155,22 @@ namespace BZROpenShim
             // Carrier::GetWeapon result for the selected mask; an empty
             // selected hardpoint gets a non-SNIP stand-in instead of null.
             { 0, HookEngine::PatchType::REL32, {}, "Person Sniper Scan Weapon Null Guard", false, {} },
+            // LensFlare::~LensFlare at 0x004F9250 runs from an atexit thunk
+            // during CRT exit, after Ogre::MaterialManager has been destroyed.
+            // It calls getSingleton and dereferences the null result twice for
+            // a vtable+0x38 virtual call. Both sites are 5-byte JMP5 detours:
+            // null resumes past the call with the pushed std::string argument
+            // still balanced, non-null replays the stolen instructions, so the
+            // remainder of the destructor (state byte, local string cleanup,
+            // sub-objects, base dtors) behaves exactly as stock.
+            { 0, HookEngine::PatchType::JMP5, {}, "LensFlare MaterialManager Guard 1/2", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "LensFlare MaterialManager Guard 2/2", false, {} },
+            // The atexit thunk 0x00866C60 is the destructor's only entry point
+            // at process exit; NOPing its 5-byte call keeps the whole
+            // destructor from running after Ogre has torn MaterialManager down.
+            // This covers the sub-object release at 0x004C85D0, which faults
+            // before the two guarded derefs above.
+            { 0, HookEngine::PatchType::BYTES, { 0x90, 0x90, 0x90, 0x90, 0x90 }, "LensFlare Exit Destructor Skip", false, {} },
             // HoverCraft::UpdateSounds' turbo-stop lookup: stop the craft's
             // own cached turbo loop, never the thrust loop that shares its
             // filename (which left +0x2C0 dangling and heap-corrupting).

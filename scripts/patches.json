@@ -156,6 +156,42 @@
       "identity": "Second null-carrier crash site, sibling of Pilot Carrier Null Guard. A five-slot loop (i < 5) loads Person+0x1A0 into ECX and calls Carrier::GetWeapon at 0x00417F60 without testing it, so a pilot whose ODF misplaces weaponHard1 outside [GameObjectClass] -- and therefore never allocated a Carrier -- faults at the callee's AND EAX,[ECX+0x2C]. Observed on GOG Redux 2.2.301 loading the Hell Gate II addon mission, whose sshg01.odf (unitName \"Player\") declares its hardpoints under [CraftClass]: EIP 0x00417F74, ECX=0, read=0x2C, return 0x005A1387, on the first simulation frame. The caller stores the result and immediately branches on null at 0x005A138D, so returning null is a path it already handles."
     },
     {
+      "name": "LensFlare MaterialManager Guard 1/2",
+      "platforms": [
+        "gog"
+      ],
+      "pattern": "FF 15 C0 9E 86 00 89 45 B4 8D 4D D8 51 8B 55 B4 8B 02 8B 4D B4 8B 50 38 FF D2 C6 45 FC 02 8D 4D D8",
+      "offset": 13,
+      "expected_size": 5,
+      "fallback": "0x004F92F1",
+      "require_unique": true,
+      "identity": "First of two unguarded singleton dereferences in LensFlare::~LensFlare at 0x004F9250 on GOG Redux 2.2.301. The function is a destructor, not a constructor: it writes its own vtable pointers into this+0x00, this+0x28 and this+0x2C and then calls Ogre::RenderQueueListener::~RenderQueueListener at this+0x28. It is reached only from the atexit thunk 0x00866C60 (mov ecx,0x009B7C28; call 0x004F9250; pop ebp; ret), so it runs during CRT exit. Here it calls Ogre::MaterialManager::getSingleton through the IAT slot 0x00869EC0, stores the result in [ebp-0x4C], pushes the local std::string at [ebp-0x28h] and then dereferences the singleton with no null test to reach vtable slot +0x38. Static destruction order has already torn MaterialManager down, so the singleton is null. Crash dump openshim_crash_20260928_200455.dmp: exception 0xC0000005, EIP 0x004F92F4, EDX=0, EAX=0, read at 0x00000000, faulting thread 49188 (the main thread, entered via BaseThreadInitThunk) returning to 0x00866C6D, [ebp-0x44]=0x009B7C28. Live memory and the on-disk image were compared over 0x00866C00-0x00866D00 and 0x004F9200-0x004F9400 and differ in zero bytes, so both sites are stock. The guard detours the two stolen instructions only when the singleton is null: it pops the already-pushed std::string argument (the virtual call is callee-cleaned, with no stack adjustment after it) and resumes at 0x004F92FE, which still sets the state byte at [ebp-0x4] and destroys the local string, so the rest of the destructor runs unchanged."
+    },
+    {
+      "name": "LensFlare MaterialManager Guard 2/2",
+      "platforms": [
+        "gog"
+      ],
+      "pattern": "FF 15 C0 9E 86 00 89 45 B0 8D 4D C0 51 8B 55 B0 8B 02 8B 4D B0 8B 50 38 FF D2 C6 45 FC 02 8D 4D C0",
+      "offset": 13,
+      "expected_size": 5,
+      "fallback": "0x004F935C",
+      "require_unique": true,
+      "identity": "Second unguarded singleton dereference in the same LensFlare::~LensFlare at 0x004F9250, and the site that would fault next if only the first were guarded: the two sites have identical relative layout, differing only in the stack displacement (B4/B0) and the local string ([ebp-0x28h] here against [ebp-0x40h] at the first site). It repeats call [0x00869EC0] (MaterialManager::getSingleton), stores it in [ebp-0x50], pushes the local string, and dereferences it for vtable slot +0x38 with no null test. The guard resumes at 0x004F9369 on the null path and at 0x004F9361 after replaying the stolen instructions, matching the sibling site exactly."
+    },
+    {
+      "name": "LensFlare Exit Destructor Skip",
+      "platforms": [
+        "gog"
+      ],
+      "pattern": "55 8B EC B9 28 7C 9B 00 E8 ?? ?? ?? ?? 5D C3",
+      "offset": 8,
+      "expected_size": 5,
+      "fallback": "0x00866C68",
+      "require_unique": true,
+      "identity": "The atexit thunk for the global LensFlare object at 0x009B7C28 on GOG Redux 2.2.301. Bytes at 0x00866C60 are 55 8B EC B9 28 7C 9B 00 E8 E3 25 C9 FF 5D C3, i.e. mov ecx,0x009B7C28; call 0x004F9250; pop ebp; ret. It is reached only from the CRT exit dispatch, so this call is the destructor's sole entry point at process teardown, after Ogre::MaterialManager has been destroyed. Three teardown dumps (openshim_crash_20260928_223900 and _224057, both OgreMain!INVALID_POINTER_READ, and _225458, RenderSystem_Direct3D11!INVALID_POINTER_READ) all fault inside the destructor's sub-object release at 0x004C85D0 (called at 0x004F92DF and 0x004F934A) -- before the two guarded getSingleton derefs -- and every stack carries the return address 0x00866C6D back into this thunk. The patch replaces the 5-byte call with NOPs so the destructor does not run at exit; the object's materials are already gone, so the removal is a no-op. Only this thunk is patched, so any non-exit (in-play) destructor call is unaffected, and the two LensFlare MaterialManager Guard sites remain as a fallback layer for the null-deref variant."
+    },
+    {
       "name": "Person Sniper Scan Weapon Null Guard",
       "pattern": "8B 8D C0 FC FF FF 8B 89 A0 01 00 00 E8 ?? ?? ?? ?? 89 85 4C FB FF FF 8B 95 4C FB FF FF 8B 42 08 81 78 0C 50 49 4E 53",
       "offset": 13,
@@ -1492,6 +1528,14 @@
     {
       "name": "StartupShellAutoLoadFlag",
       "address": "0x008EAAA8"
+    },
+    {
+      "name": "LensFlareMatMgrGuardSite1",
+      "address": "0x004F92F1"
+    },
+    {
+      "name": "LensFlareMatMgrGuardSite2",
+      "address": "0x004F935C"
     },
     {
       "name": "RetAddr_VehicleListModFix1",
