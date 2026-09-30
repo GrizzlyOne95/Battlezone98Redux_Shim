@@ -216,6 +216,15 @@ Where practical, asset-dependent rows (for example `Death Chunk Meshes`, `DX11 F
 
 Partial or stale packs (for example a stale `resources.version` or a manifest that claims `ChunkMeshes=1` while the mesh files are missing) degrade the affected capability only; unrelated native fixes and netcode continue to operate.
 
+After the first installation through Campaign Reimagined's Setup / Repair mission,
+**Check for Updates** in OpenShim Settings downloads and verifies the Workshop
+bundle and performs the same OpenShim file repair: the bootstrap, loader, runtime
+plugin, network defaults, patch definitions, missing player configuration, and
+asset-pack manifest. Existing `openshim.ini` settings are preserved. Support-file
+repairs take effect immediately; native suite replacements require a complete
+game exit and restart. A newer installed OpenShim is never downgraded. This
+expanded repair behavior requires a release newer than 1.0.0.34.
+
 See `resources/openshim/OpenShimAssets.ini` (shipped with the asset pack) and `include/openshim_assets.h` for the capability / manifest design. The detection itself validates the deployed filesystem via the same resource-resolution mechanism the runtime uses (including `addon`, `mods`, `packaged_mods`, and `steamapps/workshop/content/301650` probing), not Workshop subscription state, so it remains compatible with Steam, GOG, Proton, and manual installs.
 
 ## What is OpenShim?

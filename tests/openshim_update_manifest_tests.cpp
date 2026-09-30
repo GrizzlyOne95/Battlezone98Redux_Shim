@@ -25,6 +25,7 @@ return {
         network = { source = "openshim_net.ini.payload", destination = "net.ini", sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", size = 2345 },
         patches = { source = "openshim_patches.json.payload", destination = "scripts\patches.json", sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", size = 3456 },
         playerConfig = { source = "openshim.ini.payload", destination = "openshim.ini", sha256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", size = 5678, overwrite = false },
+        assetManifest = { source = "OpenShimAssets.ini.payload", destination = "openshim\\OpenShimAssets.ini", sha256 = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", size = 1051 },
         helper = { source = "bzfile_replace_helper.exe", sha256 = "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD", size = 4567 },
     },
 }
@@ -58,10 +59,19 @@ return {
         Check(manifest.helper.size == 4567, "helper size should be preserved");
         Check(manifest.helper.destination.empty(), "helper has no destination");
         Check(manifest.plugin.destination == "plugins\\openshim.dll", "plugin installs below plugins");
+        Check(!manifest.playerConfig.overwrite, "player settings must never be overwritten");
+        Check(manifest.assetManifest.destination == "openshim\\OpenShimAssets.ini",
+              "asset manifest installs where runtime detection reads it");
         for (const auto& mutation : std::vector<std::pair<std::string, std::string>> {
             { "formatVersion = 3", "formatVersion = 2" },
             { "loader =", "missingLoader =" },
             { "plugin =", "missingPlugin =" },
+            { "assetManifest =", "missingAssetManifest =" },
+            { "playerConfig =", "missingPlayerConfig =" },
+            { "overwrite = false", "overwrite = true" },
+            { ", overwrite = false", "" },
+            { "OpenShimAssets.ini.payload", "../OpenShimAssets.ini.payload" },
+            { "destination = \"openshim\\\\OpenShimAssets.ini\"", "destination = \"other.ini\"" },
             { "destination = \"bzloader.dll\"", "destination = \"other.dll\"" },
             { "destination = \"plugins\\\\openshim.dll\"", "destination = \"openshim.dll\"" },
             { "size = 5678", "size = 0" },
