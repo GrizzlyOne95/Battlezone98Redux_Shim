@@ -12,8 +12,11 @@ The interrupted audit implementation is now merged. The subsequent
 passes a real GOG campaign startup/exit smoke on DX9 and DX11. The later
 [complete-suite candidate](CR_SUITE_RELEASE_20260929.md) closes the package and
 updater's missing loader/plugin work and passes in-game Setup replacement.
-Candidate source checkpoints are pushed in OpenShim #382, bzfile #25 and CR
-#111. Public release and supported-platform qualification remain separate
+Candidate source checkpoints are merged in OpenShim #382, bzfile #25 and CR
+#111. CR #112 adds the local preparation command; its complete 59-step GOG
+build/check/deploy/test/package run passes. OpenShim #383 adds bounded Steam
+menu smokes and `/nointro`; actual Steam campaign activation is still unverified.
+Public release and supported-platform qualification remain separate
 gates; the primary checkout's uncommitted LensFlare prototype is excluded.
 
 ## Recovered sessions
