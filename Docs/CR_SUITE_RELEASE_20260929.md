@@ -26,7 +26,15 @@ preserved outside this candidate. It has not been qualified for this release.
 The verifier fix is recovered into this branch with its fixture tests.
 
 Final package identities, runtime results and publication handoff are recorded
-in [Campaign Reimagined's release candidate document](https://github.com/GrizzlyOne95/Battlezone98Redux_CampaignReimagined/blob/agent/cr-suite-release-20260929/Docs/RELEASE_CANDIDATE_20260929.md),
-with campaign source in [CR #111](https://github.com/GrizzlyOne95/Battlezone98Redux_CampaignReimagined/pull/111).
-Public tags, merges,
+in [Campaign Reimagined's preparation follow-up](https://github.com/GrizzlyOne95/Battlezone98Redux_CampaignReimagined/pull/112),
+with the complete suite source merged in OpenShim #382, bzfile #25 and
+[CR #111](https://github.com/GrizzlyOne95/Battlezone98Redux_CampaignReimagined/pull/111).
+The local manager now builds/checks the native dependencies, deploys/tests GOG
+and creates all five verified archives; its 59-step run passed with DX9, DX11
+and Setup. The final rc5 handoff carries the same runtime payload with corrected
+manual installation instructions. Steam's local candidate is enumerated under
+`packaged_mods`, but direct CLI mission starts did not activate its native DLLs.
+Menu-start attempts with `/nointro` remain unqualified because desktop control
+was disconnected. All Steam backups and saves were restored.
+Public tags, releases,
 Workshop upload and Roadmap synchronization are separate authorized actions.
