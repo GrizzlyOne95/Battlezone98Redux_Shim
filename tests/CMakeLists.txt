@@ -109,6 +109,11 @@ openshim_add_test(weapon_convergence_tests STD 20 SOURCES
     weapon_convergence_tests.cpp
 )
 
+openshim_add_test(weapon_presentation_tests STD 20 SOURCES
+    weapon_presentation_tests.cpp
+    ../src/patches/weapon_presentation.cpp
+)
+
 openshim_add_test(headlight_falloff_tests STD 20 SOURCES
     headlight_falloff_tests.cpp
 )
