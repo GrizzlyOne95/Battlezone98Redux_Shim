@@ -32,7 +32,15 @@ The general priority remains:
 [*] [b]Source-history cleanup[/b] - Research corpora have been moved out of current public source and archived privately. The history-cleanup plan is preserved; rewriting shared history still awaits the owner's approval.
 [/list]
 
-These are source and validation milestones. No new release or Workshop publication is implied. The detailed stopping point and deferred work are recorded in [code]Docs/AUDIT_BACKLOG_STATUS.md[/code].
+These are source and validation milestones; publication status is recorded separately below. The detailed stopping point and deferred work are recorded in [code]Docs/AUDIT_BACKLOG_STATUS.md[/code].
+
+[h2]Campaign Reimagined Publication (2026-09-29)[/h2]
+
+The early NSDF rewrite now registers as its own [b]Custom Campaign > Campaign Reimagined[/b], containing Red Arrival, Eagle's Nest, The Relic Discovered and An Unexpected Connection. It no longer requires global Mods activation. CR campaign assets mount with the custom campaign; installed OpenShim engine fixes continue to apply game-wide.
+
+[b]Installation and repair[/b] belong to [b]Single Player > Instant Action > ! SETUP / REPAIR - Open Community Patch[/b]. Follow its result and fully restart when requested. Playable campaign startup only inspects the installation and displays a reminder: it does not copy or stage native files, clear setup status, or end a mission for installation. This corrects the legacy automatic updater prematurely completing a campaign mission when a bundled configuration differed.
+
+The rc7 source checkpoint passed repository/package checks and the read-only installer regression tests. A real GOG DX9 Custom Campaign menu smoke ran Red Arrival for 40 seconds with a deliberately mismatched net.ini, loaded EXU/bzfile from CR, made no native/network file changes, and exited cleanly; the harness restored configuration and saves. This is bounded startup evidence, not a completed campaign playthrough. Subsequent mission transitions, stale global-selection migration, content isolation after campaign exit, and Proton/Wine runtime qualification remain open. [url=https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/releases/tag/v1.0.0.34]OpenShim 1.0.0.34 is released[/url] from the candidate's exact native source, with successful release CI and a checksum-verified public suite. Workshop publication consumes those release binaries; upload and downloaded Steam smoke results are tracked in the publication receipt.
 
 [h2]High Priority[/h2]
 
