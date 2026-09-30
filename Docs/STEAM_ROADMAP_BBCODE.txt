@@ -44,6 +44,10 @@ The rc7 source checkpoint passed repository/package checks and the read-only ins
 
 [h2]High Priority[/h2]
 
+[h3]OpenShim Update / Repair Parity[/h3]
+
+[b]Implemented - Qualification Pending (2026-09-30):[/b] After the initial Setup / Repair installation, OpenShim Settings' Check for Updates also repairs the asset-pack manifest and installs missing player configuration, while preserving existing player settings. Support-file repairs refresh asset detection immediately; native suite updates still require a full game exit. This extends the native updater to match Setup / Repair's OpenShim file handling. Released v34 does not include this change; Steam and Proton/Wine runtime qualification remain required.
+
 [h3]World Builder Source-Folder Saves[/h3]
 
 [b]Implemented - Qualification Pending (2026-09-07):[/b] Opt-in editor routing now supports BZN and TRN with an actual-destination overwrite prompt before saving. Cancel prevents all native writes; TRN/HG2/MAT companions derive from the confirmed folder. Duplicate source names disable routing. Win32 dialog/file integration tests pass and GOG hook-site bytes are live-verified. Full editor save/reload and supported-platform qualification remain open. Default remains off; this has not been released.
