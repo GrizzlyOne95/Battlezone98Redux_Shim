@@ -530,7 +530,15 @@ namespace BZROpenShim
         // retried every frame.
         static std::unordered_map<std::string, ProducerMenuTree*> g_ProducerMenuTrees;
         // Objects below their root page; an object at the root has no entry.
-        static std::unordered_map<void*, const BuildItem*> g_ProducerMenuCursors;
+        // The team is the object's when it opened the page: GameObject::SetTeam
+        // re-runs UpdateModeList, so a captured producer drops the previous
+        // owner's page on its next list build.
+        struct ProducerMenuCursor
+        {
+            const BuildItem* node;
+            int team;
+        };
+        static std::unordered_map<void*, ProducerMenuCursor> g_ProducerMenuCursors;
         static bool g_ProducerMenuSessionActive = false;
 
         // Submenu stubs. A stub is never freed: a stale mode value may still
@@ -733,6 +741,11 @@ namespace BZROpenShim
             return *reinterpret_cast<const int*>(static_cast<uint8_t*>(self) + kCraftDeployStateOffset);
         }
 
+        static int ProducerTeam(void* self)
+        {
+            return *reinterpret_cast<const int*>(static_cast<uint8_t*>(self) + ObjectLayout::kGameObjectActualTeam);
+        }
+
         static ProducerMenuTree* ProducerMenuTreeFor(void* self)
         {
             LoadProducerBuildMenuConfig();
@@ -769,15 +782,15 @@ namespace BZROpenShim
             return false;
         }
 
-        // The page an object is on; a stale cursor (another tree, or an object
-        // at a reused address) falls back to the root.
+        // The page an object is on; a stale cursor (another tree, another
+        // team, or an object at a reused address) falls back to the root.
         static const BuildItem* ProducerMenuNodeFor(void* self, const ProducerMenuTree* tree)
         {
             const auto found = g_ProducerMenuCursors.find(self);
             if (found == g_ProducerMenuCursors.end())
                 return &tree->root;
-            if (ProducerMenuTreeContains(tree, found->second))
-                return found->second;
+            if (found->second.team == ProducerTeam(self) && ProducerMenuTreeContains(tree, found->second.node))
+                return found->second.node;
             g_ProducerMenuCursors.erase(found);
             return &tree->root;
         }
@@ -787,7 +800,7 @@ namespace BZROpenShim
             if (node == &tree->root)
                 g_ProducerMenuCursors.erase(self);
             else
-                g_ProducerMenuCursors[self] = node;
+                g_ProducerMenuCursors[self] = ProducerMenuCursor{node, ProducerTeam(self)};
         }
 
         // --- Pages --------------------------------------------------------------
