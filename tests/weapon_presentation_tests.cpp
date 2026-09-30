@@ -532,6 +532,49 @@ namespace
         Finish(runtime, backend);
     }
 
+    void TestFailedRecoilRestorationRemainsBounded()
+    {
+        FakeBackend backend;
+        WP::Runtime runtime;
+        Start(runtime, false, true);
+        std::vector<WP::BindingToken> tokens;
+        tokens.reserve(WP::kMaxBindings);
+        for (size_t i = 0; i < WP::kMaxBindings; ++i)
+        {
+            auto request = Request(0x100000 + i * 16);
+            request.recoil->node = { 0x200000 + i * 16, 1 };
+            const auto token = Bind(runtime, request);
+            Require(runtime.Fire(token, 1, WC::Identity()).recoilReset,
+                "capacity fixture did not request recoil");
+            tokens.push_back(token);
+        }
+        runtime.SynchronizeVisuals(backend);
+        backend.failRecoil = true;
+        for (const auto token : tokens)
+            Require(runtime.Release(token), "capacity fixture release failed");
+        runtime.SynchronizeVisuals(backend);
+        Require(runtime.Inspect().bindings == 0 &&
+            runtime.Inspect().sharedRecoilNodes == WP::kMaxBindings,
+            "failed restorations did not outlive their weapon bindings");
+
+        auto replacement = Request(0x400000);
+        replacement.recoil->node = { 0x300000, 1 };
+        Require(!runtime.Bind(replacement),
+            "failed restoration records grew past the shared-controller cap");
+        Require(runtime.Inspect().bindings == 0 &&
+            runtime.Inspect().sharedRecoilNodes == WP::kMaxBindings,
+            "rejected binding changed retained restoration state");
+        backend.failRecoil = false;
+        runtime.SynchronizeVisuals(backend);
+        Require(runtime.Inspect().sharedRecoilNodes == 0,
+            "successful restoration did not reclaim controller capacity");
+        const auto rebound = Bind(runtime, replacement);
+        Require(runtime.Fire(rebound, 1, WC::Identity()).recoilReset,
+            "reclaimed controller capacity did not admit a new binding");
+        runtime.SynchronizeVisuals(backend);
+        Finish(runtime, backend);
+    }
+
     void TestInvalidRecoilDoesNotDisableValidFlash()
     {
         FakeBackend backend;
@@ -566,6 +609,7 @@ int main()
     TestPointerReuseReplacementAndRestorationRetry();
     TestNestedSceneLossAndSettingsDisable();
     TestOgreSceneLossDoesNotEndNativeBackReferences();
+    TestFailedRecoilRestorationRemainsBounded();
     TestInvalidRecoilDoesNotDisableValidFlash();
     std::puts("weapon_presentation_tests: all checks passed");
     return 0;
