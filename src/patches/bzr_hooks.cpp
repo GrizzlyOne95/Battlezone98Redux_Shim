@@ -334,7 +334,6 @@ namespace BZROpenShim
         g_EngineFlamePrimaryBlackDogTexture = 0;
         g_LoggedEngineFlameTargetFailure = false;
         g_LoggedEngineFlameVtableHook = false;
-        g_BzrFn_ProducerModeCallOriginal = nullptr;
         g_BzrFn_InitBuildItem = nullptr;
         g_BzrFn_CleanupBuildItem = nullptr;
         g_BzrBuildMenuRoot = nullptr;
@@ -347,13 +346,11 @@ namespace BZROpenShim
         g_CareerStatsMpHookLastAttemptTick = 0;
         g_JumpSnipeProbeLogState = {};
         g_ProducerBuildMenuConfig = {};
+        ResetProducerBuildMenuRuntime();
         g_AiTuningCache = {};
         g_ShieldTowerTeamFilterCache = {};
         g_MagnetMineTeamFilterCache = {};
         g_ProximityMineTeamFilterCache = {};
-        g_HasAppliedProducerBuildMenu = false;
-        g_LastAppliedProducerBuildMenu = 0;
-        g_LastUnknownProducerVft = 0;
         g_CalcRangeCraftHookInstalled = false;
         g_ScrapPathScoreHookInstalled = false;
         g_BzrFn_RecycleTaskDoGotoScrap =
@@ -718,6 +715,23 @@ namespace BZROpenShim
             {"InitBuildItem", reinterpret_cast<void**>(&g_BzrFn_InitBuildItem)},
             {"CleanupBuildItem", reinterpret_cast<void**>(&g_BzrFn_CleanupBuildItem)},
             {"BuildMenuRoot", reinterpret_cast<void**>(&g_BzrBuildMenuRoot)},
+            // Producer nested build menus: the stock targets of the replaced
+            // vtable slots, the vtables that name the producer type, and the
+            // class loader's asset-preload flag.
+            {"ProducerUpdateModeList", reinterpret_cast<void**>(&g_BzrFn_ProducerUpdateModeList)},
+            {"ProducerSetActiveMode", reinterpret_cast<void**>(&g_BzrFn_ProducerSetActiveMode)},
+            {"GameObjectDeselect", reinterpret_cast<void**>(&g_BzrFn_GameObjectDeselect)},
+            {"ConstructionRigUpdateModeList", reinterpret_cast<void**>(&g_BzrFn_ConstructionRigUpdateModeList)},
+            {"ConstructionRigSetActiveMode", reinterpret_cast<void**>(&g_BzrFn_ConstructionRigSetActiveMode)},
+            {"ConstructionRigDeselect", reinterpret_cast<void**>(&g_BzrFn_ConstructionRigDeselect)},
+            {"ControlPanelPostLoad", reinterpret_cast<void**>(&g_BzrFn_ControlPanelPostLoad)},
+            {"ControlPanelCleanup", reinterpret_cast<void**>(&g_BzrFn_ControlPanelCleanup)},
+            {"ModeListSetMode", reinterpret_cast<void**>(&g_BzrFn_ModeListSetMode)},
+            {"ProducerVtable", reinterpret_cast<void**>(&g_BzrVtbl_Producer)},
+            {"RecyclerVtable", reinterpret_cast<void**>(&g_BzrVtbl_Recycler)},
+            {"FactoryVtable", reinterpret_cast<void**>(&g_BzrVtbl_Factory)},
+            {"ConstructionRigVtable", reinterpret_cast<void**>(&g_BzrVtbl_ConstructionRig)},
+            {"ClassLoadAssetsFlag", reinterpret_cast<void**>(&g_BzrPtr_ClassLoadAssetsFlag)},
         };
         constexpr size_t kRowCount = sizeof(kRows) / sizeof(kRows[0]);
         HookEngine::EngineAddressStatus status[kRowCount] = {};
@@ -831,6 +845,28 @@ namespace BZROpenShim
         {
             return firstMissing({{"EngineFlameControl", reinterpret_cast<const void*>(g_BzrFn_EngineFlameControl)},
                                  {"EngineFlameSubmit", reinterpret_cast<const void*>(g_BzrFn_EngineFlameSubmit)}});
+        }
+        // Every producer-menu slot needs the whole set: a SetActiveMode
+        // replacement with no UpdateModeList partner is harmless, but the
+        // reverse would let a menu stub reach the stock build command.
+        if (IsProducerBuildMenuPatchName(patchName))
+        {
+            return firstMissing({{"InitBuildItem", reinterpret_cast<const void*>(g_BzrFn_InitBuildItem)},
+                                 {"CleanupBuildItem", reinterpret_cast<const void*>(g_BzrFn_CleanupBuildItem)},
+                                 {"ModeListSetMode", reinterpret_cast<const void*>(g_BzrFn_ModeListSetMode)},
+                                 {"ProducerUpdateModeList", reinterpret_cast<const void*>(g_BzrFn_ProducerUpdateModeList)},
+                                 {"ProducerSetActiveMode", reinterpret_cast<const void*>(g_BzrFn_ProducerSetActiveMode)},
+                                 {"GameObjectDeselect", reinterpret_cast<const void*>(g_BzrFn_GameObjectDeselect)},
+                                 {"ConstructionRigUpdateModeList", reinterpret_cast<const void*>(g_BzrFn_ConstructionRigUpdateModeList)},
+                                 {"ConstructionRigSetActiveMode", reinterpret_cast<const void*>(g_BzrFn_ConstructionRigSetActiveMode)},
+                                 {"ConstructionRigDeselect", reinterpret_cast<const void*>(g_BzrFn_ConstructionRigDeselect)},
+                                 {"ControlPanelPostLoad", reinterpret_cast<const void*>(g_BzrFn_ControlPanelPostLoad)},
+                                 {"ControlPanelCleanup", reinterpret_cast<const void*>(g_BzrFn_ControlPanelCleanup)},
+                                 {"ProducerVtable", g_BzrVtbl_Producer},
+                                 {"RecyclerVtable", g_BzrVtbl_Recycler},
+                                 {"FactoryVtable", g_BzrVtbl_Factory},
+                                 {"ConstructionRigVtable", g_BzrVtbl_ConstructionRig},
+                                 {"ClassLoadAssetsFlag", g_BzrPtr_ClassLoadAssetsFlag}});
         }
         if (name == "Chunk Effect Simulate VTable Hook")
             return firstMissing({{"ChunkEffectSimulate", reinterpret_cast<const void*>(g_BzrFn_ChunkEffectSimulate)}});
@@ -1511,10 +1547,13 @@ namespace BZROpenShim
         Log(L"[MAPTRACE] Map refresh trace: %hs\n",
             (EnvFlagEnabled("OPENSHIM_TRACE_MAP_REFRESH") ||
              EnvFlagEnabled("OPENSHIM_TRACE_STEAM_MAP_REFRESH")) ? "enabled" : "disabled");
-        Log(L"[PRODMENU] Builder bridge: %hs\n",
-            (g_BzrFn_InitBuildItem && g_BzrFn_CleanupBuildItem && g_BzrBuildMenuRoot)
-                ? (g_IsSteamExe ? "Steam ready" : "GOG ready")
-                : "disabled");
+        Log(L"[PRODMENU] Engine helpers: %hs\n",
+            (g_BzrFn_InitBuildItem && g_BzrFn_CleanupBuildItem && g_BzrFn_ModeListSetMode &&
+             g_BzrFn_ProducerUpdateModeList && g_BzrFn_ProducerSetActiveMode &&
+             g_BzrFn_ConstructionRigUpdateModeList && g_BzrFn_ConstructionRigSetActiveMode &&
+             g_BzrFn_ControlPanelPostLoad && g_BzrFn_ControlPanelCleanup)
+                ? "bound"
+                : "incomplete; producer menu slots stand down");
         Log(L"[FLAG] Multiplayer flag UI: %hs\n",
             ShouldEnableMultiplayerFlagUi() ? "enabled" : "disabled");
         EnsureBansConfigLoaded();
