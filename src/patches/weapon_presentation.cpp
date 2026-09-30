@@ -268,6 +268,11 @@ namespace BZROpenShim::WeaponPresentation
         }
         const bool validRecoil = request.recoil && request.recoil->node.Valid() &&
             ValidPose(request.recoil->unrecoiledPose);
+        // A failed visual restoration can retain a controller after its last
+        // weapon record is gone. Bound that table independently of weapons.
+        if (validRecoil && impl_->recoils.size() >= kMaxBindings &&
+            impl_->recoils.find({ request.owner, request.recoil->node }) == impl_->recoils.end())
+            return std::nullopt;
         if (!(impl_->settings.muzzleFlash && request.flash.Valid()) &&
             !(impl_->settings.meshRecoil && validRecoil))
             return std::nullopt;

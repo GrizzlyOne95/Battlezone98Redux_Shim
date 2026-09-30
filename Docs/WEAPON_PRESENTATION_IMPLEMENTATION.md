@@ -112,6 +112,9 @@ cannot revive old tokens. Rebinding a shared node waits for its previous visual
 restoration, unless scene destruction has already removed that presentation.
 Slots still held by failed detach count toward the binding cap; refusing new
 cosmetic bindings is safer than freeing pointer storage still held by the engine.
+The shared recoil table has its own cap: failed visual restorations can outlive
+their weapon records. A binding that needs a new controller is refused when
+that table is full; successful restoration or scene loss reclaims its capacity.
 
 At coordinator destruction, an outstanding native pointer slot is deliberately
 retained rather than freed. Normal teardown should detach or observe native
@@ -142,6 +145,8 @@ a native back-reference that outlives the Ogre scene. Other tests cover opt-in
 and session gates, inherited/invalid configuration, bounded mesh lookup,
 logical-shot deduplication, rapid-fire deadlines, delayed rendering, rotated
 axes, shared-slot recovery, pose restoration retries and stale binding tokens.
+The capacity regression retains a full table of failed recoil restorations
+after releasing every weapon, then verifies refusal and eventual reclamation.
 
 Windows plugin compilation is checked by the draft PR's `Release Win32` lane.
 Native hook bytes/ABI, deployed-game visibility, Ogre update order, asset
