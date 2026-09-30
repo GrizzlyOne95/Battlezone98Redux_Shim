@@ -195,6 +195,8 @@
     <ClCompile Include="src\patches\unit_vo.cpp" />
     <ClCompile Include="src\patches\vehicle_list_mod_fix.cpp" />
     <ClCompile Include="src\patches\weapon_convergence_hooks.cpp" />
+    <ClCompile Include="src\patches\weapon_presentation.cpp" />
+    <ClCompile Include="src\patches\weapon_presentation_hooks.cpp" />
     <ClCompile Include="src\patches\bzr_options_ui.cpp" />
     <ClCompile Include="src\patches\bzrnet_instrumentation.cpp" />
     <ClCompile Include="src\patches\bzrnet_protocol.cpp" />
@@ -286,6 +288,8 @@
     <ClInclude Include="include\autosave.h" />
     <ClInclude Include="include\autosave_gate.h" />
     <ClInclude Include="include\bzr_hooks.h" />
+    <ClInclude Include="include\weapon_presentation.h" />
+    <ClInclude Include="include\weapon_presentation_hooks.h" />
     <ClInclude Include="include\pond_class_label.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
     <ClInclude Include="include\cli_multiparam_parser.h" />

@@ -156,6 +156,10 @@ The obstacle to a native Windows x64 build is not pointer width; it is reconstru
 
 This remains research, not a promise to replace Redux.
 
+[h3]Singleplayer Muzzle Flash and Mesh Recoil[/h3]
+
+[b]Active / Implementation Begun (2026-09-30):[/b] A draft implementation adds simulation-time flash state, shared mesh recoil, stable native pointer slots and cleanup through existing mission/scene seams, using the existing singleplayer gate. Host tests pass. The native firing, ODF and renderer adapters are not connected yet, so this does not produce visible in-game effects. Existing weapon convergence is reused. Native ABI/byte qualification, Windows build and in-game lifecycle/visual acceptance remain open. Multiplayer is outside this workstream.
+
 [h2]Implemented - Qualification Pending[/h2]
 
 These items have working code but still have a meaningful acceptance gate.
