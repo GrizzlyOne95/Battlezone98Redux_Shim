@@ -807,6 +807,36 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Resource-layer file size query, int __cdecl (const char* name), on exact GOG Redux 2.2.301, taken from the first call in Music::Start, which passes the formatted \"%02d.ogg\" name and gives up on the track when the result is below 1. It forwards to FUN_00481A80(nullptr, name), which returns the cached entry's size (+0x10) or the on-disk size and has no side effects; the same query sizes wave files elsewhere. OpenShimSetMusicTrack uses it to refuse a track that does not exist before touching the engine's music state."
+    },
+    {
+      "name": "Music::Pause",
+      "pattern": "55 8B EC 83 EC 24 A1 ?? ?? ?? ?? 33 C5 89 45 FC 83 3D ?? ?? ?? ?? FF 74 ?? 83 3D ?? ?? ?? ?? 00 74 ?? A1 ?? ?? ?? ?? 50 E8 ?? ?? ?? ?? 83 C4 04 8B 0D ?? ?? ?? ?? 51 E8 ?? ?? ?? ?? 83 C4 04 8B 15 ?? ?? ?? ?? 52 68 ?? ?? ?? ?? 8D 45 DC 50 FF 15",
+      "offset": -160,
+      "mode": "address",
+      "fallback": "0x004379D0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Redux soundtrack pause, void __cdecl(void), on exact GOG Redux 2.2.301. Identified in live_scan_findings_20260706.md #17 and the matching GOG corpus: pause retains the Ogg stream and sets the paused flag only while started and not paused; resume clears it only while started and paused. The released-build layout is anchored to the already verified unique Music::Stop entry, at the recorded negative offset. This is a fixed-layout resolve, not a newly qualified standalone signature; reject on build or anchor mismatch. New runtime validation is still required before release."
+    },
+    {
+      "name": "Music::Resume",
+      "pattern": "55 8B EC 83 EC 24 A1 ?? ?? ?? ?? 33 C5 89 45 FC 83 3D ?? ?? ?? ?? FF 74 ?? 83 3D ?? ?? ?? ?? 00 74 ?? A1 ?? ?? ?? ?? 50 E8 ?? ?? ?? ?? 83 C4 04 8B 0D ?? ?? ?? ?? 51 E8 ?? ?? ?? ?? 83 C4 04 8B 15 ?? ?? ?? ?? 52 68 ?? ?? ?? ?? 8D 45 DC 50 FF 15",
+      "offset": -80,
+      "mode": "address",
+      "fallback": "0x00437A20",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Redux soundtrack resume, void __cdecl(void), on exact GOG Redux 2.2.301. Identified in live_scan_findings_20260706.md #17 and the matching GOG corpus: pause retains the Ogg stream and sets the paused flag only while started and not paused; resume clears it only while started and paused. The released-build layout is anchored to the already verified unique Music::Stop entry, at the recorded negative offset. This is a fixed-layout resolve, not a newly qualified standalone signature; reject on build or anchor mismatch. New runtime validation is still required before release."
+    },
+    {
+      "name": "Music::SelectedTrack",
+      "pattern": "55 8B EC 8B 45 08 3B 05 ?? ?? ?? ?? 74 05 E8 ?? ?? ?? ?? 8B 4D 0C 89 0D ?? ?? ?? ?? 8B 55 10 89 15 ?? ?? ?? ?? 8B 45 14 A3 ?? ?? ?? ?? 8B 4D 08 89 0D ?? ?? ?? ?? 5D C3",
+      "offset": 8,
+      "mode": "abs32_operand",
+      "fallback": "0x008E75F4",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Selected soundtrack track global. Decode the cmp eax,[abs32] operand at Music::SelectTrack+8, which compares the requested track before deciding whether to call Stop; the final store in the same selector writes that same global. Start formats it as %02d.ogg and the playlist advancer updates it. This is the selected track, not proof of playing, and Stop retains it."
     }
   ],
   "engine_addresses": [

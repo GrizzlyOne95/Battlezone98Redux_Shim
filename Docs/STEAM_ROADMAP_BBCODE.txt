@@ -233,7 +233,7 @@ Change track
 Fade/change music state
 [/code]
 
-[b]In progress:[/b] change track and stop now drive the real soundtrack in OpenShim, through EXU's [code]SetMusicTrack[/code]/[code]StopMusic[/code]. Pause, resume, read-back and fades are still to do.
+[b]In progress:[/b] review implementations now cover native play/change, stop, pause, resume and read-back. EXU can control the soundtrack when shipped alone with a separate mod, with mission-driven gain fades and track transitions; OpenShim provides the basic native exports. Fresh Windows builds and GOG/Steam/Proton/Wine playback validation are still required before release.
 
 [h3]Higher-Level Environment Presets[/h3]
 
