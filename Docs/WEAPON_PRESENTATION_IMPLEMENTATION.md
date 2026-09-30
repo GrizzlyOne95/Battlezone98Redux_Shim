@@ -89,6 +89,10 @@ using the runtime. This rechecks the existing fail-closed SP gate and verified
 mission state on every entry. The render driver performs the same check for
 cleanup. Do not bypass it with a cached enabled flag.
 
+The existing mission seam is currently qualified for GOG only. This additional
+gate also keeps the bridge inactive on Steam until that seam has its own
+released-build qualification; the SP predicate alone does not enable it.
+
 ## Ownership and teardown
 
 `BeginSceneTeardown` retires bindings before the original engine call. Nested
@@ -123,7 +127,8 @@ cmake --build build/weapon-presentation-tests --parallel 4
 ctest --test-dir build/weapon-presentation-tests --output-on-failure
 ~~~
 
-All **57** host tests passed, including new presentation, existing convergence,
+All **57** host tests passed again after rebasing onto current main, including
+new presentation, existing convergence,
 patch registration, resolve-table and shared-document checks. The new portable
 source/tests also compile with `-Wall -Wextra -Werror`.
 
@@ -138,6 +143,7 @@ and session gates, inherited/invalid configuration, bounded mesh lookup,
 logical-shot deduplication, rapid-fire deadlines, delayed rendering, rotated
 axes, shared-slot recovery, pose restoration retries and stale binding tokens.
 
-Windows plugin compilation, native hook bytes/ABI, deployed-game visibility,
-Ogre update order, asset loading and in-game lifetime tests remain separate
-gates. Do not describe this milestone as a working in-game feature.
+Windows plugin compilation is checked by the draft PR's `Release Win32` lane.
+Native hook bytes/ABI, deployed-game visibility, Ogre update order, asset
+loading and in-game lifetime tests remain separate gates. Do not describe this
+milestone as a working in-game feature.

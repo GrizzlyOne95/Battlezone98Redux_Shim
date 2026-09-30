@@ -215,7 +215,7 @@ namespace BZROpenShim::WeaponPresentation
     Runtime::~Runtime()
     {
         // Destruction must not call a backend with an unknown engine lifetime.
-        // A failed detach is retained until native scene loss is confirmed.
+        // A failed detach retains its slot until native back-references end.
         // If a caller violates that contract, leak only the stable slot record
         // rather than leave the engine with a dangling back-reference.
         for (auto& entry : impl_->weapons)

@@ -106,8 +106,9 @@ namespace BZROpenShim::WeaponPresentation
     {
     public:
         virtual ~Backend() = default;
-        // storage has a stable address until detach clears it or scene loss is
-        // confirmed. Native renderers can keep &storage and zero it on expiry.
+        // storage has a stable address until detach clears it or native
+        // back-references are proven gone. Ogre scene loss alone is insufficient.
+        // Native renderers can keep &storage and zero it on expiry.
         // Backend methods must catch native faults, validate identities and run
         // only on the engine's safe rendering thread. No callbacks from Fire.
         virtual bool CreateFlash(std::string_view effect, const Matrix& pose,
