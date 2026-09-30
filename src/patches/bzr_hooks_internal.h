@@ -131,11 +131,32 @@ namespace BZROpenShim
     struct BuildItem;
     using FnBuildItemInit = void(__cdecl*)(BuildItem& item, int64_t token);
     using FnBuildItemCleanup = void(__cdecl*)(BuildItem& item);
-    using FnProducerModeCall = void* (__cdecl*)(void* producerPtr, int slot, int flags);
     extern BuildItem* g_BzrBuildMenuRoot;
     extern FnBuildItemCleanup g_BzrFn_CleanupBuildItem;
     extern FnBuildItemInit g_BzrFn_InitBuildItem;
-    extern FnProducerModeCall g_BzrFn_ProducerModeCallOriginal;
+
+    // Producer nested build menus (producer_build_menu.cpp). The functions are
+    // the stock targets of the vtable slots the menu patches replace, and the
+    // vtables identify which producer type an object is.
+    using FnModeListUpdate = void(__thiscall*)(void* self);
+    using FnSetActiveMode = bool(__thiscall*)(void* self, int mode);
+    using FnObjectDeselect = void(__thiscall*)(void* self);
+    using FnControlPanelLifecycle = void(__thiscall*)(void* self);
+    using FnModeListSetMode = void(__thiscall*)(void* modeList, int slot, int mode, int enabled);
+    extern FnModeListUpdate g_BzrFn_ProducerUpdateModeList;
+    extern FnSetActiveMode g_BzrFn_ProducerSetActiveMode;
+    extern FnObjectDeselect g_BzrFn_GameObjectDeselect;
+    extern FnModeListUpdate g_BzrFn_ConstructionRigUpdateModeList;
+    extern FnSetActiveMode g_BzrFn_ConstructionRigSetActiveMode;
+    extern FnObjectDeselect g_BzrFn_ConstructionRigDeselect;
+    extern FnControlPanelLifecycle g_BzrFn_ControlPanelPostLoad;
+    extern FnControlPanelLifecycle g_BzrFn_ControlPanelCleanup;
+    extern FnModeListSetMode g_BzrFn_ModeListSetMode;
+    extern void* g_BzrVtbl_Producer;
+    extern void* g_BzrVtbl_Recycler;
+    extern void* g_BzrVtbl_Factory;
+    extern void* g_BzrVtbl_ConstructionRig;
+    extern uint8_t* g_BzrPtr_ClassLoadAssetsFlag;
 
     using FnLoadScreenPrep = void(__cdecl*)();
     using FnSetShellState = void(__cdecl*)(int state);
@@ -941,21 +962,19 @@ namespace BZROpenShim
         {
             bool initialized = false;
             bool enabled = false;
-            ProducerBuildMenuEntry fallbackRoot = {};
             ProducerBuildMenuEntry recycler = {};
             ProducerBuildMenuEntry factory = {};
-            ProducerBuildMenuEntry armory = {};
             ProducerBuildMenuEntry constructionRig = {};
             std::unordered_map<std::string, ProducerBuildMenuEntry> odfOverrides = {};
             std::unordered_map<std::string, ProducerBuildMenuEntry> odfFileEntries = {};
         };
         std::vector<std::filesystem::path> GetProducerOdfDirectoryCandidates();
         bool TryGetObjectOdfToken(void* objectPtr, char (&outToken)[kProducerBuildMenuTokenLen + 1]);
-        extern bool g_HasAppliedProducerBuildMenu;
-        extern int64_t g_LastAppliedProducerBuildMenu;
-        extern uint32_t g_LastUnknownProducerVft;
         extern ProducerBuildMenuConfig g_ProducerBuildMenuConfig;
         ProducerBuildMenuEntry NormalizeProducerBuildMenuToken(const char* value);
+        // Drops every menu tree, cursor and stub mapping; the stub blocks
+        // themselves are kept, since a stale mode value may still name one.
+        void ResetProducerBuildMenuRuntime();
 
         // --- AutoSave load button and restart mission (autosave_restart.cpp) ---
         void ForgetAllChunkProxySceneResources(const wchar_t* reason);

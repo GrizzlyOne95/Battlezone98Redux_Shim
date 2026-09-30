@@ -77,7 +77,6 @@ namespace BZROpenShim
     inline void** g_MapListObject = nullptr;
 
     // Helper functions (implemented in trampolines.cpp and the src/patches hook files)
-    void SetProducerBuildMenuOriginal(void* original);
     void InstallBriefingAssetOverrides();
     void InstallOgreMaterialCollisionGuard();
 
@@ -144,6 +143,10 @@ namespace BZROpenShim
             // own cached turbo loop, never the thrust loop that shares its
             // filename (which left +0x2C0 dangling and heap-corrupting).
             { 0, HookEngine::PatchType::REL32, {}, "HoverCraft Turbo Sound Stop Guard", false, {} },
+            // HoverCraft construction collects every type-67 (throttle nacelle)
+            // geo into an eight-slot stack array with no bound check; a ninth
+            // overran the /GS cookie. The rewritten store stops at eight.
+            { 0, HookEngine::PatchType::BYTES, { 0x8B, 0x85, 0x3C, 0xFF, 0xFF, 0xFF, 0x83, 0xF8, 0x08, 0x7D, 0x36, 0x8B, 0x8D, 0x50, 0xFF, 0xFF, 0xFF, 0x89, 0x4C, 0x85, 0xD0, 0x40, 0x89, 0x85, 0x3C, 0xFF, 0xFF, 0xFF, 0xEB, 0x23, 0x90, 0x90, 0x90 }, "HoverCraft Nacelle Array Cap", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "World Builder Save Destination Dialog", false, {} },
             // ControlPanel target-list EnemyP call: an opt-in local order
             // authoring relaxation. The global EnemyP implementation stays stock.
@@ -196,6 +199,22 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::DWORD, {}, "Engine Flame Submit VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Chunk Effect Simulate VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Legacy World Update RenderQueue VTable Hook", false, {} },
+            // Producer nested build menus (producer_build_menu.cpp): each
+            // entry swaps one stock vtable slot, guarded by its stock pointer.
+            { 0, HookEngine::PatchType::DWORD, {}, "Producer UpdateModeList VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Recycler UpdateModeList VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Factory UpdateModeList VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Producer SetActiveMode VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Recycler SetActiveMode VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Factory SetActiveMode VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Producer Deselect VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Recycler Deselect VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Factory Deselect VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "ConstructionRig UpdateModeList VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "ConstructionRig SetActiveMode VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "ConstructionRig Deselect VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "ControlPanel PostLoad VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "ControlPanel Cleanup VTable Hook", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Vehicle List Mod Fix 2/4 (Force Mod-Scoped Assets 2/3)", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", false, {} },
