@@ -13,13 +13,15 @@ namespace
 {
     const char* const kValidManifest = R"LUA(
 return {
-    formatVersion = 2,
+    formatVersion = 3,
     version = "1.2.3.4",
     sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     size = 1234,
     architecture = "x86",
     payloads = {
         winmm = { source = "winmm.dll", destination = "winmm.dll", sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", size = 1234, version = "1.2.3.4", architecture = "x86" },
+        loader = { source = "bzloader.dll", destination = "bzloader.dll", sha256 = "1111111111111111111111111111111111111111111111111111111111111111", size = 5678, version = "1.2.3.4", architecture = "x86" },
+        plugin = { source = "openshim.dll", destination = "plugins\\openshim.dll", sha256 = "2222222222222222222222222222222222222222222222222222222222222222", size = 6789, version = "1.2.3.4", architecture = "x86" },
         network = { source = "openshim_net.ini.payload", destination = "net.ini", sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", size = 2345 },
         patches = { source = "openshim_patches.json.payload", destination = "scripts\patches.json", sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", size = 3456 },
         playerConfig = { source = "openshim.ini.payload", destination = "openshim.ini", sha256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", size = 5678, overwrite = false },
@@ -55,6 +57,20 @@ return {
               "helper hash should be lower-cased");
         Check(manifest.helper.size == 4567, "helper size should be preserved");
         Check(manifest.helper.destination.empty(), "helper has no destination");
+        Check(manifest.plugin.destination == "plugins\\openshim.dll", "plugin installs below plugins");
+        for (const auto& mutation : std::vector<std::pair<std::string, std::string>> {
+            { "formatVersion = 3", "formatVersion = 2" },
+            { "loader =", "missingLoader =" },
+            { "plugin =", "missingPlugin =" },
+            { "destination = \"bzloader.dll\"", "destination = \"other.dll\"" },
+            { "destination = \"plugins\\\\openshim.dll\"", "destination = \"openshim.dll\"" },
+            { "size = 5678", "size = 0" },
+            { "size = 6789, version = \"1.2.3.4\"", "size = 6789, version = \"1.2.3.3\"" },
+        })
+        {
+            Check(!ParseOpenShimUpdateManifest(Replace(kValidManifest, mutation.first, mutation.second), manifest, error),
+                  "incomplete or mismatched load chain must be rejected");
+        }
 
         Check(!ParseOpenShimUpdateManifest(
                   Replace(kValidManifest, kHelperLine, ""), manifest, error),

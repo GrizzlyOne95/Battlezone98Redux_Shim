@@ -133,7 +133,16 @@ void fixedfunc_fragment(
     // Ambient floor so unlit legacy content never goes pitch black the way
     // a missing light rig would. Matches the Enhanced payload's approach of
     // a small ambient contribution on top of the diffuse term.
+    //
+    // Not for the adapters that stand in for stock UNLIT families: effect,
+    // sky, ui and simple_one_tex output texture * vertex colour and nothing
+    // else. Those passes are mostly additive (particles, flares, beams), and
+    // a constant added to their black texels draws every sprite as a visible
+    // grey quad.
+#if !defined(COMPAT_FAMILY_EFFECT) && !defined(COMPAT_FAMILY_SKY) && \
+    !defined(COMPAT_FAMILY_UI) && !defined(COMPAT_FAMILY_SIMPLEONETEX)
     albedo += sceneAmbient.xyz * 0.25;
+#endif
     oColor.xyz = albedo;
 
     float fogValue = saturate((vDepth - fogParams.y) * fogParams.w);
