@@ -210,8 +210,24 @@ returned `FALSE`.
 unsupported build or when the entry points did not resolve. The music stays
 stopped until the next `OpenShimSetMusicTrack`, mission start or shell visit.
 
-`OpenShimPauseMusic`, `OpenShimResumeMusic` and `OpenShimGetMusicTrack` are
-still stubs that return `FALSE`.
+`OpenShimPauseMusic()` and `OpenShimResumeMusic()` now call the native
+soundtrack manager. Pause retains the stream and its position; resume continues
+a paused stream and does not restart stopped music. Both calls are idempotent
+and return `TRUE` when the native call ran, including when there was nothing to
+change. They return `FALSE` on an unsupported build or unresolved target.
+
+`OpenShimGetMusicTrack(int* outIndex)` reads the actual selected engine track.
+The TRN loader, shell and stock playlist can update this value independently
+of SDK requests. `StopMusic` retains the selection, so it is not a playing
+status test. A successful read can return -1 (no selection). Null output,
+unsupported build, unresolved global or a memory fault returns `FALSE`.
+
+The export names, signatures and provider-table layout are unchanged. The
+pause/resume targets use fixed offsets from the existing unique stop anchor
+for the supported 2.2.301 layout; fresh runtime qualification is required before
+release. EXU owns the standalone Lua runtime and mission-driven gain/fade
+controller, allowing separate mods to ship EXU without requiring OpenShim.
+See ExtraUtilities `Docs/NATIVE_SOUNDTRACK.md` for that API and test gate.
 
 ## Storefront-gated patches
 

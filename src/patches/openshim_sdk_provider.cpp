@@ -387,6 +387,9 @@ namespace
         MusicVoidFn start = nullptr;
         MusicVoidFn stop = nullptr;
         ResourceSizeFn resourceSize = nullptr;
+        MusicVoidFn pause = nullptr;
+        MusicVoidFn resume = nullptr;
+        const int* selectedTrack = nullptr;
 
         bool Complete() const
         {
@@ -409,6 +412,12 @@ namespace
                 static_cast<uintptr_t>(HookEngine::ResolveNamedAddress("Music::Stop")));
             entryPoints.resourceSize = reinterpret_cast<ResourceSizeFn>(
                 static_cast<uintptr_t>(HookEngine::ResolveNamedAddress("Music::ResourceSize")));
+            entryPoints.pause = reinterpret_cast<MusicVoidFn>(
+                static_cast<uintptr_t>(HookEngine::ResolveNamedAddress("Music::Pause")));
+            entryPoints.resume = reinterpret_cast<MusicVoidFn>(
+                static_cast<uintptr_t>(HookEngine::ResolveNamedAddress("Music::Resume")));
+            entryPoints.selectedTrack = reinterpret_cast<const int*>(
+                static_cast<uintptr_t>(HookEngine::ResolveNamedAddress("Music::SelectedTrack")));
             if (!entryPoints.Complete())
             {
                 BZROpenShim::LogShimA(
@@ -480,7 +489,7 @@ namespace
         }
     }
 
-    bool TryStopMusic(MusicVoidFn stop)
+    bool TryMusicCall(MusicVoidFn stop)
     {
         __try
         {
@@ -571,7 +580,7 @@ extern "C" BOOL WINAPI OpenShimImpl_StopMusic()
     if (!entryPoints)
         return FALSE;
 
-    if (!TryStopMusic(entryPoints->stop))
+    if (!TryMusicCall(entryPoints->stop))
     {
         BZROpenShim::LogShimA(
             BZROpenShim::LogLevel::Error,
@@ -589,48 +598,35 @@ extern "C" BOOL WINAPI OpenShimImpl_StopMusic()
 
 extern "C" BOOL WINAPI OpenShimImpl_PauseMusic()
 {
-    static bool logged = false;
-    if (!logged)
-    {
-        logged = true;
-        BZROpenShim::LogShimA(
-            BZROpenShim::LogLevel::Info,
-            "music",
-            "OpenShimPauseMusic: stub/fail closed");
-    }
-    return FALSE;
+    const MusicEntryPoints* entryPoints = AcquireMusicEntryPoints("OpenShimPauseMusic");
+    return entryPoints && entryPoints->pause && TryMusicCall(entryPoints->pause) ? TRUE : FALSE;
 }
 
 extern "C" BOOL WINAPI OpenShimImpl_ResumeMusic()
 {
-    static bool logged = false;
-    if (!logged)
-    {
-        logged = true;
-        BZROpenShim::LogShimA(
-            BZROpenShim::LogLevel::Info,
-            "music",
-            "OpenShimResumeMusic: stub/fail closed");
-    }
-    return FALSE;
+    const MusicEntryPoints* entryPoints = AcquireMusicEntryPoints("OpenShimResumeMusic");
+    return entryPoints && entryPoints->resume && TryMusicCall(entryPoints->resume) ? TRUE : FALSE;
 }
 
 extern "C" BOOL WINAPI OpenShimImpl_GetMusicTrack(int* outIndex)
 {
-    static bool logged = false;
-    if (!logged)
-    {
-        logged = true;
-        BZROpenShim::LogShimA(
-            BZROpenShim::LogLevel::Info,
-            "music",
-            "OpenShimGetMusicTrack: stub/fail closed");
-    }
-    if (outIndex)
+    if (!outIndex)
+        return FALSE;
+    const MusicEntryPoints* entryPoints = AcquireMusicEntryPoints("OpenShimGetMusicTrack");
+    __try
     {
         *outIndex = -1;
+        if (!entryPoints || !entryPoints->selectedTrack)
+            return FALSE;
+        // The selected track survives Stop. Read the engine, not a cache of
+        // SDK requests: the shell, TRN loader and playlist can also change it.
+        *outIndex = *entryPoints->selectedTrack;
+        return TRUE;
     }
-    return FALSE;
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return FALSE;
+    }
 }
 
 // Implementations that live in their own subsystems.
