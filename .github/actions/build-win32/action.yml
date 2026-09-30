@@ -159,6 +159,10 @@ runs:
       shell: pwsh
       run: ./tests/uninstall_windows_tests.ps1
 
+    - name: Test Windows deployment verification
+      shell: pwsh
+      run: ./tests/verify_windows_tests.ps1
+
     # Campaign Reimagined's staging refuses a bundled .pdb it cannot match to
     # the binary, so a release without symbols cannot be packaged downstream.
     # All three modules ship symbols: a crash can land in any of them. Every

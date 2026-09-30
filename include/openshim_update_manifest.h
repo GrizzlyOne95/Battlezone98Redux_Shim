@@ -24,6 +24,8 @@ namespace BZROpenShim
         uint64_t size = 0;
         std::string architecture;
         OpenShimUpdatePayloadManifest winmm;
+        OpenShimUpdatePayloadManifest loader;
+        OpenShimUpdatePayloadManifest plugin;
         OpenShimUpdatePayloadManifest network;
         OpenShimUpdatePayloadManifest patches;
         // The replacement helper the updater launches from the Workshop item.
