@@ -13,6 +13,13 @@
 #define OPENSHIM_SDK_EXPORT_NS_WAS_DEFAULTED
 #endif
 
+// Appended exports live AFTER the existing legacy provider block. Consumers
+// other than the provider layout expand them just like ordinary exports.
+#ifndef OPENSHIM_SDK_EXPORT_APPEND
+#define OPENSHIM_SDK_EXPORT_APPEND OPENSHIM_SDK_EXPORT
+#define OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED
+#endif
+
 OPENSHIM_SDK_EXPORT_NS(int32_t, __cdecl, OpenShimCaptureDeveloperSnapshot, OpenShimImpl_CaptureDeveloperSnapshot, (BZROpenShim::OpenShimDeveloperSnapshot* outSnapshot), (outSnapshot), 0)
 OPENSHIM_SDK_EXPORT(BOOL, WINAPI, OpenShimClearAiUnitTuning, OpenShimImpl_ClearAiUnitTuning, (void* objectPtr), (objectPtr), FALSE)
 OPENSHIM_SDK_EXPORT(BOOL, WINAPI, OpenShimClearAllAiUnitTuning, OpenShimImpl_ClearAllAiUnitTuning, (void), (), FALSE)
@@ -84,6 +91,20 @@ OPENSHIM_SDK_EXPORT(BOOL, WINAPI, OpenShimSetUnitVoThrottle, OpenShimImpl_SetUni
 OPENSHIM_SDK_EXPORT(BOOL, WINAPI, OpenShimSetWeaponMaskCarrierBiasEnabled, OpenShimImpl_SetWeaponMaskCarrierBiasEnabled, (BOOL enabled), (enabled), FALSE)
 OPENSHIM_SDK_EXPORT(BOOL, WINAPI, OpenShimStopMusic, OpenShimImpl_StopMusic, (void), (), FALSE)
 OPENSHIM_SDK_EXPORT(BOOL, WINAPI, OpenShimSupportsRenderProfile, OpenShimImpl_SupportsRenderProfile, (DWORD profile), (profile), FALSE)
+
+// Native HUD layout v1: availability stays zero until a native adapter qualifies.
+OPENSHIM_SDK_EXPORT_APPEND(DWORD, WINAPI, OpenShimGetNativeHudLayoutCapabilities, OpenShimImpl_GetNativeHudLayoutCapabilities, (void), (), 0)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimGetNativeHudMeterRect, OpenShimImpl_GetNativeHudMeterRect, (LPCSTR name, int* x, int* y, int* w, int* h), (name, x, y, w, h), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimGetNativeHudMeterDefaultRect, OpenShimImpl_GetNativeHudMeterDefaultRect, (LPCSTR name, int* x, int* y, int* w, int* h), (name, x, y, w, h), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetNativeHudMeterRect, OpenShimImpl_SetNativeHudMeterRect, (LPCSTR name, int x, int y, int w, int h), (name, x, y, w, h), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetNativeHudMeterVisible, OpenShimImpl_SetNativeHudMeterVisible, (LPCSTR name, BOOL visible), (name, visible), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimRestoreNativeHudMeter, OpenShimImpl_RestoreNativeHudMeter, (LPCSTR name), (name), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimRestoreAllNativeHudMeters, OpenShimImpl_RestoreAllNativeHudMeters, (void), (), FALSE)
+
+#ifdef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED
+#undef OPENSHIM_SDK_EXPORT_APPEND
+#undef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED
+#endif
 
 #ifdef OPENSHIM_SDK_EXPORT_NS_WAS_DEFAULTED
 #undef OPENSHIM_SDK_EXPORT_NS

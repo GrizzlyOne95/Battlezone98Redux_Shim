@@ -35,7 +35,9 @@ struct OpenShimSdkProviderTable
 
 #define OPENSHIM_SDK_EXPORT(ret, cc, name, impl, params, args, unavail) \
     ret(cc* impl) params;
+#define OPENSHIM_SDK_EXPORT_APPEND(ret, cc, name, impl, params, args, unavail)
 #include "openshim_sdk_exports.inc"
+#undef OPENSHIM_SDK_EXPORT_APPEND
 #undef OPENSHIM_SDK_EXPORT
 
     // Appended: the legacy v1 C++ API. winmm.dll exports these as mangled
@@ -47,14 +49,29 @@ struct OpenShimSdkProviderTable
     int32_t(__cdecl* legacyIsPatchingComplete)(void);
     uint32_t(__cdecl* legacyGetAppliedPatchCount)(void);
     uint32_t(__cdecl* legacyGetBzrDistribution)(void);
+
+    // New slots must follow every existing slot, including the legacy block.
+#define OPENSHIM_SDK_EXPORT(ret, cc, name, impl, params, args, unavail)
+#define OPENSHIM_SDK_EXPORT_APPEND(ret, cc, name, impl, params, args, unavail) \
+    ret(cc* impl) params;
+#include "openshim_sdk_exports.inc"
+#undef OPENSHIM_SDK_EXPORT_APPEND
+#undef OPENSHIM_SDK_EXPORT
 };
+
+// The new HUD block follows the exact previous table size. Never insert new
+// exports in the original sorted block: older bootstrap/plugin pairs depend
+// on those offsets even when the table has a different structSize.
+static_assert(offsetof(OpenShimSdkProviderTable, OpenShimImpl_GetNativeHudLayoutCapabilities) ==
+    offsetof(OpenShimSdkProviderTable, legacyGetBzrDistribution) + sizeof(void (*)(void)),
+    "new HUD fields must append after the existing legacy block");
 
 // Layout pins. The thunks in winmm.dll and the provider in the plugin read the
 // same table from two separately built modules, so its shape is ABI: a
 // uint32_t structSize at offset 0, then one pointer per export in .inc order
-// with no padding between them, then the legacy block directly after the last
-// export. Any other member, or a reordering that moved the legacy block, fails
-// here instead of misrouting calls at runtime.
+// with no padding between them, then the legacy block after the original
+// exports, then the appended exports. Any other member or a reordering of
+// the legacy block fails here instead of misrouting calls at runtime.
 namespace BZROpenShim::SdkBridge::Detail
 {
     constexpr size_t kExportSlotCount = 0
@@ -62,14 +79,27 @@ namespace BZROpenShim::SdkBridge::Detail
 #include "openshim_sdk_exports.inc"
 #undef OPENSHIM_SDK_EXPORT
         ;
+    constexpr size_t kOriginalExportSlotCount = 0
+#define OPENSHIM_SDK_EXPORT(ret, cc, name, impl, params, args, unavail) + 1
+#define OPENSHIM_SDK_EXPORT_APPEND(ret, cc, name, impl, params, args, unavail)
+#include "openshim_sdk_exports.inc"
+#undef OPENSHIM_SDK_EXPORT_APPEND
+#undef OPENSHIM_SDK_EXPORT
+        ;
+    constexpr size_t kAppendedExportSlotCount = kExportSlotCount - kOriginalExportSlotCount;
     constexpr size_t kLegacySlotCount = 5;
     constexpr size_t kSlotSize = sizeof(void (*)(void));
     // structSize, padded up to pointer alignment.
     constexpr size_t kFirstSlotOffset =
         (sizeof(uint32_t) + alignof(void (*)(void)) - 1) / alignof(void (*)(void)) * alignof(void (*)(void));
-    constexpr size_t kLegacyOffset = kFirstSlotOffset + kExportSlotCount * kSlotSize;
+    constexpr size_t kLegacyOffset = kFirstSlotOffset + kOriginalExportSlotCount * kSlotSize;
 }
 
+static_assert(BZROpenShim::SdkBridge::Detail::kOriginalExportSlotCount == 71,
+              "the shipped provider prefix is frozen; append new exports");
+static_assert(sizeof(void*) != 4 ||
+              offsetof(OpenShimSdkProviderTable, OpenShimImpl_GetNativeHudLayoutCapabilities) == 308,
+              "HUD must follow the previous 308-byte Win32 provider table");
 static_assert(offsetof(OpenShimSdkProviderTable, structSize) == 0,
               "structSize must stay the first field of the provider table");
 static_assert(offsetof(OpenShimSdkProviderTable, legacyGetShimVersion) ==
@@ -81,7 +111,8 @@ static_assert(offsetof(OpenShimSdkProviderTable, legacyGetBzrDistribution) ==
               "the five legacy slots must stay contiguous and in order");
 static_assert(sizeof(OpenShimSdkProviderTable) ==
                   BZROpenShim::SdkBridge::Detail::kLegacyOffset +
-                      BZROpenShim::SdkBridge::Detail::kLegacySlotCount * BZROpenShim::SdkBridge::Detail::kSlotSize,
+                      (BZROpenShim::SdkBridge::Detail::kLegacySlotCount +
+                       BZROpenShim::SdkBridge::Detail::kAppendedExportSlotCount) * BZROpenShim::SdkBridge::Detail::kSlotSize,
               "the provider table must be structSize plus one pointer per slot, nothing else");
 // The shipped Win32 build: a 4-byte structSize, then 4-byte pointers.
 static_assert(sizeof(void*) != 4 ||

@@ -3,6 +3,7 @@
 // teardown forget hooks, the SetRunning mission transition seam (with the
 // EXU lifecycle notify) and the D3D11 module pin for shutdown ordering,
 // split out of bzr_hooks.cpp.
+#include "native_hud_runtime.h"
 #include "bzr_hooks.h"
 #include "bzr_object_layout.h"
 #include "bzr_hooks_internal.h"
@@ -365,6 +366,7 @@ namespace BZROpenShim
                 PilotFlashlightNotifyMissionRunStateChanged(false);
                 FogWakeNotifyMissionRunStateChanged(false);
                 NotifyExuMissionSimulationState(false);
+                NativeHud::Runtime::ResetMission();
             }
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
             {
