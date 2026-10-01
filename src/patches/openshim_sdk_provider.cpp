@@ -12,6 +12,7 @@
 #include "openshim_sdk_bridge.h"
 #include "winmm_proxy.h"
 #include "bzr_hooks.h"
+#include "native_hud_runtime.h"
 #include "shim_log.h"
 #include "hook_engine.h"
 #include <cstdio>
@@ -38,6 +39,36 @@ namespace
             spriteName ? spriteName : "<null>",
             result ? "true" : "false");
     }
+}
+
+// Native meters use screen-space geometry, independent of the atlas API.
+extern "C" DWORD WINAPI OpenShimImpl_GetNativeHudLayoutCapabilities()
+{
+    return BZROpenShim::NativeHud::Runtime::Capabilities();
+}
+extern "C" BOOL WINAPI OpenShimImpl_GetNativeHudMeterRect(LPCSTR name, int* x, int* y, int* w, int* h)
+{
+    return BZROpenShim::NativeHud::Runtime::GetRect(name, false, x, y, w, h) ? TRUE : FALSE;
+}
+extern "C" BOOL WINAPI OpenShimImpl_GetNativeHudMeterDefaultRect(LPCSTR name, int* x, int* y, int* w, int* h)
+{
+    return BZROpenShim::NativeHud::Runtime::GetRect(name, true, x, y, w, h) ? TRUE : FALSE;
+}
+extern "C" BOOL WINAPI OpenShimImpl_SetNativeHudMeterRect(LPCSTR name, int x, int y, int w, int h)
+{
+    return BZROpenShim::NativeHud::Runtime::SetRect(name, x, y, w, h) ? TRUE : FALSE;
+}
+extern "C" BOOL WINAPI OpenShimImpl_SetNativeHudMeterVisible(LPCSTR name, BOOL visible)
+{
+    return BZROpenShim::NativeHud::Runtime::SetVisible(name, visible != FALSE) ? TRUE : FALSE;
+}
+extern "C" BOOL WINAPI OpenShimImpl_RestoreNativeHudMeter(LPCSTR name)
+{
+    return BZROpenShim::NativeHud::Runtime::Restore(name) ? TRUE : FALSE;
+}
+extern "C" BOOL WINAPI OpenShimImpl_RestoreAllNativeHudMeters()
+{
+    return BZROpenShim::NativeHud::Runtime::RestoreAll() ? TRUE : FALSE;
 }
 
 extern "C" BOOL WINAPI OpenShimImpl_SetUnderAttackAlertMode(int mode)
@@ -759,6 +790,13 @@ namespace
         .legacyIsPatchingComplete = LegacyIsPatchingComplete,
         .legacyGetAppliedPatchCount = LegacyGetAppliedPatchCount,
         .legacyGetBzrDistribution = LegacyGetBzrDistribution,
+        .OpenShimImpl_GetNativeHudLayoutCapabilities = OpenShimImpl_GetNativeHudLayoutCapabilities,
+        .OpenShimImpl_GetNativeHudMeterRect = OpenShimImpl_GetNativeHudMeterRect,
+        .OpenShimImpl_GetNativeHudMeterDefaultRect = OpenShimImpl_GetNativeHudMeterDefaultRect,
+        .OpenShimImpl_SetNativeHudMeterRect = OpenShimImpl_SetNativeHudMeterRect,
+        .OpenShimImpl_SetNativeHudMeterVisible = OpenShimImpl_SetNativeHudMeterVisible,
+        .OpenShimImpl_RestoreNativeHudMeter = OpenShimImpl_RestoreNativeHudMeter,
+        .OpenShimImpl_RestoreAllNativeHudMeters = OpenShimImpl_RestoreAllNativeHudMeters,
     };
 
     // Designated initializers enforce order but not completeness: a slot left
