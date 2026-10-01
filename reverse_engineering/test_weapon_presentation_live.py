@@ -1,5 +1,7 @@
 """Fail-closed capture tests without Windows, Frida, or a private executable."""
 import copy
+import contextlib
+import io
 import json
 from pathlib import Path
 import sys
@@ -10,7 +12,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from capture_weapon_presentation_live import (  # noqa: E402
-    bounded_float, catalog_rows, observe, trace_config, verify_sites,
+    bounded_float, catalog_rows, main, observe, trace_config, verify_sites,
 )
 
 
@@ -188,6 +190,18 @@ class TraceHostTests(unittest.TestCase):
                 observe(42, {"max_events": 1}, 0, output, lambda: None)
             frida.attach.assert_not_called()
             self.assertEqual(output.read_text(), "prior evidence")
+
+    def test_interruption_preserves_rejected_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.json"
+            with patch.object(sys, "argv", ["collector", "--pid", "42", "--output", str(output)]), \
+                    patch("capture_weapon_presentation_live.capture", side_effect=KeyboardInterrupt), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(), 130)
+            report = json.loads(output.read_text())
+            self.assertFalse(report["activation_qualified"])
+            self.assertFalse(report["byte_verification_passed"])
+            self.assertIn("incomplete", report["error"])
 
 
 if __name__ == "__main__":

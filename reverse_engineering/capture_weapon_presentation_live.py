@@ -296,6 +296,9 @@ def main():
         try:
             capture(args, report)
             result = 0
+        except KeyboardInterrupt:
+            report["error"] = "KeyboardInterrupt: capture interrupted; evidence is incomplete"
+            result = 130
         except Exception as error:
             report["error"] = f"{type(error).__name__}: {error}"
             result = 1
