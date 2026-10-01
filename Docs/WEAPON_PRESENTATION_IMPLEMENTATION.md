@@ -22,6 +22,10 @@ executable is in the private evidence repository at
 Do not import the executable, PDB, decompiler output or copied binary material
 into this public repository.
 
+The [native static qualification report](https://github.com/GrizzlyOne95/Battlezone_Source/pull/13)
+preserves executable/ZIP provenance, recovered contracts, generated signature
+proof and explicit remaining runtime uncertainties in the private repository.
+
 ## Implemented
 
 | Surface | Behavior |
@@ -230,7 +234,15 @@ three original call destinations, five complete stolen instruction ranges
 and eleven native callee cleanup sizes. Its output explicitly records
 `evidence_kind=static_only`, no PID and `activation_qualified=false`.
 
-Windows plugin compilation and the actual assembly bridges are checked by the
-draft PR's CI. Deployed-game visibility, Ogre update order, asset loading and
-in-game lifetime tests remain separate gates. Do not describe this milestone
-as a working in-game feature.
+At code checkpoint `0589b97d12b9b442b958e64c291e1b595ec64a1e`,
+[Release Win32 CI](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/actions/runs/36871341541)
+passed all **67** Windows CTests, including the production x86 bridge harness,
+and compiled the full native candidate in Plugin_OpenShim. INI completeness,
+conservative defaults, the loader host lifecycle, complete load chain/package
+shape and all 271 baseline exports passed. Linux CI and BZRNet instrumentation
+validation also passed for the same code checkpoint.
+
+These are compiler/host tests. Deployed-game visibility, Ogre update order,
+asset loading and in-game lifetime tests remain separate gates. No native game
+PID or live game qualification is claimed. Do not describe this milestone as
+a working in-game feature.
