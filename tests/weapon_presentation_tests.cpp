@@ -53,9 +53,11 @@ namespace
             return !failCreate; // test failure AFTER native pointer assignment
         }
 
-        bool UpdateFlash(void* renderer, const WP::Matrix& pose) noexcept override
+        bool UpdateFlash(void*& renderer, const WP::Matrix& pose) noexcept override
         {
             ++updates;
+            Require(static_cast<Renderer*>(renderer)->backReference == &renderer,
+                "native update was passed a temporary attachment slot");
             if (failUpdate)
                 return false;
             static_cast<Renderer*>(renderer)->pose = pose;

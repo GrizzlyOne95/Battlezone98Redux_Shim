@@ -2,8 +2,8 @@
 
 // Engine-independent singleplayer weapon presentation. Native hooks supply
 // copied identities/poses; this layer never reads game memory or changes aim.
-// The native firing/factory ABI still needs qualification before a backend is
-// connected. See Docs/WEAPON_PRESENTATION_IMPLEMENTATION.md.
+// The native adapter remains gated pending live Windows lifetime/order
+// qualification. See Docs/WEAPON_PRESENTATION_IMPLEMENTATION.md.
 
 #include "weapon_convergence.h"
 
@@ -113,7 +113,9 @@ namespace BZROpenShim::WeaponPresentation
         // only on the engine's safe rendering thread. No callbacks from Fire.
         virtual bool CreateFlash(std::string_view effect, const Matrix& pose,
             void*& storage) noexcept = 0;
-        virtual bool UpdateFlash(void* renderer, const Matrix& pose) noexcept = 0;
+        // Updating passes the same stable slot: native Attach stores its
+        // address again. A local temporary slot would leave a dangling write.
+        virtual bool UpdateFlash(void*& storage, const Matrix& pose) noexcept = 0;
         virtual bool DetachFlash(void*& storage) noexcept = 0;
         // This writes a presentation pose only; never the gameplay MAT_3D.
         virtual bool ApplyRecoil(const Identity& owner, const Identity& node,
@@ -156,6 +158,10 @@ namespace BZROpenShim::WeaponPresentation
         // recapturing rest from an already displaced renderer pose.
         bool SetRecoilPose(const Identity& owner, const Identity& node,
             const Matrix& unrecoiledPose) noexcept;
+        // Stage a copy for the native-to-Ogre writer; the source gameplay
+        // matrix remains untouched, including when stock aiming writes again.
+        bool TryGetVisualRecoilPose(const Identity& owner, const Identity& node,
+            Matrix& visualPose) const noexcept;
 
         // Call at global simulation-pass entry, before accepted shots in that
         // pass. A repeated serial cannot recover a shared node twice. Rendering

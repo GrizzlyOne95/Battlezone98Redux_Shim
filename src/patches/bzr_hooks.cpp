@@ -28,6 +28,7 @@
 #include "ogre_profiler_algorithms.h"
 #include "weapon_convergence.h"
 #include "weapon_presentation_hooks.h"
+#include "weapon_presentation_native.h"
 #include "headlight_falloff.h"
 #include "shadow_far_distance.h"
 #include "sun_flash.h"
@@ -1531,6 +1532,7 @@ namespace BZROpenShim
             {"InitializeGlobalTurboConfig", &InitializeGlobalTurboConfig},
             {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
             {"InitializePilotFlashlightConfig", &InitializePilotFlashlightConfig},
+            {"InstallWeaponPresentationNativeIfRequested", &InstallWeaponPresentationNativeIfRequested},
             {"InstallEmissionLightFixIfPossible", &InstallEmissionLightFixIfPossible},
             {"VerifyExpectedOgreExportsIfPossible", &VerifyExpectedOgreExportsIfPossible},
             {"InitializeJetFlamesConfig", &InitializeJetFlamesConfig},

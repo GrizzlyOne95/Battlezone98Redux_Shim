@@ -114,6 +114,18 @@ openshim_add_test(weapon_presentation_tests STD 20 SOURCES
     ../src/patches/weapon_presentation.cpp
 )
 
+openshim_add_test(weapon_presentation_native_policy_tests STD 20 SOURCES
+    weapon_presentation_native_policy_tests.cpp
+    ../src/patches/weapon_presentation.cpp
+)
+
+if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+    openshim_add_test(weapon_presentation_bridges_win32_tests STD 20 SOURCES
+        weapon_presentation_bridges_win32_tests.cpp
+        ../src/patches/weapon_presentation_call_bridges.cpp
+    )
+endif()
+
 openshim_add_test(headlight_falloff_tests STD 20 SOURCES
     headlight_falloff_tests.cpp
 )

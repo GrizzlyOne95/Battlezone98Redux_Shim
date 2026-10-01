@@ -1240,4 +1240,101 @@ void __declspec(naked) __cdecl Trampoline_ArtilleryTriggerVolley()
     }
 }
 
+// ---------------------------------------------------------------------------
+// LensFlare::~LensFlare singleton guards (atexit-time MaterialManager teardown).
+//
+// FUN_004F9250 is a destructor: it writes its own vtable pointers into this+0x00,
+// this+0x28 and this+0x2C, then calls Ogre::RenderQueueListener's destructor at
+// this+0x28. It is reached only from the atexit thunk 0x00866C60
+// (`mov ecx,0x009B7C28; call 0x004F9250; pop ebp; ret`), i.e. during CRT exit.
+//
+// Twice it calls Ogre::MaterialManager::getSingleton through the IAT slot
+// 0x00869EC0, keeps the result in a local, and dereferences it straight away to
+// reach vtable +0x38. Static destruction order has already taken MaterialManager
+// down, so the singleton is null and the dereference faults. Each site has the
+// same shape, offset only by the stack displacement:
+//
+//     call dword ptr [00869ec0]   ; MaterialManager::getSingleton
+//     mov  [ebp-0x4C], eax        ; ...and [ebp-0x50] at the second site
+//     lea  ecx, [ebp-0x28h]       ; ...and [ebp-0x40h] at the second site
+//     push ecx                     ; the local std::string, still on the stack
+//     mov  edx, [ebp-0x4C]         ; <- 0x004F92F1, and 0x004F935C. 5 stolen bytes.
+//     mov  eax, [edx]              //    faults here when the singleton is null
+//     mov  ecx, [ebp-0x4C]
+//     mov  edx, [eax+38h]
+//     call edx                     ; callee-cleaned: no stack adjust follows it
+//     mov  byte [ebp-0x4], 2       ; <- 0x004F92FE, and 0x004F9369
+//
+// Null path: pop the argument the stock code already pushed, then resume at the
+// state byte, so the local std::string is still destroyed and the rest of the
+// destructor runs untouched. Non-null path: replay both stolen instructions and
+// resume at site+5, which is bit-identical to stock.
+//
+// ECX is the only scratch register used, and it is dead on both paths -- the
+// resume block at site+5 loads it from [ebp-0x4C] and the skip target at site+13
+// does not read it. EBX is callee-saved in the destructor's frame and is left
+// alone.
+//
+// The two destinations are derived from the site's own address (site+5 and
+// site+13) so no second build-specific address is baked into the guard; the
+// site itself comes from the LensFlareMatMgrGuardSite1/2 static_pointers.
+// ---------------------------------------------------------------------------
+void __declspec(naked) __cdecl Trampoline_LensFlareMatMgrGuard1()
+{
+    static const char* name = "Trampoline_LensFlareMatMgrGuard1";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        mov  edx, [ebp - 0x4C]      // replay: MaterialManager* from getSingleton
+        test edx, edx
+        jz   null_site
+        mov  eax, [edx]              // replay: vtable
+        mov  ecx, [g_Site_LensFlareMatMgrGuard1]
+        add  ecx, 5
+        jmp  ecx                     // resume after the stolen instructions
+
+    null_site:
+        pop  ecx                     // balance the pushed std::string argument
+        mov  ecx, [g_Site_LensFlareMatMgrGuard1]
+        add  ecx, 0Dh
+        jmp  ecx                     // resume past the virtual call
+    }
+}
+
+void __declspec(naked) __cdecl Trampoline_LensFlareMatMgrGuard2()
+{
+    static const char* name = "Trampoline_LensFlareMatMgrGuard2";
+    __asm
+    {
+        pushfd
+        pushad
+        push name
+        call LogHit
+        add  esp, 4
+        popad
+        popfd
+
+        mov  edx, [ebp - 0x50]      // replay: MaterialManager* from getSingleton
+        test edx, edx
+        jz   null_site
+        mov  eax, [edx]              // replay: vtable
+        mov  ecx, [g_Site_LensFlareMatMgrGuard2]
+        add  ecx, 5
+        jmp  ecx                     // resume after the stolen instructions
+
+    null_site:
+        pop  ecx                     // balance the pushed std::string argument
+        mov  ecx, [g_Site_LensFlareMatMgrGuard2]
+        add  ecx, 0Dh
+        jmp  ecx                     // resume past the virtual call
+    }
+}
+
 } // namespace BZROpenShim

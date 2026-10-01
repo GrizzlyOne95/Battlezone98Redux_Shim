@@ -52,8 +52,28 @@ Notes for future attempts:
 - `baseName = "avtank"` inheritance does not resolve stock archive ODFs;
   ship a full copy instead.
 - The two unhandled crashes at `exe+0xF92F4` in `openshim_crash.log`
-  (2026-08-23) are LensFlare-constructor faults (`FUN_004F9250`,
-  MaterialManager singleton read during teardown), unrelated to weaponMask.
+  (2026-08-23) are teardown-time faults in `LensFlare::~LensFlare`
+  (`FUN_004F9250`), unrelated to weaponMask. An earlier revision of this note
+  called it a "LensFlare-constructor"; that was wrong, and the correction
+  matters because it changes the fix. It is a destructor, not a constructor: it
+  writes its own vtable pointers back into `this+0x00`, `this+0x28` and
+  `this+0x2C` and then calls `Ogre::RenderQueueListener::~RenderQueueListener`
+  at `this+0x28`. It runs only from the atexit thunk `0x00866C60`
+  (`mov ecx,0x009B7C28; call 0x004F9250; pop ebp; ret`), so it executes during
+  CRT exit, after static destruction has already taken `Ogre::MaterialManager`
+  down. It calls `Ogre::MaterialManager::getSingleton` through the IAT slot
+  `0x00869EC0` and dereferences the null result twice, once per technique, with
+  no null test, to reach vtable `+0x38`. Confirmed against
+  `openshim_crash_20260928_200455.dmp`: `0xC0000005` at `0x004F92F4` with
+  `EDX=0`, faulting thread 49188 (the main thread), returning to the
+  `0x00866C60` thunk with `[ebp-0x44]=0x009B7C28`. Live memory and the on-disk
+  image were compared over `0x00866C00-0x00866D00` and `0x004F9200-0x004F9400`
+  and differ in zero bytes, so both sites are stock. Guarded by the
+  "LensFlare MaterialManager Guard 1/2" and "2/2" patches; see
+  `../Docs/AGENT_PATCH_WORKFLOW.md`. The two sites have identical relative
+  layout, differing only in the stack displacement (`B4`/`B0`) and the local
+  string ([`ebp-0x28h`] against [`ebp-0x40h`]), so each guard derives both of
+  its destinations from its own site address.
 - Historical workaround lore says "do not ship all-zero weaponMask"; if the
   crash predates the current exe revision, byte-drift may have moved or fixed
   it. Run `bzr-ghidriff` against any older redistributable exe before
