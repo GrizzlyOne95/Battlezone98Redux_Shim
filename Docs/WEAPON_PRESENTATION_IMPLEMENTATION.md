@@ -1,16 +1,18 @@
 # Singleplayer weapon presentation implementation
 
-Implementation milestone: 2026-09-30.
+Implementation milestone: 2026-10-01.
 
-**Status: the runtime state and lifecycle bridge are implemented; native weapon
-producers and the renderer backend are not connected. This branch does not yet
-produce visible muzzle flash or recoil in the game.**
+**Status: the runtime, lifecycle bridge and GOG cannon native adapter candidate
+are implemented. The native installer is deliberately closed until live Windows
+qualification. This branch does not yet produce visible effects in the game.**
 
 The scope is singleplayer muzzle flash and primary mesh recoil. Existing weapon
 convergence remains the aiming implementation. The bridge uses the existing
 `IsSinglePlayerSession()` predicate, including its unreadable-state rejection,
 and requires the verified mission seam to report a running mission. There are
-no multiplayer packets, SDK exports, Lua events or new user-facing INI options.
+no multiplayer packets, SDK exports or Lua events. `SinglePlayer/MuzzleFlash`
+and `SinglePlayer/MeshRecoil` both default to 0. While qualification is pending,
+setting either key only logs why the native candidate remains inactive.
 
 The [research handoff](https://github.com/GrizzlyOne95/Battlezone_Source/pull/12)
 contains the pinned Redux integration map and original evidence. The GOG
@@ -33,7 +35,8 @@ into this public repository.
 | Pose staging | Preserve live local orientation and captured rest translation; output a separate visual pose; do not modify the supplied gameplay matrix |
 | Stable native pointer storage | Heap-stable per-weapon record; partial factory failure and failed detach retain its pointer slot for native back-reference writes |
 | Lifecycle bridge | Render synchronization, mission departure/reentry, hook reset and nested Ogre teardown use existing OpenShim seams |
-| Build integration | Both new source units compile in Plugin_OpenShim; the portable suite includes `weapon_presentation_tests` |
+| Native candidate | Scoped ParameterDB reads; constructor generation; pre-destruction/pre-replacement release; cannon factory observer; global simulation clock; native renderer backend; interception of later stock model pose writes |
+| Build integration | Native and portable source units compile in Plugin_OpenShim; portable policy tests and a real MSVC x86 assembly-bridge harness are included |
 
 The first recoil binding contract supports static local translation with live
 orientation updates. It rejects an animated/displaced translation instead of
@@ -43,10 +46,76 @@ baseline writer before support is added.
 ## Native adapter contract
 
 `RegisterQualifiedWeaponPresentationBackend` is an internal connection point,
-not an installer or a claim of runtime qualification. There is deliberately no
-caller yet. Stock content takes the null-runtime fast path through the existing
-frame and lifecycle seams. Registration allocates only when a qualified adapter
-explicitly connects an enabled setting.
+not a claim of runtime qualification. The candidate supplies a caller, guarded
+by `kNativePresentationLiveQualified = false`. Initialization records requests
+but installs no candidate hooks and allocates no presentation runtime while
+that gate is closed. Once qualified, registration runs lazily on the pinned
+engine thread. A producer on another thread forwards stock behavior.
+
+The actual GOG executable was transferred through a private GitHub Actions ZIP,
+then independently checked by file size, SHA-256 and Git blob SHA. All fourteen
+named resolves are unique exact-build signatures in `scripts/patches.json`;
+the three call sites also check their original rel32 destinations before any
+write. Static evidence is separate from live qualification.
+
+| Native surface | Resolved site | Recovered contract |
+|---|---|---|
+| Cannon accepted factory call | `0x005A7195` | ECX=OrdnanceClass; final Matrix and owner OBJ on stack; original RET 8/EAX retained; weapon recovered from caller `[EBP-190]` |
+| Weapon ODF scope pop | `0x00611DE4` | ECX=live ParameterDB scope; class at caller `[EBP-3C]`; read flashName/flashDuration before original pop |
+| Craft ODF scope pop | `0x004E1138` | Successful new-class path only; class at caller `[EBP-4C]`; read recoilName1..5 before original pop |
+| Global simulation | `0x00611270` | cdecl(float dt), plain RET; tick once before original weapon list pass |
+| Constructor/destructor | `0x00611300` / `0x00611500` | Constructor thiscall two args/RET 8, destructor thiscall no args/plain RET; native lifetime serial never inferred from address alone |
+| Slot replacement | `0x004A77A0` | thiscall slot/weapon, RET 8; release old slot before stock store |
+| Model pose writer | `0x00681A00` | cdecl(OBJ*, Matrix*); output a copied local matrix to Ogre, including subsequent stock/convergence updates |
+| Raw ParameterDB read | `0x00589620` | thiscall(scope, section FNV, key FNV), RET 8; copy borrowed value before scope ends |
+| Native render resolver | `0x0044E4C0` | cdecl(effect name), class returned in EAX; native class vtable+08 builds renderer |
+| Renderer update/detach | `0x0044DCA0` / `0x0044DC60` | thiscall on the same stable Render** slot; RET 4 / RET 8; stock detach uses null Matrix and zero float |
+
+The constructor steal is **9 bytes**, ending after `sub esp,0xE4`; a five-byte
+steal would split that instruction. Other steals end on qualified instruction
+boundaries. The assembly harness calls the production bridges using synthetic
+stock frames and checks factory argument forwarding, post-factory order, EAX,
+callee stack cleanup, nonvolatile registers and pre-pop scope reads.
+
+The native update ABI required changing `Backend::UpdateFlash` to accept
+`void*& storage`. Native Attach writes and retains the slot address again;
+passing a temporary pointer variable could cause a later native destructor to
+write into a dead stack frame. Tests check slot identity during updates too.
+
+The cannon follow pose retains the committed correction relative to the stock
+barrel/mount matrix, then applies it to current stock poses. Recoil modifies
+only a copy passed to Ogre. Translation animation, ambiguous slot/node matches,
+missed constructors, missed class loads and reload/lifetime disagreement fail
+closed. Bindings and class caches are bounded; configuration failures cannot
+abort native class loading or an already-created projectile. Other firing
+families and hot enabling after class loading are not implemented.
+
+### Required before activation
+
+`AGENT_TOOLING.md` requires a native live launch and target-byte capture before
+patch installation. This Linux environment cannot perform that Windows/game
+qualification. Keep the gate closed until the following evidence is recorded:
+
+1. Capture exact GOG build identity, settled PID, all fourteen resolves, three
+   call targets and five stolen instruction ranges. Check startup timing so
+   class/weapon constructors are observed before mission loading.
+2. Trace the cannon bridge on accepted/rejected shots and verify the factory
+   Matrix, owner, native result and caller-frame weapon. Confirm the one engine
+   thread also owns simulation, model writes, render sync and lifecycle seams.
+3. Use an audited single-sprite effect to prove create/update, no timer restart,
+   native self-expiry, detach visibility and eventual native list cleanup.
+   Check that render-queue ordering makes the flash visible at the proper pose.
+4. Use a static barrel with rotated axis, nonzero rest position and a child
+   marker. Prove subsequent stock writers retain recoil, descendants follow,
+   projectile origin/aim remains stock, and native model reload cannot reuse a
+   node under a still-valid owner identity without retiring its binding.
+5. Run pause/resume, replacement, failed detach, mission hops, save load and
+   nested scene teardown. Verify restoration retries never touch reused nodes.
+   Enter MP after SP and confirm no new flashes/recoil; return to SP with fresh
+   tokens. Steam remains unsupported pending independent build/lifecycle proof.
+
+Only after that evidence passes should an agent change the qualification gate.
+Do not treat a successful ABI harness or plugin build as these game tests.
 
 The native adapter must:
 
@@ -55,8 +124,9 @@ The native adapter must:
    build-specific addresses in `scripts/patches.json` when they are known.
    Do not enable guessed decompiler declarations or generic-prologue resolves.
 2. Read extension keys within the engine's active ParameterDB scope, copying
-   strings and inherited values before that scope ends. ODF parsing and class
-   invalidation are not supplied by this milestone.
+   strings and inherited values before that scope ends. The candidate captures
+   every observed class load and checks the native packed name on cache use;
+   missed loads and late enable remain unsupported.
 3. Bind only after the weapon/carrier slot and model exist. Supply native
    lifetime/handle identity, not address alone. Release before replacement or
    destruction. Catch allocation failures at this native boundary and allow the
@@ -130,8 +200,8 @@ cmake --build build/weapon-presentation-tests --parallel 4
 ctest --test-dir build/weapon-presentation-tests --output-on-failure
 ~~~
 
-All **57** host tests passed again after rebasing onto current main, including
-new presentation, existing convergence,
+All **58** host tests passed after merging current main, including
+new presentation and native policy tests, existing convergence,
 patch registration, resolve-table and shared-document checks. The new portable
 source/tests also compile with `-Wall -Wextra -Werror`.
 
@@ -148,7 +218,19 @@ axes, shared-slot recovery, pose restoration retries and stale binding tokens.
 The capacity regression retains a full table of failed recoil restorations
 after releasing every weapon, then verifies refusal and eventual reclamation.
 
-Windows plugin compilation is checked by the draft PR's `Release Win32` lane.
-Native hook bytes/ABI, deployed-game visibility, Ogre update order, asset
-loading and in-game lifetime tests remain separate gates. Do not describe this
-milestone as a working in-game feature.
+Static qualification can be reproduced with the private executable and the
+public `reverse_engineering/qualify_weapon_presentation_static.py` script:
+
+~~~sh
+python qualify_weapon_presentation_static.py <private-stock-exe> --report <private-evidence>/static_report.json
+~~~
+
+It checks executable identity, fourteen unique mapped-image signatures,
+three original call destinations, five complete stolen instruction ranges
+and eleven native callee cleanup sizes. Its output explicitly records
+`evidence_kind=static_only`, no PID and `activation_qualified=false`.
+
+Windows plugin compilation and the actual assembly bridges are checked by the
+draft PR's CI. Deployed-game visibility, Ogre update order, asset loading and
+in-game lifetime tests remain separate gates. Do not describe this milestone
+as a working in-game feature.

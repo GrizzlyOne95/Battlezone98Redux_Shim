@@ -44,6 +44,10 @@ The rc7 source checkpoint passed repository/package checks and the read-only ins
 
 [h2]High Priority[/h2]
 
+[h3]GOG LensFlare process-exit crash[/h3]
+
+[b]Recovered candidate - Qualification Pending (2026-09-30):[/b] The recovered candidate guards two MaterialManager dereferences and skips the global LensFlare atexit destructor call after Ogre teardown. All three patches require a unique signature and stand down on Steam. Patch registration passes host checks; Release Win32 and repeated GOG DX9/DX11 exit acceptance remain qualification gates. Steam and Proton/Wine runtime behavior remains unverified; this candidate is not a published release.
+
 [h3]World Builder Source-Folder Saves[/h3]
 
 [b]Implemented - Qualification Pending (2026-09-07):[/b] Opt-in editor routing now supports BZN and TRN with an actual-destination overwrite prompt before saving. Cancel prevents all native writes; TRN/HG2/MAT companions derive from the confirmed folder. Duplicate source names disable routing. Win32 dialog/file integration tests pass and GOG hook-site bytes are live-verified. Full editor save/reload and supported-platform qualification remain open. Default remains off; this has not been released.
@@ -158,7 +162,7 @@ This remains research, not a promise to replace Redux.
 
 [h3]Singleplayer Muzzle Flash and Mesh Recoil[/h3]
 
-[b]Active / Implementation Begun (2026-09-30):[/b] A draft implementation adds simulation-time flash state, shared mesh recoil, stable native pointer slots and cleanup through existing mission/scene seams, using the existing singleplayer gate. Host tests pass. The native firing, ODF and renderer adapters are not connected yet, so this does not produce visible in-game effects. Existing weapon convergence is reused. Windows CI checks compilation; native ABI/byte qualification and in-game lifecycle/visual acceptance remain open. Multiplayer is outside this workstream.
+[b]Active / Native Candidate Implemented (2026-10-01):[/b] The draft now includes GOG cannon shot observation, scoped ODF reads, weapon lifetime/slot cleanup, simulation timing, native flash rendering and copied Ogre recoil poses. The stock executable was verified and exact instruction sites recovered. An x86 harness tests the production assembly bridges. Activation remains blocked pending live Windows renderer lifetime, update order and model reload qualification; this does not yet produce in-game effects. Both new settings default OFF. Existing convergence and the existing singleplayer gate are retained. Multiplayer is outside this workstream.
 
 [h2]Implemented - Qualification Pending[/h2]
 

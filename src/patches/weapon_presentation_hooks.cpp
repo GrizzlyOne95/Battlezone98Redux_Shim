@@ -1,4 +1,5 @@
 #include "weapon_presentation_hooks.h"
+#include "weapon_presentation_native.h"
 #include "bzr_hooks_internal.h"
 
 #include <memory>
@@ -38,6 +39,7 @@ namespace BZROpenShim::Hooks
 
     WeaponPresentation::Runtime* TryGetSingleplayerWeaponPresentationRuntime() noexcept
     {
+        if (!WeaponPresentationNativeThreadAllowed()) return nullptr;
         // Recheck the existing fail-closed MP gate on every producer entry,
         // rather than relying only on a cached per-render reconcile verdict.
         RefreshSessionGate();
@@ -46,16 +48,19 @@ namespace BZROpenShim::Hooks
 
     void RefreshWeaponPresentationState() noexcept
     {
+        if (!WeaponPresentationNativeThreadAllowed()) return;
+        RefreshWeaponPresentationNativePoses();
         if (!g_Runtime || !g_Backend)
             return;
         RefreshSessionGate();
-        // Renderer synchronization only. dt comes from the native global
-        // simulation-pass adapter, which is not installed in this milestone.
+        // Renderer synchronization only. dt comes from the simulation adapter.
         g_Runtime->SynchronizeVisuals(*g_Backend);
     }
 
     void WeaponPresentationMissionRunStateChanged(bool running) noexcept
     {
+        if (!WeaponPresentationNativeThreadAllowed()) return;
+        if (!running) RetireWeaponPresentationNativeBindings();
         if (!g_Runtime)
             return;
         g_Runtime->SetSession(IsSinglePlayerSession(), running);
@@ -65,6 +70,9 @@ namespace BZROpenShim::Hooks
 
     void WeaponPresentationSceneTeardownBegin() noexcept
     {
+        if (!WeaponPresentationNativeThreadAllowed()) return;
+        WeaponPresentationNativeSceneBegin();
+        RetireWeaponPresentationNativeBindings();
         if (!g_Runtime)
             return;
         g_Runtime->BeginSceneTeardown();
@@ -74,12 +82,16 @@ namespace BZROpenShim::Hooks
 
     void WeaponPresentationSceneTeardownComplete() noexcept
     {
+        if (!WeaponPresentationNativeThreadAllowed()) return;
         if (g_Runtime)
             g_Runtime->EndSceneTeardown();
+        WeaponPresentationNativeSceneComplete();
     }
 
     void ResetWeaponPresentationState() noexcept
     {
+        if (!WeaponPresentationNativeThreadAllowed()) return;
+        RetireWeaponPresentationNativeBindings();
         if (!g_Runtime)
             return;
         g_Runtime->SetSession(false, false);

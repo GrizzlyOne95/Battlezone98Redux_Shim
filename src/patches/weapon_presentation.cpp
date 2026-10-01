@@ -397,6 +397,18 @@ namespace BZROpenShim::WeaponPresentation
         return true;
     }
 
+    bool Runtime::TryGetVisualRecoilPose(const Identity& owner, const Identity& node,
+        Matrix& visualPose) const noexcept
+    {
+        if (!impl_->Active())
+            return false;
+        const auto it = impl_->recoils.find({ owner, node });
+        if (it == impl_->recoils.end() || it->second.references == 0)
+            return false;
+        visualPose = it->second.Visual();
+        return true;
+    }
+
     bool Runtime::BeginSimulationStep(uint64_t stepSerial, float dt) noexcept
     {
         if (!impl_->Active() || stepSerial == 0 || stepSerial <= impl_->lastStep ||
