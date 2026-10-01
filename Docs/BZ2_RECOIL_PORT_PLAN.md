@@ -13,7 +13,7 @@ successful weapon shot
     -> return submesh to its captured rest transform over time
 ```
 
-This document is a design/research artifact only. It does not implement hooks or change runtime behavior.
+This document describes the planned native port. The [initial presentation runtime](WEAPON_PRESENTATION_IMPLEMENTATION.md) now implements shared-node displacement, simulation timing, visual pose staging and lifecycle state. Native weapon producers and the render backend remain unconnected; recoil is not yet visible in game.
 
 ## BZ2 behavior to preserve
 

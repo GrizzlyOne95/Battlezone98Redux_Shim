@@ -47,6 +47,9 @@ The rc7 source checkpoint passed repository/package checks and the read-only ins
 [h3]OpenShim Update / Repair Parity[/h3]
 
 [b]Implemented - Qualification Pending (2026-09-30):[/b] After the initial Setup / Repair installation, OpenShim Settings' Check for Updates also repairs the asset-pack manifest and installs missing player configuration, while preserving existing player settings. Support-file repairs refresh asset detection immediately; native suite updates still require a full game exit. This extends the native updater to match Setup / Repair's OpenShim file handling. Released v34 does not include this change; Steam and Proton/Wine runtime qualification remain required.
+[h3]GOG LensFlare process-exit crash[/h3]
+
+[b]Recovered candidate - Qualification Pending (2026-09-30):[/b] The recovered candidate guards two MaterialManager dereferences and skips the global LensFlare atexit destructor call after Ogre teardown. All three patches require a unique signature and stand down on Steam. Patch registration passes host checks; Release Win32 and repeated GOG DX9/DX11 exit acceptance remain qualification gates. Steam and Proton/Wine runtime behavior remains unverified; this candidate is not a published release.
 
 [h3]World Builder Source-Folder Saves[/h3]
 
@@ -159,6 +162,10 @@ DistributedObject and GameObject have already been reconstructed against the Win
 The obstacle to a native Windows x64 build is not pointer width; it is reconstructing a very large source-less codebase and replacing Windows-specific middleware/ABI assumptions.
 
 This remains research, not a promise to replace Redux.
+
+[h3]Singleplayer Muzzle Flash and Mesh Recoil[/h3]
+
+[b]Active / Native Candidate Implemented (2026-10-01):[/b] The draft now includes GOG cannon shot observation, scoped ODF reads, weapon lifetime/slot cleanup, simulation timing, native flash rendering and copied Ogre recoil poses. The stock executable was verified and exact instruction sites recovered. An x86 harness tests the production assembly bridges. Activation remains blocked pending live Windows renderer lifetime, update order and model reload qualification; this does not yet produce in-game effects. Both new settings default OFF. Existing convergence and the existing singleplayer gate are retained. Multiplayer is outside this workstream.
 
 [h2]Implemented - Qualification Pending[/h2]
 
