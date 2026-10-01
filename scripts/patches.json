@@ -156,6 +156,42 @@
       "identity": "Second null-carrier crash site, sibling of Pilot Carrier Null Guard. A five-slot loop (i < 5) loads Person+0x1A0 into ECX and calls Carrier::GetWeapon at 0x00417F60 without testing it, so a pilot whose ODF misplaces weaponHard1 outside [GameObjectClass] -- and therefore never allocated a Carrier -- faults at the callee's AND EAX,[ECX+0x2C]. Observed on GOG Redux 2.2.301 loading the Hell Gate II addon mission, whose sshg01.odf (unitName \"Player\") declares its hardpoints under [CraftClass]: EIP 0x00417F74, ECX=0, read=0x2C, return 0x005A1387, on the first simulation frame. The caller stores the result and immediately branches on null at 0x005A138D, so returning null is a path it already handles."
     },
     {
+      "name": "LensFlare MaterialManager Guard 1/2",
+      "platforms": [
+        "gog"
+      ],
+      "pattern": "FF 15 C0 9E 86 00 89 45 B4 8D 4D D8 51 8B 55 B4 8B 02 8B 4D B4 8B 50 38 FF D2 C6 45 FC 02 8D 4D D8",
+      "offset": 13,
+      "expected_size": 5,
+      "fallback": "0x004F92F1",
+      "require_unique": true,
+      "identity": "First of two unguarded singleton dereferences in LensFlare::~LensFlare at 0x004F9250 on GOG Redux 2.2.301. The function is a destructor, not a constructor: it writes its own vtable pointers into this+0x00, this+0x28 and this+0x2C and then calls Ogre::RenderQueueListener::~RenderQueueListener at this+0x28. It is reached only from the atexit thunk 0x00866C60 (mov ecx,0x009B7C28; call 0x004F9250; pop ebp; ret), so it runs during CRT exit. Here it calls Ogre::MaterialManager::getSingleton through the IAT slot 0x00869EC0, stores the result in [ebp-0x4C], pushes the local std::string at [ebp-0x28h] and then dereferences the singleton with no null test to reach vtable slot +0x38. Static destruction order has already torn MaterialManager down, so the singleton is null. Crash dump openshim_crash_20260928_200455.dmp: exception 0xC0000005, EIP 0x004F92F4, EDX=0, EAX=0, read at 0x00000000, faulting thread 49188 (the main thread, entered via BaseThreadInitThunk) returning to 0x00866C6D, [ebp-0x44]=0x009B7C28. Live memory and the on-disk image were compared over 0x00866C00-0x00866D00 and 0x004F9200-0x004F9400 and differ in zero bytes, so both sites are stock. The guard detours the two stolen instructions only when the singleton is null: it pops the already-pushed std::string argument (the virtual call is callee-cleaned, with no stack adjustment after it) and resumes at 0x004F92FE, which still sets the state byte at [ebp-0x4] and destroys the local string, so the rest of the destructor runs unchanged."
+    },
+    {
+      "name": "LensFlare MaterialManager Guard 2/2",
+      "platforms": [
+        "gog"
+      ],
+      "pattern": "FF 15 C0 9E 86 00 89 45 B0 8D 4D C0 51 8B 55 B0 8B 02 8B 4D B0 8B 50 38 FF D2 C6 45 FC 02 8D 4D C0",
+      "offset": 13,
+      "expected_size": 5,
+      "fallback": "0x004F935C",
+      "require_unique": true,
+      "identity": "Second unguarded singleton dereference in the same LensFlare::~LensFlare at 0x004F9250, and the site that would fault next if only the first were guarded: the two sites have identical relative layout, differing only in the stack displacement (B4/B0) and the local string ([ebp-0x28h] here against [ebp-0x40h] at the first site). It repeats call [0x00869EC0] (MaterialManager::getSingleton), stores it in [ebp-0x50], pushes the local string, and dereferences it for vtable slot +0x38 with no null test. The guard resumes at 0x004F9369 on the null path and at 0x004F9361 after replaying the stolen instructions, matching the sibling site exactly."
+    },
+    {
+      "name": "LensFlare Exit Destructor Skip",
+      "platforms": [
+        "gog"
+      ],
+      "pattern": "55 8B EC B9 28 7C 9B 00 E8 ?? ?? ?? ?? 5D C3",
+      "offset": 8,
+      "expected_size": 5,
+      "fallback": "0x00866C68",
+      "require_unique": true,
+      "identity": "The atexit thunk for the global LensFlare object at 0x009B7C28 on GOG Redux 2.2.301. Bytes at 0x00866C60 are 55 8B EC B9 28 7C 9B 00 E8 E3 25 C9 FF 5D C3, i.e. mov ecx,0x009B7C28; call 0x004F9250; pop ebp; ret. It is reached only from the CRT exit dispatch, so this call is the destructor's sole entry point at process teardown, after Ogre::MaterialManager has been destroyed. Three teardown dumps (openshim_crash_20260928_223900 and _224057, both OgreMain!INVALID_POINTER_READ, and _225458, RenderSystem_Direct3D11!INVALID_POINTER_READ) all fault inside the destructor's sub-object release at 0x004C85D0 (called at 0x004F92DF and 0x004F934A) -- before the two guarded getSingleton derefs -- and every stack carries the return address 0x00866C6D back into this thunk. The patch replaces the 5-byte call with NOPs so the destructor does not run at exit; the object's materials are already gone, so the removal is a no-op. Only this thunk is patched, so any non-exit (in-play) destructor call is unaffected, and the two LensFlare MaterialManager Guard sites remain as a fallback layer for the null-deref variant."
+    },
+    {
       "name": "Person Sniper Scan Weapon Null Guard",
       "pattern": "8B 8D C0 FC FF FF 8B 89 A0 01 00 00 E8 ?? ?? ?? ?? 89 85 4C FB FF FF 8B 95 4C FB FF FF 8B 42 08 81 78 0C 50 49 4E 53",
       "offset": 13,
@@ -837,6 +873,132 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Selected soundtrack track global. Decode the cmp eax,[abs32] operand at Music::SelectTrack+8, which compares the requested track before deciding whether to call Stop; the final store in the same selector writes that same global. Start formats it as %02d.ogg and the playlist advancer updates it. This is the selected track, not proof of playing, and Stop retains it."
+    },
+    {
+      "name": "WeaponPresentation::WeaponCtor",
+      "pattern": "55 8B EC 81 EC E4 00 00 00 A1 00 70 8E 00 33 C5 89 45 FC 56 57 89 8D 6C",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00611300",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); Base Weapon constructor; ECX=this, hardpoint OBJ and WeaponClass on stack; returns this in EAX with RET 8. Tracks each actual constructor lifetime before accepted-shot binding. Native adapter activation remains gated pending Windows lifetime/order qualification."
+    },
+    {
+      "name": "WeaponPresentation::WeaponDtor",
+      "pattern": "55 8B EC 83 EC 1C 89 4D F8 8B 45 F8 C7 00 94 A1 88 00 8D 4D FC E8 76 F0",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00611500",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); Weapon destructor removes the weapon from its global simulation list; ECX=this and plain RET. Retire stable flash attachment before stock destruction. Native adapter activation remains gated pending Windows lifetime/order qualification."
+    },
+    {
+      "name": "WeaponPresentation::SimulationPass",
+      "pattern": "55 8B EC 83 EC 18 C7 45 F4 F8 7D 5F 02 8D 4D FC E8 0B F3 E1 FF 8D 45 F0",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00611270",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); Global weapon-list simulation; cdecl(float dt), pushes its dt into each weapon vtable+18 call and ends in plain RET. Advance shared presentation once at pass entry. Native adapter activation remains gated pending Windows lifetime/order qualification."
+    },
+    {
+      "name": "WeaponPresentation::SetWeapon",
+      "pattern": "55 8B EC 51 89 4D FC 83 7D 08 00 7C 49 83 7D 08 05 7D 43 8B 45 08 8B 4D",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004A77A0",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); Carrier SetWeapon checks index 0..4 and writes [this+18+index*4], updates hardpoint mask at +2C, RET 8. Release old binding before replacement. Native adapter activation remains gated pending Windows lifetime/order qualification."
+    },
+    {
+      "name": "WeaponPresentation::ModelPose",
+      "pattern": "55 8B EC 83 EC 3C A1 00 70 8E 00 33 C5 89 45 FC 83 7D 08 00 0F 84 7F 01",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00681A00",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); Native OBJ-to-Ogre transform writer; cdecl(OBJ*, Matrix*), copies quaternion and converted position to the two Ogre nodes at OBJ+C8/CC without writing the input Matrix; plain RET. Stage a copied local pose. Native adapter activation remains gated pending Windows lifetime/order qualification."
+    },
+    {
+      "name": "WeaponPresentation::OrdnanceFactory",
+      "pattern": "55 8B EC 83 EC 10 89 4D FC 8B 45 FC 8B 48 38 83 B9 80 00 00 00 00 74 2F",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00586FF0",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); Cannon accepted-shot call at 0x005A7195 invokes this OrdnanceClass factory with ECX=class, final Matrix and owner OBJ on stack; RET 8 and EAX=result. Native adapter activation remains gated pending Windows lifetime/order qualification."
+    },
+    {
+      "name": "WeaponPresentation::PopScope",
+      "pattern": "55 8B EC 83 EC 28 89 4D FC 8B 45 FC 8B 08 8B 11 83 EA 01 89 55 F8 8B 45",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00589530",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); ParameterDB scope destructor; ECX=scope, decrements database refcount then releases it when unused, plain RET. Scoped extension reads must precede this call. Native adapter activation remains gated pending Windows lifetime/order qualification."
+    },
+    {
+      "name": "WeaponPresentation::RawGet",
+      "pattern": "55 8B EC 83 EC 18 89 4D F0 8B 45 F0 8B 08 83 C1 18 89 4D F8 8D 55 08 52",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00589620",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); ParameterDB raw lookup; ECX=scope, lowercase-FNV section/key DWORDs on stack, nested section/key map lookup; returns borrowed char pointer or null in EAX and RET 8. Native adapter activation remains gated pending Windows lifetime/order qualification."
+    },
+    {
+      "name": "WeaponPresentation::RenderFind",
+      "pattern": "55 8B EC 6A FF 68 EB 68 84 00 64 A1 00 00 00 00 50 81 EC 60 01 00 00 A1",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0044E4C0",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); RenderClass resolver; cdecl(effect identifier), lower-case native FNV lookup, recursively resolves renderBase and derives via prototype vtable+0C; returns class in EAX, plain RET. Native adapter activation remains gated pending Windows lifetime/order qualification."
+    },
+    {
+      "name": "WeaponPresentation::RenderUpdate",
+      "pattern": "55 8B EC 51 89 4D FC 8B 45 FC 83 38 00 74 19 8B 4D 08 51 8B 55 FC 52 8B",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0044DCA0",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); Renderer pointer update helper; ECX=stable Render** slot and Matrix* stack arg. Forwards the same slot and Matrix to renderer vtable+04; RET 4. Base attach rewrites its back-reference, so a temporary slot is unsafe. Native adapter activation remains gated pending Windows lifetime/order qualification."
+    },
+    {
+      "name": "WeaponPresentation::RenderDetach",
+      "pattern": "55 8B EC 51 89 4D FC 8B 4D FC 83 39 00 74 29 51 F3 0F 10 45 0C F3 0F 11",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0044DC60",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); Renderer pointer detach helper; ECX=stable Render** slot, Matrix* and float arguments on stack, forwards both to renderer vtable+08 and clears slot; RET 8. Stock wrapper destructor supplies null and zero. Native adapter activation remains gated pending Windows lifetime/order qualification."
+    },
+    {
+      "name": "WeaponPresentation::CannonShotCall",
+      "pattern": "8B 95 70 FE FF FF 8B 42 18 50 8D 8D 74 FF FF FF 51 8B 95 70 FE FF FF 8B 4A 0C E8 56 FE FD FF 89 85 6C FE FF FF 8B 85",
+      "offset": 26,
+      "mode": "address",
+      "fallback": "0x005A7195",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); Only the native cannon path after trigger/cooldown/ammo acceptance. Caller weapon is [EBP-190], final copied Matrix is [EBP-8C], owner is weapon+18 and ECX=weapon+0C. E8 calls OrdnanceFactory and following store preserves EAX at [EBP-194]. Live-runtime qualification pending; installation gate is closed."
+    },
+    {
+      "name": "WeaponPresentation::WeaponClassPopCall",
+      "pattern": "C7 45 FC FF FF FF FF 8D 4D C0 E8 47 77 F7 FF 8B 45 C4 8B 4D F4 64 89",
+      "offset": 10,
+      "mode": "address",
+      "fallback": "0x00611DE4",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); WeaponClass ctor successful ODF completion: ECX=live scope [EBP-40], newly loaded class stored at [EBP-3C], calls PopScope then reloads class into EAX. Read flashName/flashDuration before pop. Live-runtime qualification pending; installation gate is closed."
+    },
+    {
+      "name": "WeaponPresentation::CraftClassPopCall",
+      "pattern": "89 45 B4 C7 45 FC FF FF FF FF 8D 4D C4 E8 F3 83 0A 00 8B 45 B4 EB 33 E9 73 FF",
+      "offset": 13,
+      "mode": "address",
+      "fallback": "0x004E1138",
+      "require_unique": true,
+      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); GameObjectClass Find successful new-class path: native BuildClass result saved at [EBP-4C], ECX=scope [EBP-3C], calls PopScope then returns saved class. Read CraftClass recoilName1..5 before pop; cache hits and failure path are excluded. Live-runtime qualification pending; installation gate is closed."
     }
   ],
   "engine_addresses": [
@@ -1680,6 +1842,14 @@
     {
       "name": "StartupShellAutoLoadFlag",
       "address": "0x008EAAA8"
+    },
+    {
+      "name": "LensFlareMatMgrGuardSite1",
+      "address": "0x004F92F1"
+    },
+    {
+      "name": "LensFlareMatMgrGuardSite2",
+      "address": "0x004F935C"
     },
     {
       "name": "RetAddr_VehicleListModFix1",

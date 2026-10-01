@@ -167,7 +167,7 @@ Controllers must not outlive the associated weapon, vehicle, or effect handle. R
 
 Multiple weapon slots may fire through the same hardpoint in one tick. Do not allow two controllers to fight over one billboard handle, and do not accumulate opacity/scale unintentionally.
 
-Preferred design: one controller per weapon instance (mirrors BZ2 `Weapon+0x450`), with `Fire` re-arming the existing active flash (reset `remaining = flashDuration`) rather than allocating a second overlapping instance. This matches the BZ2 `+0x450==0` double-attach guard semantics while handling same-tick linked fire gracefully.
+One controller per weapon instance mirrors BZ2 `Weapon+0x450`. Its active-pointer guard covers both creation and timer initialization: repeated fire does not restart the active flash. The initial [presentation runtime](WEAPON_PRESENTATION_IMPLEMENTATION.md) implements that no-restart policy, including a flash pending its first renderer synchronization. Native weapon producers and the render backend remain unconnected.
 
 ## Transform semantics
 
