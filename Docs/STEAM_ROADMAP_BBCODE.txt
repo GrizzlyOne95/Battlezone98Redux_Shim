@@ -163,6 +163,10 @@ The obstacle to a native Windows x64 build is not pointer width; it is reconstru
 
 This remains research, not a promise to replace Redux.
 
+[h3]Singleplayer Muzzle Flash and Mesh Recoil[/h3]
+
+[b]Active / Native Candidate Implemented (2026-10-01):[/b] The draft now includes GOG cannon shot observation, scoped ODF reads, weapon lifetime/slot cleanup, simulation timing, native flash rendering and copied Ogre recoil poses. The stock executable was verified and exact instruction sites recovered. An x86 harness tests the production assembly bridges. Activation remains blocked pending live Windows renderer lifetime, update order and model reload qualification; this does not yet produce in-game effects. Both new settings default OFF. Existing convergence and the existing singleplayer gate are retained. Multiplayer is outside this workstream.
+
 [h2]Implemented - Qualification Pending[/h2]
 
 These items have working code but still have a meaningful acceptance gate.
