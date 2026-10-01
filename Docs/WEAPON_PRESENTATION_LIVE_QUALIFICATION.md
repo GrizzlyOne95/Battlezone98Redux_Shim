@@ -154,7 +154,7 @@ the production observer's argument/frame/matrix reads, unrelated caller
 filtering, native null results, registration rollback and event exhaustion.
 These checks qualify the tooling's host behavior, not its live integration.
 
-On 2026-10-01, all 60 Linux CTests passed, including the 16 Python cases and
+On 2026-10-01, all 60 Linux CTests passed, including the 17 Python cases and
 the production JavaScript observer harness. The collector's validation seam
 also passed an offline check against the hash-verified private GOG executable
 (fourteen sites, three calls and five steals). The unsupported-platform CLI
