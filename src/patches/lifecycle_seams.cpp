@@ -31,6 +31,7 @@
 #include "ogre_animation_profiler.h"
 #include "ogre_profiler_algorithms.h"
 #include "weapon_convergence.h"
+#include "weapon_presentation_hooks.h"
 #include "headlight_falloff.h"
 #include "shadow_far_distance.h"
 #include "sun_flash.h"
@@ -91,6 +92,8 @@ namespace BZROpenShim
 
         static void __fastcall SceneManagerClearSceneHook(void* sceneManager, void* /*unusedEdx*/)
         {
+            if (g_OgreFn_ClearSceneOriginal)
+                WeaponPresentationSceneTeardownBegin();
             TerrainProxySceneTeardownBegin(sceneManager, true);
             ForgetAllChunkProxySceneResources(L"clearScene");
             ForgetPilotFlashlight(L"clearScene");
@@ -98,10 +101,14 @@ namespace BZROpenShim
             if (g_OgreFn_ClearSceneOriginal)
                 g_OgreFn_ClearSceneOriginal(sceneManager);
             TerrainProxySceneTeardownComplete(sceneManager, true);
+            if (g_OgreFn_ClearSceneOriginal)
+                WeaponPresentationSceneTeardownComplete();
         }
 
         static void __fastcall SceneManagerDestroyAllMovablesHook(void* sceneManager, void* /*unusedEdx*/)
         {
+            if (g_OgreFn_DestroyAllMovablesOriginal)
+                WeaponPresentationSceneTeardownBegin();
             TerrainProxySceneTeardownBegin(sceneManager, false);
             ForgetAllChunkProxySceneResources(L"destroyAllMovableObjects");
             ForgetPilotFlashlight(L"destroyAllMovableObjects");
@@ -109,6 +116,8 @@ namespace BZROpenShim
             if (g_OgreFn_DestroyAllMovablesOriginal)
                 g_OgreFn_DestroyAllMovablesOriginal(sceneManager);
             TerrainProxySceneTeardownComplete(sceneManager, false);
+            if (g_OgreFn_DestroyAllMovablesOriginal)
+                WeaponPresentationSceneTeardownComplete();
         }
 
         void InstallSceneTeardownForgetHooksIfPossible()
@@ -363,6 +372,7 @@ namespace BZROpenShim
                 // (battlezone98redux.exe.35108.dmp).
                 DeactivateAllChunkProxySceneResources(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);
+                WeaponPresentationMissionRunStateChanged(false);
                 PilotFlashlightNotifyMissionRunStateChanged(false);
                 FogWakeNotifyMissionRunStateChanged(false);
                 NotifyExuMissionSimulationState(false);
@@ -371,6 +381,7 @@ namespace BZROpenShim
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
             {
                 HeadlightNotifyMissionRunStateChanged(true);
+                WeaponPresentationMissionRunStateChanged(true);
                 FogWakeNotifyMissionRunStateChanged(true);
                 PilotFlashlightNotifyMissionRunStateChanged(true);
                 ApplyTerrainTileBlendForCurrentMission();

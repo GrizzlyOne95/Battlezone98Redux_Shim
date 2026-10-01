@@ -28,6 +28,8 @@
 #include "ogre_animation_profiler.h"
 #include "ogre_profiler_algorithms.h"
 #include "weapon_convergence.h"
+#include "weapon_presentation_hooks.h"
+#include "weapon_presentation_native.h"
 #include "headlight_falloff.h"
 #include "shadow_far_distance.h"
 #include "sun_flash.h"
@@ -269,6 +271,7 @@ namespace BZROpenShim
     void ResetBzrHookRuntimeState()
     {
         NativeHud::Runtime::SetAdapterCapabilities(0);
+        ResetWeaponPresentationState();
         g_BzrFn_EngineFlameAddFlame = nullptr;
         g_BzrFn_EngineFlameControl = nullptr;
         g_BzrFn_EngineFlameSubmit = nullptr;
@@ -1531,6 +1534,7 @@ namespace BZROpenShim
             {"InitializeGlobalTurboConfig", &InitializeGlobalTurboConfig},
             {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
             {"InitializePilotFlashlightConfig", &InitializePilotFlashlightConfig},
+            {"InstallWeaponPresentationNativeIfRequested", &InstallWeaponPresentationNativeIfRequested},
             {"InstallEmissionLightFixIfPossible", &InstallEmissionLightFixIfPossible},
             {"VerifyExpectedOgreExportsIfPossible", &VerifyExpectedOgreExportsIfPossible},
             {"InitializeJetFlamesConfig", &InitializeJetFlamesConfig},
@@ -1647,6 +1651,10 @@ namespace BZROpenShim
         // destroyed here because this is the only callback guaranteed to run
         // while a world is rendered, on or off foot.
         RefreshPilotFlashlightState();
+
+        // Uses the existing SP gate; no allocation/work until a qualified
+        // presentation backend is registered. Never advance simulation here.
+        RefreshWeaponPresentationState();
 
         // Same driver again, and for the same reason: the packed team has to be
         // repaired while the player is still on foot, because the value is read
