@@ -1526,6 +1526,10 @@ StatsTracking = 1
 ; From the player's perspective this requires manually targeting a unit.
 ; Accepted: boolean. Default: ON.
 WeaponConvergence = 1
+; Native cannon presentation candidate; activation is held until Windows
+; lifetime/order qualification. These keys currently only request diagnostics.
+MuzzleFlash = 0
+MeshRecoil = 0
 
 ; Reticle convergence: use the same gameplay concept, but converge the local
 ; player's weapon hardpoints on the smart-reticle world point instead of an
