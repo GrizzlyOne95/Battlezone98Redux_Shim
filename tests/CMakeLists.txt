@@ -7,6 +7,19 @@ project(BzrNetProtocolTests LANGUAGES CXX)
 #   cmake -S tests -B tests/build && cmake --build tests/build -j && ctest --test-dir tests/build --output-on-failure
 enable_testing()
 
+# Qualification tooling has pure host seams. Neither test requires the private
+# executable, Windows process APIs, Frida, pefile or capstone.
+find_package(Python3 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME weapon_presentation_live_capture_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../reverse_engineering/test_weapon_presentation_live.py")
+endif()
+find_program(OPENSHIM_NODE_EXECUTABLE NAMES node nodejs)
+if(OPENSHIM_NODE_EXECUTABLE)
+    add_test(NAME weapon_presentation_probe_tests
+        COMMAND "${OPENSHIM_NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../reverse_engineering/test_weapon_presentation_probe.js")
+endif()
+
 # The common case: the listed sources, ../include, one C++ standard, warnings
 # as errors on both compilers, and a CTest entry named after the target.
 # Targets that need anything else (definitions, libraries, a Windows-only
