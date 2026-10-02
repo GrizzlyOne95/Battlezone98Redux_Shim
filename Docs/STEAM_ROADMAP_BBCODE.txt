@@ -44,6 +44,9 @@ The rc7 source checkpoint passed repository/package checks and the read-only ins
 
 [h2]High Priority[/h2]
 
+[h3]BZN mission-load failure context[/h3]
+
+[b]Recovered candidate - Qualification Pending (2026-09-30):[/b] The recovered diagnostic correlates the stock failure message and last object index with a bounded BZN object snapshot, including ODF, label, team and sequence number. Empty unbracketed labels no longer consume the following field. The hook uses the current mission lifecycle module. Host regression checks pass; Windows compilation and actual failed-load/normal-quit acceptance remain qualification gates. This is a diagnostic clue, not proof of the missing file or parse error.
 [h3]GOG LensFlare process-exit crash[/h3]
 
 [b]Recovered candidate - Qualification Pending (2026-09-30):[/b] The recovered candidate guards two MaterialManager dereferences and skips the global LensFlare atexit destructor call after Ogre teardown. All three patches require a unique signature and stand down on Steam. Patch registration passes host checks; Release Win32 and repeated GOG DX9/DX11 exit acceptance remain qualification gates. Steam and Proton/Wine runtime behavior remains unverified; this candidate is not a published release.
