@@ -356,7 +356,10 @@ namespace BZROpenShim::BznAnalysis
             key.assign(left);
             const std::string_view rhs = Trim(text.substr(eq + 1));
             value.assign(rhs);
-            valueOnNextLine = rhs.empty();
+            // Redux's bracketed fields place the value on the following line.
+            // An unbracketed `label =` can intentionally be empty; consuming
+            // the next `isUser [1] =` as its value invents duplicate labels.
+            valueOnNextLine = rhs.empty() && bracket != std::string_view::npos;
             return true;
         }
     }
