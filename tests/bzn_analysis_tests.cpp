@@ -9,6 +9,7 @@
 // load aborted on exactly that object -- with nothing in any log naming it.
 
 #include "bzn_analysis.h"
+#include "bzn_failure_log.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -1279,6 +1280,54 @@ int main()
         Check(r.objects.empty(), "empty: no objects");
         Check(r.problems.empty(), "empty: no problems");
         Check(!r.endings.mixed(), "empty: not mixed");
+    }
+
+    // Redux logs the load failure after the last object it attempted. The
+    // diagnostic must report that index without reusing a prior mission's
+    // failure on an ordinary later quit.
+    {
+        const std::string log =
+            "Sim Startup: Mission Load after 215 ms initializing\n"
+            "(Crystal) is loading (obj #13)\n"
+            "(Condor) is loading (obj #14)\n"
+            "Quiting Game because failed to load game files\n";
+        const auto failure = BZROpenShim::BznFailureLog::Parse(log);
+        Check(failure.failed && failure.hasObjectIndex && failure.objectIndex == 14,
+              "failure log: last loading object is #14");
+        const auto laterQuit = BZROpenShim::BznFailureLog::Parse(
+            log + "Sim Startup: Mission Load after 1 ms initializing\n"
+                  "SetRunning: was RUN_STARTED, now RUN_WAS_QUIT\n");
+        Check(!laterQuit.failed, "failure log: later normal quit ignores prior failure");
+        const auto noObject = BZROpenShim::BznFailureLog::Parse(
+            "Sim Startup: Mission Load\nQuiting Game because failed to load game files\n");
+        Check(noObject.failed && !noObject.hasObjectIndex,
+              "failure log: failure without object is still reported");
+    }
+
+    {
+        std::vector<std::string> lines = SampleMission();
+        lines[FindLine(lines, "label = player-1_hover")] = "label =";
+        const Result r = Analyze(Build(lines));
+        Check(!r.objects.empty() && r.objects[0].label.empty(),
+              "blank label: next field is not consumed as label text");
+    }
+
+
+    {
+        const std::string prefix = "Sim Startup: Mission Load\n";
+        const std::string failed = "Quiting Game because failed to load game files\n";
+        const auto oldObject = BZROpenShim::BznFailureLog::Parse(
+            "(Old) is loading (obj #99)\n" + prefix + failed);
+        Check(oldObject.failed && !oldObject.hasObjectIndex,
+              "failure log: prior mission object is not reused");
+        const auto overflow = BZROpenShim::BznFailureLog::Parse(prefix +
+            "(Bad) is loading (obj #999999999999999999999999999999)\n" + failed);
+        Check(overflow.failed && !overflow.hasObjectIndex,
+              "failure log: overflowing object index is rejected");
+        const auto malformed = BZROpenShim::BznFailureLog::Parse(prefix +
+            "(Bad) is loading (obj #14x)\n" + failed);
+        Check(malformed.failed && !malformed.hasObjectIndex,
+              "failure log: malformed object index is rejected");
     }
 
     if (OpenShimTest::FailureCount() == 0)
