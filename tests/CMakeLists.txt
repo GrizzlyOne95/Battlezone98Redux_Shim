@@ -565,3 +565,9 @@ add_test(NAME shared_bzr_docs_check
     COMMAND ${CMAKE_COMMAND} -DREPO_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/..
             -P ${CMAKE_CURRENT_SOURCE_DIR}/shared_bzr_docs_check.cmake
 )
+
+if(WIN32 AND MSVC)
+    openshim_add_test(live_reticle_team_tests STD 20 SOURCES
+        live_reticle_team_tests.cpp
+    )
+endif()
