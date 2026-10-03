@@ -523,4 +523,36 @@ At minimum, validate:
 - All PDA pages at common UI scales/aspect ratios.
 - All initial PDA themes for readability and warning-state clarity.
 
+---
+
+# 12. Later playtest findings
+
+## 12.1 Stock text stops rendering on ISDFC Test Range — ACTION / VERIFY
+
+Observed 2026-10-03 on GOG Redux 2.2.301 with the ISDF Chronicles addon,
+mission "ISDFC: Test Range" (`isdftest.lua`). All stock in-game text stopped
+rendering: HUD gauge text was missing and a large black "B" block was drawn
+near the top center of the screen. Other missions rendered text normally.
+
+Owner: **OpenShim** (stock fix), unless hypothesis 2 is confirmed, in which
+case **EXU**.
+
+Hypotheses:
+
+1. **Primary — stock bug.** The user has seen this before and believes
+   invalid view-range values in the map's TRN file trigger it.
+2. **Secondary — correlated, unconfirmed.** At the same moment EXU created
+   its private Ogre OverlaySystem for ISDFC's `wetglass.lua` rain overlay,
+   which registered an Ogre FontManager. Campaign Reimagined's Workshop mod
+   (`mods/3686673790/OverlayFont/CRBZoneOverlay.fontdef`) defines a font
+   sourced from `bzfont.dds`, the texture stock text uses, and
+   `BZOgreLogfile` shows `bzfont.dds` loaded with a full mip chain right
+   afterwards.
+
+Repro / triage:
+
+- Compare the Test Range TRN's view-range values against stock TRNs.
+- Run Test Range with weather/windshield rain off. Text that still breaks
+  points to the TRN; text that renders points to the EXU overlay/font path.
+
 This file is intended to remain the master checklist for the next coordinated polish/QA implementation pass.
