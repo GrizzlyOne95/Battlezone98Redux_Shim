@@ -780,7 +780,8 @@ namespace BZROpenShim
                     outMeshNameCapacity))
             {
                 static volatile long s_GenericFallbackLogBudget = 64;
-                if (InterlockedDecrement(&s_GenericFallbackLogBudget) >= 0)
+                if (g_ChunkEventLogging &&
+                    InterlockedDecrement(&s_GenericFallbackLogBudget) >= 0)
                 {
                     LogChunkDiagnostic(
                         "chunkmesh",
