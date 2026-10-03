@@ -127,6 +127,20 @@ this is not a promise of zero overhead for arbitrary assets and hardware.
 
 ## Validation
 
+Piece frames and recentring (local 1.0.0.46): all 67 CTest checks pass,
+including rotated-bone positions and normals, the origin shift, bit-exact
+cache centres and mis-sized chunk lengths. Each recentred chunk logs a frame
+check against the fragment's node-local legacy geometry. Redux stores those
+arrays turned 180 degrees about Y relative to the rendered mesh, while chunk
+rendering matches Redux's own object placement (`FUN_006802b0`, quaternion via
+row-major `FUN_0081f1e0`). The pivot probe (Sabre, recycler, two buildings,
+skeletonless vehicle) generated fresh v4 pieces on GOG DX9 and DX11. All 86
+recentred pieces agreed with the engine geometry on both renderers, including
+the recycler's 24 rotated bones; no piece disagreed. DX9 exited with code 0.
+DX11 reproduced the existing driver-thread shutdown fault, and the full set of
+first-chance entries matched the 1.0.0.44 and 1.0.0.45 runs exactly. Motion
+was not inspected visually.
+
 The pivot correction (local 1.0.0.45) passed all 67 CTest checks, including
 serialized Ogre identity/rotated quaternions and translated/scaled parent
 hierarchies. The current ISDFC audit extracted 528 meshes; 27 lacked a usable
