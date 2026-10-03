@@ -523,4 +523,151 @@ At minimum, validate:
 - All PDA pages at common UI scales/aspect ratios.
 - All initial PDA themes for readability and warning-state clarity.
 
+---
+
+# 12. Later playtest findings
+
+## 12.1 Stock text stops rendering on ISDFC Test Range — FIXED (OpenShim, branch `agent/stock-text-fog-fix`)
+
+Observed 2026-10-03 on GOG Redux 2.2.301 with the ISDF Chronicles addon,
+mission "ISDFC: Test Range" (`isdftest.lua`). All stock in-game text stopped
+rendering: HUD gauge text was missing and a large black "B" block was drawn
+near the top center of the screen. Other missions rendered text normally.
+
+Owner: **OpenShim** (stock fix), unless hypothesis 2 is confirmed, in which
+case **EXU**.
+
+Hypotheses:
+
+1. **Primary — stock bug.** The user has seen this before and believes
+   invalid view-range values in the map's TRN file trigger it.
+2. **Secondary — correlated, unconfirmed.** At the same moment EXU created
+   its private Ogre OverlaySystem for ISDFC's `wetglass.lua` rain overlay,
+   which registered an Ogre FontManager. Campaign Reimagined's Workshop mod
+   (`mods/3686673790/OverlayFont/CRBZoneOverlay.fontdef`) defines a font
+   sourced from `bzfont.dds`, the texture stock text uses, and
+   `BZOgreLogfile` shows `bzfont.dds` loaded with a full mip chain right
+   afterwards.
+
+Repro / triage:
+
+- Compare the Test Range TRN's view-range values against stock TRNs.
+- Run Test Range with weather/windshield rain off. Text that still breaks
+  points to the TRN; text that renders points to the EXU overlay/font path.
+
+Findings 2026-10-03:
+
+- Hypothesis 2 is refuted. `hilo.bzn`, which uses the same `hilo.trn`
+  terrain, also breaks: pause-menu text is gone as well, the run creates no
+  EXU overlay, and text still breaks with EXU disabled. `dunes.bzn`, a
+  near-identical CC-port map, renders text correctly. Owner: OpenShim
+  (stock), with the content fix in ISDFC.
+- The view-range values are in the range other working ISDFC maps use.
+  Stripped palettes, a blank `BackdropTexture`, and the atlas size are also
+  present on maps that work.
+- Leading suspect: `hilo.trn` has `[Clouds]` with Count=24, Type=0 and
+  `Texture0-2 = mcloud1.map`. `dunes.trn` has no `[Clouds]`. `mcloud1.map`
+  and any matching material exist nowhere in the install. `bridges`,
+  `isdfms10` and `isdfms11` use the same block.
+- Cloud test plan: remove `[Clouds]` from `hilo.trn`, or point it at stock
+  `acloud2.map`, and check whether text returns. Check `bridges.bzn`.
+
+Findings 2026-10-03 (harness A/B, windowed, `hilo.trn` restored by SHA256):
+
+- The `[Clouds]` suspect is refuted. Text stays broken on `hilo.bzn` with
+  `[Clouds]` removed, and also with `Texture0-2 = acloud2.map`
+  (`acloud2.tga` loads). `bridges.bzn`, with the same `mcloud1` block, and
+  `dunes.bzn` both render HUD and pause-menu text.
+- On hilo the HUD panels, the radar and the Scrap/Pilots backing panel (the
+  black "B") all draw, but every glyph is missing. `bzfont.dds` still loads.
+  Font rendering is lost, not the HUD.
+- The logs do not tell broken runs from working ones. Each run has the same
+  missing-mesh preload errors and one handled first-chance access violation
+  at `openshim.dll+0x9D000` (read of 0x95), on bridges and dunes too, so
+  that access violation is not the cause.
+- In the ISDFC addon, the uncommitted CC port changed `hilo.trn`, `.hg2`,
+  `.mat`, `.lgt`, `.BMP`, `.bzn` and `.lua`, and added `hilo.act`,
+  `hilo_cc_atlas.material` and `hiloenv.lua`. Test Range shares only the
+  terrain assets with `hilo.bzn`, so the cause is most likely among those.
+
+Findings 2026-10-03 (terrain bisect, 14 harness runs, all files restored by
+SHA256):
+
+- With every hilo terrain asset at `HEAD`, text renders. Running with only
+  the current `hilo.trn` `[NormalView]` keys set back to their `HEAD` values
+  also brings text back, with the 2560 `[Size]`, the hg2, the atlas, `.act`,
+  `.mat`, `.lgt` and `.BMP` all kept current. Text was possibly slightly
+  dimmer.
+- These keys trigger the loss: `Time=830 FogStart=100 FogEnd=350
+  VisibilityRange=400 FogBreak=30 FlatRange=450`. At `HEAD` they were `900 /
+  120 / 250 / 250 / 60 / 250`. No single key was isolated.
+- Ruled out: `[Clouds]`, `[Sky]`, `[Color]`, `[Sun_*]`, `[Atlases]`, the hcc
+  texture types, `Height`, `hilo.act`, the atlas material,
+  `.mat`/`.lgt`/`.BMP`.
+- No single value is out of range. Working maps exceed each one: `dunes`
+  uses `FogEnd=475 VisibilityRange=500 FlatRange=450`, and `isdfms14` uses
+  the same `FogBreak`/`FlatRange`. The trigger is therefore a combination,
+  possibly with the 2560 terrain size, or `Time=830`. This corrects the
+  earlier "view-range values are not the cause" note.
+- Next: isolate the key with roughly three halving runs, then find the stock
+  code path where that view/fog state stops font glyphs drawing, for an
+  OpenShim fail-safe. Content workaround for ISDFC: restore the `HEAD`
+  `[NormalView]` values in `hilo.trn`.
+
+Root cause and fix 2026-10-03 (static RE of GOG 2.2.301 plus a Frida dump):
+
+- **Mechanism (proven): stock places the HUD's front layer one float ULP in
+  front of the camera near plane.** View setup (`0x0066536B`..`0x0066538B`)
+  sets the main camera near clip to 0.08 (`0x008A2530`). It then stores
+  `near * 1.0000001f` (`0x008A2608`) to `0x008ED780`, the screen-space 2D depth
+  floor. Text draws clamp their depth (`DAT_00920EF4`) up to that floor
+  (`FUN_0068B050`, seeded by `FUN_0068B0E0`). `FUN_00686600` and
+  `FUN_00685740` turn each 2D vertex depth `d` into
+  `z = P[2][3] * (1/d) - P[2][2]` using the main camera's projection, and the
+  batch is then drawn with an identity projection. At `d = near * 1.0000001`
+  that z sits on the near plane to within float rounding, and the rounding
+  direction depends on the projection's far term, which the TRN's
+  `[NormalView]` values set (the live far clip on broken `hilo` is 1800). For
+  some far values z rounds just outside, and the GPU clips the whole floor
+  layer. `depth_check off` does not prevent clipping.
+- **Live evidence:** on `hilo.bzn` with the broken values (windowed GOG run,
+  Frida on `DynamicGeometry::prepareForSubmit` `0x00678CD0`), DynamicMain
+  held 33 batches and 7,526 vertices in one chunk. Seven HUD batches,
+  including one of 632 vertices, sat exactly on the floor at squared depth
+  6.400e-3 = 0.08². The rest sat deeper, at 6.6e-3 to 1.44e-2. The probe
+  did not resolve material names, so the batch-to-element mapping is
+  inferred. The link is proven by the fix: moving only the floor restored
+  every missing element. Glyph loss is only the most visible symptom; the
+  gauges, weapon icons and reticle on the same layer vanish too.
+- **Why it looks like a value combination:** a float32 model of the
+  projection with near = 0.08 clips the floor layer only at a sparse,
+  arbitrary set of far distances. It is illustrative only: it did not flag
+  1800, so Ogre's exact matrix arithmetic differs from the model. No single
+  TRN key is out of range; the far clip that results from the whole
+  `[NormalView]` combination lands on a value whose rounding falls outside.
+  How the far clip is derived from those keys was not traced. "Dimmer text"
+  is not explained by this mechanism.
+- **Refuted along the way:** scene fog (the stock `ui.hlsl`/`ui-sm4.hlsl` and
+  CR's `CR_ui` override have no fog term; NormalView fog reaches only
+  `SceneManager::setFog` at `0x00683370`); DynamicGeometry capacity (it grows
+  in 65,536-vertex chunks and never drops batches); `Time` (all tested values
+  map to the same lighting bucket in `FUN_0068A230`).
+- **Fix (OpenShim):** patch `HUD 2D Depth Floor Margin` (DWORD). It rewrites
+  only the abs32 operand of `mulss xmm0,[0x008A2608]` at `0x00665387` to an
+  OpenShim-owned `1.0001f`, so the floor becomes `near * 1.0001`. The same
+  float32 model clips at no far value from 100 to 4000. HUD layers are
+  separated by depth steps of 0.0005 or more (at least 0.6% relative), so
+  the 0.01% shift keeps their order. The scan pattern covers all five
+  instructions, including the `0x008A2530` and `0x008ED780` operands, and
+  `require_unique` is set, so any other build stands down. Owner: OpenShim.
+  The ISDFC content workaround is no longer required once the fix ships.
+- **Validated 2026-10-03** (windowed GOG run, broken `hilo.trn` swapped in
+  temporarily and restored by SHA256): the log shows `[OK] HUD 2D Depth Floor
+  Margin wrote 4 bytes to 0x00665387`, and the live floor reads 0.080008.
+  Every HUD element draws: unit list, Scrap/Pilots, gauges, weapon list and
+  icons, reticle, and pause-menu labels. The first post-deploy launch showed
+  only a black window at 30 s, because the new build's shader fingerprint
+  dropped the microcode cache and the shaders were recompiling. The warm
+  relaunch was the validating run.
+
 This file is intended to remain the master checklist for the next coordinated polish/QA implementation pass.
