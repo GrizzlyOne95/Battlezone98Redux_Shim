@@ -589,9 +589,29 @@ Findings 2026-10-03 (harness A/B, windowed, `hilo.trn` restored by SHA256):
   `.mat`, `.lgt`, `.BMP`, `.bzn` and `.lua`, and added `hilo.act`,
   `hilo_cc_atlas.material` and `hiloenv.lua`. Test Range shares only the
   terrain assets with `hilo.bzn`, so the cause is most likely among those.
-- Next: swap hilo's terrain assets one at a time back to their `HEAD`
-  versions (TRN first, then `.mat`/`.hg2`/`.act`/atlas, then `.lgt`) to find
-  the asset that triggers the loss. Then find the stock code path that
-  breaks font rendering for an OpenShim fail-safe.
+
+Findings 2026-10-03 (terrain bisect, 14 harness runs, all files restored by
+SHA256):
+
+- With every hilo terrain asset at `HEAD`, text renders. Running with only
+  the current `hilo.trn` `[NormalView]` keys set back to their `HEAD` values
+  also brings text back, with the 2560 `[Size]`, the hg2, the atlas, `.act`,
+  `.mat`, `.lgt` and `.BMP` all kept current. Text was possibly slightly
+  dimmer.
+- These keys trigger the loss: `Time=830 FogStart=100 FogEnd=350
+  VisibilityRange=400 FogBreak=30 FlatRange=450`. At `HEAD` they were `900 /
+  120 / 250 / 250 / 60 / 250`. No single key was isolated.
+- Ruled out: `[Clouds]`, `[Sky]`, `[Color]`, `[Sun_*]`, `[Atlases]`, the hcc
+  texture types, `Height`, `hilo.act`, the atlas material,
+  `.mat`/`.lgt`/`.BMP`.
+- No single value is out of range. Working maps exceed each one: `dunes`
+  uses `FogEnd=475 VisibilityRange=500 FlatRange=450`, and `isdfms14` uses
+  the same `FogBreak`/`FlatRange`. The trigger is therefore a combination,
+  possibly with the 2560 terrain size, or `Time=830`. This corrects the
+  earlier "view-range values are not the cause" note.
+- Next: isolate the key with roughly three halving runs, then find the stock
+  code path where that view/fog state stops font glyphs drawing, for an
+  OpenShim fail-safe. Content workaround for ISDFC: restore the `HEAD`
+  `[NormalView]` values in `hilo.trn`.
 
 This file is intended to remain the master checklist for the next coordinated polish/QA implementation pass.
