@@ -127,90 +127,168 @@ struct Model
     std::vector<Sub> subs;
     std::string skeleton;
 };
-Geometry geometry(Reader r)
+// Ogre's MeshSerializer reads chunks sequentially by content and uses the
+// declared lengths only to skip chunks it does not know. Some exporters'
+// v1.100/v1.8 lengths are a few bytes off, which Ogre tolerates, so parse
+// the same way: known chunks by their contents, children while their IDs fit.
+struct Head
+{
+    uint16_t id;
+    uint32_t size;
+    size_t start;
+};
+bool nextHead(Reader &r, Head &h)
+{
+    if (r.p > r.end || r.end - r.p < 6)
+        return false;
+    h.start = r.p;
+    h.id = r.get<uint16_t>();
+    h.size = r.get<uint32_t>();
+    return true;
+}
+void rewind(Reader &r, const Head &h)
+{
+    r.p = h.start;
+}
+Geometry geometry(Reader &r, bool copy)
 {
     Geometry g;
     g.count = r.get<uint32_t>();
     if (g.count > 1000000)
         throw std::runtime_error("oversized vertex count");
-    while (r.p < r.end)
+    Head h;
+    while (nextHead(r, h))
     {
-        uint16_t id;
-        auto c = r.chunk(id);
-        if (id == 0x5100)
-            while (c.p < c.end)
-            {
-                uint16_t eid;
-                auto e = c.chunk(eid);
-                if (eid == 0x5110)
-                    g.elements.push_back({e.get<uint16_t>(), e.get<uint16_t>(), e.get<uint16_t>(), e.get<uint16_t>(),
-                                          e.get<uint16_t>()});
-            }
-        if (id == 0x5200)
+        if (h.id == 0x5100)
         {
-            auto source = c.get<uint16_t>();
-            auto stride = c.get<uint16_t>();
-            uint16_t did;
-            auto d = c.chunk(did);
-            if (did != 0x5210 || stride == 0 || stride > 4096)
+            Head e;
+            while (nextHead(r, e))
+            {
+                if (e.id != 0x5110)
+                {
+                    rewind(r, e);
+                    break;
+                }
+                g.elements.push_back({r.get<uint16_t>(), r.get<uint16_t>(), r.get<uint16_t>(), r.get<uint16_t>(),
+                                      r.get<uint16_t>()});
+                if (g.elements.size() > 64)
+                    throw std::runtime_error("oversized vertex declaration");
+            }
+        }
+        else if (h.id == 0x5200)
+        {
+            auto source = r.get<uint16_t>();
+            auto stride = r.get<uint16_t>();
+            Head d;
+            if (!nextHead(r, d) || d.id != 0x5210 || stride == 0 || stride > 4096)
                 throw std::runtime_error("invalid vertex buffer");
             const size_t n = static_cast<size_t>(g.count) * stride;
-            d.need(n);
-            g.buffers[source] = {stride, Bytes(d.b.begin() + d.p, d.b.begin() + d.p + n)};
+            r.need(n);
+            Buffer buffer{stride, {}};
+            if (copy)
+                buffer.data.assign(r.b.begin() + r.p, r.b.begin() + r.p + n);
+            if (!g.buffers.emplace(source, std::move(buffer)).second)
+                throw std::runtime_error("duplicate vertex buffer source");
+            r.p += n;
+        }
+        else
+        {
+            rewind(r, h);
+            break;
         }
     }
     return g;
 }
-Assignment assignment(Reader c)
+Assignment assignment(Reader &r)
 {
-    return {c.get<uint32_t>(), c.get<uint16_t>(), c.get<float>()};
+    return {r.get<uint32_t>(), r.get<uint16_t>(), r.get<float>()};
 }
-Model model(const Bytes &b)
+Sub submesh(Reader &r, bool copy)
+{
+    Sub s;
+    s.material = r.line();
+    s.shared = r.get<uint8_t>() != 0;
+    auto count = r.get<uint32_t>();
+    bool wide = r.get<uint8_t>() != 0;
+    if (count > 3000000)
+        throw std::runtime_error("oversized index count");
+    r.need(static_cast<size_t>(count) * (wide ? 4 : 2));
+    s.indices.reserve(count);
+    for (uint32_t i = 0; i < count; ++i)
+        s.indices.push_back(wide ? r.get<uint32_t>() : r.get<uint16_t>());
+    Head h;
+    if (!s.shared)
+    {
+        if (!nextHead(r, h) || h.id != 0x5000)
+            throw std::runtime_error("missing submesh geometry");
+        s.geometry = geometry(r, copy);
+    }
+    while (nextHead(r, h))
+    {
+        if (h.id == 0x4010)
+            s.operation = r.get<uint16_t>();
+        else if (h.id == 0x4100)
+            s.assignments.push_back(assignment(r));
+        else if (h.id == 0x4200)
+        {
+            r.line();
+            r.line();
+        }
+        else
+        {
+            rewind(r, h);
+            break;
+        }
+    }
+    return s;
+}
+// `copy` false walks the same structure without copying vertex data, for a
+// cache hit that only needs the skeleton link.
+Model model(const Bytes &b, bool copy = true)
 {
     auto r = header(b, true);
-    uint16_t id;
-    auto root = r.chunk(id);
-    if (id != 0x3000)
+    Head h;
+    if (!nextHead(r, h) || h.id != 0x3000)
         throw std::runtime_error("missing Ogre mesh");
-    root.get<uint8_t>();
+    // Lengths are not trusted: shipped Resurgence/stock exports over- and
+    // under-declare the root by up to 17 bytes, and Ogre ignores them.
+    r.get<uint8_t>();
     Model m;
-    while (root.p < root.end)
+    // Ogre writes shared geometry, submeshes, the skeleton link and mesh
+    // bone assignments, then always at least the bounds chunk. Stopping at
+    // a known trailing chunk proves everything consumed here is complete,
+    // without trusting a possibly mis-sized length to skip it.
+    bool complete = false;
+    while (nextHead(r, h))
     {
-        auto c = root.chunk(id);
-        if (id == 0x5000)
-            m.geometry = geometry(c);
-        if (id == 0x6000)
-            m.skeleton = c.line();
-        if (id == 0x7000)
-            m.assignments.push_back(assignment(c));
-        if (id == 0x4000)
+        if (h.id == 0x5000)
+            m.geometry = geometry(r, copy);
+        else if (h.id == 0x4000)
         {
-            Sub s;
-            s.material = c.line();
-            s.shared = c.get<uint8_t>() != 0;
-            auto count = c.get<uint32_t>();
-            bool wide = c.get<uint8_t>() != 0;
-            if (count > 3000000)
-                throw std::runtime_error("oversized index count");
-            c.need(static_cast<size_t>(count) * (wide ? 4 : 2));
-            for (uint32_t i = 0; i < count; ++i)
-                s.indices.push_back(wide ? c.get<uint32_t>() : c.get<uint16_t>());
-            while (c.p < c.end)
-            {
-                uint16_t sid;
-                auto d = c.chunk(sid);
-                if (sid == 0x5000)
-                    s.geometry = geometry(d);
-                if (sid == 0x4100)
-                    s.assignments.push_back(assignment(d));
-                if (sid == 0x4010)
-                    s.operation = d.get<uint16_t>();
-            }
-            m.subs.push_back(std::move(s));
+            m.subs.push_back(submesh(r, copy));
             if (m.subs.size() > 1024)
                 throw std::runtime_error("oversized submesh count");
         }
+        else if (h.id == 0x6000)
+            m.skeleton = r.line();
+        else if (h.id == 0x7000)
+            m.assignments.push_back(assignment(r));
+        else if (h.id >= 0x8000 && h.id <= 0xE000 && (h.id & 0x0FFF) == 0)
+        {
+            // LOD, bounds, submesh names, edge lists, poses, animations or
+            // extremes. Bounds is fixed-size, so check its body as well.
+            if (h.id == 0x9000)
+                r.need(28);
+            complete = true;
+            break;
+        }
+        else
+            throw std::runtime_error("unexpected Ogre mesh chunk");
     }
+    if (m.subs.empty())
+        throw std::runtime_error("mesh has no submeshes");
+    if (!complete)
+        throw std::runtime_error("truncated Ogre mesh (no trailing chunks)");
     return m;
 }
 using V = std::array<float, 3>;
@@ -331,7 +409,9 @@ std::vector<int> triangleOwners(const Sub &sub, const Model &model, const std::m
     for (auto a : assignments)
     {
         if (a.vertex >= g.count || !std::isfinite(a.weight) || a.weight < 0 || !bones.count(a.bone))
-            throw std::runtime_error("invalid bone assignment");
+            throw std::runtime_error("invalid bone assignment vertex=" + std::to_string(a.vertex) + "/" +
+                                     std::to_string(g.count) + " bone=" + std::to_string(a.bone) +
+                                     " weight=" + std::to_string(a.weight));
         if (a.weight > 0)
             weights[a.vertex][a.bone] += a.weight;
     }
@@ -374,7 +454,58 @@ std::vector<int> triangleOwners(const Sub &sub, const Model &model, const std::m
     }
     return owners;
 }
-Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, V pivot, V &lo, V &hi, float &radius)
+// Maps source model space into a piece's own frame: remove the bone's bind
+// translation and rotation, then the piece-bounds centre.
+struct Frame
+{
+    V pivot{};
+    Q inverse{1, 0, 0, 0};
+    V center{};
+    bool rotate = false;
+};
+Frame boneFrame(const Bone &b)
+{
+    Frame f;
+    f.pivot = b.pos;
+    const float n = std::sqrt(b.ori[0] * b.ori[0] + b.ori[1] * b.ori[1] + b.ori[2] * b.ori[2] + b.ori[3] * b.ori[3]);
+    if (!std::isfinite(n) || n < 1e-6f)
+        throw std::runtime_error("degenerate bone orientation");
+    f.inverse = {b.ori[0] / n, -b.ori[1] / n, -b.ori[2] / n, -b.ori[3] / n};
+    // Identity binds keep exact source bytes for directions; anything else is
+    // a real rotation the fragment's world matrix will apply again.
+    f.rotate = std::abs(std::abs(f.inverse[0]) - 1.0f) > 1e-7f;
+    return f;
+}
+V toFrame(const Frame &f, V p)
+{
+    for (int i = 0; i < 3; ++i)
+        p[i] -= f.pivot[i];
+    return f.rotate ? rotate(f.inverse, p) : p;
+}
+bool isDirection(uint16_t semantic)
+{
+    // VES_NORMAL, VES_BINORMAL, VES_TANGENT.
+    return semantic == 4 || semantic == 8 || semantic == 9;
+}
+V position(const Geometry &g, uint32_t index)
+{
+    for (const auto &e : g.elements)
+        if (e.semantic == 1)
+        {
+            const auto buffer = g.buffers.find(e.source);
+            if (buffer == g.buffers.end() || e.type != 2 || static_cast<size_t>(e.offset) + 12 > buffer->second.stride)
+                throw std::runtime_error("unsupported position format");
+            if (index >= g.count)
+                throw std::runtime_error("index outside vertex data");
+            V p;
+            std::memcpy(p.data(), buffer->second.data.data() + static_cast<size_t>(index) * buffer->second.stride + e.offset,
+                        12);
+            return p;
+        }
+    throw std::runtime_error("missing position stream");
+}
+Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, const Frame &frame, V &lo, V &hi,
+                   float &radius)
 {
     Bytes out;
     put(out, static_cast<uint32_t>(vertices.size()));
@@ -397,6 +528,7 @@ Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, V p
     {
         Bytes values;
         const Element *pos = nullptr;
+        std::vector<uint16_t> directions;
         bool used = false;
         for (const auto &e : g.elements)
             if (e.source == source && e.semantic != 2 && e.semantic != 3)
@@ -409,6 +541,13 @@ Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, V p
                     pos = &e;
                     hasPosition = true;
                 }
+                else if (frame.rotate && isDirection(e.semantic))
+                {
+                    // FLOAT3, or FLOAT4 tangents whose w (handedness) is kept.
+                    if ((e.type != 2 && e.type != 3) || static_cast<size_t>(e.offset) + 12 > buf.stride)
+                        throw std::runtime_error("unsupported direction format on rotated bone");
+                    directions.push_back(e.offset);
+                }
             }
         if (!used)
             continue;
@@ -419,14 +558,22 @@ Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, V p
             const size_t begin = static_cast<size_t>(index) * buf.stride;
             const size_t next = values.size();
             values.insert(values.end(), buf.data.begin() + begin, buf.data.begin() + begin + buf.stride);
+            for (auto offset : directions)
+            {
+                V d;
+                std::memcpy(d.data(), values.data() + next + offset, 12);
+                d = rotate(frame.inverse, d);
+                std::memcpy(values.data() + next + offset, d.data(), 12);
+            }
             if (pos)
             {
                 V p;
                 std::memcpy(p.data(), values.data() + next + pos->offset, 12);
+                p = toFrame(frame, p);
                 float r2 = 0;
                 for (int i = 0; i < 3; ++i)
                 {
-                    p[i] -= pivot[i];
+                    p[i] -= frame.center[i];
                     if (!std::isfinite(p[i]) || std::abs(p[i]) > 100000)
                         throw std::runtime_error("invalid vertex position");
                     lo[i] = std::min(lo[i], p[i]);
@@ -502,7 +649,7 @@ Piece StockFallbackMesh(unsigned kind)
     put(sub, uint8_t{0});
     for (uint16_t i = 0; i < count; ++i)
         put(sub, i);
-    chunk(sub, 0x5000, emitGeometry(g, indices, V{}, lo, hi, radius));
+    chunk(sub, 0x5000, emitGeometry(g, indices, Frame{}, lo, hi, radius));
     Bytes body{0};
     chunk(body, 0x4000, sub);
     Bytes bounds;
@@ -522,27 +669,33 @@ std::string SkeletonName(const Bytes &b)
 {
     try
     {
-        // Resource discovery only needs the link. Skip serialized geometry
-        // here so a cache hit does not copy and parse all vertex buffers.
-        auto r = header(b, true);
-        uint16_t id;
-        auto root = r.chunk(id);
-        if (id != 0x3000)
-            return {};
-        root.get<uint8_t>();
-        std::string name;
-        while (root.p < root.end)
-        {
-            auto c = root.chunk(id);
-            if (id == 0x6000)
-                name = c.line();
-        }
-        return name;
+        // Resource discovery only needs the link. Walk the structure without
+        // copying vertex buffers so a cache hit stays cheap.
+        return model(b, false).skeleton;
     }
     catch (...)
     {
         return {};
     }
+}
+bool FragmentOriginShift(const float right[3], const float up[3], const float front[3], const float center[3],
+                         double out[3])
+{
+    out[0] = out[1] = out[2] = 0;
+    // Ogre local -> sim local mirrors Z (see the proxy's render conversion).
+    const double local[3] = {center[0], center[1], -static_cast<double>(center[2])};
+    const float *basis[3] = {right, up, front};
+    for (int column = 0; column < 3; ++column)
+    {
+        const double length = std::sqrt(static_cast<double>(basis[column][0]) * basis[column][0] +
+                                        static_cast<double>(basis[column][1]) * basis[column][1] +
+                                        static_cast<double>(basis[column][2]) * basis[column][2]);
+        if (!std::isfinite(length) || length < 1e-6 || !std::isfinite(local[column]))
+            return false;
+        for (int axis = 0; axis < 3; ++axis)
+            out[axis] += basis[column][axis] / length * local[column];
+    }
+    return std::isfinite(out[0]) && std::isfinite(out[1]) && std::isfinite(out[2]);
 }
 bool Extract(const Bytes &bytes, const Bytes &skeleton, std::vector<Piece> &pieces, std::string &error)
 {
@@ -577,6 +730,39 @@ bool Extract(const Bytes &bytes, const Bytes &skeleton, std::vector<Piece> &piec
             uint32_t triangles = 0;
             V lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
             float radius = 0;
+            Frame frame = boneFrame(b);
+            // Centre the piece on its own bounds in the bone frame. A bone
+            // pivot can sit far from its geometry (many exporters leave every
+            // vertex-group bone at the model origin), and the engine spins a
+            // fragment about its origin: without this it orbits empty space.
+            bool any = false;
+            for (size_t s = 0; s < m.subs.size(); ++s)
+            {
+                const auto group = faces[s].find(id);
+                if (group == faces[s].end())
+                    continue;
+                const auto &g = m.subs[s].shared ? m.geometry : m.subs[s].geometry;
+                for (auto index : group->second)
+                {
+                    const V p = toFrame(frame, position(g, index));
+                    for (int i = 0; i < 3; ++i)
+                    {
+                        lo[i] = std::min(lo[i], p[i]);
+                        hi[i] = std::max(hi[i], p[i]);
+                    }
+                    any = true;
+                }
+            }
+            if (!any)
+                continue;
+            for (int i = 0; i < 3; ++i)
+            {
+                frame.center[i] = (lo[i] + hi[i]) * 0.5f;
+                if (!std::isfinite(frame.center[i]) || std::abs(frame.center[i]) > 100000)
+                    throw std::runtime_error("invalid piece centre");
+            }
+            lo = {1e30f, 1e30f, 1e30f};
+            hi = {-1e30f, -1e30f, -1e30f};
             for (size_t s = 0; s < m.subs.size(); ++s)
             {
                 const auto &sub = m.subs[s];
@@ -597,7 +783,7 @@ bool Extract(const Bytes &bytes, const Bytes &skeleton, std::vector<Piece> &piec
                 put(data, uint8_t{1});
                 for (auto index : selected)
                     put(data, remap.at(index));
-                chunk(data, 0x5000, emitGeometry(g, vertices, b.pos, lo, hi, radius));
+                chunk(data, 0x5000, emitGeometry(g, vertices, frame, lo, hi, radius));
                 chunk(body, 0x4000, data);
                 triangles += static_cast<uint32_t>(selected.size() / 3);
             }
@@ -614,7 +800,7 @@ bool Extract(const Bytes &bytes, const Bytes &skeleton, std::vector<Piece> &piec
             put(out, uint16_t{0x1000});
             line(out, "[MeshSerializer_v1.8]");
             chunk(out, 0x3000, body);
-            pieces.push_back({b.name, std::move(out), triangles});
+            pieces.push_back({b.name, std::move(out), triangles, {frame.center[0], frame.center[1], frame.center[2]}});
         }
         if (pieces.empty())
             throw std::runtime_error("no complete bone-group faces");

@@ -8,6 +8,7 @@ struct CachedPiece
 {
     std::string name;
     uint32_t triangles = 0;
+    float center[3] = {0, 0, 0};
 };
 uint64_t Fingerprint(const std::vector<uint8_t> &bytes);
 // Only complete, bounded manifests with matching payload hashes are usable.
