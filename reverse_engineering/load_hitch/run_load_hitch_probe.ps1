@@ -3,7 +3,7 @@
 # three shim modules before and after, an optional cold microcode-cache arm,
 # and a done-marker so the runner can be launched detached (via WMI) and
 # polled from another shell.
-param([ValidateSet('DX9','DX11')][string]$Renderer='DX9',[string]$Label='live-dx9',[int]$Seconds=110,[switch]$ColdShaderCache,[string[]]$ExtraEnv=@())
+param([ValidateSet('DX9','DX11')][string]$Renderer='DX9',[string]$Label='live-dx9',[int]$Seconds=110,[switch]$ColdShaderCache,[string[]]$ExtraEnv=@(),[ValidateSet('Normal','Minimized','Hidden')][string]$WindowStyle='Normal')
 $ErrorActionPreference='Stop'
 $gameRoot=[IO.Path]::GetFullPath('C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux')
 $repoRoot='C:\Users\iestu\Documents\GIT\BZR-OpenShim'
@@ -62,7 +62,7 @@ try {
  $originalOgre=Set-BZROgreWindowed -GameRoot $gameRoot
  [IO.File]::WriteAllText($selection,$modRoot+"`r`n",[Text.UTF8Encoding]::new($false))
  $launchUtc=[DateTime]::UtcNow
- $gameProc=Start-Process -FilePath (Join-Path $gameRoot 'battlezone98redux.exe') -ArgumentList @('ncprobe.bzn','/nointro',('/renderer:'+$Renderer.ToLowerInvariant())) -WorkingDirectory $gameRoot -WindowStyle Hidden -PassThru
+ $gameProc=Start-Process -FilePath (Join-Path $gameRoot 'battlezone98redux.exe') -ArgumentList @('ncprobe.bzn','/nointro',('/renderer:'+$Renderer.ToLowerInvariant())) -WorkingDirectory $gameRoot -WindowStyle $WindowStyle -PassThru
  Write-Output "Started load-hitch probe PID=$($gameProc.Id)"
  for($i=0;$i -lt $Seconds;$i+=2){
   Start-Sleep -Seconds 2
