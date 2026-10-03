@@ -1,6 +1,8 @@
 #include "native_chunk_cache.h"
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstring>
 #include <fstream>
 #include <set>
 #include <sstream>
@@ -13,7 +15,20 @@ constexpr uintmax_t maxPieceBytes = 64 * 1024 * 1024;
 constexpr uintmax_t maxCacheBytes = 128 * 1024 * 1024;
 constexpr size_t maxPieces = 4096;
 constexpr const char *manifestName = "pieces.cache";
-constexpr const char *manifestVersion = "OPENSHIM_NATIVE_CHUNKS_V3";
+constexpr const char *manifestVersion = "OPENSHIM_NATIVE_CHUNKS_V4";
+// Centres round-trip as their exact IEEE bit patterns, not decimal text.
+uint32_t bits(float value)
+{
+    uint32_t out;
+    std::memcpy(&out, &value, sizeof(out));
+    return out;
+}
+float fromBits(uint32_t value)
+{
+    float out;
+    std::memcpy(&out, &value, sizeof(out));
+    return out;
+}
 std::string normalized(std::string name)
 {
     for (auto &c : name)
@@ -91,10 +106,17 @@ bool ReadCache(const std::filesystem::path &directory, std::vector<CachedPiece> 
             CachedPiece piece;
             uintmax_t bytes = 0;
             uint64_t hash = 0;
-            if (!(input >> piece.name >> piece.triangles >> bytes >> hash) || !safeName(piece.name) ||
-                !piece.triangles || !names.insert(piece.name).second || !bytes || bytes > maxPieceBytes ||
-                bytes > byteBudget - total)
+            uint32_t center[3] = {};
+            if (!(input >> piece.name >> piece.triangles >> bytes >> hash >> center[0] >> center[1] >> center[2]) ||
+                !safeName(piece.name) || !piece.triangles || !names.insert(piece.name).second || !bytes ||
+                bytes > maxPieceBytes || bytes > byteBudget - total)
                 return false;
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                piece.center[axis] = fromBits(center[axis]);
+                if (!std::isfinite(piece.center[axis]) || std::abs(piece.center[axis]) > 100000)
+                    return false;
+            }
             total += bytes;
             if (validatedBytes)
                 *validatedBytes = total;
@@ -135,10 +157,14 @@ bool WriteCache(const std::filesystem::path &directory, const std::vector<Piece>
             if (!safeName(name) || !names.insert(name).second || !piece.triangles || piece.mesh.empty() ||
                 piece.mesh.size() > maxPieceBytes || piece.mesh.size() > maxCacheBytes - total)
                 return false;
+            for (float axis : piece.center)
+                if (!std::isfinite(axis) || std::abs(axis) > 100000)
+                    return false;
             total += piece.mesh.size();
             manifest << name << ' ' << piece.triangles << ' ' << piece.mesh.size() << ' '
-                     << Fingerprint(piece.mesh) << '\n';
-            result.push_back({name, piece.triangles});
+                     << Fingerprint(piece.mesh) << ' ' << bits(piece.center[0]) << ' ' << bits(piece.center[1])
+                     << ' ' << bits(piece.center[2]) << '\n';
+            result.push_back({name, piece.triangles, {piece.center[0], piece.center[1], piece.center[2]}});
         }
         std::error_code ec;
         std::filesystem::create_directories(directory, ec);

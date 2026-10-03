@@ -25,12 +25,18 @@ using Open = Ptr *(__thiscall *)(void *, Ptr *, const std::string &, const std::
 using Read = size_t(__thiscall *)(void *, void *, size_t);
 using Free = void(__cdecl *)(void *);
 using Dtor = void(__thiscall *)(void *, unsigned);
+// v4: pieces are in their bone's rotated frame and centred on their bounds.
+// v3 output used model-axis offsets from the bone pivot and is ignored.
+constexpr const char *kNativeFolder = "native/v4/";
 struct Model
 {
     std::map<std::string, std::string> pieces;
     bool extracted = false;
 };
 std::map<std::string, Model> models;
+// Generated resource -> piece centre in its bone frame (Ogre axes). Used once
+// per chunk, at creation, to move the physical origin onto the geometry.
+std::map<std::string, std::array<float, 3>> pieceCenters;
 std::mutex modelsMutex;
 // Cache verification belongs to startup, before simulation. Keep only bounded
 // names/counts, never source geometry or Ogre pointers, across mission hops.
@@ -160,7 +166,7 @@ bool prepare(void *entity, char *sourceName, size_t capacity)
     // basename cannot inherit each other's generated meshes, even after hops.
     std::ostringstream hex;
     hex << std::hex << hash;
-    const std::string folder = "native/v3/" + hex.str();
+    const std::string folder = std::string(kNativeFolder) + hex.str();
     const auto root = GetNativeChunkCacheDirectory();
     std::vector<NativeChunks::CachedPiece> cached;
     const auto ready = readyCaches.find(folder);
@@ -195,7 +201,9 @@ bool prepare(void *entity, char *sourceName, size_t capacity)
     uint32_t triangles = 0;
     for (const auto &piece : cached)
     {
-        result.pieces[piece.name] = folder + "/" + piece.name + ".mesh";
+        const std::string resource = folder + "/" + piece.name + ".mesh";
+        result.pieces[piece.name] = resource;
+        pieceCenters[lower(resource)] = {piece.center[0], piece.center[1], piece.center[2]};
         triangles += piece.triangles;
     }
     result.extracted = !result.pieces.empty();
@@ -206,6 +214,32 @@ bool prepare(void *entity, char *sourceName, size_t capacity)
                        (root / folder).string().c_str(),
                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
     return result.extracted;
+}
+// The chunk's legacy matrix is engine memory: touch it only under SEH, with no
+// C++ objects in this frame.
+bool shiftOriginSafe(uint8_t *objectBytes, const float center[3], double shift[3])
+{
+    __try
+    {
+        auto *transform = reinterpret_cast<LegacyMat3 *>(objectBytes + 0x20);
+        const float right[3] = {transform->right_x, transform->right_y, transform->right_z};
+        const float up[3] = {transform->up_x, transform->up_y, transform->up_z};
+        const float front[3] = {transform->front_x, transform->front_y, transform->front_z};
+        if (!NativeChunks::FragmentOriginShift(right, up, front, center, shift))
+            return false;
+        const double x = transform->posit_x + shift[0], y = transform->posit_y + shift[1],
+                     z = transform->posit_z + shift[2];
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
+            return false;
+        transform->posit_x = x;
+        transform->posit_y = y;
+        transform->posit_z = z;
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
 }
 bool prepareCppSafe(void *entity, char *sourceName, size_t capacity)
 {
@@ -247,6 +281,7 @@ void ResetNativeChunkPayloads()
 {
     std::lock_guard<std::mutex> lock(modelsMutex);
     models.clear();
+    pieceCenters.clear();
     stockFallbackState = 0;
 }
 void WarmNativeChunkCaches()
@@ -260,7 +295,7 @@ void WarmNativeChunkCaches()
             return;
         cachesWarmed = true;
         const auto start = std::chrono::steady_clock::now();
-        const auto root = GetNativeChunkCacheDirectory() / "native/v3";
+        const auto root = GetNativeChunkCacheDirectory() / kNativeFolder;
         std::error_code ec;
         std::filesystem::directory_iterator directories(root, ec);
         if (ec)
@@ -282,7 +317,7 @@ void WarmNativeChunkCaches()
             if (!valid || pieces.size() > maxReadyPieces - readyPieceCount)
                 continue;
             readyPieceCount += pieces.size();
-            readyCaches.emplace("native/v3/" + name, std::move(pieces));
+            readyCaches.emplace(std::string(kNativeFolder) + name, std::move(pieces));
         }
         LogChunkDiagnostic("chunknative", L"[CHUNKNATIVE] startup cache validation models=%zu pieces=%zu ms=%.3f\n",
                            readyCaches.size(), readyPieceCount,
@@ -343,6 +378,44 @@ bool TryResolveGeneratedStockChunkFallback(const char *seed, char *out, size_t c
     {
         return false;
     }
+}
+bool RecenterNativeChunkObject(uint8_t *objectBytes, const char *payloadMeshName)
+{
+    if (!objectBytes || !payloadMeshName || !*payloadMeshName || !g_EnableChunkMeshProxy)
+        return false;
+    static const bool disabled = EnvFlagEnabled("OPENSHIM_DISABLE_NATIVE_CHUNK_RECENTER");
+    if (disabled)
+        return false;
+    float center[3] = {};
+    try
+    {
+        std::lock_guard<std::mutex> lock(modelsMutex);
+        const auto found = pieceCenters.find(lower(payloadMeshName));
+        if (found == pieceCenters.end())
+            return false;
+        std::copy(found->second.begin(), found->second.end(), center);
+    }
+    catch (...)
+    {
+        return false;
+    }
+    if (center[0] == 0 && center[1] == 0 && center[2] == 0)
+        return false;
+    // ChunkEffect::Simulate integrates, spins, terrain-tests, smokes and
+    // finally explodes at this origin only, so moving it once at creation
+    // makes the piece tumble and land about its own geometry. The rendered
+    // mesh is centred to match; the visible pose at spawn is unchanged.
+    double shift[3] = {};
+    if (!shiftOriginSafe(objectBytes, center, shift))
+        return false;
+    static volatile long logBudget = 8;
+    if (InterlockedDecrement(&logBudget) >= 0)
+        LogChunkDiagnostic("chunknative",
+                           L"[CHUNKNATIVE] recentred obj=0x%08X mesh=%hs centre=(%.3f, %.3f, %.3f) "
+                           L"shift=(%.3f, %.3f, %.3f)\n",
+                           static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)), payloadMeshName,
+                           center[0], center[1], center[2], shift[0], shift[1], shift[2]);
+    return true;
 }
 bool TryResolveNativeChunkPayload(const char *mesh, const char *geom, char *out, size_t capacity, bool &handled)
 {

@@ -623,7 +623,16 @@ namespace BZROpenShim
         EraseChunkResolvedBinding(boundObjectBytes);
 
         if (boundObjectBytes)
+        {
             StoreChunkResolvedBinding(boundObjectBytes, sourceTreeProbe);
+            // Only a freshly created chunk (count advanced) owns this matrix
+            // now; a rejected create already removed the object.
+            const ChunkResolvedBindingEntry* binding = createdEntryPtr
+                ? FindChunkResolvedBindingEntryForGeom(boundObjectBytes, sourceTreeProbe.source.geomName)
+                : nullptr;
+            if (binding && binding->payloadMeshName[0])
+                RecenterNativeChunkObject(const_cast<uint8_t*>(boundObjectBytes), binding->payloadMeshName);
+        }
 
         // Now that the debris exists, stop the intact hull from drawing the piece
         // that just left it. No-op unless PartialFragmentObject is on the stack.
