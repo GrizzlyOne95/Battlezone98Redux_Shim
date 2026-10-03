@@ -12,18 +12,37 @@ belongs to exactly one group, including faces crossing groups or carrying
 multiple bone weights. The strongest aggregate weight wins, with stable ties.
 Unweighted faces belong to the unique skeleton root when one exists.
 
-Generated static meshes retain materials, normal/tangent/color/UV streams and
-use the skeleton's derived bind pivot. They are cached automatically under
-`openshim/cache/chunks/native/v3/<content fingerprint>/<bone>.mesh`. The user
+Generated static meshes retain materials, normal/tangent/color/UV streams.
+They are cached automatically under
+`openshim/cache/chunks/native/v4/<content fingerprint>/<bone>.mesh`. The user
 does not need an exporter or a separate asset pack. The fingerprint includes
 both source resources, and the per-mission lookup is cleared at initialization.
 
+## Piece frames and spin centre
+
+`ChunkEffect::CreateChunk` (Redux `0x00492AA0`, 1.5 `0x004BE555`) gives each
+fragment the source node's full world matrix, then `ChunkEffect::Simulate`
+spins it about that origin at up to 5 rad/s. Two things follow:
+
+- Each piece is stored in its bone's own frame: the derived bind translation
+  *and rotation* are removed, with normals, binormals and tangents rotated to
+  match. Storing model-axis offsets applied a rotated bone's rotation twice.
+  In the installed GOG content, 3,783 of 10,187 non-root bones (344
+  skeletons) have a bind rotation above one degree.
+- Each piece is then centred on its own bounds, and the fragment's physical
+  origin is moved onto that centre once, inside the CreateChunk hook. A bone
+  pivot can sit far from its geometry; 53 installed skeletons have every bone
+  at the model origin, which is typical of vertex-group exports. Without this
+  the piece orbits empty space. Simulate uses only the origin for integration,
+  spin, terrain contact, smoke and the final explosion, so all of them now
+  follow the visible piece. The pose at the moment of separation is
+  unchanged. `OPENSHIM_DISABLE_NATIVE_CHUNK_RECENTER=1` turns the move off.
+
 Skeleton quaternions are decoded from Ogre's serialized `x,y,z,w` order before
-deriving parent rotations, scales and translations. The local 1.0.0.45 fix
-corrects child pivots that were previously mirrored or displaced, causing wings
-and building parts to orbit an invisible center. Cache version 3 regenerates
-pieces automatically; version 2 output is ignored. This change runs during
-cached mesh preparation, with no new per-frame work or physics changes.
+deriving parent rotations, scales and translations (local 1.0.0.45). Cache
+version 4 stores each piece centre as exact float bits and regenerates
+automatically; v3 output (model-axis offsets) is ignored. This runs during
+cached mesh preparation and once per created chunk, with no per-frame work.
 
 Only the fragment's own geometry name can select a generated group. Unnamed
 nodes and empty groups cannot borrow sibling geometry or another craft's mesh.
@@ -81,13 +100,21 @@ this is not a promise of zero overhead for arbitrary assets and hardware.
 ## Compatibility and limits
 
 - Reads little-endian Ogre mesh versions 1.41, 1.8 and 1.100, and skeleton
-  versions 1.10 and 1.80. Uses the shipped Ogre DLL's exported functions and
+  versions 1.10 and 1.80. Like Ogre's own reader, meshes are parsed by chunk
+  content and position rather than declared lengths: shipped stock and
+  Resurgence exports mis-state them by 1 to 17 bytes in both directions.
+  The parse must end at one of Ogre's trailing chunks (LOD, bounds, names,
+  edges, poses, animations, extremes), so content cut short still fails.
+  Offline, 1,210 of 1,211 installed skeleton-linked meshes extract; the
+  remaining ISDFC `issold_cockpit-old` references a bone its skeleton lacks.
+  Uses the shipped Ogre DLL's exported functions and
   its two-word SharedPtr / DataStream ABI; no replacement Ogre is loaded.
 - Reads bytes directly into shim-owned buffers. Returning a large Ogre STL
   string to the newer shim CRT is unsafe because allocation alignment differs.
   Stream control blocks are released through the owning DLL's destructor and
   allocator.
 - Requires triangle lists, float3 positions and a usable skeleton resource.
+  On a rotated bone, normals/binormals/tangents must be float3 or float4.
   The engine also needs native fragment nodes whose geometry names correspond
   to skeleton groups. A monolithic ungrouped mesh cannot acquire an authored
   physical fracture hierarchy from rendering data alone.
