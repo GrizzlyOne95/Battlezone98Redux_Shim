@@ -177,6 +177,7 @@
     <ClCompile Include="src\patches\odf_helpers.cpp" />
     <ClCompile Include="src\patches\ogre_dedupe_crash_fixes.cpp" />
     <ClCompile Include="src\patches\ogre_script_import_cache.cpp" />
+    <ClCompile Include="src\patches\resource_walk_stat_cache.cpp" />
     <ClCompile Include="src\patches\ogre_entity_frustum_cull.cpp" />
     <ClCompile Include="src\patches\ogre_runtime_helpers.cpp" />
     <ClCompile Include="src\patches\ordnance_velocity.cpp" />
@@ -329,6 +330,7 @@
     <ClInclude Include="include\trn_codec.h" />
     <ClInclude Include="include\ogre_shader_cache.h" />
     <ClInclude Include="include\ogre_script_import_cache.h" />
+    <ClInclude Include="include\resource_walk_stat_cache.h" />
     <ClInclude Include="include\ogre_enhanced_light_selection.h" />
     <ClInclude Include="include\enhanced_light_selection.h" />
     <ClInclude Include="include\sun_flash.h" />
