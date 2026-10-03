@@ -19,10 +19,17 @@ cost. Lazy texture, mesh and shader loading during play is not.
 - Shader compile at load is small: DX9 0.2–0.4 s per load, DX11 0.04 s, with the
   microcode cache warm.
 
-The first fix is now built: an OpenShim **import cache** for the script compiler
-(`src/patches/ogre_script_import_cache.cpp`). It cuts script parsing by
-1.2–1.7 s per load (see "Import cache: results" below). The other options are
-ranked further down.
+Two fixes are now built. Together they took the DX11 probe load from
+18.4 s to 15.3 s:
+
+- an **import cache** for the script compiler
+  (`src/patches/ogre_script_import_cache.cpp`), which saves 1.2–1.7 s of script
+  parsing per load;
+- a **walk stat cache** (`src/patches/resource_walk_stat_cache.cpp`), which
+  saves ~1 s per mod-set change.
+
+The results sections below have the details; the remaining options are ranked
+further down.
 
 ## Method
 
@@ -107,9 +114,8 @@ first-use hitch.
 ## Options, ranked
 
 1. **Import cache for the script compiler. Built** (see the next section).
-2. **Cache the resource-location directory walk** (~0.8 s per mod-set change).
-   Feasible, but it means hooking engine code (`FUN_006679c0`/`FUN_00667ed0`)
-   with a cache keyed on directory mtimes. Second priority.
+2. **Resource-location walk. Built** as a scoped stat cache rather than a
+   cross-load cache (see "Walk stat cache: results").
 3. **Avoid the Modable re-parse altogether** (5–6 s per change, the largest
    prize). The engine already skips an unchanged set. Skipping a changed set
    means making Modable a union of all sets, or keeping per-set groups alive.
@@ -184,6 +190,49 @@ sampled ms:
   - A DX9 cache-off arm was lost: the game and its runner were stopped
     externally 2 s after launch. The DX9 baseline is therefore the earlier
     no-cache run on the same content.
+
+## Walk stat cache: design and results
+
+`buildSingleIAResource` (`0x0076A600`, new `engine_addresses` row
+`BuildSingleIAResource` with guard bytes and identity) re-registers every
+Modable location through a recursive `std::tr2::sys` walk. That walk
+enumerates with `FindFirstFileW`/`FindNextFileW`, then calls
+`GetFileAttributesExW`/`GetFileAttributesW` on each entry it was just handed.
+
+`src/patches/resource_walk_stat_cache.cpp` handles it like this:
+
+- **Scope.** It detours `buildSingleIAResource` to open a per-thread scope.
+- **Record.** Inside the scope, the executable's enumeration imports (IAT)
+  remember each entry's `WIN32_FIND_DATAW` attributes.
+- **Answer.** Stat calls for exactly those paths are answered from the record.
+  Both APIs describe the same object without following reparse points, so the
+  answer is what the OS would return a moment later.
+- **Lifetime.** The record is dropped when the scope closes; nothing survives
+  into another load or another code path.
+- **Outside the scope**, every hook is a thread-local test and a tail call.
+- **Coexistence.** It chains with the UiPerf file-scan counters when those are
+  installed.
+- **Kill switch:** `OPENSHIM_DISABLE_RESOURCE_WALK_STAT_CACHE=1`.
+
+Live, on DX11 with the GOG install's chunks build plus both caches:
+
+| | walk cache off | walk cache on |
+|---|---:|---:|
+| stat calls answered from enumeration | — | 33 212 (6 went to the OS; 33 470 entries) |
+| `buildSingleIAResource` wall (BZLogger µs stamps) | 6.10 s | 4.95–5.17 s |
+| attribute-query samples, start → sim | 947 ms | 65 ms |
+| Modable unload → clear, sampled | 1 442 ms | 699 ms |
+| start → sim wall | 16.7 s | 15.3 s |
+
+Run notes:
+
+- **Probe window.** These runs used a visible game window.
+- **Stall in the off arm.** The sim stopped advancing 21 s into the mission,
+  after 4 of 10 destructions, with no crash; the runner then closed it
+  gracefully. That is the known focus-loss stall, and it comes after the load
+  window being measured.
+- **Exits.** Every DX11 exit ended in the known `…FCC6` driver-thread shutdown
+  fault, which PR #396 fixes.
 
 ## Texture optimisation done in this workstream
 
