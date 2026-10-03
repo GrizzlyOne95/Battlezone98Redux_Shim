@@ -35,6 +35,7 @@
 #include "shadow_far_distance.h"
 #include "sun_flash.h"
 #include "chunk_batch_invalidation.h"
+#include "native_chunk_cache.h"
 #include "ai_range_policy.h"
 #include "lcbench_safety_policy.h"
 #include "hook_engine.h"
@@ -47,6 +48,7 @@
 #include <objidl.h>
 #include <gdiplus.h>
 #include <array>
+#include <atomic>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -123,6 +125,19 @@ namespace BZROpenShim
         bool g_GenericChunkBatchSectionCreated = false;
         bool g_GenericChunkBatchRuntimeAvailable = true;
         int g_GenericChunkBatchEligibility[2] = { -1, -1 };
+        int g_StockFallbackBatchEligibility[2] = { -1, -1 };
+        static std::atomic<DWORD> g_ChunkWorldQueueDriverTick{0};
+
+        void ObserveChunkWorldQueueDriver()
+        {
+            g_ChunkWorldQueueDriverTick.store(GetTickCount(), std::memory_order_relaxed);
+        }
+
+        bool ChunkWorldQueueDriverIsActive()
+        {
+            const DWORD tick = g_ChunkWorldQueueDriverTick.load(std::memory_order_relaxed);
+            return tick != 0 && static_cast<DWORD>(GetTickCount() - tick) < 1000;
+        }
         DWORD g_GenericChunkBatchLastLogTick = 0;
         // Bounded diagnostics for the per-frame submission question: the game
         // drives its _updateRenderQueue override more than once per frame (one
@@ -1213,6 +1228,46 @@ namespace BZROpenShim
             return true;
         }
 
+        static bool TryPrimeChunkPayloadResourcesSafe()
+        {
+            __try
+            {
+                return EnsureChunkPayloadResourceLocations();
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                return false;
+            }
+        }
+
+        static void PrimeChunkPayloadResources()
+        {
+            // This caller is already inside Ogre's world render callback.
+            // Initialise the same resource group before combat needs it; the
+            // first-death scan otherwise caused a measured ~300 ms frame.
+            // Attempt once only. Failure preserves the original first-use
+            // path, without introducing filesystem retries every frame.
+            static const bool enabled =
+                !EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_RESOURCE_PREWARM");
+            static bool attempted = false;
+            if (!enabled || attempted || g_ChunkPayloadResourceLocationsReady)
+                return;
+            attempted = true;
+            const DWORD began = GetTickCount();
+            bool ready = false;
+            try
+            {
+                ready = TryPrimeChunkPayloadResourcesSafe();
+            }
+            catch (...)
+            {
+                // Directory discovery can also fail before Ogre is called.
+            }
+            LogChunkDiagnostic("chunkmesh",
+                L"[CHUNKMESH] resource prewarm ready=%u elapsedMs=%lu (first-use fallback retained)\n",
+                ready ? 1u : 0u, static_cast<unsigned long>(GetTickCount() - began));
+        }
+
         static bool TryUpdateChunkMeshProxyTransform(
             void* sceneNode,
             void* entity,
@@ -1265,14 +1320,9 @@ namespace BZROpenShim
                 return false;
             // Second gate: even if config said enabled at boot, re-check
             // centralized asset capability on every creation attempt. This
-            // covers partial packages where the sentinel says "detected" but
-            // the specific mesh file for this slot is absent, and ensures we
-            // never create an Ogre Entity with a missing mesh name.
-            if (!Assets::IsAssetFeatureAvailable(Assets::AssetFeature::DestructionChunks))
-                return false;
-            // Per-mesh verification: even when the global capability is true
-            // (some payloads exist), the particular requested mesh may be absent
-            // in a partial pack. The resolver (TryResolveChunkPayloadMeshResource)
+            // Native extraction supplies verified payloads without an asset
+            // pack. proofMeshName is still mandatory before allocating Ogre.
+            // The resolver (TryResolveChunkPayloadMeshResource)
             // already verified before filling proofMeshName, so an empty
             // proofMeshName means "no file for this mesh" and must not allocate.
             // Trace for partial-pack proof (see tests/openshim_assets_tests):
@@ -2115,7 +2165,9 @@ namespace BZROpenShim
                     static_cast<unsigned>(slot.renderQueueAddCount));
             }
 
-            return visibleNow;
+            // A successfully handled invisible Entity must not fall through
+            // to direct adds that bypass the camera's visibility decision.
+            return true;
         }
 
         static bool IsChunkManualSubmitEnabled()
@@ -2130,7 +2182,7 @@ namespace BZROpenShim
         // struct (vertex count at +0x04, position array at +0x0C, 3 floats
         // per vertex) so payload mesh pivots can be compared against the
         // original geo pivots the chunk sim rotates around.
-        static bool TryComputeChunkGeomLocalBounds(
+        bool TryComputeChunkGeomLocalBounds(
             const void* geomRef,
             uint32_t& outCount,
             float outMin[3],
@@ -2250,24 +2302,27 @@ namespace BZROpenShim
             return true;
         }
 
-        static bool IsCanonicalGenericChunkPayload(uint8_t kind)
+        static bool IsCanonicalGenericChunkPayload(uint8_t kind, bool generated = false)
         {
             if (kind < 1 || kind > 2)
                 return false;
 
-            int& cached = g_GenericChunkBatchEligibility[kind - 1];
+            int& cached = generated ? g_StockFallbackBatchEligibility[kind - 1]
+                                    : g_GenericChunkBatchEligibility[kind - 1];
             if (cached >= 0)
                 return cached != 0;
 
             if (g_ChunkPayloadResourceDirectories.empty())
                 RefreshChunkPayloadResourceDirectories();
 
-            const std::filesystem::path relativePath = kind == 1
+            const auto fallback = generated ? NativeChunks::StockFallbackMesh(kind) : NativeChunks::Piece{};
+            const std::filesystem::path relativePath = generated
+                ? std::filesystem::path("fallback/v1") / (fallback.name + ".mesh") : kind == 1
                 ? std::filesystem::path("chunk1") / "chunk1.mesh"
                 : std::filesystem::path("chunk2") / "chunk2.mesh";
-            const uintmax_t expectedBytes = kind == 1
+            const uintmax_t expectedBytes = generated ? fallback.mesh.size() : kind == 1
                 ? kChunk1MeshBytes : kChunk2MeshBytes;
-            const uint64_t expectedHash = kind == 1
+            const uint64_t expectedHash = generated ? NativeChunks::Fingerprint(fallback.mesh) : kind == 1
                 ? kChunk1MeshFnv1a : kChunk2MeshFnv1a;
 
             bool found = false;
@@ -2293,7 +2348,8 @@ namespace BZROpenShim
             cached = found && canonical ? 1 : 0;
             LogChunkDiagnostic(
                 "chunkbatch",
-                L"[CHUNKBATCH] canonical chunk%u batching=%hs roots=%zu expectedBytes=%zu hash=0x%016llX\n",
+                L"[CHUNKBATCH] canonical %hschunk%u batching=%hs roots=%zu expectedBytes=%zu hash=0x%016llX\n",
+                generated ? "stock-fallback-" : "",
                 static_cast<unsigned>(kind),
                 cached ? "enabled" : "fallback-entity",
                 g_ChunkPayloadResourceDirectories.size(),
@@ -2368,6 +2424,9 @@ namespace BZROpenShim
                 return IsCanonicalGenericChunkPayload(1) ? 1 : 0;
             if (_stricmp(meshName, "chunk2/chunk2.mesh") == 0)
                 return IsCanonicalGenericChunkPayload(2) ? 2 : 0;
+            const auto stockKind = static_cast<uint8_t>(NativeChunks::StockFallbackBatchKind(meshName));
+            if (stockKind)
+                return IsCanonicalGenericChunkPayload(stockKind, true) ? stockKind : 0;
             return 0;
         }
 
@@ -3696,6 +3755,7 @@ namespace BZROpenShim
                 return;
             if (!IsChunkManualSubmitEnabled())
                 return;
+            PrimeChunkPayloadResources();
             if (g_ChunkProxySlots.empty())
                 return;
 
@@ -3773,6 +3833,12 @@ namespace BZROpenShim
                     continue;
                 }
                 if (!slot.active || !slot.entity)
+                    continue;
+
+                // Notify the active camera and let Ogre prepare this Entity
+                // once in the owning queue. The older direct-add path below
+                // remains a guarded fallback if camera/queue discovery fails.
+                if (TrySubmitChunkMeshProxyToCurrentRenderQueue(slot, nullptr))
                     continue;
 
                 bool groupFaulted = false;
@@ -3908,6 +3974,28 @@ namespace BZROpenShim
             return nullptr;
         }
 
+        static bool ResolveTrackedChunkPayload(
+            const ChunkObjectLinkProbe& probe,
+            const char* preferredMeshName,
+            const char* geomName,
+            char* output,
+            size_t capacity)
+        {
+            // CreateChunk captures the payload before the source Entity dies.
+            // Its cache is checked against live geometry and cleared when a
+            // pooled object becomes a chunklet, so tracking need not repeat
+            // the whole model/VDF/resource search every simulation update.
+            const auto* binding = FindChunkResolvedBindingEntryForGeom(probe.objectBytes, geomName);
+            if (binding && binding->payloadMeshName[0] &&
+                (!preferredMeshName || !*preferredMeshName || _stricmp(preferredMeshName, binding->meshName) == 0) &&
+                std::strlen(binding->payloadMeshName) < capacity)
+            {
+                strncpy_s(output, capacity, binding->payloadMeshName, _TRUNCATE);
+                return true;
+            }
+            return TryResolveChunkPayloadMeshResource(probe, preferredMeshName, geomName, output, capacity);
+        }
+
         static void TrackChunkProxyDebugEntry(
             const uint8_t* objectBytes,
             const void* geomRef,
@@ -3974,7 +4062,7 @@ namespace BZROpenShim
                         strncpy_s(slot.ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
                     else
                         slot.ownerOgreFilename[0] = '\0';
-                    TryResolveChunkPayloadMeshResource(
+                    ResolveTrackedChunkPayload(
                         probe,
                         preferredMeshName,
                         slot.geomName,
@@ -4025,7 +4113,7 @@ namespace BZROpenShim
                 strncpy_s(freeSlot->ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
             else
                 freeSlot->ownerOgreFilename[0] = '\0';
-            if (!TryResolveChunkPayloadMeshResource(
+            if (!ResolveTrackedChunkPayload(
                     probe,
                     preferredMeshName,
                     freeSlot->geomName,
