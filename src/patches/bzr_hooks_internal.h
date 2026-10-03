@@ -1545,6 +1545,9 @@ namespace BZROpenShim
         bool TryResolveGeneratedStockChunkFallback(const char* seed, char* out, size_t capacity);
         bool TryResolveNativeChunkPayload(const char* mesh, const char* geom,
             char* out, size_t capacity, bool& handled);
+        // Once per new chunk: move its physical origin onto a generated
+        // piece's centre. No-op for stock, external or uncentred payloads.
+        bool RecenterNativeChunkObject(uint8_t* objectBytes, const char* payloadMeshName);
         std::string NormalizeChunkPayloadComponentName(const char* value);
         bool TryResolveChunkPayloadMeshResource(
             const ChunkObjectLinkProbe& probe,
