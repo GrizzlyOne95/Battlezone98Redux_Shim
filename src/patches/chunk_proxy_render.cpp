@@ -4372,6 +4372,73 @@ namespace BZROpenShim
             }
         }
 
+        // A proxy slot is keyed by the chunk object's address, and the engine
+        // recycles that memory for other objects as soon as the chunk dies.
+        // The 400 ms expiry alone left the proxy reading its transform from
+        // whatever moved in -- minigun rounds (bullet7f, no shot geometry)
+        // were seen flying as debris meshes on isdfms04. Release a slot the
+        // moment its object is no longer a live chunk in ChunkEffect's list.
+        static constexpr uint32_t kChunkEffectMaxEntries = static_cast<uint32_t>(
+            (kChunkEffectActiveCountOffset - kChunkEffectEntryBaseOffset) / kChunkEffectEntrySize);
+        static uintptr_t g_ChunkEffectLiveObjects[kChunkEffectMaxEntries];
+
+        static bool CollectLiveChunkObjects(const uint8_t* thisBytes, size_t& outCount)
+        {
+            outCount = 0;
+            __try
+            {
+                const uint32_t count =
+                    *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectActiveCountOffset);
+                if (count > kChunkEffectMaxEntries)
+                    return false;
+
+                for (uint32_t index = 0; index < count; ++index)
+                {
+                    const auto* entryBytes = thisBytes + kChunkEffectEntryBaseOffset +
+                        (static_cast<uintptr_t>(index) * kChunkEffectEntrySize);
+                    const uint8_t* objectBytes = *reinterpret_cast<const uint8_t* const*>(entryBytes);
+                    if (!objectBytes ||
+                        *reinterpret_cast<const uint32_t*>(objectBytes + 0x84) != kClassIdChunk)
+                    {
+                        continue;
+                    }
+                    g_ChunkEffectLiveObjects[outCount++] = reinterpret_cast<uintptr_t>(objectBytes);
+                }
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                // A torn read is not evidence that any chunk died; keep the
+                // slots and let the expiry handle them.
+                return false;
+            }
+        }
+
+        void ReleaseChunkProxiesMissingFromActiveList(void* thisPtr)
+        {
+            if ((!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy) || !thisPtr ||
+                g_ChunkProxySlots.empty())
+            {
+                return;
+            }
+
+            size_t liveCount = 0;
+            if (!CollectLiveChunkObjects(reinterpret_cast<const uint8_t*>(thisPtr), liveCount))
+                return;
+
+            uintptr_t* const liveBegin = g_ChunkEffectLiveObjects;
+            uintptr_t* const liveEnd = g_ChunkEffectLiveObjects + liveCount;
+            std::sort(liveBegin, liveEnd);
+            for (ChunkProxySlot& slot : g_ChunkProxySlots)
+            {
+                if (slot.active &&
+                    !std::binary_search(liveBegin, liveEnd, reinterpret_cast<uintptr_t>(slot.objectBytes)))
+                {
+                    ReleaseChunkProxySlot(slot, L"left-active-list");
+                }
+            }
+        }
+
         // The bridge/owner slots below are only pointers on some of the
         // objects that reach here; others hold small integers (0x01, 0x18
         // were caught in the isdfms04 crash log) that the __try below would

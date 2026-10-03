@@ -1794,6 +1794,9 @@ namespace BZROpenShim
         {
             g_BzrFn_ChunkEffectSimulate(thisPtr, dt);
         }
+        // Chunks the stock simulate just retired give their memory back to
+        // the object pool; drop their proxies before anything can reuse it.
+        ReleaseChunkProxiesMissingFromActiveList(thisPtr);
     }
 
 }

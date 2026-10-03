@@ -1816,6 +1816,7 @@ namespace BZROpenShim
             ChunkEffectActiveEntry& outEntry);
         void LogChunkEffectRuntimeSample(void* thisPtr, float dt);
         void TrackChunkEffectActiveEntries(void* thisPtr);
+        void ReleaseChunkProxiesMissingFromActiveList(void* thisPtr);
         void NoteChunkClassTransition(const uint8_t* objectBytes, uint32_t classId);
         void LogChunkResolveSnapshot(
             const char* stage,
