@@ -477,6 +477,8 @@ The following have moved out of the speculative backlog into working/qualified c
 [*] [b]Editor Shift-F10 object placement[/b]
 [*] [b]Multi-parameter command-line parsing[/b]
 [*] Restored physical destruction chunks
+[*] Automatic Ogre bone-group destruction meshes with batched stock-debris fallback and startup-validated cache reuse, without an external payload pack (local GOG DX11 validation; model-shaped pieces require usable skeleton groups and native fragment nodes)
+[*] Native destruction-piece pivot correction: decode Ogre's serialized quaternion order before deriving child origins, with automatic cache regeneration and no additional per-frame work
 [*] Stock GOG DX9/DX11 destruction/live-fire submission reduction
 [*] Generic destruction-chunk batch rebuild deduplication by actual state change
 [*] GOG DX11 animated-mesh readback fix for software-skinned position/normal sources

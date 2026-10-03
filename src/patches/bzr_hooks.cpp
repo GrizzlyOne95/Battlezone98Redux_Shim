@@ -1047,11 +1047,10 @@ namespace BZROpenShim
         const bool configWantsChunkMeshProxy =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_MESH_PROXY") ||
               EnvFlagEnabled("BZR_DISABLE_CHUNK_MESH_PROXY"));
-        // Gate on both user config AND verified resource availability.
-        // This prevents a copied openshim.ini with ChunkMeshes=1 from
-        // entering unsafe Ogre Entity creation paths when the asset pack
-        // is absent, stale, or partial.
-        g_EnableChunkMeshProxy = configWantsChunkMeshProxy && chunkAssetsAvailable;
+        // Mesh pieces can now be generated from the source Ogre resource.
+        // External payload packs remain a fallback, not a prerequisite.
+        g_EnableChunkMeshProxy = configWantsChunkMeshProxy;
+        WarmNativeChunkCaches();
         if (configWantsChunkMeshProxy && !chunkAssetsAvailable)
         {
             static bool s_logged = false;
@@ -1059,7 +1058,7 @@ namespace BZROpenShim
             {
                 s_logged = true;
                 const auto caps = Assets::GetAssetCapabilities();
-                Log(L"[CHUNKMESH] Chunk mesh proxy requested but asset capability unavailable; suppressing feature state=%hs installed=%hs problem=%hs\n",
+                Log(L"[CHUNKMESH] External payloads unavailable; using native mesh extraction state=%hs installed=%hs problem=%hs\n",
                     Assets::AssetPackStateName(caps.state),
                     caps.installedVersion.c_str(),
                     caps.problem.c_str());
@@ -1193,7 +1192,10 @@ namespace BZROpenShim
                 vehicleSkinningTraceBudget = 4096;
         }
         g_VehicleSkinningTraceBudget = vehicleSkinningTraceBudget;
-        long chunkLogBudget = 4000;
+        // Normal gameplay needs only a few lifecycle samples. Thousands of
+        // synchronous, duplicated log writes can stall a destruction burst.
+        // Explicit diagnostic overrides still permit a larger capture.
+        long chunkLogBudget = 12;
         const bool chunkLogBudgetSpecified =
             TryGetEnvLong("BZR_CHUNK_LOG_BUDGET", chunkLogBudget) ||
             TryGetEnvLong("OPENSHIM_CHUNK_LOG_BUDGET", chunkLogBudget);
@@ -1490,11 +1492,14 @@ namespace BZROpenShim
         g_GenericChunkBatchRuntimeAvailable = true;
         g_GenericChunkBatchEligibility[0] = -1;
         g_GenericChunkBatchEligibility[1] = -1;
+        g_StockFallbackBatchEligibility[0] = -1;
+        g_StockFallbackBatchEligibility[1] = -1;
         g_GenericChunkBatchLastLogTick = 0;
         g_ChunkPayloadResourceDirectories.clear();
         g_ChunkPayloadMeshExistsCache.clear();
         g_ChunkPayloadResolveFailureLogCache.clear();
         g_ChunkResolvedBindingCache.clear();
+        ResetNativeChunkPayloads();
         g_ChunkResolvedBindingLastPruneTick = 0;
         InitializeGlobalImprovementConfig();
         const char* rawInputSource = "default";
@@ -1629,6 +1634,11 @@ namespace BZROpenShim
 
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* /*edx*/, void* renderQueue)
     {
+        // Keep one owner per camera/material traversal. Flame callbacks can
+        // precede this Ogre traversal, so call-stack nesting alone does not
+        // exclude duplicate submissions. A recent observed world callback
+        // proves this driver is live; the flame fallback resumes if it stalls.
+        ObserveChunkWorldQueueDriver();
         if (g_BzrFn_LegacyWorldUpdateRenderQueue && thisPtr)
         {
             if (!RunLegacyWorldQueueWithDynamicGeometryCounters(thisPtr, renderQueue))
@@ -1681,6 +1691,7 @@ namespace BZROpenShim
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(renderQueue)));
         }
 
+        TickChunkProxyDebug(nullptr, false);
         SubmitChunkProxiesToRenderQueue(renderQueue);
 
         // Opt-in Phase 3A parity capture. Inert unless a semantic frame
