@@ -299,3 +299,10 @@ waveOutUnprepareHeader@12
 waveOutWrite@12
 wid32Message@0
 wod32Message@0
+OpenShimGetNativeHudLayoutCapabilities@0
+OpenShimGetNativeHudMeterRect@20
+OpenShimGetNativeHudMeterDefaultRect@20
+OpenShimSetNativeHudMeterRect@20
+OpenShimSetNativeHudMeterVisible@8
+OpenShimRestoreNativeHudMeter@4
+OpenShimRestoreAllNativeHudMeters@0
