@@ -56,6 +56,11 @@ namespace BZROpenShim
     // its own.
     void BznLoadTraceOnOpenA(const char* absolutePath, uint32_t desiredAccess) noexcept;
 
+    // Called when Redux leaves RUN_STARTED for RUN_WAS_QUIT. If the stock
+    // logger says the mission load failed, correlate its last "obj #N" with
+    // the BZN table captured at open time and emit one actionable summary.
+    void BznLoadTraceOnMissionQuit() noexcept;
+
     // True when the per-object table is enabled. Exposed for the startup
     // banner; the structural report runs regardless.
     bool IsBznLoadTraceVerbose() noexcept;

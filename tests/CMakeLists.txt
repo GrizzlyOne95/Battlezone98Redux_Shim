@@ -579,3 +579,9 @@ openshim_add_test(native_hud_layout_tests STD 20 SOURCES
     ../src/engine/native_hud_layout.cpp
     ../src/patches/native_hud_runtime.cpp
 )
+
+if(WIN32 AND MSVC)
+    openshim_add_test(live_reticle_team_tests STD 20 SOURCES
+        live_reticle_team_tests.cpp
+    )
+endif()
