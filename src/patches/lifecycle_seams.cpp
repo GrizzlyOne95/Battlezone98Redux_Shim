@@ -350,6 +350,12 @@ namespace BZROpenShim
             const bool readPrevious = TryReadBzrRunState(previous);
             if (g_BzrFn_SetRunningOriginal)
                 g_BzrFn_SetRunningOriginal(state);
+            // The init-time pin runs ~5 s before Ogre loads its render system
+            // plugins on GOG, and the deferred retry only recurs from Lua
+            // bridges, so the guard used to never engage. Every SetRunning,
+            // including RUN_WAS_EXITED ahead of Ogre's plugin unload, is
+            // after plugin load. Latched per module: a no-op once pinned.
+            PinDirect3DModulesForShutdown();
             // Re-read instead of trusting the argument: SetRunning refuses every
             // change once the state is RUN_WAS_EXITED.
             int current = kBzrRunStateUnknown;
@@ -494,8 +500,9 @@ namespace BZROpenShim
                 if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN, kModules[index], &module) ||
                     module == nullptr)
                 {
-                    // Not loaded yet (or a DX9 run). Retried from
-                    // RetryDeferredRuntimeHooks until it appears.
+                    // Not loaded yet: the init-time call precedes Ogre's
+                    // plugin load. BzrSetRunningHook retries on every run
+                    // state change, which is what actually pins on GOG.
                     continue;
                 }
 

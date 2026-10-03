@@ -1186,8 +1186,16 @@ namespace BZROpenShim
         }
     }
 
+    // Replacement for stock's 1.0000001f at 0x008A2608, read by the one mulss
+    // that derives the screen-space 2D depth floor from the camera near clip
+    // ("HUD 2D Depth Floor Margin"). 1e-4 of relative margin is far above the
+    // float rounding of the projected z, and far below the 0.0005+ steps that
+    // separate HUD layers, so layer order is unchanged.
+    static const float kHud2DDepthFloorScale = 1.0001f;
+
     static void FillDwordPayloads(std::vector<HookEngine::PatchDef>& patches) {
         const uint32_t tag = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(GetOpenShimVersionTag()));
+        const uint32_t depthFloorScale = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&kHud2DDepthFloorScale));
         const uint32_t flameC = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(EngineFlameControlHook));
         const uint32_t flameS = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(EngineFlameSubmitHook));
         const uint32_t chunkE = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ChunkEffectSimulateHook));
@@ -1200,6 +1208,7 @@ namespace BZROpenShim
             else if (p.name == "Engine Flame Submit VTable Hook") val = flameS;
             else if (p.name == "Chunk Effect Simulate VTable Hook") val = chunkE;
             else if (p.name == "Legacy World Update RenderQueue VTable Hook") val = legacyRQ;
+            else if (p.name == "HUD 2D Depth Floor Margin") val = depthFloorScale;
             else if (IsProducerBuildMenuPatchName(p.name.c_str())) val = ProducerBuildMenuPatchTarget(p.name.c_str());
             if (val) { p.payload.resize(4); memcpy(p.payload.data(), &val, 4); }
         }
