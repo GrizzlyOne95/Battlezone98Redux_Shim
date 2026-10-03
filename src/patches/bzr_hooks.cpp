@@ -509,9 +509,10 @@ namespace BZROpenShim
     {
         LogChunkDiagnostic("chunk", L"[CHUNK] Force-first-geo fallback: %hs\n",
             g_EnableChunkRenderFallback ? "enabled" : "disabled");
-        LogChunkDiagnostic("chunk", L"[CHUNK] Trace logging: %hs%s budget=%ld entryLimit=%u\n",
+        LogChunkDiagnostic("chunk", L"[CHUNK] Trace logging: %hs%hs%hs budget=%ld entryLimit=%u\n",
             g_TraceChunkRender ? "enabled" : "disabled",
             g_TraceChunkRenderVerbose ? " verbose" : "",
+            g_ChunkEventLogging ? " events" : " events=off (set OPENSHIM_CHUNK_TRACE=1)",
             static_cast<long>(g_ChunkRenderLogBudget),
             g_ChunkTraceEntryLimit);
         LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] Placeholder proxy debug: %hs cap=%u size=%.2f\n",
@@ -1245,6 +1246,21 @@ namespace BZROpenShim
             (EnvFlagEnabled("BZR_TRACE_CHUNK_EFFECT") ||
              EnvFlagEnabled("OPENSHIM_TRACE_CHUNK_EFFECT") ||
              EnvFlagEnabled("OPENSHIM_CHUNK_EFFECT_TRACE"));
+        // g_TraceChunkRender above is also switched on by ChunkMeshes alone
+        // (it arms the hooks the mesh proxy depends on), which used to make
+        // every debris piece emit ~5 flushed lines: ~2000 lines/s in a
+        // minigun fight until the 4000-line budget ran dry. Per-chunk lines
+        // now need an explicit trace or chunk-debug request.
+        g_ChunkEventLogging =
+            (!disableChunkTrace &&
+             (g_EnableChunkRenderFallback ||
+              g_EnableChunkProxyDebug ||
+              EnvFlagEnabled("BZR_CHUNK_TRACE") ||
+              EnvFlagEnabled("OPENSHIM_CHUNK_TRACE") ||
+              g_TraceChunkRenderVerbose ||
+              chunkLogBudgetSpecified ||
+              chunkTraceEntryLimitSpecified)) ||
+            g_TraceChunkEffectRuntime;
         InstallChunkEffectCreateHooksIfRequested();
         InstallChunkFragmentWalkHooksIfRequested();
         // Satellite fog-of-war investigation (feature item 24). Defaulted ON

@@ -281,7 +281,10 @@ namespace BZROpenShim
     // pointer, so the real geo-name field can be located from a live session.
     static void DumpChunkGeomBytes(const char* tag, const void* geomPtr, volatile long* budget)
     {
-        if (!geomPtr || !budget || InterlockedDecrement(budget) < 0)
+        // Diagnostic only: the dword probe below deliberately dereferences
+        // floats and indices as pointers, so every call takes first-chance
+        // faults. Never run it without an explicit chunk trace request.
+        if (!g_ChunkEventLogging || !geomPtr || !budget || InterlockedDecrement(budget) < 0)
             return;
 
         uint8_t raw[0x60] = {};
@@ -690,7 +693,7 @@ namespace BZROpenShim
 
         // Baseline layout dump of a known-good chunklet geo (its name reads
         // fine) to compare against the craft-piece geoms whose names don't.
-        if (createdEntryPtr && createdEntryPtr->objectBytes)
+        if (g_ChunkEventLogging && createdEntryPtr && createdEntryPtr->objectBytes)
         {
             const void* geomRef = nullptr;
             char geomName[64] = {};
@@ -706,7 +709,8 @@ namespace BZROpenShim
 
     static bool AcquireChunkFragmentWalkLogSlot()
     {
-        return InterlockedDecrement(&g_ChunkFragmentWalkLogBudget) >= 0;
+        return g_ChunkEventLogging &&
+            InterlockedDecrement(&g_ChunkFragmentWalkLogBudget) >= 0;
     }
 
 
