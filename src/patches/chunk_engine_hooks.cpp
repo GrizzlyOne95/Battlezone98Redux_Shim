@@ -702,10 +702,12 @@ namespace BZROpenShim
         }
     }
 
-    static volatile long g_ChunkFragmentWalkLogBudget = 160;
+    static volatile long g_ChunkFragmentWalkLogBudget = 16;
 
     static bool AcquireChunkFragmentWalkLogSlot()
     {
+        if (g_TraceChunkRenderVerbose)
+            return true;
         return InterlockedDecrement(&g_ChunkFragmentWalkLogBudget) >= 0;
     }
 
@@ -830,6 +832,8 @@ namespace BZROpenShim
 
         g_ActiveFragmentSourceOgreEntity =
             ResolveCraftOgreEntity(rootObjectPtr, g_ActiveFragmentSourceOgreEntityVia);
+        PrepareNativeChunkPayloads(g_ActiveFragmentSourceOgreEntity,
+            g_ActiveFragmentSourceMeshName, sizeof(g_ActiveFragmentSourceMeshName));
 
         // Fragment nodes are render-tree nodes; the ODF lives on the GameObject
         // that owns them, one hop out through the obj76 back-link.

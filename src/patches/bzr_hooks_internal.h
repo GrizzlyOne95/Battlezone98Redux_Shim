@@ -1539,6 +1539,12 @@ namespace BZROpenShim
         extern bool g_TraceChunkRender;
         std::filesystem::path GetChunkPayloadStockResourceDirectory();
         void RefreshChunkPayloadResourceDirectories();
+        std::filesystem::path GetNativeChunkCacheDirectory();
+        bool PrepareNativeChunkPayloads(void* entity, char* sourceName = nullptr, size_t capacity = 0);
+        void ResetNativeChunkPayloads();
+        bool TryResolveGeneratedStockChunkFallback(const char* seed, char* out, size_t capacity);
+        bool TryResolveNativeChunkPayload(const char* mesh, const char* geom,
+            char* out, size_t capacity, bool& handled);
         std::string NormalizeChunkPayloadComponentName(const char* value);
         bool TryResolveChunkPayloadMeshResource(
             const ChunkObjectLinkProbe& probe,
@@ -1770,6 +1776,10 @@ namespace BZROpenShim
         extern std::string g_GenericChunkBatchBuiltMaterial;
         extern uint64_t g_GenericChunkBatchBuiltVersion;
         extern int g_GenericChunkBatchEligibility[2];
+        extern int g_StockFallbackBatchEligibility[2];
+        void ObserveChunkWorldQueueDriver();
+        bool ChunkWorldQueueDriverIsActive();
+        void WarmNativeChunkCaches();
         extern DWORD g_GenericChunkBatchLastLogTick;
         extern void* g_GenericChunkBatchManualObject;
         extern bool g_GenericChunkBatchRateDiagnostics;

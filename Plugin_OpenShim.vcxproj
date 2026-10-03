@@ -155,6 +155,9 @@
     <ClCompile Include="src\patches\dynamic_geometry_hooks.cpp" />
     <ClCompile Include="src\patches\chunk_identity.cpp" />
     <ClCompile Include="src\patches\chunk_payload_resolve.cpp" />
+    <ClCompile Include="src\patches\native_chunk_mesh.cpp" />
+    <ClCompile Include="src\patches\native_chunk_cache.cpp" />
+    <ClCompile Include="src\patches\native_chunk_runtime.cpp" />
     <ClCompile Include="src\patches\chunk_proxy_render.cpp" />
     <ClCompile Include="src\patches\config_helpers.cpp" />
     <ClCompile Include="src\patches\diag_jump_snipe_probe.cpp" />
