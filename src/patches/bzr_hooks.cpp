@@ -1,3 +1,4 @@
+#include "native_hud_runtime.h"
 #include "bzr_hooks.h"
 #include "env_switch_table.h"
 #include "bool_token.h"
@@ -269,6 +270,7 @@ namespace BZROpenShim
     // trampolines. Runs after g_IsSteamExe is set.
     void ResetBzrHookRuntimeState()
     {
+        NativeHud::Runtime::SetAdapterCapabilities(0);
         ResetWeaponPresentationState();
         g_BzrFn_EngineFlameAddFlame = nullptr;
         g_BzrFn_EngineFlameControl = nullptr;

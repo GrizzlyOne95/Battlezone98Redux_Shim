@@ -586,6 +586,13 @@ add_test(NAME shared_bzr_docs_check
             -P ${CMAKE_CURRENT_SOURCE_DIR}/shared_bzr_docs_check.cmake
 )
 
+# Native meter geometry/provider before build-specific hook qualification.
+openshim_add_test(native_hud_layout_tests STD 20 SOURCES
+    native_hud_layout_tests.cpp
+    ../src/engine/native_hud_layout.cpp
+    ../src/patches/native_hud_runtime.cpp
+)
+
 if(WIN32 AND MSVC)
     openshim_add_test(live_reticle_team_tests STD 20 SOURCES
         live_reticle_team_tests.cpp

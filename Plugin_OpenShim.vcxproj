@@ -132,6 +132,8 @@
     <ClCompile Include="src\engine\patch_config_parse.cpp" />
     <ClCompile Include="src\engine\patcher.cpp" />
     <ClCompile Include="src\engine\render_effect_intent.cpp" />
+    <ClCompile Include="src\engine\native_hud_layout.cpp" />
+    <ClCompile Include="src\patches\native_hud_runtime.cpp" />
     <ClCompile Include="src\engine\scene_depth_facts.cpp" />
     <ClCompile Include="src\engine\render_profile.cpp" />
     <ClCompile Include="src\engine\render_profile_resources.cpp" />
@@ -273,6 +275,8 @@
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
     <ClInclude Include="include\render_effect_intent.h" />
+    <ClInclude Include="include\native_hud_layout.h" />
+    <ClInclude Include="include\native_hud_runtime.h" />
     <ClInclude Include="include\fog_wake.h" />
     <ClInclude Include="include\fog_wake_runtime.h" />
     <ClInclude Include="include\fog_wake_feature.h" />

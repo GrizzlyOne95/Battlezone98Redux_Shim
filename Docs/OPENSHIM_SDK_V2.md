@@ -247,3 +247,11 @@ searched for in a GOG executable.
 Distribution itself is published through `OpenShimGetBzrDistribution()` and
 `BZROpenShim::GetBzrDistribution()`, and is only set to `GOG`/`Steam` after the
 supported BZR version gate succeeds.
+
+## Native HUD layout exports (implementation checkpoint)
+
+The optional full-meter placement exports and their physical-pixel contract are
+listed in [NATIVE_HUD_LAYOUT.md](NATIVE_HUD_LAYOUT.md). Their provider fields
+append after the existing legacy block without changing `OpenShimApiV2` or any
+previous provider offsets. `OpenShimGetNativeHudLayoutCapabilities()` currently
+returns zero: no native render adapter is qualified/enabled in this checkpoint.
