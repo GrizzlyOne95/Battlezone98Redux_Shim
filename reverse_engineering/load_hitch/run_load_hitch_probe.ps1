@@ -3,7 +3,7 @@
 # three shim modules before and after, an optional cold microcode-cache arm,
 # and a done-marker so the runner can be launched detached (via WMI) and
 # polled from another shell.
-param([ValidateSet('DX9','DX11')][string]$Renderer='DX9',[string]$Label='live-dx9',[int]$Seconds=110,[switch]$ColdShaderCache)
+param([ValidateSet('DX9','DX11')][string]$Renderer='DX9',[string]$Label='live-dx9',[int]$Seconds=110,[switch]$ColdShaderCache,[string[]]$ExtraEnv=@())
 $ErrorActionPreference='Stop'
 $gameRoot=[IO.Path]::GetFullPath('C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux')
 $repoRoot='C:\Users\iestu\Documents\GIT\BZR-OpenShim'
@@ -36,7 +36,7 @@ $cacheDir=Join-Path $gameRoot 'shader_cache'
 $cacheBackup=Join-Path $evidence 'shader_cache.backup'
 $cacheMoved=$false
 $launchUtc=$null
-$created=@();$gameProc=$null
+$created=@();$gameProc=$null;$extraNames=@()
 try {
  foreach($name in $names){
   $path=Join-Path $modRoot $name
@@ -58,6 +58,7 @@ try {
  $env:OPENSHIM_PROFILE_NATIVE_CPU_HZ='1000'
  $env:OPENSHIM_PROFILE_NATIVE_CPU_DEPTH='64'
  $env:OPENSHIM_PROFILE_NATIVE_CPU_LABEL=$Label
+ $extraNames=@(); foreach($kv in $ExtraEnv){ $k,$v=$kv.Split('=',2); $extraNames+=$k; Set-Item -Path ('env:'+$k) -Value $v }
  $originalOgre=Set-BZROgreWindowed -GameRoot $gameRoot
  [IO.File]::WriteAllText($selection,$modRoot+"`r`n",[Text.UTF8Encoding]::new($false))
  $launchUtc=[DateTime]::UtcNow
@@ -75,6 +76,7 @@ try {
  $gameProc=$null
 } finally {
  if($gameProc){Stop-BZRGame -Id $gameProc.Id -TimeoutSeconds 60}
+ foreach($k in $extraNames){ Remove-Item -Path ('env:'+$k) -ErrorAction SilentlyContinue }
  [IO.File]::WriteAllBytes($selection,$originalSelection)
  [IO.File]::WriteAllBytes($config,$originalConfig)
  if($cacheMoved){
@@ -95,7 +97,7 @@ try {
    Where-Object { $_.LastWriteTimeUtc -ge $launchUtc } | Move-Item -Destination $evidence
  }
  $hashesAfter=Get-ModuleHashes
- [ordered]@{renderer=$Renderer;label=$Label;coldShaderCache=[bool]$ColdShaderCache;launchUtc=$launchUtc;
+ [ordered]@{renderer=$Renderer;label=$Label;extraEnv=$ExtraEnv;coldShaderCache=[bool]$ColdShaderCache;launchUtc=$launchUtc;
   version=(Get-Item -LiteralPath (Join-Path $gameRoot 'plugins\openshim.dll')).VersionInfo.FileVersion;
   hashesBefore=$hashesBefore;hashesAfter=$hashesAfter;
   hashesStable=(($hashesBefore.Values -join ',') -eq ($hashesAfter.Values -join ','));

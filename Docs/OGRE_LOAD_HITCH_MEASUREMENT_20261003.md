@@ -19,9 +19,10 @@ cost. Lazy texture, mesh and shader loading during play is not.
 - Shader compile at load is small: DX9 0.2–0.4 s per load, DX11 0.04 s, with the
   microcode cache warm.
 
-Recommended next step: an OpenShim **import cache** for the script compiler. It
-needs no engine behaviour change and should recover ~1.1–1.4 s per mod-set change.
-Details and the other options are below. No runtime change is in this commit.
+The first fix is now built: an OpenShim **import cache** for the script compiler
+(`src/patches/ogre_script_import_cache.cpp`). It cuts script parsing by
+1.2–1.7 s per load (see "Import cache: results" below). The other options are
+ranked further down.
 
 ## Method
 
@@ -105,24 +106,7 @@ first-use hitch.
 
 ## Options, ranked
 
-1. **Import cache for the script compiler. Recommended; not built yet.**
-   - **What:** register a `ScriptCompilerListener` through the exported
-     `ScriptCompilerManager::setListener`. Redux registers none, and the exe
-     has no reference to the listener API.
-   - **How:** its `importFile` returns a cached `ConcreteNodeListPtr` per
-     (group, import name), cleared when a resource group starts initialising.
-     The concrete tree is read-only input to `convertToAST`, so sharing it is
-     safe. The abstract tree is not, because inheritance and variable
-     processing mutate it.
-   - **ABI:** build the listener's vtable from the exported
-     `??_7ScriptCompilerListener@Ogre@@6B@`, overriding only the `importFile`
-     slot. The retail Ogre headers are not ABI-identical, so do not take the
-     layout from them.
-   - **Expected gain:** most of `loadImportPath` minus `convertToAST`, roughly
-     1.0–1.2 s per mod-set change. More if the lexer/parser for a cache miss can
-     reuse the exported `ScriptLexer`/`ScriptParser`.
-   - **Risk:** moderate. STLport/SharedPtr layout must match OgreMain, and an
-     import edited mid-session must invalidate the cache.
+1. **Import cache for the script compiler. Built** (see the next section).
 2. **Cache the resource-location directory walk** (~0.8 s per mod-set change).
    Feasible, but it means hooking engine code (`FUN_006679c0`/`FUN_00667ed0`)
    with a cache keyed on directory mtimes. Second priority.
@@ -141,6 +125,65 @@ first-use hitch.
    a scene with heavier first-use content (Resurgence) shows otherwise.
 6. **OS file-cache prefetch thread.** Not justified: file I/O is 30–110 ms per
    window with a warm cache, and the parse is CPU-bound.
+
+## Import cache: design and results
+
+`src/patches/ogre_script_import_cache.cpp` adds two inline detours on
+OgreMain exports, both prologue-checked and failing closed:
+
+- **`ScriptCompiler::loadImportPath`.** On a cache hit it returns
+  `convertToAST(cached concrete list)`. On a miss it runs the original with a
+  thread-local capture slot armed.
+- **`ScriptParser::parse`.** When the slot is armed, it keeps a reference to the
+  result. This only happens inside the original `loadImportPath`, whose single
+  parse is the import itself.
+
+Design notes:
+
+- **What is cached.** Only the concrete node list. `AbstractTreeBuilder` only
+  reads it, so one list can feed any number of compiles. The abstract tree is
+  never shared, because `processImports`/`processObjects` mutate it and are not
+  idempotent: overlays and override insertion repeat.
+- **Lifetime.** Entries are keyed by resource group + import name and are
+  dropped when no import is requested for 1.5 s. Each parse wave therefore
+  starts empty, and an edit made between loads is read fresh.
+- **Why not a listener.** A `ScriptCompilerListener::importFile` would also
+  work, but a cache miss would then have to run Ogre's lexer and parser itself.
+  The detour reuses Ogre's own miss path.
+- **ABI, verified in the shipped DLL:**
+  - `SharedPtr` is `{pRep, pInfo}`.
+  - **`useCount` is at `SharedPtrInfo+0x14`, not the header's `+4`** (every
+    retail copy and release site uses `+0x14`).
+  - Release at zero is `vtbl[0](info, 0)` + `StdAllocPolicy::deallocateBytes`.
+  - The first captured list must read `useCount == 1` at that offset, or the
+    cache disables itself before it holds a reference.
+- **Kill switch:** `OPENSHIM_DISABLE_SCRIPT_IMPORT_CACHE=1`.
+
+Live runs used the same probe on the GOG install, running the
+`agent/native-mesh-chunks` 1.0.0.46 build plus this change. Main-thread
+sampled ms:
+
+| run | script parse (whole load) | mission parse phase | `loadImportPath` in it | start → sim wall |
+|---|---:|---:|---:|---:|
+| DX11, cache off (kill switch) | 4 283 | 3 596 | 1 416 | 18.4 s |
+| DX11, cache on | 3 050 | 2 531 | 11 | 17.2 s |
+| DX9, earlier run without the cache | 4 564 | 3 894 | 1 546 | 19.2 s |
+| DX9, cache on | 2 883 | 2 441 | 11 | 16.2 s |
+
+- **Shell wave:** 220 hits from only 3 parsed imports.
+- **Mission re-parse:** the phase fell from 6–7 s to 4–5 s of wall clock
+  (1 s log stamps).
+- **Unchanged:** all runs had the same 1 424 parsed scripts and 10/10
+  destruction events.
+- **Exits:** the DX11 runs, with and without the cache, ended in the known
+  `nvwgf2um` shutdown fault (eip `…FCC6`) that open PR #396 fixes; DX9 exited 0.
+- **Unusable arms:**
+  - The first cache-on DX11 run paid 2.9 s of one-off shader recompilation
+    because the deploy invalidated the microcode cache; it was rerun with the
+    cache warm.
+  - A DX9 cache-off arm was lost: the game and its runner were stopped
+    externally 2 s after launch. The DX9 baseline is therefore the earlier
+    no-cache run on the same content.
 
 ## Texture optimisation done in this workstream
 
