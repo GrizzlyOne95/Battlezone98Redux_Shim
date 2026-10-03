@@ -5,6 +5,8 @@
 #include "hook_engine.h"
 #include "memory_access.h"
 #include "openshim_update_manifest.h"
+#include "openshim_update_support.h"
+#include "openshim_assets.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -765,12 +767,6 @@ namespace BZROpenShim
 
             const bool allCurrent = std::all_of(payloads.begin(), payloads.end(),
                 [](const RuntimePayload& payload) { return InstalledPayloadMatches(payload); });
-            if (allCurrent)
-            {
-                SetState(OpenShimUpdateState::UpToDate,
-                         "OpenShim " + manifest.version + " is up to date.");
-                return;
-            }
 
             // Downgrade guard. Both versions must parse, or nothing is staged:
             // an unreadable installed version is not a licence to overwrite it.
@@ -795,6 +791,31 @@ namespace BZROpenShim
                 SetState(OpenShimUpdateState::UpToDate,
                          "Installed OpenShim " + installedVersion +
                          " is newer than Workshop " + manifest.version + "; no downgrade was staged.");
+                return;
+            }
+
+            bool supportChanged = false;
+            const auto verifySupport = [](const std::filesystem::path& path,
+                                          const OpenShimUpdatePayloadManifest& metadata,
+                                          std::string& reason)
+            {
+                return ValidatePayload({ &metadata, path, {}, {}, {} }, reason);
+            };
+            if (!RepairOpenShimUpdateSupport(itemDirectory, gameRoot, manifest,
+                                             verifySupport, supportChanged, error))
+            {
+                SetState(OpenShimUpdateState::Failed, "Update repair failed: " + error + ".");
+                LogShimA(LogLevel::Error, kComponent, "Support-file repair failed: %s", error.c_str());
+                return;
+            }
+            Assets::RefreshAssetCapabilities();
+            if (supportChanged)
+                LogShimA(LogLevel::Info, kComponent, "OpenShim support files repaired; player settings preserved");
+            if (allCurrent)
+            {
+                SetState(OpenShimUpdateState::UpToDate,
+                         "OpenShim " + manifest.version + (supportChanged
+                             ? " is up to date; support files repaired." : " is up to date."));
                 return;
             }
 

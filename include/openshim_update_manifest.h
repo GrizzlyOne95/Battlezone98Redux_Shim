@@ -14,6 +14,7 @@ namespace BZROpenShim
         uint64_t size = 0;
         std::string version;
         std::string architecture;
+        bool overwrite = true;
     };
 
     struct OpenShimUpdateManifest
@@ -28,6 +29,8 @@ namespace BZROpenShim
         OpenShimUpdatePayloadManifest plugin;
         OpenShimUpdatePayloadManifest network;
         OpenShimUpdatePayloadManifest patches;
+        OpenShimUpdatePayloadManifest playerConfig;
+        OpenShimUpdatePayloadManifest assetManifest;
         // The replacement helper the updater launches from the Workshop item.
         // It is not installed anywhere, so only source, sha256 and size are
         // attested; destination stays empty.

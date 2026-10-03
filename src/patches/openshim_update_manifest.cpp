@@ -99,7 +99,7 @@ namespace BZROpenShim
         {
             const std::string pattern =
                 std::string("(?:^|[\\r\\n])\\s*") + name +
-                R"MANIFEST(\s*=\s*\{\s*source\s*=\s*"([^"]+)"\s*,\s*destination\s*=\s*"([^"]+)"\s*,\s*sha256\s*=\s*"([0-9A-Fa-f]{64})"\s*,\s*size\s*=\s*([0-9]+)(?:\s*,\s*version\s*=\s*"([^"]+)")?(?:\s*,\s*architecture\s*=\s*"([^"]+)")?\s*\}\s*,?)MANIFEST";
+                R"MANIFEST(\s*=\s*\{\s*source\s*=\s*"([^"]+)"\s*,\s*destination\s*=\s*"([^"]+)"\s*,\s*sha256\s*=\s*"([0-9A-Fa-f]{64})"\s*,\s*size\s*=\s*([0-9]+)(?:\s*,\s*version\s*=\s*"([^"]+)")?(?:\s*,\s*architecture\s*=\s*"([^"]+)")?(?:\s*,\s*overwrite\s*=\s*(true|false))?\s*\}\s*,?)MANIFEST";
             std::smatch match;
             if (!std::regex_search(text, match, std::regex(pattern)))
                 return false;
@@ -117,6 +117,7 @@ namespace BZROpenShim
             }
             payload.version = match[5].matched ? UnescapeLuaString(match[5].str()) : std::string();
             payload.architecture = match[6].matched ? UnescapeLuaString(match[6].str()) : std::string();
+            payload.overwrite = !match[7].matched || match[7].str() == "true";
             return true;
         }
 
@@ -170,7 +171,9 @@ namespace BZROpenShim
             !ReadPayload(text, "loader", manifest.loader) ||
             !ReadPayload(text, "plugin", manifest.plugin) ||
             !ReadPayload(text, "network", manifest.network) ||
-            !ReadPayload(text, "patches", manifest.patches))
+            !ReadPayload(text, "patches", manifest.patches) ||
+            !ReadPayload(text, "playerConfig", manifest.playerConfig) ||
+            !ReadPayload(text, "assetManifest", manifest.assetManifest))
         {
             error = "manifest is missing a required field or payload";
             return false;
@@ -202,6 +205,12 @@ namespace BZROpenShim
             manifest.network.destination != "net.ini" ||
             manifest.patches.source != "openshim_patches.json.payload" ||
             manifest.patches.destination != "scripts\\patches.json" ||
+            manifest.playerConfig.source != "openshim.ini.payload" ||
+            manifest.playerConfig.destination != "openshim.ini" ||
+            manifest.playerConfig.overwrite || manifest.playerConfig.size == 0 ||
+            manifest.assetManifest.source != "OpenShimAssets.ini.payload" ||
+            manifest.assetManifest.destination != "openshim\\OpenShimAssets.ini" ||
+            !manifest.assetManifest.overwrite || manifest.assetManifest.size == 0 ||
             manifest.winmm.sha256 != manifest.sha256 ||
             manifest.winmm.size != manifest.size ||
             manifest.winmm.version != manifest.version ||
