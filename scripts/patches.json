@@ -13,6 +13,15 @@
       "identity": "PromptSaveMission at 0x004FBE90 passes its 4096-byte filename buffer and missionSave=1 to the thiscall GetSaveName dialog at 0x0056AD10. AL=false branches to cleanup before SaveGame at 0x004FBF48. The dialog returns with RET 8. GOG PID 430832 live bytes matched on 2026-09-07. Hooking filename selection covers BZN and TRN before any terrain writes and preserves caller cancellation."
     },
     {
+      "name": "HUD 2D Depth Floor Margin",
+      "pattern": "F3 0F 10 05 30 25 8A 00 F3 0F 11 85 88 FB FF FF F3 0F 10 85 88 FB FF FF F3 0F 59 05 08 26 8A 00 F3 0F 11 05 80 D7 8E 00",
+      "offset": 28,
+      "expected_size": 4,
+      "fallback": "0x00665387",
+      "require_unique": true,
+      "identity": "View setup (inside the Onyx2015 camera/viewport setup at 0x00664110) loads the main camera near clip 0.08 from 0x008A2530, passes it to Camera vtable +0x140, then stores near * [0x008A2608] (1.0000001f) to 0x008ED780, the screen-space 2D depth floor. This mulss is the only reference to 0x008A2608 in .text and the only writer of 0x008ED780; FUN_0068B050 clamps DAT_00920EF4 to it, FUN_0068B0E0 seeds it, FUN_0068CE80 rejects depths below it. FUN_00686600 maps 2D vertex z through the camera projection, so the floor layer (HUD text, gauges, weapon icons, reticle) sits one ULP in front of the near plane and is clipped for some far-clip values. A Frida dump of DynamicMain on GOG SHA256 8D71F56C... (hilo.trn broken NormalView, 2026-10-03) showed every missing HUD batch at squared depth 6.4e-3 = 0.08^2. The patch rewrites only the abs32 operand to an OpenShim-owned 1.0001f; the whole five-instruction sequence is matched, so any other layout stands down."
+    },
+    {
       "name": "GameObject Handle Stale Slot Guard",
       "platforms": [
         "gog"
