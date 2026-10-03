@@ -523,4 +523,95 @@ At minimum, validate:
 - All PDA pages at common UI scales/aspect ratios.
 - All initial PDA themes for readability and warning-state clarity.
 
+---
+
+# 12. Later playtest findings
+
+## 12.1 Stock text stops rendering on ISDFC Test Range — ACTION / VERIFY
+
+Observed 2026-10-03 on GOG Redux 2.2.301 with the ISDF Chronicles addon,
+mission "ISDFC: Test Range" (`isdftest.lua`). All stock in-game text stopped
+rendering: HUD gauge text was missing and a large black "B" block was drawn
+near the top center of the screen. Other missions rendered text normally.
+
+Owner: **OpenShim** (stock fix), unless hypothesis 2 is confirmed, in which
+case **EXU**.
+
+Hypotheses:
+
+1. **Primary — stock bug.** The user has seen this before and believes
+   invalid view-range values in the map's TRN file trigger it.
+2. **Secondary — correlated, unconfirmed.** At the same moment EXU created
+   its private Ogre OverlaySystem for ISDFC's `wetglass.lua` rain overlay,
+   which registered an Ogre FontManager. Campaign Reimagined's Workshop mod
+   (`mods/3686673790/OverlayFont/CRBZoneOverlay.fontdef`) defines a font
+   sourced from `bzfont.dds`, the texture stock text uses, and
+   `BZOgreLogfile` shows `bzfont.dds` loaded with a full mip chain right
+   afterwards.
+
+Repro / triage:
+
+- Compare the Test Range TRN's view-range values against stock TRNs.
+- Run Test Range with weather/windshield rain off. Text that still breaks
+  points to the TRN; text that renders points to the EXU overlay/font path.
+
+Findings 2026-10-03:
+
+- Hypothesis 2 is refuted. `hilo.bzn`, which uses the same `hilo.trn`
+  terrain, also breaks: pause-menu text is gone as well, the run creates no
+  EXU overlay, and text still breaks with EXU disabled. `dunes.bzn`, a
+  near-identical CC-port map, renders text correctly. Owner: OpenShim
+  (stock), with the content fix in ISDFC.
+- The view-range values are in the range other working ISDFC maps use.
+  Stripped palettes, a blank `BackdropTexture`, and the atlas size are also
+  present on maps that work.
+- Leading suspect: `hilo.trn` has `[Clouds]` with Count=24, Type=0 and
+  `Texture0-2 = mcloud1.map`. `dunes.trn` has no `[Clouds]`. `mcloud1.map`
+  and any matching material exist nowhere in the install. `bridges`,
+  `isdfms10` and `isdfms11` use the same block.
+- Cloud test plan: remove `[Clouds]` from `hilo.trn`, or point it at stock
+  `acloud2.map`, and check whether text returns. Check `bridges.bzn`.
+
+Findings 2026-10-03 (harness A/B, windowed, `hilo.trn` restored by SHA256):
+
+- The `[Clouds]` suspect is refuted. Text stays broken on `hilo.bzn` with
+  `[Clouds]` removed, and also with `Texture0-2 = acloud2.map`
+  (`acloud2.tga` loads). `bridges.bzn`, with the same `mcloud1` block, and
+  `dunes.bzn` both render HUD and pause-menu text.
+- On hilo the HUD panels, the radar and the Scrap/Pilots backing panel (the
+  black "B") all draw, but every glyph is missing. `bzfont.dds` still loads.
+  Font rendering is lost, not the HUD.
+- The logs do not tell broken runs from working ones. Each run has the same
+  missing-mesh preload errors and one handled first-chance access violation
+  at `openshim.dll+0x9D000` (read of 0x95), on bridges and dunes too, so
+  that access violation is not the cause.
+- In the ISDFC addon, the uncommitted CC port changed `hilo.trn`, `.hg2`,
+  `.mat`, `.lgt`, `.BMP`, `.bzn` and `.lua`, and added `hilo.act`,
+  `hilo_cc_atlas.material` and `hiloenv.lua`. Test Range shares only the
+  terrain assets with `hilo.bzn`, so the cause is most likely among those.
+
+Findings 2026-10-03 (terrain bisect, 14 harness runs, all files restored by
+SHA256):
+
+- With every hilo terrain asset at `HEAD`, text renders. Running with only
+  the current `hilo.trn` `[NormalView]` keys set back to their `HEAD` values
+  also brings text back, with the 2560 `[Size]`, the hg2, the atlas, `.act`,
+  `.mat`, `.lgt` and `.BMP` all kept current. Text was possibly slightly
+  dimmer.
+- These keys trigger the loss: `Time=830 FogStart=100 FogEnd=350
+  VisibilityRange=400 FogBreak=30 FlatRange=450`. At `HEAD` they were `900 /
+  120 / 250 / 250 / 60 / 250`. No single key was isolated.
+- Ruled out: `[Clouds]`, `[Sky]`, `[Color]`, `[Sun_*]`, `[Atlases]`, the hcc
+  texture types, `Height`, `hilo.act`, the atlas material,
+  `.mat`/`.lgt`/`.BMP`.
+- No single value is out of range. Working maps exceed each one: `dunes`
+  uses `FogEnd=475 VisibilityRange=500 FlatRange=450`, and `isdfms14` uses
+  the same `FogBreak`/`FlatRange`. The trigger is therefore a combination,
+  possibly with the 2560 terrain size, or `Time=830`. This corrects the
+  earlier "view-range values are not the cause" note.
+- Next: isolate the key with roughly three halving runs, then find the stock
+  code path where that view/fog state stops font glyphs drawing, for an
+  OpenShim fail-safe. Content workaround for ISDFC: restore the `HEAD`
+  `[NormalView]` values in `hilo.trn`.
+
 This file is intended to remain the master checklist for the next coordinated polish/QA implementation pass.
