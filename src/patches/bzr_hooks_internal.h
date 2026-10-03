@@ -1800,6 +1800,7 @@ namespace BZROpenShim
         extern bool g_GenericChunkBatchVisible;
         extern uint32_t g_LastChunkEffectLoggedCount;
         extern bool g_TraceChunkRenderVerbose;
+        extern bool g_ChunkEventLogging;
         int FindChunkGeoEntryByKey(const BzrGeoLookup* lookup, uint32_t key);
         int FindFirstChunkGeoEntryWithHandle(const BzrGeoLookup* lookup);
         void MaybeLogDx11EnhancedLightingState();
@@ -1815,6 +1816,7 @@ namespace BZROpenShim
             ChunkEffectActiveEntry& outEntry);
         void LogChunkEffectRuntimeSample(void* thisPtr, float dt);
         void TrackChunkEffectActiveEntries(void* thisPtr);
+        void ReleaseChunkProxiesMissingFromActiveList(void* thisPtr);
         void NoteChunkClassTransition(const uint8_t* objectBytes, uint32_t classId);
         void LogChunkResolveSnapshot(
             const char* stage,

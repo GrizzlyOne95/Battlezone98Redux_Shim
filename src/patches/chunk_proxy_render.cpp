@@ -84,6 +84,13 @@ namespace BZROpenShim
         bool g_TraceChunkRender = false;
         bool g_TraceChunkRenderVerbose = false;
         bool g_TraceChunkEffectRuntime = false;
+        // Per-chunk event lines (spawn, track, assign, release, fragment walk,
+        // per-second batch stats). Off unless a chunk trace or chunk debug
+        // feature was asked for explicitly: g_TraceChunkRender alone is also
+        // implied by ChunkMeshes, because it arms the create/fragment hooks
+        // the mesh proxy needs, and must not turn every debris piece into
+        // several synchronous log writes.
+        bool g_ChunkEventLogging = false;
         uint32_t g_LastChunkEffectLoggedCount = UINT32_MAX;
         volatile long g_ChunkRenderLogBudget = 12;
         uint32_t g_ChunkTraceEntryLimit = 32;
@@ -186,12 +193,15 @@ namespace BZROpenShim
             _vsnwprintf_s(buffer, _countof(buffer), _TRUNCATE, fmt, args);
             va_end(args);
 
-            Log(L"%ls", buffer);
+            // One write, under the chunk component. Routing through Log() as
+            // well wrote every line a second time tagged [patcher].
             LogShimW(LogLevel::Info, component, L"%ls", buffer);
         }
 
         bool AcquireChunkLogSlot()
         {
+            if (!g_ChunkEventLogging)
+                return false;
             if (g_TraceChunkRenderVerbose)
                 return true;
 
@@ -1859,15 +1869,19 @@ namespace BZROpenShim
                 return false;
             }
 
-            HMODULE ogreMain = GetModuleHandleA("OgreMain.dll");
-            if (!vtable || !ogreMain)
+            // Range compare against the cached OgreMain image, not VirtualQuery:
+            // this runs once per sub-entity per render-queue traversal (every
+            // scheme and shadow cascade), and the syscall measured 23-34% of
+            // the main thread with ~100 debris proxies live (isdfms04 minigun
+            // capture, 2026-10-03). A mapped image is committed end to end, so
+            // "inside OgreMain's image" is the same test the query made.
+            uintptr_t ogreBase = 0;
+            uintptr_t ogreEnd = 0;
+            if (!vtable || !TryGetOgreModuleRange(ogreBase, ogreEnd))
                 return false;
 
-            MEMORY_BASIC_INFORMATION mbi = {};
-            return VirtualQuery(vtable, &mbi, sizeof(mbi)) == sizeof(mbi) &&
-                mbi.State == MEM_COMMIT &&
-                mbi.Type == MEM_IMAGE &&
-                mbi.AllocationBase == ogreMain;
+            const uintptr_t vtableAddress = reinterpret_cast<uintptr_t>(vtable);
+            return vtableAddress >= ogreBase && vtableAddress < ogreEnd;
         }
 
         static bool TryAddChunkProxyRenderableSafe(
@@ -3685,8 +3699,9 @@ namespace BZROpenShim
             }
 
             const DWORD now = GetTickCount();
-            if (g_GenericChunkBatchLastLogTick == 0 ||
-                static_cast<DWORD>(now - g_GenericChunkBatchLastLogTick) >= 1000)
+            if (g_ChunkEventLogging &&
+                (g_GenericChunkBatchLastLogTick == 0 ||
+                 static_cast<DWORD>(now - g_GenericChunkBatchLastLogTick) >= 1000))
             {
                 g_GenericChunkBatchLastLogTick = now;
                 LogChunkDiagnostic(
@@ -4357,6 +4372,83 @@ namespace BZROpenShim
             }
         }
 
+        // A proxy slot is keyed by the chunk object's address, and the engine
+        // recycles that memory for other objects as soon as the chunk dies.
+        // The 400 ms expiry alone left the proxy reading its transform from
+        // whatever moved in -- minigun rounds (bullet7f, no shot geometry)
+        // were seen flying as debris meshes on isdfms04. Release a slot the
+        // moment its object is no longer a live chunk in ChunkEffect's list.
+        static constexpr uint32_t kChunkEffectMaxEntries = static_cast<uint32_t>(
+            (kChunkEffectActiveCountOffset - kChunkEffectEntryBaseOffset) / kChunkEffectEntrySize);
+        static uintptr_t g_ChunkEffectLiveObjects[kChunkEffectMaxEntries];
+
+        static bool CollectLiveChunkObjects(const uint8_t* thisBytes, size_t& outCount)
+        {
+            outCount = 0;
+            __try
+            {
+                const uint32_t count =
+                    *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectActiveCountOffset);
+                if (count > kChunkEffectMaxEntries)
+                    return false;
+
+                for (uint32_t index = 0; index < count; ++index)
+                {
+                    const auto* entryBytes = thisBytes + kChunkEffectEntryBaseOffset +
+                        (static_cast<uintptr_t>(index) * kChunkEffectEntrySize);
+                    const uint8_t* objectBytes = *reinterpret_cast<const uint8_t* const*>(entryBytes);
+                    if (!objectBytes ||
+                        *reinterpret_cast<const uint32_t*>(objectBytes + 0x84) != kClassIdChunk)
+                    {
+                        continue;
+                    }
+                    g_ChunkEffectLiveObjects[outCount++] = reinterpret_cast<uintptr_t>(objectBytes);
+                }
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                // A torn read is not evidence that any chunk died; keep the
+                // slots and let the expiry handle them.
+                return false;
+            }
+        }
+
+        void ReleaseChunkProxiesMissingFromActiveList(void* thisPtr)
+        {
+            if ((!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy) || !thisPtr ||
+                g_ChunkProxySlots.empty())
+            {
+                return;
+            }
+
+            size_t liveCount = 0;
+            if (!CollectLiveChunkObjects(reinterpret_cast<const uint8_t*>(thisPtr), liveCount))
+                return;
+
+            uintptr_t* const liveBegin = g_ChunkEffectLiveObjects;
+            uintptr_t* const liveEnd = g_ChunkEffectLiveObjects + liveCount;
+            std::sort(liveBegin, liveEnd);
+            for (ChunkProxySlot& slot : g_ChunkProxySlots)
+            {
+                if (slot.active &&
+                    !std::binary_search(liveBegin, liveEnd, reinterpret_cast<uintptr_t>(slot.objectBytes)))
+                {
+                    ReleaseChunkProxySlot(slot, L"left-active-list");
+                }
+            }
+        }
+
+        // The bridge/owner slots below are only pointers on some of the
+        // objects that reach here; others hold small integers (0x01, 0x18
+        // were caught in the isdfms04 crash log) that the __try below would
+        // fault on every sim tick. Reject those before dereferencing.
+        static bool IsPointerShaped(const void* candidate)
+        {
+            const uintptr_t address = reinterpret_cast<uintptr_t>(candidate);
+            return address >= 0x00010000 && (address % sizeof(void*)) == 0;
+        }
+
         ChunkBridgeSnapshot CaptureChunkBridgeSnapshot(const uint8_t* objectBytes)
         {
             ChunkBridgeSnapshot snapshot = {};
@@ -4366,6 +4458,8 @@ namespace BZROpenShim
             __try
             {
                 snapshot.directBridgeRoot = *reinterpret_cast<void* const*>(objectBytes + 0xF0);
+                if (!IsPointerShaped(snapshot.directBridgeRoot))
+                    snapshot.directBridgeRoot = nullptr;
                 if (snapshot.directBridgeRoot)
                 {
                     const auto* bridgeBytes = reinterpret_cast<const uint8_t*>(snapshot.directBridgeRoot);
@@ -4384,12 +4478,18 @@ namespace BZROpenShim
                 // Legacy OBJ76 layouts observed in Redux helpers place the owning GameObject*
                 // at +0x8C, which is the bridge we want to validate for native death chunks.
                 snapshot.legacyOwner = *reinterpret_cast<void* const*>(objectBytes + 0x8C);
+                if (!IsPointerShaped(snapshot.legacyOwner))
+                    snapshot.legacyOwner = nullptr;
                 if (snapshot.legacyOwner)
                 {
                     const auto* ownerBytes = reinterpret_cast<const uint8_t*>(snapshot.legacyOwner);
                     snapshot.ownerBridgeRoot = *reinterpret_cast<void* const*>(ownerBytes + 0xF0);
                     snapshot.ownerEntity = *reinterpret_cast<void* const*>(ownerBytes + 0xF4);
                     snapshot.ownerObj = *reinterpret_cast<void* const*>(ownerBytes + 0xF8);
+                    if (!IsPointerShaped(snapshot.ownerBridgeRoot))
+                        snapshot.ownerBridgeRoot = nullptr;
+                    if (!IsPointerShaped(snapshot.ownerEntity))
+                        snapshot.ownerEntity = nullptr;
 
                     if (snapshot.ownerBridgeRoot)
                     {
