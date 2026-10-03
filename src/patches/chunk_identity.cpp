@@ -712,6 +712,13 @@ namespace BZROpenShim
             if (sourceTreeProbe.source.geomName[0])
                 strncpy_s(entry.sourceGeomName, sizeof(entry.sourceGeomName), sourceTreeProbe.source.geomName, _TRUNCATE);
 
+            PrepareNativeChunkPayloads(sourceTreeProbe.ownerOgreEntity,
+                entry.meshName, sizeof(entry.meshName));
+            if (entry.meshName[0])
+                TryResolveChunkPayloadMeshResource(sourceTreeProbe.source,
+                    entry.meshName, entry.sourceGeomName,
+                    entry.payloadMeshName, sizeof(entry.payloadMeshName));
+
             if (!entry.meshName[0] &&
                 !entry.vdfCandidates[0] &&
                 entry.sourceClassId == 0 &&

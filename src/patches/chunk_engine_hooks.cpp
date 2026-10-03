@@ -626,7 +626,22 @@ namespace BZROpenShim
         EraseChunkResolvedBinding(boundObjectBytes);
 
         if (boundObjectBytes)
+        {
             StoreChunkResolvedBinding(boundObjectBytes, sourceTreeProbe);
+            // Only a freshly created chunk (count advanced) owns this matrix
+            // now; a rejected create already removed the object.
+            const ChunkResolvedBindingEntry* binding = createdEntryPtr
+                ? FindChunkResolvedBindingEntryForGeom(boundObjectBytes, sourceTreeProbe.source.geomName)
+                : nullptr;
+            if (binding && binding->payloadMeshName[0])
+            {
+                const void* geomRef = nullptr;
+                char geomName[64] = {};
+                TryReadChunkGeomIdentity(boundObjectBytes, geomRef, geomName, sizeof(geomName));
+                RecenterNativeChunkObject(const_cast<uint8_t*>(boundObjectBytes),
+                    binding->payloadMeshName, geomRef);
+            }
+        }
 
         // Now that the debris exists, stop the intact hull from drawing the piece
         // that just left it. No-op unless PartialFragmentObject is on the stack.
@@ -705,12 +720,15 @@ namespace BZROpenShim
         }
     }
 
-    static volatile long g_ChunkFragmentWalkLogBudget = 160;
+    static volatile long g_ChunkFragmentWalkLogBudget = 16;
 
     static bool AcquireChunkFragmentWalkLogSlot()
     {
-        return g_ChunkEventLogging &&
-            InterlockedDecrement(&g_ChunkFragmentWalkLogBudget) >= 0;
+        if (!g_ChunkEventLogging)
+            return false;
+        if (g_TraceChunkRenderVerbose)
+            return true;
+        return InterlockedDecrement(&g_ChunkFragmentWalkLogBudget) >= 0;
     }
 
 
@@ -834,6 +852,8 @@ namespace BZROpenShim
 
         g_ActiveFragmentSourceOgreEntity =
             ResolveCraftOgreEntity(rootObjectPtr, g_ActiveFragmentSourceOgreEntityVia);
+        PrepareNativeChunkPayloads(g_ActiveFragmentSourceOgreEntity,
+            g_ActiveFragmentSourceMeshName, sizeof(g_ActiveFragmentSourceMeshName));
 
         // Fragment nodes are render-tree nodes; the ODF lives on the GameObject
         // that owns them, one hop out through the obj76 back-link.
