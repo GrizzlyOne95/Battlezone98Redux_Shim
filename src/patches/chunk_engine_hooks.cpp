@@ -631,7 +631,13 @@ namespace BZROpenShim
                 ? FindChunkResolvedBindingEntryForGeom(boundObjectBytes, sourceTreeProbe.source.geomName)
                 : nullptr;
             if (binding && binding->payloadMeshName[0])
-                RecenterNativeChunkObject(const_cast<uint8_t*>(boundObjectBytes), binding->payloadMeshName);
+            {
+                const void* geomRef = nullptr;
+                char geomName[64] = {};
+                TryReadChunkGeomIdentity(boundObjectBytes, geomRef, geomName, sizeof(geomName));
+                RecenterNativeChunkObject(const_cast<uint8_t*>(boundObjectBytes),
+                    binding->payloadMeshName, geomRef);
+            }
         }
 
         // Now that the debris exists, stop the intact hull from drawing the piece
