@@ -126,6 +126,15 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::JMP5, {}, "Map List Rewrite for Hop-Fix 3/3", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Map List Fix Support 1/3", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Main Menu Version Text OpenShim", false, {} },
+            // View setup stores the screen-space 2D depth floor as
+            // near * 1.0000001, one float ULP in front of the near plane. HUD
+            // text, gauges, weapon icons and the reticle all sit on that floor,
+            // so for some far-clip values (driven by the TRN's NormalView
+            // VisibilityRange) the projected z rounds past the near plane and
+            // the whole layer is clipped. Repoint the mulss operand at a
+            // constant with real margin; see Docs/FEEDBACK_MASTER_20260909.md
+            // section 12.1.
+            { 0, HookEngine::PatchType::DWORD, {}, "HUD 2D Depth Floor Margin", false, {} },
             { 0, HookEngine::PatchType::BYTE1, { 0xEB }, "Vehicle List Mod Fix 3/4 (Always Update Vehicle Control)", false, {} },
             // Rewrites the whole `push 0x10188` that supplies DSBUFFERDESC.dwFlags
             // for the streaming music buffer, adding DSBCAPS_GLOBALFOCUS (0x8000)

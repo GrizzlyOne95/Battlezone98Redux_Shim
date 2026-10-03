@@ -41,6 +41,7 @@
 #include "ui_performance.h"
 #include "openshim_events.h"
 #include "player_kill_trace.h"
+#include "bzn_load_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
 #include <Windows.h>
@@ -255,6 +256,7 @@ namespace BZROpenShim
         constexpr uintptr_t kBzrSetRunningAddr = 0x00434170;
         constexpr uintptr_t kBzrRunStateAddr = 0x008E706C;
         constexpr uintptr_t kBzrRunStateNameTableAddr = 0x00871690;
+        constexpr int kBzrRunStateWasQuit = 2;
 
         using FnBzrSetRunning = void(__cdecl*)(int);
         static InlineDetour32 g_BzrSetRunningDetour = {};
@@ -347,6 +349,12 @@ namespace BZROpenShim
             const bool readPrevious = TryReadBzrRunState(previous);
             if (g_BzrFn_SetRunningOriginal)
                 g_BzrFn_SetRunningOriginal(state);
+            // The init-time pin runs ~5 s before Ogre loads its render system
+            // plugins on GOG, and the deferred retry only recurs from Lua
+            // bridges, so the guard used to never engage. Every SetRunning,
+            // including RUN_WAS_EXITED ahead of Ogre's plugin unload, is
+            // after plugin load. Latched per module: a no-op once pinned.
+            PinDirect3DModulesForShutdown();
             // Re-read instead of trusting the argument: SetRunning refuses every
             // change once the state is RUN_WAS_EXITED.
             int current = kBzrRunStateUnknown;
@@ -360,6 +368,8 @@ namespace BZROpenShim
                     BzrRunStateName(previous), previous,
                     BzrRunStateName(current), current,
                     g_MissionTransitionCount);
+                if (current == kBzrRunStateWasQuit)
+                    BznLoadTraceOnMissionQuit();
                 // clearScene / destroyAllMovableObjects never fire for this
                 // in-process transition. Deactivate chunk proxies now, while
                 // setVisible and node updates are still safe; otherwise Ogre's
@@ -488,8 +498,9 @@ namespace BZROpenShim
                 if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN, kModules[index], &module) ||
                     module == nullptr)
                 {
-                    // Not loaded yet (or a DX9 run). Retried from
-                    // RetryDeferredRuntimeHooks until it appears.
+                    // Not loaded yet: the init-time call precedes Ogre's
+                    // plugin load. BzrSetRunningHook retries on every run
+                    // state change, which is what actually pins on GOG.
                     continue;
                 }
 
