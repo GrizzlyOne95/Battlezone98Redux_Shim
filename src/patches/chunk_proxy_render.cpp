@@ -2182,7 +2182,7 @@ namespace BZROpenShim
         // struct (vertex count at +0x04, position array at +0x0C, 3 floats
         // per vertex) so payload mesh pivots can be compared against the
         // original geo pivots the chunk sim rotates around.
-        static bool TryComputeChunkGeomLocalBounds(
+        bool TryComputeChunkGeomLocalBounds(
             const void* geomRef,
             uint32_t& outCount,
             float outMin[3],

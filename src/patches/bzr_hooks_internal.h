@@ -1547,7 +1547,12 @@ namespace BZROpenShim
             char* out, size_t capacity, bool& handled);
         // Once per new chunk: move its physical origin onto a generated
         // piece's centre. No-op for stock, external or uncentred payloads.
-        bool RecenterNativeChunkObject(uint8_t* objectBytes, const char* payloadMeshName);
+        // geomRef (optional) is the fragment's legacy geometry, whose
+        // node-local bounds cross-check the piece frame in the log.
+        bool RecenterNativeChunkObject(uint8_t* objectBytes, const char* payloadMeshName,
+            const void* geomRef = nullptr);
+        bool TryComputeChunkGeomLocalBounds(const void* geomRef, uint32_t& outCount,
+            float outMin[3], float outMax[3]);
         std::string NormalizeChunkPayloadComponentName(const char* value);
         bool TryResolveChunkPayloadMeshResource(
             const ChunkObjectLinkProbe& probe,

@@ -379,7 +379,7 @@ bool TryResolveGeneratedStockChunkFallback(const char *seed, char *out, size_t c
         return false;
     }
 }
-bool RecenterNativeChunkObject(uint8_t *objectBytes, const char *payloadMeshName)
+bool RecenterNativeChunkObject(uint8_t *objectBytes, const char *payloadMeshName, const void *geomRef)
 {
     if (!objectBytes || !payloadMeshName || !*payloadMeshName || !g_EnableChunkMeshProxy)
         return false;
@@ -408,13 +408,44 @@ bool RecenterNativeChunkObject(uint8_t *objectBytes, const char *payloadMeshName
     double shift[3] = {};
     if (!shiftOriginSafe(objectBytes, center, shift))
         return false;
-    static volatile long logBudget = 8;
-    if (InterlockedDecrement(&logBudget) >= 0)
-        LogChunkDiagnostic("chunknative",
-                           L"[CHUNKNATIVE] recentred obj=0x%08X mesh=%hs centre=(%.3f, %.3f, %.3f) "
-                           L"shift=(%.3f, %.3f, %.3f)\n",
-                           static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)), payloadMeshName,
-                           center[0], center[1], center[2], shift[0], shift[1], shift[2]);
+    if (AcquireChunkLogSlot())
+    {
+        // Frame check against the fragment's node-local legacy geometry.
+        // Redux stores those arrays turned 180 degrees about Y relative to
+        // the rendered mesh frame: geo = (-cx, cy, cz) for a piece centre c.
+        // (The render side itself matches Redux's own object placement,
+        // FUN_006802b0, which is what the origin shift above follows.)
+        // Live GOG probe, 1.0.0.46: 86 of 86 pieces across ivsabr, ivrecy
+        // (24 rotated bones), ibcmmd and fbcomm2 agree. A miss means this
+        // model's piece frame disagrees; diagnostic only, nothing is undone.
+        uint32_t count = 0;
+        float lo[3] = {}, hi[3] = {};
+        if (geomRef && TryComputeChunkGeomLocalBounds(geomRef, count, lo, hi))
+        {
+            const double expected[3] = {-static_cast<double>(center[0]), center[1], center[2]};
+            double miss = 0, extent = 0;
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                const double d = (lo[axis] + hi[axis]) * 0.5 - expected[axis];
+                miss += d * d;
+                extent = std::max(extent, static_cast<double>(hi[axis] - lo[axis]));
+            }
+            miss = std::sqrt(miss);
+            LogChunkDiagnostic("chunknative",
+                               L"[CHUNKNATIVE] recentred obj=0x%08X mesh=%hs shift=(%.3f, %.3f, %.3f) "
+                               L"frame=%hs geoCentre=(%.3f, %.3f, %.3f) expected=(%.3f, %.3f, %.3f) miss=%.3f "
+                               L"extent=%.3f verts=%u\n",
+                               static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)), payloadMeshName,
+                               shift[0], shift[1], shift[2], miss <= std::max(0.05, extent * 0.02) ? "match" : "MISMATCH",
+                               (lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5, expected[0],
+                               expected[1], expected[2], miss, extent, count);
+        }
+        else
+            LogChunkDiagnostic("chunknative",
+                               L"[CHUNKNATIVE] recentred obj=0x%08X mesh=%hs shift=(%.3f, %.3f, %.3f) frame=unchecked\n",
+                               static_cast<uint32_t>(reinterpret_cast<uintptr_t>(objectBytes)), payloadMeshName,
+                               shift[0], shift[1], shift[2]);
+    }
     return true;
 }
 bool TryResolveNativeChunkPayload(const char *mesh, const char *geom, char *out, size_t capacity, bool &handled)
