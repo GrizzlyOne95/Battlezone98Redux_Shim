@@ -527,7 +527,7 @@ At minimum, validate:
 
 # 12. Later playtest findings
 
-## 12.1 Stock text stops rendering on ISDFC Test Range — ACTION / VERIFY
+## 12.1 Stock text stops rendering on ISDFC Test Range — FIXED (OpenShim, branch `agent/stock-text-fog-fix`)
 
 Observed 2026-10-03 on GOG Redux 2.2.301 with the ISDF Chronicles addon,
 mission "ISDFC: Test Range" (`isdftest.lua`). All stock in-game text stopped
@@ -613,5 +613,61 @@ SHA256):
   code path where that view/fog state stops font glyphs drawing, for an
   OpenShim fail-safe. Content workaround for ISDFC: restore the `HEAD`
   `[NormalView]` values in `hilo.trn`.
+
+Root cause and fix 2026-10-03 (static RE of GOG 2.2.301 plus a Frida dump):
+
+- **Mechanism (proven): stock places the HUD's front layer one float ULP in
+  front of the camera near plane.** View setup (`0x0066536B`..`0x0066538B`)
+  sets the main camera near clip to 0.08 (`0x008A2530`). It then stores
+  `near * 1.0000001f` (`0x008A2608`) to `0x008ED780`, the screen-space 2D depth
+  floor. Text draws clamp their depth (`DAT_00920EF4`) up to that floor
+  (`FUN_0068B050`, seeded by `FUN_0068B0E0`). `FUN_00686600` and
+  `FUN_00685740` turn each 2D vertex depth `d` into
+  `z = P[2][3] * (1/d) - P[2][2]` using the main camera's projection, and the
+  batch is then drawn with an identity projection. At `d = near * 1.0000001`
+  that z sits on the near plane to within float rounding, and the rounding
+  direction depends on the projection's far term, which the TRN's
+  `[NormalView]` values set (the live far clip on broken `hilo` is 1800). For
+  some far values z rounds just outside, and the GPU clips the whole floor
+  layer. `depth_check off` does not prevent clipping.
+- **Live evidence:** on `hilo.bzn` with the broken values (windowed GOG run,
+  Frida on `DynamicGeometry::prepareForSubmit` `0x00678CD0`), DynamicMain
+  held 33 batches and 7,526 vertices in one chunk. Seven HUD batches,
+  including one of 632 vertices, sat exactly on the floor at squared depth
+  6.400e-3 = 0.08². The rest sat deeper, at 6.6e-3 to 1.44e-2. The probe
+  did not resolve material names, so the batch-to-element mapping is
+  inferred. The link is proven by the fix: moving only the floor restored
+  every missing element. Glyph loss is only the most visible symptom; the
+  gauges, weapon icons and reticle on the same layer vanish too.
+- **Why it looks like a value combination:** a float32 model of the
+  projection with near = 0.08 clips the floor layer only at a sparse,
+  arbitrary set of far distances. It is illustrative only: it did not flag
+  1800, so Ogre's exact matrix arithmetic differs from the model. No single
+  TRN key is out of range; the far clip that results from the whole
+  `[NormalView]` combination lands on a value whose rounding falls outside.
+  How the far clip is derived from those keys was not traced. "Dimmer text"
+  is not explained by this mechanism.
+- **Refuted along the way:** scene fog (the stock `ui.hlsl`/`ui-sm4.hlsl` and
+  CR's `CR_ui` override have no fog term; NormalView fog reaches only
+  `SceneManager::setFog` at `0x00683370`); DynamicGeometry capacity (it grows
+  in 65,536-vertex chunks and never drops batches); `Time` (all tested values
+  map to the same lighting bucket in `FUN_0068A230`).
+- **Fix (OpenShim):** patch `HUD 2D Depth Floor Margin` (DWORD). It rewrites
+  only the abs32 operand of `mulss xmm0,[0x008A2608]` at `0x00665387` to an
+  OpenShim-owned `1.0001f`, so the floor becomes `near * 1.0001`. The same
+  float32 model clips at no far value from 100 to 4000. HUD layers are
+  separated by depth steps of 0.0005 or more (at least 0.6% relative), so
+  the 0.01% shift keeps their order. The scan pattern covers all five
+  instructions, including the `0x008A2530` and `0x008ED780` operands, and
+  `require_unique` is set, so any other build stands down. Owner: OpenShim.
+  The ISDFC content workaround is no longer required once the fix ships.
+- **Validated 2026-10-03** (windowed GOG run, broken `hilo.trn` swapped in
+  temporarily and restored by SHA256): the log shows `[OK] HUD 2D Depth Floor
+  Margin wrote 4 bytes to 0x00665387`, and the live floor reads 0.080008.
+  Every HUD element draws: unit list, Scrap/Pilots, gauges, weapon list and
+  icons, reticle, and pause-menu labels. The first post-deploy launch showed
+  only a black window at 30 s, because the new build's shader fingerprint
+  dropped the microcode cache and the shaders were recompiling. The warm
+  relaunch was the validating run.
 
 This file is intended to remain the master checklist for the next coordinated polish/QA implementation pass.
