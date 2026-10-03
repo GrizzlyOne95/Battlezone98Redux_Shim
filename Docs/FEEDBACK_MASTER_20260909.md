@@ -555,4 +555,23 @@ Repro / triage:
 - Run Test Range with weather/windshield rain off. Text that still breaks
   points to the TRN; text that renders points to the EXU overlay/font path.
 
+Findings 2026-10-03:
+
+- Hypothesis 2 is refuted. `hilo.bzn`, which uses the same `hilo.trn`
+  terrain, also breaks: pause-menu text is gone as well, the run creates no
+  EXU overlay, and text still breaks with EXU disabled. `dunes.bzn`, a
+  near-identical CC-port map, renders text correctly. Owner: OpenShim
+  (stock), with the content fix in ISDFC.
+- The view-range values are in the range other working ISDFC maps use.
+  Stripped palettes, a blank `BackdropTexture`, and the atlas size are also
+  present on maps that work.
+- Leading suspect: `hilo.trn` has `[Clouds]` with Count=24, Type=0 and
+  `Texture0-2 = mcloud1.map`. `dunes.trn` has no `[Clouds]`. `mcloud1.map`
+  and any matching material exist nowhere in the install. `bridges`,
+  `isdfms10` and `isdfms11` use the same block.
+- Next: remove `[Clouds]` from `hilo.trn`, or point it at stock
+  `acloud2.map`, and check whether text returns. Check `bridges.bzn`. If
+  confirmed, find the stock cloud path's handling of a missing cloud texture
+  and consider an OpenShim fail-safe.
+
 This file is intended to remain the master checklist for the next coordinated polish/QA implementation pass.
