@@ -93,6 +93,9 @@ SettingsUi = 1
 ; Accepted: boolean. Default: ON.
 ; Set OFF only as a compatibility/emergency opt-out.
 ; Exposed on the OpenShim Settings page as "Death Chunk Meshes".
+; Generates bone-group pieces automatically from the source Ogre mesh and
+; skeleton. Cached under openshim/cache/chunks; no external payload pack is
+; required. Unsupported source assets can still use existing payload packs.
 ; Legacy env aliases: OPENSHIM_DISABLE_CHUNK_EXPERIMENTS,
 ;                     BZR_DISABLE_CHUNK_EXPERIMENTS
 ChunkMeshes = 1
