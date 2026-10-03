@@ -569,9 +569,29 @@ Findings 2026-10-03:
   `Texture0-2 = mcloud1.map`. `dunes.trn` has no `[Clouds]`. `mcloud1.map`
   and any matching material exist nowhere in the install. `bridges`,
   `isdfms10` and `isdfms11` use the same block.
-- Next: remove `[Clouds]` from `hilo.trn`, or point it at stock
-  `acloud2.map`, and check whether text returns. Check `bridges.bzn`. If
-  confirmed, find the stock cloud path's handling of a missing cloud texture
-  and consider an OpenShim fail-safe.
+- Cloud test plan: remove `[Clouds]` from `hilo.trn`, or point it at stock
+  `acloud2.map`, and check whether text returns. Check `bridges.bzn`.
+
+Findings 2026-10-03 (harness A/B, windowed, `hilo.trn` restored by SHA256):
+
+- The `[Clouds]` suspect is refuted. Text stays broken on `hilo.bzn` with
+  `[Clouds]` removed, and also with `Texture0-2 = acloud2.map`
+  (`acloud2.tga` loads). `bridges.bzn`, with the same `mcloud1` block, and
+  `dunes.bzn` both render HUD and pause-menu text.
+- On hilo the HUD panels, the radar and the Scrap/Pilots backing panel (the
+  black "B") all draw, but every glyph is missing. `bzfont.dds` still loads.
+  Font rendering is lost, not the HUD.
+- The logs do not tell broken runs from working ones. Each run has the same
+  missing-mesh preload errors and one handled first-chance access violation
+  at `openshim.dll+0x9D000` (read of 0x95), on bridges and dunes too, so
+  that access violation is not the cause.
+- In the ISDFC addon, the uncommitted CC port changed `hilo.trn`, `.hg2`,
+  `.mat`, `.lgt`, `.BMP`, `.bzn` and `.lua`, and added `hilo.act`,
+  `hilo_cc_atlas.material` and `hiloenv.lua`. Test Range shares only the
+  terrain assets with `hilo.bzn`, so the cause is most likely among those.
+- Next: swap hilo's terrain assets one at a time back to their `HEAD`
+  versions (TRN first, then `.mat`/`.hg2`/`.act`/atlas, then `.lgt`) to find
+  the asset that triggers the loss. Then find the stock code path that
+  breaks font rendering for an OpenShim fail-safe.
 
 This file is intended to remain the master checklist for the next coordinated polish/QA implementation pass.
