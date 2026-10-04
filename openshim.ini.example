@@ -555,6 +555,13 @@ RenderProfile = Redux
 
 
 [Terrain]
+; Terrain Micro Detail in the OpenShim settings page. Off by default.
+; Experimental visual-only ground relief, using factor-4 DX11 tessellation and
+; a 0.25-world-unit maximum offset. Collision, placement and gameplay heights
+; are unchanged. Requires DX11 and a game restart; increases GPU cost.
+; Unsupported renderer/build/terrain contracts retain native terrain.
+TerrainMicroRelief = 0
+
 
 ; NOTE: terrain booleans below are integer flags; use 0/1.
 

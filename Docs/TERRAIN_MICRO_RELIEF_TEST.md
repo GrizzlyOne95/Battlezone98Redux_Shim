@@ -1,7 +1,13 @@
 # Visual terrain micro relief prototype
 
-Experimental, off by default. This extends the native tessellation submission
-test with shallow procedural surface detail. It changes rendered terrain and
+Experimental, off by default. The OpenShim Options page exposes **Terrain Micro
+Detail** on page 1, beside the DX11 rendering controls. Its On/Off choice saves
+`[Terrain] TerrainMicroRelief = 0/1` in `openshim.ini` and takes effect after a
+game restart. On uses factor 4 and the 0.25-world-unit relief preset. DX11 is
+required; unsupported renderer/build/terrain contracts retain native terrain.
+
+This extends the native tessellation submission test with shallow procedural
+surface detail. It changes rendered terrain and
 render bounds only: collision, pathfinding, placement, height files, networking,
 and the native terrain vertex/index buffers are unchanged.
 
@@ -59,7 +65,10 @@ Build Release/Win32 and deploy with the normal full-load-chain harness:
 `-Wireframe` can be combined with relief. `-ReliefAmplitude 0` is the flat
 control. The process-only controls are `OPENSHIM_TERRAIN_MICRO_RELIEF_TEST` and
 `OPENSHIM_TERRAIN_MICRO_RELIEF_AMPLITUDE`, alongside the existing tessellation
-factor/wireframe controls. No INI setting or permanent enablement is added.
+factor/wireframe controls. An explicit process value for
+`OPENSHIM_TERRAIN_MICRO_RELIEF_TEST` overrides the saved UI choice for harness
+runs, including a flat control when the UI choice is On. Without an override,
+the saved setting applies. Amplitude/factor overrides remain developer controls.
 
 The shader linkage check compiles 110 shaders across ten native permutations,
 baseline factors 1/2/4 and relief factors 2/4. The Windows CTest
@@ -69,6 +78,15 @@ camera/coordinate recovery, and analytic slopes against finite differences of
 GPU heights. It needs no game installation. Linux keeps the existing host test
 lane; this GPU check is Windows-only.
 Release/Win32 built successfully and all 74 Windows CTest tests passed.
+
+The 2026-10-04 UI follow-up also passed the INI completeness/default-policy,
+lossless writer and preset migration checks. GOG DX11 PID 11924 showed the new
+page-1 row as Off, then clicking it saved `TerrainMicroRelief = 1`, displayed
+On and the restart-required status. The game exited cleanly. PID 29760 then
+initialized the terrain path from that saved setting with every terrain test
+environment override removed. That run exited before cluster selection, so it
+does not add a second rendering acceptance result. UI automation stopped after
+the user's physical Escape input; no further automated UI input was sent.
 
 Initial Windows/GOG run PID 59828 installed 27 shared passes, padded/restored all
 320 discovered meshes, and exited cleanly. Factor 4 recorded 12,800 IA patches,
