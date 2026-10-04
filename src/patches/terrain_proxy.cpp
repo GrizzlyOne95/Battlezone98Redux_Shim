@@ -871,10 +871,16 @@ namespace BZROpenShim
                 config.tessellationFactor = factor;
             if (config.tessellationTest)
             {
-                // Mutually exclusive with the separate proxy/HD experiment.
-                config.proxyEnabled = config.semanticRenderer = config.hdEnabled = false;
+                // Native HD tiles can share the tessellation stages. Disable only
+                // the separate proxy experiment.
+                config.proxyEnabled = config.semanticRenderer = false;
                 config.semanticCapture = config.semanticValidateUv = false;
                 config.semanticFrameCaptures = 0;
+                config.followCamera = true;
+            }
+            if (config.hdEnabled)
+            {
+                config.proxyEnabled = config.semanticRenderer = false;
                 config.followCamera = true;
             }
             return config;
@@ -3232,6 +3238,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         bool PrepareTerrainMicroReliefBounds();
         void RefreshTerrainMicroReliefBounds(void* zone);
         void RestoreTerrainMicroReliefBounds();
+        void RestoreNativeTerrainHd();
+        void ResetNativeTerrainHd();
         #include "terrain_tessellation_test.inl"
 
         bool InstallSemanticMaterial()
@@ -3898,6 +3906,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 DestroyProxySceneObjectsByName(reasonName, destroyEntity, destroyNode);
 
             RestoreNativeTerrainTessellationTest();
+            RestoreNativeTerrainHd();
+            ResetNativeTerrainHd();
             RemoveSemanticResources(reasonName);
             ReleaseSemanticStreamOwnership(reasonName);
             RemoveProxyMeshResource();
@@ -4535,6 +4545,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
 
         #include "terrain_microrelief_bounds.inl"
+        #include "terrain_native_hd.inl"
 
         bool GetActiveCameraPosition(void*& camera, Vector3& position)
         {
@@ -4712,7 +4723,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         bool ObserveZone(void* zone)
         {
             if (!zone || g_proxy.tearingDown || !g_discoveryArmed ||
-                (g_proxy.selected && !g_config.microReliefTest))
+                (g_proxy.selected && !g_config.microReliefTest && !g_config.hdEnabled))
                 return g_proxy.selected;
             int zoneX = 0;
             int zoneZ = 0;
@@ -4867,9 +4878,10 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         static_cast<double>(g_config.followCameraAimDistance),
                         static_cast<double>(best.cameraDistance),
                         g_proxy.sourceMeshName.c_str());
+                    if (g_config.hdEnabled) InstallNativeTerrainHd();
                     if (g_config.tessellationTest)
                         InstallNativeTerrainTessellationTest();
-                    else
+                    else if (!g_config.hdEnabled)
                         CreateProxy();
                     CaptureSemantics(true);
                     BuildAndValidateSemanticVertices(true);
@@ -4906,6 +4918,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
                 RefreshTerrainMicroReliefBounds(zone);
+                RefreshNativeTerrainHd(zone, false);
                 ObserveZone(zone);
             }
             catch (...)
@@ -4940,6 +4953,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 return;
             }
 
+            bool hdDirty = false;
             bool selectedZone = false;
             bool fullDirty = false;
             bool heightDirty = false;
@@ -4948,6 +4962,12 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             if (g_active.load(std::memory_order_acquire) && !g_shutdown.load())
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
+                if (g_config.hdEnabled)
+                    for (size_t index = 0; index < 16; ++index)
+                    {
+                        uint8_t dirty = 0;
+                        if (!SafeReadZoneByte(zone, kFullDirtyOffset + index, dirty) || dirty) hdDirty = true;
+                    }
                 selectedZone = g_proxy.selected && !g_proxy.tearingDown && g_proxy.zone == zone;
                 if (selectedZone)
                 {
@@ -4971,6 +4991,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 return;
             std::lock_guard<std::mutex> lock(g_mutex);
             RefreshTerrainMicroReliefBounds(zone);
+            RefreshNativeTerrainHd(zone, hdDirty);
             // The engine can destroy the proxy Entity at any point during a
             // mission change. Detect that by name before anything dereferences
             // the stored pointer, and forget so the next qualifying zone in
@@ -5038,7 +5059,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                     ForgetTerrainProxy(TerrainForgetReason::SourceMismatch, true, true);
                 }
             }
-            if (!g_proxy.selected && !g_proxy.tearingDown)
+            if (!g_proxy.tearingDown && (!g_proxy.selected || g_config.hdEnabled || g_config.microReliefTest))
                 ObserveZone(zone);
             if (selectedZone && !g_proxy.tearingDown && g_proxy.zone == zone &&
                 (fullDirty || heightDirty))
@@ -5276,17 +5297,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         g_config = ReadConfig();
         if (g_config.hdEnabled)
         {
-            // The HD smoke path is a Phase 3B specialization of the semantic
-            // proxy. One opt-in switch activates its two prerequisites so a
-            // missing secondary setting cannot silently turn the test into a
-            // stock-atlas run.
-            if (LoadTerrainHdManifest())
-            {
-                g_config.proxyEnabled = true;
-                g_config.semanticRenderer = true;
-            }
-            else
-                g_config.hdEnabled = false;
+            // HD replaces native diffuse sampling; no proxy is created.
+            if (!LoadTerrainHdManifest()) g_config.hdEnabled = false;
         }
         if (g_config.semanticRenderer && !g_config.proxyEnabled)
         {
@@ -5296,7 +5308,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
         if (!g_config.proxyEnabled && !g_config.semanticCapture &&
             !g_config.semanticValidateUv && !g_config.semanticRenderer &&
-            !g_config.tessellationTest)
+            !g_config.tessellationTest && !g_config.hdEnabled)
             return;
         g_shutdown.store(false);
         LogShimA(LogLevel::Info, "terrain-proxy",
@@ -5316,7 +5328,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         if (g_config.hdEnabled)
         {
             LogShimA(LogLevel::Info, "terrain-hd",
-                "[TERRAIN-HD] initialized manifest=\"%s\" proxy=1 semanticRenderer=1 stockFallback=enabled",
+                "[TERRAIN-HD] initialized manifest=\"%s\" native=1 proxy=0 stockFallback=enabled",
                 g_hdManifest.path.string().c_str());
         }
         g_worker = CreateThread(nullptr, 0, WorkerProc, nullptr, 0, nullptr);

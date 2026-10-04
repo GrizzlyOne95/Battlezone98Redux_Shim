@@ -41,8 +41,10 @@ float3 TerrainMicroRelief(float2 objectXZ)
     float2 grid = objectXZ * 0.4; // 2.5 world units per noise cell
     int2 cell = int2(floor(grid));
     float2 f = frac(grid);
-    float2 blend = f * f * (3.0 - 2.0 * f);
-    float2 derivative = 6.0 * f * (1.0 - f) * 0.4;
+    // Quintic interpolation has zero first AND second derivatives at cell
+    // boundaries, avoiding curvature kinks without changing phase or bounds.
+    float2 blend = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    float2 derivative = 30.0 * f * f * (f - 1.0) * (f - 1.0) * 0.4;
     float a = TerrainReliefHash(cell);
     float b = TerrainReliefHash(cell + int2(1,0));
     float c = TerrainReliefHash(cell + int2(0,1));
@@ -69,6 +71,10 @@ struct TerrainTessVertex
 #endif
 #endif
     float2 uv : TEXCOORD0;
+#if defined(OPENSHIM_TERRAIN_HD)
+    float2 hdUV : TEXCOORD9;
+    float tileSlice : TEXCOORD10;
+#endif
 #if !defined(VERTEX_LIGHTING)
     float3 normal : TEXCOORD2;
 #if defined(NORMALMAP_ENABLED) && defined(VERTEX_TANGENTS)
@@ -120,6 +126,10 @@ TerrainTessVertex TerrainDomain(TerrainTessFactors f, float3 b : SV_DomainLocati
     TerrainTessVertex o;
     TERRAIN_INTERPOLATE(color);
     TERRAIN_INTERPOLATE(uv);
+#if defined(OPENSHIM_TERRAIN_HD)
+    TERRAIN_INTERPOLATE(hdUV);
+    TERRAIN_INTERPOLATE(tileSlice);
+#endif
     TERRAIN_INTERPOLATE(depth);
     TERRAIN_INTERPOLATE(position);
 #if defined(VERTEX_LIGHTING)

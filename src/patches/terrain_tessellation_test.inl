@@ -368,6 +368,7 @@ bool InstallNativeTerrainTessellationTest()
     ReleaseCloneHandoff(program);
     ReleaseCloneHandoff(sourceMaterial);
     ReleaseCloneHandoff(clone);
+    RestoreNativeTerrainHd(); // HD backup/programs share this mission resource owner
     RemoveSemanticResources("tessellation-test-declined");
     g_proxy.semanticMaterialUnsupported = true; // bounded one attempt per mission
     return false;

@@ -123,6 +123,11 @@ void TestRelief(uint3 id : SV_DispatchThreadID)
                 const float dx = (values[i+1].height - values[i+2].height) / (points[i+1].x - points[i+2].x);
                 const float dz = (values[i+3].height - values[i+4].height) / (points[i+3].z - points[i+4].z);
                 check(std::abs(v.dx - dx) < 0.012f && std::abs(v.dz - dz) < 0.012f, "normal derivative differs from GPU height");
+                // At a noise-cell boundary the quintic relief has zero
+                // curvature. Cubic interpolation leaves a visible kink here.
+                if (std::abs(std::remainder(points[i].x, 2.5f)) < 1e-5f)
+                    check(std::abs((values[i+1].dx - v.dx) / (points[i+1].x - points[i].x)) < 0.1f,
+                        "relief curvature kink at noise-cell boundary");
                 if (bound == 0)
                     check(v.height == 0 && v.dx == 0 && v.dz == 0, "zero-amplitude fallback not flat");
             }

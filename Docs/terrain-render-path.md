@@ -1860,3 +1860,17 @@ this blocker stayed hidden.
   before trusting an automated series, or it will measure the lock screen.
 - Framing and reselection are diagnostics. Neither can influence what is
   rendered; both only decide which cluster is proxied and when a PNG is written.
+
+
+## 2026-10-04: native full-resolution diffuse tiles
+
+The historical Phase 3B proxy blocker above is bypassed by the native path in
+`src/patches/terrain_native_hd.inl`. `TerrainHdEnabled` now specializes native
+shared material passes and appends audited per-tile semantic data to every
+qualified terrain mesh. It no longer enables or depends on the proxy renderer.
+
+See [terrain-hd-tiles.md](terrain-hd-tiles.md) for the pack contract, configuration,
+repeatable combined HD/micro-relief test, live evidence and remaining limits.
+The local numbered-tile test visibly replaced terrain and restored all 320
+native streams and 28 material passes. The separate proxy experiment remains
+unqualified; its historical bind logs still do not establish that it draws.

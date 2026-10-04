@@ -9,14 +9,14 @@ struct TerrainTessQuery
     unsigned attempts = 0;
     unsigned skipCandidates = 0;
 };
-TerrainTessQuery g_TessQueries[2]; // one ordinary draw and one tessellated draw
+TerrainTessQuery g_TessQueries[4]; // ordinary/tessellated, with and without HD diffuse tiles
 bool g_TessStatisticsEnabled = false;
 std::mutex g_TessQueryMutex;
 
 void PollTerrainTessQueries(ID3D11DeviceContext* context)
 {
     if (context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE) return;
-    for (unsigned kind = 0; kind < 2; ++kind)
+    for (unsigned kind = 0; kind < 4; ++kind)
     {
         auto& sample = g_TessQueries[kind];
         if (!sample.query || !sample.ended) continue;
@@ -26,11 +26,11 @@ void PollTerrainTessQueries(ID3D11DeviceContext* context)
         if (result == S_OK)
         {
             LogShimA(LogLevel::Info, "terrain-tess",
-                "[TERRAIN-TESS] GPU statistics tessellated=%u iaPrimitives=%llu hsInvocations=%llu dsInvocations=%llu clipPrimitives=%llu psInvocations=%llu",
-                kind, data.IAPrimitives, data.HSInvocations, data.DSInvocations, data.CPrimitives, data.PSInvocations);
+                "[TERRAIN-TESS] GPU statistics tessellated=%u iaPrimitives=%llu hsInvocations=%llu dsInvocations=%llu clipPrimitives=%llu psInvocations=%llu hdTiles=%u",
+                kind & 1u, data.IAPrimitives, data.HSInvocations, data.DSInvocations, data.CPrimitives, data.PSInvocations, kind >= 2 ? 1u : 0u);
             // A native submission can be completely clipped. Try a bounded
             // number of other clusters rather than accepting that as pixels.
-            if (kind == 1 && (data.CPrimitives < 128 || data.PSInvocations < 1024) && sample.attempts < 16)
+            if (kind != 0 && (data.CPrimitives < 128 || data.PSInvocations < 1024) && sample.attempts < 16)
             {
                 sample.attempted = false;
                 // Do not repeatedly sample the first (often occluded) cluster
@@ -59,8 +59,20 @@ ID3D11Query* BeginTerrainTessQuery(ID3D11DeviceContext* context, UINT count,
         return nullptr;
     D3D11_PRIMITIVE_TOPOLOGY topology;
     context->IAGetPrimitiveTopology(&topology);
-    const unsigned kind = topology == D3D11_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST ? 1 : 0;
-    if ((kind == 0 && topology != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST) ||
+    const bool tessellated = topology == D3D11_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST;
+    // Verify the actual array SRV AND semantic stream at submission time.
+    ID3D11ShaderResourceView* diffuse = nullptr;
+    context->PSGetShaderResources(0, 1, &diffuse);
+    D3D11_SHADER_RESOURCE_VIEW_DESC diffuseDesc = {};
+    if (diffuse) { diffuse->GetDesc(&diffuseDesc); diffuse->Release(); }
+    ID3D11Buffer* semantic = nullptr;
+    UINT semanticStride = 0, semanticOffset = 0;
+    context->IAGetVertexBuffers(3, 1, &semantic, &semanticStride, &semanticOffset);
+    const bool hdTiles = semantic && semanticStride == 28 && semanticOffset == 0 &&
+        diffuseDesc.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+    if (semantic) semantic->Release();
+    const unsigned kind = (tessellated ? 1u : 0u) + (hdTiles ? 2u : 0u);
+    if ((!tessellated && topology != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST) ||
         g_TessQueries[kind].attempted)
         return nullptr;
     // Shadow/depth-only submissions cannot establish a visible terrain test.
@@ -114,7 +126,7 @@ ID3D11Query* BeginTerrainTessQuery(ID3D11DeviceContext* context, UINT count,
     const bool bound = hull && domain;
     if (hull) hull->Release();
     if (domain) domain->Release();
-    if ((kind == 1) != bound) return nullptr;
+    if (tessellated != bound) return nullptr;
     auto& sample = g_TessQueries[kind];
     if (sample.skipCandidates)
     {
@@ -137,8 +149,8 @@ ID3D11Query* BeginTerrainTessQuery(ID3D11DeviceContext* context, UINT count,
         return nullptr;
     }
     LogShimA(LogLevel::Info, "terrain-tess",
-        "[TERRAIN-TESS] sampling native submission tessellated=%u indices=%u topology=%u hullDomainBound=%d colorFormat=%u",
-        kind, count, static_cast<unsigned>(topology), bound ? 1 : 0, static_cast<unsigned>(colorDesc.Format));
+        "[TERRAIN-TESS] sampling native submission tessellated=%u indices=%u topology=%u hullDomainBound=%d colorFormat=%u hdTiles=%u",
+        tessellated ? 1u : 0u, count, static_cast<unsigned>(topology), bound ? 1 : 0, static_cast<unsigned>(colorDesc.Format), hdTiles ? 1u : 0u);
     context->Begin(sample.query);
     return sample.query;
 }
