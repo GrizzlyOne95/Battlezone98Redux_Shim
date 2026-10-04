@@ -79,6 +79,14 @@ runs:
       shell: pwsh
       run: ./scripts/Test-EnhancedShaderCompile.ps1
 
+    - name: Validate terrain tessellation shader linkage
+      shell: pwsh
+      run: |
+        python scripts/Test-TerrainTessellationShaders.py
+        if ($LASTEXITCODE -ne 0) {
+          throw "Terrain tessellation shader compilation/linkage failed"
+        }
+
     # Ported from Campaign Reimagined, whose copy was orphaned when the
     # Enhanced shaders moved here. See the header of the script.
     - name: Validate Enhanced PSSM v2 math, isolation, and cost

@@ -225,6 +225,9 @@ namespace BZROpenShim
         {
             bool proxyEnabled = false;
             bool proxyVisible = true;
+            bool tessellationTest = false;
+            bool tessellationWireframe = false;
+            int tessellationFactor = 2;
             bool semanticCapture = false;
             bool semanticDumpJson = true;
             bool semanticRenderer = false;
@@ -514,6 +517,15 @@ namespace BZROpenShim
             FnGetUnifiedDelegate getUnifiedDelegate = nullptr;
             FnGetGpuProgramParameters getVertexProgramParameters = nullptr;
             FnSetVertexProgram setVertexProgram = nullptr;
+            FnSetVertexProgram setHullProgram = nullptr;
+            FnSetVertexProgram setDomainProgram = nullptr;
+            FnGetGpuProgram getHullProgram = nullptr;
+            FnGetGpuProgram getDomainProgram = nullptr;
+            bool (__thiscall* hasHullProgram)(void*) = nullptr;
+            bool (__thiscall* hasDomainProgram)(void*) = nullptr;
+            bool (__thiscall* programSupported)(void*) = nullptr;
+            void (__thiscall* setPolygonMode)(void*, int) = nullptr;
+            int (__thiscall* getPolygonMode)(void*) = nullptr;
             FnSetVertexProgramParameters setVertexProgramParameters = nullptr;
             FnGetStringReference getProgramSource = nullptr;
             FnGetStringParameter getStringParameter = nullptr;
@@ -839,6 +851,20 @@ namespace BZROpenShim
             if (!(config.semanticFrameCaptureMinCoverage >= 0.0f) ||
                 config.semanticFrameCaptureMinCoverage > 1.0f)
                 config.semanticFrameCaptureMinCoverage = 0.005f;
+            config.tessellationTest = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_TEST");
+            config.tessellationWireframe = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_WIREFRAME");
+            int factor = 2;
+            if (ReadEnvInt("OPENSHIM_TERRAIN_TESSELLATION_FACTOR", factor) &&
+                (factor == 1 || factor == 2 || factor == 4))
+                config.tessellationFactor = factor;
+            if (config.tessellationTest)
+            {
+                // Mutually exclusive with the separate proxy/HD experiment.
+                config.proxyEnabled = config.semanticRenderer = config.hdEnabled = false;
+                config.semanticCapture = config.semanticValidateUv = false;
+                config.semanticFrameCaptures = 0;
+                config.followCamera = true;
+            }
             return config;
         }
 
@@ -1146,6 +1172,25 @@ namespace BZROpenShim
                 "?getVertexProgram@Pass@Ogre@@QBEABV?$SharedPtr@VGpuProgram@Ogre@@@2@XZ");
             g_ogre.getUnifiedDelegate = Resolve<FnGetUnifiedDelegate>(module,
                 "?_getDelegate@UnifiedHighLevelGpuProgram@Ogre@@QBEABV?$SharedPtr@VHighLevelGpuProgram@Ogre@@@2@XZ");
+            // Optional APIs, used only by the native tessellation test.
+            g_ogre.setHullProgram = Resolve<FnSetVertexProgram>(module,
+                "?setTessellationHullProgram@Pass@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+            g_ogre.setDomainProgram = Resolve<FnSetVertexProgram>(module,
+                "?setTessellationDomainProgram@Pass@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+            g_ogre.getHullProgram = Resolve<FnGetGpuProgram>(module,
+                "?getTessellationHullProgram@Pass@Ogre@@QBEABV?$SharedPtr@VGpuProgram@Ogre@@@2@XZ");
+            g_ogre.getDomainProgram = Resolve<FnGetGpuProgram>(module,
+                "?getTessellationDomainProgram@Pass@Ogre@@QBEABV?$SharedPtr@VGpuProgram@Ogre@@@2@XZ");
+            g_ogre.hasHullProgram = Resolve<decltype(g_ogre.hasHullProgram)>(module,
+                "?hasTessellationHullProgram@Pass@Ogre@@QBE_NXZ");
+            g_ogre.hasDomainProgram = Resolve<decltype(g_ogre.hasDomainProgram)>(module,
+                "?hasTessellationDomainProgram@Pass@Ogre@@QBE_NXZ");
+            g_ogre.programSupported = Resolve<decltype(g_ogre.programSupported)>(module,
+                "?isSupported@GpuProgram@Ogre@@UBE_NXZ");
+            g_ogre.setPolygonMode = Resolve<decltype(g_ogre.setPolygonMode)>(module,
+                "?setPolygonMode@Pass@Ogre@@QAEXW4PolygonMode@2@@Z");
+            g_ogre.getPolygonMode = Resolve<decltype(g_ogre.getPolygonMode)>(module,
+                "?getPolygonMode@Pass@Ogre@@QBE?AW4PolygonMode@2@XZ");
             g_ogre.getVertexProgramParameters = Resolve<FnGetGpuProgramParameters>(module,
                 "?getVertexProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@XZ");
             g_ogre.setVertexProgram = Resolve<FnSetVertexProgram>(module,
@@ -3172,6 +3217,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             }
         }
 
+        #include "terrain_tessellation_test.inl"
+
         bool InstallSemanticMaterial()
         {
             if (!g_config.semanticRenderer || !g_proxy.proxyCreated ||
@@ -3835,6 +3882,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             if (destroyEntity || destroyNode)
                 DestroyProxySceneObjectsByName(reasonName, destroyEntity, destroyNode);
 
+            RestoreNativeTerrainTessellationTest();
             RemoveSemanticResources(reasonName);
             ReleaseSemanticStreamOwnership(reasonName);
             RemoveProxyMeshResource();
@@ -4681,6 +4729,11 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 // rather than settle for a cluster nobody will ever see.
                 return false;
             }
+            // Renderer construction exposes an identity camera at the origin
+            // before the mission camera is placed. Do not select that cluster.
+            if (g_config.tessellationTest && (!followCamera ||
+                (cameraPosition.x == 0.0f && cameraPosition.y == 0.0f && cameraPosition.z == 0.0f)))
+                return false;
 
             ClusterCandidate best;
             bool haveBest = false;
@@ -4795,7 +4848,10 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         static_cast<double>(g_config.followCameraAimDistance),
                         static_cast<double>(best.cameraDistance),
                         g_proxy.sourceMeshName.c_str());
-                    CreateProxy();
+                    if (g_config.tessellationTest)
+                        InstallNativeTerrainTessellationTest();
+                    else
+                        CreateProxy();
                     CaptureSemantics(true);
                     BuildAndValidateSemanticVertices(true);
                     // With the proxy live, report where it actually lands on
@@ -5218,7 +5274,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             g_config.semanticRenderer = false;
         }
         if (!g_config.proxyEnabled && !g_config.semanticCapture &&
-            !g_config.semanticValidateUv && !g_config.semanticRenderer)
+            !g_config.semanticValidateUv && !g_config.semanticRenderer &&
+            !g_config.tessellationTest)
             return;
         g_shutdown.store(false);
         LogShimA(LogLevel::Info, "terrain-proxy",
