@@ -9,6 +9,56 @@ struct TerrainTessPass
 std::vector<TerrainTessPass> g_TessPasses;
 std::string g_TessSourceMaterial;
 
+// Optional Ogre parameter exports, guarded by the same released Ogre identity
+// as the terrain adapters. Use the logical matrix slot, not a guessed buffer
+// offset, so Ogre owns per-camera/per-light updates and stage constant binding.
+void ConfigureTerrainMicroReliefDomain(void* pass, const std::string& defines)
+{
+    if (!g_config.microReliefTest) return;
+    HMODULE ogre = GetModuleHandleW(L"OgreMain.dll");
+    auto getParameters = Resolve<FnGetGpuProgramParameters>(ogre,
+        "?getTessellationDomainProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@XZ");
+    struct ConstantDefinition {
+        int type; uint32_t physical, logical, elementSize, arraySize; uint16_t variability;
+    };
+    using FindConstant = const ConstantDefinition* (__thiscall*)(void*, const std::string&, bool);
+    using SetAuto = void (__thiscall*)(void*, uint32_t, int, uint32_t);
+    auto find = Resolve<FindConstant>(ogre,
+        "?_findNamedConstantDefinition@GpuProgramParameters@Ogre@@QBEPBUGpuConstantDefinition@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+    auto set = Resolve<SetAuto>(ogre,
+        "?setAutoConstant@GpuProgramParameters@Ogre@@QAEXIW4AutoConstantType@12@I@Z");
+    if (!getParameters || !find || !set) throw std::runtime_error("relief auto-parameter API unavailable");
+    OgreSharedPtr parameters;
+    getParameters(pass, &parameters);
+    if (!parameters.rep) throw std::runtime_error("relief domain parameters unavailable");
+    try
+    {
+        const auto bind = [&](const char* name, int type, uint32_t index = 0) {
+            const auto* definition = find(parameters.rep, std::string(name), false);
+            if (!definition || definition->type != 21 || definition->elementSize != 16 ||
+                definition->arraySize != 1 || definition->physical > 4096 || definition->logical > 4096)
+                throw std::runtime_error("relief matrix definition contract unavailable");
+            set(parameters.rep, definition->logical, type, index);
+        };
+        // Ogre 1.10 AutoConstantType, independently checked against public SDK.
+        bind("reliefView", 8);          // ACT_VIEW_MATRIX
+        bind("reliefInverseView", 9);   // ACT_INVERSE_VIEW_MATRIX
+        bind("reliefInverseWorldView", 21); // ACT_INVERSE_WORLDVIEW_MATRIX
+        bind("reliefProjection", 12);   // ACT_PROJECTION_MATRIX
+        if (defines.find("SHADOWRECEIVER") != std::string::npos)
+        {
+            bind("reliefShadow1", 80, 0); // ACT_TEXTURE_VIEWPROJ_MATRIX
+            if (defines.find("PSSM_ENABLED") != std::string::npos)
+            {
+                bind("reliefShadow2", 80, 1);
+                bind("reliefShadow3", 80, 2);
+            }
+        }
+    }
+    catch (...) { ReleaseCloneHandoff(parameters); throw; }
+    ReleaseCloneHandoff(parameters);
+}
+
 // Released renderer export: vector<uint8_t> uses the three-pointer release ABI.
 struct TerrainMicrocode { const uint8_t* first; const uint8_t* last; const uint8_t* end; };
 using FnTerrainMicrocode = const TerrainMicrocode* (__thiscall*)(void*);
@@ -63,7 +113,7 @@ std::string TerrainProgramSignature(void* program, const char* tag, bool control
 
 void RestoreNativeTerrainTessellationTest()
 {
-    if (g_TessSourceMaterial.empty()) return;
+    if (g_TessSourceMaterial.empty()) { RestoreTerrainMicroReliefBounds(); return; }
     OgreSharedPtr material;
     try
     {
@@ -95,6 +145,7 @@ void RestoreNativeTerrainTessellationTest()
         ReleaseCloneHandoff(material);
         LogShimA(LogLevel::Warn, "terrain-tess", "[TERRAIN-TESS] shared material restore raised an Ogre exception");
     }
+    RestoreTerrainMicroReliefBounds();
     g_TessPasses.clear();
     g_TessSourceMaterial.clear();
 }
@@ -148,6 +199,9 @@ bool InstallNativeTerrainTessellationTest()
         if (source.empty() || source.size() > 64 * 1024)
             throw std::runtime_error("test shader missing/invalid");
         source = "#define OPENSHIM_TESS_FACTOR " + std::to_string(g_config.tessellationFactor) + "\n" + source;
+        if (g_config.microReliefTest)
+            source = "#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE " +
+                std::to_string(g_config.microReliefAmplitude) + "\n" + source;
 
         const std::string group = "Autodetect";
         const std::string* material = g_ogre.getMaterialName(subEntity);
@@ -246,6 +300,7 @@ bool InstallNativeTerrainTessellationTest()
                 }
                 g_ogre.setHullProgram(pass, found->second.first, true);
                 g_ogre.setDomainProgram(pass, found->second.second, true);
+                ConfigureTerrainMicroReliefDomain(pass, defines);
                 const OgreSharedPtr* hull = g_ogre.getHullProgram(pass);
                 const OgreSharedPtr* domain = g_ogre.getDomainProgram(pass);
                 if (!hull || !hull->rep || !domain || !domain->rep ||
@@ -265,6 +320,8 @@ bool InstallNativeTerrainTessellationTest()
         }
         if (!specialized)
             throw std::runtime_error("no compatible per-pixel terrain pass");
+        if (g_config.microReliefTest && !PrepareTerrainMicroReliefBounds())
+            throw std::runtime_error("relief bounds could not be prepared");
         // Assigning a clone to the discovered Entity did not reach observed
         // submissions. Specialize its shared terrain material so native
         // renderables see the programs. All clusters using this material are
@@ -275,15 +332,25 @@ bool InstallNativeTerrainTessellationTest()
             void* pass = g_ogre.getPass(g_ogre.getTechnique(sourceMaterial.rep, saved.technique), saved.pass);
             g_ogre.setHullProgram(pass, saved.hull, true);
             g_ogre.setDomainProgram(pass, saved.domain, true);
+            // Stage parameters were audited on the clone. Copy the same
+            // auto-constant setup onto the newly attached original usage.
+            if (g_config.microReliefTest)
+            {
+                const OgreSharedPtr* domain = g_ogre.getDomainProgram(pass);
+                std::string defines;
+                g_ogre.getStringParameter(domain->rep, &defines, std::string("preprocessor_defines"));
+                ConfigureTerrainMicroReliefDomain(pass, defines);
+            }
             if (g_config.tessellationWireframe) g_ogre.setPolygonMode(pass, 2);
         }
         ReleaseCloneHandoff(sourceMaterial);
         ReleaseCloneHandoff(clone);
         g_proxy.semanticMaterialInstalled = true;
         LogShimA(LogLevel::Info, "terrain-tess",
-            "[TERRAIN-TESS] shared native material installed discoveryZone=(%d,%d) discoveryCluster=(%d,%d) factor=%d displacement=0 wireframe=%d passes=%u programs=%zu featureLevel=0x%X source=\"%s\" test=\"%s\"",
+            "[TERRAIN-TESS] shared native material installed discoveryZone=(%d,%d) discoveryCluster=(%d,%d) factor=%d displacement=%.3f wireframe=%d passes=%u programs=%zu featureLevel=0x%X source=\"%s\" test=\"%s\"",
             g_proxy.zoneX, g_proxy.zoneZ, g_proxy.clusterX, g_proxy.clusterZ,
-            g_config.tessellationFactor, g_config.tessellationWireframe ? 1 : 0,
+            g_config.tessellationFactor, g_config.microReliefTest ? g_config.microReliefAmplitude : 0.0f,
+            g_config.tessellationWireframe ? 1 : 0,
             specialized, g_proxy.semanticProgramNames.size(), static_cast<unsigned>(level),
             g_proxy.materialName.c_str(), g_proxy.semanticMaterialName.c_str());
         return true;
