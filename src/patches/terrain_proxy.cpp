@@ -862,6 +862,9 @@ namespace BZROpenShim
                 config.microReliefAmplitude = reliefAmplitude;
             config.tessellationTest = config.tessellationTest || config.microReliefTest;
             if (config.microReliefAmplitude == 0.0f) config.microReliefTest = false;
+            // The persistent UI switch uses the visually qualified factor-4
+            // relief preset; plain submission tests keep their factor-2 default.
+            if (config.microReliefTest) config.tessellationFactor = 4;
             int factor = 2;
             if (ReadEnvInt("OPENSHIM_TERRAIN_TESSELLATION_FACTOR", factor) &&
                 (factor == 1 || factor == 2 || factor == 4))

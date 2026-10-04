@@ -2832,6 +2832,11 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
               "Contribution-ranked per-object local-light ordering. DX11 only. Restart required." },
+            { "Terrain Micro Detail", "Terrain", "TerrainMicroRelief", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::RestartRequired,
+              "Experimental shallow ground relief. Visual only; collision is unchanged. "
+              "DX11 only. Increases GPU cost. Restart required." },
             { "Sun Flashbang", "Display", "SunFlashbang", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::LiveEngineToggle,

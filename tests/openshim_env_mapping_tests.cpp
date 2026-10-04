@@ -271,6 +271,25 @@ namespace
         Check(!IsCaptureOverrideName(nullptr), "null is not a capture name");
     }
 
+    void TestTerrainReliefUiAndHarnessPrecedence()
+    {
+        FakeIni ini;
+        FakeEnv env;
+        constexpr const char* name = "OPENSHIM_TERRAIN_MICRO_RELIEF_TEST";
+        Check(Lookup(name, &ini, env) == "<unset>", "absent relief setting does not opt in");
+        ini.Set("Terrain", "TerrainMicroRelief", "On");
+        Check(Lookup(name, &ini, env) == "1", "saved UI On enables relief without launch environment");
+        env.values[name] = "0";
+        Check(Lookup(name, &ini, env) == "0", "flat harness control overrides saved On");
+        ini.Set("Terrain", "TerrainMicroRelief", "Off");
+        env.values[name] = "1";
+        Check(Lookup(name, &ini, env) == "1", "relief harness overrides shipped Off");
+        env.values.clear();
+        Check(Lookup(name, &ini, env) == "0", "saved UI Off disables relief after harness ends");
+        ini.Set("Terrain", "TerrainMicroRelief", "invalid");
+        Check(Lookup(name, &ini, env) == "<unset>", "invalid relief setting does not opt in");
+    }
+
     void TestEmptyNamesPassThrough()
     {
         FakeIni ini;
@@ -320,6 +339,7 @@ int main()
     TestProducerMenusDefaultOnFromTheirOwnFile();
     TestIniBeatsLaunchEnvironment();
     TestCaptureNamesLetTheEnvironmentWin();
+    TestTerrainReliefUiAndHarnessPrecedence();
     TestEmptyNamesPassThrough();
     TestCopyContract();
 
