@@ -1587,6 +1587,32 @@ namespace BZROpenShim
             return true;
         }
 
+        // -renderer:dx9 still loads RenderSystem_Direct3D11.dll (plugins.cfg
+        // lists both), so the module being present proves nothing. Casting a
+        // D3D9HardwareVertexBuffer through the D3D11 getter returns a garbage
+        // "ID3D11Buffer" and the first COM call jumps to null. Accept only a
+        // buffer whose vtable is the exported D3D11HardwareVertexBuffer one.
+        ID3D11Buffer* GetD3D11Buffer(void* ogreBuffer)
+        {
+            static const void* d3d11VertexBufferVtable = nullptr;
+            if (!ogreBuffer)
+                return nullptr;
+            HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
+            if (!renderer)
+                return nullptr;
+            if (!g_ogre.getD3D11VertexBuffer)
+                g_ogre.getD3D11VertexBuffer = Resolve<FnGetD3D11VertexBuffer>(
+                    renderer,
+                    "?getD3DVertexBuffer@D3D11HardwareVertexBuffer@Ogre@@QBEPAUID3D11Buffer@@XZ");
+            if (!d3d11VertexBufferVtable)
+                d3d11VertexBufferVtable = reinterpret_cast<const void*>(
+                    GetProcAddress(renderer, "??_7D3D11HardwareVertexBuffer@Ogre@@6B@"));
+            if (!g_ogre.getD3D11VertexBuffer || !d3d11VertexBufferVtable ||
+                *static_cast<const void* const*>(ogreBuffer) != d3d11VertexBufferVtable)
+                return nullptr;
+            return g_ogre.getD3D11VertexBuffer(ogreBuffer);
+        }
+
         bool ReadD3D11VertexBuffer(
             void* ogreBuffer,
             uint32_t byteCount,
@@ -1596,17 +1622,6 @@ namespace BZROpenShim
             if (!ogreBuffer || byteCount == 0)
                 return false;
 
-            if (!g_ogre.getD3D11VertexBuffer)
-            {
-                HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
-                if (!renderer)
-                    return false;
-                g_ogre.getD3D11VertexBuffer = Resolve<FnGetD3D11VertexBuffer>(
-                    renderer,
-                    "?getD3DVertexBuffer@D3D11HardwareVertexBuffer@Ogre@@QBEPAUID3D11Buffer@@XZ");
-                if (!g_ogre.getD3D11VertexBuffer)
-                    return false;
-            }
 
             ID3D11Buffer* source = nullptr;
             ID3D11Device* device = nullptr;
@@ -1619,7 +1634,7 @@ namespace BZROpenShim
             {
                 do
                 {
-                    source = g_ogre.getD3D11VertexBuffer(ogreBuffer);
+                    source = GetD3D11Buffer(ogreBuffer);
                     if (!source)
                         break;
 
@@ -1679,17 +1694,6 @@ namespace BZROpenShim
         {
             if (!ogreBuffer || !bytes || byteCount == 0)
                 return false;
-            if (!g_ogre.getD3D11VertexBuffer)
-            {
-                HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
-                if (!renderer)
-                    return false;
-                g_ogre.getD3D11VertexBuffer = Resolve<FnGetD3D11VertexBuffer>(
-                    renderer,
-                    "?getD3DVertexBuffer@D3D11HardwareVertexBuffer@Ogre@@QBEPAUID3D11Buffer@@XZ");
-                if (!g_ogre.getD3D11VertexBuffer)
-                    return false;
-            }
             ID3D11Buffer* buffer = nullptr;
             ID3D11Device* device = nullptr;
             ID3D11DeviceContext* context = nullptr;
@@ -1700,7 +1704,7 @@ namespace BZROpenShim
             {
                 do
                 {
-                    buffer = g_ogre.getD3D11VertexBuffer(ogreBuffer);
+                    buffer = GetD3D11Buffer(ogreBuffer);
                     if (!buffer)
                         break;
                     D3D11_BUFFER_DESC description = {};
