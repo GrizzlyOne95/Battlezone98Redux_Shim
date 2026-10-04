@@ -340,6 +340,7 @@
     <ClInclude Include="include\sun_flash.h" />
     <ClInclude Include="include\terrain_proxy.h" />
     <ClInclude Include="include\terrain_semantic.h" />
+    <ClInclude Include="include\terrain_hd_texture_copy.h" />
     <ClInclude Include="include\ogre_runtime.h" />
     <ClInclude Include="include\game_state.h" />
     <ClInclude Include="include\diagnostic_output_cap.h" />

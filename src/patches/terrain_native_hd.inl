@@ -20,12 +20,14 @@ using HdDestroyBinding = void (__thiscall*)(void*, void*);
 using HdCopyBinding = void* (__thiscall*)(void*, const void*);
 using HdRemoveElement = void (__thiscall*)(void*, int, uint16_t);
 using HdGetTexture = const OgreSharedPtr* (__thiscall*)(void*);
+using HdGetTextureName = const std::string* (__thiscall*)(void*);
 using HdBindingCount = uint32_t (__thiscall*)(void*);
 HdCreateBinding g_hdCreateBinding = nullptr;
 HdDestroyBinding g_hdDestroyBinding = nullptr;
 HdCopyBinding g_hdCopyBinding = nullptr;
 HdRemoveElement g_hdRemoveElement = nullptr;
 HdGetTexture g_hdGetTexture = nullptr;
+HdGetTextureName g_hdGetTextureName = nullptr;
 HdBindingCount g_hdBindingCount = nullptr;
 FnGetMaterialByName g_hdGetMesh = nullptr;
 using HdGetSubMesh = void* (__thiscall*)(void*, uint16_t);
@@ -42,12 +44,13 @@ void ResolveNativeHdApi()
     g_hdCopyBinding = Resolve<HdCopyBinding>(ogre, "??4VertexBufferBinding@Ogre@@QAEAAV01@ABV01@@Z");
     g_hdRemoveElement = Resolve<HdRemoveElement>(ogre, "?removeElement@VertexDeclaration@Ogre@@UAEXW4VertexElementSemantic@2@G@Z");
     g_hdGetTexture = Resolve<HdGetTexture>(ogre, "?_getTexturePtr@TextureUnitState@Ogre@@QBEABV?$SharedPtr@VTexture@Ogre@@@2@XZ");
+    g_hdGetTextureName = Resolve<HdGetTextureName>(ogre, "?getTextureName@TextureUnitState@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
     g_hdBindingCount = Resolve<HdBindingCount>(ogre, "?getBufferCount@VertexBufferBinding@Ogre@@UBEIXZ");
     g_hdGetMesh = Resolve<FnGetMaterialByName>(ogre, "?getByName@MeshManager@Ogre@@QAE?AV?$SharedPtr@VMesh@Ogre@@@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@0@Z");
     g_hdGetSubMesh = Resolve<HdGetSubMesh>(ogre, "?getSubMesh@Mesh@Ogre@@QBEPAVSubMesh@2@G@Z");
     g_hdMeshOperation = Resolve<HdMeshOperation>(ogre, "?_getRenderOperation@SubMesh@Ogre@@QAEXAAVRenderOperation@2@G@Z");
     if (!g_hdGetSubMesh || !g_hdMeshOperation || !g_hdCreateBinding || !g_hdDestroyBinding || !g_hdCopyBinding || !g_hdRemoveElement ||
-        !g_hdGetTexture || !g_hdBindingCount || !g_hdGetMesh || !g_ogre.isBufferBound ||
+        !g_hdGetTexture || !g_hdGetTextureName || !g_hdBindingCount || !g_hdGetMesh || !g_ogre.isBufferBound ||
         !g_ogre.findElementBySemantic || !g_ogre.programSupported ||
         !g_ogre.getFragmentProgram || !g_ogre.setFragmentProgram ||
         !g_ogre.getFragmentProgramParameters || !g_ogre.setFragmentProgramParameters ||
@@ -296,6 +299,18 @@ bool InstallNativeTerrainHd()
         g_proxy.semanticMaterialName = "OpenShim/TerrainNativeHD/Backup/" + std::to_string(g_proxy.semanticMaterialGeneration);
         g_ogre.getMaterialByName(g_ogre.getMaterialManager(), &source, g_proxy.materialName, std::string("Autodetect"));
         if (!source.rep) throw std::runtime_error("native HD material unavailable");
+        if (!binding->diffuseResource.empty())
+        {
+            if (!g_ogre.getNumTechniques(source.rep)) throw std::runtime_error("native HD source technique unavailable");
+            void* technique = g_ogre.getTechnique(source.rep, 0);
+            if (!g_ogre.getNumPasses(technique)) throw std::runtime_error("native HD source pass unavailable");
+            void* pass = g_ogre.getPass(technique, 0);
+            if (!g_ogre.getNumTextureUnitStates(pass)) throw std::runtime_error("native HD source diffuse unavailable");
+            const auto* name = g_hdGetTextureName(g_ogre.getTextureUnitState(pass, 0));
+            if (!name || *name != binding->diffuseResource)
+                throw std::runtime_error("native HD source atlas does not match pack: expected=" +
+                    binding->diffuseResource + " actual=" + (name ? *name : "<unavailable>"));
+        }
         g_ogre.cloneMaterial(source.rep, &backup, g_proxy.semanticMaterialName, false, std::string());
         if (!backup.rep) throw std::runtime_error("native HD backup unavailable");
         ++g_semanticMaterialCreated;
@@ -340,6 +355,15 @@ bool InstallNativeTerrainHd()
         for (uint16_t p = 0; p < g_ogre.getNumPasses(g_ogre.getTechnique(backup.rep, t)); ++p)
         {
             void* pass = g_ogre.getPass(g_ogre.getTechnique(backup.rep, t), p);
+            // The ordinary diffuse pass above establishes pack identity. Some
+            // terrain shadow techniques intentionally use black.dds at unit
+            // zero; retain their original programs and texture bindings.
+            if (!binding->diffuseResource.empty())
+            {
+                if (!g_ogre.getNumTextureUnitStates(pass)) continue;
+                const auto* name = g_hdGetTextureName(g_ogre.getTextureUnitState(pass, 0));
+                if (!name || *name != binding->diffuseResource) continue;
+            }
             const std::string vs = generate(g_ogre.getVertexProgram(pass), false);
             if (vs.empty()) continue;
             const std::string ps = generate(g_ogre.getFragmentProgram(pass), true);

@@ -11,6 +11,14 @@ enable_testing()
 # executable, Windows process APIs, Frida, pefile or capstone.
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
+    execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import PIL"
+        RESULT_VARIABLE OPENSHIM_PIL_IMPORT_RESULT OUTPUT_QUIET ERROR_QUIET)
+    if(OPENSHIM_PIL_IMPORT_RESULT EQUAL 0)
+        add_test(NAME terrain_hd_pack_tests
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_hd_pack_tests.py")
+    else()
+        message(STATUS "terrain_hd_pack_tests needs Pillow; install it to qualify texture pack changes")
+    endif()
     add_test(NAME weapon_presentation_live_capture_tests
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../reverse_engineering/test_weapon_presentation_live.py")
 endif()
@@ -38,6 +46,8 @@ function(openshim_add_test name)
 endfunction()
 
 if(WIN32)
+    openshim_add_test(terrain_hd_texture_copy_tests STD 17 SOURCES terrain_hd_texture_copy_tests.cpp)
+    target_link_libraries(terrain_hd_texture_copy_tests PRIVATE d3d11)
     openshim_add_test(terrain_microrelief_gpu_tests STD 17 SOURCES terrain_microrelief_gpu_tests.cpp)
     target_link_libraries(terrain_microrelief_gpu_tests PRIVATE d3d11 d3dcompiler)
     target_compile_definitions(terrain_microrelief_gpu_tests PRIVATE

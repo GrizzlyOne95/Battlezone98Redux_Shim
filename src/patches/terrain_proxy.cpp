@@ -14,6 +14,7 @@
 #include <Windows.h>
 #include <bcrypt.h>
 #include <d3d11.h>
+#include "terrain_hd_texture_copy.h"
 
 #include <algorithm>
 #include <array>
@@ -158,16 +159,6 @@ namespace BZROpenShim
             float coverage = 0.0f;
         };
 
-        struct OgreBox
-        {
-            uint32_t left;
-            uint32_t top;
-            uint32_t right;
-            uint32_t bottom;
-            uint32_t front;
-            uint32_t back;
-        };
-
         struct OgreSharedPtr
         {
             void* rep = nullptr;
@@ -257,6 +248,7 @@ namespace BZROpenShim
             int followCameraReselectFrames = 300;
             bool hdEnabled = false;
             std::string hdManifest = "terrain_hd_tiles.json";
+            std::string hdExportPath;
             int zoneOrdinal = -1;
             int clusterOrdinal = -1;
             int zoneX = INT_MIN;
@@ -332,6 +324,7 @@ namespace BZROpenShim
         {
             uint32_t sliceCount = 0;
             std::string fallback;
+            std::string diffuseResource;
             std::unordered_map<uint32_t, std::string> tiles;
         };
 
@@ -447,10 +440,7 @@ namespace BZROpenShim
         using FnGetTextureUInt = uint32_t(__thiscall*)(void*);
         using FnGetTextureByte = uint8_t(__thiscall*)(void*);
         using FnGetTextureInt = int(__thiscall*)(void*);
-        using FnGetTextureBuffer = OgreSharedPtr* (__thiscall*)(
-            void*, OgreSharedPtr*, uint32_t, uint32_t);
-        using FnBlitPixelBuffer = void(__thiscall*)(
-            void*, const OgreSharedPtr&, const OgreBox&, const OgreBox&);
+        using FnGetD3D11Texture2D = ID3D11Texture2D* (__thiscall*)(void*);
         using FnGetViewport = void* (__thiscall*)(void*, uint16_t);
         using FnGetViewportCamera = void* (__thiscall*)(void*);
         using FnGetViewportInt = int(__thiscall*)(void*);
@@ -566,8 +556,7 @@ namespace BZROpenShim
             FnGetTextureByte getTextureMipmaps = nullptr;
             FnGetTextureInt getTextureType = nullptr;
             FnGetTextureInt getTextureFormat = nullptr;
-            FnGetTextureBuffer getTextureBuffer = nullptr;
-            FnBlitPixelBuffer blitPixelBuffer = nullptr;
+            FnGetD3D11Texture2D getD3D11Texture2D = nullptr;
             // Optional capture-framing APIs. Their absence disables only the
             // screen-rect diagnostic and the camera-aware selection mode; the
             // Phase 2/3A/3B render paths never depend on them.
@@ -810,6 +799,7 @@ namespace BZROpenShim
             if (IsEnvEnabled("OPENSHIM_TERRAIN_HD"))
                 config.hdEnabled = true;
             ReadEnvString("OPENSHIM_TERRAIN_HD_MANIFEST", config.hdManifest);
+            ReadEnvString("OPENSHIM_TERRAIN_HD_EXPORT", config.hdExportPath);
             int debugOverride = 0;
             if (ReadEnvInt("OPENSHIM_TERRAIN_SEMANTIC_DEBUG", debugOverride))
                 config.semanticDebugMode = debugOverride;
@@ -878,7 +868,7 @@ namespace BZROpenShim
                 config.semanticFrameCaptures = 0;
                 config.followCamera = true;
             }
-            if (config.hdEnabled)
+            if (config.hdEnabled || !config.hdExportPath.empty())
             {
                 config.proxyEnabled = config.semanticRenderer = false;
                 config.followCamera = true;
@@ -951,6 +941,8 @@ namespace BZROpenShim
                         "sliceCount", 0u);
                     binding.fallback = materialIt.value().value(
                         "fallback", std::string());
+                    binding.diffuseResource = materialIt.value().value(
+                        "diffuseResource", std::string());
                     if (binding.sliceCount == 0 || binding.sliceCount > 256 ||
                         binding.fallback.empty())
                         throw std::runtime_error(
@@ -1278,8 +1270,6 @@ namespace BZROpenShim
                 "?getTextureType@Texture@Ogre@@UBE?AW4TextureType@2@XZ");
             g_ogre.getTextureFormat = Resolve<FnGetTextureInt>(module,
                 "?getFormat@Texture@Ogre@@UBE?AW4PixelFormat@2@XZ");
-            g_ogre.blitPixelBuffer = Resolve<FnBlitPixelBuffer>(module,
-                "?blit@HardwarePixelBuffer@Ogre@@UAEXABVHardwarePixelBufferSharedPtr@2@ABUBox@2@1@Z");
             g_ogre.getViewport = Resolve<FnGetViewport>(module,
                 "?getViewport@RenderTarget@Ogre@@UAEPAVViewport@2@G@Z");
             g_ogre.getViewportCamera = Resolve<FnGetViewportCamera>(module,
@@ -1346,14 +1336,18 @@ namespace BZROpenShim
 
         bool ResolveD3D11TextureApi()
         {
-            if (g_ogre.getTextureBuffer)
+            if (g_ogre.getD3D11Texture2D)
                 return true;
             HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
             if (!renderer)
                 return false;
-            g_ogre.getTextureBuffer = Resolve<FnGetTextureBuffer>(renderer,
-                "?getBuffer@D3D11Texture@Ogre@@UAE?AVHardwarePixelBufferSharedPtr@2@II@Z");
-            return g_ogre.getTextureBuffer != nullptr;
+            std::string actual;
+            if (!VerifyModuleHash(renderer,
+                "78A1D8E13C8BD71983B09A39A3DCF7783E6C34DDE577DE3B9202460DB500AAE0", actual))
+                return false;
+            g_ogre.getD3D11Texture2D = Resolve<FnGetD3D11Texture2D>(renderer,
+                "?GetTex2D@D3D11Texture@Ogre@@QAEPAUID3D11Texture2D@@XZ");
+            return g_ogre.getD3D11Texture2D != nullptr;
         }
 
         bool SafeReadZoneInt(void* zone, size_t offset, int& value)
@@ -2466,7 +2460,7 @@ namespace BZROpenShim
                 g_ogre.createManualTexture && g_ogre.getTextureWidth &&
                 g_ogre.getTextureHeight && g_ogre.getTextureDepth &&
                 g_ogre.getTextureMipmaps && g_ogre.getTextureType &&
-                g_ogre.getTextureFormat && g_ogre.blitPixelBuffer &&
+                g_ogre.getTextureFormat &&
                 ResolveD3D11TextureApi();
         }
 
@@ -2519,33 +2513,11 @@ namespace BZROpenShim
                                 uint32_t height,
                                 uint32_t mipmaps)
         {
-            for (uint32_t mip = 0; mip <= mipmaps; ++mip)
-            {
-                OgreSharedPtr sourceBuffer;
-                OgreSharedPtr destinationBuffer;
-                g_ogre.getTextureBuffer(sourceTexture, &sourceBuffer, 0, mip);
-                g_ogre.getTextureBuffer(arrayTexture, &destinationBuffer, 0, mip);
-                if (!sourceBuffer.rep || !sourceBuffer.info ||
-                    !destinationBuffer.rep || !destinationBuffer.info)
-                {
-                    ReleaseCloneHandoff(sourceBuffer);
-                    ReleaseCloneHandoff(destinationBuffer);
-                    return false;
-                }
-                const uint32_t mipWidth = (std::max)(1u, width >> mip);
-                const uint32_t mipHeight = (std::max)(1u, height >> mip);
-                const OgreBox sourceBox = {
-                    0, 0, mipWidth, mipHeight, 0, 1
-                };
-                const OgreBox destinationBox = {
-                    0, 0, mipWidth, mipHeight, slice, slice + 1
-                };
-                g_ogre.blitPixelBuffer(destinationBuffer.rep, sourceBuffer,
-                    sourceBox, destinationBox);
-                ReleaseCloneHandoff(sourceBuffer);
-                ReleaseCloneHandoff(destinationBuffer);
-            }
-            return true;
+            if (!g_ogre.getD3D11Texture2D) return false;
+            // Exported getters return borrowed resources. Ogre owns both
+            // Texture shared pointers throughout this submission.
+            return TerrainHd::CopyTextureSlice(g_ogre.getD3D11Texture2D(arrayTexture),
+                g_ogre.getD3D11Texture2D(sourceTexture), slice, width, height, mipmaps);
         }
 
         // Reports which array slices the selected cluster actually samples, and
@@ -4546,6 +4518,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 
         #include "terrain_microrelief_bounds.inl"
         #include "terrain_native_hd.inl"
+        #include "terrain_atlas_export.inl"
 
         bool GetActiveCameraPosition(void*& camera, Vector3& position)
         {
@@ -4878,10 +4851,11 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         static_cast<double>(g_config.followCameraAimDistance),
                         static_cast<double>(best.cameraDistance),
                         g_proxy.sourceMeshName.c_str());
+                    if (!g_config.hdExportPath.empty()) ExportNativeTerrainAtlas();
                     if (g_config.hdEnabled) InstallNativeTerrainHd();
                     if (g_config.tessellationTest)
                         InstallNativeTerrainTessellationTest();
-                    else if (!g_config.hdEnabled)
+                    else if (!g_config.hdEnabled && g_config.hdExportPath.empty())
                         CreateProxy();
                     CaptureSemantics(true);
                     BuildAndValidateSemanticVertices(true);
@@ -5308,7 +5282,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
         if (!g_config.proxyEnabled && !g_config.semanticCapture &&
             !g_config.semanticValidateUv && !g_config.semanticRenderer &&
-            !g_config.tessellationTest && !g_config.hdEnabled)
+            !g_config.tessellationTest && !g_config.hdEnabled && g_config.hdExportPath.empty())
             return;
         g_shutdown.store(false);
         LogShimA(LogLevel::Info, "terrain-proxy",

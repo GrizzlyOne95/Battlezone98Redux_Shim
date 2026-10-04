@@ -29,6 +29,7 @@ Save this manifest beside `battlezone98redux.exe` as `terrain_hd_tiles.json`:
   "materials": {
     "MA_DETAIL_ATLAS": {
       "sliceCount": 256,
+      "diffuseResource": "mars_atlas_d.dds",
       "fallback": "my_terrain_fallback.png",
       "tiles": {
         "9": "my_tile_009.png",
@@ -45,6 +46,11 @@ Use `256` slices for a complete pack. A smaller pack must still cover every
 index the mission uses. Exact material-name bindings take priority over `*`.
 Select a planet/map-appropriate manifest; the system does not infer artwork
 from the material name shared between different terrains.
+The optional `diffuseResource` guard requires the ordinary native diffuse
+pass's exact texture resource name before allocating the HD array, installing
+streams or changing material bindings. Only compatible passes using that
+atlas are replaced; shadow techniques using `black.dds` remain unchanged.
+Exported packs include this guard; older diagnostic manifests remain supported.
 
 Enable the option or set:
 
@@ -112,3 +118,112 @@ interpolation. Its first and second derivatives vanish at noise-cell edges,
 reducing curvature kinks while preserving fixed phase and bounded visual
 displacement. The shipped GPU test checks boundary curvature, analytic slopes,
 camera independence, periodic seams and displacement limits.
+
+## Atlas exporter and Mars pilot
+
+`scripts/Build-TerrainHdPack.py` creates a complete engine-indexed baseline
+from a live mapping capture and the installed game's diffuse atlas. CSV rows
+are **not** semantic tile IDs: the stock Mars CSV repeats `MA11SA0.MAP`, and
+native indices 9 and 10 both resolve to its later rectangle. Capture the real
+mapping rather than assuming CSV order. The exporter reads the validated
+256-entry engine table; it does not parse or modify TRN/HG2/MAT/LGT files.
+
+For a fresh DX11 Mars mission, set an absolute output filename in the process
+environment before launching through the harness:
+
+```powershell
+New-Item -ItemType Directory -Force build/terrain-mars-pack | Out-Null
+$env:OPENSHIM_TERRAIN_HD_EXPORT = Join-Path (Get-Location) 'build/terrain-mars-pack/mars-atlas.json'
+try {
+    ./reverse_engineering/run_terrain_tessellation_test.ps1 -Mission misn04.bzn -RunSeconds 65 -Deploy
+} finally {
+    Remove-Item Env:/OPENSHIM_TERRAIN_HD_EXPORT
+}
+```
+
+The diagnostic makes one capture per fresh process, before any native HD
+binding. Keep HD off for this capture and give the file's parent directory
+permission to receive output. The existing harness enables its flat
+tessellation submission test; the export flag alone does not alter terrain.
+
+Install Python 3.9+ and Pillow 9.1+ (`python -m pip install 'Pillow>=9.1'`), then build:
+
+```powershell
+$game = 'C:/Program Files (x86)/GOG Galaxy/Games/Battlezone 98 Redux'
+$atlas = "$game/BZ_ASSETS/pc/textures/TerrainTextures/BZ_TERRAIN_ATLASES_DIFF_DDS/mars_atlas_d.dds"
+$csv = "$game/BZ_ASSETS/common/materials/ma_detail_atlas.csv"
+python scripts/Build-TerrainHdPack.py `
+  --capture build/terrain-mars-pack/mars-atlas.json --atlas $atlas --atlas-csv $csv `
+  --output build/terrain-mars-pack/baseline --prefix openshim_mars_baseline
+```
+
+The baseline only enlarges existing artwork, which establishes correct tile
+assignment rather than creating new detail. Images retain the atlas crop's
+orientation; the native renderer applies the map's original rotation. Missing
+used IDs, wrong atlas identity/dimensions, invalid or fractional pixel crops
+and unknown recipe tile names fail before publishing a manifest. Existing
+outputs require `--force`. Exact pixel equivalence to stock is not promised:
+native stock UVs are quantized, while HD samples continuous local tile UVs.
+
+Add `--recipe scripts/terrain-packs/mars-pilot.json --source-root <textures>`
+and change output/prefix to `pilot`/`openshim_mars_pilot` to use the supplied
+Mars albedo archives. The recipe replaces nine named solid dune, soil and rock
+variants. It preserves stock alpha, matches average stock color and fades to
+the original crop at the edges over 32 output pixels. Baked transition tiles
+remain stock, enlarged to the same 512-pixel dimensions. This is a partial
+artwork pilot: preserved transition/detail/normal/specular maps have their
+original detail, and stock-edge bands can remain visible. Material height and
+normal assets in those archives are not applied by this diffuse-only path.
+
+Artwork sources may be loose files (`{"file":"relative/albedo.png"}`) or
+specific ZIP members (`{"archive":"art.zip","member":"albedo.png"}`). ZIPs
+are read without extracting them, and artwork paths must remain inside the
+explicit source root. The builder writes a contact sheet and provenance
+report with content hashes beside the manifest. User artwork and game-derived
+images/captures stay local; only the exporter, recipe and tests belong in Git.
+
+Copy the generated PNGs to a registered Ogre resource directory, such as
+`$game/openshim/renderer/enhanced`, and the generated manifest beside the game
+executable. Select `openshim_mars_pilot.json` with `TerrainHdManifest` and
+enable **HD Terrain Tiles** in OpenShim Options, then restart with DX11. The
+baseline occupies 18 unique source images; the pilot occupies 19. Both cover
+all 256 native slots and allocate approximately 341 MiB for the 512-pixel
+RGBA8 array with mips, plus source caches and native semantic streams.
+
+`python tests/terrain_hd_pack_tests.py` checks scrambled IDs, crop orientation,
+duplicate source regions/names, partial overrides, original edge/alpha
+preservation, source identity and path boundaries. CTest includes this suite
+when its Python interpreter has Pillow; configuration reports a missing
+dependency. Linux/Proton authoring uses the same script and case-preserved
+resource filenames; native Steam/Proton/Wine qualification remains separate.
+
+The first 512-pixel native run faulted during Ogre's pixel-buffer upload path.
+HD uploads now resolve the exact-build backend's exported `GetTex2D` getter
+and validate source/destination descriptors, slice bounds and device identity
+before explicit [DX11 subresource copies](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-copysubresourceregion).
+Each source mip is copied to the destination slice's corresponding mip without
+scaling or implicit mip generation. `terrain_hd_texture_copy_tests` uses WARP
+readback to check 512-pixel mip chains, first/last slices including index 255,
+untouched neighbouring slices, row orientation and invalid/cross-device copies.
+
+On 2026-10-04, GOG DX11 `misn04` baseline PID 46296 and artwork-plus-relief
+PID 5408 both rendered the 512-pixel, 256-slice array on actual native terrain.
+Each audited 320 mesh streams and replaced/restored 27 diffuse material passes;
+the shadow technique using `black.dds` was retained. GPU evidence confirmed
+the array/semantic stream at rasterized draws. The pilot also restored all
+320 relief bounds, and a live screenshot showed the new cracked-soil artwork.
+The complete CTest suite passed 76/76, including seven Python authoring tests.
+These short runs establish the authoring path and submission/lifetime behavior;
+broad seam/rotation artistic acceptance and production performance remain open.
+
+The subsequent `misn05` pilot/relief run (PID 50948) also passed native GPU
+submission and clean restoration for its 256 meshes and 27 diffuse passes.
+Its independently captured 256-slot table and diffuse resource matched
+`misn04` exactly. The earlier unattended `misn05` attempt never selected a
+cluster and did not qualify; the rerun reached active terrain before the user
+stopped Computer Use, after which no further UI automation was performed.
+The user subsequently confirmed that the second mission worked as well.
+A deliberately wrong `moon_atlas_d.dds` guard on Mars (PID 8824) declined
+before array allocation or HD material installation and kept stock terrain.
+The positive-test harness reported failure for that deliberate negative case,
+as expected; fresh-session logs established rejection and clean game exit.
