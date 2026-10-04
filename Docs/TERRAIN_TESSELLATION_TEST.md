@@ -1,9 +1,11 @@
 # Native terrain tessellation submission test
 
-Experimental, default off, zero displacement. This establishes whether the
+Experimental, default off, zero displacement by default. This establishes whether the
 released DX11 renderer can tessellate Redux's existing terrain buffers. It does
 not add smoother hills or surface relief. Collision, placement, pathfinding,
 terrain data, and networking are unchanged.
+The optional [micro relief prototype](TERRAIN_MICRO_RELIEF_TEST.md) adds bounded
+visual surface detail through `-MicroRelief`.
 
 ## Scope
 
@@ -65,8 +67,8 @@ process. No persistent INI setting is added.
 
 ## Evidence and limits
 
-The shader check compiles 70 shaders: ten declared terrain permutations and
-factors 1/2/4. It checks semantic names, indices, types, registers and masks
+The shader check compiles 110 shaders: ten declared terrain permutations,
+baseline factors 1/2/4 and micro relief factors 2/4. It checks semantic names, indices, types, registers and masks
 across VS -> HS -> DS using OGRE-compatible compiler flags. Runtime compilation
 is audited separately. `SV_POSITION`'s system-value tag is normalized only at
 the intermediate control-point interface; final domain output is checked.
@@ -117,5 +119,8 @@ remains a separate gate.
 Remaining gates include a locked-camera image comparison, wider map/edge
 sweeps, deformation and full rebuilds, A -> B -> A,
 profile/quality changes, device recreation, and Steam/Proton/Wine coverage.
-Adaptive factors, displacement, displacement bounds/normals and authored art
-are future work. See [the research](TERRAIN_VISUAL_TESSELLATION_RESEARCH.md).
+The separate [micro relief test](TERRAIN_MICRO_RELIEF_TEST.md) now adds bounded
+static displacement and updates render bounds/normals; the user confirmed
+stable ground in the corrected local GOG camera-motion test. Adaptive factors,
+authored height art and broader qualification remain future work.
+See [the research](TERRAIN_VISUAL_TESSELLATION_RESEARCH.md).

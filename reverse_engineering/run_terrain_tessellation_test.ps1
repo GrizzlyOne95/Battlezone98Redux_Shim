@@ -4,6 +4,8 @@ param(
     [string]$Mission = 'misn04.bzn',
     [ValidateSet(1, 2, 4)][int]$Factor = 2,
     [switch]$Wireframe,
+    [switch]$MicroRelief,
+    [ValidateRange(0, 1)][float]$ReliefAmplitude = 0.25,
     [switch]$Editor,
     [ValidateRange(10, 120)][int]$RunSeconds = 45,
     [switch]$Deploy
@@ -25,6 +27,8 @@ $variables = @{
     OPENSHIM_TERRAIN_TESSELLATION_TEST = '1'
     OPENSHIM_TERRAIN_TESSELLATION_FACTOR = "$Factor"
     OPENSHIM_TERRAIN_TESSELLATION_WIREFRAME = $(if ($Wireframe) { '1' } else { '0' })
+    OPENSHIM_TERRAIN_MICRO_RELIEF_TEST = $(if ($MicroRelief) { '1' } else { '0' })
+    OPENSHIM_TERRAIN_MICRO_RELIEF_AMPLITUDE = $ReliefAmplitude.ToString('R', [Globalization.CultureInfo]::InvariantCulture)
 }
 $saved = @{}
 $process = $null
@@ -46,7 +50,7 @@ try {
         PassThru = $true
     }
     $process = Start-Process @launch
-    Write-Host "Terrain test PID=$($process.Id), factor=$Factor, wireframe=$Wireframe. Press Space if the mission waits for briefing."
+    Write-Host "Terrain test PID=$($process.Id), factor=$Factor, wireframe=$Wireframe, microRelief=$MicroRelief, amplitude=$ReliefAmplitude. Press Space if the mission waits for briefing."
     $deadline = (Get-Date).AddSeconds($RunSeconds)
     while ((Get-Date) -lt $deadline -and -not $process.HasExited) {
         Start-Sleep -Milliseconds 500
@@ -85,10 +89,17 @@ $proved = @($evidence | Where-Object {
     [uint64]([regex]::Match($_, 'clipPrimitives=([0-9]+)').Groups[1].Value) -ge 128
 }).Count -gt 0
 $restored = @($evidence | Where-Object { $_ -match 'shared material restored' }).Count -gt 0
+if ($MicroRelief -and $ReliefAmplitude -gt 0) {
+    $boundsRestored = @($evidence | Where-Object {
+        $_ -match 'micro-relief render bounds restored meshes=([0-9]+) tracked=([0-9]+)' -and
+        [int]$Matches[1] -gt 0 -and $Matches[1] -eq $Matches[2]
+    }).Count -gt 0
+    $restored = $restored -and $boundsRestored
+}
 $process.Refresh()
 $cleanExit = $process.HasExited -and $process.ExitCode -eq 0
 Write-Host "Evidence saved to $output"
 if (-not ($proved -and $restored -and $cleanExit)) {
     throw "Submission test failed: GPU proof=$proved, restored=$restored, cleanExit=$cleanExit. Inspect the fresh-session logs."
 }
-Write-Host 'PASS: tessellation submission, rasterization and clean restoration. Visual parity and displacement remain separate gates.'
+Write-Host 'PASS: tessellation submission, rasterization and clean restoration. Camera-motion and terrain-contact acceptance require visual checks.'

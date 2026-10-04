@@ -3,6 +3,61 @@
 #ifndef OPENSHIM_TESS_FACTOR
 #define OPENSHIM_TESS_FACTOR 1
 #endif
+#ifndef OPENSHIM_RELIEF_AMPLITUDE
+#define OPENSHIM_RELIEF_AMPLITUDE 0
+#endif
+
+#if defined(OPENSHIM_RELIEF_TEST)
+float4x4 reliefView;
+float4x4 reliefInverseView;
+float4x4 reliefInverseWorldView;
+float4x4 reliefProjection;
+#if defined(SHADOWRECEIVER)
+float4x4 reliefShadow1;
+#if defined(PSSM_ENABLED)
+float4x4 reliefShadow2;
+float4x4 reliefShadow3;
+#endif
+#endif
+
+// Native cluster translations are multiples of eighty world units (runtime
+// checked). A periodic field therefore agrees across clusters while using
+// object coordinates, including under camera-relative rendering.
+// No camera-driven height fade: a fixed ground point must remain fixed.
+float TerrainReliefHash(int2 cell)
+{
+    uint2 wrapped = uint2(cell) & 31;
+    uint key = wrapped.x + wrapped.y * 32;
+    key ^= key >> 16;
+    key *= 0x7feb352d;
+    key ^= key >> 15;
+    key *= 0x846ca68b;
+    key ^= key >> 16;
+    return float(key & 0xffffff) * (2.0 / 16777215.0) - 1.0;
+}
+
+float3 TerrainMicroRelief(float2 objectXZ)
+{
+    float2 grid = objectXZ * 0.4; // 2.5 world units per noise cell
+    int2 cell = int2(floor(grid));
+    float2 f = frac(grid);
+    float2 blend = f * f * (3.0 - 2.0 * f);
+    float2 derivative = 6.0 * f * (1.0 - f) * 0.4;
+    float a = TerrainReliefHash(cell);
+    float b = TerrainReliefHash(cell + int2(1,0));
+    float c = TerrainReliefHash(cell + int2(0,1));
+    float d = TerrainReliefHash(cell + int2(1,1));
+    float h = lerp(lerp(a,b,blend.x), lerp(c,d,blend.x), blend.y);
+    float2 dh = float2(lerp(b-a,d-c,blend.y) * derivative.x,
+        lerp(c-a,d-b,blend.x) * derivative.y);
+    return OPENSHIM_RELIEF_AMPLITUDE * float3(h, dh);
+}
+
+float2 TerrainReliefObjectXZ(float3 viewPosition, float4x4 inverseWorldView)
+{
+    return mul(inverseWorldView, float4(viewPosition, 1.0)).xz;
+}
+#endif
 
 struct TerrainTessVertex
 {
@@ -84,6 +139,33 @@ TerrainTessVertex TerrainDomain(TerrainTessFactors f, float3 b : SV_DomainLocati
 #if defined(PSSM_ENABLED)
     TERRAIN_INTERPOLATE(shadow2);
     TERRAIN_INTERPOLATE(shadow3);
+#endif
+#endif
+// Recover native object position with inverse WORLD-view, which remains
+// valid when Ogre subtracts the camera origin from world/view transforms.
+#if defined(OPENSHIM_RELIEF_TEST)
+    float3 relief = TerrainMicroRelief(TerrainReliefObjectXZ(o.viewPosition, reliefInverseWorldView));
+    float3 worldNormal = normalize(mul(reliefInverseView, float4(o.normal, 0.0)).xyz);
+    // The differential of (x,y,z) -> (x,y+h(x,z),z) transforms the normal
+    // by inverse transpose; this preserves native slopes and adds relief.
+    worldNormal = normalize(float3(worldNormal.x - worldNormal.y * relief.y,
+        worldNormal.y, worldNormal.z - worldNormal.y * relief.z));
+    o.normal = mul(reliefView, float4(worldNormal, 0.0)).xyz;
+#if defined(NORMALMAP_ENABLED) && defined(VERTEX_TANGENTS)
+    float3 worldTangent = mul(reliefInverseView, float4(o.tangent, 0.0)).xyz;
+    worldTangent.y += relief.y * worldTangent.x + relief.z * worldTangent.z;
+    o.tangent = mul(reliefView, float4(normalize(worldTangent), 0.0)).xyz;
+#endif
+    float4 vertical = float4(0.0, relief.x, 0.0, 0.0);
+    o.viewPosition += mul(reliefView, vertical).xyz;
+    o.position += mul(reliefProjection, mul(reliefView, vertical));
+    o.depth = o.position.z;
+#if defined(SHADOWRECEIVER)
+    o.shadow1 += mul(reliefShadow1, vertical);
+#if defined(PSSM_ENABLED)
+    o.shadow2 += mul(reliefShadow2, vertical);
+    o.shadow3 += mul(reliefShadow3, vertical);
+#endif
 #endif
 #endif
     return o;

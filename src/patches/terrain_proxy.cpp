@@ -228,6 +228,8 @@ namespace BZROpenShim
             bool tessellationTest = false;
             bool tessellationWireframe = false;
             int tessellationFactor = 2;
+            bool microReliefTest = false;
+            float microReliefAmplitude = 0.25f;
             bool semanticCapture = false;
             bool semanticDumpJson = true;
             bool semanticRenderer = false;
@@ -853,6 +855,13 @@ namespace BZROpenShim
                 config.semanticFrameCaptureMinCoverage = 0.005f;
             config.tessellationTest = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_TEST");
             config.tessellationWireframe = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_WIREFRAME");
+            config.microReliefTest = IsEnvEnabled("OPENSHIM_TERRAIN_MICRO_RELIEF_TEST");
+            float reliefAmplitude = 0.25f;
+            if (ReadEnvFloat("OPENSHIM_TERRAIN_MICRO_RELIEF_AMPLITUDE", reliefAmplitude) &&
+                std::isfinite(reliefAmplitude) && reliefAmplitude >= 0.0f && reliefAmplitude <= 1.0f)
+                config.microReliefAmplitude = reliefAmplitude;
+            config.tessellationTest = config.tessellationTest || config.microReliefTest;
+            if (config.microReliefAmplitude == 0.0f) config.microReliefTest = false;
             int factor = 2;
             if (ReadEnvInt("OPENSHIM_TERRAIN_TESSELLATION_FACTOR", factor) &&
                 (factor == 1 || factor == 2 || factor == 4))
@@ -3217,6 +3226,9 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             }
         }
 
+        bool PrepareTerrainMicroReliefBounds();
+        void RefreshTerrainMicroReliefBounds(void* zone);
+        void RestoreTerrainMicroReliefBounds();
         #include "terrain_tessellation_test.inl"
 
         bool InstallSemanticMaterial()
@@ -4519,6 +4531,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             return true;
         }
 
+        #include "terrain_microrelief_bounds.inl"
+
         bool GetActiveCameraPosition(void*& camera, Vector3& position)
         {
             camera = nullptr;
@@ -4694,7 +4708,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 
         bool ObserveZone(void* zone)
         {
-            if (!zone || g_proxy.tearingDown || g_proxy.selected || !g_discoveryArmed)
+            if (!zone || g_proxy.tearingDown || !g_discoveryArmed ||
+                (g_proxy.selected && !g_config.microReliefTest))
                 return g_proxy.selected;
             int zoneX = 0;
             int zoneZ = 0;
@@ -4710,6 +4725,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 zoneOrdinal = g_nextZoneOrdinal++;
                 g_zoneOrdinals.emplace(zone, zoneOrdinal);
             }
+            if (g_proxy.selected) return true;
 
             const bool followCamera = FollowCameraUsable();
             void* camera = nullptr;
@@ -4886,6 +4902,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             try
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
+                RefreshTerrainMicroReliefBounds(zone);
                 ObserveZone(zone);
             }
             catch (...)
@@ -4950,6 +4967,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             if (!g_active.load(std::memory_order_acquire) || g_shutdown.load())
                 return;
             std::lock_guard<std::mutex> lock(g_mutex);
+            RefreshTerrainMicroReliefBounds(zone);
             // The engine can destroy the proxy Entity at any point during a
             // mission change. Detect that by name before anything dereferences
             // the stored pointer, and forget so the next qualifying zone in

@@ -4,6 +4,11 @@ Research date: 2026-10-03. A default-off, zero-displacement prototype now exists
 local Windows/GOG tests establish native patch submission and a visible factor-2
 terrain wireframe. Visual parity, displacement and performance remain unqualified.
 See [the test and evidence](TERRAIN_TESSELLATION_TEST.md).
+The [micro relief prototype](TERRAIN_MICRO_RELIEF_TEST.md) is the next bounded
+geometry experiment. Its initial camera-dependent wave result was rejected;
+the current version uses fixed object coordinates with matched periodic phase.
+The user confirmed stable ground during the corrected local GOG camera-motion
+test on 2026-10-04; broader terrain and platform qualification remains.
 
 ## Recommendation
 
