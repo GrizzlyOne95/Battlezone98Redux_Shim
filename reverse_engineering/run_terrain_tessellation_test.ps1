@@ -5,6 +5,8 @@ param(
     [ValidateSet(1, 2, 4)][int]$Factor = 2,
     [switch]$Wireframe,
     [switch]$MicroRelief,
+    [switch]$HdTiles,
+    [string]$HdManifest = 'terrain_hd_tiles.json',
     [ValidateRange(0, 1)][float]$ReliefAmplitude = 0.25,
     [switch]$Editor,
     [ValidateRange(10, 120)][int]$RunSeconds = 45,
@@ -32,9 +34,37 @@ $variables = @{
 }
 $saved = @{}
 $process = $null
+$hdIni = Join-Path $GameRoot 'openshim.ini'
+$hdSaved = @{}
+if ($HdTiles) {
+    if (-not ('BzrTerrainTestIni' -as [type])) {
+        Add-Type @'
+using System.Runtime.InteropServices;
+using System.Text;
+public static class BzrTerrainTestIni {
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode)]
+    public static extern uint GetPrivateProfileString(string section, string key, string fallback, StringBuilder value, uint count, string path);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool WritePrivateProfileString(string section, string key, string value, string path);
+}
+'@
+    }
+}
 try {
     if ($Deploy) {
         & "$PSScriptRoot\..\scripts\Deploy-OpenShim.ps1" -GameDir $GameRoot
+    }
+    if ($HdTiles) {
+        foreach ($key in 'TerrainHdEnabled', 'TerrainHdManifest') {
+            $value = [Text.StringBuilder]::new(4096)
+            [void][BzrTerrainTestIni]::GetPrivateProfileString('Terrain', $key, '__absent__', $value, 4096, $hdIni)
+            $hdSaved[$key] = $(if ($value.ToString() -eq '__absent__') { $null } else { $value.ToString() })
+        }
+        if (-not [BzrTerrainTestIni]::WritePrivateProfileString('Terrain', 'TerrainHdEnabled', '1', $hdIni) -or
+            -not [BzrTerrainTestIni]::WritePrivateProfileString('Terrain', 'TerrainHdManifest', $HdManifest, $hdIni)) {
+            throw 'Could not apply temporary HD terrain test settings.'
+        }
     }
     foreach ($key in $variables.Keys) {
         $saved[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
@@ -58,11 +88,16 @@ try {
     }
 }
 finally {
-    if ($process) { Stop-BZRGame -Id $process.Id }
+    if ($process) { Stop-BZRGame -Id $process.Id -NoForce }
     $null = Restore-BZROrphanedOgreConfig -GameRoot $GameRoot
     $env:BZR_FORCE_WINDOWED = $savedWindowed
     foreach ($key in $saved.Keys) {
         [Environment]::SetEnvironmentVariable($key, $saved[$key], 'Process')
+    }
+    foreach ($key in $hdSaved.Keys) {
+        if (-not [BzrTerrainTestIni]::WritePrivateProfileString('Terrain', $key, $hdSaved[$key], $hdIni)) {
+            Write-Warning "Could not restore Terrain/$key after the HD test."
+        }
     }
 }
 $records = @()
@@ -77,7 +112,7 @@ foreach ($name in 'openshim.log', 'BZOgreLogfile.log', 'BZLogger.txt') {
         }
     }
 }
-$evidence = @($records | Where-Object { $_ -match '\[TERRAIN-TESS\]' })
+$evidence = @($records | Where-Object { $_ -match '\[TERRAIN-(TESS|HD)\]' })
 $evidence | Set-Content -LiteralPath (Join-Path $output 'evidence.txt')
 $evidence | ForEach-Object { Write-Host $_ }
 $proved = @($evidence | Where-Object {
@@ -89,6 +124,15 @@ $proved = @($evidence | Where-Object {
     [uint64]([regex]::Match($_, 'clipPrimitives=([0-9]+)').Groups[1].Value) -ge 128
 }).Count -gt 0
 $restored = @($evidence | Where-Object { $_ -match 'shared material restored' }).Count -gt 0
+if ($HdTiles) {
+    $hdDraw = @($evidence | Where-Object { $_ -match 'GPU statistics .*hdTiles=1' -and
+        [uint64]([regex]::Match($_, 'psInvocations=([0-9]+)').Groups[1].Value) -ge 1024 }).Count -gt 0
+    $hdRestore = @($evidence | Where-Object { $_ -match 'native streams restored meshes=([0-9]+) tracked=([0-9]+)' -and
+        [int]$Matches[1] -gt 0 -and $Matches[1] -eq $Matches[2] }).Count -gt 0
+    $hdMaterialRestore = @($evidence | Where-Object { $_ -match 'shared native material restored passes=[1-9]' }).Count -gt 0
+    $proved = $proved -and $hdDraw
+    $restored = $restored -and $hdRestore -and $hdMaterialRestore
+}
 if ($MicroRelief -and $ReliefAmplitude -gt 0) {
     $boundsRestored = @($evidence | Where-Object {
         $_ -match 'micro-relief render bounds restored meshes=([0-9]+) tracked=([0-9]+)' -and

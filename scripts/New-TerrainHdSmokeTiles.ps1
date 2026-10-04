@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Creates numbered PNG tiles and a Phase 3B terrain-HD manifest.
+    Creates numbered PNG tiles and a native terrain-HD manifest.
 
 .DESCRIPTION
     OutputDirectory must be an Ogre resource directory used by the active mod.

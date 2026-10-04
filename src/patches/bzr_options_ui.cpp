@@ -2832,6 +2832,11 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
               "Contribution-ranked per-object local-light ordering. DX11 only. Restart required." },
+            { "HD Terrain Tiles", "Terrain", "TerrainHdEnabled", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::RestartRequired,
+              "Experimental full-resolution terrain diffuse tiles. Requires a terrain_hd_tiles.json "
+              "texture pack. Keeps existing tile placement and collision. DX11 only. Restart required." },
             { "Terrain Micro Detail", "Terrain", "TerrainMicroRelief", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
               ShimSettingApplyGroup::RestartRequired,

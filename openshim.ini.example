@@ -700,6 +700,8 @@ TerrainSemanticFrameCaptureMinCoverage = 0.005
 ; Accepted: integer flag 0/1. Default: 0.
 ; ON also enables the one-cluster proxy and semantic renderer. Missing/invalid
 ; resources fail soft to the stock atlas.
+; Native full-resolution diffuse tile replacement (DX11). Requires a texture
+; pack manifest; existing tile placement, orientation and gameplay stay intact.
 TerrainHdEnabled = 0
 
 ; HD tile manifest path. Accepted: non-empty path string.
