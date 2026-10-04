@@ -18,8 +18,9 @@ Put ordinary PNG or DDS images in an Ogre resource directory loaded by the
 game/mod. All images, including the fallback, must have matching dimensions,
 pixel format and mip count. DDS files must be ordinary 2D images, not prebuilt
 DX10 arrays. Use tile artwork with compatible edges and baked transitions;
-this keeps the original tile system and does not add brush painting or blending
-between arbitrary new materials.
+this mode keeps the original tile system. The separate experimental
+[four-material paint mode](terrain-paint.md) uses continuous RGBA weights
+and a standalone brush editor instead of the map's tile choices.
 
 Save this manifest beside `battlezone98redux.exe` as `terrain_hd_tiles.json`:
 

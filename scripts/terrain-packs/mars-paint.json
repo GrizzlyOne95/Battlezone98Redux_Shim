@@ -1,0 +1,16 @@
+{
+  "schema": "bzr-openshim-terrain-paint-art-v1",
+  "baseLayer": 1,
+  "layers": [
+    {"name":"Dune sand", "repeatMeters":24, "archive":"MarsDustySandDunes_PbrGenericSpecular4kBitmap.zip", "member":"MarsDustySandDunes_albedo.png"},
+    {"name":"Rocky soil", "repeatMeters":16, "archive":"MarsSoilWithRockyDebris_PbrGenericSpecular4kBitmap.zip", "member":"MarsSoilWithRockyDebris_albedo.png"},
+    {"name":"Gravel", "repeatMeters":12, "archive":"MarsGravel_PbrGenericSpecular4kBitmap.zip", "member":"MarsGravel_albedo.png"},
+    {"name":"Cracked rock", "repeatMeters":24, "archive":"MarsCrackedRock_PbrGenericSpecular4kBitmap.zip", "member":"MarsCrackedRock_albedo.png"}
+  ],
+  "strokes": [
+    {"layer":0,"x":0.35,"z":0.45,"radius":0.3,"strength":1},
+    {"layer":2,"x":0.55,"z":0.55,"radius":0.2,"strength":1},
+    {"layer":3,"x":0.7,"z":0.35,"radius":0.25,"strength":1},
+    {"layer":3,"x":0.35,"z":0.65,"radius":0.18,"strength":1}
+  ]
+}

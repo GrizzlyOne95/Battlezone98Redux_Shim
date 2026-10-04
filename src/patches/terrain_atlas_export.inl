@@ -34,6 +34,7 @@ void ExportNativeTerrainAtlas()
             {"height", g_ogre.getTextureHeight(texture->rep)},
             {"tiles", nlohmann::json::object()}, {"usedIndices", nlohmann::json::array()}
         };
+        root["paintMap"] = CaptureTerrainPaintMap();
         void* manager = g_terrainManager();
         if (!manager) throw std::runtime_error("atlas export terrain manager unavailable");
         // The validated released-build table has 256 entries. CSV row order

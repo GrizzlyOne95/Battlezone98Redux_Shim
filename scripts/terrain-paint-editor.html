@@ -1,0 +1,70 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenShim terrain paint</title>
+<style>
+body{margin:0;background:#151b22;color:#eef0f3;font:16px system-ui}main{max-width:1100px;margin:24px auto;padding:0 24px}h1{font-size:26px}p{color:#c0c8d4;line-height:1.5}button,input{font:inherit}button{padding:8px 12px;border:1px solid #536273;border-radius:6px;background:#273341;color:white;cursor:pointer}button[aria-pressed=true]{outline:3px solid #eabc75}.toolbar,.layers{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.layers button{display:flex;align-items:center;gap:8px}.layers img{width:52px;height:52px;border-radius:4px}label{display:flex;align-items:center;gap:8px}canvas{width:100%;height:auto;touch-action:none;cursor:crosshair;background:#000;border:1px solid #536273}output{font-variant-numeric:tabular-nums}small{color:#aebacc}.swatch{display:inline-block;width:12px;height:12px;border-radius:50%}
+</style>
+<main>
+<h1>Terrain paint · four materials</h1>
+<p>Paint a soft material blend across the map. This top-down view shows layer weights; the game renders the full-resolution material textures. Row zero is minimum Z. Painting changes appearance only.</p>
+<div class="layers" id="layers"></div>
+<div class="toolbar">
+<label>Radius <input id="radius" type="range" min="5" max="500" value="120"><output id="radiusValue">120 m</output></label>
+<label>Strength <input id="strength" type="range" min="1" max="100" value="40"><output id="strengthValue">40%</output></label>
+<button id="undo">Undo</button><button id="redo">Redo</button>
+<button id="save">Save weights PNG</button><label>Load weights <input id="load" type="file" accept="image/png"></label>
+</div>
+<canvas id="map"></canvas>
+<p id="status" role="status"></p>
+<small>Save the PNG, rebuild the pack with <code>--weights &lt;saved PNG&gt;</code>, then restart the mission. This first editor has no in-game preview or live reload. Material repeats and map identity are saved in the adjacent project JSON.</small>
+</main>
+<script id="project" type="application/json">__PAINT_PROJECT__</script>
+<script>
+__PAINT_CODE__
+</script>
+<script>
+"use strict";
+const project=JSON.parse(document.getElementById('project').textContent);
+const canvas=document.getElementById('map'),ctx=canvas.getContext('2d');
+const n=project.weightSize,b=project.paint.boundsMeters;
+canvas.width=canvas.height=n;
+const weights=Uint8ClampedArray.from(atob(project.weights),c=>c.charCodeAt(0));
+const colors=[[230,185,118],[175,102,67],[113,132,147],[79,72,73]];
+let layer=0,drawing=false,last=null,history=[],future=[];
+const radius=document.getElementById('radius'),strength=document.getElementById('strength');
+for(let i=0;i<4;i++){
+ const button=document.createElement('button');button.setAttribute('aria-pressed',String(i===0));
+ const img=document.createElement('img');img.src=project.previews[i];img.alt='';button.append(img);
+ const swatch=document.createElement('span');swatch.className='swatch';swatch.style.background=`rgb(${colors[i]})`;button.append(swatch);
+ button.append(document.createTextNode(project.layers[i].name));button.onclick=()=>{layer=i;document.querySelectorAll('#layers button').forEach((el,j)=>el.setAttribute('aria-pressed',String(i===j)));};
+ document.getElementById('layers').append(button);
+}
+function render(){
+ const display=ctx.createImageData(n,n);
+ for(let p=0;p<weights.length;p+=4){let total=weights[p]+weights[p+1]+weights[p+2]+weights[p+3];for(let c=0;c<3;c++){let v=0;for(let i=0;i<4;i++)v+=weights[p+i]*colors[i][c];display.data[p+c]=total?v/total:colors[0][c];}display.data[p+3]=255;}
+ ctx.putImageData(display,0,0);
+ document.getElementById('status').textContent=`${n} × ${n} editable weights · X ${b[0]} to ${b[2]} m · Z ${b[1]} to ${b[3]} m · map ${project.paint.terrainFingerprint}`;
+}
+const normalize=TerrainPaintCodec.normalize;
+function stamp(x,z){
+ const r=Number(radius.value),amount=Number(strength.value)/100,sx=(b[2]-b[0])/n,sz=(b[3]-b[1])/n;
+ for(let py=Math.max(0,Math.floor((z-r-b[1])/sz));py<Math.min(n,Math.ceil((z+r-b[1])/sz));py++)for(let px=Math.max(0,Math.floor((x-r-b[0])/sx));px<Math.min(n,Math.ceil((x+r-b[0])/sx));px++){
+  const d=Math.hypot(b[0]+(px+.5)*sx-x,b[1]+(py+.5)*sz-z)/r;if(d>=1)continue;
+  const influence=amount*(1-d)**2*(1+2*d),p=(py*n+px)*4,old=normalize(Array.from(weights.subarray(p,p+4)));
+  weights.set(normalize(old.map((v,i)=>v*(1-influence)+(i===layer?255*influence:0))),p);
+ }
+}
+function position(e){const rect=canvas.getBoundingClientRect();return [b[0]+(e.clientX-rect.left)/rect.width*(b[2]-b[0]),b[1]+(e.clientY-rect.top)/rect.height*(b[3]-b[1])];}
+function move(e){const p=position(e);if(last){const steps=Math.max(1,Math.ceil(Math.hypot(p[0]-last[0],p[1]-last[1])/(Number(radius.value)*.25)));for(let i=1;i<=steps;i++)stamp(last[0]+(p[0]-last[0])*i/steps,last[1]+(p[1]-last[1])*i/steps);}else stamp(...p);last=p;render();}
+canvas.onpointerdown=e=>{if(e.button!==0)return;history.push(weights.slice());if(history.length>12)history.shift();future=[];drawing=true;last=null;canvas.setPointerCapture(e.pointerId);move(e);};
+canvas.onpointermove=e=>{if(drawing)move(e);};
+canvas.onpointerup=canvas.onpointercancel=()=>{drawing=false;last=null;};
+document.getElementById('undo').onclick=()=>{if(history.length){future.push(weights.slice());weights.set(history.pop());render();}};
+document.getElementById('redo').onclick=()=>{if(future.length){history.push(weights.slice());weights.set(future.pop());render();}};
+radius.oninput=()=>document.getElementById('radiusValue').textContent=radius.value+' m';
+strength.oninput=()=>document.getElementById('strengthValue').textContent=strength.value+'%';
+document.getElementById('save').onclick=async()=>{try{const png=await TerrainPaintCodec.encode(n,weights),url=URL.createObjectURL(new Blob([png],{type:'image/png'})),a=document.createElement('a');a.href=url;a.download=project.prefix+'_weights.png';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(error){document.getElementById('status').textContent=error.message;}};
+document.getElementById('load').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;const imported=await TerrainPaintCodec.decode(new Uint8Array(await file.arrayBuffer()),n);history.push(weights.slice());if(history.length>12)history.shift();future=[];for(let p=0;p<weights.length;p+=4)weights.set(normalize(Array.from(imported.subarray(p,p+4))),p);render();}catch(error){document.getElementById('status').textContent=error.message;}};
+render();
+</script>

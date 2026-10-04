@@ -15,6 +15,7 @@
 #include <bcrypt.h>
 #include <d3d11.h>
 #include "terrain_hd_texture_copy.h"
+#include "terrain_paint.h"
 
 #include <algorithm>
 #include <array>
@@ -325,6 +326,7 @@ namespace BZROpenShim
             uint32_t sliceCount = 0;
             std::string fallback;
             std::string diffuseResource;
+            TerrainPaint::Config paint;
             std::unordered_map<uint32_t, std::string> tiles;
         };
 
@@ -965,6 +967,19 @@ namespace BZROpenShim
                             binding.tiles.emplace(static_cast<uint32_t>(index),
                                 tileIt.value().get<std::string>());
                         }
+                    }
+                    if (materialIt.value().contains("paint"))
+                    {
+                        const auto& paint = materialIt.value()["paint"];
+                        if (paint.value("schema", std::string()) != "bzr-openshim-terrain-paint-v1" ||
+                            paint.value("rowZero", std::string()) != "minZ" || binding.sliceCount != 5 ||
+                            binding.diffuseResource.empty() || binding.tiles.size() != 5)
+                            throw std::runtime_error("paint needs five explicit slices, atlas identity and minZ row order");
+                        binding.paint.enabled = true;
+                        binding.paint.fingerprint = paint.at("terrainFingerprint").get<std::string>();
+                        binding.paint.bounds = paint.at("boundsMeters").get<std::array<float, 4>>();
+                        binding.paint.repeatMeters = paint.at("repeatMeters").get<std::array<float, 4>>();
+                        binding.paint.Validate();
                     }
                     parsed.materials.emplace(materialIt.key(), std::move(binding));
                 }
@@ -2528,6 +2543,12 @@ namespace BZROpenShim
         // visual "looks right" would be worth nothing.
         void LogTerrainHdTileCoverage(const TerrainHdMaterialBinding& binding)
         {
+            if (binding.paint.enabled)
+            {
+                LogShimA(LogLevel::Info, "terrain-hd",
+                    "[TERRAIN-PAINT] coverage uses four material layers and control slice4; native tile indices do not select diffuse slices");
+                return;
+            }
             std::map<uint32_t, uint32_t> usage;
             for (const TerrainSemantic::Vertex& vertex : g_proxy.semanticVertices)
                 ++usage[static_cast<uint32_t>(vertex.gpu.tileIndex)];
@@ -2585,7 +2606,7 @@ namespace BZROpenShim
             for (const TerrainSemantic::Vertex& vertex : g_proxy.semanticVertices)
                 maximumTileIndex = (std::max)(maximumTileIndex,
                     static_cast<uint32_t>(vertex.gpu.tileIndex));
-            if (maximumTileIndex >= binding.sliceCount)
+            if (!binding.paint.enabled && maximumTileIndex >= binding.sliceCount)
             {
                 LogShimA(LogLevel::Warn, "terrain-hd",
                     "[TERRAIN-HD] manifest has too few slices material=\"%s\" slices=%u selectedMaxTileIndex=%u; stock atlas retained",
@@ -4517,6 +4538,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
 
         #include "terrain_microrelief_bounds.inl"
+        #include "terrain_paint_capture.inl"
         #include "terrain_native_hd.inl"
         #include "terrain_atlas_export.inl"
 

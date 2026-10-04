@@ -14,6 +14,8 @@ if(Python3_Interpreter_FOUND)
     execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import PIL"
         RESULT_VARIABLE OPENSHIM_PIL_IMPORT_RESULT OUTPUT_QUIET ERROR_QUIET)
     if(OPENSHIM_PIL_IMPORT_RESULT EQUAL 0)
+        add_test(NAME terrain_paint_pack_tests
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_paint_pack_tests.py")
         add_test(NAME terrain_hd_pack_tests
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_hd_pack_tests.py")
     else()
@@ -24,6 +26,8 @@ if(Python3_Interpreter_FOUND)
 endif()
 find_program(OPENSHIM_NODE_EXECUTABLE NAMES node nodejs)
 if(OPENSHIM_NODE_EXECUTABLE)
+    add_test(NAME terrain_paint_codec_tests
+        COMMAND "${OPENSHIM_NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_paint_codec_tests.js")
     add_test(NAME weapon_presentation_probe_tests
         COMMAND "${OPENSHIM_NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../reverse_engineering/test_weapon_presentation_probe.js")
 endif()
@@ -45,7 +49,11 @@ function(openshim_add_test name)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+openshim_add_test(terrain_paint_tests STD 17 SOURCES terrain_paint_tests.cpp)
+
 if(WIN32)
+    openshim_add_test(terrain_paint_gpu_tests STD 17 SOURCES terrain_paint_gpu_tests.cpp)
+    target_link_libraries(terrain_paint_gpu_tests PRIVATE d3d11 d3dcompiler)
     openshim_add_test(terrain_hd_texture_copy_tests STD 17 SOURCES terrain_hd_texture_copy_tests.cpp)
     target_link_libraries(terrain_hd_texture_copy_tests PRIVATE d3d11)
     openshim_add_test(terrain_microrelief_gpu_tests STD 17 SOURCES terrain_microrelief_gpu_tests.cpp)

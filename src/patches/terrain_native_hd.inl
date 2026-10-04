@@ -13,6 +13,7 @@ std::map<std::string, NativeHdStream> g_HdStreams;
 std::vector<NativeHdPass> g_HdPasses;
 std::string g_HdSourceMaterial, g_HdBackupMaterial;
 bool g_HdActive = false, g_HdDeclined = false;
+TerrainPaint::Config g_HdPaint;
 void ResetNativeTerrainHd() { g_HdDeclined = false; }
 
 using HdCreateBinding = void* (__thiscall*)(void*);
@@ -83,6 +84,7 @@ void CopyHdPrograms(void* destination, void* source,
 void RestoreNativeTerrainHd()
 {
     g_HdActive = false;
+    g_HdPaint = {};
     OgreSharedPtr source, backup;
     bool materialRestored = g_HdSourceMaterial.empty();
     try
@@ -223,11 +225,33 @@ void UpdateNativeHdZone(void* zone, bool dirty)
         const auto audit = TerrainSemantic::ValidatePackedUv(vertices, bytes.data(), 4, 0);
         if (audit.checked != TerrainSemantic::kVertexCount || audit.mismatches)
             throw std::runtime_error("native HD packed UV parity failed");
-        std::vector<TerrainSemantic::GpuVertex> upload;
-        for (const auto& v : vertices)
+        std::vector<uint8_t> positions;
+        Vector3 translation = {};
+        if (g_HdPaint.enabled)
         {
-            if (v.gpu.tileIndex >= g_proxy.hdSliceCount) throw std::runtime_error("native HD manifest slice missing");
-            upload.push_back(v.gpu);
+            void* buffer = nullptr;
+            const auto* p = g_ogre.getNodePosition(candidate.node);
+            if (!p || !GetVertexBuffer(operation, 0, buffer) || g_ogre.getVertexSize(buffer) != 16 ||
+                !ReadD3D11VertexBuffer(buffer, uint32_t(TerrainSemantic::kVertexCount * 16), positions))
+                throw std::runtime_error("paint native position stream unavailable");
+            translation = *p;
+        }
+        std::vector<TerrainSemantic::GpuVertex> upload;
+        upload.reserve(vertices.size());
+        for (size_t i = 0; i < vertices.size(); ++i)
+        {
+            auto gpu = vertices[i].gpu;
+            if (g_HdPaint.enabled)
+            {
+                // Copy actual native POSITION.xz, not tile UV or camera-relative
+                // positions. This preserves duplicated seams and native spacing.
+                float x = 0, z = 0;
+                memcpy(&x, positions.data() + i*16, 4); memcpy(&z, positions.data() + i*16+8, 4);
+                const auto world = TerrainPaint::WorldXZ(x, z, translation.x, translation.z);
+                gpu.localU = world[0]; gpu.localV = world[1]; gpu.tileIndex = 0;
+            }
+            else if (gpu.tileIndex >= g_proxy.hdSliceCount) throw std::runtime_error("native HD manifest slice missing");
+            upload.push_back(gpu);
         }
         const uint32_t size = uint32_t(upload.size() * sizeof(TerrainSemantic::GpuVertex));
         if (installed)
@@ -311,6 +335,17 @@ bool InstallNativeTerrainHd()
                 throw std::runtime_error("native HD source atlas does not match pack: expected=" +
                     binding->diffuseResource + " actual=" + (name ? *name : "<unavailable>"));
         }
+        if (binding->paint.enabled)
+        {
+            const auto map = CaptureTerrainPaintMap();
+            if (map.at("terrainFingerprint").get<std::string>() != binding->paint.fingerprint ||
+                map.at("boundsMeters").get<std::array<float, 4>>() != binding->paint.bounds)
+                throw std::runtime_error("paint terrain fingerprint/bounds do not match this mission: expected=" +
+                    binding->paint.fingerprint + " actual=" + map.dump());
+            g_HdPaint = binding->paint;
+            LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-PAINT] map accepted fingerprint=%s zones=%zu bounds=(%.1f,%.1f,%.1f,%.1f)",
+                g_HdPaint.fingerprint.c_str(), g_zoneOrdinals.size(), g_HdPaint.bounds[0], g_HdPaint.bounds[1], g_HdPaint.bounds[2], g_HdPaint.bounds[3]);
+        }
         g_ogre.cloneMaterial(source.rep, &backup, g_proxy.semanticMaterialName, false, std::string());
         if (!backup.rep) throw std::runtime_error("native HD backup unavailable");
         ++g_semanticMaterialCreated;
@@ -337,6 +372,8 @@ bool InstallNativeTerrainHd()
             std::string generated; bool debug = false;
             if (!(pixel ? BuildSemanticFragmentSource(*text, false, true, generated) :
                 BuildSemanticProgramSource(*text, true, true, 0, key, generated, debug))) return {};
+            if (binding->paint.enabled && !TerrainPaint::Specialize(generated, pixel, binding->paint))
+                throw std::runtime_error("native paint shader specialization declined");
             const std::string name = "OpenShim/TerrainNativeHD/" + std::to_string(g_proxy.semanticMaterialGeneration) +
                 "/" + SourceHashSuffix(key + generated + defines);
             g_ogre.createHighLevelProgram(g_ogre.getHighLevelProgramManager(), &program, name, std::string("General"), std::string("hlsl"), pixel ? 1 : 0);
@@ -384,6 +421,8 @@ bool InstallNativeTerrainHd()
         g_HdActive = true;
         LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] shared native material installed source=\"%s\" passes=%zu meshes=%zu size=%ux%u slices=%u packedUV=exact",
             g_HdSourceMaterial.c_str(), g_HdPasses.size(), g_HdStreams.size(), g_proxy.hdWidth, g_proxy.hdHeight, g_proxy.hdSliceCount);
+        if (g_HdPaint.enabled) LogShimA(LogLevel::Info, "terrain-hd",
+            "[TERRAIN-PAINT] four-layer diffuse installed weights=slice4 coordinates=native-world-XZ alpha=opaque");
         ReleaseCloneHandoff(source); ReleaseCloneHandoff(backup); ReleaseCloneHandoff(array);
         return true;
     }
