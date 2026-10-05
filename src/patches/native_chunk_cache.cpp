@@ -198,4 +198,146 @@ bool WriteCache(const std::filesystem::path &directory, const std::vector<Piece>
         return false;
     }
 }
+namespace
+{
+constexpr const char *gibManifestName = "gibs.cache";
+constexpr const char *gibManifestVersion = "OPENSHIM_SKINNED_GIBS_V1";
+std::string hexName(const std::string &name)
+{
+    static const char digits[] = "0123456789abcdef";
+    std::string out;
+    for (unsigned char c : name)
+    {
+        out.push_back(digits[c >> 4]);
+        out.push_back(digits[c & 15]);
+    }
+    return out.empty() ? std::string("-") : out;
+}
+bool unhexName(const std::string &hex, std::string &out)
+{
+    out.clear();
+    if (hex == "-")
+        return true;
+    if (hex.size() % 2 || hex.size() > 256)
+        return false;
+    for (size_t i = 0; i < hex.size(); i += 2)
+    {
+        int value = 0;
+        for (size_t k = 0; k < 2; ++k)
+        {
+            const char c = hex[i + k];
+            value <<= 4;
+            if (c >= '0' && c <= '9')
+                value |= c - '0';
+            else if (c >= 'a' && c <= 'f')
+                value |= c - 'a' + 10;
+            else
+                return false;
+        }
+        if (value < 0x20 || value > 0x7E)
+            return false;
+        out.push_back(static_cast<char>(value));
+    }
+    return true;
+}
+} // namespace
+bool ReadGibCache(const std::filesystem::path &directory, std::vector<CachedGib> &gibs)
+{
+    gibs.clear();
+    try
+    {
+        std::vector<CachedPiece> pieces;
+        if (!ReadCache(directory, pieces))
+            return false;
+        std::error_code ec;
+        const auto path = directory / gibManifestName;
+        if (std::filesystem::file_size(path, ec) > 256 * 1024 || ec)
+            return false;
+        std::ifstream input(path);
+        std::string version;
+        size_t count = 0;
+        if (!std::getline(input, version) || version != gibManifestVersion || !(input >> count) ||
+            count != pieces.size())
+            return false;
+        std::vector<CachedGib> result;
+        for (size_t i = 0; i < count; ++i)
+        {
+            CachedGib gib;
+            std::string name, boneHex;
+            uint32_t bone = 0, radius = 0, weapon = 0;
+            if (!(input >> name >> bone >> boneHex >> radius >> gib.capTriangles >> weapon) || bone > 0xFFFF ||
+                weapon > 1 || name != pieces[i].name || !unhexName(boneHex, gib.boneName))
+                return false;
+            gib.piece = pieces[i];
+            gib.bone = static_cast<uint16_t>(bone);
+            gib.radius = fromBits(radius);
+            gib.weapon = weapon != 0;
+            if (!std::isfinite(gib.radius) || gib.radius < 0 || gib.radius > 100000 ||
+                gib.capTriangles > gib.piece.triangles)
+                return false;
+            result.push_back(std::move(gib));
+        }
+        input >> std::ws;
+        if (!input.eof())
+            return false;
+        gibs = std::move(result);
+        return true;
+    }
+    catch (...)
+    {
+        gibs.clear();
+        return false;
+    }
+}
+bool WriteGibCache(const std::filesystem::path &directory, const std::vector<GibPiece> &gibs,
+                   std::vector<CachedGib> &cached)
+{
+    cached.clear();
+    try
+    {
+        std::vector<Piece> pieces;
+        for (const auto &gib : gibs)
+        {
+            if (!std::isfinite(gib.radius) || gib.radius < 0 || gib.radius > 100000)
+                return false;
+            pieces.push_back(gib.piece);
+        }
+        std::vector<CachedPiece> written;
+        // Drop a stale sidecar first: a crash between the two writes must
+        // never pair new pieces with old bones.
+        std::error_code ec;
+        std::filesystem::remove(directory / gibManifestName, ec);
+        if (!WriteCache(directory, pieces, written) || written.size() != gibs.size())
+            return false;
+        std::ostringstream manifest;
+        manifest << gibManifestVersion << '\n' << gibs.size() << '\n';
+        std::vector<CachedGib> result;
+        for (size_t i = 0; i < gibs.size(); ++i)
+        {
+            const auto &gib = gibs[i];
+            manifest << written[i].name << ' ' << gib.bone << ' ' << hexName(gib.boneName) << ' ' << bits(gib.radius)
+                     << ' ' << gib.capTriangles << ' ' << (gib.weapon ? 1 : 0) << '\n';
+            CachedGib entry;
+            entry.piece = written[i];
+            entry.bone = gib.bone;
+            entry.boneName = gib.boneName;
+            entry.radius = gib.radius;
+            entry.capTriangles = gib.capTriangles;
+            entry.weapon = gib.weapon;
+            result.push_back(std::move(entry));
+        }
+        std::ofstream output(directory / gibManifestName, std::ios::binary | std::ios::trunc);
+        output << manifest.str();
+        output.close();
+        if (!output)
+            return false;
+        cached = std::move(result);
+        return true;
+    }
+    catch (...)
+    {
+        cached.clear();
+        return false;
+    }
+}
 } // namespace BZROpenShim::NativeChunks
