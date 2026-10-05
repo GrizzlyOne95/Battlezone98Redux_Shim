@@ -384,6 +384,7 @@ namespace BZROpenShim
                 // (battlezone98redux.exe.35108.dmp).
                 DeactivateAllChunkProxySceneResources(L"left simulation");
                 DeactivateSkinnedGibs(L"left simulation");
+                ResetPathBlockState(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);
                 WeaponPresentationMissionRunStateChanged(false);
                 PilotFlashlightNotifyMissionRunStateChanged(false);
