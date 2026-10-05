@@ -165,6 +165,12 @@ namespace
             return ini(IniFile::Main, "General", "SkinnedGibsForce", out);
         if (Equals(name, "OPENSHIM_TRACE_SKINNED_GIBS"))
             return TryReadMappedBool(ini, "Diagnostics", "TraceSkinnedGibs", false, out);
+        // PathBlockFaces: building path-grid footprints from collision faces
+        // for ODFs that opt in. Its own inverted switch, default ON.
+        if (Equals(name, "OPENSHIM_DISABLE_PATH_BLOCK_FACES"))
+            return TryReadMappedBool(ini, "General", "PathBlockFaces", true, out);
+        if (Equals(name, "OPENSHIM_TRACE_PATH_BLOCK"))
+            return TryReadMappedBool(ini, "Diagnostics", "TracePathBlock", false, out);
         if (Equals(name, "OPENSHIM_DISABLE_MAP_REFRESH_FIXES") ||
             Equals(name, "BZR_DISABLE_MAP_REFRESH_FIXES"))
         {
