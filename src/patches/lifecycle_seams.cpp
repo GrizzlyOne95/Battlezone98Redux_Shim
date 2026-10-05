@@ -97,6 +97,7 @@ namespace BZROpenShim
                 WeaponPresentationSceneTeardownBegin();
             TerrainProxySceneTeardownBegin(sceneManager, true);
             ForgetAllChunkProxySceneResources(L"clearScene");
+            ForgetSkinnedGibSceneResources(L"clearScene");
             ForgetPilotFlashlight(L"clearScene");
             ForgetMultiplayerFlagSceneResources(L"clearScene");
             if (g_OgreFn_ClearSceneOriginal)
@@ -112,6 +113,7 @@ namespace BZROpenShim
                 WeaponPresentationSceneTeardownBegin();
             TerrainProxySceneTeardownBegin(sceneManager, false);
             ForgetAllChunkProxySceneResources(L"destroyAllMovableObjects");
+            ForgetSkinnedGibSceneResources(L"destroyAllMovableObjects");
             ForgetPilotFlashlight(L"destroyAllMovableObjects");
             ForgetMultiplayerFlagSceneResources(L"destroyAllMovableObjects");
             if (g_OgreFn_DestroyAllMovablesOriginal)
@@ -381,6 +383,7 @@ namespace BZROpenShim
                 // still-live Ogre objects and aborted in RenderMultiplayerFlags
                 // (battlezone98redux.exe.35108.dmp).
                 DeactivateAllChunkProxySceneResources(L"left simulation");
+                DeactivateSkinnedGibs(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);
                 WeaponPresentationMissionRunStateChanged(false);
                 PilotFlashlightNotifyMissionRunStateChanged(false);

@@ -172,6 +172,12 @@ namespace BZROpenShim
             {
                 AppendUniquePath(g_ChunkPayloadResourceDirectories, stockDir);
             }
+
+            // SkinnedGibs' default cut-flesh material lives in the cache root,
+            // which is registered with this group: it has to exist before the
+            // group is initialised, and must yield to a payload pack's own.
+            if (!nativeError)
+                EnsureSkinnedGibFleshMaterial(nativeRoot, g_ChunkPayloadResourceDirectories);
         }
 
         static const std::vector<std::filesystem::path>& GetChunkPayloadResourceDirectories()
