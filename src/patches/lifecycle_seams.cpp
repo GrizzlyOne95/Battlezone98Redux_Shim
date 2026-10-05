@@ -98,6 +98,7 @@ namespace BZROpenShim
             TerrainProxySceneTeardownBegin(sceneManager, true);
             ForgetAllChunkProxySceneResources(L"clearScene");
             ForgetSkinnedGibSceneResources(L"clearScene");
+            ForgetShellCasingSceneResources(L"clearScene");
             ForgetPilotFlashlight(L"clearScene");
             ForgetMultiplayerFlagSceneResources(L"clearScene");
             if (g_OgreFn_ClearSceneOriginal)
@@ -114,6 +115,7 @@ namespace BZROpenShim
             TerrainProxySceneTeardownBegin(sceneManager, false);
             ForgetAllChunkProxySceneResources(L"destroyAllMovableObjects");
             ForgetSkinnedGibSceneResources(L"destroyAllMovableObjects");
+            ForgetShellCasingSceneResources(L"destroyAllMovableObjects");
             ForgetPilotFlashlight(L"destroyAllMovableObjects");
             ForgetMultiplayerFlagSceneResources(L"destroyAllMovableObjects");
             if (g_OgreFn_DestroyAllMovablesOriginal)
@@ -384,6 +386,7 @@ namespace BZROpenShim
                 // (battlezone98redux.exe.35108.dmp).
                 DeactivateAllChunkProxySceneResources(L"left simulation");
                 DeactivateSkinnedGibs(L"left simulation");
+                DeactivateShellCasings(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);
                 WeaponPresentationMissionRunStateChanged(false);
                 PilotFlashlightNotifyMissionRunStateChanged(false);

@@ -55,6 +55,10 @@ if(EXISTS "${OPENSHIM_GIB_SAMPLE_DIR}/ispilo.mesh" AND EXISTS "${OPENSHIM_GIB_SA
                 "${OPENSHIM_GIB_SAMPLE_DIR}/ispcc.skeleton")
 endif()
 
+openshim_add_test(shell_casing_physics_tests STD 20 SOURCES
+    shell_casing_physics_tests.cpp
+)
+
 openshim_add_test(bzrnet_protocol_tests STD 20 SOURCES
     bzrnet_protocol_tests.cpp
     ../src/patches/bzrnet_protocol.cpp
