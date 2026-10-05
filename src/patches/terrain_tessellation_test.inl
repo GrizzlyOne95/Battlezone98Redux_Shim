@@ -182,10 +182,10 @@ bool InstallNativeTerrainTessellationTest()
         if (!GetEntityOperation(g_proxy.sourceEntity, operation, subEntity) ||
             !GetVertexBuffer(operation, 0, vertexBuffer))
             throw std::runtime_error("native source buffer unavailable");
-        ID3D11Buffer* buffer = g_ogre.getD3D11VertexBuffer(vertexBuffer);
+        ID3D11Buffer* buffer = GetD3D11Buffer(vertexBuffer);
         ID3D11Device* device = nullptr;
         if (!buffer)
-            throw std::runtime_error("DX11 buffer unavailable");
+            throw std::runtime_error("active renderer is not DX11 (or DX11 buffer unavailable)");
         buffer->GetDevice(&device);
         const D3D_FEATURE_LEVEL level = device ? device->GetFeatureLevel() : D3D_FEATURE_LEVEL_9_1;
         if (device) device->Release();
