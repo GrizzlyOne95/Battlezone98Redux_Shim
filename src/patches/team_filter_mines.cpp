@@ -198,8 +198,6 @@ namespace BZROpenShim
 
         constexpr uintptr_t kGogProximityMineNetNotifyAddr = 0x004B8460;
 
-        constexpr uintptr_t kCollisionRangeSearchAddr = 0x006A3E10;
-
         constexpr uintptr_t kGogShieldTowerSimulateAddr = 0x005D0D80;
 
         constexpr uintptr_t kGogMagnetMineSimulateAddr = 0x0050C650;
@@ -225,10 +223,6 @@ namespace BZROpenShim
         constexpr uintptr_t kGogMatrixInverseAddr = 0x008203F0;
 
         constexpr uintptr_t kGogVectorTransformAddr = 0x00820180;
-
-        constexpr uintptr_t kGogRangeSearchAddr = 0x005B2950;
-
-        constexpr uintptr_t kGogRangeResultsGetNextAddr = 0x00462710;
 
         constexpr uintptr_t kShieldTowerSimulateVtableSlotAddr = 0x00887724;
 
@@ -260,6 +254,36 @@ namespace BZROpenShim
             float ordPush = 0.0f;
             float ordDrag = 0.0f;
         };
+
+        // The grid query and its iterator, from patches.json; null when
+        // unresolved, which keeps the filter hooks from reporting installed.
+        static void ResolveCollisionGridQuery()
+        {
+            if (!g_BzrFn_CollisionRangeSearch)
+                g_BzrFn_CollisionRangeSearch = reinterpret_cast<FnRangeSearch>(
+                    static_cast<uintptr_t>(HookEngine::ResolveNamedAddress("CollisionGrid::RangeQuery")));
+            if (!g_BzrFn_RangeResultsGetNext)
+                g_BzrFn_RangeResultsGetNext = reinterpret_cast<FnRangeResultsGetNext>(
+                    static_cast<uintptr_t>(HookEngine::ResolveNamedAddress("CollisionGrid::RangeNext")));
+        }
+
+        // The craft collision grid (1.5 collision_range_search), the same set
+        // stock ShieldTower queries and stock Magnet/ProximityMine walk as the
+        // craft list. Null before the grid exists or when unresolved.
+        static void* ReadCraftCollisionGrid()
+        {
+            const uintptr_t slot = EngineGlobals::CraftCollisionGridSlot();
+            if (slot == 0)
+                return nullptr;
+            __try
+            {
+                return *reinterpret_cast<void**>(slot);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
 
         void __fastcall ShieldTowerSimulateTeamFilterHook(void* thisPtr, void* /*edx*/, float dt)
         {
@@ -352,12 +376,7 @@ namespace BZROpenShim
             if (!g_BzrFn_VectorTransform)
                 g_BzrFn_VectorTransform =
                     reinterpret_cast<FnVectorTransform>(kGogVectorTransformAddr);
-            if (!g_BzrFn_CollisionRangeSearch)
-                g_BzrFn_CollisionRangeSearch =
-                    reinterpret_cast<FnRangeSearch>(kGogRangeSearchAddr);
-            if (!g_BzrFn_RangeResultsGetNext)
-                g_BzrFn_RangeResultsGetNext =
-                    reinterpret_cast<FnRangeResultsGetNext>(kGogRangeResultsGetNextAddr);
+            ResolveCollisionGridQuery();
 
             void* current = nullptr;
             __try
@@ -427,12 +446,7 @@ namespace BZROpenShim
             if (!g_BzrFn_GameObjectGetObjByHandle)
                 g_BzrFn_GameObjectGetObjByHandle =
                     &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
-            if (!g_BzrFn_CollisionRangeSearch)
-                g_BzrFn_CollisionRangeSearch =
-                    reinterpret_cast<FnRangeSearch>(kGogRangeSearchAddr);
-            if (!g_BzrFn_RangeResultsGetNext)
-                g_BzrFn_RangeResultsGetNext =
-                    reinterpret_cast<FnRangeResultsGetNext>(kGogRangeResultsGetNextAddr);
+            ResolveCollisionGridQuery();
 
             if (!g_MagnetMineSimulateHookInstalled)
             {
@@ -919,17 +933,8 @@ namespace BZROpenShim
                     maxWorldZ = (std::max)(maxWorldZ, worldZ);
                 }
 
-                void* collisionRangeSearch = nullptr;
-                __try
-                {
-                    collisionRangeSearch = *reinterpret_cast<void**>(kCollisionRangeSearchAddr);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    collisionRangeSearch = nullptr;
-                }
-
-                if (collisionRangeSearch)
+                void* collisionRangeSearch = ReadCraftCollisionGrid();
+                if (collisionRangeSearch && g_BzrFn_CollisionRangeSearch && g_BzrFn_RangeResultsGetNext)
                 {
                     ShieldTowerRangeSearchResults results = {};
                     g_BzrFn_CollisionRangeSearch(
@@ -1037,7 +1042,7 @@ namespace BZROpenShim
                     };
 
                     // Proximity scan for objects
-                    void* collisionRangeSearch = *reinterpret_cast<void**>(kCollisionRangeSearchAddr);
+                    void* collisionRangeSearch = ReadCraftCollisionGrid();
                     if (collisionRangeSearch && g_BzrFn_CollisionRangeSearch && g_BzrFn_RangeResultsGetNext)
                     {
                         ShieldTowerRangeSearchResults results = {};
@@ -1272,7 +1277,7 @@ namespace BZROpenShim
                     const float rangeSq = range * range;
                     const float* minePos = reinterpret_cast<float*>(mineBytes + kProximityMinePositionOffset);
 
-                    void* collisionRangeSearch = *reinterpret_cast<void**>(kCollisionRangeSearchAddr);
+                    void* collisionRangeSearch = ReadCraftCollisionGrid();
                     if (collisionRangeSearch && g_BzrFn_CollisionRangeSearch && g_BzrFn_RangeResultsGetNext)
                     {
                         ShieldTowerRangeSearchResults results = {};
