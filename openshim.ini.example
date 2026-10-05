@@ -122,6 +122,30 @@ SkinnedGibsLinger = 8
 ; Multiplier for the random part of the launch velocity (0..5). Default: 1.0.
 SkinnedGibsForce = 1.0
 
+; Shell casings: when a cannon-like weapon fires, a small brass casing is
+; ejected from the weapon's breech, tumbles, bounces off the terrain, the
+; firing hull and nearby objects, then lies on the ground and sinks away.
+; Accepted: boolean. Default: ON. Needs no asset pack: the casing mesh and
+; its openshim_casing_brass / openshim_casing_rim materials are generated in
+; the chunk cache root (a chunk payload directory may ship its own
+; openshim_casing.material, and a <weapon>_casing.mesh resource, for example
+; gminigun_casing.mesh, replaces the casing for that weapon). Visual only:
+; the shot itself is untouched, and 0 leaves the fire calls stock.
+; Legacy env alias: OPENSHIM_DISABLE_SHELL_CASINGS
+ShellCasings = 1
+; Most casings alive at once (4..512). When full, the oldest casing already
+; at rest is recycled first, then the oldest. Default: 48.
+ShellCasingsMax = 48
+; Seconds a casing lies at rest before sinking away (0..120). Default: 6.
+ShellCasingsLinger = 6
+; Which weapons eject casings, comma separated, case-insensitive. A class
+; label (cannon, mortar, machinegun, snipergun -- the native classes whose
+; shots are hooked) or a weapon ODF name enables; a leading "-" disables
+; that label or ODF and always wins; "all" enables every hooked class.
+; Lasers, beams, missiles and the other weapon classes never eject.
+; Default: cannon,mortar,machinegun,snipergun,-gquake,-gsandbag
+ShellCasingsClasses = cannon,mortar,machinegun,snipergun,-gquake,-gsandbag
+
 ; Redux multiplayer map-list refresh/selection preservation fixes.
 ; Accepted: boolean. Default: ON.
 ; Exposed on the OpenShim Settings page as "Map List Fixes".
@@ -928,6 +952,12 @@ RespectExternalAutoSave = 1
 ; Accepted: boolean. Default: OFF.
 ; Legacy env alias: OPENSHIM_TRACE_SKINNED_GIBS
 TraceSkinnedGibs = 0
+
+; ShellCasings diagnostics: one [SHELLCASINGS] line per spawned casing and a
+; once-a-second stats line (spawned, filtered, culled, active, hits, submits).
+; Accepted: boolean. Default: OFF.
+; Legacy env alias: OPENSHIM_TRACE_SHELL_CASINGS
+TraceShellCasings = 0
 
 ; Explain a "Not Ready" multiplayer entry on the main menu. The stock shell has
 ; no way to say why: its readiness getter returns only ready/not-ready, so the

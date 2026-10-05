@@ -165,6 +165,18 @@ namespace
             return ini(IniFile::Main, "General", "SkinnedGibsForce", out);
         if (Equals(name, "OPENSHIM_TRACE_SKINNED_GIBS"))
             return TryReadMappedBool(ini, "Diagnostics", "TraceSkinnedGibs", false, out);
+        // ShellCasings: cosmetic casings from cannon-like weapons. The class
+        // list and numeric keys are read raw and parsed by the feature.
+        if (Equals(name, "OPENSHIM_DISABLE_SHELL_CASINGS") || Equals(name, "BZR_DISABLE_SHELL_CASINGS"))
+            return TryReadMappedBool(ini, "General", "ShellCasings", true, out);
+        if (Equals(name, "OPENSHIM_SHELL_CASINGS_MAX"))
+            return ini(IniFile::Main, "General", "ShellCasingsMax", out);
+        if (Equals(name, "OPENSHIM_SHELL_CASINGS_LINGER"))
+            return ini(IniFile::Main, "General", "ShellCasingsLinger", out);
+        if (Equals(name, "OPENSHIM_SHELL_CASINGS_CLASSES"))
+            return ini(IniFile::Main, "General", "ShellCasingsClasses", out);
+        if (Equals(name, "OPENSHIM_TRACE_SHELL_CASINGS"))
+            return TryReadMappedBool(ini, "Diagnostics", "TraceShellCasings", false, out);
         if (Equals(name, "OPENSHIM_DISABLE_MAP_REFRESH_FIXES") ||
             Equals(name, "BZR_DISABLE_MAP_REFRESH_FIXES"))
         {
