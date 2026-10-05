@@ -1559,6 +1559,9 @@ namespace BZROpenShim
         void SubmitSkinnedGibsToRenderQueue(void* renderQueue);
         void ForgetSkinnedGibSceneResources(const wchar_t* reason);
         void DeactivateSkinnedGibs(const wchar_t* reason);
+        // PathBlockFaces (path_block.cpp): forget the per-mission blocker
+        // registry and ODF cache. No-op when the hook is not installed.
+        void ResetPathBlockState(const wchar_t* reason);
         bool IsSkinnedGibSuppressedChunk(const uint8_t* objectBytes, const void* geomRef);
         // Writes the default openshim_gib_flesh.material into the chunk cache
         // root unless a payload directory overrides it. Must run before the

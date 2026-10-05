@@ -161,6 +161,7 @@
     <ClCompile Include="src\patches\native_chunk_cache.cpp" />
     <ClCompile Include="src\patches\native_chunk_runtime.cpp" />
     <ClCompile Include="src\patches\skinned_gibs.cpp" />
+    <ClCompile Include="src\patches\path_block.cpp" />
     <ClCompile Include="src\patches\chunk_proxy_render.cpp" />
     <ClCompile Include="src\patches\config_helpers.cpp" />
     <ClCompile Include="src\patches\diag_jump_snipe_probe.cpp" />
