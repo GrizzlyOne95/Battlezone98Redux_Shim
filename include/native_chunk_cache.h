@@ -18,4 +18,19 @@ bool ReadCache(const std::filesystem::path &directory, std::vector<CachedPiece> 
                uintmax_t byteBudget = 128 * 1024 * 1024, uintmax_t *validatedBytes = nullptr);
 bool WriteCache(const std::filesystem::path &directory, const std::vector<Piece> &pieces,
                 std::vector<CachedPiece> &cached);
+// Skinned gib caches: the same content-validated piece cache plus a
+// gibs.cache sidecar carrying each piece's driving bone and bound radius.
+// A missing, stale or mismatched sidecar fails the whole cache closed.
+struct CachedGib
+{
+    CachedPiece piece;
+    uint16_t bone = 0;
+    std::string boneName;
+    float radius = 0;
+    uint32_t capTriangles = 0;
+    bool weapon = false;
+};
+bool ReadGibCache(const std::filesystem::path &directory, std::vector<CachedGib> &gibs);
+bool WriteGibCache(const std::filesystem::path &directory, const std::vector<GibPiece> &gibs,
+                   std::vector<CachedGib> &cached);
 } // namespace BZROpenShim::NativeChunks

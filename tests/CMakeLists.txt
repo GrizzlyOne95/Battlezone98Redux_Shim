@@ -43,6 +43,18 @@ openshim_add_test(native_chunk_mesh_tests STD 20 SOURCES
     ../src/patches/native_chunk_cache.cpp
 )
 
+# SkinnedGibs offline check on a real skinned pilot: prints the runtime split
+# (compare with scripts/export_gib_payloads.py). Only where the GOG test
+# install and its ISDF Chronicles addon are present; the path can be
+# overridden with -DOPENSHIM_GIB_SAMPLE_DIR=<dir with ispilo.mesh/ispcc.skeleton>.
+set(OPENSHIM_GIB_SAMPLE_DIR "C:/Program Files (x86)/GOG Galaxy/Games/Battlezone 98 Redux/addon/ISDF Chronicles"
+    CACHE PATH "Directory holding ispilo.mesh and ispcc.skeleton for the gib split check")
+if(EXISTS "${OPENSHIM_GIB_SAMPLE_DIR}/ispilo.mesh" AND EXISTS "${OPENSHIM_GIB_SAMPLE_DIR}/ispcc.skeleton")
+    add_test(NAME native_chunk_gibs_ispilo
+        COMMAND native_chunk_mesh_tests --gibs "${OPENSHIM_GIB_SAMPLE_DIR}/ispilo.mesh"
+                "${OPENSHIM_GIB_SAMPLE_DIR}/ispcc.skeleton")
+endif()
+
 openshim_add_test(bzrnet_protocol_tests STD 20 SOURCES
     bzrnet_protocol_tests.cpp
     ../src/patches/bzrnet_protocol.cpp

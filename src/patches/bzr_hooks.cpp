@@ -1719,6 +1719,8 @@ namespace BZROpenShim
 
         TickChunkProxyDebug(nullptr, false);
         SubmitChunkProxiesToRenderQueue(renderQueue);
+        // Independent of ChunkMeshes: gibs have their own pool and gate.
+        SubmitSkinnedGibsToRenderQueue(renderQueue);
 
         // Opt-in Phase 3A parity capture. Inert unless a semantic frame
         // capture count is configured.
@@ -1799,6 +1801,9 @@ namespace BZROpenShim
         // Chunks the stock simulate just retired give their memory back to
         // the object pool; drop their proxies before anything can reuse it.
         ReleaseChunkProxiesMissingFromActiveList(thisPtr);
+        // Shim-owned person gibs: integrated on the engine's own dt, after the
+        // stock simulate (the only engine time source). No-op when disabled.
+        TickSkinnedGibs(thisPtr, dt);
     }
 
 }

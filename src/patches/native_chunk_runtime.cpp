@@ -1,7 +1,10 @@
 #include "bzr_hooks_internal.h"
 #include "native_chunk_mesh.h"
 #include "native_chunk_cache.h"
+#include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <map>
@@ -483,5 +486,263 @@ bool TryResolveNativeChunkPayload(const char *mesh, const char *geom, char *out,
         return false;
     strncpy_s(out, capacity, p->second.c_str(), _TRUNCATE);
     return out[0] != 0;
+}
+// ---------------------------------------------------------------------------
+// SkinnedGibs payloads. Cached apart from vehicle chunks (gibs/v1/<hash>), so
+// generating gibs never rewrites or invalidates a native/v4 cache.
+namespace
+{
+constexpr const char *kGibFolder = "gibs/v1/";
+struct GibModelEntry
+{
+    bool ready = false;
+    BZROpenShim::Hooks::SkinnedGibModelInfo info;
+};
+std::map<std::string, GibModelEntry> gibModels;
+std::mutex gibModelsMutex;
+bool safeGibName(const std::string &name)
+{
+    return !name.empty() && name.size() < 80 &&
+           name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") ==
+               std::string::npos;
+}
+// <payload root>/<lower mesh basename>/gibs.txt, as written by
+// scripts/export_gib_payloads.py:
+//   piece <name> bone <bone name> pivot <x> <y> <z> radius <r> tris <n>
+// Pieces are in model (bind) space minus the pivot. Every listed mesh must
+// exist or the whole override is ignored, so a half-copied pack cannot
+// leave a body with missing limbs.
+bool loadAuthoredGibs(const std::string &key, BZROpenShim::Hooks::SkinnedGibModelInfo &out)
+{
+    using namespace BZROpenShim::Hooks;
+    if (g_ChunkPayloadResourceDirectories.empty())
+        RefreshChunkPayloadResourceDirectories();
+    for (const auto &root : g_ChunkPayloadResourceDirectories)
+    {
+        std::error_code ec;
+        const auto folder = root / key;
+        const auto manifest = folder / "gibs.txt";
+        if (!std::filesystem::is_regular_file(manifest, ec) || ec ||
+            std::filesystem::file_size(manifest, ec) > 64 * 1024 || ec)
+            continue;
+        std::ifstream input(manifest);
+        std::string text;
+        SkinnedGibModelInfo info;
+        info.authored = true;
+        info.source = manifest.string();
+        bool valid = true;
+        while (valid && std::getline(input, text))
+        {
+            std::istringstream line(text);
+            std::vector<std::string> tokens;
+            for (std::string token; line >> token;)
+                tokens.push_back(token);
+            if (tokens.empty() || tokens[0][0] == '#')
+                continue;
+            const auto pivot = std::find(tokens.begin(), tokens.end(), "pivot");
+            if (tokens.size() < 10 || tokens[0] != "piece" || tokens[2] != "bone" || pivot == tokens.end() ||
+                pivot - tokens.begin() < 4 || tokens.end() - pivot < 6 || pivot[4] != "radius" ||
+                !safeGibName(tokens[1]) || info.pieces.size() >= 64)
+            {
+                valid = false;
+                break;
+            }
+            SkinnedGibPieceInfo piece;
+            for (auto bone = tokens.begin() + 3; bone != pivot; ++bone)
+                piece.boneName += (piece.boneName.empty() ? "" : " ") + *bone;
+            char *end = nullptr;
+            for (int axis = 0; axis < 3 && valid; ++axis)
+            {
+                piece.offset[axis] = std::strtof(pivot[1 + axis].c_str(), &end);
+                valid = end && !*end && std::isfinite(piece.offset[axis]) && std::abs(piece.offset[axis]) < 100000;
+            }
+            piece.radius = std::strtof(pivot[5].c_str(), &end);
+            valid = valid && end && !*end && std::isfinite(piece.radius) && piece.radius >= 0 && piece.radius < 1000;
+            piece.weapon = lower(tokens[1]).find("weapon") != std::string::npos;
+            piece.resource = key + "/" + tokens[1] + ".mesh";
+            valid = valid && std::filesystem::is_regular_file(folder / (tokens[1] + ".mesh"), ec) && !ec;
+            info.pieces.push_back(std::move(piece));
+        }
+        if (valid && !info.pieces.empty())
+        {
+            out = std::move(info);
+            return true;
+        }
+        LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] ignored invalid authored manifest %hs\n",
+                           manifest.string().c_str());
+    }
+    return false;
+}
+bool prepareGibs(const std::string &meshName, const std::string &group, BZROpenShim::Hooks::SkinnedGibModelInfo &out)
+{
+    using namespace BZROpenShim::Hooks;
+    const std::string key = base(meshName);
+    if (key.empty())
+        return false;
+    const auto found = gibModels.find(key);
+    if (found != gibModels.end())
+    {
+        if (found->second.ready)
+            out = found->second.info;
+        return found->second.ready;
+    }
+    // Any failure below is remembered for the mission: no retry per death.
+    auto &entry = gibModels[key];
+    const auto started = std::chrono::steady_clock::now();
+    if (loadAuthoredGibs(key, entry.info))
+    {
+        entry.ready = true;
+        out = entry.info;
+        LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] authored mesh=%hs pieces=%zu manifest=%hs\n",
+                           meshName.c_str(), entry.info.pieces.size(), entry.info.source.c_str());
+        return true;
+    }
+    static auto singleton = ResolveOgreProc<Singleton>("?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ");
+    void *manager = singleton ? singleton() : nullptr;
+    std::vector<uint8_t> bytes, skeleton;
+    if (!manager || !readResource(manager, meshName, group, bytes))
+        return false;
+    const auto skeletonName = NativeChunks::SkeletonName(bytes);
+    if (skeletonName.empty() || !readResource(manager, skeletonName, group, skeleton))
+    {
+        LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] unsupported mesh=%hs reason=no skeleton\n", meshName.c_str());
+        return false;
+    }
+    uint64_t hash = 14695981039346656037ull;
+    for (const auto *source : {&bytes, &skeleton})
+        for (uint8_t c : *source)
+        {
+            hash ^= c;
+            hash *= 1099511628211ull;
+        }
+    std::ostringstream hex;
+    hex << std::hex << hash;
+    const std::string folder = std::string(kGibFolder) + hex.str();
+    const auto root = GetNativeChunkCacheDirectory();
+    std::vector<NativeChunks::CachedGib> cached;
+    const bool reused = NativeChunks::ReadGibCache(root / folder, cached);
+    if (!reused)
+    {
+        std::vector<NativeChunks::GibPiece> gibs;
+        std::string error;
+        if (!NativeChunks::ExtractGibs(bytes, skeleton, NativeChunks::GibOptions{}, gibs, error))
+        {
+            LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] unsupported mesh=%hs reason=%hs\n", meshName.c_str(),
+                               error.c_str());
+            return false;
+        }
+        if (!NativeChunks::WriteGibCache(root / folder, gibs, cached))
+        {
+            LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] cache write failed mesh=%hs dir=%hs\n",
+                               meshName.c_str(), (root / folder).string().c_str());
+            return false;
+        }
+    }
+    SkinnedGibModelInfo info;
+    info.source = (root / folder).string();
+    uint32_t triangles = 0;
+    for (const auto &gib : cached)
+    {
+        SkinnedGibPieceInfo piece;
+        piece.resource = folder + "/" + gib.piece.name + ".mesh";
+        piece.boneName = gib.boneName;
+        piece.bone = gib.bone;
+        std::copy(gib.piece.center, gib.piece.center + 3, piece.offset);
+        piece.radius = gib.radius;
+        piece.weapon = gib.weapon;
+        triangles += gib.piece.triangles;
+        info.pieces.push_back(std::move(piece));
+    }
+    entry.info = std::move(info);
+    entry.ready = !entry.info.pieces.empty();
+    if (entry.ready)
+        out = entry.info;
+    LogChunkDiagnostic("skinnedgibs",
+                       L"[SKINNEDGIBS] %hs mesh=%hs group=%hs pieces=%zu triangles=%u cache=%hs prepareMs=%.3f\n",
+                       reused ? "reused" : "generated", meshName.c_str(), group.c_str(), entry.info.pieces.size(),
+                       triangles, entry.info.source.c_str(),
+                       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+    return entry.ready;
+}
+bool prepareGibsCppSafe(const std::string &meshName, const std::string &group,
+                        BZROpenShim::Hooks::SkinnedGibModelInfo &out)
+{
+    try
+    {
+        return prepareGibs(meshName, group, out);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+bool prepareGibsSafe(const std::string &meshName, const std::string &group,
+                     BZROpenShim::Hooks::SkinnedGibModelInfo &out)
+{
+    __try
+    {
+        return prepareGibsCppSafe(meshName, group, out);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+bool captureIdentityCpp(void *entity, char *outName, size_t nameCapacity, char *outGroup, size_t groupCapacity)
+{
+    static auto getMesh = ResolveOgreProc<GetMesh>("?getMesh@Entity@Ogre@@QBEABV?$SharedPtr@VMesh@Ogre@@@2@XZ");
+    static auto getName =
+        ResolveOgreProc<GetString>("?getName@Resource@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$"
+                                   "allocator@D@2@@std@@XZ");
+    static auto getGroup =
+        ResolveOgreProc<GetString>("?getGroup@Resource@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$"
+                                   "allocator@D@2@@std@@XZ");
+    if (!entity || !getMesh || !getName || !getGroup)
+        return false;
+    try
+    {
+        const Ptr *mesh = getMesh(entity);
+        if (!mesh || !mesh->rep)
+            return false;
+        const std::string *name = getName(mesh->rep), *group = getGroup(mesh->rep);
+        if (!name || !group || name->empty() || name->size() >= nameCapacity || group->size() >= groupCapacity)
+            return false;
+        strncpy_s(outName, nameCapacity, name->c_str(), _TRUNCATE);
+        strncpy_s(outGroup, groupCapacity, group->c_str(), _TRUNCATE);
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+} // namespace
+bool TryCaptureEntityMeshIdentity(void *entity, char *outName, size_t nameCapacity, char *outGroup,
+                                  size_t groupCapacity)
+{
+    if (!outName || !nameCapacity || !outGroup || !groupCapacity)
+        return false;
+    outName[0] = outGroup[0] = 0;
+    __try
+    {
+        return captureIdentityCpp(entity, outName, nameCapacity, outGroup, groupCapacity);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+bool PrepareSkinnedGibPayloads(const std::string &meshName, const std::string &group, SkinnedGibModelInfo &out)
+{
+    out = {};
+    if (meshName.empty())
+        return false;
+    std::lock_guard<std::mutex> lock(gibModelsMutex);
+    return prepareGibsSafe(meshName, group, out);
+}
+void ResetSkinnedGibPayloads()
+{
+    std::lock_guard<std::mutex> lock(gibModelsMutex);
+    gibModels.clear();
 }
 } // namespace BZROpenShim::Hooks

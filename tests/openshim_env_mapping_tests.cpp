@@ -125,6 +125,15 @@ namespace
             Check(Mapped(ini, name) == "1", std::string(name) + " follows [General] ChunkMeshes");
         }
 
+        // SkinnedGibs is its own key, not ChunkMeshes: chunks off keeps gibs.
+        Check(Mapped(ini, "OPENSHIM_DISABLE_SKINNED_GIBS") == "<none>", "unset SkinnedGibs keeps the code default");
+        ini.Set("General", "SkinnedGibs", "0");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_SKINNED_GIBS") == "1", "SkinnedGibs = 0 reads as DISABLE=1");
+        ini.Set("General", "SkinnedGibs", "on");
+        Check(Mapped(ini, "BZR_DISABLE_SKINNED_GIBS") == "0", "SkinnedGibs = on reads as DISABLE=0");
+        ini.Set("General", "SkinnedGibsMax", "96");
+        Check(Mapped(ini, "OPENSHIM_SKINNED_GIBS_MAX") == "96", "numeric gib tuning passes through raw");
+
         // DisableControlSmoothing is the one General DISABLE_ key that is
         // itself negative, so it is read as written.
         ini.Set("General", "DisableControlSmoothing", "1");

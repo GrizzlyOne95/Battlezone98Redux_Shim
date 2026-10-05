@@ -544,6 +544,16 @@
       "identity": "Released TRN/INI float getter at 0x00787B60. FUN_00780160 and the terrain lighting/height readers pass section, key, float fallback, and current TRN filename; the body copies the fallback, rejects empty strings, normalizes/loads the named file through FUN_00787370, retrieves a 16-byte value through FUN_00787660, parses it with the unique percent-f sscanf path, and returns the float in ST0. The signature anchors the entry and its four-argument validation prelude."
     },
     {
+      "name": "Terrain::HeightAt",
+      "pattern": "55 8B EC 83 EC 2C F3 0F 5A 05 ?? ?? ?? ?? F2 0F 59 45 08 F2 0F 11 45 08 F3 0F 5A 05 ?? ?? ?? ?? F2 0F 59 45 10 F2 0F 11 45 10 83 EC 08 F2 0F 10 45 08 F2 0F 11 04 24 E8",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x007855E0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Released terrain height sampler, double __cdecl(double x, double z), at 0x007855E0 on GOG Redux 2.2.301. Stock ProximityMine::Simulate's detonation block (FUN_005B0E40, call at 0x005B1189) stores its return into obj+0x50 (the y of the posit triple at obj+0x48/+0x50/+0x58) before building the explosion, as team_filter_mines.cpp reproduces; it has 50+ callers, including the Person ground-follow code at 0x005A05BE-0x005A071C. The body scales both world coordinates by the float at 0x02CC50E4, floors them through 0x0046EAF0 and bilinearly blends four grid heights fetched through 0x00784100. The pattern (entry, both coordinate scalings, first floor call) matches once in the GOG image. Used by SkinnedGibs for gib ground contact only; it reads terrain and writes nothing."
+    },
+    {
       "name": "MPVehicleList::LoadCallSiteNetveh",
       "pattern": "C6 45 FC 22 8D 4D 90 51 E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ??",
       "offset": 15,
