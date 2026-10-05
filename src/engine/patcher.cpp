@@ -400,6 +400,17 @@ namespace BZROpenShim
 
     static bool IsDisableControlSmoothingPatchName(const char* name) { return name && strcmp(name, "Disable Control Smoothing") == 0; }
 
+    static bool IsPathBlockFacesPatchName(const char* name) { return name && strcmp(name, "Path Block Faces BlockCells Hook") == 0; }
+
+    // [General] PathBlockFaces (default ON: it changes only ODFs that opt in
+    // with pathBlock = "faces"/"none") arrives inverted through the env mapping.
+    static bool ShouldEnablePathBlockFaces() {
+        static int s_cached = -1;
+        if (s_cached < 0)
+            s_cached = EnvFlagEnabledByName("OPENSHIM_DISABLE_PATH_BLOCK_FACES") ? 0 : 1;
+        return s_cached != 0;
+    }
+
     static bool IsShellCasingPatchName(const char* name) { return name && strncmp(name, "Shell Casings ", 14) == 0; }
 
     // [General] ShellCasings (default ON) arrives inverted through the env
@@ -520,6 +531,9 @@ namespace BZROpenShim
         }
         if (!ShouldEnableDisableControlSmoothing()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsDisableControlSmoothingPatchName(p.name.c_str()); }), patches.end());
+        }
+        if (!ShouldEnablePathBlockFaces()) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsPathBlockFacesPatchName(p.name.c_str()); }), patches.end());
         }
         if (!ShouldEnableShellCasings()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsShellCasingPatchName(p.name.c_str()); }), patches.end());
@@ -988,6 +1002,18 @@ namespace BZROpenShim
                     p.verified = false;
                     continue;
                 }
+            }
+            // PathBlockFaces relocates BlockCells' 6-byte prologue into its
+            // own trampoline and resolves the grid globals it needs; any miss
+            // stands the hook down before the detour is written.
+            if (IsPathBlockFacesPatchName(p.name.c_str())) {
+                if (!Hooks::InstallPathBlockHook(p.address)) {
+                    p.verified = false;
+                    continue;
+                }
+                p.payload = HookEngine::MakeJmp5Payload(p.address,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Hooks::GetPathBlockCellsDetourAddress())), 6);
+                continue;
             }
             for (auto& x : m) {
                 if (p.name == x.n) {

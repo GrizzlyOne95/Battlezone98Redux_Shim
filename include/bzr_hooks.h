@@ -49,6 +49,14 @@ namespace BZROpenShim
     void SetHoverCraftTurboSoundResolves(void* soundFind, void* soundListHead);
     namespace Hooks
     {
+        // PathBlockFaces (path_block.cpp): BlockCells entry detour. Install
+        // builds the prologue trampoline and resolves the grid globals; false
+        // means the hook must not be written.
+        bool InstallPathBlockHook(uint32_t site);
+        void* GetPathBlockCellsDetourAddress();
+    }
+    namespace Hooks
+    {
         // ShellCasings (shell_casings.cpp): REL32 target for the OrdnanceClass
         // factory calls in Cannon::Simulate and MachineGun::Simulate. The
         // original factory must be set before the call is redirected.

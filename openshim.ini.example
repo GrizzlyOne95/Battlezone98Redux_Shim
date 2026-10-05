@@ -122,6 +122,20 @@ SkinnedGibsLinger = 8
 ; Multiplier for the random part of the launch velocity (0..5). Default: 1.0.
 SkinnedGibsForce = 1.0
 
+; Path-grid footprints from collision faces. Stock AI planning blocks the
+; whole bounding box of every building, so tunnels, arcades and walk-in rooms
+; are walls to the planner. An ODF opts in under [GameObjectClass]:
+;   pathBlock = "faces"     ; "box" (stock, default) | "faces" | "none"
+;   pathBlockHeight = 1.5   ; local sample height above the origin (m)
+;   pathBlockHeight2 = 3.0  ; second sample height (m)
+; With "faces" a cell of the stock box stays blocked only when its centre is
+; inside the object's collision solids at either height (nonzero winding);
+; "none" blocks nothing. ODFs without the key are untouched. Shares its ODF
+; keys and results with the EXU implementation of the same contract.
+; Accepted: boolean. Default: ON.
+; Legacy env alias: OPENSHIM_DISABLE_PATH_BLOCK_FACES
+PathBlockFaces = 1
+
 ; Shell casings: when a cannon-like weapon fires, a small brass casing is
 ; ejected from the weapon's breech, tumbles, bounces off the terrain, the
 ; firing hull and nearby objects, then lies on the ground and sinks away.
@@ -954,6 +968,13 @@ RespectExternalAutoSave = 1
 ; Accepted: boolean. Default: OFF.
 ; Legacy env alias: OPENSHIM_TRACE_SKINNED_GIBS
 TraceSkinnedGibs = 0
+
+; PathBlockFaces diagnostics: an ASCII dump of the path grid around every
+; flagged building after its footprint is applied, plus removal lines. The
+; one-line summary per flagged object is always logged (first 256 per
+; mission). Accepted: boolean. Default: OFF.
+; Legacy env alias: OPENSHIM_TRACE_PATH_BLOCK
+TracePathBlock = 0
 
 ; ShellCasings diagnostics: one [SHELLCASINGS] line per spawned casing and a
 ; once-a-second stats line (spawned, filtered, culled, active, hits, submits).

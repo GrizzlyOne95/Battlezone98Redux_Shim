@@ -59,6 +59,19 @@ openshim_add_test(shell_casing_physics_tests STD 20 SOURCES
     shell_casing_physics_tests.cpp
 )
 
+# PathBlockFaces: winding, ODF keys, grid contract (pure math), plus the
+# offline dry check on the ISDF Chronicles subway underpass when the GOG test
+# install is present (override with -DOPENSHIM_PATHBLOCK_SAMPLE_DIR=<dir>).
+openshim_add_test(path_block_geometry_tests STD 17 SOURCES
+    path_block_geometry_tests.cpp
+)
+set(OPENSHIM_PATHBLOCK_SAMPLE_DIR "C:/Program Files (x86)/GOG Galaxy/Games/Battlezone 98 Redux/addon/ISDF Chronicles"
+    CACHE PATH "Directory holding bbsubtun.odf/.sdf and its .geo files for the PathBlockFaces dry check")
+if(EXISTS "${OPENSHIM_PATHBLOCK_SAMPLE_DIR}/bbsubtun.sdf")
+    add_test(NAME path_block_dry_check_bbsubtun
+        COMMAND path_block_geometry_tests --dry "${OPENSHIM_PATHBLOCK_SAMPLE_DIR}" bbsubtun --expect-tunnel)
+endif()
+
 openshim_add_test(bzrnet_protocol_tests STD 20 SOURCES
     bzrnet_protocol_tests.cpp
     ../src/patches/bzrnet_protocol.cpp
