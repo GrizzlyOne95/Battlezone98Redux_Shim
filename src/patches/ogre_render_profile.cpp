@@ -3839,6 +3839,11 @@ namespace BZROpenShim::RenderProfiles
         }
     }
 
+    int IdentifyActiveRenderSystem()
+    {
+        return DetectActiveBackend();
+    }
+
     namespace Exports
     {
         uint32_t GetRenderApiVersion()
