@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <chrono>
 #include <filesystem>
@@ -183,8 +184,283 @@ void extraAssignment(Bytes &mesh, uint32_t vertex, uint16_t bone, float weight)
     const uint32_t size = static_cast<uint32_t>(mesh.size() - root);
     std::memcpy(mesh.data() + root + 2, &size, sizeof(size));
 }
+// ---- Skinned gib fixtures ---------------------------------------------------
+struct GibTestSub
+{
+    std::string material;
+    std::vector<std::array<float, 3>> positions;
+    std::vector<uint16_t> indices;
+    uint16_t bone;
+};
+// Every submesh owns its geometry (position + normal) and its assignments,
+// so a cut between two submeshes is only visible through position welding.
+Bytes gibFixtureMesh(const std::vector<GibTestSub> &subs)
+{
+    Bytes body{1};
+    for (const auto &s : subs)
+    {
+        Bytes sub;
+        text(sub, s.material);
+        put(sub, uint8_t{0});
+        put(sub, static_cast<uint32_t>(s.indices.size()));
+        put(sub, uint8_t{0});
+        for (uint16_t i : s.indices)
+            put(sub, i);
+        Bytes g;
+        put(g, static_cast<uint32_t>(s.positions.size()));
+        Bytes decl;
+        for (const auto &e : {std::array<uint16_t, 5>{0, 2, 1, 0, 0}, std::array<uint16_t, 5>{0, 2, 4, 12, 0}})
+        {
+            Bytes element;
+            for (uint16_t v : e)
+                put(element, v);
+            chunk(decl, 0x5110, element);
+        }
+        chunk(g, 0x5100, decl);
+        Bytes vertices;
+        for (const auto &p : s.positions)
+            for (float v : {p[0], p[1], p[2], 0.f, 1.f, 0.f})
+                put(vertices, v);
+        Bytes buf;
+        put(buf, uint16_t{0});
+        put(buf, uint16_t{24});
+        chunk(buf, 0x5210, vertices);
+        chunk(g, 0x5200, buf);
+        chunk(sub, 0x5000, g);
+        for (uint32_t v = 0; v < s.positions.size(); ++v)
+        {
+            Bytes a;
+            put(a, v);
+            put(a, s.bone);
+            put(a, 1.f);
+            chunk(sub, 0x4100, a);
+        }
+        chunk(body, 0x4000, sub);
+    }
+    Bytes link;
+    text(link, "gib.skeleton");
+    chunk(body, 0x6000, link);
+    Bytes bounds;
+    for (float v : {-1.f, 0.f, -1.f, 1.f, 3.f, 1.f, 3.f})
+        put(bounds, v);
+    chunk(body, 0x9000, bounds);
+    Bytes out;
+    put(out, uint16_t{0x1000});
+    text(out, "[MeshSerializer_v1.8]");
+    chunk(out, 0x3000, body);
+    return out;
+}
+// root (0) at the origin; head (1) one unit up, turned 90 degrees about Y;
+// finger (2) half a unit above the head.
+Bytes gibFixtureSkeleton()
+{
+    constexpr float h = 0.7071067811865475f;
+    struct B
+    {
+        const char *name;
+        std::array<float, 3> position;
+        std::array<float, 4> xyzw;
+    };
+    const B bones[] = {{"root", {0, 0, 0}, {0, 0, 0, 1}}, {"head", {0, 1, 0}, {0, h, 0, h}},
+                       {"finger", {0, 0.5f, 0}, {0, 0, 0, 1}}};
+    Bytes out;
+    put(out, uint16_t{0x1000});
+    text(out, "[Serializer_v1.80]");
+    for (uint16_t handle = 0; handle < 3; ++handle)
+    {
+        Bytes d;
+        text(d, bones[handle].name);
+        put(d, handle);
+        for (float v : bones[handle].position)
+            put(d, v);
+        for (float v : bones[handle].xyzw)
+            put(d, v);
+        // The source serializer excludes the name from a bone chunk's size.
+        put(out, uint16_t{0x2000});
+        put(out, static_cast<uint32_t>(d.size() + 6 - std::strlen(bones[handle].name) - 1));
+        out.insert(out.end(), d.begin(), d.end());
+    }
+    for (uint16_t child : {uint16_t{1}, uint16_t{2}})
+    {
+        Bytes parent;
+        put(parent, child);
+        put(parent, static_cast<uint16_t>(child - 1));
+        chunk(out, 0x3000, parent);
+    }
+    return out;
+}
+std::vector<std::array<float, 3>> gibRing(float y)
+{
+    return {{-0.5f, y, -0.5f}, {0.5f, y, -0.5f}, {0.5f, y, 0.5f}, {-0.5f, y, 0.5f}};
+}
+GibTestSub gibBand(float y0, float y1, bool bottom, uint16_t bone)
+{
+    GibTestSub s{"body_mat", gibRing(y0), {}, bone};
+    const auto upper = gibRing(y1);
+    s.positions.insert(s.positions.end(), upper.begin(), upper.end());
+    for (uint16_t i = 0; i < 4; ++i)
+    {
+        const uint16_t a = i, b = static_cast<uint16_t>((i + 1) % 4);
+        for (uint16_t v : {a, b, static_cast<uint16_t>(b + 4), a, static_cast<uint16_t>(b + 4),
+                           static_cast<uint16_t>(a + 4)})
+            s.indices.push_back(v);
+    }
+    const std::array<uint16_t, 6> cap = bottom ? std::array<uint16_t, 6>{0, 2, 1, 0, 3, 2}
+                                               : std::array<uint16_t, 6>{4, 5, 6, 4, 6, 7};
+    s.indices.insert(s.indices.end(), cap.begin(), cap.end());
+    return s;
+}
+// A square column: rings y=0 and y=1 skinned to root, a duplicated y=1 ring
+// and y=2 to head, closed top and bottom; a finger triangle and a rifle.
+std::vector<GibTestSub> gibFixtureSubs()
+{
+    GibTestSub finger{"body_mat", {{0, 2, 0}, {0.1f, 2.2f, 0}, {0, 2.2f, 0.1f}}, {0, 1, 2}, 2};
+    GibTestSub rifle{"ISDF_Rifle_Mat", {{0.6f, 1.5f, 0}, {0.6f, 1.5f, 0.8f}, {0.7f, 1.6f, 0}}, {0, 1, 2}, 2};
+    return {gibBand(0, 1, true, 0), gibBand(1, 2, false, 1), finger, rifle};
+}
+// Normals of the cap submesh (the only 32-byte stream) in a gib piece.
+std::vector<std::array<float, 3>> capNormals(const Bytes &mesh)
+{
+    std::vector<std::array<float, 3>> out;
+    for (size_t p = 2; p + 6 <= mesh.size(); ++p)
+    {
+        uint16_t id, stride;
+        uint32_t size;
+        std::memcpy(&id, mesh.data() + p, 2);
+        std::memcpy(&size, mesh.data() + p + 2, 4);
+        std::memcpy(&stride, mesh.data() + p - 2, 2);
+        if (id != 0x5210 || stride != 32 || size < 6 || p + size > mesh.size() || (size - 6) % 32)
+            continue;
+        for (size_t v = p + 6; v < p + size; v += 32)
+        {
+            std::array<float, 3> n;
+            std::memcpy(n.data(), mesh.data() + v + 12, 12);
+            out.push_back(n);
+        }
+    }
+    return out;
+}
+void gibTests()
+{
+    using namespace BZROpenShim::NativeChunks;
+    const auto mesh = gibFixtureMesh(gibFixtureSubs());
+    const auto skeleton = gibFixtureSkeleton();
+    std::vector<GibPiece> gibs;
+    std::string error;
+    Require(ExtractGibs(mesh, skeleton, GibOptions{}, gibs, error), ("extract gibs: " + error).c_str());
+    Require(gibs.size() == 3 && gibs[0].piece.name == "gib_head" && gibs[1].piece.name == "gib_root" &&
+                gibs[2].piece.name == "gib_weapon",
+            "finger rolls into the kept head; root and weapon stay separate, in sorted order");
+    const auto &head = gibs[0], &root = gibs[1], &weapon = gibs[2];
+    Require(head.bone == 1 && head.boneName == "head" && root.bone == 0 && root.boneName == "root",
+            "body gibs record their driving bone handle and name");
+    Require(weapon.weapon && weapon.bone == 2 && weapon.capTriangles == 0 && weapon.piece.triangles == 1,
+            "weapon submesh is one uncapped piece driven by its own dominant bone, not rolled up");
+    Require(head.capTriangles == 4 && root.capTriangles == 4,
+            "the welded cut between the two submeshes closes one fan cap per side");
+    Require(head.piece.triangles == 10 + 1 + 4 && root.piece.triangles == 10 + 4,
+            "every skinned face lands in exactly one gib, plus its caps");
+    {
+        const std::string bytes(head.piece.mesh.begin(), head.piece.mesh.end());
+        Require(bytes.find("openshim_gib_flesh") != std::string::npos && bytes.find("body_mat") != std::string::npos,
+                "caps use the flesh material in their own submesh");
+        const std::string weaponBytes(weapon.piece.mesh.begin(), weapon.piece.mesh.end());
+        Require(weaponBytes.find("ISDF_Rifle_Mat") != std::string::npos &&
+                    weaponBytes.find("openshim_gib_flesh") == std::string::npos,
+                "weapon keeps its own material and gets no cap");
+    }
+    // Caps face away from their own piece: up out of the root, down out of
+    // the head. The head's bind yaw about Y leaves the vertical axis alone.
+    const auto rootNormals = capNormals(root.piece.mesh), headNormals = capNormals(head.piece.mesh);
+    Require(rootNormals.size() == 12 && headNormals.size() == 12, "cap vertices are emitted per triangle");
+    Require(std::all_of(rootNormals.begin(), rootNormals.end(),
+                        [](const std::array<float, 3> &n) { return near(n, {0, 1, 0}); }) &&
+                std::all_of(headNormals.begin(), headNormals.end(),
+                            [](const std::array<float, 3> &n) { return near(n, {0, -1, 0}); }),
+            "cap normals point away from the piece");
+    // Head bone sits at (0,1,0); its geometry spans y 1..2.2, so the
+    // bone-frame centre is y = 0.6. The root spans 0..1.
+    Require(std::abs(head.piece.center[1] - 0.6f) < 1e-4f && std::abs(root.piece.center[1] - 0.5f) < 1e-4f,
+            "piece centres are reported in the driving bone frame");
+    Require(head.radius > 0.5f && root.radius > 0.5f, "bound radius recorded");
+    std::vector<GibPiece> again;
+    Require(ExtractGibs(mesh, skeleton, GibOptions{}, again, error) && again.size() == gibs.size(),
+            "repeat extraction");
+    for (size_t i = 0; i < gibs.size(); ++i)
+        Require(again[i].piece.mesh == gibs[i].piece.mesh && again[i].piece.name == gibs[i].piece.name,
+                "gib output is byte-for-byte deterministic");
+
+    GibOptions merge;
+    merge.keepPattern.clear();
+    merge.minFaceFraction = 0.6f;
+    Require(ExtractGibs(mesh, skeleton, merge, gibs, error) && gibs.size() == 2 && gibs[0].piece.name == "gib_root" &&
+                gibs[0].capTriangles == 0 && gibs[0].piece.triangles == 21 && gibs[1].piece.name == "gib_weapon",
+            "small bones roll up deepest first and a whole-body gib has no cut to cap");
+    GibOptions noCaps;
+    noCaps.caps = false;
+    Require(ExtractGibs(mesh, skeleton, noCaps, gibs, error) && gibs.size() == 3 && gibs[0].capTriangles == 0 &&
+                gibs[0].piece.triangles == 11,
+            "caps can be disabled");
+    GibOptions badPattern;
+    badPattern.dropPattern = "(";
+    Require(!ExtractGibs(mesh, skeleton, badPattern, gibs, error) && gibs.empty(), "bad pattern fails closed");
+    Require(!ExtractGibs(mesh, {}, GibOptions{}, gibs, error) && gibs.empty(), "missing skeleton fails closed");
+
+    // Cache round trip, including the bone sidecar.
+    Require(ExtractGibs(mesh, skeleton, GibOptions{}, gibs, error), "restore gibs");
+    const auto cache = std::filesystem::temp_directory_path() /
+                       ("openshim_gib_cache_" +
+                        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::vector<CachedGib> cached, read;
+    Require(!ReadGibCache(cache, read), "missing gib cache");
+    Require(WriteGibCache(cache, gibs, cached) && cached.size() == 3 && ReadGibCache(cache, read) && read.size() == 3,
+            "gib cache round trip");
+    for (size_t i = 0; i < 3; ++i)
+        Require(read[i].piece.name == gibs[i].piece.name && read[i].bone == gibs[i].bone &&
+                    read[i].boneName == gibs[i].boneName && read[i].radius == gibs[i].radius &&
+                    read[i].weapon == gibs[i].weapon && read[i].capTriangles == gibs[i].capTriangles &&
+                    std::memcmp(read[i].piece.center, gibs[i].piece.center, sizeof(read[i].piece.center)) == 0,
+                "gib cache keeps bones, radius and centre bit-exactly");
+    {
+        std::ofstream f(cache / "gibs.cache", std::ios::binary | std::ios::trunc);
+        f << "OPENSHIM_SKINNED_GIBS_V1\n3\n";
+    }
+    Require(!ReadGibCache(cache, read) && read.empty(), "truncated gib sidecar fails closed");
+    std::filesystem::remove(cache / "gibs.cache");
+    Require(!ReadGibCache(cache, read), "missing gib sidecar fails closed");
+    std::filesystem::remove_all(cache);
+}
+// Offline check against a real model: prints the split, like
+// scripts/export_gib_payloads.py does.
+int printGibs(const char *meshPath, const char *skeletonPath)
+{
+    using namespace BZROpenShim::NativeChunks;
+    const auto mesh = load(meshPath), skeleton = load(skeletonPath);
+    std::vector<GibPiece> gibs;
+    std::string error;
+    if (!ExtractGibs(mesh, skeleton, GibOptions{}, gibs, error))
+    {
+        std::cerr << "ExtractGibs failed: " << error << '\n';
+        return 1;
+    }
+    uint32_t triangles = 0;
+    for (const auto &gib : gibs)
+    {
+        triangles += gib.piece.triangles;
+        std::printf("  %-24s bone %-24s handle %3u tris %5u caps %4u r %.3f centre (%.3f, %.3f, %.3f)\n",
+                    gib.piece.name.c_str(), gib.boneName.c_str(), static_cast<unsigned>(gib.bone),
+                    static_cast<unsigned>(gib.piece.triangles), static_cast<unsigned>(gib.capTriangles),
+                    static_cast<double>(gib.radius), static_cast<double>(gib.piece.center[0]),
+                    static_cast<double>(gib.piece.center[1]), static_cast<double>(gib.piece.center[2]));
+    }
+    std::printf("%zu gibs, %u triangles\n", gibs.size(), static_cast<unsigned>(triangles));
+    // A humanoid must come apart into limbs, not one lump or a hundred bits.
+    return gibs.size() >= 6 && gibs.size() <= 32 ? 0 : 1;
+}
 int main(int argc, char **argv)
 {
+    if (argc == 4 && std::string(argv[1]) == "--gibs")
+        return printGibs(argv[2], argv[3]);
     using namespace BZROpenShim::NativeChunks;
     std::vector<Piece> pieces;
     std::string error;
@@ -449,5 +725,6 @@ int main(int argc, char **argv)
     auto truncated = skeleton;
     truncated.pop_back();
     Require(!Extract(mesh, truncated, pieces, error), "truncated skeleton must fail closed");
+    gibTests();
     std::cout << "native chunk mesh tests passed\n";
 }

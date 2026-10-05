@@ -33,6 +33,40 @@ std::string SkeletonName(const std::vector<uint8_t> &mesh);
 // basis or non-finite input.
 bool FragmentOriginShift(const float right[3], const float up[3], const float front[3], const float center[3],
                          double out[3]);
+// Skinned gibs (OpenShim SkinnedGibs): the runtime twin of
+// scripts/export_gib_payloads.py. Every face goes to its dominant bone
+// (summed weights over its three corners; unweighted faces are skipped);
+// bones owning fewer than minFaceFraction of all faces, or matching
+// dropPattern, roll up into their parent deepest first unless they match
+// keepPattern or are a root; submeshes whose material matches
+// weaponMaterialPattern become one uncapped "weapon" piece driven by their
+// dominant bone; and each cut (an edge shared by two body pieces in the
+// position-welded topology) is closed by a fan cap in an extra submesh using
+// capMaterial. Patterns are ECMAScript, case-insensitive, searched; empty
+// matches nothing. Pieces are written like Extract's: in the driving bone's
+// bind frame, centred on their bounds, with `piece.center` that centre in the
+// bone frame, so world = entityNode * boneDerived * translate(center).
+struct GibOptions
+{
+    float minFaceFraction = 0.025f;
+    std::string keepPattern = "head$";
+    std::string dropPattern = "nub|footsteps|finger|toe|clavicle";
+    std::string weaponMaterialPattern = "gun|laser|weapon|rifle";
+    std::string capMaterial = "openshim_gib_flesh";
+    float capUvScale = 4.0f;
+    bool caps = true;
+};
+struct GibPiece
+{
+    Piece piece;           // name gib_<bone> (lower case) or gib_weapon
+    uint16_t bone = 0;     // driving bone handle (== Ogre bone index)
+    std::string boneName;  // driving bone name
+    float radius = 0;      // bound radius about the piece centre
+    uint32_t capTriangles = 0;
+    bool weapon = false;
+};
+bool ExtractGibs(const std::vector<uint8_t> &mesh, const std::vector<uint8_t> &skeleton, const GibOptions &options,
+                 std::vector<GibPiece> &pieces, std::string &error);
 // The stock chunklet shapes already embedded for batching, emitted on demand
 // with the game's scrap material. No skeleton, texture or payload pack needed.
 Piece StockFallbackMesh(unsigned kind);
