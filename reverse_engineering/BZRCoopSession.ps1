@@ -86,7 +86,10 @@ if ($NoOpenShim) { $NeverCopy += 'winmm.dll' }
 # generate_interfaces_file.exe; Goldberg needs it for this older SDK.
 $SteamInterfaces = Join-Path $BZRCoopRoot 'tools\steam_interfaces.txt'
 
-function Get-InstanceDir([int]$Index) { Join-Path $InstancesDir ("Instance{0}" -f $Index) }
+# Each game root keeps the stock folder name: mod loaders such as Campaign
+# Reimagined's RequireFix recognise the game directory by it and otherwise
+# search one level too high (exu.dll/bzfile.dll then fail to load).
+function Get-InstanceDir([int]$Index) { Join-Path $InstancesDir ("Instance{0}\Battlezone 98 Redux" -f $Index) }
 
 function Get-FileSha256([string]$Path) {
     if (Test-Path -LiteralPath $Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }

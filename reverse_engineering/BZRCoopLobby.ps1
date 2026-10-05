@@ -14,6 +14,11 @@ param(
     [int]$StepTimeoutSeconds = 45,
     [string]$GuestName = 'BZRCoop2',
     [string]$ServerLog = 'C:\BZRCoop\server\server.log',
+    [string]$CapturesUrl = 'http://127.0.0.1:8080/captures',
+    # Optional map pick on the host staging list: the row's y (x is fixed) and
+    # the .bzn the lobby gameSettings must then name, e.g. 195 + misn02b.bzn.
+    [int]$MapListY = 0,
+    [string]$MapBzn = '',
     [switch]$SyncJoin,
     [switch]$Launch
 )
@@ -129,6 +134,18 @@ $readyPattern = '< TEXT .\{"content":\{"key":"ready"[^\r\n]*'
 # gameSettings version and invalidates earlier ready values. The toggle only
 # takes clicks on its label, not the value cell.
 Start-Sleep -Seconds 2
+if ($MapListY) {
+    $off = Get-ServerOffset
+    Click $hostClient @(330, $MapListY)
+    # The debug log truncates frame text; the server's /captures previews keep
+    # the whole gameSettings value ("N*<map>.bzn*...").
+    $null = Wait-Until 'host-map' {
+        $caps = try { (Invoke-RestMethod -Uri $CapturesUrl -TimeoutSec 3).protocol.history } catch { @() }
+        $last = @($caps | Where-Object { $_.type -eq 'SetLobbyData' -and $_.preview -match '"key":"gameSettings"' }) | Select-Object -Last 1
+        if ($last -and $last.preview -match ('"value":"\d+\*' + [regex]::Escape($MapBzn) + '\*')) { $last.preview }
+    }
+    Start-Sleep -Milliseconds 500
+}
 if ($SyncJoin) {
     $off = Get-ServerOffset
     Click $hostClient $UI.SyncJoinToggle
