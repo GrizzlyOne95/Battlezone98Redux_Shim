@@ -1008,18 +1008,31 @@ namespace BZROpenShim
             return;
 
         const bool outermost = (g_ChunkFragmentHookDepth == 0);
+        // The detour exists for chunk tracing, SkinnedGibs, or both. Only the
+        // trace path does the old source-mesh work, so a SkinnedGibs-only
+        // install leaves every non-person fragmentation exactly as stock.
+        const bool trace = g_TraceChunkRender || g_TraceChunkEffectRuntime;
         uint32_t countBefore = 0;
+        bool skinnedGibs = false;
         if (outermost)
         {
-            LogChunkFragmentWalkTree(L"FullFragmentObject", thisPtr, objectPtr, preserveFlag);
-            TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countBefore);
-            HideChunkFragmentSourceMesh(objectPtr);
-            BeginActiveFragmentSourceContext(objectPtr);
+            // Captures the person's pose now, before the engine turns its
+            // node tree into chunks; no-op (false) for anything else.
+            skinnedGibs = SkinnedGibsBeginFullFragment(thisPtr, objectPtr, velocity);
+            if (trace)
+            {
+                LogChunkFragmentWalkTree(L"FullFragmentObject", thisPtr, objectPtr, preserveFlag);
+                TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countBefore);
+                HideChunkFragmentSourceMesh(objectPtr);
+                BeginActiveFragmentSourceContext(objectPtr);
+            }
         }
         ++g_ChunkFragmentHookDepth;
         g_BzrFn_ChunkEffectFullFragment(thisPtr, objectPtr, velocity, preserveFlag);
         --g_ChunkFragmentHookDepth;
-        if (outermost)
+        if (outermost && skinnedGibs)
+            SkinnedGibsEndFullFragment(thisPtr);
+        if (outermost && trace)
         {
             g_ActiveFragmentSourceMeshName[0] = '\0';
             g_ActiveFragmentSourceOgreEntity = nullptr;

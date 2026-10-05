@@ -100,6 +100,28 @@ SettingsUi = 1
 ;                     BZR_DISABLE_CHUNK_EXPERIMENTS
 ChunkMeshes = 1
 
+; Skinned person gibs: when a pilot, soldier or zombie (any Person) is blown
+; apart, its skinned body splits into rigid limb pieces (head, torso, arms,
+; hands, legs, weapon...) posed where each limb was on the frame of death,
+; launched with the stock chunk velocities and left lying on the ground.
+; Accepted: boolean. Default: ON. Independent of ChunkMeshes and of any asset
+; pack: the split is generated from the person's own .mesh/.skeleton and
+; cached under openshim/cache/chunks/gibs. An authored split from
+; scripts/export_gib_payloads.py (<payload dir>/<mesh>/gibs.txt) wins over the
+; runtime one. Cut faces use openshim_gib_flesh, written to the cache root
+; unless a chunk payload directory ships its own openshim_gib_flesh.material.
+; Visual only: the engine's own chunk simulation for the body is untouched,
+; and 0 restores exactly the previous behaviour. GOG build only.
+; Legacy env alias: OPENSHIM_DISABLE_SKINNED_GIBS
+SkinnedGibs = 1
+; Most gibs alive at once (12..1024). When full, the oldest gib already at
+; rest is recycled first, then the oldest. Default: 160.
+SkinnedGibsMax = 160
+; Seconds a gib lies at rest before sinking away (0..60). Default: 8.
+SkinnedGibsLinger = 8
+; Multiplier for the random part of the launch velocity (0..5). Default: 1.0.
+SkinnedGibsForce = 1.0
+
 ; Redux multiplayer map-list refresh/selection preservation fixes.
 ; Accepted: boolean. Default: ON.
 ; Exposed on the OpenShim Settings page as "Map List Fixes".
@@ -900,6 +922,12 @@ RespectExternalAutoSave = 1
 
 
 [Diagnostics]
+
+; Per-gib SkinnedGibs log lines (mesh, bone, launch position and velocity) and
+; an unbudgeted [SKINNEDGIBS] summary for every person death.
+; Accepted: boolean. Default: OFF.
+; Legacy env alias: OPENSHIM_TRACE_SKINNED_GIBS
+TraceSkinnedGibs = 0
 
 ; Explain a "Not Ready" multiplayer entry on the main menu. The stock shell has
 ; no way to say why: its readiness getter returns only ready/not-ready, so the

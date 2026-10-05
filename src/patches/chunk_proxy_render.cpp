@@ -1141,11 +1141,12 @@ namespace BZROpenShim
             }
         }
 
-        static bool EnsureChunkPayloadResourceLocations()
+        // The registration itself, shared by chunk proxies (gated on
+        // ChunkMeshes below) and SkinnedGibs, which must work with chunk
+        // meshes off. One group, one ready flag: whichever feature gets here
+        // first registers it, and nothing is registered twice.
+        static bool EnsureChunkPayloadResourceLocationsUngated()
         {
-            if (!g_EnableChunkMeshProxy)
-                return false;
-
             if (g_ChunkPayloadResourceLocationsReady)
                 return true;
 
@@ -1236,6 +1237,13 @@ namespace BZROpenShim
             g_ChunkPayloadResourceLocationsLogged = true;
             g_ChunkPayloadResourceLocationsFailureLogged = false;
             return true;
+        }
+
+        static bool EnsureChunkPayloadResourceLocations()
+        {
+            if (!g_EnableChunkMeshProxy)
+                return false;
+            return EnsureChunkPayloadResourceLocationsUngated();
         }
 
         static bool TryPrimeChunkPayloadResourcesSafe()
@@ -2190,6 +2198,225 @@ namespace BZROpenShim
                 EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_MANUAL_SUBMIT") ||
                 EnvFlagEnabled("BZR_DISABLE_CHUNK_MANUAL_SUBMIT");
             return !disabled;
+        }
+
+        // ---- Shim-owned mesh objects (SkinnedGibs) -------------------------
+        // The same guarded Ogre calls the chunk proxies use, for a caller that
+        // keeps its own pool. Nothing here touches g_ChunkProxySlots.
+        bool EnsureSkinnedGibResourceLocations()
+        {
+            __try
+            {
+                return EnsureChunkPayloadResourceLocationsUngated();
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                return false;
+            }
+        }
+
+        bool CreateShimOwnedMeshObject(const char* meshName, void*& outSceneManager, void*& outNode, void*& outEntity)
+        {
+            outSceneManager = nullptr;
+            outNode = nullptr;
+            outEntity = nullptr;
+            if (!meshName || !*meshName)
+                return false;
+
+            static FnOgreGetRootSceneNode getRootSceneNode =
+                ResolveOgreProc<FnOgreGetRootSceneNode>("?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
+            static FnOgreCreateChildSceneNode createChildSceneNode =
+                ResolveOgreProc<FnOgreCreateChildSceneNode>("?createChildSceneNode@SceneNode@Ogre@@UAEPAV12@ABVVector3@2@ABVQuaternion@2@@Z");
+            static FnOgreCreateEntity createEntity =
+                ResolveOgreProc<FnOgreCreateEntity>("?createEntity@SceneManager@Ogre@@UAEPAVEntity@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            static FnOgreAttachObject attachObject =
+                ResolveOgreProc<FnOgreAttachObject>("?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+            if (!getRootSceneNode || !createChildSceneNode || !createEntity || !attachObject || !setVisible)
+                return false;
+
+            void* const sceneManager = GetOgreSceneManagerRuntime();
+            if (!sceneManager || !EnsureSkinnedGibResourceLocations())
+                return false;
+            void* const rootNode = TryGetChunkMeshProxyRootNode(sceneManager, getRootSceneNode);
+            if (!rootNode)
+                return false;
+            if (!TryCreateChunkMeshProxyObjects(rootNode, sceneManager, createChildSceneNode, createEntity,
+                    attachObject, setVisible, meshName, outNode, outEntity))
+            {
+                // A node without its entity stays attached and hidden-empty;
+                // Ogre owns it until scene teardown, exactly as for proxies.
+                outNode = nullptr;
+                outEntity = nullptr;
+                return false;
+            }
+            outSceneManager = sceneManager;
+            return true;
+        }
+
+        using FnOgreDestroyEntityPtr = void(__thiscall*)(void*, void*);
+
+        // No function-local statics here: their guarded initialisation needs
+        // unwinding, which __try forbids (C2712).
+        static bool TryReplaceShimEntitySeh(
+            void* sceneManager,
+            void* node,
+            void* old,
+            const char* meshName,
+            FnOgreDestroyEntityPtr destroyEntity,
+            FnOgreCreateEntity createEntity,
+            FnOgreAttachObject attachObject,
+            FnOgreSetVisible setVisible,
+            void*& created)
+        {
+            created = nullptr;
+            __try
+            {
+                return CatchOgreThrow("replaceShimEntity", [&] {
+                    if (old && IsLikelyLiveOgreObject(old))
+                        destroyEntity(sceneManager, old);
+                    created = CreateChunkMeshProxyEntity(sceneManager, createEntity, meshName);
+                    if (created)
+                    {
+                        attachObject(node, created);
+                        setVisible(created, false);
+                    }
+                });
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                return false;
+            }
+        }
+
+        static bool TrySetShimNodeScaleSeh(void* node, FnOgreNodeSetScale setScale, const float scale[3])
+        {
+            __try
+            {
+                return CatchOgreThrow("shimNodeScale", [&] { setScale(node, scale[0], scale[1], scale[2]); });
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                return false;
+            }
+        }
+
+        // Reuses the node for another mesh: the old entity is destroyed by
+        // the scene manager that made it (between frames, never during a
+        // render traversal) and a new one attached in its place.
+        bool ReplaceShimOwnedMeshEntity(void* sceneManager, void* node, void*& entity, const char* meshName)
+        {
+            static FnOgreDestroyEntityPtr destroyEntity =
+                ResolveOgreProc<FnOgreDestroyEntityPtr>("?destroyEntity@SceneManager@Ogre@@UAEXPAVEntity@2@@Z");
+            static FnOgreCreateEntity createEntity =
+                ResolveOgreProc<FnOgreCreateEntity>("?createEntity@SceneManager@Ogre@@UAEPAVEntity@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            static FnOgreAttachObject attachObject =
+                ResolveOgreProc<FnOgreAttachObject>("?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+            if (!sceneManager || !node || !meshName || !*meshName || !destroyEntity || !createEntity ||
+                !attachObject || !setVisible || sceneManager != GetOgreSceneManagerRuntime())
+            {
+                return false;
+            }
+
+            void* created = nullptr;
+            const bool ok = TryReplaceShimEntitySeh(
+                sceneManager, node, entity, meshName, destroyEntity, createEntity, attachObject, setVisible, created);
+            // The old entity is gone (or was never live) either way.
+            entity = (ok && created) ? created : nullptr;
+            return entity != nullptr;
+        }
+
+        bool SetShimOwnedObjectTransform(
+            void* node,
+            void* entity,
+            const float position[3],
+            const float orientationWxyz[4],
+            const float scale[3])
+        {
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+            static FnOgreSetNodePosition setPosition =
+                ResolveOgreProc<FnOgreSetNodePosition>("?setPosition@Node@Ogre@@UAEXMMM@Z");
+            static FnOgreSetNodeOrientation setOrientation =
+                ResolveOgreProc<FnOgreSetNodeOrientation>("?setOrientation@Node@Ogre@@UAEXMMMM@Z");
+            static FnOgreNodeSetScale setScale =
+                ResolveOgreProc<FnOgreNodeSetScale>("?setScale@Node@Ogre@@UAEXMMM@Z");
+            if (!node || !entity || !position || !orientationWxyz || !setOrientation)
+                return false;
+
+            ChunkProxyTransform transform = {};
+            transform.x = position[0];
+            transform.y = position[1];
+            transform.z = position[2];
+            transform.orientation.w = orientationWxyz[0];
+            transform.orientation.x = orientationWxyz[1];
+            transform.orientation.y = orientationWxyz[2];
+            transform.orientation.z = orientationWxyz[3];
+            if (scale && setScale && !TrySetShimNodeScaleSeh(node, setScale, scale))
+                return false;
+            return TryUpdateChunkMeshProxyTransform(node, entity, setPosition, setOrientation, setVisible, transform);
+        }
+
+        void HideShimOwnedObject(void* node, void* entity)
+        {
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+            static FnOgreSetNodePosition setPosition =
+                ResolveOgreProc<FnOgreSetNodePosition>("?setPosition@Node@Ogre@@UAEXMMM@Z");
+            static FnOgreSetNodeOrientation setOrientation =
+                ResolveOgreProc<FnOgreSetNodeOrientation>("?setOrientation@Node@Ogre@@UAEXMMMM@Z");
+            TryHideChunkProxyEntity(entity, setVisible);
+            TryResetChunkProxyNode(node, setPosition, setOrientation);
+        }
+
+        // Same submission the per-Entity chunk path makes: notify the live
+        // viewport camera, then let the Entity queue its own sub-entities.
+        // False means the entity faulted and must be forgotten, not touched.
+        bool SubmitShimOwnedEntityToRenderQueue(void* sceneManager, void* entity, void* renderQueue)
+        {
+            if (!sceneManager || !entity || !renderQueue)
+                return false;
+
+            static FnOgreGetCurrentViewport getCurrentViewport =
+                ResolveOgreProc<FnOgreGetCurrentViewport>("?getCurrentViewport@SceneManager@Ogre@@QBEPAVViewport@2@XZ");
+            static FnOgreViewportGetCamera getViewportCamera =
+                ResolveOgreProc<FnOgreViewportGetCamera>("?getCamera@Viewport@Ogre@@QBEPAVCamera@2@XZ");
+            static FnOgreIsVisible isVisible =
+                ResolveOgreProcByOffset<FnOgreIsVisible>(0x0002CCCD);
+            static FnOgreMovableObjectNotifyCurrentCamera notifyCurrentCamera = nullptr;
+            static FnOgreEntityUpdateRenderQueue updateRenderQueue = nullptr;
+            if (!notifyCurrentCamera)
+            {
+                notifyCurrentCamera = g_OgreFn_MovableObjectNotifyCurrentCamera
+                    ? g_OgreFn_MovableObjectNotifyCurrentCamera
+                    : ResolveOgreProc<FnOgreMovableObjectNotifyCurrentCamera>(
+                        "?_notifyCurrentCamera@Entity@Ogre@@UAEXPAVCamera@2@@Z");
+            }
+            if (!updateRenderQueue)
+            {
+                updateRenderQueue = g_OgreFn_EntityUpdateRenderQueue
+                    ? g_OgreFn_EntityUpdateRenderQueue
+                    : ResolveOgreProc<FnOgreEntityUpdateRenderQueue>(
+                        "?_updateRenderQueue@Entity@Ogre@@UAEXPAVRenderQueue@2@@Z");
+            }
+            if (!notifyCurrentCamera || !updateRenderQueue || !IsLikelyLiveOgreObject(entity))
+                return false;
+
+            void* const camera =
+                TryGetChunkProxyViewportCameraSafe(sceneManager, getCurrentViewport, getViewportCamera, nullptr, nullptr);
+            if (!camera)
+                return true; // nothing to draw into this pass; the entity is fine
+            if (!TryNotifyChunkProxyCameraSafe(entity, camera, notifyCurrentCamera))
+                return false;
+            const int visible = TryGetChunkProxyVisibleSafe(entity, isVisible);
+            if (visible < 0)
+                return false;
+            if (visible == 0)
+                return true;
+            return TryUpdateChunkProxyRenderQueueSafe(entity, renderQueue, updateRenderQueue);
         }
 
         // Reads the geo-local vertex bounds straight out of the Redux geom
@@ -4022,6 +4249,20 @@ namespace BZROpenShim
             if ((!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy) || !objectBytes)
                 return;
 
+            // A person SkinnedGibs already drew as rigid limbs: the engine's
+            // legacy chunks for that body keep simulating untouched, but the
+            // shim must not draw them a second time. Release any slot a
+            // recycled address left behind for this object.
+            if (IsSkinnedGibSuppressedChunk(objectBytes, geomRef))
+            {
+                for (ChunkProxySlot& slot : g_ChunkProxySlots)
+                {
+                    if (slot.active && slot.objectBytes == objectBytes)
+                        ReleaseChunkProxySlot(slot, L"skinned-gibs");
+                }
+                return;
+            }
+
             // Before a slot is taken: no slot means no mesh and no billboard,
             // which is the whole point -- an empty payload name still draws a
             // billboard sprite.
@@ -4829,8 +5070,12 @@ namespace BZROpenShim
         // told apart from "walker never ran". GOG only; addresses are GOG layout.
         void InstallChunkFragmentWalkHooksIfRequested()
         {
-            if ((!g_TraceChunkRender && !g_TraceChunkEffectRuntime) ||
-                g_ChunkEffectFragmentHooksInstalled || g_IsSteamExe)
+            // SkinnedGibs needs FullFragmentObject only. Without a chunk trace
+            // PartialFragmentObject stays unhooked and the full hook is a pure
+            // pass-through for everything that is not a person.
+            const bool trace = g_TraceChunkRender || g_TraceChunkEffectRuntime;
+            const bool gibs = IsSkinnedGibsEnabled();
+            if ((!trace && !gibs) || g_ChunkEffectFragmentHooksInstalled || g_IsSteamExe)
                 return;
 
             static const uint8_t kExpectedPartialFragmentBytes[kChunkEffectFragmentDetourLen] =
@@ -4842,7 +5087,7 @@ namespace BZROpenShim
                 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x28
             };
 
-            if (!g_ChunkEffectPartialFragmentDetour.trampoline)
+            if (trace && !g_ChunkEffectPartialFragmentDetour.trampoline)
             {
                 InstallInlineDetour32(
                     g_ChunkEffectPartialFragmentDetour,
@@ -4875,18 +5120,38 @@ namespace BZROpenShim
             }
 
             g_ChunkEffectFragmentHooksInstalled =
-                g_ChunkEffectPartialFragmentDetour.trampoline &&
-                g_BzrFn_ChunkEffectPartialFragment &&
+                (!trace || (g_ChunkEffectPartialFragmentDetour.trampoline &&
+                            g_BzrFn_ChunkEffectPartialFragment)) &&
                 g_ChunkEffectFullFragmentDetour.trampoline &&
                 g_BzrFn_ChunkEffectFullFragment;
+            if (!g_ChunkEffectFullFragmentDetour.trampoline && gibs)
+            {
+                // InstallInlineDetour32 refused the expected prologue bytes:
+                // fail closed, once, and stop retrying every tick.
+                static bool s_gibInstallFailureLogged = false;
+                if (!s_gibInstallFailureLogged)
+                {
+                    s_gibInstallFailureLogged = true;
+                    LogChunkDiagnostic(
+                        "skinnedgibs",
+                        L"[SKINNEDGIBS] FullFragmentObject detour unavailable at 0x%08X; skinned gibs disabled\n",
+                        static_cast<uint32_t>(kGogChunkEffectFullFragmentAddr));
+                }
+                if (!trace)
+                {
+                    g_ChunkEffectFragmentHooksInstalled = true;
+                    g_ChunkEffectFragmentHooksLogged = true;
+                }
+            }
 
             if (g_ChunkEffectFragmentHooksInstalled && !g_ChunkEffectFragmentHooksLogged)
             {
                 LogChunkDiagnostic(
                     "chunkspawn",
-                    L"[CHUNKSPAWN] Installed fragment walk hooks partial=0x%08X full=0x%08X\n",
-                    static_cast<uint32_t>(kGogChunkEffectPartialFragmentAddr),
-                    static_cast<uint32_t>(kGogChunkEffectFullFragmentAddr));
+                    L"[CHUNKSPAWN] Installed fragment walk hooks partial=0x%08X full=0x%08X skinnedGibs=%u\n",
+                    trace ? static_cast<uint32_t>(kGogChunkEffectPartialFragmentAddr) : 0u,
+                    static_cast<uint32_t>(kGogChunkEffectFullFragmentAddr),
+                    gibs ? 1u : 0u);
                 g_ChunkEffectFragmentHooksLogged = true;
             }
         }
