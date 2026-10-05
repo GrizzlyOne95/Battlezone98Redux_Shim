@@ -136,6 +136,12 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         // True when every technique Ogre could fall back to still contains a
         // shaderless pass, i.e. declining would leave a draw D3D11 throws on.
         bool fallbackShaderless = false;
+        // Pass::getLightingEnabled() of the source pass. Fixed function adds
+        // the pass emissive only when lighting is on, so the synthesized
+        // FixedFunc* paths take the *_lit fragment twin (emissive term) for
+        // lit passes. Defaults to false -- the historical no-emissive
+        // programs -- when the runtime cannot read it.
+        bool lightingEnabled = false;
     };
 
     // The bounded two-unit support set: exactly two stages, both read, both
@@ -214,12 +220,19 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
 
     // Compat program names owned by openshim_dx11_fixedfunc.program.
     const char* FixedFuncTexturedVertex() noexcept;
-    const char* FixedFuncTexturedFragment() noexcept;
+    // `lit` selects the `lighting on` twin that adds the pass emissive
+    // (surface_emissive_colour), as fixed-function lighting does.
+    const char* FixedFuncTexturedFragment(bool lit = false) noexcept;
     const char* FixedFuncUntexturedVertex() noexcept;
-    const char* FixedFuncUntexturedFragment() noexcept;
+    const char* FixedFuncUntexturedFragment(bool lit = false) noexcept;
     const char* FixedFuncTextured2Vertex() noexcept;
     // Fragment program for a supported stage-1 combine, else nullptr.
-    const char* FixedFuncTextured2Fragment(StageCombine stage1) noexcept;
+    const char* FixedFuncTextured2Fragment(StageCombine stage1,
+                                           bool lit = false) noexcept;
+    // Maps an OSE_FixedFunc_*_lit fragment name to its no-emissive sibling.
+    // The runtime falls back to it when a deployed payload predates the *_lit
+    // programs, so a stale resources folder costs the glow, not the draw.
+    bool UnlitFragmentTwin(std::string_view litFragment, std::string& outUnlit);
     // Draw-nothing pair bound by CompatPath::SuppressPass. POSITION only.
     const char* FixedFuncSuppressVertex() noexcept;
     const char* FixedFuncSuppressFragment() noexcept;
