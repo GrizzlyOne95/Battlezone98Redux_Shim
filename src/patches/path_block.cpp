@@ -327,10 +327,15 @@ namespace
         return out;
     }
 
-    // Final state of one cell: building bits present iff `want`. Clearing goes
-    // through the engine's BuildingUnblock so the steep/slope bits it shares
-    // with 0xB are re-derived from terrain exactly as stock deletion does; a
-    // cell without building bits is never touched.
+    // Final state of one cell: building bits present iff `want`. A cell
+    // without building bits is never touched. Clearing a cell the stock call
+    // just blocked restores its byte from before that call, so terrain bits
+    // (including the cliff value 3, which the 0xB OR hides) come back exactly;
+    // a cell that was already blocked before (a second pass, an EXU pass) goes
+    // through the engine's BuildingUnblock, which re-derives steep/slope from
+    // terrain the way stock deletion does.
+    std::vector<uint8_t> g_PreCall;
+
     void ApplyCell(uint8_t* grid, int index, int gx, int gz, bool want, int& changed)
     {
         const uint8_t v = grid[index];
@@ -342,7 +347,11 @@ namespace
         }
         else if (!want && has)
         {
-            g_Engine.buildingUnblock(index, gx, gz);
+            const bool snapshot = index >= 0 && static_cast<size_t>(index) < g_PreCall.size();
+            if (snapshot && (g_PreCall[index] & kBuildingBits) != kBuildingBits)
+                grid[index] = g_PreCall[index];
+            else
+                g_Engine.buildingUnblock(index, gx, gz);
             ++changed;
         }
     }
@@ -377,6 +386,22 @@ namespace
 
     void HandleAdd(void* object, uint8_t* grid)
     {
+        // Flagged objects only: keep the grid bytes from before the stock box
+        // so ApplyCell can undo it exactly (see there).
+        std::string odfName;
+        OdfEntry* odf = LookupOdf(object, odfName);
+        g_PreCall.clear();
+        if (odf && odf->spec.mode != PB::Mode::Box)
+        {
+            const PB::GridDesc pre = ReadGrid();
+            if (pre.Width() > 0 && pre.Depth() > 0)
+            {
+                g_PreCall.resize(static_cast<size_t>(pre.Width()) * static_cast<size_t>(pre.Depth()));
+                if (!SafeCopy(grid, g_PreCall.data(), g_PreCall.size()))
+                    g_PreCall.clear();
+            }
+        }
+
         uint32_t sentinel = kQuadSentinel;
         std::memcpy(&g_Engine.blockVerts[0], &sentinel, sizeof(sentinel));
         if (!SafeCallOriginal(object, 1))
@@ -395,7 +420,7 @@ namespace
         }
         PB::QuadBounds(b.quad, b.x0, b.z0, b.x1, b.z1);
 
-        OdfEntry* odf = LookupOdf(object, b.odf);
+        b.odf = odfName;
         b.mode = odf ? odf->spec.mode : PB::Mode::Box;
 
         auto previous = g_Blockers.find(object);
@@ -468,6 +493,7 @@ namespace
 
     void HandleRemove(void* object, uint8_t* grid)
     {
+        g_PreCall.clear(); // removal only re-adds; never restore a stale snapshot
         const bool ok = SafeCallOriginal(object, 0);
         auto found = g_Blockers.find(object);
         if (!ok || found == g_Blockers.end())
