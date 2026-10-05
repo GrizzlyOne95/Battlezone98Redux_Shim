@@ -1051,8 +1051,183 @@ void TestSuppressAndInPlace()
           "pass kind name");
 }
 
+void TestFixedFunctionEmissive()
+{
+    std::printf("TestFixedFunctionEmissive\n");
+    std::string vs;
+    std::string ps;
+
+    // Lighting off (the default and the "unknown" reading): historical
+    // programs, no emissive -- fixed function ignores emissive when unlit.
+    LegacyPassDesc unlit1 = FixedFuncDesc(1);
+    Check(!unlit1.lightingEnabled, "lighting defaults off when unread");
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncTextured, unlit1, vs,
+                                ps) &&
+              vs == "OSE_FixedFunc_Textured_vertex" &&
+              ps == "OSE_FixedFunc_Textured_fragment",
+          "unlit textured pass keeps the no-emissive fragment");
+
+    // Lighting on: the *_lit twin adds the pass emissive (ivptank_ck_*).
+    LegacyPassDesc lit1 = FixedFuncDesc(1);
+    lit1.lightingEnabled = true;
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncTextured, lit1, vs,
+                                ps) &&
+              vs == "OSE_FixedFunc_Textured_vertex" &&
+              ps == "OSE_FixedFunc_Textured_fragment_lit",
+          "lit textured pass takes the emissive fragment, same vertex");
+    LegacyPassDesc lit0 = FixedFuncDesc(0, nullptr);
+    lit0.lightingEnabled = true;
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncUntextured, lit0, vs,
+                                ps) &&
+              vs == "OSE_FixedFunc_Untextured_vertex" &&
+              ps == "OSE_FixedFunc_Untextured_fragment_lit",
+          "lit untextured pass takes the emissive fragment");
+    lit0.lightingEnabled = false;
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncUntextured, lit0, vs,
+                                ps) &&
+              ps == "OSE_FixedFunc_Untextured_fragment",
+          "unlit untextured pass keeps the no-emissive fragment");
+
+    LegacyPassDesc xrain = XrainDesc();
+    xrain.lightingEnabled = true;
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncTextured2, xrain, vs,
+                                ps) &&
+              vs == "OSE_FixedFunc_Textured2_vertex" &&
+              ps == "OSE_FixedFunc_Textured2_fragment_alphablend_lit",
+          "lit two-stage alpha_blend takes its emissive twin");
+    LegacyPassDesc add2 = XrainDesc();
+    add2.stages[1] = Stage(BlendOpEx::Add);
+    add2.lightingEnabled = true;
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncTextured2, add2, vs,
+                                ps) &&
+              ps == "OSE_FixedFunc_Textured2_fragment_add_lit",
+          "lit two-stage add takes its emissive twin");
+    LegacyPassDesc mod2 = XrainDesc();
+    mod2.stages[1] = Stage(BlendOpEx::Modulate);
+    mod2.lightingEnabled = true;
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncTextured2, mod2, vs,
+                                ps) &&
+              ps == "OSE_FixedFunc_Textured2_fragment_modulate_lit",
+          "lit two-stage modulate takes its emissive twin");
+    Check(FixedFuncTextured2Fragment(StageCombine::Replace, true) == nullptr,
+          "lit replace has no twin");
+
+    // Programmable sources replaced fixed-function lighting with their own
+    // shader: neither the generic remap fallback nor the aggressive stand-in
+    // adds it.
+    LegacyPassDesc unknown = ProgramDesc("MyOwn_vs", "vs_2_0", "MyOwn_ps",
+                                         "ps_2_0");
+    unknown.textureUnits = 1;
+    unknown.lightingEnabled = true;
+    Check(ResolveCompatPrograms(CompatPath::FamilyRemap, unknown, vs, ps) &&
+              ps == "OSE_FixedFunc_Textured_fragment",
+          "family remap fallback never takes the emissive twin");
+    Check(ResolveCompatPrograms(CompatPath::AggressiveGeneric, unknown, vs,
+                                ps) &&
+              ps == "OSE_FixedFunc_Textured_fragment",
+          "aggressive generic never takes the emissive twin");
+
+    // Stale payload fallback: each *_lit twin maps to its sibling; nothing
+    // else does.
+    std::string unlit;
+    Check(UnlitFragmentTwin("OSE_FixedFunc_Textured_fragment_lit", unlit) &&
+              unlit == "OSE_FixedFunc_Textured_fragment",
+          "textured twin falls back to its sibling");
+    Check(UnlitFragmentTwin("OSE_FixedFunc_Textured2_fragment_add_lit",
+                            unlit) &&
+              unlit == "OSE_FixedFunc_Textured2_fragment_add",
+          "two-stage twin falls back to its sibling");
+    Check(!UnlitFragmentTwin("OSE_FixedFunc_Textured_fragment", unlit) &&
+              unlit.empty(),
+          "an unlit name has no fallback");
+    Check(!UnlitFragmentTwin("OSE_Compat_Effect_fragment_lit", unlit),
+          "only OSE_FixedFunc names fall back");
+    Check(!UnlitFragmentTwin("OSE_FixedFunc_Textured_vertex_lit", unlit),
+          "only fragment programs fall back");
+
+    // Payload contract: every *_lit twin exists with its sibling's entry and
+    // defines plus COMPAT_LIGHTING_EMISSIVE and the live emissive auto param;
+    // nothing else binds emissiveColour (the uniform only exists under the
+    // define, and binding a stripped uniform is a program load error).
+    const std::string script = ReadTextFile(BZR_FIXEDFUNC_PROGRAM);
+    const std::string hlsl = ReadTextFile(BZR_FIXEDFUNC_HLSL);
+    struct LitTwin
+    {
+        const char* name;
+        const char* sibling;
+        const char* entry;
+        const char* extraDefine;
+    };
+    const LitTwin twins[] = {
+        { "OSE_FixedFunc_Textured_fragment_lit",
+          "OSE_FixedFunc_Textured_fragment", "fixedfunc_fragment", nullptr },
+        { "OSE_FixedFunc_Untextured_fragment_lit",
+          "OSE_FixedFunc_Untextured_fragment", "fixedfunc_untextured_fragment",
+          nullptr },
+        { "OSE_FixedFunc_Textured2_fragment_modulate_lit",
+          "OSE_FixedFunc_Textured2_fragment_modulate", "fixedfunc2_fragment",
+          "COMPAT_OP1_MODULATE" },
+        { "OSE_FixedFunc_Textured2_fragment_add_lit",
+          "OSE_FixedFunc_Textured2_fragment_add", "fixedfunc2_fragment",
+          "COMPAT_OP1_ADD" },
+        { "OSE_FixedFunc_Textured2_fragment_alphablend_lit",
+          "OSE_FixedFunc_Textured2_fragment_alphablend", "fixedfunc2_fragment",
+          "COMPAT_OP1_ALPHABLEND" },
+    };
+    for (const LitTwin& t : twins)
+    {
+        const std::string block =
+            ProgramBlock(script, t.name, "fragment_program");
+        Check(!block.empty(), t.name);
+        ExpectContains(block, (std::string("entry_point ") + t.entry).c_str(),
+                       t.name);
+        ExpectContains(block, "COMPAT_LIGHTING_EMISSIVE", t.name);
+        ExpectContains(block,
+                       "param_named_auto emissiveColour surface_emissive_colour",
+                       t.name);
+        ExpectContains(block,
+                       "param_named_auto sceneAmbient derived_ambient_light_colour",
+                       t.name);
+        ExpectContains(block, "param_named_auto fogParams fog_params", t.name);
+        if (t.extraDefine != nullptr)
+        {
+            ExpectContains(block, t.extraDefine, t.name);
+        }
+        const std::string sibling =
+            ProgramBlock(script, t.sibling, "fragment_program");
+        Check(!sibling.empty() &&
+                  sibling.find("emissiveColour") == std::string::npos &&
+                  sibling.find("COMPAT_LIGHTING_EMISSIVE") == std::string::npos,
+              t.sibling);
+    }
+    size_t binds = 0;
+    for (size_t at = script.find("emissiveColour surface_emissive_colour");
+         at != std::string::npos;
+         at = script.find("emissiveColour surface_emissive_colour", at + 1))
+    {
+        ++binds;
+    }
+    Check(binds == sizeof(twins) / sizeof(twins[0]),
+          "only the *_lit twins bind emissiveColour");
+    ExpectContains(hlsl,
+                   "float3 ApplyFfpEmissive(float3 colour, float3 emissive)",
+                   "emissive helper");
+    ExpectContains(hlsl, "return min(colour + emissive, max(colour, 1.0));",
+                   "black emissive is the identity");
+    size_t uniforms = 0;
+    for (size_t at = hlsl.find("    uniform float4 emissiveColour,");
+         at != std::string::npos;
+         at = hlsl.find("    uniform float4 emissiveColour,", at + 1))
+    {
+        ++uniforms;
+    }
+    Check(uniforms == 3,
+          "textured, untextured and two-stage fragments declare it");
+}
+
 int main()
 {
+    TestFixedFunctionEmissive();
     TestNativeInputGuards();
     TestVertexInputFit();
     TestTwoStageFixedFunction();
