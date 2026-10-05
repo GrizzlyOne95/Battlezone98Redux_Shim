@@ -152,6 +152,19 @@ namespace
         {
             return TryReadMappedBool(ini, "General", "ChunkMeshes", true, out);
         }
+        // SkinnedGibs: person deaths as rigid limb gibs. Independent of
+        // ChunkMeshes; the numeric keys are read raw and clamped by the
+        // feature.
+        if (Equals(name, "OPENSHIM_DISABLE_SKINNED_GIBS") || Equals(name, "BZR_DISABLE_SKINNED_GIBS"))
+            return TryReadMappedBool(ini, "General", "SkinnedGibs", true, out);
+        if (Equals(name, "OPENSHIM_SKINNED_GIBS_MAX"))
+            return ini(IniFile::Main, "General", "SkinnedGibsMax", out);
+        if (Equals(name, "OPENSHIM_SKINNED_GIBS_LINGER"))
+            return ini(IniFile::Main, "General", "SkinnedGibsLinger", out);
+        if (Equals(name, "OPENSHIM_SKINNED_GIBS_FORCE"))
+            return ini(IniFile::Main, "General", "SkinnedGibsForce", out);
+        if (Equals(name, "OPENSHIM_TRACE_SKINNED_GIBS"))
+            return TryReadMappedBool(ini, "Diagnostics", "TraceSkinnedGibs", false, out);
         if (Equals(name, "OPENSHIM_DISABLE_MAP_REFRESH_FIXES") ||
             Equals(name, "BZR_DISABLE_MAP_REFRESH_FIXES"))
         {
