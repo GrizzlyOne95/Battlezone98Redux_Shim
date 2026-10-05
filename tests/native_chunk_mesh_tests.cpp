@@ -513,6 +513,34 @@ int main(int argc, char **argv)
                     pieces[0].triangles == (kind == 1 ? 4u : 8u),
                 "fallback mesh reloads with all stock faces preserved");
     }
+    {
+        // ShellCasings' generated cartridge case.
+        Require(CasingMesh(5).mesh.empty() && CasingMesh(33).mesh.empty(), "invalid casing side counts fail closed");
+        const auto casing = CasingMesh(10);
+        const std::string data(casing.mesh.begin(), casing.mesh.end());
+        Require(casing.mesh == CasingMesh(10).mesh && casing.mesh.size() < 32768, "casing mesh is deterministic and small");
+        Require(data.find("openshim_casing_brass") != std::string::npos &&
+                    data.find("openshim_casing_rim") != std::string::npos && SkeletonName(casing.mesh).empty(),
+                "casing uses the brass and rim materials and no skeleton");
+        // Body 3 bands + rim band = 4 * 2 * sides; rim top annulus 2 * sides;
+        // base and mouth discs one fan triangle per side each.
+        Require(casing.triangles == 10u * (8u + 2u + 2u), "casing triangle count");
+        Require(Extract(casing.mesh, skeleton, pieces, error) && pieces.size() == 1 &&
+                    pieces[0].triangles == casing.triangles,
+                "casing mesh reloads through the Ogre mesh parser with every face");
+        // Bounds: unit length along Z, rim radius 0.225 across X/Y.
+        // The bounds chunk (id 0x9000, 6-byte header, min, max, radius) is
+        // the last thing in the file.
+        float bounds[7] = {};
+        Require(casing.mesh.size() > sizeof(bounds) + 6 &&
+                    casing.mesh[casing.mesh.size() - sizeof(bounds) - 6] == 0x00 &&
+                    casing.mesh[casing.mesh.size() - sizeof(bounds) - 5] == 0x90,
+                "casing ends with its bounds chunk");
+        std::memcpy(bounds, casing.mesh.data() + casing.mesh.size() - sizeof(bounds), sizeof(bounds));
+        Require(std::fabs(bounds[2] + 0.5f) < 1e-5f && std::fabs(bounds[5] - 0.5f) < 1e-5f &&
+                    std::fabs(bounds[3] - 0.225f) < 1e-4f && std::fabs(bounds[0] + 0.225f) < 1e-3f,
+                "casing bounds span z -0.5..0.5 and the rim radius");
+    }
     Require(SkeletonName(mesh) == "test.skeleton", "shared geometry skeleton link");
     Require(Extract(mesh, skeleton, pieces, error), "extract rigid bone group");
     Require(pieces.size() == 1 && pieces[0].name == "piece" && pieces[0].triangles == 1,

@@ -1567,6 +1567,21 @@ namespace BZROpenShim
             const std::filesystem::path& cacheRoot,
             const std::vector<std::filesystem::path>& payloadDirectories);
 
+        // ShellCasings (shell_casings.cpp): cosmetic casings ejected by
+        // cannon-like weapons, simulated and drawn by the shim. [General]
+        // ShellCasings = 0 leaves every path below inert.
+        bool IsShellCasingsEnabled();
+        void TickShellCasings(float dt);
+        void SubmitShellCasingsToRenderQueue(void* renderQueue);
+        void ForgetShellCasingSceneResources(const wchar_t* reason);
+        void DeactivateShellCasings(const wchar_t* reason);
+        // Writes the generated casing mesh and its default materials into
+        // the chunk cache root (materials yield to a payload pack's own).
+        // Must run before the payload resource group is initialised.
+        void EnsureShellCasingAssets(
+            const std::filesystem::path& cacheRoot,
+            const std::vector<std::filesystem::path>& payloadDirectories);
+
         // Shim-owned mesh objects on the chunk payload group
         // (chunk_proxy_render.cpp), independent of ChunkMeshes.
         bool EnsureSkinnedGibResourceLocations();

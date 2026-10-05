@@ -669,6 +669,131 @@ Piece StockFallbackMesh(unsigned kind)
     chunk(out, 0x3000, body);
     return {"stock_chunk" + std::to_string(kind), std::move(out), g.count / 3};
 }
+Piece CasingMesh(unsigned sides)
+{
+    if (sides < 6 || sides > 32)
+        return {};
+    // Unit-length shell along local +Z, centred on the origin: a rim and base
+    // at z = -0.5, a straight body, a short shoulder and a neck to the mouth
+    // at z = +0.5. Two submeshes so the brass and the darker rim, base and
+    // open mouth take separate materials.
+    constexpr float kRim = 0.225f, kBody = 0.2f, kNeck = 0.165f;
+    constexpr float kBase = -0.5f, kRimTop = -0.44f, kShoulder = 0.36f, kNeckStart = 0.42f, kMouth = 0.5f;
+    constexpr float kPi = 3.14159265358979f;
+    struct Vertex
+    {
+        V p, n;
+        float u, v;
+    };
+    auto ring = [&](unsigned i, float radius) {
+        const float a = 2.0f * kPi * static_cast<float>(i % sides) / static_cast<float>(sides);
+        return V{std::cos(a) * radius, std::sin(a) * radius, 0.0f};
+    };
+    auto at = [](V p, float z) { return V{p[0], p[1], z}; };
+    auto norm = [](V a) {
+        const float l = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+        return l > 1e-9f ? V{a[0] / l, a[1] / l, a[2] / l} : V{0, 0, 1};
+    };
+    std::vector<Vertex> brass, rim;
+    auto tri = [](std::vector<Vertex> &out, Vertex a, Vertex b, Vertex c) {
+        out.push_back(a);
+        out.push_back(b);
+        out.push_back(c);
+    };
+    // A band between two rings, outward facing. Normals tilt with the slope
+    // so the shoulder shades as a cone.
+    auto band = [&](std::vector<Vertex> &out, float z0, float r0, float z1, float r1) {
+        for (unsigned i = 0; i < sides; ++i)
+        {
+            const float u0 = static_cast<float>(i) / static_cast<float>(sides);
+            const float u1 = static_cast<float>(i + 1) / static_cast<float>(sides);
+            const V d0 = ring(i, 1.0f), d1 = ring(i + 1, 1.0f);
+            const V n0 = norm({d0[0] * (z1 - z0), d0[1] * (z1 - z0), r0 - r1});
+            const V n1 = norm({d1[0] * (z1 - z0), d1[1] * (z1 - z0), r0 - r1});
+            const Vertex a0{at(ring(i, r0), z0), n0, u0, z0 + 0.5f}, a1{at(ring(i + 1, r0), z0), n1, u1, z0 + 0.5f};
+            const Vertex b0{at(ring(i, r1), z1), n0, u0, z1 + 0.5f}, b1{at(ring(i + 1, r1), z1), n1, u1, z1 + 0.5f};
+            tri(out, a0, a1, b1);
+            tri(out, a0, b1, b0);
+        }
+    };
+    // A flat ring between two radii at one z, facing +Z or -Z.
+    auto annulus = [&](std::vector<Vertex> &out, float z, float inner, float outer, bool up) {
+        const V n{0, 0, up ? 1.0f : -1.0f};
+        for (unsigned i = 0; i < sides; ++i)
+        {
+            const V in0 = at(ring(i, inner), z), in1 = at(ring(i + 1, inner), z);
+            const V out0 = at(ring(i, outer), z), out1 = at(ring(i + 1, outer), z);
+            const Vertex vi0{in0, n, in0[0] + 0.5f, in0[1] + 0.5f}, vi1{in1, n, in1[0] + 0.5f, in1[1] + 0.5f};
+            const Vertex vo0{out0, n, out0[0] + 0.5f, out0[1] + 0.5f}, vo1{out1, n, out1[0] + 0.5f, out1[1] + 0.5f};
+            // A disc (inner radius 0) is a fan: its second triangle would
+            // be degenerate.
+            if (up)
+            {
+                tri(out, vi0, vo0, vo1);
+                if (inner > 0.0f)
+                    tri(out, vi0, vo1, vi1);
+            }
+            else
+            {
+                tri(out, vi0, vo1, vo0);
+                if (inner > 0.0f)
+                    tri(out, vi0, vi1, vo1);
+            }
+        }
+    };
+    band(brass, kRimTop, kBody, kShoulder, kBody);
+    band(brass, kShoulder, kBody, kNeckStart, kNeck);
+    band(brass, kNeckStart, kNeck, kMouth, kNeck);
+    band(rim, kBase, kRim, kRimTop, kRim);
+    annulus(rim, kRimTop, kBody, kRim, true);
+    annulus(rim, kBase, 0.0f, kRim, false);
+    annulus(rim, kMouth, 0.0f, kNeck, true);
+
+    V lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
+    float radius = 0;
+    Bytes body{0};
+    uint32_t triangles = 0;
+    for (const auto &[material, vertices] :
+         {std::pair<const char *, const std::vector<Vertex> *>{"openshim_casing_brass", &brass},
+          std::pair<const char *, const std::vector<Vertex> *>{"openshim_casing_rim", &rim}})
+    {
+        Geometry g;
+        g.count = static_cast<uint32_t>(vertices->size());
+        // Position, normal, uv0: the gib cap declaration.
+        g.elements = {{0, 2, 1, 0, 0}, {0, 2, 4, 12, 0}, {0, 1, 7, 24, 0}};
+        Buffer buffer{32, {}};
+        std::vector<uint32_t> indices;
+        for (const auto &v : *vertices)
+        {
+            for (float value : {v.p[0], v.p[1], v.p[2], v.n[0], v.n[1], v.n[2], v.u, v.v})
+                put(buffer.data, value);
+            indices.push_back(static_cast<uint32_t>(indices.size()));
+        }
+        g.buffers.emplace(uint16_t{0}, std::move(buffer));
+        Bytes sub;
+        line(sub, material);
+        put(sub, uint8_t{0});
+        put(sub, g.count);
+        put(sub, uint8_t{0});
+        for (auto index : indices)
+            put(sub, static_cast<uint16_t>(index));
+        chunk(sub, 0x5000, emitGeometry(g, indices, Frame{}, lo, hi, radius));
+        chunk(body, 0x4000, sub);
+        triangles += g.count / 3;
+    }
+    Bytes bounds;
+    for (float v : lo)
+        put(bounds, v);
+    for (float v : hi)
+        put(bounds, v);
+    put(bounds, radius);
+    chunk(body, 0x9000, bounds);
+    Bytes out;
+    put(out, uint16_t{0x1000});
+    line(out, "[MeshSerializer_v1.8]");
+    chunk(out, 0x3000, body);
+    return {"openshim_casing", std::move(out), triangles};
+}
 std::string SkeletonName(const Bytes &b)
 {
     try

@@ -47,6 +47,14 @@ namespace BZROpenShim
     void* __fastcall PersonCarrierGetWeaponGuard(void* carrier, void* edx, int slot);
     void* __fastcall PersonSniperScanGetWeaponGuard(void* carrier, void* edx, int slot);
     void SetHoverCraftTurboSoundResolves(void* soundFind, void* soundListHead);
+    namespace Hooks
+    {
+        // ShellCasings (shell_casings.cpp): REL32 target for the OrdnanceClass
+        // factory calls in Cannon::Simulate and MachineGun::Simulate. The
+        // original factory must be set before the call is redirected.
+        void SetShellCasingFactoryOriginal(void* factory);
+        void* GetShellCasingShotBridgeAddress();
+    }
     // REL32 target at HoverCraft::UpdateSounds' turbo-stop Sound::Find call.
     // Naked: reads the craft from the caller's frame, cdecl (name, owner) args.
     void HoverCraftTurboSoundStopFindThunk();
