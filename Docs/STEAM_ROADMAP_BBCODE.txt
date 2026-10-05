@@ -389,6 +389,7 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 [*] Restore animated terrain waves / Ctrl+Shift waves
 [*] Restore additional legacy TRN lighting parameters
 [*] Multiple terrain atlases / per-tile material selection
+[*] [b]Visual-only terrain tessellation[/b] - [b]Research (2026-10-03):[/b] the GOG renderer contains hull/domain shader and triangle-patch submission paths. The proposed first proof uses native terrain materials, then shallow adaptive displacement while preserving collision and gameplay terrain. No tessellated gameplay capture or performance qualification exists yet.
 [*] Backport [code]draw_geom[/code] or an equivalent geometry effect only if EXU/Ogre entity APIs do not already cover the need
 [/list]
 
