@@ -222,6 +222,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # mod corpus qualifies it, so it needs no allowlist entry.
     "Fixes/DX11ShaderlessDrawGuard",
 
+    # Opt-in per ODF: changes the AI path grid only for buildings whose ODF
+    # sets pathBlock = "faces"/"none". No stock or unflagged content changes.
+    "General/PathBlockFaces",
+
     # Qualified socket/netcode baseline.
     "Network/NetImprovements",
 

@@ -134,6 +134,15 @@ namespace
         ini.Set("General", "SkinnedGibsMax", "96");
         Check(Mapped(ini, "OPENSHIM_SKINNED_GIBS_MAX") == "96", "numeric gib tuning passes through raw");
 
+        // PathBlockFaces: inverted switch, trace from [Diagnostics].
+        Check(Mapped(ini, "OPENSHIM_DISABLE_PATH_BLOCK_FACES") == "<none>", "unset PathBlockFaces keeps the code default");
+        ini.Set("General", "PathBlockFaces", "0");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_PATH_BLOCK_FACES") == "1", "PathBlockFaces = 0 reads as DISABLE=1");
+        ini.Set("General", "PathBlockFaces", "1");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_PATH_BLOCK_FACES") == "0", "PathBlockFaces = 1 reads as DISABLE=0");
+        ini.Set("Diagnostics", "TracePathBlock", "1");
+        Check(Mapped(ini, "OPENSHIM_TRACE_PATH_BLOCK") == "1", "TracePathBlock maps from [Diagnostics]");
+
         // DisableControlSmoothing is the one General DISABLE_ key that is
         // itself negative, so it is read as written.
         ini.Set("General", "DisableControlSmoothing", "1");
