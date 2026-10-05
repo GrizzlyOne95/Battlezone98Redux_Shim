@@ -2,6 +2,8 @@
 #include "engine_globals.h"
 
 #include "terrain_semantic.h"
+#include "terrain_proxy_backend_gate.h"
+#include "render_profile_runtime.h"
 
 #include "bzr_hooks.h"
 #include "bzr_options_ui.h"
@@ -585,6 +587,12 @@ namespace BZROpenShim
         FnMixAt g_mixAt = nullptr;
         uintptr_t g_mainBase = 0;
         std::atomic<bool> g_active{ false };
+        // Set only after the ACTIVE Ogre render system was positively
+        // identified as Direct3D11 (TerrainProxyGate). Every helper that
+        // reinterprets an Ogre object as a D3D11 render-system object checks
+        // it first: RenderSystem_Direct3D11.dll is loaded in DX9 processes
+        // too, so resolving its exports proves nothing about buffer ownership.
+        std::atomic<bool> g_d3d11RenderSystemConfirmed{ false };
         std::atomic<bool> g_shutdown{ false };
         HANDLE g_worker = nullptr;
         std::mutex g_mutex;
@@ -1283,6 +1291,8 @@ namespace BZROpenShim
 
         bool ResolveD3D11TextureApi()
         {
+            if (!g_d3d11RenderSystemConfirmed.load(std::memory_order_acquire))
+                return false;
             if (g_ogre.getTextureBuffer)
                 return true;
             HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
@@ -1515,35 +1525,44 @@ namespace BZROpenShim
             return true;
         }
 
-        bool ReadD3D11VertexBuffer(
-            void* ogreBuffer,
-            uint32_t byteCount,
-            std::vector<uint8_t>& bytes)
+        bool ResolveD3D11VertexBufferApi()
         {
-            bytes.clear();
-            if (!ogreBuffer || byteCount == 0)
-                return false;
-
-            if (!g_ogre.getD3D11VertexBuffer)
+            if (!g_d3d11RenderSystemConfirmed.load(std::memory_order_acquire))
             {
-                HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
-                if (!renderer)
-                    return false;
-                g_ogre.getD3D11VertexBuffer = Resolve<FnGetD3D11VertexBuffer>(
-                    renderer,
-                    "?getD3DVertexBuffer@D3D11HardwareVertexBuffer@Ogre@@QBEPAUID3D11Buffer@@XZ");
-                if (!g_ogre.getD3D11VertexBuffer)
-                    return false;
+                static std::atomic<bool> s_logged{ false };
+                if (!s_logged.exchange(true))
+                {
+                    LogShimA(LogLevel::Warn, "terrain-proxy",
+                        "[TERRAIN-PROXY] D3D11 buffer access refused: active render system is not confirmed Direct3D11");
+                }
+                return false;
             }
+            if (g_ogre.getD3D11VertexBuffer)
+                return true;
+            HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
+            if (!renderer)
+                return false;
+            g_ogre.getD3D11VertexBuffer = Resolve<FnGetD3D11VertexBuffer>(
+                renderer,
+                "?getD3DVertexBuffer@D3D11HardwareVertexBuffer@Ogre@@QBEPAUID3D11Buffer@@XZ");
+            return g_ogre.getD3D11VertexBuffer != nullptr;
+        }
 
+        // SEH leaves: no C++ objects with destructors live in these frames,
+        // so a bad buffer (wrong render system, stale pointer) fails closed
+        // instead of taking the process down. try/catch(...) does not catch
+        // access violations in this /EHsc build. After a fault the COM state
+        // is unknown, so references are deliberately leaked, never touched.
+        __declspec(noinline) bool GuardedReadD3D11Buffer(
+            void* ogreBuffer, uint8_t* destination, uint32_t byteCount)
+        {
             ID3D11Buffer* source = nullptr;
             ID3D11Device* device = nullptr;
             ID3D11DeviceContext* context = nullptr;
             ID3D11Buffer* staging = nullptr;
             bool mapped = false;
             bool ok = false;
-            D3D11_MAPPED_SUBRESOURCE mapping = {};
-            try
+            __try
             {
                 do
                 {
@@ -1573,58 +1592,40 @@ namespace BZROpenShim
                         break;
 
                     context->CopyResource(staging, source);
+                    D3D11_MAPPED_SUBRESOURCE mapping = {};
                     if (FAILED(context->Map(staging, 0, D3D11_MAP_READ, 0, &mapping)) ||
                         !mapping.pData)
                         break;
                     mapped = true;
-                    bytes.resize(byteCount);
-                    memcpy(bytes.data(), mapping.pData, byteCount);
+                    memcpy(destination, mapping.pData, byteCount);
                     ok = true;
                 } while (false);
+
+                if (mapped && context && staging)
+                    context->Unmap(staging, 0);
+                if (staging)
+                    staging->Release();
+                if (context)
+                    context->Release();
+                if (device)
+                    device->Release();
             }
-            catch (...)
+            __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 ok = false;
             }
-
-            if (mapped && context && staging)
-                context->Unmap(staging, 0);
-            if (staging)
-                staging->Release();
-            if (context)
-                context->Release();
-            if (device)
-                device->Release();
-            if (!ok)
-                bytes.clear();
             return ok;
         }
 
-        bool WriteD3D11VertexBuffer(
-            void* ogreBuffer,
-            const void* bytes,
-            uint32_t byteCount)
+        __declspec(noinline) bool GuardedWriteD3D11Buffer(
+            void* ogreBuffer, const void* bytes, uint32_t byteCount)
         {
-            if (!ogreBuffer || !bytes || byteCount == 0)
-                return false;
-            if (!g_ogre.getD3D11VertexBuffer)
-            {
-                HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
-                if (!renderer)
-                    return false;
-                g_ogre.getD3D11VertexBuffer = Resolve<FnGetD3D11VertexBuffer>(
-                    renderer,
-                    "?getD3DVertexBuffer@D3D11HardwareVertexBuffer@Ogre@@QBEPAUID3D11Buffer@@XZ");
-                if (!g_ogre.getD3D11VertexBuffer)
-                    return false;
-            }
             ID3D11Buffer* buffer = nullptr;
             ID3D11Device* device = nullptr;
             ID3D11DeviceContext* context = nullptr;
             bool mapped = false;
             bool ok = false;
-            D3D11_MAPPED_SUBRESOURCE mapping = {};
-            try
+            __try
             {
                 do
                 {
@@ -1643,6 +1644,7 @@ namespace BZROpenShim
                     device->GetImmediateContext(&context);
                     if (!context)
                         break;
+                    D3D11_MAPPED_SUBRESOURCE mapping = {};
                     if (FAILED(context->Map(buffer, 0,
                             D3D11_MAP_WRITE_DISCARD, 0, &mapping)) ||
                         !mapping.pData)
@@ -1651,18 +1653,50 @@ namespace BZROpenShim
                     memcpy(mapping.pData, bytes, byteCount);
                     ok = true;
                 } while (false);
+
+                if (mapped && context && buffer)
+                    context->Unmap(buffer, 0);
+                if (context)
+                    context->Release();
+                if (device)
+                    device->Release();
             }
-            catch (...)
+            __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 ok = false;
             }
-            if (mapped && context && buffer)
-                context->Unmap(buffer, 0);
-            if (context)
-                context->Release();
-            if (device)
-                device->Release();
             return ok;
+        }
+
+        bool ReadD3D11VertexBuffer(
+            void* ogreBuffer,
+            uint32_t byteCount,
+            std::vector<uint8_t>& bytes)
+        {
+            bytes.clear();
+            if (!ogreBuffer || byteCount == 0)
+                return false;
+            if (!ResolveD3D11VertexBufferApi())
+                return false;
+            bytes.resize(byteCount);
+            if (!GuardedReadD3D11Buffer(ogreBuffer, bytes.data(), byteCount))
+            {
+                bytes.clear();
+                return false;
+            }
+            return true;
+        }
+
+        bool WriteD3D11VertexBuffer(
+            void* ogreBuffer,
+            const void* bytes,
+            uint32_t byteCount)
+        {
+            if (!ogreBuffer || !bytes || byteCount == 0)
+                return false;
+            if (!ResolveD3D11VertexBufferApi())
+                return false;
+            return GuardedWriteD3D11Buffer(ogreBuffer, bytes, byteCount);
         }
 
         bool ValidateTerrainOperation(void* mesh, void* entity, const char* role)
@@ -5132,6 +5166,46 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             return true;
         }
 
+        // Fail-closed renderer gate (dump 61904). The proxy, semantic renderer
+        // and HD terrain all write through D3D11 render-system objects, so no
+        // hook is installed until Ogre's ACTIVE render system is positively
+        // identified as Direct3D11. Anything else -- DX9, OpenGL, or no
+        // identification within the budget -- leaves stock terrain untouched.
+        bool WaitForDirect3D11RenderSystem()
+        {
+            using namespace TerrainProxyGate;
+            constexpr DWORD kPollMs = 250;
+            constexpr DWORD kBudgetMs = 120000;
+            DWORD waited = 0;
+            ActiveRenderSystem active = ActiveRenderSystem::NotReady;
+            Decision decision = Decision::Wait;
+            while (!g_shutdown.load())
+            {
+                active = ActiveRenderSystemFromCode(
+                    RenderProfiles::IdentifyActiveRenderSystem());
+                decision = DecideTerrainProxyBackend(active, waited >= kBudgetMs);
+                if (decision != Decision::Wait)
+                    break;
+                Sleep(kPollMs);
+                waited += kPollMs;
+            }
+            if (decision == Decision::Allow)
+            {
+                g_d3d11RenderSystemConfirmed.store(true, std::memory_order_release);
+                LogShimA(LogLevel::Info, "terrain-proxy",
+                    "[TERRAIN-PROXY] active render system Direct3D11 confirmed; terrain proxy enabled");
+                return true;
+            }
+            if (decision == Decision::Deny)
+            {
+                LogShimA(LogLevel::Warn, "terrain-proxy",
+                    "[TERRAIN-PROXY] active render system is %s, not Direct3D11; terrain proxy/semantic/HD disabled, stock terrain kept (proxy=%d semantic=%d hd=%d requested)",
+                    ActiveRenderSystemName(active), g_config.proxyEnabled ? 1 : 0,
+                    g_config.semanticRenderer ? 1 : 0, g_config.hdEnabled ? 1 : 0);
+            }
+            return false;
+        }
+
         DWORD WINAPI WorkerProc(void*)
         {
             HMODULE executable = GetModuleHandleW(nullptr);
@@ -5178,6 +5252,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                     "[TERRAIN-PROXY] required Ogre exports unresolved; Phase 2 unavailable");
                 return 0;
             }
+            if (!WaitForDirect3D11RenderSystem())
+                return 0;
             if (InstallHooks())
             {
                 LogShimA(LogLevel::Info, "terrain-proxy",

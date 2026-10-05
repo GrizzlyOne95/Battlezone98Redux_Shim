@@ -228,6 +228,10 @@ openshim_add_test(terrain_tile_blend_tests STD 20 SOURCES
     terrain_tile_blend_tests.cpp
 )
 
+openshim_add_test(terrain_proxy_backend_gate_tests STD 20 SOURCES
+    terrain_proxy_backend_gate_tests.cpp
+)
+
 openshim_add_test(terrain_atlas_rect_repair_tests STD 20 SOURCES
     terrain_atlas_rect_repair_tests.cpp
     ../src/patches/terrain_atlas_rect_repair.cpp

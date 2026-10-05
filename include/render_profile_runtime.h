@@ -60,6 +60,14 @@ namespace BZROpenShim::RenderProfiles
     // it here on the engine's thread at its next setMaterialScheme call.
     bool ReapplyEffectiveProfileToViewports(const char* context);
 
+    // Synchronous, SEH-guarded identification of Ogre's ACTIVE render system
+    // by pointer identity (Root::getRenderSystem vs getRenderSystemByName).
+    // Module presence is never used: RenderSystem_Direct3D11.dll is loaded in
+    // -renderer:dx9 processes too. Returns 0 = not ready, 1 = Direct3D11,
+    // 2 = Direct3D9, 3 = OpenGL, 4 = unrecognized, -1 = transient fault.
+    // Read-only; safe from any thread once OgreMain.dll is loaded.
+    int IdentifyActiveRenderSystem();
+
     namespace Exports
     {
         uint32_t GetRenderApiVersion();

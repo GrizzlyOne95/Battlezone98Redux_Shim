@@ -714,6 +714,8 @@ TerrainSemanticFrameCaptureMinCoverage = 0.005
 ; Phase 3B HD diffuse tile-array smoke path. DX11 only.
 ; Accepted: integer flag 0/1. Default: 0.
 ; ON also enables the one-cluster proxy and semantic renderer. Missing/invalid
+; Direct3D11 only: under any other active render system the whole terrain
+; proxy path stays off and stock terrain is drawn.
 ; resources fail soft to the stock atlas.
 TerrainHdEnabled = 0
 

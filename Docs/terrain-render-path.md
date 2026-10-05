@@ -548,8 +548,25 @@ The hooks are installed only after all of these checks pass:
 - `OgreMain.dll` SHA-256 is exactly
   `E5E693960B95AD0D60733A3B688464A6C6CBA234E86950698F9C2BEA4ACFEB45`;
 - all required OGRE exports resolve;
+- Ogre's ACTIVE render system is positively identified as Direct3D11
+  (pointer identity of `Root::getRenderSystem()` against
+  `getRenderSystemByName("Direct3D11 Rendering Subsystem")`, polled for up to
+  120 s; `include/terrain_proxy_backend_gate.h`). Module presence is not
+  evidence: `RenderSystem_Direct3D11.dll` is loaded in `-renderer:dx9`
+  processes too, and dump 61904 showed the semantic upload reading a D3D9
+  buffer through the D3D11 accessor and calling through a null vtable slot.
+  DX9, OpenGL or no identification logs
+  `[TERRAIN-PROXY] active render system is <name>, not Direct3D11; terrain
+  proxy/semantic/HD disabled, stock terrain kept` and installs nothing;
 - both released function entries still begin `55 8B EC 6A FF`;
 - each five-byte inline detour and trampoline installs successfully.
+
+The D3D11 buffer helpers (`ReadD3D11VertexBuffer`, `WriteD3D11VertexBuffer`,
+`ResolveD3D11TextureApi`) independently refuse to run until that Direct3D11
+confirmation is recorded, and their COM calls run in SEH-guarded leaf
+functions, so a buffer that is not a live `D3D11HardwareVertexBuffer` fails
+closed instead of terminating the process (`try`/`catch (...)` does not catch
+access violations in this `/EHsc` build).
 
 The rebuild detour also rejects a null zone pointer before entering stock code,
 whose first access is `zone+0x270`. This is a fail-soft corruption backstop and
