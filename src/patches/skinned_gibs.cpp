@@ -1069,6 +1069,182 @@ namespace BZROpenShim
             }
         }
 
+        namespace
+        {
+            // ---- Render probe (TraceSkinnedGibs only) -------------------------
+            // Once a second, report what Ogre itself thinks of one live gib:
+            // visibility, scene membership, queue group, and per sub-entity
+            // whether its material has a technique for the active scheme. Read
+            // only; every call is SEH-guarded.
+            struct GibProbeApi
+            {
+                bool(__thiscall* isVisible)(void*) = nullptr;
+                bool(__thiscall* isInScene)(void*) = nullptr;
+                uint8_t(__thiscall* queueGroup)(void*) = nullptr;
+                uint32_t(__thiscall* visibilityFlags)(void*) = nullptr;
+                void*(__thiscall* parentNode)(void*) = nullptr;
+                const OgreVector3*(__thiscall* derivedPosition)(void*) = nullptr;
+                const OgreVector3*(__thiscall* derivedScale)(void*) = nullptr;
+                unsigned(__thiscall* numSubEntities)(void*) = nullptr;
+                void*(__thiscall* subEntity)(void*, unsigned) = nullptr;
+                bool(__thiscall* subVisible)(void*) = nullptr;
+                const std::string*(__thiscall* subMaterialName)(void*) = nullptr;
+                void* const*(__thiscall* subMaterial)(void*) = nullptr; // SharedPtr: rep first
+                bool(__thiscall* resourceLoaded)(void*) = nullptr;
+                void*(__thiscall* bestTechnique)(void*, unsigned short, const void*) = nullptr;
+            };
+
+            const GibProbeApi& GetGibProbeApi()
+            {
+                static GibProbeApi api;
+                static bool resolved = false;
+                if (resolved)
+                    return api;
+                resolved = true;
+                api.isVisible = ResolveOgreProc<decltype(api.isVisible)>("?isVisible@MovableObject@Ogre@@UBE_NXZ");
+                api.isInScene = ResolveOgreProc<decltype(api.isInScene)>("?isInScene@MovableObject@Ogre@@UBE_NXZ");
+                api.queueGroup =
+                    ResolveOgreProc<decltype(api.queueGroup)>("?getRenderQueueGroup@MovableObject@Ogre@@UBEEXZ");
+                api.visibilityFlags =
+                    ResolveOgreProc<decltype(api.visibilityFlags)>("?getVisibilityFlags@MovableObject@Ogre@@UBEIXZ");
+                api.parentNode = ResolveOgreProc<decltype(api.parentNode)>(
+                    "?getParentSceneNode@MovableObject@Ogre@@UBEPAVSceneNode@2@XZ");
+                api.derivedPosition =
+                    ResolveOgreProc<decltype(api.derivedPosition)>("?_getDerivedPosition@Node@Ogre@@UBEABVVector3@2@XZ");
+                api.derivedScale =
+                    ResolveOgreProc<decltype(api.derivedScale)>("?_getDerivedScale@Node@Ogre@@UBEABVVector3@2@XZ");
+                api.numSubEntities =
+                    ResolveOgreProc<decltype(api.numSubEntities)>("?getNumSubEntities@Entity@Ogre@@QBEIXZ");
+                api.subEntity =
+                    ResolveOgreProc<decltype(api.subEntity)>("?getSubEntity@Entity@Ogre@@QBEPAVSubEntity@2@I@Z");
+                api.subVisible = ResolveOgreProc<decltype(api.subVisible)>("?isVisible@SubEntity@Ogre@@UBE_NXZ");
+                api.subMaterialName = ResolveOgreProc<decltype(api.subMaterialName)>(
+                    "?getMaterialName@SubEntity@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+                api.subMaterial = ResolveOgreProc<decltype(api.subMaterial)>(
+                    "?getMaterial@SubEntity@Ogre@@UBEABV?$SharedPtr@VMaterial@Ogre@@@2@XZ");
+                api.resourceLoaded = ResolveOgreProc<decltype(api.resourceLoaded)>("?isLoaded@Resource@Ogre@@UBE_NXZ");
+                api.bestTechnique = ResolveOgreProc<decltype(api.bestTechnique)>(
+                    "?getBestTechnique@Material@Ogre@@QAEPAVTechnique@2@GPBVRenderable@2@@Z");
+                return api;
+            }
+
+            struct GibProbeSub
+            {
+                char material[64] = {};
+                int visible = -1;
+                int hasMaterial = -1;
+                int loaded = -1;
+                int hasTechnique = -1;
+            };
+
+            struct GibProbeResult
+            {
+                int visible = -1;
+                int inScene = -1;
+                int queueGroup = -1;
+                uint32_t flags = 0;
+                int hasNode = -1;
+                float position[3] = {};
+                float scale[3] = {};
+                unsigned subCount = 0;
+                GibProbeSub subs[4];
+                bool faulted = false;
+            };
+
+            void ProbeGibEntitySeh(void* entity, const GibProbeApi& api, GibProbeResult& out)
+            {
+                __try
+                {
+                    if (api.isVisible)
+                        out.visible = api.isVisible(entity) ? 1 : 0;
+                    if (api.isInScene)
+                        out.inScene = api.isInScene(entity) ? 1 : 0;
+                    if (api.queueGroup)
+                        out.queueGroup = api.queueGroup(entity);
+                    if (api.visibilityFlags)
+                        out.flags = api.visibilityFlags(entity);
+                    void* node = api.parentNode ? api.parentNode(entity) : nullptr;
+                    out.hasNode = node ? 1 : 0;
+                    if (node && api.derivedPosition)
+                    {
+                        const OgreVector3* p = api.derivedPosition(node);
+                        out.position[0] = p->x;
+                        out.position[1] = p->y;
+                        out.position[2] = p->z;
+                    }
+                    if (node && api.derivedScale)
+                    {
+                        const OgreVector3* v = api.derivedScale(node);
+                        out.scale[0] = v->x;
+                        out.scale[1] = v->y;
+                        out.scale[2] = v->z;
+                    }
+                    if (!api.numSubEntities || !api.subEntity)
+                        return;
+                    out.subCount = api.numSubEntities(entity);
+                    for (unsigned i = 0; i < out.subCount && i < 4; ++i)
+                    {
+                        void* sub = api.subEntity(entity, i);
+                        GibProbeSub& r = out.subs[i];
+                        if (!sub)
+                            continue;
+                        if (api.subVisible)
+                            r.visible = api.subVisible(sub) ? 1 : 0;
+                        if (api.subMaterialName)
+                            strncpy_s(r.material, api.subMaterialName(sub)->c_str(), _TRUNCATE);
+                        void* material = nullptr;
+                        if (api.subMaterial)
+                        {
+                            void* const* ptr = api.subMaterial(sub);
+                            material = ptr ? *ptr : nullptr;
+                            r.hasMaterial = material ? 1 : 0;
+                        }
+                        if (material && api.resourceLoaded)
+                            r.loaded = api.resourceLoaded(material) ? 1 : 0;
+                        if (material && api.bestTechnique)
+                            r.hasTechnique = api.bestTechnique(material, 0, sub) ? 1 : 0;
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    out.faulted = true;
+                }
+            }
+
+            uint32_t g_LastProbeTick = 0;
+            uint32_t g_SubmitCalls = 0;
+            uint32_t g_SubmitEntities = 0;
+
+            void MaybeProbeGibRendering(const GibSlot& slot)
+            {
+                const uint32_t now = GetTickCount();
+                if (now - g_LastProbeTick < 1000)
+                    return;
+                g_LastProbeTick = now;
+                GibProbeResult r;
+                ProbeGibEntitySeh(slot.entity, GetGibProbeApi(), r);
+                LogChunkDiagnostic(
+                    "skinnedgibs",
+                    L"[SKINNEDGIBS] probe mesh=%hs visible=%d inScene=%d group=%d flags=0x%08X node=%d "
+                    L"nodePos=(%.2f, %.2f, %.2f) nodeScale=(%.2f, %.2f, %.2f) subs=%u submits/s=%u entities/s=%u fault=%u\n",
+                    slot.mesh.c_str(), r.visible, r.inScene, r.queueGroup, r.flags, r.hasNode,
+                    static_cast<double>(r.position[0]), static_cast<double>(r.position[1]),
+                    static_cast<double>(r.position[2]), static_cast<double>(r.scale[0]),
+                    static_cast<double>(r.scale[1]), static_cast<double>(r.scale[2]), r.subCount, g_SubmitCalls,
+                    g_SubmitEntities, r.faulted ? 1u : 0u);
+                for (unsigned i = 0; i < r.subCount && i < 4; ++i)
+                {
+                    const GibProbeSub& sub = r.subs[i];
+                    LogChunkDiagnostic("skinnedgibs",
+                                       L"[SKINNEDGIBS] probe   sub%u material=%hs visible=%d hasMaterial=%d loaded=%d "
+                                       L"bestTechnique=%d\n",
+                                       i, sub.material, sub.visible, sub.hasMaterial, sub.loaded, sub.hasTechnique);
+                }
+                g_SubmitCalls = 0;
+                g_SubmitEntities = 0;
+            }
+        }
+
         void SubmitSkinnedGibsToRenderQueue(void* renderQueue)
         {
             if (!renderQueue || !IsSkinnedGibsEnabled())
@@ -1084,10 +1260,18 @@ namespace BZROpenShim
             if (!g_ActiveCount)
                 return;
             void* const sceneManager = GetOgreSceneManagerRuntime();
+            ++g_SubmitCalls;
+            bool probed = false;
             for (GibSlot& slot : g_Slots)
             {
                 if (!slot.active || !slot.entity || !SceneMatches(slot, sceneManager))
                     continue;
+                ++g_SubmitEntities;
+                if (g_Config.trace && !probed)
+                {
+                    probed = true;
+                    MaybeProbeGibRendering(slot);
+                }
                 if (!SubmitShimOwnedEntityToRenderQueue(slot.sceneManager, slot.entity, renderQueue))
                 {
                     if (AcquireGibLogSlot())
