@@ -2184,6 +2184,66 @@
       "address": "0x005BCCB3",
       "expected": "F3 0F 10 05 20 6B 88 00",
       "identity": "Reticle::FindGroundPos movss xmm,[pooled 200.0] terrain ray length"
+    },
+    {
+      "name": "RadarLayoutBuilder",
+      "address": "0x00492EC0",
+      "expected": "55 8B EC 83 EC 10 E8 E5 6F 1F 00 89 45 F0",
+      "identity": "BZR::Radar::RefreshLayout(screenHeight); writes radar projection + backdrop globals"
+    },
+    {
+      "name": "RadarProjRadius",
+      "address": "0x009173C0",
+      "kind": "data",
+      "identity": "int radar projection radius, written by RadarLayoutBuilder (stock base 245)"
+    },
+    {
+      "name": "RadarProjCentreX",
+      "address": "0x008E7924",
+      "kind": "data",
+      "identity": "int radar projection centre x, written by RadarLayoutBuilder (stock base 275)"
+    },
+    {
+      "name": "RadarProjCentreY",
+      "address": "0x008E7928",
+      "kind": "data",
+      "identity": "int radar projection centre y, written by RadarLayoutBuilder (stock base 170)"
+    },
+    {
+      "name": "RadarBackdropX",
+      "address": "0x008E77A8",
+      "kind": "data",
+      "identity": "int radar backdrop sprite x, written by RadarLayoutBuilder, read by FUN_00493D40"
+    },
+    {
+      "name": "RadarBackdropY",
+      "address": "0x008E77AC",
+      "kind": "data",
+      "identity": "int radar backdrop sprite y, written by RadarLayoutBuilder, read by FUN_00493D40"
+    },
+    {
+      "name": "RadarSizeScale",
+      "address": "0x008E77B0",
+      "kind": "data",
+      "identity": "float radar size scale, read by RadarLayoutBuilder and the backdrop draw"
+    },
+    {
+      "name": "RadarCompactMode",
+      "address": "0x009173C4",
+      "kind": "data",
+      "identity": "int compact (2/3-size) radar preset flag, set by FUN_00492DC0"
+    },
+    {
+      "name": "RadarUiScaleX",
+      "address": "0x02BF041C",
+      "kind": "data",
+      "identity": "float live UI scale x read by RadarLayoutBuilder"
+    },
+    {
+      "name": "RadarUiScaleY",
+      "address": "0x02BF0420",
+      "kind": "data",
+      "identity": "float live UI scale y read by RadarLayoutBuilder"
     }
   ],
   "globals": [
