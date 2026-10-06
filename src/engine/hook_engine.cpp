@@ -14,6 +14,7 @@
 #include <iterator>
 #include <map>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <vector>
 
@@ -1008,6 +1009,21 @@ namespace HookEngine
             return EngineAddressStatus::BoundData;
         }
 
+        // A code row that matched once stays bound for the process. The image
+        // only changes after that through OpenShim's own patches, and a
+        // feature that binds a row and then detours it would otherwise make
+        // the row read as Mismatch to every feature that binds it later.
+        static std::mutex verifiedMutex;
+        static std::set<const BZROpenShim::EngineAddressEntry*> verified;
+        {
+            std::lock_guard<std::mutex> lock(verifiedMutex);
+            if (verified.count(entry))
+            {
+                outAddress = entry->address;
+                return EngineAddressStatus::Bound;
+            }
+        }
+
         std::vector<uint8_t> actual(entry->expected.size());
         SIZE_T read = 0;
         if (!ReadProcessMemory(GetCurrentProcess(),
@@ -1020,6 +1036,10 @@ namespace HookEngine
         if (!BZROpenShim::EngineAddressBytesMatch(entry->expected, actual.data(), actual.size()))
             return EngineAddressStatus::Mismatch;
 
+        {
+            std::lock_guard<std::mutex> lock(verifiedMutex);
+            verified.insert(entry);
+        }
         outAddress = entry->address;
         return EngineAddressStatus::Bound;
     }
