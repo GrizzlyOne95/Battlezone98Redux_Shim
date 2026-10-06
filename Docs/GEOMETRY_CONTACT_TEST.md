@@ -89,6 +89,13 @@ surfaces and vertical alignment must be distinguished in follow-up testing.
 ISDFC retains curated partial measurements and explicit provenance; this is not
 full five-craft collision acceptance.
 
+Stock `avtank`/`svtank` controls complete all 48 pair/mode/lane/speed passes at
+12 and 24 m/s. Both survive every pass; all 24 GEO passes produce contact, with
+zero stock fallbacks and no sampled speed above 24 m/s. Each target selects six
+physical parts (164 and 159 collision polygons). These are positive controls
+for the installed runtime module recorded in ISDFC's stock-control provenance,
+not proof of exact normals or a substitute for resolving the Scion misses.
+
 **UNKNOWN:** production suitability on all craft, animated extreme poses,
 save/load gameplay contact, multiplayer determinism, and Steam/Wine/Proton.
 This is a one-craft contact experiment, not a global collision mode.
