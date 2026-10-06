@@ -146,6 +146,20 @@ ShellCasingsLinger = 6
 ; Default: cannon,mortar,machinegun,snipergun,-gquake,-gsandbag
 ShellCasingsClasses = cannon,mortar,machinegun,snipergun,-gquake,-gsandbag
 
+; Path-grid footprints from collision faces. Stock AI planning blocks the
+; whole bounding box of every building, so tunnels, arcades and walk-in rooms
+; are walls to the planner. An ODF opts in under [GameObjectClass]:
+;   pathBlock = "faces"     ; "box" (stock, default) | "faces" | "none"
+;   pathBlockHeight = 1.5   ; local sample height above the origin (m)
+;   pathBlockHeight2 = 3.0  ; second sample height (m)
+; With "faces" a cell of the stock box stays blocked only when its centre is
+; inside the object's collision solids at either height (nonzero winding);
+; "none" blocks nothing. ODFs without the key are untouched. Shares its ODF
+; keys and results with the EXU implementation of the same contract.
+; Accepted: boolean. Default: ON.
+; Legacy env alias: OPENSHIM_DISABLE_PATH_BLOCK_FACES
+PathBlockFaces = 1
+
 ; Redux multiplayer map-list refresh/selection preservation fixes.
 ; Accepted: boolean. Default: ON.
 ; Exposed on the OpenShim Settings page as "Map List Fixes".
@@ -738,6 +752,8 @@ TerrainSemanticFrameCaptureMinCoverage = 0.005
 ; Phase 3B HD diffuse tile-array smoke path. DX11 only.
 ; Accepted: integer flag 0/1. Default: 0.
 ; ON also enables the one-cluster proxy and semantic renderer. Missing/invalid
+; Direct3D11 only: under any other active render system the whole terrain
+; proxy path stays off and stock terrain is drawn.
 ; resources fail soft to the stock atlas.
 TerrainHdEnabled = 0
 
@@ -958,6 +974,13 @@ TraceSkinnedGibs = 0
 ; Accepted: boolean. Default: OFF.
 ; Legacy env alias: OPENSHIM_TRACE_SHELL_CASINGS
 TraceShellCasings = 0
+
+; PathBlockFaces diagnostics: an ASCII dump of the path grid around every
+; flagged building after its footprint is applied, plus removal lines. The
+; one-line summary per flagged object is always logged (first 256 per
+; mission). Accepted: boolean. Default: OFF.
+; Legacy env alias: OPENSHIM_TRACE_PATH_BLOCK
+TracePathBlock = 0
 
 ; Explain a "Not Ready" multiplayer entry on the main menu. The stock shell has
 ; no way to say why: its readiness getter returns only ready/not-ready, so the

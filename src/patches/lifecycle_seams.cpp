@@ -387,6 +387,8 @@ namespace BZROpenShim
                 DeactivateAllChunkProxySceneResources(L"left simulation");
                 DeactivateSkinnedGibs(L"left simulation");
                 DeactivateShellCasings(L"left simulation");
+
+                ResetPathBlockState(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);
                 WeaponPresentationMissionRunStateChanged(false);
                 PilotFlashlightNotifyMissionRunStateChanged(false);

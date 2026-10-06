@@ -54,6 +54,12 @@ namespace BZROpenShim
         // original factory must be set before the call is redirected.
         void SetShellCasingFactoryOriginal(void* factory);
         void* GetShellCasingShotBridgeAddress();
+
+        // PathBlockFaces (path_block.cpp): BlockCells entry detour. Install
+        // builds the prologue trampoline and resolves the grid globals; false
+        // means the hook must not be written.
+        bool InstallPathBlockHook(uint32_t site);
+        void* GetPathBlockCellsDetourAddress();
     }
     // REL32 target at HoverCraft::UpdateSounds' turbo-stop Sound::Find call.
     // Naked: reads the craft from the caller's frame, cdecl (name, owner) args.
