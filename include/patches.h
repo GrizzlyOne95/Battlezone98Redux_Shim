@@ -69,6 +69,9 @@ namespace BZROpenShim
     inline void* g_RetAddr_BanHook1           = nullptr;
     inline void* g_RetAddr_BanHook2           = nullptr;
     inline void* g_RetAddr_AutoSaveLoadHook   = nullptr;
+    // Global the AutoSave load-button site loads (mov eax, [global]); read
+    // from the site in ResolveStaticReturnPointers before the hook goes in.
+    inline uint32_t g_AutoSaveLoadReplayGlobal = 0;
     inline void* g_RetAddr_TurretCraftAimPitchMultiplier = nullptr;
     inline void* g_RetAddr_TurretTankAimPitchMultiplier = nullptr;
     inline void* g_RetAddr_UnderAttackAlertHook1 = nullptr;

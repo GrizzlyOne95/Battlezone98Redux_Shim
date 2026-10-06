@@ -761,6 +761,23 @@ namespace HookEngine
         return false;
     }
 
+    bool LiteralAddressesApply(const char* feature)
+    {
+        if (IsReferenceBuild()) return true;
+        static std::mutex mutex;
+        static std::map<std::string, bool> reported;
+        std::lock_guard<std::mutex> lock(mutex);
+        bool& done = reported[feature ? feature : "?"];
+        if (!done)
+        {
+            done = true;
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "build",
+                "[BUILD] %s stands down: its engine addresses are still literals for 2.2.301 "
+                "(exe link stamp 0x%08X)", feature ? feature : "?", GetBuildInfo().exeStamp);
+        }
+        return false;
+    }
+
     namespace
     {
         std::mutex g_ResolveMutex;
@@ -1062,6 +1079,37 @@ namespace HookEngine
         BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "resolve",
             "[ADDR] %s stands down: %s", feature, failed.c_str());
         return false;
+    }
+
+    uint32_t EngineAddress(const char* name)
+    {
+        static std::mutex mutex;
+        static std::map<std::string, uint32_t> bound;
+        static std::map<std::string, bool> reported;
+        if (!name) return 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            const auto it = bound.find(name);
+            if (it != bound.end()) return it->second;
+        }
+        uint32_t address = 0;
+        const EngineAddressStatus status = ResolveEngineAddress(name, address);
+        std::lock_guard<std::mutex> lock(mutex);
+        if (status == EngineAddressStatus::Bound || status == EngineAddressStatus::BoundData)
+        {
+            bound[name] = address;
+            return address;
+        }
+        if (!reported[name])
+        {
+            reported[name] = true;
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "resolve",
+                "[ADDR] %s %s; features reading it stand down",
+                name,
+                status == EngineAddressStatus::Missing ? "has no row for this build" :
+                status == EngineAddressStatus::Mismatch ? "guard bytes differ" : "is unreadable");
+        }
+        return 0;
     }
 
 }

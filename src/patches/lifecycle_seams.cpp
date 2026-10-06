@@ -127,6 +127,7 @@ namespace BZROpenShim
 
         void InstallSceneTeardownForgetHooksIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Lifecycle seams")) return;
             if (g_SceneTeardownHooksInstalled)
                 return;
 
@@ -273,6 +274,7 @@ namespace BZROpenShim
 
         bool TryReadBzrRunState(int& value)
         {
+            if (!HookEngine::LiteralAddressesApply("Lifecycle seams")) return false;
             __try
             {
                 value = *reinterpret_cast<const int*>(kBzrRunStateAddr);
@@ -410,6 +412,7 @@ namespace BZROpenShim
 
         void InstallMissionTransitionSeamIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Lifecycle seams")) return;
             if (g_MissionSeamInstalled || g_MissionSeamFailureLogged)
                 return;
             // GOG-only absolute addresses, and the stolen prologue carries an

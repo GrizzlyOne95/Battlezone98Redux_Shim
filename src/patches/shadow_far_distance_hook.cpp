@@ -383,6 +383,7 @@ namespace BZROpenShim
 
     void InstallShadowFarOverrideIfPossible()
     {
+        if (!HookEngine::LiteralAddressesApply("Shadow far distance")) return;
         using namespace ShadowFarOverride;
         if (g_InstallAttempted)
             return;

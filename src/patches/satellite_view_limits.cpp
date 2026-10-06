@@ -3,6 +3,7 @@
 // SinglePlayer tier), split out of bzr_hooks.cpp. Its baselines are parsed
 // by InitializeGlobalImprovementConfig there.
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "patcher.h"
@@ -112,6 +113,7 @@ namespace BZROpenShim
 
         void RefreshSatelliteViewState()
         {
+            if (!HookEngine::LiteralAddressesApply("Satellite view limits")) return;
             const bool singlePlayer = IsSinglePlayerSession();
             const float zoomOut =
                 singlePlayer ? ClampSatelliteMultiplier(g_SatelliteZoomOutMultiplier) : 1.0f;
@@ -159,6 +161,7 @@ namespace BZROpenShim
 
         void RevertSatelliteViewToBaseline()
         {
+            if (!HookEngine::LiteralAddressesApply("Satellite view limits")) return;
             g_SatelliteZoomOutMultiplier = g_SatelliteZoomOutMultiplierBaseline;
             g_SatellitePanSpeedMultiplier = g_SatellitePanSpeedMultiplierBaseline;
             RefreshSatelliteViewState();

@@ -3,6 +3,7 @@
 // radar size bridge accessors, split out of bzr_hooks.cpp. Configured from
 // there; shared helpers come from bzr_hooks_internal.h.
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "patcher.h"
@@ -171,6 +172,7 @@ namespace BZROpenShim
 
         void InstallRadarLayoutHookIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Radar layout")) return;
             if (g_RadarLayoutHookInstalled)
                 return;
 
@@ -241,6 +243,7 @@ namespace BZROpenShim
 
         void RefreshRadarSizeScaleState()
         {
+            if (!HookEngine::LiteralAddressesApply("Radar layout")) return;
             const float desired = ClampRadarSizeScaleSetting(g_RadarSizeScale);
             g_RadarSizeScale = desired;
 
@@ -288,6 +291,7 @@ namespace BZROpenShim
 
         void RevertRadarSizeScaleToBaseline()
         {
+            if (!HookEngine::LiteralAddressesApply("Radar layout")) return;
             g_RadarSizeScale = g_RadarSizeScaleBaseline;
             RefreshRadarSizeScaleState();
         }
@@ -297,6 +301,7 @@ namespace BZROpenShim
 
     float GetRadarSizeScaleFromBridge()
     {
+        if (!HookEngine::LiteralAddressesApply("Radar layout")) return 0;
         // Until the byte-guarded layout hook has identified this build, the
         // engine global is only an address; answer with the shim's own value.
         if (!g_RadarLayoutHookInstalled)
@@ -316,6 +321,7 @@ namespace BZROpenShim
 
     bool SetRadarSizeScaleFromBridge(float scale)
     {
+        if (!HookEngine::LiteralAddressesApply("Radar layout")) return false;
         if (!std::isfinite(scale) || scale <= 0.0f)
             return false;
 

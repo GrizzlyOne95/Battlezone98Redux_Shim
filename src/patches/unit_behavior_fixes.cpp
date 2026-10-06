@@ -356,6 +356,7 @@ namespace BZROpenShim
 
         void InstallProducerScriptPredicateHooksIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
             if (!g_ProducerScriptPredicateHooksEnabled)
                 return;
 
@@ -491,6 +492,7 @@ namespace BZROpenShim
 
 		void InstallSplinterUndeadFixIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
             if (!g_SplinterUndeadFixEnabled)
                 return;
             if (g_SprayBuildingSimulateHookInstalled)
@@ -657,6 +659,7 @@ namespace BZROpenShim
 
 		void InstallConstructorRecycleStaleTargetFixIfPossible()
 		{
+		    if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
 			if (!g_ConstructorRecycleStaleTargetFixEnabled ||
 				g_ConstructorRecycleStaleTargetFixInstalled)
 				return;
@@ -737,6 +740,7 @@ namespace BZROpenShim
 
 		void InstallTugCargoPostLoadFixIfPossible()
 		{
+		    if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
 			if (!g_TugCargoPostLoadFixEnabled || g_TugCargoPostLoadFixInstalled)
 				return;
 
@@ -808,6 +812,7 @@ namespace BZROpenShim
 		// touches .text when the wanted state actually differs.
 		void RefreshApcAlliedTargetDeployFixState()
 		{
+		    if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
 			if (!g_ApcAlliedTargetDeployFixInstalled)
 				return;
 
@@ -827,6 +832,7 @@ namespace BZROpenShim
 
 		void InstallApcAlliedTargetDeployFixIfPossible()
 		{
+		    if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
 			if (!g_ApcAlliedTargetDeployFixEnabled || g_ApcAlliedTargetDeployFixInstalled)
 				return;
 
@@ -1091,6 +1097,7 @@ namespace BZROpenShim
 
         void InstallConstructorRemoteBuildFixIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
             if (!g_ConstructorRemoteBuildFixEnabled)
                 return;
 

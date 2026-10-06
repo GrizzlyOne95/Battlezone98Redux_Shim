@@ -2915,6 +2915,7 @@ namespace BZROpenShim
             void* currentCamera,
             bool allowManualSubmit)
         {
+            if (!HookEngine::LiteralAddressesApply("Chunk proxy rendering")) return;
             if (!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy)
                 return;
 
@@ -3993,6 +3994,7 @@ namespace BZROpenShim
         // as the game's world geometry — no camera/viewport guesswork.
         void SubmitChunkProxiesToRenderQueue(void* renderQueue)
         {
+            if (!HookEngine::LiteralAddressesApply("Chunk proxy rendering")) return;
             if (!renderQueue || !g_EnableChunkMeshProxy)
                 return;
             if (!IsChunkManualSubmitEnabled())
@@ -4418,6 +4420,7 @@ namespace BZROpenShim
             uint32_t index,
             ChunkEffectActiveEntry& outEntry)
         {
+            if (!HookEngine::LiteralAddressesApply("Chunk proxy rendering")) return false;
             if (!thisBytes)
                 return false;
 
@@ -4544,6 +4547,7 @@ namespace BZROpenShim
 
         void TrackChunkEffectActiveEntries(void* thisPtr)
         {
+            if (!HookEngine::LiteralAddressesApply("Chunk proxy rendering")) return;
             if ((!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy && !g_TraceChunkEffectRuntime) || !thisPtr)
                 return;
 
@@ -4657,6 +4661,7 @@ namespace BZROpenShim
 
         void ReleaseChunkProxiesMissingFromActiveList(void* thisPtr)
         {
+            if (!HookEngine::LiteralAddressesApply("Chunk proxy rendering")) return;
             if ((!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy) || !thisPtr ||
                 g_ChunkProxySlots.empty())
             {
@@ -4952,6 +4957,7 @@ namespace BZROpenShim
 
         void InstallChunkEffectCreateHooksIfRequested()
         {
+            if (!HookEngine::LiteralAddressesApply("Chunk proxy rendering")) return;
             if ((!g_TraceChunkRender && !g_TraceChunkEffectRuntime) || g_ChunkEffectCreateHooksInstalled)
                 return;
 
@@ -5070,6 +5076,7 @@ namespace BZROpenShim
         // told apart from "walker never ran". GOG only; addresses are GOG layout.
         void InstallChunkFragmentWalkHooksIfRequested()
         {
+            if (!HookEngine::LiteralAddressesApply("Chunk proxy rendering")) return;
             // SkinnedGibs needs FullFragmentObject only. Without a chunk trace
             // PartialFragmentObject stays unhooked and the full hook is a pure
             // pass-through for everything that is not a person.

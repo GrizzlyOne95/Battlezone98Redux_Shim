@@ -9,6 +9,7 @@
 // reverse-engineering/testing. OpenShim does not link or require EXU/Lua.
 
 #include "autosave.h"
+#include "hook_engine.h"
 #include "engine_globals.h"
 #include "autosave_gate.h"
 #include "BZROpenShim.h"
@@ -805,6 +806,7 @@ namespace BZROpenShim
 
     bool InitializeAutoSave()
     {
+        if (!HookEngine::LiteralAddressesApply("AutoSave")) return false;
         if (g_hookInstalled)
             return true;
 
@@ -949,6 +951,7 @@ namespace BZROpenShim
 
     void AutoSaveTick()
     {
+        if (!HookEngine::LiteralAddressesApply("AutoSave")) return;
         if (!g_config.enabled || !g_nativeSaveGame || g_saveDisabledForProcess)
             return;
 

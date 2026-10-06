@@ -662,6 +662,7 @@ namespace BZROpenShim
 
     void InitializeMpReadyDiagnostic()
     {
+        if (!HookEngine::LiteralAddressesApply("MP ready diagnostic")) return;
         if (InterlockedCompareExchange(&g_Started, 1, 0) != 0)
             return;
         // The worker owns the byte-guard check that both features depend on, so

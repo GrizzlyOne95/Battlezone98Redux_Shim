@@ -1,4 +1,5 @@
 #include "terrain_proxy.h"
+#include "hook_engine.h"
 #include "engine_globals.h"
 
 #include "terrain_semantic.h"
@@ -5270,6 +5271,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 
     void InitializeTerrainProxyPhase2()
     {
+        if (!HookEngine::LiteralAddressesApply("Terrain proxy")) return;
         if (g_worker || g_active.load())
             return;
         g_config = ReadConfig();
@@ -5340,6 +5342,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 
     void TerrainProxyRenderFrameTick()
     {
+        if (!HookEngine::LiteralAddressesApply("Terrain proxy")) return;
         // Cheap early-out: this runs on every rendered world frame and must
         // cost nothing when the opt-in capture is off.
         if (g_config.semanticFrameCaptures <= 0 || !g_active.load() ||
@@ -5354,6 +5357,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 
     void TerrainProxyMissionRunStateChanged(int previousState, int currentState)
     {
+        if (!HookEngine::LiteralAddressesApply("Terrain proxy")) return;
         if (!g_active.load(std::memory_order_acquire) || g_shutdown.load())
             return;
         OnRunStateChanged(previousState, currentState);
@@ -5362,6 +5366,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 
     void TerrainProxySceneTeardownBegin(void* sceneManager, bool clearScene)
     {
+        if (!HookEngine::LiteralAddressesApply("Terrain proxy")) return;
         if (!g_active.load() || g_shutdown.load())
             return;
         std::lock_guard<std::mutex> lock(g_mutex);
@@ -5394,6 +5399,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 
     void TerrainProxySceneTeardownComplete(void* sceneManager, bool clearScene)
     {
+        if (!HookEngine::LiteralAddressesApply("Terrain proxy")) return;
         if (!g_active.load() || g_shutdown.load())
             return;
         std::lock_guard<std::mutex> lock(g_mutex);

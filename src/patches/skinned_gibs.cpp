@@ -530,7 +530,7 @@ namespace BZROpenShim
             // ground height and ended up buried or floating out of view.
             bool TerrainHeightSafe(FnTerrainHeightAt fn, float x, float z, float& out)
             {
-                if (!fn)
+                if (!fn || !HookEngine::LiteralAddressesApply("Skinned gibs"))
                     return false;
                 double height = 0.0;
                 float origin[3] = {};

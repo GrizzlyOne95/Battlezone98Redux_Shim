@@ -608,6 +608,7 @@ namespace BZROpenShim
 
         void InitializeMpauthConfig()
         {
+            if (!HookEngine::LiteralAddressesApply("MP auth trace")) return;
             bool enabled = false;
             bool dwEnabled = false;
             bool splEnabled = false;
@@ -658,6 +659,7 @@ namespace BZROpenShim
 
         void InstallMpauthHooksIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("MP auth trace")) return;
             if (!g_MpauthEnabled)
                 return;
             if (g_MpauthHooksInstalled)

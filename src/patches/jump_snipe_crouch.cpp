@@ -3,6 +3,7 @@
 // its bridge setter, split out of bzr_hooks.cpp. The Person::Simulate
 // research probe stays there; shared helpers come from bzr_hooks_internal.h.
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "patcher.h"
@@ -76,6 +77,7 @@ namespace BZROpenShim
         // no-ops on any build (e.g. Steam, which relocates Person::Simulate).
         void RefreshJumpSnipeCrouchPatchState()
         {
+            if (!HookEngine::LiteralAddressesApply("Jump-snipe crouch")) return;
             const bool wantActive =
                 g_JumpSnipeCrouchEnabled && (ReadLocalPlayerNetIdValue() == 0);
             if (wantActive == g_JumpSnipeCrouchPatchActive)
@@ -124,6 +126,7 @@ namespace BZROpenShim
         // revert-to-baseline contract below.
         void RevertJumpSnipeCrouchToBaseline()
         {
+            if (!HookEngine::LiteralAddressesApply("Jump-snipe crouch")) return;
             g_JumpSnipeCrouchEnabled = g_JumpSnipeCrouchBaselineEnabled;
             RefreshJumpSnipeCrouchPatchState();
         }
@@ -133,6 +136,7 @@ namespace BZROpenShim
 
     bool SetJumpSnipeCrouchEnabledFromBridge(bool enabled)
     {
+        if (!HookEngine::LiteralAddressesApply("Jump-snipe crouch")) return false;
         // Scripted content can temporarily override the INI baseline. Never
         // applies in a network game; see RefreshJumpSnipeCrouchPatchState().
         g_JumpSnipeCrouchEnabled = enabled;

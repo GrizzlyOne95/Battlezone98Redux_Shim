@@ -120,6 +120,7 @@ namespace BZROpenShim
     // observers. GOG only: both detours check the exact prologue bytes.
     void InstallDynamicGeometryHooks()
     {
+        if (!HookEngine::LiteralAddressesApply("Dynamic geometry hooks")) return;
         g_DynamicAlphaDepthBatchingEnabled =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_DYNAMIC_ALPHA_BATCHING") ||
               EnvFlagEnabled("BZR_DISABLE_DYNAMIC_ALPHA_BATCHING"));

@@ -17,6 +17,7 @@
 // Enhanced/Retro report themselves unavailable rather than half-working.
 
 #include "render_profile_runtime.h"
+#include "hook_engine.h"
 #include "backend_selection.h"
 #include "startup_backend_seam.h"
 #include "dx11_legacy_material_compat.h"
@@ -838,6 +839,7 @@ namespace BZROpenShim::RenderProfiles
 
         unsigned __stdcall BackendObservationThread(void*)
         {
+            if (!HookEngine::LiteralAddressesApply("Render profile backend observer")) return 0;
             LogShimA(LogLevel::Info, kLogTag, "backend observation thread started");
             constexpr DWORD pollMs = 250;
             constexpr DWORD timeoutMs = 90000;

@@ -792,6 +792,7 @@ namespace BZROpenShim
 
         void RefreshScrapPilotHudLayout()
         {
+            if (!HookEngine::LiteralAddressesApply("Scrap/pilot HUD")) return;
             const ULONGLONG now = GetTickCount64();
             if (g_ScrapPilotHudLastRefreshTick != 0 &&
                 now - g_ScrapPilotHudLastRefreshTick < kScrapPilotHudRefreshMs)
@@ -841,6 +842,7 @@ namespace BZROpenShim
 
         void RevertScrapPilotHudToBaseline()
         {
+            if (!HookEngine::LiteralAddressesApply("Scrap/pilot HUD")) return;
             g_ScrapPilotHudMissionOverrideActive = false;
             g_ScrapPilotHudPanelOverrideActive = false;
             // Leave the applied panel-visibility state alone: a mission that hid
@@ -859,6 +861,7 @@ namespace BZROpenShim
         int* pilotLeft,
         int* pilotTop)
     {
+        if (!HookEngine::LiteralAddressesApply("Scrap/pilot HUD")) return false;
         if (!scrapLeft || !scrapTop || !pilotLeft || !pilotTop)
             return false;
         if (!g_ScrapPilotHudBaselineCaptured && !TryCaptureScrapPilotHudBaseline())
@@ -879,6 +882,7 @@ namespace BZROpenShim
         int pilotLeft,
         int pilotTop)
     {
+        if (!HookEngine::LiteralAddressesApply("Scrap/pilot HUD")) return false;
         constexpr int kMinHudCoordinate = -4096;
         constexpr int kMaxHudCoordinate = 16384;
         const int values[] = { scrapLeft, scrapTop, pilotLeft, pilotTop };
@@ -938,6 +942,7 @@ namespace BZROpenShim
 
     bool RestoreScrapPilotHudStockFromBridge()
     {
+        if (!HookEngine::LiteralAddressesApply("Scrap/pilot HUD")) return false;
         if (!g_ScrapPilotHudBaselineCaptured && !TryCaptureScrapPilotHudBaseline())
             return false;
         g_ScrapPilotHudMissionOverride = g_ScrapPilotHudBaseline;

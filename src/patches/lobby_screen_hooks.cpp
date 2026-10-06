@@ -149,6 +149,7 @@ namespace BZROpenShim
 
         void InstallNicknameTextEntryInputHookIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Lobby screen hooks")) return;
             if (g_LobbyNicknameInputHookInstalled)
                 return;
 
@@ -299,6 +300,7 @@ namespace BZROpenShim
 
         void InstallMultiCreatePreviewFixIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Lobby screen hooks")) return;
             if (!ShouldEnableMapPreviewFix() || g_MultiCreatePreviewHookInstalled)
                 return;
 

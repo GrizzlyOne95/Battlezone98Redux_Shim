@@ -3,6 +3,7 @@
 // of bzr_hooks.cpp. Configured from there and used by the lobby UI; shared
 // helpers come from bzr_hooks_internal.h.
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "net_optimizer.h"
@@ -295,6 +296,7 @@ namespace BZROpenShim
         BzrNetNicknameResult ApplyBzrNetNicknameAuthoritative(
             const char* requestedValue, const char* source)
         {
+            if (!HookEngine::LiteralAddressesApply("BZRNet settings")) return {};
             const std::string nickname = TrimAsciiCopy(requestedValue ? requestedValue : "");
             if (!IsValidBzrNetNickname(nickname))
             {
@@ -525,6 +527,7 @@ namespace BZROpenShim
 
         void InitializeBzrNetConfig()
         {
+            if (!HookEngine::LiteralAddressesApply("BZRNet settings")) return;
             const bool firstRun = !g_BzrNetConfigInitialized;
             g_BzrNetConfigInitialized = true;
 
@@ -592,6 +595,7 @@ namespace BZROpenShim
 
     BzrNetNicknameResult SetBzrNetNicknameFromBridge(const char* nickname)
     {
+        if (!HookEngine::LiteralAddressesApply("BZRNet settings")) return {};
         const BzrNetNicknameResult result = ApplyBzrNetNicknameAuthoritative(
             nickname, "external_bridge");
         if (IsAcceptedBzrNetNicknameResult(result))

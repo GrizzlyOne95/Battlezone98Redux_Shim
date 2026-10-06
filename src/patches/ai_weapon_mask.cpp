@@ -83,24 +83,28 @@ namespace BZROpenShim
 
         void RefreshAiWeaponMaskArtilleryState()
         {
+            if (!HookEngine::LiteralAddressesApply("AI weapon mask")) return;
             g_AiWeaponMaskArtilleryActive =
                 g_AiWeaponMaskArtilleryEnabled && ReadLocalPlayerNetIdValue() == 0;
         }
 
         void RevertAiWeaponMaskArtilleryToBaseline()
         {
+            if (!HookEngine::LiteralAddressesApply("AI weapon mask")) return;
             g_AiWeaponMaskArtilleryEnabled = kAiWeaponMaskArtilleryEnabledDefault;
             g_AiWeaponMaskArtilleryActive = false;
         }
 
         void RefreshAiWeaponMaskMinelayerState()
         {
+            if (!HookEngine::LiteralAddressesApply("AI weapon mask")) return;
             g_AiWeaponMaskMinelayerActive =
                 g_AiWeaponMaskMinelayerEnabled && ReadLocalPlayerNetIdValue() == 0;
         }
 
         void RevertAiWeaponMaskMinelayerToBaseline()
         {
+            if (!HookEngine::LiteralAddressesApply("AI weapon mask")) return;
             g_AiWeaponMaskMinelayerEnabled = kAiWeaponMaskMinelayerEnabledDefault;
             g_AiWeaponMaskMinelayerActive = false;
         }
@@ -110,6 +114,7 @@ namespace BZROpenShim
 
     bool SetHowitzerVolleyEnabledFromBridge(bool enabled)
     {
+        if (!HookEngine::LiteralAddressesApply("AI weapon mask")) return false;
         g_HowitzerVolleyEnabled = false;
         if (enabled)
         {
@@ -123,6 +128,7 @@ namespace BZROpenShim
 
     bool SetWeaponMaskCarrierBiasEnabledFromBridge(bool enabled)
     {
+        if (!HookEngine::LiteralAddressesApply("AI weapon mask")) return false;
         g_WeaponMaskCarrierBiasEnabled = enabled;
         Log(L"[MISSIONHOOK] weapon-mask carrier bias %hs\n", enabled ? "enabled" : "disabled");
         return true;

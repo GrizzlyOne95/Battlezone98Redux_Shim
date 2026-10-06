@@ -828,6 +828,7 @@ namespace BZROpenShim
 
         bool TryGetHudSpriteCurrentRecord(int spriteId, HudSpriteRectRecord& outRecord)
         {
+            if (!HookEngine::LiteralAddressesApply("HUD sprite rects")) return false;
             auto* entry = GetHudSpriteRectEntry(spriteId);
             if (!entry)
                 return false;
@@ -1019,6 +1020,7 @@ namespace BZROpenShim
 
     bool SetStockScrapPilotPanelsVisible(bool visible)
     {
+        if (!HookEngine::LiteralAddressesApply("HUD sprite rects")) return false;
         // The addon intentionally calls the primary panel name once. Treat any
         // stock scrap/pilot name as a request for the complete six-entry set so
         // faction/team aliases cannot leave one of the two top HUD boxes drawn.
@@ -1050,6 +1052,7 @@ namespace BZROpenShim
 
     bool GetHudSpriteRectFromBridge(const char* name, int* outX, int* outY, int* outW, int* outH)
     {
+        if (!HookEngine::LiteralAddressesApply("HUD sprite rects")) return false;
         if (!outX || !outY || !outW || !outH)
         {
             Log(L"[HUD] Invalid rect output pointers for sprite '%hs'\n", name ? name : "<null>");
@@ -1081,6 +1084,7 @@ namespace BZROpenShim
 
     bool SetHudSpriteRectFromBridge(const char* name, int x, int y, int w, int h)
     {
+        if (!HookEngine::LiteralAddressesApply("HUD sprite rects")) return false;
         if (IsStockScrapPilotPanelName(name))
         {
             g_ScrapPilotHudPanelOverrideActive = true;
@@ -1093,6 +1097,7 @@ namespace BZROpenShim
 
     bool SetHudSpriteVisibleFromBridge(const char* name, bool visible)
     {
+        if (!HookEngine::LiteralAddressesApply("HUD sprite rects")) return false;
         if (IsStockScrapPilotPanelName(name))
         {
             g_ScrapPilotHudPanelOverrideActive = true;
@@ -1105,6 +1110,7 @@ namespace BZROpenShim
 
     bool RestoreHudSpriteFromBridge(const char* name)
     {
+        if (!HookEngine::LiteralAddressesApply("HUD sprite rects")) return false;
         if (IsStockScrapPilotPanelName(name))
         {
             g_ScrapPilotHudPanelOverrideActive = true;
@@ -1143,6 +1149,7 @@ namespace BZROpenShim
 
     bool RestoreAllHudSpritesFromBridge()
     {
+        if (!HookEngine::LiteralAddressesApply("HUD sprite rects")) return false;
         bool anyFailed = false;
         for (const auto& entry : g_HudSpriteOriginalEntries)
         {

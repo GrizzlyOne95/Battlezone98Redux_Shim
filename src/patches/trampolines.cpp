@@ -971,7 +971,8 @@ void __declspec(naked) __cdecl Trampoline_BanButtonHook2()
 // -----------------------------------------------------------------------
 // AutoSave Load Button Hook
 // Site: 0x0078B45A
-// Replays: mov eax, [0x0091830C]
+// Replays: mov eax, [0x0091830C], through g_AutoSaveLoadReplayGlobal (read
+// from the site before patching, so a ported build replays its own global)
 // -----------------------------------------------------------------------
 void __declspec(naked) __cdecl Trampoline_AutoSaveLoadButtonHook()
 {
@@ -986,7 +987,8 @@ void __declspec(naked) __cdecl Trampoline_AutoSaveLoadButtonHook()
         popad
         popfd
 
-        mov  eax, [0x0091830C]
+        mov  eax, [g_AutoSaveLoadReplayGlobal]
+        mov  eax, [eax]
         pushad
         push ebp
         call AutoSaveLoadButtonCreateFromFrame
