@@ -172,10 +172,7 @@ namespace BZROpenShim
                 // preferred base. Rebase defensively anyway so a relocated
                 // image degrades to "no entries match" rather than to a
                 // mis-identification.
-                const uintptr_t base = GetMainModuleBase();
-                const uintptr_t expected = base
-                    ? base + (kGogGameObjectGetTeamAddr - kGogPreferredImageBase)
-                    : kGogGameObjectGetTeamAddr;
+                const uintptr_t expected = ExpectedGameObjectGetTeamAddr();
                 if (reinterpret_cast<uintptr_t>(vtable[kGameObjectGetTeamVtableOffset / sizeof(void*)]) != expected)
                     return false;
 

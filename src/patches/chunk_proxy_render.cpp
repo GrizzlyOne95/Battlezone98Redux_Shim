@@ -2464,7 +2464,7 @@ namespace BZROpenShim
         }
 
         // Redux renders around a per-map origin (terrain center, the
-        // Ogre::Vector3 global at kGogWorldRenderOriginAddr) with the Z axis
+        // Ogre::Vector3 global, the WorldRenderOrigin row) with the Z axis
         // mirrored versus sim space. The camera, lights, and every world
         // renderable go through this conversion inside the exe, so proxy
         // nodes fed raw sim coordinates land ~1e5 units outside the render
@@ -2472,10 +2472,13 @@ namespace BZROpenShim
         static bool TryConvertChunkSimTransformToRenderSpace(ChunkProxyTransform& transform)
         {
             float origin[3] = {};
+            const uintptr_t originAddr = WorldRenderOriginAddr();
+            if (!originAddr)
+                return false;
 
             __try
             {
-                const float* originPtr = reinterpret_cast<const float*>(kGogWorldRenderOriginAddr);
+                const float* originPtr = reinterpret_cast<const float*>(originAddr);
                 origin[0] = originPtr[0];
                 origin[1] = originPtr[1];
                 origin[2] = originPtr[2];

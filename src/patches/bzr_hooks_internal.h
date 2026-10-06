@@ -535,10 +535,12 @@ namespace BZROpenShim
         //
         // So the vtable is used only as a type tag -- compared, never invoked.
         // Slot 1 of every GameObject-family vtable in .rdata is the same
-        // GameObject::GetTeam (0x00462450), which makes an exact pointer
-        // compare a positive identification rather than a heuristic, and
-        // rejects abstract/_purecall tables and foreign objects alike.
-        inline constexpr uintptr_t kGogGameObjectGetTeamAddr = 0x00462450;
+        // GameObject::GetTeam (the GameObjectGetTeam row), which makes an
+        // exact pointer compare a positive identification rather than a
+        // heuristic, and rejects abstract/_purecall tables and foreign objects
+        // alike. Rebased to the live image; 0 when the row is not bound, which
+        // no vtable slot equals, so every check fails closed.
+        uintptr_t ExpectedGameObjectGetTeamAddr();
         inline constexpr uintptr_t kGogPreferredImageBase = 0x00400000;
         bool IsLikelyGameObjectEntry(void* objectPtr);
         bool WritePointerValue(uintptr_t address, void* value);
@@ -1032,8 +1034,9 @@ namespace BZROpenShim
         // --- Multiplayer vehicle flags (multiplayer_vehicle_flags.cpp) ---------
         // Ogre::Vector3 global holding the per-map render origin (terrain
         // center); every engine sim->render conversion subtracts it and
-        // mirrors Z (render = simX-o.x, simY-o.y, -simZ-o.z).
-        inline constexpr uintptr_t kGogWorldRenderOriginAddr = 0x025F8E4C;
+        // mirrors Z (render = simX-o.x, simY-o.y, -simZ-o.z). The
+        // WorldRenderOrigin row; 0 when it is not bound.
+        uintptr_t WorldRenderOriginAddr();
         using FnFlagDisplaySubmit = void(__thiscall*)(void*, void*);
         struct MultiplayerFlagRenderSet
         {

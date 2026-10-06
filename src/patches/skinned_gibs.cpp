@@ -530,13 +530,14 @@ namespace BZROpenShim
             // ground height and ended up buried or floating out of view.
             bool TerrainHeightSafe(FnTerrainHeightAt fn, float x, float z, float& out)
             {
-                if (!fn || !HookEngine::LiteralAddressesApply("Skinned gibs"))
+                const uintptr_t originAddr = WorldRenderOriginAddr();
+                if (!fn || !originAddr)
                     return false;
                 double height = 0.0;
                 float origin[3] = {};
                 __try
                 {
-                    const float* renderOrigin = reinterpret_cast<const float*>(kGogWorldRenderOriginAddr);
+                    const float* renderOrigin = reinterpret_cast<const float*>(originAddr);
                     origin[0] = renderOrigin[0];
                     origin[1] = renderOrigin[1];
                     origin[2] = renderOrigin[2];

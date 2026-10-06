@@ -2244,6 +2244,36 @@
       "address": "0x02BF0420",
       "kind": "data",
       "identity": "float live UI scale y read by RadarLayoutBuilder"
+    },
+    {
+      "name": "GameObjectGetTeam",
+      "address": "0x00462450",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 80 5C 01 00 00 8B E5",
+      "identity": "GameObject::GetTeam (returns [this+0x15C]); slot 1 of every GameObject-family vtable, compared as a type tag"
+    },
+    {
+      "name": "WorldRenderOrigin",
+      "address": "0x025F8E4C",
+      "kind": "data",
+      "identity": "Ogre::Vector3 per-map render origin; render = (x-o.x, y-o.y, -z-o.z)"
+    },
+    {
+      "name": "CarrierSetSelected",
+      "address": "0x004D9880",
+      "expected": "55 8B EC 83 EC 10 89 4D F8 8B 45 F8",
+      "identity": "Carrier::SetSelected(mask) __thiscall; LayMinesTask calls it with mask 1"
+    },
+    {
+      "name": "UiEnsureManualObject",
+      "address": "0x007D2B70",
+      "expected": "55 8B EC 6A FF 68 B0 2B 86 00 64 A1 00 00 00 00",
+      "identity": "UI widget lazily (re)creates its named Ogre ManualObject; SharedPtr by value, ret 8"
+    },
+    {
+      "name": "PersonCrouchBranch",
+      "address": "0x0059DEA5",
+      "expected": "0F B6 85 AE FC FF FF 85 C0 74 26",
+      "identity": "Person::Simulate landing: movzx eax,[ebp-jumpHeld]; test eax,eax; je sniper-check"
     }
   ],
   "globals": [

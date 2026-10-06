@@ -525,9 +525,12 @@ namespace BZROpenShim
 
         static bool ConvertMultiplayerFlagPointToRenderSpace(float (&position)[3])
         {
+            const uintptr_t originAddr = WorldRenderOriginAddr();
+            if (!originAddr)
+                return false;
             __try
             {
-                const float* origin = reinterpret_cast<const float*>(kGogWorldRenderOriginAddr);
+                const float* origin = reinterpret_cast<const float*>(originAddr);
                 position[0] -= origin[0];
                 position[1] -= origin[1];
                 position[2] = -position[2] - origin[2];

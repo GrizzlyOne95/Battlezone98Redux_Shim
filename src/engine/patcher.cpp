@@ -531,8 +531,6 @@ namespace BZROpenShim
             "Restart Mission Hook Failure",   // autosave_restart.cpp
             "Ban Button Hook 1/2",            // lobby_ui.cpp
             "Ban Button Hook 2/2",            // lobby_ui.cpp
-            "Under Attack Alert Hook 1/2",    // alert_reticle_modes.cpp
-            "Under Attack Alert Hook 2/2",    // alert_reticle_modes.cpp
         };
         for (const char* n : kNames)
             if (strcmp(name, n) == 0) return true;
@@ -1271,9 +1269,35 @@ namespace BZROpenShim
                     reinterpret_cast<uintptr_t>(SprayEmitterBuildOwnerHook));
             }
             else if (p.name.find("HoverCraft Engine Flame Emit Hook") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_EngineFlameHoverCraftEmit));
-            else if (p.name == "Artillery Weapon Mask Select Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_ArtilleryWeaponSelect));
-            else if (p.name == "LayMines Weapon Mask Select Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_LayMinesWeaponSelect));
-            else if (p.name == "LayMines Weapon Mask Trigger Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_LayMinesSetSelected));
+            else if (p.name == "Artillery Weapon Mask Select Hook" ||
+                     p.name == "LayMines Weapon Mask Select Hook" ||
+                     p.name == "LayMines Weapon Mask Trigger Hook") {
+                // The handlers call on to whatever this call reached, so take
+                // that from the call's own rel32 and require it to be the
+                // routine the engine_addresses row names.
+                const bool trigger = p.name == "LayMines Weapon Mask Trigger Hook";
+                const char* rowName = trigger ? "CarrierSetSelected" : "CarrierGetWeapon";
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                const uint32_t expected = HookEngine::EngineAddress(rowName);
+                if (!original || expected == 0 ||
+                    reinterpret_cast<uintptr_t>(original) != expected) {
+                    Log(L"[WMASK] %hs identity failed site=0x%08X original=%p expected %hs=0x%08X; leaving stock call\n",
+                        p.name.c_str(), p.address - 1, original, rowName, expected);
+                    continue;
+                }
+                if (trigger) {
+                    SetCarrierSetSelectedOriginal(original);
+                    target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_LayMinesSetSelected));
+                } else {
+                    SetCarrierGetWeaponOriginal(original);
+                    target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+                        p.name == "Artillery Weapon Mask Select Hook"
+                            ? Trampoline_ArtilleryWeaponSelect
+                            : Trampoline_LayMinesWeaponSelect));
+                }
+            }
             if (target) { int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(p.address + 4); p.payload.resize(4); memcpy(p.payload.data(), &rel, 4); }
         }
     }

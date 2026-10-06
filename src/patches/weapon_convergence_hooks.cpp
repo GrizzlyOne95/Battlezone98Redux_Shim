@@ -334,10 +334,7 @@ namespace BZROpenShim
 
                 // Slot 1 re-verified against the rebased expectation, then
                 // slot 3 must be executable exe code before the call.
-                const uintptr_t mainBase = GetMainModuleBase();
-                const uintptr_t expectedGetTeam = mainBase
-                    ? mainBase + (kGogGameObjectGetTeamAddr - kGogPreferredImageBase)
-                    : kGogGameObjectGetTeamAddr;
+                const uintptr_t expectedGetTeam = ExpectedGameObjectGetTeamAddr();
                 if (reinterpret_cast<uintptr_t>(vtable[kGameObjectGetTeamVtableOffset / sizeof(void*)]) != expectedGetTeam)
                     return false;
 
