@@ -2088,6 +2088,102 @@
       "address": "0x0068FC60",
       "expected": "55 8B EC 51 83 3D 08 0F 93 00 00",
       "identity": "AI_UnitRemove(unit) entry"
+    },
+    {
+      "name": "WingmanVtable",
+      "address": "0x0088A464",
+      "kind": "data",
+      "identity": "RTTI .?AVWingman@@ primary vtable; UpdateWeaponAim is slot 38 (+0x98)"
+    },
+    {
+      "name": "TurretCraftVtable",
+      "address": "0x00889380",
+      "kind": "data",
+      "identity": "RTTI .?AVTurretCraft@@ primary vtable; UpdateWeaponAim is slot 38"
+    },
+    {
+      "name": "HowitzerVtable",
+      "address": "0x0087AD70",
+      "kind": "data",
+      "identity": "RTTI .?AVHowitzer@@ primary vtable; slot 38 inherits TurretTank::UpdateWeaponAim"
+    },
+    {
+      "name": "TurretTankVtable",
+      "address": "0x00889498",
+      "kind": "data",
+      "identity": "RTTI .?AVTurretTank@@ primary vtable; UpdateWeaponAim is slot 38"
+    },
+    {
+      "name": "WingmanUpdateWeaponAim",
+      "address": "0x004EB590",
+      "expected": "55 8B EC 81 EC 18 03 00 00",
+      "identity": "Wingman::UpdateWeaponAim, WingmanVtable slot 38"
+    },
+    {
+      "name": "TurretCraftUpdateWeaponAim",
+      "address": "0x005F0930",
+      "expected": "55 8B EC 81 EC 68 03 00 00",
+      "identity": "TurretCraft::UpdateWeaponAim, TurretCraftVtable slot 38"
+    },
+    {
+      "name": "TurretTankUpdateWeaponAim",
+      "address": "0x005F27B0",
+      "expected": "55 8B EC 81 EC 18 03 00 00",
+      "identity": "TurretTank::UpdateWeaponAim, TurretTankVtable and HowitzerVtable slot 38"
+    },
+    {
+      "name": "CarrierGetWeapon",
+      "address": "0x00417F60",
+      "expected": "55 8B EC 51 89 4D FC B8 01 00 00 00",
+      "identity": "Carrier::GetWeapon(slot), thiscall; called after mov ecx,[craft+0x1A0] in each UpdateWeaponAim"
+    },
+    {
+      "name": "RefreshWeaponTransform",
+      "address": "0x00681A00",
+      "expected": "55 8B EC 83 EC 3C A1 00 70 8E 00",
+      "identity": "RefreshWeaponTransform(weaponObject, transform), cdecl"
+    },
+    {
+      "name": "ReticleGlobal",
+      "address": "0x025CE6D0",
+      "kind": "data",
+      "identity": "global Reticle; ctor 0x005BA170 called with this from 0x0040B013"
+    },
+    {
+      "name": "SmartReticlePooledRange",
+      "address": "0x00886B20",
+      "kind": "data",
+      "identity": "pooled read-only 200.0f literal the five reticle range loads use (and ~107 other sites)"
+    },
+    {
+      "name": "SmartReticleRangeRadiusLoad",
+      "address": "0x005BC6CF",
+      "expected": "F3 0F 10 05 20 6B 88 00",
+      "identity": "Reticle::FindReticleObject movss xmm,[pooled 200.0] radius = range*0.5"
+    },
+    {
+      "name": "SmartReticleRangeCenterXMul",
+      "address": "0x005BC6F6",
+      "expected": "F3 0F 59 05 20 6B 88 00",
+      "identity": "Reticle::FindReticleObject mulss xmm,[pooled 200.0] search center x"
+    },
+    {
+      "name": "SmartReticleRangeCenterZMul",
+      "address": "0x005BC728",
+      "expected": "F3 0F 59 05 20 6B 88 00",
+      "identity": "Reticle::FindReticleObject mulss xmm,[pooled 200.0] search center z"
+    },
+    {
+      "name": "SmartReticleRangeDepthCull",
+      "address": "0x005BC8BD",
+      "expected": "0F 2F 05 20 6B 88 00 76 05",
+      "identity": "Reticle::FindReticleObject comiss xmm,[pooled 200.0] depth cull"
+    },
+    {
+      "name": "SmartReticleRangeGroundRay",
+      "address": "0x005BCCB3",
+      "expected": "F3 0F 10 05 20 6B 88 00",
+      "identity": "Reticle::FindGroundPos movss xmm,[pooled 200.0] terrain ray length"
     }
   ],
   "globals": [

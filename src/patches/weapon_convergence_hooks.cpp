@@ -45,39 +45,51 @@ namespace BZROpenShim
         // keeps its own stock UpdateWeaponAim implementation authoritative; the
         // wrappers below add only the shared exact-Walker hardpoint convergence
         // stage after native aiming has finished.
-        constexpr uintptr_t kWingmanWeaponAimVtableSlotAddr = 0x0088A4FC;
+        //
+        // UpdateWeaponAim is slot 38 (+0x98) of each class's primary vtable.
+        // The vtables are engine_addresses rows checked by RTTI name; the slot
+        // owner guard below verifies that a slot still holds the stock
+        // function before replacing it, so derived consumers stay fail-closed.
+        //
+        // Redux RTTI/inventory identifies TurretCraftUpdateWeaponAim as
+        // TurretCraft::UpdateWeaponAim, not HoverCraft::UpdateWeaponAim.
+        // TurretCraftClass is the native implementation behind
+        // classLabel="turret". TurretTank::UpdateWeaponAim has two released
+        // consumers: TurretTank itself and Howitzer, which inherits it.
+        constexpr size_t kUpdateWeaponAimVtableIndex = 0x98 / sizeof(void*);
 
-        // Redux RTTI/inventory identifies 0x005F0930 as
-        // TurretCraft::UpdateWeaponAim, not HoverCraft::UpdateWeaponAim. The
-        // second TurretCraft vtable begins at 0x00889380 and its +0x98
-        // UpdateWeaponAim slot is 0x00889418. TurretCraftClass is the native
-        // implementation behind classLabel="turret".
-        constexpr uintptr_t kTurretCraftWeaponAimVtableSlotAddr = 0x00889418;
-
-        // TurretTank::UpdateWeaponAim has two released consumers. The owner
-        // guard below verifies that a candidate slot still contains 0x005F27B0
-        // before replacing it, so derived consumers remain fail-closed.
-        constexpr uintptr_t kTurretTankWeaponAimVtableSlotAddrs[] = {
-            0x0087AE08,
-            0x00889530,
+        struct ConvergenceVtable
+        {
+            const char* row;
+            const char* rttiName;
+            uint32_t address;
         };
 
-        constexpr uintptr_t kWingmanWeaponAimStockAddr = 0x004EB590;
+        static ConvergenceVtable g_WingmanVtable = { "WingmanVtable", ".?AVWingman@@", 0 };
 
-        constexpr uintptr_t kTurretCraftUpdateWeaponAimAddr = 0x005F0930;
+        static ConvergenceVtable g_TurretCraftVtable = { "TurretCraftVtable", ".?AVTurretCraft@@", 0 };
 
-        constexpr uintptr_t kTurretTankUpdateWeaponAimAddr = 0x005F27B0;
+        static ConvergenceVtable g_TurretTankVtables[] = {
+            { "HowitzerVtable", ".?AVHowitzer@@", 0 },
+            { "TurretTankVtable", ".?AVTurretTank@@", 0 },
+        };
 
-        constexpr uintptr_t kCarrierGetWeaponAddr = 0x00417F60;
+        static uint32_t g_WingmanUpdateWeaponAimAddr = 0;
 
-        constexpr uintptr_t kRefreshWeaponTransformAddr = 0x00681A00;
+        static uint32_t g_TurretCraftUpdateWeaponAimAddr = 0;
 
-        // The global Reticle lives at 0x025CE6D0 (its ctor at 0x005BA170 is
-        // called with that `this` from 0x0040B013). Member addresses below come
-        // from the class layout; nothing references them absolutely from inside
-        // Reticle itself because member access goes through its own `this`.
+        static uint32_t g_TurretTankUpdateWeaponAimAddr = 0;
+
+        static uint32_t g_CarrierGetWeaponAddr = 0;
+
+        static uint32_t g_RefreshWeaponTransformAddr = 0;
+
+        // The global Reticle (row ReticleGlobal; its ctor is called with that
+        // `this` from the startup code). Member offsets below come from the
+        // class layout; nothing references them absolutely from inside Reticle
+        // itself because member access goes through its own `this`.
         //
-        // Reticle::Simulate (0x005BA560) resolves the crosshair in a strict
+        // Reticle::Simulate resolves the crosshair in a strict
         // order, and convergence has to follow the same one:
         //   selectObj = FindReticleObject(...)      ; object under the crosshair
         //   if (selectObj == 0)                     ; ONLY THEN
@@ -87,7 +99,7 @@ namespace BZROpenShim
         // So gPos is stale whenever the crosshair is sitting on something, and
         // reading it unconditionally aims at wherever the ground last was.
         //
-        // Reticle::FindGroundPos (0x005BCCA0) only writes gPos when its ray
+        // Reticle::FindGroundPos only writes gPos when its ray
         // actually hits terrain:
         //
         //   if (TerrainRaycast(...) != 0) {
@@ -99,38 +111,50 @@ namespace BZROpenShim
         // gPos keeps the last hit forever once the crosshair leaves the
         // terrain. Convergence has to consult the flag, not just gPos, or
         // aiming at the sky keeps firing at wherever the ground last was.
-        constexpr uintptr_t kSmartReticleGroundHitAddr = 0x025CE778;     // +0xA8
+        static uint32_t g_ReticleGlobalAddr = 0;
 
-        constexpr uintptr_t kSmartReticleSelectObjectAddr = 0x025CE77C;  // +0xAC
+        constexpr size_t kReticleGroundHitOffset = 0xA8;
 
-        constexpr uintptr_t kSmartReticlePositionAddr = 0x025CE79C;      // +0xCC gPos
+        constexpr size_t kReticleSelectObjectOffset = 0xAC;
 
-        // 0x00886B20 is NOT a reticle range variable: it is a pooled read-only
+        constexpr size_t kReticlePositionOffset = 0xCC; // gPos
+
+        // SmartReticlePooledRange is NOT a reticle range variable: it is a pooled read-only
         // 200.0f literal in .rdata that 112 unrelated .text sites also load
         // (comparisons, field initializers, arithmetic all over the game).
         // Writing it moves the reticle range and 107 other things with it, so
         // it is only ever read here as a byte guard, never written. The five
         // reticle loads are redirected to g_SmartReticleRangeCell instead:
         //
-        //   Reticle::FindReticleObject (0x005BC640)
-        //     0x005BC6CF F3 0F 10 05 [20 6B 88 00] movss  ; radius = range*0.5
-        //     0x005BC6F6 F3 0F 59 05 [20 6B 88 00] mulss  ; search center x
-        //     0x005BC728 F3 0F 59 05 [20 6B 88 00] mulss  ; search center z
-        //     0x005BC8BD 0F 2F 05    [20 6B 88 00] comiss ; depth cull
-        //   Reticle::FindGroundPos (0x005BCCA0)
-        //     0x005BCCB3 F3 0F 10 05 [20 6B 88 00] movss  ; terrain ray length
+        //   Reticle::FindReticleObject
+        //     SmartReticleRangeRadiusLoad  F3 0F 10 05 [pooled] movss  ; radius = range*0.5
+        //     SmartReticleRangeCenterXMul  F3 0F 59 05 [pooled] mulss  ; search center x
+        //     SmartReticleRangeCenterZMul  F3 0F 59 05 [pooled] mulss  ; search center z
+        //     SmartReticleRangeDepthCull   0F 2F 05    [pooled] comiss ; depth cull
+        //   Reticle::FindGroundPos
+        //     SmartReticleRangeGroundRay   F3 0F 10 05 [pooled] movss  ; terrain ray length
         //
         // The last one is what player reticle convergence ultimately aims at,
-        // since it caps how far down the sight gPos can land.
-        constexpr uintptr_t kSmartReticleRangePooledLiteralAddr = 0x00886B20;
+        // since it caps how far down the sight gPos can land. The site rows
+        // are bound into instructionAddr; the pooled literal is its own row.
+        static uint32_t g_SmartReticleRangePooledLiteralAddr = 0;
 
-        constexpr SmartReticleRangeSite kSmartReticleRangeSites[] = {
-            { 0x005BC6CF, { 0xF3, 0x0F, 0x10, 0x05 }, 4 },
-            { 0x005BC6F6, { 0xF3, 0x0F, 0x59, 0x05 }, 4 },
-            { 0x005BC728, { 0xF3, 0x0F, 0x59, 0x05 }, 4 },
-            { 0x005BC8BD, { 0x0F, 0x2F, 0x05, 0x00 }, 3 },
-            { 0x005BCCB3, { 0xF3, 0x0F, 0x10, 0x05 }, 4 },
+        static SmartReticleRangeSite g_SmartReticleRangeSites[] = {
+            { 0, { 0xF3, 0x0F, 0x10, 0x05 }, 4 },
+            { 0, { 0xF3, 0x0F, 0x59, 0x05 }, 4 },
+            { 0, { 0xF3, 0x0F, 0x59, 0x05 }, 4 },
+            { 0, { 0x0F, 0x2F, 0x05, 0x00 }, 3 },
+            { 0, { 0xF3, 0x0F, 0x10, 0x05 }, 4 },
         };
+
+        static const char* const kSmartReticleRangeSiteRows[] = {
+            "SmartReticleRangeRadiusLoad",
+            "SmartReticleRangeCenterXMul",
+            "SmartReticleRangeCenterZMul",
+            "SmartReticleRangeDepthCull",
+            "SmartReticleRangeGroundRay",
+        };
+        static_assert(std::size(kSmartReticleRangeSiteRows) == std::size(g_SmartReticleRangeSites));
 
         constexpr float kSmartReticleRangeMin = 1.0f;
 
@@ -138,8 +162,8 @@ namespace BZROpenShim
 
         // Craft layout taken from the stock aim updates themselves: all three
         // UpdateWeaponAim bodies load the Carrier* from +0x1A0 right before
-        // calling Carrier::GetWeapon (0x005F0993, 0x004EB62C, 0x0060F3BC each
-        // `mov ecx,[this+0x1A0]` / `call 0x00417F60`).
+        // calling Carrier::GetWeapon (each `mov ecx,[this+0x1A0]` /
+        // `call CarrierGetWeapon`).
         constexpr size_t kCraftCarrierOffset = 0x1A0;
 
         constexpr size_t kWeaponObjectOffset = 0x10;
@@ -443,7 +467,7 @@ namespace BZROpenShim
                     return false;
 
                 void* selectObject =
-                    *reinterpret_cast<void* const*>(kSmartReticleSelectObjectAddr);
+                    *reinterpret_cast<void* const*>(g_ReticleGlobalAddr + kReticleSelectObjectOffset);
                 if (selectObject)
                 {
                     float objectPosition[3] = {};
@@ -459,7 +483,7 @@ namespace BZROpenShim
 
                 // No object under the crosshair and no ground hit this frame
                 // means gPos is stale. Stand down rather than reuse an old range.
-                if (*reinterpret_cast<const int*>(kSmartReticleGroundHitAddr) == 0)
+                if (*reinterpret_cast<const int*>(g_ReticleGlobalAddr + kReticleGroundHitOffset) == 0)
                 {
                     LogPlayerConvergenceSkyStandDownOnce();
                     return false;
@@ -468,7 +492,7 @@ namespace BZROpenShim
                 return TryBuildConvergenceRangeSample(
                     craft,
                     *reinterpret_cast<const ConvergenceVec3*>(
-                        kSmartReticlePositionAddr),
+                        g_ReticleGlobalAddr + kReticlePositionOffset),
                     "reticle-ground",
                     outSample);
             }
@@ -497,9 +521,9 @@ namespace BZROpenShim
                 return 0;
 
             auto carrierGetWeapon =
-                reinterpret_cast<FnCarrierGetWeapon>(kCarrierGetWeaponAddr);
+                reinterpret_cast<FnCarrierGetWeapon>(g_CarrierGetWeaponAddr);
             auto refreshWeaponTransform =
-                reinterpret_cast<FnRefreshWeaponTransform>(kRefreshWeaponTransformAddr);
+                reinterpret_cast<FnRefreshWeaponTransform>(g_RefreshWeaponTransformAddr);
 
             static FnObjRelParentMatrix objRelParentMatrix = nullptr;
             if (!objRelParentMatrix)
@@ -645,7 +669,7 @@ namespace BZROpenShim
             // Work Order 4: TurretCraft owns classLabel="turret". Preserve its
             // native turret articulation / weapon transform construction, then
             // add only Walker's hardpoint convergence stage by range.
-            reinterpret_cast<FnUpdateWeaponAim>(kTurretCraftUpdateWeaponAimAddr)(craft, dt);
+            reinterpret_cast<FnUpdateWeaponAim>(g_TurretCraftUpdateWeaponAimAddr)(craft, dt);
 
             if (g_ShotConvergenceEnabled && singlePlayer)
                 ApplyExplicitTargetWeaponConvergence(craft);
@@ -665,7 +689,7 @@ namespace BZROpenShim
             // apply only Walker's convergence stage through the common post-pass.
             // The audit in PR #241 proved Wingman and Walker are identical up to
             // the point where Walker adds that stage.
-            reinterpret_cast<FnUpdateWeaponAim>(kWingmanWeaponAimStockAddr)(craft, dt);
+            reinterpret_cast<FnUpdateWeaponAim>(g_WingmanUpdateWeaponAimAddr)(craft, dt);
 
             if (g_ShotConvergenceEnabled && singlePlayer)
                 ApplyExplicitTargetWeaponConvergence(craft);
@@ -687,7 +711,7 @@ namespace BZROpenShim
             // Work Order 4: never substitute Walker::UpdateWeaponAim here.
             // TurretTank's own yaw/pitch mechanics and weapon transform setup
             // remain authoritative; convergence is strictly a post-pass.
-            reinterpret_cast<FnUpdateWeaponAim>(kTurretTankUpdateWeaponAimAddr)(craft, dt);
+            reinterpret_cast<FnUpdateWeaponAim>(g_TurretTankUpdateWeaponAimAddr)(craft, dt);
 
             if (g_ShotConvergenceEnabled && singlePlayer)
                 ApplyExplicitTargetWeaponConvergence(craft);
@@ -762,35 +786,85 @@ namespace BZROpenShim
             return true;
         }
 
+        static uintptr_t UpdateWeaponAimSlot(const ConvergenceVtable& vtable)
+        {
+            return vtable.address + kUpdateWeaponAimVtableIndex * sizeof(void*);
+        }
+
+        static bool ShotConvergenceAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { g_WingmanVtable.row, &g_WingmanVtable.address },
+                    { g_TurretCraftVtable.row, &g_TurretCraftVtable.address },
+                    { g_TurretTankVtables[0].row, &g_TurretTankVtables[0].address },
+                    { g_TurretTankVtables[1].row, &g_TurretTankVtables[1].address },
+                    { "WingmanUpdateWeaponAim", &g_WingmanUpdateWeaponAimAddr },
+                    { "TurretCraftUpdateWeaponAim", &g_TurretCraftUpdateWeaponAimAddr },
+                    { "TurretTankUpdateWeaponAim", &g_TurretTankUpdateWeaponAimAddr },
+                    { "CarrierGetWeapon", &g_CarrierGetWeaponAddr },
+                    { "RefreshWeaponTransform", &g_RefreshWeaponTransformAddr },
+                    { "ReticleGlobal", &g_ReticleGlobalAddr },
+                };
+                if (!HookEngine::BindEngineRows("Shot convergence", rows))
+                    return false;
+                const ConvergenceVtable* vtables[] = {
+                    &g_WingmanVtable, &g_TurretCraftVtable,
+                    &g_TurretTankVtables[0], &g_TurretTankVtables[1],
+                };
+                for (const ConvergenceVtable* vtable : vtables)
+                {
+                    if (VtableTypeNameMatches(vtable->address, vtable->rttiName))
+                        continue;
+                    Log(L"[CONVERGE] %hs RTTI mismatch vtable=0x%08X; convergence stands down\n",
+                        vtable->row, vtable->address);
+                    return false;
+                }
+                return true;
+            }();
+            return bound;
+        }
+
         void RefreshShotConvergencePatchState()
         {
-            if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return;
             const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
             const bool wantConvergenceWrapper =
                 singlePlayer &&
                 (g_ShotConvergenceEnabled || g_PlayerReticleShotConvergenceEnabled);
 
+            // Nothing installed and nothing wanted: the slots are stock, and a
+            // build without the rows has no reason to report a stand-down.
+            const bool anyWrapperActive =
+                g_WingmanWeaponAimWrapperActive || g_TurretCraftWeaponAimWrapperActive ||
+                g_TurretTankWeaponAimWrapperActive[0] || g_TurretTankWeaponAimWrapperActive[1];
+            if ((!wantConvergenceWrapper && !anyWrapperActive) || !ShotConvergenceAddressesBound())
+            {
+                g_ShotConvergencePatchActive = false;
+                g_PlayerReticleShotConvergencePatchActive = false;
+                return;
+            }
+
             RefreshConvergenceVtableSlot(
-                kWingmanWeaponAimVtableSlotAddr,
-                kWingmanWeaponAimStockAddr,
+                UpdateWeaponAimSlot(g_WingmanVtable),
+                g_WingmanUpdateWeaponAimAddr,
                 reinterpret_cast<void*>(WingmanUpdateWeaponAimWithConvergence),
                 wantConvergenceWrapper,
                 g_WingmanWeaponAimWrapperActive,
                 L"wingman convergence dispatcher");
             RefreshConvergenceVtableSlot(
-                kTurretCraftWeaponAimVtableSlotAddr,
-                kTurretCraftUpdateWeaponAimAddr,
+                UpdateWeaponAimSlot(g_TurretCraftVtable),
+                g_TurretCraftUpdateWeaponAimAddr,
                 reinterpret_cast<void*>(TurretCraftUpdateWeaponAimWithConvergence),
                 wantConvergenceWrapper,
                 g_TurretCraftWeaponAimWrapperActive,
                 L"turret convergence dispatcher");
             for (size_t index = 0;
-                 index < std::size(kTurretTankWeaponAimVtableSlotAddrs);
+                 index < std::size(g_TurretTankVtables);
                  ++index)
             {
                 RefreshConvergenceVtableSlot(
-                    kTurretTankWeaponAimVtableSlotAddrs[index],
-                    kTurretTankUpdateWeaponAimAddr,
+                    UpdateWeaponAimSlot(g_TurretTankVtables[index]),
+                    g_TurretTankUpdateWeaponAimAddr,
                     reinterpret_cast<void*>(TurretTankUpdateWeaponAimWithConvergence),
                     wantConvergenceWrapper,
                     g_TurretTankWeaponAimWrapperActive[index],
@@ -825,7 +899,7 @@ namespace BZROpenShim
             const SmartReticleRangeSite& site,
             uint8_t (&outBytes)[8])
         {
-            const uint32_t pooled = static_cast<uint32_t>(kSmartReticleRangePooledLiteralAddr);
+            const uint32_t pooled = g_SmartReticleRangePooledLiteralAddr;
             std::memcpy(outBytes, site.opcode, site.opcodeLen);
             std::memcpy(outBytes + site.opcodeLen, &pooled, sizeof(pooled));
         }
@@ -833,12 +907,32 @@ namespace BZROpenShim
         // Points all five reticle range loads at our own cell. Either every
         // site moves or none does -- a partial redirect would leave the reticle
         // taking its range from two different places.
+        static bool SmartReticleRangeAddressesBound()
+        {
+            static const bool bound = [] {
+                uint32_t sites[std::size(g_SmartReticleRangeSites)] = {};
+                HookEngine::EngineRow rows[std::size(g_SmartReticleRangeSites) + 1] = {
+                    { "SmartReticlePooledRange", &g_SmartReticleRangePooledLiteralAddr },
+                };
+                for (size_t index = 0; index < std::size(sites); ++index)
+                    rows[index + 1] = { kSmartReticleRangeSiteRows[index], &sites[index] };
+                if (!HookEngine::BindEngineRows("Smart-reticle range", rows))
+                    return false;
+                for (size_t index = 0; index < std::size(sites); ++index)
+                    g_SmartReticleRangeSites[index].instructionAddr = sites[index];
+                return true;
+            }();
+            return bound;
+        }
+
         static bool EnsureSmartReticleRangeRedirect()
         {
             if (g_SmartReticleRangeRedirectActive)
                 return true;
+            if (!SmartReticleRangeAddressesBound())
+                return false;
 
-            for (const auto& site : kSmartReticleRangeSites)
+            for (const auto& site : g_SmartReticleRangeSites)
             {
                 uint8_t expected[8] = {};
                 BuildSmartReticleRangeSiteBytes(site, expected);
@@ -857,7 +951,7 @@ namespace BZROpenShim
             const uint32_t cellAddr =
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g_SmartReticleRangeCell));
             size_t written = 0;
-            for (const auto& site : kSmartReticleRangeSites)
+            for (const auto& site : g_SmartReticleRangeSites)
             {
                 if (!WritePatchBytes(
                         site.instructionAddr + site.opcodeLen,
@@ -869,14 +963,13 @@ namespace BZROpenShim
                 ++written;
             }
 
-            if (written != std::size(kSmartReticleRangeSites))
+            if (written != std::size(g_SmartReticleRangeSites))
             {
                 // Put back whatever landed so the reticle stays wholly stock.
                 for (size_t index = 0; index < written; ++index)
                 {
-                    const auto& site = kSmartReticleRangeSites[index];
-                    const uint32_t pooled =
-                        static_cast<uint32_t>(kSmartReticleRangePooledLiteralAddr);
+                    const auto& site = g_SmartReticleRangeSites[index];
+                    const uint32_t pooled = g_SmartReticleRangePooledLiteralAddr;
                     WritePatchBytes(
                         site.instructionAddr + site.opcodeLen,
                         reinterpret_cast<const uint8_t*>(&pooled),
@@ -886,7 +979,7 @@ namespace BZROpenShim
                 {
                     Log(L"[RETICLE] Smart-reticle range redirect failed to write (%zu of %zu sites); rolled back\n",
                         written,
-                        std::size(kSmartReticleRangeSites));
+                        std::size(g_SmartReticleRangeSites));
                     g_SmartReticleRangeRedirectFaultLogged = true;
                 }
                 return false;
@@ -895,8 +988,8 @@ namespace BZROpenShim
             g_SmartReticleRangeRedirectActive = true;
             Log(L"[RETICLE] Smart-reticle range redirected to 0x%08X across %zu site(s); shared 200.0 literal at 0x%08X left untouched\n",
                 cellAddr,
-                std::size(kSmartReticleRangeSites),
-                static_cast<uint32_t>(kSmartReticleRangePooledLiteralAddr));
+                std::size(g_SmartReticleRangeSites),
+                g_SmartReticleRangePooledLiteralAddr);
             return true;
         }
 
@@ -910,10 +1003,9 @@ namespace BZROpenShim
             if (!g_SmartReticleRangeRedirectActive)
                 return;
 
-            const uint32_t pooled =
-                static_cast<uint32_t>(kSmartReticleRangePooledLiteralAddr);
+            const uint32_t pooled = g_SmartReticleRangePooledLiteralAddr;
             size_t restored = 0;
-            for (const auto& site : kSmartReticleRangeSites)
+            for (const auto& site : g_SmartReticleRangeSites)
             {
                 if (!WritePatchBytes(
                         site.instructionAddr + site.opcodeLen,
@@ -925,13 +1017,13 @@ namespace BZROpenShim
                 ++restored;
             }
 
-            if (restored != std::size(kSmartReticleRangeSites))
+            if (restored != std::size(g_SmartReticleRangeSites))
             {
                 if (!g_SmartReticleRangeRedirectFaultLogged)
                 {
                     Log(L"[RETICLE] Smart-reticle range restore failed (%zu of %zu sites)\n",
                         restored,
-                        std::size(kSmartReticleRangeSites));
+                        std::size(g_SmartReticleRangeSites));
                     g_SmartReticleRangeRedirectFaultLogged = true;
                 }
                 return;
@@ -953,7 +1045,6 @@ namespace BZROpenShim
 
         void RefreshSmartReticleRangeState()
         {
-            if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return;
             const bool networkGame = ReadLocalPlayerNetIdValue() != 0;
             float desired = kSmartReticleRangeStock;
             bool claimRange = false;
@@ -996,7 +1087,6 @@ namespace BZROpenShim
 
         void RevertShotConvergenceToBaseline()
         {
-            if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return;
             g_ShotConvergenceEnabled = g_ShotConvergenceBaselineEnabled;
             g_PlayerReticleShotConvergenceEnabled =
                 g_PlayerReticleShotConvergenceBaselineEnabled;
@@ -1005,7 +1095,6 @@ namespace BZROpenShim
 
         void RevertSmartReticleRangeToBaseline()
         {
-            if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return;
             g_SmartReticleRangeOwnedByBridge = false;
             g_SmartReticleRange = g_SmartReticleRangeBaseline;
             RefreshSmartReticleRangeState();
@@ -1021,7 +1110,6 @@ namespace BZROpenShim
 
     bool SetShotConvergenceFromBridge(bool enabled)
     {
-        if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return false;
         g_ShotConvergenceEnabled = enabled;
         RefreshShotConvergencePatchState();
         Log(L"[MISSIONHOOK] all-craft weapon convergence %hs patch=%hs\n",
@@ -1037,7 +1125,6 @@ namespace BZROpenShim
 
     bool SetPlayerReticleShotConvergenceFromBridge(bool enabled)
     {
-        if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return false;
         g_PlayerReticleShotConvergenceEnabled = enabled;
         RefreshShotConvergencePatchState();
         Log(L"[MISSIONHOOK] player smart-reticle convergence %hs patch=%hs\n",
@@ -1058,7 +1145,6 @@ namespace BZROpenShim
 
     bool SetSmartReticleRangeFromBridge(float range)
     {
-        if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return false;
         if (!std::isfinite(range))
             return false;
 
