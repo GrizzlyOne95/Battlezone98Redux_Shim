@@ -149,11 +149,12 @@ namespace BZROpenShim
 
         void InstallNicknameTextEntryInputHookIfPossible()
         {
-            if (!HookEngine::LiteralAddressesApply("Lobby screen hooks")) return;
             if (g_LobbyNicknameInputHookInstalled)
                 return;
 
-            constexpr uintptr_t kTextEntryAppendCharAddr = 0x007CFA70;
+            const uintptr_t kTextEntryAppendCharAddr = HookEngine::EngineAddress("TextEntryAppendChar");
+            if (kTextEntryAppendCharAddr == 0)
+                return;
             // push ebp; mov ebp,esp; push -1 -- complete instructions only.
             static constexpr uint8_t kExpectedBytes[] =
             {
@@ -198,14 +199,17 @@ namespace BZROpenShim
         // engine's own layout pass, and rebuilds the quad using the same
         // beginUpdate/rebuild/end sequence the video-texture path uses
         // (0x7D3C92..0x7D3CEA). Driven from the screen's per-frame update
-        // virtual (vftable 0x0089EBE0 slot 13, live-verified as the only
-        // per-frame slot), so only this screen ever dispatches the hook.
-        constexpr uintptr_t kMultiCreateUpdateVtblSlotAddr = 0x0089EC14;
-        constexpr uintptr_t kMultiCreateUpdateFnAddr = 0x0079CDA0;
-        constexpr uintptr_t kMultiMapComponentPtrAddr = 0x00945574;
-        constexpr uintptr_t kUiImageWidgetVftableAddr = 0x008A0B94;
-        constexpr uintptr_t kUiWidgetLayoutFnAddr = 0x007D14B0;
-        constexpr uintptr_t kUiImageRebuildGeometryFnAddr = 0x007D2E20;
+        // virtual (MultiplayerCreateVtable row, slot 13, live-verified as the
+        // only per-frame slot), so only this screen ever dispatches the hook.
+        // Both vtables are checked by RTTI name; the slot's stock target is
+        // whatever the checked vtable holds at bind time.
+        static uintptr_t g_MultiCreateUpdateVtblSlotAddr = 0;
+        static uintptr_t g_MultiCreateUpdateFnAddr = 0;
+        static uint32_t g_MultiMapComponentPtrAddr = 0;
+        static uint32_t g_UiImageWidgetVftableAddr = 0;
+        static uint32_t g_UiWidgetLayoutFnAddr = 0;
+        static uint32_t g_UiImageRebuildGeometryFnAddr = 0;
+        constexpr size_t kMultiCreateUpdateVtblIndex = 13;
         constexpr float kMultiMapPreviewDesignSize = 200.0f;
 
         using FnScreenUpdate = void(__thiscall*)(void*);
@@ -231,16 +235,42 @@ namespace BZROpenShim
             return s_cached != 0;
         }
 
+        static bool MultiCreatePreviewAddressesBound()
+        {
+            static const bool bound = [] {
+                uint32_t screenVtable = 0;
+                const HookEngine::EngineRow rows[] = {
+                    { "MultiplayerCreateVtable", &screenVtable },
+                    { "MultiplayerMapComponent", &g_MultiMapComponentPtrAddr },
+                    { "UiPerfMainScreenOverlayVtable", &g_UiImageWidgetVftableAddr },
+                    { "UiWidgetLayout", &g_UiWidgetLayoutFnAddr },
+                    { "UiImageRebuildGeometry", &g_UiImageRebuildGeometryFnAddr },
+                };
+                if (!HookEngine::BindEngineRows("Map preview fix", rows))
+                    return false;
+                if (!VtableTypeNameMatches(screenVtable, ".?AVcUI_Multiplayer_Create@@") ||
+                    !VtableTypeNameMatches(g_UiImageWidgetVftableAddr, ".?AVcUI_View@@"))
+                {
+                    Log(L"[MAPPREVIEW] vtable RTTI mismatch; map preview fix stands down\n");
+                    return false;
+                }
+                g_MultiCreateUpdateVtblSlotAddr = screenVtable + kMultiCreateUpdateVtblIndex * sizeof(void*);
+                g_MultiCreateUpdateFnAddr = *reinterpret_cast<const uintptr_t*>(g_MultiCreateUpdateVtblSlotAddr);
+                return true;
+            }();
+            return bound;
+        }
+
         static void ClampMultiCreateMapPreviewIfNeeded()
         {
             __try
             {
-                uint8_t* component = *reinterpret_cast<uint8_t**>(kMultiMapComponentPtrAddr);
+                uint8_t* component = *reinterpret_cast<uint8_t**>(g_MultiMapComponentPtrAddr);
                 if (!component)
                     return;
                 uint8_t* widget = *reinterpret_cast<uint8_t**>(component + 0x1C);
                 if (!widget ||
-                    *reinterpret_cast<uintptr_t*>(widget) != kUiImageWidgetVftableAddr)
+                    *reinterpret_cast<uintptr_t*>(widget) != g_UiImageWidgetVftableAddr)
                     return;
 
                 float* designW = reinterpret_cast<float*>(widget + 0xF4);
@@ -263,7 +293,7 @@ namespace BZROpenShim
                 *designH = kMultiMapPreviewDesignSize;
                 const float designX = *reinterpret_cast<float*>(widget + 0xEC);
                 const float designY = *reinterpret_cast<float*>(widget + 0xF0);
-                reinterpret_cast<FnWidgetLayout>(kUiWidgetLayoutFnAddr)(
+                reinterpret_cast<FnWidgetLayout>(g_UiWidgetLayoutFnAddr)(
                     widget,
                     designX,
                     designY,
@@ -275,7 +305,7 @@ namespace BZROpenShim
                 {
                     uintptr_t* vtbl = *reinterpret_cast<uintptr_t**>(manualObject);
                     reinterpret_cast<FnManualObjectBeginUpdate>(vtbl[0x118 / 4])(manualObject, 0);
-                    reinterpret_cast<FnImageRebuildGeometry>(kUiImageRebuildGeometryFnAddr)(widget);
+                    reinterpret_cast<FnImageRebuildGeometry>(g_UiImageRebuildGeometryFnAddr)(widget);
                     reinterpret_cast<FnManualObjectEnd>(vtbl[0x16C / 4])(manualObject);
                 }
             }
@@ -300,26 +330,27 @@ namespace BZROpenShim
 
         void InstallMultiCreatePreviewFixIfPossible()
         {
-            if (!HookEngine::LiteralAddressesApply("Lobby screen hooks")) return;
             if (!ShouldEnableMapPreviewFix() || g_MultiCreatePreviewHookInstalled)
+                return;
+            if (!MultiCreatePreviewAddressesBound())
                 return;
 
             __try
             {
-                void* current = *reinterpret_cast<void**>(kMultiCreateUpdateVtblSlotAddr);
+                void* current = *reinterpret_cast<void**>(g_MultiCreateUpdateVtblSlotAddr);
                 if (current == reinterpret_cast<void*>(MultiCreateUpdateHook))
                 {
                     g_MultiCreatePreviewHookInstalled = true;
                     return;
                 }
-                if (current != reinterpret_cast<void*>(kMultiCreateUpdateFnAddr))
+                if (current != reinterpret_cast<void*>(g_MultiCreateUpdateFnAddr))
                 {
                     if (!g_MultiCreatePreviewHookFailureLogged)
                     {
                         Log(L"[MAPPREVIEW] update hook skipped: slot=0x%08X current=0x%08X expected=0x%08X\n",
-                            static_cast<uint32_t>(kMultiCreateUpdateVtblSlotAddr),
+                            static_cast<uint32_t>(g_MultiCreateUpdateVtblSlotAddr),
                             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
-                            static_cast<uint32_t>(kMultiCreateUpdateFnAddr));
+                            static_cast<uint32_t>(g_MultiCreateUpdateFnAddr));
                         g_MultiCreatePreviewHookFailureLogged = true;
                     }
                     return;
@@ -328,14 +359,14 @@ namespace BZROpenShim
                 g_BzrFn_MultiCreateUpdateOriginal =
                     reinterpret_cast<FnScreenUpdate>(current);
                 if (!WritePointerValue(
-                        kMultiCreateUpdateVtblSlotAddr,
+                        g_MultiCreateUpdateVtblSlotAddr,
                         reinterpret_cast<void*>(MultiCreateUpdateHook)))
                 {
                     return;
                 }
                 g_MultiCreatePreviewHookInstalled = true;
                 Log(L"[MAPPREVIEW] Installed multi-create map preview fix slot=0x%08X original=0x%08X\n",
-                    static_cast<uint32_t>(kMultiCreateUpdateVtblSlotAddr),
+                    static_cast<uint32_t>(g_MultiCreateUpdateVtblSlotAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)));
             }
             __except (EXCEPTION_EXECUTE_HANDLER)

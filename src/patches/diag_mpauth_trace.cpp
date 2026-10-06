@@ -79,33 +79,48 @@ namespace BZROpenShim
         // MPAUTH instrumentation (Redux 2.2.301) — diagnostic only, no authority patch.
         // Daywrecker: shared consumed byte at +0x230 (complete) / +0x218 (adjusted).
         // Splinter: payload bSend at +0x80, source at +0x7C, ordid at +0x7E.
-        constexpr uintptr_t kGogDayWreckerSimulateAddr = 0x004B0460;
+        // engine_addresses rows, bound together in MpauthAddressesBound().
+        uint32_t g_DayWreckerSimulateAddr = 0;
+        uint32_t g_DayWreckerExplodeAddr = 0;
+        uint32_t g_DayWreckerVtableAddr = 0;
+        uint32_t g_DayWreckerDistributedVtableAddr = 0;
+        uint32_t g_GameObjectRemoveAddr = 0;
+        uint32_t g_OrdinaryStateReaderAddr = 0;
+        uint32_t g_PermanentStateReaderAddr = 0;
+        uint32_t g_DayWreckerSetRemoteAddr = 0;
+        uint32_t g_OrdnanceReceiverAddr = 0;
+        uint32_t g_SprayBombHitAddr = 0;
+        uint32_t g_SprayBombSimulateAddr = 0;
 
-        constexpr uintptr_t kGogDayWreckerExplodeAddr = 0x004B07D0;
-
-        constexpr uintptr_t kGogDayWreckerVtableAddr = 0x00878508;
-
-        constexpr uintptr_t kGogDayWreckerDistributedVtableAddr = 0x00878574;
+        bool MpauthAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "DayWreckerSimulate", &g_DayWreckerSimulateAddr },
+                    { "DayWreckerExplode", &g_DayWreckerExplodeAddr },
+                    { "DayWreckerVtable", &g_DayWreckerVtableAddr },
+                    { "DayWreckerDistributedVtable", &g_DayWreckerDistributedVtableAddr },
+                    { "GameObjectRemove", &g_GameObjectRemoveAddr },
+                    { "DayWreckerOrdinaryStateReader", &g_OrdinaryStateReaderAddr },
+                    { "DayWreckerPermanentStateReader", &g_PermanentStateReaderAddr },
+                    { "DayWreckerSetRemote", &g_DayWreckerSetRemoteAddr },
+                    { "OrdnanceReceive", &g_OrdnanceReceiverAddr },
+                    { "SprayBombHit", &g_SprayBombHitAddr },
+                    { "SprayBombSimulate", &g_SprayBombSimulateAddr },
+                };
+                if (!HookEngine::BindEngineRows("MP auth trace", rows))
+                    return false;
+                return VtableTypeNameMatches(g_DayWreckerVtableAddr, ".?AVDayWrecker@@") &&
+                       VtableTypeNameMatches(g_DayWreckerDistributedVtableAddr, ".?AVDayWrecker@@");
+            }();
+            return bound;
+        }
 
         constexpr size_t kDayWreckerConsumedByteOffset = 0x230;
 
         constexpr size_t kDayWreckerDistributedConsumedOffset = 0x218;
 
         constexpr size_t kDayWreckerDistributedOffset = 0x18;
-
-        constexpr uintptr_t kGogGameObjectRemoveAddr = 0x004DAE70;
-
-        constexpr uintptr_t kGogOrdinaryStateReaderAddr = 0x004B8590;
-
-        constexpr uintptr_t kGogPermanentStateReaderAddr = 0x004B8FA0;
-
-        constexpr uintptr_t kGogDayWreckerSetRemoteAddr = 0x004B7F20;
-
-        constexpr uintptr_t kGogOrdnanceReceiverAddr = 0x00584620;
-
-        constexpr uintptr_t kGogSprayBombHitAddr = 0x005DB080;
-
-        constexpr uintptr_t kGogSprayBombSimulateAddr = 0x004E7D30;
 
         constexpr size_t kMpauthOrdnanceSourceOffset = 0x7C;
 
@@ -189,12 +204,12 @@ namespace BZROpenShim
             __try
             {
                 void* vt0 = *(void**)ptr;
-                if (vt0 == reinterpret_cast<void*>(kGogDayWreckerVtableAddr))
+                if (vt0 == reinterpret_cast<void*>(g_DayWreckerVtableAddr))
                     return true;
                 void* vt1 = *(void**)((uint8_t*)ptr + kDayWreckerDistributedOffset);
-                if (vt1 == reinterpret_cast<void*>(kGogDayWreckerDistributedVtableAddr))
+                if (vt1 == reinterpret_cast<void*>(g_DayWreckerDistributedVtableAddr))
                     return true;
-                if (vt0 == reinterpret_cast<void*>(kGogDayWreckerDistributedVtableAddr))
+                if (vt0 == reinterpret_cast<void*>(g_DayWreckerDistributedVtableAddr))
                     return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -608,7 +623,6 @@ namespace BZROpenShim
 
         void InitializeMpauthConfig()
         {
-            if (!HookEngine::LiteralAddressesApply("MP auth trace")) return;
             bool enabled = false;
             bool dwEnabled = false;
             bool splEnabled = false;
@@ -659,153 +673,154 @@ namespace BZROpenShim
 
         void InstallMpauthHooksIfPossible()
         {
-            if (!HookEngine::LiteralAddressesApply("MP auth trace")) return;
             if (!g_MpauthEnabled)
                 return;
             if (g_MpauthHooksInstalled)
                 return;
+            if (!MpauthAddressesBound())
+                return;
             {
                 // push ebp; mov ebp,esp; sub esp,0x4C: steal all three (GOG 2.2.301).
                 static const uint8_t kExpectedDwSim[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x4C };
-                if (ExpectedBytesMatchAt(kGogDayWreckerSimulateAddr, kExpectedDwSim, sizeof(kExpectedDwSim)))
+                if (ExpectedBytesMatchAt(g_DayWreckerSimulateAddr, kExpectedDwSim, sizeof(kExpectedDwSim)))
                 {
-                    if (InstallInlineDetour32(g_DayWreckerSimulateDetour, kGogDayWreckerSimulateAddr,
+                    if (InstallInlineDetour32(g_DayWreckerSimulateDetour, g_DayWreckerSimulateAddr,
                         reinterpret_cast<void*>(MpauthDwSimulateHook), sizeof(kExpectedDwSim), kExpectedDwSim, sizeof(kExpectedDwSim)))
                     {
                         g_MpauthDwSimOrig = reinterpret_cast<FnMpauthDwSim>(g_DayWreckerSimulateDetour.trampoline);
                         Log(L"[MPAUTH] Installed DayWrecker::Simulate hook at 0x%08X tramp=0x%08X\n",
-                            (uint32_t)kGogDayWreckerSimulateAddr, (uint32_t)(uintptr_t)g_DayWreckerSimulateDetour.trampoline);
+                            (uint32_t)g_DayWreckerSimulateAddr, (uint32_t)(uintptr_t)g_DayWreckerSimulateDetour.trampoline);
                     }
                     else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
-                        Log(L"[MPAUTH] Failed installing DayWrecker::Simulate hook at 0x%08X\n", (uint32_t)kGogDayWreckerSimulateAddr);
+                        Log(L"[MPAUTH] Failed installing DayWrecker::Simulate hook at 0x%08X\n", (uint32_t)g_DayWreckerSimulateAddr);
                 }
                 else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
                 {
-                    Log(L"[MPAUTH] DayWrecker::Simulate bytes mismatch at 0x%08X\n", (uint32_t)kGogDayWreckerSimulateAddr);
-                    __try { uint8_t b[6]={}; memcpy(b, reinterpret_cast<void*>(kGogDayWreckerSimulateAddr), 6);
+                    Log(L"[MPAUTH] DayWrecker::Simulate bytes mismatch at 0x%08X\n", (uint32_t)g_DayWreckerSimulateAddr);
+                    __try { uint8_t b[6]={}; memcpy(b, reinterpret_cast<void*>(g_DayWreckerSimulateAddr), 6);
                         Log(L"[MPAUTH] bytes: %02X %02X %02X %02X %02X %02X\n", b[0],b[1],b[2],b[3],b[4],b[5]); } __except(EXCEPTION_EXECUTE_HANDLER) {}
                 }
             }
             {
                 static const uint8_t kExpectedDwExplode[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x4C };
-                if (ExpectedBytesMatchAt(kGogDayWreckerExplodeAddr, kExpectedDwExplode, sizeof(kExpectedDwExplode)))
+                if (ExpectedBytesMatchAt(g_DayWreckerExplodeAddr, kExpectedDwExplode, sizeof(kExpectedDwExplode)))
                 {
-                    if (InstallInlineDetour32(g_DayWreckerExplodeDetour, kGogDayWreckerExplodeAddr,
+                    if (InstallInlineDetour32(g_DayWreckerExplodeDetour, g_DayWreckerExplodeAddr,
                         reinterpret_cast<void*>(MpauthDwExplodeHook), sizeof(kExpectedDwExplode), kExpectedDwExplode, sizeof(kExpectedDwExplode)))
                     {
                         g_MpauthDwExplodeOrig = reinterpret_cast<FnMpauthDwExplode>(g_DayWreckerExplodeDetour.trampoline);
                         Log(L"[MPAUTH] Installed DayWrecker::Explode hook at 0x%08X tramp=0x%08X\n",
-                            (uint32_t)kGogDayWreckerExplodeAddr, (uint32_t)(uintptr_t)g_DayWreckerExplodeDetour.trampoline);
+                            (uint32_t)g_DayWreckerExplodeAddr, (uint32_t)(uintptr_t)g_DayWreckerExplodeDetour.trampoline);
                     }
                 }
                 else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
-                    Log(L"[MPAUTH] DayWrecker::Explode bytes mismatch at 0x%08X\n", (uint32_t)kGogDayWreckerExplodeAddr);
+                    Log(L"[MPAUTH] DayWrecker::Explode bytes mismatch at 0x%08X\n", (uint32_t)g_DayWreckerExplodeAddr);
             }
             {
                 static const uint8_t kExpectedGoRemove[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x38 };
-                if (ExpectedBytesMatchAt(kGogGameObjectRemoveAddr, kExpectedGoRemove, sizeof(kExpectedGoRemove)))
+                if (ExpectedBytesMatchAt(g_GameObjectRemoveAddr, kExpectedGoRemove, sizeof(kExpectedGoRemove)))
                 {
-                    if (InstallInlineDetour32(g_GameObjectRemoveDetour, kGogGameObjectRemoveAddr,
+                    if (InstallInlineDetour32(g_GameObjectRemoveDetour, g_GameObjectRemoveAddr,
                         reinterpret_cast<void*>(MpauthGoRemoveHook), sizeof(kExpectedGoRemove), kExpectedGoRemove, sizeof(kExpectedGoRemove)))
                     {
                         g_MpauthGoRemoveOrig = reinterpret_cast<FnMpauthGoRemove>(g_GameObjectRemoveDetour.trampoline);
-                        Log(L"[MPAUTH] Installed GameObject::Remove hook at 0x%08X\n", (uint32_t)kGogGameObjectRemoveAddr);
+                        Log(L"[MPAUTH] Installed GameObject::Remove hook at 0x%08X\n", (uint32_t)g_GameObjectRemoveAddr);
                     }
                 }
                 else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
-                    Log(L"[MPAUTH] GameObject::Remove bytes mismatch at 0x%08X\n", (uint32_t)kGogGameObjectRemoveAddr);
+                    Log(L"[MPAUTH] GameObject::Remove bytes mismatch at 0x%08X\n", (uint32_t)g_GameObjectRemoveAddr);
             }
             {
                 static const uint8_t kExpectedSetRemote[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x20 };
-                if (ExpectedBytesMatchAt(kGogDayWreckerSetRemoteAddr, kExpectedSetRemote, sizeof(kExpectedSetRemote)))
+                if (ExpectedBytesMatchAt(g_DayWreckerSetRemoteAddr, kExpectedSetRemote, sizeof(kExpectedSetRemote)))
                 {
-                    if (InstallInlineDetour32(g_DistributedCreateDetour, kGogDayWreckerSetRemoteAddr,
+                    if (InstallInlineDetour32(g_DistributedCreateDetour, g_DayWreckerSetRemoteAddr,
                         reinterpret_cast<void*>(MpauthSetRemoteHook), sizeof(kExpectedSetRemote), kExpectedSetRemote, sizeof(kExpectedSetRemote)))
                     {
                         g_MpauthSetRemoteOrig = reinterpret_cast<FnMpauthSetRemote>(g_DistributedCreateDetour.trampoline);
-                        Log(L"[MPAUTH] Installed SetRemote hook at 0x%08X\n", (uint32_t)kGogDayWreckerSetRemoteAddr);
+                        Log(L"[MPAUTH] Installed SetRemote hook at 0x%08X\n", (uint32_t)g_DayWreckerSetRemoteAddr);
                     }
                 }
                 else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
-                    Log(L"[MPAUTH] SetRemote bytes mismatch at 0x%08X\n", (uint32_t)kGogDayWreckerSetRemoteAddr);
+                    Log(L"[MPAUTH] SetRemote bytes mismatch at 0x%08X\n", (uint32_t)g_DayWreckerSetRemoteAddr);
             }
             {
                 // push ebp; mov ebp,esp; sub esp,0x150 (imm32 form): boundary at 9.
                 static const uint8_t kExpectedOrdnRecv[9] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x50, 0x01, 0x00, 0x00 };
-                if (ExpectedBytesMatchAt(kGogOrdnanceReceiverAddr, kExpectedOrdnRecv, sizeof(kExpectedOrdnRecv)))
+                if (ExpectedBytesMatchAt(g_OrdnanceReceiverAddr, kExpectedOrdnRecv, sizeof(kExpectedOrdnRecv)))
                 {
-                    if (InstallInlineDetour32(g_OrdnanceReceiverDetour, kGogOrdnanceReceiverAddr,
+                    if (InstallInlineDetour32(g_OrdnanceReceiverDetour, g_OrdnanceReceiverAddr,
                         reinterpret_cast<void*>(MpauthOrdnanceReceiverHook), sizeof(kExpectedOrdnRecv), kExpectedOrdnRecv, sizeof(kExpectedOrdnRecv)))
                     {
                         g_MpauthOrdnReceiveOrig = reinterpret_cast<FnMpauthOrdnReceive>(g_OrdnanceReceiverDetour.trampoline);
-                        Log(L"[MPAUTH] Installed Ordnance_Receive hook at 0x%08X\n", (uint32_t)kGogOrdnanceReceiverAddr);
+                        Log(L"[MPAUTH] Installed Ordnance_Receive hook at 0x%08X\n", (uint32_t)g_OrdnanceReceiverAddr);
                     }
                 }
                 else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
                 {
-                    Log(L"[MPAUTH] Ordnance_Receive bytes mismatch at 0x%08X\n", (uint32_t)kGogOrdnanceReceiverAddr);
-                    __try { uint8_t b[6]={}; memcpy(b, reinterpret_cast<void*>(kGogOrdnanceReceiverAddr), 6);
+                    Log(L"[MPAUTH] Ordnance_Receive bytes mismatch at 0x%08X\n", (uint32_t)g_OrdnanceReceiverAddr);
+                    __try { uint8_t b[6]={}; memcpy(b, reinterpret_cast<void*>(g_OrdnanceReceiverAddr), 6);
                         Log(L"[MPAUTH] ordn recv bytes: %02X %02X %02X %02X %02X %02X\n", b[0],b[1],b[2],b[3],b[4],b[5]); } __except(EXCEPTION_EXECUTE_HANDLER) {}
                 }
             }
             {
                 static const uint8_t kExpectedHit[9] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x08, 0x03, 0x00, 0x00 };
-                if (ExpectedBytesMatchAt(kGogSprayBombHitAddr, kExpectedHit, sizeof(kExpectedHit)))
+                if (ExpectedBytesMatchAt(g_SprayBombHitAddr, kExpectedHit, sizeof(kExpectedHit)))
                 {
-                    if (InstallInlineDetour32(g_SprayBombHitDetour, kGogSprayBombHitAddr,
+                    if (InstallInlineDetour32(g_SprayBombHitDetour, g_SprayBombHitAddr,
                         reinterpret_cast<void*>(MpauthSprayBombHitHook), sizeof(kExpectedHit), kExpectedHit, sizeof(kExpectedHit)))
                     {
                         g_MpauthSprayHitOrig = reinterpret_cast<FnMpauthSprayHit>(g_SprayBombHitDetour.trampoline);
-                        Log(L"[MPAUTH] Installed SprayBomb::Hit hook at 0x%08X\n", (uint32_t)kGogSprayBombHitAddr);
+                        Log(L"[MPAUTH] Installed SprayBomb::Hit hook at 0x%08X\n", (uint32_t)g_SprayBombHitAddr);
                     }
                 }
                 else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
-                    Log(L"[MPAUTH] SprayBomb::Hit bytes mismatch at 0x%08X\n", (uint32_t)kGogSprayBombHitAddr);
+                    Log(L"[MPAUTH] SprayBomb::Hit bytes mismatch at 0x%08X\n", (uint32_t)g_SprayBombHitAddr);
             }
             {
                 static const uint8_t kExpectedSim[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08 };
-                if (ExpectedBytesMatchAt(kGogSprayBombSimulateAddr, kExpectedSim, sizeof(kExpectedSim)))
+                if (ExpectedBytesMatchAt(g_SprayBombSimulateAddr, kExpectedSim, sizeof(kExpectedSim)))
                 {
-                    if (InstallInlineDetour32(g_SprayBombSimulateDetour, kGogSprayBombSimulateAddr,
+                    if (InstallInlineDetour32(g_SprayBombSimulateDetour, g_SprayBombSimulateAddr,
                         reinterpret_cast<void*>(MpauthSprayBombSimulateHook), sizeof(kExpectedSim), kExpectedSim, sizeof(kExpectedSim)))
                     {
                         g_MpauthSpraySimOrig = reinterpret_cast<FnMpauthSpraySim>(g_SprayBombSimulateDetour.trampoline);
-                        Log(L"[MPAUTH] Installed SprayBomb::Simulate hook at 0x%08X\n", (uint32_t)kGogSprayBombSimulateAddr);
+                        Log(L"[MPAUTH] Installed SprayBomb::Simulate hook at 0x%08X\n", (uint32_t)g_SprayBombSimulateAddr);
                     }
                 }
                 else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
-                    Log(L"[MPAUTH] SprayBomb::Simulate bytes mismatch at 0x%08X\n", (uint32_t)kGogSprayBombSimulateAddr);
+                    Log(L"[MPAUTH] SprayBomb::Simulate bytes mismatch at 0x%08X\n", (uint32_t)g_SprayBombSimulateAddr);
             }
             // Ordinary state reader (004B8590) — daywrecker revive path, GOG 2.2.301 only
             {
                 // push ebp; mov ebp,esp; sub esp,0x160 (imm32 form): boundary at 9.
                 static const uint8_t kExpectedOrdinary[9] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x60, 0x01, 0x00, 0x00 };
-                if (ExpectedBytesMatchAt(kGogOrdinaryStateReaderAddr, kExpectedOrdinary, sizeof(kExpectedOrdinary)))
+                if (ExpectedBytesMatchAt(g_OrdinaryStateReaderAddr, kExpectedOrdinary, sizeof(kExpectedOrdinary)))
                 {
-                    if (InstallInlineDetour32(g_OrdinaryStateReaderDetour, kGogOrdinaryStateReaderAddr,
+                    if (InstallInlineDetour32(g_OrdinaryStateReaderDetour, g_OrdinaryStateReaderAddr,
                         reinterpret_cast<void*>(MpauthOrdinaryStateReaderHook), sizeof(kExpectedOrdinary), kExpectedOrdinary, sizeof(kExpectedOrdinary)))
                     {
                         g_MpauthOrdinaryReaderOrig = reinterpret_cast<FnMpauthOrdinaryReader>(g_OrdinaryStateReaderDetour.trampoline);
-                        Log(L"[MPAUTH] Installed ordinary state reader hook at 0x%08X\n", (uint32_t)kGogOrdinaryStateReaderAddr);
+                        Log(L"[MPAUTH] Installed ordinary state reader hook at 0x%08X\n", (uint32_t)g_OrdinaryStateReaderAddr);
                     }
                 }
                 else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
-                    Log(L"[MPAUTH] Ordinary reader bytes mismatch at 0x%08X\n", (uint32_t)kGogOrdinaryStateReaderAddr);
+                    Log(L"[MPAUTH] Ordinary reader bytes mismatch at 0x%08X\n", (uint32_t)g_OrdinaryStateReaderAddr);
             }
             // Permanent state reader (004B8FA0)
             {
                 static const uint8_t kExpectedPermanent[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x68 };
-                if (ExpectedBytesMatchAt(kGogPermanentStateReaderAddr, kExpectedPermanent, sizeof(kExpectedPermanent)))
+                if (ExpectedBytesMatchAt(g_PermanentStateReaderAddr, kExpectedPermanent, sizeof(kExpectedPermanent)))
                 {
-                    if (InstallInlineDetour32(g_PermanentStateReaderDetour, kGogPermanentStateReaderAddr,
+                    if (InstallInlineDetour32(g_PermanentStateReaderDetour, g_PermanentStateReaderAddr,
                         reinterpret_cast<void*>(MpauthPermanentStateReaderHook), sizeof(kExpectedPermanent), kExpectedPermanent, sizeof(kExpectedPermanent)))
                     {
                         g_MpauthPermanentReaderOrig = reinterpret_cast<FnMpauthPermanentReader>(g_PermanentStateReaderDetour.trampoline);
-                        Log(L"[MPAUTH] Installed permanent state reader hook at 0x%08X\n", (uint32_t)kGogPermanentStateReaderAddr);
+                        Log(L"[MPAUTH] Installed permanent state reader hook at 0x%08X\n", (uint32_t)g_PermanentStateReaderAddr);
                     }
                 }
                 else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
-                    Log(L"[MPAUTH] Permanent reader bytes mismatch at 0x%08X\n", (uint32_t)kGogPermanentStateReaderAddr);
+                    Log(L"[MPAUTH] Permanent reader bytes mismatch at 0x%08X\n", (uint32_t)g_PermanentStateReaderAddr);
             }
             g_MpauthHooksInstalled = g_MpauthDwSimOrig || g_MpauthDwExplodeOrig || g_MpauthGoRemoveOrig || g_MpauthSetRemoteOrig || g_MpauthOrdnReceiveOrig || g_MpauthSprayHitOrig;
             if (g_MpauthHooksInstalled)

@@ -2550,6 +2550,120 @@
       "address": "0x00918328",
       "kind": "data",
       "identity": "uint32 type of the shell's current screen"
+    },
+    {
+      "name": "ChunkEffectCreateChunk",
+      "address": "0x00492AA0",
+      "expected": "55 8B EC 81 EC A8 00 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "ChunkEffect::CreateChunk entry; the chunk create-path trace detours it"
+    },
+    {
+      "name": "ChunkEffectCreateChunklet",
+      "address": "0x004927D0",
+      "expected": "55 8B EC 81 EC B8 00 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "ChunkEffect::CreateChunklet entry; the chunk create-path trace detours it"
+    },
+    {
+      "name": "ChunkEffectPartialFragment",
+      "address": "0x00492460",
+      "expected": "55 8B EC 83 EC 30 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "ChunkEffect::PartialFragmentObject entry (walker for the dying OBJ76 tree); trace-only detour"
+    },
+    {
+      "name": "ChunkEffectFullFragment",
+      "address": "0x00492640",
+      "expected": "55 8B EC 83 EC 28 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "ChunkEffect::FullFragmentObject entry; skinned gibs and the chunk trace detour it"
+    },
+    {
+      "name": "UiWidgetLayout",
+      "address": "0x007D14B0",
+      "expected": "55 8B EC 81 EC 14 01 00 00 89 4D FC E8 DF BD C7 FF",
+      "identity": "cUI widget layout(x,y,w,h); the map preview fix re-runs it after clamping the design size"
+    },
+    {
+      "name": "UiImageRebuildGeometry",
+      "address": "0x007D2E20",
+      "expected": "55 8B EC 83 EC 58 89 4D FC 8D 45 C0 50 8D 4D BC",
+      "identity": "cUI image widget quad rebuild, run between ManualObject beginUpdate/end"
+    },
+    {
+      "name": "DayWreckerSimulate",
+      "address": "0x004B0460",
+      "expected": "55 8B EC 83 EC 4C A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "DayWrecker::Simulate entry; MP auth trace detour"
+    },
+    {
+      "name": "DayWreckerExplode",
+      "address": "0x004B07D0",
+      "expected": "55 8B EC 83 EC 4C A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "DayWrecker::Explode entry; MP auth trace detour"
+    },
+    {
+      "name": "GameObjectRemove",
+      "address": "0x004DAE70",
+      "expected": "55 8B EC 83 EC 38 89 4D FC 8B 45 FC 8B 88 D8 00 00 00",
+      "identity": "GameObject::Remove entry; MP auth trace detour"
+    },
+    {
+      "name": "DayWreckerOrdinaryStateReader",
+      "address": "0x004B8590",
+      "expected": "55 8B EC 81 EC 60 01 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "DayWrecker distributed ordinary state reader; MP auth trace detour"
+    },
+    {
+      "name": "DayWreckerPermanentStateReader",
+      "address": "0x004B8FA0",
+      "expected": "55 8B EC 83 EC 68 56 8D 4D F4 E8 E1 75 F7 FF 8B 45 14",
+      "identity": "DayWrecker distributed permanent state reader; MP auth trace detour"
+    },
+    {
+      "name": "DayWreckerSetRemote",
+      "address": "0x004B7F20",
+      "expected": "55 8B EC 83 EC 20 89 4D FC 8B 45 FC 0F B6 48 68",
+      "identity": "DayWrecker distributed SetRemote/create; MP auth trace detour"
+    },
+    {
+      "name": "OrdnanceReceive",
+      "address": "0x00584620",
+      "expected": "55 8B EC 81 EC 50 01 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "Ordnance network receive entry; MP auth trace detour"
+    },
+    {
+      "name": "SprayBombHit",
+      "address": "0x005DB080",
+      "expected": "55 8B EC 81 EC 08 03 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "SprayBomb::Hit entry; MP auth trace detour"
+    },
+    {
+      "name": "SprayBombSimulate",
+      "address": "0x004E7D30",
+      "expected": "55 8B EC 83 EC 08 89 4D FC F3 0F 10 05 58 28 8A 00",
+      "identity": "SprayBomb::Simulate entry; MP auth trace detour"
+    },
+    {
+      "name": "MultiplayerCreateVtable",
+      "address": "0x0089EBE0",
+      "kind": "data",
+      "identity": "RTTI .?AVcUI_Multiplayer_Create@@ vtable; slot 13 is the per-frame update the map preview fix wraps"
+    },
+    {
+      "name": "MultiplayerMapComponent",
+      "address": "0x00945574",
+      "kind": "data",
+      "identity": "pointer to the multiplayer create screen's map component; +0x1C is the MapPreview image widget"
+    },
+    {
+      "name": "DayWreckerVtable",
+      "address": "0x00878508",
+      "kind": "data",
+      "identity": "RTTI .?AVDayWrecker@@ primary vtable"
+    },
+    {
+      "name": "DayWreckerDistributedVtable",
+      "address": "0x00878574",
+      "kind": "data",
+      "identity": "RTTI .?AVDayWrecker@@ vtable of the Distributed subobject at +0x18"
     }
   ],
   "globals": [
