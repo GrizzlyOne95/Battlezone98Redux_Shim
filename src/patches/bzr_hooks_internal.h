@@ -1155,7 +1155,6 @@ namespace BZROpenShim
         void PinDirect3DModulesForShutdown();
 
         // --- Shield tower and mine team filters (team_filter_mines.cpp) --------
-        inline constexpr uintptr_t kGogBuildingSimulateAddr = 0x0047FCB0;
         struct TeamFilterConfig;
         struct TeamFilterCache;
         struct TeamFilterConfig
