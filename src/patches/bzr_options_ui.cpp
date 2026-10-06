@@ -47,6 +47,11 @@ namespace BZROpenShim
     void __fastcall OptionsInputDtorHook(void* thisPtr, void* /*edx*/);
     void __fastcall OptionsParentDtorHook(void* thisPtr, void* /*edx*/);
 
+    namespace Hooks
+    {
+        bool VtableTypeNameMatches(uintptr_t vtableAddress, const char* expectedName);
+    }
+
     namespace
     {
         // UI texture availability probe for DLL-only bootstrap.
@@ -97,16 +102,16 @@ namespace BZROpenShim
         // The shipped GOG PDB public-symbol addresses for cUI_OptionsInput methods
         // are not reliable function-entry hooks against the current Redux binary.
         // The stock input screen constructor was recovered from string xrefs instead.
-        constexpr uintptr_t kOptionsInputCtorAddr = 0x007B25B0;
-        constexpr uintptr_t kOptionsInputKeyReleasedAddr = 0x007B48C0;
-        constexpr uintptr_t kOptionsInputScreenFactoryCallerAddr = 0x007C8600;
-        constexpr uintptr_t kOptionsInputBackClickAddr = 0x007B2210;
-        constexpr uintptr_t kOptionsInputDefaultsClickAddr = 0x007B2230;
+        uint32_t g_OptionsInputCtorAddr = 0;
+        uint32_t g_OptionsInputKeyReleasedAddr = 0;
+        uint32_t g_OptionsInputScreenFactoryCallerAddr = 0;
+        uint32_t g_OptionsInputBackClickAddr = 0;
+        uint32_t g_OptionsInputDefaultsClickAddr = 0;
         // Stock "Joystick" button click thunk (cUI_OptionsInput ctor wires it
         // via SetOnClick 0x007C23E0; see FUN_007b25b0 decomp). The Default and
         // Joystick buttons are ctor locals, not screen members, so they are
         // located at runtime by matching this thunk in the +0x154 click slot.
-        constexpr uintptr_t kOptionsInputJoystickClickAddr = 0x007B2220;
+        uint32_t g_OptionsInputJoystickClickAddr = 0;
         constexpr size_t kUiViewChildBeginOffset = 0x12C;
         constexpr size_t kUiViewChildEndOffset = 0x130;
         constexpr size_t kUiButtonOnHoverOffset = 0x150;
@@ -116,13 +121,13 @@ namespace BZROpenShim
         // the cUI_View vtable 0x008A0B94, which is how a node is identified as
         // a button when walking a screen's child tree.
         constexpr size_t kUiViewNameOffset = 0x20;
-        constexpr uintptr_t kUiButtonVtableAddr = 0x008A0470;
+        uint32_t g_UiButtonVtableAddr = 0;
         // cUI_OptionsParent constructor on the live GOG/Steam 2.2.301 exe,
         // recovered from the Redux decompile corpus (FUN_007b61a0: builds the
         // esc_center.png overlay plus the Play/Graphic/Audio/Input buttons) and
         // byte-verified against the installed exe (SEH prologue
         // 55 8B EC 6A FF 68 60 13 86 00). Singleton stored at 0x009455C4.
-        constexpr uintptr_t kOptionsParentCtorAddr = 0x007B61A0;
+        uint32_t g_OptionsParentCtorAddr = 0;
         // cUI_MainScreen menu setup, void __thiscall(this, char).
         //
         // NOT the constructor. Hooking the constructor (0x0078E670) was tried
@@ -140,32 +145,31 @@ namespace BZROpenShim
         //
         // Prologue read from the shipped GOG 2.2.301 image:
         //   55 8B EC 6A FF 68 12 EC 85 00
-        constexpr uintptr_t kMainScreenCtorAddr = 0x0078D000;
+        uint32_t g_MainScreenCtorAddr = 0;
         constexpr size_t kMainScreenCtorDetourLen = 10;
         constexpr size_t kOptionsParentCtorDetourLen = 10;
-        constexpr uintptr_t kOptionsParentSingletonAddr = 0x009455C4;
         // Stock cUI_OptionsParent "Input" click thunk: loads the parent
         // singleton and asks the options shell (this+0x138) to switch to screen
         // id 0x15 (the input options page) via the switch fn at 0x007C7930.
         // The OpenShim settings button reuses this exact navigation path.
-        constexpr uintptr_t kOptionsParentInputClickThunkAddr = 0x007B6100;
+        uint32_t g_OptionsParentInputClickThunkAddr = 0;
         // cUI_OptionsInput singleton (DAT_009455B8); non-null while the stock
         // input screen object is alive inside the current options shell.
-        constexpr uintptr_t kOptionsInputSingletonAddr = 0x009455B8;
+        uint32_t g_OptionsInputSingletonAddr = 0;
         // Inner (non-deleting) destructors of the two hooked screens, recovered
         // from the live GOG exe: the ctor at 0x007B25B0 installs vtable
         // 0x0089F930 whose slot 0 (scalar deleting dtor 0x007B4840) calls
         // 0x007B4870; the parent ctor 0x007B61A0 installs vtable 0x0089FC34 ->
         // slot 0 0x007B6820 -> 0x007B6850. Hooking the inner dtor catches every
         // destruction path, which is what invalidates our cached child views.
-        constexpr uintptr_t kOptionsInputDtorAddr = 0x007B4870;
-        constexpr uintptr_t kOptionsParentDtorAddr = 0x007B6850;
+        uint32_t g_OptionsInputDtorAddr = 0;
+        uint32_t g_OptionsParentDtorAddr = 0;
         constexpr size_t kOptionsScreenDtorDetourLen = 10;
         constexpr size_t kOptionsInputCtorDetourLen = 10;
         constexpr size_t kOptionsInputKeyReleasedDetourLen = 9;
         constexpr size_t kOptionsInputKeyConfigOffset = 0x188;
 
-        constexpr uintptr_t kGogReadMappingTableAddr = 0x00620010;
+        uint32_t g_ReadMappingTableAddr = 0;
 
         enum class InputBindingMapFamily
         {
@@ -1462,8 +1466,8 @@ namespace BZROpenShim
             }
 
             Log(L"[INPUTUI] Recovered stock constructor entry=0x%08X screenFactoryCall=0x%08X\n",
-                static_cast<uint32_t>(kOptionsInputCtorAddr),
-                static_cast<uint32_t>(kOptionsInputScreenFactoryCallerAddr));
+                static_cast<uint32_t>(g_OptionsInputCtorAddr),
+                static_cast<uint32_t>(g_OptionsInputScreenFactoryCallerAddr));
         }
 
         static bool ShouldEnableInputBindingUiReplacement()
@@ -2034,10 +2038,10 @@ namespace BZROpenShim
         // context, accumulating per-char advances at the current global char
         // size; the factory multiplies that char size by the per-text scale
         // before measuring and restores it afterwards, which is mirrored here.
-        constexpr uintptr_t kGogUiTextMeasureAddr = 0x00689AB0;    // cdecl (font, text, &w, &h)
-        constexpr uintptr_t kGogUiFontContextPtrAddr = 0x0091552C; // global font the UI text uses
-        constexpr uintptr_t kGogUiFontCharSizeXAddr = 0x02BF041C;  // global char-size floats read
-        constexpr uintptr_t kGogUiFontCharSizeYAddr = 0x02BF0420;  // by the per-char advance calls
+        uint32_t g_UiTextMeasureAddr = 0;    // cdecl (font, text, &w, &h)
+        uint32_t g_UiFontContextPtrAddr = 0; // global font the UI text uses
+        uint32_t g_UiFontCharSizeXAddr = 0;  // global char-size floats read
+        uint32_t g_UiFontCharSizeYAddr = 0;  // by the per-char advance calls
 
         typedef void(__cdecl* FnUiMeasureText)(void* font, const char* text,
                                                float* outWidth, float* outHeight);
@@ -2049,30 +2053,27 @@ namespace BZROpenShim
             static int s_measureState = 0; // 0=unchecked 1=usable -1=unavailable
             if (s_measureState == 0)
             {
-                static const uint8_t kExpectedMeasureBytes[] =
-                {
-                    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x24, 0x83, 0x7D, 0x10, 0x00
+                const HookEngine::EngineRow rows[] = {
+                    { "UiTextMeasure", &g_UiTextMeasureAddr },
+                    { "UiFontContext", &g_UiFontContextPtrAddr },
+                    { "UiFontCharSizeX", &g_UiFontCharSizeXAddr },
+                    { "UiFontCharSizeY", &g_UiFontCharSizeYAddr },
                 };
-                s_measureState = ExpectedBytesMatchAt(kGogUiTextMeasureAddr,
-                                                      kExpectedMeasureBytes,
-                                                      sizeof(kExpectedMeasureBytes))
-                                     ? 1
-                                     : -1;
+                s_measureState = HookEngine::BindEngineRows("Native UI text measure", rows) ? 1 : -1;
                 if (s_measureState < 0)
-                    Log(L"[INPUTUI] Text measure bytes mismatch at 0x%08X; using char estimates\n",
-                        static_cast<uint32_t>(kGogUiTextMeasureAddr));
+                    Log(L"[INPUTUI] Text measure rows do not bind; using char estimates\n");
             }
             if (s_measureState < 0 || !text || !outWidth || scale <= 0.0f)
                 return false;
 
-            float* const charSizeX = reinterpret_cast<float*>(kGogUiFontCharSizeXAddr);
-            float* const charSizeY = reinterpret_cast<float*>(kGogUiFontCharSizeYAddr);
+            float* const charSizeX = reinterpret_cast<float*>(g_UiFontCharSizeXAddr);
+            float* const charSizeY = reinterpret_cast<float*>(g_UiFontCharSizeYAddr);
             float savedX = 0.0f;
             float savedY = 0.0f;
             bool scaled = false;
             __try
             {
-                void* const font = *reinterpret_cast<void**>(kGogUiFontContextPtrAddr);
+                void* const font = *reinterpret_cast<void**>(g_UiFontContextPtrAddr);
                 if (!font)
                     return false;
 
@@ -2085,7 +2086,7 @@ namespace BZROpenShim
                 scaled = true;
                 float width = 0.0f;
                 float height = 0.0f;
-                reinterpret_cast<FnUiMeasureText>(kGogUiTextMeasureAddr)(font, text, &width, &height);
+                reinterpret_cast<FnUiMeasureText>(g_UiTextMeasureAddr)(font, text, &width, &height);
                 *charSizeX = savedX;
                 *charSizeY = savedY;
                 scaled = false;
@@ -2526,17 +2527,17 @@ namespace BZROpenShim
 
             void* const overlay = ResolveStockOptionsInputMiddleOverlay(screen);
             void* defaultsButton =
-                FindStockOptionsInputButtonByClick(overlay, kOptionsInputDefaultsClickAddr);
+                FindStockOptionsInputButtonByClick(overlay, g_OptionsInputDefaultsClickAddr);
             if (!defaultsButton)
                 defaultsButton =
-                    FindStockOptionsInputButtonByClick(screen, kOptionsInputDefaultsClickAddr);
+                    FindStockOptionsInputButtonByClick(screen, g_OptionsInputDefaultsClickAddr);
             SetStockOptionsInputButtonActive(defaultsButton, false, nullptr);
 
             void* joystickButton =
-                FindStockOptionsInputButtonByClick(screen, kOptionsInputJoystickClickAddr);
+                FindStockOptionsInputButtonByClick(screen, g_OptionsInputJoystickClickAddr);
             if (!joystickButton)
                 joystickButton =
-                    FindStockOptionsInputButtonByClick(overlay, kOptionsInputJoystickClickAddr);
+                    FindStockOptionsInputButtonByClick(overlay, g_OptionsInputJoystickClickAddr);
             SetStockOptionsInputButtonActive(joystickButton, showJoystick, "Joystick");
         }
 
@@ -2684,7 +2685,7 @@ namespace BZROpenShim
         {
             __try
             {
-                return *reinterpret_cast<void* const volatile*>(kOptionsInputSingletonAddr);
+                return *reinterpret_cast<void* const volatile*>(g_OptionsInputSingletonAddr);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -4055,7 +4056,7 @@ namespace BZROpenShim
             g_ShimSettingsPageRequested = true;
             g_ShimSettingsPageRequestTick = now;
             auto* const navigateToInputScreen =
-                reinterpret_cast<void(__cdecl*)()>(kOptionsParentInputClickThunkAddr);
+                reinterpret_cast<void(__cdecl*)()>(g_OptionsParentInputClickThunkAddr);
             navigateToInputScreen();
 
             // If the shell keeps a constructed input screen alive, the ctor hook
@@ -4335,7 +4336,7 @@ namespace BZROpenShim
 
         static void OnInputBindingBackClicked()
         {
-            auto* const backClick = reinterpret_cast<void(__cdecl*)()>(kOptionsInputBackClickAddr);
+            auto* const backClick = reinterpret_cast<void(__cdecl*)()>(g_OptionsInputBackClickAddr);
             if (backClick)
             {
                 Log(L"[INPUTUI] Invoking stock Back callback\n");
@@ -4345,7 +4346,7 @@ namespace BZROpenShim
 
         static void OnInputBindingDefaultsClicked()
         {
-            auto* const defaultsClick = reinterpret_cast<void(__cdecl*)()>(kOptionsInputDefaultsClickAddr);
+            auto* const defaultsClick = reinterpret_cast<void(__cdecl*)()>(g_OptionsInputDefaultsClickAddr);
             if (defaultsClick)
             {
                 Log(L"[INPUTUI] Invoking stock input default reset callback\n");
@@ -4509,24 +4510,18 @@ namespace BZROpenShim
             if (!g_InputMapLiveReloadChecked)
             {
                 g_InputMapLiveReloadChecked = true;
-                static const uint8_t kExpectedReadMappingTableBytes[] =
-                {
-                    0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xDC, 0x02, 0x00, 0x00
-                };
-                g_InputMapLiveReloadAvailable =
-                    ExpectedBytesMatchAt(kGogReadMappingTableAddr,
-                                         kExpectedReadMappingTableBytes,
-                                         sizeof(kExpectedReadMappingTableBytes));
+                g_ReadMappingTableAddr = HookEngine::EngineAddress("ReadMappingTable");
+                g_InputMapLiveReloadAvailable = g_ReadMappingTableAddr != 0;
                 Log(L"[INPUTUI] Live input.map reload %hs at 0x%08X\n",
                     g_InputMapLiveReloadAvailable ? "available" : "unavailable (bytes mismatch)",
-                    static_cast<uint32_t>(kGogReadMappingTableAddr));
+                    static_cast<uint32_t>(g_ReadMappingTableAddr));
             }
 
             if (!g_InputMapLiveReloadAvailable)
                 return false;
 
             auto* readMappingTable =
-                reinterpret_cast<FnReloadGameKeyMap>(kGogReadMappingTableAddr);
+                reinterpret_cast<FnReloadGameKeyMap>(g_ReadMappingTableAddr);
             if (!CallReloadMappingTableGuarded(readMappingTable))
             {
                 // The stock parser crashed mid-reload once (dump 30940, AV in a
@@ -4534,7 +4529,7 @@ namespace BZROpenShim
                 // for a crash-to-desktop: report failure and stop retrying.
                 g_InputMapLiveReloadAvailable = false;
                 Log(L"[INPUTUI] Live input.map reload faulted at 0x%08X; disabled for this session\n",
-                    static_cast<uint32_t>(kGogReadMappingTableAddr));
+                    static_cast<uint32_t>(g_ReadMappingTableAddr));
                 return false;
             }
             return true;
@@ -5020,7 +5015,7 @@ namespace BZROpenShim
                 const ptrdiff_t childCount =
                     (begin && end && begin <= end && (end - begin) < 256) ? (end - begin) : -1;
                 const uintptr_t vtable = *reinterpret_cast<uintptr_t*>(bytes);
-                const bool isButton = (vtable == kUiButtonVtableAddr);
+                const bool isButton = (vtable == g_UiButtonVtableAddr);
 
                 Log(L"[SETTINGSUI] %ls depth=%u view=0x%08X vt=0x%08X name=%hs "
                     L"rect=(%.1f,%.1f,%.1f,%.1f) flags=0x%X vis=%u layer=%u "
@@ -5233,7 +5228,7 @@ namespace BZROpenShim
         // Binary-confirmed cUI_MainScreen singleton for this GOG build; the
         // constructor stores it and the destructor clears it, so a null read
         // means "no title screen right now" rather than "not resolved yet".
-        constexpr uintptr_t kMainScreenSingletonAddr = 0x0094551C;
+        uint32_t g_MainScreenSingletonAddr = 0;
 
         // Matches the stock top-corner controls exactly: same 342x77 frame,
         // same art, clamped to the top edge. ExitGame_MainScreen and
@@ -5371,8 +5366,8 @@ namespace BZROpenShim
         // which is a whole-instruction 7-byte cut. The guards run past that into
         // the bytes that differ between them (SetText pushes 0x7D0), so neither
         // guard can match the other function.
-        constexpr uintptr_t kCareerUiSetButtonLabelAddr = 0x007C2950;
-        constexpr uintptr_t kCareerUiSetTooltipAddr = 0x007CC660;
+        uint32_t g_CareerUiSetButtonLabelAddr = 0;
+        uint32_t g_CareerUiSetTooltipAddr = 0;
         constexpr size_t kCareerUiTextSetterDetourLen = 7;
 
         constexpr uint8_t kExpectedSetButtonLabelBytes[] =
@@ -5396,11 +5391,58 @@ namespace BZROpenShim
         // hidden came back visible over the closed menu. Re-hiding on every
         // setup pass was not enough -- dismissing the splash re-showed it -- so
         // the hidden state is enforced at the setter instead of re-asserted.
-        constexpr uintptr_t kCareerUiSetActiveAddr = 0x007D3310;
+        uint32_t g_CareerUiSetActiveAddr = 0;
         constexpr uint8_t kExpectedSetActiveBytes[] =
         {
             0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x8B, 0x45, 0xFC, 0x83, 0xB8
         };
+        // Every address in this file is an engine_addresses row. The options/career
+        // hooks bind them together (OptionsUiAddressesBound); the native text
+        // measure and the live input.map reload each bind their own rows and
+        // fall back (char estimates, restart-to-apply) when those do not bind.
+        static bool OptionsUiAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "OptionsInputCtor", &g_OptionsInputCtorAddr },
+                    { "OptionsInputKeyReleased", &g_OptionsInputKeyReleasedAddr },
+                    { "OptionsInputScreenFactoryCaller", &g_OptionsInputScreenFactoryCallerAddr },
+                    { "OptionsInputBackClick", &g_OptionsInputBackClickAddr },
+                    { "OptionsInputDefaultsClick", &g_OptionsInputDefaultsClickAddr },
+                    { "OptionsInputJoystickClick", &g_OptionsInputJoystickClickAddr },
+                    { "UiPerfButtonVtable", &g_UiButtonVtableAddr },
+                    { "OptionsParentCtor", &g_OptionsParentCtorAddr },
+                    { "MainScreenMenuSetup", &g_MainScreenCtorAddr },
+                    { "OptionsParentInputClick", &g_OptionsParentInputClickThunkAddr },
+                    { "OptionsInputSingleton", &g_OptionsInputSingletonAddr },
+                    { "OptionsInputDtor", &g_OptionsInputDtorAddr },
+                    { "OptionsParentDtor", &g_OptionsParentDtorAddr },
+                    { "UiPerfMainScreenGlobal", &g_MainScreenSingletonAddr },
+                    { "SetButtonLabel", &g_CareerUiSetButtonLabelAddr },
+                    { "SetTooltip", &g_CareerUiSetTooltipAddr },
+                    { "UiSetActive", &g_CareerUiSetActiveAddr },
+                };
+                if (!HookEngine::BindEngineRows("Shim options UI", rows))
+                    return false;
+                if (!Hooks::VtableTypeNameMatches(g_UiButtonVtableAddr, ".?AVcUI_Button@@"))
+                {
+                    Log(L"[INPUTUI] cUI_Button vtable RTTI mismatch; shim options UI stands down\n");
+                    return false;
+                }
+                return true;
+            }();
+            return bound;
+        }
+
+        // Copies a prologue's live bytes into an expected-bytes buffer. Used for
+        // SEH prologues whose `push offset handler` operand is absolute: the
+        // row's guard has already checked them on the reference build and the
+        // porter regenerates it for others, so the live bytes are the truth.
+        static void CopyLivePrologue(uint32_t address, uint8_t* out, size_t length)
+        {
+            std::memcpy(out, reinterpret_cast<const void*>(static_cast<uintptr_t>(address)), length);
+        }
+
         static InlineDetour32 g_CareerUiSetActiveDetour = {};
         static FnUiSetActive g_CareerUiSetActiveOriginal = nullptr;
 
@@ -5415,7 +5457,7 @@ namespace BZROpenShim
         {
             __try
             {
-                return *reinterpret_cast<void* const*>(kMainScreenSingletonAddr);
+                return *reinterpret_cast<void* const*>(g_MainScreenSingletonAddr);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -5803,7 +5845,7 @@ namespace BZROpenShim
             {
                 if (!view)
                     return nullptr;
-                if (*reinterpret_cast<uintptr_t*>(view) != kUiButtonVtableAddr)
+                if (*reinterpret_cast<uintptr_t*>(view) != g_UiButtonVtableAddr)
                     return nullptr;
                 return *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(view) + 0x144);
             }
@@ -6529,7 +6571,7 @@ namespace BZROpenShim
 
     void EnsureInputBindingPopulateHookScaffold()
     {
-        if (!HookEngine::LiteralAddressesApply("Shim options UI")) return;
+        if (!OptionsUiAddressesBound()) return;
         InitializeInputBindingUiScaffold();
 
         // The settings page reuses the hooked input screen as its host, so
@@ -6537,7 +6579,7 @@ namespace BZROpenShim
         if (!ShouldEnableInputBindingUiReplacement() && !ShouldEnableShimSettingsUi())
             return;
 
-        EnsureOptionsScreenDtorHook(kOptionsInputDtorAddr,
+        EnsureOptionsScreenDtorHook(g_OptionsInputDtorAddr,
                                     g_OptionsInputDtorDetour,
                                     reinterpret_cast<void*>(OptionsInputDtorHook),
                                     g_BzrFn_OptionsInputDtorOriginal,
@@ -6548,10 +6590,9 @@ namespace BZROpenShim
         if (g_InputBindingUiPopulateHookInstalled && g_InputBindingUiKeyReleasedHookInstalled)
             return;
 
-        const uint8_t kExpectedOptionsInputCtorBytes[kOptionsInputCtorDetourLen] =
-        {
-            0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x73, 0x12, 0x86, 0x00
-        };
+        // push ebp; mov ebp,esp; push -1; push offset SEH handler -- read live.
+        uint8_t kExpectedOptionsInputCtorBytes[kOptionsInputCtorDetourLen] = {};
+        CopyLivePrologue(g_OptionsInputCtorAddr, kExpectedOptionsInputCtorBytes, sizeof(kExpectedOptionsInputCtorBytes));
         const uint8_t kExpectedOptionsInputKeyReleasedBytes[kOptionsInputKeyReleasedDetourLen] =
         {
             0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x54, 0x01, 0x00, 0x00
@@ -6564,28 +6605,28 @@ namespace BZROpenShim
         // keys, and a retry never re-validates bytes on an already-patched site.
         if (!g_InputBindingUiKeyReleasedHookInstalled)
         {
-            if (!ExpectedBytesMatchAt(kOptionsInputKeyReleasedAddr,
+            if (!ExpectedBytesMatchAt(g_OptionsInputKeyReleasedAddr,
                                       kExpectedOptionsInputKeyReleasedBytes,
                                       sizeof(kExpectedOptionsInputKeyReleasedBytes)))
             {
                 if (!g_InputBindingUiPopulateHookMismatchLogged)
                 {
                     Log(L"[INPUTUI] KeyReleased entry bytes mismatch at 0x%08X; input UI replacement remains disabled\n",
-                        static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
+                        static_cast<uint32_t>(g_OptionsInputKeyReleasedAddr));
                     g_InputBindingUiPopulateHookMismatchLogged = true;
                 }
                 return;
             }
 
             if (!InstallInlineDetour32(g_OptionsInputKeyReleasedDetour,
-                                       kOptionsInputKeyReleasedAddr,
+                                       g_OptionsInputKeyReleasedAddr,
                                        reinterpret_cast<void*>(OptionsInputKeyReleasedHook),
                                        kOptionsInputKeyReleasedDetourLen,
                                        kExpectedOptionsInputKeyReleasedBytes,
                                        sizeof(kExpectedOptionsInputKeyReleasedBytes)))
             {
                 Log(L"[INPUTUI] Failed installing key-release hook at 0x%08X\n",
-                    static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
+                    static_cast<uint32_t>(g_OptionsInputKeyReleasedAddr));
                 return;
             }
 
@@ -6598,28 +6639,28 @@ namespace BZROpenShim
 
         if (!g_InputBindingUiPopulateHookInstalled)
         {
-            if (!ExpectedBytesMatchAt(kOptionsInputCtorAddr,
+            if (!ExpectedBytesMatchAt(g_OptionsInputCtorAddr,
                                       kExpectedOptionsInputCtorBytes,
                                       sizeof(kExpectedOptionsInputCtorBytes)))
             {
                 if (!g_InputBindingUiPopulateHookMismatchLogged)
                 {
                     Log(L"[INPUTUI] Constructor entry bytes mismatch at 0x%08X; input UI replacement remains disabled\n",
-                        static_cast<uint32_t>(kOptionsInputCtorAddr));
+                        static_cast<uint32_t>(g_OptionsInputCtorAddr));
                     g_InputBindingUiPopulateHookMismatchLogged = true;
                 }
                 return;
             }
 
             if (!InstallInlineDetour32(g_OptionsInputPopulateUiDetour,
-                                       kOptionsInputCtorAddr,
+                                       g_OptionsInputCtorAddr,
                                        reinterpret_cast<void*>(OptionsInputPopulateUiHook),
                                        kOptionsInputCtorDetourLen,
                                        kExpectedOptionsInputCtorBytes,
                                        sizeof(kExpectedOptionsInputCtorBytes)))
             {
                 Log(L"[INPUTUI] Failed installing constructor hook at 0x%08X\n",
-                    static_cast<uint32_t>(kOptionsInputCtorAddr));
+                    static_cast<uint32_t>(g_OptionsInputCtorAddr));
                 return;
             }
 
@@ -6632,9 +6673,9 @@ namespace BZROpenShim
 
         g_InputBindingUiPopulateHookMismatchLogged = false;
         Log(L"[INPUTUI] Installed constructor hook entry=0x%08X trampoline=0x%08X keyRelease=0x%08X\n",
-            static_cast<uint32_t>(kOptionsInputCtorAddr),
+            static_cast<uint32_t>(g_OptionsInputCtorAddr),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OptionsInputPopulateUiDetour.trampoline)),
-            static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
+            static_cast<uint32_t>(g_OptionsInputKeyReleasedAddr));
     }
 
     // Thin public wrapper so features outside the settings page (the lobby
@@ -6659,18 +6700,17 @@ namespace BZROpenShim
     // get a new title-screen button either.
     void EnsureMainScreenCtorHookScaffold()
     {
-        if (!ShouldEnableShimSettingsUi())
+        if (!ShouldEnableShimSettingsUi() || !OptionsUiAddressesBound())
             return;
         if (g_MainScreenCtorHookInstalled || g_MainScreenCtorHookAttempted)
             return;
         g_MainScreenCtorHookAttempted = true;
 
-        const uint8_t kExpectedMainScreenCtorBytes[kMainScreenCtorDetourLen] =
-        {
-            0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x12, 0xEC, 0x85, 0x00
-        };
+        // push ebp; mov ebp,esp; push -1; push offset SEH handler -- read live.
+        uint8_t kExpectedMainScreenCtorBytes[kMainScreenCtorDetourLen] = {};
+        CopyLivePrologue(g_MainScreenCtorAddr, kExpectedMainScreenCtorBytes, sizeof(kExpectedMainScreenCtorBytes));
 
-        if (!ExpectedBytesMatchAt(kMainScreenCtorAddr,
+        if (!ExpectedBytesMatchAt(g_MainScreenCtorAddr,
                                   kExpectedMainScreenCtorBytes,
                                   sizeof(kExpectedMainScreenCtorBytes)))
         {
@@ -6678,20 +6718,20 @@ namespace BZROpenShim
             {
                 g_MainScreenCtorMismatchLogged = true;
                 Log(L"[CAREERUI] MainScreen ctor bytes mismatch at 0x%08X; Career button disabled\n",
-                    static_cast<uint32_t>(kMainScreenCtorAddr));
+                    static_cast<uint32_t>(g_MainScreenCtorAddr));
             }
             return;
         }
 
         if (!InstallInlineDetour32(g_MainScreenCtorDetour,
-                                   kMainScreenCtorAddr,
+                                   g_MainScreenCtorAddr,
                                    reinterpret_cast<void*>(MainScreenCtorHook),
                                    kMainScreenCtorDetourLen,
                                    kExpectedMainScreenCtorBytes,
                                    sizeof(kExpectedMainScreenCtorBytes)))
         {
             Log(L"[CAREERUI] Failed installing MainScreen ctor hook at 0x%08X\n",
-                static_cast<uint32_t>(kMainScreenCtorAddr));
+                static_cast<uint32_t>(g_MainScreenCtorAddr));
             return;
         }
 
@@ -6700,7 +6740,7 @@ namespace BZROpenShim
         g_MainScreenCtorHookInstalled = (g_BzrFn_MainScreenCtorOriginal != nullptr);
 
         Log(L"[CAREERUI] MainScreen setup hook installed entry=0x%08X trampoline=0x%08X\n",
-            static_cast<uint32_t>(kMainScreenCtorAddr),
+            static_cast<uint32_t>(g_MainScreenCtorAddr),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_MainScreenCtorDetour.trampoline)));
 
         InstallCareerUiTextRecorders();
@@ -6728,11 +6768,11 @@ namespace BZROpenShim
     void InstallCareerUiTextRecorders()
     {
         if (!g_CareerUiSetButtonLabelOriginal &&
-            ExpectedBytesMatchAt(kCareerUiSetButtonLabelAddr,
+            ExpectedBytesMatchAt(g_CareerUiSetButtonLabelAddr,
                                  kExpectedSetButtonLabelBytes,
                                  sizeof(kExpectedSetButtonLabelBytes)) &&
             InstallInlineDetour32(g_CareerUiSetButtonLabelDetour,
-                                  kCareerUiSetButtonLabelAddr,
+                                  g_CareerUiSetButtonLabelAddr,
                                   reinterpret_cast<void*>(CareerUiSetButtonLabelHook),
                                   kCareerUiTextSetterDetourLen,
                                   kExpectedSetButtonLabelBytes,
@@ -6743,11 +6783,11 @@ namespace BZROpenShim
         }
 
         if (!g_CareerUiSetTooltipOriginal &&
-            ExpectedBytesMatchAt(kCareerUiSetTooltipAddr,
+            ExpectedBytesMatchAt(g_CareerUiSetTooltipAddr,
                                  kExpectedSetTooltipBytes,
                                  sizeof(kExpectedSetTooltipBytes)) &&
             InstallInlineDetour32(g_CareerUiSetTooltipDetour,
-                                  kCareerUiSetTooltipAddr,
+                                  g_CareerUiSetTooltipAddr,
                                   reinterpret_cast<void*>(CareerUiSetTooltipHook),
                                   kCareerUiTextSetterDetourLen,
                                   kExpectedSetTooltipBytes,
@@ -6758,11 +6798,11 @@ namespace BZROpenShim
         }
 
         if (!g_CareerUiSetActiveOriginal &&
-            ExpectedBytesMatchAt(kCareerUiSetActiveAddr,
+            ExpectedBytesMatchAt(g_CareerUiSetActiveAddr,
                                  kExpectedSetActiveBytes,
                                  sizeof(kExpectedSetActiveBytes)) &&
             InstallInlineDetour32(g_CareerUiSetActiveDetour,
-                                  kCareerUiSetActiveAddr,
+                                  g_CareerUiSetActiveAddr,
                                   reinterpret_cast<void*>(CareerUiSetActiveHook),
                                   kCareerUiTextSetterDetourLen,
                                   kExpectedSetActiveBytes,
@@ -6787,13 +6827,13 @@ namespace BZROpenShim
 
     void EnsureOptionsParentCtorHookScaffold()
     {
-        if (!HookEngine::LiteralAddressesApply("Shim options UI")) return;
+        if (!OptionsUiAddressesBound()) return;
         if (!ShouldEnableShimSettingsUi())
             return;
 
         EnsureMainScreenCtorHookScaffold();
 
-        EnsureOptionsScreenDtorHook(kOptionsParentDtorAddr,
+        EnsureOptionsScreenDtorHook(g_OptionsParentDtorAddr,
                                     g_OptionsParentDtorDetour,
                                     reinterpret_cast<void*>(OptionsParentDtorHook),
                                     g_BzrFn_OptionsParentDtorOriginal,
@@ -6804,33 +6844,32 @@ namespace BZROpenShim
         if (g_OptionsParentHookInstalled)
             return;
 
-        const uint8_t kExpectedOptionsParentCtorBytes[kOptionsParentCtorDetourLen] =
-        {
-            0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x60, 0x13, 0x86, 0x00
-        };
+        // push ebp; mov ebp,esp; push -1; push offset SEH handler -- read live.
+        uint8_t kExpectedOptionsParentCtorBytes[kOptionsParentCtorDetourLen] = {};
+        CopyLivePrologue(g_OptionsParentCtorAddr, kExpectedOptionsParentCtorBytes, sizeof(kExpectedOptionsParentCtorBytes));
 
-        if (!ExpectedBytesMatchAt(kOptionsParentCtorAddr,
+        if (!ExpectedBytesMatchAt(g_OptionsParentCtorAddr,
                                   kExpectedOptionsParentCtorBytes,
                                   sizeof(kExpectedOptionsParentCtorBytes)))
         {
             if (!g_OptionsParentHookMismatchLogged)
             {
                 Log(L"[SETTINGSUI] Options ctor bytes mismatch at 0x%08X; settings UI disabled\n",
-                    static_cast<uint32_t>(kOptionsParentCtorAddr));
+                    static_cast<uint32_t>(g_OptionsParentCtorAddr));
                 g_OptionsParentHookMismatchLogged = true;
             }
             return;
         }
 
         if (!InstallInlineDetour32(g_OptionsParentCtorDetour,
-                                   kOptionsParentCtorAddr,
+                                   g_OptionsParentCtorAddr,
                                    reinterpret_cast<void*>(OptionsParentCtorHook),
                                    kOptionsParentCtorDetourLen,
                                    kExpectedOptionsParentCtorBytes,
                                    sizeof(kExpectedOptionsParentCtorBytes)))
         {
             Log(L"[SETTINGSUI] Failed installing options ctor hook at 0x%08X\n",
-                static_cast<uint32_t>(kOptionsParentCtorAddr));
+                static_cast<uint32_t>(g_OptionsParentCtorAddr));
             return;
         }
 
@@ -6840,7 +6879,7 @@ namespace BZROpenShim
         if (g_OptionsParentHookInstalled)
         {
             Log(L"[SETTINGSUI] Installed options ctor hook entry=0x%08X trampoline=0x%08X\n",
-                static_cast<uint32_t>(kOptionsParentCtorAddr),
+                static_cast<uint32_t>(g_OptionsParentCtorAddr),
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OptionsParentCtorDetour.trampoline)));
         }
     }
