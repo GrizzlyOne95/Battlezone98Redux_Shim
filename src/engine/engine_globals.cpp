@@ -73,6 +73,12 @@ namespace BZROpenShim
             return Lookup(cache, [] { return HookEngine::ResolveNamedAddress("CurrentTrnName"); });
         }
 
+        uintptr_t CraftCollisionGridSlot()
+        {
+            static CachedGlobal cache;
+            return Lookup(cache, [] { return HookEngine::ResolveNamedAddress("CollisionGrid::Crafts"); });
+        }
+
         // One literal per name, like the accessors above.
         uintptr_t NetTunableAddress(NetTunable which)
         {
