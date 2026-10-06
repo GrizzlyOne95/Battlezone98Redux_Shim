@@ -210,6 +210,15 @@
       "identity": "Third Carrier::GetWeapon site in Person::Simulate (0x0059D340), sibling of Pilot Carrier Null Guard (0x0059D76D, same function). The loop at 0x0059D777 walks slots 0-4 of the selected mask returned by Carrier::GetSelected, calls Carrier::GetWeapon (0x00417F60) at 0x0059D7C3 for every set bit, and dereferences the result unconditionally: mov eax,[edx+8] at 0x0059D7D4, then cmp [eax+0xC],'SNIP' to set the crouch flag at [ebp-0x351]. GetWeapon returns null when the hardpoint mask at [carrier+0x2C] lacks that bit, so a selected-mask bit on an empty hardpoint faults. Observed on GOG Redux 2.2.301 in ISDF Chronicles isdfms10 (dump battlezone98redux.exe.54600.dmp): a jak person whose Lua removed its only weapon with GiveWeapon(h, nil, 0) kept selected=1 at [carrier+0x30] with hardpoint mask 0, EIP 0x0059D7D4 reading [0+8]. The result at [ebp-0x4B4] is read only by that SNIP test, so the guard returns a static non-SNIP stand-in for an empty slot. The earlier GetWeapon call at 0x0059D3F0 already null-checks and is left stock. Pattern verified single-match by whole-image scan on 2026-09-26."
     },
     {
+      "name": "Path Block Faces BlockCells Hook",
+      "pattern": "55 8B EC 83 EC 64 A1 ?? ?? ?? ?? 33 C5 89 45 FC 83 3D ?? ?? ?? ?? 00 75 05 E9 ?? ?? ?? ?? 8B 4D 08 83 C1 18 8B 45 08 8B 50 18 8B 02 FF D0 83 78 1C 05 0F 84",
+      "offset": 0,
+      "expected_size": 6,
+      "fallback": "0x00468A70",
+      "require_unique": true,
+      "identity": "BlockCells(GameObject*, bool add) at 0x00468A70 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), cdecl. Its callers are ProcessBuildings 0x00469C70 (call 0x00469D77, the map PostLoad pass reached from AiUtilFeature::PostLoad 0x0046B0CA), AiUtilFeature::AddObject 0x0046B100 (0x0046B18A, add=1) and AiUtilFeature::DeleteObject 0x0046B1A0 (0x0046B22A, add=0), whose class filters (class 2/10/5 or sig TURR, minus PROX/GEIZ/SFLD/SPWN) match BZ 1.5's, plus five Producer/ConstructionRig deploy calls (0x005AC047, 0x005AC0A8, 0x005AC95B, 0x005AD46D, 0x005AFF38); whole-image E8 scan 2026-10-05. Body: cmp [cellType 0x0260D178],0; class+0x1C == 5 takes the perimeter branch; otherwise get_obj_bounding_box 0x0062E650 and the matrix [obj+0xF4]+0x20 build the quad at 0x0260D158 (count 4 at 0x00917380) and BuildingCells 0x004698A0 runs UpdateCells 0x004690F0 with BuildingBlock 0x004693C0 or BuildingUnblock 0x004697C0. PathBlockFaces detours the entry (JMP5 over the 6-byte push ebp/mov ebp,esp/sub esp,64h prologue, relocated to a trampoline); the stock body always runs first. Single match in the GOG image (scan 2026-10-05)."
+    },
+    {
       "name": "HoverCraft Turbo Sound Stop Guard",
       "pattern": "8B 85 20 FF FF FF 8B 88 F4 00 00 00 51 8B 95 1C FF FF FF 81 C2 B0 05 00 00 52 E8 ?? ?? ?? ?? 83 C4 08 89 85 E0 FE FF FF 8B 85 E0 FE FF FF 50 E8 ?? ?? ?? ?? 83 C4 04 8B 8D 20 FF FF FF C7 81 C4 02 00 00 00 00 00 00",
       "offset": 27,
@@ -552,6 +561,126 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Released terrain height sampler, double __cdecl(double x, double z), at 0x007855E0 on GOG Redux 2.2.301. Stock ProximityMine::Simulate's detonation block (FUN_005B0E40, call at 0x005B1189) stores its return into obj+0x50 (the y of the posit triple at obj+0x48/+0x50/+0x58) before building the explosion, as team_filter_mines.cpp reproduces; it has 50+ callers, including the Person ground-follow code at 0x005A05BE-0x005A071C. The body scales both world coordinates by the float at 0x02CC50E4, floors them through 0x0046EAF0 and bilinearly blends four grid heights fetched through 0x00784100. The pattern (entry, both coordinate scalings, first floor call) matches once in the GOG image. Used by SkinnedGibs for gib ground contact only; it reads terrain and writes nothing."
+    },
+    {
+      "name": "PathBlock::CellType",
+      "pattern": "55 8B EC A1 ?? ?? ?? ?? 03 45 08 0F B6 08 83 E1 F4 8B 15 ?? ?? ?? ?? 03 55 08 88 0A",
+      "offset": 4,
+      "mode": "abs32_operand",
+      "fallback": "0x0260D178",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "AI path-grid cell byte array pointer (BZ 1.5 cellType) on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), read by BuildingUnblock 0x004697C0 (mov eax,[0x0260D178]; add eax,[ebp+8]; and cl,0F4h), tested for null at BlockCells 0x00468A80 and UpdateCells 0x004690F6, freed by BlockedCellClean 0x0046AC00. Single match. Read and written by PathBlockFaces for ODF-flagged buildings only."
+    },
+    {
+      "name": "PathBlock::BuildingUnblock",
+      "pattern": "55 8B EC A1 ?? ?? ?? ?? 03 45 08 0F B6 08 83 E1 F4 8B 15 ?? ?? ?? ?? 03 55 08 88 0A",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004697C0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "BuildingUnblock(int index, int gx, int gz) cdecl at 0x004697C0 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): cellType[index] &= 0xF4, then |= 2 when CellIsSteep 0x00468890(gx,gz) else |= 1 when CellIsSlope 0x00468450(gx,gz). Selected by BuildingCells 0x004698A0 for add=0 and called per cell by UpdateCells 0x004690F0. PathBlockFaces calls it to clear building bits so the terrain bits are re-derived exactly as stock deletion does."
+    },
+    {
+      "name": "PathBlock::InvalidateStrips",
+      "pattern": "55 8B EC 83 EC 18 F3 0F 10 45 08 F3 0F 59 05 ?? ?? ?? ?? F3 0F 11 45 08 F3 0F 10 45 0C",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0058D090",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "InvalidateStrips(float x0, float z0, float x1, float z1) cdecl at 0x0058D090 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): scales by Grid_Scale 0x02CC50E4 and resets each 16x16-cell path strip block in range (0x0058CF00). Called at the end of UpdateCells (0x00469327) and from 0x00469C5E. PathBlockFaces calls it again after rewriting cells of a flagged building's box."
+    },
+    {
+      "name": "PathBlock::GridSize",
+      "pattern": "55 8B EC 81 EC B8 00 00 00 83 3D ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? F3 0F 2A 45 0C F3 0F 58 05 ?? ?? ?? ?? F3 0F 59 05 ?? ?? ?? ??",
+      "offset": 39,
+      "mode": "abs32_operand",
+      "fallback": "0x02CC50E0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Terrain Grid_Size float on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), read by BuildingBlock 0x004693C0 (mulss xmm0,[0x02CC50E0] at 0x004693E3) for the cell centre ((g + 0.5) * size); written with 5.0 (.rdata 0x008A285C) by the terrain init 0x0077E990, which also stores Grid_Scale = 1/size at 0x02CC50E4. Single match (BuildingBlock entry)."
+    },
+    {
+      "name": "PathBlock::BlockVertArray",
+      "pattern": "C7 05 ?? ?? ?? ?? 04 00 00 00 8B 4D C0 F3 0F 10 01 F3 0F 59 45 C4 8B 55 C0 F3 0F 10 4A 18 F3 0F 59 4D CC F3 0F 58 C1 F3 0F 5A C0 8B 45 C0 F2 0F 58 40 28 F2 0F 5A C0 B9 08 00 00 00 6B D1 00 F3 0F 11 82 ?? ?? ?? ??",
+      "offset": 67,
+      "mode": "abs32_operand",
+      "fallback": "0x0260D158",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "blockVertArray (4 x {x,z} float) on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): BlockCells 0x00468B0F sets blockVertCount [0x00917380] = 4 and stores corner 0 = right_x*min.x + front_x*min.z + posit_x at [0x0260D158] (0x00468B4E); BuildingBlock 0x004693C0 reads it as [count*8 + 0x0260D150]. PathBlockFaces reads the quad back after the stock call (a sentinel detects the perimeter/degenerate branches)."
+    },
+    {
+      "name": "PathBlock::GridMaxX",
+      "pattern": "8B 0D ?? ?? ?? ?? 2B 0D ?? ?? ?? ?? 83 E9 01 51 6A 00 F3 0F 10 45 08 F3 0F 59 05 ?? ?? ?? ?? 51 F3 0F 11 04 24 E8",
+      "offset": 2,
+      "mode": "abs32_operand",
+      "fallback": "0x02CE99A0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GridMaxX int on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), from UpdateCells 0x004690F0 at 0x0046913A: mov ecx,[0x02CE99A0]; sub ecx,[0x02CE99C0]; sub ecx,1 is the clamp bound for floor(x0 * Grid_Scale) - GridMinX. The same pair forms the row stride (0x00469265). Single match."
+    },
+    {
+      "name": "PathBlock::GridMinX",
+      "pattern": "8B 0D ?? ?? ?? ?? 2B 0D ?? ?? ?? ?? 83 E9 01 51 6A 00 F3 0F 10 45 08 F3 0F 59 05 ?? ?? ?? ?? 51 F3 0F 11 04 24 E8",
+      "offset": 8,
+      "mode": "abs32_operand",
+      "fallback": "0x02CE99C0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GridMinX int on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), the subtrahend at UpdateCells 0x00469140 (see PathBlock::GridMaxX); also subtracted from the floored cell x at 0x00469173. Single match."
+    },
+    {
+      "name": "PathBlock::GridMaxZ",
+      "pattern": "8B 15 ?? ?? ?? ?? 2B 15 ?? ?? ?? ?? 83 EA 01 52 6A 00 F3 0F 10 45 0C F3 0F 59 05 ?? ?? ?? ?? 51 F3 0F 11 04 24 E8",
+      "offset": 2,
+      "mode": "abs32_operand",
+      "fallback": "0x02CE99C4",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GridMaxZ int on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), from UpdateCells 0x004690F0 at 0x004691CF: mov edx,[0x02CE99C4]; sub edx,[0x02CD9984]; sub edx,1 bounds floor(z0 * Grid_Scale) - GridMinZ; CellIsBlocked 0x0046AE20 uses the same pair. Single match."
+    },
+    {
+      "name": "PathBlock::GridMinZ",
+      "pattern": "8B 15 ?? ?? ?? ?? 2B 15 ?? ?? ?? ?? 83 EA 01 52 6A 00 F3 0F 10 45 0C F3 0F 59 05 ?? ?? ?? ?? 51 F3 0F 11 04 24 E8",
+      "offset": 8,
+      "mode": "abs32_operand",
+      "fallback": "0x02CD9984",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GridMinZ int on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), the subtrahend at UpdateCells 0x004691D5 (see PathBlock::GridMaxZ). Single match."
+    },
+    {
+      "name": "PathBlock::GetItemSize",
+      "pattern": "8B 45 E0 83 C0 04 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 D4 8B 4D E0 83 C1 04 51 E8 ?? ?? ?? ?? 83 C4 04 89 45 CC",
+      "offset": 7,
+      "mode": "rel32_target",
+      "fallback": "0x00481A60",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Engine GetItemSize(name) thunk 0x00481A60 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413) (the ODF GetItemSize Hook site), taken from its FileData ctor call at 0x00588E60 so a hooked entry still resolves. Worker 0x00481A80 answers from the item cache or the file system (0x00829150). Used by PathBlockFaces to read ODF/SDF/GEO bytes. Single match."
+    },
+    {
+      "name": "PathBlock::UseItem",
+      "pattern": "8B 45 E0 83 C0 04 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 D4 8B 4D E0 83 C1 04 51 E8 ?? ?? ?? ?? 83 C4 04 89 45 CC",
+      "offset": 25,
+      "mode": "rel32_target",
+      "fallback": "0x00481AF0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Engine UseItem(name) thunk 0x00481AF0 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413) (the ODF UseItem Hook site), from the FileData ctor call at 0x00588E72: returns the locked item bytes, released by UnlockItem. Single match."
+    },
+    {
+      "name": "PathBlock::UnlockItem",
+      "pattern": "E9 ?? ?? ?? ?? 8B 4D E0 83 C1 04 51 E8 ?? ?? ?? ?? 83 C4 04",
+      "offset": 12,
+      "mode": "rel32_target",
+      "fallback": "0x00481990",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Engine UnlockItem(name) thunk 0x00481990 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413) (the ODF UnlockItem Hook site), from the FileData ctor call at 0x005893B4 after parsing. Single match."
     },
     {
       "name": "MPVehicleList::LoadCallSiteNetveh",
