@@ -44,13 +44,10 @@ namespace BZROpenShim
         // 0x007D5CE1. Read at 0x0075F09F (the per-peer connect decision in
         // FUN_0075EEA0) and 0x0075DDC6, both as `cmp dword ptr [addr], 0` -- so
         // it is consulted per connection attempt and may be changed live.
-        constexpr uintptr_t kBzrNetForceRelayFlagAddr = 0x00946708;
-        // NB: the guard site is the INSTRUCTION address, which starts two bytes
-        // before the disp32 operand that names the global (`83 3D` opcode +
-        // modrm). Anchoring on the operand instead silently fails the guard.
-        constexpr uintptr_t kBzrNetForceRelayReadSiteAddr = 0x0075F09D;
-        constexpr uint8_t kBzrNetForceRelayReadSiteBytes[] =
-            { 0x83, 0x3D, 0x08, 0x67, 0x94, 0x00, 0x00 }; // cmp dword [946708],0
+        //
+        // The BzrNetForceRelayRead row is that `cmp dword ptr [flag],0`
+        // instruction (83 3D disp32 00); the flag is its disp32 at +2.
+        static uintptr_t g_BzrNetForceRelayFlagAddr = 0;
 
         // WORD, not dword: /bzrnetport= stores it with `mov word ptr` at
         // 0x007D5DB9. FUN_006BE750 reads it as the REQUESTED port at 0x006BE7B8
@@ -58,10 +55,8 @@ namespace BZROpenShim
         // bound. So it must be written before the socket opens -- and after the
         // socket opens it reads back as the true bound port, which is what the
         // lobby readout reports.
-        constexpr uintptr_t kBzrNetUdpPortAddr = 0x00945704;
-        constexpr uintptr_t kBzrNetUdpPortReadSiteAddr = 0x006BE7B5; // instr, not operand
-        constexpr uint8_t kBzrNetUdpPortReadSiteBytes[] =
-            { 0x0F, 0xB7, 0x15, 0x04, 0x57, 0x94, 0x00 }; // movzx edx,word [945704]
+        // BzrNetUdpPortRead row: `movzx edx,word ptr [port]` (0F B7 15 disp32).
+        static uintptr_t g_BzrNetUdpPortAddr = 0;
 
         // char[0x80] multiplayer name override, the /nickname= destination
         // (strncpy at 0x007D5947, terminator guard written at 0x007D5974).
@@ -71,10 +66,8 @@ namespace BZROpenShim
         // std::string ctor. Because it is read at identity time rather than
         // latched at startup, an edit only reaches the service on the next
         // connect -- see the note on the lobby entry.
-        constexpr uintptr_t kBzrNetNicknameAddr = 0x009453E0;
-        constexpr uintptr_t kBzrNetNicknameReadSiteAddr = 0x006C7D84; // instr, not operand
-        constexpr uint8_t kBzrNetNicknameReadSiteBytes[] =
-            { 0x0F, 0xBE, 0x91, 0xE0, 0x53, 0x94, 0x00 }; // movsx edx,byte [ecx+9453E0]
+        // BzrNetNicknameRead row: `movsx edx,byte ptr [ecx+name]` (0F BE 91 disp32).
+        static uintptr_t g_BzrNetNicknameAddr = 0;
 
         enum class BzrNetRoutePreference
         {
@@ -89,39 +82,45 @@ namespace BZROpenShim
         static BzrNetRoutePreference g_BzrNetRoutePreference = BzrNetRoutePreference::Stock;
         static int g_BzrNetConfiguredUdpPort = -1; // <0 leaves the stock ephemeral bind
 
-        // Guard the writes on the two read sites still carrying the exact
-        // instruction encodings that name these addresses. A build whose layout
-        // moved fails this and the feature stands down rather than writing into
-        // whatever now lives at the old address.
+        // The three read sites are guarded rows, and each global is taken from
+        // the operand of the instruction that reads it, so a build whose layout
+        // moved either ports all three together or stands the feature down
+        // rather than writing into whatever now lives at the old address.
         static bool VerifyBzrNetGlobals()
         {
             if (g_BzrNetGlobalsChecked)
                 return g_BzrNetGlobalsVerified;
             g_BzrNetGlobalsChecked = true;
 
-            const bool relayOk = ExpectedBytesMatchAt(
-                kBzrNetForceRelayReadSiteAddr,
-                kBzrNetForceRelayReadSiteBytes,
-                sizeof(kBzrNetForceRelayReadSiteBytes));
-            const bool portOk = ExpectedBytesMatchAt(
-                kBzrNetUdpPortReadSiteAddr,
-                kBzrNetUdpPortReadSiteBytes,
-                sizeof(kBzrNetUdpPortReadSiteBytes));
-            const bool nicknameOk = ExpectedBytesMatchAt(
-                kBzrNetNicknameReadSiteAddr,
-                kBzrNetNicknameReadSiteBytes,
-                sizeof(kBzrNetNicknameReadSiteBytes));
+            uint32_t relaySite = 0, portSite = 0, nicknameSite = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "BzrNetForceRelayRead", &relaySite },
+                { "BzrNetUdpPortRead", &portSite },
+                { "BzrNetNicknameRead", &nicknameSite },
+            };
+            if (!HookEngine::BindEngineRows("BZRNet settings", rows))
+                return false;
+            const auto* relay = reinterpret_cast<const uint8_t*>(relaySite);
+            const auto* port = reinterpret_cast<const uint8_t*>(portSite);
+            const auto* nickname = reinterpret_cast<const uint8_t*>(nicknameSite);
+            const bool relayOk = relay[0] == 0x83 && relay[1] == 0x3D && relay[6] == 0x00;
+            const bool portOk = port[0] == 0x0F && port[1] == 0xB7 && port[2] == 0x15;
+            const bool nicknameOk = nickname[0] == 0x0F && nickname[1] == 0xBE && nickname[2] == 0x91;
 
             g_BzrNetGlobalsVerified = relayOk && portOk && nicknameOk;
             if (!g_BzrNetGlobalsVerified)
             {
-                Log(L"[BZRNET] Globals failed byte guard (relay=%hs port=%hs nickname=%hs); "
+                Log(L"[BZRNET] Globals failed opcode check (relay=%hs port=%hs nickname=%hs); "
                     L"settings stand down on this build\n",
                     relayOk ? "ok" : "mismatch",
                     portOk ? "ok" : "mismatch",
                     nicknameOk ? "ok" : "mismatch");
+                return false;
             }
-            return g_BzrNetGlobalsVerified;
+            g_BzrNetForceRelayFlagAddr = *reinterpret_cast<const uint32_t*>(relay + 2);
+            g_BzrNetUdpPortAddr = *reinterpret_cast<const uint32_t*>(port + 3);
+            g_BzrNetNicknameAddr = *reinterpret_cast<const uint32_t*>(nickname + 3);
+            return true;
         }
 
         // Both sides of the nickname buffer, in functions free of unwindable
@@ -135,7 +134,7 @@ namespace BZROpenShim
                 return false;
             __try
             {
-                const char* const buffer = reinterpret_cast<const char*>(kBzrNetNicknameAddr);
+                const char* const buffer = reinterpret_cast<const char*>(g_BzrNetNicknameAddr);
                 size_t i = 0;
                 for (; i + 1 < outSize && i < kBzrNetNicknameCapacity && buffer[i] != '\0'; ++i)
                     out[i] = buffer[i];
@@ -155,7 +154,7 @@ namespace BZROpenShim
                 return false;
             __try
             {
-                char* const buffer = reinterpret_cast<char*>(kBzrNetNicknameAddr);
+                char* const buffer = reinterpret_cast<char*>(g_BzrNetNicknameAddr);
                 size_t i = 0;
                 if (value)
                 {
@@ -178,23 +177,33 @@ namespace BZROpenShim
         // The service receives the nickname in Authorization. Recycling the
         // control connection lets Redux's qualified stock reconnect path build
         // and send that message; no private BZRNet send ABI is called here.
-        constexpr uintptr_t kBzrNetLobbyVftable = 0x0089ADDC;
-        constexpr uintptr_t kBzrNetGetLobbyAddr = 0x00764760;
+        // BZRNetLobby vtable (checked by RTTI name) and the GetLobby accessor
+        // are rows; both bind together.
+        static uint32_t g_BzrNetLobbyVftable = 0;
+        static uint32_t g_BzrNetGetLobbyAddr = 0;
+
+        static bool BzrNetLobbyAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "BzrNetLobbyVtable", &g_BzrNetLobbyVftable },
+                    { "BzrNetGetLobby", &g_BzrNetGetLobbyAddr },
+                };
+                return HookEngine::BindEngineRows("BZRNet lobby access", rows) &&
+                       VtableTypeNameMatches(g_BzrNetLobbyVftable, ".?AVBZRNetLobby@@");
+            }();
+            return bound;
+        }
         constexpr size_t kBzrNetLobbyClientOffset = 0xC8;
         constexpr size_t kBzrNetNativeClientBackPointerOffset = 0xC38;
 
-        // `mov eax,[0x00945470]; ret` -- the global the lobby is published to on
-        // construction and zeroed on teardown. Guarded on the instruction.
+        // `mov eax,[lobby]; ret` -- the global the lobby is published to on
+        // construction and zeroed on teardown. The row guards the whole body.
         static void* TryGetStockBzrNetLobby()
         {
-            static constexpr uint8_t kExpectedBytes[] =
-            {
-                0x55, 0x8B, 0xEC, 0xA1, 0x70, 0x54, 0x94, 0x00, 0x5D, 0xC3
-            };
-            if (!ExpectedBytesMatchAt(
-                    kBzrNetGetLobbyAddr, kExpectedBytes, sizeof(kExpectedBytes)))
+            if (!BzrNetLobbyAddressesBound())
                 return nullptr;
-            return reinterpret_cast<void* (__cdecl*)()>(kBzrNetGetLobbyAddr)();
+            return reinterpret_cast<void* (__cdecl*)()>(g_BzrNetGetLobbyAddr)();
         }
 
         // Experimental and default off until a two-client observer test proves
@@ -217,7 +226,8 @@ namespace BZROpenShim
                 return false;
             __try
             {
-                if (*reinterpret_cast<uintptr_t*>(lobby) != kBzrNetLobbyVftable)
+                if (!BzrNetLobbyAddressesBound() ||
+                    *reinterpret_cast<uintptr_t*>(lobby) != g_BzrNetLobbyVftable)
                     return false;
                 void* const client = *reinterpret_cast<void**>(
                     static_cast<uint8_t*>(lobby) + kBzrNetLobbyClientOffset);
@@ -296,7 +306,6 @@ namespace BZROpenShim
         BzrNetNicknameResult ApplyBzrNetNicknameAuthoritative(
             const char* requestedValue, const char* source)
         {
-            if (!HookEngine::LiteralAddressesApply("BZRNet settings")) return {};
             const std::string nickname = TrimAsciiCopy(requestedValue ? requestedValue : "");
             if (!IsValidBzrNetNickname(nickname))
             {
@@ -468,7 +477,7 @@ namespace BZROpenShim
                 return -1;
             __try
             {
-                return static_cast<int>(*reinterpret_cast<volatile uint16_t*>(kBzrNetUdpPortAddr));
+                return static_cast<int>(*reinterpret_cast<volatile uint16_t*>(g_BzrNetUdpPortAddr));
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -482,7 +491,7 @@ namespace BZROpenShim
                 return false;
             __try
             {
-                return *reinterpret_cast<volatile uint32_t*>(kBzrNetForceRelayFlagAddr) != 0;
+                return *reinterpret_cast<volatile uint32_t*>(g_BzrNetForceRelayFlagAddr) != 0;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -501,7 +510,7 @@ namespace BZROpenShim
                 (g_BzrNetRoutePreference == BzrNetRoutePreference::Relay) ? 1u : 0u;
             __try
             {
-                *reinterpret_cast<volatile uint32_t*>(kBzrNetForceRelayFlagAddr) = value;
+                *reinterpret_cast<volatile uint32_t*>(g_BzrNetForceRelayFlagAddr) = value;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -517,7 +526,7 @@ namespace BZROpenShim
                 return;
             __try
             {
-                *reinterpret_cast<volatile uint16_t*>(kBzrNetUdpPortAddr) = port;
+                *reinterpret_cast<volatile uint16_t*>(g_BzrNetUdpPortAddr) = port;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -527,7 +536,6 @@ namespace BZROpenShim
 
         void InitializeBzrNetConfig()
         {
-            if (!HookEngine::LiteralAddressesApply("BZRNet settings")) return;
             const bool firstRun = !g_BzrNetConfigInitialized;
             g_BzrNetConfigInitialized = true;
 
@@ -595,7 +603,6 @@ namespace BZROpenShim
 
     BzrNetNicknameResult SetBzrNetNicknameFromBridge(const char* nickname)
     {
-        if (!HookEngine::LiteralAddressesApply("BZRNet settings")) return {};
         const BzrNetNicknameResult result = ApplyBzrNetNicknameAuthoritative(
             nickname, "external_bridge");
         if (IsAcceptedBzrNetNicknameResult(result))
