@@ -30,7 +30,11 @@ Only one handle is selected. Round-trip its generation through the live object
 arena and verify its GameObject and root before walking the remembered tree.
 Changed trees/geometry pointers fall back to stock and increment `fallbacks`.
 Recreate the target to qualify its new hierarchy. Cache limits: 256 nodes,
-8192 vertices per physical part; allocation/validation failures reject selection.
+16384 vertices per physical part; allocation/validation failures reject selection.
+The generated Spitter, Spearhead and Leviathan hulls contain 9469, 9619 and
+11146 vertices respectively. Cgeom_Create uses 14 bytes of temporary stack
+storage per source vertex and ushort remap indices; the bounded 16384 limit
+allows these hulls while staying below the index format's capacity.
 
 Caches are detached outside contact. Free them via native Cgeom_Delete on a
 temporary object containing only the owned +0x9C pointer; never dereference a
@@ -75,6 +79,15 @@ centre passes with reversed craft creation order (eight passes total). All
 survive with zero stock fallbacks. Creation order was varied; native dispatch
 argument order was not separately instrumented. Local `QUALIFICATION.md` and
 `qualification.json` retain counters/travel and exact deployed hashes.
+
+The five-new-Scion matrix accepted all targets: Spitter 3 parts/14080 faces,
+Spearhead 3/15992, Leviathan 7/18412, Healer 5/1356 and Fury 8/3158. Its saved
+record contains 44 of 150 planned pair/mode/lane passes with zero stock fallbacks
+or flagged excessive speeds. Remaining combinations are unqualified. Several
+GEO passes produce no contact while BOX does; one-impulse coast distance, recessed
+surfaces and vertical alignment must be distinguished in follow-up testing.
+ISDFC retains curated partial measurements and explicit provenance; this is not
+full five-craft collision acceptance.
 
 **UNKNOWN:** production suitability on all craft, animated extreme poses,
 save/load gameplay contact, multiplayer determinism, and Steam/Wine/Proton.

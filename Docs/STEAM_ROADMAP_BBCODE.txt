@@ -2,7 +2,7 @@
 
 This is the authoritative roadmap and backlog for the Battlezone 98 Redux community patch / OpenShim / Extra Utilities work.
 
-[b]Last updated: 2026-10-05 (Campaign Reimagined co-op release, OpenShim 1.0.0.47).[/b]
+[b]Last updated: 2026-10-06 (opt-in vehicle geometry contact experiment; released suite remains OpenShim 1.0.0.47).[/b]
 [b]Last major code audit: 2026-09-25 to 2026-09-28.[/b]
 
 This file now supersedes the old ExtraUtilities [code]FeaturesToLookInto.txt[/code] tracker as the source of truth. Older tracker items have either been folded in here, marked completed/reclassified, or retained below as lower-priority research ideas.
@@ -51,6 +51,12 @@ The early NSDF rewrite now registers as its own [b]Custom Campaign > Campaign Re
 [b]Installation and repair[/b] belong to [b]Single Player > Instant Action > ! SETUP / REPAIR - Open Community Patch[/b]. Follow its result and fully restart when requested. Playable campaign startup only inspects the installation and displays a reminder: it does not copy or stage native files, clear setup status, or end a mission for installation. This corrects the legacy automatic updater prematurely completing a campaign mission when a bundled configuration differed.
 
 The rc7 source checkpoint passed repository/package checks and the read-only installer regression tests. A real GOG DX9 Custom Campaign menu smoke ran Red Arrival for 40 seconds with a deliberately mismatched net.ini, loaded EXU/bzfile from CR, made no native/network file changes, and exited cleanly; the harness restored configuration and saves. This is bounded startup evidence, not a completed campaign playthrough. Subsequent mission transitions, stale global-selection migration, content isolation after campaign exit, and Proton/Wine runtime qualification remain open. [url=https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/releases/tag/v1.0.0.34]OpenShim 1.0.0.34 is released[/url] from the candidate's exact native source, with successful release CI and a checksum-verified public suite. Workshop publication consumes those release binaries; upload and downloaded Steam smoke results are tracked in the publication receipt.
+
+[h2]Vehicle Geometry Contact Experiment (2026-10-06)[/h2]
+
+[b]Implemented - Qualification Pending.[/b] Development OpenShim/EXU builds expose [code]exu.collision.SetGeometry(handle, enabled)[/code], actual-mode statistics and explicit cleanup. One selected vehicle uses legacy VDF/GEO target surfaces against the other vehicle's COLP body; stock broadphase, terrain and projectile contact remain. This is not mutual polygon collision or Ogre skinned-mesh collision.
+
+Windows GOG 2.2.301 Fury A/B testing completed eight centre/edge and creation-order passes with surviving craft and zero stock fallbacks. ISDFC's five-new-Scion-craft ordered pair matrix accepted geometry selection for all five targets and retains 44/150 measured passes with zero stock fallbacks or flagged excessive speeds. The remaining combinations and no-contact GEO cases are unqualified. Prototype support is opt-in and unreleased; other builds/platforms, multiplayer, morph extremes and save/load physical contact remain unqualified. Technical scope and measurements live in [code]Docs/GEOMETRY_CONTACT_TEST.md[/code] and ISDFC's collision test documentation.
 
 [h2]High Priority[/h2]
 
