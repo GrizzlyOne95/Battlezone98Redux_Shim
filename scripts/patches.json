@@ -1980,6 +1980,114 @@
       "address": "0x005C735B",
       "expected": "6A 01 6A 00 6A FF 8B 0D 5C 75 91 00",
       "identity": "push 1 alignment for the pilot value string."
+    },
+    {
+      "name": "ScriptCanBuild",
+      "address": "0x005CB4E0",
+      "expected": "55 8B EC 83 EC 08 8B 45 08",
+      "identity": "ScriptUtils CanBuild(handle) predicate"
+    },
+    {
+      "name": "ScriptIsBusy",
+      "address": "0x005CB550",
+      "expected": "55 8B EC 83 EC 08 8B 45 08",
+      "identity": "ScriptUtils IsBusy(handle) predicate"
+    },
+    {
+      "name": "ProducerCanBuild",
+      "address": "0x004738B0",
+      "expected": "55 8B EC 83 EC 08 89 4D FC",
+      "identity": "Producer::CanBuild"
+    },
+    {
+      "name": "ProducerIsBusy",
+      "address": "0x004723D0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC",
+      "identity": "Producer::IsBusy"
+    },
+    {
+      "name": "SprayBuildingVtable",
+      "address": "0x008881EC",
+      "kind": "data",
+      "identity": "RTTI .?AVSprayBuilding@@ primary vtable; Simulate is slot 15"
+    },
+    {
+      "name": "SprayBuildingSimulate",
+      "address": "0x005DA6E0",
+      "expected": "55 8B EC 81 EC E8 02 00 00",
+      "identity": "SprayBuilding::Simulate, SprayBuildingVtable slot 15"
+    },
+    {
+      "name": "BuildingSimulate",
+      "address": "0x0047FCB0",
+      "expected": "55 8B EC 83 EC 68 A1 00 70 8E 00",
+      "identity": "Building::Simulate"
+    },
+    {
+      "name": "TugVtable",
+      "address": "0x00889008",
+      "kind": "data",
+      "identity": "RTTI .?AVTug@@ primary vtable; PostLoad is slot 22"
+    },
+    {
+      "name": "TugPostLoad",
+      "address": "0x005EC430",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC",
+      "identity": "Tug::PostLoad, TugVtable slot 22"
+    },
+    {
+      "name": "GameObjectHandleGetObj",
+      "address": "0x00462630",
+      "expected": "55 8B EC 51 8B 45 08 50 E8 23 7A 07 00",
+      "identity": "GameObjectHandle::GetObj(handle), cdecl"
+    },
+    {
+      "name": "ApcActualTeamRejectBranch",
+      "address": "0x004700E6",
+      "expected": "0F 84 A5 00 00 00 8B 8D 70 FF FF FF",
+      "identity": "APC::Simulate jz on selected-target actual-team relation failure"
+    },
+    {
+      "name": "ApcPerceivedTeamRejectBranch",
+      "address": "0x00470108",
+      "expected": "0F 84 83 00 00 00 8B 8D 70 FF FF FF",
+      "identity": "APC::Simulate jz on selected-target perceived-team relation failure"
+    },
+    {
+      "name": "ApcNoTargetScan",
+      "address": "0x004701AC",
+      "expected": "C6 85 7B FF FF FF 00 8B 15 74 7A 91 00",
+      "identity": "APC::Simulate nearby-enemy scan taken when no target is selected"
+    },
+    {
+      "name": "AiGameInitialised",
+      "address": "0x00930F08",
+      "kind": "data",
+      "identity": "AI game-initialised flag, read by AI_UnitRemove entry"
+    },
+    {
+      "name": "AiTeamTable",
+      "address": "0x00920F04",
+      "kind": "data",
+      "identity": "AI team pointer table, indexed by team"
+    },
+    {
+      "name": "AiTeamData",
+      "address": "0x02CE9B18",
+      "kind": "data",
+      "identity": "AI per-team data, stride 0x1E0, byte 0 is the AI-controlled flag"
+    },
+    {
+      "name": "RigProcessCleanUState2",
+      "address": "0x0049EE10",
+      "expected": "55 8B EC 83 EC 10 89 4D F8 8B 45 F8 8B 48 34 E8 8C DF FF FF 8B 4D F8 8B 51 38",
+      "identity": "RigProcess::CleanUState2; guard runs through the CancelUnbuild call and the task load at +0x17"
+    },
+    {
+      "name": "AIUnitRemove",
+      "address": "0x0068FC60",
+      "expected": "55 8B EC 51 83 3D 08 0F 93 00 00",
+      "identity": "AI_UnitRemove(unit) entry"
     }
   ],
   "globals": [
