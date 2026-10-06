@@ -206,7 +206,7 @@ These items have working code but still have a meaningful acceptance gate.
 
 [h3]Native Event / Callback System[/h3]
 
-[b]The OpenShim half ships.[/b] SDK v2 publishes lifecycle events and simulation events including session start/end, damage, kills, and multiplayer team deaths through a queued safe delivery path.
+[b]The OpenShim event layer ships.[/b] SDK v2 exposes queued lifecycle/session events, derived kills and multiplayer team deaths. Damage notifications currently reach OpenShim's internal subscribers, not the companion polling queue. The v2 companion queue is shared and destructive, so multiple DLLs cannot independently consume a complete stream.
 
 Still open:
 
@@ -223,7 +223,9 @@ OnPlayerJoined
 OnPlayerLeft
 [/code]
 
-Companion DLLs can consume current events now; EXU still needs the clean Lua-side callback surface. EXU's older direct BulletHit->Lua path should eventually move onto the same queued safe-delivery model.
+Companion DLLs can consume current v2 events now. [b]EXU owns runtime scripting events:[/b] listener registration, runtime queues and safe Lua delivery belong in EXU. OpenShim supplies native observations where it already owns the hooks. Research and planning started 2026-10-06; the first milestone is a small EXU dispatcher pumped from mission Update, followed by damage/kill observations independent of career tracking and the remaining producers.
+
+EXU's older direct BulletHit->Lua path should eventually move to queued snapshot delivery. Its raw ordnance pointer cannot safely be deferred unchanged; retain compatibility while adding copied projectile events and migrating consumers. The concise implementation plan is in ExtraUtilities [code]Docs/Research/RUNTIME_SCRIPTING_EVENTS_20261006.md[/code]. No callback implementation or deployment is claimed yet.
 
 [h3]Custom Unit Commands[/h3]
 
