@@ -548,8 +548,8 @@ namespace BZROpenShim
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ChunkEffectSimulate)));
         LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Create-path hooks: %hs create=0x%08X chunklet=0x%08X\n",
             g_ChunkEffectCreateHooksInstalled ? "enabled" : "disabled",
-            static_cast<uint32_t>(kGogChunkEffectCreateChunkAddr),
-            static_cast<uint32_t>(kGogChunkEffectCreateChunkletAddr));
+            g_ChunkEffectCreateChunkAddr,
+            g_ChunkEffectCreateChunkletAddr);
         if (g_IsSteamExe && !g_AllowUnsafeSteamChunkCreateHooks)
         {
             LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Steam safety gate active; creator hooks will install after settled-byte verification and delay\n");

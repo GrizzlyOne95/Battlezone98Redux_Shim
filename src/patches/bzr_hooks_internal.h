@@ -1789,8 +1789,10 @@ namespace BZROpenShim
         void RefreshChunkObjectIdentityCacheIfNeeded();
 
         // --- Chunk proxy rendering (chunk_proxy_render.cpp) --------------------
-        inline constexpr uintptr_t kGogChunkEffectCreateChunkAddr = 0x00492AA0;
-        inline constexpr uintptr_t kGogChunkEffectCreateChunkletAddr = 0x004927D0;
+        // ChunkEffectCreateChunk / ChunkEffectCreateChunklet rows; 0 until the
+        // create-path trace binds them.
+        extern uint32_t g_ChunkEffectCreateChunkAddr;
+        extern uint32_t g_ChunkEffectCreateChunkletAddr;
         struct BzrGeoEntry
         {
             uint32_t packedKey;
