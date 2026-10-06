@@ -2,6 +2,7 @@
 
 This is the authoritative roadmap and backlog for the Battlezone 98 Redux community patch / OpenShim / Extra Utilities work.
 
+[b]Last updated: 2026-10-05 (Campaign Reimagined co-op release, OpenShim 1.0.0.47).[/b]
 [b]Last major code audit: 2026-09-25 to 2026-09-28.[/b]
 
 This file now supersedes the old ExtraUtilities [code]FeaturesToLookInto.txt[/code] tracker as the source of truth. Older tracker items have either been folded in here, marked completed/reclassified, or retained below as lower-priority research ideas.
@@ -33,6 +34,15 @@ The general priority remains:
 [/list]
 
 These are source and validation milestones; publication status is recorded separately below. The detailed stopping point and deferred work are recorded in [code]Docs/AUDIT_BACKLOG_STATUS.md[/code].
+
+[h2]October 2026 Update: Co-op Missions and OpenShim 1.0.0.47 (2026-10-05)[/h2]
+
+[list]
+[*] [b]Campaign Reimagined co-op missions[/b] - Red Arrival, Eagle's Nest and The Relic Discovered are now also 2-4 player co-op maps ([b]CR: ... Coop[/b] in the multiplayer map list). The host plays team 1 and each guest gets a distinct team; everyone must start together, and a late join requires a restart. Solo play in the Custom Campaign is unchanged. Eagle's Nest received guest camera-stack and spawn-overlap fixes before release.
+[*] [b]Qualification so far[/b] - two-client runs on a local test server: Red Arrival ran 3+ minutes clean; three Eagle's Nest runs reached the mission with no crash and no camera overflow, and both clients reached the same mission result in sync. Open: one guest ship loss with no recorded killer, a handled first-chance renderer exception, and real two-PC / Steam-to-GOG sessions.
+[*] [b]OpenShim 1.0.0.47 released[/b] - [url=https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/releases/tag/v1.0.0.47]published[/url] from current main with release CI and a checksum-verified suite, and bundled with this Workshop update. It replaces 1.0.0.34; Steam and Proton/Wine runtime qualification of the new suite remains open.
+[*] [b]Workshop packaging[/b] - each co-op map now ships its same-named terrain companions so Workshop uploaders accept it; newly ported Lua missions that are not yet qualified are deliberately excluded from the package.
+[/list]
 
 [h2]Campaign Reimagined Publication (2026-09-29)[/h2]
 
@@ -98,6 +108,9 @@ The current work includes:
 [*] Health/admin tooling
 [*] Native OpenShim control-plane and datagram instrumentation
 [*] Live nickname mutation support in OpenShim, now via opt-in lounge re-authorization, with two-client propagation qualification still open
+[*] [b]Stock-client lobby to launch (2026-10-05)[/b] - the community server now follows the official lobby member-data protocol, so unmodified clients can ready up and launch a game; stale game lobbies are no longer restored after a server restart
+[*] [b]Home / LAN hosting (2026-10-05)[/b] - a short guide covers running the server on a home PC and pointing every player's OpenShim at it ([code]MatchmakingRedirectAddress[/code] in net.ini); real multi-PC sessions remain to be qualified
+[*] [b]Same-PC two-client test harness (2026-10-05)[/b] - automated lobby, launch and in-mission checks with two game instances against a local server, used to test the co-op missions
 [/list]
 
 The long-term goal is to expose something like:
