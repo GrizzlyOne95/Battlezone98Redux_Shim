@@ -2,7 +2,7 @@
 
 This is the authoritative roadmap and backlog for the Battlezone 98 Redux community patch / OpenShim / Extra Utilities work.
 
-[b]Last updated: 2026-10-05 (Campaign Reimagined co-op release, OpenShim 1.0.0.47).[/b]
+[b]Last updated: 2026-10-06 (OpenShim / EXU / ISDFC / Campaign Reimagined roadmap reconciliation).[/b]
 [b]Last major code audit: 2026-09-25 to 2026-09-28.[/b]
 
 This file now supersedes the old ExtraUtilities [code]FeaturesToLookInto.txt[/code] tracker as the source of truth. Older tracker items have either been folded in here, marked completed/reclassified, or retained below as lower-priority research ideas.
@@ -42,6 +42,19 @@ These are source and validation milestones; publication status is recorded separ
 [*] [b]Qualification so far[/b] - two-client runs on a local test server: Red Arrival ran 3+ minutes clean; three Eagle's Nest runs reached the mission with no crash and no camera overflow, and both clients reached the same mission result in sync. Open: one guest ship loss with no recorded killer, a handled first-chance renderer exception, and real two-PC / Steam-to-GOG sessions.
 [*] [b]OpenShim 1.0.0.47 released[/b] - [url=https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/releases/tag/v1.0.0.47]published[/url] from current main with release CI and a checksum-verified suite, and bundled with this Workshop update. It replaces 1.0.0.34; Steam and Proton/Wine runtime qualification of the new suite remains open.
 [*] [b]Workshop packaging[/b] - each co-op map now ships its same-named terrain companions so Workshop uploaders accept it; newly ported Lua missions that are not yet qualified are deliberately excluded from the package.
+[/list]
+
+[h2]October 2026 Update: EXU / ISDFC / CR Reconciliation (2026-10-06)[/h2]
+
+Recent Extra Utilities work and real consuming content moved several older roadmap ideas into implemented or reclassified status:
+
+[list]
+[*] [b]EXU path-grid building footprints[/b] - [code]pathBlock = "faces"[/code] / [code]"none"[/code] is implemented in EXU, with OpenShim implementing the same ODF contract and EXU standing down when OpenShim owns the native [code]BlockCells[/code] entry. ISDF Chronicles now authors the Bane ruins/subway with face-based path blocking and includes AI tunnel-route tests plus [code]exu.pathing.DumpGrid[/code] in its test range. The broader idea of AI-passable tunnels/building interiors is therefore implemented; unrelated local-steering/AI behavior remains separate.
+[*] [b]EXU BZ2-style 3D muzzle flashes[/b] - [code]exu.flash[/code] now supplies the Ogre-side equivalent needed for BZ2 [code]flashName[/code] / [code]draw_geom[/code] muzzle-flash meshes. ISDF Chronicles uses it for real weapon content, including crossed-card and cone flashes. This does not claim that every historical [code]draw_geom[/code] use case has been generically backported.
+[*] [b]EXU physical shell casings[/b] - [code]exu.casing[/code] owns rendered-frame casing simulation and Ogre entities; ISDF Chronicles has replaced its old sprite casing path with the EXU-backed 3D version.
+[*] [b]EXU pilot / first-person animation stack[/b] - live-qualified pilot FSM inspection and crouch override work is merged, alongside first-person layers, transition blending, fire-trigger inspection, first-person particle attachment, cockpit targets and general Ogre animation controls. ISDF Chronicles also uses [code]SetPersonLongClips[/code] for authored creature walk/idle clips. These capabilities do not close the separate stock-wide skeletal rate/looping defects for every class and animation path.
+[*] [b]EXU cockpit entity / glass control[/b] - cockpit-target animation/material access, sub-entity render-queue control and texture-window controls are implemented. ISDF Chronicles consumes them for actual cockpit-glass layers.
+[*] [b]Operation Livewire showcase[/b] - Campaign Reimagined now contains the nine-chapter Shim + EXU showcase/regression mission and host-side checks. Native game loading, framing, rendering, audio and physics observation remain qualification work, so this moves from a speculative idea to Implemented - Qualification Pending rather than Completed.
 [/list]
 
 [h2]Campaign Reimagined Publication (2026-09-29)[/h2]
@@ -200,6 +213,7 @@ These items have working code but still have a meaningful acceptance gate.
 [*] [b]Legacy scrap/pilot HUD reconstruction[/b] - BZ 1.5 layout, black backplates, colors, and command-menu-relative placement are reconstructed. Continue normal gameplay/resolution acceptance.
 [*] [b]Persistent player mutes[/b] - a mute applied in the multiplayer player list now survives leaving and rejoining, and survives a restart. Mutes are keyed on the same stable Steam/GOG platform identity as bans and stored beside them in [code]mutes.cfg[/code], so a peer who reconnects on a new session or changes their display name stays muted. OpenShim adds no chat filtering of its own - it reapplies Redux's own player-list mute through the native path, so muted behavior is exactly stock. Always on; there is no setting to disable it. Remaining gate: two-client qualification that a mute set in one session is still in effect after both peers restart, on Steam and on GOG.
 [*] [b]Multiplayer Create Game vehicle preview on DX11[/b] - the starting-vehicle preview rendered solid black under the DX11 backend while every submission, face and draw-call counter looked healthy. The preview viewport has shadows disabled but was falling back to the material's first (PSSM) technique, so the shader sampled uninitialized shadow matrices and produced NaN. The viewport is now pinned to the matching no-shadow scheme. Verified from a RenderDoc capture. Remaining gate: live confirmation across DX9, DX11 and OpenGL, and in exclusive fullscreen as well as windowed.
+[*] [b]Operation Livewire Shim + EXU showcase mission[/b] - Campaign Reimagined now contains a nine-chapter, repeatable showcase/regression mission covering overlays, material clones, environment/weather, AI tuning, destruction, team filters, radio policy, the Hunt command replacement, radar/HUD controls, native soundtrack controls, save/options handoff and cleanup/reporting. Host checks pass, but the mission's own build notes explicitly say native game loading, framing, rendering, audio and physics have not yet been observed; those are the remaining acceptance gates.
 [/list]
 
 [h2]Extra Utilities / Modding API[/h2]
@@ -251,18 +265,9 @@ Do this only after the underlying ownership and replication cases are understood
 
 [h3]Lua Control of Native OGG Soundtrack[/h3]
 
-Expose Redux's real soundtrack manager rather than forcing compressed music through WAV-oriented mission audio:
+[b]Implemented - Qualification Pending (2026-10-06):[/b] EXU now owns a standalone Redux soundtrack runtime and Lua surface rather than requiring OpenShim for a separate mod. The current API covers play/select, stop, pause, resume, read-back, temporary gain fades, fade-and-change transitions, state inspection and reset. OpenShim still provides the basic native bridge when present.
 
-[code]
-Play
-Stop
-Pause
-Resume
-Change track
-Fade/change music state
-[/code]
-
-[b]In progress:[/b] review implementations now cover native play/change, stop, pause, resume and read-back. EXU can control the soundtrack when shipped alone with a separate mod, with mission-driven gain fades and track transitions; OpenShim provides the basic native exports. Fresh Windows builds and GOG/Steam/Proton/Wine playback validation are still required before release.
+Campaign Reimagined's Operation Livewire exercises the full music surface in host-side regression logic, but that is not proof of audible native playback. EXU's own documentation still gates release on fresh Windows/GOG, Windows/Steam, Proton/Steam and Wine/GOG runtime validation, including pause/resume position retention, fade behavior, missing-track failure handling and lifecycle cleanup.
 
 [h3]Higher-Level Environment Presets[/h3]
 
@@ -316,7 +321,7 @@ OpenShim now has first-chance/unhandled crash logging and minidump capture, so d
 
 [h3]Deeper Craft / AI Control API[/h3]
 
-EXU has typed AI process/task inspection and selected task-state writes. Still worth researching verified direct controls for jump and broader craft-side control/input state so scripts can drive behavior without blind structure-offset writes.
+EXU has typed AI process/task inspection and selected task-state writes. It now also exposes qualified read-only local pilot FSM state, grounded/sniper state and the current native fire/auto-fire trigger signal, plus first-person presentation layers. Still worth researching verified direct controls for jump and broader writable craft-side control/input state so scripts can drive behavior without blind structure-offset writes.
 
 [h3]Lua / Script API Bugs[/h3]
 
@@ -326,7 +331,7 @@ EXU has typed AI process/task inspection and selected task-state writes. Still w
 
 [h3]Reactive HUD / Hit Feedback[/h3]
 
-The event layer plus existing Ogre overlay APIs should enable clean reactive reticles, hit markers, damage flashes, critical warnings, and other contextual HUD reactions without polling. Keep these as user-facing features rather than treating the event infrastructure itself as the end goal.
+The capability is now partly proven in real content: ISDF Chronicles consumes EXU's direct [code]BulletHit[/code] path for cockpit hit reaction, visible damage, windshield crack/dirt presentation and related status feedback. What remains open is the cleaner generic layer: queued native-event delivery plus reusable reactive reticles, hit markers, damage flashes, critical warnings and contextual HUD helpers that do not require each mod to build its own callback plumbing or polling layer.
 
 [h3]Legacy Battlezone 1.4 AI Behavior[/h3]
 
@@ -362,8 +367,8 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 
 [list]
 [*] [b]Terrain type-0/orientation deformation[/b] - systematic transition/rotation validation still needed.
-[*] [b]Skeletal animation rate handling[/b] - person/skeletal animation can ignore animRate-like values and use hard-coded rates.
-[*] [b]Skeletal animation looping[/b] - some authored looping animations play only once.
+[*] [b]Skeletal animation rate handling[/b] - stock/general person and skeletal animation can ignore animRate-like values and use hard-coded rates. EXU's live-qualified local-pilot profile can substitute clips and control crouch-transition completion, but that targeted pilot seam is not a general engine-wide animRate repair.
+[*] [b]Skeletal animation looping[/b] - some authored looping animations play only once. EXU now has [code]SetPersonLongClips[/code] for the specific long Person run/idle clamp and ISDF Chronicles uses it for creature locomotion, but broader stock looping behavior remains open.
 [/list]
 
 [h3]Resource Loading / Mod Isolation[/h3]
@@ -389,6 +394,7 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 [*] [b]Cloak Disabled as a legacy host option[/b] - not established. Any future lobby cloak rule is a new OpenShim rule unless stronger evidence appears.
 [*] [b]Enable Large Address Aware as a memory fix[/b] - not applicable; Windows Redux 2.2.301 is already LAA.
 [*] [b]Legacy heightmap smoothing as an engine defect[/b] - reclassified as a content conversion policy. Redux's legacy HGT cook is a faithful 2x piecewise-planar upsample followed by one 3x3 blur; offline unsmoothed HG2 conversion is the preferred solution rather than a runtime hook.
+[*] [b]Generic [code]draw_geom[/code] backport as a muzzle-flash requirement[/b] - reclassified. EXU's [code]exu.flash[/code] now renders the BZ2-style [code]flashName[/code] geometry use case through Ogre and ISDF Chronicles consumes it. A broader compatibility layer is only worth revisiting for historical [code]draw_geom[/code] primitives that existing EXU entity/static-geometry APIs cannot express.
 [/list]
 
 [h2]Possible Additions / Ideas[/h2]
@@ -402,14 +408,12 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 [*] Restore animated terrain waves / Ctrl+Shift waves
 [*] Restore additional legacy TRN lighting parameters
 [*] Multiple terrain atlases / per-tile material selection
-[*] Backport [code]draw_geom[/code] or an equivalent geometry effect only if EXU/Ogre entity APIs do not already cover the need
 [/list]
 
 [h3]Gameplay / AI / Unit Definition[/h3]
 
 [list]
 [*] Per-ODF/generalized turret aim-limit controls beyond the existing global [code]TurretAimPitch[/code] / [code]TurretAimPitchMultiplier[/code] behavior
-[*] AI-passable building / bridge behavior
 [*] Extend the existing generic ODF team-filter framework beyond ShieldTower, MagnetMine, and ProximityMine where another class has a clear use case
 [*] Selectable skeletal vs VDF animation mode
 [*] Walker quake/thump resistance ODF control
@@ -454,10 +458,9 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 [list]
 [*] Generalized unit command buttons
 [*] Nested producer/build menus
-[*] Lua control of native OGG soundtrack playback
 [*] Higher-level multiplayer replication API
-[*] Deeper direct craft control API for jump/input/control state
-[*] Reactive reticles, hit markers, damage flashes and contextual HUD widgets driven by native events
+[*] Direct jump / writable craft-control state beyond EXU's current read-only pilot/FSM and fire-trigger signals
+[*] Generic queued-event reactive reticles, hit markers and contextual HUD helpers beyond the proven ISDF Chronicles direct-[code]BulletHit[/code] cockpit feedback
 [/list]
 
 [h3]Large / Experimental Ideas[/h3]
@@ -468,7 +471,6 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 [*] Higher-level environment/planet preset system
 [*] Carrier / hangar vessel class with interior collision, attached defenses and internal craft spawn/launch
 [*] Dropship / aircraft class backport, including zero/low-gravity support
-[*] [b]Shim + EXU showcase/demo mission[/b] - create a visible living demo and regression mission that exercises supported overlays, material swaps, dynamic environment controls, AI tuning, destruction chunks, team filters, radio controls, radar/HUD changes, command hooks, autosave/options, and multiplayer-safe features where practical.
 [/list]
 
 [h2]Completed / Restored[/h2]
@@ -476,6 +478,11 @@ The Red Odyssey 1.3 comparison establishes Cloak and Portal plus a widened natio
 The following have moved out of the speculative backlog into working/qualified code or a sufficiently proven compatibility result:
 
 [list]
+[*] [b]EXU collision-face path-grid footprints[/b] - [code]pathBlock = "faces"[/code] and [code]"none"[/code] let authored buildings/tunnels stop using the stock full bounding-box obstacle in the AI path grid. OpenShim implements the same contract and EXU detects/stands down when OpenShim owns the native hook. ISDF Chronicles now ships Bane subway/ruin ODFs using the feature and includes dedicated tunnel-route/grid tests.
+[*] [b]EXU BZ2-style 3D muzzle flashes[/b] - [code]exu.flash[/code] creates short-lived Ogre mesh flashes from BZ2-style [code]flashName[/code] data; ISDF Chronicles uses the API for actual crossed-card and cone weapon flashes instead of Redux's non-working [code]draw_geom[/code] path.
+[*] [b]EXU physical shell casings[/b] - [code]exu.casing[/code] owns casing physics/tumble and Ogre entities at rendered-frame cadence; ISDF Chronicles consumes it and removed the corresponding flat sprite casing path.
+[*] [b]EXU pilot / first-person animation control stack[/b] - live-qualified local Person FSM inspection, native crouch overrides, animation profiles, first-person layers, transition blending, fire-trigger inspection and first-person particle attachment are merged, alongside the reusable Ogre animation target API. ISDF Chronicles also consumes [code]SetPersonLongClips[/code] for long creature walk/idle clips. General stock-wide skeletal rate/looping defects remain separately open above.
+[*] [b]EXU cockpit entity and glass controls[/b] - cockpit-target animation/material access, sub-entity render-queue control and texture-window helpers are implemented, and ISDF Chronicles uses them for authored cockpit glass/windshield layers.
 [*] [b]Actionable multiplayer readiness reporting[/b] - the main menu now explains why Multiplayer is unavailable instead of collapsing platform sign-in, service transport and rejected authorization into the same bare [code]Not Ready[/code] caption. A privacy-preserving [code][MPREADY][/code] state-change log records the same engine readiness chain without logging the player's name. Both features are byte-guarded; the on-screen explanation and the low-volume diagnostic ship enabled so a blocked player has useful evidence immediately.
 [*] [b]Linux/Proton crash-report and runtime-log hardening[/b] - OpenShim now starts a fresh crash report for each process and labels caught first-chance exceptions separately from fatal crashes, so old or recovered faults are no longer presented as the cause of a later session. Expensive Ogre vehicle/chunk research probes are opt-in again, and multiplayer routing/reorder diagnostics are sampled or emitted once per reason instead of writing hundreds of thousands of packet-path lines during a match.
 [*] [b]Multiplayer nickname crash fix[/b] - typing [code]/nickname[/code] during a match could terminate the game. The lobby route-display widgets are destroyed when the match starts, but the refresh that runs after every accepted rename only checked that its cached pointer was non-null before handing it to the engine. It now requires the widget to still be a live child of its owning screen, and clears the stale pointers when it is not. This ran outside the live-nickname setting, so turning that off did not avoid it.
