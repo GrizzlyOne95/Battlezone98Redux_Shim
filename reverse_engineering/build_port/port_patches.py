@@ -300,7 +300,7 @@ class Anchors:
 
     def __init__(self, old, new):
         so, sn = self._strings(old), self._strings(new)
-        code, data = [], []
+        code, data = {}, []
         for text, a in so.items():
             b = sn.get(text)
             if b is None:
@@ -308,9 +308,62 @@ class Anchors:
             data.append((a, b - a))
             ra, rb = self._refs(old, a), self._refs(new, b)
             if len(ra) == 1 and len(rb) == 1:
-                code.append((ra[0], rb[0] - ra[0]))
-        self.code = self._clean(sorted(code))
+                code[ra[0]] = rb[0] - ra[0]
+        # Strings alone leave long stretches of code with no anchor, so two
+        # more signature-free kinds: the one call site of an import called
+        # exactly once in each build, and the one reference to a read-only
+        # constant (float table, struct, string) whose bytes are unique.
+        for a, b in self._import_sites(old, new) + self._constant_sites(old, new):
+            code.setdefault(a, b - a)
+        self.code = self._clean(sorted(code.items()))
         self.data = self._clean(sorted(data))
+
+    @staticmethod
+    def _import_sites(old, new):
+        def slots(img):
+            pe = pefile.PE(img.path, fast_load=True)
+            pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"]])
+            out = {}
+            for dll in getattr(pe, "DIRECTORY_ENTRY_IMPORT", []):
+                for imp in dll.imports:
+                    key = (dll.dll.lower(), imp.name or imp.ordinal)
+                    out[key] = imp.address
+            return out
+        so, sn = slots(old), slots(new)
+        pairs = []
+        for key, a in so.items():
+            b = sn.get(key)
+            if b is None:
+                continue
+            ra, rb = Anchors._refs(old, a), Anchors._refs(new, b)
+            if len(ra) == 1 and len(rb) == 1:
+                pairs.append((ra[0], rb[0]))
+        return pairs
+
+    @staticmethod
+    def _constant_sites(old, new, width=16):
+        def table(img):
+            count = collections.Counter()
+            where = {}
+            t = img.text
+            for pos in range(len(t) - 3):
+                v = struct.unpack_from("<I", t, pos)[0]
+                if img.in_image(v) and not img.in_text(v):
+                    count[v] += 1
+                    where[v] = img.text_lo + pos
+            by_content = collections.defaultdict(list)
+            for v, n in count.items():
+                if n != 1:
+                    continue
+                name, _ = img.section_of(v)
+                if name != ".rdata":
+                    continue
+                blob = img.read(v, width)
+                if blob and any(blob) and len(set(blob)) > 2:
+                    by_content[blob].append(v)
+            return {k: where[vs[0]] for k, vs in by_content.items() if len(vs) == 1}
+        to, tn = table(old), table(new)
+        return [(a, tn[k]) for k, a in to.items() if k in tn]
 
     @staticmethod
     def _strings(img):
@@ -344,7 +397,10 @@ class Anchors:
         return keep
 
     def check(self, old_va, new_va, in_text):
-        """True/False when anchors bracket old_va, None when they do not."""
+        """True: the shift equals that of agreeing anchors on both sides.
+        False: it cannot be right. "range": an edit lies between the anchors
+        and the shift falls within the step (consistent, but confirms
+        nothing). None: no anchors close enough to say."""
         pairs = self.code if in_text else self.data
         if not pairs:
             return None
@@ -361,7 +417,7 @@ class Anchors:
         if not in_text:
             return None   # the linker reorders pooled data; no local rule
         # An edit lies between the anchors; the shift steps from dl to dr.
-        return min(dl, dr) - self.TOL <= d <= max(dl, dr) + self.TOL
+        return "range" if min(dl, dr) - self.TOL <= d <= max(dl, dr) + self.TOL else False
 
 
 class CodePorter:
@@ -437,13 +493,19 @@ class CodePorter:
             return {"status": "CONFLICT", "evidence": evidence, "candidates": sorted(cands)}
         new = next(iter(cands))
         strict = [e for e in evidence if not e["strategy"].endswith("~")]
-        # One signature hit alone is not enough: when the code around the
-        # target was edited, a leftover look-alike can be the only match.
-        # Accept two independent agreeing signals, an operand-verified hit,
-        # or one hit that the anchors on both sides confirm.
-        strong = any(e["strategy"].startswith(("pinned", "function+")) for e in evidence)
+        # A signature match is one signal however many windows agree: the
+        # windows overlap and share most of their bytes. When the code around
+        # the target was edited, a leftover look-alike can be the only match,
+        # so OK needs a second, independent signal: the exact layout shift of
+        # the anchors either side, callers or references that carry across to
+        # it, or operands verified on the candidate (pinned, function+).
+        kinds = {e["strategy"].split("~")[0] for e in evidence}
+        signals = 1 if kinds & {"fwd", "insn"} or any(k.startswith("back") for k in kinds) else 0
+        signals += min(2, sum(1 for e in evidence if e["strategy"].startswith("ref")))
+        signals += 2 if any(k.startswith(("pinned", "function+")) for k in kinds) else 0
         layout = self.anchors.check(va, new, True) if self.anchors is not None else None
-        ok = len(evidence) >= 2 or strong or layout is True
+        signals += 1 if layout is True else 0
+        ok = signals >= 2
         return {"status": "OK" if ok and strict else "WEAK", "new": new, "evidence": evidence,
                 "layout": layout}
 
@@ -919,12 +981,42 @@ def entropy(b):
     return -sum(v / len(b) * math.log2(v / len(b)) for v in c.values()) if b else 0.0
 
 
+SECTIONS = ("patches", "resolves", "engine_addresses", "globals", "static_pointers")
+
+
+def make_overlay(base, ported, rows, label, stamp):
+    """A build_overlays entry (include/build_overlay.h) for the new build.
+
+    OK entries carry the fields that changed ({} when nothing moved); every
+    other entry is null, so at runtime it reads as missing on the new build
+    and its feature stands down instead of using the base build's address.
+    """
+    status = {(r["section"], r["name"]): r["status"] for r in rows}
+    entries = {}
+    for section in SECTIONS:
+        for b, n in zip(base.get(section, []), ported.get(section, [])):
+            key = "%s/%s" % (section, b["name"])
+            if status.get((section, b["name"])) != "OK":
+                entries[key] = None
+                continue
+            entries[key] = {k: v for k, v in n.items() if k != "name" and b.get(k) != v}
+    if "audio_gas_pattern" in base:
+        ok = status.get(("audio_gas_pattern", "audio_gas_pattern")) == "OK"
+        entries["audio_gas_pattern"] = {} if ok else None
+    return {"build": {"label": label, "time_date_stamps": ["0x%08X" % stamp],
+                      "identity": "Generated by reverse_engineering/build_port/port_patches.py; "
+                                  "null entries could not be carried across with confidence."},
+            "entries": entries}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("old_exe")
     ap.add_argument("new_exe")
     ap.add_argument("--patches", default=str(REPO / "scripts" / "patches.json"))
-    ap.add_argument("--out", default="ported_patches.json")
+    ap.add_argument("--out", default="ported_patches.json",
+                    help="patches.json with a build_overlays entry for NEW added (or replaced)")
+    ap.add_argument("--label", help="label for the new build, e.g. 2.2.302 (default: its link stamp)")
     ap.add_argument("--report", default="port_report.md")
     ap.add_argument("--addresses", help="extra addresses to carry across, one hex value per line (e.g. literals still in C++)")
     a = ap.parse_args()
@@ -945,7 +1037,13 @@ def main():
             extra.append({"section": "extra", "name": fmt(va), "old": va, "new": r.get("new"),
                           "status": r["status"], "note": r.get("via", r["kind"])})
 
-    Path(a.out).write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    label = a.label or "0x%08X" % new.timestamp
+    overlay = make_overlay(d, out, rows, label, new.timestamp)
+    merged = json.loads(json.dumps(d))
+    keep = [o for o in merged.get("build_overlays", [])
+            if new.timestamp not in [int(s, 16) for s in o.get("build", {}).get("time_date_stamps", [])]]
+    merged["build_overlays"] = keep + [overlay]
+    Path(a.out).write_text(json.dumps(merged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     cnt = write_report(a.report, rows, old, new, extra)
     print("ported:", ", ".join("%s=%d" % kv for kv in sorted(cnt.items())))
     print("json  :", a.out)

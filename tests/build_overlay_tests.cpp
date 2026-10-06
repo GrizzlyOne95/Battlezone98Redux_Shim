@@ -120,8 +120,43 @@ namespace
     }
 }
 
+#ifdef BZR_PATCHES_JSON
+#include <fstream>
+#include <iterator>
+
+namespace
+{
+    // The shipped file must name its build, select itself unchanged for the
+    // 2.2.301 link stamp, and hand any other exe no addresses at all.
+    void ShippedFileNamesItsBuild()
+    {
+        std::ifstream file(BZR_PATCHES_JSON, std::ios::binary);
+        Check(file.is_open(), "scripts/patches.json must be readable at " BZR_PATCHES_JSON);
+        if (!file.is_open()) return;
+        const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        auto base = nlohmann::json::parse(text);
+        const auto before = base;
+        const auto sel = BuildOverlay::Apply(base, 0x58D9D6CC);
+        Check(sel.match == BuildOverlay::Match::Base, "2.2.301 selects the shipped base entries");
+        Check(sel.error.empty(), "the shipped build blocks are well formed: " + sel.error);
+        Check(base["engine_addresses"] == before["engine_addresses"] && base["patches"] == before["patches"],
+              "the base build sees the file unchanged");
+
+        auto other = nlohmann::json::parse(text);
+        const auto unknown = BuildOverlay::Apply(other, 0x12345678);
+        Check(unknown.match == BuildOverlay::Match::Unknown, "an unlisted exe is unknown");
+        Check(other["engine_addresses"].empty() && other["patches"].empty() && other["static_pointers"].empty() &&
+              other["globals"].empty() && other["resolves"].empty(),
+              "an unknown exe gets no address entries from the shipped file");
+    }
+}
+#endif
+
 int main()
 {
+#ifdef BZR_PATCHES_JSON
+    ShippedFileNamesItsBuild();
+#endif
     BaseBuildIsUntouched();
     OverlayReplacesAndDrops();
     UnknownBuildSeesNoAddresses();
