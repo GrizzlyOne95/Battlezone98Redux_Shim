@@ -162,12 +162,11 @@ namespace HookEngine
     // literal must stand down when this is false: no patches.json can move it.
     bool IsReferenceBuild();
 
-    // The gate for a feature whose engine addresses are still literals in its
-    // code: true on the reference build; on any other build false, with one
-    // log line per feature naming it. Put at every entry point that installs,
-    // writes or reads through those literals, and remove it once the
-    // feature's addresses come from patches.json.
-    bool LiteralAddressesApply(const char* feature);
+    // True when patches.json describes the running exe (its base entries or
+    // an overlay), or when it is the reference build. OpenShim's own features
+    // take every engine address from patches.json, so this, not the public
+    // IsCompatibleGameVersion, is what internal bridges gate on.
+    bool IsKnownBuild();
 
     // Helpers
     void* ResolveRelCallTarget(uint32_t instrAddr);

@@ -520,29 +520,7 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
-    // patches.json patches whose trampolines enter handlers that still read
-    // engine addresses written as literals. The patch site itself ports to a
-    // new build with the rest of the file; the handler does not, so off the
-    // reference build these stay out until their handler is migrated.
-    static bool IsLiteralHandlerPatchName(const char* name) {
-        static const char* const kNames[] = {
-            "AutoSave Load Button Hook",      // autosave_restart.cpp
-            "Restart Mission Hook Pause",     // autosave_restart.cpp
-            "Restart Mission Hook Failure",   // autosave_restart.cpp
-        };
-        for (const char* n : kNames)
-            if (strcmp(name, n) == 0) return true;
-        return false;
-    }
-
     static void FilterPatchesForRuntime(std::vector<HookEngine::PatchDef>& patches, BzrDistribution distribution) {
-        if (!HookEngine::IsReferenceBuild()) {
-            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) {
-                if (!IsLiteralHandlerPatchName(p.name.c_str())) return false;
-                Log(L"[BUILD] %hs stands down: its handler still uses 2.2.301 literal addresses\n", p.name.c_str());
-                return true;
-            }), patches.end());
-        }
         const bool isSteam = distribution == BzrDistribution::Steam;
         if (!isSteam) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsSteamOnlyPatchName(p.name.c_str()); }), patches.end());
@@ -1434,10 +1412,9 @@ namespace BZROpenShim
             }
             break;
         default:
-            Log(L"[BUILD] battlezone98redux.exe build %u (link stamp 0x%08X) is patches.json build %hs (%hs)%hs\n",
+            Log(L"[BUILD] battlezone98redux.exe build %u (link stamp 0x%08X) is patches.json build %hs (%hs)\n",
                 gameVer, build.exeStamp, build.label.c_str(),
-                build.match == HookEngine::BuildMatch::Base ? "base entries" : "overlay entries",
-                HookEngine::IsReferenceBuild() ? "" : "; features still on in-code addresses stand down");
+                build.match == HookEngine::BuildMatch::Base ? "base entries" : "overlay entries");
             break;
         }
         const BzrDistribution distribution = isSteam ? BzrDistribution::Steam : BzrDistribution::GOG;

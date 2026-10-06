@@ -192,7 +192,6 @@ namespace BZROpenShim
 
         constexpr ULONGLONG kSteamChunkCreateHookSettleDelayMs = 15000;
 
-        static constexpr uintptr_t kChunkEffectVtableSimulateSlotAddr = 0x0087708C;
         static constexpr DWORD kVehicleSkinningTraceIntervalMsDefault = 5000;
         static constexpr DWORD kVehicleSkinningTraceIntervalMsMin = 100;
         static constexpr DWORD kVehicleSkinningTraceIntervalMsMax = 60000;
@@ -542,9 +541,8 @@ namespace BZROpenShim
             g_VehicleSkinningTraceEnabled ? "enabled" : "disabled",
             static_cast<unsigned long>(g_VehicleSkinningTraceIntervalMs),
             static_cast<long>(g_VehicleSkinningTraceBudget));
-        LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT] Runtime manager trace: %hs vtableSlot=0x%08X orig=0x%08X\n",
+        LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT] Runtime manager trace: %hs orig=0x%08X\n",
             g_TraceChunkEffectRuntime ? "enabled" : "disabled",
-            static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ChunkEffectSimulate)));
         LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Create-path hooks: %hs create=0x%08X chunklet=0x%08X\n",
             g_ChunkEffectCreateHooksInstalled ? "enabled" : "disabled",

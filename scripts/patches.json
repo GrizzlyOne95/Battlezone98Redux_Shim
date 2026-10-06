@@ -3342,6 +3342,24 @@
       "address": "0x0078EC38",
       "expected": "E8 03 DF 08 00 83 C4 08",
       "identity": "call Localize(\"multi_message\",\"no inet\") in the code-1 branch of the main-menu refresh; the MP ready explainer redirects it"
+    },
+    {
+      "name": "LoadScreenSelectionFlag",
+      "address": "0x00918133",
+      "kind": "data",
+      "identity": "byte the load screen reads as 'a save is selected'; the AutoSave load button sets it before advancing the dialog"
+    },
+    {
+      "name": "MissionSaveFlag",
+      "address": "0x009173B7",
+      "kind": "data",
+      "identity": "byte mission-save flag the restart path saves and restores"
+    },
+    {
+      "name": "OldMissionMode",
+      "address": "0x00918314",
+      "kind": "data",
+      "identity": "uint32 previous mission mode the restart path saves and restores"
     }
   ],
   "globals": [
