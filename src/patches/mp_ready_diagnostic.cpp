@@ -42,84 +42,61 @@ namespace BZROpenShim
         // on BzrNetAuthOk -- the BZRNet websocket reaching authorized state 3 --
         // which is exactly the term the shell never reports.
 
-        constexpr uintptr_t kPlatformModeAddr = 0x008F0470;
-        constexpr uintptr_t kSteamInitFlagAddr = 0x00945463;
-        constexpr uintptr_t kGalaxyObjAddr = 0x00945490;
-        constexpr uintptr_t kBzrNetClientHolderAddr = 0x00945484;
-        constexpr uintptr_t kBzrNetLobbyAddr = 0x00945470;
-        constexpr uintptr_t kBzrNetNicknameAddr = 0x009453E0;
+        // The globals are read from the operands of the instructions that
+        // name them, inside guarded engine_addresses rows, so a build whose
+        // layout moved fails the bind instead of reading a plausible-looking
+        // value out of an unrelated address.
+        uint32_t g_PlatformModeAddr = 0;       // PlatformReady +3: cmp dword [mode],2
+        uint32_t g_SteamInitFlagAddr = 0;      // SteamOk +3: movzx eax,byte [flag]
+        uint32_t g_GalaxyObjAddr = 0;          // GalaxyOk +3: cmp dword [galaxy],0
+        uint32_t g_BzrNetClientHolderAddr = 0; // BzrNetAuthOk +3: cmp dword [holder],0
+        uint32_t g_BzrNetLobbyAddr = 0;        // BzrNetGetLobby +3: mov eax,[lobby]
+        uint32_t g_BzrNetNicknameAddr = 0;     // BzrNetNicknameRead: movsx edx,byte [ecx+name]
+        uint32_t g_ReadyGetterAddr = 0;
         constexpr size_t kBzrNetNicknameCapacity = 0x80;
 
         constexpr size_t kGalaxyStateOffset = 8;
         constexpr size_t kClientStateOffset = 4;
 
-        // Each guard covers the instruction that names the global above, so a
-        // build whose layout moved fails the check instead of reading a
-        // plausible-looking value out of an unrelated address.
-        struct ByteGuard
+        // First five bytes of cNetFriends::GetReadyState (push ebp; mov ebp,esp;
+        // push ecx; mov [ebp-4],ecx -- relative-free), which the explainer
+        // replaces with a jmp.
+        constexpr uint8_t kReadyGetterBytes[] = { 0x55, 0x8B, 0xEC, 0x51, 0x89 };
+
+        static uint32_t OperandAt(uint32_t code, size_t offset)
         {
-            uintptr_t address;
-            const uint8_t* bytes;
-            size_t length;
-            const char* label;
-        };
+            return *reinterpret_cast<const uint32_t*>(static_cast<uintptr_t>(code) + offset);
+        }
 
-        constexpr uint8_t kReadyGetterBytes[] = {
-            // 0x00753810 cNetFriends::GetReadyState: call PlatformReady, test,
-            // call GetBzrNetLobby, test, mov eax,3.
-            0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0xE8, 0x54, 0x10, 0x01, 0x00,
-            0x85, 0xC0, 0x74, 0x12, 0xE8, 0x3B, 0x0F, 0x01, 0x00, 0x85, 0xC0, 0x74,
-            0x09, 0xB8, 0x03, 0x00, 0x00, 0x00
-        };
-        constexpr uint8_t kPlatformReadyBytes[] = {
-            // 0x00764870: cmp dword [0x008F0470], 2
-            0x55, 0x8B, 0xEC, 0x83, 0x3D, 0x70, 0x04, 0x8F, 0x00, 0x02, 0x75, 0x13
-        };
-        constexpr uint8_t kSteamOkBytes[] = {
-            // 0x007647F0: movzx eax, byte [0x00945463]
-            0x55, 0x8B, 0xEC, 0x0F, 0xB6, 0x05, 0x63, 0x54, 0x94, 0x00, 0x85, 0xC0
-        };
-        constexpr uint8_t kGalaxyOkBytes[] = {
-            // 0x00764810: cmp dword [0x00945490], 0 / mov ecx, [0x00945490]
-            0x55, 0x8B, 0xEC, 0x83, 0x3D, 0x90, 0x54, 0x94, 0x00, 0x00, 0x74, 0x19,
-            0x8B, 0x0D, 0x90, 0x54, 0x94, 0x00
-        };
-        constexpr uint8_t kBzrNetAuthOkBytes[] = {
-            // 0x00764840: cmp dword [0x00945484], 0 / mov ecx, [0x00945484]
-            0x55, 0x8B, 0xEC, 0x83, 0x3D, 0x84, 0x54, 0x94, 0x00, 0x00, 0x74, 0x19,
-            0x8B, 0x0D, 0x84, 0x54, 0x94, 0x00
-        };
-        constexpr uint8_t kGetLobbyBytes[] = {
-            // 0x00764760: mov eax, [0x00945470]; ret
-            0x55, 0x8B, 0xEC, 0xA1, 0x70, 0x54, 0x94, 0x00, 0x5D, 0xC3
-        };
-        constexpr uint8_t kGalaxyStateBytes[] = {
-            // 0x0073B100: cmp dword [eax+8], 3; jl
-            0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x89, 0x4D, 0xF8, 0x8B, 0x45, 0xF8,
-            0x83, 0x78, 0x08, 0x03, 0x7C
-        };
-        constexpr uint8_t kClientStateBytes[] = {
-            // 0x006C3AA0: cmp dword [eax+4], 3; jne
-            0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x89, 0x4D, 0xF8, 0x8B, 0x45, 0xF8,
-            0x83, 0x78, 0x04, 0x03, 0x75
-        };
-        constexpr uint8_t kMenuRefreshBytes[] = {
-            // 0x0078EB50: the per-frame main-menu refresh that writes the caption.
-            0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x1C, 0x89, 0x4D, 0xFC, 0x8B, 0x45, 0xFC,
-            0x83, 0xB8, 0x70, 0x01, 0x00, 0x00, 0x00
-        };
-
-        constexpr ByteGuard kGuards[] = {
-            {0x00753810, kReadyGetterBytes, sizeof(kReadyGetterBytes), "ready-getter"},
-            {0x00764870, kPlatformReadyBytes, sizeof(kPlatformReadyBytes), "platform-ready"},
-            {0x007647F0, kSteamOkBytes, sizeof(kSteamOkBytes), "steam-ok"},
-            {0x00764810, kGalaxyOkBytes, sizeof(kGalaxyOkBytes), "galaxy-ok"},
-            {0x00764840, kBzrNetAuthOkBytes, sizeof(kBzrNetAuthOkBytes), "bzrnet-auth-ok"},
-            {0x00764760, kGetLobbyBytes, sizeof(kGetLobbyBytes), "get-lobby"},
-            {0x0073B100, kGalaxyStateBytes, sizeof(kGalaxyStateBytes), "galaxy-state"},
-            {0x006C3AA0, kClientStateBytes, sizeof(kClientStateBytes), "client-state"},
-            {0x0078EB50, kMenuRefreshBytes, sizeof(kMenuRefreshBytes), "menu-refresh"},
-        };
+        // Binds every row the diagnostic reads or the explainer patches.
+        // GalaxyState/ClientState/MenuRefresh are bound only so a moved layout
+        // there stands the diagnostic down too, as the old byte guards did.
+        bool MpReadyAddressesBound()
+        {
+            uint32_t platformReady = 0, steamOk = 0, galaxyOk = 0, authOk = 0, getLobby = 0;
+            uint32_t nicknameRead = 0, galaxyState = 0, clientState = 0, menuRefresh = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "NetFriendsGetReadyState", &g_ReadyGetterAddr },
+                { "PlatformReady", &platformReady },
+                { "PlatformSteamOk", &steamOk },
+                { "PlatformGalaxyOk", &galaxyOk },
+                { "PlatformBzrNetAuthOk", &authOk },
+                { "BzrNetGetLobby", &getLobby },
+                { "BzrNetNicknameRead", &nicknameRead },
+                { "GalaxyClientState", &galaxyState },
+                { "BzrNetClientState", &clientState },
+                { "MainScreenMpStatusRefresh", &menuRefresh },
+            };
+            if (!HookEngine::BindEngineRows("MP ready diagnostic", rows))
+                return false;
+            g_PlatformModeAddr = OperandAt(platformReady, 5);
+            g_SteamInitFlagAddr = OperandAt(steamOk, 6);
+            g_GalaxyObjAddr = OperandAt(galaxyOk, 5);
+            g_BzrNetClientHolderAddr = OperandAt(authOk, 5);
+            g_BzrNetLobbyAddr = OperandAt(getLobby, 4);
+            g_BzrNetNicknameAddr = OperandAt(nicknameRead, 3);
+            return true;
+        }
 
         // ---- guarded reads ----------------------------------------------
         //
@@ -230,7 +207,7 @@ namespace BZROpenShim
             __try
             {
                 const uint8_t* const buffer =
-                    reinterpret_cast<const uint8_t*>(kBzrNetNicknameAddr);
+                    reinterpret_cast<const uint8_t*>(g_BzrNetNicknameAddr);
                 size_t i = 0;
                 for (; i < kBzrNetNicknameCapacity && buffer[i] != '\0'; ++i)
                 {
@@ -272,19 +249,19 @@ namespace BZROpenShim
 
             uint8_t steamFlag = 0;
             uint32_t lobby = 0;
-            if (!ReadDword(kPlatformModeAddr, r.mode) ||
-                !ReadByte(kSteamInitFlagAddr, steamFlag) ||
-                !ReadDword(kBzrNetLobbyAddr, lobby))
+            if (!ReadDword(g_PlatformModeAddr, r.mode) ||
+                !ReadByte(g_SteamInitFlagAddr, steamFlag) ||
+                !ReadDword(g_BzrNetLobbyAddr, lobby))
                 return false;
             r.steamOk = steamFlag != 0;
             r.lobbyPresent = lobby != 0;
 
-            if (!ReadStateDirect(kGalaxyObjAddr, kGalaxyStateOffset,
+            if (!ReadStateDirect(g_GalaxyObjAddr, kGalaxyStateOffset,
                                  r.galaxyState, r.galaxyPresent))
                 return false;
             r.galaxyOk = r.galaxyPresent && r.galaxyState >= 3;
 
-            if (!ReadStateThroughHolder(kBzrNetClientHolderAddr, kClientStateOffset,
+            if (!ReadStateThroughHolder(g_BzrNetClientHolderAddr, kClientStateOffset,
                                         r.clientState, r.clientPresent))
                 return false;
             r.bzrNetAuthOk = r.clientPresent && r.clientState == 3;
@@ -512,51 +489,52 @@ namespace BZROpenShim
             return "Multiplayer unavailable";
         }
 
-        // 0x0078EC38: the call Localize("multi_message","no inet") inside the
-        // code-1 branch of the menu refresh.
-        constexpr uintptr_t kLocalizeCallSite = 0x0078EC38;
-        constexpr uint8_t kLocalizeCallBytes[] = { 0xE8, 0x03, 0xDF, 0x08, 0x00 };
+        // The MainScreenNoInetMessageCall row: the call
+        // Localize("multi_message","no inet") inside the code-1 branch of the
+        // menu refresh.
+        uint32_t g_LocalizeCallSite = 0;
 
         void InstallExplainer()
         {
-            // Guarded separately from kGuards so a layout change here stands
-            // down only the explainer, leaving the diagnostic reporting.
-            if (!BytesMatchAt(kLocalizeCallSite, kLocalizeCallBytes,
-                              sizeof(kLocalizeCallBytes)))
+            // Bound separately from the diagnostic's rows so a layout change
+            // here stands down only the explainer, leaving the reporting.
+            g_LocalizeCallSite = HookEngine::EngineAddress("MainScreenNoInetMessageCall");
+            if (g_LocalizeCallSite == 0)
             {
-                Log(L"[MPREADY] Explainer stands down: message call site at "
-                    L"0x%08X does not match\n",
-                    static_cast<uint32_t>(kLocalizeCallSite));
+                Log(L"[MPREADY] Explainer stands down: message call site does not bind\n");
                 return;
             }
+            uint8_t localizeCallBytes[5] = {};
+            std::memcpy(localizeCallBytes, reinterpret_cast<const void*>(static_cast<uintptr_t>(g_LocalizeCallSite)),
+                        sizeof(localizeCallBytes));
 
             HookEngine::PatchDef getter;
-            getter.address = 0x00753810;
+            getter.address = g_ReadyGetterAddr;
             getter.type = HookEngine::PatchType::JMP5;
             getter.name = "cNetFriends::GetReadyState/explain";
             getter.verified = true;
             getter.expected_original.assign(kReadyGetterBytes, kReadyGetterBytes + 5);
             getter.payload = HookEngine::MakeJmp5Payload(
-                0x00753810,
+                g_ReadyGetterAddr,
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&ExplainedGetReadyState)));
 
             if (!HookEngine::ApplyPatch(getter))
             {
-                Log(L"[MPREADY] Explainer failed to install at 0x00753810\n");
+                Log(L"[MPREADY] Explainer failed to install at 0x%08X\n", g_ReadyGetterAddr);
                 return;
             }
 
             HookEngine::PatchDef message;
-            message.address = static_cast<uint32_t>(kLocalizeCallSite);
+            message.address = g_LocalizeCallSite;
             message.type = HookEngine::PatchType::REL32;
             message.name = "MainScreen::MPStatus/message";
             message.verified = true;
             message.expected_original.assign(
-                kLocalizeCallBytes, kLocalizeCallBytes + sizeof(kLocalizeCallBytes));
+                localizeCallBytes, localizeCallBytes + sizeof(localizeCallBytes));
 
             const int32_t rel =
                 static_cast<int32_t>(reinterpret_cast<uintptr_t>(&NotReadyMessage)) -
-                static_cast<int32_t>(kLocalizeCallSite + 5);
+                static_cast<int32_t>(g_LocalizeCallSite + 5);
             message.payload.assign(5, 0);
             message.payload[0] = 0xE8;
             std::memcpy(message.payload.data() + 1, &rel, sizeof(rel));
@@ -577,15 +555,8 @@ namespace BZROpenShim
             // guard check rather than reporting a torn startup state.
             Sleep(3000);
 
-            for (const ByteGuard& guard : kGuards)
-            {
-                if (BytesMatchAt(guard.address, guard.bytes, guard.length))
-                    continue;
-                Log(L"[MPREADY] Byte guard '%hs' mismatched at 0x%08X; readiness "
-                    L"diagnostic stands down on this build\n",
-                    guard.label, static_cast<uint32_t>(guard.address));
+            if (!MpReadyAddressesBound())
                 return 0;
-            }
 
             // The guards above cover the getter this replaces, so the explainer
             // is only ever installed on a build whose layout it was written for.
@@ -595,8 +566,8 @@ namespace BZROpenShim
             if (!DiagnosticEnabled())
                 return 0;
 
-            Log(L"[MPREADY] Watching main-menu multiplayer readiness "
-                L"(getter 0x00753810, caption 0x0078EB50)\n");
+            Log(L"[MPREADY] Watching main-menu multiplayer readiness (getter 0x%08X)\n",
+                g_ReadyGetterAddr);
 
             bool havePrevious = false;
             Readiness previous = {};
@@ -662,7 +633,6 @@ namespace BZROpenShim
 
     void InitializeMpReadyDiagnostic()
     {
-        if (!HookEngine::LiteralAddressesApply("MP ready diagnostic")) return;
         if (InterlockedCompareExchange(&g_Started, 1, 0) != 0)
             return;
         // The worker owns the byte-guard check that both features depend on, so

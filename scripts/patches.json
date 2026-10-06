@@ -3288,6 +3288,60 @@
       "address": "0x0087AE1C",
       "kind": "data",
       "identity": "RTTI .?AVHowitzer@@ secondary vtable"
+    },
+    {
+      "name": "NetFriendsGetReadyState",
+      "address": "0x00753810",
+      "expected": "55 8B EC 51 89 4D FC E8 54 10 01 00 85 C0 74 12 E8 3B 0F 01 00 85 C0 74 09 B8 03 00 00 00",
+      "identity": "cNetFriends::GetReadyState: call PlatformReady, test, call BzrNetGetLobby, test, mov eax,3; the MP ready explainer replaces its entry"
+    },
+    {
+      "name": "PlatformReady",
+      "address": "0x00764870",
+      "expected": "55 8B EC 83 3D 70 04 8F 00 02 75 13",
+      "identity": "platform readiness, opens cmp dword [platformMode],2 (mode global = disp32 at +5)"
+    },
+    {
+      "name": "PlatformSteamOk",
+      "address": "0x007647F0",
+      "expected": "55 8B EC 0F B6 05 63 54 94 00 85 C0",
+      "identity": "Steam ok, opens movzx eax,byte [steamInitFlag] (disp32 at +6)"
+    },
+    {
+      "name": "PlatformGalaxyOk",
+      "address": "0x00764810",
+      "expected": "55 8B EC 83 3D 90 54 94 00 00 74 19 8B 0D 90 54 94 00",
+      "identity": "Galaxy ok: cmp dword [galaxyObj],0 / mov ecx,[galaxyObj] (disp32 at +5)"
+    },
+    {
+      "name": "PlatformBzrNetAuthOk",
+      "address": "0x00764840",
+      "expected": "55 8B EC 83 3D 84 54 94 00 00 74 19 8B 0D 84 54 94 00",
+      "identity": "BZRNet auth ok: cmp dword [clientHolder],0 / mov ecx,[clientHolder] (disp32 at +5)"
+    },
+    {
+      "name": "GalaxyClientState",
+      "address": "0x0073B100",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 8B 45 F8 83 78 08 03 7C 09",
+      "identity": "Galaxy client state test cmp dword [eax+8],3; jl"
+    },
+    {
+      "name": "BzrNetClientState",
+      "address": "0x006C3AA0",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 8B 45 F8 83 78 04 03 75 09",
+      "identity": "BZRNet client state test cmp dword [eax+4],3; jne"
+    },
+    {
+      "name": "MainScreenMpStatusRefresh",
+      "address": "0x0078EB50",
+      "expected": "55 8B EC 83 EC 1C 89 4D FC 8B 45 FC 83 B8 70 01 00 00 00",
+      "identity": "per-frame main-menu refresh that writes the multiplayer caption"
+    },
+    {
+      "name": "MainScreenNoInetMessageCall",
+      "address": "0x0078EC38",
+      "expected": "E8 03 DF 08 00 83 C4 08",
+      "identity": "call Localize(\"multi_message\",\"no inet\") in the code-1 branch of the main-menu refresh; the MP ready explainer redirects it"
     }
   ],
   "globals": [
