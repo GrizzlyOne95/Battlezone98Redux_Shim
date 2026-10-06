@@ -591,6 +591,16 @@
       "identity": "Global pointer to the object collision grid on GOG Redux 2.2.301, read by `mov ecx,[0x00917A6C]` at 0x004810C0 immediately before the range query 0x005B2950 in FUN_00480F40, whose results loop resolves each handle through GameObject::GetObj 0x004DA060. The same load precedes the query at 0x004672AE and 0x005AC2E6. ShieldTower's own query (0x005D10A3) uses a different grid at 0x009173DC. team_filter_mines.cpp's kCollisionRangeSearchAddr (0x006A3E10) is inside .text, not this global. Read only, by ShellCasings to find objects near flying casings."
     },
     {
+      "name": "CollisionGrid::Crafts",
+      "pattern": "F2 0F 11 04 24 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 8D 8D 88 FE FF FF 51 8D 8D 54 FE FF FF E8",
+      "offset": 7,
+      "mode": "abs32_operand",
+      "fallback": "0x009173DC",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Global pointer to the craft collision grid (BZ 1.5 collision_range_search) on GOG Redux 2.2.301, read by `mov ecx,[0x009173DC]` at 0x005D10A3 immediately before the range query 0x005B2950 in stock ShieldTower::Simulate 0x005D0D80, whose results loop resolves each handle through GameObject::GetObj 0x004DA060. The grid is created at 0x0049B36C and refilled every frame by the function around 0x0049B205-0x0049B2A8 (clear 0x005B2BD0, insert loop over the craft list 0x0094E2D4, done 0x005B2C30), matching 1.5 Collision_Fill_In_Range_Search_Structure over Craft::craftList. Stock MagnetMine::Simulate (0x0050C801) and ProximityMine::Simulate (0x005B0EFA) walk that same craft list directly. The sibling object grid 0x00917A6C (GameObject::objectRange, PR #405 CollisionGrid::Objects, refilled at 0x004DFAD6-0x004DFB8F) holds every GameObject. The pattern (store, grid load, query call, results lea) is a single match in the GOG image (whole-image scan 2026-10-05). Read only, by the ShieldTower/MagnetMine/ProximityMine team-filter paths in team_filter_mines.cpp."
+    },
+    {
       "name": "CollisionGrid::RangeQuery",
       "pattern": "55 8B EC 83 EC 44 89 4D FC 8B 45 FC F2 0F 10 45 08 F2 0F 5C 40 18 F2 0F 11 45 08 8B 4D FC F2 0F 10 45 10 F2 0F 5C 41 10",
       "offset": 0,

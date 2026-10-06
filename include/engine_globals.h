@@ -30,6 +30,11 @@ namespace BZROpenShim
         // patches.json "CurrentTrnName".
         uintptr_t CurrentTrnName();
 
+        // Slot holding the craft collision grid (BZ 1.5 collision_range_search),
+        // refilled every frame from the craft list; the `this` for the grid
+        // range query. patches.json "CollisionGrid::Crafts".
+        uintptr_t CraftCollisionGridSlot();
+
         // The [Net] tunables the game reads from net.ini (FUN_0056fd20), and
         // the bandwidth governor's current rate it seeds from MinBandwidth.
         // patches.json "Net::<name>"; all eleven share one signature over the
