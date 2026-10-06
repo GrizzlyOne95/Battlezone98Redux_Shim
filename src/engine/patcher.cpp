@@ -16,6 +16,7 @@
 #include "openshim_sdk_v2.h"
 #include "cli_multiparam_parser.h"
 #include "redux_compatibility.h"
+#include "shell_casing_config.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -402,12 +403,14 @@ namespace BZROpenShim
 
     static bool IsShellCasingPatchName(const char* name) { return name && strncmp(name, "Shell Casings ", 14) == 0; }
 
-    // [General] ShellCasings (default ON) arrives inverted through the env
+    // [General] ShellCasings (default OFF) arrives inverted through the env
     // mapping; off means the two shot calls are never redirected.
     static bool ShouldEnableShellCasings() {
         static int s_cached = -1;
         if (s_cached < 0)
-            s_cached = (EnvFlagEnabledByName("OPENSHIM_DISABLE_SHELL_CASINGS") || EnvFlagEnabledByName("BZR_DISABLE_SHELL_CASINGS")) ? 0 : 1;
+            s_cached = ShellCasings::EnabledByEnvironment([](const char* name, char* value, uint32_t size) {
+                return GetEnvironmentVariableA(name, value, size);
+            }) ? 1 : 0;
         return s_cached != 0;
     }
 

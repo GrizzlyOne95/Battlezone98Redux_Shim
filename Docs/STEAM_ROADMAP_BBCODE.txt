@@ -2,7 +2,9 @@
 
 This is the authoritative roadmap and backlog for the Battlezone 98 Redux community patch / OpenShim / Extra Utilities work.
 
-[b]Last updated: 2026-10-05 (Campaign Reimagined co-op release, OpenShim 1.0.0.47).[/b]
+[b]Last updated: 2026-10-06 (native shell casing defaults; last release OpenShim 1.0.0.47).[/b]
+
+[b]Native shell casings (development, 2026-10-06):[/b] OpenShim's cosmetic casing emitter defaults OFF, including with an older configuration that has no ShellCasings key. Set [code][General] ShellCasings = 1[/code] to opt in. This avoids automatic brass on mod energy weapons that use native cannon/machinegun classes and duplicate emission alongside mod-controlled EXU casings. The feature merged after 1.0.0.47 and was not part of that Workshop release.
 [b]Last major code audit: 2026-09-25 to 2026-09-28.[/b]
 
 This file now supersedes the old ExtraUtilities [code]FeaturesToLookInto.txt[/code] tracker as the source of truth. Older tracker items have either been folded in here, marked completed/reclassified, or retained below as lower-priority research ideas.
