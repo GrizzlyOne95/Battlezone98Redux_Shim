@@ -133,7 +133,8 @@ if (Test-Path -LiteralPath $assetManifestSource) {
 # them with the DLL so a clean install cannot silently fall back to
 # missing-texture panels.
 $uiFiles = @(
-    'uiline.png', 'uiplate.png', 'uibtn.png', 'uibtnhv.png'
+    'uiline.png', 'uiplate.png', 'uibtn.png', 'uibtnhv.png',
+    'osh_career_center.png'
 )
 New-Item -ItemType Directory -Force -Path $uiTargetDir | Out-Null
 foreach ($name in $uiFiles) {
@@ -148,7 +149,7 @@ foreach ($name in $uiFiles) {
         throw "UI resource verification failed: $name"
     }
 }
-Write-Host ("UI resources deployed: {0} flat tiles" -f $uiFiles.Count)
+Write-Host ("UI resources deployed: {0} files" -f $uiFiles.Count)
 
 Write-Host ""
 Write-Host "patches.json verified: all $(@($repoJson.patches).Count + @($repoJson.globals).Count + @($repoJson.static_pointers).Count) declared names present."

@@ -190,4 +190,8 @@ namespace BZROpenShim
     void EnsureOptionsParentCtorHookScaffold();
     void ResetOptionsUiResolvedState();
     void LogShimSettingsUiStatus();
+
+    // The Career shell screen (career_screen.cpp). False when this build
+    // cannot host OpenShim screens.
+    bool RegisterCareerScreen();
 }

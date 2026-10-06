@@ -5,6 +5,7 @@
 // declared in bzr_options_ui.h and implemented by bzr_hooks.cpp and the
 // helper files split out of it.
 #include "bzr_options_ui.h"
+#include "shell_screens.h"
 #include "hook_engine.h"
 #include "bool_token.h"
 
@@ -40,10 +41,6 @@ namespace BZROpenShim
     bool __fastcall OptionsInputKeyReleasedHook(void* thisPtr, void* /*edx*/, uint32_t key, uint32_t keyCode);
     void* __fastcall OptionsParentCtorHook(void* thisPtr, void* /*edx*/);
     void __fastcall MainScreenCtorHook(void* thisPtr, void* /*edx*/, char phase);
-    void InstallCareerUiTextRecorders();
-    void __fastcall CareerUiSetActiveHook(void* thisPtr, void* /*edx*/, uint8_t value);
-    void __fastcall CareerUiSetButtonLabelHook(void* thisPtr, void* /*edx*/, const char* text);
-    void __fastcall CareerUiSetTooltipHook(void* thisPtr, void* /*edx*/, const char* text);
     void __fastcall OptionsInputDtorHook(void* thisPtr, void* /*edx*/);
     void __fastcall OptionsParentDtorHook(void* thisPtr, void* /*edx*/);
 
@@ -5252,150 +5249,13 @@ namespace BZROpenShim
         constexpr float kCareerButtonX = 720.0f - kCareerButtonW * 0.5f;
         constexpr float kCareerButtonY = (77.0f - kCareerButtonH) * 0.5f;
 
-        // The backing plate is deliberately larger than the screen. The menu
-        // backdrop art is MainScreen_Overlay's own texture, not a control, so
-        // hiding controls leaves the frame grid and panel edges drawn behind a
-        // page-sized plate; only a full-bleed plate covers them. The overlay
-        // itself spans design x -88..1528, so this over-covers on every side
-        // rather than depending on that number being exact.
-        constexpr float kCareerPlateX = -200.0f;
-        constexpr float kCareerPlateY = -100.0f;
-        constexpr float kCareerPlateW = 1840.0f;
-        constexpr float kCareerPlateH = 1280.0f;
-
-        // Content column. Captions and values are separate labels on a fixed
-        // column so the numbers line up: the font is proportional, so padding a
-        // single string with spaces does not align anything.
-        constexpr float kCareerHeaderX = 300.0f;
-        constexpr float kCareerCaptionX = 340.0f;
-        constexpr float kCareerValueX = 860.0f;
-        constexpr float kCareerColumnW = 520.0f;
-        constexpr float kCareerContentTop = 250.0f;
-        constexpr float kCareerLineH = 40.0f;
-        constexpr float kCareerSectionGap = 26.0f;
-        constexpr size_t kCareerRowCount = 20;
-
-        constexpr float kCareerTitleX = 300.0f;
-        constexpr float kCareerTitleY = 120.0f;
-        constexpr float kCareerTitleW = 840.0f;
-        constexpr float kCareerBackW = 369.0f;
-        constexpr float kCareerBackH = 68.0f;
-        constexpr float kCareerBackY = 940.0f;
-
         static void* g_CareerUiMainScreen = nullptr;
         static void* g_CareerUiOverlay = nullptr;
         static void* g_CareerUiButton = nullptr;
-        static void* g_CareerUiPlate = nullptr;
-        static void* g_CareerUiTitleLabel = nullptr;
-        static void* g_CareerUiCaptions[kCareerRowCount] = {};
-        static void* g_CareerUiValues[kCareerRowCount] = {};
-        static void* g_CareerUiBackButton = nullptr;
-        static bool g_CareerUiPageActive = false;
-
-        // Stock title controls hidden while the page is up, so Back can put
-        // back exactly what it took away rather than guessing the stock set.
-        static void* g_CareerUiHiddenStock[32] = {};
-        static size_t g_CareerUiHiddenStockCount = 0;
-
-        // Text on this screen cannot be hidden by any visibility flag. Measured
-        // live on 2.2.301 while the page was open:
-        //
-        //   view                        vt          layer  vis
-        //   SinglePlayer_MainScreen     0x008A0470    2     0
-        //   SinglePlayer_..._text       0x008A096C    4     0
-        //   MPStatus_text               0x008A096C    2     0
-        //   MainScreen_Overlay          0x008A0B94    1     1
-        //
-        // Every one of those had vis=0 -- SetActive had been called on the
-        // button, on its caption, and (in a probe build) on the whole overlay --
-        // and every caption still drew. Panels obey the flag; text does not.
-        // The layer byte at +0xE8 is fixed at construction, so a plate cannot be
-        // raised above the layer-4 captions after the fact either.
-        //
-        // The one mechanism that does work is blanking the string, which is what
-        // SuppressStockOptionsInputWidgets already does on the options screen.
-        // That page can hard-code its restore captions; the title screen's are
-        // localized, so they are recorded as the shell sets them and replayed on
-        // Back. Recording is limited to direct children of MainScreen_Overlay so
-        // that no in-game text ever enters this table.
-        static void* g_CareerUiHiddenCaptions[32] = {};
-        static size_t g_CareerUiHiddenCaptionCount = 0;
-
-        struct CareerUiTextRecord
-        {
-            void* view;
-            bool viaButtonLabel;   // replay through the setter that wrote it
-            char name[64];         // guards against a reused heap address
-            char text[96];
-        };
-        static CareerUiTextRecord g_CareerUiTextMemory[64] = {};
-        static size_t g_CareerUiTextMemoryCount = 0;
-        static bool g_CareerUiTextMemoryFull = false;
-        // Set while this code is the one calling a setter, so blanking and
-        // restoring never overwrite the remembered original with "".
-        static bool g_CareerUiTextMemorySuppressed = false;
-
-        // Stock views whose text was blanked, and therefore must be restored.
-        static void* g_CareerUiBlankedText[32] = {};
-        static size_t g_CareerUiBlankedTextCount = 0;
 
         static void ResetCareerUiState();
         static void* ReadMainScreenSingleton();
 
-        // The cached widget pointers are meaningful only while the title
-        // screen they were taken from is the live singleton: the constructor
-        // stores it and the destructor clears it. Between a teardown and the
-        // destructor listener or the next setup pass, a recycled heap address
-        // must not be mistaken for a page widget or a blanked caption.
-        static bool CareerUiCacheIsLive()
-        {
-            if (!g_CareerUiMainScreen)
-                return false;
-            if (ReadMainScreenSingleton() == g_CareerUiMainScreen)
-                return true;
-            Log(L"[CAREERUI] title screen 0x%08X is no longer the live singleton; dropping cached widgets\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CareerUiMainScreen)));
-            ResetCareerUiState();
-            return false;
-        }
-
-        // cUI_Button::SetLabel and cUI_Text::SetText. Both are
-        // void __thiscall(this, const char*), and both open with
-        //   55 8B EC 51 89 4D FC          push ebp / mov ebp,esp / push ecx /
-        //                                 mov [ebp-4],ecx
-        // which is a whole-instruction 7-byte cut. The guards run past that into
-        // the bytes that differ between them (SetText pushes 0x7D0), so neither
-        // guard can match the other function.
-        uint32_t g_CareerUiSetButtonLabelAddr = 0;
-        uint32_t g_CareerUiSetTooltipAddr = 0;
-        constexpr size_t kCareerUiTextSetterDetourLen = 7;
-
-        constexpr uint8_t kExpectedSetButtonLabelBytes[] =
-        {
-            0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x8B, 0x45, 0x08, 0x50, 0x8B
-        };
-        constexpr uint8_t kExpectedSetTooltipBytes[] =
-        {
-            0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x68, 0xD0, 0x07, 0x00, 0x00
-        };
-
-        static InlineDetour32 g_CareerUiSetButtonLabelDetour = {};
-        static InlineDetour32 g_CareerUiSetTooltipDetour = {};
-        static FnUiSetStr g_CareerUiSetButtonLabelOriginal = nullptr;
-        static FnUiSetStr g_CareerUiSetTooltipOriginal = nullptr;
-
-        // cUI_View::SetActive. Hooked to veto re-activation of the page's own
-        // widgets while the page is closed: the page has to be built during
-        // screen setup for its stock button art to bind at all, but something
-        // after that re-activates the overlay's children, and a plate built
-        // hidden came back visible over the closed menu. Re-hiding on every
-        // setup pass was not enough -- dismissing the splash re-showed it -- so
-        // the hidden state is enforced at the setter instead of re-asserted.
-        uint32_t g_CareerUiSetActiveAddr = 0;
-        constexpr uint8_t kExpectedSetActiveBytes[] =
-        {
-            0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x8B, 0x45, 0xFC, 0x83, 0xB8
-        };
         // Every address in this file is an engine_addresses row. The options/career
         // hooks bind them together (OptionsUiAddressesBound); the native text
         // measure and the live input.map reload each bind their own rows and
@@ -5418,9 +5278,6 @@ namespace BZROpenShim
                     { "OptionsInputDtor", &g_OptionsInputDtorAddr },
                     { "OptionsParentDtor", &g_OptionsParentDtorAddr },
                     { "UiPerfMainScreenGlobal", &g_MainScreenSingletonAddr },
-                    { "SetButtonLabel", &g_CareerUiSetButtonLabelAddr },
-                    { "SetTooltip", &g_CareerUiSetTooltipAddr },
-                    { "UiSetActive", &g_CareerUiSetActiveAddr },
                 };
                 if (!HookEngine::BindEngineRows("Shim options UI", rows))
                     return false;
@@ -5442,9 +5299,6 @@ namespace BZROpenShim
         {
             std::memcpy(out, reinterpret_cast<const void*>(static_cast<uintptr_t>(address)), length);
         }
-
-        static InlineDetour32 g_CareerUiSetActiveDetour = {};
-        static FnUiSetActive g_CareerUiSetActiveOriginal = nullptr;
 
         static InlineDetour32 g_MainScreenCtorDetour = {};
         using FnMainScreenSetup = void(__thiscall*)(void* thisPtr, char phase);
@@ -5581,790 +5435,13 @@ namespace BZROpenShim
             return nullptr;
         }
 
-        // ------------------------------------------------------------------
-        // career_stats.cfg reader
-        // ------------------------------------------------------------------
-        //
-        // The file is the flat "key=value" document bzr_hooks.cpp writes. Keys
-        // are namespaced per profile (profile.<key>.career.totalKills and so
-        // on). Values are summed across profiles: an install normally has one,
-        // and summing is the honest answer when it has more rather than
-        // silently picking whichever came first.
-
-        struct CareerUiTotals
-        {
-            bool fileFound = false;
-            int profiles = 0;
-            long long totalKills = 0;
-            long long totalDeaths = 0;
-            long long spKills = 0;
-            long long spDeaths = 0;
-            long long mpKills = 0;
-            long long mpDeaths = 0;
-            long long missionsPlayed = 0;
-            long long spMissions = 0;
-            long long mpMatches = 0;
-            int missionsRecorded = 0;
-        };
-
-        static std::filesystem::path GetCareerUiStatsPath()
-        {
-            return GetUserConfigPath().parent_path() / "career_stats.cfg";
-        }
-
-        static void ReadCareerUiTotals(CareerUiTotals& out)
-        {
-            out = CareerUiTotals{};
-
-            std::ifstream input(GetCareerUiStatsPath());
-            if (!input.is_open())
-                return;
-            out.fileFound = true;
-
-            std::unordered_set<std::string> profileKeys;
-            std::unordered_set<std::string> missionKeys;
-
-            std::string line;
-            while (std::getline(input, line))
-            {
-                const size_t split = line.find('=');
-                if (split == std::string::npos || split == 0)
-                    continue;
-                std::string key = line.substr(0, split);
-                const long long value = std::atoll(line.c_str() + split + 1);
-
-                if (key.rfind("profile.", 0) != 0)
-                    continue;
-
-                const size_t profileEnd = key.find('.', sizeof("profile.") - 1);
-                if (profileEnd == std::string::npos)
-                    continue;
-                profileKeys.insert(key.substr(0, profileEnd));
-
-                const std::string tail = key.substr(profileEnd + 1);
-                if (tail == "career.totalKills")            out.totalKills += value;
-                else if (tail == "career.totalDeaths")      out.totalDeaths += value;
-                else if (tail == "career.spKills")          out.spKills += value;
-                else if (tail == "career.spDeaths")         out.spDeaths += value;
-                else if (tail == "career.mpKills")          out.mpKills += value;
-                else if (tail == "career.mpDeaths")         out.mpDeaths += value;
-                else if (tail == "career.missionsPlayed")   out.missionsPlayed += value;
-                else if (tail == "career.spMissionsPlayed") out.spMissions += value;
-                else if (tail == "career.mpMatchesPlayed")  out.mpMatches += value;
-                else if (tail.rfind("mission.", 0) == 0)
-                {
-                    const size_t nameEnd = tail.find('.', sizeof("mission.") - 1);
-                    if (nameEnd != std::string::npos)
-                        missionKeys.insert(tail.substr(0, nameEnd));
-                }
-            }
-
-            out.profiles = static_cast<int>(profileKeys.size());
-            out.missionsRecorded = static_cast<int>(missionKeys.size());
-        }
-
-        static std::string FormatCareerUiRatio(long long kills, long long deaths)
-        {
-            if (deaths <= 0)
-                return kills > 0 ? "perfect" : "-";
-            char buffer[32] = {};
-            _snprintf_s(buffer, _TRUNCATE, "%.2f",
-                        static_cast<double>(kills) / static_cast<double>(deaths));
-            return buffer;
-        }
-
-        // Two columns of plain text: a caption and its value, so the page reads
-        // as a record rather than a form.
-        // One rendered row. A header carries no value and sits in the outer
-        // column; a spacer reserves vertical room without a widget.
-        struct CareerUiRow
-        {
-            std::string caption;
-            std::string value;
-            bool header = false;
-            bool spacer = false;
-        };
-
-        static void BuildCareerUiRows(CareerUiRow (&rows)[kCareerRowCount])
-        {
-            for (auto& row : rows)
-                row = CareerUiRow{};
-
-            CareerUiTotals t;
-            ReadCareerUiTotals(t);
-
-            const auto num = [](long long v) { return std::to_string(v); };
-
-            size_t i = 0;
-            const auto header = [&](const char* text)
-            {
-                if (i < kCareerRowCount) { rows[i].caption = text; rows[i].header = true; ++i; }
-            };
-            const auto entry = [&](const char* caption, const std::string& value)
-            {
-                if (i < kCareerRowCount) { rows[i].caption = caption; rows[i].value = value; ++i; }
-            };
-            const auto gap = [&]()
-            {
-                if (i < kCareerRowCount) { rows[i].spacer = true; ++i; }
-            };
-
-            if (!t.fileFound)
-            {
-                header("NO RECORD YET");
-                gap();
-                entry("Kills, deaths and missions are recorded automatically", "");
-                entry("in single player and multiplayer once you start playing.", "");
-                gap();
-                entry("Tracking can be switched off under OpenShim Settings.", "");
-                return;
-            }
-
-            header("OVERALL");
-            entry("Kills", num(t.totalKills));
-            entry("Deaths", num(t.totalDeaths));
-            entry("Kill / death", FormatCareerUiRatio(t.totalKills, t.totalDeaths));
-            gap();
-
-            header("SINGLE PLAYER");
-            entry("Kills", num(t.spKills));
-            entry("Deaths", num(t.spDeaths));
-            // career.spMissionsPlayed is written only by the OpenShim career
-            // layer; career.missionsPlayed predates it and is what every record
-            // written before this feature shipped actually carries. Preferring
-            // the specific key and falling back to the general one is why an
-            // existing install reads its real total instead of a flat zero --
-            // the GOG test record has 342 under the old key and none under the
-            // new one, and showed "Missions played 0" before this fallback.
-            entry("Missions played", num(t.spMissions > 0 ? t.spMissions : t.missionsPlayed));
-            gap();
-
-            header("MULTIPLAYER");
-            entry("Kills", num(t.mpKills));
-            entry("Deaths", num(t.mpDeaths));
-            entry("Matches played", num(t.mpMatches));
-            gap();
-
-            header("RECORD");
-            entry("Distinct missions", num(t.missionsRecorded));
-            if (t.profiles > 1)
-                entry("Profiles combined", num(t.profiles));
-        }
-
-        // Row y positions, so widget creation and text refresh agree without
-        // either having to recompute the other's layout.
-        static void ComputeCareerUiRowY(const CareerUiRow (&rows)[kCareerRowCount],
-                                        float (&outY)[kCareerRowCount])
-        {
-            float y = kCareerContentTop;
-            for (size_t i = 0; i < kCareerRowCount; ++i)
-            {
-                outY[i] = y;
-                if (rows[i].spacer)
-                    y += kCareerSectionGap;
-                else if (!rows[i].caption.empty())
-                    y += kCareerLineH;
-            }
-        }
-
-        // ------------------------------------------------------------------
-        // Page show / hide
-        // ------------------------------------------------------------------
-
-        // Hide every stock child of MainScreen_Overlay, remembering exactly
-        // what was hidden. Our own widgets are skipped by pointer identity, not
-        // by name, so a stock control that happens to share a name prefix can
-        // never be confused for one of ours.
-        // Widgets that make up the page itself. The page is built before the
-        // stock controls are hidden, so by then these are overlay children too
-        // and would otherwise hide themselves. Deliberately excludes the Career
-        // button: that one is a stock-overlay sibling that should disappear
-        // with the rest while the page is up.
-        static bool IsCareerUiPageWidget(void* view)
-        {
-            if (!view || !CareerUiCacheIsLive())
-                return false;
-            if (view == g_CareerUiPlate || view == g_CareerUiTitleLabel ||
-                view == g_CareerUiBackButton)
-            {
-                return true;
-            }
-            for (void* label : g_CareerUiCaptions)
-                if (label && view == label)
-                    return true;
-            for (void* label : g_CareerUiValues)
-                if (label && view == label)
-                    return true;
-            return false;
-        }
-
-        // The active flag as the engine stores it (+0xE9), read back rather than
-        // assumed. The title screen ships with at least one control already
-        // inactive -- openAchievements is built but switched off -- so hiding
-        // everything and then activating everything on Back turns on a button
-        // the shell had deliberately left off. Only controls that were actually
-        // on are touched.
-        static bool IsUiViewActive(void* view)
-        {
-            __try
-            {
-                if (!view)
-                    return false;
-                return *(reinterpret_cast<uint8_t*>(view) + 0xE9) != 0;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
-        // cUI_Button's enabled byte (+0x148), the same field LogUiViewNode
-        // reports. A disabled button still draws but is skipped by the click
-        // dispatch, which is exactly what a full-bleed backing plate needs: the
-        // dispatch takes the first leaf child whose rect is hit, and the plate
-        // is created before the Back button and covers it, so an enabled plate
-        // silently eats every Back click.
-        static void SetInputBindingUiButtonEnabled(void* button, bool enabled)
-        {
-            __try
-            {
-                if (button)
-                    *(reinterpret_cast<uint8_t*>(button) + 0x148) = enabled ? 1 : 0;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-        }
-
-        // Caption of a cUI_Button, or null for any other view. The vtable check
-        // is what makes reading +0x144 safe: on a label or overlay that offset
-        // is unrelated storage, not a view pointer.
-        static void* GetCareerUiStockCaption(void* view)
-        {
-            __try
-            {
-                if (!view)
-                    return nullptr;
-                if (*reinterpret_cast<uintptr_t*>(view) != g_UiButtonVtableAddr)
-                    return nullptr;
-                return *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(view) + 0x144);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return nullptr;
-            }
-        }
-
-        // --- remembering the title screen's strings ------------------------
-        //
-        // Armed while a cUI_MainScreen is being set up or is live, so that no
-        // in-game text setter call ever reaches the parent check below.
-        static bool g_CareerUiTextRecordingArmed = false;
-
-        static CareerUiTextRecord* FindCareerUiTextRecord(void* view)
-        {
-            for (size_t i = 0; i < g_CareerUiTextMemoryCount; ++i)
-                if (g_CareerUiTextMemory[i].view == view)
-                    return &g_CareerUiTextMemory[i];
-            return nullptr;
-        }
-
-        static void RecordCareerUiText(void* view, const char* text, bool viaButtonLabel)
-        {
-            if (!g_CareerUiTextRecordingArmed || g_CareerUiTextMemorySuppressed)
-                return;
-            if (!view || !text)
-                return;
-
-            // Diagnostic for captions that reach the page unblanked. Off unless
-            // OPENSHIM_CAREER_TRACE is set.
-            static int s_traceBudget = 400;
-            if (s_traceBudget > 0 &&
-                ::GetEnvironmentVariableW(L"OPENSHIM_CAREER_TRACE", nullptr, 0) != 0)
-            {
-                --s_traceBudget;
-                void* const parent = GetInputBindingUiViewParent(view);
-                Log(L"[CAREERTRACE] set view=0x%08X viaButton=%d text=\"%hs\"\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(view)),
-                    viaButtonLabel ? 1 : 0, text);
-                Log(L"[CAREERTRACE]   viewName=%hs\n", ReadUiViewName(view));
-                Log(L"[CAREERTRACE]   parent=0x%08X\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parent)));
-                Log(L"[CAREERTRACE]   parentName=%hs\n", ReadUiViewName(parent));
-            }
-
-            // Accept a child of MainScreen_Overlay, or a view that has no parent
-            // yet. The second case is not laxity: traced live, the four corner
-            // controls are labelled before they are AddChild'd --
-            //
-            //   set view=0x1FD9D970 viaButton=1 text="Exit Game"
-            //     viewName=ExitGame_MainScreen
-            //     parent=0x00000000
-            //
-            // -- while SinglePlayer_MainScreen is labelled after, with
-            // parent=MainScreen_Overlay. Requiring a parent therefore dropped
-            // exactly Exit Game, Options, Mods and Achievements, which are the
-            // captions that kept drawing over the page.
-            //
-            // Recording a view that never becomes a title-screen control is
-            // harmless: a record is only ever consulted for a view that is a
-            // current child of the live overlay, and only after its name is
-            // re-checked against the record.
-            void* const parent = GetInputBindingUiViewParent(view);
-            if (parent && !MainScreenViewNameMatches(parent, "MainScreen_Overlay"))
-                return;
-            if (IsCareerUiPageWidget(view))
-                return;
-
-            CareerUiTextRecord* record = FindCareerUiTextRecord(view);
-            if (!record)
-            {
-                if (g_CareerUiTextMemoryCount >=
-                    sizeof(g_CareerUiTextMemory) / sizeof(g_CareerUiTextMemory[0]))
-                {
-                    if (!g_CareerUiTextMemoryFull)
-                    {
-                        g_CareerUiTextMemoryFull = true;
-                        Log(L"[CAREERUI] text memory full; some captions will not be hidden\n");
-                    }
-                    return;
-                }
-                record = &g_CareerUiTextMemory[g_CareerUiTextMemoryCount++];
-                record->view = view;
-            }
-
-            record->viaButtonLabel = viaButtonLabel;
-            _snprintf_s(record->name, _TRUNCATE, "%s", ReadUiViewName(view));
-            __try
-            {
-                _snprintf_s(record->text, _TRUNCATE, "%s", text);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                record->text[0] = '\0';
-            }
-        }
-
-        // A record is only usable if the view at that address is still the same
-        // control. Screen teardown frees these views and a later menu can be
-        // built on the same heap addresses, so matching the pointer alone could
-        // replay one control's caption onto another.
-        static const CareerUiTextRecord* FindUsableCareerUiTextRecord(void* view)
-        {
-            const CareerUiTextRecord* const record = FindCareerUiTextRecord(view);
-            if (!record)
-                return nullptr;
-            if (std::strcmp(record->name, ReadUiViewName(view)) != 0)
-                return nullptr;
-            return record;
-        }
-
-        // True while the page is up and this view is one whose text was blanked.
-        // The multiplayer control's caption is live status text ("Not Ready"),
-        // rewritten by the shell after the page opens, which is why blanking it
-        // once was not enough -- it reappeared over the page seconds later.
-        static bool IsCareerUiBlankedView(void* view)
-        {
-            if (!g_CareerUiPageActive || !view || !CareerUiCacheIsLive())
-                return false;
-            for (size_t i = 0; i < g_CareerUiBlankedTextCount; ++i)
-                if (g_CareerUiBlankedText[i] == view)
-                    return true;
-            return false;
-        }
-
-        // Replays a string through the same setter that originally wrote it.
-        static void SetCareerUiStockText(void* view, const char* text, bool viaButtonLabel)
-        {
-            if (!view)
-                return;
-
-            g_CareerUiTextMemorySuppressed = true;
-            if (viaButtonLabel)
-            {
-                if (g_BzrFn_SetButtonLabel)
-                    g_BzrFn_SetButtonLabel(view, text);
-            }
-            else if (g_BzrFn_SetTooltip)
-            {
-                g_BzrFn_SetTooltip(view, text);
-            }
-            g_CareerUiTextMemorySuppressed = false;
-        }
-
-        static void HideStockMainScreenControls()
-        {
-            g_CareerUiHiddenStockCount = 0;
-            g_CareerUiHiddenCaptionCount = 0;
-            g_CareerUiBlankedTextCount = 0;
-            if (!g_CareerUiOverlay)
-                return;
-
-            void* children[64] = {};
-            size_t count = 0;
-            __try
-            {
-                auto* const bytes = reinterpret_cast<uint8_t*>(g_CareerUiOverlay);
-                void** const begin =
-                    *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
-                void** const end =
-                    *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
-                if (!begin || !end || begin >= end || (end - begin) >= 64)
-                    return;
-                for (void** slot = begin; slot != end && count < 64; ++slot)
-                    if (*slot)
-                        children[count++] = *slot;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return;
-            }
-
-            static bool s_loggedStockSet = false;
-            for (size_t i = 0; i < count; ++i)
-            {
-                void* const child = children[i];
-                if (IsCareerUiPageWidget(child))
-                    continue;
-                // Already off -- leave it exactly as found.
-                if (!IsUiViewActive(child))
-                    continue;
-                if (g_CareerUiHiddenStockCount >=
-                    sizeof(g_CareerUiHiddenStock) / sizeof(g_CareerUiHiddenStock[0]))
-                {
-                    break;
-                }
-
-                void* const caption = GetCareerUiStockCaption(child);
-                if (!s_loggedStockSet)
-                {
-                    Log(L"[CAREERUI]   hide[%zu]=0x%08X caption=0x%08X name=%hs\n",
-                        i,
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(child)),
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(caption)),
-                        ReadUiViewName(child));
-                    // Separate Log call per name: ReadUiViewName returns one
-                    // shared static buffer, so two in a single format list both
-                    // print whichever ran last.
-                    if (caption)
-                        Log(L"[CAREERUI]     caption name=%hs\n", ReadUiViewName(caption));
-                }
-
-                SetInputBindingUiViewActive(child, false);
-                g_CareerUiHiddenStock[g_CareerUiHiddenStockCount++] = child;
-
-                if (caption &&
-                    g_CareerUiHiddenCaptionCount <
-                        sizeof(g_CareerUiHiddenCaptions) / sizeof(g_CareerUiHiddenCaptions[0]))
-                {
-                    SetInputBindingUiViewActive(caption, false);
-                    g_CareerUiHiddenCaptions[g_CareerUiHiddenCaptionCount++] = caption;
-                }
-
-                // Blank the string only when its original is on record. A
-                // caption that was never observed being set is left alone:
-                // leaving a label visible is a cosmetic flaw, erasing one with
-                // no way to put it back is a broken menu.
-                const CareerUiTextRecord* const record =
-                    FindUsableCareerUiTextRecord(child);
-                if (!record || record->text[0] == '\0')
-                {
-                    if (!s_loggedStockSet)
-                        Log(L"[CAREERUI]     NO TEXT RECORD -- caption will stay drawn\n");
-                    continue;
-                }
-                if (!s_loggedStockSet)
-                    Log(L"[CAREERUI]     blanking \"%hs\"\n", record->text);
-                if (g_CareerUiBlankedTextCount >=
-                    sizeof(g_CareerUiBlankedText) / sizeof(g_CareerUiBlankedText[0]))
-                {
-                    continue;
-                }
-
-                SetCareerUiStockText(child, "", record->viaButtonLabel);
-                g_CareerUiBlankedText[g_CareerUiBlankedTextCount++] = child;
-            }
-            s_loggedStockSet = true;
-        }
-
-        static void RestoreStockMainScreenControls()
-        {
-            for (size_t i = 0; i < g_CareerUiBlankedTextCount; ++i)
-            {
-                void* const view = g_CareerUiBlankedText[i];
-                const CareerUiTextRecord* const record =
-                    FindUsableCareerUiTextRecord(view);
-                if (record)
-                    SetCareerUiStockText(view, record->text, record->viaButtonLabel);
-            }
-            g_CareerUiBlankedTextCount = 0;
-
-            for (size_t i = 0; i < g_CareerUiHiddenCaptionCount; ++i)
-                SetInputBindingUiViewActive(g_CareerUiHiddenCaptions[i], true);
-            g_CareerUiHiddenCaptionCount = 0;
-
-            for (size_t i = 0; i < g_CareerUiHiddenStockCount; ++i)
-                SetInputBindingUiViewActive(g_CareerUiHiddenStock[i], true);
-            g_CareerUiHiddenStockCount = 0;
-        }
-
-        static void RefreshCareerUiPageText();
-
-        // The active flag hides the plate and blocks input, but not text -- the
-        // page's own strings would otherwise keep drawing over the restored
-        // menu after Back, exactly as the stock captions do over the page.
-        static void SetCareerUiPageVisible(bool visible)
-        {
-            SetInputBindingUiViewActive(g_CareerUiPlate, visible);
-            SetInputBindingUiViewActive(g_CareerUiTitleLabel, visible);
-            SetInputBindingUiViewActive(g_CareerUiBackButton, visible);
-            for (void* label : g_CareerUiCaptions)
-                SetInputBindingUiViewActive(label, visible);
-            for (void* label : g_CareerUiValues)
-                SetInputBindingUiViewActive(label, visible);
-
-            SetInputBindingUiLabelText(g_CareerUiTitleLabel, visible ? "CAREER" : "");
-            if (g_BzrFn_SetButtonLabel && g_CareerUiBackButton)
-                g_BzrFn_SetButtonLabel(g_CareerUiBackButton, visible ? "Back" : "");
-
-            if (visible)
-            {
-                RefreshCareerUiPageText();
-            }
-            else
-            {
-                for (void* label : g_CareerUiCaptions)
-                    SetInputBindingUiLabelText(label, "");
-                for (void* label : g_CareerUiValues)
-                    SetInputBindingUiLabelText(label, "");
-            }
-        }
-
-        // Re-assert the closed page's hidden state.
-        //
-        // TickCareerUi runs only from the cUI_MainScreen ctor hook, so the hide
-        // it applies is the last word only for as long as construction lasts.
-        // The shell re-activates the overlay's children when it actually
-        // presents the screen -- which on a cold start is after the intro, long
-        // after the final ctor phase -- and the page came back with the plate
-        // (-200,-100,1840,1280, full-bleed by design) drawn over the closed
-        // menu. That reads as "the main menu lost its background", because the
-        // plate covers the stock buttons' frames while their captions still
-        // draw over it: text on this screen ignores the active flag, which is
-        // the same reason Back's caption stayed blank while its frame returned.
-        //
-        // Text blanking survives re-activation; the active flag does not. So it
-        // has to be re-applied from something the shell itself runs while the
-        // menu is up, not once at construction. Only the flag is touched here --
-        // re-running the text half would push "" through the label hooks every
-        // frame and churn the text memory Back restores from.
-        static bool IsCareerUiTitleScreenLive()
-        {
-            void* const mainScreen = ReadMainScreenSingleton();
-            if (!mainScreen || !g_CareerUiOverlay)
-                return false;
-            return MainScreenViewNameMatches(mainScreen, "Top Screen") &&
-                   MainScreenViewNameMatches(g_CareerUiOverlay, "MainScreen_Overlay");
-        }
-
-        // Is the cached page still part of the live child tree? The name check
-        // above proves the screen and the overlay are alive, but not the
-        // widgets under them: returning to the title from a game (FirstGAS)
-        // rebuilds the overlay's children while the overlay pointer and its
-        // name stay put. The cached plate is then a freed allocation.
-        //
-        // Deliberately not UiViewHasChild: that helper caps the vector at 64
-        // slots as a garbage guard, and this overlay legitimately carries more
-        // than that once the 20-row career page is built over the stock menu.
-        static bool IsCareerUiPlateAttached()
-        {
-            if (!g_CareerUiOverlay || !g_CareerUiPlate)
-                return false;
-
-            __try
-            {
-                auto* const bytes = reinterpret_cast<uint8_t*>(g_CareerUiOverlay);
-                void** const begin =
-                    *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
-                void** const end =
-                    *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
-                if (!begin || !end || begin >= end || (end - begin) >= 256)
-                    return false;
-
-                for (void** slot = begin; slot != end; ++slot)
-                    if (*slot == g_CareerUiPlate)
-                        return true;
-                return false;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
-        static void ReassertCareerUiHiddenState()
-        {
-            if (g_CareerUiPageActive || !g_CareerUiPlate)
-                return;
-            // SetTooltip is a process-wide hook. After Click_MultiPlayer the
-            // shell still writes tooltips, and re-hiding career widgets then
-            // walks a plate whose Ogre element is already gone -- SetActive
-            // calls through nullptr (eip=0 at 0x007D3344). Only re-assert
-            // while the title screen is still the live singleton.
-            if (!IsCareerUiTitleScreenLive())
-                return;
-
-            // ...and only while the cached widgets still belong to the live
-            // tree. Without this the same call faults through a freed vtable
-            // instead (eip garbage at the same 0x007D3344 call site) in the
-            // window between the menu rebuild and the next TickCareerUi, which
-            // is what CareerUiSetActiveHook's __except was left to absorb.
-            if (!IsCareerUiPlateAttached())
-            {
-                static bool s_detachedLogged = false;
-                if (!s_detachedLogged)
-                {
-                    s_detachedLogged = true;
-                    Log(L"[CAREERUI] page widgets detached from overlay 0x%08X; "
-                        L"skipping hidden-state reassert until reinjection\n",
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CareerUiOverlay)));
-                }
-                return;
-            }
-
-            SetInputBindingUiViewActive(g_CareerUiPlate, false);
-            SetInputBindingUiViewActive(g_CareerUiTitleLabel, false);
-            SetInputBindingUiViewActive(g_CareerUiBackButton, false);
-            for (void* label : g_CareerUiCaptions)
-                SetInputBindingUiViewActive(label, false);
-            for (void* label : g_CareerUiValues)
-                SetInputBindingUiViewActive(label, false);
-        }
-
-        static void OnCareerUiBackClicked();
-
-        static bool EnsureCareerUiPageWidgets()
-        {
-            if (!g_CareerUiOverlay)
-                return false;
-
-            char controlName[64] = {};
-
-            if (!g_CareerUiPlate)
-            {
-                _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerPlate");
-                CreateInputBindingUiPlate(g_CareerUiPlate, g_CareerUiOverlay, controlName,
-                                          kCareerPlateX, kCareerPlateY,
-                                          kCareerPlateW, kCareerPlateH);
-                // Backing only. Without this the plate consumes the Back click,
-                // because it is an earlier leaf sibling covering the same rect.
-                SetInputBindingUiButtonEnabled(g_CareerUiPlate, false);
-            }
-
-            _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerTitle");
-            CreateInputBindingUiLabel(g_CareerUiTitleLabel, g_CareerUiOverlay, controlName,
-                                      "CAREER",
-                                      kCareerTitleX, kCareerTitleY,
-                                      kCareerTitleW, 48.0f);
-            // No text-scale call here on purpose: SetButtonTextScale is a
-            // cUI_Button method, and this is a cUI_Text. The rule below the
-            // title is what separates it, not a larger glyph size.
-
-            // No rule under the title. A uiline.png decor piece and then a thin
-            // plate were both tried: each ended up active, with the right rect,
-            // drawing no pixels at 3-5 px tall. That matches the known
-            // small-element behaviour in this UI, so the separation is left to
-            // spacing rather than shipping a widget that never renders.
-
-            CareerUiRow rows[kCareerRowCount];
-            BuildCareerUiRows(rows);
-            float rowY[kCareerRowCount];
-            ComputeCareerUiRowY(rows, rowY);
-
-            for (size_t i = 0; i < kCareerRowCount; ++i)
-            {
-                const bool header = rows[i].header;
-                _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerCap%zu", i);
-                CreateInputBindingUiLabel(g_CareerUiCaptions[i], g_CareerUiOverlay, controlName,
-                                          rows[i].caption.c_str(),
-                                          header ? kCareerHeaderX : kCareerCaptionX,
-                                          rowY[i],
-                                          kCareerColumnW, kCareerLineH);
-
-                _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerVal%zu", i);
-                CreateInputBindingUiLabel(g_CareerUiValues[i], g_CareerUiOverlay, controlName,
-                                          rows[i].value.c_str(),
-                                          kCareerValueX, rowY[i],
-                                          kCareerColumnW, kCareerLineH);
-            }
-
-            _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerBack");
-            CreateInputBindingUiButton(g_CareerUiBackButton, g_CareerUiOverlay, controlName,
-                                       "Back",
-                                       720.0f - kCareerBackW * 0.5f, kCareerBackY,
-                                       kCareerBackW, kCareerBackH,
-                                       reinterpret_cast<void*>(OnCareerUiBackClicked));
-            if (g_BzrFn_SetButtonTextScale)
-                g_BzrFn_SetButtonTextScale(g_CareerUiBackButton, 1.0f);
-            if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(g_CareerUiBackButton, "tomnoff.png");
-            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(g_CareerUiBackButton, "tomnon.png");
-            if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(g_CareerUiBackButton, "tomnclk.png");
-
-            return g_CareerUiTitleLabel != nullptr && g_CareerUiBackButton != nullptr;
-        }
-
-        static void RefreshCareerUiPageText()
-        {
-            CareerUiRow rows[kCareerRowCount];
-            BuildCareerUiRows(rows);
-            for (size_t i = 0; i < kCareerRowCount; ++i)
-            {
-                SetInputBindingUiLabelText(g_CareerUiCaptions[i], rows[i].caption.c_str());
-                SetInputBindingUiLabelText(g_CareerUiValues[i], rows[i].value.c_str());
-            }
-        }
-
-        static void OpenCareerUiPage()
-        {
-            if (g_CareerUiPageActive)
-                return;
-            if (!EnsureCareerUiPageWidgets())
-            {
-                Log(L"[CAREERUI] page widgets unavailable; leaving the title screen alone\n");
-                return;
-            }
-
-            HideStockMainScreenControls();
-            // The Career button is a stock-overlay sibling, so it is hidden
-            // along with the rest; that is deliberate.
-            //
-            // Set before showing, not after: the SetActive hook vetoes
-            // activation of page widgets while this flag is false, so showing
-            // first would be quietly turned back off.
-            g_CareerUiPageActive = true;
-            SetCareerUiPageVisible(true);
-            Log(L"[CAREERUI] opened (hid %zu stock control(s), %zu caption(s))\n",
-                g_CareerUiHiddenStockCount, g_CareerUiHiddenCaptionCount);
-        }
-
-        static void CloseCareerUiPage()
-        {
-            if (!g_CareerUiPageActive)
-                return;
-            SetCareerUiPageVisible(false);
-            RestoreStockMainScreenControls();
-            g_CareerUiPageActive = false;
-            Log(L"[CAREERUI] closed\n");
-        }
-
+        // The Career page is its own shell screen (career_screen.cpp); the
+        // title-screen button only asks the shell to go there, the same way
+        // the stock Single Player and Options buttons do.
         static void __cdecl CareerUiButtonClick()
         {
-            OpenCareerUiPage();
-        }
-
-        static void OnCareerUiBackClicked()
-        {
-            CloseCareerUiPage();
+            if (!ShellScreens::RequestScreen(ReadMainScreenSingleton(), ShellScreens::kCareerScreenId))
+                Log(L"[CAREERUI] could not request the Career screen\n");
         }
 
         // Drop every cached pointer. Called when the singleton changes or goes
@@ -6376,17 +5453,6 @@ namespace BZROpenShim
             g_CareerUiMainScreen = nullptr;
             g_CareerUiOverlay = nullptr;
             g_CareerUiButton = nullptr;
-            g_CareerUiPlate = nullptr;
-            g_CareerUiTitleLabel = nullptr;
-            g_CareerUiBackButton = nullptr;
-            for (void*& label : g_CareerUiCaptions)
-                label = nullptr;
-            for (void*& label : g_CareerUiValues)
-                label = nullptr;
-            g_CareerUiHiddenStockCount = 0;
-            g_CareerUiHiddenCaptionCount = 0;
-            g_CareerUiBlankedTextCount = 0;
-            g_CareerUiPageActive = false;
         }
 
         // Runs from the MainScreen destructor detour after the engine's
@@ -6398,9 +5464,8 @@ namespace BZROpenShim
         {
             if (!g_CareerUiMainScreen)
                 return;
-            Log(L"[CAREERUI] title screen 0x%08X destroyed; dropping cached widgets%hs\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
-                g_CareerUiPageActive ? " (the page was open)" : "");
+            Log(L"[CAREERUI] title screen 0x%08X destroyed; dropping cached widgets\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)));
             ResetCareerUiState();
         }
 
@@ -6433,26 +5498,6 @@ namespace BZROpenShim
             {
                 return false;
             }
-        }
-
-        // Discard text records for controls that are no longer children of the
-        // live overlay. A title-menu rebuild can keep the MainScreen singleton
-        // (and sometimes the overlay) while replacing every button below it.
-        // Without compaction, dead controls eventually fill the fixed record
-        // table and later localized captions can no longer be restored.
-        static void PruneDetachedCareerUiTextRecords(void* overlay)
-        {
-            size_t out = 0;
-            for (size_t i = 0; i < g_CareerUiTextMemoryCount; ++i)
-            {
-                if (!UiViewHasChild(overlay, g_CareerUiTextMemory[i].view))
-                    continue;
-                if (out != i)
-                    g_CareerUiTextMemory[out] = g_CareerUiTextMemory[i];
-                ++out;
-            }
-            g_CareerUiTextMemoryCount = out;
-            g_CareerUiTextMemoryFull = false;
         }
 
         static void EnsureCareerUiButton()
@@ -6545,27 +5590,9 @@ namespace BZROpenShim
                 ResetCareerUiState();
                 g_CareerUiMainScreen = mainScreen;
                 g_CareerUiOverlay = overlay;
-                PruneDetachedCareerUiTextRecords(overlay);
             }
 
             EnsureCareerUiButton();
-
-            // Build the page here, with the screen, rather than lazily on the
-            // first click. A button created inside the click dispatch renders
-            // its caption but not its frame -- the Back button came out as bare
-            // text on the plate -- while the same construction during screen
-            // setup renders correctly, as the Career button itself does. Built
-            // hidden, so nothing is shown until the page is opened.
-            if (!g_CareerUiBackButton)
-                EnsureCareerUiPageWidgets();
-
-            // Re-hidden on every setup pass, not just after building. The setup
-            // routine runs for several phases and a later one re-activates the
-            // overlay's children: built-then-hidden once, the page came back
-            // vis=1 and the plate covered the closed menu. This hook runs after
-            // each phase, so the last word is always ours.
-            if (!g_CareerUiPageActive && g_CareerUiBackButton)
-                SetCareerUiPageVisible(false);
         }
     }
 
@@ -6706,6 +5733,14 @@ namespace BZROpenShim
             return;
         g_MainScreenCtorHookAttempted = true;
 
+        // The button leads to the Career screen; without the screen there is
+        // nothing to put on the title menu.
+        if (!RegisterCareerScreen())
+        {
+            Log(L"[CAREERUI] Career screen unavailable on this build; no title-screen button\n");
+            return;
+        }
+
         // push ebp; mov ebp,esp; push -1; push offset SEH handler -- read live.
         uint8_t kExpectedMainScreenCtorBytes[kMainScreenCtorDetourLen] = {};
         CopyLivePrologue(g_MainScreenCtorAddr, kExpectedMainScreenCtorBytes, sizeof(kExpectedMainScreenCtorBytes));
@@ -6743,7 +5778,6 @@ namespace BZROpenShim
             static_cast<uint32_t>(g_MainScreenCtorAddr),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_MainScreenCtorDetour.trampoline)));
 
-        InstallCareerUiTextRecorders();
         // The cached widgets die with the screen; learn about it from the
         // destructor rather than from the next setup pass.
         if (EnsureMainScreenDestroyedHook() &&
@@ -6756,73 +5790,6 @@ namespace BZROpenShim
             Log(L"[CAREERUI] MainScreen destructor hook unavailable; cached widgets are "
                 L"checked against the live singleton instead\n");
         }
-    }
-
-    // Observation-only detours on the two string setters. They record what the
-    // shell writes to direct children of MainScreen_Overlay so Back can put the
-    // localized captions back; nothing else about the call is changed.
-    //
-    // Failing to install either one is not fatal: an unrecorded caption is
-    // simply never blanked, so the page opens with that one label still drawn
-    // rather than with a menu that cannot be restored.
-    void InstallCareerUiTextRecorders()
-    {
-        if (!g_CareerUiSetButtonLabelOriginal &&
-            ExpectedBytesMatchAt(g_CareerUiSetButtonLabelAddr,
-                                 kExpectedSetButtonLabelBytes,
-                                 sizeof(kExpectedSetButtonLabelBytes)) &&
-            InstallInlineDetour32(g_CareerUiSetButtonLabelDetour,
-                                  g_CareerUiSetButtonLabelAddr,
-                                  reinterpret_cast<void*>(CareerUiSetButtonLabelHook),
-                                  kCareerUiTextSetterDetourLen,
-                                  kExpectedSetButtonLabelBytes,
-                                  kCareerUiTextSetterDetourLen))
-        {
-            g_CareerUiSetButtonLabelOriginal =
-                reinterpret_cast<FnUiSetStr>(g_CareerUiSetButtonLabelDetour.trampoline);
-        }
-
-        if (!g_CareerUiSetTooltipOriginal &&
-            ExpectedBytesMatchAt(g_CareerUiSetTooltipAddr,
-                                 kExpectedSetTooltipBytes,
-                                 sizeof(kExpectedSetTooltipBytes)) &&
-            InstallInlineDetour32(g_CareerUiSetTooltipDetour,
-                                  g_CareerUiSetTooltipAddr,
-                                  reinterpret_cast<void*>(CareerUiSetTooltipHook),
-                                  kCareerUiTextSetterDetourLen,
-                                  kExpectedSetTooltipBytes,
-                                  kCareerUiTextSetterDetourLen))
-        {
-            g_CareerUiSetTooltipOriginal =
-                reinterpret_cast<FnUiSetStr>(g_CareerUiSetTooltipDetour.trampoline);
-        }
-
-        if (!g_CareerUiSetActiveOriginal &&
-            ExpectedBytesMatchAt(g_CareerUiSetActiveAddr,
-                                 kExpectedSetActiveBytes,
-                                 sizeof(kExpectedSetActiveBytes)) &&
-            InstallInlineDetour32(g_CareerUiSetActiveDetour,
-                                  g_CareerUiSetActiveAddr,
-                                  reinterpret_cast<void*>(CareerUiSetActiveHook),
-                                  kCareerUiTextSetterDetourLen,
-                                  kExpectedSetActiveBytes,
-                                  kCareerUiTextSetterDetourLen))
-        {
-            g_CareerUiSetActiveOriginal =
-                reinterpret_cast<FnUiSetActive>(g_CareerUiSetActiveDetour.trampoline);
-        }
-
-        // Armed from here rather than from the setup hook. Exit Game, Options,
-        // Mods and MPStatus_text are labelled before that hook ever runs, so
-        // arming there left exactly those four captions unrecorded -- and
-        // therefore still drawn over the page. The parent-name check is what
-        // keeps this scoped to the title screen, not the arming point.
-        g_CareerUiTextRecordingArmed = true;
-
-        Log(L"[CAREERUI] text recorders: buttonLabel=%hs tooltip=%hs setActive=%hs\n",
-            g_CareerUiSetButtonLabelOriginal ? "installed" : "UNAVAILABLE",
-            g_CareerUiSetTooltipOriginal ? "installed" : "UNAVAILABLE",
-            g_CareerUiSetActiveOriginal ? "installed" : "UNAVAILABLE");
     }
 
     void EnsureOptionsParentCtorHookScaffold()
@@ -6929,70 +5896,6 @@ namespace BZROpenShim
     // Runs once per title-screen construction. The stock constructor builds
     // the whole menu (including MainScreen_Overlay and the singleton the
     // resolver reads), so injection has to happen after it returns, not before.
-    // Forces our own page widgets inactive while the page is closed. Only ever
-    // turns activation off, so nothing else on the screen is affected.
-    void __fastcall CareerUiSetActiveHook(void* thisPtr, void* /*edx*/, uint8_t value)
-    {
-        const bool isCareerPageWidget = IsCareerUiPageWidget(thisPtr);
-        uint8_t out = value;
-        if (out && !g_CareerUiPageActive && isCareerPageWidget)
-            out = 0;
-        if (!g_CareerUiSetActiveOriginal || !thisPtr)
-            return;
-
-        // SetActive is hooked process-wide, so faults from stock views must
-        // remain loud. Only our cached page widgets can race title-screen
-        // teardown after the liveness check in ReassertCareerUiHiddenState.
-        if (!isCareerPageWidget)
-        {
-            g_CareerUiSetActiveOriginal(thisPtr, out);
-            return;
-        }
-
-        __try
-        {
-            g_CareerUiSetActiveOriginal(thisPtr, out);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            static bool s_teardownFaultLogged = false;
-            if (!s_teardownFaultLogged)
-            {
-                s_teardownFaultLogged = true;
-                Log(L"[CAREERUI] ignored SetActive fault on a stale injected widget during title-screen teardown\n");
-            }
-            ResetCareerUiState();
-        }
-    }
-
-    // Both hooks record the incoming string and then, if the page is up and
-    // this is a control the page blanked, write "" through instead. The new
-    // value is still what Back restores; it just does not get drawn over the
-    // page in the meantime.
-    void __fastcall CareerUiSetButtonLabelHook(void* thisPtr, void* /*edx*/, const char* text)
-    {
-        RecordCareerUiText(thisPtr, text, true);
-        const bool hold = !g_CareerUiTextMemorySuppressed && IsCareerUiBlankedView(thisPtr);
-        if (g_CareerUiSetButtonLabelOriginal)
-            g_CareerUiSetButtonLabelOriginal(thisPtr, hold ? "" : text);
-    }
-
-    void __fastcall CareerUiSetTooltipHook(void* thisPtr, void* /*edx*/, const char* text)
-    {
-        RecordCareerUiText(thisPtr, text, false);
-        const bool hold = !g_CareerUiTextMemorySuppressed && IsCareerUiBlankedView(thisPtr);
-        if (g_CareerUiSetTooltipOriginal)
-            g_CareerUiSetTooltipOriginal(thisPtr, hold ? "" : text);
-
-        // The main menu's per-frame refresh blanks the MPStatus tooltip on
-        // every pass, so this hook is a path the shell drives continuously
-        // while the menu is up -- which is what the closed career page needs to
-        // stay hidden after the shell re-activates the overlay's children. It
-        // is a field write per widget and self-cancels the moment the page is
-        // opened, so no new detour is needed to carry it.
-        ReassertCareerUiHiddenState();
-    }
-
     void __fastcall MainScreenCtorHook(void* thisPtr, void* /*edx*/, char phase)
     {
         if (g_BzrFn_MainScreenCtorOriginal)

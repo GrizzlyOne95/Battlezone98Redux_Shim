@@ -35,7 +35,7 @@ $steamAppId = "301650"
 $defaultInstallDir = "Battlezone 98 Redux"
 
 # UI tiles the game actually loads out of the custom-widget resource tree.
-$uiTiles = @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png")
+$uiTiles = @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png", "osh_career_center.png")
 
 $requestedGamePath = if ($env:OPENSHIM_GAME_PATH) { $env:OPENSHIM_GAME_PATH } else { "" }
 
