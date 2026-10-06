@@ -141,6 +141,42 @@ namespace BZROpenShim
             return 0;
         }
 
+        uintptr_t ViewRecordAddr()
+        {
+            static uintptr_t s_addr = 0;
+            if (s_addr == 0)
+                s_addr = HookEngine::EngineAddress("ViewRecord");
+            return s_addr;
+        }
+
+        bool IsKnownOgreMainBuild(HMODULE ogreMain)
+        {
+            // SHA-256 E5E693960B95AD0D60733A3B688464A6C6CBA234E86950698F9C2BEA4ACFEB45,
+            // identical on GOG and Steam (see ogre_enhanced_light_selection.cpp).
+            constexpr DWORD kKnownOgreTimestamp = 0x5866BF6A;
+            constexpr DWORD kKnownOgreImageSize = 0x00A65000;
+            static const bool known = [ogreMain] {
+                __try
+                {
+                    const auto base = reinterpret_cast<uintptr_t>(ogreMain);
+                    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+                    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
+                    const bool match = dos->e_magic == IMAGE_DOS_SIGNATURE &&
+                                       nt->Signature == IMAGE_NT_SIGNATURE &&
+                                       nt->FileHeader.TimeDateStamp == kKnownOgreTimestamp &&
+                                       nt->OptionalHeader.SizeOfImage == kKnownOgreImageSize;
+                    if (!match)
+                        Log(L"[BUILD] OgreMain.dll is not the known build; offset-resolved Ogre helpers stand down\n");
+                    return match;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+            }();
+            return known;
+        }
+
         uintptr_t WorldRenderOriginAddr()
         {
             static uintptr_t s_addr = 0;

@@ -688,7 +688,8 @@ namespace BZROpenShim
         // Base 0x008EAAD0 + kPresetViewCurrentViewOffset (0x8) lands on
         // 0x008EAAD8, which matches the independently derived
         // kGogViewModeAddr used by the target-camera fix.
-        inline constexpr uintptr_t kViewRecordRva = 0x004EAAD0;
+        // The ViewRecord row; 0 when it is not bound.
+        uintptr_t ViewRecordAddr();
         inline constexpr bool kHopOutAttackAlertFixEnabledDefault = false;
         // SelectionDisplay::Render carries the complete Redux GameObject pointer,
         // while the inherited GameObject interface (whose slot +4 is GetTeam)
@@ -752,6 +753,9 @@ namespace BZROpenShim
         inline constexpr long kCameraTypeOverView = 3;
         // Some render-queue helpers are inlined or unexported from the shipped
         // OgreMain.dll; resolve those by raw image offset from the module base.
+        // The offsets are only meaningful in the OgreMain both storefronts
+        // ship, so anything else (a patch that updates OgreMain) gets nullptr.
+        bool IsKnownOgreMainBuild(HMODULE ogreMain);
         template<typename T>
         T ResolveOgreProcByOffset(uintptr_t offset)
         {
@@ -761,7 +765,7 @@ namespace BZROpenShim
             static HMODULE ogreMain = nullptr;
             if (!ogreMain)
                 ogreMain = GetModuleHandleA("OgreMain.dll");
-            if (!ogreMain)
+            if (!ogreMain || !IsKnownOgreMainBuild(ogreMain))
                 return nullptr;
 
             return reinterpret_cast<T>(reinterpret_cast<uint8_t*>(ogreMain) + offset);
