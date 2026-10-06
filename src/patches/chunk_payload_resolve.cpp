@@ -177,7 +177,11 @@ namespace BZROpenShim
             // which is registered with this group: it has to exist before the
             // group is initialised, and must yield to a payload pack's own.
             if (!nativeError)
+            {
                 EnsureSkinnedGibFleshMaterial(nativeRoot, g_ChunkPayloadResourceDirectories);
+                // ShellCasings' generated mesh and materials, same rules.
+                EnsureShellCasingAssets(nativeRoot, g_ChunkPayloadResourceDirectories);
+            }
         }
 
         static const std::vector<std::filesystem::path>& GetChunkPayloadResourceDirectories()
