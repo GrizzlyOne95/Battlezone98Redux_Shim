@@ -2694,6 +2694,36 @@
       "address": "0x00917FAC",
       "kind": "data",
       "identity": "char[MAX_PATH] flag image path SetMyFlag uploads from"
+    },
+    {
+      "name": "BzrNetForceRelayRead",
+      "address": "0x0075F09D",
+      "expected": "83 3D 08 67 94 00 00 74 6A 8D 55 D8",
+      "identity": "cmp dword ptr [forceRelay],0 in the per-peer connect decision (FUN_0075EEA0); the /iprelay flag is its disp32 at +2"
+    },
+    {
+      "name": "BzrNetUdpPortRead",
+      "address": "0x006BE7B5",
+      "expected": "0F B7 15 04 57 94 00 52 8D 4D B4",
+      "identity": "movzx edx,word ptr [udpPort] in FUN_006BE750 (requested port, later overwritten with the bound port); the /bzrnetport= global is its disp32 at +3"
+    },
+    {
+      "name": "BzrNetNicknameRead",
+      "address": "0x006C7D84",
+      "expected": "0F BE 91 E0 53 94 00 85 D2 74 7A",
+      "identity": "movsx edx,byte ptr [ecx+nickname] in FUN_006C6E60 (identity message); the char[0x80] /nickname= buffer is its disp32 at +3"
+    },
+    {
+      "name": "BzrNetGetLobby",
+      "address": "0x00764760",
+      "expected": "55 8B EC A1 70 54 94 00 5D C3",
+      "identity": "BZRNet lobby accessor, whole body push ebp; mov ebp,esp; mov eax,[lobby]; pop ebp; ret"
+    },
+    {
+      "name": "BzrNetLobbyVtable",
+      "address": "0x0089ADDC",
+      "kind": "data",
+      "identity": "RTTI .?AVBZRNetLobby@@ vtable; the nickname reauth path checks the live lobby against it"
     }
   ],
   "globals": [
