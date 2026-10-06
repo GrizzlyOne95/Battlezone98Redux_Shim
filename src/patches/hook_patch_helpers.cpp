@@ -141,6 +141,22 @@ namespace BZROpenShim
             return 0;
         }
 
+        uintptr_t QueuedLoadPathBufferAddr()
+        {
+            static uintptr_t s_addr = 0;
+            if (s_addr == 0)
+                s_addr = HookEngine::EngineAddress("QueuedLoadPathBuffer");
+            return s_addr;
+        }
+
+        uintptr_t QueuedLoadNameBufferAddr()
+        {
+            static uintptr_t s_addr = 0;
+            if (s_addr == 0)
+                s_addr = HookEngine::EngineAddress("QueuedLoadNameBuffer");
+            return s_addr;
+        }
+
         uintptr_t ViewRecordAddr()
         {
             static uintptr_t s_addr = 0;

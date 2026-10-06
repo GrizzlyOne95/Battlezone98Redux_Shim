@@ -83,9 +83,10 @@ namespace BZROpenShim
         // waiting room. The legacy disable variables remain an override.
         // Latched, because the renderer hook is a vtable write that is only
         // attempted while the feature is on.
+        static bool MultiplayerFlagAddressesBound();
+
         bool ShouldEnableMultiplayerFlagUi()
         {
-            if (!HookEngine::LiteralAddressesApply("Multiplayer vehicle flags")) return false;
             static int s_cached = -1;
             if (s_cached < 0)
             {
@@ -106,16 +107,42 @@ namespace BZROpenShim
                 Log(L"[FLAG] multiplayer vehicle flags: %hs\n",
                     enabled ? "enabled" : "disabled");
             }
-            return s_cached != 0;
+            return s_cached != 0 && MultiplayerFlagAddressesBound();
         }
 
-        constexpr uintptr_t kFlagDisplaySubmitVtableSlotAddr = 0x008799A4;
+        // engine_addresses rows. The Submit slot is FlagDisplay vtable slot 8,
+        // checked by RTTI name; everything that uses these runs behind
+        // ShouldEnableMultiplayerFlagUi(), which requires the bind.
+        static uintptr_t g_FlagDisplaySubmitVtableSlotAddr = 0;
+        static uintptr_t g_FlagDisplaySubmitAddr = 0;
+        static uintptr_t g_NetPlayerGetDataAddr = 0;
+        static uintptr_t g_GameObjectGetSphereAddr = 0;
+        static uintptr_t g_NetPlayerByTeamAddr = 0;
+        constexpr size_t kFlagDisplaySubmitVtableIndex = 8;
 
-        constexpr uintptr_t kFlagDisplaySubmitAddr = 0x004D1C80;
-
-        constexpr uintptr_t kNetPlayerGetDataAddr = 0x00575510;
-
-        constexpr uintptr_t kGameObjectGetSphereAddr = 0x00462400;
+        static bool MultiplayerFlagAddressesBound()
+        {
+            static const bool bound = [] {
+                uint32_t vtable = 0;
+                const HookEngine::EngineRow rows[] = {
+                    { "FlagDisplayVtable", &vtable },
+                    { "FlagDisplaySubmit", &g_FlagDisplaySubmitAddr },
+                    { "NetPlayerGetData", &g_NetPlayerGetDataAddr },
+                    { "GameObjectGetSphere", &g_GameObjectGetSphereAddr },
+                    { "NetPlayerByTeam", &g_NetPlayerByTeamAddr },
+                };
+                if (!HookEngine::BindEngineRows("Multiplayer vehicle flags", rows))
+                    return false;
+                if (!VtableTypeNameMatches(vtable, ".?AVFlagDisplay@@"))
+                {
+                    Log(L"[FLAG] FlagDisplay RTTI mismatch at vtable 0x%08X; multiplayer flags stand down\n", vtable);
+                    return false;
+                }
+                g_FlagDisplaySubmitVtableSlotAddr = vtable + kFlagDisplaySubmitVtableIndex * sizeof(void*);
+                return true;
+            }();
+            return bound;
+        }
 
         constexpr size_t kNetPlayerFlagBufferOffset = 0x1C;
 
@@ -185,7 +212,7 @@ namespace BZROpenShim
             if (!netPlayer)
                 return false;
 
-            auto getData = reinterpret_cast<FnNetPlayerGetData>(kNetPlayerGetDataAddr);
+            auto getData = reinterpret_cast<FnNetPlayerGetData>(g_NetPlayerGetDataAddr);
             __try
             {
                 if (getData)
@@ -504,7 +531,7 @@ namespace BZROpenShim
 
         static float GetMultiplayerFlagObjectLift(void* gameObject)
         {
-            auto getSphere = reinterpret_cast<FnGameObjectGetSphere>(kGameObjectGetSphereAddr);
+            auto getSphere = reinterpret_cast<FnGameObjectGetSphere>(g_GameObjectGetSphereAddr);
             if (!gameObject || !getSphere)
                 return kMultiplayerFlagMinimumLift;
             __try
@@ -642,8 +669,8 @@ namespace BZROpenShim
                 return;
             g_MultiplayerFlagDiagLogged = true;
 
-            auto** playersByTeam = reinterpret_cast<void**>(kNetPlayerByTeamAddr);
-            auto getData = reinterpret_cast<FnNetPlayerGetData>(kNetPlayerGetDataAddr);
+            auto** playersByTeam = reinterpret_cast<void**>(g_NetPlayerByTeamAddr);
+            auto getData = reinterpret_cast<FnNetPlayerGetData>(g_NetPlayerGetDataAddr);
             for (int team = 0; team < 16; ++team)
             {
                 __try
@@ -833,7 +860,7 @@ namespace BZROpenShim
             __try
             {
                 void* p1 = playersByTeam ? playersByTeam[1] : nullptr;
-                auto getData = reinterpret_cast<FnNetPlayerGetData>(kNetPlayerGetDataAddr);
+                auto getData = reinterpret_cast<FnNetPlayerGetData>(g_NetPlayerGetDataAddr);
                 void* slotVec = (getData && p1) ? getData(p1, kLegacyFlagDataSlot) : nullptr;
                 long slotSize = -1;
                 if (slotVec)
@@ -872,7 +899,7 @@ namespace BZROpenShim
 
             std::array<uint64_t, 16> teamHashes = {};
             std::array<std::array<uint8_t, kLegacyFlagPayloadBytes>, 16> teamPayloads = {};
-            auto** playersByTeam = reinterpret_cast<void**>(kNetPlayerByTeamAddr);
+            auto** playersByTeam = reinterpret_cast<void**>(g_NetPlayerByTeamAddr);
             bool anyTeamPayload = false;
             for (int team = 1; team < 16; ++team)
             {
@@ -1060,7 +1087,6 @@ namespace BZROpenShim
         // feature does not depend on the unproven dispatch path.
         void MaybeDriveMultiplayerFlagRenderFallback()
         {
-            if (!HookEngine::LiteralAddressesApply("Multiplayer vehicle flags")) return;
             if (!ShouldEnableMultiplayerFlagUi())
                 return;
             const ULONGLONG now = GetTickCount64();
@@ -1077,26 +1103,25 @@ namespace BZROpenShim
 
         void InstallMultiplayerFlagRenderHookIfPossible()
         {
-            if (!HookEngine::LiteralAddressesApply("Multiplayer vehicle flags")) return;
             if (!ShouldEnableMultiplayerFlagUi() || g_MultiplayerFlagRenderHookInstalled)
                 return;
 
             __try
             {
-                void* current = *reinterpret_cast<void**>(kFlagDisplaySubmitVtableSlotAddr);
+                void* current = *reinterpret_cast<void**>(g_FlagDisplaySubmitVtableSlotAddr);
                 if (current == reinterpret_cast<void*>(MultiplayerFlagSubmitHook))
                 {
                     g_MultiplayerFlagRenderHookInstalled = true;
                     return;
                 }
-                if (current != reinterpret_cast<void*>(kFlagDisplaySubmitAddr))
+                if (current != reinterpret_cast<void*>(g_FlagDisplaySubmitAddr))
                 {
                     if (!g_MultiplayerFlagRenderHookFailureLogged)
                     {
                         Log(L"[FLAG] Submit hook skipped: vtable slot=0x%08X current=0x%08X expected=0x%08X\n",
-                            static_cast<uint32_t>(kFlagDisplaySubmitVtableSlotAddr),
+                            static_cast<uint32_t>(g_FlagDisplaySubmitVtableSlotAddr),
                             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
-                            static_cast<uint32_t>(kFlagDisplaySubmitAddr));
+                            static_cast<uint32_t>(g_FlagDisplaySubmitAddr));
                         g_MultiplayerFlagRenderHookFailureLogged = true;
                     }
                     return;
@@ -1105,14 +1130,14 @@ namespace BZROpenShim
                 g_BzrFn_FlagDisplaySubmitOriginal =
                     reinterpret_cast<FnFlagDisplaySubmit>(current);
                 if (!WritePointerValue(
-                        kFlagDisplaySubmitVtableSlotAddr,
+                        g_FlagDisplaySubmitVtableSlotAddr,
                         reinterpret_cast<void*>(MultiplayerFlagSubmitHook)))
                 {
                     return;
                 }
                 g_MultiplayerFlagRenderHookInstalled = true;
                 Log(L"[FLAG] Installed Redux FlagDisplay::Submit Ogre renderer hook slot=0x%08X original=0x%08X\n",
-                    static_cast<uint32_t>(kFlagDisplaySubmitVtableSlotAddr),
+                    static_cast<uint32_t>(g_FlagDisplaySubmitVtableSlotAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)));
             }
             __except (EXCEPTION_EXECUTE_HANDLER)

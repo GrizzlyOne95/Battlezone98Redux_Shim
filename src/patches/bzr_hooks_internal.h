@@ -621,9 +621,11 @@ namespace BZROpenShim
 
         // --- Career statistics and PKTRACE (career_stats.cpp) ------------------
         inline constexpr int kQueuedLoadNameBufferLen = 16;
-        inline constexpr uintptr_t kQueuedLoadPathBufferAddr = 0x00945708;
-        inline constexpr uintptr_t kQueuedLoadNameBufferAddr = 0x00915540;
-        inline constexpr uintptr_t kNetPlayerByTeamAddr = 0x009180E8;
+        // The QueuedLoadPathBuffer / QueuedLoadNameBuffer rows; 0 when not
+        // bound. Career stats and the multiplayer flags bind these and
+        // NetPlayerByTeam into their own row sets instead.
+        uintptr_t QueuedLoadPathBufferAddr();
+        uintptr_t QueuedLoadNameBufferAddr();
         struct CareerPendingVictim
         {
             bool inUse = false;
@@ -799,8 +801,9 @@ namespace BZROpenShim
         void InstallUiManualObjectDedupeHookIfPossible();
 
         // --- Raw mouse input (raw_mouse_input.cpp) -----------------------------
-        inline constexpr uintptr_t kRawMouseInputEnabledAddr = 0x00918424;
-        inline constexpr uintptr_t kRawMouseInputProcessAddr = 0x004357D0;
+        // Bound by RawMouseInputSignaturesMatch(); 0 until then.
+        extern uintptr_t g_RawMouseInputEnabledAddr;
+        extern uintptr_t g_RawMouseInputProcessAddr;
         extern bool g_RawMouseInputSignaturesMatch;
         extern bool g_RawMouseInputProcessHookInstalled;
         extern long g_RawMouseInputTraceBudget;

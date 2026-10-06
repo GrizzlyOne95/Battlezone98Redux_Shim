@@ -583,8 +583,8 @@ namespace BZROpenShim
             g_RawMouseInputSignaturesMatch ? "verified" : "mismatch",
             g_RawMouseInputProcessHookInstalled ? "installed" : "absent",
             ShouldTraceRawMouseInput() ? "enabled" : "disabled",
-            static_cast<uint32_t>(kRawMouseInputEnabledAddr),
-            static_cast<uint32_t>(kRawMouseInputProcessAddr));
+            static_cast<uint32_t>(g_RawMouseInputEnabledAddr),
+            static_cast<uint32_t>(g_RawMouseInputProcessAddr));
         Log(L"[PRODSCRIPT] PROD CanBuild/IsBusy fix: %hs\n",
             g_ProducerScriptPredicateHooksInstalled ? "installed" : "pending");
 		Log(L"[ARTYDEPLOY] Undeployed howitzer sniper-retaliation fix: %hs offensiveSubTaskHook=%hs\n",
