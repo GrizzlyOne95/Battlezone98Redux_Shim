@@ -400,6 +400,17 @@ namespace BZROpenShim
 
     static bool IsDisableControlSmoothingPatchName(const char* name) { return name && strcmp(name, "Disable Control Smoothing") == 0; }
 
+    static bool IsShellCasingPatchName(const char* name) { return name && strncmp(name, "Shell Casings ", 14) == 0; }
+
+    // [General] ShellCasings (default ON) arrives inverted through the env
+    // mapping; off means the two shot calls are never redirected.
+    static bool ShouldEnableShellCasings() {
+        static int s_cached = -1;
+        if (s_cached < 0)
+            s_cached = (EnvFlagEnabledByName("OPENSHIM_DISABLE_SHELL_CASINGS") || EnvFlagEnabledByName("BZR_DISABLE_SHELL_CASINGS")) ? 0 : 1;
+        return s_cached != 0;
+    }
+
     static bool IsPathBlockFacesPatchName(const char* name) { return name && strcmp(name, "Path Block Faces BlockCells Hook") == 0; }
 
     // [General] PathBlockFaces (default ON: it changes only ODFs that opt in
@@ -520,6 +531,9 @@ namespace BZROpenShim
         }
         if (!ShouldEnableDisableControlSmoothing()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsDisableControlSmoothingPatchName(p.name.c_str()); }), patches.end());
+        }
+        if (!ShouldEnableShellCasings()) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsShellCasingPatchName(p.name.c_str()); }), patches.end());
         }
         if (!ShouldEnablePathBlockFaces()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsPathBlockFacesPatchName(p.name.c_str()); }), patches.end());
@@ -1052,6 +1066,23 @@ namespace BZROpenShim
                 SetPersonCarrierGetWeaponOriginal(original);
                 target = static_cast<uint32_t>(
                     reinterpret_cast<uintptr_t>(PersonSniperScanGetWeaponGuard));
+            }
+            else if (IsShellCasingPatchName(p.name.c_str())) {
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                const uint32_t expected =
+                    HookEngine::ResolveNamedAddress("WeaponPresentation::OrdnanceFactory");
+                if (!original || expected == 0 ||
+                    reinterpret_cast<uintptr_t>(original) != expected) {
+                    Log(L"[SHELLCASINGS] %hs identity failed site=0x%08X original=%p expected=0x%08X; leaving stock call\n",
+                        p.name.c_str(), p.address - 1, original, expected);
+                    continue;
+                }
+                Hooks::SetShellCasingFactoryOriginal(original);
+                target = static_cast<uint32_t>(
+                    reinterpret_cast<uintptr_t>(Hooks::GetShellCasingShotBridgeAddress()));
+                Log(L"[SHELLCASINGS] %hs redirected site=0x%08X factory=%p\n", p.name.c_str(), p.address - 1, original);
             }
             else if (p.name == "HoverCraft Turbo Sound Stop Guard") {
                 void* original = isSteam

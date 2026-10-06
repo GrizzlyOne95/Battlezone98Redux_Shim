@@ -74,4 +74,9 @@ unsigned StockFallbackKind(std::string_view seed);
 // Exact generated resource names only; vehicle pieces and similarly named
 // custom assets must never become generic debris.
 unsigned StockFallbackBatchKind(std::string_view resource);
+// ShellCasings: a unit-length cartridge case along local +Z (centred, rim and
+// base at -Z, open mouth at +Z) with `sides` facets (6..32), position/normal/
+// uv0, in two submeshes using openshim_casing_brass and openshim_casing_rim.
+// Deterministic; an out-of-range side count returns an empty piece.
+Piece CasingMesh(unsigned sides);
 } // namespace BZROpenShim::NativeChunks

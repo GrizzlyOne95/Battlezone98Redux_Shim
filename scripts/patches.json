@@ -210,6 +210,24 @@
       "identity": "Third Carrier::GetWeapon site in Person::Simulate (0x0059D340), sibling of Pilot Carrier Null Guard (0x0059D76D, same function). The loop at 0x0059D777 walks slots 0-4 of the selected mask returned by Carrier::GetSelected, calls Carrier::GetWeapon (0x00417F60) at 0x0059D7C3 for every set bit, and dereferences the result unconditionally: mov eax,[edx+8] at 0x0059D7D4, then cmp [eax+0xC],'SNIP' to set the crouch flag at [ebp-0x351]. GetWeapon returns null when the hardpoint mask at [carrier+0x2C] lacks that bit, so a selected-mask bit on an empty hardpoint faults. Observed on GOG Redux 2.2.301 in ISDF Chronicles isdfms10 (dump battlezone98redux.exe.54600.dmp): a jak person whose Lua removed its only weapon with GiveWeapon(h, nil, 0) kept selected=1 at [carrier+0x30] with hardpoint mask 0, EIP 0x0059D7D4 reading [0+8]. The result at [ebp-0x4B4] is read only by that SNIP test, so the guard returns a static non-SNIP stand-in for an empty slot. The earlier GetWeapon call at 0x0059D3F0 already null-checks and is left stock. Pattern verified single-match by whole-image scan on 2026-09-26."
     },
     {
+      "name": "Shell Casings Cannon Shot Call",
+      "pattern": "8B 85 B0 FD FF FF 8B 48 18 51 8D 55 BC 52 8B 85 B0 FD FF FF 8B 48 0C E8 ?? ?? ?? ?? 89 85 9C FD FF FF",
+      "offset": 24,
+      "expected_size": 4,
+      "fallback": "0x0048F550",
+      "require_unique": true,
+      "identity": "Accepted-shot OrdnanceClass factory call (E8 at 0x0048F54F) inside Cannon::Simulate 0x0048EFE0 on GOG Redux 2.2.301. RTTI identity: the vtables of .?AVCannon@@ (0x00876F4C), .?AVMortar@@ (0x00883698) and .?AVSniperGun@@ (0x00887B34) all hold 0x0048EFE0 at slot +0x18, the Simulate slot the global weapon pass calls. The function stores ECX (this = Weapon) at [EBP-250h] in its prologue (0x0048EFF5), and the call passes the final copied Matrix at [EBP-44h] and the owner OBJ76 [weapon+18h] on the stack with ECX = [weapon+0Ch] (OrdnanceClass); the factory 0x00586FF0 ends RET 8 and the result is stored at [EBP-264h]. ShellCasings redirects only this call to a bridge that runs the factory first, then copies the weapon, matrix and owner for a cosmetic casing. The pattern (both [EBP-250h] loads, the call and the store) is a single match in the GOG image (whole-image scan 2026-10-05). Note: WeaponPresentation::CannonShotCall (0x005A7195) is in PopperGun::Simulate 0x005A6F70, not Cannon (PopperGun vtable 0x00885D88 slot +0x18)."
+    },
+    {
+      "name": "Shell Casings MachineGun Shot Call",
+      "pattern": "8B 95 B0 FD FF FF 8B 42 18 50 8D 4D BC 51 8B 95 B0 FD FF FF 8B 4A 0C E8 ?? ?? ?? ?? 89 85 98 FD FF FF",
+      "offset": 24,
+      "expected_size": 4,
+      "fallback": "0x0050BE3B",
+      "require_unique": true,
+      "identity": "Accepted-shot OrdnanceClass factory call (E8 at 0x0050BE3A) inside MachineGun::Simulate 0x0050B960 on GOG Redux 2.2.301, slot +0x18 of the .?AVMachineGun@@ vtable 0x0087D4D0. Same frame contract as the Cannon site: this = Weapon stored at [EBP-250h] (0x0050B975), final Matrix [EBP-44h] and owner OBJ76 [weapon+18h] pushed, ECX = [weapon+0Ch], factory 0x00586FF0 RET 8, result stored at [EBP-268h]. Redirected by ShellCasings to the same bridge. Single match in the GOG image (whole-image scan 2026-10-05)."
+      },
+      {
       "name": "Path Block Faces BlockCells Hook",
       "pattern": "55 8B EC 83 EC 64 A1 ?? ?? ?? ?? 33 C5 89 45 FC 83 3D ?? ?? ?? ?? 00 75 05 E9 ?? ?? ?? ?? 8B 4D 08 83 C1 18 8B 45 08 8B 50 18 8B 02 FF D0 83 78 1C 05 0F 84",
       "offset": 0,
@@ -561,6 +579,16 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Released terrain height sampler, double __cdecl(double x, double z), at 0x007855E0 on GOG Redux 2.2.301. Stock ProximityMine::Simulate's detonation block (FUN_005B0E40, call at 0x005B1189) stores its return into obj+0x50 (the y of the posit triple at obj+0x48/+0x50/+0x58) before building the explosion, as team_filter_mines.cpp reproduces; it has 50+ callers, including the Person ground-follow code at 0x005A05BE-0x005A071C. The body scales both world coordinates by the float at 0x02CC50E4, floors them through 0x0046EAF0 and bilinearly blends four grid heights fetched through 0x00784100. The pattern (entry, both coordinate scalings, first floor call) matches once in the GOG image. Used by SkinnedGibs for gib ground contact only; it reads terrain and writes nothing."
+    },
+    {
+      "name": "CollisionGrid::Objects",
+      "pattern": "F2 0F 11 04 24 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 8D 4D 98 51 8D 8D 6C FF FF FF E8",
+      "offset": 7,
+      "mode": "abs32_operand",
+      "fallback": "0x00917A6C",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Global pointer to the object collision grid on GOG Redux 2.2.301, read by `mov ecx,[0x00917A6C]` at 0x004810C0 immediately before the range query 0x005B2950 in FUN_00480F40, whose results loop resolves each handle through GameObject::GetObj 0x004DA060. The same load precedes the query at 0x004672AE and 0x005AC2E6. ShieldTower's own query (0x005D10A3) uses a different grid at 0x009173DC. team_filter_mines.cpp's kCollisionRangeSearchAddr (0x006A3E10) is inside .text, not this global. Read only, by ShellCasings to find objects near flying casings."
     },
     {
       "name": "CollisionGrid::Crafts",

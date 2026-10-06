@@ -55,6 +55,10 @@ if(EXISTS "${OPENSHIM_GIB_SAMPLE_DIR}/ispilo.mesh" AND EXISTS "${OPENSHIM_GIB_SA
                 "${OPENSHIM_GIB_SAMPLE_DIR}/ispcc.skeleton")
 endif()
 
+openshim_add_test(shell_casing_physics_tests STD 20 SOURCES
+    shell_casing_physics_tests.cpp
+)
+
 # PathBlockFaces: winding, ODF keys, grid contract (pure math), plus the
 # offline dry check on the ISDF Chronicles subway underpass when the GOG test
 # install is present (override with -DOPENSHIM_PATHBLOCK_SAMPLE_DIR=<dir>).
