@@ -152,10 +152,9 @@ static unsigned __stdcall PatchThreadProc(void*)
 
     // AutoSave stacks its main-thread update hook after the normal patch set so
     // it chains whichever world-update target (stock or OpenShim) is active.
-    // Never install version-specific runtime addresses if the core compatibility
-    // check failed.
+    // Its addresses are patches.json rows; it stands down itself when they do
+    // not bind on this build.
     RunPatchStage("BZROpenShim::InitializeAutoSave()", [] {
-        if (!BZROpenShim::IsCompatibleGameVersion()) return;
         if (!BZROpenShim::InitializeAutoSave())
         {
             BZROpenShim::LogShimA(
