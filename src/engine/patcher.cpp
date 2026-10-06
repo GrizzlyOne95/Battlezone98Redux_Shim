@@ -807,8 +807,8 @@ namespace BZROpenShim
             // a null there means the replaced select(0) never runs and the
             // engine faults on the unselected list.
             g_HopFix2SelectCallSite = h2 + 0x0E;
-            g_HopFix2SelectFallback = g_Config.GetStaticPointer("HopFix2Select_Fallback", 0x007CAFA0);
-            g_BZRFnPtr_HopFix2 = reinterpret_cast<void(*)()>(ResolveCallTargetWithFallback(h2 + 0x0E, isSteam, "HopFix2Select_Fallback", 0x007CAFA0, "Hop-Fix 2 select"));
+            g_HopFix2SelectFallback = g_Config.GetStaticPointer("HopFix2_Fallback", 0x007CAFA0);
+            g_BZRFnPtr_HopFix2 = reinterpret_cast<void(*)()>(ResolveCallTargetWithFallback(h2 + 0x0E, isSteam, "HopFix2_Fallback", 0x007CAFA0, "Hop-Fix 2 select"));
             g_MapListObject = reinterpret_cast<void**>(g_Config.GetStaticPointer("MapListObject", 0x0094555C));
         }
         if (h3) g_RetAddr_HopFix3 = reinterpret_cast<void*>(h3 + g_Config.GetStaticPointer("RetAddr_HopFix3_Offset", 0x07));
