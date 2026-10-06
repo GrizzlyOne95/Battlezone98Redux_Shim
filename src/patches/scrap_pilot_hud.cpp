@@ -40,15 +40,82 @@ namespace BZROpenShim
         //   pilotValue = pilotPanel + (40*sx, 14*sy)
         // The four text points come first so the existing group helpers and the
         // mod bridge keep addressing scrap as group 0/1 and pilot as group 2/3;
-        // the two backplate sprite anchors follow.
-        constexpr uintptr_t kScrapPilotHudLayoutPointAddresses[6][2] = {
-            { 0x0091829C, 0x009182A0 },  // scrap title text
-            { 0x0091826C, 0x00918270 },  // scrap value text
-            { 0x00918280, 0x00918284 },  // pilot title text
-            { 0x00918278, 0x0091827C },  // pilot value text
-            { 0x00918260, 0x00918264 },  // scrap backplate sprite
-            { 0x0091828C, 0x00918290 },  // pilot backplate sprite
+        // the two backplate sprite anchors follow. Each point is an int x with
+        // its y at +4.
+        //
+        // Every engine address this file uses comes from the ScrapHud*,
+        // CommandMenu*, CommandUi*, HudViewport*, HudColor*, HudFillRect and
+        // HudSpriteSubmit engine_addresses rows in scripts/patches.json, bound
+        // all or nothing on first use, so a new game build is carried across
+        // by reverse_engineering/build_port instead of by editing this file.
+        // Code rows guard the pristine bytes of sites legacy mode rewrites, so
+        // binding happens before any rewrite and is not repeated.
+        struct ScrapHudAddresses
+        {
+            uint32_t points[6] = {};          // scrap title, scrap value, pilot title, pilot value, scrap plate, pilot plate
+            uint32_t commandMenuRowRects = 0;
+            uint32_t commandUiBoundsLeft = 0;
+            uint32_t commandUiUnderlaySpriteId = 0;
+            uint32_t commandMenuAltLayoutFlag = 0;
+            uint32_t viewportWidth = 0;
+            uint32_t viewportHeight = 0;
+            uint32_t colorWhite = 0, colorBlue = 0, colorGreen = 0;
+            uint32_t fillRect = 0;
+            uint32_t spriteSubmit = 0;
+            uint32_t scrapPanelSubmitCall = 0, pilotPanelSubmitCall = 0;
+            uint32_t colorLoad[4] = {};       // scrap title, scrap value, pilot title, pilot value
+            uint32_t alignPush[4] = {};
+            // The submit CALLs as found, so turning legacy mode off restores
+            // exactly what was there.
+            uint8_t scrapPanelSubmitOriginal[5] = {};
+            uint8_t pilotPanelSubmitOriginal[5] = {};
         };
+
+        static ScrapHudAddresses g_ScrapHud;
+
+        static bool ScrapHudAddressesBound()
+        {
+            static const bool bound = [] {
+                ScrapHudAddresses& a = g_ScrapHud;
+                const HookEngine::EngineRow rows[] = {
+                    { "ScrapHudScrapTitlePoint", &a.points[0] },
+                    { "ScrapHudScrapValuePoint", &a.points[1] },
+                    { "ScrapHudPilotTitlePoint", &a.points[2] },
+                    { "ScrapHudPilotValuePoint", &a.points[3] },
+                    { "ScrapHudScrapPanelPoint", &a.points[4] },
+                    { "ScrapHudPilotPanelPoint", &a.points[5] },
+                    { "CommandMenuRowRects", &a.commandMenuRowRects },
+                    { "CommandUiBoundsLeft", &a.commandUiBoundsLeft },
+                    { "CommandUiUnderlaySpriteId", &a.commandUiUnderlaySpriteId },
+                    { "CommandMenuAltLayoutFlag", &a.commandMenuAltLayoutFlag },
+                    { "HudViewportWidth", &a.viewportWidth },
+                    { "HudViewportHeight", &a.viewportHeight },
+                    { "HudColorWhite", &a.colorWhite },
+                    { "HudColorBlue", &a.colorBlue },
+                    { "HudColorGreen", &a.colorGreen },
+                    { "HudFillRect", &a.fillRect },
+                    { "HudSpriteSubmit", &a.spriteSubmit },
+                    { "ScrapHudScrapPanelSubmitCall", &a.scrapPanelSubmitCall },
+                    { "ScrapHudPilotPanelSubmitCall", &a.pilotPanelSubmitCall },
+                    { "ScrapHudScrapTitleColorLoad", &a.colorLoad[0] },
+                    { "ScrapHudScrapValueColorLoad", &a.colorLoad[1] },
+                    { "ScrapHudPilotTitleColorLoad", &a.colorLoad[2] },
+                    { "ScrapHudPilotValueColorLoad", &a.colorLoad[3] },
+                    { "ScrapHudScrapTitleAlignPush", &a.alignPush[0] },
+                    { "ScrapHudScrapValueAlignPush", &a.alignPush[1] },
+                    { "ScrapHudPilotTitleAlignPush", &a.alignPush[2] },
+                    { "ScrapHudPilotValueAlignPush", &a.alignPush[3] },
+                };
+                if (!HookEngine::BindEngineRows("Scrap/pilot HUD", rows))
+                    return false;
+                // The guard bytes just matched, so these are the stock CALLs.
+                return HookEngine::ReadMemory(a.scrapPanelSubmitCall, a.scrapPanelSubmitOriginal,
+                                              sizeof(a.scrapPanelSubmitOriginal)) &&
+                       HookEngine::ReadMemory(a.pilotPanelSubmitCall, a.pilotPanelSubmitOriginal,
+                                              sizeof(a.pilotPanelSubmitOriginal));
+            }();
+            return bound;
+        }
 
         constexpr size_t kScrapPilotHudScrapPanelPoint = 4;
 
@@ -97,8 +164,6 @@ namespace BZROpenShim
         // right edge keeps the gauge clamped to the menu even if a mod or a
         // later patch moves it; the design constant above is the fallback for
         // when the rects have not been built yet.
-        constexpr uintptr_t kCommandMenuRowRectsAddr = 0x009173E8;
-
         // The row rects are the menu's content box; the frame drawn behind it
         // is a separate sprite and is wider. CommandUI::Render at 0x004A08E0
         // submits that frame as
@@ -117,12 +182,6 @@ namespace BZROpenShim
         // the normal menu layout (0x00915567 == 0). The alt layout draws no
         // frame, and its wider 156-unit rows already come through the live row
         // rect.
-        constexpr uintptr_t kCommandUiBoundsLeftAddr = 0x0260D748;
-
-        constexpr uintptr_t kCommandUiUnderlaySpriteIdAddr = 0x009173E4;
-
-        constexpr uintptr_t kCommandMenuAltLayoutFlagAddr = 0x00915567;
-
         constexpr double kCommandUiUnderlayLeftInset = 18.0;
 
         constexpr int kCommandUiUnderlayWidthBias = 110;
@@ -136,8 +195,6 @@ namespace BZROpenShim
         constexpr double kScrapPilotHudStockHalfBlock = 88.0;   // pilotPanelX - scrapPanelX
 
         constexpr double kScrapPilotHudStockValueDrop = 14.0;   // scrapValueY - scrapPanelY
-
-        constexpr uintptr_t kScrapPilotHudViewportWidthAddr = 0x02CECEE0;
 
         constexpr ScrapPilotHudPlateRun kScrapPlateRuns[] = {
             {  0,  9,  0, 29 }, {  9, 10,  0, 35 }, { 10, 11,  0, 41 },
@@ -179,18 +236,6 @@ namespace BZROpenShim
         // stock backplate's z, one step behind the strings, with no separate
         // z bookkeeping. The submitted sprite is zero-sized by then (the rect
         // bridge hid it), so forwarding to the original draws nothing.
-        constexpr uintptr_t kHudFillRectAddr = 0x0068AFB0;
-
-        constexpr uintptr_t kHudSpriteSubmitAddr = 0x0068CA30;
-
-        constexpr uintptr_t kScrapPanelSubmitCallAddr = 0x005C710E;
-
-        constexpr uintptr_t kPilotPanelSubmitCallAddr = 0x005C72D4;
-
-        constexpr uint8_t kScrapPanelSubmitCallExpected[5] = { 0xE8, 0x1D, 0x59, 0x0C, 0x00 };
-
-        constexpr uint8_t kPilotPanelSubmitCallExpected[5] = { 0xE8, 0x57, 0x57, 0x0C, 0x00 };
-
         // FUN_0068AC50 only rescales alpha for modes 2/3/5, so mode 0 passes the
         // colour through untouched.
         constexpr uint32_t kLegacyScrapPilotHudPlateColor = 0xFF000000u;
@@ -201,32 +246,26 @@ namespace BZROpenShim
         // strings; BZ 1.5's ScrapGauge::Render used colorBlue for scrap and
         // colorGreen for pilots. The palette globals are written by the Redux
         // port of LoadInterfaceColors at 0x004B6720.
-        constexpr uintptr_t kHudColorWhiteAddr = 0x0091755C;
-
-        constexpr uintptr_t kHudColorBlueAddr = 0x00917578;   // 0xFF007FFF
-
-        constexpr uintptr_t kHudColorGreenAddr = 0x009175B0;  // 0xFF00FF00
-
         // Each of the four gauge strings is drawn by one FUN_004C0100 call whose
         // colour arrives as `mov reg, [colorWhite]` and whose horizontal
         // alignment arrives as a `push 1` immediate (centre on x). Legacy mode
         // rewrites the colour operand and flips the alignment to 0, which makes
         // x the string's left edge -- BZ 1.5 drew these left-aligned at
         // plate + 5. Guard on whole instructions, not bare operands.
+        // Instruction shapes of the four sites; addresses are g_ScrapHud's
+        // colorLoad[i] / alignPush[i] for the same index.
         struct ScrapPilotHudTextSite
         {
-            uintptr_t colorInstructionAddr;
             uint8_t colorOpcode[2];
             size_t colorOpcodeLen;
-            uintptr_t legacyColorAddr;
-            uintptr_t alignXPushAddr;
+            bool legacyBlue;   // scrap strings blue, pilot strings green
         };
 
         constexpr ScrapPilotHudTextSite kScrapPilotHudTextSites[] = {
-            { 0x005C712B, { 0xA1, 0x00 }, 1, kHudColorBlueAddr,  0x005C7125 },  // scrap title
-            { 0x005C719B, { 0x8B, 0x15 }, 2, kHudColorBlueAddr,  0x005C7195 },  // scrap value
-            { 0x005C72F1, { 0x8B, 0x15 }, 2, kHudColorGreenAddr, 0x005C72EB },  // pilot title
-            { 0x005C7361, { 0x8B, 0x0D }, 2, kHudColorGreenAddr, 0x005C735B },  // pilot value
+            { { 0xA1, 0x00 }, 1, true },   // scrap title: mov eax, [colour]
+            { { 0x8B, 0x15 }, 2, true },   // scrap value: mov edx, [colour]
+            { { 0x8B, 0x15 }, 2, false },  // pilot title: mov edx, [colour]
+            { { 0x8B, 0x0D }, 2, false },  // pilot value: mov ecx, [colour]
         };
 
         constexpr uint8_t kScrapPilotHudTextCentreAlign[2] = { 0x6A, 0x01 };
@@ -282,10 +321,10 @@ namespace BZROpenShim
             __try
             {
                 size_t index = 0;
-                for (const auto& point : kScrapPilotHudLayoutPointAddresses)
+                for (const uint32_t point : g_ScrapHud.points)
                 {
-                    const int x = *reinterpret_cast<const int*>(point[0]);
-                    const int y = *reinterpret_cast<const int*>(point[1]);
+                    const int x = *reinterpret_cast<const int*>(point);
+                    const int y = *reinterpret_cast<const int*>(point + 4);
                     if (x < -4096 || x > 16384 || y < -4096 || y > 16384)
                         return false;
                     out[index++] = x;
@@ -356,8 +395,8 @@ namespace BZROpenShim
         {
             __try
             {
-                const int width = *reinterpret_cast<const int*>(kScrapPilotHudViewportWidthAddr);
-                const int height = *reinterpret_cast<const int*>(kScrapPilotHudViewportHeightAddr);
+                const int width = *reinterpret_cast<const int*>(g_ScrapHud.viewportWidth);
+                const int height = *reinterpret_cast<const int*>(g_ScrapHud.viewportHeight);
                 if (width <= 0 || height <= 0 || width > 16384 || height > 16384)
                     return false;
                 outWidth = width;
@@ -375,7 +414,7 @@ namespace BZROpenShim
         {
             __try
             {
-                const int* rect = reinterpret_cast<const int*>(kCommandMenuRowRectsAddr);
+                const int* rect = reinterpret_cast<const int*>(g_ScrapHud.commandMenuRowRects);
                 const int left = rect[0];
                 const int right = rect[2];
                 if (left < 0 || right <= left || right >= viewportWidth)
@@ -395,10 +434,10 @@ namespace BZROpenShim
         {
             __try
             {
-                if (*reinterpret_cast<const char*>(kCommandMenuAltLayoutFlagAddr) != '\0')
+                if (*reinterpret_cast<const char*>(g_ScrapHud.commandMenuAltLayoutFlag) != '\0')
                     return false;
-                outSpriteId = *reinterpret_cast<const int*>(kCommandUiUnderlaySpriteIdAddr);
-                outBoundsLeft = *reinterpret_cast<const int*>(kCommandUiBoundsLeftAddr);
+                outSpriteId = *reinterpret_cast<const int*>(g_ScrapHud.commandUiUnderlaySpriteId);
+                outBoundsLeft = *reinterpret_cast<const int*>(g_ScrapHud.commandUiBoundsLeft);
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -563,10 +602,10 @@ namespace BZROpenShim
             __try
             {
                 size_t index = 0;
-                for (const auto& point : kScrapPilotHudLayoutPointAddresses)
+                for (const uint32_t point : g_ScrapHud.points)
                 {
-                    *reinterpret_cast<int*>(point[0]) = desired[index++];
-                    *reinterpret_cast<int*>(point[1]) = desired[index++];
+                    *reinterpret_cast<int*>(point) = desired[index++];
+                    *reinterpret_cast<int*>(point + 4) = desired[index++];
                 }
                 return true;
             }
@@ -613,10 +652,10 @@ namespace BZROpenShim
 
             __try
             {
-                const auto& point = kScrapPilotHudLayoutPointAddresses[panelPoint];
-                const int originX = *reinterpret_cast<const int*>(point[0]);
-                const int originY = *reinterpret_cast<const int*>(point[1]);
-                const auto fill = reinterpret_cast<FnHudFillRect>(kHudFillRectAddr);
+                const uint32_t point = g_ScrapHud.points[panelPoint];
+                const int originX = *reinterpret_cast<const int*>(point);
+                const int originY = *reinterpret_cast<const int*>(point + 4);
+                const auto fill = reinterpret_cast<FnHudFillRect>(g_ScrapHud.fillRect);
                 for (size_t index = 0; index < plate.runCount; ++index)
                 {
                     const ScrapPilotHudPlateRun& run = plate.runs[index];
@@ -640,7 +679,7 @@ namespace BZROpenShim
             int x, int y, int w, int h, int a, int b)
         {
             DrawScrapPilotHudPlate(buffer, kScrapPilotHudScrapPanelPoint, kScrapPlate);
-            reinterpret_cast<FnHudSpriteSubmit>(kHudSpriteSubmitAddr)(
+            reinterpret_cast<FnHudSpriteSubmit>(g_ScrapHud.spriteSubmit)(
                 buffer, material, spriteId, x, y, w, h, a, b);
         }
 
@@ -649,7 +688,7 @@ namespace BZROpenShim
             int x, int y, int w, int h, int a, int b)
         {
             DrawScrapPilotHudPlate(buffer, kScrapPilotHudPilotPanelPoint, kPilotPlate);
-            reinterpret_cast<FnHudSpriteSubmit>(kHudSpriteSubmitAddr)(
+            reinterpret_cast<FnHudSpriteSubmit>(g_ScrapHud.spriteSubmit)(
                 buffer, material, spriteId, x, y, w, h, a, b);
         }
 
@@ -673,13 +712,13 @@ namespace BZROpenShim
             if (active)
             {
                 if (!ExpectedBytesMatchAt(
-                        kScrapPanelSubmitCallAddr,
-                        kScrapPanelSubmitCallExpected,
-                        sizeof(kScrapPanelSubmitCallExpected)) ||
+                        g_ScrapHud.scrapPanelSubmitCall,
+                        g_ScrapHud.scrapPanelSubmitOriginal,
+                        sizeof(g_ScrapHud.scrapPanelSubmitOriginal)) ||
                     !ExpectedBytesMatchAt(
-                        kPilotPanelSubmitCallAddr,
-                        kPilotPanelSubmitCallExpected,
-                        sizeof(kPilotPanelSubmitCallExpected)))
+                        g_ScrapHud.pilotPanelSubmitCall,
+                        g_ScrapHud.pilotPanelSubmitOriginal,
+                        sizeof(g_ScrapHud.pilotPanelSubmitOriginal)))
                 {
                     if (!g_ScrapPilotHudPlateGuardMismatchLogged)
                     {
@@ -691,32 +730,32 @@ namespace BZROpenShim
                 }
 
                 if (!WriteScrapPilotHudSubmitCall(
-                        kScrapPanelSubmitCallAddr,
+                        g_ScrapHud.scrapPanelSubmitCall,
                         reinterpret_cast<const void*>(&ScrapPanelSubmitHook)))
                 {
                     return;
                 }
                 if (!WriteScrapPilotHudSubmitCall(
-                        kPilotPanelSubmitCallAddr,
+                        g_ScrapHud.pilotPanelSubmitCall,
                         reinterpret_cast<const void*>(&PilotPanelSubmitHook)))
                 {
                     WritePatchBytes(
-                        kScrapPanelSubmitCallAddr,
-                        kScrapPanelSubmitCallExpected,
-                        sizeof(kScrapPanelSubmitCallExpected));
+                        g_ScrapHud.scrapPanelSubmitCall,
+                        g_ScrapHud.scrapPanelSubmitOriginal,
+                        sizeof(g_ScrapHud.scrapPanelSubmitOriginal));
                     return;
                 }
             }
             else
             {
                 if (!WritePatchBytes(
-                        kScrapPanelSubmitCallAddr,
-                        kScrapPanelSubmitCallExpected,
-                        sizeof(kScrapPanelSubmitCallExpected)) ||
+                        g_ScrapHud.scrapPanelSubmitCall,
+                        g_ScrapHud.scrapPanelSubmitOriginal,
+                        sizeof(g_ScrapHud.scrapPanelSubmitOriginal)) ||
                     !WritePatchBytes(
-                        kPilotPanelSubmitCallAddr,
-                        kPilotPanelSubmitCallExpected,
-                        sizeof(kPilotPanelSubmitCallExpected)))
+                        g_ScrapHud.pilotPanelSubmitCall,
+                        g_ScrapHud.pilotPanelSubmitOriginal,
+                        sizeof(g_ScrapHud.pilotPanelSubmitOriginal)))
                 {
                     return;
                 }
@@ -742,44 +781,48 @@ namespace BZROpenShim
             const uint8_t* desiredAlign =
                 active ? kScrapPilotHudTextLeftAlign : kScrapPilotHudTextCentreAlign;
 
-            for (const auto& site : kScrapPilotHudTextSites)
+            const auto legacyColorFor = [](const ScrapPilotHudTextSite& site) {
+                return site.legacyBlue ? g_ScrapHud.colorBlue : g_ScrapHud.colorGreen;
+            };
+
+            for (size_t i = 0; i < std::size(kScrapPilotHudTextSites); ++i)
             {
+                const ScrapPilotHudTextSite& site = kScrapPilotHudTextSites[i];
                 uint8_t expected[6] = {};
                 size_t expectedLen = 0;
                 for (size_t index = 0; index < site.colorOpcodeLen; ++index)
                     expected[expectedLen++] = site.colorOpcode[index];
-                const uint32_t currentOperand = static_cast<uint32_t>(
-                    active ? kHudColorWhiteAddr : site.legacyColorAddr);
+                const uint32_t currentOperand = active ? g_ScrapHud.colorWhite : legacyColorFor(site);
                 std::memcpy(expected + expectedLen, &currentOperand, sizeof(currentOperand));
                 expectedLen += sizeof(currentOperand);
 
-                if (!ExpectedBytesMatchAt(site.colorInstructionAddr, expected, expectedLen) ||
-                    !ExpectedBytesMatchAt(site.alignXPushAddr, expectedAlign, 2))
+                if (!ExpectedBytesMatchAt(g_ScrapHud.colorLoad[i], expected, expectedLen) ||
+                    !ExpectedBytesMatchAt(g_ScrapHud.alignPush[i], expectedAlign, 2))
                 {
                     if (!g_ScrapPilotHudColorGuardMismatchLogged)
                     {
                         g_ScrapPilotHudColorGuardMismatchLogged = true;
                         Log(L"[HUD] Scrap/pilot text site 0x%08X does not match; leaving stock\n",
-                            static_cast<uint32_t>(site.colorInstructionAddr));
+                            g_ScrapHud.colorLoad[i]);
                     }
                     return;
                 }
             }
 
-            for (const auto& site : kScrapPilotHudTextSites)
+            for (size_t i = 0; i < std::size(kScrapPilotHudTextSites); ++i)
             {
-                const uint32_t operand = static_cast<uint32_t>(
-                    active ? site.legacyColorAddr : kHudColorWhiteAddr);
+                const ScrapPilotHudTextSite& site = kScrapPilotHudTextSites[i];
+                const uint32_t operand = active ? legacyColorFor(site) : g_ScrapHud.colorWhite;
                 uint8_t operandBytes[sizeof(operand)] = {};
                 std::memcpy(operandBytes, &operand, sizeof(operand));
                 if (!WritePatchBytes(
-                        site.colorInstructionAddr + site.colorOpcodeLen,
+                        g_ScrapHud.colorLoad[i] + site.colorOpcodeLen,
                         operandBytes,
                         sizeof(operandBytes)))
                 {
                     return;
                 }
-                if (!WritePatchBytes(site.alignXPushAddr, desiredAlign, 2))
+                if (!WritePatchBytes(g_ScrapHud.alignPush[i], desiredAlign, 2))
                     return;
             }
 
@@ -792,7 +835,7 @@ namespace BZROpenShim
 
         void RefreshScrapPilotHudLayout()
         {
-            if (!HookEngine::LiteralAddressesApply("Scrap/pilot HUD")) return;
+            if (!ScrapHudAddressesBound()) return;
             const ULONGLONG now = GetTickCount64();
             if (g_ScrapPilotHudLastRefreshTick != 0 &&
                 now - g_ScrapPilotHudLastRefreshTick < kScrapPilotHudRefreshMs)
@@ -842,7 +885,7 @@ namespace BZROpenShim
 
         void RevertScrapPilotHudToBaseline()
         {
-            if (!HookEngine::LiteralAddressesApply("Scrap/pilot HUD")) return;
+            if (!ScrapHudAddressesBound()) return;
             g_ScrapPilotHudMissionOverrideActive = false;
             g_ScrapPilotHudPanelOverrideActive = false;
             // Leave the applied panel-visibility state alone: a mission that hid
@@ -861,7 +904,7 @@ namespace BZROpenShim
         int* pilotLeft,
         int* pilotTop)
     {
-        if (!HookEngine::LiteralAddressesApply("Scrap/pilot HUD")) return false;
+        if (!ScrapHudAddressesBound()) return false;
         if (!scrapLeft || !scrapTop || !pilotLeft || !pilotTop)
             return false;
         if (!g_ScrapPilotHudBaselineCaptured && !TryCaptureScrapPilotHudBaseline())
@@ -882,7 +925,7 @@ namespace BZROpenShim
         int pilotLeft,
         int pilotTop)
     {
-        if (!HookEngine::LiteralAddressesApply("Scrap/pilot HUD")) return false;
+        if (!ScrapHudAddressesBound()) return false;
         constexpr int kMinHudCoordinate = -4096;
         constexpr int kMaxHudCoordinate = 16384;
         const int values[] = { scrapLeft, scrapTop, pilotLeft, pilotTop };
@@ -942,7 +985,7 @@ namespace BZROpenShim
 
     bool RestoreScrapPilotHudStockFromBridge()
     {
-        if (!HookEngine::LiteralAddressesApply("Scrap/pilot HUD")) return false;
+        if (!ScrapHudAddressesBound()) return false;
         if (!g_ScrapPilotHudBaselineCaptured && !TryCaptureScrapPilotHudBaseline())
             return false;
         g_ScrapPilotHudMissionOverride = g_ScrapPilotHudBaseline;

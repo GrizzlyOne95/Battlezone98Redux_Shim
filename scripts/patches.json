@@ -1818,6 +1818,168 @@
       "address": "0x0076B350",
       "expected": "55 8B EC 6A FF 68 A7 D7 85 00 64 A1 00 00 00 00",
       "identity": "setModableContentB (ret 4)."
+    },
+    {
+      "name": "ScrapHudScrapTitlePoint",
+      "address": "0x0091829C",
+      "kind": "data",
+      "identity": "Scrap/pilot HUD layout point (int x at +0, y at +4) the stock builder 0x005C6CF0 writes and the gauge draw 0x005C6F70 reads: scrap title text."
+    },
+    {
+      "name": "ScrapHudScrapValuePoint",
+      "address": "0x0091826C",
+      "kind": "data",
+      "identity": "Scrap/pilot HUD layout point (x, y): scrap value text."
+    },
+    {
+      "name": "ScrapHudPilotTitlePoint",
+      "address": "0x00918280",
+      "kind": "data",
+      "identity": "Scrap/pilot HUD layout point (x, y): pilot title text."
+    },
+    {
+      "name": "ScrapHudPilotValuePoint",
+      "address": "0x00918278",
+      "kind": "data",
+      "identity": "Scrap/pilot HUD layout point (x, y): pilot value text."
+    },
+    {
+      "name": "ScrapHudScrapPanelPoint",
+      "address": "0x00918260",
+      "kind": "data",
+      "identity": "Scrap/pilot HUD layout point (x, y): scrap backplate sprite."
+    },
+    {
+      "name": "ScrapHudPilotPanelPoint",
+      "address": "0x0091828C",
+      "kind": "data",
+      "identity": "Scrap/pilot HUD layout point (x, y): pilot backplate sprite."
+    },
+    {
+      "name": "CommandMenuRowRects",
+      "address": "0x009173E8",
+      "kind": "data",
+      "identity": "Command menu row rects, 13 x {left, top, right, bottom}, rebuilt by 0x0049F9E0 on every viewport or UI-scale change."
+    },
+    {
+      "name": "CommandUiBoundsLeft",
+      "address": "0x0260D748",
+      "kind": "data",
+      "identity": "CommandUI bounds.left (the title row's left, design 10), cached by 0x0049F9E0; CommandUI::Render 0x004A08E0 places the menu frame from it."
+    },
+    {
+      "name": "CommandUiUnderlaySpriteId",
+      "address": "0x009173E4",
+      "kind": "data",
+      "identity": "Sprite id of the command menu frame CommandUI::Render submits."
+    },
+    {
+      "name": "CommandMenuAltLayoutFlag",
+      "address": "0x00915567",
+      "kind": "data",
+      "identity": "Byte flag, non-zero for the alternate command menu layout (no frame)."
+    },
+    {
+      "name": "HudViewportWidth",
+      "address": "0x02CECEE0",
+      "kind": "data",
+      "identity": "HUD viewport width (int); the height follows at HudViewportHeight."
+    },
+    {
+      "name": "HudViewportHeight",
+      "address": "0x02CECEE4",
+      "kind": "data",
+      "identity": "HUD viewport height (int)."
+    },
+    {
+      "name": "HudColorWhite",
+      "address": "0x0091755C",
+      "kind": "data",
+      "identity": "DisplayInterface::colorWhite, written by LoadInterfaceColors 0x004B6720; Redux draws all four scrap/pilot strings with it."
+    },
+    {
+      "name": "HudColorBlue",
+      "address": "0x00917578",
+      "kind": "data",
+      "identity": "DisplayInterface::colorBlue (0xFF007FFF); BZ 1.5 drew the scrap strings with it."
+    },
+    {
+      "name": "HudColorGreen",
+      "address": "0x009175B0",
+      "kind": "data",
+      "identity": "DisplayInterface::colorGreen (0xFF00FF00); BZ 1.5 drew the pilot strings with it."
+    },
+    {
+      "name": "HudFillRect",
+      "address": "0x0068AFB0",
+      "expected": "55 8B EC 8B 45 0C 3B 45 14 7F 08 8B 4D 10",
+      "identity": "HUD 2D filled-rect helper, cdecl (buffer, x1, y1, x2, y2, colour, mode); mode 0 passes the colour through."
+    },
+    {
+      "name": "HudSpriteSubmit",
+      "address": "0x0068CA30",
+      "expected": "55 8B EC 81 EC 98 00 00 00 A1 00 70 8E 00",
+      "identity": "HUD sprite submit, cdecl (buffer, material, spriteId, x, y, w, h, 1, 0)."
+    },
+    {
+      "name": "ScrapHudScrapPanelSubmitCall",
+      "address": "0x005C710E",
+      "expected": "E8 1D 59 0C 00 83 C4 24 F3 0F 10 45 DC",
+      "identity": "The CALL HudSpriteSubmit that draws the scrap backplate; legacy layout retargets it."
+    },
+    {
+      "name": "ScrapHudPilotPanelSubmitCall",
+      "address": "0x005C72D4",
+      "expected": "E8 57 57 0C 00 83 C4 24 F3 0F 10 45 DC",
+      "identity": "The CALL HudSpriteSubmit that draws the pilot backplate; legacy layout retargets it."
+    },
+    {
+      "name": "ScrapHudScrapTitleColorLoad",
+      "address": "0x005C712B",
+      "expected": "A1 5C 75 91 00 50 8B 0D 50 75 91 00",
+      "identity": "mov eax, [colorWhite] feeding the scrap title string draw; legacy layout repoints the operand."
+    },
+    {
+      "name": "ScrapHudScrapValueColorLoad",
+      "address": "0x005C719B",
+      "expected": "8B 15 5C 75 91 00 52 A1 50 75 91 00",
+      "identity": "mov edx, [colorWhite] feeding the scrap value string draw."
+    },
+    {
+      "name": "ScrapHudPilotTitleColorLoad",
+      "address": "0x005C72F1",
+      "expected": "8B 15 5C 75 91 00 52 A1 50 75 91 00",
+      "identity": "mov edx, [colorWhite] feeding the pilot title string draw."
+    },
+    {
+      "name": "ScrapHudPilotValueColorLoad",
+      "address": "0x005C7361",
+      "expected": "8B 0D 5C 75 91 00 51 8B 15 50 75 91 00",
+      "identity": "mov ecx, [colorWhite] feeding the pilot value string draw."
+    },
+    {
+      "name": "ScrapHudScrapTitleAlignPush",
+      "address": "0x005C7125",
+      "expected": "6A 01 6A 00 6A FF A1 5C 75 91 00 50",
+      "identity": "push 1 (centre on x) for the scrap title string; legacy layout makes it push 0."
+    },
+    {
+      "name": "ScrapHudScrapValueAlignPush",
+      "address": "0x005C7195",
+      "expected": "6A 01 6A 00 6A FF 8B 15 5C 75 91 00",
+      "identity": "push 1 alignment for the scrap value string."
+    },
+    {
+      "name": "ScrapHudPilotTitleAlignPush",
+      "address": "0x005C72EB",
+      "expected": "6A 01 6A 00 6A FF 8B 15 5C 75 91 00",
+      "identity": "push 1 alignment for the pilot title string."
+    },
+    {
+      "name": "ScrapHudPilotValueAlignPush",
+      "address": "0x005C735B",
+      "expected": "6A 01 6A 00 6A FF 8B 0D 5C 75 91 00",
+      "identity": "push 1 alignment for the pilot value string."
     }
   ],
   "globals": [
