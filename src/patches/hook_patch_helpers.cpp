@@ -157,6 +157,14 @@ namespace BZROpenShim
             return s_addr;
         }
 
+        uintptr_t TerrainGetIntersectionAddr()
+        {
+            static uintptr_t s_addr = 0;
+            if (s_addr == 0)
+                s_addr = HookEngine::EngineAddress("TerrainGetIntersection");
+            return s_addr;
+        }
+
         uintptr_t ViewRecordAddr()
         {
             static uintptr_t s_addr = 0;

@@ -1216,7 +1216,8 @@ namespace BZROpenShim
         // --- AI ODF tuning (ai_odf_tuning.cpp) ---------------------------------
         inline constexpr float kScrapRetargetPeriodDefault = 2.0f;
         inline constexpr float kScrapRetargetMinImprovementDefault = 25.0f;
-        inline constexpr uintptr_t kGogTerrainGetIntersectionAddr = 0x00784620;
+        // TerrainGetIntersection row; 0 when it does not bind.
+        uintptr_t TerrainGetIntersectionAddr();
         struct RetargetPeriodState
         {
             float appliedDeadline = 0.0f;

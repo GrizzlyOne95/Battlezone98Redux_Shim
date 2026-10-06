@@ -144,17 +144,17 @@ namespace BZROpenShim
         // RecycleTask::InitLookingForScrap computes a stock squared-distance
         // score at this one call site after all team/material/region filters.
         // Replacing only this call keeps the rest of the Redux task intact.
-        constexpr uintptr_t kGogRecycleTaskScrapDistanceCallAddr = 0x005B680E;
+        uint32_t g_RecycleTaskScrapDistanceCallAddr = 0;
 
-        constexpr uintptr_t kGogDist3DSquaredAddr = 0x004620B0;
+        uint32_t g_Dist3DSquaredAddr = 0;
 
-        constexpr uintptr_t kGogFindPlanForObjectAddr = 0x004666C0;
+        uint32_t g_FindPlanForObjectAddr = 0;
 
-        constexpr uintptr_t kGogAiPathGetLengthAddr = 0x00461110;
+        uint32_t g_AiPathGetLengthAddr = 0;
 
-        constexpr uintptr_t kGogAiPathDeleteAddr = 0x00460640;
+        uint32_t g_AiPathDeleteAddr = 0;
 
-        constexpr uintptr_t kGogRecycleTaskDoGotoScrapAddr = 0x005B6AE0;
+        uint32_t g_RecycleTaskDoGotoScrapAddr = 0;
 
         constexpr size_t kRecycleTaskDoGotoScrapDetourLen = 7;
 
@@ -178,7 +178,7 @@ namespace BZROpenShim
 
         constexpr float kScrapRetargetPickupGuardDistance = 20.0f;
 
-        constexpr uintptr_t kGogAttackTaskDoStateEntryAddr = 0x00478A50;
+        uint32_t g_AttackTaskDoStateEntryAddr = 0;
 
         constexpr size_t kAttackTaskDoStateDetourLen = 9;
 
@@ -214,46 +214,47 @@ namespace BZROpenShim
 
         // IsStuck's first test: bool __cdecl(const float* position), true on
         // terrain cell types 5 and 6. It only reads the terrain.
-        constexpr uintptr_t kGogTerrainBlocksCraftAddr = 0x00466D40;
+        uint32_t g_TerrainBlocksCraftAddr = 0;
 
-        // Current Redux 2.2.301 process vtables, re-derived via RTTI. Slot 11
+        // Process vtables are rows, each checked by RTTI name below before its
+        // slot is touched. Slot 11
         // owns the target-acquisition state method which schedules the stock
         // 7-10 second retry after a failed enemy search.
         constexpr size_t kProcessDoSubTaskVtableSlot = 11;
 
         constexpr float kGlobalRetargetPeriod = 0.75f;
 
-        constexpr uintptr_t kArtilleryProcessVtableAddr = 0x00876024;
+        uint32_t g_ArtilleryProcessVtableAddr = 0;
 
-        constexpr uintptr_t kBomberProcessVtableAddr = 0x0088B178;
+        uint32_t g_BomberProcessVtableAddr = 0;
 
-        constexpr uintptr_t kGechProcessVtableAddr = 0x0087A13C;
+        uint32_t g_GechProcessVtableAddr = 0;
 
-        constexpr uintptr_t kOffensiveProcessVtableAddr = 0x00884C28;
+        uint32_t g_OffensiveProcessVtableAddr = 0;
 
-        constexpr uintptr_t kPersonProcessVtableAddr = 0x00885984;
+        uint32_t g_PersonProcessVtableAddr = 0;
 
-        constexpr uintptr_t kRocketTankProcessVtableAddr = 0x0088A5C0;
+        uint32_t g_RocketTankProcessVtableAddr = 0;
 
-        constexpr uintptr_t kScoutProcessVtableAddr = 0x0088AF98;
+        uint32_t g_ScoutProcessVtableAddr = 0;
 
-        constexpr uintptr_t kSoldierProcessVtableAddr = 0x00887D18;
+        uint32_t g_SoldierProcessVtableAddr = 0;
 
-        constexpr uintptr_t kTankProcessVtableAddr = 0x0088AB9C;
+        uint32_t g_TankProcessVtableAddr = 0;
 
-        constexpr uintptr_t kWingmanProcessVtableAddr = 0x0088A6EC;
+        uint32_t g_WingmanProcessVtableAddr = 0;
 
-        constexpr uintptr_t kGunTowerProcessVtableAddr = 0x0087A87C;
+        uint32_t g_GunTowerProcessVtableAddr = 0;
 
-        constexpr uintptr_t kTurretTankProcessVtableAddr = 0x00889710;
+        uint32_t g_TurretTankProcessVtableAddr = 0;
 
-        constexpr uintptr_t kGogOffensiveProcessDoSubTaskAddr = 0x00583520;
+        uint32_t g_OffensiveProcessDoSubTaskAddr = 0;
 
-        constexpr uintptr_t kGogGunTowerProcessDoSubTaskAddr = 0x004E8780;
+        uint32_t g_GunTowerProcessDoSubTaskAddr = 0;
 
-        constexpr uintptr_t kGogTurretTankProcessDoSubTaskAddr = 0x005F6FF0;
+        uint32_t g_TurretTankProcessDoSubTaskAddr = 0;
 
-        constexpr uintptr_t kGogGetGameTimeAddr = 0x00822D80;
+        uint32_t g_GetGameTimeAddr = 0;
 
         constexpr size_t kUnitProcessNextEnemyCheckOffset = 0x30;
 
@@ -532,12 +533,10 @@ namespace BZROpenShim
             static int s_terrainTestVerified = -1;
             if (s_terrainTestVerified < 0)
             {
-                static const uint8_t kExpected[] = { 0x55, 0x8B, 0xEC, 0x51, 0x8B, 0x45, 0x08, 0x51 };
-                s_terrainTestVerified =
-                    ExpectedBytesMatchAt(kGogTerrainBlocksCraftAddr, kExpected, sizeof(kExpected)) ? 1 : 0;
+                g_TerrainBlocksCraftAddr = HookEngine::EngineAddress("TerrainBlocksCraft");
+                s_terrainTestVerified = g_TerrainBlocksCraftAddr != 0 ? 1 : 0;
                 if (!s_terrainTestVerified)
-                    Log(L"[LEGACY] D3 disabled: terrain test at 0x%08X does not match; legacy flee follows stock\n",
-                        static_cast<uint32_t>(kGogTerrainBlocksCraftAddr));
+                    Log(L"[LEGACY] D3 disabled: terrain test row does not bind; legacy flee follows stock\n");
             }
             if (!s_terrainTestVerified)
                 return false;
@@ -558,7 +557,7 @@ namespace BZROpenShim
                 if (!position)
                     return false;
                 using FnTerrainBlocksCraft = bool(__cdecl*)(const float* position);
-                outStuck = reinterpret_cast<FnTerrainBlocksCraft>(kGogTerrainBlocksCraftAddr)(position);
+                outStuck = reinterpret_cast<FnTerrainBlocksCraft>(g_TerrainBlocksCraftAddr)(position);
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -910,7 +909,11 @@ namespace BZROpenShim
                 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x7C, 0x89, 0x4D, 0xFC
             };
 
-            if (!ExpectedBytesMatchAt(kGogAttackTaskDoStateEntryAddr,
+            g_AttackTaskDoStateEntryAddr = HookEngine::EngineAddress("AttackTaskDoState");
+            if (g_AttackTaskDoStateEntryAddr == 0 || TerrainGetIntersectionAddr() == 0)
+                return;
+
+            if (!ExpectedBytesMatchAt(g_AttackTaskDoStateEntryAddr,
                                       kExpectedAttackTaskDoStateBytes,
                                       sizeof(kExpectedAttackTaskDoStateBytes)))
             {
@@ -918,29 +921,29 @@ namespace BZROpenShim
             }
 
             if (!InstallInlineDetour32(g_AttackTaskDoStateDetour,
-                                       kGogAttackTaskDoStateEntryAddr,
+                                       g_AttackTaskDoStateEntryAddr,
                                        reinterpret_cast<void*>(AttackTaskDoStateTuningHook),
                                        kAttackTaskDoStateDetourLen,
                                        kExpectedAttackTaskDoStateBytes,
                                        sizeof(kExpectedAttackTaskDoStateBytes)))
             {
                 Log(L"[AIKITE] Failed installing AttackTask::DoState hook at 0x%08X\n",
-                    static_cast<uint32_t>(kGogAttackTaskDoStateEntryAddr));
+                    static_cast<uint32_t>(g_AttackTaskDoStateEntryAddr));
                 return;
             }
 
             g_BzrFn_AttackTaskDoState = reinterpret_cast<FnAttackTaskDoState>(
                 g_AttackTaskDoStateDetour.trampoline);
             g_BzrFn_TerrainGetIntersection = reinterpret_cast<FnTerrainGetIntersection>(
-                kGogTerrainGetIntersectionAddr);
+                TerrainGetIntersectionAddr());
             g_AttackTaskDoStateHookInstalled =
                 g_BzrFn_AttackTaskDoState && g_BzrFn_TerrainGetIntersection;
             if (g_AttackTaskDoStateHookInstalled)
             {
                 Log(L"[AIKITE] Installed AttackTask::DoState hook entry=0x%08X trampoline=0x%08X terrainLos=0x%08X\n",
-                    static_cast<uint32_t>(kGogAttackTaskDoStateEntryAddr),
+                    static_cast<uint32_t>(g_AttackTaskDoStateEntryAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_AttackTaskDoStateDetour.trampoline)),
-                    static_cast<uint32_t>(kGogTerrainGetIntersectionAddr));
+                    static_cast<uint32_t>(TerrainGetIntersectionAddr()));
             }
         }
 
@@ -1284,36 +1287,44 @@ namespace BZROpenShim
 #if !defined(_M_IX86)
             return;
 #else
+            static int s_bound = 0;
+            if (s_bound == 0)
+            {
+                const HookEngine::EngineRow rows[] = {
+                    { "RecycleTaskScrapDistanceCall", &g_RecycleTaskScrapDistanceCallAddr },
+                    { "Dist3DSquared", &g_Dist3DSquaredAddr },
+                    { "FindPlanForObject", &g_FindPlanForObjectAddr },
+                    { "AiPathGetLength", &g_AiPathGetLengthAddr },
+                    { "AiPathDelete", &g_AiPathDeleteAddr },
+                    { "GetGameTime", &g_GetGameTimeAddr },
+                };
+                s_bound = HookEngine::BindEngineRows("Path-scored scrap selection", rows) ? 1 : -1;
+            }
+            if (s_bound < 0)
+                return;
             g_BzrFn_FindPlanForObject =
-                reinterpret_cast<FnFindPlanForObject>(kGogFindPlanForObjectAddr);
+                reinterpret_cast<FnFindPlanForObject>(g_FindPlanForObjectAddr);
             g_BzrFn_AiPathGetLength =
-                reinterpret_cast<FnAiPathGetLength>(kGogAiPathGetLengthAddr);
+                reinterpret_cast<FnAiPathGetLength>(g_AiPathGetLengthAddr);
             g_BzrFn_AiPathDelete =
-                reinterpret_cast<FnAiPathDelete>(kGogAiPathDeleteAddr);
-            g_BzrFn_GetGameTime = reinterpret_cast<FnGetGameTime>(kGogGetGameTimeAddr);
+                reinterpret_cast<FnAiPathDelete>(g_AiPathDeleteAddr);
+            g_BzrFn_GetGameTime = reinterpret_cast<FnGetGameTime>(g_GetGameTimeAddr);
             if (!g_BzrFn_GameObjectGetObjByHandle)
             {
                 g_BzrFn_GameObjectGetObjByHandle =
                     &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
             }
 
-            static const uint8_t kExpectedCall[5] =
-                { 0xE8, 0x9D, 0xB8, 0xEA, 0xFF };
-            static const uint8_t kExpectedFindPlan[8] =
-                { 0x55, 0x8B, 0xEC, 0x51, 0x8B, 0x4D, 0x08, 0x83 };
-            static const uint8_t kExpectedGetLength[8] =
-                { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x18, 0x89, 0x4D };
-            static const uint8_t kExpectedDelete[8] =
-                { 0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x8B };
-
-            auto* callBytes = reinterpret_cast<uint8_t*>(kGogRecycleTaskScrapDistanceCallAddr);
+            // The rows' guards stand for the helper prologues; the call site
+            // must still target Dist3DSquared (or already be ours).
+            auto* callBytes = reinterpret_cast<uint8_t*>(g_RecycleTaskScrapDistanceCallAddr);
             uintptr_t currentTarget = 0;
             if (callBytes[0] == 0xE8)
             {
                 int32_t currentRelative = 0;
                 std::memcpy(&currentRelative, callBytes + 1, sizeof(currentRelative));
                 currentTarget =
-                    kGogRecycleTaskScrapDistanceCallAddr + 5 + currentRelative;
+                    g_RecycleTaskScrapDistanceCallAddr + 5 + currentRelative;
                 if (currentTarget == reinterpret_cast<uintptr_t>(ScrapCandidateScoreCallsiteHook))
                 {
                     g_ScrapPathScoreHookInstalled = true;
@@ -1321,15 +1332,7 @@ namespace BZROpenShim
                 }
             }
 
-            if (currentTarget != kGogDist3DSquaredAddr ||
-                !ExpectedBytesMatchAt(kGogRecycleTaskScrapDistanceCallAddr,
-                                      kExpectedCall, sizeof(kExpectedCall)) ||
-                !ExpectedBytesMatchAt(kGogFindPlanForObjectAddr,
-                                      kExpectedFindPlan, sizeof(kExpectedFindPlan)) ||
-                !ExpectedBytesMatchAt(kGogAiPathGetLengthAddr,
-                                      kExpectedGetLength, sizeof(kExpectedGetLength)) ||
-                !ExpectedBytesMatchAt(kGogAiPathDeleteAddr,
-                                      kExpectedDelete, sizeof(kExpectedDelete)))
+            if (currentTarget != g_Dist3DSquaredAddr)
             {
                 Log(L"[SCAVPATH] Redux helper/call-site bytes mismatch; path-scored scrap selection disabled\n");
                 return;
@@ -1338,20 +1341,20 @@ namespace BZROpenShim
             uint8_t patch[5] = { 0xE8, 0, 0, 0, 0 };
             const int32_t relative =
                 static_cast<int32_t>(reinterpret_cast<uintptr_t>(ScrapCandidateScoreCallsiteHook)) -
-                static_cast<int32_t>(kGogRecycleTaskScrapDistanceCallAddr + 5);
+                static_cast<int32_t>(g_RecycleTaskScrapDistanceCallAddr + 5);
             std::memcpy(patch + 1, &relative, sizeof(relative));
-            if (!WritePatchBytes(kGogRecycleTaskScrapDistanceCallAddr, patch, sizeof(patch)))
+            if (!WritePatchBytes(g_RecycleTaskScrapDistanceCallAddr, patch, sizeof(patch)))
             {
                 Log(L"[SCAVPATH] Failed patching scrap score call at 0x%08X\n",
-                    static_cast<uint32_t>(kGogRecycleTaskScrapDistanceCallAddr));
+                    static_cast<uint32_t>(g_RecycleTaskScrapDistanceCallAddr));
                 return;
             }
 
             g_ScrapPathScoreHookInstalled = true;
             Log(L"[SCAVPATH] Installed path-scored scrap selector call=0x%08X FindPlan=0x%08X GetLength=0x%08X\n",
-                static_cast<uint32_t>(kGogRecycleTaskScrapDistanceCallAddr),
-                static_cast<uint32_t>(kGogFindPlanForObjectAddr),
-                static_cast<uint32_t>(kGogAiPathGetLengthAddr));
+                static_cast<uint32_t>(g_RecycleTaskScrapDistanceCallAddr),
+                static_cast<uint32_t>(g_FindPlanForObjectAddr),
+                static_cast<uint32_t>(g_AiPathGetLengthAddr));
 #endif
         }
 
@@ -1513,24 +1516,28 @@ namespace BZROpenShim
 
             static const uint8_t kExpectedBytes[kRecycleTaskDoGotoScrapDetourLen] =
                 { 0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC };
-            if (!ExpectedBytesMatchAt(kGogRecycleTaskDoGotoScrapAddr,
+            g_RecycleTaskDoGotoScrapAddr = HookEngine::EngineAddress("RecycleTaskDoGotoScrap");
+            g_GetGameTimeAddr = HookEngine::EngineAddress("GetGameTime");
+            if (g_RecycleTaskDoGotoScrapAddr == 0 || g_GetGameTimeAddr == 0)
+                return;
+            if (!ExpectedBytesMatchAt(g_RecycleTaskDoGotoScrapAddr,
                                       kExpectedBytes,
                                       sizeof(kExpectedBytes)))
             {
                 Log(L"[SCAVPATH] RecycleTask::DoGotoScrap bytes mismatch at 0x%08X; en-route retargeting disabled\n",
-                    static_cast<uint32_t>(kGogRecycleTaskDoGotoScrapAddr));
+                    static_cast<uint32_t>(g_RecycleTaskDoGotoScrapAddr));
                 return;
             }
 
             if (!InstallInlineDetour32(g_RecycleTaskDoGotoScrapDetour,
-                                       kGogRecycleTaskDoGotoScrapAddr,
+                                       g_RecycleTaskDoGotoScrapAddr,
                                        reinterpret_cast<void*>(RecycleTaskDoGotoScrapHook),
                                        kRecycleTaskDoGotoScrapDetourLen,
                                        kExpectedBytes,
                                        sizeof(kExpectedBytes)))
             {
                 Log(L"[SCAVPATH] Failed installing RecycleTask::DoGotoScrap retarget hook at 0x%08X\n",
-                    static_cast<uint32_t>(kGogRecycleTaskDoGotoScrapAddr));
+                    static_cast<uint32_t>(g_RecycleTaskDoGotoScrapAddr));
                 return;
             }
 
@@ -1542,7 +1549,7 @@ namespace BZROpenShim
             if (g_ScrapRetargetHookInstalled)
             {
                 Log(L"[SCAVPATH] Installed en-route scrap retarget hook entry=0x%08X trampoline=0x%08X periodDefault=%.2f improveDefault=%.2f\n",
-                    static_cast<uint32_t>(kGogRecycleTaskDoGotoScrapAddr),
+                    static_cast<uint32_t>(g_RecycleTaskDoGotoScrapAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
                         g_RecycleTaskDoGotoScrapDetour.trampoline)),
                     static_cast<double>(kScrapRetargetPeriodDefault),
@@ -1849,6 +1856,14 @@ namespace BZROpenShim
                 { nextEnemyCheck, clampedPeriod };
         }
 
+		// The two Howitzer vtables are rows; 0 when they do not bind.
+		static uint32_t HowitzerVtableRow(bool secondary)
+		{
+			static const uint32_t primary = HookEngine::EngineAddress("HowitzerVtable");
+			static const uint32_t second = HookEngine::EngineAddress("HowitzerSecondaryVtable");
+			return secondary ? second : primary;
+		}
+
 		static bool SuppressUndeployedHowitzerSniperRetaliation(
 			void* processPtr,
 			void** outCraft,
@@ -1862,10 +1877,13 @@ namespace BZROpenShim
 				!outCraft || !outDamageOrdnance)
 				return false;
 
+			const uint32_t kHowitzerPrimaryVtable = HowitzerVtableRow(false);
+			const uint32_t kHowitzerSecondaryVtable = HowitzerVtableRow(true);
+			if (!kHowitzerPrimaryVtable || !kHowitzerSecondaryVtable || !g_ArtilleryProcessVtableAddr)
+				return false;
+
 			__try
 			{
-				constexpr uint32_t kHowitzerPrimaryVtable = 0x0087AD70;
-				constexpr uint32_t kHowitzerSecondaryVtable = 0x0087AE1C;
 				constexpr size_t kCraftDeployState = 0x228;
 				constexpr int32_t kDeployed = 2;
 				constexpr size_t kLastDamageOrdnance = 0x98;
@@ -1873,7 +1891,7 @@ namespace BZROpenShim
 				constexpr uint32_t kSniperSignature = 0x534E4950u; // 'SNIP'
 
 				if (*reinterpret_cast<const uint32_t*>(processPtr) !=
-					static_cast<uint32_t>(kArtilleryProcessVtableAddr))
+					static_cast<uint32_t>(g_ArtilleryProcessVtableAddr))
 					return false;
 
 				auto* process = static_cast<uint8_t*>(processPtr);
@@ -1995,7 +2013,6 @@ namespace BZROpenShim
 
 		void InstallAiTuningHooksIfPossible()
         {
-            if (!HookEngine::LiteralAddressesApply("AI ODF tuning")) return;
             InstallAttackTaskKiteHookIfPossible();
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();
@@ -2060,7 +2077,33 @@ namespace BZROpenShim
             if (g_RetargetPeriodHooksInstalled)
                 return;
 
-            g_BzrFn_GetGameTime = reinterpret_cast<FnGetGameTime>(kGogGetGameTimeAddr);
+            static int s_retargetBound = 0;
+            if (s_retargetBound == 0)
+            {
+                const HookEngine::EngineRow rows[] = {
+                    { "ArtilleryProcessVtable", &g_ArtilleryProcessVtableAddr },
+                    { "BomberProcessVtable", &g_BomberProcessVtableAddr },
+                    { "GechProcessVtable", &g_GechProcessVtableAddr },
+                    { "OffensiveProcessVtable", &g_OffensiveProcessVtableAddr },
+                    { "PersonProcessVtable", &g_PersonProcessVtableAddr },
+                    { "RocketTankProcessVtable", &g_RocketTankProcessVtableAddr },
+                    { "ScoutProcessVtable", &g_ScoutProcessVtableAddr },
+                    { "SoldierProcessVtable", &g_SoldierProcessVtableAddr },
+                    { "TankProcessVtable", &g_TankProcessVtableAddr },
+                    { "WingmanProcessVtable", &g_WingmanProcessVtableAddr },
+                    { "GunTowerProcessVtable", &g_GunTowerProcessVtableAddr },
+                    { "TurretTankProcessVtable", &g_TurretTankProcessVtableAddr },
+                    { "OffensiveProcessDoSubTask", &g_OffensiveProcessDoSubTaskAddr },
+                    { "GunTowerProcessDoSubTask", &g_GunTowerProcessDoSubTaskAddr },
+                    { "TurretTankProcessDoSubTask", &g_TurretTankProcessDoSubTaskAddr },
+                    { "GetGameTime", &g_GetGameTimeAddr },
+                };
+                s_retargetBound = HookEngine::BindEngineRows("AI retarget period", rows) ? 1 : -1;
+            }
+            if (s_retargetBound < 0)
+                return;
+
+            g_BzrFn_GetGameTime = reinterpret_cast<FnGetGameTime>(g_GetGameTimeAddr);
 
             struct RetargetVtableHookSpec
             {
@@ -2074,42 +2117,42 @@ namespace BZROpenShim
 
             RetargetVtableHookSpec hooks[] =
             {
-                { L"ArtilleryProcess", ".?AVArtilleryProcess@@", kArtilleryProcessVtableAddr,
-                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                { L"ArtilleryProcess", ".?AVArtilleryProcess@@", g_ArtilleryProcessVtableAddr,
+                  g_OffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
                   &g_BzrFn_OffensiveProcessDoSubTask },
-                { L"BomberProcess", ".?AVBomberProcess@@", kBomberProcessVtableAddr,
-                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                { L"BomberProcess", ".?AVBomberProcess@@", g_BomberProcessVtableAddr,
+                  g_OffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
                   &g_BzrFn_OffensiveProcessDoSubTask },
-                { L"GechProcess", ".?AVGechProcess@@", kGechProcessVtableAddr,
-                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                { L"GechProcess", ".?AVGechProcess@@", g_GechProcessVtableAddr,
+                  g_OffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
                   &g_BzrFn_OffensiveProcessDoSubTask },
-                { L"OffensiveProcess", ".?AVOffensiveProcess@@", kOffensiveProcessVtableAddr,
-                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                { L"OffensiveProcess", ".?AVOffensiveProcess@@", g_OffensiveProcessVtableAddr,
+                  g_OffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
                   &g_BzrFn_OffensiveProcessDoSubTask },
-                { L"PersonProcess", ".?AVPersonProcess@@", kPersonProcessVtableAddr,
-                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                { L"PersonProcess", ".?AVPersonProcess@@", g_PersonProcessVtableAddr,
+                  g_OffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
                   &g_BzrFn_OffensiveProcessDoSubTask },
-                { L"RocketTankProcess", ".?AVRocketTankProcess@@", kRocketTankProcessVtableAddr,
-                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                { L"RocketTankProcess", ".?AVRocketTankProcess@@", g_RocketTankProcessVtableAddr,
+                  g_OffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
                   &g_BzrFn_OffensiveProcessDoSubTask },
-                { L"ScoutProcess", ".?AVScoutProcess@@", kScoutProcessVtableAddr,
-                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                { L"ScoutProcess", ".?AVScoutProcess@@", g_ScoutProcessVtableAddr,
+                  g_OffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
                   &g_BzrFn_OffensiveProcessDoSubTask },
-                { L"SoldierProcess", ".?AVSoldierProcess@@", kSoldierProcessVtableAddr,
-                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                { L"SoldierProcess", ".?AVSoldierProcess@@", g_SoldierProcessVtableAddr,
+                  g_OffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
                   &g_BzrFn_OffensiveProcessDoSubTask },
-                { L"TankProcess", ".?AVTankProcess@@", kTankProcessVtableAddr,
-                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                { L"TankProcess", ".?AVTankProcess@@", g_TankProcessVtableAddr,
+                  g_OffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
                   &g_BzrFn_OffensiveProcessDoSubTask },
-                { L"WingmanProcess", ".?AVWingmanProcess@@", kWingmanProcessVtableAddr,
-                  kGogOffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
+                { L"WingmanProcess", ".?AVWingmanProcess@@", g_WingmanProcessVtableAddr,
+                  g_OffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
                   &g_BzrFn_OffensiveProcessDoSubTask },
                 { L"GunTowerProcess", ".?AVGunTowerProcess@@",
-                  kGunTowerProcessVtableAddr, kGogGunTowerProcessDoSubTaskAddr,
+                  g_GunTowerProcessVtableAddr, g_GunTowerProcessDoSubTaskAddr,
                   reinterpret_cast<void*>(GunTowerProcessDoSubTaskHook),
                   &g_BzrFn_GunTowerProcessDoSubTask },
                 { L"TurretTankProcess", ".?AVTurretTankProcess@@",
-                  kTurretTankProcessVtableAddr, kGogTurretTankProcessDoSubTaskAddr,
+                  g_TurretTankProcessVtableAddr, g_TurretTankProcessDoSubTaskAddr,
                   reinterpret_cast<void*>(TurretTankProcessDoSubTaskHook),
                   &g_BzrFn_TurretTankProcessDoSubTask },
             };

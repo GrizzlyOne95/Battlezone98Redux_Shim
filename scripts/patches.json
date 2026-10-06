@@ -3132,6 +3132,162 @@
       "address": "0x02BF0420",
       "kind": "data",
       "identity": "global UI char size Y float"
+    },
+    {
+      "name": "RecycleTaskScrapDistanceCall",
+      "address": "0x005B680E",
+      "expected": "E8 9D B8 EA FF 83 C4 18 D9 5D BC F3 0F 10 45 BC",
+      "identity": "RecycleTask::InitLookingForScrap call to Dist3DSquared that scores each candidate after the team/material/region filters; path-scored scrap selection redirects it"
+    },
+    {
+      "name": "Dist3DSquared",
+      "address": "0x004620B0",
+      "expected": "55 8B EC 83 EC 2C A1 00 70 8E 00 33 C5",
+      "identity": "squared 3D distance helper"
+    },
+    {
+      "name": "FindPlanForObject",
+      "address": "0x004666C0",
+      "expected": "55 8B EC 51 8B 4D 08 83 C1 18 8B 45 08",
+      "identity": "AiPath plan lookup for an object"
+    },
+    {
+      "name": "AiPathGetLength",
+      "address": "0x00461110",
+      "expected": "55 8B EC 83 EC 18 89 4D F8 F3 0F 10 05 98 24 8A 00",
+      "identity": "AiPath::GetLength"
+    },
+    {
+      "name": "AiPathDelete",
+      "address": "0x00460640",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D FC E8 41 FF FF FF",
+      "identity": "AiPath delete"
+    },
+    {
+      "name": "RecycleTaskDoGotoScrap",
+      "address": "0x005B6AE0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 78 30 00",
+      "identity": "RecycleTask::DoGotoScrap; the en-route scrap retarget detours it"
+    },
+    {
+      "name": "AttackTaskDoState",
+      "address": "0x00478A50",
+      "expected": "55 8B EC 83 EC 7C 89 4D FC 8B 45 FC",
+      "identity": "AttackTask::DoState; the AI kite tuning detours it"
+    },
+    {
+      "name": "TerrainBlocksCraft",
+      "address": "0x00466D40",
+      "expected": "55 8B EC 51 8B 45 08 51 F3 0F 10 40 08",
+      "identity": "IsStuck's first test, bool cdecl(const float* position), true on terrain cell types 5 and 6"
+    },
+    {
+      "name": "OffensiveProcessDoSubTask",
+      "address": "0x00583520",
+      "expected": "55 8B EC 83 EC 58 89 4D F8 8B 45 F8",
+      "identity": "OffensiveProcess::DoSubTask (vtable slot 11 of the offensive-family processes)"
+    },
+    {
+      "name": "GunTowerProcessDoSubTask",
+      "address": "0x004E8780",
+      "expected": "55 8B EC 83 EC 2C 89 4D F8 8B 45 F8",
+      "identity": "GunTowerProcess::DoSubTask (vtable slot 11)"
+    },
+    {
+      "name": "TurretTankProcessDoSubTask",
+      "address": "0x005F6FF0",
+      "expected": "55 8B EC 83 EC 54 89 4D F8 C7 45 F0 00 00 00 00",
+      "identity": "TurretTankProcess::DoSubTask (vtable slot 11)"
+    },
+    {
+      "name": "GetGameTime",
+      "address": "0x00822D80",
+      "expected": "55 8B EC D9 05 2C 1B CC 02 5D C3 CC",
+      "identity": "game time getter"
+    },
+    {
+      "name": "TerrainGetIntersection",
+      "address": "0x00784620",
+      "expected": "55 8B EC 83 EC 4C F3 0F 5A 05 E4 50 CC 02",
+      "identity": "terrain ray intersection; AttackTask terrain line of sight"
+    },
+    {
+      "name": "ArtilleryProcessVtable",
+      "address": "0x00876024",
+      "kind": "data",
+      "identity": "RTTI .?AVArtilleryProcess@@ vtable; slot 11 DoSubTask"
+    },
+    {
+      "name": "BomberProcessVtable",
+      "address": "0x0088B178",
+      "kind": "data",
+      "identity": "RTTI .?AVBomberProcess@@ vtable"
+    },
+    {
+      "name": "GechProcessVtable",
+      "address": "0x0087A13C",
+      "kind": "data",
+      "identity": "RTTI .?AVGechProcess@@ vtable"
+    },
+    {
+      "name": "OffensiveProcessVtable",
+      "address": "0x00884C28",
+      "kind": "data",
+      "identity": "RTTI .?AVOffensiveProcess@@ vtable"
+    },
+    {
+      "name": "PersonProcessVtable",
+      "address": "0x00885984",
+      "kind": "data",
+      "identity": "RTTI .?AVPersonProcess@@ vtable"
+    },
+    {
+      "name": "RocketTankProcessVtable",
+      "address": "0x0088A5C0",
+      "kind": "data",
+      "identity": "RTTI .?AVRocketTankProcess@@ vtable"
+    },
+    {
+      "name": "ScoutProcessVtable",
+      "address": "0x0088AF98",
+      "kind": "data",
+      "identity": "RTTI .?AVScoutProcess@@ vtable"
+    },
+    {
+      "name": "SoldierProcessVtable",
+      "address": "0x00887D18",
+      "kind": "data",
+      "identity": "RTTI .?AVSoldierProcess@@ vtable"
+    },
+    {
+      "name": "TankProcessVtable",
+      "address": "0x0088AB9C",
+      "kind": "data",
+      "identity": "RTTI .?AVTankProcess@@ vtable"
+    },
+    {
+      "name": "WingmanProcessVtable",
+      "address": "0x0088A6EC",
+      "kind": "data",
+      "identity": "RTTI .?AVWingmanProcess@@ vtable"
+    },
+    {
+      "name": "GunTowerProcessVtable",
+      "address": "0x0087A87C",
+      "kind": "data",
+      "identity": "RTTI .?AVGunTowerProcess@@ vtable"
+    },
+    {
+      "name": "TurretTankProcessVtable",
+      "address": "0x00889710",
+      "kind": "data",
+      "identity": "RTTI .?AVTurretTankProcess@@ vtable"
+    },
+    {
+      "name": "HowitzerSecondaryVtable",
+      "address": "0x0087AE1C",
+      "kind": "data",
+      "identity": "RTTI .?AVHowitzer@@ secondary vtable"
     }
   ],
   "globals": [
