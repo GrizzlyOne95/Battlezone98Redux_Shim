@@ -18,6 +18,10 @@ namespace BZROpenShim::GeometryContactTest
         using SelectFn = bool(__cdecl*)(void*, int);
         using PropertiesFn = void*(__cdecl*)(void*, void*);
         constexpr unsigned kMaxNodes = 256;
+        // The generated Scion hulls reach 11146 source vertices. Cgeom_Create
+        // uses 14 bytes of temporary stack storage per vertex and ushort remap
+        // indices; 16384 stays bounded and below the index format's limit.
+        constexpr unsigned kMaxVertices = 16384;
         struct Node
         {
             void* object;
@@ -134,7 +138,12 @@ namespace BZROpenShim::GeometryContactTest
                 node.geometry = Field<void*>(node.object, 0x64);
                 if (!node.geometry) return false;
                 const unsigned vertices = Field<unsigned>(node.geometry, 4);
-                if (vertices <= 8 || vertices > 8192) return false;
+                if (vertices <= 8 || vertices > kMaxVertices)
+                {
+                    LogShimA(LogLevel::Warn, "geometrycontact", "part=%.8s rejected: source vertices=%u limit=%u",
+                        static_cast<char*>(node.object) + 8, vertices, kMaxVertices);
+                    return false;
+                }
                 const float* positions = Field<const float*>(node.geometry, 0x0c);
                 if (!positions) return false;
                 float lo[3] = {positions[0], positions[1], positions[2]};
