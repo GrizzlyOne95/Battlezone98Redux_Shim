@@ -3030,6 +3030,108 @@
       "address": "0x00950190",
       "kind": "data",
       "identity": "the global ChunkEffect; stock ProximityMine detonation calls CreateChunklet on it 20 times (mov ecx, offset at 0x005B1113)"
+    },
+    {
+      "name": "OptionsInputCtor",
+      "address": "0x007B25B0",
+      "expected": "55 8B EC 6A FF 68 73 12 86 00",
+      "identity": "cUI_OptionsInput constructor (FUN_007b25b0, recovered from string xrefs); the input binding UI detours it"
+    },
+    {
+      "name": "OptionsInputKeyReleased",
+      "address": "0x007B48C0",
+      "expected": "55 8B EC 81 EC 54 01 00 00 A1 00 70 8E 00",
+      "identity": "cUI_OptionsInput key-released handler; the key capture hook detours it"
+    },
+    {
+      "name": "OptionsInputScreenFactoryCaller",
+      "address": "0x007C8600",
+      "expected": "E8 AB 9F FE FF 89 85 B4 FD FF FF",
+      "identity": "options shell screen factory that constructs cUI_OptionsInput (log only)"
+    },
+    {
+      "name": "OptionsInputBackClick",
+      "address": "0x007B2210",
+      "expected": "55 8B EC 8B 0D B8 55 94 00 E8 42 5E FD FF",
+      "identity": "cUI_OptionsInput Back button click thunk"
+    },
+    {
+      "name": "OptionsInputJoystickClick",
+      "address": "0x007B2220",
+      "expected": "55 8B EC 8B 0D B8 55 94 00 E8 D2 00 00 00",
+      "identity": "cUI_OptionsInput Joystick button click thunk; the ctor-local Joystick button is found by this value in its +0x154 click slot"
+    },
+    {
+      "name": "OptionsInputDefaultsClick",
+      "address": "0x007B2230",
+      "expected": "55 8B EC 8B 0D B8 55 94 00 E8 E2 00 00 00",
+      "identity": "cUI_OptionsInput Default button click thunk; matched like the Joystick one"
+    },
+    {
+      "name": "OptionsParentCtor",
+      "address": "0x007B61A0",
+      "expected": "55 8B EC 6A FF 68 60 13 86 00",
+      "identity": "cUI_OptionsParent constructor (FUN_007b61a0: esc_center.png overlay plus Play/Graphic/Audio/Input buttons)"
+    },
+    {
+      "name": "MainScreenMenuSetup",
+      "address": "0x0078D000",
+      "expected": "55 8B EC 6A FF 68 12 EC 85 00",
+      "identity": "cUI_MainScreen menu setup void __thiscall(this, char); builds SinglePlayer_MainScreen and friends under this+0x158"
+    },
+    {
+      "name": "OptionsParentInputClick",
+      "address": "0x007B6100",
+      "expected": "55 8B EC 8B 0D C4 55 94 00 E8 52 00 00 00",
+      "identity": "cUI_OptionsParent Input click thunk (switches the options shell to screen 0x15); the OpenShim settings button reuses it"
+    },
+    {
+      "name": "OptionsInputDtor",
+      "address": "0x007B4870",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC C7 00 30 F9 89 00 8B 4D FC E8 28 D6 01 00",
+      "identity": "cUI_OptionsInput inner destructor (called by vtable slot 0 scalar deleting dtor)"
+    },
+    {
+      "name": "OptionsParentDtor",
+      "address": "0x007B6850",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC C7 00 34 FC 89 00 8B 4D FC E8 48 B6 01 00",
+      "identity": "cUI_OptionsParent inner destructor"
+    },
+    {
+      "name": "ReadMappingTable",
+      "address": "0x00620010",
+      "expected": "55 8B EC 81 EC DC 02 00 00 A1 00 70 8E 00",
+      "identity": "input.map reader; the live input.map reload calls it"
+    },
+    {
+      "name": "UiTextMeasure",
+      "address": "0x00689AB0",
+      "expected": "55 8B EC 83 EC 24 83 7D 10 00",
+      "identity": "cdecl (font, text, &w, &h) UI text measure, walks the string with the global char size"
+    },
+    {
+      "name": "OptionsInputSingleton",
+      "address": "0x009455B8",
+      "kind": "data",
+      "identity": "cUI_OptionsInput singleton pointer, non-null while the stock input screen is alive"
+    },
+    {
+      "name": "UiFontContext",
+      "address": "0x0091552C",
+      "kind": "data",
+      "identity": "global font the UI text uses"
+    },
+    {
+      "name": "UiFontCharSizeX",
+      "address": "0x02BF041C",
+      "kind": "data",
+      "identity": "global UI char size X float read by the per-char advance calls"
+    },
+    {
+      "name": "UiFontCharSizeY",
+      "address": "0x02BF0420",
+      "kind": "data",
+      "identity": "global UI char size Y float"
     }
   ],
   "globals": [
