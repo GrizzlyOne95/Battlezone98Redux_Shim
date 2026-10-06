@@ -163,6 +163,11 @@ namespace BZROpenShim
             // Carrier::GetWeapon result for the selected mask; an empty
             // selected hardpoint gets a non-SNIP stand-in instead of null.
             { 0, HookEngine::PatchType::REL32, {}, "Person Sniper Scan Weapon Null Guard", false, {} },
+            // PathBlockFaces: BlockCells entry detour. ODFs with pathBlock =
+            // "faces"/"none" block only the path-grid cells inside their
+            // collision solids; every other object keeps the stock box.
+            // Removed at startup when [General] PathBlockFaces = 0.
+            { 0, HookEngine::PatchType::JMP5, {}, "Path Block Faces BlockCells Hook", false, {} },
             // LensFlare::~LensFlare at 0x004F9250 runs from an atexit thunk
             // during CRT exit, after Ogre::MaterialManager has been destroyed.
             // It calls getSingleton and dereferences the null result twice for
