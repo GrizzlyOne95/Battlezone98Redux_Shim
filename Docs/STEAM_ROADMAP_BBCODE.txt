@@ -58,6 +58,8 @@ The rc7 source checkpoint passed repository/package checks and the read-only ins
 
 Windows GOG 2.2.301 Fury A/B testing completed eight centre/edge and creation-order passes with surviving craft and zero stock fallbacks. ISDFC's five-new-Scion-craft ordered pair matrix accepted geometry selection for all five targets and retains 44/150 measured passes with zero stock fallbacks or flagged excessive speeds. The remaining combinations and no-contact GEO cases are unqualified. Prototype support is opt-in and unreleased; other builds/platforms, multiplayer, morph extremes and save/load physical contact remain unqualified. Technical scope and measurements live in [code]Docs/GEOMETRY_CONTACT_TEST.md[/code] and ISDFC's collision test documentation.
 
+Stock [code]avtank[/code]/[code]svtank[/code] controls complete 48/48 ordered pair/mode/lane/speed passes at 12 and 24 m/s. All 24 GEO passes produce contact, both craft survive and no stock fallback or excessive speed is flagged. These positive controls do not resolve the model-specific Scion misses or qualify exact contact normals.
+
 [h2]High Priority[/h2]
 
 [h3]OpenShim Update / Repair Parity[/h3]
