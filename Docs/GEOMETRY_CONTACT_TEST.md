@@ -2,7 +2,17 @@
 
 The local ISDFC `isdftest` COLLISION page selects one Fury Warrior (`fvtankf`).
 EXU exposes `exu.collision`; the optional winmm SDK bridge delegates to OpenShim.
-Nothing is enabled automatically in the permanent mission or other campaigns.
+The OpenShim Settings **Vehicle Geometry** toggle requests automatic contact
+for all supported vehicles. It defaults **OFF**, requires a process restart,
+and is Windows GOG / single player only. Its INI key is:
+
+```ini
+[SinglePlayer]
+VehicleGeometryContact = 0
+```
+
+The permanent mission does not turn this preference on. `COLP` describes a
+box/sphere, so rewriting VDF bounds cannot express polygon hull contact.
 
 ## Contact path and scope
 
@@ -26,11 +36,19 @@ Nothing is enabled automatically in the permanent mission or other campaigns.
 
 ## Ownership and failure behavior
 
-Only one handle is selected. Round-trip its generation through the live object
-arena and verify its GameObject and root before walking the remembered tree.
+EXU can explicitly select one handle, overriding the global policy for its
+pairs (including an intentional BOX selection). Automatic mode selects native
+argument B as the geometry target and builds each craft's native caches on its
+first eligible contact. It does not require mission Lua or ODF edits.
+Round-trip the generation through the live object arena and verify its
+GameObject and root before walking the remembered tree.
 Changed trees/geometry pointers fall back to stock and increment `fallbacks`.
 Recreate the target to qualify its new hierarchy. Cache limits: 256 nodes,
-16384 vertices per physical part; allocation/validation failures reject selection.
+16384 vertices per physical part, 65536 total vertices and 131072 faces per
+craft; allocation/validation failures reject selection. Automatic caches are
+bounded to 128 targets and 500000 faces with oldest-use eviction. Unsupported
+or changed targets remain stock until removed/recreated, cleared or evicted.
+This avoids attempting native allocations on every rejected contact.
 The generated Spitter, Spearhead and Leviathan hulls contain 9469, 9619 and
 11146 vertices respectively. Cgeom_Create uses 14 bytes of temporary stack
 storage per source vertex and ushort remap indices; the bounded 16384 limit
@@ -38,7 +56,11 @@ allows these hulls while staying below the index format's capacity.
 
 Caches are detached outside contact. Free them via native Cgeom_Delete on a
 temporary object containing only the owned +0x9C pointer; never dereference a
-destroyed part to free memory. EXU clears selection on mission reset/close.
+destroyed part to free memory. A main-thread tick retires removed/replaced
+automatic targets. Mission transitions and scene teardown clear all caches;
+EXU also clears them on mission reset/close. Clearing retains the global INI
+preference, so subsequent contacts can rebuild. Every hook call checks the
+existing fail-closed single-player gate, including explicit EXU selections.
 The process-owned hook keeps no EXU function pointers. Lua/native APIs must be
 called on the mission simulation thread, as the EXU bindings do.
 
@@ -98,7 +120,9 @@ not proof of exact normals or a substitute for resolving the Scion misses.
 
 **UNKNOWN:** production suitability on all craft, animated extreme poses,
 save/load gameplay contact, multiplayer determinism, and Steam/Wine/Proton.
-This is a one-craft contact experiment, not a global collision mode.
+Automatic mode is implemented but has not received live all-vehicle
+qualification. It uses the same one-target legacy-GEO / source-COLP algorithm,
+preserving stock broadphase; it is not mutual polygon contact.
 
 ## SDK and Lua
 
@@ -119,3 +143,14 @@ stops because that environment has no `node`; Linux qualification is incomplete.
 Local deployment uses Deploy-OpenShim.ps1 for the complete winmm/bzloader/plugin/
 patches/resources set, plus the rebuilt EXU and ISDFC scripts, with backups.
 No release, Workshop publication or global ODF collision rewrite is performed.
+
+## Global toggle validation (2026-10-06)
+
+Release Win32 plugin build, INI shipping/default tests and all 79 Windows CTests
+pass. A fake-engine test exercises the production implementation: default-off
+dispatch, multiple automatic targets, EXU BOX precedence, removal, generation
+reuse, changed geometry, unsupported tiny geometry, MP blocking, native-fault
+field restoration, mission cleanup, entry eviction and the face budget.
+These checks qualify cache policy/ownership, not the native geometry solver.
+No new live session or installed-binary replacement was performed for this
+toggle at the user's request to commit and push for now.
