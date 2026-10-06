@@ -2292,6 +2292,54 @@
       "address": "0x009455C4",
       "kind": "data",
       "identity": "Global holding the live Options screen, the parent native_ui attaches Options widgets to"
+    },
+    {
+      "name": "DynamicGeometrySetSquaredViewDepth",
+      "address": "0x0067A780",
+      "expected": "55 8B EC 83 EC 08 89 4D FC 8B 45 FC",
+      "identity": "DynamicGeometry squared view depth (alpha sort key) setter; dynamic alpha depth batching detours it"
+    },
+    {
+      "name": "DynamicGeometryPrepare",
+      "address": "0x00678CD0",
+      "expected": "55 8B EC 6A FF 68 50 F3 84 00 64 A1 00 00 00 00",
+      "identity": "DynamicGeometry::prepareForSubmit; opt-in Ogre profiler observer"
+    },
+    {
+      "name": "GetPlayerHandle",
+      "address": "0x005C7FB0",
+      "expected": "55 8B EC 83 EC 08 E8 B5 FC E4 FF 89 45 FC",
+      "identity": "GetPlayerHandle(): handle of the local player object"
+    },
+    {
+      "name": "SatelliteMaxZoomCompare",
+      "address": "0x00587E68",
+      "expected": "0F 2F 05 F4 23 87 00 76 10 8B 4D EC",
+      "identity": "comiss xmm0,[max zoom] in the satellite zoom clamp; operand at +3 is the .rdata maximum"
+    },
+    {
+      "name": "SatellitePanSpeedLoad",
+      "address": "0x00587BE6",
+      "expected": "F3 0F 10 05 D0 91 9C 00 F3 0F 59 45 D8",
+      "identity": "movss xmm0,[pan speed] in the satellite pan step; operand at +4 is the .data pan speed"
+    },
+    {
+      "name": "OrdnanceSpawnVelocitySite",
+      "address": "0x004803D4",
+      "expected": "8B 4D F0 89 08 8B 55 F4 89 50 04 8B 4D F8 89 48 08 8B 55 E0 8B 42 0C 8B 4D E0",
+      "identity": "Ordnance spawn velocity copy (mov ecx,[ebp-0x10]; mov [eax],ecx; ...); the spawn-velocity detour overwrites 8 bytes and its stub reads the host frame"
+    },
+    {
+      "name": "CannonLeadVelocitySite",
+      "address": "0x0048F658",
+      "expected": "8B 45 E0 8B 48 0C F3 0F 10 41 54 F3 0F 11 45 CC 8B 55 E0 F2 0F 5A 42 50",
+      "identity": "Cannon lead solve target-velocity load (mov eax,[ebp-0x20]; mov ecx,[eax+0x0C]); the cannon-lead detour overwrites 6 bytes and its stub reads the host frame"
+    },
+    {
+      "name": "CannonLeadToleranceBranch",
+      "address": "0x0048F639",
+      "expected": "0F 86 F0 01 00 00 8B 4D 0C E8 69 2E FD FF 8B 10 89 55 E4 8B 48 04 89 4D E8",
+      "identity": "jbe skipping the cannon lead solve for a target slower than 0.1 m/s; NOPed while lead compensation runs"
     }
   ],
   "globals": [

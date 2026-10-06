@@ -76,7 +76,7 @@ namespace BZROpenShim
         // come out for the compensation to be observable at all. It is only
         // ever applied while the compensation is actually running: on its own
         // it would make a moving shooter's aim worse, not better.
-        constexpr uintptr_t kOrdnanceSpawnVelocityAddr = 0x004803D4;
+        static uintptr_t g_OrdnanceSpawnVelocityAddr = 0;
         constexpr size_t kOrdnanceSpawnVelocityPatchLen = 8;
         // mov ecx,[ebp-0x10] ; mov [eax],ecx ; mov edx,[ebp-0x0C]
         constexpr uint8_t kOrdnanceSpawnVelocityExpected[kOrdnanceSpawnVelocityPatchLen] =
@@ -84,7 +84,7 @@ namespace BZROpenShim
             0x8B, 0x4D, 0xF0, 0x89, 0x08, 0x8B, 0x55, 0xF4
         };
 
-        constexpr uintptr_t kCannonLeadVelocityAddr = 0x0048F658;
+        static uintptr_t g_CannonLeadVelocityAddr = 0;
         constexpr size_t kCannonLeadVelocityPatchLen = 6;
         // mov eax,[ebp-0x20] ; mov ecx,[eax+0x0C]
         constexpr uint8_t kCannonLeadVelocityExpected[kCannonLeadVelocityPatchLen] =
@@ -92,7 +92,7 @@ namespace BZROpenShim
             0x8B, 0x45, 0xE0, 0x8B, 0x48, 0x0C
         };
 
-        constexpr uintptr_t kCannonLeadToleranceAddr = 0x0048F639;
+        static uintptr_t g_CannonLeadToleranceAddr = 0;
         constexpr size_t kCannonLeadTolerancePatchLen = 6;
         // jbe 0x0048F82F -- the "target is barely moving, skip the lead solve"
         // branch guarded by the 0.1f at 0x008A2538.
@@ -160,13 +160,13 @@ namespace BZROpenShim
         static volatile long g_CannonLeadVelocityAppliedCount = 0;
 
         // --- Ordnance velocity inheritance ------------------------------------
-        // See the site trace next to kOrdnanceSpawnVelocityAddr above.
+        // See the site trace next to g_OrdnanceSpawnVelocityAddr above.
 
         // Defined further down this file; both thunk helpers need it.
 
         static bool WriteCannonLeadToleranceBytes(const uint8_t* bytes)
         {
-            auto* target = reinterpret_cast<uint8_t*>(kCannonLeadToleranceAddr);
+            auto* target = reinterpret_cast<uint8_t*>(g_CannonLeadToleranceAddr);
             DWORD oldProtect = 0;
             if (!VirtualProtect(target,
                                 kCannonLeadTolerancePatchLen,
@@ -174,7 +174,7 @@ namespace BZROpenShim
                                 &oldProtect))
             {
                 Log(L"[ORDVEL] Lead-tolerance VirtualProtect failed at 0x%08X\n",
-                    static_cast<uint32_t>(kCannonLeadToleranceAddr));
+                    static_cast<uint32_t>(g_CannonLeadToleranceAddr));
                 return false;
             }
 
@@ -196,7 +196,7 @@ namespace BZROpenShim
 
             if (wantActive)
             {
-                if (!ExpectedBytesMatchAt(kCannonLeadToleranceAddr,
+                if (!ExpectedBytesMatchAt(g_CannonLeadToleranceAddr,
                                           kCannonLeadToleranceExpected,
                                           sizeof(kCannonLeadToleranceExpected)))
                 {
@@ -206,12 +206,12 @@ namespace BZROpenShim
                 {
                     g_CannonLeadTolerancePatchActive = true;
                     Log(L"[ORDVEL] Applied lead-tolerance bypass at 0x%08X (SP-only)\n",
-                        static_cast<uint32_t>(kCannonLeadToleranceAddr));
+                        static_cast<uint32_t>(g_CannonLeadToleranceAddr));
                 }
             }
             else
             {
-                if (ExpectedBytesMatchAt(kCannonLeadToleranceAddr,
+                if (ExpectedBytesMatchAt(g_CannonLeadToleranceAddr,
                                          kCannonLeadTolerancePatched,
                                          sizeof(kCannonLeadTolerancePatched)))
                 {
@@ -219,7 +219,7 @@ namespace BZROpenShim
                     {
                         g_CannonLeadTolerancePatchActive = false;
                         Log(L"[ORDVEL] Reverted lead-tolerance bypass at 0x%08X\n",
-                            static_cast<uint32_t>(kCannonLeadToleranceAddr));
+                            static_cast<uint32_t>(g_CannonLeadToleranceAddr));
                     }
                 }
                 else
@@ -433,7 +433,7 @@ namespace BZROpenShim
 
             if (!g_OrdnanceSpawnVelocityDetourInstalled &&
                 InstallInlineDetour32(g_OrdnanceSpawnVelocityDetour,
-                                      kOrdnanceSpawnVelocityAddr,
+                                      g_OrdnanceSpawnVelocityAddr,
                                       reinterpret_cast<void*>(&OrdnanceSpawnVelocityThunk),
                                       kOrdnanceSpawnVelocityPatchLen,
                                       kOrdnanceSpawnVelocityExpected,
@@ -442,13 +442,13 @@ namespace BZROpenShim
                 g_OrdnanceSpawnVelocityResume = g_OrdnanceSpawnVelocityDetour.trampoline;
                 g_OrdnanceSpawnVelocityDetourInstalled = true;
                 Log(L"[ORDVEL] Installed spawn-velocity detour at 0x%08X trampoline=0x%08X\n",
-                    static_cast<uint32_t>(kOrdnanceSpawnVelocityAddr),
+                    static_cast<uint32_t>(g_OrdnanceSpawnVelocityAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OrdnanceSpawnVelocityResume)));
             }
 
             if (!g_CannonLeadVelocityDetourInstalled &&
                 InstallInlineDetour32(g_CannonLeadVelocityDetour,
-                                      kCannonLeadVelocityAddr,
+                                      g_CannonLeadVelocityAddr,
                                       reinterpret_cast<void*>(&CannonLeadVelocityThunk),
                                       kCannonLeadVelocityPatchLen,
                                       kCannonLeadVelocityExpected,
@@ -457,7 +457,7 @@ namespace BZROpenShim
                 g_CannonLeadVelocityResume = g_CannonLeadVelocityDetour.trampoline;
                 g_CannonLeadVelocityDetourInstalled = true;
                 Log(L"[ORDVEL] Installed cannon-lead detour at 0x%08X trampoline=0x%08X\n",
-                    static_cast<uint32_t>(kCannonLeadVelocityAddr),
+                    static_cast<uint32_t>(g_CannonLeadVelocityAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CannonLeadVelocityResume)));
             }
 
@@ -473,7 +473,7 @@ namespace BZROpenShim
                 {
                     Log(L"[ORDVEL] Spawn-velocity site at 0x%08X never matched after %d "
                         L"attempts; ordnance velocity inheritance unavailable on this build\n",
-                        static_cast<uint32_t>(kOrdnanceSpawnVelocityAddr),
+                        static_cast<uint32_t>(g_OrdnanceSpawnVelocityAddr),
                         g_OrdnanceVelocityDetourAttempts);
                 }
                 else
@@ -481,7 +481,7 @@ namespace BZROpenShim
                     Log(L"[ORDVEL] Cannon-lead site at 0x%08X never matched after %d "
                         L"attempts; spawn inheritance is active but lead compensation "
                         L"and its tolerance bypass stay off\n",
-                        static_cast<uint32_t>(kCannonLeadVelocityAddr),
+                        static_cast<uint32_t>(g_CannonLeadVelocityAddr),
                         g_OrdnanceVelocityDetourAttempts);
                 }
             }
@@ -494,11 +494,31 @@ namespace BZROpenShim
         // validation, so a build whose Cannon layout differs degrades to
         // spawn-velocity inheritance instead of feeding the weapon solver a
         // pointer it cannot trust.
+        // The three sites are rows; their guards run well past the bytes the
+        // detours overwrite, because the stubs also read the host frame.
+        static bool OrdnanceVelocityAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "OrdnanceSpawnVelocitySite", &g_OrdnanceSpawnVelocityAddr },
+                    { "CannonLeadVelocitySite", &g_CannonLeadVelocityAddr },
+                    { "CannonLeadToleranceBranch", &g_CannonLeadToleranceAddr },
+                };
+                return HookEngine::BindEngineRows("Ordnance velocity inheritance", rows);
+            }();
+            return bound;
+        }
+
         void RefreshOrdnanceVelocityInheritanceState()
         {
-            if (!HookEngine::LiteralAddressesApply("Ordnance velocity inheritance")) return;
             const bool wantActive =
                 g_OrdnanceVelocityInheritanceEnabled && IsSinglePlayerSession();
+            // Nothing wanted and nothing live: no need to know the sites.
+            if (!wantActive && !g_OrdnanceSpawnVelocityDetourInstalled &&
+                !g_CannonLeadTolerancePatchActive)
+                return;
+            if (!OrdnanceVelocityAddressesBound())
+                return;
 
             if (wantActive)
                 EnsureOrdnanceVelocityDetours();
@@ -526,7 +546,6 @@ namespace BZROpenShim
         // baseline, then reconcile (which also re-applies the multiplayer gate).
         void RevertOrdnanceVelocityInheritanceToBaseline()
         {
-            if (!HookEngine::LiteralAddressesApply("Ordnance velocity inheritance")) return;
             g_OrdnanceVelocityInheritanceEnabled = g_OrdnanceVelocityInheritanceBaselineEnabled;
             RefreshOrdnanceVelocityInheritanceState();
         }

@@ -97,6 +97,50 @@ namespace BZROpenShim
             return s_expected;
         }
 
+        uintptr_t FindMainImageImportSlot(const char* dllName, const char* importName)
+        {
+            const uintptr_t base = GetMainModuleBase();
+            if (!base || !dllName || !importName)
+                return 0;
+            __try
+            {
+                const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+                if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+                    return 0;
+                const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
+                if (nt->Signature != IMAGE_NT_SIGNATURE)
+                    return 0;
+                const IMAGE_DATA_DIRECTORY& dir =
+                    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+                if (dir.VirtualAddress == 0)
+                    return 0;
+                for (auto* desc = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(base + dir.VirtualAddress);
+                     desc->Name != 0;
+                     ++desc)
+                {
+                    if (_stricmp(reinterpret_cast<const char*>(base + desc->Name), dllName) != 0)
+                        continue;
+                    if (desc->OriginalFirstThunk == 0)
+                        return 0;
+                    const auto* names =
+                        reinterpret_cast<const IMAGE_THUNK_DATA32*>(base + desc->OriginalFirstThunk);
+                    for (size_t i = 0; names[i].u1.AddressOfData != 0; ++i)
+                    {
+                        if (IMAGE_SNAP_BY_ORDINAL32(names[i].u1.Ordinal))
+                            continue;
+                        const auto* byName = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(
+                            base + names[i].u1.AddressOfData);
+                        if (strcmp(reinterpret_cast<const char*>(byName->Name), importName) == 0)
+                            return base + desc->FirstThunk + i * sizeof(IMAGE_THUNK_DATA32);
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            return 0;
+        }
+
         uintptr_t WorldRenderOriginAddr()
         {
             static uintptr_t s_addr = 0;

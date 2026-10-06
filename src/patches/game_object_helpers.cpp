@@ -109,7 +109,32 @@ namespace BZROpenShim
                           ObjectLayout::kGameObjectMaxAmmoObfuscated,
                       "target handle must not alias obfuscated maxAmmo");
 
-        constexpr uintptr_t kLocalPlayerNetIdAddr = 0x009180D4;
+        // The net id global, taken from the operand of the GetLocalPlayerNetId
+        // accessor (`push ebp; mov ebp,esp; mov ax,[global]; pop ebp; ret`),
+        // whose whole body the resolve table's pattern verifies. 0 until it
+        // resolves. Each failed resolve logs, so a build that never resolves
+        // stops asking after a bounded number of tries.
+        static uintptr_t LocalPlayerNetIdAddr()
+        {
+            static uintptr_t s_addr = 0;
+            static int s_attempts = 0;
+            if (s_addr != 0 || s_attempts >= 32)
+                return s_addr;
+            ++s_attempts;
+            const uint32_t accessor = HookEngine::ResolveNamedAddress("GetLocalPlayerNetId");
+            if (accessor == 0)
+                return 0;
+            __try
+            {
+                const auto* code = reinterpret_cast<const uint8_t*>(accessor);
+                if (code[3] == 0x66 && code[4] == 0xA1)
+                    s_addr = *reinterpret_cast<const uint32_t*>(code + 5);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            return s_addr;
+        }
         // Returned when the net id cannot be read at all. Every SinglePlayer-tier
         // gate is written as "net id == 0", so a sentinel that is not 0 makes an
         // unreadable net id stand the feature down instead of enabling it. This
@@ -123,9 +148,12 @@ namespace BZROpenShim
         // correct for the sentinel as well.
         uint16_t ReadLocalPlayerNetIdValue()
         {
+            const uintptr_t netIdAddr = LocalPlayerNetIdAddr();
+            if (netIdAddr == 0)
+                return kLocalPlayerNetIdUnreadable;
             __try
             {
-                return *reinterpret_cast<volatile const uint16_t*>(kLocalPlayerNetIdAddr);
+                return *reinterpret_cast<volatile const uint16_t*>(netIdAddr);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -580,11 +608,12 @@ namespace BZROpenShim
     // calling this.
     void ResolveLocalPlayerLookupForVerifiedGogBuild()
     {
-        if (!HookEngine::LiteralAddressesApply("Local player lookup")) return;
         if (!g_BzrFn_GetPlayerHandle)
         {
-            g_BzrFn_GetPlayerHandle =
-                reinterpret_cast<FnGetPlayerHandle>(kGogGetPlayerHandleAddr);
+            const uint32_t getPlayerHandle = HookEngine::EngineAddress("GetPlayerHandle");
+            if (getPlayerHandle == 0)
+                return;
+            g_BzrFn_GetPlayerHandle = reinterpret_cast<FnGetPlayerHandle>(getPlayerHandle);
         }
         if (!g_BzrFn_GameObjectGetObjByHandle)
         {

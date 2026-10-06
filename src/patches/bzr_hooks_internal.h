@@ -541,6 +541,10 @@ namespace BZROpenShim
         // alike. Rebased to the live image; 0 when the row is not bound, which
         // no vtable slot equals, so every check fails closed.
         uintptr_t ExpectedGameObjectGetTeamAddr();
+        // The main image's import address table slot for dllName!importName,
+        // found through the import name table so it follows the build. 0 when
+        // the image does not import it by name.
+        uintptr_t FindMainImageImportSlot(const char* dllName, const char* importName);
         inline constexpr uintptr_t kGogPreferredImageBase = 0x00400000;
         bool IsLikelyGameObjectEntry(void* objectPtr);
         bool WritePointerValue(uintptr_t address, void* value);
@@ -1412,7 +1416,7 @@ namespace BZROpenShim
         // (0x477590). This is the inner void-overload the Lua wrapper (0x4FFCD0) calls on
         // its non-numeric branch, matching the 1.5 decomp. Previous 0x00514610 was WRONG
         // (mid-instruction, same failure class as the fixed GetObjByHandle).
-        inline constexpr uintptr_t kGogGetPlayerHandleAddr = 0x005C7FB0;
+        // Now the GetPlayerHandle engine_addresses row.
         struct JumpSnipeProbeSnapshot
         {
             bool valid = false;
