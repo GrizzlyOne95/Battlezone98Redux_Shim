@@ -93,17 +93,40 @@ namespace BZROpenShim
     //   - touches no material LOD, shader, split distance, or headlight state.
     namespace ShadowFarOverride
     {
-        // FUN_00680fe0: shadow-texture/PSSM/viewport-scheme apply.
-        constexpr uintptr_t kShadowApplyFnRva = 0x00280FE0;
-        // DAT_0094672c -> settings struct; +0x25 shadow quality (sbyte).
-        constexpr uintptr_t kShadowSettingsPtrRva = 0x0054672C;
-        // 0x008ED0BC: per-quality mode bytes (0 = single map, 1 = PSSM).
-        constexpr uintptr_t kShadowModeTableRva = 0x004ED0BC;
-        // Validated GOG 2.2.301 module identities (exe SHA-256
-        // 8D71F56C...; OgreMain SHA-256 E5E69396... — PE timestamp/size here,
-        // full-hash checks exist in the features that write memory elsewhere).
-        constexpr DWORD kExpectedExeTimestamp = 0x58D9D6CC;
-        constexpr DWORD kExpectedExeImageSize = 0x0290F000;
+        // The ShadowApply row (FUN_00680fe0: shadow-texture/PSSM/viewport-
+        // scheme apply). Its guard covers the two globals it reads first:
+        //   +0x13 `mov eax,[settings]` -> settings struct; +0x25 shadow
+        //         quality (sbyte);
+        //   +0x39 `movzx eax,byte [edx+modeTable]` -> per-quality mode bytes
+        //         (0 = single map, 1 = PSSM).
+        // Both are taken from those operands rather than written down.
+        uintptr_t g_ShadowApplyAddr = 0;
+        uintptr_t g_ShadowSettingsPtrAddr = 0;
+        uintptr_t g_ShadowModeTableAddr = 0;
+
+        bool ShadowApplyAddressesBound()
+        {
+            static const bool bound = [] {
+                uint32_t apply = 0;
+                const HookEngine::EngineRow rows[] = {
+                    { "ShadowApply", &apply },
+                };
+                if (!HookEngine::BindEngineRows("Shadow far distance", rows))
+                    return false;
+                const auto* code = reinterpret_cast<const uint8_t*>(apply);
+                if (code[0x13] != 0xA1 || code[0x39] != 0x0F || code[0x3A] != 0xB6 || code[0x3B] != 0x82)
+                    return false;
+                g_ShadowApplyAddr = apply;
+                g_ShadowSettingsPtrAddr = *reinterpret_cast<const uint32_t*>(code + 0x14);
+                g_ShadowModeTableAddr = *reinterpret_cast<const uint32_t*>(code + 0x3C);
+                return true;
+            }();
+            return bound;
+        }
+
+        // Validated OgreMain identity (SHA-256 E5E69396...; PE timestamp/size
+        // here): the SceneManager vtable slots below are OgreMain facts, so a
+        // different OgreMain stands this down even when the exe rows bind.
         constexpr DWORD kExpectedOgreTimestamp = 0x5866BF6A;
         constexpr DWORD kExpectedOgreImageSize = 0x00A65000;
         // SceneManager vtable slots, confirmed two ways: FUN_00680fe0 calls
@@ -248,9 +271,7 @@ namespace BZROpenShim
 
             __try
             {
-                const HMODULE exe = GetModuleHandleA(nullptr);
-                auto* settingsPtr = *reinterpret_cast<uint8_t**>(
-                    reinterpret_cast<uintptr_t>(exe) + kShadowSettingsPtrRva);
+                auto* settingsPtr = *reinterpret_cast<uint8_t**>(g_ShadowSettingsPtrAddr);
                 int quality = -1;
                 bool pssm = false;
                 if (settingsPtr)
@@ -259,8 +280,7 @@ namespace BZROpenShim
                     if (quality >= 0 && quality <= 4)
                     {
                         pssm = *reinterpret_cast<const int8_t*>(
-                            reinterpret_cast<uintptr_t>(exe)
-                            + kShadowModeTableRva + quality) != 0;
+                            g_ShadowModeTableAddr + quality) != 0;
                     }
                 }
 
@@ -383,7 +403,6 @@ namespace BZROpenShim
 
     void InstallShadowFarOverrideIfPossible()
     {
-        if (!HookEngine::LiteralAddressesApply("Shadow far distance")) return;
         using namespace ShadowFarOverride;
         if (g_InstallAttempted)
             return;
@@ -406,11 +425,16 @@ namespace BZROpenShim
             return;
         }
 
-        if (!ModuleIdentityMatches(exe, kExpectedExeTimestamp, kExpectedExeImageSize)
-            || !ModuleIdentityMatches(ogre, kExpectedOgreTimestamp, kExpectedOgreImageSize))
+        if (!ModuleIdentityMatches(ogre, kExpectedOgreTimestamp, kExpectedOgreImageSize))
         {
             LogShimA(LogLevel::Warn, "SHADOWFAR",
-                "unsupported exe/OgreMain build; shadow-far override not installed");
+                "unsupported OgreMain build; shadow-far override not installed");
+            return;
+        }
+        if (!ShadowApplyAddressesBound())
+        {
+            LogShimA(LogLevel::Warn, "SHADOWFAR",
+                "apply routine does not bind on this build; shadow-far override not installed");
             return;
         }
 
@@ -418,7 +442,7 @@ namespace BZROpenShim
         // instructions, so the verbatim-copy trampoline is instruction-safe.
         static const uint8_t expected[] =
             { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x94, 0x00, 0x00, 0x00 };
-        const uintptr_t target = reinterpret_cast<uintptr_t>(exe) + kShadowApplyFnRva;
+        const uintptr_t target = g_ShadowApplyAddr;
         if (!InstallInlineDetour32(g_ApplyDetour, target,
                 reinterpret_cast<void*>(&ApplyHook), sizeof(expected),
                 expected, sizeof(expected)))
@@ -429,10 +453,10 @@ namespace BZROpenShim
         }
 
         LogShimA(LogLevel::Info, "SHADOWFAR",
-            "installed override=%.2f applyRva=0x%08lX (stock %.2f reissued "
+            "installed override=%.2f apply=0x%08lX (stock %.2f reissued "
             "after each stock apply; stock-exact when the env var is unset)",
             static_cast<double>(g_OverrideDistance),
-            static_cast<unsigned long>(kShadowApplyFnRva),
+            static_cast<unsigned long>(g_ShadowApplyAddr),
             static_cast<double>(kStockFarDistance));
     }
 }

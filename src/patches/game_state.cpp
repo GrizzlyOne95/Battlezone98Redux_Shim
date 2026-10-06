@@ -8,13 +8,31 @@ namespace BZROpenShim
 {
     namespace
     {
-        constexpr uintptr_t kMultiplayerPauseFlagAddr = 0x00945549;
-        constexpr uintptr_t kMultiplayerPauseRootAddr = 0x0094557C;
-        constexpr uintptr_t kSingleplayerPauseRootAddr = 0x009454EC;
+        // engine_addresses rows, bound together; every probe reads "not
+        // open" / unreadable when they do not bind on this build.
+        uint32_t g_MultiplayerPauseFlagAddr = 0;
+        uint32_t g_MultiplayerPauseRootAddr = 0;
+        uint32_t g_SingleplayerPauseRootAddr = 0;
 
-        constexpr uintptr_t kUiCurrentScreenAddr = 0x00918320;
-        constexpr uintptr_t kUiWrapperActiveAddr = 0x00918324;
-        constexpr uintptr_t kUiCurrentScreenTypeAddr = 0x00918328;
+        uint32_t g_UiCurrentScreenAddr = 0;
+        uint32_t g_UiWrapperActiveAddr = 0;
+        uint32_t g_UiCurrentScreenTypeAddr = 0;
+
+        bool GameStateAddressesBound() noexcept
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "MultiplayerPauseFlag", &g_MultiplayerPauseFlagAddr },
+                    { "MultiplayerPauseRoot", &g_MultiplayerPauseRootAddr },
+                    { "SingleplayerPauseRoot", &g_SingleplayerPauseRootAddr },
+                    { "UiPerfShellWrapperGlobal", &g_UiCurrentScreenAddr },
+                    { "UiWrapperActive", &g_UiWrapperActiveAddr },
+                    { "UiCurrentScreenType", &g_UiCurrentScreenTypeAddr },
+                };
+                return HookEngine::BindEngineRows("Game state probes", rows);
+            }();
+            return bound;
+        }
 
         bool IsCursorVisible() noexcept
         {
@@ -26,11 +44,11 @@ namespace BZROpenShim
 
     bool IsMultiplayerPauseMenuOpen() noexcept
     {
-        if (!HookEngine::LiteralAddressesApply("Game state probes")) return false;
+        if (!GameStateAddressesBound()) return false;
         __try
         {
-            const auto* root = reinterpret_cast<void* const*>(kMultiplayerPauseRootAddr);
-            const auto* flag = reinterpret_cast<const uint8_t*>(kMultiplayerPauseFlagAddr);
+            const auto* root = reinterpret_cast<void* const*>(g_MultiplayerPauseRootAddr);
+            const auto* flag = reinterpret_cast<const uint8_t*>(g_MultiplayerPauseFlagAddr);
             return (*root != nullptr || *flag != 0) && IsCursorVisible();
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
@@ -41,13 +59,13 @@ namespace BZROpenShim
 
     bool IsSingleplayerPauseMenuOpen() noexcept
     {
-        if (!HookEngine::LiteralAddressesApply("Game state probes")) return false;
+        if (!GameStateAddressesBound()) return false;
         __try
         {
-            const auto* pauseRoot = reinterpret_cast<void* const*>(kSingleplayerPauseRootAddr);
-            const auto* uiWrapperActive = reinterpret_cast<const uint32_t*>(kUiWrapperActiveAddr);
-            const auto* uiCurrentScreen = reinterpret_cast<void* const*>(kUiCurrentScreenAddr);
-            const auto* uiCurrentScreenType = reinterpret_cast<const uint32_t*>(kUiCurrentScreenTypeAddr);
+            const auto* pauseRoot = reinterpret_cast<void* const*>(g_SingleplayerPauseRootAddr);
+            const auto* uiWrapperActive = reinterpret_cast<const uint32_t*>(g_UiWrapperActiveAddr);
+            const auto* uiCurrentScreen = reinterpret_cast<void* const*>(g_UiCurrentScreenAddr);
+            const auto* uiCurrentScreenType = reinterpret_cast<const uint32_t*>(g_UiCurrentScreenTypeAddr);
 
             if (*pauseRoot == nullptr || *uiWrapperActive == 0)
             {
@@ -69,20 +87,20 @@ namespace BZROpenShim
 
     bool IsPauseMenuOpen() noexcept
     {
-        if (!HookEngine::LiteralAddressesApply("Game state probes")) return false;
+        if (!GameStateAddressesBound()) return false;
         return IsMultiplayerPauseMenuOpen() || IsSingleplayerPauseMenuOpen();
     }
 
     ShellUiState ReadShellUiState() noexcept
     {
-        if (!HookEngine::LiteralAddressesApply("Game state probes")) return {};
+        if (!GameStateAddressesBound()) return {};
         ShellUiState state{};
         __try
         {
-            const auto* uiWrapperActive = reinterpret_cast<const volatile uint32_t*>(kUiWrapperActiveAddr);
-            const auto* uiCurrentScreen = reinterpret_cast<void* const volatile*>(kUiCurrentScreenAddr);
+            const auto* uiWrapperActive = reinterpret_cast<const volatile uint32_t*>(g_UiWrapperActiveAddr);
+            const auto* uiCurrentScreen = reinterpret_cast<void* const volatile*>(g_UiCurrentScreenAddr);
             const auto* uiCurrentScreenType =
-                reinterpret_cast<const volatile uint32_t*>(kUiCurrentScreenTypeAddr);
+                reinterpret_cast<const volatile uint32_t*>(g_UiCurrentScreenTypeAddr);
 
             state.wrapperActive = *uiWrapperActive != 0;
             state.screenPresent = *uiCurrentScreen != nullptr;

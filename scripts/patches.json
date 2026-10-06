@@ -2502,6 +2502,54 @@
       "address": "0x00918324",
       "kind": "data",
       "identity": "uint32 non-zero while the shell UI wrapper is active"
+    },
+    {
+      "name": "ShadowApply",
+      "address": "0x00680FE0",
+      "expected": "55 8B EC 81 EC 94 00 00 00 A1 00 70 8E 00 33 C5 89 45 FC A1 2C 67 94 00 0F BE 48 25 89 4D BC 83 7D BC 00 0F 8C A3 03 00 00 83 7D BC 05 72 07 C7 45 BC 04 00 00 00 8B 55 BC 0F B6 82 BC D0 8E 00",
+      "identity": "FUN_00680fe0 shadow-texture/PSSM/viewport-scheme apply; reads the settings pointer at +0x14 (mov eax,[g]) and the per-quality PSSM mode table at +0x3C (movzx eax,byte [edx+t])"
+    },
+    {
+      "name": "SchemeCallReassert",
+      "address": "0x00681585",
+      "expected": "FF 15 10 98 86 00 EB B0",
+      "identity": "call [Viewport::setMaterialScheme IAT] in the ~1 Hz graphics settings reassert loop over all viewports"
+    },
+    {
+      "name": "SchemeCallSecondaryViewport",
+      "address": "0x00682AA0",
+      "expected": "FF 15 10 98 86 00 C7 45 FC FF FF FF FF",
+      "identity": "call [Viewport::setMaterialScheme IAT] at secondary viewport creation (low-noshadow)"
+    },
+    {
+      "name": "SchemeCallTertiaryViewport",
+      "address": "0x00682EA7",
+      "expected": "FF 15 10 98 86 00 C7 45 FC FF FF FF FF",
+      "identity": "call [Viewport::setMaterialScheme IAT] at tertiary viewport creation (low-noshadow)"
+    },
+    {
+      "name": "MultiplayerPauseFlag",
+      "address": "0x00945549",
+      "kind": "data",
+      "identity": "byte, non-zero while the multiplayer pause menu is up"
+    },
+    {
+      "name": "MultiplayerPauseRoot",
+      "address": "0x0094557C",
+      "kind": "data",
+      "identity": "pointer, multiplayer pause/lobby client root; non-null while that menu exists"
+    },
+    {
+      "name": "SingleplayerPauseRoot",
+      "address": "0x009454EC",
+      "kind": "data",
+      "identity": "pointer to the single-player pause screen; compared with the shell's current screen"
+    },
+    {
+      "name": "UiCurrentScreenType",
+      "address": "0x00918328",
+      "kind": "data",
+      "identity": "uint32 type of the shell's current screen"
     }
   ],
   "globals": [
