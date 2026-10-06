@@ -963,7 +963,9 @@ void __declspec(naked) __cdecl Trampoline_BanButtonHook2()
         mov  ecx, [ebp - 0xD8]
         mov  [g_BanParentClient], ecx
         call BanButtonCreateClient
-        mov  byte ptr [ebp - 4], 0xFF
+        // Displaced `mov dword ptr [ebp-4],-1` (C7 45 FC FF FF FF FF): the
+        // whole EH state, not one byte of it.
+        mov  dword ptr [ebp - 4], 0xFFFFFFFF
         jmp  [g_RetAddr_BanHook2]
     }
 }
