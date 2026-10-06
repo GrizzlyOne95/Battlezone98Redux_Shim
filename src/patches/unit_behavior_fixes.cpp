@@ -113,14 +113,15 @@ namespace BZROpenShim
         // ScriptUtils::CanBuild/IsBusy accept the four legacy producer
         // signatures but omit the base Producer signature (PROD). The two
         // functions are adjacent in settled Redux 2.2.301 and are identical
-        // on GOG and the settled Steam image.
-        constexpr uintptr_t kGogScriptCanBuildAddr = 0x005CB4E0;
+        // on GOG and the settled Steam image. Addresses are engine_addresses
+        // rows, bound when the hooks install.
+        static uint32_t g_ScriptCanBuildAddr = 0;
 
-        constexpr uintptr_t kGogScriptIsBusyAddr = 0x005CB550;
+        static uint32_t g_ScriptIsBusyAddr = 0;
 
-        constexpr uintptr_t kGogProducerCanBuildAddr = 0x004738B0;
+        static uint32_t g_ProducerCanBuildAddr = 0;
 
-        constexpr uintptr_t kGogProducerIsBusyAddr = 0x004723D0;
+        static uint32_t g_ProducerIsBusyAddr = 0;
 
         constexpr uint32_t kProducerClassSignature = 0x50524F44u; // 'PROD'
 
@@ -130,23 +131,29 @@ namespace BZROpenShim
         // spinning its payload fire loop after the deployed splinter is damaged
         // below zero because it overrides Building::Simulate without preserving
         // the base destroyed/remove gate. GOG addresses re-derived via RTTI on
-        // the live 2.2.301 exe (advisory-PDB VA 0x005242F0 had drifted): the
-        // SprayBuilding vtable is 0x008881EC and Simulate is slot 15.
-        constexpr uintptr_t kGogSprayBuildingSimulateAddr = 0x005DA6E0;
+        // the live 2.2.301 exe (advisory-PDB VA 0x005242F0 had drifted):
+        // Simulate is slot 15 of the SprayBuilding vtable (rows
+        // SprayBuildingVtable, SprayBuildingSimulate, BuildingSimulate).
+        constexpr size_t kSprayBuildingSimulateVtableIndex = 15;
 
-		constexpr uintptr_t kSprayBuildingSimulateVtableSlotAddr = 0x00888228;
+        static uint32_t g_SprayBuildingVtableAddr = 0;
+
+        static uint32_t g_SprayBuildingSimulateAddr = 0;
+
+        static uint32_t g_BuildingSimulateAddr = 0;
 
 		// Tug::PostLoad restores the cargo relationship but does not reconcile a
 		// newly created/loaded tug's deployment state.  With cargo attached and
 		// state==UNDEPLOYED, a later Deploy command starts the *load* transition
 		// instead of the drop transition.  This is the native equivalent of the
 		// long-standing Lua workaround `if HasCargo(tug) then Deploy(tug) end`.
-		// Current Redux 2.2.301 Tug primary vtable: 0x00889008; PostLoad is slot 22.
-		constexpr uintptr_t kGogTugPostLoadAddr = 0x005EC430;
+		// PostLoad is slot 22 of the Tug primary vtable (rows TugVtable,
+		// TugPostLoad).
+		constexpr size_t kTugPostLoadVtableIndex = 22;
 
-		constexpr uintptr_t kTugVtableAddr = 0x00889008;
+		static uint32_t g_TugVtableAddr = 0;
 
-		constexpr uintptr_t kTugPostLoadVtableSlotAddr = 0x00889060;
+		static uint32_t g_TugPostLoadAddr = 0;
 
 		constexpr size_t kTugDeployStateOffset = 0x228;
 
@@ -176,9 +183,9 @@ namespace BZROpenShim
 		// other way of leaving this state stays stock.
 		//
 		// Reproduced with controls by reverse_engineering/run_lcroad_recycle.ps1.
-		constexpr uintptr_t kGogRigProcessCleanUState2Addr = 0x0049EE10;
+		static uint32_t g_RigProcessCleanUState2Addr = 0;
 
-		constexpr uintptr_t kGogGameObjectHandleGetObjAddr = 0x00462630;
+		static uint32_t g_GameObjectHandleGetObjAddr = 0;
 
 		constexpr size_t kRigProcessCleanUState2DetourLen = 6;
 
@@ -203,21 +210,23 @@ namespace BZROpenShim
 		// scan.  If that target is allied, both relation failures jump straight to
 		// the "cannot deploy" result.  Retarget those two stock branches to the
 		// existing no-target scan so a selected ally does not mask nearby enemies.
-		constexpr uintptr_t kGogApcTargetActualTeamRejectBranchAddr = 0x004700E6;
+		// Rows ApcActualTeamRejectBranch / ApcPerceivedTeamRejectBranch guard
+		// the stock jz rel32 bytes; ApcNoTargetScan is the new jump target.
+		static uint32_t g_ApcActualTeamRejectBranchAddr = 0;
 
-		constexpr uintptr_t kGogApcTargetPerceivedTeamRejectBranchAddr = 0x00470108;
+		static uint32_t g_ApcPerceivedTeamRejectBranchAddr = 0;
 
-		constexpr uint8_t kGogApcTargetActualTeamRejectOriginal[6] =
-			{ 0x0F, 0x84, 0xA5, 0x00, 0x00, 0x00 };
+		static uint32_t g_ApcNoTargetScanAddr = 0;
 
-		constexpr uint8_t kGogApcTargetActualTeamRejectPatched[6] =
-			{ 0x0F, 0x84, 0xC0, 0x00, 0x00, 0x00 };
+		constexpr size_t kApcRejectBranchLen = 6; // jz rel32
 
-		constexpr uint8_t kGogApcTargetPerceivedTeamRejectOriginal[6] =
-			{ 0x0F, 0x84, 0x83, 0x00, 0x00, 0x00 };
+		static uint8_t g_ApcActualTeamRejectOriginal[kApcRejectBranchLen] = {};
 
-		constexpr uint8_t kGogApcTargetPerceivedTeamRejectPatched[6] =
-			{ 0x0F, 0x84, 0x9E, 0x00, 0x00, 0x00 };
+		static uint8_t g_ApcActualTeamRejectPatched[kApcRejectBranchLen] = {};
+
+		static uint8_t g_ApcPerceivedTeamRejectOriginal[kApcRejectBranchLen] = {};
+
+		static uint8_t g_ApcPerceivedTeamRejectPatched[kApcRejectBranchLen] = {};
 
         // Building::Simulate reads flags at [[this+0xF4]+0x14] and early-outs on
         // destroyed (0x1000000) / marked-for-remove (0x200) by dispatching the
@@ -230,11 +239,13 @@ namespace BZROpenShim
 
         constexpr size_t kAIUnitRemoveDetourLen = 11;
 
-        constexpr uintptr_t kAiGameInitialisedAddr = 0x00930F08;
+        static uint32_t g_AIUnitRemoveAddr = 0;
 
-        constexpr uintptr_t kAiTeamTableAddr = 0x00920F04;
+        static uint32_t g_AiGameInitialisedAddr = 0;
 
-        constexpr uintptr_t kAiTeamDataBaseAddr = 0x02CE9B18;
+        static uint32_t g_AiTeamTableAddr = 0;
+
+        static uint32_t g_AiTeamDataBaseAddr = 0;
 
         constexpr size_t kAiTeamDataStride = 0x1E0;
 
@@ -338,7 +349,7 @@ namespace BZROpenShim
 
             return CallProducerPredicateForBaseProducer(
                 handle,
-                reinterpret_cast<FnProducerPredicate>(kGogProducerCanBuildAddr));
+                reinterpret_cast<FnProducerPredicate>(g_ProducerCanBuildAddr));
         }
 
         static bool __cdecl ScriptIsBusyProducerHook(int handle)
@@ -351,16 +362,33 @@ namespace BZROpenShim
 
             return CallProducerPredicateForBaseProducer(
                 handle,
-                reinterpret_cast<FnProducerPredicate>(kGogProducerIsBusyAddr));
+                reinterpret_cast<FnProducerPredicate>(g_ProducerIsBusyAddr));
+        }
+
+        static bool ProducerPredicateAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "ScriptCanBuild", &g_ScriptCanBuildAddr },
+                    { "ScriptIsBusy", &g_ScriptIsBusyAddr },
+                    { "ProducerCanBuild", &g_ProducerCanBuildAddr },
+                    { "ProducerIsBusy", &g_ProducerIsBusyAddr },
+                };
+                return HookEngine::BindEngineRows("Producer script predicates", rows);
+            }();
+            return bound;
         }
 
         void InstallProducerScriptPredicateHooksIfPossible()
         {
-            if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
             if (!g_ProducerScriptPredicateHooksEnabled)
                 return;
 
             if (g_ProducerScriptPredicateHooksInstalled)
+                return;
+
+            // The rows guard both Producer methods and both predicate entries.
+            if (!ProducerPredicateAddressesBound())
                 return;
 
             static const uint8_t kExpectedPredicateEntry[
@@ -368,28 +396,9 @@ namespace BZROpenShim
             {
                 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x8B, 0x45, 0x08
             };
-            static const uint8_t kExpectedCanBuildMethod[9] =
-            {
-                0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x89, 0x4D, 0xFC
-            };
-            static const uint8_t kExpectedIsBusyMethod[7] =
-            {
-                0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
-            };
-
-            if (!ExpectedBytesMatchAt(kGogProducerCanBuildAddr,
-                                      kExpectedCanBuildMethod,
-                                      sizeof(kExpectedCanBuildMethod)) ||
-                !ExpectedBytesMatchAt(kGogProducerIsBusyAddr,
-                                      kExpectedIsBusyMethod,
-                                      sizeof(kExpectedIsBusyMethod)))
-            {
-                return;
-            }
-
             if (!g_ScriptCanBuildDetour.trampoline &&
                 !InstallInlineDetour32(g_ScriptCanBuildDetour,
-                                       kGogScriptCanBuildAddr,
+                                       g_ScriptCanBuildAddr,
                                        reinterpret_cast<void*>(ScriptCanBuildProducerHook),
                                        kScriptProducerPredicateDetourLen,
                                        kExpectedPredicateEntry,
@@ -403,7 +412,7 @@ namespace BZROpenShim
 
             if (!g_ScriptIsBusyDetour.trampoline &&
                 !InstallInlineDetour32(g_ScriptIsBusyDetour,
-                                       kGogScriptIsBusyAddr,
+                                       g_ScriptIsBusyAddr,
                                        reinterpret_cast<void*>(ScriptIsBusyProducerHook),
                                        kScriptProducerPredicateDetourLen,
                                        kExpectedPredicateEntry,
@@ -420,8 +429,8 @@ namespace BZROpenShim
             if (g_ProducerScriptPredicateHooksInstalled)
             {
                 Log(L"[PRODSCRIPT] Added PROD support to ScriptUtils CanBuild/IsBusy canBuild=0x%08X isBusy=0x%08X\n",
-                    static_cast<uint32_t>(kGogScriptCanBuildAddr),
-                    static_cast<uint32_t>(kGogScriptIsBusyAddr));
+                    g_ScriptCanBuildAddr,
+                    g_ScriptIsBusyAddr);
             }
         }
 
@@ -490,25 +499,47 @@ namespace BZROpenShim
             RunSprayBuildingSimulateWithDeadGate(thisPtr, dt);
         }
 
+		static bool SplinterUndeadAddressesBound()
+		{
+			static const bool bound = [] {
+				const HookEngine::EngineRow rows[] = {
+					{ "SprayBuildingVtable", &g_SprayBuildingVtableAddr },
+					{ "SprayBuildingSimulate", &g_SprayBuildingSimulateAddr },
+					{ "BuildingSimulate", &g_BuildingSimulateAddr },
+				};
+				return HookEngine::BindEngineRows("Splinter undead fix", rows);
+			}();
+			return bound;
+		}
+
 		void InstallSplinterUndeadFixIfPossible()
         {
-            if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
             if (!g_SplinterUndeadFixEnabled)
                 return;
             if (g_SprayBuildingSimulateHookInstalled)
                 return;
+            if (!SplinterUndeadAddressesBound())
+                return;
+            if (!VtableTypeNameMatches(g_SprayBuildingVtableAddr, ".?AVSprayBuilding@@"))
+            {
+                Log(L"[SPLINTER] SprayBuilding RTTI mismatch vtable=0x%08X; splinter undead fix skipped\n",
+                    g_SprayBuildingVtableAddr);
+                return;
+            }
+            const uintptr_t slotAddr =
+                g_SprayBuildingVtableAddr + kSprayBuildingSimulateVtableIndex * sizeof(void*);
 
             if (!g_BzrFn_SprayBuildingSimulateOriginal)
                 g_BzrFn_SprayBuildingSimulateOriginal =
-                    reinterpret_cast<FnSprayBuildingSimulate>(kGogSprayBuildingSimulateAddr);
+                    reinterpret_cast<FnSprayBuildingSimulate>(g_SprayBuildingSimulateAddr);
             if (!g_BzrFn_BuildingSimulate)
                 g_BzrFn_BuildingSimulate =
-                    reinterpret_cast<FnShieldTowerSimulate>(kGogBuildingSimulateAddr);
+                    reinterpret_cast<FnShieldTowerSimulate>(g_BuildingSimulateAddr);
 
             void* current = nullptr;
             __try
             {
-                current = *reinterpret_cast<void**>(kSprayBuildingSimulateVtableSlotAddr);
+                current = *reinterpret_cast<void**>(slotAddr);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -516,18 +547,18 @@ namespace BZROpenShim
             }
 
             if (current != reinterpret_cast<void*>(SprayBuildingSimulateUndeadFixHook) &&
-                current != reinterpret_cast<void*>(kGogSprayBuildingSimulateAddr))
+                current != reinterpret_cast<void*>(g_SprayBuildingSimulateAddr))
             {
                 Log(L"[SPLINTER] SprayBuilding::Simulate vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
-                    static_cast<uint32_t>(kSprayBuildingSimulateVtableSlotAddr),
+                    static_cast<uint32_t>(slotAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
-                    static_cast<uint32_t>(kGogSprayBuildingSimulateAddr));
+                    g_SprayBuildingSimulateAddr);
                 return;
             }
 
             const bool patched =
                 (current == reinterpret_cast<void*>(SprayBuildingSimulateUndeadFixHook)) ||
-                WritePointerValue(kSprayBuildingSimulateVtableSlotAddr,
+                WritePointerValue(slotAddr,
                                   reinterpret_cast<void*>(SprayBuildingSimulateUndeadFixHook));
             g_SprayBuildingSimulateHookInstalled =
                 patched &&
@@ -537,7 +568,7 @@ namespace BZROpenShim
             if (g_SprayBuildingSimulateHookInstalled)
             {
                 Log(L"[SPLINTER] Installed splinter undead fix slot=0x%08X original=0x%08X base=0x%08X trace=%hs\n",
-                    static_cast<uint32_t>(kSprayBuildingSimulateVtableSlotAddr),
+                    static_cast<uint32_t>(slotAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_SprayBuildingSimulateOriginal)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_BuildingSimulate)),
                     BoolText(ShouldTraceSplinterUndeadFix()));
@@ -657,57 +688,42 @@ namespace BZROpenShim
 			}
 		}
 
+		static bool ConstructorRecycleAddressesBound()
+		{
+			static const bool bound = [] {
+				const HookEngine::EngineRow rows[] = {
+					{ "RigProcessCleanUState2", &g_RigProcessCleanUState2Addr },
+					{ "GameObjectHandleGetObj", &g_GameObjectHandleGetObjAddr },
+				};
+				return HookEngine::BindEngineRows("Constructor recycle undeploy fix", rows);
+			}();
+			return bound;
+		}
+
 		void InstallConstructorRecycleStaleTargetFixIfPossible()
 		{
-		    if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
 			if (!g_ConstructorRecycleStaleTargetFixEnabled ||
 				g_ConstructorRecycleStaleTargetFixInstalled)
 				return;
 
-			// Guard on instructions, not on the operands they carry. The entry
-			// prologue alone is shared by thousands of functions, so identity
-			// comes from the body: the load of the craft at +0x34 feeding the
-			// call to ConstructionRig::CancelUnbuild, and the load of the task
-			// pointer at +0x38 that this function exists to destroy.
+			// Identity is the RigProcessCleanUState2 row guard, which runs past
+			// the entry prologue (shared by thousands of functions) into the
+			// body: the load of the craft at +0x34 feeding the call to
+			// ConstructionRig::CancelUnbuild, and the load of the task pointer
+			// at +0x38 that this function exists to destroy. The
+			// GameObjectHandleGetObj row guards GetObj's __cdecl prologue.
+			if (!ConstructorRecycleAddressesBound())
+				return;
+
 			static const uint8_t kExpectedEntryBytes[kRigProcessCleanUState2DetourLen] =
 			{
 				0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10
 			};
-			// mov ecx,[eax+0x34] ; call ConstructionRig::CancelUnbuild (0x0049CDB0)
-			static const uint8_t kExpectedCancelUnbuildCallBytes[] =
-			{
-				0x8B, 0x48, 0x34, 0xE8, 0x8C, 0xDF, 0xFF, 0xFF
-			};
-			// mov edx,[ecx+0x38]  -- the UnBuild task about to be deleted
-			static const uint8_t kExpectedTaskLoadBytes[] =
-			{
-				0x8B, 0x51, 0x38
-			};
-			// GameObjectHandle::GetObj prologue: push ebp; mov ebp,esp; push ecx;
-			// mov eax,[ebp+8]; push eax  -- __cdecl, one stack argument.
-			static const uint8_t kExpectedGetObjBytes[] =
-			{
-				0x55, 0x8B, 0xEC, 0x51, 0x8B, 0x45, 0x08, 0x50
-			};
 
-			const uintptr_t entry = kGogRigProcessCleanUState2Addr;
-			if (!ExpectedBytesMatchAt(entry, kExpectedEntryBytes, sizeof(kExpectedEntryBytes)) ||
-				!ExpectedBytesMatchAt(entry + 0x0C, kExpectedCancelUnbuildCallBytes, sizeof(kExpectedCancelUnbuildCallBytes)) ||
-				!ExpectedBytesMatchAt(entry + 0x17, kExpectedTaskLoadBytes, sizeof(kExpectedTaskLoadBytes)) ||
-				!ExpectedBytesMatchAt(kGogGameObjectHandleGetObjAddr, kExpectedGetObjBytes, sizeof(kExpectedGetObjBytes)))
-			{
-				if (!g_ConstructorRecycleStaleTargetMismatchLogged)
-				{
-					Log(L"[RIGRECYCLE] RigProcess::CleanUState2 bytes not settled at 0x%08X; deferring recycle undeploy fix\n",
-						static_cast<uint32_t>(entry));
-					g_ConstructorRecycleStaleTargetMismatchLogged = true;
-				}
-				return;
-			}
-
+			const uintptr_t entry = g_RigProcessCleanUState2Addr;
 			if (!g_BzrFn_GameObjectHandleGetObj)
 				g_BzrFn_GameObjectHandleGetObj =
-					reinterpret_cast<FnGameObjectHandleGetObj>(kGogGameObjectHandleGetObjAddr);
+					reinterpret_cast<FnGameObjectHandleGetObj>(g_GameObjectHandleGetObjAddr);
 
 			if (!InstallInlineDetour32(g_RigProcessCleanUState2Detour,
 									   entry,
@@ -734,51 +750,65 @@ namespace BZROpenShim
 					static_cast<uint32_t>(entry),
 					static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
 						g_RigProcessCleanUState2Detour.trampoline)),
-					static_cast<uint32_t>(kGogGameObjectHandleGetObjAddr));
+					g_GameObjectHandleGetObjAddr);
 			}
+		}
+
+		static bool TugCargoAddressesBound()
+		{
+			static const bool bound = [] {
+				const HookEngine::EngineRow rows[] = {
+					{ "TugVtable", &g_TugVtableAddr },
+					{ "TugPostLoad", &g_TugPostLoadAddr },
+				};
+				return HookEngine::BindEngineRows("Tug cargo PostLoad fix", rows);
+			}();
+			return bound;
 		}
 
 		void InstallTugCargoPostLoadFixIfPossible()
 		{
-		    if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
 			if (!g_TugCargoPostLoadFixEnabled || g_TugCargoPostLoadFixInstalled)
 				return;
+			if (!TugCargoAddressesBound())
+				return;
 
-			if (!VtableTypeNameMatches(kTugVtableAddr, ".?AVTug@@"))
+			if (!VtableTypeNameMatches(g_TugVtableAddr, ".?AVTug@@"))
 			{
 				Log(L"[TUGCARGO] Tug RTTI mismatch vtable=0x%08X; cargo PostLoad fix skipped\n",
-					static_cast<uint32_t>(kTugVtableAddr));
+					g_TugVtableAddr);
 				return;
 			}
+			const uintptr_t slotAddr = g_TugVtableAddr + kTugPostLoadVtableIndex * sizeof(void*);
 
 			void* current = nullptr;
-			__try { current = *reinterpret_cast<void**>(kTugPostLoadVtableSlotAddr); }
+			__try { current = *reinterpret_cast<void**>(slotAddr); }
 			__except (EXCEPTION_EXECUTE_HANDLER) { current = nullptr; }
 
 			if (current != reinterpret_cast<void*>(TugPostLoadCargoDeployFixHook) &&
-				current != reinterpret_cast<void*>(kGogTugPostLoadAddr))
+				current != reinterpret_cast<void*>(g_TugPostLoadAddr))
 			{
 				Log(L"[TUGCARGO] Tug::PostLoad vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
-					static_cast<uint32_t>(kTugPostLoadVtableSlotAddr),
+					static_cast<uint32_t>(slotAddr),
 					static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
-					static_cast<uint32_t>(kGogTugPostLoadAddr));
+					g_TugPostLoadAddr);
 				return;
 			}
 
 			if (!g_BzrFn_TugPostLoadOriginal)
 				g_BzrFn_TugPostLoadOriginal =
-					reinterpret_cast<FnTugPostLoad>(kGogTugPostLoadAddr);
+					reinterpret_cast<FnTugPostLoad>(g_TugPostLoadAddr);
 
 			g_TugCargoPostLoadFixInstalled =
 				(current == reinterpret_cast<void*>(TugPostLoadCargoDeployFixHook)) ||
-				WritePointerValue(kTugPostLoadVtableSlotAddr,
+				WritePointerValue(slotAddr,
 					reinterpret_cast<void*>(TugPostLoadCargoDeployFixHook));
 
 			if (g_TugCargoPostLoadFixInstalled)
 			{
 				Log(L"[TUGCARGO] Installed cargo PostLoad deploy-state fix slot=0x%08X original=0x%08X\n",
-					static_cast<uint32_t>(kTugPostLoadVtableSlotAddr),
-					static_cast<uint32_t>(kGogTugPostLoadAddr));
+					static_cast<uint32_t>(slotAddr),
+					g_TugPostLoadAddr);
 			}
 		}
 
@@ -788,15 +818,15 @@ namespace BZROpenShim
 		static bool WriteApcAlliedTargetDeployBranches(bool patched)
 		{
 			const bool firstOk = WritePatchBytes(
-				kGogApcTargetActualTeamRejectBranchAddr,
-				patched ? kGogApcTargetActualTeamRejectPatched
-				        : kGogApcTargetActualTeamRejectOriginal,
-				sizeof(kGogApcTargetActualTeamRejectPatched));
+				g_ApcActualTeamRejectBranchAddr,
+				patched ? g_ApcActualTeamRejectPatched
+				        : g_ApcActualTeamRejectOriginal,
+				kApcRejectBranchLen);
 			const bool secondOk = WritePatchBytes(
-				kGogApcTargetPerceivedTeamRejectBranchAddr,
-				patched ? kGogApcTargetPerceivedTeamRejectPatched
-				        : kGogApcTargetPerceivedTeamRejectOriginal,
-				sizeof(kGogApcTargetPerceivedTeamRejectPatched));
+				g_ApcPerceivedTeamRejectBranchAddr,
+				patched ? g_ApcPerceivedTeamRejectPatched
+				        : g_ApcPerceivedTeamRejectOriginal,
+				kApcRejectBranchLen);
 
 			if (firstOk && secondOk)
 				return true;
@@ -812,7 +842,6 @@ namespace BZROpenShim
 		// touches .text when the wanted state actually differs.
 		void RefreshApcAlliedTargetDeployFixState()
 		{
-		    if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
 			if (!g_ApcAlliedTargetDeployFixInstalled)
 				return;
 
@@ -830,36 +859,56 @@ namespace BZROpenShim
 				wantActive ? "single-player" : "network game");
 		}
 
+		// The patched form of a stock jz rel32: same opcode, retargeted at the
+		// no-target scan. The row guard has just matched the stock bytes.
+		static bool BuildApcRejectBranchPair(uint32_t branchAddr,
+		                                     uint8_t (&original)[kApcRejectBranchLen],
+		                                     uint8_t (&patched)[kApcRejectBranchLen])
+		{
+			if (!HookEngine::ReadMemory(branchAddr, original, kApcRejectBranchLen) ||
+				original[0] != 0x0F || original[1] != 0x84)
+				return false;
+			const int32_t rel = static_cast<int32_t>(
+				g_ApcNoTargetScanAddr - (branchAddr + kApcRejectBranchLen));
+			std::memcpy(patched, original, 2);
+			std::memcpy(patched + 2, &rel, sizeof(rel));
+			return true;
+		}
+
+		static bool ApcAlliedTargetAddressesBound()
+		{
+			static const bool bound = [] {
+				const HookEngine::EngineRow rows[] = {
+					{ "ApcActualTeamRejectBranch", &g_ApcActualTeamRejectBranchAddr },
+					{ "ApcPerceivedTeamRejectBranch", &g_ApcPerceivedTeamRejectBranchAddr },
+					{ "ApcNoTargetScan", &g_ApcNoTargetScanAddr },
+				};
+				return HookEngine::BindEngineRows("APC allied-target deploy fix", rows) &&
+				       BuildApcRejectBranchPair(g_ApcActualTeamRejectBranchAddr,
+				                                g_ApcActualTeamRejectOriginal,
+				                                g_ApcActualTeamRejectPatched) &&
+				       BuildApcRejectBranchPair(g_ApcPerceivedTeamRejectBranchAddr,
+				                                g_ApcPerceivedTeamRejectOriginal,
+				                                g_ApcPerceivedTeamRejectPatched);
+			}();
+			return bound;
+		}
+
 		void InstallApcAlliedTargetDeployFixIfPossible()
 		{
-		    if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
 			if (!g_ApcAlliedTargetDeployFixEnabled || g_ApcAlliedTargetDeployFixInstalled)
 				return;
-
-			const bool firstOriginal = ExpectedBytesMatchAt(
-				kGogApcTargetActualTeamRejectBranchAddr,
-				kGogApcTargetActualTeamRejectOriginal,
-				sizeof(kGogApcTargetActualTeamRejectOriginal));
-			const bool firstPatched = ExpectedBytesMatchAt(
-				kGogApcTargetActualTeamRejectBranchAddr,
-				kGogApcTargetActualTeamRejectPatched,
-				sizeof(kGogApcTargetActualTeamRejectPatched));
-			const bool secondOriginal = ExpectedBytesMatchAt(
-				kGogApcTargetPerceivedTeamRejectBranchAddr,
-				kGogApcTargetPerceivedTeamRejectOriginal,
-				sizeof(kGogApcTargetPerceivedTeamRejectOriginal));
-			const bool secondPatched = ExpectedBytesMatchAt(
-				kGogApcTargetPerceivedTeamRejectBranchAddr,
-				kGogApcTargetPerceivedTeamRejectPatched,
-				sizeof(kGogApcTargetPerceivedTeamRejectPatched));
-
-			if ((!firstOriginal && !firstPatched) || (!secondOriginal && !secondPatched))
-			{
-				Log(L"[APCDEPLOY] APC::Simulate relation branches drifted; allied-target fix skipped first=0x%08X second=0x%08X\n",
-					static_cast<uint32_t>(kGogApcTargetActualTeamRejectBranchAddr),
-					static_cast<uint32_t>(kGogApcTargetPerceivedTeamRejectBranchAddr));
+			if (!ApcAlliedTargetAddressesBound())
 				return;
-			}
+
+			const bool firstPatched = ExpectedBytesMatchAt(
+				g_ApcActualTeamRejectBranchAddr,
+				g_ApcActualTeamRejectPatched,
+				kApcRejectBranchLen);
+			const bool secondPatched = ExpectedBytesMatchAt(
+				g_ApcPerceivedTeamRejectBranchAddr,
+				g_ApcPerceivedTeamRejectPatched,
+				kApcRejectBranchLen);
 
 			// Both guards passed, so the site is ours to drive. Seed the active
 			// flag from what the bytes already say before handing the write to the
@@ -930,7 +979,7 @@ namespace BZROpenShim
 
             __try
             {
-                if (*reinterpret_cast<const uint32_t*>(kAiGameInitialisedAddr) == 0)
+                if (*reinterpret_cast<const uint32_t*>(g_AiGameInitialisedAddr) == 0)
                 {
                     if (outReason)
                         *outReason = "ai_not_ready";
@@ -948,7 +997,7 @@ namespace BZROpenShim
                 }
 
                 auto* teamAicontrol =
-                    reinterpret_cast<const uint8_t*>(kAiTeamDataBaseAddr + (teamId * kAiTeamDataStride));
+                    reinterpret_cast<const uint8_t*>(g_AiTeamDataBaseAddr + (teamId * kAiTeamDataStride));
                 if (*teamAicontrol == 0)
                 {
                     if (outReason)
@@ -956,7 +1005,7 @@ namespace BZROpenShim
                     return false;
                 }
 
-                auto* teamTable = reinterpret_cast<void* const*>(kAiTeamTableAddr);
+                auto* teamTable = reinterpret_cast<void* const*>(g_AiTeamTableAddr);
                 outSnapshot.teamPtr = teamTable[teamId];
                 if (!outSnapshot.teamPtr)
                 {
@@ -1095,9 +1144,22 @@ namespace BZROpenShim
                 g_BzrFn_AIUnitRemove(unitPtr);
         }
 
+        static bool ConstructorRemoteBuildAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "AIUnitRemove", &g_AIUnitRemoveAddr },
+                    { "AiGameInitialised", &g_AiGameInitialisedAddr },
+                    { "AiTeamTable", &g_AiTeamTableAddr },
+                    { "AiTeamData", &g_AiTeamDataBaseAddr },
+                };
+                return HookEngine::BindEngineRows("Constructor remote-build cleanup", rows);
+            }();
+            return bound;
+        }
+
         void InstallConstructorRemoteBuildFixIfPossible()
         {
-            if (!HookEngine::LiteralAddressesApply("Unit behaviour fixes")) return;
             if (!g_ConstructorRemoteBuildFixEnabled)
                 return;
 
@@ -1110,33 +1172,34 @@ namespace BZROpenShim
                 return;
             }
 
-            static const uint8_t kExpectedAIUnitRemoveBytes[kAIUnitRemoveDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x51, 0x83, 0x3D, 0x08, 0x0F, 0x93, 0x00, 0x00
-            };
+            if (!ConstructorRemoteBuildAddressesBound())
+                return;
 
-            if (!ExpectedBytesMatchAt(kGogAIUnitRemoveEntryAddr,
-                                      kExpectedAIUnitRemoveBytes,
-                                      sizeof(kExpectedAIUnitRemoveBytes)))
+            // push ebp; mov ebp,esp; push ecx; cmp dword [AiGameInitialised],0.
+            // The AIUnitRemove row guard covers these bytes, so the copy taken
+            // here is the stock entry of whichever build the row was made for.
+            uint8_t expectedAIUnitRemoveBytes[kAIUnitRemoveDetourLen] = {};
+            if (!HookEngine::ReadMemory(g_AIUnitRemoveAddr, expectedAIUnitRemoveBytes,
+                                        sizeof(expectedAIUnitRemoveBytes)))
             {
                 if (!g_ConstructorRemoteBuildFixMismatchLogged)
                 {
-                    Log(L"[AICONSTRUCT] AI_UnitRemove entry bytes not settled at 0x%08X; deferring constructor death cleanup hook\n",
-                        static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr));
+                    Log(L"[AICONSTRUCT] AI_UnitRemove entry unreadable at 0x%08X; deferring constructor death cleanup hook\n",
+                        g_AIUnitRemoveAddr);
                     g_ConstructorRemoteBuildFixMismatchLogged = true;
                 }
                 return;
             }
 
             if (!InstallInlineDetour32(g_AIUnitRemoveDetour,
-                                       kGogAIUnitRemoveEntryAddr,
+                                       g_AIUnitRemoveAddr,
                                        reinterpret_cast<void*>(AIUnitRemoveConstructorCleanupHook),
                                        kAIUnitRemoveDetourLen,
-                                       kExpectedAIUnitRemoveBytes,
-                                       sizeof(kExpectedAIUnitRemoveBytes)))
+                                       expectedAIUnitRemoveBytes,
+                                       sizeof(expectedAIUnitRemoveBytes)))
             {
                 Log(L"[AICONSTRUCT] Failed installing AI_UnitRemove cleanup hook at 0x%08X\n",
-                    static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr));
+                    g_AIUnitRemoveAddr);
                 return;
             }
 
@@ -1147,7 +1210,7 @@ namespace BZROpenShim
             {
                 g_ConstructorRemoteBuildFixMismatchLogged = false;
                 Log(L"[AICONSTRUCT] Installed AI_UnitRemove cleanup hook entry=0x%08X trampoline=0x%08X trace=%hs\n",
-                    static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr),
+                    g_AIUnitRemoveAddr,
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_AIUnitRemoveDetour.trampoline)),
                     BoolText(ShouldTraceConstructorRemoteBuildFix()));
             }

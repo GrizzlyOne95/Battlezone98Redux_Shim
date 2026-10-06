@@ -1319,7 +1319,6 @@ namespace BZROpenShim
         void InstallAiTuningHooksIfPossible();
 
         // --- Unit behaviour fixes (unit_behavior_fixes.cpp) --------------------
-        inline constexpr uintptr_t kGogAIUnitRemoveEntryAddr = 0x0068FC60;
         extern bool g_ApcAlliedTargetDeployFixEnabled;
         extern bool g_ApcAlliedTargetDeployFixInstalled;
         extern FnScriptProducerPredicate g_BzrFn_ScriptCanBuildOriginal;

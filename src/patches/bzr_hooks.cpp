@@ -613,9 +613,8 @@ namespace BZROpenShim
         Log(L"[TURRET] Aim pitch multiplier: %.3f%s\n",
             static_cast<double>(g_TurretAimPitchMultiplier),
             g_TurretAimPitchMultiplier >= 0.999f ? " (full range)" : "");
-        Log(L"[AICONSTRUCT] Constructor death cleanup fix: %hs entry=0x%08X trace=%hs budget=%ld\n",
+        Log(L"[AICONSTRUCT] Constructor death cleanup fix: %hs trace=%hs budget=%ld\n",
             g_ConstructorRemoteBuildFixEnabled ? "enabled" : "disabled",
-            static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr),
             ShouldTraceConstructorRemoteBuildFix() ? "enabled" : "disabled",
             g_ConstructorRemoteBuildTraceBudget);
         Log(L"[AGGRO] Attack reveal fix: %hs trace=%hs budget=%ld\n",
