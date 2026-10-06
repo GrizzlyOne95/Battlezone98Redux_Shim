@@ -522,22 +522,33 @@ namespace BZROpenShim
                 return fn;
             }
 
+            // Gibs live in Ogre render space (their start pose is read from the
+            // scene node), but Terrain::HeightAt takes sim coordinates. Redux
+            // draws around a per-map origin with Z mirrored: render = (x - ox,
+            // y - oy, -z - oz). Sampling the raw render x/z read the wrong
+            // place (often off the map), so gibs were snapped to an unrelated
+            // ground height and ended up buried or floating out of view.
             bool TerrainHeightSafe(FnTerrainHeightAt fn, float x, float z, float& out)
             {
                 if (!fn)
                     return false;
                 double height = 0.0;
+                float origin[3] = {};
                 __try
                 {
-                    height = fn(static_cast<double>(x), static_cast<double>(z));
+                    const float* renderOrigin = reinterpret_cast<const float*>(kGogWorldRenderOriginAddr);
+                    origin[0] = renderOrigin[0];
+                    origin[1] = renderOrigin[1];
+                    origin[2] = renderOrigin[2];
+                    height = fn(static_cast<double>(x) + origin[0], -(static_cast<double>(z) + origin[2]));
                 }
                 __except (EXCEPTION_EXECUTE_HANDLER)
                 {
                     return false;
                 }
-                if (!std::isfinite(height) || std::abs(height) > 1.0e6)
+                if (!std::isfinite(height) || std::abs(height) > 1.0e6 || !std::isfinite(origin[1]))
                     return false;
-                out = static_cast<float>(height);
+                out = static_cast<float>(height - origin[1]);
                 return true;
             }
 
