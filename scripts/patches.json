@@ -2412,6 +2412,96 @@
       "address": "0x008926A8",
       "kind": "data",
       "identity": "RTTI .?AVDynamicGeometry@@ vtable; slot 32 (+0x80) is the world updateRenderQueue AutoSave chains"
+    },
+    {
+      "name": "FlagDisplaySubmit",
+      "address": "0x004D1C80",
+      "expected": "55 8B EC 81 EC 48 01 00 00 A1 00 70 8E 00",
+      "identity": "FlagDisplay::Submit, slot 8 of the FlagDisplay vtable; the multiplayer flag renderer replaces the slot"
+    },
+    {
+      "name": "NetPlayerGetData",
+      "address": "0x00575510",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC 8D 45 08",
+      "identity": "NetPlayer::GetData __thiscall"
+    },
+    {
+      "name": "GameObjectGetSphere",
+      "address": "0x00462400",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC 8B 45 FC",
+      "identity": "GameObject::GetSphere __thiscall"
+    },
+    {
+      "name": "RawMouseInputProcess",
+      "address": "0x004357D0",
+      "expected": "55 8B EC 8B 45 08 0F B7 48 04 83 E1 01",
+      "identity": "ProcessMouseRawInput(RAWMOUSE*) __cdecl; adds lLastX/lLastY into the look accumulator"
+    },
+    {
+      "name": "DistributedRecordDeathInt",
+      "address": "0x006796D0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 10",
+      "identity": "DistributedObject::RecordDeath(int) __thiscall (player-kill trace)"
+    },
+    {
+      "name": "RawMouseInputRegisterGate",
+      "address": "0x00618E82",
+      "expected": "83 3D 24 84 91 00 00 74 42",
+      "identity": "cmp dword [rawInputEnabled],0; jz -- before RegisterRawInputDevices; operand at +2 is the enable flag"
+    },
+    {
+      "name": "RawMouseInputLegacyGate",
+      "address": "0x00619717",
+      "expected": "83 3D 24 84 91 00 00 75 14",
+      "identity": "cmp dword [rawInputEnabled],0; jnz -- suppresses the WM_MOUSEMOVE look path"
+    },
+    {
+      "name": "RawMouseInputConsumerGate",
+      "address": "0x00623C39",
+      "expected": "83 3D 24 84 91 00 00 74 5C",
+      "identity": "cmp dword [rawInputEnabled],0; jz -- look consumer reads the raw accumulators"
+    },
+    {
+      "name": "NetPlayerRecordDeath",
+      "address": "0x00577290",
+      "expected": "55 8B EC 83 EC 0C E8 F5 BA FF FF 66 89 45 FC 83 7D 08 00 7E 3B 8B 45 08 8B 0C 85 E8 80 91 00",
+      "identity": "NetPlayer::RecordDeath(killedTeam, killerTeam) __cdecl; reads netPlayerByTeam[] at +0x1B"
+    },
+    {
+      "name": "UnitTurboThrottleBlock",
+      "address": "0x00601C92",
+      "expected": "8B 45 90 D9 58 08 8B 4D 90 F3 0F 10 41 0C 0F 2F 05 04 26 8A 00 72 1A F3 0F 10 05 C8 25 8A 00 0F 2F 45 AC 76 0C C7 85 78 FF FF FF 01 00 00 00 EB 0A C7 85 78 FF FF FF 00 00 00 00 8B 55 90 8B 85 78 FF FF FF",
+      "identity": "per-unit turbo decision in the craft throttle update: begin hook +0, comiss [tolerance] operand +0x11, second gate jbe +0x23, end hook +0x3B"
+    },
+    {
+      "name": "FlagDisplayVtable",
+      "address": "0x00879984",
+      "kind": "data",
+      "identity": "RTTI .?AVFlagDisplay@@ vtable; slot 8 (+0x20) is Submit"
+    },
+    {
+      "name": "NetPlayerByTeam",
+      "address": "0x009180E8",
+      "kind": "data",
+      "identity": "NetPlayer* netPlayerByTeam[16]; NetPlayerRecordDeath reads it at +0x1B"
+    },
+    {
+      "name": "QueuedLoadPathBuffer",
+      "address": "0x00945708",
+      "kind": "data",
+      "identity": "MAX_PATH queued load path buffer the shell load screen consumes"
+    },
+    {
+      "name": "Steam64Global",
+      "address": "0x0260B1D0",
+      "kind": "data",
+      "identity": "uint64 local Steam64 id (0 when not signed in)"
+    },
+    {
+      "name": "UiWrapperActive",
+      "address": "0x00918324",
+      "kind": "data",
+      "identity": "uint32 non-zero while the shell UI wrapper is active"
     }
   ],
   "globals": [

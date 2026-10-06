@@ -211,8 +211,8 @@ namespace BZROpenShim
             if (!autoSavePath || !autoSavePath[0])
                 return false;
 
-            auto* queuedPath = reinterpret_cast<char*>(kQueuedLoadPathBufferAddr);
-            auto* queuedName = reinterpret_cast<char*>(kQueuedLoadNameBufferAddr);
+            auto* queuedPath = reinterpret_cast<char*>(QueuedLoadPathBufferAddr());
+            auto* queuedName = reinterpret_cast<char*>(QueuedLoadNameBufferAddr());
             if (!queuedPath || !queuedName)
                 return false;
 
@@ -226,8 +226,8 @@ namespace BZROpenShim
 
         static bool RefreshQueuedPathFromMissionName()
         {
-            auto* queuedPath = reinterpret_cast<char*>(kQueuedLoadPathBufferAddr);
-            auto* queuedName = reinterpret_cast<const char*>(kQueuedLoadNameBufferAddr);
+            auto* queuedPath = reinterpret_cast<char*>(QueuedLoadPathBufferAddr());
+            auto* queuedName = reinterpret_cast<const char*>(QueuedLoadNameBufferAddr());
             if (!queuedPath || !queuedName || !queuedName[0])
                 return false;
 
@@ -265,8 +265,8 @@ namespace BZROpenShim
             auto* missionSaveFlag = reinterpret_cast<uint8_t*>(kMissionSaveFlagAddr);
             auto* oldMissionMode = reinterpret_cast<uint32_t*>(kOldMissionModeAddr);
             auto* screenType = reinterpret_cast<uint32_t*>(kUiScreenTypeAddr);
-            auto* queuedPath = reinterpret_cast<const char*>(kQueuedLoadPathBufferAddr);
-            auto* queuedName = reinterpret_cast<const char*>(kQueuedLoadNameBufferAddr);
+            auto* queuedPath = reinterpret_cast<const char*>(QueuedLoadPathBufferAddr());
+            auto* queuedName = reinterpret_cast<const char*>(QueuedLoadNameBufferAddr());
 
             const uint8_t previousMissionSave = *missionSaveFlag;
             const uint32_t previousMissionMode = *oldMissionMode;
@@ -336,7 +336,7 @@ namespace BZROpenShim
                 return;
             }
 
-            auto* queuedPath = reinterpret_cast<char*>(kQueuedLoadPathBufferAddr);
+            auto* queuedPath = reinterpret_cast<char*>(QueuedLoadPathBufferAddr());
             Log(L"[AUTOSAVE] Auto-save queued for stock save-load state path=%hs\n",
                 queuedPath);
             g_BzrFn_SetShellState(kLoadSaveState);
