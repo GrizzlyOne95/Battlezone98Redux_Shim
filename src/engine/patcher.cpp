@@ -155,7 +155,11 @@ namespace BZROpenShim
     }
     static constexpr uint32_t kDefaultMaxSoundChannels = 256;
     static constexpr uint32_t kMaxSupportedSoundChannels = 256;
-    static constexpr uint32_t kGASMasterMaxObjectsOffset = 0x10;
+    // GAS master +0x04 is the voice cap: FirstGAS sets it to 0x40 through the
+    // one-line setter at 0x0043A660, and the per-frame voice update
+    // (0x0043A170) culls 3D sounds once its active count reaches it. +0x10 is
+    // only ever zeroed at init/shutdown; nothing reads it.
+    static constexpr uint32_t kGASMasterMaxObjectsOffset = 0x04;
     static constexpr DWORD kSoundChannelRefreshDelayMs = 1000;
 
     struct SoundChannelOverrideConfig {
