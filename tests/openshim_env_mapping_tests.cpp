@@ -134,6 +134,19 @@ namespace
         ini.Set("General", "SkinnedGibsMax", "96");
         Check(Mapped(ini, "OPENSHIM_SKINNED_GIBS_MAX") == "96", "numeric gib tuning passes through raw");
 
+        // ShellCasings: its own inverted switch, raw numeric and list keys.
+        Check(Mapped(ini, "OPENSHIM_DISABLE_SHELL_CASINGS") == "<none>", "unset ShellCasings keeps the code default");
+        ini.Set("General", "ShellCasings", "0");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_SHELL_CASINGS") == "1", "ShellCasings = 0 reads as DISABLE=1");
+        ini.Set("General", "ShellCasings", "on");
+        Check(Mapped(ini, "BZR_DISABLE_SHELL_CASINGS") == "0", "ShellCasings = on reads as DISABLE=0");
+        ini.Set("General", "ShellCasingsMax", "64");
+        Check(Mapped(ini, "OPENSHIM_SHELL_CASINGS_MAX") == "64", "casing pool size passes through raw");
+        ini.Set("General", "ShellCasingsClasses", "cannon,-gquake");
+        Check(Mapped(ini, "OPENSHIM_SHELL_CASINGS_CLASSES") == "cannon,-gquake", "casing class list passes through raw");
+        ini.Set("Diagnostics", "TraceShellCasings", "1");
+        Check(Mapped(ini, "OPENSHIM_TRACE_SHELL_CASINGS") == "1", "TraceShellCasings maps from [Diagnostics]");
+
         // PathBlockFaces: inverted switch, trace from [Diagnostics].
         Check(Mapped(ini, "OPENSHIM_DISABLE_PATH_BLOCK_FACES") == "<none>", "unset PathBlockFaces keeps the code default");
         ini.Set("General", "PathBlockFaces", "0");
