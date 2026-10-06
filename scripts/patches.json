@@ -2664,6 +2664,36 @@
       "address": "0x00878574",
       "kind": "data",
       "identity": "RTTI .?AVDayWrecker@@ vtable of the Distributed subobject at +0x18"
+    },
+    {
+      "name": "BzrNetLogger",
+      "address": "0x007D6A70",
+      "expected": "55 8B EC 81 EC 1C 04 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "shared cdecl BZRNet logger (fmt, ...); 272 call sites"
+    },
+    {
+      "name": "BzrNetRouteCompletedLogCall",
+      "address": "0x0075ED1D",
+      "expected": "E8 4E 7D 07 00 83 C4 10 C6 45 FC 0E 8D 8D 48 FF FF FF",
+      "identity": "call BzrNetLogger(\"BZRNet P2P Completed %s Connect For Client %s, using address %s\", route, name, address); the peer route observer redirects it"
+    },
+    {
+      "name": "BzrNetRouteResetLogCall",
+      "address": "0x0075EF99",
+      "expected": "E8 D2 7A 07 00 83 C4 08 C7 45 FC FF FF FF FF 8D 4D C0",
+      "identity": "call BzrNetLogger(\"BZRNet P2P Fully Resetting Connection Status For Client %s\", name); the peer route observer redirects it"
+    },
+    {
+      "name": "FlagDisplayInstance",
+      "address": "0x009B60CC",
+      "kind": "data",
+      "identity": "static FlagDisplay object (dynamic initializer does mov ecx,imm; call ctor); first dword is the FlagDisplayVtable row once constructed; +0x2C makeTexture byte"
+    },
+    {
+      "name": "FlagFilePathBuffer",
+      "address": "0x00917FAC",
+      "kind": "data",
+      "identity": "char[MAX_PATH] flag image path SetMyFlag uploads from"
     }
   ],
   "globals": [

@@ -529,8 +529,6 @@ namespace BZROpenShim
             "AutoSave Load Button Hook",      // autosave_restart.cpp
             "Restart Mission Hook Pause",     // autosave_restart.cpp
             "Restart Mission Hook Failure",   // autosave_restart.cpp
-            "Ban Button Hook 1/2",            // lobby_ui.cpp
-            "Ban Button Hook 2/2",            // lobby_ui.cpp
         };
         for (const char* n : kNames)
             if (strcmp(name, n) == 0) return true;
