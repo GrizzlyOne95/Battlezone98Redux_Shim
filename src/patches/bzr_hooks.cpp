@@ -370,8 +370,8 @@ namespace BZROpenShim
             ? reinterpret_cast<FnAttackTaskDoState>(g_AttackTaskDoStateDetour.trampoline)
             : nullptr;
         g_BzrFn_TerrainGetIntersection =
-            g_BzrFn_AttackTaskDoState && HookEngine::LiteralAddressesApply("Attack task terrain line of sight")
-            ? reinterpret_cast<FnTerrainGetIntersection>(kGogTerrainGetIntersectionAddr)
+            g_BzrFn_AttackTaskDoState && TerrainGetIntersectionAddr() != 0
+            ? reinterpret_cast<FnTerrainGetIntersection>(TerrainGetIntersectionAddr())
             : nullptr;
         g_AttackTaskDoStateHookInstalled =
             g_BzrFn_AttackTaskDoState && g_BzrFn_TerrainGetIntersection;
