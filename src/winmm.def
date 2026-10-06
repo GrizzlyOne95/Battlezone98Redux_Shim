@@ -287,3 +287,8 @@ EXPORTS
     OpenShimSetNativeHudMeterVisible
     OpenShimRestoreNativeHudMeter
     OpenShimRestoreAllNativeHudMeters
+
+    OpenShimGetGeometryContactCapabilities
+    OpenShimSetGeometryContact
+    OpenShimClearGeometryContact
+    OpenShimGetGeometryContactStats

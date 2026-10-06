@@ -13,6 +13,7 @@
 #include "winmm_proxy.h"
 #include "bzr_hooks.h"
 #include "native_hud_runtime.h"
+#include "geometry_contact_test.h"
 #include "shim_log.h"
 #include "hook_engine.h"
 #include <cstdio>
@@ -40,6 +41,12 @@ namespace
             result ? "true" : "false");
     }
 }
+
+extern "C" DWORD WINAPI OpenShimImpl_GetGeometryContactCapabilities() { return BZROpenShim::GeometryContactTest::Capabilities(); }
+extern "C" BOOL WINAPI OpenShimImpl_SetGeometryContact(DWORD handle, BOOL enabled) { return BZROpenShim::GeometryContactTest::Set(handle, enabled); }
+extern "C" BOOL WINAPI OpenShimImpl_ClearGeometryContact() { return BZROpenShim::GeometryContactTest::Clear(); }
+extern "C" BOOL WINAPI OpenShimImpl_GetGeometryContactStats(DWORD handle, DWORD* enabled, DWORD* parts, DWORD* faces, DWORD* checks, DWORD* hits, DWORD* fallbacks)
+{ return BZROpenShim::GeometryContactTest::Stats(handle, enabled, parts, faces, checks, hits, fallbacks); }
 
 // Native meters use screen-space geometry, independent of the atlas API.
 extern "C" DWORD WINAPI OpenShimImpl_GetNativeHudLayoutCapabilities()
@@ -797,6 +804,10 @@ namespace
         .OpenShimImpl_SetNativeHudMeterVisible = OpenShimImpl_SetNativeHudMeterVisible,
         .OpenShimImpl_RestoreNativeHudMeter = OpenShimImpl_RestoreNativeHudMeter,
         .OpenShimImpl_RestoreAllNativeHudMeters = OpenShimImpl_RestoreAllNativeHudMeters,
+        .OpenShimImpl_GetGeometryContactCapabilities = OpenShimImpl_GetGeometryContactCapabilities,
+        .OpenShimImpl_SetGeometryContact = OpenShimImpl_SetGeometryContact,
+        .OpenShimImpl_ClearGeometryContact = OpenShimImpl_ClearGeometryContact,
+        .OpenShimImpl_GetGeometryContactStats = OpenShimImpl_GetGeometryContactStats,
     };
 
     // Designated initializers enforce order but not completeness: a slot left
