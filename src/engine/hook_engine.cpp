@@ -1,4 +1,5 @@
 #include "hook_engine.h"
+#include "build_overlay.h"
 #include "resolve_table.h"
 #include "shim_log.h"
 #ifndef WIN32_LEAN_AND_MEAN
@@ -658,6 +659,110 @@ namespace HookEngine
 
     namespace
     {
+        // Link timestamp of the build the literal addresses in feature code
+        // were taken from: Redux 2.2.301. GOG and Steam ship the same link
+        // (same timestamp and PDB GUID); Steam only wraps it in SteamStub.
+        constexpr uint32_t kLiteralReferenceStamps[] = { 0x58D9D6CC };
+
+        std::once_flag g_EffectiveOnce;
+        std::string g_EffectiveText;
+        BuildInfo g_BuildInfo;
+
+        uint32_t RunningExeStamp()
+        {
+            const auto* base = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
+            if (!base) return 0;
+            const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+            if (dos->e_magic != IMAGE_DOS_SIGNATURE) return 0;
+            const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
+            if (nt->Signature != IMAGE_NT_SIGNATURE) return 0;
+            return nt->FileHeader.TimeDateStamp;
+        }
+
+        BuildMatch ToBuildMatch(BZROpenShim::BuildOverlay::Match match)
+        {
+            switch (match)
+            {
+            case BZROpenShim::BuildOverlay::Match::Base: return BuildMatch::Base;
+            case BZROpenShim::BuildOverlay::Match::Overlay: return BuildMatch::Overlay;
+            case BZROpenShim::BuildOverlay::Match::Unknown: return BuildMatch::Unknown;
+            default: return BuildMatch::Unversioned;
+            }
+        }
+
+        void LoadEffectivePatches()
+        {
+            g_BuildInfo.exeStamp = RunningExeStamp();
+            const std::string path = FindPatchesJsonPath();
+            if (path.empty()) return;
+            std::string text;
+            try
+            {
+                std::ifstream f(path, std::ios::binary);
+                text.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+            }
+            catch (...)
+            {
+                return;
+            }
+
+            nlohmann::json doc;
+            try
+            {
+                doc = nlohmann::json::parse(text);
+            }
+            catch (...)
+            {
+                // Left to the table parsers, which name the parse error.
+                g_EffectiveText = std::move(text);
+                return;
+            }
+
+            const auto sel = BZROpenShim::BuildOverlay::Apply(doc, g_BuildInfo.exeStamp);
+            g_BuildInfo.match = ToBuildMatch(sel.match);
+            g_BuildInfo.label = sel.label;
+            for (const auto& k : sel.known)
+                g_BuildInfo.known += (g_BuildInfo.known.empty() ? "" : ", ") + k;
+            g_BuildInfo.replaced = sel.replaced;
+            g_BuildInfo.dropped = sel.dropped;
+            g_EffectiveText = sel.match == BZROpenShim::BuildOverlay::Match::Unversioned
+                ? std::move(text) : doc.dump();
+
+            BZROpenShim::LogShimA(
+                sel.match == BZROpenShim::BuildOverlay::Match::Unknown || !sel.error.empty()
+                    ? BZROpenShim::LogLevel::Warn : BZROpenShim::LogLevel::Info,
+                "build",
+                "[BUILD] exe link stamp 0x%08X: %s%s%s; patches.json builds: %s; overlay replaced=%zu dropped=%zu%s%s",
+                g_BuildInfo.exeStamp, BZROpenShim::BuildOverlay::MatchName(sel.match),
+                sel.label.empty() ? "" : " ", sel.label.c_str(),
+                g_BuildInfo.known.empty() ? "(none named)" : g_BuildInfo.known.c_str(),
+                sel.replaced, sel.dropped,
+                sel.error.empty() ? "" : "; ", sel.error.c_str());
+        }
+    }
+
+    const BuildInfo& GetBuildInfo()
+    {
+        std::call_once(g_EffectiveOnce, LoadEffectivePatches);
+        return g_BuildInfo;
+    }
+
+    const std::string& EffectivePatchesText()
+    {
+        std::call_once(g_EffectiveOnce, LoadEffectivePatches);
+        return g_EffectiveText;
+    }
+
+    bool IsReferenceBuild()
+    {
+        const uint32_t stamp = GetBuildInfo().exeStamp;
+        for (uint32_t s : kLiteralReferenceStamps)
+            if (s == stamp) return true;
+        return false;
+    }
+
+    namespace
+    {
         std::mutex g_ResolveMutex;
         bool g_ResolveTableLoaded = false;
         std::vector<BZROpenShim::ResolveTarget> g_ResolveTable;
@@ -679,16 +784,8 @@ namespace HookEngine
                 return;
             }
 
-            std::string text;
-            try
-            {
-                std::ifstream f(path, std::ios::binary);
-                text.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-            }
-            catch (...)
-            {
-                text.clear();
-            }
+            // The entries for the running build, not the raw file.
+            const std::string& text = EffectivePatchesText();
 
             std::string engineError;
             g_EngineAddressTable = BZROpenShim::ParseEngineAddressTable(text, &engineError);
@@ -908,6 +1005,63 @@ namespace HookEngine
 
         outAddress = entry->address;
         return EngineAddressStatus::Bound;
+    }
+
+    namespace
+    {
+        // SteamStub adds a ".bind" section; GOG has none.
+        bool ExeHasBindSection()
+        {
+            const auto* base = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
+            if (!base) return false;
+            const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+                base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+            const auto* sect = IMAGE_FIRST_SECTION(nt);
+            for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i)
+                if (memcmp(sect[i].Name, ".bind", 5) == 0) return true;
+            return false;
+        }
+    }
+
+    bool BindEngineRows(const char* feature, const EngineRow* rows, size_t count)
+    {
+        std::vector<EngineAddressStatus> status(count, EngineAddressStatus::Missing);
+        const auto bind = [&](size_t i) {
+            uint32_t address = 0;
+            status[i] = ResolveEngineAddress(rows[i].name, address);
+            *rows[i].out = address;
+        };
+        for (size_t i = 0; i < count; ++i)
+            bind(i);
+
+        static const bool steam = ExeHasBindSection();
+        for (int attempt = 0; steam && attempt < 100; ++attempt)
+        {
+            bool pending = false;
+            for (size_t i = 0; i < count; ++i)
+                pending = pending || status[i] == EngineAddressStatus::Mismatch;
+            if (!pending) break;
+            Sleep(10);
+            for (size_t i = 0; i < count; ++i)
+                if (status[i] == EngineAddressStatus::Mismatch) bind(i);
+        }
+
+        std::string failed;
+        for (size_t i = 0; i < count; ++i)
+        {
+            if (status[i] == EngineAddressStatus::Bound || status[i] == EngineAddressStatus::BoundData)
+                continue;
+            const char* why =
+                status[i] == EngineAddressStatus::Missing ? "no row for this build" :
+                status[i] == EngineAddressStatus::Mismatch ? "guard bytes differ" : "unreadable";
+            failed += std::string(failed.empty() ? "" : ", ") + rows[i].name + " (" + why + ")";
+        }
+        if (failed.empty()) return true;
+        for (size_t i = 0; i < count; ++i)
+            *rows[i].out = 0;
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "resolve",
+            "[ADDR] %s stands down: %s", feature, failed.c_str());
+        return false;
     }
 
 }

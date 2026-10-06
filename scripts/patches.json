@@ -2,6 +2,11 @@
   "features": {
     "ogre_material_collision_guard": true
   },
+  "build": {
+    "label": "2.2.301",
+    "time_date_stamps": ["0x58D9D6CC"],
+    "identity": "Battlezone 98 Redux 2.2.301, the GOG build and the Steam public manifest 7411172603041703474: one link (PE timestamp 0x58D9D6CC, PDB GUID 04FFCABE-6837-4AB9-9D42-E5B9DF4C7CBA); Steam wraps it in SteamStub. Every address below is for this build; other builds go in build_overlays (see include/build_overlay.h)."
+  },
   "patches": [
     {
       "name": "World Builder Save Destination Dialog",
@@ -1711,6 +1716,108 @@
       "address": "0x008E7732",
       "kind": "data",
       "identity": "Byte read by the GameObjectClass loader (FUN_004e0450) to preload assets; ControlPanel PostLoad clears it around its own InitBuildItem calls."
+    },
+    {
+      "name": "UiPerfMainScreenGlobal",
+      "address": "0x0094551C",
+      "kind": "data",
+      "identity": "Global holding the live MainScreen (shell main menu) object; ui_performance_hooks.cpp reads it for the harness and the Steam settle check."
+    },
+    {
+      "name": "UiPerfMainScreenVtable",
+      "address": "0x0089E178",
+      "kind": "data",
+      "identity": "MainScreen vtable; identifies the object held in UiPerfMainScreenGlobal."
+    },
+    {
+      "name": "UiPerfMainScreenOverlayVtable",
+      "address": "0x008A0B94",
+      "kind": "data",
+      "identity": "Vtable of the MainScreen overlay at MainScreen+0x158 that owns the main menu buttons."
+    },
+    {
+      "name": "UiPerfButtonVtable",
+      "address": "0x008A0470",
+      "kind": "data",
+      "identity": "UI button vtable; a button keeps its OnClick thunk at +0x154."
+    },
+    {
+      "name": "UiPerfShellWrapperGlobal",
+      "address": "0x00918320",
+      "kind": "data",
+      "identity": "Global holding the shell wrapper; the active screen is at wrapper+0x14 and ShellBack takes the wrapper."
+    },
+    {
+      "name": "UiPerfBuildMainResources",
+      "address": "0x0076A030",
+      "expected": "55 8B EC 6A FF 68 50 D5 85 00 64 A1 00 00 00 00",
+      "identity": "buildMainResources (modable mount mode 4). Guard covers the SEH prologue and the handler push the body check used."
+    },
+    {
+      "name": "UiPerfBuildMpResources",
+      "address": "0x0076A240",
+      "expected": "55 8B EC 6A FF 68 A0 D5 85 00 64 A1 00 00 00 00",
+      "identity": "buildMPResources (modable mount mode 2)."
+    },
+    {
+      "name": "UiPerfBuildIaResources",
+      "address": "0x0076A430",
+      "expected": "55 8B EC 6A FF 68 F0 D5 85 00 64 A1 00 00 00 00",
+      "identity": "buildIAResources (modable mount mode 1)."
+    },
+    {
+      "name": "UiPerfMainScreenCtor",
+      "address": "0x0078E670",
+      "expected": "55 8B EC 6A FF 68 54 EC 85 00 64 A1 00 00 00 00",
+      "identity": "MainScreen constructor."
+    },
+    {
+      "name": "UiPerfMainScreenDtor",
+      "address": "0x0078E8C0",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D FC E8 D1 03 00 00 8B 45 08",
+      "identity": "MainScreen scalar deleting destructor."
+    },
+    {
+      "name": "UiPerfMultiplayerLobbyCtor",
+      "address": "0x0079EA90",
+      "expected": "55 8B EC 6A FF 68 50 FF 85 00 64 A1 00 00 00 00",
+      "identity": "Multiplayer lobby screen constructor."
+    },
+    {
+      "name": "UiPerfMultiplayerLobbyDtor",
+      "address": "0x007A0F80",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D FC E8 21 00 00 00 8B 45 08",
+      "identity": "Multiplayer lobby screen scalar deleting destructor."
+    },
+    {
+      "name": "UiPerfInstantActionCtor",
+      "address": "0x00789C20",
+      "expected": "55 8B EC 6A FF 68 C4 E8 85 00 64 A1 00 00 00 00",
+      "identity": "Instant Action screen constructor."
+    },
+    {
+      "name": "UiPerfSetModableNone",
+      "address": "0x0076A600",
+      "expected": "55 8B EC 6A FF 68 A3 D6 85 00 64 A1 00 00 00 00",
+      "identity": "setModableNone (mount mode 0; ret 4)."
+    },
+    {
+      "name": "UiPerfSetModableCustomCampaignList",
+      "address": "0x0076AB20",
+      "expected": "55 8B EC 6A FF 68 27 D7 85 00 64 A1 00 00 00 00",
+      "identity": "setModableCustomCampaignList (mount mode 3; plain ret, no argument)."
+    },
+    {
+      "name": "UiPerfSetModableCampaign",
+      "address": "0x0076AE60",
+      "expected": "55 8B EC 6A FF 68 A3 D6 85 00 64 A1 00 00 00 00",
+      "identity": "setModableCampaign (ret 4; compares content+0x7C with the manager's +0x90)."
+    },
+    {
+      "name": "UiPerfSetModableContentB",
+      "address": "0x0076B350",
+      "expected": "55 8B EC 6A FF 68 A7 D7 85 00 64 A1 00 00 00 00",
+      "identity": "setModableContentB (ret 4)."
     }
   ],
   "globals": [
@@ -2001,6 +2108,11 @@
     }
   ],
   "static_pointers": [
+    {
+      "name": "BZR_SIGNATURE_ADDR",
+      "address": "0x00868300",
+      "identity": "Start of the 256-byte .text block RunPatcher compares against the exe file on disk before patching. On Steam those bytes only match once SteamStub has decrypted .text, so the wait is the code-ready gate. Must lie in .text on every build."
+    },
     {
       "name": "MapListObject",
       "address": "0x0094555C"

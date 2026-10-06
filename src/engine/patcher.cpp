@@ -44,13 +44,27 @@ namespace BZROpenShim
             // One search order for the whole shim: HookEngine::ResolveNamedAddress
             // has to find the same file this does, or a "resolves" entry and the
             // patch that depends on it could come from different installs.
+            // EffectivePatchesText also applies the running build's overlay
+            // (build_overlay.h), so both readers see the same build's entries.
             try {
-                const std::string path = HookEngine::FindPatchesJsonPath();
-                if (path.empty()) return false;
-                std::ifstream f(path);
-                if (f.is_open()) { data = nlohmann::json::parse(f); return true; }
+                const std::string& text = HookEngine::EffectivePatchesText();
+                if (text.empty()) return false;
+                data = nlohmann::json::parse(text);
+                return true;
             } catch (...) {}
             return false;
+        }
+        // An in-code default is an address in the reference build. On any
+        // other build only patches.json can supply one; a name it lacks reads
+        // as 0 so the feature stands down. Relative offsets ("..._Offset") are
+        // distances inside a site its own pattern located, so they stay.
+        uint32_t DefaultFor(const std::string& name, uint32_t defaultVal) {
+            const auto match = HookEngine::GetBuildInfo().match;
+            if (match == HookEngine::BuildMatch::Base || match == HookEngine::BuildMatch::Unversioned) return defaultVal;
+            if (name.size() > 7 && name.compare(name.size() - 7, 7, "_Offset") == 0) return defaultVal;
+            Log(L"[BUILD] static_pointers '%hs' has no value for this build; the in-code 0x%08X belongs to the reference build, using 0\n",
+                name.c_str(), defaultVal);
+            return 0;
         }
         // Both readers are non-throwing (patch_config_parse.h). A hand-edited
         // patches.json with a non-string or non-hex "address" used to throw
@@ -63,8 +77,8 @@ namespace BZROpenShim
             case PatchConfig::LookupStatus::Found: return value;
             case PatchConfig::LookupStatus::Malformed:
                 Log(L"[CONFIG] static_pointers '%hs': %hs; using default 0x%08X\n", name.c_str(), error.c_str(), defaultVal);
-                return defaultVal;
-            default: return defaultVal;
+                return DefaultFor(name, defaultVal);
+            default: return DefaultFor(name, defaultVal);
             }
         }
         bool GetBool(const std::string& name, bool defaultVal = false) {
@@ -1320,8 +1334,35 @@ namespace BZROpenShim
         const bool isSteam = IsSteamExe(); g_EnableScrollRestore = true;
         if (ShouldEnableD3DStartupHooks()) ApplyD3DStartupHooks();
         ApplyTrnSaveNormalizeHooks();
-        uint32_t gameVer = GetBZRVersion();
-        if (gameVer != static_cast<uint32_t>(g_Config.GetStaticPointer("BZR_EXPECTED_VERSION", BZR_EXPECTED_VERSION))) return;
+        // Which build is this? patches.json names the builds it has addresses
+        // for (build_overlay.h); anything else gets no engine patches at all.
+        // Said once, plainly, because "OpenShim does nothing after a game
+        // update" is otherwise indistinguishable from a broken install.
+        g_Config.Load();
+        const HookEngine::BuildInfo& build = HookEngine::GetBuildInfo();
+        const uint32_t gameVer = GetBZRVersion();
+        switch (build.match) {
+        case HookEngine::BuildMatch::Unknown:
+            Log(L"[BUILD] battlezone98redux.exe build %u (link stamp 0x%08X) is not one scripts/patches.json has addresses for "
+                L"(it has: %hs). Engine patches stay off for this build; a patches.json for it can be generated with "
+                L"reverse_engineering/build_port/port_patches.py.\n",
+                gameVer, build.exeStamp, build.known.c_str());
+            return;
+        case HookEngine::BuildMatch::Unversioned:
+            // A patches.json from before build blocks: keep the old version check.
+            if (gameVer != static_cast<uint32_t>(g_Config.GetStaticPointer("BZR_EXPECTED_VERSION", BZR_EXPECTED_VERSION))) {
+                Log(L"[BUILD] battlezone98redux.exe build %u is not %u, and scripts/patches.json names no builds; engine patches stay off\n",
+                    gameVer, static_cast<unsigned>(BZR_EXPECTED_VERSION));
+                return;
+            }
+            break;
+        default:
+            Log(L"[BUILD] battlezone98redux.exe build %u (link stamp 0x%08X) is patches.json build %hs (%hs)%hs\n",
+                gameVer, build.exeStamp, build.label.c_str(),
+                build.match == HookEngine::BuildMatch::Base ? "base entries" : "overlay entries",
+                HookEngine::IsReferenceBuild() ? "" : "; features still on in-code addresses stand down");
+            break;
+        }
         const BzrDistribution distribution = isSteam ? BzrDistribution::Steam : BzrDistribution::GOG;
         SetBzrDistribution(distribution);
         Log(L"[PLATFORM] distribution=%hs steamStub=%hs\n",
@@ -1335,7 +1376,16 @@ namespace BZROpenShim
         // forever. dllmain gates engine-level AutoSave on it, so AutoSave never
         // initialized on any build.
         SetCompatibleVersion(true);
-        std::vector<uint8_t> sig; if (ReadExeSignature(sig)) WaitForSignature(sig);
+        std::vector<uint8_t> sig;
+        if (ReadExeSignature(sig)) {
+            WaitForSignature(sig);
+        } else if (isSteam) {
+            // The signature wait is the only sign SteamStub has decrypted
+            // .text; without it every guard below would compare ciphertext.
+            Log(L"[BUILD] no code-ready signature for this build (static_pointers BZR_SIGNATURE_ADDR); "
+                L"cannot tell when SteamStub has finished, so engine patches stay off\n");
+            return;
+        }
         // .text is decrypted by now, so the CLI delimiter repair applied at
         // attach can finally have its .text corroboration settled, and a
         // SteamStub restore over the .data write would be reported rather than
