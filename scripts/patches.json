@@ -2370,6 +2370,48 @@
       "address": "0x00494D35",
       "expected": "0F 2F 05 D0 73 91 00 76 2B 6A 00 6A 00",
       "identity": "comiss xmm0,[next beep] in CockpitRadar::Render's under-attack growl; operand at +3 is the cooldown float"
+    },
+    {
+      "name": "EmissionLightStateBranch",
+      "address": "0x0044CBD0",
+      "expected": "8B 45 FC 0F B6 48 1C 85 C9 0F 84 3E 03 00 00 8B 55 FC F2 0F 10 42 58 66 0F 57 05 00 30 8A 00",
+      "identity": "LightRenderClass::Simulate active-flag test (mov eax,[ebp-4]; movzx ecx,[eax+0x1C]; test ecx,ecx; je delete-path); the active path resumes after the je at +15"
+    },
+    {
+      "name": "EmissionLightLoopContinue",
+      "address": "0x0044CF49",
+      "expected": "E9 3E FC FF FF 5E 8B E5 5D C2 04 00",
+      "identity": "LightRenderClass::Simulate loop continue jmp; the emission-light fix sends dormant renderers here instead of the deleting destructor"
+    },
+    {
+      "name": "RunStateNameTable",
+      "address": "0x00871690",
+      "kind": "data",
+      "identity": "char* table of run state names (RUN_WAS_FAILURE .. RUN_STARTED at 5); index 5 must read RUN_STARTED"
+    },
+    {
+      "name": "IsNetGameFlag",
+      "address": "0x00917F7B",
+      "kind": "data",
+      "identity": "byte, non-zero in a network game; AutoSave gate input"
+    },
+    {
+      "name": "TerrainEditMode",
+      "address": "0x009454B8",
+      "kind": "data",
+      "identity": "byte terrain edit flag; AutoSave diagnostics only"
+    },
+    {
+      "name": "QueuedLoadNameBuffer",
+      "address": "0x00915540",
+      "kind": "data",
+      "identity": "16-char current/queued mission short name buffer"
+    },
+    {
+      "name": "DynamicGeometryVtable",
+      "address": "0x008926A8",
+      "kind": "data",
+      "identity": "RTTI .?AVDynamicGeometry@@ vtable; slot 32 (+0x80) is the world updateRenderQueue AutoSave chains"
     }
   ],
   "globals": [
