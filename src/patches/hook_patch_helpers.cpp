@@ -83,6 +83,28 @@ namespace BZROpenShim
             return s_moduleBase;
         }
 
+        uintptr_t ExpectedGameObjectGetTeamAddr()
+        {
+            // Cached once bound: the reticle getter asks per visible selection.
+            static uintptr_t s_expected = 0;
+            if (s_expected == 0)
+            {
+                const uintptr_t addr = HookEngine::EngineAddress("GameObjectGetTeam");
+                const uintptr_t base = GetMainModuleBase();
+                if (addr)
+                    s_expected = base ? base + (addr - kGogPreferredImageBase) : addr;
+            }
+            return s_expected;
+        }
+
+        uintptr_t WorldRenderOriginAddr()
+        {
+            static uintptr_t s_addr = 0;
+            if (s_addr == 0)
+                s_addr = HookEngine::EngineAddress("WorldRenderOrigin");
+            return s_addr;
+        }
+
         uint32_t ResolveRel32Target(uint8_t* callInstr)
         {
             if (!callInstr || callInstr[0] != 0xE8)

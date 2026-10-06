@@ -222,8 +222,7 @@ namespace BZROpenShim
                     vtableAddress + (kGetTeamSlot + 1) * sizeof(void*) > imageEnd)
                     return false;
 
-                const uintptr_t expected =
-                    imageBase + (kGogGameObjectGetTeamAddr - kGogPreferredImageBase);
+                const uintptr_t expected = ExpectedGameObjectGetTeamAddr();
                 if (reinterpret_cast<uintptr_t>(vtable[kGetTeamSlot]) != expected)
                     return false;
 
