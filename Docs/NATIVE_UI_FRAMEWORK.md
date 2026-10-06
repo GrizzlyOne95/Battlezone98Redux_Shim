@@ -135,7 +135,7 @@ RequestShellScreen(stockScreen);
 BackShellScreen();
 ```
 
-Do not expose the raw Ghidra-inferred calling convention for `FUN_007c7930` or `FUN_007c79a0` yet. The decompiler prototype around the implicit manager/object pointer is not trustworthy enough for a public ABI. Resolve/validate the exact call ABI first.
+Their ABI is now resolved from disassembly (see the shell screens section below).
 
 Known callback-derived IDs include:
 
@@ -152,42 +152,59 @@ Known callback-derived IDs include:
 
 The full `0x01..0x2A` factory map, constructor addresses, allocation sizes, holes, and conditional cases are documented in `reverse_engineering/REDUX_SHELL_UI_RE_MAP.md`.
 
-## Main-menu `Career` direction
+## OpenShim shell screens (custom screen IDs)
 
-The corpus answers the architecture question more clearly than the older Options-only work could.
+OpenShim can now add whole screens to the Redux shell. They are built and navigated exactly like stock screens, so they get the stock background and borders, the shell fade, the history stack, and Esc-to-back. The first one is Career. Code: `include/shell_screens.h`, `src/engine/shell_screens.cpp`; Career: `src/patches/career_screen.cpp`.
 
-A true title menu such as:
+### How it works
 
-```text
-Single Player
-Multiplayer
-Career
-Options
-Credits
-Quit
+The GOG decompile settled what the earlier notes left open:
+
+- **Every stock screen is a `cUI_View`.** Each constructor starts with the default `cUI_View` ctor (`UiTopScreenCtor`, `0x007D0FA0`), which builds the "Top Screen": `bckground_1920x1080.png` plus the `Border_Top/Bot/Left/Right` views. Screens with no extra state (`cUI_MissionFailed`, `cUI_AlertDlgBox`, `cUI_OptionsParent`) are exactly the 0x144-byte `cUI_View`.
+- **The look is one painted panel.** Each screen adds a 1440x1080 overlay (flags `0x60`) whose texture is a painted centre panel (`esc_center.png`, `goptions_center.png`, ...), and puts widgets over the painted boxes. All widgets are `AddChild`ed to that overlay.
+- **Screen vtables differ from `cUI_View` in very few slots.** `cUI_OptionsParent` and `cUI_Load` change only slot 0 (deleting dtor) and slot 5 (`OnKey`). Their shared slot 5 (`UiScreenEscBackKey`, `0x00788E70`) calls Back on `this+0x138` when the key is Esc (0x1B).
+- **The factory** (`ShellScreenFactory`, `0x007C7AD0`) is `void* __thiscall(manager, int id)`. Around the switch it bumps a counter (`ShellFactoryTick`), clears `manager+0x18`, stores the manager in `screen+0x138`, and attaches any pending GameAlert dialog (`ShellFactoryAlertCheck` / `ShellShowPendingAlert`) unless the id is 0x1D.
+- **Navigation ABI** is resolved: `ShellRequestScreen` (`0x007C7930`) is `void __thiscall(manager, int id)` (ret 4) and pushes the id onto the history vector at `manager+0x2C`. `ShellBackScreen` (`0x007C79A0`) is `void __thiscall(manager)` and pops it. Both set the pending byte at `manager+0x27`. Stock buttons reach them through the screen's `+0x138` manager.
+- **Button callbacks** (`button+0x154`) are argument-less cdecl functions. Stock ones find their screen through a singleton.
+
+OpenShim detours the factory. A registered id (`0x4F53xxxx`) is built the way the stock factory builds a screen: allocate 0x144 bytes with the game's own `operator new` (MSVCR120, so the shell's `delete` matches), run the Top Screen ctor, install OpenShim's copy of the `cUI_View` vtable, set `+0x138`, run the screen's build function, and attach the pending alert. The vtable copy keeps the RTTI locator and changes two slots: slot 5 becomes the stock Esc-to-back handler, and slot 0 tells the screen it is closing before running `cUI_View`'s deleting dtor. Every other id goes to the stock factory.
+
+Because the shell rebuilds whatever id is on the history stack, Back from a stock screen opened on top of an OpenShim screen comes back to it. No stock code switches on these ids.
+
+### Writing a screen
+
+```cpp
+namespace Shell = BZROpenShim::ShellScreens;
+
+bool BuildMyScreen(void* screen)
+{
+    void* panel = Shell::AddPanel(screen, nullptr, "My_Overlay",
+                                  { 0, 0, 1440, 1080 }, "osh_my_center.png");
+    Shell::AddLabel(panel, panel, "My_Title", { 470, 132, 500, 56 }, "TITLE",
+                    Shell::kTitleLabelFlags);
+    return Shell::AddButton(panel, nullptr, "My_Back", { 0, 0, 342, 77 }, "Back",
+                            Shell::kSkinTopCorner, 1.0f, 28.0f, &OnMyBack) != nullptr;
+}
+
+Shell::RegisterScreen({ Shell::kCustomScreenIdBase + 2, "Mine", &BuildMyScreen, nullptr });
+// from any button: Shell::RequestScreen(currentScreen, id); Shell::Back(currentScreen);
 ```
 
-is feasible, but the safest first implementation is **not** to invent a new native screen ID.
+Rules learned building Career:
 
-Redux's stock factory is a compiled switch, not a dynamic screen-registration table. There is no binary evidence of a simple `RegisterScreen(id, constructor)` facility.
+- Build widgets inside the build function, which runs during the factory call. A widget built later, from a click, draws its caption but not its frame.
+- Call `SetActive` on injected buttons; the kit does this. The ctor leaves a button that receives hover but not clicks.
+- A button with a null layout parent (the top-corner Back) is anchored to the window edge, not to the centred 1440 area. Content widgets use the panel as their layout parent.
 
-The preferred first Career layout is therefore:
+### Panel art
 
-```text
-cUI_MainScreen
-    |
-    `-- MainScreen_Overlay
-            |
-            +-- stock main-menu controls
-            +-- OpenShim Career button
-            `-- OpenShim Career logical surfaces (hidden by default)
-```
+The engine stretches a texture to its widget, so each screen gets its own centre panel painted at 1440x1080 by `resources/ui/custom_widgets/mkscreens.py`. The panels are drawn from geometry in the stock palette, with no stock pixels copied, and are transparent outside the frame like the stock ones. The boxes in the script are the layout contract with the screen's constants. Panels ship with the other UI files (`Deploy-OpenShim.ps1`, installer, uninstaller) into `BZ_ASSETS_CORE/common/ui/CustomWidgets/`. A screen whose panel is missing falls back to the bare stock background rather than showing a missing texture.
 
-When Career opens, the integration should temporarily deactivate/hide the overlapping stock interactive controls, show the Career-native controls, and provide a Career Back action that restores the stock title controls without destroying `cUI_MainScreen`.
+### Career
 
-This is consistent with Redux's own MainScreen behavior: Credits and Replay Intro do not create new factory screens; they temporarily create/use a `movie1` overlay under the existing `cUI_MainScreen` and play `credits.ogv` / `intro.ogv`.
+The title menu's CAREER button calls `RequestScreen(mainScreen, kCareerScreenId)`. Career shows `career_stats.cfg` in four boxes (overall, single player, multiplayer, record) on `osh_career_center.png`, with the stock top-corner Back button. It is rebuilt fresh every time it opens. This replaces the earlier in-place page under `MainScreen_Overlay`, which needed a full-screen plate and recorded and blanked every stock caption, because stock text ignores visibility.
 
-A true custom `CAREER_ID` remains a later RE target. It would require intercepting the stock request/factory path and fully owning a compatible root-screen lifecycle, including destructor/vtable/input/history semantics. Sending an arbitrary custom ID to the unmodified stock factory is not safe.
+Live-tested on GOG 2.2.301: the title menu opens Career, Back and Esc both return, and the title menu rebuilds each time.
 
 ## Logical surfaces
 

@@ -31,7 +31,7 @@ $requestedGamePath = if ($env:OPENSHIM_GAME_PATH) { $env:OPENSHIM_GAME_PATH } el
 
 # UI tiles the installer writes into the game's custom-widget resource tree.
 # Everything else in that folder belongs to the game or to the player.
-$uiTiles = @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png")
+$uiTiles = @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png", "osh_career_center.png")
 
 function Get-Switch {
     param([string]$Name)
