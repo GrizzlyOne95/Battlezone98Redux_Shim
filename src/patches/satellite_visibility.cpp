@@ -291,6 +291,7 @@ namespace BZROpenShim
 
         bool IsSatelliteOverviewActive()
         {
+            if (!HookEngine::LiteralAddressesApply("Satellite visibility")) return false;
             long currentView = -1;
             return TryReadCurrentViewId(currentView) &&
                    currentView == kCameraTypeOverView;
@@ -353,6 +354,7 @@ namespace BZROpenShim
 
         void RefreshSatelliteVisibilityFixState()
         {
+            if (!HookEngine::LiteralAddressesApply("Satellite visibility")) return;
             g_SatelliteVisibilityFixActive =
                 g_SatelliteVisibilityFixEnabled && IsSinglePlayerSession();
         }
@@ -643,6 +645,7 @@ namespace BZROpenShim
 
         void MaybeSuppressStaleHopOutAttackAlert()
         {
+            if (!HookEngine::LiteralAddressesApply("Satellite visibility")) return;
             if (!g_HopOutAttackAlertFixEnabled)
                 return;
 
@@ -698,6 +701,7 @@ namespace BZROpenShim
 
         void MaybeLogSatelliteVisibilitySample()
         {
+            if (!HookEngine::LiteralAddressesApply("Satellite visibility")) return;
             if (!g_TraceSatelliteVisibility)
                 return;
             // Deliberately NOT gated on the overview any more. The question is
@@ -924,6 +928,7 @@ namespace BZROpenShim
         // destroyed, so there is nothing to restore.
         bool SatelliteWorldIsLive()
         {
+            if (!HookEngine::LiteralAddressesApply("Satellite visibility")) return false;
             void* player = TryGetHeadlightPlayerObject();
             return player != nullptr && IsLiveHeadlightObjectSlot(player);
         }
@@ -970,6 +975,7 @@ namespace BZROpenShim
 
         void SyncSatelliteVisibility()
         {
+            if (!HookEngine::LiteralAddressesApply("Satellite visibility")) return;
             // Deliberately not an early-out on "inactive". Going inactive while
             // the satellite view is open -- the feature switched off, or a
             // network game starting -- must still reach the exit transition
@@ -1221,6 +1227,7 @@ namespace BZROpenShim
 
         void LogSatelliteVisibilityValidationSample()
         {
+            if (!HookEngine::LiteralAddressesApply("Satellite visibility")) return;
             if (!g_SatVisValidateEnabled)
                 return;
 

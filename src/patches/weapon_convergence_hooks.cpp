@@ -764,6 +764,7 @@ namespace BZROpenShim
 
         void RefreshShotConvergencePatchState()
         {
+            if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return;
             const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
             const bool wantConvergenceWrapper =
                 singlePlayer &&
@@ -952,6 +953,7 @@ namespace BZROpenShim
 
         void RefreshSmartReticleRangeState()
         {
+            if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return;
             const bool networkGame = ReadLocalPlayerNetIdValue() != 0;
             float desired = kSmartReticleRangeStock;
             bool claimRange = false;
@@ -994,6 +996,7 @@ namespace BZROpenShim
 
         void RevertShotConvergenceToBaseline()
         {
+            if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return;
             g_ShotConvergenceEnabled = g_ShotConvergenceBaselineEnabled;
             g_PlayerReticleShotConvergenceEnabled =
                 g_PlayerReticleShotConvergenceBaselineEnabled;
@@ -1002,6 +1005,7 @@ namespace BZROpenShim
 
         void RevertSmartReticleRangeToBaseline()
         {
+            if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return;
             g_SmartReticleRangeOwnedByBridge = false;
             g_SmartReticleRange = g_SmartReticleRangeBaseline;
             RefreshSmartReticleRangeState();
@@ -1017,6 +1021,7 @@ namespace BZROpenShim
 
     bool SetShotConvergenceFromBridge(bool enabled)
     {
+        if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return false;
         g_ShotConvergenceEnabled = enabled;
         RefreshShotConvergencePatchState();
         Log(L"[MISSIONHOOK] all-craft weapon convergence %hs patch=%hs\n",
@@ -1032,6 +1037,7 @@ namespace BZROpenShim
 
     bool SetPlayerReticleShotConvergenceFromBridge(bool enabled)
     {
+        if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return false;
         g_PlayerReticleShotConvergenceEnabled = enabled;
         RefreshShotConvergencePatchState();
         Log(L"[MISSIONHOOK] player smart-reticle convergence %hs patch=%hs\n",
@@ -1052,6 +1058,7 @@ namespace BZROpenShim
 
     bool SetSmartReticleRangeFromBridge(float range)
     {
+        if (!HookEngine::LiteralAddressesApply("Shot convergence and smart reticle")) return false;
         if (!std::isfinite(range))
             return false;
 

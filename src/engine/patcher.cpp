@@ -520,7 +520,33 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
+    // patches.json patches whose trampolines enter handlers that still read
+    // engine addresses written as literals. The patch site itself ports to a
+    // new build with the rest of the file; the handler does not, so off the
+    // reference build these stay out until their handler is migrated.
+    static bool IsLiteralHandlerPatchName(const char* name) {
+        static const char* const kNames[] = {
+            "AutoSave Load Button Hook",      // autosave_restart.cpp
+            "Restart Mission Hook Pause",     // autosave_restart.cpp
+            "Restart Mission Hook Failure",   // autosave_restart.cpp
+            "Ban Button Hook 1/2",            // lobby_ui.cpp
+            "Ban Button Hook 2/2",            // lobby_ui.cpp
+            "Under Attack Alert Hook 1/2",    // alert_reticle_modes.cpp
+            "Under Attack Alert Hook 2/2",    // alert_reticle_modes.cpp
+        };
+        for (const char* n : kNames)
+            if (strcmp(name, n) == 0) return true;
+        return false;
+    }
+
     static void FilterPatchesForRuntime(std::vector<HookEngine::PatchDef>& patches, BzrDistribution distribution) {
+        if (!HookEngine::IsReferenceBuild()) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) {
+                if (!IsLiteralHandlerPatchName(p.name.c_str())) return false;
+                Log(L"[BUILD] %hs stands down: its handler still uses 2.2.301 literal addresses\n", p.name.c_str());
+                return true;
+            }), patches.end());
+        }
         const bool isSteam = distribution == BzrDistribution::Steam;
         if (!isSteam) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsSteamOnlyPatchName(p.name.c_str()); }), patches.end());
@@ -869,6 +895,19 @@ namespace BZROpenShim
         g_RetAddr_BanHook1 = ptr("RetAddr_BanHook1", 0x007D0A35);
         g_RetAddr_BanHook2 = ptr("RetAddr_BanHook2", 0x007A691A);
         g_RetAddr_AutoSaveLoadHook = ptr("RetAddr_AutoSaveLoadHook", 0x0078B45F);
+        // The trampoline replays the `mov eax, [global]` its JMP5 overwrites,
+        // which ends at the return address. Take the global from the site
+        // itself before the patch goes in, so a ported build replays its own
+        // global; the patch's expected_original (A1 ...) has to match before
+        // it is written, so the trampoline never runs on any other bytes.
+        g_AutoSaveLoadReplayGlobal = 0;
+        if (g_RetAddr_AutoSaveLoadHook) {
+            uint32_t operand = 0; SIZE_T read = 0;
+            if (ReadProcessMemory(GetCurrentProcess(),
+                    reinterpret_cast<uint8_t*>(g_RetAddr_AutoSaveLoadHook) - sizeof(operand),
+                    &operand, sizeof(operand), &read) && read == sizeof(operand))
+                g_AutoSaveLoadReplayGlobal = operand;
+        }
         // LensFlare::~LensFlare singleton guards. These hold the detour sites
         // themselves, not a return address: each trampoline derives its two
         // destinations as site+5 (replay resume) and site+13 (skip the call),
@@ -1375,7 +1414,12 @@ namespace BZROpenShim
         // mismatch and simply fell through on success, leaving the flag false
         // forever. dllmain gates engine-level AutoSave on it, so AutoSave never
         // initialized on any build.
-        SetCompatibleVersion(true);
+        //
+        // IsCompatibleGameVersion is public SDK API, and features and mods use
+        // it to mean "the addresses written into code apply". On a build that
+        // runs from a patches.json overlay only the file's addresses do, so it
+        // stays false there.
+        SetCompatibleVersion(HookEngine::IsReferenceBuild());
         std::vector<uint8_t> sig;
         if (ReadExeSignature(sig)) {
             WaitForSignature(sig);

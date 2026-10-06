@@ -1995,6 +1995,7 @@ namespace BZROpenShim
 
 		void InstallAiTuningHooksIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("AI ODF tuning")) return;
             InstallAttackTaskKiteHookIfPossible();
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();

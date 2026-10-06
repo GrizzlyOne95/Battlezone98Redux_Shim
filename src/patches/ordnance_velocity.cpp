@@ -3,6 +3,7 @@
 // and reconcile), split out of bzr_hooks.cpp. Configured from its shared
 // initializer; shared helpers come from bzr_hooks_internal.h.
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "patcher.h"
@@ -495,6 +496,7 @@ namespace BZROpenShim
         // pointer it cannot trust.
         void RefreshOrdnanceVelocityInheritanceState()
         {
+            if (!HookEngine::LiteralAddressesApply("Ordnance velocity inheritance")) return;
             const bool wantActive =
                 g_OrdnanceVelocityInheritanceEnabled && IsSinglePlayerSession();
 
@@ -524,6 +526,7 @@ namespace BZROpenShim
         // baseline, then reconcile (which also re-applies the multiplayer gate).
         void RevertOrdnanceVelocityInheritanceToBaseline()
         {
+            if (!HookEngine::LiteralAddressesApply("Ordnance velocity inheritance")) return;
             g_OrdnanceVelocityInheritanceEnabled = g_OrdnanceVelocityInheritanceBaselineEnabled;
             RefreshOrdnanceVelocityInheritanceState();
         }

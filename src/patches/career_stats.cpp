@@ -422,6 +422,7 @@ namespace BZROpenShim
 
         void RememberQueuedMissionName(const char* name)
         {
+            if (!HookEngine::LiteralAddressesApply("Career stats")) return;
             if (name && name[0])
                 strncpy_s(g_LastKnownQueuedMissionName, name, _TRUNCATE);
         }
@@ -722,6 +723,7 @@ namespace BZROpenShim
 
         void StartCareerStatsMpSessionWorker()
         {
+            if (!HookEngine::LiteralAddressesApply("Career stats")) return;
             if (InterlockedCompareExchange(&g_CareerStatsMpSessionWorkerStarted, 1, 0) != 0)
                 return;
 
@@ -827,6 +829,7 @@ namespace BZROpenShim
         // wired into a career-specific predicate.
         void PublishDamageForCareerStatsFromProbe(void* victim, void* damage)
         {
+            if (!HookEngine::LiteralAddressesApply("Career stats")) return;
             if (!HasEventSubscribers())
                 return;
 
@@ -964,6 +967,7 @@ namespace BZROpenShim
         // Drain side, once per frame: turn pending damage into Kill events.
         void TickCareerPendingVictims()
         {
+            if (!HookEngine::LiteralAddressesApply("Career stats")) return;
             if (!HasEventSubscribers())
                 return;
 
@@ -1283,6 +1287,7 @@ namespace BZROpenShim
 
         void InstallDistributedRecordDeathIntHookIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Career stats")) return;
             if (g_DistributedRecordDeathIntHookInstalled || !ShouldTracePlayerKills()) return;
             if (g_DistributedRecordDeathIntDetour.trampoline && g_BzrFn_DistributedRecordDeathInt) { g_DistributedRecordDeathIntHookInstalled = true; return; }
             const uint64_t now = GetTickCount64();
@@ -1464,6 +1469,7 @@ namespace BZROpenShim
 
         void InitializeCareerStatsConfig()
         {
+            if (!HookEngine::LiteralAddressesApply("Career stats")) return;
             bool configured = false;
             if (TryGetUserConfigBool("Career", "StatsTracking", configured))
                 g_CareerStatsEnabled = configured;
@@ -1492,6 +1498,7 @@ namespace BZROpenShim
         // right order, just late; nothing here depends on the dead world.
         void TickCareerSessionState()
         {
+            if (!HookEngine::LiteralAddressesApply("Career stats")) return;
             static bool s_WorldWasLive = false;
 
             // No subscriber check here on purpose. This is a two-state
@@ -1632,6 +1639,7 @@ namespace BZROpenShim
 
         void InstallCareerStatsMpHookIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Career stats")) return;
             if (g_CareerStatsMpHookInstalled)
                 return;
 
@@ -1722,6 +1730,7 @@ namespace BZROpenShim
 
     CareerStatsResetResult ResetCareerStatsFromBridge()
     {
+        if (!HookEngine::LiteralAddressesApply("Career stats")) return {};
         return ResetCareerStatsData();
     }
 }

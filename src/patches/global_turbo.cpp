@@ -3,6 +3,7 @@
 // bridge accessors, split out of bzr_hooks.cpp. Installed and configured
 // from there; shared helpers come from bzr_hooks_internal.h.
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "patcher.h"
@@ -275,6 +276,7 @@ namespace BZROpenShim
 
         void InstallUnitTurboHooksIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Global turbo")) return;
             if (g_UnitTurboHooksInstalled)
                 return;
             if (!ExpectedBytesMatchAt(
@@ -323,6 +325,7 @@ namespace BZROpenShim
         // Reconciles the live turbo bytes with the desired global state.
         void RefreshGlobalTurboPatchState()
         {
+            if (!HookEngine::LiteralAddressesApply("Global turbo")) return;
             const bool wantActive =
                 g_GlobalTurboEnabled &&
                 (ReadLocalPlayerNetIdValue() == 0);
@@ -331,6 +334,7 @@ namespace BZROpenShim
 
         void InitializeGlobalTurboConfig()
         {
+            if (!HookEngine::LiteralAddressesApply("Global turbo")) return;
             if (g_GlobalTurboConfigInitialized)
                 return;
             g_GlobalTurboConfigInitialized = true;
@@ -368,6 +372,7 @@ namespace BZROpenShim
 
         void RevertGlobalTurboToBaseline()
         {
+            if (!HookEngine::LiteralAddressesApply("Global turbo")) return;
             InitializeGlobalTurboConfig();  // idempotent; ensures baseline captured
             if (!g_GlobalTurboBaselineCaptured)
                 return;
@@ -387,6 +392,7 @@ namespace BZROpenShim
 
     bool SetGlobalTurboFromBridge(bool enabled)
     {
+        if (!HookEngine::LiteralAddressesApply("Global turbo")) return false;
         InitializeGlobalTurboConfig();
         InstallUnitTurboHooksIfPossible();
         g_GlobalTurboEnabled = enabled;
@@ -411,6 +417,7 @@ namespace BZROpenShim
 
     bool SetUnitTurboFromBridge(uint32_t handle, bool enabled)
     {
+        if (!HookEngine::LiteralAddressesApply("Global turbo")) return false;
         if (handle == 0)
             return false;
         // Accept the mission override even if Steam's runtime bytes have not

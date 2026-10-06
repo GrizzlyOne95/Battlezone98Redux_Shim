@@ -701,6 +701,7 @@ namespace BZROpenShim
 
         bool TryGetLocalPlayerForFlags(void*& outPlayer)
         {
+            if (!HookEngine::LiteralAddressesApply("Lobby UI")) return false;
             outPlayer = nullptr;
             if (!g_BzrFn_GetLocalPlayerNetId || !g_BzrFn_BanLookup)
                 return false;
@@ -1058,6 +1059,7 @@ namespace BZROpenShim
 
         bool TryApplySelectedFlagThroughEngine(const char* source)
         {
+            if (!HookEngine::LiteralAddressesApply("Lobby UI")) return false;
             const FlagCatalogEntry* entry = GetSelectedFlagEntry();
             if (!entry)
             {
@@ -1091,6 +1093,7 @@ namespace BZROpenShim
 
         bool TryApplyCachedFlagPayload(const char* source)
         {
+            if (!HookEngine::LiteralAddressesApply("Lobby UI")) return false;
             if (!g_FlagPayloadReady)
                 return false;
 
@@ -1383,6 +1386,7 @@ namespace BZROpenShim
 
         void InstallBzrNetRouteObserverIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Lobby UI")) return;
             if (g_BzrNetRouteObserverInstalled)
                 return;
 
@@ -2607,6 +2611,7 @@ namespace BZROpenShim
 
         void SyncNicknameEntriesFromAuthoritativeValue(const char* value)
         {
+            if (!HookEngine::LiteralAddressesApply("Lobby UI")) return;
             SyncOneNicknameEntry(true, g_NicknameEntryHost, value);
             SyncOneNicknameEntry(false, g_NicknameEntryClient, value);
         }
@@ -3066,12 +3071,14 @@ namespace BZROpenShim
 
     void __cdecl NetRouteRefreshHost()
     {
+        if (!HookEngine::LiteralAddressesApply("Lobby UI")) return;
         if (CachedLobbyWidgetIsLive(true, g_NetRouteLabelHost, "route_refresh"))
             UpdateNetRouteLabel(g_HostUiParent, g_NetRouteLabelHost);
     }
 
     void __cdecl NetRouteRefreshClient()
     {
+        if (!HookEngine::LiteralAddressesApply("Lobby UI")) return;
         if (CachedLobbyWidgetIsLive(false, g_NetRouteLabelClient, "route_refresh"))
             UpdateNetRouteLabel(g_ClientUiParent, g_NetRouteLabelClient);
     }

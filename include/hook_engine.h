@@ -112,6 +112,12 @@ namespace HookEngine
         uint32_t* out;
     };
     bool BindEngineRows(const char* feature, const EngineRow* rows, size_t count);
+
+    // One engine_addresses row by name, for addresses several files share:
+    // the address when the row is Bound or BoundData, else 0 (logged once per
+    // name). Successes are cached; a failure is asked again next time, since
+    // on Steam it can be a page SteamStub has not finished with. Never waits.
+    uint32_t EngineAddress(const char* name);
     template <size_t N>
     bool BindEngineRows(const char* feature, const EngineRow (&rows)[N])
     {
@@ -155,6 +161,13 @@ namespace HookEngine
     // as literals in feature code were taken from. A feature built on such a
     // literal must stand down when this is false: no patches.json can move it.
     bool IsReferenceBuild();
+
+    // The gate for a feature whose engine addresses are still literals in its
+    // code: true on the reference build; on any other build false, with one
+    // log line per feature naming it. Put at every entry point that installs,
+    // writes or reads through those literals, and remove it once the
+    // feature's addresses come from patches.json.
+    bool LiteralAddressesApply(const char* feature);
 
     // Helpers
     void* ResolveRelCallTarget(uint32_t instrAddr);

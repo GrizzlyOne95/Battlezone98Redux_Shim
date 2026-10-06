@@ -4,6 +4,7 @@
 // out of bzr_hooks.cpp. Both read the legacy campaignReimagined_settings.cfg
 // as well as openshim.ini.
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "patcher.h"
@@ -216,6 +217,7 @@ namespace BZROpenShim
 
         void InitializeUnderAttackAlertConfig()
         {
+            if (!HookEngine::LiteralAddressesApply("Under-attack alert and target reticle modes")) return;
             if (g_UnderAttackAlertConfigInitialized)
                 return;
 
@@ -273,6 +275,7 @@ namespace BZROpenShim
 
         void RevertUnderAttackAlertToBaseline()
         {
+            if (!HookEngine::LiteralAddressesApply("Under-attack alert and target reticle modes")) return;
             InitializeUnderAttackAlertConfig();  // idempotent; ensures baseline captured
             if (!g_UnderAttackAlertBaselineCaptured)
                 return;
@@ -426,6 +429,7 @@ namespace BZROpenShim
 
         void InitializeTargetReticlePopupConfig()
         {
+            if (!HookEngine::LiteralAddressesApply("Under-attack alert and target reticle modes")) return;
             if (g_TargetReticlePopupConfigInitialized)
                 return;
 
@@ -467,6 +471,7 @@ namespace BZROpenShim
 
         void RevertTargetReticlePopupToBaseline()
         {
+            if (!HookEngine::LiteralAddressesApply("Under-attack alert and target reticle modes")) return;
             InitializeTargetReticlePopupConfig();  // idempotent; ensures baseline captured
             if (!g_TargetReticlePopupBaselineCaptured)
                 return;
@@ -507,11 +512,13 @@ namespace BZROpenShim
 
     bool SetUnderAttackAlertModeFromBridge(int mode)
     {
+        if (!HookEngine::LiteralAddressesApply("Under-attack alert and target reticle modes")) return false;
         return SetUnderAttackAlertModeInternal(ClampUnderAttackAlertMode(mode), true);
     }
 
     bool SetTargetReticlePopupModeFromBridge(int mode)
     {
+        if (!HookEngine::LiteralAddressesApply("Under-attack alert and target reticle modes")) return false;
         return SetTargetReticlePopupModeInternal(ClampTargetReticlePopupMode(mode), true);
     }
 

@@ -198,6 +198,7 @@ namespace BZROpenShim
             // ---- Render origin (sim <-> render) ------------------------------
             bool ReadRenderOrigin(Vec3& out)
             {
+                if (!HookEngine::LiteralAddressesApply("Shell casings")) return false;
                 __try
                 {
                     const float* origin = reinterpret_cast<const float*>(kGogWorldRenderOriginAddr);

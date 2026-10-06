@@ -4,6 +4,7 @@
 // The dispatchers that drive them stay there; shared helpers come from
 // bzr_hooks_internal.h.
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "light_colour_presets.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
@@ -480,6 +481,7 @@ namespace BZROpenShim
 
         void InstallEmissionLightFixIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Headlights")) return;
             if (g_EmissionLightFixInstalled || g_EmissionLightFixInstallAttempted)
                 return;
             g_EmissionLightFixInstallAttempted = true;
@@ -972,6 +974,7 @@ namespace BZROpenShim
 
         void RefreshHeadlightState()
         {
+            if (!HookEngine::LiteralAddressesApply("Headlights")) return;
             const bool exuLoaded = IsExuModuleLoaded();
             const bool wantActive =
                 IsHeadlightFeatureConfigured() &&

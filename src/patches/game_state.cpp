@@ -1,4 +1,5 @@
 #include "game_state.h"
+#include "hook_engine.h"
 
 #include <Windows.h>
 #include <cstdint>
@@ -25,6 +26,7 @@ namespace BZROpenShim
 
     bool IsMultiplayerPauseMenuOpen() noexcept
     {
+        if (!HookEngine::LiteralAddressesApply("Game state probes")) return false;
         __try
         {
             const auto* root = reinterpret_cast<void* const*>(kMultiplayerPauseRootAddr);
@@ -39,6 +41,7 @@ namespace BZROpenShim
 
     bool IsSingleplayerPauseMenuOpen() noexcept
     {
+        if (!HookEngine::LiteralAddressesApply("Game state probes")) return false;
         __try
         {
             const auto* pauseRoot = reinterpret_cast<void* const*>(kSingleplayerPauseRootAddr);
@@ -66,11 +69,13 @@ namespace BZROpenShim
 
     bool IsPauseMenuOpen() noexcept
     {
+        if (!HookEngine::LiteralAddressesApply("Game state probes")) return false;
         return IsMultiplayerPauseMenuOpen() || IsSingleplayerPauseMenuOpen();
     }
 
     ShellUiState ReadShellUiState() noexcept
     {
+        if (!HookEngine::LiteralAddressesApply("Game state probes")) return {};
         ShellUiState state{};
         __try
         {

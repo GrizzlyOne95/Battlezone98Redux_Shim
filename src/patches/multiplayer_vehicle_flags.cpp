@@ -85,6 +85,7 @@ namespace BZROpenShim
         // attempted while the feature is on.
         bool ShouldEnableMultiplayerFlagUi()
         {
+            if (!HookEngine::LiteralAddressesApply("Multiplayer vehicle flags")) return false;
             static int s_cached = -1;
             if (s_cached < 0)
             {
@@ -1056,6 +1057,7 @@ namespace BZROpenShim
         // feature does not depend on the unproven dispatch path.
         void MaybeDriveMultiplayerFlagRenderFallback()
         {
+            if (!HookEngine::LiteralAddressesApply("Multiplayer vehicle flags")) return;
             if (!ShouldEnableMultiplayerFlagUi())
                 return;
             const ULONGLONG now = GetTickCount64();
@@ -1072,6 +1074,7 @@ namespace BZROpenShim
 
         void InstallMultiplayerFlagRenderHookIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Multiplayer vehicle flags")) return;
             if (!ShouldEnableMultiplayerFlagUi() || g_MultiplayerFlagRenderHookInstalled)
                 return;
 

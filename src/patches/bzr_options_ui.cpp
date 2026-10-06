@@ -5,6 +5,7 @@
 // declared in bzr_options_ui.h and implemented by bzr_hooks.cpp and the
 // helper files split out of it.
 #include "bzr_options_ui.h"
+#include "hook_engine.h"
 #include "bool_token.h"
 
 #include "autosave.h"
@@ -6528,6 +6529,7 @@ namespace BZROpenShim
 
     void EnsureInputBindingPopulateHookScaffold()
     {
+        if (!HookEngine::LiteralAddressesApply("Shim options UI")) return;
         InitializeInputBindingUiScaffold();
 
         // The settings page reuses the hooked input screen as its host, so
@@ -6785,6 +6787,7 @@ namespace BZROpenShim
 
     void EnsureOptionsParentCtorHookScaffold()
     {
+        if (!HookEngine::LiteralAddressesApply("Shim options UI")) return;
         if (!ShouldEnableShimSettingsUi())
             return;
 

@@ -583,6 +583,7 @@ namespace BZROpenShim
     // calling this.
     void ResolveLocalPlayerLookupForVerifiedGogBuild()
     {
+        if (!HookEngine::LiteralAddressesApply("Local player lookup")) return;
         if (!g_BzrFn_GetPlayerHandle)
         {
             g_BzrFn_GetPlayerHandle =

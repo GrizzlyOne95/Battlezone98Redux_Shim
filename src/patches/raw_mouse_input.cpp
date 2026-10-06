@@ -144,6 +144,7 @@ namespace BZROpenShim
         // reference to the same address.
         bool RawMouseInputSignaturesMatch()
         {
+            if (!HookEngine::LiteralAddressesApply("Raw mouse input")) return false;
             if (g_RawMouseInputSignaturesChecked)
                 return g_RawMouseInputSignaturesMatch;
 
@@ -267,6 +268,7 @@ namespace BZROpenShim
 
         void InstallRawMouseInputProcessHookIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Raw mouse input")) return;
             if (g_RawMouseInputProcessHookInstalled || !RawMouseInputSignaturesMatch())
                 return;
 
@@ -396,6 +398,7 @@ namespace BZROpenShim
 
     bool GetRawMouseInputEnabledFromBridge()
     {
+        if (!HookEngine::LiteralAddressesApply("Raw mouse input")) return false;
         // Set by the stock `rawinput` / `norawinput` command-line parser and
         // consumed by startup before RegisterRawInputDevices. The stock code
         // then stores the registration result back into the same value.
@@ -405,6 +408,7 @@ namespace BZROpenShim
 
     bool SetRawMouseInputEnabledFromBridge(bool enabled)
     {
+        if (!HookEngine::LiteralAddressesApply("Raw mouse input")) return false;
         if (!RawMouseInputSignaturesMatch())
             return false;
 

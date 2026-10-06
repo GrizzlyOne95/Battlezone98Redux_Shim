@@ -237,6 +237,7 @@ namespace BZROpenShim
 
         void InstallBriefingScrollFixIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("UI and camera fixes")) return;
             if (!g_BriefingScrollFixEnabled || g_BriefingScrollFixInstalled)
                 return;
 
@@ -318,6 +319,7 @@ namespace BZROpenShim
 
         void InstallMultiRenderCountClampIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("UI and camera fixes")) return;
             if (!g_MultiRenderCountClampEnabled || g_MultiRenderCountClampInstalled)
                 return;
 
@@ -595,6 +597,7 @@ namespace BZROpenShim
 
         void InstallThumbnailBmpGuardIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("UI and camera fixes")) return;
             if (!g_ThumbnailBmpGuardEnabled || g_ThumbnailBmpGuardInstalled)
                 return;
 
@@ -731,6 +734,7 @@ namespace BZROpenShim
 
         void InstallQuakeReplayFadeIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("UI and camera fixes")) return;
             if (!g_QuakeReplayFadeEnabled || g_QuakeReplayFadeInstalled)
                 return;
 
@@ -806,6 +810,7 @@ namespace BZROpenShim
 
         void InstallTargetCamSatelliteFixIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("UI and camera fixes")) return;
             if (!g_TargetCamSatelliteFixEnabled || g_TargetCamSatelliteFixInstalled)
                 return;
 
@@ -896,6 +901,7 @@ namespace BZROpenShim
 
         void InstallCinematicSatelliteZoomFixIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("UI and camera fixes")) return;
             if (!g_CinematicSatelliteZoomFixEnabled || g_CinematicSatelliteZoomFixInstalled)
                 return;
 

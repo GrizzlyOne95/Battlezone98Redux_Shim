@@ -349,6 +349,7 @@ namespace BZROpenShim
 
         void InstallShieldTowerTeamFilterHookIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Team filter (shield towers, mines)")) return;
             if (g_ShieldTowerSimulateHookInstalled)
                 return;
 
@@ -424,6 +425,7 @@ namespace BZROpenShim
         }
         void InstallMineTeamFilterHooksIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("Team filter (shield towers, mines)")) return;
             if (g_MagnetMineSimulateHookInstalled && g_ProximityMineSimulateHookInstalled)
                 return;
 

@@ -319,6 +319,7 @@ namespace BZROpenShim
 
         void InstallUiManualObjectDedupeHookIfPossible()
         {
+            if (!HookEngine::LiteralAddressesApply("UI ManualObject dedupe fix")) return;
             if (!ShouldEnableUiManualObjectDedupe() ||
                 g_UiManualObjectDedupeHookInstalled)
                 return;
