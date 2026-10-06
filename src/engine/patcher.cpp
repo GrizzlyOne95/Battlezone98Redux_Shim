@@ -1251,7 +1251,23 @@ namespace BZROpenShim
                 SunFlash::LoadConfig();
                 target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(SunFlash::ThunkAddress()));
             }
-            else if (p.name.find("Damage Reveal Probe") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(DamageRevealProbeHook));
+            else if (p.name.find("Damage Reveal Probe") != std::string::npos) {
+                // The hook calls on to whatever this call reached, so take
+                // that from the call's own rel32 and require it to be the
+                // routine the engine_addresses row names.
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                const uint32_t expected = HookEngine::EngineAddress("GameObjectSetDamageFlags");
+                if (!original || expected == 0 ||
+                    reinterpret_cast<uintptr_t>(original) != expected) {
+                    Log(L"[OWNREVEAL] %hs identity failed site=0x%08X original=%p expected=0x%08X; leaving stock call\n",
+                        p.name.c_str(), p.address - 1, original, expected);
+                    continue;
+                }
+                SetDamageFlagsOriginal(original);
+                target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(DamageRevealProbeHook));
+            }
             else if (p.name == "Splinter Emitter Owner Propagation") {
                 void* original = isSteam
                     ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)

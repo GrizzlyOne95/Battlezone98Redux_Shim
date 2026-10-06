@@ -99,7 +99,10 @@ namespace BZROpenShim
         // uses itself (0x00479F30). Both are read straight from the shipped
         // image; nothing about the DAMAGE layout is assumed beyond the two
         // fields SetDamageFlags itself reads ([0] damager, [1] dmg_source).
-        constexpr uintptr_t kGogSetDamageFlagsAddr = 0x004DC130;
+        // The patcher sets this from each probe call's own rel32 once it
+        // matches the GameObjectSetDamageFlags row, and leaves the stock call
+        // in place otherwise, so a probe is never live without it.
+        static void* g_SetDamageFlagsOriginal = nullptr;
 
         // Configured value AND'd with the single-player gate. perceivedTeam is
         // simulation state -- it drives AI target selection, radar and the
@@ -548,10 +551,15 @@ namespace BZROpenShim
     }
 #endif
 
+    void SetDamageFlagsOriginal(void* original)
+    {
+        g_SetDamageFlagsOriginal = original;
+    }
+
     void __fastcall DamageRevealProbeHook(void* victim, void* /*edx*/, void* damage)
     {
         using FnSetDamageFlags = void(__fastcall*)(void*, void*, void*);
-        auto stock = reinterpret_cast<FnSetDamageFlags>(kGogSetDamageFlagsAddr);
+        auto stock = reinterpret_cast<FnSetDamageFlags>(g_SetDamageFlagsOriginal);
 
         // These four call sites are the engine's four damage handlers, shared
         // by single player and network games, so this is where the native event

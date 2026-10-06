@@ -2274,6 +2274,24 @@
       "address": "0x0059DEA5",
       "expected": "0F B6 85 AE FC FF FF 85 C0 74 26",
       "identity": "Person::Simulate landing: movzx eax,[ebp-jumpHeld]; test eax,eax; je sniper-check"
+    },
+    {
+      "name": "GameObjectSetDamageFlags",
+      "address": "0x004DC130",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC E8 62 6C 34 00",
+      "identity": "GameObject::SetDamageFlags(DAMAGE*) __thiscall; the four damage handlers call it, resolving damager/dmg_source through obj76 -> GameObject"
+    },
+    {
+      "name": "MainScreenDtor",
+      "address": "0x0078ECA0",
+      "expected": "55 8B EC 6A FF 68 C8 E6 85 00 64 A1 00 00 00 00",
+      "identity": "MainScreen destructor body, called by the scalar deleting destructor (UiPerfMainScreenDtor); clears the MainScreen singleton"
+    },
+    {
+      "name": "OptionsParentSingleton",
+      "address": "0x009455C4",
+      "kind": "data",
+      "identity": "Global holding the live Options screen, the parent native_ui attaches Options widgets to"
     }
   ],
   "globals": [
