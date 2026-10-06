@@ -48,20 +48,46 @@ namespace BZROpenShim
         // 0x0049405B inside CockpitRadar::Render, which runs every frame. A
         // correction applied at the load site alone is overwritten by the very
         // next frame, so this detours the builder itself and covers both.
-        constexpr uintptr_t kRadarLayoutBuilderAddr = 0x00492EC0;
+        //
+        // Addresses come from the patches.json engine_addresses rows bound in
+        // RadarLayoutAddressesBound(); the builder row's byte guard is what
+        // identifies the build for the data globals beside it.
         constexpr size_t kRadarLayoutDetourLen = 6;
         constexpr uint8_t kRadarLayoutExpectedBytes[kRadarLayoutDetourLen] = {
             0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10
         };
-        constexpr uintptr_t kRadarProjRadiusAddr = 0x009173C0;
-        constexpr uintptr_t kRadarProjCentreXAddr = 0x008E7924;
-        constexpr uintptr_t kRadarProjCentreYAddr = 0x008E7928;
-        constexpr uintptr_t kRadarBackdropXAddr = 0x008E77A8;
-        constexpr uintptr_t kRadarBackdropYAddr = 0x008E77AC;
-        constexpr uintptr_t kRadarSizeScaleAddr = 0x008E77B0;
-        constexpr uintptr_t kRadarCompactModeAddr = 0x009173C4;
-        constexpr uintptr_t kRadarUiScaleXAddr = 0x02BF041C;
-        constexpr uintptr_t kRadarUiScaleYAddr = 0x02BF0420;
+        static uintptr_t g_RadarLayoutBuilderAddr = 0;
+        static uintptr_t g_RadarProjRadiusAddr = 0;
+        static uintptr_t g_RadarProjCentreXAddr = 0;
+        static uintptr_t g_RadarProjCentreYAddr = 0;
+        static uintptr_t g_RadarBackdropXAddr = 0;
+        static uintptr_t g_RadarBackdropYAddr = 0;
+        static uintptr_t g_RadarSizeScaleAddr = 0;
+        static uintptr_t g_RadarCompactModeAddr = 0;
+        static uintptr_t g_RadarUiScaleXAddr = 0;
+        static uintptr_t g_RadarUiScaleYAddr = 0;
+        static uintptr_t g_RadarViewportHeightAddr = 0;
+
+        static bool RadarLayoutAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "RadarLayoutBuilder", &g_RadarLayoutBuilderAddr },
+                    { "RadarProjRadius", &g_RadarProjRadiusAddr },
+                    { "RadarProjCentreX", &g_RadarProjCentreXAddr },
+                    { "RadarProjCentreY", &g_RadarProjCentreYAddr },
+                    { "RadarBackdropX", &g_RadarBackdropXAddr },
+                    { "RadarBackdropY", &g_RadarBackdropYAddr },
+                    { "RadarSizeScale", &g_RadarSizeScaleAddr },
+                    { "RadarCompactMode", &g_RadarCompactModeAddr },
+                    { "RadarUiScaleX", &g_RadarUiScaleXAddr },
+                    { "RadarUiScaleY", &g_RadarUiScaleYAddr },
+                    { "HudViewportHeight", &g_RadarViewportHeightAddr },
+                };
+                return HookEngine::BindEngineRows("Radar layout", rows);
+            }();
+            return bound;
+        }
         // Stock normal-preset bases, from the `param_1 != 2` branch of
         // 0x00492DC0. Read as constants rather than from the live globals
         // because a scale provider may already have scaled 0x008E7754 in place;
@@ -91,23 +117,23 @@ namespace BZROpenShim
             __try
             {
                 // The compact preset ships its own consistent base set.
-                if (*reinterpret_cast<const int*>(kRadarCompactModeAddr) != 0)
+                if (*reinterpret_cast<const int*>(g_RadarCompactModeAddr) != 0)
                     return;
 
-                const float scale = *reinterpret_cast<const float*>(kRadarSizeScaleAddr);
+                const float scale = *reinterpret_cast<const float*>(g_RadarSizeScaleAddr);
                 if (!(scale > kRadarScaleMin) || !(scale < kRadarScaleMax))
                     return;
                 // The stock preset is already internally consistent.
                 if (std::fabs(scale - 1.0f) < 1.0e-4f)
                     return;
 
-                const double uiScaleX = *reinterpret_cast<const float*>(kRadarUiScaleXAddr);
-                const double uiScaleY = *reinterpret_cast<const float*>(kRadarUiScaleYAddr);
+                const double uiScaleX = *reinterpret_cast<const float*>(g_RadarUiScaleXAddr);
+                const double uiScaleY = *reinterpret_cast<const float*>(g_RadarUiScaleYAddr);
                 if (!(uiScaleX > 0.05) || !(uiScaleY > 0.05))
                     return;
 
                 const int viewportHeight =
-                    *reinterpret_cast<const int*>(kScrapPilotHudViewportHeightAddr);
+                    *reinterpret_cast<const int*>(g_RadarViewportHeightAddr);
                 if (viewportHeight <= 0)
                     return;
 
@@ -125,8 +151,8 @@ namespace BZROpenShim
                 const int backdropYRef = viewportHeight -
                     static_cast<int>(kRadarStockBackdropYBase * uiScaleY / 2.0);
 
-                const int backdropX = *reinterpret_cast<const int*>(kRadarBackdropXAddr);
-                const int backdropY = *reinterpret_cast<const int*>(kRadarBackdropYAddr);
+                const int backdropX = *reinterpret_cast<const int*>(g_RadarBackdropXAddr);
+                const int backdropY = *reinterpret_cast<const int*>(g_RadarBackdropYAddr);
 
                 const int radius =
                     static_cast<int>(std::lround(scale * radiusRef));
@@ -135,9 +161,9 @@ namespace BZROpenShim
                 const int centreY = backdropY +
                     static_cast<int>(std::lround(scale * (centreYRef - backdropYRef)));
 
-                *reinterpret_cast<int*>(kRadarProjRadiusAddr) = radius;
-                *reinterpret_cast<int*>(kRadarProjCentreXAddr) = centreX;
-                *reinterpret_cast<int*>(kRadarProjCentreYAddr) = centreY;
+                *reinterpret_cast<int*>(g_RadarProjRadiusAddr) = radius;
+                *reinterpret_cast<int*>(g_RadarProjCentreXAddr) = centreX;
+                *reinterpret_cast<int*>(g_RadarProjCentreYAddr) = centreY;
 
                 // Once per scale change: the builder runs every frame.
                 if (g_RadarLayoutLoggedScale != scale)
@@ -172,11 +198,11 @@ namespace BZROpenShim
 
         void InstallRadarLayoutHookIfPossible()
         {
-            if (!HookEngine::LiteralAddressesApply("Radar layout")) return;
+            if (!RadarLayoutAddressesBound()) return;
             if (g_RadarLayoutHookInstalled)
                 return;
 
-            if (!ExpectedBytesMatchAt(kRadarLayoutBuilderAddr,
+            if (!ExpectedBytesMatchAt(g_RadarLayoutBuilderAddr,
                                       kRadarLayoutExpectedBytes,
                                       sizeof(kRadarLayoutExpectedBytes)))
             {
@@ -185,13 +211,13 @@ namespace BZROpenShim
                     g_RadarLayoutMismatchLogged = true;
                     Log(L"[RADAR] Layout builder entry at 0x%08X does not match; "
                         L"radar scale correction stands down\n",
-                        static_cast<uint32_t>(kRadarLayoutBuilderAddr));
+                        static_cast<uint32_t>(g_RadarLayoutBuilderAddr));
                 }
                 return;
             }
 
             if (!InstallInlineDetour32(g_RadarLayoutDetour,
-                                       kRadarLayoutBuilderAddr,
+                                       g_RadarLayoutBuilderAddr,
                                        reinterpret_cast<void*>(RadarRefreshLayoutHook),
                                        kRadarLayoutDetourLen,
                                        kRadarLayoutExpectedBytes,
@@ -210,7 +236,7 @@ namespace BZROpenShim
             g_RadarLayoutHookInstalled = true;
             Log(L"[RADAR] Layout hook installed at 0x%08X; projection now tracks "
                 L"the backdrop at any radar scale\n",
-                static_cast<uint32_t>(kRadarLayoutBuilderAddr));
+                static_cast<uint32_t>(g_RadarLayoutBuilderAddr));
         }
 
         // --- Radar size scale: the player-facing setting ------------------------
@@ -243,7 +269,6 @@ namespace BZROpenShim
 
         void RefreshRadarSizeScaleState()
         {
-            if (!HookEngine::LiteralAddressesApply("Radar layout")) return;
             const float desired = ClampRadarSizeScaleSetting(g_RadarSizeScale);
             g_RadarSizeScale = desired;
 
@@ -276,7 +301,7 @@ namespace BZROpenShim
 
             __try
             {
-                *reinterpret_cast<float*>(kRadarSizeScaleAddr) = desired;
+                *reinterpret_cast<float*>(g_RadarSizeScaleAddr) = desired;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -284,14 +309,13 @@ namespace BZROpenShim
                 {
                     g_RadarSizeScaleWriteFailureLogged = true;
                     Log(L"[RADAR] Could not write the size scale at 0x%08X\n",
-                        static_cast<uint32_t>(kRadarSizeScaleAddr));
+                        static_cast<uint32_t>(g_RadarSizeScaleAddr));
                 }
             }
         }
 
         void RevertRadarSizeScaleToBaseline()
         {
-            if (!HookEngine::LiteralAddressesApply("Radar layout")) return;
             g_RadarSizeScale = g_RadarSizeScaleBaseline;
             RefreshRadarSizeScaleState();
         }
@@ -301,14 +325,13 @@ namespace BZROpenShim
 
     float GetRadarSizeScaleFromBridge()
     {
-        if (!HookEngine::LiteralAddressesApply("Radar layout")) return 0;
         // Until the byte-guarded layout hook has identified this build, the
         // engine global is only an address; answer with the shim's own value.
         if (!g_RadarLayoutHookInstalled)
             return g_RadarSizeScale;
         __try
         {
-            const float current = *reinterpret_cast<const float*>(kRadarSizeScaleAddr);
+            const float current = *reinterpret_cast<const float*>(g_RadarSizeScaleAddr);
             return std::isfinite(current) && current > 0.0f
                 ? current
                 : g_RadarSizeScale;
@@ -321,7 +344,6 @@ namespace BZROpenShim
 
     bool SetRadarSizeScaleFromBridge(float scale)
     {
-        if (!HookEngine::LiteralAddressesApply("Radar layout")) return false;
         if (!std::isfinite(scale) || scale <= 0.0f)
             return false;
 
@@ -339,7 +361,7 @@ namespace BZROpenShim
         g_RadarSizeScale = clamped;
         __try
         {
-            *reinterpret_cast<float*>(kRadarSizeScaleAddr) = clamped;
+            *reinterpret_cast<float*>(g_RadarSizeScaleAddr) = clamped;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
