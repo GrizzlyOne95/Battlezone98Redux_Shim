@@ -2766,6 +2766,150 @@
       "address": "0x00780E40",
       "expected": "55 8B EC 83 EC 08 8B 45 0C 50 8B 4D 08 51 E8 8D 01 D4 FF",
       "identity": "terrain tile mix lookup; terrain proxy calls it"
+    },
+    {
+      "name": "BriefingScrollUpCall",
+      "address": "0x0078ED29",
+      "expected": "E8 B2 F3 03 00 5D C3 55",
+      "identity": "mission briefing scroll-up callback's call to the unguarded list scroll-up; the briefing scroll fix redirects it to the guarded one"
+    },
+    {
+      "name": "BriefingScrollDownCall",
+      "address": "0x0078ED39",
+      "expected": "E8 D2 F3 03 00 5D C3 55",
+      "identity": "mission briefing scroll-down callback's call to the unguarded list scroll-down"
+    },
+    {
+      "name": "ArchiveScrollUpCall",
+      "address": "0x00790AF9",
+      "expected": "E8 E2 D5 03 00 5D C3 55",
+      "identity": "mission archive scroll-up callback's call to the unguarded list scroll-up"
+    },
+    {
+      "name": "ArchiveScrollDownCall",
+      "address": "0x00790B09",
+      "expected": "E8 02 D6 03 00 5D C3 55",
+      "identity": "mission archive scroll-down callback's call to the unguarded list scroll-down"
+    },
+    {
+      "name": "UiScrollUpGuarded",
+      "address": "0x007CE730",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 58 29 00 00 00",
+      "identity": "clamped list scroll-up used by the lobby/chat UI"
+    },
+    {
+      "name": "UiScrollDownGuarded",
+      "address": "0x007CE6D0",
+      "expected": "55 8B EC 83 EC 08 89 4D FC E8 82 60 F9 FF",
+      "identity": "clamped list scroll-down used by the lobby/chat UI"
+    },
+    {
+      "name": "UiScrollUpUnguarded",
+      "address": "0x007CE0E0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 58 29 00 00",
+      "identity": "unclamped list scroll-up (snaps back to the top on the last partial page)"
+    },
+    {
+      "name": "UiScrollDownUnguarded",
+      "address": "0x007CE110",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 58 29 00 00",
+      "identity": "unclamped list scroll-down"
+    },
+    {
+      "name": "ThumbnailMaterialApply",
+      "address": "0x007D3FF0",
+      "expected": "55 8B EC 6A FF 68 E1 2C 86 00 64 A1 00 00 00 00",
+      "identity": "FUN_007D3FF0 build-thumbnail-material helper (clones UI material, loads the texture); the BMP guard detours its entry"
+    },
+    {
+      "name": "PostLoadQuakeRestart",
+      "address": "0x005C7B7E",
+      "expected": "B9 28 23 99 00 E8 28 90 EF FF 8A 45 FF",
+      "identity": "PostLoadScriptUtils mov ecx,offset earthQuake; call EarthQuake::StartQuake (the save-replay restart); the EarthQuake object is the mov operand at +1, the call is at +5"
+    },
+    {
+      "name": "EarthQuakeStartQuake",
+      "address": "0x004C0BB0",
+      "expected": "55 8B EC 83 EC 50 A1 00 70 8E 00 33 C5",
+      "identity": "EarthQuake::StartQuake"
+    },
+    {
+      "name": "EarthQuakeUpdateQuake",
+      "address": "0x004C0C40",
+      "expected": "55 8B EC 83 EC 08 89 4D FC 8B 45 FC",
+      "identity": "EarthQuake::UpdateQuake"
+    },
+    {
+      "name": "EarthQuakeStopQuake",
+      "address": "0x004C0CA0",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 8B 45 F8",
+      "identity": "EarthQuake::StopQuake"
+    },
+    {
+      "name": "EarthQuakeSimulate",
+      "address": "0x004C0CF0",
+      "expected": "55 8B EC 81 EC 90 00 00 00 A1 00 70 8E 00",
+      "identity": "EarthQuake::Simulate; the quake replay fade detours its entry"
+    },
+    {
+      "name": "TargetCamEnabledCall",
+      "address": "0x00682679",
+      "expected": "E8 62 B7 F5 FF 0F B6 C8 85 C9 0F 84 88 04 00 00",
+      "identity": "Ogre frame driver's call to the TargetCam enabled predicate, followed by movzx ecx,al; test ecx,ecx"
+    },
+    {
+      "name": "TargetCamEnabledWrapper",
+      "address": "0x005DDDE0",
+      "expected": "55 8B EC B9 E0 5F 5F 02 E8 23 FF FF FF",
+      "identity": "TargetCam enabled predicate (reads targetCam+0x1F1)"
+    },
+    {
+      "name": "CinematicCameraBegin",
+      "address": "0x00821E30",
+      "expected": "55 8B EC 51 E8 C7 81 DF FF 85 C0 75 0D",
+      "identity": "cinematic camera begin (view mode 5)"
+    },
+    {
+      "name": "CinematicBeginCallMission",
+      "address": "0x004F5667",
+      "expected": "E8 C4 C7 32 00 8B 4D FC 0F B6 51 2D",
+      "identity": "call CinematicCameraBegin from the mission path"
+    },
+    {
+      "name": "CinematicBeginCallScript",
+      "address": "0x005CD2D9",
+      "expected": "E8 52 4B 25 00 E8 AD 44 05 00 B9 10 69 94 00",
+      "identity": "call CinematicCameraBegin from the script path"
+    },
+    {
+      "name": "GetCameraRecord",
+      "address": "0x00439E60",
+      "expected": "55 8B EC B8 E0 AA 8E 00 5D C3 CC CC",
+      "identity": "main camera record getter"
+    },
+    {
+      "name": "BuildCameraRecord",
+      "address": "0x00688370",
+      "expected": "55 8B EC 81 EC 48 02 00 00 A1 00 70 8E 00",
+      "identity": "camera record builder (fov, zoom, ...)"
+    },
+    {
+      "name": "CockpitFovBits",
+      "address": "0x0087256C",
+      "kind": "data",
+      "identity": "float bits of the cockpit FOV the cockpit view setter (0x0061BAB0) passes to the record builder"
+    },
+    {
+      "name": "CockpitZoomBits",
+      "address": "0x008A2604",
+      "kind": "data",
+      "identity": "float 1.0 cockpit zoom the cockpit view setter passes to the record builder"
+    },
+    {
+      "name": "MultiRenderCountClampSite",
+      "address": "0x0044D858",
+      "expected": "33 C9 8B 55 AC 8B 82 08 01 00 00",
+      "identity": "MultiRenderClass ctor right after the ParameterDB read of rendercount: xor ecx,ecx; mov edx,[ebp-0x54]; mov eax,[edx+0x108] (exactly the 11 bytes the clamp displaces)"
     }
   ],
   "globals": [
