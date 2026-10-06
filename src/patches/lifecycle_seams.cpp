@@ -287,6 +287,19 @@ namespace BZROpenShim
             }();
             return bound;
         }
+
+        // Shared with the terrain proxy. The mission seam detours SetRunning
+        // once this has bound, so later readers must take these values rather
+        // than bind the SetShellState row again (its guard no longer matches).
+        bool GetBzrRunStateAddresses(uintptr_t& setRunning, uintptr_t& runState, uintptr_t& nameTable)
+        {
+            if (!BzrRunStateAddressesBound())
+                return false;
+            setRunning = g_BzrSetRunningAddr;
+            runState = g_BzrRunStateAddr;
+            nameTable = g_BzrRunStateNameTableAddr;
+            return true;
+        }
         constexpr int kBzrRunStateWasQuit = 2;
 
         using FnBzrSetRunning = void(__cdecl*)(int);
