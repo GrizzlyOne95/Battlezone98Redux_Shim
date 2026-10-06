@@ -2910,6 +2910,126 @@
       "address": "0x0044D858",
       "expected": "33 C9 8B 55 AC 8B 82 08 01 00 00",
       "identity": "MultiRenderClass ctor right after the ParameterDB read of rendercount: xor ecx,ecx; mov edx,[ebp-0x54]; mov eax,[edx+0x108] (exactly the 11 bytes the clamp displaces)"
+    },
+    {
+      "name": "ShieldTowerSimulate",
+      "address": "0x005D0D80",
+      "expected": "55 8B EC 81 EC EC 01 00 00 A1 00 70 8E 00",
+      "identity": "ShieldTower::Simulate (vtable slot 15); the team filter wraps it"
+    },
+    {
+      "name": "MagnetMineSimulate",
+      "address": "0x0050C650",
+      "expected": "55 8B EC 81 EC 00 01 00 00 A1 00 70 8E 00",
+      "identity": "MagnetMine::Simulate (vtable slot 15); the team filter wraps it"
+    },
+    {
+      "name": "ProximityMineSimulate",
+      "address": "0x005B0E40",
+      "expected": "55 8B EC 81 EC BC 00 00 00 A1 00 70 8E 00",
+      "identity": "ProximityMine::Simulate (vtable slot 15); the team filter wraps it"
+    },
+    {
+      "name": "MineSimulate",
+      "address": "0x00511460",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC F3 0F 10 45 08",
+      "identity": "Mine::Simulate, the base MagnetMine/ProximityMine delegate to"
+    },
+    {
+      "name": "ShieldTowerPowerUpdate",
+      "address": "0x005D0CC0",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC 8B 45 FC",
+      "identity": "ShieldTower power update, first call of stock ShieldTower::Simulate"
+    },
+    {
+      "name": "GameObjectFriendP",
+      "address": "0x004DB510",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 83 7D 08 00 74 2A 8B 4D 08 83 C1 18 8B 45 08 8B 50 18 8B 42 04 FF D0 50 8B 4D F8 E8 27 00 00 00",
+      "identity": "GameObject::FriendP(GameObject*), bool thiscall; null-checks other, calls other->GetTeamNum, then the int overload"
+    },
+    {
+      "name": "GameObjectEnemyP",
+      "address": "0x004DB5B0",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 83 7D 08 00 74 2A 8B 4D 08 83 C1 18 8B 45 08 8B 50 18 8B 42 04 FF D0 50 8B 4D F8 E8 27 00 00 00",
+      "identity": "GameObject::EnemyP(GameObject*), bool thiscall; mirror of FriendP"
+    },
+    {
+      "name": "GameObjectAddVelocity",
+      "address": "0x004A75B0",
+      "expected": "55 8B EC 83 EC 08 89 4D FC 8B 45 FC",
+      "identity": "GameObject add-velocity thiscall (const float delta[3])"
+    },
+    {
+      "name": "MatrixInverse",
+      "address": "0x008203F0",
+      "expected": "55 8B EC 83 EC 44 A1 00 70 8E 00 33 C5",
+      "identity": "legacy 3x4 matrix inverse"
+    },
+    {
+      "name": "VectorTransform",
+      "address": "0x00820180",
+      "expected": "55 8B EC 83 EC 0C 8B 45 10 83 E8 01",
+      "identity": "legacy vector transform (out, in, count, matrix)"
+    },
+    {
+      "name": "ShieldTowerOrdnanceScan",
+      "address": "0x005D12BB",
+      "expected": "B9 8C 90 9C 00 E8 FB C5 E5 FF 8D 8D 84 FE FF FF",
+      "identity": "stock ShieldTower::Simulate ordnance pass: mov ecx, offset ordnanceList; call list begin; the std::list<Ordnance*> is the mov operand at +1"
+    },
+    {
+      "name": "ProximityMineGroundFx",
+      "address": "0x007809D0",
+      "expected": "55 8B EC 83 EC 30 83 3D B8 54 94 00 00",
+      "identity": "ground effect cdecl (x, z, 3.0) in stock ProximityMine detonation"
+    },
+    {
+      "name": "GameObjectDamageOwner",
+      "address": "0x004B0400",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 24 02 00 00",
+      "identity": "GameObject damage owner thiscall, or null"
+    },
+    {
+      "name": "ExplosionClassBuild",
+      "address": "0x004CB7B0",
+      "expected": "55 8B EC 83 EC 10 89 4D FC 8B 45 FC",
+      "identity": "ExplosionClass::Build thiscall (matrix, owner obj), ret 8"
+    },
+    {
+      "name": "ProximityMineNetFlag",
+      "address": "0x00571C40",
+      "expected": "55 8B EC A0 7B 7F 91 00 5D C3 CC CC",
+      "identity": "returns the net-game byte; stock ProximityMine detonation notifies when set"
+    },
+    {
+      "name": "ProximityMineNetNotify",
+      "address": "0x004B8460",
+      "expected": "55 8B EC 83 EC 14 89 4D FC 8B 45 FC",
+      "identity": "distributed notify on mine+0x18 after detonation"
+    },
+    {
+      "name": "ShieldTowerVtable",
+      "address": "0x008876E8",
+      "kind": "data",
+      "identity": "RTTI .?AVShieldTower@@ vtable; slot 15 is Simulate"
+    },
+    {
+      "name": "MagnetMineVtable",
+      "address": "0x0087D538",
+      "kind": "data",
+      "identity": "RTTI .?AVMagnetMine@@ vtable; slot 15 is Simulate"
+    },
+    {
+      "name": "ProximityMineVtable",
+      "address": "0x00886278",
+      "kind": "data",
+      "identity": "RTTI .?AVProximityMine@@ vtable; slot 15 is Simulate"
+    },
+    {
+      "name": "ChunkEffectInstance",
+      "address": "0x00950190",
+      "kind": "data",
+      "identity": "the global ChunkEffect; stock ProximityMine detonation calls CreateChunklet on it 20 times (mov ecx, offset at 0x005B1113)"
     }
   ],
   "globals": [
