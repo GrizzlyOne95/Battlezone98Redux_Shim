@@ -2724,6 +2724,48 @@
       "address": "0x0089ADDC",
       "kind": "data",
       "identity": "RTTI .?AVBZRNetLobby@@ vtable; the nickname reauth path checks the live lobby against it"
+    },
+    {
+      "name": "TerrainZoneConstruct",
+      "address": "0x007778B0",
+      "expected": "55 8B EC 6A FF 68 67 E3 85 00 64 A1 00 00 00 00",
+      "identity": "terrain zone mesh constructor (FUN_007778B0); terrain proxy detour"
+    },
+    {
+      "name": "TerrainZoneProcess",
+      "address": "0x00778450",
+      "expected": "55 8B EC 6A FF 68 D9 E3 85 00 64 A1 00 00 00 00",
+      "identity": "terrain zone rebuild/process (FUN_00778450); terrain proxy detour"
+    },
+    {
+      "name": "TerrainWordAt",
+      "address": "0x004C0FE0",
+      "expected": "55 8B EC 83 EC 0C 8B 45 08 05 00 18 00 00 89 45 FC",
+      "identity": "terrain cell word lookup; terrain proxy calls it"
+    },
+    {
+      "name": "TerrainHeightAt",
+      "address": "0x0077D640",
+      "expected": "55 8B EC 8B 45 0C 50 8B 4D 08 51 E8 10 57 D1 FF",
+      "identity": "terrain height sample lookup; terrain proxy calls it"
+    },
+    {
+      "name": "TerrainAtlasRectAt",
+      "address": "0x0050CE10",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 08 50 8B 4D FC 83 C1 38",
+      "identity": "terrain atlas rect lookup; terrain proxy calls it"
+    },
+    {
+      "name": "TerrainTileIndexAt",
+      "address": "0x00780DC0",
+      "expected": "55 8B EC 83 EC 14 8B 45 0C 50 8B 4D 08 51 E8 0D 02 D4 FF",
+      "identity": "terrain tile index lookup; terrain proxy calls it"
+    },
+    {
+      "name": "TerrainMixAt",
+      "address": "0x00780E40",
+      "expected": "55 8B EC 83 EC 08 8B 45 0C 50 8B 4D 08 51 E8 8D 01 D4 FF",
+      "identity": "terrain tile mix lookup; terrain proxy calls it"
     }
   ],
   "globals": [
