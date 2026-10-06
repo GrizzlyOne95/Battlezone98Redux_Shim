@@ -138,6 +138,7 @@
     <ClCompile Include="src\engine\render_profile.cpp" />
     <ClCompile Include="src\engine\render_profile_resources.cpp" />
     <ClCompile Include="src\engine\resolve_table.cpp" />
+    <ClCompile Include="src\engine\build_overlay.cpp" />
     <ClCompile Include="src\engine\engine_globals.cpp" />
     <ClCompile Include="src\engine\x86_length.cpp" />
     <ClCompile Include="src\engine\shim_log_client.cpp" />

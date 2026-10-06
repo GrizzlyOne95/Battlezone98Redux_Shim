@@ -101,10 +101,60 @@ namespace HookEngine
     };
     EngineAddressStatus ResolveEngineAddress(const char* name, uint32_t& outAddress);
 
+    // A feature's engine addresses, bound all or nothing. Every row must be
+    // Bound (code) or BoundData (data); otherwise every output is set to 0,
+    // one log line names the rows that failed and why, and false comes back so
+    // the feature stands down. On Steam a Mismatch can be SteamStub still
+    // decrypting the page, so mismatched rows get about a second of retries.
+    struct EngineRow
+    {
+        const char* name;
+        uint32_t* out;
+    };
+    bool BindEngineRows(const char* feature, const EngineRow* rows, size_t count);
+    template <size_t N>
+    bool BindEngineRows(const char* feature, const EngineRow (&rows)[N])
+    {
+        return BindEngineRows(feature, rows, N);
+    }
+
     // Locates scripts/patches.json: working directory first, then the exe's
     // own directory, since the game is routinely launched from elsewhere.
     // Empty when neither exists.
     std::string FindPatchesJsonPath();
+
+    // Which battlezone98redux.exe build is running, and which of the builds
+    // patches.json describes it is (build_overlay.h). Decided once, from the
+    // exe's PE link timestamp, the first time anything reads patches.json.
+    enum class BuildMatch : uint8_t
+    {
+        Base,        // the build the file's top-level entries describe
+        Overlay,     // a build described by one of the file's build_overlays
+        Unknown,     // the file names builds and this is none of them
+        Unversioned, // the file names no build (older patches.json)
+    };
+    struct BuildInfo
+    {
+        uint32_t exeStamp = 0;
+        BuildMatch match = BuildMatch::Unversioned;
+        std::string label;  // the selected build's label
+        std::string known;  // every build label the file names, comma separated
+        size_t replaced = 0;
+        size_t dropped = 0;
+    };
+    const BuildInfo& GetBuildInfo();
+
+    // patches.json as it applies to the running build: the base entries, the
+    // selected overlay merged over them, or no address entries at all for an
+    // unknown build. Every reader of the file goes through this, so the patch
+    // list and the resolve table cannot come from different builds. Empty when
+    // the file is missing.
+    const std::string& EffectivePatchesText();
+
+    // True when the running exe is the build that the addresses still written
+    // as literals in feature code were taken from. A feature built on such a
+    // literal must stand down when this is false: no patches.json can move it.
+    bool IsReferenceBuild();
 
     // Helpers
     void* ResolveRelCallTarget(uint32_t instrAddr);
