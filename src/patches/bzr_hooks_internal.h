@@ -457,8 +457,6 @@ namespace BZROpenShim
         char* TrimAsciiInPlace(char* text);
         // Resolved by ResolveBzrHooks from patches.json ("PlayGlobalSound").
         extern FnPlayGlobalSound g_BzrFn_PlayGlobalSound;
-        // Engine viewport height global (the scrap/pilot HUD and radar layout read it).
-        inline constexpr uintptr_t kScrapPilotHudViewportHeightAddr = 0x02CECEE4;
 
         // --- Headlights (headlights.cpp) -------------------------------------
         inline constexpr size_t kHeadlightObjectSlotCount = 4096;

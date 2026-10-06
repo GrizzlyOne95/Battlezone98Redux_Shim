@@ -762,21 +762,10 @@ namespace HookEngine
         return false;
     }
 
-    bool LiteralAddressesApply(const char* feature)
+    bool IsKnownBuild()
     {
-        if (IsReferenceBuild()) return true;
-        static std::mutex mutex;
-        static std::map<std::string, bool> reported;
-        std::lock_guard<std::mutex> lock(mutex);
-        bool& done = reported[feature ? feature : "?"];
-        if (!done)
-        {
-            done = true;
-            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "build",
-                "[BUILD] %s stands down: its engine addresses are still literals for 2.2.301 "
-                "(exe link stamp 0x%08X)", feature ? feature : "?", GetBuildInfo().exeStamp);
-        }
-        return false;
+        const BuildMatch match = GetBuildInfo().match;
+        return match == BuildMatch::Base || match == BuildMatch::Overlay || IsReferenceBuild();
     }
 
     namespace

@@ -471,7 +471,7 @@ namespace
     // engine code gates on.
     const MusicEntryPoints* AcquireMusicEntryPoints(const char* exportName)
     {
-        if (!BZROpenShim::IsCompatibleGameVersion())
+        if (!HookEngine::IsKnownBuild())
         {
             static bool s_refused = false;
             if (!s_refused)
