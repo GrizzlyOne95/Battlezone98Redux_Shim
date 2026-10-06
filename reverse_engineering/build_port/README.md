@@ -65,27 +65,95 @@ push the same text; a function must still reference the same strings; a
 string's address must still hold its text). The figure that matters is
 `WRONG`, a confident answer that fails the oracle; it should be zero.
 
-Measured on the one consecutive pair of Steam builds available,
-2016-04-19a (2.0.115.5) to 2016-04-19b (2.0.117.0), a hotfix that grew
-`.text` by about 4 KB with edits spread through it (213 distinct shifts),
-three samples of 300 each:
+Two real Steam build pairs (Steam depot 301652; unpack with Steamless):
 
-| kind | OK | safely flagged | genuinely wrong |
-|---|---|---|---|
-| code sites | 93-95% | 5-7% | 0 |
-| function entries | 98% | 2% | 0 |
-| data | 78-84% | 16-22% | 0 |
+- **Hotfix:** 2016-04-19a (2.0.115.5) to 2016-04-19b (2.0.117.0). `.text`
+  grew about 4 KB, with edits spread through it (213 distinct shifts).
+- **Release:** 2.1.201 (manifest 729440969425738960, August 2016) to today's
+  2.2.301. `.text` grew by 1.1 MB, with much of it rewritten.
 
-The oracle still prints a handful of `WRONG` lines; each was checked by hand
-and is the oracle's own mistake: the version string itself changed
-(`2.0.115.5` to `2.0.117.0`), or a random constant in a function body happens
-to point at a string. Data is flagged more often by design: a single reference
-is not accepted on its own (see `DataPorter._confirmed`).
+| pair | kind | OK | safely flagged | genuinely wrong |
+|---|---|---|---|---|
+| hotfix | code sites | 93% | 7% | 0 |
+| hotfix | function entries | 94% | 6% | 0 |
+| hotfix | data | 76% | 24% | 0 |
+| release | code sites | 48% | 52% | ~0.3% |
+| release | function entries | 52% | 48% | ~1% |
+| release | data | 42% | 58% | ~0.3% |
 
-The porter's rules came from failures this evaluation found: repeated Lua
-binding and key-table code that let a unique-in-old signature land on a
-neighbouring copy, and a mission script whose instruction now names a
-different file. Re-run it after changing the porter.
+The oracle's own `WRONG` lines were each checked by hand. Most are the oracle
+being wrong, not the porter:
+
+- a string's text changed between versions (`2.0.115.5` became `2.0.117.0`,
+  `%d` became `%p`, `failture` became `failure`);
+- a random constant in a function body happens to point at a string.
+
+The genuine misses on the release pair are code that moved into a different
+function between versions; there is no single right answer for those. So for a
+patch on the scale of a hotfix, OK can be taken as is. After a release-sized
+update, review the OK entries that belong to features the update touched, and
+test them live. Data is flagged more often by design: a single reference is
+not accepted on its own (see `DataPorter._confirmed`).
+
+The porter's rules came from failures these evaluations found:
+
+- repeated Lua binding and key-table code, where a signature unique in the old
+  build landed on a neighbouring copy;
+- a mission script whose instruction now names a different file;
+- overlapping signature windows counted as independent agreement. A signature
+  match is now one signal, and OK needs a second: exact layout, references,
+  or verified operands.
+
+Re-run the evaluations after changing the porter.
+
+## On a BZR patch
+
+1. Unpack the new Steam exe with Steamless (GOG needs nothing), then run
+   `port_patches.py OLD NEW --label <version> --out scripts/patches.json`.
+   This adds a `build_overlays` entry for the new build next to the existing
+   one, so both builds work from the same file.
+2. Read the report. Fix the CHANGED, CONFLICT, WEAK and NOTFOUND rows that
+   matter by hand (Ghidra), by editing that overlay's entries.
+3. Features whose addresses are still literals in C++ stand down on the new
+   build (`HookEngine::IsReferenceBuild`); see "Literal addresses" below.
+4. Launch both builds and read the `[BUILD]` and `[ADDR]` lines in
+   `logs/openshim.log`.
+
+`make_engine_rows.py` generates `engine_addresses` rows (with guard bytes)
+for addresses being moved out of C++.
 
 Sanity check: porting the GOG exe onto itself must give OK for every entry
 with a zero shift.
+
+## Literal addresses
+
+Some feature code still writes engine addresses as literals (about 300 of
+them, across 40 files). A patches.json overlay cannot move those, so on any
+build other than the one they were taken from (2.2.301, link stamp
+`0x58D9D6CC`, GOG and Steam alike), the features built on them stand down.
+Each one logs a single line:
+
+    [BUILD] <feature> stands down: its engine addresses are still literals for 2.2.301
+
+The pieces that do this:
+
+- `HookEngine::LiteralAddressesApply("<feature>")` gates each such file's
+  entry points.
+- `IsLiteralHandlerPatchName` in `patcher.cpp` lists the patches.json patches
+  whose trampolines enter those files.
+- `IsCompatibleGameVersion()` (public SDK) is true only on the reference
+  build.
+
+To bring a feature to a new build, move its literals into patches.json:
+
+1. Generate rows with guard bytes:
+   `python make_engine_rows.py <2.2.301 exe> Name=0xADDR:"identity note" ...`
+   and add them to `engine_addresses`.
+2. In the feature, read them with `HookEngine::BindEngineRows` (all or
+   nothing, for a feature's own set) or `HookEngine::EngineAddress` (one
+   shared address). Treat 0 as "stand down".
+3. Remove the feature's `LiteralAddressesApply` gates, and its entry in
+   `IsLiteralHandlerPatchName` if it has one.
+4. Re-run `port_patches.py` so the new rows get carried to the other builds.
+
+`ui_performance_hooks.cpp` is the worked example.
