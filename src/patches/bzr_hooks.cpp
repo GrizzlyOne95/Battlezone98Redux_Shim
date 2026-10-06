@@ -559,7 +559,7 @@ namespace BZROpenShim
             g_SatelliteVisibilityLogBudget,
             static_cast<unsigned long>(g_SatelliteVisibilityLogIntervalMs),
             g_SatelliteVisibilityObjectLimit,
-            static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva),
+            static_cast<uint32_t>(ViewRecordAddr()),
             static_cast<uint32_t>(EngineGlobals::UserObjectSlot()),
             static_cast<uint32_t>(EngineGlobals::GameObjectArena()));
         // Record the layout the sample lines were produced with, so a captured

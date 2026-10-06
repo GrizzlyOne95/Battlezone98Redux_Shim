@@ -2340,6 +2340,36 @@
       "address": "0x0048F639",
       "expected": "0F 86 F0 01 00 00 8B 4D 0C E8 69 2E FD FF 8B 10 89 55 E4 8B 48 04 89 4D E8",
       "identity": "jbe skipping the cannon lead solve for a target slower than 0.1 m/s; NOPed while lead compensation runs"
+    },
+    {
+      "name": "HudSpriteNameCount",
+      "address": "0x00920F00",
+      "kind": "data",
+      "identity": "uint32 count of registered HUD sprite names; sanity-checked (1..4096) before every read"
+    },
+    {
+      "name": "HudSpriteNameTable",
+      "address": "0x00920F08",
+      "kind": "data",
+      "identity": "HUD sprite name table, 0x20-byte names indexed by sprite id"
+    },
+    {
+      "name": "HudSpriteRectTable",
+      "address": "0x025F8F40",
+      "kind": "data",
+      "identity": "static HUD sprite rect records, id*0x24 (int16 x,y,w,h; float uv[4]); validated against stock atlas UVs before use"
+    },
+    {
+      "name": "ViewRecord",
+      "address": "0x008EAAD0",
+      "kind": "data",
+      "identity": "preset view record written by the satellite view setter (0x0061BD20): +0 Update_Camera, +4 previous view, +8 Current_View"
+    },
+    {
+      "name": "RadarAttackAlertCompare",
+      "address": "0x00494D35",
+      "expected": "0F 2F 05 D0 73 91 00 76 2B 6A 00 6A 00",
+      "identity": "comiss xmm0,[next beep] in CockpitRadar::Render's under-attack growl; operand at +3 is the cooldown float"
     }
   ],
   "globals": [
