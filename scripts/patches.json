@@ -563,6 +563,36 @@
       "identity": "Released terrain height sampler, double __cdecl(double x, double z), at 0x007855E0 on GOG Redux 2.2.301. Stock ProximityMine::Simulate's detonation block (FUN_005B0E40, call at 0x005B1189) stores its return into obj+0x50 (the y of the posit triple at obj+0x48/+0x50/+0x58) before building the explosion, as team_filter_mines.cpp reproduces; it has 50+ callers, including the Person ground-follow code at 0x005A05BE-0x005A071C. The body scales both world coordinates by the float at 0x02CC50E4, floors them through 0x0046EAF0 and bilinearly blends four grid heights fetched through 0x00784100. The pattern (entry, both coordinate scalings, first floor call) matches once in the GOG image. Used by SkinnedGibs for gib ground contact only; it reads terrain and writes nothing."
     },
     {
+      "name": "CollisionGrid::Crafts",
+      "pattern": "F2 0F 11 04 24 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 8D 8D 88 FE FF FF 51 8D 8D 54 FE FF FF E8",
+      "offset": 7,
+      "mode": "abs32_operand",
+      "fallback": "0x009173DC",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Global pointer to the craft collision grid (BZ 1.5 collision_range_search) on GOG Redux 2.2.301, read by `mov ecx,[0x009173DC]` at 0x005D10A3 immediately before the range query 0x005B2950 in stock ShieldTower::Simulate 0x005D0D80, whose results loop resolves each handle through GameObject::GetObj 0x004DA060. The grid is created at 0x0049B36C and refilled every frame by the function around 0x0049B205-0x0049B2A8 (clear 0x005B2BD0, insert loop over the craft list 0x0094E2D4, done 0x005B2C30), matching 1.5 Collision_Fill_In_Range_Search_Structure over Craft::craftList. Stock MagnetMine::Simulate (0x0050C801) and ProximityMine::Simulate (0x005B0EFA) walk that same craft list directly. The sibling object grid 0x00917A6C (GameObject::objectRange, PR #405 CollisionGrid::Objects, refilled at 0x004DFAD6-0x004DFB8F) holds every GameObject. The pattern (store, grid load, query call, results lea) is a single match in the GOG image (whole-image scan 2026-10-05). Read only, by the ShieldTower/MagnetMine/ProximityMine team-filter paths in team_filter_mines.cpp."
+    },
+    {
+      "name": "CollisionGrid::RangeQuery",
+      "pattern": "55 8B EC 83 EC 44 89 4D FC 8B 45 FC F2 0F 10 45 08 F2 0F 5C 40 18 F2 0F 11 45 08 8B 4D FC F2 0F 10 45 10 F2 0F 5C 41 10",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x005B2950",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Grid range query on GOG Redux 2.2.301: thiscall(grid, double minX, double minZ, double maxX, double maxZ, results*), RET 24h. Fills a 44-byte results record (clears its done flag, clamps cell bounds padded by 20 m, then 0x005B26E0 primes the first cell); FUN_005B28E0 wraps it as (x - r, z - r, x + r, z + r). Called with the grid from CollisionGrid::Objects at 0x004810C6, 0x004672B4 and 0x005AC2EC. Single match in the GOG image."
+    },
+    {
+      "name": "CollisionGrid::RangeNext",
+      "pattern": "55 8B EC 83 EC 08 89 4D FC 8B 45 FC 0F B6 08 85 C9 74 07 32 C0 E9 ?? ?? ?? ?? 8B 55 FC 83 7A 28 FF 75",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00462710",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Grid results iterator on GOG Redux 2.2.301: bool thiscall(results, uint32_t** outHandle), RET 4; returns false once the done flag at +0 is set, else advances through the cell lists and writes a pointer to the next object handle. FUN_00480F40 loops it at 0x004810D5 with ECX = the results record passed to CollisionGrid::RangeQuery and dereferences the out pointer into GameObject::GetObj 0x004DA060. Single match in the GOG image."
+    },
+    {
       "name": "PathBlock::CellType",
       "pattern": "55 8B EC A1 ?? ?? ?? ?? 03 45 08 0F B6 08 83 E1 F4 8B 15 ?? ?? ?? ?? 03 55 08 88 0A",
       "offset": 4,
