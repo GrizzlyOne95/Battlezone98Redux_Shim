@@ -15,8 +15,8 @@ Written 2026-10-07. For the next agent picking up CR co-op PDA testing.
   `LBRACKET`/`RBRACKET`) and drops their `GameKey` copies.
 - Y is the stock "ally with team" key online, so the PDA toggle moved to X
   everywhere (user's call; CR never runs with ISDFC).
-- Chat is not guarded: an Enter/Esc tracker failed (Enter showed no chat line
-  in the test clients) and was removed. Typing J in chat can ping.
+- Chat and the ally box are now guarded via `exu.IsTextEntryActive()`, and
+  co-op locks alliances: see `HANDOFF_TEXT_ENTRY.md`.
 - Q reaches `GameKey` online; a tap moves a parked tank 0.05 m/s. J stays.
 - Stock network messages ("Team 5's ship destroyed") are being researched
   separately: `COOP_MESSAGE_SUPPRESSION.md`.
