@@ -263,6 +263,8 @@ Build a coherent host-authoritative / explicitly synchronized API for:
 
 Do this only after the underlying ownership and replication cases are understood individually.
 
+[b]Research started 2026-10-07.[/b] Exact-build Ghidra tracing now covers the stock Lua bindings, spawn ownership branch, locality/claim paths, names, objectives, weapons, and script transport. A diagnostic Lua 5.1 harness tests each operation independently and passes 51 offline assertions. Two-client engine qualification, late joins, and ownership transfer remain open; the higher-level API is not implemented. See [code]docs/MP_LUA_REPLICATION_QUALIFICATION.md[/code].
+
 [h3]Lua Control of Native OGG Soundtrack[/h3]
 
 [b]Implemented - Qualification Pending (2026-10-06):[/b] EXU now owns a standalone Redux soundtrack runtime and Lua surface rather than requiring OpenShim for a separate mod. The current API covers play/select, stop, pause, resume, read-back, temporary gain fades, fade-and-change transitions, state inspection and reset. OpenShim still provides the basic native bridge when present.
