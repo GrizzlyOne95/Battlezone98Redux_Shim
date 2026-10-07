@@ -322,7 +322,8 @@ function Get-CRFlowOpSignature($Event) {
         $opArgs = @($opArgs | Select-Object -Skip 1)
     }
     $parts = foreach ($a in $opArgs) {
-        if ($a -is [psobject] -and $a.PSObject.Properties['valid']) { '@' + $a.odf + '/' + $a.label }
+        # Labels are per peer (SetLabel does not replicate), so compare by odf.
+        if ($a -is [psobject] -and $a.PSObject.Properties['valid']) { '@' + $a.odf }
         else { ConvertTo-Json $a -Compress -Depth 4 }
     }
     $Event.op + '(' + ($parts -join ',') + ')'
@@ -385,7 +386,8 @@ function Test-CRFlowWorldParity([int]$HostClient = 0, [int[]]$Guests = @(1), [do
     if (-not $h) { Add-CRFlowCheck "world state c$HostClient readable" $false 'host returned no M handles'; return }
     foreach ($g in $Guests) {
         $o = Invoke-CRFlow $g $lua
-        if (-not $o) { Add-CRFlowCheck "world state c$g readable" $false 'guest returned no M handles'; continue }
+        # Missions whose Start() resolves handles only on the leader leave the guest's M empty.
+        if (-not $o) { Add-CRFlowCheck "world state c$g readable" $false 'guest M holds no handles (resolved on the leader only)' -WarnOnly; continue }
         $diffs, $moved, $shared = @(), @(), 0
         foreach ($p in $h.PSObject.Properties) {
             $gp = $o.PSObject.Properties[$p.Name]
@@ -411,10 +413,12 @@ function Test-CRFlowLogErrors([int[]]$Clients = @(0, 1)) {
         $log = Get-CRFlowLogPath (Get-CRFlowClient $i)
         $hits = @()
         if ($log) {
-            $hits = @(Select-String -LiteralPath $log -Pattern 'stack traceback|attempt to (index|call|compare|perform|concatenate)|Lua error|LUA ERROR' |
+            $hits = @(Select-String -LiteralPath $log -Pattern 'stack traceback|attempt to (index|call|compare|perform|concatenate)|Lua error|LUA ERROR|Fsm error' |
                 Select-Object -Last 10 | ForEach-Object { $_.Line.Trim() })
         }
-        Add-CRFlowCheck "c$i no Lua errors" ($hits.Count -eq 0) $hits
+        # "Fsm error" is the engine's own (e.g. "Camera Stack 0verfow" from an
+        # unbalanced CameraFinish); it raises an in-game alert.
+        Add-CRFlowCheck "c$i no Lua or engine script errors" ($hits.Count -eq 0) $hits
         Add-CRFlowCheck "c$i probe healthy" ($probeErrors.Count -eq 0) $probeErrors -WarnOnly
     }
 }
@@ -424,7 +428,9 @@ function Complete-CRFlowRun {
     $run = $script:CRFlowRun
     $failedSteps = @($run.steps | Where-Object status -eq 'fail').Count
     $failedChecks = @($run.checks | Where-Object status -eq 'fail').Count
-    $pass = $failedSteps -eq 0 -and $failedChecks -eq 0 -and $run.steps.Count -gt 0
+    # A scenario that threw outside a step (Outcome "Stopped early: ...") never finished.
+    $aborted = $Outcome -like 'Stopped early*'
+    $pass = $failedSteps -eq 0 -and $failedChecks -eq 0 -and $run.steps.Count -gt 0 -and -not $aborted
     $summary = [ordered]@{
         mission = $run.mission; scenario = $run.scenario; started = $run.started
         seconds = [math]::Round($run.clock.Elapsed.TotalSeconds, 1)

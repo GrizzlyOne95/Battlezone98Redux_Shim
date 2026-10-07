@@ -29,6 +29,9 @@ param(
     # Host map list row (stock shell, 1280x720). Empty = the known row for $Mission.
     [int]$MapListY = 0,
     [hashtable]$ScenarioArgs = @{},
+    # Folder of files copied over the staged CR content in both test
+    # instances (try a content fix, e.g. a .vxt, without touching CR itself).
+    [string]$ContentOverride = '',
     # Reuse prepared instances (the probe is still reinstalled).
     [switch]$SkipPrepare,
     # Leave clients and server running afterwards for manual inspection.
@@ -54,7 +57,11 @@ $PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powe
 $playMode = $Scenario -eq 'play'
 if ($playMode) { $KeepRunning = $true; $scenarioPath = Join-Path $PSScriptRoot 'coopflow\scenarios\play.ps1' }
 elseif (Test-Path -LiteralPath $Scenario) { $scenarioPath = (Resolve-Path -LiteralPath $Scenario).Path }
-else { $scenarioPath = Join-Path $PSScriptRoot "coopflow\scenarios\$Mission-$Scenario.ps1" }
+else {
+    # Mission-specific scenario first, then a generic one (e.g. host-leaves).
+    $scenarioPath = Join-Path $PSScriptRoot "coopflow\scenarios\$Mission-$Scenario.ps1"
+    if (-not (Test-Path -LiteralPath $scenarioPath)) { $scenarioPath = Join-Path $PSScriptRoot "coopflow\scenarios\$Scenario.ps1" }
+}
 if (-not (Test-Path -LiteralPath $scenarioPath)) { throw "Scenario not found: $scenarioPath" }
 if (-not $MapListY) {
     if (-not $KnownMapRows.ContainsKey($Mission)) { throw "No known map row for $Mission; pass -MapListY." }
@@ -80,7 +87,8 @@ if ($Attach) {
         Write-Host "[run] $outcome" -ForegroundColor Red
     }
     Start-Sleep -Seconds 3
-    Test-CRFlowPresentationParity 0 @(1)
+    # A scenario that ends the session unevenly (host leaves) sets this.
+    if (-not $script:CRFlowSkipParity) { Test-CRFlowPresentationParity 0 @(1) }
     Test-CRFlowLogErrors @(0, 1)
     $summary = Complete-CRFlowRun -Outcome $outcome
     Write-Host "[run] session left up; stop with BZRCoopPlay.ps1 -Stop"
@@ -112,6 +120,7 @@ foreach ($port in $Ports) {
     if ($busy) { throw "$($port.p) $($port.n) is in use (pid $(@($busy.OwningProcess) -join ', ')); a lobby server is already running." }
 }
 if (-not (Test-Path -LiteralPath (Join-Path $CampaignContent "$Mission.lua"))) { throw "$Mission.lua not in $CampaignContent" }
+if ($ContentOverride -and -not (Test-Path -LiteralPath $ContentOverride -PathType Container)) { throw "Content override folder not found: $ContentOverride" }
 
 $server = $null
 $launcher = $null
@@ -149,6 +158,11 @@ try {
         $inst = Join-Path $BZRCoopRoot ("instances\Instance{0}\Battlezone 98 Redux" -f $i)
         robocopy $stage (Join-Path $inst "mods\$($script:CRFlowModId)") /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
         if ($LASTEXITCODE -ge 8) { throw "robocopy stage -> instance $i failed ($LASTEXITCODE)" }
+        if ($ContentOverride) {
+            $over = @(Get-ChildItem -LiteralPath $ContentOverride -File)
+            $over | Copy-Item -Destination (Join-Path $inst "mods\$($script:CRFlowModId)") -Force
+            Write-Host "[run] content override in instance ${i}: $($over.Name -join ', ')"
+        }
         $p = Install-CRFlowProbe -InstanceDir $inst -Mission $Mission
         Write-Host "[run] probe installed: $($p.Script)"
     }
@@ -185,10 +199,12 @@ try {
         Write-Host "[run] $outcome" -ForegroundColor Red
     }
     Start-Sleep -Seconds 3
-    Test-CRFlowPresentationParity 0 @(1)
+    # A scenario that ends the session unevenly (host leaves) sets this.
+    if (-not $script:CRFlowSkipParity) { Test-CRFlowPresentationParity 0 @(1) }
     Test-CRFlowLogErrors @(0, 1)
     $summary = Complete-CRFlowRun -Outcome $outcome
     $summary | Add-Member -NotePropertyName campaignContent -NotePropertyValue "$CampaignContent ($contentCommit)"
+    if ($ContentOverride) { $summary | Add-Member -NotePropertyName contentOverride -NotePropertyValue $ContentOverride }
 } finally {
     if ($KeepRunning) {
         if ($server) {

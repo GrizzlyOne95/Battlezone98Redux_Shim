@@ -77,6 +77,19 @@ at 127 bytes, or split longer text across arguments or messages.
 - Health fractions sync while custom maximums do not (F3), so a script that
   raises max health on the host shows different absolute values on each peer.
   CR's `SetMaxHealth` presentation op already works around this.
+- `SetLabel` is local-only as well: labels the host assigns (e.g.
+  `misn02b_bscav`) show as the ODF default (`avscav2_scavenger`) on the guest.
+  Compare objects across peers by ODF/position, never by label.
+- `CameraFinish()` with no camera pushed logs `Fsm error: Camera Stack
+  0verfow`, opens an in-game alert, and **aborts the calling Lua chunk without
+  a Lua error**: statements after it never run. In misn02b this skipped
+  `M.coopResult = true`, so the result was queued twice. The guest applied it
+  twice (two alerts) and then hung in BZRNet shutdown on exit. Guard every
+  `CameraFinish` with the peer's own camera state. Fixed in CR
+  `agent/misn02b-coop-start`.
+- A skip releases only the skipping player's camera, whether the host or a
+  guest skips (misn03 and misn02b, both directions). The host's camera
+  snapshots keep the other player's film running.
 - An unattended misn03 is lost at about t=77 s: the two first-wave fighters
   destroy the Command Tower, and the loss reaches both clients identically
   (`FailMission(87.4, misn03f1.des)`).
