@@ -18,6 +18,7 @@ param(
         'misn03 lose-tower',
         'misn02b win Override=misn02b-onfoot ExpectOnFoot=1',
         'misn02b win Override=misn02b-onfoot ExpectOnFoot=1 Skipper=host',
+        'misn02b win Override=misn02b-onfoot ExpectOnFoot=1 Skipper=none NaturalIntro=1',
         'misn04 win',
         'misn02b host-leaves Override=misn02b-onfoot'
     ),
@@ -51,8 +52,15 @@ foreach ($case in $Cases) {
     Write-Host "`n[suite] $case -> $runName" -ForegroundColor Cyan
     $cmd = "& '$PSScriptRoot\Run-BZRCoopMission.ps1' -Mission $mission -Scenario $scenario -RunName '$runName' -BZRCoopRoot '$BZRCoopRoot'$overrideArg -ScenarioArgs @{$argText}; exit `$LASTEXITCODE"
     $clock = [Diagnostics.Stopwatch]::StartNew()
-    & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -Command $cmd 2>&1 | Tee-Object -FilePath (Join-Path $suiteDir "$runName.log") | Out-Host
-    $code = $LASTEXITCODE
+    # Output goes to files, not a pipe: the run's server and coordinator inherit
+    # its handles and can outlive it, which would hold a pipe open forever.
+    $log = Join-Path $suiteDir "$runName.log"
+    $p = Start-Process -FilePath $PowerShellExe -ArgumentList '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', "`"$($cmd -replace '"', '\"')`"" `
+        -RedirectStandardOutput $log -RedirectStandardError "$log.err" -NoNewWindow -PassThru
+    $null = $p.Handle   # keeps ExitCode readable after exit
+    $p.WaitForExit()
+    $code = $p.ExitCode
+    Get-Content -LiteralPath $log, "$log.err" -ErrorAction SilentlyContinue | Out-Host
     $summaryPath = Join-Path $BZRCoopRoot "runs\$runName\flow-summary.json"
     $s = if (Test-Path -LiteralPath $summaryPath) { Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json } else { $null }
     $failed = if ($s) { @(@($s.steps | Where-Object status -eq 'fail' | ForEach-Object { "step: $($_.step) -- $($_.detail)" }) + @($s.checks | Where-Object status -eq 'fail' | ForEach-Object { "check: $($_.check)" })) } else { @() }

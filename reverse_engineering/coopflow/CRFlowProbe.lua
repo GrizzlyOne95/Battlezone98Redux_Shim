@@ -622,6 +622,21 @@ function Probe.Attach(options)
         if type(missionReceive) == "function" then return missionReceive(from, kind, ...) end
         return false
     end
+    -- Craft creation and deletion trace (who made what, where, on which peer).
+    -- Buildings, scrap and powerups are left out to keep the log small.
+    local function isTraced(h)
+        return try(IsCraft, h) or try(IsPerson, h)
+    end
+    local missionAdd = rawget(_G, "AddObject")
+    _G.AddObject = function(h, ...)
+        if isTraced(h) then emit("add", { h = tostring(h), obj = describeHandle(h) }) end
+        if type(missionAdd) == "function" then return missionAdd(h, ...) end
+    end
+    local missionDelete = rawget(_G, "DeleteObject")
+    _G.DeleteObject = function(h, ...)
+        if isTraced(h) then emit("del", { h = tostring(h), obj = describeHandle(h) }) end
+        if type(missionDelete) == "function" then return missionDelete(h, ...) end
+    end
     -- Start the command sequence after whatever a previous run left behind.
     local stale = readFile("cmd.txt")
     if stale then lastSeq = tonumber(stale:match("^seq=(%d+)")) or -1 end

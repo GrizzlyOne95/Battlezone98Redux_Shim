@@ -11,7 +11,11 @@ param([int]$HostClient = 0, [int]$GuestClient = 1,
       [ValidateSet('guest', 'host', 'none')][string]$Skipper = 'guest',
       [int]$SkipKey = 0x20,
       # Players must start as pilots, as in single player (needs an asuser-only misn02b.vxt).
-      [switch]$ExpectOnFoot)
+      [switch]$ExpectOnFoot,
+      # Let the intro play out (no timer pulls) and check each shot as single
+      # player runs it: lander (fixcam), then the dummy tank driving player_path
+      # (zoomcam), then the first objective. Use with Skipper=none.
+      [switch]$NaturalIntro)
 
 $H, $G = $HostClient, $GuestClient
 
@@ -73,6 +77,53 @@ if ($Skipper -ne 'none') {
     }
 }
 
+if ($NaturalIntro) {
+    # Stray craft: single player has none. Report every team-0 craft the probe
+    # saw created on the host, with when and where.
+    Invoke-CRFlowStep 'no stray team-0 craft at the start' {
+        Start-Sleep -Seconds 2
+        $adds = @(Get-CRFlowEvents $H add | Where-Object { $_.obj.team -eq 0 -and $_.obj.odf -notmatch '^(npscr|sscr)' })
+        $now = Invoke-CRFlow $H @'
+local out = {}
+for h in AllCraft() do
+    if GetTeamNum(h) == 0 and IsAlive(h) then out[#out + 1] = describe(h) end
+end
+return out
+'@
+        $r = @{ created = @($adds | ForEach-Object { "t=$($_.t) $($_.h) $($_.obj.odf) [$($_.obj.label)] at $($_.obj.pos -join ',')" }); alive = $now }
+        if (@($now | Where-Object { $_.odf -eq 'player' }).Count) { throw "stray team-0 player craft: $(ConvertTo-Json $r -Compress -Depth 5)" }
+        $r
+    } -Soft
+
+    Invoke-CRFlowStep 'intro shot 1: camera on the lander until its path ends' {
+        $t0 = Invoke-CRFlow $H 'return GetTime()'
+        Wait-CRFlow $H 'return M.camera3 or (not M.camera1 and not M.camera2)' -TimeoutSeconds 45 | Out-Null
+        $t1 = Invoke-CRFlow $H 'return GetTime()'
+        @{ shotSeconds = [math]::Round($t1 - $t0, 1) }
+    }
+
+    Invoke-CRFlowStep 'intro shot 2: both cameras follow the living dummy tank' {
+        $samples = foreach ($i in 1..3) {
+            Start-Sleep -Seconds 2
+            # (PowerShell names ignore case: never call these $h/$g, which are $H/$G.)
+            $hostShot = Invoke-CRFlow $H 'return { camera3 = M.camera3 == true, dummy = describe(M.dummy), path = L().cameraPath }'
+            $guestShot = Invoke-CRFlow $G 'local l = L(); return { active = l.localCameraActive, path = l.remotePath, targetOdf = l.remoteTargetOdf }'
+            @{ host = $hostShot; guest = $guestShot }
+        }
+        foreach ($s in $samples) {
+            if (-not $s.host.camera3) { break }   # shot over
+            if (-not $s.host.dummy.alive) { throw "the dummy tank died during its shot: $(ConvertTo-Json $s -Compress -Depth 5)" }
+            if ($s.guest.path -ne 'zoomcam' -or -not $s.guest.active) { throw "guest camera is not following the dummy: $(ConvertTo-Json $s -Compress -Depth 5)" }
+        }
+        $samples
+    }
+
+    Invoke-CRFlowStep 'intro ends by itself -> first objective on guest' {
+        Wait-CRFlow $H 'return not M.camera1 and not M.camera2 and not M.camera3' -TimeoutSeconds 60 | Out-Null
+        Wait-CRFlowOp $G AddObjective 'misn02b1.otf' -TimeoutSeconds 30 | Out-Null
+        @{ dummy = Invoke-CRFlow $H 'return describe(M.dummy)' }
+    }
+} else {
 Invoke-CRFlowStep 'intro ends -> first objective on guest' {
     # Co-op ends each film shot on a timer (30 s + 25 s); pull both forward.
     Invoke-CRFlow $H "return ff('^cam_time$')" | Out-Null
@@ -82,6 +133,7 @@ Invoke-CRFlowStep 'intro ends -> first objective on guest' {
     Wait-CRFlow $H 'return not M.camera1 and not M.camera2 and not M.camera3' -TimeoutSeconds 20 | Out-Null
     Wait-CRFlowOp $G AddObjective 'misn02b1.otf' -TimeoutSeconds 30 | Out-Null
     'misn02b1.otf'
+}
 }
 
 Invoke-CRFlowStep 'both cameras released after the intro' {

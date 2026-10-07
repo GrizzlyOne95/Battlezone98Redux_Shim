@@ -41,10 +41,23 @@ content in both test instances, so a fix can be proven before it lands in CR.
 The CR repository and the live install are not touched. Folders live in
 `coopflow\overrides\`. In a suite case, write `Override=<folder>`.
 
-`misn02b-onfoot` holds the misn02b fixes committed to CR as
-`agent/misn02b-coop-start`: a pilot-only `.vxt`, spawns beside the vehicles,
-and a guarded result `CameraFinish`. Drop the override once a CR build that
-ships them is the staged content.
+`misn02b-onfoot` holds the misn02b fixes: a pilot-only `.vxt`, spawns beside
+the vehicles, camera-stack-safe `CameraFinish`, film shots that advance when
+the leader's path ends, and the intro route renamed from `player_path` (see
+below). Drop the override once a CR build that ships them is the staged
+content.
+
+To test whatever is in a CR checkout right now (several agents' uncommitted
+work, a new EXU build), generate an override instead of hand-copying:
+
+```
+powershell -ExecutionPolicy Bypass -File reverse_engineering\New-CRFlowOverride.ps1 -Name coop-comms `
+    -Extra C:\Users\iestu\Documents\GIT\ExtraUtilities\Release\exu.dll
+```
+
+It copies every file changed or added since the staged build's commit,
+flattened to the Workshop layout, and records the source in `OVERRIDE.txt`.
+Generated folders are git-ignored.
 
 A `.vxt` that should offer only the pilot must use the stock line
 `asuser aspilo.des<TAB>anims\aspil.avi NSDF Pilot`. The short `asuser ,` form
@@ -58,6 +71,8 @@ leaves staging at "Vehicle not selected", and Ready never completes.
 | misn03 | `win Skipper=host` | Same, but the host skips the film and the guest keeps watching |
 | misn03 | `lose-tower` | The Command Tower falls; the red objective and `misn03f1.des` reach both |
 | misn02b | `win Override=misn02b-onfoot ExpectOnFoot=1` | Scavenger escort: start on foot beside the vehicles, intro film skip, fields, waves, retreat, second scavenger, `misn02w1.des` once on each |
+| misn02b | `win Override=misn02b-onfoot ExpectOnFoot=1 Skipper=none NaturalIntro=1` | Nobody skips: the intro plays as offline (lander shot until its path ends, then both cameras follow the living dummy tank), no stray team-0 craft, then the full win |
+| misn03 | `C:\...\Campaign-Reimagined\Tools\Test-CoopCommsLive.ps1` (with `-ContentOverride` from `New-CRFlowOverride.ps1` + new `exu.dll`) | CR's co-op PDA comms: terrain/object pings both ways, explicit targeting, PDA Co-op page, J quick ping, expiry, pilot rescue request and host replies |
 | misn04 | `win` | Relic: patrols, recon camera, relic film skip, relic secure, CCA base destroyed, end film, `misn04w1.des` |
 | any | `host-leaves` | The host quits mid-mission; the guest detects leader departure, fails the mission and keeps running |
 | misn03 | `replication-cases` | 20 isolated stock-Lua replication cases (see [REPLICATION_FINDINGS.md](REPLICATION_FINDINGS.md)) |
@@ -115,6 +130,22 @@ Rules that keep results meaningful:
   mission clock is running.
 - **Send strings:** keep any `Send()` string under 128 bytes, or the receiver
   crashes.
+- **Variable names:** PowerShell names ignore case, so `$h`/`$g` inside a step
+  are `$H`/`$G` (the client indexes). Use names like `$hostShot`.
+- **Closing a client on purpose:** add its pid to `$script:CRFlowExpectedExit`
+  first. Any other client exit fails the run within a second.
+- **Craft trace:** the probe logs every craft/person created (`add`) and
+  removed (`del`) with odf, team, label and position: `Get-CRFlowEvents 0 add`.
+
+## Co-op map rules found by these tests
+
+- Never name a path `player_path` in a co-op map. Online, the native mission
+  builds an AI-piloted team-0 `player` ship there on the first frame, before
+  any mission Lua runs. In misn02b it killed the intro dummy tank and froze
+  the film; renaming the path removed it.
+- A skip pops the skipper's camera. Any later `CameraFinish` on an empty stack
+  raises "Camera Stack 0verfow" and silently aborts the rest of the Lua chunk.
+  Track the peer's own camera and pop only what it pushed.
 
 ## Known environment gotchas
 
@@ -129,3 +160,11 @@ Rules that keep results meaningful:
   never before typed text, because the focus change drops the text field.
 - Clients are stopped with WM_CLOSE (`Stop-BZRGame -NoForce`), never
   TerminateProcess.
+- Never dot-source `BZRHarness.ps1` from a scenario: it takes the launch lock,
+  which the session coordinator holds, and the scenario blocks. The mission
+  library already loads it with the lock skipped.
+- A dead client fails the lobby step or the next probe call within a second.
+  Suite runs are `-NonInteractive`, so a hidden prompt fails instead of hanging.
+- Redux's music streamer once crashed a client on the Multiplayer screen (null
+  audio system at `0x43ee3c`, two clients sharing one audio device over RDP).
+  Rare; rerun the case.

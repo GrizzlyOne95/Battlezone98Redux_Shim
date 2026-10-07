@@ -42,9 +42,9 @@ Invoke-CRFlowStep 'guest shows the defense objective' {
 }
 
 Invoke-CRFlowStep 'guest never ran the authority gates' {
-    $g = Invoke-CRFlow $G 'return { start_done = M.start_done == true, first_wave_done = M.first_wave_done == true }'
-    if ($g.start_done -or $g.first_wave_done) { throw "guest advanced authority state: $(ConvertTo-Json $g -Compress)" }
-    $g
+    $guestState = Invoke-CRFlow $G 'return { start_done = M.start_done == true, first_wave_done = M.first_wave_done == true }'
+    if ($guestState.start_done -or $guestState.first_wave_done) { throw "guest advanced authority state: $(ConvertTo-Json $guestState -Compress)" }
+    $guestState
 }
 
 Invoke-CRFlowStep 'keep objectives and players alive (test assist)' {

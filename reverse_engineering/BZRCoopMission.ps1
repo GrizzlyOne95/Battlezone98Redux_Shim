@@ -21,6 +21,14 @@
 
 . "$PSScriptRoot\BZRWindowInput.ps1"
 
+# Stop-BZRGame for scenarios (e.g. host-leaves). Loading BZRHarness normally
+# takes the machine-wide launch lock, which the session coordinator already
+# holds until its clients exit, so skip that here or the load blocks.
+$crflowLockHeld = $env:BZR_LAUNCH_LOCK_HELD
+$env:BZR_LAUNCH_LOCK_HELD = "$PID"
+. "$PSScriptRoot\BZRHarness.ps1"
+$env:BZR_LAUNCH_LOCK_HELD = $crflowLockHeld
+
 $script:CRFlowCoopRoot = 'C:\BZRCoop'
 $script:CRFlowModId = '3686673790'
 $script:CRFlowProbeSource = Join-Path $PSScriptRoot 'coopflow\CRFlowProbe.lua'
@@ -60,6 +68,11 @@ do
                     cameraGeneration = cameraGeneration,
                     localCameraGeneration = localCameraGeneration,
                     remoteCameraSerial = remoteCameraSerial,
+                    -- Current film shot: the leader's own frame, and the
+                    -- snapshot a guest is following (path, target odf).
+                    cameraPath = type(cameraFrame) == "table" and cameraFrame[1] or nil,
+                    remotePath = type(remoteCamera) == "table" and remoteCamera[2] or nil,
+                    remoteTargetOdf = type(remoteCamera) == "table" and IsValid(remoteCamera[5]) and GetOdf(remoteCamera[5]) or nil,
                 }
             end,
         })
@@ -105,6 +118,20 @@ function Get-CRFlowClient([int]$Index) {
     $c = (Get-CRFlowSession).clients | Where-Object index -eq $Index
     if (-not $c) { throw "No client $Index in the session" }
     $c
+}
+
+# Throws as soon as any session client has exited, so a crash fails the run
+# within a poll instead of at a step's timeout. A scenario that closes a client
+# on purpose adds its pid to $script:CRFlowExpectedExit first.
+$script:CRFlowExpectedExit = @()
+function Assert-CRFlowClientsAlive {
+    foreach ($c in (Get-CRFlowSession).clients) {
+        if ($script:CRFlowExpectedExit -contains $c.pid) { continue }
+        if (Get-Process -Id $c.pid -ErrorAction SilentlyContinue) { continue }
+        $log = Get-CRFlowLogPath $c
+        $last = if ($log) { Get-Content -LiteralPath $log -Tail 1 } else { '' }
+        throw "client $($c.index) (pid $($c.pid)) exited unexpectedly (crash?). Last log: $last"
+    }
 }
 
 function Get-CRFlowLogPath($Client) {
@@ -158,8 +185,10 @@ function Invoke-CRFlow {
         catch [IO.IOException] { if ($i -ge 20) { throw }; Start-Sleep -Milliseconds 50 }
     }
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $nextAlive = Get-Date
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 150
+        if ((Get-Date) -ge $nextAlive) { Assert-CRFlowClientsAlive; $nextAlive = (Get-Date).AddSeconds(1) }
         if (-not (Test-Path -LiteralPath $out)) { continue }
         $text = try { (Read-CRFlowShared $out).Text } catch { '' }
         $m = [regex]::Match($text, '^seq=(\d+)\r?\nok=(true|false)\r?\n([\s\S]*)\r?\n#END\r?\n?$')
@@ -247,6 +276,7 @@ function Wait-CRFlowEvent {
     do {
         $hit = Get-CRFlowEvents $Client $Kind | Where-Object $Where | Select-Object -First 1
         if ($hit) { return $hit }
+        Assert-CRFlowClientsAlive
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $deadline)
     throw "client ${Client}: no '$Kind' event $Description within ${TimeoutSeconds}s"

@@ -11,7 +11,6 @@ param([int]$HostClient = 0, [int]$GuestClient = 1,
       # Seconds the guest must stay up after the failure.
       [int]$SurviveSeconds = 15)
 
-. "$PSScriptRoot\..\..\BZRHarness.ps1"
 $H, $G = $HostClient, $GuestClient
 $script:CRFlowSkipParity = $true
 
@@ -33,12 +32,13 @@ Invoke-CRFlowStep 'session ready and mission running on both' {
     Wait-CRFlow $H 'return role().ready and M.coopMissionStarted' -TimeoutSeconds 120 | Out-Null
     Wait-CRFlow $G 'return role().ready and M.coopMissionStarted' -TimeoutSeconds 60 | Out-Null
     Start-Sleep -Seconds $PlaySeconds
-    $g = Invoke-CRFlow $G 'return { departed = role().leaderDeparted, result = M.coopResult == true, players = #players() }'
-    if ($g.departed -or $g.result) { throw "guest already finished before the host left: $(ConvertTo-Json $g -Compress)" }
-    $g
+    $guestState = Invoke-CRFlow $G 'return { departed = role().leaderDeparted, result = M.coopResult == true, players = #players() }'
+    if ($guestState.departed -or $guestState.result) { throw "guest already finished before the host left: $(ConvertTo-Json $guestState -Compress)" }
+    $guestState
 }
 
 $hostPid = (Get-CRFlowClient $H).pid
+$script:CRFlowExpectedExit += $hostPid
 Invoke-CRFlowStep 'host closes the game' {
     Stop-BZRGame -Id $hostPid -NoForce -TimeoutSeconds 30
     if (Get-Process -Id $hostPid -ErrorAction SilentlyContinue) { throw "host pid $hostPid still running after WM_CLOSE" }
