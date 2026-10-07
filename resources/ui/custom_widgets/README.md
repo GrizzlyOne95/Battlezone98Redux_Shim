@@ -67,3 +67,15 @@ shell screens (see the shell screens section of `Docs/NATIVE_UI_FRAMEWORK.md`).
 Unlike the tiles they are shown at exactly their own size, so they can carry
 frames and boxes. Regenerate with `python mkscreens.py`; the box rectangles in
 it are the layout contract with each screen's code.
+
+| File | Used by |
+|---|---|
+| `osh_career_center.png` | Career screen |
+| `osh_options_center.png` | stock Options screen, five-slot column |
+| `osh_hub_center.png` | OpenShim Options hub |
+| `osh_category_center.png` | every OpenShim Options category screen |
+| `osh_tile_hv.png`, `osh_tile_ck.png` | hub tiles, hover / pressed (300x100) |
+| `osh_value_hv.png`, `osh_value_ck.png` | category value cells, hover / pressed (196x42) |
+
+The buttons have no idle texture: at rest they show the slot painted into the
+panel, as the stock option buttons do.

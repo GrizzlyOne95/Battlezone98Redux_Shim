@@ -405,7 +405,7 @@ namespace BZROpenShim::ShellScreens
 
     void* AddButton(void* container, void* layoutParent, const char* name, const Rect& r,
                     const char* text, const ButtonSkin& skin, float textScale,
-                    float textOffset, void(__cdecl* onClick)())
+                    float textOffset, void(__cdecl* onClick)(), HoverFn onHover)
     {
         if (!container || !g_Bound)
             return nullptr;
@@ -425,13 +425,29 @@ namespace BZROpenShim::ShellScreens
             g_BzrFn_SetButtonTextScale(button, textScale);
         // The shell calls a child button's hover and click slots unchecked.
         g_BzrFn_SetOnClick(button, reinterpret_cast<void*>(onClick));
-        g_BzrFn_SetOnHover(button, reinterpret_cast<void*>(&ButtonHoverNoop));
+        g_BzrFn_SetOnHover(button, onHover ? reinterpret_cast<void*>(onHover)
+                                           : reinterpret_cast<void*>(&ButtonHoverNoop));
         g_BzrFn_AddChild(container, button, 0);
         // The ctor leaves the button input-inactive until SetActive runs, as
         // every injected button in this codebase has found.
         if (g_BzrFn_UiSetActive)
             g_BzrFn_UiSetActive(button, 1);
         return button;
+    }
+
+    bool CursorDesignPoint(float& x, float& y)
+    {
+        HWND window = GetForegroundWindow();
+        POINT cursor = {};
+        RECT client = {};
+        if (!window || !GetCursorPos(&cursor) || !ScreenToClient(window, &cursor) ||
+            !GetClientRect(window, &client) || client.bottom <= 0)
+            return false;
+        const float scale = static_cast<float>(client.bottom) / 1080.0f;
+        const float offsetX = (static_cast<float>(client.right) - 1440.0f * scale) * 0.5f;
+        x = (static_cast<float>(cursor.x) - offsetX) / scale;
+        y = static_cast<float>(cursor.y) / scale;
+        return true;
     }
 
     void SetLabelText(void* label, const char* text)

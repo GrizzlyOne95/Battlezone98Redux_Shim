@@ -134,7 +134,14 @@ if (Test-Path -LiteralPath $assetManifestSource) {
 # missing-texture panels.
 $uiFiles = @(
     'uiline.png', 'uiplate.png', 'uibtn.png', 'uibtnhv.png',
-    'osh_career_center.png'
+    'osh_career_center.png',
+    'osh_options_center.png',
+    'osh_hub_center.png',
+    'osh_category_center.png',
+    'osh_tile_hv.png',
+    'osh_tile_ck.png',
+    'osh_value_hv.png',
+    'osh_value_ck.png'
 )
 New-Item -ItemType Directory -Force -Path $uiTargetDir | Out-Null
 foreach ($name in $uiFiles) {

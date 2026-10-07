@@ -206,6 +206,17 @@ The title menu's CAREER button calls `RequestScreen(mainScreen, kCareerScreenId)
 
 Live-tested on GOG 2.2.301: the title menu opens Career, Back and Esc both return, and the title menu rebuilds each time.
 
+### OpenShim Options
+
+The OpenShim settings are their own screens, replacing the earlier page that took over the stock Input screen and hid its widgets.
+
+- **The stock Options screen gets a fifth slot.** Its four buttons (Play, Graphic, Audio, Input) are 422x130 at x 508 and rest on four slots painted into `esc_center.png`; their idle texture is empty. When `osh_options_center.png` is deployed, the Options ctor hook swaps `Middle_Overlay`'s texture for it (the same column with five 120-tall slots) and moves the four stock buttons onto the first four slots before the first layout pass. "OpenShim Options" is the fifth, with the stock caption scale. The four are found by their exact ctor geometry; if exactly four do not match, or the art is missing, the column is left stock and the button squeezes in underneath as before.
+- **Hub** (`kOptionsHubScreenId`, `osh_hub_center.png`): a 3x3 grid of category tiles (Video, Lighting, Audio, HUD, Controls, Gameplay, Fixes, Network, System) and an info box with the asset-pack state and the OpenShim and game versions. Pointing at a tile describes the category.
+- **Category screens** (`kOptionsCategoryScreenIdBase + n`, one shared `osh_category_center.png`): up to 16 rows in two columns of eight, each a caption over a painted well and a value button over a painted slot. Clicking a value cycles it, saves it to `openshim.ini` losslessly, and applies it live where the feature can. Pointing at a value describes the setting. A `*` marks values that need a restart.
+- Categories list registry rows by label (`kShimSettingsCategories` in `bzr_options_ui.cpp`). The first time the hub opens, any registry row that no category lists is logged, as is any listed label with no matching row. Two rows are actions, not settings: **Key Bindings** (Controls) opens the stock Input screen, which carries the key-binding editor, and **OpenShim Updates** (System) runs the Workshop update check.
+- Hover: a button's hover slot fires when its hover state changes, entering or leaving, so the handlers read the cursor (`CursorDesignPoint`) and hit-test the layout rects, as the old page did.
+- Button skins: tiles and value cells use `osh_tile_*` / `osh_value_*` (hover and press) drawn at their exact size, with no idle texture, like the stock option buttons. Without the art they fall back to the stock `optionhv` / `optionck`.
+
 ## Logical surfaces
 
 A surface is a logical page/group, not a new active `cUI_View` container.

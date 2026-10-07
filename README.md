@@ -189,7 +189,7 @@ OpenShim DLL + compatible assets
 * The binaries have no hard dependency on Workshop content. The DLL-only layout is the whole load chain without the asset pack: `winmm.dll`, `bzloader.dll`, `plugins\openshim.dll` and `scripts\patches.json` (plus `openshim.ini`) in a stock install. That is a deliberately supported degraded configuration. `winmm.dll` on its own is not: without `bzloader.dll` and the plugin the game starts with no OpenShim at all, and without a matching `patches.json` the address-dependent patches stand down.
 * Asset-dependent features — such as `Death Chunk Meshes` (`chunkMeshes`), Enhanced renderer resources (`openshim/renderer/enhanced`), and other visual payloads — require the separate asset package. When those resources are absent, OpenShim suppresses the dependent feature, emits a single concise diagnostic, and continues running. No crash, no invalid Ogre/resource access, and no repeated per-frame load attempts occur.
 * A copied `openshim.ini` that enables an asset-backed feature (for example `ChunkMeshes=1`) cannot bypass this protection: the feature also requires verified asset availability and remains unavailable until compatible assets are detected.
-* The native **OpenShim Settings** page reports asset-pack status directly:
+* The native **OpenShim Options** screens (Options → OpenShim Options) report asset-pack status directly on the hub:
 
 ```text
 OpenShim Status
@@ -212,12 +212,12 @@ Asset Pack:    VERSION MISMATCH
                Expected:  1
 ```
 
-Where practical, asset-dependent rows (for example `Death Chunk Meshes`, `DX11 FXAA`, `DX11 Local Lights`) remain visible but show `Unavailable — OpenShim asset pack not detected` (or a version-mismatch / partial-payload variant) and cannot be toggled while their resources are absent. The footer of the settings page always reflects the current asset-pack state so a DLL-only install is immediately recognizable.
+Rows whose resources are absent stay visible but show `Unavailable` and cannot be toggled: today that is `DX11 FXAA` and `DX11 Local Lights` (Video) without the Enhanced renderer resources. `Death Chunk Meshes` builds its pieces from the model itself and needs no pack. The hub's info box always reflects the current asset-pack state so a DLL-only install is immediately recognizable.
 
 Partial or stale packs (for example a stale `resources.version` or a manifest that claims `ChunkMeshes=1` while the mesh files are missing) degrade the affected capability only; unrelated native fixes and netcode continue to operate.
 
 After the first installation through Campaign Reimagined's Setup / Repair mission,
-**Check for Updates** in OpenShim Settings downloads and verifies the Workshop
+**OpenShim Updates** (OpenShim Options → System) downloads and verifies the Workshop
 bundle and performs the same OpenShim file repair: the bootstrap, loader, runtime
 plugin, network defaults, patch definitions, missing player configuration, and
 asset-pack manifest. Existing `openshim.ini` settings are preserved. Support-file
@@ -376,7 +376,7 @@ That file contains every first-class OpenShim setting with conservative player-o
 
 `[Network] GovernorTuning = OpenShim` is an intentional compatibility exception to the otherwise stock-oriented preset: it preserves OpenShim's already-shipped measured bandwidth-governor and host auto-kick tuning. Set it to `Stock` for strict mixed-client parity; `net.ini` remains the granular authority for low-level network values.
 
-To disable the legacy mouse path's smoothing/Windows acceleration, set `[General] RawMouseInput = 1` and restart the game, or use **Raw Mouse Input** on the native OpenShim Settings page and restart.
+To disable the legacy mouse path's smoothing/Windows acceleration, set `[General] RawMouseInput = 1` and restart the game, or use **Raw Mouse Input** under OpenShim Options → Controls and restart.
 
 The exhaustive technical reference remains:
 

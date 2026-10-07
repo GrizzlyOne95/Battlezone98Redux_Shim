@@ -447,30 +447,9 @@ namespace BZROpenShim
             OnInputBindingRefreshClicked();
         }
 
-        // --- OpenShim settings screen (options-shell sub-page) ------------------
-        // A native "OpenShim" button is appended to the stock Options screen; it
-        // navigates to the (already hooked) input options screen with a mode flag
-        // set, and the constructor hook renders a settings page there instead of
-        // the key-binding list. Settings edit openshim.ini losslessly and apply
-        // live through each feature's existing baseline/refresh machinery.
-        constexpr size_t kShimSettingsUiColumnCount = 2;
-        constexpr size_t kShimSettingsUiRowsPerColumn = 8;
-        constexpr size_t kShimSettingsUiVisibleRowCount =
-            kShimSettingsUiColumnCount * kShimSettingsUiRowsPerColumn;
-
-        // Toolbar: Back, Check for Updates | page caption, Prev, Next. Slot 2 is
-        // a label rather than a button, so it reserves toolbar width the same
-        // way and is centred inside its slot when it is created.
-        constexpr size_t kShimSettingsUiToolbarSlotCount = 5;
-        constexpr size_t kShimSettingsUiToolbarRightGroup = 2;
-        constexpr float kShimSettingsUiToolbarWidths[kShimSettingsUiToolbarSlotCount] =
-        {
-            // Slot 2 is the "Page N of M" caption. 130px ellipsized "Page 2 of 3"
-            // to "Page 2 of..." (12 glyphs at ~11px). Keep this slot wide enough
-            // for two-digit page counts without Fitted truncation.
-            140.0f, 180.0f, 170.0f, 105.0f, 105.0f
-        };
-
+        // --- OpenShim Options entry point ------------------------------------
+        // An "OpenShim Options" button on the stock Options screen opens
+        // OpenShim's own settings screens (see OPENSHIM OPTIONS SCREENS).
         static InlineDetour32 g_OptionsParentCtorDetour = {};
         static FnOptionsInputCtor g_BzrFn_OptionsParentCtor = nullptr;
         static bool g_OptionsParentHookInstalled = false;
@@ -490,48 +469,15 @@ namespace BZROpenShim
         static bool g_OptionsParentDtorHookAttempted = false;
         static ScreenBinding g_ParentScreenBinding = {};
         static void* g_ShimSettingsMenuButton = nullptr;
-        // Set by the OpenShim button click; consumed when the input screen is
-        // (re)constructed or when it already exists and can be restyled directly.
-        // The request expires so a click that never reached a construction cannot
-        // hijack an unrelated later visit to the stock input page.
-        static bool g_ShimSettingsPageRequested = false;
-        static ULONGLONG g_ShimSettingsPageRequestTick = 0;
         static ULONGLONG g_ShimSettingsNavigationTick = 0;
-        constexpr ULONGLONG kShimSettingsPageRequestTtlMs = 3000;
         constexpr ULONGLONG kShimSettingsNavigationDebounceMs = 350;
-        // True while the settings page owns the hooked input screen's visuals.
-        static bool g_ShimSettingsPageActive = false;
-        static void* g_ShimSettingsUiTopMask = nullptr;
-        static void* g_ShimSettingsUiContentMask = nullptr;
-        static std::array<void*, kUiDecorMaxOptionsPagePieces> g_ShimSettingsUiDecor = {};
-        static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowBackdrops = {};
-        static void* g_ShimSettingsUiHeaderLabel = nullptr;
-        static void* g_ShimSettingsUiStatusLabel = nullptr;
-        static void* g_ShimSettingsUiStatusDetailLabel = nullptr;
-        static void* g_ShimSettingsUiFooterLabel = nullptr;
-        static void* g_ShimSettingsUiFooterDetailLabel = nullptr;
-        static void* g_ShimSettingsUiBackButton = nullptr;
-        static void* g_ShimSettingsUiUpdateButton = nullptr;
-        static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowLabels = {};
-        static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowButtons = {};
-        static void* g_ShimSettingsUiPageLabel = nullptr;
-        static void* g_ShimSettingsUiPrevPageButton = nullptr;
-        static void* g_ShimSettingsUiNextPageButton = nullptr;
-        static size_t g_ShimSettingsUiPageStart = 0;
-        static std::string g_ShimSettingsUiStatusText = {};
         static UINT_PTR g_ShimSettingsUiUpdateTimer = 0;
         static uint64_t g_ShimSettingsUiUpdateGeneration = 0;
         static void OnShimSettingsMenuClicked();
-        static void OnShimSettingsBackClicked();
-        static void OnShimSettingsUpdateClicked();
-        static void OnShimSettingsRowClicked(size_t rowIndex);
-        static void OnShimSettingsRowHovered(size_t rowIndex);
         struct ShimSettingDescriptor;
         static void OnShimSettingsActionRowClicked(size_t settingIndex,
                                                    const ShimSettingDescriptor& setting);
-        static void OnShimSettingsPageStepClicked(int direction);
         static bool EnsureShimSettingsUpdateTimer();
-        static void ResetShimSettingsUiVisuals();
         static void EnsureInputBindingUiControls(void* screen);
         static void RefreshInputBindingUiControls();
         static void EnsureOptionsScreenDtorHook(uintptr_t dtorAddr,
@@ -546,113 +492,6 @@ namespace BZROpenShim
         {
             OnShimSettingsMenuClicked();
         }
-
-        static void __cdecl ShimSettingsBackClick()
-        {
-            OnShimSettingsBackClicked();
-        }
-
-        static void __cdecl ShimSettingsUpdateClick()
-        {
-            OnShimSettingsUpdateClicked();
-        }
-
-        static void __cdecl ShimSettingsPrevPageClick()
-        {
-            OnShimSettingsPageStepClicked(-1);
-        }
-
-        static void __cdecl ShimSettingsNextPageClick()
-        {
-            OnShimSettingsPageStepClicked(1);
-        }
-
-#define BZR_SHIM_SETTINGS_ROW_CLICK_DECL(index) \
-        static void __cdecl ShimSettingsRowClick##index() { OnShimSettingsRowClicked(index); }
-
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(0)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(1)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(2)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(3)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(4)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(5)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(6)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(7)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(8)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(9)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(10)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(11)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(12)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(13)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(14)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(15)
-
-#undef BZR_SHIM_SETTINGS_ROW_CLICK_DECL
-
-// Hover thunks feed the row's setting description into the status label.
-// Screens may invoke every child's hover slot in bulk when they open (see
-// InputBindingUiButtonOnHoverNoop), so the handler is gated and label-only.
-#define BZR_SHIM_SETTINGS_ROW_HOVER_DECL(index) \
-        static void __cdecl ShimSettingsRowHover##index(void* /*param*/) { OnShimSettingsRowHovered(index); }
-
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(0)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(1)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(2)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(3)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(4)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(5)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(6)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(7)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(8)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(9)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(10)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(11)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(12)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(13)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(14)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(15)
-
-#undef BZR_SHIM_SETTINGS_ROW_HOVER_DECL
-
-        static void* const kShimSettingsRowHoverCallbacks[kShimSettingsUiVisibleRowCount] =
-        {
-            reinterpret_cast<void*>(ShimSettingsRowHover0),
-            reinterpret_cast<void*>(ShimSettingsRowHover1),
-            reinterpret_cast<void*>(ShimSettingsRowHover2),
-            reinterpret_cast<void*>(ShimSettingsRowHover3),
-            reinterpret_cast<void*>(ShimSettingsRowHover4),
-            reinterpret_cast<void*>(ShimSettingsRowHover5),
-            reinterpret_cast<void*>(ShimSettingsRowHover6),
-            reinterpret_cast<void*>(ShimSettingsRowHover7),
-            reinterpret_cast<void*>(ShimSettingsRowHover8),
-            reinterpret_cast<void*>(ShimSettingsRowHover9),
-            reinterpret_cast<void*>(ShimSettingsRowHover10),
-            reinterpret_cast<void*>(ShimSettingsRowHover11),
-            reinterpret_cast<void*>(ShimSettingsRowHover12),
-            reinterpret_cast<void*>(ShimSettingsRowHover13),
-            reinterpret_cast<void*>(ShimSettingsRowHover14),
-            reinterpret_cast<void*>(ShimSettingsRowHover15),
-        };
-
-        static void* const kShimSettingsRowClickCallbacks[kShimSettingsUiVisibleRowCount] =
-        {
-            reinterpret_cast<void*>(ShimSettingsRowClick0),
-            reinterpret_cast<void*>(ShimSettingsRowClick1),
-            reinterpret_cast<void*>(ShimSettingsRowClick2),
-            reinterpret_cast<void*>(ShimSettingsRowClick3),
-            reinterpret_cast<void*>(ShimSettingsRowClick4),
-            reinterpret_cast<void*>(ShimSettingsRowClick5),
-            reinterpret_cast<void*>(ShimSettingsRowClick6),
-            reinterpret_cast<void*>(ShimSettingsRowClick7),
-            reinterpret_cast<void*>(ShimSettingsRowClick8),
-            reinterpret_cast<void*>(ShimSettingsRowClick9),
-            reinterpret_cast<void*>(ShimSettingsRowClick10),
-            reinterpret_cast<void*>(ShimSettingsRowClick11),
-            reinterpret_cast<void*>(ShimSettingsRowClick12),
-            reinterpret_cast<void*>(ShimSettingsRowClick13),
-            reinterpret_cast<void*>(ShimSettingsRowClick14),
-            reinterpret_cast<void*>(ShimSettingsRowClick15),
-        };
 
         static constexpr InputBindingRowSeed kInputBindingFirstPassSeeds[] = {
             { "turbo", nullptr, "Turbo" },
@@ -1494,7 +1333,6 @@ namespace BZROpenShim
 
         static void ResetInputBindingUiVisuals()
         {
-            ResetShimSettingsUiVisuals();
             g_InputScreenBinding.BindDecorated(nullptr);
             g_InputBindingUiMiddleOverlay = nullptr;
             g_InputBindingUiTopMask = nullptr;
@@ -2678,18 +2516,6 @@ namespace BZROpenShim
 
         // --- OpenShim settings page implementation ------------------------------
 
-        static void* ReadOptionsInputSingletonRaw()
-        {
-            __try
-            {
-                return *reinterpret_cast<void* const volatile*>(g_OptionsInputSingletonAddr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return nullptr;
-            }
-        }
-
         static bool ShouldEnableShimSettingsUi()
         {
             static int s_cached = -1;
@@ -3152,9 +2978,7 @@ namespace BZROpenShim
               "and keeps the previous record as career_stats.cfg.openshim.bak. "
               "Does not turn tracking off." },
         };
-        // The page count adapts to the registry (see the paging controls in
-        // RefreshShimSettingsUiControls), so the registry may exceed the
-        // per-page row slots.
+        // The screens list registry rows by category (kShimSettingsCategories).
         constexpr size_t kShimSettingsRegistryCount =
             sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0]);
 
@@ -3175,21 +2999,6 @@ namespace BZROpenShim
         static void DisarmShimSettingsAction()
         {
             g_ShimSettingsArmedActionIndex = kShimSettingsRegistryCount;
-        }
-
-        static size_t ClampShimSettingsUiPageStart(size_t pageStart)
-        {
-            if constexpr (kShimSettingsRegistryCount <= kShimSettingsUiVisibleRowCount)
-            {
-                return 0;
-            }
-            else
-            {
-                constexpr size_t maxPageStart =
-                    ((kShimSettingsRegistryCount - 1) / kShimSettingsUiVisibleRowCount) *
-                    kShimSettingsUiVisibleRowCount;
-                return (std::min)(pageStart, maxPageStart);
-            }
         }
 
         // The UI shows the ini baseline: the value the key currently resolves to
@@ -3246,458 +3055,508 @@ namespace BZROpenShim
         }
 
 
-        static void ResetShimSettingsUiVisuals()
+        // ====================================================================
+        // OPENSHIM OPTIONS SCREENS
+        // ====================================================================
+        //
+        // The settings are their own shell screens (see shell_screens.h): the
+        // stock Options screen gains an "OpenShim Options" button that opens a
+        // hub, and each hub tile opens one category screen. They are built
+        // like stock screens -- the stock Top Screen, one painted centre panel
+        // (mkscreens.py), and stock widgets placed over the painted slots -- so
+        // they fade, stack, and answer Esc like the screens around them.
+        //
+        // Every setting still comes from g_ShimSettingsRegistry; a category
+        // lists registry rows by label, in display order. The coordinates
+        // below are the layout contract with HUB_LAYOUT / CATEGORY_LAYOUT in
+        // resources/ui/custom_widgets/mkscreens.py.
+        namespace Shell = BZROpenShim::ShellScreens;
+
+        constexpr const char* kShimHubPanelTexture = "osh_hub_center.png";
+        constexpr const char* kShimCategoryPanelTexture = "osh_category_center.png";
+
+        // Rows that are not openshim.ini settings: they run something.
+        constexpr const char* kShimRowUpdateCheck = "OpenShim Updates";
+        constexpr const char* kShimRowKeyBindings = "Key Bindings";
+        constexpr size_t kShimPseudoRowUpdateCheck = kShimSettingsRegistryCount + 0;
+        constexpr size_t kShimPseudoRowKeyBindings = kShimSettingsRegistryCount + 1;
+        constexpr size_t kShimNoRow = kShimSettingsRegistryCount + 2;
+        // Stock cUI_OptionsInput (key bindings), as the stock Input button uses.
+        constexpr uint32_t kStockOptionsInputScreenId = 0x15;
+
+        constexpr size_t kShimCategoryRowsPerColumn = 8;
+        constexpr size_t kShimCategoryMaxRows = 2 * kShimCategoryRowsPerColumn;
+
+        static const char* const kShimCategoryVideo[] = {
+            "Render Profile", "DX11 FXAA", "DX11 Local Lights", "Sun Flashbang", "Jet Flames",
+            "Empty Craft Lights", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes" };
+        static const char* const kShimCategoryLighting[] = {
+            "Player Headlight", "Headlight Brightness", "Headlight Color", "Headlight Beam",
+            "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam" };
+        static const char* const kShimCategoryAudio[] = {
+            "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
+        static const char* const kShimCategoryHud[] = {
+            "Scrap/Pilot HUD", "Radar Size", "Target Popup", "MP Vehicle Flags", "Show Own MP Flag" };
+        static const char* const kShimCategoryControls[] = {
+            kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Unsmoothed Controls",
+            "Satellite Zoom Out", "Satellite Pan Speed", "Editor Placement" };
+        static const char* const kShimCategoryGameplay[] = {
+            "Weapon Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
+            "Jump-Snipe Crouch", "Global Turbo", "Satellite Fog Of War", "Neutral Attack Orders",
+            "Smart Scavengers", "Turret AA Pitch", "Bomber AI Range", "AI Howitzer Volley",
+            "AI Mine Volley", "AutoSave", "AutoSave Interval" };
+        static const char* const kShimCategoryFixes[] = {
+            "AI Multi-Producer", "APC Allied Deploy", "Splinter Undead Fix", "Howitzer Deploy Fix",
+            "Tug Cargo Deploy", "Recycle Release Fix", "Constructor Cleanup", "Material Guard" };
+        static const char* const kShimCategoryNetwork[] = {
+            "Net Route", "Net Improvements", "Net Tuning", "Stock Factions", "Map List Fixes",
+            "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname" };
+        static const char* const kShimCategorySystem[] = {
+            kShimRowUpdateCheck, "Career Stats", "Reset Career Stats" };
+
+        struct ShimSettingsCategory
         {
-            g_ShimSettingsUiTopMask = nullptr;
-            g_ShimSettingsUiContentMask = nullptr;
-            g_ShimSettingsUiDecor.fill(nullptr);
-            g_ShimSettingsUiRowBackdrops.fill(nullptr);
-            g_ShimSettingsUiHeaderLabel = nullptr;
-            g_ShimSettingsUiStatusLabel = nullptr;
-            g_ShimSettingsUiStatusDetailLabel = nullptr;
-            g_ShimSettingsUiFooterLabel = nullptr;
-            g_ShimSettingsUiFooterDetailLabel = nullptr;
-            g_ShimSettingsUiBackButton = nullptr;
-            g_ShimSettingsUiUpdateButton = nullptr;
-            g_ShimSettingsUiPageLabel = nullptr;
-            g_ShimSettingsUiPrevPageButton = nullptr;
-            g_ShimSettingsUiNextPageButton = nullptr;
-            g_ShimSettingsUiRowLabels.fill(nullptr);
-            g_ShimSettingsUiRowButtons.fill(nullptr);
-            DisarmShimSettingsAction();
+            const char* name;   // tile caption
+            const char* title;  // screen title
+            const char* blurb;  // hub hover text
+            const char* const* rows;
+            size_t rowCount;
+        };
+
+#define BZR_SHIM_CATEGORY(name, title, blurb, rows) \
+            { name, title, blurb, rows, sizeof(rows) / sizeof(rows[0]) }
+        static const ShimSettingsCategory kShimSettingsCategories[] =
+        {
+            BZR_SHIM_CATEGORY("Video", "VIDEO",
+                "Render profile, the DX11 Enhanced passes, and visual effects.", kShimCategoryVideo),
+            BZR_SHIM_CATEGORY("Lighting", "LIGHTING",
+                "Vehicle headlights and the pilot flashlight.", kShimCategoryLighting),
+            BZR_SHIM_CATEGORY("Audio", "AUDIO",
+                "Sound channels, background music, unit voices and alerts.", kShimCategoryAudio),
+            BZR_SHIM_CATEGORY("HUD", "HUD",
+                "Scrap and pilot readout, radar size, target popup and vehicle flags.", kShimCategoryHud),
+            BZR_SHIM_CATEGORY("Controls", "CONTROLS",
+                "Key bindings, raw mouse input, control smoothing and the satellite view.",
+                kShimCategoryControls),
+            BZR_SHIM_CATEGORY("Gameplay", "GAMEPLAY",
+                "Single-player aiming, AI behaviour, turbo and AutoSave.", kShimCategoryGameplay),
+            BZR_SHIM_CATEGORY("Fixes", "FIXES",
+                "Switches for confirmed Redux engine defects. Leave these on unless "
+                "you are chasing a regression.", kShimCategoryFixes),
+            BZR_SHIM_CATEGORY("Network", "NETWORK",
+                "Connection route, the socket layer, lobby features and map lists.",
+                kShimCategoryNetwork),
+            BZR_SHIM_CATEGORY("System", "SYSTEM",
+                "OpenShim updates and career statistics.", kShimCategorySystem),
+        };
+#undef BZR_SHIM_CATEGORY
+        constexpr size_t kShimSettingsCategoryCount =
+            sizeof(kShimSettingsCategories) / sizeof(kShimSettingsCategories[0]);
+        static_assert(sizeof(kShimCategoryGameplay) / sizeof(kShimCategoryGameplay[0]) <= kShimCategoryMaxRows,
+                      "a category screen shows at most 16 rows");
+
+        // Hub geometry (HUB_LAYOUT).
+        constexpr Shell::Rect kShimTitleRect = { 470.0f, 132.0f, 500.0f, 56.0f };
+        constexpr Shell::Rect kShimBackRect = { 0.0f, 0.0f, 342.0f, 77.0f };
+        constexpr float kShimBackTextOffset = 28.0f;
+        constexpr size_t kShimHubColumns = 3;
+        constexpr Shell::Rect kShimHubTile0 = { 240.0f, 252.0f, 300.0f, 100.0f };
+        constexpr float kShimHubPitchX = 330.0f;
+        constexpr float kShimHubPitchY = 124.0f;
+        constexpr Shell::Rect kShimHubInfo = { 240.0f, 640.0f, 960.0f, 170.0f };
+        // Category geometry (CATEGORY_LAYOUT).
+        constexpr float kShimColumnX[2] = { 228.0f, 736.0f };
+        constexpr float kShimColumnY = 236.0f;
+        constexpr float kShimColumnW = 476.0f;
+        constexpr float kShimRowTop = 14.0f;
+        constexpr float kShimRowPitch = 52.0f;
+        constexpr float kShimRowH = 42.0f;
+        constexpr float kShimRowPad = 16.0f;
+        constexpr float kShimValueW = 196.0f;
+        constexpr Shell::Rect kShimCategoryInfo = { 228.0f, 690.0f, 984.0f, 120.0f };
+
+        static Shell::Rect ShimHubTileRect(size_t index)
+        {
+            const float col = static_cast<float>(index % kShimHubColumns);
+            const float row = static_cast<float>(index / kShimHubColumns);
+            return { kShimHubTile0.x + col * kShimHubPitchX, kShimHubTile0.y + row * kShimHubPitchY,
+                     kShimHubTile0.w, kShimHubTile0.h };
         }
 
-        static void SetShimSettingsUiControlsVisible(bool visible)
+        static Shell::Rect ShimValueRect(size_t slot)
         {
-            SetInputBindingUiViewActive(g_ShimSettingsUiTopMask, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiContentMask, visible);
-            for (void* decor : g_ShimSettingsUiDecor)
-                SetInputBindingUiViewActive(decor, visible);
-            for (void* backdrop : g_ShimSettingsUiRowBackdrops)
-                SetInputBindingUiViewActive(backdrop, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiHeaderLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiStatusLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiStatusDetailLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiFooterLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiFooterDetailLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiBackButton, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiUpdateButton, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiPageLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiPrevPageButton, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiNextPageButton, visible);
-            for (void* label : g_ShimSettingsUiRowLabels)
-                SetInputBindingUiViewActive(label, visible);
-            for (void* button : g_ShimSettingsUiRowButtons)
-                SetInputBindingUiViewActive(button, visible);
+            const float x = kShimColumnX[slot / kShimCategoryRowsPerColumn] + kShimColumnW -
+                            kShimRowPad - kShimValueW;
+            const float y = kShimColumnY + kShimRowTop +
+                            kShimRowPitch * static_cast<float>(slot % kShimCategoryRowsPerColumn);
+            return { x, y, kShimValueW, kShimRowH };
         }
 
-        static void SetInputBindingUiControlsVisible(bool visible)
+        static Shell::Rect ShimRowLabelRect(size_t slot)
         {
-            SetInputBindingUiViewActive(g_InputBindingUiTopMask, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiContentMask, visible);
-            for (void* decor : g_InputBindingUiDecor)
-                SetInputBindingUiViewActive(decor, visible);
-            for (void* backdrop : g_InputBindingUiRowBackdrops)
-                SetInputBindingUiViewActive(backdrop, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiHeaderLabel, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiStatusLabel, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiStatusDetailLabel, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiPageLabel, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiBackButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiDefaultsButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiInputFamilyButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiGameKeyFamilyButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiPrevPageButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiNextPageButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiRefreshButton, visible);
-            for (void* label : g_InputBindingUiRowLabels)
-                SetInputBindingUiViewActive(label, visible);
-            for (void* button : g_InputBindingUiRowButtons)
-                SetInputBindingUiViewActive(button, visible);
+            const Shell::Rect value = ShimValueRect(slot);
+            const float x = kShimColumnX[slot / kShimCategoryRowsPerColumn] + kShimRowPad + 12.0f;
+            return { x, value.y, value.x - x - 22.0f, kShimRowH };
         }
 
-        static void RefreshShimSettingsUiControls()
+        // Three text lines in an info box: two for a description, and one
+        // under the painted divider for a standing note.
+        static Shell::Rect ShimInfoLine(const Shell::Rect& box, size_t line)
         {
-            g_ShimSettingsUiPageStart = ClampShimSettingsUiPageStart(g_ShimSettingsUiPageStart);
+            const float x = box.x + 24.0f;
+            const float w = box.w - 48.0f;
+            if (line < 2)
+                return { x, box.y + 14.0f + 32.0f * static_cast<float>(line), w, 30.0f };
+            return { x, box.y + box.h - 42.0f, w, 30.0f };
+        }
 
-            const UiOptionsPageLayout layout =
-                BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
+        static Shell::ButtonSkin ShimSlotSkin(const char* hover, const char* press)
+        {
+            // No resting texture: the slot is painted into the panel, as the
+            // stock option buttons rest on esc_center.png's slots. Without
+            // our art there is no painted slot, so rest on the stock art.
+            if (Shell::IsTextureDeployed(hover) && Shell::IsTextureDeployed(press))
+                return { nullptr, hover, press };
+            return { "optionhv.png", "optionhv.png", "optionck.png" };
+        }
 
-            // Header shows static title; asset-pack status lives in the footer
-            // so it is always visible, even when a row hover overwrites the
-            // status lines. The status lines keep showing the last click result
-            // or hover description exactly as before.
-            SetInputBindingUiLabelTextFitted(g_ShimSettingsUiHeaderLabel, "OpenShim Settings",
-                                             layout.headerTextWidth);
-            if (g_ShimSettingsUiStatusText.empty())
+        static size_t FindShimSettingByLabel(const char* label)
+        {
+            if (std::strcmp(label, kShimRowUpdateCheck) == 0)
+                return kShimPseudoRowUpdateCheck;
+            if (std::strcmp(label, kShimRowKeyBindings) == 0)
+                return kShimPseudoRowKeyBindings;
+            for (size_t index = 0; index < kShimSettingsRegistryCount; ++index)
             {
-                std::string runtimeStatus;
-                // Keep capability detail in the dedicated footer rather than
-                // repeating it in the runtime line.
-                const uint32_t shimVer = GetShimVersion();
-                const BZROpenShim::BzrDistribution dist = BZROpenShim::GetBzrDistribution();
-                const char* distName = (dist == BZROpenShim::BzrDistribution::Steam) ? "Steam"
-                                     : (dist == BZROpenShim::BzrDistribution::GOG) ? "GOG"
-                                                                                    : "Unknown";
-                runtimeStatus = "Runtime: Active  OpenShim: " + std::to_string(shimVer) +
-                                "  Game: " + distName + " 2.2.301";
-                SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
-                                                  g_ShimSettingsUiStatusDetailLabel,
-                                                  runtimeStatus.c_str(),
-                                                  layout.headerTextWidth);
+                if (std::strcmp(g_ShimSettingsRegistry[index].label, label) == 0)
+                    return index;
             }
-            else
+            return kShimNoRow;
+        }
+
+        // Logged once: a registry row no category lists cannot be reached from
+        // the screens, and a category label that matches no row is a typo.
+        static void CheckShimSettingsCategories()
+        {
+            static bool checked = false;
+            if (checked)
+                return;
+            checked = true;
+            std::array<bool, kShimSettingsRegistryCount> listed = {};
+            for (const auto& category : kShimSettingsCategories)
             {
-                SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
-                                                  g_ShimSettingsUiStatusDetailLabel,
-                                                  g_ShimSettingsUiStatusText.c_str(),
-                                                  layout.headerTextWidth);
-            }
-            const OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
-            SetInputBindingUiButtonTextFitted(
-                g_ShimSettingsUiUpdateButton,
-                update.busy ? "Checking..." : "Check for Updates",
-                kShimSettingsUiToolbarWidths[1] - kUiToolbarCaptionPadding);
-            // Footer always shows asset-pack status detail plus the hint, so
-            // DLL-only users immediately see why asset features are suppressed.
-            // Cached capabilities are used here; the filesystem scan happened
-            // once in ActivateShimSettingsPage's RefreshAssetCapabilities(), so
-            // no synchronous Workshop tree scan occurs per redraw. Scan duration
-            // is instrumented in Assets::EvaluateAssetCapabilitiesAt and logged.
-            {
-                const auto caps = Assets::GetAssetCapabilities();
-                std::string footerLine1 = Assets::FormatAssetStatusForUi(caps);
-                std::string footerLine2;
-                if (caps.state == Assets::AssetPackState::NotDetected)
+                for (size_t r = 0; r < category.rowCount; ++r)
                 {
-                    // Truthful separation: pack not detected vs compatible resources available (unrelated mod).
-                    if (caps.destructionChunks || caps.enhancedResources || caps.terrainHd)
-                        footerLine2 = Assets::FormatAssetCapabilitiesDetail(caps);
-                    else
-                        footerLine2 = "Asset-dependent features are unavailable.";
+                    const size_t index = FindShimSettingByLabel(category.rows[r]);
+                    if (index < kShimSettingsRegistryCount)
+                        listed[index] = true;
+                    else if (index == kShimNoRow)
+                        Log(L"[SETTINGSUI] category %hs lists unknown row \"%hs\"\n",
+                            category.name, category.rows[r]);
                 }
-                else if (caps.state == Assets::AssetPackState::Incompatible)
-                {
-                    std::string v = !caps.installedCompatibilityVersion.empty() ? caps.installedCompatibilityVersion : caps.installedVersion;
-                    std::string exp = caps.expectedCompatibilityVersion;
-                    footerLine2 = "Installed: " + v + " Expected: " + exp + " — update the asset pack.";
-                    if (!caps.problem.empty() && caps.problem.find(v) == std::string::npos)
-                        footerLine2 += " " + caps.problem;
-                }
-                else if (!caps.destructionChunks || !caps.enhancedResources || !caps.terrainHd)
-                {
-                    std::string detail = Assets::FormatAssetCapabilitiesDetail(caps);
-                    if (!detail.empty() && detail != "Asset-dependent features are unavailable.")
-                        footerLine2 = detail;
-                    else
-                        footerLine2 = "Click a value to cycle it. * Takes effect after restarting Battlezone.";
-                }
-                else
-                    footerLine2 = "Click a value to cycle it. * Takes effect after restarting Battlezone.";
-                // Use the two footer labels as two physical lines.
-                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiFooterLabel,
-                                                 footerLine1.c_str(),
-                                                 layout.headerTextWidth);
-                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiFooterDetailLabel,
-                                                 footerLine2.c_str(),
-                                                 layout.headerTextWidth);
             }
-
-            // Paging controls only appear once the registry outgrows one page;
-            // blank the captions too, an inactive caption keeps drawing.
-            const size_t pageCount =
-                (kShimSettingsRegistryCount + kShimSettingsUiVisibleRowCount - 1) /
-                kShimSettingsUiVisibleRowCount;
-            const bool paged = pageCount > 1;
-            if (paged)
+            for (size_t index = 0; index < kShimSettingsRegistryCount; ++index)
             {
-                char pageText[64] = {};
-                std::snprintf(pageText, sizeof(pageText), "Page %u of %u",
-                              static_cast<unsigned>(g_ShimSettingsUiPageStart /
-                                                        kShimSettingsUiVisibleRowCount + 1),
-                              static_cast<unsigned>(pageCount));
-                SetInputBindingUiLabelText(g_ShimSettingsUiPageLabel, pageText);
-                SetInputBindingUiButtonText(g_ShimSettingsUiPrevPageButton, "Prev");
-                SetInputBindingUiButtonText(g_ShimSettingsUiNextPageButton, "Next");
+                if (!listed[index])
+                    Log(L"[SETTINGSUI] setting \"%hs\" is in no category; it is not on any screen\n",
+                        g_ShimSettingsRegistry[index].label);
             }
-            else
+        }
+
+        // Null when the row can be used; otherwise why not.
+        static const char* ShimSettingUnavailableReason(const ShimSettingDescriptor& setting)
+        {
+            const auto caps = Assets::GetAssetCapabilities();
+            if (caps.state == Assets::AssetPackState::Unknown || !setting.section || !setting.key)
+                return nullptr;
+            // Native mesh extraction (ChunkMeshes) needs no external payload pack.
+            if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
+                (std::strcmp(setting.key, "FXAA") == 0 ||
+                 std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0) &&
+                !Assets::IsAssetFeatureAvailable(Assets::AssetFeature::EnhancedRenderer))
             {
-                SetInputBindingUiLabelText(g_ShimSettingsUiPageLabel, "");
-                SetInputBindingUiButtonText(g_ShimSettingsUiPrevPageButton, "");
-                SetInputBindingUiButtonText(g_ShimSettingsUiNextPageButton, "");
+                return "Unavailable: Enhanced renderer resources were not detected.";
             }
-            SetInputBindingUiViewActive(g_ShimSettingsUiPageLabel, paged);
-            SetInputBindingUiViewActive(g_ShimSettingsUiPrevPageButton, paged);
-            SetInputBindingUiViewActive(g_ShimSettingsUiNextPageButton, paged);
+            return nullptr;
+        }
 
-            for (size_t slot = 0; slot < kShimSettingsUiVisibleRowCount; ++slot)
+        // ---- shared state -------------------------------------------------
+        // One hub and one category screen can be live at a time (the shell may
+        // build the next screen before it frees the last, so every reset is
+        // keyed to the screen that owns the state).
+        struct ShimHubUi
+        {
+            void* screen = nullptr;
+            void* info[3] = {};
+        };
+        struct ShimCategoryUi
+        {
+            void* screen = nullptr;
+            size_t category = 0;
+            size_t rowCount = 0;
+            std::array<size_t, kShimCategoryMaxRows> rows = {};
+            std::array<void*, kShimCategoryMaxRows> values = {};
+            void* info[3] = {};
+            std::string status;
+        };
+        static ShimHubUi g_ShimHubUi;
+        static ShimCategoryUi g_ShimCategoryUi;
+
+        static std::string ShimRuntimeLine()
+        {
+            const BZROpenShim::BzrDistribution dist = BZROpenShim::GetBzrDistribution();
+            const char* distName = (dist == BZROpenShim::BzrDistribution::Steam) ? "Steam"
+                                 : (dist == BZROpenShim::BzrDistribution::GOG)   ? "GOG"
+                                                                                 : "Unknown";
+            return "OpenShim " + std::to_string(GetShimVersion()) + "   Game: " + distName + " 2.2.301";
+        }
+
+        static void SetShimInfoText(void* const (&info)[3], const char* text, float width)
+        {
+            SetInputBindingUiWrappedLabelText(info[0], info[1], text ? text : "", width);
+        }
+
+        // ---- hub ----------------------------------------------------------
+        static void ShowShimHubDefaultInfo()
+        {
+            if (!g_ShimHubUi.screen)
+                return;
+            const float width = ShimInfoLine(kShimHubInfo, 0).w;
+            const auto caps = Assets::GetAssetCapabilities();
+            std::string text = "Changes are saved to openshim.ini as you make them. ";
+            text += Assets::FormatAssetStatusForUi(caps);
+            SetShimInfoText(g_ShimHubUi.info, text.c_str(), width);
+            SetInputBindingUiLabelTextFitted(g_ShimHubUi.info[2], ShimRuntimeLine().c_str(), width);
+        }
+
+        static void __cdecl OnShimHubHover(void* /*param*/)
+        {
+            if (!g_ShimHubUi.screen)
+                return;
+            float x = 0.0f, y = 0.0f;
+            if (Shell::CursorDesignPoint(x, y))
             {
-                const size_t index = g_ShimSettingsUiPageStart + slot;
-                if (index >= kShimSettingsRegistryCount)
+                for (size_t i = 0; i < kShimSettingsCategoryCount; ++i)
                 {
-                    SetInputBindingUiLabelText(g_ShimSettingsUiRowLabels[slot], "");
-                    SetInputBindingUiButtonText(g_ShimSettingsUiRowButtons[slot], "");
-                    SetInputBindingUiViewActive(g_ShimSettingsUiRowLabels[slot], false);
-                    SetInputBindingUiViewActive(g_ShimSettingsUiRowButtons[slot], false);
-                    SetInputBindingUiViewActive(g_ShimSettingsUiRowBackdrops[slot], false);
-                    continue;
-                }
-
-                const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[index];
-                // Will be defined after ShimSettingDescriptor; use a lambda-style check here via
-                // a forward-declared helper is not possible at this point, so we inline the
-                // asset-availability probe using string compare and the central service.
-                bool assetAvailable = true;
-                {
-                    const auto caps = Assets::GetAssetCapabilities();
-                    if (caps.state != Assets::AssetPackState::Unknown)
+                    if (Shell::Contains(ShimHubTileRect(i), x, y))
                     {
-                        if (setting.section && setting.key)
-                        {
-                            if (std::strcmp(setting.section, "General") == 0 &&
-                                std::strcmp(setting.key, "ChunkMeshes") == 0)
-                                assetAvailable = true; // Native mesh extraction requires no external payload pack.
-                            else if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
-                                     (std::strcmp(setting.key, "FXAA") == 0 ||
-                                      std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0))
-                                assetAvailable = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::EnhancedRenderer);
-                        }
+                        SetShimInfoText(g_ShimHubUi.info, kShimSettingsCategories[i].blurb,
+                                        ShimInfoLine(kShimHubInfo, 0).w);
+                        return;
                     }
                 }
-                std::string valueText;
-                if (!assetAvailable)
-                {
-                    // Visible but clearly unavailable, rather than hidden.
-                    // Keep the label so the user sees what it would control.
-                    valueText = "Unavailable";
-                }
-                else
-                {
-                    const size_t valueIndex = GetShimSettingCurrentIndex(setting);
-                    valueText = setting.valueLabels[valueIndex];
-                    if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
-                        valueText += " *";
-                }
-                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiRowLabels[slot], setting.label,
-                                                 layout.rowLabelTextWidth);
-                SetInputBindingUiButtonTextFitted(g_ShimSettingsUiRowButtons[slot],
-                                                  valueText.c_str(), layout.rowValueTextWidth);
-                SetInputBindingUiViewActive(g_ShimSettingsUiRowLabels[slot], true);
-                SetInputBindingUiViewActive(g_ShimSettingsUiRowButtons[slot], true);
-                SetInputBindingUiViewActive(g_ShimSettingsUiRowBackdrops[slot], true);
             }
+            ShowShimHubDefaultInfo();
         }
 
-        static void EnsureShimSettingsUiControls(void* screen)
+        static void OnShimHubTileClicked(size_t category)
         {
-            if (!screen)
-                return;
-
-            void* const visualParent = screen;
-            void* controlParent = ResolveStockOptionsInputMiddleOverlay(screen);
-            if (!controlParent)
-                controlParent = screen;
-
-            const UiOptionsPageLayout layout =
-                BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
-
-            const unsigned screenTag = static_cast<unsigned>(reinterpret_cast<uintptr_t>(screen));
-            char controlName[64] = {};
-
-            UiOptionsPageBackgroundSlots background = {};
-            background.topMask = &g_ShimSettingsUiTopMask;
-            background.contentMask = &g_ShimSettingsUiContentMask;
-            CreateInputBindingUiPageBackground(background,
-                                               g_ShimSettingsUiDecor,
-                                               visualParent,
-                                               controlParent,
-                                               "OpenShimSettings",
-                                               screenTag,
-                                               layout);
-
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsHeader_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiHeaderLabel, controlParent, controlName, "",
-                                      layout.title.x, layout.title.y,
-                                      layout.title.width, layout.title.height);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsStatus_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiStatusLabel, controlParent, controlName, "",
-                                      layout.statusLine1.x, layout.statusLine1.y,
-                                      layout.statusLine1.width, layout.statusLine1.height);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsStatus2_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiStatusDetailLabel, controlParent, controlName, "",
-                                      layout.statusLine2.x, layout.statusLine2.y,
-                                      layout.statusLine2.width, layout.statusLine2.height);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsFooter_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiFooterLabel, controlParent, controlName, "",
-                                      layout.contextLine1.x, layout.contextLine1.y,
-                                      layout.contextLine1.width, layout.contextLine1.height);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsFooter2_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiFooterDetailLabel, controlParent, controlName, "",
-                                      layout.contextLine2.x, layout.contextLine2.y,
-                                      layout.contextLine2.width, layout.contextLine2.height);
-            UiDecorRect toolbar[kShimSettingsUiToolbarSlotCount] = {};
-            LayoutUiToolbarRow(layout,
-                               kShimSettingsUiToolbarWidths,
-                               kShimSettingsUiToolbarSlotCount,
-                               kShimSettingsUiToolbarRightGroup,
-                               toolbar,
-                               kShimSettingsUiToolbarSlotCount);
-
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsBack_%08X", screenTag);
-            CreateInputBindingUiButton(g_ShimSettingsUiBackButton, controlParent, controlName, "Back",
-                                       toolbar[0].x, toolbar[0].y, toolbar[0].width, toolbar[0].height,
-                                       reinterpret_cast<void*>(ShimSettingsBackClick));
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsUpdate_%08X", screenTag);
-            CreateInputBindingUiButton(g_ShimSettingsUiUpdateButton, controlParent, controlName,
-                                       "Check for Updates",
-                                       toolbar[1].x, toolbar[1].y, toolbar[1].width, toolbar[1].height,
-                                       reinterpret_cast<void*>(ShimSettingsUpdateClick));
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsPage_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiPageLabel, controlParent, controlName, "",
-                                      toolbar[2].x,
-                                      toolbar[2].y + (toolbar[2].height - 28.0f) * 0.5f,
-                                      toolbar[2].width,
-                                      28.0f);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsPrev_%08X", screenTag);
-            CreateInputBindingUiButton(g_ShimSettingsUiPrevPageButton, controlParent, controlName, "Prev",
-                                       toolbar[3].x, toolbar[3].y, toolbar[3].width, toolbar[3].height,
-                                       reinterpret_cast<void*>(ShimSettingsPrevPageClick));
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsNext_%08X", screenTag);
-            CreateInputBindingUiButton(g_ShimSettingsUiNextPageButton, controlParent, controlName, "Next",
-                                       toolbar[4].x, toolbar[4].y, toolbar[4].width, toolbar[4].height,
-                                       reinterpret_cast<void*>(ShimSettingsNextPageClick));
-
-            for (size_t slot = 0; slot < kShimSettingsUiVisibleRowCount; ++slot)
-            {
-                const size_t column = slot / kShimSettingsUiRowsPerColumn;
-                const size_t row = slot % kShimSettingsUiRowsPerColumn;
-                const float baseX = (column == 0) ? layout.rowLeftX : layout.rowRightX;
-                const float y = layout.rowStartY + (static_cast<float>(row) * layout.rowPitch);
-                std::snprintf(controlName, sizeof(controlName),
-                              "OpenShimSettingsRowPlate_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiPlate(g_ShimSettingsUiRowBackdrops[slot], controlParent, controlName,
-                                          baseX - layout.rowPlateInsetX,
-                                          y,
-                                          layout.rowPlateWidth,
-                                          layout.rowHeight);
-                std::snprintf(controlName, sizeof(controlName),
-                              "OpenShimSettingsRowLabel_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiLabel(g_ShimSettingsUiRowLabels[slot], controlParent, controlName, "",
-                                          baseX, y + layout.rowLabelYInset,
-                                          layout.rowLabelWidth,
-                                          layout.rowHeight - layout.rowLabelYInset);
-                std::snprintf(controlName, sizeof(controlName),
-                              "OpenShimSettingsRowButton_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiButton(g_ShimSettingsUiRowButtons[slot], controlParent, controlName, "",
-                                           baseX + layout.rowValueOffsetX, y,
-                                           layout.rowValueWidth, layout.rowHeight,
-                                           kShimSettingsRowClickCallbacks[slot],
-                                           kShimSettingsRowHoverCallbacks[slot]);
-            }
+            if (g_ShimHubUi.screen && category < kShimSettingsCategoryCount)
+                Shell::RequestScreen(g_ShimHubUi.screen,
+                                     Shell::kOptionsCategoryScreenIdBase + static_cast<uint32_t>(category));
         }
 
-        static void ActivateShimSettingsPage(void* screen)
+        template <size_t I>
+        static void __cdecl ShimHubTileClick() { OnShimHubTileClicked(I); }
+
+        template <size_t... I>
+        static constexpr std::array<void(__cdecl*)(), sizeof...(I)> MakeShimHubTileClicks(std::index_sequence<I...>)
         {
-            if (!screen)
-                return;
+            return { &ShimHubTileClick<I>... };
+        }
+        static constexpr auto kShimHubTileClicks =
+            MakeShimHubTileClicks(std::make_index_sequence<kShimSettingsCategoryCount>{});
 
-            if (g_InputScreenBinding.decorated != screen)
-            {
-                ResetInputBindingUiVisuals();
-                g_InputScreenBinding.BindDecorated(screen);
-            }
+        static void __cdecl OnShimHubBack()
+        {
+            if (g_ShimHubUi.screen)
+                Shell::Back(g_ShimHubUi.screen);
+        }
 
-            g_ShimSettingsPageActive = true;
-            // Re-probe before the page is built so a pack installed, removed, or
-            // updated since startup is reflected in the footer and in the
-            // asset-gated rows. This is the explicit refresh point documented in
-            // Docs/DLL_ONLY_QUALIFICATION.md; every other UI read uses the cache.
+        static bool BuildShimHubScreen(void* screen)
+        {
+            CheckShimSettingsCategories();
             Assets::RefreshAssetCapabilities();
-            const OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
-            g_ShimSettingsUiUpdateGeneration = update.generation;
-            if (!update.message.empty())
-                g_ShimSettingsUiStatusText = update.message;
-            if (update.busy)
-                EnsureShimSettingsUpdateTimer();
-            SetInputBindingUiControlsVisible(false);
-            SuppressStockOptionsInputWidgets(screen);
-            SetStockOptionsInputAccessoryVisibility(screen, false);
-            EnsureShimSettingsUiControls(screen);
-            RefreshShimSettingsUiControls();
-            Log(L"[SETTINGSUI] Settings page active screen=0x%08X rows=%u\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
-                static_cast<unsigned>(sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0])));
+            g_ShimHubUi = {};
+            g_ShimHubUi.screen = screen;
+
+            const char* texture =
+                Shell::IsTextureDeployed(kShimHubPanelTexture) ? kShimHubPanelTexture : nullptr;
+            void* panel = Shell::AddPanel(screen, nullptr, "OpenShimHub_Overlay",
+                                          { 0.0f, 0.0f, 1440.0f, 1080.0f }, texture);
+            if (!panel)
+                return false;
+            Shell::AddLabel(panel, panel, "OpenShimHub_Title", kShimTitleRect, "OPENSHIM OPTIONS",
+                            Shell::kTitleLabelFlags);
+
+            const Shell::ButtonSkin skin = ShimSlotSkin("osh_tile_hv.png", "osh_tile_ck.png");
+            char name[64] = {};
+            for (size_t i = 0; i < kShimSettingsCategoryCount; ++i)
+            {
+                _snprintf_s(name, _TRUNCATE, "OpenShimHub_%s", kShimSettingsCategories[i].name);
+                Shell::AddButton(panel, panel, name, ShimHubTileRect(i), kShimSettingsCategories[i].name,
+                                 skin, 1.3f, 0.0f, kShimHubTileClicks[i], &OnShimHubHover);
+            }
+            for (size_t line = 0; line < 3; ++line)
+            {
+                _snprintf_s(name, _TRUNCATE, "OpenShimHub_Info%zu", line);
+                g_ShimHubUi.info[line] =
+                    Shell::AddLabel(panel, panel, name, ShimInfoLine(kShimHubInfo, line), "");
+            }
+            ShowShimHubDefaultInfo();
+            return Shell::AddButton(panel, nullptr, "OpenShimHub_Back", kShimBackRect, "Back",
+                                    Shell::kSkinTopCorner, 1.0f, kShimBackTextOffset,
+                                    &OnShimHubBack) != nullptr;
         }
 
-        static void OnShimSettingsRowClicked(size_t rowIndex)
+        static void OnShimHubClosed(void* screen)
         {
-            const size_t settingIndex = g_ShimSettingsUiPageStart + rowIndex;
-            if (settingIndex >= kShimSettingsRegistryCount || !g_ShimSettingsPageActive)
+            if (g_ShimHubUi.screen == screen)
+                g_ShimHubUi = {};
+        }
+
+        // ---- category screens ---------------------------------------------
+        static std::string ShimRowValueText(size_t row)
+        {
+            if (row == kShimPseudoRowUpdateCheck)
+                return GetOpenShimUpdateSnapshot().busy ? "Checking..." : "Check now";
+            if (row == kShimPseudoRowKeyBindings)
+                return "Edit";
+            const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
+            if (ShimSettingUnavailableReason(setting))
+                return "Unavailable";
+            std::string text = setting.valueLabels[GetShimSettingCurrentIndex(setting)];
+            if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
+                text += " *";
+            return text;
+        }
+
+        static const char* ShimRowLabel(size_t row)
+        {
+            if (row == kShimPseudoRowUpdateCheck)
+                return kShimRowUpdateCheck;
+            if (row == kShimPseudoRowKeyBindings)
+                return kShimRowKeyBindings;
+            return g_ShimSettingsRegistry[row].label;
+        }
+
+        static const char* ShimRowDescription(size_t row)
+        {
+            if (row == kShimPseudoRowUpdateCheck)
+                return "Check the Steam Workshop for a newer OpenShim and stage it for the next launch.";
+            if (row == kShimPseudoRowKeyBindings)
+                return "Open the key-binding editor for keyboard commands and game keys.";
+            const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
+            if (const char* reason = ShimSettingUnavailableReason(setting))
+                return reason;
+            return setting.description;
+        }
+
+        static void ShowShimCategoryDefaultInfo()
+        {
+            ShimCategoryUi& ui = g_ShimCategoryUi;
+            if (!ui.screen)
                 return;
-
-            const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[settingIndex];
-
-            // Block toggling asset-backed features when their resources are absent.
-            // This protects users who copied an old openshim.ini with
-            // ChunkMeshes=1 into a stock install. DX11 rows are gated on the
-            // parent renderer resource, not the pack, for accuracy.
+            const float width = ShimInfoLine(kShimCategoryInfo, 0).w;
+            SetShimInfoText(ui.info,
+                            ui.status.empty()
+                                ? "Click a value to change it. Point at a setting to read what it does."
+                                : ui.status.c_str(),
+                            width);
+            bool anyRestart = false;
+            for (size_t slot = 0; slot < ui.rowCount; ++slot)
             {
-                const auto caps = Assets::GetAssetCapabilities();
-                bool avail = true;
-                bool isDx11Row = false;
-                if (caps.state != Assets::AssetPackState::Unknown && setting.section && setting.key)
+                const size_t row = ui.rows[slot];
+                anyRestart |= row < kShimSettingsRegistryCount &&
+                              g_ShimSettingsRegistry[row].applyGroup == ShimSettingApplyGroup::RestartRequired;
+            }
+            SetInputBindingUiLabelTextFitted(
+                ui.info[2],
+                anyRestart ? "* Takes effect after restarting Battlezone." : ShimRuntimeLine().c_str(),
+                width);
+        }
+
+        static void RefreshShimCategoryValues()
+        {
+            ShimCategoryUi& ui = g_ShimCategoryUi;
+            for (size_t slot = 0; slot < ui.rowCount; ++slot)
+                SetInputBindingUiButtonTextFitted(ui.values[slot], ShimRowValueText(ui.rows[slot]).c_str(),
+                                                  kShimValueW - 20.0f);
+            ShowShimCategoryDefaultInfo();
+        }
+
+        static void __cdecl OnShimCategoryHover(void* /*param*/)
+        {
+            ShimCategoryUi& ui = g_ShimCategoryUi;
+            if (!ui.screen)
+                return;
+            float x = 0.0f, y = 0.0f;
+            if (Shell::CursorDesignPoint(x, y))
+            {
+                for (size_t slot = 0; slot < ui.rowCount; ++slot)
                 {
-                    if (std::strcmp(setting.section, "General") == 0 &&
-                        std::strcmp(setting.key, "ChunkMeshes") == 0)
-                        avail = true; // Native mesh extraction requires no external payload pack.
-                    else if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
-                             (std::strcmp(setting.key, "FXAA") == 0 ||
-                              std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0))
+                    if (!Shell::Contains(ShimValueRect(slot), x, y))
+                        continue;
+                    const size_t row = ui.rows[slot];
+                    std::string text = ShimRowDescription(row) ? ShimRowDescription(row) : "";
+                    if (row < kShimSettingsRegistryCount && !IsShimSettingActionRow(g_ShimSettingsRegistry[row]) &&
+                        !ShimSettingUnavailableReason(g_ShimSettingsRegistry[row]))
                     {
-                        isDx11Row = true;
-                        avail = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::EnhancedRenderer);
+                        const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
+                        const size_t current = GetShimSettingCurrentIndex(setting);
+                        text += "  Click for ";
+                        text += setting.valueLabels[(current + 1) % setting.valueCount];
+                        text += ".";
                     }
-                }
-                if (!avail)
-                {
-                    const char* reason = nullptr;
-                    if (isDx11Row)
-                        reason = "Unavailable — Enhanced renderer resources not detected";
-                    else if (caps.state == Assets::AssetPackState::NotDetected)
-                        reason = "Unavailable — OpenShim asset pack not detected";
-                    else if (caps.state == Assets::AssetPackState::Incompatible)
-                        reason = "Unavailable — asset pack version mismatch";
-                    else
-                        reason = "Unavailable — required assets missing";
-                    g_ShimSettingsUiStatusText = reason;
-                    Log(L"[SETTINGSUI] Asset-backed setting blocked %hs: %hs\n",
-                        setting.key, reason);
-                    RefreshShimSettingsUiControls();
+                    SetShimInfoText(ui.info, text.c_str(), ShimInfoLine(kShimCategoryInfo, 0).w);
                     return;
                 }
             }
+            ShowShimCategoryDefaultInfo();
+        }
 
-            if (IsShimSettingActionRow(setting))
+        static void StartShimUpdateCheck()
+        {
+            BeginOpenShimUpdateCheck();
+            OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
+            if (update.busy && !EnsureShimSettingsUpdateTimer())
             {
-                OnShimSettingsActionRowClicked(settingIndex, setting);
+                CancelOpenShimUpdateCheck(
+                    "Update check failed: Battlezone could not schedule Workshop status checks.");
+                update = GetOpenShimUpdateSnapshot();
+            }
+            g_ShimSettingsUiUpdateGeneration = update.generation;
+            g_ShimCategoryUi.status = update.message;
+        }
+
+        // Cycles a setting to its next value, saves it, and applies it live
+        // where the feature supports that.
+        static void CycleShimSetting(size_t index)
+        {
+            const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[index];
+            std::string& status = g_ShimCategoryUi.status;
+            if (const char* reason = ShimSettingUnavailableReason(setting))
+            {
+                status = reason;
+                Log(L"[SETTINGSUI] Asset-backed setting blocked %hs: %hs\n", setting.key, reason);
                 return;
             }
-
+            if (IsShimSettingActionRow(setting))
+            {
+                OnShimSettingsActionRowClicked(index, setting);
+                return;
+            }
             // Clicking anything else abandons a pending confirmation rather
             // than leaving it armed behind the player's back.
             DisarmShimSettingsAction();
 
             const size_t nextIndex = (GetShimSettingCurrentIndex(setting) + 1) % setting.valueCount;
-            const char* const newValue = setting.values[nextIndex];
-
             std::string error;
-            if (!WriteUserConfigValueLossless(setting.section, setting.key,
-                                              setting.altKeys, setting.altKeyCount,
-                                              newValue, error))
+            if (!WriteUserConfigValueLossless(setting.section, setting.key, setting.altKeys,
+                                              setting.altKeyCount, setting.values[nextIndex], error))
             {
-                g_ShimSettingsUiStatusText = "Save failed: " + error;
+                status = "Save failed: " + error;
                 Log(L"[SETTINGSUI] Save failed for %hs: %hs\n", setting.key, error.c_str());
-                RefreshShimSettingsUiControls();
                 return;
             }
 
@@ -3707,31 +3566,154 @@ namespace BZROpenShim
             else
                 ApplyShimSettingLive(setting.applyGroup);
 
-            g_ShimSettingsUiStatusText = std::string(setting.label) + " = " +
-                setting.valueLabels[nextIndex];
+            status = std::string(setting.label) + " = " + setting.valueLabels[nextIndex];
             if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
-                g_ShimSettingsUiStatusText += "  (takes effect after restart)";
+                status += "  (takes effect after restart)";
             else if (setting.applyGroup == ShimSettingApplyGroup::ReadOnNextUse)
-                g_ShimSettingsUiStatusText += "  (takes effect on the next nickname apply)";
+                status += "  (takes effect the next time it is used)";
             else if (!liveApplyOk)
-                g_ShimSettingsUiStatusText += "  (saved; runtime apply failed - see openshim.log)";
+                status += "  (saved; runtime apply failed - see openshim.log)";
             else
-                g_ShimSettingsUiStatusText += "  (applied)";
-            RefreshShimSettingsUiControls();
+                status += "  (applied)";
+        }
+
+        static void OnShimCategoryRowClicked(size_t slot)
+        {
+            ShimCategoryUi& ui = g_ShimCategoryUi;
+            if (!ui.screen || slot >= ui.rowCount)
+                return;
+            const size_t row = ui.rows[slot];
+            if (row == kShimPseudoRowKeyBindings)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen, kStockOptionsInputScreenId);
+                return;
+            }
+            if (row == kShimPseudoRowUpdateCheck)
+            {
+                DisarmShimSettingsAction();
+                StartShimUpdateCheck();
+            }
+            else
+            {
+                CycleShimSetting(row);
+            }
+            RefreshShimCategoryValues();
+        }
+
+        template <size_t I>
+        static void __cdecl ShimCategoryRowClick() { OnShimCategoryRowClicked(I); }
+
+        template <size_t... I>
+        static constexpr std::array<void(__cdecl*)(), sizeof...(I)> MakeShimCategoryRowClicks(std::index_sequence<I...>)
+        {
+            return { &ShimCategoryRowClick<I>... };
+        }
+        static constexpr auto kShimCategoryRowClicks =
+            MakeShimCategoryRowClicks(std::make_index_sequence<kShimCategoryMaxRows>{});
+
+        static void __cdecl OnShimCategoryBack()
+        {
+            if (g_ShimCategoryUi.screen)
+                Shell::Back(g_ShimCategoryUi.screen);
+        }
+
+        static bool BuildShimCategoryScreen(size_t category, void* screen)
+        {
+            const ShimSettingsCategory& def = kShimSettingsCategories[category];
+            ShimCategoryUi& ui = g_ShimCategoryUi;
+            ui = {};
+            ui.screen = screen;
+            ui.category = category;
+            DisarmShimSettingsAction();
+            if (GetOpenShimUpdateSnapshot().busy)
+                EnsureShimSettingsUpdateTimer();
+
+            const char* texture =
+                Shell::IsTextureDeployed(kShimCategoryPanelTexture) ? kShimCategoryPanelTexture : nullptr;
+            void* panel = Shell::AddPanel(screen, nullptr, "OpenShimCategory_Overlay",
+                                          { 0.0f, 0.0f, 1440.0f, 1080.0f }, texture);
+            if (!panel)
+                return false;
+            Shell::AddLabel(panel, panel, "OpenShimCategory_Title", kShimTitleRect, def.title,
+                            Shell::kTitleLabelFlags);
+
+            const Shell::ButtonSkin skin = ShimSlotSkin("osh_value_hv.png", "osh_value_ck.png");
+            char name[64] = {};
+            for (size_t r = 0; r < def.rowCount && ui.rowCount < kShimCategoryMaxRows; ++r)
+            {
+                const size_t row = FindShimSettingByLabel(def.rows[r]);
+                if (row == kShimNoRow)
+                    continue;
+                const size_t slot = ui.rowCount++;
+                ui.rows[slot] = row;
+                _snprintf_s(name, _TRUNCATE, "OpenShimCategory_Label%zu", slot);
+                void* label = Shell::AddLabel(panel, panel, name, ShimRowLabelRect(slot), "");
+                SetInputBindingUiLabelTextFitted(label, ShimRowLabel(row), ShimRowLabelRect(slot).w);
+                _snprintf_s(name, _TRUNCATE, "OpenShimCategory_Value%zu", slot);
+                ui.values[slot] = Shell::AddButton(panel, panel, name, ShimValueRect(slot), "", skin, 1.0f,
+                                                   0.0f, kShimCategoryRowClicks[slot], &OnShimCategoryHover);
+            }
+            for (size_t line = 0; line < 3; ++line)
+            {
+                _snprintf_s(name, _TRUNCATE, "OpenShimCategory_Info%zu", line);
+                ui.info[line] = Shell::AddLabel(panel, panel, name, ShimInfoLine(kShimCategoryInfo, line), "");
+            }
+            RefreshShimCategoryValues();
+            Log(L"[SETTINGSUI] %hs screen built: %u rows\n", def.name, static_cast<unsigned>(ui.rowCount));
+            return Shell::AddButton(panel, nullptr, "OpenShimCategory_Back", kShimBackRect, "Back",
+                                    Shell::kSkinTopCorner, 1.0f, kShimBackTextOffset,
+                                    &OnShimCategoryBack) != nullptr;
+        }
+
+        template <size_t I>
+        static bool BuildShimCategoryScreenAt(void* screen) { return BuildShimCategoryScreen(I, screen); }
+
+        template <size_t... I>
+        static constexpr std::array<Shell::BuildFn, sizeof...(I)> MakeShimCategoryBuilders(std::index_sequence<I...>)
+        {
+            return { &BuildShimCategoryScreenAt<I>... };
+        }
+        static constexpr auto kShimCategoryBuilders =
+            MakeShimCategoryBuilders(std::make_index_sequence<kShimSettingsCategoryCount>{});
+
+        static void OnShimCategoryClosed(void* screen)
+        {
+            if (g_ShimCategoryUi.screen != screen)
+                return;
+            DisarmShimSettingsAction();
+            g_ShimCategoryUi = {};
+        }
+
+        static bool RegisterShimOptionsScreens()
+        {
+            static const bool registered = [] {
+                if (!Shell::RegisterScreen({ Shell::kOptionsHubScreenId, "OpenShim Options",
+                                             &BuildShimHubScreen, &OnShimHubClosed }))
+                    return false;
+                for (size_t i = 0; i < kShimSettingsCategoryCount; ++i)
+                {
+                    if (!Shell::RegisterScreen({ Shell::kOptionsCategoryScreenIdBase + static_cast<uint32_t>(i),
+                                                 kShimSettingsCategories[i].name, kShimCategoryBuilders[i],
+                                                 &OnShimCategoryClosed }))
+                        return false;
+                }
+                return true;
+            }();
+            return registered;
         }
 
         // Two-click confirmation for a destructive row. The first click arms
         // it and repaints the value cell; the second runs it. Clicking any
-        // other row, stepping pages, or leaving the page disarms.
+        // other row or leaving the screen disarms.
         static void OnShimSettingsActionRowClicked(size_t settingIndex,
                                                    const ShimSettingDescriptor& setting)
         {
+            std::string& status = g_ShimCategoryUi.status;
             if (g_ShimSettingsArmedActionIndex != settingIndex)
             {
                 g_ShimSettingsArmedActionIndex = settingIndex;
-                g_ShimSettingsUiStatusText =
-                    std::string(setting.label) + ": click again to confirm. This cannot be undone.";
-                RefreshShimSettingsUiControls();
+                status = std::string(setting.label) + ": click again to confirm. This cannot be undone.";
                 return;
             }
 
@@ -3740,223 +3722,24 @@ namespace BZROpenShim
             switch (setting.applyGroup)
             {
             case ShimSettingApplyGroup::CareerStatsReset:
-            {
                 switch (ResetCareerStatsFromBridge())
                 {
                 case CareerStatsResetResult::Cleared:
-                    g_ShimSettingsUiStatusText =
-                        "Career statistics cleared. The previous record was kept as "
-                        "career_stats.cfg.openshim.bak";
+                    status = "Career statistics cleared. The previous record was kept as "
+                             "career_stats.cfg.openshim.bak";
                     break;
                 case CareerStatsResetResult::AlreadyEmpty:
-                    g_ShimSettingsUiStatusText =
-                        "Career statistics were already empty; nothing changed.";
+                    status = "Career statistics were already empty; nothing changed.";
                     break;
                 case CareerStatsResetResult::Failed:
-                    g_ShimSettingsUiStatusText =
-                        "Career reset failed; existing statistics were kept - see openshim.log";
+                    status = "Career reset failed; existing statistics were kept - see openshim.log";
                     break;
                 }
                 break;
-            }
             default:
-                g_ShimSettingsUiStatusText =
-                    std::string(setting.label) + ": no action is wired up for this row.";
+                status = std::string(setting.label) + ": no action is wired up for this row.";
                 break;
             }
-
-            RefreshShimSettingsUiControls();
-        }
-
-        // The +0x150 slot fires on hover-state *changes* (verified in-game
-        // 2026-07-17: sweeping row 3 -> row 0 invoked row 3's thunk while the
-        // cursor already sat on row 0), so the thunk's own row index lags one
-        // row behind the cursor. Resolve the row actually under the cursor by
-        // reversing the UI transform: the 1440x1080 design space is uniformly
-        // scaled by clientHeight/1080 and centered horizontally.
-        static bool TryResolveHoveredShimSettingsSlot(size_t* outSlot, bool* outValueCell)
-        {
-            HWND window = GetForegroundWindow();
-            if (!window || !outSlot)
-                return false;
-
-            POINT cursor = {};
-            RECT client = {};
-            if (!GetCursorPos(&cursor) || !ScreenToClient(window, &cursor) ||
-                !GetClientRect(window, &client) || client.bottom <= 0)
-                return false;
-
-            const float scale = static_cast<float>(client.bottom) / 1080.0f;
-            const float offsetX = (static_cast<float>(client.right) - 1440.0f * scale) * 0.5f;
-            const float logicalX = (static_cast<float>(cursor.x) - offsetX) / scale;
-            const float logicalY = static_cast<float>(cursor.y) / scale;
-
-            // Geometry MUST come from the same builder that places the rows.
-            // This function used to hardcode its own copy, and the copy went
-            // stale: it described an older grid (left column 258 vs 175, first
-            // row 308 vs 420, pitch 38 vs 42, row height 30 vs 36). Reversing
-            // the transform against those numbers mapped the cursor two rows
-            // low, so every hover printed another row's description. Derive
-            // from the layout and the two cannot drift apart again.
-            const UiOptionsPageLayout layout =
-                BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
-
-            // Full row footprint: the plate starts one inset before the label
-            // and the value button ends the row.
-            const float spanW =
-                layout.rowPlateInsetX + layout.rowValueOffsetX + layout.rowValueWidth;
-            const float leftX = layout.rowLeftX - layout.rowPlateInsetX;
-            const float rightX = layout.rowRightX - layout.rowPlateInsetX;
-
-            size_t column = 0;
-            if (logicalX >= leftX && logicalX <= leftX + spanW)
-                column = 0;
-            else if (logicalX >= rightX && logicalX <= rightX + spanW)
-                column = 1;
-            else
-                return false;
-
-            const float rowOffset = logicalY - layout.rowStartY;
-            if (rowOffset < 0.0f || layout.rowPitch <= 0.0f)
-                return false;
-            const size_t row = static_cast<size_t>(rowOffset / layout.rowPitch);
-            // Reject the inter-row gap so a cursor between two rows does not
-            // claim the row above it.
-            if (row >= kShimSettingsUiRowsPerColumn ||
-                (rowOffset - static_cast<float>(row) * layout.rowPitch) > layout.rowHeight)
-                return false;
-
-            *outSlot = column * kShimSettingsUiRowsPerColumn + row;
-            if (outValueCell)
-            {
-                const float baseX = column == 0 ? layout.rowLeftX : layout.rowRightX;
-                *outValueCell = logicalX >= baseX + layout.rowValueOffsetX;
-            }
-            return true;
-        }
-
-        // Writes the hovered row's description straight into the status label.
-        // g_ShimSettingsUiStatusText is left alone so the next full refresh
-        // restores the last click/apply status. Screens may invoke every hover
-        // slot in bulk on open, hence the active-page gate.
-        static void OnShimSettingsRowHovered(size_t rowIndex)
-        {
-            if (!g_ShimSettingsPageActive)
-                return;
-
-            size_t slot = rowIndex;
-            bool overValueCell = true;
-            if (!TryResolveHoveredShimSettingsSlot(&slot, &overValueCell))
-            {
-                // The callback also fires as the cursor leaves a value button.
-                // Restore the durable page/click status instead of leaving the
-                // last hover help stranded on screen.
-                RefreshShimSettingsUiControls();
-                return;
-            }
-
-            const size_t settingIndex = g_ShimSettingsUiPageStart + slot;
-            if (settingIndex >= kShimSettingsRegistryCount)
-                return;
-
-            const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[settingIndex];
-            // If this asset-backed row is currently unavailable, show that
-            // reason instead of the normal description so the user understands
-            // why it cannot be toggled. DX11 rows report the parent renderer
-            // resource, not the pack, for diagnostic accuracy.
-            {
-                const auto caps = Assets::GetAssetCapabilities();
-                bool avail = true;
-                bool isDx11Row = false;
-                if (caps.state != Assets::AssetPackState::Unknown && setting.section && setting.key)
-                {
-                    if (std::strcmp(setting.section, "General") == 0 &&
-                        std::strcmp(setting.key, "ChunkMeshes") == 0)
-                        avail = true; // Native mesh extraction requires no external payload pack.
-                    else if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
-                             (std::strcmp(setting.key, "FXAA") == 0 ||
-                              std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0))
-                    {
-                        isDx11Row = true;
-                        avail = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::EnhancedRenderer);
-                    }
-                }
-                if (!avail)
-                {
-                    const char* reason = nullptr;
-                    if (isDx11Row)
-                        reason = "Unavailable — Enhanced renderer resources not detected";
-                    else if (caps.state == Assets::AssetPackState::NotDetected)
-                        reason = "Unavailable — OpenShim asset pack not detected";
-                    else if (caps.state == Assets::AssetPackState::Incompatible)
-                        reason = "Unavailable — asset pack version mismatch";
-                    else if (std::strcmp(setting.section, "General") == 0 &&
-                             std::strcmp(setting.key, "ChunkMeshes") == 0)
-                        reason = "Unavailable — chunk payloads missing";
-                    else
-                        reason = "Unavailable — required assets missing";
-                    const UiOptionsPageLayout layout = BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
-                    SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
-                                                      g_ShimSettingsUiStatusDetailLabel,
-                                                      reason,
-                                                      layout.headerTextWidth);
-                    return;
-                }
-            }
-            std::string helpText;
-            if (overValueCell && !IsShimSettingActionRow(setting) && setting.valueCount > 0)
-            {
-                const size_t current = GetShimSettingCurrentIndex(setting);
-                const size_t next = (current + 1) % setting.valueCount;
-                helpText = "Click to change ";
-                helpText += setting.label;
-                helpText += " from ";
-                helpText += setting.valueLabels[current];
-                helpText += " to ";
-                helpText += setting.valueLabels[next];
-                helpText += ".";
-                if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
-                    helpText += " Takes effect after restarting Battlezone.";
-            }
-            else if (setting.description)
-            {
-                helpText = setting.description;
-            }
-            if (!helpText.empty())
-            {
-                // Not a hand-picked width: the hover path used to fit to a flat
-                // 800 px on one line, which cut every description that the
-                // header has room to wrap across two.
-                const UiOptionsPageLayout layout =
-                    BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
-                SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
-                                                  g_ShimSettingsUiStatusDetailLabel,
-                                                  helpText.c_str(),
-                                                  layout.headerTextWidth);
-            }
-        }
-
-        static void OnShimSettingsPageStepClicked(int direction)
-        {
-            if (!g_ShimSettingsPageActive)
-                return;
-
-            const size_t current = g_ShimSettingsUiPageStart;
-            if (direction < 0)
-            {
-                g_ShimSettingsUiPageStart =
-                    current >= kShimSettingsUiVisibleRowCount ? current - kShimSettingsUiVisibleRowCount : 0;
-            }
-            else if (direction > 0)
-            {
-                g_ShimSettingsUiPageStart = current + kShimSettingsUiVisibleRowCount;
-            }
-
-            g_ShimSettingsUiPageStart = ClampShimSettingsUiPageStart(g_ShimSettingsUiPageStart);
-            // A confirmation armed on the page being left must not survive to
-            // fire against a click on whatever lands in that slot next.
-            DisarmShimSettingsAction();
-            RefreshShimSettingsUiControls();
         }
 
         static void StopShimSettingsUpdateTimer()
@@ -3978,13 +3761,19 @@ namespace BZROpenShim
             if (update.generation != g_ShimSettingsUiUpdateGeneration)
             {
                 g_ShimSettingsUiUpdateGeneration = update.generation;
-                if (!update.message.empty())
-                    g_ShimSettingsUiStatusText = update.message;
-                if (g_ShimSettingsPageActive && g_ShimSettingsUiStatusLabel)
-                    RefreshShimSettingsUiControls();
+                if (g_ShimCategoryUi.screen)
+                {
+                    if (!update.message.empty())
+                        g_ShimCategoryUi.status = update.message;
+                    RefreshShimCategoryValues();
+                }
             }
             if (!update.busy)
+            {
                 StopShimSettingsUpdateTimer();
+                if (g_ShimCategoryUi.screen)
+                    RefreshShimCategoryValues();
+            }
         }
 
         static bool EnsureShimSettingsUpdateTimer()
@@ -3996,50 +3785,6 @@ namespace BZROpenShim
             return g_ShimSettingsUiUpdateTimer != 0;
         }
 
-        static void OnShimSettingsUpdateClicked()
-        {
-            if (!g_ShimSettingsPageActive)
-                return;
-
-            BeginOpenShimUpdateCheck();
-            OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
-            if (update.busy && !EnsureShimSettingsUpdateTimer())
-            {
-                CancelOpenShimUpdateCheck(
-                    "Update check failed: Battlezone could not schedule Workshop status checks.");
-                update = GetOpenShimUpdateSnapshot();
-            }
-            g_ShimSettingsUiUpdateGeneration = update.generation;
-            g_ShimSettingsUiStatusText = update.message;
-            RefreshShimSettingsUiControls();
-        }
-
-        // Hide the settings page and hand the host screen back to the binding
-        // UI (when enabled) so a later plain "Input" visit that does not
-        // reconstruct the screen still shows the key-binding page.
-        static void DeactivateShimSettingsPage()
-        {
-            if (!g_ShimSettingsPageActive)
-                return;
-
-            g_ShimSettingsPageActive = false;
-            g_ShimSettingsUiStatusText.clear();
-            SetShimSettingsUiControlsVisible(false);
-
-            void* const hostScreen = g_InputScreenBinding.decorated;
-            if (ShouldEnableInputBindingUiReplacement() && hostScreen)
-            {
-                EnsureInputBindingUiControls(hostScreen);
-                RefreshInputBindingUiControls();
-            }
-        }
-
-        static void OnShimSettingsBackClicked()
-        {
-            DeactivateShimSettingsPage();
-            OnInputBindingBackClicked();
-        }
-
         static void OnShimSettingsMenuClicked()
         {
             const ULONGLONG now = GetTickCount64();
@@ -4049,26 +3794,9 @@ namespace BZROpenShim
                 return;
             }
             g_ShimSettingsNavigationTick = now;
-            g_ShimSettingsUiStatusText.clear();
-            g_ShimSettingsPageRequested = true;
-            g_ShimSettingsPageRequestTick = now;
-            auto* const navigateToInputScreen =
-                reinterpret_cast<void(__cdecl*)()>(g_OptionsParentInputClickThunkAddr);
-            navigateToInputScreen();
-
-            // If the shell keeps a constructed input screen alive, the ctor hook
-            // will not re-fire for this navigation; restyle the live screen now.
-            // Pointer equality is only trustworthy while the dtor hook clears
-            // the binding on destruction: without it, a destroy-then-deferred-
-            // reconstruct navigation leaves the binding matching a freed
-            // screen and this path walks dangling child views (dump 2692).
-            void* const liveInputScreen = ReadOptionsInputSingletonRaw();
-            if (g_OptionsInputDtorHookInstalled &&
-                g_InputScreenBinding.IsLive(liveInputScreen))
-            {
-                g_ShimSettingsPageRequested = false;
-                ActivateShimSettingsPage(liveInputScreen);
-            }
+            void* const optionsScreen = g_ParentScreenBinding.constructed;
+            if (!optionsScreen || !Shell::RequestScreen(optionsScreen, Shell::kOptionsHubScreenId))
+                Log(L"[SETTINGSUI] OpenShim Options: no live Options screen to navigate from\n");
         }
 
         static void EnsureInputBindingUiControls(void* screen)
@@ -4745,23 +4473,10 @@ namespace BZROpenShim
             ResetInputBindingUiVisuals();
             g_InputScreenBinding.BindConstructed(screen);
 
-            const bool requestFresh =
-                g_ShimSettingsPageRequested &&
-                (GetTickCount64() - g_ShimSettingsPageRequestTick) <= kShimSettingsPageRequestTtlMs;
-            const bool settingsMode = requestFresh && ShouldEnableShimSettingsUi();
-            g_ShimSettingsPageRequested = false;
-            if (settingsMode)
-            {
-                ActivateShimSettingsPage(screen);
-                return;
-            }
-
-            g_ShimSettingsPageActive = false;
             if (!ShouldEnableInputBindingUiReplacement())
                 return;
 
             EnsureInputBindingUiControls(screen);
-            SetShimSettingsUiControlsVisible(false);
             RefreshInputBindingUiControls();
             Log(L"[INPUTUI] Constructor hook screen=0x%08X gen=%u rows=%u liveUi=%hs keyRelease=%hs\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
@@ -4782,7 +4497,6 @@ namespace BZROpenShim
             if (!g_InputScreenBinding.Owns(screen))
                 return;
 
-            g_ShimSettingsPageActive = false;
             ResetInputBindingUiVisuals();
             g_InputScreenBinding.Unbind();
             Log(L"[INPUTUI] Input screen destroyed; binding cleared screen=0x%08X gen=%u\n",
@@ -5053,8 +4767,68 @@ namespace BZROpenShim
             }
         }
 
-        // A shorter final row keeps the button inside the frame at 16:9 instead
-        // of clipping off the bottom.
+        // The stock Options column (cUI_OptionsParent ctor 0x007B61A0): four
+        // 422x130 buttons at x 508, y 208 / 386 / 564 / 741, resting on four
+        // slots painted into esc_center.png. With OpenShim's panel art
+        // deployed the column becomes five even slots (OPTIONS_LAYOUT in
+        // mkscreens.py): the panel is swapped for osh_options_center.png and
+        // the four stock buttons are re-placed on its slots before the first
+        // layout pass, with OpenShim Options as the fifth. Without the art the
+        // stock layout is left alone and the button squeezes in underneath.
+        constexpr const char* kOptionsPanelTexture = "osh_options_center.png";
+        constexpr float kOptionsColumnX = 508.0f;
+        constexpr float kOptionsColumnW = 422.0f;
+        constexpr float kOptionsSlotY0 = 180.0f;
+        constexpr float kOptionsSlotH = 120.0f;
+        constexpr float kOptionsSlotPitch = 150.0f;
+        constexpr size_t kOptionsStockButtonCount = 4;
+        // The stock option buttons' caption scale (FUN_007c30e0(1.3f)).
+        constexpr float kOptionsButtonTextScale = 1.3f;
+
+        // Finds the four stock column buttons by their constructor geometry
+        // and moves them onto the five-slot column. All or nothing: a column
+        // that does not look stock is left exactly as built.
+        static bool RespaceStockOptionsColumn(void* overlay)
+        {
+            std::array<float*, kOptionsStockButtonCount> rects = {};
+            size_t found = 0;
+            __try
+            {
+                auto* const bytes = reinterpret_cast<uint8_t*>(overlay);
+                void** const begin = *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
+                void** const end = *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
+                if (!begin || !end || begin > end || (end - begin) >= 64)
+                    return false;
+                for (void** slot = begin; slot != end; ++slot)
+                {
+                    auto* const child = reinterpret_cast<uint8_t*>(*slot);
+                    if (!child || *reinterpret_cast<uintptr_t*>(child) != g_UiButtonVtableAddr)
+                        continue;
+                    auto* const rect = reinterpret_cast<float*>(child + 4);
+                    if (rect[0] != kOptionsColumnX || rect[2] != kOptionsColumnW || rect[3] != 130.0f)
+                        continue;
+                    if (found == kOptionsStockButtonCount)
+                        return false;
+                    rects[found++] = rect;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            if (found != kOptionsStockButtonCount)
+                return false;
+
+            std::sort(rects.begin(), rects.end(),
+                      [](const float* a, const float* b) { return a[1] < b[1]; });
+            for (size_t i = 0; i < kOptionsStockButtonCount; ++i)
+            {
+                rects[i][1] = kOptionsSlotY0 + kOptionsSlotPitch * static_cast<float>(i);
+                rects[i][3] = kOptionsSlotH;
+            }
+            return true;
+        }
+
         static void EnsureShimSettingsMenuButton(void* parentScreen)
         {
             if (!parentScreen || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild ||
@@ -5086,38 +4860,47 @@ namespace BZROpenShim
                 return;
             }
 
+            const bool fiveSlots = ShellScreens::IsTextureDeployed(kOptionsPanelTexture) &&
+                                   g_BzrFn_SetTextureOff && RespaceStockOptionsColumn(buttonParent);
+            if (fiveSlots)
+                g_BzrFn_SetTextureOff(buttonParent, kOptionsPanelTexture);
+            else
+                Log(L"[SETTINGSUI] Options column left stock (%hs); OpenShim button goes underneath\n",
+                    ShellScreens::IsTextureDeployed(kOptionsPanelTexture) ? "column not recognised"
+                                                                          : "panel art not deployed");
+
             void* buttonMem = ::operator new(0x1EC, std::nothrow);
             if (!buttonMem)
                 return;
 
             std::memset(buttonMem, 0, 0x1EC);
-            void* const button = g_BzrFn_ButtonCtor(buttonMem,
-                                                    "OpenShimSettingsMenuButton",
-                                                    // Continue the stock options column with a compact fifth row.
-                                                    // The shorter height keeps it above the lower frame at 16:9.
-                                                    // x/w match the stock Play/Graphic/Audio/Input buttons because
-                                                    // this shares their parent: the layout pass (0x007D14B0) adds
-                                                    // Middle_Overlay's absolute origin on top of these design
-                                                    // coordinates, so 508 lands the column-aligned 1496 at 4K.
-                                                    508.0f,
-                                                    882.0f,
-                                                    422.0f,
-                                                    58.0f,
-                                                    0x20,
-                                                    buttonParent,
-                                                    0,
-                                                    0);
+            // Shares the stock buttons' parent: the layout pass (0x007D14B0)
+            // adds Middle_Overlay's absolute origin on top of these design
+            // coordinates, so the button lines up with the column at any size.
+            const float y = fiveSlots ? kOptionsSlotY0 + kOptionsSlotPitch * kOptionsStockButtonCount : 882.0f;
+            const float h = fiveSlots ? kOptionsSlotH : 58.0f;
+            void* const button = g_BzrFn_ButtonCtor(buttonMem, "OpenShimSettingsMenuButton",
+                                                    kOptionsColumnX, y, kOptionsColumnW, h,
+                                                    0x20, buttonParent, 0, 0);
             if (!button)
                 return;
 
-            if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(button, "optionhv.png");
-            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(button, "optionck.png");
+            // Like the stock buttons: nothing at rest over a painted slot.
+            if (!fiveSlots && g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(button, "optionhv.png");
+            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(button, "optionhv.png");
             if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(button, "optionck.png");
-            SetInputBindingUiButtonTextFitted(button, "OpenShim Options", 390.0f);
-            if (g_BzrFn_SetOnClick)
-                g_BzrFn_SetOnClick(button, reinterpret_cast<void*>(ShimSettingsMenuClick));
-            if (g_BzrFn_SetOnHover)
-                g_BzrFn_SetOnHover(button, reinterpret_cast<void*>(InputBindingUiButtonOnHoverNoop));
+            if (fiveSlots && g_BzrFn_SetButtonLabel)
+            {
+                g_BzrFn_SetButtonLabel(button, "OpenShim Options");
+                if (g_BzrFn_SetButtonTextScale)
+                    g_BzrFn_SetButtonTextScale(button, kOptionsButtonTextScale);
+            }
+            else
+            {
+                SetInputBindingUiButtonTextFitted(button, "OpenShim Options", 390.0f);
+            }
+            g_BzrFn_SetOnClick(button, reinterpret_cast<void*>(ShimSettingsMenuClick));
+            g_BzrFn_SetOnHover(button, reinterpret_cast<void*>(InputBindingUiButtonOnHoverNoop));
             // Append as Middle_Overlay's sixth child, alongside Back and the four
             // stock option buttons. All six are leaf views, so they share the
             // dispatch pass and are tried in list order; Back stays at index 0
@@ -5125,19 +4908,11 @@ namespace BZROpenShim
             g_BzrFn_AddChild(buttonParent, button, 0);
             g_ShimSettingsMenuButton = button;
 
-            const auto* const buttonRect =
-                reinterpret_cast<const float*>(reinterpret_cast<uint8_t*>(button) + 4);
-            void** const parentBegin = *reinterpret_cast<void***>(
-                reinterpret_cast<uint8_t*>(buttonParent) + kUiViewChildBeginOffset);
-            void** const parentEnd = *reinterpret_cast<void***>(
-                reinterpret_cast<uint8_t*>(buttonParent) + kUiViewChildEndOffset);
-            Log(L"[SETTINGSUI] OpenShim button added to options screen=0x%08X parent=0x%08X "
-                L"parentName=%hs parentChildren=%d rect=(%.1f,%.1f,%.1f,%.1f)\n",
+            Log(L"[SETTINGSUI] OpenShim button added to options screen=0x%08X layout=%hs "
+                L"rect=(%.1f,%.1f,%.1f,%.1f)\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parentScreen)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(buttonParent)),
-                ReadUiViewName(buttonParent),
-                static_cast<int>(parentEnd - parentBegin),
-                buttonRect[0], buttonRect[1], buttonRect[2], buttonRect[3]);
+                fiveSlots ? "five-slot" : "stock+compact",
+                kOptionsColumnX, y, kOptionsColumnW, h);
         }
 
         static void OnOptionsParentCtorScaffold(void* screen)
@@ -5800,6 +5575,14 @@ namespace BZROpenShim
 
         EnsureMainScreenCtorHookScaffold();
 
+        // The OpenShim button leads to OpenShim's own screens; a build that
+        // cannot host them gets no button rather than a dead one.
+        if (!RegisterShimOptionsScreens())
+        {
+            Log(L"[SETTINGSUI] OpenShim Options screens unavailable; Options left stock\n");
+            return;
+        }
+
         EnsureOptionsScreenDtorHook(g_OptionsParentDtorAddr,
                                     g_OptionsParentDtorDetour,
                                     reinterpret_cast<void*>(OptionsParentDtorHook),
@@ -5867,12 +5650,6 @@ namespace BZROpenShim
                                                 uint32_t key,
                                                 uint32_t keyCode)
     {
-        // A stock ESC backs out of the settings page without our Back button;
-        // hand the host screen back to the binding UI before the stock handler
-        // navigates away.
-        if (g_ShimSettingsPageActive && key == VK_ESCAPE)
-            DeactivateShimSettingsPage();
-
         if (HandleCapturedInputBindingKey(thisPtr, key, keyCode))
             return true;
 
