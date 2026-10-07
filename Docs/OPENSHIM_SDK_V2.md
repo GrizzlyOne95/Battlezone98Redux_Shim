@@ -255,3 +255,8 @@ listed in [NATIVE_HUD_LAYOUT.md](NATIVE_HUD_LAYOUT.md). Their provider fields
 append after the existing legacy block without changing `OpenShimApiV2` or any
 previous provider offsets. `OpenShimGetNativeHudLayoutCapabilities()` currently
 returns zero: no native render adapter is qualified/enabled in this checkpoint.
+
+## Native craft damage resistance
+
+The appended per-craft damage exports and their lifetime/build contract are in
+[UNIT_DAMAGE.md](UNIT_DAMAGE.md). EXU provides the Lua-facing API.
