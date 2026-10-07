@@ -360,21 +360,16 @@ function Get-CRFlowOpSignature($Event) {
 }
 
 function Test-CRFlowPresentationParity([int]$HostClient = 0, [int[]]$Guests = @(1)) {
-    $hostOps = @(Get-CRFlowEvents $HostClient op | Where-Object { $_.op -in $script:CRFlowReplicatedOps } | ForEach-Object { Get-CRFlowOpSignature $_ })
+    # RemoveObject is left out: the owner's deletion replicates through the
+    # engine (world parity checks it), and a mission may remove its own
+    # objects natively without a presentation event, which logs on the host only.
+    $streamOp = { $_.op -in $script:CRFlowReplicatedOps -and $_.op -ne 'RemoveObject' }
+    $hostOps = @(Get-CRFlowEvents $HostClient op | Where-Object $streamOp | ForEach-Object { Get-CRFlowOpSignature $_ })
     foreach ($g in $Guests) {
-        $guestOps = @(Get-CRFlowEvents $g op | Where-Object { $_.op -in $script:CRFlowReplicatedOps } | ForEach-Object { Get-CRFlowOpSignature $_ })
+        $guestOps = @(Get-CRFlowEvents $g op | Where-Object $streamOp | ForEach-Object { Get-CRFlowOpSignature $_ })
         $first = -1
-        $deadHandles = New-Object System.Collections.ArrayList
         for ($i = 0; $i -lt [math]::Min($hostOps.Count, $guestOps.Count); $i++) {
-            if ($hostOps[$i] -eq $guestOps[$i]) { continue }
-            # The host removes the object as it queues the event, so the handle
-            # is dead before it is sent and arrives as nil. Not a stream fault:
-            # the owner's deletion replicates on its own (world parity checks it).
-            if ($guestOps[$i] -eq 'RemoveObject()' -and $hostOps[$i] -like 'RemoveObject(@*)') { [void]$deadHandles.Add($hostOps[$i]); continue }
-            $first = $i; break
-        }
-        if ($deadHandles.Count) {
-            Add-CRFlowCheck "c$g RemoveObject events carried dead handles ($($deadHandles.Count))" $false @($deadHandles | Select-Object -First 8) -WarnOnly
+            if ($hostOps[$i] -ne $guestOps[$i]) { $first = $i; break }
         }
         $detail = [ordered]@{ hostOps = $hostOps.Count; guestOps = $guestOps.Count }
         if ($first -ge 0) {
