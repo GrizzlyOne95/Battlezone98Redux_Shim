@@ -80,6 +80,7 @@ leaves staging at "Vehicle not selected", and Ready never completes.
 | misn03 | `replication-cases` | 20 isolated stock-Lua replication cases (see [REPLICATION_FINDINGS.md](REPLICATION_FINDINGS.md)) |
 | misn03 | `coop-pda-controls` (with the `coop-comms` override) | CR's co-op PDA by real key presses on both clients: X open/close on the Co-op page, [ ] paging, arrow rows, PDA ping, quick-J terrain/object pings, cooldown, rescue request/replies, film and Esc-menu suppression, Q as a ping-key candidate |
 | misn03 | `coop-respawn` (with the `coop-comms` override) | CR co-op respawns: the guest respawns near the host 700+ m from spawn (both clients agree), players dying together use their own fallback, and the fifth death fails the mission on both clients |
+| misn03 | `coop-text-entry` (with the `coop-comms` override and an EXU build with `IsTextEntryActive`) | Stock text entry vs CR keys: `LockAllies` keeps Y/U from opening the ally box, the EXU focus probe sees the ally box and the chat line, and J/X typed there neither ping nor toggle the PDA (TEXT_ENTRY_STATE.md) |
 | any | `gamekey-names` | Not a test: which real key presses reach the mission `GameKey` callback vs. the raw key state (network games drop many keys) |
 
 Run any scenario with `-Scenario <name>`. The runner looks for
