@@ -6,10 +6,13 @@
 # it owns (mission AI on teams 1 and 5); each client moves only its own craft.
 # At every gate the guest must see the same presentation the host published.
 param([int]$HostClient = 0, [int]$GuestClient = 1,
-      # Virtual key posted to the guest to skip the evacuation film (Space).
+      # Virtual key posted to skip the evacuation film (Space).
       [int]$SkipKey = 0x20,
-      # Seconds to let the outro play on its own before pulling its 90s fallback.
-      [int]$NaturalOutroSeconds = 45)
+      # Who presses skip during the evacuation film: 'guest' or 'host'.
+      [ValidateSet('guest', 'host')][string]$Skipper = 'guest',
+      # Seconds to let the outro play on its own before pulling its 90s fallback
+      # (the authored outro runs about 67 s of game time).
+      [int]$NaturalOutroSeconds = 85)
 
 $H, $G = $HostClient, $GuestClient
 
@@ -97,14 +100,24 @@ Invoke-CRFlowStep 'evacuation film plays on both clients' {
     @{ host = Invoke-CRFlow $H 'return L()'; guest = Invoke-CRFlow $G 'return L()' }
 }
 
-Invoke-CRFlowStep 'guest skips the film; host film continues' {
-    Send-CRFlowKey $G $SkipKey
+# A skip releases only the skipper's own camera: the other player keeps
+# watching until the film ends on its own timer.
+$skipClient, $watchClient = if ($Skipper -eq 'host') { $H, $G } else { $G, $H }
+Invoke-CRFlowStep "$Skipper skips the film; the other client's film continues" {
+    Send-CRFlowKey $skipClient $SkipKey
     Start-Sleep -Milliseconds 300
-    Send-CRFlowKey $G $SkipKey
-    Wait-CRFlow $G 'return L().cameraSkipped and not L().localCameraActive' -TimeoutSeconds 10 | Out-Null
-    $hostCam = Invoke-CRFlow $H 'return { active = L().localCameraActive, over = M.movie_over == true }'
-    if (-not $hostCam.active -and -not $hostCam.over) { throw 'host camera ended without the film finishing' }
-    $hostCam
+    Send-CRFlowKey $skipClient $SkipKey
+    Wait-CRFlow $skipClient 'return L().cameraSkipped and not L().localCameraActive' -TimeoutSeconds 10 | Out-Null
+    $seen = @()
+    foreach ($i in 1..3) {
+        $seen += Invoke-CRFlow $watchClient 'return { active = L().localCameraActive, over = M.movie_over == true }'
+        Start-Sleep -Seconds 2
+    }
+    $early = @($seen | Where-Object { -not $_.active -and -not $_.over })
+    if ($early.Count) { throw "c$watchClient camera ended without the film finishing: $(ConvertTo-Json $seen -Compress)" }
+    $over = Invoke-CRFlow $H 'return M.movie_over == true'
+    if ($over -and $Skipper -eq 'host') { throw 'the host skip ended the shared film early' }
+    @{ watcher = $seen[-1]; skipperStillSkipped = (Invoke-CRFlow $skipClient 'return L().cameraSkipped and not L().localCameraActive') }
 }
 
 Invoke-CRFlowStep 'film ends -> escort objective on guest' {
@@ -113,7 +126,8 @@ Invoke-CRFlowStep 'film ends -> escort objective on guest' {
     'misn0303.otf'
 }
 
-Invoke-CRFlowStep 'guest camera released after the film' {
+Invoke-CRFlowStep 'both cameras released after the film' {
+    Wait-CRFlow $H 'return not L().localCameraActive' -TimeoutSeconds 15 | Out-Null
     Wait-CRFlow $G 'return not L().localCameraActive' -TimeoutSeconds 15
 }
 
