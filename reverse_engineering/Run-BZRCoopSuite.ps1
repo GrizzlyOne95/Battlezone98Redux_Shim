@@ -31,6 +31,8 @@ param(
     ),
     # Run only cases whose text contains this.
     [string]$Only = '',
+    [ValidateRange(2, 4)][int]$Clients = 2,
+    [switch]$StopOnFailure,
     [string]$BZRCoopRoot = 'C:\BZRCoop'
 )
 
@@ -55,9 +57,9 @@ foreach ($case in $Cases) {
     }) -join '; '
     $overrideArg = if ($override) { " -ContentOverride '$override'" } else { '' }
     $tag = (@($parts | Select-Object -Skip 1) -join '-') -replace '[^\w-]', ''
-    $runName = "cr-$mission-$tag-$stamp"
+    $runName = "cr-$mission-$tag-$($Clients)p-$stamp"
     Write-Host "`n[suite] $case -> $runName" -ForegroundColor Cyan
-    $cmd = "& '$PSScriptRoot\Run-BZRCoopMission.ps1' -Mission $mission -Scenario $scenario -RunName '$runName' -BZRCoopRoot '$BZRCoopRoot'$overrideArg -ScenarioArgs @{$argText}; exit `$LASTEXITCODE"
+    $cmd = "& '$PSScriptRoot\Run-BZRCoopMission.ps1' -Mission $mission -Scenario $scenario -Clients $Clients -RunName '$runName' -BZRCoopRoot '$BZRCoopRoot'$overrideArg -ScenarioArgs @{$argText}; exit `$LASTEXITCODE"
     $clock = [Diagnostics.Stopwatch]::StartNew()
     # Output goes to files, not a pipe: the run's server and coordinator inherit
     # its handles and can outlive it, which would hold a pipe open forever.
@@ -73,12 +75,13 @@ foreach ($case in $Cases) {
     $failed = if ($s) { @(@($s.steps | Where-Object status -eq 'fail' | ForEach-Object { "step: $($_.step) -- $($_.detail)" }) + @($s.checks | Where-Object status -eq 'fail' | ForEach-Object { "check: $($_.check)" })) } else { @() }
     $warned = if ($s) { @(@($s.steps | Where-Object status -eq 'warn' | ForEach-Object { $_.step }) + @($s.checks | Where-Object status -eq 'warn' | ForEach-Object { $_.check })) } else { @() }
     [void]$rows.Add([ordered]@{
-        case = $case; run = $runName; verdict = if ($s) { $s.verdict } else { 'NO RUN' }
+        case = $case; clients = $Clients; run = $runName; verdict = if ($s) { $s.verdict } else { 'NO RUN' }
         minutes = [math]::Round($clock.Elapsed.TotalMinutes, 1); exit = $code
         failed = $failed; warned = $warned
     })
     Write-Host "[suite] $case -> $($rows[-1].verdict)" -ForegroundColor $(if ($rows[-1].verdict -eq 'PASS') { 'Green' } else { 'Red' })
     if (-not $s) { Write-Host '[suite] run did not start; stopping the suite.' -ForegroundColor Red; break }
+    if ($StopOnFailure -and $rows[-1].verdict -ne 'PASS') { Write-Host '[suite] stopping at the first failed case.' -ForegroundColor Red; break }
 }
 
 $md = New-Object System.Text.StringBuilder

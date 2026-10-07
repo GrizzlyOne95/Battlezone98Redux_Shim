@@ -1,4 +1,4 @@
-# One-command co-op mission flow test: two real Redux clients on this PC.
+# One-command co-op mission flow test: two to four real Redux clients on this PC.
 #
 #   powershell -ExecutionPolicy Bypass -File reverse_engineering\Run-BZRCoopMission.ps1 -Mission misn03 -Scenario win
 #
@@ -7,8 +7,8 @@
 # 2. Mirrors the chosen Campaign Reimagined build into C:\BZRCoop\stage.
 # 3. Starts a private Battlezone98Redux_DedicatedServer bound to 127.0.0.1.
 # 4. BZRCoopSession.ps1 Prepare + probe install, then Launch (background; it
-#    holds the machine-wide launch lock until both clients exit).
-# 5. BZRCoopLobby.ps1: host creates, guest joins, map pick, Sync Join, launch.
+#    holds the machine-wide launch lock until all clients exit).
+# 5. BZRCoopLobby.ps1: host creates, map/limit pick, guests join, Sync Join, launch.
 # 6. Runs coopflow\scenarios\<Mission>-<Scenario>.ps1 against the live mission.
 # 7. Log-wide checks (presentation parity, Lua errors), writes
 #    flow-summary.md/.json in the run folder, stops clients and server.
@@ -23,13 +23,14 @@ param(
     [string]$ServerRepo = (Join-Path $env:USERPROFILE 'Documents\GIT\Battlezone98Redux_DedicatedServer'),
     [string]$Python = 'python',
     [string]$BZRCoopRoot = 'C:\BZRCoop',
+    [ValidateRange(2, 4)][int]$Clients = 2,
     [string]$RunName = '',
     # OpenShim checkout with a Release|Win32 build for the instances; empty = the install's.
     [string]$OpenShimRepo = '',
     # Host map list row (stock shell, 1280x720). Empty = the known row for $Mission.
     [int]$MapListY = 0,
     [hashtable]$ScenarioArgs = @{},
-    # Folder of files copied over the staged CR content in both test
+    # Folder of files copied over the staged CR content in all test
     # instances (try a content fix, e.g. a .vxt, without touching CR itself).
     [string]$ContentOverride = '',
     # Reuse prepared instances (the probe is still reinstalled).
@@ -44,6 +45,8 @@ param(
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\BZRCoopMission.ps1"
 $script:CRFlowCoopRoot = $BZRCoopRoot
+$clientIndices = @(0..($Clients - 1))
+$guestIndices = @(1..($Clients - 1))
 
 # Rows in the host's "All Maps" list at 1280x720 (12 px pitch, first row 99).
 # The lobby step confirms the pick from the server's gameSettings, so a stale
@@ -75,21 +78,21 @@ if ($Attach) {
     $play = Get-Content -LiteralPath $playFile -Raw | ConvertFrom-Json
     if ($play.mission -ne $Mission) { throw "The play session is running $($play.mission), not $Mission." }
     $s = Get-CRFlowSession
-    if (@($s.clients | Where-Object { Get-Process -Id $_.pid -ErrorAction SilentlyContinue }).Count -lt 2) { throw 'The play session clients are not both running.' }
+    if (@($s.clients).Count -ne $Clients -or @($s.clients | Where-Object { Get-Process -Id $_.pid -ErrorAction SilentlyContinue }).Count -ne $Clients) { throw "The play session must have $Clients running clients; pass its count with -Clients." }
     $runDir = (New-Item -ItemType Directory -Force -Path (Join-Path $play.runDir $RunName)).FullName
     Write-Host "[run] attached to $($play.run): $RunName -> $runDir"
     # Events count from the start of each client's log, i.e. this mission load.
-    Set-CRFlowLogMark @(0, 1) -FromStart
+    Set-CRFlowLogMark $clientIndices -FromStart
     Start-CRFlowRun -RunDir $runDir -Mission $Mission -Scenario ([IO.Path]::GetFileNameWithoutExtension($scenarioPath))
     $outcome = ''
-    try { . $scenarioPath @ScenarioArgs } catch {
+    try { Test-CRFlowRoster -ExpectedClients $Clients; . $scenarioPath @ScenarioArgs } catch {
         $outcome = "Stopped early: $($_.Exception.Message)"
         Write-Host "[run] $outcome" -ForegroundColor Red
     }
     Start-Sleep -Seconds 3
     # A scenario that ends the session unevenly (host leaves) sets this.
-    if (-not $script:CRFlowSkipParity) { Test-CRFlowPresentationParity 0 @(1) }
-    Test-CRFlowLogErrors @(0, 1)
+    if (-not $script:CRFlowSkipParity) { Test-CRFlowPresentationParity 0 $guestIndices }
+    Test-CRFlowLogErrors $clientIndices
     $summary = Complete-CRFlowRun -Outcome $outcome
     Write-Host "[run] session left up; stop with BZRCoopPlay.ps1 -Stop"
     if ($summary.verdict -eq 'PASS') { exit 0 }
@@ -125,6 +128,7 @@ if ($ContentOverride -and -not (Test-Path -LiteralPath $ContentOverride -PathTyp
 $server = $null
 $launcher = $null
 $summary = $null
+$flowFinished = $false
 Write-Host "[run] $RunName -> $runDir"
 try {
     # ------------------------------------------------------------ stage --
@@ -137,6 +141,12 @@ try {
     $serverLog = Join-Path $runDir 'server.log'
     $serverArgs = @('server.py', '--ws-host', '127.0.0.1', '--udp-host', '127.0.0.1', '--relay-host', '127.0.0.1',
                     '--health-host', '127.0.0.1', '--state-file', (Join-Path $runDir 'server-state.json'), '--log-level', 'DEBUG')
+    # A shared relay destination cannot distinguish a sender's multiple peers.
+    # Private loopback runs use one negotiated UDP destination per peer pair.
+    if ($Clients -gt 2) {
+        $serverArgs += '--relay-pair-ports'
+        $serverArgs += @('--relay-trace', (Join-Path $runDir 'relay-trace.jsonl'))
+    }
     $server = Start-Process -FilePath $Python -ArgumentList $serverArgs -WorkingDirectory $ServerRepo -WindowStyle Hidden -PassThru `
         -RedirectStandardError $serverLog -RedirectStandardOutput (Join-Path $runDir 'server.out.log')
     $deadline = (Get-Date).AddSeconds(20)
@@ -150,12 +160,13 @@ try {
 
     # ---------------------------------------------- prepare + probe --
     if (-not $SkipPrepare) {
-        $prep = @('-Action', 'Prepare', '-CampaignStage', $stage, '-BZRCoopRoot', $BZRCoopRoot)
+        $prep = @('-Action', 'Prepare', '-CampaignStage', $stage, '-BZRCoopRoot', $BZRCoopRoot, '-Clients', "$Clients")
         if ($OpenShimRepo) { $prep += @('-OpenShimRepo', $OpenShimRepo) }
         Invoke-Child 'BZRCoopSession.ps1' $prep
     }
-    foreach ($i in 0, 1) {
+    foreach ($i in $clientIndices) {
         $inst = Join-Path $BZRCoopRoot ("instances\Instance{0}\Battlezone 98 Redux" -f $i)
+        if (-not (Test-Path -LiteralPath (Join-Path $inst 'battlezone98redux.exe'))) { throw "Instance $i is not prepared; run without -SkipPrepare." }
         robocopy $stage (Join-Path $inst "mods\$($script:CRFlowModId)") /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
         if ($LASTEXITCODE -ge 8) { throw "robocopy stage -> instance $i failed ($LASTEXITCODE)" }
         if ($ContentOverride) {
@@ -167,23 +178,46 @@ try {
         Write-Host "[run] probe installed: $($p.Script)"
     }
 
+    # Preserve the exact inputs even when the relay or generated override has
+    # not been committed yet. The session manifest records native DLL hashes.
+    $inputs = [ordered]@{
+        clients = $Clients
+        harnessCommit = (git -C (Split-Path $PSScriptRoot) rev-parse HEAD)
+        harnessFiles = @(@('Run-BZRCoopMission.ps1', 'BZRCoopMission.ps1', 'BZRCoopLobby.ps1', 'BZRCoopSession.ps1') | ForEach-Object {
+            @{ name = $_; sha256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $_)).Hash }
+        })
+        scenario = $scenarioPath
+        scenarioSha256 = (Get-FileHash -LiteralPath $scenarioPath).Hash
+        scenarioArgs = $ScenarioArgs
+        serverCommit = (git -C $ServerRepo rev-parse HEAD)
+        serverSha256 = (Get-FileHash -LiteralPath (Join-Path $ServerRepo 'server.py')).Hash
+        nativeHealthAnalyzerSha256 = if ($Clients -gt 2) { (Get-FileHash -LiteralPath (Join-Path $ServerRepo 'native_network_health.py')).Hash } else { $null }
+        relayPairPorts = ($Clients -gt 2)
+        campaignContent = "$CampaignContent ($contentCommit)"
+        contentOverride = $ContentOverride
+        overrideFiles = @(if ($ContentOverride) { Get-ChildItem -LiteralPath $ContentOverride -File | Sort-Object Name | ForEach-Object {
+            @{ name = $_.Name; sha256 = (Get-FileHash -LiteralPath $_.FullName).Hash }
+        } })
+    }
+    $inputs | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $runDir 'flow-inputs.json')
+
     # ----------------------------------------------------------- launch --
-    $launchCmd = "& '$PSScriptRoot\BZRCoopSession.ps1' -Action Launch -BZRCoopRoot '$BZRCoopRoot' -RunName '$RunName' -GameArgs '/nointro','/norawinput'"
+    $launchCmd = "& '$PSScriptRoot\BZRCoopSession.ps1' -Action Launch -Clients $Clients -BZRCoopRoot '$BZRCoopRoot' -RunName '$RunName' -GameArgs '/nointro','/norawinput'"
     Remove-Item Env:BZR_LAUNCH_LOCK_HELD -ErrorAction SilentlyContinue
     $launcher = Start-Process -FilePath $PowerShellExe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $launchCmd) `
         -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runDir 'coordinator.log') -RedirectStandardError (Join-Path $runDir 'coordinator.err.log')
-    $deadline = (Get-Date).AddMinutes(6)
+    $deadline = (Get-Date).AddSeconds([math]::Max(360, $Clients * 150))
     while ($true) {
         Start-Sleep -Seconds 2
         $s = try { Get-CRFlowSession } catch { $null }
-        if ($s -and @($s.clients | Where-Object authenticatedAs).Count -ge 2) { break }
+        if ($s -and @($s.clients | Where-Object authenticatedAs).Count -eq $Clients) { break }
         if ($launcher.HasExited) { throw "client launch failed: $((Get-Content (Join-Path $runDir 'coordinator.err.log') -Raw), (Get-Content (Join-Path $runDir 'coordinator.log') -Tail 5) -join ' ')" }
-        if ((Get-Date) -gt $deadline) { throw 'clients did not both reach the lobby in 6 minutes' }
+        if ((Get-Date) -gt $deadline) { throw "$Clients clients did not all reach the lobby before the launch deadline" }
     }
-    Write-Host "[run] both clients authenticated"
+    Write-Host "[run] all $Clients clients authenticated"
 
     # ---------------------------------------------------- lobby + flow --
-    Set-CRFlowLogMark @(0, 1)
+    Set-CRFlowLogMark $clientIndices
     Start-CRFlowRun -RunDir $runDir -Mission $Mission -Scenario ([IO.Path]::GetFileNameWithoutExtension($scenarioPath))
     $outcome = ''
     try {
@@ -192,6 +226,7 @@ try {
                 '-MapListY', "$MapListY", '-MapBzn', "$Mission.bzn", '-SyncJoin', '-Launch')
             "$Mission.bzn"
         } | Out-Null
+        Test-CRFlowRoster -ExpectedClients $Clients
         # Dot-sourced: scenarios share this script scope with the library state.
         . $scenarioPath @ScenarioArgs
     } catch {
@@ -200,11 +235,9 @@ try {
     }
     Start-Sleep -Seconds 3
     # A scenario that ends the session unevenly (host leaves) sets this.
-    if (-not $script:CRFlowSkipParity) { Test-CRFlowPresentationParity 0 @(1) }
-    Test-CRFlowLogErrors @(0, 1)
-    $summary = Complete-CRFlowRun -Outcome $outcome
-    $summary | Add-Member -NotePropertyName campaignContent -NotePropertyValue "$CampaignContent ($contentCommit)"
-    if ($ContentOverride) { $summary | Add-Member -NotePropertyName contentOverride -NotePropertyValue $ContentOverride }
+    if (-not $script:CRFlowSkipParity) { Test-CRFlowPresentationParity 0 $guestIndices }
+    Test-CRFlowLogErrors $clientIndices
+    $flowFinished = $true
 } finally {
     if ($KeepRunning) {
         if ($server) {
@@ -218,6 +251,22 @@ try {
         }
         if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
     }
+}
+if ($flowFinished) {
+    if ($Clients -gt 2 -and -not $KeepRunning) {
+        # WM_CLOSE has archived complete native logs. Forwarding alone cannot
+        # detect the game's sustained rejection of newer position/ping data.
+        $healthPath = Join-Path $runDir 'native-network-health.json'
+        try {
+            & $Python (Join-Path $ServerRepo 'native_network_health.py') --run-dir $runDir --clients $Clients --json-out $healthPath | Out-Host
+            $healthExit = $LASTEXITCODE
+            $health = Get-Content -LiteralPath $healthPath -Raw | ConvertFrom-Json
+            Add-CRFlowCheck 'native peers have no sustained post-loading sequence rejection' ($healthExit -eq 0 -and $health.status -eq 'pass') @{ status = $health.status; report = $healthPath }
+        } catch {
+            Add-CRFlowCheck 'native peers have no sustained post-loading sequence rejection' $false $_.Exception.Message
+        }
+    }
+    $summary = Complete-CRFlowRun -Outcome $outcome -Clients $clientIndices
 }
 if ($summary -and $summary.verdict -eq 'PASS') { exit 0 }
 exit 1

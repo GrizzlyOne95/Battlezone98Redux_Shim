@@ -3,9 +3,11 @@ param([int]$HostClient = 0, [int]$GuestClient = 1,
       [ValidateSet('guest','host','none')][string]$Skipper = 'guest',
       [switch]$FocusedSkip)
 $H, $G = $HostClient, $GuestClient
+$C = @(Get-CRFlowClientIndices)
+$guests = @($C | Where-Object { $_ -ne $H })
 
 Invoke-CRFlowStep 'probes, readiness and campaign authority' {
-    foreach ($client in $H, $G) {
+    foreach ($client in $C) {
         Wait-CRFlowEvent $client attach -TimeoutSeconds 120 | Out-Null
         Wait-CRFlow $client 'return role().ready' -TimeoutSeconds 90 | Out-Null
     }
@@ -17,7 +19,7 @@ Invoke-CRFlowStep 'probes, readiness and campaign authority' {
 }
 
 Invoke-CRFlowStep 'shared opening objective; one authored Montana and no guest AI execution' {
-    Wait-CRFlowOp $G AddObjective 'misn0501.otf' -TimeoutSeconds 25 | Out-Null
+    foreach ($client in $guests) { Wait-CRFlowOp $client AddObjective 'misn0501.otf' -TimeoutSeconds 25 | Out-Null }
     $state = Invoke-CRFlow $H @'
 local mines, humanRecyclers = 0, 0
 for h in AllObjects() do
@@ -27,39 +29,50 @@ for h in AllObjects() do
         if GetTeamNum(h) >= 1 and GetTeamNum(h) <= 4 and IsOdf(h, "avrec5") then humanRecyclers = humanRecyclers + 1 end
     end
 end
-return { mines = mines, humanRecyclers = humanRecyclers, enemyTeam = GetTeamNum(M.svrec), mineTeam = 6 }
+local spread = 0
+local leader = CRCoop.GetPlayers()[role().playerId].handle
+for _, player in pairs(CRCoop.GetPlayers()) do spread = math.max(spread, GetDistance(leader, player.handle)) end
+return { mines = mines, humanRecyclers = humanRecyclers, enemyTeam = GetTeamNum(M.svrec), mineTeam = 6, spawnSpread = spread }
 '@
     if ($state.enemyTeam -ne 5 -or $state.humanRecyclers -ne 1 -or $state.mines -ne 23) { throw "native team/recycler/mine setup incorrect: $(ConvertTo-Json $state -Compress)" }
-    $guestStarted = Invoke-CRFlow $G 'return M.game_start'
-    if ($guestStarted) { throw 'guest ran authoritative mission startup' }
+    if ($state.spawnSpread -gt 100) { throw "players did not share the authored start: spread $($state.spawnSpread)m" }
+    foreach ($client in $guests) {
+        if (Invoke-CRFlow $client 'return M.game_start') { throw "guest c$client ran authoritative mission startup" }
+    }
+    foreach ($client in $C) {
+        $resources = Invoke-CRFlow $client 'local team = role().team; local diff = require("DiffUtils"); return { team = team, scrap = GetScrap(team), pilots = GetPilot(team), maxScrap = GetMaxScrap(team), maxPilots = GetMaxPilot(team), expectedScrap = diff.ScaleRes(40), expectedPilots = diff.ScaleRes(10) }'
+        if ($resources.scrap -ne $resources.expectedScrap -or $resources.pilots -ne $resources.expectedPilots) { throw "c$client starting resources incorrect: $(ConvertTo-Json $resources -Compress)" }
+        $resources
+    }
     $state
 }
 
 Invoke-CRFlowStep 'protect mission objectives and players (test assist)' {
     Invoke-CRFlow $H "every('protect', 0.5, function() heal(M.avrec); heal(M.lemnos) end); return true" | Out-Null
-    foreach ($client in $H, $G) { Invoke-CRFlow $client "every('selfheal', 0.5, function() heal(me()) end); return true" | Out-Null }
+    foreach ($client in $C) { Invoke-CRFlow $client "every('selfheal', 0.5, function() heal(me()) end); return true" | Out-Null }
     'owner-local heal only'
 }
 
-Invoke-CRFlowStep 'guest discovers Lemnos; recon film reaches both clients' {
+Invoke-CRFlowStep "c$G discovers Lemnos; recon film reaches the shared mission" {
     Invoke-CRFlow $G 'return tp(M.lemnos, 120)' | Out-Null
     Wait-CRFlow $H 'return M.reconfactory and L().localCameraActive' -TimeoutSeconds 20 | Out-Null
     Wait-CRFlow $G 'return L().localCameraActive' -TimeoutSeconds 10 | Out-Null
+    foreach ($client in $C) { Wait-CRFlowOp $client CameraReady -TimeoutSeconds 8 | Out-Null }
     @{ host = Invoke-CRFlow $H 'return L()'; guest = Invoke-CRFlow $G 'return L()' }
 }
 
 Invoke-CRFlowStep 'recon film ends; all cameras released' {
     Wait-CRFlow $H 'return M.lemcin2' -TimeoutSeconds 12 | Out-Null
-    foreach ($client in $H, $G) { Wait-CRFlow $client 'return not L().localCameraActive' -TimeoutSeconds 8 | Out-Null }
-    'both released'
+    foreach ($client in $C) { Wait-CRFlow $client 'return not L().localCameraActive' -TimeoutSeconds 8 | Out-Null }
+    'all released'
 }
 
 Invoke-CRFlowStep 'factory identified; defense orders reach guest' {
     Invoke-CRFlow $H 'M.start = GetTime() - 1; return true' | Out-Null
-    Wait-CRFlowOp $G SetObjectiveName 'Lemnos Factory' -TimeoutSeconds 20 | Out-Null
+    foreach ($client in $guests) { Wait-CRFlowOp $client SetObjectiveName 'Lemnos Factory' -TimeoutSeconds 20 | Out-Null }
     Invoke-CRFlow $H 'M.readtime = GetTime() - 1; return true' | Out-Null
     Wait-CRFlow $H 'return M.neworders' -TimeoutSeconds 10 | Out-Null
-    Wait-CRFlowOp $G AddObjective 'misn0502.otf' -TimeoutSeconds 20 | Out-Null
+    foreach ($client in $guests) { Wait-CRFlowOp $client AddObjective 'misn0502.otf' -TimeoutSeconds 20 | Out-Null }
     'shared identification and defense objectives'
 }
 
@@ -80,7 +93,7 @@ Invoke-CRFlowStep 'clear deployment; final Lemnos assault spawns once' {
 Invoke-CRFlowStep 'all four reinforcement waves; shared severe weather' {
     Invoke-CRFlow $H 'M.aw1t = GetTime() - 1; M.aw2t = M.aw1t; M.aw3t = M.aw1t; M.aw4t = M.aw1t; return true' | Out-Null
     Wait-CRFlow $H 'return M.aw1sent and M.aw2sent and M.aw3sent and M.aw4sent and M.weatherSetPiece' -TimeoutSeconds 20 | Out-Null
-    Wait-CRFlow $G 'return require("CRMarsWeather").GetTargetLevel() >= 4' -TimeoutSeconds 20 | Out-Null
+    foreach ($client in $guests) { Wait-CRFlow $client 'return require("CRMarsWeather").GetTargetLevel() >= 4' -TimeoutSeconds 20 | Out-Null }
     'reinforcements and weather cues delivered'
 }
 
@@ -90,35 +103,44 @@ Invoke-CRFlowStep 'destroy CCA recycler; a surviving scripted attacker still blo
 }
 
 Invoke-CRFlowStep 'all victory-gating attackers cleared; friendly fleet on reserved team 7' {
+    # Check alliances before the ten-second film starts. Keep input and peer
+    # assertions in this step so captures cannot consume the skip window.
+    foreach ($client in $C) {
+        if (-not (Invoke-CRFlow $client 'local team = role().team; return IsTeamAllied(team, 7) and IsTeamAllied(7, team)')) { throw "support fleet is not allied with c$client in both directions" }
+    }
     Invoke-CRFlow $H 'for _, h in ipairs(M.victoryEnemies) do kill(h) end; return true' | Out-Null
     Wait-CRFlow $H 'return M.missionwon and M.endseq_started and #M.endFleet == 7' -TimeoutSeconds 15 | Out-Null
     $fleet = Invoke-CRFlow $H 'return { count = #M.endFleet, team = GetTeamNum(M.endFleet[1]) }'
     if ($fleet.team -ne 7) { throw 'friendly fleet collides with a human or mine team' }
-    Wait-CRFlow $G 'return L().localCameraActive' -TimeoutSeconds 12 | Out-Null
-    $fleet
-}
-
-if ($Skipper -ne 'none') {
-    $skipClient, $watchClient = if ($Skipper -eq 'host') { $H, $G } else { $G, $H }
-    Invoke-CRFlowStep "$Skipper skips locally; shared closing film remains timed" {
+    foreach ($client in $guests) { Wait-CRFlow $client 'return L().localCameraActive' -TimeoutSeconds 12 | Out-Null }
+    if ($Skipper -ne 'none') {
+        $skipClient = if ($Skipper -eq 'host') { $H } else { $G }
         # The recon film is only four seconds; verify skip during the ten-second
         # closing film. -FocusedSkip optionally tests real desktop input.
+        $before = Invoke-CRFlow $H 'return { remaining = M.endseq_cutscene_end - GetTime(), done = M.endseq_cutscene_done }'
+        if ($before.done -or $before.remaining -lt 3) { throw "closing film delivered too late for skip check: $(ConvertTo-Json $before -Compress)" }
         Send-CRFlowKey $skipClient 0x20 -Focused:$FocusedSkip -WithVk -HoldMs 400
         Start-Sleep -Milliseconds 300
         Send-CRFlowKey $skipClient 0x20 -Focused:$FocusedSkip -WithVk -HoldMs 400
         Wait-CRFlow $skipClient 'return L().cameraSkipped and not L().localCameraActive' -TimeoutSeconds 5 | Out-Null
         $filming = Invoke-CRFlow $H 'return not M.endseq_cutscene_done'
-        $watching = Invoke-CRFlow $watchClient 'return L().localCameraActive'
-        if (-not $filming -or -not $watching) { throw 'shared closing film ended on the local skip' }
-        @{ watcherActive = $watching; hostFilming = $filming }
+        $watching = @()
+        foreach ($client in ($C | Where-Object { $_ -ne $skipClient })) {
+            $active = Invoke-CRFlow $client 'return L().localCameraActive'
+            if (-not $filming -or -not $active) { throw "shared closing film ended on c$client after c$skipClient skipped" }
+            $watching += @{ client = $client; active = $active }
+        }
+        @{ watchers = $watching; hostFilming = $filming; skipper = $skipClient; remainingBeforeSkip = $before.remaining }
     }
+    $fleet
 }
 
-Invoke-CRFlowStep 'closing film releases; commander reveal and win reach both' {
+Invoke-CRFlowStep 'closing film releases; commander reveal and win reach everyone' {
     Wait-CRFlow $H 'return M.endseq_cutscene_done' -TimeoutSeconds 20 | Out-Null
-    Wait-CRFlowOp $G SetObjectiveName 'Commander Eldritch' -TimeoutSeconds 30 | Out-Null
+    foreach ($client in $guests) { Wait-CRFlowOp $client SetObjectiveName 'Commander Eldritch' -TimeoutSeconds 30 | Out-Null }
     Wait-CRFlowOp $H SucceedMission 'misn05w1.des' -TimeoutSeconds 30 | Out-Null
-    Wait-CRFlowOp $G SucceedMission 'misn05w1.des' -TimeoutSeconds 20 | Out-Null
-    'misn05w1.des on both clients'
+    foreach ($client in $guests) { Wait-CRFlowOp $client SucceedMission 'misn05w1.des' -TimeoutSeconds 20 | Out-Null }
+    foreach ($client in $C) { Wait-CRFlow $client 'return not L().localCameraActive' -TimeoutSeconds 5 | Out-Null }
+    "misn05w1.des on all $($C.Count) clients"
 }
-Test-CRFlowResultParity -Expect SucceedMission -Debrief 'misn05w1.des' -Clients @($H, $G)
+Test-CRFlowResultParity -Expect SucceedMission -Debrief 'misn05w1.des' -Clients $C

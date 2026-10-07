@@ -1,7 +1,7 @@
 # In-mission co-op flow testing for BZRCoopSession clients (dot-source it).
 #
-# BZRCoopSession.ps1 gets two real clients onto one PC and BZRCoopLobby.ps1
-# launches a map on both. This library takes over once the mission loads:
+# BZRCoopSession.ps1 gets two to four real clients onto one PC and BZRCoopLobby.ps1
+# launches a map on all of them. This library takes over once the mission loads:
 #
 #   * Install-CRFlowProbe puts coopflow\CRFlowProbe.lua into an instance's copy
 #     of Campaign Reimagined and appends an Attach() stub to the mission script.
@@ -12,7 +12,7 @@
 #     Wait-CRFlow polls a Lua condition until it is true.
 #   * Update-CRFlowEvents / Wait-CRFlowEvent read the probe's "[CRFLOW] {json} #END"
 #     lines from each client's BZLogger (flags, presentation ops, snapshots).
-#   * Invoke-CRFlowStep records a named step (JSONL + screenshots of both
+#   * Invoke-CRFlowStep records a named step (JSONL + screenshots of all
 #     clients) and Test-CRFlow* add host/guest parity checks to the report.
 #
 # Scenarios (coopflow\scenarios\*.ps1) are plain PowerShell using these
@@ -114,13 +114,45 @@ function Install-CRFlowProbe {
 function Get-CRFlowSession {
     $path = Join-Path $script:CRFlowCoopRoot 'session.json'
     if (-not (Test-Path -LiteralPath $path)) { throw "No BZRCoop session ($path)" }
-    Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    $deadline = (Get-Date).AddMilliseconds(500)
+    while ($true) {
+        try { return ((Read-CRFlowShared $path).Text | ConvertFrom-Json) }
+        catch [IO.IOException] {
+            if ((Get-Date) -ge $deadline) { throw }
+            Start-Sleep -Milliseconds 10
+        }
+    }
 }
 
 function Get-CRFlowClient([int]$Index) {
     $c = (Get-CRFlowSession).clients | Where-Object index -eq $Index
     if (-not $c) { throw "No client $Index in the session" }
     $c
+}
+
+function Get-CRFlowClientIndices {
+    @((Get-CRFlowSession).clients | Sort-Object index | ForEach-Object { [int]$_.index })
+}
+
+function Test-CRFlowRoster([int]$ExpectedClients = 2) {
+    Invoke-CRFlowStep "$ExpectedClients distinct human teams; complete registry and alliances on every client" {
+        $indices = @(Get-CRFlowClientIndices)
+        if ($indices.Count -ne $ExpectedClients) { throw "Expected $ExpectedClients clients, found $($indices.Count)" }
+        $states = @()
+        foreach ($client in $indices) {
+            Wait-CRFlowEvent $client attach -TimeoutSeconds 120 | Out-Null
+            $state = Wait-CRFlow $client "return role().ready and M.coopMissionStarted and #players() == $ExpectedClients and { role = role(), players = players() }" -TimeoutSeconds 120
+            if ($state.role.team -ne ($client + 1) -or [bool]$state.role.authority -ne ($client -eq 0) -or $state.role.lateJoiners) { throw "client $client has incorrect role: $(ConvertTo-Json $state -Compress -Depth 5)" }
+            $teams = @($state.players | ForEach-Object { $_.team } | Sort-Object -Unique)
+            if (($teams -join ',') -ne (@(1..$ExpectedClients) -join ',') -or @($state.players | Where-Object { -not $_.handle.valid -or $_.handle.team -ne $_.team }).Count) { throw "client $client has an incomplete native player registry" }
+            $owners = @($state.players | Where-Object { $_.handle.local })
+            if ($owners.Count -ne 1 -or $owners[0].team -ne $state.role.team) { throw "client $client has incorrect human craft ownership" }
+            $allied = Invoke-CRFlow $client "for a = 1, $ExpectedClients do for b = 1, $ExpectedClients do if a ~= b and not IsTeamAllied(a, b) then return false end end end; return true"
+            if (-not $allied) { throw "client $client has a missing directional human alliance" }
+            $states += @{ client = $client; role = $state.role; players = $state.players }
+        }
+        $states
+    } | Out-Null
 }
 
 # Throws as soon as any session client has exited, so a crash fails the run
@@ -143,7 +175,7 @@ function Get-CRFlowLogPath($Client) {
 }
 
 function Read-CRFlowShared([string]$Path, [long]$Offset = 0) {
-    $fs = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+    $fs = [IO.File]::Open($Path, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
     try {
         if ($Offset -gt $fs.Length) { $Offset = 0 }
         $null = $fs.Seek($Offset, 'Begin')
@@ -365,7 +397,8 @@ function Get-CRFlowOpSignature($Event) {
     $Event.op + '(' + ($parts -join ',') + ')'
 }
 
-function Test-CRFlowPresentationParity([int]$HostClient = 0, [int[]]$Guests = @(1)) {
+function Test-CRFlowPresentationParity([int]$HostClient = 0, [int[]]$Guests) {
+    if (-not $PSBoundParameters.ContainsKey('Guests')) { $Guests = @(Get-CRFlowClientIndices | Where-Object { $_ -ne $HostClient }) }
     # RemoveObject is left out: the owner's deletion replicates through the
     # engine (world parity checks it), and a mission may remove its own
     # objects natively without a presentation event, which logs on the host only.
@@ -392,16 +425,18 @@ function Test-CRFlowPresentationParity([int]$HostClient = 0, [int[]]$Guests = @(
     }
 }
 
-function Test-CRFlowResultParity([string]$Expect, [string]$Debrief = '', [int[]]$Clients = @(0, 1)) {
+function Test-CRFlowResultParity([string]$Expect, [string]$Debrief = '', [int[]]$Clients) {
+    if (-not $PSBoundParameters.ContainsKey('Clients')) { $Clients = @(Get-CRFlowClientIndices) }
     foreach ($i in $Clients) {
         $r = @(Get-CRFlowEvents $i op | Where-Object { $_.op -in 'SucceedMission', 'FailMission' })
         $detail = @($r | ForEach-Object { Get-CRFlowOpSignature $_ })
-        $pass = $r.Count -ge 1 -and $r[0].op -eq $Expect -and (-not $Debrief -or @($r[0].args) -contains $Debrief)
+        $pass = $r.Count -eq 1 -and $r[0].op -eq $Expect -and (-not $Debrief -or @($r[0].args) -contains $Debrief)
         Add-CRFlowCheck "c$i result $Expect $Debrief" $pass $detail
     }
 }
 
-function Test-CRFlowTransport([int]$HostClient = 0, [int[]]$Guests = @(1)) {
+function Test-CRFlowTransport([int]$HostClient = 0, [int[]]$Guests) {
+    if (-not $PSBoundParameters.ContainsKey('Guests')) { $Guests = @(Get-CRFlowClientIndices | Where-Object { $_ -ne $HostClient }) }
     $sent = Invoke-CRFlow $HostClient 'return L().events' -TimeoutSeconds 10
     foreach ($g in $Guests) {
         $got = Invoke-CRFlow $g 'return L().receivedEvent' -TimeoutSeconds 10
@@ -411,7 +446,8 @@ function Test-CRFlowTransport([int]$HostClient = 0, [int[]]$Guests = @(1)) {
 
 # Handles stored in M on both peers (Start() resolves BZN labels on each):
 # alive/odf must agree; positions are compared loosely and only warn.
-function Test-CRFlowWorldParity([int]$HostClient = 0, [int[]]$Guests = @(1), [double]$Tolerance = 30) {
+function Test-CRFlowWorldParity([int]$HostClient = 0, [int[]]$Guests, [double]$Tolerance = 30) {
+    if (-not $PSBoundParameters.ContainsKey('Guests')) { $Guests = @(Get-CRFlowClientIndices | Where-Object { $_ -ne $HostClient }) }
     $lua = 'local s = snap(); return s.M and s.M.handles'
     $h = Invoke-CRFlow $HostClient $lua
     if (-not $h) { Add-CRFlowCheck "world state c$HostClient readable" $false 'host returned no M handles'; return }
@@ -438,7 +474,8 @@ function Test-CRFlowWorldParity([int]$HostClient = 0, [int[]]$Guests = @(1), [do
     }
 }
 
-function Test-CRFlowLogErrors([int[]]$Clients = @(0, 1)) {
+function Test-CRFlowLogErrors([int[]]$Clients) {
+    if (-not $PSBoundParameters.ContainsKey('Clients')) { $Clients = @(Get-CRFlowClientIndices) }
     foreach ($i in $Clients) {
         $probeErrors = @(Get-CRFlowEvents $i error | ForEach-Object { "$($_.where) $($_.msg)" })
         $log = Get-CRFlowLogPath (Get-CRFlowClient $i)
@@ -450,6 +487,17 @@ function Test-CRFlowLogErrors([int[]]$Clients = @(0, 1)) {
         # "Fsm error" is the engine's own (e.g. "Camera Stack 0verfow" from an
         # unbalanced CameraFinish); it raises an in-game alert.
         Add-CRFlowCheck "c$i no Lua or engine script errors" ($hits.Count -eq 0) $hits
+        # Subtitle fallback prints a user-visible OGRE failure notice without
+        # raising a Lua error. Include its dedicated diagnostics in the verdict.
+        $overlayHits = @()
+        if ($log) {
+            $overlayLog = Join-Path (Split-Path $log -Parent) 'campaignReimagined_subtitle_overlay_errors.log'
+            if (Test-Path -LiteralPath $overlayLog) {
+                $overlayHits = @(Select-String -LiteralPath $overlayLog -Pattern 'reason=overlay-(unavailable|init-failed|call-exception|call-false|font-bind-failed)' |
+                    Select-Object -Last 10 | ForEach-Object { $_.Line.Trim() })
+            }
+        }
+        Add-CRFlowCheck "c$i subtitle overlay healthy" ($overlayHits.Count -eq 0) $overlayHits
         Add-CRFlowCheck "c$i probe healthy" ($probeErrors.Count -eq 0) $probeErrors -WarnOnly
         # No audio device (e.g. a phone Remote Desktop session without sound):
         # every voice-over counts as finished at once, so films gated on
@@ -460,7 +508,8 @@ function Test-CRFlowLogErrors([int[]]$Clients = @(0, 1)) {
 }
 
 function Complete-CRFlowRun {
-    param([string]$Outcome = '')
+    param([string]$Outcome = '', [int[]]$Clients)
+    if (-not $PSBoundParameters.ContainsKey('Clients')) { $Clients = @(Get-CRFlowClientIndices) }
     $run = $script:CRFlowRun
     $failedSteps = @($run.steps | Where-Object status -eq 'fail').Count
     $failedChecks = @($run.checks | Where-Object status -eq 'fail').Count
@@ -469,6 +518,7 @@ function Complete-CRFlowRun {
     $pass = $failedSteps -eq 0 -and $failedChecks -eq 0 -and $run.steps.Count -gt 0 -and -not $aborted
     $summary = [ordered]@{
         mission = $run.mission; scenario = $run.scenario; started = $run.started
+        clients = @($Clients)
         seconds = [math]::Round($run.clock.Elapsed.TotalSeconds, 1)
         verdict = if ($pass) { 'PASS' } else { 'FAIL' }; outcome = $Outcome
         steps = $run.steps; checks = $run.checks

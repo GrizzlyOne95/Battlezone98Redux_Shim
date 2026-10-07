@@ -12,29 +12,38 @@ param([int]$HostClient = 0, [int]$GuestClient = 1,
       [int]$SurviveSeconds = 15)
 
 $H, $G = $HostClient, $GuestClient
+$C = @(Get-CRFlowClientIndices)
+$guests = @($C | Where-Object { $_ -ne $H })
 $script:CRFlowSkipParity = $true
 
 Invoke-CRFlowStep 'probes attached on both clients' {
     $a = Wait-CRFlowEvent $H attach -TimeoutSeconds 120
-    $b = Wait-CRFlowEvent $G attach -TimeoutSeconds 120
-    if (-not $a.bzfile -or -not $b.bzfile) { throw "bzfile missing (host=$($a.bzfile) guest=$($b.bzfile)); no command channel" }
+    foreach ($client in $C) {
+        $attached = Wait-CRFlowEvent $client attach -TimeoutSeconds 120
+        if (-not $attached.bzfile) { throw "bzfile missing on c$client; no command channel" }
+    }
     @{ mission = $a.mission }
 }
 
 Invoke-CRFlowStep 'roles: host has authority, guest does not' {
     $hr = Wait-CRFlow $H 'local r = role(); return r.playerId ~= nil and r' -TimeoutSeconds 90
-    $gr = Wait-CRFlow $G 'local r = role(); return r.playerId ~= nil and r' -TimeoutSeconds 90
-    if (-not $hr.authority -or $gr.authority) { throw "authority host=$($hr.authority) guest=$($gr.authority)" }
-    @{ hostId = $hr.playerId; guestId = $gr.playerId }
+    if (-not $hr.authority) { throw 'host has no authority' }
+    foreach ($client in $guests) {
+        $gr = Wait-CRFlow $client 'local r = role(); return r.playerId ~= nil and r' -TimeoutSeconds 90
+        if ($gr.authority) { throw "guest c$client has authority" }
+        @{ hostId = $hr.playerId; guestId = $gr.playerId; client = $client }
+    }
 }
 
 Invoke-CRFlowStep 'session ready and mission running on both' {
     Wait-CRFlow $H 'return role().ready and M.coopMissionStarted' -TimeoutSeconds 120 | Out-Null
-    Wait-CRFlow $G 'return role().ready and M.coopMissionStarted' -TimeoutSeconds 60 | Out-Null
+    foreach ($client in $guests) { Wait-CRFlow $client 'return role().ready and M.coopMissionStarted' -TimeoutSeconds 60 | Out-Null }
     Start-Sleep -Seconds $PlaySeconds
-    $guestState = Invoke-CRFlow $G 'return { departed = role().leaderDeparted, result = M.coopResult == true, players = #players() }'
-    if ($guestState.departed -or $guestState.result) { throw "guest already finished before the host left: $(ConvertTo-Json $guestState -Compress)" }
-    $guestState
+    foreach ($client in $guests) {
+        $guestState = Invoke-CRFlow $client 'return { departed = role().leaderDeparted, result = M.coopResult == true, players = #players() }'
+        if ($guestState.departed -or $guestState.result -or $guestState.players -ne $C.Count) { throw "guest c$client already finished or lost the roster before the host left" }
+        $guestState
+    }
 }
 
 $hostPid = (Get-CRFlowClient $H).pid
@@ -46,21 +55,25 @@ Invoke-CRFlowStep 'host closes the game' {
 }
 
 Invoke-CRFlowStep 'guest detects the leader departure' {
-    Wait-CRFlow $G 'return role().leaderDeparted and role()' -TimeoutSeconds 60
+    foreach ($client in $guests) { Wait-CRFlow $client 'return role().leaderDeparted and role()' -TimeoutSeconds 60 }
 }
 
 Invoke-CRFlowStep 'guest fails the mission' {
-    $f = Wait-CRFlowOp $G FailMission -TimeoutSeconds 30
-    @{ at = $f.t; args = $f.args }
+    foreach ($client in $guests) {
+        $f = Wait-CRFlowOp $client FailMission -TimeoutSeconds 30
+        @{ client = $client; at = $f.t; args = $f.args }
+    }
 }
 
 Invoke-CRFlowStep "guest still running ${SurviveSeconds}s later" {
     Start-Sleep -Seconds $SurviveSeconds
-    $gp = (Get-CRFlowClient $G).pid
-    if (-not (Get-Process -Id $gp -ErrorAction SilentlyContinue)) { throw "guest pid $gp exited (crash?)" }
-    $ops = @(Get-CRFlowEvents $G op | Where-Object { $_.op -in 'SucceedMission', 'FailMission' } | ForEach-Object { Get-CRFlowOpSignature $_ })
-    if ($ops.Count -ne 1) { throw "expected exactly one mission result on the guest, got: $($ops -join '; ')" }
-    @{ guestPid = $gp; results = $ops }
+    foreach ($client in $guests) {
+        $gp = (Get-CRFlowClient $client).pid
+        if (-not (Get-Process -Id $gp -ErrorAction SilentlyContinue)) { throw "guest pid $gp exited (crash?)" }
+        $ops = @(Get-CRFlowEvents $client op | Where-Object { $_.op -in 'SucceedMission', 'FailMission' } | ForEach-Object { Get-CRFlowOpSignature $_ })
+        if ($ops.Count -ne 1) { throw "expected exactly one mission result on c$client, got: $($ops -join '; ')" }
+        @{ guestPid = $gp; results = $ops }
+    }
 }
 
-Test-CRFlowResultParity -Expect FailMission -Clients @($G)
+Test-CRFlowResultParity -Expect FailMission -Clients $guests

@@ -22,7 +22,7 @@
 param(
     [ValidateSet('Prepare', 'Launch', 'Stop', 'Status')]
     [string]$Action = 'Status',
-    [int]$Clients = 2,
+    [ValidateRange(1, 16)][int]$Clients = 2,
     [string]$SourceRoot = 'C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux',
     [string]$BZRCoopRoot = 'C:\BZRCoop',
     # Goldberg steam_api.dll (32-bit). Defaults to the copy bundled with Nucleus.
@@ -114,7 +114,11 @@ function Install-OpenShimBuild([string]$Dir) {
 
 function New-BZRCoopInstance {
     param([int]$Index)
-    $dir = Get-InstanceDir $Index
+    $dir = [IO.Path]::GetFullPath((Get-InstanceDir $Index))
+    $safeRoot = [IO.Path]::GetFullPath($InstancesDir).TrimEnd('\') + '\'
+    if (-not $dir.StartsWith($safeRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Instance path is outside $safeRoot"
+    }
     if (Get-Process battlezone98redux -ErrorAction SilentlyContinue |
             Where-Object { $_.Path -and $_.Path.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) }) {
         throw "A client is still running from $dir; stop the session first."
@@ -222,11 +226,42 @@ function Get-ClientLogState([string]$Dir) {
 }
 
 function Write-SessionFile($Session) {
-    $Session | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $SessionFile
+    # Readers poll while clients are added/authenticated. Publish one complete
+    # snapshot and retry briefly if a Windows reader holds the destination.
+    $pending = "$SessionFile.$PID.tmp"
+    try {
+        [IO.File]::WriteAllText($pending, ($Session | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        $deadline = (Get-Date).AddSeconds(5)
+        while ($true) {
+            try {
+                if ([IO.File]::Exists($SessionFile)) { [IO.File]::Replace($pending, $SessionFile, [NullString]::Value) }
+                else { [IO.File]::Move($pending, $SessionFile) }
+                break
+            } catch [IO.IOException] {
+                if ((Get-Date) -ge $deadline) { throw }
+                Start-Sleep -Milliseconds 50
+            }
+        }
+    } finally {
+        if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending -Force }
+    }
 }
 
 function Read-SessionFile {
-    if (Test-Path -LiteralPath $SessionFile) { Get-Content -LiteralPath $SessionFile -Raw | ConvertFrom-Json }
+    $deadline = (Get-Date).AddMilliseconds(500)
+    while ($true) {
+        try {
+            $stream = [IO.File]::Open($SessionFile, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+            $reader = New-Object IO.StreamReader($stream)
+            try { return ($reader.ReadToEnd() | ConvertFrom-Json) } finally { $reader.Dispose() }
+        } catch [IO.IOException] {
+            if ((Get-Date) -ge $deadline) {
+                if (-not (Test-Path -LiteralPath $SessionFile)) { return }
+                throw
+            }
+            Start-Sleep -Milliseconds 10
+        }
+    }
 }
 
 function Start-BZRCoopClients {
@@ -324,7 +359,7 @@ function Stop-BZRCoopClients {
         if (Test-Path -LiteralPath $logs) { Copy-Item -LiteralPath $logs -Destination $dest -Recurse -Force }
     }
     if ($hung.Count) { throw "Clients still running after WM_CLOSE (left for capture): $($hung -join ', ')" }
-    Remove-Item -LiteralPath $SessionFile -Force
+    [IO.File]::Delete($SessionFile) # another orderly stopper may already have removed it
     Write-Host "[BZRCoop] stopped; evidence in $($session.runDir)"
 }
 
