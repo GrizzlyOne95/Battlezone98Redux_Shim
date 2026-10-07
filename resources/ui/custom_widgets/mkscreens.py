@@ -14,7 +14,7 @@ the stock background shows through.
 The box rectangles here are the layout contract with the screen code: keep
 CAREER_LAYOUT in step with the constants in src/patches/career_screen.cpp.
 
-    python mkscreens.py            # writes osh_career_center.png
+    python mkscreens.py            # writes every osh_*_center.png and button skin
     python mkscreens.py --preview  # also writes *_preview.png over black
 """
 import sys
@@ -138,17 +138,167 @@ def career_center():
     return img.resize((W, H), Image.LANCZOS)
 
 
+# Stock option-slot colours, sampled from Options/optionhv.png, optionck.png
+# and the painted slots in Options/esc_center.png.
+SLOT_RIM = (0, 127, 0, 255)
+SLOT_SHADE = (0, 43, 0, 255)
+SLOT_SPARK = (96, 255, 96, 255)
+SLOT_CUT = (0, 119, 0, 255)
+SLOT_HOVER = (0, 84, 0, 255)
+SLOT_PRESS = (0, 127, 0, 255)
+CONNECT = (0, 23, 2, 255)
+
+
+def slot(d, x, y, w, h, fill=(0, 0, 0, 255), mark=None):
+    """An option slot after the stock ones: a plate with a bright rim along
+    the top and right, a shaded rim along the left and bottom, a lit triangle
+    in the top-left corner and a cut corner at the bottom right. Painted into
+    a panel it is the resting state; the button's hover and press textures
+    are the same slot with a filled body, drawn by slot_texture."""
+    cut = max(8, min(40, h * 0.32))
+    tri = max(10, min(56, h * 0.42))
+    body = [(x, y), (x + w, y), (x + w, y + h - cut), (x + w - cut, y + h), (x, y + h)]
+    poly(d, body, fill=fill)
+    d.line([(s(x), s(y + 1)), (s(x + w), s(y + 1))], fill=SLOT_RIM, width=s(2))
+    d.line([(s(x + w - 1), s(y)), (s(x + w - 1), s(y + h - cut))], fill=SLOT_RIM, width=s(2))
+    d.line([(s(x + 1), s(y)), (s(x + 1), s(y + h))], fill=SLOT_SHADE, width=s(3))
+    d.line([(s(x), s(y + h - 1)), (s(x + w - cut), s(y + h - 1))], fill=SLOT_SHADE, width=s(3))
+    poly(d, [(x + w, y + h - cut), (x + w, y + h), (x + w - cut, y + h)], fill=SLOT_CUT)
+    poly(d, [(x + 2, y + 2), (x + tri, y + 2), (x + 2, y + tri)], fill=mark or SLOT_RIM)
+    poly(d, [(x + 2, y + 2), (x + tri * 0.3, y + 2), (x + 2, y + tri * 0.3)], fill=SLOT_SPARK)
+    # The stock slot's twin bevel strokes beside the lit corner.
+    for k in (0.55, 0.8):
+        d.line([(s(x + tri * k + 4), s(y + 4)), (s(x + 4), s(y + tri * k + 4))],
+               fill=SLOT_RIM, width=s(2))
+
+
+def slot_texture(w, h, fill):
+    img = Image.new('RGBA', (s(w), s(h)), (0, 0, 0, 0))
+    slot(ImageDraw.Draw(img), 0, 0, w, h, fill=fill)
+    return img.resize((w, h), Image.LANCZOS)
+
+
+def connector(d, x, y, w, h):
+    """The dark band with a centre block that links stacked stock slots."""
+    d.rectangle([s(x), s(y), s(x + w), s(y + h)], fill=CONNECT)
+    bw = min(130, w * 0.4)
+    poly(d, chamfer_poly(x + (w - bw) / 2, y + 2, bw, h - 4, 4), fill=FILL, outline=LINE, width=2)
+    for k in range(7):
+        gx = x + w / 2 - 33 + k * 11
+        d.rectangle([s(gx), s(y + 6), s(gx + 3), s(y + h - 6)], fill=ACCENT if k == 3 else LINE)
+
+
+def text_well(d, x, y, w, h):
+    """A recessed strip for a row caption."""
+    d.rectangle([s(x), s(y), s(x + w), s(y + h)], fill=(0, 14, 1, 255))
+    d.rectangle([s(x), s(y + h - 2), s(x + w), s(y + h)], fill=LINE)
+
+
+def new_panel():
+    img = Image.new('RGBA', (s(W), s(H)), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    frame(d)
+    return img, d
+
+
+# Layout contract with src/patches/bzr_options_ui.cpp (OpenShim options).
+# The stock Options screen with a fifth slot: the four stock buttons and the
+# OpenShim button are re-placed on these rects, so the column is even.
+OPTIONS_LAYOUT = {
+    'slot': (508, 180, 422, 120),
+    'pitch': 150,
+    'count': 5,
+}
+HUB_LAYOUT = {
+    'title': (470, 132, 500, 56),
+    'tile': (240, 252, 300, 100),
+    'tile_pitch': (330, 124),
+    'grid': (3, 3),
+    'info': (240, 640, 960, 170),
+}
+CATEGORY_LAYOUT = {
+    'title': (470, 132, 500, 56),
+    'columns': [(228, 236, 476, 438), (736, 236, 476, 438)],
+    'row_top': 14, 'row_pitch': 52, 'row_h': 42, 'rows': 8,
+    'pad': 16, 'value_w': 196,
+    'info': (228, 690, 984, 120),
+}
+VALUE_SIZE = (CATEGORY_LAYOUT['value_w'], CATEGORY_LAYOUT['row_h'])
+TILE_SIZE = HUB_LAYOUT['tile'][2:]
+
+
+def options_center():
+    img, d = new_panel()
+    x, y0, w, h = OPTIONS_LAYOUT['slot']
+    pitch, n = OPTIONS_LAYOUT['pitch'], OPTIONS_LAYOUT['count']
+    # Connectors from the trace bands to the column, and between slots.
+    connector(d, x + w / 2 - 65, 116, 130, y0 - 116)
+    for k in range(n):
+        y = y0 + k * pitch
+        if k:
+            connector(d, x, y - (pitch - h), w, pitch - h)
+        slot(d, x, y, w, h)
+    last = y0 + (n - 1) * pitch + h
+    connector(d, x + w / 2 - 65, last, 130, 964 - last)
+    return img.resize((W, H), Image.LANCZOS)
+
+
+def info_box(d, x, y, w, h):
+    c = 14
+    poly(d, chamfer_poly(x, y, w, h, c), fill=BOX, outline=HILITE, width=2)
+    d.rectangle([s(x + 24), s(y + h - 46), s(x + w - 24), s(y + h - 45)], fill=LINE)
+    for nx, ny, dx in ((x + 2, y + h - c - 2, 1), (x + w - 2, y + h - c - 2, -1)):
+        poly(d, [(nx, ny), (nx + dx * 12, ny + 12), (nx, ny + 12)], fill=ACCENT)
+
+
+def hub_center():
+    img, d = new_panel()
+    title_plate(d, *HUB_LAYOUT['title'])
+    tx, ty, tw, th = HUB_LAYOUT['tile']
+    px, py = HUB_LAYOUT['tile_pitch']
+    cols, rows = HUB_LAYOUT['grid']
+    for r in range(rows):
+        for c in range(cols):
+            slot(d, tx + c * px, ty + r * py, tw, th)
+    info_box(d, *HUB_LAYOUT['info'])
+    return img.resize((W, H), Image.LANCZOS)
+
+
+def category_center():
+    img, d = new_panel()
+    title_plate(d, *CATEGORY_LAYOUT['title'])
+    L = CATEGORY_LAYOUT
+    for (bx, by, bw, bh) in L['columns']:
+        poly(d, chamfer_poly(bx, by, bw, bh, 14), fill=BOX, outline=HILITE, width=2)
+        for r in range(L['rows']):
+            y = by + L['row_top'] + r * L['row_pitch']
+            vx = bx + bw - L['pad'] - L['value_w']
+            text_well(d, bx + L['pad'], y, vx - bx - L['pad'] - 10, L['row_h'])
+            slot(d, vx, y, L['value_w'], L['row_h'])
+    info_box(d, *L['info'])
+    return img.resize((W, H), Image.LANCZOS)
+
+
 def main():
-    out = HERE / 'osh_career_center.png'
-    img = career_center()
-    img.save(out, optimize=True)
-    print('wrote', out.name, img.size)
-    if '--preview' in sys.argv:
-        bg = Image.new('RGBA', img.size, (0, 0, 0, 255))
-        bg.alpha_composite(img)
-        prev = HERE / 'osh_career_center_preview.png'
-        bg.convert('RGB').save(prev)
-        print('wrote', prev.name)
+    outputs = {
+        'osh_career_center.png': career_center(),
+        'osh_options_center.png': options_center(),
+        'osh_hub_center.png': hub_center(),
+        'osh_category_center.png': category_center(),
+        'osh_tile_hv.png': slot_texture(*TILE_SIZE, SLOT_HOVER),
+        'osh_tile_ck.png': slot_texture(*TILE_SIZE, SLOT_PRESS),
+        'osh_value_hv.png': slot_texture(*VALUE_SIZE, SLOT_HOVER),
+        'osh_value_ck.png': slot_texture(*VALUE_SIZE, SLOT_PRESS),
+    }
+    for name, img in outputs.items():
+        img.save(HERE / name, optimize=True)
+        print('wrote', name, img.size)
+        if '--preview' in sys.argv and img.size == (W, H):
+            bg = Image.new('RGBA', img.size, (0, 0, 0, 255))
+            bg.alpha_composite(img)
+            prev = HERE / name.replace('.png', '_preview.png')
+            bg.convert('RGB').save(prev)
+            print('wrote', prev.name)
 
 
 if __name__ == '__main__':

@@ -20,6 +20,10 @@ namespace BZROpenShim::ShellScreens
     // above them so a later stock screen cannot collide.
     inline constexpr uint32_t kCustomScreenIdBase = 0x4F530000;  // 'OS' << 16
     inline constexpr uint32_t kCareerScreenId = kCustomScreenIdBase + 1;
+    // OpenShim Options: the hub reached from the stock Options screen, and
+    // one screen per settings category (base + category index).
+    inline constexpr uint32_t kOptionsHubScreenId = kCustomScreenIdBase + 2;
+    inline constexpr uint32_t kOptionsCategoryScreenIdBase = kCustomScreenIdBase + 0x10;
 
     // Adds the screen's children to `screen` (a constructed Top Screen). Runs
     // inside the shell's factory call, on the UI thread, which is the point
@@ -91,10 +95,24 @@ namespace BZROpenShim::ShellScreens
                    const char* text, uint32_t flags = kControlFlags);
     // `textOffset` is the stock ctor's caption inset (28 for the top-corner
     // Back button). `onClick` is a plain cdecl callback, as stock buttons use.
+    // `onHover` fires when the button's hover state changes, entering or
+    // leaving, so it cannot tell which by itself; read CursorDesignPoint.
+    // A skin whose `off` is null shows nothing at rest, like the stock option
+    // buttons, which sit over slots painted into the panel.
+    using HoverFn = void(__cdecl*)(void* param);
     void* AddButton(void* container, void* layoutParent, const char* name, const Rect& r,
                     const char* text, const ButtonSkin& skin, float textScale,
-                    float textOffset, void(__cdecl* onClick)());
+                    float textOffset, void(__cdecl* onClick)(), HoverFn onHover = nullptr);
     void SetLabelText(void* label, const char* text);
+
+    // The cursor in the 1440x1080 design space of the centred content area
+    // (the shell scales by client height and centres horizontally). False
+    // when the game window is not in front.
+    bool CursorDesignPoint(float& x, float& y);
+    inline bool Contains(const Rect& r, float x, float y)
+    {
+        return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+    }
 
     // True when an OpenShim UI texture is deployed (loose file in the
     // CustomWidgets folder). Screens fall back to the bare stock background
