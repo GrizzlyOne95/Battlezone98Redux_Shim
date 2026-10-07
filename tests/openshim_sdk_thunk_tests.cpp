@@ -22,6 +22,12 @@ namespace
     bool g_ClearAllCalled = false;
     DWORD g_LastThrottle = 0;
     struct { const char* name; int x, y, w, h; } g_LastRect = {};
+    struct { void* object; DWORD handle; float multiplier; } g_LastDamage = {};
+    BOOL WINAPI FakeSetDamage(void* object, DWORD handle, float multiplier)
+    {
+        g_LastDamage = {object, handle, multiplier};
+        return TRUE;
+    }
 
     BOOL WINAPI FakeClearAll()
     {
@@ -71,6 +77,8 @@ namespace
             .OpenShimImpl_SupportsRenderProfile = FakeSupportsRenderProfile,
             .OpenShimImpl_GetNativeHudLayoutCapabilities = FakeNativeHudCapabilities,
             .OpenShimImpl_SetNativeHudMeterRect = FakeSetHudSpriteRect,
+            .OpenShimImpl_HasNativeDamageResistance = FakeClearAll,
+            .OpenShimImpl_SetUnitDamageMultiplier = FakeSetDamage,
         };
         return t;
     }
@@ -92,6 +100,8 @@ int main()
     // Calling with no provider must not have reached anything.
     CHECK(!g_ClearAllCalled);
     CHECK(g_LastThrottle == 0);
+    CHECK(OpenShimHasNativeDamageResistance() == FALSE);
+    CHECK(OpenShimSetUnitDamageMultiplier(nullptr, 0, .75f) == FALSE);
 
     // ---- provider installed: calls forward unchanged -------------------
     OpenShimSdkProviderTable table = MakeTable();
@@ -122,6 +132,18 @@ int main()
     CHECK(OpenShimGetNativeHudLayoutCapabilities() == 3);
     CHECK(OpenShimSetNativeHudMeterRect("hull", 11, 22, 33, 44) == TRUE);
     CHECK(std::strcmp(g_LastRect.name, "hull") == 0 && g_LastRect.x == 11 && g_LastRect.h == 44);
+    CHECK(OpenShimHasNativeDamageResistance() == TRUE);
+    auto* damageObject = reinterpret_cast<void*>(static_cast<uintptr_t>(0x12345678));
+    CHECK(OpenShimSetUnitDamageMultiplier(damageObject, 0x123ABCD, .75f) == TRUE);
+    CHECK(g_LastDamage.object == damageObject && g_LastDamage.handle == 0x123ABCD &&
+        g_LastDamage.multiplier == .75f);
+    // The immediately preceding HUD provider keeps all of its slots and fails
+    // closed on this appended damage block.
+    table.structSize = (uint32_t)offsetof(OpenShimSdkProviderTable, OpenShimImpl_HasNativeDamageResistance);
+    CHECK(OpenShimHasNativeDamageResistance() == FALSE);
+    CHECK(OpenShimSetUnitDamageMultiplier(damageObject, 7, .5f) == FALSE);
+    CHECK(OpenShimGetNativeHudLayoutCapabilities() == 3);
+    table.structSize = sizeof(table);
 
     // A previous-version provider ends immediately after its legacy block.
     // New slots fail closed, while every previous slot remains at its offset.

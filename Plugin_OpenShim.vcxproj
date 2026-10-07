@@ -186,6 +186,7 @@
     <ClCompile Include="src\patches\ogre_entity_frustum_cull.cpp" />
     <ClCompile Include="src\patches\ogre_runtime_helpers.cpp" />
     <ClCompile Include="src\patches\ordnance_velocity.cpp" />
+    <ClCompile Include="src\patches\unit_damage.cpp" />
     <ClCompile Include="src\patches\perceived_team_reveal.cpp" />
     <ClCompile Include="src\patches\pilot_flashlight.cpp" />
     <ClCompile Include="src\patches\pilot_team_restore.cpp" />
@@ -300,6 +301,8 @@
     <ClInclude Include="include\autosave.h" />
     <ClInclude Include="include\autosave_gate.h" />
     <ClInclude Include="include\bzr_hooks.h" />
+    <ClInclude Include="include\unit_damage.h" />
+    <ClInclude Include="include\unit_damage_policy.h" />
     <ClInclude Include="include\weapon_presentation.h" />
     <ClInclude Include="include\weapon_presentation_hooks.h" />
     <ClInclude Include="include\weapon_presentation_native.h" />

@@ -4,6 +4,7 @@
 // EXU lifecycle notify) and the D3D11 module pin for shutdown ordering,
 // split out of bzr_hooks.cpp.
 #include "native_hud_runtime.h"
+#include "unit_damage.h"
 #include "bzr_hooks.h"
 #include "bzr_object_layout.h"
 #include "bzr_hooks_internal.h"
@@ -393,6 +394,7 @@ namespace BZROpenShim
                 FogWakeNotifyMissionRunStateChanged(false);
                 NotifyExuMissionSimulationState(false);
                 NativeHud::Runtime::ResetMission();
+                UnitDamage::ResetMissionState();
             }
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
             {
