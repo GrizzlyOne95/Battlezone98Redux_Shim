@@ -225,6 +225,8 @@ OnPlayerLeft
 
 Companion DLLs can consume current v2 events now. [b]EXU owns runtime scripting events:[/b] listener registration, runtime queues and safe Lua delivery belong in EXU. OpenShim supplies native observations where it already owns the hooks. Research and planning started 2026-10-06; the first milestone is a small EXU dispatcher pumped from mission Update, followed by damage/kill observations independent of career tracking and the remaining producers.
 
+Damage-attribution research on 2026-10-07 maps immediate damager versus projectile/explosion source, separate owned-object creator chains, and distinct native-object IDs versus Lua handles. This is static GOG evidence; the interrupted follow-up probe did not reach fixture actions. The findings and prepared opt-in fixture are in ExtraUtilities [code]Docs/Research/RUNTIME_DAMAGE_ATTRIBUTION_GOG_20261007.md[/code].
+
 EXU's older direct BulletHit->Lua path should eventually move to queued snapshot delivery. Its raw ordnance pointer cannot safely be deferred unchanged; retain compatibility while adding copied projectile events and migrating consumers. The concise implementation plan is in ExtraUtilities [code]Docs/Research/RUNTIME_SCRIPTING_EVENTS_20261006.md[/code]. No callback implementation or deployment is claimed yet.
 
 [h3]Custom Unit Commands[/h3]
