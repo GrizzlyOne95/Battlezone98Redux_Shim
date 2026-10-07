@@ -18,6 +18,7 @@ Windows PowerShell 5.1, from the repository root. Refuses to start while any
 powershell -ExecutionPolicy Bypass -File reverse_engineering\Run-BZRCoopMission.ps1 -Mission misn03 -Scenario win
 powershell -ExecutionPolicy Bypass -File reverse_engineering\Run-BZRCoopSuite.ps1             # every known case
 powershell -ExecutionPolicy Bypass -File reverse_engineering\Run-BZRCoopSuite.ps1 -Only misn04
+powershell -ExecutionPolicy Bypass -File reverse_engineering\Run-BZRCoopSuite.ps1 -Only misn05
 ```
 
 Scenario parameters: `-ScenarioArgs @{ Skipper = 'host' }` (needs `-Command`,
@@ -59,6 +60,11 @@ It copies every file changed or added since the staged build's commit,
 flattened to the Workshop layout, and records the source in `OVERRIDE.txt`.
 Generated folders are git-ignored.
 
+For mission 05, generate `-Name misn05-coop` with the matching EXU build. The
+generator includes changed graphics previews and root `.des` files as well as
+Scripts/Missions/ODF/Config, so all four new multiplayer assets accompany the
+mission. The default suite's mission 05 cases use that generated override.
+
 A `.vxt` that should offer only the pilot must use the stock line
 `asuser aspilo.des<TAB>anims\aspil.avi NSDF Pilot`. The short `asuser ,` form
 leaves staging at "Vehicle not selected", and Ready never completes.
@@ -74,6 +80,11 @@ leaves staging at "Vehicle not selected", and Ready never completes.
 | misn02b | `win Override=misn02b-onfoot ExpectOnFoot=1 Skipper=none NaturalIntro=1` | Nobody skips: the intro plays as offline (lander shot until its path ends, then both cameras follow the living dummy tank), no stray team-0 craft, then the full win |
 | misn03 | `C:\...\Campaign-Reimagined\Tools\Test-CoopCommsLive.ps1` (with `-ContentOverride` from `New-CRFlowOverride.ps1` + new `exu.dll`) | CR's co-op PDA comms: terrain/object pings both ways, explicit targeting, PDA Co-op page, J quick ping, expiry, pilot rescue request and host replies |
 | misn04 | `win` | Relic: patrols, recon camera, relic film skip, relic secure, CCA base destroyed, end film, `misn04w1.des` |
+| misn05 | `win Override=misn05-coop` | Guest discovers Lemnos; four shuffled deployments, final assault, four reinforcements, severe weather, surviving-attacker gate, seven friendly tanks, local guest skip, commander reveal and `misn05w1.des` on both |
+| misn05 | `win Override=misn05-coop Skipper=host` / `Skipper=none` | Independent host skip, or both object films play to their shared time limits |
+| misn05 | `lose Override=misn05-coop Destroyed=factory` / `Destroyed=recycler` | Owner destroys Lemnos / Montana; `misn05l2.des` / `misn05l1.des` reaches both |
+| misn05 | `coop-respawn Override=misn05-coop` | Respawn near a settled teammate, simultaneous deaths use fallback, fifth death fails both |
+| misn05 | `host-leaves Override=misn05-coop` | Host closes gracefully; guest fails once and stays running |
 | any | `film-preview` (`-ScenarioArgs @{ Path='endcin'; Variants=@('100,200,M.avrec','8000,9000,center'); Protect=@('avrec') }`) | Not a test: plays one camera path on the host with each height,speed,target (cm, cm/s, Lua handle or `center` = a pod at the path's middle) and screenshots it, to tune a film without playing up to it. Height/speed are cm: 100 is 1 m |
 | misn04 | `endfilm` | Jumps the host to the win and checks the closing film on both clients: camera pod on the Face summit, both cameras on `endcin`, pod removed, `misn04w1.des` on both. Does not need audio |
 | any | `host-leaves` | The host quits mid-mission; the guest detects leader departure, fails the mission and keeps running |
@@ -86,6 +97,28 @@ leaves staging at "Vehicle not selected", and Ready never completes.
 Run any scenario with `-Scenario <name>`. The runner looks for
 `scenarios\<mission>-<name>.ps1` first, then `scenarios\<name>.ps1`, or takes
 a path.
+
+### Mission 05 qualification (2026-10-07)
+
+Windows GOG runs passed both local closing-film skips (`cr-misn05-win-20261007-161218`
+and `cr-misn05-win-20261007-161522`), natural films, both objective-loss paths,
+respawn/life exhaustion and host departure. The natural-film, loss and departure
+evidence is in `suite-20261007-154157`; the final respawn evidence is
+`cr-misn05-coop-respawn-20261007-160725`. All are under `C:\BZRCoop\runs`.
+
+The strengthened respawn case verifies both persistent rally labels and actual
+phase-2 positions on both clients. Native MultST consumes the spawn buoys, and
+`GetPosition(label)` treats its string as a path: the CR adapter now resolves
+object labels through `GetHandle` before reading positions. The earlier case
+only checked the word `rally` and missed placement at the map origin.
+
+No listed run has Lua or engine script errors. Later RDP-disconnected runs have
+audio-unavailable warnings; a lobby audio-stack crash and a focused-input
+failure remain recorded in `suite-20261007-160215`. Scenarios accelerate combat
+and timers, so this qualifies two-client mission flow rather than balance.
+See CR's `Docs/MISN05_COOP.md` for source checks and platform limits. Stock
+destruction messages remain visible; `COOP_MESSAGE_SUPPRESSION.md` is still
+an unimplemented native suppression design.
 
 ## Writing a scenario
 
@@ -157,6 +190,12 @@ Rules that keep results meaningful:
 - A skip pops the skipper's camera. Any later `CameraFinish` on an empty stack
   raises "Camera Stack 0verfow" and silently aborts the rest of the Lua chunk.
   Track the peer's own camera and pop only what it pushed.
+- The misn05 object camera checks cancellation after `CameraObject`, in the
+  authored order. Posted Space originally failed with the earlier adapter
+  and a 40 ms hold. The final scenario uses a 400 ms hold, now honored by the
+  posted-key helper, and passes without foreground access. `FocusedSkip=1`
+  optionally checks real desktop input. Check during the ten-second closing
+  film; the four-second recon is too short for screenshots and input checks.
 
 ## Known environment gotchas
 

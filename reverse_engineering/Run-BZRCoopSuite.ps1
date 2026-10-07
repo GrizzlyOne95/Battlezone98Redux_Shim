@@ -20,7 +20,14 @@ param(
         'misn02b win Override=misn02b-onfoot ExpectOnFoot=1 Skipper=host',
         'misn02b win Override=misn02b-onfoot ExpectOnFoot=1 Skipper=none NaturalIntro=1',
         'misn04 win',
-        'misn02b host-leaves Override=misn02b-onfoot'
+        'misn02b host-leaves Override=misn02b-onfoot',
+        'misn05 win Override=misn05-coop',
+        'misn05 win Override=misn05-coop Skipper=host',
+        'misn05 win Override=misn05-coop Skipper=none',
+        'misn05 lose Override=misn05-coop Destroyed=factory',
+        'misn05 lose Override=misn05-coop Destroyed=recycler',
+        'misn05 coop-respawn Override=misn05-coop',
+        'misn05 host-leaves Override=misn05-coop'
     ),
     # Run only cases whose text contains this.
     [string]$Only = '',

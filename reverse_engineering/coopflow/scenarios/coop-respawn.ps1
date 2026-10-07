@@ -1,4 +1,4 @@
-# CR co-op respawn placement and lives (misn03, with a CR override that has
+# CR co-op respawn placement and lives (misn03/misn05, with an override that has
 # CRCoopRespawn). Native MultST respawns a player as a pilot at the team start
 # location; CR moves the new handle near a settled living teammate, else the
 # phase rally point, else the player's last safe position. CR counts lives
@@ -46,7 +46,7 @@ function Kill-UntilRespawn([int]$Client) {
 Invoke-CRFlowStep 'probes attached; respawn service on both clients' {
     Wait-CRFlowEvent $H attach -TimeoutSeconds 120 | Out-Null
     Wait-CRFlowEvent $G attach -TimeoutSeconds 120 | Out-Null
-    Wait-CRFlow $H 'return M.start_done and role().ready' -TimeoutSeconds 120 | Out-Null
+    Wait-CRFlow $H 'return M.coopMissionStarted and role().ready' -TimeoutSeconds 120 | Out-Null
     foreach ($c in $H, $G) {
         $ok = Invoke-CRFlow $c 'return CRCoop.GetRespawn() ~= nil and CRCoop.COOP_LIVES'
         if (-not $ok) { throw "client $c has no CRCoopRespawn (regenerate the override)" }
@@ -58,7 +58,7 @@ Invoke-CRFlowStep 'keep the mission alive (test assist)' {
     Invoke-CRFlow $H @'
 kill(M.wave1_1); kill(M.wave1_2)
 every('protect', 1, function()
-    for _, k in ipairs({ "solar1", "solar2", "solar3", "solar4", "launch", "avrecycler", "rescue1", "rescue2" }) do
+    for _, k in ipairs({ "solar1", "solar2", "solar3", "solar4", "launch", "avrecycler", "rescue1", "rescue2", "avrec", "lemnos" }) do
         if M[k] then heal(M[k]) end
     end
     clearAroundPlayers(5, nil, 500)
@@ -69,10 +69,20 @@ return true
     'protect + clear near players + host selfheal'
 }
 
+if (Invoke-CRFlow $H 'return IsValid(M.lemnos)') {
+    Invoke-CRFlowStep 'both native rally labels resolve on each client' {
+        foreach ($client in $H, $G) {
+            $labels = Invoke-CRFlow $client 'local start = GetHandle("avrecy-1_recycler"); local factory = GetHandle("oblema110_i76building"); return { valid = IsValid(start) and IsValid(factory), start = xyz(start), factory = xyz(factory) }'
+            Assert-That $labels.valid 'persistent rally labels missing' $labels
+            $labels
+        }
+    }
+}
+
 Invoke-CRFlowStep 'host moves far from the start; guest stays at spawn' {
     $spawn = Invoke-CRFlow $G 'return xyz(me())'
-    # The launch pad is the far end of misn03's base; host owns its own craft.
-    Invoke-CRFlow $H 'return tp(M.launch or "launch", 60)' | Out-Null
+    # Move to the mission's far objective; host owns its own craft.
+    Invoke-CRFlow $H 'return tp(M.launch or M.lemnos or "launch", 60)' | Out-Null
     Start-Sleep -Seconds 10   # the host's handle must be settled (8 s) to be a target
     $hostPos = Invoke-CRFlow $H 'return xyz(me())'
     $d = [math]::Sqrt([math]::Pow($hostPos[0] - $spawn[0], 2) + [math]::Pow($hostPos[2] - $spawn[2], 2))
@@ -106,6 +116,16 @@ Invoke-CRFlowStep 'both die together -> guest uses its own fallback, not the res
     Assert-That ($s.lastRespawn.how -ne 'teammate') 'guest followed the host, who had just respawned' $s
     @{ host = $job; guest = $s }
 } -Soft
+
+if (Invoke-CRFlow $H 'return IsValid(M.lemnos)') {
+    Invoke-CRFlowStep 'phase 2 fallback actually lands near Lemnos on both clients' {
+        $rally = Invoke-CRFlow $G 'return { how = CRCoop.GetRespawn().lastRespawn.how, phase = CRCoop.GetMissionPhase(), distance = GetDistance(me(), M.lemnos), pos = xyz(me()) }'
+        Assert-That ($rally.how -eq 'rally' -and $rally.phase -eq 2 -and $rally.distance -lt 120) 'guest missed the Lemnos rally point' $rally
+        $seenRally = Invoke-CRFlow $H 'for id, p in pairs(CRCoop.GetPlayers()) do if p.team ~= 1 and IsValid(p.handle) then return GetDistance(p.handle, M.lemnos) end end'
+        Assert-That ($null -ne $seenRally -and $seenRally -lt 120) 'host sees the guest outside the Lemnos rally' @{ distance = $seenRally }
+        @{ guest = $rally; hostSeesDistance = $seenRally }
+    }
+}
 
 Invoke-CRFlowStep 'guest uses up its lives -> mission fails on both clients' {
     $deaths = @()

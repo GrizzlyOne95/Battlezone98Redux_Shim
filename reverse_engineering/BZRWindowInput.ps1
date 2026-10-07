@@ -75,9 +75,12 @@ public static class Native {
         PostMessage(h, 0x0202, IntPtr.Zero, XY(x, y));          // WM_LBUTTONUP
     }
     public static void Key(IntPtr h, int vk) {
+        KeyHeld(h, vk, 40);
+    }
+    public static void KeyHeld(IntPtr h, int vk, int holdMs) {
         Activate(h);
         PostMessage(h, 0x0100, (IntPtr)vk, (IntPtr)1);          // WM_KEYDOWN
-        System.Threading.Thread.Sleep(40);
+        System.Threading.Thread.Sleep(holdMs);
         PostMessage(h, 0x0101, (IntPtr)vk, unchecked((IntPtr)(int)0xC0000001)); // WM_KEYUP
     }
     public static void Char(IntPtr h, char c) { PostMessage(h, 0x0102, (IntPtr)c, (IntPtr)1); }
@@ -159,8 +162,8 @@ function Save-BZRClientCapture([int]$ProcessId, [string]$Path) {
 function Send-BZRClientClick([int]$ProcessId, [int]$X, [int]$Y) {
     [BZRWin.Native]::Click((Get-BZRClientWindow $ProcessId), $X, $Y)
 }
-function Send-BZRClientKey([int]$ProcessId, [int]$VirtualKey) {
-    [BZRWin.Native]::Key((Get-BZRClientWindow $ProcessId), $VirtualKey)
+function Send-BZRClientKey([int]$ProcessId, [int]$VirtualKey, [int]$HoldMs = 40) {
+    [BZRWin.Native]::KeyHeld((Get-BZRClientWindow $ProcessId), $VirtualKey, $HoldMs)
 }
 function Send-BZRClientKeyFocused([int]$ProcessId, [int]$VirtualKey, [int]$HoldMs = 150, [switch]$WithVk) {
     # Takes the desktop foreground for the press; see FocusedKey.

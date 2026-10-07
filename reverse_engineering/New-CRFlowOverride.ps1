@@ -11,21 +11,26 @@
 # Windows PowerShell 5.1.
 
 param(
-    [Parameter(Mandatory)][string]$Name,
+    [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_-]*$')][string]$Name,
     [string]$CRRepo = 'C:\Users\iestu\Documents\GIT\Campaign-Reimagined',
     # Staged CR build the harness copies first; its commit is the diff base.
     [string]$StagedContent = 'C:\Users\iestu\Documents\GIT\CR-release\Local\Workshop\content',
     [string]$Base = '',
     [string[]]$Extra = @(),
-    # Repository folders whose files ship flat in the Workshop content.
-    [string[]]$Folders = @('Scripts', 'Missions', 'ODF', 'Config')
+    # Repository paths whose files ship flat in the Workshop content. New map
+    # previews and root descriptions must accompany their INI/BZN/VXT files.
+    [string[]]$Folders = @('Scripts', 'Missions', 'ODF', 'Config', 'Assets/Graphics', '*.des')
 )
 
 $ErrorActionPreference = 'Stop'
 if (-not $Base) {
     $Base = (& git -C (Split-Path $StagedContent -Parent | Split-Path -Parent | Split-Path -Parent) rev-parse HEAD).Trim()
 }
-$out = Join-Path $PSScriptRoot "coopflow\overrides\$Name"
+$overrideRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'coopflow\overrides'))
+$out = [IO.Path]::GetFullPath((Join-Path $overrideRoot $Name))
+if (-not $out.StartsWith($overrideRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Override output must stay inside coopflow\overrides.'
+}
 if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force }
 $null = New-Item -ItemType Directory -Force -Path $out
 
