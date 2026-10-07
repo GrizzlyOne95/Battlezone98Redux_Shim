@@ -1,9 +1,12 @@
 # Four-client misn05 qualification
 
-Resumed at the user's request on 2026-10-07. Full nine-case suite
-`C:\BZRCoop\runs\suite-20261007-183449` is in progress, with new native
-sequence-rejection and subtitle-overlay health gates. Final qualification
-is pending. Earlier checkpoint results below predate these gates.
+Resumed at the user's request on 2026-10-07. Suite
+`C:\BZRCoop\runs\suite-20261007-183449` passed four-player services and
+the team-2/team-3 wins (14/21, 14/24, 14/24 steps/checks). All native network,
+subtitle, script, audio and presentation checks passed. The next case was
+NO RUN because an independent sxshow game started under C:\BZRCoop\sx.
+Six cases remain; let that game close before resuming. Final qualification
+is pending. Earlier checkpoint results below predate the new health gates.
 
 The user's observed team-4 100% loss is real: the host screenshot in the win
 run at 181309 shows 55 ms / 100%. Reliable ACKs still advance while newer
@@ -60,11 +63,11 @@ warnings. Assists accelerate timers/combat and act on each object's owner.
   repository validator passed before the live win. Existing shipping entries
   suffice. Changes were tested through generated overrides; this workstream
   has not deployed them to the main GOG installation or Workshop.
-- Harness: `agent/four-client-coop`, task changes **uncommitted**. Adds variable
+- Harness: `agent/four-client-coop`, committed/pushed **1f964380**. Adds variable
   2–4 participants, native limit selection, complete roster/ownership checks,
   all-participant parity/error checks, exact-one-result checks, run input hashes,
   four-player scenarios and `Run-BZRCoopFour.ps1` (nine cases, stop on failure).
-  Participant regression passed 11 checks; ten scripts parsed before the latest
+  Participant regression passed 12 checks; scripts parsed before the latest
   session-file change. Preserve the preexisting, unowned
   `coopflow/TEXT_ENTRY_STATE.md` diff; never stage it with this work.
 
