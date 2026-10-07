@@ -74,6 +74,7 @@ leaves staging at "Vehicle not selected", and Ready never completes.
 | misn02b | `win Override=misn02b-onfoot ExpectOnFoot=1 Skipper=none NaturalIntro=1` | Nobody skips: the intro plays as offline (lander shot until its path ends, then both cameras follow the living dummy tank), no stray team-0 craft, then the full win |
 | misn03 | `C:\...\Campaign-Reimagined\Tools\Test-CoopCommsLive.ps1` (with `-ContentOverride` from `New-CRFlowOverride.ps1` + new `exu.dll`) | CR's co-op PDA comms: terrain/object pings both ways, explicit targeting, PDA Co-op page, J quick ping, expiry, pilot rescue request and host replies |
 | misn04 | `win` | Relic: patrols, recon camera, relic film skip, relic secure, CCA base destroyed, end film, `misn04w1.des` |
+| any | `film-preview` (`-ScenarioArgs @{ Path='endcin'; Variants=@('100,200,M.avrec','8000,9000,center'); Protect=@('avrec') }`) | Not a test: plays one camera path on the host with each height,speed,target (cm, cm/s, Lua handle or `center` = a pod at the path's middle) and screenshots it, to tune a film without playing up to it. Height/speed are cm: 100 is 1 m |
 | any | `host-leaves` | The host quits mid-mission; the guest detects leader departure, fails the mission and keeps running |
 | misn03 | `replication-cases` | 20 isolated stock-Lua replication cases (see [REPLICATION_FINDINGS.md](REPLICATION_FINDINGS.md)) |
 
@@ -151,8 +152,10 @@ Rules that keep results meaningful:
 
 - `openshim.ini` `RawMouseInput = 1` ignores posted clicks. Prepare forces it
   to 0 in the test instances.
-- Over Remote Desktop the clients are clamped to 584x720. The lobby script
-  converts its 1280x720 coordinates, finds the map row by scanning, and
+- The client size follows the user's display (584x720 over a portrait
+  Remote Desktop, 624x393 from a phone). The shell scales with the client
+  height, so the lobby script scales its 1280x720 coordinates by h/720 per
+  anchor (centre / right edge), finds the map row by scanning, and
   confirms the pick and Sync Join through the server's `/captures`
   gameSettings. Stay connected: a disconnected RDP session may stop rendering.
 - Background windows only change shell screens while they believe they are
