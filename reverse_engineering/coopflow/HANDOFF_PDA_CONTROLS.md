@@ -2,6 +2,27 @@
 
 Written 2026-10-07. For the next agent picking up CR co-op PDA testing.
 
+## Status (2026-10-07, later): done
+
+`scenarios\coop-pda-controls.ps1` passes all 20 steps (run
+`C:\BZRCoop\runs\cr-misn03-coop-pda-controls-20261007-142936`). What it found:
+
+- Posted key messages reach neither CR's polled keys nor `GameKey`; the
+  scenario sends real input (`Send-CRFlowKey -Focused`).
+- In a network game Redux calls `GameKey` only for some keys (reliably Y,
+  digits, /; J, [ ], arrows, Enter only sometimes). CR now polls J / [ ] /
+  arrows there (`PersistentConfig._PollNetworkGameKeys`, EXU key names
+  `LBRACKET`/`RBRACKET`) and drops their `GameKey` copies.
+- Y is the stock "ally with team" key online, so the PDA toggle moved to X
+  everywhere (user's call; CR never runs with ISDFC).
+- Chat is not guarded: an Enter/Esc tracker failed (Enter showed no chat line
+  in the test clients) and was removed. Typing J in chat can ping.
+- Q reaches `GameKey` online; a tap moves a parked tank 0.05 m/s. J stays.
+- Stock network messages ("Team 5's ship destroyed") are being researched
+  separately: `COOP_MESSAGE_SUPPRESSION.md`.
+
+The original brief follows.
+
 ## Goal
 
 Prove the co-op PDA and pings work the way a player uses them, with real key

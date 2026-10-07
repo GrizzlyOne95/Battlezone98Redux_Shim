@@ -81,6 +81,68 @@ public static class Native {
         PostMessage(h, 0x0101, (IntPtr)vk, unchecked((IntPtr)(int)0xC0000001)); // WM_KEYUP
     }
     public static void Char(IntPtr h, char c) { PostMessage(h, 0x0102, (IntPtr)c, (IntPtr)1); }
+
+    // Real keyboard input for keys the game polls (GetAsyncKeyState, OIS /
+    // DirectInput) rather than reads from window messages. SendInput has no
+    // target window, so the client is brought to the foreground first and
+    // nothing is sent unless that worked. The key is sent as a scan code
+    // (DirectInput ignores VK-only injection) and held across several frames.
+    // The previous foreground window gets focus back afterwards.
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
+    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] static extern uint MapVirtualKey(uint code, uint mapType);
+    [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint n, INPUT[] p, int cb);
+    [StructLayout(LayoutKind.Sequential)] struct INPUT { public uint type; public InputUnion U; }
+    // MOUSEINPUT is the largest member; SendInput rejects a short cbSize.
+    [StructLayout(LayoutKind.Explicit)] struct InputUnion {
+        [FieldOffset(0)] public MOUSEINPUT mi;
+        [FieldOffset(0)] public KEYBDINPUT ki;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr extra; }
+    [StructLayout(LayoutKind.Sequential)] struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr extra; }
+
+    static bool Foreground(IntPtr h) {
+        if (GetForegroundWindow() == h) return true;
+        uint pid;
+        uint fg = GetWindowThreadProcessId(GetForegroundWindow(), out pid), me = GetCurrentThreadId();
+        bool attached = fg != 0 && fg != me && AttachThreadInput(me, fg, true);
+        BringWindowToTop(h);
+        SetForegroundWindow(h);
+        if (attached) AttachThreadInput(me, fg, false);
+        return GetForegroundWindow() == h;
+    }
+    // withVk: also fill wVk and drop KEYEVENTF_SCANCODE, so Windows posts the
+    // virtual key as given instead of deriving it from the scan code.
+    static bool SendScan(int vk, bool up, bool withVk) {
+        var i = new INPUT[1];
+        i[0].type = 1;
+        i[0].U.ki.wScan = (ushort)MapVirtualKey((uint)vk, 0);
+        if (withVk) i[0].U.ki.wVk = (ushort)vk;
+        uint flags = withVk ? 0u : 0x0008u;                      // KEYEVENTF_SCANCODE
+        if ((vk >= 0x21 && vk <= 0x28) || vk == 0x2D || vk == 0x2E) flags |= 0x0001; // arrows/nav: EXTENDEDKEY
+        if (up) flags |= 0x0002;                                 // KEYEVENTF_KEYUP
+        i[0].U.ki.dwFlags = flags;
+        return SendInput(1, i, Marshal.SizeOf(typeof(INPUT))) == 1;
+    }
+    public static string FocusedKey(IntPtr h, int vk, int holdMs, bool withVk) {
+        IntPtr before = GetForegroundWindow();
+        bool ok = false;
+        for (int attempt = 0; attempt < 5 && !ok; attempt++) {
+            ok = Foreground(h);
+            if (!ok) System.Threading.Thread.Sleep(100);
+        }
+        if (!ok) return "not foreground";
+        System.Threading.Thread.Sleep(60);                       // let the game see the activation
+        bool down = SendScan(vk, false, withVk);
+        System.Threading.Thread.Sleep(holdMs);
+        bool upOk = SendScan(vk, true, withVk);
+        System.Threading.Thread.Sleep(60);
+        if (before != IntPtr.Zero && before != h) Foreground(before);
+        return down && upOk ? "ok" : "SendInput failed err=" + Marshal.GetLastWin32Error();
+    }
 }
 }
 '@
@@ -99,6 +161,11 @@ function Send-BZRClientClick([int]$ProcessId, [int]$X, [int]$Y) {
 }
 function Send-BZRClientKey([int]$ProcessId, [int]$VirtualKey) {
     [BZRWin.Native]::Key((Get-BZRClientWindow $ProcessId), $VirtualKey)
+}
+function Send-BZRClientKeyFocused([int]$ProcessId, [int]$VirtualKey, [int]$HoldMs = 150, [switch]$WithVk) {
+    # Takes the desktop foreground for the press; see FocusedKey.
+    $r = [BZRWin.Native]::FocusedKey((Get-BZRClientWindow $ProcessId), $VirtualKey, $HoldMs, [bool]$WithVk)
+    if ($r -ne 'ok') { throw "focused key 0x$('{0:X2}' -f $VirtualKey) to pid ${ProcessId}: $r" }
 }
 function Send-BZRClientText([int]$ProcessId, [string]$Text) {
     # No Activate here: WM_SETFOCUS clears the focused text field the

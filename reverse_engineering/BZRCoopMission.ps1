@@ -59,6 +59,9 @@ do
             mission = "$Mission",
             getM = function() return M end,
             CRCoop = CRCoop, exu = exu, native = native,
+            -- Marks a film as running for code gated on the mission's own flag
+            -- (PDA suppression); the caller runs the native camera itself.
+            setCameraActive = function(v) localCameraActive = v == true end,
             getLocals = function()
                 return {
                     events = type(events) == "table" and #events or nil,
@@ -224,8 +227,11 @@ function Wait-CRFlow {
     throw "client ${Client}: '$Lua' still false after ${TimeoutSeconds}s (last $(ConvertTo-Json $last -Compress -Depth 6))"
 }
 
-function Send-CRFlowKey([int]$Client, [int]$VirtualKey) {
-    Send-BZRClientKey (Get-CRFlowClient $Client).pid $VirtualKey
+function Send-CRFlowKey([int]$Client, [int]$VirtualKey, [switch]$Focused, [int]$HoldMs = 150, [switch]$WithVk) {
+    # Posted messages reach keys the game reads from its window queue (film
+    # skip). -Focused sends real input for keys it polls (exu.GetGameKey).
+    if ($Focused) { Send-BZRClientKeyFocused (Get-CRFlowClient $Client).pid $VirtualKey $HoldMs -WithVk:$WithVk }
+    else { Send-BZRClientKey (Get-CRFlowClient $Client).pid $VirtualKey }
 }
 
 # ---------------------------------------------------------------- events --
