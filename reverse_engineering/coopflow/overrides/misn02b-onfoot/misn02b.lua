@@ -117,9 +117,8 @@ local function ApplyPresentation(op, ...)
     elseif op == "SucceedMission" or op == "FailMission" then
         local when, description = ...
         -- Only pop a camera this peer pushed: an empty stack raises the
-        -- engine's "Camera Stack 0verfow" alert. The leader's film is live while
-        -- cameraFrame is set; a guest's while localCameraActive.
-        if localCameraActive or cameraFrame then native.CameraFinish() end
+        -- engine's "Camera Stack 0verfow" alert.
+        if localCameraActive then native.CameraFinish() end
         cameraFrame = nil
         localCameraActive = false
         M.coopResult = true
@@ -167,20 +166,28 @@ end
 local function SucceedMission(...) return EndMission("SucceedMission", ...) end
 local function FailMission(...) return EndMission("FailMission", ...) end
 
+-- localCameraActive tracks whether this peer holds a pushed camera. A skip
+-- pops it early, so the film's own CameraFinish must not pop again: an empty
+-- stack raises "Camera Stack 0verfow" and aborts the rest of the chunk.
 local function CameraReady()
     cameraGeneration = cameraGeneration + 1
     cameraSkipped = false
+    if CRCoop.IsNetworkGame() and localCameraActive then native.CameraFinish() end
+    localCameraActive = true
     return native.CameraReady()
 end
 local function CameraPath(path, height, speed, target)
     cameraFrame = { path, height, speed, target }
     if CRCoop.IsNetworkGame() and native.CameraCancelled() then
         cameraSkipped = true
-        native.CameraFinish()
+        if localCameraActive then native.CameraFinish() end
+        localCameraActive = false
     end
+    -- Only the leader's result drives the film, as offline: a finished path
+    -- moves on to the next shot. After a leader skip the film's own timers
+    -- and audio gates take over.
     if not cameraSkipped then
-        local done = native.CameraPath(path, height, speed, target)
-        if not CRCoop.IsNetworkGame() then return done end
+        return native.CameraPath(path, height, speed, target)
     end
     return false
 end
@@ -193,7 +200,9 @@ end
 local function CameraFinish()
     cameraFrame = nil
     cameraSkipped = false
-    return native.CameraFinish()
+    local wasActive = localCameraActive
+    localCameraActive = false
+    if not CRCoop.IsNetworkGame() or wasActive then return native.CameraFinish() end
 end
 
 local function UpdateRemoteCamera()
@@ -376,7 +385,7 @@ local function UpdateModules(dt)
         subtit.Update()
     end
     if PersistentConfig then
-        if PersistentConfig.UpdateInputs then PersistentConfig.UpdateInputs() end
+        if PersistentConfig.UpdateInputs then PersistentConfig.UpdateInputs(localCameraActive) end
         if PersistentConfig.UpdateHeadlights then PersistentConfig.UpdateHeadlights() end
     end
 end
@@ -845,7 +854,7 @@ function Update()
     if CRCoop.IsNetworkGame() then
         if CRCoop.HasLeaderDeparted() then
             M.coopResult = true
-            if localCameraActive or cameraFrame then native.CameraFinish() end
+            if localCameraActive then native.CameraFinish() end
             localCameraActive = false
             native.FailMission(GetTime() + 1.0)
             return
@@ -1035,13 +1044,15 @@ function Update()
         M.camera2 = false
         M.camera3 = true
         if IsAlive(M.dummy) then
-            Goto(M.dummy, "player_path")
+            Goto(M.dummy, "dummy__path")
         end
         M.cam_time = GetTime() + 25.0
     end
 
     if M.camera3 then
-        if CameraPath("zoomcam", 1200, 800, M.dummy) or AudioDone(M.audmsg) or CameraCancelled()
+        -- The shot follows the dummy tank; if it is gone, end the shot rather
+        -- than leave the camera frozen on its last frame.
+        if not IsAlive(M.dummy) or CameraPath("zoomcam", 1200, 800, M.dummy) or AudioDone(M.audmsg) or CameraCancelled()
             or (CRCoop.IsNetworkGame() and GetTime() > M.cam_time) then
             M.camera3 = false
             M.cam_time = 99999.0

@@ -37,9 +37,9 @@ Invoke-CRFlowStep 'mission started; base objectives on guest' {
 }
 
 Invoke-CRFlowStep 'guest never ran the authority gates' {
-    $g = Invoke-CRFlow $G 'return { missionstart = M.missionstart == true, relic = M.relic ~= nil }'
-    if ($g.missionstart) { throw "guest advanced authority state: $(ConvertTo-Json $g -Compress)" }
-    $g
+    $guestState = Invoke-CRFlow $G 'return { missionstart = M.missionstart == true, relic = M.relic ~= nil }'
+    if ($guestState.missionstart) { throw "guest advanced authority state: $(ConvertTo-Json $guestState -Compress)" }
+    $guestState
 }
 
 Invoke-CRFlowStep 'keep objectives and players alive (test assist)' {

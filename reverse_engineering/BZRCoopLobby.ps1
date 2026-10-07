@@ -89,6 +89,13 @@ function Write-Step([string]$Name, [string]$Status, $Extra = @{}) {
 function Wait-Until([string]$Name, [scriptblock]$Condition) {
     $deadline = (Get-Date).AddSeconds($StepTimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
+        # A crashed client never satisfies a step: fail now, not at the timeout.
+        foreach ($c in $hostClient, $guestClient) {
+            if (-not (Get-Process -Id $c.pid -ErrorAction SilentlyContinue)) {
+                Write-Step $Name 'client-exited' @{ client = $c.index; last = (Get-LastLine $c) }
+                throw "Step '$Name': client $($c.index) (pid $($c.pid)) exited; last log: $(Get-LastLine $c)"
+            }
+        }
         $r = & $Condition
         if ($r) { Write-Step $Name 'ok' @{ evidence = "$r" }; return ,$r }
         Start-Sleep -Milliseconds 400
