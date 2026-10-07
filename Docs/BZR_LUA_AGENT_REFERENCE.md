@@ -51,6 +51,7 @@ When a runtime finding contradicts the HTML reference, document both rather than
 10. **Use `TeamSlot`, `AiCommand`, `PathType`, and `ClassId` instead of magic numeric constants.**
 11. **Exact capitalization is part of the API.** Do not “correct” names such as `UpdateEarthQuake` or `isPortalActive`.
 12. **Project/runtime findings outrank an HTML statement when the conflict is explicit and reproducible in Redux.**
+13. **Do not mass-build in `Start()`.** The load frame shares one 1024-entry GEO table. Models first loaded after it fills get no geometry, so they have no bounds or collision for the whole mission. Queue large builds across later updates.
 
 ---
 
@@ -165,6 +166,59 @@ Safer pattern:
 Build(rig, "abtowe")
 -- issue Dropoff on a later Update
 ```
+
+## Mass `BuildObject()` in the load frame: 1024-entry GEO table
+
+The engine keeps every loaded `.geo` in one fixed table of **1024 entries**. When it is full, a new load evicts the
+largest entry whose reference count is below 1. If every entry is still referenced, the load quietly fails, and no
+`BZLogger.txt` line reports it.
+
+Nothing loaded during the mission-load frame is released until that frame ends. That covers the class preload and
+everything `Start()` builds. A model loaded for the first time after the table fills in that frame gets no geometry:
+
+- the editor shows it as a dot, and its target marker sits at the ground origin;
+- it has no collision and no pathing footprint;
+- the same holds for every later copy of that model for the rest of the mission, because the missing geometry
+  belongs to the model's class.
+
+One frame later the table churns normally again. That is why the same ODF placed in the editor, or built a few
+seconds into the mission, is fine.
+
+Stock-sized missions never come close. A large addon can: ISDF Chronicles' load alone holds ~900 entries through
+the first frame. That left `Start()` room for about 120 new GEOs, and a test range building ~380 objects there broke
+every model loaded after it. This was measured 2026-10-07 by reading the table from process memory while the game
+ran.
+
+Unsafe assumption:
+
+```lua
+function Start()
+    for _, s in ipairs(hundredsOfStations) do BuildObject(s.odf, s.team, s.pos) end
+    BuildObject("bigbuilding", 0, "spot")   -- may come out with no bounds
+end
+```
+
+Safer pattern:
+
+```lua
+function Start()
+    queue = hundredsOfStations           -- build nothing heavy here
+end
+function Update()
+    for _ = 1, 40 do                     -- a capped number of builds per update
+        local s = table.remove(queue)
+        if not s then break end
+        BuildObject(s.odf, s.team, s.pos)
+    end
+end
+```
+
+**Agent rule:** keep many-model builds out of `Start()` and spread them over later updates. Suspect this limit when a
+Lua-built building is a dot with no collision while the same ODF placed in the editor works.
+
+Engine detail (GOG 2.2.301): the table is at `0x02A0DB28` (0x18-byte entries) with its count at `0x00917B04`. The
+lookup is `0x004E3810` and the eviction `0x004E3750`. A part with no geometry fails LOD selection (`0x004E3620`), so
+the object's bounding box (`0x0062E3F0`) comes back empty.
 
 ## `SetAIControl()` timing
 
