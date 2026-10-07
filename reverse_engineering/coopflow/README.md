@@ -1,9 +1,9 @@
 # Co-op mission flow tests (Campaign Reimagined)
 
-Two real Redux clients on this PC play a CR co-op mission against a private
+Two to four real Redux clients on this PC play a CR co-op mission against a private
 loopback lobby server. A probe inside each client's mission script lets the
 harness read state and act like a player; every step is checked on both the
-host (authority) and the guest.
+host (authority) and each guest. Two clients remain the default.
 
 This exercises mission mechanics (gates, objectives, films, results,
 replication), not real combat: scenarios kill enemies, pull timers forward
@@ -19,15 +19,23 @@ powershell -ExecutionPolicy Bypass -File reverse_engineering\Run-BZRCoopMission.
 powershell -ExecutionPolicy Bypass -File reverse_engineering\Run-BZRCoopSuite.ps1             # every known case
 powershell -ExecutionPolicy Bypass -File reverse_engineering\Run-BZRCoopSuite.ps1 -Only misn04
 powershell -ExecutionPolicy Bypass -File reverse_engineering\Run-BZRCoopSuite.ps1 -Only misn05
+powershell -ExecutionPolicy Bypass -File reverse_engineering\Run-BZRCoopMission.ps1 -Mission misn05 -Scenario win -Clients 4 -ContentOverride reverse_engineering\coopflow\overrides\misn05-coop
+powershell -ExecutionPolicy Bypass -File reverse_engineering\Run-BZRCoopFour.ps1
 ```
 
 Scenario parameters: `-ScenarioArgs @{ Skipper = 'host' }` (needs `-Command`,
 not `-File`), or `misn03 win Skipper=host` as a suite case.
 
-Each run takes 5-8 minutes and leaves evidence in `C:\BZRCoop\runs\<run>\`:
+Each run takes about 5-8 minutes and leaves evidence in `C:\BZRCoop\runs\<run>\`:
 `flow-summary.md` (steps and checks), `flow-steps.jsonl`, `flow-shots\`
-(both clients' screens after every step), the server log and both clients'
-`BZLogger.txt`. Exit code 0 means PASS.
+(all clients' screens after every step), the server log and each client's
+`BZLogger.txt`. `flow-inputs.json` records participant count, scenario arguments
+and hashes of the harness, relay source and override files. Exit code 0 means PASS.
+Four-client runs also save `relay-trace.jsonl` and `native-network-health.json`.
+The final verdict rejects sustained native sequence rejection after loading;
+zero relay drops alone do not prove the game accepted position or ping packets.
+This diagnostic pattern is not a measurement of zero packet loss. Subtitle
+overlay failure notices also fail the verdict, even when Lua has not raised an error.
 
 Hands-on: `-Scenario play` loads the mission and leaves everything running.
 Drive it with `BZRCoopPlay.ps1` (`-Lua`, `-State`, `-Events`, `-Shot`, `-Key`,
@@ -38,9 +46,34 @@ meantime, so attach right after it loads (an idle misn03 is lost at about 77 s).
 ## Trying a CR content fix
 
 `-ContentOverride <folder>` copies the files in that folder over the staged CR
-content in both test instances, so a fix can be proven before it lands in CR.
+content in every test instance, so a fix can be proven before it lands in CR.
 The CR repository and the live install are not touched. Folders live in
 `coopflow\overrides\`. In a suite case, write `Override=<folder>`.
+
+`-Clients 4` prepares four isolated roots and Goldberg identities, joins three
+guests to the selected co-op map and checks native teams 1–4, full registries
+and directional alliances on every client. Each receives a separate probe
+channel. Final presentation parity compares every guest with the host, and
+error/audio checks cover all four logs. Result checks require exactly one result.
+The session still holds one launch lock and closes each game with WM_CLOSE.
+The lobby explicitly raises the native Player Limit before joining the guests.
+Three/four-client runs require the private server's `--relay-pair-ports` option:
+each peer pair gets a distinct loopback UDP destination, preserving opaque
+payloads and native peer lookup. The runner enables it automatically. These
+ephemeral loopback ports do not qualify a public firewall or WAN relay setup.
+The server checkout must include `native_network_health.py` (3424853 or later).
+
+`Run-BZRCoopFour.ps1` is the focused mission 05 suite: full wins with team 2,
+3, 4 and host skips, natural films, both objective losses, four-player services
+and host departure. The services case checks all-to-all terrain/object pings,
+each player's respawn and handle replication, four pilot requests and host
+responses/cancellations, simultaneous phase-2 rally fallback and team-4 life
+exhaustion ending the mission for everyone. All assists run on the owner.
+The four-player suite stops at its first failed case; the general suite can
+use `-StopOnFailure` too.
+`Test-CRFlowParticipants.ps1` covers participant selection and rejects a missing
+fourth-client presentation, duplicate result, script error, directional alliance
+or craft owner.
 
 `misn02b-onfoot` holds the misn02b fixes: a pilot-only `.vxt`, spawns beside
 the vehicles, camera-stack-safe `CameraFinish`, film shots that advance when
