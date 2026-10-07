@@ -53,6 +53,7 @@ endfunction()
 openshim_add_test(d3d11_buffer_mirror_policy_tests STD 17 SOURCES
     d3d11_buffer_mirror_policy_tests.cpp
 )
+openshim_add_test(unit_damage_tests STD 20 SOURCES unit_damage_tests.cpp)
 
 openshim_add_test(native_chunk_mesh_tests STD 20 SOURCES
     native_chunk_mesh_tests.cpp
