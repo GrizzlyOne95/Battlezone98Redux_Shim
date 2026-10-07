@@ -2,6 +2,8 @@
 
 Every one of the 607 input lines in `Docs/STEAM_ROADMAP_BBCODE.txt` is accounted for below, including blank lines, BBCode, proposals and research claims. Original line numbers are stable audit IDs; the corrected roadmap adds an evidence-scope paragraph. References point to immutable fetched main revisions. This is a source/documentation audit, not a new game/runtime or private-binary audit.
 
+The subsequent progress-reference cleanup reorganizes the roadmap by implementation status, consolidates repeated milestones, removes speculative wish lists and obsolete chronology, and moves implemented repairs out of open reports. The ledger below preserves the original input and validation history; its line IDs are not positions in the reorganized reference sheet. No new runtime qualification is implied by that cleanup.
+
 ## Source revisions
 
 | Component | Revision | Local reading scope |
