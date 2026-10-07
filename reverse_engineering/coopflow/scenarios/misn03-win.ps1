@@ -156,8 +156,10 @@ Invoke-CRFlowStep 'outro film plays on guest' {
 } -Soft
 
 $natural = $true
+# The co-op outro can end in the result itself (coopResult) without the
+# single-player camera_off flag ever being set.
 Invoke-CRFlowStep "outro completes on its own (${NaturalOutroSeconds}s)" {
-    Wait-CRFlow $H 'return M.camera_off' -TimeoutSeconds $NaturalOutroSeconds
+    Wait-CRFlow $H 'return M.camera_off or M.coopResult or M.coopPendingResult ~= nil' -TimeoutSeconds $NaturalOutroSeconds
 } -Soft
 if (-not (Invoke-CRFlow $H 'return M.camera_off == true or M.coopResult == true or M.coopPendingResult ~= nil')) {
     $natural = $false

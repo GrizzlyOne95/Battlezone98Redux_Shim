@@ -56,7 +56,16 @@ public static class Native {
     }
 
     static IntPtr XY(int x, int y) { return (IntPtr)((y << 16) | (x & 0xFFFF)); }
+    // The shell queues a screen change on click but only builds the new screen
+    // while the app believes it is active; a background client keeps its old
+    // screen until it next gets activation. Tell it so without taking focus.
+    public static void Activate(IntPtr h) {
+        PostMessage(h, 0x001C, (IntPtr)1, IntPtr.Zero);         // WM_ACTIVATEAPP
+        PostMessage(h, 0x0006, (IntPtr)1, IntPtr.Zero);         // WM_ACTIVATE (WA_ACTIVE)
+        PostMessage(h, 0x0007, IntPtr.Zero, IntPtr.Zero);       // WM_SETFOCUS
+    }
     public static void Click(IntPtr h, int x, int y) {
+        Activate(h);
         // The shell's corner buttons only take a press after a hover frame.
         PostMessage(h, 0x0200, IntPtr.Zero, XY(x, y));          // WM_MOUSEMOVE
         System.Threading.Thread.Sleep(150);
@@ -66,6 +75,7 @@ public static class Native {
         PostMessage(h, 0x0202, IntPtr.Zero, XY(x, y));          // WM_LBUTTONUP
     }
     public static void Key(IntPtr h, int vk) {
+        Activate(h);
         PostMessage(h, 0x0100, (IntPtr)vk, (IntPtr)1);          // WM_KEYDOWN
         System.Threading.Thread.Sleep(40);
         PostMessage(h, 0x0101, (IntPtr)vk, unchecked((IntPtr)(int)0xC0000001)); // WM_KEYUP
@@ -91,6 +101,8 @@ function Send-BZRClientKey([int]$ProcessId, [int]$VirtualKey) {
     [BZRWin.Native]::Key((Get-BZRClientWindow $ProcessId), $VirtualKey)
 }
 function Send-BZRClientText([int]$ProcessId, [string]$Text) {
+    # No Activate here: WM_SETFOCUS clears the focused text field the
+    # preceding click selected.
     $h = Get-BZRClientWindow $ProcessId
     foreach ($c in $Text.ToCharArray()) { [BZRWin.Native]::Char($h, $c) }
 }
