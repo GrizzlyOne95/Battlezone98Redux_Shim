@@ -14,10 +14,24 @@ and `HANDOFF_PDA_CONTROLS.md` first.
 ## State: done, live-validated, committed (2026-10-07)
 
 `coop-text-entry` passed 7/7 with no script errors on either client
-(`C:\BZRCoopuns\cr-misn03-coop-text-entry-20261007-150741`). Committed and
-pushed on the three agent branches below. Remaining open item: LockAllies is
-never unlocked at mission end (effect on later non-CR MP games unchecked).
-The "In flight" and "Next steps" sections below are historical.
+(`C:\BZRCoop\runs\cr-misn03-coop-text-entry-20261007-150741`). All three
+commits were verified present on origin during the continuation:
+
+| Repository | Branch | Commit |
+|---|---|---|
+| ExtraUtilities | `agent/text-entry-state` | `eccfceb` |
+| Campaign-Reimagined | `agent/coop-comms-pings` | `74807eb` |
+| BZR-OpenShim-coopflow | `agent/coop-mission-flow` | `2719a116` |
+
+The alliance-lock carryover concern was traced in the released executable:
+multiplayer entry initialization clears the gate before later gameplay.
+See [LOCK_ALLIES_LIFECYCLE.md](LOCK_ALLIES_LIFECYCLE.md) for the verified
+reset instruction and startup callers. No mission-result unlock was added.
+This is static evidence; a CR-to-stock match transition in the same running
+process has not been live-tested. Steam/Wine/Proton remain unverified.
+
+The implementation notes below describe the original checkpoint; their
+uncommitted/in-flight wording and "Next steps" are historical.
 
 ### ExtraUtilities: branch `agent/text-entry-state` (created from `agent/coop-comms-pings`, uncommitted)
 - Codex's work, copied from its scratch copy `Build\text-entry-state\` (Codex's
@@ -65,7 +79,8 @@ A live run was started:
 (scratchpad = `%LOCALAPPDATA%\Temp\claude\C--Program-Files--x86--GOG-Galaxy-Games-Battlezone-98-Redux\46264f78-30f9-4494-89a7-3d6c09e3085c\scratchpad`).
 It had produced no step results yet. Its run folder will be under
 `C:\BZRCoop\runs\cr-misn03-coop-text-entry-*`. Test clients in
-`C:\BZRCoop\instances` may be force-killed if it hangs.
+`C:\BZRCoop\instances` must be stopped gracefully through
+`Stop-BZRGame -Id <pid> -NoForce` (current root AGENTS.md takes precedence).
 
 ## Next steps
 
