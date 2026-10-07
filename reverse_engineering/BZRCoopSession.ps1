@@ -152,6 +152,15 @@ function New-BZRCoopInstance {
             Where-Object { -not (Test-Path -LiteralPath (Join-Path $dir $_.Name)) } |
             ForEach-Object { New-Item -ItemType HardLink -Path (Join-Path $dir $_.Name) -Target $_.FullName | Out-Null }
     }
+    # Clients are driven by posted window messages. OpenShim's RawMouseInput
+    # setting (openshim.ini) overrides /norawinput and makes the game ignore
+    # them, so every test instance turns it off in its own copy.
+    $shimIni = Join-Path $dir 'openshim.ini'
+    if (Test-Path -LiteralPath $shimIni) {
+        $ini = [IO.File]::ReadAllText($shimIni)
+        $ini = [regex]::Replace($ini, '(?m)^(\s*RawMouseInput\s*=\s*)\S+', '${1}0')
+        [IO.File]::WriteAllText($shimIni, $ini)
+    }
     Copy-Item -LiteralPath (Join-Path $SourceRoot 'scripts') -Destination $dir -Recurse
     if ($OpenShimRepo -and -not $NoOpenShim) { Install-OpenShimBuild $dir }
     foreach ($name in 'logs', 'save', 'shader_cache', 'mods', 'addon') {

@@ -203,10 +203,12 @@ function Send-CRFlowKey([int]$Client, [int]$VirtualKey) {
 
 # Starts event collection at the current end of each client's log, so only
 # lines written by the coming mission count.
-function Set-CRFlowLogMark([int[]]$Clients = @(0, 1)) {
+# -FromStart reads each log from the beginning instead (attaching to a mission
+# that is already running; each client log covers one launch).
+function Set-CRFlowLogMark([int[]]$Clients = @(0, 1), [switch]$FromStart) {
     foreach ($i in $Clients) {
         $log = Get-CRFlowLogPath (Get-CRFlowClient $i)
-        $script:CRFlowLogPos[$i] = if ($log) { (Get-Item -LiteralPath $log).Length } else { 0 }
+        $script:CRFlowLogPos[$i] = if ($log -and -not $FromStart) { (Get-Item -LiteralPath $log).Length } else { 0 }
         $script:CRFlowEvents[$i] = New-Object System.Collections.ArrayList
     }
 }
@@ -331,8 +333,17 @@ function Test-CRFlowPresentationParity([int]$HostClient = 0, [int[]]$Guests = @(
     foreach ($g in $Guests) {
         $guestOps = @(Get-CRFlowEvents $g op | Where-Object { $_.op -in $script:CRFlowReplicatedOps } | ForEach-Object { Get-CRFlowOpSignature $_ })
         $first = -1
+        $deadHandles = New-Object System.Collections.ArrayList
         for ($i = 0; $i -lt [math]::Min($hostOps.Count, $guestOps.Count); $i++) {
-            if ($hostOps[$i] -ne $guestOps[$i]) { $first = $i; break }
+            if ($hostOps[$i] -eq $guestOps[$i]) { continue }
+            # The host removes the object as it queues the event, so the handle
+            # is dead before it is sent and arrives as nil. Not a stream fault:
+            # the owner's deletion replicates on its own (world parity checks it).
+            if ($guestOps[$i] -eq 'RemoveObject()' -and $hostOps[$i] -like 'RemoveObject(@*)') { [void]$deadHandles.Add($hostOps[$i]); continue }
+            $first = $i; break
+        }
+        if ($deadHandles.Count) {
+            Add-CRFlowCheck "c$g RemoveObject events carried dead handles ($($deadHandles.Count))" $false @($deadHandles | Select-Object -First 8) -WarnOnly
         }
         $detail = [ordered]@{ hostOps = $hostOps.Count; guestOps = $guestOps.Count }
         if ($first -ge 0) {

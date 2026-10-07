@@ -25,7 +25,7 @@ param(
     [int]$Last = 30,
     [string]$Key = '',
     [int]$HoldMs = 0,
-    [int[]]$Click = @(),
+    [string]$Click = '',
     [switch]$Status,
     [switch]$Stop,
     [int]$TimeoutSeconds = 20,
@@ -134,6 +134,7 @@ if ($Key) {
     foreach ($i in $targets) {
         if ($HoldMs -gt 0) {
             $h = Get-BZRClientWindow (Get-CRFlowClient $i).pid
+            [BZRWin.Native]::Activate($h)
             [void][BZRWin.Native]::PostMessage($h, 0x0100, [IntPtr]$vk, [IntPtr]1)
             $end = (Get-Date).AddMilliseconds($HoldMs)
             # Autorepeat while held, as a real keyboard does.
@@ -147,8 +148,9 @@ if ($Key) {
     return
 }
 
-if ($Click.Count -eq 2) {
-    foreach ($i in $targets) { Send-BZRClientClick (Get-CRFlowClient $i).pid $Click[0] $Click[1]; "c$i click $($Click -join ',')" }
+if ($Click) {
+    $xy = @($Click -split '[,\s]+' | ForEach-Object { [int]$_ })
+    foreach ($i in $targets) { Send-BZRClientClick (Get-CRFlowClient $i).pid $xy[0] $xy[1]; "c$i click $($xy -join ',')" }
     return
 }
 

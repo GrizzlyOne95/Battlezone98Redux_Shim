@@ -32,7 +32,10 @@ param(
     # Reuse prepared instances (the probe is still reinstalled).
     [switch]$SkipPrepare,
     # Leave clients and server running afterwards for manual inspection.
-    [switch]$KeepRunning
+    [switch]$KeepRunning,
+    # Run the scenario against the session a -Scenario play run left in the
+    # mission (C:\BZRCoop\play.json): no launch, no lobby, nothing stopped.
+    [switch]$Attach
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,6 +61,33 @@ if (-not $MapListY) {
     $MapListY = $KnownMapRows[$Mission]
 }
 if (-not $RunName) { $RunName = 'cr-{0}-{1}-{2}' -f $Mission, [IO.Path]::GetFileNameWithoutExtension($scenarioPath).Replace("$Mission-", ''), (Get-Date -Format 'yyyyMMdd-HHmmss') }
+
+if ($Attach) {
+    $playFile = Join-Path $BZRCoopRoot 'play.json'
+    if (-not (Test-Path -LiteralPath $playFile)) { throw "No play session ($playFile); start one with -Scenario play." }
+    $play = Get-Content -LiteralPath $playFile -Raw | ConvertFrom-Json
+    if ($play.mission -ne $Mission) { throw "The play session is running $($play.mission), not $Mission." }
+    $s = Get-CRFlowSession
+    if (@($s.clients | Where-Object { Get-Process -Id $_.pid -ErrorAction SilentlyContinue }).Count -lt 2) { throw 'The play session clients are not both running.' }
+    $runDir = (New-Item -ItemType Directory -Force -Path (Join-Path $play.runDir $RunName)).FullName
+    Write-Host "[run] attached to $($play.run): $RunName -> $runDir"
+    # Events count from the start of each client's log, i.e. this mission load.
+    Set-CRFlowLogMark @(0, 1) -FromStart
+    Start-CRFlowRun -RunDir $runDir -Mission $Mission -Scenario ([IO.Path]::GetFileNameWithoutExtension($scenarioPath))
+    $outcome = ''
+    try { . $scenarioPath @ScenarioArgs } catch {
+        $outcome = "Stopped early: $($_.Exception.Message)"
+        Write-Host "[run] $outcome" -ForegroundColor Red
+    }
+    Start-Sleep -Seconds 3
+    Test-CRFlowPresentationParity 0 @(1)
+    Test-CRFlowLogErrors @(0, 1)
+    $summary = Complete-CRFlowRun -Outcome $outcome
+    Write-Host "[run] session left up; stop with BZRCoopPlay.ps1 -Stop"
+    if ($summary.verdict -eq 'PASS') { exit 0 }
+    exit 1
+}
+
 $runDir = (New-Item -ItemType Directory -Force -Path (Join-Path $BZRCoopRoot "runs\$RunName")).FullName
 $stage = Join-Path $BZRCoopRoot "stage\$($script:CRFlowModId)"
 

@@ -33,18 +33,26 @@ $shots = New-Item -ItemType Directory -Force (Join-Path $session.runDir 'shots')
 $stepLog = Join-Path $session.runDir 'steps.jsonl'
 $clock = [Diagnostics.Stopwatch]::StartNew()
 
-# Native shell layout (1280x720).
+# Native shell layout, authored at a 1280x720 client area. Ogre clamps a
+# windowed client to the desktop (a narrow Remote Desktop session gave 584x720),
+# and the shell keeps each control's distance from its anchor edge, so x is
+# converted per control: C = centre, R = right edge. Measured at 584 wide: the
+# lounge and staging panels stay centred and are cropped at both sides; the
+# corner buttons stay on the right. x is clamped into the client, which keeps
+# the Sync Join label reachable at 584 (only its last pixels are on screen).
 $UI = @{
-    MainMultiPlayer = @(860, 163)
-    LoungeCreate    = @(1138, 25)
-    CreateNameField = @(725, 255)
-    CreateOkay      = @(727, 358)
-    LoungeFirstGame = @(560, 95)
-    LoungeJoin      = @(1138, 697)
-    StagingReady    = @(1138, 25)
-    StagingLaunch   = @(1138, 25)
-    SyncJoinToggle  = @(250, 359)
+    MainMultiPlayer = @(845, 163, 'C')
+    LoungeCreate    = @(1138, 25, 'R')
+    CreateNameField = @(725, 255, 'C')
+    CreateOkay      = @(727, 358, 'C')
+    LoungeFirstGame = @(560, 95, 'C')
+    LoungeJoin      = @(1138, 697, 'R')
+    StagingReady    = @(1138, 25, 'R')
+    StagingLaunch   = @(1138, 25, 'R')
+    SyncJoinToggle  = @(250, 359, 'C')
+    MapList         = @(428, 0, 'C')
 }
+$LayoutWidth = 1280
 
 function Get-LogPath($client) {
     Get-ChildItem -LiteralPath $client.dir, (Join-Path $client.dir 'logs') -Filter 'BZLogger.txt' -File -ErrorAction SilentlyContinue |
@@ -66,7 +74,7 @@ function Find-LogLine($client, [string]$Pattern) {
     if ($m.Count) { $m[$m.Count - 1] }
 }
 
-function Get-LastLine($client) { (Get-Content -LiteralPath (Get-LogPath $client) -Tail 1) }
+function Get-LastLine($client) { [string](Get-Content -LiteralPath (Get-LogPath $client) -Tail 1) }
 
 function Write-Step([string]$Name, [string]$Status, $Extra = @{}) {
     $rec = [ordered]@{ t = (Get-Date).ToString('o'); ms = $clock.ElapsedMilliseconds; step = $Name; status = $Status }
@@ -89,7 +97,29 @@ function Wait-Until([string]$Name, [scriptblock]$Condition) {
     throw "Step '$Name' timed out after ${StepTimeoutSeconds}s"
 }
 
-function Click($client, $xy) { Send-BZRClientClick $client.pid $xy[0] $xy[1] }
+if (-not ('BZRWin.Rect' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices;
+namespace BZRWin { public static class Rect {
+    [StructLayout(LayoutKind.Sequential)] struct R { public int L, T, Ri, B; }
+    [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr h, out R r);
+    public static int Width(IntPtr h) { R r; GetClientRect(h, out r); return r.Ri - r.L; }
+} }
+'@
+}
+$clientWidth = @{}
+function Get-ClientWidth($client) {
+    if (-not $clientWidth.ContainsKey($client.index)) { $clientWidth[$client.index] = [BZRWin.Rect]::Width((Get-BZRClientWindow $client.pid)) }
+    $clientWidth[$client.index]
+}
+function Click($client, $xy) {
+    $x = [int]$xy[0]
+    $w = Get-ClientWidth $client
+    $extra = $w - $LayoutWidth
+    switch ($xy[2]) { 'C' { $x += [int]($extra / 2) } 'R' { $x += $extra } }
+    $x = [Math]::Max(5, [Math]::Min($w - 5, $x))
+    Send-BZRClientClick $client.pid $x $xy[1]
+}
 
 # 1. Both clients into the multiplayer lounge.
 Click $hostClient $UI.MainMultiPlayer
@@ -133,23 +163,41 @@ $readyPattern = '< TEXT .\{"content":\{"key":"ready"[^\r\n]*'
 # 4. Optional Sync Join before anyone readies: a settings change bumps the
 # gameSettings version and invalidates earlier ready values. The toggle only
 # takes clicks on its label, not the value cell.
+# The debug log truncates frame text; the server's /captures previews keep the
+# whole gameSettings value: "<version>*<map>.bzn*<crc>*<mod>*<syncJoin>*...".
+function Get-GameSettings {
+    $caps = try { (Invoke-RestMethod -Uri $CapturesUrl -TimeoutSec 3).protocol.history } catch { @() }
+    $last = @($caps | Where-Object { $_.type -eq 'SetLobbyData' -and $_.preview -match '"key":"gameSettings"' }) | Select-Object -Last 1
+    if ($last -and $last.preview -match '"value":"([^"]*)"') { ,($Matches[1] -split '\*') }
+}
+function Wait-NewSettings([string]$Version) {
+    $deadline = (Get-Date).AddSeconds(4)
+    while ((Get-Date) -lt $deadline) {
+        $s = Get-GameSettings
+        if ($s -and $s[0] -ne $Version) { return ,$s }
+        Start-Sleep -Milliseconds 250
+    }
+}
+
 Start-Sleep -Seconds 2
 if ($MapListY) {
-    $off = Get-ServerOffset
-    Click $hostClient @(330, $MapListY)
-    # The debug log truncates frame text; the server's /captures previews keep
-    # the whole gameSettings value ("N*<map>.bzn*...").
-    $null = Wait-Until 'host-map' {
-        $caps = try { (Invoke-RestMethod -Uri $CapturesUrl -TimeoutSec 3).protocol.history } catch { @() }
-        $last = @($caps | Where-Object { $_.type -eq 'SetLobbyData' -and $_.preview -match '"key":"gameSettings"' }) | Select-Object -Last 1
-        if ($last -and $last.preview -match ('"value":"\d+\*' + [regex]::Escape($MapBzn) + '\*')) { $last.preview }
+    # Row height follows the client size (12 px at 1280 wide, ~8.5 px at 584),
+    # so try the 1280 row first, then walk the list until the map is selected.
+    $tries = @($MapListY) + @(for ($y = 88; $y -le 230; $y += 8) { $y })
+    foreach ($y in $tries) {
+        $before = Get-GameSettings
+        Click $hostClient @($UI.MapList[0], $y, $UI.MapList[2])
+        $s = Wait-NewSettings $(if ($before) { $before[0] } else { '' })
+        if ($s -and $s[1] -eq $MapBzn) { break }
     }
+    $null = Wait-Until 'host-map' { $s = Get-GameSettings; if ($s -and $s[1] -eq $MapBzn) { "$MapBzn (row y=$y)" } }
     Start-Sleep -Milliseconds 500
 }
 if ($SyncJoin) {
-    $off = Get-ServerOffset
-    Click $hostClient $UI.SyncJoinToggle
-    $null = Wait-Until 'host-sync-join' { Find-ServerLine $off '< TEXT .\{"content":\{"key":"gameSettings"[^\r\n]*' }
+    # The setting can persist from an earlier session; only toggle it on.
+    $s = Get-GameSettings
+    if (-not $s -or $s[4] -ne '1') { Click $hostClient $UI.SyncJoinToggle }
+    $null = Wait-Until 'host-sync-join' { $s = Get-GameSettings; if ($s -and $s[4] -eq '1') { $s -join '*' } }
     Start-Sleep -Milliseconds 500
 }
 
