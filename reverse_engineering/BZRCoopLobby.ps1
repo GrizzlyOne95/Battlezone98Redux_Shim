@@ -111,21 +111,33 @@ namespace BZRWin { public static class Rect {
     [StructLayout(LayoutKind.Sequential)] struct R { public int L, T, Ri, B; }
     [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr h, out R r);
     public static int Width(IntPtr h) { R r; GetClientRect(h, out r); return r.Ri - r.L; }
+    public static int Height(IntPtr h) { R r; GetClientRect(h, out r); return r.B - r.T; }
 } }
 '@
 }
-$clientWidth = @{}
-function Get-ClientWidth($client) {
-    if (-not $clientWidth.ContainsKey($client.index)) { $clientWidth[$client.index] = [BZRWin.Rect]::Width((Get-BZRClientWindow $client.pid)) }
-    $clientWidth[$client.index]
+$LayoutHeight = 720
+$clientSize = @{}
+function Get-ClientSize($client) {
+    if (-not $clientSize.ContainsKey($client.index)) {
+        $hwnd = Get-BZRClientWindow $client.pid
+        $clientSize[$client.index] = @([BZRWin.Rect]::Width($hwnd), [BZRWin.Rect]::Height($hwnd))
+    }
+    $clientSize[$client.index]
 }
+# The shell scales uniformly with the client height (s = h/720) and keeps each
+# control's distance from its anchor: C = centre, R = right edge, L = left.
+# A 584x720 client (s = 1) only crops; a 624x393 one (narrow RDP/phone
+# display) also shrinks everything to 0.55.
 function Click($client, $xy) {
-    $x = [int]$xy[0]
-    $w = Get-ClientWidth $client
-    $extra = $w - $LayoutWidth
-    switch ($xy[2]) { 'C' { $x += [int]($extra / 2) } 'R' { $x += $extra } }
-    $x = [Math]::Max(5, [Math]::Min($w - 5, $x))
-    Send-BZRClientClick $client.pid $x $xy[1]
+    $w, $h = Get-ClientSize $client
+    $s = $h / $LayoutHeight
+    $x = switch ($xy[2]) {
+        'C' { ($xy[0] - $LayoutWidth / 2) * $s + $w / 2 }
+        'R' { $w - ($LayoutWidth - $xy[0]) * $s }
+        default { $xy[0] * $s }
+    }
+    $x = [Math]::Max(5, [Math]::Min($w - 5, [int]$x))
+    Send-BZRClientClick $client.pid $x ([int]($xy[1] * $s))
 }
 
 # 1. Both clients into the multiplayer lounge.
