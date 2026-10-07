@@ -450,6 +450,11 @@ function Test-CRFlowLogErrors([int[]]$Clients = @(0, 1)) {
         # unbalanced CameraFinish); it raises an in-game alert.
         Add-CRFlowCheck "c$i no Lua or engine script errors" ($hits.Count -eq 0) $hits
         Add-CRFlowCheck "c$i probe healthy" ($probeErrors.Count -eq 0) $probeErrors -WarnOnly
+        # No audio device (e.g. a phone Remote Desktop session without sound):
+        # every voice-over counts as finished at once, so films gated on
+        # AudioDone end on their first frame and audio-gated steps fail.
+        $noAudio = if ($log) { @(Select-String -LiteralPath $log -Pattern "Couldn't create a streaming ogg|minFreeCopies\(0\)" | Select-Object -First 2 | ForEach-Object { $_.Line.Trim() }) } else { @() }
+        Add-CRFlowCheck "c$i audio available (films wait on voice-overs)" ($noAudio.Count -eq 0) $noAudio -WarnOnly
     }
 }
 

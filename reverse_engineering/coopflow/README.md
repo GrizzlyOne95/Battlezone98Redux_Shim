@@ -75,6 +75,7 @@ leaves staging at "Vehicle not selected", and Ready never completes.
 | misn03 | `C:\...\Campaign-Reimagined\Tools\Test-CoopCommsLive.ps1` (with `-ContentOverride` from `New-CRFlowOverride.ps1` + new `exu.dll`) | CR's co-op PDA comms: terrain/object pings both ways, explicit targeting, PDA Co-op page, J quick ping, expiry, pilot rescue request and host replies |
 | misn04 | `win` | Relic: patrols, recon camera, relic film skip, relic secure, CCA base destroyed, end film, `misn04w1.des` |
 | any | `film-preview` (`-ScenarioArgs @{ Path='endcin'; Variants=@('100,200,M.avrec','8000,9000,center'); Protect=@('avrec') }`) | Not a test: plays one camera path on the host with each height,speed,target (cm, cm/s, Lua handle or `center` = a pod at the path's middle) and screenshots it, to tune a film without playing up to it. Height/speed are cm: 100 is 1 m |
+| misn04 | `endfilm` | Jumps the host to the win and checks the closing film on both clients: camera pod on the Face summit, both cameras on `endcin`, pod removed, `misn04w1.des` on both. Does not need audio |
 | any | `host-leaves` | The host quits mid-mission; the guest detects leader departure, fails the mission and keeps running |
 | misn03 | `replication-cases` | 20 isolated stock-Lua replication cases (see [REPLICATION_FINDINGS.md](REPLICATION_FINDINGS.md)) |
 
@@ -168,6 +169,11 @@ Rules that keep results meaningful:
   library already loads it with the lock skipped.
 - A dead client fails the lobby step or the next probe call within a second.
   Suite runs are `-NonInteractive`, so a hidden prompt fails instead of hanging.
+- The clients need an audio device. Without one (a phone Remote Desktop
+  session set not to play sound) the log shows "Couldn't create a streaming
+  ogg!" / `minFreeCopies(0)`, every voice-over counts as done at once, and
+  films gated on `AudioDone` end on their first frame. The run summary warns
+  "audio available"; fix the Remote Desktop sound setting and rerun.
 - Redux's music streamer once crashed a client on the Multiplayer screen (null
   audio system at `0x43ee3c`, two clients sharing one audio device over RDP).
   Rare; rerun the case.
