@@ -45,6 +45,21 @@ function Next-Spot {
 }
 function Find-Lua([string]$Odf, $S, [int]$Radius = 25) { "findNear('$Odf', $($S.x), $($S.z), $Radius)" }
 
+# A fresh host-owned building per case, stored in host global $Var, confirmed
+# alive on both peers. Cases never share objects: a damaged, moved or removed
+# object would poison every later case (seen in run cr-misn03-repl-3).
+function New-HostBuilding([string]$Var) {
+    $s = Next-Spot
+    Invoke-CRFlow $H "$Var = BuildObject('abspow', $($hr.team), at($($s.x), $($s.y), $($s.z))); return IsAlive($Var)" | Out-Null
+    $seen = Poll $G "local h = $(Find-Lua 'abspow' $s); return h ~= nil and IsAlive(h)"
+    if (-not $seen.value) { throw "test building $Var never appeared alive on the guest" }
+    $s
+}
+# Throws (case not classified) when the case's object died during the case.
+function Assert-Alive([string]$Var) {
+    if (-not (Invoke-CRFlow $H "return IsAlive($Var)")) { throw "test object $Var died during the case; not classified" }
+}
+
 Invoke-CRFlowStep 'probes attached and roles known' {
     Wait-CRFlowEvent $H attach -TimeoutSeconds 120 | Out-Null
     Wait-CRFlowEvent $G attach -TimeoutSeconds 120 | Out-Null
@@ -115,50 +130,56 @@ Invoke-CRFlowStep 'D1 host SetObjectiveName / SetName' {
 }
 
 # --------------------------------------------------------------- health --
+# Damage is a small fraction so other sources (mission AI) cannot finish the
+# object off mid-case; each health case has its own building.
 Invoke-CRFlowStep 'F1 host Damage on host-owned building' {
-    $s = Next-Spot
-    $script:f1spot = $s
-    Invoke-CRFlow $H "f1 = BuildObject('abspow', $($hr.team), at($($s.x), $($s.y), $($s.z))); return true" | Out-Null
-    Poll $G "return $(Find-Lua 'abspow' $s) ~= nil" | Out-Null
-    $a = Invoke-CRFlow $H 'local before = GetHealth(f1); Damage(f1, GetMaxHealth(f1) * 0.4); return { before = before, after = GetHealth(f1) }'
-    $o = Poll $G "local h = $(Find-Lua 'abspow' $s); return h and GetHealth(h) < 0.95 and GetHealth(h)"
+    $s = New-HostBuilding 'f1'
+    $a = Invoke-CRFlow $H 'local before = GetHealth(f1); Damage(f1, GetMaxHealth(f1) * 0.2); return { before = before, after = GetHealth(f1) }'
+    $o = Poll $G "local h = $(Find-Lua 'abspow' $s); return h and GetHealth(h) < $($a.before) - 0.1 and GetHealth(h)"
+    Assert-Alive 'f1'
     Add-Finding 'F1' 'health' 'Host Damage() on a host-owned object reaches the guest' $(if ($o.value) { 'replicated' } else { 'local-only' }) @{ actor = $a; other = $o.value; seconds = $o.seconds }
 }
 
 Invoke-CRFlowStep 'F2 guest Damage on host-owned building' {
-    $s = $script:f1spot
-    $hostBefore = Invoke-CRFlow $H 'return GetHealth(f1)'
-    $a = Invoke-CRFlow $G "f2 = $(Find-Lua 'abspow' $s); local before = GetHealth(f2); Damage(f2, GetMaxHealth(f2) * 0.3); return { before = before, after = GetHealth(f2) }"
-    $o = Poll $H "local v = GetHealth(f1); return v < $hostBefore - 0.05 and v"
+    $s = New-HostBuilding 'f2'
+    $hostBefore = Invoke-CRFlow $H 'return GetHealth(f2)'
+    $a = Invoke-CRFlow $G "f2 = $(Find-Lua 'abspow' $s); local before = GetHealth(f2); Damage(f2, GetMaxHealth(f2) * 0.2); return { before = before, after = GetHealth(f2) }"
+    $o = Poll $H "local v = GetHealth(f2); return v < $hostBefore - 0.1 and v"
     Start-Sleep -Seconds 2
     $guestLater = Invoke-CRFlow $G 'return GetHealth(f2)'
-    $r = if ($o.value) { 'replicated' } elseif ($a.after -lt $a.before -and $guestLater -gt $a.after + 0.05) { 'reverted' } elseif ($a.after -lt $a.before) { 'diverged' } else { 'none' }
+    Assert-Alive 'f2'
+    $localDrop = $a.after -lt $a.before - 0.1
+    $r = if ($o.value) { 'replicated' } elseif ($localDrop -and $guestLater -gt $a.after + 0.05) { 'reverted' } elseif ($localDrop) { 'diverged' } else { 'none' }
     Add-Finding 'F2' 'ownership' 'Guest Damage() on a host-owned object reaches the host' $r @{ actor = $a; hostBefore = $hostBefore; host = $o.value; guestAfterWait = $guestLater; seconds = $o.seconds }
 }
 
 Invoke-CRFlowStep 'F3 host SetMaxHealth / SetCurHealth' {
-    $s = $script:f1spot
-    $a = Invoke-CRFlow $H 'local m = GetMaxHealth(f1); SetMaxHealth(f1, m * 3); SetCurHealth(f1, m * 3); return { max = GetMaxHealth(f1), cur = GetCurHealth and GetCurHealth(f1), frac = GetHealth(f1) }'
+    $s = New-HostBuilding 'f3'
+    $a = Invoke-CRFlow $H 'local m = GetMaxHealth(f3); SetMaxHealth(f3, m * 3); SetCurHealth(f3, m * 3); return { baseMax = m, max = GetMaxHealth(f3), cur = GetCurHealth and GetCurHealth(f3), frac = GetHealth(f3) }'
     Start-Sleep -Seconds $ObserveSeconds
     $o = Invoke-CRFlow $G "local h = $(Find-Lua 'abspow' $s); return h and { max = GetMaxHealth(h), cur = GetCurHealth and GetCurHealth(h), frac = GetHealth(h) }"
-    $r = if ($o -and [math]::Abs($o.max - $a.max) -lt 1) { 'replicated' } else { 'local-only' }
+    Assert-Alive 'f3'
+    $r = if (-not $o) { 'missing' } elseif ([math]::Abs($o.max - $a.max) -lt 1) { 'replicated' } else { 'local-only' }
     Add-Finding 'F3' 'health' 'Host SetMaxHealth() is visible on the guest' $r @{ actor = $a; other = $o }
 }
 
 # ------------------------------------------------------------- position --
 Invoke-CRFlowStep 'G1 host SetPosition on host-owned building' {
-    $s = $script:f1spot
-    $a = Invoke-CRFlow $H "SetPosition(f1, at($($s.x + 40), $($s.y), $($s.z))); return xyz(f1)"
+    $s = New-HostBuilding 'g1'
+    $a = Invoke-CRFlow $H "SetPosition(g1, at($($s.x + 40), $($s.y), $($s.z))); return xyz(g1)"
     $o = Poll $G "local h = $(Find-Lua 'abspow' @{ x = $s.x + 40; z = $s.z } 10); return h and xyz(h)"
-    Add-Finding 'G1' 'position' 'Host SetPosition() on a host-owned object reaches the guest' $(if ($o.value) { 'replicated' } else { 'local-only' }) @{ actor = $a; other = $o.value; seconds = $o.seconds }
+    $stayed = Invoke-CRFlow $G "return $(Find-Lua 'abspow' $s 10) ~= nil"
+    Assert-Alive 'g1'
+    Add-Finding 'G1' 'position' 'Host SetPosition() on a host-owned object reaches the guest' $(if ($o.value) { 'replicated' } else { 'local-only' }) @{ actor = $a; other = $o.value; guestStillAtOldSpot = $stayed; seconds = $o.seconds }
 }
 
 Invoke-CRFlowStep 'G2 guest SetPosition on host-owned building' {
-    $s = @{ x = $script:f1spot.x + 40; z = $script:f1spot.z; y = $script:f1spot.y }
+    $s = New-HostBuilding 'g2'
     $a = Invoke-CRFlow $G "g2 = $(Find-Lua 'abspow' $s 10); SetPosition(g2, at($($s.x + 40), $($s.y), $($s.z))); return xyz(g2)"
-    $o = Poll $H "local p = xyz(f1); return math.abs(p[1] - $($s.x + 40)) < 10 and p"
+    $o = Poll $H "local p = xyz(g2); return math.abs(p[1] - $($s.x + 40)) < 10 and p"
     Start-Sleep -Seconds 2
     $guestLater = Invoke-CRFlow $G 'return xyz(g2)'
+    Assert-Alive 'g2'
     $moved = [math]::Abs($a[0] - ($s.x + 40)) -lt 10
     $back = [math]::Abs($guestLater[0] - $s.x) -lt 10
     $r = if ($o.value) { 'replicated' } elseif ($moved -and $back) { 'reverted' } elseif ($moved) { 'diverged' } else { 'none' }
@@ -167,10 +188,12 @@ Invoke-CRFlowStep 'G2 guest SetPosition on host-owned building' {
 
 # ----------------------------------------------------------------- team --
 Invoke-CRFlowStep 'H1 host SetTeamNum on host-owned building' {
-    $s = @{ x = $script:f1spot.x + 40; z = $script:f1spot.z }
-    $a = Invoke-CRFlow $H 'SetTeamNum(f1, 5); return GetTeamNum(f1)'
-    $o = Poll $G "local h = $(Find-Lua 'abspow' $s 60); return h and GetTeamNum(h) == 5 and GetTeamNum(h)"
-    Add-Finding 'H1' 'team' 'Host SetTeamNum() on a host-owned object reaches the guest' $(if ($o.value) { 'replicated' } else { 'local-only' }) @{ actor = $a; other = $o.value; seconds = $o.seconds }
+    $s = New-HostBuilding 'h1'
+    $a = Invoke-CRFlow $H 'SetTeamNum(h1, 5); return GetTeamNum(h1)'
+    $o = Poll $G "local h = $(Find-Lua 'abspow' $s); return h and GetTeamNum(h) == 5 and GetTeamNum(h)"
+    $guestTeam = Invoke-CRFlow $G "local h = $(Find-Lua 'abspow' $s); return h and GetTeamNum(h)"
+    Assert-Alive 'h1'
+    Add-Finding 'H1' 'team' 'Host SetTeamNum() on a host-owned object reaches the guest' $(if ($o.value) { 'replicated' } else { 'local-only' }) @{ actor = $a; other = $o.value; guestTeam = $guestTeam; seconds = $o.seconds }
 }
 
 # --------------------------------------------------------------- weapons --
@@ -205,28 +228,32 @@ Invoke-CRFlowStep 'B2 guest RemoveObject on host-owned building' {
 }
 
 Invoke-CRFlowStep 'B1 host RemoveObject on host-owned building' {
-    $s = $script:b2spot
-    $before = Invoke-CRFlow $G "return $(Find-Lua 'abspow' $s) ~= nil"
-    Invoke-CRFlow $H 'RemoveObject(b2); return IsValid(b2)' | Out-Null
+    $s = New-HostBuilding 'b1'
+    Invoke-CRFlow $H 'RemoveObject(b1); return IsValid(b1)' | Out-Null
     $o = Poll $G "return $(Find-Lua 'abspow' $s) == nil"
-    $r = if (-not $before) { 'n/a (guest had no copy)' } elseif ($o.value) { 'replicated' } else { 'local-only' }
-    Add-Finding 'B1' 'spawn' 'Host RemoveObject() on a host-owned object removes it on the guest' $r @{ guestHadIt = $before; seconds = $o.seconds }
+    Add-Finding 'B1' 'spawn' 'Host RemoveObject() on a host-owned object removes it on the guest' $(if ($o.value) { 'replicated' } else { 'local-only' }) @{ seconds = $o.seconds }
 }
 
 # ------------------------------------------------------ custom events --
-Invoke-CRFlowStep 'J1 Send/Receive value types and payload size' {
+# Stock Send string encoding (Ghidra, 2.2.301): 0-30 bytes ride in the type
+# byte; longer strings get one length byte written as (char)len with no range
+# check (0x5058d0), and the receiver reads it back as a signed char (0x5059b0).
+# So 31-127 should arrive intact, 128+ sign-extends on the receiver (crash in
+# luaS_newlstr 0x8309f4, seen live), and 256+ also desyncs the rest of the
+# packet. J1 stays inside the safe range; J3 probes 128 and runs last.
+Invoke-CRFlowStep 'J1 Send/Receive value types and safe string sizes' {
     Invoke-CRFlow $G 'inbox(); return true' | Out-Null
-    $sw = [Diagnostics.Stopwatch]::StartNew()
-    Invoke-CRFlow $H "Send(0, '~', 'J1', 1.25, -7, true, false, 'text'); Send(0, '~', 'J2', string.rep('x', 200)); Send(0, '~', 'J3', string.rep('y', 400)); return true" | Out-Null
-    $o = Poll $G 'local m = inbox(); return #m > 0 and m' 5
-    Start-Sleep -Seconds 2
+    Invoke-CRFlow $H "Send(0, '~', 'J1', 1.25, -7, true, false, 'text'); Send(0, '~', 'J1s', string.rep('a', 30), string.rep('b', 31), string.rep('c', 127)); return true" | Out-Null
+    $o = Poll $G 'local m = inbox(); return #m > 1 and m' 5
+    Start-Sleep -Seconds 1
     $more = Invoke-CRFlow $G 'return inbox()'
     $all = @($o.value) + @($more) | Where-Object { $_ }
     $j1 = $all | Where-Object { @($_.args)[0] -eq 'J1' } | Select-Object -First 1
-    $len = { param($tag) $m = $all | Where-Object { @($_.args)[0] -eq $tag } | Select-Object -First 1; if ($m) { (@($m.args)[1]).Length } else { $null } }
-    $ev = @{ firstSeconds = $o.seconds; j1 = $(if ($j1) { $j1.args } else { $null }); j2len = & $len 'J2'; j3len = & $len 'J3'; sendCallSeconds = [math]::Round($sw.Elapsed.TotalSeconds, 1) }
-    $r = if ($j1 -and $ev.j2len -eq 200 -and $ev.j3len -eq 400) { 'replicated' } elseif ($j1) { 'partial' } else { 'none' }
-    Add-Finding 'J1' 'events' 'Send(0, ...) delivers numbers/booleans/strings; 200 and 400 byte strings' $r $ev
+    $js = $all | Where-Object { @($_.args)[0] -eq 'J1s' } | Select-Object -First 1
+    $lens = if ($js) { @(@($js.args) | Select-Object -Skip 1 | ForEach-Object { "$_".Length }) } else { @() }
+    $ev = @{ seconds = $o.seconds; j1 = $(if ($j1) { $j1.args } else { $null }); stringLengths = $lens }
+    $r = if ($j1 -and ($lens -join ',') -eq '30,31,127') { 'replicated' } elseif ($j1) { 'partial' } else { 'none' }
+    Add-Finding 'J1' 'events' 'Send(0, ...) delivers numbers/booleans and 30/31/127-byte strings intact' $r $ev
 }
 
 Invoke-CRFlowStep 'J2 guest Send to host' {
@@ -234,6 +261,25 @@ Invoke-CRFlowStep 'J2 guest Send to host' {
     Invoke-CRFlow $G "Send(0, '~', 'J4', 42); return true" | Out-Null
     $o = Poll $H 'local m = inbox(); return #m > 0 and m' 5
     Add-Finding 'J2' 'events' 'Guest Send(0, ...) reaches the host' $(if ($o.value) { 'replicated' } else { 'none' }) @{ received = $o.value; seconds = $o.seconds }
+}
+
+# Last on purpose: expected to kill the guest.
+Invoke-CRFlowStep 'J3 Send of a 128-byte string (expected receiver crash)' {
+    $guestPid = (Get-CRFlowClient $G).pid
+    Invoke-CRFlow $G 'inbox(); return true' | Out-Null
+    Invoke-CRFlow $H "Send(0, '~', 'J3', string.rep('z', 128)); return true" | Out-Null
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $alive = $true
+    while ($sw.Elapsed.TotalSeconds -lt 8) {
+        if (-not (Get-Process -Id $guestPid -ErrorAction SilentlyContinue)) { $alive = $false; break }
+        Start-Sleep -Milliseconds 250
+    }
+    $ev = @{ guestAlive = $alive; seconds = $(if ($alive) { $null } else { [math]::Round($sw.Elapsed.TotalSeconds, 1) }) }
+    if ($alive) { $ev.received = Invoke-CRFlow $G 'return inbox()' }
+    $dump = Get-ChildItem -LiteralPath (Join-Path (Get-CRFlowClient $G).dir 'logs') -Filter 'openshim_crash_*.dmp' -ErrorAction SilentlyContinue |
+        Where-Object LastWriteTime -gt (Get-Date).AddSeconds(-30) | Select-Object -First 1
+    if ($dump) { $ev.dump = $dump.FullName }
+    Add-Finding 'J3' 'events' 'Send(0, ...) of a 128-byte string' $(if ($alive) { 'replicated' } else { 'crash' }) $ev
 }
 
 # --------------------------------------------------------------- report --
