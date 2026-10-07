@@ -783,34 +783,14 @@
       "identity": "GridMinZ int on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), the subtrahend at UpdateCells 0x004691D5 (see PathBlock::GridMaxZ). Single match."
     },
     {
-      "name": "PathBlock::GetItemSize",
-      "pattern": "8B 45 E0 83 C0 04 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 D4 8B 4D E0 83 C1 04 51 E8 ?? ?? ?? ?? 83 C4 04 89 45 CC",
-      "offset": 7,
+      "name": "PathBlock::ReadFile",
+      "pattern": "8B 4D DC 51 8B 55 F0 83 C2 28 52 8D 45 B4 50 8B 4D 0C 51 E8 ?? ?? ?? ?? 83 C4 10 85 C0",
+      "offset": 19,
       "mode": "rel32_target",
-      "fallback": "0x00481A60",
+      "fallback": "0x008290F0",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "Engine GetItemSize(name) thunk 0x00481A60 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413) (the ODF GetItemSize Hook site), taken from its FileData ctor call at 0x00588E60 so a hooked entry still resolves. Worker 0x00481A80 answers from the item cache or the file system (0x00829150). Used by PathBlockFaces to read ODF/SDF/GEO bytes. Single match."
-    },
-    {
-      "name": "PathBlock::UseItem",
-      "pattern": "8B 45 E0 83 C0 04 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 D4 8B 4D E0 83 C1 04 51 E8 ?? ?? ?? ?? 83 C4 04 89 45 CC",
-      "offset": 25,
-      "mode": "rel32_target",
-      "fallback": "0x00481AF0",
-      "prefer": "scan",
-      "require_unique": true,
-      "identity": "Engine UseItem(name) thunk 0x00481AF0 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413) (the ODF UseItem Hook site), from the FileData ctor call at 0x00588E72: returns the locked item bytes, released by UnlockItem. Single match."
-    },
-    {
-      "name": "PathBlock::UnlockItem",
-      "pattern": "E9 ?? ?? ?? ?? 8B 4D E0 83 C1 04 51 E8 ?? ?? ?? ?? 83 C4 04",
-      "offset": 12,
-      "mode": "rel32_target",
-      "fallback": "0x00481990",
-      "prefer": "scan",
-      "require_unique": true,
-      "identity": "Engine UnlockItem(name) thunk 0x00481990 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413) (the ODF UnlockItem Hook site), from the FileData ctor call at 0x005893B4 after parsing. Single match."
+      "identity": "Engine file-system read 0x008290F0 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): cdecl bool(name, int* size, void* buffer, int capacity), a wrapper over 0x00828DC0 (loose addon file via fopen, or packed record via 0x008273E0). Taken from the item-cache miss path in UseItem's worker 0x00481B80 (call at 0x00481D0D). It does not touch the item cache: a loose file reports its size before failing on a short buffer; a packed record fails without one. Used by PathBlockFaces to read ODF/SDF/GEO bytes (reading those through UseItem/UnlockItem inside BlockCells broke the building being added). Single match."
     },
     {
       "name": "MPVehicleList::LoadCallSiteNetveh",
