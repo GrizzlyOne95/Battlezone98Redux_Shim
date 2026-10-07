@@ -66,7 +66,7 @@ namespace BZROpenShim::ShellScreens
         constexpr size_t kManagerAlertByteB = 0x28;
         constexpr int kAlertDialogScreenId = 0x1D;  // cUI_AlertDlgBox never gets the pending alert
         constexpr size_t kFactoryDetourLen = 10;    // push ebp; mov ebp,esp; push -1; push imm32
-        constexpr size_t kMaxScreens = 8;
+        constexpr size_t kMaxScreens = 32;
 
         using FnFactory = void* (__thiscall*)(void* manager, int id);
         using FnRequest = void(__thiscall*)(void* manager, int id);
@@ -334,7 +334,11 @@ namespace BZROpenShim::ShellScreens
         if (FindDef(def.id))
             return true;
         if (g_DefCount >= kMaxScreens || def.id < kCustomScreenIdBase)
+        {
+            Log(L"[SHELLUI] cannot register screen %hs (id 0x%08X): %ls\n", def.name, def.id,
+                def.id < kCustomScreenIdBase ? L"id below the custom range" : L"screen table full");
             return false;
+        }
         g_Defs[g_DefCount++] = def;
         Log(L"[SHELLUI] registered screen %hs (id 0x%08X)\n", def.name, def.id);
         return true;

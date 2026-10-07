@@ -223,7 +223,21 @@ CATEGORY_LAYOUT = {
     'pad': 16, 'value_w': 196,
     'info': (228, 690, 984, 120),
 }
+# The key-binding editor on the stock Input screen (painted mode). Toolbar
+# widths and grouping mirror kInputBindingUiToolbarWidths / RightGroup, and
+# the rest mirrors BuildKeysPanelLayout, both in bzr_options_ui.cpp.
+KEYS_LAYOUT = {
+    'title': (470, 132, 500, 56),
+    'toolbar': {'y': 264, 'h': 40, 'left': 228, 'right': 1212, 'gap': 10,
+                'widths': [120, 190, 150, 160, 90, 90, 120], 'right_from': 4},
+    'columns': [(228, 316, 476, 374), (736, 316, 476, 374)],
+    'row_top': 10, 'row_pitch': 36, 'row_h': 30, 'rows': 10,
+    'pad': 16, 'value_w': 196,
+    'info': (228, 702, 984, 116),
+}
 VALUE_SIZE = (CATEGORY_LAYOUT['value_w'], CATEGORY_LAYOUT['row_h'])
+KEY_SIZE = (KEYS_LAYOUT['value_w'], KEYS_LAYOUT['row_h'])
+TOOL_SIZE = (150, KEYS_LAYOUT['toolbar']['h'])
 TILE_SIZE = HUB_LAYOUT['tile'][2:]
 
 
@@ -279,6 +293,38 @@ def category_center():
     return img.resize((W, H), Image.LANCZOS)
 
 
+def toolbar_rects(t):
+    rects = []
+    x = t['left']
+    for w in t['widths'][:t['right_from']]:
+        rects.append((x, t['y'], w, t['h']))
+        x += w + t['gap']
+    x = t['right']
+    right = []
+    for w in reversed(t['widths'][t['right_from']:]):
+        x -= w
+        right.append((x, t['y'], w, t['h']))
+        x -= t['gap']
+    return rects + list(reversed(right))
+
+
+def keys_center():
+    img, d = new_panel()
+    L = KEYS_LAYOUT
+    title_plate(d, *L['title'])
+    for r in toolbar_rects(L['toolbar']):
+        slot(d, *r)
+    for (bx, by, bw, bh) in L['columns']:
+        poly(d, chamfer_poly(bx, by, bw, bh, 14), fill=BOX, outline=HILITE, width=2)
+        for r in range(L['rows']):
+            y = by + L['row_top'] + r * L['row_pitch']
+            vx = bx + bw - L['pad'] - L['value_w']
+            text_well(d, bx + L['pad'], y, vx - bx - L['pad'] - 10, L['row_h'])
+            slot(d, vx, y, L['value_w'], L['row_h'])
+    info_box(d, *L['info'])
+    return img.resize((W, H), Image.LANCZOS)
+
+
 def main():
     outputs = {
         'osh_career_center.png': career_center(),
@@ -289,6 +335,11 @@ def main():
         'osh_tile_ck.png': slot_texture(*TILE_SIZE, SLOT_PRESS),
         'osh_value_hv.png': slot_texture(*VALUE_SIZE, SLOT_HOVER),
         'osh_value_ck.png': slot_texture(*VALUE_SIZE, SLOT_PRESS),
+        'osh_keys_center.png': keys_center(),
+        'osh_key_hv.png': slot_texture(*KEY_SIZE, SLOT_HOVER),
+        'osh_key_ck.png': slot_texture(*KEY_SIZE, SLOT_PRESS),
+        'osh_tool_hv.png': slot_texture(*TOOL_SIZE, SLOT_HOVER),
+        'osh_tool_ck.png': slot_texture(*TOOL_SIZE, SLOT_PRESS),
     }
     for name, img in outputs.items():
         img.save(HERE / name, optimize=True)

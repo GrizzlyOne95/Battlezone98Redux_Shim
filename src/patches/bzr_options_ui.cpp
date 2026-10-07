@@ -264,6 +264,69 @@ namespace BZROpenShim
             120.0f, 190.0f, 150.0f, 160.0f, 90.0f, 90.0f, 120.0f
         };
 
+        // Painted mode: with osh_keys_center.png deployed, the editor swaps the
+        // Input screen's centre panel for it and places its widgets over the
+        // panel's painted slots instead of building flat masks and plates. The
+        // geometry is the layout contract with KEYS_LAYOUT in
+        // resources/ui/custom_widgets/mkscreens.py.
+        constexpr const char* kInputBindingPanelTexture = "osh_keys_center.png";
+        static bool g_InputBindingUiPainted = false;
+
+        static UiOptionsPageLayout BuildKeysPanelLayout()
+        {
+            UiOptionsPageLayout layout = {};
+            constexpr float kColumnX[2] = { 228.0f, 736.0f };
+            constexpr float kColumnW = 476.0f;
+            constexpr float kColumnY = 316.0f;
+            constexpr float kRowTop = 10.0f;
+            constexpr float kPad = 16.0f;
+            constexpr float kValueW = 196.0f;
+            constexpr float kLabelInset = 28.0f;
+            constexpr float kInfoX = 228.0f, kInfoY = 702.0f, kInfoW = 984.0f, kInfoH = 116.0f;
+
+            layout.title = { 470.0f, 132.0f, 500.0f, 56.0f };
+            const float textX = kInfoX + 24.0f;
+            const float textW = kInfoW - 48.0f;
+            layout.headerTextWidth = textW;
+            layout.statusLine1 = { textX, kInfoY + 14.0f, textW, 30.0f };
+            layout.statusLine2 = { textX, kInfoY + 46.0f, textW, 30.0f };
+            layout.contextLine1 = { textX, kInfoY + kInfoH - 42.0f, textW, 30.0f };
+
+            layout.toolbarY = 264.0f;
+            layout.toolbarHeight = 40.0f;
+            layout.toolbarLeftX = 228.0f;
+            layout.toolbarRightX = 1212.0f;
+            layout.toolbarGap = 10.0f;
+
+            layout.rowLeftX = kColumnX[0] + kLabelInset;
+            layout.rowRightX = kColumnX[1] + kLabelInset;
+            layout.rowStartY = kColumnY + kRowTop;
+            layout.rowPitch = 36.0f;
+            layout.rowHeight = 30.0f;
+            layout.rowLabelYInset = 2.0f;
+            layout.rowValueOffsetX = kColumnW - kPad - kValueW - kLabelInset;
+            layout.rowValueWidth = kValueW;
+            layout.rowValueTextWidth = kValueW - 20.0f;
+            layout.rowLabelWidth = layout.rowValueOffsetX - 22.0f;
+            layout.rowLabelTextWidth = layout.rowLabelWidth - 30.0f;
+            return layout;
+        }
+
+        static UiOptionsPageLayout GetInputBindingUiLayout()
+        {
+            return g_InputBindingUiPainted ? BuildKeysPanelLayout()
+                                           : BuildUiOptionsPageLayout(kInputBindingUiRowsPerColumn);
+        }
+
+        // Button skins for painted mode: hover and press only, so the button
+        // rests on its painted slot like the stock option buttons.
+        struct InputBindingUiSkin
+        {
+            const char* over;
+            const char* on;
+        };
+        static const InputBindingUiSkin* g_InputBindingUiSkin = nullptr;
+
         static InlineDetour32 g_OptionsInputPopulateUiDetour = {};
         static InlineDetour32 g_OptionsInputKeyReleasedDetour = {};
 
@@ -1634,7 +1697,10 @@ namespace BZROpenShim
                 if (!slot)
                     return false;
 
-                if (IsUiTextureFileAvailable("uibtn.png")) {
+                if (g_InputBindingUiSkin) {
+                if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, g_InputBindingUiSkin->over);
+                if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, g_InputBindingUiSkin->on);
+            } else if (IsUiTextureFileAvailable("uibtn.png")) {
                 if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, "uibtn.png");
                 if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, "uibtnhv.png");
                 if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, "uibtnhv.png");
@@ -2390,13 +2456,15 @@ namespace BZROpenShim
             const size_t pageCount =
                 totalRows == 0 ? 1 : ((totalRows - 1) / kInputBindingUiVisibleRowCount) + 1;
 
+            // Painted mode puts the header in the title plate, which holds a
+            // short title; the active family shows on its toolbar button.
             const char* headerText =
-                g_InputBindingUiActiveFamily == InputBindingMapFamily::GameKey
+                g_InputBindingUiPainted ? "KEY BINDINGS"
+                : g_InputBindingUiActiveFamily == InputBindingMapFamily::GameKey
                     ? "RTS & Game Actions"
                     : "Movement & Vehicle Controls";
 
-            const UiOptionsPageLayout layout =
-                BuildUiOptionsPageLayout(kInputBindingUiRowsPerColumn);
+            const UiOptionsPageLayout layout = GetInputBindingUiLayout();
 
             SetInputBindingUiLabelTextFitted(g_InputBindingUiHeaderLabel, headerText,
                                              layout.headerTextWidth);
@@ -3649,7 +3717,9 @@ namespace BZROpenShim
                 ui.rows[slot] = row;
                 _snprintf_s(name, _TRUNCATE, "OpenShimCategory_Label%zu", slot);
                 void* label = Shell::AddLabel(panel, panel, name, ShimRowLabelRect(slot), "");
-                SetInputBindingUiLabelTextFitted(label, ShimRowLabel(row), ShimRowLabelRect(slot).w);
+                // The text measure runs a little narrow for this font size, so
+                // fit with a margin; the label rect itself stays the full well.
+                SetInputBindingUiLabelTextFitted(label, ShimRowLabel(row), ShimRowLabelRect(slot).w - 34.0f);
                 _snprintf_s(name, _TRUNCATE, "OpenShimCategory_Value%zu", slot);
                 ui.values[slot] = Shell::AddButton(panel, panel, name, ShimValueRect(slot), "", skin, 1.0f,
                                                    0.0f, kShimCategoryRowClicks[slot], &OnShimCategoryHover);
@@ -3817,27 +3887,48 @@ namespace BZROpenShim
             void* const controlParent =
                 g_InputBindingUiMiddleOverlay ? g_InputBindingUiMiddleOverlay : screen;
 
-            const UiOptionsPageLayout layout =
-                BuildUiOptionsPageLayout(kInputBindingUiRowsPerColumn);
+            // Painted mode needs the panel art, the overlay to put it on, and
+            // the shell kit for the title label; otherwise the flat masks and
+            // plates are built as before.
+            g_InputBindingUiPainted =
+                g_InputBindingUiMiddleOverlay && g_BzrFn_SetTextureOff &&
+                ShellScreens::IsAvailable() &&
+                ShellScreens::IsTextureDeployed(kInputBindingPanelTexture) &&
+                ShellScreens::IsTextureDeployed("osh_key_hv.png") &&
+                ShellScreens::IsTextureDeployed("osh_tool_hv.png");
+            const UiOptionsPageLayout layout = GetInputBindingUiLayout();
+            static const InputBindingUiSkin kKeySkin = { "osh_key_hv.png", "osh_key_ck.png" };
+            static const InputBindingUiSkin kToolSkin = { "osh_tool_hv.png", "osh_tool_ck.png" };
 
             const unsigned screenTag = static_cast<unsigned>(reinterpret_cast<uintptr_t>(screen));
             char controlName[64] = {};
 
-            UiOptionsPageBackgroundSlots background = {};
-            background.topMask = &g_InputBindingUiTopMask;
-            background.contentMask = &g_InputBindingUiContentMask;
-            CreateInputBindingUiPageBackground(background,
-                                               g_InputBindingUiDecor,
-                                               visualParent,
-                                               controlParent,
-                                               "OpenShimInput",
-                                               screenTag,
-                                               layout);
-
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputHeader_%08X", screenTag);
-            CreateInputBindingUiLabel(g_InputBindingUiHeaderLabel, controlParent, controlName, "",
-                                      layout.title.x, layout.title.y,
-                                      layout.title.width, layout.title.height);
+            if (g_InputBindingUiPainted)
+            {
+                g_BzrFn_SetTextureOff(g_InputBindingUiMiddleOverlay, kInputBindingPanelTexture);
+                if (!g_InputBindingUiHeaderLabel)
+                    g_InputBindingUiHeaderLabel = ShellScreens::AddLabel(
+                        controlParent, controlParent, controlName,
+                        { layout.title.x, layout.title.y, layout.title.width, layout.title.height },
+                        "", ShellScreens::kTitleLabelFlags);
+            }
+            else
+            {
+                UiOptionsPageBackgroundSlots background = {};
+                background.topMask = &g_InputBindingUiTopMask;
+                background.contentMask = &g_InputBindingUiContentMask;
+                CreateInputBindingUiPageBackground(background,
+                                                   g_InputBindingUiDecor,
+                                                   visualParent,
+                                                   controlParent,
+                                                   "OpenShimInput",
+                                                   screenTag,
+                                                   layout);
+                CreateInputBindingUiLabel(g_InputBindingUiHeaderLabel, controlParent, controlName, "",
+                                          layout.title.x, layout.title.y,
+                                          layout.title.width, layout.title.height);
+            }
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputStatus_%08X", screenTag);
             CreateInputBindingUiLabel(g_InputBindingUiStatusLabel, controlParent, controlName, "",
                                       layout.statusLine1.x, layout.statusLine1.y,
@@ -3858,6 +3949,7 @@ namespace BZROpenShim
                                toolbar,
                                kInputBindingUiToolbarSlotCount);
 
+            g_InputBindingUiSkin = g_InputBindingUiPainted ? &kToolSkin : nullptr;
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputBack_%08X", screenTag);
             CreateInputBindingUiButton(g_InputBindingUiBackButton, controlParent, controlName, "Back",
                                        toolbar[0].x, toolbar[0].y, toolbar[0].width, toolbar[0].height,
@@ -3893,6 +3985,7 @@ namespace BZROpenShim
                                        toolbar[6].x, toolbar[6].y, toolbar[6].width, toolbar[6].height,
                                        reinterpret_cast<void*>(InputBindingRefreshClick));
 
+            g_InputBindingUiSkin = g_InputBindingUiPainted ? &kKeySkin : nullptr;
             for (size_t slot = 0; slot < kInputBindingUiVisibleRowCount; ++slot)
             {
                 const size_t column = slot / kInputBindingUiRowsPerColumn;
@@ -3900,7 +3993,8 @@ namespace BZROpenShim
                 const float baseX = (column == 0) ? layout.rowLeftX : layout.rowRightX;
                 const float y = layout.rowStartY + (static_cast<float>(row) * layout.rowPitch);
                 std::snprintf(controlName, sizeof(controlName), "OpenShimInputRowPlate_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiPlate(g_InputBindingUiRowBackdrops[slot], controlParent, controlName,
+                if (!g_InputBindingUiPainted)
+                    CreateInputBindingUiPlate(g_InputBindingUiRowBackdrops[slot], controlParent, controlName,
                                           baseX - layout.rowPlateInsetX, y,
                                           layout.rowPlateWidth,
                                           layout.rowHeight);
@@ -3915,6 +4009,7 @@ namespace BZROpenShim
                                            layout.rowValueWidth, layout.rowHeight,
                                            kInputBindingRowClickCallbacks[slot]);
             }
+            g_InputBindingUiSkin = nullptr;
         }
 
 
@@ -4772,8 +4867,9 @@ namespace BZROpenShim
         // slots painted into esc_center.png. With OpenShim's panel art
         // deployed the column becomes five even slots (OPTIONS_LAYOUT in
         // mkscreens.py): the panel is swapped for osh_options_center.png and
-        // the four stock buttons are re-placed on its slots before the first
-        // layout pass, with OpenShim Options as the fifth. Without the art the
+        // the four stock buttons are moved onto its slots (design rect
+        // rewritten, layout run again), with OpenShim Options as the fifth.
+        // Without the art the
         // stock layout is left alone and the button squeezes in underneath.
         constexpr const char* kOptionsPanelTexture = "osh_options_center.png";
         constexpr float kOptionsColumnX = 508.0f;
@@ -4785,12 +4881,35 @@ namespace BZROpenShim
         // The stock option buttons' caption scale (FUN_007c30e0(1.3f)).
         constexpr float kOptionsButtonTextScale = 1.3f;
 
-        // Finds the four stock column buttons by their constructor geometry
-        // and moves them onto the five-slot column. All or nothing: a column
-        // that does not look stock is left exactly as built.
+        // cUI_View keeps the ctor's design rect (1440x1080 space) at +0xEC and
+        // the laid-out screen rect at +4; the ctor runs the layout
+        // (UiWidgetLayout, 0x007D14B0) immediately, so moving a built widget
+        // means rewriting the design rect and running the layout again, as
+        // the map preview fix does.
+        constexpr size_t kUiViewDesignRectOffset = 0xEC;
+        using FnUiWidgetLayout = void(__thiscall*)(void* view, float x, float y, float w, float h);
+
+        static FnUiWidgetLayout ResolveUiWidgetLayout()
+        {
+            static const FnUiWidgetLayout layout = [] {
+                uint32_t address = 0;
+                const HookEngine::EngineRow rows[] = { { "UiWidgetLayout", &address } };
+                if (!HookEngine::BindEngineRows("Options column", rows))
+                    return FnUiWidgetLayout{};
+                return reinterpret_cast<FnUiWidgetLayout>(static_cast<uintptr_t>(address));
+            }();
+            return layout;
+        }
+
+        // Finds the four stock column buttons by their ctor design rect and
+        // moves them onto the five-slot column. All or nothing: a column that
+        // does not look stock is left exactly as built.
         static bool RespaceStockOptionsColumn(void* overlay)
         {
-            std::array<float*, kOptionsStockButtonCount> rects = {};
+            const FnUiWidgetLayout layout = ResolveUiWidgetLayout();
+            if (!layout)
+                return false;
+            std::array<uint8_t*, kOptionsStockButtonCount> buttons = {};
             size_t found = 0;
             __try
             {
@@ -4804,12 +4923,12 @@ namespace BZROpenShim
                     auto* const child = reinterpret_cast<uint8_t*>(*slot);
                     if (!child || *reinterpret_cast<uintptr_t*>(child) != g_UiButtonVtableAddr)
                         continue;
-                    auto* const rect = reinterpret_cast<float*>(child + 4);
-                    if (rect[0] != kOptionsColumnX || rect[2] != kOptionsColumnW || rect[3] != 130.0f)
+                    const auto* const design = reinterpret_cast<const float*>(child + kUiViewDesignRectOffset);
+                    if (design[0] != kOptionsColumnX || design[2] != kOptionsColumnW || design[3] != 130.0f)
                         continue;
                     if (found == kOptionsStockButtonCount)
                         return false;
-                    rects[found++] = rect;
+                    buttons[found++] = child;
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -4819,12 +4938,37 @@ namespace BZROpenShim
             if (found != kOptionsStockButtonCount)
                 return false;
 
-            std::sort(rects.begin(), rects.end(),
-                      [](const float* a, const float* b) { return a[1] < b[1]; });
+            std::sort(buttons.begin(), buttons.end(), [](const uint8_t* a, const uint8_t* b) {
+                return reinterpret_cast<const float*>(a + kUiViewDesignRectOffset)[1] <
+                       reinterpret_cast<const float*>(b + kUiViewDesignRectOffset)[1];
+            });
             for (size_t i = 0; i < kOptionsStockButtonCount; ++i)
             {
-                rects[i][1] = kOptionsSlotY0 + kOptionsSlotPitch * static_cast<float>(i);
-                rects[i][3] = kOptionsSlotH;
+                auto* const design = reinterpret_cast<float*>(buttons[i] + kUiViewDesignRectOffset);
+                const float newY = kOptionsSlotY0 + kOptionsSlotPitch * static_cast<float>(i);
+                // The caption (+0x144) is its own text view, built by the
+                // button ctor on the same layout parent at the button's rect
+                // plus the caption offset; it moves with the button.
+                auto* const caption = *reinterpret_cast<uint8_t**>(buttons[i] + 0x144);
+                if (caption)
+                {
+                    auto* const captionDesign = reinterpret_cast<float*>(caption + kUiViewDesignRectOffset);
+                    captionDesign[1] += newY - design[1];
+                    captionDesign[3] = kOptionsSlotH;
+                    layout(caption, captionDesign[0], captionDesign[1], captionDesign[2], captionDesign[3]);
+                }
+                design[1] = newY;
+                design[3] = kOptionsSlotH;
+                layout(buttons[i], design[0], design[1], design[2], design[3]);
+                // A cUI_Text builds its glyphs when its text is set, so the
+                // moved caption keeps drawing at the old place until the text
+                // is set again. Its buffer is at +0x144 (2000 bytes).
+                if (caption && g_BzrFn_SetButtonLabel)
+                {
+                    char text[256] = {};
+                    strncpy_s(text, reinterpret_cast<const char*>(caption + 0x144), _TRUNCATE);
+                    g_BzrFn_SetButtonLabel(buttons[i], text);
+                }
             }
             return true;
         }
