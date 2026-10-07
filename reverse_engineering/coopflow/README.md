@@ -79,6 +79,7 @@ leaves staging at "Vehicle not selected", and Ready never completes.
 | any | `host-leaves` | The host quits mid-mission; the guest detects leader departure, fails the mission and keeps running |
 | misn03 | `replication-cases` | 20 isolated stock-Lua replication cases (see [REPLICATION_FINDINGS.md](REPLICATION_FINDINGS.md)) |
 | misn03 | `coop-pda-controls` (with the `coop-comms` override) | CR's co-op PDA by real key presses on both clients: X open/close on the Co-op page, [ ] paging, arrow rows, PDA ping, quick-J terrain/object pings, cooldown, rescue request/replies, film and Esc-menu suppression, Q as a ping-key candidate |
+| misn03 | `coop-respawn` (with the `coop-comms` override) | CR co-op respawns: the guest respawns near the host 700+ m from spawn (both clients agree), players dying together use their own fallback, and the fifth death fails the mission on both clients |
 | any | `gamekey-names` | Not a test: which real key presses reach the mission `GameKey` callback vs. the raw key state (network games drop many keys) |
 
 Run any scenario with `-Scenario <name>`. The runner looks for
