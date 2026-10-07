@@ -48,7 +48,7 @@ $script:CRFlowCoopRoot = $BZRCoopRoot
 # Rows in the host's "All Maps" list at 1280x720 (12 px pitch, first row 99).
 # The lobby step confirms the pick from the server's gameSettings, so a stale
 # row fails the run instead of testing the wrong map.
-$KnownMapRows = @{ misn03 = 147; misn02b = 159; misn04 = 171 }
+$KnownMapRows = @{ misn05 = 128; misn03 = 147; misn02b = 159; misn04 = 171 }
 $Ports = @(@{ p = 'TCP'; n = 1337 }, @{ p = 'UDP'; n = 1338 }, @{ p = 'UDP'; n = 1339 }, @{ p = 'TCP'; n = 8080 })
 $PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 

@@ -231,7 +231,7 @@ function Send-CRFlowKey([int]$Client, [int]$VirtualKey, [switch]$Focused, [int]$
     # Posted messages reach keys the game reads from its window queue (film
     # skip). -Focused sends real input for keys it polls (exu.GetGameKey).
     if ($Focused) { Send-BZRClientKeyFocused (Get-CRFlowClient $Client).pid $VirtualKey $HoldMs -WithVk:$WithVk }
-    else { Send-BZRClientKey (Get-CRFlowClient $Client).pid $VirtualKey }
+    else { Send-BZRClientKey (Get-CRFlowClient $Client).pid $VirtualKey $HoldMs }
 }
 
 # ---------------------------------------------------------------- events --
