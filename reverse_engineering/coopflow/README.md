@@ -78,6 +78,8 @@ leaves staging at "Vehicle not selected", and Ready never completes.
 | misn04 | `endfilm` | Jumps the host to the win and checks the closing film on both clients: camera pod on the Face summit, both cameras on `endcin`, pod removed, `misn04w1.des` on both. Does not need audio |
 | any | `host-leaves` | The host quits mid-mission; the guest detects leader departure, fails the mission and keeps running |
 | misn03 | `replication-cases` | 20 isolated stock-Lua replication cases (see [REPLICATION_FINDINGS.md](REPLICATION_FINDINGS.md)) |
+| misn03 | `coop-pda-controls` (with the `coop-comms` override) | CR's co-op PDA by real key presses on both clients: X open/close on the Co-op page, [ ] paging, arrow rows, PDA ping, quick-J terrain/object pings, cooldown, rescue request/replies, film and Esc-menu suppression, Q as a ping-key candidate |
+| any | `gamekey-names` | Not a test: which real key presses reach the mission `GameKey` callback vs. the raw key state (network games drop many keys) |
 
 Run any scenario with `-Scenario <name>`. The runner looks for
 `scenarios\<mission>-<name>.ps1` first, then `scenarios\<name>.ps1`, or takes
@@ -101,7 +103,10 @@ Building blocks, from `BZRCoopMission.ps1`:
 - `Wait-CRFlowOp <client> AddObjective 'x.otf'` waits until a presentation call
   reached that client's native API. `Wait-CRFlowEvent` handles any probe
   event with a `-Where` filter.
-- `Send-CRFlowKey <client> 0x20`: a key press (Space skips a film).
+- `Send-CRFlowKey <client> 0x20`: a posted key press (Space skips a film). Add `-Focused`
+  for real input (SendInput scan codes; takes the desktop focus for the press,
+  then gives it back). Keys the game polls (`exu.GetGameKey`) and the mission
+  `GameKey` callback only see real input.
 - Checks: `Test-CRFlowResultParity`, `Test-CRFlowWorldParity`,
   `Test-CRFlowTransport`. The runner adds presentation-stream parity and a
   Lua-error scan at the end. A scenario that ends the session unevenly sets
@@ -117,6 +122,8 @@ plus these helpers:
 - `heal(h)`
 - `ff('^timer_field$')` pulls a future `GetTime()` deadline in `M` to now.
 - `every(name, seconds, fn)` runs a task until `fn` returns true; `cancel(name)`.
+- `setCameraActive(v)` sets the mission's own film flag (`localCameraActive`) for
+  code gated on it, e.g. PDA suppression; run the native camera yourself.
 - `xyz(h)`, `findNear(odf, x, z, r)`, `inbox()` (test `Send` messages)
 
 Variables a command assigns persist for later commands.
@@ -150,6 +157,14 @@ Rules that keep results meaningful:
   Track the peer's own camera and pop only what it pushed.
 
 ## Known environment gotchas
+
+- Launching Windows PowerShell 5.1 from PowerShell 7 or Git Bash inherits
+  PowerShell 7's `PSModulePath`; 5.1 then cannot load its own modules
+  (`Get-FileHash` not found in Prepare). Clear it first (`env -u PSModulePath`).
+- In a network game Redux calls the mission `GameKey` callback only for some keys
+  (reliably Y, digits, /; J, [ ], arrows and Enter only sometimes), though the
+  raw key state sees all of them (`scenarios\gamekey-names.ps1`). Y is the stock
+  "ally with team" key online.
 
 - `openshim.ini` `RawMouseInput = 1` ignores posted clicks. Prepare forces it
   to 0 in the test instances.

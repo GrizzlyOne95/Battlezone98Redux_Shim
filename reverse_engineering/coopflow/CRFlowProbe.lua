@@ -465,6 +465,11 @@ function Helpers.snap() return snapshot() end
 function Helpers.role() return roleInfo() end
 function Helpers.players() return players() end
 function Helpers.L() return getLocals() end
+function Helpers.setCameraActive(v)
+    if not opts.setCameraActive then return false end
+    opts.setCameraActive(v)
+    return getLocals().localCameraActive == (v == true)
+end
 
 function Helpers.craft(team)
     local list = {}
