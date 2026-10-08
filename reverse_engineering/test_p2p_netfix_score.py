@@ -5,6 +5,7 @@
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 
@@ -214,6 +215,39 @@ class ScoreTests(unittest.TestCase):
             self.assertEqual(score.aggregate(matrix)["acceptance"], "FAIL")
         finally:
             shutil.rmtree(matrix, ignore_errors=True)
+
+
+class GpuQueryTests(unittest.TestCase):
+    """The event-log adapter fails closed: only an explicit count is evidence."""
+
+    @staticmethod
+    def runner(returncode=0, stdout="", raises=None):
+        def run(script):
+            if raises:
+                raise raises
+            # Errors must stop the query; nothing may silence them.
+            assert "NoMatchingEventsFound" in script and "SilentlyContinue" not in script
+            return subprocess.CompletedProcess(["powershell"], returncode, stdout, "")
+        return run
+
+    def test_explicit_zero_and_count(self):
+        self.assertEqual(score.gpu_events(0, 1, self.runner(stdout="COUNT 0\r\n")), 0)
+        self.assertEqual(score.gpu_events(0, 1, self.runner(stdout="COUNT 16\n")), 16)
+
+    def test_query_error_is_unknown(self):
+        out = "ERR UnauthorizedAccessException,Microsoft.PowerShell.Commands.GetWinEventCommand\n"
+        self.assertIsNone(score.gpu_events(0, 1, self.runner(3, out)))
+
+    def test_nonzero_returncode_is_unknown(self):
+        self.assertIsNone(score.gpu_events(0, 1, self.runner(1, "COUNT 0\n")))
+
+    def test_empty_or_garbage_output_is_unknown(self):
+        for out in ("", "  \n", "0", "COUNT", "COUNT -1", "COUNT 3\nCOUNT 4", "Get-WinEvent : error"):
+            self.assertIsNone(score.gpu_events(0, 1, self.runner(stdout=out)), out)
+
+    def test_runner_failure_is_unknown(self):
+        self.assertIsNone(score.gpu_events(0, 1, self.runner(raises=subprocess.TimeoutExpired("powershell", 90))))
+        self.assertIsNone(score.gpu_events(0, 1, self.runner(raises=OSError("no powershell"))))
 
 if __name__ == "__main__":
     unittest.main()

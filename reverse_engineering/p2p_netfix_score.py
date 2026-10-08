@@ -126,21 +126,50 @@ def crash_evidence(run, start, end):
     return found
 
 
-def gpu_events(start, end):
+GPU_EVENT_QUERY = r"""
+$ErrorActionPreference = 'Stop'
+try {
+    $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; StartTime = [datetime]'%(start)s'; EndTime = [datetime]'%(end)s' })
+} catch {
+    # Only "no records in the window" is a genuine zero; anything else
+    # (access denied, log unavailable, bad filter) is unknown evidence.
+    if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') { 'COUNT 0'; exit 0 }
+    "ERR $($_.FullyQualifiedErrorId)"; exit 3
+}
+# Provider names are post-filtered: a FilterHashtable ProviderName list that
+# names a provider not registered here (amdkmdag, igfx) throws instead.
+'COUNT ' + @($events | Where-Object { $_.ProviderName -match 'nvlddmkm|dxgkrnl|amdkmdag|igfx' -or $_.Id -eq 4101 }).Count
+"""
+
+
+def run_powershell(script):
+    return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                          capture_output=True, text=True, timeout=90)
+
+
+def parse_gpu_query(returncode, stdout):
+    """Driver reset count, or None when the evidence is unavailable."""
+    if returncode != 0:
+        return None
+    lines = [l.strip() for l in (stdout or "").splitlines() if l.strip()]
+    if len(lines) != 1 or not re.fullmatch(r"COUNT \d+", lines[0]):
+        return None
+    return int(lines[0].split()[1])
+
+
+def gpu_events(start, end, runner=run_powershell):
     # Driver resets only: Display 4127 (an HDR/brightness notice) fires on
     # every client launch and is not one.
     fmt = "%Y-%m-%dT%H:%M:%S"
-    s = datetime.datetime.fromtimestamp(start).strftime(fmt)
-    e = datetime.datetime.fromtimestamp(end + 10).strftime(fmt)  # small shutdown allowance only
-    ps = (f"(Get-WinEvent -FilterHashtable @{{LogName='System';StartTime=[datetime]'{s}';EndTime=[datetime]'{e}'}} "
-          "-ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -match 'nvlddmkm|dxgkrnl|amdkmdag|igfx' "
-          "-or $_.Id -eq 4101 } | Measure-Object).Count")
+    script = GPU_EVENT_QUERY % {
+        "start": datetime.datetime.fromtimestamp(start).strftime(fmt),
+        "end": datetime.datetime.fromtimestamp(end + 10).strftime(fmt),  # small shutdown allowance only
+    }
     try:
-        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                             capture_output=True, text=True, timeout=90)
-        return int(out.stdout.strip() or 0)
-    except (OSError, ValueError, subprocess.SubprocessError):
+        out = runner(script)
+    except (OSError, subprocess.SubprocessError):
         return None
+    return parse_gpu_query(out.returncode, out.stdout)
 
 
 def load_json(path):
