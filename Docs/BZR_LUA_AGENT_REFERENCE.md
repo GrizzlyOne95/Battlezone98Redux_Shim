@@ -52,10 +52,57 @@ When a runtime finding contradicts the HTML reference, document both rather than
 11. **Exact capitalization is part of the API.** Do not “correct” names such as `UpdateEarthQuake` or `isPortalActive`.
 12. **Project/runtime findings outrank an HTML statement when the conflict is explicit and reproducible in Redux.**
 13. **Do not mass-build in `Start()`.** The load frame shares one 1024-entry GEO table. Models first loaded after it fills get no geometry, so they have no bounds or collision for the whole mission. Queue large builds across later updates.
+14. **Keep the camera stack balanced and the camera target steady.** Call `CameraFinish()` only while your own `CameraReady()` camera is up. Swapping a `CameraPath`/`CameraObject` target mid-shot snaps the view; cut instead (see [Cinematic camera](#cinematic-camera)).
+
+15. **Never call `SetIndependence` on a camera pod, pickup, or other non-unit fixture.** It assumes unit AI layout; on `PowerUpProcess` it writes past the native allocation. A valid handle and Lua `pcall` do not make it safe. Use an explicit known-craft allowlist (see [SetIndependence heap corruption](#setindependence--native-heap-corruption-on-non-unit-ai)).
 
 ---
 
 # High-priority stock bugs and quirks
+
+## `SetIndependence` — native heap corruption on non-unit AI
+
+Confirmed in GOG Redux 2.2.301 on 2026-10-08 during Operation Livewire validation.
+The destruction setup called `SetIndependence(handle, 0)` on every object in a
+presentation group. That included `sxanchor`, a `camerapod` whose `aiName` and
+`aiName2` select `PowerUpProcess`.
+
+`PowerUpProcess` is allocated **24 bytes**. The stock independence setter writes
+an integer at **byte offset 24**, just beyond that allocation. A native hardware
+watchpoint caught the setter changing the heap tail guard to zero at mission
+setup. The resulting crash was detected later in Ogre skeleton destruction when
+the first tank died. That later stack does not identify the original writer.
+
+**Agent rule:** issue unit AI commands only to explicitly classified, known craft
+with suitable unit AI. Do not classify an entire display group by its scene name,
+team, non-player status, `IsValid`, or the presence of an AI process. Camera pods,
+pickups, static markers, and buildings must not inherit craft commands from a
+blanket fixture loop. Validate any exceptional ODF's AI separately.
+
+```lua
+-- Unsafe: a display group can contain camera pods and static buildings.
+if spec.group == "chunks" then pcall(SetIndependence, h, 0) end
+
+-- Safe fixture policy: opt in only the known craft in the authored manifest.
+if spec.holdPosition then
+    SetIndependence(h, 0)
+    Stop(h, 1)
+end
+```
+
+`pcall` catches Lua errors; it cannot prevent a native write to an accessible but
+out-of-bounds address. A run that happens to complete under another render
+profile is not proof of safety: heap layout changes can delay detection. Require
+both the intended destruction sequence and normal shutdown when qualifying a
+heap-corruption fix. Host tests should reject AI commands on non-craft fixtures
+even when wrapped in `pcall`.
+
+The fix was limited to the mission's craft allowlist. Thirteen destruction cues
+and the full 400-second tour completed with clean shutdown using the original
+installed DX11 Enhanced OpenShim DLL. An experimental renderer input-probe change
+was discarded. See CR `Docs/LIVEWIRE_VALIDATION_20261008.md` for evidence boundaries
+and unresolved trailer checks. This finding does not qualify other non-unit AI
+commands or other game builds.
 
 ## `ObjectiveObjects()` — BROKEN IN STOCK REDUX
 
@@ -219,6 +266,47 @@ Lua-built building is a dot with no collision while the same ODF placed in the e
 Engine detail (GOG 2.2.301): the table is at `0x02A0DB28` (0x18-byte entries) with its count at `0x00917B04`. The
 lookup is `0x004E3810` and the eviction `0x004E3750`. A part with no geometry fails LOD selection (`0x004E3620`), so
 the object's bounding box (`0x0062E3F0`) comes back empty.
+
+## Camera stack: `"Fsm error: Camera Stack 0verfow"`
+
+The alert text is misleading. In the 1.5 source the only place it is raised is `fsm_pop_camera`, when a pop finds the
+stack already empty, so in practice it means **one `CameraFinish()` too many**. Redux shows the same alert (with an
+Okay/Cancel dialog over the game) and it was reproduced on 2026-10-07 by a mission that called `CameraFinish()`
+during setup, before its first `CameraReady()`. misn04 hit the opposite imbalance: `CameraReady()` was called every
+frame while `CameraFinish()` ran once, and that surfaced on mission end as `"Camera Stack Underfow"`.
+
+Unsafe:
+
+```lua
+local function EndCamera() CameraFinish() end   -- called from reset/cleanup paths too
+```
+
+Safer:
+
+```lua
+local cameraUp = false
+local function BeginCamera() if cameraUp then CameraFinish() end; CameraReady(); cameraUp = true end
+local function EndCamera() if cameraUp then CameraFinish() end; cameraUp = false end
+```
+
+**Agent rule:** track whether your camera is up and only pop it then. Any cleanup or replay path that "makes sure the
+camera is closed" must use the same flag.
+
+## Text BZN files must use CRLF line endings
+
+The Redux loader rejects an LF-only text BZN. The only symptom is `Quiting Game because failed to load game files`
+in `BZLogger.txt`, immediately after `Sim Startup: Mission Load` and with no other error. OpenShim's
+`TraceBznLoad = 1` still lists every `[GameObject]`, so the objects are not the problem. The same file loads once it
+is converted to CRLF (verified 2026-10-07 with `sxshow.bzn`).
+
+This bites generated maps: Python's `write_text(..., newline="\n")` produces a file that only works after git
+re-checks it out through `.gitattributes` (`*.bzn text eol=crlf`). Write `newline="\r\n"` when generating a BZN.
+
+## `print()` lines in `BZLogger.txt` have no line break
+
+Mission `print()` output is written to `BZLogger.txt` without a trailing newline, so the next log line's timestamp is
+glued onto it (`...value2026-10-07 19:33:51.07 ...`). When printing machine-readable data, end each record with a
+delimiter and parse up to the next `\d{4}-\d\d-\d\d ` timestamp.
 
 ## `SetAIControl()` timing
 
@@ -968,6 +1056,30 @@ boolean CameraCancelled()
 
 `CameraObject` offsets are in centimeters.
 
+### How `CameraPath` moves (1.5 source, consistent with Redux measurement)
+
+`CameraPath` → `fsm_camera_trans_obj` in the 1.5 source. On 2026-10-07 the Redux camera was sampled every frame
+through EXU `GetCameraTransformMatrix` and matched this model.
+
+- **Speed is centimetres per second along the path.** Each call advances `speed / 100 × dt` metres along the current
+  segment (`dl = 1 / segment length`). `speed = 850` measured as 8.5 m/s.
+- **Height is centimetres above the terrain at the camera's x/z.** The camera follows the ground (`Terrain_FindFloor`),
+  so a path that crosses a cliff lip makes the camera rise or drop with it. Keep cinematic paths on even ground, or
+  accept the move.
+- **Position is low-pass filtered**: each call moves the drawn position 30% of the way to the moving target point,
+  so position is smooth even with a few widely spaced points. Corners are not splined; the filter rounds them.
+- **Aim is not filtered.** Every call points the camera straight at `target`. Swapping to a different `target`
+  handle snaps the view in one frame; a stationary or smoothly moving target pans smoothly. A dead or removed target
+  makes your fallback target snap in.
+- **Progress is remembered per path.** The camera continues while successive calls name the same path. Calling a
+  different path (or `CameraPathDir` / `CameraObject` in between) restarts from that path's first point. After the
+  last segment the call returns `true` (arrived) and the *next* call starts the path again from point 0. Stop calling
+  it, or switch shots, before the path runs out. (Source-derived; not yet observed in Redux.)
+- A **hard cut** between two paths: `CameraFinish(); CameraReady()` then the new `CameraPath`. This keeps the stack
+  balanced (host-tested); how clean the cut looks in Redux is still to be confirmed.
+
+`CameraPath` must be called every update while the shot is live; it does not run on its own.
+
 ## Info display
 
 ```text
@@ -1002,6 +1114,12 @@ number height, vector normal = GetFloorHeightAndNormal(pos)
 ```
 
 Floor queries include upward-facing polygons on floor-owner entities; terrain queries use the terrain height field.
+
+**Surveying a map for staging.** `GetTerrainHeightAndNormal(SetVector(x, 0, z))` is cheap. A one-time sweep of a
+1500 × 1700 m area on a 20 m grid (about 6,500 calls) runs inside a single update with no visible hitch. Printing the
+results lets offline tools find flat staging areas and check that camera paths stay off cliff lips. That is faster
+and more reliable than fitting the HG2 to world coordinates by hand. Flat ground fits a world-to-grid mapping in many
+ways, so object heights alone do not pin it down.
 
 ## Map / files / effects
 
@@ -1211,6 +1329,27 @@ If a shim/EXU compatibility patch later provides a proven full iterator, code th
 Campaign Reimagined uses the game's legacy short-name conventions. ODF basenames and files directly referenced from Lua should remain **8 characters or fewer where applicable**.
 
 This is a content/integration constraint rather than a Lua language rule, but agents editing mission scripts must preserve it.
+
+Related content findings that mission scripts depend on (2026-10-07, Operation Livewire):
+
+- **Launching a mission from the command line:** pass the bare file name (`battlezone98redux.exe /nointro sxshow.bzn`).
+  The argument parser treats `/` as a switch prefix, so `mods/<id>/sxshow.bzn` is split and the game goes looking for
+  a terrain named after the folder.
+- **`shieldtower` needs its field box.** `[ShieldTowerClass]` `shieldMinX/Y/Z` and `shieldMaxX/Y/Z` define a box in the
+  tower's local frame. Craft and ordnance inside it are pushed along the tower's *front* axis by `objPush`/`ordPush`
+  (negative pushes toward `-z`) and damped by `objDrag`/`ordDrag`, and only while the tower has a power source. No
+  stock ODF sets the box, so a `shieldtower` without it does nothing. The stock `abshld`/`sbshld` are plain
+  `i76building`s and are not shields at all.
+- **Magnet mines read `[MagnetMineClass]`.** Use the stock `magpull` model (`baseName = "magpull"`) so a magnet looks
+  like one; a `proxmine` base reads as a proximity mine. Negative `objPushCenter`/`objPushEdge` pull inward. OpenShim
+  maps a legacy `[MagnetClass]` header to `[MagnetMineClass]`, but stock Redux without OpenShim does not.
+- **OpenShim team filters** (`teamFilter`, `affectAllies`, `affectEnemies`) are read from any section of a shieldtower,
+  magnet or proximity ODF. They are an OpenShim feature, not stock behavior.
+- **EXU overlay text under DX11:** an Ogre image font builds a fixed-function material. D3D11 cannot draw it, so every
+  frame throws `RenderingAPIException ... no fixed pipeline in d3d11` and the scene never presents (the window stays
+  on the load screen). After `SetOverlayTextFont`, bind the shader-backed atlas material with
+  `SetOverlayMaterial(element, "CR_OverlayFont")`, as `ScriptSubtitles.lua` does. This is EXU/Ogre behavior, not stock
+  Lua.
 
 ---
 
