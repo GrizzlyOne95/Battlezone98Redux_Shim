@@ -41,7 +41,12 @@ param(
     [switch]$KeepRunning,
     # Run the scenario against the session a -Scenario play run left in the
     # mission (C:\BZRCoop\play.json): no launch, no lobby, nothing stopped.
-    [switch]$Attach
+    [switch]$Attach,
+    # Relay network impairment (relay_impairment.py spec, e.g. 'loss=3,seed=7'),
+    # applied once every client is in the mission so joining and loading stay
+    # clean. Needs a server with POST /relay/impairment. Scenarios can change
+    # it mid-run with Set-CRFlowImpairment.
+    [string]$Impair = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -201,6 +206,7 @@ try {
         serverSha256 = (Get-FileHash -LiteralPath (Join-Path $ServerRepo 'server.py')).Hash
         nativeHealthAnalyzerSha256 = if ($Clients -gt 2) { (Get-FileHash -LiteralPath (Join-Path $ServerRepo 'native_network_health.py')).Hash } else { $null }
         relayPairPorts = ($Clients -gt 2)
+        impair = $Impair
         maxNetworkLogging = [bool]$MaxNetworkLogging
         muteClients = [bool]$MuteClients
         serverArgs = $serverArgs
@@ -244,6 +250,7 @@ try {
             "$Mission.bzn"
         } | Out-Null
         Test-CRFlowRoster -ExpectedClients $Clients
+        if ($Impair) { Set-CRFlowImpairment $Impair | Out-Null }
         # Dot-sourced: scenarios share this script scope with the library state.
         . $scenarioPath @ScenarioArgs
     } catch {
@@ -254,6 +261,13 @@ try {
     # A scenario that ends the session unevenly (host leaves) sets this.
     if (-not $script:CRFlowSkipParity) { Test-CRFlowPresentationParity 0 $guestIndices }
     Test-CRFlowLogErrors $clientIndices
+    if ($Impair) {
+        # Final relay counters, before the server stops.
+        try {
+            Invoke-RestMethod -Uri "$($script:CRFlowHealthUrl)/relay/impairment" -TimeoutSec 5 |
+                ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runDir 'relay-impairment-final.json')
+        } catch { Write-Warning "relay impairment counters: $_" }
+    }
     $flowFinished = $true
 } finally {
     if ($KeepRunning) {
