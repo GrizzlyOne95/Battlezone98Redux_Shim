@@ -231,6 +231,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Sender-side native netcode fix: same wire format, so no mixed-client
     # divergence; stock peers just receive reliable messages on time.
     "Network/ReliableSendBacklogFix",
+    # Acts only after a GPU reset, to keep the recreated D3D11 device alive.
+    "Graphics/D3D11DeviceLossRecovery",
 
     # Proven Redux regressions that are hard-disabled in network games.
     "SinglePlayer/JumpSnipeCrouch",
@@ -333,6 +335,7 @@ $shippingPolicyChecks = @{
     "Network/NetImprovements" = "1"
     "Network/GovernorTuning" = "OpenShim"
     "Network/ReliableSendBacklogFix" = "1"
+    "Graphics/D3D11DeviceLossRecovery" = "1"
     "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "1"
     "Network/LobbyBanButton" = "0"
