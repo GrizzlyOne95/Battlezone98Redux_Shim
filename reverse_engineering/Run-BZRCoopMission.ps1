@@ -24,6 +24,8 @@ param(
     [string]$Python = 'python',
     [string]$BZRCoopRoot = 'C:\BZRCoop',
     [ValidateRange(2, 4)][int]$Clients = 2,
+    [switch]$MaxNetworkLogging,
+    [switch]$MuteClients,
     [string]$RunName = '',
     # OpenShim checkout with a Release|Win32 build for the instances; empty = the install's.
     [string]$OpenShimRepo = '',
@@ -44,6 +46,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\BZRCoopMission.ps1"
+. "$PSScriptRoot\BZRCoopDiagnostics.ps1"
 $script:CRFlowCoopRoot = $BZRCoopRoot
 $clientIndices = @(0..($Clients - 1))
 $guestIndices = @(1..($Clients - 1))
@@ -147,6 +150,11 @@ try {
         $serverArgs += '--relay-pair-ports'
         $serverArgs += @('--relay-trace', (Join-Path $runDir 'relay-trace.jsonl'))
     }
+    if ($MaxNetworkLogging) {
+        if ($Clients -le 2) { $serverArgs += @('--relay-trace', (Join-Path $runDir 'relay-trace.jsonl')) }
+        $serverArgs += '--relay-trace-payloads'
+        $serverArgs += @('--protocol-trace', (Join-Path $runDir 'protocol-trace.jsonl'))
+    }
     $server = Start-Process -FilePath $Python -ArgumentList $serverArgs -WorkingDirectory $ServerRepo -WindowStyle Hidden -PassThru `
         -RedirectStandardError $serverLog -RedirectStandardOutput (Join-Path $runDir 'server.out.log')
     $deadline = (Get-Date).AddSeconds(20)
@@ -183,7 +191,7 @@ try {
     $inputs = [ordered]@{
         clients = $Clients
         harnessCommit = (git -C (Split-Path $PSScriptRoot) rev-parse HEAD)
-        harnessFiles = @(@('Run-BZRCoopMission.ps1', 'BZRCoopMission.ps1', 'BZRCoopLobby.ps1', 'BZRCoopSession.ps1') | ForEach-Object {
+        harnessFiles = @(@('Run-BZRCoopMission.ps1', 'BZRCoopMission.ps1', 'BZRCoopLobby.ps1', 'BZRCoopSession.ps1', 'BZRCoopDiagnostics.ps1', 'BZRCoopAudio.cs') | ForEach-Object {
             @{ name = $_; sha256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $_)).Hash }
         })
         scenario = $scenarioPath
@@ -193,6 +201,9 @@ try {
         serverSha256 = (Get-FileHash -LiteralPath (Join-Path $ServerRepo 'server.py')).Hash
         nativeHealthAnalyzerSha256 = if ($Clients -gt 2) { (Get-FileHash -LiteralPath (Join-Path $ServerRepo 'native_network_health.py')).Hash } else { $null }
         relayPairPorts = ($Clients -gt 2)
+        maxNetworkLogging = [bool]$MaxNetworkLogging
+        muteClients = [bool]$MuteClients
+        serverArgs = $serverArgs
         campaignContent = "$CampaignContent ($contentCommit)"
         contentOverride = $ContentOverride
         overrideFiles = @(if ($ContentOverride) { Get-ChildItem -LiteralPath $ContentOverride -File | Sort-Object Name | ForEach-Object {
@@ -203,6 +214,8 @@ try {
 
     # ----------------------------------------------------------- launch --
     $launchCmd = "& '$PSScriptRoot\BZRCoopSession.ps1' -Action Launch -Clients $Clients -BZRCoopRoot '$BZRCoopRoot' -RunName '$RunName' -GameArgs '/nointro','/norawinput'"
+    if ($MaxNetworkLogging) { $launchCmd += ' -MaxNetworkLogging' }
+    if ($MuteClients) { $launchCmd += ' -MuteClients' }
     Remove-Item Env:BZR_LAUNCH_LOCK_HELD -ErrorAction SilentlyContinue
     $launcher = Start-Process -FilePath $PowerShellExe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $launchCmd) `
         -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runDir 'coordinator.log') -RedirectStandardError (Join-Path $runDir 'coordinator.err.log')
@@ -215,6 +228,10 @@ try {
         if ((Get-Date) -gt $deadline) { throw "$Clients clients did not all reach the lobby before the launch deadline" }
     }
     Write-Host "[run] all $Clients clients authenticated"
+    if ($MuteClients) {
+        if (@($s.clients | Where-Object { $_.mutedAudioSessions -lt 1 }).Count) { throw 'A client has no verified muted audio session.' }
+        Write-Host "[run] all $Clients client audio sessions muted; native playback remains enabled"
+    }
 
     # ---------------------------------------------------- lobby + flow --
     Set-CRFlowLogMark $clientIndices
@@ -253,6 +270,14 @@ try {
     }
 }
 if ($flowFinished) {
+    if ($MaxNetworkLogging -and $MuteClients -and -not $KeepRunning) {
+        try {
+            $diagnostics = @(Test-BZRCoopDiagnosticEvidence $runDir $Clients)
+            Add-CRFlowCheck 'all clients muted with complete maximum network captures' $true $diagnostics
+        } catch {
+            Add-CRFlowCheck 'all clients muted with complete maximum network captures' $false $_.Exception.Message
+        }
+    }
     if ($Clients -gt 2 -and -not $KeepRunning) {
         # WM_CLOSE has archived complete native logs. Forwarding alone cannot
         # detect the game's sustained rejection of newer position/ping data.

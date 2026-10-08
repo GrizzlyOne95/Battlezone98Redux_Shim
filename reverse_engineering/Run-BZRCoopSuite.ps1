@@ -32,6 +32,9 @@ param(
     # Run only cases whose text contains this.
     [string]$Only = '',
     [ValidateRange(2, 4)][int]$Clients = 2,
+    [switch]$MaxNetworkLogging,
+    [switch]$MuteClients,
+    [string]$OpenShimRepo = '',
     [switch]$StopOnFailure,
     [string]$BZRCoopRoot = 'C:\BZRCoop'
 )
@@ -60,6 +63,9 @@ foreach ($case in $Cases) {
     $runName = "cr-$mission-$tag-$($Clients)p-$stamp"
     Write-Host "`n[suite] $case -> $runName" -ForegroundColor Cyan
     $cmd = "& '$PSScriptRoot\Run-BZRCoopMission.ps1' -Mission $mission -Scenario $scenario -Clients $Clients -RunName '$runName' -BZRCoopRoot '$BZRCoopRoot'$overrideArg -ScenarioArgs @{$argText}; exit `$LASTEXITCODE"
+    if ($MaxNetworkLogging) { $cmd = $cmd.Replace('; exit ', ' -MaxNetworkLogging; exit ') }
+    if ($MuteClients) { $cmd = $cmd.Replace('; exit ', ' -MuteClients; exit ') }
+    if ($OpenShimRepo) { $cmd = $cmd.Replace('; exit ', " -OpenShimRepo '$($OpenShimRepo -replace "'", "''")'; exit ") }
     $clock = [Diagnostics.Stopwatch]::StartNew()
     # Output goes to files, not a pipe: the run's server and coordinator inherit
     # its handles and can outlive it, which would hold a pipe open forever.
