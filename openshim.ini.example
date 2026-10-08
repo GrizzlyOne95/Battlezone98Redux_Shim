@@ -1994,6 +1994,23 @@ AttackRevealPerceivedTeam = 1
 ;                                     BZR_DISABLE_SATELLITE_VISIBILITY_FIX
 SatelliteVisibilityFix = 1
 
+[Testing]
+; Developer and automated-test aids. Off by default; not shown in the Settings UI.
+
+; RunInBackground: keep a single-player game simulating while its window is
+; unfocused. Normally Redux pauses the simulation, and a game launched without
+; focus sits on its load screen. When ON, OpenShim swallows WM_ACTIVATEAPP(FALSE)
+; (so nothing pauses or minimizes), raises the engine's app-active flag if it
+; started at 0, and turns ClipCursor / SetCursorPos / SetCursor into no-ops
+; (ClipCursor releases) whenever the game window is not the foreground window,
+; so an unfocused game never traps or warps your mouse.
+; Single-player and windowed only: inert in network games and in fullscreen.
+; Verifies GOG 2.2.301 code bytes at load and stays off on any mismatch
+; ([BGRUN] lines in the shim log). Restart required.
+; Accepted: boolean. Default: OFF.
+; Env override: OPENSHIM_RUN_IN_BACKGROUND=1
+RunInBackground = 0
+
 [Experimental]
 
 ; ---------------------------------------------------------------------------

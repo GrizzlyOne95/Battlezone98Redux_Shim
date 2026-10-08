@@ -192,6 +192,7 @@
     <ClCompile Include="src\patches\pilot_flashlight.cpp" />
     <ClCompile Include="src\patches\pilot_team_restore.cpp" />
     <ClCompile Include="src\patches\producer_build_menu.cpp" />
+    <ClCompile Include="src\patches\background_run.cpp" />
     <ClCompile Include="src\patches\radar_layout.cpp" />
     <ClCompile Include="src\patches\raw_mouse_input.cpp" />
     <ClCompile Include="src\patches\satellite_visibility.cpp" />
@@ -282,6 +283,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
+    <ClInclude Include="include\background_run_policy.h" />
     <ClInclude Include="include\render_effect_intent.h" />
     <ClInclude Include="include\native_hud_layout.h" />
     <ClInclude Include="include\native_hud_runtime.h" />
