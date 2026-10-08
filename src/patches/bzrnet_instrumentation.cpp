@@ -9,6 +9,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <Windows.h>
+#include "win32_last_error_scope.h"
 
 #include <algorithm>
 #include <array>
@@ -237,6 +238,7 @@ namespace
 
     bool IsWsSocket(SOCKET s)
     {
+        Win32LastErrorScope diagnosticsError;
         sockaddr_storage peer = {};
         int length = static_cast<int>(sizeof(peer));
         if (getpeername(s, reinterpret_cast<sockaddr*>(&peer), &length) != 0) return false;
@@ -245,6 +247,7 @@ namespace
 
     bool IsUdpSocket(SOCKET s)
     {
+        Win32LastErrorScope diagnosticsError;
         int type = 0;
         int length = static_cast<int>(sizeof(type));
         return getsockopt(s, SOL_SOCKET, SO_TYPE, reinterpret_cast<char*>(&type), &length) == 0 &&
@@ -253,6 +256,7 @@ namespace
 
     bool TryGetConnectedPeer(SOCKET s, sockaddr_storage& peer, int& peerLen)
     {
+        Win32LastErrorScope diagnosticsError;
         peer = {};
         peerLen = static_cast<int>(sizeof(peer));
         return getpeername(s, reinterpret_cast<sockaddr*>(&peer), &peerLen) == 0;
@@ -465,14 +469,18 @@ namespace
     void CALLBACK CompletionThunk(DWORD error, DWORD transferred, LPWSAOVERLAPPED overlapped, DWORD flags)
     {
         PendingIo io;
-        if (!TakePending(overlapped, io, true)) return;
-        if (!error && !io.capturedImmediate) CapturePending(io, transferred);
+        {
+            Win32LastErrorScope diagnosticsError;
+            if (!TakePending(overlapped, io, true)) return;
+            if (!error && !io.capturedImmediate) CapturePending(io, transferred);
+        }
         if (io.originalCompletion) io.originalCompletion(error, transferred, overlapped, flags);
     }
 
     int WSAAPI HookSend(SOCKET s, const char* buffer, int length, int flags)
     {
         const int rc = g_Send ? g_Send(s, buffer, length, flags) : SOCKET_ERROR;
+        Win32LastErrorScope diagnosticsError;
         if (rc > 0 && buffer)
         {
             if (IsWsSocket(s))
@@ -494,6 +502,7 @@ namespace
     int WSAAPI HookRecv(SOCKET s, char* buffer, int length, int flags)
     {
         const int rc = g_Recv ? g_Recv(s, buffer, length, flags) : SOCKET_ERROR;
+        Win32LastErrorScope diagnosticsError;
         if (rc > 0 && buffer)
         {
             if (IsWsSocket(s))
@@ -515,6 +524,7 @@ namespace
     int WSAAPI HookSendTo(SOCKET s, const char* buffer, int length, int flags, const sockaddr* to, int toLen)
     {
         const int rc = g_SendTo ? g_SendTo(s, buffer, length, flags, to, toLen) : SOCKET_ERROR;
+        Win32LastErrorScope diagnosticsError;
         if (rc > 0 && buffer) TraceWire(s, true, to, toLen, reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(rc), false);
         return rc;
     }
@@ -522,6 +532,7 @@ namespace
     int WSAAPI HookRecvFrom(SOCKET s, char* buffer, int length, int flags, sockaddr* from, int* fromLen)
     {
         const int rc = g_RecvFrom ? g_RecvFrom(s, buffer, length, flags, from, fromLen) : SOCKET_ERROR;
+        Win32LastErrorScope diagnosticsError;
         if (rc > 0 && buffer) TraceWire(s, false, from, fromLen ? *fromLen : 0, reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(rc), false);
         return rc;
     }
@@ -530,6 +541,7 @@ namespace
         LPWSAOVERLAPPED overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completion)
     {
         const int rc = g_WSASend ? g_WSASend(s, buffers, count, bytesSent, flags, overlapped, completion) : SOCKET_ERROR;
+        Win32LastErrorScope diagnosticsError;
         const int err = rc == SOCKET_ERROR ? WSAGetLastError() : 0;
         if (rc == 0 || err == WSA_IO_PENDING)
         {
@@ -560,10 +572,13 @@ namespace
     int WSAAPI HookWSARecv(SOCKET s, LPWSABUF buffers, DWORD count, LPDWORD bytesRecv, LPDWORD flags,
         LPWSAOVERLAPPED overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completion)
     {
+        Win32LastErrorScope diagnosticsError;
         const PendingKind kind = IsWsSocket(s) ? PendingKind::Stream : PendingKind::ConnectedDatagram;
         const bool registered = RegisterPending(overlapped, kind, s, buffers, count, nullptr, nullptr, completion);
         const auto effective = registered && completion ? CompletionThunk : completion;
+        diagnosticsError.Restore();
         const int rc = g_WSARecv ? g_WSARecv(s, buffers, count, bytesRecv, flags, overlapped, effective) : SOCKET_ERROR;
+        diagnosticsError.Capture();
         const int err = rc == SOCKET_ERROR ? WSAGetLastError() : 0;
         if (rc == 0 && bytesRecv && *bytesRecv)
         {
@@ -596,6 +611,7 @@ namespace
         const sockaddr* to, int toLen, LPWSAOVERLAPPED overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completion)
     {
         const int rc = g_WSASendTo ? g_WSASendTo(s, buffers, count, bytesSent, flags, to, toLen, overlapped, completion) : SOCKET_ERROR;
+        Win32LastErrorScope diagnosticsError;
         const int err = rc == SOCKET_ERROR ? WSAGetLastError() : 0;
         if (rc == 0 || err == WSA_IO_PENDING)
         {
@@ -612,9 +628,12 @@ namespace
     int WSAAPI HookWSARecvFrom(SOCKET s, LPWSABUF buffers, DWORD count, LPDWORD bytesRecv, LPDWORD flags,
         sockaddr* from, LPINT fromLen, LPWSAOVERLAPPED overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completion)
     {
+        Win32LastErrorScope diagnosticsError;
         const bool registered = RegisterPending(overlapped, PendingKind::Datagram, s, buffers, count, from, fromLen, completion);
         const auto effective = registered && completion ? CompletionThunk : completion;
+        diagnosticsError.Restore();
         const int rc = g_WSARecvFrom ? g_WSARecvFrom(s, buffers, count, bytesRecv, flags, from, fromLen, overlapped, effective) : SOCKET_ERROR;
+        diagnosticsError.Capture();
         const int err = rc == SOCKET_ERROR ? WSAGetLastError() : 0;
         if (rc == 0 && bytesRecv && *bytesRecv)
         {
@@ -631,8 +650,11 @@ namespace
 
     int WSAAPI HookCloseSocket(SOCKET s)
     {
+        Win32LastErrorScope diagnosticsError;
         const SocketIdentity socket = SocketFor(s);
+        diagnosticsError.Restore();
         const int rc = g_CloseSocket ? g_CloseSocket(s) : SOCKET_ERROR;
+        diagnosticsError.Capture();
         if (rc == 0)
         {
             EmitBzrNetTrace("socket", "SOCKET_CLOSED", "internal", socket.id, socket.generation, "", "{}");
@@ -644,6 +666,7 @@ namespace
     BOOL WINAPI HookGqcs(HANDLE port, LPDWORD bytes, PULONG_PTR key, LPOVERLAPPED* overlapped, DWORD timeout)
     {
         const BOOL ok = g_Gqcs ? g_Gqcs(port, bytes, key, overlapped, timeout) : FALSE;
+        Win32LastErrorScope diagnosticsError;
         if (overlapped && *overlapped)
         {
             PendingIo io;
