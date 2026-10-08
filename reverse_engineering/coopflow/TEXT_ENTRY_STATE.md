@@ -2,7 +2,7 @@
 
 Research date: 2026-10-07. **A solid static signal was found:** the first focused node in the engine's legacy text-editor list. Both multiplayer chat and the ally/unally team-number prompt use this list. These are distinct from the lobby's `cUI_TextEntry` named `chatEntry`.
 
-**Evidence limits:** verified below means released-executable instructions, their Ghidra decompilation, source/configuration inspection, or explicitly identified synthetic tests. No game was launched, instrumented, or given input during this task. Live client validation remains pending. The cause of the reported invisible Enter chat line and the intermittent network `GameKey` omissions is **not conclusively established**.
+**Evidence limits:** verified below means released-executable instructions, their Ghidra decompilation, source/configuration inspection, explicitly identified synthetic tests, or the external harness results reported separately below. This agent did not launch, instrument, or give input to a game. The agent owning the live clients subsequently ran a passing two-client scenario; its saved results were reviewed read only. The cause of the earlier invisible Enter chat line and the intermittent network `GameKey` omissions is **not conclusively established**, although Enter successfully opened chat in that later live run.
 
 ## Examined build and method
 
@@ -67,7 +67,7 @@ While focused, `0x00823700` handles `WM_CHAR` values `0x20..0xFF` by inserting c
 
 ### Why Enter showed no visible chat line
 
-**Not resolved for the reported live clients.** Static evidence confirms that Enter is bound and has an opener; it does not establish what their pending input, focus, or renderer state was at the time. Do not infer that Enter is unbound or that the lobby `chatEntry` is the missing in-mission object.
+**The earlier observation is not resolved.** Static evidence confirms that Enter is bound and has an opener; it does not establish what the clients' pending input, focus, or renderer state was at that earlier time. In the later external `coop-text-entry` live run, Enter did open the guest's chat editor with `chatOpen=true` and flags `0x111` (including focus and visibility). Do not infer that Enter is unbound or that the lobby `chatEntry` is the missing in-mission object.
 
 Verified conditions that can distinguish the failure:
 
@@ -105,7 +105,7 @@ Focused legacy entry routing bypasses normal key-message queuing and normal keyb
 
 **The exact cause of intermittent J/[ ]/arrow/Enter callbacks in the reported network tests was not found.** The pending key is a single sample read on mission update, rather than a Lua event for every OS transition. Input/update scheduling, queued keys, local UI capture, or cinematic/menu consumers are possible contributors, but none was proven to cause those particular omissions. Retain the real-key probe in `scenarios/gamekey-names.ps1`; do not replace this gap with a claimed network key whitelist.
 
-## Prepared EXU implementation and validation
+## EXU implementation and validation
 
 Three Lua bindings were implemented in an isolated source copy:
 
@@ -117,7 +117,9 @@ The C++ operations live in `src/Game/game_state.cpp/.h`, with thin bindings in `
 
 All addresses/signatures are in `exu.json` and the regenerated address header. Three optional, feature-specific profile anchors qualify the focus lookup and the chat/ally node publication sites. Each query requires the existing `RuntimeGate`, preferred image base, and all three fixed-address anchor matches before reading globals. No native calls, hooks, input writes, cached editor pointers, or initialization-time scans were added. Steam must have settled runtime bytes matching these anchors; Steam, Wine, and Proton live behavior remains untested.
 
-**Git status and blocker:** this session grants read-only access to EXU's `.git`. Its initial `git switch -c agent/text-entry-state` failed with permission denied creating the branch lock. An external session subsequently created the requested branch from the recorded HEAD and copied the ten prepared source files into the main checkout; their bytes were verified identical to the scratch implementation. This session's explicit staging attempt still failed creating `.git/index.lock`, so the requested commit remains unperformed by this agent. `.claude/` was left untouched. The ignored `Build\text-entry-state` directory contains `text-entry-state.patch`, `task-files.json`, a guarded `Apply-And-Commit.ps1`, and `commit-message.txt` ending with the required `Co-Authored-By: Codex <noreply@openai.com>` line. No push or merge was performed.
+**Git status and ownership:** this session grants read-only access to EXU's `.git`; its branch-creation and staging attempts failed creating the branch lock and `.git/index.lock`. An external session created `agent/text-entry-state` from the recorded HEAD, installed the ten exact prepared files, and committed them as `eccfceb3cbfcf0f4e641af736514687be58ccef2`. The external session also pushed that branch (remote-tracking reflog: 2026-10-07 15:10:09 -0500). This agent did not commit, push, merge, or modify other branches. The EXU tracked tree is clean and `.claude/` remains untracked/untouched.
+
+**Requested trailer discrepancy:** the external commit ends with a Claude co-author trailer and lacks the requested `Co-Authored-By: Codex <noreply@openai.com>`. This agent did not rewrite that published commit. The ignored `Build\text-entry-state` directory retains the ten-file patch, hashes, and the intended `commit-message.txt` with the Codex trailer. Its guarded apply/commit helper rejects HEADs changed from the original preparation base, so it will not overwrite the external checkpoint.
 
 Validation of that exact prepared source:
 
@@ -126,6 +128,23 @@ Validation of that exact prepared source:
 - Generated address/profile header checks — passed. Build qualification tooling's 12 tests — passed. Lua API parity, shared-document hashes, address census, and patch-preimage checks — passed.
 - Synthetic x86 smoke executable compiled the actual `game_state.cpp` probe and populated only its own memory. Empty/inactive lists, chat/ally/other focus, first-node priority, the 64-node limit, cyclic/overlong lists, null/overflowing payloads, inaccessible memory caught by SEH, unsupported runtime, and changed identity bytes — passed. This is **not** a live Redux smoke test.
 - Full `tools/validate_hardening.py` remains blocked by the **pre-existing** `src/Ogre/OgreNativeFontBridge.cpp:827` exception-filter violation. The baseline checkout was run before applying these changes and fails at the same location. That unrelated file was not changed.
+
+### External live validation reviewed
+
+The client-owner agent's `misn03 / coop-text-entry` run at `C:\BZRCoop\runs\cr-misn03-coop-text-entry-20261007-150741` finished **PASS**. Evidence is in `flow-steps.jsonl`, `flow-summary.json`, and `flow-summary.md`; `coordinator.log` records host PID `67080` and guest PID `47792`. Both staged executable files were separately hashed and match the examined GOG SHA-256 above. These are results read from the other agent's run, not launches or input performed by this agent.
+
+| Recorded check | Result |
+|---|---|
+| Baseline on host and guest | Both `ok=true`, inactive, with nonzero chat/ally node pointers. Confirms that allocation is not focus. |
+| Guest, alliances locked, Y and U | No focused editor; the co-op alliance remained intact. |
+| Guest, unlocked Y | `textEntryActive=true`, `allyPromptOpen=true`, `chatOpen=false`; focused node equals ally node, flags `257` (`0x101`). Both boolean bindings agreed. |
+| J/X during ally input, then Escape | No ping or PDA toggle; Escape returned capture to false. |
+| Guest Enter from baseline | Opened chat on the first attempted key: `chatOpen=true`, ally false; focused node equals chat node, flags `273` (`0x111`). |
+| J/X during chat, then Escape | No ping or PDA toggle; Escape returned capture to false. |
+| J after chat closed | Ping sequence increased from 0 to 1. |
+| Script/probe health | Both clients passed error/probe checks. |
+
+This validates the focus signal and the other agent's CR integration for those cases. It does not establish why the earlier Enter test had no visible line, nor independently test every opener, valid numeric alliance submission, or Steam/Wine/Proton.
 
 ## How to validate live with the existing two-client harness
 
@@ -169,4 +188,4 @@ end
 -- Handle the mission's keys here.
 ```
 
-This illustrates conservative handling of an unavailable probe. The boolean APIs return false on failure, consistent with existing state-query behavior; false alone does not distinguish unavailable from inactive. No Campaign Reimagined integration was changed in this task.
+This illustrates conservative handling of an unavailable probe. The boolean APIs return false on failure, consistent with existing state-query behavior; false alone does not distinguish unavailable from inactive. This agent did not change Campaign Reimagined.
