@@ -228,6 +228,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
 
     # Qualified socket/netcode baseline.
     "Network/NetImprovements",
+    # Sender-side native netcode fix: same wire format, so no mixed-client
+    # divergence; stock peers just receive reliable messages on time.
+    "Network/ReliableSendBacklogFix",
 
     # Proven Redux regressions that are hard-disabled in network games.
     "SinglePlayer/JumpSnipeCrouch",
@@ -327,6 +330,7 @@ $shippingPolicyChecks = @{
     "Display/MultiplayerFlags" = "0"
     "Network/NetImprovements" = "1"
     "Network/GovernorTuning" = "OpenShim"
+    "Network/ReliableSendBacklogFix" = "1"
     "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "1"
     "Network/LobbyBanButton" = "0"

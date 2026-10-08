@@ -997,6 +997,7 @@ namespace BZROpenShim
             g_OwnedObjectRevealFixEnabled = false;
         }
         RefreshOwnedObjectRevealFixState();
+        InstallP2PReliableSendFixIfEnabled();
         g_OwnedObjectRevealTraceBudget = kOwnedObjectRevealTraceBudgetDefault;
 		{
 			long quakeFadeSeconds = kQuakeReplayFadeSecondsDefault;
