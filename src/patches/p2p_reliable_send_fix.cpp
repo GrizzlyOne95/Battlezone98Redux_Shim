@@ -4,7 +4,8 @@
 // starving the link of every unreliable update.
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
-#include "hook_engine.h"
+#include "p2p_reliable_send_fix.h"
+#include "p2p_reliable_send_policy.h"
 #include "patcher.h"
 #include <Windows.h>
 #include <cstdint>
@@ -56,150 +57,63 @@ namespace BZROpenShim
         // the receiver are untouched, so stock peers see an ordinary sender
         // that is merely on time.
 
-        constexpr uintptr_t kP2PReliableSendSiteAddr = 0x0075C71B;
-        constexpr uintptr_t kP2PReliableSendGateAddr = 0x0075C730;
-
-        // The two retransmit timers, both `push imm32` milliseconds into the
-        // deadline helper 0x0075FE50. A send arms the first retry 1000 ms out
-        // (0x0075C9A6); a retry pass re-arms the next one 2500 ms out
-        // (0x0075BD19). While a lost reliable fragment waits for either, every
-        // update stamped after it is dropped by the receiver, so on a lossy
-        // link each loss costs that long without updates. Stock values by
-        // default; lower ones are opt-in until qualified.
-        constexpr uintptr_t kP2PFirstRetrySiteAddr = 0x0075C9A4;
-        constexpr uint32_t kP2PFirstRetryStockMs = 1000;
-        constexpr uintptr_t kP2PRetryIntervalSiteAddr = 0x0075BD13;
-        constexpr uint32_t kP2PRetryIntervalStockMs = 2500;
-        constexpr uint32_t kP2PRetryMinMs = 50;
-        constexpr uint32_t kP2PRetryMaxMs = 10000;
-
-        bool g_P2PReliableSendFixEnabled = true;
-
-        static bool TryReadRetryMs(const char* key, uint32_t& out)
+        void ConfigureP2PReliablePatches(std::vector<HookEngine::PatchDef>& patches)
         {
-            std::string text;
-            if (!TryGetUserConfigString("Network", key, text) || text.empty())
-                return false;
-            char* end = nullptr;
-            const unsigned long value = std::strtoul(text.c_str(), &end, 10);
-            if (end == text.c_str())
-                return false;
-            out = static_cast<uint32_t>(value);
-            return true;
-        }
-
-        // `site` holds the matched bytes; the imm32 sits at site + immOffset.
-        static void ApplyRetryTimer(const char* key, uintptr_t site,
-                                    const uint8_t* expected, size_t expectedLen,
-                                    size_t immOffset, uint32_t stockMs)
-        {
-            uint32_t ms = stockMs;
-            if (!TryReadRetryMs(key, ms) || ms == stockMs)
-                return;
-            if (ms < kP2PRetryMinMs || ms > kP2PRetryMaxMs)
-            {
-                Log(L"[P2PSEND] %hs=%u outside %u-%u ms; stock %u ms kept\n",
-                    key, ms, kP2PRetryMinMs, kP2PRetryMaxMs, stockMs);
-                return;
-            }
-            if (!ExpectedBytesMatchAt(site, expected, expectedLen))
-            {
-                Log(L"[P2PSEND] Signature mismatch at 0x%08X; %hs stays %u ms\n",
-                    static_cast<uint32_t>(site), key, stockMs);
-                return;
-            }
-            if (!HookEngine::WriteMemory(static_cast<uint32_t>(site + immOffset), &ms, sizeof(ms)))
-            {
-                Log(L"[P2PSEND] Could not write 0x%08X; %hs stays %u ms\n",
-                    static_cast<uint32_t>(site + immOffset), key, stockMs);
-                return;
-            }
-            Log(L"[P2PSEND] %hs set to %u ms (stock %u)\n", key, ms, stockMs);
-        }
-
-        static void ApplyRetryTimers()
-        {
-            if (reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) != 0x00400000)
-                return;
-            // push 0 / push 3E8h / lea ecx,[ebp-104h] / call 0x0075FE50
-            static const uint8_t kFirstRetry[] =
-            {
-                0x6A, 0x00, 0x68, 0xE8, 0x03, 0x00, 0x00, 0x8D, 0x8D, 0xFC, 0xFE, 0xFF, 0xFF,
-                0xE8, 0x9A, 0x34, 0x00, 0x00,
-            };
-            // mov byte [eax+19h],0 / push 0 / push 9C4h / lea ecx,[ebp-2E4h] / call 0x0075FE50
-            static const uint8_t kRetryInterval[] =
-            {
-                0xC6, 0x40, 0x19, 0x00, 0x6A, 0x00, 0x68, 0xC4, 0x09, 0x00, 0x00,
-                0x8D, 0x8D, 0x1C, 0xFD, 0xFF, 0xFF, 0xE8, 0x27, 0x41, 0x00, 0x00,
-            };
-            ApplyRetryTimer("ReliableFirstRetryMs", kP2PFirstRetrySiteAddr,
-                            kFirstRetry, sizeof(kFirstRetry), 3, kP2PFirstRetryStockMs);
-            ApplyRetryTimer("ReliableRetryIntervalMs", kP2PRetryIntervalSiteAddr,
-                            kRetryInterval, sizeof(kRetryInterval), 7, kP2PRetryIntervalStockMs);
-        }
-
-        void InstallP2PReliableSendFixIfEnabled()
-        {
-            ApplyRetryTimers();
-
-            bool configured = true;
-            if (TryGetUserConfigBool("Network", "ReliableSendBacklogFix", configured))
-                g_P2PReliableSendFixEnabled = configured;
+            bool enabled = true;
+            TryGetUserConfigBool("Network", "ReliableSendBacklogFix", enabled);
             if (EnvFlagEnabled("OPENSHIM_DISABLE_RELIABLE_SEND_BACKLOG_FIX") ||
                 EnvFlagEnabled("BZR_DISABLE_RELIABLE_SEND_BACKLOG_FIX"))
-            {
-                g_P2PReliableSendFixEnabled = false;
-            }
-            if (!g_P2PReliableSendFixEnabled)
-            {
+                enabled = false;
+            if (!enabled)
                 Log(L"[P2PSEND] Reliable send backlog fix disabled; stock retry gating kept\n");
-                return;
-            }
 
-            if (reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) != 0x00400000)
+            for (auto& patch : patches)
             {
-                Log(L"[P2PSEND] Executable relocated; reliable send backlog fix not applied\n");
-                return;
-            }
+                if (patch.name == "P2P Reliable Send Backlog")
+                {
+                    if (!enabled) continue;
+                    if (!patch.verified || !patch.address)
+                    {
+                        Log(L"[P2PSEND] Reliable send signature unavailable; stock retry gating kept\n");
+                        continue;
+                    }
+                    patch.payload = { 0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00 };
+                    continue;
+                }
 
-            // mov eax,[ebp-78h] / cmp dword [eax],8 / jne +24Bh /
-            // mov ecx,[ebp-78h] / movzx edx,byte [ecx+1Ah] / test edx,edx /
-            // jne +23Ch. The state test is kept; only the last jne goes.
-            static const uint8_t kExpected[] =
-            {
-                0x8B, 0x45, 0x88, 0x83, 0x38, 0x08, 0x0F, 0x85, 0x4B, 0x02, 0x00, 0x00,
-                0x8B, 0x4D, 0x88, 0x0F, 0xB6, 0x51, 0x1A, 0x85, 0xD2,
-                0x0F, 0x85, 0x3C, 0x02, 0x00, 0x00,
-            };
-            static const uint8_t kPatched[] =
-            {
-                0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00,
-            };
-            static_assert(sizeof(kExpected) ==
-                          kP2PReliableSendGateAddr - kP2PReliableSendSiteAddr + sizeof(kPatched),
-                          "gate must be the last instruction of the signature");
+                const char* key = nullptr;
+                uint32_t stockMs = 0;
+                if (patch.name == "P2P Reliable First Retry")
+                {
+                    key = "ReliableFirstRetryMs";
+                    stockMs = P2PReliable::kFirstRetryStockMs;
+                }
+                else if (patch.name == "P2P Reliable Retry Interval")
+                {
+                    key = "ReliableRetryIntervalMs";
+                    stockMs = P2PReliable::kRetryIntervalStockMs;
+                }
+                else continue;
 
-            if (ExpectedBytesMatchAt(kP2PReliableSendGateAddr, kPatched, sizeof(kPatched)))
-            {
-                Log(L"[P2PSEND] Reliable send backlog fix already applied\n");
-                return;
+                std::string text;
+                if (!TryGetUserConfigString("Network", key, text)) continue;
+                uint32_t ms = stockMs;
+                if (!P2PReliable::ParseRetryMs(text, ms))
+                {
+                    Log(L"[P2PSEND] Invalid %hs; decimal %u-%u ms required; stock %u ms kept\n",
+                        key, P2PReliable::kRetryMinMs, P2PReliable::kRetryMaxMs, stockMs);
+                    continue;
+                }
+                if (ms == stockMs) continue;
+                if (!patch.verified || !patch.address)
+                {
+                    Log(L"[P2PSEND] Signature unavailable; %hs stays %u ms\n", key, stockMs);
+                    continue;
+                }
+                const auto* bytes = reinterpret_cast<const uint8_t*>(&ms);
+                patch.payload.assign(bytes, bytes + sizeof(ms));
+                Log(L"[P2PSEND] %hs requested %u ms (stock %u); guarded write follows\n", key, ms, stockMs);
             }
-            if (!ExpectedBytesMatchAt(kP2PReliableSendSiteAddr, kExpected, sizeof(kExpected)))
-            {
-                Log(L"[P2PSEND] Signature mismatch at 0x%08X; stock retry gating kept\n",
-                    static_cast<uint32_t>(kP2PReliableSendSiteAddr));
-                return;
-            }
-            if (!HookEngine::WriteMemory(static_cast<uint32_t>(kP2PReliableSendGateAddr),
-                                         kPatched, sizeof(kPatched)))
-            {
-                Log(L"[P2PSEND] Could not write 0x%08X; stock retry gating kept\n",
-                    static_cast<uint32_t>(kP2PReliableSendGateAddr));
-                return;
-            }
-            Log(L"[P2PSEND] Reliable send backlog fix applied at 0x%08X\n",
-                static_cast<uint32_t>(kP2PReliableSendGateAddr));
         }
     }
 }

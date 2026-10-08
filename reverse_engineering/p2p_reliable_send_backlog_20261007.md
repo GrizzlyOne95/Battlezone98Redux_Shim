@@ -2,6 +2,9 @@
 
 2026-10-07, GOG 2.2.301 (`battlezone98redux.exe`, image base 0x00400000).
 Fix: `src/patches/p2p_reliable_send_fix.cpp`, `[Network] ReliableSendBacklogFix`.
+The three sites are registered in `scripts/patches.json` and `include/patches.h`;
+the normal patch engine scans unique signatures, verifies original bytes and
+writes while other threads are suspended. No address fallback is used.
 
 ## Symptom
 
@@ -96,11 +99,39 @@ untouched, so stock peers interoperate. Kill switch
 reliable fragment still blocks later updates until it is resent. Stock by
 default until lower values are qualified.
 
-## Open
+## Live validation
 
-* Live qualification: the four-client suite with the fix on, then with the
-  kill switch, compared by `p2p_reliable_backlog_replay.py` and the harness
-  `native-network-health.json` gate. Not yet run.
+The same four-player `misn05 four-services` scenario completed with maximum
+network capture on GOG 2.2.301. The DLL, CR/EXU content, server, DX9 renderer
+and stock 1000/2500 ms timers were identical; only the backlog kill switch
+changed. Both runs passed all 14 gameplay steps and 22 checks, including
+all-to-all pings, replicated respawn handles/positions and mission results.
+
+| Measure across all 12 directed links | Fix on | Stock gate |
+|---|---:|---:|
+| Rejected unreliable updates / future-stamped gaps | 0 | 75 |
+| Reliable messages held before first send | 0 / 10,934 | 71 / 11,487 |
+| Longest held reliable message | 0 ms | 27 ms |
+| Duplicate reliable retransmits | 188 | 101 |
+| GPU resets | 0 | 0 |
+
+The native health gate passed both runs because it detects sustained
+rejection, while these stock gaps were brief (at most 13 rejects in its
+window). A health pass therefore does not mean zero rejected updates; the
+replay's unreliable-gap count is the stricter backlog acceptance measure.
+Duplicate reliable retransmits are reported separately from position loss.
+The local evidence is under `C:\BZRCoop\runs\netfix-{on,off}-services-dx9-20261007-validation`.
+
+An earlier fix-on DX11 attempt authenticated all four clients, then one
+client crashed during a GPU driver reset. That incomplete run is excluded
+from qualification. DX9 avoided the reset in the completed A/B; graphics
+device restore remains a separate engine task.
+
+## Remaining qualification
+
+* Full four-client scenario matrix: two passes of nine cases with the fix on,
+  then the same two passes with the kill switch. The focused A/B above is
+  complete; matrix results will be recorded separately.
 * WAN behaviour with real loss, and a qualified lower retry timer.
 * Steam build: same layout is expected but unverified; a signature mismatch
   leaves stock behaviour.
