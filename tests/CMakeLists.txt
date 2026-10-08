@@ -37,6 +37,10 @@ function(openshim_add_test name)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+openshim_add_test(ogre_entity_reload_tests STD 17 SOURCES
+    ogre_entity_reload_tests.cpp
+)
+
 openshim_add_test(native_chunk_mesh_tests STD 20 SOURCES
     native_chunk_mesh_tests.cpp
     ../src/patches/native_chunk_mesh.cpp
