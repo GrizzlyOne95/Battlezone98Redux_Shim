@@ -1118,8 +1118,6 @@ namespace BZROpenShim
         void RefreshAttackRevealState();
         void RevertAttackRevealToBaseline();
         void RefreshOwnedObjectRevealFixState();
-        extern bool g_P2PReliableSendFixEnabled;
-        void InstallP2PReliableSendFixIfEnabled();
         bool ShouldTraceOwnedObjectReveal();
         bool ShouldTraceAttackReveal();
         void RevealProcessOwnerPerceivedTeam(void* processPtr, const char* sourceTag);

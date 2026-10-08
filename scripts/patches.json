@@ -4,6 +4,33 @@
   },
   "patches": [
     {
+      "name": "P2P Reliable Send Backlog",
+      "pattern": "8B 45 88 83 38 08 0F 85 4B 02 00 00 8B 4D 88 0F B6 51 1A 85 D2 0F 85 3C 02 00 00",
+      "offset": 21,
+      "expected_size": 6,
+      "fallback": "0x00000000",
+      "require_unique": true,
+      "identity": "GOG 2.2.301 P2P send 0x0075BEB0 queues and increments reliable sequence before this connected-state/retransmit-pending test at 0x0075C71B. Only the second JNE at 0x0075C730 skips immediate send to 0x0075C972 when peer+0x1A is set. The retry pump 0x0075AAF0 still owns acknowledgements and retransmission; receive 0x0075D800 rejects updates stamped beyond unreceived reliable messages. The exact whole test occurs once in the shipped GOG image and the recorded four-player replay reproduces native drop counts within three packets. Preserve the connected-state branch and remove only the backlog branch; no fallback on a signature miss. See reverse_engineering/p2p_reliable_send_backlog_20261007.md."
+    },
+    {
+      "name": "P2P Reliable First Retry",
+      "pattern": "6A 00 68 E8 03 00 00 8D 8D FC FE FF FF E8 9A 34 00 00",
+      "offset": 3,
+      "expected_size": 4,
+      "fallback": "0x00000000",
+      "require_unique": true,
+      "identity": "GOG 2.2.301 P2P send 0x0075BEB0 arms the first retry deadline with push 0 / push 1000 at 0x0075C9A4 followed by the deadline helper 0x0075FE50. Exact call-site pattern occurs once; only the imm32 at 0x0075C9A7 is configurable, default 1000 ms. No fallback."
+    },
+    {
+      "name": "P2P Reliable Retry Interval",
+      "pattern": "C6 40 19 00 6A 00 68 C4 09 00 00 8D 8D 1C FD FF FF E8 27 41 00 00",
+      "offset": 7,
+      "expected_size": 4,
+      "fallback": "0x00000000",
+      "require_unique": true,
+      "identity": "GOG 2.2.301 P2P retry pump 0x0075AAF0 clears peer+0x19 and arms another deadline with push 0 / push 2500 at 0x0075BD13 followed by the same deadline helper 0x0075FE50. Exact call-site pattern occurs once; only the imm32 at 0x0075BD1A is configurable, default 2500 ms. No fallback."
+    },
+    {
       "name": "World Builder Save Destination Dialog",
       "pattern": "0F B6 0D B7 73 91 00 51 8D 95 FC EF FF FF 52 8D 8D FB EF FF FF E8 23 EE 06 00 0F B6 C0 85 C0 75 20",
       "offset": 22,

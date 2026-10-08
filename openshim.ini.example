@@ -1405,9 +1405,11 @@ ReliableSendBacklogFix = 1
 ; lossy connection each loss costs up to this long with no position updates.
 ;   ReliableFirstRetryMs    = first resend after a send       (stock 1000)
 ;   ReliableRetryIntervalMs = gap between later resend passes (stock 2500)
-; Each resend pass is capped at 5000 bytes / peer count, so lower values cost
-; little bandwidth. Sender-side only. Accepted: 50-10000; the stock value or
-; anything out of range leaves the game's own timer untouched.
+; Each resend pass is capped at 5000 bytes / peer count; shorter intervals can
+; increase retry bandwidth and need controlled-loss testing. Sender-side only,
+; independent of ReliableSendBacklogFix. Accepted: decimal 50-10000; the stock
+; value, malformed text or anything out of range leaves the timer untouched.
+; A stock timer logs [SKIP] with payload=0 because no write is required.
 ; Restart required after changing. Stock until qualified.
 ReliableFirstRetryMs = 1000
 ReliableRetryIntervalMs = 2500

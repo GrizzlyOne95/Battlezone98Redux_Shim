@@ -16,6 +16,7 @@
 #include "openshim_sdk_v2.h"
 #include "cli_multiparam_parser.h"
 #include "redux_compatibility.h"
+#include "p2p_reliable_send_fix.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -1395,6 +1396,7 @@ namespace BZROpenShim
             return true;
         }), patches.end());
         FillJmp5Payloads(patches); FillDwordPayloads(patches); FillRel32Payloads(patches, isSteam); FillArtilleryVolleyPayloads(patches); WaitForExpectedBytes(patches, isSteam);
+        Hooks::ConfigureP2PReliablePatches(patches);
         // Apply critical patches (JMP5 hooks, version notice, etc.) BEFORE the
         // deferred-hook retry loop. The retry loop can take ~25 seconds for
         // Steam input binding UI hooks, and the game may crash during that
