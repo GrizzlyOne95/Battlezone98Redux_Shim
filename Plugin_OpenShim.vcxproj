@@ -215,6 +215,7 @@
     <ClCompile Include="src\patches\bzrnet_trace.cpp" />
     <ClCompile Include="src\patches\d3d_startup_hooks.cpp" />
     <ClCompile Include="src\patches\dx11_colorspace_diagnostic.cpp" />
+    <ClCompile Include="src\patches\d3d11_device_loss_recovery.cpp" />
     <ClCompile Include="src\patches\dx11_enhanced_fxaa.cpp" />
     <ClCompile Include="src\patches\dx11_scene_depth.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
@@ -328,6 +329,7 @@
     <ClInclude Include="include\bzr_string.h" />
     <ClInclude Include="include\d3d_startup_hooks.h" />
     <ClInclude Include="include\dx11_colorspace_diagnostic.h" />
+    <ClInclude Include="include\d3d11_device_loss_recovery.h" />
     <ClInclude Include="include\dx11_scene_depth.h" />
     <ClInclude Include="include\scene_depth_facts.h" />
     <ClInclude Include="include\dx11_enhanced_fxaa.h" />

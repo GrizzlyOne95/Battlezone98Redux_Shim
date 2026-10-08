@@ -613,6 +613,19 @@ Renderer = Auto
 ; overrides are cleared automatically at mission end.
 RenderProfile = Redux
 
+; Direct3D 11 device-loss recovery. Accepted: boolean. Default: 1.
+;   When the display driver resets the GPU (a TDR), Ogre recreates its D3D11
+;   device at once. Recreated inside the reset window, the new device is lost
+;   again and every buffer request fails, or Ogre falls back to the software
+;   "Microsoft Basic Render Driver" and runs out of memory; both crash the game.
+;   With this on, device recreation waits (up to 15 s) until probe devices on
+;   the original hardware adapter survive several submits in a row, and a
+;   software adapter picked while the hardware one was briefly absent is
+;   replaced by the hardware adapter. First device creation is never delayed,
+;   and DX9 is untouched. Logged under [DX11 Recovery].
+;   Kill switch: OPENSHIM_DISABLE_D3D11_DEVICE_LOSS_RECOVERY=1.
+D3D11DeviceLossRecovery = 1
+
 
 [Terrain]
 
