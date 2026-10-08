@@ -1400,6 +1400,18 @@ NetImprovements = 1
 ; Site: GOG 2.2.301 jne at 0x0075C730; a signature mismatch keeps stock.
 ReliableSendBacklogFix = 1
 
+; BZRNet P2P reliable retransmit timers, in milliseconds. A lost reliable
+; message blocks every later update on that link until it is resent, so on a
+; lossy connection each loss costs up to this long with no position updates.
+;   ReliableFirstRetryMs    = first resend after a send       (stock 1000)
+;   ReliableRetryIntervalMs = gap between later resend passes (stock 2500)
+; Each resend pass is capped at 5000 bytes / peer count, so lower values cost
+; little bandwidth. Sender-side only. Accepted: 50-10000; the stock value or
+; anything out of range leaves the game's own timer untouched.
+; Restart required after changing. Stock until qualified.
+ReliableFirstRetryMs = 1000
+ReliableRetryIntervalMs = 2500
+
 ; Granular netcode tuning -- the send-rate governor, bandwidth floor/ceiling,
 ; ramp rates and auto-kick envelope -- lives in net.ini under [OpenShimSocket],
 ; because it is applied by the socket layer. See net.ini for what each value
