@@ -24,15 +24,22 @@
 // is substituted. The game thread blocks for that settle time, which it would
 // otherwise spend crashing. Initial device creation is never delayed.
 //
+// The restored device then gets its vertex and index buffers back in place
+// instead of through Ogre's mesh reload; see d3d11_buffer_restore.cpp.
+//
 // Config: [Graphics] D3D11DeviceLossRecovery (default 1);
 // OPENSHIM_DISABLE_D3D11_DEVICE_LOSS_RECOVERY=1 turns it off.
 //
 // Test only (environment, never ini): OPENSHIM_TEST_D3D11_DEVICE_LOSS_AFTER_MS
 // makes the first device report DXGI_ERROR_DEVICE_REMOVED that many ms after it
-// is created, and OPENSHIM_TEST_D3D11_UNSTABLE_MS (default 4000) makes probes
-// fail for that long afterwards, so the settle loop has a reset to wait out.
+// is created, OPENSHIM_TEST_D3D11_DEVICE_LOSS_FILE makes the current device do
+// so whenever that file exists (a loss at a chosen moment, e.g. mid-mission;
+// the file is deleted as the loss fires, so each write is one loss), and
+// OPENSHIM_TEST_D3D11_UNSTABLE_MS (default 4000) makes probes fail for that
+// long afterwards, so the settle loop has a reset to wait out.
 #include "bool_token.h"
 #include "com_vtable_patch.h"
+#include "d3d11_buffer_restore.h"
 #include "d3d11_device_loss_recovery.h"
 #include "diagnostic_switch.h"
 #include "iat_patch.h"
@@ -88,8 +95,10 @@ namespace BZROpenShim
 
         // Test injector state.
         DWORD g_TestLossAfterMs = 0;
+        char g_TestLossFile[MAX_PATH] = {};
         DWORD g_TestUnstableMs = 4000;
         std::atomic<ID3D11Device*> g_TestDevice{nullptr};
+        std::atomic<ID3D11Device*> g_TestLostDevice{nullptr};
         std::atomic<DWORD> g_TestDeviceCreatedAt{0};
         std::atomic<DWORD> g_TestLossFiredAt{0};
         FnGetDeviceRemovedReason g_RealGetDeviceRemovedReason = nullptr;
@@ -262,11 +271,19 @@ namespace BZROpenShim
             if (self == g_TestDevice.load(std::memory_order_acquire))
             {
                 const DWORD created = g_TestDeviceCreatedAt.load(std::memory_order_acquire);
-                if (GetTickCount() - created >= g_TestLossAfterMs)
+                const bool due = g_TestLostDevice.load(std::memory_order_acquire) == self ||
+                                 (g_TestLossAfterMs && !g_TestLossFiredAt.load(std::memory_order_acquire) &&
+                                  GetTickCount() - created >= g_TestLossAfterMs) ||
+                                 (g_TestLossFile[0] && GetFileAttributesA(g_TestLossFile) != INVALID_FILE_ATTRIBUTES);
+                if (due)
                 {
-                    DWORD expected = 0;
-                    if (g_TestLossFiredAt.compare_exchange_strong(expected, GetTickCount()))
+                    if (g_TestLostDevice.exchange(self) != self)
                     {
+                        g_TestLossFiredAt.store(GetTickCount(), std::memory_order_release);
+                        // The file is consumed, so writing it again later
+                        // removes the device that replaced this one.
+                        if (g_TestLossFile[0])
+                            DeleteFileA(g_TestLossFile);
                         LogShimA(LogLevel::Warn, kComponent,
                                  "[DX11 Recovery] TEST: device 0x%p now reports DXGI_ERROR_DEVICE_REMOVED; probes fail for %lu ms",
                                  self, g_TestUnstableMs);
@@ -305,7 +322,8 @@ namespace BZROpenShim
             g_TestDeviceCreatedAt.compare_exchange_strong(unset, GetTickCount());
             g_TestDevice.store(device, std::memory_order_release);
             LogShimA(LogLevel::Warn, kComponent,
-                     "[DX11 Recovery] TEST: device 0x%p will report removal after %lu ms", device, g_TestLossAfterMs);
+                     "[DX11 Recovery] TEST: device 0x%p will report removal after %lu ms%s%s", device, g_TestLossAfterMs,
+                     g_TestLossFile[0] ? " or once this file exists: " : "", g_TestLossFile);
         }
 
         HRESULT WINAPI HookD3D11CreateDevice(
@@ -337,6 +355,7 @@ namespace BZROpenShim
                 // The device being replaced is gone; stop the test reporting
                 // removal for an address the allocator may hand out again.
                 g_TestDevice.store(nullptr, std::memory_order_release);
+                g_TestLostDevice.store(nullptr, std::memory_order_release);
 
                 DXGI_ADAPTER_DESC1 requested = {};
                 const bool requestedKnown = DescribeAdapter(adapter, requested);
@@ -395,7 +414,9 @@ namespace BZROpenShim
                     std::lock_guard<std::mutex> lock(g_Mutex);
                     g_LastDevice = *device;
                 }
-                if (!recovery && g_TestLossAfterMs)
+                // The timer removes the first device once; the file can remove
+                // each device in turn, recovered ones included.
+                if ((!recovery && g_TestLossAfterMs) || g_TestLossFile[0])
                     ArmTestInjector(*device, (*device)->GetFeatureLevel());
             }
             else if (recovery)
@@ -428,6 +449,9 @@ namespace BZROpenShim
                                  "[DX11 Recovery] d3d11/dxgi entry points unavailable; recovery not installed");
                         return 0;
                     }
+                    // Before the first device, so every buffer is seen from its
+                    // constructor on (d3d11_buffer_restore.cpp).
+                    InstallD3D11BufferRestore(renderer);
                     for (unsigned retry = 0; retry < 20; ++retry)
                     {
                         const auto result = IatPatch::PatchImport(
@@ -438,7 +462,7 @@ namespace BZROpenShim
                         {
                             LogShimA(LogLevel::Info, kComponent,
                                      "[DX11 Recovery] installed: device recreation waits for the hardware adapter to settle (limit %lu ms)%s",
-                                     kSettleLimitMs, g_TestLossAfterMs ? "; TEST injector enabled" : "");
+                                     kSettleLimitMs, (g_TestLossAfterMs || g_TestLossFile[0]) ? "; TEST injector enabled" : "");
                             return 0;
                         }
                         if (result == IatPatch::Result::NotFound)
@@ -469,6 +493,10 @@ namespace BZROpenShim
             return;
 
         g_TestLossAfterMs = ReadEnvMs("OPENSHIM_TEST_D3D11_DEVICE_LOSS_AFTER_MS", 0);
+        const DWORD fileLen = GetEnvironmentVariableA("OPENSHIM_TEST_D3D11_DEVICE_LOSS_FILE", g_TestLossFile,
+                                                      static_cast<DWORD>(sizeof(g_TestLossFile)));
+        if (fileLen == 0 || fileLen >= sizeof(g_TestLossFile))
+            g_TestLossFile[0] = '\0';
         g_TestUnstableMs = ReadEnvMs("OPENSHIM_TEST_D3D11_UNSTABLE_MS", 4000);
         g_DiscoveryThread = _beginthreadex(nullptr, 0, DiscoveryThreadProc, nullptr, 0, nullptr);
     }
