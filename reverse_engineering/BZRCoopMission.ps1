@@ -381,6 +381,27 @@ function Add-CRFlowCheck {
     Write-Host ("[check] {0,-4} {1}" -f $status, $Name) -ForegroundColor $color
 }
 
+# ------------------------------------------------------------ impairment --
+
+# The private server's health/control endpoint (Run-BZRCoopMission.ps1).
+$script:CRFlowHealthUrl = 'http://127.0.0.1:8080'
+
+# Applies a relay impairment spec (Battlezone98Redux_DedicatedServer
+# relay_impairment.py), or clears it with ''. The relay trace records every
+# change. Example, a 20-second blackout of one player:
+#   Set-CRFlowImpairment 'loss=100,peer=<player name>,for=20'
+function Set-CRFlowImpairment([AllowEmptyString()][string]$Spec) {
+    $body = @{ spec = $Spec } | ConvertTo-Json -Compress
+    try {
+        $r = Invoke-RestMethod -Method Post -Uri "$($script:CRFlowHealthUrl)/relay/impairment" -Body $body `
+            -ContentType 'application/json' -TimeoutSec 5
+    } catch {
+        throw "relay impairment '$Spec' was refused: $($_.ErrorDetails.Message) $($_.Exception.Message)"
+    }
+    Write-Host ("[impair] {0}" -f $(if ($r.impairment.spec) { $r.impairment.spec } else { 'cleared' })) -ForegroundColor Yellow
+    $r.impairment
+}
+
 # ---------------------------------------------------------------- parity --
 
 function Get-CRFlowOpSignature($Event) {
