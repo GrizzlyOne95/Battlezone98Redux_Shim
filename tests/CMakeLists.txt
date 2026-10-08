@@ -7,6 +7,14 @@ project(BzrNetProtocolTests LANGUAGES CXX)
 #   cmake -S tests -B tests/build && cmake --build tests/build -j && ctest --test-dir tests/build --output-on-failure
 enable_testing()
 
+if(WIN32)
+    add_executable(win32_last_error_scope_tests win32_last_error_scope_tests.cpp)
+    target_include_directories(win32_last_error_scope_tests PRIVATE ../include)
+    target_compile_features(win32_last_error_scope_tests PRIVATE cxx_std_14)
+    target_link_libraries(win32_last_error_scope_tests PRIVATE ws2_32)
+    add_test(NAME win32_last_error_scope_tests COMMAND win32_last_error_scope_tests)
+endif()
+
 # Qualification tooling has pure host seams. Neither test requires the private
 # executable, Windows process APIs, Frida, pefile or capstone.
 find_package(Python3 QUIET COMPONENTS Interpreter)
