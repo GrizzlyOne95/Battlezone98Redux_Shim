@@ -210,6 +210,7 @@ See that branch's
 `network_battle_load_validation_20261009.md` for configuration, activity metrics,
 progress and limitations. This supplements the completed objective/services
 results rather than changing their 20-run acceptance verdict.
+Continuation: generated nbattle now uses MultSTMission, matching the working co-op native multiplayer class, and preserves authored spawn powerup state. First-update gating and opt-in zero-audio-endpoint RDP support pass local checks. The 123027 attempt stopped at audio precondition; 123310 stopped at locked-desktop preflight. No corrected mission-class live run or combat acceptance yet.
 That branch also contains `NETWORK_BATTLE_LOAD_HANDOFF_20261009.md`, including
 artifact paths, source checkpoints, test results and the resume sequence.
 DedicatedServer `agent/network-startup-observability` commit `fcc350d` now logs

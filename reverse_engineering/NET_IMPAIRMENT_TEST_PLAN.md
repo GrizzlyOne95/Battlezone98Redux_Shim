@@ -21,6 +21,7 @@ artifacts, tests, recovery and exact resume gates. DedicatedServer branch
 submission/outcome and scheduler timing events. Focused and regression suites
 passed; native qualification remains pending. Socket submission is not proof
 of OS delivery or receiver acceptance. Existing trace writers flush per record.
+Continuation: generated nbattle now uses MultSTMission, matching the working co-op native multiplayer class, and preserves authored spawn powerup state. First-update gating and opt-in zero-audio-endpoint RDP support pass local checks. The 123027 attempt stopped at audio precondition; 123310 stopped at locked-desktop preflight. No corrected mission-class live run or combat acceptance yet.
 Qualify 20 AI first, then 40/80 clean loads and matched 80-unit ON/OFF 3% loss.
 Scrap collection, artillery, soak, caps and multi-PC/WAN remain separate gates.
 
