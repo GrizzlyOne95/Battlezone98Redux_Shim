@@ -130,8 +130,10 @@ foreach ($port in $Ports) {
             else { Get-NetUDPEndpoint -LocalPort $port.n -ErrorAction SilentlyContinue }
     if ($busy) { throw "$($port.p) $($port.n) is in use (pid $(@($busy.OwningProcess) -join ', ')); a lobby server is already running." }
 }
-if (-not (Test-Path -LiteralPath (Join-Path $CampaignContent "$Mission.lua"))) { throw "$Mission.lua not in $CampaignContent" }
 if ($ContentOverride -and -not (Test-Path -LiteralPath $ContentOverride -PathType Container)) { throw "Content override folder not found: $ContentOverride" }
+$hasBaseMission = Test-Path -LiteralPath (Join-Path $CampaignContent "$Mission.lua") -PathType Leaf
+$hasOverrideMission = $ContentOverride -and (Test-Path -LiteralPath (Join-Path $ContentOverride "$Mission.lua") -PathType Leaf)
+if (-not ($hasBaseMission -or $hasOverrideMission)) { throw "$Mission.lua not in campaign content or content override" }
 
 $server = $null
 $launcher = $null

@@ -203,8 +203,10 @@ if ($MapListY) {
     $tries = @($MapListY) + @(for ($y = 88; $y -le 230; $y += 8) { $y })
     foreach ($y in $tries) {
         $before = Get-GameSettings
+        if ($before -and $before[1] -eq $MapBzn) { break }
         Click $hostClient @($UI.MapList[0], $y, $UI.MapList[2])
         $s = Wait-NewSettings $(if ($before) { $before[0] } else { '' })
+        if (-not $s) { $s = Get-GameSettings }
         if ($s -and $s[1] -eq $MapBzn) { break }
     }
     $null = Wait-Until 'host-map' { $s = Get-GameSettings; if ($s -and $s[1] -eq $MapBzn) { "$MapBzn (row y=$y)" } }
