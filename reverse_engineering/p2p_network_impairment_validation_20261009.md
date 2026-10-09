@@ -39,6 +39,19 @@ interval. Accepted-update silence reached 14.469 seconds. These recovered
 before mission success. This is a repeat of the long loss-case behavior seen
 on the full console; improving average blackout time does not eliminate it.
 
+Focused c0-to-c2 trace/native-log diagnosis shows a recovery cascade, not a
+single packet missing for fourteen seconds. Reliable sequence 582 was dropped
+at 08:49:02.822 and resent/forwarded 116 ms later. During the modeled blackout
+the receiver advances through 293 reliable sequences (582-874), while rejecting
+785 unreliable updates. Native logs also show reliable 604 rejected while
+expecting 582 and 651 rejected while expecting 604. Some subsequent head
+sequences had originally been forwarded but require another retry after the
+earlier hole; eleven head-wait stages last approximately 1.02-1.12 seconds.
+Repeated relay loss contributes too. Retry bursts are typically 1190-1243 wire
+bytes / 19-25 fragments, consistent with a bounded retry-drain path. The relay
+cannot prove when the sender processed each ACK or which retry-pump branch ran;
+this is not proof of a new sender-starvation bug.
+
 The ON fallback failure shows a death-coordination/visibility race: four owner
 deaths spanned 749 ms across a one-second outage. The host chose BZRCoop4 as a
 living teammate 591 ms before logging that player's death. The harness arms
@@ -186,5 +199,12 @@ Instrument and reproduce the fallback-respawn race with an acknowledged common
 deadline, then qualify faster reliable retry timer arms and investigate the
 remaining long 5% loss blackouts. Add a measured pre-impairment baseline and
 actual relay-send timestamps before isolating impairment-triggered damage.
+Client candidates are `1000/2500` versus `300/800` (optionally `150/400`), with
+duplicate/bandwidth-cap checks; bounded future-reliable buffering may avoid
+retransmitting fragments already delivered ahead of an earlier hole. Preserve
+sequence/application ordering and wire compatibility. Add queue age, retry-burst
+and ACK-progress diagnostics before altering the retry budget. Server tooling
+should retain expired impairment-generation counters and expose unambiguous
+peer IDs so dead-peer tests cannot silently match nothing.
 Retry/reorder defaults remain unchanged; lower-timer, reordering, dead-peer,
 bandwidth, robustness, soak, real WAN and other-platform lanes remain open.
