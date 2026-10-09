@@ -560,3 +560,29 @@ lifecycle trace; qualify lower retry timers (stock 1000/2500 versus 300/800)
 with duplicate/bandwidth/ACK-progress checks; test equal-population idle/moving
 controls and longer combat/collection workloads. Keep current retry defaults
 until that evidence passes. WAN, Steam/Proton and renderer/FPS remain open.
+
+## Guarded retry-arm experiment - 2026-10-09 18:19 CDT
+
+`Run-P2PRetryBattleMatrix.ps1` now compares stock 1000/2500 ms with 300/800 ms
+on the existing guarded native timer sites, with the backlog fix ON in both
+arms. The helper validates all four INIs before writing, saves original bytes
+privately before mutation and restores them after every game exits. The scorer
+requires matching archived configs and unique successful native apply evidence
+for every client; aggregation rejects wrong or unverified timer arms.
+Shipped defaults and the native DLL are unchanged.
+
+The four-run battle experiment plans 80 fighting AI, 16 beacons,
+64 ammo/repair objects and 60 steady simulation seconds per arm; 3% loss seed
+212, then 3% loss plus a 256 kbit/s sender cap/200 ms queue seed 213. The first
+attempt stopped INCOMPLETE before impairment/combat following four DX9
+device-loss/null-read crashes during the phone-RDP-to-direct-desktop transition.
+Stock timer evidence verified on four clients; no shorter arm ran. Independent
+restoration audit: 128 targets, zero mismatches, zero games. A fresh attempt
+`182600` is active on the direct desktop, preserving the failed `182000`
+capture/score separately. Compare
+equal-duration post-ramp recovery, repeat reliable sequences, datagram byte
+rates and observed wire seqB progress. No final live verdict yet. Exact setup,
+validation and subsequent results belong in
+`p2p_retry_timing_validation_20261009.md`; raw captures remain private.
+Python checks passed 41/41, PowerShell restoration checks passed and Release
+x86 CTest passed 81/81. Full network/default-change qualification stays OPEN.
