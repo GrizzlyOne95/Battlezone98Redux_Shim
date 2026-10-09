@@ -2,8 +2,14 @@
 
 Update 2026-10-09: the four-client 3% loss tooling qualification passed
 (`IMPAIRED_OK`, gameplay PASS, complete captures, no crash/GPU event).
-The 20-run sweep started but stopped before impairment when the desktop
-changed to a 600-pixel-wide RDP mode; the session later disconnected.
+The 20-run sweep initially stopped before impairment when the desktop
+changed to a 600-pixel-wide RDP mode; the session later disconnected. It later
+completed ten fix-ON runs on the full console in `netimpair-matrix-20261009-072736`,
+all gameplay PASS / `IMPAIRED_OK`, before phone RDP interrupted the first stock
+launch. A separate phone-display qualification passed, and a fresh matched
+20-run sweep is running in `netimpair-matrix-20261009-081632`. Stock comparison
+and full acceptance remain pending. Draft tooling PRs are #417/#418 in OpenShim
+and #8 in DedicatedServer.
 See `p2p_network_impairment_validation_20261009.md` for evidence, setup
 corrections, display compatibility and dead-peer scenario findings.
 
