@@ -245,7 +245,7 @@ def flow_breakdown(flow):
     return ("PASS" if not failed else "FAIL"), capture_seen and not capture_failed, failed
 
 
-def score(run, arm=None, clients=4, gpu_query=None):
+def score(run, arm=None, clients=4, gpu_query=None, timers=None):
     run = os.path.abspath(run)
     result = {"run": os.path.basename(run), "runDir": run, "arm": arm, "problems": []}
     flow = load_json(os.path.join(run, "flow-summary.json"))
@@ -298,6 +298,11 @@ def score(run, arm=None, clients=4, gpu_query=None):
     result["worstLink"] = max(links, key=lambda k: links[k]["futureStampedGaps"]) if links else None
 
     result["fix"], result["fixPerClient"] = fix_state(run)
+    if timers is not None:
+        from p2p_retry_timing import parse_timers, verify_run
+        values = parse_timers(timers)
+        result["timers"] = f"{values[0]}/{values[1]}"
+        result["timerEvidence"] = verify_run(run, result["timers"], clients)
     start, end = run_window(run)
     result["crashes"] = crash_evidence(run, start, end)
     # None means the event log could not be read: evidence unavailable, never
@@ -336,6 +341,9 @@ def score(run, arm=None, clients=4, gpu_query=None):
         # log agreeing with it.
         result["class"] = "ARM_MISMATCH"
         result["problems"].append(f"intended {arm}, clients {result['fixPerClient']}")
+    elif timers is not None and result["timerEvidence"]["status"] != "verified":
+        result["class"] = "ARM_MISMATCH"
+        result["problems"].append(f"retry timer evidence mismatch: {result['timerEvidence']['clients']}")
     elif result["gameplayVerdict"] != "PASS":
         result["class"] = "FLOW_FAIL"
         result["problems"] += result["gameplayFailures"]
@@ -384,6 +392,11 @@ def aggregate(matrix):
                 problems.append(f"planned run {p['index']} ({p['arm']} p{p['pass']} {p['case']}) scored {len(got)} times")
             elif got[0].get("run") != p["run"] or got[0].get("arm") != p["arm"]:
                 problems.append(f"planned run {p['index']} scored as {got[0].get('run')} arm {got[0].get('arm')}")
+            elif p.get("timers") and (got[0].get("timers") != p["timers"] or
+                                      (got[0].get("timerEvidence") or {}).get("status") != "verified"):
+                problems.append(f"planned run {p['index']} lacks verified timers {p['timers']}")
+            elif p.get("timers") and (got[0].get("impair") or "") != (p.get("impair") or ""):
+                problems.append(f"planned run {p['index']} impairment differs from its timer comparison arm")
         extra = sorted(set(by_index) - {p["index"] for p in plan})
         if extra:
             problems.append(f"scores outside the plan: {extra}")
@@ -396,7 +409,7 @@ def aggregate(matrix):
         c[s["class"]] += 1
         for k, v in s.get("totals", {}).items():
             c[k] += v
-    if any(p.get("impair") for p in plan):
+    if any(p.get("impair") or p.get("timers") for p in plan):
         return aggregate_impaired(matrix, plan, scores, problems)
     planned_arms = sorted({p["arm"] for p in plan})
     for arm in planned_arms:
@@ -467,9 +480,9 @@ def aggregate_impaired(matrix, plan, scores, problems):
     arms are then compared per impairment profile."""
     groups = collections.OrderedDict()
     for p in plan:
-        groups.setdefault((p.get("impair") or "", p["arm"]), collections.Counter())
+        groups.setdefault((p.get("impair") or "", p["arm"], p.get("timers") or ""), collections.Counter())
     for s in scores:
-        c = groups.setdefault((s.get("impair") or "", s.get("arm") or "none"), collections.Counter())
+        c = groups.setdefault((s.get("impair") or "", s.get("arm") or "none", s.get("timers") or ""), collections.Counter())
         c["runs"] += 1
         c[s["class"]] += 1
         for k, v in s.get("totals", {}).items():
@@ -480,31 +493,36 @@ def aggregate_impaired(matrix, plan, scores, problems):
         c["relayMatched"] += imp.get("matched", 0)
         c["relayDropped"] += sum(imp.get(k, 0) for k in ("dropped_loss", "dropped_outage", "dropped_queue"))
     for s in scores:
-        if s.get("arm") == "on" and s["class"] != "IMPAIRED_OK":
+        wanted = "IMPAIRED_OK" if s.get("impair") else "STRICT_PASS"
+        if s.get("arm") == "on" and s["class"] != wanted:
             problems.append(f"fix-ON run {s.get('index')} ({s.get('impair')}) is {s['class']}")
         if s.get("arm") == "off" and s["class"] in HARD_FAIL_CLASSES:
             problems.append(f"stock run {s.get('index')} ({s.get('impair')}) failed for infrastructure: {s['class']}")
     rows = []
-    for (impair, arm), c in groups.items():
+    for (impair, arm, timers), c in groups.items():
         lm = c["linkMinutes"]
         rows.append({
             "impair": impair, "arm": arm, "runs": c["runs"],
+            "timers": timers,
             "classes": {k: v for k, v in c.items() if k.isupper()},
             "relayDropPct": round(100.0 * c["relayDropped"] / c["relayMatched"], 2) if c["relayMatched"] else None,
             "gapsPer1000Reliable": round(1000.0 * c["futureStampedGaps"] / c["reliableMessages"], 2) if c["reliableMessages"] else None,
             "blackoutSPerLinkMinute": round(c["blackoutTotalMs"] / 1000.0 / lm, 4) if lm else None,
             "blackoutsOver500MsPerLinkMinute": round(c["blackoutsOver500Ms"] / lm, 4) if lm else None,
             "maxBlackoutMs": c["maxBlackoutMs"],
+            "duplicateReliable": c["duplicateReliable"],
+            "reliableMessages": c["reliableMessages"],
         })
     acceptance = "PASS" if not problems else "FAIL"
     summary = {
         "matrix": matrix, "kind": "impairment",
         "verdict": acceptance, "acceptance": acceptance,
-        "acceptanceRule": "plan complete; every fix-ON run IMPAIRED_OK (complete capture, impairment applied, no crash/GPU "
-                          "event, gameplay PASS); no stock-control infrastructure failure",
+        "acceptanceRule": "plan complete; intended timer arms verified when specified; every fix-ON impaired run IMPAIRED_OK "
+                          "(complete capture, impairment applied, no crash/GPU event, gameplay PASS), clean run STRICT_PASS; "
+                          "no stock-control infrastructure failure. Native-health qualification remains separate.",
         "planned": len(plan), "scored": len(scores), "problems": problems,
         "groups": rows,
-        "runs": [{k: s.get(k) for k in ("index", "run", "case", "pass", "arm", "impair", "class", "gameplayVerdict",
+        "runs": [{k: s.get(k) for k in ("index", "run", "case", "pass", "arm", "impair", "timers", "timerEvidence", "class", "gameplayVerdict",
                                         "healthStatus", "traceSpanS", "maxBlackoutMs", "blackoutSPerLinkMinute",
                                         "worstLink", "gpuEvents", "problems")}
                  | {"gaps": s.get("totals", {}).get("futureStampedGaps"),
@@ -518,13 +536,13 @@ def aggregate_impaired(matrix, plan, scores, problems):
              f"**Verdict: {acceptance}**", "", f"- Acceptance: {summary['acceptanceRule']}",
              "- Blackout: a receiver rejecting a peer's updates as future-stamped until it next accepts one."]
     lines += [f"- Problem: {p}" for p in problems]
-    lines += ["", "| Impairment | Arm | Runs | Classes | Relay drop % | Gaps / 1000 reliable | Blackout s / link-min | "
-              ">=500 ms blackouts / link-min | Max blackout ms |", "|---|---|---|---|---|---|---|---|---|"]
+    lines += ["", "| Impairment | Arm | Timers ms | Runs | Classes | Relay drop % | Gaps / 1000 reliable | Blackout s / link-min | "
+              ">=500 ms blackouts / link-min | Max blackout ms | Duplicates / reliable |", "|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in rows:
         classes = ", ".join(f"{k} {v}" for k, v in sorted(r["classes"].items()))
-        lines.append(f"| `{r['impair']}` | {r['arm']} | {r['runs']} | {classes} | {r['relayDropPct']} | "
+        lines.append(f"| `{r['impair']}` | {r['arm']} | {r['timers'] or 'unspecified'} | {r['runs']} | {classes} | {r['relayDropPct']} | "
                      f"{r['gapsPer1000Reliable']} | {r['blackoutSPerLinkMinute']} | {r['blackoutsOver500MsPerLinkMinute']} | "
-                     f"{r['maxBlackoutMs']:.0f} |")
+                     f"{r['maxBlackoutMs']:.0f} | {r['duplicateReliable']} / {r['reliableMessages']} |")
     lines += ["", "| # | Run | Arm | Impairment | Class | Gameplay | Span s | Gaps | Blackout s/link-min | Max blackout ms | "
               "GPU | Notes |", "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in summary["runs"]:
@@ -545,6 +563,7 @@ def main():
     s.add_argument("run")
     s.add_argument("--arm", choices=("on", "off"))
     s.add_argument("--clients", type=int, default=4)
+    s.add_argument("--timers", help="intended first/interval ms; requires matching archived INI and native apply logs")
     s.add_argument("--case", default=None)
     s.add_argument("--pass-index", type=int, default=None)
     s.add_argument("--index", type=int, default=None, help="position in the matrix plan")
@@ -554,7 +573,13 @@ def main():
     a.add_argument("matrix")
     args = ap.parse_args()
     if args.cmd == "score":
-        r = score(args.run, args.arm, args.clients)
+        if args.timers is not None:
+            from p2p_retry_timing import parse_timers
+            try:
+                parse_timers(args.timers)
+            except ValueError as error:
+                ap.error(str(error))
+        r = score(args.run, args.arm, args.clients, timers=args.timers)
         r["case"], r["pass"], r["index"] = args.case, args.pass_index, args.index
         if args.impair is not None and args.impair != r["impair"]:
             r["class"] = "ARM_MISMATCH"
