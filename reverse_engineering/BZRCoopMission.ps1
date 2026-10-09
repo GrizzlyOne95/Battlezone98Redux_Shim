@@ -144,7 +144,20 @@ function Test-CRFlowRoster([int]$ExpectedClients = 2) {
             # Attach occurs during native map loading. Probe commands are only
             # serviced by Update; wait for its first role event before polling.
             Wait-CRFlowEvent $client role -TimeoutSeconds 120 -Description 'after native startup sync / first mission update' | Out-Null
-            $state = Wait-CRFlow $client "return role().ready and M.coopMissionStarted and #players() == $ExpectedClients and { role = role(), players = players() }" -TimeoutSeconds 120
+            try {
+                $state = Wait-CRFlow $client "return role().ready and M.coopMissionStarted and #players() == $ExpectedClients and { role = role(), players = players() }" -TimeoutSeconds 120
+            } catch {
+                $admissionFailure = $_
+                $admission = @()
+                foreach ($observer in $indices) {
+                    try {
+                        $detail = Invoke-CRFlow $observer 'local list = {}; for id,p in pairs(CRCoop.GetPlayers()) do list[#list+1] = {id=id,team=p.team,name=p.name,ready=p.ready,protocolVersion=p.protocolVersion,handle=describe(p.handle)} end; return {time=GetTime(),role=role(),missionStarted=M.coopMissionStarted,players=list}' -TimeoutSeconds 2 -AllowError
+                        $admission += @{client=$observer; at=(Get-Date).ToUniversalTime().ToString('o'); result=$detail}
+                    } catch { $admission += @{client=$observer; error=$_.Exception.Message} }
+                }
+                $admission | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $script:CRFlowRun.runDir 'admission-failure.json')
+                throw $admissionFailure
+            }
             if ($state.role.team -ne ($client + 1) -or [bool]$state.role.authority -ne ($client -eq 0) -or $state.role.lateJoiners) { throw "client $client has incorrect role: $(ConvertTo-Json $state -Compress -Depth 5)" }
             $teams = @($state.players | ForEach-Object { $_.team } | Sort-Object -Unique)
             if (($teams -join ',') -ne (@(1..$ExpectedClients) -join ',') -or @($state.players | Where-Object { -not $_.handle.valid -or $_.handle.team -ne $_.team }).Count) { throw "client $client has an incomplete native player registry" }
