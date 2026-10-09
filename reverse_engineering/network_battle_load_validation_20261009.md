@@ -1,6 +1,7 @@
 # Multiplayer battle-load qualification — 2026-10-09
 
-Status: implemented; four-client live qualification in progress. This extends
+Status: implemented and locally tested; four-client live qualification is
+blocked at native startup. No combat phase has run. This extends
 the objective/services impairment suite with natural AI combat and object churn.
 It does not change client retry timers, packet ordering, or server defaults.
 
@@ -45,7 +46,7 @@ no WAN, multi-PC, or independent GPU performance acceptance is implied.
 | `battle-control-20261009-100650` / `battle-load-20261009-100650-smoke20` | lobby selection failed | All four authenticated. Display name placed the new map below the visible searched rows. No combat started. Display name now sorts first. Restored/verified. |
 | `battle-control-20261009-101002` / `battle-load-20261009-101002-smoke20` | native map load failed | All four selected/launched the map; native loader rejected craft-state fields inherited by generated start markers (`battle_spawn1 skipped pilot class`, failed to load game files). Replaced the marker with the validated authored co-op `pspwn_1` template. No combat started; restored/verified. |
 | `battle-control-20261009-101530` / `battle-load-20261009-101530-smoke20` | lobby selection failed | New map was already selected; harness required a changed settings version and then walked away from it. Missing/comma-only vehicle descriptions also appeared. No combat. Independent review found marker-coordinate regexes also overwrote orientation/velocity; fixed before the next launch. Restored/verified. |
-| `battle-control-20261009-102214` / `battle-load-20261009-102214-smoke20` | running | Four clients, clean network, 20 requested AI, 45 sustained seconds after ramp. Validated marker structure/basis/velocity, proper pilot VXT, description, terrain filenames matching map name. Harness accepts an already-selected matching map. Source/scenario snapshotted. |
+| `battle-control-20261009-102214` / `battle-load-20261009-102214-smoke20` | native startup failed | Lobby and map load passed, but all four stayed at frame/time zero in Connecting 1 of 4. Host reported Network Start Sync Failure after 90 seconds. No combat began. Graceful close left four hidden processes; the user authorized terminating only those four PIDs. Independent audit verified all 128 restored targets and zero remaining game processes. |
 
 The Lua fixture passed authority restrictions, bounded frame spawning,
 native damage/ammo/death accounting, exact zero-health scrap classification,
@@ -54,6 +55,33 @@ and prohibition of cleanup during the measured phase. Additional checks passed
 PowerShell syntax and map staging passed. Python map regression verifies all
 four native marker bases, translations, zero motion, team/sequence/mission
 references, and byte-identical copies of the existing authored terrain.
+The report regression also passed twelve-link accounting, drop reasons,
+payload-identical retries despite changed headers, CPU/rate calculations and
+rejection of missing measurement windows.
+
+## Startup evidence and server logging
+
+In the final attempt, all twelve relay links forwarded without injected loss;
+the host repeatedly sent startup payload `53 53 01`, but the 18-byte `50 53`
+spawn-coordinate message and `53 53 02`/`04` progression seen in the validated
+co-op control were absent. Native peers remained at SyncInAt/SyncOutAckAt zero.
+Spawn marker registration/eligibility is the next focused check. This is a
+hypothesis, not a proved Redux cause or a server-delivery diagnosis.
+
+DedicatedServer branch `agent/network-startup-observability`, commit `fcc350d`,
+adds packet-correlated socket submission events, copy indexes, socket identity,
+queue/scheduler delay, send-call duration and submitted/exception/closing
+outcomes. Eight focused observability tests and the existing impairment,
+fault-injection, bounded pair-port, full pair-port and capture suites passed.
+The change has not yet run with native clients. A submitted event proves that
+`sendto` returned, not OS delivery or peer acceptance. Opaque payload forwarding
+is unchanged. Existing trace writers already flush every record.
+
+Private evidence remains under `C:\BZRCoop\runs`; the latest control contains
+`independent-restoration-audit.json`. Final client logs are preserved separately
+as unclean termination captures; do not score them as clean shutdown evidence.
+See [checkpoint handoff](NETWORK_BATTLE_LOAD_HANDOFF_20261009.md) for recovery,
+branches, artifact paths and next steps.
 
 ## Next qualification gates
 
