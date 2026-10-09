@@ -1,5 +1,63 @@
 # Network impairment qualification, 2026-10-09
 
+## Completed: the 20-run loss/burst comparison
+
+Final continuation: `C:\BZRCoop\runs\netimpair-matrix-20261009-091255\summary.md`,
+20/20 scored, **acceptance FAIL**. Fix ON passed gameplay in 9/10 runs; stock
+passed 5/10. The one ON failure is the services fallback-respawn assertion
+under `outage=1000/20000,seed=13`; do not erase it or call the matrix PASS.
+
+Independent comparison and capture audit:
+`C:\BZRCoop\runs\network-qualification-control-20261009-071830\comparison.md`
+and `final_capture_provenance_audit_091255.md` (JSON evidence alongside each).
+All twenty source scores replay exactly, all twelve directed links per run
+were impaired and dropped traffic, and all eighty client captures have exact
+shutdown sizes and no ring overflow. All intended ON/OFF patch states match.
+No crash or GPU event occurred in the twenty retained gameplay attempts.
+
+| Profile | ON gameplay passes | OFF gameplay passes | Source blackout ON/OFF s/link-minute | Equal-active-window ON/OFF |
+|---|---:|---:|---:|---:|
+| 1% loss | 2/2 | 0/2 | 0.5198 / 19.1288 | 0.1612 / 29.5568 |
+| 3% loss | 2/2 | 0/2 | 1.1008 / 24.0738 | 1.1822 / 28.7135 |
+| 5% loss | 2/2 | 1/2 | 2.6801 / 20.7726 | 3.2923 / 25.1444 |
+| 1 s / 20 s outage | 1/2 | 2/2 | 1.4003 / 10.1170 | 1.9014 / 11.0118 |
+| 200 ms / 5 s outage | 2/2 | 2/2 | 1.4009 / 21.9860 | 1.7987 / 25.0221 |
+
+The no-worse blackout criterion passes for every profile and every matched
+case, for both source and equal-exposure supplements. This supports a better
+complete-session result with the fix, not isolation of impairment-triggered
+damage: eight OFF runs already carried blackouts into the impairment window.
+Four failed OFF controls have only 16.7-33.2 seconds of active impairment;
+equal exposure clips later ON behavior. There is one seed per profile/case,
+all ON runs precede OFF, and identical seeds do not impose identical loss
+decisions when traffic differs. Health was PASS in 6/10 ON and 0/10 OFF runs;
+health failure remains reported separately from impaired gameplay acceptance.
+
+The fresh ON win case at 5% loss had a 14.391-second active c0-to-c2 blackout
+(08:49:02.836-08:49:17.227 Central), and a concurrent 13.583-second c0-to-c3
+interval. Accepted-update silence reached 14.469 seconds. These recovered
+before mission success. This is a repeat of the long loss-case behavior seen
+on the full console; improving average blackout time does not eliminate it.
+
+The ON fallback failure shows a death-coordination/visibility race: four owner
+deaths spanned 749 ms across a one-second outage. The host chose BZRCoop4 as a
+living teammate 591 ms before logging that player's death. The harness arms
+separate client-local deadlines, waits for native life decrement rather than
+completed placement, then assumes everyone used the rally. The product policy
+prefers a locally living teammate and has no acknowledged all-dead barrier.
+An instrumented common-deadline reproduction is needed before attributing
+this result to the backlog fix. `lastRespawn.pos.valid=false` is a vector
+serialization limitation in the probe, not proof of invalid player placement.
+The matching stock retry passed this check; the ON failure remains FAIL.
+
+The original phone matrix `081632` stopped at run 14 before impairment when
+the host landed on Mods instead of the lounge. Its failed attempt is retained.
+The final continuation carries scores 1-13 byte-for-byte and records an
+explicitly renamed fresh run-14 retry; runs 15-20 were then completed.
+Control: `C:\BZRCoop\runs\network-qualification-control-20261009-091255`.
+All 128 backup targets/absence states independently match after restoration;
+the install renderer retains its original hash and no game remains running.
+
 ## Completed: the tooling qualification
 
 Four internal windowed DX9 GOG clients, private loopback relay, fix ON,
@@ -75,12 +133,12 @@ renderer SHA-256 `822d26ca4b9cce82ddd2fca5e31e7d3a0cd8d05032130a987830143e3d0f95
 became `39a5fc90c8a7545c523901a5b6c1a9e62ca237730d0bfce58ae1120a12bd7bc4`
 in the four disposable copies only. The wrapper restored and verified them.
 
-A fresh matched 20-run sweep is now running under that qualified setup:
+A fresh matched 20-run sweep started under that qualified setup:
 `C:\BZRCoop\runs\netimpair-matrix-20261009-081632`, control
 `C:\BZRCoop\runs\network-qualification-control-20261009-081629`.
 Both ON and OFF arms use the same renderer adaptation and window setup;
-the first run passed. Original full-console ON results remain separate evidence.
-Full comparative acceptance remains pending.
+Original full-console ON results remain separate evidence. The completed
+continuation and acceptance limits are documented above.
 
 Draft tooling PRs opened after qualification: OpenShim matrix/scorer
 [#417](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/pull/417),
@@ -124,8 +182,9 @@ The `impairment_expired` trace event retains the previous totals.
 
 ## Next
 
-On a live unlocked desktop, qualify the current display setup, then complete
-the planned two cases by five impairment profiles by two arms (20 runs).
-Report gameplay acceptance and the ON/OFF blackout comparison separately.
+Instrument and reproduce the fallback-respawn race with an acknowledged common
+deadline, then qualify faster reliable retry timer arms and investigate the
+remaining long 5% loss blackouts. Add a measured pre-impairment baseline and
+actual relay-send timestamps before isolating impairment-triggered damage.
 Retry/reorder defaults remain unchanged; lower-timer, reordering, dead-peer,
 bandwidth, robustness, soak, real WAN and other-platform lanes remain open.
