@@ -141,6 +141,9 @@ function Test-CRFlowRoster([int]$ExpectedClients = 2) {
         $states = @()
         foreach ($client in $indices) {
             Wait-CRFlowEvent $client attach -TimeoutSeconds 120 | Out-Null
+            # Attach occurs during native map loading. Probe commands are only
+            # serviced by Update; wait for its first role event before polling.
+            Wait-CRFlowEvent $client role -TimeoutSeconds 120 -Description 'after native startup sync / first mission update' | Out-Null
             $state = Wait-CRFlow $client "return role().ready and M.coopMissionStarted and #players() == $ExpectedClients and { role = role(), players = players() }" -TimeoutSeconds 120
             if ($state.role.team -ne ($client + 1) -or [bool]$state.role.authority -ne ($client -eq 0) -or $state.role.lateJoiners) { throw "client $client has incorrect role: $(ConvertTo-Json $state -Compress -Depth 5)" }
             $teams = @($state.players | ForEach-Object { $_.team } | Sort-Object -Unique)
@@ -160,7 +163,12 @@ function Test-CRFlowRoster([int]$ExpectedClients = 2) {
 # on purpose adds its pid to $script:CRFlowExpectedExit first.
 $script:CRFlowExpectedExit = @()
 function Assert-CRFlowClientsAlive {
-    foreach ($c in (Get-CRFlowSession).clients) {
+    $session = Get-CRFlowSession
+    if ($session.coordinatorPid -and -not (Get-Process -Id $session.coordinatorPid -ErrorAction SilentlyContinue) -and
+        @($session.clients | Where-Object { $script:CRFlowExpectedExit -notcontains $_.pid -and (Get-Process -Id $_.pid -ErrorAction SilentlyContinue) }).Count) {
+        throw "Session coordinator $($session.coordinatorPid) exited while clients remain alive; inspect coordinator.err.log and audio-mute.jsonl."
+    }
+    foreach ($c in $session.clients) {
         if ($script:CRFlowExpectedExit -contains $c.pid) { continue }
         if (Get-Process -Id $c.pid -ErrorAction SilentlyContinue) { continue }
         $log = Get-CRFlowLogPath $c

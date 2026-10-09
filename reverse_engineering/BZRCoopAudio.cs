@@ -56,6 +56,14 @@ namespace BZRCoopAudio {
     public static class Sessions {
         static void Check(int hr) { Marshal.ThrowExceptionForHR(hr); }
         static void Release(object value) { if (value != null) Marshal.ReleaseComObject(value); }
+        public static int ActiveRenderDeviceCount() {
+            object enumerator = new DeviceEnumerator();
+            IDeviceCollection devices = null;
+            try {
+                Check(((IDeviceEnumerator)enumerator).EnumAudioEndpoints(0, 1, out devices));
+                uint count; Check(devices.GetCount(out count)); return (int)count;
+            } finally { Release(devices); Release(enumerator); }
+        }
         public static int Mute(int processId) {
             object enumerator = new DeviceEnumerator();
             IDeviceCollection devices = null;

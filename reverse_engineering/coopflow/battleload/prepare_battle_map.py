@@ -37,15 +37,14 @@ def prepare(output: Path) -> None:
                   "front_x": 0, "front_y": 0, "front_z": 1}
         for field, value in fields.items():
             buoy = re.sub(rf"(?m)^([ \t]*{field} \[1\] =\n)[^\n]+", rf"\g<1>{value}", buoy)
-        # A start marker is not a craft; don't carry serialized player state.
-        for field in ("healthRatio", "curHealth", "maxHealth", "ammoRatio", "curAmmo", "maxAmmo", "mass", "mass_inv", "k_i"):
-            buoy = re.sub(rf"({field} \[1\] =\s*)[-\d.e+]+", r"\g<1>0", buoy)
-        buoy = buoy.replace("aiProcess [1] =\ntrue", "aiProcess [1] =\nfalse")
-        buoy = buoy.replace("curPilot [1] =\nasuser", "curPilot [1] =\n")
+        # Preserve the authored spawn powerup's state, including the native
+        # zero-mass inverse sentinel. It is already a spawn, not a craft.
         buoy = re.sub(r"(perceivedTeam \[1\] =\s*)1\b", rf"\g<1>{team}", buoy)
         blocks.append(buoy)
     bzn = header + "".join("[GameObject]" + b for b in blocks)
-    bzn += "name = LuaMission" + tail.replace("00000002", "00000006")
+    # Strategy multiplayer must construct the native multiplayer mission class
+    # to initialize its spawn powerup registry before network startup sync.
+    bzn += "name = MultSTMission" + tail.replace("00000002", "00000006")
     (output / "nbattle.bzn").write_text(bzn, encoding="ascii")
     (output / "nbattle.ini").write_text(
         '[DESCRIPTION]\nmissionName = "A Network Battle Load"\n'

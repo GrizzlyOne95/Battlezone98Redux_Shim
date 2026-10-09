@@ -273,6 +273,12 @@ Rules that keep results meaningful:
   ogg!" / `minFreeCopies(0)`, every voice-over counts as done at once, and
   films gated on `AudioDone` end on their first frame. The run summary warns
   "audio available"; fix the Remote Desktop sound setting and rerun.
+- Battle-load startup/combat diagnostics can explicitly use
+  `-AllowNoAudioEndpoint` with muted clients when Windows enumerates zero active
+  render endpoints. Session and periodic logs mark audio timing unqualified;
+  available sessions are still muted, and a missing session with any active
+  endpoint still fails. Campaign films/audio acceptance still require an audio
+  device. Keep the same audio condition in battle CPU comparisons.
 - Redux's music streamer once crashed a client on the Multiplayer screen (null
   audio system at `0x43ee3c`, two clients sharing one audio device over RDP).
   Rare; rerun the case.

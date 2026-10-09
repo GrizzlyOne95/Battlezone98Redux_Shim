@@ -37,6 +37,7 @@ param(
     [string[]]$GameArgs = @('/nointro'),
     [switch]$MaxNetworkLogging,
     [switch]$MuteClients,
+    [switch]$AllowNoAudioEndpoint,
     # 'local' (default) DNS-redirects the stock matchmaking host through
     # OpenShim to a loopback Battlezone98Redux_DedicatedServer. 'official'
     # sends test clients with Goldberg identities to Rebellion's public lobby
@@ -295,6 +296,7 @@ function Start-BZRCoopClients {
         sourceRoot = $SourceRoot; matchmaking = $Matchmaking; launchDelaySeconds = $LaunchDelaySeconds
         coordinatorPid = $PID; clients = @()
         gameArgs = $GameArgs; maxNetworkLogging = [bool]$MaxNetworkLogging; muteClients = [bool]$MuteClients
+        allowNoAudioEndpoint = [bool]$AllowNoAudioEndpoint
     }
     $clientGameArgs = @($GameArgs)
     if ($MaxNetworkLogging) {
@@ -336,11 +338,14 @@ function Start-BZRCoopClients {
             $ready = [bool]$st.authenticatedAs
         } until ($ready -or (Get-Date) -gt $deadline)
         if (-not $ready) { throw "client $i did not authenticate to the lobby in ${ReadyTimeoutSeconds}s; last log: $($st.last)" }
-        if ($MuteClients -and $muteCount -lt 1) { throw "Client $i authenticated without a muted audio session; audio timing cannot be qualified." }
+        $audioEndpoints = if ($MuteClients) { [BZRCoopAudio.Sessions]::ActiveRenderDeviceCount() } else { $null }
+        if ($MuteClients -and $muteCount -lt 1 -and (-not $AllowNoAudioEndpoint -or $audioEndpoints -gt 0)) { throw "Client $i authenticated without a muted audio session; audio timing cannot be qualified." }
         $session.clients[$i].menuAtMs = $clock.ElapsedMilliseconds
         $session.clients[$i].authenticatedAs = $st.authenticatedAs
         $session.clients[$i].redirect = $st.redirect
         $session.clients[$i].mutedAudioSessions = if ($MuteClients) { $muteCount } else { $null }
+        $session.clients[$i].activeAudioEndpoints = $audioEndpoints
+        $session.clients[$i].audioTimingQualified = [bool]($MuteClients -and $muteCount -gt 0)
         $session.clients[$i].mutedAt = if ($MuteClients) { (Get-Date).ToString('o') } else { $null }
         Write-SessionFile $session
         Write-Host ("[BZRCoop] client {0} authenticated as {1} after {2:N1}s (redirect {3})" -f $i, $st.authenticatedAs, ($clock.ElapsedMilliseconds / 1000), $st.redirect)
@@ -433,10 +438,17 @@ switch ($Action) {
             do {
                 $alive = @($session.clients | Where-Object { Get-Process -Id $_.pid -ErrorAction SilentlyContinue })
                 foreach ($c in $alive) {
-                    $count = Set-BZRCoopClientMute $c.pid
-                    if ($count -lt 1) { throw "Client $($c.index) lost its audio session." }
-                    [ordered]@{ time = (Get-Date).ToString('o'); client = $c.index; pid = $c.pid; mutedSessions = $count } |
+                    try {
+                        $count = Set-BZRCoopClientMute $c.pid
+                        $endpoints = [BZRCoopAudio.Sessions]::ActiveRenderDeviceCount()
+                    } catch {
+                        [ordered]@{ time = (Get-Date).ToString('o'); client = $c.index; pid = $c.pid; error = $_.Exception.Message } |
+                            ConvertTo-Json -Compress | Add-Content -LiteralPath (Join-Path $session.runDir 'audio-mute.jsonl')
+                        throw
+                    }
+                    [ordered]@{ time = (Get-Date).ToString('o'); client = $c.index; pid = $c.pid; mutedSessions = $count; activeAudioEndpoints = $endpoints; audioTimingQualified = ($count -gt 0) } |
                         ConvertTo-Json -Compress | Add-Content -LiteralPath (Join-Path $session.runDir 'audio-mute.jsonl')
+                    if ($count -lt 1 -and (-not $AllowNoAudioEndpoint -or $endpoints -gt 0)) { throw "Client $($c.index) lost its audio session." }
                 }
                 if ($alive.Count) { Start-Sleep -Seconds 5 }
             } while ($alive.Count)

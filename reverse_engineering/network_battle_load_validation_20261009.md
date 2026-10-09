@@ -48,6 +48,12 @@ no WAN, multi-PC, or independent GPU performance acceptance is implied.
 | `battle-control-20261009-101530` / `battle-load-20261009-101530-smoke20` | lobby selection failed | New map was already selected; harness required a changed settings version and then walked away from it. Missing/comma-only vehicle descriptions also appeared. No combat. Independent review found marker-coordinate regexes also overwrote orientation/velocity; fixed before the next launch. Restored/verified. |
 | `battle-control-20261009-102214` / `battle-load-20261009-102214-smoke20` | native startup failed | Lobby and map load passed, but all four stayed at frame/time zero in Connecting 1 of 4. Host reported Network Start Sync Failure after 90 seconds. No combat began. Graceful close left four hidden processes; the user authorized terminating only those four PIDs. Independent audit verified all 128 restored targets and zero remaining game processes. |
 
+Continuation runs: `battle-control-20261009-123027` stopped after client 0
+authenticated because RDP has zero active render audio endpoints; the client
+exited gracefully and files restored. No lobby/map/combat phase ran.
+`battle-control-20261009-123310` stopped at locked-desktop preflight before
+deployment. No clients launched and no corresponding smoke directory exists.
+
 The Lua fixture passed authority restrictions, bounded frame spawning,
 native damage/ammo/death accounting, exact zero-health scrap classification,
 and prohibition of cleanup during the measured phase. Additional checks passed
@@ -65,8 +71,30 @@ In the final attempt, all twelve relay links forwarded without injected loss;
 the host repeatedly sent startup payload `53 53 01`, but the 18-byte `50 53`
 spawn-coordinate message and `53 53 02`/`04` progression seen in the validated
 co-op control were absent. Native peers remained at SyncInAt/SyncOutAckAt zero.
-Spawn marker registration/eligibility is the next focused check. This is a
-hypothesis, not a proved Redux cause or a server-delivery diagnosis.
+The generated map inherited single-player `LuaMission` from lcbench, whereas
+the working co-op BZN uses `MultSTMission`. Multiplayer initialization assigns
+native player spawns; this mission-class difference is the strongest identified
+setup candidate. The generator now emits `MultSTMission` and preserves authored
+`pspwn_1` spawn powerup state, including mass_inv's zero-mass sentinel. The map
+test pins both. A live retry is still required to establish causality; no
+spawn-path requirement or server-delivery failure has been established.
+
+The roster gate now waits for the first mission-update role event before probe
+commands, so native startup stalls receive a direct diagnostic. An explicit
+`-AllowNoAudioEndpoint` test option permits muted-client runs with zero render
+endpoints. Available sessions remain muted; missing sessions with active
+endpoints still fail. Session/periodic logs record endpoint count and audio
+timing qualification. The option is off by default; native audio configuration
+is unchanged. Zero-endpoint runs cannot qualify audio timing or compare directly
+with earlier audio-enabled CPU controls. Local syntax, map, Lua and report checks
+pass; an unlocked desktop is required for the corrected live retry.
+Final evidence still requires complete clean captures and periodic audio
+observations. Watcher errors are persisted before exit; a dead coordinator
+fails mission polling while clients remain alive. Eight sanitized Windows
+PowerShell 5.1 evidence tests pass default mute acceptance, explicit zero-device
+audio-unqualified acceptance, and rejection of missing provenance, active-device
+missing mute, watcher errors, absent samples and unclean captures. Five-second
+audio observations do not prove continuous mute coverage.
 
 DedicatedServer branch `agent/network-startup-observability`, commit `fcc350d`,
 adds packet-correlated socket submission events, copy indexes, socket identity,
