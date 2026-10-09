@@ -11,6 +11,7 @@
 --     print() line without a newline.
 --       attach  the probe is running (mission, Lua version, bzfile present)
 --       role    first frame after CRCoop knows authority/team/player id
+--       admission  Initialize/player/Q/K boundaries with raw readiness flags
 --       flag    a boolean/string M field changed (mission progression)
 --       op      a presentation call reached the native API on this client
 --               (objectives, markers, subtitles, camera, result)
@@ -587,6 +588,50 @@ local function tick()
     end
 end
 
+-- Observe lifecycle ordering without calling identity/authority getters: those
+-- can resolve/cache the local ID and refresh handles before Initialize.
+local function hookAdmission()
+    local c = opts.CRCoop
+    if type(c) ~= "table" then return end
+    local emitted = 0
+    local function observe(call, edge, args)
+        if emitted >= 1024 then return end
+        emitted = emitted + 1
+        local peers = {}
+        if type(c.GetPlayers) == "function" then
+            for id, p in pairs(c.GetPlayers()) do
+                peers[#peers + 1] = {id=id, team=p.team, ready=p.ready,
+                    protocolVersion=p.protocolVersion, handle=tostring(p.handle)}
+            end
+        end
+        local h = try(GetPlayerHandle)
+        emit("admission", {call=call, edge=edge, peers=peers,
+            hosting=try(IsHosting), netGame=try(IsNetGame),
+            localHandle=tostring(h), localTeam=try(GetTeamNum, h),
+            playerId=args[1], kind=call == "Receive" and args[2] or nil,
+            version=call == "Receive" and args[2] == "Q" and args[5] or
+                (call == "Receive" and args[2] == "K" and args[3] or nil),
+            eventLimitReached=emitted == 1024})
+    end
+    local function pack(...) return {n=select("#", ...), ...} end
+    for _, name in ipairs({"Initialize", "CreatePlayer", "AddPlayer", "DeletePlayer",
+            "Receive", "MarkMissionStarted"}) do
+        local original = c[name]
+        if type(original) == "function" then
+            local call = name
+            c[call] = function(...)
+                local args = pack(...)
+                local traced = call ~= "Receive" or args[2] == "Q" or args[2] == "K"
+                if traced then pcall(observe, call, "before", args) end
+                -- Original errors propagate and the callback runs exactly once.
+                local result = pack(original(...))
+                if traced then pcall(observe, call, "after", args) end
+                return unpack(result, 1, result.n)
+            end
+        end
+    end
+end
+
 function Probe.Attach(options)
     opts = options or {}
     local okFile, mod = pcall(require, "bzfile")
@@ -599,6 +644,7 @@ function Probe.Attach(options)
         end
     end
     hookNative()
+    hookAdmission()
     local missionUpdate = rawget(_G, "Update")
     if type(missionUpdate) ~= "function" then
         emit("error", { msg = "mission has no global Update to wrap" })
