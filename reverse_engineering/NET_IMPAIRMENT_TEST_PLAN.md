@@ -479,3 +479,84 @@ SHA256. The first diagnostic's supplemental private provenance records the
 probe byte match on all four instances and the metadata-only scenario change
 between the pre-launch hash snapshot and execution. Inspect active status
 before any further launch; continuation comparison and restoration are pending.
+
+Independent diagnostic relay audit: 65,641 decisions = 60,817 forwarded and
+submitted + 4,824 intentional outage drops across all generations. All 12
+links match exact source TX bytes, with zero missing outcomes, exceptions or
+socket errors. Four clean complete captures; 108 additional target RX deficits,
+99 beyond final P2P RX and 9 earlier. None lies within the aligned outage to
+placement window after intentional drops are excluded. Queue wait p99/max
+0.165/267.886 ms (maximum before aligned deaths); send call p99/max
+0.052/0.755 ms. These qualify capture/correlation, not OS delivery. Callback
+restoration has source/finally/no-error execution evidence; direct callback
+identity was not queried. Private `respawn-independent-audit.json` and
+`admission-startup-audit.json` preserve the exact evidence.
+
+## Completed paired battle comparison and analyzer correction - 2026-10-09
+
+Latest state: both completed pairs are archived; no controller or game is
+active. Continuation `142000` completed at 14:28 CDT. Its 128 restored targets
+were independently rehashed at 18:04 CDT: zero mismatch and zero games.
+Private `battle-loss-combined-20261009-142000` joins the four completed arms;
+it retains source-control paths and the two INCOMPLETE startup attempts.
+This is a completed paired comparison, not an uninterrupted four-run matrix.
+The second pair uses passive admission logging in both arms. Native DLL,
+server.py and battle workload bytes remain matched across completed arms.
+
+| 3% loss seed | Matched post-ramp seconds | ON/OFF gameplay | ON/OFF rejection-frequency gate | Modeled blackout seconds/link-minute ON/OFF | Worst modeled blackout ms ON/OFF |
+|---|---:|---|---|---:|---:|
+| 12 | 55.371 | PASS/PASS | FAIL/FAIL | 0.6334 / 17.1155 | 558 / 4,125 |
+| 112 | 55.544 | PASS/PASS | FAIL/FAIL | 0.5566 / 26.3344 | 714 / 8,563 |
+
+All arms maintained 80 AI and staged 16 beacons plus 64 ammo/repair objects for 60
+sustained simulation seconds, then converged on cleanup. Seed-112 ON/stock
+recorded 32/29 natural vehicle deaths and 130/128 newly observed scrap handles.
+Gameplay acceptance passes; native rejection-frequency acceptance remains
+FAIL, so full network qualification is OPEN. The completed 20-run services
+matrix retains its original FAIL and 9/10 versus 5/10 gameplay totals.
+
+Native windows wholly within each conservative post-ramp interval affected
+1/11 links (seed 12 ON/OFF) and 0/12 (seed 112 ON/OFF). The whole-mission gate
+includes other phases. Same seeds with different native traffic do not select
+identical packet drops. The replay measures forwarding-based sequence gaps,
+not actual application acceptance; CPU/probe samples do not measure FPS.
+
+Seed-112 ON: 56,284 decisions = 54,601 submitted + 1,683 intended drops.
+Stock: 50,282 decisions = 48,782 submitted + 1,500 intended drops. Every source
+TX byte and socket outcome matches across twelve links, with no correlation
+errors, missing outcomes or submission failures, and four clean untruncated
+captures with zero dropped capture events per arm. Additional target RX
+record deficits excluding intended drops: 106/83; post-ramp 5/11 (ON 3
+unreliable + 2 reliable; stock 8 unreliable + 3 reliable). Stock has no gaps
+beyond its final target P2P RX, so the earlier runs' late-gap explanation
+cannot be generalized. Two stock hashes each expected two copies but retained
+one copy in both JSON and binary: a deficit is proven, its exact missing
+occurrence is ambiguous. All 83 JSON deficits are also binary deficits; three
+other datagrams occur in JSON without a binary match. Preserve this
+capture discrepancy as open; complete ring retention is not proof that both
+hooks recorded every event. Raw captures and exact deficit audits stay private.
+
+The remaining ON seed-12 five-second frequency window was traced packet by
+packet: all 36 rejected datagrams matched source TX, relay forwarding/socket
+submission and target wire RX. Its 24 type-0 Drop lines printed expected=0,
+but each preceding Received line had a nonzero expected sequence. Replay and
+native expected sequences agreed; four short modeled gaps (94/86/120/94 ms)
+explain repeated rejection without a continuous five-second blackout.
+
+Server `native_network_health.py` now pairs only adjacent matching
+Received/Drop records (same route/peer, sequence, type and complete header,
+within 50 ms). It reports actual zero/nonzero/unknown expected counts and
+flags-confirmed unreliable rejections. Unmatched records remain unknown.
+Legacy fields, gate thresholds and all historical results are unchanged.
+Fourteen sanitized regression tests pass; all legacy fields and statuses
+match when reanalyzing every completed battle arm. New private diagnostic
+reports preserve original native reports/scores. Counted printed-zero
+rejections ON1/OFF1/ON2/OFF2 were 1,168/5,503/865/8,921; all paired to nonzero
+actual expectations, with no unknowns. A printed zero cannot establish a
+sequence reset, and a five-second frequency window is not blackout duration.
+
+Next work: reproduce the intermittent host admission reset with the new
+lifecycle trace; qualify lower retry timers (stock 1000/2500 versus 300/800)
+with duplicate/bandwidth/ACK-progress checks; test equal-population idle/moving
+controls and longer combat/collection workloads. Keep current retry defaults
+until that evidence passes. WAN, Steam/Proton and renderer/FPS remain open.
