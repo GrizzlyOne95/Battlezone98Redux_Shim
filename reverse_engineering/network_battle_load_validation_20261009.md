@@ -1,8 +1,7 @@
 # Multiplayer battle-load qualification — 2026-10-09
 
 Status: native startup and natural combat now run on all four clients.
-Mixed 40/80 battles passed, including beacons, pickups and complete cleanup;
-the maximum 160-unit mix is in progress. The first combat run's cleanup FAIL
+Mixed 40/80/160 battles passed, including beacons, pickups and complete cleanup. The first combat run's cleanup FAIL
 remains separate evidence. This extends
 the objective/services impairment suite with natural AI combat and object churn.
 It does not change client retry timers, packet ordering, or server defaults.
@@ -108,9 +107,33 @@ socket shutdown. Do not characterize whole-run ratios as steady-combat loss.
 Shutdown includes guest WSARecvFrom 10054 and closesocket 10038; causal attribution
 remains open. No zero-loss or delivery guarantee follows from submission logging.
 
-`battle-load-20261009-131010-mixed160-b16-p128` is active: 160 vehicles,
-16 beacons, 128 powerups, 60 sustained seconds. An observed failure needs
-separate object-family controls to isolate cause. Running is not acceptance.
+Maximum mix `battle-load-20261009-131010-mixed160-b16-p128` passed all 32 checks
+and native health: 160 vehicles, 16 nav beacons, 128 ammo/repair powerups,
+60 sustained simulation seconds and steady-load fraction 1. Host created 198
+vehicles, recorded 39 natural deaths, 157 new observed scrap handles, 25 ammo
+rises and 36 health rises. Pickup peak was 114; 88 disappeared, without assuming
+every disappearance was collection. All four peers converged to zero AI/pilots/
+staged extras after measurement. Four clean captures had zero drops/truncation;
+128 restored targets independently matched, with no game processes remaining.
+
+The 160 run matched all 57,709 source TX / relay decisions / socket submissions
+across 12 links, with no missing outcome, send exception or source-byte mismatch.
+Target RX matched 57,651 copies; 58 gaps included seven within broad combat sample
+bounds and five in the conservative post-ramp window (three reliable, two
+unreliable). Fifty followed the final RX on the target P2P socket generation;
+causality remains unresolved. Complete binary RX also lacks the missing bytes.
+Queue wait p95 0.113 ms/max 0.420 ms; send call p95 0.043 ms/max 0.241 ms.
+Submission is not proof of delivery or game acceptance.
+
+The sampled post-ramp window spans 55.0 seconds: 543.8 kbps relay ingress versus
+148.9 kbps empty-map idle, excluding UDP/IP headers. Host CPU averaged 1.03 core
+over the broader combat samples, versus 0.38 in the 80 run; simulation/wall ratios
+remained 0.999–1.001 across the four clients. Different object populations,
+nondeterministic combat and shared-PC/RDP conditions limit causal comparisons.
+Viewed 160 combat screenshots were black or stale/partial lobby surfaces;
+PrintWindow images do not qualify visual rendering or FPS. Gameplay evidence
+comes from native probes/captures. No cascading gameplay/network failure was
+observed in this clean run; impaired battles, WAN, rendering and soak remain open.
 
 The Lua fixture passed authority restrictions, bounded frame spawning,
 native damage/ammo/death accounting, exact zero-health scrap classification,
@@ -183,9 +206,9 @@ branches, artifact paths and next steps.
 
 ## Next qualification gates
 
-Mixed 40 qualified destruction/scrap, beacons/pickups and host/guest cleanup.
-Finish the maximum mixed 160 clean run, then matched 80-unit fix ON/OFF runs
-with 3% loss. Preserve the clean reference alongside loss runs. Add equal-population
+Mixed 40/80/160 qualified destruction/scrap, beacons/pickups and host/guest
+cleanup in clean same-PC runs. Next run matched 80-unit fix ON/OFF trials with
+3% loss. Preserve the clean reference alongside loss runs. Add equal-population
 idle/moving-only controls before attributing packet growth specifically to
 combat instead of object count. Natural combat is repeatable configuration,
 not bit-deterministic native simulation; repeated seeds/passes remain required.
