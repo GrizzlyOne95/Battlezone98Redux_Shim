@@ -302,3 +302,45 @@ and a new common deadline targets its first drop interval before release.
 Actual native kill/life timestamps and relay drop timestamps must confirm
 alignment; a configured deadline alone cannot qualify overlap. Keep its final
 verdict and restoration pending until the controller exits.
+
+## Synchronized fallback diagnostic - 2026-10-09 14:19 CDT
+
+`respawn-fallback-commondeadline-20261009-141300` completed **PASS**, 14 steps,
+24 checks, native rejection-health pass, clean shutdown and independent
+128-target restoration (zero mismatch, zero games remaining). Fix ON was
+verified; no admission or respawn selection policy changed. This separate
+reproduction does not overwrite the earlier sequential-deadline FAIL.
+
+All owners acknowledged deadline 77.585 simulation seconds. First kill times
+77.615 / 77.614 / 77.614 / 77.616 span 2 ms, and all native life decrements
+were observed at 77.647. Logged task completion at 14:18:01.378820-01.379820
+CDT places deaths inside the aligned relay outage: 461 drops on all 12 links,
+14:18:00.943473-01.884028. Wall mapping of the first kill is approximate
+(one simulation frame before the task completion log), with ample overlap.
+
+At the life decrement all clients still observed old remote pilots alive.
+At placement 79.648-79.680, clients 0-2 saw invalid/nil old remote handles;
+client 3 saw new live handles with observed unchanged age zero. All four
+correctly chose rally (respawns=2, livesLeft=3), consistent with the service's
+existing eight-second stable-handle eligibility rule. Observed age is not its
+private timer. Common deaths do not imply instantaneous replica convergence.
+This supports the earlier test timing ambiguity; it does not prove the old
+failure had no product contribution or qualify all outage timing offsets.
+
+Diagnostic observation had zero errors or transition drops, retaining all 12
+transitions. Bounded periodic rings evicted 0/0/10/20 older samples while
+retaining the placement and transition evidence. All four startup traces had
+24 complete admission events: Initialize preceded accepted Q/K; no premature
+acknowledgement/reset race reproduced in this launch. Earlier ready=false
+failures still require their own event-order reproduction.
+
+Continuation `battle-loss-continuation-control-20261009-142000` launched at
+14:19 CDT with only the remaining seed-112 ON/OFF pair, indices 3/4. Run names
+end in `142000`; previous `135530` failure is retained. Both continuation arms
+use the same updated passive admission logger. Its latest Lua 5.1 suite has
+34 checks, including explicit observer errors and exact return-value count.
+Input provenance now includes probe SHA256; diagnostic metadata includes helper
+SHA256. The first diagnostic's supplemental private provenance records the
+probe byte match on all four instances and the metadata-only scenario change
+between the pre-launch hash snapshot and execution. Inspect active status
+before any further launch; continuation comparison and restoration are pending.
