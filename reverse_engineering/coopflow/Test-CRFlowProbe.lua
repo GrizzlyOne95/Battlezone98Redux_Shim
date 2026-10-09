@@ -78,12 +78,25 @@ local native = {
     CameraPath = function() end,
     CameraReady = function() end,
 }
+local admissionCalls, admissionThrows = 0, false
+local admissionPeer = { name="BZRCoop1", team=1, handle=me, ready=false }
 local CRCoop = {
+    Initialize = function()
+        admissionCalls = admissionCalls + 1
+        if admissionThrows then error("original admission error") end
+        admissionPeer.ready = false
+        return nil, "initialized", nil
+    end,
+    Receive = function(from, kind)
+        admissionCalls = admissionCalls + 1
+        if kind == "Q" then admissionPeer.ready = true end
+        return true
+    end,
     IsAuthority = function() return true end, GetLocalTeam = function() return 1 end,
     GetLocalPlayerId = function() return 1 end, GetMissionPhase = function() return 1 end,
     IsSessionReady = function() return true end, HasLateJoiners = function() return false end,
     HasLeaderDeparted = function() return false end,
-    GetPlayers = function() return { [1] = { name = "BZRCoop1", team = 1, handle = me } } end,
+    GetPlayers = function() return { [1] = admissionPeer } end,
 }
 local events = { 1, 2, 3 }
 
@@ -100,6 +113,24 @@ local function lines(kind)
 end
 check(#lines("attach") == 1, "attach event printed")
 check(printed[1]:match("^%[CRFLOW%] {.*} #END$"), "event line format")
+
+-- Admission observation preserves callback count, nil-bearing results and
+-- original errors, including when the observer itself cannot read the roster.
+CRCoop.Receive(1, "Q", me, 1, 1)
+local a, b, c = CRCoop.Initialize()
+check(admissionCalls == 2 and a == nil and b == "initialized" and c == nil,
+    "admission wrappers preserve original calls/results")
+local admission = lines("admission")
+check(#admission == 4 and admission[2]:find('"ready":true', 1, true)
+    and admission[4]:find('"ready":false', 1, true), "handshake then initialization reset is observable")
+local savedPlayers = CRCoop.GetPlayers
+CRCoop.GetPlayers = function() error("observer failure") end
+check(pcall(CRCoop.Initialize) and admissionCalls == 3, "observer failure cannot suppress original")
+admissionThrows = true
+local admissionOK, admissionError = pcall(CRCoop.Initialize)
+check(not admissionOK and admissionCalls == 4 and tostring(admissionError):find("original admission error", 1, true),
+    "original admission error propagates once")
+admissionThrows, CRCoop.GetPlayers = false, savedPlayers
 
 -- The wrapped Update still runs the mission's Update.
 Update(); check(updates == 1, "mission Update still called")
