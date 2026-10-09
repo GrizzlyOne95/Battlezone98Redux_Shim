@@ -1,6 +1,6 @@
 # Four real owners exercise all-to-all comms, handle changes, simultaneous
 # fallback, and a team-4 out-of-lives failure. Never mutate a remote craft.
-param([int]$RespawnTimeout = 45)
+param([int]$RespawnTimeout = 45, [switch]$AlignFallbackOutage)
 $C = @(Get-CRFlowClientIndices)
 if (($C -join ',') -ne '0,1,2,3') { throw 'four-services requires -Clients 4' }
 $script:CRFlowSkipParity = $true # local deaths/respawns have different HUD messages
@@ -118,6 +118,20 @@ Invoke-CRFlowStep 'shared-deadline deaths diagnose Lemnos fallback on every peer
             if (-not $ack.armed -or [math]::Abs($ack.deadline - $deathAt) -gt 0.001) { throw "c$client did not acknowledge common death deadline" }
             $diag.arms += @{client=$client; at=(Get-Date).ToUniversalTime().ToString('o'); ack=$ack}
         }
+        if ($AlignFallbackOutage) {
+            # Start a new documented generation only after all owners are held.
+            # Its first outage begins 19 wall seconds later. Schedule near its
+            # midpoint; recorded packet times and actual kills verify overlap.
+            $response = Set-CRFlowImpairment 'outage=1000/20000,seed=13'
+            $deathAt = [double](Invoke-CRFlow 0 'return GetTime()') + 19.25
+            $literal = $deathAt.ToString('F4', [Globalization.CultureInfo]::InvariantCulture)
+            $diag['outageAlignment'] = @{at=(Get-Date).ToUniversalTime().ToString('o');response=$response;deadline=$deathAt;acks=@()}
+            foreach ($client in $C) {
+                $ack = Invoke-CRFlow $client "return fourDiag.Reschedule($literal)"
+                if (-not $ack.armed -or [math]::Abs($ack.deadline - $deathAt) -gt 0.001) { throw "c$client did not acknowledge aligned deadline" }
+                $diag.outageAlignment.acks += @{client=$client; at=(Get-Date).ToUniversalTime().ToString('o');ack=$ack}
+            }
+        }
         foreach ($client in $C) {
             $ack = Invoke-CRFlow $client 'return fourDiag.Release()'
             if (-not $ack.released) { throw "c$client did not acknowledge release" }
@@ -151,6 +165,14 @@ Invoke-CRFlowStep 'shared-deadline deaths diagnose Lemnos fallback on every peer
             } catch { $diag.clients += @{client=$client; error=$_.Exception.Message} }
         }
         $diag | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath (Join-Path $script:CRFlowRun.runDir 'fallback-respawn-diagnostic.json')
+        $owners = @($diag.clients | Where-Object { $_.metadata })
+        $badObservers = @($diag.clients | Where-Object { $_.error -or -not $_.metadata -or $_.metadata.observerErrors -gt 0 -or $_.metadata.errorDropped -gt 0 -or $_.metadata.eventDropped -gt 0 })
+        Add-CRFlowCheck 'respawn diagnostic retains all owner transitions without observer errors' ($owners.Count -eq 4 -and $badObservers.Count -eq 0) $diag.clients
+        $killTimes = @($owners | ForEach-Object { $_.metadata.firstKillAt } | Where-Object { $null -ne $_ })
+        $lostLives = @($owners | Where-Object { $null -ne $_.metadata.lifeLostAt })
+        $spread = if ($killTimes.Count -eq 4) { ($killTimes | Measure-Object -Maximum).Maximum - ($killTimes | Measure-Object -Minimum).Minimum } else { $null }
+        $lateKills = @($owners | Where-Object { $null -eq $_.metadata.firstKillAt -or $_.metadata.firstKillAt -lt $_.metadata.deadline -or $_.metadata.firstKillAt -gt $_.metadata.deadline + 0.25 })
+        Add-CRFlowCheck 'all four owners die at the common deadline with native life decrements' ($killTimes.Count -eq 4 -and $lostLives.Count -eq 4 -and $lateKills.Count -eq 0 -and $spread -le 0.25) @{spreadSeconds=$spread;owners=$owners}
     }
     $diag.arms
 }

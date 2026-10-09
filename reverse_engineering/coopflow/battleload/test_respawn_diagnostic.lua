@@ -18,12 +18,14 @@ kill = function() kills = kills + 1 end
 assert(dofile(arg[1] or 'four_respawn_diagnostic.lua'))
 assert(not pcall(fourDiag.Arm, 4), 'must reject insufficient arm lead')
 fourDiag.Arm(10)
+assert(fourDiag.Reschedule(10).deadline == 10)
 now = 10
 fourDiag.KillTick()
 assert(kills == 0, 'unreleased schedule must never kill')
 assert(not pcall(fourDiag.Release), 'late release must fail')
 now = 1
 fourDiag.Release()
+assert(not pcall(fourDiag.Reschedule, 20), 'released owners cannot be rescheduled')
 fourDiag.KillTick()
 assert(kills == 0, 'common deadline must hold')
 now = 10
