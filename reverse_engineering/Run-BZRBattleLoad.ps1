@@ -6,6 +6,8 @@ param([ValidateRange(4,160)][int]$Units = 40,
       [string]$ServerRepo = 'C:\Users\iestu\Documents\GIT\Battlezone98Redux_DedicatedServer-bounded-pairports',
       [string]$Python = 'python',
       [switch]$AllowNoAudioEndpoint,
+      [ValidateRange(0,16)][int]$Beacons = 0,
+      [ValidateRange(0,128)][int]$Powerups = 0,
       [string]$RunName = ('battle-load-' + (Get-Date -Format 'yyyyMMdd-HHmmss')))
 $ErrorActionPreference = 'Stop'
 if ($Units % 2) { throw 'Units must be even.' }
@@ -18,5 +20,5 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'coopflow\scenarios\nbattle-batt
     -MapListY 99 -ContentOverride $override -Clients 4 -SkipPrepare -MaxNetworkLogging -MuteClients `
     -RunName $RunName -ServerRepo $ServerRepo -Python $Python -Impair $Impair `
     -AllowNoAudioEndpoint:$AllowNoAudioEndpoint `
-    -ScenarioArgs @{Units=$Units; Seconds=$Seconds}
+    -ScenarioArgs @{Units=$Units; Seconds=$Seconds; Beacons=$Beacons; Powerups=$Powerups}
 exit $LASTEXITCODE

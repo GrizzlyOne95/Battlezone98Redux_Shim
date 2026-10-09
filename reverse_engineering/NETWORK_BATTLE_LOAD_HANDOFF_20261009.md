@@ -1,17 +1,36 @@
 # Network battle-load checkpoint — 2026-10-09
 
-The battle fixture and reporting tools are implemented and locally tested.
-Native qualification is blocked before the first simulation frame; no battle,
-destruction, scrap or battle performance acceptance is claimed. Server socket
-submission logging is implemented and tested, but not yet exercised by native
-clients. All four internal clients are stopped and all 128 backed-up targets
-were independently verified restored. Resume from this checkpoint.
+Battle-load update 2026-10-09: the corrected multiplayer setup reaches native
+four-client combat. The first 20-unit run failed cleanup of three ejected pilots;
+retain that FAIL. The corrected census/cleanup and mixed object creation passed
+local tests. Both mixed runs passed all 32 checks and native health: 40 vehicles,
+8 nav beacons and 32 ammo/repair powerups (`125735`), then 80 vehicles, 16 beacons
+and 64 powerups (`130310`), each sustained for 60 simulation seconds. The 80 run
+recorded 23 natural deaths, 100 new observed scrap handles, 15 ammo rises and
+15 health rises. All clients cleaned up, four captures closed cleanly with zero
+capture drops, and 128 restored targets were independently verified for each run.
+Maximum mix `battle-load-20261009-131010-mixed160-b16-p128` is running: 160 vehicles,
+16 beacons, 128 powerups. Check its control status before launching another run.
+
+Server observability `fcc350d` matched all 45,774 / 50,585 relay decisions to
+byte-identical source TX and socket submissions across all 12 links in the
+40 / 80 runs, with no send exceptions or missing outcomes. Target RX gaps were
+64 / 54 copies, including 8 / 5 within the periodic combat sample bounds.
+Conservative post-ramp windows excluding the finished sample contain 6 / 2 gaps;
+the two 80-unit gaps are unreliable. These windows span 55.9 / 56.4 seconds.
+Most gaps cluster around socket shutdown; whole-run ratios are not steady-battle
+loss rates. Guest shutdown logs include WSARecvFrom 10054 and closesocket 10038;
+causality remains unresolved. Submission proves sendto returned, not delivery
+or native acceptance. Private phase/socket-aware audits retain exact missing
+copies. Battle details and resume instructions are in the battle branch's
+`network_battle_load_validation_20261009.md` and `NETWORK_BATTLE_LOAD_HANDOFF_20261009.md`.
 
 Continuation: the generator now uses `MultSTMission`, matching the working
 co-op BZN, instead of single-player `LuaMission`. Spawn powerup state is preserved.
 The first-update role gate and an opt-in zero-audio-endpoint RDP mode are added.
-Local checks pass; Windows is currently locked, so the corrected multiplayer
-mission-class live retry has not run. An unlock question is pending in this chat.
+The phone desktop was subsequently unlocked; startup passed in `124452`.
+The latest run includes nav pods and pickups with bounded shared creation budget,
+host locality assertions, guest visibility and post-measurement cleanup.
 
 ## Source checkpoints
 
@@ -57,7 +76,7 @@ Server validation passed 8 focused observability tests, 8 impairment groups,
 6 capture tests on ephemeral loopback. Existing writers flush per record;
 earlier zero-size tool reads were not evidence of a missing flush bug.
 
-## Latest live evidence and recovery
+## Retained failed startup evidence and recovery
 
 Control: `C:\BZRCoop\runs\battle-control-20261009-102214`.
 Run: `C:\BZRCoop\runs\battle-load-20261009-102214-smoke20`.
@@ -104,6 +123,25 @@ at locked-desktop preflight, before deployment; no corresponding smoke run exist
 The failed auth run selects server fcc350d but cannot qualify native correlation.
 Retain both setup failures separately.
 
+Completed first combat: `C:\BZRCoop\runs\battle-load-20261009-124452-smoke20`.
+Control `battle-control-20261009-124452` restored 128 targets, independently audited.
+Host observed 509 health-decrease samples, 678 ammo-decrease samples, 27 vehicles
+created, 7 deaths and 28 unique observed scrap handles. Original peak23 includes
+ejected pilots, so is not a pure vehicle metric. All combat/guest checks passed;
+cleanup failed with aspilo×1/sspilo×2 alive. Keep overall FAIL. Its full reports,
+clean native logs, relay-correlation-audit.json/.md and 71-gap packet details
+remain private in the run directory. Submitted p95 queue wait 0.105 ms/send call
+0.042 ms. All 120 periodic audio samples had muted sessions; this run's audio
+evidence passed. Earlier zero-endpoint preconditions were separate failures.
+
+Mixed workload implementation: up to 16 `apcamr` beacons and 128 alternating
+`apammo`/`aprepa` pickups, sharing a maximum of four creations per 0.25 simulation
+seconds with vehicles. No scripted damage or refill. Host locality is asserted;
+all guests must see both object families. AI vehicle census excludes ejected
+pilots. Cleanup snapshots all reserved-team craft before removal, then removes
+surviving staged extras while preserving human observers. Local regressions
+and mixed 40/80 native runs passed. Source/content hashes are retained privately.
+
 ## Previous accepted evidence to retain
 
 The objective/services A/B matrix is still
@@ -123,25 +161,23 @@ shutdown provenance; latest unclean battle captures do not change that fact.
    The phone RDP display was 600x1284; reuse the qualified reversible private
    renderer/control setup, never normal-install fullscreen experiments. Input
    helpers require Windows PowerShell 5.1, not PowerShell 7.
-2. Wait for Windows to be unlocked; do not bypass desktop protection. The map
-   generator now uses `MultSTMission` and authored spawn powerup state; the
-   first-role gate is implemented. Run a separate immutable snapshot with the
-   observability server and check spawn traffic, sync completion and all four
-   first frames. The failed LuaMission run remains the control.
-3. Run a validated co-op control using the observability server branch to qualify
-   native decision/socket correlation, then retry 20 AI / 45 seconds clean.
+2. Check maximum mixed 160 control `131010` first; do not interrupt its clients
+   or launch another session. Review combat, beacon/pickup visibility, locality,
+   cleanup and native capture/correlation results. Preserve failed124452.
+3. Require the pilot/extra cleanup regression to converge on all four peers.
    Preserve all source/native/content hashes and restore/audit on each exit.
-4. Require actual native combat, natural deaths/scrap and host/guest convergence.
-   Then run 40/80 clean and matched 80-unit fix ON/OFF at 3% loss, repeated passes.
+4. After maximum mixed 160, run matched 80-unit fix ON/OFF at 3% loss with
+   repeated passes. Separate runs retain each verdict.
    Add equal-population idle/moving controls before attributing growth to combat.
 5. Separate follow-ups: scavengers/collection, artillery/projectiles, soak,
    bandwidth caps and multi-PC/WAN. CPU/probe/simulation samples are not FPS.
 
 Battle entry point: `reverse_engineering\Run-BZRBattleLoad.ps1 -Units 20 -Seconds 45`
 requires the external private control/deployment setup, not a bare launch.
-For this RDP session explicitly add `-AllowNoAudioEndpoint`: the API enumerates
-zero active endpoints. Session/log records flag audio timing unqualified, while
-available sessions are still muted. Missing sessions with active endpoints still
+The phone control enables `-AllowNoAudioEndpoint` to tolerate zero render
+endpoints if they recur. Completed combat runs observed available, muted sessions
+and qualified their audio evidence. Actual zero-endpoint samples mark audio
+timing unqualified; available sessions are still muted. Missing sessions with active endpoints still
 fail. Preserve this audio condition for subsequent battle CPU controls; do not
 compare it directly with prior audio-enabled CPU measurements.
 The final evidence checker retains complete clean-capture gates, rejects missing
