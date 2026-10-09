@@ -75,6 +75,12 @@ fourDiag = (function()
         d.released = true
         return { time = GetTime(), deadline = d.deadline, released = true }
     end
+    function d.Reschedule(deadline)
+        assert(d.deadline and not d.released, 'reschedule requires armed, held owners')
+        assert(deadline - GetTime() >= 5, 'rescheduled deadline too close')
+        d.deadline = deadline
+        return { time = GetTime(), deadline = deadline, armed = true }
+    end
     function d.KillTick()
         if not d.released or GetTime() < d.deadline then return end
         if exu.GetLives() < d.initialLives then
