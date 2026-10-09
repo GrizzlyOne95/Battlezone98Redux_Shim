@@ -195,10 +195,33 @@ The `impairment_expired` trace event retains the previous totals.
 
 ## Next
 
+Battle-load coverage is now an active workstream (`agent/network-battle-load`,
+worktree `BZR-OpenShim-battleload`). A separate authored `nbattle` map exercises
+native two-army combat, natural destruction/scrap, bounded replacement waves,
+and four-peer observation/cleanup. Smoke
+`battle-load-20261009-102214-smoke20` passed lobby/map load but failed native
+startup sync after 90 seconds; no combat began. All twelve relay links forwarded
+without injected loss; expected spawn-coordinate startup traffic was absent.
+Marker registration/eligibility is the next hypothesis to test. Setup failures
+are retained separately. All four internal clients are stopped, with all 128
+backed-up targets independently verified restored. Final captures from this
+attempt are unclean termination evidence, not clean replay qualification.
+See that branch's
+`network_battle_load_validation_20261009.md` for configuration, activity metrics,
+progress and limitations. This supplements the completed objective/services
+results rather than changing their 20-run acceptance verdict.
+That branch also contains `NETWORK_BATTLE_LOAD_HANDOFF_20261009.md`, including
+artifact paths, source checkpoints, test results and the resume sequence.
+DedicatedServer `agent/network-startup-observability` commit `fcc350d` now logs
+packet-correlated socket submission outcomes and queue/scheduler/send timing.
+Eight focused tests plus impairment, fault-injection, bounded pair-port, full
+pair-port and capture suites passed. Native correlation remains unqualified;
+a returned socket submission does not prove OS delivery or peer acceptance.
+
 Instrument and reproduce the fallback-respawn race with an acknowledged common
 deadline, then qualify faster reliable retry timer arms and investigate the
 remaining long 5% loss blackouts. Add a measured pre-impairment baseline and
-actual relay-send timestamps before isolating impairment-triggered damage.
+native-qualified relay submission timestamps before isolating impairment-triggered damage.
 Client candidates are `1000/2500` versus `300/800` (optionally `150/400`), with
 duplicate/bandwidth-cap checks; bounded future-reliable buffering may avoid
 retransmitting fragments already delivered ahead of an earlier hole. Preserve

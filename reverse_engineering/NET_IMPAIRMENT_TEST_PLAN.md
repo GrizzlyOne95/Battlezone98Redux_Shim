@@ -1,5 +1,29 @@
 # Network impairment test plan (handoff)
 
+Battle-load update 2026-10-09: a separate four-player `nbattle` test map is
+implemented on `agent/network-battle-load` in `BZR-OpenShim-battleload`.
+It uses native tank/fighter AI combat, replacement waves, natural destruction
+and scrap, with host/guest activity assertions and full network captures.
+Live qualification is blocked at native startup; no combat has run yet.
+Preflight, lobby selection and map-template failures were retained separately;
+no combat result is claimed from them. The corrected retry
+`battle-load-20261009-102214-smoke20` (20 AI, 45 requested seconds, clean relay)
+loaded the map but failed native start sync after 90 seconds. Missing spawn
+coordinate startup traffic makes marker registration/eligibility the next check,
+not a proved cause. All four internal processes are stopped and an independent
+audit verifies all 128 backed-up targets restored. Final logs are unclean
+termination captures; the existing clean matrix evidence is preserved.
+Results and progress are maintained in
+`reverse_engineering/network_battle_load_validation_20261009.md` on that branch.
+The same branch contains `NETWORK_BATTLE_LOAD_HANDOFF_20261009.md` with source,
+artifacts, tests, recovery and exact resume gates. DedicatedServer branch
+`agent/network-startup-observability` at `fcc350d` adds correlated socket
+submission/outcome and scheduler timing events. Focused and regression suites
+passed; native qualification remains pending. Socket submission is not proof
+of OS delivery or receiver acceptance. Existing trace writers flush per record.
+Qualify 20 AI first, then 40/80 clean loads and matched 80-unit ON/OFF 3% loss.
+Scrap collection, artillery, soak, caps and multi-PC/WAN remain separate gates.
+
 Update 2026-10-09: the four-client 3% loss tooling qualification passed
 (`IMPAIRED_OK`, gameplay PASS, complete captures, no crash/GPU event).
 The 20-run sweep initially stopped before impairment when the desktop
@@ -39,8 +63,9 @@ mean a download and a system change, which needs the user's permission.
 | Harness: `Run-BZRCoopMission.ps1 -Impair`, `Set-CRFlowImpairment` (BZRCoopMission.ps1), scenario `coopflow/scenarios/peer-blackout.ps1` | OpenShim `agent/four-client-coop` (worktree `Documents\GIT\BZR-OpenShim-coopflow`) | 34a3b799 |
 | Matrix `-Impair`/`-Cases`, impairment-aware scorer (delivery-order replay, update blackouts, `IMPAIRED_OK`, `aggregate_impaired`), tests | OpenShim `agent/net-impairment-matrix` (worktree `Documents\GIT\BZR-OpenShim-netfix`, branched from PR #415) | 51c526aa |
 
-None of these branches has a PR yet. Open them once a live run has
-qualified the tooling.
+Tooling is now in draft OpenShim PRs #417/#418 and DedicatedServer PR #8.
+The objective/services suite qualified the capture pipeline; its acceptance
+failures and remaining blackout limits are documented above and in the results.
 
 ### Impairment spec (relay_impairment.py)
 
