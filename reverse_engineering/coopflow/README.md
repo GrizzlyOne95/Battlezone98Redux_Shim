@@ -5,9 +5,19 @@ loopback lobby server. A probe inside each client's mission script lets the
 harness read state and act like a player; every step is checked on both the
 host (authority) and each guest. Two clients remain the default.
 
-This exercises mission mechanics (gates, objectives, films, results,
-replication), not real combat: scenarios kill enemies, pull timers forward
-and teleport craft through the probe.
+Campaign scenarios exercise mission mechanics (gates, objectives, films,
+results, replication): they kill enemies, pull timers forward and teleport
+craft through the probe. The separate `nbattle` map exercises native AI combat,
+natural destruction and scrap with bounded replacement waves and four-client
+network captures. See [battle-load qualification](../network_battle_load_validation_20261009.md).
+
+After preparing the private clients and qualified windowed native deployment:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File reverse_engineering/Run-BZRBattleLoad.ps1 -Units 80 -Seconds 60
+# Add -Impair 'loss=3,seed=12' for the impaired lane.
+python reverse_engineering/coopflow/battleload/report_battle.py C:/BZRCoop/runs/<battle-run>
+```
 
 ## Run
 
