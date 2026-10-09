@@ -269,3 +269,35 @@ should retain expired impairment-generation counters and expose unambiguous
 peer IDs so dead-peer tests cannot silently match nothing.
 Retry/reorder defaults remain unchanged; lower-timer, reordering, dead-peer,
 bandwidth, robustness, soak, real WAN and other-platform lanes remain open.
+
+## Battle loss continuation — 2026-10-09
+
+Planned repeated A/B: 80 vehicles, 16 nav beacons, 64 ammo/repair pickups,
+60 sustained simulation seconds, 3% relay loss with seeds 12 and 112, alternating
+fix ON / stock OFF. Native arm logs and complete captures are required; relay
+model blackout is separate from observed native gameplay/acceptance.
+
+First control `battle-loss-control-20261009-132800` stopped after its first ON
+run: host co-op readiness remained false for 120 seconds despite completed
+native sync, four valid player handles and ready guests. Impairment was never
+applied; no combat ran. Retain **INCOMPLETE**, not impaired acceptance. All
+41,599 decisions/submissions/source TX matched on 12 links; no host RX gap in
+first five simulation seconds. This does not explain admission state. Four
+captures closed cleanly; all 128 restored targets independently verified.
+Raw admission fields are now collected on a roster-readiness timeout.
+Fresh diagnostic matrix `battle-loss-control-20261009-135530` is active;
+check status and latest pointers before another launch.
+
+Earlier services fallback failure `netfix-on-four-services-i4-p1-20261009-081632`
+assigned relative +8-second deadlines independently, spreading deaths by about
+0.8 seconds. A 1-second outage overlapped deaths; c0–c2 placed near the old c3
+replica, while c3 used the rally. This supports a test-coordination/stale-replica
+ambiguity, not a proven send-fix regression. Preserve the original FAIL.
+The separate `misn05-four-services-diagnostic.ps1` scenario arms and acknowledges
+one absolute simulation deadline before release. Bounded candidate snapshots
+bracket the original respawn Update, with native lives and handle transitions;
+no selection policy changes. Observed handle age is not private eligibility
+age, and a shared deadline does not prove peers observed every death in time.
+Local Lua tests pass deadline/release guards, life/handle transitions, bounded
+pagination, vector encoding and callback restoration; PS5.1 syntax passed.
+This diagnostic has not yet run natively.
