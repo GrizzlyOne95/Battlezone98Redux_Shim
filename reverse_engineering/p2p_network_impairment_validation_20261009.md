@@ -285,8 +285,8 @@ applied; no combat ran. Retain **INCOMPLETE**, not impaired acceptance. All
 first five simulation seconds. This does not explain admission state. Four
 captures closed cleanly; all 128 restored targets independently verified.
 Raw admission fields are now collected on a roster-readiness timeout.
-Fresh diagnostic matrix `battle-loss-control-20261009-135530` is active;
-check status and latest pointers before another launch.
+Diagnostic matrix `battle-loss-control-20261009-135530` stopped after the third
+arm hit another pre-impairment admission failure; see the continuation below.
 
 Earlier services fallback failure `netfix-on-four-services-i4-p1-20261009-081632`
 assigned relative +8-second deadlines independently, spreading deaths by about
@@ -300,4 +300,57 @@ no selection policy changes. Observed handle age is not private eligibility
 age, and a shared deadline does not prove peers observed every death in time.
 Local Lua tests pass deadline/release guards, life/handle transitions, bounded
 pagination, vector encoding and callback restoration; PS5.1 syntax passed.
-This diagnostic has not yet run natively.
+The native diagnostic launched at 14:14 CDT; see the continuation below.
+
+## Loss-pair checkpoint and handshake logging - 2026-10-09 14:14 CDT
+
+Matrix `battle-loss-control-20261009-135530` stopped after 3 of 4 planned arms.
+First ON/OFF pair (seed 12) completed 80 AI, 16 beacons, 64 powerups and 60
+sustained simulation seconds. Both gameplay and cleanup passed; both native
+health checks failed from sustained sequence rejection. Scorer `IMPAIRED_OK`
+means complete impaired gameplay evidence, not native-health acceptance.
+
+Equal 55.371-second conservative post-ramp windows give modeled blackout
+0.6334 versus 17.1155 seconds per directed-link minute, fix ON versus stock;
+worst modeled intervals 558 versus 4,125 ms. The model preserves pre-window
+sequence state and uses relay decisions/scheduled delays, not observed native
+acceptance. Native logs independently show sustained rejection on 1 versus 11
+of 12 directed links during post-ramp combat. This is one completed pair;
+same configured seed with differing traffic is not the same packet-drop schedule.
+The repeated comparison remains incomplete and previous 20-run services FAIL
+and 9/10 versus 5/10 gameplay totals are unchanged.
+
+Exact relay audits: ON 57,224 decisions, 1,719 intentional drops, 55,505
+forwarded/submitted; OFF 47,305 decisions, 1,417 drops, 45,888
+forwarded/submitted. Source TX bytes and every submission match across 12
+links, with four clean complete captures each. Additional target RX deficits
+excluding intentional drops are 86/87; 80/72 occur beyond target final P2P RX.
+Conservative post-ramp deficits are 1/11 (ON reliable; OFF 9 unreliable,
+2 reliable). Duplicate identical expected copies can establish a deficit
+without uniquely identifying which occurrence was missing. Submission is
+not delivery. Private raw captures and phase-aware audits stay outside Git.
+
+Third ON arm (seed 112) never applied impairment or ran combat. Host had all
+four valid handles; one guest (team 4) had protocol version 1 but ready=false
+on host, while all three guests reported ready and missionStarted. No native
+RX deficit occurred in first five simulation seconds. Preserve INCOMPLETE:
+these flags suggest a readiness-reset/handshake ordering race, not proof of
+packet loss. Four captures clean; 41,609 forwarded/submitted match source TX,
+64 additional RX gaps, 49 beyond target final P2P RX. All 128 original targets
+independently restored with zero mismatch and zero remaining games at 14:11.
+
+The test-only CRFlowProbe now logs before/after Initialize, player callbacks,
+Q/K Receive and MarkMissionStarted, with raw readiness/protocol/handle fields
+and native hosting/team. It avoids identity getters that resolve/cache IDs or
+refresh registry handles. Observations are guarded; original callbacks run
+once, preserve nil-bearing result tuples and propagate original errors.
+Lua 5.1 probe regression: 33 checks passed, including observer-failure isolation.
+No CR admission or respawn selection policy was changed.
+
+Native `respawn-fallback-commondeadline-20261009-141300` launched under control
+`respawn-diagnostic-control-20261009-141300` at 14:14 CDT with unchanged policy.
+All owners acknowledge one held deadline, then the outage generation is reset
+and a new common deadline targets its first drop interval before release.
+Actual native kill/life timestamps and relay drop timestamps must confirm
+alignment; a configured deadline alone cannot qualify overlap. Keep its final
+verdict and restoration pending until the controller exits.
