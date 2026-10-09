@@ -1,29 +1,29 @@
 # Network impairment test plan (handoff)
 
-Battle-load update 2026-10-09: a separate four-player `nbattle` test map is
-implemented on `agent/network-battle-load` in `BZR-OpenShim-battleload`.
-It uses native tank/fighter AI combat, replacement waves, natural destruction
-and scrap, with host/guest activity assertions and full network captures.
-Live qualification is blocked at native startup; no combat has run yet.
-Preflight, lobby selection and map-template failures were retained separately;
-no combat result is claimed from them. The corrected retry
-`battle-load-20261009-102214-smoke20` (20 AI, 45 requested seconds, clean relay)
-loaded the map but failed native start sync after 90 seconds. Missing spawn
-coordinate startup traffic makes marker registration/eligibility the next check,
-not a proved cause. All four internal processes are stopped and an independent
-audit verifies all 128 backed-up targets restored. Final logs are unclean
-termination captures; the existing clean matrix evidence is preserved.
-Results and progress are maintained in
-`reverse_engineering/network_battle_load_validation_20261009.md` on that branch.
-The same branch contains `NETWORK_BATTLE_LOAD_HANDOFF_20261009.md` with source,
-artifacts, tests, recovery and exact resume gates. DedicatedServer branch
-`agent/network-startup-observability` at `fcc350d` adds correlated socket
-submission/outcome and scheduler timing events. Focused and regression suites
-passed; native qualification remains pending. Socket submission is not proof
-of OS delivery or receiver acceptance. Existing trace writers flush per record.
-Continuation: generated nbattle now uses MultSTMission, matching the working co-op native multiplayer class, and preserves authored spawn powerup state. First-update gating and opt-in zero-audio-endpoint RDP support pass local checks. The 123027 attempt stopped at audio precondition; 123310 stopped at locked-desktop preflight. No corrected mission-class live run or combat acceptance yet.
-Qualify 20 AI first, then 40/80 clean loads and matched 80-unit ON/OFF 3% loss.
-Scrap collection, artillery, soak, caps and multi-PC/WAN remain separate gates.
+Battle-load update 2026-10-09: the corrected multiplayer setup reaches native
+four-client combat. The first 20-unit run failed cleanup of three ejected pilots;
+retain that FAIL. The corrected census/cleanup and mixed object creation passed
+local tests. Both mixed runs passed all 32 checks and native health: 40 vehicles,
+8 nav beacons and 32 ammo/repair powerups (`125735`), then 80 vehicles, 16 beacons
+and 64 powerups (`130310`), each sustained for 60 simulation seconds. The 80 run
+recorded 23 natural deaths, 100 new observed scrap handles, 15 ammo rises and
+15 health rises. All clients cleaned up, four captures closed cleanly with zero
+capture drops, and 128 restored targets were independently verified for each run.
+Maximum mix `battle-load-20261009-131010-mixed160-b16-p128` is running: 160 vehicles,
+16 beacons, 128 powerups. Check its control status before launching another run.
+
+Server observability `fcc350d` matched all 45,774 / 50,585 relay decisions to
+byte-identical source TX and socket submissions across all 12 links in the
+40 / 80 runs, with no send exceptions or missing outcomes. Target RX gaps were
+64 / 54 copies, including 8 / 5 within the periodic combat sample bounds.
+Conservative post-ramp windows excluding the finished sample contain 6 / 2 gaps;
+the two 80-unit gaps are unreliable. These windows span 55.9 / 56.4 seconds.
+Most gaps cluster around socket shutdown; whole-run ratios are not steady-battle
+loss rates. Guest shutdown logs include WSARecvFrom 10054 and closesocket 10038;
+causality remains unresolved. Submission proves sendto returned, not delivery
+or native acceptance. Private phase/socket-aware audits retain exact missing
+copies. Battle details and resume instructions are in the battle branch's
+`network_battle_load_validation_20261009.md` and `NETWORK_BATTLE_LOAD_HANDOFF_20261009.md`.
 
 Update 2026-10-09: the four-client 3% loss tooling qualification passed
 (`IMPAIRED_OK`, gameplay PASS, complete captures, no crash/GPU event).
@@ -123,8 +123,8 @@ The relay trace gets these records:
    Never `tscon` the session to the console without asking; that unlocks the
    physical screen.
 2. **Never launch while the user's own game runs.** The matrix preflight
-   refuses. Force-killing `C:\BZRCoop` test instances is fine; never kill
-   the GOG or Steam game without asking.
+   refuses. Stop internal clients through BZRHarness with `-NoForce`. Never
+   force-kill the game; prior authorization covered only four historical PIDs.
 3. **Instances on DX9.** Use `[Graphics] Renderer=DX9` and `ogre.cfg`
    Direct3D9. DX11 with four clients hits NVIDIA TDRs at mission load.
 4. **Load-chain match.** The preflight requires each instance's
