@@ -204,8 +204,34 @@ and 64 powerups (`130310`), each sustained for 60 simulation seconds. The 80 run
 recorded 23 natural deaths, 100 new observed scrap handles, 15 ammo rises and
 15 health rises. All clients cleaned up, four captures closed cleanly with zero
 capture drops, and 128 restored targets were independently verified for each run.
-Maximum mix `battle-load-20261009-131010-mixed160-b16-p128` is running: 160 vehicles,
-16 beacons, 128 powerups. Check its control status before launching another run.
+Maximum mix `battle-load-20261009-131010-mixed160-b16-p128` passed all 32 checks
+and native health: 160 vehicles, 16 nav beacons, 128 ammo/repair powerups,
+60 sustained simulation seconds and steady-load fraction 1. Host created 198
+vehicles, recorded 39 natural deaths, 157 new observed scrap handles, 25 ammo
+rises and 36 health rises. Pickup peak was 114; 88 disappeared, without assuming
+every disappearance was collection. All four peers converged to zero AI/pilots/
+staged extras after measurement. Four clean captures had zero drops/truncation;
+128 restored targets independently matched, with no game processes remaining.
+
+The 160 run matched all 57,709 source TX / relay decisions / socket submissions
+across 12 links, with no missing outcome, send exception or source-byte mismatch.
+Target RX matched 57,651 copies; 58 gaps included seven within broad combat sample
+bounds and five in the conservative post-ramp window (three reliable, two
+unreliable). Fifty followed the final RX on the target P2P socket generation;
+causality remains unresolved. Complete binary RX also lacks the missing bytes.
+Queue wait p95 0.113 ms/max 0.420 ms; send call p95 0.043 ms/max 0.241 ms.
+Submission is not proof of delivery or game acceptance.
+
+The sampled post-ramp window spans 55.0 seconds: 543.8 kbps relay ingress versus
+148.9 kbps empty-map idle, excluding UDP/IP headers. Host CPU averaged 1.03 core
+over the broader combat samples, versus 0.38 in the 80 run; simulation/wall ratios
+remained 0.999–1.001 across the four clients. Different object populations,
+nondeterministic combat and shared-PC/RDP conditions limit causal comparisons.
+Viewed 160 combat screenshots were black or stale/partial lobby surfaces;
+PrintWindow images do not qualify visual rendering or FPS. Gameplay evidence
+comes from native probes/captures. No cascading gameplay/network failure was
+observed in this clean run; impaired battles, WAN, rendering and soak remain open.
+
 
 Server observability `fcc350d` matched all 45,774 / 50,585 relay decisions to
 byte-identical source TX and socket submissions across all 12 links in the
@@ -222,7 +248,7 @@ copies. Battle details and resume instructions are in the battle branch's
 
 ## Next
 
-Finish the maximum mixed battle, retain its own verdict and audit, then run
+Retain the clean 40/80/160 mixed references and their independent audits. Run
 matched 80-unit fix ON/OFF trials with 3% loss. Add equal-population idle/moving
 controls before isolating combat cost. This supplements the completed services
 A/B matrix and does not change its overall FAIL or 9/10 versus 5/10 scores.
