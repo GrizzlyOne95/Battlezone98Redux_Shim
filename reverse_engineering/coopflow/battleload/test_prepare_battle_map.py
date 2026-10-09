@@ -15,11 +15,16 @@ class MapFixture(unittest.TestCase):
             self.assertEqual(len(blocks), 5)
             self.assertIn("TerrainName = nbattle", text)
             self.assertIn("sObject = 00000006", text)
+            self.assertIn("name = MultSTMission", text)
+            self.assertNotIn("name = LuaMission", text)
             for team, block in enumerate(blocks[1:], 1):
                 value = lambda name: float(re.search(rf"(?m)^\s*{name} \[1\] =\n([^\n]+)", block)[1])
                 self.assertEqual(value("seqno"), team + 1)
                 self.assertEqual(value("team"), team)
                 self.assertEqual(value("perceivedTeam"), team)
+                self.assertIn("PrjID [1] =\npspwn_1", block)
+                self.assertEqual(value("mass"), 0)
+                self.assertEqual(value("mass_inv"), 1e30)
                 for prefix, basis in (("right", (1,0,0)), ("up", (0,1,0)), ("front", (0,0,1))):
                     self.assertEqual(tuple(value(prefix + "_" + axis) for axis in "xyz"), basis)
                 self.assertEqual(value("posit_x"), 2490 + team * 35)

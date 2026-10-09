@@ -55,8 +55,13 @@ function Test-BZRCoopDiagnosticEvidence([string]$RunDir, [int]$Clients) {
     foreach ($i in 0..($Clients - 1)) {
         $client = $launch.clients | Where-Object index -eq $i
         $samples = @($mutes | Where-Object client -eq $i)
-        if ($client.mutedAudioSessions -lt 1 -or -not $samples.Count -or @($samples | Where-Object mutedSessions -lt 1).Count) {
-            throw "Client $i has no verified process-specific audio mute." 
+        $zeroEndpointMode = [bool]$launch.allowNoAudioEndpoint
+        $invalidSamples = @($samples | Where-Object {
+            $_.error -or ($_.mutedSessions -lt 1 -and (-not $zeroEndpointMode -or $_.activeAudioEndpoints -ne 0))
+        })
+        if (($client.mutedAudioSessions -lt 1 -and (-not $zeroEndpointMode -or $client.activeAudioEndpoints -ne 0)) -or
+            -not $samples.Count -or $invalidSamples.Count) {
+            throw "Client $i has no verified audio condition (muted session or explicit zero-endpoint mode)."
         }
         $logs = Join-Path $RunDir "client$i\logs"
         $capture = Get-Content -LiteralPath (Join-Path $logs 'bzrnet_session.json') -Raw | ConvertFrom-Json
@@ -73,7 +78,10 @@ function Test-BZRCoopDiagnosticEvidence([string]$RunDir, [int]$Clients) {
         if ($native -notmatch 'WebSocket Message Sent:' -or $native -notmatch 'TempStateSendAll Prev Bytes:') {
             throw "Client $i native level-3 logs are missing."
         }
-        $details += @{ client = $i; mutedSamples = $samples.Count; droppedCaptureEvents = $capture.droppedEvents; cleanCaptureShutdown = $capture.writerShutdownClean }
+        $details += @{ client = $i; audioSamples = $samples.Count;
+            audioTimingQualified = ($client.mutedAudioSessions -gt 0 -and -not @($samples | Where-Object mutedSessions -lt 1).Count);
+            allowNoAudioEndpoint = $zeroEndpointMode;
+            droppedCaptureEvents = $capture.droppedEvents; cleanCaptureShutdown = $capture.writerShutdownClean }
     }
     foreach ($name in 'relay-trace.jsonl', 'protocol-trace.jsonl') {
         if ((Get-Item -LiteralPath (Join-Path $RunDir $name)).Length -lt 100) { throw "Missing server capture $name" }

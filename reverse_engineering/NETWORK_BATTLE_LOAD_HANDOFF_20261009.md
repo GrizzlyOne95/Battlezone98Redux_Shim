@@ -7,6 +7,12 @@ submission logging is implemented and tested, but not yet exercised by native
 clients. All four internal clients are stopped and all 128 backed-up targets
 were independently verified restored. Resume from this checkpoint.
 
+Continuation: the generator now uses `MultSTMission`, matching the working
+co-op BZN, instead of single-player `LuaMission`. Spawn powerup state is preserved.
+The first-update role gate and an opt-in zero-audio-endpoint RDP mode are added.
+Local checks pass; Windows is currently locked, so the corrected multiplayer
+mission-class live retry has not run. An unlock question is pending in this chat.
+
 ## Source checkpoints
 
 | Worktree under `C:\Users\iestu\Documents\GIT` | Branch | Checkpoint |
@@ -74,8 +80,8 @@ map selection, native marker load and selection. All retained separately in
 `network_battle_load_validation_20261009.md`; none ran combat. Corrections
 include authored pspw marker template, explicit coordinate fields preserving
 basis/velocity, pilot description/VXT, matching terrain names and recognition
-of an already-selected map. Current generator also normalizes mass_inv to 0
-instead of the template's 1e30: minimize template edits in the next check.
+of an already-selected map. The earlier generator normalized mass_inv to 0
+instead of the template's 1e30; that extra edit has now been removed.
 
 Graceful close and WM_QUIT left hidden PIDs 53528/49284/11900/47036. The user
 explicitly authorized terminating those four only; they were identity-checked
@@ -90,6 +96,13 @@ locked live bzrnet_trace copies were empty placeholders, not valid captures;
 the live manifest is annotated accordingly. Separate `terminated-copy` logs
 and manifest preserve final available logs after termination, marked unclean.
 Raw captures remain private local artifacts, never public Git content.
+
+Continuation controls: `battle-control-20261009-123027` stopped after client 0
+authenticated because RDP has zero active render audio endpoints. No map/battle
+phase ran; client exited gracefully and files restored. Control `123310` stopped
+at locked-desktop preflight, before deployment; no corresponding smoke run exists.
+The failed auth run selects server fcc350d but cannot qualify native correlation.
+Retain both setup failures separately.
 
 ## Previous accepted evidence to retain
 
@@ -110,11 +123,11 @@ shutdown provenance; latest unclean battle captures do not change that fact.
    The phone RDP display was 600x1284; reuse the qualified reversible private
    renderer/control setup, never normal-install fullscreen experiments. Input
    helpers require Windows PowerShell 5.1, not PowerShell 7.
-2. Compare generated marker eligibility/registration with the validated authored
-   co-op template and terrain elevation, minimizing changed native fields.
-   Add a first-role/update/native-sync gate before issuing probe roster commands
-   so startup failure receives its own diagnosis. Avoid increasing timeouts as
-   a substitute for fixing startup.
+2. Wait for Windows to be unlocked; do not bypass desktop protection. The map
+   generator now uses `MultSTMission` and authored spawn powerup state; the
+   first-role gate is implemented. Run a separate immutable snapshot with the
+   observability server and check spawn traffic, sync completion and all four
+   first frames. The failed LuaMission run remains the control.
 3. Run a validated co-op control using the observability server branch to qualify
    native decision/socket correlation, then retry 20 AI / 45 seconds clean.
    Preserve all source/native/content hashes and restore/audit on each exit.
@@ -126,7 +139,19 @@ shutdown provenance; latest unclean battle captures do not change that fact.
 
 Battle entry point: `reverse_engineering\Run-BZRBattleLoad.ps1 -Units 20 -Seconds 45`
 requires the external private control/deployment setup, not a bare launch.
-Local tests: Lua `test_battle.lua` from the battleload directory; Python
+For this RDP session explicitly add `-AllowNoAudioEndpoint`: the API enumerates
+zero active endpoints. Session/log records flag audio timing unqualified, while
+available sessions are still muted. Missing sessions with active endpoints still
+fail. Preserve this audio condition for subsequent battle CPU controls; do not
+compare it directly with prior audio-enabled CPU measurements.
+The final evidence checker retains complete clean-capture gates, rejects missing
+audio provenance/samples and persisted watcher errors, and reports audio timing
+separately. Watcher failures are recorded before throw; mission polling detects
+coordinator exit while unexpected clients remain alive. Eight sanitized evidence
+tests pass with Windows PowerShell 5.1. Audio is sampled every five seconds,
+not continuously monitored. Run `reverse_engineering\Test-BZRCoopDiagnosticEvidence.ps1`
+with Windows PowerShell 5.1 for those gates; it launches no game.
+Local tests: `lua test_battle.lua nbattle.lua` from the battleload directory; Python
 `test_prepare_battle_map.py` and `test_report_battle.py` from that directory.
 Server tests: `python relay_observability_test.py`, `relay_impairment_test.py`,
 `relay_faultinject_test.py`, `relay_pair_ports_test.py`, `network_capture_test.py`,

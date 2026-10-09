@@ -26,6 +26,7 @@ param(
     [ValidateRange(2, 4)][int]$Clients = 2,
     [switch]$MaxNetworkLogging,
     [switch]$MuteClients,
+    [switch]$AllowNoAudioEndpoint,
     [string]$RunName = '',
     # OpenShim checkout with a Release|Win32 build for the instances; empty = the install's.
     [string]$OpenShimRepo = '',
@@ -197,6 +198,7 @@ try {
     # not been committed yet. The session manifest records native DLL hashes.
     $inputs = [ordered]@{
         clients = $Clients
+        allowNoAudioEndpoint = [bool]$AllowNoAudioEndpoint
         harnessCommit = (git -C (Split-Path $PSScriptRoot) rev-parse HEAD)
         harnessFiles = @(@('Run-BZRCoopMission.ps1', 'BZRCoopMission.ps1', 'BZRCoopLobby.ps1', 'BZRCoopSession.ps1', 'BZRCoopDiagnostics.ps1', 'BZRCoopAudio.cs') | ForEach-Object {
             @{ name = $_; sha256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $_)).Hash }
@@ -224,6 +226,7 @@ try {
     $launchCmd = "& '$PSScriptRoot\BZRCoopSession.ps1' -Action Launch -Clients $Clients -BZRCoopRoot '$BZRCoopRoot' -RunName '$RunName' -GameArgs '/nointro','/norawinput'"
     if ($MaxNetworkLogging) { $launchCmd += ' -MaxNetworkLogging' }
     if ($MuteClients) { $launchCmd += ' -MuteClients' }
+    if ($AllowNoAudioEndpoint) { $launchCmd += ' -AllowNoAudioEndpoint' }
     Remove-Item Env:BZR_LAUNCH_LOCK_HELD -ErrorAction SilentlyContinue
     $launcher = Start-Process -FilePath $PowerShellExe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $launchCmd) `
         -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runDir 'coordinator.log') -RedirectStandardError (Join-Path $runDir 'coordinator.err.log')
@@ -237,8 +240,8 @@ try {
     }
     Write-Host "[run] all $Clients clients authenticated"
     if ($MuteClients) {
-        if (@($s.clients | Where-Object { $_.mutedAudioSessions -lt 1 }).Count) { throw 'A client has no verified muted audio session.' }
-        Write-Host "[run] all $Clients client audio sessions muted; native playback remains enabled"
+        if (@($s.clients | Where-Object { $_.mutedAudioSessions -lt 1 -and (-not $AllowNoAudioEndpoint -or $_.activeAudioEndpoints -gt 0) }).Count) { throw 'A client has no verified muted audio session.' }
+        Write-Host "[run] audio mode: verified muted sessions or explicitly allowed zero active endpoints; audio timing qualification is recorded per client"
     }
 
     # ---------------------------------------------------- lobby + flow --
@@ -289,9 +292,9 @@ if ($flowFinished) {
     if ($MaxNetworkLogging -and $MuteClients -and -not $KeepRunning) {
         try {
             $diagnostics = @(Test-BZRCoopDiagnosticEvidence $runDir $Clients)
-            Add-CRFlowCheck 'all clients muted with complete maximum network captures' $true $diagnostics
+            Add-CRFlowCheck 'all clients have verified audio conditions and complete maximum network captures' $true $diagnostics
         } catch {
-            Add-CRFlowCheck 'all clients muted with complete maximum network captures' $false $_.Exception.Message
+            Add-CRFlowCheck 'all clients have verified audio conditions and complete maximum network captures' $false $_.Exception.Message
         }
     }
     if ($Clients -gt 2 -and -not $KeepRunning) {
