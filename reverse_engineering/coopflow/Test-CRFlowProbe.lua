@@ -117,8 +117,9 @@ check(printed[1]:match("^%[CRFLOW%] {.*} #END$"), "event line format")
 -- Admission observation preserves callback count, nil-bearing results and
 -- original errors, including when the observer itself cannot read the roster.
 CRCoop.Receive(1, "Q", me, 1, 1)
-local a, b, c = CRCoop.Initialize()
-check(admissionCalls == 2 and a == nil and b == "initialized" and c == nil,
+local function resultCount(...) return select("#", ...), ... end
+local countResults, a, b, c = resultCount(CRCoop.Initialize())
+check(admissionCalls == 2 and countResults == 3 and a == nil and b == "initialized" and c == nil,
     "admission wrappers preserve original calls/results")
 local admission = lines("admission")
 check(#admission == 4 and admission[2]:find('"ready":true', 1, true)
@@ -126,6 +127,8 @@ check(#admission == 4 and admission[2]:find('"ready":true', 1, true)
 local savedPlayers = CRCoop.GetPlayers
 CRCoop.GetPlayers = function() error("observer failure") end
 check(pcall(CRCoop.Initialize) and admissionCalls == 3, "observer failure cannot suppress original")
+check(#lines("error") == 2 and lines("error")[1]:find('"where":"admission"', 1, true),
+    "observer failure leaves explicit diagnostic evidence")
 admissionThrows = true
 local admissionOK, admissionError = pcall(CRCoop.Initialize)
 check(not admissionOK and admissionCalls == 4 and tostring(admissionError):find("original admission error", 1, true),

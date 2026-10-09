@@ -200,7 +200,7 @@ try {
         clients = $Clients
         allowNoAudioEndpoint = [bool]$AllowNoAudioEndpoint
         harnessCommit = (git -C (Split-Path $PSScriptRoot) rev-parse HEAD)
-        harnessFiles = @(@('Run-BZRCoopMission.ps1', 'BZRCoopMission.ps1', 'BZRCoopLobby.ps1', 'BZRCoopSession.ps1', 'BZRCoopDiagnostics.ps1', 'BZRCoopAudio.cs') | ForEach-Object {
+        harnessFiles = @(@('Run-BZRCoopMission.ps1', 'BZRCoopMission.ps1', 'BZRCoopLobby.ps1', 'BZRCoopSession.ps1', 'BZRCoopDiagnostics.ps1', 'BZRCoopAudio.cs', 'coopflow\CRFlowProbe.lua') | ForEach-Object {
             @{ name = $_; sha256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $_)).Hash }
         })
         scenario = $scenarioPath

@@ -608,10 +608,20 @@ local function hookAdmission()
         emit("admission", {call=call, edge=edge, peers=peers,
             hosting=try(IsHosting), netGame=try(IsNetGame),
             localHandle=tostring(h), localTeam=try(GetTeamNum, h),
-            playerId=args[1], kind=call == "Receive" and args[2] or nil,
+            playerId=call ~= "Initialize" and call ~= "MarkMissionStarted" and args[1] or nil,
+            kind=call == "Receive" and args[2] or nil,
+            incomingTeam=call == "Receive" and args[2] == "Q" and args[4] or nil,
+            incomingHandle=call == "Receive" and args[2] == "Q" and tostring(args[3]) or nil,
             version=call == "Receive" and args[2] == "Q" and args[5] or
                 (call == "Receive" and args[2] == "K" and args[3] or nil),
             eventLimitReached=emitted == 1024})
+    end
+    local function guardedObserve(call, edge, args)
+        local ok, err = pcall(observe, call, edge, args)
+        if not ok then
+            pcall(emit, "error", {where="admission", call=call, edge=edge,
+                msg=tostring(err), eventLimitReached=emitted == 1024})
+        end
     end
     local function pack(...) return {n=select("#", ...), ...} end
     for _, name in ipairs({"Initialize", "CreatePlayer", "AddPlayer", "DeletePlayer",
@@ -622,10 +632,10 @@ local function hookAdmission()
             c[call] = function(...)
                 local args = pack(...)
                 local traced = call ~= "Receive" or args[2] == "Q" or args[2] == "K"
-                if traced then pcall(observe, call, "before", args) end
+                if traced then guardedObserve(call, "before", args) end
                 -- Original errors propagate and the callback runs exactly once.
                 local result = pack(original(...))
-                if traced then pcall(observe, call, "after", args) end
+                if traced then guardedObserve(call, "after", args) end
                 return unpack(result, 1, result.n)
             end
         end

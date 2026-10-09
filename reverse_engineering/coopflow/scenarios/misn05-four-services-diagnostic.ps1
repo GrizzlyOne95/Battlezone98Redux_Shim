@@ -109,6 +109,7 @@ Invoke-CRFlowStep 'all four cancel rescue; every peer clears all requests' {
 Invoke-CRFlowStep 'shared-deadline deaths diagnose Lemnos fallback on every peer' {
     $diag = [ordered]@{ method='All owners acknowledge one absolute simulation deadline before release; candidate snapshots bracket service.Update. Observed handle age is not private eligibility age.'; arms=@(); releases=@(); clients=@() }
     $helper = Join-Path $PSScriptRoot '..\battleload\four_respawn_diagnostic.lua'
+    $diag['helperSha256'] = (Get-FileHash -LiteralPath $helper).Hash
     try {
         foreach ($client in $C) { Invoke-CRFlow $client ([IO.File]::ReadAllText($helper)) | Out-Null }
         $deathAt = [double](Invoke-CRFlow 0 'return GetTime()') + 15
