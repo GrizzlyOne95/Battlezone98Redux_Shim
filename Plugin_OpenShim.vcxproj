@@ -206,6 +206,7 @@
     <ClCompile Include="src\patches\satellite_view_limits.cpp" />
     <ClCompile Include="src\patches\scrap_pilot_hud.cpp" />
     <ClCompile Include="src\patches\shadow_far_distance_hook.cpp" />
+    <ClCompile Include="src\patches\p2p_reliable_send_fix.cpp" />
     <ClCompile Include="src\patches\team_filter_mines.cpp" />
     <ClCompile Include="src\patches\ui_camera_fixes.cpp" />
     <ClCompile Include="src\patches\unfocused_mouse_release.cpp" />
@@ -223,6 +224,8 @@
     <ClCompile Include="src\patches\bzrnet_trace.cpp" />
     <ClCompile Include="src\patches\d3d_startup_hooks.cpp" />
     <ClCompile Include="src\patches\dx11_colorspace_diagnostic.cpp" />
+    <ClCompile Include="src\patches\d3d11_buffer_restore.cpp" />
+    <ClCompile Include="src\patches\d3d11_device_loss_recovery.cpp" />
     <ClCompile Include="src\patches\dx11_enhanced_fxaa.cpp" />
     <ClCompile Include="src\patches\dx11_scene_depth.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
@@ -340,6 +343,9 @@
     <ClInclude Include="include\bzr_string.h" />
     <ClInclude Include="include\d3d_startup_hooks.h" />
     <ClInclude Include="include\dx11_colorspace_diagnostic.h" />
+    <ClInclude Include="include\d3d11_buffer_mirror_policy.h" />
+    <ClInclude Include="include\d3d11_buffer_restore.h" />
+    <ClInclude Include="include\d3d11_device_loss_recovery.h" />
     <ClInclude Include="include\dx11_scene_depth.h" />
     <ClInclude Include="include\scene_depth_facts.h" />
     <ClInclude Include="include\dx11_enhanced_fxaa.h" />
