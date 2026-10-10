@@ -31,6 +31,7 @@ param(
     [string]$RunStamp = (Get-Date -Format 'yyyyMMdd-HHmmss'),
     [string]$CoopOverride = '',
     [switch]$AllowNoAudioEndpoint,
+    [ValidateSet('Classic','Strategy')][string]$Mode = 'Classic',
     [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
@@ -41,6 +42,11 @@ $scorer = Join-Path $PSScriptRoot 'p2p_netfix_score.py'
 $ps51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if ($RunStamp -notmatch '^[a-zA-Z0-9-]+$') { throw 'RunStamp must contain only letters, digits and hyphens.' }
 if ($Units % 2) { throw 'Units must be even.' }
+if ($Mode -eq 'Strategy') {
+    # One owned army per client (Run-BZRBattleLoad -Mode Strategy); no extras.
+    if ($Units % 4) { throw 'Strategy mode needs Units divisible by 4 (one army per client).' }
+    $Beacons = 0; $Powerups = 0
+}
 if (Get-Process battlezone98redux -ErrorAction SilentlyContinue) { throw 'A game is alive; nothing changed.' }
 . (Join-Path $PSScriptRoot 'BZRHarness.ps1')
 if (-not (Test-Path -LiteralPath $battle)) { throw "Missing battle harness: $battle" }
@@ -79,7 +85,7 @@ foreach ($pass in 1..$Passes) {
         foreach ($timer in $order) {
             $tag = $timer.Replace('/','x').Replace('+early','e').Replace('+nak0','z').Replace('+nak','n')
             $plan += [pscustomobject]@{index=$plan.Count+1; arm='on'; pass=$pass; timers=$timer; impair=$Impair[$profileIndex];
-                case="nbattle ${Units}AI ${Beacons}beacons ${Powerups}powerups ${Seconds}s";
+                case="$(if ($Mode -eq 'Strategy') { 'sbattle' } else { 'nbattle' }) ${Units}AI ${Beacons}beacons ${Powerups}powerups ${Seconds}s";
                 run="retry-battle-t$tag-i$($profileIndex+1)-p$pass-$RunStamp"}
         }
     }
@@ -118,6 +124,10 @@ try {
                 '-Beacons',$Beacons,'-Powerups',$Powerups,'-RunName',$row.run,'-ServerRepo',$ServerRepo,'-Python',$Python,
                 '-InheritedLaunchLockOwner',$env:BZR_LAUNCH_LOCK_HELD)
             if ($row.impair) { $battleArgs += @('-Impair',$row.impair) }
+            if ($Mode -eq 'Strategy') {
+                if (-not (Get-Command $battle).Parameters.ContainsKey('Mode')) { throw 'Battle harness lacks -Mode Strategy.' }
+                $battleArgs += @('-Mode','Strategy')
+            }
             if ($AllowNoAudioEndpoint) { $battleArgs += '-AllowNoAudioEndpoint' }
             if ($CoopOverride) {
                 if ((Get-FileHash -LiteralPath $CoopOverride).Hash -ne $coopHash) { throw 'Co-op override changed between arms.' }
