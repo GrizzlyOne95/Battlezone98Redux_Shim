@@ -100,6 +100,13 @@ SettingsUi = 1
 ;                     BZR_DISABLE_CHUNK_EXPERIMENTS
 ChunkMeshes = 1
 
+; Generated chunk mesh cache (openshim/cache/chunks) pruning, once at startup.
+; Obsolete cache versions are always deleted. ChunkCacheMaxMB is the total size cap
+; (least recently used model folders go first; 0 = no cap). Default: 256.
+ChunkCacheMaxMB = 256
+; Days since a model folder was last used before it is deleted (0 = never). Default: 30.
+ChunkCacheMaxAgeDays = 30
+
 ; Skinned person gibs: when a pilot, soldier or zombie (any Person) is blown
 ; apart, its skinned body splits into rigid limb pieces (head, torso, arms,
 ; hands, legs, weapon...) posed where each limb was on the frame of death,
