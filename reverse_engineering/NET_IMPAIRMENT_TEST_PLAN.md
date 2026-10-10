@@ -577,12 +577,24 @@ The four-run battle experiment plans 80 fighting AI, 16 beacons,
 attempt stopped INCOMPLETE before impairment/combat following four DX9
 device-loss/null-read crashes during the phone-RDP-to-direct-desktop transition.
 Stock timer evidence verified on four clients; no shorter arm ran. Independent
-restoration audit: 128 targets, zero mismatches, zero games. A fresh attempt
-`182600` is active on the direct desktop, preserving the failed `182000`
-capture/score separately. Compare
+restoration audit: 128 targets, zero mismatches, zero games. Subsequent attempts are retained separately: `182600` nested-lock wait,
+`183000` proven pre-Initialize admission reset, and `193200` guarded startup.
+The last trial completed one stock-timer battle, then stopped at second-arm
+lobby navigation before combat. No paired timer verdict is available. Compare
 equal-duration post-ramp recovery, repeat reliable sequences, datagram byte
 rates and observed wire seqB progress. No final live verdict yet. Exact setup,
 validation and subsequent results belong in
 `p2p_retry_timing_validation_20261009.md`; raw captures remain private.
 Python checks passed 41/41, PowerShell restoration checks passed and Release
 x86 CTest passed 81/81. Full network/default-change qualification stays OPEN.
+
+
+Final `193200` checkpoint: stock gameplay/cleanup PASS with 80 AI, 16 beacons,
+64 powerups, 23 natural vehicle deaths and 94 new scrap handles; native health
+FAIL remains separate. Independent twelve-link capture attribution is complete;
+nine RX deficits remain in the conservative combat interval. The second host
+was on Options when lounge navigation timed out; rate/queue arms did not run.
+128-file restoration audit passed with no games remaining. Canonical CR now
+guards fresh-module early Q/K/P until Initialize completes; the old source
+fails the new regression and both fixed variants pass. Keep retry defaults
+stock and restart a fresh bounded comparison before qualifying lower timers.
