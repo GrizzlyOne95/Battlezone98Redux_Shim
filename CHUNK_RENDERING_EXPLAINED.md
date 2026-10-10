@@ -171,12 +171,63 @@ For current platform-specific commands and DLL-only/asset-pack behavior, treat
 
 ---
 
+## Skinned gibs (people)
+
+Pilots, soldiers and zombies are skinned models, so the legacy "one chunk per
+node" split only ever gave them crude stand-in pieces. With `[General]
+SkinnedGibs = 1` (the default when the key is absent) OpenShim handles a
+person's death itself:
+
+1. **Catch the death.** `ChunkEffect::FullFragmentObject` is detoured whenever
+   SkinnedGibs is on (GOG only; byte-guarded). If the fragment root is a
+   `.?AVPerson@@`'s own object tree, the hook snapshots the person's world
+   entity *before* the engine shreds the tree: its parent node's world
+   position/orientation/scale and every bone's current derived pose and
+   inverse bind pose. Anything that is not a person passes straight through.
+2. **Split the body once per model.** `NativeChunks::ExtractGibs` reads the
+   person's own `.mesh` and `.skeleton` and cuts them the way
+   `scripts/export_gib_payloads.py` does: each triangle goes to its dominant
+   bone, small bones (fingers, toes, clavicles, nubs...) roll up into their
+   parent, the weapon submesh becomes one piece, and every cut is closed with a
+   fan cap using the material `openshim_gib_flesh`. The result is cached under
+   `openshim/cache/chunks/gibs/v1/<hash>/` (vehicle caches are untouched). An
+   authored split (`<payload dir>/<mesh basename>/gibs.txt` plus its meshes,
+   written by the script) takes precedence over the runtime one.
+3. **Pose, launch, simulate.** Each piece is spawned exactly where that limb
+   was on the death frame and launched with the legacy chunk numbers (random
+   ×10 per axis, +5 up, a kick away from the body's origin, the body's own
+   velocity, random spin). OpenShim integrates them itself from the engine's
+   chunk tick: gravity, a soft thud on the terrain (low bounce, high friction),
+   lie still for `SkinnedGibsLinger` seconds, sink, disappear. At most
+   `SkinnedGibsMax` gibs live at once; the oldest resting one is recycled
+   first.
+4. **No double bodies.** The body mesh is hidden, and the engine's own legacy
+   chunks for that death keep simulating (their smoke and pops are unchanged)
+   but the chunk renderer is told not to draw them. Nothing in the engine's
+   chunk state is written.
+
+The cut faces need no asset pack: OpenShim writes a plain dark-red
+`openshim_gib_flesh.material` into the cache root before the payload resource
+group starts. A pack can restyle it by shipping its own
+`openshim_gib_flesh.material` at the top of a chunk payload directory
+(`<mod>/chunkMeshes/` or `BZ_ASSETS/common/models/OpenShimChunkPayloads/`);
+the generated copy then steps aside so the name is never defined twice.
+
+`SkinnedGibs = 0` restores exactly the previous behaviour. Set
+`[Diagnostics] TraceSkinnedGibs = 1` for one log line per gib.
+
+---
+
 ## Current status
 
 - Vehicles: working when compatible chunk assets are detected.
 - Buildings: working, including the previously-broken faction-twin buildings
   (correct chunk shapes; twin *textures* are the documented limitation above).
 - Pilots: working for all four, via hand-named piece meshes.
+- People (any Person model): SkinnedGibs replaces the body chunks with posed,
+  capped limb gibs generated from the skinned mesh; verified offline on the
+  ISDF Chronicles pilot (12 gibs, identical to the Python exporter), awaiting
+  in-game confirmation.
 - Generic fallback: covers remaining identified edge cases so chunk rendering does
   not silently disappear when a specific source piece is unavailable.
 - DLL-only OpenShim: supported; chunk rendering remains safely unavailable without

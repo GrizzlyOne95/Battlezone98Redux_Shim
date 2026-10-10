@@ -9,6 +9,11 @@
 // which legacy family selected them, so per-family tuning lands here without
 // touching the resolver or rewriting mod files on disk.
 //
+// *_lit fragment variants carry the fixed-function emissive term for passes
+// with `lighting on` (surface_emissive_colour, live per draw). OSE_Compat_*
+// adapters stand in for programmable legacy families whose shaders never read
+// emissive, so they stay without it.
+//
 // DX9 never loads this file: the runtime probe is DX11-gated and stock DX9
 // keeps its fixed pipeline. Uniform names must match
 // openshim_dx11_fixedfunc-sm4.hlsl exactly; Ogre binds them through the
@@ -74,6 +79,27 @@ fragment_program OSE_FixedFunc_Textured_fragment_add hlsl
     }
 }
 
+// `lighting on` twins: add the pass emissive (surface_emissive_colour) to the
+// colour the texture stage combines with, as fixed-function lighting did.
+// Bound only to passes with lighting enabled; see the .hlsl header.
+// Replace discards the lit colour, so it has no twin.
+
+fragment_program OSE_FixedFunc_Textured_fragment_lit hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_fragment
+
+    preprocessor_defines COMPAT_LIGHTING_EMISSIVE
+    default_params
+    {
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+        param_named_auto emissiveColour surface_emissive_colour
+    }
+}
+
 vertex_program OSE_FixedFunc_Untextured_vertex hlsl
 {
     source openshim_dx11_fixedfunc-sm4.hlsl
@@ -96,6 +122,22 @@ fragment_program OSE_FixedFunc_Untextured_fragment hlsl
         param_named_auto sceneAmbient derived_ambient_light_colour
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
+    }
+}
+
+fragment_program OSE_FixedFunc_Untextured_fragment_lit hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_untextured_fragment
+
+    preprocessor_defines COMPAT_LIGHTING_EMISSIVE
+    default_params
+    {
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+        param_named_auto emissiveColour surface_emissive_colour
     }
 }
 
@@ -486,6 +528,54 @@ fragment_program OSE_FixedFunc_Textured2_fragment_alphablend hlsl
         param_named_auto sceneAmbient derived_ambient_light_colour
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
+    }
+}
+
+fragment_program OSE_FixedFunc_Textured2_fragment_modulate_lit hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc2_fragment
+
+    preprocessor_defines COMPAT_OP1_MODULATE;COMPAT_LIGHTING_EMISSIVE
+    default_params
+    {
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+        param_named_auto emissiveColour surface_emissive_colour
+    }
+}
+
+fragment_program OSE_FixedFunc_Textured2_fragment_add_lit hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc2_fragment
+
+    preprocessor_defines COMPAT_OP1_ADD;COMPAT_LIGHTING_EMISSIVE
+    default_params
+    {
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+        param_named_auto emissiveColour surface_emissive_colour
+    }
+}
+
+fragment_program OSE_FixedFunc_Textured2_fragment_alphablend_lit hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc2_fragment
+
+    preprocessor_defines COMPAT_OP1_ALPHABLEND;COMPAT_LIGHTING_EMISSIVE
+    default_params
+    {
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+        param_named_auto emissiveColour surface_emissive_colour
     }
 }
 

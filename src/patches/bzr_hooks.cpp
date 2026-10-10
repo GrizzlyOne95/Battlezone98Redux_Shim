@@ -1,3 +1,4 @@
+#include "native_hud_runtime.h"
 #include "bzr_hooks.h"
 #include "env_switch_table.h"
 #include "bool_token.h"
@@ -271,6 +272,7 @@ namespace BZROpenShim
     // trampolines. Runs after g_IsSteamExe is set.
     void ResetBzrHookRuntimeState()
     {
+        NativeHud::Runtime::SetAdapterCapabilities(0);
         ResetWeaponPresentationState();
         g_BzrFn_EngineFlameAddFlame = nullptr;
         g_BzrFn_EngineFlameControl = nullptr;
@@ -511,9 +513,10 @@ namespace BZROpenShim
     {
         LogChunkDiagnostic("chunk", L"[CHUNK] Force-first-geo fallback: %hs\n",
             g_EnableChunkRenderFallback ? "enabled" : "disabled");
-        LogChunkDiagnostic("chunk", L"[CHUNK] Trace logging: %hs%s budget=%ld entryLimit=%u\n",
+        LogChunkDiagnostic("chunk", L"[CHUNK] Trace logging: %hs%hs%hs budget=%ld entryLimit=%u\n",
             g_TraceChunkRender ? "enabled" : "disabled",
             g_TraceChunkRenderVerbose ? " verbose" : "",
+            g_ChunkEventLogging ? " events" : " events=off (set OPENSHIM_CHUNK_TRACE=1)",
             static_cast<long>(g_ChunkRenderLogBudget),
             g_ChunkTraceEntryLimit);
         LogChunkDiagnostic("chunkproxy", L"[CHUNKPROXY] Placeholder proxy debug: %hs cap=%u size=%.2f\n",
@@ -943,6 +946,7 @@ namespace BZROpenShim
             {"InstallResourceWalkStatCacheIfPossible", &InstallResourceWalkStatCacheIfPossible},
             {"InstallUiManualObjectDedupeHookIfPossible", &InstallUiManualObjectDedupeHookIfPossible},
             {"InstallSceneTeardownForgetHooksIfPossible", &InstallSceneTeardownForgetHooksIfPossible},
+            {"InstallEntityReloadLifetimeHookIfPossible", &InstallEntityReloadLifetimeHookIfPossible},
             {"InstallMissionTransitionSeamIfPossible", &InstallMissionTransitionSeamIfPossible},
             {"PinDirect3DModulesForShutdown", &PinDirect3DModulesForShutdown},
             {"InstallMultiplayerFlagRenderHookIfPossible", &InstallMultiplayerFlagRenderHookIfPossible},
@@ -958,6 +962,8 @@ namespace BZROpenShim
         static const EnvSwitches::EnvSwitch kFixKillSwitches[] = {
             {&g_MagnetZeroRangeGuardEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX", "BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"},
+            {&g_UnfocusedMouseReleaseEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE", "BZR_DISABLE_UNFOCUSED_MOUSE_RELEASE"},
             {&g_BriefingScrollFixEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_BRIEFING_SCROLL_FIX", "BZR_DISABLE_BRIEFING_SCROLL_FIX"},
             {&g_MultiRenderCountClampEnabled, EnvSwitches::Kind::KillSwitch,
@@ -1027,6 +1033,7 @@ namespace BZROpenShim
             {"InstallQuakeReplayFadeIfPossible", &InstallQuakeReplayFadeIfPossible},
             {"InstallTargetCamSatelliteFixIfPossible", &InstallTargetCamSatelliteFixIfPossible},
             {"InstallCinematicSatelliteZoomFixIfPossible", &InstallCinematicSatelliteZoomFixIfPossible},
+            {"InstallUnfocusedMouseReleaseIfPossible", &InstallUnfocusedMouseReleaseIfPossible},
         };
         RunInitSteps(kFixInstallSteps);
 
@@ -1054,11 +1061,10 @@ namespace BZROpenShim
         const bool configWantsChunkMeshProxy =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_MESH_PROXY") ||
               EnvFlagEnabled("BZR_DISABLE_CHUNK_MESH_PROXY"));
-        // Gate on both user config AND verified resource availability.
-        // This prevents a copied openshim.ini with ChunkMeshes=1 from
-        // entering unsafe Ogre Entity creation paths when the asset pack
-        // is absent, stale, or partial.
-        g_EnableChunkMeshProxy = configWantsChunkMeshProxy && chunkAssetsAvailable;
+        // Mesh pieces can now be generated from the source Ogre resource.
+        // External payload packs remain a fallback, not a prerequisite.
+        g_EnableChunkMeshProxy = configWantsChunkMeshProxy;
+        WarmNativeChunkCaches();
         if (configWantsChunkMeshProxy && !chunkAssetsAvailable)
         {
             static bool s_logged = false;
@@ -1066,7 +1072,7 @@ namespace BZROpenShim
             {
                 s_logged = true;
                 const auto caps = Assets::GetAssetCapabilities();
-                Log(L"[CHUNKMESH] Chunk mesh proxy requested but asset capability unavailable; suppressing feature state=%hs installed=%hs problem=%hs\n",
+                Log(L"[CHUNKMESH] External payloads unavailable; using native mesh extraction state=%hs installed=%hs problem=%hs\n",
                     Assets::AssetPackStateName(caps.state),
                     caps.installedVersion.c_str(),
                     caps.problem.c_str());
@@ -1200,7 +1206,10 @@ namespace BZROpenShim
                 vehicleSkinningTraceBudget = 4096;
         }
         g_VehicleSkinningTraceBudget = vehicleSkinningTraceBudget;
-        long chunkLogBudget = 4000;
+        // Normal gameplay needs only a few lifecycle samples. Thousands of
+        // synchronous, duplicated log writes can stall a destruction burst.
+        // Explicit diagnostic overrides still permit a larger capture.
+        long chunkLogBudget = 12;
         const bool chunkLogBudgetSpecified =
             TryGetEnvLong("BZR_CHUNK_LOG_BUDGET", chunkLogBudget) ||
             TryGetEnvLong("OPENSHIM_CHUNK_LOG_BUDGET", chunkLogBudget);
@@ -1249,6 +1258,21 @@ namespace BZROpenShim
             (EnvFlagEnabled("BZR_TRACE_CHUNK_EFFECT") ||
              EnvFlagEnabled("OPENSHIM_TRACE_CHUNK_EFFECT") ||
              EnvFlagEnabled("OPENSHIM_CHUNK_EFFECT_TRACE"));
+        // g_TraceChunkRender above is also switched on by ChunkMeshes alone
+        // (it arms the hooks the mesh proxy depends on), which used to make
+        // every debris piece emit ~5 flushed lines: ~2000 lines/s in a
+        // minigun fight until the 4000-line budget ran dry. Per-chunk lines
+        // now need an explicit trace or chunk-debug request.
+        g_ChunkEventLogging =
+            (!disableChunkTrace &&
+             (g_EnableChunkRenderFallback ||
+              g_EnableChunkProxyDebug ||
+              EnvFlagEnabled("BZR_CHUNK_TRACE") ||
+              EnvFlagEnabled("OPENSHIM_CHUNK_TRACE") ||
+              g_TraceChunkRenderVerbose ||
+              chunkLogBudgetSpecified ||
+              chunkTraceEntryLimitSpecified)) ||
+            g_TraceChunkEffectRuntime;
         InstallChunkEffectCreateHooksIfRequested();
         InstallChunkFragmentWalkHooksIfRequested();
         // Satellite fog-of-war investigation (feature item 24). Defaulted ON
@@ -1497,11 +1521,14 @@ namespace BZROpenShim
         g_GenericChunkBatchRuntimeAvailable = true;
         g_GenericChunkBatchEligibility[0] = -1;
         g_GenericChunkBatchEligibility[1] = -1;
+        g_StockFallbackBatchEligibility[0] = -1;
+        g_StockFallbackBatchEligibility[1] = -1;
         g_GenericChunkBatchLastLogTick = 0;
         g_ChunkPayloadResourceDirectories.clear();
         g_ChunkPayloadMeshExistsCache.clear();
         g_ChunkPayloadResolveFailureLogCache.clear();
         g_ChunkResolvedBindingCache.clear();
+        ResetNativeChunkPayloads();
         g_ChunkResolvedBindingLastPruneTick = 0;
         InitializeGlobalImprovementConfig();
         const char* rawInputSource = "default";
@@ -1550,6 +1577,7 @@ namespace BZROpenShim
             {"EnsureOptionsParentCtorHookScaffold", &EnsureOptionsParentCtorHookScaffold},
             {"EnsureNativeUiMainMenuDiagnosticScaffold", &EnsureNativeUiMainMenuDiagnosticScaffold},
             {"LogShimSettingsUiStatus", &LogShimSettingsUiStatus},
+            {"InstallBackgroundRunIfRequested", &InstallBackgroundRunIfRequested},
         };
         RunInitSteps(kLateInitSteps);
         Log(L"[MAPTRACE] Map refresh trace: %hs\n",
@@ -1594,6 +1622,7 @@ namespace BZROpenShim
         InstallEmissionLightFixIfPossible();
         VerifyExpectedOgreExportsIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
+        InstallEntityReloadLifetimeHookIfPossible();
         InstallEntityFrustumCullingIfEnabled();
         InstallMissionTransitionSeamIfPossible();
         PinDirect3DModulesForShutdown();
@@ -1612,6 +1641,7 @@ namespace BZROpenShim
 		InstallQuakeReplayFadeIfPossible();
 		InstallTargetCamSatelliteFixIfPossible();
 		InstallCinematicSatelliteZoomFixIfPossible();
+		InstallUnfocusedMouseReleaseIfPossible();
         InstallAiTuningHooksIfPossible();
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();
@@ -1639,6 +1669,11 @@ namespace BZROpenShim
 
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* /*edx*/, void* renderQueue)
     {
+        // Keep one owner per camera/material traversal. Flame callbacks can
+        // precede this Ogre traversal, so call-stack nesting alone does not
+        // exclude duplicate submissions. A recent observed world callback
+        // proves this driver is live; the flame fallback resumes if it stalls.
+        ObserveChunkWorldQueueDriver();
         if (g_BzrFn_LegacyWorldUpdateRenderQueue && thisPtr)
         {
             if (!RunLegacyWorldQueueWithDynamicGeometryCounters(thisPtr, renderQueue))
@@ -1695,7 +1730,11 @@ namespace BZROpenShim
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(renderQueue)));
         }
 
+        TickChunkProxyDebug(nullptr, false);
         SubmitChunkProxiesToRenderQueue(renderQueue);
+        // Independent of ChunkMeshes: gibs have their own pool and gate.
+        SubmitSkinnedGibsToRenderQueue(renderQueue);
+        SubmitShellCasingsToRenderQueue(renderQueue);
 
         // Opt-in Phase 3A parity capture. Inert unless a semantic frame
         // capture count is configured.
@@ -1773,6 +1812,14 @@ namespace BZROpenShim
         {
             g_BzrFn_ChunkEffectSimulate(thisPtr, dt);
         }
+        // Chunks the stock simulate just retired give their memory back to
+        // the object pool; drop their proxies before anything can reuse it.
+        ReleaseChunkProxiesMissingFromActiveList(thisPtr);
+        // Shim-owned person gibs: integrated on the engine's own dt, after the
+        // stock simulate (the only engine time source). No-op when disabled.
+        TickSkinnedGibs(thisPtr, dt);
+        // Shim-owned shell casings, same clock. No-op when disabled.
+        TickShellCasings(dt);
     }
 
 }

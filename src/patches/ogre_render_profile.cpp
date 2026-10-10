@@ -1150,6 +1150,7 @@ namespace BZROpenShim::RenderProfiles
         using FnPassGetFragmentProgramName =
             const std::string& (__thiscall*)(const void*);
         using FnPassGetNumTexUnits = unsigned short(__thiscall*)(const void*);
+        using FnPassGetLightingEnabled = bool(__thiscall*)(const void*);
         using FnResourceGetName =
             const std::string& (__thiscall*)(const void*);
         using FnMaterialCreateTechnique = void* (__thiscall*)(void*);
@@ -1172,6 +1173,9 @@ namespace BZROpenShim::RenderProfiles
             FnPassGetVertexProgramName getVertexProgramName = nullptr;
             FnPassGetFragmentProgramName getFragmentProgramName = nullptr;
             FnPassGetNumTexUnits getNumTexUnits = nullptr;
+            // Optional: only selects the emissive (*_lit) FixedFunc twin.
+            // Unresolved reads as lighting off, the historical programs.
+            FnPassGetLightingEnabled getLightingEnabled = nullptr;
             FnResourceGetName getResourceName = nullptr;
 
             bool CanInspect() const
@@ -1211,6 +1215,9 @@ namespace BZROpenShim::RenderProfiles
                 resolved.getNumTexUnits =
                     ResolveOgreExport<FnPassGetNumTexUnits>(
                         "?getNumTextureUnitStates@Pass@Ogre@@QBEGXZ");
+                resolved.getLightingEnabled =
+                    ResolveOgreExport<FnPassGetLightingEnabled>(
+                        "?getLightingEnabled@Pass@Ogre@@QBE_NXZ");
                 resolved.getResourceName =
                     ResolveOgreExport<FnResourceGetName>(
                         // "UBE", not "QBE": Resource::getName is VIRTUAL and
@@ -1329,6 +1336,19 @@ namespace BZROpenShim::RenderProfiles
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 return 0;
+            }
+        }
+
+        __declspec(noinline) static bool GuardedGetLightingEnabled(
+            FnPassGetLightingEnabled fn, const void* pass)
+        {
+            __try
+            {
+                return fn != nullptr && pass != nullptr && fn(pass);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
             }
         }
 
@@ -1669,6 +1689,10 @@ namespace BZROpenShim::RenderProfiles
             // ClassifyLegacyPass treats referenced programs as legacy.
             desc.textureUnits = static_cast<int>(
                 GuardedGetNumTexUnits(CompatPassApi().getNumTexUnits, pass));
+            // Fixed function adds the pass emissive only with lighting on;
+            // the policy picks the matching FixedFunc fragment twin.
+            desc.lightingEnabled = GuardedGetLightingEnabled(
+                CompatPassApi().getLightingEnabled, pass);
             if (desc.textureUnits == 1)
             {
                 desc.colorOp0 = "modulate";
@@ -2039,6 +2063,24 @@ namespace BZROpenShim::RenderProfiles
             return api;
         }
 
+        // A payload deployed before the *_lit emissive twins existed still
+        // has their no-emissive siblings: keep drawing, lose only the glow.
+        void FallBackToUnlitTwinIfAbsent(std::string& fragment,
+                                         const std::string& materialName)
+        {
+            std::string unlit;
+            if (!Dx11Compat::UnlitFragmentTwin(fragment, unlit) ||
+                GuardedProgramExists(&fragment) || !GuardedProgramExists(&unlit))
+            {
+                return;
+            }
+            LogCompatOnce("[DX11COMPAT] material=" + materialName +
+                              " emissive twin absent ps=" + fragment +
+                              " -> " + unlit + " (stale renderer resources?)",
+                          LogLevel::Warn);
+            fragment = unlit;
+        }
+
         bool GuardedProgramExists(const std::string* name)
         {
             const OgreProgramLookupApi& api = ProgramLookupApi();
@@ -2155,6 +2197,7 @@ namespace BZROpenShim::RenderProfiles
                     targetVs = fittedVs;
                 }
             }
+            FallBackToUnlitTwinIfAbsent(targetPs, materialName);
             if (!GuardedProgramExists(&targetVs) ||
                 !GuardedProgramExists(&targetPs))
             {
@@ -2349,6 +2392,7 @@ namespace BZROpenShim::RenderProfiles
                 {
                     vs = fitted;
                 }
+                FallBackToUnlitTwinIfAbsent(ps, materialName);
                 if (!GuardedProgramExists(&vs) || !GuardedProgramExists(&ps))
                 {
                     LogCompatOnce("[DX11COMPAT] material=" + materialName +
@@ -3837,6 +3881,11 @@ namespace BZROpenShim::RenderProfiles
                      "backend observation thread failed to start err=%lu",
                      static_cast<unsigned long>(GetLastError()));
         }
+    }
+
+    int IdentifyActiveRenderSystem()
+    {
+        return DetectActiveBackend();
     }
 
     namespace Exports

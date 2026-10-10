@@ -139,6 +139,11 @@ namespace BZROpenShim
         void RefreshChunkPayloadResourceDirectories()
         {
             g_ChunkPayloadResourceDirectories.clear();
+            const auto nativeRoot = GetNativeChunkCacheDirectory();
+            std::error_code nativeError;
+            std::filesystem::create_directories(nativeRoot, nativeError);
+            if (!nativeError)
+                AppendUniquePath(g_ChunkPayloadResourceDirectories, nativeRoot);
 
             const std::filesystem::path gameDir = GetMainModuleDirectory();
             static constexpr const char* kPayloadDirNames[] =
@@ -166,6 +171,16 @@ namespace BZROpenShim
                 std::filesystem::is_directory(stockDir, stockError) && !stockError)
             {
                 AppendUniquePath(g_ChunkPayloadResourceDirectories, stockDir);
+            }
+
+            // SkinnedGibs' default cut-flesh material lives in the cache root,
+            // which is registered with this group: it has to exist before the
+            // group is initialised, and must yield to a payload pack's own.
+            if (!nativeError)
+            {
+                EnsureSkinnedGibFleshMaterial(nativeRoot, g_ChunkPayloadResourceDirectories);
+                // ShellCasings' generated mesh and materials, same rules.
+                EnsureShellCasingAssets(nativeRoot, g_ChunkPayloadResourceDirectories);
             }
         }
 
@@ -635,6 +650,22 @@ namespace BZROpenShim
             outMeshName[0] = '\0';
 
             std::vector<std::string> meshCandidates;
+            // Ordinary chunklets have no source model identity. Resolve their
+            // exact two templates without building craft/VDF candidate lists.
+            // Unidentified entries also use this cheap, batchable stock path.
+            const char* ownGeom = explicitGeomName && *explicitGeomName ? explicitGeomName : probe.geomName;
+            if ((!preferredMeshName || !*preferredMeshName) && !probe.cachedMeshName[0])
+            {
+                if (_stricmp(ownGeom, "chunk1") == 0 || _stricmp(ownGeom, "chunk2") == 0)
+                {
+                    if (TryResolveChunkPayloadMeshResourceForMeshAndGeom(ownGeom, ownGeom, outMeshName,
+                                                                       outMeshNameCapacity) ||
+                        TryResolveGeneratedStockChunkFallback(ownGeom, outMeshName, outMeshNameCapacity))
+                        return true;
+                }
+                else if (!*ownGeom && TryResolveGeneratedStockChunkFallback(nullptr, outMeshName, outMeshNameCapacity))
+                    return true;
+            }
             meshCandidates.reserve(2);
             AppendUniqueChunkPayloadCandidate(meshCandidates, NormalizeChunkMeshBaseName(preferredMeshName));
             AppendUniqueChunkPayloadCandidate(meshCandidates, NormalizeChunkMeshBaseName(probe.cachedMeshName));
@@ -697,6 +728,7 @@ namespace BZROpenShim
             geomCandidates.reserve(4);
             AppendUniqueChunkPayloadCandidate(geomCandidates, NormalizeChunkPayloadComponentName(explicitGeomName));
             AppendUniqueChunkPayloadCandidate(geomCandidates, NormalizeChunkPayloadComponentName(probe.geomName));
+            const auto nativeGeomCandidates = geomCandidates;
             // The VDF candidate list names OTHER pieces of the source craft.
             // Substituting one of those is only acceptable when the chunk's
             // own geo name could not be read at all — otherwise a resolve
@@ -704,6 +736,37 @@ namespace BZROpenShim
             // piece instead of an invisible chunk.
             if (geomCandidates.empty())
                 AppendChunkPayloadCandidatesFromPipeList(probe.vdfCandidates, geomCandidates);
+
+            bool nativeModelHandled = false;
+            for (const auto& meshCandidate : meshCandidates)
+            {
+                // Native pieces require the chunk's own geometry identity.
+                // A VDF sibling list is not evidence that an unnamed node is
+                // that sibling. Guessing here dressed pooled chunklets in a
+                // previously destroyed trigger's geyser mesh.
+                for (const auto& geomCandidate : nativeGeomCandidates)
+                {
+                    bool handled = false;
+                    if (TryResolveNativeChunkPayload(meshCandidate.c_str(),
+                            geomCandidate.c_str(), outMeshName,
+                            outMeshNameCapacity, handled))
+                        return true;
+                    nativeModelHandled = nativeModelHandled || handled;
+                }
+                if (nativeGeomCandidates.empty())
+                {
+                    bool handled = false;
+                    TryResolveNativeChunkPayload(meshCandidate.c_str(), "",
+                        outMeshName, outMeshNameCapacity, handled);
+                    nativeModelHandled = nativeModelHandled || handled;
+                }
+            }
+            // A missing group must not borrow sibling geometry or another
+            // craft's mesh. Use only the tiny canonical stock debris shapes.
+            if (nativeModelHandled)
+                return TryResolveGeneratedStockChunkFallback(
+                    nativeGeomCandidates.empty() ? nullptr : nativeGeomCandidates.front().c_str(),
+                    outMeshName, outMeshNameCapacity);
 
             for (const std::string& meshCandidate : meshCandidates)
             {
@@ -771,6 +834,14 @@ namespace BZROpenShim
                 }
             }
 
+            // Prefer the bounded static stock batch over arbitrary generic
+            // meshes (which may have skeletons, many materials and shadows).
+            // Authored craft-specific external pieces were already tried.
+            if (TryResolveGeneratedStockChunkFallback(
+                    geomCandidates.empty() ? nullptr : geomCandidates.front().c_str(),
+                    outMeshName, outMeshNameCapacity))
+                return true;
+
             // Last resort: a payload root can ship generic debris meshes in a
             // "generic" dir (generic/iechunkN.mesh). Seed the pick with the
             // geo name so a given piece always shatters into the same shape.
@@ -780,7 +851,8 @@ namespace BZROpenShim
                     outMeshNameCapacity))
             {
                 static volatile long s_GenericFallbackLogBudget = 64;
-                if (InterlockedDecrement(&s_GenericFallbackLogBudget) >= 0)
+                if (g_ChunkEventLogging &&
+                    InterlockedDecrement(&s_GenericFallbackLogBudget) >= 0)
                 {
                     LogChunkDiagnostic(
                         "chunkmesh",

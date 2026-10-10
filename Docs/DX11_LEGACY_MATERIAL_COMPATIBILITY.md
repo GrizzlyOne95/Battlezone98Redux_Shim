@@ -228,6 +228,18 @@ On `isdfms10` under DX11, the ISDF Chronicles rain material `xrain` threw `Attem
 
 Not covered: a fixed-function technique on a material that never misses a scheme is still drawn as-is.
 
+#### Pass emissive / self-illumination (2026-10-05)
+
+Under DX9 fixed function a `lighting on` pass is lit per vertex as `saturate(emissive + ambient * sceneAmbient + diffuse * sum(lights))`, and its texture stages combine against that colour. A `lighting off` pass skips lighting and feeds the vertex colour (white when absent) straight to the stages; its emissive is ignored. The `OSE_FixedFunc_*` programs used to drop the emissive term, so fixed-function glow never appeared under DX11. ISDF Chronicles' `ivptank_ck_*` cockpit lamps show it: they are `lighting on`, `ambient 0`, and their lit state is the pass emissive, animated at runtime with `exu.SetMaterialPassColors(clone, { emissive = c, diffuse = c }, -1, 0)`.
+
+- The runtime reads the source pass's `Pass::getLightingEnabled()` (exported; SEH-guarded; unresolved reads as off) into `LegacyPassDesc::lightingEnabled`.
+- For lit passes, `ResolveCompatPrograms` binds the `*_lit` fragment twin on the true fixed-function paths: `OSE_FixedFunc_Textured_fragment_lit`, `OSE_FixedFunc_Untextured_fragment_lit`, and `OSE_FixedFunc_Textured2_fragment_{modulate,add,alphablend}_lit`. Each twin uses its sibling's entry point and defines plus `COMPAT_LIGHTING_EMISSIVE`, and binds `param_named_auto emissiveColour surface_emissive_colour`. Ogre reads that auto constant from the pass on every draw, so runtime emissive changes take effect. Vertex programs are unchanged, so the `_novc` / `_nouv` input reductions and the native `.bgra` rule still apply.
+- The shader computes `lit = min(vColor + emissive, max(vColor, 1))` before the stage combine (modulate: `lit * tex`; add: `lit + tex`; replace ignores it, so it has no twin). This clamps like fixed function, and a black emissive (the default) returns `vColor` exactly. Existing content therefore draws unchanged.
+- Lighting-off passes keep the historical programs, so they ignore emissive as DX9 does. `FamilyRemap` and `AggressiveGeneric` also keep them: they stand in for programmable passes whose own shaders replaced fixed-function lighting, and the stock legacy families never read emissive.
+- If a deployed payload predates the twins, the runtime falls back to the sibling (`[DX11COMPAT] material=<m> emissive twin absent ps=<lit> -> <unlit>`). The draw survives and only the glow is lost.
+
+Still approximated: these programs do not evaluate dynamic lights, specular, or the pass ambient. `lit` remains vertex colour × surface diffuse plus the `0.25 × sceneAmbient` floor. For lighting-off passes, fixed function would also ignore surface diffuse, which these programs still multiply in. With the default white diffuse there is no difference.
+
 ### Level 3 - optional RTSS-generated fallback
 
 Ogre's RT Shader System is designed to generate shaders for fixed-function material state. Redux already exposes evidence of `ShaderGeneratorDefaultScheme` in runtime behaviour, so RTSS may be available in some form.

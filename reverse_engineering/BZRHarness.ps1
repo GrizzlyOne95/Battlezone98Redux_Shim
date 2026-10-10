@@ -28,6 +28,13 @@
 
 $script:BZRGameProcessName = 'battlezone98redux'
 
+# Harness clients are driven by posted window messages, so a foreground test
+# window that clips or re-centres the OS cursor only steals the real mouse from
+# whoever is at the desk. Launched games inherit this; OpenShim then never
+# calls ClipCursor/SetCursorPos for them. A script that genuinely needs stock
+# mouse capture sets it to 0 before dot-sourcing this file.
+if (-not $env:OPENSHIM_NEVER_CAPTURE_MOUSE) { $env:OPENSHIM_NEVER_CAPTURE_MOUSE = '1' }
+
 function Stop-BZRGame {
     <#
     .SYNOPSIS
@@ -37,6 +44,8 @@ function Stop-BZRGame {
         hand the exclusive-fullscreen mode back to the driver. Only escalates to
         TerminateProcess for a process that ignored the close request, which is
         the genuinely-hung case where there is nothing gentler left to try.
+        Pass -NoForce for probes that must leave an unresponsive game running
+        rather than terminate it. The caller receives an error in that case.
 
         This is a drop-in replacement for the old
             Get-Process -Name "battlezone98redux" | Stop-Process -Force
@@ -54,6 +63,7 @@ function Stop-BZRGame {
         # Generous by design: a DX11 fullscreen teardown at 4K can take several
         # seconds, and waiting is always cheaper than a hard restart.
         [int]$TimeoutSeconds = 15,
+        [switch]$NoForce,
         # Time for the driver to finish releasing the adapter before the caller
         # launches again. Back-to-back mode-sets are what wedged the stack.
         [int]$SettleMilliseconds = 750
@@ -102,7 +112,7 @@ function Stop-BZRGame {
             }
         }
 
-        $graceMs = if ($accepted) { $TimeoutSeconds * 1000 } else { 2000 }
+        $graceMs = if ($accepted -or $NoForce) { $TimeoutSeconds * 1000 } else { 2000 }
         $deadline = (Get-Date).AddMilliseconds($graceMs)
 
         foreach ($p in $procs) {
@@ -113,6 +123,10 @@ function Stop-BZRGame {
 
         # Escalate only for whatever is still standing.
         foreach ($p in $procs) {
+            $p.Refresh()
+            if (-not $p.HasExited -and $NoForce) {
+                throw ("{0} (pid {1}) is still running after the close request; -NoForce leaves it running." -f $procName, $p.Id)
+            }
             try {
                 $p.Refresh()
                 if ($p.HasExited) { continue }

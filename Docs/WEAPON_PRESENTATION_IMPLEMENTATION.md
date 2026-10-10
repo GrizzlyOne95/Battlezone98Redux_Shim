@@ -26,6 +26,11 @@ The [native static qualification report](https://github.com/GrizzlyOne95/Battlez
 preserves executable/ZIP provenance, recovered contracts, generated signature
 proof and explicit remaining runtime uncertainties in the private repository.
 
+PR #389 merged this candidate and guide into `main`. The follow-up
+[Windows evidence collection guide](WEAPON_PRESENTATION_LIVE_QUALIFICATION.md)
+provides explicit-PID live-byte capture and optional bounded call observation.
+Neither tool opens the activation gate; no live results are claimed here.
+
 ## Implemented
 
 | Surface | Behavior |

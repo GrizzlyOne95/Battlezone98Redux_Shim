@@ -280,3 +280,10 @@ EXPORTS
     tid32Message
     wid32Message
     wod32Message
+    OpenShimGetNativeHudLayoutCapabilities
+    OpenShimGetNativeHudMeterRect
+    OpenShimGetNativeHudMeterDefaultRect
+    OpenShimSetNativeHudMeterRect
+    OpenShimSetNativeHudMeterVisible
+    OpenShimRestoreNativeHudMeter
+    OpenShimRestoreAllNativeHudMeters

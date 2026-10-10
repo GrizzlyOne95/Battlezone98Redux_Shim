@@ -125,10 +125,51 @@ namespace
             Check(Mapped(ini, name) == "1", std::string(name) + " follows [General] ChunkMeshes");
         }
 
+        // SkinnedGibs is its own key, not ChunkMeshes: chunks off keeps gibs.
+        Check(Mapped(ini, "OPENSHIM_DISABLE_SKINNED_GIBS") == "<none>", "unset SkinnedGibs keeps the code default");
+        ini.Set("General", "SkinnedGibs", "0");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_SKINNED_GIBS") == "1", "SkinnedGibs = 0 reads as DISABLE=1");
+        ini.Set("General", "SkinnedGibs", "on");
+        Check(Mapped(ini, "BZR_DISABLE_SKINNED_GIBS") == "0", "SkinnedGibs = on reads as DISABLE=0");
+        ini.Set("General", "SkinnedGibsMax", "96");
+        Check(Mapped(ini, "OPENSHIM_SKINNED_GIBS_MAX") == "96", "numeric gib tuning passes through raw");
+
+        // ShellCasings: its own inverted switch, raw numeric and list keys.
+        Check(Mapped(ini, "OPENSHIM_DISABLE_SHELL_CASINGS") == "<none>", "unset ShellCasings keeps the code default");
+        ini.Set("General", "ShellCasings", "0");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_SHELL_CASINGS") == "1", "ShellCasings = 0 reads as DISABLE=1");
+        ini.Set("General", "ShellCasings", "on");
+        Check(Mapped(ini, "BZR_DISABLE_SHELL_CASINGS") == "0", "ShellCasings = on reads as DISABLE=0");
+        ini.Set("General", "ShellCasingsMax", "64");
+        Check(Mapped(ini, "OPENSHIM_SHELL_CASINGS_MAX") == "64", "casing pool size passes through raw");
+        ini.Set("General", "ShellCasingsClasses", "cannon,-gquake");
+        Check(Mapped(ini, "OPENSHIM_SHELL_CASINGS_CLASSES") == "cannon,-gquake", "casing class list passes through raw");
+        ini.Set("Diagnostics", "TraceShellCasings", "1");
+        Check(Mapped(ini, "OPENSHIM_TRACE_SHELL_CASINGS") == "1", "TraceShellCasings maps from [Diagnostics]");
+
+        // PathBlockFaces: inverted switch, trace from [Diagnostics].
+        Check(Mapped(ini, "OPENSHIM_DISABLE_PATH_BLOCK_FACES") == "<none>", "unset PathBlockFaces keeps the code default");
+        ini.Set("General", "PathBlockFaces", "0");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_PATH_BLOCK_FACES") == "1", "PathBlockFaces = 0 reads as DISABLE=1");
+        ini.Set("General", "PathBlockFaces", "1");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_PATH_BLOCK_FACES") == "0", "PathBlockFaces = 1 reads as DISABLE=0");
+        ini.Set("Diagnostics", "TracePathBlock", "1");
+        Check(Mapped(ini, "OPENSHIM_TRACE_PATH_BLOCK") == "1", "TracePathBlock maps from [Diagnostics]");
+
         // DisableControlSmoothing is the one General DISABLE_ key that is
         // itself negative, so it is read as written.
         ini.Set("General", "DisableControlSmoothing", "1");
         Check(Mapped(ini, "OPENSHIM_DISABLE_CONTROL_SMOOTHING") == "1", "negative key is not inverted again");
+    }
+
+    void TestRunInBackgroundMapping()
+    {
+        FakeIni ini;
+        Check(Mapped(ini, "OPENSHIM_RUN_IN_BACKGROUND") == "<none>", "absent key leaves the toggle unset");
+        ini.Set("Testing", "RunInBackground", "1");
+        Check(Mapped(ini, "OPENSHIM_RUN_IN_BACKGROUND") == "1", "[Testing] RunInBackground maps to the env name");
+        ini.Set("Testing", "RunInBackground", "0");
+        Check(Mapped(ini, "OPENSHIM_RUN_IN_BACKGROUND") == "0", "[Testing] RunInBackground=0 maps to 0");
     }
 
     void TestNamesMatchWithoutCase()
@@ -311,6 +352,7 @@ int main()
 {
     TestBooleanKeysNormalise();
     TestDisableNamesInvertPositiveKeys();
+    TestRunInBackgroundMapping();
     TestNamesMatchWithoutCase();
     TestAbsentAndUnparseableKeys();
     TestFriendlyKeyBeatsEnvironmentSection();

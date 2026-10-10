@@ -445,9 +445,10 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         return "OSE_FixedFunc_Textured_vertex";
     }
 
-    const char* FixedFuncTexturedFragment() noexcept
+    const char* FixedFuncTexturedFragment(bool lit) noexcept
     {
-        return "OSE_FixedFunc_Textured_fragment";
+        return lit ? "OSE_FixedFunc_Textured_fragment_lit"
+                   : "OSE_FixedFunc_Textured_fragment";
     }
 
     const char* FixedFuncUntexturedVertex() noexcept
@@ -455,9 +456,10 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         return "OSE_FixedFunc_Untextured_vertex";
     }
 
-    const char* FixedFuncUntexturedFragment() noexcept
+    const char* FixedFuncUntexturedFragment(bool lit) noexcept
     {
-        return "OSE_FixedFunc_Untextured_fragment";
+        return lit ? "OSE_FixedFunc_Untextured_fragment_lit"
+                   : "OSE_FixedFunc_Untextured_fragment";
     }
 
     const char* FixedFuncTextured2Vertex() noexcept
@@ -465,21 +467,40 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         return "OSE_FixedFunc_Textured2_vertex";
     }
 
-    const char* FixedFuncTextured2Fragment(StageCombine stage1) noexcept
+    const char* FixedFuncTextured2Fragment(StageCombine stage1, bool lit) noexcept
     {
         switch (stage1)
         {
         case StageCombine::Modulate:
-            return "OSE_FixedFunc_Textured2_fragment_modulate";
+            return lit ? "OSE_FixedFunc_Textured2_fragment_modulate_lit"
+                       : "OSE_FixedFunc_Textured2_fragment_modulate";
         case StageCombine::Add:
-            return "OSE_FixedFunc_Textured2_fragment_add";
+            return lit ? "OSE_FixedFunc_Textured2_fragment_add_lit"
+                       : "OSE_FixedFunc_Textured2_fragment_add";
         case StageCombine::AlphaBlendTexture:
-            return "OSE_FixedFunc_Textured2_fragment_alphablend";
+            return lit ? "OSE_FixedFunc_Textured2_fragment_alphablend_lit"
+                       : "OSE_FixedFunc_Textured2_fragment_alphablend";
         default:
             // Replace on stage 1 discards stage 0 entirely; no shipped
             // material does it, so it stays out of the support set.
             return nullptr;
         }
+    }
+
+    bool UnlitFragmentTwin(std::string_view litFragment, std::string& outUnlit)
+    {
+        outUnlit.clear();
+        constexpr std::string_view kPrefix = "OSE_FixedFunc_";
+        constexpr std::string_view kSuffix = "_lit";
+        if (litFragment.size() <= kPrefix.size() + kSuffix.size() ||
+            litFragment.substr(0, kPrefix.size()) != kPrefix ||
+            litFragment.substr(litFragment.size() - kSuffix.size()) != kSuffix ||
+            litFragment.find("_fragment") == std::string_view::npos)
+        {
+            return false;
+        }
+        outUnlit.assign(litFragment.substr(0, litFragment.size() - kSuffix.size()));
+        return true;
     }
 
     const char* FixedFuncSuppressVertex() noexcept
@@ -640,14 +661,18 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             }
             return true;
 
+        // True fixed-function passes: the source pass's lighting flag decides
+        // whether the fixed pipeline would have added its emissive. FamilyRemap
+        // and AggressiveGeneric stand in for programmable passes, whose own
+        // shaders replaced fixed-function lighting, so they never take it.
         case CompatPath::FixedFuncTextured:
             outVertex.assign(FixedFuncTexturedVertex());
-            outFragment.assign(FixedFuncTexturedFragment());
+            outFragment.assign(FixedFuncTexturedFragment(desc.lightingEnabled));
             return true;
 
         case CompatPath::FixedFuncUntextured:
             outVertex.assign(FixedFuncUntexturedVertex());
-            outFragment.assign(FixedFuncUntexturedFragment());
+            outFragment.assign(FixedFuncUntexturedFragment(desc.lightingEnabled));
             return true;
 
         case CompatPath::FixedFuncTextured2:
@@ -657,7 +682,8 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
                 return false;
             }
             const char* fragment =
-                FixedFuncTextured2Fragment(ClassifyStageColour(desc.stages[1]));
+                FixedFuncTextured2Fragment(ClassifyStageColour(desc.stages[1]),
+                                           desc.lightingEnabled);
             if (fragment == nullptr)
             {
                 return false;
