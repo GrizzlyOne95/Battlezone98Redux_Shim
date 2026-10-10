@@ -49,6 +49,14 @@ namespace BZROpenShim
     void __fastcall OptionsParentDtorHook(void* thisPtr, void* /*edx*/);
     void __cdecl ClickMultiPlayerHook();
     uint8_t __fastcall MainScreenOnCharHook(void* thisPtr, void* /*edx*/, uint8_t character);
+    void __fastcall MainScreenMpStatusRefreshHook(void* thisPtr, void* /*edx*/);
+
+    namespace Hooks
+    {
+        bool RedirectCallTarget(uintptr_t callAddress,
+                                uintptr_t originalTarget,
+                                uintptr_t desiredTarget);
+    }
 
     namespace
     {
@@ -5399,6 +5407,12 @@ namespace BZROpenShim
         static bool g_ClickMultiPlayerHookInstalled = false;
         static FnMainScreenOnChar g_MainScreenOnCharOriginal = nullptr;
         static bool g_MainScreenOnCharHookInstalled = false;
+        // cUI_MainScreen MP-status refresh (0x0078EB50, __thiscall(this)), reached
+        // only through the call at 0x0078EB30 in PerFrameCallBack.
+        constexpr uintptr_t kMainScreenMpStatusRefreshAddr = 0x0078EB50;
+        constexpr size_t kMainScreenMpButtonOffset = 0x170;
+        constexpr size_t kUiButtonEnabledOffset = 0x148;
+        static bool g_MainScreenMpStatusRefreshHookInstalled = false;
 
         static void ResetCareerUiState();
         static void* ReadMainScreenSingleton();
@@ -6603,7 +6617,11 @@ namespace BZROpenShim
             // Before showing, for the same reason as the Career page: the
             // SetActive veto turns activation off while this flag is false.
             g_PreLobbyPageActive = true;
+            // Every label write below re-enters the SetTooltip hook, which
+            // polls this page; hold the poll off until the page is settled.
+            g_PreLobbyTickBusy = true;
             SetPreLobbyPageVisible(true);
+            g_PreLobbyTickBusy = false;
             Log(L"[PRELOBBY] opened (hid %zu stock control(s), %zu caption(s), server=%hs)\n",
                 g_CareerUiHiddenStockCount, g_CareerUiHiddenCaptionCount, g_PreLobbyServer);
         }
@@ -6614,9 +6632,15 @@ namespace BZROpenShim
                 return;
             g_PreLobbyPending = false;
             g_PreLobbyAwaitDrop = false;
+            // Blanking the status label goes through the SetTooltip hook, and
+            // its poll would rewrite the status text while the page is still
+            // flagged open -- which left the status line drawn over the
+            // restored menu after Back.
+            g_PreLobbyTickBusy = true;
             SetPreLobbyPageVisible(false);
             RestoreStockMainScreenControls();
             g_PreLobbyPageActive = false;
+            g_PreLobbyTickBusy = false;
             Log(L"[PRELOBBY] closed\n");
         }
 
@@ -6732,7 +6756,7 @@ namespace BZROpenShim
                 {
                     g_PreLobbyPending = false;
                     g_PreLobbyAwaitDrop = false;
-                    SetPreLobbyNote("Server not responding");
+                    SetPreLobbyNote("Still not ready (check sign-in or network)");
                     Log(L"[PRELOBBY] continue timed out after %llu ms\n", elapsed);
                 }
             }
@@ -7224,6 +7248,36 @@ namespace BZROpenShim
             }
         }
 
+        // The title screen disables the Multiplayer button every frame until
+        // BZRNet authorises (0x0078EB50 -> SetEnabled(0) on +0x170), so the
+        // click never reaches Click_MultiPlayer while it reads "Not Ready".
+        // The pre-lobby has to open in exactly that state -- it is where the
+        // player waits for sign-in and, later, picks another server -- so the
+        // refresh's one call site is redirected to re-enable the button after
+        // the stock refresh has run.
+        if (!g_MainScreenMpStatusRefreshHookInstalled)
+        {
+            uint32_t callSite = 0;
+            if (HookEngine::ResolveEngineAddress("MainScreenMpStatusRefreshCall", callSite) !=
+                HookEngine::EngineAddressStatus::Bound)
+            {
+                Log(L"[PRELOBBY] MP status refresh call is not bound; the page opens only once "
+                    L"the network is ready\n");
+            }
+            else if (Hooks::RedirectCallTarget(
+                         callSite, kMainScreenMpStatusRefreshAddr,
+                         reinterpret_cast<uintptr_t>(&MainScreenMpStatusRefreshHook)))
+            {
+                g_MainScreenMpStatusRefreshHookInstalled = true;
+                Log(L"[PRELOBBY] MP status refresh call redirected at 0x%08X\n", callSite);
+            }
+            else
+            {
+                Log(L"[PRELOBBY] MP status refresh call at 0x%08X has an unexpected target; the "
+                    L"page opens only once the network is ready\n", callSite);
+            }
+        }
+
         if (!g_MainScreenOnCharHookInstalled)
         {
             uint32_t slotAddress = 0;
@@ -7561,7 +7615,39 @@ namespace BZROpenShim
     {
         if (g_PreLobbyPageActive && PreLobbyForwardChar(character))
             return 1;
+        // Esc backs out of the page, as it does on stock shell screens. The
+        // title screen itself does nothing with it, so it is consumed here.
+        if (g_PreLobbyPageActive && character == 0x1B && !g_PreLobbyInContinue)
+        {
+            ClosePreLobbyPage();
+            return 1;
+        }
         return g_MainScreenOnCharOriginal ? g_MainScreenOnCharOriginal(thisPtr, character) : 0;
+    }
+
+    // Stock MP-status refresh first (label, status text, enabled byte), then
+    // the button is made clickable again while the pre-lobby page exists and is
+    // closed. The page is only built with [Network] PreLobby on, so a stock
+    // install keeps the stock "Not Ready" lock-out.
+    void __fastcall MainScreenMpStatusRefreshHook(void* thisPtr, void* /*edx*/)
+    {
+        using FnRefresh = void(__thiscall*)(void*);
+        reinterpret_cast<FnRefresh>(kMainScreenMpStatusRefreshAddr)(thisPtr);
+
+        if (!g_PreLobbyBackButton || g_PreLobbyPageActive || g_PreLobbyInContinue)
+            return;
+        if (thisPtr != ReadMainScreenSingleton())
+            return;
+        __try
+        {
+            auto* const button = *reinterpret_cast<uint8_t**>(
+                static_cast<uint8_t*>(thisPtr) + kMainScreenMpButtonOffset);
+            if (button)
+                button[kUiButtonEnabledOffset] = 1;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
     }
 
     void __fastcall MainScreenCtorHook(void* thisPtr, void* /*edx*/, char phase)
