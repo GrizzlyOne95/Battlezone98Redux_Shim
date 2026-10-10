@@ -633,6 +633,19 @@ Renderer = Auto
 ; overrides are cleared automatically at mission end.
 RenderProfile = Redux
 
+; Direct3D 11 device-loss recovery. Accepted: boolean. Default: 1.
+;   When the display driver resets the GPU (a TDR), Ogre recreates its D3D11
+;   device at once. Recreated inside the reset window, the new device is lost
+;   again and every buffer request fails, or Ogre falls back to the software
+;   "Microsoft Basic Render Driver" and runs out of memory; both crash the game.
+;   With this on, device recreation waits (up to 15 s) until probe devices on
+;   the original hardware adapter survive several submits in a row, and a
+;   software adapter picked while the hardware one was briefly absent is
+;   replaced by the hardware adapter. First device creation is never delayed,
+;   and DX9 is untouched. Logged under [DX11 Recovery].
+;   Kill switch: OPENSHIM_DISABLE_D3D11_DEVICE_LOSS_RECOVERY=1.
+D3D11DeviceLossRecovery = 1
+
 
 [Terrain]
 
@@ -1403,6 +1416,36 @@ TracePlayerKills = 0
 ; governor and auto-kick back at the game's own values.
 ; Legacy env aliases: OPENSHIM_NET_IMPROVEMENTS, BZ_NET_IMPROVEMENTS
 NetImprovements = 1
+
+; BZRNet P2P reliable-send backlog fix. Stock Redux stops sending new reliable
+; messages to a peer immediately once any retransmit pass has run for it; they
+; wait for the next retry pump (every 2.5 s, budget 5000 bytes / peer count).
+; Every unreliable update is stamped past those unsent messages, and the
+; receiver accepts a packet only when its stamp is the next one it expects, so
+; the link drops all position updates until the queue is empty -- which a busy
+; link never is. Players see 100% loss and climbing ping, mostly with three or
+; more players. On, a new reliable message is always sent once immediately; it
+; stays queued and is retransmitted exactly as before until acknowledged.
+; Sender-side only: the wire format and the receiver are unchanged, so it is
+; safe with stock peers. Independent of NetImprovements.
+; Accepted: boolean. Default: ON. Restart required after changing.
+; Kill switch: OPENSHIM_DISABLE_RELIABLE_SEND_BACKLOG_FIX (or BZR_ prefix).
+; Site: GOG 2.2.301 jne at 0x0075C730; a signature mismatch keeps stock.
+ReliableSendBacklogFix = 1
+
+; BZRNet P2P reliable retransmit timers, in milliseconds. A lost reliable
+; message blocks every later update on that link until it is resent, so on a
+; lossy connection each loss costs up to this long with no position updates.
+;   ReliableFirstRetryMs    = first resend after a send       (stock 1000)
+;   ReliableRetryIntervalMs = gap between later resend passes (stock 2500)
+; Each resend pass is capped at 5000 bytes / peer count; shorter intervals can
+; increase retry bandwidth and need controlled-loss testing. Sender-side only,
+; independent of ReliableSendBacklogFix. Accepted: decimal 50-10000; the stock
+; value, malformed text or anything out of range leaves the timer untouched.
+; A stock timer logs [SKIP] with payload=0 because no write is required.
+; Restart required after changing. Stock until qualified.
+ReliableFirstRetryMs = 1000
+ReliableRetryIntervalMs = 2500
 
 ; Granular netcode tuning -- the send-rate governor, bandwidth floor/ceiling,
 ; ramp rates and auto-kick envelope -- lives in net.ini under [OpenShimSocket],
