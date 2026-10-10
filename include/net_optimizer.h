@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 namespace BZROpenShim
 {
     // Installs optional Winsock IAT hooks and socket mitigations.
@@ -14,4 +16,10 @@ namespace BZROpenShim
     // uses this; in-match callers must not. False if no such socket was open
     // or Winsock hooks are not installed.
     bool RecycleBzrNetWebSocket();
+
+    // The host BZRNet matchmaking lookups are redirected to (net.ini
+    // [OpenShimSocket] MatchmakingRedirectAddress or the BZ_/OPENSHIM_
+    // environment override), as the socket layer actually applies it. False,
+    // with out empty, when no redirect is active.
+    bool GetMatchmakingRedirectTarget(char* out, size_t outSize);
 }

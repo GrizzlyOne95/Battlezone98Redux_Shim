@@ -142,6 +142,19 @@ namespace BZROpenShim
             BzrNetNicknameResult::StoredForNextConnection;
         bool g_ReplaceNicknameOnNextInput = false;
 
+        // Third nickname/flag context: the multiplayer pre-lobby shell screen.
+        // Its parent is the screen's centre panel, and prelobby_screen.cpp owns
+        // the screen around these widgets. Nothing here outlives that panel:
+        // ResetPreLobbyLobbyWidgets drops every pointer when the screen closes.
+        static void* g_PreLobbyUiParent = nullptr;
+        static void* g_NicknamePanelPreLobby = nullptr;
+        static void* g_NicknameEntryPreLobby = nullptr;
+        static void* g_NicknameEditButtonPreLobby = nullptr;
+        static void* g_FlagButtonPreLobby = nullptr;
+        static void* g_FlagButtonPreLobbyRight = nullptr;
+        static void* g_FlagLabelPreLobby = nullptr;
+        static void* g_FlagPreviewPreLobby = nullptr;
+
         constexpr char kFlagsConfigName[] = "flags.cfg";
 
         constexpr char kFlagsDirectoryName[] = "flags";
@@ -2539,7 +2552,9 @@ namespace BZROpenShim
                 IsWidgetLiveChildOfParent(g_HostUiParent, entry);
             const bool clientLive = g_ClientUiParent &&
                 IsWidgetLiveChildOfParent(g_ClientUiParent, entry);
-            if (!hostLive && !clientLive)
+            const bool preLobbyLive = g_PreLobbyUiParent &&
+                IsWidgetLiveChildOfParent(g_PreLobbyUiParent, entry);
+            if (!hostLive && !clientLive && !preLobbyLive)
                 return;
             const char* text = (result == BzrNetNicknameResult::NativeSendCompleted)
                 ? "Sent to server"
@@ -2585,11 +2600,9 @@ namespace BZROpenShim
         // value, then try the native live SetPlayerData path. The fixed buffer
         // at 0x009453E0 remains the Authorization `name` source for a later
         // reconnect in this same process.
-        static void SyncOneNicknameEntry(bool host, void* entry, const char* value)
+        static void SyncNicknameEntryText(void* entry, const char* value)
         {
             if (!entry || !value || !g_BzrFn_TextEntryClear || !g_BzrFn_TextEntryAppendText)
-                return;
-            if (!CachedLobbyWidgetIsLive(host, entry, "nickname_sync"))
                 return;
             __try
             {
@@ -2603,6 +2616,15 @@ namespace BZROpenShim
                 Log(L"[BZRNET] Nickname UI synchronization faulted code=0x%08X\n",
                     static_cast<uint32_t>(GetExceptionCode()));
             }
+        }
+
+        static void SyncOneNicknameEntry(bool host, void* entry, const char* value)
+        {
+            if (!entry || !value || !g_BzrFn_TextEntryClear || !g_BzrFn_TextEntryAppendText)
+                return;
+            if (!CachedLobbyWidgetIsLive(host, entry, "nickname_sync"))
+                return;
+            SyncNicknameEntryText(entry, value);
         }
 
         void SyncNicknameEntriesFromAuthoritativeValue(const char* value)
@@ -2732,10 +2754,18 @@ namespace BZROpenShim
             void* routeLabel,
             const char* source)
         {
+            // The pre-lobby only ends the edit and keeps the typed text: its
+            // Continue button is what applies the name (and recycles the
+            // connection), so Enter must not do either.
+            if (entry && entry == g_NicknameEntryPreLobby)
+            {
+                EndNicknameEdit(entry);
+                return;
+            }
             const bool host = entry == g_NicknameEntryHost;
             const BzrNetNicknameResult result = ApplyNicknameFromEntry(entry, source);
             EndNicknameEdit(entry);
-            if (CachedLobbyWidgetIsLive(host, routeLabel, "nickname_complete"))
+            if (routeLabel && CachedLobbyWidgetIsLive(host, routeLabel, "nickname_complete"))
                 UpdateNetRouteLabel(CachedLobbyOwner(host), routeLabel);
             if (!IsAcceptedBzrNetNicknameResult(result))
                 return;
@@ -3184,7 +3214,11 @@ namespace BZROpenShim
             }
         }
 
-        if (ShouldEnableMultiplayerFlagUi() &&
+        // With [Network] PreLobby on, the flag and nickname pickers live on the
+        // pre-lobby screen only; the net-route readout stays here.
+        const bool pickersMoved = IsPreLobbyEnabled();
+
+        if (!pickersMoved && ShouldEnableMultiplayerFlagUi() &&
             (!g_FlagButtonHost ||
              !IsWidgetLiveChildOfParent(parent, g_FlagButtonHost)))
         {
@@ -3203,7 +3237,28 @@ namespace BZROpenShim
                 reinterpret_cast<void*>(FlagButtonOnHoverHost));
         }
 
-        if (!g_NicknamePanelHost || !g_NicknameEntryHost || !g_NicknameEditButtonHost ||
+        if (pickersMoved)
+        {
+            // Same position as the full cluster would give the route row.
+            if (!g_NetRouteLabelHost || !IsWidgetLiveChildOfParent(parent, g_NetRouteLabelHost))
+            {
+                CreateNicknameAndRouteWidgets(
+                    parent,
+                    g_BanX - 208.0f,
+                    g_BanY - 360.0f,
+                    nullptr, nullptr, nullptr, nullptr,
+                    &g_NetRouteLabelHost,
+                    nullptr,
+                    nullptr,
+                    reinterpret_cast<void*>(NetRouteRefreshHost),
+                    reinterpret_cast<void*>(FlagButtonOnHoverHost));
+            }
+            else
+            {
+                NetRouteRefreshHost();
+            }
+        }
+        else if (!g_NicknamePanelHost || !g_NicknameEntryHost || !g_NicknameEditButtonHost ||
             !g_NicknameConfirmButtonHost ||
             !IsWidgetLiveChildOfParent(parent, g_NicknamePanelHost) ||
             !IsWidgetLiveChildOfParent(parent, g_NicknameEntryHost) ||
@@ -3302,7 +3357,11 @@ namespace BZROpenShim
             }
         }
 
-        if (ShouldEnableMultiplayerFlagUi() &&
+        // With [Network] PreLobby on, the flag and nickname pickers live on the
+        // pre-lobby screen only; the net-route readout stays here.
+        const bool pickersMoved = IsPreLobbyEnabled();
+
+        if (!pickersMoved && ShouldEnableMultiplayerFlagUi() &&
             (!g_FlagButtonClient ||
              !IsWidgetLiveChildOfParent(parent, g_FlagButtonClient)))
         {
@@ -3319,7 +3378,27 @@ namespace BZROpenShim
                 reinterpret_cast<void*>(FlagButtonOnHoverClient));
         }
 
-        if (!g_NicknamePanelClient || !g_NicknameEntryClient || !g_NicknameEditButtonClient ||
+        if (pickersMoved)
+        {
+            if (!g_NetRouteLabelClient || !IsWidgetLiveChildOfParent(parent, g_NetRouteLabelClient))
+            {
+                CreateNicknameAndRouteWidgets(
+                    parent,
+                    -189.0f,
+                    496.0f,
+                    nullptr, nullptr, nullptr, nullptr,
+                    &g_NetRouteLabelClient,
+                    nullptr,
+                    nullptr,
+                    reinterpret_cast<void*>(NetRouteRefreshClient),
+                    reinterpret_cast<void*>(FlagButtonOnHoverClient));
+            }
+            else
+            {
+                NetRouteRefreshClient();
+            }
+        }
+        else if (!g_NicknamePanelClient || !g_NicknameEntryClient || !g_NicknameEditButtonClient ||
             !g_NicknameConfirmButtonClient ||
             !IsWidgetLiveChildOfParent(parent, g_NicknamePanelClient) ||
             !IsWidgetLiveChildOfParent(parent, g_NicknameEntryClient) ||
@@ -3348,5 +3427,296 @@ namespace BZROpenShim
             MakeViewInputTransparent(g_NicknamePanelClient);
             NetRouteRefreshClient();
         }
+    }
+
+    // ---- Multiplayer pre-lobby ----------------------------------------------
+    //
+    // prelobby_screen.cpp builds the screen and calls in here for the widgets
+    // it borrows from the lobby. Every callback is bound to the pre-lobby
+    // globals, so nothing here can touch a lobby screen.
+
+    static bool PreLobbyWidgetLive(void* widget)
+    {
+        return g_PreLobbyUiParent && widget &&
+               IsWidgetLiveChildOfParent(g_PreLobbyUiParent, widget);
+    }
+
+    static void __cdecl FlagButtonOnClickPreLobby()
+    {
+        CycleSelectedFlag(1, "prelobby_button");
+        if (PreLobbyWidgetLive(g_FlagPreviewPreLobby))
+            UpdateFlagPreviewWidget(g_FlagPreviewPreLobby);
+    }
+
+    static void __cdecl FlagButtonOnClickPrevPreLobby()
+    {
+        CycleSelectedFlag(-1, "prelobby_button_prev");
+        if (PreLobbyWidgetLive(g_FlagPreviewPreLobby))
+            UpdateFlagPreviewWidget(g_FlagPreviewPreLobby);
+    }
+
+    static void __cdecl FlagButtonOnHoverPreLobby(void* /*param*/)
+    {
+        UpdateFlagSelectionUiLabel(g_FlagLabelPreLobby);
+    }
+
+    static void __cdecl NicknameEntryOnEnterPreLobby()
+    {
+        CompleteNicknameEdit(g_NicknameEntryPreLobby, nullptr, "prelobby");
+    }
+
+    static void __cdecl NicknameEditOnClickPreLobby()
+    {
+        BeginNicknameEdit(g_NicknameEntryPreLobby, g_PreLobbyUiParent, "prelobby_click");
+    }
+
+    void ResetPreLobbyLobbyWidgets()
+    {
+        if (g_NicknameEntryPreLobby)
+        {
+            if (g_ActiveNicknameEntry == g_NicknameEntryPreLobby)
+            {
+                g_ActiveNicknameEntry = nullptr;
+                g_ActiveNicknameParent = nullptr;
+                g_ReplaceNicknameOnNextInput = false;
+            }
+            if (g_NicknameEnterDispatchEntry == g_NicknameEntryPreLobby)
+                g_NicknameEnterDispatchEntry = nullptr;
+            if (g_PendingNicknameConfirmationEntry == g_NicknameEntryPreLobby)
+                g_PendingNicknameConfirmationEntry = nullptr;
+        }
+        g_PreLobbyUiParent = nullptr;
+        g_NicknamePanelPreLobby = nullptr;
+        g_NicknameEntryPreLobby = nullptr;
+        g_NicknameEditButtonPreLobby = nullptr;
+        g_FlagButtonPreLobby = nullptr;
+        g_FlagButtonPreLobbyRight = nullptr;
+        g_FlagLabelPreLobby = nullptr;
+        g_FlagPreviewPreLobby = nullptr;
+    }
+
+    bool CreatePreLobbyNicknameAndFlagWidgets(
+        void* parent, float nicknameX, float nicknameY, float flagX, float flagY)
+    {
+        if (!parent || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild ||
+            !g_BzrFn_SetOnClick || !g_BzrFn_SetOnHover)
+            return false;
+
+        if (g_PreLobbyUiParent != parent)
+        {
+            ResetPreLobbyLobbyWidgets();
+            g_PreLobbyUiParent = parent;
+        }
+
+        // Gated exactly as the lobby gates them: the flag pair by
+        // [Display] MultiplayerFlags, the name entry by [Network]
+        // LobbyReadouts (inside CreateNicknameAndRouteWidgets).
+        if (ShouldEnableMultiplayerFlagUi() && !PreLobbyWidgetLive(g_FlagButtonPreLobby))
+        {
+            CreateFlagButtonCommon(
+                parent,
+                flagX,
+                flagY,
+                &g_FlagButtonPreLobby,
+                &g_FlagButtonPreLobbyRight,
+                &g_FlagLabelPreLobby,
+                &g_FlagPreviewPreLobby,
+                reinterpret_cast<void*>(FlagButtonOnClickPrevPreLobby),
+                reinterpret_cast<void*>(FlagButtonOnClickPreLobby),
+                reinterpret_cast<void*>(FlagButtonOnHoverPreLobby));
+        }
+
+        // The panel is decoration only; a failed panel texture must not make
+        // every setup pass add another entry.
+        if (!PreLobbyWidgetLive(g_NicknameEntryPreLobby) ||
+            !PreLobbyWidgetLive(g_NicknameEditButtonPreLobby))
+        {
+            // No OK button and no route readout: Continue applies the name and
+            // the page has its own status line.
+            CreateNicknameAndRouteWidgets(
+                parent,
+                nicknameX,
+                nicknameY,
+                &g_NicknamePanelPreLobby,
+                &g_NicknameEntryPreLobby,
+                &g_NicknameEditButtonPreLobby,
+                nullptr,
+                nullptr,
+                reinterpret_cast<void*>(NicknameEntryOnEnterPreLobby),
+                reinterpret_cast<void*>(NicknameEditOnClickPreLobby),
+                nullptr,
+                reinterpret_cast<void*>(FlagButtonOnHoverPreLobby));
+        }
+
+        return g_NicknameEntryPreLobby != nullptr || g_FlagButtonPreLobby != nullptr;
+    }
+
+    size_t GetPreLobbyLobbyWidgets(void** out, size_t capacity)
+    {
+        void* const widgets[] =
+        {
+            g_NicknamePanelPreLobby,
+            g_NicknameEntryPreLobby,
+            g_NicknameEditButtonPreLobby,
+            g_FlagButtonPreLobby,
+            g_FlagButtonPreLobbyRight,
+            g_FlagPreviewPreLobby,
+        };
+        size_t count = 0;
+        for (void* widget : widgets)
+        {
+            if (widget && out && count < capacity)
+                out[count++] = widget;
+        }
+        return count;
+    }
+
+    bool IsPreLobbyLobbyWidget(void* view)
+    {
+        if (!view)
+            return false;
+        return view == g_NicknamePanelPreLobby || view == g_NicknameEntryPreLobby ||
+               view == g_NicknameEditButtonPreLobby || view == g_FlagButtonPreLobby ||
+               view == g_FlagButtonPreLobbyRight || view == g_FlagPreviewPreLobby;
+    }
+
+    // Fills the entry with the persisted nickname and the arrows' captions
+    // when the screen is built. Called with visible=false it blanks them.
+    void RefreshPreLobbyLobbyWidgets(bool visible)
+    {
+        if (!visible)
+            EndNicknameEdit(g_NicknameEntryPreLobby);
+
+        if (PreLobbyWidgetLive(g_NicknameEntryPreLobby))
+        {
+            if (visible)
+            {
+                // SetActive restores the input byte the panel had cleared, which
+                // would put the click-swallowing rectangle back over the entry.
+                MakeViewInputTransparent(g_NicknamePanelPreLobby);
+
+                char current[128] = {};
+                if (ReadBzrNetNickname(current, sizeof(current)) && current[0] != '\0')
+                {
+                    SyncNicknameEntryText(g_NicknameEntryPreLobby, current);
+                }
+                else if (g_BzrFn_TextEntryClear && g_BzrFn_SetTooltip)
+                {
+                    __try
+                    {
+                        g_BzrFn_TextEntryClear(g_NicknameEntryPreLobby);
+                        g_BzrFn_SetTooltip(g_NicknameEntryPreLobby, kNicknamePlaceholder);
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        Log(L"[PRELOBBY] nickname placeholder faulted code=0x%08X\n",
+                            static_cast<uint32_t>(GetExceptionCode()));
+                    }
+                }
+            }
+            else if (g_BzrFn_SetTooltip)
+            {
+                __try
+                {
+                    g_BzrFn_SetTooltip(g_NicknameEntryPreLobby, "");
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    Log(L"[PRELOBBY] nickname blanking faulted code=0x%08X\n",
+                        static_cast<uint32_t>(GetExceptionCode()));
+                }
+            }
+        }
+
+        if (g_BzrFn_SetButtonLabel)
+        {
+            __try
+            {
+                if (PreLobbyWidgetLive(g_FlagButtonPreLobby))
+                    g_BzrFn_SetButtonLabel(g_FlagButtonPreLobby, visible ? "<" : "");
+                if (PreLobbyWidgetLive(g_FlagButtonPreLobbyRight))
+                    g_BzrFn_SetButtonLabel(g_FlagButtonPreLobbyRight, visible ? ">" : "");
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[PRELOBBY] flag arrow captions faulted code=0x%08X\n",
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
+        }
+
+        if (visible && PreLobbyWidgetLive(g_FlagPreviewPreLobby))
+            UpdateFlagPreviewWidget(g_FlagPreviewPreLobby);
+    }
+
+    // True when the entry holds a usable name that is not already the
+    // persisted one: Continue applies exactly in that case.
+    bool PreLobbyGetPendingNickname(char* out, size_t outSize)
+    {
+        if (!out || outSize == 0)
+            return false;
+        out[0] = '\0';
+        if (!PreLobbyWidgetLive(g_NicknameEntryPreLobby))
+            return false;
+
+        char text[192] = {};
+        if (!ReadEngineStdString(
+                static_cast<uint8_t*>(g_NicknameEntryPreLobby) + kUiTextEntryTextOffset,
+                text, sizeof(text)))
+        {
+            return false;
+        }
+
+        const std::string trimmed = TrimAsciiCopy(text);
+        if (trimmed.empty() || trimmed == kNicknamePlaceholder)
+            return false;
+
+        char persisted[128] = {};
+        if (ReadBzrNetNickname(persisted, sizeof(persisted)) && trimmed == persisted)
+            return false;
+
+        std::snprintf(out, outSize, "%s", trimmed.c_str());
+        return true;
+    }
+
+    // False when the name was not stored (invalid or not persisted).
+    bool PreLobbyApplyNickname(const char* nickname, BzrNetNicknameResult& result)
+    {
+        EndNicknameEdit(g_NicknameEntryPreLobby);
+        result = ApplyBzrNetNicknameForPreLobby(nickname);
+        if (!IsAcceptedBzrNetNicknameResult(result))
+            return false;
+        if (PreLobbyWidgetLive(g_NicknameEntryPreLobby))
+            SyncNicknameEntryText(g_NicknameEntryPreLobby, nickname);
+        return true;
+    }
+
+    void PreLobbyEndNicknameEdit()
+    {
+        EndNicknameEdit(g_NicknameEntryPreLobby);
+    }
+
+    // The pre-lobby screen's char slot hands every typed character here first.
+    // Consumed only while the pre-lobby nickname edit is the active one; the
+    // existing AppendChar detour then does the usual replace-on-first-key and
+    // Enter routing.
+    bool PreLobbyForwardChar(uint8_t character)
+    {
+        void* const entry = g_NicknameEntryPreLobby;
+        if (!entry || g_ActiveNicknameEntry != entry ||
+            g_ActiveNicknameParent != g_PreLobbyUiParent ||
+            !g_BzrFn_TextEntryAppendChar || !PreLobbyWidgetLive(entry))
+        {
+            return false;
+        }
+        __try
+        {
+            g_BzrFn_TextEntryAppendChar(entry, character);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            Log(L"[PRELOBBY] nickname key routing faulted code=0x%08X\n",
+                static_cast<uint32_t>(GetExceptionCode()));
+        }
+        return true;
     }
 }

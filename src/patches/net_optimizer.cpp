@@ -4995,6 +4995,18 @@ namespace
         }
     }
 
+    bool GetMatchmakingRedirectTarget(char* out, size_t outSize)
+    {
+        if (!out || outSize == 0)
+            return false;
+        out[0] = '\0';
+        // Without the resolver hook the configured value redirects nothing.
+        if (!g_RealGetAddrInfoA || g_Config.matchmakingRedirectAddress.empty())
+            return false;
+        std::snprintf(out, outSize, "%s", g_Config.matchmakingRedirectAddress.c_str());
+        return true;
+    }
+
     bool RecycleBzrNetWebSocket()
     {
         if (!g_RealCloseSocket || !g_RealGetPeerName)
