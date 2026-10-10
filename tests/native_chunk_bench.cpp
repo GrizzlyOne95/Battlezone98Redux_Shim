@@ -1,8 +1,10 @@
 // Host benchmark for the native chunk / skinned gib generators. NOT a ctest
 // test. Usage:
 //   native_chunk_bench [--csv out.csv] [--tmp scratch_dir] [--runs N] [--gibs-only]
-//                      [--hash out.txt] [--only substr] dir [dir...]
+//                      [--hash out.txt] [--only substr] [--dump-obj outdir] dir [dir...]
 // --only keeps just the meshes whose path contains the (case-insensitive) text.
+// --dump-obj writes each selected model's gib pieces as OBJ+MTL (vertex colours as
+// `v x y z r g b`) plus the generated flesh texture and material.
 // ExtractGibs phase totals (summed over all runs, per call) are printed at the end.
 // --gibs-only skips the chunk Extract/cache timings; --hash writes one line per
 // gib piece ("model piece bytes fnv1a64"), sorted by model, so two builds can
@@ -15,8 +17,13 @@
 // the piece .mesh bytes are produced inside Extract), ExtractGibs, the gib
 // SerializeCache, and ReadCache/ReadGibCache of a previously written cache.
 // Inputs are only read; cache folders are written under --tmp.
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS // fopen in the OBJ preview writer
+#endif
+#include "gib_flesh_texture.h"
 #include "native_chunk_cache.h"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -26,6 +33,7 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <stdexcept>
 
 using namespace BZROpenShim::NativeChunks;
 namespace BZROpenShim::NativeChunks
@@ -126,6 +134,196 @@ template <class F> bool minTime(int runs, double &best, F fn)
     }
     return ok;
 }
+
+// ---- OBJ preview (--dump-obj) ---------------------------------------------
+// Reads a generated piece back (Ogre v1.8 binary, our own writer's layout) and
+// writes it as OBJ with `v x y z r g b` vertex colours, for looking at in
+// Blender. Pieces sit in their own bone frames, laid out in a row.
+struct DumpSub
+{
+    std::string material;
+    std::vector<uint32_t> indices;
+    std::vector<std::array<float, 3>> position, normal;
+    std::vector<std::array<float, 2>> uv;
+    std::vector<std::array<float, 3>> colour;
+};
+struct Cursor
+{
+    const std::vector<uint8_t> &b;
+    size_t p;
+    template <class T> T get()
+    {
+        T v;
+        if (p + sizeof(T) > b.size())
+            throw std::runtime_error("truncated piece");
+        std::memcpy(&v, &b[p], sizeof(T));
+        p += sizeof(T);
+        return v;
+    }
+};
+std::vector<DumpSub> parsePiece(const std::vector<uint8_t> &mesh)
+{
+    Cursor c{mesh, 2};
+    while (c.p < mesh.size() && mesh[c.p++] != '\n')
+    {
+    }
+    c.get<uint16_t>(); // 0x3000
+    c.get<uint32_t>();
+    c.get<uint8_t>();
+    std::vector<DumpSub> subs;
+    while (c.p + 6 <= mesh.size())
+    {
+        const size_t start = c.p;
+        const auto id = c.get<uint16_t>();
+        const auto size = c.get<uint32_t>();
+        if (id != 0x4000)
+        {
+            c.p = start + size;
+            continue;
+        }
+        DumpSub sub;
+        while (c.p < mesh.size() && mesh[c.p] != '\n')
+            sub.material.push_back(static_cast<char>(mesh[c.p++]));
+        ++c.p;
+        c.get<uint8_t>();
+        const auto count = c.get<uint32_t>();
+        const bool wide = c.get<uint8_t>() != 0;
+        for (uint32_t i = 0; i < count; ++i)
+            sub.indices.push_back(wide ? c.get<uint32_t>() : c.get<uint16_t>());
+        c.get<uint16_t>(); // 0x5000
+        c.get<uint32_t>();
+        const auto vertices = c.get<uint32_t>();
+        struct El
+        {
+            uint16_t source, type, semantic, offset, index;
+        };
+        std::vector<El> elements;
+        c.get<uint16_t>(); // 0x5100
+        const auto declSize = c.get<uint32_t>();
+        for (uint32_t used = 6; used < declSize; used += 16)
+        {
+            c.get<uint16_t>();
+            c.get<uint32_t>();
+            elements.push_back({c.get<uint16_t>(), c.get<uint16_t>(), c.get<uint16_t>(), c.get<uint16_t>(),
+                                c.get<uint16_t>()});
+        }
+        c.get<uint16_t>(); // 0x5200
+        c.get<uint32_t>();
+        c.get<uint16_t>(); // source
+        const auto stride = c.get<uint16_t>();
+        c.get<uint16_t>(); // 0x5210
+        c.get<uint32_t>();
+        const size_t data = c.p;
+        c.p += static_cast<size_t>(vertices) * stride;
+        auto f3 = [&](size_t at) {
+            std::array<float, 3> v;
+            std::memcpy(v.data(), &mesh[at], 12);
+            return v;
+        };
+        for (uint32_t v = 0; v < vertices; ++v)
+        {
+            const size_t row = data + static_cast<size_t>(v) * stride;
+            std::array<float, 3> colour{0.7f, 0.7f, 0.7f};
+            std::array<float, 3> position{}, normal{0, 1, 0};
+            std::array<float, 2> uv{};
+            for (const auto &e : elements)
+            {
+                if (e.semantic == 1)
+                    position = f3(row + e.offset);
+                else if (e.semantic == 4)
+                    normal = f3(row + e.offset);
+                else if (e.semantic == 7)
+                    std::memcpy(uv.data(), &mesh[row + e.offset], 8);
+                else if (e.semantic == 5 && sub.material == kGibFleshMaterialName)
+                {
+                    uint32_t packed;
+                    std::memcpy(&packed, &mesh[row + e.offset], 4);
+                    // VET_COLOUR_ABGR (11) is 0xAABBGGRR; ARGB (10) and the
+                    // generic colour (4) are 0xAARRGGBB.
+                    const unsigned r = e.type == 11 ? packed & 255 : (packed >> 16) & 255;
+                    const unsigned b = e.type == 11 ? (packed >> 16) & 255 : packed & 255;
+                    colour = {static_cast<float>(r) / 255.0f, static_cast<float>((packed >> 8) & 255) / 255.0f,
+                              static_cast<float>(b) / 255.0f};
+                }
+            }
+            sub.position.push_back(position);
+            sub.normal.push_back(normal);
+            sub.uv.push_back(uv);
+            sub.colour.push_back(colour);
+        }
+        subs.push_back(std::move(sub));
+    }
+    return subs;
+}
+void dumpObj(const fs::path &dir, const std::string &model, const std::vector<GibPiece> &gibs)
+{
+    fs::create_directories(dir);
+    std::FILE *obj = std::fopen((dir / (model + ".obj")).string().c_str(), "wb");
+    std::FILE *mtl = std::fopen((dir / (model + ".mtl")).string().c_str(), "wb");
+    if (!obj || !mtl)
+    {
+        if (obj)
+            std::fclose(obj);
+        if (mtl)
+            std::fclose(mtl);
+        return;
+    }
+    std::fprintf(obj, "# %s gib pieces, laid out in a row (each in its own bone frame)\nmtllib %s.mtl\n",
+                 model.c_str(), model.c_str());
+    std::map<std::string, bool> written;
+    size_t base = 1;
+    float cursor = 0;
+    for (const auto &gib : gibs)
+    {
+        std::vector<DumpSub> subs;
+        try
+        {
+            subs = parsePiece(gib.piece.mesh);
+        }
+        catch (const std::exception &e)
+        {
+            std::fprintf(stderr, "dump %s: %s\n", gib.piece.name.c_str(), e.what());
+            continue;
+        }
+        cursor += gib.radius;
+        std::fprintf(obj, "o %s\n", gib.piece.name.c_str());
+        for (const auto &sub : subs)
+        {
+            if (!written[sub.material])
+            {
+                written[sub.material] = true;
+                const bool flesh = sub.material == kGibFleshMaterialName;
+                std::fprintf(mtl, "newmtl %s\nKd %s\nKs 0.35 0.25 0.25\nNs 48\n%s\n", sub.material.c_str(),
+                             flesh ? "1 1 1" : "0.55 0.5 0.45", flesh ? "map_Kd openshim_gib_flesh.tga" : "");
+            }
+            for (size_t v = 0; v < sub.position.size(); ++v)
+                std::fprintf(obj, "v %.6f %.6f %.6f %.4f %.4f %.4f\n",
+                             static_cast<double>(sub.position[v][0] + cursor), static_cast<double>(sub.position[v][1]),
+                             static_cast<double>(sub.position[v][2]), static_cast<double>(sub.colour[v][0]),
+                             static_cast<double>(sub.colour[v][1]), static_cast<double>(sub.colour[v][2]));
+            for (const auto &n : sub.normal)
+                std::fprintf(obj, "vn %.5f %.5f %.5f\n", static_cast<double>(n[0]), static_cast<double>(n[1]),
+                             static_cast<double>(n[2]));
+            for (const auto &t : sub.uv)
+                std::fprintf(obj, "vt %.5f %.5f\n", static_cast<double>(t[0]), static_cast<double>(1.0f - t[1]));
+            std::fprintf(obj, "usemtl %s\n", sub.material.c_str());
+            for (size_t i = 0; i + 2 < sub.indices.size(); i += 3)
+            {
+                const size_t a = base + sub.indices[i], b = base + sub.indices[i + 1], c = base + sub.indices[i + 2];
+                std::fprintf(obj, "f %zu/%zu/%zu %zu/%zu/%zu %zu/%zu/%zu\n", a, a, a, b, b, b, c, c, c);
+            }
+            base += sub.position.size();
+        }
+        cursor += gib.radius * 0.25f;
+    }
+    std::fclose(obj);
+    std::fclose(mtl);
+    // The generated texture and material script, next to the OBJ.
+    const auto tga = GibFleshTextureTga();
+    std::ofstream(dir / kGibFleshTextureFile, std::ios::binary)
+        .write(reinterpret_cast<const char *>(tga.data()), static_cast<std::streamsize>(tga.size()));
+    std::ofstream(dir / kGibFleshMaterialFile, std::ios::binary) << GibFleshMaterialScript();
+}
 } // namespace
 
 int main(int argc, char **argv)
@@ -135,6 +333,7 @@ int main(int argc, char **argv)
     bool gibsOnly = false;
     fs::path hashPath;
     std::string only;
+    fs::path dumpDir;
     std::vector<std::string> hashLines;
     std::vector<fs::path> roots;
     for (int i = 1; i < argc; ++i)
@@ -146,6 +345,8 @@ int main(int argc, char **argv)
             tmp = argv[++i];
         else if (a == "--gibs-only")
             gibsOnly = true;
+        else if (a == "--dump-obj" && i + 1 < argc)
+            dumpDir = argv[++i];
         else if (a == "--only" && i + 1 < argc)
             only = lower(argv[++i]);
         else if (a == "--hash" && i + 1 < argc)
@@ -270,6 +471,8 @@ int main(int argc, char **argv)
             row.hasGibs = true;
             row.gibs = t;
             row.gibPieces = static_cast<unsigned>(gibs.size());
+            if (!dumpDir.empty())
+                dumpObj(dumpDir, meshPath.stem().string(), gibs);
             std::vector<Piece> gp;
             for (const auto &g : gibs)
             {

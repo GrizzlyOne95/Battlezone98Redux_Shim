@@ -1,4 +1,5 @@
 #include "native_chunk_mesh.h"
+#include "gib_flesh_texture.h"
 #include "native_chunk_cache.h"
 #include "test_check.h"
 #include <algorithm>
@@ -11,6 +12,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <map>
 
 using Bytes = std::vector<uint8_t>;
 using OpenShimTest::Require;
@@ -252,7 +254,7 @@ Bytes gibFixtureMesh(const std::vector<GibTestSub> &subs)
 }
 // root (0) at the origin; head (1) one unit up, turned 90 degrees about Y;
 // finger (2) half a unit above the head.
-Bytes gibFixtureSkeleton()
+Bytes gibFixtureSkeleton(const char *rootName = "root", const char *headName = "head")
 {
     constexpr float h = 0.7071067811865475f;
     struct B
@@ -261,7 +263,7 @@ Bytes gibFixtureSkeleton()
         std::array<float, 3> position;
         std::array<float, 4> xyzw;
     };
-    const B bones[] = {{"root", {0, 0, 0}, {0, 0, 0, 1}}, {"head", {0, 1, 0}, {0, h, 0, h}},
+    const B bones[] = {{rootName, {0, 0, 0}, {0, 0, 0, 1}}, {headName, {0, 1, 0}, {0, h, 0, h}},
                        {"finger", {0, 0.5f, 0}, {0, 0, 0, 1}}};
     Bytes out;
     put(out, uint16_t{0x1000});
@@ -318,27 +320,155 @@ std::vector<GibTestSub> gibFixtureSubs()
     GibTestSub rifle{"ISDF_Rifle_Mat", {{0.6f, 1.5f, 0}, {0.6f, 1.5f, 0.8f}, {0.7f, 1.6f, 0}}, {0, 1, 2}, 2};
     return {gibBand(0, 1, true, 0), gibBand(1, 2, false, 1), finger, rifle};
 }
-// Normals of the cap submesh (the only 32-byte stream) in a gib piece.
-std::vector<std::array<float, 3>> capNormals(const Bytes &mesh)
+// The flesh-material cap submesh of a gib piece, read back from the bytes.
+struct CapData
 {
-    std::vector<std::array<float, 3>> out;
-    for (size_t p = 2; p + 6 <= mesh.size(); ++p)
+    bool found = false;
+    uint32_t stride = 0;
+    std::vector<std::array<uint16_t, 5>> elements; // source, type, semantic, offset, index
+    std::vector<std::array<float, 3>> positions, normals;
+    std::vector<uint32_t> colours;
+    std::vector<uint32_t> indices;
+};
+CapData parseCap(const Bytes &mesh)
+{
+    CapData cap;
+    size_t p = 2;
+    while (p < mesh.size() && mesh[p++] != '\n')
     {
-        uint16_t id, stride;
-        uint32_t size;
-        std::memcpy(&id, mesh.data() + p, 2);
-        std::memcpy(&size, mesh.data() + p + 2, 4);
-        std::memcpy(&stride, mesh.data() + p - 2, 2);
-        if (id != 0x5210 || stride != 32 || size < 6 || p + size > mesh.size() || (size - 6) % 32)
-            continue;
-        for (size_t v = p + 6; v < p + size; v += 32)
-        {
-            std::array<float, 3> n;
-            std::memcpy(n.data(), mesh.data() + v + 12, 12);
-            out.push_back(n);
-        }
     }
-    return out;
+    const auto u16 = [&](size_t at) {
+        uint16_t v;
+        std::memcpy(&v, mesh.data() + at, 2);
+        return v;
+    };
+    const auto u32 = [&](size_t at) {
+        uint32_t v;
+        std::memcpy(&v, mesh.data() + at, 4);
+        return v;
+    };
+    p += 6 + 1; // 0x3000 header and its leading byte
+    while (p + 6 <= mesh.size())
+    {
+        const uint16_t id = u16(p);
+        const uint32_t size = u32(p + 2);
+        if (id != 0x4000)
+        {
+            p += size;
+            continue;
+        }
+        size_t q = p + 6;
+        size_t nameEnd = q;
+        while (nameEnd < mesh.size() && mesh[nameEnd] != '\n')
+            ++nameEnd;
+        const std::string material(mesh.begin() + static_cast<std::ptrdiff_t>(q),
+                                   mesh.begin() + static_cast<std::ptrdiff_t>(nameEnd));
+        q = nameEnd + 1 + 1;
+        const uint32_t count = u32(q);
+        const bool wide = mesh[q + 4] != 0;
+        q += 5;
+        std::vector<uint32_t> indices;
+        for (uint32_t i = 0; i < count; ++i, q += wide ? 4 : 2)
+            indices.push_back(wide ? u32(q) : u16(q));
+        if (material == "openshim_gib_flesh")
+        {
+            cap.found = true;
+            cap.indices = indices;
+            q += 6; // 0x5000 header
+            const uint32_t vertices = u32(q);
+            q += 4;
+            const uint32_t declSize = u32(q + 2);
+            for (uint32_t used = 6, e = q + 6; used < declSize; used += 16, e += 16)
+                cap.elements.push_back({u16(e + 6), u16(e + 8), u16(e + 10), u16(e + 12), u16(e + 14)});
+            q += declSize;
+            cap.stride = u16(q + 8);
+            const size_t data = q + 6 + 4 + 6;
+            for (uint32_t v = 0; v < vertices; ++v)
+            {
+                const size_t row = data + static_cast<size_t>(v) * cap.stride;
+                std::array<float, 3> position, normal;
+                std::memcpy(position.data(), mesh.data() + row, 12);
+                std::memcpy(normal.data(), mesh.data() + row + 12, 12);
+                cap.positions.push_back(position);
+                cap.normals.push_back(normal);
+                cap.colours.push_back(u32(row + 24));
+            }
+            return cap;
+        }
+        p += size;
+    }
+    return cap;
+}
+float dot(const std::array<float, 3> &a, const std::array<float, 3> &b)
+{
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+std::array<float, 3> cross(const std::array<float, 3> &a, const std::array<float, 3> &b)
+{
+    return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+}
+std::array<float, 3> minus(const std::array<float, 3> &a, const std::array<float, 3> &b)
+{
+    return {a[0] - b[0], a[1] - b[1], a[2] - b[2]};
+}
+bool allFinite(const CapData &cap)
+{
+    for (size_t v = 0; v < cap.positions.size(); ++v)
+        for (int i = 0; i < 3; ++i)
+            if (!std::isfinite(cap.positions[v][i]) || !std::isfinite(cap.normals[v][i]))
+                return false;
+    return true;
+}
+// Every directed edge once; interior edges shared by exactly two triangles in
+// opposite directions; the remaining boundary is exactly the rim ring
+// (vertices 0..rim-1, in order), so the cap is a closed, consistently wound
+// disc glued to the cut.
+bool closedWinding(const CapData &cap, uint32_t rim)
+{
+    std::map<std::pair<uint32_t, uint32_t>, int> directed;
+    for (size_t t = 0; t + 2 < cap.indices.size(); t += 3)
+        for (size_t e = 0; e < 3; ++e)
+            ++directed[{cap.indices[t + e], cap.indices[t + (e + 1) % 3]}];
+    size_t boundary = 0;
+    for (const auto &[edge, count] : directed)
+    {
+        if (count != 1)
+            return false;
+        if (directed.count({edge.second, edge.first}))
+            continue;
+        ++boundary;
+        if (edge.first >= rim || edge.second >= rim)
+            return false;
+    }
+    return boundary == rim;
+}
+// Mean over vertices of how well the geometric face normal agrees with the
+// vertex normals (1 = every face winds with its normals).
+bool windingMatchesNormals(const CapData &cap)
+{
+    for (size_t t = 0; t + 2 < cap.indices.size(); t += 3)
+    {
+        const auto &a = cap.positions[cap.indices[t]], &b = cap.positions[cap.indices[t + 1]],
+                   &c = cap.positions[cap.indices[t + 2]];
+        const auto face = cross(minus(b, a), minus(c, a));
+        std::array<float, 3> n{0, 0, 0};
+        for (size_t k = 0; k < 3; ++k)
+            for (int i = 0; i < 3; ++i)
+                n[i] += cap.normals[cap.indices[t + k]][i];
+        if (dot(face, n) < 0)
+            return false;
+    }
+    return true;
+}
+float channel(uint32_t argb, int shift)
+{
+    return static_cast<float>((argb >> shift) & 255) / 255.0f;
+}
+bool hasIvory(const CapData &cap)
+{
+    return std::any_of(cap.colours.begin(), cap.colours.end(), [](uint32_t c) {
+        return channel(c, 16) > 0.8f && channel(c, 8) > 0.75f && channel(c, 0) > 0.6f;
+    });
 }
 void gibTests()
 {
@@ -356,9 +486,11 @@ void gibTests()
             "body gibs record their driving bone handle and name");
     Require(weapon.weapon && weapon.bone == 2 && weapon.capTriangles == 0 && weapon.piece.triangles == 1,
             "weapon submesh is one uncapped piece driven by its own dominant bone, not rolled up");
-    Require(head.capTriangles == 4 && root.capTriangles == 4,
-            "the welded cut between the two submeshes closes one fan cap per side");
-    Require(head.piece.triangles == 10 + 1 + 4 && root.piece.triangles == 10 + 4,
+    // A square loop on a non-limb cut: rim ring (4), inset ring (4) and a
+    // bulged centre (1) -- 8 strip triangles plus 4 inner fan triangles.
+    Require(head.capTriangles == 12 && root.capTriangles == 12,
+            "the welded cut between the two submeshes closes one torn-flesh cap per side");
+    Require(head.piece.triangles == 10 + 1 + 12 && root.piece.triangles == 10 + 12,
             "every skinned face lands in exactly one gib, plus its caps");
     {
         const std::string bytes(head.piece.mesh.begin(), head.piece.mesh.end());
@@ -371,12 +503,14 @@ void gibTests()
     }
     // Caps face away from their own piece: up out of the root, down out of
     // the head. The head's bind yaw about Y leaves the vertical axis alone.
-    const auto rootNormals = capNormals(root.piece.mesh), headNormals = capNormals(head.piece.mesh);
-    Require(rootNormals.size() == 12 && headNormals.size() == 12, "cap vertices are emitted per triangle");
-    Require(std::all_of(rootNormals.begin(), rootNormals.end(),
-                        [](const std::array<float, 3> &n) { return near(n, {0, 1, 0}); }) &&
-                std::all_of(headNormals.begin(), headNormals.end(),
-                            [](const std::array<float, 3> &n) { return near(n, {0, -1, 0}); }),
+    const auto rootCap = parseCap(root.piece.mesh), headCap = parseCap(head.piece.mesh);
+    Require(rootCap.found && headCap.found && rootCap.positions.size() == 9 && headCap.positions.size() == 9,
+            "cap vertices are shared: rim 4, inset ring 4, centre 1");
+    // Smoothed normals tilt with the bulge but still face away from the piece.
+    Require(std::all_of(rootCap.normals.begin(), rootCap.normals.end(),
+                        [](const std::array<float, 3> &n) { return n[1] > 0.7f; }) &&
+                std::all_of(headCap.normals.begin(), headCap.normals.end(),
+                            [](const std::array<float, 3> &n) { return n[1] < -0.7f; }),
             "cap normals point away from the piece");
     // Head bone sits at (0,1,0); its geometry spans y 1..2.2, so the
     // bone-frame centre is y = 0.6. The root spans 0..1.
@@ -389,6 +523,86 @@ void gibTests()
     for (size_t i = 0; i < gibs.size(); ++i)
         Require(again[i].piece.mesh == gibs[i].piece.mesh && again[i].piece.name == gibs[i].piece.name,
                 "gib output is byte-for-byte deterministic");
+
+    // ---- Torn-flesh cap structure ------------------------------------------
+    {
+        Require(rootCap.stride == 36 && rootCap.elements.size() == 4 && rootCap.elements[2][1] == 10 &&
+                    rootCap.elements[2][2] == 5 && rootCap.elements[2][3] == 24,
+                "cap declaration carries an ARGB vertex colour at offset 24 (stride 36)");
+        Require(allFinite(rootCap) && allFinite(headCap), "no NaN or infinite cap positions or normals");
+        Require(std::all_of(rootCap.colours.begin(), rootCap.colours.end(),
+                            [](uint32_t c) { return (c >> 24) == 0xFF; }),
+                "cap vertex colours are opaque");
+        Require(closedWinding(rootCap, 4) && closedWinding(headCap, 4),
+                "cap rings form a closed, consistently wound disc whose only boundary is the rim");
+        Require(windingMatchesNormals(rootCap) && windingMatchesNormals(headCap),
+                "cap faces wind with their outward normals");
+        // The rim (first ring) is the dark clotted colour, the centre brighter.
+        const uint32_t rim = rootCap.colours[0], centreColour = rootCap.colours[8];
+        Require(channel(rim, 16) < 0.4f && channel(centreColour, 16) > 0.7f && channel(centreColour, 16) > channel(rim, 16),
+                "rim is dark maroon, the centre brighter red");
+        Require(!hasIvory(rootCap) && !hasIvory(headCap), "a non-limb cut has no bone ring");
+        // The rim sits exactly on the cut; the centre bulges outward of it.
+        Require(rootCap.positions[8][1] - rootCap.positions[0][1] > 0.02f, "the centre bulges outward along the cap normal");
+        // Ragged offsets hash the position: the same cut gives the same cap.
+        std::vector<GibPiece> repeat;
+        Require(ExtractGibs(mesh, skeleton, GibOptions{}, repeat, error) &&
+                    parseCap(repeat[1].piece.mesh).colours == rootCap.colours &&
+                    parseCap(repeat[1].piece.mesh).positions == rootCap.positions,
+                "ragged offsets and colours are deterministic");
+
+        // A limb cut gets muscle and bone rings: 4 rings + centre, 3 strips
+        // of 8 triangles and a fan of 4.
+        const auto limbSkeleton = gibFixtureSkeleton("bip01_l_thigh", "bip01_neck");
+        std::vector<GibPiece> limb;
+        Require(ExtractGibs(mesh, limbSkeleton, GibOptions{}, limb, error) && limb.size() == 3,
+                ("limb extraction: " + error).c_str());
+        // Sorted by bone name: bip01_l_thigh (the root), then bip01_neck (the head).
+        const auto thighCap = parseCap(limb[0].piece.mesh), neckCap = parseCap(limb[1].piece.mesh);
+        Require(limb[0].boneName == "bip01_l_thigh" && limb[0].capTriangles == 28 && thighCap.positions.size() == 17 &&
+                    limb[1].boneName == "bip01_neck" && limb[1].capTriangles == 28 && neckCap.positions.size() == 17,
+                "limb and neck cuts add muscle and bone rings");
+        Require(closedWinding(thighCap, 4) && closedWinding(neckCap, 4) && windingMatchesNormals(thighCap) &&
+                    allFinite(thighCap),
+                "limb caps are closed and consistently wound");
+        Require(hasIvory(thighCap) && hasIvory(neckCap), "limb caps have a pale bone ring");
+        GibOptions noLimb;
+        noLimb.limbPattern.clear();
+        std::vector<GibPiece> plain;
+        Require(ExtractGibs(mesh, limbSkeleton, noLimb, plain, error) && plain[0].capTriangles == 12 &&
+                    !hasIvory(parseCap(plain[0].piece.mesh)),
+                "the limb pattern is an option; empty disables the bone ring");
+
+        // Plain fan: rings off, and loops that are degenerate stay a fan.
+        GibOptions fan;
+        fan.capRings = false;
+        std::vector<GibPiece> flat;
+        Require(ExtractGibs(mesh, skeleton, fan, flat, error) && flat[1].capTriangles == 4 &&
+                    flat[0].capTriangles == 4,
+                "ring caps can be switched off for the plain fan");
+        const auto fanCap = parseCap(flat[1].piece.mesh);
+        Require(fanCap.positions.size() == 5 && closedWinding(fanCap, 4) && allFinite(fanCap),
+                "the fan is a closed rim plus centre");
+        auto tiny = gibFixtureSubs();
+        for (auto &sub : tiny)
+            for (auto &p : sub.positions)
+                for (float &c : p)
+                    c *= 1.5e-3f;
+        std::vector<GibPiece> small;
+        Require(ExtractGibs(gibFixtureMesh(tiny), skeleton, GibOptions{}, small, error) && small.size() == 3 &&
+                    small[1].capTriangles == 4,
+                "a tiny loop falls back to the fan");
+        // A very non-planar loop (opposite corners lifted: a saddle).
+        auto warped = gibFixtureSubs();
+        for (auto &sub : warped)
+            for (auto &p : sub.positions)
+                if (std::abs(p[1] - 1.0f) < 1e-6f && p[0] * p[2] > 0.2f)
+                    p[1] = 2.2f;
+        std::vector<GibPiece> bent;
+        Require(ExtractGibs(gibFixtureMesh(warped), skeleton, GibOptions{}, bent, error) && bent.size() == 3 &&
+                    bent[1].capTriangles == 4 && bent[0].capTriangles == 4,
+                "a very non-planar loop falls back to the fan");
+    }
 
     GibOptions merge;
     merge.keepPattern.clear();
@@ -429,6 +643,53 @@ void gibTests()
     std::filesystem::remove(cache / "gibs.cache");
     Require(!ReadGibCache(cache, read), "missing gib sidecar fails closed");
     std::filesystem::remove_all(cache);
+}
+// The procedural flesh texture and its material script.
+void fleshTextureTests()
+{
+    using namespace BZROpenShim::NativeChunks;
+    const auto rgb = GibFleshTextureRgb();
+    constexpr unsigned N = kGibFleshTextureSize;
+    Require(rgb.size() == static_cast<size_t>(N) * N * 3 && rgb == GibFleshTextureRgb(),
+            "flesh texture is the right size and deterministic");
+    double sum = 0;
+    for (size_t i = 0; i < rgb.size(); i += 3)
+        sum += (0.299 * rgb[i] + 0.587 * rgb[i + 1] + 0.114 * rgb[i + 2]) / 255.0;
+    const double mean = sum / (static_cast<double>(N) * N);
+    Require(mean > 0.45 && mean < 0.85, "flesh texture is mid-tone so vertex colours modulate it");
+    // Tileable: the wrap-around step is no bigger than an ordinary neighbouring step.
+    double wrapStep = 0, step = 0;
+    for (unsigned y = 0; y < N; ++y)
+        for (unsigned c = 0; c < 3; ++c)
+        {
+            wrapStep += std::abs(static_cast<int>(rgb[(y * N + N - 1) * 3 + c]) - static_cast<int>(rgb[(y * N) * 3 + c]));
+            for (unsigned x = 0; x + 1 < N; ++x)
+                step += std::abs(static_cast<int>(rgb[(y * N + x) * 3 + c]) - static_cast<int>(rgb[(y * N + x + 1) * 3 + c])) /
+                        static_cast<double>(N - 1);
+        }
+    double wrapRows = 0, rows = 0;
+    for (unsigned x = 0; x < N; ++x)
+        for (unsigned c = 0; c < 3; ++c)
+        {
+            wrapRows += std::abs(static_cast<int>(rgb[((N - 1) * N + x) * 3 + c]) - static_cast<int>(rgb[x * 3 + c]));
+            for (unsigned y = 0; y + 1 < N; ++y)
+                rows += std::abs(static_cast<int>(rgb[(y * N + x) * 3 + c]) - static_cast<int>(rgb[((y + 1) * N + x) * 3 + c])) /
+                        static_cast<double>(N - 1);
+        }
+    Require(wrapStep <= 2.5 * step && wrapRows <= 2.5 * rows, "flesh texture tiles without a seam");
+    const auto tga = GibFleshTextureTga();
+    Require(tga.size() == 18 + tga[0] + static_cast<size_t>(N) * N * 3 && tga[2] == 2 && tga[16] == 24 &&
+                IsGeneratedGibFleshTga(tga) && IsCurrentGibFleshTga(tga) && !IsGeneratedGibFleshTga({}) &&
+                !IsCurrentGibFleshTga(Bytes(64, 0)),
+            "flesh TGA is an uncompressed 24-bit image tagged with its version");
+    const std::string script = GibFleshMaterialScript();
+    Require(script.rfind(GibFleshMaterialHeader(), 0) == 0 && script.find("material openshim_gib_flesh") != std::string::npos &&
+                script.find("diffuse vertexcolour") != std::string::npos &&
+                script.find("ambient vertexcolour") != std::string::npos &&
+                script.find(kGibFleshTextureFile) != std::string::npos && script.find("cull_hardware none") != std::string::npos,
+            "flesh material multiplies the texture by the vertex colours");
+    Require(std::string(kGibFleshMaterialName) == GibOptions{}.capMaterial,
+            "the default cap material is the one the writer generates");
 }
 // Offline check against a real model: prints the split, like
 // scripts/export_gib_payloads.py does.
@@ -487,6 +748,7 @@ int main(int argc, char **argv)
         std::cout << pieces.size() << " pieces, " << triangles << " triangles\n";
         return 0;
     }
+    fleshTextureTests();
     auto mesh = fixtureMesh(), skeleton = fixtureSkeleton();
     Require(StockFallbackKind("chunk1") == 1 && StockFallbackKind("CHUNK2") == 2,
             "stock chunklet names retain their shape");
