@@ -49,5 +49,24 @@ int main() {
     check(!ShouldAcceptNak(7, 101, 100), "keepalive is not a NAK");
     check(!ShouldAcceptNak(0, 101, 100), "data is not a NAK");
     check(ShouldAcceptNak(6, 1, 0xFFFFFFFFu), "NAK ahead across u32 wrap is accepted");
+
+    using BZROpenShim::P2PEarlyUnreliable::NakGate;
+    NakGate gate;
+    check(gate.Admit(0x1000, 50, 1000, 300), "first NAK for a missing stamp is admitted");
+    check(!gate.Admit(0x1000, 50, 1100, 300), "repeat NAK for the same stamp is held");
+    check(!gate.Admit(0x1000, 50, 1299, 300), "holdoff is exclusive of its end");
+    check(gate.Admit(0x1000, 50, 1300, 300), "same stamp is re-admitted after the holdoff");
+    check(gate.Admit(0x1000, 51, 1310, 300), "NAK for a new missing stamp is admitted at once");
+    check(gate.Admit(0x2000, 51, 1320, 300), "peers are gated independently");
+    check(!gate.Admit(0x2000, 51, 1400, 300), "second peer holds its own repeat");
+    NakGate wrap;
+    check(wrap.Admit(0x1000, 7, 0xFFFFFF00u, 300), "first NAK before tick wrap");
+    check(!wrap.Admit(0x1000, 7, 0x10u, 300), "holdoff spans GetTickCount wrap");
+    NakGate full;
+    for (uintptr_t peer = 1; peer <= NakGate::kSlots; ++peer)
+        full.Admit(peer, 9, static_cast<uint32_t>(peer), 300);
+    check(full.Admit(NakGate::kSlots + 1, 9, 100, 300), "a new peer evicts the oldest slot");
+    check(full.Admit(1, 9, 101, 300), "the evicted peer is treated as new");
+    check(!full.Admit(NakGate::kSlots, 9, 102, 300), "a recent peer keeps its slot");
     return failures ? 1 : 0;
 }

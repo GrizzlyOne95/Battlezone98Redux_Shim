@@ -128,7 +128,7 @@ def reliable_flow(all_rows, forwarded):
         if t["kindNibble"] == 0 and int(t["flagsByte"], 16) & 0x80:
             first_seen.setdefault(t["seqA"], r["tsUnixMs"])
             copies[t["seqA"]] += 1
-            wire_bytes += r.get("wireBytes", 0)
+            wire_bytes += t.get("wireBytes", r.get("wireBytes", 0))
     accepted_at, expected = {}, None
     nak = {"equal": 0, "ahead": 0, "behind": 0, "noExpectation": 0}
     for r in forwarded:

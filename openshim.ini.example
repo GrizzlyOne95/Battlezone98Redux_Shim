@@ -1458,6 +1458,13 @@ EarlyUnreliableAccept = 0
 ; Site: GOG 2.2.301 0x0075DA88; a signature mismatch keeps stock.
 EarlyNakAccept = 0
 
+; Repeat NAKs for the same missing message are ignored for this long, so one
+; loss triggers one immediate resend instead of one per dropped follower
+; (each resend pass re-sends the whole unacknowledged queue). A repeat after
+; the holdoff is honoured (the retransmission itself was lost).
+; Accepted: decimal 50-10000 ms. Default: 300. Used only with EarlyNakAccept.
+EarlyNakHoldoffMs = 300
+
 ; Granular netcode tuning -- the send-rate governor, bandwidth floor/ceiling,
 ; ramp rates and auto-kick envelope -- lives in net.ini under [OpenShimSocket],
 ; because it is applied by the socket layer. See net.ini for what each value

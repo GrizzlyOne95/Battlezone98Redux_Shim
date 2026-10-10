@@ -166,9 +166,37 @@ only. Logs `[P2PRECV] Early NAK receive armed` and throttled
 `Accepted early NAKs: total=N`. Default off; kill switch
 `OPENSHIM_DISABLE_EARLY_NAK_ACCEPT`.
 
-Live A/B: matrix 3 (`1000/2500+early` vs `1000/2500+early+nak`), scored with
-the new `reliableDelivery` (p50/p95/p99, retransmit copies, reliable bytes)
-and `nakAcceptance` fields.
+### Live A/B, ungated — matrix `retry-battle-matrix-20261010-0706`
+
+Control `nak-battle-control-20261010-0706`; `1000/2500+early` vs
+`1000/2500+early+nak`, same battle case. Pass 1 completed; pass 2 stopped when
+client 1 failed to authenticate at launch (harness, before any game traffic);
+instances restored. Delay = first relay arrival of a reliable stamp to its
+in-order forward (relay model, stock reorder rule).
+
+| Impairment | EarlyNakAccept | NAKs accepted | Reliable p95 / p99 / max ms | Unresolved stamps | Retransmit copies | Reliable bytes | Relay drop % | Native health |
+|---|---|---:|---|---:|---:|---:|---:|---|
+| `loss=3,seed=212` | 0 | 0 | 3,135 / 4,166 / 4,836 | 1,322 | 2,655 | 428 k | 3.08 | pass |
+| `loss=3,seed=212` | 1 | 476 | **696 / 1,004 / 1,175** | 8 | 4,426 | 545 k | 3.12 | pass |
+| `loss=3,rate=256,queue=200,seed=213` | 0 | 0 | 2,853 / 6,595 / 8,080 | 1,326 | 9,804 | 861 k | 11.46 | pass |
+| `loss=3,rate=256,queue=200,seed=213` | 1 | 2,498 | **1,515 / 2,288 / 2,971** | 1,033 | 24,204 | 1,488 k | 18.67 | pass |
+
+Gameplay PASS and IMPAIRED_OK in all four. Reliable tail latency falls 4x on
+the lossy link and 2.5-3x on the rate-limited one. The cost is resend volume:
++27% reliable bytes at 3% loss, +73% (and more queue drops) at 256 kbit/s.
+Cause: after one loss the requester drops and NAKs every following fragment,
+all naming the same missing stamp, and each accepted NAK runs a full
+go-back-N pass of the unacknowledged queue before the first retransmission
+can land.
+
+### NAK holdoff (`EarlyNakHoldoffMs`, default 300)
+
+A NAK's header ack (`+0x0E`, frame `[ebp-0x174]`, decoded at `0x0075D8F8`)
+is the requester's `peer+0x84`, i.e. the missing stamp. `NakGate` admits the
+first early NAK per (peer, missing stamp), holds repeats of that stamp for the
+holdoff, and admits a new missing stamp at once; a repeat after the holdoff
+(lost retransmission) is admitted again. 32 peer slots, oldest evicted.
+Held NAKs return as stock and are logged as `Held repeat NAKs: total=N`.
 
 Open before a default flip: mixed stock/patched peers, longer sessions,
 WAN round trips.
