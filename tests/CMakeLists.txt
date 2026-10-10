@@ -255,6 +255,10 @@ openshim_add_test(bool_token_tests STD 20 SOURCES
     bool_token_tests.cpp
 )
 
+openshim_add_test(matchmaking_server_tests STD 17 SOURCES
+    matchmaking_server_tests.cpp
+)
+
 openshim_add_test(map_filter_extras_tests STD 14 SOURCES
     map_filter_extras_tests.cpp
 )

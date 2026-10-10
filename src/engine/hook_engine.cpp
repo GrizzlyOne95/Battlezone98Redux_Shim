@@ -13,6 +13,7 @@
 #include <iterator>
 #include <map>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <vector>
 
@@ -894,6 +895,21 @@ namespace HookEngine
             return EngineAddressStatus::BoundData;
         }
 
+        // A code row that matched once stays bound for the process. The image
+        // only changes after that through OpenShim's own patches, and a
+        // feature that binds a row and then detours it would otherwise make
+        // the row read as Mismatch to every feature that binds it later.
+        static std::mutex verifiedMutex;
+        static std::set<const BZROpenShim::EngineAddressEntry*> verified;
+        {
+            std::lock_guard<std::mutex> lock(verifiedMutex);
+            if (verified.count(entry))
+            {
+                outAddress = entry->address;
+                return EngineAddressStatus::Bound;
+            }
+        }
+
         std::vector<uint8_t> actual(entry->expected.size());
         SIZE_T read = 0;
         if (!ReadProcessMemory(GetCurrentProcess(),
@@ -906,8 +922,100 @@ namespace HookEngine
         if (!BZROpenShim::EngineAddressBytesMatch(entry->expected, actual.data(), actual.size()))
             return EngineAddressStatus::Mismatch;
 
+        {
+            std::lock_guard<std::mutex> lock(verifiedMutex);
+            verified.insert(entry);
+        }
         outAddress = entry->address;
         return EngineAddressStatus::Bound;
+    }
+
+    namespace
+    {
+        // SteamStub adds a ".bind" section; GOG has none.
+        bool ExeHasBindSection()
+        {
+            const auto* base = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
+            if (!base) return false;
+            const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+                base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+            const auto* sect = IMAGE_FIRST_SECTION(nt);
+            for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i)
+                if (memcmp(sect[i].Name, ".bind", 5) == 0) return true;
+            return false;
+        }
+    }
+
+    bool BindEngineRows(const char* feature, const EngineRow* rows, size_t count)
+    {
+        std::vector<EngineAddressStatus> status(count, EngineAddressStatus::Missing);
+        const auto bind = [&](size_t i) {
+            uint32_t address = 0;
+            status[i] = ResolveEngineAddress(rows[i].name, address);
+            *rows[i].out = address;
+        };
+        for (size_t i = 0; i < count; ++i)
+            bind(i);
+
+        static const bool steam = ExeHasBindSection();
+        for (int attempt = 0; steam && attempt < 100; ++attempt)
+        {
+            bool pending = false;
+            for (size_t i = 0; i < count; ++i)
+                pending = pending || status[i] == EngineAddressStatus::Mismatch;
+            if (!pending) break;
+            Sleep(10);
+            for (size_t i = 0; i < count; ++i)
+                if (status[i] == EngineAddressStatus::Mismatch) bind(i);
+        }
+
+        std::string failed;
+        for (size_t i = 0; i < count; ++i)
+        {
+            if (status[i] == EngineAddressStatus::Bound || status[i] == EngineAddressStatus::BoundData)
+                continue;
+            const char* why =
+                status[i] == EngineAddressStatus::Missing ? "no row for this build" :
+                status[i] == EngineAddressStatus::Mismatch ? "guard bytes differ" : "unreadable";
+            failed += std::string(failed.empty() ? "" : ", ") + rows[i].name + " (" + why + ")";
+        }
+        if (failed.empty()) return true;
+        for (size_t i = 0; i < count; ++i)
+            *rows[i].out = 0;
+        BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "resolve",
+            "[ADDR] %s stands down: %s", feature, failed.c_str());
+        return false;
+    }
+
+    uint32_t EngineAddress(const char* name)
+    {
+        static std::mutex mutex;
+        static std::map<std::string, uint32_t> bound;
+        static std::map<std::string, bool> reported;
+        if (!name) return 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            const auto it = bound.find(name);
+            if (it != bound.end()) return it->second;
+        }
+        uint32_t address = 0;
+        const EngineAddressStatus status = ResolveEngineAddress(name, address);
+        std::lock_guard<std::mutex> lock(mutex);
+        if (status == EngineAddressStatus::Bound || status == EngineAddressStatus::BoundData)
+        {
+            bound[name] = address;
+            return address;
+        }
+        if (!reported[name])
+        {
+            reported[name] = true;
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "resolve",
+                "[ADDR] %s %s; features reading it stand down",
+                name,
+                status == EngineAddressStatus::Missing ? "has no row for this build" :
+                status == EngineAddressStatus::Mismatch ? "guard bytes differ" : "is unreadable");
+        }
+        return 0;
     }
 
 }

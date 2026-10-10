@@ -27,7 +27,9 @@ function Get-OpenShimIniSettingIds {
         "TerrainProxyZoneZ",
         "TerrainProxyClusterX",
         "TerrainProxyClusterZ",
-        "Nickname"
+        "Nickname",
+        "Server",
+        "CustomServer"
     )
 
     foreach ($line in Get-Content -LiteralPath $Path) {
@@ -343,6 +345,7 @@ $shippingPolicyChecks = @{
     "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "1"
     "Network/LobbyBanButton" = "0"
+    "Network/PreLobby" = "0"
     "Career/StatsTracking" = "0"
     "SinglePlayer/JumpSnipeCrouch" = "1"
     "SinglePlayer/AttackRevealPerceivedTeam" = "0"

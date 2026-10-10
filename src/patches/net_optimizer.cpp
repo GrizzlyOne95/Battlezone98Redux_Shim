@@ -5,6 +5,8 @@
 #include "net_reorder_core.h"
 #include "shim_log.h"
 #include "engine_globals.h"
+#include "bzr_options_ui.h"
+#include "matchmaking_server.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -13,6 +15,7 @@
 #include "win32_last_error_scope.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdlib>
 #include <cstdarg>
@@ -25,6 +28,7 @@
 #include <new>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace BZROpenShim
@@ -385,6 +389,12 @@ namespace
     WSAGetLastErrorFn g_RealWSAGetLastError = nullptr;
     WSASetLastErrorFn g_RealWSASetLastError = nullptr;
     GetAddrInfoAFn g_RealGetAddrInfoA = nullptr;
+
+    // Live matchmaking-server override (the pre-lobby's Rebellion / Custom
+    // choice). A host name or IP; empty means no override. Applied to lookups
+    // of the launch-server host only, and never while a test redirect is set.
+    SRWLOCK g_ServerOverrideLock = SRWLOCK_INIT;
+    std::string g_ServerOverrideHost;
     GetQueuedCompletionStatusFn g_RealGetQueuedCompletionStatus = nullptr;
 
     enum class PendingIoKind : uint8_t
@@ -3717,6 +3727,250 @@ namespace
             g_RealWSASetLastError(err);
     }
 
+    // The host the client connects to without an override: the /bzrserver=
+    // launch switch if present, else the official host.
+    const std::string& GetLaunchServerHostCached()
+    {
+        static const std::string launchHostCache = []
+        {
+            std::string host;
+            if (!MatchmakingServer::ExtractLaunchHost(GetCommandLineW(), host))
+                host = MatchmakingServer::kRebellionHost;
+            return host;
+        }();
+        return launchHostCache;
+    }
+
+    bool CopyServerOverrideHost(std::string& out)
+    {
+        AcquireSRWLockShared(&g_ServerOverrideLock);
+        out = g_ServerOverrideHost;
+        ReleaseSRWLockShared(&g_ServerOverrideLock);
+        return !out.empty();
+    }
+
+    // Seeds the override from the saved [Network] Server / CustomServer so the
+    // first connection (and invites) already use the saved choice.
+    void LoadSavedServerOverride()
+    {
+        std::string modeText;
+        std::string customText;
+        TryGetUserConfigString("Network", "Server", modeText);
+        TryGetUserConfigString("Network", "CustomServer", customText);
+
+        MatchmakingServer::Mode mode = MatchmakingServer::Mode::None;
+        if (!MatchmakingServer::ParseMode(modeText, mode))
+        {
+            Logf("[OpenShimNet] Ignoring [Network] Server=%s (expected Rebellion or Custom)",
+                modeText.c_str());
+            return;
+        }
+        const std::string host = MatchmakingServer::ResolveSavedHost(mode, customText);
+        if (mode == MatchmakingServer::Mode::Custom && host.empty())
+        {
+            Logf("[OpenShimNet] [Network] Server=Custom ignored: CustomServer is empty or invalid");
+            return;
+        }
+        if (host.empty())
+            return;
+        AcquireSRWLockExclusive(&g_ServerOverrideLock);
+        g_ServerOverrideHost = host;
+        ReleaseSRWLockExclusive(&g_ServerOverrideLock);
+        Logf("[OpenShimNet] Saved server selection: %s -> %s",
+            MatchmakingServer::ModeName(mode), host.c_str());
+    }
+
+    // ---- Platform-ticket withholding ----------------------------------------
+    //
+    // The Authorization message carries the Steam/GOG app ticket. It must only
+    // ever reach the official host. A socket withholds when its connected peer
+    // (port 1337) is an address a BZRNet lookup resolved from a NON-official host
+    // (test redirect, saved server selection, or /bzrserver=). Each outbound call
+    // is then scrubbed by ScrubWebSocketTicketsPerCall (frame-aligned, in place)
+    // before it reaches ws2_32, and fails closed when it cannot be. Traffic to
+    // the official host is never inspected or altered. Independent of
+    // RelayCapture.
+
+    struct WithholdSocket
+    {
+        std::string key;        // peer the socket was last armed for (log-once only)
+        bool abortLogged = false;
+    };
+
+    SRWLOCK g_WithholdLock = SRWLOCK_INIT;
+    std::unordered_set<std::string> g_WithholdAddresses;   // resolved from non-official hosts
+    std::unordered_set<std::string> g_OfficialAddresses;   // resolved from the official host
+    std::unordered_map<SOCKET, WithholdSocket> g_WithholdSockets;
+    std::atomic<int> g_WithholdAddressCount{ 0 };   // non-official addresses known
+
+    // Address-family-normalised key; IPv4-mapped IPv6 collapses to IPv4.
+    bool MakeAddressKey(const sockaddr* addr, int addrLen, std::string& key)
+    {
+        if (!addr)
+            return false;
+        if (addr->sa_family == AF_INET && addrLen >= static_cast<int>(sizeof(sockaddr_in)))
+        {
+            key.assign("4");
+            key.append(reinterpret_cast<const char*>(&reinterpret_cast<const sockaddr_in*>(addr)->sin_addr), 4);
+            return true;
+        }
+        if (addr->sa_family == AF_INET6 && addrLen >= static_cast<int>(sizeof(sockaddr_in6)))
+        {
+            const uint8_t* b = reinterpret_cast<const sockaddr_in6*>(addr)->sin6_addr.s6_addr;
+            static const uint8_t mappedPrefix[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF };
+            if (std::memcmp(b, mappedPrefix, sizeof(mappedPrefix)) == 0)
+            {
+                key.assign("4");
+                key.append(reinterpret_cast<const char*>(b + 12), 4);
+            }
+            else
+            {
+                key.assign("6");
+                key.append(reinterpret_cast<const char*>(b), 16);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    // Called with the result of a BZRNet-endpoint lookup. `effectiveHost` is
+    // the name actually resolved after any override.
+    void RecordLookupAddresses(PCSTR nodeName, PCSTR effectiveHost, const ADDRINFOA* result)
+    {
+        if (!nodeName || !effectiveHost || !result)
+            return;
+        // Only lookups for the endpoint the game itself would use: the official
+        // name, or the /bzrserver= host.
+        if (!MatchmakingServer::EqualsNoCase(nodeName, kBzrNetMatchmakingHost) &&
+            !MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()))
+            return;
+
+        const bool official = MatchmakingServer::EqualsNoCase(effectiveHost, kBzrNetMatchmakingHost);
+        AcquireSRWLockExclusive(&g_WithholdLock);
+        for (const ADDRINFOA* ai = result; ai; ai = ai->ai_next)
+        {
+            std::string key;
+            if (ai->ai_addr && MakeAddressKey(ai->ai_addr, static_cast<int>(ai->ai_addrlen), key))
+                (official ? g_OfficialAddresses : g_WithholdAddresses).insert(key);
+        }
+        g_WithholdAddressCount.store(static_cast<int>(g_WithholdAddresses.size()));
+        ReleaseSRWLockExclusive(&g_WithholdLock);
+    }
+
+    // The verdict is NOT cached per socket: handle values are reused, and the
+    // game's IOCP library closes its sockets through imports we do not patch,
+    // so a cached "clear" (or "withhold") could outlive the socket it described.
+    // It is recomputed from the live peer address, which costs nothing unless a
+    // non-official address has been resolved (g_WithholdAddressCount > 0).
+    bool WithholdAddressMatch(const sockaddr* addr, int addrLen, std::string* keyOut = nullptr)
+    {
+        uint16_t port = 0;
+        std::string key;
+        if (!TryGetSockaddrPort(addr, addrLen, &port) || port != kBzrNetWebSocketPort ||
+            !MakeAddressKey(addr, addrLen, key))
+            return false;
+
+        AcquireSRWLockShared(&g_WithholdLock);
+        const bool match = g_WithholdAddresses.count(key) && !g_OfficialAddresses.count(key);
+        ReleaseSRWLockShared(&g_WithholdLock);
+        if (match && keyOut)
+            *keyOut = key;
+        return match;
+    }
+
+    // Log-once bookkeeping per socket handle (re-armed if the peer changes).
+    void NoteWithholdArmed(SOCKET s, const std::string& key, const char* how, const sockaddr* peer, int peerLen)
+    {
+        bool log = false;
+        AcquireSRWLockExclusive(&g_WithholdLock);
+        WithholdSocket& entry = g_WithholdSockets[s];
+        if (entry.key != key)
+        {
+            entry.key = key;
+            entry.abortLogged = false;
+            log = true;
+        }
+        ReleaseSRWLockExclusive(&g_WithholdLock);
+        if (log)
+            Logf("[OpenShimNet] sid=%u ticket withholding armed (%s, peer %s)",
+                GetSocketId(s), how, FormatSockaddr(peer, peerLen).c_str());
+    }
+
+    void TagWithholdSocketIfNeeded(SOCKET s, const sockaddr* name, int namelen)
+    {
+        if (g_WithholdAddressCount.load() == 0)
+            return;
+        std::string key;
+        if (!WithholdAddressMatch(name, namelen, &key))
+            return;
+        AcquireSRWLockShared(&g_SocketLock);
+        const auto sit = g_Sockets.find(s);
+        const bool stream = sit != g_Sockets.end() && sit->second.type == SOCK_STREAM;
+        ReleaseSRWLockShared(&g_SocketLock);
+        if (stream)
+            NoteWithholdArmed(s, key, "connect", name, namelen);
+    }
+
+    void ForgetWithholdSocket(SOCKET s)
+    {
+        AcquireSRWLockExclusive(&g_WithholdLock);
+        g_WithholdSockets.erase(s);
+        ReleaseSRWLockExclusive(&g_WithholdLock);
+    }
+
+    // True when `s` is a connected TCP socket whose peer is a non-official
+    // BZRNet ws endpoint. Covers sockets created and connected outside our
+    // socket()/connect() hooks (IOCP/ConnectEx), which is the game's ws socket.
+    bool ShouldWithholdSocket(SOCKET s)
+    {
+        if (g_WithholdAddressCount.load() == 0 || !g_RealGetPeerName)
+            return false;
+
+        int type = 0;
+        int typeLen = static_cast<int>(sizeof(type));
+        if (::getsockopt(s, SOL_SOCKET, SO_TYPE, reinterpret_cast<char*>(&type), &typeLen) == 0 &&
+            type != SOCK_STREAM)
+            return false;
+
+        sockaddr_storage peer = {};
+        int peerLen = static_cast<int>(sizeof(peer));
+        if (g_RealGetPeerName(s, reinterpret_cast<sockaddr*>(&peer), &peerLen) != 0)
+            return false;
+
+        std::string key;
+        if (!WithholdAddressMatch(reinterpret_cast<const sockaddr*>(&peer), peerLen, &key))
+            return false;
+        NoteWithholdArmed(s, key, "lazy", reinterpret_cast<const sockaddr*>(&peer), peerLen);
+        return true;
+    }
+
+    // Scrubs one outbound call on a withholding socket in place. Rejected = the
+    // caller must not send and should fail with WSAECONNABORTED.
+    WebSocketScrubStatus ScrubTaggedCall(SOCKET s, const ByteSpan* spans, size_t count)
+    {
+        std::vector<WebSocketTicketRewrite> rewrites;
+        const char* reason = nullptr;
+        const WebSocketScrubStatus status = ScrubWebSocketTicketsPerCall(spans, count, rewrites, &reason);
+
+        bool logAbort = false;
+        if (status == WebSocketScrubStatus::Rejected)
+        {
+            AcquireSRWLockExclusive(&g_WithholdLock);
+            WithholdSocket& entry = g_WithholdSockets[s];
+            logAbort = !entry.abortLogged;
+            entry.abortLogged = true;
+            ReleaseSRWLockExclusive(&g_WithholdLock);
+        }
+
+        const uint32_t sid = GetSocketId(s);
+        for (const WebSocketTicketRewrite& r : rewrites)
+            Logf("[OpenShimNet] ticket_withheld sid=%u key=%s length=%zu", sid, r.key, r.length);
+        if (logAbort)
+            Logf("[OpenShimNet] sid=%u ticket withholding refused a send: %s",
+                sid, reason ? reason : "unknown");
+        return status;
+    }
+
     INT WSAAPI Hook_getaddrinfo(
         PCSTR nodeName,
         PCSTR serviceName,
@@ -3724,17 +3978,32 @@ namespace
         PADDRINFOA* result)
     {
         PCSTR resolvedNode = nodeName;
+        std::string overrideHost;
         if (nodeName &&
             !g_Config.matchmakingRedirectAddress.empty() &&
             _stricmp(nodeName, kBzrNetMatchmakingHost) == 0)
         {
+            // The test redirect is a fail-closed guard and always wins.
             resolvedNode = g_Config.matchmakingRedirectAddress.c_str();
             Logf("[OpenShimNet] Redirecting BZRNet lookup %s -> %s",
                 nodeName,
                 resolvedNode);
         }
+        else if (nodeName &&
+                 g_Config.matchmakingRedirectAddress.empty() &&
+                 CopyServerOverrideHost(overrideHost) &&
+                 MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()))
+        {
+            resolvedNode = overrideHost.c_str();
+            Logf("[OpenShimNet] Redirecting BZRNet lookup %s -> %s (server selection)",
+                nodeName,
+                resolvedNode);
+        }
 
-        return g_RealGetAddrInfoA(resolvedNode, serviceName, hints, result);
+        const INT rc = g_RealGetAddrInfoA(resolvedNode, serviceName, hints, result);
+        if (rc == 0 && result)
+            RecordLookupAddresses(nodeName, resolvedNode, *result);
+        return rc;
     }
 
     SOCKET WSAAPI Hook_socket(int af, int type, int protocol)
@@ -3799,6 +4068,7 @@ namespace
 
     int WSAAPI Hook_connect(SOCKET s, const sockaddr* name, int namelen)
     {
+        TagWithholdSocketIfNeeded(s, name, namelen);
         const int rc = g_RealConnect(s, name, namelen);
         const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
         if (rc == 0)
@@ -3823,6 +4093,7 @@ namespace
 
     int WSAAPI Hook_WSAConnect(SOCKET s, const sockaddr* name, int namelen, LPWSABUF callerData, LPWSABUF calleeData, LPQOS sqos, LPQOS gqos)
     {
+        TagWithholdSocketIfNeeded(s, name, namelen);
         const int rc = g_RealWSAConnect(s, name, namelen, callerData, calleeData, sqos, gqos);
         const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
         if (rc == 0)
@@ -3851,6 +4122,7 @@ namespace
         if (rc == 0)
         {
             PurgeWebSocketCaptureForSocket(s);
+            ForgetWithholdSocket(s);
             ClearReorderStateForSocket(s);
             DupPurgeSocket(s);
             LogSocketSummaryAndForget(s);
@@ -3868,6 +4140,27 @@ namespace
     int WSAAPI Hook_WSASend(SOCKET s, LPWSABUF buffers, DWORD bufferCount, LPDWORD bytesSent, DWORD flags, LPWSAOVERLAPPED overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completionRoutine)
     {
         EnsureSocketOptions(s);
+        if (buffers && bufferCount > 0 && ShouldWithholdSocket(s))
+        {
+            // Non-official server: scrub this call's buffers in place. The
+            // game's IOCP library keeps them alive until completion and the
+            // length never changes, so the real call can use them as they are.
+            std::vector<ByteSpan> spans;
+            spans.reserve(bufferCount);
+            for (DWORD i = 0; i < bufferCount; ++i)
+            {
+                ByteSpan span;
+                span.data = reinterpret_cast<uint8_t*>(buffers[i].buf);
+                span.length = buffers[i].len;
+                spans.push_back(span);
+            }
+            if (ScrubTaggedCall(s, spans.data(), spans.size()) == WebSocketScrubStatus::Rejected)
+            {
+                if (g_RealWSASetLastError)
+                    g_RealWSASetLastError(WSAECONNABORTED);
+                return SOCKET_ERROR;
+            }
+        }
         const int rc = g_RealWSASend(s, buffers, bufferCount, bytesSent, flags, overlapped, completionRoutine);
         const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
         if (g_Config.enableRelayCapture &&
@@ -3987,10 +4280,29 @@ namespace
     int WSAAPI Hook_send(SOCKET s, const char* buffer, int length, int flags)
     {
         EnsureSocketOptions(s);
-        const int rc = g_RealSend(s, buffer, length, flags);
+        const char* sendBuffer = buffer;
+        std::vector<uint8_t> scrubbed;
+        if (buffer && length > 0 && ShouldWithholdSocket(s))
+        {
+            // Non-official server: scrub a private copy of this call and send
+            // that. A partial send leaves a tail the game re-sends from its own
+            // buffer; that tail is not frame-aligned, so it is refused.
+            scrubbed.assign(reinterpret_cast<const uint8_t*>(buffer), reinterpret_cast<const uint8_t*>(buffer) + length);
+            ByteSpan span;
+            span.data = scrubbed.data();
+            span.length = scrubbed.size();
+            if (ScrubTaggedCall(s, &span, 1) == WebSocketScrubStatus::Rejected)
+            {
+                if (g_RealWSASetLastError)
+                    g_RealWSASetLastError(WSAECONNABORTED);
+                return SOCKET_ERROR;
+            }
+            sendBuffer = reinterpret_cast<const char*>(scrubbed.data());
+        }
+        const int rc = g_RealSend(s, sendBuffer, length, flags);
         const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
         if (rc > 0 && buffer)
-            FeedWebSocketCapture(s, true, reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(rc));
+            FeedWebSocketCapture(s, true, reinterpret_cast<const uint8_t*>(sendBuffer), static_cast<size_t>(rc));
         if (rc >= 0)
             LogPacketActivity("send", s, true, rc, nullptr, 0);
         LogSocketError("send", s, rc == SOCKET_ERROR ? SOCKET_ERROR : 0, &SocketState::lastSendError);
@@ -4746,6 +5058,7 @@ namespace
     BOOL CALLBACK InitializeNetworkOptimizerOnce(PINIT_ONCE, PVOID, PVOID*)
     {
         LoadConfig();
+        LoadSavedServerOverride();
 
         LogShimA(LogLevel::Info, "net", "[OpenShimNet] Initializing");
         LogNetIniValues();
@@ -4995,6 +5308,46 @@ namespace
         }
     }
 
+    bool GetMatchmakingRedirectTarget(char* out, size_t outSize)
+    {
+        if (!out || outSize == 0)
+            return false;
+        out[0] = '\0';
+        // Without the resolver hook the configured value redirects nothing.
+        if (!g_RealGetAddrInfoA || g_Config.matchmakingRedirectAddress.empty())
+            return false;
+        std::snprintf(out, outSize, "%s", g_Config.matchmakingRedirectAddress.c_str());
+        return true;
+    }
+
+    bool GetLaunchServerHost(char* out, size_t outSize)
+    {
+        if (!out || outSize == 0)
+            return false;
+        std::snprintf(out, outSize, "%s", GetLaunchServerHostCached().c_str());
+        return true;
+    }
+
+    void SetMatchmakingServerOverride(const char* host)
+    {
+        AcquireSRWLockExclusive(&g_ServerOverrideLock);
+        g_ServerOverrideHost = host ? host : "";
+        ReleaseSRWLockExclusive(&g_ServerOverrideLock);
+        Logf("[OpenShimNet] Matchmaking server override %s%s",
+            host && *host ? "set to " : "cleared",
+            host && *host ? host : "");
+    }
+
+    bool GetMatchmakingServerOverride(char* out, size_t outSize)
+    {
+        if (!out || outSize == 0)
+            return false;
+        std::string host;
+        CopyServerOverrideHost(host);
+        std::snprintf(out, outSize, "%s", host.c_str());
+        return !host.empty();
+    }
+
     bool RecycleBzrNetWebSocket()
     {
         if (!g_RealCloseSocket || !g_RealGetPeerName)
@@ -5083,6 +5436,7 @@ namespace
                 candidate.socketId,
                 FormatSockaddr(reinterpret_cast<const sockaddr*>(&peer), peerLen).c_str());
             PurgeWebSocketCaptureForSocket(s);
+            ForgetWithholdSocket(s);
             ClearReorderStateForSocket(s);
             DupPurgeSocket(s);
             LogSocketSummary(s, closedState);
