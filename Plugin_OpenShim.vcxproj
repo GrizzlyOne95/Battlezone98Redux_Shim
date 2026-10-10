@@ -160,6 +160,10 @@
     <ClCompile Include="src\patches\native_chunk_mesh.cpp" />
     <ClCompile Include="src\patches\native_chunk_cache.cpp" />
     <ClCompile Include="src\patches\native_chunk_runtime.cpp" />
+    <ClCompile Include="src\patches\skinned_gibs.cpp" />
+    <ClCompile Include="src\patches\shell_casings.cpp" />
+
+    <ClCompile Include="src\patches\path_block.cpp" />
     <ClCompile Include="src\patches\chunk_proxy_render.cpp" />
     <ClCompile Include="src\patches\config_helpers.cpp" />
     <ClCompile Include="src\patches\diag_jump_snipe_probe.cpp" />
@@ -181,13 +185,18 @@
     <ClCompile Include="src\patches\multiplayer_vehicle_flags.cpp" />
     <ClCompile Include="src\patches\odf_helpers.cpp" />
     <ClCompile Include="src\patches\ogre_dedupe_crash_fixes.cpp" />
+    <ClCompile Include="src\patches\ogre_script_import_cache.cpp" />
+    <ClCompile Include="src\patches\resource_walk_stat_cache.cpp" />
+    <ClCompile Include="src\patches\ogre_entity_reload.cpp" />
     <ClCompile Include="src\patches\ogre_entity_frustum_cull.cpp" />
     <ClCompile Include="src\patches\ogre_runtime_helpers.cpp" />
     <ClCompile Include="src\patches\ordnance_velocity.cpp" />
+    <ClCompile Include="src\patches\unit_damage.cpp" />
     <ClCompile Include="src\patches\perceived_team_reveal.cpp" />
     <ClCompile Include="src\patches\pilot_flashlight.cpp" />
     <ClCompile Include="src\patches\pilot_team_restore.cpp" />
     <ClCompile Include="src\patches\producer_build_menu.cpp" />
+    <ClCompile Include="src\patches\background_run.cpp" />
     <ClCompile Include="src\patches\radar_layout.cpp" />
     <ClCompile Include="src\patches\raw_mouse_input.cpp" />
     <ClCompile Include="src\patches\satellite_visibility.cpp" />
@@ -196,6 +205,7 @@
     <ClCompile Include="src\patches\shadow_far_distance_hook.cpp" />
     <ClCompile Include="src\patches\team_filter_mines.cpp" />
     <ClCompile Include="src\patches\ui_camera_fixes.cpp" />
+    <ClCompile Include="src\patches\unfocused_mouse_release.cpp" />
     <ClCompile Include="src\patches\unit_behavior_fixes.cpp" />
     <ClCompile Include="src\patches\unit_vo.cpp" />
     <ClCompile Include="src\patches\vehicle_list_mod_fix.cpp" />
@@ -278,6 +288,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
+    <ClInclude Include="include\background_run_policy.h" />
     <ClInclude Include="include\render_effect_intent.h" />
     <ClInclude Include="include\native_hud_layout.h" />
     <ClInclude Include="include\native_hud_runtime.h" />
@@ -298,6 +309,8 @@
     <ClInclude Include="include\autosave.h" />
     <ClInclude Include="include\autosave_gate.h" />
     <ClInclude Include="include\bzr_hooks.h" />
+    <ClInclude Include="include\unit_damage.h" />
+    <ClInclude Include="include\unit_damage_policy.h" />
     <ClInclude Include="include\weapon_presentation.h" />
     <ClInclude Include="include\weapon_presentation_hooks.h" />
     <ClInclude Include="include\weapon_presentation_native.h" />
@@ -335,6 +348,8 @@
     <ClInclude Include="include\redux_compatibility.h" />
     <ClInclude Include="include\trn_codec.h" />
     <ClInclude Include="include\ogre_shader_cache.h" />
+    <ClInclude Include="include\ogre_script_import_cache.h" />
+    <ClInclude Include="include\resource_walk_stat_cache.h" />
     <ClInclude Include="include\ogre_enhanced_light_selection.h" />
     <ClInclude Include="include\enhanced_light_selection.h" />
     <ClInclude Include="include\sun_flash.h" />

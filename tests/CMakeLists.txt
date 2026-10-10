@@ -37,11 +37,45 @@ function(openshim_add_test name)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+openshim_add_test(ogre_entity_reload_tests STD 17 SOURCES
+    ogre_entity_reload_tests.cpp
+)
+openshim_add_test(unit_damage_tests STD 20 SOURCES unit_damage_tests.cpp)
+
 openshim_add_test(native_chunk_mesh_tests STD 20 SOURCES
     native_chunk_mesh_tests.cpp
     ../src/patches/native_chunk_mesh.cpp
     ../src/patches/native_chunk_cache.cpp
 )
+
+# SkinnedGibs offline check on a real skinned pilot: prints the runtime split
+# (compare with scripts/export_gib_payloads.py). Only where the GOG test
+# install and its ISDF Chronicles addon are present; the path can be
+# overridden with -DOPENSHIM_GIB_SAMPLE_DIR=<dir with ispilo.mesh/ispcc.skeleton>.
+set(OPENSHIM_GIB_SAMPLE_DIR "C:/Program Files (x86)/GOG Galaxy/Games/Battlezone 98 Redux/addon/ISDF Chronicles"
+    CACHE PATH "Directory holding ispilo.mesh and ispcc.skeleton for the gib split check")
+if(EXISTS "${OPENSHIM_GIB_SAMPLE_DIR}/ispilo.mesh" AND EXISTS "${OPENSHIM_GIB_SAMPLE_DIR}/ispcc.skeleton")
+    add_test(NAME native_chunk_gibs_ispilo
+        COMMAND native_chunk_mesh_tests --gibs "${OPENSHIM_GIB_SAMPLE_DIR}/ispilo.mesh"
+                "${OPENSHIM_GIB_SAMPLE_DIR}/ispcc.skeleton")
+endif()
+
+openshim_add_test(shell_casing_physics_tests STD 20 SOURCES
+    shell_casing_physics_tests.cpp
+)
+
+# PathBlockFaces: winding, ODF keys, grid contract (pure math), plus the
+# offline dry check on the ISDF Chronicles subway underpass when the GOG test
+# install is present (override with -DOPENSHIM_PATHBLOCK_SAMPLE_DIR=<dir>).
+openshim_add_test(path_block_geometry_tests STD 17 SOURCES
+    path_block_geometry_tests.cpp
+)
+set(OPENSHIM_PATHBLOCK_SAMPLE_DIR "C:/Program Files (x86)/GOG Galaxy/Games/Battlezone 98 Redux/addon/ISDF Chronicles"
+    CACHE PATH "Directory holding bbsubtun.odf/.sdf and its .geo files for the PathBlockFaces dry check")
+if(EXISTS "${OPENSHIM_PATHBLOCK_SAMPLE_DIR}/bbsubtun.sdf")
+    add_test(NAME path_block_dry_check_bbsubtun
+        COMMAND path_block_geometry_tests --dry "${OPENSHIM_PATHBLOCK_SAMPLE_DIR}" bbsubtun --expect-tunnel)
+endif()
 
 openshim_add_test(bzrnet_protocol_tests STD 20 SOURCES
     bzrnet_protocol_tests.cpp
@@ -216,6 +250,10 @@ openshim_add_test(terrain_tile_blend_tests STD 20 SOURCES
     terrain_tile_blend_tests.cpp
 )
 
+openshim_add_test(terrain_proxy_backend_gate_tests STD 20 SOURCES
+    terrain_proxy_backend_gate_tests.cpp
+)
+
 openshim_add_test(terrain_atlas_rect_repair_tests STD 20 SOURCES
     terrain_atlas_rect_repair_tests.cpp
     ../src/patches/terrain_atlas_rect_repair.cpp
@@ -283,6 +321,10 @@ target_include_directories(patch_config_parse_tests PRIVATE ../include)
 target_compile_features(patch_config_parse_tests PRIVATE cxx_std_20)
 target_compile_definitions(patch_config_parse_tests PRIVATE
     BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json")
+
+openshim_add_test(background_run_policy_tests STD 20 SOURCES
+    background_run_policy_tests.cpp
+)
 
 openshim_add_test(ai_range_policy_tests STD 20 SOURCES
     ai_range_policy_tests.cpp

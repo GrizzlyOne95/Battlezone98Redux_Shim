@@ -100,6 +100,66 @@ SettingsUi = 1
 ;                     BZR_DISABLE_CHUNK_EXPERIMENTS
 ChunkMeshes = 1
 
+; Skinned person gibs: when a pilot, soldier or zombie (any Person) is blown
+; apart, its skinned body splits into rigid limb pieces (head, torso, arms,
+; hands, legs, weapon...) posed where each limb was on the frame of death,
+; launched with the stock chunk velocities and left lying on the ground.
+; Accepted: boolean. Default: ON. Independent of ChunkMeshes and of any asset
+; pack: the split is generated from the person's own .mesh/.skeleton and
+; cached under openshim/cache/chunks/gibs. An authored split from
+; scripts/export_gib_payloads.py (<payload dir>/<mesh>/gibs.txt) wins over the
+; runtime one. Cut faces use openshim_gib_flesh, written to the cache root
+; unless a chunk payload directory ships its own openshim_gib_flesh.material.
+; Visual only: the engine's own chunk simulation for the body is untouched,
+; and 0 restores exactly the previous behaviour. GOG build only.
+; Legacy env alias: OPENSHIM_DISABLE_SKINNED_GIBS
+SkinnedGibs = 1
+; Most gibs alive at once (12..1024). When full, the oldest gib already at
+; rest is recycled first, then the oldest. Default: 160.
+SkinnedGibsMax = 160
+; Seconds a gib lies at rest before sinking away (0..60). Default: 8.
+SkinnedGibsLinger = 8
+; Multiplier for the random part of the launch velocity (0..5). Default: 1.0.
+SkinnedGibsForce = 1.0
+
+; Shell casings: when a cannon-like weapon fires, a small brass casing is
+; ejected from the weapon's breech, tumbles, bounces off the terrain, the
+; firing hull and nearby objects, then lies on the ground and sinks away.
+; Accepted: boolean. Default: ON. Needs no asset pack: the casing mesh and
+; its openshim_casing_brass / openshim_casing_rim materials are generated in
+; the chunk cache root (a chunk payload directory may ship its own
+; openshim_casing.material, and a <weapon>_casing.mesh resource, for example
+; gminigun_casing.mesh, replaces the casing for that weapon). Visual only:
+; the shot itself is untouched, and 0 leaves the fire calls stock.
+; Legacy env alias: OPENSHIM_DISABLE_SHELL_CASINGS
+ShellCasings = 1
+; Most casings alive at once (4..512). When full, the oldest casing already
+; at rest is recycled first, then the oldest. Default: 48.
+ShellCasingsMax = 48
+; Seconds a casing lies at rest before sinking away (0..120). Default: 6.
+ShellCasingsLinger = 6
+; Which weapons eject casings, comma separated, case-insensitive. A class
+; label (cannon, mortar, machinegun, snipergun -- the native classes whose
+; shots are hooked) or a weapon ODF name enables; a leading "-" disables
+; that label or ODF and always wins; "all" enables every hooked class.
+; Lasers, beams, missiles and the other weapon classes never eject.
+; Default: cannon,mortar,machinegun,snipergun,-gquake,-gsandbag
+ShellCasingsClasses = cannon,mortar,machinegun,snipergun,-gquake,-gsandbag
+
+; Path-grid footprints from collision faces. Stock AI planning blocks the
+; whole bounding box of every building, so tunnels, arcades and walk-in rooms
+; are walls to the planner. An ODF opts in under [GameObjectClass]:
+;   pathBlock = "faces"     ; "box" (stock, default) | "faces" | "none"
+;   pathBlockHeight = 1.5   ; local sample height above the origin (m)
+;   pathBlockHeight2 = 3.0  ; second sample height (m)
+; With "faces" a cell of the stock box stays blocked only when its centre is
+; inside the object's collision solids at either height (nonzero winding);
+; "none" blocks nothing. ODFs without the key are untouched. Shares its ODF
+; keys and results with the EXU implementation of the same contract.
+; Accepted: boolean. Default: ON.
+; Legacy env alias: OPENSHIM_DISABLE_PATH_BLOCK_FACES
+PathBlockFaces = 1
+
 ; Redux multiplayer map-list refresh/selection preservation fixes.
 ; Accepted: boolean. Default: ON.
 ; Exposed on the OpenShim Settings page as "Map List Fixes".
@@ -377,6 +437,18 @@ ConstructorRecycleStaleTarget = 1
 ; Accepted: boolean. Default: ON.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX
 MagnetZeroRangeGuard = 1
+
+; Stop Redux pinning the OS cursor while it is minimized or in the
+; background. In mouse-look the stock look reader re-clips the cursor and
+; warps it to the window centre every frame, guarded only by a per-thread
+; GetActiveWindow test that a minimized or backgrounded Redux still passes.
+; While another process owns the foreground, or Redux is minimized,
+; SetCursorPos is skipped and any ClipCursor rectangle becomes a release.
+; Focus returning restores stock behaviour on the next frame.
+; Client-side only; not gated in network games.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE
+UnfocusedMouseRelease = 1
 
 ; Extend the script-facing CanBuild / IsBusy producer predicates to base
 ; producers, so mission Lua sees the same answer for a base producer that it
@@ -692,6 +764,8 @@ TerrainSemanticFrameCaptureMinCoverage = 0.005
 ; Phase 3B HD diffuse tile-array smoke path. DX11 only.
 ; Accepted: integer flag 0/1. Default: 0.
 ; ON also enables the one-cluster proxy and semantic renderer. Missing/invalid
+; Direct3D11 only: under any other active render system the whole terrain
+; proxy path stays off and stock terrain is drawn.
 ; resources fail soft to the stock atlas.
 TerrainHdEnabled = 0
 
@@ -900,6 +974,25 @@ RespectExternalAutoSave = 1
 
 
 [Diagnostics]
+
+; Per-gib SkinnedGibs log lines (mesh, bone, launch position and velocity) and
+; an unbudgeted [SKINNEDGIBS] summary for every person death.
+; Accepted: boolean. Default: OFF.
+; Legacy env alias: OPENSHIM_TRACE_SKINNED_GIBS
+TraceSkinnedGibs = 0
+
+; ShellCasings diagnostics: one [SHELLCASINGS] line per spawned casing and a
+; once-a-second stats line (spawned, filtered, culled, active, hits, submits).
+; Accepted: boolean. Default: OFF.
+; Legacy env alias: OPENSHIM_TRACE_SHELL_CASINGS
+TraceShellCasings = 0
+
+; PathBlockFaces diagnostics: an ASCII dump of the path grid around every
+; flagged building after its footprint is applied, plus removal lines. The
+; one-line summary per flagged object is always logged (first 256 per
+; mission). Accepted: boolean. Default: OFF.
+; Legacy env alias: OPENSHIM_TRACE_PATH_BLOCK
+TracePathBlock = 0
 
 ; Explain a "Not Ready" multiplayer entry on the main menu. The stock shell has
 ; no way to say why: its readiness getter returns only ready/not-ready, so the
@@ -1912,6 +2005,23 @@ AttackRevealPerceivedTeam = 1
 ; Legacy env aliases to force it off: OPENSHIM_DISABLE_SATELLITE_VISIBILITY_FIX,
 ;                                     BZR_DISABLE_SATELLITE_VISIBILITY_FIX
 SatelliteVisibilityFix = 1
+
+[Testing]
+; Developer and automated-test aids. Off by default; not shown in the Settings UI.
+
+; RunInBackground: keep a single-player game simulating while its window is
+; unfocused. Normally Redux pauses the simulation, and a game launched without
+; focus sits on its load screen. When ON, OpenShim swallows WM_ACTIVATEAPP(FALSE)
+; (so nothing pauses or minimizes), raises the engine's app-active flag if it
+; started at 0, and turns ClipCursor / SetCursorPos / SetCursor into no-ops
+; (ClipCursor releases) whenever the game window is not the foreground window,
+; so an unfocused game never traps or warps your mouse.
+; Single-player and windowed only: inert in network games and in fullscreen.
+; Verifies GOG 2.2.301 code bytes at load and stays off on any mismatch
+; ([BGRUN] lines in the shim log). Restart required.
+; Accepted: boolean. Default: OFF.
+; Env override: OPENSHIM_RUN_IN_BACKGROUND=1
+RunInBackground = 0
 
 [Experimental]
 
