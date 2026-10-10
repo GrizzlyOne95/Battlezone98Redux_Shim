@@ -248,7 +248,7 @@ At WAN round trips the early NAK helps the tail only modestly (p99 about
 unacknowledged queue, much of which is still in flight one RTT later, and a
 1% reorder NAKs datagrams that are not lost.
 
-## NAK reorder hold (`EarlyNakReorderMs`, default 40) — 2026-10-10
+## NAK reorder hold (`EarlyNakReorderMs`; tried at 40, default 0 after the A/B) — 2026-10-10
 
 Proposed after the WAN matrix: (1) act on a NAK only once its stamp has been
 missing for about 40 ms, and (2) skip re-sending fragments still in flight.
@@ -283,7 +283,39 @@ treated as new. Repeats after admission keep the 300 ms holdoff.
 stale-stamp rule. Armed line: `... reorder=40ms holdoff=300ms`. Matrix arms:
 `+nak` (40) and `+nak0` (0).
 
-Status: unit-tested (`p2p_early_unreliable_policy_tests`); live A/B pending.
+### Live A/B — matrix `retry-battle-matrix-20261010-1300`
+
+Control `nakhold-battle-control-20261010-1300`, one pass, classic battle
+(80 host-owned AI, 16 beacons, 64 powerups, 60 s). Every run IMPAIRED_OK,
+gameplay PASS, native health pass; instances restored and verified. Shot and
+gap columns are from the `agent/netfix-hitreg-metrics` scorer (modelled
+delivery; it replays the early rule and does not model the NAK gate).
+
+| Impairment | Arm | Reliable p95 / p99 / max ms | Undelivered stamps | Reliable bytes | Shot packets lost | Update gaps >500 ms |
+|---|---|---|---:|---:|---:|---:|
+| `loss=3,seed=212` | `+early` | 2,419 / 3,693 / 4,365 | 1,182 | 402 k | 90 / 3,246 | 0 |
+| | `+early+nak0` | **757 / 923 / 1,099** | 120 | 580 k | 108 / 3,252 | 6 |
+| | `+early+nak` (40) | 1,090 / 1,772 / 1,975 | 460 | 617 k | 96 / 3,348 | 2 |
+| `loss=3,rate=256,queue=200,seed=213` | `+early` | 3,529 / 4,722 / 7,233 | 1,308 | 1,375 k | 310 / 2,904 | 36 |
+| | `+early+nak0` | **2,141 / 4,844 / 5,873** | 648 | 2,178 k | 315 / 3,027 | 45 |
+| | `+early+nak` (40) | 2,629 / 8,110 / 8,516 | 839 | 3,531 k | 423 / 3,045 | 36 |
+| WAN `delay=60,jitter=20,loss=2,reorder=1,seed=215` | `+early` | 2,650 / 4,572 / 5,452 | 1,066 | 569 k | 68 / 3,357 | 12 |
+| | `+early+nak0` | **830 / 1,279 / 1,469** | 142 | 769 k | 63 / 3,018 | 2 |
+| | `+early+nak` (40) | 1,326 / 2,423 / 2,858 | 705 | 657 k | 72 / 3,144 | 0 |
+
+Verdict: the 40 ms hold is worse than no hold on reliable latency in every
+profile (p99 about 2x, more undelivered stamps), cheaper in bytes only on WAN
+(-15%) and far more expensive at 256 kbit/s (+62%), where the extra resend
+volume also cost shot packets. Likely cause (hypothesis): a backlog drains in
+several budget-limited passes, each advancing the missing stamp, and the hold
+now delays every one of them by the window plus a confirming NAK. Default
+changed to `EarlyNakReorderMs = 0`; the setting remains for experiments.
+Single pass per cell, so treat byte differences under ~20% as noise.
+
+Against the shipped default (`+early`), the old gate (`nak0`) still cuts
+reliable p95 3x at 3% loss and WAN for +35-44% reliable bytes, and +58% at
+256 kbit/s. None of the NAK arms moved shot-packet loss or update gaps
+materially: those are unreliable traffic, fixed by `EarlyUnreliableAccept`.
 
 ## Decision
 

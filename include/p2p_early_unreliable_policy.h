@@ -59,7 +59,7 @@ inline bool ShouldAcceptNak(uint8_t kind, uint32_t stamp, uint32_t expected) {
 // naming a stamp behind the current one was overtaken by a later NAK and is
 // held. reorderMs = 0 admits a new stamp at once (the earlier gate).
 constexpr uint32_t kDefaultNakHoldoffMs = 300;
-constexpr uint32_t kDefaultNakReorderMs = 40;
+constexpr uint32_t kDefaultNakReorderMs = 0;  // 40 measured worse (matrix 20261010-1300)
 constexpr uint32_t kNakReorderMaxMs = 1000;
 
 // Decimal 0-kNakReorderMaxMs with surrounding INI whitespace only.
