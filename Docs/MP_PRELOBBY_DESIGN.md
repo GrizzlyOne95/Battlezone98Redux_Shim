@@ -208,7 +208,7 @@ will use, whatever happens to the live session.
      `Server:` row with two stock-style option slots, **Rebellion** and
      **Custom** (the selected one is captioned `> Rebellion <`), plus a text
      entry for the custom host that exists only while Custom is selected. A
-     note under it reads "Custom servers receive your platform sign-in
+     note under it reads "Custom servers never receive your sign-in
      ticket." When a test redirect is active
      (`GetMatchmakingRedirectTarget`) the row is instead the read-only label
      `Server: <addr> (test redirect)` and no toggle or entry is built.
@@ -285,17 +285,32 @@ from OpenShim means matching that layout and allocator exactly, which is the
 the first version.** For non-default ports, persist the endpoint and apply it
 as `/bzrserver=` on the next launch, with OpenShim offering a relaunch.
 
-**Security: the platform ticket goes to whatever server you choose.** The
-`Authorization` body carries the Steam/Galaxy ticket, and a custom server
-receives it. A malicious server could try to replay it against Rebellion's
-service while it is still valid.
+**Security: the platform ticket is withheld from non-official servers.** The
+`Authorization` body carries the Steam/Galaxy ticket; a malicious server could
+try to replay it against Rebellion's service while it is still valid. So
+OpenShim never lets it leave for any host other than
+`battlezone98mp.webdev.rebellion.co.uk`, whichever way the server was chosen
+(`[Network] Server=Custom`, `/bzrserver=`, or the test redirect):
 
-- The UI must label Custom as "sends your platform login ticket to this server".
-- The reference `bzrnet_server/server.py` skips ticket validation. It stays
-  LAN/dev only until it validates tickets.
-- Whether a custom endpoint should send a ticket at all, or an
-  OpenShim-specific auth type, is a decision for the community-server
-  workstream.
+- A BZRNet lookup that resolves to a non-official host records its addresses;
+  a TCP socket that connects to one of them is tagged. Its outbound WebSocket
+  stream is scrubbed in `net_optimizer.cpp` (`ScrubWebSocketTickets`,
+  `bzrnet_protocol.cpp`) before it reaches ws2_32: `steamAppTicket`,
+  `gogAppTicket`, `authTicket` and `platformTicket` string values become
+  `"withheld"` (or `""` for a value shorter than that), padded with JSON
+  spaces so the frame length and mask key are unchanged. One
+  `ticket_withheld sid= key= length=` line is logged per rewrite, never the
+  value. Traffic to the official host is never inspected.
+- Fail closed: on a tagged socket a text frame that could carry a ticket but
+  cannot be rewritten in place (payload split across send calls, fragmented or
+  continuation frame, RSV bits / permessage-deflate, over 256 KiB, ticket value
+  that is not a string, an overlapped send that would need rewriting) is not
+  sent; the send returns `SOCKET_ERROR` / `WSAECONNABORTED`.
+- Needs the socket hooks, i.e. `NetImprovements` on (the same gate as the
+  redirect itself); independent of `RelayCapture`.
+- The community server therefore sees `withheld` as the ticket and must not
+  require a valid platform ticket. The reference `bzrnet_server/server.py`
+  skips ticket validation.
 
 ### Why not defer auth
 
@@ -326,7 +341,7 @@ endpoint pointing at a LAN machine running the dev server.
    - Acceptance: a second client sees the new name.
 2. **Endpoint picker, apply on relaunch.**
    - Official / Custom persisted; `/bzrserver=` or the redirect at launch.
-   - Ticket warning.
+   - Ticket withholding (done; see Security above).
 3. **Live endpoint switch.** Host-only redirect + recycle, once live checks 1
    and 6 pass.
 4. **LAN-hosted control plane.** Its own design.
