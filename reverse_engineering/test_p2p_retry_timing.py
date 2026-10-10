@@ -17,11 +17,19 @@ def receive_log(early, armed=1, unavailable=0, totals=()):
     return log
 
 
+def nak_log(nak, armed=1, unavailable=0, totals=()):
+    log = '[P2PRECV] Early NAK receive armed: return=0x00 accept=0x00 window=4096\n' * armed
+    log += '[P2PRECV] NAK signatures unavailable; stock NAK receive kept\n' * unavailable
+    for total in totals:
+        log += f'[P2PRECV] Accepted early NAKs: total={total} (+1)\n'
+    return log
+
+
 def evidence(token):
     values = timing.parse_timers(token)
     ini = '[Network]\n' + ''.join(f'{key} = {value}\n' for (key, _, _), value in zip(timing.TIMERS, values))
-    ini += f'EarlyUnreliableAccept = {values[2]}\n'
-    log = receive_log(values[2], armed=values[2])
+    ini += f'EarlyUnreliableAccept = {values[2]}\nEarlyNakAccept = {values[3]}\n'
+    log = receive_log(values[2], armed=values[2]) + nak_log(values[3], armed=values[3])
     for (key, patch, stock), value in zip(timing.TIMERS, values):
         if value == stock:
             log += f'[SKIP] {patch} address=0x0075CA00 verified=yes payload=0\n'
@@ -71,8 +79,8 @@ class RetryEvidenceTests(unittest.TestCase):
 
 class EarlyEvidenceTests(unittest.TestCase):
     def test_token_parse_and_round_trip(self):
-        self.assertEqual(timing.parse_timers('1000/2500'), (1000, 2500, 0))
-        self.assertEqual(timing.parse_timers('300/800+early'), (300, 800, 1))
+        self.assertEqual(timing.parse_timers('1000/2500'), (1000, 2500, 0, 0))
+        self.assertEqual(timing.parse_timers('300/800+early'), (300, 800, 1, 0))
         self.assertEqual(timing.token_of(*timing.parse_timers('300/800+early')), '300/800+early')
         for token in ('300/800+', '300/800+Early', '300/800+early+early', '+early', '49/800+early'):
             with self.assertRaises(ValueError):
@@ -84,7 +92,8 @@ class EarlyEvidenceTests(unittest.TestCase):
         result = timing.verify_client(ini, log, '1000/2500+early')
         self.assertEqual(result['status'], 'verified')
         self.assertEqual(result['timers'], '1000/2500+early')
-        self.assertEqual(result['receive'], {'early':1, 'armedLines':1, 'signaturesUnavailableLines':0, 'deliveredTotal':9})
+        self.assertEqual(result['receive'], {'early':1, 'armedLines':1, 'signaturesUnavailableLines':0, 'deliveredTotal':9,
+                                            'nak':0, 'nakArmedLines':0, 'nakSignaturesUnavailableLines':0, 'naksAcceptedTotal':0})
 
     def test_early_one_failures(self):
         ini, log = evidence('1000/2500+early')
@@ -115,6 +124,53 @@ class EarlyEvidenceTests(unittest.TestCase):
             self.assertEqual(result['clients']['c2']['receive']['deliveredTotal'], 12)
             (Path(run)/'client1/logs/openshim.log').write_text(evidence('300/800+early')[1] + receive_log(1, armed=0, unavailable=1))
             self.assertEqual(timing.verify_run(run, '300/800+early', 4)['clients']['c1']['status'], 'mismatch')
+
+
+class NakEvidenceTests(unittest.TestCase):
+    def test_token_order_and_round_trip(self):
+        self.assertEqual(timing.parse_timers('300/800+nak'), (300, 800, 0, 1))
+        self.assertEqual(timing.parse_timers('300/800+early+nak'), (300, 800, 1, 1))
+        self.assertEqual(timing.token_of(*timing.parse_timers('300/800+early+nak')), '300/800+early+nak')
+        self.assertEqual(timing.token_of(*timing.parse_timers('300/800+nak')), '300/800+nak')
+        for token in ('300/800+nak+early', '300/800+nak+nak', '300/800+early+early+nak', '300/800+NAK', '300/800+Nak',
+                      '300/800+early+', '300/800+nakk', '+nak', '49/800+nak'):
+            with self.assertRaises(ValueError):
+                timing.parse_timers(token)
+
+    def test_nak_armed_line_does_not_count_as_early_and_vice_versa(self):
+        ini, log = evidence('300/800+nak')
+        result = timing.verify_client(ini, log, '300/800+nak')
+        self.assertEqual(result['status'], 'verified')
+        self.assertEqual((result['receive']['armedLines'], result['receive']['nakArmedLines']), (0, 1))
+        ini, log = evidence('300/800+early')
+        self.assertEqual(timing.verify_client(ini, log, '300/800+early')['receive']['nakArmedLines'], 0)
+        # only the other feature's armed line present: both directions must fail
+        self.assertEqual(timing.verify_client(ini, log.replace(receive_log(1), nak_log(1)), '300/800+early')['status'], 'mismatch')
+        ini, log = evidence('300/800+nak')
+        self.assertEqual(timing.verify_client(ini, log.replace(nak_log(1), receive_log(1)), '300/800+nak')['status'], 'mismatch')
+
+    def test_nak_failures(self):
+        ini, log = evidence('300/800+early+nak')
+        self.assertEqual(timing.verify_client(ini, log, '300/800+early+nak')['status'], 'verified')
+        for broken in (log.replace(nak_log(1), ''), log + nak_log(1), log + nak_log(1, armed=0, unavailable=1)):
+            self.assertEqual(timing.verify_client(ini, broken, '300/800+early+nak')['status'], 'mismatch')
+        for broken in (ini.replace('EarlyNakAccept = 1', 'EarlyNakAccept = 0'), ini.replace('EarlyNakAccept = 1\n', ''),
+                       ini + 'EarlyNakAccept = 1\n', ini.replace('NakAccept = 1', 'NakAccept = 2')):
+            self.assertEqual(timing.verify_client(broken, log, '300/800+early+nak')['status'], 'mismatch')
+        ini, log = evidence('300/800')
+        self.assertEqual(timing.verify_client(ini, log + nak_log(1), '300/800')['status'], 'mismatch')
+        self.assertEqual(timing.verify_client(ini.replace('NakAccept = 0', 'NakAccept = 1'), log, '300/800')['status'], 'mismatch')
+
+    def test_verify_run_reports_nak_totals(self):
+        with tempfile.TemporaryDirectory() as run:
+            for i in range(4):
+                root = Path(run)/f'client{i}'; (root/'logs').mkdir(parents=True)
+                ini, log = evidence('300/800+nak')
+                (root/'openshim.ini').write_text(ini)
+                (root/'logs/openshim.log').write_text(log + nak_log(1, armed=0, totals=(i, 5 + i)))
+            result = timing.verify_run(run, '300/800+nak', 4)
+            self.assertEqual((result['status'], result['nak'], result['early'], result['naksAcceptedTotal']), ('verified', 1, 0, 26))
+            self.assertEqual(result['clients']['c3']['receive']['naksAcceptedTotal'], 8)
 
 
 class RetryScoreTests(unittest.TestCase):

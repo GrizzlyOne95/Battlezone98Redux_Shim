@@ -30,5 +30,16 @@ inline bool ShouldDeliver(const Packet& p) {
     const uint32_t ahead = p.stamp - p.expected;  // modular: wraps like the native u32 stamp
     return ahead != 0 && ahead <= kMaxAhead;
 }
+
+// A kind-6 NAK carries the requester's next reliable stamp, so stock accepts it
+// only when every reliable fragment the requester has sent us has arrived;
+// with reliable traffic in flight in both directions that is rarely true, and
+// the native receive drops kinds 6/7 silently. Accepting a NAK stamped ahead
+// runs its only effect, case 6 setting peer+0x20 (retry deadline) to now.
+inline bool ShouldAcceptNak(uint8_t kind, uint32_t stamp, uint32_t expected) {
+    if (kind != 6) return false;
+    const uint32_t ahead = stamp - expected;
+    return ahead != 0 && ahead <= kMaxAhead;
+}
 } // namespace P2PEarlyUnreliable
 } // namespace BZROpenShim

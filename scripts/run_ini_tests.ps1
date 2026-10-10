@@ -286,6 +286,7 @@ $stockValueChecks = @{
     "Network/ReliableFirstRetryMs" = "1000"
     "Network/ReliableRetryIntervalMs" = "2500"
     "Network/EarlyUnreliableAccept" = "0"
+    "Network/EarlyNakAccept" = "0"
     "SinglePlayer/HeadlightColor" = "Stock"
     "SinglePlayer/HeadlightBeam" = "Stock"
     "SinglePlayer/HeadlightBrightness" = "1.00"

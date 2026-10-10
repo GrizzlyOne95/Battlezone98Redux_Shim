@@ -39,5 +39,15 @@ int main() {
     check(ShouldDeliver(p), "stamp ahead across u32 wrap is delivered");
     p = base; p.expected = 2; p.stamp = 0xFFFFFFFFu;
     check(!ShouldDeliver(p), "stamp behind across u32 wrap stays rejected");
+
+    using BZROpenShim::P2PEarlyUnreliable::ShouldAcceptNak;
+    check(ShouldAcceptNak(6, 101, 100), "NAK stamped past an unreceived reliable is accepted");
+    check(ShouldAcceptNak(6, 100 + kMaxAhead, 100), "NAK window upper bound is inclusive");
+    check(!ShouldAcceptNak(6, 100 + kMaxAhead + 1, 100), "implausibly far NAK stays dropped");
+    check(!ShouldAcceptNak(6, 100, 100), "in-order NAK is stock's accept path");
+    check(!ShouldAcceptNak(6, 99, 100), "stale NAK stays dropped");
+    check(!ShouldAcceptNak(7, 101, 100), "keepalive is not a NAK");
+    check(!ShouldAcceptNak(0, 101, 100), "data is not a NAK");
+    check(ShouldAcceptNak(6, 1, 0xFFFFFFFFu), "NAK ahead across u32 wrap is accepted");
     return failures ? 1 : 0;
 }

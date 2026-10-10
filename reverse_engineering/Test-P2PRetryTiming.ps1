@@ -49,10 +49,24 @@ try {
         Assert $rejected "Invalid early token accepted: $token"
     }
     $withEarly = Set-P2PRetryTimingText "[Network]`r`nEarlyUnreliableAccept=0`r`nLabel=x`r`nEarlyUnreliableAccept = 1`r`n[Other]`r`nEarlyUnreliableAccept=7`r`n" '300/800+early'
-    Assert ($withEarly -ceq "[Network]`r`nLabel=x`r`nReliableFirstRetryMs = 300`r`nReliableRetryIntervalMs = 800`r`nEarlyUnreliableAccept = 1`r`n[Other]`r`nEarlyUnreliableAccept=7`r`n") 'Early key was not replaced only inside [Network].'
+    Assert ($withEarly -ceq "[Network]`r`nLabel=x`r`nReliableFirstRetryMs = 300`r`nReliableRetryIntervalMs = 800`r`nEarlyUnreliableAccept = 1`r`nEarlyNakAccept = 0`r`n[Other]`r`nEarlyUnreliableAccept=7`r`n") 'Early key was not replaced only inside [Network].'
     $off = Set-P2PRetryTimingText "[Network]`nEarlyUnreliableAccept=1`n" '300/800'
-    Assert ($off -ceq "[Network]`nReliableFirstRetryMs = 300`nReliableRetryIntervalMs = 800`nEarlyUnreliableAccept = 0`n") 'Plain token did not write an explicit early 0.'
+    Assert ($off -ceq "[Network]`nReliableFirstRetryMs = 300`nReliableRetryIntervalMs = 800`nEarlyUnreliableAccept = 0`nEarlyNakAccept = 0`n") 'Plain token did not write an explicit early 0.'
     Assert ((Set-P2PRetryTimingText '[Graphics]' '50/10000+early').Contains("EarlyUnreliableAccept = 1`n")) 'A missing Network section did not receive the early key.'
+    # NAK token: canonical order early then nak, explicit EarlyNakAccept 0/1, same section rules.
+    $both = ConvertTo-P2PRetryTiming '300/800+early+nak'
+    $nakOnly = ConvertTo-P2PRetryTiming '300/800+nak'
+    Assert (($both.early -eq 1) -and ($both.nak -eq 1) -and ($both.token -eq '300/800+early+nak') -and ($nakOnly.early -eq 0) -and ($nakOnly.nak -eq 1) -and ($nakOnly.token -eq '300/800+nak') -and ($plain.nak -eq 0)) 'NAK token did not round trip.'
+    foreach ($token in @('300/800+nak+early','300/800+nak+nak','300/800+early+early+nak','300/800+NAK','300/800+Nak','300/800+early+','300/800+nakk','+nak')) {
+        $rejected = $false
+        try { ConvertTo-P2PRetryTiming $token | Out-Null } catch { $rejected = $true }
+        Assert $rejected "Invalid NAK token accepted: $token"
+    }
+    $withNak = Set-P2PRetryTimingText "[Network]`r`nEarlyNakAccept=0`r`nLabel=x`r`nEarlyNakAccept = 1`r`n[Other]`r`nEarlyNakAccept=7`r`n" '300/800+nak'
+    Assert ($withNak -ceq "[Network]`r`nLabel=x`r`nReliableFirstRetryMs = 300`r`nReliableRetryIntervalMs = 800`r`nEarlyUnreliableAccept = 0`r`nEarlyNakAccept = 1`r`n[Other]`r`nEarlyNakAccept=7`r`n") 'NAK key was not replaced only inside [Network].'
+    $offNak = Set-P2PRetryTimingText "[Network]`nEarlyNakAccept=1`nEarlyUnreliableAccept=1`n" '300/800'
+    Assert ($offNak -ceq "[Network]`nReliableFirstRetryMs = 300`nReliableRetryIntervalMs = 800`nEarlyUnreliableAccept = 0`nEarlyNakAccept = 0`n") 'Plain token did not write explicit early and NAK 0.'
+    Assert ((Set-P2PRetryTimingText '[Graphics]' '50/10000+early+nak').Contains("EarlyUnreliableAccept = 1`nEarlyNakAccept = 1`n")) 'A missing Network section did not receive both keys.'
     Write-Host '[PASS] Prevalidation, section isolation, durable backup, and exact byte restoration.'
 } finally {
     # Remove only the explicitly created temporary files; no recursive deletion.
