@@ -200,6 +200,7 @@
     <ClCompile Include="src\patches\shadow_far_distance_hook.cpp" />
     <ClCompile Include="src\patches\team_filter_mines.cpp" />
     <ClCompile Include="src\patches\ui_camera_fixes.cpp" />
+    <ClCompile Include="src\patches\unfocused_mouse_release.cpp" />
     <ClCompile Include="src\patches\unit_behavior_fixes.cpp" />
     <ClCompile Include="src\patches\unit_vo.cpp" />
     <ClCompile Include="src\patches\vehicle_list_mod_fix.cpp" />
