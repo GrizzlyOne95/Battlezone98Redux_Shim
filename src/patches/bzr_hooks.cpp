@@ -1,4 +1,5 @@
 #include "native_hud_runtime.h"
+#include "geometry_contact_test.h"
 #include "bzr_hooks.h"
 #include "env_switch_table.h"
 #include "bool_token.h"
@@ -274,6 +275,7 @@ namespace BZROpenShim
     {
         NativeHud::Runtime::SetAdapterCapabilities(0);
         ResetWeaponPresentationState();
+        GeometryContactTest::Clear();
         g_BzrFn_EngineFlameAddFlame = nullptr;
         g_BzrFn_EngineFlameControl = nullptr;
         g_BzrFn_EngineFlameSubmit = nullptr;
@@ -1564,6 +1566,7 @@ namespace BZROpenShim
             {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
             {"InitializePilotFlashlightConfig", &InitializePilotFlashlightConfig},
             {"InstallWeaponPresentationNativeIfRequested", &InstallWeaponPresentationNativeIfRequested},
+            {"InitializeVehicleGeometryContact", &GeometryContactTest::InitializeGlobal},
             {"InstallEmissionLightFixIfPossible", &InstallEmissionLightFixIfPossible},
             {"VerifyExpectedOgreExportsIfPossible", &VerifyExpectedOgreExportsIfPossible},
             {"InitializeJetFlamesConfig", &InitializeJetFlamesConfig},
@@ -1694,6 +1697,7 @@ namespace BZROpenShim
         // Uses the existing SP gate; no allocation/work until a qualified
         // presentation backend is registered. Never advance simulation here.
         RefreshWeaponPresentationState();
+        GeometryContactTest::Tick();
 
         // Same driver again, and for the same reason: the packed team has to be
         // repaired while the player is still on foot, because the value is read
