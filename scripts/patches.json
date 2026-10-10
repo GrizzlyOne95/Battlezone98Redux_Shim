@@ -2,6 +2,11 @@
   "features": {
     "ogre_material_collision_guard": true
   },
+  "build": {
+    "label": "2.2.301",
+    "time_date_stamps": ["0x58D9D6CC"],
+    "identity": "Battlezone 98 Redux 2.2.301, the GOG build and the Steam public manifest 7411172603041703474: one link (PE timestamp 0x58D9D6CC, PDB GUID 04FFCABE-6837-4AB9-9D42-E5B9DF4C7CBA); Steam wraps it in SteamStub. Every address below is for this build; other builds go in build_overlays (see include/build_overlay.h)."
+  },
   "patches": [
     {
       "name": "P2P Reliable Send Backlog",
@@ -1738,6 +1743,1704 @@
       "address": "0x008E7732",
       "kind": "data",
       "identity": "Byte read by the GameObjectClass loader (FUN_004e0450) to preload assets; ControlPanel PostLoad clears it around its own InitBuildItem calls."
+    },
+    {
+      "name": "UiPerfMainScreenGlobal",
+      "address": "0x0094551C",
+      "kind": "data",
+      "identity": "Global holding the live MainScreen (shell main menu) object; ui_performance_hooks.cpp reads it for the harness and the Steam settle check."
+    },
+    {
+      "name": "UiPerfMainScreenVtable",
+      "address": "0x0089E178",
+      "kind": "data",
+      "identity": "MainScreen vtable; identifies the object held in UiPerfMainScreenGlobal."
+    },
+    {
+      "name": "UiPerfMainScreenOverlayVtable",
+      "address": "0x008A0B94",
+      "kind": "data",
+      "identity": "Vtable of the MainScreen overlay at MainScreen+0x158 that owns the main menu buttons."
+    },
+    {
+      "name": "UiPerfButtonVtable",
+      "address": "0x008A0470",
+      "kind": "data",
+      "identity": "UI button vtable; a button keeps its OnClick thunk at +0x154."
+    },
+    {
+      "name": "UiPerfShellWrapperGlobal",
+      "address": "0x00918320",
+      "kind": "data",
+      "identity": "Global holding the shell wrapper; the active screen is at wrapper+0x14 and ShellBack takes the wrapper."
+    },
+    {
+      "name": "UiPerfBuildMainResources",
+      "address": "0x0076A030",
+      "expected": "55 8B EC 6A FF 68 50 D5 85 00 64 A1 00 00 00 00",
+      "identity": "buildMainResources (modable mount mode 4). Guard covers the SEH prologue and the handler push the body check used."
+    },
+    {
+      "name": "UiPerfBuildMpResources",
+      "address": "0x0076A240",
+      "expected": "55 8B EC 6A FF 68 A0 D5 85 00 64 A1 00 00 00 00",
+      "identity": "buildMPResources (modable mount mode 2)."
+    },
+    {
+      "name": "UiPerfBuildIaResources",
+      "address": "0x0076A430",
+      "expected": "55 8B EC 6A FF 68 F0 D5 85 00 64 A1 00 00 00 00",
+      "identity": "buildIAResources (modable mount mode 1)."
+    },
+    {
+      "name": "UiPerfMainScreenCtor",
+      "address": "0x0078E670",
+      "expected": "55 8B EC 6A FF 68 54 EC 85 00 64 A1 00 00 00 00",
+      "identity": "MainScreen constructor."
+    },
+    {
+      "name": "UiPerfMainScreenDtor",
+      "address": "0x0078E8C0",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D FC E8 D1 03 00 00 8B 45 08",
+      "identity": "MainScreen scalar deleting destructor."
+    },
+    {
+      "name": "UiPerfMultiplayerLobbyCtor",
+      "address": "0x0079EA90",
+      "expected": "55 8B EC 6A FF 68 50 FF 85 00 64 A1 00 00 00 00",
+      "identity": "Multiplayer lobby screen constructor."
+    },
+    {
+      "name": "UiPerfMultiplayerLobbyDtor",
+      "address": "0x007A0F80",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D FC E8 21 00 00 00 8B 45 08",
+      "identity": "Multiplayer lobby screen scalar deleting destructor."
+    },
+    {
+      "name": "UiPerfInstantActionCtor",
+      "address": "0x00789C20",
+      "expected": "55 8B EC 6A FF 68 C4 E8 85 00 64 A1 00 00 00 00",
+      "identity": "Instant Action screen constructor."
+    },
+    {
+      "name": "UiPerfSetModableNone",
+      "address": "0x0076A600",
+      "expected": "55 8B EC 6A FF 68 A3 D6 85 00 64 A1 00 00 00 00",
+      "identity": "setModableNone (mount mode 0; ret 4)."
+    },
+    {
+      "name": "UiPerfSetModableCustomCampaignList",
+      "address": "0x0076AB20",
+      "expected": "55 8B EC 6A FF 68 27 D7 85 00 64 A1 00 00 00 00",
+      "identity": "setModableCustomCampaignList (mount mode 3; plain ret, no argument)."
+    },
+    {
+      "name": "UiPerfSetModableCampaign",
+      "address": "0x0076AE60",
+      "expected": "55 8B EC 6A FF 68 A3 D6 85 00 64 A1 00 00 00 00",
+      "identity": "setModableCampaign (ret 4; compares content+0x7C with the manager's +0x90)."
+    },
+    {
+      "name": "UiPerfSetModableContentB",
+      "address": "0x0076B350",
+      "expected": "55 8B EC 6A FF 68 A7 D7 85 00 64 A1 00 00 00 00",
+      "identity": "setModableContentB (ret 4)."
+    },
+    {
+      "name": "ScrapHudScrapTitlePoint",
+      "address": "0x0091829C",
+      "kind": "data",
+      "identity": "Scrap/pilot HUD layout point (int x at +0, y at +4) the stock builder 0x005C6CF0 writes and the gauge draw 0x005C6F70 reads: scrap title text."
+    },
+    {
+      "name": "ScrapHudScrapValuePoint",
+      "address": "0x0091826C",
+      "kind": "data",
+      "identity": "Scrap/pilot HUD layout point (x, y): scrap value text."
+    },
+    {
+      "name": "ScrapHudPilotTitlePoint",
+      "address": "0x00918280",
+      "kind": "data",
+      "identity": "Scrap/pilot HUD layout point (x, y): pilot title text."
+    },
+    {
+      "name": "ScrapHudPilotValuePoint",
+      "address": "0x00918278",
+      "kind": "data",
+      "identity": "Scrap/pilot HUD layout point (x, y): pilot value text."
+    },
+    {
+      "name": "ScrapHudScrapPanelPoint",
+      "address": "0x00918260",
+      "kind": "data",
+      "identity": "Scrap/pilot HUD layout point (x, y): scrap backplate sprite."
+    },
+    {
+      "name": "ScrapHudPilotPanelPoint",
+      "address": "0x0091828C",
+      "kind": "data",
+      "identity": "Scrap/pilot HUD layout point (x, y): pilot backplate sprite."
+    },
+    {
+      "name": "CommandMenuRowRects",
+      "address": "0x009173E8",
+      "kind": "data",
+      "identity": "Command menu row rects, 13 x {left, top, right, bottom}, rebuilt by 0x0049F9E0 on every viewport or UI-scale change."
+    },
+    {
+      "name": "CommandUiBoundsLeft",
+      "address": "0x0260D748",
+      "kind": "data",
+      "identity": "CommandUI bounds.left (the title row's left, design 10), cached by 0x0049F9E0; CommandUI::Render 0x004A08E0 places the menu frame from it."
+    },
+    {
+      "name": "CommandUiUnderlaySpriteId",
+      "address": "0x009173E4",
+      "kind": "data",
+      "identity": "Sprite id of the command menu frame CommandUI::Render submits."
+    },
+    {
+      "name": "CommandMenuAltLayoutFlag",
+      "address": "0x00915567",
+      "kind": "data",
+      "identity": "Byte flag, non-zero for the alternate command menu layout (no frame)."
+    },
+    {
+      "name": "HudViewportWidth",
+      "address": "0x02CECEE0",
+      "kind": "data",
+      "identity": "HUD viewport width (int); the height follows at HudViewportHeight."
+    },
+    {
+      "name": "HudViewportHeight",
+      "address": "0x02CECEE4",
+      "kind": "data",
+      "identity": "HUD viewport height (int)."
+    },
+    {
+      "name": "HudColorWhite",
+      "address": "0x0091755C",
+      "kind": "data",
+      "identity": "DisplayInterface::colorWhite, written by LoadInterfaceColors 0x004B6720; Redux draws all four scrap/pilot strings with it."
+    },
+    {
+      "name": "HudColorBlue",
+      "address": "0x00917578",
+      "kind": "data",
+      "identity": "DisplayInterface::colorBlue (0xFF007FFF); BZ 1.5 drew the scrap strings with it."
+    },
+    {
+      "name": "HudColorGreen",
+      "address": "0x009175B0",
+      "kind": "data",
+      "identity": "DisplayInterface::colorGreen (0xFF00FF00); BZ 1.5 drew the pilot strings with it."
+    },
+    {
+      "name": "HudFillRect",
+      "address": "0x0068AFB0",
+      "expected": "55 8B EC 8B 45 0C 3B 45 14 7F 08 8B 4D 10",
+      "identity": "HUD 2D filled-rect helper, cdecl (buffer, x1, y1, x2, y2, colour, mode); mode 0 passes the colour through."
+    },
+    {
+      "name": "HudSpriteSubmit",
+      "address": "0x0068CA30",
+      "expected": "55 8B EC 81 EC 98 00 00 00 A1 00 70 8E 00",
+      "identity": "HUD sprite submit, cdecl (buffer, material, spriteId, x, y, w, h, 1, 0)."
+    },
+    {
+      "name": "ScrapHudScrapPanelSubmitCall",
+      "address": "0x005C710E",
+      "expected": "E8 1D 59 0C 00 83 C4 24 F3 0F 10 45 DC",
+      "identity": "The CALL HudSpriteSubmit that draws the scrap backplate; legacy layout retargets it."
+    },
+    {
+      "name": "ScrapHudPilotPanelSubmitCall",
+      "address": "0x005C72D4",
+      "expected": "E8 57 57 0C 00 83 C4 24 F3 0F 10 45 DC",
+      "identity": "The CALL HudSpriteSubmit that draws the pilot backplate; legacy layout retargets it."
+    },
+    {
+      "name": "ScrapHudScrapTitleColorLoad",
+      "address": "0x005C712B",
+      "expected": "A1 5C 75 91 00 50 8B 0D 50 75 91 00",
+      "identity": "mov eax, [colorWhite] feeding the scrap title string draw; legacy layout repoints the operand."
+    },
+    {
+      "name": "ScrapHudScrapValueColorLoad",
+      "address": "0x005C719B",
+      "expected": "8B 15 5C 75 91 00 52 A1 50 75 91 00",
+      "identity": "mov edx, [colorWhite] feeding the scrap value string draw."
+    },
+    {
+      "name": "ScrapHudPilotTitleColorLoad",
+      "address": "0x005C72F1",
+      "expected": "8B 15 5C 75 91 00 52 A1 50 75 91 00",
+      "identity": "mov edx, [colorWhite] feeding the pilot title string draw."
+    },
+    {
+      "name": "ScrapHudPilotValueColorLoad",
+      "address": "0x005C7361",
+      "expected": "8B 0D 5C 75 91 00 51 8B 15 50 75 91 00",
+      "identity": "mov ecx, [colorWhite] feeding the pilot value string draw."
+    },
+    {
+      "name": "ScrapHudScrapTitleAlignPush",
+      "address": "0x005C7125",
+      "expected": "6A 01 6A 00 6A FF A1 5C 75 91 00 50",
+      "identity": "push 1 (centre on x) for the scrap title string; legacy layout makes it push 0."
+    },
+    {
+      "name": "ScrapHudScrapValueAlignPush",
+      "address": "0x005C7195",
+      "expected": "6A 01 6A 00 6A FF 8B 15 5C 75 91 00",
+      "identity": "push 1 alignment for the scrap value string."
+    },
+    {
+      "name": "ScrapHudPilotTitleAlignPush",
+      "address": "0x005C72EB",
+      "expected": "6A 01 6A 00 6A FF 8B 15 5C 75 91 00",
+      "identity": "push 1 alignment for the pilot title string."
+    },
+    {
+      "name": "ScrapHudPilotValueAlignPush",
+      "address": "0x005C735B",
+      "expected": "6A 01 6A 00 6A FF 8B 0D 5C 75 91 00",
+      "identity": "push 1 alignment for the pilot value string."
+    },
+    {
+      "name": "ScriptCanBuild",
+      "address": "0x005CB4E0",
+      "expected": "55 8B EC 83 EC 08 8B 45 08",
+      "identity": "ScriptUtils CanBuild(handle) predicate"
+    },
+    {
+      "name": "ScriptIsBusy",
+      "address": "0x005CB550",
+      "expected": "55 8B EC 83 EC 08 8B 45 08",
+      "identity": "ScriptUtils IsBusy(handle) predicate"
+    },
+    {
+      "name": "ProducerCanBuild",
+      "address": "0x004738B0",
+      "expected": "55 8B EC 83 EC 08 89 4D FC",
+      "identity": "Producer::CanBuild"
+    },
+    {
+      "name": "ProducerIsBusy",
+      "address": "0x004723D0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC",
+      "identity": "Producer::IsBusy"
+    },
+    {
+      "name": "SprayBuildingVtable",
+      "address": "0x008881EC",
+      "kind": "data",
+      "identity": "RTTI .?AVSprayBuilding@@ primary vtable; Simulate is slot 15"
+    },
+    {
+      "name": "SprayBuildingSimulate",
+      "address": "0x005DA6E0",
+      "expected": "55 8B EC 81 EC E8 02 00 00",
+      "identity": "SprayBuilding::Simulate, SprayBuildingVtable slot 15"
+    },
+    {
+      "name": "BuildingSimulate",
+      "address": "0x0047FCB0",
+      "expected": "55 8B EC 83 EC 68 A1 00 70 8E 00",
+      "identity": "Building::Simulate"
+    },
+    {
+      "name": "TugVtable",
+      "address": "0x00889008",
+      "kind": "data",
+      "identity": "RTTI .?AVTug@@ primary vtable; PostLoad is slot 22"
+    },
+    {
+      "name": "TugPostLoad",
+      "address": "0x005EC430",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC",
+      "identity": "Tug::PostLoad, TugVtable slot 22"
+    },
+    {
+      "name": "GameObjectHandleGetObj",
+      "address": "0x00462630",
+      "expected": "55 8B EC 51 8B 45 08 50 E8 23 7A 07 00",
+      "identity": "GameObjectHandle::GetObj(handle), cdecl"
+    },
+    {
+      "name": "ApcActualTeamRejectBranch",
+      "address": "0x004700E6",
+      "expected": "0F 84 A5 00 00 00 8B 8D 70 FF FF FF",
+      "identity": "APC::Simulate jz on selected-target actual-team relation failure"
+    },
+    {
+      "name": "ApcPerceivedTeamRejectBranch",
+      "address": "0x00470108",
+      "expected": "0F 84 83 00 00 00 8B 8D 70 FF FF FF",
+      "identity": "APC::Simulate jz on selected-target perceived-team relation failure"
+    },
+    {
+      "name": "ApcNoTargetScan",
+      "address": "0x004701AC",
+      "expected": "C6 85 7B FF FF FF 00 8B 15 74 7A 91 00",
+      "identity": "APC::Simulate nearby-enemy scan taken when no target is selected"
+    },
+    {
+      "name": "AiGameInitialised",
+      "address": "0x00930F08",
+      "kind": "data",
+      "identity": "AI game-initialised flag, read by AI_UnitRemove entry"
+    },
+    {
+      "name": "AiTeamTable",
+      "address": "0x00920F04",
+      "kind": "data",
+      "identity": "AI team pointer table, indexed by team"
+    },
+    {
+      "name": "AiTeamData",
+      "address": "0x02CE9B18",
+      "kind": "data",
+      "identity": "AI per-team data, stride 0x1E0, byte 0 is the AI-controlled flag"
+    },
+    {
+      "name": "RigProcessCleanUState2",
+      "address": "0x0049EE10",
+      "expected": "55 8B EC 83 EC 10 89 4D F8 8B 45 F8 8B 48 34 E8 8C DF FF FF 8B 4D F8 8B 51 38",
+      "identity": "RigProcess::CleanUState2; guard runs through the CancelUnbuild call and the task load at +0x17"
+    },
+    {
+      "name": "AIUnitRemove",
+      "address": "0x0068FC60",
+      "expected": "55 8B EC 51 83 3D 08 0F 93 00 00",
+      "identity": "AI_UnitRemove(unit) entry"
+    },
+    {
+      "name": "WingmanVtable",
+      "address": "0x0088A464",
+      "kind": "data",
+      "identity": "RTTI .?AVWingman@@ primary vtable; UpdateWeaponAim is slot 38 (+0x98)"
+    },
+    {
+      "name": "TurretCraftVtable",
+      "address": "0x00889380",
+      "kind": "data",
+      "identity": "RTTI .?AVTurretCraft@@ primary vtable; UpdateWeaponAim is slot 38"
+    },
+    {
+      "name": "HowitzerVtable",
+      "address": "0x0087AD70",
+      "kind": "data",
+      "identity": "RTTI .?AVHowitzer@@ primary vtable; slot 38 inherits TurretTank::UpdateWeaponAim"
+    },
+    {
+      "name": "TurretTankVtable",
+      "address": "0x00889498",
+      "kind": "data",
+      "identity": "RTTI .?AVTurretTank@@ primary vtable; UpdateWeaponAim is slot 38"
+    },
+    {
+      "name": "WingmanUpdateWeaponAim",
+      "address": "0x004EB590",
+      "expected": "55 8B EC 81 EC 18 03 00 00",
+      "identity": "Wingman::UpdateWeaponAim, WingmanVtable slot 38"
+    },
+    {
+      "name": "TurretCraftUpdateWeaponAim",
+      "address": "0x005F0930",
+      "expected": "55 8B EC 81 EC 68 03 00 00",
+      "identity": "TurretCraft::UpdateWeaponAim, TurretCraftVtable slot 38"
+    },
+    {
+      "name": "TurretTankUpdateWeaponAim",
+      "address": "0x005F27B0",
+      "expected": "55 8B EC 81 EC 18 03 00 00",
+      "identity": "TurretTank::UpdateWeaponAim, TurretTankVtable and HowitzerVtable slot 38"
+    },
+    {
+      "name": "CarrierGetWeapon",
+      "address": "0x00417F60",
+      "expected": "55 8B EC 51 89 4D FC B8 01 00 00 00",
+      "identity": "Carrier::GetWeapon(slot), thiscall; called after mov ecx,[craft+0x1A0] in each UpdateWeaponAim"
+    },
+    {
+      "name": "RefreshWeaponTransform",
+      "address": "0x00681A00",
+      "expected": "55 8B EC 83 EC 3C A1 00 70 8E 00",
+      "identity": "RefreshWeaponTransform(weaponObject, transform), cdecl"
+    },
+    {
+      "name": "ReticleGlobal",
+      "address": "0x025CE6D0",
+      "kind": "data",
+      "identity": "global Reticle; ctor 0x005BA170 called with this from 0x0040B013"
+    },
+    {
+      "name": "SmartReticlePooledRange",
+      "address": "0x00886B20",
+      "kind": "data",
+      "identity": "pooled read-only 200.0f literal the five reticle range loads use (and ~107 other sites)"
+    },
+    {
+      "name": "SmartReticleRangeRadiusLoad",
+      "address": "0x005BC6CF",
+      "expected": "F3 0F 10 05 20 6B 88 00",
+      "identity": "Reticle::FindReticleObject movss xmm,[pooled 200.0] radius = range*0.5"
+    },
+    {
+      "name": "SmartReticleRangeCenterXMul",
+      "address": "0x005BC6F6",
+      "expected": "F3 0F 59 05 20 6B 88 00",
+      "identity": "Reticle::FindReticleObject mulss xmm,[pooled 200.0] search center x"
+    },
+    {
+      "name": "SmartReticleRangeCenterZMul",
+      "address": "0x005BC728",
+      "expected": "F3 0F 59 05 20 6B 88 00",
+      "identity": "Reticle::FindReticleObject mulss xmm,[pooled 200.0] search center z"
+    },
+    {
+      "name": "SmartReticleRangeDepthCull",
+      "address": "0x005BC8BD",
+      "expected": "0F 2F 05 20 6B 88 00 76 05",
+      "identity": "Reticle::FindReticleObject comiss xmm,[pooled 200.0] depth cull"
+    },
+    {
+      "name": "SmartReticleRangeGroundRay",
+      "address": "0x005BCCB3",
+      "expected": "F3 0F 10 05 20 6B 88 00",
+      "identity": "Reticle::FindGroundPos movss xmm,[pooled 200.0] terrain ray length"
+    },
+    {
+      "name": "RadarLayoutBuilder",
+      "address": "0x00492EC0",
+      "expected": "55 8B EC 83 EC 10 E8 E5 6F 1F 00 89 45 F0",
+      "identity": "BZR::Radar::RefreshLayout(screenHeight); writes radar projection + backdrop globals"
+    },
+    {
+      "name": "RadarProjRadius",
+      "address": "0x009173C0",
+      "kind": "data",
+      "identity": "int radar projection radius, written by RadarLayoutBuilder (stock base 245)"
+    },
+    {
+      "name": "RadarProjCentreX",
+      "address": "0x008E7924",
+      "kind": "data",
+      "identity": "int radar projection centre x, written by RadarLayoutBuilder (stock base 275)"
+    },
+    {
+      "name": "RadarProjCentreY",
+      "address": "0x008E7928",
+      "kind": "data",
+      "identity": "int radar projection centre y, written by RadarLayoutBuilder (stock base 170)"
+    },
+    {
+      "name": "RadarBackdropX",
+      "address": "0x008E77A8",
+      "kind": "data",
+      "identity": "int radar backdrop sprite x, written by RadarLayoutBuilder, read by FUN_00493D40"
+    },
+    {
+      "name": "RadarBackdropY",
+      "address": "0x008E77AC",
+      "kind": "data",
+      "identity": "int radar backdrop sprite y, written by RadarLayoutBuilder, read by FUN_00493D40"
+    },
+    {
+      "name": "RadarSizeScale",
+      "address": "0x008E77B0",
+      "kind": "data",
+      "identity": "float radar size scale, read by RadarLayoutBuilder and the backdrop draw"
+    },
+    {
+      "name": "RadarCompactMode",
+      "address": "0x009173C4",
+      "kind": "data",
+      "identity": "int compact (2/3-size) radar preset flag, set by FUN_00492DC0"
+    },
+    {
+      "name": "RadarUiScaleX",
+      "address": "0x02BF041C",
+      "kind": "data",
+      "identity": "float live UI scale x read by RadarLayoutBuilder"
+    },
+    {
+      "name": "RadarUiScaleY",
+      "address": "0x02BF0420",
+      "kind": "data",
+      "identity": "float live UI scale y read by RadarLayoutBuilder"
+    },
+    {
+      "name": "GameObjectGetTeam",
+      "address": "0x00462450",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 80 5C 01 00 00 8B E5",
+      "identity": "GameObject::GetTeam (returns [this+0x15C]); slot 1 of every GameObject-family vtable, compared as a type tag"
+    },
+    {
+      "name": "WorldRenderOrigin",
+      "address": "0x025F8E4C",
+      "kind": "data",
+      "identity": "Ogre::Vector3 per-map render origin; render = (x-o.x, y-o.y, -z-o.z)"
+    },
+    {
+      "name": "CarrierSetSelected",
+      "address": "0x004D9880",
+      "expected": "55 8B EC 83 EC 10 89 4D F8 8B 45 F8",
+      "identity": "Carrier::SetSelected(mask) __thiscall; LayMinesTask calls it with mask 1"
+    },
+    {
+      "name": "UiEnsureManualObject",
+      "address": "0x007D2B70",
+      "expected": "55 8B EC 6A FF 68 B0 2B 86 00 64 A1 00 00 00 00",
+      "identity": "UI widget lazily (re)creates its named Ogre ManualObject; SharedPtr by value, ret 8"
+    },
+    {
+      "name": "PersonCrouchBranch",
+      "address": "0x0059DEA5",
+      "expected": "0F B6 85 AE FC FF FF 85 C0 74 26",
+      "identity": "Person::Simulate landing: movzx eax,[ebp-jumpHeld]; test eax,eax; je sniper-check"
+    },
+    {
+      "name": "GameObjectSetDamageFlags",
+      "address": "0x004DC130",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC E8 62 6C 34 00",
+      "identity": "GameObject::SetDamageFlags(DAMAGE*) __thiscall; the four damage handlers call it, resolving damager/dmg_source through obj76 -> GameObject"
+    },
+    {
+      "name": "MainScreenDtor",
+      "address": "0x0078ECA0",
+      "expected": "55 8B EC 6A FF 68 C8 E6 85 00 64 A1 00 00 00 00",
+      "identity": "MainScreen destructor body, called by the scalar deleting destructor (UiPerfMainScreenDtor); clears the MainScreen singleton"
+    },
+    {
+      "name": "OptionsParentSingleton",
+      "address": "0x009455C4",
+      "kind": "data",
+      "identity": "Global holding the live Options screen, the parent native_ui attaches Options widgets to"
+    },
+    {
+      "name": "DynamicGeometrySetSquaredViewDepth",
+      "address": "0x0067A780",
+      "expected": "55 8B EC 83 EC 08 89 4D FC 8B 45 FC",
+      "identity": "DynamicGeometry squared view depth (alpha sort key) setter; dynamic alpha depth batching detours it"
+    },
+    {
+      "name": "DynamicGeometryPrepare",
+      "address": "0x00678CD0",
+      "expected": "55 8B EC 6A FF 68 50 F3 84 00 64 A1 00 00 00 00",
+      "identity": "DynamicGeometry::prepareForSubmit; opt-in Ogre profiler observer"
+    },
+    {
+      "name": "GetPlayerHandle",
+      "address": "0x005C7FB0",
+      "expected": "55 8B EC 83 EC 08 E8 B5 FC E4 FF 89 45 FC",
+      "identity": "GetPlayerHandle(): handle of the local player object"
+    },
+    {
+      "name": "SatelliteMaxZoomCompare",
+      "address": "0x00587E68",
+      "expected": "0F 2F 05 F4 23 87 00 76 10 8B 4D EC",
+      "identity": "comiss xmm0,[max zoom] in the satellite zoom clamp; operand at +3 is the .rdata maximum"
+    },
+    {
+      "name": "SatellitePanSpeedLoad",
+      "address": "0x00587BE6",
+      "expected": "F3 0F 10 05 D0 91 9C 00 F3 0F 59 45 D8",
+      "identity": "movss xmm0,[pan speed] in the satellite pan step; operand at +4 is the .data pan speed"
+    },
+    {
+      "name": "OrdnanceSpawnVelocitySite",
+      "address": "0x004803D4",
+      "expected": "8B 4D F0 89 08 8B 55 F4 89 50 04 8B 4D F8 89 48 08 8B 55 E0 8B 42 0C 8B 4D E0",
+      "identity": "Ordnance spawn velocity copy (mov ecx,[ebp-0x10]; mov [eax],ecx; ...); the spawn-velocity detour overwrites 8 bytes and its stub reads the host frame"
+    },
+    {
+      "name": "CannonLeadVelocitySite",
+      "address": "0x0048F658",
+      "expected": "8B 45 E0 8B 48 0C F3 0F 10 41 54 F3 0F 11 45 CC 8B 55 E0 F2 0F 5A 42 50",
+      "identity": "Cannon lead solve target-velocity load (mov eax,[ebp-0x20]; mov ecx,[eax+0x0C]); the cannon-lead detour overwrites 6 bytes and its stub reads the host frame"
+    },
+    {
+      "name": "CannonLeadToleranceBranch",
+      "address": "0x0048F639",
+      "expected": "0F 86 F0 01 00 00 8B 4D 0C E8 69 2E FD FF 8B 10 89 55 E4 8B 48 04 89 4D E8",
+      "identity": "jbe skipping the cannon lead solve for a target slower than 0.1 m/s; NOPed while lead compensation runs"
+    },
+    {
+      "name": "HudSpriteNameCount",
+      "address": "0x00920F00",
+      "kind": "data",
+      "identity": "uint32 count of registered HUD sprite names; sanity-checked (1..4096) before every read"
+    },
+    {
+      "name": "HudSpriteNameTable",
+      "address": "0x00920F08",
+      "kind": "data",
+      "identity": "HUD sprite name table, 0x20-byte names indexed by sprite id"
+    },
+    {
+      "name": "HudSpriteRectTable",
+      "address": "0x025F8F40",
+      "kind": "data",
+      "identity": "static HUD sprite rect records, id*0x24 (int16 x,y,w,h; float uv[4]); validated against stock atlas UVs before use"
+    },
+    {
+      "name": "ViewRecord",
+      "address": "0x008EAAD0",
+      "kind": "data",
+      "identity": "preset view record written by the satellite view setter (0x0061BD20): +0 Update_Camera, +4 previous view, +8 Current_View"
+    },
+    {
+      "name": "RadarAttackAlertCompare",
+      "address": "0x00494D35",
+      "expected": "0F 2F 05 D0 73 91 00 76 2B 6A 00 6A 00",
+      "identity": "comiss xmm0,[next beep] in CockpitRadar::Render's under-attack growl; operand at +3 is the cooldown float"
+    },
+    {
+      "name": "EmissionLightStateBranch",
+      "address": "0x0044CBD0",
+      "expected": "8B 45 FC 0F B6 48 1C 85 C9 0F 84 3E 03 00 00 8B 55 FC F2 0F 10 42 58 66 0F 57 05 00 30 8A 00",
+      "identity": "LightRenderClass::Simulate active-flag test (mov eax,[ebp-4]; movzx ecx,[eax+0x1C]; test ecx,ecx; je delete-path); the active path resumes after the je at +15"
+    },
+    {
+      "name": "EmissionLightLoopContinue",
+      "address": "0x0044CF49",
+      "expected": "E9 3E FC FF FF 5E 8B E5 5D C2 04 00",
+      "identity": "LightRenderClass::Simulate loop continue jmp; the emission-light fix sends dormant renderers here instead of the deleting destructor"
+    },
+    {
+      "name": "RunStateNameTable",
+      "address": "0x00871690",
+      "kind": "data",
+      "identity": "char* table of run state names (RUN_WAS_FAILURE .. RUN_STARTED at 5); index 5 must read RUN_STARTED"
+    },
+    {
+      "name": "IsNetGameFlag",
+      "address": "0x00917F7B",
+      "kind": "data",
+      "identity": "byte, non-zero in a network game; AutoSave gate input"
+    },
+    {
+      "name": "TerrainEditMode",
+      "address": "0x009454B8",
+      "kind": "data",
+      "identity": "byte terrain edit flag; AutoSave diagnostics only"
+    },
+    {
+      "name": "QueuedLoadNameBuffer",
+      "address": "0x00915540",
+      "kind": "data",
+      "identity": "16-char current/queued mission short name buffer"
+    },
+    {
+      "name": "DynamicGeometryVtable",
+      "address": "0x008926A8",
+      "kind": "data",
+      "identity": "RTTI .?AVDynamicGeometry@@ vtable; slot 32 (+0x80) is the world updateRenderQueue AutoSave chains"
+    },
+    {
+      "name": "FlagDisplaySubmit",
+      "address": "0x004D1C80",
+      "expected": "55 8B EC 81 EC 48 01 00 00 A1 00 70 8E 00",
+      "identity": "FlagDisplay::Submit, slot 8 of the FlagDisplay vtable; the multiplayer flag renderer replaces the slot"
+    },
+    {
+      "name": "NetPlayerGetData",
+      "address": "0x00575510",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC 8D 45 08",
+      "identity": "NetPlayer::GetData __thiscall"
+    },
+    {
+      "name": "GameObjectGetSphere",
+      "address": "0x00462400",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC 8B 45 FC",
+      "identity": "GameObject::GetSphere __thiscall"
+    },
+    {
+      "name": "RawMouseInputProcess",
+      "address": "0x004357D0",
+      "expected": "55 8B EC 8B 45 08 0F B7 48 04 83 E1 01",
+      "identity": "ProcessMouseRawInput(RAWMOUSE*) __cdecl; adds lLastX/lLastY into the look accumulator"
+    },
+    {
+      "name": "DistributedRecordDeathInt",
+      "address": "0x006796D0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 10",
+      "identity": "DistributedObject::RecordDeath(int) __thiscall (player-kill trace)"
+    },
+    {
+      "name": "RawMouseInputRegisterGate",
+      "address": "0x00618E82",
+      "expected": "83 3D 24 84 91 00 00 74 42",
+      "identity": "cmp dword [rawInputEnabled],0; jz -- before RegisterRawInputDevices; operand at +2 is the enable flag"
+    },
+    {
+      "name": "RawMouseInputLegacyGate",
+      "address": "0x00619717",
+      "expected": "83 3D 24 84 91 00 00 75 14",
+      "identity": "cmp dword [rawInputEnabled],0; jnz -- suppresses the WM_MOUSEMOVE look path"
+    },
+    {
+      "name": "RawMouseInputConsumerGate",
+      "address": "0x00623C39",
+      "expected": "83 3D 24 84 91 00 00 74 5C",
+      "identity": "cmp dword [rawInputEnabled],0; jz -- look consumer reads the raw accumulators"
+    },
+    {
+      "name": "NetPlayerRecordDeath",
+      "address": "0x00577290",
+      "expected": "55 8B EC 83 EC 0C E8 F5 BA FF FF 66 89 45 FC 83 7D 08 00 7E 3B 8B 45 08 8B 0C 85 E8 80 91 00",
+      "identity": "NetPlayer::RecordDeath(killedTeam, killerTeam) __cdecl; reads netPlayerByTeam[] at +0x1B"
+    },
+    {
+      "name": "UnitTurboThrottleBlock",
+      "address": "0x00601C92",
+      "expected": "8B 45 90 D9 58 08 8B 4D 90 F3 0F 10 41 0C 0F 2F 05 04 26 8A 00 72 1A F3 0F 10 05 C8 25 8A 00 0F 2F 45 AC 76 0C C7 85 78 FF FF FF 01 00 00 00 EB 0A C7 85 78 FF FF FF 00 00 00 00 8B 55 90 8B 85 78 FF FF FF",
+      "identity": "per-unit turbo decision in the craft throttle update: begin hook +0, comiss [tolerance] operand +0x11, second gate jbe +0x23, end hook +0x3B"
+    },
+    {
+      "name": "FlagDisplayVtable",
+      "address": "0x00879984",
+      "kind": "data",
+      "identity": "RTTI .?AVFlagDisplay@@ vtable; slot 8 (+0x20) is Submit"
+    },
+    {
+      "name": "NetPlayerByTeam",
+      "address": "0x009180E8",
+      "kind": "data",
+      "identity": "NetPlayer* netPlayerByTeam[16]; NetPlayerRecordDeath reads it at +0x1B"
+    },
+    {
+      "name": "QueuedLoadPathBuffer",
+      "address": "0x00945708",
+      "kind": "data",
+      "identity": "MAX_PATH queued load path buffer the shell load screen consumes"
+    },
+    {
+      "name": "Steam64Global",
+      "address": "0x0260B1D0",
+      "kind": "data",
+      "identity": "uint64 local Steam64 id (0 when not signed in)"
+    },
+    {
+      "name": "UiWrapperActive",
+      "address": "0x00918324",
+      "kind": "data",
+      "identity": "uint32 non-zero while the shell UI wrapper is active"
+    },
+    {
+      "name": "ShadowApply",
+      "address": "0x00680FE0",
+      "expected": "55 8B EC 81 EC 94 00 00 00 A1 00 70 8E 00 33 C5 89 45 FC A1 2C 67 94 00 0F BE 48 25 89 4D BC 83 7D BC 00 0F 8C A3 03 00 00 83 7D BC 05 72 07 C7 45 BC 04 00 00 00 8B 55 BC 0F B6 82 BC D0 8E 00",
+      "identity": "FUN_00680fe0 shadow-texture/PSSM/viewport-scheme apply; reads the settings pointer at +0x14 (mov eax,[g]) and the per-quality PSSM mode table at +0x3C (movzx eax,byte [edx+t])"
+    },
+    {
+      "name": "SchemeCallReassert",
+      "address": "0x00681585",
+      "expected": "FF 15 10 98 86 00 EB B0",
+      "identity": "call [Viewport::setMaterialScheme IAT] in the ~1 Hz graphics settings reassert loop over all viewports"
+    },
+    {
+      "name": "SchemeCallSecondaryViewport",
+      "address": "0x00682AA0",
+      "expected": "FF 15 10 98 86 00 C7 45 FC FF FF FF FF",
+      "identity": "call [Viewport::setMaterialScheme IAT] at secondary viewport creation (low-noshadow)"
+    },
+    {
+      "name": "SchemeCallTertiaryViewport",
+      "address": "0x00682EA7",
+      "expected": "FF 15 10 98 86 00 C7 45 FC FF FF FF FF",
+      "identity": "call [Viewport::setMaterialScheme IAT] at tertiary viewport creation (low-noshadow)"
+    },
+    {
+      "name": "MultiplayerPauseFlag",
+      "address": "0x00945549",
+      "kind": "data",
+      "identity": "byte, non-zero while the multiplayer pause menu is up"
+    },
+    {
+      "name": "MultiplayerPauseRoot",
+      "address": "0x0094557C",
+      "kind": "data",
+      "identity": "pointer, multiplayer pause/lobby client root; non-null while that menu exists"
+    },
+    {
+      "name": "SingleplayerPauseRoot",
+      "address": "0x009454EC",
+      "kind": "data",
+      "identity": "pointer to the single-player pause screen; compared with the shell's current screen"
+    },
+    {
+      "name": "UiCurrentScreenType",
+      "address": "0x00918328",
+      "kind": "data",
+      "identity": "uint32 type of the shell's current screen"
+    },
+    {
+      "name": "ChunkEffectCreateChunk",
+      "address": "0x00492AA0",
+      "expected": "55 8B EC 81 EC A8 00 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "ChunkEffect::CreateChunk entry; the chunk create-path trace detours it"
+    },
+    {
+      "name": "ChunkEffectCreateChunklet",
+      "address": "0x004927D0",
+      "expected": "55 8B EC 81 EC B8 00 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "ChunkEffect::CreateChunklet entry; the chunk create-path trace detours it"
+    },
+    {
+      "name": "ChunkEffectPartialFragment",
+      "address": "0x00492460",
+      "expected": "55 8B EC 83 EC 30 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "ChunkEffect::PartialFragmentObject entry (walker for the dying OBJ76 tree); trace-only detour"
+    },
+    {
+      "name": "ChunkEffectFullFragment",
+      "address": "0x00492640",
+      "expected": "55 8B EC 83 EC 28 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "ChunkEffect::FullFragmentObject entry; skinned gibs and the chunk trace detour it"
+    },
+    {
+      "name": "UiWidgetLayout",
+      "address": "0x007D14B0",
+      "expected": "55 8B EC 81 EC 14 01 00 00 89 4D FC E8 DF BD C7 FF",
+      "identity": "cUI widget layout(x,y,w,h); the map preview fix re-runs it after clamping the design size"
+    },
+    {
+      "name": "UiImageRebuildGeometry",
+      "address": "0x007D2E20",
+      "expected": "55 8B EC 83 EC 58 89 4D FC 8D 45 C0 50 8D 4D BC",
+      "identity": "cUI image widget quad rebuild, run between ManualObject beginUpdate/end"
+    },
+    {
+      "name": "DayWreckerSimulate",
+      "address": "0x004B0460",
+      "expected": "55 8B EC 83 EC 4C A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "DayWrecker::Simulate entry; MP auth trace detour"
+    },
+    {
+      "name": "DayWreckerExplode",
+      "address": "0x004B07D0",
+      "expected": "55 8B EC 83 EC 4C A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "DayWrecker::Explode entry; MP auth trace detour"
+    },
+    {
+      "name": "GameObjectRemove",
+      "address": "0x004DAE70",
+      "expected": "55 8B EC 83 EC 38 89 4D FC 8B 45 FC 8B 88 D8 00 00 00",
+      "identity": "GameObject::Remove entry; MP auth trace detour"
+    },
+    {
+      "name": "DayWreckerOrdinaryStateReader",
+      "address": "0x004B8590",
+      "expected": "55 8B EC 81 EC 60 01 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "DayWrecker distributed ordinary state reader; MP auth trace detour"
+    },
+    {
+      "name": "DayWreckerPermanentStateReader",
+      "address": "0x004B8FA0",
+      "expected": "55 8B EC 83 EC 68 56 8D 4D F4 E8 E1 75 F7 FF 8B 45 14",
+      "identity": "DayWrecker distributed permanent state reader; MP auth trace detour"
+    },
+    {
+      "name": "DayWreckerSetRemote",
+      "address": "0x004B7F20",
+      "expected": "55 8B EC 83 EC 20 89 4D FC 8B 45 FC 0F B6 48 68",
+      "identity": "DayWrecker distributed SetRemote/create; MP auth trace detour"
+    },
+    {
+      "name": "OrdnanceReceive",
+      "address": "0x00584620",
+      "expected": "55 8B EC 81 EC 50 01 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "Ordnance network receive entry; MP auth trace detour"
+    },
+    {
+      "name": "SprayBombHit",
+      "address": "0x005DB080",
+      "expected": "55 8B EC 81 EC 08 03 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "SprayBomb::Hit entry; MP auth trace detour"
+    },
+    {
+      "name": "SprayBombSimulate",
+      "address": "0x004E7D30",
+      "expected": "55 8B EC 83 EC 08 89 4D FC F3 0F 10 05 58 28 8A 00",
+      "identity": "SprayBomb::Simulate entry; MP auth trace detour"
+    },
+    {
+      "name": "MultiplayerCreateVtable",
+      "address": "0x0089EBE0",
+      "kind": "data",
+      "identity": "RTTI .?AVcUI_Multiplayer_Create@@ vtable; slot 13 is the per-frame update the map preview fix wraps"
+    },
+    {
+      "name": "MultiplayerMapComponent",
+      "address": "0x00945574",
+      "kind": "data",
+      "identity": "pointer to the multiplayer create screen's map component; +0x1C is the MapPreview image widget"
+    },
+    {
+      "name": "DayWreckerVtable",
+      "address": "0x00878508",
+      "kind": "data",
+      "identity": "RTTI .?AVDayWrecker@@ primary vtable"
+    },
+    {
+      "name": "DayWreckerDistributedVtable",
+      "address": "0x00878574",
+      "kind": "data",
+      "identity": "RTTI .?AVDayWrecker@@ vtable of the Distributed subobject at +0x18"
+    },
+    {
+      "name": "BzrNetLogger",
+      "address": "0x007D6A70",
+      "expected": "55 8B EC 81 EC 1C 04 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "shared cdecl BZRNet logger (fmt, ...); 272 call sites"
+    },
+    {
+      "name": "BzrNetRouteCompletedLogCall",
+      "address": "0x0075ED1D",
+      "expected": "E8 4E 7D 07 00 83 C4 10 C6 45 FC 0E 8D 8D 48 FF FF FF",
+      "identity": "call BzrNetLogger(\"BZRNet P2P Completed %s Connect For Client %s, using address %s\", route, name, address); the peer route observer redirects it"
+    },
+    {
+      "name": "BzrNetRouteResetLogCall",
+      "address": "0x0075EF99",
+      "expected": "E8 D2 7A 07 00 83 C4 08 C7 45 FC FF FF FF FF 8D 4D C0",
+      "identity": "call BzrNetLogger(\"BZRNet P2P Fully Resetting Connection Status For Client %s\", name); the peer route observer redirects it"
+    },
+    {
+      "name": "FlagDisplayInstance",
+      "address": "0x009B60CC",
+      "kind": "data",
+      "identity": "static FlagDisplay object (dynamic initializer does mov ecx,imm; call ctor); first dword is the FlagDisplayVtable row once constructed; +0x2C makeTexture byte"
+    },
+    {
+      "name": "FlagFilePathBuffer",
+      "address": "0x00917FAC",
+      "kind": "data",
+      "identity": "char[MAX_PATH] flag image path SetMyFlag uploads from"
+    },
+    {
+      "name": "BzrNetForceRelayRead",
+      "address": "0x0075F09D",
+      "expected": "83 3D 08 67 94 00 00 74 6A 8D 55 D8",
+      "identity": "cmp dword ptr [forceRelay],0 in the per-peer connect decision (FUN_0075EEA0); the /iprelay flag is its disp32 at +2"
+    },
+    {
+      "name": "BzrNetUdpPortRead",
+      "address": "0x006BE7B5",
+      "expected": "0F B7 15 04 57 94 00 52 8D 4D B4",
+      "identity": "movzx edx,word ptr [udpPort] in FUN_006BE750 (requested port, later overwritten with the bound port); the /bzrnetport= global is its disp32 at +3"
+    },
+    {
+      "name": "BzrNetNicknameRead",
+      "address": "0x006C7D84",
+      "expected": "0F BE 91 E0 53 94 00 85 D2 74 7A",
+      "identity": "movsx edx,byte ptr [ecx+nickname] in FUN_006C6E60 (identity message); the char[0x80] /nickname= buffer is its disp32 at +3"
+    },
+    {
+      "name": "BzrNetGetLobby",
+      "address": "0x00764760",
+      "expected": "55 8B EC A1 70 54 94 00 5D C3",
+      "identity": "BZRNet lobby accessor, whole body push ebp; mov ebp,esp; mov eax,[lobby]; pop ebp; ret"
+    },
+    {
+      "name": "BzrNetLobbyVtable",
+      "address": "0x0089ADDC",
+      "kind": "data",
+      "identity": "RTTI .?AVBZRNetLobby@@ vtable; the nickname reauth path checks the live lobby against it"
+    },
+    {
+      "name": "TerrainZoneConstruct",
+      "address": "0x007778B0",
+      "expected": "55 8B EC 6A FF 68 67 E3 85 00 64 A1 00 00 00 00",
+      "identity": "terrain zone mesh constructor (FUN_007778B0); terrain proxy detour"
+    },
+    {
+      "name": "TerrainZoneProcess",
+      "address": "0x00778450",
+      "expected": "55 8B EC 6A FF 68 D9 E3 85 00 64 A1 00 00 00 00",
+      "identity": "terrain zone rebuild/process (FUN_00778450); terrain proxy detour"
+    },
+    {
+      "name": "TerrainWordAt",
+      "address": "0x004C0FE0",
+      "expected": "55 8B EC 83 EC 0C 8B 45 08 05 00 18 00 00 89 45 FC",
+      "identity": "terrain cell word lookup; terrain proxy calls it"
+    },
+    {
+      "name": "TerrainHeightAt",
+      "address": "0x0077D640",
+      "expected": "55 8B EC 8B 45 0C 50 8B 4D 08 51 E8 10 57 D1 FF",
+      "identity": "terrain height sample lookup; terrain proxy calls it"
+    },
+    {
+      "name": "TerrainAtlasRectAt",
+      "address": "0x0050CE10",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 08 50 8B 4D FC 83 C1 38",
+      "identity": "terrain atlas rect lookup; terrain proxy calls it"
+    },
+    {
+      "name": "TerrainTileIndexAt",
+      "address": "0x00780DC0",
+      "expected": "55 8B EC 83 EC 14 8B 45 0C 50 8B 4D 08 51 E8 0D 02 D4 FF",
+      "identity": "terrain tile index lookup; terrain proxy calls it"
+    },
+    {
+      "name": "TerrainMixAt",
+      "address": "0x00780E40",
+      "expected": "55 8B EC 83 EC 08 8B 45 0C 50 8B 4D 08 51 E8 8D 01 D4 FF",
+      "identity": "terrain tile mix lookup; terrain proxy calls it"
+    },
+    {
+      "name": "BriefingScrollUpCall",
+      "address": "0x0078ED29",
+      "expected": "E8 B2 F3 03 00 5D C3 55",
+      "identity": "mission briefing scroll-up callback's call to the unguarded list scroll-up; the briefing scroll fix redirects it to the guarded one"
+    },
+    {
+      "name": "BriefingScrollDownCall",
+      "address": "0x0078ED39",
+      "expected": "E8 D2 F3 03 00 5D C3 55",
+      "identity": "mission briefing scroll-down callback's call to the unguarded list scroll-down"
+    },
+    {
+      "name": "ArchiveScrollUpCall",
+      "address": "0x00790AF9",
+      "expected": "E8 E2 D5 03 00 5D C3 55",
+      "identity": "mission archive scroll-up callback's call to the unguarded list scroll-up"
+    },
+    {
+      "name": "ArchiveScrollDownCall",
+      "address": "0x00790B09",
+      "expected": "E8 02 D6 03 00 5D C3 55",
+      "identity": "mission archive scroll-down callback's call to the unguarded list scroll-down"
+    },
+    {
+      "name": "UiScrollUpGuarded",
+      "address": "0x007CE730",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 58 29 00 00 00",
+      "identity": "clamped list scroll-up used by the lobby/chat UI"
+    },
+    {
+      "name": "UiScrollDownGuarded",
+      "address": "0x007CE6D0",
+      "expected": "55 8B EC 83 EC 08 89 4D FC E8 82 60 F9 FF",
+      "identity": "clamped list scroll-down used by the lobby/chat UI"
+    },
+    {
+      "name": "UiScrollUpUnguarded",
+      "address": "0x007CE0E0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 58 29 00 00",
+      "identity": "unclamped list scroll-up (snaps back to the top on the last partial page)"
+    },
+    {
+      "name": "UiScrollDownUnguarded",
+      "address": "0x007CE110",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 58 29 00 00",
+      "identity": "unclamped list scroll-down"
+    },
+    {
+      "name": "ThumbnailMaterialApply",
+      "address": "0x007D3FF0",
+      "expected": "55 8B EC 6A FF 68 E1 2C 86 00 64 A1 00 00 00 00",
+      "identity": "FUN_007D3FF0 build-thumbnail-material helper (clones UI material, loads the texture); the BMP guard detours its entry"
+    },
+    {
+      "name": "PostLoadQuakeRestart",
+      "address": "0x005C7B7E",
+      "expected": "B9 28 23 99 00 E8 28 90 EF FF 8A 45 FF",
+      "identity": "PostLoadScriptUtils mov ecx,offset earthQuake; call EarthQuake::StartQuake (the save-replay restart); the EarthQuake object is the mov operand at +1, the call is at +5"
+    },
+    {
+      "name": "EarthQuakeStartQuake",
+      "address": "0x004C0BB0",
+      "expected": "55 8B EC 83 EC 50 A1 00 70 8E 00 33 C5",
+      "identity": "EarthQuake::StartQuake"
+    },
+    {
+      "name": "EarthQuakeUpdateQuake",
+      "address": "0x004C0C40",
+      "expected": "55 8B EC 83 EC 08 89 4D FC 8B 45 FC",
+      "identity": "EarthQuake::UpdateQuake"
+    },
+    {
+      "name": "EarthQuakeStopQuake",
+      "address": "0x004C0CA0",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 8B 45 F8",
+      "identity": "EarthQuake::StopQuake"
+    },
+    {
+      "name": "EarthQuakeSimulate",
+      "address": "0x004C0CF0",
+      "expected": "55 8B EC 81 EC 90 00 00 00 A1 00 70 8E 00",
+      "identity": "EarthQuake::Simulate; the quake replay fade detours its entry"
+    },
+    {
+      "name": "TargetCamEnabledCall",
+      "address": "0x00682679",
+      "expected": "E8 62 B7 F5 FF 0F B6 C8 85 C9 0F 84 88 04 00 00",
+      "identity": "Ogre frame driver's call to the TargetCam enabled predicate, followed by movzx ecx,al; test ecx,ecx"
+    },
+    {
+      "name": "TargetCamEnabledWrapper",
+      "address": "0x005DDDE0",
+      "expected": "55 8B EC B9 E0 5F 5F 02 E8 23 FF FF FF",
+      "identity": "TargetCam enabled predicate (reads targetCam+0x1F1)"
+    },
+    {
+      "name": "CinematicCameraBegin",
+      "address": "0x00821E30",
+      "expected": "55 8B EC 51 E8 C7 81 DF FF 85 C0 75 0D",
+      "identity": "cinematic camera begin (view mode 5)"
+    },
+    {
+      "name": "CinematicBeginCallMission",
+      "address": "0x004F5667",
+      "expected": "E8 C4 C7 32 00 8B 4D FC 0F B6 51 2D",
+      "identity": "call CinematicCameraBegin from the mission path"
+    },
+    {
+      "name": "CinematicBeginCallScript",
+      "address": "0x005CD2D9",
+      "expected": "E8 52 4B 25 00 E8 AD 44 05 00 B9 10 69 94 00",
+      "identity": "call CinematicCameraBegin from the script path"
+    },
+    {
+      "name": "GetCameraRecord",
+      "address": "0x00439E60",
+      "expected": "55 8B EC B8 E0 AA 8E 00 5D C3 CC CC",
+      "identity": "main camera record getter"
+    },
+    {
+      "name": "BuildCameraRecord",
+      "address": "0x00688370",
+      "expected": "55 8B EC 81 EC 48 02 00 00 A1 00 70 8E 00",
+      "identity": "camera record builder (fov, zoom, ...)"
+    },
+    {
+      "name": "CockpitFovBits",
+      "address": "0x0087256C",
+      "kind": "data",
+      "identity": "float bits of the cockpit FOV the cockpit view setter (0x0061BAB0) passes to the record builder"
+    },
+    {
+      "name": "CockpitZoomBits",
+      "address": "0x008A2604",
+      "kind": "data",
+      "identity": "float 1.0 cockpit zoom the cockpit view setter passes to the record builder"
+    },
+    {
+      "name": "MultiRenderCountClampSite",
+      "address": "0x0044D858",
+      "expected": "33 C9 8B 55 AC 8B 82 08 01 00 00",
+      "identity": "MultiRenderClass ctor right after the ParameterDB read of rendercount: xor ecx,ecx; mov edx,[ebp-0x54]; mov eax,[edx+0x108] (exactly the 11 bytes the clamp displaces)"
+    },
+    {
+      "name": "ShieldTowerSimulate",
+      "address": "0x005D0D80",
+      "expected": "55 8B EC 81 EC EC 01 00 00 A1 00 70 8E 00",
+      "identity": "ShieldTower::Simulate (vtable slot 15); the team filter wraps it"
+    },
+    {
+      "name": "MagnetMineSimulate",
+      "address": "0x0050C650",
+      "expected": "55 8B EC 81 EC 00 01 00 00 A1 00 70 8E 00",
+      "identity": "MagnetMine::Simulate (vtable slot 15); the team filter wraps it"
+    },
+    {
+      "name": "ProximityMineSimulate",
+      "address": "0x005B0E40",
+      "expected": "55 8B EC 81 EC BC 00 00 00 A1 00 70 8E 00",
+      "identity": "ProximityMine::Simulate (vtable slot 15); the team filter wraps it"
+    },
+    {
+      "name": "MineSimulate",
+      "address": "0x00511460",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC F3 0F 10 45 08",
+      "identity": "Mine::Simulate, the base MagnetMine/ProximityMine delegate to"
+    },
+    {
+      "name": "ShieldTowerPowerUpdate",
+      "address": "0x005D0CC0",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC 8B 45 FC",
+      "identity": "ShieldTower power update, first call of stock ShieldTower::Simulate"
+    },
+    {
+      "name": "GameObjectFriendP",
+      "address": "0x004DB510",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 83 7D 08 00 74 2A 8B 4D 08 83 C1 18 8B 45 08 8B 50 18 8B 42 04 FF D0 50 8B 4D F8 E8 27 00 00 00",
+      "identity": "GameObject::FriendP(GameObject*), bool thiscall; null-checks other, calls other->GetTeamNum, then the int overload"
+    },
+    {
+      "name": "GameObjectEnemyP",
+      "address": "0x004DB5B0",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 83 7D 08 00 74 2A 8B 4D 08 83 C1 18 8B 45 08 8B 50 18 8B 42 04 FF D0 50 8B 4D F8 E8 27 00 00 00",
+      "identity": "GameObject::EnemyP(GameObject*), bool thiscall; mirror of FriendP"
+    },
+    {
+      "name": "GameObjectAddVelocity",
+      "address": "0x004A75B0",
+      "expected": "55 8B EC 83 EC 08 89 4D FC 8B 45 FC",
+      "identity": "GameObject add-velocity thiscall (const float delta[3])"
+    },
+    {
+      "name": "MatrixInverse",
+      "address": "0x008203F0",
+      "expected": "55 8B EC 83 EC 44 A1 00 70 8E 00 33 C5",
+      "identity": "legacy 3x4 matrix inverse"
+    },
+    {
+      "name": "VectorTransform",
+      "address": "0x00820180",
+      "expected": "55 8B EC 83 EC 0C 8B 45 10 83 E8 01",
+      "identity": "legacy vector transform (out, in, count, matrix)"
+    },
+    {
+      "name": "ShieldTowerOrdnanceScan",
+      "address": "0x005D12BB",
+      "expected": "B9 8C 90 9C 00 E8 FB C5 E5 FF 8D 8D 84 FE FF FF",
+      "identity": "stock ShieldTower::Simulate ordnance pass: mov ecx, offset ordnanceList; call list begin; the std::list<Ordnance*> is the mov operand at +1"
+    },
+    {
+      "name": "ProximityMineGroundFx",
+      "address": "0x007809D0",
+      "expected": "55 8B EC 83 EC 30 83 3D B8 54 94 00 00",
+      "identity": "ground effect cdecl (x, z, 3.0) in stock ProximityMine detonation"
+    },
+    {
+      "name": "GameObjectDamageOwner",
+      "address": "0x004B0400",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 24 02 00 00",
+      "identity": "GameObject damage owner thiscall, or null"
+    },
+    {
+      "name": "ExplosionClassBuild",
+      "address": "0x004CB7B0",
+      "expected": "55 8B EC 83 EC 10 89 4D FC 8B 45 FC",
+      "identity": "ExplosionClass::Build thiscall (matrix, owner obj), ret 8"
+    },
+    {
+      "name": "ProximityMineNetFlag",
+      "address": "0x00571C40",
+      "expected": "55 8B EC A0 7B 7F 91 00 5D C3 CC CC",
+      "identity": "returns the net-game byte; stock ProximityMine detonation notifies when set"
+    },
+    {
+      "name": "ProximityMineNetNotify",
+      "address": "0x004B8460",
+      "expected": "55 8B EC 83 EC 14 89 4D FC 8B 45 FC",
+      "identity": "distributed notify on mine+0x18 after detonation"
+    },
+    {
+      "name": "ShieldTowerVtable",
+      "address": "0x008876E8",
+      "kind": "data",
+      "identity": "RTTI .?AVShieldTower@@ vtable; slot 15 is Simulate"
+    },
+    {
+      "name": "MagnetMineVtable",
+      "address": "0x0087D538",
+      "kind": "data",
+      "identity": "RTTI .?AVMagnetMine@@ vtable; slot 15 is Simulate"
+    },
+    {
+      "name": "ProximityMineVtable",
+      "address": "0x00886278",
+      "kind": "data",
+      "identity": "RTTI .?AVProximityMine@@ vtable; slot 15 is Simulate"
+    },
+    {
+      "name": "ChunkEffectInstance",
+      "address": "0x00950190",
+      "kind": "data",
+      "identity": "the global ChunkEffect; stock ProximityMine detonation calls CreateChunklet on it 20 times (mov ecx, offset at 0x005B1113)"
+    },
+    {
+      "name": "OptionsInputCtor",
+      "address": "0x007B25B0",
+      "expected": "55 8B EC 6A FF 68 73 12 86 00",
+      "identity": "cUI_OptionsInput constructor (FUN_007b25b0, recovered from string xrefs); the input binding UI detours it"
+    },
+    {
+      "name": "OptionsInputKeyReleased",
+      "address": "0x007B48C0",
+      "expected": "55 8B EC 81 EC 54 01 00 00 A1 00 70 8E 00",
+      "identity": "cUI_OptionsInput key-released handler; the key capture hook detours it"
+    },
+    {
+      "name": "OptionsInputScreenFactoryCaller",
+      "address": "0x007C8600",
+      "expected": "E8 AB 9F FE FF 89 85 B4 FD FF FF",
+      "identity": "options shell screen factory that constructs cUI_OptionsInput (log only)"
+    },
+    {
+      "name": "OptionsInputBackClick",
+      "address": "0x007B2210",
+      "expected": "55 8B EC 8B 0D B8 55 94 00 E8 42 5E FD FF",
+      "identity": "cUI_OptionsInput Back button click thunk"
+    },
+    {
+      "name": "OptionsInputJoystickClick",
+      "address": "0x007B2220",
+      "expected": "55 8B EC 8B 0D B8 55 94 00 E8 D2 00 00 00",
+      "identity": "cUI_OptionsInput Joystick button click thunk; the ctor-local Joystick button is found by this value in its +0x154 click slot"
+    },
+    {
+      "name": "OptionsInputDefaultsClick",
+      "address": "0x007B2230",
+      "expected": "55 8B EC 8B 0D B8 55 94 00 E8 E2 00 00 00",
+      "identity": "cUI_OptionsInput Default button click thunk; matched like the Joystick one"
+    },
+    {
+      "name": "OptionsParentCtor",
+      "address": "0x007B61A0",
+      "expected": "55 8B EC 6A FF 68 60 13 86 00",
+      "identity": "cUI_OptionsParent constructor (FUN_007b61a0: esc_center.png overlay plus Play/Graphic/Audio/Input buttons)"
+    },
+    {
+      "name": "MainScreenMenuSetup",
+      "address": "0x0078D000",
+      "expected": "55 8B EC 6A FF 68 12 EC 85 00",
+      "identity": "cUI_MainScreen menu setup void __thiscall(this, char); builds SinglePlayer_MainScreen and friends under this+0x158"
+    },
+    {
+      "name": "OptionsParentInputClick",
+      "address": "0x007B6100",
+      "expected": "55 8B EC 8B 0D C4 55 94 00 E8 52 00 00 00",
+      "identity": "cUI_OptionsParent Input click thunk (switches the options shell to screen 0x15); the OpenShim settings button reuses it"
+    },
+    {
+      "name": "OptionsInputDtor",
+      "address": "0x007B4870",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC C7 00 30 F9 89 00 8B 4D FC E8 28 D6 01 00",
+      "identity": "cUI_OptionsInput inner destructor (called by vtable slot 0 scalar deleting dtor)"
+    },
+    {
+      "name": "OptionsParentDtor",
+      "address": "0x007B6850",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC C7 00 34 FC 89 00 8B 4D FC E8 48 B6 01 00",
+      "identity": "cUI_OptionsParent inner destructor"
+    },
+    {
+      "name": "ReadMappingTable",
+      "address": "0x00620010",
+      "expected": "55 8B EC 81 EC DC 02 00 00 A1 00 70 8E 00",
+      "identity": "input.map reader; the live input.map reload calls it"
+    },
+    {
+      "name": "UiTextMeasure",
+      "address": "0x00689AB0",
+      "expected": "55 8B EC 83 EC 24 83 7D 10 00",
+      "identity": "cdecl (font, text, &w, &h) UI text measure, walks the string with the global char size"
+    },
+    {
+      "name": "OptionsInputSingleton",
+      "address": "0x009455B8",
+      "kind": "data",
+      "identity": "cUI_OptionsInput singleton pointer, non-null while the stock input screen is alive"
+    },
+    {
+      "name": "UiFontContext",
+      "address": "0x0091552C",
+      "kind": "data",
+      "identity": "global font the UI text uses"
+    },
+    {
+      "name": "UiFontCharSizeX",
+      "address": "0x02BF041C",
+      "kind": "data",
+      "identity": "global UI char size X float read by the per-char advance calls"
+    },
+    {
+      "name": "UiFontCharSizeY",
+      "address": "0x02BF0420",
+      "kind": "data",
+      "identity": "global UI char size Y float"
+    },
+    {
+      "name": "RecycleTaskScrapDistanceCall",
+      "address": "0x005B680E",
+      "expected": "E8 9D B8 EA FF 83 C4 18 D9 5D BC F3 0F 10 45 BC",
+      "identity": "RecycleTask::InitLookingForScrap call to Dist3DSquared that scores each candidate after the team/material/region filters; path-scored scrap selection redirects it"
+    },
+    {
+      "name": "Dist3DSquared",
+      "address": "0x004620B0",
+      "expected": "55 8B EC 83 EC 2C A1 00 70 8E 00 33 C5",
+      "identity": "squared 3D distance helper"
+    },
+    {
+      "name": "FindPlanForObject",
+      "address": "0x004666C0",
+      "expected": "55 8B EC 51 8B 4D 08 83 C1 18 8B 45 08",
+      "identity": "AiPath plan lookup for an object"
+    },
+    {
+      "name": "AiPathGetLength",
+      "address": "0x00461110",
+      "expected": "55 8B EC 83 EC 18 89 4D F8 F3 0F 10 05 98 24 8A 00",
+      "identity": "AiPath::GetLength"
+    },
+    {
+      "name": "AiPathDelete",
+      "address": "0x00460640",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D FC E8 41 FF FF FF",
+      "identity": "AiPath delete"
+    },
+    {
+      "name": "RecycleTaskDoGotoScrap",
+      "address": "0x005B6AE0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 78 30 00",
+      "identity": "RecycleTask::DoGotoScrap; the en-route scrap retarget detours it"
+    },
+    {
+      "name": "AttackTaskDoState",
+      "address": "0x00478A50",
+      "expected": "55 8B EC 83 EC 7C 89 4D FC 8B 45 FC",
+      "identity": "AttackTask::DoState; the AI kite tuning detours it"
+    },
+    {
+      "name": "TerrainBlocksCraft",
+      "address": "0x00466D40",
+      "expected": "55 8B EC 51 8B 45 08 51 F3 0F 10 40 08",
+      "identity": "IsStuck's first test, bool cdecl(const float* position), true on terrain cell types 5 and 6"
+    },
+    {
+      "name": "OffensiveProcessDoSubTask",
+      "address": "0x00583520",
+      "expected": "55 8B EC 83 EC 58 89 4D F8 8B 45 F8",
+      "identity": "OffensiveProcess::DoSubTask (vtable slot 11 of the offensive-family processes)"
+    },
+    {
+      "name": "GunTowerProcessDoSubTask",
+      "address": "0x004E8780",
+      "expected": "55 8B EC 83 EC 2C 89 4D F8 8B 45 F8",
+      "identity": "GunTowerProcess::DoSubTask (vtable slot 11)"
+    },
+    {
+      "name": "TurretTankProcessDoSubTask",
+      "address": "0x005F6FF0",
+      "expected": "55 8B EC 83 EC 54 89 4D F8 C7 45 F0 00 00 00 00",
+      "identity": "TurretTankProcess::DoSubTask (vtable slot 11)"
+    },
+    {
+      "name": "GetGameTime",
+      "address": "0x00822D80",
+      "expected": "55 8B EC D9 05 2C 1B CC 02 5D C3 CC",
+      "identity": "game time getter"
+    },
+    {
+      "name": "TerrainGetIntersection",
+      "address": "0x00784620",
+      "expected": "55 8B EC 83 EC 4C F3 0F 5A 05 E4 50 CC 02",
+      "identity": "terrain ray intersection; AttackTask terrain line of sight"
+    },
+    {
+      "name": "ArtilleryProcessVtable",
+      "address": "0x00876024",
+      "kind": "data",
+      "identity": "RTTI .?AVArtilleryProcess@@ vtable; slot 11 DoSubTask"
+    },
+    {
+      "name": "BomberProcessVtable",
+      "address": "0x0088B178",
+      "kind": "data",
+      "identity": "RTTI .?AVBomberProcess@@ vtable"
+    },
+    {
+      "name": "GechProcessVtable",
+      "address": "0x0087A13C",
+      "kind": "data",
+      "identity": "RTTI .?AVGechProcess@@ vtable"
+    },
+    {
+      "name": "OffensiveProcessVtable",
+      "address": "0x00884C28",
+      "kind": "data",
+      "identity": "RTTI .?AVOffensiveProcess@@ vtable"
+    },
+    {
+      "name": "PersonProcessVtable",
+      "address": "0x00885984",
+      "kind": "data",
+      "identity": "RTTI .?AVPersonProcess@@ vtable"
+    },
+    {
+      "name": "RocketTankProcessVtable",
+      "address": "0x0088A5C0",
+      "kind": "data",
+      "identity": "RTTI .?AVRocketTankProcess@@ vtable"
+    },
+    {
+      "name": "ScoutProcessVtable",
+      "address": "0x0088AF98",
+      "kind": "data",
+      "identity": "RTTI .?AVScoutProcess@@ vtable"
+    },
+    {
+      "name": "SoldierProcessVtable",
+      "address": "0x00887D18",
+      "kind": "data",
+      "identity": "RTTI .?AVSoldierProcess@@ vtable"
+    },
+    {
+      "name": "TankProcessVtable",
+      "address": "0x0088AB9C",
+      "kind": "data",
+      "identity": "RTTI .?AVTankProcess@@ vtable"
+    },
+    {
+      "name": "WingmanProcessVtable",
+      "address": "0x0088A6EC",
+      "kind": "data",
+      "identity": "RTTI .?AVWingmanProcess@@ vtable"
+    },
+    {
+      "name": "GunTowerProcessVtable",
+      "address": "0x0087A87C",
+      "kind": "data",
+      "identity": "RTTI .?AVGunTowerProcess@@ vtable"
+    },
+    {
+      "name": "TurretTankProcessVtable",
+      "address": "0x00889710",
+      "kind": "data",
+      "identity": "RTTI .?AVTurretTankProcess@@ vtable"
+    },
+    {
+      "name": "HowitzerSecondaryVtable",
+      "address": "0x0087AE1C",
+      "kind": "data",
+      "identity": "RTTI .?AVHowitzer@@ secondary vtable"
+    },
+    {
+      "name": "NetFriendsGetReadyState",
+      "address": "0x00753810",
+      "expected": "55 8B EC 51 89 4D FC E8 54 10 01 00 85 C0 74 12 E8 3B 0F 01 00 85 C0 74 09 B8 03 00 00 00",
+      "identity": "cNetFriends::GetReadyState: call PlatformReady, test, call BzrNetGetLobby, test, mov eax,3; the MP ready explainer replaces its entry"
+    },
+    {
+      "name": "PlatformReady",
+      "address": "0x00764870",
+      "expected": "55 8B EC 83 3D 70 04 8F 00 02 75 13",
+      "identity": "platform readiness, opens cmp dword [platformMode],2 (mode global = disp32 at +5)"
+    },
+    {
+      "name": "PlatformSteamOk",
+      "address": "0x007647F0",
+      "expected": "55 8B EC 0F B6 05 63 54 94 00 85 C0",
+      "identity": "Steam ok, opens movzx eax,byte [steamInitFlag] (disp32 at +6)"
+    },
+    {
+      "name": "PlatformGalaxyOk",
+      "address": "0x00764810",
+      "expected": "55 8B EC 83 3D 90 54 94 00 00 74 19 8B 0D 90 54 94 00",
+      "identity": "Galaxy ok: cmp dword [galaxyObj],0 / mov ecx,[galaxyObj] (disp32 at +5)"
+    },
+    {
+      "name": "PlatformBzrNetAuthOk",
+      "address": "0x00764840",
+      "expected": "55 8B EC 83 3D 84 54 94 00 00 74 19 8B 0D 84 54 94 00",
+      "identity": "BZRNet auth ok: cmp dword [clientHolder],0 / mov ecx,[clientHolder] (disp32 at +5)"
+    },
+    {
+      "name": "GalaxyClientState",
+      "address": "0x0073B100",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 8B 45 F8 83 78 08 03 7C 09",
+      "identity": "Galaxy client state test cmp dword [eax+8],3; jl"
+    },
+    {
+      "name": "BzrNetClientState",
+      "address": "0x006C3AA0",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 8B 45 F8 83 78 04 03 75 09",
+      "identity": "BZRNet client state test cmp dword [eax+4],3; jne"
+    },
+    {
+      "name": "MainScreenMpStatusRefresh",
+      "address": "0x0078EB50",
+      "expected": "55 8B EC 83 EC 1C 89 4D FC 8B 45 FC 83 B8 70 01 00 00 00",
+      "identity": "per-frame main-menu refresh that writes the multiplayer caption"
+    },
+    {
+      "name": "MainScreenNoInetMessageCall",
+      "address": "0x0078EC38",
+      "expected": "E8 03 DF 08 00 83 C4 08",
+      "identity": "call Localize(\"multi_message\",\"no inet\") in the code-1 branch of the main-menu refresh; the MP ready explainer redirects it"
+    },
+    {
+      "name": "LoadScreenSelectionFlag",
+      "address": "0x00918133",
+      "kind": "data",
+      "identity": "byte the load screen reads as 'a save is selected'; the AutoSave load button sets it before advancing the dialog"
+    },
+    {
+      "name": "MissionSaveFlag",
+      "address": "0x009173B7",
+      "kind": "data",
+      "identity": "byte mission-save flag the restart path saves and restores"
+    },
+    {
+      "name": "OldMissionMode",
+      "address": "0x00918314",
+      "kind": "data",
+      "identity": "uint32 previous mission mode the restart path saves and restores"
+    },
+    {
+      "name": "ShellScreenFactory",
+      "address": "0x007C7AD0",
+      "expected": "55 8B EC 6A FF 68 A7 23 86 00 64 A1 00 00 00 00",
+      "identity": "shell screen factory void* __thiscall(manager, int id); switch over stock screen ids, logs 'Creating screen of type %d'"
+    },
+    {
+      "name": "ShellRequestScreen",
+      "address": "0x007C7930",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC C6 40 27 01 8D 4D 08",
+      "identity": "shell request screen void __thiscall(manager, int id); pushes id on the history vector at +0x2C and sets the transition-pending byte +0x27"
+    },
+    {
+      "name": "ShellBackScreen",
+      "address": "0x007C79A0",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D FC 83 C1 2C E8 DE 82 C5 FF",
+      "identity": "shell back void __thiscall(manager); pops the history vector at +0x2C and sets the transition-pending byte +0x27"
+    },
+    {
+      "name": "ShellFactoryTick",
+      "address": "0x007C6920",
+      "expected": "55 8B EC 83 EC 08 A1 F0 55 94 00 83 C0 01 8B 0D F4 55 94 00",
+      "identity": "screen factory preamble void __cdecl(); bumps the screen-creation counter at 0x009455F0"
+    },
+    {
+      "name": "ShellShowPendingAlert",
+      "address": "0x00787DE0",
+      "expected": "55 8B EC 6A FF 68 BC D0 84 00 64 A1 00 00 00 00",
+      "identity": "void __cdecl(screen, manager); attaches the pending GameAlert dialog to a newly created screen"
+    },
+    {
+      "name": "UiTopScreenCtor",
+      "address": "0x007D0FA0",
+      "expected": "55 8B EC 6A FF 68 42 2A 86 00 64 A1 00 00 00 00",
+      "identity": "cUI_View default (top screen) ctor __thiscall(this); 'Top Screen' with bckground_1920x1080.png and the four border views"
+    },
+    {
+      "name": "UiScreenEscBackKey",
+      "address": "0x00788E70",
+      "expected": "55 8B EC 51 89 4D FC 83 7D 08 1B 75 0C 8B 4D FC",
+      "identity": "screen OnKey (vtable slot 5) bool __thiscall(this, key, mods); Esc (0x1B) runs Back on this+0x138, other keys go to cUI_View"
+    },
+    {
+      "name": "ShellFactoryAlertCheck",
+      "address": "0x007C9068",
+      "expected": "0F B6 15 32 81 91 00 85 D2 74 30 83 7D 08 1D",
+      "identity": "factory tail: movzx edx,byte [alert pending]; test; je; cmp [ebp+8],0x1D -- the pending-alert test after a screen is created"
+    },
+    {
+      "name": "UiViewVtable",
+      "address": "0x008A0B94",
+      "kind": "data",
+      "identity": "cUI_View vtable (15 slots; RTTI .?AVcUI_View@@). OpenShim custom screens copy it and replace slots 0 and 5."
     }
   ],
   "globals": [
@@ -2028,6 +3731,11 @@
     }
   ],
   "static_pointers": [
+    {
+      "name": "BZR_SIGNATURE_ADDR",
+      "address": "0x00868300",
+      "identity": "Start of the 256-byte .text block RunPatcher compares against the exe file on disk before patching. On Steam those bytes only match once SteamStub has decrypted .text, so the wait is the code-ready gate. Must lie in .text on every build."
+    },
     {
       "name": "MapListObject",
       "address": "0x0094555C"

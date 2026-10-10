@@ -106,9 +106,8 @@ namespace BZROpenShim
         // What OpenShim adds is turning the flag on, guarding the write, and
         // covering the one case the stock handler gets wrong (below).
 
-        constexpr uintptr_t kRawMouseInputRegisterGateAddr = 0x00618E82;
-        constexpr uintptr_t kRawMouseInputLegacyGateAddr = 0x00619717;
-        constexpr uintptr_t kRawMouseInputConsumerGateAddr = 0x00623C39;
+        uintptr_t g_RawMouseInputEnabledAddr = 0;
+        uintptr_t g_RawMouseInputProcessAddr = 0;
 
         // An absolute-mode device that goes quiet for this long is treated as
         // having moved elsewhere meanwhile (alt-tab, menu, another monitor),
@@ -138,10 +137,11 @@ namespace BZROpenShim
                    EnvFlagEnabled("OPENSHIM_TRACE_MOUSE_INPUT");
         }
 
-        // Anchors on the whole `cmp dword ptr [0x00918424], 0` instruction plus
-        // the branch opcode that consumes it, at all three sites that read the
-        // flag. Anchoring on the operand alone would match any unrelated
-        // reference to the same address.
+        // Anchors on the whole `cmp dword ptr [flag], 0` instruction plus the
+        // branch opcode that consumes it, at all three sites that read the
+        // flag (each a row whose guard is exactly that), and requires all three
+        // to name the same flag, which is then the one written. Anchoring on
+        // the operand alone would match any unrelated reference to it.
         bool RawMouseInputSignaturesMatch()
         {
             if (g_RawMouseInputSignaturesChecked)
@@ -158,40 +158,34 @@ namespace BZROpenShim
                 return false;
             }
 
-            static const uint8_t kRegisterGate[] =
-            { 0x83, 0x3D, 0x24, 0x84, 0x91, 0x00, 0x00, 0x74 };
-            static const uint8_t kLegacyGate[] =
-            { 0x83, 0x3D, 0x24, 0x84, 0x91, 0x00, 0x00, 0x75 };
-            static const uint8_t kConsumerGate[] =
-            { 0x83, 0x3D, 0x24, 0x84, 0x91, 0x00, 0x00, 0x74 };
-            static const uint8_t kProcessRawInput[] =
-            { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x0F, 0xB7, 0x48, 0x04 };
+            uint32_t registerGate = 0;
+            uint32_t legacyGate = 0;
+            uint32_t consumerGate = 0;
+            uint32_t process = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "RawMouseInputRegisterGate", &registerGate },
+                { "RawMouseInputLegacyGate", &legacyGate },
+                { "RawMouseInputConsumerGate", &consumerGate },
+                { "RawMouseInputProcess", &process },
+            };
+            if (!HookEngine::BindEngineRows("Raw mouse input", rows))
+                return false;
 
-            struct Site
-            {
-                uintptr_t address;
-                const uint8_t* bytes;
-                size_t length;
-                const char* name;
+            // cmp dword [m32],0 ; jz/jnz -- the guard proved these bytes; the
+            // three operands must agree on one flag.
+            const auto flagAt = [](uint32_t gate) {
+                return *reinterpret_cast<const uint32_t*>(static_cast<uintptr_t>(gate) + 2);
             };
-            const Site sites[] =
+            const uint32_t flag = flagAt(registerGate);
+            if (flagAt(legacyGate) != flag || flagAt(consumerGate) != flag)
             {
-                { kRawMouseInputRegisterGateAddr, kRegisterGate, sizeof(kRegisterGate), "register gate" },
-                { kRawMouseInputLegacyGateAddr, kLegacyGate, sizeof(kLegacyGate), "legacy-suppress gate" },
-                { kRawMouseInputConsumerGateAddr, kConsumerGate, sizeof(kConsumerGate), "look-consumer gate" },
-                { kRawMouseInputProcessAddr, kProcessRawInput, sizeof(kProcessRawInput), "ProcessMouseRawInput" },
-            };
-            for (const Site& site : sites)
-            {
-                if (!ExpectedBytesMatchAt(site.address, site.bytes, site.length))
-                {
-                    Log(L"[RAWINPUT] Signature mismatch at 0x%08X (%hs); staying on the legacy mouse path\n",
-                        static_cast<uint32_t>(site.address),
-                        site.name);
-                    return false;
-                }
+                Log(L"[RAWINPUT] The three raw-input gates name different flags (0x%08X/0x%08X/0x%08X); staying on the legacy mouse path\n",
+                    flag, flagAt(legacyGate), flagAt(consumerGate));
+                return false;
             }
 
+            g_RawMouseInputEnabledAddr = flag;
+            g_RawMouseInputProcessAddr = process;
             g_RawMouseInputSignaturesMatch = true;
             return true;
         }
@@ -275,7 +269,7 @@ namespace BZROpenShim
             static const uint8_t kExpectedPrologue[] =
             { 0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08 };
             if (!InstallInlineDetour32(g_RawMouseInputProcessDetour,
-                                       kRawMouseInputProcessAddr,
+                                       g_RawMouseInputProcessAddr,
                                        reinterpret_cast<void*>(ProcessMouseRawInputHook),
                                        sizeof(kExpectedPrologue),
                                        kExpectedPrologue,
@@ -285,7 +279,7 @@ namespace BZROpenShim
                 // ordinary relative mouse; only the absolute-mode guard and the
                 // packet diagnostics are lost.
                 Log(L"[RAWINPUT] ProcessMouseRawInput hook install failed at 0x%08X; absolute-mode guard unavailable\n",
-                    static_cast<uint32_t>(kRawMouseInputProcessAddr));
+                    static_cast<uint32_t>(g_RawMouseInputProcessAddr));
                 return;
             }
 
@@ -293,7 +287,7 @@ namespace BZROpenShim
                 reinterpret_cast<FnProcessMouseRawInput>(g_RawMouseInputProcessDetour.trampoline);
             g_RawMouseInputProcessHookInstalled = true;
             Log(L"[RAWINPUT] Installed ProcessMouseRawInput guard at 0x%08X\n",
-                static_cast<uint32_t>(kRawMouseInputProcessAddr));
+                static_cast<uint32_t>(g_RawMouseInputProcessAddr));
         }
 
         bool TryReadRawMouseInputFlag(int& out)
@@ -302,7 +296,7 @@ namespace BZROpenShim
                 return false;
             __try
             {
-                out = *reinterpret_cast<const int*>(kRawMouseInputEnabledAddr);
+                out = *reinterpret_cast<const int*>(g_RawMouseInputEnabledAddr);
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -317,7 +311,7 @@ namespace BZROpenShim
                 return false;
             __try
             {
-                *reinterpret_cast<int*>(kRawMouseInputEnabledAddr) = value;
+                *reinterpret_cast<int*>(g_RawMouseInputEnabledAddr) = value;
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -443,7 +437,7 @@ namespace BZROpenShim
         if (!TryWriteRawMouseInputFlag(enabled ? 1 : 0))
         {
             Log(L"[RAWINPUT] Could not write the enable flag at 0x%08X; legacy mouse path stays active\n",
-                static_cast<uint32_t>(kRawMouseInputEnabledAddr));
+                static_cast<uint32_t>(g_RawMouseInputEnabledAddr));
             return false;
         }
 

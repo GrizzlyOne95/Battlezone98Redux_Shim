@@ -1,4 +1,5 @@
 #include "terrain_proxy.h"
+#include "hook_engine.h"
 #include "engine_globals.h"
 
 #include "terrain_semantic.h"
@@ -38,33 +39,41 @@
 
 namespace BZROpenShim
 {
+    extern bool g_IsSteamExe;
+
+    namespace Hooks
+    {
+        bool GetBzrRunStateAddresses(uintptr_t& setRunning, uintptr_t& runState, uintptr_t& nameTable);
+    }
+
     namespace
     {
-        constexpr char kExpectedExeSha256[] =
-            "8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413";
         constexpr char kExpectedOgreSha256[] =
             "E5E693960B95AD0D60733A3B688464A6C6CBA234E86950698F9C2BEA4ACFEB45";
-        constexpr uintptr_t kPreferredImageBase = 0x00400000;
-        constexpr uintptr_t kZoneConstructVa = 0x007778B0;
-        constexpr uintptr_t kZoneProcessVa = 0x00778450;
-        constexpr uintptr_t kTerrainWordAtVa = 0x004C0FE0;
-        constexpr uintptr_t kHeightAtVa = 0x0077D640;
-        constexpr uintptr_t kAtlasRectAtVa = 0x0050CE10;
-        constexpr uintptr_t kTerrainManagerVa = 0x0077C670;
-        constexpr uintptr_t kTileIndexAtVa = 0x00780DC0;
-        constexpr uintptr_t kMixAtVa = 0x00780E40;
-        constexpr uintptr_t kTerrainOriginXVa = 0x02CE99C0;
-        constexpr uintptr_t kTerrainOriginZVa = 0x02CD9984;
-        // Redux's mission-run state machine. FUN_00434170 is
-        // `void __cdecl SetRunning(int)`: it stores the new state in
-        // kRunStateVa (unless the state is already RUN_WAS_EXITED, which is
-        // sticky) and logs "SetRunning: was %s, now %s" using a table of
-        // eleven name pointers at kRunStateNameTableVa. This is the only
+        // Engine addresses, all bound together by TerrainProxyAddressesBound():
+        // engine_addresses rows for the zone/terrain functions, resolve-table
+        // patterns for the terrain manager getter and the grid origin, and the
+        // run state as the lifecycle seam bound it.
+        uintptr_t g_zoneConstructVa = 0;
+        uintptr_t g_zoneProcessVa = 0;
+        uintptr_t g_terrainWordAtVa = 0;
+        uintptr_t g_heightAtVa = 0;
+        uintptr_t g_atlasRectAtVa = 0;
+        uintptr_t g_terrainManagerVa = 0;
+        uintptr_t g_tileIndexAtVa = 0;
+        uintptr_t g_mixAtVa = 0;
+        uintptr_t g_terrainOriginXVa = 0;
+        uintptr_t g_terrainOriginZVa = 0;
+        // Redux's mission-run state machine. SetRunning (the SetShellState
+        // row) is `void __cdecl SetRunning(int)`: it stores the new state in
+        // the run state global (unless the state is already RUN_WAS_EXITED,
+        // which is sticky) and logs "SetRunning: was %s, now %s" using a table
+        // of eleven name pointers (the RunStateNameTable row). This is the only
         // mission-lifetime boundary Redux crosses in-process: it never calls
         // SceneManager::clearScene or destroyAllMovableObjects.
-        constexpr uintptr_t kSetRunningVa = 0x00434170;
-        constexpr uintptr_t kRunStateVa = 0x008E706C;
-        constexpr uintptr_t kRunStateNameTableVa = 0x00871690;
+        uintptr_t g_setRunningVa = 0;
+        uintptr_t g_runStateVa = 0;
+        uintptr_t g_runStateNameTableVa = 0;
         constexpr int kRunStateNameCount = 11;
         constexpr int kRunStateStarted = 5;
         constexpr int kRunStateUnknown = -1;
@@ -666,9 +675,45 @@ namespace BZROpenShim
             }
         }
 
-        uintptr_t Rebase(uintptr_t preferredVa)
+        bool TerrainProxyAddressesBound()
         {
-            return g_mainBase + (preferredVa - kPreferredImageBase);
+            static const bool bound = [] {
+                uint32_t zoneConstruct = 0, zoneProcess = 0, wordAt = 0, heightAt = 0;
+                uint32_t atlasRectAt = 0, tileIndexAt = 0, mixAt = 0;
+                const HookEngine::EngineRow rows[] = {
+                    { "TerrainZoneConstruct", &zoneConstruct },
+                    { "TerrainZoneProcess", &zoneProcess },
+                    { "TerrainWordAt", &wordAt },
+                    { "TerrainHeightAt", &heightAt },
+                    { "TerrainAtlasRectAt", &atlasRectAt },
+                    { "TerrainTileIndexAt", &tileIndexAt },
+                    { "TerrainMixAt", &mixAt },
+                };
+                if (!HookEngine::BindEngineRows("Terrain proxy", rows))
+                    return false;
+                const uint32_t manager = HookEngine::ResolveNamedAddress("Terrain::GetManager");
+                const uint32_t originX = HookEngine::ResolveNamedAddress("PathBlock::GridMinX");
+                const uint32_t originZ = HookEngine::ResolveNamedAddress("PathBlock::GridMinZ");
+                if (!manager || !originX || !originZ ||
+                    !Hooks::GetBzrRunStateAddresses(g_setRunningVa, g_runStateVa, g_runStateNameTableVa))
+                {
+                    LogShimA(LogLevel::Warn, "terrain-proxy",
+                        "[TERRAIN-PROXY] terrain manager/grid origin/run state unresolved; Phase 2 unavailable");
+                    return false;
+                }
+                g_zoneConstructVa = zoneConstruct;
+                g_zoneProcessVa = zoneProcess;
+                g_terrainWordAtVa = wordAt;
+                g_heightAtVa = heightAt;
+                g_atlasRectAtVa = atlasRectAt;
+                g_terrainManagerVa = manager;
+                g_tileIndexAtVa = tileIndexAt;
+                g_mixAtVa = mixAt;
+                g_terrainOriginXVa = originX;
+                g_terrainOriginZVa = originZ;
+                return true;
+            }();
+            return bound;
         }
 
         bool IsEnvEnabled(const char* name)
@@ -1357,7 +1402,7 @@ namespace BZROpenShim
 
         bool SafeReadRunState(int& value)
         {
-            return SafeReadIntAddress(Rebase(kRunStateVa), value);
+            return SafeReadIntAddress(g_runStateVa, value);
         }
 
         // Names come from Redux's own SetRunning table rather than from a
@@ -1370,7 +1415,7 @@ namespace BZROpenShim
             __try
             {
                 const char* const* const table =
-                    reinterpret_cast<const char* const*>(Rebase(kRunStateNameTableVa));
+                    reinterpret_cast<const char* const*>(g_runStateNameTableVa);
                 const char* const name = table[state];
                 return name ? name : "<null>";
             }
@@ -1385,7 +1430,7 @@ namespace BZROpenShim
             __try
             {
                 const char* const* const table =
-                    reinterpret_cast<const char* const*>(Rebase(kRunStateNameTableVa));
+                    reinterpret_cast<const char* const*>(g_runStateNameTableVa);
                 const char* const name = table[state];
                 if (!name)
                     return false;
@@ -1428,8 +1473,8 @@ namespace BZROpenShim
                 return false;
             int originX = 0;
             int originZ = 0;
-            if (!SafeReadIntAddress(Rebase(kTerrainOriginXVa), originX) ||
-                !SafeReadIntAddress(Rebase(kTerrainOriginZVa), originZ))
+            if (!SafeReadIntAddress(g_terrainOriginXVa, originX) ||
+                !SafeReadIntAddress(g_terrainOriginZVa, originZ))
                 return false;
             const int baseX = g_proxy.zoneX * 256 + originX - 128 + g_proxy.clusterX * 64;
             const int baseZ = g_proxy.zoneZ * 256 + originZ - 128 + g_proxy.clusterZ * 64;
@@ -4205,8 +4250,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 
             int originX = 0;
             int originZ = 0;
-            if (!SafeReadIntAddress(Rebase(kTerrainOriginXVa), originX) ||
-                !SafeReadIntAddress(Rebase(kTerrainOriginZVa), originZ))
+            if (!SafeReadIntAddress(g_terrainOriginXVa, originX) ||
+                !SafeReadIntAddress(g_terrainOriginZVa, originZ))
                 return false;
 
             SemanticBuildContext context{originX, originZ};
@@ -4321,8 +4366,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 return;
             int originX = 0;
             int originZ = 0;
-            if (!SafeReadIntAddress(Rebase(kTerrainOriginXVa), originX) ||
-                !SafeReadIntAddress(Rebase(kTerrainOriginZVa), originZ))
+            if (!SafeReadIntAddress(g_terrainOriginXVa, originX) ||
+                !SafeReadIntAddress(g_terrainOriginZVa, originZ))
                 return;
 
             struct Cell
@@ -5112,11 +5157,11 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         bool InstallHooks()
         {
             g_mainBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-            if (!g_mainBase)
+            if (!g_mainBase || !TerrainProxyAddressesBound())
                 return false;
             static const uint8_t expectedEntry[] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF };
-            const uintptr_t constructor = Rebase(kZoneConstructVa);
-            const uintptr_t process = Rebase(kZoneProcessVa);
+            const uintptr_t constructor = g_zoneConstructVa;
+            const uintptr_t process = g_zoneProcessVa;
             if (!ExpectedBytesMatchAt(constructor, expectedEntry, sizeof(expectedEntry)) ||
                 !ExpectedBytesMatchAt(process, expectedEntry, sizeof(expectedEntry)))
             {
@@ -5156,12 +5201,12 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             // If a mission is already running when Phase 2 comes up, no arming
             // transition will be observed for it, so adopt the current state.
             g_discoveryArmed = g_lastRunState == kRunStateStarted;
-            g_terrainWordAt = reinterpret_cast<FnTerrainWordAt>(Rebase(kTerrainWordAtVa));
-            g_heightAt = reinterpret_cast<FnHeightAt>(Rebase(kHeightAtVa));
-            g_terrainManager = reinterpret_cast<FnTerrainManager>(Rebase(kTerrainManagerVa));
-            g_atlasRectAt = reinterpret_cast<FnAtlasRectAt>(Rebase(kAtlasRectAtVa));
-            g_tileIndexAt = reinterpret_cast<FnTileIndexAt>(Rebase(kTileIndexAtVa));
-            g_mixAt = reinterpret_cast<FnMixAt>(Rebase(kMixAtVa));
+            g_terrainWordAt = reinterpret_cast<FnTerrainWordAt>(g_terrainWordAtVa);
+            g_heightAt = reinterpret_cast<FnHeightAt>(g_heightAtVa);
+            g_terrainManager = reinterpret_cast<FnTerrainManager>(g_terrainManagerVa);
+            g_atlasRectAt = reinterpret_cast<FnAtlasRectAt>(g_atlasRectAtVa);
+            g_tileIndexAt = reinterpret_cast<FnTileIndexAt>(g_tileIndexAtVa);
+            g_mixAt = reinterpret_cast<FnMixAt>(g_mixAtVa);
             g_active.store(true, std::memory_order_release);
             return true;
         }
@@ -5208,20 +5253,19 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 
         DWORD WINAPI WorkerProc(void*)
         {
-            HMODULE executable = GetModuleHandleW(nullptr);
-            std::string exeHash;
-            if (!VerifyModuleHash(executable, kExpectedExeSha256, exeHash))
+            // Validated on GOG only; Steam stays stock as it always has.
+            if (g_IsSteamExe)
             {
                 LogShimA(LogLevel::Warn, "terrain-proxy",
-                    "[TERRAIN-PROXY] exact executable build not validated sha256=%s; Phase 2 unavailable",
-                    exeHash.empty() ? "<unavailable>" : exeHash.c_str());
+                    "[TERRAIN-PROXY] GOG executable only; Phase 2 unavailable on Steam");
                 return 0;
             }
-            LogShimA(LogLevel::Info, "terrain-proxy", "[TERRAIN-PROXY] exact executable build validated");
+            if (!TerrainProxyAddressesBound())
+                return 0;
+            LogShimA(LogLevel::Info, "terrain-proxy", "[TERRAIN-PROXY] engine addresses bound");
 
             // The follow-camera aim point anchors on the player, which needs the
-            // GOG-build player-handle lookup wired up. The hash check above is
-            // what makes that address safe to take.
+            // player-handle lookup wired up; that binds through its own row.
             ResolveLocalPlayerLookupForVerifiedGogBuild();
 
             HMODULE ogre = nullptr;
@@ -5258,9 +5302,9 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             {
                 LogShimA(LogLevel::Info, "terrain-proxy",
                     "[TERRAIN-PROXY] hooks installed constructor=0x%08X rebuild=0x%08X missionSeam=0x%08X runStateTable=%s initialRunState=%s(%d)",
-                    static_cast<unsigned>(Rebase(kZoneConstructVa)),
-                    static_cast<unsigned>(Rebase(kZoneProcessVa)),
-                    static_cast<unsigned>(Rebase(kSetRunningVa)),
+                    static_cast<unsigned>(g_zoneConstructVa),
+                    static_cast<unsigned>(g_zoneProcessVa),
+                    static_cast<unsigned>(g_setRunningVa),
                     g_runStateHookInstalled ? "verified" : "mismatched",
                     RunStateName(g_lastRunState), g_lastRunState);
             }

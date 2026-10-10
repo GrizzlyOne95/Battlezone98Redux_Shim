@@ -84,9 +84,22 @@ namespace BZROpenShim
         static constexpr size_t kGameObjectEnemyShotOffset = 0x1E8;
 
         // CockpitRadar::Render's "a friendly is under attack" cooldown, the
-        // float the growl alert compares enemyShot against
-        // (comiss xmm0, [0x009173D0] at 0x00494D35).
-        static constexpr uintptr_t kRadarAttackAlertNextBeepRva = 0x005173D0;
+        // float the growl alert compares enemyShot against. Taken from the
+        // operand of that comiss (the RadarAttackAlertCompare row); 0 when the
+        // row does not bind.
+        static uintptr_t RadarAttackAlertNextBeepAddr()
+        {
+            static const uintptr_t addr = [] {
+                uint32_t compare = 0;
+                const HookEngine::EngineRow rows[] = {
+                    { "RadarAttackAlertCompare", &compare },  // comiss xmm0,[m32]
+                };
+                if (!HookEngine::BindEngineRows("Hop-out attack alert fix", rows))
+                    return uintptr_t{0};
+                return static_cast<uintptr_t>(*reinterpret_cast<const uint32_t*>(compare + 3));
+            }();
+            return addr;
+        }
 
         static bool g_HopOutAttackAlertFixEnabled = kHopOutAttackAlertFixEnabledDefault;
 
@@ -222,8 +235,7 @@ namespace BZROpenShim
                     vtableAddress + (kGetTeamSlot + 1) * sizeof(void*) > imageEnd)
                     return false;
 
-                const uintptr_t expected =
-                    imageBase + (kGogGameObjectGetTeamAddr - kGogPreferredImageBase);
+                const uintptr_t expected = ExpectedGameObjectGetTeamAddr();
                 if (reinterpret_cast<uintptr_t>(vtable[kGetTeamSlot]) != expected)
                     return false;
 
@@ -273,7 +285,7 @@ namespace BZROpenShim
         static bool TryReadCurrentViewId(long& outView)
         {
             outView = -1;
-            auto* viewRecord = ResolveMainModulePtr<uint8_t>(kViewRecordRva);
+            auto* viewRecord = reinterpret_cast<uint8_t*>(ViewRecordAddr());
             if (!viewRecord)
                 return false;
 
@@ -669,7 +681,7 @@ namespace BZROpenShim
             if (!TryGetGameObjectFieldBase(previousObject, previousBase))
                 return;
 
-            auto* nextBeep = ResolveMainModulePtr<float>(kRadarAttackAlertNextBeepRva);
+            auto* nextBeep = reinterpret_cast<float*>(RadarAttackAlertNextBeepAddr());
             if (!nextBeep)
                 return;
 
@@ -718,11 +730,11 @@ namespace BZROpenShim
 
             g_SatelliteVisibilityLastTick = now;
 
-            auto* viewRecord = ResolveMainModulePtr<uint8_t>(kViewRecordRva);
+            auto* viewRecord = reinterpret_cast<uint8_t*>(ViewRecordAddr());
             if (!viewRecord)
             {
                 Log(L"[SATVIS] missing view record pointer 0x%08X\n",
-                    static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva));
+                    static_cast<uint32_t>(ViewRecordAddr()));
                 return;
             }
 

@@ -42,7 +42,7 @@ The default schedule matches the existing Campaign Reimagined autosave behavior:
 
 ## Configuration
 
-The in-game **OpenShim Settings** page exposes the two player-facing controls:
+The in-game **OpenShim Options → Gameplay** screen exposes the two player-facing controls:
 
 - **AutoSave** - On/Off. Applies immediately.
 - **AutoSave Interval** - 1, 2, 3, 5, or 10 minutes. Applies immediately and restarts the current interval from the time it is changed.

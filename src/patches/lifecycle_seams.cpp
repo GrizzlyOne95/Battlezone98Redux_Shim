@@ -258,9 +258,48 @@ namespace BZROpenShim
         // The one mission boundary Redux does cross in-process is
         // SetRunning (FUN_00434170) leaving RUN_STARTED. The scene is still
         // fully alive at that point, so it is a safe place to drop references.
-        constexpr uintptr_t kBzrSetRunningAddr = 0x00434170;
-        constexpr uintptr_t kBzrRunStateAddr = 0x008E706C;
-        constexpr uintptr_t kBzrRunStateNameTableAddr = 0x00871690;
+        //
+        // SetRunning is the SetShellState row and opens with
+        // `cmp dword [runState],9`, so the run state global is read from that
+        // operand; the name table is a row checked by name before use.
+        static uintptr_t g_BzrSetRunningAddr = 0;
+        static uintptr_t g_BzrRunStateAddr = 0;
+        static uintptr_t g_BzrRunStateNameTableAddr = 0;
+
+        static bool BzrRunStateAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "SetShellState", &g_BzrSetRunningAddr },
+                    { "RunStateNameTable", &g_BzrRunStateNameTableAddr },
+                };
+                if (!HookEngine::BindEngineRows("Lifecycle seams", rows))
+                    return false;
+                const auto* code = reinterpret_cast<const uint8_t*>(g_BzrSetRunningAddr);
+                if (code[3] != 0x83 || code[4] != 0x3D)
+                {
+                    Log(L"[MISSION] SetRunning at 0x%08X does not open with cmp [runState]; lifecycle seams stand down\n",
+                        static_cast<uint32_t>(g_BzrSetRunningAddr));
+                    return false;
+                }
+                g_BzrRunStateAddr = *reinterpret_cast<const uint32_t*>(code + 5);
+                return true;
+            }();
+            return bound;
+        }
+
+        // Shared with the terrain proxy. The mission seam detours SetRunning
+        // once this has bound, so later readers must take these values rather
+        // than bind the SetShellState row again (its guard no longer matches).
+        bool GetBzrRunStateAddresses(uintptr_t& setRunning, uintptr_t& runState, uintptr_t& nameTable)
+        {
+            if (!BzrRunStateAddressesBound())
+                return false;
+            setRunning = g_BzrSetRunningAddr;
+            runState = g_BzrRunStateAddr;
+            nameTable = g_BzrRunStateNameTableAddr;
+            return true;
+        }
         constexpr int kBzrRunStateWasQuit = 2;
 
         using FnBzrSetRunning = void(__cdecl*)(int);
@@ -273,9 +312,11 @@ namespace BZROpenShim
 
         bool TryReadBzrRunState(int& value)
         {
+            if (!BzrRunStateAddressesBound())
+                return false;
             __try
             {
-                value = *reinterpret_cast<const int*>(kBzrRunStateAddr);
+                value = *reinterpret_cast<const int*>(g_BzrRunStateAddr);
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -291,7 +332,7 @@ namespace BZROpenShim
             __try
             {
                 const char* const* const table =
-                    reinterpret_cast<const char* const*>(kBzrRunStateNameTableAddr);
+                    reinterpret_cast<const char* const*>(g_BzrRunStateNameTableAddr);
                 const char* const name = table[state];
                 return name ? name : "<null>";
             }
@@ -306,7 +347,7 @@ namespace BZROpenShim
             __try
             {
                 const char* const* const table =
-                    reinterpret_cast<const char* const*>(kBzrRunStateNameTableAddr);
+                    reinterpret_cast<const char* const*>(g_BzrRunStateNameTableAddr);
                 const char* const name = table[state];
                 if (!name)
                     return false;
@@ -412,6 +453,11 @@ namespace BZROpenShim
         {
             if (g_MissionSeamInstalled || g_MissionSeamFailureLogged)
                 return;
+            if (!BzrRunStateAddressesBound())
+            {
+                g_MissionSeamFailureLogged = true;
+                return;
+            }
             // GOG-only absolute addresses, and the stolen prologue carries an
             // absolute operand, so require the pinned image at its fixed base.
             if (g_IsSteamExe ||
@@ -423,18 +469,18 @@ namespace BZROpenShim
                 return;
             }
 
-            // push ebp; mov ebp,esp; cmp dword ptr [runState],9
-            static const uint8_t kExpectedSetRunningBytes[] =
-            {
-                0x55, 0x8B, 0xEC, 0x83, 0x3D, 0x6C, 0x70, 0x8E, 0x00, 0x09
-            };
-            if (!ExpectedBytesMatchAt(kBzrSetRunningAddr,
+            // push ebp; mov ebp,esp; cmp dword ptr [runState],9 -- read live
+            // after the row's guard, since the operand is absolute.
+            uint8_t kExpectedSetRunningBytes[10] = {};
+            memcpy(kExpectedSetRunningBytes, reinterpret_cast<const void*>(g_BzrSetRunningAddr),
+                   sizeof(kExpectedSetRunningBytes));
+            if (!ExpectedBytesMatchAt(g_BzrSetRunningAddr,
                                       kExpectedSetRunningBytes,
                                       sizeof(kExpectedSetRunningBytes)) ||
                 !BzrRunStateNameMatches(kBzrRunStateStarted, "RUN_STARTED"))
             {
                 Log(L"[MISSION] SetRunning signature mismatch at 0x%08X (index %d reads \"%hs\"); mission transition seam unavailable\n",
-                    static_cast<uint32_t>(kBzrSetRunningAddr),
+                    static_cast<uint32_t>(g_BzrSetRunningAddr),
                     kBzrRunStateStarted,
                     BzrRunStateName(kBzrRunStateStarted));
                 g_MissionSeamFailureLogged = true;
@@ -442,14 +488,14 @@ namespace BZROpenShim
             }
 
             if (!InstallInlineDetour32(g_BzrSetRunningDetour,
-                                       kBzrSetRunningAddr,
+                                       g_BzrSetRunningAddr,
                                        reinterpret_cast<void*>(BzrSetRunningHook),
                                        sizeof(kExpectedSetRunningBytes),
                                        kExpectedSetRunningBytes,
                                        sizeof(kExpectedSetRunningBytes)))
             {
                 Log(L"[MISSION] Mission transition seam install failed at 0x%08X\n",
-                    static_cast<uint32_t>(kBzrSetRunningAddr));
+                    static_cast<uint32_t>(g_BzrSetRunningAddr));
                 g_MissionSeamFailureLogged = true;
                 return;
             }
@@ -461,7 +507,7 @@ namespace BZROpenShim
             if (initial != kBzrRunStateUnknown)
                 NotifyExuMissionSimulationState(initial == kBzrRunStateStarted);
             Log(L"[MISSION] Installed mission transition seam SetRunning=0x%08X initialState=%hs(%d)\n",
-                static_cast<uint32_t>(kBzrSetRunningAddr),
+                static_cast<uint32_t>(g_BzrSetRunningAddr),
                 BzrRunStateName(initial), initial);
         }
 

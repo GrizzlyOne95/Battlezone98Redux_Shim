@@ -173,15 +173,13 @@ namespace BZROpenShim
         // playerId +0x28, deaths +0x6C, kills +0x70). Same VA on Steam: the
         // Steam exe is the identical build wrapped in SteamStub (.bind), whose
         // .text decrypts in place at runtime.
-        constexpr uintptr_t kGogRecordDeathEntryAddr = 0x00577290;
+        static uintptr_t g_RecordDeathEntryAddr = 0;
 
         // DistributedObject::RecordDeath(int) candidate (BSim 0x48a281 -> 0x6796D0).
         // Advisory until qualified via ExpectedBytesMatchAt on GOG and Steam.
-        constexpr uintptr_t kGogDistributedRecordDeathIntAddr = 0x006796D0;
-
-        // Same VA on Steam after SteamStub .bind decrypts .text in place (see kGogRecordDeathEntryAddr note).
-        // Separate constant kept for distribution-specific override if validation diverges.
-        constexpr uintptr_t kSteamDistributedRecordDeathIntAddr = 0x006796D0;
+        // Same VA on Steam after SteamStub .bind decrypts .text in place (see
+        // the RecordDeath note); a per-build overlay carries any divergence.
+        static uintptr_t g_DistributedRecordDeathIntAddr = 0;
 
         // SetAsUser / SetAsNotUser had a probe here. Its addresses
         // (0x00495468 / 0x004954D7) are not function entries: both land
@@ -192,9 +190,31 @@ namespace BZROpenShim
         // installed and only cost a re-probe and two log lines per sim
         // tick. Removed rather than left failing; see
         // Docs/MP_EXPLOSIVE_AUTHORITY_QUALIFICATION.md before reviving it.
-        constexpr uintptr_t kSteam64GlobalAddr = 0x0260B1D0;
+        static uintptr_t g_Steam64GlobalAddr = 0;
+        static uintptr_t g_UiWrapperActiveAddr = 0;
+        static uintptr_t g_CareerQueuedLoadNameBufferAddr = 0;
+        static uintptr_t g_CareerQueuedLoadPathBufferAddr = 0;
+        static uintptr_t g_CareerNetPlayerByTeamAddr = 0;
 
-        constexpr uintptr_t kUiWrapperActiveAddr = 0x00918324;
+        // Every address above is an engine_addresses row, bound as one set;
+        // each entry point that used to require the reference build now
+        // requires this instead.
+        static bool CareerStatsAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "NetPlayerRecordDeath", &g_RecordDeathEntryAddr },
+                    { "DistributedRecordDeathInt", &g_DistributedRecordDeathIntAddr },
+                    { "Steam64Global", &g_Steam64GlobalAddr },
+                    { "UiWrapperActive", &g_UiWrapperActiveAddr },
+                    { "QueuedLoadNameBuffer", &g_CareerQueuedLoadNameBufferAddr },
+                    { "QueuedLoadPathBuffer", &g_CareerQueuedLoadPathBufferAddr },
+                    { "NetPlayerByTeam", &g_CareerNetPlayerByTeamAddr },
+                };
+                return HookEngine::BindEngineRows("Career stats", rows);
+            }();
+            return bound;
+        }
 
         constexpr size_t kRecordDeathDetourLen = 6;
 
@@ -239,7 +259,7 @@ namespace BZROpenShim
             outValue = 0;
             __try
             {
-                outValue = *reinterpret_cast<volatile const uint64_t*>(kSteam64GlobalAddr);
+                outValue = *reinterpret_cast<volatile const uint64_t*>(g_Steam64GlobalAddr);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -254,7 +274,7 @@ namespace BZROpenShim
         {
             __try
             {
-                return *reinterpret_cast<volatile const uint32_t*>(kUiWrapperActiveAddr);
+                return *reinterpret_cast<volatile const uint32_t*>(g_UiWrapperActiveAddr);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -422,6 +442,7 @@ namespace BZROpenShim
 
         void RememberQueuedMissionName(const char* name)
         {
+            if (!CareerStatsAddressesBound()) return;
             if (name && name[0])
                 strncpy_s(g_LastKnownQueuedMissionName, name, _TRUNCATE);
         }
@@ -444,7 +465,7 @@ namespace BZROpenShim
             };
 
             const std::string queuedName =
-                normalizeCandidate(ReadInlineAsciiBuffer(kQueuedLoadNameBufferAddr, kQueuedLoadNameBufferLen));
+                normalizeCandidate(ReadInlineAsciiBuffer(g_CareerQueuedLoadNameBufferAddr, kQueuedLoadNameBufferLen));
             if (!queuedName.empty())
             {
                 RememberQueuedMissionName(queuedName.c_str());
@@ -460,7 +481,7 @@ namespace BZROpenShim
             // would file its stats under. It is not a mission, so refuse it
             // rather than inventing one.
             const std::string queuedPath =
-                normalizeCandidate(ReadInlineAsciiBuffer(kQueuedLoadPathBufferAddr, MAX_PATH));
+                normalizeCandidate(ReadInlineAsciiBuffer(g_CareerQueuedLoadPathBufferAddr, MAX_PATH));
             if (_stricmp(queuedPath.c_str(), "auto") == 0)
                 return {};
 
@@ -722,6 +743,7 @@ namespace BZROpenShim
 
         void StartCareerStatsMpSessionWorker()
         {
+            if (!CareerStatsAddressesBound()) return;
             if (InterlockedCompareExchange(&g_CareerStatsMpSessionWorkerStarted, 1, 0) != 0)
                 return;
 
@@ -827,6 +849,7 @@ namespace BZROpenShim
         // wired into a career-specific predicate.
         void PublishDamageForCareerStatsFromProbe(void* victim, void* damage)
         {
+            if (!CareerStatsAddressesBound()) return;
             if (!HasEventSubscribers())
                 return;
 
@@ -964,6 +987,7 @@ namespace BZROpenShim
         // Drain side, once per frame: turn pending damage into Kill events.
         void TickCareerPendingVictims()
         {
+            if (!CareerStatsAddressesBound()) return;
             if (!HasEventSubscribers())
                 return;
 
@@ -1043,14 +1067,14 @@ namespace BZROpenShim
         static bool IsTeamHumanByNetPlayer(int team)
         {
             if (team <= 0 || team > 15) return false;
-            auto** byTeam = reinterpret_cast<void**>(kNetPlayerByTeamAddr);
+            auto** byTeam = reinterpret_cast<void**>(g_CareerNetPlayerByTeamAddr);
             __try { return byTeam[team] != nullptr; } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
         }
 
         static uint16_t GetNetPlayerIdForTeam(int team)
         {
             if (team <= 0 || team > 15) return PlayerKillTrace::kNetPlayerIdUnread;
-            auto** byTeam = reinterpret_cast<void**>(kNetPlayerByTeamAddr);
+            auto** byTeam = reinterpret_cast<void**>(g_CareerNetPlayerByTeamAddr);
             __try {
                 void* np = byTeam[team];
                 if (!np) return PlayerKillTrace::kNetPlayerIdUnread;
@@ -1283,6 +1307,7 @@ namespace BZROpenShim
 
         void InstallDistributedRecordDeathIntHookIfPossible()
         {
+            if (!CareerStatsAddressesBound()) return;
             if (g_DistributedRecordDeathIntHookInstalled || !ShouldTracePlayerKills()) return;
             if (g_DistributedRecordDeathIntDetour.trampoline && g_BzrFn_DistributedRecordDeathInt) { g_DistributedRecordDeathIntHookInstalled = true; return; }
             const uint64_t now = GetTickCount64();
@@ -1291,7 +1316,7 @@ namespace BZROpenShim
             g_DistributedRecordDeathIntLastTick = now;
             g_DistributedRecordDeathIntHookAttempted = true;
             uintptr_t target = 0;
-            if (g_IsSteamExe) target = kSteamDistributedRecordDeathIntAddr; else target = kGogDistributedRecordDeathIntAddr;
+            target = g_DistributedRecordDeathIntAddr;
             // Re-derive validation: check at least that target is executable and has plausible prolog.
             // From 1.5: RecordDeath(int) is small thiscall: 55 8B EC 83 EC ?? . For Redux candidate 0x6796D0 we expect similar.
             static const uint8_t kExpectedProlog[] = { 0x55, 0x8B, 0xEC };
@@ -1464,6 +1489,7 @@ namespace BZROpenShim
 
         void InitializeCareerStatsConfig()
         {
+            if (!CareerStatsAddressesBound()) return;
             bool configured = false;
             if (TryGetUserConfigBool("Career", "StatsTracking", configured))
                 g_CareerStatsEnabled = configured;
@@ -1492,6 +1518,7 @@ namespace BZROpenShim
         // right order, just late; nothing here depends on the dead world.
         void TickCareerSessionState()
         {
+            if (!CareerStatsAddressesBound()) return;
             static bool s_WorldWasLive = false;
 
             // No subscriber check here on purpose. This is a two-state
@@ -1632,6 +1659,7 @@ namespace BZROpenShim
 
         void InstallCareerStatsMpHookIfPossible()
         {
+            if (!CareerStatsAddressesBound()) return;
             if (g_CareerStatsMpHookInstalled)
                 return;
 
@@ -1660,32 +1688,36 @@ namespace BZROpenShim
             };
             // Body check at +0x0F distinguishes RecordDeath from other small
             // cdecl helpers sharing the generic prologue: cmp [ebp+8],0 / jle /
-            // mov eax,[ebp+8] / mov ecx,[eax*4 + netPlayerByTeam(0x9180E8)].
+            // mov eax,[ebp+8] / mov ecx,[eax*4 + netPlayerByTeam], and that
+            // table has to be the NetPlayerByTeam row bound beside it.
             static const uint8_t kExpectedRecordDeathBodyBytes[] =
             {
                 0x83, 0x7D, 0x08, 0x00, 0x7E, 0x3B, 0x8B, 0x45, 0x08,
-                0x8B, 0x0C, 0x85, 0xE8, 0x80, 0x91, 0x00
+                0x8B, 0x0C, 0x85
             };
             constexpr uintptr_t kRecordDeathBodyCheckOffset = 0x0F;
+            const uintptr_t bodyTableOperand =
+                g_RecordDeathEntryAddr + kRecordDeathBodyCheckOffset + sizeof(kExpectedRecordDeathBodyBytes);
 
-            if (!ExpectedBytesMatchAt(kGogRecordDeathEntryAddr,
+            if (!ExpectedBytesMatchAt(g_RecordDeathEntryAddr,
                                       kExpectedRecordDeathBytes,
                                       sizeof(kExpectedRecordDeathBytes)) ||
-                !ExpectedBytesMatchAt(kGogRecordDeathEntryAddr + kRecordDeathBodyCheckOffset,
+                !ExpectedBytesMatchAt(g_RecordDeathEntryAddr + kRecordDeathBodyCheckOffset,
                                       kExpectedRecordDeathBodyBytes,
-                                      sizeof(kExpectedRecordDeathBodyBytes)))
+                                      sizeof(kExpectedRecordDeathBodyBytes)) ||
+                *reinterpret_cast<const uint32_t*>(bodyTableOperand) != g_CareerNetPlayerByTeamAddr)
             {
                 if (!g_CareerStatsMpHookMismatchLogged)
                 {
                     Log(L"[CAREER] RecordDeath entry bytes not settled yet at 0x%08X; retrying for up to %llums\n",
-                        static_cast<uint32_t>(kGogRecordDeathEntryAddr),
+                        static_cast<uint32_t>(g_RecordDeathEntryAddr),
                         static_cast<unsigned long long>(kCareerStatsMpHookRetryWindowMs));
                     g_CareerStatsMpHookMismatchLogged = true;
                 }
                 else if ((nowMs - g_CareerStatsMpHookFirstAttemptTick) >= kCareerStatsMpHookRetryWindowMs)
                 {
                     Log(L"[CAREER] RecordDeath entry bytes still mismatched at 0x%08X after %llums; continuing guarded retries\n",
-                        static_cast<uint32_t>(kGogRecordDeathEntryAddr),
+                        static_cast<uint32_t>(g_RecordDeathEntryAddr),
                         static_cast<unsigned long long>(nowMs - g_CareerStatsMpHookFirstAttemptTick));
                     g_CareerStatsMpHookFirstAttemptTick = nowMs;
                 }
@@ -1693,14 +1725,14 @@ namespace BZROpenShim
             }
 
             if (!InstallInlineDetour32(g_RecordDeathDetour,
-                                       kGogRecordDeathEntryAddr,
+                                       g_RecordDeathEntryAddr,
                                        reinterpret_cast<void*>(RecordDeathHook),
                                        kRecordDeathDetourLen,
                                        kExpectedRecordDeathBytes,
                                        sizeof(kExpectedRecordDeathBytes)))
             {
                 Log(L"[CAREER] Failed installing RecordDeath hook at 0x%08X\n",
-                    static_cast<uint32_t>(kGogRecordDeathEntryAddr));
+                    static_cast<uint32_t>(g_RecordDeathEntryAddr));
                 return;
             }
 
@@ -1711,7 +1743,7 @@ namespace BZROpenShim
             {
                 g_CareerStatsMpHookMismatchLogged = false;
                 Log(L"[CAREER] Installed NetPlayer::RecordDeath hook entry=0x%08X trampoline=0x%08X path=%hs\n",
-                    static_cast<uint32_t>(kGogRecordDeathEntryAddr),
+                    static_cast<uint32_t>(g_RecordDeathEntryAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_RecordDeathDetour.trampoline)),
                     GetCareerStatsPath().string().c_str());
             }
@@ -1722,6 +1754,7 @@ namespace BZROpenShim
 
     CareerStatsResetResult ResetCareerStatsFromBridge()
     {
+        if (!CareerStatsAddressesBound()) return {};
         return ResetCareerStatsData();
     }
 }

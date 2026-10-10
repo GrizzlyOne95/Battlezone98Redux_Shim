@@ -2,6 +2,7 @@
 // read-only developer snapshot surface.
 
 #include "openshim_sdk_v2.h"
+#include "hook_engine.h"
 #include "openshim_sdk_record_copy.h"
 
 #include "bzr_hooks.h"
@@ -350,7 +351,7 @@ namespace BZROpenShim
         float x = 0.0f;
         float y = 0.0f;
         float z = 0.0f;
-        if (IsCompatibleGameVersion() && TryGetLocalPlayerWorldPosition(x, y, z))
+        if (HookEngine::IsKnownBuild() && TryGetLocalPlayerWorldPosition(x, y, z))
         {
             outSnapshot.localPlayerResolved = 1u;
             outSnapshot.localPlayerX = x;

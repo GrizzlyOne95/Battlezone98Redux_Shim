@@ -138,7 +138,17 @@ namespace BZROpenShim
             if (g_DynamicAlphaDepthBucketStride <= 1)
                 g_DynamicAlphaDepthBatchingEnabled = false;
         }
-        if (!g_IsSteamExe && g_DynamicAlphaDepthBatchingEnabled)
+        static uintptr_t s_SetSquaredViewDepthAddr = 0;
+        const bool depthBound = !g_IsSteamExe && g_DynamicAlphaDepthBatchingEnabled && [] {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "DynamicGeometrySetSquaredViewDepth", &s_SetSquaredViewDepthAddr },
+                };
+                return HookEngine::BindEngineRows("Dynamic alpha batching", rows);
+            }();
+            return bound;
+        }();
+        if (depthBound)
         {
             static const uint8_t kDynamicGeometryDepthPrologue[] =
             {
@@ -146,7 +156,7 @@ namespace BZROpenShim
             };
             if (InstallInlineDetour32(
                     g_DynamicGeometrySetSquaredViewDepthDetour,
-                    0x0067A780,
+                    s_SetSquaredViewDepthAddr,
                     reinterpret_cast<void*>(
                         &DynamicGeometrySetSquaredViewDepthHook),
                     sizeof(kDynamicGeometryDepthPrologue),
@@ -159,7 +169,8 @@ namespace BZROpenShim
                 LogShimA(
                     LogLevel::Info,
                     "render",
-                    "Dynamic alpha batching installed target=0x0067A780 stride=%u optOut=OPENSHIM_DISABLE_DYNAMIC_ALPHA_BATCHING",
+                    "Dynamic alpha batching installed target=0x%08X stride=%u optOut=OPENSHIM_DISABLE_DYNAMIC_ALPHA_BATCHING",
+                    static_cast<unsigned>(s_SetSquaredViewDepthAddr),
                     g_DynamicAlphaDepthBucketStride);
             }
             else
@@ -171,15 +182,23 @@ namespace BZROpenShim
                     "Dynamic alpha batching unavailable: GOG depth-key prologue mismatch");
             }
         }
+        static uintptr_t s_PrepareAddr = 0;
         if (!g_IsSteamExe && IsOgreAnimationProfilerCollecting())
         {
+            static const bool prepareBound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "DynamicGeometryPrepare", &s_PrepareAddr },
+                };
+                return HookEngine::BindEngineRows("DynamicGeometry profiler observer", rows);
+            }();
             static const uint8_t kDynamicGeometryPreparePrologue[] =
             {
                 0x55, 0x8B, 0xEC, 0x6A, 0xFF
             };
-            if (InstallInlineDetour32(
+            if (prepareBound &&
+                InstallInlineDetour32(
                     g_DynamicGeometryPrepareDetour,
-                    0x00678CD0,
+                    s_PrepareAddr,
                     reinterpret_cast<void*>(&DynamicGeometryPrepareHook),
                     sizeof(kDynamicGeometryPreparePrologue),
                     kDynamicGeometryPreparePrologue,
@@ -191,7 +210,8 @@ namespace BZROpenShim
                 LogShimA(
                     LogLevel::Info,
                     "ogre-profile",
-                    "[OgreProfile] installed GOG DynamicGeometry::prepareForSubmit observer target=0x00678CD0 trampoline=0x%p",
+                    "[OgreProfile] installed GOG DynamicGeometry::prepareForSubmit observer target=0x%08X trampoline=0x%p",
+                    static_cast<unsigned>(s_PrepareAddr),
                     g_DynamicGeometryPrepareDetour.trampoline);
             }
             else
@@ -202,9 +222,11 @@ namespace BZROpenShim
                     "[OgreProfile] GOG DynamicGeometry::prepareForSubmit prologue mismatch; native rebuild attribution unavailable");
             }
 
-            constexpr uintptr_t kRenderQueueAddRenderableIatSlot = 0x00869B64;
-            void* const currentAddRenderable =
-                *reinterpret_cast<void**>(kRenderQueueAddRenderableIatSlot);
+            static const uintptr_t kRenderQueueAddRenderableIatSlot = FindMainImageImportSlot(
+                "OgreMain.dll", "?addRenderable@RenderQueue@Ogre@@QAEXPAVRenderable@2@E@Z");
+            void* const currentAddRenderable = kRenderQueueAddRenderableIatSlot
+                ? *reinterpret_cast<void**>(kRenderQueueAddRenderableIatSlot)
+                : nullptr;
             if (currentAddRenderable ==
                 reinterpret_cast<void*>(&DynamicGeometryAddRenderableHook))
             {
@@ -241,7 +263,8 @@ namespace BZROpenShim
                 LogShimA(
                     LogLevel::Info,
                     "ogre-profile",
-                    "[OgreProfile] installed DynamicGeometry addRenderable batch counter IAT=0x00869B64 original=0x%p",
+                    "[OgreProfile] installed DynamicGeometry addRenderable batch counter IAT=0x%08X original=0x%p",
+                    static_cast<unsigned>(kRenderQueueAddRenderableIatSlot),
                     reinterpret_cast<void*>(g_BzrFn_RenderQueueAddRenderable));
             }
             else

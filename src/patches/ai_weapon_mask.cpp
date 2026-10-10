@@ -188,8 +188,12 @@ namespace BZROpenShim
         constexpr size_t kReduxUnitProcessMeOffset = 0x34;
         constexpr size_t kReduxLayMinesTaskMeOffset = 0x10;
 
-        constexpr uintptr_t kReduxCarrierGetWeaponAddr = 0x00417F60;
-        constexpr uintptr_t kReduxCarrierSetSelectedAddr = 0x004D9880;
+        // The routines each redirected call stood in for. The patcher sets
+        // them from the call's own rel32 once it matches the CarrierGetWeapon
+        // or CarrierSetSelected row, and leaves the stock call in place
+        // otherwise, so a redirect is never live without its original.
+        static void* g_CarrierGetWeaponOriginal = nullptr;
+        static void* g_CarrierSetSelectedOriginal = nullptr;
 
         // Both are __thiscall: `this` in ecx, one stack argument, callee-cleaned.
         // __fastcall with an ignored second parameter is the exact same ABI.
@@ -381,9 +385,19 @@ namespace BZROpenShim
     // Returning the preferred weapon on every iteration (slot 1..4) would cause
     // the stock loop to trigger the same weapon 5 times or to advance past the
     // selected slot. The `slot != 0` guard ensures exactly one non-null return.
+    void SetCarrierGetWeaponOriginal(void* original)
+    {
+        g_CarrierGetWeaponOriginal = original;
+    }
+
+    void SetCarrierSetSelectedOriginal(void* original)
+    {
+        g_CarrierSetSelectedOriginal = original;
+    }
+
     void* __cdecl OpenShimArtillerySelectWeapon(void* carrier, int slot, void* process)
     {
-        auto getWeapon = reinterpret_cast<FnCarrierGetWeaponThiscall>(kReduxCarrierGetWeaponAddr);
+        auto getWeapon = reinterpret_cast<FnCarrierGetWeaponThiscall>(g_CarrierGetWeaponOriginal);
 
         if (!g_AiWeaponMaskArtilleryActive)
             return getWeapon(carrier, nullptr, slot);
@@ -426,7 +440,7 @@ namespace BZROpenShim
     // is a single substitution, not a per-iteration loop.
     void* __cdecl OpenShimLayMinesGetWeapon(void* carrier, int slot, void* task)
     {
-        auto getWeapon = reinterpret_cast<FnCarrierGetWeaponThiscall>(kReduxCarrierGetWeaponAddr);
+        auto getWeapon = reinterpret_cast<FnCarrierGetWeaponThiscall>(g_CarrierGetWeaponOriginal);
 
         if (!g_AiWeaponMaskMinelayerActive)
             return getWeapon(carrier, nullptr, slot);
@@ -467,7 +481,7 @@ namespace BZROpenShim
     // mine from hardpoint 0 regardless of the mask.
     void __cdecl OpenShimLayMinesSetSelected(void* carrier, uint32_t mask, void* task)
     {
-        auto setSelected = reinterpret_cast<FnCarrierSetSelectedThiscall>(kReduxCarrierSetSelectedAddr);
+        auto setSelected = reinterpret_cast<FnCarrierSetSelectedThiscall>(g_CarrierSetSelectedOriginal);
 
         if (!g_AiWeaponMaskMinelayerActive)
         {

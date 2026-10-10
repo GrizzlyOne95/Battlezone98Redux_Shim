@@ -457,8 +457,6 @@ namespace BZROpenShim
         char* TrimAsciiInPlace(char* text);
         // Resolved by ResolveBzrHooks from patches.json ("PlayGlobalSound").
         extern FnPlayGlobalSound g_BzrFn_PlayGlobalSound;
-        // Engine viewport height global (the scrap/pilot HUD and radar layout read it).
-        inline constexpr uintptr_t kScrapPilotHudViewportHeightAddr = 0x02CECEE4;
 
         // --- Headlights (headlights.cpp) -------------------------------------
         inline constexpr size_t kHeadlightObjectSlotCount = 4096;
@@ -535,10 +533,16 @@ namespace BZROpenShim
         //
         // So the vtable is used only as a type tag -- compared, never invoked.
         // Slot 1 of every GameObject-family vtable in .rdata is the same
-        // GameObject::GetTeam (0x00462450), which makes an exact pointer
-        // compare a positive identification rather than a heuristic, and
-        // rejects abstract/_purecall tables and foreign objects alike.
-        inline constexpr uintptr_t kGogGameObjectGetTeamAddr = 0x00462450;
+        // GameObject::GetTeam (the GameObjectGetTeam row), which makes an
+        // exact pointer compare a positive identification rather than a
+        // heuristic, and rejects abstract/_purecall tables and foreign objects
+        // alike. Rebased to the live image; 0 when the row is not bound, which
+        // no vtable slot equals, so every check fails closed.
+        uintptr_t ExpectedGameObjectGetTeamAddr();
+        // The main image's import address table slot for dllName!importName,
+        // found through the import name table so it follows the build. 0 when
+        // the image does not import it by name.
+        uintptr_t FindMainImageImportSlot(const char* dllName, const char* importName);
         inline constexpr uintptr_t kGogPreferredImageBase = 0x00400000;
         bool IsLikelyGameObjectEntry(void* objectPtr);
         bool WritePointerValue(uintptr_t address, void* value);
@@ -615,9 +619,11 @@ namespace BZROpenShim
 
         // --- Career statistics and PKTRACE (career_stats.cpp) ------------------
         inline constexpr int kQueuedLoadNameBufferLen = 16;
-        inline constexpr uintptr_t kQueuedLoadPathBufferAddr = 0x00945708;
-        inline constexpr uintptr_t kQueuedLoadNameBufferAddr = 0x00915540;
-        inline constexpr uintptr_t kNetPlayerByTeamAddr = 0x009180E8;
+        // The QueuedLoadPathBuffer / QueuedLoadNameBuffer rows; 0 when not
+        // bound. Career stats and the multiplayer flags bind these and
+        // NetPlayerByTeam into their own row sets instead.
+        uintptr_t QueuedLoadPathBufferAddr();
+        uintptr_t QueuedLoadNameBufferAddr();
         struct CareerPendingVictim
         {
             bool inUse = false;
@@ -682,7 +688,8 @@ namespace BZROpenShim
         // Base 0x008EAAD0 + kPresetViewCurrentViewOffset (0x8) lands on
         // 0x008EAAD8, which matches the independently derived
         // kGogViewModeAddr used by the target-camera fix.
-        inline constexpr uintptr_t kViewRecordRva = 0x004EAAD0;
+        // The ViewRecord row; 0 when it is not bound.
+        uintptr_t ViewRecordAddr();
         inline constexpr bool kHopOutAttackAlertFixEnabledDefault = false;
         // SelectionDisplay::Render carries the complete Redux GameObject pointer,
         // while the inherited GameObject interface (whose slot +4 is GetTeam)
@@ -746,6 +753,9 @@ namespace BZROpenShim
         inline constexpr long kCameraTypeOverView = 3;
         // Some render-queue helpers are inlined or unexported from the shipped
         // OgreMain.dll; resolve those by raw image offset from the module base.
+        // The offsets are only meaningful in the OgreMain both storefronts
+        // ship, so anything else (a patch that updates OgreMain) gets nullptr.
+        bool IsKnownOgreMainBuild(HMODULE ogreMain);
         template<typename T>
         T ResolveOgreProcByOffset(uintptr_t offset)
         {
@@ -755,7 +765,7 @@ namespace BZROpenShim
             static HMODULE ogreMain = nullptr;
             if (!ogreMain)
                 ogreMain = GetModuleHandleA("OgreMain.dll");
-            if (!ogreMain)
+            if (!ogreMain || !IsKnownOgreMainBuild(ogreMain))
                 return nullptr;
 
             return reinterpret_cast<T>(reinterpret_cast<uint8_t*>(ogreMain) + offset);
@@ -789,8 +799,9 @@ namespace BZROpenShim
         void InstallUiManualObjectDedupeHookIfPossible();
 
         // --- Raw mouse input (raw_mouse_input.cpp) -----------------------------
-        inline constexpr uintptr_t kRawMouseInputEnabledAddr = 0x00918424;
-        inline constexpr uintptr_t kRawMouseInputProcessAddr = 0x004357D0;
+        // Bound by RawMouseInputSignaturesMatch(); 0 until then.
+        extern uintptr_t g_RawMouseInputEnabledAddr;
+        extern uintptr_t g_RawMouseInputProcessAddr;
         extern bool g_RawMouseInputSignaturesMatch;
         extern bool g_RawMouseInputProcessHookInstalled;
         extern long g_RawMouseInputTraceBudget;
@@ -1032,8 +1043,9 @@ namespace BZROpenShim
         // --- Multiplayer vehicle flags (multiplayer_vehicle_flags.cpp) ---------
         // Ogre::Vector3 global holding the per-map render origin (terrain
         // center); every engine sim->render conversion subtracts it and
-        // mirrors Z (render = simX-o.x, simY-o.y, -simZ-o.z).
-        inline constexpr uintptr_t kGogWorldRenderOriginAddr = 0x025F8E4C;
+        // mirrors Z (render = simX-o.x, simY-o.y, -simZ-o.z). The
+        // WorldRenderOrigin row; 0 when it is not bound.
+        uintptr_t WorldRenderOriginAddr();
         using FnFlagDisplaySubmit = void(__thiscall*)(void*, void*);
         struct MultiplayerFlagRenderSet
         {
@@ -1141,7 +1153,6 @@ namespace BZROpenShim
         void PinDirect3DModulesForShutdown();
 
         // --- Shield tower and mine team filters (team_filter_mines.cpp) --------
-        inline constexpr uintptr_t kGogBuildingSimulateAddr = 0x0047FCB0;
         struct TeamFilterConfig;
         struct TeamFilterCache;
         struct TeamFilterConfig
@@ -1203,7 +1214,8 @@ namespace BZROpenShim
         // --- AI ODF tuning (ai_odf_tuning.cpp) ---------------------------------
         inline constexpr float kScrapRetargetPeriodDefault = 2.0f;
         inline constexpr float kScrapRetargetMinImprovementDefault = 25.0f;
-        inline constexpr uintptr_t kGogTerrainGetIntersectionAddr = 0x00784620;
+        // TerrainGetIntersection row; 0 when it does not bind.
+        uintptr_t TerrainGetIntersectionAddr();
         struct RetargetPeriodState
         {
             float appliedDeadline = 0.0f;
@@ -1319,7 +1331,6 @@ namespace BZROpenShim
         void InstallAiTuningHooksIfPossible();
 
         // --- Unit behaviour fixes (unit_behavior_fixes.cpp) --------------------
-        inline constexpr uintptr_t kGogAIUnitRemoveEntryAddr = 0x0068FC60;
         extern bool g_ApcAlliedTargetDeployFixEnabled;
         extern bool g_ApcAlliedTargetDeployFixInstalled;
         extern FnScriptProducerPredicate g_BzrFn_ScriptCanBuildOriginal;
@@ -1410,7 +1421,7 @@ namespace BZROpenShim
         // (0x477590). This is the inner void-overload the Lua wrapper (0x4FFCD0) calls on
         // its non-numeric branch, matching the 1.5 decomp. Previous 0x00514610 was WRONG
         // (mid-instruction, same failure class as the fixed GetObjByHandle).
-        inline constexpr uintptr_t kGogGetPlayerHandleAddr = 0x005C7FB0;
+        // Now the GetPlayerHandle engine_addresses row.
         struct JumpSnipeProbeSnapshot
         {
             bool valid = false;
@@ -1776,8 +1787,10 @@ namespace BZROpenShim
         void RefreshChunkObjectIdentityCacheIfNeeded();
 
         // --- Chunk proxy rendering (chunk_proxy_render.cpp) --------------------
-        inline constexpr uintptr_t kGogChunkEffectCreateChunkAddr = 0x00492AA0;
-        inline constexpr uintptr_t kGogChunkEffectCreateChunkletAddr = 0x004927D0;
+        // ChunkEffectCreateChunk / ChunkEffectCreateChunklet rows; 0 until the
+        // create-path trace binds them.
+        extern uint32_t g_ChunkEffectCreateChunkAddr;
+        extern uint32_t g_ChunkEffectCreateChunkletAddr;
         struct BzrGeoEntry
         {
             uint32_t packedKey;

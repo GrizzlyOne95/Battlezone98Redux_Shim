@@ -220,7 +220,8 @@ namespace BZROpenShim
         // process. Remove only this verified orphan immediately before the
         // stock widget rebuild. ManualObject destruction detaches it from its
         // old SceneNode, and Redux creates/attaches a fresh object normally.
-        constexpr uintptr_t kUiEnsureManualObjectAddr = 0x007D2B70;
+        // The UiEnsureManualObject row.
+        static uintptr_t g_UiEnsureManualObjectAddr = 0;
         constexpr size_t kUiManualObjectPtrOffset = 0x120;
         constexpr size_t kUiWidgetNameOffset = 0x20;
 
@@ -322,6 +323,14 @@ namespace BZROpenShim
             if (!ShouldEnableUiManualObjectDedupe() ||
                 g_UiManualObjectDedupeHookInstalled)
                 return;
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "UiEnsureManualObject", &g_UiEnsureManualObjectAddr },
+                };
+                return HookEngine::BindEngineRows("UI ManualObject dedupe fix", rows);
+            }();
+            if (!bound)
+                return;
 
             HMODULE ogreMain = GetModuleHandleA("OgreMain.dll");
             if (!ogreMain)
@@ -347,7 +356,7 @@ namespace BZROpenShim
             {
                 0x55, 0x8B, 0xEC, 0x6A, 0xFF
             };
-            if (!ExpectedBytesMatchAt(kUiEnsureManualObjectAddr,
+            if (!ExpectedBytesMatchAt(g_UiEnsureManualObjectAddr,
                                       kExpectedBytes,
                                       sizeof(kExpectedBytes)))
             {
@@ -360,7 +369,7 @@ namespace BZROpenShim
             }
 
             if (!InstallInlineDetour32(g_UiManualObjectEnsureDetour,
-                                       kUiEnsureManualObjectAddr,
+                                       g_UiEnsureManualObjectAddr,
                                        reinterpret_cast<void*>(UiEnsureManualObjectDedupeHook),
                                        sizeof(kExpectedBytes),
                                        kExpectedBytes,
@@ -382,7 +391,7 @@ namespace BZROpenShim
             if (g_UiManualObjectDedupeHookInstalled)
             {
                 Log(L"[UI-DEDUPE] Installed Top Screen ManualObject orphan recovery entry=0x%08X trampoline=0x%08X\n",
-                    static_cast<uint32_t>(kUiEnsureManualObjectAddr),
+                    static_cast<uint32_t>(g_UiEnsureManualObjectAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
                         g_UiManualObjectEnsureDetour.trampoline)));
             }
