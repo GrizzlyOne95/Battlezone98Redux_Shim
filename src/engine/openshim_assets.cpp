@@ -990,12 +990,12 @@ std::string FormatAssetStatusForUi(const AssetCapabilities& caps)
         }
     case AssetPackState::Detected:
     {
-        if (!caps.destructionChunks && !caps.enhancedResources && !caps.terrainHd && !caps.customUiAssets)
+        // Chunk payloads are not part of the pack: chunk meshes are generated
+        // at runtime, so their absence never makes the pack look partial.
+        if (!caps.enhancedResources && !caps.terrainHd && !caps.customUiAssets)
             return "Asset Pack: Detected (partial)";
-        if (!caps.destructionChunks && caps.enhancedResources)
-            return "Asset Pack: Detected (Enhanced only)";
-        if (caps.destructionChunks && !caps.enhancedResources)
-            return "Asset Pack: Detected (Chunks only)";
+        if (!caps.enhancedResources)
+            return "Asset Pack: Detected (Enhanced resources missing)";
         if (caps.terrainHd)
             return "Asset Pack: Detected (+Terrain HD)";
         return "Asset Pack: Detected";
@@ -1013,15 +1013,15 @@ std::string FormatAssetCapabilitiesDetail(const AssetCapabilities& caps)
     {
         if (caps.destructionChunks || caps.enhancedResources || caps.terrainHd)
         {
+            // Optional authored chunk payloads are mentioned only when a mod
+            // supplies them; chunk meshes do not depend on them.
             std::string d;
-            d += "Compatible chunk resources: ";
-            d += caps.destructionChunks ? "Available" : "Not Available";
-            d += " | Enhanced resources: ";
+            d += "Enhanced resources: ";
             d += caps.enhancedResources ? "Available" : "Not Available";
+            if (caps.destructionChunks)
+                d += " | Compatible chunk resources: Available";
             if (caps.terrainHd)
                 d += " | Terrain HD: Available";
-            else if (caps.state == AssetPackState::NotDetected && caps.destructionChunks)
-                d += " | Terrain HD: Not Available";
             return d;
         }
         return "Asset-dependent features are unavailable.";
@@ -1034,10 +1034,8 @@ std::string FormatAssetCapabilitiesDetail(const AssetCapabilities& caps)
     }
     if (caps.state == AssetPackState::Detected)
     {
-        if (!caps.destructionChunks && caps.enhancedResources)
-            return "Chunk payloads missing — Enhanced only.";
-        if (caps.destructionChunks && !caps.enhancedResources)
-            return "Enhanced resources missing — Chunks only.";
+        if (!caps.enhancedResources)
+            return "Enhanced resources missing.";
         if (!caps.problem.empty())
             return caps.problem;
         return "Asset-dependent features available.";
