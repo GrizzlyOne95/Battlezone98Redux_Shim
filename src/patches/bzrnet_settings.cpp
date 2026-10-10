@@ -6,6 +6,7 @@
 #include "hook_engine.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
+#include "hook_engine.h"
 #include "net_optimizer.h"
 #include "patcher.h"
 #include "shim_log.h"
@@ -303,26 +304,51 @@ namespace BZROpenShim
             return "gog-unavailable";
         }
 
-        BzrNetNicknameResult ApplyBzrNetNicknameAuthoritative(
-            const char* requestedValue, const char* source)
+        // Everything both nickname entry points do before they decide whether
+        // a live reconnect is wanted: validate, remember the old value, write
+        // the native buffer and persist openshim.ini.
+        struct BzrNetNicknameStore
         {
-            const std::string nickname = TrimAsciiCopy(requestedValue ? requestedValue : "");
+            std::string nickname;
+            char oldNickname[128] = {};
+            bool oldNicknameReadable = false;
+            void* lobby = nullptr;
+            bool lobbyValid = false;
+            const char* sessionState = "";
+            const char* backend = "";
+            std::string stableIdentity;
+            const char* operationSource = "unknown";
+            bool localUpdated = false;
+            bool persisted = false;
+        };
+
+        // False when the nickname is invalid (nothing is written).
+        static bool StoreBzrNetNickname(
+            const char* requestedValue, const char* source, BzrNetNicknameStore& store)
+        {
+            store.nickname = TrimAsciiCopy(requestedValue ? requestedValue : "");
+            const std::string& nickname = store.nickname;
             if (!IsValidBzrNetNickname(nickname))
             {
                 Log(L"[BZRNET] Nickname rejected (source=%hs reason=invalid)\n",
                     source ? source : "unknown");
-                return BzrNetNicknameResult::InvalidNickname;
+                return false;
             }
 
-            char oldNickname[128] = {};
-            const bool oldNicknameReadable = ReadBzrNetNickname(
+            char (&oldNickname)[128] = store.oldNickname;
+            store.oldNicknameReadable = ReadBzrNetNickname(
                 oldNickname, sizeof(oldNickname));
-            void* const lobby = TryGetStockBzrNetLobby();
-            const bool lobbyValid = lobby && ValidateBzrNetLobbyState(lobby);
-            const char* const sessionState = CurrentNicknameSessionState(lobby, lobbyValid);
-            const char* const backend = g_IsSteamExe ? "steam" : "gog";
-            const std::string stableIdentity = CurrentNicknameStableIdentity();
-            const char* const operationSource = source ? source : "unknown";
+            const bool oldNicknameReadable = store.oldNicknameReadable;
+            store.lobby = TryGetStockBzrNetLobby();
+            store.lobbyValid = store.lobby && ValidateBzrNetLobbyState(store.lobby);
+            store.sessionState = CurrentNicknameSessionState(store.lobby, store.lobbyValid);
+            store.backend = g_IsSteamExe ? "steam" : "gog";
+            store.stableIdentity = CurrentNicknameStableIdentity();
+            store.operationSource = source ? source : "unknown";
+            const char* const sessionState = store.sessionState;
+            const char* const backend = store.backend;
+            const std::string& stableIdentity = store.stableIdentity;
+            const char* const operationSource = store.operationSource;
 
             Log(L"[BZRNET] NicknameCommandAccepted backend=%hs session=%hs stable=%hs "
                 L"old=\"%hs\" requested=\"%hs\" source=%hs\n",
@@ -336,6 +362,7 @@ namespace BZROpenShim
             // 0x009453E0 is read when the next Authorization body is built. It
             // is process state, not a live remote-player record.
             const bool localUpdated = WriteBzrNetNickname(nickname.c_str());
+            store.localUpdated = localUpdated;
             Log(L"[BZRNET] NicknameLocalStateUpdated backend=%hs session=%hs stable=%hs "
                 L"success=%hs old=\"%hs\" requested=\"%hs\" source=%hs\n",
                 backend,
@@ -348,6 +375,7 @@ namespace BZROpenShim
 
             const bool persisted = WriteShimUserConfigValue(
                 kUserConfigNetworkSection, "Nickname", nickname.c_str());
+            store.persisted = persisted;
             Log(L"[BZRNET] NicknamePersisted backend=%hs session=%hs stable=%hs "
                 L"success=%hs old=\"%hs\" requested=\"%hs\" source=%hs\n",
                 backend,
@@ -357,6 +385,23 @@ namespace BZROpenShim
                 oldNicknameReadable ? oldNickname : "<unavailable>",
                 nickname.c_str(),
                 operationSource);
+            return true;
+        }
+
+        BzrNetNicknameResult ApplyBzrNetNicknameAuthoritative(
+            const char* requestedValue, const char* source)
+        {
+            BzrNetNicknameStore store;
+            if (!StoreBzrNetNickname(requestedValue, source, store))
+                return BzrNetNicknameResult::InvalidNickname;
+            void* const lobby = store.lobby;
+            const bool lobbyValid = store.lobbyValid;
+            const char* const sessionState = store.sessionState;
+            const char* const backend = store.backend;
+            const std::string& stableIdentity = store.stableIdentity;
+            const char* const operationSource = store.operationSource;
+            const bool localUpdated = store.localUpdated;
+            const bool persisted = store.persisted;
 
             if (!localUpdated)
             {
@@ -427,6 +472,50 @@ namespace BZROpenShim
             Log(L"[BZRNET] Nickname result=%hs (source=%hs)\n",
                 BzrNetNicknameResultName(BzrNetNicknameResult::StoredForNextConnection),
                 operationSource);
+            return BzrNetNicknameResult::StoredForNextConnection;
+        }
+
+        // Multiplayer pre-lobby apply. Same validation and persistence as the
+        // authoritative path, no live-key traffic. Unlike it, an authorised
+        // control connection outside a match is always recycled: the pre-lobby
+        // is where the player picks the name the lounge will see, so the
+        // ReauthOnNicknameChange experiment gate does not apply. Not yet
+        // authorised means the pending first connect reads the buffer anyway.
+        BzrNetNicknameResult ApplyBzrNetNicknameForPreLobby(const char* nickname)
+        {
+            BzrNetNicknameStore store;
+            if (!StoreBzrNetNickname(nickname, "prelobby", store))
+                return BzrNetNicknameResult::InvalidNickname;
+
+            if (!store.localUpdated)
+            {
+                return store.persisted
+                    ? BzrNetNicknameResult::UnsupportedBuild
+                    : BzrNetNicknameResult::PersistenceFailed;
+            }
+            if (!store.persisted)
+                return BzrNetNicknameResult::PersistenceFailed;
+
+            const int networkInit = QueryStockIsNetworkInit();
+            if (networkInit > 0 && ReadLocalPlayerNetIdValue() == 0)
+            {
+                const bool recycled = RecycleBzrNetWebSocket();
+                Log(L"[BZRNET] NicknameNativeSendCompleted backend=%hs session=%hs stable=%hs "
+                    L"entered=yes completed=%hs result=%hs reason=ws-recycle source=prelobby\n",
+                    store.backend, store.sessionState, store.stableIdentity.c_str(),
+                    recycled ? "yes" : "no",
+                    recycled ? "reauth-queued" : "recycle-failed");
+                const BzrNetNicknameResult result = recycled
+                    ? BzrNetNicknameResult::ReauthQueued
+                    : BzrNetNicknameResult::LiveSendUnavailable;
+                Log(L"[BZRNET] Nickname result=%hs (source=prelobby)\n",
+                    BzrNetNicknameResultName(result));
+                return result;
+            }
+
+            Log(L"[BZRNET] Nickname result=%hs (source=prelobby network-init=%d)\n",
+                BzrNetNicknameResultName(BzrNetNicknameResult::StoredForNextConnection),
+                networkInit);
             return BzrNetNicknameResult::StoredForNextConnection;
         }
 
@@ -600,6 +689,37 @@ namespace BZROpenShim
     }
 
     using namespace Hooks;
+
+    // The stock readiness gate (0x00764870, int __cdecl(void)): the Steam or
+    // Galaxy identity is up and the BZRNet client is authorised. -1 when the
+    // site fails its byte guard, so callers can tell "unknown" from "no".
+    int QueryStockIsNetworkInit()
+    {
+        static uint32_t s_address = 0;
+        uint32_t address = s_address;
+        if (address == 0 &&
+            HookEngine::ResolveEngineAddress("IsNetworkInit", address) !=
+                HookEngine::EngineAddressStatus::Bound)
+        {
+            static bool s_loggedUnbound = false;
+            if (!s_loggedUnbound)
+            {
+                s_loggedUnbound = true;
+                Log(L"[BZRNET] IsNetworkInit is not bound (engine_addresses row missing or "
+                    L"bytes differ); readiness is unknown\n");
+            }
+            return -1;
+        }
+        s_address = address;
+        __try
+        {
+            return reinterpret_cast<int(__cdecl*)()>(address)();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1;
+        }
+    }
 
     BzrNetNicknameResult SetBzrNetNicknameFromBridge(const char* nickname)
     {

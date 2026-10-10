@@ -1411,6 +1411,21 @@
       "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 20 01 00 00"
     },
     {
+      "name": "ClickMultiPlayer",
+      "address": "0x0078C6C0",
+      "expected": "55 8B EC 6A FF 68 F3 EA 85 00"
+    },
+    {
+      "name": "IsNetworkInit",
+      "address": "0x00764870",
+      "expected": "55 8B EC 83 3D 70 04 8F 00 02"
+    },
+    {
+      "name": "MainScreenMpStatusRefreshCall",
+      "address": "0x0078EB30",
+      "expected": "E8 1B 00 00 00 8B E5 5D"
+    },
+    {
       "name": "AddChild",
       "address": "0x007D2110",
       "expected": "55 8B EC 83 EC 18 89 4D F8 83 7D 0C 00 0F 84 84"

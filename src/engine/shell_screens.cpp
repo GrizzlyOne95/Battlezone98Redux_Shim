@@ -16,14 +16,19 @@
 //     if alert pending && id != 0x1D:    attach the GameAlert dialog
 //        manager+0x24 = manager+0x28 = 0; ShellShowPendingAlert(screen, manager)
 //
-// The shell later deletes the screen through vtable slot 0 and activates it
-// through slot 13 (+0x34). cUI_View already implements every slot, so an
-// OpenShim screen is a plain 0x144-byte cUI_View with its own copy of the
-// cUI_View vtable in which only two slots differ:
+// The shell later deletes the screen through vtable slot 0 and updates it
+// every frame through slot 13 (+0x34, which calls slot 13 on each child).
+// cUI_View already implements every slot, so an OpenShim screen is a plain
+// 0x144-byte cUI_View with its own copy of the cUI_View vtable in which only
+// four slots differ:
 //   slot 0  deleting dtor: tells the registered screen it is closing, then
 //           runs cUI_View's
+//   slot 2  char dispatcher (0x007D2420): offers a typed character to the
+//           screen's onChar first, then runs cUI_View's
 //   slot 5  OnKey: the stock handler cUI_OptionsParent and cUI_Load share
 //           (UiScreenEscBackKey 0x00788E70), which runs Back on Esc
+//   slot 13 per-frame update (0x007D37F0): runs cUI_View's, then the
+//           screen's tick
 //
 // Navigation is the stock pair the shell's own buttons use, both __thiscall
 // on the manager each screen stores at +0x138: ShellRequestScreen(id) pushes
@@ -59,7 +64,9 @@ namespace BZROpenShim::ShellScreens
     {
         constexpr size_t kUiViewVtableSlots = 15;
         constexpr size_t kVtableSlotDeletingDtor = 0;
+        constexpr size_t kVtableSlotChar = 2;
         constexpr size_t kVtableSlotOnKey = 5;
+        constexpr size_t kVtableSlotUpdate = 13;
         constexpr size_t kScreenManagerOffset = 0x138;
         constexpr size_t kManagerCreatingFlagOffset = 0x18;
         constexpr size_t kManagerAlertByteA = 0x24;
@@ -76,6 +83,8 @@ namespace BZROpenShim::ShellScreens
         using FnTopScreenCtor = void* (__thiscall*)(void* self);
         using FnDeletingDtor = void* (__thiscall*)(void* self, unsigned flags);
         using FnGameNew = void* (__cdecl*)(size_t size);
+        using FnStockUpdate = void(__thiscall*)(void* self);
+        using FnStockChar = uint8_t(__thiscall*)(void* self, uint8_t ch);
 
         uint32_t g_FactoryAddr = 0;
         uint32_t g_RequestAddr = 0;
@@ -92,6 +101,10 @@ namespace BZROpenShim::ShellScreens
         InlineDetour32 g_FactoryDetour = {};
         FnFactory g_FactoryOriginal = nullptr;
         FnDeletingDtor g_StockDeletingDtor = nullptr;
+        FnStockUpdate g_StockUpdate = nullptr;
+        FnStockChar g_StockChar = nullptr;
+        bool g_TickFaultLogged = false;
+        bool g_CharFaultLogged = false;
 
         // [0] is the RTTI locator copied from the stock table, so the screen
         // still identifies as cUI_View to anything that checks.
@@ -112,6 +125,8 @@ namespace BZROpenShim::ShellScreens
         bool g_DetourInstalled = false;
 
         void* __fastcall CustomScreenDeletingDtor(void* self, void* /*edx*/, unsigned flags);
+        void __fastcall CustomScreenUpdate(void* self, void* /*edx*/);
+        uint8_t __fastcall CustomScreenChar(void* self, void* /*edx*/, uint8_t ch);
         void* __fastcall ShellFactoryHook(void* manager, void* /*edx*/, int id);
 
         bool BindShellRows()
@@ -159,6 +174,10 @@ namespace BZROpenShim::ShellScreens
             g_StockDeletingDtor = reinterpret_cast<FnDeletingDtor>(stock[kVtableSlotDeletingDtor]);
             g_ScreenVtable[1 + kVtableSlotDeletingDtor] = reinterpret_cast<uintptr_t>(&CustomScreenDeletingDtor);
             g_ScreenVtable[1 + kVtableSlotOnKey] = g_EscBackKeyAddr;
+            g_StockUpdate = reinterpret_cast<FnStockUpdate>(stock[kVtableSlotUpdate]);
+            g_StockChar = reinterpret_cast<FnStockChar>(stock[kVtableSlotChar]);
+            g_ScreenVtable[1 + kVtableSlotUpdate] = reinterpret_cast<uintptr_t>(&CustomScreenUpdate);
+            g_ScreenVtable[1 + kVtableSlotChar] = reinterpret_cast<uintptr_t>(&CustomScreenChar);
 
             g_Bound = g_BzrFn_OverlayCtor && g_BzrFn_LabelCtor && g_BzrFn_ButtonCtor &&
                       g_BzrFn_AddChild && g_BzrFn_SetOnClick && g_BzrFn_SetOnHover;
@@ -276,6 +295,84 @@ namespace BZROpenShim::ShellScreens
             if (!def)
                 return g_FactoryOriginal(manager, id);
             return CreateCustomScreen(manager, *def, id);
+        }
+
+        const ScreenDef* DefForScreen(void* self)
+        {
+            for (const auto& entry : g_Live)
+                if (entry.screen == self && entry.id != 0)
+                    return FindDef(entry.id);
+            return nullptr;
+        }
+
+        // The callbacks run under SEH, as the build does: a fault logs once
+        // and the frame continues rather than taking the game down.
+        bool RunTickGuarded(TickFn tick, void* screen, DWORD& faultCode)
+        {
+            faultCode = 0;
+            __try
+            {
+                tick(screen);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                faultCode = GetExceptionCode();
+                return false;
+            }
+        }
+
+        bool RunCharGuarded(CharFn onChar, void* screen, uint8_t ch, bool& consumed, DWORD& faultCode)
+        {
+            faultCode = 0;
+            consumed = false;
+            __try
+            {
+                consumed = onChar(screen, ch);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                faultCode = GetExceptionCode();
+                return false;
+            }
+        }
+
+        void __fastcall CustomScreenUpdate(void* self, void* /*edx*/)
+        {
+            g_StockUpdate(self);
+            const ScreenDef* def = DefForScreen(self);
+            if (!def || !def->tick)
+                return;
+            DWORD fault = 0;
+            if (!RunTickGuarded(def->tick, self, fault) && !g_TickFaultLogged)
+            {
+                g_TickFaultLogged = true;
+                Log(L"[SHELLUI] %hs tick faulted (0x%08X); further faults are not logged\n",
+                    def->name, fault);
+            }
+        }
+
+        uint8_t __fastcall CustomScreenChar(void* self, void* /*edx*/, uint8_t ch)
+        {
+            const ScreenDef* def = DefForScreen(self);
+            if (def && def->onChar)
+            {
+                bool consumed = false;
+                DWORD fault = 0;
+                if (!RunCharGuarded(def->onChar, self, ch, consumed, fault))
+                {
+                    if (!g_CharFaultLogged)
+                    {
+                        g_CharFaultLogged = true;
+                        Log(L"[SHELLUI] %hs char handler faulted (0x%08X); further faults are not logged\n",
+                            def->name, fault);
+                    }
+                }
+                else if (consumed)
+                    return 1;
+            }
+            return g_StockChar(self, ch);
         }
 
         void* __fastcall CustomScreenDeletingDtor(void* self, void* /*edx*/, unsigned flags)
