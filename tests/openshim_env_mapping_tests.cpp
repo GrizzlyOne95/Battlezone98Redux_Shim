@@ -162,6 +162,16 @@ namespace
         Check(Mapped(ini, "OPENSHIM_DISABLE_CONTROL_SMOOTHING") == "1", "negative key is not inverted again");
     }
 
+    void TestRunInBackgroundMapping()
+    {
+        FakeIni ini;
+        Check(Mapped(ini, "OPENSHIM_RUN_IN_BACKGROUND") == "<none>", "absent key leaves the toggle unset");
+        ini.Set("Testing", "RunInBackground", "1");
+        Check(Mapped(ini, "OPENSHIM_RUN_IN_BACKGROUND") == "1", "[Testing] RunInBackground maps to the env name");
+        ini.Set("Testing", "RunInBackground", "0");
+        Check(Mapped(ini, "OPENSHIM_RUN_IN_BACKGROUND") == "0", "[Testing] RunInBackground=0 maps to 0");
+    }
+
     void TestNamesMatchWithoutCase()
     {
         FakeIni ini;
@@ -342,6 +352,7 @@ int main()
 {
     TestBooleanKeysNormalise();
     TestDisableNamesInvertPositiveKeys();
+    TestRunInBackgroundMapping();
     TestNamesMatchWithoutCase();
     TestAbsentAndUnparseableKeys();
     TestFriendlyKeyBeatsEnvironmentSection();

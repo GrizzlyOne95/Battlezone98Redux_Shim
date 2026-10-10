@@ -799,6 +799,9 @@ namespace BZROpenShim
         void InstallRawMouseInputProcessHookIfPossible();
         bool ResolveRawMouseInputPreference(const char*& outSource);
 
+        // --- Background run test toggle (background_run.cpp) -------------------
+        void InstallBackgroundRunIfRequested();
+
         // --- Shadow far distance correction (shadow_far_distance_hook.cpp) -----
 
         // --- Engine flames (engine_flames.cpp) ---------------------------------

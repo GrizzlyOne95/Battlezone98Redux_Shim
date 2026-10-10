@@ -127,6 +127,8 @@ namespace
         {
             return TryReadMappedBool(ini, "Diagnostics", "TraceArtilleryMask", false, out);
         }
+        if (Equals(name, "OPENSHIM_RUN_IN_BACKGROUND"))
+            return TryReadMappedBool(ini, "Testing", "RunInBackground", false, out);
         if (Equals(name, "OPENSHIM_TRACE_SUN_FLASH"))
             return TryReadMappedBool(ini, "Diagnostics", "TraceSunFlash", false, out);
         if (Equals(name, "OPENSHIM_TRACE_BZN_LOAD"))
