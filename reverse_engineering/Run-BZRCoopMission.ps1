@@ -50,7 +50,12 @@ param(
     [string]$Impair = '',
     # A matrix may keep the common lock across config changes and runs. Default
     # zero keeps the normal coordinator-owned lock. Never combine with KeepRunning.
-    [int]$InheritedLaunchLockOwner = 0
+    [int]$InheritedLaunchLockOwner = 0,
+    # Out-of-process watchdog (BZRCoopWatchdog.ps1): after a step failure or
+    # the start of teardown this run gets FailureGraceSeconds to finish, and
+    # HardTimeoutSeconds (0 = none) overall, before it is torn down and killed.
+    [ValidateRange(0, 86400)][int]$HardTimeoutSeconds = 0,
+    [ValidateRange(30, 3600)][int]$FailureGraceSeconds = 300
 )
 
 $ErrorActionPreference = 'Stop'
@@ -61,6 +66,7 @@ if ($InheritedLaunchLockOwner) {
 }
 . "$PSScriptRoot\BZRCoopMission.ps1"
 . "$PSScriptRoot\BZRCoopDiagnostics.ps1"
+. "$PSScriptRoot\BZRCoopWatchdog.ps1"
 $script:CRFlowCoopRoot = $BZRCoopRoot
 $clientIndices = @(0..($Clients - 1))
 $guestIndices = @(1..($Clients - 1))
@@ -148,7 +154,14 @@ $server = $null
 $launcher = $null
 $summary = $null
 $flowFinished = $false
+$fatal = $null
 Write-Host "[run] $RunName -> $runDir"
+if (-not $KeepRunning) {
+    foreach ($f in 'flow-failed', 'flow-teardown', 'harness-pids.json') { Remove-Item -LiteralPath (Join-Path $runDir $f) -ErrorAction SilentlyContinue }
+    $watchdog = Start-BZRCoopWatchdog -RunDir $runDir -SessionFile (Join-Path $BZRCoopRoot 'session.json') `
+        -HardTimeoutSeconds $HardTimeoutSeconds -FailureGraceSeconds $FailureGraceSeconds
+    Write-Host "[run] watchdog pid $($watchdog.Id) (grace $FailureGraceSeconds s, hard $(if ($HardTimeoutSeconds) { "$HardTimeoutSeconds s" } else { 'none' }))"
+}
 try {
     # ------------------------------------------------------------ stage --
     robocopy $CampaignContent $stage /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
@@ -173,6 +186,7 @@ try {
     }
     $server = Start-Process -FilePath $Python -ArgumentList $serverArgs -WorkingDirectory $ServerRepo -WindowStyle Hidden -PassThru `
         -RedirectStandardError $serverLog -RedirectStandardOutput (Join-Path $runDir 'server.out.log')
+    Set-BZRCoopWatchdogPid $runDir 'server' $server.Id
     $deadline = (Get-Date).AddSeconds(20)
     while ($true) {
         try { Invoke-RestMethod -Uri 'http://127.0.0.1:8080/health' -TimeoutSec 2 | Out-Null; break } catch { }
@@ -208,7 +222,7 @@ try {
         clients = $Clients
         allowNoAudioEndpoint = [bool]$AllowNoAudioEndpoint
         harnessCommit = (git -C (Split-Path $PSScriptRoot) rev-parse HEAD)
-        harnessFiles = @(@('Run-BZRCoopMission.ps1', 'BZRCoopMission.ps1', 'BZRCoopLobby.ps1', 'BZRCoopSession.ps1', 'BZRCoopDiagnostics.ps1', 'BZRCoopAudio.cs', 'coopflow\CRFlowProbe.lua') | ForEach-Object {
+        harnessFiles = @(@('Run-BZRCoopMission.ps1', 'BZRCoopMission.ps1', 'BZRCoopLobby.ps1', 'BZRCoopSession.ps1', 'BZRCoopDiagnostics.ps1', 'BZRCoopWatchdog.ps1', 'BZRCoopAudio.cs', 'coopflow\CRFlowProbe.lua') | ForEach-Object {
             @{ name = $_; sha256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $_)).Hash }
         })
         scenario = $scenarioPath
@@ -241,6 +255,7 @@ try {
     } else { Remove-Item Env:BZR_LAUNCH_LOCK_HELD -ErrorAction SilentlyContinue }
     $launcher = Start-Process -FilePath $PowerShellExe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $launchCmd) `
         -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runDir 'coordinator.log') -RedirectStandardError (Join-Path $runDir 'coordinator.err.log')
+    Set-BZRCoopWatchdogPid $runDir 'launcher' $launcher.Id
     $deadline = (Get-Date).AddSeconds([math]::Max(360, $Clients * 150))
     while ($true) {
         Start-Sleep -Seconds 2
@@ -272,6 +287,7 @@ try {
     } catch {
         $outcome = "Stopped early: $($_.Exception.Message)"
         Write-Host "[run] $outcome" -ForegroundColor Red
+        Set-Content -LiteralPath (Join-Path $runDir 'flow-failed') -Value $outcome
     }
     Start-Sleep -Seconds 3
     # A scenario that ends the session unevenly (host leaves) sets this.
@@ -285,7 +301,11 @@ try {
         } catch { Write-Warning "relay impairment counters: $_" }
     }
     $flowFinished = $true
+} catch {
+    $fatal = $_
+    Set-Content -LiteralPath (Join-Path $runDir 'flow-failed') -Value "Stopped early: $($_.Exception.Message)"
 } finally {
+    if (-not $KeepRunning) { Set-Content -LiteralPath (Join-Path $runDir 'flow-teardown') -Value (Get-Date).ToString('o') }
     if ($KeepRunning) {
         if ($server) {
             [ordered]@{ run = $RunName; runDir = $runDir; mission = $Mission; serverPid = $server.Id; launcherPid = $launcher.Id } |
@@ -298,6 +318,11 @@ try {
         }
         if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
     }
+}
+if ($fatal) {
+    # The run still records its failure before the error propagates.
+    if ($script:CRFlowRun) { $summary = Complete-CRFlowRun -Outcome "Stopped early: $($fatal.Exception.Message)" -Clients $clientIndices }
+    throw $fatal
 }
 if ($flowFinished) {
     if ($MaxNetworkLogging -and $MuteClients -and -not $KeepRunning) {

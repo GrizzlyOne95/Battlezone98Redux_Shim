@@ -30,5 +30,6 @@ if ($CoopOverride) {
     -RunName $RunName -ServerRepo $ServerRepo -Python $Python -Impair $Impair `
     -AllowNoAudioEndpoint:$AllowNoAudioEndpoint `
     -InheritedLaunchLockOwner $InheritedLaunchLockOwner `
+    -HardTimeoutSeconds (1500 + 2 * $Seconds) `
     -ScenarioArgs @{Units=$Units; Seconds=$Seconds; Beacons=$Beacons; Powerups=$Powerups}
 exit $LASTEXITCODE
