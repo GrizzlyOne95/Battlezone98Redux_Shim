@@ -5,6 +5,7 @@
 // environment, so no plugin directory is involved.
 
 #include "openshim_env_mapping.h"
+#include "shell_casing_config.h"
 
 #include <cstdio>
 #include <cstring>
@@ -289,6 +290,40 @@ namespace
               "producer default applies with the plugin directory");
     }
 
+    void TestShellCasingsDefaultOff()
+    {
+        FakeIni ini;
+        FakeEnv env;
+        auto enabled = [&](const FakeIni* settings) {
+            const IniReader reader = ini.Reader();
+            return BZROpenShim::ShellCasings::EnabledByEnvironment(
+                [&](const char* name, char* value, uint32_t size) {
+                    return GetEnvironmentValue(name, value, size, settings ? &reader : nullptr, env.Reader());
+                });
+        };
+        Check(!enabled(&ini), "missing ShellCasings key defaults off");
+        Check(!enabled(nullptr), "missing INI and environment default casings off");
+        ini.Set("General", "ShellCasings", "on");
+        Check(enabled(&ini), "ShellCasings = on explicitly enables casings");
+        ini.Set("General", "ShellCasings", "0");
+        Check(!enabled(&ini), "ShellCasings = 0 disables casings");
+        ini.Set("General", "ShellCasings", "garbage");
+        Check(!enabled(&ini), "malformed ShellCasings key defaults off");
+        for (const char* name : {"OPENSHIM_DISABLE_SHELL_CASINGS", "BZR_DISABLE_SHELL_CASINGS"})
+        {
+            env.values.clear();
+            env.values[name] = "0";
+            Check(enabled(nullptr), std::string(name) + " = 0 preserves legacy opt-in");
+            env.values[name] = "garbage";
+            Check(!enabled(nullptr), std::string(name) + " malformed stays off");
+        }
+        env.values["OPENSHIM_DISABLE_SHELL_CASINGS"] = "0";
+        env.values["BZR_DISABLE_SHELL_CASINGS"] = "1";
+        Check(!enabled(nullptr), "either disable alias vetoes explicit opt-in");
+        ini.Set("General", "ShellCasings", "1");
+        Check(enabled(&ini), "friendly INI key still takes precedence over launch environment");
+    }
+
     void TestCaptureNamesLetTheEnvironmentWin()
     {
         FakeIni ini;
@@ -361,6 +396,7 @@ int main()
     TestGovernorTuningWords();
     TestProducerMenusDefaultOnFromTheirOwnFile();
     TestIniBeatsLaunchEnvironment();
+    TestShellCasingsDefaultOff();
     TestCaptureNamesLetTheEnvironmentWin();
     TestEmptyNamesPassThrough();
     TestCopyContract();

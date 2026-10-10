@@ -125,14 +125,15 @@ SkinnedGibsForce = 1.0
 ; Shell casings: when a cannon-like weapon fires, a small brass casing is
 ; ejected from the weapon's breech, tumbles, bounces off the terrain, the
 ; firing hull and nearby objects, then lies on the ground and sinks away.
-; Accepted: boolean. Default: ON. Needs no asset pack: the casing mesh and
+; Accepted: boolean. Default: OFF, including when this key is absent.
+; Needs no asset pack: the casing mesh and
 ; its openshim_casing_brass / openshim_casing_rim materials are generated in
 ; the chunk cache root (a chunk payload directory may ship its own
 ; openshim_casing.material, and a <weapon>_casing.mesh resource, for example
 ; gminigun_casing.mesh, replaces the casing for that weapon). Visual only:
 ; the shot itself is untouched, and 0 leaves the fire calls stock.
 ; Legacy env alias: OPENSHIM_DISABLE_SHELL_CASINGS
-ShellCasings = 1
+ShellCasings = 0
 ; Most casings alive at once (4..512). When full, the oldest casing already
 ; at rest is recycled first, then the oldest. Default: 48.
 ShellCasingsMax = 48
