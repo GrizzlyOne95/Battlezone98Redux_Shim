@@ -439,6 +439,18 @@ ConstructorRecycleStaleTarget = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX
 MagnetZeroRangeGuard = 1
 
+; Stop Redux pinning the OS cursor while it is minimized or in the
+; background. In mouse-look the stock look reader re-clips the cursor and
+; warps it to the window centre every frame, guarded only by a per-thread
+; GetActiveWindow test that a minimized or backgrounded Redux still passes.
+; While another process owns the foreground, or Redux is minimized,
+; SetCursorPos is skipped and any ClipCursor rectangle becomes a release.
+; Focus returning restores stock behaviour on the next frame.
+; Client-side only; not gated in network games.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE
+UnfocusedMouseRelease = 1
+
 ; Extend the script-facing CanBuild / IsBusy producer predicates to base
 ; producers, so mission Lua sees the same answer for a base producer that it
 ; already gets for the derived ones.
@@ -1994,6 +2006,23 @@ AttackRevealPerceivedTeam = 1
 ; Legacy env aliases to force it off: OPENSHIM_DISABLE_SATELLITE_VISIBILITY_FIX,
 ;                                     BZR_DISABLE_SATELLITE_VISIBILITY_FIX
 SatelliteVisibilityFix = 1
+
+[Testing]
+; Developer and automated-test aids. Off by default; not shown in the Settings UI.
+
+; RunInBackground: keep a single-player game simulating while its window is
+; unfocused. Normally Redux pauses the simulation, and a game launched without
+; focus sits on its load screen. When ON, OpenShim swallows WM_ACTIVATEAPP(FALSE)
+; (so nothing pauses or minimizes), raises the engine's app-active flag if it
+; started at 0, and turns ClipCursor / SetCursorPos / SetCursor into no-ops
+; (ClipCursor releases) whenever the game window is not the foreground window,
+; so an unfocused game never traps or warps your mouse.
+; Single-player and windowed only: inert in network games and in fullscreen.
+; Verifies GOG 2.2.301 code bytes at load and stays off on any mismatch
+; ([BGRUN] lines in the shim log). Restart required.
+; Accepted: boolean. Default: OFF.
+; Env override: OPENSHIM_RUN_IN_BACKGROUND=1
+RunInBackground = 0
 
 [Experimental]
 
