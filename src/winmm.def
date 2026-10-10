@@ -287,3 +287,7 @@ EXPORTS
     OpenShimSetNativeHudMeterVisible
     OpenShimRestoreNativeHudMeter
     OpenShimRestoreAllNativeHudMeters
+    OpenShimHasNativeDamageResistance
+    OpenShimSetUnitDamageMultiplier
+    OpenShimClearUnitDamageMultiplier
+    OpenShimResetUnitDamageMultipliers

@@ -127,6 +127,8 @@ namespace
         {
             return TryReadMappedBool(ini, "Diagnostics", "TraceArtilleryMask", false, out);
         }
+        if (Equals(name, "OPENSHIM_RUN_IN_BACKGROUND"))
+            return TryReadMappedBool(ini, "Testing", "RunInBackground", false, out);
         if (Equals(name, "OPENSHIM_TRACE_SUN_FLASH"))
             return TryReadMappedBool(ini, "Diagnostics", "TraceSunFlash", false, out);
         if (Equals(name, "OPENSHIM_TRACE_BZN_LOAD"))
@@ -238,6 +240,11 @@ namespace
             Equals(name, "BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"))
         {
             return TryReadMappedBool(ini, "Fixes", "MagnetZeroRangeGuard", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE") ||
+            Equals(name, "BZR_DISABLE_UNFOCUSED_MOUSE_RELEASE"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "UnfocusedMouseRelease", true, out);
         }
         // New switches: these two had no opt-out of any kind before.
         if (Equals(name, "OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||

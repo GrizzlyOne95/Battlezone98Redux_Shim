@@ -8,6 +8,16 @@ Redux 2.2.301 has a shared consumed byte in both detonation bodies. The new
 receiver replay findings below are current-binary evidence; 1.5 networking is
 not used as proof of Redux network behavior.
 
+**2026-10-07 trace qualification:** the receiver-only symptom and focused
+capture follow-up are in
+[DAYWRECKER_RECEIVER_LIFETIME_INVESTIGATION_20261007.md](DAYWRECKER_RECEIVER_LIFETIME_INVESTIGATION_20261007.md).
+The existing MPAUTH hook logs simulation entry as detonation and labels a
+receive lookup MISS without observing that lookup. Its messages do not alone
+prove effects, reconstruction, or a new lifetime. The follow-up supplies an
+observational Frida probe with constructor generations, actual effect-call
+counts, and nested reader/Create origin. Attachment smoke passed on two GOG
+clients; the reported duplicate has not been captured. No authority fix.
+
 ## Splinter — no authority patch
 
 **HIGH confidence: the proposed payload duplication chain is contradicted.**

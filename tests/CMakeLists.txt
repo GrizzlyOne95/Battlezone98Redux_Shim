@@ -37,6 +37,11 @@ function(openshim_add_test name)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+openshim_add_test(ogre_entity_reload_tests STD 17 SOURCES
+    ogre_entity_reload_tests.cpp
+)
+openshim_add_test(unit_damage_tests STD 20 SOURCES unit_damage_tests.cpp)
+
 openshim_add_test(native_chunk_mesh_tests STD 20 SOURCES
     native_chunk_mesh_tests.cpp
     ../src/patches/native_chunk_mesh.cpp
@@ -316,6 +321,10 @@ target_include_directories(patch_config_parse_tests PRIVATE ../include)
 target_compile_features(patch_config_parse_tests PRIVATE cxx_std_20)
 target_compile_definitions(patch_config_parse_tests PRIVATE
     BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json")
+
+openshim_add_test(background_run_policy_tests STD 20 SOURCES
+    background_run_policy_tests.cpp
+)
 
 openshim_add_test(ai_range_policy_tests STD 20 SOURCES
     ai_range_policy_tests.cpp
