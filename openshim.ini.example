@@ -1504,6 +1504,17 @@ LobbyReadouts = 1
 ;                     BZR_DISABLE_LOBBY_BAN_BUTTON, BZR_ENABLE_LOBBY_BAN_BUTTON
 LobbyBanButton = 1
 
+; Multiplayer pre-lobby: clicking Multiplayer on the title screen opens a setup
+; screen (nickname, flag, matchmaking server) before the lobby. Continue applies a
+; changed nickname -- reconnecting to the server so it takes effect -- and then
+; opens the lobby exactly as stock does. While this is ON the nickname and flag
+; pickers appear only on the setup screen and are not built in the lobby (the
+; net-route readout stays there; /nickname works either way).
+; Accepted: boolean. Default: OFF. Read when Multiplayer is clicked.
+; The server line is read-only: "Official", or [OpenShimSocket]
+; MatchmakingRedirectAddress when that is set.
+PreLobby = 0
+
 ; Remember muted players across sessions.
 ; Accepted: boolean. Default: ON. No restart required.
 ; ON  = a mute is written to mutes.cfg beside the shim, keyed by the same
