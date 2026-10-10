@@ -258,4 +258,11 @@ unacknowledged queue, much of which is still in flight one RTT later, and a
   low-RTT lossy links for about +30% resend bytes, but on WAN the gain is small
   and the byte cost larger.
 
-Still open: longer sessions, real (non-loopback) WAN peers.
+Soak, matrix `retry-battle-matrix-20261010-1130` (verdict PASS): the shipped
+defaults (`1000/2500+early`) for 300 steady simulation seconds (~370 s
+traced) per profile. `loss=3,seed=212`: native health pass, 0 native
+unreliable rejections, gameplay PASS. WAN profile: native health pass, 110
+unreliable rejections over the whole run, gameplay PASS. No crash or GPU
+event.
+
+Still open: real (non-loopback) WAN peers.
