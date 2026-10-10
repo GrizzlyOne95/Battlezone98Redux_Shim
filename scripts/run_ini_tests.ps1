@@ -193,6 +193,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # stands down in network games with the other simulation fixes.
     "Fixes/ConstructorRecycleStaleTarget",
     "Fixes/MagnetZeroRangeGuard",
+    # Client-side cursor handling only; no simulation or wire effect.
+    "Fixes/UnfocusedMouseRelease",
     "Fixes/CliMultiParameterOptions",
 
     # Menu-only rendering repair, no simulation or wire effect. The Create Game
@@ -306,6 +308,7 @@ foreach ($entry in $stockValueChecks.GetEnumerator()) {
 # multiplayer-risk fix. Generic enabled-looking detection above remains the
 # catch-all for newly added settings.
 $shippingPolicyChecks = @{
+    "SinglePlayer/VehicleGeometryContact" = "0"
     "General/CustomBindsUi" = "1"
     "General/SettingsUi" = "1"
     "General/MapRefreshFixes" = "1"
@@ -322,6 +325,7 @@ $shippingPolicyChecks = @{
     "Fixes/ConstructorRemoteBuild" = "1"
     "Fixes/ConstructorRecycleStaleTarget" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
+    "Fixes/UnfocusedMouseRelease" = "1"
     "Fixes/ProducerScriptPredicates" = "0"
     "Fixes/VehicleListModScoping" = "0"
     "Fixes/CliMultiParameterOptions" = "1"

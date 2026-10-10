@@ -15,7 +15,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PROJECT_PATH = REPO_ROOT / "pyghidra_mcp_projects"
 DEFAULT_PROJECT_NAME = "BZ98_Redux"
-DEFAULT_GHIDRA_INSTALL_DIR = Path("<GHIDRA_ROOT>")
 DEFAULT_SERVICE_HOST = "127.0.0.1"
 DEFAULT_SERVICE_PORT = 8765
 DEFAULT_SERVICE_PATH = "/mcp"
@@ -176,17 +175,148 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ghidra-install-dir",
         type=Path,
-        default=Path(
-            os.environ.get(
-                "BZR_GHIDRA_INSTALL_DIR",
-                os.environ.get("GHIDRA_INSTALL_DIR", str(DEFAULT_GHIDRA_INSTALL_DIR)),
-            )
-        ),
-        help="Sets GHIDRA_INSTALL_DIR for the launched MCP process.",
+        default=None,
+        help="Sets GHIDRA_INSTALL_DIR for the launched MCP process. "
+        "Default: the newest Ghidra found (env vars and the usual install roots).",
     )
     args, unknown = parser.parse_known_args()
     args.extra_args = unknown
+    if args.ghidra_install_dir is None:
+        args.ghidra_install_dir = resolve_ghidra_install_dir()
     return args
+
+
+def _ghidra_version(install_dir: Path) -> tuple[int, ...] | None:
+    properties = install_dir / "Ghidra" / "application.properties"
+    try:
+        text = properties.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    match = re.search(r"^application\.version=([\d.]+)", text, re.MULTILINE)
+    if not match:
+        return None
+    return tuple(int(part) for part in match.group(1).split(".") if part)
+
+
+def candidate_ghidra_install_dirs() -> list[Path]:
+    candidates: list[Path] = []
+    for name in ("BZR_GHIDRA_INSTALL_DIR", "GHIDRA_INSTALL_DIR"):
+        value = os.environ.get(name)
+        if value:
+            candidates.append(Path(value))
+    roots = [Path("C:/"), Path.home() / "Tools", Path.home()]
+    for env_name in ("ProgramFiles", "LOCALAPPDATA"):
+        value = os.environ.get(env_name)
+        if value:
+            roots.append(Path(value))
+    for root in roots:
+        try:
+            candidates.extend(sorted(root.glob("ghidra_*_PUBLIC")))
+        except OSError:
+            continue
+    return candidates
+
+
+def resolve_ghidra_install_dir() -> Path | None:
+    # Newest wins, env vars included. A project saved by a newer Ghidra cannot
+    # be opened by an older one ("Language version (V4.9 or later) required"),
+    # so an env var left pointing at an older install broke the service while
+    # a newer Ghidra sat installed beside it. Newer always opens older.
+    best: tuple[tuple[int, ...], Path] | None = None
+    for candidate in candidate_ghidra_install_dirs():
+        version = _ghidra_version(candidate)
+        if version and (best is None or version > best[0]):
+            best = (version, candidate)
+    if best is None:
+        return None
+    print(
+        f"[ghidra_mcp_bz98] Ghidra {'.'.join(map(str, best[0]))} at {best[1]}",
+        file=sys.stderr,
+    )
+    return best[1]
+
+
+def _candidate_pythons() -> list[str]:
+    seen: set[str] = set()
+    found: list[str] = []
+
+    def add(path: str) -> None:
+        key = os.path.normcase(os.path.abspath(path))
+        # The WindowsApps python.exe is a Store alias stub that can open the
+        # Store instead of running.
+        if "windowsapps" in key:
+            return
+        if key not in seen and os.path.isfile(path):
+            seen.add(key)
+            found.append(path)
+
+    try:
+        listing = subprocess.run(
+            ["py", "-0p"], capture_output=True, text=True, timeout=15
+        ).stdout
+        for line in listing.splitlines():
+            match = re.search(r"([A-Za-z]:\\.*python\.exe)\s*$", line.strip())
+            if match:
+                add(match.group(1))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if directory:
+            add(os.path.join(directory, "python.exe"))
+    for pattern in (
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Python",
+        Path("C:/"),
+    ):
+        try:
+            for path in sorted(pattern.glob("Python3*/python.exe"), reverse=True):
+                add(str(path))
+        except OSError:
+            continue
+    return found
+
+
+def ensure_pyghidra_mcp_interpreter() -> int | None:
+    """Re-run under a Python that has pyghidra_mcp when this one lacks it.
+
+    The wrappers and the login Run entry call bare `python`, so a newer Python
+    landing first on PATH silently broke the service. Returns the child's exit
+    code after re-running, or None when this interpreter is already usable.
+    """
+    import importlib.util
+
+    if importlib.util.find_spec("pyghidra_mcp") is not None:
+        return None
+    if os.environ.get("BZR_GHIDRA_MCP_REEXEC"):
+        print(
+            "[ghidra_mcp_bz98] pyghidra_mcp missing after re-exec; giving up",
+            file=sys.stderr,
+        )
+        return 1
+
+    probe = "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec('pyghidra_mcp') else 1)"
+    current = os.path.normcase(os.path.abspath(sys.executable))
+    for python in _candidate_pythons():
+        if os.path.normcase(os.path.abspath(python)) == current:
+            continue
+        try:
+            if subprocess.run([python, "-c", probe], timeout=30).returncode != 0:
+                continue
+        except (OSError, subprocess.SubprocessError):
+            continue
+        print(
+            f"[ghidra_mcp_bz98] {sys.executable} lacks pyghidra_mcp; re-running under {python}",
+            file=sys.stderr,
+        )
+        env = os.environ.copy()
+        env["BZR_GHIDRA_MCP_REEXEC"] = "1"
+        return subprocess.call([python, str(Path(__file__).resolve()), *sys.argv[1:]], env=env)
+
+    print(
+        "[ghidra_mcp_bz98] no Python with pyghidra_mcp found; install it with "
+        "`python -m pip install pyghidra-mcp` into the interpreter you want to use",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def normalize_exit_code(value: object) -> int:
@@ -635,9 +765,9 @@ def build_background_command(args: argparse.Namespace) -> list[str]:
         args.service_host,
         "--port",
         str(args.service_port),
-        "--ghidra-install-dir",
-        str(args.ghidra_install_dir),
     ]
+    if args.ghidra_install_dir:
+        command += ["--ghidra-install-dir", str(args.ghidra_install_dir)]
 
     if args.wait_for_analysis:
         command.append("--wait-for-analysis")
@@ -690,14 +820,31 @@ def ensure_service(args: argparse.Namespace) -> int:
 
         return_code = process.poll()
         if return_code is not None:
-            return return_code
+            _report_service_failure(args, f"exited with code {return_code}")
+            return return_code or 1
 
         time.sleep(1.0)
 
+    _report_service_failure(args, "did not become ready before the startup timeout")
     return 1
 
 
+def _report_service_failure(args: argparse.Namespace, reason: str) -> None:
+    # The service runs detached with output only in its log, so a failed start
+    # used to surface as a bare exit code 1. Show why.
+    print(f"[ghidra_mcp_bz98] service {reason}; log: {args.service_log_path}", file=sys.stderr)
+    try:
+        lines = args.service_log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return
+    for line in lines[-15:]:
+        print(f"  {line}", file=sys.stderr)
+
+
 def main() -> int:
+    reexec_code = ensure_pyghidra_mcp_interpreter()
+    if reexec_code is not None:
+        return reexec_code
     args = parse_args()
     if args.ensure_service:
         return ensure_service(args)
