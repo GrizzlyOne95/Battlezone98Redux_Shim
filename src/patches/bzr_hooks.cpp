@@ -21,6 +21,8 @@
 #include "shim_log.h"
 #include "x86_length.h"
 #include "ogre_shader_cache.h"
+#include "ogre_script_import_cache.h"
+#include "resource_walk_stat_cache.h"
 #include "ogre_enhanced_light_selection.h"
 #include "render_effect_intent.h"
 #include "render_profile_runtime.h"
@@ -942,8 +944,11 @@ namespace BZROpenShim
             {"InstallCareerStatsMpHookIfPossible", &InstallCareerStatsMpHookIfPossible},
             {"InstallUnitVoQueueHooksIfPossible", &InstallUnitVoQueueHooksIfPossible},
             {"InstallParticleTemplateDedupeHookIfPossible", &InstallParticleTemplateDedupeHookIfPossible},
+            {"InstallOgreScriptImportCacheIfPossible", &InstallOgreScriptImportCacheIfPossible},
+            {"InstallResourceWalkStatCacheIfPossible", &InstallResourceWalkStatCacheIfPossible},
             {"InstallUiManualObjectDedupeHookIfPossible", &InstallUiManualObjectDedupeHookIfPossible},
             {"InstallSceneTeardownForgetHooksIfPossible", &InstallSceneTeardownForgetHooksIfPossible},
+            {"InstallEntityReloadLifetimeHookIfPossible", &InstallEntityReloadLifetimeHookIfPossible},
             {"InstallMissionTransitionSeamIfPossible", &InstallMissionTransitionSeamIfPossible},
             {"PinDirect3DModulesForShutdown", &PinDirect3DModulesForShutdown},
             {"InstallMultiplayerFlagRenderHookIfPossible", &InstallMultiplayerFlagRenderHookIfPossible},
@@ -959,6 +964,8 @@ namespace BZROpenShim
         static const EnvSwitches::EnvSwitch kFixKillSwitches[] = {
             {&g_MagnetZeroRangeGuardEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX", "BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"},
+            {&g_UnfocusedMouseReleaseEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE", "BZR_DISABLE_UNFOCUSED_MOUSE_RELEASE"},
             {&g_BriefingScrollFixEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_BRIEFING_SCROLL_FIX", "BZR_DISABLE_BRIEFING_SCROLL_FIX"},
             {&g_MultiRenderCountClampEnabled, EnvSwitches::Kind::KillSwitch,
@@ -1028,6 +1035,7 @@ namespace BZROpenShim
             {"InstallQuakeReplayFadeIfPossible", &InstallQuakeReplayFadeIfPossible},
             {"InstallTargetCamSatelliteFixIfPossible", &InstallTargetCamSatelliteFixIfPossible},
             {"InstallCinematicSatelliteZoomFixIfPossible", &InstallCinematicSatelliteZoomFixIfPossible},
+            {"InstallUnfocusedMouseReleaseIfPossible", &InstallUnfocusedMouseReleaseIfPossible},
         };
         RunInitSteps(kFixInstallSteps);
 
@@ -1572,6 +1580,7 @@ namespace BZROpenShim
             {"EnsureOptionsParentCtorHookScaffold", &EnsureOptionsParentCtorHookScaffold},
             {"EnsureNativeUiMainMenuDiagnosticScaffold", &EnsureNativeUiMainMenuDiagnosticScaffold},
             {"LogShimSettingsUiStatus", &LogShimSettingsUiStatus},
+            {"InstallBackgroundRunIfRequested", &InstallBackgroundRunIfRequested},
         };
         RunInitSteps(kLateInitSteps);
         Log(L"[MAPTRACE] Map refresh trace: %hs\n",
@@ -1610,10 +1619,13 @@ namespace BZROpenShim
         InstallCareerStatsMpHookIfPossible();
         InstallUnitVoQueueHooksIfPossible();
         InstallParticleTemplateDedupeHookIfPossible();
+        InstallOgreScriptImportCacheIfPossible();
+        InstallResourceWalkStatCacheIfPossible();
         InstallUiManualObjectDedupeHookIfPossible();
         InstallEmissionLightFixIfPossible();
         VerifyExpectedOgreExportsIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
+        InstallEntityReloadLifetimeHookIfPossible();
         InstallEntityFrustumCullingIfEnabled();
         InstallMissionTransitionSeamIfPossible();
         PinDirect3DModulesForShutdown();
@@ -1632,6 +1644,7 @@ namespace BZROpenShim
 		InstallQuakeReplayFadeIfPossible();
 		InstallTargetCamSatelliteFixIfPossible();
 		InstallCinematicSatelliteZoomFixIfPossible();
+		InstallUnfocusedMouseReleaseIfPossible();
         InstallAiTuningHooksIfPossible();
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();

@@ -688,6 +688,11 @@ extern "C" DWORD WINAPI OpenShimImpl_SetRenderEffectEnabled(DWORD effectId, BOOL
 extern "C" DWORD WINAPI OpenShimImpl_SetRenderEffectFloat(DWORD effectId, DWORD paramId, float value);
 extern "C" BOOL WINAPI OpenShimImpl_SupportsRenderProfile(DWORD profile);
 
+extern "C" BOOL WINAPI OpenShimImpl_HasNativeDamageResistance(void);
+extern "C" BOOL WINAPI OpenShimImpl_SetUnitDamageMultiplier(void* object, DWORD handle, float multiplier);
+extern "C" BOOL WINAPI OpenShimImpl_ClearUnitDamageMultiplier(DWORD handle);
+extern "C" BOOL WINAPI OpenShimImpl_ResetUnitDamageMultipliers(void);
+
 namespace
 {
     // Legacy v1 C++ API, adapted to the table's plain-C signatures.
@@ -804,6 +809,10 @@ namespace
         .OpenShimImpl_SetNativeHudMeterVisible = OpenShimImpl_SetNativeHudMeterVisible,
         .OpenShimImpl_RestoreNativeHudMeter = OpenShimImpl_RestoreNativeHudMeter,
         .OpenShimImpl_RestoreAllNativeHudMeters = OpenShimImpl_RestoreAllNativeHudMeters,
+        .OpenShimImpl_HasNativeDamageResistance = OpenShimImpl_HasNativeDamageResistance,
+        .OpenShimImpl_SetUnitDamageMultiplier = OpenShimImpl_SetUnitDamageMultiplier,
+        .OpenShimImpl_ClearUnitDamageMultiplier = OpenShimImpl_ClearUnitDamageMultiplier,
+        .OpenShimImpl_ResetUnitDamageMultipliers = OpenShimImpl_ResetUnitDamageMultipliers,
         .OpenShimImpl_GetGeometryContactCapabilities = OpenShimImpl_GetGeometryContactCapabilities,
         .OpenShimImpl_SetGeometryContact = OpenShimImpl_SetGeometryContact,
         .OpenShimImpl_ClearGeometryContact = OpenShimImpl_ClearGeometryContact,
