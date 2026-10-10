@@ -10,6 +10,7 @@
 #include <ws2tcpip.h>
 #include <mstcpip.h>
 #include <Windows.h>
+#include "win32_last_error_scope.h"
 
 #include <algorithm>
 #include <cctype>
@@ -2959,10 +2960,13 @@ namespace
     {
         PendingCaptureIo pending = {};
         LPWSAOVERLAPPED_COMPLETION_ROUTINE original = nullptr;
-        if (TakePendingCaptureIo(overlapped, pending))
         {
-            original = pending.originalCompletionRoutine;
-            CaptureCompletedIo(pending, transferredLength, error);
+            Win32LastErrorScope diagnosticsError;
+            if (TakePendingCaptureIo(overlapped, pending))
+            {
+                original = pending.originalCompletionRoutine;
+                CaptureCompletedIo(pending, transferredLength, error);
+            }
         }
         if (original)
             original(error, transferredLength, overlapped, flags);
@@ -2981,6 +2985,7 @@ namespace
             completionKey,
             overlapped,
             milliseconds);
+        Win32LastErrorScope diagnosticsError;
         const DWORD error = rc ? ERROR_SUCCESS : GetLastError();
         if (overlapped && *overlapped)
         {
