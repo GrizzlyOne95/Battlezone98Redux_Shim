@@ -348,8 +348,7 @@ namespace BZROpenShim::ShellScreens
             if (!RunTickGuarded(def->tick, self, fault) && !g_TickFaultLogged)
             {
                 g_TickFaultLogged = true;
-                Log(L"[SHELLUI] %hs tick faulted (0x%08X); further faults are not logged
-",
+                Log(L"[SHELLUI] %hs tick faulted (0x%08X); further faults are not logged\n",
                     def->name, fault);
             }
         }
@@ -366,8 +365,7 @@ namespace BZROpenShim::ShellScreens
                     if (!g_CharFaultLogged)
                     {
                         g_CharFaultLogged = true;
-                        Log(L"[SHELLUI] %hs char handler faulted (0x%08X); further faults are not logged
-",
+                        Log(L"[SHELLUI] %hs char handler faulted (0x%08X); further faults are not logged\n",
                             def->name, fault);
                     }
                 }

@@ -12,7 +12,8 @@ pixels are copied. Transparent outside the frame, like the stock panels, so
 the stock background shows through.
 
 The box rectangles here are the layout contract with the screen code: keep
-CAREER_LAYOUT in step with the constants in src/patches/career_screen.cpp.
+CAREER_LAYOUT in step with the constants in src/patches/career_screen.cpp, and
+PRELOBBY_LAYOUT with src/patches/prelobby_screen.cpp.
 
     python mkscreens.py            # writes every osh_*_center.png and button skin
     python mkscreens.py --preview  # also writes *_preview.png over black
@@ -134,6 +135,28 @@ def career_center():
     frame(d)
     title_plate(d, *CAREER_LAYOUT['title'])
     for b in CAREER_LAYOUT['boxes']:
+        box(d, *b)
+    return img.resize((W, H), Image.LANCZOS)
+
+
+# Layout contract with src/patches/prelobby_screen.cpp (1440x1080 design space).
+# The PLAYER box holds the nickname panel (240x144) and the flag picker (224x170
+# preview with the 48px arrows 8 below it) side by side, each centred in a half.
+PRELOBBY_LAYOUT = {
+    'title': (470, 132, 500, 56),
+    'boxes': [
+        (244, 238, 952, 330),   # Player
+        (244, 596, 952, 200),   # Connection
+    ],
+}
+
+
+def prelobby_center():
+    img = Image.new('RGBA', (s(W), s(H)), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    frame(d)
+    title_plate(d, *PRELOBBY_LAYOUT['title'])
+    for b in PRELOBBY_LAYOUT['boxes']:
         box(d, *b)
     return img.resize((W, H), Image.LANCZOS)
 
@@ -328,6 +351,7 @@ def keys_center():
 def main():
     outputs = {
         'osh_career_center.png': career_center(),
+        'osh_prelobby_center.png': prelobby_center(),
         'osh_options_center.png': options_center(),
         'osh_hub_center.png': hub_center(),
         'osh_category_center.png': category_center(),
