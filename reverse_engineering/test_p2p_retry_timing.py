@@ -180,7 +180,7 @@ class NakEvidenceTests(unittest.TestCase):
 
     def test_nak_reorder_config_parsing(self):
         base = '[Network]\nEarlyNakAccept = 1\n'
-        self.assertEqual(timing.configured_timers(base)[3], 1)  # absent => 40
+        self.assertEqual(timing.configured_timers(base)[3], 2)  # absent => native default 0
         self.assertEqual(timing.configured_timers(base + 'EarlyNakReorderMs = 40\n')[3], 1)
         self.assertEqual(timing.configured_timers(base + 'EarlyNakReorderMs = 0 ; pinned\n')[3], 2)
         # ignored (but still validated) while NAK acceptance is off

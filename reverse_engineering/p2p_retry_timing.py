@@ -54,7 +54,7 @@ def configured_timers(text):
         raise ValueError('repeated Network sections')
     nak = values.get('earlynakaccept', 0)
     if nak:
-        reorder = values.get('earlynakreorderms', 40)
+        reorder = values.get('earlynakreorderms', 0)  # native default 0
         if reorder not in (0, 40):
             raise ValueError(f'EarlyNakReorderMs={reorder} is neither 0 (+nak0) nor 40 (+nak)')
         nak = 2 if reorder == 0 else 1
