@@ -11,6 +11,7 @@ DELIVERED = r'\[P2PRECV\] Delivered early unreliable updates: total=(\d+)'
 NAK_ARMED = r'\[P2PRECV\] Early NAK receive armed:'
 NAK_UNAVAILABLE = r'\[P2PRECV\] NAK signatures unavailable; stock NAK receive kept'
 NAK_ACCEPTED = r'\[P2PRECV\] Accepted early NAKs: total=(\d+)'
+NAK_HELD = r'\[P2PRECV\] Held repeat NAKs: total=(\d+)'
 
 def parse_timers(token):
     """(first ms, interval ms, early 0|1, nak 0|1) from first/interval[+early][+nak]."""
@@ -53,12 +54,13 @@ def receive_evidence(log, early, nak):
     totals = [int(total) for total in re.findall(DELIVERED, log)]
     nak_armed = len(re.findall(NAK_ARMED, log)); nak_unavailable = len(re.findall(NAK_UNAVAILABLE, log))
     nak_totals = [int(total) for total in re.findall(NAK_ACCEPTED, log)]
+    held = [int(total) for total in re.findall(NAK_HELD, log)]
     ok = armed == 1 and not unavailable if early else not armed
     ok = ok and (nak_armed == 1 and not nak_unavailable if nak else not nak_armed)
     return ok, {'early':early, 'armedLines':armed, 'signaturesUnavailableLines':unavailable,
                 'deliveredTotal':max(totals, default=0),
                 'nak':nak, 'nakArmedLines':nak_armed, 'nakSignaturesUnavailableLines':nak_unavailable,
-                'naksAcceptedTotal':max(nak_totals, default=0)}
+                'naksAcceptedTotal':max(nak_totals, default=0), 'naksHeldTotal':max(held, default=0)}
 
 def verify_client(ini, log, intended):
     values = parse_timers(intended)
@@ -100,6 +102,7 @@ def verify_run(run, intended, clients):
             results[f'c{index}'] = {'status':'mismatch', 'reason':f'missing timer evidence: {error.filename}'}
     totals = [r['receive']['deliveredTotal'] for r in results.values() if 'receive' in r]
     naks = [r['receive']['naksAcceptedTotal'] for r in results.values() if 'receive' in r]
+    held = [r['receive'].get('naksHeldTotal', 0) for r in results.values() if 'receive' in r]
     values = parse_timers(intended)
-    return {'intended':intended, 'early':values[2], 'nak':values[3], 'deliveredTotal':sum(totals), 'naksAcceptedTotal':sum(naks),
+    return {'intended':intended, 'early':values[2], 'nak':values[3], 'deliveredTotal':sum(totals), 'naksAcceptedTotal':sum(naks), 'naksHeldTotal':sum(held),
             'status':'verified' if all(r['status']=='verified' for r in results.values()) else 'mismatch', 'clients':results}

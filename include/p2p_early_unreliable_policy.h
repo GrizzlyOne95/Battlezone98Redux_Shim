@@ -41,5 +41,40 @@ inline bool ShouldAcceptNak(uint8_t kind, uint32_t stamp, uint32_t expected) {
     const uint32_t ahead = stamp - expected;
     return ahead != 0 && ahead <= kMaxAhead;
 }
+
+// One lost reliable fragment makes the requester drop, and NAK, every later
+// fragment until the retransmission lands; each of those NAKs names the same
+// missing stamp (header ack, the requester's peer+0x84). Every accepted NAK
+// runs a go-back-N resend pass, so admitting them all multiplies duplicates
+// on exactly the links that are short of bandwidth. NakGate admits the first
+// NAK for a missing stamp, then that stamp again only after holdoffMs (the
+// retransmission itself was lost); a NAK naming a new stamp is always admitted.
+constexpr uint32_t kDefaultNakHoldoffMs = 300;
+
+class NakGate {
+public:
+    static constexpr int kSlots = 32;
+    bool Admit(uintptr_t peer, uint32_t missing, uint32_t nowMs, uint32_t holdoffMs) {
+        Slot* slot = nullptr;
+        Slot* oldest = &slots_[0];
+        for (Slot& s : slots_) {
+            if (s.peer == peer) { slot = &s; break; }
+            if (!s.peer || static_cast<int32_t>(s.lastMs - oldest->lastMs) < 0) oldest = &s;
+            if (!s.peer) break;
+        }
+        if (!slot) {
+            slot = oldest;
+            *slot = Slot{ peer, missing, nowMs };
+            return true;
+        }
+        if (slot->missing == missing && nowMs - slot->lastMs < holdoffMs) return false;
+        slot->missing = missing;
+        slot->lastMs = nowMs;
+        return true;
+    }
+private:
+    struct Slot { uintptr_t peer; uint32_t missing; uint32_t lastMs; };
+    Slot slots_[kSlots] = {};
+};
 } // namespace P2PEarlyUnreliable
 } // namespace BZROpenShim

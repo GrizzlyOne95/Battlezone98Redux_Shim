@@ -93,7 +93,7 @@ class EarlyEvidenceTests(unittest.TestCase):
         self.assertEqual(result['status'], 'verified')
         self.assertEqual(result['timers'], '1000/2500+early')
         self.assertEqual(result['receive'], {'early':1, 'armedLines':1, 'signaturesUnavailableLines':0, 'deliveredTotal':9,
-                                            'nak':0, 'nakArmedLines':0, 'nakSignaturesUnavailableLines':0, 'naksAcceptedTotal':0})
+                                            'nak':0, 'nakArmedLines':0, 'nakSignaturesUnavailableLines':0, 'naksAcceptedTotal':0, 'naksHeldTotal':0})
 
     def test_early_one_failures(self):
         ini, log = evidence('1000/2500+early')
