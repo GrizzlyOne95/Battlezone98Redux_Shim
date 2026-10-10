@@ -37,6 +37,8 @@ try {
         try { ConvertTo-P2PRetryTiming $token | Out-Null } catch { $rejected = $true }
         Assert $rejected "Invalid timer pair accepted: $token"
     }
+    $added = Set-P2PRetryTimingText '[Graphics]' '50/10000'
+    Assert ($added.Contains("[Network]`nReliableFirstRetryMs = 50`nReliableRetryIntervalMs = 10000`n")) 'A missing Network section or timer range boundary failed.'
     Write-Host '[PASS] Prevalidation, section isolation, durable backup, and exact byte restoration.'
 } finally {
     # Remove only the explicitly created temporary files; no recursive deletion.

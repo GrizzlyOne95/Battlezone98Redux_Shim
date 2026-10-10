@@ -25,6 +25,7 @@ param(
     [ValidateRange(0,16)][int]$Beacons = 16,
     [ValidateRange(0,128)][int]$Powerups = 64,
     [string]$RunStamp = (Get-Date -Format 'yyyyMMdd-HHmmss'),
+    [string]$CoopOverride = '',
     [switch]$AllowNoAudioEndpoint,
     [switch]$DryRun
 )
@@ -39,6 +40,12 @@ if ($Units % 2) { throw 'Units must be even.' }
 if (Get-Process battlezone98redux -ErrorAction SilentlyContinue) { throw 'A game is alive; nothing changed.' }
 . (Join-Path $PSScriptRoot 'BZRHarness.ps1')
 if (-not (Test-Path -LiteralPath $battle)) { throw "Missing battle harness: $battle" }
+if (-not (Get-Command $battle).Parameters.ContainsKey('InheritedLaunchLockOwner')) { throw 'Battle harness lacks the explicit inherited-lock handoff.' }
+$coopHash = $null
+if ($CoopOverride) {
+    if (-not (Get-Command $battle).Parameters.ContainsKey('CoopOverride')) { throw 'Battle harness lacks the co-op test override.' }
+    $coopHash = (Get-FileHash -LiteralPath $CoopOverride).Hash
+}
 if (-not $Timers.Count -or -not $Impair.Count) { throw 'Timer and impairment axes must not be empty.' }
 $Timers = @($Timers | ForEach-Object { (ConvertTo-P2PRetryTiming $_).token })
 if (@($Timers | Select-Object -Unique).Count -ne $Timers.Count) { throw 'Duplicate timer arms.' }
@@ -81,7 +88,13 @@ $toolHashes = @{}
 foreach ($name in @('Run-P2PRetryBattleMatrix.ps1','P2PRetryTiming.ps1','p2p_retry_timing.py','p2p_netfix_score.py')) {
     $toolHashes[$name] = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot $name)).Hash
 }
+$harnessHashes = @{}
+foreach ($name in @('Run-BZRBattleLoad.ps1','Run-BZRCoopMission.ps1','BZRCoopLaunchLock.ps1','BZRHarness.ps1')) {
+    $harnessHashes[$name] = (Get-FileHash -LiteralPath (Join-Path $BattleRepo "reverse_engineering\$name")).Hash
+}
 [ordered]@{started=(Get-Date).ToString('o'); clients=4; plan=$plan; sourceHashes=$hashes; toolHashes=$toolHashes;
+    harnessHashes=$harnessHashes;
+    coopOverrideSha256=$coopHash;
     note='Fix ON in every arm; guarded timer overrides only; nondeterministic combat/traffic.'} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $control 'matrix.json')
 $prior = @{}
@@ -97,9 +110,14 @@ try {
             $runPath = Join-Path $BZRCoopRoot "runs\$($row.run)"
             if (Test-Path -LiteralPath $runPath) { throw 'Run already exists; refusing to overwrite captures.' }
             $battleArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$battle,'-Units',$Units,'-Seconds',$Seconds,
-                '-Beacons',$Beacons,'-Powerups',$Powerups,'-RunName',$row.run,'-ServerRepo',$ServerRepo,'-Python',$Python)
+                '-Beacons',$Beacons,'-Powerups',$Powerups,'-RunName',$row.run,'-ServerRepo',$ServerRepo,'-Python',$Python,
+                '-InheritedLaunchLockOwner',$env:BZR_LAUNCH_LOCK_HELD)
             if ($row.impair) { $battleArgs += @('-Impair',$row.impair) }
             if ($AllowNoAudioEndpoint) { $battleArgs += '-AllowNoAudioEndpoint' }
+            if ($CoopOverride) {
+                if ((Get-FileHash -LiteralPath $CoopOverride).Hash -ne $coopHash) { throw 'Co-op override changed between arms.' }
+                $battleArgs += @('-CoopOverride',$CoopOverride)
+            }
             & $ps51 @battleArgs 2>&1 | Tee-Object -FilePath (Join-Path $control "run-$($row.index).log") | Out-Host
             $exitCode = $LASTEXITCODE
             if (Get-Process battlezone98redux -ErrorAction SilentlyContinue) { throw 'Games remain alive; restoration deferred and matrix stopped.' }
