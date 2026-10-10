@@ -12,6 +12,11 @@ target_include_directories(p2p_reliable_send_policy_tests PRIVATE ../include)
 target_compile_features(p2p_reliable_send_policy_tests PRIVATE cxx_std_14)
 add_test(NAME p2p_reliable_send_policy_tests COMMAND p2p_reliable_send_policy_tests)
 
+add_executable(p2p_early_unreliable_policy_tests p2p_early_unreliable_policy_tests.cpp)
+target_include_directories(p2p_early_unreliable_policy_tests PRIVATE ../include)
+target_compile_features(p2p_early_unreliable_policy_tests PRIVATE cxx_std_14)
+add_test(NAME p2p_early_unreliable_policy_tests COMMAND p2p_early_unreliable_policy_tests)
+
 if(WIN32)
     add_executable(win32_last_error_scope_tests win32_last_error_scope_tests.cpp)
     target_include_directories(win32_last_error_scope_tests PRIVATE ../include)

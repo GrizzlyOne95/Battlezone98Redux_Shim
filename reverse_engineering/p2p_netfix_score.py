@@ -54,28 +54,44 @@ def load_ports(run):
     return ports
 
 
-def analyse_link(packets):
+HOLD_SPAN_LIMIT = 1 << 20
+EARLY_MAX_AHEAD = 4096  # include/p2p_early_unreliable_policy.h kMaxAhead
+U32 = 0xFFFFFFFF
+
+
+def replay_link(packets, early=False):
+    """Accept rule over one link in delivery order. early=True adds the opt-in
+    receiver policy (p2p_early_unreliable_policy.h): a final-fragment unreliable
+    kind-0 packet stamped 1..4096 past expected is delivered while no multi-
+    fragment reliable message is partly received. Expected advances only on
+    accepted reliable packets. Stock mode keeps the legacy comparisons."""
     expected = None
     gaps = dups = rejected = 0
-    first_tx, queued_by, high = {}, {}, -1
     blackouts, blackout_from, at = [], None, None
+    reassembling = False  # accepted reliable fragment without 0x40 not yet completed
     for r in packets:
         t = r["transport"]
         if t["kindNibble"] != 0:
             continue
-        # ts: when the sender sent it (relay arrival); at: when the receiver got it.
-        seq, ts = t["seqA"], r["tsUnixMs"]
-        at = r.get("deliveredMs", ts)
-        reliable = bool(int(t["flagsByte"], 16) & 0x80)
+        seq = t["seqA"]
+        at = r.get("deliveredMs", r["tsUnixMs"])
+        flags = int(t["flagsByte"], 16)
+        reliable = bool(flags & 0x80)
         if expected is None:
             expected = seq
+        ahead = (seq - expected) & U32 if early else seq - expected
         if seq == expected:
             if reliable:
-                expected = seq + 1
+                expected = (seq + 1) & U32 if early else seq + 1
+                reassembling = not flags & 0x40
             elif blackout_from is not None:
                 blackouts.append(at - blackout_from)
                 blackout_from = None
-        elif seq > expected:
+        elif early and not reliable and flags & 0x40 and not reassembling and 1 <= ahead <= EARLY_MAX_AHEAD:
+            if blackout_from is not None:
+                blackouts.append(at - blackout_from)
+                blackout_from = None
+        elif (0 < ahead <= U32 // 2) if early else ahead > 0:
             gaps += 1
             rejected += not reliable
             if not reliable and blackout_from is None:
@@ -84,12 +100,36 @@ def analyse_link(packets):
             dups += 1
         else:
             rejected += 1
+    if blackout_from is not None:
+        blackouts.append(at - blackout_from)
+    return {"gaps": gaps, "dups": dups, "rejected": rejected, "blackouts": blackouts}
+
+
+def modeled(replay):
+    stats = blackout_stats(replay["blackouts"])
+    return {"blackoutTotalMs": stats["blackoutTotalMs"], "blackoutMaxMs": stats["blackoutMaxMs"],
+            "unreliableRejected": replay["rejected"]}
+
+
+def analyse_link(packets, early=False):
+    first_tx, queued_by, high = {}, {}, -1
+    for r in packets:
+        t = r["transport"]
+        if t["kindNibble"] != 0:
+            continue
+        # ts: when the sender sent it (relay arrival).
+        seq, ts = t["seqA"], r["tsUnixMs"]
+        reliable = bool(int(t["flagsByte"], 16) & 0x80)
         if reliable:
             first_tx.setdefault(seq, ts)
         else:
-            for k in range(high + 1, seq):
+            # A stamp wrapping or jumping far ahead is not a plausible backlog; do not enumerate it.
+            for k in range(high + 1, seq if seq - high <= HOLD_SPAN_LIMIT else high + 1):
                 queued_by.setdefault(k, ts)
             high = max(high, seq - 1)
+    stock, early_replay = replay_link(packets), replay_link(packets, True)
+    used = early_replay if early else stock
+    gaps, dups, rejected = used["gaps"], used["dups"], used["rejected"]
     late = sorted(first_tx[k] - queued_by[k] for k in first_tx
                   if k in queued_by and first_tx[k] > queued_by[k])
     return {
@@ -100,7 +140,9 @@ def analyse_link(packets):
         "reliableHeld": len(late),
         "holdMedianMs": statistics.median(late) if late else 0,
         "holdMaxMs": late[-1] if late else 0,
-    } | blackout_stats(blackouts + ([at - blackout_from] if blackout_from is not None else []))
+        "modeledStock": modeled(stock),
+        "modeledEarly": modeled(early_replay),
+    } | blackout_stats(used["blackouts"])
 
 
 LONG_BLACKOUT_MS = 500
@@ -245,8 +287,20 @@ def flow_breakdown(flow):
     return ("PASS" if not failed else "FAIL"), capture_seen and not capture_failed, failed
 
 
+def modeled_summary(links, key, link_minutes):
+    total = sum(v[key]["blackoutTotalMs"] for v in links.values())
+    return {"blackoutSPerLinkMinute": round(total / 1000.0 / link_minutes, 4) if link_minutes else None,
+            "worstBlackoutMs": max((v[key]["blackoutMaxMs"] for v in links.values()), default=0),
+            "unreliableRejected": sum(v[key]["unreliableRejected"] for v in links.values())}
+
+
 def score(run, arm=None, clients=4, gpu_query=None, timers=None):
     run = os.path.abspath(run)
+    early = False
+    if timers is not None:
+        from p2p_retry_timing import parse_timers, token_of
+        values = parse_timers(timers)
+        early = bool(values[2])
     result = {"run": os.path.basename(run), "runDir": run, "arm": arm, "problems": []}
     flow = load_json(os.path.join(run, "flow-summary.json"))
     health = load_json(os.path.join(run, "native-network-health.json"))
@@ -278,7 +332,7 @@ def score(run, arm=None, clients=4, gpu_query=None, timers=None):
         for r in rows:
             streams[(r["source"].rsplit(":", 1)[1], r["target"].rsplit(":", 1)[1])].append(r)
         for (src, dst), packets in streams.items():
-            links[f"{ports.get(src, src)}->{ports.get(dst, dst)}"] = analyse_link(delivered(packets))
+            links[f"{ports.get(src, src)}->{ports.get(dst, dst)}"] = analyse_link(delivered(packets), early)
     result["traceSpanS"] = span
     result["links"] = dict(sorted(links.items()))
     totals = collections.Counter()
@@ -291,6 +345,10 @@ def score(run, arm=None, clients=4, gpu_query=None, timers=None):
     result["maxBlackoutMs"] = max((v["blackoutMaxMs"] for v in links.values()), default=0)
     link_minutes = len(links) * span / 60.0
     result["blackoutSPerLinkMinute"] = round(totals["blackoutTotalMs"] / 1000.0 / link_minutes, 4) if link_minutes else None
+    # Both rules on the same trace, whatever arm ran; the legacy fields above follow the run's own rule.
+    result["earlyModel"] = early
+    result["modeledStock"] = modeled_summary(links, "modeledStock", link_minutes)
+    result["modeledEarly"] = modeled_summary(links, "modeledEarly", link_minutes)
     inputs = load_json(os.path.join(run, "flow-inputs.json")) or {}
     result["impair"] = inputs.get("impair") or ""
     final = load_json(os.path.join(run, "relay-impairment-final.json"))
@@ -299,9 +357,8 @@ def score(run, arm=None, clients=4, gpu_query=None, timers=None):
 
     result["fix"], result["fixPerClient"] = fix_state(run)
     if timers is not None:
-        from p2p_retry_timing import parse_timers, verify_run
-        values = parse_timers(timers)
-        result["timers"] = f"{values[0]}/{values[1]}"
+        from p2p_retry_timing import verify_run
+        result["timers"] = token_of(*values)
         result["timerEvidence"] = verify_run(run, result["timers"], clients)
     start, end = run_window(run)
     result["crashes"] = crash_evidence(run, start, end)
@@ -563,7 +620,7 @@ def main():
     s.add_argument("run")
     s.add_argument("--arm", choices=("on", "off"))
     s.add_argument("--clients", type=int, default=4)
-    s.add_argument("--timers", help="intended first/interval ms; requires matching archived INI and native apply logs")
+    s.add_argument("--timers", help="intended first/interval[+early] ms; requires matching archived INI and native apply logs")
     s.add_argument("--case", default=None)
     s.add_argument("--pass-index", type=int, default=None)
     s.add_argument("--index", type=int, default=None, help="position in the matrix plan")
