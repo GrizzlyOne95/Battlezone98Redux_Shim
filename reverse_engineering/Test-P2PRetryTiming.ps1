@@ -39,6 +39,20 @@ try {
     }
     $added = Set-P2PRetryTimingText '[Graphics]' '50/10000'
     Assert ($added.Contains("[Network]`nReliableFirstRetryMs = 50`nReliableRetryIntervalMs = 10000`n")) 'A missing Network section or timer range boundary failed.'
+    # Early-receive token: explicit 0/1, round trip, replacement and removal confined to [Network].
+    $plain = ConvertTo-P2PRetryTiming '1000/2500'
+    $early = ConvertTo-P2PRetryTiming '1000/2500+early'
+    Assert (($plain.early -eq 0) -and ($plain.token -eq '1000/2500') -and ($early.early -eq 1) -and ($early.token -eq '1000/2500+early')) 'Early token did not round trip.'
+    foreach ($token in @('300/800+','300/800+Early','300/800+early+early','+early','49/800+early')) {
+        $rejected = $false
+        try { ConvertTo-P2PRetryTiming $token | Out-Null } catch { $rejected = $true }
+        Assert $rejected "Invalid early token accepted: $token"
+    }
+    $withEarly = Set-P2PRetryTimingText "[Network]`r`nEarlyUnreliableAccept=0`r`nLabel=x`r`nEarlyUnreliableAccept = 1`r`n[Other]`r`nEarlyUnreliableAccept=7`r`n" '300/800+early'
+    Assert ($withEarly -ceq "[Network]`r`nLabel=x`r`nReliableFirstRetryMs = 300`r`nReliableRetryIntervalMs = 800`r`nEarlyUnreliableAccept = 1`r`n[Other]`r`nEarlyUnreliableAccept=7`r`n") 'Early key was not replaced only inside [Network].'
+    $off = Set-P2PRetryTimingText "[Network]`nEarlyUnreliableAccept=1`n" '300/800'
+    Assert ($off -ceq "[Network]`nReliableFirstRetryMs = 300`nReliableRetryIntervalMs = 800`nEarlyUnreliableAccept = 0`n") 'Plain token did not write an explicit early 0.'
+    Assert ((Set-P2PRetryTimingText '[Graphics]' '50/10000+early').Contains("EarlyUnreliableAccept = 1`n")) 'A missing Network section did not receive the early key.'
     Write-Host '[PASS] Prevalidation, section isolation, durable backup, and exact byte restoration.'
 } finally {
     # Remove only the explicitly created temporary files; no recursive deletion.

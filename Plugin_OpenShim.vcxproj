@@ -201,6 +201,7 @@
     <ClCompile Include="src\patches\satellite_view_limits.cpp" />
     <ClCompile Include="src\patches\scrap_pilot_hud.cpp" />
     <ClCompile Include="src\patches\shadow_far_distance_hook.cpp" />
+    <ClCompile Include="src\patches\p2p_early_unreliable_receive.cpp" />
     <ClCompile Include="src\patches\p2p_reliable_send_fix.cpp" />
     <ClCompile Include="src\patches\team_filter_mines.cpp" />
     <ClCompile Include="src\patches\ui_camera_fixes.cpp" />

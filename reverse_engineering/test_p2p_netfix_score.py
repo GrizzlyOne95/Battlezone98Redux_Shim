@@ -317,6 +317,74 @@ class ScoreTests(unittest.TestCase):
             finally:
                 shutil.rmtree(matrix, ignore_errors=True)
 
+def raw(seq, flags, ts, kind=0):
+    return {"source": "127.0.0.1:50001", "target": "127.0.0.1:50002", "tsUnixMs": ts, "disposition": "forwarded",
+            "transport": {"seqA": seq, "flagsByte": f"0x{flags:02X}", "kindNibble": kind}}
+
+
+REL_FINAL, REL_PART, UNREL_FINAL, UNREL_PART = 0xC0, 0x80, 0x40, 0x00
+
+
+class EarlyReplayTests(unittest.TestCase):
+    """The receiver-side early rule (include/p2p_early_unreliable_policy.h)."""
+
+    def run_link(self, packets, early=True):
+        return score.analyse_link(score.delivered(packets), early)
+
+    def test_future_stamped_final_unreliable_is_delivered_only_in_early_mode(self):
+        s = [raw(0, REL_FINAL, 1000), raw(2, UNREL_FINAL, 1010), raw(2, UNREL_FINAL, 1300), raw(1, REL_FINAL, 1600)]
+        stock, early = self.run_link(s, False), self.run_link(s, True)
+        self.assertEqual((stock["futureStampedGaps"], stock["unreliableRejected"], stock["blackoutTotalMs"]), (2, 2, 590))
+        self.assertEqual((early["futureStampedGaps"], early["unreliableRejected"], early["blackouts"]), (0, 0, 0))
+        # both models are always reported, whatever mode drove the legacy fields
+        for link in (stock, early):
+            self.assertEqual(link["modeledStock"]["unreliableRejected"], 2)
+            self.assertEqual(link["modeledEarly"]["unreliableRejected"], 0)
+            self.assertEqual(link["modeledStock"]["blackoutTotalMs"], 590)
+            self.assertEqual(link["modeledEarly"]["blackoutMaxMs"], 0)
+
+    def test_expected_advances_only_on_accepted_reliable(self):
+        # a delivered early update must not move expected: reliable 1 still lands
+        s = [raw(0, REL_FINAL, 1000), raw(2, UNREL_FINAL, 1010), raw(1, REL_FINAL, 1020), raw(2, UNREL_FINAL, 1030)]
+        link = self.run_link(s)
+        self.assertEqual((link["futureStampedGaps"], link["duplicateReliable"], link["unreliableRejected"]), (0, 0, 0))
+
+    def test_stale_unreliable_stays_rejected(self):
+        s = [raw(5, REL_FINAL, 1000), raw(6, REL_FINAL, 1010), raw(5, UNREL_FINAL, 1020)]
+        link = self.run_link(s)
+        self.assertEqual((link["unreliableRejected"], link["futureStampedGaps"]), (1, 0))
+
+    def test_future_reliable_is_still_rejected(self):
+        s = [raw(0, REL_FINAL, 1000), raw(3, REL_FINAL, 1010), raw(1, UNREL_FINAL, 1020)]
+        link = self.run_link(s)
+        self.assertEqual(link["futureStampedGaps"], 1)
+        self.assertEqual(link["unreliableRejected"], 0)
+
+    def test_non_final_unreliable_is_rejected_and_opens_a_blackout(self):
+        s = [raw(0, REL_FINAL, 1000), raw(2, UNREL_PART, 1010), raw(1, REL_FINAL, 1100), raw(2, UNREL_FINAL, 1200)]
+        link = self.run_link(s)
+        self.assertEqual((link["futureStampedGaps"], link["unreliableRejected"], link["blackoutTotalMs"]), (1, 1, 190))
+
+    def test_partial_reliable_reassembly_blocks_until_final_fragment(self):
+        s = [raw(0, REL_FINAL, 1000), raw(1, REL_PART, 1010), raw(3, UNREL_FINAL, 1020),
+             raw(2, REL_FINAL, 1030), raw(4, UNREL_FINAL, 1040)]
+        link = self.run_link(s)
+        # stamp 3 vs expected 2 is blocked mid-reassembly; after the final fragment stamp 4 vs 3 is delivered
+        self.assertEqual((link["futureStampedGaps"], link["unreliableRejected"]), (1, 1))
+        self.assertEqual(link["blackoutTotalMs"], 20)
+
+    def test_window_limit_and_u32_wrap(self):
+        far = [raw(0, REL_FINAL, 1000), raw(1 + 4096, UNREL_FINAL, 1010), raw(1 + 4097, UNREL_FINAL, 1020)]
+        link = self.run_link(far)
+        self.assertEqual(link["unreliableRejected"], 1)  # +4096 delivered, +4097 rejected
+        wrap = [raw(0xFFFFFFFE, REL_FINAL, 1000), raw(0xFFFFFFFF, REL_FINAL, 1010), raw(2, UNREL_FINAL, 1020),
+                raw(0, REL_FINAL, 1030), raw(0xFFFFFFFF, UNREL_FINAL, 1040)]
+        link = self.run_link(wrap)
+        # stamp 2 is 3 ahead of expected 0 (wrapped): delivered; reliable 0 is accepted;
+        # stamp 0xFFFFFFFF is then behind expected 1: stale, rejected
+        self.assertEqual((link["futureStampedGaps"], link["unreliableRejected"], link["duplicateReliable"]), (0, 1, 0))
+
+
 class GpuQueryTests(unittest.TestCase):
     """The event-log adapter fails closed: only an explicit count is evidence."""
 
