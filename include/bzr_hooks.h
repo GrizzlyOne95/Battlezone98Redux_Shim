@@ -124,6 +124,15 @@ namespace BZROpenShim
     bool PreLobbyApplyNickname(const char* nickname, BzrNetNicknameResult& result);
     void PreLobbyEndNicknameEdit();
     bool PreLobbyForwardChar(uint8_t character);
+    // The custom matchmaking server host entry: a text entry edited like the
+    // nickname. PreLobbyForwardChar routes characters to whichever of the two
+    // is active. `text` is the initial value (blank shows a placeholder).
+    bool CreatePreLobbyServerEntry(
+        void* parent, float x, float y, float width, float height, const char* text);
+    void PreLobbySetServerEntryVisible(bool visible);
+    bool PreLobbyGetServerEntryText(char* out, size_t outSize);
+    void PreLobbySetServerEntryText(const char* text);
+    void PreLobbyEndServerEdit();
     // Stock isNetworkInit (0x00764870): >0 authorised, 0 not yet, -1 unknown.
     int QueryStockIsNetworkInit();
     void __cdecl BanButtonOnClickHost();

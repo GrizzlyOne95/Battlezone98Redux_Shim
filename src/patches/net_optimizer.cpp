@@ -5,6 +5,8 @@
 #include "net_reorder_core.h"
 #include "shim_log.h"
 #include "engine_globals.h"
+#include "bzr_options_ui.h"
+#include "matchmaking_server.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -385,6 +387,12 @@ namespace
     WSAGetLastErrorFn g_RealWSAGetLastError = nullptr;
     WSASetLastErrorFn g_RealWSASetLastError = nullptr;
     GetAddrInfoAFn g_RealGetAddrInfoA = nullptr;
+
+    // Live matchmaking-server override (the pre-lobby's Rebellion / Custom
+    // choice). A host name or IP; empty means no override. Applied to lookups
+    // of the launch-server host only, and never while a test redirect is set.
+    SRWLOCK g_ServerOverrideLock = SRWLOCK_INIT;
+    std::string g_ServerOverrideHost;
     GetQueuedCompletionStatusFn g_RealGetQueuedCompletionStatus = nullptr;
 
     enum class PendingIoKind : uint8_t
@@ -3717,6 +3725,59 @@ namespace
             g_RealWSASetLastError(err);
     }
 
+    // The host the client connects to without an override: the /bzrserver=
+    // launch switch if present, else the official host.
+    const std::string& GetLaunchServerHostCached()
+    {
+        static const std::string launchHostCache = []
+        {
+            std::string host;
+            if (!MatchmakingServer::ExtractLaunchHost(GetCommandLineW(), host))
+                host = MatchmakingServer::kRebellionHost;
+            return host;
+        }();
+        return launchHostCache;
+    }
+
+    bool CopyServerOverrideHost(std::string& out)
+    {
+        AcquireSRWLockShared(&g_ServerOverrideLock);
+        out = g_ServerOverrideHost;
+        ReleaseSRWLockShared(&g_ServerOverrideLock);
+        return !out.empty();
+    }
+
+    // Seeds the override from the saved [Network] Server / CustomServer so the
+    // first connection (and invites) already use the saved choice.
+    void LoadSavedServerOverride()
+    {
+        std::string modeText;
+        std::string customText;
+        TryGetUserConfigString("Network", "Server", modeText);
+        TryGetUserConfigString("Network", "CustomServer", customText);
+
+        MatchmakingServer::Mode mode = MatchmakingServer::Mode::None;
+        if (!MatchmakingServer::ParseMode(modeText, mode))
+        {
+            Logf("[OpenShimNet] Ignoring [Network] Server=%s (expected Rebellion or Custom)",
+                modeText.c_str());
+            return;
+        }
+        const std::string host = MatchmakingServer::ResolveSavedHost(mode, customText);
+        if (mode == MatchmakingServer::Mode::Custom && host.empty())
+        {
+            Logf("[OpenShimNet] [Network] Server=Custom ignored: CustomServer is empty or invalid");
+            return;
+        }
+        if (host.empty())
+            return;
+        AcquireSRWLockExclusive(&g_ServerOverrideLock);
+        g_ServerOverrideHost = host;
+        ReleaseSRWLockExclusive(&g_ServerOverrideLock);
+        Logf("[OpenShimNet] Saved server selection: %s -> %s",
+            MatchmakingServer::ModeName(mode), host.c_str());
+    }
+
     INT WSAAPI Hook_getaddrinfo(
         PCSTR nodeName,
         PCSTR serviceName,
@@ -3724,12 +3785,24 @@ namespace
         PADDRINFOA* result)
     {
         PCSTR resolvedNode = nodeName;
+        std::string overrideHost;
         if (nodeName &&
             !g_Config.matchmakingRedirectAddress.empty() &&
             _stricmp(nodeName, kBzrNetMatchmakingHost) == 0)
         {
+            // The test redirect is a fail-closed guard and always wins.
             resolvedNode = g_Config.matchmakingRedirectAddress.c_str();
             Logf("[OpenShimNet] Redirecting BZRNet lookup %s -> %s",
+                nodeName,
+                resolvedNode);
+        }
+        else if (nodeName &&
+                 g_Config.matchmakingRedirectAddress.empty() &&
+                 CopyServerOverrideHost(overrideHost) &&
+                 MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()))
+        {
+            resolvedNode = overrideHost.c_str();
+            Logf("[OpenShimNet] Redirecting BZRNet lookup %s -> %s (server selection)",
                 nodeName,
                 resolvedNode);
         }
@@ -4746,6 +4819,7 @@ namespace
     BOOL CALLBACK InitializeNetworkOptimizerOnce(PINIT_ONCE, PVOID, PVOID*)
     {
         LoadConfig();
+        LoadSavedServerOverride();
 
         LogShimA(LogLevel::Info, "net", "[OpenShimNet] Initializing");
         LogNetIniValues();
@@ -5005,6 +5079,34 @@ namespace
             return false;
         std::snprintf(out, outSize, "%s", g_Config.matchmakingRedirectAddress.c_str());
         return true;
+    }
+
+    bool GetLaunchServerHost(char* out, size_t outSize)
+    {
+        if (!out || outSize == 0)
+            return false;
+        std::snprintf(out, outSize, "%s", GetLaunchServerHostCached().c_str());
+        return true;
+    }
+
+    void SetMatchmakingServerOverride(const char* host)
+    {
+        AcquireSRWLockExclusive(&g_ServerOverrideLock);
+        g_ServerOverrideHost = host ? host : "";
+        ReleaseSRWLockExclusive(&g_ServerOverrideLock);
+        Logf("[OpenShimNet] Matchmaking server override %s%s",
+            host && *host ? "set to " : "cleared",
+            host && *host ? host : "");
+    }
+
+    bool GetMatchmakingServerOverride(char* out, size_t outSize)
+    {
+        if (!out || outSize == 0)
+            return false;
+        std::string host;
+        CopyServerOverrideHost(host);
+        std::snprintf(out, outSize, "%s", host.c_str());
+        return !host.empty();
     }
 
     bool RecycleBzrNetWebSocket()
