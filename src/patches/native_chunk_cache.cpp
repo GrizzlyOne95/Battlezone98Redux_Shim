@@ -137,10 +137,9 @@ bool ReadCache(const std::filesystem::path &directory, std::vector<CachedPiece> 
         return false;
     }
 }
-bool WriteCache(const std::filesystem::path &directory, const std::vector<Piece> &pieces,
-                std::vector<CachedPiece> &cached)
+bool SerializeCache(const std::vector<Piece> &pieces, CacheImage &image)
 {
-    cached.clear();
+    image = CacheImage{};
     try
     {
         if (pieces.empty() || pieces.size() > maxPieces)
@@ -148,6 +147,7 @@ bool WriteCache(const std::filesystem::path &directory, const std::vector<Piece>
         std::set<std::string> names;
         uintmax_t total = 0;
         std::vector<CachedPiece> result;
+        std::vector<uint64_t> hashes;
         std::ostringstream manifest;
         manifest << manifestVersion << '\n' << pieces.size() << '\n';
         // Validate every name and bound before touching any cache files.
@@ -161,11 +161,33 @@ bool WriteCache(const std::filesystem::path &directory, const std::vector<Piece>
                 if (!std::isfinite(axis) || std::abs(axis) > 100000)
                     return false;
             total += piece.mesh.size();
-            manifest << name << ' ' << piece.triangles << ' ' << piece.mesh.size() << ' '
-                     << Fingerprint(piece.mesh) << ' ' << bits(piece.center[0]) << ' ' << bits(piece.center[1])
-                     << ' ' << bits(piece.center[2]) << '\n';
+            const auto hash = Fingerprint(piece.mesh);
+            manifest << name << ' ' << piece.triangles << ' ' << piece.mesh.size() << ' ' << hash << ' '
+                     << bits(piece.center[0]) << ' ' << bits(piece.center[1]) << ' ' << bits(piece.center[2])
+                     << '\n';
             result.push_back({name, piece.triangles, {piece.center[0], piece.center[1], piece.center[2]}});
+            hashes.push_back(hash);
         }
+        image.manifest = manifest.str();
+        image.cached = std::move(result);
+        image.hashes = std::move(hashes);
+        return true;
+    }
+    catch (...)
+    {
+        image = CacheImage{};
+        return false;
+    }
+}
+bool WriteCache(const std::filesystem::path &directory, const std::vector<Piece> &pieces,
+                std::vector<CachedPiece> &cached)
+{
+    cached.clear();
+    try
+    {
+        CacheImage image;
+        if (!SerializeCache(pieces, image))
+            return false;
         std::error_code ec;
         std::filesystem::create_directories(directory, ec);
         if (ec)
@@ -173,8 +195,8 @@ bool WriteCache(const std::filesystem::path &directory, const std::vector<Piece>
         for (size_t i = 0; i < pieces.size(); ++i)
         {
             const auto &piece = pieces[i];
-            const auto file = directory / (result[i].name + ".mesh");
-            if (matches(file, piece.mesh.size(), Fingerprint(piece.mesh)))
+            const auto file = directory / (image.cached[i].name + ".mesh");
+            if (matches(file, piece.mesh.size(), image.hashes[i]))
                 continue;
             std::ofstream output(file, std::ios::binary | std::ios::trunc);
             output.write(reinterpret_cast<const char *>(piece.mesh.data()),
@@ -186,11 +208,11 @@ bool WriteCache(const std::filesystem::path &directory, const std::vector<Piece>
         // Publish the index last. Interrupted writes never make a partial
         // cache usable: readers also validate each file's size and content.
         std::ofstream output(directory / manifestName, std::ios::binary | std::ios::trunc);
-        output << manifest.str();
+        output << image.manifest;
         output.close();
         if (!output)
             return false;
-        cached = std::move(result);
+        cached = std::move(image.cached);
         return true;
     }
     catch (...)
