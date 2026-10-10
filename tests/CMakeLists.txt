@@ -60,6 +60,11 @@ if(EXISTS "${OPENSHIM_GIB_SAMPLE_DIR}/ispilo.mesh" AND EXISTS "${OPENSHIM_GIB_SA
                 "${OPENSHIM_GIB_SAMPLE_DIR}/ispcc.skeleton")
 endif()
 
+openshim_add_test(native_chunk_prune_tests STD 20 SOURCES
+    native_chunk_prune_tests.cpp
+    ../src/patches/native_chunk_prune.cpp
+)
+
 openshim_add_test(shell_casing_physics_tests STD 20 SOURCES
     shell_casing_physics_tests.cpp
 )

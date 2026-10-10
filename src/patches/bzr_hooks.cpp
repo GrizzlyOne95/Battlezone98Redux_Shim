@@ -1066,6 +1066,7 @@ namespace BZROpenShim
         // Mesh pieces can now be generated from the source Ogre resource.
         // External payload packs remain a fallback, not a prerequisite.
         g_EnableChunkMeshProxy = configWantsChunkMeshProxy;
+        PruneNativeChunkCache();
         WarmNativeChunkCaches();
         if (configWantsChunkMeshProxy && !chunkAssetsAvailable)
         {
