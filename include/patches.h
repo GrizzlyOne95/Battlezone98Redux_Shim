@@ -69,6 +69,9 @@ namespace BZROpenShim
     inline void* g_RetAddr_BanHook1           = nullptr;
     inline void* g_RetAddr_BanHook2           = nullptr;
     inline void* g_RetAddr_AutoSaveLoadHook   = nullptr;
+    // Global the AutoSave load-button site loads (mov eax, [global]); read
+    // from the site in ResolveStaticReturnPointers before the hook goes in.
+    inline uint32_t g_AutoSaveLoadReplayGlobal = 0;
     inline void* g_RetAddr_TurretCraftAimPitchMultiplier = nullptr;
     inline void* g_RetAddr_TurretTankAimPitchMultiplier = nullptr;
     inline void* g_RetAddr_UnderAttackAlertHook1 = nullptr;
@@ -294,6 +297,9 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::BYTES, {}, "Redux Numeric Locale Compatibility Call", false, {} },
             { 0, HookEngine::PatchType::BYTES, {}, "Redux TRN Binary Writer Mode", false, {} },
             { 0, HookEngine::PatchType::BYTES, {}, "Redux TRN Canonical Fwrite Hook", false, {} },
+            { 0, HookEngine::PatchType::BYTES, {}, "P2P Reliable Send Backlog", false, {} },
+            { 0, HookEngine::PatchType::BYTES, {}, "P2P Reliable First Retry", false, {} },
+            { 0, HookEngine::PatchType::BYTES, {}, "P2P Reliable Retry Interval", false, {} },
         };
 
         // Future: could also load this list from JSON

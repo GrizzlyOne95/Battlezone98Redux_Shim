@@ -5,6 +5,8 @@
 // declared in bzr_options_ui.h and implemented by bzr_hooks.cpp and the
 // helper files split out of it.
 #include "bzr_options_ui.h"
+#include "shell_screens.h"
+#include "hook_engine.h"
 #include "bool_token.h"
 
 #include "autosave.h"
@@ -39,12 +41,13 @@ namespace BZROpenShim
     bool __fastcall OptionsInputKeyReleasedHook(void* thisPtr, void* /*edx*/, uint32_t key, uint32_t keyCode);
     void* __fastcall OptionsParentCtorHook(void* thisPtr, void* /*edx*/);
     void __fastcall MainScreenCtorHook(void* thisPtr, void* /*edx*/, char phase);
-    void InstallCareerUiTextRecorders();
-    void __fastcall CareerUiSetActiveHook(void* thisPtr, void* /*edx*/, uint8_t value);
-    void __fastcall CareerUiSetButtonLabelHook(void* thisPtr, void* /*edx*/, const char* text);
-    void __fastcall CareerUiSetTooltipHook(void* thisPtr, void* /*edx*/, const char* text);
     void __fastcall OptionsInputDtorHook(void* thisPtr, void* /*edx*/);
     void __fastcall OptionsParentDtorHook(void* thisPtr, void* /*edx*/);
+
+    namespace Hooks
+    {
+        bool VtableTypeNameMatches(uintptr_t vtableAddress, const char* expectedName);
+    }
 
     namespace
     {
@@ -96,16 +99,16 @@ namespace BZROpenShim
         // The shipped GOG PDB public-symbol addresses for cUI_OptionsInput methods
         // are not reliable function-entry hooks against the current Redux binary.
         // The stock input screen constructor was recovered from string xrefs instead.
-        constexpr uintptr_t kOptionsInputCtorAddr = 0x007B25B0;
-        constexpr uintptr_t kOptionsInputKeyReleasedAddr = 0x007B48C0;
-        constexpr uintptr_t kOptionsInputScreenFactoryCallerAddr = 0x007C8600;
-        constexpr uintptr_t kOptionsInputBackClickAddr = 0x007B2210;
-        constexpr uintptr_t kOptionsInputDefaultsClickAddr = 0x007B2230;
+        uint32_t g_OptionsInputCtorAddr = 0;
+        uint32_t g_OptionsInputKeyReleasedAddr = 0;
+        uint32_t g_OptionsInputScreenFactoryCallerAddr = 0;
+        uint32_t g_OptionsInputBackClickAddr = 0;
+        uint32_t g_OptionsInputDefaultsClickAddr = 0;
         // Stock "Joystick" button click thunk (cUI_OptionsInput ctor wires it
         // via SetOnClick 0x007C23E0; see FUN_007b25b0 decomp). The Default and
         // Joystick buttons are ctor locals, not screen members, so they are
         // located at runtime by matching this thunk in the +0x154 click slot.
-        constexpr uintptr_t kOptionsInputJoystickClickAddr = 0x007B2220;
+        uint32_t g_OptionsInputJoystickClickAddr = 0;
         constexpr size_t kUiViewChildBeginOffset = 0x12C;
         constexpr size_t kUiViewChildEndOffset = 0x130;
         constexpr size_t kUiButtonOnHoverOffset = 0x150;
@@ -115,13 +118,13 @@ namespace BZROpenShim
         // the cUI_View vtable 0x008A0B94, which is how a node is identified as
         // a button when walking a screen's child tree.
         constexpr size_t kUiViewNameOffset = 0x20;
-        constexpr uintptr_t kUiButtonVtableAddr = 0x008A0470;
+        uint32_t g_UiButtonVtableAddr = 0;
         // cUI_OptionsParent constructor on the live GOG/Steam 2.2.301 exe,
         // recovered from the Redux decompile corpus (FUN_007b61a0: builds the
         // esc_center.png overlay plus the Play/Graphic/Audio/Input buttons) and
         // byte-verified against the installed exe (SEH prologue
         // 55 8B EC 6A FF 68 60 13 86 00). Singleton stored at 0x009455C4.
-        constexpr uintptr_t kOptionsParentCtorAddr = 0x007B61A0;
+        uint32_t g_OptionsParentCtorAddr = 0;
         // cUI_MainScreen menu setup, void __thiscall(this, char).
         //
         // NOT the constructor. Hooking the constructor (0x0078E670) was tried
@@ -139,32 +142,31 @@ namespace BZROpenShim
         //
         // Prologue read from the shipped GOG 2.2.301 image:
         //   55 8B EC 6A FF 68 12 EC 85 00
-        constexpr uintptr_t kMainScreenCtorAddr = 0x0078D000;
+        uint32_t g_MainScreenCtorAddr = 0;
         constexpr size_t kMainScreenCtorDetourLen = 10;
         constexpr size_t kOptionsParentCtorDetourLen = 10;
-        constexpr uintptr_t kOptionsParentSingletonAddr = 0x009455C4;
         // Stock cUI_OptionsParent "Input" click thunk: loads the parent
         // singleton and asks the options shell (this+0x138) to switch to screen
         // id 0x15 (the input options page) via the switch fn at 0x007C7930.
         // The OpenShim settings button reuses this exact navigation path.
-        constexpr uintptr_t kOptionsParentInputClickThunkAddr = 0x007B6100;
+        uint32_t g_OptionsParentInputClickThunkAddr = 0;
         // cUI_OptionsInput singleton (DAT_009455B8); non-null while the stock
         // input screen object is alive inside the current options shell.
-        constexpr uintptr_t kOptionsInputSingletonAddr = 0x009455B8;
+        uint32_t g_OptionsInputSingletonAddr = 0;
         // Inner (non-deleting) destructors of the two hooked screens, recovered
         // from the live GOG exe: the ctor at 0x007B25B0 installs vtable
         // 0x0089F930 whose slot 0 (scalar deleting dtor 0x007B4840) calls
         // 0x007B4870; the parent ctor 0x007B61A0 installs vtable 0x0089FC34 ->
         // slot 0 0x007B6820 -> 0x007B6850. Hooking the inner dtor catches every
         // destruction path, which is what invalidates our cached child views.
-        constexpr uintptr_t kOptionsInputDtorAddr = 0x007B4870;
-        constexpr uintptr_t kOptionsParentDtorAddr = 0x007B6850;
+        uint32_t g_OptionsInputDtorAddr = 0;
+        uint32_t g_OptionsParentDtorAddr = 0;
         constexpr size_t kOptionsScreenDtorDetourLen = 10;
         constexpr size_t kOptionsInputCtorDetourLen = 10;
         constexpr size_t kOptionsInputKeyReleasedDetourLen = 9;
         constexpr size_t kOptionsInputKeyConfigOffset = 0x188;
 
-        constexpr uintptr_t kGogReadMappingTableAddr = 0x00620010;
+        uint32_t g_ReadMappingTableAddr = 0;
 
         enum class InputBindingMapFamily
         {
@@ -261,6 +263,69 @@ namespace BZROpenShim
         {
             120.0f, 190.0f, 150.0f, 160.0f, 90.0f, 90.0f, 120.0f
         };
+
+        // Painted mode: with osh_keys_center.png deployed, the editor swaps the
+        // Input screen's centre panel for it and places its widgets over the
+        // panel's painted slots instead of building flat masks and plates. The
+        // geometry is the layout contract with KEYS_LAYOUT in
+        // resources/ui/custom_widgets/mkscreens.py.
+        constexpr const char* kInputBindingPanelTexture = "osh_keys_center.png";
+        static bool g_InputBindingUiPainted = false;
+
+        static UiOptionsPageLayout BuildKeysPanelLayout()
+        {
+            UiOptionsPageLayout layout = {};
+            constexpr float kColumnX[2] = { 228.0f, 736.0f };
+            constexpr float kColumnW = 476.0f;
+            constexpr float kColumnY = 316.0f;
+            constexpr float kRowTop = 10.0f;
+            constexpr float kPad = 16.0f;
+            constexpr float kValueW = 196.0f;
+            constexpr float kLabelInset = 28.0f;
+            constexpr float kInfoX = 228.0f, kInfoY = 702.0f, kInfoW = 984.0f, kInfoH = 116.0f;
+
+            layout.title = { 470.0f, 132.0f, 500.0f, 56.0f };
+            const float textX = kInfoX + 24.0f;
+            const float textW = kInfoW - 48.0f;
+            layout.headerTextWidth = textW;
+            layout.statusLine1 = { textX, kInfoY + 14.0f, textW, 30.0f };
+            layout.statusLine2 = { textX, kInfoY + 46.0f, textW, 30.0f };
+            layout.contextLine1 = { textX, kInfoY + kInfoH - 42.0f, textW, 30.0f };
+
+            layout.toolbarY = 264.0f;
+            layout.toolbarHeight = 40.0f;
+            layout.toolbarLeftX = 228.0f;
+            layout.toolbarRightX = 1212.0f;
+            layout.toolbarGap = 10.0f;
+
+            layout.rowLeftX = kColumnX[0] + kLabelInset;
+            layout.rowRightX = kColumnX[1] + kLabelInset;
+            layout.rowStartY = kColumnY + kRowTop;
+            layout.rowPitch = 36.0f;
+            layout.rowHeight = 30.0f;
+            layout.rowLabelYInset = 2.0f;
+            layout.rowValueOffsetX = kColumnW - kPad - kValueW - kLabelInset;
+            layout.rowValueWidth = kValueW;
+            layout.rowValueTextWidth = kValueW - 20.0f;
+            layout.rowLabelWidth = layout.rowValueOffsetX - 22.0f;
+            layout.rowLabelTextWidth = layout.rowLabelWidth - 30.0f;
+            return layout;
+        }
+
+        static UiOptionsPageLayout GetInputBindingUiLayout()
+        {
+            return g_InputBindingUiPainted ? BuildKeysPanelLayout()
+                                           : BuildUiOptionsPageLayout(kInputBindingUiRowsPerColumn);
+        }
+
+        // Button skins for painted mode: hover and press only, so the button
+        // rests on its painted slot like the stock option buttons.
+        struct InputBindingUiSkin
+        {
+            const char* over;
+            const char* on;
+        };
+        static const InputBindingUiSkin* g_InputBindingUiSkin = nullptr;
 
         static InlineDetour32 g_OptionsInputPopulateUiDetour = {};
         static InlineDetour32 g_OptionsInputKeyReleasedDetour = {};
@@ -445,30 +510,9 @@ namespace BZROpenShim
             OnInputBindingRefreshClicked();
         }
 
-        // --- OpenShim settings screen (options-shell sub-page) ------------------
-        // A native "OpenShim" button is appended to the stock Options screen; it
-        // navigates to the (already hooked) input options screen with a mode flag
-        // set, and the constructor hook renders a settings page there instead of
-        // the key-binding list. Settings edit openshim.ini losslessly and apply
-        // live through each feature's existing baseline/refresh machinery.
-        constexpr size_t kShimSettingsUiColumnCount = 2;
-        constexpr size_t kShimSettingsUiRowsPerColumn = 8;
-        constexpr size_t kShimSettingsUiVisibleRowCount =
-            kShimSettingsUiColumnCount * kShimSettingsUiRowsPerColumn;
-
-        // Toolbar: Back, Check for Updates | page caption, Prev, Next. Slot 2 is
-        // a label rather than a button, so it reserves toolbar width the same
-        // way and is centred inside its slot when it is created.
-        constexpr size_t kShimSettingsUiToolbarSlotCount = 5;
-        constexpr size_t kShimSettingsUiToolbarRightGroup = 2;
-        constexpr float kShimSettingsUiToolbarWidths[kShimSettingsUiToolbarSlotCount] =
-        {
-            // Slot 2 is the "Page N of M" caption. 130px ellipsized "Page 2 of 3"
-            // to "Page 2 of..." (12 glyphs at ~11px). Keep this slot wide enough
-            // for two-digit page counts without Fitted truncation.
-            140.0f, 180.0f, 170.0f, 105.0f, 105.0f
-        };
-
+        // --- OpenShim Options entry point ------------------------------------
+        // An "OpenShim Options" button on the stock Options screen opens
+        // OpenShim's own settings screens (see OPENSHIM OPTIONS SCREENS).
         static InlineDetour32 g_OptionsParentCtorDetour = {};
         static FnOptionsInputCtor g_BzrFn_OptionsParentCtor = nullptr;
         static bool g_OptionsParentHookInstalled = false;
@@ -488,48 +532,15 @@ namespace BZROpenShim
         static bool g_OptionsParentDtorHookAttempted = false;
         static ScreenBinding g_ParentScreenBinding = {};
         static void* g_ShimSettingsMenuButton = nullptr;
-        // Set by the OpenShim button click; consumed when the input screen is
-        // (re)constructed or when it already exists and can be restyled directly.
-        // The request expires so a click that never reached a construction cannot
-        // hijack an unrelated later visit to the stock input page.
-        static bool g_ShimSettingsPageRequested = false;
-        static ULONGLONG g_ShimSettingsPageRequestTick = 0;
         static ULONGLONG g_ShimSettingsNavigationTick = 0;
-        constexpr ULONGLONG kShimSettingsPageRequestTtlMs = 3000;
         constexpr ULONGLONG kShimSettingsNavigationDebounceMs = 350;
-        // True while the settings page owns the hooked input screen's visuals.
-        static bool g_ShimSettingsPageActive = false;
-        static void* g_ShimSettingsUiTopMask = nullptr;
-        static void* g_ShimSettingsUiContentMask = nullptr;
-        static std::array<void*, kUiDecorMaxOptionsPagePieces> g_ShimSettingsUiDecor = {};
-        static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowBackdrops = {};
-        static void* g_ShimSettingsUiHeaderLabel = nullptr;
-        static void* g_ShimSettingsUiStatusLabel = nullptr;
-        static void* g_ShimSettingsUiStatusDetailLabel = nullptr;
-        static void* g_ShimSettingsUiFooterLabel = nullptr;
-        static void* g_ShimSettingsUiFooterDetailLabel = nullptr;
-        static void* g_ShimSettingsUiBackButton = nullptr;
-        static void* g_ShimSettingsUiUpdateButton = nullptr;
-        static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowLabels = {};
-        static std::array<void*, kShimSettingsUiVisibleRowCount> g_ShimSettingsUiRowButtons = {};
-        static void* g_ShimSettingsUiPageLabel = nullptr;
-        static void* g_ShimSettingsUiPrevPageButton = nullptr;
-        static void* g_ShimSettingsUiNextPageButton = nullptr;
-        static size_t g_ShimSettingsUiPageStart = 0;
-        static std::string g_ShimSettingsUiStatusText = {};
         static UINT_PTR g_ShimSettingsUiUpdateTimer = 0;
         static uint64_t g_ShimSettingsUiUpdateGeneration = 0;
         static void OnShimSettingsMenuClicked();
-        static void OnShimSettingsBackClicked();
-        static void OnShimSettingsUpdateClicked();
-        static void OnShimSettingsRowClicked(size_t rowIndex);
-        static void OnShimSettingsRowHovered(size_t rowIndex);
         struct ShimSettingDescriptor;
         static void OnShimSettingsActionRowClicked(size_t settingIndex,
                                                    const ShimSettingDescriptor& setting);
-        static void OnShimSettingsPageStepClicked(int direction);
         static bool EnsureShimSettingsUpdateTimer();
-        static void ResetShimSettingsUiVisuals();
         static void EnsureInputBindingUiControls(void* screen);
         static void RefreshInputBindingUiControls();
         static void EnsureOptionsScreenDtorHook(uintptr_t dtorAddr,
@@ -544,113 +555,6 @@ namespace BZROpenShim
         {
             OnShimSettingsMenuClicked();
         }
-
-        static void __cdecl ShimSettingsBackClick()
-        {
-            OnShimSettingsBackClicked();
-        }
-
-        static void __cdecl ShimSettingsUpdateClick()
-        {
-            OnShimSettingsUpdateClicked();
-        }
-
-        static void __cdecl ShimSettingsPrevPageClick()
-        {
-            OnShimSettingsPageStepClicked(-1);
-        }
-
-        static void __cdecl ShimSettingsNextPageClick()
-        {
-            OnShimSettingsPageStepClicked(1);
-        }
-
-#define BZR_SHIM_SETTINGS_ROW_CLICK_DECL(index) \
-        static void __cdecl ShimSettingsRowClick##index() { OnShimSettingsRowClicked(index); }
-
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(0)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(1)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(2)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(3)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(4)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(5)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(6)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(7)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(8)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(9)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(10)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(11)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(12)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(13)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(14)
-        BZR_SHIM_SETTINGS_ROW_CLICK_DECL(15)
-
-#undef BZR_SHIM_SETTINGS_ROW_CLICK_DECL
-
-// Hover thunks feed the row's setting description into the status label.
-// Screens may invoke every child's hover slot in bulk when they open (see
-// InputBindingUiButtonOnHoverNoop), so the handler is gated and label-only.
-#define BZR_SHIM_SETTINGS_ROW_HOVER_DECL(index) \
-        static void __cdecl ShimSettingsRowHover##index(void* /*param*/) { OnShimSettingsRowHovered(index); }
-
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(0)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(1)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(2)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(3)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(4)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(5)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(6)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(7)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(8)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(9)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(10)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(11)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(12)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(13)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(14)
-        BZR_SHIM_SETTINGS_ROW_HOVER_DECL(15)
-
-#undef BZR_SHIM_SETTINGS_ROW_HOVER_DECL
-
-        static void* const kShimSettingsRowHoverCallbacks[kShimSettingsUiVisibleRowCount] =
-        {
-            reinterpret_cast<void*>(ShimSettingsRowHover0),
-            reinterpret_cast<void*>(ShimSettingsRowHover1),
-            reinterpret_cast<void*>(ShimSettingsRowHover2),
-            reinterpret_cast<void*>(ShimSettingsRowHover3),
-            reinterpret_cast<void*>(ShimSettingsRowHover4),
-            reinterpret_cast<void*>(ShimSettingsRowHover5),
-            reinterpret_cast<void*>(ShimSettingsRowHover6),
-            reinterpret_cast<void*>(ShimSettingsRowHover7),
-            reinterpret_cast<void*>(ShimSettingsRowHover8),
-            reinterpret_cast<void*>(ShimSettingsRowHover9),
-            reinterpret_cast<void*>(ShimSettingsRowHover10),
-            reinterpret_cast<void*>(ShimSettingsRowHover11),
-            reinterpret_cast<void*>(ShimSettingsRowHover12),
-            reinterpret_cast<void*>(ShimSettingsRowHover13),
-            reinterpret_cast<void*>(ShimSettingsRowHover14),
-            reinterpret_cast<void*>(ShimSettingsRowHover15),
-        };
-
-        static void* const kShimSettingsRowClickCallbacks[kShimSettingsUiVisibleRowCount] =
-        {
-            reinterpret_cast<void*>(ShimSettingsRowClick0),
-            reinterpret_cast<void*>(ShimSettingsRowClick1),
-            reinterpret_cast<void*>(ShimSettingsRowClick2),
-            reinterpret_cast<void*>(ShimSettingsRowClick3),
-            reinterpret_cast<void*>(ShimSettingsRowClick4),
-            reinterpret_cast<void*>(ShimSettingsRowClick5),
-            reinterpret_cast<void*>(ShimSettingsRowClick6),
-            reinterpret_cast<void*>(ShimSettingsRowClick7),
-            reinterpret_cast<void*>(ShimSettingsRowClick8),
-            reinterpret_cast<void*>(ShimSettingsRowClick9),
-            reinterpret_cast<void*>(ShimSettingsRowClick10),
-            reinterpret_cast<void*>(ShimSettingsRowClick11),
-            reinterpret_cast<void*>(ShimSettingsRowClick12),
-            reinterpret_cast<void*>(ShimSettingsRowClick13),
-            reinterpret_cast<void*>(ShimSettingsRowClick14),
-            reinterpret_cast<void*>(ShimSettingsRowClick15),
-        };
 
         static constexpr InputBindingRowSeed kInputBindingFirstPassSeeds[] = {
             { "turbo", nullptr, "Turbo" },
@@ -1461,8 +1365,8 @@ namespace BZROpenShim
             }
 
             Log(L"[INPUTUI] Recovered stock constructor entry=0x%08X screenFactoryCall=0x%08X\n",
-                static_cast<uint32_t>(kOptionsInputCtorAddr),
-                static_cast<uint32_t>(kOptionsInputScreenFactoryCallerAddr));
+                static_cast<uint32_t>(g_OptionsInputCtorAddr),
+                static_cast<uint32_t>(g_OptionsInputScreenFactoryCallerAddr));
         }
 
         static bool ShouldEnableInputBindingUiReplacement()
@@ -1492,7 +1396,6 @@ namespace BZROpenShim
 
         static void ResetInputBindingUiVisuals()
         {
-            ResetShimSettingsUiVisuals();
             g_InputScreenBinding.BindDecorated(nullptr);
             g_InputBindingUiMiddleOverlay = nullptr;
             g_InputBindingUiTopMask = nullptr;
@@ -1794,7 +1697,10 @@ namespace BZROpenShim
                 if (!slot)
                     return false;
 
-                if (IsUiTextureFileAvailable("uibtn.png")) {
+                if (g_InputBindingUiSkin) {
+                if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, g_InputBindingUiSkin->over);
+                if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, g_InputBindingUiSkin->on);
+            } else if (IsUiTextureFileAvailable("uibtn.png")) {
                 if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(slot, "uibtn.png");
                 if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(slot, "uibtnhv.png");
                 if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(slot, "uibtnhv.png");
@@ -2033,10 +1939,10 @@ namespace BZROpenShim
         // context, accumulating per-char advances at the current global char
         // size; the factory multiplies that char size by the per-text scale
         // before measuring and restores it afterwards, which is mirrored here.
-        constexpr uintptr_t kGogUiTextMeasureAddr = 0x00689AB0;    // cdecl (font, text, &w, &h)
-        constexpr uintptr_t kGogUiFontContextPtrAddr = 0x0091552C; // global font the UI text uses
-        constexpr uintptr_t kGogUiFontCharSizeXAddr = 0x02BF041C;  // global char-size floats read
-        constexpr uintptr_t kGogUiFontCharSizeYAddr = 0x02BF0420;  // by the per-char advance calls
+        uint32_t g_UiTextMeasureAddr = 0;    // cdecl (font, text, &w, &h)
+        uint32_t g_UiFontContextPtrAddr = 0; // global font the UI text uses
+        uint32_t g_UiFontCharSizeXAddr = 0;  // global char-size floats read
+        uint32_t g_UiFontCharSizeYAddr = 0;  // by the per-char advance calls
 
         typedef void(__cdecl* FnUiMeasureText)(void* font, const char* text,
                                                float* outWidth, float* outHeight);
@@ -2048,30 +1954,27 @@ namespace BZROpenShim
             static int s_measureState = 0; // 0=unchecked 1=usable -1=unavailable
             if (s_measureState == 0)
             {
-                static const uint8_t kExpectedMeasureBytes[] =
-                {
-                    0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x24, 0x83, 0x7D, 0x10, 0x00
+                const HookEngine::EngineRow rows[] = {
+                    { "UiTextMeasure", &g_UiTextMeasureAddr },
+                    { "UiFontContext", &g_UiFontContextPtrAddr },
+                    { "UiFontCharSizeX", &g_UiFontCharSizeXAddr },
+                    { "UiFontCharSizeY", &g_UiFontCharSizeYAddr },
                 };
-                s_measureState = ExpectedBytesMatchAt(kGogUiTextMeasureAddr,
-                                                      kExpectedMeasureBytes,
-                                                      sizeof(kExpectedMeasureBytes))
-                                     ? 1
-                                     : -1;
+                s_measureState = HookEngine::BindEngineRows("Native UI text measure", rows) ? 1 : -1;
                 if (s_measureState < 0)
-                    Log(L"[INPUTUI] Text measure bytes mismatch at 0x%08X; using char estimates\n",
-                        static_cast<uint32_t>(kGogUiTextMeasureAddr));
+                    Log(L"[INPUTUI] Text measure rows do not bind; using char estimates\n");
             }
             if (s_measureState < 0 || !text || !outWidth || scale <= 0.0f)
                 return false;
 
-            float* const charSizeX = reinterpret_cast<float*>(kGogUiFontCharSizeXAddr);
-            float* const charSizeY = reinterpret_cast<float*>(kGogUiFontCharSizeYAddr);
+            float* const charSizeX = reinterpret_cast<float*>(g_UiFontCharSizeXAddr);
+            float* const charSizeY = reinterpret_cast<float*>(g_UiFontCharSizeYAddr);
             float savedX = 0.0f;
             float savedY = 0.0f;
             bool scaled = false;
             __try
             {
-                void* const font = *reinterpret_cast<void**>(kGogUiFontContextPtrAddr);
+                void* const font = *reinterpret_cast<void**>(g_UiFontContextPtrAddr);
                 if (!font)
                     return false;
 
@@ -2084,7 +1987,7 @@ namespace BZROpenShim
                 scaled = true;
                 float width = 0.0f;
                 float height = 0.0f;
-                reinterpret_cast<FnUiMeasureText>(kGogUiTextMeasureAddr)(font, text, &width, &height);
+                reinterpret_cast<FnUiMeasureText>(g_UiTextMeasureAddr)(font, text, &width, &height);
                 *charSizeX = savedX;
                 *charSizeY = savedY;
                 scaled = false;
@@ -2525,17 +2428,17 @@ namespace BZROpenShim
 
             void* const overlay = ResolveStockOptionsInputMiddleOverlay(screen);
             void* defaultsButton =
-                FindStockOptionsInputButtonByClick(overlay, kOptionsInputDefaultsClickAddr);
+                FindStockOptionsInputButtonByClick(overlay, g_OptionsInputDefaultsClickAddr);
             if (!defaultsButton)
                 defaultsButton =
-                    FindStockOptionsInputButtonByClick(screen, kOptionsInputDefaultsClickAddr);
+                    FindStockOptionsInputButtonByClick(screen, g_OptionsInputDefaultsClickAddr);
             SetStockOptionsInputButtonActive(defaultsButton, false, nullptr);
 
             void* joystickButton =
-                FindStockOptionsInputButtonByClick(screen, kOptionsInputJoystickClickAddr);
+                FindStockOptionsInputButtonByClick(screen, g_OptionsInputJoystickClickAddr);
             if (!joystickButton)
                 joystickButton =
-                    FindStockOptionsInputButtonByClick(overlay, kOptionsInputJoystickClickAddr);
+                    FindStockOptionsInputButtonByClick(overlay, g_OptionsInputJoystickClickAddr);
             SetStockOptionsInputButtonActive(joystickButton, showJoystick, "Joystick");
         }
 
@@ -2553,13 +2456,15 @@ namespace BZROpenShim
             const size_t pageCount =
                 totalRows == 0 ? 1 : ((totalRows - 1) / kInputBindingUiVisibleRowCount) + 1;
 
+            // Painted mode puts the header in the title plate, which holds a
+            // short title; the active family shows on its toolbar button.
             const char* headerText =
-                g_InputBindingUiActiveFamily == InputBindingMapFamily::GameKey
+                g_InputBindingUiPainted ? "KEY BINDINGS"
+                : g_InputBindingUiActiveFamily == InputBindingMapFamily::GameKey
                     ? "RTS & Game Actions"
                     : "Movement & Vehicle Controls";
 
-            const UiOptionsPageLayout layout =
-                BuildUiOptionsPageLayout(kInputBindingUiRowsPerColumn);
+            const UiOptionsPageLayout layout = GetInputBindingUiLayout();
 
             SetInputBindingUiLabelTextFitted(g_InputBindingUiHeaderLabel, headerText,
                                              layout.headerTextWidth);
@@ -2678,18 +2583,6 @@ namespace BZROpenShim
         }
 
         // --- OpenShim settings page implementation ------------------------------
-
-        static void* ReadOptionsInputSingletonRaw()
-        {
-            __try
-            {
-                return *reinterpret_cast<void* const volatile*>(kOptionsInputSingletonAddr);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return nullptr;
-            }
-        }
 
         static bool ShouldEnableShimSettingsUi()
         {
@@ -3157,9 +3050,7 @@ namespace BZROpenShim
               "and keeps the previous record as career_stats.cfg.openshim.bak. "
               "Does not turn tracking off." },
         };
-        // The page count adapts to the registry (see the paging controls in
-        // RefreshShimSettingsUiControls), so the registry may exceed the
-        // per-page row slots.
+        // The screens list registry rows by category (kShimSettingsCategories).
         constexpr size_t kShimSettingsRegistryCount =
             sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0]);
 
@@ -3180,21 +3071,6 @@ namespace BZROpenShim
         static void DisarmShimSettingsAction()
         {
             g_ShimSettingsArmedActionIndex = kShimSettingsRegistryCount;
-        }
-
-        static size_t ClampShimSettingsUiPageStart(size_t pageStart)
-        {
-            if constexpr (kShimSettingsRegistryCount <= kShimSettingsUiVisibleRowCount)
-            {
-                return 0;
-            }
-            else
-            {
-                constexpr size_t maxPageStart =
-                    ((kShimSettingsRegistryCount - 1) / kShimSettingsUiVisibleRowCount) *
-                    kShimSettingsUiVisibleRowCount;
-                return (std::min)(pageStart, maxPageStart);
-            }
         }
 
         // The UI shows the ini baseline: the value the key currently resolves to
@@ -3251,458 +3127,508 @@ namespace BZROpenShim
         }
 
 
-        static void ResetShimSettingsUiVisuals()
+        // ====================================================================
+        // OPENSHIM OPTIONS SCREENS
+        // ====================================================================
+        //
+        // The settings are their own shell screens (see shell_screens.h): the
+        // stock Options screen gains an "OpenShim Options" button that opens a
+        // hub, and each hub tile opens one category screen. They are built
+        // like stock screens -- the stock Top Screen, one painted centre panel
+        // (mkscreens.py), and stock widgets placed over the painted slots -- so
+        // they fade, stack, and answer Esc like the screens around them.
+        //
+        // Every setting still comes from g_ShimSettingsRegistry; a category
+        // lists registry rows by label, in display order. The coordinates
+        // below are the layout contract with HUB_LAYOUT / CATEGORY_LAYOUT in
+        // resources/ui/custom_widgets/mkscreens.py.
+        namespace Shell = BZROpenShim::ShellScreens;
+
+        constexpr const char* kShimHubPanelTexture = "osh_hub_center.png";
+        constexpr const char* kShimCategoryPanelTexture = "osh_category_center.png";
+
+        // Rows that are not openshim.ini settings: they run something.
+        constexpr const char* kShimRowUpdateCheck = "OpenShim Updates";
+        constexpr const char* kShimRowKeyBindings = "Key Bindings";
+        constexpr size_t kShimPseudoRowUpdateCheck = kShimSettingsRegistryCount + 0;
+        constexpr size_t kShimPseudoRowKeyBindings = kShimSettingsRegistryCount + 1;
+        constexpr size_t kShimNoRow = kShimSettingsRegistryCount + 2;
+        // Stock cUI_OptionsInput (key bindings), as the stock Input button uses.
+        constexpr uint32_t kStockOptionsInputScreenId = 0x15;
+
+        constexpr size_t kShimCategoryRowsPerColumn = 8;
+        constexpr size_t kShimCategoryMaxRows = 2 * kShimCategoryRowsPerColumn;
+
+        static const char* const kShimCategoryVideo[] = {
+            "Render Profile", "DX11 FXAA", "DX11 Local Lights", "Sun Flashbang", "Jet Flames",
+            "Empty Craft Lights", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes" };
+        static const char* const kShimCategoryLighting[] = {
+            "Player Headlight", "Headlight Brightness", "Headlight Color", "Headlight Beam",
+            "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam" };
+        static const char* const kShimCategoryAudio[] = {
+            "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
+        static const char* const kShimCategoryHud[] = {
+            "Scrap/Pilot HUD", "Radar Size", "Target Popup", "MP Vehicle Flags", "Show Own MP Flag" };
+        static const char* const kShimCategoryControls[] = {
+            kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Unsmoothed Controls",
+            "Satellite Zoom Out", "Satellite Pan Speed", "Editor Placement" };
+        static const char* const kShimCategoryGameplay[] = {
+            "Weapon Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
+            "Jump-Snipe Crouch", "Global Turbo", "Satellite Fog Of War", "Neutral Attack Orders",
+            "Smart Scavengers", "Turret AA Pitch", "Bomber AI Range", "AI Howitzer Volley",
+            "AI Mine Volley", "AutoSave", "AutoSave Interval" };
+        static const char* const kShimCategoryFixes[] = {
+            "AI Multi-Producer", "APC Allied Deploy", "Splinter Undead Fix", "Howitzer Deploy Fix",
+            "Tug Cargo Deploy", "Recycle Release Fix", "Constructor Cleanup", "Material Guard" };
+        static const char* const kShimCategoryNetwork[] = {
+            "Net Route", "Net Improvements", "Net Tuning", "Stock Factions", "Map List Fixes",
+            "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname" };
+        static const char* const kShimCategorySystem[] = {
+            kShimRowUpdateCheck, "Career Stats", "Reset Career Stats" };
+
+        struct ShimSettingsCategory
         {
-            g_ShimSettingsUiTopMask = nullptr;
-            g_ShimSettingsUiContentMask = nullptr;
-            g_ShimSettingsUiDecor.fill(nullptr);
-            g_ShimSettingsUiRowBackdrops.fill(nullptr);
-            g_ShimSettingsUiHeaderLabel = nullptr;
-            g_ShimSettingsUiStatusLabel = nullptr;
-            g_ShimSettingsUiStatusDetailLabel = nullptr;
-            g_ShimSettingsUiFooterLabel = nullptr;
-            g_ShimSettingsUiFooterDetailLabel = nullptr;
-            g_ShimSettingsUiBackButton = nullptr;
-            g_ShimSettingsUiUpdateButton = nullptr;
-            g_ShimSettingsUiPageLabel = nullptr;
-            g_ShimSettingsUiPrevPageButton = nullptr;
-            g_ShimSettingsUiNextPageButton = nullptr;
-            g_ShimSettingsUiRowLabels.fill(nullptr);
-            g_ShimSettingsUiRowButtons.fill(nullptr);
-            DisarmShimSettingsAction();
+            const char* name;   // tile caption
+            const char* title;  // screen title
+            const char* blurb;  // hub hover text
+            const char* const* rows;
+            size_t rowCount;
+        };
+
+#define BZR_SHIM_CATEGORY(name, title, blurb, rows) \
+            { name, title, blurb, rows, sizeof(rows) / sizeof(rows[0]) }
+        static const ShimSettingsCategory kShimSettingsCategories[] =
+        {
+            BZR_SHIM_CATEGORY("Video", "VIDEO",
+                "Render profile, the DX11 Enhanced passes, and visual effects.", kShimCategoryVideo),
+            BZR_SHIM_CATEGORY("Lighting", "LIGHTING",
+                "Vehicle headlights and the pilot flashlight.", kShimCategoryLighting),
+            BZR_SHIM_CATEGORY("Audio", "AUDIO",
+                "Sound channels, background music, unit voices and alerts.", kShimCategoryAudio),
+            BZR_SHIM_CATEGORY("HUD", "HUD",
+                "Scrap and pilot readout, radar size, target popup and vehicle flags.", kShimCategoryHud),
+            BZR_SHIM_CATEGORY("Controls", "CONTROLS",
+                "Key bindings, raw mouse input, control smoothing and the satellite view.",
+                kShimCategoryControls),
+            BZR_SHIM_CATEGORY("Gameplay", "GAMEPLAY",
+                "Single-player aiming, AI behaviour, turbo and AutoSave.", kShimCategoryGameplay),
+            BZR_SHIM_CATEGORY("Fixes", "FIXES",
+                "Switches for confirmed Redux engine defects. Leave these on unless "
+                "you are chasing a regression.", kShimCategoryFixes),
+            BZR_SHIM_CATEGORY("Network", "NETWORK",
+                "Connection route, the socket layer, lobby features and map lists.",
+                kShimCategoryNetwork),
+            BZR_SHIM_CATEGORY("System", "SYSTEM",
+                "OpenShim updates and career statistics.", kShimCategorySystem),
+        };
+#undef BZR_SHIM_CATEGORY
+        constexpr size_t kShimSettingsCategoryCount =
+            sizeof(kShimSettingsCategories) / sizeof(kShimSettingsCategories[0]);
+        static_assert(sizeof(kShimCategoryGameplay) / sizeof(kShimCategoryGameplay[0]) <= kShimCategoryMaxRows,
+                      "a category screen shows at most 16 rows");
+
+        // Hub geometry (HUB_LAYOUT).
+        constexpr Shell::Rect kShimTitleRect = { 470.0f, 132.0f, 500.0f, 56.0f };
+        constexpr Shell::Rect kShimBackRect = { 0.0f, 0.0f, 342.0f, 77.0f };
+        constexpr float kShimBackTextOffset = 28.0f;
+        constexpr size_t kShimHubColumns = 3;
+        constexpr Shell::Rect kShimHubTile0 = { 240.0f, 252.0f, 300.0f, 100.0f };
+        constexpr float kShimHubPitchX = 330.0f;
+        constexpr float kShimHubPitchY = 124.0f;
+        constexpr Shell::Rect kShimHubInfo = { 240.0f, 640.0f, 960.0f, 170.0f };
+        // Category geometry (CATEGORY_LAYOUT).
+        constexpr float kShimColumnX[2] = { 228.0f, 736.0f };
+        constexpr float kShimColumnY = 236.0f;
+        constexpr float kShimColumnW = 476.0f;
+        constexpr float kShimRowTop = 14.0f;
+        constexpr float kShimRowPitch = 52.0f;
+        constexpr float kShimRowH = 42.0f;
+        constexpr float kShimRowPad = 16.0f;
+        constexpr float kShimValueW = 196.0f;
+        constexpr Shell::Rect kShimCategoryInfo = { 228.0f, 690.0f, 984.0f, 120.0f };
+
+        static Shell::Rect ShimHubTileRect(size_t index)
+        {
+            const float col = static_cast<float>(index % kShimHubColumns);
+            const float row = static_cast<float>(index / kShimHubColumns);
+            return { kShimHubTile0.x + col * kShimHubPitchX, kShimHubTile0.y + row * kShimHubPitchY,
+                     kShimHubTile0.w, kShimHubTile0.h };
         }
 
-        static void SetShimSettingsUiControlsVisible(bool visible)
+        static Shell::Rect ShimValueRect(size_t slot)
         {
-            SetInputBindingUiViewActive(g_ShimSettingsUiTopMask, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiContentMask, visible);
-            for (void* decor : g_ShimSettingsUiDecor)
-                SetInputBindingUiViewActive(decor, visible);
-            for (void* backdrop : g_ShimSettingsUiRowBackdrops)
-                SetInputBindingUiViewActive(backdrop, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiHeaderLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiStatusLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiStatusDetailLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiFooterLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiFooterDetailLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiBackButton, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiUpdateButton, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiPageLabel, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiPrevPageButton, visible);
-            SetInputBindingUiViewActive(g_ShimSettingsUiNextPageButton, visible);
-            for (void* label : g_ShimSettingsUiRowLabels)
-                SetInputBindingUiViewActive(label, visible);
-            for (void* button : g_ShimSettingsUiRowButtons)
-                SetInputBindingUiViewActive(button, visible);
+            const float x = kShimColumnX[slot / kShimCategoryRowsPerColumn] + kShimColumnW -
+                            kShimRowPad - kShimValueW;
+            const float y = kShimColumnY + kShimRowTop +
+                            kShimRowPitch * static_cast<float>(slot % kShimCategoryRowsPerColumn);
+            return { x, y, kShimValueW, kShimRowH };
         }
 
-        static void SetInputBindingUiControlsVisible(bool visible)
+        static Shell::Rect ShimRowLabelRect(size_t slot)
         {
-            SetInputBindingUiViewActive(g_InputBindingUiTopMask, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiContentMask, visible);
-            for (void* decor : g_InputBindingUiDecor)
-                SetInputBindingUiViewActive(decor, visible);
-            for (void* backdrop : g_InputBindingUiRowBackdrops)
-                SetInputBindingUiViewActive(backdrop, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiHeaderLabel, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiStatusLabel, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiStatusDetailLabel, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiPageLabel, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiBackButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiDefaultsButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiInputFamilyButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiGameKeyFamilyButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiPrevPageButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiNextPageButton, visible);
-            SetInputBindingUiViewActive(g_InputBindingUiRefreshButton, visible);
-            for (void* label : g_InputBindingUiRowLabels)
-                SetInputBindingUiViewActive(label, visible);
-            for (void* button : g_InputBindingUiRowButtons)
-                SetInputBindingUiViewActive(button, visible);
+            const Shell::Rect value = ShimValueRect(slot);
+            const float x = kShimColumnX[slot / kShimCategoryRowsPerColumn] + kShimRowPad + 12.0f;
+            return { x, value.y, value.x - x - 22.0f, kShimRowH };
         }
 
-        static void RefreshShimSettingsUiControls()
+        // Three text lines in an info box: two for a description, and one
+        // under the painted divider for a standing note.
+        static Shell::Rect ShimInfoLine(const Shell::Rect& box, size_t line)
         {
-            g_ShimSettingsUiPageStart = ClampShimSettingsUiPageStart(g_ShimSettingsUiPageStart);
+            const float x = box.x + 24.0f;
+            const float w = box.w - 48.0f;
+            if (line < 2)
+                return { x, box.y + 14.0f + 32.0f * static_cast<float>(line), w, 30.0f };
+            return { x, box.y + box.h - 42.0f, w, 30.0f };
+        }
 
-            const UiOptionsPageLayout layout =
-                BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
+        static Shell::ButtonSkin ShimSlotSkin(const char* hover, const char* press)
+        {
+            // No resting texture: the slot is painted into the panel, as the
+            // stock option buttons rest on esc_center.png's slots. Without
+            // our art there is no painted slot, so rest on the stock art.
+            if (Shell::IsTextureDeployed(hover) && Shell::IsTextureDeployed(press))
+                return { nullptr, hover, press };
+            return { "optionhv.png", "optionhv.png", "optionck.png" };
+        }
 
-            // Header shows static title; asset-pack status lives in the footer
-            // so it is always visible, even when a row hover overwrites the
-            // status lines. The status lines keep showing the last click result
-            // or hover description exactly as before.
-            SetInputBindingUiLabelTextFitted(g_ShimSettingsUiHeaderLabel, "OpenShim Settings",
-                                             layout.headerTextWidth);
-            if (g_ShimSettingsUiStatusText.empty())
+        static size_t FindShimSettingByLabel(const char* label)
+        {
+            if (std::strcmp(label, kShimRowUpdateCheck) == 0)
+                return kShimPseudoRowUpdateCheck;
+            if (std::strcmp(label, kShimRowKeyBindings) == 0)
+                return kShimPseudoRowKeyBindings;
+            for (size_t index = 0; index < kShimSettingsRegistryCount; ++index)
             {
-                std::string runtimeStatus;
-                // Keep capability detail in the dedicated footer rather than
-                // repeating it in the runtime line.
-                const uint32_t shimVer = GetShimVersion();
-                const BZROpenShim::BzrDistribution dist = BZROpenShim::GetBzrDistribution();
-                const char* distName = (dist == BZROpenShim::BzrDistribution::Steam) ? "Steam"
-                                     : (dist == BZROpenShim::BzrDistribution::GOG) ? "GOG"
-                                                                                    : "Unknown";
-                runtimeStatus = "Runtime: Active  OpenShim: " + std::to_string(shimVer) +
-                                "  Game: " + distName + " 2.2.301";
-                SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
-                                                  g_ShimSettingsUiStatusDetailLabel,
-                                                  runtimeStatus.c_str(),
-                                                  layout.headerTextWidth);
+                if (std::strcmp(g_ShimSettingsRegistry[index].label, label) == 0)
+                    return index;
             }
-            else
+            return kShimNoRow;
+        }
+
+        // Logged once: a registry row no category lists cannot be reached from
+        // the screens, and a category label that matches no row is a typo.
+        static void CheckShimSettingsCategories()
+        {
+            static bool checked = false;
+            if (checked)
+                return;
+            checked = true;
+            std::array<bool, kShimSettingsRegistryCount> listed = {};
+            for (const auto& category : kShimSettingsCategories)
             {
-                SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
-                                                  g_ShimSettingsUiStatusDetailLabel,
-                                                  g_ShimSettingsUiStatusText.c_str(),
-                                                  layout.headerTextWidth);
-            }
-            const OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
-            SetInputBindingUiButtonTextFitted(
-                g_ShimSettingsUiUpdateButton,
-                update.busy ? "Checking..." : "Check for Updates",
-                kShimSettingsUiToolbarWidths[1] - kUiToolbarCaptionPadding);
-            // Footer always shows asset-pack status detail plus the hint, so
-            // DLL-only users immediately see why asset features are suppressed.
-            // Cached capabilities are used here; the filesystem scan happened
-            // once in ActivateShimSettingsPage's RefreshAssetCapabilities(), so
-            // no synchronous Workshop tree scan occurs per redraw. Scan duration
-            // is instrumented in Assets::EvaluateAssetCapabilitiesAt and logged.
-            {
-                const auto caps = Assets::GetAssetCapabilities();
-                std::string footerLine1 = Assets::FormatAssetStatusForUi(caps);
-                std::string footerLine2;
-                if (caps.state == Assets::AssetPackState::NotDetected)
+                for (size_t r = 0; r < category.rowCount; ++r)
                 {
-                    // Truthful separation: pack not detected vs compatible resources available (unrelated mod).
-                    if (caps.destructionChunks || caps.enhancedResources || caps.terrainHd)
-                        footerLine2 = Assets::FormatAssetCapabilitiesDetail(caps);
-                    else
-                        footerLine2 = "Asset-dependent features are unavailable.";
+                    const size_t index = FindShimSettingByLabel(category.rows[r]);
+                    if (index < kShimSettingsRegistryCount)
+                        listed[index] = true;
+                    else if (index == kShimNoRow)
+                        Log(L"[SETTINGSUI] category %hs lists unknown row \"%hs\"\n",
+                            category.name, category.rows[r]);
                 }
-                else if (caps.state == Assets::AssetPackState::Incompatible)
-                {
-                    std::string v = !caps.installedCompatibilityVersion.empty() ? caps.installedCompatibilityVersion : caps.installedVersion;
-                    std::string exp = caps.expectedCompatibilityVersion;
-                    footerLine2 = "Installed: " + v + " Expected: " + exp + " — update the asset pack.";
-                    if (!caps.problem.empty() && caps.problem.find(v) == std::string::npos)
-                        footerLine2 += " " + caps.problem;
-                }
-                else if (!caps.destructionChunks || !caps.enhancedResources || !caps.terrainHd)
-                {
-                    std::string detail = Assets::FormatAssetCapabilitiesDetail(caps);
-                    if (!detail.empty() && detail != "Asset-dependent features are unavailable.")
-                        footerLine2 = detail;
-                    else
-                        footerLine2 = "Click a value to cycle it. * Takes effect after restarting Battlezone.";
-                }
-                else
-                    footerLine2 = "Click a value to cycle it. * Takes effect after restarting Battlezone.";
-                // Use the two footer labels as two physical lines.
-                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiFooterLabel,
-                                                 footerLine1.c_str(),
-                                                 layout.headerTextWidth);
-                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiFooterDetailLabel,
-                                                 footerLine2.c_str(),
-                                                 layout.headerTextWidth);
             }
-
-            // Paging controls only appear once the registry outgrows one page;
-            // blank the captions too, an inactive caption keeps drawing.
-            const size_t pageCount =
-                (kShimSettingsRegistryCount + kShimSettingsUiVisibleRowCount - 1) /
-                kShimSettingsUiVisibleRowCount;
-            const bool paged = pageCount > 1;
-            if (paged)
+            for (size_t index = 0; index < kShimSettingsRegistryCount; ++index)
             {
-                char pageText[64] = {};
-                std::snprintf(pageText, sizeof(pageText), "Page %u of %u",
-                              static_cast<unsigned>(g_ShimSettingsUiPageStart /
-                                                        kShimSettingsUiVisibleRowCount + 1),
-                              static_cast<unsigned>(pageCount));
-                SetInputBindingUiLabelText(g_ShimSettingsUiPageLabel, pageText);
-                SetInputBindingUiButtonText(g_ShimSettingsUiPrevPageButton, "Prev");
-                SetInputBindingUiButtonText(g_ShimSettingsUiNextPageButton, "Next");
+                if (!listed[index])
+                    Log(L"[SETTINGSUI] setting \"%hs\" is in no category; it is not on any screen\n",
+                        g_ShimSettingsRegistry[index].label);
             }
-            else
+        }
+
+        // Null when the row can be used; otherwise why not.
+        static const char* ShimSettingUnavailableReason(const ShimSettingDescriptor& setting)
+        {
+            const auto caps = Assets::GetAssetCapabilities();
+            if (caps.state == Assets::AssetPackState::Unknown || !setting.section || !setting.key)
+                return nullptr;
+            // Native mesh extraction (ChunkMeshes) needs no external payload pack.
+            if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
+                (std::strcmp(setting.key, "FXAA") == 0 ||
+                 std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0) &&
+                !Assets::IsAssetFeatureAvailable(Assets::AssetFeature::EnhancedRenderer))
             {
-                SetInputBindingUiLabelText(g_ShimSettingsUiPageLabel, "");
-                SetInputBindingUiButtonText(g_ShimSettingsUiPrevPageButton, "");
-                SetInputBindingUiButtonText(g_ShimSettingsUiNextPageButton, "");
+                return "Unavailable: Enhanced renderer resources were not detected.";
             }
-            SetInputBindingUiViewActive(g_ShimSettingsUiPageLabel, paged);
-            SetInputBindingUiViewActive(g_ShimSettingsUiPrevPageButton, paged);
-            SetInputBindingUiViewActive(g_ShimSettingsUiNextPageButton, paged);
+            return nullptr;
+        }
 
-            for (size_t slot = 0; slot < kShimSettingsUiVisibleRowCount; ++slot)
+        // ---- shared state -------------------------------------------------
+        // One hub and one category screen can be live at a time (the shell may
+        // build the next screen before it frees the last, so every reset is
+        // keyed to the screen that owns the state).
+        struct ShimHubUi
+        {
+            void* screen = nullptr;
+            void* info[3] = {};
+        };
+        struct ShimCategoryUi
+        {
+            void* screen = nullptr;
+            size_t category = 0;
+            size_t rowCount = 0;
+            std::array<size_t, kShimCategoryMaxRows> rows = {};
+            std::array<void*, kShimCategoryMaxRows> values = {};
+            void* info[3] = {};
+            std::string status;
+        };
+        static ShimHubUi g_ShimHubUi;
+        static ShimCategoryUi g_ShimCategoryUi;
+
+        static std::string ShimRuntimeLine()
+        {
+            const BZROpenShim::BzrDistribution dist = BZROpenShim::GetBzrDistribution();
+            const char* distName = (dist == BZROpenShim::BzrDistribution::Steam) ? "Steam"
+                                 : (dist == BZROpenShim::BzrDistribution::GOG)   ? "GOG"
+                                                                                 : "Unknown";
+            return "OpenShim " + std::to_string(GetShimVersion()) + "   Game: " + distName + " 2.2.301";
+        }
+
+        static void SetShimInfoText(void* const (&info)[3], const char* text, float width)
+        {
+            SetInputBindingUiWrappedLabelText(info[0], info[1], text ? text : "", width);
+        }
+
+        // ---- hub ----------------------------------------------------------
+        static void ShowShimHubDefaultInfo()
+        {
+            if (!g_ShimHubUi.screen)
+                return;
+            const float width = ShimInfoLine(kShimHubInfo, 0).w;
+            const auto caps = Assets::GetAssetCapabilities();
+            std::string text = "Changes are saved to openshim.ini as you make them. ";
+            text += Assets::FormatAssetStatusForUi(caps);
+            SetShimInfoText(g_ShimHubUi.info, text.c_str(), width);
+            SetInputBindingUiLabelTextFitted(g_ShimHubUi.info[2], ShimRuntimeLine().c_str(), width);
+        }
+
+        static void __cdecl OnShimHubHover(void* /*param*/)
+        {
+            if (!g_ShimHubUi.screen)
+                return;
+            float x = 0.0f, y = 0.0f;
+            if (Shell::CursorDesignPoint(x, y))
             {
-                const size_t index = g_ShimSettingsUiPageStart + slot;
-                if (index >= kShimSettingsRegistryCount)
+                for (size_t i = 0; i < kShimSettingsCategoryCount; ++i)
                 {
-                    SetInputBindingUiLabelText(g_ShimSettingsUiRowLabels[slot], "");
-                    SetInputBindingUiButtonText(g_ShimSettingsUiRowButtons[slot], "");
-                    SetInputBindingUiViewActive(g_ShimSettingsUiRowLabels[slot], false);
-                    SetInputBindingUiViewActive(g_ShimSettingsUiRowButtons[slot], false);
-                    SetInputBindingUiViewActive(g_ShimSettingsUiRowBackdrops[slot], false);
-                    continue;
-                }
-
-                const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[index];
-                // Will be defined after ShimSettingDescriptor; use a lambda-style check here via
-                // a forward-declared helper is not possible at this point, so we inline the
-                // asset-availability probe using string compare and the central service.
-                bool assetAvailable = true;
-                {
-                    const auto caps = Assets::GetAssetCapabilities();
-                    if (caps.state != Assets::AssetPackState::Unknown)
+                    if (Shell::Contains(ShimHubTileRect(i), x, y))
                     {
-                        if (setting.section && setting.key)
-                        {
-                            if (std::strcmp(setting.section, "General") == 0 &&
-                                std::strcmp(setting.key, "ChunkMeshes") == 0)
-                                assetAvailable = true; // Native mesh extraction requires no external payload pack.
-                            else if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
-                                     (std::strcmp(setting.key, "FXAA") == 0 ||
-                                      std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0))
-                                assetAvailable = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::EnhancedRenderer);
-                        }
+                        SetShimInfoText(g_ShimHubUi.info, kShimSettingsCategories[i].blurb,
+                                        ShimInfoLine(kShimHubInfo, 0).w);
+                        return;
                     }
                 }
-                std::string valueText;
-                if (!assetAvailable)
-                {
-                    // Visible but clearly unavailable, rather than hidden.
-                    // Keep the label so the user sees what it would control.
-                    valueText = "Unavailable";
-                }
-                else
-                {
-                    const size_t valueIndex = GetShimSettingCurrentIndex(setting);
-                    valueText = setting.valueLabels[valueIndex];
-                    if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
-                        valueText += " *";
-                }
-                SetInputBindingUiLabelTextFitted(g_ShimSettingsUiRowLabels[slot], setting.label,
-                                                 layout.rowLabelTextWidth);
-                SetInputBindingUiButtonTextFitted(g_ShimSettingsUiRowButtons[slot],
-                                                  valueText.c_str(), layout.rowValueTextWidth);
-                SetInputBindingUiViewActive(g_ShimSettingsUiRowLabels[slot], true);
-                SetInputBindingUiViewActive(g_ShimSettingsUiRowButtons[slot], true);
-                SetInputBindingUiViewActive(g_ShimSettingsUiRowBackdrops[slot], true);
             }
+            ShowShimHubDefaultInfo();
         }
 
-        static void EnsureShimSettingsUiControls(void* screen)
+        static void OnShimHubTileClicked(size_t category)
         {
-            if (!screen)
-                return;
-
-            void* const visualParent = screen;
-            void* controlParent = ResolveStockOptionsInputMiddleOverlay(screen);
-            if (!controlParent)
-                controlParent = screen;
-
-            const UiOptionsPageLayout layout =
-                BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
-
-            const unsigned screenTag = static_cast<unsigned>(reinterpret_cast<uintptr_t>(screen));
-            char controlName[64] = {};
-
-            UiOptionsPageBackgroundSlots background = {};
-            background.topMask = &g_ShimSettingsUiTopMask;
-            background.contentMask = &g_ShimSettingsUiContentMask;
-            CreateInputBindingUiPageBackground(background,
-                                               g_ShimSettingsUiDecor,
-                                               visualParent,
-                                               controlParent,
-                                               "OpenShimSettings",
-                                               screenTag,
-                                               layout);
-
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsHeader_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiHeaderLabel, controlParent, controlName, "",
-                                      layout.title.x, layout.title.y,
-                                      layout.title.width, layout.title.height);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsStatus_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiStatusLabel, controlParent, controlName, "",
-                                      layout.statusLine1.x, layout.statusLine1.y,
-                                      layout.statusLine1.width, layout.statusLine1.height);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsStatus2_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiStatusDetailLabel, controlParent, controlName, "",
-                                      layout.statusLine2.x, layout.statusLine2.y,
-                                      layout.statusLine2.width, layout.statusLine2.height);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsFooter_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiFooterLabel, controlParent, controlName, "",
-                                      layout.contextLine1.x, layout.contextLine1.y,
-                                      layout.contextLine1.width, layout.contextLine1.height);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsFooter2_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiFooterDetailLabel, controlParent, controlName, "",
-                                      layout.contextLine2.x, layout.contextLine2.y,
-                                      layout.contextLine2.width, layout.contextLine2.height);
-            UiDecorRect toolbar[kShimSettingsUiToolbarSlotCount] = {};
-            LayoutUiToolbarRow(layout,
-                               kShimSettingsUiToolbarWidths,
-                               kShimSettingsUiToolbarSlotCount,
-                               kShimSettingsUiToolbarRightGroup,
-                               toolbar,
-                               kShimSettingsUiToolbarSlotCount);
-
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsBack_%08X", screenTag);
-            CreateInputBindingUiButton(g_ShimSettingsUiBackButton, controlParent, controlName, "Back",
-                                       toolbar[0].x, toolbar[0].y, toolbar[0].width, toolbar[0].height,
-                                       reinterpret_cast<void*>(ShimSettingsBackClick));
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsUpdate_%08X", screenTag);
-            CreateInputBindingUiButton(g_ShimSettingsUiUpdateButton, controlParent, controlName,
-                                       "Check for Updates",
-                                       toolbar[1].x, toolbar[1].y, toolbar[1].width, toolbar[1].height,
-                                       reinterpret_cast<void*>(ShimSettingsUpdateClick));
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsPage_%08X", screenTag);
-            CreateInputBindingUiLabel(g_ShimSettingsUiPageLabel, controlParent, controlName, "",
-                                      toolbar[2].x,
-                                      toolbar[2].y + (toolbar[2].height - 28.0f) * 0.5f,
-                                      toolbar[2].width,
-                                      28.0f);
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsPrev_%08X", screenTag);
-            CreateInputBindingUiButton(g_ShimSettingsUiPrevPageButton, controlParent, controlName, "Prev",
-                                       toolbar[3].x, toolbar[3].y, toolbar[3].width, toolbar[3].height,
-                                       reinterpret_cast<void*>(ShimSettingsPrevPageClick));
-            std::snprintf(controlName, sizeof(controlName), "OpenShimSettingsNext_%08X", screenTag);
-            CreateInputBindingUiButton(g_ShimSettingsUiNextPageButton, controlParent, controlName, "Next",
-                                       toolbar[4].x, toolbar[4].y, toolbar[4].width, toolbar[4].height,
-                                       reinterpret_cast<void*>(ShimSettingsNextPageClick));
-
-            for (size_t slot = 0; slot < kShimSettingsUiVisibleRowCount; ++slot)
-            {
-                const size_t column = slot / kShimSettingsUiRowsPerColumn;
-                const size_t row = slot % kShimSettingsUiRowsPerColumn;
-                const float baseX = (column == 0) ? layout.rowLeftX : layout.rowRightX;
-                const float y = layout.rowStartY + (static_cast<float>(row) * layout.rowPitch);
-                std::snprintf(controlName, sizeof(controlName),
-                              "OpenShimSettingsRowPlate_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiPlate(g_ShimSettingsUiRowBackdrops[slot], controlParent, controlName,
-                                          baseX - layout.rowPlateInsetX,
-                                          y,
-                                          layout.rowPlateWidth,
-                                          layout.rowHeight);
-                std::snprintf(controlName, sizeof(controlName),
-                              "OpenShimSettingsRowLabel_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiLabel(g_ShimSettingsUiRowLabels[slot], controlParent, controlName, "",
-                                          baseX, y + layout.rowLabelYInset,
-                                          layout.rowLabelWidth,
-                                          layout.rowHeight - layout.rowLabelYInset);
-                std::snprintf(controlName, sizeof(controlName),
-                              "OpenShimSettingsRowButton_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiButton(g_ShimSettingsUiRowButtons[slot], controlParent, controlName, "",
-                                           baseX + layout.rowValueOffsetX, y,
-                                           layout.rowValueWidth, layout.rowHeight,
-                                           kShimSettingsRowClickCallbacks[slot],
-                                           kShimSettingsRowHoverCallbacks[slot]);
-            }
+            if (g_ShimHubUi.screen && category < kShimSettingsCategoryCount)
+                Shell::RequestScreen(g_ShimHubUi.screen,
+                                     Shell::kOptionsCategoryScreenIdBase + static_cast<uint32_t>(category));
         }
 
-        static void ActivateShimSettingsPage(void* screen)
+        template <size_t I>
+        static void __cdecl ShimHubTileClick() { OnShimHubTileClicked(I); }
+
+        template <size_t... I>
+        static constexpr std::array<void(__cdecl*)(), sizeof...(I)> MakeShimHubTileClicks(std::index_sequence<I...>)
         {
-            if (!screen)
-                return;
+            return { &ShimHubTileClick<I>... };
+        }
+        static constexpr auto kShimHubTileClicks =
+            MakeShimHubTileClicks(std::make_index_sequence<kShimSettingsCategoryCount>{});
 
-            if (g_InputScreenBinding.decorated != screen)
-            {
-                ResetInputBindingUiVisuals();
-                g_InputScreenBinding.BindDecorated(screen);
-            }
+        static void __cdecl OnShimHubBack()
+        {
+            if (g_ShimHubUi.screen)
+                Shell::Back(g_ShimHubUi.screen);
+        }
 
-            g_ShimSettingsPageActive = true;
-            // Re-probe before the page is built so a pack installed, removed, or
-            // updated since startup is reflected in the footer and in the
-            // asset-gated rows. This is the explicit refresh point documented in
-            // Docs/DLL_ONLY_QUALIFICATION.md; every other UI read uses the cache.
+        static bool BuildShimHubScreen(void* screen)
+        {
+            CheckShimSettingsCategories();
             Assets::RefreshAssetCapabilities();
-            const OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
-            g_ShimSettingsUiUpdateGeneration = update.generation;
-            if (!update.message.empty())
-                g_ShimSettingsUiStatusText = update.message;
-            if (update.busy)
-                EnsureShimSettingsUpdateTimer();
-            SetInputBindingUiControlsVisible(false);
-            SuppressStockOptionsInputWidgets(screen);
-            SetStockOptionsInputAccessoryVisibility(screen, false);
-            EnsureShimSettingsUiControls(screen);
-            RefreshShimSettingsUiControls();
-            Log(L"[SETTINGSUI] Settings page active screen=0x%08X rows=%u\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
-                static_cast<unsigned>(sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0])));
+            g_ShimHubUi = {};
+            g_ShimHubUi.screen = screen;
+
+            const char* texture =
+                Shell::IsTextureDeployed(kShimHubPanelTexture) ? kShimHubPanelTexture : nullptr;
+            void* panel = Shell::AddPanel(screen, nullptr, "OpenShimHub_Overlay",
+                                          { 0.0f, 0.0f, 1440.0f, 1080.0f }, texture);
+            if (!panel)
+                return false;
+            Shell::AddLabel(panel, panel, "OpenShimHub_Title", kShimTitleRect, "OPENSHIM OPTIONS",
+                            Shell::kTitleLabelFlags);
+
+            const Shell::ButtonSkin skin = ShimSlotSkin("osh_tile_hv.png", "osh_tile_ck.png");
+            char name[64] = {};
+            for (size_t i = 0; i < kShimSettingsCategoryCount; ++i)
+            {
+                _snprintf_s(name, _TRUNCATE, "OpenShimHub_%s", kShimSettingsCategories[i].name);
+                Shell::AddButton(panel, panel, name, ShimHubTileRect(i), kShimSettingsCategories[i].name,
+                                 skin, 1.3f, 0.0f, kShimHubTileClicks[i], &OnShimHubHover);
+            }
+            for (size_t line = 0; line < 3; ++line)
+            {
+                _snprintf_s(name, _TRUNCATE, "OpenShimHub_Info%zu", line);
+                g_ShimHubUi.info[line] =
+                    Shell::AddLabel(panel, panel, name, ShimInfoLine(kShimHubInfo, line), "");
+            }
+            ShowShimHubDefaultInfo();
+            return Shell::AddButton(panel, nullptr, "OpenShimHub_Back", kShimBackRect, "Back",
+                                    Shell::kSkinTopCorner, 1.0f, kShimBackTextOffset,
+                                    &OnShimHubBack) != nullptr;
         }
 
-        static void OnShimSettingsRowClicked(size_t rowIndex)
+        static void OnShimHubClosed(void* screen)
         {
-            const size_t settingIndex = g_ShimSettingsUiPageStart + rowIndex;
-            if (settingIndex >= kShimSettingsRegistryCount || !g_ShimSettingsPageActive)
+            if (g_ShimHubUi.screen == screen)
+                g_ShimHubUi = {};
+        }
+
+        // ---- category screens ---------------------------------------------
+        static std::string ShimRowValueText(size_t row)
+        {
+            if (row == kShimPseudoRowUpdateCheck)
+                return GetOpenShimUpdateSnapshot().busy ? "Checking..." : "Check now";
+            if (row == kShimPseudoRowKeyBindings)
+                return "Edit";
+            const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
+            if (ShimSettingUnavailableReason(setting))
+                return "Unavailable";
+            std::string text = setting.valueLabels[GetShimSettingCurrentIndex(setting)];
+            if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
+                text += " *";
+            return text;
+        }
+
+        static const char* ShimRowLabel(size_t row)
+        {
+            if (row == kShimPseudoRowUpdateCheck)
+                return kShimRowUpdateCheck;
+            if (row == kShimPseudoRowKeyBindings)
+                return kShimRowKeyBindings;
+            return g_ShimSettingsRegistry[row].label;
+        }
+
+        static const char* ShimRowDescription(size_t row)
+        {
+            if (row == kShimPseudoRowUpdateCheck)
+                return "Check the Steam Workshop for a newer OpenShim and stage it for the next launch.";
+            if (row == kShimPseudoRowKeyBindings)
+                return "Open the key-binding editor for keyboard commands and game keys.";
+            const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
+            if (const char* reason = ShimSettingUnavailableReason(setting))
+                return reason;
+            return setting.description;
+        }
+
+        static void ShowShimCategoryDefaultInfo()
+        {
+            ShimCategoryUi& ui = g_ShimCategoryUi;
+            if (!ui.screen)
                 return;
-
-            const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[settingIndex];
-
-            // Block toggling asset-backed features when their resources are absent.
-            // This protects users who copied an old openshim.ini with
-            // ChunkMeshes=1 into a stock install. DX11 rows are gated on the
-            // parent renderer resource, not the pack, for accuracy.
+            const float width = ShimInfoLine(kShimCategoryInfo, 0).w;
+            SetShimInfoText(ui.info,
+                            ui.status.empty()
+                                ? "Click a value to change it. Point at a setting to read what it does."
+                                : ui.status.c_str(),
+                            width);
+            bool anyRestart = false;
+            for (size_t slot = 0; slot < ui.rowCount; ++slot)
             {
-                const auto caps = Assets::GetAssetCapabilities();
-                bool avail = true;
-                bool isDx11Row = false;
-                if (caps.state != Assets::AssetPackState::Unknown && setting.section && setting.key)
+                const size_t row = ui.rows[slot];
+                anyRestart |= row < kShimSettingsRegistryCount &&
+                              g_ShimSettingsRegistry[row].applyGroup == ShimSettingApplyGroup::RestartRequired;
+            }
+            SetInputBindingUiLabelTextFitted(
+                ui.info[2],
+                anyRestart ? "* Takes effect after restarting Battlezone." : ShimRuntimeLine().c_str(),
+                width);
+        }
+
+        static void RefreshShimCategoryValues()
+        {
+            ShimCategoryUi& ui = g_ShimCategoryUi;
+            for (size_t slot = 0; slot < ui.rowCount; ++slot)
+                SetInputBindingUiButtonTextFitted(ui.values[slot], ShimRowValueText(ui.rows[slot]).c_str(),
+                                                  kShimValueW - 20.0f);
+            ShowShimCategoryDefaultInfo();
+        }
+
+        static void __cdecl OnShimCategoryHover(void* /*param*/)
+        {
+            ShimCategoryUi& ui = g_ShimCategoryUi;
+            if (!ui.screen)
+                return;
+            float x = 0.0f, y = 0.0f;
+            if (Shell::CursorDesignPoint(x, y))
+            {
+                for (size_t slot = 0; slot < ui.rowCount; ++slot)
                 {
-                    if (std::strcmp(setting.section, "General") == 0 &&
-                        std::strcmp(setting.key, "ChunkMeshes") == 0)
-                        avail = true; // Native mesh extraction requires no external payload pack.
-                    else if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
-                             (std::strcmp(setting.key, "FXAA") == 0 ||
-                              std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0))
+                    if (!Shell::Contains(ShimValueRect(slot), x, y))
+                        continue;
+                    const size_t row = ui.rows[slot];
+                    std::string text = ShimRowDescription(row) ? ShimRowDescription(row) : "";
+                    if (row < kShimSettingsRegistryCount && !IsShimSettingActionRow(g_ShimSettingsRegistry[row]) &&
+                        !ShimSettingUnavailableReason(g_ShimSettingsRegistry[row]))
                     {
-                        isDx11Row = true;
-                        avail = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::EnhancedRenderer);
+                        const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
+                        const size_t current = GetShimSettingCurrentIndex(setting);
+                        text += "  Click for ";
+                        text += setting.valueLabels[(current + 1) % setting.valueCount];
+                        text += ".";
                     }
-                }
-                if (!avail)
-                {
-                    const char* reason = nullptr;
-                    if (isDx11Row)
-                        reason = "Unavailable — Enhanced renderer resources not detected";
-                    else if (caps.state == Assets::AssetPackState::NotDetected)
-                        reason = "Unavailable — OpenShim asset pack not detected";
-                    else if (caps.state == Assets::AssetPackState::Incompatible)
-                        reason = "Unavailable — asset pack version mismatch";
-                    else
-                        reason = "Unavailable — required assets missing";
-                    g_ShimSettingsUiStatusText = reason;
-                    Log(L"[SETTINGSUI] Asset-backed setting blocked %hs: %hs\n",
-                        setting.key, reason);
-                    RefreshShimSettingsUiControls();
+                    SetShimInfoText(ui.info, text.c_str(), ShimInfoLine(kShimCategoryInfo, 0).w);
                     return;
                 }
             }
+            ShowShimCategoryDefaultInfo();
+        }
 
-            if (IsShimSettingActionRow(setting))
+        static void StartShimUpdateCheck()
+        {
+            BeginOpenShimUpdateCheck();
+            OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
+            if (update.busy && !EnsureShimSettingsUpdateTimer())
             {
-                OnShimSettingsActionRowClicked(settingIndex, setting);
+                CancelOpenShimUpdateCheck(
+                    "Update check failed: Battlezone could not schedule Workshop status checks.");
+                update = GetOpenShimUpdateSnapshot();
+            }
+            g_ShimSettingsUiUpdateGeneration = update.generation;
+            g_ShimCategoryUi.status = update.message;
+        }
+
+        // Cycles a setting to its next value, saves it, and applies it live
+        // where the feature supports that.
+        static void CycleShimSetting(size_t index)
+        {
+            const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[index];
+            std::string& status = g_ShimCategoryUi.status;
+            if (const char* reason = ShimSettingUnavailableReason(setting))
+            {
+                status = reason;
+                Log(L"[SETTINGSUI] Asset-backed setting blocked %hs: %hs\n", setting.key, reason);
                 return;
             }
-
+            if (IsShimSettingActionRow(setting))
+            {
+                OnShimSettingsActionRowClicked(index, setting);
+                return;
+            }
             // Clicking anything else abandons a pending confirmation rather
             // than leaving it armed behind the player's back.
             DisarmShimSettingsAction();
 
             const size_t nextIndex = (GetShimSettingCurrentIndex(setting) + 1) % setting.valueCount;
-            const char* const newValue = setting.values[nextIndex];
-
             std::string error;
-            if (!WriteUserConfigValueLossless(setting.section, setting.key,
-                                              setting.altKeys, setting.altKeyCount,
-                                              newValue, error))
+            if (!WriteUserConfigValueLossless(setting.section, setting.key, setting.altKeys,
+                                              setting.altKeyCount, setting.values[nextIndex], error))
             {
-                g_ShimSettingsUiStatusText = "Save failed: " + error;
+                status = "Save failed: " + error;
                 Log(L"[SETTINGSUI] Save failed for %hs: %hs\n", setting.key, error.c_str());
-                RefreshShimSettingsUiControls();
                 return;
             }
 
@@ -3712,31 +3638,156 @@ namespace BZROpenShim
             else
                 ApplyShimSettingLive(setting.applyGroup);
 
-            g_ShimSettingsUiStatusText = std::string(setting.label) + " = " +
-                setting.valueLabels[nextIndex];
+            status = std::string(setting.label) + " = " + setting.valueLabels[nextIndex];
             if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
-                g_ShimSettingsUiStatusText += "  (takes effect after restart)";
+                status += "  (takes effect after restart)";
             else if (setting.applyGroup == ShimSettingApplyGroup::ReadOnNextUse)
-                g_ShimSettingsUiStatusText += "  (takes effect on the next nickname apply)";
+                status += "  (takes effect the next time it is used)";
             else if (!liveApplyOk)
-                g_ShimSettingsUiStatusText += "  (saved; runtime apply failed - see openshim.log)";
+                status += "  (saved; runtime apply failed - see openshim.log)";
             else
-                g_ShimSettingsUiStatusText += "  (applied)";
-            RefreshShimSettingsUiControls();
+                status += "  (applied)";
+        }
+
+        static void OnShimCategoryRowClicked(size_t slot)
+        {
+            ShimCategoryUi& ui = g_ShimCategoryUi;
+            if (!ui.screen || slot >= ui.rowCount)
+                return;
+            const size_t row = ui.rows[slot];
+            if (row == kShimPseudoRowKeyBindings)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen, kStockOptionsInputScreenId);
+                return;
+            }
+            if (row == kShimPseudoRowUpdateCheck)
+            {
+                DisarmShimSettingsAction();
+                StartShimUpdateCheck();
+            }
+            else
+            {
+                CycleShimSetting(row);
+            }
+            RefreshShimCategoryValues();
+        }
+
+        template <size_t I>
+        static void __cdecl ShimCategoryRowClick() { OnShimCategoryRowClicked(I); }
+
+        template <size_t... I>
+        static constexpr std::array<void(__cdecl*)(), sizeof...(I)> MakeShimCategoryRowClicks(std::index_sequence<I...>)
+        {
+            return { &ShimCategoryRowClick<I>... };
+        }
+        static constexpr auto kShimCategoryRowClicks =
+            MakeShimCategoryRowClicks(std::make_index_sequence<kShimCategoryMaxRows>{});
+
+        static void __cdecl OnShimCategoryBack()
+        {
+            if (g_ShimCategoryUi.screen)
+                Shell::Back(g_ShimCategoryUi.screen);
+        }
+
+        static bool BuildShimCategoryScreen(size_t category, void* screen)
+        {
+            const ShimSettingsCategory& def = kShimSettingsCategories[category];
+            ShimCategoryUi& ui = g_ShimCategoryUi;
+            ui = {};
+            ui.screen = screen;
+            ui.category = category;
+            DisarmShimSettingsAction();
+            if (GetOpenShimUpdateSnapshot().busy)
+                EnsureShimSettingsUpdateTimer();
+
+            const char* texture =
+                Shell::IsTextureDeployed(kShimCategoryPanelTexture) ? kShimCategoryPanelTexture : nullptr;
+            void* panel = Shell::AddPanel(screen, nullptr, "OpenShimCategory_Overlay",
+                                          { 0.0f, 0.0f, 1440.0f, 1080.0f }, texture);
+            if (!panel)
+                return false;
+            Shell::AddLabel(panel, panel, "OpenShimCategory_Title", kShimTitleRect, def.title,
+                            Shell::kTitleLabelFlags);
+
+            const Shell::ButtonSkin skin = ShimSlotSkin("osh_value_hv.png", "osh_value_ck.png");
+            char name[64] = {};
+            for (size_t r = 0; r < def.rowCount && ui.rowCount < kShimCategoryMaxRows; ++r)
+            {
+                const size_t row = FindShimSettingByLabel(def.rows[r]);
+                if (row == kShimNoRow)
+                    continue;
+                const size_t slot = ui.rowCount++;
+                ui.rows[slot] = row;
+                _snprintf_s(name, _TRUNCATE, "OpenShimCategory_Label%zu", slot);
+                void* label = Shell::AddLabel(panel, panel, name, ShimRowLabelRect(slot), "");
+                // The text measure runs a little narrow for this font size, so
+                // fit with a margin; the label rect itself stays the full well.
+                SetInputBindingUiLabelTextFitted(label, ShimRowLabel(row), ShimRowLabelRect(slot).w - 34.0f);
+                _snprintf_s(name, _TRUNCATE, "OpenShimCategory_Value%zu", slot);
+                ui.values[slot] = Shell::AddButton(panel, panel, name, ShimValueRect(slot), "", skin, 1.0f,
+                                                   0.0f, kShimCategoryRowClicks[slot], &OnShimCategoryHover);
+            }
+            for (size_t line = 0; line < 3; ++line)
+            {
+                _snprintf_s(name, _TRUNCATE, "OpenShimCategory_Info%zu", line);
+                ui.info[line] = Shell::AddLabel(panel, panel, name, ShimInfoLine(kShimCategoryInfo, line), "");
+            }
+            RefreshShimCategoryValues();
+            Log(L"[SETTINGSUI] %hs screen built: %u rows\n", def.name, static_cast<unsigned>(ui.rowCount));
+            return Shell::AddButton(panel, nullptr, "OpenShimCategory_Back", kShimBackRect, "Back",
+                                    Shell::kSkinTopCorner, 1.0f, kShimBackTextOffset,
+                                    &OnShimCategoryBack) != nullptr;
+        }
+
+        template <size_t I>
+        static bool BuildShimCategoryScreenAt(void* screen) { return BuildShimCategoryScreen(I, screen); }
+
+        template <size_t... I>
+        static constexpr std::array<Shell::BuildFn, sizeof...(I)> MakeShimCategoryBuilders(std::index_sequence<I...>)
+        {
+            return { &BuildShimCategoryScreenAt<I>... };
+        }
+        static constexpr auto kShimCategoryBuilders =
+            MakeShimCategoryBuilders(std::make_index_sequence<kShimSettingsCategoryCount>{});
+
+        static void OnShimCategoryClosed(void* screen)
+        {
+            if (g_ShimCategoryUi.screen != screen)
+                return;
+            DisarmShimSettingsAction();
+            g_ShimCategoryUi = {};
+        }
+
+        static bool RegisterShimOptionsScreens()
+        {
+            static const bool registered = [] {
+                if (!Shell::RegisterScreen({ Shell::kOptionsHubScreenId, "OpenShim Options",
+                                             &BuildShimHubScreen, &OnShimHubClosed }))
+                    return false;
+                for (size_t i = 0; i < kShimSettingsCategoryCount; ++i)
+                {
+                    if (!Shell::RegisterScreen({ Shell::kOptionsCategoryScreenIdBase + static_cast<uint32_t>(i),
+                                                 kShimSettingsCategories[i].name, kShimCategoryBuilders[i],
+                                                 &OnShimCategoryClosed }))
+                        return false;
+                }
+                return true;
+            }();
+            return registered;
         }
 
         // Two-click confirmation for a destructive row. The first click arms
         // it and repaints the value cell; the second runs it. Clicking any
-        // other row, stepping pages, or leaving the page disarms.
+        // other row or leaving the screen disarms.
         static void OnShimSettingsActionRowClicked(size_t settingIndex,
                                                    const ShimSettingDescriptor& setting)
         {
+            std::string& status = g_ShimCategoryUi.status;
             if (g_ShimSettingsArmedActionIndex != settingIndex)
             {
                 g_ShimSettingsArmedActionIndex = settingIndex;
-                g_ShimSettingsUiStatusText =
-                    std::string(setting.label) + ": click again to confirm. This cannot be undone.";
-                RefreshShimSettingsUiControls();
+                status = std::string(setting.label) + ": click again to confirm. This cannot be undone.";
                 return;
             }
 
@@ -3745,223 +3796,24 @@ namespace BZROpenShim
             switch (setting.applyGroup)
             {
             case ShimSettingApplyGroup::CareerStatsReset:
-            {
                 switch (ResetCareerStatsFromBridge())
                 {
                 case CareerStatsResetResult::Cleared:
-                    g_ShimSettingsUiStatusText =
-                        "Career statistics cleared. The previous record was kept as "
-                        "career_stats.cfg.openshim.bak";
+                    status = "Career statistics cleared. The previous record was kept as "
+                             "career_stats.cfg.openshim.bak";
                     break;
                 case CareerStatsResetResult::AlreadyEmpty:
-                    g_ShimSettingsUiStatusText =
-                        "Career statistics were already empty; nothing changed.";
+                    status = "Career statistics were already empty; nothing changed.";
                     break;
                 case CareerStatsResetResult::Failed:
-                    g_ShimSettingsUiStatusText =
-                        "Career reset failed; existing statistics were kept - see openshim.log";
+                    status = "Career reset failed; existing statistics were kept - see openshim.log";
                     break;
                 }
                 break;
-            }
             default:
-                g_ShimSettingsUiStatusText =
-                    std::string(setting.label) + ": no action is wired up for this row.";
+                status = std::string(setting.label) + ": no action is wired up for this row.";
                 break;
             }
-
-            RefreshShimSettingsUiControls();
-        }
-
-        // The +0x150 slot fires on hover-state *changes* (verified in-game
-        // 2026-07-17: sweeping row 3 -> row 0 invoked row 3's thunk while the
-        // cursor already sat on row 0), so the thunk's own row index lags one
-        // row behind the cursor. Resolve the row actually under the cursor by
-        // reversing the UI transform: the 1440x1080 design space is uniformly
-        // scaled by clientHeight/1080 and centered horizontally.
-        static bool TryResolveHoveredShimSettingsSlot(size_t* outSlot, bool* outValueCell)
-        {
-            HWND window = GetForegroundWindow();
-            if (!window || !outSlot)
-                return false;
-
-            POINT cursor = {};
-            RECT client = {};
-            if (!GetCursorPos(&cursor) || !ScreenToClient(window, &cursor) ||
-                !GetClientRect(window, &client) || client.bottom <= 0)
-                return false;
-
-            const float scale = static_cast<float>(client.bottom) / 1080.0f;
-            const float offsetX = (static_cast<float>(client.right) - 1440.0f * scale) * 0.5f;
-            const float logicalX = (static_cast<float>(cursor.x) - offsetX) / scale;
-            const float logicalY = static_cast<float>(cursor.y) / scale;
-
-            // Geometry MUST come from the same builder that places the rows.
-            // This function used to hardcode its own copy, and the copy went
-            // stale: it described an older grid (left column 258 vs 175, first
-            // row 308 vs 420, pitch 38 vs 42, row height 30 vs 36). Reversing
-            // the transform against those numbers mapped the cursor two rows
-            // low, so every hover printed another row's description. Derive
-            // from the layout and the two cannot drift apart again.
-            const UiOptionsPageLayout layout =
-                BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
-
-            // Full row footprint: the plate starts one inset before the label
-            // and the value button ends the row.
-            const float spanW =
-                layout.rowPlateInsetX + layout.rowValueOffsetX + layout.rowValueWidth;
-            const float leftX = layout.rowLeftX - layout.rowPlateInsetX;
-            const float rightX = layout.rowRightX - layout.rowPlateInsetX;
-
-            size_t column = 0;
-            if (logicalX >= leftX && logicalX <= leftX + spanW)
-                column = 0;
-            else if (logicalX >= rightX && logicalX <= rightX + spanW)
-                column = 1;
-            else
-                return false;
-
-            const float rowOffset = logicalY - layout.rowStartY;
-            if (rowOffset < 0.0f || layout.rowPitch <= 0.0f)
-                return false;
-            const size_t row = static_cast<size_t>(rowOffset / layout.rowPitch);
-            // Reject the inter-row gap so a cursor between two rows does not
-            // claim the row above it.
-            if (row >= kShimSettingsUiRowsPerColumn ||
-                (rowOffset - static_cast<float>(row) * layout.rowPitch) > layout.rowHeight)
-                return false;
-
-            *outSlot = column * kShimSettingsUiRowsPerColumn + row;
-            if (outValueCell)
-            {
-                const float baseX = column == 0 ? layout.rowLeftX : layout.rowRightX;
-                *outValueCell = logicalX >= baseX + layout.rowValueOffsetX;
-            }
-            return true;
-        }
-
-        // Writes the hovered row's description straight into the status label.
-        // g_ShimSettingsUiStatusText is left alone so the next full refresh
-        // restores the last click/apply status. Screens may invoke every hover
-        // slot in bulk on open, hence the active-page gate.
-        static void OnShimSettingsRowHovered(size_t rowIndex)
-        {
-            if (!g_ShimSettingsPageActive)
-                return;
-
-            size_t slot = rowIndex;
-            bool overValueCell = true;
-            if (!TryResolveHoveredShimSettingsSlot(&slot, &overValueCell))
-            {
-                // The callback also fires as the cursor leaves a value button.
-                // Restore the durable page/click status instead of leaving the
-                // last hover help stranded on screen.
-                RefreshShimSettingsUiControls();
-                return;
-            }
-
-            const size_t settingIndex = g_ShimSettingsUiPageStart + slot;
-            if (settingIndex >= kShimSettingsRegistryCount)
-                return;
-
-            const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[settingIndex];
-            // If this asset-backed row is currently unavailable, show that
-            // reason instead of the normal description so the user understands
-            // why it cannot be toggled. DX11 rows report the parent renderer
-            // resource, not the pack, for diagnostic accuracy.
-            {
-                const auto caps = Assets::GetAssetCapabilities();
-                bool avail = true;
-                bool isDx11Row = false;
-                if (caps.state != Assets::AssetPackState::Unknown && setting.section && setting.key)
-                {
-                    if (std::strcmp(setting.section, "General") == 0 &&
-                        std::strcmp(setting.key, "ChunkMeshes") == 0)
-                        avail = true; // Native mesh extraction requires no external payload pack.
-                    else if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
-                             (std::strcmp(setting.key, "FXAA") == 0 ||
-                              std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0))
-                    {
-                        isDx11Row = true;
-                        avail = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::EnhancedRenderer);
-                    }
-                }
-                if (!avail)
-                {
-                    const char* reason = nullptr;
-                    if (isDx11Row)
-                        reason = "Unavailable — Enhanced renderer resources not detected";
-                    else if (caps.state == Assets::AssetPackState::NotDetected)
-                        reason = "Unavailable — OpenShim asset pack not detected";
-                    else if (caps.state == Assets::AssetPackState::Incompatible)
-                        reason = "Unavailable — asset pack version mismatch";
-                    else if (std::strcmp(setting.section, "General") == 0 &&
-                             std::strcmp(setting.key, "ChunkMeshes") == 0)
-                        reason = "Unavailable — chunk payloads missing";
-                    else
-                        reason = "Unavailable — required assets missing";
-                    const UiOptionsPageLayout layout = BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
-                    SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
-                                                      g_ShimSettingsUiStatusDetailLabel,
-                                                      reason,
-                                                      layout.headerTextWidth);
-                    return;
-                }
-            }
-            std::string helpText;
-            if (overValueCell && !IsShimSettingActionRow(setting) && setting.valueCount > 0)
-            {
-                const size_t current = GetShimSettingCurrentIndex(setting);
-                const size_t next = (current + 1) % setting.valueCount;
-                helpText = "Click to change ";
-                helpText += setting.label;
-                helpText += " from ";
-                helpText += setting.valueLabels[current];
-                helpText += " to ";
-                helpText += setting.valueLabels[next];
-                helpText += ".";
-                if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
-                    helpText += " Takes effect after restarting Battlezone.";
-            }
-            else if (setting.description)
-            {
-                helpText = setting.description;
-            }
-            if (!helpText.empty())
-            {
-                // Not a hand-picked width: the hover path used to fit to a flat
-                // 800 px on one line, which cut every description that the
-                // header has room to wrap across two.
-                const UiOptionsPageLayout layout =
-                    BuildUiOptionsPageLayout(kShimSettingsUiRowsPerColumn);
-                SetInputBindingUiWrappedLabelText(g_ShimSettingsUiStatusLabel,
-                                                  g_ShimSettingsUiStatusDetailLabel,
-                                                  helpText.c_str(),
-                                                  layout.headerTextWidth);
-            }
-        }
-
-        static void OnShimSettingsPageStepClicked(int direction)
-        {
-            if (!g_ShimSettingsPageActive)
-                return;
-
-            const size_t current = g_ShimSettingsUiPageStart;
-            if (direction < 0)
-            {
-                g_ShimSettingsUiPageStart =
-                    current >= kShimSettingsUiVisibleRowCount ? current - kShimSettingsUiVisibleRowCount : 0;
-            }
-            else if (direction > 0)
-            {
-                g_ShimSettingsUiPageStart = current + kShimSettingsUiVisibleRowCount;
-            }
-
-            g_ShimSettingsUiPageStart = ClampShimSettingsUiPageStart(g_ShimSettingsUiPageStart);
-            // A confirmation armed on the page being left must not survive to
-            // fire against a click on whatever lands in that slot next.
-            DisarmShimSettingsAction();
-            RefreshShimSettingsUiControls();
         }
 
         static void StopShimSettingsUpdateTimer()
@@ -3983,13 +3835,19 @@ namespace BZROpenShim
             if (update.generation != g_ShimSettingsUiUpdateGeneration)
             {
                 g_ShimSettingsUiUpdateGeneration = update.generation;
-                if (!update.message.empty())
-                    g_ShimSettingsUiStatusText = update.message;
-                if (g_ShimSettingsPageActive && g_ShimSettingsUiStatusLabel)
-                    RefreshShimSettingsUiControls();
+                if (g_ShimCategoryUi.screen)
+                {
+                    if (!update.message.empty())
+                        g_ShimCategoryUi.status = update.message;
+                    RefreshShimCategoryValues();
+                }
             }
             if (!update.busy)
+            {
                 StopShimSettingsUpdateTimer();
+                if (g_ShimCategoryUi.screen)
+                    RefreshShimCategoryValues();
+            }
         }
 
         static bool EnsureShimSettingsUpdateTimer()
@@ -4001,50 +3859,6 @@ namespace BZROpenShim
             return g_ShimSettingsUiUpdateTimer != 0;
         }
 
-        static void OnShimSettingsUpdateClicked()
-        {
-            if (!g_ShimSettingsPageActive)
-                return;
-
-            BeginOpenShimUpdateCheck();
-            OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
-            if (update.busy && !EnsureShimSettingsUpdateTimer())
-            {
-                CancelOpenShimUpdateCheck(
-                    "Update check failed: Battlezone could not schedule Workshop status checks.");
-                update = GetOpenShimUpdateSnapshot();
-            }
-            g_ShimSettingsUiUpdateGeneration = update.generation;
-            g_ShimSettingsUiStatusText = update.message;
-            RefreshShimSettingsUiControls();
-        }
-
-        // Hide the settings page and hand the host screen back to the binding
-        // UI (when enabled) so a later plain "Input" visit that does not
-        // reconstruct the screen still shows the key-binding page.
-        static void DeactivateShimSettingsPage()
-        {
-            if (!g_ShimSettingsPageActive)
-                return;
-
-            g_ShimSettingsPageActive = false;
-            g_ShimSettingsUiStatusText.clear();
-            SetShimSettingsUiControlsVisible(false);
-
-            void* const hostScreen = g_InputScreenBinding.decorated;
-            if (ShouldEnableInputBindingUiReplacement() && hostScreen)
-            {
-                EnsureInputBindingUiControls(hostScreen);
-                RefreshInputBindingUiControls();
-            }
-        }
-
-        static void OnShimSettingsBackClicked()
-        {
-            DeactivateShimSettingsPage();
-            OnInputBindingBackClicked();
-        }
-
         static void OnShimSettingsMenuClicked()
         {
             const ULONGLONG now = GetTickCount64();
@@ -4054,26 +3868,9 @@ namespace BZROpenShim
                 return;
             }
             g_ShimSettingsNavigationTick = now;
-            g_ShimSettingsUiStatusText.clear();
-            g_ShimSettingsPageRequested = true;
-            g_ShimSettingsPageRequestTick = now;
-            auto* const navigateToInputScreen =
-                reinterpret_cast<void(__cdecl*)()>(kOptionsParentInputClickThunkAddr);
-            navigateToInputScreen();
-
-            // If the shell keeps a constructed input screen alive, the ctor hook
-            // will not re-fire for this navigation; restyle the live screen now.
-            // Pointer equality is only trustworthy while the dtor hook clears
-            // the binding on destruction: without it, a destroy-then-deferred-
-            // reconstruct navigation leaves the binding matching a freed
-            // screen and this path walks dangling child views (dump 2692).
-            void* const liveInputScreen = ReadOptionsInputSingletonRaw();
-            if (g_OptionsInputDtorHookInstalled &&
-                g_InputScreenBinding.IsLive(liveInputScreen))
-            {
-                g_ShimSettingsPageRequested = false;
-                ActivateShimSettingsPage(liveInputScreen);
-            }
+            void* const optionsScreen = g_ParentScreenBinding.constructed;
+            if (!optionsScreen || !Shell::RequestScreen(optionsScreen, Shell::kOptionsHubScreenId))
+                Log(L"[SETTINGSUI] OpenShim Options: no live Options screen to navigate from\n");
         }
 
         static void EnsureInputBindingUiControls(void* screen)
@@ -4094,27 +3891,48 @@ namespace BZROpenShim
             void* const controlParent =
                 g_InputBindingUiMiddleOverlay ? g_InputBindingUiMiddleOverlay : screen;
 
-            const UiOptionsPageLayout layout =
-                BuildUiOptionsPageLayout(kInputBindingUiRowsPerColumn);
+            // Painted mode needs the panel art, the overlay to put it on, and
+            // the shell kit for the title label; otherwise the flat masks and
+            // plates are built as before.
+            g_InputBindingUiPainted =
+                g_InputBindingUiMiddleOverlay && g_BzrFn_SetTextureOff &&
+                ShellScreens::IsAvailable() &&
+                ShellScreens::IsTextureDeployed(kInputBindingPanelTexture) &&
+                ShellScreens::IsTextureDeployed("osh_key_hv.png") &&
+                ShellScreens::IsTextureDeployed("osh_tool_hv.png");
+            const UiOptionsPageLayout layout = GetInputBindingUiLayout();
+            static const InputBindingUiSkin kKeySkin = { "osh_key_hv.png", "osh_key_ck.png" };
+            static const InputBindingUiSkin kToolSkin = { "osh_tool_hv.png", "osh_tool_ck.png" };
 
             const unsigned screenTag = static_cast<unsigned>(reinterpret_cast<uintptr_t>(screen));
             char controlName[64] = {};
 
-            UiOptionsPageBackgroundSlots background = {};
-            background.topMask = &g_InputBindingUiTopMask;
-            background.contentMask = &g_InputBindingUiContentMask;
-            CreateInputBindingUiPageBackground(background,
-                                               g_InputBindingUiDecor,
-                                               visualParent,
-                                               controlParent,
-                                               "OpenShimInput",
-                                               screenTag,
-                                               layout);
-
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputHeader_%08X", screenTag);
-            CreateInputBindingUiLabel(g_InputBindingUiHeaderLabel, controlParent, controlName, "",
-                                      layout.title.x, layout.title.y,
-                                      layout.title.width, layout.title.height);
+            if (g_InputBindingUiPainted)
+            {
+                g_BzrFn_SetTextureOff(g_InputBindingUiMiddleOverlay, kInputBindingPanelTexture);
+                if (!g_InputBindingUiHeaderLabel)
+                    g_InputBindingUiHeaderLabel = ShellScreens::AddLabel(
+                        controlParent, controlParent, controlName,
+                        { layout.title.x, layout.title.y, layout.title.width, layout.title.height },
+                        "", ShellScreens::kTitleLabelFlags);
+            }
+            else
+            {
+                UiOptionsPageBackgroundSlots background = {};
+                background.topMask = &g_InputBindingUiTopMask;
+                background.contentMask = &g_InputBindingUiContentMask;
+                CreateInputBindingUiPageBackground(background,
+                                                   g_InputBindingUiDecor,
+                                                   visualParent,
+                                                   controlParent,
+                                                   "OpenShimInput",
+                                                   screenTag,
+                                                   layout);
+                CreateInputBindingUiLabel(g_InputBindingUiHeaderLabel, controlParent, controlName, "",
+                                          layout.title.x, layout.title.y,
+                                          layout.title.width, layout.title.height);
+            }
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputStatus_%08X", screenTag);
             CreateInputBindingUiLabel(g_InputBindingUiStatusLabel, controlParent, controlName, "",
                                       layout.statusLine1.x, layout.statusLine1.y,
@@ -4135,6 +3953,7 @@ namespace BZROpenShim
                                toolbar,
                                kInputBindingUiToolbarSlotCount);
 
+            g_InputBindingUiSkin = g_InputBindingUiPainted ? &kToolSkin : nullptr;
             std::snprintf(controlName, sizeof(controlName), "OpenShimInputBack_%08X", screenTag);
             CreateInputBindingUiButton(g_InputBindingUiBackButton, controlParent, controlName, "Back",
                                        toolbar[0].x, toolbar[0].y, toolbar[0].width, toolbar[0].height,
@@ -4170,6 +3989,7 @@ namespace BZROpenShim
                                        toolbar[6].x, toolbar[6].y, toolbar[6].width, toolbar[6].height,
                                        reinterpret_cast<void*>(InputBindingRefreshClick));
 
+            g_InputBindingUiSkin = g_InputBindingUiPainted ? &kKeySkin : nullptr;
             for (size_t slot = 0; slot < kInputBindingUiVisibleRowCount; ++slot)
             {
                 const size_t column = slot / kInputBindingUiRowsPerColumn;
@@ -4177,7 +3997,8 @@ namespace BZROpenShim
                 const float baseX = (column == 0) ? layout.rowLeftX : layout.rowRightX;
                 const float y = layout.rowStartY + (static_cast<float>(row) * layout.rowPitch);
                 std::snprintf(controlName, sizeof(controlName), "OpenShimInputRowPlate_%08X_%02u", screenTag, static_cast<unsigned>(slot));
-                CreateInputBindingUiPlate(g_InputBindingUiRowBackdrops[slot], controlParent, controlName,
+                if (!g_InputBindingUiPainted)
+                    CreateInputBindingUiPlate(g_InputBindingUiRowBackdrops[slot], controlParent, controlName,
                                           baseX - layout.rowPlateInsetX, y,
                                           layout.rowPlateWidth,
                                           layout.rowHeight);
@@ -4192,6 +4013,7 @@ namespace BZROpenShim
                                            layout.rowValueWidth, layout.rowHeight,
                                            kInputBindingRowClickCallbacks[slot]);
             }
+            g_InputBindingUiSkin = nullptr;
         }
 
 
@@ -4338,7 +4160,7 @@ namespace BZROpenShim
 
         static void OnInputBindingBackClicked()
         {
-            auto* const backClick = reinterpret_cast<void(__cdecl*)()>(kOptionsInputBackClickAddr);
+            auto* const backClick = reinterpret_cast<void(__cdecl*)()>(g_OptionsInputBackClickAddr);
             if (backClick)
             {
                 Log(L"[INPUTUI] Invoking stock Back callback\n");
@@ -4348,7 +4170,7 @@ namespace BZROpenShim
 
         static void OnInputBindingDefaultsClicked()
         {
-            auto* const defaultsClick = reinterpret_cast<void(__cdecl*)()>(kOptionsInputDefaultsClickAddr);
+            auto* const defaultsClick = reinterpret_cast<void(__cdecl*)()>(g_OptionsInputDefaultsClickAddr);
             if (defaultsClick)
             {
                 Log(L"[INPUTUI] Invoking stock input default reset callback\n");
@@ -4512,24 +4334,18 @@ namespace BZROpenShim
             if (!g_InputMapLiveReloadChecked)
             {
                 g_InputMapLiveReloadChecked = true;
-                static const uint8_t kExpectedReadMappingTableBytes[] =
-                {
-                    0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xDC, 0x02, 0x00, 0x00
-                };
-                g_InputMapLiveReloadAvailable =
-                    ExpectedBytesMatchAt(kGogReadMappingTableAddr,
-                                         kExpectedReadMappingTableBytes,
-                                         sizeof(kExpectedReadMappingTableBytes));
+                g_ReadMappingTableAddr = HookEngine::EngineAddress("ReadMappingTable");
+                g_InputMapLiveReloadAvailable = g_ReadMappingTableAddr != 0;
                 Log(L"[INPUTUI] Live input.map reload %hs at 0x%08X\n",
                     g_InputMapLiveReloadAvailable ? "available" : "unavailable (bytes mismatch)",
-                    static_cast<uint32_t>(kGogReadMappingTableAddr));
+                    static_cast<uint32_t>(g_ReadMappingTableAddr));
             }
 
             if (!g_InputMapLiveReloadAvailable)
                 return false;
 
             auto* readMappingTable =
-                reinterpret_cast<FnReloadGameKeyMap>(kGogReadMappingTableAddr);
+                reinterpret_cast<FnReloadGameKeyMap>(g_ReadMappingTableAddr);
             if (!CallReloadMappingTableGuarded(readMappingTable))
             {
                 // The stock parser crashed mid-reload once (dump 30940, AV in a
@@ -4537,7 +4353,7 @@ namespace BZROpenShim
                 // for a crash-to-desktop: report failure and stop retrying.
                 g_InputMapLiveReloadAvailable = false;
                 Log(L"[INPUTUI] Live input.map reload faulted at 0x%08X; disabled for this session\n",
-                    static_cast<uint32_t>(kGogReadMappingTableAddr));
+                    static_cast<uint32_t>(g_ReadMappingTableAddr));
                 return false;
             }
             return true;
@@ -4756,23 +4572,10 @@ namespace BZROpenShim
             ResetInputBindingUiVisuals();
             g_InputScreenBinding.BindConstructed(screen);
 
-            const bool requestFresh =
-                g_ShimSettingsPageRequested &&
-                (GetTickCount64() - g_ShimSettingsPageRequestTick) <= kShimSettingsPageRequestTtlMs;
-            const bool settingsMode = requestFresh && ShouldEnableShimSettingsUi();
-            g_ShimSettingsPageRequested = false;
-            if (settingsMode)
-            {
-                ActivateShimSettingsPage(screen);
-                return;
-            }
-
-            g_ShimSettingsPageActive = false;
             if (!ShouldEnableInputBindingUiReplacement())
                 return;
 
             EnsureInputBindingUiControls(screen);
-            SetShimSettingsUiControlsVisible(false);
             RefreshInputBindingUiControls();
             Log(L"[INPUTUI] Constructor hook screen=0x%08X gen=%u rows=%u liveUi=%hs keyRelease=%hs\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
@@ -4793,7 +4596,6 @@ namespace BZROpenShim
             if (!g_InputScreenBinding.Owns(screen))
                 return;
 
-            g_ShimSettingsPageActive = false;
             ResetInputBindingUiVisuals();
             g_InputScreenBinding.Unbind();
             Log(L"[INPUTUI] Input screen destroyed; binding cleared screen=0x%08X gen=%u\n",
@@ -5023,7 +4825,7 @@ namespace BZROpenShim
                 const ptrdiff_t childCount =
                     (begin && end && begin <= end && (end - begin) < 256) ? (end - begin) : -1;
                 const uintptr_t vtable = *reinterpret_cast<uintptr_t*>(bytes);
-                const bool isButton = (vtable == kUiButtonVtableAddr);
+                const bool isButton = (vtable == g_UiButtonVtableAddr);
 
                 Log(L"[SETTINGSUI] %ls depth=%u view=0x%08X vt=0x%08X name=%hs "
                     L"rect=(%.1f,%.1f,%.1f,%.1f) flags=0x%X vis=%u layer=%u "
@@ -5064,8 +4866,117 @@ namespace BZROpenShim
             }
         }
 
-        // A shorter final row keeps the button inside the frame at 16:9 instead
-        // of clipping off the bottom.
+        // The stock Options column (cUI_OptionsParent ctor 0x007B61A0): four
+        // 422x130 buttons at x 508, y 208 / 386 / 564 / 741, resting on four
+        // slots painted into esc_center.png. With OpenShim's panel art
+        // deployed the column becomes five even slots (OPTIONS_LAYOUT in
+        // mkscreens.py): the panel is swapped for osh_options_center.png and
+        // the four stock buttons are moved onto its slots (design rect
+        // rewritten, layout run again), with OpenShim Options as the fifth.
+        // Without the art the
+        // stock layout is left alone and the button squeezes in underneath.
+        constexpr const char* kOptionsPanelTexture = "osh_options_center.png";
+        constexpr float kOptionsColumnX = 508.0f;
+        constexpr float kOptionsColumnW = 422.0f;
+        constexpr float kOptionsSlotY0 = 180.0f;
+        constexpr float kOptionsSlotH = 120.0f;
+        constexpr float kOptionsSlotPitch = 150.0f;
+        constexpr size_t kOptionsStockButtonCount = 4;
+        // The stock option buttons' caption scale (FUN_007c30e0(1.3f)).
+        constexpr float kOptionsButtonTextScale = 1.3f;
+
+        // cUI_View keeps the ctor's design rect (1440x1080 space) at +0xEC and
+        // the laid-out screen rect at +4; the ctor runs the layout
+        // (UiWidgetLayout, 0x007D14B0) immediately, so moving a built widget
+        // means rewriting the design rect and running the layout again, as
+        // the map preview fix does.
+        constexpr size_t kUiViewDesignRectOffset = 0xEC;
+        using FnUiWidgetLayout = void(__thiscall*)(void* view, float x, float y, float w, float h);
+
+        static FnUiWidgetLayout ResolveUiWidgetLayout()
+        {
+            static const FnUiWidgetLayout layout = [] {
+                uint32_t address = 0;
+                const HookEngine::EngineRow rows[] = { { "UiWidgetLayout", &address } };
+                if (!HookEngine::BindEngineRows("Options column", rows))
+                    return FnUiWidgetLayout{};
+                return reinterpret_cast<FnUiWidgetLayout>(static_cast<uintptr_t>(address));
+            }();
+            return layout;
+        }
+
+        // Finds the four stock column buttons by their ctor design rect and
+        // moves them onto the five-slot column. All or nothing: a column that
+        // does not look stock is left exactly as built.
+        static bool RespaceStockOptionsColumn(void* overlay)
+        {
+            const FnUiWidgetLayout layout = ResolveUiWidgetLayout();
+            if (!layout)
+                return false;
+            std::array<uint8_t*, kOptionsStockButtonCount> buttons = {};
+            size_t found = 0;
+            __try
+            {
+                auto* const bytes = reinterpret_cast<uint8_t*>(overlay);
+                void** const begin = *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
+                void** const end = *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
+                if (!begin || !end || begin > end || (end - begin) >= 64)
+                    return false;
+                for (void** slot = begin; slot != end; ++slot)
+                {
+                    auto* const child = reinterpret_cast<uint8_t*>(*slot);
+                    if (!child || *reinterpret_cast<uintptr_t*>(child) != g_UiButtonVtableAddr)
+                        continue;
+                    const auto* const design = reinterpret_cast<const float*>(child + kUiViewDesignRectOffset);
+                    if (design[0] != kOptionsColumnX || design[2] != kOptionsColumnW || design[3] != 130.0f)
+                        continue;
+                    if (found == kOptionsStockButtonCount)
+                        return false;
+                    buttons[found++] = child;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            if (found != kOptionsStockButtonCount)
+                return false;
+
+            std::sort(buttons.begin(), buttons.end(), [](const uint8_t* a, const uint8_t* b) {
+                return reinterpret_cast<const float*>(a + kUiViewDesignRectOffset)[1] <
+                       reinterpret_cast<const float*>(b + kUiViewDesignRectOffset)[1];
+            });
+            for (size_t i = 0; i < kOptionsStockButtonCount; ++i)
+            {
+                auto* const design = reinterpret_cast<float*>(buttons[i] + kUiViewDesignRectOffset);
+                const float newY = kOptionsSlotY0 + kOptionsSlotPitch * static_cast<float>(i);
+                // The caption (+0x144) is its own text view, built by the
+                // button ctor on the same layout parent at the button's rect
+                // plus the caption offset; it moves with the button.
+                auto* const caption = *reinterpret_cast<uint8_t**>(buttons[i] + 0x144);
+                if (caption)
+                {
+                    auto* const captionDesign = reinterpret_cast<float*>(caption + kUiViewDesignRectOffset);
+                    captionDesign[1] += newY - design[1];
+                    captionDesign[3] = kOptionsSlotH;
+                    layout(caption, captionDesign[0], captionDesign[1], captionDesign[2], captionDesign[3]);
+                }
+                design[1] = newY;
+                design[3] = kOptionsSlotH;
+                layout(buttons[i], design[0], design[1], design[2], design[3]);
+                // A cUI_Text builds its glyphs when its text is set, so the
+                // moved caption keeps drawing at the old place until the text
+                // is set again. Its buffer is at +0x144 (2000 bytes).
+                if (caption && g_BzrFn_SetButtonLabel)
+                {
+                    char text[256] = {};
+                    strncpy_s(text, reinterpret_cast<const char*>(caption + 0x144), _TRUNCATE);
+                    g_BzrFn_SetButtonLabel(buttons[i], text);
+                }
+            }
+            return true;
+        }
+
         static void EnsureShimSettingsMenuButton(void* parentScreen)
         {
             if (!parentScreen || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild ||
@@ -5097,38 +5008,47 @@ namespace BZROpenShim
                 return;
             }
 
+            const bool fiveSlots = ShellScreens::IsTextureDeployed(kOptionsPanelTexture) &&
+                                   g_BzrFn_SetTextureOff && RespaceStockOptionsColumn(buttonParent);
+            if (fiveSlots)
+                g_BzrFn_SetTextureOff(buttonParent, kOptionsPanelTexture);
+            else
+                Log(L"[SETTINGSUI] Options column left stock (%hs); OpenShim button goes underneath\n",
+                    ShellScreens::IsTextureDeployed(kOptionsPanelTexture) ? "column not recognised"
+                                                                          : "panel art not deployed");
+
             void* buttonMem = ::operator new(0x1EC, std::nothrow);
             if (!buttonMem)
                 return;
 
             std::memset(buttonMem, 0, 0x1EC);
-            void* const button = g_BzrFn_ButtonCtor(buttonMem,
-                                                    "OpenShimSettingsMenuButton",
-                                                    // Continue the stock options column with a compact fifth row.
-                                                    // The shorter height keeps it above the lower frame at 16:9.
-                                                    // x/w match the stock Play/Graphic/Audio/Input buttons because
-                                                    // this shares their parent: the layout pass (0x007D14B0) adds
-                                                    // Middle_Overlay's absolute origin on top of these design
-                                                    // coordinates, so 508 lands the column-aligned 1496 at 4K.
-                                                    508.0f,
-                                                    882.0f,
-                                                    422.0f,
-                                                    58.0f,
-                                                    0x20,
-                                                    buttonParent,
-                                                    0,
-                                                    0);
+            // Shares the stock buttons' parent: the layout pass (0x007D14B0)
+            // adds Middle_Overlay's absolute origin on top of these design
+            // coordinates, so the button lines up with the column at any size.
+            const float y = fiveSlots ? kOptionsSlotY0 + kOptionsSlotPitch * kOptionsStockButtonCount : 882.0f;
+            const float h = fiveSlots ? kOptionsSlotH : 58.0f;
+            void* const button = g_BzrFn_ButtonCtor(buttonMem, "OpenShimSettingsMenuButton",
+                                                    kOptionsColumnX, y, kOptionsColumnW, h,
+                                                    0x20, buttonParent, 0, 0);
             if (!button)
                 return;
 
-            if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(button, "optionhv.png");
-            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(button, "optionck.png");
+            // Like the stock buttons: nothing at rest over a painted slot.
+            if (!fiveSlots && g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(button, "optionhv.png");
+            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(button, "optionhv.png");
             if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(button, "optionck.png");
-            SetInputBindingUiButtonTextFitted(button, "OpenShim Options", 390.0f);
-            if (g_BzrFn_SetOnClick)
-                g_BzrFn_SetOnClick(button, reinterpret_cast<void*>(ShimSettingsMenuClick));
-            if (g_BzrFn_SetOnHover)
-                g_BzrFn_SetOnHover(button, reinterpret_cast<void*>(InputBindingUiButtonOnHoverNoop));
+            if (fiveSlots && g_BzrFn_SetButtonLabel)
+            {
+                g_BzrFn_SetButtonLabel(button, "OpenShim Options");
+                if (g_BzrFn_SetButtonTextScale)
+                    g_BzrFn_SetButtonTextScale(button, kOptionsButtonTextScale);
+            }
+            else
+            {
+                SetInputBindingUiButtonTextFitted(button, "OpenShim Options", 390.0f);
+            }
+            g_BzrFn_SetOnClick(button, reinterpret_cast<void*>(ShimSettingsMenuClick));
+            g_BzrFn_SetOnHover(button, reinterpret_cast<void*>(InputBindingUiButtonOnHoverNoop));
             // Append as Middle_Overlay's sixth child, alongside Back and the four
             // stock option buttons. All six are leaf views, so they share the
             // dispatch pass and are tried in list order; Back stays at index 0
@@ -5136,19 +5056,11 @@ namespace BZROpenShim
             g_BzrFn_AddChild(buttonParent, button, 0);
             g_ShimSettingsMenuButton = button;
 
-            const auto* const buttonRect =
-                reinterpret_cast<const float*>(reinterpret_cast<uint8_t*>(button) + 4);
-            void** const parentBegin = *reinterpret_cast<void***>(
-                reinterpret_cast<uint8_t*>(buttonParent) + kUiViewChildBeginOffset);
-            void** const parentEnd = *reinterpret_cast<void***>(
-                reinterpret_cast<uint8_t*>(buttonParent) + kUiViewChildEndOffset);
-            Log(L"[SETTINGSUI] OpenShim button added to options screen=0x%08X parent=0x%08X "
-                L"parentName=%hs parentChildren=%d rect=(%.1f,%.1f,%.1f,%.1f)\n",
+            Log(L"[SETTINGSUI] OpenShim button added to options screen=0x%08X layout=%hs "
+                L"rect=(%.1f,%.1f,%.1f,%.1f)\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parentScreen)),
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(buttonParent)),
-                ReadUiViewName(buttonParent),
-                static_cast<int>(parentEnd - parentBegin),
-                buttonRect[0], buttonRect[1], buttonRect[2], buttonRect[3]);
+                fiveSlots ? "five-slot" : "stock+compact",
+                kOptionsColumnX, y, kOptionsColumnW, h);
         }
 
         static void OnOptionsParentCtorScaffold(void* screen)
@@ -5236,7 +5148,7 @@ namespace BZROpenShim
         // Binary-confirmed cUI_MainScreen singleton for this GOG build; the
         // constructor stores it and the destructor clears it, so a null read
         // means "no title screen right now" rather than "not resolved yet".
-        constexpr uintptr_t kMainScreenSingletonAddr = 0x0094551C;
+        uint32_t g_MainScreenSingletonAddr = 0;
 
         // Matches the stock top-corner controls exactly: same 342x77 frame,
         // same art, clamped to the top edge. ExitGame_MainScreen and
@@ -5260,152 +5172,56 @@ namespace BZROpenShim
         constexpr float kCareerButtonX = 720.0f - kCareerButtonW * 0.5f;
         constexpr float kCareerButtonY = (77.0f - kCareerButtonH) * 0.5f;
 
-        // The backing plate is deliberately larger than the screen. The menu
-        // backdrop art is MainScreen_Overlay's own texture, not a control, so
-        // hiding controls leaves the frame grid and panel edges drawn behind a
-        // page-sized plate; only a full-bleed plate covers them. The overlay
-        // itself spans design x -88..1528, so this over-covers on every side
-        // rather than depending on that number being exact.
-        constexpr float kCareerPlateX = -200.0f;
-        constexpr float kCareerPlateY = -100.0f;
-        constexpr float kCareerPlateW = 1840.0f;
-        constexpr float kCareerPlateH = 1280.0f;
-
-        // Content column. Captions and values are separate labels on a fixed
-        // column so the numbers line up: the font is proportional, so padding a
-        // single string with spaces does not align anything.
-        constexpr float kCareerHeaderX = 300.0f;
-        constexpr float kCareerCaptionX = 340.0f;
-        constexpr float kCareerValueX = 860.0f;
-        constexpr float kCareerColumnW = 520.0f;
-        constexpr float kCareerContentTop = 250.0f;
-        constexpr float kCareerLineH = 40.0f;
-        constexpr float kCareerSectionGap = 26.0f;
-        constexpr size_t kCareerRowCount = 20;
-
-        constexpr float kCareerTitleX = 300.0f;
-        constexpr float kCareerTitleY = 120.0f;
-        constexpr float kCareerTitleW = 840.0f;
-        constexpr float kCareerBackW = 369.0f;
-        constexpr float kCareerBackH = 68.0f;
-        constexpr float kCareerBackY = 940.0f;
-
         static void* g_CareerUiMainScreen = nullptr;
         static void* g_CareerUiOverlay = nullptr;
         static void* g_CareerUiButton = nullptr;
-        static void* g_CareerUiPlate = nullptr;
-        static void* g_CareerUiTitleLabel = nullptr;
-        static void* g_CareerUiCaptions[kCareerRowCount] = {};
-        static void* g_CareerUiValues[kCareerRowCount] = {};
-        static void* g_CareerUiBackButton = nullptr;
-        static bool g_CareerUiPageActive = false;
-
-        // Stock title controls hidden while the page is up, so Back can put
-        // back exactly what it took away rather than guessing the stock set.
-        static void* g_CareerUiHiddenStock[32] = {};
-        static size_t g_CareerUiHiddenStockCount = 0;
-
-        // Text on this screen cannot be hidden by any visibility flag. Measured
-        // live on 2.2.301 while the page was open:
-        //
-        //   view                        vt          layer  vis
-        //   SinglePlayer_MainScreen     0x008A0470    2     0
-        //   SinglePlayer_..._text       0x008A096C    4     0
-        //   MPStatus_text               0x008A096C    2     0
-        //   MainScreen_Overlay          0x008A0B94    1     1
-        //
-        // Every one of those had vis=0 -- SetActive had been called on the
-        // button, on its caption, and (in a probe build) on the whole overlay --
-        // and every caption still drew. Panels obey the flag; text does not.
-        // The layer byte at +0xE8 is fixed at construction, so a plate cannot be
-        // raised above the layer-4 captions after the fact either.
-        //
-        // The one mechanism that does work is blanking the string, which is what
-        // SuppressStockOptionsInputWidgets already does on the options screen.
-        // That page can hard-code its restore captions; the title screen's are
-        // localized, so they are recorded as the shell sets them and replayed on
-        // Back. Recording is limited to direct children of MainScreen_Overlay so
-        // that no in-game text ever enters this table.
-        static void* g_CareerUiHiddenCaptions[32] = {};
-        static size_t g_CareerUiHiddenCaptionCount = 0;
-
-        struct CareerUiTextRecord
-        {
-            void* view;
-            bool viaButtonLabel;   // replay through the setter that wrote it
-            char name[64];         // guards against a reused heap address
-            char text[96];
-        };
-        static CareerUiTextRecord g_CareerUiTextMemory[64] = {};
-        static size_t g_CareerUiTextMemoryCount = 0;
-        static bool g_CareerUiTextMemoryFull = false;
-        // Set while this code is the one calling a setter, so blanking and
-        // restoring never overwrite the remembered original with "".
-        static bool g_CareerUiTextMemorySuppressed = false;
-
-        // Stock views whose text was blanked, and therefore must be restored.
-        static void* g_CareerUiBlankedText[32] = {};
-        static size_t g_CareerUiBlankedTextCount = 0;
 
         static void ResetCareerUiState();
         static void* ReadMainScreenSingleton();
 
-        // The cached widget pointers are meaningful only while the title
-        // screen they were taken from is the live singleton: the constructor
-        // stores it and the destructor clears it. Between a teardown and the
-        // destructor listener or the next setup pass, a recycled heap address
-        // must not be mistaken for a page widget or a blanked caption.
-        static bool CareerUiCacheIsLive()
+        // Every address in this file is an engine_addresses row. The options/career
+        // hooks bind them together (OptionsUiAddressesBound); the native text
+        // measure and the live input.map reload each bind their own rows and
+        // fall back (char estimates, restart-to-apply) when those do not bind.
+        static bool OptionsUiAddressesBound()
         {
-            if (!g_CareerUiMainScreen)
-                return false;
-            if (ReadMainScreenSingleton() == g_CareerUiMainScreen)
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "OptionsInputCtor", &g_OptionsInputCtorAddr },
+                    { "OptionsInputKeyReleased", &g_OptionsInputKeyReleasedAddr },
+                    { "OptionsInputScreenFactoryCaller", &g_OptionsInputScreenFactoryCallerAddr },
+                    { "OptionsInputBackClick", &g_OptionsInputBackClickAddr },
+                    { "OptionsInputDefaultsClick", &g_OptionsInputDefaultsClickAddr },
+                    { "OptionsInputJoystickClick", &g_OptionsInputJoystickClickAddr },
+                    { "UiPerfButtonVtable", &g_UiButtonVtableAddr },
+                    { "OptionsParentCtor", &g_OptionsParentCtorAddr },
+                    { "MainScreenMenuSetup", &g_MainScreenCtorAddr },
+                    { "OptionsParentInputClick", &g_OptionsParentInputClickThunkAddr },
+                    { "OptionsInputSingleton", &g_OptionsInputSingletonAddr },
+                    { "OptionsInputDtor", &g_OptionsInputDtorAddr },
+                    { "OptionsParentDtor", &g_OptionsParentDtorAddr },
+                    { "UiPerfMainScreenGlobal", &g_MainScreenSingletonAddr },
+                };
+                if (!HookEngine::BindEngineRows("Shim options UI", rows))
+                    return false;
+                if (!Hooks::VtableTypeNameMatches(g_UiButtonVtableAddr, ".?AVcUI_Button@@"))
+                {
+                    Log(L"[INPUTUI] cUI_Button vtable RTTI mismatch; shim options UI stands down\n");
+                    return false;
+                }
                 return true;
-            Log(L"[CAREERUI] title screen 0x%08X is no longer the live singleton; dropping cached widgets\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CareerUiMainScreen)));
-            ResetCareerUiState();
-            return false;
+            }();
+            return bound;
         }
 
-        // cUI_Button::SetLabel and cUI_Text::SetText. Both are
-        // void __thiscall(this, const char*), and both open with
-        //   55 8B EC 51 89 4D FC          push ebp / mov ebp,esp / push ecx /
-        //                                 mov [ebp-4],ecx
-        // which is a whole-instruction 7-byte cut. The guards run past that into
-        // the bytes that differ between them (SetText pushes 0x7D0), so neither
-        // guard can match the other function.
-        constexpr uintptr_t kCareerUiSetButtonLabelAddr = 0x007C2950;
-        constexpr uintptr_t kCareerUiSetTooltipAddr = 0x007CC660;
-        constexpr size_t kCareerUiTextSetterDetourLen = 7;
-
-        constexpr uint8_t kExpectedSetButtonLabelBytes[] =
+        // Copies a prologue's live bytes into an expected-bytes buffer. Used for
+        // SEH prologues whose `push offset handler` operand is absolute: the
+        // row's guard has already checked them on the reference build and the
+        // porter regenerates it for others, so the live bytes are the truth.
+        static void CopyLivePrologue(uint32_t address, uint8_t* out, size_t length)
         {
-            0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x8B, 0x45, 0x08, 0x50, 0x8B
-        };
-        constexpr uint8_t kExpectedSetTooltipBytes[] =
-        {
-            0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x68, 0xD0, 0x07, 0x00, 0x00
-        };
-
-        static InlineDetour32 g_CareerUiSetButtonLabelDetour = {};
-        static InlineDetour32 g_CareerUiSetTooltipDetour = {};
-        static FnUiSetStr g_CareerUiSetButtonLabelOriginal = nullptr;
-        static FnUiSetStr g_CareerUiSetTooltipOriginal = nullptr;
-
-        // cUI_View::SetActive. Hooked to veto re-activation of the page's own
-        // widgets while the page is closed: the page has to be built during
-        // screen setup for its stock button art to bind at all, but something
-        // after that re-activates the overlay's children, and a plate built
-        // hidden came back visible over the closed menu. Re-hiding on every
-        // setup pass was not enough -- dismissing the splash re-showed it -- so
-        // the hidden state is enforced at the setter instead of re-asserted.
-        constexpr uintptr_t kCareerUiSetActiveAddr = 0x007D3310;
-        constexpr uint8_t kExpectedSetActiveBytes[] =
-        {
-            0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x8B, 0x45, 0xFC, 0x83, 0xB8
-        };
-        static InlineDetour32 g_CareerUiSetActiveDetour = {};
-        static FnUiSetActive g_CareerUiSetActiveOriginal = nullptr;
+            std::memcpy(out, reinterpret_cast<const void*>(static_cast<uintptr_t>(address)), length);
+        }
 
         static InlineDetour32 g_MainScreenCtorDetour = {};
         using FnMainScreenSetup = void(__thiscall*)(void* thisPtr, char phase);
@@ -5418,7 +5234,7 @@ namespace BZROpenShim
         {
             __try
             {
-                return *reinterpret_cast<void* const*>(kMainScreenSingletonAddr);
+                return *reinterpret_cast<void* const*>(g_MainScreenSingletonAddr);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -5542,790 +5358,13 @@ namespace BZROpenShim
             return nullptr;
         }
 
-        // ------------------------------------------------------------------
-        // career_stats.cfg reader
-        // ------------------------------------------------------------------
-        //
-        // The file is the flat "key=value" document bzr_hooks.cpp writes. Keys
-        // are namespaced per profile (profile.<key>.career.totalKills and so
-        // on). Values are summed across profiles: an install normally has one,
-        // and summing is the honest answer when it has more rather than
-        // silently picking whichever came first.
-
-        struct CareerUiTotals
-        {
-            bool fileFound = false;
-            int profiles = 0;
-            long long totalKills = 0;
-            long long totalDeaths = 0;
-            long long spKills = 0;
-            long long spDeaths = 0;
-            long long mpKills = 0;
-            long long mpDeaths = 0;
-            long long missionsPlayed = 0;
-            long long spMissions = 0;
-            long long mpMatches = 0;
-            int missionsRecorded = 0;
-        };
-
-        static std::filesystem::path GetCareerUiStatsPath()
-        {
-            return GetUserConfigPath().parent_path() / "career_stats.cfg";
-        }
-
-        static void ReadCareerUiTotals(CareerUiTotals& out)
-        {
-            out = CareerUiTotals{};
-
-            std::ifstream input(GetCareerUiStatsPath());
-            if (!input.is_open())
-                return;
-            out.fileFound = true;
-
-            std::unordered_set<std::string> profileKeys;
-            std::unordered_set<std::string> missionKeys;
-
-            std::string line;
-            while (std::getline(input, line))
-            {
-                const size_t split = line.find('=');
-                if (split == std::string::npos || split == 0)
-                    continue;
-                std::string key = line.substr(0, split);
-                const long long value = std::atoll(line.c_str() + split + 1);
-
-                if (key.rfind("profile.", 0) != 0)
-                    continue;
-
-                const size_t profileEnd = key.find('.', sizeof("profile.") - 1);
-                if (profileEnd == std::string::npos)
-                    continue;
-                profileKeys.insert(key.substr(0, profileEnd));
-
-                const std::string tail = key.substr(profileEnd + 1);
-                if (tail == "career.totalKills")            out.totalKills += value;
-                else if (tail == "career.totalDeaths")      out.totalDeaths += value;
-                else if (tail == "career.spKills")          out.spKills += value;
-                else if (tail == "career.spDeaths")         out.spDeaths += value;
-                else if (tail == "career.mpKills")          out.mpKills += value;
-                else if (tail == "career.mpDeaths")         out.mpDeaths += value;
-                else if (tail == "career.missionsPlayed")   out.missionsPlayed += value;
-                else if (tail == "career.spMissionsPlayed") out.spMissions += value;
-                else if (tail == "career.mpMatchesPlayed")  out.mpMatches += value;
-                else if (tail.rfind("mission.", 0) == 0)
-                {
-                    const size_t nameEnd = tail.find('.', sizeof("mission.") - 1);
-                    if (nameEnd != std::string::npos)
-                        missionKeys.insert(tail.substr(0, nameEnd));
-                }
-            }
-
-            out.profiles = static_cast<int>(profileKeys.size());
-            out.missionsRecorded = static_cast<int>(missionKeys.size());
-        }
-
-        static std::string FormatCareerUiRatio(long long kills, long long deaths)
-        {
-            if (deaths <= 0)
-                return kills > 0 ? "perfect" : "-";
-            char buffer[32] = {};
-            _snprintf_s(buffer, _TRUNCATE, "%.2f",
-                        static_cast<double>(kills) / static_cast<double>(deaths));
-            return buffer;
-        }
-
-        // Two columns of plain text: a caption and its value, so the page reads
-        // as a record rather than a form.
-        // One rendered row. A header carries no value and sits in the outer
-        // column; a spacer reserves vertical room without a widget.
-        struct CareerUiRow
-        {
-            std::string caption;
-            std::string value;
-            bool header = false;
-            bool spacer = false;
-        };
-
-        static void BuildCareerUiRows(CareerUiRow (&rows)[kCareerRowCount])
-        {
-            for (auto& row : rows)
-                row = CareerUiRow{};
-
-            CareerUiTotals t;
-            ReadCareerUiTotals(t);
-
-            const auto num = [](long long v) { return std::to_string(v); };
-
-            size_t i = 0;
-            const auto header = [&](const char* text)
-            {
-                if (i < kCareerRowCount) { rows[i].caption = text; rows[i].header = true; ++i; }
-            };
-            const auto entry = [&](const char* caption, const std::string& value)
-            {
-                if (i < kCareerRowCount) { rows[i].caption = caption; rows[i].value = value; ++i; }
-            };
-            const auto gap = [&]()
-            {
-                if (i < kCareerRowCount) { rows[i].spacer = true; ++i; }
-            };
-
-            if (!t.fileFound)
-            {
-                header("NO RECORD YET");
-                gap();
-                entry("Kills, deaths and missions are recorded automatically", "");
-                entry("in single player and multiplayer once you start playing.", "");
-                gap();
-                entry("Tracking can be switched off under OpenShim Settings.", "");
-                return;
-            }
-
-            header("OVERALL");
-            entry("Kills", num(t.totalKills));
-            entry("Deaths", num(t.totalDeaths));
-            entry("Kill / death", FormatCareerUiRatio(t.totalKills, t.totalDeaths));
-            gap();
-
-            header("SINGLE PLAYER");
-            entry("Kills", num(t.spKills));
-            entry("Deaths", num(t.spDeaths));
-            // career.spMissionsPlayed is written only by the OpenShim career
-            // layer; career.missionsPlayed predates it and is what every record
-            // written before this feature shipped actually carries. Preferring
-            // the specific key and falling back to the general one is why an
-            // existing install reads its real total instead of a flat zero --
-            // the GOG test record has 342 under the old key and none under the
-            // new one, and showed "Missions played 0" before this fallback.
-            entry("Missions played", num(t.spMissions > 0 ? t.spMissions : t.missionsPlayed));
-            gap();
-
-            header("MULTIPLAYER");
-            entry("Kills", num(t.mpKills));
-            entry("Deaths", num(t.mpDeaths));
-            entry("Matches played", num(t.mpMatches));
-            gap();
-
-            header("RECORD");
-            entry("Distinct missions", num(t.missionsRecorded));
-            if (t.profiles > 1)
-                entry("Profiles combined", num(t.profiles));
-        }
-
-        // Row y positions, so widget creation and text refresh agree without
-        // either having to recompute the other's layout.
-        static void ComputeCareerUiRowY(const CareerUiRow (&rows)[kCareerRowCount],
-                                        float (&outY)[kCareerRowCount])
-        {
-            float y = kCareerContentTop;
-            for (size_t i = 0; i < kCareerRowCount; ++i)
-            {
-                outY[i] = y;
-                if (rows[i].spacer)
-                    y += kCareerSectionGap;
-                else if (!rows[i].caption.empty())
-                    y += kCareerLineH;
-            }
-        }
-
-        // ------------------------------------------------------------------
-        // Page show / hide
-        // ------------------------------------------------------------------
-
-        // Hide every stock child of MainScreen_Overlay, remembering exactly
-        // what was hidden. Our own widgets are skipped by pointer identity, not
-        // by name, so a stock control that happens to share a name prefix can
-        // never be confused for one of ours.
-        // Widgets that make up the page itself. The page is built before the
-        // stock controls are hidden, so by then these are overlay children too
-        // and would otherwise hide themselves. Deliberately excludes the Career
-        // button: that one is a stock-overlay sibling that should disappear
-        // with the rest while the page is up.
-        static bool IsCareerUiPageWidget(void* view)
-        {
-            if (!view || !CareerUiCacheIsLive())
-                return false;
-            if (view == g_CareerUiPlate || view == g_CareerUiTitleLabel ||
-                view == g_CareerUiBackButton)
-            {
-                return true;
-            }
-            for (void* label : g_CareerUiCaptions)
-                if (label && view == label)
-                    return true;
-            for (void* label : g_CareerUiValues)
-                if (label && view == label)
-                    return true;
-            return false;
-        }
-
-        // The active flag as the engine stores it (+0xE9), read back rather than
-        // assumed. The title screen ships with at least one control already
-        // inactive -- openAchievements is built but switched off -- so hiding
-        // everything and then activating everything on Back turns on a button
-        // the shell had deliberately left off. Only controls that were actually
-        // on are touched.
-        static bool IsUiViewActive(void* view)
-        {
-            __try
-            {
-                if (!view)
-                    return false;
-                return *(reinterpret_cast<uint8_t*>(view) + 0xE9) != 0;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
-        // cUI_Button's enabled byte (+0x148), the same field LogUiViewNode
-        // reports. A disabled button still draws but is skipped by the click
-        // dispatch, which is exactly what a full-bleed backing plate needs: the
-        // dispatch takes the first leaf child whose rect is hit, and the plate
-        // is created before the Back button and covers it, so an enabled plate
-        // silently eats every Back click.
-        static void SetInputBindingUiButtonEnabled(void* button, bool enabled)
-        {
-            __try
-            {
-                if (button)
-                    *(reinterpret_cast<uint8_t*>(button) + 0x148) = enabled ? 1 : 0;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-            }
-        }
-
-        // Caption of a cUI_Button, or null for any other view. The vtable check
-        // is what makes reading +0x144 safe: on a label or overlay that offset
-        // is unrelated storage, not a view pointer.
-        static void* GetCareerUiStockCaption(void* view)
-        {
-            __try
-            {
-                if (!view)
-                    return nullptr;
-                if (*reinterpret_cast<uintptr_t*>(view) != kUiButtonVtableAddr)
-                    return nullptr;
-                return *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(view) + 0x144);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return nullptr;
-            }
-        }
-
-        // --- remembering the title screen's strings ------------------------
-        //
-        // Armed while a cUI_MainScreen is being set up or is live, so that no
-        // in-game text setter call ever reaches the parent check below.
-        static bool g_CareerUiTextRecordingArmed = false;
-
-        static CareerUiTextRecord* FindCareerUiTextRecord(void* view)
-        {
-            for (size_t i = 0; i < g_CareerUiTextMemoryCount; ++i)
-                if (g_CareerUiTextMemory[i].view == view)
-                    return &g_CareerUiTextMemory[i];
-            return nullptr;
-        }
-
-        static void RecordCareerUiText(void* view, const char* text, bool viaButtonLabel)
-        {
-            if (!g_CareerUiTextRecordingArmed || g_CareerUiTextMemorySuppressed)
-                return;
-            if (!view || !text)
-                return;
-
-            // Diagnostic for captions that reach the page unblanked. Off unless
-            // OPENSHIM_CAREER_TRACE is set.
-            static int s_traceBudget = 400;
-            if (s_traceBudget > 0 &&
-                ::GetEnvironmentVariableW(L"OPENSHIM_CAREER_TRACE", nullptr, 0) != 0)
-            {
-                --s_traceBudget;
-                void* const parent = GetInputBindingUiViewParent(view);
-                Log(L"[CAREERTRACE] set view=0x%08X viaButton=%d text=\"%hs\"\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(view)),
-                    viaButtonLabel ? 1 : 0, text);
-                Log(L"[CAREERTRACE]   viewName=%hs\n", ReadUiViewName(view));
-                Log(L"[CAREERTRACE]   parent=0x%08X\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parent)));
-                Log(L"[CAREERTRACE]   parentName=%hs\n", ReadUiViewName(parent));
-            }
-
-            // Accept a child of MainScreen_Overlay, or a view that has no parent
-            // yet. The second case is not laxity: traced live, the four corner
-            // controls are labelled before they are AddChild'd --
-            //
-            //   set view=0x1FD9D970 viaButton=1 text="Exit Game"
-            //     viewName=ExitGame_MainScreen
-            //     parent=0x00000000
-            //
-            // -- while SinglePlayer_MainScreen is labelled after, with
-            // parent=MainScreen_Overlay. Requiring a parent therefore dropped
-            // exactly Exit Game, Options, Mods and Achievements, which are the
-            // captions that kept drawing over the page.
-            //
-            // Recording a view that never becomes a title-screen control is
-            // harmless: a record is only ever consulted for a view that is a
-            // current child of the live overlay, and only after its name is
-            // re-checked against the record.
-            void* const parent = GetInputBindingUiViewParent(view);
-            if (parent && !MainScreenViewNameMatches(parent, "MainScreen_Overlay"))
-                return;
-            if (IsCareerUiPageWidget(view))
-                return;
-
-            CareerUiTextRecord* record = FindCareerUiTextRecord(view);
-            if (!record)
-            {
-                if (g_CareerUiTextMemoryCount >=
-                    sizeof(g_CareerUiTextMemory) / sizeof(g_CareerUiTextMemory[0]))
-                {
-                    if (!g_CareerUiTextMemoryFull)
-                    {
-                        g_CareerUiTextMemoryFull = true;
-                        Log(L"[CAREERUI] text memory full; some captions will not be hidden\n");
-                    }
-                    return;
-                }
-                record = &g_CareerUiTextMemory[g_CareerUiTextMemoryCount++];
-                record->view = view;
-            }
-
-            record->viaButtonLabel = viaButtonLabel;
-            _snprintf_s(record->name, _TRUNCATE, "%s", ReadUiViewName(view));
-            __try
-            {
-                _snprintf_s(record->text, _TRUNCATE, "%s", text);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                record->text[0] = '\0';
-            }
-        }
-
-        // A record is only usable if the view at that address is still the same
-        // control. Screen teardown frees these views and a later menu can be
-        // built on the same heap addresses, so matching the pointer alone could
-        // replay one control's caption onto another.
-        static const CareerUiTextRecord* FindUsableCareerUiTextRecord(void* view)
-        {
-            const CareerUiTextRecord* const record = FindCareerUiTextRecord(view);
-            if (!record)
-                return nullptr;
-            if (std::strcmp(record->name, ReadUiViewName(view)) != 0)
-                return nullptr;
-            return record;
-        }
-
-        // True while the page is up and this view is one whose text was blanked.
-        // The multiplayer control's caption is live status text ("Not Ready"),
-        // rewritten by the shell after the page opens, which is why blanking it
-        // once was not enough -- it reappeared over the page seconds later.
-        static bool IsCareerUiBlankedView(void* view)
-        {
-            if (!g_CareerUiPageActive || !view || !CareerUiCacheIsLive())
-                return false;
-            for (size_t i = 0; i < g_CareerUiBlankedTextCount; ++i)
-                if (g_CareerUiBlankedText[i] == view)
-                    return true;
-            return false;
-        }
-
-        // Replays a string through the same setter that originally wrote it.
-        static void SetCareerUiStockText(void* view, const char* text, bool viaButtonLabel)
-        {
-            if (!view)
-                return;
-
-            g_CareerUiTextMemorySuppressed = true;
-            if (viaButtonLabel)
-            {
-                if (g_BzrFn_SetButtonLabel)
-                    g_BzrFn_SetButtonLabel(view, text);
-            }
-            else if (g_BzrFn_SetTooltip)
-            {
-                g_BzrFn_SetTooltip(view, text);
-            }
-            g_CareerUiTextMemorySuppressed = false;
-        }
-
-        static void HideStockMainScreenControls()
-        {
-            g_CareerUiHiddenStockCount = 0;
-            g_CareerUiHiddenCaptionCount = 0;
-            g_CareerUiBlankedTextCount = 0;
-            if (!g_CareerUiOverlay)
-                return;
-
-            void* children[64] = {};
-            size_t count = 0;
-            __try
-            {
-                auto* const bytes = reinterpret_cast<uint8_t*>(g_CareerUiOverlay);
-                void** const begin =
-                    *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
-                void** const end =
-                    *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
-                if (!begin || !end || begin >= end || (end - begin) >= 64)
-                    return;
-                for (void** slot = begin; slot != end && count < 64; ++slot)
-                    if (*slot)
-                        children[count++] = *slot;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return;
-            }
-
-            static bool s_loggedStockSet = false;
-            for (size_t i = 0; i < count; ++i)
-            {
-                void* const child = children[i];
-                if (IsCareerUiPageWidget(child))
-                    continue;
-                // Already off -- leave it exactly as found.
-                if (!IsUiViewActive(child))
-                    continue;
-                if (g_CareerUiHiddenStockCount >=
-                    sizeof(g_CareerUiHiddenStock) / sizeof(g_CareerUiHiddenStock[0]))
-                {
-                    break;
-                }
-
-                void* const caption = GetCareerUiStockCaption(child);
-                if (!s_loggedStockSet)
-                {
-                    Log(L"[CAREERUI]   hide[%zu]=0x%08X caption=0x%08X name=%hs\n",
-                        i,
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(child)),
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(caption)),
-                        ReadUiViewName(child));
-                    // Separate Log call per name: ReadUiViewName returns one
-                    // shared static buffer, so two in a single format list both
-                    // print whichever ran last.
-                    if (caption)
-                        Log(L"[CAREERUI]     caption name=%hs\n", ReadUiViewName(caption));
-                }
-
-                SetInputBindingUiViewActive(child, false);
-                g_CareerUiHiddenStock[g_CareerUiHiddenStockCount++] = child;
-
-                if (caption &&
-                    g_CareerUiHiddenCaptionCount <
-                        sizeof(g_CareerUiHiddenCaptions) / sizeof(g_CareerUiHiddenCaptions[0]))
-                {
-                    SetInputBindingUiViewActive(caption, false);
-                    g_CareerUiHiddenCaptions[g_CareerUiHiddenCaptionCount++] = caption;
-                }
-
-                // Blank the string only when its original is on record. A
-                // caption that was never observed being set is left alone:
-                // leaving a label visible is a cosmetic flaw, erasing one with
-                // no way to put it back is a broken menu.
-                const CareerUiTextRecord* const record =
-                    FindUsableCareerUiTextRecord(child);
-                if (!record || record->text[0] == '\0')
-                {
-                    if (!s_loggedStockSet)
-                        Log(L"[CAREERUI]     NO TEXT RECORD -- caption will stay drawn\n");
-                    continue;
-                }
-                if (!s_loggedStockSet)
-                    Log(L"[CAREERUI]     blanking \"%hs\"\n", record->text);
-                if (g_CareerUiBlankedTextCount >=
-                    sizeof(g_CareerUiBlankedText) / sizeof(g_CareerUiBlankedText[0]))
-                {
-                    continue;
-                }
-
-                SetCareerUiStockText(child, "", record->viaButtonLabel);
-                g_CareerUiBlankedText[g_CareerUiBlankedTextCount++] = child;
-            }
-            s_loggedStockSet = true;
-        }
-
-        static void RestoreStockMainScreenControls()
-        {
-            for (size_t i = 0; i < g_CareerUiBlankedTextCount; ++i)
-            {
-                void* const view = g_CareerUiBlankedText[i];
-                const CareerUiTextRecord* const record =
-                    FindUsableCareerUiTextRecord(view);
-                if (record)
-                    SetCareerUiStockText(view, record->text, record->viaButtonLabel);
-            }
-            g_CareerUiBlankedTextCount = 0;
-
-            for (size_t i = 0; i < g_CareerUiHiddenCaptionCount; ++i)
-                SetInputBindingUiViewActive(g_CareerUiHiddenCaptions[i], true);
-            g_CareerUiHiddenCaptionCount = 0;
-
-            for (size_t i = 0; i < g_CareerUiHiddenStockCount; ++i)
-                SetInputBindingUiViewActive(g_CareerUiHiddenStock[i], true);
-            g_CareerUiHiddenStockCount = 0;
-        }
-
-        static void RefreshCareerUiPageText();
-
-        // The active flag hides the plate and blocks input, but not text -- the
-        // page's own strings would otherwise keep drawing over the restored
-        // menu after Back, exactly as the stock captions do over the page.
-        static void SetCareerUiPageVisible(bool visible)
-        {
-            SetInputBindingUiViewActive(g_CareerUiPlate, visible);
-            SetInputBindingUiViewActive(g_CareerUiTitleLabel, visible);
-            SetInputBindingUiViewActive(g_CareerUiBackButton, visible);
-            for (void* label : g_CareerUiCaptions)
-                SetInputBindingUiViewActive(label, visible);
-            for (void* label : g_CareerUiValues)
-                SetInputBindingUiViewActive(label, visible);
-
-            SetInputBindingUiLabelText(g_CareerUiTitleLabel, visible ? "CAREER" : "");
-            if (g_BzrFn_SetButtonLabel && g_CareerUiBackButton)
-                g_BzrFn_SetButtonLabel(g_CareerUiBackButton, visible ? "Back" : "");
-
-            if (visible)
-            {
-                RefreshCareerUiPageText();
-            }
-            else
-            {
-                for (void* label : g_CareerUiCaptions)
-                    SetInputBindingUiLabelText(label, "");
-                for (void* label : g_CareerUiValues)
-                    SetInputBindingUiLabelText(label, "");
-            }
-        }
-
-        // Re-assert the closed page's hidden state.
-        //
-        // TickCareerUi runs only from the cUI_MainScreen ctor hook, so the hide
-        // it applies is the last word only for as long as construction lasts.
-        // The shell re-activates the overlay's children when it actually
-        // presents the screen -- which on a cold start is after the intro, long
-        // after the final ctor phase -- and the page came back with the plate
-        // (-200,-100,1840,1280, full-bleed by design) drawn over the closed
-        // menu. That reads as "the main menu lost its background", because the
-        // plate covers the stock buttons' frames while their captions still
-        // draw over it: text on this screen ignores the active flag, which is
-        // the same reason Back's caption stayed blank while its frame returned.
-        //
-        // Text blanking survives re-activation; the active flag does not. So it
-        // has to be re-applied from something the shell itself runs while the
-        // menu is up, not once at construction. Only the flag is touched here --
-        // re-running the text half would push "" through the label hooks every
-        // frame and churn the text memory Back restores from.
-        static bool IsCareerUiTitleScreenLive()
-        {
-            void* const mainScreen = ReadMainScreenSingleton();
-            if (!mainScreen || !g_CareerUiOverlay)
-                return false;
-            return MainScreenViewNameMatches(mainScreen, "Top Screen") &&
-                   MainScreenViewNameMatches(g_CareerUiOverlay, "MainScreen_Overlay");
-        }
-
-        // Is the cached page still part of the live child tree? The name check
-        // above proves the screen and the overlay are alive, but not the
-        // widgets under them: returning to the title from a game (FirstGAS)
-        // rebuilds the overlay's children while the overlay pointer and its
-        // name stay put. The cached plate is then a freed allocation.
-        //
-        // Deliberately not UiViewHasChild: that helper caps the vector at 64
-        // slots as a garbage guard, and this overlay legitimately carries more
-        // than that once the 20-row career page is built over the stock menu.
-        static bool IsCareerUiPlateAttached()
-        {
-            if (!g_CareerUiOverlay || !g_CareerUiPlate)
-                return false;
-
-            __try
-            {
-                auto* const bytes = reinterpret_cast<uint8_t*>(g_CareerUiOverlay);
-                void** const begin =
-                    *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
-                void** const end =
-                    *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
-                if (!begin || !end || begin >= end || (end - begin) >= 256)
-                    return false;
-
-                for (void** slot = begin; slot != end; ++slot)
-                    if (*slot == g_CareerUiPlate)
-                        return true;
-                return false;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
-        static void ReassertCareerUiHiddenState()
-        {
-            if (g_CareerUiPageActive || !g_CareerUiPlate)
-                return;
-            // SetTooltip is a process-wide hook. After Click_MultiPlayer the
-            // shell still writes tooltips, and re-hiding career widgets then
-            // walks a plate whose Ogre element is already gone -- SetActive
-            // calls through nullptr (eip=0 at 0x007D3344). Only re-assert
-            // while the title screen is still the live singleton.
-            if (!IsCareerUiTitleScreenLive())
-                return;
-
-            // ...and only while the cached widgets still belong to the live
-            // tree. Without this the same call faults through a freed vtable
-            // instead (eip garbage at the same 0x007D3344 call site) in the
-            // window between the menu rebuild and the next TickCareerUi, which
-            // is what CareerUiSetActiveHook's __except was left to absorb.
-            if (!IsCareerUiPlateAttached())
-            {
-                static bool s_detachedLogged = false;
-                if (!s_detachedLogged)
-                {
-                    s_detachedLogged = true;
-                    Log(L"[CAREERUI] page widgets detached from overlay 0x%08X; "
-                        L"skipping hidden-state reassert until reinjection\n",
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CareerUiOverlay)));
-                }
-                return;
-            }
-
-            SetInputBindingUiViewActive(g_CareerUiPlate, false);
-            SetInputBindingUiViewActive(g_CareerUiTitleLabel, false);
-            SetInputBindingUiViewActive(g_CareerUiBackButton, false);
-            for (void* label : g_CareerUiCaptions)
-                SetInputBindingUiViewActive(label, false);
-            for (void* label : g_CareerUiValues)
-                SetInputBindingUiViewActive(label, false);
-        }
-
-        static void OnCareerUiBackClicked();
-
-        static bool EnsureCareerUiPageWidgets()
-        {
-            if (!g_CareerUiOverlay)
-                return false;
-
-            char controlName[64] = {};
-
-            if (!g_CareerUiPlate)
-            {
-                _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerPlate");
-                CreateInputBindingUiPlate(g_CareerUiPlate, g_CareerUiOverlay, controlName,
-                                          kCareerPlateX, kCareerPlateY,
-                                          kCareerPlateW, kCareerPlateH);
-                // Backing only. Without this the plate consumes the Back click,
-                // because it is an earlier leaf sibling covering the same rect.
-                SetInputBindingUiButtonEnabled(g_CareerUiPlate, false);
-            }
-
-            _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerTitle");
-            CreateInputBindingUiLabel(g_CareerUiTitleLabel, g_CareerUiOverlay, controlName,
-                                      "CAREER",
-                                      kCareerTitleX, kCareerTitleY,
-                                      kCareerTitleW, 48.0f);
-            // No text-scale call here on purpose: SetButtonTextScale is a
-            // cUI_Button method, and this is a cUI_Text. The rule below the
-            // title is what separates it, not a larger glyph size.
-
-            // No rule under the title. A uiline.png decor piece and then a thin
-            // plate were both tried: each ended up active, with the right rect,
-            // drawing no pixels at 3-5 px tall. That matches the known
-            // small-element behaviour in this UI, so the separation is left to
-            // spacing rather than shipping a widget that never renders.
-
-            CareerUiRow rows[kCareerRowCount];
-            BuildCareerUiRows(rows);
-            float rowY[kCareerRowCount];
-            ComputeCareerUiRowY(rows, rowY);
-
-            for (size_t i = 0; i < kCareerRowCount; ++i)
-            {
-                const bool header = rows[i].header;
-                _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerCap%zu", i);
-                CreateInputBindingUiLabel(g_CareerUiCaptions[i], g_CareerUiOverlay, controlName,
-                                          rows[i].caption.c_str(),
-                                          header ? kCareerHeaderX : kCareerCaptionX,
-                                          rowY[i],
-                                          kCareerColumnW, kCareerLineH);
-
-                _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerVal%zu", i);
-                CreateInputBindingUiLabel(g_CareerUiValues[i], g_CareerUiOverlay, controlName,
-                                          rows[i].value.c_str(),
-                                          kCareerValueX, rowY[i],
-                                          kCareerColumnW, kCareerLineH);
-            }
-
-            _snprintf_s(controlName, _TRUNCATE, "OpenShimCareerBack");
-            CreateInputBindingUiButton(g_CareerUiBackButton, g_CareerUiOverlay, controlName,
-                                       "Back",
-                                       720.0f - kCareerBackW * 0.5f, kCareerBackY,
-                                       kCareerBackW, kCareerBackH,
-                                       reinterpret_cast<void*>(OnCareerUiBackClicked));
-            if (g_BzrFn_SetButtonTextScale)
-                g_BzrFn_SetButtonTextScale(g_CareerUiBackButton, 1.0f);
-            if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(g_CareerUiBackButton, "tomnoff.png");
-            if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(g_CareerUiBackButton, "tomnon.png");
-            if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(g_CareerUiBackButton, "tomnclk.png");
-
-            return g_CareerUiTitleLabel != nullptr && g_CareerUiBackButton != nullptr;
-        }
-
-        static void RefreshCareerUiPageText()
-        {
-            CareerUiRow rows[kCareerRowCount];
-            BuildCareerUiRows(rows);
-            for (size_t i = 0; i < kCareerRowCount; ++i)
-            {
-                SetInputBindingUiLabelText(g_CareerUiCaptions[i], rows[i].caption.c_str());
-                SetInputBindingUiLabelText(g_CareerUiValues[i], rows[i].value.c_str());
-            }
-        }
-
-        static void OpenCareerUiPage()
-        {
-            if (g_CareerUiPageActive)
-                return;
-            if (!EnsureCareerUiPageWidgets())
-            {
-                Log(L"[CAREERUI] page widgets unavailable; leaving the title screen alone\n");
-                return;
-            }
-
-            HideStockMainScreenControls();
-            // The Career button is a stock-overlay sibling, so it is hidden
-            // along with the rest; that is deliberate.
-            //
-            // Set before showing, not after: the SetActive hook vetoes
-            // activation of page widgets while this flag is false, so showing
-            // first would be quietly turned back off.
-            g_CareerUiPageActive = true;
-            SetCareerUiPageVisible(true);
-            Log(L"[CAREERUI] opened (hid %zu stock control(s), %zu caption(s))\n",
-                g_CareerUiHiddenStockCount, g_CareerUiHiddenCaptionCount);
-        }
-
-        static void CloseCareerUiPage()
-        {
-            if (!g_CareerUiPageActive)
-                return;
-            SetCareerUiPageVisible(false);
-            RestoreStockMainScreenControls();
-            g_CareerUiPageActive = false;
-            Log(L"[CAREERUI] closed\n");
-        }
-
+        // The Career page is its own shell screen (career_screen.cpp); the
+        // title-screen button only asks the shell to go there, the same way
+        // the stock Single Player and Options buttons do.
         static void __cdecl CareerUiButtonClick()
         {
-            OpenCareerUiPage();
-        }
-
-        static void OnCareerUiBackClicked()
-        {
-            CloseCareerUiPage();
+            if (!ShellScreens::RequestScreen(ReadMainScreenSingleton(), ShellScreens::kCareerScreenId))
+                Log(L"[CAREERUI] could not request the Career screen\n");
         }
 
         // Drop every cached pointer. Called when the singleton changes or goes
@@ -6337,17 +5376,6 @@ namespace BZROpenShim
             g_CareerUiMainScreen = nullptr;
             g_CareerUiOverlay = nullptr;
             g_CareerUiButton = nullptr;
-            g_CareerUiPlate = nullptr;
-            g_CareerUiTitleLabel = nullptr;
-            g_CareerUiBackButton = nullptr;
-            for (void*& label : g_CareerUiCaptions)
-                label = nullptr;
-            for (void*& label : g_CareerUiValues)
-                label = nullptr;
-            g_CareerUiHiddenStockCount = 0;
-            g_CareerUiHiddenCaptionCount = 0;
-            g_CareerUiBlankedTextCount = 0;
-            g_CareerUiPageActive = false;
         }
 
         // Runs from the MainScreen destructor detour after the engine's
@@ -6359,9 +5387,8 @@ namespace BZROpenShim
         {
             if (!g_CareerUiMainScreen)
                 return;
-            Log(L"[CAREERUI] title screen 0x%08X destroyed; dropping cached widgets%hs\n",
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)),
-                g_CareerUiPageActive ? " (the page was open)" : "");
+            Log(L"[CAREERUI] title screen 0x%08X destroyed; dropping cached widgets\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(screen)));
             ResetCareerUiState();
         }
 
@@ -6394,26 +5421,6 @@ namespace BZROpenShim
             {
                 return false;
             }
-        }
-
-        // Discard text records for controls that are no longer children of the
-        // live overlay. A title-menu rebuild can keep the MainScreen singleton
-        // (and sometimes the overlay) while replacing every button below it.
-        // Without compaction, dead controls eventually fill the fixed record
-        // table and later localized captions can no longer be restored.
-        static void PruneDetachedCareerUiTextRecords(void* overlay)
-        {
-            size_t out = 0;
-            for (size_t i = 0; i < g_CareerUiTextMemoryCount; ++i)
-            {
-                if (!UiViewHasChild(overlay, g_CareerUiTextMemory[i].view))
-                    continue;
-                if (out != i)
-                    g_CareerUiTextMemory[out] = g_CareerUiTextMemory[i];
-                ++out;
-            }
-            g_CareerUiTextMemoryCount = out;
-            g_CareerUiTextMemoryFull = false;
         }
 
         static void EnsureCareerUiButton()
@@ -6506,32 +5513,15 @@ namespace BZROpenShim
                 ResetCareerUiState();
                 g_CareerUiMainScreen = mainScreen;
                 g_CareerUiOverlay = overlay;
-                PruneDetachedCareerUiTextRecords(overlay);
             }
 
             EnsureCareerUiButton();
-
-            // Build the page here, with the screen, rather than lazily on the
-            // first click. A button created inside the click dispatch renders
-            // its caption but not its frame -- the Back button came out as bare
-            // text on the plate -- while the same construction during screen
-            // setup renders correctly, as the Career button itself does. Built
-            // hidden, so nothing is shown until the page is opened.
-            if (!g_CareerUiBackButton)
-                EnsureCareerUiPageWidgets();
-
-            // Re-hidden on every setup pass, not just after building. The setup
-            // routine runs for several phases and a later one re-activates the
-            // overlay's children: built-then-hidden once, the page came back
-            // vis=1 and the plate covered the closed menu. This hook runs after
-            // each phase, so the last word is always ours.
-            if (!g_CareerUiPageActive && g_CareerUiBackButton)
-                SetCareerUiPageVisible(false);
         }
     }
 
     void EnsureInputBindingPopulateHookScaffold()
     {
+        if (!OptionsUiAddressesBound()) return;
         InitializeInputBindingUiScaffold();
 
         // The settings page reuses the hooked input screen as its host, so
@@ -6539,7 +5529,7 @@ namespace BZROpenShim
         if (!ShouldEnableInputBindingUiReplacement() && !ShouldEnableShimSettingsUi())
             return;
 
-        EnsureOptionsScreenDtorHook(kOptionsInputDtorAddr,
+        EnsureOptionsScreenDtorHook(g_OptionsInputDtorAddr,
                                     g_OptionsInputDtorDetour,
                                     reinterpret_cast<void*>(OptionsInputDtorHook),
                                     g_BzrFn_OptionsInputDtorOriginal,
@@ -6550,10 +5540,9 @@ namespace BZROpenShim
         if (g_InputBindingUiPopulateHookInstalled && g_InputBindingUiKeyReleasedHookInstalled)
             return;
 
-        const uint8_t kExpectedOptionsInputCtorBytes[kOptionsInputCtorDetourLen] =
-        {
-            0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x73, 0x12, 0x86, 0x00
-        };
+        // push ebp; mov ebp,esp; push -1; push offset SEH handler -- read live.
+        uint8_t kExpectedOptionsInputCtorBytes[kOptionsInputCtorDetourLen] = {};
+        CopyLivePrologue(g_OptionsInputCtorAddr, kExpectedOptionsInputCtorBytes, sizeof(kExpectedOptionsInputCtorBytes));
         const uint8_t kExpectedOptionsInputKeyReleasedBytes[kOptionsInputKeyReleasedDetourLen] =
         {
             0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x54, 0x01, 0x00, 0x00
@@ -6566,28 +5555,28 @@ namespace BZROpenShim
         // keys, and a retry never re-validates bytes on an already-patched site.
         if (!g_InputBindingUiKeyReleasedHookInstalled)
         {
-            if (!ExpectedBytesMatchAt(kOptionsInputKeyReleasedAddr,
+            if (!ExpectedBytesMatchAt(g_OptionsInputKeyReleasedAddr,
                                       kExpectedOptionsInputKeyReleasedBytes,
                                       sizeof(kExpectedOptionsInputKeyReleasedBytes)))
             {
                 if (!g_InputBindingUiPopulateHookMismatchLogged)
                 {
                     Log(L"[INPUTUI] KeyReleased entry bytes mismatch at 0x%08X; input UI replacement remains disabled\n",
-                        static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
+                        static_cast<uint32_t>(g_OptionsInputKeyReleasedAddr));
                     g_InputBindingUiPopulateHookMismatchLogged = true;
                 }
                 return;
             }
 
             if (!InstallInlineDetour32(g_OptionsInputKeyReleasedDetour,
-                                       kOptionsInputKeyReleasedAddr,
+                                       g_OptionsInputKeyReleasedAddr,
                                        reinterpret_cast<void*>(OptionsInputKeyReleasedHook),
                                        kOptionsInputKeyReleasedDetourLen,
                                        kExpectedOptionsInputKeyReleasedBytes,
                                        sizeof(kExpectedOptionsInputKeyReleasedBytes)))
             {
                 Log(L"[INPUTUI] Failed installing key-release hook at 0x%08X\n",
-                    static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
+                    static_cast<uint32_t>(g_OptionsInputKeyReleasedAddr));
                 return;
             }
 
@@ -6600,28 +5589,28 @@ namespace BZROpenShim
 
         if (!g_InputBindingUiPopulateHookInstalled)
         {
-            if (!ExpectedBytesMatchAt(kOptionsInputCtorAddr,
+            if (!ExpectedBytesMatchAt(g_OptionsInputCtorAddr,
                                       kExpectedOptionsInputCtorBytes,
                                       sizeof(kExpectedOptionsInputCtorBytes)))
             {
                 if (!g_InputBindingUiPopulateHookMismatchLogged)
                 {
                     Log(L"[INPUTUI] Constructor entry bytes mismatch at 0x%08X; input UI replacement remains disabled\n",
-                        static_cast<uint32_t>(kOptionsInputCtorAddr));
+                        static_cast<uint32_t>(g_OptionsInputCtorAddr));
                     g_InputBindingUiPopulateHookMismatchLogged = true;
                 }
                 return;
             }
 
             if (!InstallInlineDetour32(g_OptionsInputPopulateUiDetour,
-                                       kOptionsInputCtorAddr,
+                                       g_OptionsInputCtorAddr,
                                        reinterpret_cast<void*>(OptionsInputPopulateUiHook),
                                        kOptionsInputCtorDetourLen,
                                        kExpectedOptionsInputCtorBytes,
                                        sizeof(kExpectedOptionsInputCtorBytes)))
             {
                 Log(L"[INPUTUI] Failed installing constructor hook at 0x%08X\n",
-                    static_cast<uint32_t>(kOptionsInputCtorAddr));
+                    static_cast<uint32_t>(g_OptionsInputCtorAddr));
                 return;
             }
 
@@ -6634,9 +5623,9 @@ namespace BZROpenShim
 
         g_InputBindingUiPopulateHookMismatchLogged = false;
         Log(L"[INPUTUI] Installed constructor hook entry=0x%08X trampoline=0x%08X keyRelease=0x%08X\n",
-            static_cast<uint32_t>(kOptionsInputCtorAddr),
+            static_cast<uint32_t>(g_OptionsInputCtorAddr),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OptionsInputPopulateUiDetour.trampoline)),
-            static_cast<uint32_t>(kOptionsInputKeyReleasedAddr));
+            static_cast<uint32_t>(g_OptionsInputKeyReleasedAddr));
     }
 
     // Thin public wrapper so features outside the settings page (the lobby
@@ -6661,18 +5650,25 @@ namespace BZROpenShim
     // get a new title-screen button either.
     void EnsureMainScreenCtorHookScaffold()
     {
-        if (!ShouldEnableShimSettingsUi())
+        if (!ShouldEnableShimSettingsUi() || !OptionsUiAddressesBound())
             return;
         if (g_MainScreenCtorHookInstalled || g_MainScreenCtorHookAttempted)
             return;
         g_MainScreenCtorHookAttempted = true;
 
-        const uint8_t kExpectedMainScreenCtorBytes[kMainScreenCtorDetourLen] =
+        // The button leads to the Career screen; without the screen there is
+        // nothing to put on the title menu.
+        if (!RegisterCareerScreen())
         {
-            0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x12, 0xEC, 0x85, 0x00
-        };
+            Log(L"[CAREERUI] Career screen unavailable on this build; no title-screen button\n");
+            return;
+        }
 
-        if (!ExpectedBytesMatchAt(kMainScreenCtorAddr,
+        // push ebp; mov ebp,esp; push -1; push offset SEH handler -- read live.
+        uint8_t kExpectedMainScreenCtorBytes[kMainScreenCtorDetourLen] = {};
+        CopyLivePrologue(g_MainScreenCtorAddr, kExpectedMainScreenCtorBytes, sizeof(kExpectedMainScreenCtorBytes));
+
+        if (!ExpectedBytesMatchAt(g_MainScreenCtorAddr,
                                   kExpectedMainScreenCtorBytes,
                                   sizeof(kExpectedMainScreenCtorBytes)))
         {
@@ -6680,20 +5676,20 @@ namespace BZROpenShim
             {
                 g_MainScreenCtorMismatchLogged = true;
                 Log(L"[CAREERUI] MainScreen ctor bytes mismatch at 0x%08X; Career button disabled\n",
-                    static_cast<uint32_t>(kMainScreenCtorAddr));
+                    static_cast<uint32_t>(g_MainScreenCtorAddr));
             }
             return;
         }
 
         if (!InstallInlineDetour32(g_MainScreenCtorDetour,
-                                   kMainScreenCtorAddr,
+                                   g_MainScreenCtorAddr,
                                    reinterpret_cast<void*>(MainScreenCtorHook),
                                    kMainScreenCtorDetourLen,
                                    kExpectedMainScreenCtorBytes,
                                    sizeof(kExpectedMainScreenCtorBytes)))
         {
             Log(L"[CAREERUI] Failed installing MainScreen ctor hook at 0x%08X\n",
-                static_cast<uint32_t>(kMainScreenCtorAddr));
+                static_cast<uint32_t>(g_MainScreenCtorAddr));
             return;
         }
 
@@ -6702,10 +5698,9 @@ namespace BZROpenShim
         g_MainScreenCtorHookInstalled = (g_BzrFn_MainScreenCtorOriginal != nullptr);
 
         Log(L"[CAREERUI] MainScreen setup hook installed entry=0x%08X trampoline=0x%08X\n",
-            static_cast<uint32_t>(kMainScreenCtorAddr),
+            static_cast<uint32_t>(g_MainScreenCtorAddr),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_MainScreenCtorDetour.trampoline)));
 
-        InstallCareerUiTextRecorders();
         // The cached widgets die with the screen; learn about it from the
         // destructor rather than from the next setup pass.
         if (EnsureMainScreenDestroyedHook() &&
@@ -6720,81 +5715,23 @@ namespace BZROpenShim
         }
     }
 
-    // Observation-only detours on the two string setters. They record what the
-    // shell writes to direct children of MainScreen_Overlay so Back can put the
-    // localized captions back; nothing else about the call is changed.
-    //
-    // Failing to install either one is not fatal: an unrecorded caption is
-    // simply never blanked, so the page opens with that one label still drawn
-    // rather than with a menu that cannot be restored.
-    void InstallCareerUiTextRecorders()
-    {
-        if (!g_CareerUiSetButtonLabelOriginal &&
-            ExpectedBytesMatchAt(kCareerUiSetButtonLabelAddr,
-                                 kExpectedSetButtonLabelBytes,
-                                 sizeof(kExpectedSetButtonLabelBytes)) &&
-            InstallInlineDetour32(g_CareerUiSetButtonLabelDetour,
-                                  kCareerUiSetButtonLabelAddr,
-                                  reinterpret_cast<void*>(CareerUiSetButtonLabelHook),
-                                  kCareerUiTextSetterDetourLen,
-                                  kExpectedSetButtonLabelBytes,
-                                  kCareerUiTextSetterDetourLen))
-        {
-            g_CareerUiSetButtonLabelOriginal =
-                reinterpret_cast<FnUiSetStr>(g_CareerUiSetButtonLabelDetour.trampoline);
-        }
-
-        if (!g_CareerUiSetTooltipOriginal &&
-            ExpectedBytesMatchAt(kCareerUiSetTooltipAddr,
-                                 kExpectedSetTooltipBytes,
-                                 sizeof(kExpectedSetTooltipBytes)) &&
-            InstallInlineDetour32(g_CareerUiSetTooltipDetour,
-                                  kCareerUiSetTooltipAddr,
-                                  reinterpret_cast<void*>(CareerUiSetTooltipHook),
-                                  kCareerUiTextSetterDetourLen,
-                                  kExpectedSetTooltipBytes,
-                                  kCareerUiTextSetterDetourLen))
-        {
-            g_CareerUiSetTooltipOriginal =
-                reinterpret_cast<FnUiSetStr>(g_CareerUiSetTooltipDetour.trampoline);
-        }
-
-        if (!g_CareerUiSetActiveOriginal &&
-            ExpectedBytesMatchAt(kCareerUiSetActiveAddr,
-                                 kExpectedSetActiveBytes,
-                                 sizeof(kExpectedSetActiveBytes)) &&
-            InstallInlineDetour32(g_CareerUiSetActiveDetour,
-                                  kCareerUiSetActiveAddr,
-                                  reinterpret_cast<void*>(CareerUiSetActiveHook),
-                                  kCareerUiTextSetterDetourLen,
-                                  kExpectedSetActiveBytes,
-                                  kCareerUiTextSetterDetourLen))
-        {
-            g_CareerUiSetActiveOriginal =
-                reinterpret_cast<FnUiSetActive>(g_CareerUiSetActiveDetour.trampoline);
-        }
-
-        // Armed from here rather than from the setup hook. Exit Game, Options,
-        // Mods and MPStatus_text are labelled before that hook ever runs, so
-        // arming there left exactly those four captions unrecorded -- and
-        // therefore still drawn over the page. The parent-name check is what
-        // keeps this scoped to the title screen, not the arming point.
-        g_CareerUiTextRecordingArmed = true;
-
-        Log(L"[CAREERUI] text recorders: buttonLabel=%hs tooltip=%hs setActive=%hs\n",
-            g_CareerUiSetButtonLabelOriginal ? "installed" : "UNAVAILABLE",
-            g_CareerUiSetTooltipOriginal ? "installed" : "UNAVAILABLE",
-            g_CareerUiSetActiveOriginal ? "installed" : "UNAVAILABLE");
-    }
-
     void EnsureOptionsParentCtorHookScaffold()
     {
+        if (!OptionsUiAddressesBound()) return;
         if (!ShouldEnableShimSettingsUi())
             return;
 
         EnsureMainScreenCtorHookScaffold();
 
-        EnsureOptionsScreenDtorHook(kOptionsParentDtorAddr,
+        // The OpenShim button leads to OpenShim's own screens; a build that
+        // cannot host them gets no button rather than a dead one.
+        if (!RegisterShimOptionsScreens())
+        {
+            Log(L"[SETTINGSUI] OpenShim Options screens unavailable; Options left stock\n");
+            return;
+        }
+
+        EnsureOptionsScreenDtorHook(g_OptionsParentDtorAddr,
                                     g_OptionsParentDtorDetour,
                                     reinterpret_cast<void*>(OptionsParentDtorHook),
                                     g_BzrFn_OptionsParentDtorOriginal,
@@ -6805,33 +5742,32 @@ namespace BZROpenShim
         if (g_OptionsParentHookInstalled)
             return;
 
-        const uint8_t kExpectedOptionsParentCtorBytes[kOptionsParentCtorDetourLen] =
-        {
-            0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x60, 0x13, 0x86, 0x00
-        };
+        // push ebp; mov ebp,esp; push -1; push offset SEH handler -- read live.
+        uint8_t kExpectedOptionsParentCtorBytes[kOptionsParentCtorDetourLen] = {};
+        CopyLivePrologue(g_OptionsParentCtorAddr, kExpectedOptionsParentCtorBytes, sizeof(kExpectedOptionsParentCtorBytes));
 
-        if (!ExpectedBytesMatchAt(kOptionsParentCtorAddr,
+        if (!ExpectedBytesMatchAt(g_OptionsParentCtorAddr,
                                   kExpectedOptionsParentCtorBytes,
                                   sizeof(kExpectedOptionsParentCtorBytes)))
         {
             if (!g_OptionsParentHookMismatchLogged)
             {
                 Log(L"[SETTINGSUI] Options ctor bytes mismatch at 0x%08X; settings UI disabled\n",
-                    static_cast<uint32_t>(kOptionsParentCtorAddr));
+                    static_cast<uint32_t>(g_OptionsParentCtorAddr));
                 g_OptionsParentHookMismatchLogged = true;
             }
             return;
         }
 
         if (!InstallInlineDetour32(g_OptionsParentCtorDetour,
-                                   kOptionsParentCtorAddr,
+                                   g_OptionsParentCtorAddr,
                                    reinterpret_cast<void*>(OptionsParentCtorHook),
                                    kOptionsParentCtorDetourLen,
                                    kExpectedOptionsParentCtorBytes,
                                    sizeof(kExpectedOptionsParentCtorBytes)))
         {
             Log(L"[SETTINGSUI] Failed installing options ctor hook at 0x%08X\n",
-                static_cast<uint32_t>(kOptionsParentCtorAddr));
+                static_cast<uint32_t>(g_OptionsParentCtorAddr));
             return;
         }
 
@@ -6841,7 +5777,7 @@ namespace BZROpenShim
         if (g_OptionsParentHookInstalled)
         {
             Log(L"[SETTINGSUI] Installed options ctor hook entry=0x%08X trampoline=0x%08X\n",
-                static_cast<uint32_t>(kOptionsParentCtorAddr),
+                static_cast<uint32_t>(g_OptionsParentCtorAddr),
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_OptionsParentCtorDetour.trampoline)));
         }
     }
@@ -6862,12 +5798,6 @@ namespace BZROpenShim
                                                 uint32_t key,
                                                 uint32_t keyCode)
     {
-        // A stock ESC backs out of the settings page without our Back button;
-        // hand the host screen back to the binding UI before the stock handler
-        // navigates away.
-        if (g_ShimSettingsPageActive && key == VK_ESCAPE)
-            DeactivateShimSettingsPage();
-
         if (HandleCapturedInputBindingKey(thisPtr, key, keyCode))
             return true;
 
@@ -6891,70 +5821,6 @@ namespace BZROpenShim
     // Runs once per title-screen construction. The stock constructor builds
     // the whole menu (including MainScreen_Overlay and the singleton the
     // resolver reads), so injection has to happen after it returns, not before.
-    // Forces our own page widgets inactive while the page is closed. Only ever
-    // turns activation off, so nothing else on the screen is affected.
-    void __fastcall CareerUiSetActiveHook(void* thisPtr, void* /*edx*/, uint8_t value)
-    {
-        const bool isCareerPageWidget = IsCareerUiPageWidget(thisPtr);
-        uint8_t out = value;
-        if (out && !g_CareerUiPageActive && isCareerPageWidget)
-            out = 0;
-        if (!g_CareerUiSetActiveOriginal || !thisPtr)
-            return;
-
-        // SetActive is hooked process-wide, so faults from stock views must
-        // remain loud. Only our cached page widgets can race title-screen
-        // teardown after the liveness check in ReassertCareerUiHiddenState.
-        if (!isCareerPageWidget)
-        {
-            g_CareerUiSetActiveOriginal(thisPtr, out);
-            return;
-        }
-
-        __try
-        {
-            g_CareerUiSetActiveOriginal(thisPtr, out);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            static bool s_teardownFaultLogged = false;
-            if (!s_teardownFaultLogged)
-            {
-                s_teardownFaultLogged = true;
-                Log(L"[CAREERUI] ignored SetActive fault on a stale injected widget during title-screen teardown\n");
-            }
-            ResetCareerUiState();
-        }
-    }
-
-    // Both hooks record the incoming string and then, if the page is up and
-    // this is a control the page blanked, write "" through instead. The new
-    // value is still what Back restores; it just does not get drawn over the
-    // page in the meantime.
-    void __fastcall CareerUiSetButtonLabelHook(void* thisPtr, void* /*edx*/, const char* text)
-    {
-        RecordCareerUiText(thisPtr, text, true);
-        const bool hold = !g_CareerUiTextMemorySuppressed && IsCareerUiBlankedView(thisPtr);
-        if (g_CareerUiSetButtonLabelOriginal)
-            g_CareerUiSetButtonLabelOriginal(thisPtr, hold ? "" : text);
-    }
-
-    void __fastcall CareerUiSetTooltipHook(void* thisPtr, void* /*edx*/, const char* text)
-    {
-        RecordCareerUiText(thisPtr, text, false);
-        const bool hold = !g_CareerUiTextMemorySuppressed && IsCareerUiBlankedView(thisPtr);
-        if (g_CareerUiSetTooltipOriginal)
-            g_CareerUiSetTooltipOriginal(thisPtr, hold ? "" : text);
-
-        // The main menu's per-frame refresh blanks the MPStatus tooltip on
-        // every pass, so this hook is a path the shell drives continuously
-        // while the menu is up -- which is what the closed career page needs to
-        // stay hidden after the shell re-activates the overlay's children. It
-        // is a field write per widget and self-cancels the moment the page is
-        // opened, so no new detour is needed to carry it.
-        ReassertCareerUiHiddenState();
-    }
-
     void __fastcall MainScreenCtorHook(void* thisPtr, void* /*edx*/, char phase)
     {
         if (g_BzrFn_MainScreenCtorOriginal)

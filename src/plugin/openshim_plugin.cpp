@@ -33,6 +33,7 @@
 #include "file_io_hooks.h"
 #include "autosave.h"
 #include "dx11_colorspace_diagnostic.h"
+#include "d3d11_device_loss_recovery.h"
 #include "dx11_enhanced_fxaa.h"
 #include "dx11_scene_depth.h"
 #include "terrain_proxy.h"
@@ -105,6 +106,7 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializeWalkerCockpitTrace());
     PATCH_STAGE(BZROpenShim::InitializeOgreAnimationProfiler());
     PATCH_STAGE(BZROpenShim::InitializeDx11ColorSpaceDiagnostic());
+    PATCH_STAGE(BZROpenShim::InitializeD3D11DeviceLossRecovery());
     PATCH_STAGE(BZROpenShim::InitializeDx11EnhancedFxaa());
     // Phase A depth qualification: observation only, and off unless asked
     // for. Starts after the FXAA path so that when both are enabled the
@@ -152,10 +154,9 @@ static unsigned __stdcall PatchThreadProc(void*)
 
     // AutoSave stacks its main-thread update hook after the normal patch set so
     // it chains whichever world-update target (stock or OpenShim) is active.
-    // Never install version-specific runtime addresses if the core compatibility
-    // check failed.
+    // Its addresses are patches.json rows; it stands down itself when they do
+    // not bind on this build.
     RunPatchStage("BZROpenShim::InitializeAutoSave()", [] {
-        if (!BZROpenShim::IsCompatibleGameVersion()) return;
         if (!BZROpenShim::InitializeAutoSave())
         {
             BZROpenShim::LogShimA(

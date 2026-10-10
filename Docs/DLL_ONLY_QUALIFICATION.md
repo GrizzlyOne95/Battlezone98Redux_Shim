@@ -69,8 +69,8 @@ decisions are exercised.
 | # | Step | Expected |
 |---|------|----------|
 | 1 | Launch game | No crash, reaches main menu; `openshim.log` contains `[assets] Asset pack state=NotDetected ... destructionChunks=0 enhancedResources=0` |
-| 2 | Open **OpenShim Settings** (Options → OpenShim) | Header reads `OpenShim Settings`; status line shows `Runtime: Active Version: <ver> Game: Steam/GOG 2.2.301 Assets: NOT DETECTED` or similar; footer shows `Asset Pack: NOT DETECTED — Asset-dependent features are unavailable.` |
-| 3 | Scroll settings rows | `Death Chunk Meshes`, `DX11 FXAA`, `DX11 Local Lights` show `Unavailable` and hover shows `Unavailable — OpenShim asset pack not detected`; clicking them does not cycle and status shows the same reason |
+| 2 | Open **OpenShim Options** (Options → OpenShim Options) | Hub title reads `OPENSHIM OPTIONS`; the info box shows the asset-pack state (`NOT DETECTED` or similar) and the bottom line shows `OpenShim <ver>   Game: Steam/GOG 2.2.301` |
+| 3 | Open the **Video** category | `DX11 FXAA` and `DX11 Local Lights` show `Unavailable` and hover shows `Unavailable: Enhanced renderer resources were not detected.`; clicking them does not cycle and the info box shows the same reason. `Death Chunk Meshes` stays usable (no pack needed) |
 | 4 | Launch **Instant Action** (stock map) | Mission loads normally; stock rendering, stock terrain |
 | 5 | Destroy several units / buildings | No crash, no invalid Ogre access, no `chunkMesh` debris (stock chunk behavior only); `openshim.log` shows at most one `[CHUNKMESH] Chunk mesh proxy requested but asset capability unavailable` line, not per-frame spam |
 | 6 | Use player weapons / movement / camera | Normal |

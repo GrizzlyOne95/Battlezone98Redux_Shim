@@ -126,7 +126,17 @@ namespace BZROpenShim
         // skipped every ordnance in the list. It stayed invisible because
         // TeamFilterConfig defaults affectAllies/affectEnemies both true, which
         // short-circuits to true before the read is ever reached.
-        constexpr uintptr_t kOrdnanceListAddr = 0x0072665C;
+        //
+        // The ordnance list itself is the std::list<Ordnance*> the Ordnance
+        // ctor/dtor maintain (0x009C908C on 2.2.301). It is taken from the
+        // `mov ecx, offset list` that stock ShieldTower::Simulate's own
+        // ordnance scan opens with (the ShieldTowerOrdnanceScan row). The
+        // literal that used to stand here, 0x0072665C, pointed into .text in
+        // the middle of an instruction, so the filtered path's ordnance pass
+        // read garbage and faulted into its __except: team-filtered shield
+        // towers never deflected ordnance and team-filtered magnet mines never
+        // attracted it.
+        uint32_t g_OrdnanceListAddr = 0;
 
         constexpr size_t kShieldTowerClassShieldMinXOffset = 0x160;
 
@@ -176,37 +186,37 @@ namespace BZROpenShim
         // (FUN_005b0e40, 0x005B1067-0x005B1247), read from the GOG image.
         // Debris: thiscall on the global at 0x00950190 (const double pos[3],
         // const float vel[3], int 0), ret 0xC, run 20 times.
-        constexpr uintptr_t kGogProximityMineDebrisAddr = 0x004927D0;
+        uint32_t g_ProximityMineDebrisAddr = 0;
 
-        constexpr uintptr_t kGogProximityMineDebrisOwnerAddr = 0x00950190;
+        uint32_t g_ProximityMineDebrisOwnerAddr = 0;
 
         // cdecl (float x, float z, float 3.0).
-        constexpr uintptr_t kGogProximityMineGroundFxAddr = 0x007809D0;
+        uint32_t g_ProximityMineGroundFxAddr = 0;
 
         // double cdecl (double x, double z): terrain height; stock stores it
         // into obj+0x50 before building the explosion.
-        constexpr uintptr_t kGogTerrainHeightAtAddr = 0x007855E0;
+        uint32_t g_TerrainHeightAtAddr = 0;
 
         // thiscall (mine): the damage owner, or null.
-        constexpr uintptr_t kGogGameObjectDamageOwnerAddr = 0x004B0400;
+        uint32_t g_GameObjectDamageOwnerAddr = 0;
 
         // ExplosionClass::Build, thiscall (explosionClass, obj+0x20, owner obj), ret 8.
-        constexpr uintptr_t kGogExplosionClassBuildAddr = 0x004CB7B0;
+        uint32_t g_ExplosionClassBuildAddr = 0;
 
         // Returns a global flag; when set, stock calls the next one on mine+0x18.
-        constexpr uintptr_t kGogProximityMineNetFlagAddr = 0x00571C40;
+        uint32_t g_ProximityMineNetFlagAddr = 0;
 
-        constexpr uintptr_t kGogProximityMineNetNotifyAddr = 0x004B8460;
+        uint32_t g_ProximityMineNetNotifyAddr = 0;
 
-        constexpr uintptr_t kGogShieldTowerSimulateAddr = 0x005D0D80;
+        uint32_t g_ShieldTowerSimulateAddr = 0;
 
-        constexpr uintptr_t kGogMagnetMineSimulateAddr = 0x0050C650;
+        uint32_t g_MagnetMineSimulateAddr = 0;
 
-        constexpr uintptr_t kGogProximityMineSimulateAddr = 0x005B0E40;
+        uint32_t g_ProximityMineSimulateAddr = 0;
 
-        constexpr uintptr_t kGogMineSimulateAddr = 0x00511460;
+        uint32_t g_MineSimulateAddr = 0;
 
-        constexpr uintptr_t kGogShieldTowerPowerUpdateAddr = 0x005D0CC0;
+        uint32_t g_ShieldTowerPowerUpdateAddr = 0;
 
         // GameObject::FriendP/EnemyP(GameObject*) — bool __thiscall(this, other).
         // Verified on live GOG exe by disassembly (int3-padded prologue; null-checks
@@ -214,21 +224,21 @@ namespace BZROpenShim
         // at 0x4DB560/0x4DB600 → Team::FriendP/EnemyP at 0x5E1310/0x5E1350). Matches the
         // 1.5 decomp bodies exactly. Previous values (0x0046BF40/0x0046BFD0) were WRONG —
         // they land mid-instruction, same failure class as the fixed GetObjByHandle.
-        constexpr uintptr_t kGogGameObjectFriendPAddr = 0x004DB510;
+        uint32_t g_GameObjectFriendPAddr = 0;
 
-        constexpr uintptr_t kGogGameObjectEnemyPAddr = 0x004DB5B0;
+        uint32_t g_GameObjectEnemyPAddr = 0;
 
-        constexpr uintptr_t kGogGameObjectAddVelocityAddr = 0x004A75B0;
+        uint32_t g_GameObjectAddVelocityAddr = 0;
 
-        constexpr uintptr_t kGogMatrixInverseAddr = 0x008203F0;
+        uint32_t g_MatrixInverseAddr = 0;
 
-        constexpr uintptr_t kGogVectorTransformAddr = 0x00820180;
+        uint32_t g_VectorTransformAddr = 0;
 
-        constexpr uintptr_t kShieldTowerSimulateVtableSlotAddr = 0x00887724;
+        uint32_t g_ShieldTowerSimulateVtableSlotAddr = 0;
 
-        constexpr uintptr_t kMagnetMineSimulateVtableSlotAddr = 0x0087D574;
+        uint32_t g_MagnetMineSimulateVtableSlotAddr = 0;
 
-        constexpr uintptr_t kProximityMineSimulateVtableSlotAddr = 0x008862B4;
+        uint32_t g_ProximityMineSimulateVtableSlotAddr = 0;
 
         struct ShieldTowerRangeSearchResults
         {
@@ -347,41 +357,97 @@ namespace BZROpenShim
             RunProximityMineFilteredSimulate(thisPtr, dt);
         }
 
+        uint32_t g_BuildingSimulateAddr = 0;
+
+        // Simulate is slot 15 of each class's vtable; the vtables are rows
+        // checked by RTTI name, so the slot addresses follow the build.
+        constexpr size_t kSimulateVtableIndex = 15;
+
+        static bool BindSimulateSlot(uint32_t vtable, const char* rttiName, uint32_t& outSlot)
+        {
+            if (!VtableTypeNameMatches(vtable, rttiName))
+            {
+                Log(L"[SHIELDODF] %hs vtable RTTI mismatch at 0x%08X; team filters stand down\n",
+                    rttiName, vtable);
+                return false;
+            }
+            outSlot = vtable + static_cast<uint32_t>(kSimulateVtableIndex * sizeof(void*));
+            return true;
+        }
+
+        static bool TeamFilterAddressesBound()
+        {
+            static const bool bound = [] {
+                uint32_t shieldVtable = 0, magnetVtable = 0, proximityVtable = 0, ordnanceScan = 0;
+                const HookEngine::EngineRow rows[] = {
+                    { "ShieldTowerSimulate", &g_ShieldTowerSimulateAddr },
+                    { "MagnetMineSimulate", &g_MagnetMineSimulateAddr },
+                    { "ProximityMineSimulate", &g_ProximityMineSimulateAddr },
+                    { "MineSimulate", &g_MineSimulateAddr },
+                    { "BuildingSimulate", &g_BuildingSimulateAddr },
+                    { "ShieldTowerPowerUpdate", &g_ShieldTowerPowerUpdateAddr },
+                    { "GameObjectFriendP", &g_GameObjectFriendPAddr },
+                    { "GameObjectEnemyP", &g_GameObjectEnemyPAddr },
+                    { "GameObjectAddVelocity", &g_GameObjectAddVelocityAddr },
+                    { "MatrixInverse", &g_MatrixInverseAddr },
+                    { "VectorTransform", &g_VectorTransformAddr },
+                    { "ShieldTowerVtable", &shieldVtable },
+                    { "MagnetMineVtable", &magnetVtable },
+                    { "ProximityMineVtable", &proximityVtable },
+                    { "ShieldTowerOrdnanceScan", &ordnanceScan },
+                };
+                if (!HookEngine::BindEngineRows("Team filter (shield towers, mines)", rows))
+                    return false;
+                if (!BindSimulateSlot(shieldVtable, ".?AVShieldTower@@", g_ShieldTowerSimulateVtableSlotAddr) ||
+                    !BindSimulateSlot(magnetVtable, ".?AVMagnetMine@@", g_MagnetMineSimulateVtableSlotAddr) ||
+                    !BindSimulateSlot(proximityVtable, ".?AVProximityMine@@", g_ProximityMineSimulateVtableSlotAddr))
+                    return false;
+                const auto* scan = reinterpret_cast<const uint8_t*>(ordnanceScan);
+                if (scan[0] != 0xB9)
+                    return false;
+                g_OrdnanceListAddr = *reinterpret_cast<const uint32_t*>(scan + 1);
+                return true;
+            }();
+            return bound;
+        }
+
         void InstallShieldTowerTeamFilterHookIfPossible()
         {
             if (g_ShieldTowerSimulateHookInstalled)
                 return;
+            if (!TeamFilterAddressesBound())
+                return;
 
             if (!g_BzrFn_ShieldTowerSimulateOriginal)
                 g_BzrFn_ShieldTowerSimulateOriginal =
-                    reinterpret_cast<FnShieldTowerSimulate>(kGogShieldTowerSimulateAddr);
+                    reinterpret_cast<FnShieldTowerSimulate>(g_ShieldTowerSimulateAddr);
             if (!g_BzrFn_BuildingSimulate)
                 g_BzrFn_BuildingSimulate =
-                    reinterpret_cast<FnShieldTowerSimulate>(kGogBuildingSimulateAddr);
+                    reinterpret_cast<FnShieldTowerSimulate>(g_BuildingSimulateAddr);
             if (!g_BzrFn_ShieldTowerPowerUpdate)
                 g_BzrFn_ShieldTowerPowerUpdate =
-                    reinterpret_cast<FnShieldTowerPowerUpdate>(kGogShieldTowerPowerUpdateAddr);
+                    reinterpret_cast<FnShieldTowerPowerUpdate>(g_ShieldTowerPowerUpdateAddr);
             if (!g_BzrFn_GameObjectFriendP)
                 g_BzrFn_GameObjectFriendP =
-                    reinterpret_cast<FnGameObjectRelation>(kGogGameObjectFriendPAddr);
+                    reinterpret_cast<FnGameObjectRelation>(g_GameObjectFriendPAddr);
             if (!g_BzrFn_GameObjectEnemyP)
                 g_BzrFn_GameObjectEnemyP =
-                    reinterpret_cast<FnGameObjectRelation>(kGogGameObjectEnemyPAddr);
+                    reinterpret_cast<FnGameObjectRelation>(g_GameObjectEnemyPAddr);
             if (!g_BzrFn_GameObjectGetObjByHandle)
                 g_BzrFn_GameObjectGetObjByHandle =
                     &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
             if (!g_BzrFn_MatrixInverse)
                 g_BzrFn_MatrixInverse =
-                    reinterpret_cast<FnMatrixInverse>(kGogMatrixInverseAddr);
+                    reinterpret_cast<FnMatrixInverse>(g_MatrixInverseAddr);
             if (!g_BzrFn_VectorTransform)
                 g_BzrFn_VectorTransform =
-                    reinterpret_cast<FnVectorTransform>(kGogVectorTransformAddr);
+                    reinterpret_cast<FnVectorTransform>(g_VectorTransformAddr);
             ResolveCollisionGridQuery();
 
             void* current = nullptr;
             __try
             {
-                current = *reinterpret_cast<void**>(kShieldTowerSimulateVtableSlotAddr);
+                current = *reinterpret_cast<void**>(g_ShieldTowerSimulateVtableSlotAddr);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -389,18 +455,18 @@ namespace BZROpenShim
             }
 
             if (current != reinterpret_cast<void*>(ShieldTowerSimulateTeamFilterHook) &&
-                current != reinterpret_cast<void*>(kGogShieldTowerSimulateAddr))
+                current != reinterpret_cast<void*>(g_ShieldTowerSimulateAddr))
             {
                 Log(L"[SHIELDODF] ShieldTower::Simulate vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
-                    static_cast<uint32_t>(kShieldTowerSimulateVtableSlotAddr),
+                    static_cast<uint32_t>(g_ShieldTowerSimulateVtableSlotAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
-                    static_cast<uint32_t>(kGogShieldTowerSimulateAddr));
+                    static_cast<uint32_t>(g_ShieldTowerSimulateAddr));
                 return;
             }
 
             const bool patched =
                 (current == reinterpret_cast<void*>(ShieldTowerSimulateTeamFilterHook)) ||
-                WritePointerValue(kShieldTowerSimulateVtableSlotAddr,
+                WritePointerValue(g_ShieldTowerSimulateVtableSlotAddr,
                                   reinterpret_cast<void*>(ShieldTowerSimulateTeamFilterHook));
             g_ShieldTowerSimulateHookInstalled =
                 patched &&
@@ -418,7 +484,7 @@ namespace BZROpenShim
             if (g_ShieldTowerSimulateHookInstalled)
             {
                 Log(L"[SHIELDODF] Installed ShieldTower team filter hook slot=0x%08X original=0x%08X\n",
-                    static_cast<uint32_t>(kShieldTowerSimulateVtableSlotAddr),
+                    static_cast<uint32_t>(g_ShieldTowerSimulateVtableSlotAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ShieldTowerSimulateOriginal)));
             }
         }
@@ -426,23 +492,25 @@ namespace BZROpenShim
         {
             if (g_MagnetMineSimulateHookInstalled && g_ProximityMineSimulateHookInstalled)
                 return;
+            if (!TeamFilterAddressesBound())
+                return;
 
             if (!g_BzrFn_MagnetMineSimulateOriginal)
                 g_BzrFn_MagnetMineSimulateOriginal =
-                    reinterpret_cast<FnMagnetMineSimulate>(kGogMagnetMineSimulateAddr);
+                    reinterpret_cast<FnMagnetMineSimulate>(g_MagnetMineSimulateAddr);
             if (!g_BzrFn_ProximityMineSimulateOriginal)
                 g_BzrFn_ProximityMineSimulateOriginal =
-                    reinterpret_cast<FnProximityMineSimulate>(kGogProximityMineSimulateAddr);
+                    reinterpret_cast<FnProximityMineSimulate>(g_ProximityMineSimulateAddr);
             if (!g_BzrFn_MineSimulate)
                 g_BzrFn_MineSimulate =
-                    reinterpret_cast<FnProximityMineSimulate>(kGogMineSimulateAddr);
+                    reinterpret_cast<FnProximityMineSimulate>(g_MineSimulateAddr);
 
             if (!g_BzrFn_GameObjectFriendP)
                 g_BzrFn_GameObjectFriendP =
-                    reinterpret_cast<FnGameObjectRelation>(kGogGameObjectFriendPAddr);
+                    reinterpret_cast<FnGameObjectRelation>(g_GameObjectFriendPAddr);
             if (!g_BzrFn_GameObjectEnemyP)
                 g_BzrFn_GameObjectEnemyP =
-                    reinterpret_cast<FnGameObjectRelation>(kGogGameObjectEnemyPAddr);
+                    reinterpret_cast<FnGameObjectRelation>(g_GameObjectEnemyPAddr);
             if (!g_BzrFn_GameObjectGetObjByHandle)
                 g_BzrFn_GameObjectGetObjByHandle =
                     &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
@@ -451,22 +519,22 @@ namespace BZROpenShim
             if (!g_MagnetMineSimulateHookInstalled)
             {
                 void* current = nullptr;
-                __try { current = *reinterpret_cast<void**>(kMagnetMineSimulateVtableSlotAddr); }
+                __try { current = *reinterpret_cast<void**>(g_MagnetMineSimulateVtableSlotAddr); }
                 __except (EXCEPTION_EXECUTE_HANDLER) { current = nullptr; }
 
                 if (current != reinterpret_cast<void*>(MagnetMineSimulateTeamFilterHook) &&
-                    current != reinterpret_cast<void*>(kGogMagnetMineSimulateAddr))
+                    current != reinterpret_cast<void*>(g_MagnetMineSimulateAddr))
                 {
                     Log(L"[MAGNETODF] MagnetMine::Simulate vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
-                        static_cast<uint32_t>(kMagnetMineSimulateVtableSlotAddr),
+                        static_cast<uint32_t>(g_MagnetMineSimulateVtableSlotAddr),
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
-                        static_cast<uint32_t>(kGogMagnetMineSimulateAddr));
+                        static_cast<uint32_t>(g_MagnetMineSimulateAddr));
                 }
                 else
                 {
                     const bool patched =
                         (current == reinterpret_cast<void*>(MagnetMineSimulateTeamFilterHook)) ||
-                        WritePointerValue(kMagnetMineSimulateVtableSlotAddr,
+                        WritePointerValue(g_MagnetMineSimulateVtableSlotAddr,
                                           reinterpret_cast<void*>(MagnetMineSimulateTeamFilterHook));
                     g_MagnetMineSimulateHookInstalled =
                         patched &&
@@ -481,7 +549,7 @@ namespace BZROpenShim
                     if (g_MagnetMineSimulateHookInstalled)
                     {
                         Log(L"[MAGNETODF] Installed MagnetMine team filter hook slot=0x%08X original=0x%08X\n",
-                            static_cast<uint32_t>(kMagnetMineSimulateVtableSlotAddr),
+                            static_cast<uint32_t>(g_MagnetMineSimulateVtableSlotAddr),
                             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_MagnetMineSimulateOriginal)));
                     }
                 }
@@ -490,22 +558,22 @@ namespace BZROpenShim
             if (!g_ProximityMineSimulateHookInstalled)
             {
                 void* current = nullptr;
-                __try { current = *reinterpret_cast<void**>(kProximityMineSimulateVtableSlotAddr); }
+                __try { current = *reinterpret_cast<void**>(g_ProximityMineSimulateVtableSlotAddr); }
                 __except (EXCEPTION_EXECUTE_HANDLER) { current = nullptr; }
 
                 if (current != reinterpret_cast<void*>(ProximityMineSimulateTeamFilterHook) &&
-                    current != reinterpret_cast<void*>(kGogProximityMineSimulateAddr))
+                    current != reinterpret_cast<void*>(g_ProximityMineSimulateAddr))
                 {
                     Log(L"[PROXODF] ProximityMine::Simulate vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
-                        static_cast<uint32_t>(kProximityMineSimulateVtableSlotAddr),
+                        static_cast<uint32_t>(g_ProximityMineSimulateVtableSlotAddr),
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
-                        static_cast<uint32_t>(kGogProximityMineSimulateAddr));
+                        static_cast<uint32_t>(g_ProximityMineSimulateAddr));
                 }
                 else
                 {
                     const bool patched =
                         (current == reinterpret_cast<void*>(ProximityMineSimulateTeamFilterHook)) ||
-                        WritePointerValue(kProximityMineSimulateVtableSlotAddr,
+                        WritePointerValue(g_ProximityMineSimulateVtableSlotAddr,
                                           reinterpret_cast<void*>(ProximityMineSimulateTeamFilterHook));
                     g_ProximityMineSimulateHookInstalled =
                         patched &&
@@ -520,7 +588,7 @@ namespace BZROpenShim
                     if (g_ProximityMineSimulateHookInstalled)
                     {
                         Log(L"[PROXODF] Installed ProximityMine team filter hook slot=0x%08X original=0x%08X\n",
-                            static_cast<uint32_t>(kProximityMineSimulateVtableSlotAddr),
+                            static_cast<uint32_t>(g_ProximityMineSimulateVtableSlotAddr),
                             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ProximityMineSimulateOriginal)));
                     }
                 }
@@ -833,7 +901,7 @@ namespace BZROpenShim
                     towerMatrix.front_z * (params.objPush * dt) -
                         *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(targetObject) + 0x134) * (params.objDrag * dt)
                 };
-                reinterpret_cast<void(__thiscall*)(void*, const float*)>(kGogGameObjectAddVelocityAddr)(targetObject, delta);
+                reinterpret_cast<void(__thiscall*)(void*, const float*)>(g_GameObjectAddVelocityAddr)(targetObject, delta);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -968,7 +1036,7 @@ namespace BZROpenShim
                     }
                 }
 
-                const auto* list = reinterpret_cast<const ListPtrValue*>(kOrdnanceListAddr);
+                const auto* list = reinterpret_cast<const ListPtrValue*>(g_OrdnanceListAddr);
                 __try
                 {
                     if (list && list->head)
@@ -1086,14 +1154,14 @@ namespace BZROpenShim
                                         dy * pull - (*reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(target) + 0x130) * rotPull),
                                         dz * pull - (*reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(target) + 0x134) * rotPull)
                                     };
-                                    reinterpret_cast<void(__thiscall*)(void*, const float*)>(kGogGameObjectAddVelocityAddr)(target, velDelta);
+                                    reinterpret_cast<void(__thiscall*)(void*, const float*)>(g_GameObjectAddVelocityAddr)(target, velDelta);
                                 }
                             }
                         }
                     }
 
                     // Proximity scan for ordnance
-                    const auto* ordList = reinterpret_cast<const ListPtrValue*>(kOrdnanceListAddr);
+                    const auto* ordList = reinterpret_cast<const ListPtrValue*>(g_OrdnanceListAddr);
                     if (ordList && ordList->head)
                     {
                         for (ListNodePtrValue* node = ordList->head->next; node && node != ordList->head; node = node->next)
@@ -1148,27 +1216,25 @@ namespace BZROpenShim
             if (s_verified >= 0)
                 return s_verified != 0;
 
-            struct Site { uintptr_t address; uint8_t bytes[8]; };
-            static const Site kSites[] = {
-                { kGogProximityMineDebrisAddr,    { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0xB8, 0x00, 0x00 } },
-                { kGogProximityMineGroundFxAddr,  { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x30, 0x83, 0x3D } },
-                { kGogTerrainHeightAtAddr,        { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x2C, 0xF3, 0x0F } },
-                { kGogGameObjectDamageOwnerAddr,  { 0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x8B } },
-                { kGogExplosionClassBuildAddr,    { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10, 0x89, 0x4D } },
-                { kGogProximityMineNetFlagAddr,   { 0x55, 0x8B, 0xEC, 0xA0, 0x7B, 0x7F, 0x91, 0x00 } },
-                { kGogProximityMineNetNotifyAddr, { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14, 0x89, 0x4D } },
+            // Each callee is a guarded row (the debris spawner is the
+            // ChunkEffect::CreateChunklet row, called on the ChunkEffect
+            // instance); terrain height comes from its resolve pattern.
+            const HookEngine::EngineRow rows[] = {
+                { "ChunkEffectCreateChunklet", &g_ProximityMineDebrisAddr },
+                { "ChunkEffectInstance", &g_ProximityMineDebrisOwnerAddr },
+                { "ProximityMineGroundFx", &g_ProximityMineGroundFxAddr },
+                { "GameObjectDamageOwner", &g_GameObjectDamageOwnerAddr },
+                { "ExplosionClassBuild", &g_ExplosionClassBuildAddr },
+                { "ProximityMineNetFlag", &g_ProximityMineNetFlagAddr },
+                { "ProximityMineNetNotify", &g_ProximityMineNetNotifyAddr },
             };
-            s_verified = 1;
-            for (const Site& site : kSites)
+            g_TerrainHeightAtAddr = HookEngine::ResolveNamedAddress("Terrain::HeightAt");
+            s_verified = (g_TerrainHeightAtAddr != 0 &&
+                          HookEngine::BindEngineRows("Proximity mine team filter", rows)) ? 1 : 0;
+            if (!s_verified)
             {
-                if (!ExpectedBytesMatchAt(site.address, site.bytes, sizeof(site.bytes)))
-                {
-                    Log(L"[PROXODF] teamFilter disabled: detonation call 0x%08X does not match; "
-                        L"filtered proximity mines use stock targeting\n",
-                        static_cast<uint32_t>(site.address));
-                    s_verified = 0;
-                    break;
-                }
+                Log(L"[PROXODF] teamFilter disabled: detonation calls do not bind on this build; "
+                    L"filtered proximity mines use stock targeting\n");
             }
             return s_verified != 0;
         }
@@ -1196,20 +1262,20 @@ namespace BZROpenShim
                 double position[3] = {};
                 std::memcpy(position, obj + 0x48, sizeof(position));
                 const float debrisVelocity[3] = { 0.0f, 15.0f, 0.0f };
-                auto debris = reinterpret_cast<FnDebris>(kGogProximityMineDebrisAddr);
+                auto debris = reinterpret_cast<FnDebris>(g_ProximityMineDebrisAddr);
                 for (int i = 0; i < 20; ++i)
-                    debris(reinterpret_cast<void*>(kGogProximityMineDebrisOwnerAddr), position, debrisVelocity, 0);
+                    debris(reinterpret_cast<void*>(g_ProximityMineDebrisOwnerAddr), position, debrisVelocity, 0);
 
                 const double x = *reinterpret_cast<double*>(obj + 0x48);
                 const double z = *reinterpret_cast<double*>(obj + 0x58);
-                reinterpret_cast<FnGroundFx>(kGogProximityMineGroundFxAddr)(
+                reinterpret_cast<FnGroundFx>(g_ProximityMineGroundFxAddr)(
                     static_cast<float>(x), static_cast<float>(z), 3.0f);
                 *reinterpret_cast<double*>(obj + 0x50) =
-                    reinterpret_cast<FnTerrainHeightAt>(kGogTerrainHeightAtAddr)(x, z);
+                    reinterpret_cast<FnTerrainHeightAt>(g_TerrainHeightAtAddr)(x, z);
 
                 void* ownerObj = obj;
                 auto* damageOwner = static_cast<uint8_t*>(
-                    reinterpret_cast<FnDamageOwner>(kGogGameObjectDamageOwnerAddr)(proximityMinePtr));
+                    reinterpret_cast<FnDamageOwner>(g_GameObjectDamageOwnerAddr)(proximityMinePtr));
                 if (damageOwner)
                 {
                     void* entity = damageOwner + 0x18;
@@ -1219,11 +1285,11 @@ namespace BZROpenShim
 
                 void* explosionClass = *reinterpret_cast<void**>(mineClass + kProximityMineClassExplosionOffset);
                 if (explosionClass)
-                    reinterpret_cast<FnExplosionBuild>(kGogExplosionClassBuildAddr)(explosionClass, obj + 0x20, ownerObj);
+                    reinterpret_cast<FnExplosionBuild>(g_ExplosionClassBuildAddr)(explosionClass, obj + 0x20, ownerObj);
 
                 *reinterpret_cast<uint32_t*>(obj + 0x14) |= 0x280;
-                if (reinterpret_cast<FnNetFlag>(kGogProximityMineNetFlagAddr)())
-                    reinterpret_cast<FnNetNotify>(kGogProximityMineNetNotifyAddr)(mineBytes + 0x18);
+                if (reinterpret_cast<FnNetFlag>(g_ProximityMineNetFlagAddr)())
+                    reinterpret_cast<FnNetNotify>(g_ProximityMineNetNotifyAddr)(mineBytes + 0x18);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {

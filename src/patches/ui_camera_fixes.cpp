@@ -93,21 +93,21 @@ namespace BZROpenShim
         // scrolling methods. Redirect just those four calls to the guarded
         // variants already used by the lobby/chat UI so the final partial page
         // is clamped instead of snapping back to the top.
-        constexpr uintptr_t kGogBriefingScrollUpCallAddr = 0x0078ED29;
+        uint32_t g_BriefingScrollUpCallAddr = 0;
 
-        constexpr uintptr_t kGogBriefingScrollDownCallAddr = 0x0078ED39;
+        uint32_t g_BriefingScrollDownCallAddr = 0;
 
-        constexpr uintptr_t kGogArchiveScrollUpCallAddr = 0x00790AF9;
+        uint32_t g_ArchiveScrollUpCallAddr = 0;
 
-        constexpr uintptr_t kGogArchiveScrollDownCallAddr = 0x00790B09;
+        uint32_t g_ArchiveScrollDownCallAddr = 0;
 
-        constexpr uintptr_t kGogGuardedScrollUpAddr = 0x007CE730;
+        uint32_t g_GuardedScrollUpAddr = 0;
 
-        constexpr uintptr_t kGogGuardedScrollDownAddr = 0x007CE6D0;
+        uint32_t g_GuardedScrollDownAddr = 0;
 
-        constexpr uintptr_t kGogUnguardedScrollUpAddr = 0x007CE0E0;
+        uint32_t g_UnguardedScrollUpAddr = 0;
 
-        constexpr uintptr_t kGogUnguardedScrollDownAddr = 0x007CE110;
+        uint32_t g_UnguardedScrollDownAddr = 0;
 
         // renderCount allocation crash (#65). The MultiRenderClass constructor
         // (0x0044D7B0, selected by [Render] renderBase="draw_multi") reads the
@@ -118,9 +118,9 @@ namespace BZROpenShim
         // [0, kMultiRenderCountMax] between the ParameterDB read and the
         // allocation; the same field bounds the renderName%d copy loop, so the
         // single clamp protects both the allocation and the loop.
-        constexpr uintptr_t kGogMultiRenderCountClampSiteAddr = 0x0044D858;
+        uint32_t g_MultiRenderCountClampSiteAddr = 0;
 
-        constexpr uintptr_t kGogMultiRenderCountClampResumeAddr = 0x0044D863;
+        uint32_t g_MultiRenderCountClampResumeAddr = 0;
 
         constexpr size_t kMultiRenderCountClampDetourLen = 11;
 
@@ -138,7 +138,7 @@ namespace BZROpenShim
         // exceptions (0xE06D7363) into the same outcome as a missing thumbnail:
         // a cleared out SharedPtr slot. AVs and other faults still crash loudly.
         // See reverse_engineering/bmp_thumbnail_crash_20260824.md.
-        constexpr uintptr_t kGogThumbnailMaterialApplySiteAddr = 0x007D3FF0;
+        uint32_t g_ThumbnailMaterialApplySiteAddr = 0;
 
         constexpr size_t kThumbnailMaterialApplyDetourLen = 5;
 
@@ -161,17 +161,17 @@ namespace BZROpenShim
 		// EarthQuake::Simulate ramps the replayed scale to zero and calls
 		// StopQuake unless a mission script takes ownership by writing the
 		// scale itself first.
-		constexpr uintptr_t kGogPostLoadQuakeRestartCallAddr = 0x005C7B83;
+		uint32_t g_PostLoadQuakeRestartCallAddr = 0;
 
-		constexpr uintptr_t kGogEarthQuakeStartQuakeAddr = 0x004C0BB0;
+		uint32_t g_EarthQuakeStartQuakeAddr = 0;
 
-		constexpr uintptr_t kGogEarthQuakeUpdateQuakeAddr = 0x004C0C40;
+		uint32_t g_EarthQuakeUpdateQuakeAddr = 0;
 
-		constexpr uintptr_t kGogEarthQuakeStopQuakeAddr = 0x004C0CA0;
+		uint32_t g_EarthQuakeStopQuakeAddr = 0;
 
-		constexpr uintptr_t kGogEarthQuakeSimulateAddr = 0x004C0CF0;
+		uint32_t g_EarthQuakeSimulateAddr = 0;
 
-		constexpr uintptr_t kGogEarthQuakeObjectAddr = 0x00992328;
+		uint32_t g_EarthQuakeObjectAddr = 0;
 
 		constexpr size_t kEarthQuakeScaleOffset = 0x28;
 
@@ -189,11 +189,11 @@ namespace BZROpenShim
 		// (0x008EAAD8) is satellite (3) or editor (9); the stock code then
 		// removes the viewport itself and re-creates it on return to cockpit.
 		// The gameplay target is never touched.
-		constexpr uintptr_t kGogTargetCamEnabledCallAddr = 0x00682679;
+		uint32_t g_TargetCamEnabledCallAddr = 0;
 
-		constexpr uintptr_t kGogTargetCamEnabledWrapperAddr = 0x005DDDE0;
+		uint32_t g_TargetCamEnabledWrapperAddr = 0;
 
-		constexpr uintptr_t kGogViewModeAddr = 0x008EAAD8;
+		uint32_t g_ViewModeAddr = 0;
 
 		constexpr int32_t kGogViewModeSatellite = 3;
 
@@ -209,19 +209,19 @@ namespace BZROpenShim
 		// both begin call sites to a gate that first rebuilds the record with
 		// the cockpit parameters (FOV bits at 0x0087256C, zoom 1.0 bits at
 		// 0x008A2604) exactly like the cockpit view setter (0x0061BAB0) does.
-		constexpr uintptr_t kGogCinematicCameraBeginAddr = 0x00821E30;
+		uint32_t g_CinematicCameraBeginAddr = 0;
 
-		constexpr uintptr_t kGogCinematicBeginCallAddr1 = 0x004F5667;
+		uint32_t g_CinematicBeginCallAddr1 = 0;
 
-		constexpr uintptr_t kGogCinematicBeginCallAddr2 = 0x005CD2D9;
+		uint32_t g_CinematicBeginCallAddr2 = 0;
 
-		constexpr uintptr_t kGogGetCameraRecordAddr = 0x00439E60;
+		uint32_t g_GetCameraRecordAddr = 0;
 
-		constexpr uintptr_t kGogBuildCameraRecordAddr = 0x00688370;
+		uint32_t g_BuildCameraRecordAddr = 0;
 
-		constexpr uintptr_t kGogCockpitFovBitsAddr = 0x0087256C;
+		uint32_t g_CockpitFovBitsAddr = 0;
 
-		constexpr uintptr_t kGogCockpitZoomBitsAddr = 0x008A2604;
+		uint32_t g_CockpitZoomBitsAddr = 0;
 
 		constexpr size_t kGogCameraRecordDwords = 0x76;
 
@@ -235,27 +235,51 @@ namespace BZROpenShim
 
         static ULONGLONG g_QuakeReplayArmTick = 0;
 
+        // Each fix binds its own engine_addresses rows, all or nothing, the
+        // first time it is asked to install; a fix whose rows do not bind on
+        // this build stays off and the others are unaffected.
+        template <size_t N>
+        static bool BindUiCameraRows(const char* feature, const HookEngine::EngineRow (&rows)[N], int& state)
+        {
+            if (state == 0)
+                state = HookEngine::BindEngineRows(feature, rows) ? 1 : -1;
+            return state > 0;
+        }
+
         void InstallBriefingScrollFixIfPossible()
         {
             if (!g_BriefingScrollFixEnabled || g_BriefingScrollFixInstalled)
                 return;
+            static int s_bound = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "BriefingScrollUpCall", &g_BriefingScrollUpCallAddr },
+                { "BriefingScrollDownCall", &g_BriefingScrollDownCallAddr },
+                { "ArchiveScrollUpCall", &g_ArchiveScrollUpCallAddr },
+                { "ArchiveScrollDownCall", &g_ArchiveScrollDownCallAddr },
+                { "UiScrollUpGuarded", &g_GuardedScrollUpAddr },
+                { "UiScrollDownGuarded", &g_GuardedScrollDownAddr },
+                { "UiScrollUpUnguarded", &g_UnguardedScrollUpAddr },
+                { "UiScrollDownUnguarded", &g_UnguardedScrollDownAddr },
+            };
+            if (!BindUiCameraRows("Briefing scroll fix", rows, s_bound))
+                return;
 
             const bool briefingUp = RedirectCallTarget(
-                kGogBriefingScrollUpCallAddr,
-                kGogUnguardedScrollUpAddr,
-                kGogGuardedScrollUpAddr);
+                g_BriefingScrollUpCallAddr,
+                g_UnguardedScrollUpAddr,
+                g_GuardedScrollUpAddr);
             const bool briefingDown = RedirectCallTarget(
-                kGogBriefingScrollDownCallAddr,
-                kGogUnguardedScrollDownAddr,
-                kGogGuardedScrollDownAddr);
+                g_BriefingScrollDownCallAddr,
+                g_UnguardedScrollDownAddr,
+                g_GuardedScrollDownAddr);
             const bool archiveUp = RedirectCallTarget(
-                kGogArchiveScrollUpCallAddr,
-                kGogUnguardedScrollUpAddr,
-                kGogGuardedScrollUpAddr);
+                g_ArchiveScrollUpCallAddr,
+                g_UnguardedScrollUpAddr,
+                g_GuardedScrollUpAddr);
             const bool archiveDown = RedirectCallTarget(
-                kGogArchiveScrollDownCallAddr,
-                kGogUnguardedScrollDownAddr,
-                kGogGuardedScrollDownAddr);
+                g_ArchiveScrollDownCallAddr,
+                g_UnguardedScrollDownAddr,
+                g_GuardedScrollDownAddr);
 
             g_BriefingScrollFixInstalled =
                 briefingUp && briefingDown && archiveUp && archiveDown;
@@ -268,8 +292,7 @@ namespace BZROpenShim
         // renderCount clamp (#65) helpers. The naked detour below runs between
         // the MultiRenderClass constructor's ParameterDB read of "rendercount"
         // and the operator new[] that consumes it.
-        static void* g_MultiRenderCountClampResumePtr =
-            reinterpret_cast<void*>(kGogMultiRenderCountClampResumeAddr);
+        static void* g_MultiRenderCountClampResumePtr = nullptr;
 
         static int32_t __stdcall ClampMultiRenderCountValue(int32_t count)
         {
@@ -320,6 +343,15 @@ namespace BZROpenShim
         {
             if (!g_MultiRenderCountClampEnabled || g_MultiRenderCountClampInstalled)
                 return;
+            static int s_bound = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "MultiRenderCountClampSite", &g_MultiRenderCountClampSiteAddr },
+            };
+            if (!BindUiCameraRows("renderCount clamp", rows, s_bound))
+                return;
+            // The row's guard is exactly the 11 displaced bytes; resume after them.
+            g_MultiRenderCountClampResumeAddr = g_MultiRenderCountClampSiteAddr + kMultiRenderCountClampDetourLen;
+            g_MultiRenderCountClampResumePtr = reinterpret_cast<void*>(g_MultiRenderCountClampResumeAddr);
 
 #if !defined(_M_IX86)
             return;
@@ -331,7 +363,7 @@ namespace BZROpenShim
                 0x33, 0xC9, 0x8B, 0x55, 0xAC, 0x8B, 0x82, 0x08, 0x01, 0x00, 0x00
             };
 
-            if (!ExpectedBytesMatchAt(kGogMultiRenderCountClampSiteAddr,
+            if (!ExpectedBytesMatchAt(g_MultiRenderCountClampSiteAddr,
                                       kExpectedClampSiteBytes,
                                       sizeof(kExpectedClampSiteBytes)))
             {
@@ -344,20 +376,20 @@ namespace BZROpenShim
             };
             const int32_t relative =
                 static_cast<int32_t>(reinterpret_cast<uintptr_t>(MultiRenderCountClampHook)) -
-                static_cast<int32_t>(kGogMultiRenderCountClampSiteAddr + 5);
+                static_cast<int32_t>(g_MultiRenderCountClampSiteAddr + 5);
             std::memcpy(patch + 1, &relative, sizeof(relative));
 
-            if (!WritePatchBytes(kGogMultiRenderCountClampSiteAddr, patch, sizeof(patch)))
+            if (!WritePatchBytes(g_MultiRenderCountClampSiteAddr, patch, sizeof(patch)))
             {
                 Log(L"[RENDERCOUNT] Failed installing draw_multi renderCount clamp at 0x%08X\n",
-                    static_cast<uint32_t>(kGogMultiRenderCountClampSiteAddr));
+                    static_cast<uint32_t>(g_MultiRenderCountClampSiteAddr));
                 return;
             }
 
             g_MultiRenderCountClampInstalled = true;
             Log(L"[RENDERCOUNT] Installed draw_multi renderCount clamp site=0x%08X resume=0x%08X max=%d\n",
-                static_cast<uint32_t>(kGogMultiRenderCountClampSiteAddr),
-                static_cast<uint32_t>(kGogMultiRenderCountClampResumeAddr),
+                static_cast<uint32_t>(g_MultiRenderCountClampSiteAddr),
+                static_cast<uint32_t>(g_MultiRenderCountClampResumeAddr),
                 kMultiRenderCountMax);
 #endif
         }
@@ -597,6 +629,12 @@ namespace BZROpenShim
         {
             if (!g_ThumbnailBmpGuardEnabled || g_ThumbnailBmpGuardInstalled)
                 return;
+            static int s_bound = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "ThumbnailMaterialApply", &g_ThumbnailMaterialApplySiteAddr },
+            };
+            if (!BindUiCameraRows("Thumbnail BMP guard", rows, s_bound))
+                return;
 
 #if !defined(_M_IX86)
             return;
@@ -608,7 +646,7 @@ namespace BZROpenShim
 
             static InlineDetour32 g_ThumbnailBmpGuardDetour = {};
             if (!InstallInlineDetour32(g_ThumbnailBmpGuardDetour,
-                                       kGogThumbnailMaterialApplySiteAddr,
+                                       g_ThumbnailMaterialApplySiteAddr,
                                        &ThumbnailMaterialGuardEntry,
                                        kThumbnailMaterialApplyDetourLen,
                                        kExpectedThumbApplyBytes,
@@ -618,7 +656,7 @@ namespace BZROpenShim
                 {
                     g_ThumbnailBmpGuardMismatchLogged = true;
                     Log(L"[BMPFIX] Thumbnail guard not installed: byte validation failed at 0x%08X\n",
-                        static_cast<uint32_t>(kGogThumbnailMaterialApplySiteAddr));
+                        static_cast<uint32_t>(g_ThumbnailMaterialApplySiteAddr));
                 }
                 return;
             }
@@ -628,7 +666,7 @@ namespace BZROpenShim
 
             g_ThumbnailBmpGuardInstalled = true;
             Log(L"[BMPFIX] Installed thumbnail decode guard site=0x%08X trampoline=0x%08X\n",
-                static_cast<uint32_t>(kGogThumbnailMaterialApplySiteAddr),
+                static_cast<uint32_t>(g_ThumbnailMaterialApplySiteAddr),
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_ThumbnailBmpGuardDetour.trampoline)));
 #endif
         }
@@ -657,20 +695,20 @@ namespace BZROpenShim
         static void __fastcall PostLoadQuakeRestartArmHook(void* thisPtr, void* /*edx*/, float scale)
         {
             ArmQuakeReplayWatchdog(scale);
-            reinterpret_cast<FnEarthQuakeStartQuake>(kGogEarthQuakeStartQuakeAddr)(
+            reinterpret_cast<FnEarthQuakeStartQuake>(g_EarthQuakeStartQuakeAddr)(
                 thisPtr, nullptr, scale);
         }
 
         static void QuakeReplayFadeTick(void* quakePtr)
         {
             if (!g_QuakeReplayArmed ||
-                reinterpret_cast<uintptr_t>(quakePtr) != kGogEarthQuakeObjectAddr)
+                reinterpret_cast<uintptr_t>(quakePtr) != g_EarthQuakeObjectAddr)
                 return;
 
             __try
             {
                 auto* scalePtr = reinterpret_cast<const float*>(
-                    kGogEarthQuakeObjectAddr + kEarthQuakeScaleOffset);
+                    g_EarthQuakeObjectAddr + kEarthQuakeScaleOffset);
                 uint32_t currentBits = 0;
                 std::memcpy(&currentBits, scalePtr, sizeof(currentBits));
                 if (currentBits != g_QuakeReplayLastWrittenBits)
@@ -699,7 +737,7 @@ namespace BZROpenShim
 
                 if (target <= 0.01f)
                 {
-                    reinterpret_cast<FnEarthQuakeStopQuake>(kGogEarthQuakeStopQuakeAddr)(
+                    reinterpret_cast<FnEarthQuakeStopQuake>(g_EarthQuakeStopQuakeAddr)(
                         quakePtr, nullptr);
                     InterlockedExchange(&g_QuakeReplayArmed, 0);
                     Log(L"[QUAKEFADE] Stopped replayed quake after %lds fade\n",
@@ -710,7 +748,7 @@ namespace BZROpenShim
                 if (target < current)
                 {
                     // UpdateQuake also re-scales the looping gquak01.wav.
-                    reinterpret_cast<FnEarthQuakeUpdateQuake>(kGogEarthQuakeUpdateQuakeAddr)(
+                    reinterpret_cast<FnEarthQuakeUpdateQuake>(g_EarthQuakeUpdateQuakeAddr)(
                         quakePtr, nullptr, target);
                     std::memcpy(&g_QuakeReplayLastWrittenBits, &target, sizeof(target));
                 }
@@ -734,19 +772,34 @@ namespace BZROpenShim
             if (!g_QuakeReplayFadeEnabled || g_QuakeReplayFadeInstalled)
                 return;
 
-            // mov ecx, offset earthQuake (0x992328) directly before the
-            // PostLoadScriptUtils StartQuake call we redirect. This never
-            // changes, so it stays a valid guard across retries.
-            static const uint8_t kExpectedQuakeThisSetup[5] =
-            {
-                0xB9, 0x28, 0x23, 0x99, 0x00
+            // The PostLoadQuakeRestart row is `mov ecx, offset earthQuake`
+            // followed by the PostLoadScriptUtils StartQuake call we redirect;
+            // the EarthQuake object is that mov's operand. The row is bound
+            // once, before the call is rewritten, so it stays valid across
+            // retries.
+            static int s_bound = 0;
+            uint32_t restartSetup = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "PostLoadQuakeRestart", &restartSetup },
+                { "EarthQuakeStartQuake", &g_EarthQuakeStartQuakeAddr },
+                { "EarthQuakeUpdateQuake", &g_EarthQuakeUpdateQuakeAddr },
+                { "EarthQuakeStopQuake", &g_EarthQuakeStopQuakeAddr },
+                { "EarthQuakeSimulate", &g_EarthQuakeSimulateAddr },
             };
-            if (!ExpectedBytesMatchAt(kGogPostLoadQuakeRestartCallAddr - 5,
-                                      kExpectedQuakeThisSetup,
-                                      sizeof(kExpectedQuakeThisSetup)))
+            static uint32_t s_restartSetup = 0;
+            if (s_bound == 0)
             {
-                return;
+                if (!BindUiCameraRows("Quake replay fade", rows, s_bound))
+                    return;
+                s_restartSetup = restartSetup;
             }
+            if (s_bound < 0)
+                return;
+            const auto* setup = reinterpret_cast<const uint8_t*>(s_restartSetup);
+            if (setup[0] != 0xB9 || setup[5] != 0xE8)
+                return;
+            g_EarthQuakeObjectAddr = *reinterpret_cast<const uint32_t*>(setup + 1);
+            g_PostLoadQuakeRestartCallAddr = s_restartSetup + 5;
 
             // push ebp / mov ebp, esp / sub esp, 0x90 at EarthQuake::Simulate.
             static const uint8_t kExpectedSimulateEntry[kEarthQuakeSimulateDetourLen] =
@@ -754,7 +807,7 @@ namespace BZROpenShim
                 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x90, 0x00, 0x00, 0x00
             };
             if (!InstallInlineDetour32(g_EarthQuakeSimulateDetour,
-                                       kGogEarthQuakeSimulateAddr,
+                                       g_EarthQuakeSimulateAddr,
                                        reinterpret_cast<void*>(EarthQuakeSimulateReplayFadeHook),
                                        kEarthQuakeSimulateDetourLen,
                                        kExpectedSimulateEntry,
@@ -765,19 +818,19 @@ namespace BZROpenShim
             g_BzrFn_EarthQuakeSimulateOriginal =
                 reinterpret_cast<FnEarthQuakeSimulate>(g_EarthQuakeSimulateDetour.trampoline);
 
-            if (!RedirectCallTarget(kGogPostLoadQuakeRestartCallAddr,
-                                    kGogEarthQuakeStartQuakeAddr,
+            if (!RedirectCallTarget(g_PostLoadQuakeRestartCallAddr,
+                                    g_EarthQuakeStartQuakeAddr,
                                     reinterpret_cast<uintptr_t>(PostLoadQuakeRestartArmHook)))
             {
                 Log(L"[QUAKEFADE] Failed redirecting post-load quake restart call at 0x%08X\n",
-                    static_cast<uint32_t>(kGogPostLoadQuakeRestartCallAddr));
+                    static_cast<uint32_t>(g_PostLoadQuakeRestartCallAddr));
                 return;
             }
 
             g_QuakeReplayFadeInstalled = true;
             Log(L"[QUAKEFADE] Installed post-load quake fade restartCall=0x%08X simulate=0x%08X fadeSeconds=%ld\n",
-                static_cast<uint32_t>(kGogPostLoadQuakeRestartCallAddr),
-                static_cast<uint32_t>(kGogEarthQuakeSimulateAddr),
+                static_cast<uint32_t>(g_PostLoadQuakeRestartCallAddr),
+                static_cast<uint32_t>(g_EarthQuakeSimulateAddr),
                 g_QuakeReplayFadeSeconds);
         }
 
@@ -787,12 +840,12 @@ namespace BZROpenShim
         static uint8_t __cdecl TargetCamEnabledOverviewGateHook()
         {
             const uint8_t enabled =
-                reinterpret_cast<FnTargetCamEnabled>(kGogTargetCamEnabledWrapperAddr)();
+                reinterpret_cast<FnTargetCamEnabled>(g_TargetCamEnabledWrapperAddr)();
             if (!enabled)
                 return 0;
 
             const int32_t viewMode =
-                *reinterpret_cast<const volatile int32_t*>(kGogViewModeAddr);
+                *reinterpret_cast<const volatile int32_t*>(g_ViewModeAddr);
             if (viewMode != kGogViewModeSatellite && viewMode != kGogViewModeEditor)
                 return enabled;
 
@@ -808,6 +861,17 @@ namespace BZROpenShim
         {
             if (!g_TargetCamSatelliteFixEnabled || g_TargetCamSatelliteFixInstalled)
                 return;
+            static int s_bound = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "TargetCamEnabledCall", &g_TargetCamEnabledCallAddr },
+                { "TargetCamEnabledWrapper", &g_TargetCamEnabledWrapperAddr },
+            };
+            if (!BindUiCameraRows("Target camera satellite fix", rows, s_bound))
+                return;
+            // Current_View is +8 in the ViewRecord row.
+            if (ViewRecordAddr() == 0)
+                return;
+            g_ViewModeAddr = static_cast<uint32_t>(ViewRecordAddr() + 8);
 
             // movzx ecx, al / test ecx, ecx directly after the enabled-predicate
             // call in the Ogre frame driver.
@@ -815,26 +879,26 @@ namespace BZROpenShim
             {
                 0x0F, 0xB6, 0xC8, 0x85, 0xC9
             };
-            if (!ExpectedBytesMatchAt(kGogTargetCamEnabledCallAddr + 5,
+            if (!ExpectedBytesMatchAt(g_TargetCamEnabledCallAddr + 5,
                                       kExpectedAfterEnabledCall,
                                       sizeof(kExpectedAfterEnabledCall)))
             {
                 return;
             }
 
-            if (!RedirectCallTarget(kGogTargetCamEnabledCallAddr,
-                                    kGogTargetCamEnabledWrapperAddr,
+            if (!RedirectCallTarget(g_TargetCamEnabledCallAddr,
+                                    g_TargetCamEnabledWrapperAddr,
                                     reinterpret_cast<uintptr_t>(TargetCamEnabledOverviewGateHook)))
             {
                 Log(L"[TARGETCAM] Failed redirecting target camera predicate call at 0x%08X\n",
-                    static_cast<uint32_t>(kGogTargetCamEnabledCallAddr));
+                    static_cast<uint32_t>(g_TargetCamEnabledCallAddr));
                 return;
             }
 
             g_TargetCamSatelliteFixInstalled = true;
             Log(L"[TARGETCAM] Installed satellite/F9 stale target camera fix call=0x%08X viewMode=0x%08X\n",
-                static_cast<uint32_t>(kGogTargetCamEnabledCallAddr),
-                static_cast<uint32_t>(kGogViewModeAddr));
+                static_cast<uint32_t>(g_TargetCamEnabledCallAddr),
+                static_cast<uint32_t>(g_ViewModeAddr));
         }
 
         // Cinematic camera satellite zoom fix (#58) helpers.
@@ -852,7 +916,7 @@ namespace BZROpenShim
             __try
             {
                 auto* record = static_cast<uint8_t*>(
-                    reinterpret_cast<FnGetCameraRecord>(kGogGetCameraRecordAddr)());
+                    reinterpret_cast<FnGetCameraRecord>(g_GetCameraRecordAddr)());
                 if (!record)
                     return;
 
@@ -860,13 +924,13 @@ namespace BZROpenShim
                 // record's viewport/pane/far values, swap in cockpit FOV and
                 // zoom 1.0 so the cinematic does not inherit the overview zoom.
                 static uint8_t rebuildBuffer[1024];
-                void* rebuilt = reinterpret_cast<FnBuildCameraRecord>(kGogBuildCameraRecordAddr)(
+                void* rebuilt = reinterpret_cast<FnBuildCameraRecord>(g_BuildCameraRecordAddr)(
                     rebuildBuffer,
                     *reinterpret_cast<void**>(record + 0x38),
-                    *reinterpret_cast<const uint32_t*>(kGogCockpitFovBitsAddr),
+                    *reinterpret_cast<const uint32_t*>(g_CockpitFovBitsAddr),
                     *reinterpret_cast<const uint32_t*>(record + 0x2C),
                     *reinterpret_cast<const uint32_t*>(record + 0x10),
-                    *reinterpret_cast<const uint32_t*>(kGogCockpitZoomBitsAddr));
+                    *reinterpret_cast<const uint32_t*>(g_CockpitZoomBitsAddr));
                 if (rebuilt)
                     memcpy(record, rebuilt, kGogCameraRecordDwords * 4);
 
@@ -885,26 +949,41 @@ namespace BZROpenShim
         static void __cdecl CinematicCameraBeginZoomFixHook()
         {
             const int32_t viewMode =
-                *reinterpret_cast<const volatile int32_t*>(kGogViewModeAddr);
+                *reinterpret_cast<const volatile int32_t*>(g_ViewModeAddr);
             if (g_CinematicSatelliteZoomFixEnabled &&
                 (viewMode == kGogViewModeSatellite || viewMode == kGogViewModeEditor))
             {
                 RestoreCockpitCameraRecordForCinematic(viewMode);
             }
-            reinterpret_cast<FnCinematicCameraBegin>(kGogCinematicCameraBeginAddr)();
+            reinterpret_cast<FnCinematicCameraBegin>(g_CinematicCameraBeginAddr)();
         }
 
         void InstallCinematicSatelliteZoomFixIfPossible()
         {
             if (!g_CinematicSatelliteZoomFixEnabled || g_CinematicSatelliteZoomFixInstalled)
                 return;
+            static int s_bound = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "CinematicCameraBegin", &g_CinematicCameraBeginAddr },
+                { "CinematicBeginCallMission", &g_CinematicBeginCallAddr1 },
+                { "CinematicBeginCallScript", &g_CinematicBeginCallAddr2 },
+                { "GetCameraRecord", &g_GetCameraRecordAddr },
+                { "BuildCameraRecord", &g_BuildCameraRecordAddr },
+                { "CockpitFovBits", &g_CockpitFovBitsAddr },
+                { "CockpitZoomBits", &g_CockpitZoomBitsAddr },
+            };
+            if (!BindUiCameraRows("Cinematic satellite zoom fix", rows, s_bound))
+                return;
+            if (ViewRecordAddr() == 0)
+                return;
+            g_ViewModeAddr = static_cast<uint32_t>(ViewRecordAddr() + 8);
 
             // push ebp / mov ebp, esp / push ecx at the cinematic begin entry.
             static const uint8_t kExpectedCinematicBeginEntry[4] =
             {
                 0x55, 0x8B, 0xEC, 0x51
             };
-            if (!ExpectedBytesMatchAt(kGogCinematicCameraBeginAddr,
+            if (!ExpectedBytesMatchAt(g_CinematicCameraBeginAddr,
                                       kExpectedCinematicBeginEntry,
                                       sizeof(kExpectedCinematicBeginEntry)))
             {
@@ -912,21 +991,21 @@ namespace BZROpenShim
             }
 
             const bool missionCall = RedirectCallTarget(
-                kGogCinematicBeginCallAddr1,
-                kGogCinematicCameraBeginAddr,
+                g_CinematicBeginCallAddr1,
+                g_CinematicCameraBeginAddr,
                 reinterpret_cast<uintptr_t>(CinematicCameraBeginZoomFixHook));
             const bool scriptCall = RedirectCallTarget(
-                kGogCinematicBeginCallAddr2,
-                kGogCinematicCameraBeginAddr,
+                g_CinematicBeginCallAddr2,
+                g_CinematicCameraBeginAddr,
                 reinterpret_cast<uintptr_t>(CinematicCameraBeginZoomFixHook));
 
             g_CinematicSatelliteZoomFixInstalled = missionCall && scriptCall;
             if (g_CinematicSatelliteZoomFixInstalled)
             {
                 Log(L"[CINECAM] Installed cinematic-from-satellite zoom fix calls=0x%08X,0x%08X begin=0x%08X\n",
-                    static_cast<uint32_t>(kGogCinematicBeginCallAddr1),
-                    static_cast<uint32_t>(kGogCinematicBeginCallAddr2),
-                    static_cast<uint32_t>(kGogCinematicCameraBeginAddr));
+                    static_cast<uint32_t>(g_CinematicBeginCallAddr1),
+                    static_cast<uint32_t>(g_CinematicBeginCallAddr2),
+                    static_cast<uint32_t>(g_CinematicCameraBeginAddr));
             }
             else
             {

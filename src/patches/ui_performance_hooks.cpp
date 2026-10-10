@@ -445,6 +445,68 @@ namespace BZROpenShim::UiPerfHooks
         uintptr_t g_ShellRequestAddr = 0;
         uintptr_t g_ShellTransitionAddr = 0;
         uintptr_t g_ShellBackAddr = 0;
+
+        // Everything else this file touches in the exe comes from the UiPerf*
+        // engine_addresses rows in scripts/patches.json, so a new game build
+        // is carried across by reverse_engineering/build_port rather than by
+        // editing literals here. Two groups, each bound all or nothing.
+        struct UiPerfData
+        {
+            uint32_t mainScreenGlobal = 0;   // holds the live MainScreen
+            uint32_t mainScreenVtable = 0;
+            uint32_t overlayVtable = 0;      // MainScreen+0x158, owns the buttons
+            uint32_t buttonVtable = 0;       // OnClick thunk at +0x154
+            uint32_t shellWrapperGlobal = 0; // active screen at wrapper+0x14
+        };
+        struct UiPerfCode
+        {
+            uint32_t buildMain = 0, buildMp = 0, buildIa = 0;
+            uint32_t mainCtor = 0, mainDtor = 0, mpCtor = 0, mpDtor = 0, iaCtor = 0;
+            uint32_t modable[4] = {};
+        };
+        UiPerfData g_Data;
+        UiPerfCode g_Code;
+
+        // Data the trigger harness and the Steam settle check read. Data rows
+        // carry no guard bytes, so binding never waits; done once.
+        const UiPerfData& Data()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "UiPerfMainScreenGlobal", &g_Data.mainScreenGlobal },
+                    { "UiPerfMainScreenVtable", &g_Data.mainScreenVtable },
+                    { "UiPerfMainScreenOverlayVtable", &g_Data.overlayVtable },
+                    { "UiPerfButtonVtable", &g_Data.buttonVtable },
+                    { "UiPerfShellWrapperGlobal", &g_Data.shellWrapperGlobal },
+                };
+                return HookEngine::BindEngineRows("UiPerf main screen data", rows);
+            }();
+            (void)bound;
+            return g_Data;
+        }
+
+        // The drilldown and modable-setter bodies. Their guard bytes run past
+        // each overwritten prologue, so a match also says SteamStub has
+        // finished with the page: bound only when the hooks are about to go
+        // in, on the same settle gate.
+        bool BindCode()
+        {
+            const HookEngine::EngineRow rows[] = {
+                { "UiPerfBuildMainResources", &g_Code.buildMain },
+                { "UiPerfBuildMpResources", &g_Code.buildMp },
+                { "UiPerfBuildIaResources", &g_Code.buildIa },
+                { "UiPerfMainScreenCtor", &g_Code.mainCtor },
+                { "UiPerfMainScreenDtor", &g_Code.mainDtor },
+                { "UiPerfMultiplayerLobbyCtor", &g_Code.mpCtor },
+                { "UiPerfMultiplayerLobbyDtor", &g_Code.mpDtor },
+                { "UiPerfInstantActionCtor", &g_Code.iaCtor },
+                { "UiPerfSetModableNone", &g_Code.modable[0] },
+                { "UiPerfSetModableCustomCampaignList", &g_Code.modable[1] },
+                { "UiPerfSetModableCampaign", &g_Code.modable[2] },
+                { "UiPerfSetModableContentB", &g_Code.modable[3] },
+            };
+            return HookEngine::BindEngineRows("UiPerf drilldown and modable hooks", rows);
+        }
     } // namespace
 
     void OnOgreInitialiseResourceGroup_Begin(const char* group)
@@ -612,11 +674,13 @@ namespace BZROpenShim::UiPerfHooks
         // Helper: log MainScreen buttons (POD, SEH-safe). Called only when pending==0x01.
         static void LogMainScreenButtons()
         {
+            const UiPerfData& a = Data();
+            if (!a.mainScreenGlobal) return;
             __try {
-                void* ms = *(void**)0x0094551C;
-                if (!ms || *(uintptr_t*)ms != 0x0089E178) return;
+                void* ms = *(void**)a.mainScreenGlobal;
+                if (!ms || *(uintptr_t*)ms != a.mainScreenVtable) return;
                 void* ov = *(void**)((uint8_t*)ms + 0x158);
-                if (!ov || *(uintptr_t*)ov != 0x008A0B94) return;
+                if (!ov || *(uintptr_t*)ov != a.overlayVtable) return;
                 void** beg = *(void***)((uint8_t*)ov + 0x12C);
                 void** en = *(void***)((uint8_t*)ov + 0x130);
                 if (!beg || !en || beg >= en || (en - beg) >= 64) return;
@@ -627,7 +691,7 @@ namespace BZROpenShim::UiPerfHooks
                     const char* nm = (const char*)((uint8_t*)ch + 0x20);
                     if (!nm || !nm[0] || strlen(nm) > 64) continue;
                     uintptr_t vt = *(uintptr_t*)ch;
-                    void* oc = (vt == 0x008A0470) ? *(void**)((uint8_t*)ch + 0x154) : nullptr;
+                    void* oc = (vt == a.buttonVtable) ? *(void**)((uint8_t*)ch + 0x154) : nullptr;
                     LogShimA(LogLevel::Info, "uiperf-harness", "button name='%s' vt=0x%08X this=0x%p onClick=0x%p", nm, (unsigned)vt, ch, oc);
                 }
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -642,7 +706,7 @@ namespace BZROpenShim::UiPerfHooks
                     reinterpret_cast<uint8_t*>(node) + 0x20);
                 const size_t nameLength = strnlen_s(name, 65);
                 const uintptr_t vtable = *reinterpret_cast<uintptr_t*>(node);
-                void* onClick = vtable == 0x008A0470
+                void* onClick = Data().buttonVtable && vtable == Data().buttonVtable
                     ? *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(node) + 0x154)
                     : nullptr;
                 LogShimA(LogLevel::Info, "uiperf-harness",
@@ -670,7 +734,8 @@ namespace BZROpenShim::UiPerfHooks
                 const char* name = reinterpret_cast<const char*>(
                     reinterpret_cast<uint8_t*>(node) + 0x20);
                 if (strnlen_s(name, 65) <= 64 && std::strcmp(name, wanted) == 0 &&
-                    *reinterpret_cast<uintptr_t*>(node) == 0x008A0470)
+                    Data().buttonVtable &&
+                    *reinterpret_cast<uintptr_t*>(node) == Data().buttonVtable)
                     return node;
 
                 void** begin = *reinterpret_cast<void***>(
@@ -689,9 +754,11 @@ namespace BZROpenShim::UiPerfHooks
 
         static void* GetActiveScreen() noexcept
         {
+            const uint32_t wrapperGlobal = Data().shellWrapperGlobal;
+            if (!wrapperGlobal) return nullptr;
             __try
             {
-                void* wrapper = *reinterpret_cast<void**>(0x00918320);
+                void* wrapper = *reinterpret_cast<void**>(wrapperGlobal);
                 return wrapper ? *reinterpret_cast<void**>(
                     reinterpret_cast<uint8_t*>(wrapper) + 0x14) : nullptr;
             }
@@ -734,7 +801,8 @@ namespace BZROpenShim::UiPerfHooks
                             "[UIPERF][HARNESS] __BACK__ ignored: ShellBack hook not installed");
                         return;
                     }
-                    void* wrapper = *reinterpret_cast<void**>(0x00918320);
+                    const uint32_t wrapperGlobal = Data().shellWrapperGlobal;
+                    void* wrapper = wrapperGlobal ? *reinterpret_cast<void**>(wrapperGlobal) : nullptr;
                     if (backFn && wrapper)
                     {
                         LogShimA(LogLevel::Info, "uiperf-harness",
@@ -754,8 +822,9 @@ namespace BZROpenShim::UiPerfHooks
                     LogUiTree(activeScreen, 0);
                     return;
                 }
-                void* ms2 = *(void**)0x0094551C;
-                if (!ms2 || *(uintptr_t*)ms2 != 0x0089E178)
+                const UiPerfData& a = Data();
+                void* ms2 = a.mainScreenGlobal ? *(void**)a.mainScreenGlobal : nullptr;
+                if (!ms2 || *(uintptr_t*)ms2 != a.mainScreenVtable)
                 {
                     void* activeScreen = GetActiveScreen();
                     void* genericButton = FindNamedButton(activeScreen, p, 0);
@@ -787,7 +856,7 @@ namespace BZROpenShim::UiPerfHooks
                     "[UIPERF][HARNESS] MainScreen ptr=0x%p vt=0x%08X",
                     ms2, static_cast<unsigned>(*(uintptr_t*)ms2));
                 void* ov2 = *(void**)((uint8_t*)ms2 + 0x158);
-                if (!ov2 || *(uintptr_t*)ov2 != 0x008A0B94)
+                if (!ov2 || *(uintptr_t*)ov2 != a.overlayVtable)
                 {
                     LogShimA(LogLevel::Warn, "uiperf-harness",
                         "[UIPERF][HARNESS] MainScreen_Overlay not located ptr=0x%p", ov2);
@@ -806,7 +875,7 @@ namespace BZROpenShim::UiPerfHooks
                     if (!ch2) continue;
                     const char* nm2 = (const char*)((uint8_t*)ch2 + 0x20);
                     if (!nm2 || strcmp(nm2, p) != 0) continue;
-                    if (*(uintptr_t*)ch2 != 0x008A0470) return;
+                    if (*(uintptr_t*)ch2 != a.buttonVtable) return;
                     void* oc2 = *(void**)((uint8_t*)ch2 + 0x154);
                     if (!oc2) return;
                     found = true;
@@ -958,11 +1027,13 @@ namespace BZROpenShim::UiPerfHooks
 
         bool IsLiveMainScreenReady()
         {
+            const UiPerfData& a = Data();
+            if (!a.mainScreenGlobal) return false;
             __try
             {
-                void* mainScreen = *reinterpret_cast<void**>(0x0094551C);
+                void* mainScreen = *reinterpret_cast<void**>(a.mainScreenGlobal);
                 return mainScreen &&
-                       *reinterpret_cast<uintptr_t*>(mainScreen) == 0x0089E178;
+                       *reinterpret_cast<uintptr_t*>(mainScreen) == a.mainScreenVtable;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -982,8 +1053,12 @@ namespace BZROpenShim::UiPerfHooks
             static constexpr uint8_t kRequestTail[] = {
                 0x8B, 0xE5, 0x5D, 0xC2, 0x04, 0x00
             };
+            // push <SEH handler>; mov eax, fs:[0]. The handler address is
+            // skipped: it moves with every build, and the bytes either side
+            // already show the page is plaintext.
+            static constexpr uint8_t kTransitionPush[] = { 0x68 };
             static constexpr uint8_t kTransitionBody[] = {
-                0x68, 0xE0, 0x20, 0x86, 0x00, 0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
+                0x64, 0xA1, 0x00, 0x00, 0x00, 0x00
             };
             static constexpr uint8_t kBackBody[] = {
                 0x8B, 0x4D, 0xFC, 0x83, 0xC1, 0x2C, 0xE8
@@ -993,49 +1068,23 @@ namespace BZROpenShim::UiPerfHooks
                    MemoryMatches(g_ShellRequestAddr + 0x1D,
                                  kRequestTail, sizeof(kRequestTail)) &&
                    MemoryMatches(g_ShellTransitionAddr + 0x05,
+                                 kTransitionPush, sizeof(kTransitionPush)) &&
+                   MemoryMatches(g_ShellTransitionAddr + 0x0A,
                                  kTransitionBody, sizeof(kTransitionBody)) &&
                    MemoryMatches(g_ShellBackAddr + 0x07,
                                  kBackBody, sizeof(kBackBody));
         }
 
-        bool AreFrontendDrilldownFunctionsSettled()
-        {
-            // These body sentinels are intentionally outside the overwritten
-            // prologues. SteamStub previously exposed valid entry bytes while
-            // the remainder of a function was still ciphertext, so a prologue
-            // match alone is not sufficient authority to install a detour.
-            static constexpr uint8_t kBuildMainBody[] = {
-                0x68, 0x50, 0xD5, 0x85, 0x00, 0x64, 0xA1
-            };
-            static constexpr uint8_t kBuildMpBody[] = {
-                0x68, 0xA0, 0xD5, 0x85, 0x00, 0x64, 0xA1
-            };
-            static constexpr uint8_t kMainCtorBody[] = {
-                0x68, 0x54, 0xEC, 0x85, 0x00, 0x64, 0xA1
-            };
-            static constexpr uint8_t kMpCtorBody[] = {
-                0x68, 0x50, 0xFF, 0x85, 0x00, 0x64, 0xA1
-            };
-            static constexpr uint8_t kMainDtorBody[] = {
-                0x8B, 0x4D, 0xFC, 0xE8, 0xD1, 0x03, 0x00, 0x00
-            };
-            static constexpr uint8_t kMpDtorBody[] = {
-                0x8B, 0x4D, 0xFC, 0xE8, 0x21, 0x00, 0x00, 0x00
-            };
-            return MemoryMatches(0x0076A030 + 5, kBuildMainBody, sizeof(kBuildMainBody)) &&
-                   MemoryMatches(0x0076A240 + 5, kBuildMpBody, sizeof(kBuildMpBody)) &&
-                   MemoryMatches(0x0078E670 + 5, kMainCtorBody, sizeof(kMainCtorBody)) &&
-                   MemoryMatches(0x0079EA90 + 5, kMpCtorBody, sizeof(kMpCtorBody)) &&
-                   MemoryMatches(0x0078E8C0 + 7, kMainDtorBody, sizeof(kMainDtorBody)) &&
-                   MemoryMatches(0x007A0F80 + 7, kMpDtorBody, sizeof(kMpDtorBody));
-        }
-
+        // Expects BindCode() to have succeeded. The UiPerf* rows' guard bytes
+        // run past each overwritten prologue (SteamStub has exposed a correct
+        // entry while the rest of a function was still ciphertext), so a bound
+        // row is also a settled body.
         void InstallFrontendDrilldownHooks()
         {
-            if (!AreFrontendDrilldownFunctionsSettled())
+            if (!g_Code.buildMain)
             {
                 LogShimA(LogLevel::Warn, "uiperf-hooks",
-                    "Frontend drilldown hooks skipped because full-function sentinels are not settled");
+                    "Frontend drilldown hooks skipped: UiPerf code addresses are not bound");
                 return;
             }
 
@@ -1046,17 +1095,17 @@ namespace BZROpenShim::UiPerfHooks
                 0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC
             };
             int hooked = 0;
-            hooked += InstallInlineHook(g_BuildMainResourcesHook, 0x0076A030,
+            hooked += InstallInlineHook(g_BuildMainResourcesHook, g_Code.buildMain,
                 reinterpret_cast<void*>(&Detour_BuildMainResources), 5, kSehPrefix) ? 1 : 0;
-            hooked += InstallInlineHook(g_BuildMpResourcesHook, 0x0076A240,
+            hooked += InstallInlineHook(g_BuildMpResourcesHook, g_Code.buildMp,
                 reinterpret_cast<void*>(&Detour_BuildMpResources), 5, kSehPrefix) ? 1 : 0;
-            hooked += InstallInlineHook(g_MainScreenCtorHook, 0x0078E670,
+            hooked += InstallInlineHook(g_MainScreenCtorHook, g_Code.mainCtor,
                 reinterpret_cast<void*>(&Detour_MainScreenCtor), 5, kSehPrefix) ? 1 : 0;
-            hooked += InstallInlineHook(g_MainScreenDtorHook, 0x0078E8C0,
+            hooked += InstallInlineHook(g_MainScreenDtorHook, g_Code.mainDtor,
                 reinterpret_cast<void*>(&Detour_MainScreenDtor), 7, kDeletingDtorPrefix) ? 1 : 0;
-            hooked += InstallInlineHook(g_MultiplayerLobbyCtorHook, 0x0079EA90,
+            hooked += InstallInlineHook(g_MultiplayerLobbyCtorHook, g_Code.mpCtor,
                 reinterpret_cast<void*>(&Detour_MultiplayerLobbyCtor), 5, kSehPrefix) ? 1 : 0;
-            hooked += InstallInlineHook(g_MultiplayerLobbyDtorHook, 0x007A0F80,
+            hooked += InstallInlineHook(g_MultiplayerLobbyDtorHook, g_Code.mpDtor,
                 reinterpret_cast<void*>(&Detour_MultiplayerLobbyDtor), 7, kDeletingDtorPrefix) ? 1 : 0;
             LogShimA(hooked == 6 ? LogLevel::Info : LogLevel::Warn,
                 "uiperf-hooks",
@@ -1423,15 +1472,15 @@ namespace BZROpenShim::UiPerfHooks
             ShellHook hook;
         };
 
-        // 0x0076A030 (mode 4), 0x0076A240 (mode 2) and 0x0076A430 (mode 1) are
-        // the functions this file already hooks as buildMainResources,
-        // buildMPResources and buildIAResources, so they are reported from
-        // those detours instead of being hooked twice.
+        // buildMainResources (mode 4), buildMPResources (mode 2) and
+        // buildIAResources (mode 1) are already hooked by this file, so they
+        // are reported from those detours instead of being hooked twice. The
+        // addresses are filled from g_Code.modable[] at install.
         ModableSetterSite g_ModableSetters[] = {
-            { 0x0076A600, 0, "setModableNone", {} },
-            { 0x0076AB20, 3, "setModableCustomCampaignList", {} },
-            { 0x0076AE60, 0, "setModableCampaign", {} },
-            { 0x0076B350, 0, "setModableContentB", {} },
+            { 0, 0, "setModableNone", {} },
+            { 0, 3, "setModableCustomCampaignList", {} },
+            { 0, 0, "setModableCampaign", {} },
+            { 0, 0, "setModableContentB", {} },
         };
 
         ShellHook g_OgreAddLocationHook;
@@ -1476,8 +1525,8 @@ namespace BZROpenShim::UiPerfHooks
                         identity[0] ? identity : "<none>");
         }
 
-        // Argument counts are taken from each function's own epilogue: 0x0076AB20
-        // ends in `ret`, the other three in `ret 4`. Getting this wrong
+        // Argument counts are taken from each function's own epilogue:
+        // setModableCustomCampaignList ends in `ret`, the other three in `ret 4`. Getting this wrong
         // unbalances the stack, so the two shapes are kept strictly separate.
         struct ModableSetterCall
         {
@@ -1537,7 +1586,7 @@ namespace BZROpenShim::UiPerfHooks
                         g_ModableRemoves.load(std::memory_order_relaxed), ms);
         }
 
-        // 0x0076AB20 takes no argument; the other three take the selected
+        // setModableCustomCampaignList takes no argument; the other three take the selected
         // content object, whose identity string lives at +0x7C and which the
         // manager remembers at +0x90.
         void __fastcall Detour_ModableSetter0(void* ecx, void*, void* content) { InvokeModableSetterImpl(0, ecx, content, true); }
@@ -1590,6 +1639,7 @@ namespace BZROpenShim::UiPerfHooks
         void InstallModableModeHooks()
         {
             if (!UiPerf::IsEnabled()) return;
+            if (!g_Code.modable[0]) return; // BindCode() failed; it already said why
             if (g_ModableHooksInstalled.exchange(true)) return;
 
             // Every one of these bodies begins with the same MSVC SEH prologue,
@@ -1607,6 +1657,7 @@ namespace BZROpenShim::UiPerfHooks
             for (size_t i = 0; i < std::size(g_ModableSetters); ++i)
             {
                 ModableSetterSite& site = g_ModableSetters[i];
+                site.addr = g_Code.modable[i];
                 if (InstallInlineHook(site.hook, site.addr, detours[i], 5, kSehPrologue))
                 {
                     ++installed;
@@ -1682,15 +1733,19 @@ namespace BZROpenShim::UiPerfHooks
                     g_ShellBackAddr, g_ShellBackHook.trampoline);
             }
 
+            // The drilldown and modable bodies, bound all or nothing; on Steam
+            // this runs only after the settle gate, so the guard bytes match.
+            const bool codeBound = BindCode();
+
             // These addresses and prologues are GOG-only drilldown evidence;
             // they must not be written into SteamStub-managed code pages.
-            if (installGogDrilldown)
+            if (installGogDrilldown && codeBound)
             {
-                if (InstallInlineHook(g_BuildIaResourcesHook, 0x0076A430,
+                if (InstallInlineHook(g_BuildIaResourcesHook, g_Code.buildIa,
                                       reinterpret_cast<void*>(&Detour_BuildIaResources),
                                       5, kTransitionPrefix))
                     LogShimA(LogLevel::Info, "uiperf-hooks", "buildIAResources drilldown installed");
-                if (InstallInlineHook(g_InstantActionCtorHook, 0x00789C20,
+                if (InstallInlineHook(g_InstantActionCtorHook, g_Code.iaCtor,
                                       reinterpret_cast<void*>(&Detour_InstantActionCtor),
                                       5, kTransitionPrefix))
                     LogShimA(LogLevel::Info, "uiperf-hooks", "InstantActionCtor drilldown installed");

@@ -33,7 +33,7 @@ what the setting decides is whether that mute outlives the process.
 
     openshim.ini   [Network] PersistentPlayerMute = 1
     environment    OPENSHIM_DISABLE_PERSISTENT_PLAYER_MUTE=1
-    in-game        OpenShim Settings -> Persistent Mutes
+    in-game        OpenShim Options -> Network -> Persistent Mutes
 
 | Value | Behaviour |
 |---|---|

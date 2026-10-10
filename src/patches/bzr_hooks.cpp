@@ -192,7 +192,6 @@ namespace BZROpenShim
 
         constexpr ULONGLONG kSteamChunkCreateHookSettleDelayMs = 15000;
 
-        static constexpr uintptr_t kChunkEffectVtableSimulateSlotAddr = 0x0087708C;
         static constexpr DWORD kVehicleSkinningTraceIntervalMsDefault = 5000;
         static constexpr DWORD kVehicleSkinningTraceIntervalMsMin = 100;
         static constexpr DWORD kVehicleSkinningTraceIntervalMsMax = 60000;
@@ -369,8 +368,9 @@ namespace BZROpenShim
         g_BzrFn_AttackTaskDoState = g_AttackTaskDoStateDetour.trampoline
             ? reinterpret_cast<FnAttackTaskDoState>(g_AttackTaskDoStateDetour.trampoline)
             : nullptr;
-        g_BzrFn_TerrainGetIntersection = g_BzrFn_AttackTaskDoState
-            ? reinterpret_cast<FnTerrainGetIntersection>(kGogTerrainGetIntersectionAddr)
+        g_BzrFn_TerrainGetIntersection =
+            g_BzrFn_AttackTaskDoState && TerrainGetIntersectionAddr() != 0
+            ? reinterpret_cast<FnTerrainGetIntersection>(TerrainGetIntersectionAddr())
             : nullptr;
         g_AttackTaskDoStateHookInstalled =
             g_BzrFn_AttackTaskDoState && g_BzrFn_TerrainGetIntersection;
@@ -541,14 +541,13 @@ namespace BZROpenShim
             g_VehicleSkinningTraceEnabled ? "enabled" : "disabled",
             static_cast<unsigned long>(g_VehicleSkinningTraceIntervalMs),
             static_cast<long>(g_VehicleSkinningTraceBudget));
-        LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT] Runtime manager trace: %hs vtableSlot=0x%08X orig=0x%08X\n",
+        LogChunkDiagnostic("chunkeffect", L"[CHUNKEFFECT] Runtime manager trace: %hs orig=0x%08X\n",
             g_TraceChunkEffectRuntime ? "enabled" : "disabled",
-            static_cast<uint32_t>(kChunkEffectVtableSimulateSlotAddr),
             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_ChunkEffectSimulate)));
         LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Create-path hooks: %hs create=0x%08X chunklet=0x%08X\n",
             g_ChunkEffectCreateHooksInstalled ? "enabled" : "disabled",
-            static_cast<uint32_t>(kGogChunkEffectCreateChunkAddr),
-            static_cast<uint32_t>(kGogChunkEffectCreateChunkletAddr));
+            g_ChunkEffectCreateChunkAddr,
+            g_ChunkEffectCreateChunkletAddr);
         if (g_IsSteamExe && !g_AllowUnsafeSteamChunkCreateHooks)
         {
             LogChunkDiagnostic("chunkspawn", L"[CHUNKSPAWN] Steam safety gate active; creator hooks will install after settled-byte verification and delay\n");
@@ -558,7 +557,7 @@ namespace BZROpenShim
             g_SatelliteVisibilityLogBudget,
             static_cast<unsigned long>(g_SatelliteVisibilityLogIntervalMs),
             g_SatelliteVisibilityObjectLimit,
-            static_cast<uint32_t>(GetMainModuleBase() + kViewRecordRva),
+            static_cast<uint32_t>(ViewRecordAddr()),
             static_cast<uint32_t>(EngineGlobals::UserObjectSlot()),
             static_cast<uint32_t>(EngineGlobals::GameObjectArena()));
         // Record the layout the sample lines were produced with, so a captured
@@ -582,8 +581,8 @@ namespace BZROpenShim
             g_RawMouseInputSignaturesMatch ? "verified" : "mismatch",
             g_RawMouseInputProcessHookInstalled ? "installed" : "absent",
             ShouldTraceRawMouseInput() ? "enabled" : "disabled",
-            static_cast<uint32_t>(kRawMouseInputEnabledAddr),
-            static_cast<uint32_t>(kRawMouseInputProcessAddr));
+            static_cast<uint32_t>(g_RawMouseInputEnabledAddr),
+            static_cast<uint32_t>(g_RawMouseInputProcessAddr));
         Log(L"[PRODSCRIPT] PROD CanBuild/IsBusy fix: %hs\n",
             g_ProducerScriptPredicateHooksInstalled ? "installed" : "pending");
 		Log(L"[ARTYDEPLOY] Undeployed howitzer sniper-retaliation fix: %hs offensiveSubTaskHook=%hs\n",
@@ -612,9 +611,8 @@ namespace BZROpenShim
         Log(L"[TURRET] Aim pitch multiplier: %.3f%s\n",
             static_cast<double>(g_TurretAimPitchMultiplier),
             g_TurretAimPitchMultiplier >= 0.999f ? " (full range)" : "");
-        Log(L"[AICONSTRUCT] Constructor death cleanup fix: %hs entry=0x%08X trace=%hs budget=%ld\n",
+        Log(L"[AICONSTRUCT] Constructor death cleanup fix: %hs trace=%hs budget=%ld\n",
             g_ConstructorRemoteBuildFixEnabled ? "enabled" : "disabled",
-            static_cast<uint32_t>(kGogAIUnitRemoveEntryAddr),
             ShouldTraceConstructorRemoteBuildFix() ? "enabled" : "disabled",
             g_ConstructorRemoteBuildTraceBudget);
         Log(L"[AGGRO] Attack reveal fix: %hs trace=%hs budget=%ld\n",

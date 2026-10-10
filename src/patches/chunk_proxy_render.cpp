@@ -216,9 +216,16 @@ namespace BZROpenShim
 
         constexpr size_t kChunkEffectCreateExpectedLen = 16;
 
-        constexpr uintptr_t kGogChunkEffectPartialFragmentAddr = 0x00492460;
+        // Fragment walker rows: FullFragmentObject is needed by skinned gibs
+        // and the trace, PartialFragmentObject by the trace alone, so each is
+        // bound only when something asks for it.
+        uint32_t g_ChunkEffectPartialFragmentAddr = 0;
 
-        constexpr uintptr_t kGogChunkEffectFullFragmentAddr = 0x00492640;
+        uint32_t g_ChunkEffectCreateChunkAddr = 0;
+
+        uint32_t g_ChunkEffectCreateChunkletAddr = 0;
+
+        uint32_t g_ChunkEffectFullFragmentAddr = 0;
 
         constexpr size_t kChunkEffectFragmentDetourLen = 6;
 
@@ -2464,7 +2471,7 @@ namespace BZROpenShim
         }
 
         // Redux renders around a per-map origin (terrain center, the
-        // Ogre::Vector3 global at kGogWorldRenderOriginAddr) with the Z axis
+        // Ogre::Vector3 global, the WorldRenderOrigin row) with the Z axis
         // mirrored versus sim space. The camera, lights, and every world
         // renderable go through this conversion inside the exe, so proxy
         // nodes fed raw sim coordinates land ~1e5 units outside the render
@@ -2472,10 +2479,13 @@ namespace BZROpenShim
         static bool TryConvertChunkSimTransformToRenderSpace(ChunkProxyTransform& transform)
         {
             float origin[3] = {};
+            const uintptr_t originAddr = WorldRenderOriginAddr();
+            if (!originAddr)
+                return false;
 
             __try
             {
-                const float* originPtr = reinterpret_cast<const float*>(kGogWorldRenderOriginAddr);
+                const float* originPtr = reinterpret_cast<const float*>(originAddr);
                 origin[0] = originPtr[0];
                 origin[1] = originPtr[1];
                 origin[2] = originPtr[2];
@@ -4954,6 +4964,17 @@ namespace BZROpenShim
         {
             if ((!g_TraceChunkRender && !g_TraceChunkEffectRuntime) || g_ChunkEffectCreateHooksInstalled)
                 return;
+            // The detours below copy their prologues unchecked, so the rows'
+            // guards are what make them safe on another build.
+            static const bool s_createBound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "ChunkEffectCreateChunk", &g_ChunkEffectCreateChunkAddr },
+                    { "ChunkEffectCreateChunklet", &g_ChunkEffectCreateChunkletAddr },
+                };
+                return HookEngine::BindEngineRows("Chunk create trace", rows);
+            }();
+            if (!s_createBound)
+                return;
 
             static const uint8_t kExpectedCreateChunkletBytes[kChunkEffectCreateExpectedLen] =
             {
@@ -4984,12 +5005,12 @@ namespace BZROpenShim
 
                 const bool createChunkBytesMatch =
                     ExpectedBytesMatchAt(
-                        kGogChunkEffectCreateChunkAddr,
+                        g_ChunkEffectCreateChunkAddr,
                         kExpectedCreateChunkBytes,
                         sizeof(kExpectedCreateChunkBytes));
                 const bool createChunkletBytesMatch =
                     ExpectedBytesMatchAt(
-                        kGogChunkEffectCreateChunkletAddr,
+                        g_ChunkEffectCreateChunkletAddr,
                         kExpectedCreateChunkletBytes,
                         sizeof(kExpectedCreateChunkletBytes));
                 if (!createChunkBytesMatch || !createChunkletBytesMatch)
@@ -5018,7 +5039,7 @@ namespace BZROpenShim
                 {
                     InstallInlineDetour32(
                         g_ChunkEffectCreateChunkDetour,
-                        kGogChunkEffectCreateChunkAddr,
+                        g_ChunkEffectCreateChunkAddr,
                         reinterpret_cast<void*>(ChunkEffectCreateChunkHook),
                         kChunkEffectCreateChunkDetourLen,
                         nullptr,
@@ -5034,7 +5055,7 @@ namespace BZROpenShim
                 {
                     InstallInlineDetour32(
                         g_ChunkEffectCreateChunkletDetour,
-                        kGogChunkEffectCreateChunkletAddr,
+                        g_ChunkEffectCreateChunkletAddr,
                         reinterpret_cast<void*>(ChunkEffectCreateChunkletHook),
                         kChunkEffectCreateChunkletDetourLen,
                         nullptr,
@@ -5058,8 +5079,8 @@ namespace BZROpenShim
                 LogChunkDiagnostic(
                     "chunkspawn",
                     L"[CHUNKSPAWN] Installed create hooks create=0x%08X chunklet=0x%08X\n",
-                    static_cast<uint32_t>(kGogChunkEffectCreateChunkAddr),
-                    static_cast<uint32_t>(kGogChunkEffectCreateChunkletAddr));
+                    static_cast<uint32_t>(g_ChunkEffectCreateChunkAddr),
+                    static_cast<uint32_t>(g_ChunkEffectCreateChunkletAddr));
                 g_ChunkEffectCreateHooksLogged = true;
             }
         }
@@ -5077,6 +5098,12 @@ namespace BZROpenShim
             const bool gibs = IsSkinnedGibsEnabled();
             if ((!trace && !gibs) || g_ChunkEffectFragmentHooksInstalled || g_IsSteamExe)
                 return;
+            if (trace && g_ChunkEffectPartialFragmentAddr == 0)
+                g_ChunkEffectPartialFragmentAddr = HookEngine::EngineAddress("ChunkEffectPartialFragment");
+            if (g_ChunkEffectFullFragmentAddr == 0)
+                g_ChunkEffectFullFragmentAddr = HookEngine::EngineAddress("ChunkEffectFullFragment");
+            if (g_ChunkEffectFullFragmentAddr == 0 || (trace && g_ChunkEffectPartialFragmentAddr == 0))
+                return;  // rows do not bind on this build (EngineAddress logs once per name)
 
             static const uint8_t kExpectedPartialFragmentBytes[kChunkEffectFragmentDetourLen] =
             {
@@ -5091,7 +5118,7 @@ namespace BZROpenShim
             {
                 InstallInlineDetour32(
                     g_ChunkEffectPartialFragmentDetour,
-                    kGogChunkEffectPartialFragmentAddr,
+                    g_ChunkEffectPartialFragmentAddr,
                     reinterpret_cast<void*>(ChunkEffectPartialFragmentHook),
                     kChunkEffectFragmentDetourLen,
                     kExpectedPartialFragmentBytes,
@@ -5107,7 +5134,7 @@ namespace BZROpenShim
             {
                 InstallInlineDetour32(
                     g_ChunkEffectFullFragmentDetour,
-                    kGogChunkEffectFullFragmentAddr,
+                    g_ChunkEffectFullFragmentAddr,
                     reinterpret_cast<void*>(ChunkEffectFullFragmentHook),
                     kChunkEffectFragmentDetourLen,
                     kExpectedFullFragmentBytes,
@@ -5135,7 +5162,7 @@ namespace BZROpenShim
                     LogChunkDiagnostic(
                         "skinnedgibs",
                         L"[SKINNEDGIBS] FullFragmentObject detour unavailable at 0x%08X; skinned gibs disabled\n",
-                        static_cast<uint32_t>(kGogChunkEffectFullFragmentAddr));
+                        g_ChunkEffectFullFragmentAddr);
                 }
                 if (!trace)
                 {
@@ -5149,8 +5176,8 @@ namespace BZROpenShim
                 LogChunkDiagnostic(
                     "chunkspawn",
                     L"[CHUNKSPAWN] Installed fragment walk hooks partial=0x%08X full=0x%08X skinnedGibs=%u\n",
-                    trace ? static_cast<uint32_t>(kGogChunkEffectPartialFragmentAddr) : 0u,
-                    static_cast<uint32_t>(kGogChunkEffectFullFragmentAddr),
+                    trace ? g_ChunkEffectPartialFragmentAddr : 0u,
+                    g_ChunkEffectFullFragmentAddr,
                     gibs ? 1u : 0u);
                 g_ChunkEffectFragmentHooksLogged = true;
             }

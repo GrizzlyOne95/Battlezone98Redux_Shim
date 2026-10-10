@@ -3,6 +3,7 @@
 // bridge accessors, split out of bzr_hooks.cpp. Installed and configured
 // from there; shared helpers come from bzr_hooks_internal.h.
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "patcher.h"
@@ -33,13 +34,39 @@ namespace BZROpenShim
         //   0F 2F 05 [04 26 8A 00]   comiss xmm0,[0x008A2604]   ; operand@0x601CA3
         //   ...
         //   76 0C                    jbe  0x601CC3              ; gate  @0x601CB5
-        static constexpr uintptr_t kGlobalTurboComissOperandAddr = 0x00601CA3;
-        static constexpr uintptr_t kGlobalTurboSecondGateAddr = 0x00601CB5;
-        static constexpr uint8_t kGlobalTurboComissOperandExpected[4] = { 0x04, 0x26, 0x8A, 0x00 };
+        //
+        // One row, UnitTurboThrottleBlock, guards the whole stretch from the
+        // begin hook through the end hook, so the four sites keep this layout.
+        // The comiss operand is an absolute .rdata address, so its stock value
+        // is captured live once the guard has passed, for revert.
+        static uintptr_t g_GlobalTurboComissOperandAddr = 0;
+        static uintptr_t g_GlobalTurboSecondGateAddr = 0;
+        static uint8_t g_GlobalTurboComissOperandExpected[4] = {};
         static constexpr uint8_t kGlobalTurboSecondGateExpected[2] = { 0x76, 0x0C };
         static constexpr uint8_t kGlobalTurboSecondGatePatched[2] = { 0x90, 0x90 };
-        static constexpr uintptr_t kUnitTurboBeginHookAddr = 0x00601C92;
-        static constexpr uintptr_t kUnitTurboEndHookAddr = 0x00601CCD;
+        static uintptr_t g_UnitTurboBeginHookAddr = 0;
+        static uintptr_t g_UnitTurboEndHookAddr = 0;
+
+        static bool GlobalTurboAddressesBound()
+        {
+            static const bool bound = [] {
+                uint32_t block = 0;
+                const HookEngine::EngineRow rows[] = {
+                    { "UnitTurboThrottleBlock", &block },
+                };
+                if (!HookEngine::BindEngineRows("Global turbo", rows))
+                    return false;
+                g_UnitTurboBeginHookAddr = block;
+                g_GlobalTurboComissOperandAddr = block + 0x11;
+                g_GlobalTurboSecondGateAddr = block + 0x23;
+                g_UnitTurboEndHookAddr = block + 0x3B;
+                std::memcpy(g_GlobalTurboComissOperandExpected,
+                            reinterpret_cast<const void*>(g_GlobalTurboComissOperandAddr),
+                            sizeof(g_GlobalTurboComissOperandExpected));
+                return true;
+            }();
+            return bound;
+        }
         static constexpr uint8_t kUnitTurboBeginHookExpected[6] = {
             0x8B, 0x45, 0x90, 0xD9, 0x58, 0x08
         };
@@ -72,7 +99,7 @@ namespace BZROpenShim
         // to the stock bytes.
         static bool WriteGlobalTurboPatch(bool active)
         {
-            uint8_t operandBytes[sizeof(kGlobalTurboComissOperandExpected)];
+            uint8_t operandBytes[sizeof(g_GlobalTurboComissOperandExpected)];
             if (active)
             {
                 const uint32_t tolAddr =
@@ -81,14 +108,14 @@ namespace BZROpenShim
             }
             else
             {
-                std::memcpy(operandBytes, kGlobalTurboComissOperandExpected, sizeof(operandBytes));
+                std::memcpy(operandBytes, g_GlobalTurboComissOperandExpected, sizeof(operandBytes));
             }
             const uint8_t* gateBytes =
                 active ? kGlobalTurboSecondGatePatched : kGlobalTurboSecondGateExpected;
 
-            if (!WritePatchBytes(kGlobalTurboComissOperandAddr, operandBytes, sizeof(operandBytes)))
+            if (!WritePatchBytes(g_GlobalTurboComissOperandAddr, operandBytes, sizeof(operandBytes)))
                 return false;
-            if (!WritePatchBytes(kGlobalTurboSecondGateAddr, gateBytes, sizeof(kGlobalTurboSecondGateExpected)))
+            if (!WritePatchBytes(g_GlobalTurboSecondGateAddr, gateBytes, sizeof(kGlobalTurboSecondGateExpected)))
                 return false;
             return true;
         }
@@ -100,10 +127,10 @@ namespace BZROpenShim
 
             if (wantActive)
             {
-                if (!ExpectedBytesMatchAt(kGlobalTurboComissOperandAddr,
-                                          kGlobalTurboComissOperandExpected,
-                                          sizeof(kGlobalTurboComissOperandExpected)) ||
-                    !ExpectedBytesMatchAt(kGlobalTurboSecondGateAddr,
+                if (!ExpectedBytesMatchAt(g_GlobalTurboComissOperandAddr,
+                                          g_GlobalTurboComissOperandExpected,
+                                          sizeof(g_GlobalTurboComissOperandExpected)) ||
+                    !ExpectedBytesMatchAt(g_GlobalTurboSecondGateAddr,
                                           kGlobalTurboSecondGateExpected,
                                           sizeof(kGlobalTurboSecondGateExpected)))
                 {
@@ -117,15 +144,15 @@ namespace BZROpenShim
                 {
                     Log(L"[TURBO] Applied global turbo (tolerance=%.3f) tol@0x%08X gate@0x%08X\n",
                         static_cast<double>(g_GlobalTurboTolerance),
-                        static_cast<uint32_t>(kGlobalTurboComissOperandAddr),
-                        static_cast<uint32_t>(kGlobalTurboSecondGateAddr));
+                        static_cast<uint32_t>(g_GlobalTurboComissOperandAddr),
+                        static_cast<uint32_t>(g_GlobalTurboSecondGateAddr));
                 }
                 return true;
             }
 
             // Revert only if the second gate still holds our NOPs. If it does
             // not, another owner changed the site and we leave it untouched.
-            if (!ExpectedBytesMatchAt(kGlobalTurboSecondGateAddr,
+            if (!ExpectedBytesMatchAt(g_GlobalTurboSecondGateAddr,
                                       kGlobalTurboSecondGatePatched,
                                       sizeof(kGlobalTurboSecondGatePatched)))
             {
@@ -277,12 +304,14 @@ namespace BZROpenShim
         {
             if (g_UnitTurboHooksInstalled)
                 return;
+            if (!GlobalTurboAddressesBound())
+                return;
             if (!ExpectedBytesMatchAt(
-                    kUnitTurboBeginHookAddr,
+                    g_UnitTurboBeginHookAddr,
                     kUnitTurboBeginHookExpected,
                     sizeof(kUnitTurboBeginHookExpected)) ||
                 !ExpectedBytesMatchAt(
-                    kUnitTurboEndHookAddr,
+                    g_UnitTurboEndHookAddr,
                     kUnitTurboEndHookExpected,
                     sizeof(kUnitTurboEndHookExpected)))
             {
@@ -295,19 +324,19 @@ namespace BZROpenShim
             }
 
             if (!WriteUnitTurboCallHook(
-                    kUnitTurboBeginHookAddr,
+                    g_UnitTurboBeginHookAddr,
                     sizeof(kUnitTurboBeginHookExpected),
                     reinterpret_cast<const void*>(UnitTurboBeginHook)))
             {
                 return;
             }
             if (!WriteUnitTurboCallHook(
-                    kUnitTurboEndHookAddr,
+                    g_UnitTurboEndHookAddr,
                     sizeof(kUnitTurboEndHookExpected),
                     reinterpret_cast<const void*>(UnitTurboEndHook)))
             {
                 WritePatchBytes(
-                    kUnitTurboBeginHookAddr,
+                    g_UnitTurboBeginHookAddr,
                     kUnitTurboBeginHookExpected,
                     sizeof(kUnitTurboBeginHookExpected));
                 return;
@@ -316,8 +345,8 @@ namespace BZROpenShim
             g_UnitTurboHooksInstalled = true;
             g_UnitTurboHookMismatchLogged = false;
             Log(L"[TURBO] Installed shim-owned per-unit hooks begin=0x%08X end=0x%08X\n",
-                static_cast<uint32_t>(kUnitTurboBeginHookAddr),
-                static_cast<uint32_t>(kUnitTurboEndHookAddr));
+                static_cast<uint32_t>(g_UnitTurboBeginHookAddr),
+                static_cast<uint32_t>(g_UnitTurboEndHookAddr));
         }
 
         // Reconciles the live turbo bytes with the desired global state.
@@ -326,6 +355,10 @@ namespace BZROpenShim
             const bool wantActive =
                 g_GlobalTurboEnabled &&
                 (ReadLocalPlayerNetIdValue() == 0);
+            if (!wantActive && !g_GlobalTurboPatchActive)
+                return;
+            if (!GlobalTurboAddressesBound())
+                return;
             ReconcileGlobalTurboPatchState(wantActive, true);
         }
 
