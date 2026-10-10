@@ -109,7 +109,8 @@ namespace BZROpenShim
                     g_ReplaceNicknameOnNextInput = false;
                 }
                 if (InterlockedDecrement(&g_NicknameInputTraceBudget) >= 0)
-                    Log(L"[BZRNET] Nickname input routed (enter=%hs)\n",
+                    Log(L"[BZRNET] Nickname input routed (char=0x%02X enter=%hs)\n",
+                        static_cast<unsigned>(character),
                         (character == '\r' || character == '\n') ? "yes" : "no");
                 const bool isEnter = (character == '\r' || character == '\n');
                 if (isEnter)
