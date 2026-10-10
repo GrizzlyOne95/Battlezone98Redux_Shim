@@ -101,6 +101,17 @@ OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetNativeHudMeterVisible, OpenS
 OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimRestoreNativeHudMeter, OpenShimImpl_RestoreNativeHudMeter, (LPCSTR name), (name), FALSE)
 OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimRestoreAllNativeHudMeters, OpenShimImpl_RestoreAllNativeHudMeters, (void), (), FALSE)
 
+// Mission-scoped resistance. Capability is false unless the native site qualifies.
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimHasNativeDamageResistance, OpenShimImpl_HasNativeDamageResistance, (void), (), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetUnitDamageMultiplier, OpenShimImpl_SetUnitDamageMultiplier, (void* object, DWORD handle, float multiplier), (object, handle, multiplier), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimClearUnitDamageMultiplier, OpenShimImpl_ClearUnitDamageMultiplier, (DWORD handle), (handle), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimResetUnitDamageMultipliers, OpenShimImpl_ResetUnitDamageMultipliers, (void), (), FALSE)
+// Opt-in legacy GEO vehicle contact experiment (GOG only).
+OPENSHIM_SDK_EXPORT_APPEND(DWORD, WINAPI, OpenShimGetGeometryContactCapabilities, OpenShimImpl_GetGeometryContactCapabilities, (void), (), 0)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetGeometryContact, OpenShimImpl_SetGeometryContact, (DWORD handle, BOOL enabled), (handle, enabled), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimClearGeometryContact, OpenShimImpl_ClearGeometryContact, (void), (), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimGetGeometryContactStats, OpenShimImpl_GetGeometryContactStats, (DWORD handle, DWORD* enabled, DWORD* parts, DWORD* faces, DWORD* checks, DWORD* hits, DWORD* fallbacks), (handle, enabled, parts, faces, checks, hits, fallbacks), FALSE)
+
 #ifdef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED
 #undef OPENSHIM_SDK_EXPORT_APPEND
 #undef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED

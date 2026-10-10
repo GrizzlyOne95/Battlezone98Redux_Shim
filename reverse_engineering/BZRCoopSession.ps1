@@ -22,7 +22,7 @@
 param(
     [ValidateSet('Prepare', 'Launch', 'Stop', 'Status')]
     [string]$Action = 'Status',
-    [int]$Clients = 2,
+    [ValidateRange(1, 16)][int]$Clients = 2,
     [string]$SourceRoot = 'C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux',
     [string]$BZRCoopRoot = 'C:\BZRCoop',
     # Goldberg steam_api.dll (32-bit). Defaults to the copy bundled with Nucleus.
@@ -35,6 +35,9 @@ param(
     [int]$LaunchDelaySeconds = 30,
     [int]$ReadyTimeoutSeconds = 120,
     [string[]]$GameArgs = @('/nointro'),
+    [switch]$MaxNetworkLogging,
+    [switch]$MuteClients,
+    [switch]$AllowNoAudioEndpoint,
     # 'local' (default) DNS-redirects the stock matchmaking host through
     # OpenShim to a loopback Battlezone98Redux_DedicatedServer. 'official'
     # sends test clients with Goldberg identities to Rebellion's public lobby
@@ -60,6 +63,7 @@ if ($Action -ne 'Launch') {
     $env:BZR_LAUNCH_LOCK_HELD = "$PID-nolaunch"
 }
 . "$PSScriptRoot\BZRHarness.ps1"
+. "$PSScriptRoot\BZRCoopDiagnostics.ps1"
 
 $InstancesDir = Join-Path $BZRCoopRoot 'instances'
 $RunsDir = Join-Path $BZRCoopRoot 'runs'
@@ -114,7 +118,11 @@ function Install-OpenShimBuild([string]$Dir) {
 
 function New-BZRCoopInstance {
     param([int]$Index)
-    $dir = Get-InstanceDir $Index
+    $dir = [IO.Path]::GetFullPath((Get-InstanceDir $Index))
+    $safeRoot = [IO.Path]::GetFullPath($InstancesDir).TrimEnd('\') + '\'
+    if (-not $dir.StartsWith($safeRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Instance path is outside $safeRoot"
+    }
     if (Get-Process battlezone98redux -ErrorAction SilentlyContinue |
             Where-Object { $_.Path -and $_.Path.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) }) {
         throw "A client is still running from $dir; stop the session first."
@@ -151,6 +159,15 @@ function New-BZRCoopInstance {
         Get-ChildItem -LiteralPath $SourceRoot -Filter $pattern -File |
             Where-Object { -not (Test-Path -LiteralPath (Join-Path $dir $_.Name)) } |
             ForEach-Object { New-Item -ItemType HardLink -Path (Join-Path $dir $_.Name) -Target $_.FullName | Out-Null }
+    }
+    # Clients are driven by posted window messages. OpenShim's RawMouseInput
+    # setting (openshim.ini) overrides /norawinput and makes the game ignore
+    # them, so every test instance turns it off in its own copy.
+    $shimIni = Join-Path $dir 'openshim.ini'
+    if (Test-Path -LiteralPath $shimIni) {
+        $ini = [IO.File]::ReadAllText($shimIni)
+        $ini = [regex]::Replace($ini, '(?m)^(\s*RawMouseInput\s*=\s*)\S+', '${1}0')
+        [IO.File]::WriteAllText($shimIni, $ini)
     }
     Copy-Item -LiteralPath (Join-Path $SourceRoot 'scripts') -Destination $dir -Recurse
     if ($OpenShimRepo -and -not $NoOpenShim) { Install-OpenShimBuild $dir }
@@ -213,11 +230,42 @@ function Get-ClientLogState([string]$Dir) {
 }
 
 function Write-SessionFile($Session) {
-    $Session | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $SessionFile
+    # Readers poll while clients are added/authenticated. Publish one complete
+    # snapshot and retry briefly if a Windows reader holds the destination.
+    $pending = "$SessionFile.$PID.tmp"
+    try {
+        [IO.File]::WriteAllText($pending, ($Session | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+        $deadline = (Get-Date).AddSeconds(5)
+        while ($true) {
+            try {
+                if ([IO.File]::Exists($SessionFile)) { [IO.File]::Replace($pending, $SessionFile, [NullString]::Value) }
+                else { [IO.File]::Move($pending, $SessionFile) }
+                break
+            } catch [IO.IOException] {
+                if ((Get-Date) -ge $deadline) { throw }
+                Start-Sleep -Milliseconds 50
+            }
+        }
+    } finally {
+        if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending -Force }
+    }
 }
 
 function Read-SessionFile {
-    if (Test-Path -LiteralPath $SessionFile) { Get-Content -LiteralPath $SessionFile -Raw | ConvertFrom-Json }
+    $deadline = (Get-Date).AddMilliseconds(500)
+    while ($true) {
+        try {
+            $stream = [IO.File]::Open($SessionFile, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+            $reader = New-Object IO.StreamReader($stream)
+            try { return ($reader.ReadToEnd() | ConvertFrom-Json) } finally { $reader.Dispose() }
+        } catch [IO.IOException] {
+            if ((Get-Date) -ge $deadline) {
+                if (-not (Test-Path -LiteralPath $SessionFile)) { return }
+                throw
+            }
+            Start-Sleep -Milliseconds 10
+        }
+    }
 }
 
 function Start-BZRCoopClients {
@@ -247,7 +295,17 @@ function Start-BZRCoopClients {
         run = $RunName; runDir = $runDir.FullName; started = (Get-Date).ToString('o')
         sourceRoot = $SourceRoot; matchmaking = $Matchmaking; launchDelaySeconds = $LaunchDelaySeconds
         coordinatorPid = $PID; clients = @()
+        gameArgs = $GameArgs; maxNetworkLogging = [bool]$MaxNetworkLogging; muteClients = [bool]$MuteClients
+        allowNoAudioEndpoint = [bool]$AllowNoAudioEndpoint
     }
+    $clientGameArgs = @($GameArgs)
+    if ($MaxNetworkLogging) {
+        # Level 3 covers every recovered native logging threshold. The packet
+        # switch is separate; it must precede the numeric verbosity settings.
+        $clientGameArgs += @('/netpktlog', '/netlog=3', '/bzrnetlog=3')
+    }
+    $session.gameArgs = $clientGameArgs
+    if ($MuteClients) { Initialize-BZRCoopAudio }
     $clock = [Diagnostics.Stopwatch]::StartNew()
     for ($i = 0; $i -lt $Clients; $i++) {
         $inst = Get-InstanceDir $i
@@ -255,8 +313,9 @@ function Start-BZRCoopClients {
             throw "Instance $i is not prepared; run -Action Prepare first."
         }
         if ($i -gt 0) { Start-Sleep -Seconds $LaunchDelaySeconds }
+        if ($MaxNetworkLogging) { Set-BZRCoopMaxNetworkLogging $inst }
         $p = Start-Process -FilePath (Join-Path $inst 'battlezone98redux.exe') -WorkingDirectory $inst `
-                -ArgumentList $GameArgs -PassThru
+                -ArgumentList $clientGameArgs -PassThru
         $session.clients += [ordered]@{ index = $i; pid = $p.Id; dir = $inst; launchedAtMs = $clock.ElapsedMilliseconds }
         Write-SessionFile $session
         Write-Host ("[BZRCoop] client {0} pid {1} from {2}" -f $i, $p.Id, $inst)
@@ -266,6 +325,7 @@ function Start-BZRCoopClients {
         $ready = $false
         do {
             Start-Sleep -Milliseconds 500
+            if ($MuteClients) { $muteCount = Set-BZRCoopClientMute $p.Id }
             $st = Get-ClientLogState $inst
             if ($p.HasExited) { throw "client $i (pid $($p.Id)) exited with $($p.ExitCode) before lobby auth; last log: $($st.last)" }
             if ($Matchmaking -eq 'local') {
@@ -278,12 +338,19 @@ function Start-BZRCoopClients {
             $ready = [bool]$st.authenticatedAs
         } until ($ready -or (Get-Date) -gt $deadline)
         if (-not $ready) { throw "client $i did not authenticate to the lobby in ${ReadyTimeoutSeconds}s; last log: $($st.last)" }
+        $audioEndpoints = if ($MuteClients) { [BZRCoopAudio.Sessions]::ActiveRenderDeviceCount() } else { $null }
+        if ($MuteClients -and $muteCount -lt 1 -and (-not $AllowNoAudioEndpoint -or $audioEndpoints -gt 0)) { throw "Client $i authenticated without a muted audio session; audio timing cannot be qualified." }
         $session.clients[$i].menuAtMs = $clock.ElapsedMilliseconds
         $session.clients[$i].authenticatedAs = $st.authenticatedAs
         $session.clients[$i].redirect = $st.redirect
+        $session.clients[$i].mutedAudioSessions = if ($MuteClients) { $muteCount } else { $null }
+        $session.clients[$i].activeAudioEndpoints = $audioEndpoints
+        $session.clients[$i].audioTimingQualified = [bool]($MuteClients -and $muteCount -gt 0)
+        $session.clients[$i].mutedAt = if ($MuteClients) { (Get-Date).ToString('o') } else { $null }
         Write-SessionFile $session
         Write-Host ("[BZRCoop] client {0} authenticated as {1} after {2:N1}s (redirect {3})" -f $i, $st.authenticatedAs, ($clock.ElapsedMilliseconds / 1000), $st.redirect)
     }
+    $session | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $runDir 'session-launch.json')
     $session
 }
 
@@ -311,11 +378,14 @@ function Stop-BZRCoopClients {
             $src = Join-Path $c.dir $f
             if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination $dest }
         }
+        foreach ($f in 'openshim.ini', 'net.ini') {
+            Copy-Item -LiteralPath (Join-Path $c.dir $f) -Destination $dest -ErrorAction SilentlyContinue
+        }
         $logs = Join-Path $c.dir 'logs'
         if (Test-Path -LiteralPath $logs) { Copy-Item -LiteralPath $logs -Destination $dest -Recurse -Force }
     }
     if ($hung.Count) { throw "Clients still running after WM_CLOSE (left for capture): $($hung -join ', ')" }
-    Remove-Item -LiteralPath $SessionFile -Force
+    [IO.File]::Delete($SessionFile) # another orderly stopper may already have removed it
     Write-Host "[BZRCoop] stopped; evidence in $($session.runDir)"
 }
 
@@ -362,9 +432,31 @@ switch ($Action) {
         # Keep this process, and with it the launch lock, alive until every
         # client has gone, so no other harness launches into a running session.
         Write-Host '[BZRCoop] holding the launch lock until all clients exit (use -Action Stop from another shell)'
-        foreach ($c in $session.clients) {
-            $p = Get-Process -Id $c.pid -ErrorAction SilentlyContinue
-            if ($p) { $p.WaitForExit() }
+        if ($MuteClients) {
+            # Keep process-specific sessions muted if the renderer reopens audio
+            # or Windows changes the endpoint while the scenario is running.
+            do {
+                $alive = @($session.clients | Where-Object { Get-Process -Id $_.pid -ErrorAction SilentlyContinue })
+                foreach ($c in $alive) {
+                    try {
+                        $count = Set-BZRCoopClientMute $c.pid
+                        $endpoints = [BZRCoopAudio.Sessions]::ActiveRenderDeviceCount()
+                    } catch {
+                        [ordered]@{ time = (Get-Date).ToString('o'); client = $c.index; pid = $c.pid; error = $_.Exception.Message } |
+                            ConvertTo-Json -Compress | Add-Content -LiteralPath (Join-Path $session.runDir 'audio-mute.jsonl')
+                        throw
+                    }
+                    [ordered]@{ time = (Get-Date).ToString('o'); client = $c.index; pid = $c.pid; mutedSessions = $count; activeAudioEndpoints = $endpoints; audioTimingQualified = ($count -gt 0) } |
+                        ConvertTo-Json -Compress | Add-Content -LiteralPath (Join-Path $session.runDir 'audio-mute.jsonl')
+                    if ($count -lt 1 -and (-not $AllowNoAudioEndpoint -or $endpoints -gt 0)) { throw "Client $($c.index) lost its audio session." }
+                }
+                if ($alive.Count) { Start-Sleep -Seconds 5 }
+            } while ($alive.Count)
+        } else {
+            foreach ($c in $session.clients) {
+                $p = Get-Process -Id $c.pid -ErrorAction SilentlyContinue
+                if ($p) { $p.WaitForExit() }
+            }
         }
         Write-Host '[BZRCoop] all clients exited; lock released'
     }

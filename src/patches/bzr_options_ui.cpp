@@ -3060,6 +3060,14 @@ namespace BZROpenShim
             // behaviour and none is negotiated with peers, so all seven stand
             // down for the duration of a network game and a mixed OpenShim /
             // stock lobby stays behaviourally identical.
+            { "Background Mouse", "Fixes", "UnfocusedMouseRelease", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Stop Redux clipping and re-centring the mouse while it is minimized or in the background. Restart required." },
+            { "Vehicle Geometry", "SinglePlayer", "VehicleGeometryContact", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::RestartRequired,
+              "Experimental vehicle contact against legacy hull geometry. All supported vehicles; single player, GOG only. Restart required." },
             { "APC Allied Deploy", "Fixes", "ApcAlliedTargetDeploy", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,

@@ -22,6 +22,12 @@ namespace
     bool g_ClearAllCalled = false;
     DWORD g_LastThrottle = 0;
     struct { const char* name; int x, y, w, h; } g_LastRect = {};
+    struct { void* object; DWORD handle; float multiplier; } g_LastDamage = {};
+    BOOL WINAPI FakeSetDamage(void* object, DWORD handle, float multiplier)
+    {
+        g_LastDamage = {object, handle, multiplier};
+        return TRUE;
+    }
 
     BOOL WINAPI FakeClearAll()
     {
@@ -36,6 +42,19 @@ namespace
     }
 
     DWORD WINAPI FakeNativeHudCapabilities() { return 3; }
+    DWORD WINAPI FakeGeometryCapabilities() { return 1; }
+    DWORD g_GeometryHandle = 0;
+    BOOL g_GeometryEnabled = FALSE;
+    BOOL WINAPI FakeSetGeometry(DWORD h, BOOL enabled)
+    { g_GeometryHandle = h; g_GeometryEnabled = enabled; return TRUE; }
+    BOOL WINAPI FakeGeometryStats(DWORD h, DWORD* enabled, DWORD* parts, DWORD* faces,
+                                 DWORD* checks, DWORD* hits, DWORD* fallbacks)
+    {
+        if (h != g_GeometryHandle) return FALSE;
+        *enabled = g_GeometryEnabled ? 1u : 0u; *parts = 9; *faces = 1200;
+        *checks = 15; *hits = 3; *fallbacks = 2;
+        return TRUE;
+    }
 
     float WINAPI FakeGetRadarSizeScale() { return 2.5f; }
 
@@ -71,6 +90,11 @@ namespace
             .OpenShimImpl_SupportsRenderProfile = FakeSupportsRenderProfile,
             .OpenShimImpl_GetNativeHudLayoutCapabilities = FakeNativeHudCapabilities,
             .OpenShimImpl_SetNativeHudMeterRect = FakeSetHudSpriteRect,
+            .OpenShimImpl_HasNativeDamageResistance = FakeClearAll,
+            .OpenShimImpl_SetUnitDamageMultiplier = FakeSetDamage,
+            .OpenShimImpl_GetGeometryContactCapabilities = FakeGeometryCapabilities,
+            .OpenShimImpl_SetGeometryContact = FakeSetGeometry,
+            .OpenShimImpl_GetGeometryContactStats = FakeGeometryStats,
         };
         return t;
     }
@@ -92,6 +116,8 @@ int main()
     // Calling with no provider must not have reached anything.
     CHECK(!g_ClearAllCalled);
     CHECK(g_LastThrottle == 0);
+    CHECK(OpenShimHasNativeDamageResistance() == FALSE);
+    CHECK(OpenShimSetUnitDamageMultiplier(nullptr, 0, .75f) == FALSE);
 
     // ---- provider installed: calls forward unchanged -------------------
     OpenShimSdkProviderTable table = MakeTable();
@@ -122,6 +148,31 @@ int main()
     CHECK(OpenShimGetNativeHudLayoutCapabilities() == 3);
     CHECK(OpenShimSetNativeHudMeterRect("hull", 11, 22, 33, 44) == TRUE);
     CHECK(std::strcmp(g_LastRect.name, "hull") == 0 && g_LastRect.x == 11 && g_LastRect.h == 44);
+    CHECK(OpenShimHasNativeDamageResistance() == TRUE);
+    auto* damageObject = reinterpret_cast<void*>(static_cast<uintptr_t>(0x12345678));
+    CHECK(OpenShimSetUnitDamageMultiplier(damageObject, 0x123ABCD, .75f) == TRUE);
+    CHECK(g_LastDamage.object == damageObject && g_LastDamage.handle == 0x123ABCD &&
+        g_LastDamage.multiplier == .75f);
+    // The immediately preceding HUD provider keeps all of its slots and fails
+    // closed on this appended damage block.
+    table.structSize = (uint32_t)offsetof(OpenShimSdkProviderTable, OpenShimImpl_HasNativeDamageResistance);
+    CHECK(OpenShimHasNativeDamageResistance() == FALSE);
+    CHECK(OpenShimSetUnitDamageMultiplier(damageObject, 7, .5f) == FALSE);
+    CHECK(OpenShimGetNativeHudLayoutCapabilities() == 3);
+    table.structSize = sizeof(table);
+
+    // Geometry fields append after HUD; every output argument keeps its order.
+    CHECK(OpenShimGetGeometryContactCapabilities() == 1);
+    CHECK(OpenShimSetGeometryContact(0xABC01234u, TRUE) == TRUE);
+    DWORD enabled = 0, parts = 0, faces = 0, checks = 0, hits = 0, fallbacks = 0;
+    CHECK(OpenShimGetGeometryContactStats(0xABC01234u, &enabled, &parts, &faces, &checks, &hits, &fallbacks) == TRUE);
+    CHECK(enabled == 1 && parts == 9 && faces == 1200 && checks == 15 && hits == 3 && fallbacks == 2);
+    table.structSize = (uint32_t)offsetof(OpenShimSdkProviderTable, OpenShimImpl_GetGeometryContactCapabilities);
+    CHECK(OpenShimGetGeometryContactCapabilities() == 0);
+    CHECK(OpenShimSetGeometryContact(0x123u, TRUE) == FALSE);
+    CHECK(OpenShimGetGeometryContactStats(0x123u, &enabled, &parts, &faces, &checks, &hits, &fallbacks) == FALSE);
+    CHECK(OpenShimGetNativeHudLayoutCapabilities() == 3);
+    table.structSize = sizeof(table);
 
     // A previous-version provider ends immediately after its legacy block.
     // New slots fail closed, while every previous slot remains at its offset.

@@ -28,7 +28,9 @@
 #include "game_state.h"
 #include "hook_engine.h"
 #include "native_chunk_mesh.h"
+#include "native_chunk_prune.h"
 #include "shell_casing_physics.h"
+#include "shell_casing_config.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -82,8 +84,8 @@ namespace BZROpenShim
             };
             constexpr CasingTuning kTuning = {};
 
-            constexpr const char* kCasingMeshResource = "casings/v1/openshim_casing.mesh";
-            constexpr const char* kCasingMeshRelative = "casings/v1/openshim_casing.mesh";
+            constexpr const char* kCasingMeshResource = OPENSHIM_CHUNK_CACHE_CASINGS_DIR "openshim_casing.mesh";
+            constexpr const char* kCasingMeshRelative = OPENSHIM_CHUNK_CACHE_CASINGS_DIR "openshim_casing.mesh";
             constexpr unsigned kCasingSides = 10;
             constexpr const char* kCasingMaterialFile = "openshim_casing.material";
             constexpr const char* kCasingMaterialMarker = "// OpenShim ShellCasings default casing materials";
@@ -109,7 +111,7 @@ namespace BZROpenShim
             struct CasingConfig
             {
                 bool initialized = false;
-                bool enabled = true;
+                bool enabled = false;
                 bool trace = false;
                 size_t maxCasings = 48;
                 float linger = 6.0f;
@@ -148,10 +150,11 @@ namespace BZROpenShim
                 if (g_Config.initialized)
                     return;
                 g_Config.initialized = true;
-                // [General] ShellCasings (default ON) arrives inverted through
+                // [General] ShellCasings (default OFF) arrives inverted through
                 // the env mapping, like SkinnedGibs.
-                g_Config.enabled = !EnvFlagEnabled("OPENSHIM_DISABLE_SHELL_CASINGS") &&
-                                   !EnvFlagEnabled("BZR_DISABLE_SHELL_CASINGS");
+                g_Config.enabled = SC::EnabledByEnvironment([](const char* name, char* value, uint32_t size) {
+                    return GetEnvironmentVariableA(name, value, size);
+                });
                 g_Config.trace = EnvFlagEnabled("OPENSHIM_TRACE_SHELL_CASINGS");
                 double value = 0.0;
                 if (ReadEnvNumber("OPENSHIM_SHELL_CASINGS_MAX", value))

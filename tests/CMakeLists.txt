@@ -53,6 +53,10 @@ endfunction()
 openshim_add_test(d3d11_buffer_mirror_policy_tests STD 17 SOURCES
     d3d11_buffer_mirror_policy_tests.cpp
 )
+openshim_add_test(ogre_entity_reload_tests STD 17 SOURCES
+    ogre_entity_reload_tests.cpp
+)
+openshim_add_test(unit_damage_tests STD 20 SOURCES unit_damage_tests.cpp)
 
 openshim_add_test(native_chunk_mesh_tests STD 20 SOURCES
     native_chunk_mesh_tests.cpp
@@ -71,6 +75,11 @@ if(EXISTS "${OPENSHIM_GIB_SAMPLE_DIR}/ispilo.mesh" AND EXISTS "${OPENSHIM_GIB_SA
         COMMAND native_chunk_mesh_tests --gibs "${OPENSHIM_GIB_SAMPLE_DIR}/ispilo.mesh"
                 "${OPENSHIM_GIB_SAMPLE_DIR}/ispcc.skeleton")
 endif()
+
+openshim_add_test(native_chunk_prune_tests STD 20 SOURCES
+    native_chunk_prune_tests.cpp
+    ../src/patches/native_chunk_prune.cpp
+)
 
 openshim_add_test(shell_casing_physics_tests STD 20 SOURCES
     shell_casing_physics_tests.cpp
@@ -333,6 +342,10 @@ target_include_directories(patch_config_parse_tests PRIVATE ../include)
 target_compile_features(patch_config_parse_tests PRIVATE cxx_std_20)
 target_compile_definitions(patch_config_parse_tests PRIVATE
     BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json")
+
+openshim_add_test(background_run_policy_tests STD 20 SOURCES
+    background_run_policy_tests.cpp
+)
 
 openshim_add_test(ai_range_policy_tests STD 20 SOURCES
     ai_range_policy_tests.cpp
@@ -654,6 +667,9 @@ openshim_add_test(native_hud_layout_tests STD 20 SOURCES
 )
 
 if(WIN32 AND MSVC)
+    openshim_add_test(geometry_contact_lifetime_tests STD 20 SOURCES
+        geometry_contact_lifetime_tests.cpp
+    )
     openshim_add_test(live_reticle_team_tests STD 20 SOURCES
         live_reticle_team_tests.cpp
     )

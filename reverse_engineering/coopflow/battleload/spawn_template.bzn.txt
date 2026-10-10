@@ -1,0 +1,129 @@
+
+PrjID [1] =
+pspwn_1
+seqno [1] =
+207
+pos [1] =
+  x [1] =
+1538.26
+  y [1] =
+26.358
+  z [1] =
+99778.9
+team [1] =
+1
+label = coop_spawn1
+isUser [1] =
+0
+obj_addr = 00003001
+transform [1] =
+  right_x [1] =
+-0.96851
+  right_y [1] =
+0.0023055
+  right_z [1] =
+0.248965
+  up_x [1] =
+0.00665916
+  up_y [1] =
+0.999839
+  up_z [1] =
+0.0166463
+  front_x [1] =
+-0.248887
+  front_y [1] =
+0.01778
+  front_z [1] =
+-0.968369
+  posit_x [1] =
+1538.26
+  posit_y [1] =
+26.358
+  posit_z [1] =
+99778.9
+illumination [1] =
+1
+pos [1] =
+  x [1] =
+1538.26
+  y [1] =
+26.358
+  z [1] =
+99778.9
+euler =
+ mass [1] =
+0
+ mass_inv [1] =
+1e+030
+ v_mag [1] =
+0
+ v_mag_inv [1] =
+1e+030
+ I [1] =
+1
+ k_i [1] =
+0
+ v [1] =
+  x [1] =
+0
+  y [1] =
+0
+  z [1] =
+0
+ omega [1] =
+  x [1] =
+0
+  y [1] =
+0
+  z [1] =
+0
+ Accel [1] =
+  x [1] =
+0
+  y [1] =
+0
+  z [1] =
+0
+seqNo [1] =
+207
+name = 
+isCritical [1] =
+false
+isObjective [1] =
+false
+isSelected [1] =
+false
+isVisible [1] =
+ffffffff
+seen [1] =
+2
+healthRatio [1] =
+0
+curHealth [1] =
+0
+maxHealth [1] =
+0
+ammoRatio [1] =
+0
+curAmmo [1] =
+0
+maxAmmo [1] =
+0
+priority [1] =
+0
+what = 00000000
+who [1] =
+0
+where = 00000000
+param [1] =
+
+aiProcess [1] =
+false
+isCargo [1] =
+false
+independence [1] =
+1
+curPilot [1] =
+
+perceivedTeam [1] =
+1

@@ -127,6 +127,8 @@ namespace
         {
             return TryReadMappedBool(ini, "Diagnostics", "TraceArtilleryMask", false, out);
         }
+        if (Equals(name, "OPENSHIM_RUN_IN_BACKGROUND"))
+            return TryReadMappedBool(ini, "Testing", "RunInBackground", false, out);
         if (Equals(name, "OPENSHIM_TRACE_SUN_FLASH"))
             return TryReadMappedBool(ini, "Diagnostics", "TraceSunFlash", false, out);
         if (Equals(name, "OPENSHIM_TRACE_BZN_LOAD"))
@@ -152,6 +154,11 @@ namespace
         {
             return TryReadMappedBool(ini, "General", "ChunkMeshes", true, out);
         }
+        // Chunk cache pruning limits: raw numbers, clamped by the pruner.
+        if (Equals(name, "OPENSHIM_CHUNK_CACHE_MAX_MB"))
+            return ini(IniFile::Main, "General", "ChunkCacheMaxMB", out);
+        if (Equals(name, "OPENSHIM_CHUNK_CACHE_MAX_AGE_DAYS"))
+            return ini(IniFile::Main, "General", "ChunkCacheMaxAgeDays", out);
         // SkinnedGibs: person deaths as rigid limb gibs. Independent of
         // ChunkMeshes; the numeric keys are read raw and clamped by the
         // feature.
@@ -238,6 +245,11 @@ namespace
             Equals(name, "BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"))
         {
             return TryReadMappedBool(ini, "Fixes", "MagnetZeroRangeGuard", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE") ||
+            Equals(name, "BZR_DISABLE_UNFOCUSED_MOUSE_RELEASE"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "UnfocusedMouseRelease", true, out);
         }
         // New switches: these two had no opt-out of any kind before.
         if (Equals(name, "OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||

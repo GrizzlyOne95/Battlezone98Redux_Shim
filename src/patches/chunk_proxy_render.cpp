@@ -21,6 +21,7 @@
 #include "fog_wake_feature.h"
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
+#include "native_chunk_prune.h"
 #include "x86_length.h"
 #include "ogre_shader_cache.h"
 #include "ogre_enhanced_light_selection.h"
@@ -2558,7 +2559,7 @@ namespace BZROpenShim
 
             const auto fallback = generated ? NativeChunks::StockFallbackMesh(kind) : NativeChunks::Piece{};
             const std::filesystem::path relativePath = generated
-                ? std::filesystem::path("fallback/v1") / (fallback.name + ".mesh") : kind == 1
+                ? std::filesystem::path(OPENSHIM_CHUNK_CACHE_FALLBACK_DIR) / (fallback.name + ".mesh") : kind == 1
                 ? std::filesystem::path("chunk1") / "chunk1.mesh"
                 : std::filesystem::path("chunk2") / "chunk2.mesh";
             const uintmax_t expectedBytes = generated ? fallback.mesh.size() : kind == 1

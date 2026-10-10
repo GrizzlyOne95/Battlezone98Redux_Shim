@@ -90,6 +90,21 @@ An incomplete or corrupt cache regenerates safely. Unsupported source meshes
 and failed writes are remembered for the current mission instead of retried
 for every fragment.
 
+The cache is bounded. Once per process, before startup validation, the shim
+prunes `openshim/cache/chunks` synchronously (a few hundred directory entries;
+a background thread could delete a folder the first mission is about to read).
+It deletes superseded version trees (anything under `native/`, `gibs/`,
+`fallback/` or `casings/` other than the version the running build writes; the
+current names come from `include/native_chunk_prune.h`), then per-model folders
+unused for `ChunkCacheMaxAgeDays` (default 30), then least recently used
+folders until the whole cache is under `ChunkCacheMaxMB` (default 256). Both
+are `[General]` keys in `openshim.ini`; 0 disables that limit. Last use is the
+folder's modification time, refreshed once per folder per process on a cache
+hit or write (existing caches simply use their current modification time).
+Current `fallback/` and `casings/` shapes, loose `.material` files, unknown
+files, and any symlink or junction are never deleted. The result is one
+`[CHUNKCACHE] prune removed=... freedMB=... kept=... sizeMB=... ms=...` log line.
+
 On a genuinely new model, extraction remains a one-time first-use operation.
 Faces are grouped in one pass rather than rescanned for every skeleton bone;
 the skeleton-link lookup skips vertex-buffer parsing. Rendering remains bounded

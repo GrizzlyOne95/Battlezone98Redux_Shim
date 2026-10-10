@@ -80,9 +80,8 @@ namespace
     using FnBlockCells = void(__cdecl*)(void* object, int add);
     using FnBuildingUnblock = void(__cdecl*)(int index, int gx, int gz);
     using FnInvalidateStrips = void(__cdecl*)(float x0, float z0, float x1, float z1);
-    using FnGetItemSize = size_t(__cdecl*)(const char* name);
-    using FnUseItem = void*(__cdecl*)(const char* name);
-    using FnUnlockItem = void(__cdecl*)(const char* name);
+    // Engine file-system read 0x008290F0: (name, out size, caller buffer, capacity) -> nonzero on success.
+    using FnReadFile = int(__cdecl*)(const char* name, int* size, void* buffer, int capacity);
 
     // BlockCells' prologue: push ebp / mov ebp,esp / sub esp,0x64. The detour
     // overwrites five bytes, landing inside the sub, so six are relocated.
@@ -110,9 +109,7 @@ namespace
         float* blockVerts = nullptr;
         FnBuildingUnblock buildingUnblock = nullptr;
         FnInvalidateStrips invalidateStrips = nullptr;
-        FnGetItemSize getItemSize = nullptr;
-        FnUseItem useItem = nullptr;
-        FnUnlockItem unlockItem = nullptr;
+        FnReadFile readFile = nullptr;
         FnBlockCells original = nullptr;
     };
 
@@ -198,24 +195,48 @@ namespace
         }
     }
 
-    // Reads a file through the engine's asset loader (GetItemSize / UseItem /
-    // UnlockItem, the trio FileData uses for ODFs), so addon directories and
-    // packed archives resolve exactly as they do for the game.
+    bool SafeReadFile(const char* name, int& size, void* buffer, int capacity)
+    {
+        __try
+        {
+            return g_Engine.readFile(name, &size, buffer, capacity) != 0;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    // Reads a file straight from the engine's file system (0x008290F0, the read
+    // under the item cache), so addon directories and packed archives resolve
+    // as they do for the game. Never through the item cache (UseItem /
+    // UnlockItem): BlockCells runs while the building being added still relies
+    // on cached SDF/GEO items, and loading a faces model's SDF + GEOs through
+    // that bounded cache left the object with a degenerate bounding box: no
+    // stock footprint, no building collision (Bane ruins, 2026-10-06).
     bool ReadGameFile(const std::string& name, std::vector<uint8_t>& out)
     {
+        constexpr int kMaxFile = 16 * 1024 * 1024;
+        constexpr int kRetryArchive = 4 * 1024 * 1024;
+        out.resize(256 * 1024);
+        for (int attempt = 0; attempt < 2; ++attempt)
+        {
+            int size = 0;
+            if (SafeReadFile(name.c_str(), size, out.data(), static_cast<int>(out.size())) && size > 0 &&
+                static_cast<size_t>(size) <= out.size())
+            {
+                out.resize(static_cast<size_t>(size));
+                return true;
+            }
+            // Too small a buffer: a loose file fails after reporting its size (0x00828DC0); a packed record
+            // (0x008273E0) fails without one, so it gets one retry at kRetryArchive.
+            int retry = size > static_cast<int>(out.size()) ? size : (size == 0 ? kRetryArchive : 0);
+            if (attempt > 0 || retry <= static_cast<int>(out.size()) || retry > kMaxFile)
+                break;
+            out.resize(static_cast<size_t>(retry));
+        }
         out.clear();
-        const size_t size = g_Engine.getItemSize(name.c_str());
-        if (size == 0 || size > 16u * 1024u * 1024u)
-            return false;
-        void* data = g_Engine.useItem(name.c_str());
-        if (!data)
-            return false;
-        out.resize(size);
-        const bool ok = SafeCopy(data, out.data(), size);
-        g_Engine.unlockItem(name.c_str());
-        if (!ok)
-            out.clear();
-        return ok;
+        return false;
     }
 
     PB::GridDesc ReadGrid()
@@ -581,9 +602,7 @@ namespace
         ok &= ResolveAs(HookEngine::ResolveNamedAddress("PathBlock::BlockVertArray"), "PathBlock::BlockVertArray", e.blockVerts);
         ok &= ResolveAs(HookEngine::ResolveNamedAddress("PathBlock::BuildingUnblock"), "PathBlock::BuildingUnblock", e.buildingUnblock);
         ok &= ResolveAs(HookEngine::ResolveNamedAddress("PathBlock::InvalidateStrips"), "PathBlock::InvalidateStrips", e.invalidateStrips);
-        ok &= ResolveAs(HookEngine::ResolveNamedAddress("PathBlock::GetItemSize"), "PathBlock::GetItemSize", e.getItemSize);
-        ok &= ResolveAs(HookEngine::ResolveNamedAddress("PathBlock::UseItem"), "PathBlock::UseItem", e.useItem);
-        ok &= ResolveAs(HookEngine::ResolveNamedAddress("PathBlock::UnlockItem"), "PathBlock::UnlockItem", e.unlockItem);
+        ok &= ResolveAs(HookEngine::ResolveNamedAddress("PathBlock::ReadFile"), "PathBlock::ReadFile", e.readFile);
         if (!ok)
         {
             Log(L"[PATHBLOCK] engine addresses incomplete; leaving stock\n");
