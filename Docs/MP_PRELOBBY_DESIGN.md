@@ -272,6 +272,39 @@ A real LAN option means an OpenShim-hosted control plane on the host machine,
 found by broadcast, with the security work above. Until then, "LAN" is a Custom
 endpoint pointing at a LAN machine running the dev server.
 
+## Phase 1 implementation notes
+
+What the shipped surface had to account for, found while building it on GOG
+2.2.301:
+
+- **`Click_MultiPlayer` is `__thiscall`.** `this` is the MainScreen singleton
+  (`0x0094551C`). It decompiles as `void(void)`, but it saves `ecx` and
+  requests screen `0x0E` through `[this+0x138]`, and the button wrapper
+  `0x0078C550` loads `ecx` from the singleton. Treated as `__cdecl`, the request
+  went to whatever `ecx` held and the lobby never opened. The detour is
+  `__fastcall(this)`, and Continue passes the live singleton.
+- **The "Not Ready" state disables the button, not the click handler.** The
+  MP-status refresh (`0x0078EB50`) sets the Multiplayer button's enabled byte to
+  0 every frame until BZRNet authorises, so a click never reaches
+  `Click_MultiPlayer`. The pre-lobby must open in exactly that state, because
+  that is where the player waits for sign-in. The refresh's single call site
+  (`0x0078EB30`, `MainScreenMpStatusRefreshCall` in `scripts/patches.json`) is
+  redirected: the stock refresh runs first, then the button is re-enabled
+  while the page is closed. With `PreLobby` off the page is never built, and the
+  stock lock-out is unchanged.
+- **Typing.** The title screen never forwards characters to a text entry. The
+  nickname edit takes them through MainScreen vtable slot 2 (the base
+  `cUI_View` char dispatcher). Esc closes the page from the same hook.
+- **`/nointro` skips the surface.** With `/nointro` the MainScreen setup at
+  `0x0078D000` is not reached, so the Career tab and the pre-lobby are not
+  injected, and Multiplayer behaves as stock. Test without it.
+- **Flag preview is blank on DX11.** The `[DX11COMPAT]` filter skips the
+  shaderless `openshim_flagprev_*` material, which the lobby flag picker also
+  uses. This predates the pre-lobby. The flag choice itself still applies.
+- **Live check 2 passed.** A rename on the title screen recycles the socket.
+  The client reconnects, re-authorises, and Continue reaches the lounge (screen
+  `0x0E`) in about 0.6 s, with no stale lounge state.
+
 ## Phases
 
 1. **Pre-lobby with nickname + flag.**
@@ -291,7 +324,7 @@ endpoint pointing at a LAN machine running the dev server.
 1. Does `getaddrinfo` run again on each reconnect, and what is the retry delay
    (`DAT_0260b0a0`)?
 2. After a recycle on the main menu (no lounge), does the lobby come back
-   cleanly at state 3, with no stale lounge state?
+   cleanly at state 3, with no stale lounge state? **Yes** (phase 1 notes).
 3. Recycle inside the lounge: what happens to screen `0x0E`, and does `inLounge`
    carry over? This decides whether the in-lobby editor can keep recycling.
 4. What starts `Authorization` on the second and later connections, given that
