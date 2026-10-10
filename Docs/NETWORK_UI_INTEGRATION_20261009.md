@@ -2,7 +2,9 @@
 
 `agent/gog-ui-network-catchup` is the single OpenShim integration branch for
 the native UI redesign, reliable-send backlog repair, renderer recovery and
-private co-op/network qualification tooling. Source branches are retained as
+private co-op/network qualification tooling, reviewed in
+[draft OpenShim PR #419](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/pull/419).
+Source branches are retained as
 history; this branch contains all five tips below. Existing PRs #415, #417 and
 #418 remain open and are included by ancestry. No PR was merged or release
 published as part of this consolidation.
