@@ -1,14 +1,15 @@
 # Test-instance timer and receive overrides. Native defaults and shipped INIs stay unchanged.
-# Token: first/interval[+early][+nak]; each receive key is written explicitly (+early -> EarlyUnreliableAccept 1,
-# +nak -> EarlyNakAccept 1, else 0).
+# Token: first/interval[+early][+nak|+nak0]; each receive key is written explicitly (+early -> EarlyUnreliableAccept 1,
+# +nak -> EarlyNakAccept 1 and EarlyNakReorderMs 40, +nak0 -> EarlyNakAccept 1 and EarlyNakReorderMs 0, else EarlyNakAccept 0
+# with EarlyNakReorderMs removed).
 function ConvertTo-P2PRetryTiming([string]$Timers) {
-    if ($Timers -cnotmatch '^([0-9]+)/([0-9]+)(\+early)?(\+nak)?$') { throw 'Timers must be decimal first/interval milliseconds, optionally followed by +early then +nak.' }
-    $first = 0; $interval = 0; $early = [int]($Matches[3] -eq '+early'); $nak = [int]($Matches[4] -eq '+nak')
+    if ($Timers -cnotmatch '^([0-9]+)/([0-9]+)(\+early)?(\+nak0?)?$') { throw 'Timers must be decimal first/interval milliseconds, optionally followed by +early then +nak or +nak0.' }
+    $first = 0; $interval = 0; $early = [int]($Matches[3] -eq '+early'); $nak = [int]($Matches[4] -eq '+nak'); $nak0 = [int]($Matches[4] -eq '+nak0')
     if (-not [int]::TryParse($Matches[1], [ref]$first) -or -not [int]::TryParse($Matches[2], [ref]$interval) -or
         $first -lt 50 -or $first -gt 10000 -or $interval -lt 50 -or $interval -gt 10000) {
         throw 'Both retry timers must be 50..10000 milliseconds, matching the native parser.'
     }
-    @{first=$first; interval=$interval; early=$early; nak=$nak; token="$first/$interval$(if ($early) { '+early' })$(if ($nak) { '+nak' })"}
+    @{first=$first; interval=$interval; early=$early; nak=($nak -bor $nak0); reorder=$(if ($nak) { 40 } elseif ($nak0) { 0 } else { $null }); token="$first/$interval$(if ($early) { '+early' })$(if ($nak) { '+nak' })$(if ($nak0) { '+nak0' })"}
 }
 
 function Set-P2PRetryTimingText([string]$Text, [string]$Timers) {
@@ -18,13 +19,14 @@ function Set-P2PRetryTimingText([string]$Text, [string]$Timers) {
     if ($network.Count -gt 1) { throw 'Ambiguous repeated [Network] sections; nothing written.' }
     $newline = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
     $keys = "ReliableFirstRetryMs = $($values.first)$newline" + "ReliableRetryIntervalMs = $($values.interval)$newline" +
-        "EarlyUnreliableAccept = $($values.early)$newline" + "EarlyNakAccept = $($values.nak)$newline"
+        "EarlyUnreliableAccept = $($values.early)$newline" + "EarlyNakAccept = $($values.nak)$newline" +
+        $(if ($null -ne $values.reorder) { "EarlyNakReorderMs = $($values.reorder)$newline" } else { '' })
     if (-not $network.Count) { return $Text.TrimEnd("`r", "`n") + $newline + '[Network]' + $newline + $keys }
     $begin = $network[0].Index + $network[0].Length
     $next = @($headers | Where-Object Index -gt $network[0].Index | Select-Object -First 1)
     $end = if ($next.Count) { $next[0].Index } else { $Text.Length }
     $body = $Text.Substring($begin, $end-$begin)
-    $body = [regex]::Replace($body, '(?im)^\s*(ReliableFirstRetryMs|ReliableRetryIntervalMs|EarlyUnreliableAccept|EarlyNakAccept)\s*=[^\r\n]*(?:\r?\n|$)', '')
+    $body = [regex]::Replace($body, '(?im)^\s*(ReliableFirstRetryMs|ReliableRetryIntervalMs|EarlyUnreliableAccept|EarlyNakAccept|EarlyNakReorderMs)\s*=[^\r\n]*(?:\r?\n|$)', '')
     $head = $Text.Substring(0, $begin)
     if (-not $head.EndsWith("`n")) { $head += $newline }
     if ($body -and -not $body.EndsWith("`n")) { $body += $newline }

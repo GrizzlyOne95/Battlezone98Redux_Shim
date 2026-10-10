@@ -11,20 +11,23 @@ DELIVERED = r'\[P2PRECV\] Delivered early unreliable updates: total=(\d+)'
 NAK_ARMED = r'\[P2PRECV\] Early NAK receive armed:'
 NAK_UNAVAILABLE = r'\[P2PRECV\] NAK signatures unavailable; stock NAK receive kept'
 NAK_ACCEPTED = r'\[P2PRECV\] Accepted early NAKs: total=(\d+)'
-NAK_HELD = r'\[P2PRECV\] Held repeat NAKs: total=(\d+)'
+NAK_HELD = r'\[P2PRECV\] Held (?:repeat NAKs|NAKs \(reorder window or repeat\)): total=(\d+)'
+NAK_REORDER = r'reorder=(\d+)ms'
+# nak field of the timer tuple: 0 off, 1 on with EarlyNakReorderMs 40 (+nak), 2 on with reorder 0 (+nak0).
+NAK_REORDER_MS = {1: 40, 2: 0}
 
 def parse_timers(token):
-    """(first ms, interval ms, early 0|1, nak 0|1) from first/interval[+early][+nak]."""
-    match = re.fullmatch(r'([0-9]+)/([0-9]+)(\+early)?(\+nak)?', token)
+    """(first ms, interval ms, early 0|1, nak 0|1|2) from first/interval[+early][+nak|+nak0]; nak 2 is +nak0."""
+    match = re.fullmatch(r'([0-9]+)/([0-9]+)(\+early)?(\+nak0?)?', token)
     if not match:
-        raise ValueError('timers must be decimal first/interval milliseconds, optionally followed by +early then +nak')
+        raise ValueError('timers must be decimal first/interval milliseconds, optionally followed by +early then +nak or +nak0')
     values = (int(match[1]), int(match[2]))
     if not all(50 <= value <= 10000 for value in values):
         raise ValueError('retry timers must be 50..10000 ms')
-    return values + (int(bool(match[3])), int(bool(match[4])))
+    return values + (int(bool(match[3])), {None:0, '+nak':1, '+nak0':2}[match[4]])
 
 def token_of(first, interval, early=0, nak=0):
-    return f'{first}/{interval}' + ('+early' if early else '') + ('+nak' if nak else '')
+    return f'{first}/{interval}' + ('+early' if early else '') + {0:'', 1:'+nak', 2:'+nak0'}[nak]
 
 def configured_timers(text):
     """(first, interval, early, nak) from the single [Network] section; stock defaults, early/nak 0."""
@@ -35,11 +38,13 @@ def configured_timers(text):
             section = match[1].strip().lower()
             sections += section == 'network'
         elif section == 'network':
-            match = re.fullmatch(r'\s*(ReliableFirstRetryMs|ReliableRetryIntervalMs|EarlyUnreliableAccept|EarlyNakAccept)\s*=\s*([^;]*)(?:;.*)?', line, re.I)
+            match = re.fullmatch(r'\s*(ReliableFirstRetryMs|ReliableRetryIntervalMs|EarlyUnreliableAccept|EarlyNakAccept|EarlyNakReorderMs)\s*=\s*([^;]*)(?:;.*)?', line, re.I)
             if match:
                 key = match[1].lower(); value = match[2].strip()
                 if key in ('earlyunreliableaccept', 'earlynakaccept'):
                     valid = value in ('0', '1')
+                elif key == 'earlynakreorderms':
+                    valid = re.fullmatch('[0-9]+', value) and 0 <= int(value) <= 1000
                 else:
                     valid = re.fullmatch('[0-9]+', value) and 50 <= int(value) <= 10000
                 if key in values or not valid:
@@ -47,7 +52,13 @@ def configured_timers(text):
                 values[key] = int(value)
     if sections > 1:
         raise ValueError('repeated Network sections')
-    return tuple(values.get(key.lower(), stock) for key, _, stock in TIMERS) + (values.get('earlyunreliableaccept', 0), values.get('earlynakaccept', 0))
+    nak = values.get('earlynakaccept', 0)
+    if nak:
+        reorder = values.get('earlynakreorderms', 40)
+        if reorder not in (0, 40):
+            raise ValueError(f'EarlyNakReorderMs={reorder} is neither 0 (+nak0) nor 40 (+nak)')
+        nak = 2 if reorder == 0 else 1
+    return tuple(values.get(key.lower(), stock) for key, _, stock in TIMERS) + (values.get('earlyunreliableaccept', 0), nak)
 
 def receive_evidence(log, early, nak):
     armed = len(re.findall(ARMED, log)); unavailable = len(re.findall(UNAVAILABLE, log))
@@ -57,10 +68,20 @@ def receive_evidence(log, early, nak):
     held = [int(total) for total in re.findall(NAK_HELD, log)]
     ok = armed == 1 and not unavailable if early else not armed
     ok = ok and (nak_armed == 1 and not nak_unavailable if nak else not nak_armed)
-    return ok, {'early':early, 'armedLines':armed, 'signaturesUnavailableLines':unavailable,
+    # Armed lines carrying reorder=<ms> must match the arm; a line without the field only fits +nak0.
+    reorders = [int(m[1]) if m else None for m in (re.search(NAK_REORDER, line) for line in log.splitlines() if re.search(NAK_ARMED, line))]
+    reorder = reorders[0] if len(reorders) == 1 else None
+    if nak and nak_armed == 1:
+        expected = NAK_REORDER_MS[nak]
+        ok = ok and (reorder == expected or (reorder is None and expected == 0))
+    evidence = {'early':early, 'armedLines':armed, 'signaturesUnavailableLines':unavailable,
                 'deliveredTotal':max(totals, default=0),
                 'nak':nak, 'nakArmedLines':nak_armed, 'nakSignaturesUnavailableLines':nak_unavailable,
                 'naksAcceptedTotal':max(nak_totals, default=0), 'naksHeldTotal':max(held, default=0)}
+    if nak:
+        evidence['nakReorderMs'] = reorder
+        evidence['nakReorderExpectedMs'] = NAK_REORDER_MS[nak]
+    return ok, evidence
 
 def verify_client(ini, log, intended):
     values = parse_timers(intended)
@@ -104,5 +125,5 @@ def verify_run(run, intended, clients):
     naks = [r['receive']['naksAcceptedTotal'] for r in results.values() if 'receive' in r]
     held = [r['receive'].get('naksHeldTotal', 0) for r in results.values() if 'receive' in r]
     values = parse_timers(intended)
-    return {'intended':intended, 'early':values[2], 'nak':values[3], 'deliveredTotal':sum(totals), 'naksAcceptedTotal':sum(naks), 'naksHeldTotal':sum(held),
+    return {'intended':intended, 'early':values[2], 'nak':int(bool(values[3])), 'deliveredTotal':sum(totals), 'naksAcceptedTotal':sum(naks), 'naksHeldTotal':sum(held),
             'status':'verified' if all(r['status']=='verified' for r in results.values()) else 'mismatch', 'clients':results}

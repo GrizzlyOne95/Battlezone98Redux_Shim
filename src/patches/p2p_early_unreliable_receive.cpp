@@ -88,8 +88,9 @@ namespace BZROpenShim
             };
             Counter g_Delivered = { L"Delivered early unreliable updates", 0, 0, 0 };
             Counter g_NaksAccepted = { L"Accepted early NAKs", 0, 0, 0 };
-            Counter g_NaksHeld = { L"Held repeat NAKs", 0, 0, 0 };
+            Counter g_NaksHeld = { L"Held NAKs (reorder window or repeat)", 0, 0, 0 };
             uint32_t g_NakHoldoffMs = P2PEarlyUnreliable::kDefaultNakHoldoffMs;
+            uint32_t g_NakReorderMs = P2PEarlyUnreliable::kDefaultNakReorderMs;
             P2PEarlyUnreliable::NakGate g_NakGate;
             SRWLOCK g_NakGateLock = SRWLOCK_INIT;
 
@@ -145,7 +146,7 @@ namespace BZROpenShim
                 return 0;
             AcquireSRWLockExclusive(&g_NakGateLock);
             const bool admit = g_NakGate.Admit(reinterpret_cast<uintptr_t>(peer),
-                *reinterpret_cast<const uint32_t*>(frame + kAckFrame), GetTickCount(), g_NakHoldoffMs);
+                *reinterpret_cast<const uint32_t*>(frame + kAckFrame), GetTickCount(), g_NakReorderMs, g_NakHoldoffMs);
             ReleaseSRWLockExclusive(&g_NakGateLock);
             Note(admit ? g_NaksAccepted : g_NaksHeld);
             return admit ? 1 : 0;
@@ -234,6 +235,14 @@ namespace BZROpenShim
                 Log(L"[P2PRECV] Invalid EarlyNakHoldoffMs; decimal %u-%u ms required; %u ms kept\n",
                     P2PReliable::kRetryMinMs, P2PReliable::kRetryMaxMs, g_NakHoldoffMs);
             }
+            std::string reorder;
+            if (nakEnabled && TryGetUserConfigString("Network", "EarlyNakReorderMs", reorder) &&
+                !P2PEarlyUnreliable::ParseNakReorderMs(reorder, g_NakReorderMs))
+            {
+                g_NakReorderMs = P2PEarlyUnreliable::kDefaultNakReorderMs;
+                Log(L"[P2PRECV] Invalid EarlyNakReorderMs; decimal 0-%u ms required; %u ms kept\n",
+                    P2PEarlyUnreliable::kNakReorderMaxMs, g_NakReorderMs);
+            }
             if (!enabled && !nakEnabled) return;
 
             HookEngine::PatchDef* siteA = nullptr;
@@ -261,8 +270,8 @@ namespace BZROpenShim
                     g_NakEnabled = true;
                     siteC->payload = HookEngine::MakeJmp5Payload(siteC->address,
                         static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&P2PEarlyNakSiteCThunk)), kSiteCLen);
-                    Log(L"[P2PRECV] Early NAK receive armed: return=0x%08X accept=0x%08X window=%u holdoff=%ums\n",
-                        g_SiteCReturn, g_SiteCAccept, P2PEarlyUnreliable::kMaxAhead, g_NakHoldoffMs);
+                    Log(L"[P2PRECV] Early NAK receive armed: return=0x%08X accept=0x%08X window=%u reorder=%ums holdoff=%ums\n",
+                        g_SiteCReturn, g_SiteCAccept, P2PEarlyUnreliable::kMaxAhead, g_NakReorderMs, g_NakHoldoffMs);
                 }
             }
             if (!enabled) return;

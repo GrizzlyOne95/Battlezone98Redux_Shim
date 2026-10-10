@@ -196,7 +196,8 @@ is the requester's `peer+0x84`, i.e. the missing stamp. `NakGate` admits the
 first early NAK per (peer, missing stamp), holds repeats of that stamp for the
 holdoff, and admits a new missing stamp at once; a repeat after the holdoff
 (lost retransmission) is admitted again. 32 peer slots, oldest evicted.
-Held NAKs return as stock and are logged as `Held repeat NAKs: total=N`.
+Held NAKs return as stock and are logged as `Held repeat NAKs: total=N`
+(since the reorder hold below: `Held NAKs (reorder window or repeat): total=N`).
 
 ### Live A/B, gated — matrix `retry-battle-matrix-20261010-0926`
 
@@ -246,6 +247,43 @@ At WAN round trips the early NAK helps the tail only modestly (p99 about
 -35%) for +43% reliable bytes: a resend pass triggered by a NAK re-sends the
 unacknowledged queue, much of which is still in flight one RTT later, and a
 1% reorder NAKs datagrams that are not lost.
+
+## NAK reorder hold (`EarlyNakReorderMs`, default 40) — 2026-10-10
+
+Proposed after the WAN matrix: (1) act on a NAK only once its stamp has been
+missing for about 40 ms, and (2) skip re-sending fragments still in flight.
+
+(2) was dropped. The receive path keeps no reorder buffer: a reliable fragment
+is accepted only when its stamp equals `peer+0x84`, so every fragment that
+reaches the requester before the retransmission of the missing one is dropped
+(and NAKed). Pump case 8 sends the queue front to back on one FIFO path, so
+everything already in flight when the pass runs is ahead of the retransmitted
+head and will be discarded. Re-sending it is required, not waste; skipping it
+would only defer those fragments to the 2.5 s re-arm. The queue element does
+carry its last send time (`+0x08/+0x0C`, rewritten by every pass), should a
+selective scheme with a receiver-side buffer ever be considered.
+
+(1) targets the passes that are pure waste:
+
+* a datagram that is merely late or reordered (the WAN profile's 1% reorder):
+  the requester NAKs once or twice naming it, the datagram lands, and its NAKs
+  move on; stock-gate admission ran a full go-back-N pass on the first one;
+* stale duplicates from a pass arriving after the requester has moved on: each
+  is dropped and NAKed naming the *current* expected stamp, typically already
+  in flight in the same burst; a new stamp was admitted at once, so a burst of
+  duplicates chained passes.
+
+`NakGate` now records when a stamp was first named and admits it only when a
+NAK still names it `reorderMs` later; the requester NAKs every packet it drops,
+so on a live link the confirming NAK arrives within a frame or two and a real
+loss pays about `reorderMs` extra. A NAK naming a stamp behind the current one
+(overtaken by a later NAK, within the 4096 window) is held instead of being
+treated as new. Repeats after admission keep the 300 ms holdoff.
+`EarlyNakReorderMs = 0` reproduces the previous gate except for that
+stale-stamp rule. Armed line: `... reorder=40ms holdoff=300ms`. Matrix arms:
+`+nak` (40) and `+nak0` (0).
+
+Status: unit-tested (`p2p_early_unreliable_policy_tests`); live A/B pending.
 
 ## Decision
 

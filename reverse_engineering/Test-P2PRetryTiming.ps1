@@ -63,10 +63,22 @@ try {
         Assert $rejected "Invalid NAK token accepted: $token"
     }
     $withNak = Set-P2PRetryTimingText "[Network]`r`nEarlyNakAccept=0`r`nLabel=x`r`nEarlyNakAccept = 1`r`n[Other]`r`nEarlyNakAccept=7`r`n" '300/800+nak'
-    Assert ($withNak -ceq "[Network]`r`nLabel=x`r`nReliableFirstRetryMs = 300`r`nReliableRetryIntervalMs = 800`r`nEarlyUnreliableAccept = 0`r`nEarlyNakAccept = 1`r`n[Other]`r`nEarlyNakAccept=7`r`n") 'NAK key was not replaced only inside [Network].'
+    Assert ($withNak -ceq "[Network]`r`nLabel=x`r`nReliableFirstRetryMs = 300`r`nReliableRetryIntervalMs = 800`r`nEarlyUnreliableAccept = 0`r`nEarlyNakAccept = 1`r`nEarlyNakReorderMs = 40`r`n[Other]`r`nEarlyNakAccept=7`r`n") 'NAK key was not replaced only inside [Network].'
     $offNak = Set-P2PRetryTimingText "[Network]`nEarlyNakAccept=1`nEarlyUnreliableAccept=1`n" '300/800'
     Assert ($offNak -ceq "[Network]`nReliableFirstRetryMs = 300`nReliableRetryIntervalMs = 800`nEarlyUnreliableAccept = 0`nEarlyNakAccept = 0`n") 'Plain token did not write explicit early and NAK 0.'
-    Assert ((Set-P2PRetryTimingText '[Graphics]' '50/10000+early+nak').Contains("EarlyUnreliableAccept = 1`nEarlyNakAccept = 1`n")) 'A missing Network section did not receive both keys.'
+    Assert ((Set-P2PRetryTimingText '[Graphics]' '50/10000+early+nak').Contains("EarlyUnreliableAccept = 1`nEarlyNakAccept = 1`nEarlyNakReorderMs = 40`n")) 'A missing Network section did not receive both keys.'
+    # +nak0 pins reorder 0; no-nak removes any managed EarlyNakReorderMs line (only inside [Network]).
+    $nak0 = ConvertTo-P2PRetryTiming '300/800+early+nak0'
+    Assert (($nak0.nak -eq 1) -and ($nak0.reorder -eq 0) -and ($nak0.token -eq '300/800+early+nak0') -and ($nakOnly.reorder -eq 40) -and ($null -eq $plain.reorder)) '+nak0 token did not round trip.'
+    foreach ($token in @('300/800+nak0+early','300/800+nak00','300/800+NAK0','300/800+nak+nak0','300/800+nak0+nak')) {
+        $rejected = $false
+        try { ConvertTo-P2PRetryTiming $token | Out-Null } catch { $rejected = $true }
+        Assert $rejected "Invalid NAK0 token accepted: $token"
+    }
+    $withNak0 = Set-P2PRetryTimingText "[Network]`r`nEarlyNakReorderMs=250`r`nLabel=x`r`n[Other]`r`nEarlyNakReorderMs=7`r`n" '300/800+nak0'
+    Assert ($withNak0 -ceq "[Network]`r`nLabel=x`r`nReliableFirstRetryMs = 300`r`nReliableRetryIntervalMs = 800`r`nEarlyUnreliableAccept = 0`r`nEarlyNakAccept = 1`r`nEarlyNakReorderMs = 0`r`n[Other]`r`nEarlyNakReorderMs=7`r`n") '+nak0 did not write reorder 0 or replace the old value.'
+    $dropReorder = Set-P2PRetryTimingText "[Network]`nEarlyNakAccept=1`nEarlyNakReorderMs=250`n" '300/800'
+    Assert ($dropReorder -ceq "[Network]`nReliableFirstRetryMs = 300`nReliableRetryIntervalMs = 800`nEarlyUnreliableAccept = 0`nEarlyNakAccept = 0`n") 'No-nak token did not remove EarlyNakReorderMs.'
     Write-Host '[PASS] Prevalidation, section isolation, durable backup, and exact byte restoration.'
 } finally {
     # Remove only the explicitly created temporary files; no recursive deletion.

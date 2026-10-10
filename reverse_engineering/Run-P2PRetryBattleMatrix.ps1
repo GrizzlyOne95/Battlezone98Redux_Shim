@@ -8,9 +8,10 @@ configs/native apply logs, and restores the INIs after all games exit. A live
 game prevents restoration and the next launch; originals.json is retained for
 recovery. Native defaults remain unchanged. Prepare/deploy the full matching
 load chain and an active DX9 display mode before calling this script.
-Timer tokens are first/interval ms; append +early and/or +nak, in that order
+Timer tokens are first/interval ms; append +early and/or +nak (or +nak0), in that order
 (e.g. 1000/2500+early+nak), to enable the opt-in EarlyUnreliableAccept and
-EarlyNakAccept receivers in that arm.
+EarlyNakAccept receivers in that arm. +nak pins EarlyNakReorderMs 40; +nak0 pins
+it to 0 (the previous NAK gate) so the two gates can be A/B tested.
 Equal impairment seeds mean equal configured profiles, not identical traffic.
 .EXAMPLE
 ./Run-P2PRetryBattleMatrix.ps1 -BattleRepo C:\path\BZR-OpenShim-battleload -ServerRepo C:\path\server -DryRun
@@ -76,7 +77,7 @@ foreach ($pass in 1..$Passes) {
         $order = @($Timers)
         if ($pass % 2 -eq 0) { [array]::Reverse($order) }
         foreach ($timer in $order) {
-            $tag = $timer.Replace('/','x').Replace('+early','e').Replace('+nak','n')
+            $tag = $timer.Replace('/','x').Replace('+early','e').Replace('+nak0','z').Replace('+nak','n')
             $plan += [pscustomobject]@{index=$plan.Count+1; arm='on'; pass=$pass; timers=$timer; impair=$Impair[$profileIndex];
                 case="nbattle ${Units}AI ${Beacons}beacons ${Powerups}powerups ${Seconds}s";
                 run="retry-battle-t$tag-i$($profileIndex+1)-p$pass-$RunStamp"}
@@ -98,7 +99,7 @@ foreach ($name in @('Run-BZRBattleLoad.ps1','Run-BZRCoopMission.ps1','BZRCoopLau
 [ordered]@{started=(Get-Date).ToString('o'); clients=4; plan=$plan; sourceHashes=$hashes; toolHashes=$toolHashes;
     harnessHashes=$harnessHashes;
     coopOverrideSha256=$coopHash;
-    note='Fix ON in every arm; guarded timer overrides plus explicit [Network] EarlyUnreliableAccept and EarlyNakAccept (tokens +early / +nak = 1, else 0), '+
+    note='Fix ON in every arm; guarded timer overrides plus explicit [Network] EarlyUnreliableAccept and EarlyNakAccept (tokens +early / +nak / +nak0 = 1, else 0; EarlyNakReorderMs 40 / 0 for +nak / +nak0), '+
         'verified per client from the archived INI and [P2PRECV] native armed/unavailable/total log lines; nondeterministic combat/traffic.'} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $control 'matrix.json')
 $prior = @{}
