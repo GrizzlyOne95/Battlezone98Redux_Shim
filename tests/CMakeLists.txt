@@ -653,3 +653,19 @@ if(WIN32 AND MSVC)
         live_reticle_team_tests.cpp
     )
 endif()
+
+# Host benchmark for runtime chunk/gib generation vs the on-disk cache. Built
+# with the suite but deliberately not a ctest test; run it by hand on a Release
+# build: native_chunk_bench [--csv f] [--tmp dir] <asset dir>...
+add_executable(native_chunk_bench
+    native_chunk_bench.cpp
+    ../src/patches/native_chunk_mesh.cpp
+    ../src/patches/native_chunk_cache.cpp
+)
+target_include_directories(native_chunk_bench PRIVATE ../include)
+target_compile_features(native_chunk_bench PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(native_chunk_bench PRIVATE /W4 /WX)
+else()
+    target_compile_options(native_chunk_bench PRIVATE -Wall -Wextra -Werror)
+endif()
