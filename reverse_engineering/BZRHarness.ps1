@@ -28,6 +28,13 @@
 
 $script:BZRGameProcessName = 'battlezone98redux'
 
+# Harness clients are driven by posted window messages, so a foreground test
+# window that clips or re-centres the OS cursor only steals the real mouse from
+# whoever is at the desk. Launched games inherit this; OpenShim then never
+# calls ClipCursor/SetCursorPos for them. A script that genuinely needs stock
+# mouse capture sets it to 0 before dot-sourcing this file.
+if (-not $env:OPENSHIM_NEVER_CAPTURE_MOUSE) { $env:OPENSHIM_NEVER_CAPTURE_MOUSE = '1' }
+
 function Stop-BZRGame {
     <#
     .SYNOPSIS
