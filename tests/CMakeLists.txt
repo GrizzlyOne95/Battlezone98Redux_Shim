@@ -46,6 +46,7 @@ openshim_add_test(native_chunk_mesh_tests STD 20 SOURCES
     native_chunk_mesh_tests.cpp
     ../src/patches/native_chunk_mesh.cpp
     ../src/patches/native_chunk_cache.cpp
+    ../src/patches/gib_flesh_texture.cpp
 )
 
 # SkinnedGibs offline check on a real skinned pilot: prints the runtime split
@@ -666,6 +667,7 @@ add_executable(native_chunk_bench
     native_chunk_bench.cpp
     ../src/patches/native_chunk_mesh.cpp
     ../src/patches/native_chunk_cache.cpp
+    ../src/patches/gib_flesh_texture.cpp
 )
 target_include_directories(native_chunk_bench PRIVATE ../include)
 target_compile_features(native_chunk_bench PRIVATE cxx_std_20)

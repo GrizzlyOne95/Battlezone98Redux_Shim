@@ -13,13 +13,14 @@
 // leaves every entry point below a no-op.
 //
 // Split: NativeChunks::ExtractGibs (runtime, cached under
-// openshim/cache/chunks/gibs/v1/<hash>/), or an authored gibs.txt payload from
+// openshim/cache/chunks/gibs/v2/<hash>/), or an authored gibs.txt payload from
 // scripts/export_gib_payloads.py. Rendering: shim-owned entities on the chunk
 // payload resource group, submitted from the world render-queue hook like the
 // chunk proxies. Simulation: ChunkEffect::Simulate's dt.
 
 #include "bzr_hooks_internal.h"
 #include "game_state.h"
+#include "gib_flesh_texture.h"
 #include "hook_engine.h"
 #include <algorithm>
 #include <cmath>
@@ -77,8 +78,10 @@ namespace BZROpenShim
             constexpr size_t kRenderBridgeWorldNodeOffset = 0x098;
             constexpr uint16_t kMaxCapturedBones = 256;
             constexpr size_t kMaxSuppressedChunks = 4096;
-            constexpr const char* kFleshMaterialFile = "openshim_gib_flesh.material";
-            constexpr const char* kFleshMaterialMarker = "// OpenShim SkinnedGibs default flesh material";
+            // The default flesh material and its procedural texture come from
+            // gib_flesh_texture.h (shared with the tests and the bench dump).
+            constexpr const char* kFleshMaterialFile = BZROpenShim::NativeChunks::kGibFleshMaterialFile;
+            constexpr const char* kFleshMaterialMarker = BZROpenShim::NativeChunks::kGibFleshMaterialMarker;
 
             // ---- Config ----------------------------------------------------
             struct GibConfig
@@ -1356,6 +1359,17 @@ namespace BZROpenShim
                             existing.close();
                             std::filesystem::remove(ours, ec);
                         }
+                        {
+                            // Our generated texture goes with it (a mod's own file of that name stays).
+                            const auto texture = cacheRoot / BZROpenShim::NativeChunks::kGibFleshTextureFile;
+                            std::vector<uint8_t> head(64);
+                            std::ifstream stale(texture, std::ios::binary);
+                            stale.read(reinterpret_cast<char*>(head.data()), static_cast<std::streamsize>(head.size()));
+                            head.resize(static_cast<size_t>(stale.gcount()));
+                            stale.close();
+                            if (BZROpenShim::NativeChunks::IsGeneratedGibFleshTga(head))
+                                std::filesystem::remove(texture, ec);
+                        }
                         static bool logged = false;
                         if (!logged)
                         {
@@ -1367,26 +1381,46 @@ namespace BZROpenShim
                     }
                     ec.clear();
                 }
+                // A file that is not ours (no marker) is the user's: leave it.
+                // Ours is regenerated whenever its version line is stale, so a
+                // changed default never lingers behind an old "do not edit" copy.
+                const std::string header = BZROpenShim::NativeChunks::GibFleshMaterialHeader();
+                const auto texture = cacheRoot / BZROpenShim::NativeChunks::kGibFleshTextureFile;
+                bool materialCurrent = false;
                 if (std::filesystem::exists(ours, ec))
-                    return;
+                {
+                    std::ifstream existing(ours);
+                    std::string first;
+                    std::getline(existing, first);
+                    while (!first.empty() && (first.back() == '\r' || first.back() == '\n'))
+                        first.pop_back();
+                    if (first.rfind(kFleshMaterialMarker, 0) != 0)
+                        return;
+                    materialCurrent = first == header;
+                }
+                ec.clear();
                 std::filesystem::create_directories(cacheRoot, ec);
+                bool textureOk = true;
+                {
+                    std::vector<uint8_t> head(64);
+                    std::ifstream existing(texture, std::ios::binary);
+                    existing.read(reinterpret_cast<char*>(head.data()), static_cast<std::streamsize>(head.size()));
+                    head.resize(static_cast<size_t>(existing.gcount()));
+                    if (!BZROpenShim::NativeChunks::IsCurrentGibFleshTga(head))
+                    {
+                        const auto tga = BZROpenShim::NativeChunks::GibFleshTextureTga();
+                        std::ofstream out(texture, std::ios::binary | std::ios::trunc);
+                        out.write(reinterpret_cast<const char*>(tga.data()), static_cast<std::streamsize>(tga.size()));
+                        out.close();
+                        textureOk = static_cast<bool>(out);
+                        LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] wrote flesh texture %hs ok=%u\n",
+                                           texture.string().c_str(), textureOk ? 1u : 0u);
+                    }
+                }
+                if (materialCurrent && textureOk)
+                    return;
                 std::ofstream output(ours, std::ios::binary | std::ios::trunc);
-                output << kFleshMaterialMarker << " (generated; do not edit).\n"
-                       << "// Override it with an openshim_gib_flesh.material at the top of a chunk payload\n"
-                       << "// directory (<mod>/chunkMeshes/ or BZ_ASSETS/common/models/OpenShimChunkPayloads/).\n"
-                       << "material openshim_gib_flesh\n"
-                       << "{\n"
-                       << "    technique\n"
-                       << "    {\n"
-                       << "        pass\n"
-                       << "        {\n"
-                       << "            ambient 0.35 0.02 0.02\n"
-                       << "            diffuse 0.55 0.04 0.04\n"
-                       << "            specular 0.6 0.3 0.3 24\n"
-                       << "            cull_hardware none\n"
-                       << "        }\n"
-                       << "    }\n"
-                       << "}\n";
+                output << BZROpenShim::NativeChunks::GibFleshMaterialScript();
                 output.close();
                 LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] wrote default flesh material %hs ok=%u\n",
                                    ours.string().c_str(), output ? 1u : 0u);

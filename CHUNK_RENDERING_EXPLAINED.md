@@ -189,8 +189,15 @@ person's death itself:
    `scripts/export_gib_payloads.py` does: each triangle goes to its dominant
    bone, small bones (fingers, toes, clavicles, nubs...) roll up into their
    parent, the weapon submesh becomes one piece, and every cut is closed with a
-   fan cap using the material `openshim_gib_flesh`. The result is cached under
-   `openshim/cache/chunks/gibs/v1/<hash>/` (vehicle caches are untouched). An
+   torn-flesh cap using the material `openshim_gib_flesh`: concentric rings
+   (a dark clotted rim on the cut itself, an inset ragged ring and a slightly
+   bulged centre, with smooth normals and ARGB vertex colours; cuts through
+   limbs and the neck also get muscle and a pale bone ring with a dark marrow
+   centre). The ragged offsets hash the welded positions, so a cut looks the
+   same on every run. Degenerate, very non-planar or very large loops keep a
+   plain fan. The result is cached under
+   `openshim/cache/chunks/gibs/v2/<hash>/` (vehicle caches are untouched; the
+   startup prune deletes the superseded `gibs/v1/` tree). An
    authored split (`<payload dir>/<mesh basename>/gibs.txt` plus its meshes,
    written by the script) takes precedence over the runtime one.
 3. **Pose, launch, simulate.** Each piece is spawned exactly where that limb
@@ -206,9 +213,17 @@ person's death itself:
    but the chunk renderer is told not to draw them. Nothing in the engine's
    chunk state is written.
 
-The cut faces need no asset pack: OpenShim writes a plain dark-red
-`openshim_gib_flesh.material` into the cache root before the payload resource
-group starts. A pack can restyle it by shipping its own
+The cut faces need no asset pack: OpenShim writes `openshim_gib_flesh.material`
+and a procedural, tileable 256x256 `openshim_gib_flesh.tga` (muscle fibres, fat
+and sinew flecks, veins) into the cache root before the payload resource group
+starts. The material multiplies the texture by the cap vertex colours
+(`ambient`/`diffuse vertexcolour`, specular 0.35/0.25/0.25 shininess 48,
+`cull_hardware none`). Both are regenerated when the version in the material's
+first line is stale; a material without that marker is the user's and is left
+alone. The DX11 fixed-function compatibility layer instantiates the same pass
+(one texture unit, modulate, vertex colour read with the ARGB swizzle the stock
+meshes use); it does not evaluate dynamic lights or specular, which is why the
+colours and texture carry the shading. A pack can restyle it by shipping its own
 `openshim_gib_flesh.material` at the top of a chunk payload directory
 (`<mod>/chunkMeshes/` or `BZ_ASSETS/common/models/OpenShimChunkPayloads/`);
 the generated copy then steps aside so the name is never defined twice.
