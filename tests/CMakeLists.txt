@@ -669,6 +669,7 @@ add_executable(native_chunk_bench
 )
 target_include_directories(native_chunk_bench PRIVATE ../include)
 target_compile_features(native_chunk_bench PRIVATE cxx_std_20)
+target_compile_definitions(native_chunk_bench PRIVATE OPENSHIM_NATIVE_CHUNK_PHASES=1)
 if(MSVC)
     target_compile_options(native_chunk_bench PRIVATE /W4 /WX)
 else()

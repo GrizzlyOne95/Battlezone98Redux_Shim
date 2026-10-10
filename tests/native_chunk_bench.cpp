@@ -1,6 +1,12 @@
 // Host benchmark for the native chunk / skinned gib generators. NOT a ctest
 // test. Usage:
-//   native_chunk_bench [--csv out.csv] [--tmp scratch_dir] [--runs N] dir [dir...]
+//   native_chunk_bench [--csv out.csv] [--tmp scratch_dir] [--runs N] [--gibs-only]
+//                      [--hash out.txt] [--only substr] dir [dir...]
+// --only keeps just the meshes whose path contains the (case-insensitive) text.
+// ExtractGibs phase totals (summed over all runs, per call) are printed at the end.
+// --gibs-only skips the chunk Extract/cache timings; --hash writes one line per
+// gib piece ("model piece bytes fnv1a64"), sorted by model, so two builds can
+// be diffed for byte-identical gib meshes.
 // Recursively pairs every Ogre .mesh with the skeleton it names (same
 // SkeletonName() the runtime uses; the runtime resolves it through the Ogre
 // resource group by name, so a same-directory match is preferred and any
@@ -22,6 +28,10 @@
 #include <map>
 
 using namespace BZROpenShim::NativeChunks;
+namespace BZROpenShim::NativeChunks
+{
+extern double g_gibPhaseMs[11]; // native_chunk_mesh.cpp, OPENSHIM_NATIVE_CHUNK_PHASES
+}
 namespace fs = std::filesystem;
 
 namespace
@@ -122,6 +132,10 @@ int main(int argc, char **argv)
 {
     fs::path csvPath, tmp = fs::temp_directory_path() / "openshim_chunk_bench";
     int runs = 3;
+    bool gibsOnly = false;
+    fs::path hashPath;
+    std::string only;
+    std::vector<std::string> hashLines;
     std::vector<fs::path> roots;
     for (int i = 1; i < argc; ++i)
     {
@@ -130,6 +144,12 @@ int main(int argc, char **argv)
             csvPath = argv[++i];
         else if (a == "--tmp" && i + 1 < argc)
             tmp = argv[++i];
+        else if (a == "--gibs-only")
+            gibsOnly = true;
+        else if (a == "--only" && i + 1 < argc)
+            only = lower(argv[++i]);
+        else if (a == "--hash" && i + 1 < argc)
+            hashPath = argv[++i];
         else if (a == "--runs" && i + 1 < argc)
             runs = std::max(1, std::atoi(argv[++i]));
         else
@@ -158,7 +178,10 @@ int main(int argc, char **argv)
                 continue;
             const auto ext = lower(it->path().extension().string());
             if (ext == ".mesh")
-                meshes.push_back(it->path());
+            {
+                if (only.empty() || lower(it->path().string()).find(only) != std::string::npos)
+                    meshes.push_back(it->path());
+            }
             else if (ext == ".skeleton")
                 skeletons.emplace(lower(it->path().filename().string()), it->path());
         }
@@ -212,7 +235,9 @@ int main(int argc, char **argv)
         std::vector<Piece> pieces;
         std::string error;
         double t = 0;
-        if (minTime(runs, t, [&] { return Extract(meshBytes, skeletonBytes, pieces, error); }))
+        if (gibsOnly)
+            row.note = "gibs-only";
+        else if (minTime(runs, t, [&] { return Extract(meshBytes, skeletonBytes, pieces, error); }))
         {
             row.extract = t;
             // Mirror the runtime's piece-name filter before caching.
@@ -248,6 +273,10 @@ int main(int argc, char **argv)
             std::vector<Piece> gp;
             for (const auto &g : gibs)
             {
+                if (!hashPath.empty())
+                    hashLines.push_back(meshPath.string() + " " + g.piece.name + " " +
+                                        std::to_string(g.piece.mesh.size()) + " " + std::to_string(g.piece.triangles) +
+                                        " " + std::to_string(Fingerprint(g.piece.mesh)));
                 gp.push_back(g.piece);
                 row.gibBytes += g.piece.mesh.size();
             }
@@ -258,10 +287,34 @@ int main(int argc, char **argv)
                 row.gibRead = minTime(runs, t, [&] { return ReadGibCache(tmp / "gibs" / id, back); }) ? t : -1;
         }
         else
+        {
             row.note += (row.note.empty() ? "" : "; ") + std::string("gibs: ") + gibError;
+            if (!hashPath.empty())
+                hashLines.push_back(meshPath.string() + " FAIL " + gibError);
+        }
         rows.push_back(std::move(row));
     }
 
+    if (!hashPath.empty())
+    {
+        std::sort(hashLines.begin(), hashLines.end());
+        std::ofstream h(hashPath);
+        for (const auto &l : hashLines)
+            h << l << '\n';
+    }
+    {
+        static const char *names[11] = {"regex setup", "parse",      "owners",    "roll-up/group", "weld/edges",
+                                        "piece bounds", "caps other", "serialize", "cut edges",     "cut loops",
+                                        "cap triangles"};
+        double total = 0;
+        for (double v : g_gibPhaseMs)
+            total += v;
+        const double calls = static_cast<double>(std::max<size_t>(1, rows.size())) * runs;
+        std::printf("ExtractGibs phases (ms per call, mean over %zu models x %d runs):\n", rows.size(), runs);
+        for (int i = 0; i < 11; ++i)
+            std::printf("  %-14s %9.4f  (%4.1f%%)\n", names[i], g_gibPhaseMs[i] / calls,
+                        total > 0 ? 100.0 * g_gibPhaseMs[i] / total : 0.0);
+    }
     std::ostream *csv = &std::cout;
     std::ofstream csvFile;
     if (!csvPath.empty())

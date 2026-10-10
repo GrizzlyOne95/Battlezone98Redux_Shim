@@ -2,9 +2,13 @@
 #include "native_chunk_prune.h"
 #include <algorithm>
 #include <array>
+#ifdef OPENSHIM_NATIVE_CHUNK_PHASES
+#include <chrono>
+#endif
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <optional>
 #include <regex>
 #include <set>
 #include <stdexcept>
@@ -410,15 +414,60 @@ std::vector<int> triangleOwners(const Sub &sub, const Model &model, const std::m
         throw std::runtime_error("incomplete triangle list");
     const auto &g = sub.shared ? model.geometry : sub.geometry;
     const auto &assignments = sub.shared ? model.assignments : sub.assignments;
-    std::vector<std::map<uint16_t, float>> weights(g.count);
-    for (auto a : assignments)
+    // Per-vertex (bone, summed weight) lists, bones ascending, in CSR form.
+    // Equal-bone weights are summed in assignment order, exactly as the old
+    // per-vertex std::map did, so the float totals are bit-identical.
+    struct Influence
     {
-        if (a.vertex >= g.count || !std::isfinite(a.weight) || a.weight < 0 || !bones.count(a.bone))
+        uint16_t bone;
+        float weight;
+    };
+    std::vector<uint8_t> knownBone(bones.empty() ? 0 : static_cast<size_t>(bones.rbegin()->first) + 1, 0);
+    for (const auto &entry : bones)
+        knownBone[entry.first] = 1;
+    std::vector<uint32_t> start(static_cast<size_t>(g.count) + 1, 0);
+    for (const auto &a : assignments)
+    {
+        if (a.vertex >= g.count || !std::isfinite(a.weight) || a.weight < 0 || a.bone >= knownBone.size() ||
+            !knownBone[a.bone])
             throw std::runtime_error("invalid bone assignment vertex=" + std::to_string(a.vertex) + "/" +
                                      std::to_string(g.count) + " bone=" + std::to_string(a.bone) +
                                      " weight=" + std::to_string(a.weight));
         if (a.weight > 0)
-            weights[a.vertex][a.bone] += a.weight;
+            ++start[a.vertex + 1];
+    }
+    for (size_t v = 0; v < g.count; ++v)
+        start[v + 1] += start[v];
+    std::vector<Influence> raw(start[g.count]);
+    {
+        std::vector<uint32_t> fill(start.begin(), start.end() - 1);
+        for (const auto &a : assignments)
+            if (a.weight > 0)
+                raw[fill[a.vertex]++] = {a.bone, a.weight};
+    }
+    std::vector<Influence> merged;
+    merged.reserve(raw.size());
+    std::vector<uint32_t> first(static_cast<size_t>(g.count) + 1, 0);
+    for (uint32_t v = 0; v < g.count; ++v)
+    {
+        const size_t begin = start[v], end = start[v + 1];
+        // Stable insertion sort by bone: ties keep assignment order.
+        for (size_t i = begin + 1; i < end; ++i)
+        {
+            const Influence x = raw[i];
+            size_t j = i;
+            for (; j > begin && raw[j - 1].bone > x.bone; --j)
+                raw[j] = raw[j - 1];
+            raw[j] = x;
+        }
+        for (size_t i = begin; i < end; ++i)
+        {
+            if (i > begin && raw[i].bone == raw[i - 1].bone)
+                merged.back().weight += raw[i].weight;
+            else
+                merged.push_back({raw[i].bone, 0.0f + raw[i].weight});
+        }
+        first[v + 1] = static_cast<uint32_t>(merged.size());
     }
     int root = -1;
     for (const auto &[id, b] : bones)
@@ -432,29 +481,43 @@ std::vector<int> triangleOwners(const Sub &sub, const Model &model, const std::m
             root = id;
         }
     std::vector<int> owners;
+    owners.reserve(sub.indices.size() / 3);
+    std::vector<uint16_t> candidates;
     for (size_t i = 0; i < sub.indices.size(); i += 3)
     {
-        std::map<uint16_t, float> scores;
+        const uint32_t vertex[3] = {sub.indices[i], sub.indices[i + 1], sub.indices[i + 2]};
+        candidates.clear();
         for (size_t j = 0; j < 3; ++j)
         {
-            auto vertex = sub.indices[i + j];
-            if (vertex >= g.count)
+            if (vertex[j] >= g.count)
                 throw std::runtime_error("invalid triangle index");
-            for (const auto &[id, weight] : weights[vertex])
-                scores[id] += weight;
+            for (uint32_t k = first[vertex[j]]; k < first[vertex[j] + 1]; ++k)
+                candidates.push_back(merged[k].bone);
         }
+        std::sort(candidates.begin(), candidates.end());
+        candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
         int owner = unweightedToRoot ? root : -1;
         float best = 0;
         // A triangle is emitted exactly once. Aggregate weights preserve seam
         // faces between rigid groups and avoid duplicating soft-skinned faces.
-        // Ordered handles give deterministic ties. Unweighted faces use the
+        // Ascending handles give deterministic ties. Unweighted faces use the
         // unique skeleton root when present, never fabricated debris.
-        for (const auto &[id, score] : scores)
+        for (const uint16_t id : candidates)
+        {
+            float score = 0;
+            for (size_t j = 0; j < 3; ++j)
+                for (uint32_t k = first[vertex[j]]; k < first[vertex[j] + 1]; ++k)
+                    if (merged[k].bone == id)
+                    {
+                        score += merged[k].weight;
+                        break;
+                    }
             if (score > best)
             {
                 owner = id;
                 best = score;
             }
+        }
         owners.push_back(owner);
     }
     return owners;
@@ -509,10 +572,58 @@ V position(const Geometry &g, uint32_t index)
         }
     throw std::runtime_error("missing position stream");
 }
-Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, const Frame &frame, V &lo, V &hi,
-                   float &radius)
+// position() with the element lookup done once: for loops over many vertices of
+// one geometry. Construction throws exactly what position() would for a
+// non-empty geometry; operator() checks the index like position().
+struct PositionReader
 {
-    Bytes out;
+    const uint8_t *data;
+    size_t stride;
+    size_t offset;
+    uint32_t count;
+    explicit PositionReader(const Geometry &g) : data(nullptr), stride(0), offset(0), count(g.count)
+    {
+        for (const auto &e : g.elements)
+            if (e.semantic == 1)
+            {
+                const auto buffer = g.buffers.find(e.source);
+                if (buffer == g.buffers.end() || e.type != 2 ||
+                    static_cast<size_t>(e.offset) + 12 > buffer->second.stride)
+                    throw std::runtime_error("unsupported position format");
+                data = buffer->second.data.data();
+                stride = buffer->second.stride;
+                offset = e.offset;
+                return;
+            }
+        throw std::runtime_error("missing position stream");
+    }
+    V operator()(uint32_t index) const
+    {
+        if (index >= count)
+            throw std::runtime_error("index outside vertex data");
+        V p;
+        std::memcpy(p.data(), data + static_cast<size_t>(index) * stride + offset, 12);
+        return p;
+    }
+};
+// Chunks written in place: open, append the body, close to patch the size
+// (same bytes as chunk(), without copying the body into every enclosing level).
+size_t openChunk(Bytes &b, uint16_t id)
+{
+    const size_t start = b.size();
+    put(b, id);
+    put(b, uint32_t{0});
+    return start;
+}
+void closeChunk(Bytes &b, size_t start)
+{
+    const auto size = static_cast<uint32_t>(b.size() - start);
+    std::memcpy(b.data() + start + 2, &size, sizeof(size));
+}
+// Appends the geometry chunk body (vertex count, declaration, buffers).
+void appendGeometry(Bytes &out, const Geometry &g, const std::vector<uint32_t> &vertices, const Frame &frame, V &lo,
+                    V &hi, float &radius)
+{
     put(out, static_cast<uint32_t>(vertices.size()));
     Bytes decl;
     bool hasPosition = false;
@@ -531,7 +642,6 @@ Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, con
     chunk(out, 0x5100, decl);
     for (const auto &[source, buf] : g.buffers)
     {
-        Bytes values;
         const Element *pos = nullptr;
         std::vector<uint16_t> directions;
         bool used = false;
@@ -556,24 +666,34 @@ Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, con
             }
         if (!used)
             continue;
+        const size_t bufferChunk = openChunk(out, 0x5200);
+        put(out, source);
+        put(out, buf.stride);
+        const size_t dataChunk = openChunk(out, 0x5210);
+        const size_t valuesAt = out.size();
+        out.resize(valuesAt + vertices.size() * buf.stride);
+        uint8_t *values = out.data() + valuesAt;
+        size_t next = 0;
+        // Bounds in locals for the loop (a throw discards the piece anyway).
+        V loLocal = lo, hiLocal = hi;
+        float radiusLocal = radius;
         for (auto index : vertices)
         {
             if (index >= g.count)
                 throw std::runtime_error("index outside vertex data");
             const size_t begin = static_cast<size_t>(index) * buf.stride;
-            const size_t next = values.size();
-            values.insert(values.end(), buf.data.begin() + begin, buf.data.begin() + begin + buf.stride);
+            std::memcpy(values + next, buf.data.data() + begin, buf.stride);
             for (auto offset : directions)
             {
                 V d;
-                std::memcpy(d.data(), values.data() + next + offset, 12);
+                std::memcpy(d.data(), values + next + offset, 12);
                 d = rotate(frame.inverse, d);
-                std::memcpy(values.data() + next + offset, d.data(), 12);
+                std::memcpy(values + next + offset, d.data(), 12);
             }
             if (pos)
             {
                 V p;
-                std::memcpy(p.data(), values.data() + next + pos->offset, 12);
+                std::memcpy(p.data(), values + next + pos->offset, 12);
                 p = toFrame(frame, p);
                 float r2 = 0;
                 for (int i = 0; i < 3; ++i)
@@ -581,25 +701,54 @@ Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, con
                     p[i] -= frame.center[i];
                     if (!std::isfinite(p[i]) || std::abs(p[i]) > 100000)
                         throw std::runtime_error("invalid vertex position");
-                    lo[i] = std::min(lo[i], p[i]);
-                    hi[i] = std::max(hi[i], p[i]);
+                    loLocal[i] = std::min(loLocal[i], p[i]);
+                    hiLocal[i] = std::max(hiLocal[i], p[i]);
                     r2 += p[i] * p[i];
                 }
-                radius = std::max(radius, std::sqrt(r2));
-                std::memcpy(values.data() + next + pos->offset, p.data(), 12);
+                radiusLocal = std::max(radiusLocal, std::sqrt(r2));
+                std::memcpy(values + next + pos->offset, p.data(), 12);
             }
+            next += buf.stride;
         }
-        Bytes d;
-        put(d, source);
-        put(d, buf.stride);
-        chunk(d, 0x5210, values);
-        chunk(out, 0x5200, d);
+        lo = loLocal;
+        hi = hiLocal;
+        radius = radiusLocal;
+        closeChunk(out, dataChunk);
+        closeChunk(out, bufferChunk);
     }
     if (!hasPosition)
         throw std::runtime_error("missing position stream");
+}
+Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, const Frame &frame, V &lo, V &hi,
+                   float &radius)
+{
+    Bytes out;
+    appendGeometry(out, g, vertices, frame, lo, hi, radius);
     return out;
 }
 } // namespace
+#ifdef OPENSHIM_NATIVE_CHUNK_PHASES
+// Bench-only phase accumulators (milliseconds); compiled out of the DLL.
+double g_gibPhaseMs[11] = {};
+namespace
+{
+struct PhaseClock
+{
+    std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
+    void mark(int phase)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        g_gibPhaseMs[phase] += std::chrono::duration<double, std::milli>(now - last).count();
+        last = now;
+    }
+};
+} // namespace
+#define GIB_PHASE_BEGIN PhaseClock phaseClock
+#define GIB_PHASE(n) phaseClock.mark(n)
+#else
+#define GIB_PHASE_BEGIN ((void)0)
+#define GIB_PHASE(n) ((void)0)
+#endif
 unsigned StockFallbackKind(std::string_view seed)
 {
     uint32_t hash = 2166136261u;
@@ -974,47 +1123,203 @@ V normalize3(V a)
 }
 // Directed boundary edges (welded ids) chained into loops, tolerant of junk:
 // the same walk as the script's _boundary_loops, open chains of three or more
-// points included.
-std::vector<std::vector<int>> boundaryLoops(const std::vector<std::pair<int, int>> &edges)
+// points included. The edges must be distinct (the caller de-duplicates).
+// `localOf` is caller scratch, at least (max welded id + 1) entries all -1; it
+// is returned to that state.
+std::vector<std::vector<int>> boundaryLoops(const std::vector<std::pair<int, int>> &edges,
+                                            std::vector<int> &localOf)
 {
-    std::map<int, std::vector<int>> outgoing;
-    for (const auto &[a, b] : edges)
-        outgoing[a].push_back(b);
-    std::set<std::pair<int, int>> used;
-    std::vector<std::vector<int>> loops;
-    for (const auto &[a, b] : edges)
-    {
-        if (used.count({a, b}))
-            continue;
-        std::vector<int> loop{a};
-        used.insert({a, b});
-        int current = b;
-        size_t guard = 0;
-        while (current != a && guard < edges.size() + 1)
+    // Dense node ids and, per node, its outgoing edges in input order (CSR).
+    std::vector<int> nodes;
+    std::vector<int> tail(edges.size()), head(edges.size());
+    const auto node = [&](int id) {
+        int &slot = localOf[static_cast<size_t>(id)];
+        if (slot < 0)
         {
-            loop.push_back(current);
-            int next = -1;
-            bool found = false;
-            const auto out = outgoing.find(current);
-            if (out != outgoing.end())
-                for (int candidate : out->second)
-                    if (!used.count({current, candidate}))
-                    {
-                        next = candidate;
-                        found = true;
-                        break;
-                    }
-            if (!found)
+            slot = static_cast<int>(nodes.size());
+            nodes.push_back(id);
+        }
+        return slot;
+    };
+    for (size_t i = 0; i < edges.size(); ++i)
+    {
+        tail[i] = node(edges[i].first);
+        head[i] = node(edges[i].second);
+    }
+    std::vector<uint32_t> first(nodes.size() + 1, 0);
+    for (size_t i = 0; i < edges.size(); ++i)
+        ++first[static_cast<size_t>(tail[i]) + 1];
+    for (size_t n = 0; n < nodes.size(); ++n)
+        first[n + 1] += first[n];
+    std::vector<uint32_t> outgoing(edges.size()), fill(first.begin(), first.end() - 1);
+    for (size_t i = 0; i < edges.size(); ++i)
+        outgoing[fill[static_cast<size_t>(tail[i])]++] = static_cast<uint32_t>(i);
+    std::vector<uint32_t> cursor(first.begin(), first.end() - 1);
+    std::vector<char> used(edges.size(), 0);
+    std::vector<std::vector<int>> loops;
+    for (size_t i = 0; i < edges.size(); ++i)
+    {
+        if (used[i])
+            continue;
+        const int a = edges[i].first;
+        std::vector<int> loop{a};
+        used[i] = 1;
+        int current = head[i];
+        size_t guard = 0;
+        while (nodes[static_cast<size_t>(current)] != a && guard < edges.size() + 1)
+        {
+            loop.push_back(nodes[static_cast<size_t>(current)]);
+            // First not-yet-used outgoing edge; used edges only accumulate, so
+            // the cursor never needs to back up.
+            const size_t n = static_cast<size_t>(current);
+            while (cursor[n] < first[n + 1] && used[outgoing[cursor[n]]])
+                ++cursor[n];
+            if (cursor[n] == first[n + 1])
                 break;
-            used.insert({current, next});
-            current = next;
+            const uint32_t e = outgoing[cursor[n]];
+            used[e] = 1;
+            current = head[e];
             ++guard;
         }
         if (loop.size() >= 3)
             loops.push_back(std::move(loop));
     }
+    for (int id : nodes)
+        localOf[static_cast<size_t>(id)] = -1;
     return loops;
 }
+// Open-addressing tables for the weld and cut-edge passes (std::map here was
+// the bulk of gib generation time on dense meshes).
+size_t tableSize(size_t entries)
+{
+    size_t n = 16;
+    while (n < entries)
+        n <<= 1;
+    return n;
+}
+uint64_t mix64(uint64_t x)
+{
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdULL;
+    x ^= x >> 33;
+    x *= 0xc4ceb9fe1a85ec53ULL;
+    x ^= x >> 33;
+    return x;
+}
+// Position (quantised to 1e-4) -> welded id, ids chosen by the caller.
+class WeldTable
+{
+  public:
+    explicit WeldTable(size_t expected) : slots_(tableSize(expected * 2)), mask_(slots_.size() - 1)
+    {
+    }
+    // Existing id for `key`, or `fresh` = true and `newId` recorded.
+    int find(const std::array<long long, 3> &key, int newId, bool &fresh)
+    {
+        uint64_t h = mix64(static_cast<uint64_t>(key[0]));
+        h = mix64(h ^ static_cast<uint64_t>(key[1]));
+        h = mix64(h ^ static_cast<uint64_t>(key[2]));
+        for (size_t i = h & mask_;; i = (i + 1) & mask_)
+        {
+            Slot &s = slots_[i];
+            if (s.id < 0)
+            {
+                s.key = key;
+                s.id = newId;
+                fresh = true;
+                return newId;
+            }
+            if (s.key == key)
+            {
+                fresh = false;
+                return s.id;
+            }
+        }
+    }
+
+  private:
+    struct Slot
+    {
+        std::array<long long, 3> key{};
+        int id = -1;
+    };
+    std::vector<Slot> slots_;
+    size_t mask_;
+};
+inline uint64_t pairKey(int a, int b)
+{
+    return (static_cast<uint64_t>(static_cast<uint32_t>(a)) << 32) | static_cast<uint32_t>(b);
+}
+// Undirected welded edge -> (first piece seen, touched by another piece too).
+class EdgeTable
+{
+  public:
+    explicit EdgeTable(size_t edges) : slots_(tableSize(edges + edges / 2 + 1)), mask_(slots_.size() - 1)
+    {
+    }
+    void touch(int u, int v, int piece)
+    {
+        Slot &s = slot(pairKey(std::min(u, v), std::max(u, v)));
+        if (s.key == kEmpty)
+        {
+            s.key = pairKey(std::min(u, v), std::max(u, v));
+            s.first = piece;
+        }
+        else if (s.first != piece)
+            s.multi = true;
+    }
+    bool shared(int u, int v)
+    {
+        const Slot &s = slot(pairKey(std::min(u, v), std::max(u, v)));
+        if (s.key == kEmpty)
+            throw std::out_of_range("edge missing from piece topology");
+        return s.multi;
+    }
+
+  private:
+    static constexpr uint64_t kEmpty = ~0ULL;
+    struct Slot
+    {
+        uint64_t key = kEmpty;
+        int first = 0;
+        bool multi = false;
+    };
+    Slot &slot(uint64_t key)
+    {
+        for (size_t i = mix64(key) & mask_;; i = (i + 1) & mask_)
+            if (slots_[i].key == key || slots_[i].key == kEmpty)
+                return slots_[i];
+    }
+    std::vector<Slot> slots_;
+    size_t mask_;
+};
+// Insert-only set of ordered welded pairs.
+class PairSet
+{
+  public:
+    explicit PairSet(size_t entries) : slots_(tableSize(entries * 2), kEmpty), mask_(slots_.size() - 1)
+    {
+    }
+    bool insert(int a, int b)
+    {
+        const uint64_t key = pairKey(a, b);
+        for (size_t i = mix64(key) & mask_;; i = (i + 1) & mask_)
+        {
+            if (slots_[i] == key)
+                return false;
+            if (slots_[i] == kEmpty)
+            {
+                slots_[i] = key;
+                return true;
+            }
+        }
+    }
+
+  private:
+    static constexpr uint64_t kEmpty = ~0ULL;
+    std::vector<uint64_t> slots_;
+    size_t mask_;
+};
 // re.sub(r"[^A-Za-z0-9_]+", "_", key).lower(), bounded for the cache.
 std::string gibPieceName(const std::string &key)
 {
@@ -1053,6 +1358,7 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
     error.clear();
     try
     {
+        GIB_PHASE_BEGIN;
         if (bytes.size() > 64 * 1024 * 1024 || skeleton.size() > 16 * 1024 * 1024)
             throw std::runtime_error("oversized Ogre resource");
         if (!std::isfinite(options.minFaceFraction) || options.minFaceFraction < 0 || options.minFaceFraction > 1)
@@ -1063,10 +1369,12 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
         const std::regex keep = pattern(options.keepPattern);
         const std::regex drop = pattern(options.dropPattern);
         const std::regex weapon = pattern(options.weaponMaterialPattern);
+        GIB_PHASE(0); // regex setup
         const auto m = model(bytes);
         auto bs = bones(skeleton);
         for (auto &[id, b] : bs)
             derive(id, bs);
+        GIB_PHASE(1); // parse mesh + skeleton
         // derive() already rejected cycles and missing parents.
         const auto depth = [&](uint16_t id) {
             int d = 0;
@@ -1078,7 +1386,8 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
         // 1. Dominant bone per face; weapon submeshes are counted apart.
         std::vector<std::vector<int>> owners;
         std::vector<bool> weaponSub;
-        std::map<uint16_t, uint32_t> counts;
+        // Dense by bone handle (a uint16_t): the hot loops below bump it per face.
+        std::vector<uint32_t> counts(65536, 0);
         std::vector<std::pair<uint16_t, uint32_t>> weaponCounts; // first-seen order breaks ties
         uint32_t totalFaces = 0;
         for (const auto &sub : m.subs)
@@ -1108,6 +1417,7 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
         }
         if (!totalFaces)
             throw std::runtime_error("no skinned faces");
+        GIB_PHASE(2); // dominant bone per face
 
         // 2. Roll small bones into their parent, deepest first, so fingers
         //    fold into the hand before the (now heavier) hand is judged. A
@@ -1148,17 +1458,26 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
         // 3. Group faces into pieces keyed like the script (gib bone name, or
         //    "weapon"); std::map gives the script's sorted output order.
         static const std::string kWeaponKey = "weapon";
-        std::map<std::string, std::vector<GibFace>> pieceFaces;
-        std::map<std::string, uint16_t> pieceBone;
+        struct PieceEntry
+        {
+            std::vector<GibFace> faces;
+            uint16_t bone = 0; // the last face's driving bone, like the script's dict overwrite
+        };
+        std::map<std::string, PieceEntry> pieceFaces;
+        // Bone -> entry, so the per-face work is two array reads, not a string-keyed map lookup.
+        std::vector<PieceEntry *> entryOfBone(65536, nullptr);
+        PieceEntry *weaponEntry = nullptr;
         for (size_t s = 0; s < m.subs.size(); ++s)
             for (size_t f = 0; f < owners[s].size(); ++f)
             {
                 if (owners[s][f] < 0)
                     continue;
                 const uint16_t bone = weaponSub[s] ? weaponBone : target.at(static_cast<uint16_t>(owners[s][f]));
-                const std::string &key = weaponSub[s] ? kWeaponKey : bs.at(bone).name;
-                pieceFaces[key].push_back({s, f});
-                pieceBone[key] = bone;
+                PieceEntry *&slot = weaponSub[s] ? weaponEntry : entryOfBone[bone];
+                if (!slot)
+                    slot = &pieceFaces[weaponSub[s] ? kWeaponKey : bs.at(bone).name];
+                slot->faces.push_back({s, f});
+                slot->bone = bone;
             }
         std::map<std::string, int> pieceIds;
         for (const auto &entry : pieceFaces)
@@ -1166,65 +1485,122 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
         std::vector<std::vector<int>> facePiece(m.subs.size());
         for (size_t s = 0; s < m.subs.size(); ++s)
             facePiece[s].assign(owners[s].size(), -1);
-        for (const auto &[key, faces] : pieceFaces)
-            for (const auto &face : faces)
-                facePiece[face.sub][face.face] = pieceIds.at(key);
+        for (const auto &[key, entry] : pieceFaces)
+        {
+            const int id = pieceIds.at(key);
+            for (const auto &face : entry.faces)
+                facePiece[face.sub][face.face] = id;
+        }
 
+        GIB_PHASE(3); // roll-up + piece grouping
         // 4. Position-welded topology: a cut is an edge shared by faces of
         //    more than one body piece, wherever the exporter split vertices.
-        std::map<std::array<long long, 3>, int> weldLookup;
+        //    Weld ids are handed out in first-seen order (the output depends
+        //    on them only through that order).
         std::vector<V> weldPosition;
         std::map<const Geometry *, std::vector<int>> weldCache;
-        for (const auto &sub : m.subs)
         {
-            const Geometry &g = sub.shared ? m.geometry : sub.geometry;
-            if (weldCache.count(&g))
-                continue;
-            std::vector<int> ids(g.count);
-            for (uint32_t v = 0; v < g.count; ++v)
+            size_t vertexTotal = 0;
+            for (const auto &sub : m.subs)
+                vertexTotal += (sub.shared ? m.geometry : sub.geometry).count;
+            WeldTable table(vertexTotal);
+            for (const auto &sub : m.subs)
             {
-                const V p = position(g, v);
-                const std::array<long long, 3> key{std::llround(static_cast<double>(p[0]) / 1e-4),
-                                                   std::llround(static_cast<double>(p[1]) / 1e-4),
-                                                   std::llround(static_cast<double>(p[2]) / 1e-4)};
-                const auto inserted = weldLookup.emplace(key, static_cast<int>(weldLookup.size()));
-                if (inserted.second)
-                    weldPosition.push_back(p);
-                ids[v] = inserted.first->second;
+                const Geometry &g = sub.shared ? m.geometry : sub.geometry;
+                if (weldCache.count(&g))
+                    continue;
+                std::vector<int> ids(g.count);
+                if (g.count)
+                {
+                    const PositionReader position(g);
+                    for (uint32_t v = 0; v < g.count; ++v)
+                    {
+                        const V p = position(v);
+                        const std::array<long long, 3> key{std::llround(static_cast<double>(p[0]) / 1e-4),
+                                                           std::llround(static_cast<double>(p[1]) / 1e-4),
+                                                           std::llround(static_cast<double>(p[2]) / 1e-4)};
+                        bool fresh = false;
+                        ids[v] = table.find(key, static_cast<int>(weldPosition.size()), fresh);
+                        if (fresh)
+                            weldPosition.push_back(p);
+                    }
+                }
+                weldCache.emplace(&g, std::move(ids));
             }
-            weldCache.emplace(&g, std::move(ids));
         }
-        const auto faceWelds = [&](size_t s, size_t f) {
-            const Sub &sub = m.subs[s];
-            const auto &ids = weldCache.at(sub.shared ? &m.geometry : &sub.geometry);
-            return std::array<int, 3>{ids.at(sub.indices[f * 3]), ids.at(sub.indices[f * 3 + 1]),
-                                      ids.at(sub.indices[f * 3 + 2])};
-        };
-        std::map<std::pair<int, int>, std::vector<int>> edgePieces;
+        std::vector<const std::vector<int> *> subWelds(m.subs.size());
         for (size_t s = 0; s < m.subs.size(); ++s)
         {
-            if (weaponSub[s])
-                continue;
-            for (size_t f = 0; f < owners[s].size(); ++f)
-            {
-                if (facePiece[s][f] < 0)
-                    continue;
-                const auto w = faceWelds(s, f);
-                for (int e = 0; e < 3; ++e)
-                {
-                    const int u = w[e], v = w[(e + 1) % 3];
-                    auto &list = edgePieces[{std::min(u, v), std::max(u, v)}];
-                    if (std::find(list.begin(), list.end(), facePiece[s][f]) == list.end())
-                        list.push_back(facePiece[s][f]);
-                }
-            }
+            const Sub &sub = m.subs[s];
+            subWelds[s] = &weldCache.at(sub.shared ? &m.geometry : &sub.geometry);
         }
+        // Triangle indices were range-checked against the vertex count by
+        // triangleOwners, which sized the weld id arrays.
+        const auto faceWelds = [&](size_t s, size_t f) {
+            const Sub &sub = m.subs[s];
+            const auto &ids = *subWelds[s];
+            return std::array<int, 3>{ids[sub.indices[f * 3]], ids[sub.indices[f * 3 + 1]],
+                                      ids[sub.indices[f * 3 + 2]]};
+        };
+        // Per welded edge: the first body piece to touch it and whether any
+        // other piece does too (all the cut test needs).
+        // A shared edge needs both ends on more than one piece, so find those
+        // vertices first and keep only edges between them in the table.
+        std::vector<int> vertexPiece(weldPosition.size(), -1);
+        std::vector<char> vertexMulti(weldPosition.size(), 0);
+        const auto forBodyFaces = [&](auto &&fn) {
+            for (size_t s = 0; s < m.subs.size(); ++s)
+            {
+                if (weaponSub[s])
+                    continue;
+                for (size_t f = 0; f < owners[s].size(); ++f)
+                    if (facePiece[s][f] >= 0)
+                        fn(faceWelds(s, f), facePiece[s][f]);
+            }
+        };
+        forBodyFaces([&](const std::array<int, 3> &w, int piece) {
+            for (const int id : w)
+            {
+                int &first = vertexPiece[static_cast<size_t>(id)];
+                if (first < 0)
+                    first = piece;
+                else if (first != piece)
+                    vertexMulti[static_cast<size_t>(id)] = 1;
+            }
+        });
+        const auto multiEdge = [&](int u, int v) {
+            return vertexMulti[static_cast<size_t>(u)] && vertexMulti[static_cast<size_t>(v)];
+        };
+        size_t candidateEdges = 0;
+        forBodyFaces([&](const std::array<int, 3> &w, int) {
+            for (int e = 0; e < 3; ++e)
+                candidateEdges += multiEdge(w[e], w[(e + 1) % 3]);
+        });
+        EdgeTable edgePieces(candidateEdges);
+        forBodyFaces([&](const std::array<int, 3> &w, int piece) {
+            for (int e = 0; e < 3; ++e)
+                if (multiEdge(w[e], w[(e + 1) % 3]))
+                    edgePieces.touch(w[e], w[(e + 1) % 3], piece);
+        });
 
+        GIB_PHASE(4); // weld + edge->piece topology
         std::set<std::string> usedNames;
-        for (const auto &[key, faces] : pieceFaces)
+        std::vector<std::optional<PositionReader>> positionReaders(m.subs.size());
+        const auto positionOf = [&](size_t s) -> const PositionReader & {
+            if (!positionReaders[s])
+            {
+                const Sub &sub = m.subs[s];
+                positionReaders[s].emplace(sub.shared ? m.geometry : sub.geometry);
+            }
+            return *positionReaders[s];
+        };
+        std::vector<int> loopScratch(weldPosition.size(), -1);
+        std::vector<uint32_t> remapScratch;
+        for (const auto &[key, entry] : pieceFaces)
         {
+            const auto &faces = entry.faces;
             const bool isWeapon = key == kWeaponKey;
-            const uint16_t boneId = pieceBone.at(key);
+            const uint16_t boneId = entry.bone;
             const Bone &bone = bs.at(boneId);
             Frame frame = boneFrame(bone);
 
@@ -1233,17 +1609,17 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
             V centroid{};
             size_t corners = 0;
             V lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
-            std::map<size_t, std::vector<uint32_t>> bySub;
+            std::vector<std::vector<uint32_t>> bySub(m.subs.size());
             for (const auto &face : faces)
             {
                 const Sub &sub = m.subs[face.sub];
-                const Geometry &g = sub.shared ? m.geometry : sub.geometry;
+                const PositionReader &position = positionOf(face.sub);
                 auto &indices = bySub[face.sub];
                 for (size_t k = 0; k < 3; ++k)
                 {
                     const uint32_t index = sub.indices[face.face * 3 + k];
                     indices.push_back(index);
-                    const V p = position(g, index);
+                    const V p = position(index);
                     centroid = add(centroid, p);
                     ++corners;
                     const V local = toFrame(frame, p);
@@ -1262,12 +1638,13 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                     throw std::runtime_error("invalid gib centre");
             }
 
+            GIB_PHASE(5); // per-piece centroid + bounds
             // 5. Fan caps over every cut loop, built in model space.
             std::vector<CapTri> caps;
             if (!isWeapon && options.caps)
             {
                 std::vector<std::pair<int, int>> cutEdges;
-                std::set<std::pair<int, int>> seen;
+                PairSet seen(faces.size() * 3);
                 for (const auto &face : faces)
                 {
                     const auto w = faceWelds(face.sub, face.face);
@@ -1275,13 +1652,23 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                     {
                         const int u = w[e], v = w[(e + 1) % 3];
                         // Reversed, so the cap winds opposite to the skin it closes.
-                        if (edgePieces.at({std::min(u, v), std::max(u, v)}).size() > 1 && seen.insert({v, u}).second)
+                        if (multiEdge(u, v) && edgePieces.shared(u, v) && seen.insert(v, u))
                             cutEdges.push_back({v, u});
                     }
                 }
-                for (const auto &loop : boundaryLoops(cutEdges))
+                GIB_PHASE(8); // cut edges
+                const auto cutLoops = boundaryLoops(cutEdges, loopScratch);
+                GIB_PHASE(9); // boundary loops
                 {
-                    std::vector<V> points;
+                    size_t capTotal = 0;
+                    for (const auto &loop : cutLoops)
+                        capTotal += loop.size();
+                    caps.reserve(capTotal);
+                }
+                std::vector<V> points;
+                for (const auto &loop : cutLoops)
+                {
+                    points.clear();
                     for (int w : loop)
                         points.push_back(weldPosition.at(static_cast<size_t>(w)));
                     V center{};
@@ -1291,7 +1678,7 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                     V newell{};
                     for (size_t i = 0; i < points.size(); ++i)
                     {
-                        const V p = points[i], q = points[(i + 1) % points.size()];
+                        const V p = points[i], q = points[i + 1 == points.size() ? 0 : i + 1];
                         newell = add(newell, V{(p[1] - q[1]) * (p[2] + q[2]), (p[2] - q[2]) * (p[0] + q[0]),
                                                (p[0] - q[0]) * (p[1] + q[1])});
                     }
@@ -1303,41 +1690,67 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                     }
                     for (size_t i = 0; i < points.size(); ++i)
                     {
-                        V p0 = points[i], p1 = points[(i + 1) % points.size()];
+                        V p0 = points[i], p1 = points[i + 1 == points.size() ? 0 : i + 1];
                         if (dot3(cross3(sub3(p0, center), sub3(p1, center)), normal) < 0)
                             std::swap(p0, p1);
                         caps.push_back({center, p0, p1, normal});
                     }
                 }
+                GIB_PHASE(10); // cap triangles
                 if (caps.size() > 1000000)
                     throw std::runtime_error("oversized gib cap");
             }
 
+            GIB_PHASE(6); // caps
             // 6. Serialize in the bone frame, centred on the piece bounds,
             //    exactly as Extract writes a chunk piece.
-            Bytes body{0};
+            Bytes body;
+            put(body, uint16_t{0x1000});
+            line(body, "[MeshSerializer_v1.8]");
+            const size_t meshChunk = openChunk(body, 0x3000);
+            put(body, uint8_t{0});
             uint32_t triangles = 0;
             float radius = 0;
             lo = {1e30f, 1e30f, 1e30f};
             hi = {-1e30f, -1e30f, -1e30f};
-            for (const auto &[s, selected] : bySub)
+            for (size_t s = 0; s < bySub.size(); ++s)
             {
+                const auto &selected = bySub[s];
+                if (selected.empty())
+                    continue;
                 const Sub &sub = m.subs[s];
                 const Geometry &g = sub.shared ? m.geometry : sub.geometry;
-                const std::set<uint32_t> used(selected.begin(), selected.end());
-                std::vector<uint32_t> vertices(used.begin(), used.end());
-                std::map<uint32_t, uint32_t> remap;
-                for (uint32_t i = 0; i < vertices.size(); ++i)
-                    remap[vertices[i]] = i;
-                Bytes data;
-                line(data, sub.material);
-                put(data, uint8_t{0});
-                put(data, static_cast<uint32_t>(selected.size()));
-                put(data, uint8_t{1});
-                for (auto index : selected)
-                    put(data, remap.at(index));
-                chunk(data, 0x5000, emitGeometry(g, vertices, frame, lo, hi, radius));
-                chunk(body, 0x4000, data);
+                // Distinct vertices ascending; every selected index was
+                // range-checked against g.count by the bounds pass above.
+                constexpr uint32_t kUnused = 0xFFFFFFFFu, kMarked = 0xFFFFFFFEu;
+                if (remapScratch.size() < g.count)
+                    remapScratch.resize(g.count);
+                std::fill(remapScratch.begin(), remapScratch.begin() + g.count, kUnused);
+                for (const uint32_t index : selected)
+                    remapScratch[index] = kMarked;
+                std::vector<uint32_t> vertices;
+                for (uint32_t v = 0; v < g.count; ++v)
+                    if (remapScratch[v] == kMarked)
+                    {
+                        remapScratch[v] = static_cast<uint32_t>(vertices.size());
+                        vertices.push_back(v);
+                    }
+                const size_t subChunk = openChunk(body, 0x4000);
+                line(body, sub.material);
+                put(body, uint8_t{0});
+                put(body, static_cast<uint32_t>(selected.size()));
+                put(body, uint8_t{1});
+                {
+                    const size_t base = body.size();
+                    body.resize(base + selected.size() * sizeof(uint32_t));
+                    for (size_t i = 0; i < selected.size(); ++i)
+                        std::memcpy(body.data() + base + i * sizeof(uint32_t), &remapScratch[selected[i]],
+                                    sizeof(uint32_t));
+                }
+                const size_t geometryChunk = openChunk(body, 0x5000);
+                appendGeometry(body, g, vertices, frame, lo, hi, radius);
+                closeChunk(body, geometryChunk);
+                closeChunk(body, subChunk);
                 triangles += static_cast<uint32_t>(selected.size() / 3);
             }
             if (!caps.empty())
@@ -1349,31 +1762,43 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                 g.count = static_cast<uint32_t>(caps.size() * 3);
                 g.elements = {{0, 2, 1, 0, 0}, {0, 2, 4, 12, 0}, {0, 1, 7, 24, 0}};
                 Buffer buffer{32, {}};
-                std::vector<uint32_t> indices;
-                for (const auto &tri : caps)
+                buffer.data.resize(caps.size() * 3 * 32);
+                std::vector<uint32_t> indices(caps.size() * 3);
+                uint8_t *dst = buffer.data.data();
+                for (size_t t = 0; t < caps.size(); ++t)
                 {
+                    const CapTri &tri = caps[t];
                     const V tangent =
                         normalize3(cross3(tri.normal, std::abs(tri.normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
                     const V bitangent = cross3(tri.normal, tangent);
                     for (const V &p : {tri.a, tri.b, tri.c})
                     {
-                        for (float value : {p[0], p[1], p[2], tri.normal[0], tri.normal[1], tri.normal[2],
-                                            dot3(p, tangent) * options.capUvScale,
-                                            dot3(p, bitangent) * options.capUvScale})
-                            put(buffer.data, value);
-                        indices.push_back(static_cast<uint32_t>(indices.size()));
+                        const float vertex[8] = {p[0],
+                                                 p[1],
+                                                 p[2],
+                                                 tri.normal[0],
+                                                 tri.normal[1],
+                                                 tri.normal[2],
+                                                 dot3(p, tangent) * options.capUvScale,
+                                                 dot3(p, bitangent) * options.capUvScale};
+                        std::memcpy(dst, vertex, sizeof(vertex));
+                        dst += sizeof(vertex);
                     }
                 }
+                for (size_t i = 0; i < indices.size(); ++i)
+                    indices[i] = static_cast<uint32_t>(i);
                 g.buffers.emplace(uint16_t{0}, std::move(buffer));
-                Bytes data;
-                line(data, options.capMaterial);
-                put(data, uint8_t{0});
-                put(data, static_cast<uint32_t>(indices.size()));
-                put(data, uint8_t{1});
-                for (auto index : indices)
-                    put(data, index);
-                chunk(data, 0x5000, emitGeometry(g, indices, frame, lo, hi, radius));
-                chunk(body, 0x4000, data);
+                const size_t subChunk = openChunk(body, 0x4000);
+                line(body, options.capMaterial);
+                put(body, uint8_t{0});
+                put(body, static_cast<uint32_t>(indices.size()));
+                put(body, uint8_t{1});
+                body.insert(body.end(), reinterpret_cast<const uint8_t *>(indices.data()),
+                            reinterpret_cast<const uint8_t *>(indices.data() + indices.size()));
+                const size_t geometryChunk = openChunk(body, 0x5000);
+                appendGeometry(body, g, indices, frame, lo, hi, radius);
+                closeChunk(body, geometryChunk);
+                closeChunk(body, subChunk);
                 triangles += static_cast<uint32_t>(caps.size());
             }
             Bytes bounds;
@@ -1383,10 +1808,8 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                 put(bounds, v);
             put(bounds, radius);
             chunk(body, 0x9000, bounds);
-            Bytes out;
-            put(out, uint16_t{0x1000});
-            line(out, "[MeshSerializer_v1.8]");
-            chunk(out, 0x3000, body);
+            closeChunk(body, meshChunk);
+            Bytes &out = body;
 
             std::string name = gibPieceName(key);
             for (int suffix = 2; !usedNames.insert(name).second; ++suffix)
@@ -1403,6 +1826,7 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
             gib.capTriangles = static_cast<uint32_t>(caps.size());
             gib.weapon = isWeapon;
             gibs.push_back(std::move(gib));
+            GIB_PHASE(7); // serialize
         }
         if (gibs.empty())
             throw std::runtime_error("no gib pieces");
