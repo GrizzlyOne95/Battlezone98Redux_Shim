@@ -304,6 +304,17 @@ What the shipped surface had to account for, found while building it on GOG
 - **Live check 2 passed.** A rename on the title screen recycles the socket.
   The client reconnects, re-authorises, and Continue reaches the lounge (screen
   `0x0E`) in about 0.6 s, with no stale lounge state.
+- **Live check 7 passed: a second client sees the new name.** Two Goldberg
+  clients against the local BZRNet server, 2026-10-10. Client 2 waited in the
+  lounge, and client 1 renamed to `PreLobbyOK` on the pre-lobby and pressed
+  Continue. The server logged `Authorized ... name=PreLobbyOK`, and client 2's
+  Players in Room list showed `PreLobbyOK`.
+- **Two misleading readouts.** After the recycle, client 1's BZLogger still
+  printed `Authenticated to BZRNet As <id>:BZRCoop1`, so that line is not the
+  name the server received. Use the server's `Authorized` line or a second
+  client to check a rename. The page's status line also reads
+  `Server: Official` while `MatchmakingRedirectAddress` points elsewhere. The
+  phase 2 endpoint work should report the redirect target.
 
 ## Phases
 
@@ -334,7 +345,7 @@ What the shipped surface had to account for, found while building it on GOG
    would be an alternative to recycling; it is not proposed.
 6. Does `/bzrserver=ws://host:port` correctly move the UDP probe to port+1?
 7. Does a second client see the renamed player? This is still open from the
-   lobby nickname work.
+   lobby nickname work. **Yes** for a rename on the pre-lobby (phase 1 notes).
 8. How does `-flagfile:` reach `0x00917FAC`?
 9. On GOG without a Galaxy sign-in, does the connect never start, and what
    should the panel show then?
