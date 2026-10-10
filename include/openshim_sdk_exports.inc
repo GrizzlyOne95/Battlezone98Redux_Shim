@@ -101,6 +101,12 @@ OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetNativeHudMeterVisible, OpenS
 OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimRestoreNativeHudMeter, OpenShimImpl_RestoreNativeHudMeter, (LPCSTR name), (name), FALSE)
 OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimRestoreAllNativeHudMeters, OpenShimImpl_RestoreAllNativeHudMeters, (void), (), FALSE)
 
+// Mission-scoped resistance. Capability is false unless the native site qualifies.
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimHasNativeDamageResistance, OpenShimImpl_HasNativeDamageResistance, (void), (), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetUnitDamageMultiplier, OpenShimImpl_SetUnitDamageMultiplier, (void* object, DWORD handle, float multiplier), (object, handle, multiplier), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimClearUnitDamageMultiplier, OpenShimImpl_ClearUnitDamageMultiplier, (DWORD handle), (handle), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimResetUnitDamageMultipliers, OpenShimImpl_ResetUnitDamageMultipliers, (void), (), FALSE)
+
 #ifdef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED
 #undef OPENSHIM_SDK_EXPORT_APPEND
 #undef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED
