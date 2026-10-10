@@ -799,6 +799,9 @@ namespace BZROpenShim
         void InstallRawMouseInputProcessHookIfPossible();
         bool ResolveRawMouseInputPreference(const char*& outSource);
 
+        // --- Background run test toggle (background_run.cpp) -------------------
+        void InstallBackgroundRunIfRequested();
+
         // --- Shadow far distance correction (shadow_far_distance_hook.cpp) -----
 
         // --- Engine flames (engine_flames.cpp) ---------------------------------
@@ -1136,6 +1139,7 @@ namespace BZROpenShim
         inline constexpr int kBzrRunStateUnknown = -1;
         void DeactivateAllChunkProxySceneResources(const wchar_t* reason);
         void InstallSceneTeardownForgetHooksIfPossible();
+        void InstallEntityReloadLifetimeHookIfPossible();
         bool TryReadBzrRunState(int& value);
         void InstallMissionTransitionSeamIfPossible();
         void PinDirect3DModulesForShutdown();
@@ -1188,6 +1192,8 @@ namespace BZROpenShim
         extern bool g_MagnetMineSimulateHookInstalled;
         extern TeamFilterCache g_MagnetMineTeamFilterCache;
         extern bool g_MagnetZeroRangeGuardEnabled;
+        extern bool g_UnfocusedMouseReleaseEnabled;
+        void InstallUnfocusedMouseReleaseIfPossible();
         extern volatile long g_MagnetZeroRangeLogBudget;
         extern bool g_ProximityMineSimulateHookInstalled;
         extern TeamFilterCache g_ProximityMineTeamFilterCache;
