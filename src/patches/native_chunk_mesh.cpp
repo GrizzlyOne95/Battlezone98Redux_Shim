@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <regex>
 #include <set>
 #include <stdexcept>
 
@@ -397,7 +398,10 @@ void derive(uint16_t id, std::map<uint16_t, Bone> &bs, int depth = 0)
     }
     b.state = 2;
 }
-std::vector<int> triangleOwners(const Sub &sub, const Model &model, const std::map<uint16_t, Bone> &bones)
+// unweightedToRoot: chunk extraction gives an unweighted face to the unique
+// skeleton root; the gib split skips it, as scripts/export_gib_payloads.py does.
+std::vector<int> triangleOwners(const Sub &sub, const Model &model, const std::map<uint16_t, Bone> &bones,
+                                bool unweightedToRoot = true)
 {
     if (sub.operation != 4)
         throw std::runtime_error("unsupported primitive operation");
@@ -438,7 +442,7 @@ std::vector<int> triangleOwners(const Sub &sub, const Model &model, const std::m
             for (const auto &[id, weight] : weights[vertex])
                 scores[id] += weight;
         }
-        int owner = root;
+        int owner = unweightedToRoot ? root : -1;
         float best = 0;
         // A triangle is emitted exactly once. Aggregate weights preserve seam
         // faces between rigid groups and avoid duplicating soft-skinned faces.
@@ -665,6 +669,131 @@ Piece StockFallbackMesh(unsigned kind)
     chunk(out, 0x3000, body);
     return {"stock_chunk" + std::to_string(kind), std::move(out), g.count / 3};
 }
+Piece CasingMesh(unsigned sides)
+{
+    if (sides < 6 || sides > 32)
+        return {};
+    // Unit-length shell along local +Z, centred on the origin: a rim and base
+    // at z = -0.5, a straight body, a short shoulder and a neck to the mouth
+    // at z = +0.5. Two submeshes so the brass and the darker rim, base and
+    // open mouth take separate materials.
+    constexpr float kRim = 0.225f, kBody = 0.2f, kNeck = 0.165f;
+    constexpr float kBase = -0.5f, kRimTop = -0.44f, kShoulder = 0.36f, kNeckStart = 0.42f, kMouth = 0.5f;
+    constexpr float kPi = 3.14159265358979f;
+    struct Vertex
+    {
+        V p, n;
+        float u, v;
+    };
+    auto ring = [&](unsigned i, float radius) {
+        const float a = 2.0f * kPi * static_cast<float>(i % sides) / static_cast<float>(sides);
+        return V{std::cos(a) * radius, std::sin(a) * radius, 0.0f};
+    };
+    auto at = [](V p, float z) { return V{p[0], p[1], z}; };
+    auto norm = [](V a) {
+        const float l = std::sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]);
+        return l > 1e-9f ? V{a[0] / l, a[1] / l, a[2] / l} : V{0, 0, 1};
+    };
+    std::vector<Vertex> brass, rim;
+    auto tri = [](std::vector<Vertex> &out, Vertex a, Vertex b, Vertex c) {
+        out.push_back(a);
+        out.push_back(b);
+        out.push_back(c);
+    };
+    // A band between two rings, outward facing. Normals tilt with the slope
+    // so the shoulder shades as a cone.
+    auto band = [&](std::vector<Vertex> &out, float z0, float r0, float z1, float r1) {
+        for (unsigned i = 0; i < sides; ++i)
+        {
+            const float u0 = static_cast<float>(i) / static_cast<float>(sides);
+            const float u1 = static_cast<float>(i + 1) / static_cast<float>(sides);
+            const V d0 = ring(i, 1.0f), d1 = ring(i + 1, 1.0f);
+            const V n0 = norm({d0[0] * (z1 - z0), d0[1] * (z1 - z0), r0 - r1});
+            const V n1 = norm({d1[0] * (z1 - z0), d1[1] * (z1 - z0), r0 - r1});
+            const Vertex a0{at(ring(i, r0), z0), n0, u0, z0 + 0.5f}, a1{at(ring(i + 1, r0), z0), n1, u1, z0 + 0.5f};
+            const Vertex b0{at(ring(i, r1), z1), n0, u0, z1 + 0.5f}, b1{at(ring(i + 1, r1), z1), n1, u1, z1 + 0.5f};
+            tri(out, a0, a1, b1);
+            tri(out, a0, b1, b0);
+        }
+    };
+    // A flat ring between two radii at one z, facing +Z or -Z.
+    auto annulus = [&](std::vector<Vertex> &out, float z, float inner, float outer, bool up) {
+        const V n{0, 0, up ? 1.0f : -1.0f};
+        for (unsigned i = 0; i < sides; ++i)
+        {
+            const V in0 = at(ring(i, inner), z), in1 = at(ring(i + 1, inner), z);
+            const V out0 = at(ring(i, outer), z), out1 = at(ring(i + 1, outer), z);
+            const Vertex vi0{in0, n, in0[0] + 0.5f, in0[1] + 0.5f}, vi1{in1, n, in1[0] + 0.5f, in1[1] + 0.5f};
+            const Vertex vo0{out0, n, out0[0] + 0.5f, out0[1] + 0.5f}, vo1{out1, n, out1[0] + 0.5f, out1[1] + 0.5f};
+            // A disc (inner radius 0) is a fan: its second triangle would
+            // be degenerate.
+            if (up)
+            {
+                tri(out, vi0, vo0, vo1);
+                if (inner > 0.0f)
+                    tri(out, vi0, vo1, vi1);
+            }
+            else
+            {
+                tri(out, vi0, vo1, vo0);
+                if (inner > 0.0f)
+                    tri(out, vi0, vi1, vo1);
+            }
+        }
+    };
+    band(brass, kRimTop, kBody, kShoulder, kBody);
+    band(brass, kShoulder, kBody, kNeckStart, kNeck);
+    band(brass, kNeckStart, kNeck, kMouth, kNeck);
+    band(rim, kBase, kRim, kRimTop, kRim);
+    annulus(rim, kRimTop, kBody, kRim, true);
+    annulus(rim, kBase, 0.0f, kRim, false);
+    annulus(rim, kMouth, 0.0f, kNeck, true);
+
+    V lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
+    float radius = 0;
+    Bytes body{0};
+    uint32_t triangles = 0;
+    for (const auto &[material, vertices] :
+         {std::pair<const char *, const std::vector<Vertex> *>{"openshim_casing_brass", &brass},
+          std::pair<const char *, const std::vector<Vertex> *>{"openshim_casing_rim", &rim}})
+    {
+        Geometry g;
+        g.count = static_cast<uint32_t>(vertices->size());
+        // Position, normal, uv0: the gib cap declaration.
+        g.elements = {{0, 2, 1, 0, 0}, {0, 2, 4, 12, 0}, {0, 1, 7, 24, 0}};
+        Buffer buffer{32, {}};
+        std::vector<uint32_t> indices;
+        for (const auto &v : *vertices)
+        {
+            for (float value : {v.p[0], v.p[1], v.p[2], v.n[0], v.n[1], v.n[2], v.u, v.v})
+                put(buffer.data, value);
+            indices.push_back(static_cast<uint32_t>(indices.size()));
+        }
+        g.buffers.emplace(uint16_t{0}, std::move(buffer));
+        Bytes sub;
+        line(sub, material);
+        put(sub, uint8_t{0});
+        put(sub, g.count);
+        put(sub, uint8_t{0});
+        for (auto index : indices)
+            put(sub, static_cast<uint16_t>(index));
+        chunk(sub, 0x5000, emitGeometry(g, indices, Frame{}, lo, hi, radius));
+        chunk(body, 0x4000, sub);
+        triangles += g.count / 3;
+    }
+    Bytes bounds;
+    for (float v : lo)
+        put(bounds, v);
+    for (float v : hi)
+        put(bounds, v);
+    put(bounds, radius);
+    chunk(body, 0x9000, bounds);
+    Bytes out;
+    put(out, uint16_t{0x1000});
+    line(out, "[MeshSerializer_v1.8]");
+    chunk(out, 0x3000, body);
+    return {"openshim_casing", std::move(out), triangles};
+}
 std::string SkeletonName(const Bytes &b)
 {
     try
@@ -809,6 +938,478 @@ bool Extract(const Bytes &bytes, const Bytes &skeleton, std::vector<Piece> &piec
     catch (const std::exception &e)
     {
         pieces.clear();
+        error = e.what();
+        return false;
+    }
+}
+// ---------------------------------------------------------------------------
+// Skinned gibs: the runtime twin of scripts/export_gib_payloads.py. Follow
+// that script when changing the split; the two must agree on which faces
+// form which gib.
+namespace
+{
+V sub3(V a, V b)
+{
+    return {a[0] - b[0], a[1] - b[1], a[2] - b[2]};
+}
+V scale3(V a, float s)
+{
+    return {a[0] * s, a[1] * s, a[2] * s};
+}
+V cross3(V a, V b)
+{
+    return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+}
+float dot3(V a, V b)
+{
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+V normalize3(V a)
+{
+    const float length = std::sqrt(dot3(a, a));
+    if (!(length >= 1e-12f))
+        return {0, 1, 0};
+    return scale3(a, 1.0f / length);
+}
+// Directed boundary edges (welded ids) chained into loops, tolerant of junk:
+// the same walk as the script's _boundary_loops, open chains of three or more
+// points included.
+std::vector<std::vector<int>> boundaryLoops(const std::vector<std::pair<int, int>> &edges)
+{
+    std::map<int, std::vector<int>> outgoing;
+    for (const auto &[a, b] : edges)
+        outgoing[a].push_back(b);
+    std::set<std::pair<int, int>> used;
+    std::vector<std::vector<int>> loops;
+    for (const auto &[a, b] : edges)
+    {
+        if (used.count({a, b}))
+            continue;
+        std::vector<int> loop{a};
+        used.insert({a, b});
+        int current = b;
+        size_t guard = 0;
+        while (current != a && guard < edges.size() + 1)
+        {
+            loop.push_back(current);
+            int next = -1;
+            bool found = false;
+            const auto out = outgoing.find(current);
+            if (out != outgoing.end())
+                for (int candidate : out->second)
+                    if (!used.count({current, candidate}))
+                    {
+                        next = candidate;
+                        found = true;
+                        break;
+                    }
+            if (!found)
+                break;
+            used.insert({current, next});
+            current = next;
+            ++guard;
+        }
+        if (loop.size() >= 3)
+            loops.push_back(std::move(loop));
+    }
+    return loops;
+}
+// re.sub(r"[^A-Za-z0-9_]+", "_", key).lower(), bounded for the cache.
+std::string gibPieceName(const std::string &key)
+{
+    std::string out = "gib_";
+    bool underscoreRun = false;
+    for (unsigned char c : key.substr(0, 60))
+    {
+        const bool keep = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+        if (keep)
+        {
+            out.push_back(static_cast<char>(c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c));
+            underscoreRun = false;
+        }
+        else if (!underscoreRun)
+        {
+            out.push_back('_');
+            underscoreRun = true;
+        }
+    }
+    return out;
+}
+struct GibFace
+{
+    size_t sub;
+    size_t face;
+};
+struct CapTri
+{
+    V a, b, c, normal;
+};
+} // namespace
+bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &options, std::vector<GibPiece> &gibs,
+                 std::string &error)
+{
+    gibs.clear();
+    error.clear();
+    try
+    {
+        if (bytes.size() > 64 * 1024 * 1024 || skeleton.size() > 16 * 1024 * 1024)
+            throw std::runtime_error("oversized Ogre resource");
+        if (!std::isfinite(options.minFaceFraction) || options.minFaceFraction < 0 || options.minFaceFraction > 1)
+            throw std::runtime_error("invalid gib face fraction");
+        const auto flags = std::regex::ECMAScript | std::regex::icase;
+        // An empty pattern matches nothing.
+        const auto pattern = [&](const std::string &text) { return std::regex(text.empty() ? "$^" : text, flags); };
+        const std::regex keep = pattern(options.keepPattern);
+        const std::regex drop = pattern(options.dropPattern);
+        const std::regex weapon = pattern(options.weaponMaterialPattern);
+        const auto m = model(bytes);
+        auto bs = bones(skeleton);
+        for (auto &[id, b] : bs)
+            derive(id, bs);
+        // derive() already rejected cycles and missing parents.
+        const auto depth = [&](uint16_t id) {
+            int d = 0;
+            for (int p = bs.at(id).parent; p >= 0; p = bs.at(static_cast<uint16_t>(p)).parent)
+                ++d;
+            return d;
+        };
+
+        // 1. Dominant bone per face; weapon submeshes are counted apart.
+        std::vector<std::vector<int>> owners;
+        std::vector<bool> weaponSub;
+        std::map<uint16_t, uint32_t> counts;
+        std::vector<std::pair<uint16_t, uint32_t>> weaponCounts; // first-seen order breaks ties
+        uint32_t totalFaces = 0;
+        for (const auto &sub : m.subs)
+        {
+            owners.push_back(triangleOwners(sub, m, bs, false));
+            weaponSub.push_back(std::regex_search(sub.material, weapon));
+            for (int owner : owners.back())
+            {
+                if (owner < 0)
+                    continue;
+                ++totalFaces;
+                const auto bone = static_cast<uint16_t>(owner);
+                if (!weaponSub.back())
+                {
+                    ++counts[bone];
+                    continue;
+                }
+                auto found = std::find_if(weaponCounts.begin(), weaponCounts.end(),
+                                          [bone](const std::pair<uint16_t, uint32_t> &entry) {
+                                              return entry.first == bone;
+                                          });
+                if (found == weaponCounts.end())
+                    weaponCounts.push_back({bone, 1});
+                else
+                    ++found->second;
+            }
+        }
+        if (!totalFaces)
+            throw std::runtime_error("no skinned faces");
+
+        // 2. Roll small bones into their parent, deepest first, so fingers
+        //    fold into the hand before the (now heavier) hand is judged. A
+        //    root never merges; the keep pattern always stays its own gib.
+        const auto minFaces =
+            std::max<uint32_t>(1, static_cast<uint32_t>(static_cast<double>(totalFaces) * options.minFaceFraction));
+        std::map<uint16_t, uint16_t> target;
+        std::vector<uint16_t> order;
+        for (const auto &[id, b] : bs)
+        {
+            target[id] = id;
+            order.push_back(id);
+        }
+        std::stable_sort(order.begin(), order.end(), [&](uint16_t a, uint16_t b) { return depth(a) > depth(b); });
+        for (uint16_t id : order)
+        {
+            const auto &bone = bs.at(id);
+            if (!counts[id] || bone.parent < 0 || std::regex_search(bone.name, keep))
+                continue;
+            if (!std::regex_search(bone.name, drop) && counts[id] >= minFaces)
+                continue;
+            const auto parent = static_cast<uint16_t>(bone.parent);
+            counts[parent] += counts[id];
+            counts[id] = 0;
+            for (auto &[source, mapped] : target)
+                if (mapped == id)
+                    mapped = parent;
+        }
+        uint16_t weaponBone = 0;
+        uint32_t weaponBest = 0;
+        for (const auto &[bone, count] : weaponCounts)
+            if (count > weaponBest)
+            {
+                weaponBone = bone;
+                weaponBest = count;
+            }
+
+        // 3. Group faces into pieces keyed like the script (gib bone name, or
+        //    "weapon"); std::map gives the script's sorted output order.
+        static const std::string kWeaponKey = "weapon";
+        std::map<std::string, std::vector<GibFace>> pieceFaces;
+        std::map<std::string, uint16_t> pieceBone;
+        for (size_t s = 0; s < m.subs.size(); ++s)
+            for (size_t f = 0; f < owners[s].size(); ++f)
+            {
+                if (owners[s][f] < 0)
+                    continue;
+                const uint16_t bone = weaponSub[s] ? weaponBone : target.at(static_cast<uint16_t>(owners[s][f]));
+                const std::string &key = weaponSub[s] ? kWeaponKey : bs.at(bone).name;
+                pieceFaces[key].push_back({s, f});
+                pieceBone[key] = bone;
+            }
+        std::map<std::string, int> pieceIds;
+        for (const auto &entry : pieceFaces)
+            pieceIds.emplace(entry.first, static_cast<int>(pieceIds.size()));
+        std::vector<std::vector<int>> facePiece(m.subs.size());
+        for (size_t s = 0; s < m.subs.size(); ++s)
+            facePiece[s].assign(owners[s].size(), -1);
+        for (const auto &[key, faces] : pieceFaces)
+            for (const auto &face : faces)
+                facePiece[face.sub][face.face] = pieceIds.at(key);
+
+        // 4. Position-welded topology: a cut is an edge shared by faces of
+        //    more than one body piece, wherever the exporter split vertices.
+        std::map<std::array<long long, 3>, int> weldLookup;
+        std::vector<V> weldPosition;
+        std::map<const Geometry *, std::vector<int>> weldCache;
+        for (const auto &sub : m.subs)
+        {
+            const Geometry &g = sub.shared ? m.geometry : sub.geometry;
+            if (weldCache.count(&g))
+                continue;
+            std::vector<int> ids(g.count);
+            for (uint32_t v = 0; v < g.count; ++v)
+            {
+                const V p = position(g, v);
+                const std::array<long long, 3> key{std::llround(static_cast<double>(p[0]) / 1e-4),
+                                                   std::llround(static_cast<double>(p[1]) / 1e-4),
+                                                   std::llround(static_cast<double>(p[2]) / 1e-4)};
+                const auto inserted = weldLookup.emplace(key, static_cast<int>(weldLookup.size()));
+                if (inserted.second)
+                    weldPosition.push_back(p);
+                ids[v] = inserted.first->second;
+            }
+            weldCache.emplace(&g, std::move(ids));
+        }
+        const auto faceWelds = [&](size_t s, size_t f) {
+            const Sub &sub = m.subs[s];
+            const auto &ids = weldCache.at(sub.shared ? &m.geometry : &sub.geometry);
+            return std::array<int, 3>{ids.at(sub.indices[f * 3]), ids.at(sub.indices[f * 3 + 1]),
+                                      ids.at(sub.indices[f * 3 + 2])};
+        };
+        std::map<std::pair<int, int>, std::vector<int>> edgePieces;
+        for (size_t s = 0; s < m.subs.size(); ++s)
+        {
+            if (weaponSub[s])
+                continue;
+            for (size_t f = 0; f < owners[s].size(); ++f)
+            {
+                if (facePiece[s][f] < 0)
+                    continue;
+                const auto w = faceWelds(s, f);
+                for (int e = 0; e < 3; ++e)
+                {
+                    const int u = w[e], v = w[(e + 1) % 3];
+                    auto &list = edgePieces[{std::min(u, v), std::max(u, v)}];
+                    if (std::find(list.begin(), list.end(), facePiece[s][f]) == list.end())
+                        list.push_back(facePiece[s][f]);
+                }
+            }
+        }
+
+        std::set<std::string> usedNames;
+        for (const auto &[key, faces] : pieceFaces)
+        {
+            const bool isWeapon = key == kWeaponKey;
+            const uint16_t boneId = pieceBone.at(key);
+            const Bone &bone = bs.at(boneId);
+            Frame frame = boneFrame(bone);
+
+            // Model-space centroid of every face corner (duplicates counted,
+            // as the script does): caps face away from it.
+            V centroid{};
+            size_t corners = 0;
+            V lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
+            std::map<size_t, std::vector<uint32_t>> bySub;
+            for (const auto &face : faces)
+            {
+                const Sub &sub = m.subs[face.sub];
+                const Geometry &g = sub.shared ? m.geometry : sub.geometry;
+                auto &indices = bySub[face.sub];
+                for (size_t k = 0; k < 3; ++k)
+                {
+                    const uint32_t index = sub.indices[face.face * 3 + k];
+                    indices.push_back(index);
+                    const V p = position(g, index);
+                    centroid = add(centroid, p);
+                    ++corners;
+                    const V local = toFrame(frame, p);
+                    for (int i = 0; i < 3; ++i)
+                    {
+                        lo[i] = std::min(lo[i], local[i]);
+                        hi[i] = std::max(hi[i], local[i]);
+                    }
+                }
+            }
+            centroid = scale3(centroid, 1.0f / static_cast<float>(corners));
+            for (int i = 0; i < 3; ++i)
+            {
+                frame.center[i] = (lo[i] + hi[i]) * 0.5f;
+                if (!std::isfinite(frame.center[i]) || std::abs(frame.center[i]) > 100000)
+                    throw std::runtime_error("invalid gib centre");
+            }
+
+            // 5. Fan caps over every cut loop, built in model space.
+            std::vector<CapTri> caps;
+            if (!isWeapon && options.caps)
+            {
+                std::vector<std::pair<int, int>> cutEdges;
+                std::set<std::pair<int, int>> seen;
+                for (const auto &face : faces)
+                {
+                    const auto w = faceWelds(face.sub, face.face);
+                    for (int e = 0; e < 3; ++e)
+                    {
+                        const int u = w[e], v = w[(e + 1) % 3];
+                        // Reversed, so the cap winds opposite to the skin it closes.
+                        if (edgePieces.at({std::min(u, v), std::max(u, v)}).size() > 1 && seen.insert({v, u}).second)
+                            cutEdges.push_back({v, u});
+                    }
+                }
+                for (const auto &loop : boundaryLoops(cutEdges))
+                {
+                    std::vector<V> points;
+                    for (int w : loop)
+                        points.push_back(weldPosition.at(static_cast<size_t>(w)));
+                    V center{};
+                    for (const auto &p : points)
+                        center = add(center, p);
+                    center = scale3(center, 1.0f / static_cast<float>(points.size()));
+                    V newell{};
+                    for (size_t i = 0; i < points.size(); ++i)
+                    {
+                        const V p = points[i], q = points[(i + 1) % points.size()];
+                        newell = add(newell, V{(p[1] - q[1]) * (p[2] + q[2]), (p[2] - q[2]) * (p[0] + q[0]),
+                                               (p[0] - q[0]) * (p[1] + q[1])});
+                    }
+                    V normal = normalize3(newell);
+                    if (dot3(normal, sub3(center, centroid)) < 0)
+                    {
+                        normal = scale3(normal, -1.0f);
+                        std::reverse(points.begin(), points.end());
+                    }
+                    for (size_t i = 0; i < points.size(); ++i)
+                    {
+                        V p0 = points[i], p1 = points[(i + 1) % points.size()];
+                        if (dot3(cross3(sub3(p0, center), sub3(p1, center)), normal) < 0)
+                            std::swap(p0, p1);
+                        caps.push_back({center, p0, p1, normal});
+                    }
+                }
+                if (caps.size() > 1000000)
+                    throw std::runtime_error("oversized gib cap");
+            }
+
+            // 6. Serialize in the bone frame, centred on the piece bounds,
+            //    exactly as Extract writes a chunk piece.
+            Bytes body{0};
+            uint32_t triangles = 0;
+            float radius = 0;
+            lo = {1e30f, 1e30f, 1e30f};
+            hi = {-1e30f, -1e30f, -1e30f};
+            for (const auto &[s, selected] : bySub)
+            {
+                const Sub &sub = m.subs[s];
+                const Geometry &g = sub.shared ? m.geometry : sub.geometry;
+                const std::set<uint32_t> used(selected.begin(), selected.end());
+                std::vector<uint32_t> vertices(used.begin(), used.end());
+                std::map<uint32_t, uint32_t> remap;
+                for (uint32_t i = 0; i < vertices.size(); ++i)
+                    remap[vertices[i]] = i;
+                Bytes data;
+                line(data, sub.material);
+                put(data, uint8_t{0});
+                put(data, static_cast<uint32_t>(selected.size()));
+                put(data, uint8_t{1});
+                for (auto index : selected)
+                    put(data, remap.at(index));
+                chunk(data, 0x5000, emitGeometry(g, vertices, frame, lo, hi, radius));
+                chunk(body, 0x4000, data);
+                triangles += static_cast<uint32_t>(selected.size() / 3);
+            }
+            if (!caps.empty())
+            {
+                // Its own submesh and declaration (position, normal, uv0).
+                // Planar UVs in each cap's plane so a flesh texture tiles
+                // evenly; positions and normals go through the piece frame.
+                Geometry g;
+                g.count = static_cast<uint32_t>(caps.size() * 3);
+                g.elements = {{0, 2, 1, 0, 0}, {0, 2, 4, 12, 0}, {0, 1, 7, 24, 0}};
+                Buffer buffer{32, {}};
+                std::vector<uint32_t> indices;
+                for (const auto &tri : caps)
+                {
+                    const V tangent =
+                        normalize3(cross3(tri.normal, std::abs(tri.normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
+                    const V bitangent = cross3(tri.normal, tangent);
+                    for (const V &p : {tri.a, tri.b, tri.c})
+                    {
+                        for (float value : {p[0], p[1], p[2], tri.normal[0], tri.normal[1], tri.normal[2],
+                                            dot3(p, tangent) * options.capUvScale,
+                                            dot3(p, bitangent) * options.capUvScale})
+                            put(buffer.data, value);
+                        indices.push_back(static_cast<uint32_t>(indices.size()));
+                    }
+                }
+                g.buffers.emplace(uint16_t{0}, std::move(buffer));
+                Bytes data;
+                line(data, options.capMaterial);
+                put(data, uint8_t{0});
+                put(data, static_cast<uint32_t>(indices.size()));
+                put(data, uint8_t{1});
+                for (auto index : indices)
+                    put(data, index);
+                chunk(data, 0x5000, emitGeometry(g, indices, frame, lo, hi, radius));
+                chunk(body, 0x4000, data);
+                triangles += static_cast<uint32_t>(caps.size());
+            }
+            Bytes bounds;
+            for (float v : lo)
+                put(bounds, v);
+            for (float v : hi)
+                put(bounds, v);
+            put(bounds, radius);
+            chunk(body, 0x9000, bounds);
+            Bytes out;
+            put(out, uint16_t{0x1000});
+            line(out, "[MeshSerializer_v1.8]");
+            chunk(out, 0x3000, body);
+
+            std::string name = gibPieceName(key);
+            for (int suffix = 2; !usedNames.insert(name).second; ++suffix)
+                name = gibPieceName(key) + "_" + std::to_string(suffix);
+            GibPiece gib;
+            gib.piece.name = name;
+            gib.piece.mesh = std::move(out);
+            gib.piece.triangles = triangles;
+            for (int i = 0; i < 3; ++i)
+                gib.piece.center[i] = frame.center[i];
+            gib.bone = boneId;
+            gib.boneName = bone.name;
+            gib.radius = radius;
+            gib.capTriangles = static_cast<uint32_t>(caps.size());
+            gib.weapon = isWeapon;
+            gibs.push_back(std::move(gib));
+        }
+        if (gibs.empty())
+            throw std::runtime_error("no gib pieces");
+        return true;
+    }
+    catch (const std::exception &e)
+    {
+        gibs.clear();
         error = e.what();
         return false;
     }

@@ -799,6 +799,9 @@ namespace BZROpenShim
         void InstallRawMouseInputProcessHookIfPossible();
         bool ResolveRawMouseInputPreference(const char*& outSource);
 
+        // --- Background run test toggle (background_run.cpp) -------------------
+        void InstallBackgroundRunIfRequested();
+
         // --- Shadow far distance correction (shadow_far_distance_hook.cpp) -----
 
         // --- Engine flames (engine_flames.cpp) ---------------------------------
@@ -1136,6 +1139,7 @@ namespace BZROpenShim
         inline constexpr int kBzrRunStateUnknown = -1;
         void DeactivateAllChunkProxySceneResources(const wchar_t* reason);
         void InstallSceneTeardownForgetHooksIfPossible();
+        void InstallEntityReloadLifetimeHookIfPossible();
         bool TryReadBzrRunState(int& value);
         void InstallMissionTransitionSeamIfPossible();
         void PinDirect3DModulesForShutdown();
@@ -1188,6 +1192,8 @@ namespace BZROpenShim
         extern bool g_MagnetMineSimulateHookInstalled;
         extern TeamFilterCache g_MagnetMineTeamFilterCache;
         extern bool g_MagnetZeroRangeGuardEnabled;
+        extern bool g_UnfocusedMouseReleaseEnabled;
+        void InstallUnfocusedMouseReleaseIfPossible();
         extern volatile long g_MagnetZeroRangeLogBudget;
         extern bool g_ProximityMineSimulateHookInstalled;
         extern TeamFilterCache g_ProximityMineTeamFilterCache;
@@ -1542,6 +1548,90 @@ namespace BZROpenShim
         std::filesystem::path GetNativeChunkCacheDirectory();
         bool PrepareNativeChunkPayloads(void* entity, char* sourceName = nullptr, size_t capacity = 0);
         void ResetNativeChunkPayloads();
+
+        // --- SkinnedGibs (skinned_gibs.cpp) --------------------------------
+        // Person deaths become rigid per-limb gibs split at runtime from the
+        // skinned mesh (or an authored gibs.txt payload), posed at the death
+        // frame and simulated by the shim. [General] SkinnedGibs = 0 leaves
+        // every path below inert.
+        bool IsSkinnedGibsEnabled();
+        // Inside ChunkEffect::FullFragmentObject (outermost call only).
+        // Begin captures pose and returns true when this is a person it will
+        // gib; End then spawns, hides the body and marks that call's legacy
+        // chunks so the proxy renderer skips them.
+        bool SkinnedGibsBeginFullFragment(void* chunkEffect, void* obj76, const float* velocity);
+        void SkinnedGibsEndFullFragment(void* chunkEffect);
+        void TickSkinnedGibs(void* chunkEffect, float dt);
+        void SubmitSkinnedGibsToRenderQueue(void* renderQueue);
+        void ForgetSkinnedGibSceneResources(const wchar_t* reason);
+        void DeactivateSkinnedGibs(const wchar_t* reason);
+        // PathBlockFaces (path_block.cpp): forget the per-mission blocker
+        // registry and ODF cache. No-op when the hook is not installed.
+        void ResetPathBlockState(const wchar_t* reason);
+        bool IsSkinnedGibSuppressedChunk(const uint8_t* objectBytes, const void* geomRef);
+        // Writes the default openshim_gib_flesh.material into the chunk cache
+        // root unless a payload directory overrides it. Must run before the
+        // payload resource group is initialised.
+        void EnsureSkinnedGibFleshMaterial(
+            const std::filesystem::path& cacheRoot,
+            const std::vector<std::filesystem::path>& payloadDirectories);
+
+        // ShellCasings (shell_casings.cpp): cosmetic casings ejected by
+        // cannon-like weapons, simulated and drawn by the shim. [General]
+        // ShellCasings = 0 leaves every path below inert.
+        bool IsShellCasingsEnabled();
+        void TickShellCasings(float dt);
+        void SubmitShellCasingsToRenderQueue(void* renderQueue);
+        void ForgetShellCasingSceneResources(const wchar_t* reason);
+        void DeactivateShellCasings(const wchar_t* reason);
+        // Writes the generated casing mesh and its default materials into
+        // the chunk cache root (materials yield to a payload pack's own).
+        // Must run before the payload resource group is initialised.
+        void EnsureShellCasingAssets(
+            const std::filesystem::path& cacheRoot,
+            const std::vector<std::filesystem::path>& payloadDirectories);
+
+        // Shim-owned mesh objects on the chunk payload group
+        // (chunk_proxy_render.cpp), independent of ChunkMeshes.
+        bool EnsureSkinnedGibResourceLocations();
+        bool CreateShimOwnedMeshObject(const char* meshName, void*& outSceneManager, void*& outNode, void*& outEntity);
+        bool ReplaceShimOwnedMeshEntity(void* sceneManager, void* node, void*& entity, const char* meshName);
+        bool SetShimOwnedObjectTransform(
+            void* node,
+            void* entity,
+            const float position[3],
+            const float orientationWxyz[4],
+            const float scale[3]);
+        void HideShimOwnedObject(void* node, void* entity);
+        bool SubmitShimOwnedEntityToRenderQueue(void* sceneManager, void* entity, void* renderQueue);
+
+        // Gib payloads (native_chunk_runtime.cpp). Runtime pieces sit in their
+        // bone's bind frame (offset = centre in that frame); authored pieces
+        // sit in model space (offset = pivot), and are placed through the
+        // bone's skinning transform instead.
+        struct SkinnedGibPieceInfo
+        {
+            std::string resource;
+            std::string boneName;
+            uint16_t bone = 0;
+            float offset[3] = {};
+            float radius = 0.0f;
+            bool weapon = false;
+        };
+        struct SkinnedGibModelInfo
+        {
+            bool authored = false;
+            std::string source;
+            std::vector<SkinnedGibPieceInfo> pieces;
+        };
+        bool TryCaptureEntityMeshIdentity(
+            void* entity,
+            char* outName,
+            size_t nameCapacity,
+            char* outGroup,
+            size_t groupCapacity);
+        bool PrepareSkinnedGibPayloads(const std::string& meshName, const std::string& group, SkinnedGibModelInfo& out);
+        void ResetSkinnedGibPayloads();
         bool TryResolveGeneratedStockChunkFallback(const char* seed, char* out, size_t capacity);
         bool TryResolveNativeChunkPayload(const char* mesh, const char* geom,
             char* out, size_t capacity, bool& handled);

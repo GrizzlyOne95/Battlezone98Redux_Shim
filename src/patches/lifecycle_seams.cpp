@@ -4,6 +4,7 @@
 // EXU lifecycle notify) and the D3D11 module pin for shutdown ordering,
 // split out of bzr_hooks.cpp.
 #include "native_hud_runtime.h"
+#include "unit_damage.h"
 #include "bzr_hooks.h"
 #include "bzr_object_layout.h"
 #include "bzr_hooks_internal.h"
@@ -97,6 +98,8 @@ namespace BZROpenShim
                 WeaponPresentationSceneTeardownBegin();
             TerrainProxySceneTeardownBegin(sceneManager, true);
             ForgetAllChunkProxySceneResources(L"clearScene");
+            ForgetSkinnedGibSceneResources(L"clearScene");
+            ForgetShellCasingSceneResources(L"clearScene");
             ForgetPilotFlashlight(L"clearScene");
             ForgetMultiplayerFlagSceneResources(L"clearScene");
             if (g_OgreFn_ClearSceneOriginal)
@@ -112,6 +115,8 @@ namespace BZROpenShim
                 WeaponPresentationSceneTeardownBegin();
             TerrainProxySceneTeardownBegin(sceneManager, false);
             ForgetAllChunkProxySceneResources(L"destroyAllMovableObjects");
+            ForgetSkinnedGibSceneResources(L"destroyAllMovableObjects");
+            ForgetShellCasingSceneResources(L"destroyAllMovableObjects");
             ForgetPilotFlashlight(L"destroyAllMovableObjects");
             ForgetMultiplayerFlagSceneResources(L"destroyAllMovableObjects");
             if (g_OgreFn_DestroyAllMovablesOriginal)
@@ -381,12 +386,17 @@ namespace BZROpenShim
                 // still-live Ogre objects and aborted in RenderMultiplayerFlags
                 // (battlezone98redux.exe.35108.dmp).
                 DeactivateAllChunkProxySceneResources(L"left simulation");
+                DeactivateSkinnedGibs(L"left simulation");
+                DeactivateShellCasings(L"left simulation");
+
+                ResetPathBlockState(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);
                 WeaponPresentationMissionRunStateChanged(false);
                 PilotFlashlightNotifyMissionRunStateChanged(false);
                 FogWakeNotifyMissionRunStateChanged(false);
                 NotifyExuMissionSimulationState(false);
                 NativeHud::Runtime::ResetMission();
+                UnitDamage::ResetMissionState();
             }
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
             {

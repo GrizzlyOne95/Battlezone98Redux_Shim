@@ -18,6 +18,36 @@
 // COMPAT_FAMILY define recording which legacy family selected them. The
 // define is informational today; per-family tuning lands here without
 // touching the resolver.
+//
+// Lighting and self-illumination (COMPAT_LIGHTING_EMISSIVE)
+// ---------------------------------------------------------
+// The fixed pipeline lights a `lighting on` pass per vertex:
+//
+//   lit = saturate(emissive + ambient * sceneAmbient + diffuse * sum(lights))
+//
+// and then runs the texture stages against `lit`. A `lighting off` pass
+// skips that entirely and feeds the vertex colour (white when absent) to the
+// stages; its emissive is ignored. These programs do NOT evaluate dynamic
+// lights: `lit` stays approximated by vertex colour * surface diffuse plus a
+// small ambient floor, which is what every synthesized pass has always drawn.
+// What they do reproduce is the emissive term, because content relies on it
+// for glow: ISDF Chronicles' cockpit lamps (ivptank_ck_*) are `lighting on`
+// passes whose glow is the pass emissive, animated at runtime through EXU
+// SetMaterialPassColors. Only the *_lit fragment variants declare it (bound
+// to surface_emissive_colour, which Ogre re-reads from the pass every draw),
+// and the runtime binds those only to passes with lighting enabled
+// (LegacyPassDesc::lightingEnabled), so lighting-off passes ignore emissive
+// exactly as fixed function did. Emissive defaults to black, for which
+// ApplyFfpEmissive is the identity: unlit and non-glowing content draws
+// exactly as before.
+
+float3 ApplyFfpEmissive(float3 colour, float3 emissive)
+{
+    // colour + emissive, clamped to 1 the way fixed-function lighting clamps
+    // its output -- but never below the incoming colour, so a black emissive
+    // returns `colour` unchanged even where it already exceeds 1.
+    return min(colour + emissive, max(colour, 1.0));
+}
 
 // ---------------------------------------------------------------------------
 // Vertex input variants
@@ -103,6 +133,9 @@ void fixedfunc_fragment(
     uniform float4 sceneAmbient,
     uniform float4 fogColour,
     uniform float4 fogParams,
+#ifdef COMPAT_LIGHTING_EMISSIVE
+    uniform float4 emissiveColour,
+#endif
 
 #ifdef COMPAT_OP_REPLACE
     // replace: texture wins, vertex colour ignored (kept as a distinct
@@ -117,17 +150,24 @@ void fixedfunc_fragment(
 )
 {
     float4 tex = diffuseMap.Sample(diffuseSam, vTexCoord);
+    // Lit vertex colour the texture stage combines with. Replace ignores it,
+    // so replace ignores emissive too, as in fixed function.
+#ifdef COMPAT_LIGHTING_EMISSIVE
+    float3 lit = ApplyFfpEmissive(vColor.xyz, emissiveColour.xyz);
+#else
+    float3 lit = vColor.xyz;
+#endif
 #if defined(COMPAT_OP_REPLACE)
     float3 albedo = tex.xyz;
     float alpha = tex.a;
 #elif defined(COMPAT_OP_ADD)
-    float3 albedo = vColor.xyz + tex.xyz;
+    float3 albedo = lit + tex.xyz;
     float alpha = vColor.a * tex.a;
 #else
     // modulate (default) and alpha_blend share this path: albedo is the
     // product, alpha is the product. Scene blending state comes from the
     // cloned source pass, not from this shader.
-    float3 albedo = vColor.xyz * tex.xyz;
+    float3 albedo = lit * tex.xyz;
     float alpha = vColor.a * tex.a;
 #endif
     // Ambient floor so unlit legacy content never goes pitch black the way
@@ -184,6 +224,9 @@ void fixedfunc_untextured_fragment(
     uniform float4 sceneAmbient,
     uniform float4 fogColour,
     uniform float4 fogParams,
+#ifdef COMPAT_LIGHTING_EMISSIVE
+    uniform float4 emissiveColour,
+#endif
 
     in float4 vColor : COLOR0,
     in float vDepth : TEXCOORD1,
@@ -191,7 +234,12 @@ void fixedfunc_untextured_fragment(
     out float4 oColor : SV_TARGET
 )
 {
-    float3 albedo = vColor.xyz + sceneAmbient.xyz * 0.25;
+#ifdef COMPAT_LIGHTING_EMISSIVE
+    float3 lit = ApplyFfpEmissive(vColor.xyz, emissiveColour.xyz);
+#else
+    float3 lit = vColor.xyz;
+#endif
+    float3 albedo = lit + sceneAmbient.xyz * 0.25;
     oColor.xyz = albedo;
 
     float fogValue = saturate((vDepth - fogParams.y) * fogParams.w);
@@ -264,6 +312,9 @@ void fixedfunc2_fragment(
     uniform float4 sceneAmbient,
     uniform float4 fogColour,
     uniform float4 fogParams,
+#ifdef COMPAT_LIGHTING_EMISSIVE
+    uniform float4 emissiveColour,
+#endif
 
     in float4 vColor : COLOR0,
     in float2 vTexCoord : TEXCOORD0,
@@ -276,8 +327,13 @@ void fixedfunc2_fragment(
     float4 tex0 = diffuseMap.Sample(diffuseSam, vTexCoord);
     float4 tex1 = stage1Map.Sample(stage1Sam, vTexCoord1);
 
-    // Stage 0: modulate.
-    float3 current = vColor.xyz * tex0.xyz;
+    // Stage 0: modulate, against the lit colour.
+#ifdef COMPAT_LIGHTING_EMISSIVE
+    float3 lit = ApplyFfpEmissive(vColor.xyz, emissiveColour.xyz);
+#else
+    float3 lit = vColor.xyz;
+#endif
+    float3 current = lit * tex0.xyz;
     float alpha = vColor.a * tex0.a;
 
     // Stage 1.

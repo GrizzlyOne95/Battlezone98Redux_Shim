@@ -127,6 +127,8 @@ namespace
         {
             return TryReadMappedBool(ini, "Diagnostics", "TraceArtilleryMask", false, out);
         }
+        if (Equals(name, "OPENSHIM_RUN_IN_BACKGROUND"))
+            return TryReadMappedBool(ini, "Testing", "RunInBackground", false, out);
         if (Equals(name, "OPENSHIM_TRACE_SUN_FLASH"))
             return TryReadMappedBool(ini, "Diagnostics", "TraceSunFlash", false, out);
         if (Equals(name, "OPENSHIM_TRACE_BZN_LOAD"))
@@ -152,6 +154,38 @@ namespace
         {
             return TryReadMappedBool(ini, "General", "ChunkMeshes", true, out);
         }
+        // SkinnedGibs: person deaths as rigid limb gibs. Independent of
+        // ChunkMeshes; the numeric keys are read raw and clamped by the
+        // feature.
+        if (Equals(name, "OPENSHIM_DISABLE_SKINNED_GIBS") || Equals(name, "BZR_DISABLE_SKINNED_GIBS"))
+            return TryReadMappedBool(ini, "General", "SkinnedGibs", true, out);
+        if (Equals(name, "OPENSHIM_SKINNED_GIBS_MAX"))
+            return ini(IniFile::Main, "General", "SkinnedGibsMax", out);
+        if (Equals(name, "OPENSHIM_SKINNED_GIBS_LINGER"))
+            return ini(IniFile::Main, "General", "SkinnedGibsLinger", out);
+        if (Equals(name, "OPENSHIM_SKINNED_GIBS_FORCE"))
+            return ini(IniFile::Main, "General", "SkinnedGibsForce", out);
+        if (Equals(name, "OPENSHIM_TRACE_SKINNED_GIBS"))
+            return TryReadMappedBool(ini, "Diagnostics", "TraceSkinnedGibs", false, out);
+        // ShellCasings: cosmetic casings from cannon-like weapons. The class
+        // list and numeric keys are read raw and parsed by the feature.
+        if (Equals(name, "OPENSHIM_DISABLE_SHELL_CASINGS") || Equals(name, "BZR_DISABLE_SHELL_CASINGS"))
+            return TryReadMappedBool(ini, "General", "ShellCasings", true, out);
+        if (Equals(name, "OPENSHIM_SHELL_CASINGS_MAX"))
+            return ini(IniFile::Main, "General", "ShellCasingsMax", out);
+        if (Equals(name, "OPENSHIM_SHELL_CASINGS_LINGER"))
+            return ini(IniFile::Main, "General", "ShellCasingsLinger", out);
+        if (Equals(name, "OPENSHIM_SHELL_CASINGS_CLASSES"))
+            return ini(IniFile::Main, "General", "ShellCasingsClasses", out);
+        if (Equals(name, "OPENSHIM_TRACE_SHELL_CASINGS"))
+            return TryReadMappedBool(ini, "Diagnostics", "TraceShellCasings", false, out);
+
+        // PathBlockFaces: building path-grid footprints from collision faces
+        // for ODFs that opt in. Its own inverted switch, default ON.
+        if (Equals(name, "OPENSHIM_DISABLE_PATH_BLOCK_FACES"))
+            return TryReadMappedBool(ini, "General", "PathBlockFaces", true, out);
+        if (Equals(name, "OPENSHIM_TRACE_PATH_BLOCK"))
+            return TryReadMappedBool(ini, "Diagnostics", "TracePathBlock", false, out);
         if (Equals(name, "OPENSHIM_DISABLE_MAP_REFRESH_FIXES") ||
             Equals(name, "BZR_DISABLE_MAP_REFRESH_FIXES"))
         {
@@ -206,6 +240,11 @@ namespace
             Equals(name, "BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"))
         {
             return TryReadMappedBool(ini, "Fixes", "MagnetZeroRangeGuard", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE") ||
+            Equals(name, "BZR_DISABLE_UNFOCUSED_MOUSE_RELEASE"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "UnfocusedMouseRelease", true, out);
         }
         // New switches: these two had no opt-out of any kind before.
         if (Equals(name, "OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||
