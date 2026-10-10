@@ -382,4 +382,221 @@ void FeedWebSocketStream(
         }
     }
 }
+
+namespace
+{
+    constexpr const char* kTicketKeys[] = { "steamAppTicket", "gogAppTicket", "authTicket", "platformTicket" };
+    constexpr char kWithheldMarker[] = "withheld";
+    constexpr size_t kWithheldLength = sizeof(kWithheldMarker) - 1;
+
+    bool IsJsonSpace(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+
+    // Rewrites every ticket value in `json` in place. False = a ticket key was
+    // found whose value could not be rewritten safely.
+    bool WithholdTicketsInJson(std::string& json, std::vector<WebSocketTicketRewrite>& rewrites)
+    {
+        for (const char* key : kTicketKeys)
+        {
+            const std::string quoted = std::string("\"") + key + "\"";
+            size_t pos = 0;
+            while ((pos = json.find(quoted, pos)) != std::string::npos)
+            {
+                size_t p = pos + quoted.size();
+                const size_t keyEnd = p;
+                while (p < json.size() && IsJsonSpace(json[p])) ++p;
+                if (p >= json.size() || json[p] != ':')
+                {
+                    pos = keyEnd;   // the name used as a value, not a key
+                    continue;
+                }
+                ++p;
+                while (p < json.size() && IsJsonSpace(json[p])) ++p;
+                if (json.compare(p, 4, "null") == 0)
+                {
+                    pos = p + 4;
+                    continue;
+                }
+                if (p >= json.size() || json[p] != '"')
+                    return false;
+
+                const size_t open = p;
+                size_t close = open + 1;
+                while (close < json.size() && json[close] != '"')
+                    close += (json[close] == '\\') ? 2 : 1;
+                if (close >= json.size())
+                    return false;
+
+                const size_t valueLength = close - open - 1;
+                if (valueLength > 0)
+                {
+                    std::string replacement(valueLength + 2, ' ');
+                    replacement[0] = '"';
+                    if (valueLength >= kWithheldLength)
+                    {
+                        std::memcpy(&replacement[1], kWithheldMarker, kWithheldLength);
+                        replacement[1 + kWithheldLength] = '"';
+                    }
+                    else
+                    {
+                        replacement[1] = '"';
+                    }
+                    json.replace(open, valueLength + 2, replacement);
+                    WebSocketTicketRewrite rewrite;
+                    rewrite.key = key;
+                    rewrite.length = valueLength;
+                    rewrites.push_back(rewrite);
+                }
+                pos = close + 1;
+            }
+        }
+        return true;
+    }
+
+    bool ContainsNoCase(const std::vector<uint8_t>& data, const char* needle)
+    {
+        const size_t n = std::strlen(needle);
+        if (data.size() < n) return false;
+        for (size_t i = 0; i + n <= data.size(); ++i)
+        {
+            size_t j = 0;
+            while (j < n && std::tolower(data[i + j]) == std::tolower(static_cast<unsigned char>(needle[j]))) ++j;
+            if (j == n) return true;
+        }
+        return false;
+    }
+}
+
+WebSocketScrubStatus ScrubWebSocketTickets(
+    WebSocketTicketScrubState& state,
+    uint8_t* data,
+    size_t length,
+    std::vector<WebSocketTicketRewrite>& rewrites,
+    const char** rejectReason)
+{
+    using Phase = WebSocketTicketScrubState::Phase;
+    auto reject = [&](const char* reason)
+    {
+        state.rejected = true;
+        if (rejectReason) *rejectReason = reason;
+        return WebSocketScrubStatus::Rejected;
+    };
+    if (state.rejected)
+        return reject("connection previously rejected");
+    if (length > 0 && !data)
+        return reject("null buffer");
+
+    bool changed = false;
+    size_t i = 0;
+    while (i < length)
+    {
+        switch (state.phase)
+        {
+        case Phase::Passthrough:
+            i = length;
+            break;
+
+        case Phase::Handshake:
+        {
+            const size_t before = state.handshake.size();
+            if (before + (length - i) > 16 * 1024)
+                return reject("handshake header too large");
+            state.handshake.insert(state.handshake.end(), data + i, data + length);
+            const size_t end = FindHttpHeaderEnd(state.handshake);
+            if (end == std::string::npos)
+            {
+                i = length;
+                break;
+            }
+            i += end - before;
+            const bool isWs = state.handshake.size() >= 4 &&
+                std::memcmp(state.handshake.data(), "GET ", 4) == 0 &&
+                ContainsNoCase(state.handshake, "websocket");
+            state.handshake.clear();
+            state.handshake.shrink_to_fit();
+            state.phase = isWs ? Phase::FrameHeader : Phase::Passthrough;
+            state.headerLength = 0;
+            break;
+        }
+
+        case Phase::FrameHeader:
+        {
+            state.header[state.headerLength++] = data[i++];
+            if (state.headerLength < 2)
+                break;
+            const uint8_t lenCode = state.header[1] & 0x7Fu;
+            const bool masked = (state.header[1] & 0x80u) != 0;
+            const size_t extra = lenCode == 126 ? 2 : (lenCode == 127 ? 8 : 0);
+            const size_t needed = 2 + extra + (masked ? 4 : 0);
+            if (state.headerLength < needed)
+                break;
+
+            const uint8_t first = state.header[0];
+            const uint8_t opcode = first & 0x0Fu;
+            if ((first & 0x70u) != 0)
+                return reject("RSV bits set (compressed or extended frame)");
+            uint64_t payloadLength = lenCode;
+            if (extra)
+            {
+                payloadLength = 0;
+                for (size_t b = 0; b < extra; ++b)
+                    payloadLength = (payloadLength << 8) | state.header[2 + b];
+            }
+            std::memset(state.mask, 0, sizeof(state.mask));
+            if (masked)
+                std::memcpy(state.mask, state.header + 2 + extra, 4);
+            state.opcode = opcode;
+            state.payloadRemaining = payloadLength;
+            state.headerLength = 0;
+
+            if (opcode == 0)
+                return reject("continuation frame");
+            if (opcode == 1 && (first & 0x80u) == 0)
+                return reject("fragmented text message");
+            if ((opcode >= 3 && opcode <= 7) || opcode >= 11)
+                return reject("reserved opcode");
+            if (opcode == 1 && payloadLength > kTicketScrubMaxPayload)
+                return reject("text frame too large");
+            if (payloadLength > 0)
+                state.phase = Phase::FramePayload;
+            break;
+        }
+
+        case Phase::FramePayload:
+        {
+            const size_t avail = length - i;
+            if (state.opcode != 1)
+            {
+                const size_t take = static_cast<size_t>((std::min<uint64_t>)(avail, state.payloadRemaining));
+                state.payloadRemaining -= take;
+                i += take;
+            }
+            else
+            {
+                if (avail < state.payloadRemaining)
+                    return reject("text frame split across sends");
+                const size_t n = static_cast<size_t>(state.payloadRemaining);
+                std::string json(n, '\0');
+                for (size_t b = 0; b < n; ++b)
+                    json[b] = static_cast<char>(data[i + b] ^ state.mask[b % 4]);
+                std::vector<WebSocketTicketRewrite> local;
+                if (!WithholdTicketsInJson(json, local))
+                    return reject("ticket value could not be rewritten");
+                if (!local.empty())
+                {
+                    for (size_t b = 0; b < n; ++b)
+                        data[i + b] = static_cast<uint8_t>(static_cast<uint8_t>(json[b]) ^ state.mask[b % 4]);
+                    rewrites.insert(rewrites.end(), local.begin(), local.end());
+                    changed = true;
+                }
+                i += n;
+                state.payloadRemaining = 0;
+            }
+            if (state.payloadRemaining == 0)
+                state.phase = Phase::FrameHeader;
+            break;
+        }
+        }
+    }
+    return changed ? WebSocketScrubStatus::Rewritten : WebSocketScrubStatus::Unchanged;
+}
 }
