@@ -1,8 +1,8 @@
 # Multiplayer pre-lobby: design
 
-Status: **nickname + flag + server status implemented** as an OpenShim shell
-screen (`src/patches/prelobby_screen.cpp`, opt-in `[Network] PreLobby = 1`).
-The endpoint picker (phases 2-4) is not built. Static RE for the GOG build
+Status: **nickname + flag + server selection (Rebellion / Custom, host only)
+implemented** as an OpenShim shell screen (`src/patches/prelobby_screen.cpp`,
+opt-in `[Network] PreLobby = 1`). LAN and non-default ports are not built. Static RE for the GOG build
 (sha256 `8d71f56c…3377413`, byte-identical to the decompile corpus). The live
 checks listed at the end have not run.
 
@@ -204,27 +204,43 @@ will use, whatever happens to the live session.
      `AppendChar` focus path) and the flag `<` / preview / `>`
      (`CreateFlagButtonCommon`), borrowed from `lobby_ui.cpp` and parented to
      the centre panel
-   - CONNECTION box: `Network: Ready | Connecting... | Status unknown` and
-     `Server: Official | <host> (custom server)` (the redirect the socket layer
-     actually applies, `GetMatchmakingRedirectTarget`)
+   - CONNECTION box: `Network: Ready | Connecting... | Status unknown`, and a
+     `Server:` row with two stock-style option slots, **Rebellion** and
+     **Custom** (the selected one is captioned `> Rebellion <`), plus a text
+     entry for the custom host that exists only while Custom is selected. A
+     note under it reads "Custom servers receive your platform sign-in
+     ticket." When a test redirect is active
+     (`GetMatchmakingRedirectTarget`) the row is instead the read-only label
+     `Server: <addr> (test redirect)` and no toggle or entry is built.
    - Back (top corner) and Continue (bottom centre)
-4. Typed characters reach the nickname entry through the screen's own char slot
-   (cUI_View slot 2), via the framework's `onChar` callback. The per-frame
+4. Typed characters reach whichever entry is being edited (nickname or custom
+   server; a click on one makes it the active entry and ends the other) through
+   the screen's own char slot (cUI_View slot 2), via the framework's `onChar`
+   callback. Enter ends the edit and applies nothing. The per-frame
    status and Continue polling run from the `tick` callback (slot 13, after the
    stock update). Both run under SEH.
 5. **Continue:**
-   1. End the nickname edit; if the typed name differs from the persisted one,
-      persist it and, when the connection is authorised outside a match,
-      recycle the websocket (`ApplyBzrNetNicknameForPreLobby`).
-   2. If the connection was recycled or is not yet authorised, show
+   1. End both edits. Resolve the selector to a host (Rebellion's, or the
+      validated custom host); an empty or malformed address, or any port other
+      than 1337, stops here with a note and no recycle. If the host differs
+      from the one in effect (live override, else the launch server), persist
+      `[Network] Server` / `CustomServer` and set the live override. This runs
+      before the nickname step so the reconnect's lookup sees the new host.
+   2. If the typed name differs from the persisted one, persist it and, when
+      the connection is authorised outside a match, recycle the websocket
+      (`ApplyBzrNetNicknameForPreLobby`). If only the server changed, or the
+      nickname apply did not recycle, the screen recycles directly, so exactly
+      one recycle covers both.
+   3. If the connection was recycled or is not yet authorised, show
       "Connecting..." and wait in the tick for `isNetworkInit` (2 s grace for
       the old authorisation to drop, 20 s timeout).
-   3. Call the original `Click_MultiPlayer` with `this` = the pre-lobby screen
+   4. Call the original `Click_MultiPlayer` with `this` = the pre-lobby screen
       (it only uses the shell manager at `+0x138`, which every OpenShim screen
       stores). Its `isNetworkInit` check is the gate, so a failed reconnect
       leaves the player on the screen. The lobby is pushed on top and lobby
       Back returns here.
-6. **Back / Esc:** the shell pops the screen. An unapplied typed name is dropped.
+6. **Back / Esc:** the shell pops the screen. An unapplied typed name or
+   server choice is dropped (the next build reads the persisted state).
 7. With the setting on, the nickname and flag pickers are no longer built on the
    in-lobby host/client setup screens (the net-route readout stays there).
 
@@ -236,12 +252,31 @@ while a lounge is registered, which is the unknown case above.
 The redirect at `getaddrinfo` swaps the **host** only. The URL, its port (1337)
 and the path come from `client+0xC`.
 
-**Runtime switch, host only:**
-1. Update the redirect target.
+**Implemented, host only:**
+1. Set the live override (`SetMatchmakingServerOverride`, net_optimizer).
 2. Recycle the websocket.
 3. The reconnect resolves the new host.
 
-This depends on the reconnect calling `getaddrinfo` again (live check 1).
+The reconnect calling `getaddrinfo` again is live-confirmed (the redirect log
+line repeats after a recycle).
+
+**Precedence, highest first:**
+1. The test redirect (net.ini `[OpenShimSocket] MatchmakingRedirectAddress` or
+   `BZ_MATCHMAKING_ADDRESS` / `OPENSHIM_MATCHMAKING_ADDRESS`). Fail-closed guard
+   for the test harness: it redirects the official host as before, nothing
+   below applies while it is set, and the pre-lobby selector is read-only.
+2. The saved choice: `[Network] Server = Rebellion | Custom` with
+   `CustomServer = <host or IP>[:1337]`, loaded at startup into the live
+   override (so the first connection and invites use it) and updated by
+   Continue. Absent or blank means no override.
+3. The `/bzrserver=` launch switch.
+4. The official host.
+
+The hook substitutes the override for lookups of the **launch host** (the host
+of `/bzrserver=` parsed from the command line, else the official host). The
+override is a mutex-guarded runtime value; the hook logs each substitution.
+Parsing and validation live in `include/matchmaking_server.h` (unit-tested).
+This needs the socket hooks, i.e. `[Network] NetImprovements` on.
 
 **A different port or path** needs `client+0xC` rewritten. That is an MSVC
 `std::string` inside the client object, owned by the game's CRT. Writing it

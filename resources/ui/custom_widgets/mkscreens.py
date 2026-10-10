@@ -142,12 +142,19 @@ def career_center():
 # Layout contract with src/patches/prelobby_screen.cpp (1440x1080 design space).
 # The PLAYER box holds the nickname panel (240x144) and the flag picker (224x170
 # preview with the 48px arrows 8 below it) side by side, each centred in a half.
+# The Connection box's Server row (y = box y + 62 + 46) holds two option slots
+# for the Rebellion / Custom buttons and a text well for the custom host.
 PRELOBBY_LAYOUT = {
     'title': (470, 132, 500, 56),
     'boxes': [
         (244, 238, 952, 330),   # Player
-        (244, 596, 952, 200),   # Connection
+        (244, 596, 952, 220),   # Connection
     ],
+    'server_slots': [
+        (392, 704, 196, 42),    # Rebellion
+        (598, 704, 196, 42),    # Custom
+    ],
+    'server_well': (804, 704, 364, 42),
 }
 
 
@@ -158,6 +165,9 @@ def prelobby_center():
     title_plate(d, *PRELOBBY_LAYOUT['title'])
     for b in PRELOBBY_LAYOUT['boxes']:
         box(d, *b)
+    for sl in PRELOBBY_LAYOUT['server_slots']:
+        slot(d, *sl)
+    text_well(d, *PRELOBBY_LAYOUT['server_well'])
     return img.resize((W, H), Image.LANCZOS)
 
 

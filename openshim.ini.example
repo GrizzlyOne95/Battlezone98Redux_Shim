@@ -1534,9 +1534,29 @@ LobbyBanButton = 1
 ; pickers appear only on the setup screen and are not built in the lobby (the
 ; net-route readout stays there; /nickname works either way).
 ; Accepted: boolean. Default: OFF. Read when Multiplayer is clicked.
-; The server line is read-only: "Official", or [OpenShimSocket]
-; MatchmakingRedirectAddress when that is set.
+; The Server row picks Rebellion or a Custom host (see Server below); it is
+; read-only, showing "<address> (test redirect)", when [OpenShimSocket]
+; MatchmakingRedirectAddress is set.
 PreLobby = 0
+
+; Matchmaking server: Rebellion's official one or a community/custom one.
+; Accepted: Rebellion, Custom. Blank/absent = no override: stock behaviour,
+; i.e. whatever the /bzrserver= launch switch gives, else Rebellion's server.
+; The multiplayer setup screen (PreLobby) edits this and CustomServer; Continue
+; saves a changed choice and reconnects to it. Read at startup too, so the first
+; connection and invites use the saved server. Needs NetImprovements on.
+; Precedence: net.ini MatchmakingRedirectAddress (test redirect) > this >
+; /bzrserver= > Rebellion.
+; SECURITY: a custom server receives your platform (Steam/GOG) sign-in ticket
+; in the BZRNet Authorization, exactly as Rebellion's does. Only choose a
+; server you trust.
+; Server =
+
+; Host name or IP of the custom server, used when Server = Custom.
+; Accepted: a bare host or IPv4 address, optionally with a ":1337" suffix. No
+; scheme (ws://), path or spaces. Only port 1337 is supported; any other port
+; is refused. Blank = none (Server = Custom then has no effect).
+; CustomServer =
 
 ; Remember muted players across sessions.
 ; Accepted: boolean. Default: ON. No restart required.
