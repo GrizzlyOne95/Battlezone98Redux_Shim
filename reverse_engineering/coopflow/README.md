@@ -19,6 +19,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File reverse_engineering/Run-BZRB
 python reverse_engineering/coopflow/battleload/report_battle.py C:/BZRCoop/runs/<battle-run>
 ```
 
+Add `-Mode Strategy` for the strategy variant: each of the four clients owns its
+own AI army (teams 5..8, sides 5+6 versus 7+8, built with `exu.BuildSyncObject`),
+so damage is applied by the victim's owner and remote units are position-replicated.
+`-Units` is then the total across clients and must be divisible by 4; beacons and
+powerups are not supported. The scenario (`scenarios/sbattle-battle-load.ps1`)
+checks that every client sees all four armies, then reports remote warp rates and
+damage per enemy shot per team in `battle-summary.json`. Lua tests:
+`lua test_sbattle.lua nbattle.lua` in `coopflow/battleload`.
+
 ## Run
 
 Windows PowerShell 5.1, from the repository root. Refuses to start while any
