@@ -1188,6 +1188,8 @@ namespace BZROpenShim
         extern bool g_MagnetMineSimulateHookInstalled;
         extern TeamFilterCache g_MagnetMineTeamFilterCache;
         extern bool g_MagnetZeroRangeGuardEnabled;
+        extern bool g_UnfocusedMouseReleaseEnabled;
+        void InstallUnfocusedMouseReleaseIfPossible();
         extern volatile long g_MagnetZeroRangeLogBudget;
         extern bool g_ProximityMineSimulateHookInstalled;
         extern TeamFilterCache g_ProximityMineTeamFilterCache;
