@@ -231,6 +231,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Sender-side native netcode fix: same wire format, so no mixed-client
     # divergence; stock peers just receive reliable messages on time.
     "Network/ReliableSendBacklogFix",
+    # Receiver-side native netcode fix: same wire format, so no mixed-client
+    # divergence; future-stamped position updates are applied instead of
+    # dropped behind a lost reliable fragment. Live-qualified 2026-10-10.
+    "Network/EarlyUnreliableAccept",
     # Acts only after a GPU reset, to keep the recreated D3D11 device alive.
     "Graphics/D3D11DeviceLossRecovery",
 
@@ -285,6 +289,9 @@ $stockValueChecks = @{
     "Network/LobbyBzrnetIntegration" = "0"
     "Network/ReliableFirstRetryMs" = "1000"
     "Network/ReliableRetryIntervalMs" = "2500"
+    "Network/EarlyUnreliableAccept" = "1"
+    "Network/EarlyNakAccept" = "0"
+    "Network/EarlyNakHoldoffMs" = "300"
     "SinglePlayer/HeadlightColor" = "Stock"
     "SinglePlayer/HeadlightBeam" = "Stock"
     "SinglePlayer/HeadlightBrightness" = "1.00"

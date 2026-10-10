@@ -1,12 +1,14 @@
-# Test-instance timer overrides. Native defaults and shipped INIs stay unchanged.
+# Test-instance timer and receive overrides. Native defaults and shipped INIs stay unchanged.
+# Token: first/interval[+early][+nak]; each receive key is written explicitly (+early -> EarlyUnreliableAccept 1,
+# +nak -> EarlyNakAccept 1, else 0).
 function ConvertTo-P2PRetryTiming([string]$Timers) {
-    if ($Timers -notmatch '^([0-9]+)/([0-9]+)$') { throw 'Timers must be decimal first/interval milliseconds.' }
-    $first = 0; $interval = 0
+    if ($Timers -cnotmatch '^([0-9]+)/([0-9]+)(\+early)?(\+nak)?$') { throw 'Timers must be decimal first/interval milliseconds, optionally followed by +early then +nak.' }
+    $first = 0; $interval = 0; $early = [int]($Matches[3] -eq '+early'); $nak = [int]($Matches[4] -eq '+nak')
     if (-not [int]::TryParse($Matches[1], [ref]$first) -or -not [int]::TryParse($Matches[2], [ref]$interval) -or
         $first -lt 50 -or $first -gt 10000 -or $interval -lt 50 -or $interval -gt 10000) {
         throw 'Both retry timers must be 50..10000 milliseconds, matching the native parser.'
     }
-    @{first=$first; interval=$interval; token="$first/$interval"}
+    @{first=$first; interval=$interval; early=$early; nak=$nak; token="$first/$interval$(if ($early) { '+early' })$(if ($nak) { '+nak' })"}
 }
 
 function Set-P2PRetryTimingText([string]$Text, [string]$Timers) {
@@ -15,13 +17,14 @@ function Set-P2PRetryTimingText([string]$Text, [string]$Timers) {
     $network = @($headers | Where-Object { $_.Groups[1].Value.Trim() -ieq 'Network' })
     if ($network.Count -gt 1) { throw 'Ambiguous repeated [Network] sections; nothing written.' }
     $newline = if ($Text.Contains("`r`n")) { "`r`n" } else { "`n" }
-    $keys = "ReliableFirstRetryMs = $($values.first)$newline" + "ReliableRetryIntervalMs = $($values.interval)$newline"
+    $keys = "ReliableFirstRetryMs = $($values.first)$newline" + "ReliableRetryIntervalMs = $($values.interval)$newline" +
+        "EarlyUnreliableAccept = $($values.early)$newline" + "EarlyNakAccept = $($values.nak)$newline"
     if (-not $network.Count) { return $Text.TrimEnd("`r", "`n") + $newline + '[Network]' + $newline + $keys }
     $begin = $network[0].Index + $network[0].Length
     $next = @($headers | Where-Object Index -gt $network[0].Index | Select-Object -First 1)
     $end = if ($next.Count) { $next[0].Index } else { $Text.Length }
     $body = $Text.Substring($begin, $end-$begin)
-    $body = [regex]::Replace($body, '(?im)^\s*(ReliableFirstRetryMs|ReliableRetryIntervalMs)\s*=[^\r\n]*(?:\r?\n|$)', '')
+    $body = [regex]::Replace($body, '(?im)^\s*(ReliableFirstRetryMs|ReliableRetryIntervalMs|EarlyUnreliableAccept|EarlyNakAccept)\s*=[^\r\n]*(?:\r?\n|$)', '')
     $head = $Text.Substring(0, $begin)
     if (-not $head.EndsWith("`n")) { $head += $newline }
     if ($body -and -not $body.EndsWith("`n")) { $body += $newline }

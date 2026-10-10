@@ -317,6 +317,140 @@ class ScoreTests(unittest.TestCase):
             finally:
                 shutil.rmtree(matrix, ignore_errors=True)
 
+def raw(seq, flags, ts, kind=0):
+    return {"source": "127.0.0.1:50001", "target": "127.0.0.1:50002", "tsUnixMs": ts, "disposition": "forwarded",
+            "transport": {"seqA": seq, "flagsByte": f"0x{flags:02X}", "kindNibble": kind}}
+
+
+REL_FINAL, REL_PART, UNREL_FINAL, UNREL_PART = 0xC0, 0x80, 0x40, 0x00
+
+
+class EarlyReplayTests(unittest.TestCase):
+    """The receiver-side early rule (include/p2p_early_unreliable_policy.h)."""
+
+    def run_link(self, packets, early=True):
+        return score.analyse_link(score.delivered(packets), early)
+
+    def test_future_stamped_final_unreliable_is_delivered_only_in_early_mode(self):
+        s = [raw(0, REL_FINAL, 1000), raw(2, UNREL_FINAL, 1010), raw(2, UNREL_FINAL, 1300), raw(1, REL_FINAL, 1600)]
+        stock, early = self.run_link(s, False), self.run_link(s, True)
+        self.assertEqual((stock["futureStampedGaps"], stock["unreliableRejected"], stock["blackoutTotalMs"]), (2, 2, 590))
+        self.assertEqual((early["futureStampedGaps"], early["unreliableRejected"], early["blackouts"]), (0, 0, 0))
+        # both models are always reported, whatever mode drove the legacy fields
+        for link in (stock, early):
+            self.assertEqual(link["modeledStock"]["unreliableRejected"], 2)
+            self.assertEqual(link["modeledEarly"]["unreliableRejected"], 0)
+            self.assertEqual(link["modeledStock"]["blackoutTotalMs"], 590)
+            self.assertEqual(link["modeledEarly"]["blackoutMaxMs"], 0)
+
+    def test_expected_advances_only_on_accepted_reliable(self):
+        # a delivered early update must not move expected: reliable 1 still lands
+        s = [raw(0, REL_FINAL, 1000), raw(2, UNREL_FINAL, 1010), raw(1, REL_FINAL, 1020), raw(2, UNREL_FINAL, 1030)]
+        link = self.run_link(s)
+        self.assertEqual((link["futureStampedGaps"], link["duplicateReliable"], link["unreliableRejected"]), (0, 0, 0))
+
+    def test_stale_unreliable_stays_rejected(self):
+        s = [raw(5, REL_FINAL, 1000), raw(6, REL_FINAL, 1010), raw(5, UNREL_FINAL, 1020)]
+        link = self.run_link(s)
+        self.assertEqual((link["unreliableRejected"], link["futureStampedGaps"]), (1, 0))
+
+    def test_future_reliable_is_still_rejected(self):
+        s = [raw(0, REL_FINAL, 1000), raw(3, REL_FINAL, 1010), raw(1, UNREL_FINAL, 1020)]
+        link = self.run_link(s)
+        self.assertEqual(link["futureStampedGaps"], 1)
+        self.assertEqual(link["unreliableRejected"], 0)
+
+    def test_non_final_unreliable_is_rejected_and_opens_a_blackout(self):
+        s = [raw(0, REL_FINAL, 1000), raw(2, UNREL_PART, 1010), raw(1, REL_FINAL, 1100), raw(2, UNREL_FINAL, 1200)]
+        link = self.run_link(s)
+        self.assertEqual((link["futureStampedGaps"], link["unreliableRejected"], link["blackoutTotalMs"]), (1, 1, 190))
+
+    def test_partial_reliable_reassembly_blocks_until_final_fragment(self):
+        s = [raw(0, REL_FINAL, 1000), raw(1, REL_PART, 1010), raw(3, UNREL_FINAL, 1020),
+             raw(2, REL_FINAL, 1030), raw(4, UNREL_FINAL, 1040)]
+        link = self.run_link(s)
+        # stamp 3 vs expected 2 is blocked mid-reassembly; after the final fragment stamp 4 vs 3 is delivered
+        self.assertEqual((link["futureStampedGaps"], link["unreliableRejected"]), (1, 1))
+        self.assertEqual(link["blackoutTotalMs"], 20)
+
+    def test_window_limit_and_u32_wrap(self):
+        far = [raw(0, REL_FINAL, 1000), raw(1 + 4096, UNREL_FINAL, 1010), raw(1 + 4097, UNREL_FINAL, 1020)]
+        link = self.run_link(far)
+        self.assertEqual(link["unreliableRejected"], 1)  # +4096 delivered, +4097 rejected
+        wrap = [raw(0xFFFFFFFE, REL_FINAL, 1000), raw(0xFFFFFFFF, REL_FINAL, 1010), raw(2, UNREL_FINAL, 1020),
+                raw(0, REL_FINAL, 1030), raw(0xFFFFFFFF, UNREL_FINAL, 1040)]
+        link = self.run_link(wrap)
+        # stamp 2 is 3 ahead of expected 0 (wrapped): delivered; reliable 0 is accepted;
+        # stamp 0xFFFFFFFF is then behind expected 1: stale, rejected
+        self.assertEqual((link["futureStampedGaps"], link["unreliableRejected"], link["duplicateReliable"]), (0, 1, 0))
+
+
+class DeliveredOrderTests(unittest.TestCase):
+    def delayed(self, seq, ts, ms, reordered=False):
+        return raw(seq, REL_FINAL, ts) | {"impairment": {"delaysMs": [ms], "reordered": reordered}}
+
+    def test_jittered_neighbours_keep_relay_order(self):
+        # 179 rebuilt 0.3 ms before 178; the relay floored it behind 178.
+        rows = [self.delayed(178, 73144, 74.813), self.delayed(179, 73161, 57.532)]
+        got = score.delivered(rows)
+        self.assertEqual([r["transport"]["seqA"] for r in got], [178, 179])
+        self.assertAlmostEqual(got[1]["deliveredMs"], 73144 + 74.813)
+
+    def test_reordered_copy_still_overtaken(self):
+        rows = [self.delayed(1, 1000, 90, reordered=True), self.delayed(2, 1001, 60)]
+        self.assertEqual([r["transport"]["seqA"] for r in score.delivered(rows)], [2, 1])
+
+
+class ReliableFlowTests(unittest.TestCase):
+    def flow(self, all_rows):
+        fwd = [r for r in all_rows if r["disposition"] == "forwarded"]
+        return score.reliable_flow(all_rows, score.delivered(fwd))
+
+    def test_delay_is_first_relay_arrival_to_in_order_acceptance(self):
+        lost = dict(raw(1, REL_FINAL, 1010), disposition="dropped_impair_loss", wireBytes=100)
+        rows = [dict(raw(0, REL_FINAL, 1000), wireBytes=50), lost,
+                dict(raw(2, REL_FINAL, 1020), wireBytes=70),        # arrives first, out of order
+                dict(raw(1, REL_FINAL, 1500), wireBytes=100),       # retransmit of stamp 1
+                dict(raw(2, REL_FINAL, 1520), wireBytes=70),        # retransmit of stamp 2
+                dict(raw(3, UNREL_FINAL, 1530), wireBytes=30)]
+        f = self.flow(rows)
+        # stamp 0 accepted at once; stamp 1 at 1500 (first seen 1010); stamp 2 only after 1, at 1520 (first seen 1020)
+        self.assertEqual(sorted(f["delays"]), [0, 490, 500])
+        self.assertEqual((f["stamps"], f["undelivered"], f["retransmitCopies"], f["bytes"]), (3, 0, 2, 390))
+
+    def test_never_accepted_stamp_is_undelivered(self):
+        rows = [raw(0, REL_FINAL, 1000), dict(raw(1, REL_FINAL, 1010), disposition="dropped_impair_loss"), raw(2, REL_FINAL, 1020)]
+        f = self.flow(rows)
+        self.assertEqual((f["delays"], f["undelivered"]), ([0], 2))
+
+    def test_nak_is_compared_with_the_links_stock_expected(self):
+        rows = [raw(0, REL_FINAL, 1000), raw(2, REL_FINAL, 1010), raw(1, 0, 1020, kind=6),   # expected 1: equal
+                raw(3, 0, 1030, kind=6), raw(0, 0, 1040, kind=6), raw(1, REL_FINAL, 1050),     # ahead; behind; reliable 1, then 2 follows
+                raw(2, REL_FINAL, 1055), raw(2, 0, 1060, kind=6)]                              # expected is 3: behind
+        self.assertEqual(self.flow(rows)["nak"], {"equal": 1, "ahead": 1, "behind": 2, "noExpectation": 0})
+
+    def test_nak_before_any_data_has_no_expectation_and_u32_wrap(self):
+        self.assertEqual(self.flow([raw(5, 0, 1000, kind=6)])["nak"]["noExpectation"], 1)
+        rows = [raw(0xFFFFFFFF, REL_FINAL, 1000), raw(0, 0, 1010, kind=6), raw(0xFFFFFFFF, 0, 1020, kind=6)]
+        self.assertEqual(self.flow(rows)["nak"], {"equal": 1, "ahead": 0, "behind": 1, "noExpectation": 0})
+
+    def test_percentiles_and_score_summary(self):
+        self.assertEqual([score.percentile(list(range(1, 101)), p) for p in (50, 95, 99, 100)], [50, 95, 99, 100])
+        self.assertEqual(score.percentile([], 50), 0)
+        t = ScoreTests("test_clean_fix_on_run_is_strict_pass")
+        t.setUp()
+        try:
+            t.make_run({(1, 2): clean_stream(1, 2) + [dict(packet(1, 2, 0, True, 1100), wireBytes=40),
+                                                      packet(1, 2, 9, False, 1110, kind=6)]})
+            r = score.score(t.run, "on", gpu_query=lambda a, b: 0)
+        finally:
+            t.tearDown()
+        d = r["reliableDelivery"]
+        self.assertEqual((d["stamps"], d["count"], d["reliableRetransmitCopies"], d["reliableBytes"]), (12 * 5, 12 * 5, 1, 40))
+        self.assertEqual(r["nakAcceptance"]["ahead"], 1)
+        self.assertEqual(list(r["nakAcceptance"]["perLink"]), ["c1->c2"])
+
+
 class GpuQueryTests(unittest.TestCase):
     """The event-log adapter fails closed: only an explicit count is evidence."""
 

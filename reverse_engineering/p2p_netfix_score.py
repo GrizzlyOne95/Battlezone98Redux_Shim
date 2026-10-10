@@ -36,6 +36,7 @@ import collections
 import datetime
 import glob
 import json
+import math
 import os
 import re
 import statistics
@@ -54,28 +55,44 @@ def load_ports(run):
     return ports
 
 
-def analyse_link(packets):
+HOLD_SPAN_LIMIT = 1 << 20
+EARLY_MAX_AHEAD = 4096  # include/p2p_early_unreliable_policy.h kMaxAhead
+U32 = 0xFFFFFFFF
+
+
+def replay_link(packets, early=False):
+    """Accept rule over one link in delivery order. early=True adds the opt-in
+    receiver policy (p2p_early_unreliable_policy.h): a final-fragment unreliable
+    kind-0 packet stamped 1..4096 past expected is delivered while no multi-
+    fragment reliable message is partly received. Expected advances only on
+    accepted reliable packets. Stock mode keeps the legacy comparisons."""
     expected = None
     gaps = dups = rejected = 0
-    first_tx, queued_by, high = {}, {}, -1
     blackouts, blackout_from, at = [], None, None
+    reassembling = False  # accepted reliable fragment without 0x40 not yet completed
     for r in packets:
         t = r["transport"]
         if t["kindNibble"] != 0:
             continue
-        # ts: when the sender sent it (relay arrival); at: when the receiver got it.
-        seq, ts = t["seqA"], r["tsUnixMs"]
-        at = r.get("deliveredMs", ts)
-        reliable = bool(int(t["flagsByte"], 16) & 0x80)
+        seq = t["seqA"]
+        at = r.get("deliveredMs", r["tsUnixMs"])
+        flags = int(t["flagsByte"], 16)
+        reliable = bool(flags & 0x80)
         if expected is None:
             expected = seq
+        ahead = (seq - expected) & U32 if early else seq - expected
         if seq == expected:
             if reliable:
-                expected = seq + 1
+                expected = (seq + 1) & U32 if early else seq + 1
+                reassembling = not flags & 0x40
             elif blackout_from is not None:
                 blackouts.append(at - blackout_from)
                 blackout_from = None
-        elif seq > expected:
+        elif early and not reliable and flags & 0x40 and not reassembling and 1 <= ahead <= EARLY_MAX_AHEAD:
+            if blackout_from is not None:
+                blackouts.append(at - blackout_from)
+                blackout_from = None
+        elif (0 < ahead <= U32 // 2) if early else ahead > 0:
             gaps += 1
             rejected += not reliable
             if not reliable and blackout_from is None:
@@ -84,12 +101,82 @@ def analyse_link(packets):
             dups += 1
         else:
             rejected += 1
+    if blackout_from is not None:
+        blackouts.append(at - blackout_from)
+    return {"gaps": gaps, "dups": dups, "rejected": rejected, "blackouts": blackouts}
+
+
+def percentile(sorted_values, pct):
+    """Nearest-rank percentile of an ascending list (0 when empty)."""
+    if not sorted_values:
+        return 0
+    return sorted_values[max(0, math.ceil(pct / 100.0 * len(sorted_values)) - 1)]
+
+
+def reliable_flow(all_rows, forwarded):
+    """Reliable delivery and NAK acceptance on one link under the stock rule.
+
+    all_rows: every traced row of the link, any disposition (relay arrival order).
+    forwarded: forwarded rows as delivered() orders them.
+    Delay is first relay arrival of a reliable kind-0 stamp to the first
+    forwarded copy accepted in order (expected advances only on in-order
+    reliable). A kind-6 NAK carries the sender's next reliable stamp, so it is
+    compared with the expected of this same link at its delivery time."""
+    first_seen, copies, wire_bytes = {}, collections.Counter(), 0
+    for r in all_rows:
+        t = r["transport"]
+        if t["kindNibble"] == 0 and int(t["flagsByte"], 16) & 0x80:
+            first_seen.setdefault(t["seqA"], r["tsUnixMs"])
+            copies[t["seqA"]] += 1
+            wire_bytes += t.get("wireBytes", r.get("wireBytes", 0))
+    accepted_at, expected = {}, None
+    nak = {"equal": 0, "ahead": 0, "behind": 0, "noExpectation": 0}
+    for r in forwarded:
+        t = r["transport"]
+        seq, at = t["seqA"], r.get("deliveredMs", r["tsUnixMs"])
+        if t["kindNibble"] == 0:
+            reliable = int(t["flagsByte"], 16) & 0x80
+            if expected is None:
+                expected = seq
+            if reliable and seq == expected:
+                accepted_at.setdefault(seq, at)
+                expected = (seq + 1) & U32
+        elif t["kindNibble"] == 6:
+            if expected is None:
+                nak["noExpectation"] += 1
+            else:
+                ahead = (seq - expected) & U32
+                nak["equal" if ahead == 0 else "ahead" if ahead <= U32 // 2 else "behind"] += 1
+    delays = [accepted_at[k] - first_seen[k] for k in accepted_at if k in first_seen]
+    return {"delays": delays, "stamps": len(first_seen), "undelivered": len(set(first_seen) - set(accepted_at)),
+            "retransmitCopies": sum(n - 1 for n in copies.values()), "bytes": wire_bytes, "nak": nak}
+
+
+def modeled(replay):
+    stats = blackout_stats(replay["blackouts"])
+    return {"blackoutTotalMs": stats["blackoutTotalMs"], "blackoutMaxMs": stats["blackoutMaxMs"],
+            "unreliableRejected": replay["rejected"]}
+
+
+def analyse_link(packets, early=False):
+    first_tx, queued_by, high = {}, {}, -1
+    for r in packets:
+        t = r["transport"]
+        if t["kindNibble"] != 0:
+            continue
+        # ts: when the sender sent it (relay arrival).
+        seq, ts = t["seqA"], r["tsUnixMs"]
+        reliable = bool(int(t["flagsByte"], 16) & 0x80)
         if reliable:
             first_tx.setdefault(seq, ts)
         else:
-            for k in range(high + 1, seq):
+            # A stamp wrapping or jumping far ahead is not a plausible backlog; do not enumerate it.
+            for k in range(high + 1, seq if seq - high <= HOLD_SPAN_LIMIT else high + 1):
                 queued_by.setdefault(k, ts)
             high = max(high, seq - 1)
+    stock, early_replay = replay_link(packets), replay_link(packets, True)
+    used = early_replay if early else stock
+    gaps, dups, rejected = used["gaps"], used["dups"], used["rejected"]
     late = sorted(first_tx[k] - queued_by[k] for k in first_tx
                   if k in queued_by and first_tx[k] > queued_by[k])
     return {
@@ -100,7 +187,9 @@ def analyse_link(packets):
         "reliableHeld": len(late),
         "holdMedianMs": statistics.median(late) if late else 0,
         "holdMaxMs": late[-1] if late else 0,
-    } | blackout_stats(blackouts + ([at - blackout_from] if blackout_from is not None else []))
+        "modeledStock": modeled(stock),
+        "modeledEarly": modeled(early_replay),
+    } | blackout_stats(used["blackouts"])
 
 
 LONG_BLACKOUT_MS = 500
@@ -117,12 +206,26 @@ def blackout_stats(blackouts):
 
 def delivered(rows):
     """Forwarded trace rows as the receiver got them: one row per copy sent,
-    at its delivery time, in delivery order (stable for equal times)."""
+    at its delivery time, in delivery order (stable for equal times).
+
+    rows are one directed stream in relay arrival order. The relay never lets
+    a delayed datagram overtake an earlier one unless reorder= picked it, so
+    each copy is floored at the previous in-order copy's delivery time;
+    rebuilding times from the millisecond trace stamp plus the logged delay
+    alone can invert neighbours that the relay sent at one shared deadline."""
     out = []
+    floor = None
     for r in rows:
-        delays = (r.get("impairment") or {}).get("delaysMs")
+        impairment = r.get("impairment") or {}
+        delays = impairment.get("delaysMs")
+        reordered = bool(impairment.get("reordered"))
         for d in (delays if delays else [0]):
-            out.append(r | {"deliveredMs": r["tsUnixMs"] + d})
+            at = r["tsUnixMs"] + d
+            if floor is not None and at < floor:
+                at = floor if not reordered else at
+            if not reordered:
+                floor = at
+            out.append(r | {"deliveredMs": at})
     out.sort(key=lambda r: r["deliveredMs"])
     return out
 
@@ -245,8 +348,20 @@ def flow_breakdown(flow):
     return ("PASS" if not failed else "FAIL"), capture_seen and not capture_failed, failed
 
 
+def modeled_summary(links, key, link_minutes):
+    total = sum(v[key]["blackoutTotalMs"] for v in links.values())
+    return {"blackoutSPerLinkMinute": round(total / 1000.0 / link_minutes, 4) if link_minutes else None,
+            "worstBlackoutMs": max((v[key]["blackoutMaxMs"] for v in links.values()), default=0),
+            "unreliableRejected": sum(v[key]["unreliableRejected"] for v in links.values())}
+
+
 def score(run, arm=None, clients=4, gpu_query=None, timers=None):
     run = os.path.abspath(run)
+    early = False
+    if timers is not None:
+        from p2p_retry_timing import parse_timers, token_of
+        values = parse_timers(timers)
+        early = bool(values[2])
     result = {"run": os.path.basename(run), "runDir": run, "arm": arm, "problems": []}
     flow = load_json(os.path.join(run, "flow-summary.json"))
     health = load_json(os.path.join(run, "native-network-health.json"))
@@ -258,8 +373,9 @@ def score(run, arm=None, clients=4, gpu_query=None, timers=None):
         result["missionObservedS"] = {f"c{c['client']}": c.get("missionObservedSeconds") for c in health.get("clients", [])}
 
     links, span, malformed = {}, 0.0, 0
+    result["reliableDelivery"] = result["nakAcceptance"] = None
     if os.path.exists(trace_path):
-        rows = []
+        rows, traced = [], []
         with open(trace_path, encoding="utf-8") as f:
             for line in f:
                 if not line.strip():
@@ -269,16 +385,37 @@ def score(run, arm=None, clients=4, gpu_query=None, timers=None):
                 except ValueError:
                     malformed += 1
                     continue
-                if "transport" in r and r.get("disposition", "forwarded") == "forwarded":
-                    rows.append(r)
+                if "transport" in r:
+                    traced.append(r)
+                    if r.get("disposition", "forwarded") == "forwarded":
+                        rows.append(r)
         if rows:
             span = (rows[-1]["tsUnixMs"] - rows[0]["tsUnixMs"]) / 1000
         ports = load_ports(run)
-        streams = collections.defaultdict(list)
+        streams, all_streams = collections.defaultdict(list), collections.defaultdict(list)
         for r in rows:
             streams[(r["source"].rsplit(":", 1)[1], r["target"].rsplit(":", 1)[1])].append(r)
+        for r in traced:
+            all_streams[(r["source"].rsplit(":", 1)[1], r["target"].rsplit(":", 1)[1])].append(r)
+        flows = {}
         for (src, dst), packets in streams.items():
-            links[f"{ports.get(src, src)}->{ports.get(dst, dst)}"] = analyse_link(delivered(packets))
+            name = f"{ports.get(src, src)}->{ports.get(dst, dst)}"
+            links[name] = analyse_link(delivered(packets), early)
+            flows[name] = reliable_flow(all_streams[(src, dst)], delivered(packets))
+        for (src, dst), packets in all_streams.items():  # links whose every copy was dropped
+            name = f"{ports.get(src, src)}->{ports.get(dst, dst)}"
+            if name not in flows:
+                flows[name] = reliable_flow(packets, [])
+        delays = sorted(d for f in flows.values() for d in f["delays"])
+        result["reliableDelivery"] = {
+            "count": len(delays), "p50Ms": percentile(delays, 50), "p95Ms": percentile(delays, 95),
+            "p99Ms": percentile(delays, 99), "maxMs": delays[-1] if delays else 0,
+            "stamps": sum(f["stamps"] for f in flows.values()),
+            "undelivered": sum(f["undelivered"] for f in flows.values()),
+            "reliableRetransmitCopies": sum(f["retransmitCopies"] for f in flows.values()),
+            "reliableBytes": sum(f["bytes"] for f in flows.values())}
+        nak = {k: sum(f["nak"][k] for f in flows.values()) for k in ("equal", "ahead", "behind", "noExpectation")}
+        result["nakAcceptance"] = nak | {"perLink": {n: f["nak"] for n, f in sorted(flows.items()) if any(f["nak"].values())}}
     result["traceSpanS"] = span
     result["links"] = dict(sorted(links.items()))
     totals = collections.Counter()
@@ -291,6 +428,10 @@ def score(run, arm=None, clients=4, gpu_query=None, timers=None):
     result["maxBlackoutMs"] = max((v["blackoutMaxMs"] for v in links.values()), default=0)
     link_minutes = len(links) * span / 60.0
     result["blackoutSPerLinkMinute"] = round(totals["blackoutTotalMs"] / 1000.0 / link_minutes, 4) if link_minutes else None
+    # Both rules on the same trace, whatever arm ran; the legacy fields above follow the run's own rule.
+    result["earlyModel"] = early
+    result["modeledStock"] = modeled_summary(links, "modeledStock", link_minutes)
+    result["modeledEarly"] = modeled_summary(links, "modeledEarly", link_minutes)
     inputs = load_json(os.path.join(run, "flow-inputs.json")) or {}
     result["impair"] = inputs.get("impair") or ""
     final = load_json(os.path.join(run, "relay-impairment-final.json"))
@@ -299,9 +440,8 @@ def score(run, arm=None, clients=4, gpu_query=None, timers=None):
 
     result["fix"], result["fixPerClient"] = fix_state(run)
     if timers is not None:
-        from p2p_retry_timing import parse_timers, verify_run
-        values = parse_timers(timers)
-        result["timers"] = f"{values[0]}/{values[1]}"
+        from p2p_retry_timing import verify_run
+        result["timers"] = token_of(*values)
         result["timerEvidence"] = verify_run(run, result["timers"], clients)
     start, end = run_window(run)
     result["crashes"] = crash_evidence(run, start, end)
@@ -563,7 +703,7 @@ def main():
     s.add_argument("run")
     s.add_argument("--arm", choices=("on", "off"))
     s.add_argument("--clients", type=int, default=4)
-    s.add_argument("--timers", help="intended first/interval ms; requires matching archived INI and native apply logs")
+    s.add_argument("--timers", help="intended first/interval[+early] ms; requires matching archived INI and native apply logs")
     s.add_argument("--case", default=None)
     s.add_argument("--pass-index", type=int, default=None)
     s.add_argument("--index", type=int, default=None, help="position in the matrix plan")
