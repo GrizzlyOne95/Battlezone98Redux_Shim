@@ -317,6 +317,125 @@ class ScoreTests(unittest.TestCase):
             finally:
                 shutil.rmtree(matrix, ignore_errors=True)
 
+def state(src, dst, seq, ts, ordnance=0, tag=0x5F, reliable=False, disposition="forwarded", hexed=True):
+    """A BZRNet state-style packet: 18 header bytes, then tag, ordnance length, filler."""
+    r = packet(src, dst, seq, reliable, ts)
+    r["disposition"] = disposition
+    if hexed:
+        r["datagramHex"] = (bytes(18) + bytes([tag, ordnance, 1, 2, 3])).hex()
+    return r
+
+
+class DeliveryMetricTests(unittest.TestCase):
+    """Hit-registration and warp proxies: '_' state packets, shots, update gaps."""
+    setUp, tearDown, make_run, score = ScoreTests.setUp, ScoreTests.tearDown, ScoreTests.make_run, ScoreTests.score
+
+    def link_stream(self):
+        # Reliable 0 accepted at 1000 (expected -> 1). Updates stamped 1 are accepted.
+        return [
+            packet(1, 2, 0, True, 1000),
+            state(1, 2, 1, 1010),                                   # plain, delivered
+            state(1, 2, 1, 1020, ordnance=3),                       # shot, delivered
+            state(1, 2, 9, 1030, ordnance=2),                       # shot stamped ahead: rejected, lost
+            state(1, 2, 1, 1300),                                   # delivered, gap 280 from 1020
+            state(1, 2, 1, 1600),                                   # gap 300
+            state(1, 2, 1, 1850),                                   # gap 250, not over 250
+            state(1, 2, 1, 1950, ordnance=1, disposition="dropped_impair_loss"),  # relay-dropped shot
+            state(1, 2, 1, 2200),                                   # gap 350
+            state(1, 2, 1, 2900),                                   # gap 700
+            state(1, 2, 1, 2950, tag=0x50),                         # not a '_' packet
+            state(1, 2, 1, 2960, ordnance=5, reliable=True),        # reliable '_' is not a state update
+        ]
+
+    def test_classification_and_loss(self):
+        self.make_run({(1, 2): self.link_stream()})
+        d = self.score()["delivery"]["used"]["perLink"]["c1->c2"]
+        self.assertEqual((d["stateUpdates"]["sent"], d["stateUpdates"]["delivered"]), (9, 7))
+        self.assertEqual(d["stateUpdates"]["lost"], 2)
+        self.assertAlmostEqual(d["stateUpdates"]["deliveryRatio"], 7 / 9, places=4)
+        self.assertEqual((d["shotPackets"]["sent"], d["shotPackets"]["delivered"], d["shotPackets"]["lost"]), (3, 1, 2))
+        self.assertAlmostEqual(d["shotPackets"]["deliveryRatio"], 1 / 3, places=4)
+        self.assertEqual(d["shotPackets"]["latencyP50Ms"], 0)
+        self.assertEqual(d["noPayload"], 0)
+
+    def test_gap_thresholds(self):
+        self.make_run({(1, 2): self.link_stream()})
+        g = self.score()["delivery"]["used"]["perLink"]["c1->c2"]["updateGaps"]
+        # delivered '_' at 1010 1020 1300 1600 1850 2200 2900 -> 10 280 300 250 350 700
+        self.assertEqual(g["count"], 6)
+        self.assertEqual(g["over250Ms"], 4)   # 250 itself is not over
+        self.assertEqual(g["over500Ms"], 1)
+        self.assertEqual(g["maxMs"], 700)
+        self.assertEqual(g["p95Ms"], 700)
+
+    def test_run_total_sums_links(self):
+        self.make_run({(1, 2): self.link_stream()})
+        r = self.score()["delivery"]
+        # other links carry no '_' packets, so the total is the one link
+        self.assertEqual(r["used"]["total"]["shotPackets"]["sent"], 3)
+        self.assertEqual(r["used"]["total"]["updateGaps"]["over500Ms"], 1)
+        self.assertEqual(r["rule"], "stock")
+        self.assertEqual(r["modeledStock"]["total"], r["used"]["total"])
+        self.assertEqual(len(r["used"]["perLink"]), 12)
+
+    def test_shot_latency_uses_impairment_delay(self):
+        s = [packet(1, 2, 0, True, 1000), state(1, 2, 1, 1010, ordnance=1), state(1, 2, 1, 1100, ordnance=1)]
+        s[1]["impairment"] = {"delaysMs": [40.0]}
+        self.make_run({(1, 2): s})
+        p = self.score()["delivery"]["used"]["perLink"]["c1->c2"]["shotPackets"]
+        self.assertEqual((p["sent"], p["delivered"]), (2, 2))
+        self.assertEqual(p["latencyP50Ms"], 0)
+        self.assertEqual(p["latencyP95Ms"], 40.0)
+
+    def test_early_rule_delivers_what_stock_rejects(self):
+        s = [packet(1, 2, 0, True, 1000), state(1, 2, 3, 1010, ordnance=1)]  # stamped 2 ahead
+        self.make_run({(1, 2): s})
+        d = self.score()["delivery"]
+        link = lambda k: d[k]["perLink"]["c1->c2"]["shotPackets"]["delivered"]
+        self.assertEqual((link("modeledStock"), link("modeledEarly")), (0, 1))
+        self.assertEqual(d["used"], d["modeledStock"])
+
+    def test_existing_scores_unchanged_by_payload_capture(self):
+        plain = [packet(1, 2, 0, True, 1000), packet(1, 2, 2, False, 1010), packet(1, 2, 1, True, 1500)]
+        withhex = [dict(r, datagramHex=(bytes(18) + bytes([0x5F, 1, 1])).hex()) if not r["transport"]["flagsByte"] == "0xC0" else r
+                   for r in plain]
+        self.make_run({(1, 2): plain})
+        a = self.score()
+        shutil.rmtree(self.run)
+        self.run = tempfile.mkdtemp(prefix="netfix-score-test-")
+        self.make_run({(1, 2): withhex})
+        b = self.score()
+        for key in ("class", "totals", "links", "reliableDelivery", "nakAcceptance", "modeledStock", "modeledEarly",
+                    "maxBlackoutMs", "blackoutSPerLinkMinute"):
+            self.assertEqual(a[key], b[key], key)
+        self.assertEqual(a["delivery"]["used"]["total"]["shotPackets"]["sent"], 0)
+        self.assertEqual(b["delivery"]["used"]["total"]["shotPackets"]["sent"], 1)
+
+    def test_missing_payload_is_reported_not_guessed(self):
+        s = [packet(1, 2, 0, True, 1000), state(1, 2, 1, 1010, ordnance=1, hexed=False)]
+        self.make_run({(1, 2): s})
+        d = self.score()["delivery"]["used"]["perLink"]["c1->c2"]
+        self.assertEqual(d["noPayload"], 1)
+        self.assertEqual(d["stateUpdates"]["sent"], 0)
+
+    def test_matrix_summary_lists_delivery(self):
+        self.make_run({(1, 2): self.link_stream()})
+        r = self.score()
+        r.update(index=1, run="run1", case="x")
+        matrix = tempfile.mkdtemp(prefix="netfix-matrix-test-")
+        try:
+            os.makedirs(os.path.join(matrix, "scores"))
+            with open(os.path.join(matrix, "scores", "1.json"), "w", encoding="utf-8") as f:
+                json.dump(r, f)
+            s = score.aggregate(matrix)
+            row = s["delivery"][0]
+            self.assertEqual((row["shotSent"], row["shotLost"], row["gapsOver500Ms"]), (3, 2, 1))
+            with open(os.path.join(matrix, "summary.md"), encoding="utf-8") as f:
+                self.assertIn("Hit-registration and warp proxies", f.read())
+        finally:
+            shutil.rmtree(matrix, ignore_errors=True)
+
+
 def raw(seq, flags, ts, kind=0):
     return {"source": "127.0.0.1:50001", "target": "127.0.0.1:50002", "tsUnixMs": ts, "disposition": "forwarded",
             "transport": {"seqA": seq, "flagsByte": f"0x{flags:02X}", "kindNibble": kind}}
