@@ -94,7 +94,7 @@ Canonical CR owns the fix in `Scripts/CRCoop.lua`; it is not published to
 Workshop or the user's installed campaign. The plan records override and
 harness hashes and refuses an override changed between arms.
 
-**Status: running; no final live verdict yet.** Compare conservative post-ramp
+**Status: stopped INCOMPLETE; no timer comparison is qualified.** Compare conservative post-ramp
 windows with equal duration, retaining pre-window sequence state. Report
 modeled blackout/accepted-update age, repeat reliable sequences, modeled
 accepted duplicates, per-sender datagram byte rates, queue/drop behavior and
@@ -107,3 +107,50 @@ Keep stock retry defaults until repeated clean/loss/burst/delay/bandwidth and
 long-session comparisons establish benefit without traffic regressions. The
 earlier services failure, admission failures, receive-capture discrepancy and
 native rejection-frequency failures remain open.
+
+
+## Completed stock arm and navigation interruption — 19:37 CDT
+
+Trial `193200` completed the stock 1000/2500 arm under 3% loss seed 212:
+80 steady fighting AI for 60 simulation seconds, 23 natural vehicle deaths,
+94 new observed scrap handles, 16 beacons and 64 ammo/repair objects created.
+Gameplay and cleanup passed; native rejection-frequency health failed, so
+the full flow remains FAIL despite scorer class IMPAIRED_OK. Stock timer
+configuration/native evidence verified on all four clients; no new crash or
+GPU error was recorded. The host initialized before its incoming Q messages;
+this arm did not reproduce the host race. Early guest Q was consumed without
+admission and subsequent startup converged with the guard active.
+
+Independent audit: 55,114 decisions = 53,446 submitted copies + 1,668 intended
+loss drops across twelve links; zero missing outcomes, correlation errors or
+source-TX mismatches. Four captures were clean/untruncated with zero dropped
+events and full binary retention. Ninety-nine other target RX deficits remain,
+84 after final target P2P RX and nine in the conservative 55.913-second
+post-ramp interval. No same-hash copy ambiguity. That interval contains 28,369
+submitted copies / 3,574,544 opaque UDP payload bytes. Socket submission does
+not establish delivery or native acceptance. Queue wait p99/max was
+0.166/76.947 ms; socket-call p99/max 0.057/0.510 ms.
+
+The second, 300/800 arm timed out at `c0-lounge` before impairment/combat.
+Its retained host screenshot shows Options rather than the expected lobby.
+Four captures archived cleanly, with zero relay decisions. Both rate/queue
+arms did not run. No completed pair or timer benefit can be claimed; defaults
+remain 1000/2500. All four clients closed gracefully, the orphaned private
+server stopped after client exit, and the outer controller restored its files.
+Independent rehash at 19:36:59 CDT: 128 targets, zero mismatch and zero games.
+The inherited-lock real-child test passed again after controller exit.
+
+## Build and UI provenance
+
+All four test clients used the same Oct 8 Release DLL, version 1.0.0.47,
+SHA256 `7C2D20C047CAAB54D1D01C608A405CCD374A28972DDEC65F057514A3FC8E9C22`.
+The ordinary GOG install held version 1.0.0.34 before catch-up. The top-level
+stock Options layout in the user's screenshot is also present in current main;
+the redesigned Settings and Keybind pages are separate sub-pages. Both source
+fallbacks and the shipped INI default General/SettingsUi and CustomBindsUi ON.
+The user requested those existing redesigned pages enabled by default, with
+the top-level menu retained. Current main was fetched and merged after the
+interrupted matrix; that merge changed the shared Lua guide and its test pin,
+not native code or UI resources. Release x86 build, 81/81 CTest, INI policy/
+writer/migration checks and network baseline validation passed before GOG
+deployment. Runtime/deployment evidence is recorded separately below.
