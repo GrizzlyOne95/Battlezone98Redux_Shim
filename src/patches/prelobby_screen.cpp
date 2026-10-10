@@ -432,6 +432,21 @@ namespace BZROpenShim
             bool enabled = false;
             return TryGetUserConfigBool("Network", "PreLobby", enabled) && enabled;
         }
+
+        // The MP-status refresh runs every title-screen frame, and the ini read
+        // is a file read; re-read at most once a second there.
+        bool PreLobbyIniEnabledThrottled()
+        {
+            static bool s_enabled = false;
+            static ULONGLONG s_readAt = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (s_readAt == 0 || now - s_readAt >= 1000)
+            {
+                s_enabled = PreLobbyIniEnabled();
+                s_readAt = now;
+            }
+            return s_enabled;
+        }
     }
 
     bool IsPreLobbyEnabled()
@@ -466,7 +481,7 @@ namespace BZROpenShim
         using FnRefresh = void(__thiscall*)(void*);
         reinterpret_cast<FnRefresh>(kMainScreenMpStatusRefreshAddr)(thisPtr);
 
-        if (!thisPtr || !PreLobbyIniEnabled())
+        if (!thisPtr || !PreLobbyIniEnabledThrottled())
             return;
         __try
         {
