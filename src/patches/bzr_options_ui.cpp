@@ -47,7 +47,7 @@ namespace BZROpenShim
     void __fastcall CareerUiSetTooltipHook(void* thisPtr, void* /*edx*/, const char* text);
     void __fastcall OptionsInputDtorHook(void* thisPtr, void* /*edx*/);
     void __fastcall OptionsParentDtorHook(void* thisPtr, void* /*edx*/);
-    void __cdecl ClickMultiPlayerHook();
+    void __fastcall ClickMultiPlayerHook(void* thisPtr, void* /*edx*/);
     uint8_t __fastcall MainScreenOnCharHook(void* thisPtr, void* /*edx*/, uint8_t character);
     void __fastcall MainScreenMpStatusRefreshHook(void* thisPtr, void* /*edx*/);
 
@@ -5400,7 +5400,11 @@ namespace BZROpenShim
         static char g_PreLobbyServer[96] = {};
         static char g_PreLobbyStatusShown[192] = {};
 
-        using FnClickMultiPlayer = void(__cdecl*)();
+        // __thiscall on cUI_MainScreen: the decompiler shows void(void), but the
+        // body saves ecx ([ebp-0x38]) and requests screen 0x0E through
+        // [this+0x138], the shell manager. The button wrapper (0x0078C550) loads
+        // ecx from the MainScreen singleton before calling it.
+        using FnClickMultiPlayer = void(__thiscall*)(void* mainScreen);
         using FnMainScreenOnChar = uint8_t(__thiscall*)(void* thisPtr, uint8_t character);
         static InlineDetour32 g_ClickMultiPlayerDetour = {};
         static FnClickMultiPlayer g_ClickMultiPlayerOriginal = nullptr;
@@ -6652,11 +6656,14 @@ namespace BZROpenShim
         {
             g_PreLobbyInContinue = true;
             ClosePreLobbyPage();
-            Log(L"[PRELOBBY] continue: calling stock Click_MultiPlayer\n");
+            // The live title screen is what the stock wrapper passes as this.
+            void* const mainScreen = ReadMainScreenSingleton();
+            Log(L"[PRELOBBY] continue: calling stock Click_MultiPlayer this=0x%08X\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mainScreen)));
             __try
             {
-                if (g_ClickMultiPlayerOriginal)
-                    g_ClickMultiPlayerOriginal();
+                if (g_ClickMultiPlayerOriginal && mainScreen)
+                    g_ClickMultiPlayerOriginal(mainScreen);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -7590,7 +7597,7 @@ namespace BZROpenShim
     // Click_MultiPlayer (0x0078C6C0). With [Network] PreLobby on and the title
     // screen live, the click opens the pre-lobby page instead; every other
     // case, including a fault while opening it, is the stock call.
-    void __cdecl ClickMultiPlayerHook()
+    void __fastcall ClickMultiPlayerHook(void* thisPtr, void* /*edx*/)
     {
         bool opened = false;
         __try
@@ -7605,7 +7612,7 @@ namespace BZROpenShim
             ResetCareerUiState();
         }
         if (!opened && g_ClickMultiPlayerOriginal)
-            g_ClickMultiPlayerOriginal();
+            g_ClickMultiPlayerOriginal(thisPtr);
     }
 
     // cUI_MainScreen vtable slot 2 (the base cUI_View char dispatcher). The
