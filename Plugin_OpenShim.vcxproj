@@ -125,6 +125,7 @@
     <ClCompile Include="src\engine\game_log_path.cpp" />
     <ClCompile Include="src\engine\hook_engine.cpp" />
     <ClCompile Include="src\engine\native_ui.cpp" />
+    <ClCompile Include="src\engine\shell_screens.cpp" />
     <ClCompile Include="src\engine\ogre_runtime.cpp" />
     <ClCompile Include="src\engine\openshim_assets.cpp" />
     <ClCompile Include="src\engine\openshim_assets_platform.cpp" />

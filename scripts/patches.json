@@ -1786,6 +1786,60 @@
       "address": "0x008E7732",
       "kind": "data",
       "identity": "Byte read by the GameObjectClass loader (FUN_004e0450) to preload assets; ControlPanel PostLoad clears it around its own InitBuildItem calls."
+    },
+    {
+      "name": "ShellScreenFactory",
+      "address": "0x007C7AD0",
+      "expected": "55 8B EC 6A FF 68 A7 23 86 00 64 A1 00 00 00 00",
+      "identity": "shell screen factory void* __thiscall(manager, int id); switch over stock screen ids, logs 'Creating screen of type %d'"
+    },
+    {
+      "name": "ShellRequestScreen",
+      "address": "0x007C7930",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC C6 40 27 01 8D 4D 08",
+      "identity": "shell request screen void __thiscall(manager, int id); pushes id on the history vector at +0x2C and sets the transition-pending byte +0x27"
+    },
+    {
+      "name": "ShellBackScreen",
+      "address": "0x007C79A0",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D FC 83 C1 2C E8 DE 82 C5 FF",
+      "identity": "shell back void __thiscall(manager); pops the history vector at +0x2C and sets the transition-pending byte +0x27"
+    },
+    {
+      "name": "ShellFactoryTick",
+      "address": "0x007C6920",
+      "expected": "55 8B EC 83 EC 08 A1 F0 55 94 00 83 C0 01 8B 0D F4 55 94 00",
+      "identity": "screen factory preamble void __cdecl(); bumps the screen-creation counter at 0x009455F0"
+    },
+    {
+      "name": "ShellShowPendingAlert",
+      "address": "0x00787DE0",
+      "expected": "55 8B EC 6A FF 68 BC D0 84 00 64 A1 00 00 00 00",
+      "identity": "void __cdecl(screen, manager); attaches the pending GameAlert dialog to a newly created screen"
+    },
+    {
+      "name": "UiTopScreenCtor",
+      "address": "0x007D0FA0",
+      "expected": "55 8B EC 6A FF 68 42 2A 86 00 64 A1 00 00 00 00",
+      "identity": "cUI_View default (top screen) ctor __thiscall(this); 'Top Screen' with bckground_1920x1080.png and the four border views"
+    },
+    {
+      "name": "UiScreenEscBackKey",
+      "address": "0x00788E70",
+      "expected": "55 8B EC 51 89 4D FC 83 7D 08 1B 75 0C 8B 4D FC",
+      "identity": "screen OnKey (vtable slot 5) bool __thiscall(this, key, mods); Esc (0x1B) runs Back on this+0x138, other keys go to cUI_View"
+    },
+    {
+      "name": "ShellFactoryAlertCheck",
+      "address": "0x007C9068",
+      "expected": "0F B6 15 32 81 91 00 85 D2 74 30 83 7D 08 1D",
+      "identity": "factory tail: movzx edx,byte [alert pending]; test; je; cmp [ebp+8],0x1D -- the pending-alert test after a screen is created"
+    },
+    {
+      "name": "UiViewVtable",
+      "address": "0x008A0B94",
+      "kind": "data",
+      "identity": "cUI_View vtable (15 slots; RTTI .?AVcUI_View@@). OpenShim custom screens copy it and replace slots 0 and 5."
     }
   ],
   "globals": [
