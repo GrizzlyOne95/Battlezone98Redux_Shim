@@ -20,6 +20,8 @@
 #include "shim_log.h"
 #include "x86_length.h"
 #include "ogre_shader_cache.h"
+#include "ogre_script_import_cache.h"
+#include "resource_walk_stat_cache.h"
 #include "ogre_enhanced_light_selection.h"
 #include "render_effect_intent.h"
 #include "render_profile_runtime.h"
@@ -940,6 +942,8 @@ namespace BZROpenShim
             {"InstallCareerStatsMpHookIfPossible", &InstallCareerStatsMpHookIfPossible},
             {"InstallUnitVoQueueHooksIfPossible", &InstallUnitVoQueueHooksIfPossible},
             {"InstallParticleTemplateDedupeHookIfPossible", &InstallParticleTemplateDedupeHookIfPossible},
+            {"InstallOgreScriptImportCacheIfPossible", &InstallOgreScriptImportCacheIfPossible},
+            {"InstallResourceWalkStatCacheIfPossible", &InstallResourceWalkStatCacheIfPossible},
             {"InstallUiManualObjectDedupeHookIfPossible", &InstallUiManualObjectDedupeHookIfPossible},
             {"InstallSceneTeardownForgetHooksIfPossible", &InstallSceneTeardownForgetHooksIfPossible},
             {"InstallEntityReloadLifetimeHookIfPossible", &InstallEntityReloadLifetimeHookIfPossible},
@@ -1612,6 +1616,8 @@ namespace BZROpenShim
         InstallCareerStatsMpHookIfPossible();
         InstallUnitVoQueueHooksIfPossible();
         InstallParticleTemplateDedupeHookIfPossible();
+        InstallOgreScriptImportCacheIfPossible();
+        InstallResourceWalkStatCacheIfPossible();
         InstallUiManualObjectDedupeHookIfPossible();
         InstallEmissionLightFixIfPossible();
         VerifyExpectedOgreExportsIfPossible();

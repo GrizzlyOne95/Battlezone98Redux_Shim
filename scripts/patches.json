@@ -1230,6 +1230,12 @@
       "kind": "data"
     },
     {
+      "name": "BuildSingleIAResource",
+      "address": "0x0076A600",
+      "expected": "55 8B EC 6A FF 68 A3 D6 85 00 64 A1 00 00 00 00",
+      "identity": "buildSingleIAResource (__thiscall, one stack arg, ret 4): logs \"buildSingleIAResource for %s started/complete\", re-registers every Modable resource location through FUN_006679c0 -> FUN_00667ed0 (recursive std::tr2::sys walk) and then calls ResourceGroupManager::clearResourceGroup/initialiseResourceGroup(\"Modable\"). Called from FUN_0076e6c0. Skips everything when the requested mod set equals the last built set and this+0x8C is clear."
+    },
+    {
       "name": "VehicleListSet",
       "address": "0x0076B7A0",
       "expected": "55 8B EC 6A FF 68 0B D8 85 00 64 A1 00 00 00 00"
