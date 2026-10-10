@@ -711,34 +711,14 @@
       "identity": "GridMinZ int on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), the subtrahend at UpdateCells 0x004691D5 (see PathBlock::GridMaxZ). Single match."
     },
     {
-      "name": "PathBlock::GetItemSize",
-      "pattern": "8B 45 E0 83 C0 04 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 D4 8B 4D E0 83 C1 04 51 E8 ?? ?? ?? ?? 83 C4 04 89 45 CC",
-      "offset": 7,
+      "name": "PathBlock::ReadFile",
+      "pattern": "8B 4D DC 51 8B 55 F0 83 C2 28 52 8D 45 B4 50 8B 4D 0C 51 E8 ?? ?? ?? ?? 83 C4 10 85 C0",
+      "offset": 19,
       "mode": "rel32_target",
-      "fallback": "0x00481A60",
+      "fallback": "0x008290F0",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "Engine GetItemSize(name) thunk 0x00481A60 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413) (the ODF GetItemSize Hook site), taken from its FileData ctor call at 0x00588E60 so a hooked entry still resolves. Worker 0x00481A80 answers from the item cache or the file system (0x00829150). Used by PathBlockFaces to read ODF/SDF/GEO bytes. Single match."
-    },
-    {
-      "name": "PathBlock::UseItem",
-      "pattern": "8B 45 E0 83 C0 04 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 D4 8B 4D E0 83 C1 04 51 E8 ?? ?? ?? ?? 83 C4 04 89 45 CC",
-      "offset": 25,
-      "mode": "rel32_target",
-      "fallback": "0x00481AF0",
-      "prefer": "scan",
-      "require_unique": true,
-      "identity": "Engine UseItem(name) thunk 0x00481AF0 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413) (the ODF UseItem Hook site), from the FileData ctor call at 0x00588E72: returns the locked item bytes, released by UnlockItem. Single match."
-    },
-    {
-      "name": "PathBlock::UnlockItem",
-      "pattern": "E9 ?? ?? ?? ?? 8B 4D E0 83 C1 04 51 E8 ?? ?? ?? ?? 83 C4 04",
-      "offset": 12,
-      "mode": "rel32_target",
-      "fallback": "0x00481990",
-      "prefer": "scan",
-      "require_unique": true,
-      "identity": "Engine UnlockItem(name) thunk 0x00481990 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413) (the ODF UnlockItem Hook site), from the FileData ctor call at 0x005893B4 after parsing. Single match."
+      "identity": "Engine file-system read 0x008290F0 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): cdecl bool(name, int* size, void* buffer, int capacity), a wrapper over 0x00828DC0 (loose addon file via fopen, or packed record via 0x008273E0). Taken from the item-cache miss path in UseItem's worker 0x00481B80 (call at 0x00481D0D). It does not touch the item cache: a loose file reports its size before failing on a short buffer; a packed record fails without one. Used by PathBlockFaces to read ODF/SDF/GEO bytes (reading those through UseItem/UnlockItem inside BlockCells broke the building being added). Single match."
     },
     {
       "name": "MPVehicleList::LoadCallSiteNetveh",
@@ -819,6 +799,17 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Local player net id accessor on exact GOG Redux 2.2.301: an 11-byte leaf that returns the 16-bit global at 0x009180D4 in AX (callers movzx it). Bound alongside NetPlayer::SetData 0x00575570, NetPlayer::SetFlagBuffer 0x00575810 and SetMyFlag 0x0056FA50, which the multiplayer flag helpers compare against it; the ban lookup and the career kill trace consult it as well."
+    },
+    {
+      "name": "Craft::EffectiveDamageResistanceSite",
+      "platforms": ["gog"],
+      "pattern": "D9 9D 04 FF FF FF F3 0F 10 05 98 24 8A 00 0F 2F 85 04 FF FF FF 72 07 32 C0 E9 D1 07 00 00",
+      "offset": 6,
+      "mode": "address",
+      "fallback": "0x004AA6A0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413. Craft distributedObject DamageAlloc vtable entry 0x00889478 targets 0x004AA630 (thiscall, ret 8). Calls AdjustDamageValues then GetDamageValue and stores the effective amount to EBP-0xFC at 0x004AA69A; EBP-0xF8 holds receiver at GameObject+0x18. Hook precedes zero comparison; the same local becomes AddHealth's negative argument at 0x004AAD5F and precedes death flagging at 0x004AAD95. Source DAMAGE+0xC stays untouched for other blast victims. Frida live PID41772 2026-10-07 captured all 30 matched bytes identical to static image. Lazy inline detour, installed by native resistance capability/setter; unavailable on Steam until independently qualified."
     },
     {
       "name": "GameObject::GetHandle",
@@ -1209,6 +1200,12 @@
   ],
   "engine_addresses": [
     {
+      "name": "GAS_SetMaxVoices",
+      "address": "0x0043A660",
+      "expected": "55 8B EC 83 3D 94 55 91 00 00 75 02 EB 0B A1 94 55 91 00 8B 4D 08 89 48 04",
+      "identity": "GAS master voice-cap setter on exact GOG Redux 2.2.301: if [0x00915594] (the GAS master pointer) is non-null it stores the argument at master+0x04. FirstGAS 0x00439F10 calls it with 0x40, and the per-frame voice update 0x0043A170 stops admitting 3D sounds once its active count reaches *(master+4). The SoundChannels override writes that same field, so its offset is guarded by this signature: the trailing 04 is the store displacement. A build whose setter differs skips the override rather than writing a field nothing reads."
+    },
+    {
       "name": "VehicleListSelection",
       "address": "0x00945478",
       "kind": "data"
@@ -1242,6 +1239,12 @@
       "name": "CurrentUser",
       "address": "0x009C8F60",
       "kind": "data"
+    },
+    {
+      "name": "BuildSingleIAResource",
+      "address": "0x0076A600",
+      "expected": "55 8B EC 6A FF 68 A3 D6 85 00 64 A1 00 00 00 00",
+      "identity": "buildSingleIAResource (__thiscall, one stack arg, ret 4): logs \"buildSingleIAResource for %s started/complete\", re-registers every Modable resource location through FUN_006679c0 -> FUN_00667ed0 (recursive std::tr2::sys walk) and then calls ResourceGroupManager::clearResourceGroup/initialiseResourceGroup(\"Modable\"). Called from FUN_0076e6c0. Skips everything when the requested mod set equals the last built set and this+0x8C is clear."
     },
     {
       "name": "VehicleListSet",
