@@ -82,5 +82,93 @@ loss (the battle workload) is the qualifying test.
 * Unit: `tests/p2p_early_unreliable_policy_tests.cpp` (window bounds,
   stale/reliable/non-final/partial-reassembly/kind rejection, u32 wrap).
 * Release Win32 build and full CTest pass; INI tests pass.
-* Live four-client A/B: pending (see `p2p_retry_timing_validation_20261009.md`
-  for the matrix tooling; arms `1000/2500` vs `1000/2500+early`).
+* Live four-client A/B: matrix `retry-battle-matrix-20261010-0035` below.
+
+## Live A/B at 3% loss — 2026-10-10
+
+Private control `early-battle-control-20261010-0035`, matrix
+`retry-battle-matrix-20261010-0035` (verdict PASS). Four clients on one PC
+through the relay, backlog fix ON and stock 1000/2500 timers in every arm,
+`loss=3,seed=212`, 80 fighting AI, 16 beacons, 64 powerups, 60 steady
+simulation seconds; two passes with arm order reversed. Each arm's INI value
+and the per-client `[P2PRECV]` armed/absent log lines were verified by the
+scorer. Instance files were restored and hash-verified after the matrix; no
+game process remained.
+
+| Arm | EarlyUnreliableAccept | Native unreliable rejections | Native reliable rejections | Delivered early | Native health | Gameplay/cleanup |
+|---|---|---:|---:|---:|---|---|
+| 1 | 0 | 1,074 | 3,235 | 0 | FAIL | PASS |
+| 2 | 1 | **0** | 3,282 | 1,404 | **pass** | PASS |
+| 3 | 1 | **0** | 3,212 | 997 | **pass** | PASS |
+| 4 | 0 | 1,143 | 3,193 | 0 | FAIL | PASS |
+
+Native rejections are `Dropping Packet Type 0` lines in the four clients'
+`BZLogger.txt`; unreliable ones print `#0 expected`, reliable ones the actual
+expected stamp. All four arms: IMPAIRED_OK, zero crashes and GPU events, zero
+Lua/engine script errors. Whole-trace relay replay of each arm's own traffic
+gives stock-rule blackout 2.16-2.91 s per directed-link minute (worst
+4.9-7.5 s) and early-rule blackout 0 s with zero rejected updates; the replay
+uses relay forwarding order, not native acceptance.
+
+Reading: every unreliable rejection was of the kind this patch targets, and
+with it on none remained; the sustained-rejection gate that failed every
+earlier impaired battle (including both backlog-fix-ON pairs of 2026-10-09)
+passed in both ON arms. Reliable out-of-order rejections are unchanged: the
+native receiver has no reorder buffer, so fragments behind a lost one are
+dropped and retransmitted. Gameplay (deaths, scrap, pickups, cleanup across
+four peers) passed with updates able to precede an earlier reliable message
+under constant creation/destruction churn; no divergence check beyond the
+existing battle assertions was run.
+
+## Clean link and bandwidth limit — 2026-10-10
+
+Matrix `retry-battle-matrix-20261010-0052` (control
+`early-battle-control-20261010-0052`, verdict PASS, restored), same battle
+case, one pass:
+
+| Impairment | EarlyUnreliableAccept | Class | Native unreliable rejections | Native health | Modeled stock blackout s/link-min (max ms) | Duplicates / reliable |
+|---|---|---|---:|---|---|---|
+| clean | 1 | STRICT_PASS | 0 | pass | 0 | 144 / 8,674 |
+| clean | 0 | STRICT_PASS | 0 | pass | 0 | 18 / 8,125 |
+| `loss=3,rate=256,queue=200,seed=213` | 1 | IMPAIRED_OK | **0** | **pass** | 4.33 (10,898) replay only | 6,134 / 6,968 |
+| `loss=3,rate=256,queue=200,seed=213` | 0 | IMPAIRED_OK | 1,666 | FAIL | 4.25 (13,350) | 5,609 / 6,578 |
+
+The clean link is unaffected (nothing is ever ahead, so the patch never
+fires). At 256 kbit/s with a 200-packet queue, stock blanks a peer's updates
+for 13 s at worst; with the patch no update was rejected. The duplicate column
+shows retransmit traffic dominating a rate-limited link under either rule;
+that is the retry pump, not this patch.
+
+## Early NAK receive (`[Network] EarlyNakAccept`)
+
+The reliable path still recovers slowly. Relay analysis of matrix 1: reliable
+delivery delay p95 1.8-3.0 s, p99 4.3-6.1 s; drop-to-retransmit p50 50-60 ms
+but p90 1.0-1.5 s. The cause is the NAK itself. A NAK (kind 6, sent at
+`0x0075DB32` on every drop) is stamped with the requester's next reliable
+stamp (`peer+0x88`), and `0x0075DA70`-`0x0075DA88` silently returns for any
+kind 6/7 whose stamp is not exactly `peer+0x84`. With reliable traffic in
+flight both ways that almost never holds: 4,236 of 4,661 NAKs in matrix-1 arm 2
+were ahead and dropped. Lost reliables therefore wait for the sender's
+1000 ms (`back.time + 1000`, send path `0x0075C990`) or 2500 ms re-arm
+(pump `0x0075AAF0` case 8) instead of one round trip. An ideal reorder buffer
+would cut p95 only to about 1.3-1.9 s by the same replay, so the NAK is the
+larger lever.
+
+Patch: site `P2P Early NAK Accept` (5-byte JMP at `0x0075DA88`, sharing the
+drop-log pattern at a disjoint offset). For kind 6 stamped 1-4096 ahead of
+`peer+0x84` (`ShouldAcceptNak`) the thunk continues at `0x0075DBC5`, the
+stock accept tail: `peer+0x19 = 1` (the pump resends only to a peer heard from
+since its last pass), the cumulative-ack loop, then case 6, which sets the
+retry deadline `peer+0x20/+0x24` to now. Everything else returns as stock.
+`peer+0x84` is never written, kind 7 stays dropped, and the resend is still
+bounded by the pump's 5000 bytes / peer-count budget per pass. Receiver-side
+only. Logs `[P2PRECV] Early NAK receive armed` and throttled
+`Accepted early NAKs: total=N`. Default off; kill switch
+`OPENSHIM_DISABLE_EARLY_NAK_ACCEPT`.
+
+Live A/B: matrix 3 (`1000/2500+early` vs `1000/2500+early+nak`), scored with
+the new `reliableDelivery` (p50/p95/p99, retransmit copies, reliable bytes)
+and `nakAcceptance` fields.
+
+Open before a default flip: mixed stock/patched peers, longer sessions,
+WAN round trips.

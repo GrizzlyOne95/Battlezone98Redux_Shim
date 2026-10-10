@@ -1443,6 +1443,21 @@ ReliableRetryIntervalMs = 2500
 ; Sites: GOG 2.2.301 0x0075DA8D and 0x0075DB96; a signature mismatch keeps stock.
 EarlyUnreliableAccept = 0
 
+; BZRNet P2P early NAK receive. When a receiver drops an out-of-order packet it
+; sends a NAK (kind 6) that makes the sender retransmit at once, but the NAK
+; carries the requester's next reliable stamp and stock discards it silently
+; unless every reliable message the requester sent has already arrived. With
+; reliable traffic in flight both ways that is rarely true (91% of NAKs were
+; discarded in a 3%-loss battle), so lost reliable messages wait for the
+; ReliableFirstRetryMs / ReliableRetryIntervalMs timers instead. On, a NAK
+; stamped ahead is accepted and triggers the immediate resend it asks for.
+; Each resend pass is still capped at 5000 bytes / peer count. Receiver-side
+; only, same wire format, safe with stock peers. Logs [P2PRECV] totals.
+; Accepted: boolean. Default: OFF until live-qualified. Restart required.
+; Kill switch: OPENSHIM_DISABLE_EARLY_NAK_ACCEPT (or BZR_ prefix).
+; Site: GOG 2.2.301 0x0075DA88; a signature mismatch keeps stock.
+EarlyNakAccept = 0
+
 ; Granular netcode tuning -- the send-rate governor, bandwidth floor/ceiling,
 ; ramp rates and auto-kick envelope -- lives in net.ini under [OpenShimSocket],
 ; because it is applied by the socket layer. See net.ini for what each value

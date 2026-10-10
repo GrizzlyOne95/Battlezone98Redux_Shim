@@ -302,6 +302,7 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::BYTES, {}, "P2P Reliable Retry Interval", false, {} },
             { 0, HookEngine::PatchType::BYTES, {}, "P2P Early Unreliable Drop Log", false, {} },
             { 0, HookEngine::PatchType::BYTES, {}, "P2P Early Unreliable Deliver", false, {} },
+            { 0, HookEngine::PatchType::BYTES, {}, "P2P Early NAK Accept", false, {} },
         };
 
         // Future: could also load this list from JSON

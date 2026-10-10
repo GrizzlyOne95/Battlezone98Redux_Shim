@@ -64,17 +64,28 @@ namespace BZROpenShim
             constexpr size_t kSiteALen = 13;
             constexpr size_t kSiteBLen = 5;
             constexpr size_t kSiteBAcceptJmp = 0x39;
+            constexpr size_t kSiteBMarkReceived = 0x2F;  // 0x0075DBC5: peer+0x19 = 1, jmp 0x0075DEEF
+            constexpr size_t kSiteCLen = 5;
             constexpr DWORD kLogIntervalMs = 5000;
 
             bool g_Enabled = false;
+            bool g_NakEnabled = false;
+            uint32_t g_SiteCReturn = 0;
+            uint32_t g_SiteCAccept = 0;
             uint32_t g_LogLevelAddr = 0;
             uint32_t g_SiteALogResume = 0;
             uint32_t g_SiteASkipLog = 0;
             uint32_t g_SiteBReturn = 0;
             uint32_t g_SiteBDeliver = 0;
-            volatile LONG g_Delivered = 0;
-            volatile LONG g_LoggedDelivered = 0;
-            volatile LONG g_LastLogTick = 0;
+            struct Counter
+            {
+                const wchar_t* what;
+                volatile LONG total;
+                volatile LONG logged;
+                volatile LONG lastTick;
+            };
+            Counter g_Delivered = { L"Delivered early unreliable updates", 0, 0, 0 };
+            Counter g_NaksAccepted = { L"Accepted early NAKs", 0, 0, 0 };
 
             uint32_t Rel32Target(uint32_t instr, size_t relOffset, size_t len)
             {
@@ -82,16 +93,15 @@ namespace BZROpenShim
                 return instr + static_cast<uint32_t>(len) + static_cast<uint32_t>(rel);
             }
 
-            void NoteDelivered()
+            void Note(Counter& c)
             {
-                const LONG total = InterlockedIncrement(&g_Delivered);
+                const LONG total = InterlockedIncrement(&c.total);
                 const LONG now = static_cast<LONG>(GetTickCount());
-                const LONG last = g_LastLogTick;
+                const LONG last = c.lastTick;
                 if (total != 1 && static_cast<DWORD>(now - last) < kLogIntervalMs) return;
-                if (InterlockedCompareExchange(&g_LastLogTick, now, last) != last) return;
-                const LONG previous = InterlockedExchange(&g_LoggedDelivered, total);
-                Log(L"[P2PRECV] Delivered early unreliable updates: total=%ld (+%ld)\n",
-                    total, total - previous);
+                if (InterlockedCompareExchange(&c.lastTick, now, last) != last) return;
+                const LONG previous = InterlockedExchange(&c.logged, total);
+                Log(L"[P2PRECV] %s: total=%ld (+%ld)\n", c.what, total, total - previous);
             }
         }
 
@@ -113,7 +123,21 @@ namespace BZROpenShim
             packet.expected = *reinterpret_cast<const uint32_t*>(peer + kPeerExpected);
             packet.reassemblyEmpty = reassembly[0] == reassembly[1];
             if (!P2PEarlyUnreliable::ShouldDeliver(packet)) return 0;
-            if (count) NoteDelivered();
+            if (count) Note(g_Delivered);
+            return 1;
+        }
+
+        // Site C: the silent kind 6/7 return. Same host frame as above.
+        extern "C" int __stdcall P2PEarlyNakDecide(const uint8_t* frame)
+        {
+            if (!g_NakEnabled) return 0;
+            const uint8_t* peer = *reinterpret_cast<uint8_t* const*>(frame + kPeerFrame);
+            if (!peer) return 0;
+            if (!P2PEarlyUnreliable::ShouldAcceptNak(frame[kKindFrame],
+                    *reinterpret_cast<const uint32_t*>(frame + kStampFrame),
+                    *reinterpret_cast<const uint32_t*>(peer + kPeerExpected)))
+                return 0;
+            Note(g_NaksAccepted);
             return 1;
         }
 
@@ -161,6 +185,25 @@ namespace BZROpenShim
             }
         }
 
+        // Accepting continues at 0x0075DBC5, the tail of the stock accept
+        // path: peer+0x19 = 1 (the retry pump resends only for a peer heard
+        // from since its last pass), then the cumulative-ack loop and case 6.
+        static __declspec(naked) void P2PEarlyNakSiteCThunk()
+        {
+            __asm
+            {
+                pushad
+                push ebp
+                call P2PEarlyNakDecide
+                test eax, eax
+                popad
+                jnz  accept
+                jmp  dword ptr [g_SiteCReturn]
+            accept:
+                jmp  dword ptr [g_SiteCAccept]
+            }
+        }
+
         void ConfigureP2PEarlyUnreliablePatches(std::vector<HookEngine::PatchDef>& patches)
         {
             bool enabled = false;
@@ -168,15 +211,43 @@ namespace BZROpenShim
             if (EnvFlagEnabled("OPENSHIM_DISABLE_EARLY_UNRELIABLE_ACCEPT") ||
                 EnvFlagEnabled("BZR_DISABLE_EARLY_UNRELIABLE_ACCEPT"))
                 enabled = false;
-            if (!enabled) return;
+            bool nakEnabled = false;
+            TryGetUserConfigBool("Network", "EarlyNakAccept", nakEnabled);
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_EARLY_NAK_ACCEPT") ||
+                EnvFlagEnabled("BZR_DISABLE_EARLY_NAK_ACCEPT"))
+                nakEnabled = false;
+            if (!enabled && !nakEnabled) return;
 
             HookEngine::PatchDef* siteA = nullptr;
             HookEngine::PatchDef* siteB = nullptr;
+            HookEngine::PatchDef* siteC = nullptr;
             for (auto& patch : patches)
             {
                 if (patch.name == "P2P Early Unreliable Drop Log") siteA = &patch;
                 else if (patch.name == "P2P Early Unreliable Deliver") siteB = &patch;
+                else if (patch.name == "P2P Early NAK Accept") siteC = &patch;
             }
+            // The NAK site resumes at an address inside site B's verified
+            // pattern, so it needs site B's signature but not its JMP.
+            if (nakEnabled)
+            {
+                if (!siteB || !siteC || !siteB->verified || !siteB->address ||
+                    !siteC->verified || !siteC->address)
+                {
+                    Log(L"[P2PRECV] NAK signatures unavailable; stock NAK receive kept\n");
+                }
+                else
+                {
+                    g_SiteCReturn = Rel32Target(siteC->address, 1, kSiteCLen);
+                    g_SiteCAccept = siteB->address + static_cast<uint32_t>(kSiteBMarkReceived);
+                    g_NakEnabled = true;
+                    siteC->payload = HookEngine::MakeJmp5Payload(siteC->address,
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&P2PEarlyNakSiteCThunk)), kSiteCLen);
+                    Log(L"[P2PRECV] Early NAK receive armed: return=0x%08X accept=0x%08X window=%u\n",
+                        g_SiteCReturn, g_SiteCAccept, P2PEarlyUnreliable::kMaxAhead);
+                }
+            }
+            if (!enabled) return;
             // Both sites or neither: site B alone would deliver while still
             // logging a drop, site A alone would hide drops it never delivers.
             if (!siteA || !siteB || !siteA->verified || !siteA->address ||

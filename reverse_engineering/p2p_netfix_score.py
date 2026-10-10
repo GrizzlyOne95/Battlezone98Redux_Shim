@@ -36,6 +36,7 @@ import collections
 import datetime
 import glob
 import json
+import math
 import os
 import re
 import statistics
@@ -103,6 +104,52 @@ def replay_link(packets, early=False):
     if blackout_from is not None:
         blackouts.append(at - blackout_from)
     return {"gaps": gaps, "dups": dups, "rejected": rejected, "blackouts": blackouts}
+
+
+def percentile(sorted_values, pct):
+    """Nearest-rank percentile of an ascending list (0 when empty)."""
+    if not sorted_values:
+        return 0
+    return sorted_values[max(0, math.ceil(pct / 100.0 * len(sorted_values)) - 1)]
+
+
+def reliable_flow(all_rows, forwarded):
+    """Reliable delivery and NAK acceptance on one link under the stock rule.
+
+    all_rows: every traced row of the link, any disposition (relay arrival order).
+    forwarded: forwarded rows as delivered() orders them.
+    Delay is first relay arrival of a reliable kind-0 stamp to the first
+    forwarded copy accepted in order (expected advances only on in-order
+    reliable). A kind-6 NAK carries the sender's next reliable stamp, so it is
+    compared with the expected of this same link at its delivery time."""
+    first_seen, copies, wire_bytes = {}, collections.Counter(), 0
+    for r in all_rows:
+        t = r["transport"]
+        if t["kindNibble"] == 0 and int(t["flagsByte"], 16) & 0x80:
+            first_seen.setdefault(t["seqA"], r["tsUnixMs"])
+            copies[t["seqA"]] += 1
+            wire_bytes += r.get("wireBytes", 0)
+    accepted_at, expected = {}, None
+    nak = {"equal": 0, "ahead": 0, "behind": 0, "noExpectation": 0}
+    for r in forwarded:
+        t = r["transport"]
+        seq, at = t["seqA"], r.get("deliveredMs", r["tsUnixMs"])
+        if t["kindNibble"] == 0:
+            reliable = int(t["flagsByte"], 16) & 0x80
+            if expected is None:
+                expected = seq
+            if reliable and seq == expected:
+                accepted_at.setdefault(seq, at)
+                expected = (seq + 1) & U32
+        elif t["kindNibble"] == 6:
+            if expected is None:
+                nak["noExpectation"] += 1
+            else:
+                ahead = (seq - expected) & U32
+                nak["equal" if ahead == 0 else "ahead" if ahead <= U32 // 2 else "behind"] += 1
+    delays = [accepted_at[k] - first_seen[k] for k in accepted_at if k in first_seen]
+    return {"delays": delays, "stamps": len(first_seen), "undelivered": len(set(first_seen) - set(accepted_at)),
+            "retransmitCopies": sum(n - 1 for n in copies.values()), "bytes": wire_bytes, "nak": nak}
 
 
 def modeled(replay):
@@ -312,8 +359,9 @@ def score(run, arm=None, clients=4, gpu_query=None, timers=None):
         result["missionObservedS"] = {f"c{c['client']}": c.get("missionObservedSeconds") for c in health.get("clients", [])}
 
     links, span, malformed = {}, 0.0, 0
+    result["reliableDelivery"] = result["nakAcceptance"] = None
     if os.path.exists(trace_path):
-        rows = []
+        rows, traced = [], []
         with open(trace_path, encoding="utf-8") as f:
             for line in f:
                 if not line.strip():
@@ -323,16 +371,37 @@ def score(run, arm=None, clients=4, gpu_query=None, timers=None):
                 except ValueError:
                     malformed += 1
                     continue
-                if "transport" in r and r.get("disposition", "forwarded") == "forwarded":
-                    rows.append(r)
+                if "transport" in r:
+                    traced.append(r)
+                    if r.get("disposition", "forwarded") == "forwarded":
+                        rows.append(r)
         if rows:
             span = (rows[-1]["tsUnixMs"] - rows[0]["tsUnixMs"]) / 1000
         ports = load_ports(run)
-        streams = collections.defaultdict(list)
+        streams, all_streams = collections.defaultdict(list), collections.defaultdict(list)
         for r in rows:
             streams[(r["source"].rsplit(":", 1)[1], r["target"].rsplit(":", 1)[1])].append(r)
+        for r in traced:
+            all_streams[(r["source"].rsplit(":", 1)[1], r["target"].rsplit(":", 1)[1])].append(r)
+        flows = {}
         for (src, dst), packets in streams.items():
-            links[f"{ports.get(src, src)}->{ports.get(dst, dst)}"] = analyse_link(delivered(packets), early)
+            name = f"{ports.get(src, src)}->{ports.get(dst, dst)}"
+            links[name] = analyse_link(delivered(packets), early)
+            flows[name] = reliable_flow(all_streams[(src, dst)], delivered(packets))
+        for (src, dst), packets in all_streams.items():  # links whose every copy was dropped
+            name = f"{ports.get(src, src)}->{ports.get(dst, dst)}"
+            if name not in flows:
+                flows[name] = reliable_flow(packets, [])
+        delays = sorted(d for f in flows.values() for d in f["delays"])
+        result["reliableDelivery"] = {
+            "count": len(delays), "p50Ms": percentile(delays, 50), "p95Ms": percentile(delays, 95),
+            "p99Ms": percentile(delays, 99), "maxMs": delays[-1] if delays else 0,
+            "stamps": sum(f["stamps"] for f in flows.values()),
+            "undelivered": sum(f["undelivered"] for f in flows.values()),
+            "reliableRetransmitCopies": sum(f["retransmitCopies"] for f in flows.values()),
+            "reliableBytes": sum(f["bytes"] for f in flows.values())}
+        nak = {k: sum(f["nak"][k] for f in flows.values()) for k in ("equal", "ahead", "behind", "noExpectation")}
+        result["nakAcceptance"] = nak | {"perLink": {n: f["nak"] for n, f in sorted(flows.items()) if any(f["nak"].values())}}
     result["traceSpanS"] = span
     result["links"] = dict(sorted(links.items()))
     totals = collections.Counter()
