@@ -28,6 +28,7 @@
 #include "game_state.h"
 #include "hook_engine.h"
 #include "native_chunk_mesh.h"
+#include "native_chunk_prune.h"
 #include "shell_casing_physics.h"
 #include "shell_casing_config.h"
 #include <algorithm>
@@ -83,8 +84,8 @@ namespace BZROpenShim
             };
             constexpr CasingTuning kTuning = {};
 
-            constexpr const char* kCasingMeshResource = "casings/v1/openshim_casing.mesh";
-            constexpr const char* kCasingMeshRelative = "casings/v1/openshim_casing.mesh";
+            constexpr const char* kCasingMeshResource = OPENSHIM_CHUNK_CACHE_CASINGS_DIR "openshim_casing.mesh";
+            constexpr const char* kCasingMeshRelative = OPENSHIM_CHUNK_CACHE_CASINGS_DIR "openshim_casing.mesh";
             constexpr unsigned kCasingSides = 10;
             constexpr const char* kCasingMaterialFile = "openshim_casing.material";
             constexpr const char* kCasingMaterialMarker = "// OpenShim ShellCasings default casing materials";

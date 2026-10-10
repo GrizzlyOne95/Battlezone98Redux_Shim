@@ -148,6 +148,11 @@ namespace
         ini.Set("Diagnostics", "TraceShellCasings", "1");
         Check(Mapped(ini, "OPENSHIM_TRACE_SHELL_CASINGS") == "1", "TraceShellCasings maps from [Diagnostics]");
 
+        ini.Set("General", "ChunkCacheMaxMB", "128");
+        Check(Mapped(ini, "OPENSHIM_CHUNK_CACHE_MAX_MB") == "128", "chunk cache size cap passes through raw");
+        ini.Set("General", "ChunkCacheMaxAgeDays", "7");
+        Check(Mapped(ini, "OPENSHIM_CHUNK_CACHE_MAX_AGE_DAYS") == "7", "chunk cache age limit passes through raw");
+
         // PathBlockFaces: inverted switch, trace from [Diagnostics].
         Check(Mapped(ini, "OPENSHIM_DISABLE_PATH_BLOCK_FACES") == "<none>", "unset PathBlockFaces keeps the code default");
         ini.Set("General", "PathBlockFaces", "0");
