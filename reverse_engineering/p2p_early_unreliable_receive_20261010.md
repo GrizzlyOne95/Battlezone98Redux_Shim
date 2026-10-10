@@ -317,6 +317,35 @@ reliable p95 3x at 3% loss and WAN for +35-44% reliable bytes, and +58% at
 256 kbit/s. None of the NAK arms moved shot-packet loss or update gaps
 materially: those are unreliable traffic, fixed by `EarlyUnreliableAccept`.
 
+### Strategy battle A/B — matrix `retry-battle-matrix-20261010-1320s`
+
+Battle load `-Mode Strategy` (`agent/strategy-battle-load`): each of the four
+clients owns a 20-unit army spawned with `exu.BuildSyncObject` (teams 5+6 vs
+7+8), so combat crosses owners. One pass, 60 s, all runs IMPAIRED_OK and
+gameplay PASS. Warps: remote-unit jumps > 80 m/s * dt + 10 m per 1000 unit
+frames, all clients. Hits/shot: owner-side damage events per shot fired
+(relative proxy only; one shot can damage over several frames).
+
+| Impairment | Arm | Native health | Warps /1k | Hits/shot | Reliable p95 / p99 ms | Reliable bytes | Shot pkts lost | Gaps >500 ms / max ms |
+|---|---|---|---:|---:|---|---:|---:|---|
+| `loss=3` | stock | **fail** | 0.027 | 1.60 | 827 / 2,058 | 245 k | 154 / 3,999 | 17 / 4,191 |
+| | `+early` | pass | 0.024 | 1.49 | 968 / 2,505 | 259 k | 129 / 4,329 | 0 / 294 |
+| | `+early+nak0` | pass | 0.022 | 1.50 | **111 / 233** | 246 k | 137 / 4,173 | 0 / 178 |
+| `loss=3,rate=256` | stock | **fail** | 0.022 | 1.60 | 1,460 / 2,538 | 342 k | 188 / 3,594 | 23 / 4,070 |
+| | `+early` | pass | 0.019 | 1.89 | 2,896 / 4,892 | 591 k | 99 / 3,597 | 26 / 1,201 |
+| | `+early+nak0` | pass | 0.007 | 1.78 | **688 / 980** | 716 k | 103 / 3,411 | 1 / 684 |
+| WAN | stock | **fail** | 0.018 | 1.67 | 1,896 / 3,106 | 439 k | 174 / 4,713 | 7 / 4,521 |
+| | `+early` | pass | 0.008 | 1.83 | 649 / 1,630 | 455 k | 87 / 3,948 | 12 / 1,173 |
+| | `+early+nak0` | pass | 0.003 | 1.85 | **409 / 801** | 591 k | 93 / 3,858 | 0 / 191 |
+
+Stock fails native health in every profile and shows multi-second update gaps
+(4.0-4.5 s max); `+early` removes the failure and roughly halves lost shot
+packets at 256 kbit/s and WAN. In this owner-distributed load `+early+nak0`
+is the best arm on every latency and gap measure, at +0% (3% loss), +21%
+(256 kbit/s) and +30% (WAN) reliable bytes versus `+early`. Absolute warp
+rates are low in all arms and the hits/shot proxy does not separate the arms;
+both are single-pass. Next: repeat passes and a second NAK-default decision.
+
 ## Decision
 
 * `EarlyUnreliableAccept` default **on**: native health passes with it in
