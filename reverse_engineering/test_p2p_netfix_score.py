@@ -385,6 +385,22 @@ class EarlyReplayTests(unittest.TestCase):
         self.assertEqual((link["futureStampedGaps"], link["unreliableRejected"], link["duplicateReliable"]), (0, 1, 0))
 
 
+class DeliveredOrderTests(unittest.TestCase):
+    def delayed(self, seq, ts, ms, reordered=False):
+        return raw(seq, REL_FINAL, ts) | {"impairment": {"delaysMs": [ms], "reordered": reordered}}
+
+    def test_jittered_neighbours_keep_relay_order(self):
+        # 179 rebuilt 0.3 ms before 178; the relay floored it behind 178.
+        rows = [self.delayed(178, 73144, 74.813), self.delayed(179, 73161, 57.532)]
+        got = score.delivered(rows)
+        self.assertEqual([r["transport"]["seqA"] for r in got], [178, 179])
+        self.assertAlmostEqual(got[1]["deliveredMs"], 73144 + 74.813)
+
+    def test_reordered_copy_still_overtaken(self):
+        rows = [self.delayed(1, 1000, 90, reordered=True), self.delayed(2, 1001, 60)]
+        self.assertEqual([r["transport"]["seqA"] for r in score.delivered(rows)], [2, 1])
+
+
 class ReliableFlowTests(unittest.TestCase):
     def flow(self, all_rows):
         fwd = [r for r in all_rows if r["disposition"] == "forwarded"]

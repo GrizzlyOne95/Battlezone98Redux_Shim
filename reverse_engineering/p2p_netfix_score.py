@@ -206,12 +206,26 @@ def blackout_stats(blackouts):
 
 def delivered(rows):
     """Forwarded trace rows as the receiver got them: one row per copy sent,
-    at its delivery time, in delivery order (stable for equal times)."""
+    at its delivery time, in delivery order (stable for equal times).
+
+    rows are one directed stream in relay arrival order. The relay never lets
+    a delayed datagram overtake an earlier one unless reorder= picked it, so
+    each copy is floored at the previous in-order copy's delivery time;
+    rebuilding times from the millisecond trace stamp plus the logged delay
+    alone can invert neighbours that the relay sent at one shared deadline."""
     out = []
+    floor = None
     for r in rows:
-        delays = (r.get("impairment") or {}).get("delaysMs")
+        impairment = r.get("impairment") or {}
+        delays = impairment.get("delaysMs")
+        reordered = bool(impairment.get("reordered"))
         for d in (delays if delays else [0]):
-            out.append(r | {"deliveredMs": r["tsUnixMs"] + d})
+            at = r["tsUnixMs"] + d
+            if floor is not None and at < floor:
+                at = floor if not reordered else at
+            if not reordered:
+                floor = at
+            out.append(r | {"deliveredMs": at})
     out.sort(key=lambda r: r["deliveredMs"])
     return out
 
