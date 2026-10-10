@@ -198,5 +198,26 @@ holdoff, and admits a new missing stamp at once; a repeat after the holdoff
 (lost retransmission) is admitted again. 32 peer slots, oldest evicted.
 Held NAKs return as stock and are logged as `Held repeat NAKs: total=N`.
 
+### Live A/B, gated — matrix `retry-battle-matrix-20261010-0926`
+
+Control `nakgate-battle-control-20261010-0926`, verdict PASS, 8/8 runs,
+restored. Two passes, arm order reversed; holdoff 300 ms (default).
+
+| Impairment | EarlyNakAccept | Reliable p95 / p99 ms (p1, p2) | Unresolved stamps | Retransmit copies | Reliable bytes | NAKs admitted / held | Native health |
+|---|---|---|---:|---:|---:|---|---|
+| `loss=3,seed=212` | 0 | 2,718 / 5,590 · 2,232 / 4,056 | 1,220 · 1,074 | 2,648 · 2,378 | 427 k · 423 k | — | pass |
+| `loss=3,seed=212` | 1 | **888 / 1,071 · 801 / 1,006** | 120 · 17 | 4,446 · 4,482 | 549 k · 561 k | 34/725 · 28/488 | pass |
+| `loss=3,rate=256,queue=200,seed=213` | 0 | 2,904 / 4,048 · 2,254 / 3,233 | 1,697 · 1,693 | 10,289 · 10,247 | 928 k · 923 k | — | pass |
+| `loss=3,rate=256,queue=200,seed=213` | 1 | **1,400 / 1,982 · 1,191 / 1,736** | 609 · 584 | 14,523 · 11,458 | 1,048 k · 947 k | 113/1,641 · 73/1,216 | pass |
+
+Gameplay PASS, IMPAIRED_OK, zero crashes/GPU events in all eight. The gate
+held 92-96% of early NAKs and kept the full latency gain of the ungated run
+(p95 3x lower at 3% loss, ~2x at 256 kbit/s), while the rate-limited
+resend-byte cost fell from +73% to +3-13% and relay queue drops from 18.7%
+to 13.4% (vs 11.4% early-only). Admitted/held counts are the throttled
+`[P2PRECV]` totals (final up to 5 s of counts can be missing). Most held
+NAKs are the stock NAK that still precedes every early-delivered update
+(site B runs after `0x0075DB32`), all naming the same missing stamp.
+
 Open before a default flip: mixed stock/patched peers, longer sessions,
 WAN round trips.
