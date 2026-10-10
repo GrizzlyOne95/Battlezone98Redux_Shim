@@ -27,7 +27,9 @@ function Get-OpenShimIniSettingIds {
         "TerrainProxyZoneZ",
         "TerrainProxyClusterX",
         "TerrainProxyClusterZ",
-        "Nickname"
+        "Nickname",
+        "Server",
+        "CustomServer"
     )
 
     foreach ($line in Get-Content -LiteralPath $Path) {
