@@ -31,7 +31,9 @@ Native `winmm.dll` shim for Battlezone 98 Redux. This repository owns low-level 
 ## Working and validation style
 
 - Inspect `git status -sb` and the relevant diff before editing. Preserve unrelated work.
-- Use one `agent/<short-description>` branch per workstream, normally from current `origin/main`. Do not reuse finished branches or mix unrelated follow-ups.
+- Use one `agent/<short-description>` branch per workstream. Do not reuse finished branches or mix unrelated follow-ups.
+- `origin/main` is not always the newest code: open integration PRs and other agents' branches can hold days of work it lacks. Before cutting a branch, run `gh pr list --state open` and `git log --all --since="3 weeks ago" --oneline -- <files you will touch>`. If an open PR or recent branch changes those files, base on it as a stacked PR or ask the user; otherwise branch from `origin/main`. Tell the user which base you chose and why.
+- Never leave pushed work invisible. A workstream ends with a PR (draft is fine), or a line in the handoff or final report naming the branch and why it has no PR. Abandoned experiments are deleted or labelled as such, not left looking like pending work.
 - Start with the smallest implementation and targeted checks. Expand validation only when the change, a failure, or a release gate requires it. A green build does not replace the task-specific pre-build checks listed in `Docs/AGENT_PATCH_WORKFLOW.md`.
 - Stage only task-owned files. Never blanket-stage, clean, restore, or overwrite unrelated changes. Do not rewrite shared history or force-push unless explicitly requested.
 - Agents may commit and push coherent task-owned checkpoints. PR merges, releases/tags, Workshop publication, and public deployment require explicit user instruction.
