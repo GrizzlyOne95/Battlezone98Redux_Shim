@@ -62,6 +62,38 @@ restores and hashes all targets after graceful teardown. The inner runner
 also keeps exact timer backups per arm. Raw logs, payloads, endpoint identities
 and original configuration backups remain private outside Git.
 
+The `182600` retry never launched: the new outer matrix lock and the mission
+coordinator's deliberate lock-state clearing caused a nested-lock wait. Root
+stopped only the verified waiting coordinator; no game was running. The child
+finally cleaned its local server and restored the files. Independent audit:
+128 targets, zero mismatch, zero games. The harness now has an explicit
+inherited-lock-owner option: it verifies a live ancestor, matching environment
+and a held common mutex, and forbids keep-running/attach/play. Real-child
+PowerShell 5.1 tests accept held ownership and reject wrong/free ownership.
+Default coordinator-owned launch behavior is unchanged. Battle-harness Release
+x86 CTest passed 79/79.
+
+The corrected `183000` trial launched four clients, then stopped INCOMPLETE
+before impairment/combat because the host never completed admission. The
+passive lifecycle trace captures Q from one guest before Initialize, a K reply,
+then Initialize clearing the ready flag and handle. The acknowledged guest
+never requests another Q. Independent source/submission/receive audit confirms
+both Q and K arrived; this state reset is not explained by relay loss.
+All four stock timer configs/native logs verified; no crashes. Independent
+restoration recheck at 19:24 CDT: 128 targets, zero mismatch, zero games.
+Original failed scores and matrix plans stay retained.
+
+The narrow CRCoop fix consumes early Q/K/P without admission/ACK until
+Initialize completes, allowing existing guest retries to complete afterwards.
+Its Lua regression fails on the original source and passes on the fix; existing
+registry and three complete-script campaign checks pass. A private
+`193200` trial is now active, using exactly this admission-only diff on the
+respawn-enabled immutable test baseline in every arm. Variant SHA256:
+`438DA35AAD3EF65A45881784466EFCDE105CEB3C0ED1D22815D885B080880B4E`.
+Canonical CR owns the fix in `Scripts/CRCoop.lua`; it is not published to
+Workshop or the user's installed campaign. The plan records override and
+harness hashes and refuses an override changed between arms.
+
 **Status: running; no final live verdict yet.** Compare conservative post-ramp
 windows with equal duration, retaining pre-window sequence state. Report
 modeled blackout/accepted-update age, repeat reliable sequences, modeled

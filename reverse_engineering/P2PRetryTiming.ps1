@@ -46,7 +46,7 @@ function Set-P2PRetryTiming([string[]]$InstanceDirs, [string]$Timers, [string]$B
     # Persist exact original bytes before the first write, including a crash or
     # a client that cannot close. Recovery must wait until all games have exited.
     $records | ForEach-Object { @{path=$_.path; originalBase64=[Convert]::ToBase64String($_.original)} } |
-        ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $BackupDir 'originals.json')
+        ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $BackupDir 'originals.json') -Encoding UTF8
     try {
         foreach ($record in $records) { [IO.File]::WriteAllBytes($record.path, $record.replacement) }
     } catch {
