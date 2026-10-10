@@ -150,6 +150,9 @@ namespace BZROpenShim
         static void* g_NicknamePanelPreLobby = nullptr;
         static void* g_NicknameEntryPreLobby = nullptr;
         static void* g_NicknameEditButtonPreLobby = nullptr;
+        // The custom matchmaking server host, edited like the nickname.
+        static void* g_ServerEntryPreLobby = nullptr;
+        static void* g_ServerEditButtonPreLobby = nullptr;
         static void* g_FlagButtonPreLobby = nullptr;
         static void* g_FlagButtonPreLobbyRight = nullptr;
         static void* g_FlagLabelPreLobby = nullptr;
@@ -3511,8 +3514,39 @@ namespace BZROpenShim
         BeginNicknameEdit(g_NicknameEntryPreLobby, g_PreLobbyUiParent, "prelobby_click");
     }
 
+    static void __cdecl ServerEntryOnEnterPreLobby()
+    {
+        // Enter only ends the edit; Continue applies the server.
+        EndNicknameEdit(g_ServerEntryPreLobby);
+    }
+
+    static void __cdecl ServerEditOnClickPreLobby()
+    {
+        BeginNicknameEdit(g_ServerEntryPreLobby, g_PreLobbyUiParent, "prelobby_server_click");
+    }
+
+    static void __cdecl ServerEditOnHoverPreLobby(void* /*param*/)
+    {
+    }
+
     void ResetPreLobbyLobbyWidgets()
     {
+        if (g_ServerEntryPreLobby)
+        {
+            if (g_ActiveNicknameEntry == g_ServerEntryPreLobby)
+            {
+                g_ActiveNicknameEntry = nullptr;
+                g_ActiveNicknameParent = nullptr;
+                g_ReplaceNicknameOnNextInput = false;
+            }
+            if (g_NicknameEnterDispatchEntry == g_ServerEntryPreLobby)
+                g_NicknameEnterDispatchEntry = nullptr;
+            if (g_PendingNicknameConfirmationEntry == g_ServerEntryPreLobby)
+                g_PendingNicknameConfirmationEntry = nullptr;
+        }
+        g_ServerEntryPreLobby = nullptr;
+        g_ServerEditButtonPreLobby = nullptr;
+
         if (g_NicknameEntryPreLobby)
         {
             if (g_ActiveNicknameEntry == g_NicknameEntryPreLobby)
@@ -3599,6 +3633,8 @@ namespace BZROpenShim
             g_NicknamePanelPreLobby,
             g_NicknameEntryPreLobby,
             g_NicknameEditButtonPreLobby,
+            g_ServerEntryPreLobby,
+            g_ServerEditButtonPreLobby,
             g_FlagButtonPreLobby,
             g_FlagButtonPreLobbyRight,
             g_FlagPreviewPreLobby,
@@ -3618,6 +3654,7 @@ namespace BZROpenShim
             return false;
         return view == g_NicknamePanelPreLobby || view == g_NicknameEntryPreLobby ||
                view == g_NicknameEditButtonPreLobby || view == g_FlagButtonPreLobby ||
+               view == g_ServerEntryPreLobby || view == g_ServerEditButtonPreLobby ||
                view == g_FlagButtonPreLobbyRight || view == g_FlagPreviewPreLobby;
     }
 
@@ -3742,8 +3779,11 @@ namespace BZROpenShim
     // Enter routing.
     bool PreLobbyForwardChar(uint8_t character)
     {
-        void* const entry = g_NicknameEntryPreLobby;
-        if (!entry || g_ActiveNicknameEntry != entry ||
+        // Whichever pre-lobby entry is being edited: the nickname or the
+        // custom server. A click on one makes it the active entry, which ends
+        // the other's edit.
+        void* const entry = g_ActiveNicknameEntry;
+        if (!entry || (entry != g_NicknameEntryPreLobby && entry != g_ServerEntryPreLobby) ||
             g_ActiveNicknameParent != g_PreLobbyUiParent ||
             !g_BzrFn_TextEntryAppendChar || !PreLobbyWidgetLive(entry))
         {
@@ -3755,9 +3795,151 @@ namespace BZROpenShim
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            Log(L"[PRELOBBY] nickname key routing faulted code=0x%08X\n",
+            Log(L"[PRELOBBY] entry key routing faulted code=0x%08X\n",
                 static_cast<uint32_t>(GetExceptionCode()));
         }
         return true;
+    }
+
+    // ---- Pre-lobby custom server entry ---------------------------------------
+    //
+    // A second text entry built like the nickname one (native cUI_TextEntry
+    // plus a textureless click proxy that makes it the active entry).
+
+    static constexpr char kServerPlaceholder[] = "Server address";
+
+    static void SetServerEntryPlaceholderOrText(const char* text)
+    {
+        if (!PreLobbyWidgetLive(g_ServerEntryPreLobby))
+            return;
+        if (text && text[0] != '\0')
+        {
+            SyncNicknameEntryText(g_ServerEntryPreLobby, text);
+            return;
+        }
+        __try
+        {
+            if (g_BzrFn_TextEntryClear)
+                g_BzrFn_TextEntryClear(g_ServerEntryPreLobby);
+            if (g_BzrFn_SetTooltip)
+                g_BzrFn_SetTooltip(g_ServerEntryPreLobby, kServerPlaceholder);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            Log(L"[PRELOBBY] server placeholder faulted code=0x%08X\n",
+                static_cast<uint32_t>(GetExceptionCode()));
+        }
+    }
+
+    bool CreatePreLobbyServerEntry(
+        void* parent, float x, float y, float width, float height, const char* text)
+    {
+        if (!parent || !g_BzrFn_AddChild || !g_BzrFn_TextEntryCtor || !g_BzrFn_ButtonCtor ||
+            !g_BzrFn_SetOnClick || !g_BzrFn_SetOnHover || !g_BzrFn_TextEntrySetEnterCb)
+            return false;
+
+        if (g_PreLobbyUiParent != parent)
+        {
+            ResetPreLobbyLobbyWidgets();
+            g_PreLobbyUiParent = parent;
+        }
+        if (PreLobbyWidgetLive(g_ServerEntryPreLobby) && PreLobbyWidgetLive(g_ServerEditButtonPreLobby))
+        {
+            SetServerEntryPlaceholderOrText(text);
+            return true;
+        }
+
+        void* const entryMem = ::operator new(kUiTextEntrySize, std::nothrow);
+        if (!entryMem)
+            return false;
+        std::memset(entryMem, 0, kUiTextEntrySize);
+        g_ServerEntryPreLobby = g_BzrFn_TextEntryCtor(
+            entryMem,
+            0,      // as the nickname entry / stock chatEntry
+            1,      // allow Enter
+            static_cast<int>(width / kNicknameCharacterWidth),
+            "ServerAddress",
+            x, y, width, height,
+            0x8020,
+            parent);
+        if (!g_ServerEntryPreLobby)
+            return false;
+        g_BzrFn_TextEntrySetEnterCb(
+            g_ServerEntryPreLobby, reinterpret_cast<void*>(ServerEntryOnEnterPreLobby));
+        if (g_BzrFn_TextEntrySetInputLimit)
+            g_BzrFn_TextEntrySetInputLimit(g_ServerEntryPreLobby, 80);
+        g_BzrFn_AddChild(parent, g_ServerEntryPreLobby, 0);
+
+        void* const proxyMem = ::operator new(kUiButtonSize, std::nothrow);
+        if (proxyMem)
+        {
+            std::memset(proxyMem, 0, kUiButtonSize);
+            g_ServerEditButtonPreLobby = g_BzrFn_ButtonCtor(
+                proxyMem, "Server Edit", x, y, width, height, 0x20, parent, 0, 0);
+            if (g_ServerEditButtonPreLobby)
+            {
+                g_BzrFn_SetOnClick(g_ServerEditButtonPreLobby,
+                                   reinterpret_cast<void*>(ServerEditOnClickPreLobby));
+                g_BzrFn_SetOnHover(g_ServerEditButtonPreLobby,
+                                   reinterpret_cast<void*>(ServerEditOnHoverPreLobby));
+                g_BzrFn_AddChild(parent, g_ServerEditButtonPreLobby, 0);
+            }
+        }
+        SetServerEntryPlaceholderOrText(text);
+        return true;
+    }
+
+    // Shown and clickable only while Custom is selected. Hiding also ends an
+    // edit in progress.
+    void PreLobbySetServerEntryVisible(bool visible)
+    {
+        if (!visible)
+            EndNicknameEdit(g_ServerEntryPreLobby);
+        if (!g_BzrFn_UiSetActive)
+            return;
+        __try
+        {
+            if (PreLobbyWidgetLive(g_ServerEntryPreLobby))
+                g_BzrFn_UiSetActive(g_ServerEntryPreLobby, visible ? 1 : 0);
+            if (PreLobbyWidgetLive(g_ServerEditButtonPreLobby))
+                g_BzrFn_UiSetActive(g_ServerEditButtonPreLobby, visible ? 1 : 0);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            Log(L"[PRELOBBY] server entry visibility faulted code=0x%08X\n",
+                static_cast<uint32_t>(GetExceptionCode()));
+        }
+    }
+
+    // The entry's typed text, trimmed; empty when blank. False when the entry
+    // does not exist.
+    bool PreLobbyGetServerEntryText(char* out, size_t outSize)
+    {
+        if (!out || outSize == 0)
+            return false;
+        out[0] = '\0';
+        if (!PreLobbyWidgetLive(g_ServerEntryPreLobby))
+            return false;
+        char text[192] = {};
+        if (!ReadEngineStdString(
+                static_cast<uint8_t*>(g_ServerEntryPreLobby) + kUiTextEntryTextOffset,
+                text, sizeof(text)))
+        {
+            return false;
+        }
+        const std::string trimmed = TrimAsciiCopy(text);
+        if (trimmed != kServerPlaceholder)
+            std::snprintf(out, outSize, "%s", trimmed.c_str());
+        return true;
+    }
+
+    void PreLobbySetServerEntryText(const char* text)
+    {
+        SetServerEntryPlaceholderOrText(text);
+    }
+
+    void PreLobbyEndServerEdit()
+    {
+        EndNicknameEdit(g_ServerEntryPreLobby);
     }
 }
