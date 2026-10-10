@@ -140,7 +140,7 @@ server stopped after client exit, and the outer controller restored its files.
 Independent rehash at 19:36:59 CDT: 128 targets, zero mismatch and zero games.
 The inherited-lock real-child test passed again after controller exit.
 
-## Build and UI provenance
+## Earlier build and UI provenance assessment (corrected below)
 
 All four test clients used the same Oct 8 Release DLL, version 1.0.0.47,
 SHA256 `7C2D20C047CAAB54D1D01C608A405CCD374A28972DDEC65F057514A3FC8E9C22`.
@@ -154,3 +154,29 @@ interrupted matrix; that merge changed the shared Lua guide and its test pin,
 not native code or UI resources. Release x86 build, 81/81 CTest, INI policy/
 writer/migration checks and network baseline validation passed before GOG
 deployment. Runtime/deployment evidence is recorded separately below.
+
+## Consolidated native UI build and local GOG catch-up
+
+The initial main-only UI assessment above was incomplete. The intended category
+hub and painted keybind implementation were on `ui/native-screens`, with
+original commits `a9b567aa`, `3b3342fe` and `6ce2b808`. Turning on the existing
+INI flags exposed the earlier flat UI because that implementation was absent.
+
+`agent/gog-ui-network-catchup` now includes the native UI, network battle load,
+impairment matrix, four-client tooling and latest device-loss/backlog branch
+tips, plus current main. Combined Release x86 build, 82/82 CTest, INI checks,
+network baseline and 41 Python P2P tests pass. Local GOG runs the new plugin
+SHA256 `A1A3966EF25205634BF521485D700F75533076A5CEB8443FC4ADFA52763D6D4F`,
+with matching full load chain, patch JSON and all 17 UI images. Actual GOG
+Options/category hub/Video/Back/painted keybind smoke passes; the process
+closed gracefully and display/input files were restored. These menu checks do
+not rerun or alter the historical four-client results above.
+
+Canonical Campaign Reimagined combines its admission guard and four-player
+mission work; its manager packages the same native suite and complete UI
+assets. Final local GOG shipping verification covers 3,789 files with zero
+missing/differing/unexpected managed files. Existing INI preferences remain,
+both redesigned pages are ON, and stock retry defaults remain 1000/2500.
+The unified source map, related review links, exact deployed hashes and
+qualification limits are in
+[`Docs/NETWORK_UI_INTEGRATION_20261009.md`](../Docs/NETWORK_UI_INTEGRATION_20261009.md).

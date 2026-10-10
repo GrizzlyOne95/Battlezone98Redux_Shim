@@ -1,5 +1,12 @@
 # Network impairment test plan (handoff)
 
+Consolidation checkpoint 2026-10-09: use
+[`NETWORK_UI_INTEGRATION_20261009.md`](../Docs/NETWORK_UI_INTEGRATION_20261009.md)
+as the source/review/deployment map for the combined native UI, network and
+campaign/server work. GOG menus and deployment pass on the combined build;
+the historical native-health failures and incomplete retry comparison below
+remain open, and the combined multiplayer build needs fresh qualification.
+
 Battle-load update 2026-10-09: the corrected multiplayer setup reaches native
 four-client combat. The first 20-unit run failed cleanup of three ejected pilots;
 retain that FAIL. The corrected census/cleanup and mixed object creation passed

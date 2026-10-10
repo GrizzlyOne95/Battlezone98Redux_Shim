@@ -487,3 +487,14 @@ Graceful client exit and independent restoration audit passed: 128 targets,
 zero mismatch/zero games at 19:36:59 CDT. Original incomplete attempts remain
 retained. Exact timer/capture evidence lives in OpenShim netfix's
 `reverse_engineering/p2p_retry_timing_validation_20261009.md`; raw data is private.
+
+## Consolidation handoff — 2026-10-09
+
+This source tip is now included in `agent/gog-ui-network-catchup` with the
+native UI redesign, impairment/retry tools, four-client mission tooling and
+latest renderer/backlog fixes. See
+[`NETWORK_UI_INTEGRATION_20261009.md`](../Docs/NETWORK_UI_INTEGRATION_20261009.md)
+for the single source map, cross-repository review links, GOG deployment hashes,
+combined tests and next qualification gates. The earlier active-run note is
+historical: `193200` stopped incomplete with one stock arm, all test files
+restored, and no qualified lower-retry comparison. Raw evidence is retained.
