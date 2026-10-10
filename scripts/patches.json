@@ -801,6 +801,17 @@
       "identity": "Local player net id accessor on exact GOG Redux 2.2.301: an 11-byte leaf that returns the 16-bit global at 0x009180D4 in AX (callers movzx it). Bound alongside NetPlayer::SetData 0x00575570, NetPlayer::SetFlagBuffer 0x00575810 and SetMyFlag 0x0056FA50, which the multiplayer flag helpers compare against it; the ban lookup and the career kill trace consult it as well."
     },
     {
+      "name": "Craft::EffectiveDamageResistanceSite",
+      "platforms": ["gog"],
+      "pattern": "D9 9D 04 FF FF FF F3 0F 10 05 98 24 8A 00 0F 2F 85 04 FF FF FF 72 07 32 C0 E9 D1 07 00 00",
+      "offset": 6,
+      "mode": "address",
+      "fallback": "0x004AA6A0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413. Craft distributedObject DamageAlloc vtable entry 0x00889478 targets 0x004AA630 (thiscall, ret 8). Calls AdjustDamageValues then GetDamageValue and stores the effective amount to EBP-0xFC at 0x004AA69A; EBP-0xF8 holds receiver at GameObject+0x18. Hook precedes zero comparison; the same local becomes AddHealth's negative argument at 0x004AAD5F and precedes death flagging at 0x004AAD95. Source DAMAGE+0xC stays untouched for other blast victims. Frida live PID41772 2026-10-07 captured all 30 matched bytes identical to static image. Lazy inline detour, installed by native resistance capability/setter; unavailable on Steam until independently qualified."
+    },
+    {
       "name": "GameObject::GetHandle",
       "pattern": "55 8B EC 83 EC 08 89 4D F8 8B 45 F8 83 B8 5C 01 00 00 00 75 04 33 C0 EB 3E 8B 4D F8 8B 91 60 01 00 00 81 E2 FF 0F 00 00 C1 E2 14 8B 45 FC 25 FF FF 0F 00 0B C2 89 45 FC",
       "offset": 0,
