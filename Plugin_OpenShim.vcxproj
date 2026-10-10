@@ -154,6 +154,7 @@
     <ClCompile Include="src\patches\autosave_restart.cpp" />
     <ClCompile Include="src\patches\bzrnet_settings.cpp" />
     <ClCompile Include="src\patches\career_stats.cpp" />
+    <ClCompile Include="src\patches\prelobby_screen.cpp" />
     <ClCompile Include="src\patches\chunk_engine_hooks.cpp" />
     <ClCompile Include="src\patches\dynamic_geometry_hooks.cpp" />
     <ClCompile Include="src\patches\chunk_identity.cpp" />

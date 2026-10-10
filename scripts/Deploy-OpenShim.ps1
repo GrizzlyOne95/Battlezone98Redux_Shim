@@ -133,7 +133,8 @@ if (Test-Path -LiteralPath $assetManifestSource) {
 # them with the DLL so a clean install cannot silently fall back to
 # missing-texture panels.
 $uiFiles = @(
-    'uiline.png', 'uiplate.png', 'uibtn.png', 'uibtnhv.png'
+    'uiline.png', 'uiplate.png', 'uibtn.png', 'uibtnhv.png',
+    'osh_prelobby_center.png'
 )
 New-Item -ItemType Directory -Force -Path $uiTargetDir | Out-Null
 foreach ($name in $uiFiles) {
