@@ -942,6 +942,7 @@ namespace BZROpenShim
             {"InstallParticleTemplateDedupeHookIfPossible", &InstallParticleTemplateDedupeHookIfPossible},
             {"InstallUiManualObjectDedupeHookIfPossible", &InstallUiManualObjectDedupeHookIfPossible},
             {"InstallSceneTeardownForgetHooksIfPossible", &InstallSceneTeardownForgetHooksIfPossible},
+            {"InstallEntityReloadLifetimeHookIfPossible", &InstallEntityReloadLifetimeHookIfPossible},
             {"InstallMissionTransitionSeamIfPossible", &InstallMissionTransitionSeamIfPossible},
             {"PinDirect3DModulesForShutdown", &PinDirect3DModulesForShutdown},
             {"InstallMultiplayerFlagRenderHookIfPossible", &InstallMultiplayerFlagRenderHookIfPossible},
@@ -1614,6 +1615,7 @@ namespace BZROpenShim
         InstallEmissionLightFixIfPossible();
         VerifyExpectedOgreExportsIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
+        InstallEntityReloadLifetimeHookIfPossible();
         InstallEntityFrustumCullingIfEnabled();
         InstallMissionTransitionSeamIfPossible();
         PinDirect3DModulesForShutdown();

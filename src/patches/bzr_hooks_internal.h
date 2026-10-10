@@ -1136,6 +1136,7 @@ namespace BZROpenShim
         inline constexpr int kBzrRunStateUnknown = -1;
         void DeactivateAllChunkProxySceneResources(const wchar_t* reason);
         void InstallSceneTeardownForgetHooksIfPossible();
+        void InstallEntityReloadLifetimeHookIfPossible();
         bool TryReadBzrRunState(int& value);
         void InstallMissionTransitionSeamIfPossible();
         void PinDirect3DModulesForShutdown();

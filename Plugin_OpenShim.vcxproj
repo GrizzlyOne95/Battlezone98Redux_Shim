@@ -185,6 +185,7 @@
     <ClCompile Include="src\patches\multiplayer_vehicle_flags.cpp" />
     <ClCompile Include="src\patches\odf_helpers.cpp" />
     <ClCompile Include="src\patches\ogre_dedupe_crash_fixes.cpp" />
+    <ClCompile Include="src\patches\ogre_entity_reload.cpp" />
     <ClCompile Include="src\patches\ogre_entity_frustum_cull.cpp" />
     <ClCompile Include="src\patches\ogre_runtime_helpers.cpp" />
     <ClCompile Include="src\patches\ordnance_velocity.cpp" />
