@@ -1,12 +1,12 @@
 [h1]OpenShim Progress Reference[/h1]
 
-[b]Updated: 2026-10-07. Source validation: 2026-10-07.[/b]
+[b]Updated: 2026-10-09. Source audit: 2026-10-07; native UI/network integration: 2026-10-09.[/b]
 
 Canonical progress reference for OpenShim, Extra Utilities (EXU), Campaign Reimagined (CR), bzfile and the community multiplayer server. OpenShim owns native engine fixes and shared settings; EXU owns reusable Lua/runtime APIs; CR and ISDF Chronicles provide consuming content; bzfile owns protected file/update primitives.
 
 [b]Reading status:[/b] Implemented means code exists at the audited revision. Qualification pending identifies a remaining runtime, visual, multiplayer or platform check. Unfinished foundations have code but do not yet deliver the intended feature. Open reports require reproduction or diagnosis and are not automatically confirmed engine defects.
 
-The source audit, pinned revisions and historical evidence are in [code]Docs/ROADMAP_CODE_VALIDATION_20261007.md[/code]. No new game tests were run for this reference update. Current-main APIs and consuming mod source do not establish inclusion in an older bundled DLL. Historical local GOG results do not qualify Steam, Proton or Wine.
+The source audit, pinned revisions and historical evidence are in [code]Docs/ROADMAP_CODE_VALIDATION_20261007.md[/code]. The October 9 combined branch, deployment hashes, GOG menu verification and remaining network gates are in [code]Docs/NETWORK_UI_INTEGRATION_20261009.md[/code]. Current-main APIs and consuming mod source do not establish inclusion in an older bundled DLL. Local GOG results do not qualify Steam, Proton or Wine.
 
 [h2]Release and Installation[/h2]
 
@@ -47,7 +47,7 @@ These are source milestones, subject to the evidence scope above. Features with 
 [h3]Presentation, Input and Settings[/h3]
 
 [list]
-[*] [b]Settings and input[/b] - native Settings UI, preset migration, rewritten key-binding screen, Raw Input controls/absolute device handling, briefing scrolling, main-menu build-version notice and restored options/keybind backgrounds. The audited registry contains 68 rows, including career reset.
+[*] [b]Settings and input[/b] - native nine-category Settings hub/pages and painted keybind editor, enabled by default, with preset migration, Raw Input controls/absolute device handling, briefing scrolling and build-version notice. The previously separate [code]ui/native-screens[/code] branch is included in the October 9 integration; full native UI assets are packaged. GOG hub/Video/Back/keybind smoke passes on the combined build. Steam/Proton/Wine and combined multiplayer qualification remain pending; this is local development integration, not a new published release.
 [*] [b]Renderer selection[/b] - startup DX9/DX11 selection through INI/command-line transport and Redux/Enhanced/Retro render-profile selection. Settings exposes Render Profile; it has no renderer-backend selector row.
 [*] [b]Lighting[/b] - player/AI headlight RGB, intensity, beam shaping and falloff/range repair; empty-craft running lights; team engine-flame colors; isolated sun fullscreen-flash suppression option.
 [*] [b]Destruction[/b] - physical chunks, automatic bone-group meshes with stock-debris fallback and startup cache validation, pivot/quaternion and physical-origin corrections, batch rebuild deduplication, GOG DX9/DX11 destruction/live-fire submission reduction and DX11 software-skinned mesh readback repair. Local GOG validation is recorded; model-shaped pieces require usable skeleton groups and native fragment nodes.
