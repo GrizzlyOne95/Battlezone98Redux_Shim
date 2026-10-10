@@ -281,7 +281,10 @@ namespace BZROpenShim
     // pointer, so the real geo-name field can be located from a live session.
     static void DumpChunkGeomBytes(const char* tag, const void* geomPtr, volatile long* budget)
     {
-        if (!geomPtr || !budget || InterlockedDecrement(budget) < 0)
+        // Diagnostic only: the dword probe below deliberately dereferences
+        // floats and indices as pointers, so every call takes first-chance
+        // faults. Never run it without an explicit chunk trace request.
+        if (!g_ChunkEventLogging || !geomPtr || !budget || InterlockedDecrement(budget) < 0)
             return;
 
         uint8_t raw[0x60] = {};
@@ -623,7 +626,22 @@ namespace BZROpenShim
         EraseChunkResolvedBinding(boundObjectBytes);
 
         if (boundObjectBytes)
+        {
             StoreChunkResolvedBinding(boundObjectBytes, sourceTreeProbe);
+            // Only a freshly created chunk (count advanced) owns this matrix
+            // now; a rejected create already removed the object.
+            const ChunkResolvedBindingEntry* binding = createdEntryPtr
+                ? FindChunkResolvedBindingEntryForGeom(boundObjectBytes, sourceTreeProbe.source.geomName)
+                : nullptr;
+            if (binding && binding->payloadMeshName[0])
+            {
+                const void* geomRef = nullptr;
+                char geomName[64] = {};
+                TryReadChunkGeomIdentity(boundObjectBytes, geomRef, geomName, sizeof(geomName));
+                RecenterNativeChunkObject(const_cast<uint8_t*>(boundObjectBytes),
+                    binding->payloadMeshName, geomRef);
+            }
+        }
 
         // Now that the debris exists, stop the intact hull from drawing the piece
         // that just left it. No-op unless PartialFragmentObject is on the stack.
@@ -690,7 +708,7 @@ namespace BZROpenShim
 
         // Baseline layout dump of a known-good chunklet geo (its name reads
         // fine) to compare against the craft-piece geoms whose names don't.
-        if (createdEntryPtr && createdEntryPtr->objectBytes)
+        if (g_ChunkEventLogging && createdEntryPtr && createdEntryPtr->objectBytes)
         {
             const void* geomRef = nullptr;
             char geomName[64] = {};
@@ -702,10 +720,14 @@ namespace BZROpenShim
         }
     }
 
-    static volatile long g_ChunkFragmentWalkLogBudget = 160;
+    static volatile long g_ChunkFragmentWalkLogBudget = 16;
 
     static bool AcquireChunkFragmentWalkLogSlot()
     {
+        if (!g_ChunkEventLogging)
+            return false;
+        if (g_TraceChunkRenderVerbose)
+            return true;
         return InterlockedDecrement(&g_ChunkFragmentWalkLogBudget) >= 0;
     }
 
@@ -830,6 +852,8 @@ namespace BZROpenShim
 
         g_ActiveFragmentSourceOgreEntity =
             ResolveCraftOgreEntity(rootObjectPtr, g_ActiveFragmentSourceOgreEntityVia);
+        PrepareNativeChunkPayloads(g_ActiveFragmentSourceOgreEntity,
+            g_ActiveFragmentSourceMeshName, sizeof(g_ActiveFragmentSourceMeshName));
 
         // Fragment nodes are render-tree nodes; the ODF lives on the GameObject
         // that owns them, one hop out through the obj76 back-link.
@@ -984,18 +1008,31 @@ namespace BZROpenShim
             return;
 
         const bool outermost = (g_ChunkFragmentHookDepth == 0);
+        // The detour exists for chunk tracing, SkinnedGibs, or both. Only the
+        // trace path does the old source-mesh work, so a SkinnedGibs-only
+        // install leaves every non-person fragmentation exactly as stock.
+        const bool trace = g_TraceChunkRender || g_TraceChunkEffectRuntime;
         uint32_t countBefore = 0;
+        bool skinnedGibs = false;
         if (outermost)
         {
-            LogChunkFragmentWalkTree(L"FullFragmentObject", thisPtr, objectPtr, preserveFlag);
-            TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countBefore);
-            HideChunkFragmentSourceMesh(objectPtr);
-            BeginActiveFragmentSourceContext(objectPtr);
+            // Captures the person's pose now, before the engine turns its
+            // node tree into chunks; no-op (false) for anything else.
+            skinnedGibs = SkinnedGibsBeginFullFragment(thisPtr, objectPtr, velocity);
+            if (trace)
+            {
+                LogChunkFragmentWalkTree(L"FullFragmentObject", thisPtr, objectPtr, preserveFlag);
+                TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(thisPtr), countBefore);
+                HideChunkFragmentSourceMesh(objectPtr);
+                BeginActiveFragmentSourceContext(objectPtr);
+            }
         }
         ++g_ChunkFragmentHookDepth;
         g_BzrFn_ChunkEffectFullFragment(thisPtr, objectPtr, velocity, preserveFlag);
         --g_ChunkFragmentHookDepth;
-        if (outermost)
+        if (outermost && skinnedGibs)
+            SkinnedGibsEndFullFragment(thisPtr);
+        if (outermost && trace)
         {
             g_ActiveFragmentSourceMeshName[0] = '\0';
             g_ActiveFragmentSourceOgreEntity = nullptr;

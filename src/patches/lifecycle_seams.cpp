@@ -3,6 +3,7 @@
 // teardown forget hooks, the SetRunning mission transition seam (with the
 // EXU lifecycle notify) and the D3D11 module pin for shutdown ordering,
 // split out of bzr_hooks.cpp.
+#include "native_hud_runtime.h"
 #include "bzr_hooks.h"
 #include "bzr_object_layout.h"
 #include "bzr_hooks_internal.h"
@@ -96,6 +97,8 @@ namespace BZROpenShim
                 WeaponPresentationSceneTeardownBegin();
             TerrainProxySceneTeardownBegin(sceneManager, true);
             ForgetAllChunkProxySceneResources(L"clearScene");
+            ForgetSkinnedGibSceneResources(L"clearScene");
+            ForgetShellCasingSceneResources(L"clearScene");
             ForgetPilotFlashlight(L"clearScene");
             ForgetMultiplayerFlagSceneResources(L"clearScene");
             if (g_OgreFn_ClearSceneOriginal)
@@ -111,6 +114,8 @@ namespace BZROpenShim
                 WeaponPresentationSceneTeardownBegin();
             TerrainProxySceneTeardownBegin(sceneManager, false);
             ForgetAllChunkProxySceneResources(L"destroyAllMovableObjects");
+            ForgetSkinnedGibSceneResources(L"destroyAllMovableObjects");
+            ForgetShellCasingSceneResources(L"destroyAllMovableObjects");
             ForgetPilotFlashlight(L"destroyAllMovableObjects");
             ForgetMultiplayerFlagSceneResources(L"destroyAllMovableObjects");
             if (g_OgreFn_DestroyAllMovablesOriginal)
@@ -349,6 +354,12 @@ namespace BZROpenShim
             const bool readPrevious = TryReadBzrRunState(previous);
             if (g_BzrFn_SetRunningOriginal)
                 g_BzrFn_SetRunningOriginal(state);
+            // The init-time pin runs ~5 s before Ogre loads its render system
+            // plugins on GOG, and the deferred retry only recurs from Lua
+            // bridges, so the guard used to never engage. Every SetRunning,
+            // including RUN_WAS_EXITED ahead of Ogre's plugin unload, is
+            // after plugin load. Latched per module: a no-op once pinned.
+            PinDirect3DModulesForShutdown();
             // Re-read instead of trusting the argument: SetRunning refuses every
             // change once the state is RUN_WAS_EXITED.
             int current = kBzrRunStateUnknown;
@@ -374,11 +385,16 @@ namespace BZROpenShim
                 // still-live Ogre objects and aborted in RenderMultiplayerFlags
                 // (battlezone98redux.exe.35108.dmp).
                 DeactivateAllChunkProxySceneResources(L"left simulation");
+                DeactivateSkinnedGibs(L"left simulation");
+                DeactivateShellCasings(L"left simulation");
+
+                ResetPathBlockState(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);
                 WeaponPresentationMissionRunStateChanged(false);
                 PilotFlashlightNotifyMissionRunStateChanged(false);
                 FogWakeNotifyMissionRunStateChanged(false);
                 NotifyExuMissionSimulationState(false);
+                NativeHud::Runtime::ResetMission();
             }
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
             {
@@ -492,8 +508,9 @@ namespace BZROpenShim
                 if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN, kModules[index], &module) ||
                     module == nullptr)
                 {
-                    // Not loaded yet (or a DX9 run). Retried from
-                    // RetryDeferredRuntimeHooks until it appears.
+                    // Not loaded yet: the init-time call precedes Ogre's
+                    // plugin load. BzrSetRunningHook retries on every run
+                    // state change, which is what actually pins on GOG.
                     continue;
                 }
 

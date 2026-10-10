@@ -13,6 +13,15 @@
       "identity": "PromptSaveMission at 0x004FBE90 passes its 4096-byte filename buffer and missionSave=1 to the thiscall GetSaveName dialog at 0x0056AD10. AL=false branches to cleanup before SaveGame at 0x004FBF48. The dialog returns with RET 8. GOG PID 430832 live bytes matched on 2026-09-07. Hooking filename selection covers BZN and TRN before any terrain writes and preserves caller cancellation."
     },
     {
+      "name": "HUD 2D Depth Floor Margin",
+      "pattern": "F3 0F 10 05 30 25 8A 00 F3 0F 11 85 88 FB FF FF F3 0F 10 85 88 FB FF FF F3 0F 59 05 08 26 8A 00 F3 0F 11 05 80 D7 8E 00",
+      "offset": 28,
+      "expected_size": 4,
+      "fallback": "0x00665387",
+      "require_unique": true,
+      "identity": "View setup (inside the Onyx2015 camera/viewport setup at 0x00664110) loads the main camera near clip 0.08 from 0x008A2530, passes it to Camera vtable +0x140, then stores near * [0x008A2608] (1.0000001f) to 0x008ED780, the screen-space 2D depth floor. This mulss is the only reference to 0x008A2608 in .text and the only writer of 0x008ED780; FUN_0068B050 clamps DAT_00920EF4 to it, FUN_0068B0E0 seeds it, FUN_0068CE80 rejects depths below it. FUN_00686600 maps 2D vertex z through the camera projection, so the floor layer (HUD text, gauges, weapon icons, reticle) sits one ULP in front of the near plane and is clipped for some far-clip values. A Frida dump of DynamicMain on GOG SHA256 8D71F56C... (hilo.trn broken NormalView, 2026-10-03) showed the HUD floor-layer batches at squared depth 6.4e-3 = 0.08^2; with this patch the same TRN renders all HUD text, gauges, icons and reticle (validated 2026-10-03, live floor 0.080008). The patch rewrites only the abs32 operand to an OpenShim-owned 1.0001f; the whole five-instruction sequence is matched, so any other layout stands down."
+    },
+    {
       "name": "GameObject Handle Stale Slot Guard",
       "platforms": [
         "gog"
@@ -199,6 +208,33 @@
       "fallback": "0x0059D7C4",
       "require_unique": true,
       "identity": "Third Carrier::GetWeapon site in Person::Simulate (0x0059D340), sibling of Pilot Carrier Null Guard (0x0059D76D, same function). The loop at 0x0059D777 walks slots 0-4 of the selected mask returned by Carrier::GetSelected, calls Carrier::GetWeapon (0x00417F60) at 0x0059D7C3 for every set bit, and dereferences the result unconditionally: mov eax,[edx+8] at 0x0059D7D4, then cmp [eax+0xC],'SNIP' to set the crouch flag at [ebp-0x351]. GetWeapon returns null when the hardpoint mask at [carrier+0x2C] lacks that bit, so a selected-mask bit on an empty hardpoint faults. Observed on GOG Redux 2.2.301 in ISDF Chronicles isdfms10 (dump battlezone98redux.exe.54600.dmp): a jak person whose Lua removed its only weapon with GiveWeapon(h, nil, 0) kept selected=1 at [carrier+0x30] with hardpoint mask 0, EIP 0x0059D7D4 reading [0+8]. The result at [ebp-0x4B4] is read only by that SNIP test, so the guard returns a static non-SNIP stand-in for an empty slot. The earlier GetWeapon call at 0x0059D3F0 already null-checks and is left stock. Pattern verified single-match by whole-image scan on 2026-09-26."
+    },
+    {
+      "name": "Shell Casings Cannon Shot Call",
+      "pattern": "8B 85 B0 FD FF FF 8B 48 18 51 8D 55 BC 52 8B 85 B0 FD FF FF 8B 48 0C E8 ?? ?? ?? ?? 89 85 9C FD FF FF",
+      "offset": 24,
+      "expected_size": 4,
+      "fallback": "0x0048F550",
+      "require_unique": true,
+      "identity": "Accepted-shot OrdnanceClass factory call (E8 at 0x0048F54F) inside Cannon::Simulate 0x0048EFE0 on GOG Redux 2.2.301. RTTI identity: the vtables of .?AVCannon@@ (0x00876F4C), .?AVMortar@@ (0x00883698) and .?AVSniperGun@@ (0x00887B34) all hold 0x0048EFE0 at slot +0x18, the Simulate slot the global weapon pass calls. The function stores ECX (this = Weapon) at [EBP-250h] in its prologue (0x0048EFF5), and the call passes the final copied Matrix at [EBP-44h] and the owner OBJ76 [weapon+18h] on the stack with ECX = [weapon+0Ch] (OrdnanceClass); the factory 0x00586FF0 ends RET 8 and the result is stored at [EBP-264h]. ShellCasings redirects only this call to a bridge that runs the factory first, then copies the weapon, matrix and owner for a cosmetic casing. The pattern (both [EBP-250h] loads, the call and the store) is a single match in the GOG image (whole-image scan 2026-10-05). Note: WeaponPresentation::CannonShotCall (0x005A7195) is in PopperGun::Simulate 0x005A6F70, not Cannon (PopperGun vtable 0x00885D88 slot +0x18)."
+    },
+    {
+      "name": "Shell Casings MachineGun Shot Call",
+      "pattern": "8B 95 B0 FD FF FF 8B 42 18 50 8D 4D BC 51 8B 95 B0 FD FF FF 8B 4A 0C E8 ?? ?? ?? ?? 89 85 98 FD FF FF",
+      "offset": 24,
+      "expected_size": 4,
+      "fallback": "0x0050BE3B",
+      "require_unique": true,
+      "identity": "Accepted-shot OrdnanceClass factory call (E8 at 0x0050BE3A) inside MachineGun::Simulate 0x0050B960 on GOG Redux 2.2.301, slot +0x18 of the .?AVMachineGun@@ vtable 0x0087D4D0. Same frame contract as the Cannon site: this = Weapon stored at [EBP-250h] (0x0050B975), final Matrix [EBP-44h] and owner OBJ76 [weapon+18h] pushed, ECX = [weapon+0Ch], factory 0x00586FF0 RET 8, result stored at [EBP-268h]. Redirected by ShellCasings to the same bridge. Single match in the GOG image (whole-image scan 2026-10-05)."
+      },
+      {
+      "name": "Path Block Faces BlockCells Hook",
+      "pattern": "55 8B EC 83 EC 64 A1 ?? ?? ?? ?? 33 C5 89 45 FC 83 3D ?? ?? ?? ?? 00 75 05 E9 ?? ?? ?? ?? 8B 4D 08 83 C1 18 8B 45 08 8B 50 18 8B 02 FF D0 83 78 1C 05 0F 84",
+      "offset": 0,
+      "expected_size": 6,
+      "fallback": "0x00468A70",
+      "require_unique": true,
+      "identity": "BlockCells(GameObject*, bool add) at 0x00468A70 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), cdecl. Its callers are ProcessBuildings 0x00469C70 (call 0x00469D77, the map PostLoad pass reached from AiUtilFeature::PostLoad 0x0046B0CA), AiUtilFeature::AddObject 0x0046B100 (0x0046B18A, add=1) and AiUtilFeature::DeleteObject 0x0046B1A0 (0x0046B22A, add=0), whose class filters (class 2/10/5 or sig TURR, minus PROX/GEIZ/SFLD/SPWN) match BZ 1.5's, plus five Producer/ConstructionRig deploy calls (0x005AC047, 0x005AC0A8, 0x005AC95B, 0x005AD46D, 0x005AFF38); whole-image E8 scan 2026-10-05. Body: cmp [cellType 0x0260D178],0; class+0x1C == 5 takes the perimeter branch; otherwise get_obj_bounding_box 0x0062E650 and the matrix [obj+0xF4]+0x20 build the quad at 0x0260D158 (count 4 at 0x00917380) and BuildingCells 0x004698A0 runs UpdateCells 0x004690F0 with BuildingBlock 0x004693C0 or BuildingUnblock 0x004697C0. PathBlockFaces detours the entry (JMP5 over the 6-byte push ebp/mov ebp,esp/sub esp,64h prologue, relocated to a trampoline); the stock body always runs first. Single match in the GOG image (scan 2026-10-05)."
     },
     {
       "name": "HoverCraft Turbo Sound Stop Guard",
@@ -533,6 +569,156 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Released TRN/INI float getter at 0x00787B60. FUN_00780160 and the terrain lighting/height readers pass section, key, float fallback, and current TRN filename; the body copies the fallback, rejects empty strings, normalizes/loads the named file through FUN_00787370, retrieves a 16-byte value through FUN_00787660, parses it with the unique percent-f sscanf path, and returns the float in ST0. The signature anchors the entry and its four-argument validation prelude."
+    },
+    {
+      "name": "Terrain::HeightAt",
+      "pattern": "55 8B EC 83 EC 2C F3 0F 5A 05 ?? ?? ?? ?? F2 0F 59 45 08 F2 0F 11 45 08 F3 0F 5A 05 ?? ?? ?? ?? F2 0F 59 45 10 F2 0F 11 45 10 83 EC 08 F2 0F 10 45 08 F2 0F 11 04 24 E8",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x007855E0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Released terrain height sampler, double __cdecl(double x, double z), at 0x007855E0 on GOG Redux 2.2.301. Stock ProximityMine::Simulate's detonation block (FUN_005B0E40, call at 0x005B1189) stores its return into obj+0x50 (the y of the posit triple at obj+0x48/+0x50/+0x58) before building the explosion, as team_filter_mines.cpp reproduces; it has 50+ callers, including the Person ground-follow code at 0x005A05BE-0x005A071C. The body scales both world coordinates by the float at 0x02CC50E4, floors them through 0x0046EAF0 and bilinearly blends four grid heights fetched through 0x00784100. The pattern (entry, both coordinate scalings, first floor call) matches once in the GOG image. Used by SkinnedGibs for gib ground contact only; it reads terrain and writes nothing."
+    },
+    {
+      "name": "CollisionGrid::Objects",
+      "pattern": "F2 0F 11 04 24 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 8D 4D 98 51 8D 8D 6C FF FF FF E8",
+      "offset": 7,
+      "mode": "abs32_operand",
+      "fallback": "0x00917A6C",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Global pointer to the object collision grid on GOG Redux 2.2.301, read by `mov ecx,[0x00917A6C]` at 0x004810C0 immediately before the range query 0x005B2950 in FUN_00480F40, whose results loop resolves each handle through GameObject::GetObj 0x004DA060. The same load precedes the query at 0x004672AE and 0x005AC2E6. ShieldTower's own query (0x005D10A3) uses a different grid at 0x009173DC. team_filter_mines.cpp's kCollisionRangeSearchAddr (0x006A3E10) is inside .text, not this global. Read only, by ShellCasings to find objects near flying casings."
+    },
+    {
+      "name": "CollisionGrid::Crafts",
+      "pattern": "F2 0F 11 04 24 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 8D 8D 88 FE FF FF 51 8D 8D 54 FE FF FF E8",
+      "offset": 7,
+      "mode": "abs32_operand",
+      "fallback": "0x009173DC",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Global pointer to the craft collision grid (BZ 1.5 collision_range_search) on GOG Redux 2.2.301, read by `mov ecx,[0x009173DC]` at 0x005D10A3 immediately before the range query 0x005B2950 in stock ShieldTower::Simulate 0x005D0D80, whose results loop resolves each handle through GameObject::GetObj 0x004DA060. The grid is created at 0x0049B36C and refilled every frame by the function around 0x0049B205-0x0049B2A8 (clear 0x005B2BD0, insert loop over the craft list 0x0094E2D4, done 0x005B2C30), matching 1.5 Collision_Fill_In_Range_Search_Structure over Craft::craftList. Stock MagnetMine::Simulate (0x0050C801) and ProximityMine::Simulate (0x005B0EFA) walk that same craft list directly. The sibling object grid 0x00917A6C (GameObject::objectRange, PR #405 CollisionGrid::Objects, refilled at 0x004DFAD6-0x004DFB8F) holds every GameObject. The pattern (store, grid load, query call, results lea) is a single match in the GOG image (whole-image scan 2026-10-05). Read only, by the ShieldTower/MagnetMine/ProximityMine team-filter paths in team_filter_mines.cpp."
+    },
+    {
+      "name": "CollisionGrid::RangeQuery",
+      "pattern": "55 8B EC 83 EC 44 89 4D FC 8B 45 FC F2 0F 10 45 08 F2 0F 5C 40 18 F2 0F 11 45 08 8B 4D FC F2 0F 10 45 10 F2 0F 5C 41 10",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x005B2950",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Grid range query on GOG Redux 2.2.301: thiscall(grid, double minX, double minZ, double maxX, double maxZ, results*), RET 24h. Fills a 44-byte results record (clears its done flag, clamps cell bounds padded by 20 m, then 0x005B26E0 primes the first cell); FUN_005B28E0 wraps it as (x - r, z - r, x + r, z + r). Called with the grid from CollisionGrid::Objects at 0x004810C6, 0x004672B4 and 0x005AC2EC. Single match in the GOG image."
+    },
+    {
+      "name": "CollisionGrid::RangeNext",
+      "pattern": "55 8B EC 83 EC 08 89 4D FC 8B 45 FC 0F B6 08 85 C9 74 07 32 C0 E9 ?? ?? ?? ?? 8B 55 FC 83 7A 28 FF 75",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00462710",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Grid results iterator on GOG Redux 2.2.301: bool thiscall(results, uint32_t** outHandle), RET 4; returns false once the done flag at +0 is set, else advances through the cell lists and writes a pointer to the next object handle. FUN_00480F40 loops it at 0x004810D5 with ECX = the results record passed to CollisionGrid::RangeQuery and dereferences the out pointer into GameObject::GetObj 0x004DA060. Single match in the GOG image."
+    },
+    {
+      "name": "PathBlock::CellType",
+      "pattern": "55 8B EC A1 ?? ?? ?? ?? 03 45 08 0F B6 08 83 E1 F4 8B 15 ?? ?? ?? ?? 03 55 08 88 0A",
+      "offset": 4,
+      "mode": "abs32_operand",
+      "fallback": "0x0260D178",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "AI path-grid cell byte array pointer (BZ 1.5 cellType) on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), read by BuildingUnblock 0x004697C0 (mov eax,[0x0260D178]; add eax,[ebp+8]; and cl,0F4h), tested for null at BlockCells 0x00468A80 and UpdateCells 0x004690F6, freed by BlockedCellClean 0x0046AC00. Single match. Read and written by PathBlockFaces for ODF-flagged buildings only."
+    },
+    {
+      "name": "PathBlock::BuildingUnblock",
+      "pattern": "55 8B EC A1 ?? ?? ?? ?? 03 45 08 0F B6 08 83 E1 F4 8B 15 ?? ?? ?? ?? 03 55 08 88 0A",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004697C0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "BuildingUnblock(int index, int gx, int gz) cdecl at 0x004697C0 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): cellType[index] &= 0xF4, then |= 2 when CellIsSteep 0x00468890(gx,gz) else |= 1 when CellIsSlope 0x00468450(gx,gz). Selected by BuildingCells 0x004698A0 for add=0 and called per cell by UpdateCells 0x004690F0. PathBlockFaces calls it to clear building bits so the terrain bits are re-derived exactly as stock deletion does."
+    },
+    {
+      "name": "PathBlock::InvalidateStrips",
+      "pattern": "55 8B EC 83 EC 18 F3 0F 10 45 08 F3 0F 59 05 ?? ?? ?? ?? F3 0F 11 45 08 F3 0F 10 45 0C",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0058D090",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "InvalidateStrips(float x0, float z0, float x1, float z1) cdecl at 0x0058D090 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): scales by Grid_Scale 0x02CC50E4 and resets each 16x16-cell path strip block in range (0x0058CF00). Called at the end of UpdateCells (0x00469327) and from 0x00469C5E. PathBlockFaces calls it again after rewriting cells of a flagged building's box."
+    },
+    {
+      "name": "PathBlock::GridSize",
+      "pattern": "55 8B EC 81 EC B8 00 00 00 83 3D ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? F3 0F 2A 45 0C F3 0F 58 05 ?? ?? ?? ?? F3 0F 59 05 ?? ?? ?? ??",
+      "offset": 39,
+      "mode": "abs32_operand",
+      "fallback": "0x02CC50E0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Terrain Grid_Size float on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), read by BuildingBlock 0x004693C0 (mulss xmm0,[0x02CC50E0] at 0x004693E3) for the cell centre ((g + 0.5) * size); written with 5.0 (.rdata 0x008A285C) by the terrain init 0x0077E990, which also stores Grid_Scale = 1/size at 0x02CC50E4. Single match (BuildingBlock entry)."
+    },
+    {
+      "name": "PathBlock::BlockVertArray",
+      "pattern": "C7 05 ?? ?? ?? ?? 04 00 00 00 8B 4D C0 F3 0F 10 01 F3 0F 59 45 C4 8B 55 C0 F3 0F 10 4A 18 F3 0F 59 4D CC F3 0F 58 C1 F3 0F 5A C0 8B 45 C0 F2 0F 58 40 28 F2 0F 5A C0 B9 08 00 00 00 6B D1 00 F3 0F 11 82 ?? ?? ?? ??",
+      "offset": 67,
+      "mode": "abs32_operand",
+      "fallback": "0x0260D158",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "blockVertArray (4 x {x,z} float) on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): BlockCells 0x00468B0F sets blockVertCount [0x00917380] = 4 and stores corner 0 = right_x*min.x + front_x*min.z + posit_x at [0x0260D158] (0x00468B4E); BuildingBlock 0x004693C0 reads it as [count*8 + 0x0260D150]. PathBlockFaces reads the quad back after the stock call (a sentinel detects the perimeter/degenerate branches)."
+    },
+    {
+      "name": "PathBlock::GridMaxX",
+      "pattern": "8B 0D ?? ?? ?? ?? 2B 0D ?? ?? ?? ?? 83 E9 01 51 6A 00 F3 0F 10 45 08 F3 0F 59 05 ?? ?? ?? ?? 51 F3 0F 11 04 24 E8",
+      "offset": 2,
+      "mode": "abs32_operand",
+      "fallback": "0x02CE99A0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GridMaxX int on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), from UpdateCells 0x004690F0 at 0x0046913A: mov ecx,[0x02CE99A0]; sub ecx,[0x02CE99C0]; sub ecx,1 is the clamp bound for floor(x0 * Grid_Scale) - GridMinX. The same pair forms the row stride (0x00469265). Single match."
+    },
+    {
+      "name": "PathBlock::GridMinX",
+      "pattern": "8B 0D ?? ?? ?? ?? 2B 0D ?? ?? ?? ?? 83 E9 01 51 6A 00 F3 0F 10 45 08 F3 0F 59 05 ?? ?? ?? ?? 51 F3 0F 11 04 24 E8",
+      "offset": 8,
+      "mode": "abs32_operand",
+      "fallback": "0x02CE99C0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GridMinX int on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), the subtrahend at UpdateCells 0x00469140 (see PathBlock::GridMaxX); also subtracted from the floored cell x at 0x00469173. Single match."
+    },
+    {
+      "name": "PathBlock::GridMaxZ",
+      "pattern": "8B 15 ?? ?? ?? ?? 2B 15 ?? ?? ?? ?? 83 EA 01 52 6A 00 F3 0F 10 45 0C F3 0F 59 05 ?? ?? ?? ?? 51 F3 0F 11 04 24 E8",
+      "offset": 2,
+      "mode": "abs32_operand",
+      "fallback": "0x02CE99C4",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GridMaxZ int on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), from UpdateCells 0x004690F0 at 0x004691CF: mov edx,[0x02CE99C4]; sub edx,[0x02CD9984]; sub edx,1 bounds floor(z0 * Grid_Scale) - GridMinZ; CellIsBlocked 0x0046AE20 uses the same pair. Single match."
+    },
+    {
+      "name": "PathBlock::GridMinZ",
+      "pattern": "8B 15 ?? ?? ?? ?? 2B 15 ?? ?? ?? ?? 83 EA 01 52 6A 00 F3 0F 10 45 0C F3 0F 59 05 ?? ?? ?? ?? 51 F3 0F 11 04 24 E8",
+      "offset": 8,
+      "mode": "abs32_operand",
+      "fallback": "0x02CD9984",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GridMinZ int on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), the subtrahend at UpdateCells 0x004691D5 (see PathBlock::GridMaxZ). Single match."
+    },
+    {
+      "name": "PathBlock::ReadFile",
+      "pattern": "8B 4D DC 51 8B 55 F0 83 C2 28 52 8D 45 B4 50 8B 4D 0C 51 E8 ?? ?? ?? ?? 83 C4 10 85 C0",
+      "offset": 19,
+      "mode": "rel32_target",
+      "fallback": "0x008290F0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Engine file-system read 0x008290F0 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): cdecl bool(name, int* size, void* buffer, int capacity), a wrapper over 0x00828DC0 (loose addon file via fopen, or packed record via 0x008273E0). Taken from the item-cache miss path in UseItem's worker 0x00481B80 (call at 0x00481D0D). It does not touch the item cache: a loose file reports its size before failing on a short buffer; a packed record fails without one. Used by PathBlockFaces to read ODF/SDF/GEO bytes (reading those through UseItem/UnlockItem inside BlockCells broke the building being added). Single match."
     },
     {
       "name": "MPVehicleList::LoadCallSiteNetveh",
@@ -1002,6 +1188,12 @@
     }
   ],
   "engine_addresses": [
+    {
+      "name": "GAS_SetMaxVoices",
+      "address": "0x0043A660",
+      "expected": "55 8B EC 83 3D 94 55 91 00 00 75 02 EB 0B A1 94 55 91 00 8B 4D 08 89 48 04",
+      "identity": "GAS master voice-cap setter on exact GOG Redux 2.2.301: if [0x00915594] (the GAS master pointer) is non-null it stores the argument at master+0x04. FirstGAS 0x00439F10 calls it with 0x40, and the per-frame voice update 0x0043A170 stops admitting 3D sounds once its active count reaches *(master+4). The SoundChannels override writes that same field, so its offset is guarded by this signature: the trailing 04 is the store displacement. A build whose setter differs skips the override rather than writing a field nothing reads."
+    },
     {
       "name": "VehicleListSelection",
       "address": "0x00945478",

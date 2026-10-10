@@ -126,6 +126,15 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::JMP5, {}, "Map List Rewrite for Hop-Fix 3/3", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Map List Fix Support 1/3", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Main Menu Version Text OpenShim", false, {} },
+            // View setup stores the screen-space 2D depth floor as
+            // near * 1.0000001, one float ULP in front of the near plane. HUD
+            // text, gauges, weapon icons and the reticle all sit on that floor,
+            // so for some far-clip values (driven by the TRN's NormalView
+            // VisibilityRange) the projected z rounds past the near plane and
+            // the whole layer is clipped. Repoint the mulss operand at a
+            // constant with real margin; see Docs/FEEDBACK_MASTER_20260909.md
+            // section 12.1.
+            { 0, HookEngine::PatchType::DWORD, {}, "HUD 2D Depth Floor Margin", false, {} },
             { 0, HookEngine::PatchType::BYTE1, { 0xEB }, "Vehicle List Mod Fix 3/4 (Always Update Vehicle Control)", false, {} },
             // Rewrites the whole `push 0x10188` that supplies DSBUFFERDESC.dwFlags
             // for the streaming music buffer, adding DSBCAPS_GLOBALFOCUS (0x8000)
@@ -154,6 +163,18 @@ namespace BZROpenShim
             // Carrier::GetWeapon result for the selected mask; an empty
             // selected hardpoint gets a non-SNIP stand-in instead of null.
             { 0, HookEngine::PatchType::REL32, {}, "Person Sniper Scan Weapon Null Guard", false, {} },
+            // ShellCasings: the OrdnanceClass factory call of an accepted
+            // Cannon/Mortar/SniperGun and MachineGun shot goes through a
+            // bridge that runs the factory, then queues a cosmetic casing.
+            // Removed at startup when [General] ShellCasings = 0.
+            { 0, HookEngine::PatchType::REL32, {}, "Shell Casings Cannon Shot Call", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Shell Casings MachineGun Shot Call", false, {} },
+
+            // PathBlockFaces: BlockCells entry detour. ODFs with pathBlock =
+            // "faces"/"none" block only the path-grid cells inside their
+            // collision solids; every other object keeps the stock box.
+            // Removed at startup when [General] PathBlockFaces = 0.
+            { 0, HookEngine::PatchType::JMP5, {}, "Path Block Faces BlockCells Hook", false, {} },
             // LensFlare::~LensFlare at 0x004F9250 runs from an atexit thunk
             // during CRT exit, after Ogre::MaterialManager has been destroyed.
             // It calls getSingleton and dereferences the null result twice for

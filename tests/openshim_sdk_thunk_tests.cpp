@@ -35,6 +35,8 @@ namespace
         return TRUE;
     }
 
+    DWORD WINAPI FakeNativeHudCapabilities() { return 3; }
+
     float WINAPI FakeGetRadarSizeScale() { return 2.5f; }
 
     BOOL WINAPI FakeSetHudSpriteRect(LPCSTR name, int x, int y, int w, int h)
@@ -67,6 +69,8 @@ namespace
             .OpenShimImpl_SetHudSpriteRect = FakeSetHudSpriteRect,
             .OpenShimImpl_SetUnitVoThrottle = FakeSetUnitVoThrottle,
             .OpenShimImpl_SupportsRenderProfile = FakeSupportsRenderProfile,
+            .OpenShimImpl_GetNativeHudLayoutCapabilities = FakeNativeHudCapabilities,
+            .OpenShimImpl_SetNativeHudMeterRect = FakeSetHudSpriteRect,
         };
         return t;
     }
@@ -78,11 +82,13 @@ int main()
     CHECK(BZROpenShim::SdkBridge::Provider() == nullptr);
 
     const uint64_t before = BZROpenShim::SdkBridge::UnavailableCallCount();
+    CHECK(OpenShimGetNativeHudLayoutCapabilities() == 0);
+    CHECK(OpenShimSetNativeHudMeterRect("hull", 1, 2, 3, 4) == FALSE);
     CHECK(OpenShimClearAllAiUnitTuning() == FALSE);
     CHECK(OpenShimGetRadarSizeScale() == 0.0f);
     CHECK(OpenShimSetUnitVoThrottle(123) == FALSE);
     CHECK(BZROpenShim::OpenShimGetApi(2) == nullptr);
-    CHECK(BZROpenShim::SdkBridge::UnavailableCallCount() == before + 4);
+    CHECK(BZROpenShim::SdkBridge::UnavailableCallCount() == before + 6);
     // Calling with no provider must not have reached anything.
     CHECK(!g_ClearAllCalled);
     CHECK(g_LastThrottle == 0);
@@ -111,6 +117,19 @@ int main()
     // __cdecl, declared inside namespace BZROpenShim, pointer return.
     CHECK(BZROpenShim::OpenShimGetApi(2) == g_FakeApi);
     CHECK(BZROpenShim::OpenShimGetApi(99) == nullptr);
+
+    // Appended HUD entries forward without moving existing/legacy slots.
+    CHECK(OpenShimGetNativeHudLayoutCapabilities() == 3);
+    CHECK(OpenShimSetNativeHudMeterRect("hull", 11, 22, 33, 44) == TRUE);
+    CHECK(std::strcmp(g_LastRect.name, "hull") == 0 && g_LastRect.x == 11 && g_LastRect.h == 44);
+
+    // A previous-version provider ends immediately after its legacy block.
+    // New slots fail closed, while every previous slot remains at its offset.
+    table.structSize = (uint32_t)offsetof(OpenShimSdkProviderTable, OpenShimImpl_GetNativeHudLayoutCapabilities);
+    CHECK(OpenShimGetNativeHudLayoutCapabilities() == 0);
+    CHECK(OpenShimSetNativeHudMeterRect("hull", 1, 2, 3, 4) == FALSE);
+    CHECK(OpenShimSetHudSpriteRect("radar", 1, 2, 3, 4) == TRUE);
+    table.structSize = sizeof(table);
 
     // ---- a slot the provider left unimplemented ------------------------
     const uint64_t beforeMissing = BZROpenShim::SdkBridge::UnavailableCallCount();

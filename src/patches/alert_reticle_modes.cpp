@@ -8,6 +8,7 @@
 #include "bzr_options_ui.h"
 #include "patcher.h"
 #include "shim_log.h"
+#include "live_reticle_team.h"
 
 #include <Windows.h>
 
@@ -54,6 +55,7 @@ namespace BZROpenShim
         static constexpr uintptr_t kUnderAttackAlertSoundAddr = 0x00877220;
         bool g_TargetReticlePopupConfigInitialized = false;
         static TargetReticlePopupMode g_TargetReticlePopupMode = TargetReticlePopupMode::Default;
+        static bool g_TargetReticleFastTeamRead = true;
         // User-config baseline (see under-attack alert note above).
         static bool g_TargetReticlePopupBaselineCaptured = false;
         static TargetReticlePopupMode g_TargetReticlePopupBaselineMode = TargetReticlePopupMode::Default;
@@ -429,6 +431,8 @@ namespace BZROpenShim
 
             g_TargetReticlePopupConfigInitialized = true;
             ApplyTargetReticlePopupMode(TargetReticlePopupMode::Default);
+            g_TargetReticleFastTeamRead =
+                !EnvFlagEnabled("OPENSHIM_DISABLE_FAST_RETICLE_TEAM_READ");
 
             TargetReticlePopupMode mode = TargetReticlePopupMode::Default;
 
@@ -456,8 +460,9 @@ namespace BZROpenShim
             g_TargetReticlePopupBaselineMode = g_TargetReticlePopupMode;
             g_TargetReticlePopupBaselineCaptured = true;
 
-            Log(L"[HUD] Target reticle popup mode=%hs\n",
-                TargetReticlePopupModeName(g_TargetReticlePopupMode));
+            Log(L"[HUD] Target reticle popup mode=%hs teamRead=%hs\n",
+                TargetReticlePopupModeName(g_TargetReticlePopupMode),
+                g_TargetReticleFastTeamRead ? "live" : "validated-query");
         }
 
         void RevertTargetReticlePopupToBaseline()
@@ -520,7 +525,20 @@ namespace BZROpenShim
         case TargetReticlePopupMode::ExplicitOnly:
             return kSuppressedRecentHitTime;
         case TargetReticlePopupMode::NeutralOnly:
-            return IsNeutralTeamObject(objectPtr) ? kSuppressedRecentHitTime : playerShotTime;
+        {
+            if (!g_TargetReticleFastTeamRead)
+                return IsNeutralTeamObject(objectPtr) ? kSuppressedRecentHitTime : playerShotTime;
+            // The existing guarded retail callback supplies a live complete
+            // GameObject, just as the direct playerShot read above requires.
+            // Avoid two kernel VirtualQuery calls per visible selection while
+            // retaining per-call vtable identity, fresh team reads and SEH.
+            const uintptr_t imageBase = GetMainModuleBase();
+            const uintptr_t expected = imageBase
+                ? imageBase + (kGogGameObjectGetTeamAddr - kGogPreferredImageBase)
+                : kGogGameObjectGetTeamAddr;
+            return Reticle::ReadLiveActualTeam(objectPtr, expected) == 0
+                ? kSuppressedRecentHitTime : playerShotTime;
+        }
         case TargetReticlePopupMode::Default:
         default:
             return playerShotTime;

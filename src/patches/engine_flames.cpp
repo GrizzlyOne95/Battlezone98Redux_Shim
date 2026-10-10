@@ -917,7 +917,8 @@ namespace BZROpenShim
 
         EnsureEngineFlameVariantsInitialized();
         g_BzrFn_EngineFlameSubmit(thisPtr, camera);
-        TickChunkProxyDebug(camera, true);
+        if (!ChunkWorldQueueDriverIsActive())
+            TickChunkProxyDebug(camera, true);
 
         if (thisPtr == GetEngineFlamePrimary())
         {

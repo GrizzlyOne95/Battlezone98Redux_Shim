@@ -2899,7 +2899,7 @@ namespace BZROpenShim
             { "Death Chunk Meshes", "General", "ChunkMeshes", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
-              "Restored legacy chunkMeshes debris on unit death. Restart required." },
+              "Generate destruction pieces from the model's mesh and skeleton. Restart required." },
             { "Sound Channels", "General", "SoundChannels", nullptr, 0,
               kShimSettingsSoundChannelValues, kShimSettingsSoundChannelLabels, 5, 4,
               ShimSettingApplyGroup::RestartRequired,
@@ -3060,6 +3060,10 @@ namespace BZROpenShim
             // behaviour and none is negotiated with peers, so all seven stand
             // down for the duration of a network game and a mixed OpenShim /
             // stock lobby stays behaviourally identical.
+            { "Background Mouse", "Fixes", "UnfocusedMouseRelease", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Stop Redux clipping and re-centring the mouse while it is minimized or in the background. Restart required." },
             { "APC Allied Deploy", "Fixes", "ApcAlliedTargetDeploy", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
@@ -3457,7 +3461,7 @@ namespace BZROpenShim
                         {
                             if (std::strcmp(setting.section, "General") == 0 &&
                                 std::strcmp(setting.key, "ChunkMeshes") == 0)
-                                assetAvailable = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::DestructionChunks);
+                                assetAvailable = true; // Native mesh extraction requires no external payload pack.
                             else if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
                                      (std::strcmp(setting.key, "FXAA") == 0 ||
                                       std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0))
@@ -3650,7 +3654,7 @@ namespace BZROpenShim
                 {
                     if (std::strcmp(setting.section, "General") == 0 &&
                         std::strcmp(setting.key, "ChunkMeshes") == 0)
-                        avail = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::DestructionChunks);
+                        avail = true; // Native mesh extraction requires no external payload pack.
                     else if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
                              (std::strcmp(setting.key, "FXAA") == 0 ||
                               std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0))
@@ -3873,7 +3877,7 @@ namespace BZROpenShim
                 {
                     if (std::strcmp(setting.section, "General") == 0 &&
                         std::strcmp(setting.key, "ChunkMeshes") == 0)
-                        avail = Assets::IsAssetFeatureAvailable(Assets::AssetFeature::DestructionChunks);
+                        avail = true; // Native mesh extraction requires no external payload pack.
                     else if (std::strcmp(setting.section, "DX11Enhanced") == 0 &&
                              (std::strcmp(setting.key, "FXAA") == 0 ||
                               std::strcmp(setting.key, "EnhancedLightSelectionV2") == 0))

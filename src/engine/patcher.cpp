@@ -155,7 +155,11 @@ namespace BZROpenShim
     }
     static constexpr uint32_t kDefaultMaxSoundChannels = 256;
     static constexpr uint32_t kMaxSupportedSoundChannels = 256;
-    static constexpr uint32_t kGASMasterMaxObjectsOffset = 0x10;
+    // GAS master +0x04 is the voice cap: FirstGAS sets it to 0x40 through the
+    // one-line setter at 0x0043A660, and the per-frame voice update
+    // (0x0043A170) culls 3D sounds once its active count reaches it. +0x10 is
+    // only ever zeroed at init/shutdown; nothing reads it.
+    static constexpr uint32_t kGASMasterMaxObjectsOffset = 0x04;
     static constexpr DWORD kSoundChannelRefreshDelayMs = 1000;
 
     struct SoundChannelOverrideConfig {
@@ -400,6 +404,28 @@ namespace BZROpenShim
 
     static bool IsDisableControlSmoothingPatchName(const char* name) { return name && strcmp(name, "Disable Control Smoothing") == 0; }
 
+    static bool IsShellCasingPatchName(const char* name) { return name && strncmp(name, "Shell Casings ", 14) == 0; }
+
+    // [General] ShellCasings (default ON) arrives inverted through the env
+    // mapping; off means the two shot calls are never redirected.
+    static bool ShouldEnableShellCasings() {
+        static int s_cached = -1;
+        if (s_cached < 0)
+            s_cached = (EnvFlagEnabledByName("OPENSHIM_DISABLE_SHELL_CASINGS") || EnvFlagEnabledByName("BZR_DISABLE_SHELL_CASINGS")) ? 0 : 1;
+        return s_cached != 0;
+    }
+
+    static bool IsPathBlockFacesPatchName(const char* name) { return name && strcmp(name, "Path Block Faces BlockCells Hook") == 0; }
+
+    // [General] PathBlockFaces (default ON: it changes only ODFs that opt in
+    // with pathBlock = "faces"/"none") arrives inverted through the env mapping.
+    static bool ShouldEnablePathBlockFaces() {
+        static int s_cached = -1;
+        if (s_cached < 0)
+            s_cached = EnvFlagEnabledByName("OPENSHIM_DISABLE_PATH_BLOCK_FACES") ? 0 : 1;
+        return s_cached != 0;
+    }
+
     static bool IsLobbyBzrnetIntegrationPatchName(const char* name) {
         if (!name) return false;
         return strcmp(name, "Lobby BZRNET Integration HOST") == 0 || strcmp(name, "Lobby BZRNET Integration CLIENT") == 0;
@@ -509,6 +535,12 @@ namespace BZROpenShim
         }
         if (!ShouldEnableDisableControlSmoothing()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsDisableControlSmoothingPatchName(p.name.c_str()); }), patches.end());
+        }
+        if (!ShouldEnableShellCasings()) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsShellCasingPatchName(p.name.c_str()); }), patches.end());
+        }
+        if (!ShouldEnablePathBlockFaces()) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsPathBlockFacesPatchName(p.name.c_str()); }), patches.end());
         }
     }
 
@@ -657,6 +689,17 @@ namespace BZROpenShim
             config.envInvalid || config.iniInvalid ? " invalid-value" : "",
             config.envClamped || config.requestedChannels > kMaxSupportedSoundChannels ? " clamped" : "");
         if (!config.enabled) return;
+        // The cap lives at a fixed struct offset that only the setter's own
+        // bytes vouch for (the engine_addresses row pins its store
+        // displacement). If this build's setter differs, writing +0x04 could
+        // land on an unrelated field, so skip instead.
+        uint32_t setterAddress = 0;
+        const auto setterStatus = HookEngine::ResolveEngineAddress("GAS_SetMaxVoices", setterAddress);
+        if (setterStatus != HookEngine::EngineAddressStatus::Bound) {
+            Log(L"[SOUND] voice-cap setter GAS_SetMaxVoices not verified (status=%d); override skipped\n",
+                static_cast<int>(setterStatus));
+            return;
+        }
         SoundChannelOverrideTargets targets = {}; if (!ResolveSoundChannelOverrideTargets(isSteam, targets)) return;
         auto* ctx = new (std::nothrow) SoundChannelOverrideThreadContext(); if (!ctx) return;
         ctx->gmStorageAddress = targets.gmStorageAddress; ctx->gasMasterAddress = targets.gasMasterAddress; ctx->maxChannels = config.maxChannels;
@@ -975,6 +1018,18 @@ namespace BZROpenShim
                     continue;
                 }
             }
+            // PathBlockFaces relocates BlockCells' 6-byte prologue into its
+            // own trampoline and resolves the grid globals it needs; any miss
+            // stands the hook down before the detour is written.
+            if (IsPathBlockFacesPatchName(p.name.c_str())) {
+                if (!Hooks::InstallPathBlockHook(p.address)) {
+                    p.verified = false;
+                    continue;
+                }
+                p.payload = HookEngine::MakeJmp5Payload(p.address,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Hooks::GetPathBlockCellsDetourAddress())), 6);
+                continue;
+            }
             for (auto& x : m) {
                 if (p.name == x.n) {
                     size_t l = (p.name.find("Turret") != std::string::npos && p.name.find("Pitch") != std::string::npos) ? 8 : (p.name.find("Reveal") != std::string::npos ? 12 : (p.name.find("Volley") != std::string::npos ? 6 : (p.name.find("Attack Alert") != std::string::npos ? 52 : 5)));
@@ -1026,6 +1081,23 @@ namespace BZROpenShim
                 SetPersonCarrierGetWeaponOriginal(original);
                 target = static_cast<uint32_t>(
                     reinterpret_cast<uintptr_t>(PersonSniperScanGetWeaponGuard));
+            }
+            else if (IsShellCasingPatchName(p.name.c_str())) {
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                const uint32_t expected =
+                    HookEngine::ResolveNamedAddress("WeaponPresentation::OrdnanceFactory");
+                if (!original || expected == 0 ||
+                    reinterpret_cast<uintptr_t>(original) != expected) {
+                    Log(L"[SHELLCASINGS] %hs identity failed site=0x%08X original=%p expected=0x%08X; leaving stock call\n",
+                        p.name.c_str(), p.address - 1, original, expected);
+                    continue;
+                }
+                Hooks::SetShellCasingFactoryOriginal(original);
+                target = static_cast<uint32_t>(
+                    reinterpret_cast<uintptr_t>(Hooks::GetShellCasingShotBridgeAddress()));
+                Log(L"[SHELLCASINGS] %hs redirected site=0x%08X factory=%p\n", p.name.c_str(), p.address - 1, original);
             }
             else if (p.name == "HoverCraft Turbo Sound Stop Guard") {
                 void* original = isSteam
@@ -1186,8 +1258,16 @@ namespace BZROpenShim
         }
     }
 
+    // Replacement for stock's 1.0000001f at 0x008A2608, read by the one mulss
+    // that derives the screen-space 2D depth floor from the camera near clip
+    // ("HUD 2D Depth Floor Margin"). 1e-4 of relative margin is far above the
+    // float rounding of the projected z, and far below the 0.0005+ steps that
+    // separate HUD layers, so layer order is unchanged.
+    static const float kHud2DDepthFloorScale = 1.0001f;
+
     static void FillDwordPayloads(std::vector<HookEngine::PatchDef>& patches) {
         const uint32_t tag = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(GetOpenShimVersionTag()));
+        const uint32_t depthFloorScale = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&kHud2DDepthFloorScale));
         const uint32_t flameC = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(EngineFlameControlHook));
         const uint32_t flameS = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(EngineFlameSubmitHook));
         const uint32_t chunkE = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ChunkEffectSimulateHook));
@@ -1200,6 +1280,7 @@ namespace BZROpenShim
             else if (p.name == "Engine Flame Submit VTable Hook") val = flameS;
             else if (p.name == "Chunk Effect Simulate VTable Hook") val = chunkE;
             else if (p.name == "Legacy World Update RenderQueue VTable Hook") val = legacyRQ;
+            else if (p.name == "HUD 2D Depth Floor Margin") val = depthFloorScale;
             else if (IsProducerBuildMenuPatchName(p.name.c_str())) val = ProducerBuildMenuPatchTarget(p.name.c_str());
             if (val) { p.payload.resize(4); memcpy(p.payload.data(), &val, 4); }
         }

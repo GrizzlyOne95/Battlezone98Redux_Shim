@@ -35,6 +35,7 @@
 #include "shadow_far_distance.h"
 #include "sun_flash.h"
 #include "chunk_batch_invalidation.h"
+#include "native_chunk_cache.h"
 #include "ai_range_policy.h"
 #include "lcbench_safety_policy.h"
 #include "hook_engine.h"
@@ -47,6 +48,7 @@
 #include <objidl.h>
 #include <gdiplus.h>
 #include <array>
+#include <atomic>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -82,6 +84,13 @@ namespace BZROpenShim
         bool g_TraceChunkRender = false;
         bool g_TraceChunkRenderVerbose = false;
         bool g_TraceChunkEffectRuntime = false;
+        // Per-chunk event lines (spawn, track, assign, release, fragment walk,
+        // per-second batch stats). Off unless a chunk trace or chunk debug
+        // feature was asked for explicitly: g_TraceChunkRender alone is also
+        // implied by ChunkMeshes, because it arms the create/fragment hooks
+        // the mesh proxy needs, and must not turn every debris piece into
+        // several synchronous log writes.
+        bool g_ChunkEventLogging = false;
         uint32_t g_LastChunkEffectLoggedCount = UINT32_MAX;
         volatile long g_ChunkRenderLogBudget = 12;
         uint32_t g_ChunkTraceEntryLimit = 32;
@@ -123,6 +132,19 @@ namespace BZROpenShim
         bool g_GenericChunkBatchSectionCreated = false;
         bool g_GenericChunkBatchRuntimeAvailable = true;
         int g_GenericChunkBatchEligibility[2] = { -1, -1 };
+        int g_StockFallbackBatchEligibility[2] = { -1, -1 };
+        static std::atomic<DWORD> g_ChunkWorldQueueDriverTick{0};
+
+        void ObserveChunkWorldQueueDriver()
+        {
+            g_ChunkWorldQueueDriverTick.store(GetTickCount(), std::memory_order_relaxed);
+        }
+
+        bool ChunkWorldQueueDriverIsActive()
+        {
+            const DWORD tick = g_ChunkWorldQueueDriverTick.load(std::memory_order_relaxed);
+            return tick != 0 && static_cast<DWORD>(GetTickCount() - tick) < 1000;
+        }
         DWORD g_GenericChunkBatchLastLogTick = 0;
         // Bounded diagnostics for the per-frame submission question: the game
         // drives its _updateRenderQueue override more than once per frame (one
@@ -171,12 +193,15 @@ namespace BZROpenShim
             _vsnwprintf_s(buffer, _countof(buffer), _TRUNCATE, fmt, args);
             va_end(args);
 
-            Log(L"%ls", buffer);
+            // One write, under the chunk component. Routing through Log() as
+            // well wrote every line a second time tagged [patcher].
             LogShimW(LogLevel::Info, component, L"%ls", buffer);
         }
 
         bool AcquireChunkLogSlot()
         {
+            if (!g_ChunkEventLogging)
+                return false;
             if (g_TraceChunkRenderVerbose)
                 return true;
 
@@ -1116,11 +1141,12 @@ namespace BZROpenShim
             }
         }
 
-        static bool EnsureChunkPayloadResourceLocations()
+        // The registration itself, shared by chunk proxies (gated on
+        // ChunkMeshes below) and SkinnedGibs, which must work with chunk
+        // meshes off. One group, one ready flag: whichever feature gets here
+        // first registers it, and nothing is registered twice.
+        static bool EnsureChunkPayloadResourceLocationsUngated()
         {
-            if (!g_EnableChunkMeshProxy)
-                return false;
-
             if (g_ChunkPayloadResourceLocationsReady)
                 return true;
 
@@ -1213,6 +1239,53 @@ namespace BZROpenShim
             return true;
         }
 
+        static bool EnsureChunkPayloadResourceLocations()
+        {
+            if (!g_EnableChunkMeshProxy)
+                return false;
+            return EnsureChunkPayloadResourceLocationsUngated();
+        }
+
+        static bool TryPrimeChunkPayloadResourcesSafe()
+        {
+            __try
+            {
+                return EnsureChunkPayloadResourceLocations();
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                return false;
+            }
+        }
+
+        static void PrimeChunkPayloadResources()
+        {
+            // This caller is already inside Ogre's world render callback.
+            // Initialise the same resource group before combat needs it; the
+            // first-death scan otherwise caused a measured ~300 ms frame.
+            // Attempt once only. Failure preserves the original first-use
+            // path, without introducing filesystem retries every frame.
+            static const bool enabled =
+                !EnvFlagEnabled("OPENSHIM_DISABLE_CHUNK_RESOURCE_PREWARM");
+            static bool attempted = false;
+            if (!enabled || attempted || g_ChunkPayloadResourceLocationsReady)
+                return;
+            attempted = true;
+            const DWORD began = GetTickCount();
+            bool ready = false;
+            try
+            {
+                ready = TryPrimeChunkPayloadResourcesSafe();
+            }
+            catch (...)
+            {
+                // Directory discovery can also fail before Ogre is called.
+            }
+            LogChunkDiagnostic("chunkmesh",
+                L"[CHUNKMESH] resource prewarm ready=%u elapsedMs=%lu (first-use fallback retained)\n",
+                ready ? 1u : 0u, static_cast<unsigned long>(GetTickCount() - began));
+        }
+
         static bool TryUpdateChunkMeshProxyTransform(
             void* sceneNode,
             void* entity,
@@ -1265,14 +1338,9 @@ namespace BZROpenShim
                 return false;
             // Second gate: even if config said enabled at boot, re-check
             // centralized asset capability on every creation attempt. This
-            // covers partial packages where the sentinel says "detected" but
-            // the specific mesh file for this slot is absent, and ensures we
-            // never create an Ogre Entity with a missing mesh name.
-            if (!Assets::IsAssetFeatureAvailable(Assets::AssetFeature::DestructionChunks))
-                return false;
-            // Per-mesh verification: even when the global capability is true
-            // (some payloads exist), the particular requested mesh may be absent
-            // in a partial pack. The resolver (TryResolveChunkPayloadMeshResource)
+            // Native extraction supplies verified payloads without an asset
+            // pack. proofMeshName is still mandatory before allocating Ogre.
+            // The resolver (TryResolveChunkPayloadMeshResource)
             // already verified before filling proofMeshName, so an empty
             // proofMeshName means "no file for this mesh" and must not allocate.
             // Trace for partial-pack proof (see tests/openshim_assets_tests):
@@ -1809,15 +1877,19 @@ namespace BZROpenShim
                 return false;
             }
 
-            HMODULE ogreMain = GetModuleHandleA("OgreMain.dll");
-            if (!vtable || !ogreMain)
+            // Range compare against the cached OgreMain image, not VirtualQuery:
+            // this runs once per sub-entity per render-queue traversal (every
+            // scheme and shadow cascade), and the syscall measured 23-34% of
+            // the main thread with ~100 debris proxies live (isdfms04 minigun
+            // capture, 2026-10-03). A mapped image is committed end to end, so
+            // "inside OgreMain's image" is the same test the query made.
+            uintptr_t ogreBase = 0;
+            uintptr_t ogreEnd = 0;
+            if (!vtable || !TryGetOgreModuleRange(ogreBase, ogreEnd))
                 return false;
 
-            MEMORY_BASIC_INFORMATION mbi = {};
-            return VirtualQuery(vtable, &mbi, sizeof(mbi)) == sizeof(mbi) &&
-                mbi.State == MEM_COMMIT &&
-                mbi.Type == MEM_IMAGE &&
-                mbi.AllocationBase == ogreMain;
+            const uintptr_t vtableAddress = reinterpret_cast<uintptr_t>(vtable);
+            return vtableAddress >= ogreBase && vtableAddress < ogreEnd;
         }
 
         static bool TryAddChunkProxyRenderableSafe(
@@ -2115,7 +2187,9 @@ namespace BZROpenShim
                     static_cast<unsigned>(slot.renderQueueAddCount));
             }
 
-            return visibleNow;
+            // A successfully handled invisible Entity must not fall through
+            // to direct adds that bypass the camera's visibility decision.
+            return true;
         }
 
         static bool IsChunkManualSubmitEnabled()
@@ -2126,11 +2200,230 @@ namespace BZROpenShim
             return !disabled;
         }
 
+        // ---- Shim-owned mesh objects (SkinnedGibs) -------------------------
+        // The same guarded Ogre calls the chunk proxies use, for a caller that
+        // keeps its own pool. Nothing here touches g_ChunkProxySlots.
+        bool EnsureSkinnedGibResourceLocations()
+        {
+            __try
+            {
+                return EnsureChunkPayloadResourceLocationsUngated();
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                return false;
+            }
+        }
+
+        bool CreateShimOwnedMeshObject(const char* meshName, void*& outSceneManager, void*& outNode, void*& outEntity)
+        {
+            outSceneManager = nullptr;
+            outNode = nullptr;
+            outEntity = nullptr;
+            if (!meshName || !*meshName)
+                return false;
+
+            static FnOgreGetRootSceneNode getRootSceneNode =
+                ResolveOgreProc<FnOgreGetRootSceneNode>("?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
+            static FnOgreCreateChildSceneNode createChildSceneNode =
+                ResolveOgreProc<FnOgreCreateChildSceneNode>("?createChildSceneNode@SceneNode@Ogre@@UAEPAV12@ABVVector3@2@ABVQuaternion@2@@Z");
+            static FnOgreCreateEntity createEntity =
+                ResolveOgreProc<FnOgreCreateEntity>("?createEntity@SceneManager@Ogre@@UAEPAVEntity@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            static FnOgreAttachObject attachObject =
+                ResolveOgreProc<FnOgreAttachObject>("?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+            if (!getRootSceneNode || !createChildSceneNode || !createEntity || !attachObject || !setVisible)
+                return false;
+
+            void* const sceneManager = GetOgreSceneManagerRuntime();
+            if (!sceneManager || !EnsureSkinnedGibResourceLocations())
+                return false;
+            void* const rootNode = TryGetChunkMeshProxyRootNode(sceneManager, getRootSceneNode);
+            if (!rootNode)
+                return false;
+            if (!TryCreateChunkMeshProxyObjects(rootNode, sceneManager, createChildSceneNode, createEntity,
+                    attachObject, setVisible, meshName, outNode, outEntity))
+            {
+                // A node without its entity stays attached and hidden-empty;
+                // Ogre owns it until scene teardown, exactly as for proxies.
+                outNode = nullptr;
+                outEntity = nullptr;
+                return false;
+            }
+            outSceneManager = sceneManager;
+            return true;
+        }
+
+        using FnOgreDestroyEntityPtr = void(__thiscall*)(void*, void*);
+
+        // No function-local statics here: their guarded initialisation needs
+        // unwinding, which __try forbids (C2712).
+        static bool TryReplaceShimEntitySeh(
+            void* sceneManager,
+            void* node,
+            void* old,
+            const char* meshName,
+            FnOgreDestroyEntityPtr destroyEntity,
+            FnOgreCreateEntity createEntity,
+            FnOgreAttachObject attachObject,
+            FnOgreSetVisible setVisible,
+            void*& created)
+        {
+            created = nullptr;
+            __try
+            {
+                return CatchOgreThrow("replaceShimEntity", [&] {
+                    if (old && IsLikelyLiveOgreObject(old))
+                        destroyEntity(sceneManager, old);
+                    created = CreateChunkMeshProxyEntity(sceneManager, createEntity, meshName);
+                    if (created)
+                    {
+                        attachObject(node, created);
+                        setVisible(created, false);
+                    }
+                });
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                return false;
+            }
+        }
+
+        static bool TrySetShimNodeScaleSeh(void* node, FnOgreNodeSetScale setScale, const float scale[3])
+        {
+            __try
+            {
+                return CatchOgreThrow("shimNodeScale", [&] { setScale(node, scale[0], scale[1], scale[2]); });
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                return false;
+            }
+        }
+
+        // Reuses the node for another mesh: the old entity is destroyed by
+        // the scene manager that made it (between frames, never during a
+        // render traversal) and a new one attached in its place.
+        bool ReplaceShimOwnedMeshEntity(void* sceneManager, void* node, void*& entity, const char* meshName)
+        {
+            static FnOgreDestroyEntityPtr destroyEntity =
+                ResolveOgreProc<FnOgreDestroyEntityPtr>("?destroyEntity@SceneManager@Ogre@@UAEXPAVEntity@2@@Z");
+            static FnOgreCreateEntity createEntity =
+                ResolveOgreProc<FnOgreCreateEntity>("?createEntity@SceneManager@Ogre@@UAEPAVEntity@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            static FnOgreAttachObject attachObject =
+                ResolveOgreProc<FnOgreAttachObject>("?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+            if (!sceneManager || !node || !meshName || !*meshName || !destroyEntity || !createEntity ||
+                !attachObject || !setVisible || sceneManager != GetOgreSceneManagerRuntime())
+            {
+                return false;
+            }
+
+            void* created = nullptr;
+            const bool ok = TryReplaceShimEntitySeh(
+                sceneManager, node, entity, meshName, destroyEntity, createEntity, attachObject, setVisible, created);
+            // The old entity is gone (or was never live) either way.
+            entity = (ok && created) ? created : nullptr;
+            return entity != nullptr;
+        }
+
+        bool SetShimOwnedObjectTransform(
+            void* node,
+            void* entity,
+            const float position[3],
+            const float orientationWxyz[4],
+            const float scale[3])
+        {
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+            static FnOgreSetNodePosition setPosition =
+                ResolveOgreProc<FnOgreSetNodePosition>("?setPosition@Node@Ogre@@UAEXMMM@Z");
+            static FnOgreSetNodeOrientation setOrientation =
+                ResolveOgreProc<FnOgreSetNodeOrientation>("?setOrientation@Node@Ogre@@UAEXMMMM@Z");
+            static FnOgreNodeSetScale setScale =
+                ResolveOgreProc<FnOgreNodeSetScale>("?setScale@Node@Ogre@@UAEXMMM@Z");
+            if (!node || !entity || !position || !orientationWxyz || !setOrientation)
+                return false;
+
+            ChunkProxyTransform transform = {};
+            transform.x = position[0];
+            transform.y = position[1];
+            transform.z = position[2];
+            transform.orientation.w = orientationWxyz[0];
+            transform.orientation.x = orientationWxyz[1];
+            transform.orientation.y = orientationWxyz[2];
+            transform.orientation.z = orientationWxyz[3];
+            if (scale && setScale && !TrySetShimNodeScaleSeh(node, setScale, scale))
+                return false;
+            return TryUpdateChunkMeshProxyTransform(node, entity, setPosition, setOrientation, setVisible, transform);
+        }
+
+        void HideShimOwnedObject(void* node, void* entity)
+        {
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+            static FnOgreSetNodePosition setPosition =
+                ResolveOgreProc<FnOgreSetNodePosition>("?setPosition@Node@Ogre@@UAEXMMM@Z");
+            static FnOgreSetNodeOrientation setOrientation =
+                ResolveOgreProc<FnOgreSetNodeOrientation>("?setOrientation@Node@Ogre@@UAEXMMMM@Z");
+            TryHideChunkProxyEntity(entity, setVisible);
+            TryResetChunkProxyNode(node, setPosition, setOrientation);
+        }
+
+        // Same submission the per-Entity chunk path makes: notify the live
+        // viewport camera, then let the Entity queue its own sub-entities.
+        // False means the entity faulted and must be forgotten, not touched.
+        bool SubmitShimOwnedEntityToRenderQueue(void* sceneManager, void* entity, void* renderQueue)
+        {
+            if (!sceneManager || !entity || !renderQueue)
+                return false;
+
+            static FnOgreGetCurrentViewport getCurrentViewport =
+                ResolveOgreProc<FnOgreGetCurrentViewport>("?getCurrentViewport@SceneManager@Ogre@@QBEPAVViewport@2@XZ");
+            static FnOgreViewportGetCamera getViewportCamera =
+                ResolveOgreProc<FnOgreViewportGetCamera>("?getCamera@Viewport@Ogre@@QBEPAVCamera@2@XZ");
+            static FnOgreIsVisible isVisible =
+                ResolveOgreProcByOffset<FnOgreIsVisible>(0x0002CCCD);
+            static FnOgreMovableObjectNotifyCurrentCamera notifyCurrentCamera = nullptr;
+            static FnOgreEntityUpdateRenderQueue updateRenderQueue = nullptr;
+            if (!notifyCurrentCamera)
+            {
+                notifyCurrentCamera = g_OgreFn_MovableObjectNotifyCurrentCamera
+                    ? g_OgreFn_MovableObjectNotifyCurrentCamera
+                    : ResolveOgreProc<FnOgreMovableObjectNotifyCurrentCamera>(
+                        "?_notifyCurrentCamera@Entity@Ogre@@UAEXPAVCamera@2@@Z");
+            }
+            if (!updateRenderQueue)
+            {
+                updateRenderQueue = g_OgreFn_EntityUpdateRenderQueue
+                    ? g_OgreFn_EntityUpdateRenderQueue
+                    : ResolveOgreProc<FnOgreEntityUpdateRenderQueue>(
+                        "?_updateRenderQueue@Entity@Ogre@@UAEXPAVRenderQueue@2@@Z");
+            }
+            if (!notifyCurrentCamera || !updateRenderQueue || !IsLikelyLiveOgreObject(entity))
+                return false;
+
+            void* const camera =
+                TryGetChunkProxyViewportCameraSafe(sceneManager, getCurrentViewport, getViewportCamera, nullptr, nullptr);
+            if (!camera)
+                return true; // nothing to draw into this pass; the entity is fine
+            if (!TryNotifyChunkProxyCameraSafe(entity, camera, notifyCurrentCamera))
+                return false;
+            const int visible = TryGetChunkProxyVisibleSafe(entity, isVisible);
+            if (visible < 0)
+                return false;
+            if (visible == 0)
+                return true;
+            return TryUpdateChunkProxyRenderQueueSafe(entity, renderQueue, updateRenderQueue);
+        }
+
         // Reads the geo-local vertex bounds straight out of the Redux geom
         // struct (vertex count at +0x04, position array at +0x0C, 3 floats
         // per vertex) so payload mesh pivots can be compared against the
         // original geo pivots the chunk sim rotates around.
-        static bool TryComputeChunkGeomLocalBounds(
+        bool TryComputeChunkGeomLocalBounds(
             const void* geomRef,
             uint32_t& outCount,
             float outMin[3],
@@ -2250,24 +2543,27 @@ namespace BZROpenShim
             return true;
         }
 
-        static bool IsCanonicalGenericChunkPayload(uint8_t kind)
+        static bool IsCanonicalGenericChunkPayload(uint8_t kind, bool generated = false)
         {
             if (kind < 1 || kind > 2)
                 return false;
 
-            int& cached = g_GenericChunkBatchEligibility[kind - 1];
+            int& cached = generated ? g_StockFallbackBatchEligibility[kind - 1]
+                                    : g_GenericChunkBatchEligibility[kind - 1];
             if (cached >= 0)
                 return cached != 0;
 
             if (g_ChunkPayloadResourceDirectories.empty())
                 RefreshChunkPayloadResourceDirectories();
 
-            const std::filesystem::path relativePath = kind == 1
+            const auto fallback = generated ? NativeChunks::StockFallbackMesh(kind) : NativeChunks::Piece{};
+            const std::filesystem::path relativePath = generated
+                ? std::filesystem::path("fallback/v1") / (fallback.name + ".mesh") : kind == 1
                 ? std::filesystem::path("chunk1") / "chunk1.mesh"
                 : std::filesystem::path("chunk2") / "chunk2.mesh";
-            const uintmax_t expectedBytes = kind == 1
+            const uintmax_t expectedBytes = generated ? fallback.mesh.size() : kind == 1
                 ? kChunk1MeshBytes : kChunk2MeshBytes;
-            const uint64_t expectedHash = kind == 1
+            const uint64_t expectedHash = generated ? NativeChunks::Fingerprint(fallback.mesh) : kind == 1
                 ? kChunk1MeshFnv1a : kChunk2MeshFnv1a;
 
             bool found = false;
@@ -2293,7 +2589,8 @@ namespace BZROpenShim
             cached = found && canonical ? 1 : 0;
             LogChunkDiagnostic(
                 "chunkbatch",
-                L"[CHUNKBATCH] canonical chunk%u batching=%hs roots=%zu expectedBytes=%zu hash=0x%016llX\n",
+                L"[CHUNKBATCH] canonical %hschunk%u batching=%hs roots=%zu expectedBytes=%zu hash=0x%016llX\n",
+                generated ? "stock-fallback-" : "",
                 static_cast<unsigned>(kind),
                 cached ? "enabled" : "fallback-entity",
                 g_ChunkPayloadResourceDirectories.size(),
@@ -2368,6 +2665,9 @@ namespace BZROpenShim
                 return IsCanonicalGenericChunkPayload(1) ? 1 : 0;
             if (_stricmp(meshName, "chunk2/chunk2.mesh") == 0)
                 return IsCanonicalGenericChunkPayload(2) ? 2 : 0;
+            const auto stockKind = static_cast<uint8_t>(NativeChunks::StockFallbackBatchKind(meshName));
+            if (stockKind)
+                return IsCanonicalGenericChunkPayload(stockKind, true) ? stockKind : 0;
             return 0;
         }
 
@@ -3626,8 +3926,9 @@ namespace BZROpenShim
             }
 
             const DWORD now = GetTickCount();
-            if (g_GenericChunkBatchLastLogTick == 0 ||
-                static_cast<DWORD>(now - g_GenericChunkBatchLastLogTick) >= 1000)
+            if (g_ChunkEventLogging &&
+                (g_GenericChunkBatchLastLogTick == 0 ||
+                 static_cast<DWORD>(now - g_GenericChunkBatchLastLogTick) >= 1000))
             {
                 g_GenericChunkBatchLastLogTick = now;
                 LogChunkDiagnostic(
@@ -3696,6 +3997,7 @@ namespace BZROpenShim
                 return;
             if (!IsChunkManualSubmitEnabled())
                 return;
+            PrimeChunkPayloadResources();
             if (g_ChunkProxySlots.empty())
                 return;
 
@@ -3773,6 +4075,12 @@ namespace BZROpenShim
                     continue;
                 }
                 if (!slot.active || !slot.entity)
+                    continue;
+
+                // Notify the active camera and let Ogre prepare this Entity
+                // once in the owning queue. The older direct-add path below
+                // remains a guarded fallback if camera/queue discovery fails.
+                if (TrySubmitChunkMeshProxyToCurrentRenderQueue(slot, nullptr))
                     continue;
 
                 bool groupFaulted = false;
@@ -3908,6 +4216,28 @@ namespace BZROpenShim
             return nullptr;
         }
 
+        static bool ResolveTrackedChunkPayload(
+            const ChunkObjectLinkProbe& probe,
+            const char* preferredMeshName,
+            const char* geomName,
+            char* output,
+            size_t capacity)
+        {
+            // CreateChunk captures the payload before the source Entity dies.
+            // Its cache is checked against live geometry and cleared when a
+            // pooled object becomes a chunklet, so tracking need not repeat
+            // the whole model/VDF/resource search every simulation update.
+            const auto* binding = FindChunkResolvedBindingEntryForGeom(probe.objectBytes, geomName);
+            if (binding && binding->payloadMeshName[0] &&
+                (!preferredMeshName || !*preferredMeshName || _stricmp(preferredMeshName, binding->meshName) == 0) &&
+                std::strlen(binding->payloadMeshName) < capacity)
+            {
+                strncpy_s(output, capacity, binding->payloadMeshName, _TRUNCATE);
+                return true;
+            }
+            return TryResolveChunkPayloadMeshResource(probe, preferredMeshName, geomName, output, capacity);
+        }
+
         static void TrackChunkProxyDebugEntry(
             const uint8_t* objectBytes,
             const void* geomRef,
@@ -3918,6 +4248,20 @@ namespace BZROpenShim
         {
             if ((!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy) || !objectBytes)
                 return;
+
+            // A person SkinnedGibs already drew as rigid limbs: the engine's
+            // legacy chunks for that body keep simulating untouched, but the
+            // shim must not draw them a second time. Release any slot a
+            // recycled address left behind for this object.
+            if (IsSkinnedGibSuppressedChunk(objectBytes, geomRef))
+            {
+                for (ChunkProxySlot& slot : g_ChunkProxySlots)
+                {
+                    if (slot.active && slot.objectBytes == objectBytes)
+                        ReleaseChunkProxySlot(slot, L"skinned-gibs");
+                }
+                return;
+            }
 
             // Before a slot is taken: no slot means no mesh and no billboard,
             // which is the whole point -- an empty payload name still draws a
@@ -3974,7 +4318,7 @@ namespace BZROpenShim
                         strncpy_s(slot.ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
                     else
                         slot.ownerOgreFilename[0] = '\0';
-                    TryResolveChunkPayloadMeshResource(
+                    ResolveTrackedChunkPayload(
                         probe,
                         preferredMeshName,
                         slot.geomName,
@@ -4025,7 +4369,7 @@ namespace BZROpenShim
                 strncpy_s(freeSlot->ownerOgreFilename, bridgeSnapshot.ownerOgreFilename, _TRUNCATE);
             else
                 freeSlot->ownerOgreFilename[0] = '\0';
-            if (!TryResolveChunkPayloadMeshResource(
+            if (!ResolveTrackedChunkPayload(
                     probe,
                     preferredMeshName,
                     freeSlot->geomName,
@@ -4269,6 +4613,83 @@ namespace BZROpenShim
             }
         }
 
+        // A proxy slot is keyed by the chunk object's address, and the engine
+        // recycles that memory for other objects as soon as the chunk dies.
+        // The 400 ms expiry alone left the proxy reading its transform from
+        // whatever moved in -- minigun rounds (bullet7f, no shot geometry)
+        // were seen flying as debris meshes on isdfms04. Release a slot the
+        // moment its object is no longer a live chunk in ChunkEffect's list.
+        static constexpr uint32_t kChunkEffectMaxEntries = static_cast<uint32_t>(
+            (kChunkEffectActiveCountOffset - kChunkEffectEntryBaseOffset) / kChunkEffectEntrySize);
+        static uintptr_t g_ChunkEffectLiveObjects[kChunkEffectMaxEntries];
+
+        static bool CollectLiveChunkObjects(const uint8_t* thisBytes, size_t& outCount)
+        {
+            outCount = 0;
+            __try
+            {
+                const uint32_t count =
+                    *reinterpret_cast<const uint32_t*>(thisBytes + kChunkEffectActiveCountOffset);
+                if (count > kChunkEffectMaxEntries)
+                    return false;
+
+                for (uint32_t index = 0; index < count; ++index)
+                {
+                    const auto* entryBytes = thisBytes + kChunkEffectEntryBaseOffset +
+                        (static_cast<uintptr_t>(index) * kChunkEffectEntrySize);
+                    const uint8_t* objectBytes = *reinterpret_cast<const uint8_t* const*>(entryBytes);
+                    if (!objectBytes ||
+                        *reinterpret_cast<const uint32_t*>(objectBytes + 0x84) != kClassIdChunk)
+                    {
+                        continue;
+                    }
+                    g_ChunkEffectLiveObjects[outCount++] = reinterpret_cast<uintptr_t>(objectBytes);
+                }
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                // A torn read is not evidence that any chunk died; keep the
+                // slots and let the expiry handle them.
+                return false;
+            }
+        }
+
+        void ReleaseChunkProxiesMissingFromActiveList(void* thisPtr)
+        {
+            if ((!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy) || !thisPtr ||
+                g_ChunkProxySlots.empty())
+            {
+                return;
+            }
+
+            size_t liveCount = 0;
+            if (!CollectLiveChunkObjects(reinterpret_cast<const uint8_t*>(thisPtr), liveCount))
+                return;
+
+            uintptr_t* const liveBegin = g_ChunkEffectLiveObjects;
+            uintptr_t* const liveEnd = g_ChunkEffectLiveObjects + liveCount;
+            std::sort(liveBegin, liveEnd);
+            for (ChunkProxySlot& slot : g_ChunkProxySlots)
+            {
+                if (slot.active &&
+                    !std::binary_search(liveBegin, liveEnd, reinterpret_cast<uintptr_t>(slot.objectBytes)))
+                {
+                    ReleaseChunkProxySlot(slot, L"left-active-list");
+                }
+            }
+        }
+
+        // The bridge/owner slots below are only pointers on some of the
+        // objects that reach here; others hold small integers (0x01, 0x18
+        // were caught in the isdfms04 crash log) that the __try below would
+        // fault on every sim tick. Reject those before dereferencing.
+        static bool IsPointerShaped(const void* candidate)
+        {
+            const uintptr_t address = reinterpret_cast<uintptr_t>(candidate);
+            return address >= 0x00010000 && (address % sizeof(void*)) == 0;
+        }
+
         ChunkBridgeSnapshot CaptureChunkBridgeSnapshot(const uint8_t* objectBytes)
         {
             ChunkBridgeSnapshot snapshot = {};
@@ -4278,6 +4699,8 @@ namespace BZROpenShim
             __try
             {
                 snapshot.directBridgeRoot = *reinterpret_cast<void* const*>(objectBytes + 0xF0);
+                if (!IsPointerShaped(snapshot.directBridgeRoot))
+                    snapshot.directBridgeRoot = nullptr;
                 if (snapshot.directBridgeRoot)
                 {
                     const auto* bridgeBytes = reinterpret_cast<const uint8_t*>(snapshot.directBridgeRoot);
@@ -4296,12 +4719,18 @@ namespace BZROpenShim
                 // Legacy OBJ76 layouts observed in Redux helpers place the owning GameObject*
                 // at +0x8C, which is the bridge we want to validate for native death chunks.
                 snapshot.legacyOwner = *reinterpret_cast<void* const*>(objectBytes + 0x8C);
+                if (!IsPointerShaped(snapshot.legacyOwner))
+                    snapshot.legacyOwner = nullptr;
                 if (snapshot.legacyOwner)
                 {
                     const auto* ownerBytes = reinterpret_cast<const uint8_t*>(snapshot.legacyOwner);
                     snapshot.ownerBridgeRoot = *reinterpret_cast<void* const*>(ownerBytes + 0xF0);
                     snapshot.ownerEntity = *reinterpret_cast<void* const*>(ownerBytes + 0xF4);
                     snapshot.ownerObj = *reinterpret_cast<void* const*>(ownerBytes + 0xF8);
+                    if (!IsPointerShaped(snapshot.ownerBridgeRoot))
+                        snapshot.ownerBridgeRoot = nullptr;
+                    if (!IsPointerShaped(snapshot.ownerEntity))
+                        snapshot.ownerEntity = nullptr;
 
                     if (snapshot.ownerBridgeRoot)
                     {
@@ -4641,8 +5070,12 @@ namespace BZROpenShim
         // told apart from "walker never ran". GOG only; addresses are GOG layout.
         void InstallChunkFragmentWalkHooksIfRequested()
         {
-            if ((!g_TraceChunkRender && !g_TraceChunkEffectRuntime) ||
-                g_ChunkEffectFragmentHooksInstalled || g_IsSteamExe)
+            // SkinnedGibs needs FullFragmentObject only. Without a chunk trace
+            // PartialFragmentObject stays unhooked and the full hook is a pure
+            // pass-through for everything that is not a person.
+            const bool trace = g_TraceChunkRender || g_TraceChunkEffectRuntime;
+            const bool gibs = IsSkinnedGibsEnabled();
+            if ((!trace && !gibs) || g_ChunkEffectFragmentHooksInstalled || g_IsSteamExe)
                 return;
 
             static const uint8_t kExpectedPartialFragmentBytes[kChunkEffectFragmentDetourLen] =
@@ -4654,7 +5087,7 @@ namespace BZROpenShim
                 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x28
             };
 
-            if (!g_ChunkEffectPartialFragmentDetour.trampoline)
+            if (trace && !g_ChunkEffectPartialFragmentDetour.trampoline)
             {
                 InstallInlineDetour32(
                     g_ChunkEffectPartialFragmentDetour,
@@ -4687,18 +5120,38 @@ namespace BZROpenShim
             }
 
             g_ChunkEffectFragmentHooksInstalled =
-                g_ChunkEffectPartialFragmentDetour.trampoline &&
-                g_BzrFn_ChunkEffectPartialFragment &&
+                (!trace || (g_ChunkEffectPartialFragmentDetour.trampoline &&
+                            g_BzrFn_ChunkEffectPartialFragment)) &&
                 g_ChunkEffectFullFragmentDetour.trampoline &&
                 g_BzrFn_ChunkEffectFullFragment;
+            if (!g_ChunkEffectFullFragmentDetour.trampoline && gibs)
+            {
+                // InstallInlineDetour32 refused the expected prologue bytes:
+                // fail closed, once, and stop retrying every tick.
+                static bool s_gibInstallFailureLogged = false;
+                if (!s_gibInstallFailureLogged)
+                {
+                    s_gibInstallFailureLogged = true;
+                    LogChunkDiagnostic(
+                        "skinnedgibs",
+                        L"[SKINNEDGIBS] FullFragmentObject detour unavailable at 0x%08X; skinned gibs disabled\n",
+                        static_cast<uint32_t>(kGogChunkEffectFullFragmentAddr));
+                }
+                if (!trace)
+                {
+                    g_ChunkEffectFragmentHooksInstalled = true;
+                    g_ChunkEffectFragmentHooksLogged = true;
+                }
+            }
 
             if (g_ChunkEffectFragmentHooksInstalled && !g_ChunkEffectFragmentHooksLogged)
             {
                 LogChunkDiagnostic(
                     "chunkspawn",
-                    L"[CHUNKSPAWN] Installed fragment walk hooks partial=0x%08X full=0x%08X\n",
-                    static_cast<uint32_t>(kGogChunkEffectPartialFragmentAddr),
-                    static_cast<uint32_t>(kGogChunkEffectFullFragmentAddr));
+                    L"[CHUNKSPAWN] Installed fragment walk hooks partial=0x%08X full=0x%08X skinnedGibs=%u\n",
+                    trace ? static_cast<uint32_t>(kGogChunkEffectPartialFragmentAddr) : 0u,
+                    static_cast<uint32_t>(kGogChunkEffectFullFragmentAddr),
+                    gibs ? 1u : 0u);
                 g_ChunkEffectFragmentHooksLogged = true;
             }
         }
