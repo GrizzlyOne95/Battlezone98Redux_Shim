@@ -1548,6 +1548,9 @@ namespace BZROpenShim
         std::filesystem::path GetNativeChunkCacheDirectory();
         bool PrepareNativeChunkPayloads(void* entity, char* sourceName = nullptr, size_t capacity = 0);
         void ResetNativeChunkPayloads();
+        // Once per process, before WarmNativeChunkCaches: removes obsolete cache
+        // versions and expired/over-cap model folders ([General] ChunkCacheMax*).
+        void PruneNativeChunkCache();
 
         // --- SkinnedGibs (skinned_gibs.cpp) --------------------------------
         // Person deaths become rigid per-limb gibs split at runtime from the

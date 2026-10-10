@@ -1,6 +1,8 @@
 #include "bzr_hooks_internal.h"
 #include "native_chunk_mesh.h"
 #include "native_chunk_cache.h"
+#include "native_chunk_prune.h"
+#include "shim_log.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -30,7 +32,7 @@ using Free = void(__cdecl *)(void *);
 using Dtor = void(__thiscall *)(void *, unsigned);
 // v4: pieces are in their bone's rotated frame and centred on their bounds.
 // v3 output used model-axis offsets from the bone pivot and is ignored.
-constexpr const char *kNativeFolder = "native/v4/";
+constexpr const char *kNativeFolder = OPENSHIM_CHUNK_CACHE_NATIVE_DIR;
 struct Model
 {
     std::map<std::string, std::string> pieces;
@@ -210,6 +212,8 @@ bool prepare(void *entity, char *sourceName, size_t capacity)
         triangles += piece.triangles;
     }
     result.extracted = !result.pieces.empty();
+    if (result.extracted)
+        NativeChunks::TouchCacheFolder(root / folder);
     LogChunkDiagnostic("chunknative",
                        L"[CHUNKNATIVE] %hs mesh=%hs group=%hs pieces=%zu "
                        L"triangles=%u cache=%hs prepareMs=%.3f\n",
@@ -287,6 +291,55 @@ void ResetNativeChunkPayloads()
     pieceCenters.clear();
     stockFallbackState = 0;
 }
+namespace
+{
+// <= 0 or unparsable -> the supplied default only when the variable is absent.
+bool readCacheLimit(const char *name, int64_t maxValue, int64_t &out)
+{
+    char buffer[32] = {};
+    const DWORD length = GetEnvironmentVariableA(name, buffer, static_cast<DWORD>(sizeof(buffer)));
+    if (length == 0 || length >= sizeof(buffer))
+        return false;
+    char *end = nullptr;
+    const long long value = std::strtoll(buffer, &end, 10);
+    if (end == buffer)
+        return false;
+    out = std::clamp<long long>(value, 0, maxValue);
+    return true;
+}
+} // namespace
+// Bounded pruning of the generated chunk cache. Synchronous on purpose: it is
+// a few hundred directory entries, and a background thread could delete a
+// folder that startup warming or the first mission is about to read.
+void PruneNativeChunkCache()
+{
+    static bool done = false;
+    if (done)
+        return;
+    done = true;
+    try
+    {
+        int64_t maxMB = 256, maxAgeDays = 30; // [General] ChunkCacheMaxMB / ChunkCacheMaxAgeDays
+        readCacheLimit("OPENSHIM_CHUNK_CACHE_MAX_MB", 1048576, maxMB);
+        readCacheLimit("OPENSHIM_CHUNK_CACHE_MAX_AGE_DAYS", 36500, maxAgeDays);
+        NativeChunks::PrunePolicy policy;
+        policy.maxBytes = static_cast<uint64_t>(maxMB) * 1024 * 1024;
+        policy.maxAgeSeconds = maxAgeDays * 24 * 3600;
+        const auto started = std::chrono::steady_clock::now();
+        const auto result = NativeChunks::PruneChunkCache(GetNativeChunkCacheDirectory(), policy);
+        if (!result.scanned)
+            return;
+        for (const auto &tree : result.obsoleteTrees)
+            LogShimA(LogLevel::Info, "CHUNKCACHE", "removed obsolete cache tree %s", tree.c_str());
+        LogShimA(LogLevel::Info, "CHUNKCACHE",
+                 "prune removed=%zu freedMB=%.1f kept=%zu sizeMB=%.1f ms=%.1f", result.removed,
+                 result.freedBytes / 1048576.0, result.keptModels, result.keptBytes / 1048576.0,
+                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+    }
+    catch (...)
+    {
+    }
+}
 void WarmNativeChunkCaches()
 {
     if (!g_EnableChunkMeshProxy)
@@ -343,7 +396,7 @@ bool TryResolveGeneratedStockChunkFallback(const char *seed, char *out, size_t c
         std::lock_guard<std::mutex> lock(modelsMutex);
         if (stockFallbackState < 0)
             return false;
-        constexpr const char *folder = "fallback/v1/";
+        constexpr const char *folder = OPENSHIM_CHUNK_CACHE_FALLBACK_DIR;
         if (!stockFallbackState)
         {
             stockFallbackState = -1;
@@ -492,7 +545,7 @@ bool TryResolveNativeChunkPayload(const char *mesh, const char *geom, char *out,
 // generating gibs never rewrites or invalidates a native/v4 cache.
 namespace
 {
-constexpr const char *kGibFolder = "gibs/v1/";
+constexpr const char *kGibFolder = OPENSHIM_CHUNK_CACHE_GIBS_DIR;
 struct GibModelEntry
 {
     bool ready = false;
@@ -656,7 +709,10 @@ bool prepareGibs(const std::string &meshName, const std::string &group, BZROpenS
     entry.info = std::move(info);
     entry.ready = !entry.info.pieces.empty();
     if (entry.ready)
+    {
+        NativeChunks::TouchCacheFolder(root / folder);
         out = entry.info;
+    }
     LogChunkDiagnostic("skinnedgibs",
                        L"[SKINNEDGIBS] %hs mesh=%hs group=%hs pieces=%zu triangles=%u cache=%hs prepareMs=%.3f\n",
                        reused ? "reused" : "generated", meshName.c_str(), group.c_str(), entry.info.pieces.size(),

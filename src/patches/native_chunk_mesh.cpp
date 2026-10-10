@@ -1,4 +1,5 @@
 #include "native_chunk_mesh.h"
+#include "native_chunk_prune.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -618,9 +619,9 @@ unsigned StockFallbackKind(std::string_view seed)
 }
 unsigned StockFallbackBatchKind(std::string_view resource)
 {
-    if (resource == "fallback/v1/stock_chunk1.mesh")
+    if (resource == OPENSHIM_CHUNK_CACHE_FALLBACK_DIR "stock_chunk1.mesh")
         return 1;
-    if (resource == "fallback/v1/stock_chunk2.mesh")
+    if (resource == OPENSHIM_CHUNK_CACHE_FALLBACK_DIR "stock_chunk2.mesh")
         return 2;
     return 0;
 }
