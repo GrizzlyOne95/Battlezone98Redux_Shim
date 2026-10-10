@@ -346,7 +346,10 @@ namespace BZROpenShim
             const bool back = Shell::AddButton(panel, nullptr, "OpenShimPreLobby_Back", kBackRect,
                                                "Back", Shell::kSkinTopCorner, 1.0f, kBackTextOffset,
                                                &OnBackClicked) != nullptr;
-            const bool cont = Shell::AddButton(panel, nullptr, "OpenShimPreLobby_Continue",
+            // Laid out against the panel so it centres with the content; the
+            // top-corner Back keeps a null layout parent because it sits on
+            // the window corner.
+            const bool cont = Shell::AddButton(panel, panel, "OpenShimPreLobby_Continue",
                                                kContinueRect, "Continue", Shell::kSkinToMainMenu,
                                                1.0f, 0.0f, &OnContinueClicked) != nullptr;
 
