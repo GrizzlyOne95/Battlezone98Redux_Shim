@@ -216,7 +216,7 @@ namespace BZROpenShim
 
         void ConfigureP2PEarlyUnreliablePatches(std::vector<HookEngine::PatchDef>& patches)
         {
-            bool enabled = false;
+            bool enabled = true;  // default on since the 2026-10-10 live matrices
             TryGetUserConfigBool("Network", "EarlyUnreliableAccept", enabled);
             if (EnvFlagEnabled("OPENSHIM_DISABLE_EARLY_UNRELIABLE_ACCEPT") ||
                 EnvFlagEnabled("BZR_DISABLE_EARLY_UNRELIABLE_ACCEPT"))

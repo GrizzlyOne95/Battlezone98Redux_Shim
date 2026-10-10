@@ -1438,10 +1438,11 @@ ReliableRetryIntervalMs = 2500
 ; Receiver-side only: the wire format and the sender are unchanged, so it is
 ; safe with stock peers. Updates may now be applied before an earlier reliable
 ; message that is still being retransmitted. Logs [P2PRECV] totals.
-; Accepted: boolean. Default: OFF until live-qualified. Restart required.
+; Accepted: boolean. Default: ON (live-qualified 2026-10-10: loss, 256 kbit/s,
+; WAN). Restart required.
 ; Kill switch: OPENSHIM_DISABLE_EARLY_UNRELIABLE_ACCEPT (or BZR_ prefix).
 ; Sites: GOG 2.2.301 0x0075DA8D and 0x0075DB96; a signature mismatch keeps stock.
-EarlyUnreliableAccept = 0
+EarlyUnreliableAccept = 1
 
 ; BZRNet P2P early NAK receive. When a receiver drops an out-of-order packet it
 ; sends a NAK (kind 6) that makes the sender retransmit at once, but the NAK
@@ -1453,7 +1454,8 @@ EarlyUnreliableAccept = 0
 ; stamped ahead is accepted and triggers the immediate resend it asks for.
 ; Each resend pass is still capped at 5000 bytes / peer count. Receiver-side
 ; only, same wire format, safe with stock peers. Logs [P2PRECV] totals.
-; Accepted: boolean. Default: OFF until live-qualified. Restart required.
+; Accepted: boolean. Default: OFF (3x lower reliable p95 on low-RTT lossy links,
+; small gain for about +40% resend bytes at WAN round trips). Restart required.
 ; Kill switch: OPENSHIM_DISABLE_EARLY_NAK_ACCEPT (or BZR_ prefix).
 ; Site: GOG 2.2.301 0x0075DA88; a signature mismatch keeps stock.
 EarlyNakAccept = 0

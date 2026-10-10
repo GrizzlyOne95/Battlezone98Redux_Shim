@@ -3,7 +3,7 @@
 GOG 2.2.301 (`battlezone98redux.exe`, image base 0x00400000).
 Patch: `src/patches/p2p_early_unreliable_receive.cpp`, policy
 `include/p2p_early_unreliable_policy.h`, `[Network] EarlyUnreliableAccept`
-(default **off** until live-qualified). Sites registered in
+(default **on** since the 2026-10-10 live matrices; see Decision). Sites registered in
 `scripts/patches.json` / `include/patches.h` as `P2P Early Unreliable Drop Log`
 and `P2P Early Unreliable Deliver`; both signatures are unique in the shipped
 image and installed together or not at all.

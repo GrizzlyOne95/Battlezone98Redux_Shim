@@ -42,7 +42,7 @@
       "expected_size": 13,
       "fallback": "0x00000000",
       "require_unique": true,
-      "identity": "GOG 2.2.301 P2P receive 0x0075D800 drop path for a connected peer, after the cumulative-ack loop and the silent kind 6/7 return: cmp dword [0x008EDA28],0 / je 0x0075DB32 at 0x0075DA8D gates the 'Dropping Packet Type' log before the NAK send at 0x0075DB32. Opt-in [Network] EarlyUnreliableAccept replaces these two whole instructions with a JMP to a thunk that skips only the log for a final-fragment unreliable data packet stamped 1-4096 ahead of peer+0x84 while the reassembly vector peer+0x98 is empty, and otherwise repeats the stock compare. Installed only together with P2P Early Unreliable Deliver. No fallback. See reverse_engineering/p2p_early_unreliable_receive_20261010.md."
+      "identity": "GOG 2.2.301 P2P receive 0x0075D800 drop path for a connected peer, after the cumulative-ack loop and the silent kind 6/7 return: cmp dword [0x008EDA28],0 / je 0x0075DB32 at 0x0075DA8D gates the 'Dropping Packet Type' log before the NAK send at 0x0075DB32. [Network] EarlyUnreliableAccept (default on) replaces these two whole instructions with a JMP to a thunk that skips only the log for a final-fragment unreliable data packet stamped 1-4096 ahead of peer+0x84 while the reassembly vector peer+0x98 is empty, and otherwise repeats the stock compare. Installed only together with P2P Early Unreliable Deliver. No fallback. See reverse_engineering/p2p_early_unreliable_receive_20261010.md."
     },
     {
       "name": "P2P Early NAK Accept",
@@ -60,7 +60,7 @@
       "expected_size": 5,
       "fallback": "0x00000000",
       "require_unique": true,
-      "identity": "GOG 2.2.301 P2P receive 0x0075D800: jmp 0x0075EE69 at 0x0075DB96 returns after the drop path has sent its kind-6 NAK; the pattern also covers the accept path (peer+0x84 = stamp+1 only for reliable packets, then jmp 0x0075DEEF at 0x0075DBCF). Opt-in [Network] EarlyUnreliableAccept redirects this JMP to a thunk that, for the same packets as P2P Early Unreliable Drop Log, continues at 0x0075DEEF (cumulative-ack loop, kind switch; case 0 delivers an unreliable packet only while reassembly is empty) and otherwise returns as stock. peer+0x84, ACK, NAK and retransmission are unchanged. Installed only together with the drop-log site. No fallback."
+      "identity": "GOG 2.2.301 P2P receive 0x0075D800: jmp 0x0075EE69 at 0x0075DB96 returns after the drop path has sent its kind-6 NAK; the pattern also covers the accept path (peer+0x84 = stamp+1 only for reliable packets, then jmp 0x0075DEEF at 0x0075DBCF). [Network] EarlyUnreliableAccept (default on) redirects this JMP to a thunk that, for the same packets as P2P Early Unreliable Drop Log, continues at 0x0075DEEF (cumulative-ack loop, kind switch; case 0 delivers an unreliable packet only while reassembly is empty) and otherwise returns as stock. peer+0x84, ACK, NAK and retransmission are unchanged. Installed only together with the drop-log site. No fallback."
     },
     {
       "name": "World Builder Save Destination Dialog",
