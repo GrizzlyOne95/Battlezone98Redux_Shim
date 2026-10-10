@@ -461,3 +461,29 @@ No completed timer comparison yet. Preserve original failed scores; compare
 equal post-ramp exposure, duplicates/byte rates and cumulative wire seqB
 progress, separately from native acceptance. Results belong in netfix
 `p2p_retry_timing_validation_20261009.md`; raw captures remain private.
+
+
+## Guarded live checkpoint — 2026-10-09 19:37 CDT
+
+Private `193200` completed one stock 1000/2500 arm: gameplay/cleanup PASS,
+80 fighting AI / 60 steady simulation seconds, 16 beacons, 64 powerups,
+23 natural vehicle deaths and 94 new observed scrap handles. Native health
+FAIL remains separate; full network qualification is OPEN. All four clients
+ran the same hashed admission-only override. The host Initialize preceded Q,
+so the original host race was not reproduced; early guest messages were
+consumed without admission and subsequent startup completed.
+
+Independent twelve-link audit: 55,114 decisions, 53,446 submitted outcomes,
+1,668 intended loss drops, zero missing outcomes/correlation/source-TX errors,
+four clean captures with zero drops/truncation/full binary retention. Nine
+target RX deficits remain within the conservative 55.913-second combat interval.
+Submission and clean retention do not establish native receipt/acceptance.
+
+The shorter-timer arm stopped at c0-lounge navigation before impairment/combat;
+the retained host screenshot shows Options instead of the expected lobby.
+Zero relay decisions, four clean archived captures. Rate/queue arms did not
+run, so no timer comparison is qualified. Defaults stay 1000/2500.
+Graceful client exit and independent restoration audit passed: 128 targets,
+zero mismatch/zero games at 19:36:59 CDT. Original incomplete attempts remain
+retained. Exact timer/capture evidence lives in OpenShim netfix's
+`reverse_engineering/p2p_retry_timing_validation_20261009.md`; raw data is private.
