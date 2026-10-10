@@ -155,7 +155,11 @@ namespace BZROpenShim
     }
     static constexpr uint32_t kDefaultMaxSoundChannels = 256;
     static constexpr uint32_t kMaxSupportedSoundChannels = 256;
-    static constexpr uint32_t kGASMasterMaxObjectsOffset = 0x10;
+    // GAS master +0x04 is the voice cap: FirstGAS sets it to 0x40 through the
+    // one-line setter at 0x0043A660, and the per-frame voice update
+    // (0x0043A170) culls 3D sounds once its active count reaches it. +0x10 is
+    // only ever zeroed at init/shutdown; nothing reads it.
+    static constexpr uint32_t kGASMasterMaxObjectsOffset = 0x04;
     static constexpr DWORD kSoundChannelRefreshDelayMs = 1000;
 
     struct SoundChannelOverrideConfig {
@@ -685,6 +689,17 @@ namespace BZROpenShim
             config.envInvalid || config.iniInvalid ? " invalid-value" : "",
             config.envClamped || config.requestedChannels > kMaxSupportedSoundChannels ? " clamped" : "");
         if (!config.enabled) return;
+        // The cap lives at a fixed struct offset that only the setter's own
+        // bytes vouch for (the engine_addresses row pins its store
+        // displacement). If this build's setter differs, writing +0x04 could
+        // land on an unrelated field, so skip instead.
+        uint32_t setterAddress = 0;
+        const auto setterStatus = HookEngine::ResolveEngineAddress("GAS_SetMaxVoices", setterAddress);
+        if (setterStatus != HookEngine::EngineAddressStatus::Bound) {
+            Log(L"[SOUND] voice-cap setter GAS_SetMaxVoices not verified (status=%d); override skipped\n",
+                static_cast<int>(setterStatus));
+            return;
+        }
         SoundChannelOverrideTargets targets = {}; if (!ResolveSoundChannelOverrideTargets(isSteam, targets)) return;
         auto* ctx = new (std::nothrow) SoundChannelOverrideThreadContext(); if (!ctx) return;
         ctx->gmStorageAddress = targets.gmStorageAddress; ctx->gasMasterAddress = targets.gasMasterAddress; ctx->maxChannels = config.maxChannels;
