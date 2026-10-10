@@ -35,7 +35,7 @@ $steamAppId = "301650"
 $defaultInstallDir = "Battlezone 98 Redux"
 
 # UI tiles the game actually loads out of the custom-widget resource tree.
-$uiTiles = @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png", "osh_career_center.png",
+$uiTiles = @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png", "osh_career_center.png", "osh_prelobby_center.png",
     "osh_options_center.png", "osh_hub_center.png", "osh_category_center.png", "osh_tile_hv.png", "osh_tile_ck.png", "osh_value_hv.png", "osh_value_ck.png",
     "osh_keys_center.png", "osh_key_hv.png", "osh_key_ck.png", "osh_tool_hv.png", "osh_tool_ck.png")
 

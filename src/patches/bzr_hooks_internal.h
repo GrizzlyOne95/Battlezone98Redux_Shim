@@ -1984,6 +1984,9 @@ namespace BZROpenShim
         bool ReadBzrNetNickname(char* out, size_t outSize);
         BzrNetNicknameResult ApplyBzrNetNicknameAuthoritative(
             const char* requestedValue, const char* source);
+        // Multiplayer pre-lobby apply: persists like the authoritative path,
+        // sends no live keys, recycles an authorised control connection.
+        BzrNetNicknameResult ApplyBzrNetNicknameForPreLobby(const char* nickname);
         const char* BzrNetNicknameResultName(BzrNetNicknameResult result);
         bool IsAcceptedBzrNetNicknameResult(BzrNetNicknameResult result);
 
