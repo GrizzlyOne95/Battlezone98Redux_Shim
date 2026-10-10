@@ -1,6 +1,8 @@
 # Multiplayer pre-lobby: design
 
-Status: **design only, nothing implemented.** Static RE for the GOG build
+Status: **nickname + flag + server status implemented** as an OpenShim shell
+screen (`src/patches/prelobby_screen.cpp`, opt-in `[Network] PreLobby = 1`).
+The endpoint picker (phases 2-4) is not built. Static RE for the GOG build
 (sha256 `8d71f56c…3377413`, byte-identical to the decompile corpus). The live
 checks listed at the end have not run.
 
@@ -14,9 +16,14 @@ and then runs the stock Multiplayer path.
 
 Two decisions follow from the RE below:
 
-1. **The pre-lobby is an in-place MainScreen surface, not a new shell screen.**
-   The shell factory is a closed switch. Redux already does in-place modes for
-   Credits and Intro (`reverse_engineering/REDUX_SHELL_UI_GATE_STATUS.md`).
+1. **The pre-lobby is an OpenShim shell screen** (`kPreLobbyScreenId`), built by
+   the shell-screen framework (`include/shell_screens.h`,
+   `src/engine/shell_screens.cpp`). The earlier premise, that the shell factory
+   is a closed switch and the page must be built in place on the title screen,
+   no longer holds: the framework detours the factory and builds registered ids
+   the way stock screens are built, with the stock background, a painted centre
+   panel, history-stack navigation and Esc/Back. The old in-place variant
+   (hide/restore of the title controls) is gone.
 2. **Force re-auth; do not defer auth.** Redux connects and authenticates at
    process startup, and invite/launch-argument joins rely on that. The
    pre-lobby edits saved preferences. When something identity-bearing changed,
@@ -181,44 +188,48 @@ will use, whatever happens to the live session.
 
 ### Surface
 
-1. Hook `Click_MultiPlayer` (`FUN_0078c6c0`) behind a setting. The hook only
-   decides whether to show the panel; the stock body still runs on Continue.
-2. Show the panel as an in-place MainScreen mode: hide the stock central
-   controls, and build the panel's widgets under `MainScreen_Overlay`.
-3. Follow the documented injection rules:
-   - Keep plates input-transparent (`+0xE9`).
-   - Both callback slots on every active button, never on `cUI_Text` /
-     `cUI_TextEntry`.
-   - Blank text instead of relying on `SetActive`.
-   - Build at screen setup.
-   - Validate widgets with `IsWidgetLiveChildOfParent`.
-   - Hold no widget pointers across a MainScreen generation (singleton
-     `0x0094551C`).
-4. Reuse rather than rebuild:
-   - The nickname row is `CreateNicknameAndRouteWidgets` with its `AppendChar`
-     focus path.
-   - The flag pair is `CreateFlagButtonCommon` / `CycleSelectedFlag`.
-   - Both currently live in `lobby_ui.cpp` and are parented to the lobby.
-5. The panel shows:
-   - nickname entry
-   - flag `<` / preview / `>`
-   - endpoint selector: Official, Custom (host[:port], recent list), LAN
-     (disabled until phase 4)
-   - a status line: platform, auth state (`client+4`), current endpoint
-   - Back and Continue
-6. **Continue:**
-   1. Persist.
-   2. If the nickname or endpoint changed and the client is authorised (state
-      3): set the new name or endpoint, recycle the websocket (the existing
-      `RecycleBzrNetWebSocket`), and show "Connecting…" until state 3 returns.
-   3. Call the original `Click_MultiPlayer`. Its `isNetworkInit` check is the
-      gate, so a failed reconnect leaves the player on the panel with the stock
-      "Not Ready" state, not in a half-built lobby.
-7. **Back:** restore the stock controls. Changes are kept only if applied.
+1. `Click_MultiPlayer` (`FUN_0078c6c0`) is detoured. With `[Network] PreLobby`
+   on (read at click time) it calls `ShellScreens::RequestScreen` for the
+   pre-lobby; otherwise, or if that fails, it runs the stock body. While
+   Continue is running the detour passes straight through.
+2. The title screen disables the Multiplayer button every frame until BZRNet
+   authorises, so the click would never arrive while it reads "Not Ready". The
+   one call site of the MP-status refresh (`0x0078EB30` -> `0x0078EB50`) is
+   redirected to run the stock refresh and then re-enable the button when the
+   setting is on.
+3. The screen is a Top Screen with a painted 1440x1080 panel
+   (`osh_prelobby_center.png`, `mkscreens.py` `PRELOBBY_LAYOUT`):
+   - title "MULTIPLAYER"
+   - PLAYER box: the nickname entry (`CreateNicknameAndRouteWidgets`, with its
+     `AppendChar` focus path) and the flag `<` / preview / `>`
+     (`CreateFlagButtonCommon`), borrowed from `lobby_ui.cpp` and parented to
+     the centre panel
+   - CONNECTION box: `Network: Ready | Connecting... | Status unknown` and
+     `Server: Official | <host> (custom server)` (the redirect the socket layer
+     actually applies, `GetMatchmakingRedirectTarget`)
+   - Back (top corner) and Continue (bottom centre)
+4. Typed characters reach the nickname entry through the screen's own char slot
+   (cUI_View slot 2), via the framework's `onChar` callback. The per-frame
+   status and Continue polling run from the `tick` callback (slot 13, after the
+   stock update). Both run under SEH.
+5. **Continue:**
+   1. End the nickname edit; if the typed name differs from the persisted one,
+      persist it and, when the connection is authorised outside a match,
+      recycle the websocket (`ApplyBzrNetNicknameForPreLobby`).
+   2. If the connection was recycled or is not yet authorised, show
+      "Connecting..." and wait in the tick for `isNetworkInit` (2 s grace for
+      the old authorisation to drop, 20 s timeout).
+   3. Call the original `Click_MultiPlayer` with `this` = the pre-lobby screen
+      (it only uses the shell manager at `+0x138`, which every OpenShim screen
+      stores). Its `isNetworkInit` check is the gate, so a failed reconnect
+      leaves the player on the screen. The lobby is pushed on top and lobby
+      Back returns here.
+6. **Back / Esc:** the shell pops the screen. An unapplied typed name is dropped.
+7. With the setting on, the nickname and flag pickers are no longer built on the
+   in-lobby host/client setup screens (the net-route readout stays there).
 
-The existing in-lobby nickname editor can stay. Its recycle runs while a lounge
-is registered, which is the unknown case above. Once the pre-lobby exists, it
-should point the player to the pre-lobby rather than recycle in place.
+The in-lobby `/nickname` command keeps working either way. Its recycle runs
+while a lounge is registered, which is the unknown case above.
 
 ### Endpoint switching
 
@@ -275,8 +286,7 @@ endpoint pointing at a LAN machine running the dev server.
 ## Phases
 
 1. **Pre-lobby with nickname + flag.**
-   - Main-menu surface: needs the open `MainScreen_Overlay` hit-test/z-order
-     gate from `REDUX_SHELL_UI_GATE_STATUS.md` passed live first.
+   - Shell-screen surface (done); the live checks below still apply.
    - Recycle-on-Continue.
    - Acceptance: a second client sees the new name.
 2. **Endpoint picker, apply on relaunch.**

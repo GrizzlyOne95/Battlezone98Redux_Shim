@@ -1631,6 +1631,7 @@ namespace BZROpenShim
         InstallConstructorRemoteBuildFixIfPossible();
         EnsureInputBindingPopulateHookScaffold();
         EnsureOptionsParentCtorHookScaffold();
+        RegisterPreLobbyScreen();
         EnsureNativeUiMainMenuDiagnosticScaffold();
     }
 
