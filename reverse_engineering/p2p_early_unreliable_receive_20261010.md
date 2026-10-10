@@ -219,5 +219,43 @@ to 13.4% (vs 11.4% early-only). Admitted/held counts are the throttled
 NAKs are the stock NAK that still precedes every early-delivered update
 (site B runs after `0x0075DB32`), all naming the same missing stamp.
 
-Open before a default flip: mixed stock/patched peers, longer sessions,
-WAN round trips.
+## WAN profile — 2026-10-10
+
+`delay=60,jitter=20,loss=2,reorder=1,seed=215` (about 120 ms round trip).
+
+Harness caveat: the first two WAN matrices (`20261010-1034`, `-1051`) ran on
+a relay whose delayed datagrams sharing one floored deadline left in timer-heap
+order, not FIFO, so every resend burst arrived scrambled (DedicatedServer
+`9eb491e` fixes it; regression in `relay_impairment_test.py`). Native receive
+then accepted about one stamp per resend pass and stock collapsed (FLOW_FAIL,
+cleanup never converged); early-only and early+NAK still passed gameplay,
+but those runs are a stress result, not a WAN result. The scorer had a matching
+flaw: rebuilding delivery from the millisecond trace stamp plus logged delay
+could invert neighbours the relay sent at one deadline; `delivered()` now
+applies the relay's per-stream floor (reorder-picked copies exempt).
+
+Matrix `retry-battle-matrix-20261010-1112` (fixed relay, verdict PASS):
+
+| Arm | Native unreliable rejections | Native stale dup / out-of-order drops | Reliable p95 / p99 / max ms | Unresolved stamps | Reliable bytes | Native health | Gameplay |
+|---|---:|---|---|---:|---:|---|---|
+| stock | 1,242 | 3,653 / 2,642 | 1,970 / 3,787 / 4,654 | 934 | 576 k | FAIL | PASS |
+| `+early` | 30 | 4,187 / 2,887 | 2,699 / 4,046 / 5,158 | 891 | 615 k | pass | PASS |
+| `+early+nak` | 27 | 6,225 / 3,911 | 1,934 / 2,606 / 3,036 | 360 | 878 k | pass | PASS |
+
+At WAN round trips the early NAK helps the tail only modestly (p99 about
+-35%) for +43% reliable bytes: a resend pass triggered by a NAK re-sends the
+unacknowledged queue, much of which is still in flight one RTT later, and a
+1% reorder NAKs datagrams that are not lost.
+
+## Decision
+
+* `EarlyUnreliableAccept` default **on**: native health passes with it in
+  every impaired profile (3% loss, 256 kbit/s, WAN) and fails without it; the
+  clean link is unaffected; gameplay passed in every arm; receiver-only with an
+  unchanged wire format, so mixed stock/patched sessions behave as before on
+  stock receivers.
+* `EarlyNakAccept` stays **opt-in** (holdoff 300 ms): reliable p95 3x lower on
+  low-RTT lossy links for about +30% resend bytes, but on WAN the gain is small
+  and the byte cost larger.
+
+Still open: longer sessions, real (non-loopback) WAN peers.
