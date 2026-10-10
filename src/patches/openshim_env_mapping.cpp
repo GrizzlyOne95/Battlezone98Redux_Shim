@@ -239,6 +239,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "MagnetZeroRangeGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE") ||
+            Equals(name, "BZR_DISABLE_UNFOCUSED_MOUSE_RELEASE"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "UnfocusedMouseRelease", true, out);
+        }
         // New switches: these two had no opt-out of any kind before.
         if (Equals(name, "OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||
             Equals(name, "BZR_DISABLE_PRODUCER_SCRIPT_PREDICATES"))
