@@ -3,6 +3,7 @@
 // while its window is in the background or minimized.
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
+#include "bzr_options_ui.h"
 #include "iat_patch.h"
 #include "patcher.h"
 #include <Windows.h>
@@ -31,8 +32,16 @@ namespace BZROpenShim
         // window is minimized, SetCursorPos becomes a no-op and any clip
         // rectangle is replaced by a release. When focus returns, the look
         // reader's next frame re-clips and re-centres exactly as stock does.
+        //
+        // OPENSHIM_NEVER_CAPTURE_MOUSE=1 (environment, or [Environment] in
+        // openshim.ini) widens that to "always": the game never clips or warps
+        // the cursor even in the foreground. That is for automated test
+        // clients, which are driven by posted window messages and only ever
+        // steal the real cursor from whoever is at the desk. Not for play:
+        // mouse-look stops working without the re-centre.
 
         bool g_UnfocusedMouseReleaseEnabled = true;
+        static bool s_NeverCaptureMouse = false;
         static bool s_UnfocusedMouseReleaseInstalled = false;
         static volatile long s_UnfocusedMouseReleaseLogBudget = 4;
 
@@ -44,6 +53,8 @@ namespace BZROpenShim
         // True when Redux should not own the cursor right now.
         static bool ReduxIsInBackground()
         {
+            if (s_NeverCaptureMouse)
+                return true;
             const HWND foreground = GetForegroundWindow();
             if (!foreground)
                 return true;
@@ -62,12 +73,13 @@ namespace BZROpenShim
         static void NoteSuppressed(const char* what)
         {
             if (InterlockedDecrement(&s_UnfocusedMouseReleaseLogBudget) >= 0)
-                Log(L"[MOUSEFOCUS] Redux is in the background; suppressed %hs\n", what);
+                Log(L"[MOUSEFOCUS] %hs; suppressed %hs\n",
+                    s_NeverCaptureMouse ? "Never-capture mode" : "Redux is in the background", what);
         }
 
         static BOOL WINAPI SetCursorPosHook(int x, int y)
         {
-            if (g_UnfocusedMouseReleaseEnabled && ReduxIsInBackground())
+            if ((g_UnfocusedMouseReleaseEnabled || s_NeverCaptureMouse) && ReduxIsInBackground())
             {
                 NoteSuppressed("SetCursorPos");
                 return TRUE;
@@ -77,7 +89,7 @@ namespace BZROpenShim
 
         static BOOL WINAPI ClipCursorHook(const RECT* rect)
         {
-            if (rect && g_UnfocusedMouseReleaseEnabled && ReduxIsInBackground())
+            if (rect && (g_UnfocusedMouseReleaseEnabled || s_NeverCaptureMouse) && ReduxIsInBackground())
             {
                 NoteSuppressed("ClipCursor");
                 rect = nullptr;
@@ -89,7 +101,10 @@ namespace BZROpenShim
         {
             if (s_UnfocusedMouseReleaseInstalled)
                 return;
-            if (!g_UnfocusedMouseReleaseEnabled)
+            s_NeverCaptureMouse = EnvFlagEnabled("OPENSHIM_NEVER_CAPTURE_MOUSE");
+            if (s_NeverCaptureMouse)
+                Log(L"[MOUSEFOCUS] OPENSHIM_NEVER_CAPTURE_MOUSE: cursor is never clipped or re-centred (test clients only)\n");
+            if (!g_UnfocusedMouseReleaseEnabled && !s_NeverCaptureMouse)
             {
                 Log(L"[MOUSEFOCUS] Unfocused mouse release disabled\n");
                 s_UnfocusedMouseReleaseInstalled = true;
