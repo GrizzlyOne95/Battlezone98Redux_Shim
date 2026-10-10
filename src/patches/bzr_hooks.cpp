@@ -1573,6 +1573,7 @@ namespace BZROpenShim
             {"EnsureOptionsParentCtorHookScaffold", &EnsureOptionsParentCtorHookScaffold},
             {"EnsureNativeUiMainMenuDiagnosticScaffold", &EnsureNativeUiMainMenuDiagnosticScaffold},
             {"LogShimSettingsUiStatus", &LogShimSettingsUiStatus},
+            {"InstallBackgroundRunIfRequested", &InstallBackgroundRunIfRequested},
         };
         RunInitSteps(kLateInitSteps);
         Log(L"[MAPTRACE] Map refresh trace: %hs\n",

@@ -321,6 +321,10 @@ target_compile_features(patch_config_parse_tests PRIVATE cxx_std_20)
 target_compile_definitions(patch_config_parse_tests PRIVATE
     BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json")
 
+openshim_add_test(background_run_policy_tests STD 20 SOURCES
+    background_run_policy_tests.cpp
+)
+
 openshim_add_test(ai_range_policy_tests STD 20 SOURCES
     ai_range_policy_tests.cpp
 )
