@@ -1467,6 +1467,13 @@ EarlyNakAccept = 0
 ; Accepted: decimal 50-10000 ms. Default: 300. Used only with EarlyNakAccept.
 EarlyNakHoldoffMs = 300
 
+; A NAK for a missing message triggers a resend only if the peer is still
+; asking for that message this long after its first NAK. A datagram that was
+; merely late or reordered arrives inside the window and causes no resend
+; pass. 0 resends on the first NAK.
+; Accepted: decimal 0-1000 ms. Default: 40. Used only with EarlyNakAccept.
+EarlyNakReorderMs = 40
+
 ; Granular netcode tuning -- the send-rate governor, bandwidth floor/ceiling,
 ; ramp rates and auto-kick envelope -- lives in net.ini under [OpenShimSocket],
 ; because it is applied by the socket layer. See net.ini for what each value

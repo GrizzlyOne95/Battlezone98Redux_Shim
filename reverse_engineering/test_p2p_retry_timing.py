@@ -17,8 +17,9 @@ def receive_log(early, armed=1, unavailable=0, totals=()):
     return log
 
 
-def nak_log(nak, armed=1, unavailable=0, totals=()):
-    log = '[P2PRECV] Early NAK receive armed: return=0x00 accept=0x00 window=4096\n' * armed
+def nak_log(nak, armed=1, unavailable=0, totals=(), reorder=40):
+    field = '' if reorder is None else f' reorder={reorder}ms holdoff=300ms'
+    log = f'[P2PRECV] Early NAK receive armed: return=0x00 accept=0x00 window=4096{field}\n' * armed
     log += '[P2PRECV] NAK signatures unavailable; stock NAK receive kept\n' * unavailable
     for total in totals:
         log += f'[P2PRECV] Accepted early NAKs: total={total} (+1)\n'
@@ -28,8 +29,11 @@ def nak_log(nak, armed=1, unavailable=0, totals=()):
 def evidence(token):
     values = timing.parse_timers(token)
     ini = '[Network]\n' + ''.join(f'{key} = {value}\n' for (key, _, _), value in zip(timing.TIMERS, values))
-    ini += f'EarlyUnreliableAccept = {values[2]}\nEarlyNakAccept = {values[3]}\n'
-    log = receive_log(values[2], armed=values[2]) + nak_log(values[3], armed=values[3])
+    ini += f'EarlyUnreliableAccept = {values[2]}\nEarlyNakAccept = {int(bool(values[3]))}\n'
+    if values[3]:
+        ini += f'EarlyNakReorderMs = {timing.NAK_REORDER_MS[values[3]]}\n'
+    log = receive_log(values[2], armed=values[2]) + nak_log(values[3], armed=int(bool(values[3])),
+                                                           reorder=timing.NAK_REORDER_MS.get(values[3]))
     for (key, patch, stock), value in zip(timing.TIMERS, values):
         if value == stock:
             log += f'[SKIP] {patch} address=0x0075CA00 verified=yes payload=0\n'
@@ -160,6 +164,61 @@ class NakEvidenceTests(unittest.TestCase):
         ini, log = evidence('300/800')
         self.assertEqual(timing.verify_client(ini, log + nak_log(1), '300/800')['status'], 'mismatch')
         self.assertEqual(timing.verify_client(ini.replace('NakAccept = 0', 'NakAccept = 1'), log, '300/800')['status'], 'mismatch')
+
+    def test_nak0_token_round_trip_and_ini(self):
+        self.assertEqual(timing.parse_timers('300/800+nak0'), (300, 800, 0, 2))
+        self.assertEqual(timing.parse_timers('300/800+early+nak0'), (300, 800, 1, 2))
+        self.assertEqual(timing.token_of(*timing.parse_timers('300/800+nak0')), '300/800+nak0')
+        self.assertEqual(timing.token_of(*timing.parse_timers('300/800+early+nak0')), '300/800+early+nak0')
+        for token in ('300/800+nak00', '300/800+NAK0', '300/800+nak0+early', '300/800+nak+nak0', '300/800+nak1'):
+            with self.assertRaises(ValueError):
+                timing.parse_timers(token)
+        ini, _ = evidence('300/800+nak0')
+        self.assertIn('EarlyNakReorderMs = 0\n', ini)
+        self.assertEqual(timing.configured_timers(ini), (300, 800, 0, 2))
+        self.assertIn('EarlyNakReorderMs = 40\n', evidence('300/800+nak')[0])
+
+    def test_nak_reorder_config_parsing(self):
+        base = '[Network]\nEarlyNakAccept = 1\n'
+        self.assertEqual(timing.configured_timers(base)[3], 1)  # absent => 40
+        self.assertEqual(timing.configured_timers(base + 'EarlyNakReorderMs = 40\n')[3], 1)
+        self.assertEqual(timing.configured_timers(base + 'EarlyNakReorderMs = 0 ; pinned\n')[3], 2)
+        # ignored (but still validated) while NAK acceptance is off
+        self.assertEqual(timing.configured_timers('[Network]\nEarlyNakReorderMs = 0\n')[3], 0)
+        for bad in ('1001', '-1', '4o', '', '40\nEarlyNakReorderMs = 40'):
+            with self.assertRaises(ValueError):
+                timing.configured_timers(base + f'EarlyNakReorderMs = {bad}\n')
+        with self.assertRaises(ValueError):  # valid range but neither arm
+            timing.configured_timers(base + 'EarlyNakReorderMs = 100\n')
+
+    def test_nak0_verifies_and_reorder_mismatch_is_reported(self):
+        ini, log = evidence('300/800+nak0')
+        result = timing.verify_client(ini, log, '300/800+nak0')
+        self.assertEqual(result['status'], 'verified')
+        self.assertEqual((result['timers'], result['receive']['nakReorderMs'], result['receive']['nakReorderExpectedMs']), ('300/800+nak0', 0, 0))
+        # older log without a reorder field is acceptable for +nak0 only
+        old = log.replace(nak_log(2, reorder=0), nak_log(2, reorder=None))
+        self.assertNotEqual(old, log)
+        self.assertEqual(timing.verify_client(ini, old, '300/800+nak0')['status'], 'verified')
+        # INI says reorder 0 but the intended arm is +nak, and vice versa
+        self.assertEqual(timing.verify_client(ini, log, '300/800+nak')['status'], 'mismatch')
+        ini40, log40 = evidence('300/800+nak')
+        self.assertEqual(timing.verify_client(ini40, log40, '300/800+nak0')['status'], 'mismatch')
+        # native armed line contradicting the arm
+        self.assertEqual(timing.verify_client(ini, log.replace('reorder=0ms', 'reorder=40ms'), '300/800+nak0')['status'], 'mismatch')
+        self.assertEqual(timing.verify_client(ini40, log40.replace('reorder=40ms', 'reorder=0ms'), '300/800+nak')['status'], 'mismatch')
+
+    def test_nak_requires_reorder_field_on_armed_line(self):
+        ini, log = evidence('300/800+nak')
+        self.assertEqual(timing.verify_client(ini, log, '300/800+nak')['receive']['nakReorderMs'], 40)
+        old = log.replace(nak_log(1), nak_log(1, reorder=None))
+        self.assertEqual(timing.verify_client(ini, old, '300/800+nak')['status'], 'mismatch')
+
+    def test_held_nak_text_old_and_new_are_both_parsed(self):
+        ini, log = evidence('300/800+nak')
+        for held in ('[P2PRECV] Held repeat NAKs: total=7 (+1)\n', '[P2PRECV] Held NAKs (reorder window or repeat): total=7 (+1)\n'):
+            result = timing.verify_client(ini, log + held, '300/800+nak')
+            self.assertEqual((result['status'], result['receive']['naksHeldTotal']), ('verified', 7))
 
     def test_verify_run_reports_nak_totals(self):
         with tempfile.TemporaryDirectory() as run:

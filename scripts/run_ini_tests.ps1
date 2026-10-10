@@ -292,6 +292,7 @@ $stockValueChecks = @{
     "Network/EarlyUnreliableAccept" = "1"
     "Network/EarlyNakAccept" = "0"
     "Network/EarlyNakHoldoffMs" = "300"
+    "Network/EarlyNakReorderMs" = "40"
     "SinglePlayer/HeadlightColor" = "Stock"
     "SinglePlayer/HeadlightBeam" = "Stock"
     "SinglePlayer/HeadlightBrightness" = "1.00"
