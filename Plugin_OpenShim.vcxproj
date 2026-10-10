@@ -258,6 +258,7 @@
      <ClCompile Include="src\patches\openshim_ini.cpp" />
     <ClCompile Include="src\patches\openshim_preset_migration.cpp" />
     <ClCompile Include="src\patches\openshim_sdk_provider.cpp" />
+    <ClCompile Include="src\patches\geometry_contact_test.cpp" />
     <ClCompile Include="src\patches\openshim_update_manifest.cpp" />
     <ClCompile Include="src\patches\openshim_update_support.cpp" />
     <ClCompile Include="src\patches\openshim_updater.cpp" />

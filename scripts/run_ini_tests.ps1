@@ -301,6 +301,7 @@ foreach ($entry in $stockValueChecks.GetEnumerator()) {
 # multiplayer-risk fix. Generic enabled-looking detection above remains the
 # catch-all for newly added settings.
 $shippingPolicyChecks = @{
+    "SinglePlayer/VehicleGeometryContact" = "0"
     "General/CustomBindsUi" = "1"
     "General/SettingsUi" = "1"
     "General/MapRefreshFixes" = "1"
