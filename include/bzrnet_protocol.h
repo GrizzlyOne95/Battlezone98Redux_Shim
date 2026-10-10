@@ -157,4 +157,23 @@ namespace BZROpenShim
         size_t length,
         std::vector<WebSocketTicketRewrite>& rewrites,
         const char** rejectReason = nullptr);
+
+    // Per-call, frame-aligned mode for IOCP-style senders that may re-issue a
+    // partial tail, so no stream state can be trusted across calls. One call
+    // (the spans are its scatter/gather buffers) must be either the HTTP
+    // upgrade request ("GET " ... CRLF CRLF) or a whole number of complete
+    // frames starting at a frame boundary; anything else is Rejected. A
+    // rewrite is scattered back into the spans in place (length unchanged).
+    struct ByteSpan
+    {
+        uint8_t* data = nullptr;
+        size_t length = 0;
+    };
+    constexpr size_t kTicketScrubMaxCallBytes = 512 * 1024;
+
+    WebSocketScrubStatus ScrubWebSocketTicketsPerCall(
+        const ByteSpan* spans,
+        size_t count,
+        std::vector<WebSocketTicketRewrite>& rewrites,
+        const char** rejectReason = nullptr);
 }

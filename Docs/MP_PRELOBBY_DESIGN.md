@@ -292,19 +292,24 @@ OpenShim never lets it leave for any host other than
 `battlezone98mp.webdev.rebellion.co.uk`, whichever way the server was chosen
 (`[Network] Server=Custom`, `/bzrserver=`, or the test redirect):
 
-- A BZRNet lookup that resolves to a non-official host records its addresses;
-  a TCP socket that connects to one of them is tagged. Its outbound WebSocket
-  stream is scrubbed in `net_optimizer.cpp` (`ScrubWebSocketTickets`,
+- A BZRNet lookup that resolves to a non-official host records its addresses.
+  On every send, a connected TCP socket whose peer is one of them (port 1337)
+  withholds; the verdict comes from `getpeername` each time, so it also covers
+  the sockets the game's IOCP library creates and connects outside our
+  `socket()`/`connect()` hooks. Its outbound WebSocket call is scrubbed in place
+  in `net_optimizer.cpp` (`ScrubWebSocketTicketsPerCall`,
   `bzrnet_protocol.cpp`) before it reaches ws2_32: `steamAppTicket`,
   `gogAppTicket`, `authTicket` and `platformTicket` string values become
   `"withheld"` (or `""` for a value shorter than that), padded with JSON
   spaces so the frame length and mask key are unchanged. One
   `ticket_withheld sid= key= length=` line is logged per rewrite, never the
   value. Traffic to the official host is never inspected.
-- Fail closed: on a tagged socket a text frame that could carry a ticket but
+- Fail closed: each call must be the HTTP upgrade request or a whole number
+  of complete frames (IOCP may re-issue a partial tail, so no state is kept
+  across calls). A call that is not, or a text frame that could carry a ticket but
   cannot be rewritten in place (payload split across send calls, fragmented or
   continuation frame, RSV bits / permessage-deflate, over 256 KiB, ticket value
-  that is not a string, an overlapped send that would need rewriting) is not
+  that is not a string) is not
   sent; the send returns `SOCKET_ERROR` / `WSAECONNABORTED`.
 - Needs the socket hooks, i.e. `NetImprovements` on (the same gate as the
   redirect itself); independent of `RelayCapture`.

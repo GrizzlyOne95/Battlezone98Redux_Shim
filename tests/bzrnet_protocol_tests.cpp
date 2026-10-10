@@ -358,6 +358,89 @@ namespace
         }
     }
 }
+
+namespace
+{
+    void TestTicketWithholdingPerCall()
+    {
+        const uint8_t mask[4] = { 0x0A, 0x0B, 0x0C, 0x0D };
+        const std::string ticket(60, 'T');
+        std::vector<WebSocketTicketRewrite> rewrites;
+
+        // The HTTP upgrade request passes untouched.
+        {
+            std::vector<uint8_t> req = Bytes(kClientHandshake);
+            const std::vector<uint8_t> original = req;
+            ByteSpan span{ req.data(), req.size() };
+            Check(ScrubWebSocketTicketsPerCall(&span, 1, rewrites) == WebSocketScrubStatus::Unchanged && req == original,
+                "per-call: upgrade request passes");
+        }
+
+        // Two complete frames in one call; only the ticket frame changes.
+        {
+            std::vector<uint8_t> a = Frame(true, 0x1, "{\"type\":\"DoPing\"}", mask);
+            const std::vector<uint8_t> aOriginal = a;
+            std::vector<uint8_t> b = Frame(true, 0x1, "{\"type\":\"Authorization\",\"steamAppTicket\":\"" + ticket + "\"}", mask);
+            std::vector<uint8_t> both = a;
+            both.insert(both.end(), b.begin(), b.end());
+            const size_t size = both.size();
+            ByteSpan span{ both.data(), both.size() };
+            rewrites.clear();
+            Check(ScrubWebSocketTicketsPerCall(&span, 1, rewrites) == WebSocketScrubStatus::Rewritten,
+                "per-call: ticket frame rewritten");
+            Check(both.size() == size && rewrites.size() == 1, "per-call: length kept, one rewrite");
+            Check(std::equal(aOriginal.begin(), aOriginal.end(), both.begin()), "per-call: first frame untouched");
+            std::vector<uint8_t> second(both.begin() + aOriginal.size(), both.end());
+            const std::string out = FramePayloadText(second);
+            Check(out.find("\"steamAppTicket\":\"withheld\"") != std::string::npos &&
+                out.find(ticket) == std::string::npos, "per-call: second frame withheld");
+        }
+
+        // A frame split across two calls is refused (each call checked alone).
+        {
+            std::vector<uint8_t> frame = Frame(true, 0x1, "{\"steamAppTicket\":\"" + ticket + "\"}", mask);
+            std::vector<uint8_t> head(frame.begin(), frame.begin() + 10);
+            std::vector<uint8_t> tail(frame.begin() + 10, frame.end());
+            ByteSpan h{ head.data(), head.size() };
+            ByteSpan t{ tail.data(), tail.size() };
+            Check(ScrubWebSocketTicketsPerCall(&h, 1, rewrites) == WebSocketScrubStatus::Rejected,
+                "per-call: first half of a split frame rejected");
+            Check(ScrubWebSocketTicketsPerCall(&t, 1, rewrites) == WebSocketScrubStatus::Rejected,
+                "per-call: second half of a split frame rejected");
+        }
+
+        // Header and payload in separate WSABUF-style spans of ONE call.
+        {
+            std::vector<uint8_t> frame = Frame(true, 0x1, "{\"gogAppTicket\":\"" + ticket + "\"}", mask);
+            const size_t headerSize = 2 + 4;
+            std::vector<uint8_t> header(frame.begin(), frame.begin() + headerSize);
+            std::vector<uint8_t> payload(frame.begin() + headerSize, frame.end());
+            ByteSpan spans[2] = { { header.data(), header.size() }, { payload.data(), payload.size() } };
+            rewrites.clear();
+            Check(ScrubWebSocketTicketsPerCall(spans, 2, rewrites) == WebSocketScrubStatus::Rewritten,
+                "scatter: two-buffer layout rewritten");
+            std::vector<uint8_t> joined = header;
+            joined.insert(joined.end(), payload.begin(), payload.end());
+            const std::string out = FramePayloadText(joined);
+            Check(joined.size() == frame.size() && out.find("\"gogAppTicket\":\"withheld\"") != std::string::npos &&
+                out.find(ticket) == std::string::npos, "scatter: payload buffer holds the rewrite");
+            Check(std::equal(header.begin(), header.end(), frame.begin()), "scatter: header buffer untouched");
+        }
+
+        // RSV1 and a call ending mid-frame are refused in per-call mode too.
+        {
+            std::vector<uint8_t> frame = Frame(true, 0x1, "{}", mask);
+            frame[0] |= 0x40;
+            ByteSpan span{ frame.data(), frame.size() };
+            Check(ScrubWebSocketTicketsPerCall(&span, 1, rewrites) == WebSocketScrubStatus::Rejected,
+                "per-call: RSV1 rejected");
+            std::vector<uint8_t> ping = Frame(true, 0x9, "abcdef", mask);
+            ByteSpan cut{ ping.data(), ping.size() - 2 };
+            Check(ScrubWebSocketTicketsPerCall(&cut, 1, rewrites) == WebSocketScrubStatus::Rejected,
+                "per-call: truncated control frame rejected");
+        }
+    }
+}
 int main()
 {
     std::string type;
@@ -430,6 +513,7 @@ int main()
     TestWebSocketStream();
     TestJsonEscape();
     TestTicketWithholding();
+    TestTicketWithholdingPerCall();
 
     std::printf("%d checks, %d failures\n", OpenShimTest::CheckCount(), OpenShimTest::FailureCount());
     return OpenShimTest::ExitCode();

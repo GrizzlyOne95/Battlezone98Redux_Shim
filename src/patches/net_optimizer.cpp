@@ -3780,17 +3780,17 @@ namespace
     // ---- Platform-ticket withholding ----------------------------------------
     //
     // The Authorization message carries the Steam/GOG app ticket. It must only
-    // ever reach the official host. A socket is tagged when it connects to an
-    // address that a BZRNet lookup resolved to a NON-official host (test
-    // redirect, saved server selection, or /bzrserver=); its outbound stream
-    // is then scrubbed by ScrubWebSocketTickets before it reaches ws2_32, and
-    // fails closed when a frame cannot be rewritten. Traffic to the official
-    // host is never inspected or altered. Independent of RelayCapture.
-    constexpr size_t kWithholdMaxSendBytes = 512 * 1024;
+    // ever reach the official host. A socket withholds when its connected peer
+    // (port 1337) is an address a BZRNet lookup resolved from a NON-official host
+    // (test redirect, saved server selection, or /bzrserver=). Each outbound call
+    // is then scrubbed by ScrubWebSocketTicketsPerCall (frame-aligned, in place)
+    // before it reaches ws2_32, and fails closed when it cannot be. Traffic to
+    // the official host is never inspected or altered. Independent of
+    // RelayCapture.
 
     struct WithholdSocket
     {
-        WebSocketTicketScrubState scrub;
+        std::string key;        // peer the socket was last armed for (log-once only)
         bool abortLogged = false;
     };
 
@@ -3798,7 +3798,7 @@ namespace
     std::unordered_set<std::string> g_WithholdAddresses;   // resolved from non-official hosts
     std::unordered_set<std::string> g_OfficialAddresses;   // resolved from the official host
     std::unordered_map<SOCKET, WithholdSocket> g_WithholdSockets;
-    std::atomic<int> g_WithholdSocketCount{ 0 };
+    std::atomic<int> g_WithholdAddressCount{ 0 };   // non-official addresses known
 
     // Address-family-normalised key; IPv4-mapped IPv6 collapses to IPv4.
     bool MakeAddressKey(const sockaddr* addr, int addrLen, std::string& key)
@@ -3850,111 +3850,122 @@ namespace
             if (ai->ai_addr && MakeAddressKey(ai->ai_addr, static_cast<int>(ai->ai_addrlen), key))
                 (official ? g_OfficialAddresses : g_WithholdAddresses).insert(key);
         }
+        g_WithholdAddressCount.store(static_cast<int>(g_WithholdAddresses.size()));
         ReleaseSRWLockExclusive(&g_WithholdLock);
+    }
+
+    // The verdict is NOT cached per socket: handle values are reused, and the
+    // game's IOCP library closes its sockets through imports we do not patch,
+    // so a cached "clear" (or "withhold") could outlive the socket it described.
+    // It is recomputed from the live peer address, which costs nothing unless a
+    // non-official address has been resolved (g_WithholdAddressCount > 0).
+    bool WithholdAddressMatch(const sockaddr* addr, int addrLen, std::string* keyOut = nullptr)
+    {
+        uint16_t port = 0;
+        std::string key;
+        if (!TryGetSockaddrPort(addr, addrLen, &port) || port != kBzrNetWebSocketPort ||
+            !MakeAddressKey(addr, addrLen, key))
+            return false;
+
+        AcquireSRWLockShared(&g_WithholdLock);
+        const bool match = g_WithholdAddresses.count(key) && !g_OfficialAddresses.count(key);
+        ReleaseSRWLockShared(&g_WithholdLock);
+        if (match && keyOut)
+            *keyOut = key;
+        return match;
+    }
+
+    // Log-once bookkeeping per socket handle (re-armed if the peer changes).
+    void NoteWithholdArmed(SOCKET s, const std::string& key, const char* how, const sockaddr* peer, int peerLen)
+    {
+        bool log = false;
+        AcquireSRWLockExclusive(&g_WithholdLock);
+        WithholdSocket& entry = g_WithholdSockets[s];
+        if (entry.key != key)
+        {
+            entry.key = key;
+            entry.abortLogged = false;
+            log = true;
+        }
+        ReleaseSRWLockExclusive(&g_WithholdLock);
+        if (log)
+            Logf("[OpenShimNet] sid=%u ticket withholding armed (%s, peer %s)",
+                GetSocketId(s), how, FormatSockaddr(peer, peerLen).c_str());
     }
 
     void TagWithholdSocketIfNeeded(SOCKET s, const sockaddr* name, int namelen)
     {
-        std::string key;
-        if (!MakeAddressKey(name, namelen, key))
+        if (g_WithholdAddressCount.load() == 0)
             return;
-
+        std::string key;
+        if (!WithholdAddressMatch(name, namelen, &key))
+            return;
         AcquireSRWLockShared(&g_SocketLock);
         const auto sit = g_Sockets.find(s);
         const bool stream = sit != g_Sockets.end() && sit->second.type == SOCK_STREAM;
         ReleaseSRWLockShared(&g_SocketLock);
-        if (!stream)
-            return;
-
-        bool tagged = false;
-        AcquireSRWLockExclusive(&g_WithholdLock);
-        if (g_WithholdAddresses.count(key) && !g_OfficialAddresses.count(key))
-        {
-            tagged = g_WithholdSockets.emplace(s, WithholdSocket()).second;
-            g_WithholdSocketCount.store(static_cast<int>(g_WithholdSockets.size()));
-        }
-        ReleaseSRWLockExclusive(&g_WithholdLock);
-        if (tagged)
-            Logf("[OpenShimNet] sid=%u ticket withholding armed (non-official server %s)",
-                GetSocketId(s), FormatSockaddr(name, namelen).c_str());
+        if (stream)
+            NoteWithholdArmed(s, key, "connect", name, namelen);
     }
 
     void ForgetWithholdSocket(SOCKET s)
     {
-        if (g_WithholdSocketCount.load() == 0)
-            return;
         AcquireSRWLockExclusive(&g_WithholdLock);
         g_WithholdSockets.erase(s);
-        g_WithholdSocketCount.store(static_cast<int>(g_WithholdSockets.size()));
         ReleaseSRWLockExclusive(&g_WithholdLock);
     }
 
-    bool IsWithholdSocket(SOCKET s)
+    // True when `s` is a connected TCP socket whose peer is a non-official
+    // BZRNet ws endpoint. Covers sockets created and connected outside our
+    // socket()/connect() hooks (IOCP/ConnectEx), which is the game's ws socket.
+    bool ShouldWithholdSocket(SOCKET s)
     {
-        if (g_WithholdSocketCount.load() == 0)
+        if (g_WithholdAddressCount.load() == 0 || !g_RealGetPeerName)
             return false;
-        AcquireSRWLockShared(&g_WithholdLock);
-        const bool tagged = g_WithholdSockets.count(s) != 0;
-        ReleaseSRWLockShared(&g_WithholdLock);
-        return tagged;
+
+        int type = 0;
+        int typeLen = static_cast<int>(sizeof(type));
+        if (::getsockopt(s, SOL_SOCKET, SO_TYPE, reinterpret_cast<char*>(&type), &typeLen) == 0 &&
+            type != SOCK_STREAM)
+            return false;
+
+        sockaddr_storage peer = {};
+        int peerLen = static_cast<int>(sizeof(peer));
+        if (g_RealGetPeerName(s, reinterpret_cast<sockaddr*>(&peer), &peerLen) != 0)
+            return false;
+
+        std::string key;
+        if (!WithholdAddressMatch(reinterpret_cast<const sockaddr*>(&peer), peerLen, &key))
+            return false;
+        NoteWithholdArmed(s, key, "lazy", reinterpret_cast<const sockaddr*>(&peer), peerLen);
+        return true;
     }
 
-    // Scrubs `data` (a private copy of an outbound send on a tagged socket) in
-    // place. Rejected = do not send.
-    WebSocketScrubStatus ScrubTaggedOutbound(SOCKET s, std::vector<uint8_t>& data)
+    // Scrubs one outbound call on a withholding socket in place. Rejected = the
+    // caller must not send and should fail with WSAECONNABORTED.
+    WebSocketScrubStatus ScrubTaggedCall(SOCKET s, const ByteSpan* spans, size_t count)
     {
         std::vector<WebSocketTicketRewrite> rewrites;
         const char* reason = nullptr;
-        WebSocketScrubStatus status = WebSocketScrubStatus::Unchanged;
-        bool logAbort = false;
+        const WebSocketScrubStatus status = ScrubWebSocketTicketsPerCall(spans, count, rewrites, &reason);
 
-        AcquireSRWLockExclusive(&g_WithholdLock);
-        const auto it = g_WithholdSockets.find(s);
-        if (it != g_WithholdSockets.end())
+        bool logAbort = false;
+        if (status == WebSocketScrubStatus::Rejected)
         {
-            status = ScrubWebSocketTickets(it->second.scrub, data.data(), data.size(), rewrites, &reason);
-            if (status == WebSocketScrubStatus::Rejected && !it->second.abortLogged)
-            {
-                it->second.abortLogged = true;
-                logAbort = true;
-            }
+            AcquireSRWLockExclusive(&g_WithholdLock);
+            WithholdSocket& entry = g_WithholdSockets[s];
+            logAbort = !entry.abortLogged;
+            entry.abortLogged = true;
+            ReleaseSRWLockExclusive(&g_WithholdLock);
         }
-        ReleaseSRWLockExclusive(&g_WithholdLock);
 
         const uint32_t sid = GetSocketId(s);
         for (const WebSocketTicketRewrite& r : rewrites)
             Logf("[OpenShimNet] ticket_withheld sid=%u key=%s length=%zu", sid, r.key, r.length);
         if (logAbort)
-            Logf("[OpenShimNet] sid=%u ticket withholding aborted the connection: %s",
+            Logf("[OpenShimNet] sid=%u ticket withholding refused a send: %s",
                 sid, reason ? reason : "unknown");
         return status;
-    }
-
-    // Sends the whole of `data` (a scrubbed copy) so the game never sees a
-    // partial send it would retry from its own unscrubbed buffer. Returns 0 or
-    // the WSA error.
-    int SendWholeCopy(SOCKET s, const std::vector<uint8_t>& data, int flags)
-    {
-        size_t offset = 0;
-        const DWORD start = GetTickCount();
-        while (offset < data.size())
-        {
-            const int rc = g_RealSend(s, reinterpret_cast<const char*>(data.data()) + offset,
-                static_cast<int>(data.size() - offset), flags);
-            if (rc > 0)
-            {
-                offset += static_cast<size_t>(rc);
-                continue;
-            }
-            const int err = g_RealWSAGetLastError ? g_RealWSAGetLastError() : WSAECONNABORTED;
-            if (rc == SOCKET_ERROR && err == WSAEWOULDBLOCK && GetTickCount() - start < 2000)
-            {
-                Sleep(1);
-                continue;
-            }
-            return (rc == SOCKET_ERROR && err != 0) ? err : WSAECONNABORTED;
-        }
-        return 0;
     }
 
     INT WSAAPI Hook_getaddrinfo(
@@ -4126,52 +4137,29 @@ namespace
     int WSAAPI Hook_WSASend(SOCKET s, LPWSABUF buffers, DWORD bufferCount, LPDWORD bytesSent, DWORD flags, LPWSAOVERLAPPED overlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE completionRoutine)
     {
         EnsureSocketOptions(s);
-        int rc = 0;
-        int err = 0;
-        bool sentScrubbed = false;
-        if (IsWithholdSocket(s))
+        if (buffers && bufferCount > 0 && ShouldWithholdSocket(s))
         {
-            // Non-official server: scrub the outbound stream before it leaves.
-            const uint32_t requested = GetRequestedWsabufBytes(buffers, bufferCount);
-            std::vector<uint8_t> copy;
-            if (requested > 0 && requested <= kWithholdMaxSendBytes)
+            // Non-official server: scrub this call's buffers in place. The
+            // game's IOCP library keeps them alive until completion and the
+            // length never changes, so the real call can use them as they are.
+            std::vector<ByteSpan> spans;
+            spans.reserve(bufferCount);
+            for (DWORD i = 0; i < bufferCount; ++i)
             {
-                copy.resize(requested);
-                copy.resize(GatherWsabufPayload(buffers, bufferCount, copy.data(), requested));
+                ByteSpan span;
+                span.data = reinterpret_cast<uint8_t*>(buffers[i].buf);
+                span.length = buffers[i].len;
+                spans.push_back(span);
             }
-            const bool tooBig = requested > kWithholdMaxSendBytes;
-            const WebSocketScrubStatus status = tooBig
-                ? WebSocketScrubStatus::Rejected
-                : ScrubTaggedOutbound(s, copy);
-            if (status == WebSocketScrubStatus::Rejected ||
-                (status == WebSocketScrubStatus::Rewritten && overlapped))
+            if (ScrubTaggedCall(s, spans.data(), spans.size()) == WebSocketScrubStatus::Rejected)
             {
-                // Overlapped sends cannot be redirected to a private copy.
-                if (status != WebSocketScrubStatus::Rejected)
-                    Logf("[OpenShimNet] sid=%u ticket withholding refused an overlapped send", GetSocketId(s));
                 if (g_RealWSASetLastError)
                     g_RealWSASetLastError(WSAECONNABORTED);
                 return SOCKET_ERROR;
             }
-            if (!overlapped)
-            {
-                err = SendWholeCopy(s, copy, 0);
-                if (err != 0)
-                {
-                    if (g_RealWSASetLastError)
-                        g_RealWSASetLastError(err);
-                    return SOCKET_ERROR;
-                }
-                if (bytesSent)
-                    *bytesSent = static_cast<DWORD>(copy.size());
-                sentScrubbed = true;
-            }
         }
-        if (!sentScrubbed)
-        {
-            rc = g_RealWSASend(s, buffers, bufferCount, bytesSent, flags, overlapped, completionRoutine);
-            err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
-        }
+        const int rc = g_RealWSASend(s, buffers, bufferCount, bytesSent, flags, overlapped, completionRoutine);
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
         if (g_Config.enableRelayCapture &&
             (rc == 0 || err == WSA_IO_PENDING) &&
             IsWebSocketControlSocket(s))
@@ -4289,39 +4277,29 @@ namespace
     int WSAAPI Hook_send(SOCKET s, const char* buffer, int length, int flags)
     {
         EnsureSocketOptions(s);
+        const char* sendBuffer = buffer;
         std::vector<uint8_t> scrubbed;
-        bool sentScrubbed = false;
-        if (buffer && length > 0 && IsWithholdSocket(s))
+        if (buffer && length > 0 && ShouldWithholdSocket(s))
         {
-            // Non-official server: scrub the outbound stream before it leaves.
-            if (static_cast<size_t>(length) > kWithholdMaxSendBytes)
-            {
-                if (g_RealWSASetLastError)
-                    g_RealWSASetLastError(WSAECONNABORTED);
-                return SOCKET_ERROR;
-            }
+            // Non-official server: scrub a private copy of this call and send
+            // that. A partial send leaves a tail the game re-sends from its own
+            // buffer; that tail is not frame-aligned, so it is refused.
             scrubbed.assign(reinterpret_cast<const uint8_t*>(buffer), reinterpret_cast<const uint8_t*>(buffer) + length);
-            if (ScrubTaggedOutbound(s, scrubbed) == WebSocketScrubStatus::Rejected)
+            ByteSpan span;
+            span.data = scrubbed.data();
+            span.length = scrubbed.size();
+            if (ScrubTaggedCall(s, &span, 1) == WebSocketScrubStatus::Rejected)
             {
                 if (g_RealWSASetLastError)
                     g_RealWSASetLastError(WSAECONNABORTED);
                 return SOCKET_ERROR;
             }
-            const int sendErr = SendWholeCopy(s, scrubbed, flags);
-            if (sendErr != 0)
-            {
-                if (g_RealWSASetLastError)
-                    g_RealWSASetLastError(sendErr);
-                return SOCKET_ERROR;
-            }
-            sentScrubbed = true;
+            sendBuffer = reinterpret_cast<const char*>(scrubbed.data());
         }
-        const int rc = sentScrubbed ? length : g_RealSend(s, buffer, length, flags);
-        const int err = (!sentScrubbed && rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
+        const int rc = g_RealSend(s, sendBuffer, length, flags);
+        const int err = (rc == SOCKET_ERROR && g_RealWSAGetLastError) ? g_RealWSAGetLastError() : 0;
         if (rc > 0 && buffer)
-            FeedWebSocketCapture(s, true,
-                sentScrubbed ? scrubbed.data() : reinterpret_cast<const uint8_t*>(buffer),
-                static_cast<size_t>(rc));
+            FeedWebSocketCapture(s, true, reinterpret_cast<const uint8_t*>(sendBuffer), static_cast<size_t>(rc));
         if (rc >= 0)
             LogPacketActivity("send", s, true, rc, nullptr, 0);
         LogSocketError("send", s, rc == SOCKET_ERROR ? SOCKET_ERROR : 0, &SocketState::lastSendError);
