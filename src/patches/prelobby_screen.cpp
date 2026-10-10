@@ -139,7 +139,7 @@ namespace BZROpenShim
 
         namespace MS = MatchmakingServer;
 
-        constexpr const char* kCustomServerNote = "Custom servers receive your platform sign-in ticket.";
+        constexpr const char* kCustomServerNote = "Custom servers never receive your sign-in ticket.";
 
         // The host the client connects to right now: the live override, else
         // the /bzrserver= launch host, else the official one.
