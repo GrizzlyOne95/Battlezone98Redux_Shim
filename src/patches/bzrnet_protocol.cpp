@@ -599,4 +599,62 @@ WebSocketScrubStatus ScrubWebSocketTickets(
     }
     return changed ? WebSocketScrubStatus::Rewritten : WebSocketScrubStatus::Unchanged;
 }
+
+WebSocketScrubStatus ScrubWebSocketTicketsPerCall(
+    const ByteSpan* spans,
+    size_t count,
+    std::vector<WebSocketTicketRewrite>& rewrites,
+    const char** rejectReason)
+{
+    auto reject = [&](const char* reason)
+    {
+        if (rejectReason) *rejectReason = reason;
+        return WebSocketScrubStatus::Rejected;
+    };
+
+    size_t total = 0;
+    for (size_t i = 0; i < count; ++i)
+    {
+        if (spans[i].length > 0 && !spans[i].data)
+            return reject("null buffer");
+        total += spans[i].length;
+        if (total > kTicketScrubMaxCallBytes)
+            return reject("send too large");
+    }
+    if (total == 0)
+        return WebSocketScrubStatus::Unchanged;
+
+    std::vector<uint8_t> flat;
+    flat.reserve(total);
+    for (size_t i = 0; i < count; ++i)
+        if (spans[i].length > 0)
+            flat.insert(flat.end(), spans[i].data, spans[i].data + spans[i].length);
+
+    static const uint8_t crlf2[4] = { '\r', '\n', '\r', '\n' };
+    if (total >= 8 && std::memcmp(flat.data(), "GET ", 4) == 0 &&
+        std::memcmp(flat.data() + total - 4, crlf2, 4) == 0)
+        return WebSocketScrubStatus::Unchanged;
+
+    WebSocketTicketScrubState state;
+    state.phase = WebSocketTicketScrubState::Phase::FrameHeader;
+    std::vector<WebSocketTicketRewrite> local;
+    const WebSocketScrubStatus status = ScrubWebSocketTickets(state, flat.data(), flat.size(), local, rejectReason);
+    if (status == WebSocketScrubStatus::Rejected)
+        return status;
+    if (state.phase != WebSocketTicketScrubState::Phase::FrameHeader || state.headerLength != 0)
+        return reject("call does not end on a frame boundary");
+    if (status == WebSocketScrubStatus::Unchanged)
+        return status;
+
+    size_t offset = 0;
+    for (size_t i = 0; i < count; ++i)
+    {
+        if (spans[i].length == 0)
+            continue;
+        std::memcpy(spans[i].data, flat.data() + offset, spans[i].length);
+        offset += spans[i].length;
+    }
+    rewrites.insert(rewrites.end(), local.begin(), local.end());
+    return WebSocketScrubStatus::Rewritten;
+}
 }
