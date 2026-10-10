@@ -721,9 +721,15 @@ void TestUiFormatting()
     caps.destructionChunks = true;
     caps.enhancedResources = true;
     ExpectContains(FormatAssetStatusForUi(caps), "Detected", "ui detected");
+    // No chunk payloads is a complete pack: chunk meshes are generated at runtime.
     caps.destructionChunks = false;
     caps.enhancedResources = true;
-    ExpectContains(FormatAssetStatusForUi(caps), "Enhanced only", "ui partial");
+    ExpectEqStr(FormatAssetStatusForUi(caps), "Asset Pack: Detected", "ui complete without chunk payloads");
+    ExpectEqStr(FormatAssetCapabilitiesDetail(caps), "Asset-dependent features available.",
+                "detail does not report chunk payloads missing");
+    caps.customUiAssets = true;  // the rest of the pack is present
+    caps.enhancedResources = false;
+    ExpectContains(FormatAssetStatusForUi(caps), "Enhanced resources missing", "ui partial");
     caps.state = AssetPackState::Incompatible;
     caps.installedVersion = "999";
     caps.expectedVersion = "1";
