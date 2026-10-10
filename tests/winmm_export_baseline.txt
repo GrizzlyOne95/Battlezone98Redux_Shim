@@ -306,3 +306,7 @@ OpenShimSetNativeHudMeterRect@20
 OpenShimSetNativeHudMeterVisible@8
 OpenShimRestoreNativeHudMeter@4
 OpenShimRestoreAllNativeHudMeters@0
+OpenShimHasNativeDamageResistance@0
+OpenShimSetUnitDamageMultiplier@12
+OpenShimClearUnitDamageMultiplier@4
+OpenShimResetUnitDamageMultipliers@0
