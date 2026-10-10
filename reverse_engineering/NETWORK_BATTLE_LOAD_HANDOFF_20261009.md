@@ -425,3 +425,39 @@ lifecycle trace; qualify lower retry timers (stock 1000/2500 versus 300/800)
 with duplicate/bandwidth/ACK-progress checks; test equal-population idle/moving
 controls and longer combat/collection workloads. Keep current retry defaults
 until that evidence passes. WAN, Steam/Proton and renderer/FPS remain open.
+
+## Retry comparison and admission race continuation - 2026-10-09
+
+The netfix worktree adds `Run-P2PRetryBattleMatrix.ps1`, exact-byte temporary
+timer backups/restoration and `score --timers` verification of all four archived
+INIs and native apply logs. Stock 1000/2500 and 300/800 ms arms keep the backlog
+fix ON, with 80 fighting units, 16 beacons and 64 powerups for 60 simulation
+seconds under loss and rate-limited profiles. Native defaults remain stock.
+
+Private attempts `182000` (DX9 device loss during RDP/direct sign-in transition),
+`182600` (outer/coordinator nested-lock wait; no games launched), and `183000`
+(host admission false before impairment) remain retained and unqualified.
+Each outer restoration independently verified 128 targets, zero mismatch,
+zero games. The last admission trace proves Q received/ACK sent before host
+Initialize, which clears that guest's ready/handle while it stops Q retries.
+Independent source-TX/socket-submission/target-RX evidence confirms Q/K arrival.
+
+`Run-BZRCoopMission.ps1 -InheritedLaunchLockOwner` now verifies an explicit
+live ancestor, matching environment and held common mutex before the coordinator
+borrows the outer lock. KeepRunning/Attach/play are refused in this mode;
+normal runs retain coordinator-owned locks. Real-child PowerShell tests pass
+held-owner acceptance/wrong-free rejection; Release x86 CTest passes 79/79.
+`Run-BZRBattleLoad.ps1 -CoopOverride` stages a private, hashed CRCoop test copy;
+the immutable campaign release is not edited. The matrix retains the same
+override hash across every arm and fails if it changes.
+
+Canonical CR now guards early Q/K/P until Initialize finishes. Regression
+reproduces the old early-ACK race and passes on the fix and respawn-enabled
+test variant; registry/misn02b/misn03/misn04 checks pass. New private trial
+`retry-battle-control-20261009-193200` / `retry-battle-matrix-20261009-193200`
+is active with that exact admission-only diff (override SHA256
+`438DA35AAD3EF65A45881784466EFCDE105CEB3C0ED1D22815D885B080880B4E`).
+No completed timer comparison yet. Preserve original failed scores; compare
+equal post-ramp exposure, duplicates/byte rates and cumulative wire seqB
+progress, separately from native acceptance. Results belong in netfix
+`p2p_retry_timing_validation_20261009.md`; raw captures remain private.

@@ -47,10 +47,18 @@ param(
     # applied once every client is in the mission so joining and loading stay
     # clean. Needs a server with POST /relay/impairment. Scenarios can change
     # it mid-run with Set-CRFlowImpairment.
-    [string]$Impair = ''
+    [string]$Impair = '',
+    # A matrix may keep the common lock across config changes and runs. Default
+    # zero keeps the normal coordinator-owned lock. Never combine with KeepRunning.
+    [int]$InheritedLaunchLockOwner = 0
 )
 
 $ErrorActionPreference = 'Stop'
+if ($InheritedLaunchLockOwner) {
+    if ($KeepRunning -or $Attach -or $Scenario -eq 'play') { throw 'An inherited lock requires a bounded, fully closed run.' }
+    . "$PSScriptRoot\BZRCoopLaunchLock.ps1"
+    Assert-BZRCoopInheritedLaunchLock $InheritedLaunchLockOwner
+}
 . "$PSScriptRoot\BZRCoopMission.ps1"
 . "$PSScriptRoot\BZRCoopDiagnostics.ps1"
 $script:CRFlowCoopRoot = $BZRCoopRoot
@@ -227,7 +235,10 @@ try {
     if ($MaxNetworkLogging) { $launchCmd += ' -MaxNetworkLogging' }
     if ($MuteClients) { $launchCmd += ' -MuteClients' }
     if ($AllowNoAudioEndpoint) { $launchCmd += ' -AllowNoAudioEndpoint' }
-    Remove-Item Env:BZR_LAUNCH_LOCK_HELD -ErrorAction SilentlyContinue
+    if ($InheritedLaunchLockOwner) {
+        Assert-BZRCoopInheritedLaunchLock $InheritedLaunchLockOwner
+        $env:BZR_LAUNCH_LOCK_HELD = "$InheritedLaunchLockOwner"
+    } else { Remove-Item Env:BZR_LAUNCH_LOCK_HELD -ErrorAction SilentlyContinue }
     $launcher = Start-Process -FilePath $PowerShellExe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $launchCmd) `
         -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runDir 'coordinator.log') -RedirectStandardError (Join-Path $runDir 'coordinator.err.log')
     $deadline = (Get-Date).AddSeconds([math]::Max(360, $Clients * 150))
