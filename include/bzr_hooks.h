@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include "bzr_string.h"
 
@@ -105,6 +106,22 @@ namespace BZROpenShim
     // Ban button helpers and callbacks.
     void BanButtonCreateHost();
     void BanButtonCreateClient();
+
+    // Title-screen multiplayer pre-lobby. lobby_ui.cpp owns the nickname and
+    // flag widgets it borrows from the lobby; bzr_options_ui.cpp owns the page.
+    // The widgets live under MainScreen_Overlay and die with it.
+    bool CreatePreLobbyNicknameAndFlagWidgets(
+        void* parent, float nicknameX, float nicknameY, float flagX, float flagY);
+    void ResetPreLobbyLobbyWidgets();
+    size_t GetPreLobbyLobbyWidgets(void** out, size_t capacity);
+    bool IsPreLobbyLobbyWidget(void* view);
+    void RefreshPreLobbyLobbyWidgets(bool visible);
+    bool PreLobbyGetPendingNickname(char* out, size_t outSize);
+    bool PreLobbyApplyNickname(const char* nickname, BzrNetNicknameResult& result);
+    void PreLobbyEndNicknameEdit();
+    bool PreLobbyForwardChar(uint8_t character);
+    // Stock isNetworkInit (0x00764870): >0 authorised, 0 not yet, -1 unknown.
+    int QueryStockIsNetworkInit();
     void __cdecl BanButtonOnClickHost();
     void __cdecl BanButtonOnClickClient();
     void __cdecl BanButtonOnHoverHost(void* param);

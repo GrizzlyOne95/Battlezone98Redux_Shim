@@ -9,6 +9,7 @@
 
 #include "autosave.h"
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "native_ui.h"
 #include "openshim_assets.h"
 #include "openshim_ini.h"
@@ -40,11 +41,14 @@ namespace BZROpenShim
     void* __fastcall OptionsParentCtorHook(void* thisPtr, void* /*edx*/);
     void __fastcall MainScreenCtorHook(void* thisPtr, void* /*edx*/, char phase);
     void InstallCareerUiTextRecorders();
+    void InstallPreLobbyHooks();
     void __fastcall CareerUiSetActiveHook(void* thisPtr, void* /*edx*/, uint8_t value);
     void __fastcall CareerUiSetButtonLabelHook(void* thisPtr, void* /*edx*/, const char* text);
     void __fastcall CareerUiSetTooltipHook(void* thisPtr, void* /*edx*/, const char* text);
     void __fastcall OptionsInputDtorHook(void* thisPtr, void* /*edx*/);
     void __fastcall OptionsParentDtorHook(void* thisPtr, void* /*edx*/);
+    void __cdecl ClickMultiPlayerHook();
+    uint8_t __fastcall MainScreenOnCharHook(void* thisPtr, void* /*edx*/, uint8_t character);
 
     namespace
     {
@@ -3135,6 +3139,13 @@ namespace BZROpenShim
               "Experimental: recycle the lounge BZRNet connection after a nickname "
               "edit so stock reconnects and authorizes the new name. Expect a brief "
               "lounge drop / possible Not Ready flicker. In-match remains persist-only." },
+            // Absent key = off, so defaultIndex 1 selects "0" (Off).
+            { "MP Setup Screen", "Network", "PreLobby", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::ReadOnNextUse,
+              "Multiplayer opens a setup page first (nickname, flag, server status) "
+              "instead of going straight to the lobby. Takes effect when the title "
+              "screen is next shown." },
             // defaultIndex 0 selects "1", which is what an absent key does: the
             // native tracker has always run, and turning the row off must be a
             // deliberate choice rather than the effect of a missing ini key.
@@ -5332,7 +5343,7 @@ namespace BZROpenShim
             char name[64];         // guards against a reused heap address
             char text[96];
         };
-        static CareerUiTextRecord g_CareerUiTextMemory[64] = {};
+        static CareerUiTextRecord g_CareerUiTextMemory[128] = {};
         static size_t g_CareerUiTextMemoryCount = 0;
         static bool g_CareerUiTextMemoryFull = false;
         // Set while this code is the one calling a setter, so blanking and
@@ -5343,8 +5354,55 @@ namespace BZROpenShim
         static void* g_CareerUiBlankedText[32] = {};
         static size_t g_CareerUiBlankedTextCount = 0;
 
+        // ------------------------------------------------------------------
+        // Multiplayer pre-lobby page ([Network] PreLobby)
+        // ------------------------------------------------------------------
+        //
+        // A second in-place title page, built and hidden exactly like the
+        // Career page and sharing its hide/restore, text-memory, SetActive-veto
+        // and lifetime machinery: only one of the two is ever open. Continue
+        // hands over to the original Click_MultiPlayer, so the stock prechecks
+        // and the push of screen 0x0E run unchanged.
+        constexpr float kPreLobbyNicknameX = 420.0f;
+        constexpr float kPreLobbyNicknameY = 320.0f;
+        constexpr float kPreLobbyFlagX = 880.0f;
+        // The flag preview sits 178 above the arrows (170 high plus an 8 gap).
+        constexpr float kPreLobbyFlagY = 560.0f;
+        constexpr float kPreLobbyStatusY = 760.0f;
+        constexpr float kPreLobbyButtonGap = 20.0f;
+        constexpr float kPreLobbyButtonY = 940.0f;
+        constexpr ULONGLONG kPreLobbyConnectTimeoutMs = 20000;
+        // After a recycle the old authorisation is still readable until the
+        // socket's close handler runs; wait for it to drop (or this long)
+        // before trusting a non-zero isNetworkInit.
+        constexpr ULONGLONG kPreLobbyDropGraceMs = 2000;
+
+        static void* g_PreLobbyPlate = nullptr;
+        static void* g_PreLobbyTitleLabel = nullptr;
+        static void* g_PreLobbyStatusLabel = nullptr;
+        static void* g_PreLobbyBackButton = nullptr;
+        static void* g_PreLobbyContinueButton = nullptr;
+        static bool g_PreLobbyPageActive = false;
+        static bool g_PreLobbyPending = false;
+        static bool g_PreLobbyAwaitDrop = false;
+        static bool g_PreLobbyInContinue = false;
+        static bool g_PreLobbyTickBusy = false;
+        static ULONGLONG g_PreLobbyPendingSince = 0;
+        static char g_PreLobbyNote[64] = {};
+        static char g_PreLobbyServer[96] = {};
+        static char g_PreLobbyStatusShown[192] = {};
+
+        using FnClickMultiPlayer = void(__cdecl*)();
+        using FnMainScreenOnChar = uint8_t(__thiscall*)(void* thisPtr, uint8_t character);
+        static InlineDetour32 g_ClickMultiPlayerDetour = {};
+        static FnClickMultiPlayer g_ClickMultiPlayerOriginal = nullptr;
+        static bool g_ClickMultiPlayerHookInstalled = false;
+        static FnMainScreenOnChar g_MainScreenOnCharOriginal = nullptr;
+        static bool g_MainScreenOnCharHookInstalled = false;
+
         static void ResetCareerUiState();
         static void* ReadMainScreenSingleton();
+        static bool UiViewHasChild(void* parent, void* child);
 
         // The cached widget pointers are meaningful only while the title
         // screen they were taken from is the live singleton: the constructor
@@ -5755,6 +5813,23 @@ namespace BZROpenShim
             return false;
         }
 
+        // The pre-lobby page's own widgets: its plate, labels and buttons, and
+        // the nickname/flag widgets it borrows from lobby_ui.cpp. Same role as
+        // IsCareerUiPageWidget, and excluded from hiding, text recording and
+        // the SetActive veto in the same places.
+        static bool IsPreLobbyPageWidget(void* view)
+        {
+            if (!view || !CareerUiCacheIsLive())
+                return false;
+            if (view == g_PreLobbyPlate || view == g_PreLobbyTitleLabel ||
+                view == g_PreLobbyStatusLabel || view == g_PreLobbyBackButton ||
+                view == g_PreLobbyContinueButton)
+            {
+                return true;
+            }
+            return IsPreLobbyLobbyWidget(view);
+        }
+
         // The active flag as the engine stores it (+0xE9), read back rather than
         // assumed. The title screen ships with at least one control already
         // inactive -- openAchievements is built but switched off -- so hiding
@@ -5870,7 +5945,7 @@ namespace BZROpenShim
             void* const parent = GetInputBindingUiViewParent(view);
             if (parent && !MainScreenViewNameMatches(parent, "MainScreen_Overlay"))
                 return;
-            if (IsCareerUiPageWidget(view))
+            if (IsCareerUiPageWidget(view) || IsPreLobbyPageWidget(view))
                 return;
 
             CareerUiTextRecord* record = FindCareerUiTextRecord(view);
@@ -5922,7 +5997,7 @@ namespace BZROpenShim
         // once was not enough -- it reappeared over the page seconds later.
         static bool IsCareerUiBlankedView(void* view)
         {
-            if (!g_CareerUiPageActive || !view || !CareerUiCacheIsLive())
+            if ((!g_CareerUiPageActive && !g_PreLobbyPageActive) || !view || !CareerUiCacheIsLive())
                 return false;
             for (size_t i = 0; i < g_CareerUiBlankedTextCount; ++i)
                 if (g_CareerUiBlankedText[i] == view)
@@ -5957,7 +6032,11 @@ namespace BZROpenShim
             if (!g_CareerUiOverlay)
                 return;
 
-            void* children[64] = {};
+            // The overlay carries the stock controls plus both injected pages
+            // (the 20-row career page alone is ~45 widgets), so 64 is no longer
+            // enough to see all of it.
+            constexpr size_t kMaxOverlayChildren = 192;
+            void* children[kMaxOverlayChildren] = {};
             size_t count = 0;
             __try
             {
@@ -5966,9 +6045,10 @@ namespace BZROpenShim
                     *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
                 void** const end =
                     *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
-                if (!begin || !end || begin >= end || (end - begin) >= 64)
+                if (!begin || !end || begin >= end ||
+                    static_cast<size_t>(end - begin) >= kMaxOverlayChildren)
                     return;
-                for (void** slot = begin; slot != end && count < 64; ++slot)
+                for (void** slot = begin; slot != end && count < kMaxOverlayChildren; ++slot)
                     if (*slot)
                         children[count++] = *slot;
             }
@@ -5981,7 +6061,7 @@ namespace BZROpenShim
             for (size_t i = 0; i < count; ++i)
             {
                 void* const child = children[i];
-                if (IsCareerUiPageWidget(child))
+                if (IsCareerUiPageWidget(child) || IsPreLobbyPageWidget(child))
                     continue;
                 // Already off -- leave it exactly as found.
                 if (!IsUiViewActive(child))
@@ -6200,6 +6280,39 @@ namespace BZROpenShim
 
         static void OnCareerUiBackClicked();
 
+        // The pre-lobby's counterpart of ReassertCareerUiHiddenState: the shell
+        // re-activates the overlay's children after construction, so the closed
+        // page is forced back off from the same per-frame hook.
+        static void ReassertPreLobbyHiddenState()
+        {
+            if (g_PreLobbyPageActive || !g_PreLobbyPlate)
+                return;
+            if (!IsCareerUiTitleScreenLive())
+                return;
+            if (!UiViewHasChild(g_CareerUiOverlay, g_PreLobbyPlate))
+            {
+                static bool s_detachedLogged = false;
+                if (!s_detachedLogged)
+                {
+                    s_detachedLogged = true;
+                    Log(L"[PRELOBBY] page widgets detached from overlay 0x%08X; "
+                        L"skipping hidden-state reassert until reinjection\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CareerUiOverlay)));
+                }
+                return;
+            }
+
+            SetInputBindingUiViewActive(g_PreLobbyPlate, false);
+            SetInputBindingUiViewActive(g_PreLobbyTitleLabel, false);
+            SetInputBindingUiViewActive(g_PreLobbyStatusLabel, false);
+            SetInputBindingUiViewActive(g_PreLobbyBackButton, false);
+            SetInputBindingUiViewActive(g_PreLobbyContinueButton, false);
+            void* lobbyWidgets[8] = {};
+            const size_t count = GetPreLobbyLobbyWidgets(lobbyWidgets, 8);
+            for (size_t i = 0; i < count; ++i)
+                SetInputBindingUiViewActive(lobbyWidgets[i], false);
+        }
+
         static bool EnsureCareerUiPageWidgets()
         {
             if (!g_CareerUiOverlay)
@@ -6324,6 +6437,328 @@ namespace BZROpenShim
             CloseCareerUiPage();
         }
 
+        // ------------------------------------------------------------------
+        // Multiplayer pre-lobby page
+        // ------------------------------------------------------------------
+
+        // Read at click time and again before building, so the Options row
+        // (ReadOnNextUse) takes effect without a restart.
+        static bool IsPreLobbyEnabled()
+        {
+            bool enabled = false;
+            return TryGetUserConfigBool("Network", "PreLobby", enabled) && enabled;
+        }
+
+        // "Official" unless the player redirected matchmaking. Read-only here;
+        // the redirect itself is applied by the socket layer.
+        static void ReadPreLobbyServerName()
+        {
+            std::string redirect;
+            if (TryGetUserConfigString("OpenShimSocket", "MatchmakingRedirectAddress", redirect))
+                redirect = TrimAsciiCopy(redirect);
+            else
+                redirect.clear();
+            _snprintf_s(g_PreLobbyServer, _TRUNCATE, "%s",
+                        redirect.empty() ? "Official" : redirect.c_str());
+        }
+
+        static void SetPreLobbyNote(const char* note)
+        {
+            _snprintf_s(g_PreLobbyNote, _TRUNCATE, "%s", note ? note : "");
+        }
+
+        // Network readiness plus the server. Rewritten only when the text
+        // changes: this runs from a hook the shell drives every frame.
+        static void RefreshPreLobbyStatus(bool force)
+        {
+            if (!g_PreLobbyStatusLabel)
+                return;
+
+            const char* network = g_PreLobbyNote;
+            if (!network[0])
+            {
+                const int ready = QueryStockIsNetworkInit();
+                network = ready > 0 ? "Network ready"
+                        : ready == 0 ? "Connecting to the network..."
+                        : "Network status unknown";
+            }
+
+            char text[sizeof(g_PreLobbyStatusShown)] = {};
+            _snprintf_s(text, _TRUNCATE, "%s     Server: %s", network, g_PreLobbyServer);
+            if (!force && std::strcmp(text, g_PreLobbyStatusShown) == 0)
+                return;
+            std::memcpy(g_PreLobbyStatusShown, text, sizeof(text));
+            SetInputBindingUiLabelText(g_PreLobbyStatusLabel, text);
+        }
+
+        // Active flags hide frames and block input but not text, so captions
+        // are blanked while the page is closed (see the Career page).
+        static void SetPreLobbyPageVisible(bool visible)
+        {
+            SetInputBindingUiViewActive(g_PreLobbyPlate, visible);
+            SetInputBindingUiViewActive(g_PreLobbyTitleLabel, visible);
+            SetInputBindingUiViewActive(g_PreLobbyStatusLabel, visible);
+            SetInputBindingUiViewActive(g_PreLobbyBackButton, visible);
+            SetInputBindingUiViewActive(g_PreLobbyContinueButton, visible);
+            void* lobbyWidgets[8] = {};
+            const size_t count = GetPreLobbyLobbyWidgets(lobbyWidgets, 8);
+            for (size_t i = 0; i < count; ++i)
+                SetInputBindingUiViewActive(lobbyWidgets[i], visible);
+
+            SetInputBindingUiLabelText(g_PreLobbyTitleLabel, visible ? "MULTIPLAYER" : "");
+            if (g_BzrFn_SetButtonLabel)
+            {
+                if (g_PreLobbyBackButton)
+                    g_BzrFn_SetButtonLabel(g_PreLobbyBackButton, visible ? "Back" : "");
+                if (g_PreLobbyContinueButton)
+                    g_BzrFn_SetButtonLabel(g_PreLobbyContinueButton, visible ? "Continue" : "");
+            }
+
+            g_PreLobbyStatusShown[0] = '\0';
+            if (visible)
+                RefreshPreLobbyStatus(true);
+            else
+                SetInputBindingUiLabelText(g_PreLobbyStatusLabel, "");
+            RefreshPreLobbyLobbyWidgets(visible);
+        }
+
+        static void OnPreLobbyBackClicked();
+        static void OnPreLobbyContinueClicked();
+
+        static bool EnsurePreLobbyPageWidgets()
+        {
+            if (!g_CareerUiOverlay)
+                return false;
+
+            char controlName[64] = {};
+
+            if (!g_PreLobbyPlate)
+            {
+                _snprintf_s(controlName, _TRUNCATE, "OpenShimPreLobbyPlate");
+                CreateInputBindingUiPlate(g_PreLobbyPlate, g_CareerUiOverlay, controlName,
+                                          kCareerPlateX, kCareerPlateY,
+                                          kCareerPlateW, kCareerPlateH);
+                SetInputBindingUiButtonEnabled(g_PreLobbyPlate, false);
+            }
+
+            _snprintf_s(controlName, _TRUNCATE, "OpenShimPreLobbyTitle");
+            CreateInputBindingUiLabel(g_PreLobbyTitleLabel, g_CareerUiOverlay, controlName,
+                                      "MULTIPLAYER",
+                                      kCareerTitleX, kCareerTitleY,
+                                      kCareerTitleW, 48.0f);
+
+            _snprintf_s(controlName, _TRUNCATE, "OpenShimPreLobbyStatus");
+            CreateInputBindingUiLabel(g_PreLobbyStatusLabel, g_CareerUiOverlay, controlName,
+                                      "",
+                                      kCareerTitleX, kPreLobbyStatusY,
+                                      kCareerTitleW, kCareerLineH);
+
+            // Created after the plate so they draw above it.
+            CreatePreLobbyNicknameAndFlagWidgets(g_CareerUiOverlay,
+                                                 kPreLobbyNicknameX, kPreLobbyNicknameY,
+                                                 kPreLobbyFlagX, kPreLobbyFlagY);
+
+            const struct
+            {
+                void** slot;
+                const char* name;
+                const char* label;
+                float x;
+                void* onClick;
+            } buttons[] =
+            {
+                { &g_PreLobbyBackButton, "OpenShimPreLobbyBack", "Back",
+                  720.0f - kPreLobbyButtonGap - kCareerBackW,
+                  reinterpret_cast<void*>(OnPreLobbyBackClicked) },
+                { &g_PreLobbyContinueButton, "OpenShimPreLobbyContinue", "Continue",
+                  720.0f + kPreLobbyButtonGap,
+                  reinterpret_cast<void*>(OnPreLobbyContinueClicked) },
+            };
+            for (const auto& button : buttons)
+            {
+                CreateInputBindingUiButton(*button.slot, g_CareerUiOverlay, button.name,
+                                           button.label,
+                                           button.x, kPreLobbyButtonY,
+                                           kCareerBackW, kCareerBackH,
+                                           button.onClick);
+                if (g_BzrFn_SetButtonTextScale)
+                    g_BzrFn_SetButtonTextScale(*button.slot, 1.0f);
+                if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(*button.slot, "tomnoff.png");
+                if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(*button.slot, "tomnon.png");
+                if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(*button.slot, "tomnclk.png");
+            }
+
+            return g_PreLobbyTitleLabel != nullptr && g_PreLobbyBackButton != nullptr &&
+                   g_PreLobbyContinueButton != nullptr;
+        }
+
+        static void OpenPreLobbyPage()
+        {
+            ReadPreLobbyServerName();
+            SetPreLobbyNote("");
+            g_PreLobbyPending = false;
+            g_PreLobbyAwaitDrop = false;
+
+            HideStockMainScreenControls();
+            // Before showing, for the same reason as the Career page: the
+            // SetActive veto turns activation off while this flag is false.
+            g_PreLobbyPageActive = true;
+            SetPreLobbyPageVisible(true);
+            Log(L"[PRELOBBY] opened (hid %zu stock control(s), %zu caption(s), server=%hs)\n",
+                g_CareerUiHiddenStockCount, g_CareerUiHiddenCaptionCount, g_PreLobbyServer);
+        }
+
+        static void ClosePreLobbyPage()
+        {
+            if (!g_PreLobbyPageActive)
+                return;
+            g_PreLobbyPending = false;
+            g_PreLobbyAwaitDrop = false;
+            SetPreLobbyPageVisible(false);
+            RestoreStockMainScreenControls();
+            g_PreLobbyPageActive = false;
+            Log(L"[PRELOBBY] closed\n");
+        }
+
+        // The page is closed and the stock controls are back before the
+        // original runs, so the stock prechecks see an ordinary title screen.
+        // The push of screen 0x0E is only a request, which is why this is safe
+        // to call from the per-frame hook that polls the pending state.
+        static void CompletePreLobbyContinue()
+        {
+            g_PreLobbyInContinue = true;
+            ClosePreLobbyPage();
+            Log(L"[PRELOBBY] continue: calling stock Click_MultiPlayer\n");
+            __try
+            {
+                if (g_ClickMultiPlayerOriginal)
+                    g_ClickMultiPlayerOriginal();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[PRELOBBY] stock Click_MultiPlayer faulted (0x%08X)\n",
+                    static_cast<uint32_t>(GetExceptionCode()));
+            }
+            g_PreLobbyInContinue = false;
+        }
+
+        static void PreLobbyContinueImpl()
+        {
+            if (!g_PreLobbyPageActive || g_PreLobbyInContinue)
+                return;
+
+            g_PreLobbyPending = false;
+            g_PreLobbyAwaitDrop = false;
+            SetPreLobbyNote("");
+            PreLobbyEndNicknameEdit();
+
+            bool recycled = false;
+            char pending[192] = {};
+            if (PreLobbyGetPendingNickname(pending, sizeof(pending)))
+            {
+                BzrNetNicknameResult result = BzrNetNicknameResult::StoredForNextConnection;
+                if (!PreLobbyApplyNickname(pending, result))
+                {
+                    SetPreLobbyNote("Nickname not saved");
+                    Log(L"[PRELOBBY] nickname apply failed (result=%u)\n",
+                        static_cast<uint32_t>(result));
+                    RefreshPreLobbyStatus(true);
+                    return;
+                }
+                recycled = (result == BzrNetNicknameResult::ReauthQueued);
+            }
+
+            if (!recycled && QueryStockIsNetworkInit() != 0)
+            {
+                CompletePreLobbyContinue();
+                return;
+            }
+
+            // Either the connection was just recycled for the new name, or it
+            // has not authorised yet: wait for isNetworkInit.
+            g_PreLobbyPending = true;
+            g_PreLobbyAwaitDrop = recycled;
+            g_PreLobbyPendingSince = GetTickCount64();
+            SetPreLobbyNote("Connecting...");
+            Log(L"[PRELOBBY] continue pending (recycled=%d)\n", recycled ? 1 : 0);
+            RefreshPreLobbyStatus(true);
+        }
+
+        static void __cdecl OnPreLobbyContinueClicked()
+        {
+            __try
+            {
+                PreLobbyContinueImpl();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                Log(L"[PRELOBBY] Continue faulted (0x%08X)\n",
+                    static_cast<uint32_t>(GetExceptionCode()));
+                g_PreLobbyInContinue = false;
+            }
+        }
+
+        // A nickname that was typed but never applied is dropped by the next
+        // open, which refreshes the entry from the persisted value.
+        static void __cdecl OnPreLobbyBackClicked()
+        {
+            ClosePreLobbyPage();
+        }
+
+        // Per-frame work while the page is open. Re-entrancy is guarded
+        // because every status write goes back through the SetTooltip hook.
+        static void PollPreLobbyPage()
+        {
+            if (!g_PreLobbyPageActive || g_PreLobbyTickBusy || g_PreLobbyInContinue)
+                return;
+            if (!IsCareerUiTitleScreenLive())
+                return;
+
+            g_PreLobbyTickBusy = true;
+            if (g_PreLobbyPending)
+            {
+                const int ready = QueryStockIsNetworkInit();
+                const ULONGLONG elapsed = GetTickCount64() - g_PreLobbyPendingSince;
+                if (g_PreLobbyAwaitDrop && (ready == 0 || elapsed >= kPreLobbyDropGraceMs))
+                    g_PreLobbyAwaitDrop = false;
+
+                if (!g_PreLobbyAwaitDrop && ready != 0)
+                {
+                    g_PreLobbyPending = false;
+                    SetPreLobbyNote("");
+                    CompletePreLobbyContinue();
+                }
+                else if (elapsed >= kPreLobbyConnectTimeoutMs)
+                {
+                    g_PreLobbyPending = false;
+                    g_PreLobbyAwaitDrop = false;
+                    SetPreLobbyNote("Server not responding");
+                    Log(L"[PRELOBBY] continue timed out after %llu ms\n", elapsed);
+                }
+            }
+            if (g_PreLobbyPageActive)
+                RefreshPreLobbyStatus(false);
+            g_PreLobbyTickBusy = false;
+        }
+
+        // Is the pre-lobby page ready to open right now?
+        static bool TryOpenPreLobbyPage()
+        {
+            if (g_PreLobbyPageActive || g_CareerUiPageActive || g_PreLobbyInContinue)
+                return false;
+            if (!IsPreLobbyEnabled())
+                return false;
+            if (!CareerUiCacheIsLive() || !IsCareerUiTitleScreenLive())
+                return false;
+            if (!g_PreLobbyBackButton || !g_PreLobbyContinueButton ||
+                !UiViewHasChild(g_CareerUiOverlay, g_PreLobbyPlate))
+            {
+                return false;
+            }
+            OpenPreLobbyPage();
+            return true;
+        }
+
         // Drop every cached pointer. Called when the singleton changes or goes
         // away: MainScreen children do not survive a screen transition, and a
         // retained pointer into a destroyed tree is the documented way to turn
@@ -6344,6 +6779,21 @@ namespace BZROpenShim
             g_CareerUiHiddenCaptionCount = 0;
             g_CareerUiBlankedTextCount = 0;
             g_CareerUiPageActive = false;
+
+            // Same child tree, same lifetime: the pre-lobby page dies with it,
+            // pending Continue included.
+            ResetPreLobbyLobbyWidgets();
+            g_PreLobbyPlate = nullptr;
+            g_PreLobbyTitleLabel = nullptr;
+            g_PreLobbyStatusLabel = nullptr;
+            g_PreLobbyBackButton = nullptr;
+            g_PreLobbyContinueButton = nullptr;
+            g_PreLobbyPageActive = false;
+            g_PreLobbyPending = false;
+            g_PreLobbyAwaitDrop = false;
+            g_PreLobbyTickBusy = false;
+            g_PreLobbyNote[0] = '\0';
+            g_PreLobbyStatusShown[0] = '\0';
         }
 
         // Runs from the MainScreen destructor detour after the engine's
@@ -6376,7 +6826,7 @@ namespace BZROpenShim
                 auto* const bytes = reinterpret_cast<uint8_t*>(parent);
                 void** const begin = *reinterpret_cast<void***>(bytes + kUiViewChildBeginOffset);
                 void** const end = *reinterpret_cast<void***>(bytes + kUiViewChildEndOffset);
-                if (!begin || !end || begin > end || (end - begin) >= 64)
+                if (!begin || !end || begin > end || (end - begin) >= 256)
                     return false;
 
                 for (void** slot = begin; slot != end; ++slot)
@@ -6523,6 +6973,18 @@ namespace BZROpenShim
             // each phase, so the last word is always ours.
             if (!g_CareerUiPageActive && g_CareerUiBackButton)
                 SetCareerUiPageVisible(false);
+
+            // The pre-lobby page, built the same way and for the same reason.
+            // Not built at all while [Network] PreLobby is off, so a stock
+            // install carries no extra widgets; returning to the title screen
+            // (Options and back rebuilds it) picks up a changed setting.
+            if (IsPreLobbyEnabled())
+            {
+                if (!g_PreLobbyBackButton)
+                    EnsurePreLobbyPageWidgets();
+                if (!g_PreLobbyPageActive && g_PreLobbyBackButton)
+                    SetPreLobbyPageVisible(false);
+            }
         }
     }
 
@@ -6714,6 +7176,108 @@ namespace BZROpenShim
             Log(L"[CAREERUI] MainScreen destructor hook unavailable; cached widgets are "
                 L"checked against the live singleton instead\n");
         }
+
+        InstallPreLobbyHooks();
+    }
+
+    // Click_MultiPlayer detour and the MainScreen OnChar slot. Both forward to
+    // the stock behaviour unless the pre-lobby page is in play, and both fail
+    // closed: an unbound row, a byte mismatch or a slot that no longer holds
+    // the base dispatcher leaves the stock path untouched.
+    void InstallPreLobbyHooks()
+    {
+        static constexpr uint8_t kExpectedClickMultiPlayerBytes[] =
+        {
+            0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0xF3, 0xEA, 0x85, 0x00
+        };
+        // Base cUI_View char dispatcher, __thiscall(this, uint8), ret 4.
+        constexpr uint32_t kBaseViewOnCharAddr = 0x007D2420;
+
+        if (!g_ClickMultiPlayerHookInstalled)
+        {
+            uint32_t address = 0;
+            const HookEngine::EngineAddressStatus status =
+                HookEngine::ResolveEngineAddress("ClickMultiPlayer", address);
+            if (status != HookEngine::EngineAddressStatus::Bound)
+            {
+                Log(L"[PRELOBBY] Click_MultiPlayer is not bound (status=%d); the pre-lobby "
+                    L"stays off\n", static_cast<int>(status));
+            }
+            else if (InstallInlineDetour32(g_ClickMultiPlayerDetour,
+                                           address,
+                                           reinterpret_cast<void*>(ClickMultiPlayerHook),
+                                           sizeof(kExpectedClickMultiPlayerBytes),
+                                           kExpectedClickMultiPlayerBytes,
+                                           sizeof(kExpectedClickMultiPlayerBytes)))
+            {
+                g_ClickMultiPlayerOriginal =
+                    reinterpret_cast<FnClickMultiPlayer>(g_ClickMultiPlayerDetour.trampoline);
+                g_ClickMultiPlayerHookInstalled = (g_ClickMultiPlayerOriginal != nullptr);
+                Log(L"[PRELOBBY] Click_MultiPlayer hook installed entry=0x%08X trampoline=0x%08X\n",
+                    address,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_ClickMultiPlayerDetour.trampoline)));
+            }
+            else
+            {
+                Log(L"[PRELOBBY] Click_MultiPlayer bytes mismatch at 0x%08X; the pre-lobby "
+                    L"stays off\n", address);
+            }
+        }
+
+        if (!g_MainScreenOnCharHookInstalled)
+        {
+            uint32_t slotAddress = 0;
+            if (HookEngine::ResolveEngineAddress("MainScreenOnCharSlot", slotAddress) !=
+                HookEngine::EngineAddressStatus::BoundData)
+            {
+                Log(L"[PRELOBBY] MainScreen OnChar slot is not bound; nickname typing is "
+                    L"unavailable\n");
+                return;
+            }
+
+            // 0 = patched, 1 = slot holds something else, 2 = protect/fault.
+            int outcome = 2;
+            __try
+            {
+                volatile uint32_t* const slot = reinterpret_cast<volatile uint32_t*>(slotAddress);
+                if (*slot != kBaseViewOnCharAddr)
+                {
+                    outcome = 1;
+                }
+                else
+                {
+                    DWORD oldProtect = 0;
+                    if (VirtualProtect(const_cast<uint32_t*>(slot), sizeof(uint32_t),
+                                       PAGE_READWRITE, &oldProtect))
+                    {
+                        g_MainScreenOnCharOriginal =
+                            reinterpret_cast<FnMainScreenOnChar>(kBaseViewOnCharAddr);
+                        *slot = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(MainScreenOnCharHook));
+                        DWORD ignored = 0;
+                        VirtualProtect(const_cast<uint32_t*>(slot), sizeof(uint32_t),
+                                       oldProtect, &ignored);
+                        outcome = 0;
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outcome = 2;
+            }
+
+            if (outcome == 0)
+            {
+                g_MainScreenOnCharHookInstalled = true;
+                Log(L"[PRELOBBY] MainScreen OnChar slot hooked at 0x%08X\n", slotAddress);
+            }
+            else
+            {
+                g_MainScreenOnCharOriginal = nullptr;
+                Log(L"[PRELOBBY] MainScreen OnChar slot 0x%08X not patched (%hs); nickname "
+                    L"typing is unavailable\n", slotAddress,
+                    outcome == 1 ? "unexpected value" : "protect or fault");
+            }
+        }
     }
 
     // Observation-only detours on the two string setters. They record what the
@@ -6892,8 +7456,11 @@ namespace BZROpenShim
     void __fastcall CareerUiSetActiveHook(void* thisPtr, void* /*edx*/, uint8_t value)
     {
         const bool isCareerPageWidget = IsCareerUiPageWidget(thisPtr);
+        const bool isPreLobbyWidget = IsPreLobbyPageWidget(thisPtr);
         uint8_t out = value;
         if (out && !g_CareerUiPageActive && isCareerPageWidget)
+            out = 0;
+        if (out && !g_PreLobbyPageActive && isPreLobbyWidget)
             out = 0;
         if (!g_CareerUiSetActiveOriginal || !thisPtr)
             return;
@@ -6901,7 +7468,7 @@ namespace BZROpenShim
         // SetActive is hooked process-wide, so faults from stock views must
         // remain loud. Only our cached page widgets can race title-screen
         // teardown after the liveness check in ReassertCareerUiHiddenState.
-        if (!isCareerPageWidget)
+        if (!isCareerPageWidget && !isPreLobbyWidget)
         {
             g_CareerUiSetActiveOriginal(thisPtr, out);
             return;
@@ -6949,6 +7516,52 @@ namespace BZROpenShim
         // is a field write per widget and self-cancels the moment the page is
         // opened, so no new detour is needed to carry it.
         ReassertCareerUiHiddenState();
+
+        // The pre-lobby rides the same hook: re-hide while closed, and poll
+        // its pending Continue while open.
+        __try
+        {
+            ReassertPreLobbyHiddenState();
+            PollPreLobbyPage();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            Log(L"[PRELOBBY] per-frame tick faulted (0x%08X); dropping the page\n",
+                static_cast<uint32_t>(GetExceptionCode()));
+            g_PreLobbyInContinue = false;
+            ResetCareerUiState();
+        }
+    }
+
+    // Click_MultiPlayer (0x0078C6C0). With [Network] PreLobby on and the title
+    // screen live, the click opens the pre-lobby page instead; every other
+    // case, including a fault while opening it, is the stock call.
+    void __cdecl ClickMultiPlayerHook()
+    {
+        bool opened = false;
+        __try
+        {
+            opened = TryOpenPreLobbyPage();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            Log(L"[PRELOBBY] opening the page faulted (0x%08X); using the stock click\n",
+                static_cast<uint32_t>(GetExceptionCode()));
+            opened = false;
+            ResetCareerUiState();
+        }
+        if (!opened && g_ClickMultiPlayerOriginal)
+            g_ClickMultiPlayerOriginal();
+    }
+
+    // cUI_MainScreen vtable slot 2 (the base cUI_View char dispatcher). The
+    // title screen never forwards typed characters to a text entry on its own;
+    // while the pre-lobby nickname edit is active they go to it.
+    uint8_t __fastcall MainScreenOnCharHook(void* thisPtr, void* /*edx*/, uint8_t character)
+    {
+        if (g_PreLobbyPageActive && PreLobbyForwardChar(character))
+            return 1;
+        return g_MainScreenOnCharOriginal ? g_MainScreenOnCharOriginal(thisPtr, character) : 0;
     }
 
     void __fastcall MainScreenCtorHook(void* thisPtr, void* /*edx*/, char phase)

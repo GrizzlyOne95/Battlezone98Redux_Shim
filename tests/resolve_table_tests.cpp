@@ -441,7 +441,7 @@ namespace
         std::string error;
         const auto rows = ParseEngineAddressTable(text, &error);
         Check(error.empty(), "the shipped engine address table must have no rejected rows");
-        Check(rows.size() == 98, "the shipped table carries all 98 engine addresses");
+        Check(rows.size() == 101, "the shipped table carries all 101 engine addresses");
         size_t data = 0;
         for (const auto& row : rows)
         {
@@ -452,7 +452,7 @@ namespace
             }
             Check(row.expected.size() >= 8, "every code row guards at least 8 bytes");
         }
-        Check(data == 15, "exactly the fifteen data globals are unguarded");
+        Check(data == 16, "exactly the sixteen data globals are unguarded");
 #endif
     }
 }

@@ -1379,6 +1379,16 @@
       "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 20 01 00 00"
     },
     {
+      "name": "ClickMultiPlayer",
+      "address": "0x0078C6C0",
+      "expected": "55 8B EC 6A FF 68 F3 EA 85 00"
+    },
+    {
+      "name": "IsNetworkInit",
+      "address": "0x00764870",
+      "expected": "55 8B EC 83 3D 70 04 8F 00 02"
+    },
+    {
       "name": "AddChild",
       "address": "0x007D2110",
       "expected": "55 8B EC 83 EC 18 89 4D F8 83 7D 0C 00 0F 84 84"
@@ -1711,6 +1721,12 @@
       "address": "0x008E7732",
       "kind": "data",
       "identity": "Byte read by the GameObjectClass loader (FUN_004e0450) to preload assets; ControlPanel PostLoad clears it around its own InitBuildItem calls."
+    },
+    {
+      "name": "MainScreenOnCharSlot",
+      "address": "0x0089E180",
+      "kind": "data",
+      "identity": "Slot 2 of the cUI_MainScreen vtable (0x0089E178, RTTI .?AVcUI_MainScreen@@). Holds the base cUI_View char dispatcher 0x007D2420, which cUI_TextEntry does not override, so the title screen never forwards typed characters to a text entry. The pre-lobby page swaps the slot only while it still holds 0x007D2420."
     }
   ],
   "globals": [
