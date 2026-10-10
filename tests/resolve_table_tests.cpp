@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <string>
 #include <vector>
 #include "test_check.h"
@@ -441,18 +442,16 @@ namespace
         std::string error;
         const auto rows = ParseEngineAddressTable(text, &error);
         Check(error.empty(), "the shipped engine address table must have no rejected rows");
-        Check(rows.size() == 98, "the shipped table carries all 98 engine addresses");
-        size_t data = 0;
+        // Rows are added as literal addresses move out of feature code, so the
+        // count only ever grows; 98 is where the table stood before that.
+        Check(rows.size() >= 98, "the shipped table keeps at least its original 98 engine addresses");
+        std::set<std::string> names;
         for (const auto& row : rows)
         {
-            if (row.isData)
-            {
-                ++data;
-                continue;
-            }
-            Check(row.expected.size() >= 8, "every code row guards at least 8 bytes");
+            Check(names.insert(row.name).second, "engine address names are unique: " + row.name);
+            if (!row.isData)
+                Check(row.expected.size() >= 8, "every code row guards at least 8 bytes: " + row.name);
         }
-        Check(data == 15, "exactly the fifteen data globals are unguarded");
 #endif
     }
 }

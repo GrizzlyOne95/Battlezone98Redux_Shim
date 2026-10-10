@@ -138,6 +138,7 @@ namespace BZROpenShim
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* edx, void* renderQueue);
     void __cdecl HandleUnderAttackAlert(float currentTime);
     void __fastcall DamageRevealProbeHook(void* victim, void* edx, void* damage);
+    void SetDamageFlagsOriginal(void* original);
     void SetSprayEmitterBuildOriginal(void* original);
     void* SprayEmitterBuildOwnerHook();
     bool SetUnderAttackAlertModeFromBridge(int mode);
@@ -231,7 +232,10 @@ namespace BZROpenShim
     void __fastcall ControlPanelCleanupHook(void* self, void* edx);
     // AI weapon-mask hardpoint selection. Each replaces one call to a
     // __thiscall engine routine; the trampolines supply the third argument from
-    // the patched routine's own stack frame.
+    // the patched routine's own stack frame. The patcher hands over each
+    // redirected call's verified original target before installing it.
+    void SetCarrierGetWeaponOriginal(void* original);
+    void SetCarrierSetSelectedOriginal(void* original);
     void* __cdecl OpenShimArtillerySelectWeapon(void* carrier, int slot, void* process);
     void* __cdecl OpenShimLayMinesGetWeapon(void* carrier, int slot, void* task);
     void __cdecl OpenShimLayMinesSetSelected(void* carrier, uint32_t mask, void* task);

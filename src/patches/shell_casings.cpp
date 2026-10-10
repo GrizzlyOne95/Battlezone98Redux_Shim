@@ -198,9 +198,12 @@ namespace BZROpenShim
             // ---- Render origin (sim <-> render) ------------------------------
             bool ReadRenderOrigin(Vec3& out)
             {
+                const uintptr_t originAddr = WorldRenderOriginAddr();
+                if (!originAddr)
+                    return false;
                 __try
                 {
-                    const float* origin = reinterpret_cast<const float*>(kGogWorldRenderOriginAddr);
+                    const float* origin = reinterpret_cast<const float*>(originAddr);
                     out = {origin[0], origin[1], origin[2]};
                 }
                 __except (EXCEPTION_EXECUTE_HANDLER)

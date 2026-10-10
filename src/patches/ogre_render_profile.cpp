@@ -17,6 +17,7 @@
 // Enhanced/Retro report themselves unavailable rather than half-working.
 
 #include "render_profile_runtime.h"
+#include "hook_engine.h"
 #include "backend_selection.h"
 #include "startup_backend_seam.h"
 #include "dx11_legacy_material_compat.h"
@@ -45,6 +46,11 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+
+namespace BZROpenShim::Hooks
+{
+    uintptr_t FindMainImageImportSlot(const char* dllName, const char* importName);
+}
 
 namespace BZROpenShim::RenderProfiles
 {
@@ -920,23 +926,50 @@ namespace BZROpenShim::RenderProfiles
 
         using FnViewportSetMaterialScheme = void (__thiscall*)(void*, const std::string&);
 
-        // Identity: IAT thunk of Ogre::Viewport::setMaterialScheme(const String&)
-        // in battlezone98redux.exe 2.2.301, cross-checked against ExtraUtilities
-        // Environment.cpp kViewportSetMaterialSchemeIat (independently shipped,
-        // field-tested there, and byte-verified here before any write).
-        constexpr uintptr_t kViewportSetMaterialSchemeIat = 0x00869810;
+        // Identity: IAT slot of Ogre::Viewport::setMaterialScheme(const String&)
+        // in battlezone98redux.exe, found by name in the import table
+        // (ExtraUtilities' Environment.cpp hooks the same slot). Every call
+        // site below must still be `call [slot]` before any write.
+        uintptr_t g_ViewportSetMaterialSchemeIat = 0;
 
         struct SchemeCallSite
         {
-            uintptr_t address;
+            const char* row;
             const char* identity;
+            uint32_t address;
         };
 
-        constexpr SchemeCallSite kSchemeCallSites[] = {
-            { 0x00681585, "settings reassert loop over all viewports" },
-            { 0x00682AA0, "secondary viewport creation ('low-noshadow')" },
-            { 0x00682EA7, "tertiary viewport creation ('low-noshadow')" },
+        SchemeCallSite kSchemeCallSites[] = {
+            { "SchemeCallReassert", "settings reassert loop over all viewports", 0 },
+            { "SchemeCallSecondaryViewport", "secondary viewport creation ('low-noshadow')", 0 },
+            { "SchemeCallTertiaryViewport", "tertiary viewport creation ('low-noshadow')", 0 },
         };
+
+        // The three call-site rows plus the import slot; all or nothing.
+        bool SchemeTakeoverAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { kSchemeCallSites[0].row, &kSchemeCallSites[0].address },
+                    { kSchemeCallSites[1].row, &kSchemeCallSites[1].address },
+                    { kSchemeCallSites[2].row, &kSchemeCallSites[2].address },
+                };
+                if (!HookEngine::BindEngineRows("Render profile scheme takeover", rows))
+                    return false;
+                g_ViewportSetMaterialSchemeIat = Hooks::FindMainImageImportSlot(
+                    "OgreMain.dll",
+                    "?setMaterialScheme@Viewport@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@"
+                    "V?$allocator@D@2@@std@@@Z");
+                if (g_ViewportSetMaterialSchemeIat == 0)
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "scheme takeover: Viewport::setMaterialScheme import not found");
+                    return false;
+                }
+                return true;
+            }();
+            return bound;
+        }
 
         // The patched instruction becomes `call [s_hookTrampolinePtr]`; the
         // cell and the function it names must outlive the process (namespace
@@ -947,7 +980,7 @@ namespace BZROpenShim::RenderProfiles
         FnViewportSetMaterialScheme OriginalSetMaterialSchemeFromIat()
         {
             return *reinterpret_cast<FnViewportSetMaterialScheme*>(
-                kViewportSetMaterialSchemeIat);
+                g_ViewportSetMaterialSchemeIat);
         }
 
         // Tracks the engine's modern base so prefixed schemes keep resolving to
@@ -3374,6 +3407,10 @@ namespace BZROpenShim::RenderProfiles
             {
                 return true;
             }
+            if (!SchemeTakeoverAddressesBound())
+            {
+                return false;
+            }
 
             // Verify every site before writing anything: a partially applied
             // takeover would be worse than none.
@@ -3393,7 +3430,7 @@ namespace BZROpenShim::RenderProfiles
                 }
                 const uint32_t disp = *reinterpret_cast<const uint32_t*>(bytes + 2);
                 const uint32_t expectedDisp =
-                    static_cast<uint32_t>(kViewportSetMaterialSchemeIat);
+                    static_cast<uint32_t>(g_ViewportSetMaterialSchemeIat);
                 if (bytes[0] != 0xFF || bytes[1] != 0x15 || disp != expectedDisp)
                 {
                     LogShimA(LogLevel::Warn, kLogTag,
@@ -3853,17 +3890,17 @@ namespace BZROpenShim::RenderProfiles
         // when Steam reaches graphics init in ~1 s. This initializer only
         // prepares profile state and starts the observation worker.
 
-        // Address-dependent work is gated on the supported build; anywhere else
-        // the takeover stays off and Enhanced reports itself unavailable
-        // instead of half-working.
-        if (IsCompatibleGameVersion())
+        // Address-dependent work needs its rows; where they do not bind the
+        // takeover stays off and Enhanced reports itself unavailable instead
+        // of half-working.
+        if (SchemeTakeoverAddressesBound())
         {
             InstallSchemeTakeover();
         }
         else
         {
             LogShimA(LogLevel::Info, kLogTag,
-                     "unsupported build; renderer-profile scheme layer inactive");
+                     "scheme takeover addresses do not bind on this build; renderer-profile scheme layer inactive");
         }
 
         ResolveAndPublishLocked("startup");

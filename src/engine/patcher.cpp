@@ -45,13 +45,27 @@ namespace BZROpenShim
             // One search order for the whole shim: HookEngine::ResolveNamedAddress
             // has to find the same file this does, or a "resolves" entry and the
             // patch that depends on it could come from different installs.
+            // EffectivePatchesText also applies the running build's overlay
+            // (build_overlay.h), so both readers see the same build's entries.
             try {
-                const std::string path = HookEngine::FindPatchesJsonPath();
-                if (path.empty()) return false;
-                std::ifstream f(path);
-                if (f.is_open()) { data = nlohmann::json::parse(f); return true; }
+                const std::string& text = HookEngine::EffectivePatchesText();
+                if (text.empty()) return false;
+                data = nlohmann::json::parse(text);
+                return true;
             } catch (...) {}
             return false;
+        }
+        // An in-code default is an address in the reference build. On any
+        // other build only patches.json can supply one; a name it lacks reads
+        // as 0 so the feature stands down. Relative offsets ("..._Offset") are
+        // distances inside a site its own pattern located, so they stay.
+        uint32_t DefaultFor(const std::string& name, uint32_t defaultVal) {
+            const auto match = HookEngine::GetBuildInfo().match;
+            if (match == HookEngine::BuildMatch::Base || match == HookEngine::BuildMatch::Unversioned) return defaultVal;
+            if (name.size() > 7 && name.compare(name.size() - 7, 7, "_Offset") == 0) return defaultVal;
+            Log(L"[BUILD] static_pointers '%hs' has no value for this build; the in-code 0x%08X belongs to the reference build, using 0\n",
+                name.c_str(), defaultVal);
+            return 0;
         }
         // Both readers are non-throwing (patch_config_parse.h). A hand-edited
         // patches.json with a non-string or non-hex "address" used to throw
@@ -64,8 +78,8 @@ namespace BZROpenShim
             case PatchConfig::LookupStatus::Found: return value;
             case PatchConfig::LookupStatus::Malformed:
                 Log(L"[CONFIG] static_pointers '%hs': %hs; using default 0x%08X\n", name.c_str(), error.c_str(), defaultVal);
-                return defaultVal;
-            default: return defaultVal;
+                return DefaultFor(name, defaultVal);
+            default: return DefaultFor(name, defaultVal);
             }
         }
         bool GetBool(const std::string& name, bool defaultVal = false) {
@@ -794,8 +808,8 @@ namespace BZROpenShim
             // a null there means the replaced select(0) never runs and the
             // engine faults on the unselected list.
             g_HopFix2SelectCallSite = h2 + 0x0E;
-            g_HopFix2SelectFallback = g_Config.GetStaticPointer("HopFix2Select_Fallback", 0x007CAFA0);
-            g_BZRFnPtr_HopFix2 = reinterpret_cast<void(*)()>(ResolveCallTargetWithFallback(h2 + 0x0E, isSteam, "HopFix2Select_Fallback", 0x007CAFA0, "Hop-Fix 2 select"));
+            g_HopFix2SelectFallback = g_Config.GetStaticPointer("HopFix2_Fallback", 0x007CAFA0);
+            g_BZRFnPtr_HopFix2 = reinterpret_cast<void(*)()>(ResolveCallTargetWithFallback(h2 + 0x0E, isSteam, "HopFix2_Fallback", 0x007CAFA0, "Hop-Fix 2 select"));
             g_MapListObject = reinterpret_cast<void**>(g_Config.GetStaticPointer("MapListObject", 0x0094555C));
         }
         if (h3) g_RetAddr_HopFix3 = reinterpret_cast<void*>(h3 + g_Config.GetStaticPointer("RetAddr_HopFix3_Offset", 0x07));
@@ -856,6 +870,19 @@ namespace BZROpenShim
         g_RetAddr_BanHook1 = ptr("RetAddr_BanHook1", 0x007D0A35);
         g_RetAddr_BanHook2 = ptr("RetAddr_BanHook2", 0x007A691A);
         g_RetAddr_AutoSaveLoadHook = ptr("RetAddr_AutoSaveLoadHook", 0x0078B45F);
+        // The trampoline replays the `mov eax, [global]` its JMP5 overwrites,
+        // which ends at the return address. Take the global from the site
+        // itself before the patch goes in, so a ported build replays its own
+        // global; the patch's expected_original (A1 ...) has to match before
+        // it is written, so the trampoline never runs on any other bytes.
+        g_AutoSaveLoadReplayGlobal = 0;
+        if (g_RetAddr_AutoSaveLoadHook) {
+            uint32_t operand = 0; SIZE_T read = 0;
+            if (ReadProcessMemory(GetCurrentProcess(),
+                    reinterpret_cast<uint8_t*>(g_RetAddr_AutoSaveLoadHook) - sizeof(operand),
+                    &operand, sizeof(operand), &read) && read == sizeof(operand))
+                g_AutoSaveLoadReplayGlobal = operand;
+        }
         // LensFlare::~LensFlare singleton guards. These hold the detour sites
         // themselves, not a return address: each trampoline derives its two
         // destinations as site+5 (replay resume) and site+13 (skip the call),
@@ -1201,7 +1228,23 @@ namespace BZROpenShim
                 SunFlash::LoadConfig();
                 target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(SunFlash::ThunkAddress()));
             }
-            else if (p.name.find("Damage Reveal Probe") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(DamageRevealProbeHook));
+            else if (p.name.find("Damage Reveal Probe") != std::string::npos) {
+                // The hook calls on to whatever this call reached, so take
+                // that from the call's own rel32 and require it to be the
+                // routine the engine_addresses row names.
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                const uint32_t expected = HookEngine::EngineAddress("GameObjectSetDamageFlags");
+                if (!original || expected == 0 ||
+                    reinterpret_cast<uintptr_t>(original) != expected) {
+                    Log(L"[OWNREVEAL] %hs identity failed site=0x%08X original=%p expected=0x%08X; leaving stock call\n",
+                        p.name.c_str(), p.address - 1, original, expected);
+                    continue;
+                }
+                SetDamageFlagsOriginal(original);
+                target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(DamageRevealProbeHook));
+            }
             else if (p.name == "Splinter Emitter Owner Propagation") {
                 void* original = isSteam
                     ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
@@ -1219,9 +1262,35 @@ namespace BZROpenShim
                     reinterpret_cast<uintptr_t>(SprayEmitterBuildOwnerHook));
             }
             else if (p.name.find("HoverCraft Engine Flame Emit Hook") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_EngineFlameHoverCraftEmit));
-            else if (p.name == "Artillery Weapon Mask Select Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_ArtilleryWeaponSelect));
-            else if (p.name == "LayMines Weapon Mask Select Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_LayMinesWeaponSelect));
-            else if (p.name == "LayMines Weapon Mask Trigger Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_LayMinesSetSelected));
+            else if (p.name == "Artillery Weapon Mask Select Hook" ||
+                     p.name == "LayMines Weapon Mask Select Hook" ||
+                     p.name == "LayMines Weapon Mask Trigger Hook") {
+                // The handlers call on to whatever this call reached, so take
+                // that from the call's own rel32 and require it to be the
+                // routine the engine_addresses row names.
+                const bool trigger = p.name == "LayMines Weapon Mask Trigger Hook";
+                const char* rowName = trigger ? "CarrierSetSelected" : "CarrierGetWeapon";
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                const uint32_t expected = HookEngine::EngineAddress(rowName);
+                if (!original || expected == 0 ||
+                    reinterpret_cast<uintptr_t>(original) != expected) {
+                    Log(L"[WMASK] %hs identity failed site=0x%08X original=%p expected %hs=0x%08X; leaving stock call\n",
+                        p.name.c_str(), p.address - 1, original, rowName, expected);
+                    continue;
+                }
+                if (trigger) {
+                    SetCarrierSetSelectedOriginal(original);
+                    target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(Trampoline_LayMinesSetSelected));
+                } else {
+                    SetCarrierGetWeaponOriginal(original);
+                    target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+                        p.name == "Artillery Weapon Mask Select Hook"
+                            ? Trampoline_ArtilleryWeaponSelect
+                            : Trampoline_LayMinesWeaponSelect));
+                }
+            }
             if (target) { int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(p.address + 4); p.payload.resize(4); memcpy(p.payload.data(), &rel, 4); }
         }
     }
@@ -1321,8 +1390,34 @@ namespace BZROpenShim
         const bool isSteam = IsSteamExe(); g_EnableScrollRestore = true;
         if (ShouldEnableD3DStartupHooks()) ApplyD3DStartupHooks();
         ApplyTrnSaveNormalizeHooks();
-        uint32_t gameVer = GetBZRVersion();
-        if (gameVer != static_cast<uint32_t>(g_Config.GetStaticPointer("BZR_EXPECTED_VERSION", BZR_EXPECTED_VERSION))) return;
+        // Which build is this? patches.json names the builds it has addresses
+        // for (build_overlay.h); anything else gets no engine patches at all.
+        // Said once, plainly, because "OpenShim does nothing after a game
+        // update" is otherwise indistinguishable from a broken install.
+        g_Config.Load();
+        const HookEngine::BuildInfo& build = HookEngine::GetBuildInfo();
+        const uint32_t gameVer = GetBZRVersion();
+        switch (build.match) {
+        case HookEngine::BuildMatch::Unknown:
+            Log(L"[BUILD] battlezone98redux.exe build %u (link stamp 0x%08X) is not one scripts/patches.json has addresses for "
+                L"(it has: %hs). Engine patches stay off for this build; a patches.json for it can be generated with "
+                L"reverse_engineering/build_port/port_patches.py.\n",
+                gameVer, build.exeStamp, build.known.c_str());
+            return;
+        case HookEngine::BuildMatch::Unversioned:
+            // A patches.json from before build blocks: keep the old version check.
+            if (gameVer != static_cast<uint32_t>(g_Config.GetStaticPointer("BZR_EXPECTED_VERSION", BZR_EXPECTED_VERSION))) {
+                Log(L"[BUILD] battlezone98redux.exe build %u is not %u, and scripts/patches.json names no builds; engine patches stay off\n",
+                    gameVer, static_cast<unsigned>(BZR_EXPECTED_VERSION));
+                return;
+            }
+            break;
+        default:
+            Log(L"[BUILD] battlezone98redux.exe build %u (link stamp 0x%08X) is patches.json build %hs (%hs)\n",
+                gameVer, build.exeStamp, build.label.c_str(),
+                build.match == HookEngine::BuildMatch::Base ? "base entries" : "overlay entries");
+            break;
+        }
         const BzrDistribution distribution = isSteam ? BzrDistribution::Steam : BzrDistribution::GOG;
         SetBzrDistribution(distribution);
         Log(L"[PLATFORM] distribution=%hs steamStub=%hs\n",
@@ -1335,8 +1430,22 @@ namespace BZROpenShim
         // mismatch and simply fell through on success, leaving the flag false
         // forever. dllmain gates engine-level AutoSave on it, so AutoSave never
         // initialized on any build.
-        SetCompatibleVersion(true);
-        std::vector<uint8_t> sig; if (ReadExeSignature(sig)) WaitForSignature(sig);
+        //
+        // IsCompatibleGameVersion is public SDK API, and features and mods use
+        // it to mean "the addresses written into code apply". On a build that
+        // runs from a patches.json overlay only the file's addresses do, so it
+        // stays false there.
+        SetCompatibleVersion(HookEngine::IsReferenceBuild());
+        std::vector<uint8_t> sig;
+        if (ReadExeSignature(sig)) {
+            WaitForSignature(sig);
+        } else if (isSteam) {
+            // The signature wait is the only sign SteamStub has decrypted
+            // .text; without it every guard below would compare ciphertext.
+            Log(L"[BUILD] no code-ready signature for this build (static_pointers BZR_SIGNATURE_ADDR); "
+                L"cannot tell when SteamStub has finished, so engine patches stay off\n");
+            return;
+        }
         // .text is decrypted by now, so the CLI delimiter repair applied at
         // attach can finally have its .text corroboration settled, and a
         // SteamStub restore over the .data write would be reported rather than

@@ -221,9 +221,29 @@ namespace BZROpenShim
         // +0x2C makeTexture byte offsets. The previous constant 0x006DDD34 was
         // a stale advisory-PDB address that lands inside .text on the live exe
         // (writes there raised first-chance C0000005 at 0x006DDD60).
-        constexpr uintptr_t kFlagDisplayAddr = 0x009B60CC;
+        //
+        // Both globals are engine_addresses rows (FlagDisplayInstance,
+        // FlagFilePathBuffer). The instance is only written while its first
+        // dword is still the FlagDisplayVtable row, so a row that drifted onto
+        // something else is never written through.
+        uint32_t g_FlagDisplayAddr = 0;
 
-        constexpr uintptr_t kFlagFilePathBufferAddr = 0x00917FAC;
+        uint32_t g_FlagFilePathBufferAddr = 0;
+
+        uint32_t g_FlagDisplayVtableAddr = 0;
+
+        bool LobbyFlagAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "FlagDisplayInstance", &g_FlagDisplayAddr },
+                    { "FlagFilePathBuffer", &g_FlagFilePathBufferAddr },
+                    { "FlagDisplayVtable", &g_FlagDisplayVtableAddr },
+                };
+                return HookEngine::BindEngineRows("Lobby flag upload", rows);
+            }();
+            return bound;
+        }
 
         constexpr size_t kFlagFilePathBufferCapacity = MAX_PATH;
 
@@ -682,12 +702,14 @@ namespace BZROpenShim
 
         static void MarkFlagDisplayDirty()
         {
-            auto* flagDisplay = reinterpret_cast<uint8_t*>(kFlagDisplayAddr);
-            if (!flagDisplay)
+            if (!LobbyFlagAddressesBound())
                 return;
+            auto* flagDisplay = reinterpret_cast<uint8_t*>(g_FlagDisplayAddr);
 
             __try
             {
+                if (*reinterpret_cast<const uint32_t*>(flagDisplay) != g_FlagDisplayVtableAddr)
+                    return;
                 // Redux never assigns the legacy atlas index, but its own
                 // CheckFlags path still uses this byte as the change signal.
                 // Our Ogre renderer polls the same network payload directly.
@@ -695,7 +717,7 @@ namespace BZROpenShim
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                Log(L"[FLAG] Failed to mark flag display dirty at 0x%08X\n", static_cast<uint32_t>(kFlagDisplayAddr));
+                Log(L"[FLAG] Failed to mark flag display dirty at 0x%08X\n", g_FlagDisplayAddr);
             }
         }
 
@@ -989,6 +1011,11 @@ namespace BZROpenShim
 
         static bool TryApplySelectedFlagThroughEnginePath(const char* source, const char* path)
         {
+            if (!LobbyFlagAddressesBound())
+            {
+                g_SelectedFlagStatus = "Flag upload unavailable on this build.";
+                return false;
+            }
             // The destination is a fixed MAX_PATH engine global, so the length
             // has to be enforced here rather than trusted from the call site.
             // The one current caller does check, but a silent overrun of an
@@ -1009,7 +1036,7 @@ namespace BZROpenShim
 
             __try
             {
-                auto* pathBuffer = reinterpret_cast<char*>(kFlagFilePathBufferAddr);
+                auto* pathBuffer = reinterpret_cast<char*>(g_FlagFilePathBufferAddr);
                 std::memset(pathBuffer, 0, kFlagFilePathBufferCapacity);
                 std::memcpy(pathBuffer, path, pathLength);
                 g_BzrFn_SetMyFlag();
@@ -1211,8 +1238,8 @@ namespace BZROpenShim
         // walking that container we observe the two announcements the engine
         // already makes, at their single call sites.
         //
-        // Both sites push their arguments and call the shared BZRNet logger at
-        // 0x007D6A70 (cdecl, 272 call sites across the image). Redirecting one
+        // Both sites push their arguments and call the shared BZRNet logger
+        // (BzrNetLogger row; cdecl, 272 call sites across the image). Redirecting one
         // `call` rel32 -- rather than detouring the logger itself -- means each
         // hook receives a fixed, known signature instead of varargs, and no
         // other log line in the game is affected. Each format string below has
@@ -1227,9 +1254,12 @@ namespace BZROpenShim
         //   0x0075EF99  logger(fmt, name)
         //     fmt @ 0x0089BCBC "BZRNet P2P Fully Resetting Connection Status
         //                       For Client %s\n"
-        constexpr uintptr_t kBzrNetLoggerAddr = 0x007D6A70;
-        constexpr uintptr_t kBzrNetRouteCompletedCallAddr = 0x0075ED1D;
-        constexpr uintptr_t kBzrNetRouteResetCallAddr = 0x0075EF99;
+        //
+        // The logger and both call sites are rows; RedirectCallTarget still
+        // requires each call to target the logger row before it rewrites it.
+        uint32_t g_BzrNetLoggerAddr = 0;
+        uint32_t g_BzrNetRouteCompletedCallAddr = 0;
+        uint32_t g_BzrNetRouteResetCallAddr = 0;
 
         struct BzrNetPeerRoute
         {
@@ -1372,27 +1402,37 @@ namespace BZROpenShim
                                                         const char* address)
         {
             RecordBzrNetPeerRoute(name, route, address);
-            reinterpret_cast<FnBzrNetLogger>(kBzrNetLoggerAddr)(fmt, route, name, address);
+            reinterpret_cast<FnBzrNetLogger>(g_BzrNetLoggerAddr)(fmt, route, name, address);
         }
 
         static void __cdecl BzrNetRouteResetLogHook(const char* fmt, const char* name)
         {
             ForgetBzrNetPeerRoute(name);
-            reinterpret_cast<FnBzrNetLogger>(kBzrNetLoggerAddr)(fmt, name);
+            reinterpret_cast<FnBzrNetLogger>(g_BzrNetLoggerAddr)(fmt, name);
         }
 
         void InstallBzrNetRouteObserverIfPossible()
         {
             if (g_BzrNetRouteObserverInstalled)
                 return;
+            static const bool s_bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "BzrNetLogger", &g_BzrNetLoggerAddr },
+                    { "BzrNetRouteCompletedLogCall", &g_BzrNetRouteCompletedCallAddr },
+                    { "BzrNetRouteResetLogCall", &g_BzrNetRouteResetCallAddr },
+                };
+                return HookEngine::BindEngineRows("BZRNet peer route observer", rows);
+            }();
+            if (!s_bound)
+                return;
 
             const bool completed = RedirectCallTarget(
-                kBzrNetRouteCompletedCallAddr,
-                kBzrNetLoggerAddr,
+                g_BzrNetRouteCompletedCallAddr,
+                g_BzrNetLoggerAddr,
                 reinterpret_cast<uintptr_t>(&BzrNetRouteCompletedLogHook));
             const bool reset = RedirectCallTarget(
-                kBzrNetRouteResetCallAddr,
-                kBzrNetLoggerAddr,
+                g_BzrNetRouteResetCallAddr,
+                g_BzrNetLoggerAddr,
                 reinterpret_cast<uintptr_t>(&BzrNetRouteResetLogHook));
 
             g_BzrNetRouteObserverInstalled = completed && reset;
@@ -1564,8 +1604,9 @@ namespace BZROpenShim
         //
         // Off by default. Set OPENSHIM_UI_WIDGET_PROBE=1 to build the widgets
         // and write the results to the log.
-        constexpr uint32_t kUiTextEntryVtable = 0x008A0AA0;
-        constexpr uint32_t kUiSelectlistVtable = 0x008A08B0;
+        // The read-back identifies each widget's vtable by RTTI name.
+        constexpr const char* kUiTextEntryTypeName = ".?AVcUI_TextEntry@@";
+        constexpr const char* kUiSelectlistTypeName = ".?AVcUI_Selectlist@@";
 
         static bool ShouldRunUiWidgetProbe()
         {
@@ -1648,12 +1689,12 @@ namespace BZROpenShim
             const bool haveText = ReadEngineStdString(
                 static_cast<uint8_t*>(widget) + kUiTextEntryTextOffset, text, sizeof(text));
 
-            Log(L"[UIPROBE] cUI_TextEntry ptr=%p vtable=0x%08X(want 0x%08X %hs) "
+            Log(L"[UIPROBE] cUI_TextEntry ptr=%p vtable=0x%08X(want %hs %hs) "
                 L"maxLength=%u(want 36 %hs) allowEnter=%u(want 1 %hs) text=\"%hs\"(%hs)\n",
                 widget,
                 haveVtable ? vtable : 0,
-                kUiTextEntryVtable,
-                (haveVtable && vtable == kUiTextEntryVtable) ? "ok" : "MISMATCH",
+                kUiTextEntryTypeName,
+                (haveVtable && VtableTypeNameMatches(vtable, kUiTextEntryTypeName)) ? "ok" : "MISMATCH",
                 maxLength,
                 maxLength == 0x24 ? "ok" : "MISMATCH",
                 allowEnter & 0xFF,
@@ -1676,12 +1717,12 @@ namespace BZROpenShim
             ReadWidgetDword(widget, kUiSelectlistPageUpOffset, pageUp);
             ReadWidgetDword(widget, kUiSelectlistPageDownOffset, pageDown);
 
-            Log(L"[UIPROBE] cUI_Selectlist ptr=%p vtable=0x%08X(want 0x%08X %hs) "
+            Log(L"[UIPROBE] cUI_Selectlist ptr=%p vtable=0x%08X(want %hs %hs) "
                 L"selected=%d(want -1 %hs) scroll=%u pageUp=0x%08X pageDown=0x%08X(%hs)\n",
                 widget,
                 haveVtable ? vtable : 0,
-                kUiSelectlistVtable,
-                (haveVtable && vtable == kUiSelectlistVtable) ? "ok" : "MISMATCH",
+                kUiSelectlistTypeName,
+                (haveVtable && VtableTypeNameMatches(vtable, kUiSelectlistTypeName)) ? "ok" : "MISMATCH",
                 static_cast<int>(selected),
                 static_cast<int>(selected) == -1 ? "ok" : "MISMATCH",
                 scroll,

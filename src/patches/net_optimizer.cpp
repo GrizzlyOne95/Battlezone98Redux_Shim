@@ -48,8 +48,6 @@ namespace
     constexpr uint32_t kDefaultReorderDrainCap = 32;
     constexpr uint32_t kMinReorderDrainCap = 1;
     constexpr uint32_t kMaxReorderDrainCap = 128;
-    constexpr uint32_t kReorderSeqOffset = 13;
-    constexpr uint32_t kReorderSeqMinPayloadBytes = 17;
     constexpr uint32_t kReorderSlotCount = 8;
     constexpr uint32_t kReorderMaxPeers = 32;
     // Bytes one reorder slot (and one send-dup entry) holds. Larger datagrams
@@ -3497,14 +3495,14 @@ namespace
     {
         outDelivery = ReorderDelivery{};
 
-        // A datagram that cannot carry a sequence, or that is larger than a
-        // reorder slot, is handed over at once in arrival order. Oversized
-        // datagrams used to be cut to the slot size; they are now never
-        // buffered, so nothing is truncated on the game's behalf.
-        const NetReorder::Admission admission = NetReorder::ClassifyDatagram(
+        // A datagram that is not a reliable BZRNet data packet, or that is
+        // larger than a reorder slot, is handed over at once in arrival order.
+        // Oversized datagrams used to be cut to the slot size; they are now
+        // never buffered, so nothing is truncated on the game's behalf.
+        const NetReorder::Admission admission = NetReorder::ClassifyTransportDatagram(
             packetSource.sin_family == AF_INET,
+            packetData,
             packetLength,
-            kReorderSeqMinPayloadBytes,
             kReorderMaxPacketBytes);
         if (admission != NetReorder::Admission::Reorder)
         {
@@ -3519,8 +3517,7 @@ namespace
             return true;
         }
 
-        uint32_t sequence = 0;
-        std::memcpy(&sequence, packetData + kReorderSeqOffset, sizeof(sequence));
+        const uint32_t sequence = NetReorder::ReadTransportSequence(packetData);
 
         AcquireSRWLockExclusive(&g_ReorderLock);
         PeerBuf* peer = FindOrCreatePeerBufLocked(s, packetSource);

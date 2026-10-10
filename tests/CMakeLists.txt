@@ -271,6 +271,22 @@ openshim_add_test(terrain_atlas_rect_repair_tests STD 20 SOURCES
     ../src/patches/terrain_atlas_rect_repair.cpp
 )
 
+# Which patches.json entries apply to the running exe build. Pure nlohmann.
+add_executable(build_overlay_tests
+    build_overlay_tests.cpp
+    ../src/engine/build_overlay.cpp
+)
+target_include_directories(build_overlay_tests PRIVATE ../include ../third_party)
+target_compile_definitions(build_overlay_tests PRIVATE
+    BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json")
+target_compile_features(build_overlay_tests PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(build_overlay_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(build_overlay_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME build_overlay_tests COMMAND build_overlay_tests)
+
 add_executable(resolve_table_tests
     resolve_table_tests.cpp
     ../src/engine/resolve_table.cpp

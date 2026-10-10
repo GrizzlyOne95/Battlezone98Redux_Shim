@@ -59,3 +59,26 @@ Decoration stays passive and stays out from under the controls. Panels are
 outlines -- four bars, no fill -- so nothing decorative covers a rect that has
 to take a click, and they are created before every label and button on the page
 so they sit behind them. Do not add a filled panel over the row grid.
+
+## Screen panels
+
+`osh_*_center.png` are the painted 1440x1080 centre panels of OpenShim's own
+shell screens (see the shell screens section of `Docs/NATIVE_UI_FRAMEWORK.md`).
+Unlike the tiles they are shown at exactly their own size, so they can carry
+frames and boxes. Regenerate with `python mkscreens.py`; the box rectangles in
+it are the layout contract with each screen's code.
+
+| File | Used by |
+|---|---|
+| `osh_career_center.png` | Career screen |
+| `osh_options_center.png` | stock Options screen, five-slot column |
+| `osh_hub_center.png` | OpenShim Options hub |
+| `osh_category_center.png` | every OpenShim Options category screen |
+| `osh_tile_hv.png`, `osh_tile_ck.png` | hub tiles, hover / pressed (300x100) |
+| `osh_value_hv.png`, `osh_value_ck.png` | category value cells, hover / pressed (196x42) |
+| `osh_keys_center.png` | key-binding editor on the stock Input screen |
+| `osh_key_hv.png`, `osh_key_ck.png` | key-binding cells, hover / pressed (196x30) |
+| `osh_tool_hv.png`, `osh_tool_ck.png` | key-binding toolbar, hover / pressed (150x40, stretched to each width) |
+
+The buttons have no idle texture: at rest they show the slot painted into the
+panel, as the stock option buttons do.

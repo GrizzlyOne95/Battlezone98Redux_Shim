@@ -4,6 +4,7 @@
 // The dispatchers that drive them stay there; shared helpers come from
 // bzr_hooks_internal.h.
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "light_colour_presets.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
@@ -75,9 +76,9 @@ namespace BZROpenShim
         // active flag clears, which means an empty craft's running lights can
         // never return when a pilot re-enters. The stock phase is also clamped
         // after one interpolation instead of cycling.
-        static constexpr uintptr_t kEmissionLightStateBranchAddr = 0x0044CBD0;
-        static constexpr uintptr_t kEmissionLightActiveResumeAddr = 0x0044CBDF;
-        static constexpr uintptr_t kEmissionLightLoopResumeAddr = 0x0044CF49;
+        // The branch and the loop's continue jump are rows; the active path
+        // resumes after the je the branch row's guard ends on.
+        static uintptr_t g_EmissionLightStateBranchAddr = 0;
         static constexpr size_t kEmissionLightStateBranchPatchLen = 9;
         static bool g_HeadlightConfigInitialized = false;
         static bool g_HeadlightPlayerVisibleConfigured = false;
@@ -137,8 +138,8 @@ namespace BZROpenShim
                 static_cast<unsigned>(g_HeadlightStaleEntryDiscards));
         }
         static InlineDetour32 g_EmissionLightStateDetour = {};
-        static uintptr_t g_EmissionLightActiveResume = kEmissionLightActiveResumeAddr;
-        static uintptr_t g_EmissionLightLoopResume = kEmissionLightLoopResumeAddr;
+        static uintptr_t g_EmissionLightActiveResume = 0;
+        static uintptr_t g_EmissionLightLoopResume = 0;
         static bool g_EmissionLightFixInstallAttempted = false;
         static bool g_EmissionLightFixInstalled = false;
         static bool g_EmissionLightFixMismatchLogged = false;
@@ -478,6 +479,27 @@ namespace BZROpenShim
             }
         }
 
+        static bool EmissionLightAddressesBound()
+        {
+            static const bool bound = [] {
+                uint32_t loopContinue = 0;
+                const HookEngine::EngineRow rows[] = {
+                    { "EmissionLightStateBranch", &g_EmissionLightStateBranchAddr },
+                    { "EmissionLightLoopContinue", &loopContinue },
+                };
+                if (!HookEngine::BindEngineRows("Emission light fix", rows))
+                    return false;
+                // test ecx,ecx is followed by je rel32 (0F 84), inside the guard.
+                const auto* code = reinterpret_cast<const uint8_t*>(g_EmissionLightStateBranchAddr);
+                if (code[9] != 0x0F || code[10] != 0x84)
+                    return false;
+                g_EmissionLightActiveResume = g_EmissionLightStateBranchAddr + 15;
+                g_EmissionLightLoopResume = loopContinue;
+                return true;
+            }();
+            return bound;
+        }
+
         void InstallEmissionLightFixIfPossible()
         {
             if (g_EmissionLightFixInstalled || g_EmissionLightFixInstallAttempted)
@@ -489,6 +511,8 @@ namespace BZROpenShim
                 Log(L"[EMISSIONLIGHT] Fix disabled by environment\n");
                 return;
             }
+            if (!EmissionLightAddressesBound())
+                return;
 
             static const uint8_t kExpectedBytes[kEmissionLightStateBranchPatchLen] =
             {
@@ -498,7 +522,7 @@ namespace BZROpenShim
             };
             if (!InstallInlineDetour32(
                     g_EmissionLightStateDetour,
-                    kEmissionLightStateBranchAddr,
+                    g_EmissionLightStateBranchAddr,
                     reinterpret_cast<void*>(EmissionLightStateHook),
                     kEmissionLightStateBranchPatchLen,
                     kExpectedBytes,
@@ -507,7 +531,7 @@ namespace BZROpenShim
                 if (!g_EmissionLightFixMismatchLogged)
                 {
                     Log(L"[EMISSIONLIGHT] Stock bytes not ready/mismatched; running-light fix deferred at 0x%08X\n",
-                        static_cast<uint32_t>(kEmissionLightStateBranchAddr));
+                        static_cast<uint32_t>(g_EmissionLightStateBranchAddr));
                     g_EmissionLightFixMismatchLogged = true;
                 }
                 // Steam's packed on-disk image settles to the GOG bytes after
@@ -519,7 +543,7 @@ namespace BZROpenShim
 
             g_EmissionLightFixInstalled = true;
             Log(L"[EMISSIONLIGHT] Installed re-entry visibility and continuous pulse fix at 0x%08X\n",
-                static_cast<uint32_t>(kEmissionLightStateBranchAddr));
+                static_cast<uint32_t>(g_EmissionLightStateBranchAddr));
         }
 
         static void* TryGetGameObjectHeadlight(void* gameObject)

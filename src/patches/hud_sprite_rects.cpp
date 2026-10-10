@@ -48,9 +48,25 @@ namespace BZROpenShim
         ULONGLONG g_HudSpriteRectTableDiscoveryBackoffMs = 0;
         ULONGLONG g_HudSpriteFallbackDiscoveryBackoffMs = 0;
 
-        constexpr uintptr_t kHudSpriteNameCountAddr = 0x00920F00;
+        // The three tables are engine_addresses rows (HudSpriteNameCount,
+        // HudSpriteNameTable, HudSpriteRectTable), bound together; every read
+        // below is behind HudSpriteAddressesBound().
+        static uintptr_t g_HudSpriteNameCountAddr = 0;
+        static uintptr_t g_HudSpriteNameTableAddr = 0;
+        static uintptr_t g_HudSpriteRectTableAddr = 0;
 
-        constexpr uintptr_t kHudSpriteNameTableAddr = 0x00920F08;
+        static bool HudSpriteAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "HudSpriteNameCount", &g_HudSpriteNameCountAddr },
+                    { "HudSpriteNameTable", &g_HudSpriteNameTableAddr },
+                    { "HudSpriteRectTable", &g_HudSpriteRectTableAddr },
+                };
+                return HookEngine::BindEngineRows("HUD sprite rects", rows);
+            }();
+            return bound;
+        }
 
         constexpr size_t kHudSpriteNameEntrySize = 0x20;
 
@@ -64,7 +80,6 @@ namespace BZROpenShim
         // runtime records and scanned process memory for them; the scan was
         // later restricted to MEM_PRIVATE regions, which can never contain
         // this MEM_IMAGE table, so discovery failed every session.)
-        constexpr uintptr_t kHudSpriteRectTableAddr = 0x025F8F40;
 
         constexpr uint32_t kHudSpriteMaxReasonableCount = 4096;
 
@@ -98,9 +113,11 @@ namespace BZROpenShim
 
         static bool TryReadHudSpriteNameCount(uint32_t& outCount)
         {
+            if (!HudSpriteAddressesBound())
+                return false;
             __try
             {
-                const uint32_t count = *reinterpret_cast<const uint32_t*>(kHudSpriteNameCountAddr);
+                const uint32_t count = *reinterpret_cast<const uint32_t*>(g_HudSpriteNameCountAddr);
                 if (count == 0 || count > kHudSpriteMaxReasonableCount)
                     return false;
 
@@ -125,7 +142,7 @@ namespace BZROpenShim
             outId = 0;
             __try
             {
-                auto* table = reinterpret_cast<const char*>(kHudSpriteNameTableAddr);
+                auto* table = reinterpret_cast<const char*>(g_HudSpriteNameTableAddr);
                 char entryName[kHudSpriteNameEntrySize + 1] = {};
                 for (int index = static_cast<int>(count) - 1; index > 0; --index)
                 {
@@ -195,7 +212,7 @@ namespace BZROpenShim
                     "table search sprite=%s count=%u tableAddr=0x%08X",
                     name,
                     static_cast<unsigned>(count),
-                    static_cast<unsigned>(kHudSpriteNameTableAddr));
+                    static_cast<unsigned>(g_HudSpriteNameTableAddr));
 
                 bool found = false;
                 int index = 0;
@@ -226,8 +243,8 @@ namespace BZROpenShim
                     "hudlookup",
                     "table unavailable for sprite=%s countAddr=0x%08X tableAddr=0x%08X",
                     name,
-                    static_cast<unsigned>(kHudSpriteNameCountAddr),
-                    static_cast<unsigned>(kHudSpriteNameTableAddr));
+                    static_cast<unsigned>(g_HudSpriteNameCountAddr),
+                    static_cast<unsigned>(g_HudSpriteNameTableAddr));
             }
 
             // Retain the engine helper for unusual builds whose name table is
@@ -717,6 +734,8 @@ namespace BZROpenShim
         {
             if (g_HudSpriteRectTableBase)
                 return true;
+            if (!HudSpriteAddressesBound())
+                return false;
             const ULONGLONG now = GetTickCount64();
             const ULONGLONG tableRetryMs =
                 g_HudSpriteRectTableDiscoveryBackoffMs > kHudSpriteRectDiscoveryRetryMs
@@ -736,18 +755,18 @@ namespace BZROpenShim
                 return false;
             }
 
-            // The table is a static exe array (see kHudSpriteRectTableAddr):
+            // The table is a static exe array (see g_HudSpriteRectTableAddr):
             // no memory scan, just validate the known base by checking that
             // every panel record carries its stock atlas UVs (UVs survive our
             // hiding, which only zeroes w/h). Validation can fail briefly at
             // boot before the game registers the sprites; the retry/backoff
             // gate above keeps that cheap.
-            auto* candidateBase = reinterpret_cast<HudSpriteRectRecord*>(kHudSpriteRectTableAddr);
+            auto* candidateBase = reinterpret_cast<HudSpriteRectRecord*>(g_HudSpriteRectTableAddr);
             if (!ValidateHudSpriteRectTableBase(candidateBase, samples))
             {
                 LogHudSpriteValidationSnapshot(
                     "static-fail",
-                    kHudSpriteRectTableAddr,
+                    g_HudSpriteRectTableAddr,
                     samples);
                 g_HudSpriteRectTableDiscoveryBackoffMs =
                     g_HudSpriteRectTableDiscoveryBackoffMs == 0
@@ -759,10 +778,10 @@ namespace BZROpenShim
                     LogLevel::Warn,
                     "huddiscover",
                     "static rect table at 0x%08X failed sample validation backoffMs=%llu",
-                    static_cast<unsigned>(kHudSpriteRectTableAddr),
+                    static_cast<unsigned>(g_HudSpriteRectTableAddr),
                     static_cast<unsigned long long>(g_HudSpriteRectTableDiscoveryBackoffMs));
                 Log(L"[HUD] Static sprite rect table at 0x%08X failed validation\n",
-                    static_cast<uint32_t>(kHudSpriteRectTableAddr));
+                    static_cast<uint32_t>(g_HudSpriteRectTableAddr));
                 return false;
             }
 
@@ -771,7 +790,7 @@ namespace BZROpenShim
             g_HudSpriteHiddenEntries.clear();
             g_HudSpriteRectTableDiscoveryBackoffMs = 0;
             Log(L"[HUD] Sprite rect table (static) base=0x%08X scrap=%d pilot=%d sscrap=%d spilot=%d fscrap=%d fpilot=%d\n",
-                static_cast<uint32_t>(kHudSpriteRectTableAddr),
+                static_cast<uint32_t>(g_HudSpriteRectTableAddr),
                 samples[0].id,
                 samples[1].id,
                 samples[2].id,
