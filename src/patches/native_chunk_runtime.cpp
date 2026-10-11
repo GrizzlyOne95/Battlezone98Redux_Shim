@@ -541,7 +541,7 @@ bool TryResolveNativeChunkPayload(const char *mesh, const char *geom, char *out,
     return out[0] != 0;
 }
 // ---------------------------------------------------------------------------
-// SkinnedGibs payloads. Cached apart from vehicle chunks (gibs/v1/<hash>), so
+// SkinnedGibs payloads. Cached apart from vehicle chunks (gibs/v6/<hash>), so
 // generating gibs never rewrites or invalidates a native/v4 cache.
 namespace
 {

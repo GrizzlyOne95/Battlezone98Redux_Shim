@@ -189,8 +189,20 @@ person's death itself:
    `scripts/export_gib_payloads.py` does: each triangle goes to its dominant
    bone, small bones (fingers, toes, clavicles, nubs...) roll up into their
    parent, the weapon submesh becomes one piece, and every cut is closed with a
-   fan cap using the material `openshim_gib_flesh`. The result is cached under
-   `openshim/cache/chunks/gibs/v1/<hash>/` (vehicle caches are untouched). An
+   torn-flesh cap: concentric rings that follow the cut's own shape (a thin
+   dark skin edge, a pale fat band, then muscle to a slightly bulged centre;
+   cuts through limbs and the neck end the muscle in an ivory bone ring around a
+   dark marrow core), with smooth normals and planar UVs. Each zone is its own
+   submesh with its own material (`openshim_gib_flesh` for the muscle,
+   `openshim_gib_flesh_skin/_fat/_bone/_marrow` for the rest). The rim is the
+   cut itself; inner rings keep each rim point's ray, are Laplacian-smoothed and
+   never reach the ring outside them, so there are no folds, and every triangle
+   is validated (a loop that folds is retried with weaker inset and smoothing,
+   then keeps a plain fan, as do tiny, very large, very non-planar or
+   non-star-shaped loops). The small ragged offsets hash the welded positions,
+   so a cut looks the same on every run. The result is cached under
+   `openshim/cache/chunks/gibs/v6/<hash>/` (vehicle caches are untouched; the
+   startup prune deletes the superseded `gibs/v1/` tree). An
    authored split (`<payload dir>/<mesh basename>/gibs.txt` plus its meshes,
    written by the script) takes precedence over the runtime one.
 3. **Pose, launch, simulate.** Each piece is spawned exactly where that limb
@@ -206,12 +218,31 @@ person's death itself:
    but the chunk renderer is told not to draw them. Nothing in the engine's
    chunk state is written.
 
-The cut faces need no asset pack: OpenShim writes a plain dark-red
-`openshim_gib_flesh.material` into the cache root before the payload resource
-group starts. A pack can restyle it by shipping its own
-`openshim_gib_flesh.material` at the top of a chunk payload directory
+The cut faces need no asset pack: OpenShim writes
+`openshim_gib_flesh.material` (the muscle, white, wet, one texture unit),
+`openshim_gib_flesh_zones.material` (skin, fat, bone, marrow as plain colours)
+and a procedural, tileable 256x256 `openshim_gib_flesh.tga` (elongated muscle
+bundles with pale perimysium lines, fibre striation, sparse fat marbling and a
+few thin vessels, in deep red-brown) into the cache root before the payload
+resource group starts. Hue lives in the texture and the material colours, not in
+vertex colours: every DX11 path reads a packed vertex colour as raw RGBA (the
+exported `D3D11Mappings::get(VertexElementType)` maps VET_COLOUR, _ARGB and
+_ABGR all to R8G8B8A8_UNORM) while the stock and compatibility programs swizzle
+with `.bgra`, so red would draw blue on whichever path does not. Each file is
+regenerated when the version in its first line is stale; a file without that
+marker is the user's and is left alone. The DX11 fixed-function compatibility
+layer (`[Fixes] DX11LegacyMaterialCompat`) instantiates these passes (one
+texture unit, modulate, or untextured); it does not evaluate dynamic lights or
+specular, which is why the zone colours and texture carry the shading. A pack can
+restyle the muscle by shipping its own `openshim_gib_flesh.material` (and the
+other zones with `openshim_gib_flesh_zones.material`) at the top of a chunk payload directory
 (`<mod>/chunkMeshes/` or `BZ_ASSETS/common/models/OpenShimChunkPayloads/`);
 the generated copy then steps aside so the name is never defined twice.
+
+Live test: `pwsh -File reverse_engineering/run_lcgibs.ps1` loads the lcbench world with
+a debug-only Lua overlay (`reverse_engineering/test_missions/lcbench_gibs/gibs.lua`)
+that spawns the four stock pilots and kills them one by one. It needs
+`[General] SkinnedGibs = 1`; add `[Diagnostics] TraceSkinnedGibs = 1` for per-gib lines.
 
 `SkinnedGibs = 0` restores exactly the previous behaviour. Set
 `[Diagnostics] TraceSkinnedGibs = 1` for one log line per gib.

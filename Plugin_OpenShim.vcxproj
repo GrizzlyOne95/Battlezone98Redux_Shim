@@ -161,6 +161,7 @@
     <ClCompile Include="src\patches\chunk_payload_resolve.cpp" />
     <ClCompile Include="src\patches\native_chunk_mesh.cpp" />
     <ClCompile Include="src\patches\native_chunk_cache.cpp" />
+    <ClCompile Include="src\patches\gib_flesh_texture.cpp" />
     <ClCompile Include="src\patches\native_chunk_prune.cpp" />
     <ClCompile Include="src\patches\native_chunk_runtime.cpp" />
     <ClCompile Include="src\patches\skinned_gibs.cpp" />

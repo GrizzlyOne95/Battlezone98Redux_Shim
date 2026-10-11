@@ -16,6 +16,16 @@ uint64_t Fingerprint(const std::vector<uint8_t> &bytes);
 // version. Corrupt, partial or stale caches fail closed and can be regenerated.
 bool ReadCache(const std::filesystem::path &directory, std::vector<CachedPiece> &pieces,
                uintmax_t byteBudget = 128 * 1024 * 1024, uintmax_t *validatedBytes = nullptr);
+// WriteCache split in two: SerializeCache validates and builds the manifest and
+// per-piece content hashes in memory (the piece .mesh bytes already exist);
+// WriteCache then writes them. Used by tests/native_chunk_bench.cpp.
+struct CacheImage
+{
+    std::string manifest;
+    std::vector<CachedPiece> cached;
+    std::vector<uint64_t> hashes;
+};
+bool SerializeCache(const std::vector<Piece> &pieces, CacheImage &image);
 bool WriteCache(const std::filesystem::path &directory, const std::vector<Piece> &pieces,
                 std::vector<CachedPiece> &cached);
 // Skinned gib caches: the same content-validated piece cache plus a
