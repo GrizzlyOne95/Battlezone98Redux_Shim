@@ -1,20 +1,27 @@
 # Visual-only terrain tessellation
 
-Research date: 2026-10-03. Status: feasible from static evidence; no tessellated
-gameplay frame, performance measurement, or implementation exists in this workstream.
+Research date: 2026-10-03. A default-off, zero-displacement prototype now exists;
+local Windows/GOG tests establish native patch submission and a visible factor-2
+terrain wireframe. Visual parity, displacement and performance remain unqualified.
+See [the test and evidence](TERRAIN_TESSELLATION_TEST.md).
+The [micro relief prototype](TERRAIN_MICRO_RELIEF_TEST.md) is the next bounded
+geometry experiment. Its initial camera-dependent wave result was rejected;
+the current version uses fixed object coordinates with matched periodic phase.
+The user confirmed stable ground during the corrected local GOG camera-motion
+test on 2026-10-04; broader terrain and platform qualification remains.
 
 ## Recommendation
 
-Prototype **DX11 triangle tessellation on the native terrain entities that Redux
-already submits**, using OGRE material/program APIs. Start with zero displacement
+Prototype **DX11 triangle tessellation on the shared terrain material used by
+Redux's native submissions**, using OGRE material/program APIs. Start with zero displacement
 to prove submission and shader compatibility, then add shallow world-space
 displacement and adaptive subdivision. Keep the authoritative terrain height
 field, terrain-cell words, collision, pathfinding, placement, and networking
 unchanged.
 
 A replacement OGRE build does not appear necessary. The installed GOG renderer
-contains the relevant shader-binding and patch-topology paths. This is stronger
-than an upstream-version assumption, but still needs a runtime proof.
+contains the relevant shader-binding and patch-topology paths. The subsequent
+prototype confirms those paths on the tested Windows/GOG installation.
 
 Do not make the first experiment depend on the existing separate terrain proxy:
 the latest account in [terrain-render-path.md](terrain-render-path.md#blocker-the-proxy-entity-renders-no-pixels)
@@ -108,10 +115,10 @@ It also found the paired-program branch that selects the three-control-point
 patch topology for triangle operations, computes indexed patch count as
 indexCount / 3, and passes the topology to `IASetPrimitiveTopology`.
 
-This supports reusing stock triangle indices as triangular patches. It does not
-prove that a new material selects the right technique or binds the right data
-in a running mission. No game was launched, no PID/live bytes were captured,
-and no binary or decompiler output is included in this document.
+This static inspection supports reusing stock triangle indices as triangular
+patches. It does not itself prove material selection in a running mission.
+No game was launched during that inspection; the later prototype's live evidence
+is recorded separately. No binary or decompiler output is included here.
 
 Static reproduction details: `bzr-rz-bin.cmd -E` was run against both installed
 DLL paths; `Get-FileHash -Algorithm SHA256` produced the identities above. Python
@@ -285,15 +292,12 @@ file format change is needed for the proposed first prototype.
 ## Cost and dynamic terrain
 
 The stock renderer already submits 12,800 triangles per cluster, including its
-overlapping patches. Uniform subdivision scales approximately with factor
-squared; these are per-cluster estimates, not measured whole-frame costs:
-
-| Uniform factor | Approximate triangles |
-|---:|---:|
-| 1 | 12,800 |
-| 2 | 51,200 |
-| 4 | 204,800 |
-| 8 | 819,200 |
+overlapping patches. Subdivision grows roughly quadratically, but triangular
+integer tessellation does not guarantee exactly factor-squared triangles.
+Measure the tessellator's actual work instead of multiplying stock triangles by
+four and treating that as a factor-2 measurement. The prototype recorded
+38,400 domain invocations at factor 1 and 89,600 at factor 2 for 12,800 patches;
+these are domain evaluations, not output-triangle or whole-frame cost counts.
 
 Adaptive fractional factors and differing edge/interior levels change the exact
 counts. A cap near 2-4 and a small near-camera region are sensible initial
@@ -351,9 +355,10 @@ For any future game launch, dot-source `reverse_engineering/BZRHarness.ps1`, use
 
 ## Current decision
 
-Proceed with a one-material, zero-displacement native-terrain tessellation proof
-before expanding the old proxy or redesigning the height field. Static released
-renderer evidence supports that experiment. Actual material selection, shader
-interface linking, adaptive edge continuity, mixed PS/DS resource binding,
-visual contact quality, performance, and all runtime platform lanes remain
-unverified.
+Continue the shared-material, zero-displacement native-terrain test before
+expanding the old proxy or redesigning the height field. Local GOG submission
+and runtime interface linking are established. Assigning a clone to one
+discovered Entity did not establish submission; changing its shared material
+did. Per-cluster ownership still needs investigation. Adaptive edge continuity,
+mixed PS/DS texture binding, visual contact quality, image parity, performance,
+and the remaining platform lanes are unverified.
