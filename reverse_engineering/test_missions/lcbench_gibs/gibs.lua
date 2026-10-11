@@ -18,9 +18,17 @@ local killed = 0
 local function BuildPosition(i)
     local player = GetPlayerHandle()
     local origin = SetVector(0.0, 0.0, 0.0)
-    if IsValid(player) then origin = GetPosition(player) end
-    -- A row 14 m ahead of the player's start, 5 m apart.
-    return SetVector(origin.x + (i - 2.5) * 5.0, origin.y, origin.z + 14.0)
+    local front = SetVector(0.0, 0.0, 1.0)
+    if IsValid(player) then
+        origin = GetPosition(player)
+        local ok, f = pcall(GetFront, player)
+        if ok and f then front = f end
+    end
+    -- A row 9 m in front of where the player faces, 4 m apart, side to side.
+    local right = SetVector(front.z, 0.0, -front.x)
+    local across = (i - 2.5) * 4.0
+    return SetVector(origin.x + front.x * 9.0 + right.x * across, origin.y,
+                     origin.z + front.z * 9.0 + right.z * across)
 end
 
 function Start()

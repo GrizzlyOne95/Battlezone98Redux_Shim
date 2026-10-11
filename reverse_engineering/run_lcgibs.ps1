@@ -43,6 +43,7 @@ if ($had) { Copy-Item -LiteralPath $live -Destination (Join-Path $OutputRoot "lc
 
 try {
     Copy-Item -LiteralPath $overlay -Destination $live -Force
+    Assert-BZRSafeToLaunch   # refuses unless the game cannot steal foreground/mouse; starts the watchdog
     $process = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot -PassThru
     if ($RunSeconds -gt 0) {
         if (-not $process.WaitForExit($RunSeconds * 1000)) { Stop-BZRGame -Id $process.Id }
@@ -60,5 +61,9 @@ try {
         $source = Join-Path $logRoot $name
         if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination (Join-Path $OutputRoot $name) -Force }
     }
+}
+$watchdog = Join-Path $env:TEMP "bzr_foreground_watchdog.log"
+if ((Test-Path -LiteralPath $watchdog) -and (Select-String -LiteralPath $watchdog -Pattern "FOREGROUND-STOLEN" -Quiet)) {
+    Write-Warning "FOREGROUND-STOLEN in $watchdog - stop launching and report."
 }
 Write-Host "Logs: $OutputRoot (look for [LCGIBS] in BZLogger.txt and [SKINNEDGIBS] / [DX11COMPAT] in openshim.log)"
