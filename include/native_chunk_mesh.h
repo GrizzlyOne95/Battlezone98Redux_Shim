@@ -72,6 +72,9 @@ struct GibOptions
     // Torn-flesh rings (rim, inset ragged ring, bulged centre) instead of the
     // plain fan; loops that are degenerate, huge or far from planar fall back.
     bool capRings = true;
+    // Loops that rings cannot follow are ear-clipped; with this on, a thin skin
+    // and fat band is inset along the rim where it does not self-intersect.
+    bool capBands = true;
 };
 struct GibPiece
 {
@@ -80,6 +83,8 @@ struct GibPiece
     std::string boneName;  // driving bone name
     float radius = 0;      // bound radius about the piece centre
     uint32_t capTriangles = 0;
+    // How the cut loops were closed: rings, ear-clipped polygon, centroid fan (last resort).
+    uint32_t capRingLoops = 0, capEarLoops = 0, capFanLoops = 0;
     bool weapon = false;
 };
 bool ExtractGibs(const std::vector<uint8_t> &mesh, const std::vector<uint8_t> &skeleton, const GibOptions &options,
