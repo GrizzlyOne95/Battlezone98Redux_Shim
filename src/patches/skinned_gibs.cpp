@@ -1336,7 +1336,6 @@ namespace BZROpenShim
             {
                 namespace NC = BZROpenShim::NativeChunks;
                 std::error_code ec;
-                const auto texture = cacheRoot / NC::kGibFleshTextureFile;
                 const auto readHead = [](const std::filesystem::path& path) {
                     std::vector<uint8_t> head(64);
                     std::ifstream in(path, std::ios::binary);
@@ -1405,25 +1404,30 @@ namespace BZROpenShim
                 const bool mainForeign = ensureFile(NC::kGibFleshMaterialFile, NC::kGibFleshMaterialMarker,
                                                     NC::GibFleshMaterialHeader(), NC::GibFleshMaterialScript(),
                                                     wroteMain);
-                ensureFile(NC::kGibFleshZoneMaterialFile, NC::kGibFleshZoneMaterialMarker,
-                           NC::GibFleshZoneMaterialHeader(), NC::GibFleshZoneMaterialScript(), wroteZones);
-                // The texture belongs to our muscle material: written when it
-                // is missing or stale, removed (if ours) when a pack or the
-                // user supplies the muscle material instead.
-                const auto head = readHead(texture);
-                if (mainForeign)
+                const bool zonesForeign = ensureFile(NC::kGibFleshZoneMaterialFile, NC::kGibFleshZoneMaterialMarker,
+                                                     NC::GibFleshZoneMaterialHeader(), NC::GibFleshZoneMaterialScript(),
+                                                     wroteZones);
+                // The textures belong to our materials: written when missing
+                // or stale, removed (if ours) when a pack or the user supplies
+                // the material that uses them.
+                for (const auto& image : NC::GibFleshTextures())
                 {
-                    if (NC::IsGeneratedGibFleshTga(head))
-                        std::filesystem::remove(texture, ec);
-                }
-                else if (!NC::IsCurrentGibFleshTga(head))
-                {
-                    const auto tga = NC::GibFleshTextureTga();
-                    std::ofstream out(texture, std::ios::binary | std::ios::trunc);
-                    out.write(reinterpret_cast<const char*>(tga.data()), static_cast<std::streamsize>(tga.size()));
-                    out.close();
-                    LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] wrote flesh texture %hs ok=%u\n",
-                                       texture.string().c_str(), out ? 1u : 0u);
+                    const auto path = cacheRoot / image.file;
+                    const auto head = readHead(path);
+                    if (image.zone ? zonesForeign : mainForeign)
+                    {
+                        if (NC::IsGeneratedGibFleshTga(head))
+                            std::filesystem::remove(path, ec);
+                    }
+                    else if (!NC::IsCurrentGibFleshTga(head))
+                    {
+                        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+                        out.write(reinterpret_cast<const char*>(image.tga.data()),
+                                  static_cast<std::streamsize>(image.tga.size()));
+                        out.close();
+                        LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] wrote flesh texture %hs ok=%u\n",
+                                           path.string().c_str(), out ? 1u : 0u);
+                    }
                 }
             }
             catch (...)

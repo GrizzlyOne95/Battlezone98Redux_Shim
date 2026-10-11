@@ -256,15 +256,26 @@ std::vector<DumpSub> parsePiece(const std::vector<uint8_t> &mesh)
     }
     return subs;
 }
-// "diffuse r g b" of a generated flesh material, read from the scripts.
+// "r g b" of a generated zone material: the colour of its solid diffuse texture
+// (the muscle returns empty: it uses the muscle texture itself).
 std::string materialDiffuse(const std::string &name)
 {
     const std::string scripts = GibFleshMaterialScript() + GibFleshZoneMaterialScript();
-    const size_t at = scripts.find("material " + name + "\n");
+    const size_t at = scripts.find("material " + name + " : BZBase");
     if (at == std::string::npos)
         return {};
-    const size_t d = scripts.find("diffuse ", at);
-    return d == std::string::npos ? std::string() : scripts.substr(d + 8, scripts.find('\n', d) - d - 8);
+    const size_t alias = scripts.find("DiffuseMap ", at);
+    const std::string file = scripts.substr(alias + 11, scripts.find('\n', alias) - alias - 11);
+    for (const auto &image : GibFleshTextures())
+        if (file == image.file && image.zone)
+        {
+            const size_t pixel = 18 + image.tga[0];
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "%.3f %.3f %.3f", image.tga[pixel + 2] / 255.0, image.tga[pixel + 1] / 255.0,
+                          image.tga[pixel] / 255.0);
+            return buf;
+        }
+    return {};
 }
 void dumpObj(const fs::path &dir, const std::string &model, const std::vector<GibPiece> &gibs)
 {
@@ -331,9 +342,9 @@ void dumpObj(const fs::path &dir, const std::string &model, const std::vector<Gi
     std::fclose(obj);
     std::fclose(mtl);
     // The generated texture and material script, next to the OBJ.
-    const auto tga = GibFleshTextureTga();
-    std::ofstream(dir / kGibFleshTextureFile, std::ios::binary)
-        .write(reinterpret_cast<const char *>(tga.data()), static_cast<std::streamsize>(tga.size()));
+    for (const auto &image : GibFleshTextures())
+        std::ofstream(dir / image.file, std::ios::binary)
+            .write(reinterpret_cast<const char *>(image.tga.data()), static_cast<std::streamsize>(image.tga.size()));
     std::ofstream(dir / kGibFleshMaterialFile, std::ios::binary) << GibFleshMaterialScript();
     std::ofstream(dir / kGibFleshZoneMaterialFile, std::ios::binary) << GibFleshZoneMaterialScript();
 }

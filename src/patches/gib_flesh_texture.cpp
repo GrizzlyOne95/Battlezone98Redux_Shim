@@ -115,61 +115,98 @@ std::string GibFleshZoneMaterialHeader()
     return std::string(kGibFleshZoneMaterialMarker) + " " + kGibFleshVersion + " (generated; do not edit).";
 }
 
+namespace
+{
+struct ZoneSpec
+{
+    const char *material, *textureFile;
+    float r, g, b;
+    const char *specular;
+    const char *shininess;
+};
+// Thin dark dermis edge, pale yellow subcutaneous fat (matte), ivory bone, dark
+// red marrow.
+const ZoneSpec kZones[] = {
+    {"openshim_gib_flesh_skin", "openshim_gib_flesh_skin.tga", 0.20f, 0.045f, 0.04f, "0.10 0.07 0.07", "24"},
+    {"openshim_gib_flesh_fat", "openshim_gib_flesh_fat.tga", 0.90f, 0.78f, 0.48f, "0.10 0.09 0.06", "16"},
+    {"openshim_gib_flesh_bone", "openshim_gib_flesh_bone.tga", 0.86f, 0.80f, 0.58f, "0.25 0.25 0.20", "32"},
+    {"openshim_gib_flesh_marrow", "openshim_gib_flesh_marrow.tga", 0.30f, 0.04f, 0.04f, "0.30 0.15 0.15", "40"}};
+
+// One stock-style material: BZBase with the diffuse texture aliased and the
+// scalar parameters set the way the stock pilots set them. NormalMap,
+// SpecularMap and EmissiveMap keep BZBase's neutral defaults (flat_n.png,
+// white.png, black.png), so there is no emissive glow and no normal detail.
+std::string stockMaterial(const std::string &name, const std::string &textureFile, const std::string &specular,
+                          const std::string &shininess)
+{
+    return "material " + name + " : BZBase\n{\n\tset_texture_alias DiffuseMap " + textureFile +
+           "\n\n\tset $diffuse \"1 1 1\"\n\tset $ambient \"1 1 1\"\n\tset $specular \"" + specular +
+           "\"\n\tset $shininess \"" + shininess + "\"\n\tset $bias \"0\"\n}\n";
+}
+std::vector<uint8_t> tga24(unsigned width, unsigned height, const std::vector<uint8_t> &rgbTopDown)
+{
+    const std::string id = versionTag();
+    std::vector<uint8_t> out;
+    out.reserve(18 + id.size() + rgbTopDown.size());
+    const uint8_t header[18] = {static_cast<uint8_t>(id.size()), 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                static_cast<uint8_t>(width & 0xFF), static_cast<uint8_t>(width >> 8),
+                                static_cast<uint8_t>(height & 0xFF), static_cast<uint8_t>(height >> 8), 24, 0};
+    out.insert(out.end(), header, header + sizeof(header));
+    out.insert(out.end(), id.begin(), id.end());
+    // Bottom-left origin: rows bottom to top, pixels B,G,R.
+    for (unsigned row = 0; row < height; ++row)
+    {
+        const unsigned y = height - 1 - row;
+        for (unsigned x = 0; x < width; ++x)
+        {
+            const uint8_t *p = &rgbTopDown[(static_cast<size_t>(y) * width + x) * 3];
+            out.push_back(p[2]);
+            out.push_back(p[1]);
+            out.push_back(p[0]);
+        }
+    }
+    return out;
+}
+} // namespace
+
 std::string GibFleshMaterialScript()
 {
-    // The muscle: the texture carries the hue (deep red-brown bundles, pale
-    // perimysium, fat marbling), the material is white, wet and tight in
-    // specular. Plain fixed-function state like the other generated materials:
-    // the same pass DX9 draws natively and the DX11 compatibility layer or a
-    // generated shader instantiates (one texture unit, modulate, no vertex
-    // colour).
+    // The muscle: BZBase with the muscle texture as its diffuse map, wet and
+    // tight in specular.
     return GibFleshMaterialHeader() + "\n" +
            "// Override it with an openshim_gib_flesh.material at the top of a chunk payload\n"
            "// directory (<mod>/chunkMeshes/ or BZ_ASSETS/common/models/OpenShimChunkPayloads/).\n"
            "// The thin skin edge, fat band, bone and marrow are in openshim_gib_flesh_zones.material.\n"
-           "material " +
-           std::string(kGibFleshMaterialName) +
-           "\n"
-           "{\n"
-           "    technique\n"
-           "    {\n"
-           "        pass\n"
-           "        {\n"
-           "            ambient 1 1 1\n"
-           "            diffuse 1 1 1\n"
-           "            specular 0.35 0.25 0.25 48\n"
-           "            cull_hardware none\n"
-           "            texture_unit\n"
-           "            {\n"
-           "                texture " +
-           kGibFleshTextureFile +
-           "\n"
-           "            }\n"
-           "        }\n"
-           "    }\n"
-           "}\n";
+           "import * from \"BZBase.material\"\n\n" +
+           stockMaterial(kGibFleshMaterialName, kGibFleshTextureFile, "0.35 0.25 0.25", "48");
 }
 
 std::string GibFleshZoneMaterialScript()
 {
-    struct Zone
-    {
-        const char *name, *colour, *specular;
-    };
-    // Thin dark dermis edge, pale yellow subcutaneous fat (matte), ivory bone,
-    // dark red marrow. Untextured: they are narrow bands.
-    static const Zone zones[] = {{"openshim_gib_flesh_skin", "0.20 0.045 0.04", "0.10 0.07 0.07 24"},
-                                 {"openshim_gib_flesh_fat", "0.90 0.78 0.48", "0.10 0.09 0.06 16"},
-                                 {"openshim_gib_flesh_bone", "0.86 0.80 0.58", "0.25 0.25 0.20 32"},
-                                 {"openshim_gib_flesh_marrow", "0.30 0.04 0.04", "0.30 0.15 0.15 40"}};
     std::string out = GibFleshZoneMaterialHeader() + "\n" +
-                      "// Override it with an openshim_gib_flesh_zones.material at the top of a chunk payload directory.\n";
-    for (const Zone &zone : zones)
+                      "// Override it with an openshim_gib_flesh_zones.material at the top of a chunk payload directory.\n"
+                      "import * from \"BZBase.material\"\n\n";
+    for (const ZoneSpec &zone : kZones)
+        out += stockMaterial(zone.material, zone.textureFile, zone.specular, zone.shininess) + "\n";
+    return out;
+}
+
+std::vector<GibFleshTexture> GibFleshTextures()
+{
+    std::vector<GibFleshTexture> out;
+    out.push_back({kGibFleshTextureFile, false, GibFleshTextureTga()});
+    for (const ZoneSpec &zone : kZones)
     {
-        out += std::string("material ") + zone.name +
-               "\n{\n    technique\n    {\n        pass\n        {\n            ambient " + zone.colour +
-               "\n            diffuse " + zone.colour + "\n            specular " + zone.specular +
-               "\n            cull_hardware none\n        }\n    }\n}\n";
+        // 4x4 solid colour: the base programs sample a texture and ignore the
+        // pass colour for hue.
+        std::vector<uint8_t> rgb(4u * 4u * 3u);
+        for (size_t i = 0; i < rgb.size(); i += 3)
+        {
+            rgb[i] = static_cast<uint8_t>(clamp01(zone.r) * 255.0f + 0.5f);
+            rgb[i + 1] = static_cast<uint8_t>(clamp01(zone.g) * 255.0f + 0.5f);
+            rgb[i + 2] = static_cast<uint8_t>(clamp01(zone.b) * 255.0f + 0.5f);
+        }
+        out.push_back({zone.textureFile, true, tga24(4, 4, rgb)});
     }
     return out;
 }
@@ -222,29 +259,7 @@ std::vector<uint8_t> GibFleshTextureRgb()
 
 std::vector<uint8_t> GibFleshTextureTga()
 {
-    constexpr unsigned N = kGibFleshTextureSize;
-    const std::string id = versionTag();
-    const auto rgb = GibFleshTextureRgb();
-    std::vector<uint8_t> out;
-    out.reserve(18 + id.size() + static_cast<size_t>(N) * N * 3);
-    const uint8_t header[18] = {static_cast<uint8_t>(id.size()), 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                static_cast<uint8_t>(N & 0xFF), static_cast<uint8_t>(N >> 8),
-                                static_cast<uint8_t>(N & 0xFF), static_cast<uint8_t>(N >> 8), 24, 0};
-    out.insert(out.end(), header, header + sizeof(header));
-    out.insert(out.end(), id.begin(), id.end());
-    // Bottom-left origin: rows bottom to top, pixels B,G,R.
-    for (unsigned row = 0; row < N; ++row)
-    {
-        const unsigned y = N - 1 - row;
-        for (unsigned x = 0; x < N; ++x)
-        {
-            const uint8_t *s = &rgb[(static_cast<size_t>(y) * N + x) * 3];
-            out.push_back(s[2]);
-            out.push_back(s[1]);
-            out.push_back(s[0]);
-        }
-    }
-    return out;
+    return tga24(kGibFleshTextureSize, kGibFleshTextureSize, GibFleshTextureRgb());
 }
 
 bool IsGeneratedGibFleshTga(const std::vector<uint8_t> &bytes)
