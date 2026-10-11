@@ -76,6 +76,40 @@ namespace
         Check(!ShowCommandNeedsBottomPush(kSwHide), "SW_HIDE needs no push");
     }
 
+    void TestExStyle()
+    {
+        const std::uint32_t reduxStyle = 0x16CA0000;
+        Check(ExStyleWithNoActivate(0, true) == kWsExNoActivate, "top-level window gains WS_EX_NOACTIVATE");
+        Check(ExStyleWithNoActivate(0x00000008, true) == (0x00000008 | kWsExNoActivate), "other ex bits are kept");
+        Check(ExStyleWithNoActivate(kWsExNoActivate, true) == kWsExNoActivate, "already set is idempotent");
+        Check(ExStyleWithNoActivate(0, false) == 0, "child windows are left alone");
+        Check(CreateExStyle(0, reduxStyle, false) == (kWsExNoActivate | kWsExAppWindow), "unowned top-level keeps its taskbar button");
+        Check((CreateExStyle(0, reduxStyle, true) & kWsExAppWindow) == 0, "owned window gets no APPWINDOW");
+        Check((CreateExStyle(kWsExToolWindow, reduxStyle, false) & kWsExAppWindow) == 0, "tool window gets no APPWINDOW");
+        Check((CreateExStyle(kWsExToolWindow, reduxStyle, false) & kWsExNoActivate) != 0, "tool window still gets NOACTIVATE");
+        Check(CreateExStyle(0, reduxStyle | kWsChild, false) == 0, "child create is untouched");
+        Check(SetWindowLongValue(kGwlExStyle, 0, true) == kWsExNoActivate, "GWL_EXSTYLE write cannot clear the bit");
+        Check(SetWindowLongValue(kGwlExStyle, 0, false) == 0, "GWL_EXSTYLE write on a child passes");
+        Check(SetWindowLongValue(-16 /* GWL_STYLE */, 0x1234, true) == 0x1234, "other indexes pass through");
+        Check(SetWindowLongValue(-4 /* GWL_WNDPROC */, 0x5678, true) == 0x5678, "window procedure writes pass through");
+    }
+
+    void TestUserClick()
+    {
+        Check(IsUserClick(0x0201, true, true, true), "physical click inside the window counts");
+        Check(IsUserClick(0x00A1, true, true, true), "physical non-client click counts");
+        Check(!IsUserClick(0x0201, true, true, false), "posted click (button not physically down) is ignored");
+        Check(!IsUserClick(0x0201, true, false, true), "click with the cursor outside the window is ignored");
+        Check(!IsUserClick(0x0201, false, true, true), "click on another window is ignored");
+        Check(!IsUserClick(0x0200, true, true, true), "mouse move is not a click");
+        Check(!IsUserClick(0x0202, true, true, true), "button up is not a click");
+        Check(ButtonVirtualKey(0x0201) == 0x01 && ButtonVirtualKey(0x00A4) == 0x02 && ButtonVirtualKey(0x0207) == 0x04,
+              "button messages map to their virtual keys");
+        Check(ButtonVirtualKey(0x0200) == 0, "non-button message has no virtual key");
+        Check(ShouldSuppress(false), "suppression holds before a user click");
+        Check(!ShouldSuppress(true), "suppression stands down after a user click");
+    }
+
     void TestActiveWindow()
     {
         Check(ReportedActiveWindow(0, 0x500, true) == 0x500, "no active window reports the game window");
@@ -96,6 +130,8 @@ int main()
     TestCreateStyle();
     TestSetFocus();
     TestZOrder();
+    TestExStyle();
+    TestUserClick();
     TestActiveWindow();
     if (OpenShimTest::FailureCount() != 0)
     {
