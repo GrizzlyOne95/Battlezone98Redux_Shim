@@ -49,8 +49,8 @@ void ExportNativeTerrainAtlas()
         }
         std::set<uint8_t> used;
         NativeHdContext c = {};
-        if (!SafeReadIntAddress(Rebase(kTerrainOriginXVa), c.originX) ||
-            !SafeReadIntAddress(Rebase(kTerrainOriginZVa), c.originZ))
+        if (!SafeReadIntAddress(g_terrainOriginXVa, c.originX) ||
+            !SafeReadIntAddress(g_terrainOriginZVa, c.originZ))
             throw std::runtime_error("atlas export origin unavailable");
         for (const auto& zone : g_zoneOrdinals)
         {
