@@ -46,7 +46,7 @@ if (-not $env:OPENSHIM_NEVER_CAPTURE_MOUSE) { $env:OPENSHIM_NEVER_CAPTURE_MOUSE 
 if (-not $env:OPENSHIM_NEVER_ACTIVATE) { $env:OPENSHIM_NEVER_ACTIVATE = '1' }
 
 # Native helpers for the foreground-steal watchdog below.
-if (-not ('BZRForegroundWatchdog' -as [type])) {
+if (-not ('BZRProcessLauncher' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
@@ -55,12 +55,55 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 
+public static class BZRProcessLauncher
+{
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct STARTUPINFO
+    {
+        public int cb; public string lpReserved; public string lpDesktop; public string lpTitle;
+        public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+        public short wShowWindow, cbReserved2; public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    struct PROCESS_INFORMATION { public IntPtr hProcess, hThread; public int dwProcessId, dwThreadId; }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CreateProcessW(string app, string cmd, IntPtr pa, IntPtr ta, bool inherit, uint flags,
+        IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+
+    const int STARTF_USESHOWWINDOW = 0x1;
+
+    // CreateProcess with STARTF_USESHOWWINDOW + showCommand (SW_SHOWNOACTIVATE = 4)
+    // so the game's first ShowWindow cannot activate the window. Inherits the
+    // caller's environment. Returns the new process id.
+    public static int Start(string exe, string args, string workingDirectory, short showCommand)
+    {
+        STARTUPINFO si = new STARTUPINFO();
+        si.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = showCommand;
+        PROCESS_INFORMATION pi;
+        string cmd = "\"" + exe + "\"" + (string.IsNullOrEmpty(args) ? "" : " " + args);
+        if (!CreateProcessW(exe, cmd, IntPtr.Zero, IntPtr.Zero, false, 0, IntPtr.Zero,
+                string.IsNullOrEmpty(workingDirectory) ? null : workingDirectory, ref si, out pi))
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+        return pi.dwProcessId;
+    }
+}
+
 public static class BZRForegroundWatchdog
 {
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern void SwitchToThisWindow(IntPtr hwnd, bool fAltTab);
+    [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+    delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+    const uint WM_CLOSE = 0x0010;
     [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
     [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
 
@@ -91,11 +134,13 @@ public static class BZRForegroundWatchdog
     // foreground window every intervalMs for watchMs. If it ever belongs to the
     // game, logs FOREGROUND-STOLEN and hands the foreground back to whatever
     // held it before. allowAttach enables the AttachThreadInput fallback.
-    public static bool Start(string gameName, int waitForGameMs, int watchMs, int intervalMs, bool allowAttach)
+    // More than maxSteals steals ends the run: WM_CLOSE (never a kill) is posted
+    // to the game's windows. A run that keeps stealing must end itself.
+    public static bool Start(string gameName, int waitForGameMs, int watchMs, int intervalMs, bool allowAttach, int maxSteals)
     {
         if (Interlocked.CompareExchange(ref running, 1, 0) != 0) return false;
         Thread t = new Thread(delegate() {
-            try { Run(gameName, waitForGameMs, watchMs, intervalMs, allowAttach); }
+            try { Run(gameName, waitForGameMs, watchMs, intervalMs, allowAttach, maxSteals); }
             catch (Exception ex) { Note("watchdog error: " + ex.Message); }
             finally { Interlocked.Exchange(ref running, 0); }
         });
@@ -105,8 +150,22 @@ public static class BZRForegroundWatchdog
         return true;
     }
 
-    static void Run(string gameName, int waitForGameMs, int watchMs, int intervalMs, bool allowAttach)
+    // Posts WM_CLOSE to every top-level window owned by the game. Graceful only.
+    static int CloseGameWindows(string gameName)
     {
+        int posted = 0;
+        EnumWindows(delegate(IntPtr hwnd, IntPtr lp) {
+            uint wpid;
+            GetWindowThreadProcessId(hwnd, out wpid);
+            if (IsGame(wpid, gameName) && PostMessage(hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero)) posted++;
+            return true;
+        }, IntPtr.Zero);
+        return posted;
+    }
+
+    static void Run(string gameName, int waitForGameMs, int watchMs, int intervalMs, bool allowAttach, int maxSteals)
+    {
+        bool aborted = false;
         IntPtr previous = IntPtr.Zero;
         Stopwatch wait = Stopwatch.StartNew();
         Stopwatch watch = null;
@@ -150,10 +209,23 @@ public static class BZRForegroundWatchdog
                             bool attached = AttachThreadInput(me, fgThread, true);
                             SetForegroundWindow(previous);
                             if (attached) AttachThreadInput(me, fgThread, false);
-                            Note("AttachThreadInput fallback attempted (attached=" + attached + ")");
+                            now = GetForegroundWindow();
+                            nowPid = 0; if (now != IntPtr.Zero) GetWindowThreadProcessId(now, out nowPid);
+                            Note("AttachThreadInput fallback attempted (attached=" + attached + ", game still foreground=" + IsGame(nowPid, gameName) + ")");
+                            if (IsGame(nowPid, gameName))
+                            {
+                                SwitchToThisWindow(previous, true);
+                                Note("SwitchToThisWindow fallback attempted");
+                            }
                         }
                     }
                     else Note("foreground restored to previous window");
+                }
+                if (!aborted && reported > maxSteals)
+                {
+                    aborted = true;
+                    int posted = CloseGameWindows(gameName);
+                    Note("aborted run: repeated foreground steals (" + reported + " > " + maxSteals + "); posted WM_CLOSE to " + posted + " game window(s)");
                 }
             }
             Thread.Sleep(intervalMs);
@@ -169,24 +241,28 @@ function Start-BZRForegroundWatchdog {
         Detects (and undoes) the game taking the foreground right after launch.
     .DESCRIPTION
         Background thread, so the caller is not blocked. Waits up to 60 s for the
-        game process to appear, then for 15 s polls GetForegroundWindow every
-        250 ms. If the foreground ever belongs to the game it logs a loud
+        game process to appear, then polls GetForegroundWindow every
+        100 ms for -WatchSeconds. If the foreground ever belongs to the game it logs a loud
         FOREGROUND-STOLEN line (Get-BZRForegroundWatchdogLog; also appended to
         %TEMP%\bzr_foreground_watchdog.log) and calls SetForegroundWindow on the
         previous foreground window. The AttachThreadInput fallback runs only when
-        plain SetForegroundWindow failed AND BZR_WATCHDOG_ATTACH_INPUT=1 (opt-in
-        until it has been verified on a supervised run).
+        plain SetForegroundWindow failed (on by default; BZR_WATCHDOG_NO_ATTACH=1
+        turns it off), followed by SwitchToThisWindow if the game still holds it.
+        More than -MaxSteals steals (default 2) ends the run: WM_CLOSE (never
+        TerminateProcess) is posted to the game's windows and "aborted run:
+        repeated foreground steals" is logged.
         Disable with BZR_NO_FOREGROUND_WATCHDOG=1.
     #>
     [CmdletBinding()]
     param(
         [int]$WaitForGameSeconds = 60,
         [int]$WatchSeconds = 900,
-        [int]$PollMilliseconds = 250
+        [int]$PollMilliseconds = 100,
+        [int]$MaxSteals = 2
     )
     if ($env:BZR_NO_FOREGROUND_WATCHDOG -eq '1') { return $false }
     [BZRForegroundWatchdog]::Start($script:BZRGameProcessName, $WaitForGameSeconds * 1000,
-        $WatchSeconds * 1000, $PollMilliseconds, ($env:BZR_WATCHDOG_ATTACH_INPUT -eq '1'))
+        $WatchSeconds * 1000, $PollMilliseconds, ($env:BZR_WATCHDOG_NO_ATTACH -ne '1'), $MaxSteals)
 }
 
 function Get-BZRForegroundWatchdogLog {
@@ -228,6 +304,34 @@ function Assert-BZRSafeToLaunch {
         }
     }
     [void](Start-BZRForegroundWatchdog)
+}
+
+function Start-BZRGameProcess {
+    <#
+    .SYNOPSIS
+        Starts the game via CreateProcess with SW_SHOWNOACTIVATE.
+    .DESCRIPTION
+        Start-Process cannot set STARTUPINFO.wShowWindow without also going
+        through ShellExecute, and the game's first ShowWindow(SW_SHOW*) call is
+        replaced by the STARTUPINFO value, so an ordinary launch activates the
+        window. This helper sets STARTF_USESHOWWINDOW + SW_SHOWNOACTIVATE
+        (-WindowStyle Hidden = SW_HIDE, Minimized = SW_SHOWMINNOACTIVE). The
+        environment is inherited. Drop-in for the
+            Start-Process -FilePath <exe> -ArgumentList <args> -WorkingDirectory <dir> [-PassThru]
+        form: array arguments are joined with spaces, exactly like Start-Process.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [object]$ArgumentList = @(),
+        [string]$WorkingDirectory = '',
+        [ValidateSet('Normal', 'Hidden', 'Minimized', 'Maximized')][string]$WindowStyle = 'Normal',
+        [switch]$PassThru
+    )
+    $show = switch ($WindowStyle) { 'Hidden' { 0 } 'Minimized' { 7 } default { 4 } }
+    $argText = (@($ArgumentList) | Where-Object { $_ -ne $null }) -join ' '
+    $processId = [BZRProcessLauncher]::Start($FilePath, $argText, $WorkingDirectory, [int16]$show)
+    if ($PassThru) { Get-Process -Id $processId }
 }
 
 function Stop-BZRGame {
