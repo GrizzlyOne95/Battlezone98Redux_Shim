@@ -2,9 +2,13 @@
 #include "native_chunk_prune.h"
 #include <algorithm>
 #include <array>
+#ifdef OPENSHIM_NATIVE_CHUNK_PHASES
+#include <chrono>
+#endif
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <optional>
 #include <regex>
 #include <set>
 #include <stdexcept>
@@ -410,15 +414,60 @@ std::vector<int> triangleOwners(const Sub &sub, const Model &model, const std::m
         throw std::runtime_error("incomplete triangle list");
     const auto &g = sub.shared ? model.geometry : sub.geometry;
     const auto &assignments = sub.shared ? model.assignments : sub.assignments;
-    std::vector<std::map<uint16_t, float>> weights(g.count);
-    for (auto a : assignments)
+    // Per-vertex (bone, summed weight) lists, bones ascending, in CSR form.
+    // Equal-bone weights are summed in assignment order, exactly as the old
+    // per-vertex std::map did, so the float totals are bit-identical.
+    struct Influence
     {
-        if (a.vertex >= g.count || !std::isfinite(a.weight) || a.weight < 0 || !bones.count(a.bone))
+        uint16_t bone;
+        float weight;
+    };
+    std::vector<uint8_t> knownBone(bones.empty() ? 0 : static_cast<size_t>(bones.rbegin()->first) + 1, 0);
+    for (const auto &entry : bones)
+        knownBone[entry.first] = 1;
+    std::vector<uint32_t> start(static_cast<size_t>(g.count) + 1, 0);
+    for (const auto &a : assignments)
+    {
+        if (a.vertex >= g.count || !std::isfinite(a.weight) || a.weight < 0 || a.bone >= knownBone.size() ||
+            !knownBone[a.bone])
             throw std::runtime_error("invalid bone assignment vertex=" + std::to_string(a.vertex) + "/" +
                                      std::to_string(g.count) + " bone=" + std::to_string(a.bone) +
                                      " weight=" + std::to_string(a.weight));
         if (a.weight > 0)
-            weights[a.vertex][a.bone] += a.weight;
+            ++start[a.vertex + 1];
+    }
+    for (size_t v = 0; v < g.count; ++v)
+        start[v + 1] += start[v];
+    std::vector<Influence> raw(start[g.count]);
+    {
+        std::vector<uint32_t> fill(start.begin(), start.end() - 1);
+        for (const auto &a : assignments)
+            if (a.weight > 0)
+                raw[fill[a.vertex]++] = {a.bone, a.weight};
+    }
+    std::vector<Influence> merged;
+    merged.reserve(raw.size());
+    std::vector<uint32_t> first(static_cast<size_t>(g.count) + 1, 0);
+    for (uint32_t v = 0; v < g.count; ++v)
+    {
+        const size_t begin = start[v], end = start[v + 1];
+        // Stable insertion sort by bone: ties keep assignment order.
+        for (size_t i = begin + 1; i < end; ++i)
+        {
+            const Influence x = raw[i];
+            size_t j = i;
+            for (; j > begin && raw[j - 1].bone > x.bone; --j)
+                raw[j] = raw[j - 1];
+            raw[j] = x;
+        }
+        for (size_t i = begin; i < end; ++i)
+        {
+            if (i > begin && raw[i].bone == raw[i - 1].bone)
+                merged.back().weight += raw[i].weight;
+            else
+                merged.push_back({raw[i].bone, 0.0f + raw[i].weight});
+        }
+        first[v + 1] = static_cast<uint32_t>(merged.size());
     }
     int root = -1;
     for (const auto &[id, b] : bones)
@@ -432,29 +481,43 @@ std::vector<int> triangleOwners(const Sub &sub, const Model &model, const std::m
             root = id;
         }
     std::vector<int> owners;
+    owners.reserve(sub.indices.size() / 3);
+    std::vector<uint16_t> candidates;
     for (size_t i = 0; i < sub.indices.size(); i += 3)
     {
-        std::map<uint16_t, float> scores;
+        const uint32_t vertex[3] = {sub.indices[i], sub.indices[i + 1], sub.indices[i + 2]};
+        candidates.clear();
         for (size_t j = 0; j < 3; ++j)
         {
-            auto vertex = sub.indices[i + j];
-            if (vertex >= g.count)
+            if (vertex[j] >= g.count)
                 throw std::runtime_error("invalid triangle index");
-            for (const auto &[id, weight] : weights[vertex])
-                scores[id] += weight;
+            for (uint32_t k = first[vertex[j]]; k < first[vertex[j] + 1]; ++k)
+                candidates.push_back(merged[k].bone);
         }
+        std::sort(candidates.begin(), candidates.end());
+        candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
         int owner = unweightedToRoot ? root : -1;
         float best = 0;
         // A triangle is emitted exactly once. Aggregate weights preserve seam
         // faces between rigid groups and avoid duplicating soft-skinned faces.
-        // Ordered handles give deterministic ties. Unweighted faces use the
+        // Ascending handles give deterministic ties. Unweighted faces use the
         // unique skeleton root when present, never fabricated debris.
-        for (const auto &[id, score] : scores)
+        for (const uint16_t id : candidates)
+        {
+            float score = 0;
+            for (size_t j = 0; j < 3; ++j)
+                for (uint32_t k = first[vertex[j]]; k < first[vertex[j] + 1]; ++k)
+                    if (merged[k].bone == id)
+                    {
+                        score += merged[k].weight;
+                        break;
+                    }
             if (score > best)
             {
                 owner = id;
                 best = score;
             }
+        }
         owners.push_back(owner);
     }
     return owners;
@@ -509,10 +572,58 @@ V position(const Geometry &g, uint32_t index)
         }
     throw std::runtime_error("missing position stream");
 }
-Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, const Frame &frame, V &lo, V &hi,
-                   float &radius)
+// position() with the element lookup done once: for loops over many vertices of
+// one geometry. Construction throws exactly what position() would for a
+// non-empty geometry; operator() checks the index like position().
+struct PositionReader
 {
-    Bytes out;
+    const uint8_t *data;
+    size_t stride;
+    size_t offset;
+    uint32_t count;
+    explicit PositionReader(const Geometry &g) : data(nullptr), stride(0), offset(0), count(g.count)
+    {
+        for (const auto &e : g.elements)
+            if (e.semantic == 1)
+            {
+                const auto buffer = g.buffers.find(e.source);
+                if (buffer == g.buffers.end() || e.type != 2 ||
+                    static_cast<size_t>(e.offset) + 12 > buffer->second.stride)
+                    throw std::runtime_error("unsupported position format");
+                data = buffer->second.data.data();
+                stride = buffer->second.stride;
+                offset = e.offset;
+                return;
+            }
+        throw std::runtime_error("missing position stream");
+    }
+    V operator()(uint32_t index) const
+    {
+        if (index >= count)
+            throw std::runtime_error("index outside vertex data");
+        V p;
+        std::memcpy(p.data(), data + static_cast<size_t>(index) * stride + offset, 12);
+        return p;
+    }
+};
+// Chunks written in place: open, append the body, close to patch the size
+// (same bytes as chunk(), without copying the body into every enclosing level).
+size_t openChunk(Bytes &b, uint16_t id)
+{
+    const size_t start = b.size();
+    put(b, id);
+    put(b, uint32_t{0});
+    return start;
+}
+void closeChunk(Bytes &b, size_t start)
+{
+    const auto size = static_cast<uint32_t>(b.size() - start);
+    std::memcpy(b.data() + start + 2, &size, sizeof(size));
+}
+// Appends the geometry chunk body (vertex count, declaration, buffers).
+void appendGeometry(Bytes &out, const Geometry &g, const std::vector<uint32_t> &vertices, const Frame &frame, V &lo,
+                    V &hi, float &radius)
+{
     put(out, static_cast<uint32_t>(vertices.size()));
     Bytes decl;
     bool hasPosition = false;
@@ -531,7 +642,6 @@ Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, con
     chunk(out, 0x5100, decl);
     for (const auto &[source, buf] : g.buffers)
     {
-        Bytes values;
         const Element *pos = nullptr;
         std::vector<uint16_t> directions;
         bool used = false;
@@ -556,24 +666,34 @@ Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, con
             }
         if (!used)
             continue;
+        const size_t bufferChunk = openChunk(out, 0x5200);
+        put(out, source);
+        put(out, buf.stride);
+        const size_t dataChunk = openChunk(out, 0x5210);
+        const size_t valuesAt = out.size();
+        out.resize(valuesAt + vertices.size() * buf.stride);
+        uint8_t *values = out.data() + valuesAt;
+        size_t next = 0;
+        // Bounds in locals for the loop (a throw discards the piece anyway).
+        V loLocal = lo, hiLocal = hi;
+        float radiusLocal = radius;
         for (auto index : vertices)
         {
             if (index >= g.count)
                 throw std::runtime_error("index outside vertex data");
             const size_t begin = static_cast<size_t>(index) * buf.stride;
-            const size_t next = values.size();
-            values.insert(values.end(), buf.data.begin() + begin, buf.data.begin() + begin + buf.stride);
+            std::memcpy(values + next, buf.data.data() + begin, buf.stride);
             for (auto offset : directions)
             {
                 V d;
-                std::memcpy(d.data(), values.data() + next + offset, 12);
+                std::memcpy(d.data(), values + next + offset, 12);
                 d = rotate(frame.inverse, d);
-                std::memcpy(values.data() + next + offset, d.data(), 12);
+                std::memcpy(values + next + offset, d.data(), 12);
             }
             if (pos)
             {
                 V p;
-                std::memcpy(p.data(), values.data() + next + pos->offset, 12);
+                std::memcpy(p.data(), values + next + pos->offset, 12);
                 p = toFrame(frame, p);
                 float r2 = 0;
                 for (int i = 0; i < 3; ++i)
@@ -581,25 +701,58 @@ Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, con
                     p[i] -= frame.center[i];
                     if (!std::isfinite(p[i]) || std::abs(p[i]) > 100000)
                         throw std::runtime_error("invalid vertex position");
-                    lo[i] = std::min(lo[i], p[i]);
-                    hi[i] = std::max(hi[i], p[i]);
+                    loLocal[i] = std::min(loLocal[i], p[i]);
+                    hiLocal[i] = std::max(hiLocal[i], p[i]);
                     r2 += p[i] * p[i];
                 }
-                radius = std::max(radius, std::sqrt(r2));
-                std::memcpy(values.data() + next + pos->offset, p.data(), 12);
+                radiusLocal = std::max(radiusLocal, std::sqrt(r2));
+                std::memcpy(values + next + pos->offset, p.data(), 12);
             }
+            next += buf.stride;
         }
-        Bytes d;
-        put(d, source);
-        put(d, buf.stride);
-        chunk(d, 0x5210, values);
-        chunk(out, 0x5200, d);
+        lo = loLocal;
+        hi = hiLocal;
+        radius = radiusLocal;
+        closeChunk(out, dataChunk);
+        closeChunk(out, bufferChunk);
     }
     if (!hasPosition)
         throw std::runtime_error("missing position stream");
+}
+Bytes emitGeometry(const Geometry &g, const std::vector<uint32_t> &vertices, const Frame &frame, V &lo, V &hi,
+                   float &radius)
+{
+    Bytes out;
+    appendGeometry(out, g, vertices, frame, lo, hi, radius);
     return out;
 }
 } // namespace
+#ifdef OPENSHIM_NATIVE_CHUNK_PHASES
+// Bench-only phase accumulators (milliseconds); compiled out of the DLL.
+double g_gibPhaseMs[11] = {};
+namespace
+{
+struct PhaseClock
+{
+    std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
+    void mark(int phase)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        g_gibPhaseMs[phase] += std::chrono::duration<double, std::milli>(now - last).count();
+        last = now;
+    }
+};
+} // namespace
+#define GIB_PHASE_BEGIN PhaseClock phaseClock
+#define GIB_PHASE(n) phaseClock.mark(n)
+// Cap outcomes: rings at full / 0.6 / 0.3 strength, fan (not eligible), fan (folded).
+double g_gibCapStats[10] = {};
+#define CAP_STAT(i) (g_gibCapStats[i] += 1.0)
+#else
+#define CAP_STAT(i) ((void)0)
+#define GIB_PHASE_BEGIN ((void)0)
+#define GIB_PHASE(n) ((void)0)
+#endif
 unsigned StockFallbackKind(std::string_view seed)
 {
     uint32_t hash = 2166136261u;
@@ -974,47 +1127,203 @@ V normalize3(V a)
 }
 // Directed boundary edges (welded ids) chained into loops, tolerant of junk:
 // the same walk as the script's _boundary_loops, open chains of three or more
-// points included.
-std::vector<std::vector<int>> boundaryLoops(const std::vector<std::pair<int, int>> &edges)
+// points included. The edges must be distinct (the caller de-duplicates).
+// `localOf` is caller scratch, at least (max welded id + 1) entries all -1; it
+// is returned to that state.
+std::vector<std::vector<int>> boundaryLoops(const std::vector<std::pair<int, int>> &edges,
+                                            std::vector<int> &localOf)
 {
-    std::map<int, std::vector<int>> outgoing;
-    for (const auto &[a, b] : edges)
-        outgoing[a].push_back(b);
-    std::set<std::pair<int, int>> used;
-    std::vector<std::vector<int>> loops;
-    for (const auto &[a, b] : edges)
-    {
-        if (used.count({a, b}))
-            continue;
-        std::vector<int> loop{a};
-        used.insert({a, b});
-        int current = b;
-        size_t guard = 0;
-        while (current != a && guard < edges.size() + 1)
+    // Dense node ids and, per node, its outgoing edges in input order (CSR).
+    std::vector<int> nodes;
+    std::vector<int> tail(edges.size()), head(edges.size());
+    const auto node = [&](int id) {
+        int &slot = localOf[static_cast<size_t>(id)];
+        if (slot < 0)
         {
-            loop.push_back(current);
-            int next = -1;
-            bool found = false;
-            const auto out = outgoing.find(current);
-            if (out != outgoing.end())
-                for (int candidate : out->second)
-                    if (!used.count({current, candidate}))
-                    {
-                        next = candidate;
-                        found = true;
-                        break;
-                    }
-            if (!found)
+            slot = static_cast<int>(nodes.size());
+            nodes.push_back(id);
+        }
+        return slot;
+    };
+    for (size_t i = 0; i < edges.size(); ++i)
+    {
+        tail[i] = node(edges[i].first);
+        head[i] = node(edges[i].second);
+    }
+    std::vector<uint32_t> first(nodes.size() + 1, 0);
+    for (size_t i = 0; i < edges.size(); ++i)
+        ++first[static_cast<size_t>(tail[i]) + 1];
+    for (size_t n = 0; n < nodes.size(); ++n)
+        first[n + 1] += first[n];
+    std::vector<uint32_t> outgoing(edges.size()), fill(first.begin(), first.end() - 1);
+    for (size_t i = 0; i < edges.size(); ++i)
+        outgoing[fill[static_cast<size_t>(tail[i])]++] = static_cast<uint32_t>(i);
+    std::vector<uint32_t> cursor(first.begin(), first.end() - 1);
+    std::vector<char> used(edges.size(), 0);
+    std::vector<std::vector<int>> loops;
+    for (size_t i = 0; i < edges.size(); ++i)
+    {
+        if (used[i])
+            continue;
+        const int a = edges[i].first;
+        std::vector<int> loop{a};
+        used[i] = 1;
+        int current = head[i];
+        size_t guard = 0;
+        while (nodes[static_cast<size_t>(current)] != a && guard < edges.size() + 1)
+        {
+            loop.push_back(nodes[static_cast<size_t>(current)]);
+            // First not-yet-used outgoing edge; used edges only accumulate, so
+            // the cursor never needs to back up.
+            const size_t n = static_cast<size_t>(current);
+            while (cursor[n] < first[n + 1] && used[outgoing[cursor[n]]])
+                ++cursor[n];
+            if (cursor[n] == first[n + 1])
                 break;
-            used.insert({current, next});
-            current = next;
+            const uint32_t e = outgoing[cursor[n]];
+            used[e] = 1;
+            current = head[e];
             ++guard;
         }
         if (loop.size() >= 3)
             loops.push_back(std::move(loop));
     }
+    for (int id : nodes)
+        localOf[static_cast<size_t>(id)] = -1;
     return loops;
 }
+// Open-addressing tables for the weld and cut-edge passes (std::map here was
+// the bulk of gib generation time on dense meshes).
+size_t tableSize(size_t entries)
+{
+    size_t n = 16;
+    while (n < entries)
+        n <<= 1;
+    return n;
+}
+uint64_t mix64(uint64_t x)
+{
+    x ^= x >> 33;
+    x *= 0xff51afd7ed558ccdULL;
+    x ^= x >> 33;
+    x *= 0xc4ceb9fe1a85ec53ULL;
+    x ^= x >> 33;
+    return x;
+}
+// Position (quantised to 1e-4) -> welded id, ids chosen by the caller.
+class WeldTable
+{
+  public:
+    explicit WeldTable(size_t expected) : slots_(tableSize(expected * 2)), mask_(slots_.size() - 1)
+    {
+    }
+    // Existing id for `key`, or `fresh` = true and `newId` recorded.
+    int find(const std::array<long long, 3> &key, int newId, bool &fresh)
+    {
+        uint64_t h = mix64(static_cast<uint64_t>(key[0]));
+        h = mix64(h ^ static_cast<uint64_t>(key[1]));
+        h = mix64(h ^ static_cast<uint64_t>(key[2]));
+        for (size_t i = h & mask_;; i = (i + 1) & mask_)
+        {
+            Slot &s = slots_[i];
+            if (s.id < 0)
+            {
+                s.key = key;
+                s.id = newId;
+                fresh = true;
+                return newId;
+            }
+            if (s.key == key)
+            {
+                fresh = false;
+                return s.id;
+            }
+        }
+    }
+
+  private:
+    struct Slot
+    {
+        std::array<long long, 3> key{};
+        int id = -1;
+    };
+    std::vector<Slot> slots_;
+    size_t mask_;
+};
+inline uint64_t pairKey(int a, int b)
+{
+    return (static_cast<uint64_t>(static_cast<uint32_t>(a)) << 32) | static_cast<uint32_t>(b);
+}
+// Undirected welded edge -> (first piece seen, touched by another piece too).
+class EdgeTable
+{
+  public:
+    explicit EdgeTable(size_t edges) : slots_(tableSize(edges + edges / 2 + 1)), mask_(slots_.size() - 1)
+    {
+    }
+    void touch(int u, int v, int piece)
+    {
+        Slot &s = slot(pairKey(std::min(u, v), std::max(u, v)));
+        if (s.key == kEmpty)
+        {
+            s.key = pairKey(std::min(u, v), std::max(u, v));
+            s.first = piece;
+        }
+        else if (s.first != piece)
+            s.multi = true;
+    }
+    bool shared(int u, int v)
+    {
+        const Slot &s = slot(pairKey(std::min(u, v), std::max(u, v)));
+        if (s.key == kEmpty)
+            throw std::out_of_range("edge missing from piece topology");
+        return s.multi;
+    }
+
+  private:
+    static constexpr uint64_t kEmpty = ~0ULL;
+    struct Slot
+    {
+        uint64_t key = kEmpty;
+        int first = 0;
+        bool multi = false;
+    };
+    Slot &slot(uint64_t key)
+    {
+        for (size_t i = mix64(key) & mask_;; i = (i + 1) & mask_)
+            if (slots_[i].key == key || slots_[i].key == kEmpty)
+                return slots_[i];
+    }
+    std::vector<Slot> slots_;
+    size_t mask_;
+};
+// Insert-only set of ordered welded pairs.
+class PairSet
+{
+  public:
+    explicit PairSet(size_t entries) : slots_(tableSize(entries * 2), kEmpty), mask_(slots_.size() - 1)
+    {
+    }
+    bool insert(int a, int b)
+    {
+        const uint64_t key = pairKey(a, b);
+        for (size_t i = mix64(key) & mask_;; i = (i + 1) & mask_)
+        {
+            if (slots_[i] == key)
+                return false;
+            if (slots_[i] == kEmpty)
+            {
+                slots_[i] = key;
+                return true;
+            }
+        }
+    }
+
+  private:
+    static constexpr uint64_t kEmpty = ~0ULL;
+    std::vector<uint64_t> slots_;
+    size_t mask_;
+};
 // re.sub(r"[^A-Za-z0-9_]+", "_", key).lower(), bounded for the cache.
 std::string gibPieceName(const std::string &key)
 {
@@ -1041,10 +1350,964 @@ struct GibFace
     size_t sub;
     size_t face;
 };
-struct CapTri
+// One cap vertex: position, normal and planar UVs. Hue deliberately does not
+// ride on vertex colours: every DX11 path reads a packed colour as raw RGBA
+// (RenderSystem_Direct3D11's D3D11Mappings::get maps VET_COLOUR, _ARGB and
+// _ABGR all to R8G8B8A8_UNORM), and the stock/compat programs swizzle with
+// .bgra while a generated fixed-function shader would not, so red would draw
+// blue on one of them. Zones are separate submeshes with their own material
+// colours instead, which every path (DX9 fixed function, DX11 compat, DX11
+// generated) handles identically.
+struct CapVertex
 {
-    V a, b, c, normal;
+    V p, n;
+    float u, v;
 };
+enum CapZone : size_t
+{
+    kZoneSkin,   // thin dark dermis edge
+    kZoneFat,    // pale subcutaneous fat band, thin and uneven
+    kZoneClot,   // darker clotted muscle just inside the fat (softens the step to the red)
+    kZoneMuscle, // textured muscle, the main body of the cap
+    kZoneBone,   // limb cuts: ivory ring
+    kZoneMarrow, // limb cuts: dark centre
+    kZoneCount
+};
+struct CapMesh
+{
+    uint32_t ringLoops = 0, earLoops = 0, fanLoops = 0; // how each cut loop was closed
+    std::vector<CapVertex> vertices;
+    std::vector<uint32_t> indices[kZoneCount];
+    size_t triangles() const
+    {
+        size_t n = 0;
+        for (const auto &list : indices)
+            n += list.size() / 3;
+        return n;
+    }
+};
+// Stable per-position noise in [0,1): the hash of the welded (1e-4 quantised)
+// position and a salt, so a cut gets the same ragged edge on every run and on
+// both sides of a shared boundary point.
+float positionNoise(const V &p, uint32_t salt)
+{
+    uint32_t h = 0x9e3779b9U * (salt + 1);
+    for (int i = 0; i < 3; ++i)
+    {
+        h ^= static_cast<uint32_t>(static_cast<int32_t>(std::llround(static_cast<double>(p[i]) / 1e-4)));
+        h ^= h >> 16;
+        h *= 0x7feb352dU;
+        h ^= h >> 15;
+        h *= 0x846ca68bU;
+        h ^= h >> 16;
+    }
+    return static_cast<float>(h >> 8) * (1.0f / 16777216.0f);
+}
+constexpr uint16_t kCapStride = 32;
+// Smooth deterministic 2D value noise in [0,1): bilinear (smoothstep) over a
+// hashed integer lattice, so relief is lumpy rather than per-vertex static.
+float latticeNoise(int ix, int iy, uint32_t salt)
+{
+    uint32_t h = 0x9e3779b9U * (salt + 1) ^ (static_cast<uint32_t>(ix) * 0x85ebca6bU) ^
+                 (static_cast<uint32_t>(iy) * 0xc2b2ae35U);
+    h ^= h >> 16;
+    h *= 0x7feb352dU;
+    h ^= h >> 15;
+    h *= 0x846ca68bU;
+    h ^= h >> 16;
+    return static_cast<float>(h >> 8) * (1.0f / 16777216.0f);
+}
+float smoothNoise2(float x, float y, uint32_t salt)
+{
+    const float fx = std::floor(x), fy = std::floor(y);
+    const int ix = static_cast<int>(fx), iy = static_cast<int>(fy);
+    const float tx = (x - fx) * (x - fx) * (3.0f - 2.0f * (x - fx)), ty = (y - fy) * (y - fy) * (3.0f - 2.0f * (y - fy));
+    const float a = latticeNoise(ix, iy, salt), b = latticeNoise(ix + 1, iy, salt);
+    const float c = latticeNoise(ix, iy + 1, salt), d = latticeNoise(ix + 1, iy + 1, salt);
+    return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * ty;
+} // position, normal, uv0
+constexpr size_t kMinRingLoop = 4, kMaxRingLoop = 96, kMaxRingTriangles = 60000;
+// Loops smaller than this (about 2 mm) are not worth rings.
+constexpr float kMinRingRadius = 2e-3f;
+// A ring layer: radius as a fraction of the loop's (smoothed) radius, normal
+// lift (fraction of the radius) and which zone the band OUTSIDE it belongs to.
+struct CapLayer
+{
+    float scale, lift;
+    float smoothing;  // how much of one Laplacian pass this ring takes: the skin edge hugs the rim
+    float jitter;     // multiplier on the ring's deterministic radial jitter (fat is deliberately uneven)
+    float radial;     // per-vertex radial irregularity as a fraction of the ring radius (bone is not a circle)
+    float relief;     // amplitude of the smooth normal-direction relief noise (fraction of the loop radius)
+    CapZone bandZone; // the band between the previous layer and this one
+};
+// Skin ~3% of the radius, fat ~4% and uneven, a darker clotted band, then muscle
+// in to the centre; limb cuts end the muscle at 0.22 with a thin, small, irregular
+// bone ring around a marrow core. Layers repeat a zone to subdivide its band so
+// the relief noise has interior vertices to move; lifts domed outward for muscle,
+// recessed for fat/clot, bone proud, marrow sunk (the centre vertex).
+// {scale, lift, smoothing, jitter, radial, relief, zone}
+constexpr CapLayer kPlainLayers[] = {{0.97f, -0.015f, 0.3f, 1.0f, 0.00f, 0.015f, kZoneSkin},
+                                     {0.925f, -0.050f, 0.5f, 7.0f, 0.00f, 0.030f, kZoneFat},
+                                     {0.865f, -0.060f, 0.6f, 4.0f, 0.03f, 0.040f, kZoneClot},
+                                     {0.80f, -0.065f, 0.8f, 3.0f, 0.04f, 0.040f, kZoneClot},
+                                     {0.66f, 0.000f, 1.0f, 1.0f, 0.03f, 0.030f, kZoneMuscle},
+                                     {0.50f, 0.050f, 1.0f, 1.0f, 0.03f, 0.030f, kZoneMuscle},
+                                     {0.30f, 0.090f, 1.0f, 1.0f, 0.03f, 0.030f, kZoneMuscle}};
+constexpr CapLayer kLimbLayers[] = {{0.97f, -0.015f, 0.3f, 1.0f, 0.00f, 0.015f, kZoneSkin},
+                                    {0.925f, -0.050f, 0.5f, 7.0f, 0.00f, 0.030f, kZoneFat},
+                                    {0.865f, -0.060f, 0.6f, 4.0f, 0.03f, 0.040f, kZoneClot},
+                                    {0.80f, -0.065f, 0.8f, 3.0f, 0.04f, 0.040f, kZoneClot},
+                                    {0.68f, 0.000f, 1.0f, 1.0f, 0.03f, 0.030f, kZoneMuscle},
+                                    {0.55f, 0.040f, 1.0f, 1.0f, 0.03f, 0.030f, kZoneMuscle},
+                                    {0.42f, 0.060f, 1.0f, 1.0f, 0.04f, 0.030f, kZoneMuscle},
+                                    {0.30f, 0.070f, 1.0f, 1.0f, 0.05f, 0.030f, kZoneMuscle},
+                                    {0.22f, 0.070f, 1.0f, 1.0f, 0.07f, 0.070f, kZoneMuscle},
+                                    {0.13f, 0.140f, 1.0f, 1.0f, 0.16f, 0.030f, kZoneBone}};
+// Torn-tissue cap over one cut loop. `points` are the welded boundary points,
+// `normal` faces away from the piece. The rim is the boundary itself (it must
+// seal the skin); every inner ring is an in-plane Laplacian-smoothed copy of
+// the one outside it, scaled toward the centre, with a few percent of
+// deterministic jitter, so the surface follows the rim's shape instead of
+// fanning out in flaps. Every triangle is validated (positive area in the cap
+// plane, facing the cap normal); a loop that folds is retried with weaker
+// inset and smoothing and finally keeps the plain fan.
+enum class RingResult
+{
+    Built,
+    NotStarShaped, // a band triangle has negative area: weaker inset cannot help, try another pivot
+    Folded         // degenerate or too steep: retry weaker
+};
+RingResult addRingCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, bool limb, float uvScale,
+                      float radius, float strength, bool flaps)
+{
+    const size_t n = points.size();
+    const CapLayer *layers = limb ? kLimbLayers : kPlainLayers;
+    const size_t layerCount = limb ? sizeof(kLimbLayers) / sizeof(CapLayer) : sizeof(kPlainLayers) / sizeof(CapLayer);
+    const V tangent = normalize3(cross3(normal, std::abs(normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
+    const V bitangent = cross3(normal, tangent);
+    // Cap-plane coordinates relative to the centre: x along tangent, y along
+    // bitangent, z along the normal. Ring 0 is the boundary, wound CCW about N.
+    std::vector<std::array<float, 3>> ring(n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        const V d = sub3(points[i], centre);
+        ring[i] = {dot3(d, tangent), dot3(d, bitangent), dot3(d, normal)};
+    }
+    double area2 = 0;
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto &a = ring[i], &b = ring[(i + 1) % n];
+        area2 += static_cast<double>(a[0]) * b[1] - static_cast<double>(b[0]) * a[1];
+    }
+    if (area2 < 0)
+        std::reverse(ring.begin(), ring.end());
+    std::vector<V> boundary = points;
+    if (area2 < 0)
+        std::reverse(boundary.begin(), boundary.end());
+
+    // Rings keep each boundary point's polar angle and move only along its
+    // ray (radius) and the normal: the radius is Laplacian-smoothed, scaled
+    // toward the centre and always kept inside the ring outside it, so every
+    // band triangle stays positively oriented in the cap plane (no folds).
+    std::vector<float> angle(n);
+    for (size_t i = 0; i < n; ++i)
+        angle[i] = std::atan2(ring[i][1], ring[i][0]);
+    std::vector<std::vector<std::array<float, 3>>> rings{ring};
+    std::vector<float> rho(n), height(n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        rho[i] = std::sqrt(ring[i][0] * ring[i][0] + ring[i][1] * ring[i][1]);
+        height[i] = ring[i][2];
+    }
+    float previousScale = 1.0f;
+    for (size_t j = 0; j < layerCount; ++j)
+    {
+        const CapLayer &layer = layers[j];
+        const float s = 1.0f - (1.0f - layer.scale) * strength;
+        const float ratio = s / previousScale;
+        std::vector<float> nextRho(n), nextHeight(n);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const size_t before = (i + n - 1) % n, after = (i + 1) % n;
+            const float smoothRho = (rho[before] + 2.0f * rho[i] + rho[after]) * 0.25f;
+            const float smoothHeight = (height[before] + 2.0f * height[i] + height[after]) * 0.25f;
+            const float blendRho = rho[i] + (smoothRho - rho[i]) * strength * layer.smoothing;
+            const float blendHeight = height[i] + (smoothHeight - height[i]) * strength * layer.smoothing;
+            // Jitter: a few percent of the local edge length, deterministic.
+            const float edge = std::sqrt((rho[after] * std::cos(angle[after]) - rho[i] * std::cos(angle[i])) *
+                                             (rho[after] * std::cos(angle[after]) - rho[i] * std::cos(angle[i])) +
+                                         (rho[after] * std::sin(angle[after]) - rho[i] * std::sin(angle[i])) *
+                                             (rho[after] * std::sin(angle[after]) - rho[i] * std::sin(angle[i])));
+            const float jr = (2.0f * positionNoise(boundary[i], 10 + static_cast<uint32_t>(j)) - 1.0f) * 0.04f * edge * layer.jitter;
+            const float jz = (2.0f * positionNoise(boundary[i], 30 + static_cast<uint32_t>(j)) - 1.0f) * 0.05f * edge;
+            // Per-vertex radial irregularity (bone is not a circle).
+            const float rr = (2.0f * positionNoise(boundary[i], 50 + static_cast<uint32_t>(j)) - 1.0f) * layer.radial *
+                             blendRho * ratio;
+            // Never reach the ring outside along the same ray.
+            nextRho[i] = std::max(std::min(blendRho * ratio + jr + rr, rho[i] * 0.97f), 0.03f * radius);
+            // Smooth lumpy relief along the normal, from the ring's own plane position.
+            const float px = nextRho[i] * std::cos(angle[i]), py = nextRho[i] * std::sin(angle[i]);
+            // Two octaves: broad torn swells and a smaller lumpy layer.
+            const float lump = 0.65f * (2.0f * smoothNoise2(px / (0.8f * radius) + 7.0f, py / (0.8f * radius) + 3.0f,
+                                                            100 + static_cast<uint32_t>(j)) - 1.0f) +
+                               0.35f * (2.0f * smoothNoise2(px / (0.3f * radius) + 1.0f, py / (0.3f * radius) + 9.0f,
+                                                            140 + static_cast<uint32_t>(j)) - 1.0f);
+            // A few small torn ridges / tags of tissue on the muscle, away from the rim.
+            float tag = 0.0f;
+            if (layer.bandZone == kZoneMuscle)
+            {
+                const float field = smoothNoise2(px / (0.22f * radius) + 4.0f, py / (0.22f * radius) + 2.0f, 180);
+                const float gate = smoothNoise2(px / (0.7f * radius) + 5.0f, py / (0.7f * radius) + 8.0f, 181);
+                const float edgeDistance = std::abs(field - 0.5f);
+                tag = (1.0f - std::min(1.0f, edgeDistance / 0.06f)) * std::max(0.0f, std::min(1.0f, (gate - 0.55f) / 0.2f)) * 0.07f;
+            }
+            nextHeight[i] = blendHeight * ratio * 0.5f + (layer.lift + layer.relief * lump + tag) * radius * strength + jz;
+        }
+        previousScale = s;
+        rho = std::move(nextRho);
+        height = std::move(nextHeight);
+        std::vector<std::array<float, 3>> next(n);
+        for (size_t i = 0; i < n; ++i)
+            next[i] = {rho[i] * std::cos(angle[i]), rho[i] * std::sin(angle[i]), height[i]};
+        rings.push_back(std::move(next));
+    }
+    const float centreLift = (limb ? -0.09f - 0.04f * positionNoise(centre, 40) : 0.09f + 0.05f * positionNoise(centre, 40)) * radius * strength;
+
+    // ---- Cap-plane vertices ------------------------------------------------
+    // Everything below works in cap-plane coordinates (x along tangent, y along
+    // bitangent, h along the normal) and converts to model space at the end.
+    struct LocalVertex
+    {
+        float x, y, h;
+        float t;       // muscle annulus parameter: 0 inner edge .. 1 outer edge (muscle vertices only)
+        bool muscle;   // free muscle-interior vertex (gets the torn displacement)
+    };
+    std::vector<LocalVertex> lv;
+    lv.reserve(rings.size() * n + 64);
+    for (const auto &r : rings)
+        for (const auto &q : r)
+            lv.push_back({q[0], q[1], q[2], 0.0f, false});
+    const uint32_t centreLocal = static_cast<uint32_t>(rings.size() * n);
+    lv.push_back({0.0f, 0.0f, centreLift, 0.0f, false});
+    const auto index = [&](size_t layer, size_t i) { return static_cast<uint32_t>(layer * n + i % n); };
+
+    // Muscle region: the bands whose zone is muscle, plus the centre fan on a
+    // plain cut. Its outer boundary is ring `outerRing` (shared with the clot
+    // band); on a limb cut its inner boundary is the ring the bone band starts at.
+    size_t firstMuscle = layerCount, lastMuscle = 0;
+    for (size_t j = 0; j < layerCount; ++j)
+        if (layers[j].bandZone == kZoneMuscle)
+        {
+            firstMuscle = std::min(firstMuscle, j);
+            lastMuscle = std::max(lastMuscle, j);
+        }
+    const size_t outerRing = firstMuscle, innerRing = lastMuscle + 1;
+    for (size_t k = outerRing; k <= innerRing && k < rings.size(); ++k)
+        for (size_t i = 0; i < n; ++i)
+        {
+            const LocalVertex &outer = lv[index(outerRing, i)], &inner = lv[index(innerRing, i)];
+            LocalVertex &v = lv[index(k, i)];
+            const float ro = std::sqrt(outer.x * outer.x + outer.y * outer.y);
+            const float ri = limb ? std::sqrt(inner.x * inner.x + inner.y * inner.y) : 0.0f;
+            const float rk = std::sqrt(v.x * v.x + v.y * v.y);
+            v.t = ro > ri + 1e-9f ? std::min(1.0f, std::max(0.0f, (rk - ri) / (ro - ri))) : 0.0f;
+            v.muscle = k > outerRing && (k < innerRing || !limb);
+        }
+    lv[centreLocal].muscle = !limb;
+    lv[centreLocal].t = 0.0f;
+
+    struct LocalTriangle
+    {
+        uint32_t v[3];
+        size_t zone;
+    };
+    std::vector<LocalTriangle> tris;
+    for (size_t j = 0; j + 1 < rings.size(); ++j)
+    {
+        const size_t zone = layers[j].bandZone;
+        for (size_t i = 0; i < n; ++i)
+        {
+            tris.push_back({{index(j, i), index(j, i + 1), index(j + 1, i + 1)}, zone});
+            tris.push_back({{index(j, i), index(j + 1, i + 1), index(j + 1, i)}, zone});
+        }
+    }
+    // The innermost band is the fan: marrow for limbs, muscle otherwise.
+    for (size_t i = 0; i < n; ++i)
+        tris.push_back({{index(rings.size() - 1, i), index(rings.size() - 1, i + 1), centreLocal},
+                        limb ? static_cast<size_t>(kZoneMarrow) : static_cast<size_t>(kZoneMuscle)});
+
+    const auto area2d = [&](uint32_t a, uint32_t b, uint32_t c) {
+        return 0.5f * ((lv[b].x - lv[a].x) * (lv[c].y - lv[a].y) - (lv[c].x - lv[a].x) * (lv[b].y - lv[a].y));
+    };
+    const auto localWorld = [&](float x, float y, float h) {
+        return add(add(centre, add(scale3(tangent, x), scale3(bitangent, y))), scale3(normal, h));
+    };
+    const float minArea = 1e-4f * radius * radius;
+
+    // ---- Non-concentric muscle: scattered points, then edge flips ----------
+    // Split the largest muscle triangles with a deterministic jittered interior
+    // point (1 -> 3, always valid, boundaries untouched), then Lawson-flip the
+    // interior edges so the triangulation stops following the rings.
+    {
+        std::vector<size_t> candidates;
+        for (size_t t = 0; t < tris.size(); ++t)
+            if (tris[t].zone == kZoneMuscle && area2d(tris[t].v[0], tris[t].v[1], tris[t].v[2]) > 40.0f * minArea)
+                candidates.push_back(t);
+        std::stable_sort(candidates.begin(), candidates.end(), [&](size_t a, size_t b) {
+            return area2d(tris[a].v[0], tris[a].v[1], tris[a].v[2]) > area2d(tris[b].v[0], tris[b].v[1], tris[b].v[2]);
+        });
+        size_t muscleCount = 0;
+        for (const auto &t : tris)
+            muscleCount += t.zone == kZoneMuscle;
+        // Big loops only get the torn displacement: scatter and flips cost O(n^2).
+        const size_t splits = n > 40 ? 0 : std::min(candidates.size(), std::max<size_t>(1, std::min<size_t>(muscleCount / 2, 12)));
+        for (size_t s = 0; s < splits; ++s)
+        {
+            const size_t ti = candidates[s];
+            const uint32_t a = tris[ti].v[0], b = tris[ti].v[1], c = tris[ti].v[2];
+            const V seed = localWorld((lv[a].x + lv[b].x + lv[c].x) / 3.0f, (lv[a].y + lv[b].y + lv[c].y) / 3.0f, 0.0f);
+            float w[3];
+            for (int k = 0; k < 3; ++k)
+                w[k] = 0.22f + 0.56f * positionNoise(seed, 200 + static_cast<uint32_t>(k));
+            const float sum = w[0] + w[1] + w[2];
+            for (float &x : w)
+                x /= sum;
+            LocalVertex p;
+            p.x = w[0] * lv[a].x + w[1] * lv[b].x + w[2] * lv[c].x;
+            p.y = w[0] * lv[a].y + w[1] * lv[b].y + w[2] * lv[c].y;
+            p.h = w[0] * lv[a].h + w[1] * lv[b].h + w[2] * lv[c].h;
+            p.t = w[0] * lv[a].t + w[1] * lv[b].t + w[2] * lv[c].t;
+            p.muscle = true;
+            const uint32_t pi = static_cast<uint32_t>(lv.size());
+            lv.push_back(p);
+            tris[ti] = {{a, b, pi}, kZoneMuscle};
+            tris.push_back({{b, c, pi}, kZoneMuscle});
+            tris.push_back({{c, a, pi}, kZoneMuscle});
+        }
+        for (int pass = 0; pass < (splits ? 2 : 0); ++pass)
+        {
+            // Flat sorted edge list instead of a map of vectors: two entries with
+            // the same key are the two muscle triangles sharing an interior edge.
+            std::vector<std::pair<uint64_t, uint32_t>> edgeList;
+            edgeList.reserve(tris.size() * 3);
+            for (size_t t = 0; t < tris.size(); ++t)
+                if (tris[t].zone == kZoneMuscle)
+                    for (int e = 0; e < 3; ++e)
+                    {
+                        const uint32_t u = tris[t].v[e], v = tris[t].v[(e + 1) % 3];
+                        edgeList.push_back({(static_cast<uint64_t>(std::min(u, v)) << 32) | std::max(u, v),
+                                            static_cast<uint32_t>(t)});
+                    }
+            std::sort(edgeList.begin(), edgeList.end());
+            std::vector<char> touched(tris.size(), 0);
+            bool flipped = false;
+            for (size_t e0 = 0; e0 + 1 < edgeList.size(); ++e0)
+            {
+                if (edgeList[e0].first != edgeList[e0 + 1].first || (e0 + 2 < edgeList.size() && edgeList[e0 + 2].first == edgeList[e0].first))
+                    continue;
+                const std::pair<uint32_t, uint32_t> edge{static_cast<uint32_t>(edgeList[e0].first >> 32),
+                                                         static_cast<uint32_t>(edgeList[e0].first & 0xFFFFFFFFu)};
+                const size_t owners[2] = {edgeList[e0].second, edgeList[e0 + 1].second};
+                ++e0; // the pair is consumed
+                if (touched[owners[0]] || touched[owners[1]])
+                    continue;
+                // Orient: t1 = (a, b, c), t2 = (b, a, d).
+                uint32_t a = 0, b = 0, c = 0, d = 0;
+                bool found = false, haveD = false;
+                for (int e = 0; e < 3 && !found; ++e)
+                {
+                    const auto &t1 = tris[owners[0]].v;
+                    if (std::min(t1[e], t1[(e + 1) % 3]) == edge.first && std::max(t1[e], t1[(e + 1) % 3]) == edge.second)
+                    {
+                        a = t1[e];
+                        b = t1[(e + 1) % 3];
+                        c = t1[(e + 2) % 3];
+                        found = true;
+                    }
+                }
+                const auto &t2 = tris[owners[1]].v;
+                for (int e = 0; e < 3; ++e)
+                    if (t2[e] == b && t2[(e + 1) % 3] == a)
+                    {
+                        d = t2[(e + 2) % 3];
+                        haveD = true;
+                    }
+                if (!found || !haveD)
+                    continue;
+                // Delaunay: flip when d lies inside the circumcircle of (a, b, c).
+                const double ax = lv[a].x - lv[d].x, ay = lv[a].y - lv[d].y, bx = lv[b].x - lv[d].x, by = lv[b].y - lv[d].y,
+                             cx = lv[c].x - lv[d].x, cy = lv[c].y - lv[d].y;
+                const double det = (ax * ax + ay * ay) * (bx * cy - cx * by) - (bx * bx + by * by) * (ax * cy - cx * ay) +
+                                   (cx * cx + cy * cy) * (ax * by - bx * ay);
+                if (!(det > 1e-9))
+                    continue;
+                // The new triangles (c, a, d) and (c, d, b) must both be positive.
+                if (!(area2d(c, a, d) > minArea) || !(area2d(c, d, b) > minArea))
+                    continue;
+                tris[owners[0]] = {{c, a, d}, kZoneMuscle};
+                tris[owners[1]] = {{c, d, b}, kZoneMuscle};
+                touched[owners[0]] = touched[owners[1]] = 1;
+                flipped = true;
+            }
+            if (!flipped)
+                break;
+        }
+    }
+
+    // ---- Torn displacement on the free muscle vertices ---------------------
+    // Ridged and billow noise, stretched strand bundles along the fibre (x)
+    // axis, pits where blood pools and a few creases that step the surface; the
+    // blend weight is zero on the zone boundaries so fat/clot/bone stay welded.
+    {
+        const float unit = radius * strength;
+        const auto smoothstep = [](float e0, float e1, float x) {
+            const float t = std::min(1.0f, std::max(0.0f, (x - e0) / (e1 - e0)));
+            return t * t * (3.0f - 2.0f * t);
+        };
+        struct Crease
+        {
+            float cx, cy, dx, dy, sign;
+        };
+        Crease creases[3];
+        for (int k = 0; k < 3; ++k)
+        {
+            const float angle2 = 6.2831853f * positionNoise(centre, 300 + static_cast<uint32_t>(k));
+            creases[k] = {(positionNoise(centre, 310 + static_cast<uint32_t>(k)) - 0.5f) * 0.9f,
+                          (positionNoise(centre, 320 + static_cast<uint32_t>(k)) - 0.5f) * 0.9f, std::cos(angle2),
+                          std::sin(angle2), positionNoise(centre, 330 + static_cast<uint32_t>(k)) > 0.5f ? 1.0f : -1.0f};
+        }
+        for (LocalVertex &v : lv)
+        {
+            if (!v.muscle)
+                continue;
+            const float u = v.x / radius, w = v.y / radius;
+            const float ridged = 1.0f - std::abs(2.0f * smoothNoise2(u * 1.6f + 3.0f, w * 1.6f + 5.0f, 210) - 1.0f);
+            const float billow = std::abs(2.0f * smoothNoise2(u * 3.4f + 1.0f, w * 3.4f + 7.0f, 211) - 1.0f);
+            float torn = 0.07f * (ridged - 0.5f) + 0.05f * (billow - 0.5f);
+            const float strandField = 1.0f - std::abs(2.0f * smoothNoise2(w * 7.0f + 2.0f, u * 0.9f + 4.0f, 212) - 1.0f);
+            torn += 0.05f * smoothstep(0.55f, 0.95f, strandField);
+            torn -= 0.09f * smoothstep(0.72f, 0.92f, smoothNoise2(u * 4.2f + 8.0f, w * 4.2f + 1.0f, 213));
+            for (const Crease &c : creases)
+            {
+                const float rx = u - c.cx, ry = w - c.cy;
+                const float along = rx * c.dx + ry * c.dy, across = -rx * c.dy + ry * c.dx;
+                const float fade = 1.0f - smoothstep(0.27f, 0.45f, std::abs(along));
+                torn += c.sign * 0.07f * std::max(-1.0f, std::min(1.0f, across / 0.03f)) * 0.5f * fade;
+                torn -= 0.04f * fade * std::exp(-(across / 0.025f) * (across / 0.025f));
+            }
+            torn = std::max(-0.15f, std::min(0.15f, torn));
+            const float weight = smoothstep(0.0f, 0.25f, 1.0f - v.t) * (limb ? smoothstep(0.0f, 0.25f, v.t) : 1.0f);
+            v.h += weight * torn * unit;
+        }
+    }
+
+    // ---- Model-space vertices, validation ----------------------------------
+    const size_t base = cap.vertices.size();
+    for (const V &p : boundary)
+        cap.vertices.push_back({p, normal, 0, 0}); // the rim is the cut itself, bit for bit
+    for (size_t k = n; k < lv.size(); ++k)
+        cap.vertices.push_back({localWorld(lv[k].x, lv[k].y, lv[k].h), normal, 0, 0});
+    bool valid = true, negative = false;
+    const auto check = [&](const LocalTriangle &t) {
+        const V &pa = cap.vertices[base + t.v[0]].p, &pb = cap.vertices[base + t.v[1]].p, &pc = cap.vertices[base + t.v[2]].p;
+        const V face = cross3(sub3(pb, pa), sub3(pc, pa));
+        const float length = std::sqrt(dot3(face, face));
+        const float planar = 0.5f * dot3(face, normal);
+        if (planar < minArea || !(dot3(face, normal) >= 0.05f * length))
+        {
+            if (valid && strength == 1.0f)
+                CAP_STAT(planar < 0 ? 5 : (planar < minArea ? 6 : 7));
+            if (planar < 0)
+                negative = true;
+            valid = false;
+        }
+    };
+    for (const LocalTriangle &t : tris)
+        check(t);
+    if (!valid)
+    {
+        cap.vertices.resize(base);
+        return negative ? RingResult::NotStarShaped : RingResult::Folded;
+    }
+
+    // ---- Ragged flaps at the rim -------------------------------------------
+    // A few small torn tissue flaps attached to rim edges, in the skin / blood
+    // film material: some fold inward over the cut and rise, some droop out.
+    // The rim vertices stay the exact (welded) cut points.
+    std::vector<LocalTriangle> flapTris;
+    if (flaps && n >= 5)
+    {
+        size_t made = 0;
+        bool previous = false;
+        for (size_t i = 0; i < n && made < 4; ++i)
+        {
+            const bool pick = !previous && positionNoise(boundary[i], 60) > 0.6f;
+            previous = pick;
+            if (!pick)
+                continue;
+            const V &p0 = boundary[i], &p1 = boundary[(i + 1) % n];
+            const V mid = scale3(add(p0, p1), 0.5f);
+            const V edge = sub3(p1, p0);
+            const float length = std::sqrt(dot3(edge, edge));
+            const V toRim = sub3(mid, centre);
+            const V outward = normalize3(sub3(toRim, scale3(normal, dot3(toRim, normal))));
+            const bool inward = positionNoise(boundary[i], 61) > 0.5f;
+            const float reach = std::min(length * (0.45f + 0.5f * positionNoise(boundary[i], 62)), 0.09f * radius);
+            const float lift = (inward ? 1.0f : -0.6f) * (0.03f + 0.04f * positionNoise(boundary[i], 63)) * radius * strength;
+            const V apex = add(add(mid, scale3(outward, inward ? -reach : reach)), scale3(normal, lift));
+            const V face = cross3(sub3(p1, p0), sub3(apex, p0));
+            const float len = std::sqrt(dot3(face, face));
+            if (!(len > 1e-9f) || std::abs(dot3(face, normal)) < 0.15f * len)
+                continue; // would be edge-on to the cut plane
+            const uint32_t apexIndex = static_cast<uint32_t>(cap.vertices.size() - base);
+            cap.vertices.push_back({apex, normal, 0, 0});
+            if (dot3(face, normal) > 0)
+                flapTris.push_back({{static_cast<uint32_t>(i), static_cast<uint32_t>((i + 1) % n), apexIndex}, kZoneSkin});
+            else
+                flapTris.push_back({{static_cast<uint32_t>((i + 1) % n), static_cast<uint32_t>(i), apexIndex}, kZoneSkin});
+            ++made;
+            CAP_STAT(9);
+        }
+    }
+    for (const LocalTriangle &t : flapTris)
+        check(t);
+    if (!valid)
+    {
+        cap.vertices.resize(base);
+        return negative ? RingResult::NotStarShaped : RingResult::Folded;
+    }
+    tris.insert(tris.end(), flapTris.begin(), flapTris.end());
+
+    // ---- Normals: smooth, with faceted creases ------------------------------
+    std::vector<V> accumulated(cap.vertices.size() - base, V{0, 0, 0});
+    std::vector<V> faceNormal(tris.size());
+    for (size_t t = 0; t < tris.size(); ++t)
+    {
+        const V &a = cap.vertices[base + tris[t].v[0]].p, &b = cap.vertices[base + tris[t].v[1]].p,
+                &c = cap.vertices[base + tris[t].v[2]].p;
+        const V face = cross3(sub3(b, a), sub3(c, a));
+        faceNormal[t] = normalize3(face);
+        for (const uint32_t v : tris[t].v)
+            accumulated[v] = add(accumulated[v], face);
+    }
+    for (size_t k = 0; k < accumulated.size(); ++k)
+    {
+        const V smoothed = normalize3(accumulated[k]);
+        cap.vertices[base + k].n = dot3(smoothed, normal) > 0.1f ? smoothed : normal;
+    }
+    // Steep muscle triangles (a crease or cliff) get their own flat-shaded
+    // vertices, so the tear catches light sharply; flaps are flat too.
+    for (size_t t = 0; t < tris.size(); ++t)
+    {
+        float lo = 1e30f, hi = -1e30f, longest = 0.0f;
+        for (int e = 0; e < 3; ++e)
+        {
+            const LocalVertex *va = e < 3 && tris[t].v[e] < lv.size() ? &lv[tris[t].v[e]] : nullptr;
+            const LocalVertex *vb = tris[t].v[(e + 1) % 3] < lv.size() ? &lv[tris[t].v[(e + 1) % 3]] : nullptr;
+            if (!va || !vb)
+                continue;
+            lo = std::min(lo, va->h);
+            hi = std::max(hi, va->h);
+            longest = std::max(longest, std::sqrt((va->x - vb->x) * (va->x - vb->x) + (va->y - vb->y) * (va->y - vb->y)));
+        }
+        const bool flap = tris[t].zone == kZoneSkin && tris[t].v[2] >= lv.size();
+        const bool steep = tris[t].zone == kZoneMuscle && longest > 1e-9f && (hi - lo) / longest > 0.45f;
+        if (!steep && !flap)
+            continue;
+        for (uint32_t &v : tris[t].v)
+        {
+            CapVertex copy = cap.vertices[base + v];
+            copy.n = faceNormal[t];
+            v = static_cast<uint32_t>(cap.vertices.size() - base);
+            cap.vertices.push_back(copy);
+        }
+    }
+    for (size_t k = base; k < cap.vertices.size(); ++k)
+    {
+        const V &p = cap.vertices[k].p;
+        cap.vertices[k].u = dot3(p, tangent) * uvScale;
+        cap.vertices[k].v = dot3(p, bitangent) * uvScale;
+    }
+    for (const LocalTriangle &t : tris)
+        for (const uint32_t v : t.v)
+            cap.indices[t.zone].push_back(static_cast<uint32_t>(base + v));
+    return RingResult::Built;
+}
+// The plain fan from the loop centroid: the fallback for loops that are
+// degenerate, huge, far from planar, or that fold when ringed. Same winding
+// logic as the original cap.
+void addFanCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, float uvScale)
+{
+    const size_t n = points.size();
+    const V tangent = normalize3(cross3(normal, std::abs(normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
+    const V bitangent = cross3(normal, tangent);
+    const size_t base = cap.vertices.size();
+    for (const V &p : points)
+        cap.vertices.push_back({p, normal, dot3(p, tangent) * uvScale, dot3(p, bitangent) * uvScale});
+    cap.vertices.push_back({centre, normal, dot3(centre, tangent) * uvScale, dot3(centre, bitangent) * uvScale});
+    const uint32_t centreIndex = static_cast<uint32_t>(base + n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        uint32_t p0 = static_cast<uint32_t>(base + i), p1 = static_cast<uint32_t>(base + (i + 1 == n ? 0 : i + 1));
+        if (dot3(cross3(sub3(cap.vertices[p0].p, centre), sub3(cap.vertices[p1].p, centre)), normal) < 0)
+            std::swap(p0, p1);
+        cap.indices[kZoneMuscle].push_back(centreIndex);
+        cap.indices[kZoneMuscle].push_back(p0);
+        cap.indices[kZoneMuscle].push_back(p1);
+    }
+}
+// ---- Ear-clipped caps -------------------------------------------------------
+// Loops that rings cannot follow (not star-shaped, non-planar, tiny, three
+// points) are triangulated as the polygons they are: projected into the cap
+// plane (Newell normal) and ear-clipped, so a simple loop of n points gives
+// exactly n-2 triangles and no flaps. Where it does not self-intersect, a thin
+// skin band and a fat band are inset along the rim edges; otherwise the whole
+// loop is muscle.
+struct P2
+{
+    float x, y;
+};
+float cross2(const P2 &o, const P2 &a, const P2 &b)
+{
+    return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+bool segmentsCross(const P2 &a, const P2 &b, const P2 &c, const P2 &d)
+{
+    const float d1 = cross2(a, b, c), d2 = cross2(a, b, d), d3 = cross2(c, d, a), d4 = cross2(c, d, b);
+    return ((d1 > 0) != (d2 > 0)) && ((d3 > 0) != (d4 > 0)) && d1 != 0 && d2 != 0 && d3 != 0 && d4 != 0;
+}
+// Does the closed polygon cross itself? (O(n^2); callers cap n.) On a hit,
+// `first`/`second` are the indices of the two crossing edges' start points.
+bool selfIntersects(const std::vector<P2> &poly, size_t *first = nullptr, size_t *second = nullptr)
+{
+    const size_t n = poly.size();
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = i + 2; j < n; ++j)
+        {
+            if (i == 0 && j == n - 1)
+                continue;
+            if (segmentsCross(poly[i], poly[(i + 1) % n], poly[j], poly[(j + 1) % n]))
+            {
+                if (first)
+                    *first = i;
+                if (second)
+                    *second = j;
+                return true;
+            }
+        }
+    return false;
+}
+// Ear-clips a CCW polygon. Returns index triples into `poly`; empty on failure.
+// Collinear vertices are removed without a triangle once no true ear remains.
+std::vector<std::array<uint32_t, 3>> earClip(const std::vector<P2> &poly, float epsilon)
+{
+    const size_t n = poly.size();
+    std::vector<std::array<uint32_t, 3>> out;
+    std::vector<uint32_t> idx(n);
+    for (size_t i = 0; i < n; ++i)
+        idx[i] = static_cast<uint32_t>(i);
+    size_t guard = 0;
+    while (idx.size() > 3 && guard++ < n * n + 8)
+    {
+        bool clipped = false;
+        for (size_t k = 0; k < idx.size() && !clipped; ++k)
+        {
+            const size_t m = idx.size();
+            const uint32_t ia = idx[(k + m - 1) % m], ib = idx[k], ic = idx[(k + 1) % m];
+            const P2 &a = poly[ia], &b = poly[ib], &c = poly[ic];
+            if (!(cross2(a, b, c) > epsilon))
+                continue;
+            bool empty = true;
+            for (size_t q = 0; q < m && empty; ++q)
+            {
+                const uint32_t iq = idx[q];
+                if (iq == ia || iq == ib || iq == ic)
+                    continue;
+                const P2 &p = poly[iq];
+                if (cross2(a, b, p) >= -epsilon && cross2(b, c, p) >= -epsilon && cross2(c, a, p) >= -epsilon)
+                    empty = false;
+            }
+            if (!empty)
+                continue;
+            out.push_back({ia, ib, ic});
+            idx.erase(idx.begin() + static_cast<std::ptrdiff_t>(k));
+            clipped = true;
+        }
+        if (clipped)
+            continue;
+        // No ear: drop a collinear/degenerate vertex (no triangle), else fail.
+        bool dropped = false;
+        for (size_t k = 0; k < idx.size() && !dropped; ++k)
+        {
+            const size_t m = idx.size();
+            if (std::abs(cross2(poly[idx[(k + m - 1) % m]], poly[idx[k]], poly[idx[(k + 1) % m]])) <= epsilon)
+            {
+                idx.erase(idx.begin() + static_cast<std::ptrdiff_t>(k));
+                dropped = true;
+            }
+        }
+        if (!dropped)
+            return {};
+    }
+    if (idx.size() == 3 && cross2(poly[idx[0]], poly[idx[1]], poly[idx[2]]) > epsilon)
+        out.push_back({idx[0], idx[1], idx[2]});
+    return out;
+}
+// Returns false when the loop cannot be ear-clipped (self-intersecting or
+// degenerate); `banded` tells whether the inset skin/fat bands were built.
+bool addEarCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, float uvScale, bool wantBands,
+               bool &banded)
+{
+    banded = false;
+    size_t n = points.size();
+    if (n < 3 || n > 300)
+        return false;
+    if (n == 3)
+    {
+        // A triangle is its own triangulation (no allocation: svapcbed has tens
+        // of thousands of these).
+        const size_t base3 = cap.vertices.size();
+        const V tangent3 = normalize3(cross3(normal, std::abs(normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
+        const V bitangent3 = cross3(normal, tangent3);
+        for (const V &p : points)
+            cap.vertices.push_back({p, normal, dot3(p, tangent3) * uvScale, dot3(p, bitangent3) * uvScale});
+        const V face = cross3(sub3(points[1], points[0]), sub3(points[2], points[0]));
+        if (!(dot3(face, face) > 0))
+        {
+            cap.vertices.resize(base3);
+            return false;
+        }
+        const bool flip = dot3(face, normal) < 0;
+        auto &list = cap.indices[kZoneMuscle];
+        list.push_back(static_cast<uint32_t>(base3));
+        list.push_back(static_cast<uint32_t>(base3 + (flip ? 2 : 1)));
+        list.push_back(static_cast<uint32_t>(base3 + (flip ? 1 : 2)));
+        return true;
+    }
+    const V tangent = normalize3(cross3(normal, std::abs(normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
+    const V bitangent = cross3(normal, tangent);
+    std::vector<P2> poly(n);
+    std::vector<float> height(n);
+    float extent = 0;
+    for (size_t i = 0; i < n; ++i)
+    {
+        const V d = sub3(points[i], centre);
+        poly[i] = {dot3(d, tangent), dot3(d, bitangent)};
+        height[i] = dot3(d, normal);
+        extent = std::max(extent, std::max(std::abs(poly[i].x), std::abs(poly[i].y)));
+    }
+    if (!(extent > 1e-6f))
+        return false;
+    std::vector<V> boundary = points;
+    double area2 = 0;
+    for (size_t i = 0; i < n; ++i)
+        area2 += static_cast<double>(poly[i].x) * poly[(i + 1) % n].y - static_cast<double>(poly[(i + 1) % n].x) * poly[i].y;
+    if (area2 < 0)
+    {
+        std::reverse(poly.begin(), poly.end());
+        std::reverse(height.begin(), height.end());
+        std::reverse(boundary.begin(), boundary.end());
+    }
+    const float epsilon = 1e-7f * extent * extent;
+    // A self-crossing loop: remove the sharpest spike vertex among the
+    // vertices of the crossing edges and look again (a handful of times).
+    for (int repair = 0; repair < 8; ++repair)
+    {
+        size_t e0 = 0, e1 = 0;
+        if (!selfIntersects(poly, &e0, &e1))
+            break;
+        if (n <= 3)
+            return false;
+        const size_t candidates[4] = {e0, (e0 + 1) % n, e1, (e1 + 1) % n};
+        size_t worst = candidates[0];
+        float best = 1e30f;
+        for (const size_t c : candidates)
+        {
+            const float turn = std::abs(cross2(poly[(c + n - 1) % n], poly[c], poly[(c + 1) % n]));
+            if (turn < best)
+            {
+                best = turn;
+                worst = c;
+            }
+        }
+        poly.erase(poly.begin() + static_cast<std::ptrdiff_t>(worst));
+        height.erase(height.begin() + static_cast<std::ptrdiff_t>(worst));
+        boundary.erase(boundary.begin() + static_cast<std::ptrdiff_t>(worst));
+        --n;
+    }
+    if (selfIntersects(poly))
+        return false;
+    const auto position = [&](const P2 &p, float h) {
+        return add(add(centre, add(scale3(tangent, p.x), scale3(bitangent, p.y))), scale3(normal, h));
+    };
+    const size_t base = cap.vertices.size();
+    const auto pushVertex = [&](V p) {
+        cap.vertices.push_back({p, normal, dot3(p, tangent) * uvScale, dot3(p, bitangent) * uvScale});
+    };
+    // Rim vertices exactly as given.
+    for (const V &p : boundary)
+        pushVertex(p);
+
+    // Inset rings along the rim edges (skin ~5% of the extent, fat ~8% more),
+    // kept only when each is simple, wound the same way and every band
+    // triangle has positive area.
+    std::vector<std::vector<P2>> insets;
+    std::vector<std::vector<float>> insetHeight;
+    if (wantBands && n >= 5 && n <= 256)
+    {
+        const float depth[2] = {0.03f * extent, 0.07f * extent};
+        for (const float d : depth)
+        {
+            std::vector<P2> ring(n);
+            std::vector<float> h(n);
+            for (size_t i = 0; i < n; ++i)
+            {
+                const P2 &prev = poly[(i + n - 1) % n], &cur = poly[i], &next = poly[(i + 1) % n];
+                const auto left = [](const P2 &a, const P2 &b) {
+                    const float ex = b.x - a.x, ey = b.y - a.y, l = std::sqrt(ex * ex + ey * ey);
+                    return l > 1e-12f ? P2{-ey / l, ex / l} : P2{0, 0};
+                };
+                const P2 l0 = left(prev, cur), l1 = left(cur, next);
+                P2 m{l0.x + l1.x, l0.y + l1.y};
+                const float ml = std::sqrt(m.x * m.x + m.y * m.y);
+                if (ml < 1e-6f)
+                {
+                    ring.clear();
+                    break;
+                }
+                m = {m.x / ml, m.y / ml};
+                const float miter = std::max(0.35f, m.x * l1.x + m.y * l1.y);
+                ring[i] = {cur.x + m.x * d / miter, cur.y + m.y * d / miter};
+                h[i] = height[i] * (d < depth[1] ? 0.7f : 0.45f) - 0.01f * extent;
+            }
+            if (ring.empty() || selfIntersects(ring))
+                break;
+            double a = 0;
+            for (size_t i = 0; i < n; ++i)
+                a += static_cast<double>(ring[i].x) * ring[(i + 1) % n].y - static_cast<double>(ring[(i + 1) % n].x) * ring[i].y;
+            if (a <= 0)
+                break;
+            const std::vector<P2> &outer = insets.empty() ? poly : insets.back();
+            bool ok = true;
+            for (size_t i = 0; i < n && ok; ++i)
+            {
+                const size_t j = (i + 1) % n;
+                ok = cross2(outer[i], outer[j], ring[j]) > epsilon && cross2(outer[i], ring[j], ring[i]) > epsilon;
+            }
+            if (!ok)
+                break;
+            insets.push_back(std::move(ring));
+            insetHeight.push_back(std::move(h));
+        }
+    }
+    const std::vector<P2> &inner = insets.empty() ? poly : insets.back();
+    const auto interior = earClip(inner, epsilon);
+    if (interior.empty())
+    {
+        cap.vertices.resize(base);
+        return false;
+    }
+    banded = !insets.empty();
+    // Inset ring vertices follow the rim in order.
+    for (size_t r = 0; r < insets.size(); ++r)
+        for (size_t i = 0; i < n; ++i)
+            pushVertex(position(insets[r][i], insetHeight[r][i]));
+    const auto ringIndex = [&](size_t ring, size_t i) { return static_cast<uint32_t>(base + ring * n + i % n); };
+    const size_t zones[2] = {kZoneSkin, kZoneFat};
+    for (size_t r = 0; r < insets.size(); ++r)
+        for (size_t i = 0; i < n; ++i)
+        {
+            auto &list = cap.indices[zones[r]];
+            list.insert(list.end(), {ringIndex(r, i), ringIndex(r, i + 1), ringIndex(r + 1, i + 1)});
+            list.insert(list.end(), {ringIndex(r, i), ringIndex(r + 1, i + 1), ringIndex(r + 1, i)});
+        }
+    const size_t last = insets.size();
+    for (const auto &t : interior)
+    {
+        const size_t zone = kZoneMuscle;
+        auto &list = cap.indices[zone];
+        list.insert(list.end(), {ringIndex(last, t[0]), ringIndex(last, t[1]), ringIndex(last, t[2])});
+    }
+    return true;
+}
+void addCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, float newellLength, bool limb,
+            bool rings, bool bands, bool flaps, float uvScale)
+{
+    const size_t n = points.size();
+    float radius = 0, planarity = 0;
+    for (const V &p : points)
+    {
+        const V d = sub3(p, centre);
+        const float along = dot3(d, normal);
+        radius += std::sqrt(std::max(0.0f, dot3(d, d) - along * along));
+        planarity = std::max(planarity, std::abs(along));
+    }
+    radius /= static_cast<float>(n);
+    const bool ringed = rings && n >= kMinRingLoop && n <= kMaxRingLoop && radius > kMinRingRadius &&
+                        planarity <= 0.4f * radius && newellLength >= 0.5f * radius * radius &&
+                        cap.triangles() < kMaxRingTriangles;
+    if (ringed)
+    {
+        // Full inset and smoothing first; on a fold, weaker, then the fan.
+        // Rings need a pivot every boundary point can be seen from in order
+        // (star-shaped). Try the vertex mean, then the polygon's area centroid
+        // and bounding-box centre in the cap plane.
+        const V tangent = normalize3(cross3(normal, std::abs(normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
+        const V bitangent = cross3(normal, tangent);
+        std::vector<V> pivots{centre};
+        {
+            double a2 = 0, cx = 0, cy = 0;
+            float lox = 1e30f, hix = -1e30f, loy = 1e30f, hiy = -1e30f;
+            for (size_t i = 0; i < n; ++i)
+            {
+                const V d0 = sub3(points[i], centre), d1 = sub3(points[(i + 1) % n], centre);
+                const double x0 = dot3(d0, tangent), y0 = dot3(d0, bitangent), x1 = dot3(d1, tangent), y1 = dot3(d1, bitangent);
+                const double w = x0 * y1 - x1 * y0;
+                a2 += w;
+                cx += (x0 + x1) * w;
+                cy += (y0 + y1) * w;
+                lox = std::min(lox, static_cast<float>(x0));
+                hix = std::max(hix, static_cast<float>(x0));
+                loy = std::min(loy, static_cast<float>(y0));
+                hiy = std::max(hiy, static_cast<float>(y0));
+            }
+            if (std::abs(a2) > 1e-12)
+                pivots.push_back(add(add(centre, scale3(tangent, static_cast<float>(cx / (3.0 * a2)))),
+                                     scale3(bitangent, static_cast<float>(cy / (3.0 * a2)))));
+            pivots.push_back(add(add(centre, scale3(tangent, 0.5f * (lox + hix))), scale3(bitangent, 0.5f * (loy + hiy))));
+        }
+        size_t attempt = 0;
+        for (const V &pivot : pivots)
+            for (const float strength : {1.0f, 0.6f, 0.3f})
+            {
+                const RingResult result = addRingCap(cap, points, normal, pivot, limb, uvScale, radius, strength, flaps);
+                if (result == RingResult::Built)
+                {
+                    CAP_STAT(attempt < 3 ? attempt : 2);
+                    ++cap.ringLoops;
+                    return;
+                }
+                ++attempt;
+                if (result == RingResult::NotStarShaped)
+                    break; // a weaker inset cannot fix the loop's shape; try the next pivot
+            }
+    }
+    // Not ringable: triangulate the polygon itself. The fan from the centroid
+    // is the very last resort (self-intersecting or degenerate loops).
+    if (newellLength > 1e-9f)
+    {
+        bool banded = false;
+        if (addEarCap(cap, points, normal, centre, uvScale, bands, banded))
+        {
+            CAP_STAT(banded ? 4 : 3);
+            ++cap.earLoops;
+            return;
+        }
+    }
+    CAP_STAT(8);
+    ++cap.fanLoops;
+    addFanCap(cap, points, normal, centre, uvScale);
+}
 } // namespace
 bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &options, std::vector<GibPiece> &gibs,
                  std::string &error)
@@ -1053,6 +2316,7 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
     error.clear();
     try
     {
+        GIB_PHASE_BEGIN;
         if (bytes.size() > 64 * 1024 * 1024 || skeleton.size() > 16 * 1024 * 1024)
             throw std::runtime_error("oversized Ogre resource");
         if (!std::isfinite(options.minFaceFraction) || options.minFaceFraction < 0 || options.minFaceFraction > 1)
@@ -1063,10 +2327,13 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
         const std::regex keep = pattern(options.keepPattern);
         const std::regex drop = pattern(options.dropPattern);
         const std::regex weapon = pattern(options.weaponMaterialPattern);
+        const std::regex limbRegex = pattern(options.limbPattern);
+        GIB_PHASE(0); // regex setup
         const auto m = model(bytes);
         auto bs = bones(skeleton);
         for (auto &[id, b] : bs)
             derive(id, bs);
+        GIB_PHASE(1); // parse mesh + skeleton
         // derive() already rejected cycles and missing parents.
         const auto depth = [&](uint16_t id) {
             int d = 0;
@@ -1078,7 +2345,8 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
         // 1. Dominant bone per face; weapon submeshes are counted apart.
         std::vector<std::vector<int>> owners;
         std::vector<bool> weaponSub;
-        std::map<uint16_t, uint32_t> counts;
+        // Dense by bone handle (a uint16_t): the hot loops below bump it per face.
+        std::vector<uint32_t> counts(65536, 0);
         std::vector<std::pair<uint16_t, uint32_t>> weaponCounts; // first-seen order breaks ties
         uint32_t totalFaces = 0;
         for (const auto &sub : m.subs)
@@ -1108,6 +2376,7 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
         }
         if (!totalFaces)
             throw std::runtime_error("no skinned faces");
+        GIB_PHASE(2); // dominant bone per face
 
         // 2. Roll small bones into their parent, deepest first, so fingers
         //    fold into the hand before the (now heavier) hand is judged. A
@@ -1148,17 +2417,26 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
         // 3. Group faces into pieces keyed like the script (gib bone name, or
         //    "weapon"); std::map gives the script's sorted output order.
         static const std::string kWeaponKey = "weapon";
-        std::map<std::string, std::vector<GibFace>> pieceFaces;
-        std::map<std::string, uint16_t> pieceBone;
+        struct PieceEntry
+        {
+            std::vector<GibFace> faces;
+            uint16_t bone = 0; // the last face's driving bone, like the script's dict overwrite
+        };
+        std::map<std::string, PieceEntry> pieceFaces;
+        // Bone -> entry, so the per-face work is two array reads, not a string-keyed map lookup.
+        std::vector<PieceEntry *> entryOfBone(65536, nullptr);
+        PieceEntry *weaponEntry = nullptr;
         for (size_t s = 0; s < m.subs.size(); ++s)
             for (size_t f = 0; f < owners[s].size(); ++f)
             {
                 if (owners[s][f] < 0)
                     continue;
                 const uint16_t bone = weaponSub[s] ? weaponBone : target.at(static_cast<uint16_t>(owners[s][f]));
-                const std::string &key = weaponSub[s] ? kWeaponKey : bs.at(bone).name;
-                pieceFaces[key].push_back({s, f});
-                pieceBone[key] = bone;
+                PieceEntry *&slot = weaponSub[s] ? weaponEntry : entryOfBone[bone];
+                if (!slot)
+                    slot = &pieceFaces[weaponSub[s] ? kWeaponKey : bs.at(bone).name];
+                slot->faces.push_back({s, f});
+                slot->bone = bone;
             }
         std::map<std::string, int> pieceIds;
         for (const auto &entry : pieceFaces)
@@ -1166,65 +2444,122 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
         std::vector<std::vector<int>> facePiece(m.subs.size());
         for (size_t s = 0; s < m.subs.size(); ++s)
             facePiece[s].assign(owners[s].size(), -1);
-        for (const auto &[key, faces] : pieceFaces)
-            for (const auto &face : faces)
-                facePiece[face.sub][face.face] = pieceIds.at(key);
+        for (const auto &[key, entry] : pieceFaces)
+        {
+            const int id = pieceIds.at(key);
+            for (const auto &face : entry.faces)
+                facePiece[face.sub][face.face] = id;
+        }
 
+        GIB_PHASE(3); // roll-up + piece grouping
         // 4. Position-welded topology: a cut is an edge shared by faces of
         //    more than one body piece, wherever the exporter split vertices.
-        std::map<std::array<long long, 3>, int> weldLookup;
+        //    Weld ids are handed out in first-seen order (the output depends
+        //    on them only through that order).
         std::vector<V> weldPosition;
         std::map<const Geometry *, std::vector<int>> weldCache;
-        for (const auto &sub : m.subs)
         {
-            const Geometry &g = sub.shared ? m.geometry : sub.geometry;
-            if (weldCache.count(&g))
-                continue;
-            std::vector<int> ids(g.count);
-            for (uint32_t v = 0; v < g.count; ++v)
+            size_t vertexTotal = 0;
+            for (const auto &sub : m.subs)
+                vertexTotal += (sub.shared ? m.geometry : sub.geometry).count;
+            WeldTable table(vertexTotal);
+            for (const auto &sub : m.subs)
             {
-                const V p = position(g, v);
-                const std::array<long long, 3> key{std::llround(static_cast<double>(p[0]) / 1e-4),
-                                                   std::llround(static_cast<double>(p[1]) / 1e-4),
-                                                   std::llround(static_cast<double>(p[2]) / 1e-4)};
-                const auto inserted = weldLookup.emplace(key, static_cast<int>(weldLookup.size()));
-                if (inserted.second)
-                    weldPosition.push_back(p);
-                ids[v] = inserted.first->second;
+                const Geometry &g = sub.shared ? m.geometry : sub.geometry;
+                if (weldCache.count(&g))
+                    continue;
+                std::vector<int> ids(g.count);
+                if (g.count)
+                {
+                    const PositionReader position(g);
+                    for (uint32_t v = 0; v < g.count; ++v)
+                    {
+                        const V p = position(v);
+                        const std::array<long long, 3> key{std::llround(static_cast<double>(p[0]) / 1e-4),
+                                                           std::llround(static_cast<double>(p[1]) / 1e-4),
+                                                           std::llround(static_cast<double>(p[2]) / 1e-4)};
+                        bool fresh = false;
+                        ids[v] = table.find(key, static_cast<int>(weldPosition.size()), fresh);
+                        if (fresh)
+                            weldPosition.push_back(p);
+                    }
+                }
+                weldCache.emplace(&g, std::move(ids));
             }
-            weldCache.emplace(&g, std::move(ids));
         }
-        const auto faceWelds = [&](size_t s, size_t f) {
-            const Sub &sub = m.subs[s];
-            const auto &ids = weldCache.at(sub.shared ? &m.geometry : &sub.geometry);
-            return std::array<int, 3>{ids.at(sub.indices[f * 3]), ids.at(sub.indices[f * 3 + 1]),
-                                      ids.at(sub.indices[f * 3 + 2])};
-        };
-        std::map<std::pair<int, int>, std::vector<int>> edgePieces;
+        std::vector<const std::vector<int> *> subWelds(m.subs.size());
         for (size_t s = 0; s < m.subs.size(); ++s)
         {
-            if (weaponSub[s])
-                continue;
-            for (size_t f = 0; f < owners[s].size(); ++f)
-            {
-                if (facePiece[s][f] < 0)
-                    continue;
-                const auto w = faceWelds(s, f);
-                for (int e = 0; e < 3; ++e)
-                {
-                    const int u = w[e], v = w[(e + 1) % 3];
-                    auto &list = edgePieces[{std::min(u, v), std::max(u, v)}];
-                    if (std::find(list.begin(), list.end(), facePiece[s][f]) == list.end())
-                        list.push_back(facePiece[s][f]);
-                }
-            }
+            const Sub &sub = m.subs[s];
+            subWelds[s] = &weldCache.at(sub.shared ? &m.geometry : &sub.geometry);
         }
+        // Triangle indices were range-checked against the vertex count by
+        // triangleOwners, which sized the weld id arrays.
+        const auto faceWelds = [&](size_t s, size_t f) {
+            const Sub &sub = m.subs[s];
+            const auto &ids = *subWelds[s];
+            return std::array<int, 3>{ids[sub.indices[f * 3]], ids[sub.indices[f * 3 + 1]],
+                                      ids[sub.indices[f * 3 + 2]]};
+        };
+        // Per welded edge: the first body piece to touch it and whether any
+        // other piece does too (all the cut test needs).
+        // A shared edge needs both ends on more than one piece, so find those
+        // vertices first and keep only edges between them in the table.
+        std::vector<int> vertexPiece(weldPosition.size(), -1);
+        std::vector<char> vertexMulti(weldPosition.size(), 0);
+        const auto forBodyFaces = [&](auto &&fn) {
+            for (size_t s = 0; s < m.subs.size(); ++s)
+            {
+                if (weaponSub[s])
+                    continue;
+                for (size_t f = 0; f < owners[s].size(); ++f)
+                    if (facePiece[s][f] >= 0)
+                        fn(faceWelds(s, f), facePiece[s][f]);
+            }
+        };
+        forBodyFaces([&](const std::array<int, 3> &w, int piece) {
+            for (const int id : w)
+            {
+                int &first = vertexPiece[static_cast<size_t>(id)];
+                if (first < 0)
+                    first = piece;
+                else if (first != piece)
+                    vertexMulti[static_cast<size_t>(id)] = 1;
+            }
+        });
+        const auto multiEdge = [&](int u, int v) {
+            return vertexMulti[static_cast<size_t>(u)] && vertexMulti[static_cast<size_t>(v)];
+        };
+        size_t candidateEdges = 0;
+        forBodyFaces([&](const std::array<int, 3> &w, int) {
+            for (int e = 0; e < 3; ++e)
+                candidateEdges += multiEdge(w[e], w[(e + 1) % 3]);
+        });
+        EdgeTable edgePieces(candidateEdges);
+        forBodyFaces([&](const std::array<int, 3> &w, int piece) {
+            for (int e = 0; e < 3; ++e)
+                if (multiEdge(w[e], w[(e + 1) % 3]))
+                    edgePieces.touch(w[e], w[(e + 1) % 3], piece);
+        });
 
+        GIB_PHASE(4); // weld + edge->piece topology
         std::set<std::string> usedNames;
-        for (const auto &[key, faces] : pieceFaces)
+        std::vector<std::optional<PositionReader>> positionReaders(m.subs.size());
+        const auto positionOf = [&](size_t s) -> const PositionReader & {
+            if (!positionReaders[s])
+            {
+                const Sub &sub = m.subs[s];
+                positionReaders[s].emplace(sub.shared ? m.geometry : sub.geometry);
+            }
+            return *positionReaders[s];
+        };
+        std::vector<int> loopScratch(weldPosition.size(), -1);
+        std::vector<uint32_t> remapScratch;
+        for (const auto &[key, entry] : pieceFaces)
         {
+            const auto &faces = entry.faces;
             const bool isWeapon = key == kWeaponKey;
-            const uint16_t boneId = pieceBone.at(key);
+            const uint16_t boneId = entry.bone;
             const Bone &bone = bs.at(boneId);
             Frame frame = boneFrame(bone);
 
@@ -1233,17 +2568,17 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
             V centroid{};
             size_t corners = 0;
             V lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
-            std::map<size_t, std::vector<uint32_t>> bySub;
+            std::vector<std::vector<uint32_t>> bySub(m.subs.size());
             for (const auto &face : faces)
             {
                 const Sub &sub = m.subs[face.sub];
-                const Geometry &g = sub.shared ? m.geometry : sub.geometry;
+                const PositionReader &position = positionOf(face.sub);
                 auto &indices = bySub[face.sub];
                 for (size_t k = 0; k < 3; ++k)
                 {
                     const uint32_t index = sub.indices[face.face * 3 + k];
                     indices.push_back(index);
-                    const V p = position(g, index);
+                    const V p = position(index);
                     centroid = add(centroid, p);
                     ++corners;
                     const V local = toFrame(frame, p);
@@ -1262,12 +2597,13 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                     throw std::runtime_error("invalid gib centre");
             }
 
-            // 5. Fan caps over every cut loop, built in model space.
-            std::vector<CapTri> caps;
+            GIB_PHASE(5); // per-piece centroid + bounds
+            // 5. Torn-flesh caps over every cut loop, built in model space.
+            CapMesh caps;
             if (!isWeapon && options.caps)
             {
                 std::vector<std::pair<int, int>> cutEdges;
-                std::set<std::pair<int, int>> seen;
+                PairSet seen(faces.size() * 3);
                 for (const auto &face : faces)
                 {
                     const auto w = faceWelds(face.sub, face.face);
@@ -1275,13 +2611,18 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                     {
                         const int u = w[e], v = w[(e + 1) % 3];
                         // Reversed, so the cap winds opposite to the skin it closes.
-                        if (edgePieces.at({std::min(u, v), std::max(u, v)}).size() > 1 && seen.insert({v, u}).second)
+                        if (multiEdge(u, v) && edgePieces.shared(u, v) && seen.insert(v, u))
                             cutEdges.push_back({v, u});
                     }
                 }
-                for (const auto &loop : boundaryLoops(cutEdges))
+                GIB_PHASE(8); // cut edges
+                const auto cutLoops = boundaryLoops(cutEdges, loopScratch);
+                GIB_PHASE(9); // boundary loops
+                const bool limb = std::regex_search(bone.name, limbRegex);
+                std::vector<V> points;
+                for (const auto &loop : cutLoops)
                 {
-                    std::vector<V> points;
+                    points.clear();
                     for (int w : loop)
                         points.push_back(weldPosition.at(static_cast<size_t>(w)));
                     V center{};
@@ -1291,7 +2632,7 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                     V newell{};
                     for (size_t i = 0; i < points.size(); ++i)
                     {
-                        const V p = points[i], q = points[(i + 1) % points.size()];
+                        const V p = points[i], q = points[i + 1 == points.size() ? 0 : i + 1];
                         newell = add(newell, V{(p[1] - q[1]) * (p[2] + q[2]), (p[2] - q[2]) * (p[0] + q[0]),
                                                (p[0] - q[0]) * (p[1] + q[1])});
                     }
@@ -1301,80 +2642,121 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                         normal = scale3(normal, -1.0f);
                         std::reverse(points.begin(), points.end());
                     }
-                    for (size_t i = 0; i < points.size(); ++i)
-                    {
-                        V p0 = points[i], p1 = points[(i + 1) % points.size()];
-                        if (dot3(cross3(sub3(p0, center), sub3(p1, center)), normal) < 0)
-                            std::swap(p0, p1);
-                        caps.push_back({center, p0, p1, normal});
-                    }
+                    addCap(caps, points, normal, center, std::sqrt(dot3(newell, newell)), limb, options.capRings, options.capBands, options.capFlaps, options.capUvScale);
                 }
-                if (caps.size() > 1000000)
+                GIB_PHASE(10); // cap triangles
+                if (caps.triangles() > 1000000)
                     throw std::runtime_error("oversized gib cap");
             }
 
+            GIB_PHASE(6); // caps
             // 6. Serialize in the bone frame, centred on the piece bounds,
             //    exactly as Extract writes a chunk piece.
-            Bytes body{0};
+            Bytes body;
+            put(body, uint16_t{0x1000});
+            line(body, "[MeshSerializer_v1.8]");
+            const size_t meshChunk = openChunk(body, 0x3000);
+            put(body, uint8_t{0});
             uint32_t triangles = 0;
             float radius = 0;
             lo = {1e30f, 1e30f, 1e30f};
             hi = {-1e30f, -1e30f, -1e30f};
-            for (const auto &[s, selected] : bySub)
+            for (size_t s = 0; s < bySub.size(); ++s)
             {
+                const auto &selected = bySub[s];
+                if (selected.empty())
+                    continue;
                 const Sub &sub = m.subs[s];
                 const Geometry &g = sub.shared ? m.geometry : sub.geometry;
-                const std::set<uint32_t> used(selected.begin(), selected.end());
-                std::vector<uint32_t> vertices(used.begin(), used.end());
-                std::map<uint32_t, uint32_t> remap;
-                for (uint32_t i = 0; i < vertices.size(); ++i)
-                    remap[vertices[i]] = i;
-                Bytes data;
-                line(data, sub.material);
-                put(data, uint8_t{0});
-                put(data, static_cast<uint32_t>(selected.size()));
-                put(data, uint8_t{1});
-                for (auto index : selected)
-                    put(data, remap.at(index));
-                chunk(data, 0x5000, emitGeometry(g, vertices, frame, lo, hi, radius));
-                chunk(body, 0x4000, data);
+                // Distinct vertices ascending; every selected index was
+                // range-checked against g.count by the bounds pass above.
+                constexpr uint32_t kUnused = 0xFFFFFFFFu, kMarked = 0xFFFFFFFEu;
+                if (remapScratch.size() < g.count)
+                    remapScratch.resize(g.count);
+                std::fill(remapScratch.begin(), remapScratch.begin() + g.count, kUnused);
+                for (const uint32_t index : selected)
+                    remapScratch[index] = kMarked;
+                std::vector<uint32_t> vertices;
+                for (uint32_t v = 0; v < g.count; ++v)
+                    if (remapScratch[v] == kMarked)
+                    {
+                        remapScratch[v] = static_cast<uint32_t>(vertices.size());
+                        vertices.push_back(v);
+                    }
+                const size_t subChunk = openChunk(body, 0x4000);
+                line(body, sub.material);
+                put(body, uint8_t{0});
+                put(body, static_cast<uint32_t>(selected.size()));
+                put(body, uint8_t{1});
+                {
+                    const size_t base = body.size();
+                    body.resize(base + selected.size() * sizeof(uint32_t));
+                    for (size_t i = 0; i < selected.size(); ++i)
+                        std::memcpy(body.data() + base + i * sizeof(uint32_t), &remapScratch[selected[i]],
+                                    sizeof(uint32_t));
+                }
+                const size_t geometryChunk = openChunk(body, 0x5000);
+                appendGeometry(body, g, vertices, frame, lo, hi, radius);
+                closeChunk(body, geometryChunk);
+                closeChunk(body, subChunk);
                 triangles += static_cast<uint32_t>(selected.size() / 3);
             }
-            if (!caps.empty())
+            const std::string *zoneMaterial[kZoneCount] = {&options.capSkinMaterial, &options.capFatMaterial,
+                                                           &options.capClotMaterial, &options.capMaterial,
+                                                           &options.capBoneMaterial, &options.capMarrowMaterial};
+            for (size_t zone = 0; zone < kZoneCount; ++zone)
             {
-                // Its own submesh and declaration (position, normal, uv0).
-                // Planar UVs in each cap's plane so a flesh texture tiles
-                // evenly; positions and normals go through the piece frame.
-                Geometry g;
-                g.count = static_cast<uint32_t>(caps.size() * 3);
-                g.elements = {{0, 2, 1, 0, 0}, {0, 2, 4, 12, 0}, {0, 1, 7, 24, 0}};
-                Buffer buffer{32, {}};
+                const auto &zoneIndices = caps.indices[zone];
+                if (zoneIndices.empty())
+                    continue;
+                // One submesh per zone (its own material colour), with only
+                // the vertices that zone uses: position, normal, uv0. Planar
+                // UVs in each cap's plane so the flesh texture tiles evenly;
+                // positions and normals go through the piece frame.
+                std::vector<uint32_t> used;
+                std::vector<uint32_t> local(caps.vertices.size(), 0xFFFFFFFFu);
                 std::vector<uint32_t> indices;
-                for (const auto &tri : caps)
+                indices.reserve(zoneIndices.size());
+                for (const uint32_t index : zoneIndices)
                 {
-                    const V tangent =
-                        normalize3(cross3(tri.normal, std::abs(tri.normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
-                    const V bitangent = cross3(tri.normal, tangent);
-                    for (const V &p : {tri.a, tri.b, tri.c})
+                    if (local[index] == 0xFFFFFFFFu)
                     {
-                        for (float value : {p[0], p[1], p[2], tri.normal[0], tri.normal[1], tri.normal[2],
-                                            dot3(p, tangent) * options.capUvScale,
-                                            dot3(p, bitangent) * options.capUvScale})
-                            put(buffer.data, value);
-                        indices.push_back(static_cast<uint32_t>(indices.size()));
+                        local[index] = static_cast<uint32_t>(used.size());
+                        used.push_back(index);
                     }
+                    indices.push_back(local[index]);
                 }
+                Geometry g;
+                g.count = static_cast<uint32_t>(used.size());
+                g.elements = {{0, 2, 1, 0, 0}, {0, 2, 4, 12, 0}, {0, 1, 7, 24, 0}};
+                Buffer buffer{kCapStride, {}};
+                buffer.data.resize(used.size() * kCapStride);
+                uint8_t *dst = buffer.data.data();
+                for (const uint32_t index : used)
+                {
+                    const CapVertex &vertex = caps.vertices[index];
+                    std::memcpy(dst, vertex.p.data(), 12);
+                    std::memcpy(dst + 12, vertex.n.data(), 12);
+                    std::memcpy(dst + 24, &vertex.u, 4);
+                    std::memcpy(dst + 28, &vertex.v, 4);
+                    dst += kCapStride;
+                }
+                std::vector<uint32_t> vertices(used.size());
+                for (size_t i = 0; i < vertices.size(); ++i)
+                    vertices[i] = static_cast<uint32_t>(i);
                 g.buffers.emplace(uint16_t{0}, std::move(buffer));
-                Bytes data;
-                line(data, options.capMaterial);
-                put(data, uint8_t{0});
-                put(data, static_cast<uint32_t>(indices.size()));
-                put(data, uint8_t{1});
-                for (auto index : indices)
-                    put(data, index);
-                chunk(data, 0x5000, emitGeometry(g, indices, frame, lo, hi, radius));
-                chunk(body, 0x4000, data);
-                triangles += static_cast<uint32_t>(caps.size());
+                const size_t subChunk = openChunk(body, 0x4000);
+                line(body, *zoneMaterial[zone]);
+                put(body, uint8_t{0});
+                put(body, static_cast<uint32_t>(indices.size()));
+                put(body, uint8_t{1});
+                body.insert(body.end(), reinterpret_cast<const uint8_t *>(indices.data()),
+                            reinterpret_cast<const uint8_t *>(indices.data() + indices.size()));
+                const size_t geometryChunk = openChunk(body, 0x5000);
+                appendGeometry(body, g, vertices, frame, lo, hi, radius);
+                closeChunk(body, geometryChunk);
+                closeChunk(body, subChunk);
+                triangles += static_cast<uint32_t>(indices.size() / 3);
             }
             Bytes bounds;
             for (float v : lo)
@@ -1383,10 +2765,8 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                 put(bounds, v);
             put(bounds, radius);
             chunk(body, 0x9000, bounds);
-            Bytes out;
-            put(out, uint16_t{0x1000});
-            line(out, "[MeshSerializer_v1.8]");
-            chunk(out, 0x3000, body);
+            closeChunk(body, meshChunk);
+            Bytes &out = body;
 
             std::string name = gibPieceName(key);
             for (int suffix = 2; !usedNames.insert(name).second; ++suffix)
@@ -1400,9 +2780,13 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
             gib.bone = boneId;
             gib.boneName = bone.name;
             gib.radius = radius;
-            gib.capTriangles = static_cast<uint32_t>(caps.size());
+            gib.capTriangles = static_cast<uint32_t>(caps.triangles());
+            gib.capRingLoops = caps.ringLoops;
+            gib.capEarLoops = caps.earLoops;
+            gib.capFanLoops = caps.fanLoops;
             gib.weapon = isWeapon;
             gibs.push_back(std::move(gib));
+            GIB_PHASE(7); // serialize
         }
         if (gibs.empty())
             throw std::runtime_error("no gib pieces");
