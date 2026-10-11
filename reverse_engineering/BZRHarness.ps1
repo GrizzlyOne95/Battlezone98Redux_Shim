@@ -99,10 +99,15 @@ public static class BZRForegroundWatchdog
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder text, int max);
     [DllImport("user32.dll")] static extern void SwitchToThisWindow(IntPtr hwnd, bool fAltTab);
     [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
     delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+    [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT pt);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT pt);
     const uint WM_CLOSE = 0x0010;
     [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
     [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
@@ -112,6 +117,34 @@ public static class BZRForegroundWatchdog
     static int running = 0;
 
     public static string LogPath = Path.Combine(Path.GetTempPath(), "bzr_foreground_watchdog.log");
+
+    // "class=<window class> process=<name>" for a window, captured while it is
+    // foreground so a later steal can say what the OS took the foreground from.
+    static string Describe(IntPtr hwnd, uint pid)
+    {
+        string cls = "?", proc = "?";
+        try { System.Text.StringBuilder sb = new System.Text.StringBuilder(256); if (GetClassName(hwnd, sb, sb.Capacity) > 0) cls = sb.ToString(); } catch { }
+        try { if (pid != 0) proc = Process.GetProcessById((int)pid).ProcessName; } catch { }
+        return "class=" + cls + " process=" + proc;
+    }
+
+    // True when a physical left/right/middle button is down (or was pressed since the
+    // last poll) with the cursor over a window owned by the game. PostMessage-driven
+    // harness clicks change neither, so they never match.
+    static bool PhysicalPressOverGame(string gameName)
+    {
+        bool pressed = false;
+        foreach (int vk in new int[] { 0x01, 0x02, 0x04 })
+            if ((GetAsyncKeyState(vk) & 0x8001) != 0) pressed = true;
+        if (!pressed) return false;
+        POINT pt;
+        if (!GetCursorPos(out pt)) return false;
+        IntPtr under = WindowFromPoint(pt);
+        if (under == IntPtr.Zero) return false;
+        uint upid;
+        GetWindowThreadProcessId(under, out upid);
+        return IsGame(upid, gameName);
+    }
 
     static void Note(string text)
     {
@@ -167,9 +200,11 @@ public static class BZRForegroundWatchdog
     {
         bool aborted = false;
         IntPtr previous = IntPtr.Zero;
+        string previousDesc = "class=? process=?";
         Stopwatch wait = Stopwatch.StartNew();
         Stopwatch watch = null;
         int reported = 0;
+        long lastGamePress = long.MinValue;
         while (true)
         {
             IntPtr fg = GetForegroundWindow();
@@ -185,14 +220,25 @@ public static class BZRForegroundWatchdog
             else if (watch.ElapsedMilliseconds > watchMs) { Note("watchdog window over; reported " + reported + " steal(s)"); return; }
             else if (Process.GetProcessesByName(gameName).Length == 0) { Note("game exited; reported " + reported + " steal(s)"); return; }
 
+            if (watch != null && PhysicalPressOverGame(gameName)) lastGamePress = Environment.TickCount;
             if (!gameFg)
             {
-                if (fg != IntPtr.Zero) previous = fg;
+                if (fg != IntPtr.Zero)
+                {
+                    if (fg != previous) previousDesc = Describe(fg, pid);
+                    previous = fg;
+                }
+            }
+            else if (watch != null && lastGamePress != long.MinValue && unchecked(Environment.TickCount - (int)lastGamePress) < 1000)
+            {
+                // The user clicked the game window: activation is intentional.
+                Note("user activated the game window (intentional); not a steal, focus left alone, watchdog done");
+                return;
             }
             else if (watch != null)
             {
                 reported++;
-                Note("FOREGROUND-STOLEN: game pid " + pid + " took the foreground (previous hwnd 0x" + previous.ToInt64().ToString("X") + ")");
+                Note("FOREGROUND-STOLEN: game pid " + pid + " took the foreground (previous hwnd 0x" + previous.ToInt64().ToString("X") + " " + previousDesc + ")");
                 if (previous != IntPtr.Zero && IsWindow(previous))
                 {
                     bool ok = SetForegroundWindow(previous);
