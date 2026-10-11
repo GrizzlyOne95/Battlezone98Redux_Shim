@@ -150,7 +150,7 @@ $installDir = Read-AcfValue -Path $manifest -Key "installdir"
 $gameDir = if ($installDir) { Join-Path (Join-Path $steamRoot "steamapps\common") $installDir } else { "" }
 
 if ($KillExisting) {
-    Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue | Stop-Process -Force
+    if (-not (Get-Command Stop-BZRGame -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }; Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue | ForEach-Object { Stop-BZRGame -Id $_.Id }
     Start-Sleep -Seconds 2
 }
 
