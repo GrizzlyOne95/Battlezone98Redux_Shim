@@ -148,7 +148,7 @@ try {
 
     Copy-Item $fixture $missionLua -Force
     Assert-BZRSafeToLaunch
-    $proc = Start-Process -FilePath $exe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot -PassThru
+    $proc = Start-BZRGameProcess -FilePath $exe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot -PassThru
     Write-Host "[val] launched PID=$($proc.Id)"
 
     $shotIndex = 0

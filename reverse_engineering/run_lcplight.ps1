@@ -326,7 +326,7 @@ try {
         Write-Host "[lcplight] --- $Scenario arm '$arm': $desc ---"
 
         Assert-BZRSafeToLaunch
-        $proc = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" `
+        $proc = Start-BZRGameProcess -FilePath $gameExe -ArgumentList "lcbench.bzn" `
             -WorkingDirectory $GameRoot -PassThru
         $launchedAt = Get-Date
         Write-Host "[lcplight] launched PID=$($proc.Id)"
