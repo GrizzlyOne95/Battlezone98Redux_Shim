@@ -91,6 +91,8 @@ function Invoke-Case {
         if ($attempt -eq 1) { & $Setup }
         Remove-Item $gameLog -Force -ErrorAction SilentlyContinue
         Start-Sleep -Milliseconds 600
+        if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\..\reverse_engineering\BZRHarness.ps1" }
+        Assert-BZRSafeToLaunch
         $proc = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" `
             -WorkingDirectory $GameRoot -PassThru
         Start-Sleep -Seconds $MissionSeconds

@@ -147,6 +147,7 @@ try {
     Write-Host "[val] openshim.ini: PilotFlashlight=1 Color=$Color Beam=$Beam"
 
     Copy-Item $fixture $missionLua -Force
+    Assert-BZRSafeToLaunch
     $proc = Start-Process -FilePath $exe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot -PassThru
     Write-Host "[val] launched PID=$($proc.Id)"
 

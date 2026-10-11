@@ -39,6 +39,7 @@ $unpackedPath = Join-Path $OutputDir "$stem.unpacked.exe"
 # restored their protected sections by the time the expired-build dialog is
 # visible. Launch normally, snapshot the live image, and close it through the
 # game harness. No system-clock change or debugger bypass is required.
+Assert-BZRSafeToLaunch
 $process = Start-Process -FilePath $ExePath -WorkingDirectory $GameRoot -PassThru
 try {
     $deadline = [DateTime]::UtcNow.AddSeconds($WaitSeconds)
