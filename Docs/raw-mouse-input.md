@@ -175,7 +175,7 @@ Live toggling is available through the existing exported bridge
 registers or removes the device and flips the flag. The INI value itself is read
 once at startup.
 
-Exposed as **Raw Mouse Input** in the OpenShim Settings UI page. The change
+Exposed as **Raw Mouse Input** under OpenShim Options → Controls. The change
 is written losslessly to `[General] RawMouseInput` and takes effect after a
 restart. It is also available directly in `openshim.ini` for manual editing.
 

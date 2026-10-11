@@ -76,6 +76,32 @@ void TestClassify()
     CHECK(std::strcmp(AdmissionReason(Admission::BypassShort), "short") == 0);
     CHECK(std::strcmp(AdmissionReason(Admission::BypassNotIpv4), "not_ipv4") == 0);
     CHECK(std::strcmp(AdmissionReason(Admission::Reorder), "reorder") == 0);
+    CHECK(std::strcmp(AdmissionReason(Admission::BypassUnsequenced), "unsequenced") == 0);
+}
+
+void TestClassifyTransport()
+{
+    // Reliable final data fragment, sequence 0x01020304, ack 7.
+    uint8_t packet[24] = { 0xC0, 0x00, 0,0,0,0,0,0,0,0, 0x01,0x02,0x03,0x04, 0,0,0,7, 'P','O' };
+    CHECK(ReadTransportSequence(packet) == 0x01020304u);
+    CHECK(ClassifyTransportDatagram(true, packet, sizeof(packet)) == Admission::Reorder);
+    CHECK(ClassifyTransportDatagram(true, packet, kTransportHeaderBytes - 1) == Admission::BypassShort);
+    CHECK(ClassifyTransportDatagram(false, packet, sizeof(packet)) == Admission::BypassNotIpv4);
+
+    // A middle reliable fragment carries its own sequence too.
+    packet[0] = 0x80;
+    CHECK(ClassifyTransportDatagram(true, packet, sizeof(packet)) == Admission::Reorder);
+
+    // Unreliable data repeats the next reliable sequence.
+    packet[0] = 0x40;
+    CHECK(ClassifyTransportDatagram(true, packet, sizeof(packet)) == Admission::BypassUnsequenced);
+
+    // Connect (3) and ack (7) packets are not data.
+    packet[0] = 0xC0;
+    packet[1] = 0x03;
+    CHECK(ClassifyTransportDatagram(true, packet, sizeof(packet)) == Admission::BypassUnsequenced);
+    packet[1] = 0x07;
+    CHECK(ClassifyTransportDatagram(true, packet, sizeof(packet)) == Admission::BypassUnsequenced);
 }
 
 void TestScatterFits()
@@ -211,6 +237,7 @@ int main()
 {
     TestBufferSizes();
     TestClassify();
+    TestClassifyTransport();
     TestScatterFits();
     TestScatterTruncates();
     TestScatterEdges();

@@ -8,17 +8,23 @@ param([ValidateRange(4,160)][int]$Units = 40,
       [switch]$AllowNoAudioEndpoint,
       [ValidateRange(0,16)][int]$Beacons = 0,
       [ValidateRange(0,128)][int]$Powerups = 0,
+      # Classic: host owns both armies (teams 5/6). Strategy: each of the 4 clients
+      # owns its own army (teams 5..8); Units is the total and must divide by 4.
+      [ValidateSet('Classic','Strategy')][string]$Mode = 'Classic',
       [string]$RunName = ('battle-load-' + (Get-Date -Format 'yyyyMMdd-HHmmss')),
       [int]$InheritedLaunchLockOwner = 0,
       # Private test copy only; the immutable staged campaign is not edited.
       [string]$CoopOverride = '')
 $ErrorActionPreference = 'Stop'
 if ($Units % 2) { throw 'Units must be even.' }
+if ($Mode -eq 'Strategy' -and $Units % 4) { throw 'Strategy mode: Units must be divisible by 4.' }
+if ($Mode -eq 'Strategy' -and ($Beacons -or $Powerups)) { throw 'Strategy mode does not stage beacons or powerups.' }
 $override = Join-Path 'C:\BZRCoop\runs' ($RunName + '-map')
 & $Python (Join-Path $PSScriptRoot 'coopflow\battleload\prepare_battle_map.py') --output $override
 if ($LASTEXITCODE -ne 0) { throw 'Battle map staging failed.' }
-$scenario = Join-Path $override 'nbattle-battle-load.ps1'
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'coopflow\scenarios\nbattle-battle-load.ps1') -Destination $scenario
+$scenarioName = if ($Mode -eq 'Strategy') { 'sbattle-battle-load.ps1' } else { 'nbattle-battle-load.ps1' }
+$scenario = Join-Path $override $scenarioName
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('coopflow\scenarios\' + $scenarioName)) -Destination $scenario
 if ($CoopOverride) {
     if (-not (Test-Path -LiteralPath $CoopOverride -PathType Leaf)) { throw 'CoopOverride file is missing.' }
     Copy-Item -LiteralPath $CoopOverride -Destination (Join-Path $override 'CRCoop.lua')

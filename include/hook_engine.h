@@ -129,6 +129,45 @@ namespace HookEngine
     // Empty when neither exists.
     std::string FindPatchesJsonPath();
 
+    // Which battlezone98redux.exe build is running, and which of the builds
+    // patches.json describes it is (build_overlay.h). Decided once, from the
+    // exe's PE link timestamp, the first time anything reads patches.json.
+    enum class BuildMatch : uint8_t
+    {
+        Base,        // the build the file's top-level entries describe
+        Overlay,     // a build described by one of the file's build_overlays
+        Unknown,     // the file names builds and this is none of them
+        Unversioned, // the file names no build (older patches.json)
+    };
+    struct BuildInfo
+    {
+        uint32_t exeStamp = 0;
+        BuildMatch match = BuildMatch::Unversioned;
+        std::string label;  // the selected build's label
+        std::string known;  // every build label the file names, comma separated
+        size_t replaced = 0;
+        size_t dropped = 0;
+    };
+    const BuildInfo& GetBuildInfo();
+
+    // patches.json as it applies to the running build: the base entries, the
+    // selected overlay merged over them, or no address entries at all for an
+    // unknown build. Every reader of the file goes through this, so the patch
+    // list and the resolve table cannot come from different builds. Empty when
+    // the file is missing.
+    const std::string& EffectivePatchesText();
+
+    // True when the running exe is the build that the addresses still written
+    // as literals in feature code were taken from. A feature built on such a
+    // literal must stand down when this is false: no patches.json can move it.
+    bool IsReferenceBuild();
+
+    // True when patches.json describes the running exe (its base entries or
+    // an overlay), or when it is the reference build. OpenShim's own features
+    // take every engine address from patches.json, so this, not the public
+    // IsCompatibleGameVersion, is what internal bridges gate on.
+    bool IsKnownBuild();
+
     // Helpers
     void* ResolveRelCallTarget(uint32_t instrAddr);
     void* ResolveRelCallTargetWithRetry(uint32_t instrAddr, int maxAttempts, uint32_t delayMs);

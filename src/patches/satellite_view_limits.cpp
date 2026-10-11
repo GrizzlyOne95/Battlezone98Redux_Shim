@@ -3,6 +3,7 @@
 // SinglePlayer tier), split out of bzr_hooks.cpp. Its baselines are parsed
 // by InitializeGlobalImprovementConfig there.
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "patcher.h"
@@ -38,9 +39,31 @@ namespace BZROpenShim
         // Gated to single player: a shim player who can pull further out than a
         // stock peer sees more of the map, which is the same reasoning that
         // keeps SatelliteVisibilityFix single-player only.
-        constexpr uintptr_t kSatelliteMaxZoomAddr = 0x008723F4;
-        constexpr uintptr_t kSatelliteMinZoomAddr = 0x00872400;
-        constexpr uintptr_t kSatellitePanSpeedAddr = 0x009C91D0;
+        //
+        // Both written globals are taken from the operands of instructions
+        // that read them -- the comiss in the zoom clamp above and the movss
+        // in the pan step -- whose rows' guards prove the opcodes, so neither
+        // is ever a bare address into .rdata.
+        static uintptr_t g_SatelliteMaxZoomAddr = 0;
+        static uintptr_t g_SatellitePanSpeedAddr = 0;
+
+        static bool SatelliteViewAddressesBound()
+        {
+            static const bool bound = [] {
+                uint32_t maxZoomCompare = 0;
+                uint32_t panSpeedLoad = 0;
+                const HookEngine::EngineRow rows[] = {
+                    { "SatelliteMaxZoomCompare", &maxZoomCompare },  // comiss xmm0,[m32]
+                    { "SatellitePanSpeedLoad", &panSpeedLoad },      // movss xmm0,[m32]
+                };
+                if (!HookEngine::BindEngineRows("Satellite view limits", rows))
+                    return false;
+                g_SatelliteMaxZoomAddr = *reinterpret_cast<const uint32_t*>(maxZoomCompare + 3);
+                g_SatellitePanSpeedAddr = *reinterpret_cast<const uint32_t*>(panSpeedLoad + 4);
+                return true;
+            }();
+            return bound;
+        }
         constexpr float kSatelliteMultiplierMin = 0.25f;
         constexpr float kSatelliteMultiplierMax = 8.0f;
 
@@ -92,8 +115,8 @@ namespace BZROpenShim
 
             __try
             {
-                const float maxZoom = *reinterpret_cast<const float*>(kSatelliteMaxZoomAddr);
-                const float panSpeed = *reinterpret_cast<const float*>(kSatellitePanSpeedAddr);
+                const float maxZoom = *reinterpret_cast<const float*>(g_SatelliteMaxZoomAddr);
+                const float panSpeed = *reinterpret_cast<const float*>(g_SatellitePanSpeedAddr);
                 if (!std::isfinite(maxZoom) || maxZoom <= 0.0f ||
                     !std::isfinite(panSpeed) || panSpeed <= 0.0f)
                 {
@@ -125,16 +148,18 @@ namespace BZROpenShim
             // until something has actually been applied there is nothing to undo.
             if (wantStock && !g_SatelliteApplied)
                 return;
+            if (!SatelliteViewAddressesBound())
+                return;
             if (!TryCaptureSatelliteStockValues())
                 return;
 
             // Only the maximum moves. Raising it lets the player pull further
             // out; the minimum stays stock so the closest zoom is unchanged.
-            bool ok = WriteReadOnlyFloat(kSatelliteMaxZoomAddr,
+            bool ok = WriteReadOnlyFloat(g_SatelliteMaxZoomAddr,
                                          g_SatelliteStockMaxZoom * zoomOut);
             __try
             {
-                *reinterpret_cast<float*>(kSatellitePanSpeedAddr) =
+                *reinterpret_cast<float*>(g_SatellitePanSpeedAddr) =
                     g_SatelliteStockPanSpeed * panSpeed;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -148,8 +173,8 @@ namespace BZROpenShim
                 {
                     g_SatelliteWriteFailureLogged = true;
                     Log(L"[SATELLITE] Could not write view limits at 0x%08X / 0x%08X\n",
-                        static_cast<uint32_t>(kSatelliteMaxZoomAddr),
-                        static_cast<uint32_t>(kSatellitePanSpeedAddr));
+                        static_cast<uint32_t>(g_SatelliteMaxZoomAddr),
+                        static_cast<uint32_t>(g_SatellitePanSpeedAddr));
                 }
                 return;
             }

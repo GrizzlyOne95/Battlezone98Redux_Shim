@@ -134,7 +134,20 @@ if (Test-Path -LiteralPath $assetManifestSource) {
 # missing-texture panels.
 $uiFiles = @(
     'uiline.png', 'uiplate.png', 'uibtn.png', 'uibtnhv.png',
-    'osh_prelobby_center.png'
+    'osh_career_center.png',
+    'osh_prelobby_center.png',
+    'osh_options_center.png',
+    'osh_hub_center.png',
+    'osh_category_center.png',
+    'osh_tile_hv.png',
+    'osh_tile_ck.png',
+    'osh_value_hv.png',
+    'osh_value_ck.png',
+    'osh_keys_center.png',
+    'osh_key_hv.png',
+    'osh_key_ck.png',
+    'osh_tool_hv.png',
+    'osh_tool_ck.png'
 )
 New-Item -ItemType Directory -Force -Path $uiTargetDir | Out-Null
 foreach ($name in $uiFiles) {
@@ -149,7 +162,7 @@ foreach ($name in $uiFiles) {
         throw "UI resource verification failed: $name"
     }
 }
-Write-Host ("UI resources deployed: {0} flat tiles" -f $uiFiles.Count)
+Write-Host ("UI resources deployed: {0} files" -f $uiFiles.Count)
 
 Write-Host ""
 Write-Host "patches.json verified: all $(@($repoJson.patches).Count + @($repoJson.globals).Count + @($repoJson.static_pointers).Count) declared names present."

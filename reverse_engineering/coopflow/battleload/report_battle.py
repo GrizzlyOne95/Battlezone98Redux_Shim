@@ -17,6 +17,27 @@ def percentile(values, fraction):
     return values[max(0, math.ceil(len(values) * fraction) - 1)] if values else None
 
 
+def ramp_done(state):
+    return state.get("rampCompleted") or (state.get("army") or {}).get("rampCompleted")
+
+
+def finished(state):
+    return state.get("finished") or (state.get("army") or {}).get("finished")
+
+
+def army_metrics(army):
+    """Strategy-mode per-client metrics; rates are None when nothing was sampled."""
+    def per_1000(count, frames):
+        return 1000 * count / frames if frames else None
+    return {"team": army["team"], "spawned": army["spawned"], "deaths": army["deaths"],
+            "damageEvents": army["damageEvents"], "ammoDrops": army["ammoDrops"],
+            "remoteUnitFrames": army["rSamples"], "remoteWarps": army["rWarps"],
+            "remoteWarpsPer1000UnitFrames": per_1000(army["rWarps"], army["rSamples"]),
+            "remoteJumpsOver25m": army["rBig"], "remoteMaxJumpM": army["rMax"],
+            "localWarps": army["lWarps"], "localUnitFrames": army["lSamples"],
+            "peaksTeams5to8": [army["p5"], army["p6"], army["p7"], army["p8"]]}
+
+
 def summarize(run):
     samples = [json.loads(line) for line in (run / "battle-samples.jsonl").read_text(encoding="utf-8-sig").splitlines() if line]
     host = [s for s in samples if s["client"] == 0]
@@ -24,7 +45,7 @@ def summarize(run):
     combat = [s for s in host if s["phase"] == "combat"]
     if len(idle) < 2 or len(combat) < 2:
         raise ValueError("missing idle/combat evidence; no rate comparison produced")
-    steady = [s for s in combat if s["state"].get("rampCompleted") and not s["state"].get("finished")]
+    steady = [s for s in combat if ramp_done(s["state"]) and not finished(s["state"])]
     if not steady:
         # Older smoke had a single duration including ramp. Explicitly label it.
         steady = [s for s in combat if timestamp(s["at"]) >= timestamp(combat[0]["at"]) + 10]
@@ -89,6 +110,8 @@ def summarize(run):
             "workingSetPeakBytes": max(s["workingSetBytes"] for s in rows),
             "peakAI": last["state"]["peakAI"], "peakScrap": last["state"]["peakScrap"],
             "newScrapObserved": last["state"]["scrapObserved"]}
+        if last["state"].get("army"):
+            clients[str(client)]["army"] = army_metrics(last["state"]["army"])
     return {"run": str(run), "hostFinalMeasured": combat[-1]["state"], "clients": clients,
             "rates": rates, "limitations": [
                 "Relay ingress bytes exclude UDP/IP headers; decision timestamps do not measure send completion.",
@@ -110,6 +133,13 @@ if __name__ == "__main__":
     lines += ["", "| Client | Peak AI | Peak scrap | New scrap observed | CPU cores | Simulation/wall | Probe p95 ms |", "|---|---:|---:|---:|---:|---:|---:|"]
     for client, value in report["clients"].items():
         lines.append(f'| {client} | {value["peakAI"]} | {value["peakScrap"]} | {value["newScrapObserved"]} | {value["cpuEquivalentCores"]:.2f} | {value["simulationSecondsPerWallSecond"]:.3f} | {value["probeCommandMsP95"]:.1f} |')
+    armies = {c: v["army"] for c, v in report["clients"].items() if "army" in v}
+    if armies:
+        lines += ["", "| Client | Army team | Damage taken | Own shots | Deaths | Remote warps/1000 unit-frames | Jumps >25 m | Max jump m |", "|---|---:|---:|---:|---:|---:|---:|---:|"]
+        for client, a in armies.items():
+            rate = a["remoteWarpsPer1000UnitFrames"]
+            rate = "n/a" if rate is None else f"{rate:.2f}"
+            lines.append(f'| {client} | {a["team"]} | {a["damageEvents"]} | {a["ammoDrops"]} | {a["deaths"]} | {rate} | {a["remoteJumpsOver25m"]} | {a["remoteMaxJumpM"]:.1f} |')
     lines += ["", *["- " + limit for limit in report["limitations"]]]
     (args.run / "battle-network-report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(json.dumps({"report": str(args.run / "battle-network-report.md"), "host": report["hostFinalMeasured"], "rates": {p: {k:v for k,v in r.items() if k != "links"} for p,r in report["rates"].items()}}, indent=2))
