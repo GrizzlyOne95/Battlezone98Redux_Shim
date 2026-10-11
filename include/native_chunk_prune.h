@@ -6,7 +6,7 @@
 // "current" version of each tree from the same strings. Bumping a version here
 // makes the old tree obsolete, and the next startup deletes it.
 #define OPENSHIM_CHUNK_CACHE_NATIVE_DIR "native/v4/"
-#define OPENSHIM_CHUNK_CACHE_GIBS_DIR "gibs/v5/"
+#define OPENSHIM_CHUNK_CACHE_GIBS_DIR "gibs/v6/"
 #define OPENSHIM_CHUNK_CACHE_FALLBACK_DIR "fallback/v1/"
 #define OPENSHIM_CHUNK_CACHE_CASINGS_DIR "casings/v1/"
 
