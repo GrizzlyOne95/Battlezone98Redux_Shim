@@ -2702,6 +2702,30 @@ namespace BZROpenShim::RenderProfiles
             return fn;
         }
 
+        // BillboardSet::getRenderOperation writes mVertexData->vertexStart, and
+        // mVertexData is null until the set first builds its buffers -- which
+        // is after the scheme miss that brought us here, so the first frame of
+        // every particle system faulted inside this probe. Its declaration is
+        // fixed (_createBuffers: POSITION, DIFFUSE, TEXCOORD0), so answer from
+        // that instead of calling it. The vtable may hold the export's
+        // incremental-link thunk or the body it jumps to; accept either.
+        bool IsBillboardSetGetRenderOperation(const void* fn)
+        {
+            static const void* const thunk = ResolveOgreExport<const void*>(
+                "?getRenderOperation@BillboardSet@Ogre@@UAEXAAVRenderOperation@2@@Z");
+            static const void* const body = [] {
+                const auto* p = static_cast<const unsigned char*>(thunk);
+                if (p == nullptr || p[0] != 0xE9)
+                {
+                    return thunk;
+                }
+                int rel = 0;
+                std::memcpy(&rel, p + 1, sizeof(rel));
+                return static_cast<const void*>(p + 5 + rel);
+            }();
+            return fn != nullptr && (fn == thunk || fn == body);
+        }
+
         __declspec(noinline) static bool GuardedReadRenderableInputs(
             const void* renderable,
             FnVertexDeclarationFindElementBySemantic findElement,
@@ -2719,6 +2743,15 @@ namespace BZROpenShim::RenderProfiles
                     vtable[kRenderableGetRenderOperationSlot] == nullptr)
                 {
                     return false;
+                }
+                if (IsBillboardSetGetRenderOperation(
+                        vtable[kRenderableGetRenderOperationSlot]))
+                {
+                    out->position = true;
+                    out->diffuse = true;
+                    out->texcoord0 = true;
+                    out->known = true;
+                    return true;
                 }
                 const auto getRenderOperation =
                     reinterpret_cast<FnRenderableGetRenderOperation>(
@@ -2958,10 +2991,15 @@ namespace BZROpenShim::RenderProfiles
             return finish(action);
         }
 
+        // Runs under either flag: the guard repairs a stock material the
+        // glow compositor draws for every non-glowing object, so a mod that
+        // only adds a `scheme glow` technique (ISDF Chronicles' SP-6 pump
+        // shotgun sights) otherwise throws once per frame with compat off.
         void EnsureNativeInputGuards()
         {
+            const Dx11Compat::CompatConfig config = CurrentCompatConfig();
             if (!s_detectedDx11Atomic.load(std::memory_order_acquire) ||
-                !CurrentCompatConfig().compatEnabled ||
+                !(config.compatEnabled || config.guardEnabled) ||
                 !s_resourcesValidAtomic.load(std::memory_order_acquire) ||
                 !EnhancedResourcesAvailable())
             {
