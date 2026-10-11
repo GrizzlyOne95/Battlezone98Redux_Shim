@@ -1,4 +1,5 @@
 #include "pilot_fp_animation_trace.h"
+#include "hook_engine.h"
 #include "diagnostic_switch.h"
 #include "trace_introspection.h"
 #include "engine_globals.h"
@@ -272,7 +273,7 @@ namespace BZROpenShim
             outPerson = nullptr;
             if (className && classNameSize)
                 className[0] = '\0';
-            if (!IsPatchingComplete() || !IsCompatibleGameVersion())
+            if (!IsPatchingComplete() || !HookEngine::IsKnownBuild())
                 return nullptr;
             auto* const userObjectSlot =
                 reinterpret_cast<void* const*>(EngineGlobals::UserObjectSlot());
@@ -1561,7 +1562,7 @@ namespace BZROpenShim
         outEntity = nullptr;
         outGeneration = g_Fp.generation.load(std::memory_order_acquire);
         if (g_ShutdownRequested.load(std::memory_order_acquire) ||
-            !IsPatchingComplete() || !IsCompatibleGameVersion() ||
+            !IsPatchingComplete() || !HookEngine::IsKnownBuild() ||
             !OgreRuntime::IsLoaded())
             return false;
 

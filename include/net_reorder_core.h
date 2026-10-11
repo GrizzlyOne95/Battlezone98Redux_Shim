@@ -53,7 +53,28 @@ namespace NetReorder
         BypassNotIpv4,   // no IPv4 source: deliver immediately
         BypassShort,     // too short to carry the sequence: deliver immediately
         BypassOversize,  // larger than a slot: deliver immediately, never cut
+        BypassUnsequenced, // not a reliable data packet: deliver immediately
     };
+
+    // BZRNet transport header (GOG 2.2.301 writer 0x0075BEB0, reader
+    // 0x0075D800): byte 0 flags (0x80 reliable, 0x40 final fragment), byte 1
+    // low nibble kind (0 data, 3/4/5 connect, 6 resend request, 7 ack),
+    // bytes 2..9 big-endian send time, bytes 10..13 big-endian sequence,
+    // bytes 14..17 big-endian acknowledgement (next sequence expected back).
+    // Only reliable data fragments take a sequence of their own; unreliable
+    // packets repeat the next reliable sequence and connect packets send 0,
+    // so those cannot be ordered by it.
+    constexpr uint32_t kTransportHeaderBytes = 18;
+    constexpr uint32_t kTransportSequenceOffset = 10;
+    constexpr uint8_t kTransportReliableFlag = 0x80;
+    constexpr uint8_t kTransportKindData = 0;
+
+    inline uint32_t ReadTransportSequence(const uint8_t* data)
+    {
+        const uint8_t* p = data + kTransportSequenceOffset;
+        return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
+               (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
+    }
 
     inline Admission ClassifyDatagram(
         bool ipv4Source,
@@ -70,11 +91,28 @@ namespace NetReorder
         return Admission::Reorder;
     }
 
+    // ClassifyDatagram for a BZRNet datagram: only reliable data packets are
+    // reordered, by the sequence ReadTransportSequence returns.
+    inline Admission ClassifyTransportDatagram(
+        bool ipv4Source,
+        const uint8_t* data,
+        uint32_t length,
+        uint32_t slotBytes = kSlotBytes)
+    {
+        const Admission admission = ClassifyDatagram(ipv4Source, length, kTransportHeaderBytes, slotBytes);
+        if (admission != Admission::Reorder)
+            return admission;
+        if ((data[0] & kTransportReliableFlag) == 0 || (data[1] & 0x0F) != kTransportKindData)
+            return Admission::BypassUnsequenced;
+        return Admission::Reorder;
+    }
+
     inline const char* AdmissionReason(Admission admission)
     {
         switch (admission)
         {
         case Admission::Reorder: return "reorder";
+        case Admission::BypassUnsequenced: return "unsequenced";
         case Admission::BypassNotIpv4: return "not_ipv4";
         case Admission::BypassShort: return "short";
         case Admission::BypassOversize: return "oversize";

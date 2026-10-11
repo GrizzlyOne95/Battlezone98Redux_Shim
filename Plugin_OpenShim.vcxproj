@@ -139,6 +139,7 @@
     <ClCompile Include="src\engine\render_profile.cpp" />
     <ClCompile Include="src\engine\render_profile_resources.cpp" />
     <ClCompile Include="src\engine\resolve_table.cpp" />
+    <ClCompile Include="src\engine\build_overlay.cpp" />
     <ClCompile Include="src\engine\engine_globals.cpp" />
     <ClCompile Include="src\engine\x86_length.cpp" />
     <ClCompile Include="src\engine\shim_log_client.cpp" />
@@ -154,6 +155,7 @@
     <ClCompile Include="src\patches\autosave_restart.cpp" />
     <ClCompile Include="src\patches\bzrnet_settings.cpp" />
     <ClCompile Include="src\patches\career_stats.cpp" />
+    <ClCompile Include="src\patches\career_screen.cpp" />
     <ClCompile Include="src\patches\prelobby_screen.cpp" />
     <ClCompile Include="src\patches\chunk_engine_hooks.cpp" />
     <ClCompile Include="src\patches\dynamic_geometry_hooks.cpp" />

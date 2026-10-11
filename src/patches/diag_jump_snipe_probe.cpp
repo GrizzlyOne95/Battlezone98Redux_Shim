@@ -398,7 +398,8 @@ namespace BZROpenShim
             // check, so a build that then failed it still handed every later
             // consumer -- career stats, the kill trace,
             // TryGetLocalPlayerWorldPosition -- an unverified address.
-            g_BzrFn_GetPlayerHandle = reinterpret_cast<FnGetPlayerHandle>(kGogGetPlayerHandleAddr);
+            if (const uint32_t getPlayerHandle = HookEngine::EngineAddress("GetPlayerHandle"))
+                g_BzrFn_GetPlayerHandle = reinterpret_cast<FnGetPlayerHandle>(getPlayerHandle);
             g_BzrFn_GameObjectGetObjByHandle =
                 &GameObjectFromHandleGog; // was 0x0046B160 (wrong fn; crashed)
 
