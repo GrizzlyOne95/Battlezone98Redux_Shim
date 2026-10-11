@@ -553,26 +553,75 @@ def read_memory_command(
     }
 
 
+def post_close_to_process(pid: int) -> int:
+    """Posts WM_CLOSE to every top-level window of pid. Returns the number posted."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    posted = 0
+    enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def callback(hwnd: int, _lparam: int) -> bool:
+        nonlocal posted
+        window_pid = wintypes.DWORD(0)
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(window_pid))
+        if window_pid.value == pid and user32.PostMessageW(hwnd, 0x0010, 0, 0):  # WM_CLOSE
+            posted += 1
+        return True
+
+    user32.EnumWindows(enum_proc(callback), 0)
+    return posted
+
+
+def close_game_gracefully(pid: int, timeout_seconds: float = 60.0, repost_seconds: float = 5.0) -> bool:
+    """WM_CLOSE the game, re-posting every few seconds. Never force-kills.
+
+    Force-killing a process that owns the D3D device can hard-lock the
+    workstation (AGENTS.md). Returns True if the process exited.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while process_alive(pid):
+        post_close_to_process(pid)
+        slice_end = min(deadline, time.monotonic() + repost_seconds)
+        while time.monotonic() < slice_end and process_alive(pid):
+            time.sleep(0.25)
+        if time.monotonic() >= deadline:
+            break
+    return not process_alive(pid)
+
+
 def terminate_session(state_path: Path = DEFAULT_STATE_PATH) -> dict[str, Any]:
     state = load_state(state_path)
     controller_pid = int(state.get("controller_pid") or 0)
     target_pid = int(state.get("target_pid") or 0)
 
+    # The target is the game: close it with WM_CLOSE only. A debugger controller
+    # (cdb) terminates its debuggee when it is killed, so the controller is only
+    # force-killed once the game is gone; a game that ignores WM_CLOSE is left
+    # running together with its controller and the saved session.
+    left_running: list[int] = []
+    if target_pid and process_alive(target_pid):
+        if not close_game_gracefully(target_pid):
+            left_running.append(target_pid)
+            if controller_pid and controller_pid != target_pid and process_alive(controller_pid):
+                left_running.append(controller_pid)
+            return {"killed_pids": [], "left_running": left_running,
+                    "error": "game ignored WM_CLOSE; left running (never force-kill)"}
+
     killed: list[int] = []
-    for pid in [controller_pid, target_pid]:
-        if not pid or pid in killed:
-            continue
-        if process_alive(pid):
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            killed.append(pid)
+    if controller_pid and controller_pid != target_pid and process_alive(controller_pid):
+        # Not the game: the debugger/launcher may be force-killed.
+        subprocess.run(
+            ["taskkill", "/PID", str(controller_pid), "/T", "/F"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        killed.append(controller_pid)
 
     save_state(state_path, {})
-    return {"killed_pids": killed}
+    return {"killed_pids": killed, "left_running": []}
 
 
 def doctor() -> dict[str, Any]:
