@@ -41,11 +41,12 @@ bool FragmentOriginShift(const float right[3], const float up[3], const float fr
 // keepPattern or are a root; submeshes whose material matches
 // weaponMaterialPattern become one uncapped "weapon" piece driven by their
 // dominant bone; and each cut (an edge shared by two body pieces in the
-// position-welded topology) is closed by a torn-flesh cap in an extra submesh
-// using capMaterial: concentric rings (clotted rim, ragged inset ring, bulged
-// centre; limb cuts add muscle and bone rings) with smooth normals, ARGB
-// vertex colours and planar UVs. Everything is deterministic: the ragged
-// offsets hash the welded positions. Patterns are ECMAScript, case-insensitive, searched; empty
+// position-welded topology) is closed by a torn-flesh cap: concentric rings
+// that follow the rim's shape (a thin skin edge, a pale fat band, muscle to a
+// slightly bulged centre; limb cuts end the muscle in a bone ring around a
+// marrow core), with smooth normals and planar UVs, one extra submesh per
+// zone. Everything is deterministic: the small ragged offsets hash the welded
+// positions. No vertex colours (see CapVertex in native_chunk_mesh.cpp). Patterns are ECMAScript, case-insensitive, searched; empty
 // matches nothing. Pieces are written like Extract's: in the driving bone's
 // bind frame, centred on their bounds, with `piece.center` that centre in the
 // bone frame, so world = entityNode * boneDerived * translate(center).
@@ -55,7 +56,14 @@ struct GibOptions
     std::string keepPattern = "head$";
     std::string dropPattern = "nub|footsteps|finger|toe|clavicle";
     std::string weaponMaterialPattern = "gun|laser|weapon|rifle";
+    // Cap zones are separate submeshes so each carries its own material
+    // colour: capMaterial is the muscle (and the plain fan); the others are
+    // the thin skin edge, the fat band, and the bone and marrow of limb cuts.
     std::string capMaterial = "openshim_gib_flesh";
+    std::string capSkinMaterial = "openshim_gib_flesh_skin";
+    std::string capFatMaterial = "openshim_gib_flesh_fat";
+    std::string capBoneMaterial = "openshim_gib_flesh_bone";
+    std::string capMarrowMaterial = "openshim_gib_flesh_marrow";
     // Cuts of a driving bone matching this pattern (limbs, neck) also get a
     // bone/marrow ring in the middle of the cap.
     std::string limbPattern = "arm|forearm|leg|thigh|calf|shin|knee|elbow|neck";

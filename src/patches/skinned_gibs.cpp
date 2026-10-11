@@ -78,10 +78,6 @@ namespace BZROpenShim
             constexpr size_t kRenderBridgeWorldNodeOffset = 0x098;
             constexpr uint16_t kMaxCapturedBones = 256;
             constexpr size_t kMaxSuppressedChunks = 4096;
-            // The default flesh material and its procedural texture come from
-            // gib_flesh_texture.h (shared with the tests and the bench dump).
-            constexpr const char* kFleshMaterialFile = BZROpenShim::NativeChunks::kGibFleshMaterialFile;
-            constexpr const char* kFleshMaterialMarker = BZROpenShim::NativeChunks::kGibFleshMaterialMarker;
 
             // ---- Config ----------------------------------------------------
             struct GibConfig
@@ -1338,92 +1334,97 @@ namespace BZROpenShim
                 return;
             try
             {
+                namespace NC = BZROpenShim::NativeChunks;
                 std::error_code ec;
-                const auto ours = cacheRoot / kFleshMaterialFile;
-                // An asset pack overrides the default by shipping the same
-                // material file at the top of any chunk payload directory.
-                // Both in the one resource group would be a duplicate
-                // definition, so ours steps aside (and is removed if it was
-                // written by an earlier run).
-                for (const auto& directory : payloadDirectories)
-                {
-                    if (std::filesystem::equivalent(directory, cacheRoot, ec) && !ec)
-                        continue;
-                    ec.clear();
-                    if (std::filesystem::is_regular_file(directory / kFleshMaterialFile, ec) && !ec)
+                const auto texture = cacheRoot / NC::kGibFleshTextureFile;
+                const auto readHead = [](const std::filesystem::path& path) {
+                    std::vector<uint8_t> head(64);
+                    std::ifstream in(path, std::ios::binary);
+                    in.read(reinterpret_cast<char*>(head.data()), static_cast<std::streamsize>(head.size()));
+                    head.resize(static_cast<size_t>(in.gcount()));
+                    return head;
+                };
+                // Generated material files, each with the same rules. A pack
+                // overrides one by shipping the same file name at the top of
+                // any chunk payload directory; ours then steps aside (and is
+                // removed if an earlier run wrote it), because both in the one
+                // resource group would be a duplicate definition. A file in
+                // the cache root without our marker is the user's: untouched.
+                // Ours is rewritten whenever its version line is stale, so a
+                // changed default never lingers behind an old "do not edit" copy.
+                // Returns true when the file is overridden or foreign.
+                const auto ensureFile = [&](const char* file, const char* marker, const std::string& header,
+                                            const std::string& script, bool& wrote) {
+                    wrote = false;
+                    const auto ours = cacheRoot / file;
+                    for (const auto& directory : payloadDirectories)
+                    {
+                        if (std::filesystem::equivalent(directory, cacheRoot, ec) && !ec)
+                            continue;
+                        ec.clear();
+                        if (std::filesystem::is_regular_file(directory / file, ec) && !ec)
+                        {
+                            std::ifstream existing(ours);
+                            std::string first;
+                            if (existing && std::getline(existing, first) && first.rfind(marker, 0) == 0)
+                            {
+                                existing.close();
+                                std::filesystem::remove(ours, ec);
+                            }
+                            LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] flesh material %hs overridden by %hs\n",
+                                               file, (directory / file).string().c_str());
+                            return true;
+                        }
+                        ec.clear();
+                    }
+                    bool current = false;
+                    if (std::filesystem::exists(ours, ec))
                     {
                         std::ifstream existing(ours);
                         std::string first;
-                        if (existing && std::getline(existing, first) && first.rfind(kFleshMaterialMarker, 0) == 0)
-                        {
-                            existing.close();
-                            std::filesystem::remove(ours, ec);
-                        }
-                        {
-                            // Our generated texture goes with it (a mod's own file of that name stays).
-                            const auto texture = cacheRoot / BZROpenShim::NativeChunks::kGibFleshTextureFile;
-                            std::vector<uint8_t> head(64);
-                            std::ifstream stale(texture, std::ios::binary);
-                            stale.read(reinterpret_cast<char*>(head.data()), static_cast<std::streamsize>(head.size()));
-                            head.resize(static_cast<size_t>(stale.gcount()));
-                            stale.close();
-                            if (BZROpenShim::NativeChunks::IsGeneratedGibFleshTga(head))
-                                std::filesystem::remove(texture, ec);
-                        }
-                        static bool logged = false;
-                        if (!logged)
-                        {
-                            logged = true;
-                            LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] flesh material overridden by %hs\n",
-                                               (directory / kFleshMaterialFile).string().c_str());
-                        }
-                        return;
+                        std::getline(existing, first);
+                        while (!first.empty() && (first.back() == '\r' || first.back() == '\n'))
+                            first.pop_back();
+                        if (first.rfind(marker, 0) != 0)
+                            return true;
+                        current = first == header;
                     }
                     ec.clear();
-                }
-                // A file that is not ours (no marker) is the user's: leave it.
-                // Ours is regenerated whenever its version line is stale, so a
-                // changed default never lingers behind an old "do not edit" copy.
-                const std::string header = BZROpenShim::NativeChunks::GibFleshMaterialHeader();
-                const auto texture = cacheRoot / BZROpenShim::NativeChunks::kGibFleshTextureFile;
-                bool materialCurrent = false;
-                if (std::filesystem::exists(ours, ec))
+                    if (current)
+                        return false;
+                    std::filesystem::create_directories(cacheRoot, ec);
+                    std::ofstream output(ours, std::ios::binary | std::ios::trunc);
+                    output << script;
+                    output.close();
+                    wrote = true;
+                    LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] wrote default flesh material %hs ok=%u\n",
+                                       ours.string().c_str(), output ? 1u : 0u);
+                    return false;
+                };
+                bool wroteMain = false, wroteZones = false;
+                const bool mainForeign = ensureFile(NC::kGibFleshMaterialFile, NC::kGibFleshMaterialMarker,
+                                                    NC::GibFleshMaterialHeader(), NC::GibFleshMaterialScript(),
+                                                    wroteMain);
+                ensureFile(NC::kGibFleshZoneMaterialFile, NC::kGibFleshZoneMaterialMarker,
+                           NC::GibFleshZoneMaterialHeader(), NC::GibFleshZoneMaterialScript(), wroteZones);
+                // The texture belongs to our muscle material: written when it
+                // is missing or stale, removed (if ours) when a pack or the
+                // user supplies the muscle material instead.
+                const auto head = readHead(texture);
+                if (mainForeign)
                 {
-                    std::ifstream existing(ours);
-                    std::string first;
-                    std::getline(existing, first);
-                    while (!first.empty() && (first.back() == '\r' || first.back() == '\n'))
-                        first.pop_back();
-                    if (first.rfind(kFleshMaterialMarker, 0) != 0)
-                        return;
-                    materialCurrent = first == header;
+                    if (NC::IsGeneratedGibFleshTga(head))
+                        std::filesystem::remove(texture, ec);
                 }
-                ec.clear();
-                std::filesystem::create_directories(cacheRoot, ec);
-                bool textureOk = true;
+                else if (!NC::IsCurrentGibFleshTga(head))
                 {
-                    std::vector<uint8_t> head(64);
-                    std::ifstream existing(texture, std::ios::binary);
-                    existing.read(reinterpret_cast<char*>(head.data()), static_cast<std::streamsize>(head.size()));
-                    head.resize(static_cast<size_t>(existing.gcount()));
-                    if (!BZROpenShim::NativeChunks::IsCurrentGibFleshTga(head))
-                    {
-                        const auto tga = BZROpenShim::NativeChunks::GibFleshTextureTga();
-                        std::ofstream out(texture, std::ios::binary | std::ios::trunc);
-                        out.write(reinterpret_cast<const char*>(tga.data()), static_cast<std::streamsize>(tga.size()));
-                        out.close();
-                        textureOk = static_cast<bool>(out);
-                        LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] wrote flesh texture %hs ok=%u\n",
-                                           texture.string().c_str(), textureOk ? 1u : 0u);
-                    }
+                    const auto tga = NC::GibFleshTextureTga();
+                    std::ofstream out(texture, std::ios::binary | std::ios::trunc);
+                    out.write(reinterpret_cast<const char*>(tga.data()), static_cast<std::streamsize>(tga.size()));
+                    out.close();
+                    LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] wrote flesh texture %hs ok=%u\n",
+                                       texture.string().c_str(), out ? 1u : 0u);
                 }
-                if (materialCurrent && textureOk)
-                    return;
-                std::ofstream output(ours, std::ios::binary | std::ios::trunc);
-                output << BZROpenShim::NativeChunks::GibFleshMaterialScript();
-                output.close();
-                LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] wrote default flesh material %hs ok=%u\n",
-                                   ours.string().c_str(), output ? 1u : 0u);
             }
             catch (...)
             {

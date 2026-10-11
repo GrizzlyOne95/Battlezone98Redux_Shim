@@ -59,28 +59,45 @@ Rgb mix(Rgb a, Rgb b, float t)
 {
     return {lerp(a.r, b.r, t), lerp(a.g, b.g, t), lerp(a.b, b.b, t)};
 }
-// Sparse pale flecks (fat, sinew): one candidate per cell of a periodic grid,
-// stretched along the fibre (x) axis. Returns coverage 0..1.
-float flecks(float u, float v)
+// Periodic, jittered cellular noise stretched along x: nearest and second
+// nearest feature distance (in texels) and the nearest cell's id hash. Cells
+// are cx wide by cy tall across the unit square, so the muscle bundles come out
+// as elongated irregular polygons.
+struct Cell
 {
-    constexpr int kCells = 14;
-    const float x = u * kCells, y = v * kCells;
-    const int cx = static_cast<int>(std::floor(x)), cy = static_cast<int>(std::floor(y));
-    float best = 0.0f;
+    float f1, f2, id;
+};
+Cell cellular(float u, float v, int cx, int cy, uint32_t seed)
+{
+    const float x = u * cx, y = v * cy;
+    const int ix = static_cast<int>(std::floor(x)), iy = static_cast<int>(std::floor(y));
+    Cell best{1e9f, 1e9f, 0.0f};
     for (int oy = -1; oy <= 1; ++oy)
         for (int ox = -1; ox <= 1; ++ox)
         {
-            const int gx = cx + ox, gy = cy + oy;
-            const int wx = wrap(gx, kCells), wy = wrap(gy, kCells);
-            if (hash01(wx, wy, 71) < 0.8f)
-                continue;
-            const float px = static_cast<float>(gx) + 0.2f + 0.6f * hash01(wx, wy, 72);
-            const float py = static_cast<float>(gy) + 0.2f + 0.6f * hash01(wx, wy, 73);
-            const float dx = (x - px) * 0.42f, dy = (y - py) * 1.7f;
+            const int gx = ix + ox, gy = iy + oy;
+            const int wx = wrap(gx, cx), wy = wrap(gy, cy);
+            const float fx = static_cast<float>(gx) + 0.15f + 0.7f * hash01(wx, wy, seed);
+            const float fy = static_cast<float>(gy) + 0.15f + 0.7f * hash01(wx, wy, seed + 1);
+            const float dx = (x - fx) * (kGibFleshTextureSize / static_cast<float>(cx));
+            const float dy = (y - fy) * (kGibFleshTextureSize / static_cast<float>(cy));
             const float d = std::sqrt(dx * dx + dy * dy);
-            best = std::max(best, 1.0f - smooth(clamp01((d - 0.07f) / 0.16f)));
+            if (d < best.f1)
+            {
+                best.f2 = best.f1;
+                best.f1 = d;
+                best.id = hash01(wx, wy, seed + 2);
+            }
+            else if (d < best.f2)
+                best.f2 = d;
         }
     return best;
+}
+float fbm(float u, float v, int period, uint32_t seed)
+{
+    return 0.5f * vnoise(u * period, v * period, period, period, seed) +
+           0.3f * vnoise(u * period * 2, v * period * 2, period * 2, period * 2, seed + 1) +
+           0.2f * vnoise(u * period * 4, v * period * 4, period * 4, period * 4, seed + 2);
 }
 std::string versionTag()
 {
@@ -93,26 +110,33 @@ std::string GibFleshMaterialHeader()
     return std::string(kGibFleshMaterialMarker) + " " + kGibFleshVersion + " (generated; do not edit).";
 }
 
+std::string GibFleshZoneMaterialHeader()
+{
+    return std::string(kGibFleshZoneMaterialMarker) + " " + kGibFleshVersion + " (generated; do not edit).";
+}
+
 std::string GibFleshMaterialScript()
 {
-    // Vertex colours carry the gore (clotted rim, red muscle, ivory bone); the
-    // texture supplies fibre, fat and veins and is mid-tone so the colours
-    // modulate it. Tight, low specular for a wet look. Plain fixed-function
-    // state on purpose: the same pass DX9 draws natively and the DX11
-    // compatibility layer instantiates (one texture unit, modulate).
+    // The muscle: the texture carries the hue (deep red-brown bundles, pale
+    // perimysium, fat marbling), the material is white, wet and tight in
+    // specular. Plain fixed-function state like the other generated materials:
+    // the same pass DX9 draws natively and the DX11 compatibility layer or a
+    // generated shader instantiates (one texture unit, modulate, no vertex
+    // colour).
     return GibFleshMaterialHeader() + "\n" +
            "// Override it with an openshim_gib_flesh.material at the top of a chunk payload\n"
            "// directory (<mod>/chunkMeshes/ or BZ_ASSETS/common/models/OpenShimChunkPayloads/).\n"
+           "// The thin skin edge, fat band, bone and marrow are in openshim_gib_flesh_zones.material.\n"
            "material " +
-           kGibFleshMaterialName +
+           std::string(kGibFleshMaterialName) +
            "\n"
            "{\n"
            "    technique\n"
            "    {\n"
            "        pass\n"
            "        {\n"
-           "            ambient vertexcolour\n"
-           "            diffuse vertexcolour\n"
+           "            ambient 1 1 1\n"
+           "            diffuse 1 1 1\n"
            "            specular 0.35 0.25 0.25 48\n"
            "            cull_hardware none\n"
            "            texture_unit\n"
@@ -126,35 +150,68 @@ std::string GibFleshMaterialScript()
            "}\n";
 }
 
+std::string GibFleshZoneMaterialScript()
+{
+    struct Zone
+    {
+        const char *name, *colour, *specular;
+    };
+    // Thin dark dermis edge, pale yellow subcutaneous fat (matte), ivory bone,
+    // dark red marrow. Untextured: they are narrow bands.
+    static const Zone zones[] = {{"openshim_gib_flesh_skin", "0.20 0.045 0.04", "0.10 0.07 0.07 24"},
+                                 {"openshim_gib_flesh_fat", "0.90 0.78 0.48", "0.10 0.09 0.06 16"},
+                                 {"openshim_gib_flesh_bone", "0.86 0.80 0.58", "0.25 0.25 0.20 32"},
+                                 {"openshim_gib_flesh_marrow", "0.30 0.04 0.04", "0.30 0.15 0.15 40"}};
+    std::string out = GibFleshZoneMaterialHeader() + "\n" +
+                      "// Override it with an openshim_gib_flesh_zones.material at the top of a chunk payload directory.\n";
+    for (const Zone &zone : zones)
+    {
+        out += std::string("material ") + zone.name +
+               "\n{\n    technique\n    {\n        pass\n        {\n            ambient " + zone.colour +
+               "\n            diffuse " + zone.colour + "\n            specular " + zone.specular +
+               "\n            cull_hardware none\n        }\n    }\n}\n";
+    }
+    return out;
+}
+
 std::vector<uint8_t> GibFleshTextureRgb()
 {
     constexpr unsigned N = kGibFleshTextureSize;
     std::vector<uint8_t> out(static_cast<size_t>(N) * N * 3);
-    const Rgb muscleDark{0.56f, 0.40f, 0.40f}, muscleLight{0.93f, 0.80f, 0.78f};
-    const Rgb fat{1.0f, 0.95f, 0.84f}, vein{0.42f, 0.16f, 0.19f};
+    const Rgb muscleLow{0.29f, 0.04f, 0.04f}, muscleHigh{0.48f, 0.10f, 0.08f}; // ~#4a0a0a .. #7a1a14
+    const Rgb perimysium{0.64f, 0.36f, 0.31f}, marbling{0.86f, 0.72f, 0.55f}, vessel{0.15f, 0.02f, 0.03f};
     for (unsigned py = 0; py < N; ++py)
         for (unsigned px = 0; px < N; ++px)
         {
-            const float u = (static_cast<float>(px) + 0.5f) / N, v = (static_cast<float>(py) + 0.5f) / N;
-            // Low-frequency warp wobbles the fibres so they are not ruled lines.
-            const float warp = vnoise(u * 4.0f, v * 8.0f, 4, 8, 11) - 0.5f;
-            // Fibres run along u: slow across, fast down the image.
-            const float fibre = 0.6f * vnoise(u * 2.0f + warp * 0.9f, v * 48.0f + warp * 3.0f, 2, 48, 1) +
-                                0.4f * vnoise(u * 4.0f + warp * 0.5f, v * 112.0f, 4, 112, 2);
-            const float cloud = 0.5f * vnoise(u * 4.0f, v * 4.0f, 4, 4, 3) + 0.3f * vnoise(u * 8.0f, v * 8.0f, 8, 8, 4) +
-                                0.2f * vnoise(u * 16.0f, v * 16.0f, 16, 16, 5);
-            Rgb c = mix(muscleDark, muscleLight, clamp01(0.15f + 0.65f * fibre + 0.35f * cloud));
-            // Pale fat and sinew flecks.
-            c = mix(c, fat, 0.85f * flecks(u, v));
-            // Veins: thin dark ridges where a smooth field crosses its midline,
-            // only where a coarser mask allows them.
-            const float ridge = std::abs(vnoise(u * 5.0f + warp, v * 5.0f, 5, 5, 6) - 0.5f) * 2.0f;
-            const float ridge2 = std::abs(vnoise(u * 9.0f, v * 9.0f + warp, 9, 9, 7) - 0.5f) * 2.0f;
-            const float mask = smooth(clamp01((vnoise(u * 3.0f, v * 3.0f, 3, 3, 8) - 0.42f) / 0.2f));
-            const float veinAmount = std::max(1.0f - smooth(clamp01(ridge / 0.07f)),
-                                              0.6f * (1.0f - smooth(clamp01(ridge2 / 0.05f)))) *
-                                     mask;
-            c = mix(c, vein, 0.8f * veinAmount);
+            float u = (static_cast<float>(px) + 0.5f) / N, v = (static_cast<float>(py) + 0.5f) / N;
+            // Domain warp so bundle outlines are irregular, not a ruled grid.
+            const float wu = vnoise(u * 5.0f, v * 5.0f, 5, 5, 21) - 0.5f, wv = vnoise(u * 5.0f, v * 5.0f, 5, 5, 22) - 0.5f;
+            u += wu * 0.05f;
+            v += wv * 0.06f;
+            // Bundles: elongated cells; each gets its own tone, drifting slowly
+            // across the image so neighbouring regions differ.
+            const Cell cell = cellular(u, v, 5, 14, 31);
+            const float drift = fbm(u, v, 3, 41);
+            const float tone = clamp01(0.55f * cell.id + 0.45f * drift);
+            Rgb c = mix(muscleLow, muscleHigh, tone);
+            // Fibre striation inside a bundle: fine lines along x.
+            const float strand = vnoise(u * 3.0f, v * 190.0f, 3, 190, 51) - 0.5f;
+            c = mix(c, Rgb{c.r * 0.72f, c.g * 0.72f, c.b * 0.72f}, clamp01(0.5f + strand * 1.4f) * 0.55f);
+            // Perimysium: thin pale lines where two cells meet.
+            const float gap = cell.f2 - cell.f1;
+            const float line = 1.0f - smooth(clamp01(gap / 2.8f));
+            // Fat marbling: sparse irregular patches that favour the cell
+            // boundaries (fat runs between bundles).
+            const float patch = smooth(clamp01((fbm(u, v, 4, 61) - 0.60f) / 0.16f));
+            const float fatAlong = 1.0f - smooth(clamp01(gap / 14.0f));
+            const float fat = patch * (0.25f + 0.75f * fatAlong);
+            c = mix(c, perimysium, 0.5f * line * (1.0f - 0.5f * fat));
+            c = mix(c, marbling, 0.9f * fat);
+            // Very few thin dark vessels: a ridge of low-frequency noise, kept
+            // only where a coarse mask is high.
+            const float ridge = std::abs(vnoise(u * 4.0f, v * 4.0f, 4, 4, 71) - 0.5f) * 2.0f;
+            const float mask = smooth(clamp01((vnoise(u * 2.0f, v * 2.0f, 2, 2, 72) - 0.62f) / 0.12f));
+            c = mix(c, vessel, 0.85f * (1.0f - smooth(clamp01(ridge / 0.035f))) * mask);
             uint8_t *dst = &out[(static_cast<size_t>(py) * N + px) * 3];
             dst[0] = static_cast<uint8_t>(clamp01(c.r) * 255.0f + 0.5f);
             dst[1] = static_cast<uint8_t>(clamp01(c.g) * 255.0f + 0.5f);
