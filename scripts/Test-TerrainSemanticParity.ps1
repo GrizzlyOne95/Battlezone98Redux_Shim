@@ -472,6 +472,8 @@ try {
 
         $arguments = @($Mission)
         if ($ExtraArgs) { $arguments += $ExtraArgs.Split(" ") }
+        if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\..\reverse_engineering\BZRHarness.ps1" }
+        Assert-BZRSafeToLaunch
         $process = Start-Process -FilePath $gameExe -ArgumentList $arguments `
             -WorkingDirectory $GameRoot -PassThru
         $runDeadline = (Get-Date).AddSeconds($RunTimeoutSeconds)

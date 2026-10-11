@@ -26,6 +26,8 @@ if ($AttachPid -gt 0) {
 } else {
     # This is intentionally visible: during the later unlocked validation the
     # tester only needs to complete/force the custom final mission and observe.
+    if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
+    Assert-BZRSafeToLaunch
     $game = Start-Process -FilePath $gameExe -ArgumentList $GameArgs -WorkingDirectory $GameRoot -PassThru
     $launched = $true
 }
