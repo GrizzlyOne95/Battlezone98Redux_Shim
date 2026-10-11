@@ -4,8 +4,8 @@ nlohmann::json CaptureTerrainPaintMap()
 {
     int originX = 0, originZ = 0;
     if (!g_heightAt || g_zoneOrdinals.empty() || g_zoneOrdinals.size() > 256 ||
-        !SafeReadIntAddress(Rebase(kTerrainOriginXVa), originX) ||
-        !SafeReadIntAddress(Rebase(kTerrainOriginZVa), originZ))
+        !SafeReadIntAddress(g_terrainOriginXVa, originX) ||
+        !SafeReadIntAddress(g_terrainOriginZVa, originZ))
         throw std::runtime_error("paint map origin/height reader unavailable");
     std::map<std::pair<int, int>, void*> zones;
     for (const auto& zone : g_zoneOrdinals)

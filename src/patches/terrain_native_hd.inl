@@ -195,8 +195,8 @@ void UpdateNativeHdZone(void* zone, bool dirty)
 {
     NativeHdContext c = {};
     if (!SafeReadZoneInt(zone, kZoneXOffset, c.zoneX) || !SafeReadZoneInt(zone, kZoneZOffset, c.zoneZ) ||
-        !SafeReadIntAddress(Rebase(kTerrainOriginXVa), c.originX) ||
-        !SafeReadIntAddress(Rebase(kTerrainOriginZVa), c.originZ))
+        !SafeReadIntAddress(g_terrainOriginXVa, c.originX) ||
+        !SafeReadIntAddress(g_terrainOriginZVa, c.originZ))
         throw std::runtime_error("native HD zone coordinates unavailable");
     for (c.clusterX = 0; c.clusterX < kClusterAxisCount; ++c.clusterX)
     for (c.clusterZ = 0; c.clusterZ < kClusterAxisCount; ++c.clusterZ)
@@ -351,8 +351,8 @@ bool InstallNativeTerrainHd()
         ++g_semanticMaterialCreated;
         g_HdBackupMaterial = g_proxy.semanticMaterialName;
         NativeHdContext selected = {0,0,g_proxy.zoneX,g_proxy.zoneZ,g_proxy.clusterX,g_proxy.clusterZ};
-        if (!SafeReadIntAddress(Rebase(kTerrainOriginXVa), selected.originX) ||
-            !SafeReadIntAddress(Rebase(kTerrainOriginZVa), selected.originZ) ||
+        if (!SafeReadIntAddress(g_terrainOriginXVa, selected.originX) ||
+            !SafeReadIntAddress(g_terrainOriginZVa, selected.originZ) ||
             !TerrainSemantic::BuildVertices(ProvideNativeHdCell, &selected, g_proxy.semanticVertices))
             throw std::runtime_error("native HD selected tile semantics unavailable");
         if (!BuildTerrainHdTextureArray(*binding, array)) throw std::runtime_error("native HD texture array declined");
