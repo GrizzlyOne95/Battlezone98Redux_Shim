@@ -132,8 +132,7 @@ namespace BZROpenShim
         static void NoteNoActivate(int slot, const char* what)
         {
             if (InterlockedExchange(&s_NeverActivateLogged[slot], 1) == 0)
-                Log(L"[NOACTIVATE] Never-activate mode; suppressed %hs
-", what);
+                Log(L"[NOACTIVATE] Never-activate mode; suppressed %hs\n", what);
         }
 
         static int NoActivateShowCommand(int cmd)
@@ -198,8 +197,7 @@ namespace BZROpenShim
                 s_NeverActivateInstalled = true; // flag unset: no hooks, no retry
                 return;
             }
-            Log(L"[NOACTIVATE] OPENSHIM_NEVER_ACTIVATE: window never takes foreground or focus (test clients only)
-");
+            Log(L"[NOACTIVATE] OPENSHIM_NEVER_ACTIVATE: window never takes foreground or focus (test clients only)\n");
 
             const HMODULE exe = GetModuleHandleW(nullptr);
             const auto patch = [exe](const char* name, void* hook, void** original) {
@@ -221,8 +219,7 @@ namespace BZROpenShim
             for (const auto r : results)
                 faulted = faulted || r == IatPatch::Result::Faulted;
             Log(L"[NOACTIVATE] Hooks: ShowWindow=%d SetForegroundWindow=%d BringWindowToTop=%d "
-                L"SetActiveWindow=%d SetWindowPos=%d (0=hooked)
-",
+                L"SetActiveWindow=%d SetWindowPos=%d (0=hooked)\n",
                 static_cast<int>(results[0]), static_cast<int>(results[1]), static_cast<int>(results[2]),
                 static_cast<int>(results[3]), static_cast<int>(results[4]));
             // As above: a fault may be transient, NotFound is final.

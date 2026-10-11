@@ -124,6 +124,7 @@ public static class BZRForegroundWatchdog
                 else if (wait.ElapsedMilliseconds > waitForGameMs) { Note("game never appeared; watchdog done"); return; }
             }
             else if (watch.ElapsedMilliseconds > watchMs) { Note("watchdog window over; reported " + reported + " steal(s)"); return; }
+            else if (Process.GetProcessesByName(gameName).Length == 0) { Note("game exited; reported " + reported + " steal(s)"); return; }
 
             if (!gameFg)
             {
@@ -180,7 +181,7 @@ function Start-BZRForegroundWatchdog {
     [CmdletBinding()]
     param(
         [int]$WaitForGameSeconds = 60,
-        [int]$WatchSeconds = 15,
+        [int]$WatchSeconds = 900,
         [int]$PollMilliseconds = 250
     )
     if ($env:BZR_NO_FOREGROUND_WATCHDOG -eq '1') { return $false }
