@@ -8,7 +8,17 @@ int main(int argc, char** argv)
     using namespace BZROpenShim::FrameBridge;
     using Microsoft::WRL::ComPtr;
     const DWORD seconds = argc > 1 ? static_cast<DWORD>(std::strtoul(argv[1], nullptr, 10)) : 20;
-    const bool msaa = argc > 2 && std::string(argv[2]) == "--msaa";
+    bool msaa = false;
+    bool padded = false;
+    bool bgra = false;
+    for (int i = 2; i < argc; ++i)
+    {
+        const std::string arg(argv[i]);
+        if (arg == "--msaa") msaa = true;
+        else if (arg == "--padded") padded = true;
+        else if (arg == "--bgra") bgra = true;
+        else return 2;
+    }
     if (seconds == 0 || seconds > 300) return 2;
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
@@ -16,10 +26,10 @@ int main(int argc, char** argv)
     HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
         0, nullptr, 0, D3D11_SDK_VERSION, &device, &level, &context);
     D3D11_TEXTURE2D_DESC desc{};
-    desc.Width = 320;
-    desc.Height = 180;
+    desc.Width = padded ? 333u : 320u;
+    desc.Height = padded ? 181u : 180u;
     desc.MipLevels = desc.ArraySize = 1;
-    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.Format = bgra ? DXGI_FORMAT_B8G8R8A8_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM;
     desc.SampleDesc = {msaa ? 4u : 1u, 0};
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_RENDER_TARGET;

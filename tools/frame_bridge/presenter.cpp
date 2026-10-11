@@ -5,6 +5,8 @@
 #include <stdexcept>
 #include <string>
 #include <cstdlib>
+#include <fstream>
+#include <vector>
 
 namespace
 {
@@ -49,9 +51,10 @@ namespace
             }
             if (window_ && IsWindow(window_)) DestroyWindow(window_);
         }
-        void Open(DWORD pid, bool show, bool verify)
+        void Open(DWORD pid, bool show, bool verify, const std::string& capturePath)
         {
             verify_ = verify;
+            capturePath_ = capturePath;
             mapping_.value = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, MappingName(pid).c_str());
             if (!mapping_.value) throw std::runtime_error("producer mapping unavailable; start source/capture first");
             frame_ = static_cast<SharedFrame*>(MapViewOfFile(mapping_.value, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SharedFrame)));
@@ -99,12 +102,13 @@ namespace
             event_.value = CreateEventW(nullptr, FALSE, FALSE, nullptr);
             if (!event_.value) throw std::runtime_error("cannot create fence completion event");
 
-            if (verify)
+            if (verify || !capturePath.empty())
             {
                 UINT rows = 0;
                 UINT64 rowBytes = 0;
                 UINT64 total = 0;
                 device_->GetCopyableFootprints(&colorDesc, 0, 1, 0, &footprint_, &rows, &rowBytes, &total);
+                readbackBytes_ = static_cast<SIZE_T>(total);
                 D3D12_HEAP_PROPERTIES heap{};
                 heap.Type = D3D12_HEAP_TYPE_READBACK;
                 D3D12_RESOURCE_DESC buffer{};
@@ -162,7 +166,7 @@ namespace
                     commands_->CopyResource(backbuffer.Get(), color_.Get());
                     Barrier(backbuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
                 }
-                if (verify_)
+                if (verify_ || (!capturePath_.empty() && consumed + 1 == limit))
                 {
                     D3D12_TEXTURE_COPY_LOCATION source{};
                     source.pResource = color_.Get();
@@ -193,11 +197,54 @@ namespace
                 if (swapchain_) Require(swapchain_->Present(1, 0), "Present");
                 deadline = GetTickCount64() + timeoutMs;
             }
+            if (!capturePath_.empty()) SaveCapture();
             std::printf("CONSUMER frames=%u last_frame=%llu verified=%s max_capture_to_copy_ms=%.3f\n",
                 consumed, static_cast<unsigned long long>(lastFrame_), verify_ ? "yes" : "no", maxDelayMs_);
             return consumed;
         }
     private:
+        void SaveCapture()
+        {
+            // BMP stores BGRA pixels. Strip D3D12's padded row pitch and swizzle
+            // RGBA input; a negative height keeps the GPU's top-to-bottom order.
+            const DWORD pixelBytes = frame_->width * frame_->height * 4;
+            BITMAPFILEHEADER file{};
+            file.bfType = 0x4d42;
+            file.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+            file.bfSize = file.bfOffBits + pixelBytes;
+            BITMAPINFOHEADER info{};
+            info.biSize = sizeof(info);
+            info.biWidth = static_cast<LONG>(frame_->width);
+            info.biHeight = -static_cast<LONG>(frame_->height);
+            info.biPlanes = 1;
+            info.biBitCount = 32;
+            info.biCompression = BI_RGB;
+            info.biSizeImage = pixelBytes;
+            std::vector<unsigned char> pixels(pixelBytes);
+            unsigned char* data = nullptr;
+            const D3D12_RANGE range{0, readbackBytes_};
+            Require(readback_->Map(0, &range, reinterpret_cast<void**>(&data)), "map capture pixels");
+            for (UINT y = 0; y < frame_->height; ++y)
+                for (UINT x = 0; x < frame_->width; ++x)
+                {
+                    const auto* source = data + static_cast<SIZE_T>(y) * footprint_.Footprint.RowPitch + x * 4;
+                    auto* destination = pixels.data() + (static_cast<SIZE_T>(y) * frame_->width + x) * 4;
+                    const bool rgba = frame_->format == DXGI_FORMAT_R8G8B8A8_UNORM;
+                    destination[0] = source[rgba ? 2 : 0];
+                    destination[1] = source[1];
+                    destination[2] = source[rgba ? 0 : 2];
+                    destination[3] = source[3];
+                }
+            const D3D12_RANGE written{0, 0};
+            readback_->Unmap(0, &written);
+            std::ofstream output(capturePath_, std::ios::binary | std::ios::trunc);
+            output.write(reinterpret_cast<const char*>(&file), sizeof(file));
+            output.write(reinterpret_cast<const char*>(&info), sizeof(info));
+            output.write(reinterpret_cast<const char*>(pixels.data()), pixelBytes);
+            output.close();
+            if (!output) throw std::runtime_error("cannot save capture BMP");
+            std::printf("CAPTURE frame=%llu path=%s\n", static_cast<unsigned long long>(lastFrame_), capturePath_.c_str());
+        }
         void WaitGpu(ID3D12Fence* fence, UINT64 value)
         {
             const UINT64 completed = fence->GetCompletedValue();
@@ -219,12 +266,12 @@ namespace
         }
         void VerifyPixels(UINT64 id)
         {
-            if (frame_->format != DXGI_FORMAT_R8G8B8A8_UNORM)
-                throw std::runtime_error("synthetic verification expects RGBA8 source");
-            const unsigned char expected[] = {static_cast<unsigned char>(id & 255),
-                static_cast<unsigned char>((id >> 8) & 255), 64, 255};
+            const bool rgba = frame_->format == DXGI_FORMAT_R8G8B8A8_UNORM;
+            const unsigned char red = static_cast<unsigned char>(id & 255);
+            const unsigned char expected[] = {rgba ? red : static_cast<unsigned char>(64),
+                static_cast<unsigned char>((id >> 8) & 255), rgba ? static_cast<unsigned char>(64) : red, 255};
             unsigned char* data = nullptr;
-            D3D12_RANGE range{0, static_cast<SIZE_T>(footprint_.Footprint.RowPitch) * frame_->height};
+            D3D12_RANGE range{0, readbackBytes_};
             Require(readback_->Map(0, &range, reinterpret_cast<void**>(&data)), "map verification pixels");
             bool valid = true;
             for (UINT y = 0; y < frame_->height && valid; ++y)
@@ -269,6 +316,7 @@ namespace
         SharedFrame* frame_ = nullptr;
         HWND window_ = nullptr;
         bool verify_ = false;
+        std::string capturePath_;
         bool ownsConsumer_ = false;
         bool reading_ = false;
         UINT64 lastFrame_ = 0;
@@ -282,6 +330,7 @@ namespace
         ComPtr<ID3D12GraphicsCommandList> commands_;
         ComPtr<IDXGISwapChain3> swapchain_;
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint_{};
+        SIZE_T readbackBytes_ = 0;
     };
 }
 
@@ -292,11 +341,17 @@ int main(int argc, char** argv)
     DWORD timeoutMs = 5000;
     bool verify = false;
     bool show = false;
+    std::string capturePath;
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg(argv[i]);
         if (arg == "--verify") verify = true;
         else if (arg == "--show") show = true;
+        else if (arg == "--capture-bmp" && i + 1 < argc)
+        {
+            capturePath = argv[++i];
+            if (capturePath.empty()) return 2;
+        }
         else if ((arg == "--pid" || arg == "--frames" || arg == "--timeout-ms") && i + 1 < argc)
         {
             char* end = nullptr;
@@ -308,7 +363,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            std::fprintf(stderr, "usage: frame_bridge_presenter --pid N [--frames N] [--timeout-ms N] [--show] [--verify]\n");
+            std::fprintf(stderr, "usage: frame_bridge_presenter --pid N [--frames N] [--timeout-ms N] [--show] [--verify] [--capture-bmp PATH]\n");
             return 2;
         }
     }
@@ -316,7 +371,7 @@ int main(int argc, char** argv)
     try
     {
         Consumer consumer;
-        consumer.Open(pid, show, verify);
+        consumer.Open(pid, show, verify, capturePath);
         return consumer.Run(frames, timeoutMs) == frames ? 0 : 1;
     }
     catch (const std::exception& error)

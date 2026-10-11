@@ -11,11 +11,13 @@ foreach ($file in @($sourceExe, $presenterExe)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Build first: $file" }
 }
 
-foreach ($case in @('single-sample', 'msaa4')) {
+foreach ($case in @('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra')) {
     $outFile = Join-Path $buildRoot "bridge-$case.out.log"
     $errFile = Join-Path $buildRoot "bridge-$case.err.log"
     $sourceArgs = @('10')
     if ($case -eq 'msaa4') { $sourceArgs += '--msaa' }
+    if ($case -like 'padded-*') { $sourceArgs += '--padded' }
+    if ($case -eq 'padded-bgra') { $sourceArgs += '--bgra' }
     # No elevation, injection or interactive helper window. The source exits on
     # its own deadline, including on a failing consumer. Never force-stop games.
     $sourceProcess = Start-Process -FilePath $sourceExe -ArgumentList $sourceArgs -WindowStyle Hidden `
@@ -53,9 +55,26 @@ foreach ($case in @('single-sample', 'msaa4')) {
             }
         }
         $presenterArgs = @('--pid', "$($sourceProcess.Id)", '--frames', '120', '--verify')
+        $captureFile = Join-Path $buildRoot "bridge-$case.bmp"
+        $presenterArgs += @('--capture-bmp', $captureFile)
         if ($Show) { $presenterArgs += '--show' }
         & $presenterExe @presenterArgs
         if ($LASTEXITCODE -ne 0) { throw "$case pixel verification failed" }
+        # Validate saved BGRA layout separately from the consumer's GPU checks.
+        # Odd width exercises the padded final row footprint caught by gameplay.
+        $bytes = [System.IO.File]::ReadAllBytes($captureFile)
+        $width = if ($case -like 'padded-*') { 333 } else { 320 }
+        $height = if ($case -like 'padded-*') { 181 } else { 180 }
+        if ($bytes.Length -ne 54 + $width * $height * 4 -or
+            [BitConverter]::ToUInt16($bytes, 0) -ne 0x4d42 -or
+            [BitConverter]::ToInt32($bytes, 18) -ne $width -or
+            [BitConverter]::ToInt32($bytes, 22) -ne -$height) { throw 'Invalid BMP size/orientation' }
+        for ($pixel = 54; $pixel -lt $bytes.Length; $pixel += 4) {
+            if ($bytes[$pixel] -ne 64 -or $bytes[$pixel + 1] -ne 0 -or
+                $bytes[$pixel + 2] -ne 120 -or $bytes[$pixel + 3] -ne 255) {
+                throw "Invalid BMP color at byte $pixel"
+            }
+        }
         # Reconnect while the producer is still alive; ownership must be
         # returned after GPU completion and frame numbering must stay aligned.
         & $presenterExe --pid $sourceProcess.Id --frames 80 --verify
