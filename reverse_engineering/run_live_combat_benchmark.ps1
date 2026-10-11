@@ -127,7 +127,8 @@ function Start-BenchmarkGame {
 
     $commandLine = if ($Arguments) { "`"$Exe`" $Arguments" } else { "`"$Exe`"" }
     $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
-        -Arguments @{ CommandLine = $commandLine; CurrentDirectory = $WorkingDirectory }
+        -Arguments @{ CommandLine = $commandLine; CurrentDirectory = $WorkingDirectory;
+                     ProcessStartupInformation = (New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]4 }) }
 
     if ($result.ReturnValue -ne 0 -or -not $result.ProcessId) {
         throw "WMI process create failed (ReturnValue=$($result.ReturnValue)) for $commandLine"

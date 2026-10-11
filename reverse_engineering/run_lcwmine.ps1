@@ -87,7 +87,7 @@ try {
     Write-Host "[lcwmine] deployed lcbench world + rmwmine.lua fixture"
 
     Assert-BZRSafeToLaunch
-    $proc = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" `
+    $proc = Start-BZRGameProcess -FilePath $gameExe -ArgumentList "lcbench.bzn" `
         -WorkingDirectory $GameRoot -PassThru
     Write-Host "[lcwmine] launched PID=$($proc.Id)"
     $deadline = (Get-Date).AddSeconds($RunSeconds)

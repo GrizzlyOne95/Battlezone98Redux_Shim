@@ -92,7 +92,7 @@ try {
 
     $t0 = Get-Date
     Assert-BZRSafeToLaunch
-    Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot | Out-Null
+    Start-BZRGameProcess -FilePath $gameExe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot | Out-Null
     # battlezone98redux.exe re-execs: follow the process by name, not the
     # launch pid.
     $deadline = $t0.AddSeconds($RunSeconds)

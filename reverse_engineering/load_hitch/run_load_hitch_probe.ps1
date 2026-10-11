@@ -63,7 +63,7 @@ try {
  [IO.File]::WriteAllText($selection,$modRoot+"`r`n",[Text.UTF8Encoding]::new($false))
  $launchUtc=[DateTime]::UtcNow
  Assert-BZRSafeToLaunch
- $gameProc=Start-Process -FilePath (Join-Path $gameRoot 'battlezone98redux.exe') -ArgumentList @('ncprobe.bzn','/nointro',('/renderer:'+$Renderer.ToLowerInvariant())) -WorkingDirectory $gameRoot -WindowStyle $WindowStyle -PassThru
+ $gameProc=Start-BZRGameProcess -FilePath (Join-Path $gameRoot 'battlezone98redux.exe') -ArgumentList @('ncprobe.bzn','/nointro',('/renderer:'+$Renderer.ToLowerInvariant())) -WorkingDirectory $gameRoot -WindowStyle $WindowStyle -PassThru
  Write-Output "Started load-hitch probe PID=$($gameProc.Id)"
  for($i=0;$i -lt $Seconds;$i+=2){
   Start-Sleep -Seconds 2
