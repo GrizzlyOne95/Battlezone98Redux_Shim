@@ -139,6 +139,7 @@ commit = "drive"
     $existing = @(Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue)
     if ($existing.Count -gt 0) { throw "Refusing to start while another Battlezone process is running" }
 
+    Assert-BZRSafeToLaunch
     $process = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot -PassThru
     Write-Host "[drive] launched pid=$($process.Id); waiting ${LoadSeconds}s for mission load + possession"
     Start-Sleep -Seconds $LoadSeconds

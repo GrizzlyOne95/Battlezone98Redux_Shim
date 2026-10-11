@@ -56,6 +56,7 @@ try {
     # 16-byte buffer, so "addon/lcbench/lcbench.bzn" arrives truncated to
     # "addon/lcbench/l" and the load fails. run_lcwalk_drive.ps1 uses the
     # same bare form.
+    Assert-BZRSafeToLaunch
     $proc = Start-Process -FilePath $exe -ArgumentList "lcbench.bzn" `
         -WorkingDirectory $GameRoot -PassThru
     Write-Host "[probe] launched PID=$($proc.Id)"

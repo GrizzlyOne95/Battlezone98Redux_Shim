@@ -105,6 +105,8 @@ $probeArgs = @(
 $probeProc = Start-Process -FilePath $python.Source -ArgumentList $probeArgs -PassThru `
     -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -WindowStyle Minimized
 
+if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
+Assert-BZRSafeToLaunch
 $gameProc = Start-Process -FilePath $gameExe -ArgumentList "misn03.bzn" -PassThru -WorkingDirectory $GameRoot
 
 if ($StartupSettleSeconds -gt 0) {
