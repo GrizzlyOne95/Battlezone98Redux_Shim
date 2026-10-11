@@ -81,5 +81,76 @@ namespace BZROpenShim
         {
             return hasTarget && targetRoot != foreground;
         }
+
+        // ---- z-order: never cover the user's foreground app ----------------
+        // SW_SHOWNOACTIVATE / SWP_NOACTIVATE still place a window at the top
+        // of the z-order, which paints it over a borderless fullscreen game.
+        // Top-level windows are therefore always pushed to HWND_BOTTOM.
+        constexpr std::uintptr_t kHwndBottom = 1;     // (HWND)1
+        constexpr std::uintptr_t kHwndTop = 0;        // (HWND)0
+        // HWND_NOTOPMOST (-2) also lands on top of every non-topmost window.
+
+        constexpr std::uint32_t kSwpNoSize = 0x0001;
+        constexpr std::uint32_t kSwpNoMove = 0x0002;
+        constexpr std::uint32_t kSwpNoZOrder = 0x0004;
+        constexpr std::uint32_t kSwpShowWindow = 0x0040;
+        constexpr std::uint32_t kSwpNoOwnerZOrder = 0x0200;
+        constexpr std::uint32_t kWsExTopmost = 0x00000008;
+
+        // Flags for the follow-up "send to bottom" call.
+        constexpr std::uint32_t BottomPushFlags()
+        {
+            return kSwpNoMove | kSwpNoSize | kSwpNoActivate | kSwpNoOwnerZOrder;
+        }
+
+        inline std::uint32_t StyleExWithoutTopmost(std::uint32_t exStyle)
+        {
+            return exStyle & ~kWsExTopmost;
+        }
+
+        // A ShowWindow command that makes the window visible needs a push.
+        inline bool ShowCommandNeedsBottomPush(int mappedCmd)
+        {
+            return mappedCmd != kSwHide;
+        }
+
+        // SetWindowPos z-order rewrite: any insert-after other than HWND_BOTTOM
+        // becomes HWND_BOTTOM, unless the caller asked to keep the z-order.
+        inline std::uintptr_t RewriteInsertAfter(std::uintptr_t insertAfter, std::uint32_t flags, bool topLevel)
+        {
+            if (!topLevel || (flags & kSwpNoZOrder) != 0)
+                return insertAfter;
+            return kHwndBottom;
+        }
+
+        // SWP_SHOWWINDOW with SWP_NOZORDER can still surface a freshly shown window.
+        inline bool SetPosNeedsBottomPush(std::uint32_t flags, bool topLevel)
+        {
+            return topLevel && (flags & kSwpShowWindow) != 0 && (flags & kSwpNoZOrder) != 0;
+        }
+
+        // ---- app-active gate -------------------------------------------------
+        // The game's "app active" flag (exe global read by the main loop)
+        // is seeded from GetActiveWindow() == gameWindow && !IsIconic(gameWindow)
+        // and flipped by WM_ACTIVATEAPP. A never-activated window gets neither,
+        // so the single-player sim idles. The exe's own GetActiveWindow import
+        // reports the game window as the thread's active window instead.
+        // Keyboard and raw mouse still arrive only through the real foreground
+        // window (WM_INPUT is registered without RIDEV_INPUTSINK).
+        inline std::uintptr_t ReportedActiveWindow(std::uintptr_t real, std::uintptr_t gameWindow, bool gameWindowValid)
+        {
+            if (real != 0 || gameWindow == 0 || !gameWindowValid)
+                return real;
+            return gameWindow;
+        }
+
+        // Which window is "the game window": prefer an Ogre-class window,
+        // otherwise the first top-level window shown. Never replace an Ogre one.
+        inline bool ShouldRecordGameWindow(bool currentIsSet, bool currentIsOgre, bool candidateIsOgre)
+        {
+            if (!currentIsSet)
+                return true;
+            return !currentIsOgre && candidateIsOgre;
+        }
     }
 }
