@@ -160,6 +160,12 @@ function Get-HashOrNull {
 
 function Stop-ProcessByNameIfPresent {
     param([string]$Name)
+    if ($Name -eq "battlezone98redux") {
+        # Never force-kill the game (AGENTS.md): close it gracefully via the harness.
+        if (-not (Get-Command Stop-BZRGame -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
+        Get-Process -Name $Name -ErrorAction SilentlyContinue | ForEach-Object { Stop-BZRGame -Id $_.Id }
+        return
+    }
     Get-Process -Name $Name -ErrorAction SilentlyContinue | Stop-Process -Force
 }
 

@@ -144,6 +144,94 @@ namespace BZROpenShim
             return gameWindow;
         }
 
+        // ---- WS_EX_NOACTIVATE: the OS must not activate the window either ----
+        // Hooks stop the game from activating itself, but when the user's
+        // foreground window closes or minimizes, Windows activates the next
+        // top-level window in z-order, which is our bottom-most game window.
+        // WS_EX_NOACTIVATE makes a top-level window ineligible.
+        constexpr std::uint32_t kWsExToolWindow = 0x00000080;
+        constexpr std::uint32_t kWsExAppWindow = 0x00040000;
+        constexpr std::uint32_t kWsExNoActivate = 0x08000000;
+        constexpr int kGwlExStyle = -20;
+
+        // The extended style a top-level window must carry. Children are untouched.
+        inline std::uint32_t ExStyleWithNoActivate(std::uint32_t exStyle, bool topLevel)
+        {
+            return topLevel ? (exStyle | kWsExNoActivate) : exStyle;
+        }
+
+        // WS_EX_NOACTIVATE drops the taskbar button; WS_EX_APPWINDOW restores
+        // it. Only for windows that would have had one: unowned, not a tool window.
+        inline bool ShouldAddAppWindow(std::uint32_t exStyle, bool topLevel, bool hasOwner)
+        {
+            return topLevel && !hasOwner && (exStyle & kWsExToolWindow) == 0;
+        }
+
+        // CreateWindowEx: NOACTIVATE (plus APPWINDOW where a button existed).
+        inline std::uint32_t CreateExStyle(std::uint32_t exStyle, std::uint32_t style, bool hasOwner)
+        {
+            const bool topLevel = (style & kWsChild) == 0;
+            const bool appWindow = ShouldAddAppWindow(exStyle, topLevel, hasOwner);
+            std::uint32_t result = ExStyleWithNoActivate(exStyle, topLevel);
+            return appWindow ? (result | kWsExAppWindow) : result;
+        }
+
+        // SetWindowLong: only GWL_EXSTYLE writes on a top-level window are rewritten,
+        // so the bit cannot be cleared later. The APPWINDOW bit is left as written.
+        inline std::uint32_t SetWindowLongValue(int index, std::uint32_t value, bool topLevel)
+        {
+            return index == kGwlExStyle ? ExStyleWithNoActivate(value, topLevel) : value;
+        }
+
+        // ---- intentional user click ------------------------------------------
+        // A real click on the game window is the user asking for it: from then
+        // on activation is allowed for the rest of the session. Posted clicks
+        // (BZRWindowInput.ps1 uses PostMessage) must not count; they leave the
+        // physical button state and the cursor untouched, so a click counts only
+        // when the button is physically down AND the cursor is over the window.
+        constexpr std::uint32_t kWmLButtonDown = 0x0201;
+        constexpr std::uint32_t kWmRButtonDown = 0x0204;
+        constexpr std::uint32_t kWmMButtonDown = 0x0207;
+        constexpr std::uint32_t kWmNcLButtonDown = 0x00A1;
+        constexpr std::uint32_t kWmNcRButtonDown = 0x00A4;
+        constexpr std::uint32_t kWmNcMButtonDown = 0x00A7;
+
+        inline bool IsButtonDownMessage(std::uint32_t msg)
+        {
+            return msg == kWmLButtonDown || msg == kWmRButtonDown || msg == kWmMButtonDown ||
+                   msg == kWmNcLButtonDown || msg == kWmNcRButtonDown || msg == kWmNcMButtonDown;
+        }
+
+        inline bool IsUserClick(std::uint32_t msg, bool targetIsGameWindow, bool cursorInsideWindow, bool buttonPhysicallyDown)
+        {
+            return IsButtonDownMessage(msg) && targetIsGameWindow && cursorInsideWindow && buttonPhysicallyDown;
+        }
+
+        // Virtual key to poll for the physical state of a button-down message.
+        inline int ButtonVirtualKey(std::uint32_t msg)
+        {
+            switch (msg)
+            {
+            case kWmLButtonDown:
+            case kWmNcLButtonDown:
+                return 0x01; // VK_LBUTTON
+            case kWmRButtonDown:
+            case kWmNcRButtonDown:
+                return 0x02; // VK_RBUTTON
+            case kWmMButtonDown:
+            case kWmNcMButtonDown:
+                return 0x04; // VK_MBUTTON
+            default:
+                return 0;
+            }
+        }
+
+        // Once the user has clicked in, every suppression stands down.
+        inline bool ShouldSuppress(bool userActivated)
+        {
+            return !userActivated;
+        }
+
         // Which window is "the game window": prefer an Ogre-class window,
         // otherwise the first top-level window shown. Never replace an Ogre one.
         inline bool ShouldRecordGameWindow(bool currentIsSet, bool currentIsOgre, bool candidateIsOgre)

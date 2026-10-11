@@ -99,10 +99,15 @@ public static class BZRForegroundWatchdog
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder text, int max);
     [DllImport("user32.dll")] static extern void SwitchToThisWindow(IntPtr hwnd, bool fAltTab);
     [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
     delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+    [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT pt);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT pt);
     const uint WM_CLOSE = 0x0010;
     [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
     [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
@@ -112,6 +117,34 @@ public static class BZRForegroundWatchdog
     static int running = 0;
 
     public static string LogPath = Path.Combine(Path.GetTempPath(), "bzr_foreground_watchdog.log");
+
+    // "class=<window class> process=<name>" for a window, captured while it is
+    // foreground so a later steal can say what the OS took the foreground from.
+    static string Describe(IntPtr hwnd, uint pid)
+    {
+        string cls = "?", proc = "?";
+        try { System.Text.StringBuilder sb = new System.Text.StringBuilder(256); if (GetClassName(hwnd, sb, sb.Capacity) > 0) cls = sb.ToString(); } catch { }
+        try { if (pid != 0) proc = Process.GetProcessById((int)pid).ProcessName; } catch { }
+        return "class=" + cls + " process=" + proc;
+    }
+
+    // True when a physical left/right/middle button is down (or was pressed since the
+    // last poll) with the cursor over a window owned by the game. PostMessage-driven
+    // harness clicks change neither, so they never match.
+    static bool PhysicalPressOverGame(string gameName)
+    {
+        bool pressed = false;
+        foreach (int vk in new int[] { 0x01, 0x02, 0x04 })
+            if ((GetAsyncKeyState(vk) & 0x8001) != 0) pressed = true;
+        if (!pressed) return false;
+        POINT pt;
+        if (!GetCursorPos(out pt)) return false;
+        IntPtr under = WindowFromPoint(pt);
+        if (under == IntPtr.Zero) return false;
+        uint upid;
+        GetWindowThreadProcessId(under, out upid);
+        return IsGame(upid, gameName);
+    }
 
     static void Note(string text)
     {
@@ -150,6 +183,19 @@ public static class BZRForegroundWatchdog
         return true;
     }
 
+    // Posts WM_CLOSE to every top-level window of one process. Graceful only.
+    public static int PostCloseToProcess(int processId)
+    {
+        int posted = 0;
+        EnumWindows(delegate(IntPtr hwnd, IntPtr lp) {
+            uint wpid;
+            GetWindowThreadProcessId(hwnd, out wpid);
+            if (wpid == (uint)processId && PostMessage(hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero)) posted++;
+            return true;
+        }, IntPtr.Zero);
+        return posted;
+    }
+
     // Posts WM_CLOSE to every top-level window owned by the game. Graceful only.
     static int CloseGameWindows(string gameName)
     {
@@ -167,9 +213,11 @@ public static class BZRForegroundWatchdog
     {
         bool aborted = false;
         IntPtr previous = IntPtr.Zero;
+        string previousDesc = "class=? process=?";
         Stopwatch wait = Stopwatch.StartNew();
         Stopwatch watch = null;
         int reported = 0;
+        long lastGamePress = long.MinValue;
         while (true)
         {
             IntPtr fg = GetForegroundWindow();
@@ -185,14 +233,25 @@ public static class BZRForegroundWatchdog
             else if (watch.ElapsedMilliseconds > watchMs) { Note("watchdog window over; reported " + reported + " steal(s)"); return; }
             else if (Process.GetProcessesByName(gameName).Length == 0) { Note("game exited; reported " + reported + " steal(s)"); return; }
 
+            if (watch != null && PhysicalPressOverGame(gameName)) lastGamePress = Environment.TickCount;
             if (!gameFg)
             {
-                if (fg != IntPtr.Zero) previous = fg;
+                if (fg != IntPtr.Zero)
+                {
+                    if (fg != previous) previousDesc = Describe(fg, pid);
+                    previous = fg;
+                }
+            }
+            else if (watch != null && lastGamePress != long.MinValue && unchecked(Environment.TickCount - (int)lastGamePress) < 1000)
+            {
+                // The user clicked the game window: activation is intentional.
+                Note("user activated the game window (intentional); not a steal, focus left alone, watchdog done");
+                return;
             }
             else if (watch != null)
             {
                 reported++;
-                Note("FOREGROUND-STOLEN: game pid " + pid + " took the foreground (previous hwnd 0x" + previous.ToInt64().ToString("X") + ")");
+                Note("FOREGROUND-STOLEN: game pid " + pid + " took the foreground (previous hwnd 0x" + previous.ToInt64().ToString("X") + " " + previousDesc + ")");
                 if (previous != IntPtr.Zero && IsWindow(previous))
                 {
                     bool ok = SetForegroundWindow(previous);
@@ -506,7 +565,20 @@ function Assert-BZRSafeToLaunch {
         which covers the launch that follows this call.
     #>
     [CmdletBinding()]
-    param()
+    param(
+        # Multi-client launchers (BZRCoopSession) start several games on purpose.
+        [switch]$AllowRunning
+    )
+
+    # Stop-BZRGame never force-kills, so a game that ignored WM_CLOSE is still
+    # alive. Launching on top of it is how a wedged display stack happens.
+    if (-not $AllowRunning) {
+        $running = @(Get-Process -Name $script:BZRGameProcessName -ErrorAction SilentlyContinue)
+        if ($running.Count -gt 0) {
+            throw ("Refusing to launch Battlezone: {0} already running (pid {1}). Stop-BZRGame never " +
+                   "force-kills; close it by hand or wait for it to exit.") -f $script:BZRGameProcessName, (($running | ForEach-Object { $_.Id }) -join ', ')
+        }
+    }
 
     $override = ($env:BZR_ALLOW_FOREGROUND_LAUNCH -eq '1') -or ($env:BZR_ALLOW_LAUNCH_WHILE_BUSY -eq '1')
     if (-not $override) {
@@ -553,18 +625,22 @@ function Start-BZRGameProcess {
 function Stop-BZRGame {
     <#
     .SYNOPSIS
-        Shuts the game down without deadlocking the display stack.
+        Shuts the game down without deadlocking the display stack. Never kills it.
     .DESCRIPTION
-        Sends WM_CLOSE and waits, so the engine can tear its swap chain down and
-        hand the exclusive-fullscreen mode back to the driver. Only escalates to
-        TerminateProcess for a process that ignored the close request, which is
-        the genuinely-hung case where there is nothing gentler left to try.
-        Pass -NoForce for probes that must leave an unresponsive game running
-        rather than terminate it. The caller receives an error in that case.
+        Posts WM_CLOSE to every top-level window of the game and re-posts it every
+        5 s for up to -TimeoutSeconds (default 60), so the engine can tear its swap
+        chain down and hand the exclusive-fullscreen mode back to the driver.
+        A game that still ignores the request is LEFT RUNNING: the function logs
+        "game ignored WM_CLOSE; left running (never force-kill)" and writes an
+        error. Force-killing a process that owns the D3D device can hard-lock the
+        workstation (AGENTS.md). Callers must not launch the next run while the
+        process exists; Assert-BZRSafeToLaunch enforces that.
 
-        This is a drop-in replacement for the old
-            Get-Process -Name "battlezone98redux" | Stop-Process -Force
-        and is safe to call when the game is not running.
+        -Force terminates a non-responsive process and exists for the rare manual
+        case only. No script in reverse_engineering/ or scripts/ may pass it.
+        -NoForce is accepted for old callers and is now the default behaviour.
+
+        Safe to call when the game is not running.
     #>
     [CmdletBinding(DefaultParameterSetName = 'ByName')]
     param(
@@ -577,8 +653,9 @@ function Stop-BZRGame {
         [int[]]$Id,
         # Generous by design: a DX11 fullscreen teardown at 4K can take several
         # seconds, and waiting is always cheaper than a hard restart.
-        [int]$TimeoutSeconds = 15,
+        [int]$TimeoutSeconds = 60,
         [switch]$NoForce,
+        [switch]$Force,
         # Time for the driver to finish releasing the adapter before the caller
         # launches again. Back-to-back mode-sets are what wedged the stack.
         [int]$SettleMilliseconds = 750
@@ -593,7 +670,7 @@ function Stop-BZRGame {
                        'explorer', 'node', 'code', 'claude', 'opencode')
         foreach ($n in $Name) {
             if ($protected -contains $n) {
-                throw ("Stop-BZRGame refuses to name-match '$n': killing every " +
+                throw ("Stop-BZRGame refuses to name-match '$n': closing every " +
                        "instance would take out unrelated shells and harness runs. " +
                        "Pass -Id if you really mean one specific process.")
             }
@@ -601,6 +678,7 @@ function Stop-BZRGame {
     }
 
     $sawAnyProcess = $false
+    $leftRunning = @()
 
     $targets = if ($PSCmdlet.ParameterSetName -eq 'ById') {
         @($Id | ForEach-Object { ,@(Get-Process -Id $_ -ErrorAction SilentlyContinue) })
@@ -608,53 +686,45 @@ function Stop-BZRGame {
         @($Name | ForEach-Object { ,@(Get-Process -Name $_ -ErrorAction SilentlyContinue) })
     }
 
-    foreach ($procs in $targets) {
-        $procs = @($procs)
-        if ($procs.Count -eq 0) { continue }
-        $sawAnyProcess = $true
-        $procName = $procs[0].ProcessName
+    $canPostAll = [bool]([BZRForegroundWatchdog].GetMethod('PostCloseToProcess'))
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $alive = @()
+    foreach ($procs in $targets) { $alive += @($procs) }
+    if ($alive.Count -gt 0) { $sawAnyProcess = $true }
 
-        # Ask first. CloseMainWindow returns $false when the process has no main
-        # window yet (still starting up) or has stopped pumping messages; track
-        # that so a process that cannot accept WM_CLOSE is not waited on for the
-        # full timeout.
-        $accepted = $false
-        foreach ($p in $procs) {
+    while ($true) {
+        # (Re-)ask every 5 s. CloseMainWindow covers a stale type without the helper.
+        foreach ($p in $alive) {
             try {
-                if (-not $p.HasExited -and $p.CloseMainWindow()) { $accepted = $true }
-            } catch {
-                # Process exited between Get-Process and here; nothing to close.
-            }
-        }
-
-        $graceMs = if ($accepted -or $NoForce) { $TimeoutSeconds * 1000 } else { 2000 }
-        $deadline = (Get-Date).AddMilliseconds($graceMs)
-
-        foreach ($p in $procs) {
-            $remaining = [int](($deadline - (Get-Date)).TotalMilliseconds)
-            if ($remaining -le 0) { break }
-            try { $p.WaitForExit($remaining) | Out-Null } catch { }
-        }
-
-        # Escalate only for whatever is still standing.
-        foreach ($p in $procs) {
-            $p.Refresh()
-            if (-not $p.HasExited -and $NoForce) {
-                throw ("{0} (pid {1}) is still running after the close request; -NoForce leaves it running." -f $procName, $p.Id)
-            }
-            try {
-                $p.Refresh()
-                if ($p.HasExited) { continue }
-                $msg = "{0} (pid {1}) ignored WM_CLOSE after {2:N1}s; force-killing. " +
-                        "If this recurs, capture the hang rather than looping."
-                Write-Warning ($msg -f $procName, $p.Id, ($graceMs / 1000))
-                Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+                if ($canPostAll) { [void][BZRForegroundWatchdog]::PostCloseToProcess($p.Id) }
+                elseif (-not $p.HasExited) { [void]$p.CloseMainWindow() }
             } catch { }
+        }
+        $sliceEnd = [DateTime]::Now.AddSeconds(5)
+        foreach ($p in $alive) {
+            $remaining = [int][Math]::Max(0, ([DateTime]$sliceEnd - (Get-Date)).TotalMilliseconds)
+            try { [void]$p.WaitForExit($remaining) } catch { }
+        }
+        $alive = @($alive | Where-Object { try { $_.Refresh(); -not $_.HasExited } catch { $false } })
+        if ($alive.Count -eq 0 -or (Get-Date) -ge $deadline) { break }
+    }
+
+    foreach ($p in $alive) {
+        if ($Force) {
+            Write-Warning ("{0} (pid {1}) ignored WM_CLOSE for {2}s; -Force terminating (manual use only)." -f $p.ProcessName, $p.Id, $TimeoutSeconds)
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+        } else {
+            Write-Warning ("game ignored WM_CLOSE; left running (never force-kill): {0} pid {1}" -f $p.ProcessName, $p.Id)
+            $leftRunning += $p.Id
         }
     }
 
     if ($sawAnyProcess -and $SettleMilliseconds -gt 0) {
         Start-Sleep -Milliseconds $SettleMilliseconds
+    }
+
+    if ($leftRunning.Count -gt 0) {
+        Write-Error ("game ignored WM_CLOSE for {0}s; left running (never force-kill): pid {1}. Do not launch another run until it exits." -f $TimeoutSeconds, ($leftRunning -join ', '))
     }
 }
 
@@ -673,7 +743,7 @@ function Enter-BZRLaunchLock {
     [CmdletBinding()]
     param([int]$TimeoutSeconds = 1800)
 
-    Assert-BZRSafeToLaunch
+    Assert-BZRSafeToLaunch -AllowRunning
 
     $mutex = New-Object System.Threading.Mutex($false, 'Local\BZROpenShimGameLaunch')
     try {

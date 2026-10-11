@@ -73,7 +73,7 @@ $originalMissionConfig = if (Test-Path -LiteralPath $missionConfig) {
 } else { $null }
 
 try {
-    Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue | Stop-Process -Force
+    if (-not (Get-Command Stop-BZRGame -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }; Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue | ForEach-Object { Stop-BZRGame -Id $_.Id }
     Start-Sleep -Seconds 2
 
     $renderSystem = if ($Renderer -eq "DX9") {
@@ -169,7 +169,7 @@ spinSeconds = $($SpinSeconds.ToString("0.0###", $invariant))
 
     $process.Refresh()
     if (-not $process.HasExited) { $process.WaitForExit(25000) | Out-Null }
-    Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue | Stop-Process -Force
+    if (-not (Get-Command Stop-BZRGame -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }; Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue | ForEach-Object { Stop-BZRGame -Id $_.Id }
 
     if (Test-Path -LiteralPath $shimLog) {
         Copy-Item -LiteralPath $shimLog -Destination (Join-Path $runRoot "openshim.log") -Force
