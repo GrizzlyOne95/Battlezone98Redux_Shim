@@ -44,7 +44,7 @@ if ($had) { Copy-Item -LiteralPath $live -Destination (Join-Path $OutputRoot "lc
 try {
     Copy-Item -LiteralPath $overlay -Destination $live -Force
     Assert-BZRSafeToLaunch   # refuses unless the game cannot steal foreground/mouse; starts the watchdog
-    $process = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot -PassThru
+    $process = Start-BZRGameProcess -FilePath $gameExe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot -PassThru
     if ($RunSeconds -gt 0) {
         if (-not $process.WaitForExit($RunSeconds * 1000)) { Stop-BZRGame -Id $process.Id }
     } else {

@@ -24,11 +24,11 @@ local function BuildPosition(i)
         local ok, f = pcall(GetFront, player)
         if ok and f then front = f end
     end
-    -- A row 9 m in front of where the player faces, 4 m apart, side to side.
+    -- A row 4.5 m in front of where the player faces, 4 m apart, side to side.
     local right = SetVector(front.z, 0.0, -front.x)
-    local across = (i - 2.5) * 4.0
-    return SetVector(origin.x + front.x * 9.0 + right.x * across, origin.y,
-                     origin.z + front.z * 9.0 + right.z * across)
+    local across = (i - 2.5) * 2.5
+    return SetVector(origin.x + front.x * 4.5 + right.x * across, origin.y,
+                     origin.z + front.z * 4.5 + right.z * across)
 end
 
 function Start()
