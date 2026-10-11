@@ -2023,6 +2023,8 @@ namespace BZROpenShim
         void RevertPilotFlashlightToBaseline();
         void ForgetPilotFlashlight(const wchar_t* reason);
         void PilotFlashlightNotifyMissionRunStateChanged(bool enteringSimulation);
+        // Marks every cached light list dirty when the engine replaces the sun.
+        void WatchSunLightReplacement();
         bool IsPilotOnFoot(void* player);
     }
 }

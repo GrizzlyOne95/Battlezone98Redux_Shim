@@ -7,6 +7,7 @@
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "headlight_falloff.h"
+#include "hook_engine.h"
 #include "patcher.h"
 #include "shim_log.h"
 
@@ -149,6 +150,15 @@ namespace BZROpenShim
         static DWORD g_PilotFlashlightLastRefreshTick = 0;
         static uint32_t g_PilotFlashlightCreations = 0;
         static uint32_t g_PilotFlashlightForgets = 0;
+        // An in-place class swap builds the new pilot and then removes the old
+        // one, and that removal also destroys and rebuilds the sun. A light
+        // created in the same tick has been seen landing at the freed sun's
+        // address. Wait until the same pilot and node have been seen for this
+        // long before building, so the swap's teardown has finished first.
+        static constexpr DWORD kPilotFlashlightSettleMs = 400;
+        static void* g_PilotFlashlightCandidateOwner = nullptr;
+        static void* g_PilotFlashlightCandidateNode = nullptr;
+        static DWORD g_PilotFlashlightCandidateSinceTick = 0;
         // Every ineligibility path below is silent by design -- it runs at the
         // render cadence -- so a feature that never lights up leaves no trace at
         // all. This budgeted opt-in trace names the exact step that refused.
@@ -708,8 +718,23 @@ namespace BZROpenShim
             TracePilotFlashlight(
                 g_PilotFlashlightLight ? L"eligible-have-light" : L"eligible-creating",
                 player, node);
-            if (!g_PilotFlashlightLight && !CreatePilotFlashlight(player, node))
-                return;
+            if (!g_PilotFlashlightLight)
+            {
+                if (g_PilotFlashlightCandidateOwner != player ||
+                    g_PilotFlashlightCandidateNode != node)
+                {
+                    g_PilotFlashlightCandidateOwner = player;
+                    g_PilotFlashlightCandidateNode = node;
+                    g_PilotFlashlightCandidateSinceTick = now;
+                    TracePilotFlashlight(L"settling", player, node);
+                    return;
+                }
+                if (static_cast<DWORD>(now - g_PilotFlashlightCandidateSinceTick) <
+                    kPilotFlashlightSettleMs)
+                    return;
+                if (!CreatePilotFlashlight(player, node))
+                    return;
+            }
 
             float r = g_PilotFlashlightColourR;
             float g = g_PilotFlashlightColourG;
@@ -900,6 +925,99 @@ namespace BZROpenShim
                 static_cast<double>(g_PilotFlashlightOffsetZ),
                 static_cast<double>(g_PilotFlashlightPitchDegrees));
             RefreshPilotFlashlightState();
+        }
+
+        // --- Sun replacement watch -----------------------------------------
+        // The sun (terrain_masterlight) lives in one engine global. Destroying
+        // a GameObject with render info deletes it -- RemoveObject of the old
+        // pilot in an in-place class swap does -- and the next frame builds a
+        // new one at a new address. Every cached per-object light list still
+        // names the old one until something marks the lists dirty, so the
+        // world can draw without its sun. Mark them dirty whenever the global
+        // changes within one scene. Pure render state: no simulation effect,
+        // so it is not gated on SP.
+        using FnOgreNotifyLightsDirty = void(__thiscall*)(void*);
+        static uint32_t g_SunLightGlobalAddr = 0;
+        static FnOgreNotifyLightsDirty g_NotifyLightsDirty = nullptr;
+        static int g_SunWatchBound = 0;  // 0 untried, 1 bound, -1 stood down
+        static void* g_LastSunLight = nullptr;
+        static void* g_LastSunSceneManager = nullptr;
+        static uint32_t g_SunReplacements = 0;
+        static constexpr uint32_t kSunReplacementLogLimit = 20;
+
+        static bool BindSunWatch()
+        {
+            if (g_SunWatchBound == 0)
+            {
+                const HookEngine::EngineRow rows[] = {
+                    { "TerrainMasterLight", &g_SunLightGlobalAddr },
+                };
+                g_NotifyLightsDirty = ResolveOgreProc<FnOgreNotifyLightsDirty>(
+                    "?_notifyLightsDirty@SceneManager@Ogre@@UAEXXZ");
+                g_SunWatchBound =
+                    HookEngine::BindEngineRows("Sun light watch", rows) && g_NotifyLightsDirty
+                        ? 1 : -1;
+                if (g_SunWatchBound < 0)
+                    Log(L"[SUNWATCH] stood down (row or Ogre export unresolved)\n");
+            }
+            return g_SunWatchBound > 0;
+        }
+
+        static void* ReadSunLight()
+        {
+            __try
+            {
+                return *reinterpret_cast<void* const*>(
+                    static_cast<uintptr_t>(g_SunLightGlobalAddr));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        static bool NotifySceneLightsDirty(void* sceneManager)
+        {
+            __try
+            {
+                g_NotifyLightsDirty(sceneManager);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        void WatchSunLightReplacement()
+        {
+            if (!BindSunWatch())
+                return;
+            void* const sceneManager = GetOgreSceneManagerRuntime();
+            void* const sun = ReadSunLight();
+            // While the sun is null between destroy and rebuild, keep the last
+            // pointer so the rebuilt one still reads as a change.
+            if (!sceneManager || !sun)
+                return;
+            if (sun == g_LastSunLight && sceneManager == g_LastSunSceneManager)
+                return;
+
+            void* const previous = g_LastSunLight;
+            const bool sameScene = sceneManager == g_LastSunSceneManager;
+            g_LastSunLight = sun;
+            g_LastSunSceneManager = sceneManager;
+            if (!previous || !sameScene)
+                return;  // first sun of this scene: nothing cached yet
+
+            const bool notified = NotifySceneLightsDirty(sceneManager);
+            if (++g_SunReplacements <= kSunReplacementLogLimit)
+            {
+                Log(L"[SUNWATCH] sun replaced 0x%08X -> 0x%08X; light lists %ls (#%u)\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(previous)),
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sun)),
+                    notified ? L"marked dirty" : L"NOT marked (fault)",
+                    static_cast<unsigned>(g_SunReplacements));
+            }
         }
 
         void RevertPilotFlashlightToBaseline()

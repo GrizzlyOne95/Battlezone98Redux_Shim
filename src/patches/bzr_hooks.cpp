@@ -1694,6 +1694,10 @@ namespace BZROpenShim
         // while a world is rendered, on or off foot.
         RefreshPilotFlashlightState();
 
+        // The sun can be destroyed and rebuilt mid-mission; repopulate light
+        // lists the frame that happens. One global read per call otherwise.
+        WatchSunLightReplacement();
+
         // Uses the existing SP gate; no allocation/work until a qualified
         // presentation backend is registered. Never advance simulation here.
         RefreshWeaponPresentationState();

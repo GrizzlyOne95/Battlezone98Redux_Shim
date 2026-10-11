@@ -50,6 +50,7 @@ namespace BZROpenShim
         uintptr_t g_IsNetGameAddr = 0;
         uintptr_t g_EditModeAddr = 0;
         uintptr_t g_QueuedLoadNameBufferAddr = 0;
+        uintptr_t g_CurrentAiMissionAddr = 0;
         constexpr size_t kQueuedLoadNameBufferLen = 16;
 
         // Existing patch-catalog slot for LegacyWorld::updateRenderQueue:
@@ -67,6 +68,7 @@ namespace BZROpenShim
                     { "IsNetGameFlag", &g_IsNetGameAddr },
                     { "TerrainEditMode", &g_EditModeAddr },
                     { "QueuedLoadNameBuffer", &g_QueuedLoadNameBufferAddr },
+                    { "CurrentAiMission", &g_CurrentAiMissionAddr },
                     { "DynamicGeometryVtable", &vtable },
                 };
                 if (!HookEngine::BindEngineRows("AutoSave", rows))
@@ -1041,6 +1043,21 @@ namespace BZROpenShim
                     IsTerrainEditActive() ? 1u : 0u);
                 s_lastDeferLogTick = now;
                 s_lastDeferReason = gate.reason;
+            }
+            return;
+        }
+
+        // SaveGame serializes the current AiMission without a null check, and
+        // the player object can exist while that global is still (or already)
+        // null: observed as a 0xC0000005 at 0x005D7593 about 10 s into a mission.
+        void* aiMission = nullptr;
+        if (!SafeReadPointer(g_CurrentAiMissionAddr, aiMission) || !aiMission)
+        {
+            static ULONGLONG s_lastNoMissionLogTick = 0;
+            if (now - s_lastNoMissionLogTick >= 5000ULL)
+            {
+                LogShimA(LogLevel::Debug, "autosave", "Deferring autosave: no current AiMission yet");
+                s_lastNoMissionLogTick = now;
             }
             return;
         }
