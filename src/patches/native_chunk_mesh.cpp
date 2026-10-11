@@ -745,7 +745,11 @@ struct PhaseClock
 } // namespace
 #define GIB_PHASE_BEGIN PhaseClock phaseClock
 #define GIB_PHASE(n) phaseClock.mark(n)
+// Cap outcomes: rings at full / 0.6 / 0.3 strength, fan (not eligible), fan (folded).
+double g_gibCapStats[8] = {};
+#define CAP_STAT(i) (g_gibCapStats[i] += 1.0)
 #else
+#define CAP_STAT(i) ((void)0)
 #define GIB_PHASE_BEGIN ((void)0)
 #define GIB_PHASE(n) ((void)0)
 #endif
@@ -1346,18 +1350,39 @@ struct GibFace
     size_t sub;
     size_t face;
 };
-// One cap vertex: position and normal (model space until the piece frame is
-// applied), an ARGB vertex colour and planar UVs.
+// One cap vertex: position, normal and planar UVs. Hue deliberately does not
+// ride on vertex colours: every DX11 path reads a packed colour as raw RGBA
+// (RenderSystem_Direct3D11's D3D11Mappings::get maps VET_COLOUR, _ARGB and
+// _ABGR all to R8G8B8A8_UNORM), and the stock/compat programs swizzle with
+// .bgra while a generated fixed-function shader would not, so red would draw
+// blue on one of them. Zones are separate submeshes with their own material
+// colours instead, which every path (DX9 fixed function, DX11 compat, DX11
+// generated) handles identically.
 struct CapVertex
 {
     V p, n;
-    uint32_t colour;
     float u, v;
+};
+enum CapZone : size_t
+{
+    kZoneSkin,   // thin dark dermis edge
+    kZoneFat,    // pale subcutaneous fat band
+    kZoneMuscle, // textured muscle, the main body of the cap
+    kZoneBone,   // limb cuts: ivory ring
+    kZoneMarrow, // limb cuts: dark centre
+    kZoneCount
 };
 struct CapMesh
 {
     std::vector<CapVertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint32_t> indices[kZoneCount];
+    size_t triangles() const
+    {
+        size_t n = 0;
+        for (const auto &list : indices)
+            n += list.size() / 3;
+        return n;
+    }
 };
 // Stable per-position noise in [0,1): the hash of the welded (1e-4 quantised)
 // position and a salt, so a cut gets the same ragged edge on every run and on
@@ -1376,168 +1401,286 @@ float positionNoise(const V &p, uint32_t salt)
     }
     return static_cast<float>(h >> 8) * (1.0f / 16777216.0f);
 }
-uint32_t packArgb(const float rgb[3], float shade)
-{
-    uint32_t out = 0xFF000000U;
-    for (int i = 0; i < 3; ++i)
-    {
-        const float c = std::min(1.0f, std::max(0.0f, rgb[i] * shade));
-        out |= static_cast<uint32_t>(c * 255.0f + 0.5f) << (16 - 8 * i);
-    }
-    return out;
-}
-// A cap ring: radial scale and normal lift (fractions of the loop radius), each
-// with a deterministic jitter amplitude, and a colour. Outer to inner; the
-// outermost layer is the cut boundary itself and never moves.
-struct CapLayer
-{
-    float scale, scaleJitter, lift, liftJitter;
-    float rgb[3];
-};
-constexpr float kRimRgb[3] = {0.28f, 0.03f, 0.04f};     // clotted, near-black maroon
-constexpr float kMuscleRgb[3] = {0.62f, 0.07f, 0.08f};  // deep red muscle
-constexpr float kMuscle2Rgb[3] = {0.74f, 0.09f, 0.10f}; // wetter muscle around the bone
-constexpr float kFreshRgb[3] = {0.90f, 0.17f, 0.15f};   // brighter tissue at the centre
-constexpr float kBoneRgb[3] = {0.93f, 0.90f, 0.76f};    // pale ivory
-constexpr float kMarrowRgb[3] = {0.40f, 0.06f, 0.05f};  // dark marrow
-// Vertex colour: Ogre VET_COLOUR_ARGB (a packed 0xAARRGGBB DWORD, as the stock
-// BZ_ASSETS meshes store it; the DX11 SM4 programs swizzle it back).
-constexpr uint16_t kCapColourType = 10;
-constexpr uint16_t kCapStride = 36;
-// How far inner rings are pulled from the loop's own jagged radius toward its mean.
-constexpr float kRingSmoothing = 0.7f;
+constexpr uint16_t kCapStride = 32; // position, normal, uv0
+constexpr size_t kMinRingLoop = 4, kMaxRingLoop = 96, kMaxRingTriangles = 60000;
 // Loops smaller than this (about 2 mm) are not worth rings.
 constexpr float kMinRingRadius = 2e-3f;
-constexpr size_t kMinRingLoop = 4, kMaxRingLoop = 96, kMaxRingTriangles = 60000;
-// Torn-tissue cap over one cut loop. `points` wind opposite to the skin they
-// close and `normal` faces away from the piece (both already oriented). A
-// healthy loop becomes concentric rings -- rim, an inset ragged ring and a
-// bulged centre, plus muscle and bone rings for limb cuts -- with smooth
-// normals and vertex colours; degenerate, huge or very non-planar loops (and
-// everything once the ring budget is spent) keep the plain fan.
-void addCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, float newellLength, bool limb,
-            bool rings, float uvScale)
+// A ring layer: radius as a fraction of the loop's (smoothed) radius, normal
+// lift (fraction of the radius) and which zone the band OUTSIDE it belongs to.
+struct CapLayer
+{
+    float scale, lift;
+    float smoothing;  // how much of one Laplacian pass this ring takes: the skin edge hugs the rim
+    CapZone bandZone; // the band between the previous layer and this one
+};
+// Skin band ~5% of the radius, fat ~8%, then muscle in to the centre; limb
+// cuts end the muscle at 0.30 with a bone annulus down to a marrow core.
+constexpr CapLayer kPlainLayers[] = {{0.95f, -0.01f, 0.3f, kZoneSkin},
+                                     {0.87f, -0.02f, 0.6f, kZoneFat},
+                                     {0.50f, -0.03f, 1.0f, kZoneMuscle}};
+constexpr CapLayer kLimbLayers[] = {{0.95f, -0.01f, 0.3f, kZoneSkin},   {0.87f, -0.02f, 0.6f, kZoneFat},
+                                    {0.55f, -0.03f, 1.0f, kZoneMuscle}, {0.32f, -0.02f, 1.0f, kZoneMuscle},
+                                    {0.20f, 0.02f, 1.0f, kZoneBone}};
+// Torn-tissue cap over one cut loop. `points` are the welded boundary points,
+// `normal` faces away from the piece. The rim is the boundary itself (it must
+// seal the skin); every inner ring is an in-plane Laplacian-smoothed copy of
+// the one outside it, scaled toward the centre, with a few percent of
+// deterministic jitter, so the surface follows the rim's shape instead of
+// fanning out in flaps. Every triangle is validated (positive area in the cap
+// plane, facing the cap normal); a loop that folds is retried with weaker
+// inset and smoothing and finally keeps the plain fan.
+enum class RingResult
+{
+    Built,
+    NotStarShaped, // a band triangle has negative area: weaker inset cannot help, try another pivot
+    Folded         // degenerate or too steep: retry weaker
+};
+RingResult addRingCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, bool limb, float uvScale,
+                      float radius, float strength)
 {
     const size_t n = points.size();
-    float radius = 0, planarity = 0, planarRadius = 0;
-    for (const V &p : points)
-    {
-        const V d = sub3(p, centre);
-        const float along = dot3(d, normal);
-        radius += std::sqrt(dot3(d, d));
-        planarRadius += std::sqrt(std::max(0.0f, dot3(d, d) - along * along));
-        planarity = std::max(planarity, std::abs(along));
-    }
-    radius /= static_cast<float>(n);
-    planarRadius /= static_cast<float>(n);
-    const bool ringed = rings && n >= kMinRingLoop && n <= kMaxRingLoop && radius > kMinRingRadius &&
-                        planarity <= 0.4f * radius && newellLength >= 0.5f * radius * radius &&
-                        cap.indices.size() / 3 < kMaxRingTriangles;
-
-    static const CapLayer kPlain[] = {{1.0f, 0, 0, 0, {kRimRgb[0], kRimRgb[1], kRimRgb[2]}},
-                                      {0.65f, 0.05f, -0.025f, 0.035f, {kMuscleRgb[0], kMuscleRgb[1], kMuscleRgb[2]}}};
-    static const CapLayer kLimb[] = {{1.0f, 0, 0, 0, {kRimRgb[0], kRimRgb[1], kRimRgb[2]}},
-                                     {0.68f, 0.05f, -0.025f, 0.035f, {kMuscleRgb[0], kMuscleRgb[1], kMuscleRgb[2]}},
-                                     {0.30f, 0.04f, -0.01f, 0.02f, {kMuscle2Rgb[0], kMuscle2Rgb[1], kMuscle2Rgb[2]}},
-                                     {0.17f, 0.02f, 0.035f, 0.01f, {kBoneRgb[0], kBoneRgb[1], kBoneRgb[2]}}};
-    const CapLayer *layers = limb ? kLimb : kPlain;
-    const size_t layerCount = ringed ? (limb ? 4 : 2) : 1;
-
-    const size_t base = cap.vertices.size();
-    const size_t firstIndex = cap.indices.size();
+    const CapLayer *layers = limb ? kLimbLayers : kPlainLayers;
+    const size_t layerCount = limb ? sizeof(kLimbLayers) / sizeof(CapLayer) : sizeof(kPlainLayers) / sizeof(CapLayer);
     const V tangent = normalize3(cross3(normal, std::abs(normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
     const V bitangent = cross3(normal, tangent);
-    const auto push = [&](V p, V vertexNormal, uint32_t colour) {
-        cap.vertices.push_back({p, vertexNormal, colour, dot3(p, tangent) * uvScale, dot3(p, bitangent) * uvScale});
-    };
-    // Nominal (unjittered, unlifted) positions decide each triangle's winding,
-    // exactly the old per-triangle test, so ragged offsets cannot flip a face.
-    std::vector<V> nominal;
-    nominal.reserve(layerCount * n + 1);
-    for (size_t j = 0; j < layerCount; ++j)
-        for (size_t i = 0; i < n; ++i)
-        {
-            const V &p = points[i];
-            const CapLayer &layer = layers[j];
-            const auto jitter = [&](uint32_t salt) { return 2.0f * positionNoise(p, salt + static_cast<uint32_t>(j)) - 1.0f; };
-            V position = p;
-            float shade = 1.0f;
-            if (ringed && j > 0)
-            {
-                // Inside the rim the surface is smoothed toward a round dish:
-                // a saw-toothed cut boundary would otherwise spike every ring.
-                // The planar radius is pulled toward the loop mean and the
-                // out-of-plane part is damped; the rim itself stays exact so
-                // the cap still seals the skin.
-                const float s = layer.scale + layer.scaleJitter * jitter(10);
-                const float lift = (layer.lift + layer.liftJitter * jitter(20)) * radius;
-                const V d = sub3(p, centre);
-                const float along = dot3(d, normal);
-                const V planar = sub3(d, scale3(normal, along));
-                const float planarLength = std::sqrt(dot3(planar, planar));
-                const float target = (kRingSmoothing * planarRadius + (1.0f - kRingSmoothing) * planarLength) * s;
-                const V direction = planarLength > 1e-9f ? scale3(planar, 1.0f / planarLength) : V{0, 0, 0};
-                position = add(add(centre, scale3(direction, target)),
-                               scale3(normal, along * (1.0f - kRingSmoothing) * s + lift));
-            }
-            if (ringed)
-                shade = 1.0f + 0.14f * jitter(30);
-            push(position, normal, packArgb(ringed ? layer.rgb : kRimRgb, shade));
-            nominal.push_back(add(centre, scale3(sub3(p, centre), ringed ? layer.scale : 1.0f)));
-        }
-    // Centre vertex: bulged outward (8-12% of the radius) on tissue, a small
-    // marrow dip inside a bone ring.
-    {
-        float lift = 0;
-        const float u = positionNoise(centre, 40);
-        if (ringed)
-            lift = (limb ? 0.01f + 0.01f * u : 0.08f + 0.04f * u) * radius;
-        push(add(centre, scale3(normal, lift)), normal,
-             packArgb(ringed ? (limb ? kMarrowRgb : kFreshRgb) : kMuscleRgb, 1.0f));
-        nominal.push_back(centre);
-    }
-    const auto index = [&](size_t layer, size_t i) { return static_cast<uint32_t>(base + layer * n + i % n); };
-    const uint32_t centreIndex = static_cast<uint32_t>(base + layerCount * n);
-    const auto triangle = [&](uint32_t a, uint32_t b, uint32_t c) {
-        // Wind like the skin's opposite: swap when the nominal triangle faces
-        // against the cap normal.
-        if (dot3(cross3(sub3(nominal[b - base], nominal[a - base]), sub3(nominal[c - base], nominal[a - base])),
-                 normal) < 0)
-            std::swap(b, c);
-        cap.indices.push_back(a);
-        cap.indices.push_back(b);
-        cap.indices.push_back(c);
-    };
-    for (size_t j = 0; j + 1 < layerCount; ++j)
-        for (size_t i = 0; i < n; ++i)
-        {
-            triangle(index(j, i), index(j, i + 1), index(j + 1, i + 1));
-            triangle(index(j, i), index(j + 1, i + 1), index(j + 1, i));
-        }
+    // Cap-plane coordinates relative to the centre: x along tangent, y along
+    // bitangent, z along the normal. Ring 0 is the boundary, wound CCW about N.
+    std::vector<std::array<float, 3>> ring(n);
     for (size_t i = 0; i < n; ++i)
-        triangle(centreIndex, index(layerCount - 1, i), index(layerCount - 1, i + 1));
-    if (!ringed)
-        return;
-
-    // Smooth normals from the real (jittered, lifted) surface: they tilt with
-    // the bulge, so the cap shades as tissue instead of a flat disc.
-    std::vector<V> accumulated(cap.vertices.size() - base, V{0, 0, 0});
-    for (size_t t = firstIndex; t < cap.indices.size(); t += 3)
     {
-        const V &a = cap.vertices[cap.indices[t]].p, &b = cap.vertices[cap.indices[t + 1]].p,
-                &c = cap.vertices[cap.indices[t + 2]].p;
-        const V face = cross3(sub3(b, a), sub3(c, a));
-        for (size_t k = 0; k < 3; ++k)
+        const V d = sub3(points[i], centre);
+        ring[i] = {dot3(d, tangent), dot3(d, bitangent), dot3(d, normal)};
+    }
+    double area2 = 0;
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto &a = ring[i], &b = ring[(i + 1) % n];
+        area2 += static_cast<double>(a[0]) * b[1] - static_cast<double>(b[0]) * a[1];
+    }
+    if (area2 < 0)
+        std::reverse(ring.begin(), ring.end());
+    std::vector<V> boundary = points;
+    if (area2 < 0)
+        std::reverse(boundary.begin(), boundary.end());
+
+    // Rings keep each boundary point's polar angle and move only along its
+    // ray (radius) and the normal: the radius is Laplacian-smoothed, scaled
+    // toward the centre and always kept inside the ring outside it, so every
+    // band triangle stays positively oriented in the cap plane (no folds).
+    std::vector<float> angle(n);
+    for (size_t i = 0; i < n; ++i)
+        angle[i] = std::atan2(ring[i][1], ring[i][0]);
+    std::vector<std::vector<std::array<float, 3>>> rings{ring};
+    std::vector<float> rho(n), height(n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        rho[i] = std::sqrt(ring[i][0] * ring[i][0] + ring[i][1] * ring[i][1]);
+        height[i] = ring[i][2];
+    }
+    float previousScale = 1.0f;
+    for (size_t j = 0; j < layerCount; ++j)
+    {
+        const CapLayer &layer = layers[j];
+        const float s = 1.0f - (1.0f - layer.scale) * strength;
+        const float ratio = s / previousScale;
+        std::vector<float> nextRho(n), nextHeight(n);
+        for (size_t i = 0; i < n; ++i)
         {
-            V &acc = accumulated[cap.indices[t + k] - base];
-            acc = add(acc, face);
+            const size_t before = (i + n - 1) % n, after = (i + 1) % n;
+            const float smoothRho = (rho[before] + 2.0f * rho[i] + rho[after]) * 0.25f;
+            const float smoothHeight = (height[before] + 2.0f * height[i] + height[after]) * 0.25f;
+            const float blendRho = rho[i] + (smoothRho - rho[i]) * strength * layer.smoothing;
+            const float blendHeight = height[i] + (smoothHeight - height[i]) * strength * layer.smoothing;
+            // Jitter: a few percent of the local edge length, deterministic.
+            const float edge = std::sqrt((rho[after] * std::cos(angle[after]) - rho[i] * std::cos(angle[i])) *
+                                             (rho[after] * std::cos(angle[after]) - rho[i] * std::cos(angle[i])) +
+                                         (rho[after] * std::sin(angle[after]) - rho[i] * std::sin(angle[i])) *
+                                             (rho[after] * std::sin(angle[after]) - rho[i] * std::sin(angle[i])));
+            const float jr = (2.0f * positionNoise(boundary[i], 10 + static_cast<uint32_t>(j)) - 1.0f) * 0.04f * edge;
+            const float jz = (2.0f * positionNoise(boundary[i], 30 + static_cast<uint32_t>(j)) - 1.0f) * 0.05f * edge;
+            // Never reach the ring outside along the same ray.
+            nextRho[i] = std::min(blendRho * ratio + jr, rho[i] * 0.97f);
+            nextHeight[i] = blendHeight * ratio * 0.5f + layer.lift * radius * strength + jz;
         }
+        previousScale = s;
+        rho = std::move(nextRho);
+        height = std::move(nextHeight);
+        std::vector<std::array<float, 3>> next(n);
+        for (size_t i = 0; i < n; ++i)
+            next[i] = {rho[i] * std::cos(angle[i]), rho[i] * std::sin(angle[i]), height[i]};
+        rings.push_back(std::move(next));
+    }
+    const float centreLift = (limb ? 0.01f + 0.01f * positionNoise(centre, 40) : 0.06f + 0.03f * positionNoise(centre, 40)) * radius * strength;
+
+    // Positions (centre is ring-local origin).
+    const auto world = [&](const std::array<float, 3> &q) {
+        return add(add(centre, add(scale3(tangent, q[0]), scale3(bitangent, q[1]))), scale3(normal, q[2]));
+    };
+    const size_t base = cap.vertices.size();
+    for (const V &p : boundary)
+        cap.vertices.push_back({p, normal, 0, 0}); // the rim is the cut itself, bit for bit
+    for (size_t j = 1; j < rings.size(); ++j)
+        for (const auto &q : rings[j])
+            cap.vertices.push_back({world(q), normal, 0, 0});
+    cap.vertices.push_back({add(centre, scale3(normal, centreLift)), normal, 0, 0});
+    const uint32_t centreIndex = static_cast<uint32_t>(base + rings.size() * n);
+    const auto index = [&](size_t layer, size_t i) { return static_cast<uint32_t>(base + layer * n + i % n); };
+
+    // Triangles: ring bands, then the fan into the centre.
+    std::vector<std::array<uint32_t, 3>> tris;
+    std::vector<size_t> triZone;
+    const auto planarArea = [&](uint32_t a, uint32_t b, uint32_t c) {
+        const V &pa = cap.vertices[a].p, &pb = cap.vertices[b].p, &pc = cap.vertices[c].p;
+        return 0.5f * dot3(cross3(sub3(pb, pa), sub3(pc, pa)), normal);
+    };
+    bool valid = true, negative = false;
+    const float minArea = 1e-4f * radius * radius;
+    const auto add_tri = [&](uint32_t a, uint32_t b, uint32_t c, size_t zone) {
+        const V &pa = cap.vertices[a].p, &pb = cap.vertices[b].p, &pc = cap.vertices[c].p;
+        const V face = cross3(sub3(pb, pa), sub3(pc, pa));
+        const float length = std::sqrt(dot3(face, face));
+        // Positive in the cap plane, and not steeply folded against the normal.
+        if (planarArea(a, b, c) < minArea || !(dot3(face, normal) >= 0.05f * length))
+        {
+            if (valid && strength == 1.0f)
+                CAP_STAT(planarArea(a, b, c) < 0 ? 5 : (planarArea(a, b, c) < minArea ? 6 : 7));
+            if (planarArea(a, b, c) < 0)
+                negative = true;
+            valid = false;
+        }
+        tris.push_back({a, b, c});
+        triZone.push_back(zone);
+    };
+    for (size_t j = 0; j + 1 < rings.size(); ++j)
+    {
+        const size_t zone = layers[j].bandZone;
+        for (size_t i = 0; i < n; ++i)
+        {
+            add_tri(index(j, i), index(j, i + 1), index(j + 1, i + 1), zone);
+            add_tri(index(j, i), index(j + 1, i + 1), index(j + 1, i), zone);
+        }
+    }
+    // The innermost band (last layer) has no band entry of its own: it is the
+    // fan, zone = bone annulus' inside = marrow for limbs, muscle otherwise.
+    for (size_t i = 0; i < n; ++i)
+        add_tri(index(rings.size() - 1, i), index(rings.size() - 1, i + 1), centreIndex,
+                limb ? static_cast<size_t>(kZoneMarrow) : static_cast<size_t>(kZoneMuscle));
+    if (!valid)
+    {
+        cap.vertices.resize(base);
+        return negative ? RingResult::NotStarShaped : RingResult::Folded;
+    }
+    // Smooth normals from the real surface.
+    std::vector<V> accumulated(cap.vertices.size() - base, V{0, 0, 0});
+    for (const auto &t : tris)
+    {
+        const V &a = cap.vertices[t[0]].p, &b = cap.vertices[t[1]].p, &c = cap.vertices[t[2]].p;
+        const V face = cross3(sub3(b, a), sub3(c, a));
+        for (const uint32_t v : t)
+            accumulated[v - base] = add(accumulated[v - base], face);
     }
     for (size_t k = 0; k < accumulated.size(); ++k)
     {
         const V smoothed = normalize3(accumulated[k]);
         cap.vertices[base + k].n = dot3(smoothed, normal) > 0.1f ? smoothed : normal;
     }
+    for (size_t k = base; k < cap.vertices.size(); ++k)
+    {
+        const V &p = cap.vertices[k].p;
+        cap.vertices[k].u = dot3(p, tangent) * uvScale;
+        cap.vertices[k].v = dot3(p, bitangent) * uvScale;
+    }
+    for (size_t t = 0; t < tris.size(); ++t)
+        for (const uint32_t v : tris[t])
+            cap.indices[triZone[t]].push_back(v);
+    return RingResult::Built;
+}
+// The plain fan from the loop centroid: the fallback for loops that are
+// degenerate, huge, far from planar, or that fold when ringed. Same winding
+// logic as the original cap.
+void addFanCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, float uvScale)
+{
+    const size_t n = points.size();
+    const V tangent = normalize3(cross3(normal, std::abs(normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
+    const V bitangent = cross3(normal, tangent);
+    const size_t base = cap.vertices.size();
+    for (const V &p : points)
+        cap.vertices.push_back({p, normal, dot3(p, tangent) * uvScale, dot3(p, bitangent) * uvScale});
+    cap.vertices.push_back({centre, normal, dot3(centre, tangent) * uvScale, dot3(centre, bitangent) * uvScale});
+    const uint32_t centreIndex = static_cast<uint32_t>(base + n);
+    for (size_t i = 0; i < n; ++i)
+    {
+        uint32_t p0 = static_cast<uint32_t>(base + i), p1 = static_cast<uint32_t>(base + (i + 1 == n ? 0 : i + 1));
+        if (dot3(cross3(sub3(cap.vertices[p0].p, centre), sub3(cap.vertices[p1].p, centre)), normal) < 0)
+            std::swap(p0, p1);
+        cap.indices[kZoneMuscle].push_back(centreIndex);
+        cap.indices[kZoneMuscle].push_back(p0);
+        cap.indices[kZoneMuscle].push_back(p1);
+    }
+}
+void addCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, float newellLength, bool limb,
+            bool rings, float uvScale)
+{
+    const size_t n = points.size();
+    float radius = 0, planarity = 0;
+    for (const V &p : points)
+    {
+        const V d = sub3(p, centre);
+        const float along = dot3(d, normal);
+        radius += std::sqrt(std::max(0.0f, dot3(d, d) - along * along));
+        planarity = std::max(planarity, std::abs(along));
+    }
+    radius /= static_cast<float>(n);
+    const bool ringed = rings && n >= kMinRingLoop && n <= kMaxRingLoop && radius > kMinRingRadius &&
+                        planarity <= 0.4f * radius && newellLength >= 0.5f * radius * radius &&
+                        cap.triangles() < kMaxRingTriangles;
+    if (ringed)
+    {
+        // Full inset and smoothing first; on a fold, weaker, then the fan.
+        // Rings need a pivot every boundary point can be seen from in order
+        // (star-shaped). Try the vertex mean, then the polygon's area centroid
+        // and bounding-box centre in the cap plane.
+        const V tangent = normalize3(cross3(normal, std::abs(normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
+        const V bitangent = cross3(normal, tangent);
+        std::vector<V> pivots{centre};
+        {
+            double a2 = 0, cx = 0, cy = 0;
+            float lox = 1e30f, hix = -1e30f, loy = 1e30f, hiy = -1e30f;
+            for (size_t i = 0; i < n; ++i)
+            {
+                const V d0 = sub3(points[i], centre), d1 = sub3(points[(i + 1) % n], centre);
+                const double x0 = dot3(d0, tangent), y0 = dot3(d0, bitangent), x1 = dot3(d1, tangent), y1 = dot3(d1, bitangent);
+                const double w = x0 * y1 - x1 * y0;
+                a2 += w;
+                cx += (x0 + x1) * w;
+                cy += (y0 + y1) * w;
+                lox = std::min(lox, static_cast<float>(x0));
+                hix = std::max(hix, static_cast<float>(x0));
+                loy = std::min(loy, static_cast<float>(y0));
+                hiy = std::max(hiy, static_cast<float>(y0));
+            }
+            if (std::abs(a2) > 1e-12)
+                pivots.push_back(add(add(centre, scale3(tangent, static_cast<float>(cx / (3.0 * a2)))),
+                                     scale3(bitangent, static_cast<float>(cy / (3.0 * a2)))));
+            pivots.push_back(add(add(centre, scale3(tangent, 0.5f * (lox + hix))), scale3(bitangent, 0.5f * (loy + hiy))));
+        }
+        size_t attempt = 0;
+        for (const V &pivot : pivots)
+            for (const float strength : {1.0f, 0.6f, 0.3f})
+            {
+                const RingResult result = addRingCap(cap, points, normal, pivot, limb, uvScale, radius, strength);
+                if (result == RingResult::Built)
+                {
+                    CAP_STAT(attempt < 3 ? attempt : 2);
+                    return;
+                }
+                ++attempt;
+                if (result == RingResult::NotStarShaped)
+                    break; // a weaker inset cannot fix the loop's shape; try the next pivot
+            }
+    }
+    CAP_STAT(ringed ? 4 : 3);
+    addFanCap(cap, points, normal, centre, uvScale);
 }
 } // namespace
 bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &options, std::vector<GibPiece> &gibs,
@@ -1877,7 +2020,7 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                            options.capUvScale);
                 }
                 GIB_PHASE(10); // cap triangles
-                if (caps.indices.size() / 3 > 1000000)
+                if (caps.triangles() > 1000000)
                     throw std::runtime_error("oversized gib cap");
             }
 
@@ -1933,43 +2076,62 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                 closeChunk(body, subChunk);
                 triangles += static_cast<uint32_t>(selected.size() / 3);
             }
-            if (!caps.indices.empty())
+            const std::string *zoneMaterial[kZoneCount] = {&options.capSkinMaterial, &options.capFatMaterial,
+                                                           &options.capMaterial, &options.capBoneMaterial,
+                                                           &options.capMarrowMaterial};
+            for (size_t zone = 0; zone < kZoneCount; ++zone)
             {
-                // Its own submesh and declaration (position, normal, ARGB
-                // colour, uv0). Planar UVs in each cap's plane so a flesh
-                // texture tiles evenly; positions and normals go through the
-                // piece frame.
-                Geometry g;
-                g.count = static_cast<uint32_t>(caps.vertices.size());
-                g.elements = {{0, 2, 1, 0, 0}, {0, 2, 4, 12, 0}, {0, kCapColourType, 5, 24, 0}, {0, 1, 7, 28, 0}};
-                Buffer buffer{kCapStride, {}};
-                buffer.data.resize(caps.vertices.size() * kCapStride);
-                uint8_t *dst = buffer.data.data();
-                for (const CapVertex &vertex : caps.vertices)
+                const auto &zoneIndices = caps.indices[zone];
+                if (zoneIndices.empty())
+                    continue;
+                // One submesh per zone (its own material colour), with only
+                // the vertices that zone uses: position, normal, uv0. Planar
+                // UVs in each cap's plane so the flesh texture tiles evenly;
+                // positions and normals go through the piece frame.
+                std::vector<uint32_t> used;
+                std::vector<uint32_t> local(caps.vertices.size(), 0xFFFFFFFFu);
+                std::vector<uint32_t> indices;
+                indices.reserve(zoneIndices.size());
+                for (const uint32_t index : zoneIndices)
                 {
+                    if (local[index] == 0xFFFFFFFFu)
+                    {
+                        local[index] = static_cast<uint32_t>(used.size());
+                        used.push_back(index);
+                    }
+                    indices.push_back(local[index]);
+                }
+                Geometry g;
+                g.count = static_cast<uint32_t>(used.size());
+                g.elements = {{0, 2, 1, 0, 0}, {0, 2, 4, 12, 0}, {0, 1, 7, 24, 0}};
+                Buffer buffer{kCapStride, {}};
+                buffer.data.resize(used.size() * kCapStride);
+                uint8_t *dst = buffer.data.data();
+                for (const uint32_t index : used)
+                {
+                    const CapVertex &vertex = caps.vertices[index];
                     std::memcpy(dst, vertex.p.data(), 12);
                     std::memcpy(dst + 12, vertex.n.data(), 12);
-                    std::memcpy(dst + 24, &vertex.colour, 4);
-                    std::memcpy(dst + 28, &vertex.u, 4);
-                    std::memcpy(dst + 32, &vertex.v, 4);
+                    std::memcpy(dst + 24, &vertex.u, 4);
+                    std::memcpy(dst + 28, &vertex.v, 4);
                     dst += kCapStride;
                 }
-                std::vector<uint32_t> vertices(caps.vertices.size());
+                std::vector<uint32_t> vertices(used.size());
                 for (size_t i = 0; i < vertices.size(); ++i)
                     vertices[i] = static_cast<uint32_t>(i);
                 g.buffers.emplace(uint16_t{0}, std::move(buffer));
                 const size_t subChunk = openChunk(body, 0x4000);
-                line(body, options.capMaterial);
+                line(body, *zoneMaterial[zone]);
                 put(body, uint8_t{0});
-                put(body, static_cast<uint32_t>(caps.indices.size()));
+                put(body, static_cast<uint32_t>(indices.size()));
                 put(body, uint8_t{1});
-                body.insert(body.end(), reinterpret_cast<const uint8_t *>(caps.indices.data()),
-                            reinterpret_cast<const uint8_t *>(caps.indices.data() + caps.indices.size()));
+                body.insert(body.end(), reinterpret_cast<const uint8_t *>(indices.data()),
+                            reinterpret_cast<const uint8_t *>(indices.data() + indices.size()));
                 const size_t geometryChunk = openChunk(body, 0x5000);
                 appendGeometry(body, g, vertices, frame, lo, hi, radius);
                 closeChunk(body, geometryChunk);
                 closeChunk(body, subChunk);
-                triangles += static_cast<uint32_t>(caps.indices.size() / 3);
+                triangles += static_cast<uint32_t>(indices.size() / 3);
             }
             Bytes bounds;
             for (float v : lo)
@@ -1993,7 +2155,7 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
             gib.bone = boneId;
             gib.boneName = bone.name;
             gib.radius = radius;
-            gib.capTriangles = static_cast<uint32_t>(caps.indices.size() / 3);
+            gib.capTriangles = static_cast<uint32_t>(caps.triangles());
             gib.weapon = isWeapon;
             gibs.push_back(std::move(gib));
             GIB_PHASE(7); // serialize

@@ -1,7 +1,7 @@
 // Host benchmark for the native chunk / skinned gib generators. NOT a ctest
 // test. Usage:
 //   native_chunk_bench [--csv out.csv] [--tmp scratch_dir] [--runs N] [--gibs-only]
-//                      [--hash out.txt] [--only substr] [--dump-obj outdir] dir [dir...]
+//                      [--hash out.txt] [--only substr] [--dump-obj outdir] [--plain-fan] dir [dir...]
 // --only keeps just the meshes whose path contains the (case-insensitive) text.
 // --dump-obj writes each selected model's gib pieces as OBJ+MTL (vertex colours as
 // `v x y z r g b`) plus the generated flesh texture and material.
@@ -38,7 +38,8 @@
 using namespace BZROpenShim::NativeChunks;
 namespace BZROpenShim::NativeChunks
 {
-extern double g_gibPhaseMs[11]; // native_chunk_mesh.cpp, OPENSHIM_NATIVE_CHUNK_PHASES
+extern double g_gibPhaseMs[11];
+extern double g_gibCapStats[8]; // native_chunk_mesh.cpp, OPENSHIM_NATIVE_CHUNK_PHASES
 }
 namespace fs = std::filesystem;
 
@@ -255,6 +256,16 @@ std::vector<DumpSub> parsePiece(const std::vector<uint8_t> &mesh)
     }
     return subs;
 }
+// "diffuse r g b" of a generated flesh material, read from the scripts.
+std::string materialDiffuse(const std::string &name)
+{
+    const std::string scripts = GibFleshMaterialScript() + GibFleshZoneMaterialScript();
+    const size_t at = scripts.find("material " + name + "\n");
+    if (at == std::string::npos)
+        return {};
+    const size_t d = scripts.find("diffuse ", at);
+    return d == std::string::npos ? std::string() : scripts.substr(d + 8, scripts.find('\n', d) - d - 8);
+}
 void dumpObj(const fs::path &dir, const std::string &model, const std::vector<GibPiece> &gibs)
 {
     fs::create_directories(dir);
@@ -293,8 +304,9 @@ void dumpObj(const fs::path &dir, const std::string &model, const std::vector<Gi
             {
                 written[sub.material] = true;
                 const bool flesh = sub.material == kGibFleshMaterialName;
+                const std::string kd = materialDiffuse(sub.material);
                 std::fprintf(mtl, "newmtl %s\nKd %s\nKs 0.35 0.25 0.25\nNs 48\n%s\n", sub.material.c_str(),
-                             flesh ? "1 1 1" : "0.55 0.5 0.45", flesh ? "map_Kd openshim_gib_flesh.tga" : "");
+                             kd.empty() ? "0.55 0.5 0.45" : kd.c_str(), flesh ? "map_Kd openshim_gib_flesh.tga" : "");
             }
             for (size_t v = 0; v < sub.position.size(); ++v)
                 std::fprintf(obj, "v %.6f %.6f %.6f %.4f %.4f %.4f\n",
@@ -323,6 +335,7 @@ void dumpObj(const fs::path &dir, const std::string &model, const std::vector<Gi
     std::ofstream(dir / kGibFleshTextureFile, std::ios::binary)
         .write(reinterpret_cast<const char *>(tga.data()), static_cast<std::streamsize>(tga.size()));
     std::ofstream(dir / kGibFleshMaterialFile, std::ios::binary) << GibFleshMaterialScript();
+    std::ofstream(dir / kGibFleshZoneMaterialFile, std::ios::binary) << GibFleshZoneMaterialScript();
 }
 } // namespace
 
@@ -334,6 +347,7 @@ int main(int argc, char **argv)
     fs::path hashPath;
     std::string only;
     fs::path dumpDir;
+    GibOptions gibOptions;
     std::vector<std::string> hashLines;
     std::vector<fs::path> roots;
     for (int i = 1; i < argc; ++i)
@@ -345,6 +359,8 @@ int main(int argc, char **argv)
             tmp = argv[++i];
         else if (a == "--gibs-only")
             gibsOnly = true;
+        else if (a == "--plain-fan")
+            gibOptions.capRings = false;
         else if (a == "--dump-obj" && i + 1 < argc)
             dumpDir = argv[++i];
         else if (a == "--only" && i + 1 < argc)
@@ -466,7 +482,7 @@ int main(int argc, char **argv)
             row.note = "extract: " + error;
         std::vector<GibPiece> gibs;
         std::string gibError;
-        if (minTime(runs, t, [&] { return ExtractGibs(meshBytes, skeletonBytes, GibOptions{}, gibs, gibError); }))
+        if (minTime(runs, t, [&] { return ExtractGibs(meshBytes, skeletonBytes, gibOptions, gibs, gibError); }))
         {
             row.hasGibs = true;
             row.gibs = t;
@@ -518,6 +534,10 @@ int main(int argc, char **argv)
             std::printf("  %-14s %9.4f  (%4.1f%%)\n", names[i], g_gibPhaseMs[i] / calls,
                         total > 0 ? 100.0 * g_gibPhaseMs[i] / total : 0.0);
     }
+    std::printf("cap loops: rings full %.0f, rings 0.6 %.0f, rings 0.3 %.0f, fan (ineligible) %.0f, fan (folded) %.0f\n",
+                g_gibCapStats[0], g_gibCapStats[1], g_gibCapStats[2], g_gibCapStats[3], g_gibCapStats[4]);
+    std::printf("first fold at full strength: negative area %.0f, tiny area %.0f, steep %.0f\n", g_gibCapStats[5],
+                g_gibCapStats[6], g_gibCapStats[7]);
     std::ostream *csv = &std::cout;
     std::ofstream csvFile;
     if (!csvPath.empty())

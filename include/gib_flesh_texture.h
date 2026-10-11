@@ -5,27 +5,39 @@
 
 namespace BZROpenShim::NativeChunks
 {
-// The default SkinnedGibs flesh: a procedural, tileable, mid-tone texture and
-// the material that multiplies it by the cap meshes' vertex colours. Pure and
-// deterministic (no clock, no RNG state), shared by the runtime writer, the
-// benchmark's preview dump and the tests.
+// The default SkinnedGibs flesh: a procedural, tileable muscle texture and the
+// materials for each zone of the cut caps (muscle, thin skin edge, fat band,
+// bone, marrow). Pure and deterministic (no clock, no RNG state), shared by the
+// runtime writer, the benchmark's preview dump and the tests.
 //
-// Bump kGibFleshVersion whenever the texture or the material text changes: it
-// is part of the generated material's first line, which is how the runtime
+// Hue lives in materials and the texture, never in vertex colours: every DX11
+// path reads a packed vertex colour as raw RGBA while the stock/compat programs
+// swizzle it (.bgra), so a coloured vertex draws with red and blue swapped on
+// whichever path does not swizzle. Plain material colours behave identically on
+// DX9 fixed function, the DX11 compatibility layer and a generated DX11 shader.
+//
+// Bump kGibFleshVersion whenever the texture or a material text changes: it is
+// part of each generated file's first line, which is how the runtime
 // recognises (and replaces) a stale generated copy, while a file without the
 // marker is the user's and is left alone.
-inline constexpr const char *kGibFleshVersion = "v2";
+inline constexpr const char *kGibFleshVersion = "v3";
 inline constexpr const char *kGibFleshMaterialName = "openshim_gib_flesh";
 inline constexpr const char *kGibFleshMaterialFile = "openshim_gib_flesh.material";
+// Skin, fat, bone and marrow live in their own file so a mod can restyle the
+// muscle (openshim_gib_flesh.material) without losing the other zones.
+inline constexpr const char *kGibFleshZoneMaterialFile = "openshim_gib_flesh_zones.material";
 inline constexpr const char *kGibFleshTextureFile = "openshim_gib_flesh.tga";
-// Ownership prefix of the material's first line (any version).
+// Ownership prefixes of the generated files' first lines (any version).
 inline constexpr const char *kGibFleshMaterialMarker = "// OpenShim SkinnedGibs default flesh material";
+inline constexpr const char *kGibFleshZoneMaterialMarker = "// OpenShim SkinnedGibs default flesh zone materials";
 inline constexpr unsigned kGibFleshTextureSize = 256;
 
-// Full first line of the current generated material, without the newline.
+// Full first lines of the current generated files, without the newline.
 std::string GibFleshMaterialHeader();
-// The whole material script (header line included).
+std::string GibFleshZoneMaterialHeader();
+// The whole scripts (header line included).
 std::string GibFleshMaterialScript();
+std::string GibFleshZoneMaterialScript();
 // kGibFleshTextureSize^2 RGB triples, top row first.
 std::vector<uint8_t> GibFleshTextureRgb();
 // The same image as an uncompressed 24-bit TGA; its ID field carries the
