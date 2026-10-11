@@ -66,7 +66,7 @@ function Invoke-CookArm {
 
     $argList = @($MissionBzn) + $ExtraArgs
     Assert-BZRSafeToLaunch
-    $proc = Start-Process -FilePath $exe -ArgumentList $argList `
+    $proc = Start-BZRGameProcess -FilePath $exe -ArgumentList $argList `
         -WorkingDirectory $GameRoot -PassThru
 
     try {

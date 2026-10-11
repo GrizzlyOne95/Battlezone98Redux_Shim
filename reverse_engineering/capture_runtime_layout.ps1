@@ -16,7 +16,7 @@ if ($Launch) {
     if (-not (Get-Process -Name $baseName -ErrorAction SilentlyContinue)) {
         if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
         Assert-BZRSafeToLaunch
-        Start-Process -FilePath $GameExe | Out-Null
+        Start-BZRGameProcess -FilePath $GameExe | Out-Null
     }
 }
 

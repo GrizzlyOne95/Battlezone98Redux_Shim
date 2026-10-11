@@ -109,7 +109,8 @@ try {
     $ogre = Set-BZROgreWindowed -GameRoot $GameRoot
     $t0 = Get-Date
     $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
-        CommandLine = '"' + $gameExe + '" ' + $Mission; CurrentDirectory = $GameRoot }
+        CommandLine = '"' + $gameExe + '" ' + $Mission; CurrentDirectory = $GameRoot
+        ProcessStartupInformation = (New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]4 }) }
     Write-Host "[turbo] launched $Mission (launcher pid $($r.ProcessId))"
 
     # Follow the re-exec'd instance, then wait for the player craft to exist.

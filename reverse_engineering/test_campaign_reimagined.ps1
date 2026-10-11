@@ -104,7 +104,7 @@ try {
     $auditStarted=Get-Date
     $launchArguments=if($MenuStart){@('/nointro',"/renderer:$Renderer")}else{@($Mission,'/nointro',"/renderer:$Renderer")}
     Assert-BZRSafeToLaunch
-    $auditProc=Start-Process -FilePath (Join-Path $GameRoot 'battlezone98redux.exe') -ArgumentList $launchArguments -WorkingDirectory $GameRoot -WindowStyle Hidden -PassThru
+    $auditProc=Start-BZRGameProcess -FilePath (Join-Path $GameRoot 'battlezone98redux.exe') -ArgumentList $launchArguments -WorkingDirectory $GameRoot -WindowStyle Hidden -PassThru
     $auditGameLaunched=$true
     [pscustomobject]@{Pid=$auditProc.Id;Started=$auditStarted.ToString('o');Mission=$Mission;Renderer=$Renderer;ShimRepo=$ShimRepo;EnabledMod=$auditCampaignRoot;MenuStart=[bool]$MenuStart} |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $auditRoot 'run.json')
