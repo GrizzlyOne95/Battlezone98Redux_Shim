@@ -329,6 +329,7 @@ struct CapData
     std::map<std::string, uint32_t> trianglesByMaterial;
     uint32_t stride = 0;
     bool hasColourElement = false;
+    std::vector<std::array<uint16_t, 4>> elements; // type, semantic, offset, index
     std::vector<std::array<float, 3>> positions, normals; // welded
     std::vector<uint32_t> indices;                         // into the welded list
     bool has(const char *material) const
@@ -387,8 +388,12 @@ CapData parseCap(const Bytes &mesh)
             q += 4;
             const uint32_t declSize = u32(q + 2);
             for (uint32_t used = 6, e = static_cast<uint32_t>(q) + 6; used < declSize; used += 16, e += 16)
+            {
                 if (u16(e + 10) == 5)
                     cap.hasColourElement = true;
+                if (cap.trianglesByMaterial.size() == 1) // the first flesh submesh declares them all alike
+                    cap.elements.push_back({u16(e + 8), u16(e + 10), u16(e + 12), u16(e + 14)});
+            }
             q += declSize;
             cap.stride = u16(q + 8);
             const size_t data = q + 6 + 4 + 6;
@@ -531,7 +536,14 @@ void gibTests()
         // centre (17 vertices); skin, fat and two muscle bands of 8 triangles
         // each plus a 4-triangle muscle fan.
         Require(rootCap.stride == 32 && !rootCap.hasColourElement && !headCap.hasColourElement,
-                "caps carry no vertex colour: position, normal, uv0 (stride 32); hue is in the zone materials");
+                "caps carry no vertex colour: position, normal, uv0 (stride 32); hue is in the zone textures");
+        // Exactly the inputs the stock BZBase programs read (base-sm4.hlsl base_vertex:
+        // POSITION float3, TEXCOORD0 float2, NORMAL float3; no VERTEX_TANGENTS anywhere),
+        // so there is no D3D11 input-layout mismatch.
+        using Element = std::array<uint16_t, 4>;
+        Require(rootCap.elements == std::vector<Element>{{2, 1, 0, 0}, {2, 4, 12, 0}, {1, 7, 24, 0}} &&
+                    headCap.elements == rootCap.elements,
+                "cap vertex elements: POSITION float3 @0, NORMAL float3 @12, TEXCOORD0 float2 @24");
         Require(rootCap.trianglesByMaterial.size() == 3 && rootCap.has("openshim_gib_flesh_skin") &&
                     rootCap.has("openshim_gib_flesh_fat") && rootCap.has("openshim_gib_flesh") &&
                     !rootCap.has("openshim_gib_flesh_bone") && !rootCap.has("openshim_gib_flesh_marrow"),
@@ -721,10 +733,31 @@ void fleshTextureTests()
                 !IsCurrentGibFleshTga(Bytes(64, 0)),
             "flesh TGA is an uncompressed 24-bit image tagged with its version");
     const std::string script = GibFleshMaterialScript();
-    Require(script.rfind(GibFleshMaterialHeader(), 0) == 0 && script.find("material openshim_gib_flesh") != std::string::npos &&
-                script.find("vertexcolour") == std::string::npos && script.find("diffuse 1 1 1") != std::string::npos &&
-                script.find(kGibFleshTextureFile) != std::string::npos && script.find("cull_hardware none") != std::string::npos,
-            "muscle material is white and textured; no vertex colour tracking");
+    Require(script.rfind(GibFleshMaterialHeader(), 0) == 0 &&
+                script.find("import * from \"BZBase.material\"") != std::string::npos &&
+                script.find("material openshim_gib_flesh : BZBase") != std::string::npos &&
+                script.find(std::string("set_texture_alias DiffuseMap ") + kGibFleshTextureFile) != std::string::npos &&
+                script.find("vertexcolour") == std::string::npos && script.find("vertex_program") == std::string::npos,
+            "muscle material inherits the stock BZBase with the muscle texture as its diffuse map");
+    {
+        // One solid-colour texture per zone, each referenced by its material.
+        const std::string zones = GibFleshZoneMaterialScript();
+        const auto images = GibFleshTextures();
+        size_t zoneImages = 0;
+        bool referenced = true, allCurrent = true;
+        for (const auto &image : images)
+        {
+            allCurrent = allCurrent && IsCurrentGibFleshTga(image.tga);
+            if (image.zone)
+            {
+                ++zoneImages;
+                referenced = referenced && zones.find(std::string("DiffuseMap ") + image.file) != std::string::npos;
+            }
+        }
+        Require(images.size() == 5 && zoneImages == 4 && referenced && allCurrent &&
+                    zones.find(" : BZBase") != std::string::npos,
+                "each cap zone has its own generated texture and a BZBase-derived material");
+    }
     Require(std::string(kGibFleshMaterialName) == GibOptions{}.capMaterial &&
                 GibFleshZoneMaterialScript().find(GibOptions{}.capSkinMaterial) != std::string::npos &&
                 GibFleshZoneMaterialScript().find(GibOptions{}.capFatMaterial) != std::string::npos &&
