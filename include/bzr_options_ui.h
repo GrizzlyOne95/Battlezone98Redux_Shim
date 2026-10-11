@@ -191,6 +191,10 @@ namespace BZROpenShim
     void ResetOptionsUiResolvedState();
     void LogShimSettingsUiStatus();
 
+    // The Career shell screen (career_screen.cpp). False when this build
+    // cannot host OpenShim screens.
+    bool RegisterCareerScreen();
+
     // The multiplayer pre-lobby shell screen and its Click_MultiPlayer entry
     // hooks (prelobby_screen.cpp). False when this build cannot host OpenShim
     // screens; the stock Multiplayer button is then untouched.

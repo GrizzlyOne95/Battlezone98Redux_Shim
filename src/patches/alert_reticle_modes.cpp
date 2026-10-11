@@ -4,6 +4,7 @@
 // out of bzr_hooks.cpp. Both read the legacy campaignReimagined_settings.cfg
 // as well as openshim.ini.
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "patcher.h"
@@ -52,7 +53,9 @@ namespace BZROpenShim
         static bool g_UnderAttackAlertBaselineEnabled = true;
         static float g_UnderAttackAlertBaselineCooldownSeconds = 1.0f;
         static constexpr const char* kUnderAttackAlertConfigName = "campaignReimagined_settings.cfg";
-        static constexpr uintptr_t kUnderAttackAlertSoundAddr = 0x00877220;
+        // The stock under-attack sound. A copy of the engine's own .rdata
+        // string, so it needs no address.
+        static constexpr char kUnderAttackAlertSound[] = "cgrowl.wav";
         bool g_TargetReticlePopupConfigInitialized = false;
         static TargetReticlePopupMode g_TargetReticlePopupMode = TargetReticlePopupMode::Default;
         static bool g_TargetReticleFastTeamRead = true;
@@ -532,10 +535,7 @@ namespace BZROpenShim
             // GameObject, just as the direct playerShot read above requires.
             // Avoid two kernel VirtualQuery calls per visible selection while
             // retaining per-call vtable identity, fresh team reads and SEH.
-            const uintptr_t imageBase = GetMainModuleBase();
-            const uintptr_t expected = imageBase
-                ? imageBase + (kGogGameObjectGetTeamAddr - kGogPreferredImageBase)
-                : kGogGameObjectGetTeamAddr;
+            const uintptr_t expected = ExpectedGameObjectGetTeamAddr();
             return Reticle::ReadLiveActualTeam(objectPtr, expected) == 0
                 ? kSuppressedRecentHitTime : playerShotTime;
         }
@@ -554,11 +554,8 @@ namespace BZROpenShim
         if (currentTime <= g_UnderAttackAlertNextAllowedTime)
             return;
 
-        if (g_BzrFn_PlayGlobalSound && kUnderAttackAlertSoundAddr != 0)
-        {
-            const char* sound = reinterpret_cast<const char*>(kUnderAttackAlertSoundAddr);
-            g_BzrFn_PlayGlobalSound(sound, 0, 0, 0);
-        }
+        if (g_BzrFn_PlayGlobalSound)
+            g_BzrFn_PlayGlobalSound(kUnderAttackAlertSound, 0, 0, 0);
 
         const float minSpacing = 1.0f;
         const float nextDelay =

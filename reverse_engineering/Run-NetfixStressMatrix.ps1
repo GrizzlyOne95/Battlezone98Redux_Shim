@@ -33,6 +33,14 @@ plugins\openshim.dll, scripts\patches.json) matches its source (the stock
 install's exe, -OpenShimRepo's Release build and patches.json); and no
 instance overrides ReliableSendBacklogFix or the retry timers.
 
+-Impair adds relay impairment profiles as another axis: every case and arm
+runs once per profile, the profile applied through the private server once
+the mission loads (Run-BZRCoopMission.ps1 -Impair; the server needs
+relay_impairment.py, so point -ServerRepo at a checkout that has it). The
+scorer then replays links in delivery order and the aggregate compares the
+arms per profile (p2p_netfix_score.py aggregate_impaired). Output then goes
+to netimpair-matrix-<stamp> instead.
+
 Runtime output goes to <BZRCoopRoot>\runs\netfix-matrix-<stamp>: matrix.json
 (plan and provenance hashes), logs\, scores\, summary.json and summary.md.
 Run directories are <BZRCoopRoot>\runs\netfix-<arm>-<case>-p<pass>-<stamp>.
@@ -42,13 +50,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\reverse_engineering\Run-Ne
 .EXAMPLE
 powershell -NoProfile -ExecutionPolicy Bypass -File .\reverse_engineering\Run-NetfixStressMatrix.ps1 -Passes 2
 .EXAMPLE
+powershell -NoProfile -ExecutionPolicy Bypass -File .\reverse_engineering\Run-NetfixStressMatrix.ps1 -Passes 1 -Only four-services,Skipper=host -Impair 'loss=1,seed=11','loss=3,seed=12','outage=1000/20000' -ServerRepo C:\path\to\Battlezone98Redux_DedicatedServer
+.EXAMPLE
 powershell -NoProfile -ExecutionPolicy Bypass -File .\reverse_engineering\Run-NetfixStressMatrix.ps1 -ResumeMatrix C:\BZRCoop\runs\netfix-matrix-20261008-010000
 #>
 param(
     [ValidateRange(1, 20)][int]$Passes = 2,
     [ValidateSet('on', 'off')][string[]]$Arms = @('on', 'off'),
-    # Substring filter on the case text, e.g. 'Skipper=host'.
-    [string]$Only = '',
+    # Substring filters on the case text, e.g. 'Skipper=host'; a case runs
+    # when it matches any of them.
+    [string[]]$Only = @(),
+    # Relay impairment profiles (relay_impairment.py specs); each is an axis value.
+    [string[]]$Impair = @(),
+    # Replaces the built-in misn05 cases: '<mission> <scenario> [Key=Value ...]',
+    # e.g. 'misn05 peer-blackout Override=misn05-coop BlackoutSeconds=20'.
+    [string[]]$Cases = @(),
     # Continue an interrupted matrix: reuse its plan, launch only unscored runs.
     [string]$ResumeMatrix = '',
     [string]$HarnessRoot = (Join-Path $env:USERPROFILE 'Documents\GIT\BZR-OpenShim-coopflow\reverse_engineering'),
@@ -71,7 +87,7 @@ $SessionScript = Join-Path $HarnessRoot 'BZRCoopSession.ps1'
 
 # The misn05 four-player cases. Skipper=host is the strongest stock
 # reproduction seen so far.
-$Cases = @(
+$DefaultCases = @(
     'misn05 four-services Override=misn05-coop',
     'misn05 win Override=misn05-coop',
     'misn05 win Override=misn05-coop GuestClient=2',
@@ -82,6 +98,7 @@ $Cases = @(
     'misn05 lose Override=misn05-coop Destroyed=recycler',
     'misn05 host-leaves Override=misn05-coop'
 )
+if (-not $Cases.Count) { $Cases = $DefaultCases }
 
 function Get-IniValue([string]$Path, [string]$Section, [string]$Key) {
     $inSection = $false
@@ -166,19 +183,26 @@ if ($ResumeMatrix) {
     foreach ($arm in $Arms) {
         foreach ($pass in 1..$Passes) {
             foreach ($case in $Cases) {
-                if ($Only -and $case -notlike "*$Only*") { continue }
+                if ($Only.Count -and -not @($Only | Where-Object { $case -like "*$_*" }).Count) { continue }
                 $parts = @($case -split '\s+' | Where-Object { $_ })
                 $tag = (@($parts | Select-Object -Skip 1 | Where-Object { $_ -notlike 'Override=*' }) -join '-') -replace '[^\w-]', ''
-                [void]$plan.Add([pscustomobject][ordered]@{
-                    index = $plan.Count + 1; arm = $arm; pass = $pass; case = $case
-                    run = "netfix-$arm-$tag-p$pass-$stamp"
-                })
+                $profiles = @(if ($Impair.Count) { $Impair } else { '' })
+                for ($k = 0; $k -lt $profiles.Count; $k++) {
+                    $itag = if ($profiles[$k]) { "-i$($k + 1)" } else { '' }
+                    [void]$plan.Add([pscustomobject][ordered]@{
+                        index = $plan.Count + 1; arm = $arm; pass = $pass; case = $case; impair = $profiles[$k]
+                        run = "netfix-$arm-$tag$itag-p$pass-$stamp"
+                    })
+                }
             }
         }
     }
-    $matrixDir = Join-Path $BZRCoopRoot "runs\netfix-matrix-$stamp"
+    $matrixDir = Join-Path $BZRCoopRoot "runs\$(if ($Impair.Count) { 'netimpair' } else { 'netfix' })-matrix-$stamp"
 }
-if (-not $plan.Count) { throw "empty plan (Only='$Only')" }
+if (-not $plan.Count) { throw "empty plan (Only='$($Only -join "','")')" }
+if (@($plan | Where-Object { $_.impair }).Count -and -not (Test-Path -LiteralPath (Join-Path $ServerRepo 'relay_impairment.py'))) {
+    [void]$problems.Add("$ServerRepo has no relay_impairment.py; -Impair needs a server with POST /relay/impairment")
+}
 $scoresDir = Join-Path $matrixDir 'scores'
 $done = @{}
 if (Test-Path -LiteralPath $scoresDir) {
@@ -186,7 +210,10 @@ if (Test-Path -LiteralPath $scoresDir) {
 }
 
 Write-Host "[matrix] $($plan.Count) planned runs ($($done.Count) already scored): arms $(@($plan.arm | Select-Object -Unique) -join '/'), DX9, muted, max network logging, stock retry timers"
-foreach ($r in $plan) { Write-Host ("  {0,2}. {1,-3} p{2} {3}{4}" -f $r.index, $r.arm, $r.pass, $r.case, $(if ($done[[int]$r.index]) { '  (scored)' } else { '' })) }
+foreach ($r in $plan) {
+    Write-Host ("  {0,2}. {1,-3} p{2} {3}{4}{5}" -f $r.index, $r.arm, $r.pass, $r.case,
+        $(if ($r.impair) { "  [impair $($r.impair)]" } else { '' }), $(if ($done[[int]$r.index]) { '  (scored)' } else { '' }))
+}
 if ($problems.Count) {
     $problems | ForEach-Object { Write-Host "[matrix] preflight: $_" -ForegroundColor Red }
     Write-Host '[matrix] preflight failed; nothing launched' -ForegroundColor Red
@@ -198,13 +225,13 @@ if ($DryRun) { Write-Host "[matrix] dry run: nothing launched; would write $matr
 $null = New-Item -ItemType Directory -Force -Path $matrixDir, (Join-Path $matrixDir 'logs'), $scoresDir
 if (-not $ResumeMatrix) {
     [ordered]@{
-        started = (Get-Date).ToString('o'); passes = $Passes; arms = $Arms; only = $Only; clients = $Clients
+        started = (Get-Date).ToString('o'); passes = $Passes; arms = $Arms; only = $Only; impair = $Impair; clients = $Clients
         plan = $plan
         sourceHashes = $sourceHashes; instances = $instances
         openShim = Get-RepoState $OpenShimRepo @('reverse_engineering\Run-NetfixStressMatrix.ps1', 'reverse_engineering\p2p_netfix_score.py')
         harness = Get-RepoState (Split-Path $HarnessRoot) @(@('Run-BZRCoopMission.ps1', 'BZRCoopMission.ps1', 'BZRCoopLobby.ps1',
             'BZRCoopSession.ps1', 'BZRCoopDiagnostics.ps1', 'BZRCoopAudio.cs') | ForEach-Object { "reverse_engineering\$_" })
-        server = Get-RepoState $ServerRepo @('server.py', 'native_network_health.py')
+        server = Get-RepoState $ServerRepo @('server.py', 'native_network_health.py', 'relay_impairment.py')
     } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $matrixDir 'matrix.json')
 }
 Write-Host "[matrix] -> $matrixDir"
@@ -237,9 +264,11 @@ foreach ($r in $plan) {
     $cmd = "& $(& $q $MissionScript) -Mission $mission -Scenario $scenario -Clients $Clients -MaxNetworkLogging -MuteClients -SkipPrepare " +
            "-OpenShimRepo $(& $q $OpenShimRepo) -ServerRepo $(& $q $ServerRepo) -BZRCoopRoot $(& $q $BZRCoopRoot) -RunName $(& $q $r.run)" +
            $(if ($override) { " -ContentOverride $(& $q $override)" } else { '' }) +
+           $(if ($r.impair) { " -Impair $(& $q $r.impair)" } else { '' }) +
            " -ScenarioArgs @{$argText}; exit `$LASTEXITCODE"
     $log = Join-Path $matrixDir ("logs\{0:D2}-{1}.log" -f [int]$r.index, $r.run)
-    Write-Host ("`n[matrix] {0}/{1} {2} p{3} {4} -> {5}" -f $r.index, $plan.Count, $r.arm, $r.pass, $r.case, $r.run) -ForegroundColor Cyan
+    Write-Host ("`n[matrix] {0}/{1} {2} p{3} {4}{5} -> {6}" -f $r.index, $plan.Count, $r.arm, $r.pass, $r.case,
+        $(if ($r.impair) { " [impair $($r.impair)]" } else { '' }), $r.run) -ForegroundColor Cyan
     $clock = [Diagnostics.Stopwatch]::StartNew()
     # Output goes to files: the run's server and coordinator inherit handles
     # and can outlive it, which would hold a pipe open.
@@ -264,11 +293,13 @@ foreach ($r in $plan) {
     $runDir = Join-Path $BZRCoopRoot "runs\$($r.run)"
     if (-not (Test-Path -LiteralPath $runDir)) { $stopReason = "harness did not start $($r.run) (exit $exit; see $log)"; break }
     $scorePath = Join-Path $scoresDir ("{0:D2}-{1}.json" -f [int]$r.index, $r.run)
-    & $Python $Scorer score $runDir --arm $r.arm --clients $Clients --case $r.case --pass-index $r.pass --index $r.index --out $scorePath
+    $scoreArgs = @('score', $runDir, '--arm', $r.arm, '--clients', $Clients, '--case', $r.case, '--pass-index', $r.pass,
+                   '--index', $r.index, '--impair', "$($r.impair)", '--out', $scorePath)
+    & $Python $Scorer @scoreArgs
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $scorePath)) { $stopReason = "scoring $($r.run) failed (exit $LASTEXITCODE)"; break }
     $class = (Get-Content -LiteralPath $scorePath -Raw | ConvertFrom-Json).class
     Write-Host ("[matrix] {0} -> {1} (harness exit {2}, {3:N1} min)" -f $r.run, $class, $exit, $clock.Elapsed.TotalMinutes) `
-        -ForegroundColor $(if ($class -in 'STRICT_PASS', 'REPRODUCED', 'NOT_REPRODUCED') { 'Green' } else { 'Red' })
+        -ForegroundColor $(if ($class -in 'STRICT_PASS', 'REPRODUCED', 'NOT_REPRODUCED', 'IMPAIRED_OK') { 'Green' } else { 'Red' })
     & $Python $Scorer aggregate $matrixDir | Out-Null
     if ($LASTEXITCODE -ne 0) { $stopReason = "aggregate failed (exit $LASTEXITCODE)"; break }
 

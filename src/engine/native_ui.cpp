@@ -9,6 +9,7 @@
 #include "native_ui_validation.h"
 
 #include "bzr_options_ui.h"
+#include "hook_engine.h"
 #include "openshim_sdk_v2.h"
 #include "shim_log.h"
 
@@ -29,12 +30,51 @@ namespace BZROpenShim
 {
     namespace
     {
-        constexpr uintptr_t kOptionsParentSingletonAddr = 0x009455C4;
-        constexpr uintptr_t kMainScreenSingletonAddr = 0x0094551C;
-        constexpr uintptr_t kMainScreenVtableAddr = 0x0089E178;
-        constexpr uintptr_t kMainScreenOverlayVtableAddr = 0x008A0B94;
-        constexpr uintptr_t kMainScreenCtorAddr = 0x0078E670;
-        constexpr uintptr_t kMainScreenDtorAddr = 0x0078ECA0;
+        // engine_addresses rows, bound in three sets so a partly ported
+        // build keeps what it can: the main-menu probe, the MainScreen
+        // destructor that teardown listeners ride on, and the Options parent.
+        uintptr_t g_OptionsParentSingletonAddr = 0;
+        uintptr_t g_MainScreenSingletonAddr = 0;
+        uintptr_t g_MainScreenVtableAddr = 0;
+        uintptr_t g_MainScreenOverlayVtableAddr = 0;
+        uintptr_t g_MainScreenCtorAddr = 0;
+        uintptr_t g_MainScreenDtorAddr = 0;
+
+        bool MainScreenProbeAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "UiPerfMainScreenGlobal", &g_MainScreenSingletonAddr },
+                    { "UiPerfMainScreenVtable", &g_MainScreenVtableAddr },
+                    { "UiPerfMainScreenOverlayVtable", &g_MainScreenOverlayVtableAddr },
+                    { "UiPerfMainScreenCtor", &g_MainScreenCtorAddr },
+                };
+                return HookEngine::BindEngineRows("Native UI main menu probe", rows);
+            }();
+            return bound;
+        }
+
+        bool MainScreenDtorAddressBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "MainScreenDtor", &g_MainScreenDtorAddr },
+                };
+                return HookEngine::BindEngineRows("Native UI MainScreen teardown", rows);
+            }();
+            return bound;
+        }
+
+        bool OptionsParentAddressBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "OptionsParentSingleton", &g_OptionsParentSingletonAddr },
+                };
+                return HookEngine::BindEngineRows("Native UI Options parent", rows);
+            }();
+            return bound;
+        }
         constexpr size_t kMainScreenDetourLen = 10;
         constexpr uint32_t kInternalMainMenuHostValue =
             NativeUiValidation::kMainMenuHost;
@@ -149,8 +189,7 @@ namespace BZROpenShim
 
         bool HasRequiredNativeUiBindings()
         {
-            return IsCompatibleGameVersion() &&
-                   g_BzrFn_ButtonCtor &&
+            return g_BzrFn_ButtonCtor &&
                    g_BzrFn_LabelCtor &&
                    g_BzrFn_AddChild &&
                    g_BzrFn_SetOnClick &&
@@ -231,7 +270,7 @@ namespace BZROpenShim
             outChildCount = -1;
             outFingerprint = 0;
             outGeneration = 0;
-            if (!g_MainMenuDiagnosticsEnabled || !IsCompatibleGameVersion())
+            if (!g_MainMenuDiagnosticsEnabled || !MainScreenProbeAddressesBound())
                 return false;
 
             constexpr const char* kRequiredChildren[] =
@@ -247,8 +286,8 @@ namespace BZROpenShim
 
             __try
             {
-                void* const screen = *reinterpret_cast<void**>(kMainScreenSingletonAddr);
-                if (!screen || *reinterpret_cast<uintptr_t*>(screen) != kMainScreenVtableAddr)
+                void* const screen = *reinterpret_cast<void**>(g_MainScreenSingletonAddr);
+                if (!screen || *reinterpret_cast<uintptr_t*>(screen) != g_MainScreenVtableAddr)
                     return false;
 
                 auto* const screenBytes = reinterpret_cast<uint8_t*>(screen);
@@ -270,7 +309,7 @@ namespace BZROpenShim
                     }
                 }
                 if (overlayMatches != 1 || !overlay ||
-                    *reinterpret_cast<uintptr_t*>(overlay) != kMainScreenOverlayVtableAddr)
+                    *reinterpret_cast<uintptr_t*>(overlay) != g_MainScreenOverlayVtableAddr)
                 {
                     return false;
                 }
@@ -334,12 +373,12 @@ namespace BZROpenShim
             outScreen = nullptr;
             outParent = nullptr;
             outChildCount = -1;
-            if (!IsCompatibleGameVersion())
+            if (!OptionsParentAddressBound())
                 return false;
 
             __try
             {
-                void* const screen = *reinterpret_cast<void**>(kOptionsParentSingletonAddr);
+                void* const screen = *reinterpret_cast<void**>(g_OptionsParentSingletonAddr);
                 if (!screen)
                     return false;
 
@@ -1237,7 +1276,7 @@ namespace BZROpenShim
 
             __try
             {
-                if (*reinterpret_cast<void**>(kMainScreenSingletonAddr) != screen)
+                if (*reinterpret_cast<void**>(g_MainScreenSingletonAddr) != screen)
                 {
                     LogShimA(LogLevel::Warn,
                              "native_ui_probe",
@@ -1337,12 +1376,14 @@ namespace BZROpenShim
         {
             if (g_MainScreenDtorOriginal)
                 return true;
-            const uint8_t expectedDtor[kMainScreenDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x6A, 0xFF,
-                0x68, 0xC8, 0xE6, 0x85, 0x00,
-            };
-            if (!ExpectedBytesMatchAt(kMainScreenDtorAddr, expectedDtor, sizeof(expectedDtor)))
+            if (!MainScreenDtorAddressBound())
+                return false;
+            // The row's guard covers these bytes. Read live: the push carries
+            // an absolute SEH handler address that moves with the build.
+            uint8_t expectedDtor[kMainScreenDetourLen] = {};
+            memcpy(expectedDtor, reinterpret_cast<const void*>(g_MainScreenDtorAddr),
+                   sizeof(expectedDtor));
+            if (!ExpectedBytesMatchAt(g_MainScreenDtorAddr, expectedDtor, sizeof(expectedDtor)))
             {
                 if (!g_MainScreenDtorMismatchLogged)
                 {
@@ -1351,12 +1392,12 @@ namespace BZROpenShim
                              "native_ui",
                              "MainScreen destructor bytes mismatch at 0x%08X; title-screen "
                              "teardown will not be observed",
-                             static_cast<unsigned>(kMainScreenDtorAddr));
+                             static_cast<unsigned>(g_MainScreenDtorAddr));
                 }
                 return false;
             }
             if (!InstallInlineDetour32(g_MainScreenDtorDetour,
-                                       kMainScreenDtorAddr,
+                                       g_MainScreenDtorAddr,
                                        reinterpret_cast<void*>(MainScreenDtorHook),
                                        kMainScreenDetourLen,
                                        expectedDtor,
@@ -1368,7 +1409,7 @@ namespace BZROpenShim
                     LogShimA(LogLevel::Warn,
                              "native_ui",
                              "Failed installing MainScreen destructor hook at 0x%08X",
-                             static_cast<unsigned>(kMainScreenDtorAddr));
+                             static_cast<unsigned>(g_MainScreenDtorAddr));
                 }
                 return false;
             }
@@ -1377,7 +1418,7 @@ namespace BZROpenShim
             LogShimA(LogLevel::Info,
                      "native_ui",
                      "MainScreen destructor hook installed at 0x%08X",
-                     static_cast<unsigned>(kMainScreenDtorAddr));
+                     static_cast<unsigned>(g_MainScreenDtorAddr));
             return true;
         }
 
@@ -1386,13 +1427,14 @@ namespace BZROpenShim
             if (g_MainScreenHooksInstalled)
                 return;
 
-            const uint8_t expectedCtor[kMainScreenDetourLen] =
-            {
-                0x55, 0x8B, 0xEC, 0x6A, 0xFF,
-                0x68, 0x54, 0xEC, 0x85, 0x00,
-            };
+            if (!MainScreenProbeAddressesBound())
+                return;
+            // Read live after the row's guard, as for the destructor.
+            uint8_t expectedCtor[kMainScreenDetourLen] = {};
+            memcpy(expectedCtor, reinterpret_cast<const void*>(g_MainScreenCtorAddr),
+                   sizeof(expectedCtor));
 
-            if (!ExpectedBytesMatchAt(kMainScreenCtorAddr, expectedCtor, sizeof(expectedCtor)))
+            if (!ExpectedBytesMatchAt(g_MainScreenCtorAddr, expectedCtor, sizeof(expectedCtor)))
             {
                 if (!g_MainScreenHookMismatchLogged)
                 {
@@ -1413,7 +1455,7 @@ namespace BZROpenShim
             }
 
             if (!InstallInlineDetour32(g_MainScreenCtorDetour,
-                                       kMainScreenCtorAddr,
+                                       g_MainScreenCtorAddr,
                                        reinterpret_cast<void*>(MainScreenCtorHook),
                                        kMainScreenDetourLen,
                                        expectedCtor,
@@ -1448,7 +1490,7 @@ namespace BZROpenShim
     {
         bool enabled = false;
         if (!TryGetUserConfigBool("NativeUiDiagnostics", "MainMenuProbe", enabled) ||
-            !enabled || !IsCompatibleGameVersion())
+            !enabled || !MainScreenProbeAddressesBound())
         {
             return;
         }
@@ -1459,10 +1501,8 @@ namespace BZROpenShim
 
     bool EnsureMainScreenDestroyedHook()
     {
-        // The site is build knowledge for the compatible executable; the byte
-        // guard inside stands the hook down on anything else.
-        if (!IsCompatibleGameVersion())
-            return false;
+        // The MainScreenDtor row's guard stands the hook down on a build it
+        // does not describe.
         return InstallMainScreenDtorHookIfPossible();
     }
 

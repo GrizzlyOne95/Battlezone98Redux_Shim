@@ -217,6 +217,106 @@ class ScoreTests(unittest.TestCase):
             shutil.rmtree(matrix, ignore_errors=True)
 
 
+    # ------------------------------------------------------ impairment --
+    def impair(self, spec="loss=3,seed=7", matched=500, dropped=15):
+        with open(os.path.join(self.run, "flow-inputs.json"), "w", encoding="utf-8") as f:
+            json.dump({"impair": spec}, f)
+        with open(os.path.join(self.run, "relay-impairment-final.json"), "w", encoding="utf-8") as f:
+            json.dump({"ok": True, "impairment": {"active": True, "spec": spec, "matched": matched,
+                                                  "dropped_loss": dropped}}, f)
+
+    def test_blackout_runs_from_first_rejection_to_next_accepted_update(self):
+        # Reliable 1 never reaches the receiver until 1600 ms: the updates
+        # stamped 2 at 1010 and 1300 are rejected, the one at 1700 accepted.
+        s = [packet(1, 2, 0, True, 1000), packet(1, 2, 2, False, 1010), packet(1, 2, 2, False, 1300),
+             packet(1, 2, 1, True, 1600), packet(1, 2, 2, False, 1700)]
+        self.make_run({(1, 2): s})
+        r = self.score()
+        link = r["links"]["c1->c2"]
+        self.assertEqual((link["blackouts"], link["blackoutTotalMs"], link["blackoutMaxMs"]), (1, 690, 690))
+        self.assertEqual(link["blackoutsOver500Ms"], 1)
+        self.assertEqual(r["maxBlackoutMs"], 690)
+        self.assertEqual(self.score()["links"]["c2->c1"]["blackouts"], 0)
+
+    def test_open_blackout_is_closed_at_the_last_packet(self):
+        s = [packet(1, 2, 0, True, 1000), packet(1, 2, 2, False, 1010), packet(1, 2, 2, False, 1210)]
+        self.make_run({(1, 2): s})
+        self.assertEqual(self.score()["links"]["c1->c2"]["blackoutTotalMs"], 200)
+
+    def test_delivery_order_follows_impairment_delays(self):
+        # At the relay, reliable 1 arrives before update 2, but it was held
+        # back 300 ms, so the receiver gets the update first: a gap.
+        r1 = packet(1, 2, 1, True, 1010) | {"impairment": {"drop": None, "delaysMs": [300.0], "reordered": True}}
+        s = [packet(1, 2, 0, True, 1000), r1, packet(1, 2, 2, False, 1020), packet(1, 2, 2, False, 1400)]
+        self.make_run({(1, 2): s})
+        link = self.score()["links"]["c1->c2"]
+        self.assertEqual(link["futureStampedGaps"], 1)
+        self.assertEqual(link["blackoutTotalMs"], 380)
+
+    def test_duplicated_copy_is_replayed_twice(self):
+        r1 = packet(1, 2, 1, True, 1010) | {"impairment": {"drop": None, "delaysMs": [0.0, 0.0], "reordered": False}}
+        s = [packet(1, 2, 0, True, 1000), r1, packet(1, 2, 2, False, 1020)]
+        self.make_run({(1, 2): s})
+        link = self.score()["links"]["c1->c2"]
+        self.assertEqual((link["duplicateReliable"], link["futureStampedGaps"]), (1, 0))
+
+    def test_relay_dropped_rows_are_not_delivered(self):
+        lost = dict(packet(1, 2, 1, True, 1010), disposition="dropped_impair_loss")
+        s = [packet(1, 2, 0, True, 1000), lost, packet(1, 2, 2, False, 1020), packet(1, 2, 1, True, 2010),
+             packet(1, 2, 2, False, 2020)]
+        self.make_run({(1, 2): s})
+        link = self.score()["links"]["c1->c2"]
+        self.assertEqual((link["futureStampedGaps"], link["blackoutTotalMs"]), (1, 1000))
+
+    def test_impaired_run_with_gaps_is_impaired_ok(self):
+        self.make_run({(1, 2): [packet(1, 2, 0, True, 1000), packet(1, 2, 2, False, 1010), packet(1, 2, 1, True, 1500)]})
+        self.impair()
+        r = self.score()
+        self.assertEqual((r["class"], r["impair"]), ("IMPAIRED_OK", "loss=3,seed=7"))
+        self.assertEqual(self.score("off")["class"], "ARM_MISMATCH")
+
+    def test_impaired_run_without_relay_counters_is_incomplete(self):
+        self.make_run()
+        self.impair(matched=0)
+        r = self.score()
+        self.assertEqual(r["class"], "INCOMPLETE")
+        os.remove(os.path.join(self.run, "relay-impairment-final.json"))
+        self.assertEqual(self.score()["class"], "INCOMPLETE")
+
+    def test_impaired_gameplay_failure_is_flow_fail(self):
+        checks = GOOD_CHECKS + [{"check": "c1 sees every ping", "status": "fail"}]
+        self.make_run(checks=checks)
+        self.impair()
+        self.assertEqual(self.score()["class"], "FLOW_FAIL")
+
+    def test_aggregate_impaired(self):
+        self.make_run()
+        self.impair()
+        base = self.score("on")
+        plan = [{"index": 1, "arm": "on", "pass": 1, "case": "x", "run": "run1", "impair": "loss=3,seed=7"},
+                {"index": 2, "arm": "off", "pass": 1, "case": "x", "run": "run2", "impair": "loss=3,seed=7"}]
+
+        def scored(index, arm, cls):
+            return dict(base, index=index, arm=arm, run=f"run{index}", **{"class": cls})
+        cases = [
+            ([scored(1, "on", "IMPAIRED_OK"), scored(2, "off", "IMPAIRED_OK")], "PASS"),
+            # a stock run that becomes unplayable under impairment is evidence
+            ([scored(1, "on", "IMPAIRED_OK"), scored(2, "off", "FLOW_FAIL")], "PASS"),
+            ([scored(1, "on", "FLOW_FAIL"), scored(2, "off", "IMPAIRED_OK")], "FAIL"),
+            ([scored(1, "on", "IMPAIRED_OK"), scored(2, "off", "CRASH")], "FAIL"),
+            ([scored(1, "on", "IMPAIRED_OK")], "FAIL"),
+        ]
+        for scores, verdict in cases:
+            matrix = tempfile.mkdtemp(prefix="netfix-matrix-test-")
+            try:
+                self.write_matrix(matrix, plan, scores)
+                s = score.aggregate(matrix)
+                self.assertEqual((s["kind"], s["verdict"]), ("impairment", verdict), [x["class"] for x in scores])
+                self.assertEqual([g["arm"] for g in s["groups"]], ["on", "off"])
+                self.assertEqual(s["groups"][0]["relayDropPct"], 3.0)
+            finally:
+                shutil.rmtree(matrix, ignore_errors=True)
+
 class GpuQueryTests(unittest.TestCase):
     """The event-log adapter fails closed: only an explicit count is evidence."""
 

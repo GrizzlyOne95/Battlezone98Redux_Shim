@@ -37,7 +37,7 @@ Test the exact release candidate files on the supported GOG executable.
 ### DX9
 
 - startup to shell
-- OpenShim settings page opens and values are clickable
+- OpenShim Options (Options → OpenShim Options) opens, every category screen opens, and values are clickable
 - keybindings page opens and values are clickable
 - campaign mission launch
 - Instant Action launch
