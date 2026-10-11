@@ -13,7 +13,7 @@
 // leaves every entry point below a no-op.
 //
 // Split: NativeChunks::ExtractGibs (runtime, cached under
-// openshim/cache/chunks/gibs/v2/<hash>/), or an authored gibs.txt payload from
+// openshim/cache/chunks/gibs/v3/<hash>/), or an authored gibs.txt payload from
 // scripts/export_gib_payloads.py. Rendering: shim-owned entities on the chunk
 // payload resource group, submitted from the world render-queue hook like the
 // chunk proxies. Simulation: ChunkEffect::Simulate's dt.

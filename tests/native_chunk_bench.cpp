@@ -256,27 +256,6 @@ std::vector<DumpSub> parsePiece(const std::vector<uint8_t> &mesh)
     }
     return subs;
 }
-// "r g b" of a generated zone material: the colour of its solid diffuse texture
-// (the muscle returns empty: it uses the muscle texture itself).
-std::string materialDiffuse(const std::string &name)
-{
-    const std::string scripts = GibFleshMaterialScript() + GibFleshZoneMaterialScript();
-    const size_t at = scripts.find("material " + name + " : BZBase");
-    if (at == std::string::npos)
-        return {};
-    const size_t alias = scripts.find("DiffuseMap ", at);
-    const std::string file = scripts.substr(alias + 11, scripts.find('\n', alias) - alias - 11);
-    for (const auto &image : GibFleshTextures())
-        if (file == image.file && image.zone)
-        {
-            const size_t pixel = 18 + image.tga[0];
-            char buf[64];
-            std::snprintf(buf, sizeof(buf), "%.3f %.3f %.3f", image.tga[pixel + 2] / 255.0, image.tga[pixel + 1] / 255.0,
-                          image.tga[pixel] / 255.0);
-            return buf;
-        }
-    return {};
-}
 void dumpObj(const fs::path &dir, const std::string &model, const std::vector<GibPiece> &gibs)
 {
     fs::create_directories(dir);
@@ -314,10 +293,11 @@ void dumpObj(const fs::path &dir, const std::string &model, const std::vector<Gi
             if (!written[sub.material])
             {
                 written[sub.material] = true;
-                const bool flesh = sub.material == kGibFleshMaterialName;
-                const std::string kd = materialDiffuse(sub.material);
+                // Every flesh zone material uses the generated texture of the same name.
+                const bool flesh = sub.material.rfind("openshim_gib_flesh", 0) == 0;
+                const std::string map = flesh ? "map_Kd " + sub.material + ".tga" : std::string();
                 std::fprintf(mtl, "newmtl %s\nKd %s\nKs 0.35 0.25 0.25\nNs 48\n%s\n", sub.material.c_str(),
-                             kd.empty() ? "0.55 0.5 0.45" : kd.c_str(), flesh ? "map_Kd openshim_gib_flesh.tga" : "");
+                             flesh ? "1 1 1" : "0.55 0.5 0.45", map.c_str());
             }
             for (size_t v = 0; v < sub.position.size(); ++v)
                 std::fprintf(obj, "v %.6f %.6f %.6f %.4f %.4f %.4f\n",

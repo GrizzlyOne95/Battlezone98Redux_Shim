@@ -63,6 +63,7 @@ struct GibOptions
     std::string capSkinMaterial = "openshim_gib_flesh_skin";
     std::string capFatMaterial = "openshim_gib_flesh_fat";
     std::string capBoneMaterial = "openshim_gib_flesh_bone";
+    std::string capClotMaterial = "openshim_gib_flesh_clot";
     std::string capMarrowMaterial = "openshim_gib_flesh_marrow";
     // Cuts of a driving bone matching this pattern (limbs, neck) also get a
     // bone/marrow ring in the middle of the cap.

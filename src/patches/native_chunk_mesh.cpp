@@ -1366,7 +1366,8 @@ struct CapVertex
 enum CapZone : size_t
 {
     kZoneSkin,   // thin dark dermis edge
-    kZoneFat,    // pale subcutaneous fat band
+    kZoneFat,    // pale subcutaneous fat band, thin and uneven
+    kZoneClot,   // darker clotted muscle just inside the fat (softens the step to the red)
     kZoneMuscle, // textured muscle, the main body of the cap
     kZoneBone,   // limb cuts: ivory ring
     kZoneMarrow, // limb cuts: dark centre
@@ -1412,16 +1413,19 @@ struct CapLayer
 {
     float scale, lift;
     float smoothing;  // how much of one Laplacian pass this ring takes: the skin edge hugs the rim
+    float jitter;     // multiplier on the ring's deterministic radial jitter (fat is deliberately uneven)
     CapZone bandZone; // the band between the previous layer and this one
 };
-// Skin band ~5% of the radius, fat ~8%, then muscle in to the centre; limb
-// cuts end the muscle at 0.30 with a bone annulus down to a marrow core.
-constexpr CapLayer kPlainLayers[] = {{0.95f, -0.01f, 0.3f, kZoneSkin},
-                                     {0.87f, -0.02f, 0.6f, kZoneFat},
-                                     {0.50f, -0.03f, 1.0f, kZoneMuscle}};
-constexpr CapLayer kLimbLayers[] = {{0.95f, -0.01f, 0.3f, kZoneSkin},   {0.87f, -0.02f, 0.6f, kZoneFat},
-                                    {0.55f, -0.03f, 1.0f, kZoneMuscle}, {0.32f, -0.02f, 1.0f, kZoneMuscle},
-                                    {0.20f, 0.02f, 1.0f, kZoneBone}};
+// Skin ~3% of the radius, fat ~4% and uneven, a darker clotted band, then muscle
+// in to the centre; limb cuts end the muscle at 0.32 with a small bone annulus
+// around a marrow core.
+constexpr CapLayer kPlainLayers[] = {{0.97f, -0.01f, 0.3f, 1.0f, kZoneSkin},
+                                     {0.925f, -0.02f, 0.5f, 7.0f, kZoneFat},
+                                     {0.80f, -0.02f, 0.8f, 3.0f, kZoneClot},
+                                     {0.50f, -0.03f, 1.0f, 1.0f, kZoneMuscle}};
+constexpr CapLayer kLimbLayers[] = {{0.97f, -0.01f, 0.3f, 1.0f, kZoneSkin},   {0.925f, -0.02f, 0.5f, 7.0f, kZoneFat},
+                                    {0.80f, -0.02f, 0.8f, 3.0f, kZoneClot},   {0.55f, -0.03f, 1.0f, 1.0f, kZoneMuscle},
+                                    {0.32f, -0.02f, 1.0f, 1.0f, kZoneMuscle}, {0.17f, 0.02f, 1.0f, 1.0f, kZoneBone}};
 // Torn-tissue cap over one cut loop. `points` are the welded boundary points,
 // `normal` faces away from the piece. The rim is the boundary itself (it must
 // seal the skin); every inner ring is an in-plane Laplacian-smoothed copy of
@@ -1497,7 +1501,7 @@ RingResult addRingCap(CapMesh &cap, const std::vector<V> &points, V normal, V ce
                                              (rho[after] * std::cos(angle[after]) - rho[i] * std::cos(angle[i])) +
                                          (rho[after] * std::sin(angle[after]) - rho[i] * std::sin(angle[i])) *
                                              (rho[after] * std::sin(angle[after]) - rho[i] * std::sin(angle[i])));
-            const float jr = (2.0f * positionNoise(boundary[i], 10 + static_cast<uint32_t>(j)) - 1.0f) * 0.04f * edge;
+            const float jr = (2.0f * positionNoise(boundary[i], 10 + static_cast<uint32_t>(j)) - 1.0f) * 0.04f * edge * layer.jitter;
             const float jz = (2.0f * positionNoise(boundary[i], 30 + static_cast<uint32_t>(j)) - 1.0f) * 0.05f * edge;
             // Never reach the ring outside along the same ray.
             nextRho[i] = std::min(blendRho * ratio + jr, rho[i] * 0.97f);
@@ -1818,7 +1822,7 @@ bool addEarCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, f
     std::vector<std::vector<float>> insetHeight;
     if (wantBands && n >= 5 && n <= 256)
     {
-        const float depth[2] = {0.05f * extent, 0.13f * extent};
+        const float depth[2] = {0.03f * extent, 0.07f * extent};
         for (const float d : depth)
         {
             std::vector<P2> ring(n);
@@ -2365,8 +2369,8 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                 triangles += static_cast<uint32_t>(selected.size() / 3);
             }
             const std::string *zoneMaterial[kZoneCount] = {&options.capSkinMaterial, &options.capFatMaterial,
-                                                           &options.capMaterial, &options.capBoneMaterial,
-                                                           &options.capMarrowMaterial};
+                                                           &options.capClotMaterial, &options.capMaterial,
+                                                           &options.capBoneMaterial, &options.capMarrowMaterial};
             for (size_t zone = 0; zone < kZoneCount; ++zone)
             {
                 const auto &zoneIndices = caps.indices[zone];
