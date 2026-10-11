@@ -129,6 +129,7 @@ try {
     $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
         CommandLine      = '"' + $gameExe + '" lcbench.bzn'
         CurrentDirectory = $GameRoot
+        ProcessStartupInformation = (New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]4 })
     }
     Write-Host "[lcmusic] launched (launcher pid $($r.ProcessId))"
 

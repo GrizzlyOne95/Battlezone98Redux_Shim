@@ -363,7 +363,7 @@ recyclerOdf = "$RecyclerOdf"
     $startedAt = Get-Date
     if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
     Assert-BZRSafeToLaunch
-    $process = Start-Process -FilePath $gameExe -ArgumentList $MissionArgs `
+    $process = Start-BZRGameProcess -FilePath $gameExe -ArgumentList $MissionArgs `
         -WorkingDirectory $GameRoot -PassThru
 
     $deadline = (Get-Date).AddSeconds($RunTimeoutSeconds)
