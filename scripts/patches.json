@@ -2540,6 +2540,12 @@
       "identity": "byte, non-zero in a network game; AutoSave gate input"
     },
     {
+      "name": "TerrainMasterLight",
+      "address": "0x00920CA0",
+      "kind": "data",
+      "identity": "Ogre::Light* terrain_masterlight (the sun); built by 0x0067DF70, destroyed and nulled by 0x0067E550, rebuilt lazily by the frame render 0x00682540"
+    },
+    {
       "name": "TerrainEditMode",
       "address": "0x009454B8",
       "kind": "data",
@@ -2550,6 +2556,12 @@
       "address": "0x00915540",
       "kind": "data",
       "identity": "16-char current/queued mission short name buffer"
+    },
+    {
+      "name": "CurrentAiMission",
+      "address": "0x00915694",
+      "kind": "data",
+      "identity": "AiMission* current mission object; SaveGame passes it unchecked via 0x0045D550 (mov eax,[0x915694]) to the serializer 0x005D7580; nulled by the AiMission destructor"
     },
     {
       "name": "DynamicGeometryVtable",
