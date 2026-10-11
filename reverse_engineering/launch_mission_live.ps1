@@ -45,6 +45,8 @@ $preLen = 0L
 if (Test-Path $bzLogger) { $preLen = (Get-Item $bzLogger).Length }
 
 Write-Host "Launching: $gameExe $MissionArgs"
+if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
+Assert-BZRSafeToLaunch
 $proc = Start-Process -FilePath $gameExe -ArgumentList $MissionArgs -WorkingDirectory $GameRoot -PassThru
 Write-Host "PID=$($proc.Id)"
 
