@@ -39,6 +39,18 @@ namespace BZROpenShim
         // SW_SHOWNOACTIVATE), SetFocus (blocked unless the target's top-level
         // window already is the foreground window).
         //
+        // Z-order: SHOWNOACTIVATE / NOACTIVATE still put a window on top, over
+        // the user's fullscreen app, so every show and every SetWindowPos z-order
+        // request on a top-level window ends at HWND_BOTTOM, and WS_EX_TOPMOST is
+        // stripped at creation. A bottom window still renders and simulates; the
+        // game's IsIconic gates (exe 0x004346A0, 0x00435BC0) skip only minimized ones.
+        //
+        // Simulation: the single-player sim is gated on an app-active flag
+        // (exe 0x008EAAA4) seeded from GetActiveWindow() == its window and flipped
+        // by WM_ACTIVATEAPP. Activation is blocked, so the flag would stay 0 and
+        // the sim would idle. Only the EXECUTABLE's GetActiveWindow import reports
+        // the game window; focus (GetFocus), keyboard and raw mouse stay real.
+        //
         // Off by default; with the flag unset no import is touched.
 
         namespace Policy = NeverActivatePolicy;
@@ -56,19 +68,21 @@ namespace BZROpenShim
             kCreateWindowExA,
             kCreateWindowExW,
             kSetFocus,
+            kGetActiveWindow,
             kSlotCount
         };
 
         const char* const kNames[kSlotCount] = {
             "ShowWindow", "ShowWindowAsync", "SetForegroundWindow", "BringWindowToTop",
             "SetActiveWindow", "SetWindowPos", "SwitchToThisWindow", "AllowSetForegroundWindow",
-            "CreateWindowExA", "CreateWindowExW", "SetFocus"};
+            "CreateWindowExA", "CreateWindowExW", "SetFocus", "GetActiveWindow"};
 
         using FnShowWindow = BOOL(WINAPI*)(HWND, int);
         using FnSetWindowPos = BOOL(WINAPI*)(HWND, HWND, int, int, int, int, UINT);
         using FnCreateWindowExA = HWND(WINAPI*)(DWORD, LPCSTR, LPCSTR, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE, LPVOID);
         using FnCreateWindowExW = HWND(WINAPI*)(DWORD, LPCWSTR, LPCWSTR, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE, LPVOID);
         using FnSetFocus = HWND(WINAPI*)(HWND);
+        using FnGetActiveWindow = HWND(WINAPI*)();
 
         void* s_hooks[kSlotCount] = {};
         void* s_real[kSlotCount] = {};
@@ -78,6 +92,41 @@ namespace BZROpenShim
         void* s_notificationCookie = nullptr;
         volatile long s_logged[kSlotCount] = {};
         volatile long s_sweepLogBudget = 6;
+        HMODULE s_exe = nullptr;
+        HWND volatile s_gameWindow = nullptr;
+        volatile long s_gameWindowIsOgre = 0;
+
+        bool IsTopLevel(HWND hwnd)
+        {
+            return hwnd && (static_cast<std::uint32_t>(GetWindowLongW(hwnd, GWL_STYLE)) & Policy::kWsChild) == 0;
+        }
+
+        // Sends a top-level window to the bottom of the z-order without
+        // activating it. SW_SHOWNOACTIVATE / SWP_NOACTIVATE alone still put it
+        // on top, over whatever the user is looking at. Calls the real function.
+        void PushToBottom(HWND hwnd)
+        {
+            if (!IsTopLevel(hwnd) || !s_real[kSetWindowPos])
+                return;
+            reinterpret_cast<FnSetWindowPos>(s_real[kSetWindowPos])(
+                hwnd, reinterpret_cast<HWND>(Policy::kHwndBottom), 0, 0, 0, 0, Policy::BottomPushFlags());
+        }
+
+        // Remembers the game window (the Ogre render window) so the exe's
+        // GetActiveWindow import can report it. Only top-level windows count.
+        void MaybeRecordGameWindow(HWND hwnd)
+        {
+            if (!IsTopLevel(hwnd))
+                return;
+            char cls[64] = {};
+            GetClassNameA(hwnd, cls, sizeof(cls));
+            const bool isOgre = strncmp(cls, "Ogre", 4) == 0;
+            if (Policy::ShouldRecordGameWindow(s_gameWindow != nullptr, s_gameWindowIsOgre != 0, isOgre))
+            {
+                s_gameWindow = hwnd;
+                s_gameWindowIsOgre = isOgre ? 1 : 0;
+            }
+        }
 
         // One-shot per API: names the module and offset of the first caller so a
         // later run identifies the culprit.
@@ -110,7 +159,13 @@ namespace BZROpenShim
             const int mapped = Policy::NoActivateShowCommand(cmd);
             if (mapped != cmd)
                 Note(kShowWindow, "ShowWindow activation", _ReturnAddress());
-            return reinterpret_cast<FnShowWindow>(s_real[kShowWindow])(hwnd, mapped);
+            const BOOL result = reinterpret_cast<FnShowWindow>(s_real[kShowWindow])(hwnd, mapped);
+            if (Policy::ShowCommandNeedsBottomPush(mapped))
+            {
+                MaybeRecordGameWindow(hwnd);
+                PushToBottom(hwnd);
+            }
+            return result;
         }
 
         BOOL WINAPI ShowWindowAsyncHook(HWND hwnd, int cmd)
@@ -118,7 +173,10 @@ namespace BZROpenShim
             const int mapped = Policy::NoActivateShowCommand(cmd);
             if (mapped != cmd)
                 Note(kShowWindowAsync, "ShowWindowAsync activation", _ReturnAddress());
-            return reinterpret_cast<FnShowWindow>(s_real[kShowWindowAsync])(hwnd, mapped);
+            const BOOL result = reinterpret_cast<FnShowWindow>(s_real[kShowWindowAsync])(hwnd, mapped);
+            if (Policy::ShowCommandNeedsBottomPush(mapped))
+                PushToBottom(hwnd);
+            return result;
         }
 
         BOOL WINAPI SetForegroundWindowHook(HWND)
@@ -155,7 +213,15 @@ namespace BZROpenShim
             if (!(flags & Policy::kSwpNoActivate))
                 Note(kSetWindowPos, "SetWindowPos activation", _ReturnAddress());
             flags = Policy::NoActivateWindowPosFlags(flags);
-            return reinterpret_cast<FnSetWindowPos>(s_real[kSetWindowPos])(hwnd, after, x, y, cx, cy, flags);
+            const bool topLevel = IsTopLevel(hwnd);
+            const HWND rewritten = reinterpret_cast<HWND>(
+                Policy::RewriteInsertAfter(reinterpret_cast<std::uintptr_t>(after), flags, topLevel));
+            if (rewritten != after)
+                Note(kSetWindowPos, "SetWindowPos z-order raise", _ReturnAddress());
+            const BOOL result = reinterpret_cast<FnSetWindowPos>(s_real[kSetWindowPos])(hwnd, rewritten, x, y, cx, cy, flags);
+            if (Policy::SetPosNeedsBottomPush(flags, topLevel))
+                PushToBottom(hwnd);
+            return result;
         }
 
         HWND WINAPI CreateWindowExAHook(DWORD ex, LPCSTR cls, LPCSTR name, DWORD style, int x, int y, int w, int h,
@@ -167,10 +233,15 @@ namespace BZROpenShim
                 Note(kCreateWindowExA, "CreateWindowExA WS_VISIBLE activation", _ReturnAddress());
                 style = Policy::StyleWithoutVisible(style);
             }
+            ex = Policy::StyleExWithoutTopmost(ex);
             HWND hwnd = reinterpret_cast<FnCreateWindowExA>(s_real[kCreateWindowExA])(
                 ex, cls, name, style, x, y, w, h, parent, menu, inst, param);
             if (hwnd && defer)
+            {
+                MaybeRecordGameWindow(hwnd);
                 reinterpret_cast<FnShowWindow>(s_real[kShowWindow])(hwnd, Policy::DeferredShowCommand(style));
+                PushToBottom(hwnd);
+            }
             return hwnd;
         }
 
@@ -183,10 +254,15 @@ namespace BZROpenShim
                 Note(kCreateWindowExW, "CreateWindowExW WS_VISIBLE activation", _ReturnAddress());
                 style = Policy::StyleWithoutVisible(style);
             }
+            ex = Policy::StyleExWithoutTopmost(ex);
             HWND hwnd = reinterpret_cast<FnCreateWindowExW>(s_real[kCreateWindowExW])(
                 ex, cls, name, style, x, y, w, h, parent, menu, inst, param);
             if (hwnd && defer)
+            {
+                MaybeRecordGameWindow(hwnd);
                 reinterpret_cast<FnShowWindow>(s_real[kShowWindow])(hwnd, Policy::DeferredShowCommand(style));
+                PushToBottom(hwnd);
+            }
             return hwnd;
         }
 
@@ -206,6 +282,20 @@ namespace BZROpenShim
             return reinterpret_cast<FnSetFocus>(s_real[kSetFocus])(hwnd);
         }
 
+        // Installed on the executable's own import only. The game's app-active
+        // flag (exe 0x008EAAA4) is seeded from GetActiveWindow() == its window;
+        // a never-activated window would otherwise leave the sim idle.
+        HWND WINAPI GetActiveWindowHook()
+        {
+            const HWND real = reinterpret_cast<FnGetActiveWindow>(s_real[kGetActiveWindow])();
+            const HWND game = s_gameWindow;
+            const HWND reported = reinterpret_cast<HWND>(Policy::ReportedActiveWindow(
+                reinterpret_cast<std::uintptr_t>(real), reinterpret_cast<std::uintptr_t>(game), game && IsWindow(game)));
+            if (reported != real)
+                Note(kGetActiveWindow, "GetActiveWindow reported the game window as active", _ReturnAddress());
+            return reported;
+        }
+
         // Patches one module; returns the number of imports it covers.
         int PatchModule(HMODULE module)
         {
@@ -214,6 +304,8 @@ namespace BZROpenShim
             int count = 0;
             for (int i = 0; i < kSlotCount; ++i)
             {
+                if (i == kGetActiveWindow && module != s_exe)
+                    continue; // Ogre/DXGI keep the real answer
                 IatPatch::Result r = IatPatch::PatchImport(module, "user32.dll", kNames[i], s_hooks[i], nullptr);
                 if (r == IatPatch::Result::NotFound)
                     r = IatPatch::PatchImportFromAnyDll(module, kNames[i], s_hooks[i], nullptr);
@@ -291,6 +383,7 @@ namespace BZROpenShim
             GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                                reinterpret_cast<LPCWSTR>(&InstallNeverActivateHooks), &s_self);
 
+            s_exe = GetModuleHandleW(nullptr);
             const HMODULE user32 = LoadLibraryW(L"user32.dll");
             void* const hooks[kSlotCount] = {
                 reinterpret_cast<void*>(&ShowWindowHook), reinterpret_cast<void*>(&ShowWindowAsyncHook),
@@ -298,7 +391,8 @@ namespace BZROpenShim
                 reinterpret_cast<void*>(&SetActiveWindowHook), reinterpret_cast<void*>(&SetWindowPosHook),
                 reinterpret_cast<void*>(&SwitchToThisWindowHook), reinterpret_cast<void*>(&AllowSetForegroundWindowHook),
                 reinterpret_cast<void*>(&CreateWindowExAHook), reinterpret_cast<void*>(&CreateWindowExWHook),
-                reinterpret_cast<void*>(&SetFocusHook)};
+                reinterpret_cast<void*>(&SetFocusHook),
+                reinterpret_cast<void*>(&GetActiveWindowHook)};
             bool resolved = user32 != nullptr;
             for (int i = 0; i < kSlotCount; ++i)
             {
@@ -306,7 +400,8 @@ namespace BZROpenShim
                 s_real[i] = user32 ? reinterpret_cast<void*>(GetProcAddress(user32, kNames[i])) : nullptr;
                 // The hooks that forward to the real function need a target.
                 if (!s_real[i] && (i == kShowWindow || i == kShowWindowAsync || i == kSetWindowPos ||
-                                   i == kCreateWindowExA || i == kCreateWindowExW || i == kSetFocus))
+                                   i == kCreateWindowExA || i == kCreateWindowExW || i == kSetFocus ||
+                                   i == kGetActiveWindow))
                     resolved = false;
             }
             if (!resolved)

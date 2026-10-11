@@ -54,6 +54,39 @@ namespace
         Check(!ShouldBlockSetFocus(true, 0x100, 0x100), "focus inside the foreground window passes");
         Check(!ShouldBlockSetFocus(false, 0, 0x200), "SetFocus(NULL) passes");
     }
+
+    void TestZOrder()
+    {
+        Check(RewriteInsertAfter(kHwndTop, 0, true) == kHwndBottom, "HWND_TOP becomes HWND_BOTTOM");
+        Check(RewriteInsertAfter(static_cast<std::uintptr_t>(-1), 0, true) == kHwndBottom, "HWND_TOPMOST becomes HWND_BOTTOM");
+        Check(RewriteInsertAfter(static_cast<std::uintptr_t>(-2), 0, true) == kHwndBottom, "HWND_NOTOPMOST becomes HWND_BOTTOM");
+        Check(RewriteInsertAfter(0x1234, 0, true) == kHwndBottom, "an arbitrary sibling becomes HWND_BOTTOM");
+        Check(RewriteInsertAfter(kHwndBottom, 0, true) == kHwndBottom, "HWND_BOTTOM is kept");
+        Check(RewriteInsertAfter(kHwndTop, kSwpNoZOrder, true) == kHwndTop, "SWP_NOZORDER leaves the argument alone");
+        Check(RewriteInsertAfter(kHwndTop, 0, false) == kHwndTop, "child windows are left alone");
+        Check(SetPosNeedsBottomPush(kSwpShowWindow | kSwpNoZOrder, true), "SHOWWINDOW+NOZORDER needs a push");
+        Check(!SetPosNeedsBottomPush(kSwpShowWindow, true), "SHOWWINDOW alone is already rewritten");
+        Check(!SetPosNeedsBottomPush(kSwpShowWindow | kSwpNoZOrder, false), "child windows need no push");
+        Check((BottomPushFlags() & kSwpNoActivate) != 0, "bottom push never activates");
+        Check((BottomPushFlags() & kSwpNoMove) != 0 && (BottomPushFlags() & kSwpNoSize) != 0, "bottom push keeps geometry");
+        Check((BottomPushFlags() & kSwpNoZOrder) == 0, "bottom push changes z-order");
+        Check(StyleExWithoutTopmost(0x08040008) == 0x08040000, "WS_EX_TOPMOST is stripped, other bits kept");
+        Check(ShowCommandNeedsBottomPush(kSwShowNoActivate), "visible show needs a push");
+        Check(ShowCommandNeedsBottomPush(kSwShowMinNoActive), "min-no-active show needs a push");
+        Check(!ShowCommandNeedsBottomPush(kSwHide), "SW_HIDE needs no push");
+    }
+
+    void TestActiveWindow()
+    {
+        Check(ReportedActiveWindow(0, 0x500, true) == 0x500, "no active window reports the game window");
+        Check(ReportedActiveWindow(0x77, 0x500, true) == 0x77, "a real active window is kept");
+        Check(ReportedActiveWindow(0, 0x500, false) == 0, "a destroyed game window is not reported");
+        Check(ReportedActiveWindow(0, 0, true) == 0, "no recorded game window reports nothing");
+        Check(ShouldRecordGameWindow(false, false, false), "first window is recorded");
+        Check(ShouldRecordGameWindow(true, false, true), "an Ogre window replaces a non-Ogre one");
+        Check(!ShouldRecordGameWindow(true, true, true), "an Ogre window is never replaced");
+        Check(!ShouldRecordGameWindow(true, false, false), "a later non-Ogre window does not replace");
+    }
 }
 
 int main()
@@ -62,6 +95,8 @@ int main()
     TestWindowPosFlags();
     TestCreateStyle();
     TestSetFocus();
+    TestZOrder();
+    TestActiveWindow();
     if (OpenShimTest::FailureCount() != 0)
     {
         std::fprintf(stderr, "never_activate_policy_tests: %d check(s) failed\n", OpenShimTest::FailureCount());
