@@ -140,6 +140,8 @@ spinSeconds = $($SpinSeconds.ToString("0.0###", $invariant))
         }
     }
 
+    if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
+    Assert-BZRSafeToLaunch
     $process = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" `
         -WorkingDirectory $GameRoot -PassThru
 

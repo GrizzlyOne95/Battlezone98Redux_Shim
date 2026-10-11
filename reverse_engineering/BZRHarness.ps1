@@ -35,6 +35,201 @@ $script:BZRGameProcessName = 'battlezone98redux'
 # mouse capture sets it to 0 before dot-sourcing this file.
 if (-not $env:OPENSHIM_NEVER_CAPTURE_MOUSE) { $env:OPENSHIM_NEVER_CAPTURE_MOUSE = '1' }
 
+# The user may be playing (or in a PvP match) while tests run, and a test
+# window that activates itself steals their foreground and keyboard focus even
+# with the mouse left alone. Launched games inherit this; OpenShim then never
+# activates, raises or focuses the game window (ShowWindow -> SW_SHOWNOACTIVATE,
+# SetForegroundWindow/BringWindowToTop/SetActiveWindow no-ops, SetWindowPos +
+# SWP_NOACTIVATE). A script that genuinely needs an activated window (SendInput
+# drivers) sets it to 0 before dot-sourcing this file and sets
+# BZR_ALLOW_FOREGROUND_LAUNCH=1 (see Assert-BZRSafeToLaunch).
+if (-not $env:OPENSHIM_NEVER_ACTIVATE) { $env:OPENSHIM_NEVER_ACTIVATE = '1' }
+
+# Native helpers for the foreground-steal watchdog below.
+if (-not ('BZRForegroundWatchdog' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+public static class BZRForegroundWatchdog
+{
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+
+    static readonly object Gate = new object();
+    static readonly List<string> Events = new List<string>();
+    static int running = 0;
+
+    public static string LogPath = Path.Combine(Path.GetTempPath(), "bzr_foreground_watchdog.log");
+
+    static void Note(string text)
+    {
+        string line = DateTime.Now.ToString("HH:mm:ss.fff") + " " + text;
+        lock (Gate) { Events.Add(line); }
+        try { File.AppendAllText(LogPath, line + Environment.NewLine); } catch { }
+    }
+
+    public static string[] Snapshot() { lock (Gate) { return Events.ToArray(); } }
+    public static bool IsRunning() { return Interlocked.CompareExchange(ref running, 0, 0) != 0; }
+
+    static bool IsGame(uint pid, string gameName)
+    {
+        if (pid == 0) return false;
+        try { return string.Equals(Process.GetProcessById((int)pid).ProcessName, gameName, StringComparison.OrdinalIgnoreCase); }
+        catch { return false; }
+    }
+
+    // Waits up to waitForGameMs for the game process to exist, then polls the
+    // foreground window every intervalMs for watchMs. If it ever belongs to the
+    // game, logs FOREGROUND-STOLEN and hands the foreground back to whatever
+    // held it before. allowAttach enables the AttachThreadInput fallback.
+    public static bool Start(string gameName, int waitForGameMs, int watchMs, int intervalMs, bool allowAttach)
+    {
+        if (Interlocked.CompareExchange(ref running, 1, 0) != 0) return false;
+        Thread t = new Thread(delegate() {
+            try { Run(gameName, waitForGameMs, watchMs, intervalMs, allowAttach); }
+            catch (Exception ex) { Note("watchdog error: " + ex.Message); }
+            finally { Interlocked.Exchange(ref running, 0); }
+        });
+        t.IsBackground = true;
+        t.Name = "BZRForegroundWatchdog";
+        t.Start();
+        return true;
+    }
+
+    static void Run(string gameName, int waitForGameMs, int watchMs, int intervalMs, bool allowAttach)
+    {
+        IntPtr previous = IntPtr.Zero;
+        Stopwatch wait = Stopwatch.StartNew();
+        Stopwatch watch = null;
+        int reported = 0;
+        while (true)
+        {
+            IntPtr fg = GetForegroundWindow();
+            uint pid = 0;
+            if (fg != IntPtr.Zero) GetWindowThreadProcessId(fg, out pid);
+            bool gameFg = IsGame(pid, gameName);
+
+            if (watch == null)
+            {
+                if (Process.GetProcessesByName(gameName).Length > 0) { watch = Stopwatch.StartNew(); Note("game process seen; watching foreground for " + watchMs + " ms"); }
+                else if (wait.ElapsedMilliseconds > waitForGameMs) { Note("game never appeared; watchdog done"); return; }
+            }
+            else if (watch.ElapsedMilliseconds > watchMs) { Note("watchdog window over; reported " + reported + " steal(s)"); return; }
+            else if (Process.GetProcessesByName(gameName).Length == 0) { Note("game exited; reported " + reported + " steal(s)"); return; }
+
+            if (!gameFg)
+            {
+                if (fg != IntPtr.Zero) previous = fg;
+            }
+            else if (watch != null)
+            {
+                reported++;
+                Note("FOREGROUND-STOLEN: game pid " + pid + " took the foreground (previous hwnd 0x" + previous.ToInt64().ToString("X") + ")");
+                if (previous != IntPtr.Zero && IsWindow(previous))
+                {
+                    bool ok = SetForegroundWindow(previous);
+                    Thread.Sleep(30);
+                    IntPtr now = GetForegroundWindow();
+                    uint nowPid = 0; if (now != IntPtr.Zero) GetWindowThreadProcessId(now, out nowPid);
+                    if (!ok || IsGame(nowPid, gameName))
+                    {
+                        Note("plain SetForegroundWindow did not restore the previous window");
+                        if (allowAttach)
+                        {
+                            uint fgThread = GetWindowThreadProcessId(now, out nowPid);
+                            uint me = GetCurrentThreadId();
+                            bool attached = AttachThreadInput(me, fgThread, true);
+                            SetForegroundWindow(previous);
+                            if (attached) AttachThreadInput(me, fgThread, false);
+                            Note("AttachThreadInput fallback attempted (attached=" + attached + ")");
+                        }
+                    }
+                    else Note("foreground restored to previous window");
+                }
+            }
+            Thread.Sleep(intervalMs);
+        }
+    }
+}
+'@
+}
+
+function Start-BZRForegroundWatchdog {
+    <#
+    .SYNOPSIS
+        Detects (and undoes) the game taking the foreground right after launch.
+    .DESCRIPTION
+        Background thread, so the caller is not blocked. Waits up to 60 s for the
+        game process to appear, then for 15 s polls GetForegroundWindow every
+        250 ms. If the foreground ever belongs to the game it logs a loud
+        FOREGROUND-STOLEN line (Get-BZRForegroundWatchdogLog; also appended to
+        %TEMP%\bzr_foreground_watchdog.log) and calls SetForegroundWindow on the
+        previous foreground window. The AttachThreadInput fallback runs only when
+        plain SetForegroundWindow failed AND BZR_WATCHDOG_ATTACH_INPUT=1 (opt-in
+        until it has been verified on a supervised run).
+        Disable with BZR_NO_FOREGROUND_WATCHDOG=1.
+    #>
+    [CmdletBinding()]
+    param(
+        [int]$WaitForGameSeconds = 60,
+        [int]$WatchSeconds = 900,
+        [int]$PollMilliseconds = 250
+    )
+    if ($env:BZR_NO_FOREGROUND_WATCHDOG -eq '1') { return $false }
+    [BZRForegroundWatchdog]::Start($script:BZRGameProcessName, $WaitForGameSeconds * 1000,
+        $WatchSeconds * 1000, $PollMilliseconds, ($env:BZR_WATCHDOG_ATTACH_INPUT -eq '1'))
+}
+
+function Get-BZRForegroundWatchdogLog {
+    [CmdletBinding()]
+    param()
+    [BZRForegroundWatchdog]::Snapshot()
+}
+
+function Assert-BZRSafeToLaunch {
+    <#
+    .SYNOPSIS
+        Launch guard: refuses to start the game unless it cannot steal input.
+    .DESCRIPTION
+        Throws unless OPENSHIM_NEVER_ACTIVATE=1 and OPENSHIM_NEVER_CAPTURE_MOUSE=1
+        are both set in the environment the game will inherit. This file defaults
+        both to 1, so the guard only fires when a script switched one off. User
+        activity and other fullscreen apps never block a launch (tests are meant
+        to run in the background while the user plays); a fullscreen foreground
+        window only produces a warning.
+
+        Scripts that genuinely need foreground (bzrdrive / SendInput drivers) set
+        $env:BZR_ALLOW_FOREGROUND_LAUNCH = '1' (the older name
+        BZR_ALLOW_LAUNCH_WHILE_BUSY is also honoured).
+
+        Also starts the post-launch foreground watchdog (Start-BZRForegroundWatchdog),
+        which covers the launch that follows this call.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $override = ($env:BZR_ALLOW_FOREGROUND_LAUNCH -eq '1') -or ($env:BZR_ALLOW_LAUNCH_WHILE_BUSY -eq '1')
+    if (-not $override) {
+        $missing = @('OPENSHIM_NEVER_ACTIVATE', 'OPENSHIM_NEVER_CAPTURE_MOUSE' |
+            Where-Object { [Environment]::GetEnvironmentVariable($_) -ne '1' })
+        if ($missing.Count -gt 0) {
+            throw ("Refusing to launch Battlezone: {0} must be '1' in the environment the game inherits, " +
+                   "or the test window can steal the user's foreground/mouse. Scripts that truly need foreground " +
+                   "set `$env:BZR_ALLOW_FOREGROUND_LAUNCH='1'.") -f ($missing -join ', ')
+        }
+    }
+    [void](Start-BZRForegroundWatchdog)
+}
+
 function Stop-BZRGame {
     <#
     .SYNOPSIS
@@ -157,6 +352,8 @@ function Enter-BZRLaunchLock {
     #>
     [CmdletBinding()]
     param([int]$TimeoutSeconds = 1800)
+
+    Assert-BZRSafeToLaunch
 
     $mutex = New-Object System.Threading.Mutex($false, 'Local\BZROpenShimGameLaunch')
     try {

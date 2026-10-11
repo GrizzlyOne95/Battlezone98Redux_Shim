@@ -325,6 +325,7 @@ try {
         $desc = ($overrides.Keys | ForEach-Object { "$_=$($overrides[$_])" }) -join " "
         Write-Host "[lcplight] --- $Scenario arm '$arm': $desc ---"
 
+        Assert-BZRSafeToLaunch
         $proc = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" `
             -WorkingDirectory $GameRoot -PassThru
         $launchedAt = Get-Date

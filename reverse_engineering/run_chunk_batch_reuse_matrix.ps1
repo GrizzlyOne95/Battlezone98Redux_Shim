@@ -132,6 +132,8 @@ spinSeconds = $($SpinSeconds.ToString("0.0###", $invariant))
                     $tag = "{0}_{1}_{2}_{3:d3}" -f $renderName.ToLowerInvariant(), $scenarioName, $modeName, $unitCount
                     Write-Host "== $tag =="
 
+                    if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
+                    Assert-BZRSafeToLaunch
                     $process = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" `
                         -WorkingDirectory $GameRoot -PassThru
                     $deadline = (Get-Date).AddSeconds($WarmupSeconds + $MeasureSeconds + 60)

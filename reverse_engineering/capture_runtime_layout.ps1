@@ -14,6 +14,8 @@ $pythonScript = Join-Path $scriptDir "capture_runtime_layout.py"
 if ($Launch) {
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($ProcessName)
     if (-not (Get-Process -Name $baseName -ErrorAction SilentlyContinue)) {
+        if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
+        Assert-BZRSafeToLaunch
         Start-Process -FilePath $GameExe | Out-Null
     }
 }

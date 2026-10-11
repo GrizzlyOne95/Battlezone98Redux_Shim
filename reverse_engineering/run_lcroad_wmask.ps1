@@ -110,6 +110,7 @@ commit = "$commit"
             }
 
             $started = Get-Date
+            Assert-BZRSafeToLaunch
             $process = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot -PassThru
             $exited = $process.WaitForExit($RunSeconds * 1000)
             if (-not $exited) {
