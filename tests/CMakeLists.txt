@@ -7,6 +7,19 @@ project(BzrNetProtocolTests LANGUAGES CXX)
 #   cmake -S tests -B tests/build && cmake --build tests/build -j && ctest --test-dir tests/build --output-on-failure
 enable_testing()
 
+add_executable(p2p_reliable_send_policy_tests p2p_reliable_send_policy_tests.cpp)
+target_include_directories(p2p_reliable_send_policy_tests PRIVATE ../include)
+target_compile_features(p2p_reliable_send_policy_tests PRIVATE cxx_std_14)
+add_test(NAME p2p_reliable_send_policy_tests COMMAND p2p_reliable_send_policy_tests)
+
+if(WIN32)
+    add_executable(win32_last_error_scope_tests win32_last_error_scope_tests.cpp)
+    target_include_directories(win32_last_error_scope_tests PRIVATE ../include)
+    target_compile_features(win32_last_error_scope_tests PRIVATE cxx_std_14)
+    target_link_libraries(win32_last_error_scope_tests PRIVATE ws2_32)
+    add_test(NAME win32_last_error_scope_tests COMMAND win32_last_error_scope_tests)
+endif()
+
 # Qualification tooling has pure host seams. Neither test requires the private
 # executable, Windows process APIs, Frida, pefile or capstone.
 find_package(Python3 QUIET COMPONENTS Interpreter)
@@ -37,6 +50,9 @@ function(openshim_add_test name)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+openshim_add_test(d3d11_buffer_mirror_policy_tests STD 17 SOURCES
+    d3d11_buffer_mirror_policy_tests.cpp
+)
 openshim_add_test(ogre_entity_reload_tests STD 17 SOURCES
     ogre_entity_reload_tests.cpp
 )
@@ -238,6 +254,10 @@ openshim_add_test(ogre_profiler_algorithms_tests STD 17 SOURCES
 
 openshim_add_test(bool_token_tests STD 20 SOURCES
     bool_token_tests.cpp
+)
+
+openshim_add_test(matchmaking_server_tests STD 17 SOURCES
+    matchmaking_server_tests.cpp
 )
 
 openshim_add_test(map_filter_extras_tests STD 14 SOURCES

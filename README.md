@@ -307,6 +307,7 @@ Native fixes and restorations for Redux behavior, including:
 - engine light and visual-state fixes
 - increased sound-channel capacity
 - restored legacy death-chunk rendering
+- DX11 device-loss recovery: the lost device is recreated after the GPU settles and vertex/index buffers are restored in place
 
 ### Global Gameplay Improvements
 
@@ -343,6 +344,7 @@ OpenShim also contains multiplayer fixes and diagnostic tooling, including:
 - socket and buffer tuning
 - network route diagnostics
 - optional packet/session capture tools
+- guarded reliable-send backlog fix for lag in native 3+ player games
 - opt-in UDP packet-reorder experimentation
 
 Diagnostics and experimental networking behavior are disabled by default unless explicitly enabled.
@@ -385,6 +387,8 @@ openshim.ini.example
 ```
 
 Use the example when you need accepted values, aliases, ranges, restart/live-apply behavior, implementation notes, or legacy `OPENSHIM_*` / `BZR_*` compatibility variables. It is a reference, not the recommended player preset.
+
+Set the environment variable `OPENSHIM_DISABLE_D3D11_BUFFER_RESTORE` to disable the in-place DX11 buffer restore after a device loss (logged under `[DX11 Buffers]`).
 
 Networking-specific low-level settings are available through:
 

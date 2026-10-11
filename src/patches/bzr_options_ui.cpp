@@ -3143,6 +3143,14 @@ namespace BZROpenShim
               "Experimental: recycle the lounge BZRNet connection after a nickname "
               "edit so stock reconnects and authorizes the new name. Expect a brief "
               "lounge drop / possible Not Ready flicker. In-match remains persist-only." },
+            // Absent key = off, so defaultIndex 1 selects "0" (Off).
+            { "MP Setup Screen", "Network", "PreLobby", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::ReadOnNextUse,
+              "Multiplayer opens a setup screen first (nickname, flag, matchmaking "
+              "server: Rebellion or Custom) instead of going straight to the lobby. "
+              "While on, the nickname and flag pickers move to that screen and are "
+              "no longer built in the lobby. Read when Multiplayer is clicked." },
             // defaultIndex 0 selects "1", which is what an absent key does: the
             // native tracker has always run, and turning the row off must be a
             // deliberate choice rather than the effect of a missing ini key.
