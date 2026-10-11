@@ -314,7 +314,7 @@ function Start-BZRCoopClients {
         }
         if ($i -gt 0) { Start-Sleep -Seconds $LaunchDelaySeconds }
         if ($MaxNetworkLogging) { Set-BZRCoopMaxNetworkLogging $inst }
-        Assert-BZRSafeToLaunch
+        if ($i -eq 0) { Assert-BZRSafeToLaunch } else { Assert-BZRSafeToLaunch -AllowRunning }
         $p = Start-BZRGameProcess -FilePath (Join-Path $inst 'battlezone98redux.exe') -WorkingDirectory $inst `
                 -ArgumentList $clientGameArgs -PassThru
         $session.clients += [ordered]@{ index = $i; pid = $p.Id; dir = $inst; launchedAtMs = $clock.ElapsedMilliseconds }
