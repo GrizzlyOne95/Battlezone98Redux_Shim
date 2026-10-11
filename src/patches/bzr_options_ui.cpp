@@ -3183,7 +3183,8 @@ namespace BZROpenShim
 
         static const char* const kShimCategoryVideo[] = {
             "Render Profile", "DX11 FXAA", "DX11 Local Lights", "Sun Flashbang", "Jet Flames",
-            "Empty Craft Lights", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes" };
+            "Empty Craft Lights", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes",
+            "HD Terrain Tiles", "Terrain Micro Detail" };
         static const char* const kShimCategoryLighting[] = {
             "Player Headlight", "Headlight Brightness", "Headlight Color", "Headlight Beam",
             "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam" };
@@ -3193,18 +3194,19 @@ namespace BZROpenShim
             "Scrap/Pilot HUD", "Radar Size", "Target Popup", "MP Vehicle Flags", "Show Own MP Flag" };
         static const char* const kShimCategoryControls[] = {
             kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Unsmoothed Controls",
-            "Satellite Zoom Out", "Satellite Pan Speed", "Editor Placement" };
+            "Satellite Zoom Out", "Satellite Pan Speed", "Editor Placement", "Background Mouse" };
         static const char* const kShimCategoryGameplay[] = {
             "Weapon Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
             "Jump-Snipe Crouch", "Global Turbo", "Satellite Fog Of War", "Neutral Attack Orders",
             "Smart Scavengers", "Turret AA Pitch", "Bomber AI Range", "AI Howitzer Volley",
-            "AI Mine Volley", "AutoSave", "AutoSave Interval" };
+            "AI Mine Volley", "AutoSave", "AutoSave Interval", "Vehicle Geometry" };
         static const char* const kShimCategoryFixes[] = {
             "AI Multi-Producer", "APC Allied Deploy", "Splinter Undead Fix", "Howitzer Deploy Fix",
             "Tug Cargo Deploy", "Recycle Release Fix", "Constructor Cleanup", "Material Guard" };
         static const char* const kShimCategoryNetwork[] = {
             "Net Route", "Net Improvements", "Net Tuning", "Stock Factions", "Map List Fixes",
-            "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname" };
+            "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname",
+            "MP Setup Screen" };
         static const char* const kShimCategorySystem[] = {
             kShimRowUpdateCheck, "Career Stats", "Reset Career Stats" };
 
