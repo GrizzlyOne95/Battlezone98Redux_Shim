@@ -120,17 +120,29 @@ namespace
 struct ZoneSpec
 {
     const char *material, *textureFile;
-    float r, g, b;
+    // Texture: kind 0 = soft mottled colour (base -> accent), 1 = the muscle
+    // image darkened (clotted band).
+    int kind;
+    float baseR, baseG, baseB, accentR, accentG, accentB;
+    int period;          // mottle scale (cells across the 64 px tile)
     const char *specular;
     const char *shininess;
 };
-// Thin dark dermis edge, pale yellow subcutaneous fat (matte), ivory bone, dark
-// red marrow.
+std::vector<uint8_t> muscleRgb(float darken);
+// Thin dark dermis edge; thin, pale, low-saturation fat (creamy off-white to
+// pinkish, mottled, matte-ish); a darker clotted muscle band that softens the
+// step from fat to red; desaturated ivory bone; dark red-brown (not black)
+// marrow. Wet, tight specular on the muscle and clot.
 const ZoneSpec kZones[] = {
-    {"openshim_gib_flesh_skin", "openshim_gib_flesh_skin.tga", 0.20f, 0.045f, 0.04f, "0.10 0.07 0.07", "24"},
-    {"openshim_gib_flesh_fat", "openshim_gib_flesh_fat.tga", 0.90f, 0.78f, 0.48f, "0.10 0.09 0.06", "16"},
-    {"openshim_gib_flesh_bone", "openshim_gib_flesh_bone.tga", 0.86f, 0.80f, 0.58f, "0.25 0.25 0.20", "32"},
-    {"openshim_gib_flesh_marrow", "openshim_gib_flesh_marrow.tga", 0.30f, 0.04f, 0.04f, "0.30 0.15 0.15", "40"}};
+    {"openshim_gib_flesh_skin", "openshim_gib_flesh_skin.tga", 0, 0.16f, 0.065f, 0.055f, 0.27f, 0.10f, 0.08f, 5,
+     "0.25 0.18 0.18", "40"},
+    {"openshim_gib_flesh_fat", "openshim_gib_flesh_fat.tga", 0, 0.86f, 0.77f, 0.67f, 0.80f, 0.60f, 0.55f, 6,
+     "0.16 0.14 0.12", "24"},
+    {"openshim_gib_flesh_clot", "openshim_gib_flesh_clot.tga", 1, 0, 0, 0, 0, 0, 0, 0, "0.45 0.30 0.30", "64"},
+    {"openshim_gib_flesh_bone", "openshim_gib_flesh_bone.tga", 0, 0.80f, 0.76f, 0.66f, 0.68f, 0.63f, 0.53f, 4,
+     "0.30 0.30 0.26", "40"},
+    {"openshim_gib_flesh_marrow", "openshim_gib_flesh_marrow.tga", 0, 0.35f, 0.105f, 0.085f, 0.22f, 0.05f, 0.045f, 4,
+     "0.40 0.25 0.25", "56"}};
 
 // One stock-style material: BZBase with the diffuse texture aliased and the
 // scalar parameters set the way the stock pilots set them. NormalMap,
@@ -178,7 +190,7 @@ std::string GibFleshMaterialScript()
            "// directory (<mod>/chunkMeshes/ or BZ_ASSETS/common/models/OpenShimChunkPayloads/).\n"
            "// The thin skin edge, fat band, bone and marrow are in openshim_gib_flesh_zones.material.\n"
            "import * from \"BZBase.material\"\n\n" +
-           stockMaterial(kGibFleshMaterialName, kGibFleshTextureFile, "0.35 0.25 0.25", "48");
+           stockMaterial(kGibFleshMaterialName, kGibFleshTextureFile, "0.60 0.45 0.45", "80");
 }
 
 std::string GibFleshZoneMaterialScript()
@@ -195,27 +207,43 @@ std::vector<GibFleshTexture> GibFleshTextures()
 {
     std::vector<GibFleshTexture> out;
     out.push_back({kGibFleshTextureFile, false, GibFleshTextureTga()});
+    constexpr unsigned Z = 64;
     for (const ZoneSpec &zone : kZones)
     {
-        // 4x4 solid colour: the base programs sample a texture and ignore the
-        // pass colour for hue.
-        std::vector<uint8_t> rgb(4u * 4u * 3u);
-        for (size_t i = 0; i < rgb.size(); i += 3)
+        if (zone.kind == 1)
         {
-            rgb[i] = static_cast<uint8_t>(clamp01(zone.r) * 255.0f + 0.5f);
-            rgb[i + 1] = static_cast<uint8_t>(clamp01(zone.g) * 255.0f + 0.5f);
-            rgb[i + 2] = static_cast<uint8_t>(clamp01(zone.b) * 255.0f + 0.5f);
+            out.push_back({zone.textureFile, true, tga24(kGibFleshTextureSize, kGibFleshTextureSize, muscleRgb(0.55f))});
+            continue;
         }
-        out.push_back({zone.textureFile, true, tga24(4, 4, rgb)});
+        // Soft tileable mottle with fine grain: no flat colour, no outline.
+        std::vector<uint8_t> rgb(static_cast<size_t>(Z) * Z * 3);
+        const Rgb base{zone.baseR, zone.baseG, zone.baseB}, accent{zone.accentR, zone.accentG, zone.accentB};
+        for (unsigned y = 0; y < Z; ++y)
+            for (unsigned x = 0; x < Z; ++x)
+            {
+                const float u = (static_cast<float>(x) + 0.5f) / Z, v = (static_cast<float>(y) + 0.5f) / Z;
+                const float blob = fbm(u, v, zone.period, 90 + static_cast<uint32_t>(zone.period));
+                const float grain = vnoise(u * 16.0f, v * 16.0f, 16, 16, 95) - 0.5f;
+                Rgb c = mix(base, accent, clamp01((blob - 0.3f) * 1.8f));
+                const float g = 1.0f + grain * 0.12f;
+                uint8_t *dst = &rgb[(static_cast<size_t>(y) * Z + x) * 3];
+                dst[0] = static_cast<uint8_t>(clamp01(c.r * g) * 255.0f + 0.5f);
+                dst[1] = static_cast<uint8_t>(clamp01(c.g * g) * 255.0f + 0.5f);
+                dst[2] = static_cast<uint8_t>(clamp01(c.b * g) * 255.0f + 0.5f);
+            }
+        out.push_back({zone.textureFile, true, tga24(Z, Z, rgb)});
     }
     return out;
 }
 
-std::vector<uint8_t> GibFleshTextureRgb()
+namespace
+{
+// The muscle image; `darken` scales it (the clotted band reuses it at 0.55).
+std::vector<uint8_t> muscleRgb(float darken)
 {
     constexpr unsigned N = kGibFleshTextureSize;
     std::vector<uint8_t> out(static_cast<size_t>(N) * N * 3);
-    const Rgb muscleLow{0.29f, 0.04f, 0.04f}, muscleHigh{0.48f, 0.10f, 0.08f}; // ~#4a0a0a .. #7a1a14
+    const Rgb muscleLow{0.26f, 0.05f, 0.045f}, muscleHigh{0.50f, 0.12f, 0.09f}; // varied red-brown
     const Rgb perimysium{0.64f, 0.36f, 0.31f}, marbling{0.86f, 0.72f, 0.55f}, vessel{0.15f, 0.02f, 0.03f};
     for (unsigned py = 0; py < N; ++py)
         for (unsigned px = 0; px < N; ++px)
@@ -233,7 +261,7 @@ std::vector<uint8_t> GibFleshTextureRgb()
             Rgb c = mix(muscleLow, muscleHigh, tone);
             // Fibre striation inside a bundle: fine lines along x.
             const float strand = vnoise(u * 3.0f, v * 190.0f, 3, 190, 51) - 0.5f;
-            c = mix(c, Rgb{c.r * 0.72f, c.g * 0.72f, c.b * 0.72f}, clamp01(0.5f + strand * 1.4f) * 0.55f);
+            c = mix(c, Rgb{c.r * 0.62f, c.g * 0.62f, c.b * 0.62f}, clamp01(0.5f + strand * 1.8f) * 0.65f);
             // Perimysium: thin pale lines where two cells meet.
             const float gap = cell.f2 - cell.f1;
             const float line = 1.0f - smooth(clamp01(gap / 2.8f));
@@ -242,19 +270,29 @@ std::vector<uint8_t> GibFleshTextureRgb()
             const float patch = smooth(clamp01((fbm(u, v, 4, 61) - 0.60f) / 0.16f));
             const float fatAlong = 1.0f - smooth(clamp01(gap / 14.0f));
             const float fat = patch * (0.25f + 0.75f * fatAlong);
-            c = mix(c, perimysium, 0.5f * line * (1.0f - 0.5f * fat));
+            c = mix(c, perimysium, 0.32f * line * (1.0f - 0.5f * fat));
             c = mix(c, marbling, 0.9f * fat);
             // Very few thin dark vessels: a ridge of low-frequency noise, kept
             // only where a coarse mask is high.
             const float ridge = std::abs(vnoise(u * 4.0f, v * 4.0f, 4, 4, 71) - 0.5f) * 2.0f;
             const float mask = smooth(clamp01((vnoise(u * 2.0f, v * 2.0f, 2, 2, 72) - 0.62f) / 0.12f));
             c = mix(c, vessel, 0.85f * (1.0f - smooth(clamp01(ridge / 0.035f))) * mask);
+            // Darker clotted patches, soft-edged and low frequency.
+            const float clot = smooth(clamp01((fbm(u, v, 3, 81) - 0.56f) / 0.18f));
+            c = mix(c, Rgb{c.r * 0.45f, c.g * 0.4f, c.b * 0.4f}, 0.8f * clot);
+            c = Rgb{c.r * darken, c.g * darken, c.b * darken};
             uint8_t *dst = &out[(static_cast<size_t>(py) * N + px) * 3];
             dst[0] = static_cast<uint8_t>(clamp01(c.r) * 255.0f + 0.5f);
             dst[1] = static_cast<uint8_t>(clamp01(c.g) * 255.0f + 0.5f);
             dst[2] = static_cast<uint8_t>(clamp01(c.b) * 255.0f + 0.5f);
         }
     return out;
+}
+} // namespace
+
+std::vector<uint8_t> GibFleshTextureRgb()
+{
+    return muscleRgb(1.0f);
 }
 
 std::vector<uint8_t> GibFleshTextureTga()
