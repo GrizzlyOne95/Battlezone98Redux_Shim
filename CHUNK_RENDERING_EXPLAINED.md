@@ -201,7 +201,7 @@ person's death itself:
    then keeps a plain fan, as do tiny, very large, very non-planar or
    non-star-shaped loops). The small ragged offsets hash the welded positions,
    so a cut looks the same on every run. The result is cached under
-   `openshim/cache/chunks/gibs/v4/<hash>/` (vehicle caches are untouched; the
+   `openshim/cache/chunks/gibs/v5/<hash>/` (vehicle caches are untouched; the
    startup prune deletes the superseded `gibs/v1/` tree). An
    authored split (`<payload dir>/<mesh basename>/gibs.txt` plus its meshes,
    written by the script) takes precedence over the runtime one.
