@@ -294,6 +294,9 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::BYTES, {}, "Redux Numeric Locale Compatibility Call", false, {} },
             { 0, HookEngine::PatchType::BYTES, {}, "Redux TRN Binary Writer Mode", false, {} },
             { 0, HookEngine::PatchType::BYTES, {}, "Redux TRN Canonical Fwrite Hook", false, {} },
+            { 0, HookEngine::PatchType::BYTES, {}, "P2P Reliable Send Backlog", false, {} },
+            { 0, HookEngine::PatchType::BYTES, {}, "P2P Reliable First Retry", false, {} },
+            { 0, HookEngine::PatchType::BYTES, {}, "P2P Reliable Retry Interval", false, {} },
         };
 
         // Future: could also load this list from JSON

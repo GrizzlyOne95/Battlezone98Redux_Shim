@@ -101,6 +101,29 @@ namespace HookEngine
     };
     EngineAddressStatus ResolveEngineAddress(const char* name, uint32_t& outAddress);
 
+    // A feature's engine addresses, bound all or nothing. Every row must be
+    // Bound (code) or BoundData (data); otherwise every output is set to 0,
+    // one log line names the rows that failed and why, and false comes back so
+    // the feature stands down. On Steam a Mismatch can be SteamStub still
+    // decrypting the page, so mismatched rows get about a second of retries.
+    struct EngineRow
+    {
+        const char* name;
+        uint32_t* out;
+    };
+    bool BindEngineRows(const char* feature, const EngineRow* rows, size_t count);
+
+    // One engine_addresses row by name, for addresses several files share:
+    // the address when the row is Bound or BoundData, else 0 (logged once per
+    // name). Successes are cached; a failure is asked again next time, since
+    // on Steam it can be a page SteamStub has not finished with. Never waits.
+    uint32_t EngineAddress(const char* name);
+    template <size_t N>
+    bool BindEngineRows(const char* feature, const EngineRow (&rows)[N])
+    {
+        return BindEngineRows(feature, rows, N);
+    }
+
     // Locates scripts/patches.json: working directory first, then the exe's
     // own directory, since the game is routinely launched from elsewhere.
     // Empty when neither exists.
