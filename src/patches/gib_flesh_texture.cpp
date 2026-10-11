@@ -139,9 +139,11 @@ const ZoneSpec kZones[] = {
     {"openshim_gib_flesh_fat", "openshim_gib_flesh_fat.tga", 0, 0.86f, 0.77f, 0.67f, 0.80f, 0.60f, 0.55f, 6,
      "0.16 0.14 0.12", "24"},
     {"openshim_gib_flesh_clot", "openshim_gib_flesh_clot.tga", 1, 0, 0, 0, 0, 0, 0, 0, "0.45 0.30 0.30", "64"},
-    {"openshim_gib_flesh_bone", "openshim_gib_flesh_bone.tga", 0, 0.80f, 0.76f, 0.66f, 0.68f, 0.63f, 0.53f, 4,
-     "0.30 0.30 0.26", "40"},
-    {"openshim_gib_flesh_marrow", "openshim_gib_flesh_marrow.tga", 0, 0.35f, 0.105f, 0.085f, 0.22f, 0.05f, 0.045f, 4,
+    // Desaturated ivory-grey with a slight yellowing, darker pitting.
+    {"openshim_gib_flesh_bone", "openshim_gib_flesh_bone.tga", 0, 0.63f, 0.61f, 0.53f, 0.50f, 0.48f, 0.41f, 5,
+     "0.22 0.22 0.19", "32"},
+    // Dark, spongy red-brown: mottled, pitted (kind 2).
+    {"openshim_gib_flesh_marrow", "openshim_gib_flesh_marrow.tga", 2, 0.31f, 0.09f, 0.07f, 0.15f, 0.035f, 0.03f, 8,
      "0.40 0.25 0.25", "56"}};
 
 // One stock-style material: BZBase with the diffuse texture aliased and the
@@ -225,6 +227,13 @@ std::vector<GibFleshTexture> GibFleshTextures()
                 const float blob = fbm(u, v, zone.period, 90 + static_cast<uint32_t>(zone.period));
                 const float grain = vnoise(u * 16.0f, v * 16.0f, 16, 16, 95) - 0.5f;
                 Rgb c = mix(base, accent, clamp01((blob - 0.3f) * 1.8f));
+                if (zone.kind == 2)
+                {
+                    // Spongy marrow: dark pores where a cellular field is near a feature point.
+                    const Cell pore = cellular(u, v, 9, 9, 120);
+                    const float pit = 1.0f - smooth(clamp01(pore.f1 / 5.0f));
+                    c = mix(c, Rgb{c.r * 0.35f, c.g * 0.35f, c.b * 0.35f}, 0.8f * pit);
+                }
                 const float g = 1.0f + grain * 0.12f;
                 uint8_t *dst = &rgb[(static_cast<size_t>(y) * Z + x) * 3];
                 dst[0] = static_cast<uint8_t>(clamp01(c.r * g) * 255.0f + 0.5f);
@@ -253,24 +262,37 @@ std::vector<uint8_t> muscleRgb(float darken)
             const float wu = vnoise(u * 5.0f, v * 5.0f, 5, 5, 21) - 0.5f, wv = vnoise(u * 5.0f, v * 5.0f, 5, 5, 22) - 0.5f;
             u += wu * 0.05f;
             v += wv * 0.06f;
-            // Bundles: elongated cells; each gets its own tone, drifting slowly
-            // across the image so neighbouring regions differ.
-            const Cell cell = cellular(u, v, 5, 14, 31);
+            // Multi-scale bundles: a coarse cell field (big, elongated along x) and a
+            // fine one, blended by low-frequency noise so cell size varies strongly
+            // across the image; plus a few very large muscle-group cells.
+            const float warpLong = 0.10f * (fbm(u, v, 2, 36) - 0.5f);
+            const Cell coarse = cellular(u + warpLong, v, 3, 7, 31);
+            const Cell fine = cellular(u, v + 0.5f * warpLong, 8, 26, 33);
+            const float useCoarse = smooth(clamp01((fbm(u, v, 2, 45) - 0.42f) / 0.2f));
+            const Cell cell{fine.f1 + (coarse.f1 - fine.f1) * useCoarse, fine.f2 + (coarse.f2 - fine.f2) * useCoarse,
+                            fine.id + (coarse.id - fine.id) * useCoarse};
+            const Cell group = cellular(u, v, 2, 3, 37);
             const float drift = fbm(u, v, 3, 41);
-            const float tone = clamp01(0.55f * cell.id + 0.45f * drift);
+            const float tone = clamp01(0.45f * cell.id + 0.3f * group.id + 0.25f * drift);
             Rgb c = mix(muscleLow, muscleHigh, tone);
             // Fibre striation inside a bundle: fine lines along x.
             const float strand = vnoise(u * 3.0f, v * 190.0f, 3, 190, 51) - 0.5f;
             c = mix(c, Rgb{c.r * 0.62f, c.g * 0.62f, c.b * 0.62f}, clamp01(0.5f + strand * 1.8f) * 0.65f);
             // Perimysium: thin pale lines where two cells meet.
             const float gap = cell.f2 - cell.f1;
-            const float line = 1.0f - smooth(clamp01(gap / 2.8f));
+            // Thin, low contrast and broken: a noise gate removes stretches of the line.
+            const float broken = smooth(clamp01((vnoise(u * 9.0f, v * 24.0f, 9, 24, 77) - 0.35f) / 0.2f));
+            const float line = (1.0f - smooth(clamp01(gap / 1.6f))) * broken;
+            // A few big separations between muscle groups: wider, softer, still low contrast.
+            const float groupLine = (1.0f - smooth(clamp01((group.f2 - group.f1) / 5.0f))) *
+                                    smooth(clamp01((vnoise(u * 4.0f, v * 6.0f, 4, 6, 78) - 0.25f) / 0.3f));
             // Fat marbling: sparse irregular patches that favour the cell
             // boundaries (fat runs between bundles).
             const float patch = smooth(clamp01((fbm(u, v, 4, 61) - 0.60f) / 0.16f));
             const float fatAlong = 1.0f - smooth(clamp01(gap / 14.0f));
             const float fat = patch * (0.25f + 0.75f * fatAlong);
-            c = mix(c, perimysium, 0.32f * line * (1.0f - 0.5f * fat));
+            c = mix(c, perimysium, 0.22f * line * (1.0f - 0.5f * fat));
+            c = mix(c, perimysium, 0.30f * groupLine);
             c = mix(c, marbling, 0.9f * fat);
             // Very few thin dark vessels: a ridge of low-frequency noise, kept
             // only where a coarse mask is high.
