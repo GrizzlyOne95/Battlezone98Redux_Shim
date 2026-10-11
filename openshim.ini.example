@@ -648,6 +648,13 @@ D3D11DeviceLossRecovery = 1
 
 
 [Terrain]
+; Terrain Micro Detail in the OpenShim settings page. Off by default.
+; Experimental visual-only ground relief, using factor-4 DX11 tessellation and
+; a 0.25-world-unit maximum offset. Collision, placement and gameplay heights
+; are unchanged. Requires DX11 and a game restart; increases GPU cost.
+; Unsupported renderer/build/terrain contracts retain native terrain.
+TerrainMicroRelief = 0
+
 
 ; NOTE: terrain booleans below are integer flags; use 0/1.
 
@@ -788,6 +795,8 @@ TerrainSemanticFrameCaptureMinCoverage = 0.005
 ; Direct3D11 only: under any other active render system the whole terrain
 ; proxy path stays off and stock terrain is drawn.
 ; resources fail soft to the stock atlas.
+; Native full-resolution diffuse tile replacement (DX11). Requires a texture
+; pack manifest; existing tile placement, orientation and gameplay stay intact.
 TerrainHdEnabled = 0
 
 ; HD tile manifest path. Accepted: non-empty path string.
