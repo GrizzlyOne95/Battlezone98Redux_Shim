@@ -4,6 +4,7 @@
 #include "diagnostic_switch.h"
 #include "dx11_enhanced_fxaa_resources.h"
 #include "shim_log.h"
+#include "frame_bridge_producer.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -37,6 +38,7 @@ namespace BZROpenShim
 
         std::atomic<bool> g_ShutdownRequested{ false };
         std::atomic<bool> g_FxaaEnabled{ false };
+        std::atomic<bool> g_FrameBridgeEnabled{ false };
         std::atomic<bool> g_PermanentFault{ false };
         std::atomic<bool> g_UnsupportedFormatLogged{ false };
         uintptr_t g_DiscoveryThread = 0;
@@ -44,6 +46,9 @@ namespace BZROpenShim
 
         std::mutex g_HookMutex;
         std::mutex g_RuntimeMutex;
+        std::mutex g_FrameBridgeMutex;
+        FrameBridge::Producer g_FrameBridge;
+        IDXGISwapChain* g_FrameBridgeOwner = nullptr; // identity only; never AddRef a swapchain
 
         using FnD3D11CreateDevice = HRESULT(WINAPI*)(
             IDXGIAdapter*, D3D_DRIVER_TYPE, HMODULE, UINT,
@@ -911,6 +916,42 @@ namespace BZROpenShim
             return true;
         }
 
+        void CaptureFrameBridge(IDXGISwapChain* swapChain)
+        {
+            if (!g_FrameBridgeEnabled.load(std::memory_order_acquire)) return;
+            std::lock_guard<std::mutex> lock(g_FrameBridgeMutex);
+            if (!g_FrameBridgeEnabled.load(std::memory_order_acquire) ||
+                g_ShutdownRequested.load(std::memory_order_acquire) ||
+                (g_FrameBridgeOwner && g_FrameBridgeOwner != swapChain)) return;
+            Microsoft::WRL::ComPtr<ID3D11Device> device;
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> color;
+            HRESULT hr = swapChain->GetDevice(IID_PPV_ARGS(&device));
+            if (SUCCEEDED(hr)) hr = swapChain->GetBuffer(0, IID_PPV_ARGS(&color));
+            if (SUCCEEDED(hr) && !g_FrameBridge.Active())
+            {
+                D3D11_TEXTURE2D_DESC desc{};
+                color->GetDesc(&desc);
+                hr = g_FrameBridge.Start(device.Get(), desc);
+                if (SUCCEEDED(hr))
+                {
+                    g_FrameBridgeOwner = swapChain;
+                    LogShimA(LogLevel::Info, kComponent,
+                        "[FrameBridge] color transport ready pid=%lu size=%ux%u; original Present retained; DLSS and ray tracing not integrated",
+                        GetCurrentProcessId(), desc.Width, desc.Height);
+                }
+            }
+            if (SUCCEEDED(hr)) hr = g_FrameBridge.Publish(color.Get());
+            if (FAILED(hr))
+            {
+                g_FrameBridgeEnabled.store(false, std::memory_order_release);
+                g_FrameBridge.Stop();
+                LogShimA(LogLevel::Warn, kComponent,
+                    "[FrameBridge] capture disabled hr=0x%08lX (unsupported resource, resize or device loss); game presentation continues",
+                    static_cast<unsigned long>(hr));
+            }
+            // color/device references die before the real Present/ResizeBuffers.
+        }
+
         HRESULT STDMETHODCALLTYPE HookPresent(
             IDXGISwapChain* self,
             UINT syncInterval,
@@ -920,7 +961,6 @@ namespace BZROpenShim
                 return E_FAIL;
 
             if ((flags & DXGI_PRESENT_TEST) != 0 ||
-                !g_FxaaEnabled.load(std::memory_order_acquire) ||
                 g_ShutdownRequested.load(std::memory_order_acquire))
             {
                 return g_RealPresent(self, syncInterval, flags);
@@ -930,7 +970,14 @@ namespace BZROpenShim
             if (!s_InPresent)
             {
                 s_InPresent = true;
-                ApplyFxaa(self);
+                if (g_FxaaEnabled.load(std::memory_order_acquire)) ApplyFxaa(self);
+                try { CaptureFrameBridge(self); }
+                catch (...)
+                {
+                    g_FrameBridgeEnabled.store(false, std::memory_order_release);
+                    LogShimA(LogLevel::Warn, kComponent,
+                        "[FrameBridge] unexpected capture exception; capture disabled and original presentation retained");
+                }
                 s_InPresent = false;
             }
 
@@ -955,13 +1002,15 @@ namespace BZROpenShim
                     LogShimA(
                         LogLevel::Info,
                         kComponent,
-                        "[DX11 Enhanced FXAA] attached to swapchain=0x%p format=%s(%u) size=%ux%u buffers=%u; pass executes immediately before Present",
+                        "[DX11 presentation] attached to swapchain=0x%p format=%s(%u) size=%ux%u buffers=%u FXAA=%u FrameBridge=%u",
                         swapChain,
                         DxgiFormatName(desc.BufferDesc.Format),
                         static_cast<unsigned>(desc.BufferDesc.Format),
                         desc.BufferDesc.Width,
                         desc.BufferDesc.Height,
-                        desc.BufferCount);
+                        desc.BufferCount,
+                        g_FxaaEnabled.load() ? 1u : 0u,
+                        g_FrameBridgeEnabled.load() ? 1u : 0u);
                 }
             }
         }
@@ -1137,7 +1186,8 @@ namespace BZROpenShim
             LogShimA(
                 LogLevel::Info,
                 kComponent,
-                "[DX11 Enhanced FXAA] experimental FXAA 3.11 requested; waiting for RenderSystem_Direct3D11.dll (DX9 is never hooked)");
+                "[DX11 presentation] requested FXAA=%u FrameBridge=%u; waiting for RenderSystem_Direct3D11.dll (DX9 is never hooked)",
+                g_FxaaEnabled.load() ? 1u : 0u, g_FrameBridgeEnabled.load() ? 1u : 0u);
 
             for (unsigned attempt = 0;
                  attempt < kDiscoveryAttempts &&
@@ -1150,7 +1200,7 @@ namespace BZROpenShim
                     LogShimA(
                         LogLevel::Info,
                         kComponent,
-                        "[DX11 Enhanced FXAA] Direct3D11 renderer found module=0x%p; enabling Enhanced-only presentation experiment",
+                        "[DX11 presentation] Direct3D11 renderer found module=0x%p; installing requested presentation experiments",
                         renderer);
                     PatchRendererImports(renderer);
                     return 0;
@@ -1171,10 +1221,15 @@ namespace BZROpenShim
 
     void InitializeDx11EnhancedFxaa()
     {
-        if (!FxaaRequested() || g_DiscoveryThread)
+        const bool fxaa = FxaaRequested();
+        char bridgeValue[8]{};
+        const DWORD bridgeLength = GetEnvironmentVariableA("OPENSHIM_FRAME_BRIDGE", bridgeValue, sizeof(bridgeValue));
+        const bool bridge = bridgeLength == 1 && bridgeValue[0] == '1';
+        if ((!fxaa && !bridge) || g_DiscoveryThread)
             return;
 
-        g_FxaaEnabled.store(true, std::memory_order_release);
+        g_FxaaEnabled.store(fxaa, std::memory_order_release);
+        g_FrameBridgeEnabled.store(bridge, std::memory_order_release);
         g_PermanentFault.store(false, std::memory_order_release);
         g_ShutdownRequested.store(false, std::memory_order_release);
         g_DiscoveryThread = _beginthreadex(
@@ -1188,6 +1243,7 @@ namespace BZROpenShim
         if (!g_DiscoveryThread)
         {
             g_FxaaEnabled.store(false, std::memory_order_release);
+            g_FrameBridgeEnabled.store(false, std::memory_order_release);
             LogShimA(
                 LogLevel::Warn,
                 kComponent,
@@ -1199,7 +1255,14 @@ namespace BZROpenShim
     void ShutdownDx11EnhancedFxaa()
     {
         g_FxaaEnabled.store(false, std::memory_order_release);
+        g_FrameBridgeEnabled.store(false, std::memory_order_release);
         g_ShutdownRequested.store(true, std::memory_order_release);
+
+        {
+            std::lock_guard<std::mutex> bridgeLock(g_FrameBridgeMutex);
+            g_FrameBridge.Stop();
+            g_FrameBridgeOwner = nullptr;
+        }
 
         if (g_DiscoveryThread)
         {
