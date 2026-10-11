@@ -1403,7 +1403,29 @@ float positionNoise(const V &p, uint32_t salt)
     }
     return static_cast<float>(h >> 8) * (1.0f / 16777216.0f);
 }
-constexpr uint16_t kCapStride = 32; // position, normal, uv0
+constexpr uint16_t kCapStride = 32;
+// Smooth deterministic 2D value noise in [0,1): bilinear (smoothstep) over a
+// hashed integer lattice, so relief is lumpy rather than per-vertex static.
+float latticeNoise(int ix, int iy, uint32_t salt)
+{
+    uint32_t h = 0x9e3779b9U * (salt + 1) ^ (static_cast<uint32_t>(ix) * 0x85ebca6bU) ^
+                 (static_cast<uint32_t>(iy) * 0xc2b2ae35U);
+    h ^= h >> 16;
+    h *= 0x7feb352dU;
+    h ^= h >> 15;
+    h *= 0x846ca68bU;
+    h ^= h >> 16;
+    return static_cast<float>(h >> 8) * (1.0f / 16777216.0f);
+}
+float smoothNoise2(float x, float y, uint32_t salt)
+{
+    const float fx = std::floor(x), fy = std::floor(y);
+    const int ix = static_cast<int>(fx), iy = static_cast<int>(fy);
+    const float tx = (x - fx) * (x - fx) * (3.0f - 2.0f * (x - fx)), ty = (y - fy) * (y - fy) * (3.0f - 2.0f * (y - fy));
+    const float a = latticeNoise(ix, iy, salt), b = latticeNoise(ix + 1, iy, salt);
+    const float c = latticeNoise(ix, iy + 1, salt), d = latticeNoise(ix + 1, iy + 1, salt);
+    return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * ty;
+} // position, normal, uv0
 constexpr size_t kMinRingLoop = 4, kMaxRingLoop = 96, kMaxRingTriangles = 60000;
 // Loops smaller than this (about 2 mm) are not worth rings.
 constexpr float kMinRingRadius = 2e-3f;
@@ -1414,18 +1436,33 @@ struct CapLayer
     float scale, lift;
     float smoothing;  // how much of one Laplacian pass this ring takes: the skin edge hugs the rim
     float jitter;     // multiplier on the ring's deterministic radial jitter (fat is deliberately uneven)
+    float radial;     // per-vertex radial irregularity as a fraction of the ring radius (bone is not a circle)
+    float relief;     // amplitude of the smooth normal-direction relief noise (fraction of the loop radius)
     CapZone bandZone; // the band between the previous layer and this one
 };
 // Skin ~3% of the radius, fat ~4% and uneven, a darker clotted band, then muscle
-// in to the centre; limb cuts end the muscle at 0.32 with a small bone annulus
-// around a marrow core.
-constexpr CapLayer kPlainLayers[] = {{0.97f, -0.01f, 0.3f, 1.0f, kZoneSkin},
-                                     {0.925f, -0.02f, 0.5f, 7.0f, kZoneFat},
-                                     {0.80f, -0.02f, 0.8f, 3.0f, kZoneClot},
-                                     {0.50f, -0.03f, 1.0f, 1.0f, kZoneMuscle}};
-constexpr CapLayer kLimbLayers[] = {{0.97f, -0.01f, 0.3f, 1.0f, kZoneSkin},   {0.925f, -0.02f, 0.5f, 7.0f, kZoneFat},
-                                    {0.80f, -0.02f, 0.8f, 3.0f, kZoneClot},   {0.55f, -0.03f, 1.0f, 1.0f, kZoneMuscle},
-                                    {0.32f, -0.02f, 1.0f, 1.0f, kZoneMuscle}, {0.17f, 0.02f, 1.0f, 1.0f, kZoneBone}};
+// in to the centre; limb cuts end the muscle at 0.22 with a thin, small, irregular
+// bone ring around a marrow core. Layers repeat a zone to subdivide its band so
+// the relief noise has interior vertices to move; lifts domed outward for muscle,
+// recessed for fat/clot, bone proud, marrow sunk (the centre vertex).
+// {scale, lift, smoothing, jitter, radial, relief, zone}
+constexpr CapLayer kPlainLayers[] = {{0.97f, -0.01f, 0.3f, 1.0f, 0.00f, 0.010f, kZoneSkin},
+                                     {0.925f, -0.02f, 0.5f, 7.0f, 0.00f, 0.015f, kZoneFat},
+                                     {0.865f, -0.025f, 0.6f, 4.0f, 0.03f, 0.020f, kZoneClot},
+                                     {0.80f, -0.025f, 0.8f, 3.0f, 0.04f, 0.020f, kZoneClot},
+                                     {0.66f, 0.000f, 1.0f, 1.0f, 0.03f, 0.035f, kZoneMuscle},
+                                     {0.50f, 0.020f, 1.0f, 1.0f, 0.03f, 0.040f, kZoneMuscle},
+                                     {0.30f, 0.040f, 1.0f, 1.0f, 0.03f, 0.040f, kZoneMuscle}};
+constexpr CapLayer kLimbLayers[] = {{0.97f, -0.01f, 0.3f, 1.0f, 0.00f, 0.010f, kZoneSkin},
+                                    {0.925f, -0.02f, 0.5f, 7.0f, 0.00f, 0.015f, kZoneFat},
+                                    {0.865f, -0.025f, 0.6f, 4.0f, 0.03f, 0.020f, kZoneClot},
+                                    {0.80f, -0.025f, 0.8f, 3.0f, 0.04f, 0.020f, kZoneClot},
+                                    {0.68f, 0.000f, 1.0f, 1.0f, 0.03f, 0.030f, kZoneMuscle},
+                                    {0.55f, 0.015f, 1.0f, 1.0f, 0.03f, 0.035f, kZoneMuscle},
+                                    {0.42f, 0.025f, 1.0f, 1.0f, 0.04f, 0.035f, kZoneMuscle},
+                                    {0.30f, 0.030f, 1.0f, 1.0f, 0.05f, 0.030f, kZoneMuscle},
+                                    {0.22f, 0.030f, 1.0f, 1.0f, 0.07f, 0.030f, kZoneMuscle},
+                                    {0.13f, 0.050f, 1.0f, 1.0f, 0.16f, 0.020f, kZoneBone}};
 // Torn-tissue cap over one cut loop. `points` are the welded boundary points,
 // `normal` faces away from the piece. The rim is the boundary itself (it must
 // seal the skin); every inner ring is an in-plane Laplacian-smoothed copy of
@@ -1503,9 +1540,16 @@ RingResult addRingCap(CapMesh &cap, const std::vector<V> &points, V normal, V ce
                                              (rho[after] * std::sin(angle[after]) - rho[i] * std::sin(angle[i])));
             const float jr = (2.0f * positionNoise(boundary[i], 10 + static_cast<uint32_t>(j)) - 1.0f) * 0.04f * edge * layer.jitter;
             const float jz = (2.0f * positionNoise(boundary[i], 30 + static_cast<uint32_t>(j)) - 1.0f) * 0.05f * edge;
+            // Per-vertex radial irregularity (bone is not a circle).
+            const float rr = (2.0f * positionNoise(boundary[i], 50 + static_cast<uint32_t>(j)) - 1.0f) * layer.radial *
+                             blendRho * ratio;
             // Never reach the ring outside along the same ray.
-            nextRho[i] = std::min(blendRho * ratio + jr, rho[i] * 0.97f);
-            nextHeight[i] = blendHeight * ratio * 0.5f + layer.lift * radius * strength + jz;
+            nextRho[i] = std::max(std::min(blendRho * ratio + jr + rr, rho[i] * 0.97f), 0.03f * radius);
+            // Smooth lumpy relief along the normal, from the ring's own plane position.
+            const float px = nextRho[i] * std::cos(angle[i]), py = nextRho[i] * std::sin(angle[i]);
+            const float lump = (2.0f * smoothNoise2(px / (0.45f * radius) + 7.0f, py / (0.45f * radius) + 3.0f,
+                                                    100 + static_cast<uint32_t>(j)) - 1.0f);
+            nextHeight[i] = blendHeight * ratio * 0.5f + (layer.lift + layer.relief * lump) * radius * strength + jz;
         }
         previousScale = s;
         rho = std::move(nextRho);
@@ -1515,7 +1559,7 @@ RingResult addRingCap(CapMesh &cap, const std::vector<V> &points, V normal, V ce
             next[i] = {rho[i] * std::cos(angle[i]), rho[i] * std::sin(angle[i]), height[i]};
         rings.push_back(std::move(next));
     }
-    const float centreLift = (limb ? 0.01f + 0.01f * positionNoise(centre, 40) : 0.06f + 0.03f * positionNoise(centre, 40)) * radius * strength;
+    const float centreLift = (limb ? -0.03f - 0.02f * positionNoise(centre, 40) : 0.05f + 0.03f * positionNoise(centre, 40)) * radius * strength;
 
     // Positions (centre is ring-local origin).
     const auto world = [&](const std::array<float, 3> &q) {
