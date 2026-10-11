@@ -235,6 +235,221 @@ public static class BZRForegroundWatchdog
 '@
 }
 
+# Audio muting for harness-launched games. Sessions in the Core Audio mixer
+# appear only after the game's audio init, so the mute is re-applied every
+# ~250 ms until the game exits. Separate namespace/type guard from the block
+# above so dot-sourcing twice (or an older already-loaded type) cannot collide.
+if (-not ('BZRAudio.GameMute' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+namespace BZRAudio
+{
+    [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumerator {}
+
+    [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IMMDeviceEnumerator
+    {
+        int EnumAudioEndpoints(int dataFlow, int stateMask, out IMMDeviceCollection devices);
+        int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice device);
+    }
+
+    [ComImport, Guid("0BD7A1BE-7A1A-44DB-8397-CC5392387B5E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IMMDeviceCollection
+    {
+        int GetCount(out int count);
+        int Item(int index, out IMMDevice device);
+    }
+
+    [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IMMDevice
+    {
+        int Activate(ref Guid iid, int clsCtx, IntPtr activationParams,
+                     [MarshalAs(UnmanagedType.IUnknown)] out object iface);
+    }
+
+    [ComImport, Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IAudioSessionManager2
+    {
+        int GetAudioSessionControl(IntPtr guid, int flags, out IntPtr control);
+        int GetSimpleAudioVolume(IntPtr guid, int flags, out IntPtr volume);
+        int GetSessionEnumerator(out IAudioSessionEnumerator sessions);
+    }
+
+    [ComImport, Guid("E2F5BB11-0570-40CA-ACDD-3AA01277DEE8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IAudioSessionEnumerator
+    {
+        int GetCount(out int count);
+        int GetSession(int index, [MarshalAs(UnmanagedType.IUnknown)] out object session);
+    }
+
+    [ComImport, Guid("bfb7ff88-7239-4fc9-8fa2-07c950be9c6d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IAudioSessionControl2
+    {
+        int GetState(out int state);
+        int GetDisplayName(out IntPtr name);
+        int SetDisplayName(IntPtr name, IntPtr ctx);
+        int GetIconPath(out IntPtr path);
+        int SetIconPath(IntPtr path, IntPtr ctx);
+        int GetGroupingParam(out Guid param);
+        int SetGroupingParam(ref Guid param, IntPtr ctx);
+        int RegisterAudioSessionNotification(IntPtr client);
+        int UnregisterAudioSessionNotification(IntPtr client);
+        int GetSessionIdentifier(out IntPtr id);
+        int GetSessionInstanceIdentifier(out IntPtr id);
+        int GetProcessId(out uint pid);
+    }
+
+    [ComImport, Guid("87CE5498-68D6-44E5-9215-6DA47EF883D8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface ISimpleAudioVolume
+    {
+        int SetMasterVolume(float level, ref Guid ctx);
+        int GetMasterVolume(out float level);
+        int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid ctx);
+        int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
+    }
+
+    public static class GameMute
+    {
+        static int running = 0;
+        public static string LogPath = Path.Combine(Path.GetTempPath(), "bzr_foreground_watchdog.log");
+        static readonly object Gate = new object();
+        static readonly List<string> Events = new List<string>();
+
+        static void Note(string text)
+        {
+            string line = DateTime.Now.ToString("HH:mm:ss.fff") + " " + text;
+            lock (Gate) { Events.Add(line); }
+            try { File.AppendAllText(LogPath, line + Environment.NewLine); } catch { }
+        }
+
+        public static string[] Snapshot() { lock (Gate) { return Events.ToArray(); } }
+
+        // Mutes (or unmutes) every render session owned by pid on every active
+        // render endpoint. Returns the number of sessions changed; 0 when the
+        // process has no audio session (yet). Never throws.
+        public static int Set(uint pid, bool mute)
+        {
+            int changed = 0;
+            try
+            {
+                IMMDeviceEnumerator enumerator = (IMMDeviceEnumerator)new MMDeviceEnumerator();
+                IMMDeviceCollection devices;
+                if (enumerator.EnumAudioEndpoints(0 /*eRender*/, 1 /*DEVICE_STATE_ACTIVE*/, out devices) != 0) return 0;
+                int deviceCount;
+                devices.GetCount(out deviceCount);
+                Guid iid = typeof(IAudioSessionManager2).GUID;
+                Guid ctx = Guid.Empty;
+                for (int d = 0; d < deviceCount; ++d)
+                {
+                    try
+                    {
+                        IMMDevice device;
+                        if (devices.Item(d, out device) != 0) continue;
+                        object managerObj;
+                        if (device.Activate(ref iid, 23 /*CLSCTX_ALL*/, IntPtr.Zero, out managerObj) != 0) continue;
+                        IAudioSessionManager2 manager = (IAudioSessionManager2)managerObj;
+                        IAudioSessionEnumerator sessions;
+                        if (manager.GetSessionEnumerator(out sessions) != 0) continue;
+                        int count;
+                        sessions.GetCount(out count);
+                        for (int i = 0; i < count; ++i)
+                        {
+                            object sessionObj;
+                            if (sessions.GetSession(i, out sessionObj) != 0) continue;
+                            IAudioSessionControl2 control = sessionObj as IAudioSessionControl2;
+                            if (control == null) continue;
+                            uint owner;
+                            if (control.GetProcessId(out owner) != 0 || owner != pid) continue;
+                            ISimpleAudioVolume volume = sessionObj as ISimpleAudioVolume;
+                            if (volume == null) continue;
+                            if (volume.SetMute(mute, ref ctx) == 0) ++changed;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return changed;
+        }
+
+        // Waits up to waitForGameMs for the game, then re-applies the mute every
+        // intervalMs until the game exits. Logs the first success per pid.
+        public static bool Start(string gameName, int waitForGameMs, int intervalMs)
+        {
+            if (Interlocked.CompareExchange(ref running, 1, 0) != 0) return false;
+            Thread t = new Thread(delegate() {
+                try { Run(gameName, waitForGameMs, intervalMs); }
+                catch (Exception ex) { Note("audio mute error: " + ex.Message); }
+                finally { Interlocked.Exchange(ref running, 0); }
+            });
+            t.IsBackground = true;
+            t.Name = "BZRGameAudioMute";
+            t.SetApartmentState(ApartmentState.MTA);
+            t.Start();
+            return true;
+        }
+
+        static void Run(string gameName, int waitForGameMs, int intervalMs)
+        {
+            HashSet<int> logged = new HashSet<int>();
+            Stopwatch wait = Stopwatch.StartNew();
+            bool seen = false;
+            while (true)
+            {
+                Process[] procs = Process.GetProcessesByName(gameName);
+                if (procs.Length == 0)
+                {
+                    if (seen) { Note("audio mute: game exited"); return; }
+                    if (wait.ElapsedMilliseconds > waitForGameMs) return;
+                }
+                else
+                {
+                    seen = true;
+                    foreach (Process p in procs)
+                    {
+                        int n = Set((uint)p.Id, true);
+                        if (n > 0 && logged.Add(p.Id)) Note("muted " + n + " audio session(s) for pid " + p.Id);
+                        p.Dispose();
+                    }
+                }
+                Thread.Sleep(intervalMs);
+            }
+        }
+    }
+}
+'@
+}
+
+function Start-BZRGameAudioMute {
+    <#
+    .SYNOPSIS
+        Keeps every audio session of the harness-launched game muted.
+    .DESCRIPTION
+        Background thread. Waits up to 60 s for the game process, then mutes all
+        Core Audio render sessions it owns (all active render endpoints) every
+        250 ms until it exits, because sessions only appear after the game's
+        audio init. The first success is logged ("muted N audio session(s) for
+        pid X") to %TEMP%\bzr_foreground_watchdog.log and Get-BZRForegroundWatchdogLog.
+        On by default; set BZR_GAME_AUDIO=1 to leave the game audible.
+    #>
+    [CmdletBinding()]
+    param([int]$WaitForGameSeconds = 60, [int]$PollMilliseconds = 250)
+    if ($env:BZR_GAME_AUDIO -eq '1') { return $false }
+    [BZRAudio.GameMute]::Start($script:BZRGameProcessName, $WaitForGameSeconds * 1000, $PollMilliseconds)
+}
+
+function Set-BZRProcessAudioMute {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][int]$ProcessId, [bool]$Mute = $true)
+    [BZRAudio.GameMute]::Set([uint32]$ProcessId, $Mute)
+}
+
 function Start-BZRForegroundWatchdog {
     <#
     .SYNOPSIS
@@ -268,7 +483,7 @@ function Start-BZRForegroundWatchdog {
 function Get-BZRForegroundWatchdogLog {
     [CmdletBinding()]
     param()
-    [BZRForegroundWatchdog]::Snapshot()
+    @([BZRForegroundWatchdog]::Snapshot()) + @([BZRAudio.GameMute]::Snapshot()) | Sort-Object
 }
 
 function Assert-BZRSafeToLaunch {
@@ -304,6 +519,7 @@ function Assert-BZRSafeToLaunch {
         }
     }
     [void](Start-BZRForegroundWatchdog)
+    [void](Start-BZRGameAudioMute)
 }
 
 function Start-BZRGameProcess {
