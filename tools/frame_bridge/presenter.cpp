@@ -1,0 +1,327 @@
+#include "frame_bridge_producer.h"
+#include <d3d12.h>
+#include <dxgi1_6.h>
+#include <cstdio>
+#include <stdexcept>
+#include <string>
+#include <cstdlib>
+
+namespace
+{
+    using Microsoft::WRL::ComPtr;
+    using namespace BZROpenShim::FrameBridge;
+
+    void Require(HRESULT hr, const char* operation)
+    {
+        if (FAILED(hr))
+        {
+            char message[256]{};
+            std::snprintf(message, sizeof(message), "%s failed: 0x%08lx", operation, static_cast<unsigned long>(hr));
+            throw std::runtime_error(message);
+        }
+    }
+    struct Handle
+    {
+        HANDLE value = nullptr;
+        ~Handle() { if (value) CloseHandle(value); }
+        Handle() = default;
+        Handle(const Handle&) = delete;
+        Handle& operator=(const Handle&) = delete;
+    };
+    LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
+    {
+        if (message == WM_CLOSE) { DestroyWindow(window); return 0; }
+        if (message == WM_DESTROY) { PostQuitMessage(0); return 0; }
+        return DefWindowProcW(window, message, wparam, lparam);
+    }
+
+    class Consumer
+    {
+    public:
+        ~Consumer()
+        {
+            // Never acknowledge a frame with outstanding GPU reads, even on an
+            // error. A stalled helper disables capture until the game restarts.
+            if (frame_)
+            {
+                if (ownsConsumer_ && !reading_) Exchange(frame_->consumerPid, 0);
+                UnmapViewOfFile(frame_);
+            }
+            if (window_ && IsWindow(window_)) DestroyWindow(window_);
+        }
+        void Open(DWORD pid, bool show, bool verify)
+        {
+            verify_ = verify;
+            mapping_.value = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, MappingName(pid).c_str());
+            if (!mapping_.value) throw std::runtime_error("producer mapping unavailable; start source/capture first");
+            frame_ = static_cast<SharedFrame*>(MapViewOfFile(mapping_.value, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SharedFrame)));
+            if (!frame_ || ReadInterlocked(frame_->active) != 1 || !ValidDescriptor(*frame_, pid))
+                throw std::runtime_error("inactive or invalid frame bridge descriptor");
+            if (!Claim(frame_->consumerPid, 0, static_cast<LONG>(GetCurrentProcessId())))
+            {
+                // Do not clear another consumer's claim on destruction.
+                UnmapViewOfFile(frame_);
+                frame_ = nullptr;
+                throw std::runtime_error("mailbox already has a consumer");
+            }
+            ownsConsumer_ = true;
+            producer_.value = OpenProcess(PROCESS_DUP_HANDLE | SYNCHRONIZE, FALSE, pid);
+            if (!producer_.value) throw std::runtime_error("cannot open producer for handle duplication");
+            const auto duplicate = [&](std::uint64_t remote, Handle& local)
+            {
+                if (!DuplicateHandle(producer_.value, reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(remote)),
+                    GetCurrentProcess(), &local.value, 0, FALSE, DUPLICATE_SAME_ACCESS))
+                    throw std::runtime_error("cannot duplicate producer GPU handle");
+            };
+            Handle texture, ready;
+            duplicate(frame_->textureHandle, texture);
+            duplicate(frame_->readyFenceHandle, ready);
+            Require(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory_)), "CreateDXGIFactory2");
+            ComPtr<IDXGIAdapter1> adapter;
+            const LUID luid{frame_->adapterLuidLow, frame_->adapterLuidHigh};
+            Require(factory_->EnumAdapterByLuid(luid, IID_PPV_ARGS(&adapter)), "match producer adapter");
+            Require(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device_)), "D3D12CreateDevice");
+            Require(device_->OpenSharedHandle(texture.value, IID_PPV_ARGS(&color_)), "open shared color");
+            Require(device_->OpenSharedHandle(ready.value, IID_PPV_ARGS(&ready_)), "open shared fence");
+            const auto colorDesc = color_->GetDesc();
+            if (colorDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
+                colorDesc.Width != frame_->width || colorDesc.Height != frame_->height ||
+                colorDesc.Format != static_cast<DXGI_FORMAT>(frame_->format) ||
+                colorDesc.SampleDesc.Count != 1 || colorDesc.MipLevels != 1 || colorDesc.DepthOrArraySize != 1)
+                throw std::runtime_error("GPU texture does not match wire descriptor");
+            D3D12_COMMAND_QUEUE_DESC queueDesc{};
+            queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+            Require(device_->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&queue_)), "CreateCommandQueue");
+            Require(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator_)), "CreateCommandAllocator");
+            Require(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator_.Get(), nullptr, IID_PPV_ARGS(&commands_)), "CreateCommandList");
+            Require(commands_->Close(), "initial command list close");
+            Require(device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&done_)), "CreateFence");
+            event_.value = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+            if (!event_.value) throw std::runtime_error("cannot create fence completion event");
+
+            if (verify)
+            {
+                UINT rows = 0;
+                UINT64 rowBytes = 0;
+                UINT64 total = 0;
+                device_->GetCopyableFootprints(&colorDesc, 0, 1, 0, &footprint_, &rows, &rowBytes, &total);
+                D3D12_HEAP_PROPERTIES heap{};
+                heap.Type = D3D12_HEAP_TYPE_READBACK;
+                D3D12_RESOURCE_DESC buffer{};
+                buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+                buffer.Width = total;
+                buffer.Height = 1;
+                buffer.DepthOrArraySize = buffer.MipLevels = 1;
+                buffer.SampleDesc.Count = 1;
+                buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+                Require(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
+                    D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback_)), "create verification readback");
+            }
+            if (show) CreateWindowAndSwapChain();
+            D3D12_FEATURE_DATA_D3D12_OPTIONS5 options{};
+            const HRESULT rayQuery = device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options, sizeof(options));
+            std::printf("CONSUMER pointer_bits=%zu size=%ux%u DXR_tier=%u query=0x%08lx DLSS=not-integrated RT=not-integrated\n",
+                sizeof(void*) * 8, frame_->width, frame_->height,
+                static_cast<unsigned>(options.RaytracingTier), static_cast<unsigned long>(rayQuery));
+            std::fflush(stdout);
+        }
+
+        unsigned Run(unsigned limit, DWORD timeoutMs)
+        {
+            unsigned consumed = 0;
+            ULONGLONG deadline = GetTickCount64() + timeoutMs;
+            while (consumed < limit)
+            {
+                MSG message{};
+                while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
+                {
+                    if (message.message == WM_QUIT) return consumed;
+                    TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+                if (ReadInterlocked(frame_->active) != 1 || WaitForSingleObject(producer_.value, 0) == WAIT_OBJECT_0)
+                    throw std::runtime_error("producer stopped before requested frame count");
+                if (!Claim(frame_->slotState, static_cast<LONG>(SlotState::Ready), static_cast<LONG>(SlotState::Reading)))
+                {
+                    if (GetTickCount64() >= deadline) throw std::runtime_error("timed out waiting for producer frame");
+                    Sleep(1);
+                    continue;
+                }
+                reading_ = true;
+                const auto id = frame_->frameId;
+                if (id == 0 || id <= lastFrame_) throw std::runtime_error("non-monotonic frame ID");
+                WaitGpu(ready_.Get(), id);
+                Require(allocator_->Reset(), "Reset allocator");
+                Require(commands_->Reset(allocator_.Get(), nullptr), "Reset commands");
+                Barrier(color_.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE);
+                ComPtr<ID3D12Resource> backbuffer;
+                if (swapchain_)
+                {
+                    Require(swapchain_->GetBuffer(swapchain_->GetCurrentBackBufferIndex(), IID_PPV_ARGS(&backbuffer)), "GetBuffer");
+                    Barrier(backbuffer.Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
+                    commands_->CopyResource(backbuffer.Get(), color_.Get());
+                    Barrier(backbuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
+                }
+                if (verify_)
+                {
+                    D3D12_TEXTURE_COPY_LOCATION source{};
+                    source.pResource = color_.Get();
+                    source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+                    D3D12_TEXTURE_COPY_LOCATION destination{};
+                    destination.pResource = readback_.Get();
+                    destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+                    destination.PlacedFootprint = footprint_;
+                    commands_->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+                }
+                Barrier(color_.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON);
+                Require(commands_->Close(), "Close commands");
+                ID3D12CommandList* lists[] = {commands_.Get()};
+                queue_->ExecuteCommandLists(1, lists);
+                Require(queue_->Signal(done_.Get(), id), "signal copy completion");
+                WaitGpu(done_.Get(), id);
+                if (verify_) VerifyPixels(id);
+                LARGE_INTEGER now{};
+                QueryPerformanceCounter(&now);
+                const double delay = 1000.0 * static_cast<double>(now.QuadPart - frame_->captureQpc) /
+                    static_cast<double>(frame_->qpcFrequency);
+                if (delay > maxDelayMs_) maxDelayMs_ = delay;
+                // GPU completion, not CPU command submission, releases ownership.
+                Exchange(frame_->slotState, static_cast<LONG>(SlotState::Free));
+                reading_ = false;
+                lastFrame_ = id;
+                ++consumed;
+                if (swapchain_) Require(swapchain_->Present(1, 0), "Present");
+                deadline = GetTickCount64() + timeoutMs;
+            }
+            std::printf("CONSUMER frames=%u last_frame=%llu verified=%s max_capture_to_copy_ms=%.3f\n",
+                consumed, static_cast<unsigned long long>(lastFrame_), verify_ ? "yes" : "no", maxDelayMs_);
+            return consumed;
+        }
+    private:
+        void WaitGpu(ID3D12Fence* fence, UINT64 value)
+        {
+            const UINT64 completed = fence->GetCompletedValue();
+            if (completed == UINT64_MAX) throw std::runtime_error("GPU device removed");
+            if (completed >= value) return;
+            Require(fence->SetEventOnCompletion(value, event_.value), "SetEventOnCompletion");
+            if (WaitForSingleObject(event_.value, 3000) != WAIT_OBJECT_0)
+                throw std::runtime_error("GPU fence timeout; capture slot kept owned");
+        }
+        void Barrier(ID3D12Resource* resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after)
+        {
+            D3D12_RESOURCE_BARRIER barrier{};
+            barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            barrier.Transition.pResource = resource;
+            barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            barrier.Transition.StateBefore = before;
+            barrier.Transition.StateAfter = after;
+            commands_->ResourceBarrier(1, &barrier);
+        }
+        void VerifyPixels(UINT64 id)
+        {
+            if (frame_->format != DXGI_FORMAT_R8G8B8A8_UNORM)
+                throw std::runtime_error("synthetic verification expects RGBA8 source");
+            const unsigned char expected[] = {static_cast<unsigned char>(id & 255),
+                static_cast<unsigned char>((id >> 8) & 255), 64, 255};
+            unsigned char* data = nullptr;
+            D3D12_RANGE range{0, static_cast<SIZE_T>(footprint_.Footprint.RowPitch) * frame_->height};
+            Require(readback_->Map(0, &range, reinterpret_cast<void**>(&data)), "map verification pixels");
+            bool valid = true;
+            for (UINT y = 0; y < frame_->height && valid; ++y)
+                for (UINT x = 0; x < frame_->width && valid; ++x)
+                    for (UINT c = 0; c < 4; ++c)
+                        if (data[static_cast<SIZE_T>(y) * footprint_.Footprint.RowPitch + x * 4 + c] != expected[c])
+                        { valid = false; break; }
+            const D3D12_RANGE written{0, 0};
+            readback_->Unmap(0, &written);
+            if (!valid) throw std::runtime_error("GPU pixel verification failed: stale/torn/wrong frame");
+        }
+        void CreateWindowAndSwapChain()
+        {
+            WNDCLASSW wc{};
+            wc.lpfnWndProc = WindowProc;
+            wc.hInstance = GetModuleHandleW(nullptr);
+            wc.lpszClassName = L"OpenShimFrameBridgePresenter";
+            if (!RegisterClassW(&wc)) throw std::runtime_error("RegisterClass failed");
+            constexpr DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU;
+            RECT rect{0, 0, static_cast<LONG>(frame_->width), static_cast<LONG>(frame_->height)};
+            AdjustWindowRectEx(&rect, style, FALSE, WS_EX_NOACTIVATE);
+            window_ = CreateWindowExW(WS_EX_NOACTIVATE, wc.lpszClassName,
+                L"OpenShim DX12 frame transport preview (DLSS/RT pending)", style,
+                CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top,
+                nullptr, nullptr, wc.hInstance, nullptr);
+            if (!window_) throw std::runtime_error("CreateWindow failed");
+            DXGI_SWAP_CHAIN_DESC1 desc{};
+            desc.Width = frame_->width;
+            desc.Height = frame_->height;
+            desc.Format = static_cast<DXGI_FORMAT>(frame_->format);
+            desc.SampleDesc.Count = 1;
+            desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+            desc.BufferCount = 2;
+            desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+            ComPtr<IDXGISwapChain1> swap;
+            Require(factory_->CreateSwapChainForHwnd(queue_.Get(), window_, &desc, nullptr, nullptr, &swap), "CreateSwapChainForHwnd");
+            Require(swap.As(&swapchain_), "IDXGISwapChain3");
+            Require(factory_->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER), "disable exclusive fullscreen");
+            ShowWindow(window_, SW_SHOWNOACTIVATE);
+        }
+        Handle mapping_, producer_, event_;
+        SharedFrame* frame_ = nullptr;
+        HWND window_ = nullptr;
+        bool verify_ = false;
+        bool ownsConsumer_ = false;
+        bool reading_ = false;
+        UINT64 lastFrame_ = 0;
+        double maxDelayMs_ = 0;
+        ComPtr<IDXGIFactory4> factory_;
+        ComPtr<ID3D12Device> device_;
+        ComPtr<ID3D12Resource> color_, readback_;
+        ComPtr<ID3D12Fence> ready_, done_;
+        ComPtr<ID3D12CommandQueue> queue_;
+        ComPtr<ID3D12CommandAllocator> allocator_;
+        ComPtr<ID3D12GraphicsCommandList> commands_;
+        ComPtr<IDXGISwapChain3> swapchain_;
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint_{};
+    };
+}
+
+int main(int argc, char** argv)
+{
+    DWORD pid = 0;
+    unsigned frames = 120;
+    DWORD timeoutMs = 5000;
+    bool verify = false;
+    bool show = false;
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string arg(argv[i]);
+        if (arg == "--verify") verify = true;
+        else if (arg == "--show") show = true;
+        else if ((arg == "--pid" || arg == "--frames" || arg == "--timeout-ms") && i + 1 < argc)
+        {
+            char* end = nullptr;
+            const unsigned long value = std::strtoul(argv[++i], &end, 10);
+            if (!*argv[i] || *end || value == 0 || value > 1000000) return 2;
+            if (arg == "--pid") pid = value;
+            else if (arg == "--frames") frames = value;
+            else timeoutMs = value;
+        }
+        else
+        {
+            std::fprintf(stderr, "usage: frame_bridge_presenter --pid N [--frames N] [--timeout-ms N] [--show] [--verify]\n");
+            return 2;
+        }
+    }
+    if (!pid) return 2;
+    try
+    {
+        Consumer consumer;
+        consumer.Open(pid, show, verify);
+        return consumer.Run(frames, timeoutMs) == frames ? 0 : 1;
+    }
+    catch (const std::exception& error)
+    {
+        std::fprintf(stderr, "CONSUMER ERROR: %s\n", error.what());
+        return 1;
+    }
+}

@@ -30,6 +30,8 @@ namespace BZROpenShim
     //   FXAA = 1
     //
     // or OPENSHIM_DX11_ENHANCED_FXAA=1.
+    // OPENSHIM_FRAME_BRIDGE=1 independently requests experimental color export
+    // for the x64 DX12 companion. It does not require FXAA or enable DLSS/RT.
     //
     // A missing key still fails closed, so existing stock/default DX11 installs
     // that have not adopted the Enhanced reference INI remain untouched. The
