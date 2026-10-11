@@ -32,6 +32,10 @@ namespace BZROpenShim
     // Runtime-resolved BZR pointers and helpers.
     void ResolveBzrHooks(bool isSteam);
     void RetryDeferredRuntimeHooks();
+    // OPENSHIM_NEVER_ACTIVATE: process-wide user32 activation hooks. Idempotent
+    // (each call re-sweeps loaded modules); a no-op unless the flag is set.
+    // See src/patches/never_activate.cpp.
+    void InstallNeverActivateHooks();
     // For a patch whose trampoline or hook depends on engine addresses from
     // the engine address table (scripts/patches.json "engine_addresses"):
     // the name of the first one that failed to bind, or nullptr when the

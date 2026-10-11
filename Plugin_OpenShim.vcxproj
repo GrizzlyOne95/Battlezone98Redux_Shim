@@ -210,6 +210,7 @@
     <ClCompile Include="src\patches\p2p_reliable_send_fix.cpp" />
     <ClCompile Include="src\patches\team_filter_mines.cpp" />
     <ClCompile Include="src\patches\ui_camera_fixes.cpp" />
+    <ClCompile Include="src\patches\never_activate.cpp" />
     <ClCompile Include="src\patches\unfocused_mouse_release.cpp" />
     <ClCompile Include="src\patches\unit_behavior_fixes.cpp" />
     <ClCompile Include="src\patches\unit_vo.cpp" />
@@ -297,6 +298,7 @@
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
     <ClInclude Include="include\background_run_policy.h" />
+    <ClInclude Include="include\never_activate_policy.h" />
     <ClInclude Include="include\render_effect_intent.h" />
     <ClInclude Include="include\native_hud_layout.h" />
     <ClInclude Include="include\native_hud_runtime.h" />

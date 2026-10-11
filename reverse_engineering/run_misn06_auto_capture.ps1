@@ -495,7 +495,7 @@ foreach ($delayMs in $SpaceDelaysMs) {
 
     if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
     Assert-BZRSafeToLaunch
-    $gameProc = Start-Process -FilePath $gameExe -ArgumentList $MissionArgs -WorkingDirectory $GameRoot -PassThru
+    $gameProc = Start-BZRGameProcess -FilePath $gameExe -ArgumentList $MissionArgs -WorkingDirectory $GameRoot -PassThru
     $windowWaitSeconds = [Math]::Min(
         $MainWindowTimeoutSeconds,
         [Math]::Max(0, [int][Math]::Ceiling(($runDeadline - (Get-Date)).TotalSeconds)))
