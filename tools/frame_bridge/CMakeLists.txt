@@ -17,10 +17,13 @@ add_executable(frame_bridge_protocol_tests ../../tests/frame_bridge_protocol_tes
 add_test(NAME frame_bridge_protocol COMMAND frame_bridge_protocol_tests)
 add_executable(frame_bridge_producer_gpu_tests ../../tests/frame_bridge_producer_gpu_tests.cpp ../../src/engine/frame_bridge_producer.cpp)
 target_link_libraries(frame_bridge_producer_gpu_tests PRIVATE d3d11 dxgi)
+add_executable(frame_bridge_depth_gpu_tests ../../tests/frame_bridge_depth_gpu_tests.cpp ../../src/engine/frame_bridge_depth.cpp)
+target_link_libraries(frame_bridge_depth_gpu_tests PRIVATE d3d11 dxgi d3dcompiler)
 # Explicit opt-in hardware test, not a mandatory GPU dependency in CI.
 option(FRAME_BRIDGE_GPU_TESTS "Register hardware-dependent bridge producer tests" OFF)
 if(FRAME_BRIDGE_GPU_TESTS)
     add_test(NAME frame_bridge_producer_gpu COMMAND frame_bridge_producer_gpu_tests)
+    add_test(NAME frame_bridge_depth_gpu COMMAND frame_bridge_depth_gpu_tests)
 endif()
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     add_executable(frame_bridge_presenter presenter.cpp)
