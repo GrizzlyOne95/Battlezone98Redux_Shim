@@ -495,9 +495,9 @@ void gibTests()
     // A square loop on a non-limb cut: rim plus seven inner rings of 4 and a
     // centre -- 7 bands of 8 triangles (skin 1, fat 1, clot 2, muscle 3) plus a
     // 4-triangle fan; the cap is relief, not a plane (see the relief test below).
-    Require(head.capTriangles == 60 && root.capTriangles == 60,
+    Require(head.capTriangles == 84 && root.capTriangles == 84,
             "the welded cut between the two submeshes closes one torn-flesh cap per side");
-    Require(head.piece.triangles == 10 + 1 + 60 && root.piece.triangles == 10 + 60,
+    Require(head.piece.triangles == 10 + 1 + 84 && root.piece.triangles == 10 + 84,
             "every skinned face lands in exactly one gib, plus its caps");
     {
         const std::string bytes(head.piece.mesh.begin(), head.piece.mesh.end());
@@ -511,8 +511,8 @@ void gibTests()
     // Caps face away from their own piece: up out of the root, down out of
     // the head. The head's bind yaw about Y leaves the vertical axis alone.
     const auto rootCap = parseCap(root.piece.mesh), headCap = parseCap(head.piece.mesh);
-    Require(rootCap.found && headCap.found && rootCap.positions.size() == 33 && headCap.positions.size() == 33,
-            "cap vertices are shared: rim 4, seven inner rings of 4, centre 1");
+    Require(rootCap.found && headCap.found && rootCap.positions.size() == 45 && headCap.positions.size() == 45,
+            "cap vertices are shared: rim 4, seven inner rings of 4, centre 1, 12 scattered muscle points");
     // Smoothed normals tilt with the bulge but still face away from the piece.
     Require(std::all_of(rootCap.normals.begin(), rootCap.normals.end(),
                         [](const std::array<float, 3> &n) { return n[1] > 0.4f; }) &&
@@ -552,7 +552,7 @@ void gibTests()
                 "a non-limb cut has skin, fat, clot and muscle zones and no bone ring");
         Require(rootCap.trianglesByMaterial.at("openshim_gib_flesh_skin") == 8 &&
                     rootCap.trianglesByMaterial.at("openshim_gib_flesh_fat") == 8 &&
-                    rootCap.trianglesByMaterial.at("openshim_gib_flesh") == 28,
+                    rootCap.trianglesByMaterial.at("openshim_gib_flesh") == 52,
                 "zone triangle counts follow the ring layers");
         Require(allFinite(rootCap) && allFinite(headCap), "no NaN or infinite cap positions or normals");
         Require(closedWinding(rootCap, 4) && closedWinding(headCap, 4),
@@ -604,12 +604,12 @@ void gibTests()
                 ("limb extraction: " + error).c_str());
         // Sorted by bone name: bip01_l_thigh (the root), then bip01_neck (the head).
         const auto thighCap = parseCap(limb[0].piece.mesh), neckCap = parseCap(limb[1].piece.mesh);
-        Require(limb[0].boneName == "bip01_l_thigh" && limb[0].capTriangles == 84 && thighCap.positions.size() == 45 &&
-                    limb[1].boneName == "bip01_neck" && limb[1].capTriangles == 84 && neckCap.positions.size() == 45,
+        Require(limb[0].boneName == "bip01_l_thigh" && limb[0].capTriangles == 108 && thighCap.positions.size() == 57 &&
+                    limb[1].boneName == "bip01_neck" && limb[1].capTriangles == 108 && neckCap.positions.size() == 57,
                 "limb and neck cuts add muscle, bone and marrow rings");
         Require(thighCap.has("openshim_gib_flesh_bone") && thighCap.has("openshim_gib_flesh_marrow") &&
                     neckCap.has("openshim_gib_flesh_bone") && neckCap.has("openshim_gib_flesh_marrow") &&
-                    thighCap.trianglesByMaterial.at("openshim_gib_flesh") == 40,
+                    thighCap.trianglesByMaterial.at("openshim_gib_flesh") == 64,
                 "limb caps have bone and marrow zones");
         Require(closedWinding(thighCap, 4) && closedWinding(neckCap, 4) && windingMatchesNormals(thighCap) &&
                     allFinite(thighCap),
@@ -617,7 +617,7 @@ void gibTests()
         GibOptions noLimb;
         noLimb.limbPattern.clear();
         std::vector<GibPiece> plain;
-        Require(ExtractGibs(mesh, limbSkeleton, noLimb, plain, error) && plain[0].capTriangles == 60 &&
+        Require(ExtractGibs(mesh, limbSkeleton, noLimb, plain, error) && plain[0].capTriangles == 84 &&
                     !parseCap(plain[0].piece.mesh).has("openshim_gib_flesh_bone"),
                 "the limb pattern is an option; empty disables the bone ring");
 

@@ -746,7 +746,7 @@ struct PhaseClock
 #define GIB_PHASE_BEGIN PhaseClock phaseClock
 #define GIB_PHASE(n) phaseClock.mark(n)
 // Cap outcomes: rings at full / 0.6 / 0.3 strength, fan (not eligible), fan (folded).
-double g_gibCapStats[9] = {};
+double g_gibCapStats[10] = {};
 #define CAP_STAT(i) (g_gibCapStats[i] += 1.0)
 #else
 #define CAP_STAT(i) ((void)0)
@@ -1450,17 +1450,17 @@ constexpr CapLayer kPlainLayers[] = {{0.97f, -0.015f, 0.3f, 1.0f, 0.00f, 0.015f,
                                      {0.925f, -0.050f, 0.5f, 7.0f, 0.00f, 0.030f, kZoneFat},
                                      {0.865f, -0.060f, 0.6f, 4.0f, 0.03f, 0.040f, kZoneClot},
                                      {0.80f, -0.065f, 0.8f, 3.0f, 0.04f, 0.040f, kZoneClot},
-                                     {0.66f, 0.000f, 1.0f, 1.0f, 0.03f, 0.080f, kZoneMuscle},
-                                     {0.50f, 0.050f, 1.0f, 1.0f, 0.03f, 0.100f, kZoneMuscle},
-                                     {0.30f, 0.090f, 1.0f, 1.0f, 0.03f, 0.100f, kZoneMuscle}};
+                                     {0.66f, 0.000f, 1.0f, 1.0f, 0.03f, 0.030f, kZoneMuscle},
+                                     {0.50f, 0.050f, 1.0f, 1.0f, 0.03f, 0.030f, kZoneMuscle},
+                                     {0.30f, 0.090f, 1.0f, 1.0f, 0.03f, 0.030f, kZoneMuscle}};
 constexpr CapLayer kLimbLayers[] = {{0.97f, -0.015f, 0.3f, 1.0f, 0.00f, 0.015f, kZoneSkin},
                                     {0.925f, -0.050f, 0.5f, 7.0f, 0.00f, 0.030f, kZoneFat},
                                     {0.865f, -0.060f, 0.6f, 4.0f, 0.03f, 0.040f, kZoneClot},
                                     {0.80f, -0.065f, 0.8f, 3.0f, 0.04f, 0.040f, kZoneClot},
-                                    {0.68f, 0.000f, 1.0f, 1.0f, 0.03f, 0.070f, kZoneMuscle},
-                                    {0.55f, 0.040f, 1.0f, 1.0f, 0.03f, 0.090f, kZoneMuscle},
-                                    {0.42f, 0.060f, 1.0f, 1.0f, 0.04f, 0.100f, kZoneMuscle},
-                                    {0.30f, 0.070f, 1.0f, 1.0f, 0.05f, 0.090f, kZoneMuscle},
+                                    {0.68f, 0.000f, 1.0f, 1.0f, 0.03f, 0.030f, kZoneMuscle},
+                                    {0.55f, 0.040f, 1.0f, 1.0f, 0.03f, 0.030f, kZoneMuscle},
+                                    {0.42f, 0.060f, 1.0f, 1.0f, 0.04f, 0.030f, kZoneMuscle},
+                                    {0.30f, 0.070f, 1.0f, 1.0f, 0.05f, 0.030f, kZoneMuscle},
                                     {0.22f, 0.070f, 1.0f, 1.0f, 0.07f, 0.070f, kZoneMuscle},
                                     {0.13f, 0.140f, 1.0f, 1.0f, 0.16f, 0.030f, kZoneBone}};
 // Torn-tissue cap over one cut loop. `points` are the welded boundary points,
@@ -1478,7 +1478,7 @@ enum class RingResult
     Folded         // degenerate or too steep: retry weaker
 };
 RingResult addRingCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, bool limb, float uvScale,
-                      float radius, float strength)
+                      float radius, float strength, bool flaps)
 {
     const size_t n = points.size();
     const CapLayer *layers = limb ? kLimbLayers : kPlainLayers;
@@ -1573,77 +1573,354 @@ RingResult addRingCap(CapMesh &cap, const std::vector<V> &points, V normal, V ce
     }
     const float centreLift = (limb ? -0.09f - 0.04f * positionNoise(centre, 40) : 0.09f + 0.05f * positionNoise(centre, 40)) * radius * strength;
 
-    // Positions (centre is ring-local origin).
-    const auto world = [&](const std::array<float, 3> &q) {
-        return add(add(centre, add(scale3(tangent, q[0]), scale3(bitangent, q[1]))), scale3(normal, q[2]));
+    // ---- Cap-plane vertices ------------------------------------------------
+    // Everything below works in cap-plane coordinates (x along tangent, y along
+    // bitangent, h along the normal) and converts to model space at the end.
+    struct LocalVertex
+    {
+        float x, y, h;
+        float t;       // muscle annulus parameter: 0 inner edge .. 1 outer edge (muscle vertices only)
+        bool muscle;   // free muscle-interior vertex (gets the torn displacement)
     };
-    const size_t base = cap.vertices.size();
-    for (const V &p : boundary)
-        cap.vertices.push_back({p, normal, 0, 0}); // the rim is the cut itself, bit for bit
-    for (size_t j = 1; j < rings.size(); ++j)
-        for (const auto &q : rings[j])
-            cap.vertices.push_back({world(q), normal, 0, 0});
-    cap.vertices.push_back({add(centre, scale3(normal, centreLift)), normal, 0, 0});
-    const uint32_t centreIndex = static_cast<uint32_t>(base + rings.size() * n);
-    const auto index = [&](size_t layer, size_t i) { return static_cast<uint32_t>(base + layer * n + i % n); };
+    std::vector<LocalVertex> lv;
+    lv.reserve(rings.size() * n + 64);
+    for (const auto &r : rings)
+        for (const auto &q : r)
+            lv.push_back({q[0], q[1], q[2], 0.0f, false});
+    const uint32_t centreLocal = static_cast<uint32_t>(rings.size() * n);
+    lv.push_back({0.0f, 0.0f, centreLift, 0.0f, false});
+    const auto index = [&](size_t layer, size_t i) { return static_cast<uint32_t>(layer * n + i % n); };
 
-    // Triangles: ring bands, then the fan into the centre.
-    std::vector<std::array<uint32_t, 3>> tris;
-    std::vector<size_t> triZone;
-    const auto planarArea = [&](uint32_t a, uint32_t b, uint32_t c) {
-        const V &pa = cap.vertices[a].p, &pb = cap.vertices[b].p, &pc = cap.vertices[c].p;
-        return 0.5f * dot3(cross3(sub3(pb, pa), sub3(pc, pa)), normal);
-    };
-    bool valid = true, negative = false;
-    const float minArea = 1e-4f * radius * radius;
-    const auto add_tri = [&](uint32_t a, uint32_t b, uint32_t c, size_t zone) {
-        const V &pa = cap.vertices[a].p, &pb = cap.vertices[b].p, &pc = cap.vertices[c].p;
-        const V face = cross3(sub3(pb, pa), sub3(pc, pa));
-        const float length = std::sqrt(dot3(face, face));
-        // Positive in the cap plane, and not steeply folded against the normal.
-        if (planarArea(a, b, c) < minArea || !(dot3(face, normal) >= 0.05f * length))
+    // Muscle region: the bands whose zone is muscle, plus the centre fan on a
+    // plain cut. Its outer boundary is ring `outerRing` (shared with the clot
+    // band); on a limb cut its inner boundary is the ring the bone band starts at.
+    size_t firstMuscle = layerCount, lastMuscle = 0;
+    for (size_t j = 0; j < layerCount; ++j)
+        if (layers[j].bandZone == kZoneMuscle)
         {
-            if (valid && strength == 1.0f)
-                CAP_STAT(planarArea(a, b, c) < 0 ? 5 : (planarArea(a, b, c) < minArea ? 6 : 7));
-            if (planarArea(a, b, c) < 0)
-                negative = true;
-            valid = false;
+            firstMuscle = std::min(firstMuscle, j);
+            lastMuscle = std::max(lastMuscle, j);
         }
-        tris.push_back({a, b, c});
-        triZone.push_back(zone);
+    const size_t outerRing = firstMuscle, innerRing = lastMuscle + 1;
+    for (size_t k = outerRing; k <= innerRing && k < rings.size(); ++k)
+        for (size_t i = 0; i < n; ++i)
+        {
+            const LocalVertex &outer = lv[index(outerRing, i)], &inner = lv[index(innerRing, i)];
+            LocalVertex &v = lv[index(k, i)];
+            const float ro = std::sqrt(outer.x * outer.x + outer.y * outer.y);
+            const float ri = limb ? std::sqrt(inner.x * inner.x + inner.y * inner.y) : 0.0f;
+            const float rk = std::sqrt(v.x * v.x + v.y * v.y);
+            v.t = ro > ri + 1e-9f ? std::min(1.0f, std::max(0.0f, (rk - ri) / (ro - ri))) : 0.0f;
+            v.muscle = k > outerRing && (k < innerRing || !limb);
+        }
+    lv[centreLocal].muscle = !limb;
+    lv[centreLocal].t = 0.0f;
+
+    struct LocalTriangle
+    {
+        uint32_t v[3];
+        size_t zone;
     };
+    std::vector<LocalTriangle> tris;
     for (size_t j = 0; j + 1 < rings.size(); ++j)
     {
         const size_t zone = layers[j].bandZone;
         for (size_t i = 0; i < n; ++i)
         {
-            add_tri(index(j, i), index(j, i + 1), index(j + 1, i + 1), zone);
-            add_tri(index(j, i), index(j + 1, i + 1), index(j + 1, i), zone);
+            tris.push_back({{index(j, i), index(j, i + 1), index(j + 1, i + 1)}, zone});
+            tris.push_back({{index(j, i), index(j + 1, i + 1), index(j + 1, i)}, zone});
         }
     }
-    // The innermost band (last layer) has no band entry of its own: it is the
-    // fan, zone = bone annulus' inside = marrow for limbs, muscle otherwise.
+    // The innermost band is the fan: marrow for limbs, muscle otherwise.
     for (size_t i = 0; i < n; ++i)
-        add_tri(index(rings.size() - 1, i), index(rings.size() - 1, i + 1), centreIndex,
-                limb ? static_cast<size_t>(kZoneMarrow) : static_cast<size_t>(kZoneMuscle));
+        tris.push_back({{index(rings.size() - 1, i), index(rings.size() - 1, i + 1), centreLocal},
+                        limb ? static_cast<size_t>(kZoneMarrow) : static_cast<size_t>(kZoneMuscle)});
+
+    const auto area2d = [&](uint32_t a, uint32_t b, uint32_t c) {
+        return 0.5f * ((lv[b].x - lv[a].x) * (lv[c].y - lv[a].y) - (lv[c].x - lv[a].x) * (lv[b].y - lv[a].y));
+    };
+    const auto localWorld = [&](float x, float y, float h) {
+        return add(add(centre, add(scale3(tangent, x), scale3(bitangent, y))), scale3(normal, h));
+    };
+    const float minArea = 1e-4f * radius * radius;
+
+    // ---- Non-concentric muscle: scattered points, then edge flips ----------
+    // Split the largest muscle triangles with a deterministic jittered interior
+    // point (1 -> 3, always valid, boundaries untouched), then Lawson-flip the
+    // interior edges so the triangulation stops following the rings.
+    {
+        std::vector<size_t> candidates;
+        for (size_t t = 0; t < tris.size(); ++t)
+            if (tris[t].zone == kZoneMuscle && area2d(tris[t].v[0], tris[t].v[1], tris[t].v[2]) > 40.0f * minArea)
+                candidates.push_back(t);
+        std::stable_sort(candidates.begin(), candidates.end(), [&](size_t a, size_t b) {
+            return area2d(tris[a].v[0], tris[a].v[1], tris[a].v[2]) > area2d(tris[b].v[0], tris[b].v[1], tris[b].v[2]);
+        });
+        size_t muscleCount = 0;
+        for (const auto &t : tris)
+            muscleCount += t.zone == kZoneMuscle;
+        // Big loops only get the torn displacement: scatter and flips cost O(n^2).
+        const size_t splits = n > 40 ? 0 : std::min(candidates.size(), std::max<size_t>(1, std::min<size_t>(muscleCount / 2, 12)));
+        for (size_t s = 0; s < splits; ++s)
+        {
+            const size_t ti = candidates[s];
+            const uint32_t a = tris[ti].v[0], b = tris[ti].v[1], c = tris[ti].v[2];
+            const V seed = localWorld((lv[a].x + lv[b].x + lv[c].x) / 3.0f, (lv[a].y + lv[b].y + lv[c].y) / 3.0f, 0.0f);
+            float w[3];
+            for (int k = 0; k < 3; ++k)
+                w[k] = 0.22f + 0.56f * positionNoise(seed, 200 + static_cast<uint32_t>(k));
+            const float sum = w[0] + w[1] + w[2];
+            for (float &x : w)
+                x /= sum;
+            LocalVertex p;
+            p.x = w[0] * lv[a].x + w[1] * lv[b].x + w[2] * lv[c].x;
+            p.y = w[0] * lv[a].y + w[1] * lv[b].y + w[2] * lv[c].y;
+            p.h = w[0] * lv[a].h + w[1] * lv[b].h + w[2] * lv[c].h;
+            p.t = w[0] * lv[a].t + w[1] * lv[b].t + w[2] * lv[c].t;
+            p.muscle = true;
+            const uint32_t pi = static_cast<uint32_t>(lv.size());
+            lv.push_back(p);
+            tris[ti] = {{a, b, pi}, kZoneMuscle};
+            tris.push_back({{b, c, pi}, kZoneMuscle});
+            tris.push_back({{c, a, pi}, kZoneMuscle});
+        }
+        for (int pass = 0; pass < (splits ? 2 : 0); ++pass)
+        {
+            // Flat sorted edge list instead of a map of vectors: two entries with
+            // the same key are the two muscle triangles sharing an interior edge.
+            std::vector<std::pair<uint64_t, uint32_t>> edgeList;
+            edgeList.reserve(tris.size() * 3);
+            for (size_t t = 0; t < tris.size(); ++t)
+                if (tris[t].zone == kZoneMuscle)
+                    for (int e = 0; e < 3; ++e)
+                    {
+                        const uint32_t u = tris[t].v[e], v = tris[t].v[(e + 1) % 3];
+                        edgeList.push_back({(static_cast<uint64_t>(std::min(u, v)) << 32) | std::max(u, v),
+                                            static_cast<uint32_t>(t)});
+                    }
+            std::sort(edgeList.begin(), edgeList.end());
+            std::vector<char> touched(tris.size(), 0);
+            bool flipped = false;
+            for (size_t e0 = 0; e0 + 1 < edgeList.size(); ++e0)
+            {
+                if (edgeList[e0].first != edgeList[e0 + 1].first || (e0 + 2 < edgeList.size() && edgeList[e0 + 2].first == edgeList[e0].first))
+                    continue;
+                const std::pair<uint32_t, uint32_t> edge{static_cast<uint32_t>(edgeList[e0].first >> 32),
+                                                         static_cast<uint32_t>(edgeList[e0].first & 0xFFFFFFFFu)};
+                const size_t owners[2] = {edgeList[e0].second, edgeList[e0 + 1].second};
+                ++e0; // the pair is consumed
+                if (touched[owners[0]] || touched[owners[1]])
+                    continue;
+                // Orient: t1 = (a, b, c), t2 = (b, a, d).
+                uint32_t a = 0, b = 0, c = 0, d = 0;
+                bool found = false, haveD = false;
+                for (int e = 0; e < 3 && !found; ++e)
+                {
+                    const auto &t1 = tris[owners[0]].v;
+                    if (std::min(t1[e], t1[(e + 1) % 3]) == edge.first && std::max(t1[e], t1[(e + 1) % 3]) == edge.second)
+                    {
+                        a = t1[e];
+                        b = t1[(e + 1) % 3];
+                        c = t1[(e + 2) % 3];
+                        found = true;
+                    }
+                }
+                const auto &t2 = tris[owners[1]].v;
+                for (int e = 0; e < 3; ++e)
+                    if (t2[e] == b && t2[(e + 1) % 3] == a)
+                    {
+                        d = t2[(e + 2) % 3];
+                        haveD = true;
+                    }
+                if (!found || !haveD)
+                    continue;
+                // Delaunay: flip when d lies inside the circumcircle of (a, b, c).
+                const double ax = lv[a].x - lv[d].x, ay = lv[a].y - lv[d].y, bx = lv[b].x - lv[d].x, by = lv[b].y - lv[d].y,
+                             cx = lv[c].x - lv[d].x, cy = lv[c].y - lv[d].y;
+                const double det = (ax * ax + ay * ay) * (bx * cy - cx * by) - (bx * bx + by * by) * (ax * cy - cx * ay) +
+                                   (cx * cx + cy * cy) * (ax * by - bx * ay);
+                if (!(det > 1e-9))
+                    continue;
+                // The new triangles (c, a, d) and (c, d, b) must both be positive.
+                if (!(area2d(c, a, d) > minArea) || !(area2d(c, d, b) > minArea))
+                    continue;
+                tris[owners[0]] = {{c, a, d}, kZoneMuscle};
+                tris[owners[1]] = {{c, d, b}, kZoneMuscle};
+                touched[owners[0]] = touched[owners[1]] = 1;
+                flipped = true;
+            }
+            if (!flipped)
+                break;
+        }
+    }
+
+    // ---- Torn displacement on the free muscle vertices ---------------------
+    // Ridged and billow noise, stretched strand bundles along the fibre (x)
+    // axis, pits where blood pools and a few creases that step the surface; the
+    // blend weight is zero on the zone boundaries so fat/clot/bone stay welded.
+    {
+        const float unit = radius * strength;
+        const auto smoothstep = [](float e0, float e1, float x) {
+            const float t = std::min(1.0f, std::max(0.0f, (x - e0) / (e1 - e0)));
+            return t * t * (3.0f - 2.0f * t);
+        };
+        struct Crease
+        {
+            float cx, cy, dx, dy, sign;
+        };
+        Crease creases[3];
+        for (int k = 0; k < 3; ++k)
+        {
+            const float angle2 = 6.2831853f * positionNoise(centre, 300 + static_cast<uint32_t>(k));
+            creases[k] = {(positionNoise(centre, 310 + static_cast<uint32_t>(k)) - 0.5f) * 0.9f,
+                          (positionNoise(centre, 320 + static_cast<uint32_t>(k)) - 0.5f) * 0.9f, std::cos(angle2),
+                          std::sin(angle2), positionNoise(centre, 330 + static_cast<uint32_t>(k)) > 0.5f ? 1.0f : -1.0f};
+        }
+        for (LocalVertex &v : lv)
+        {
+            if (!v.muscle)
+                continue;
+            const float u = v.x / radius, w = v.y / radius;
+            const float ridged = 1.0f - std::abs(2.0f * smoothNoise2(u * 1.6f + 3.0f, w * 1.6f + 5.0f, 210) - 1.0f);
+            const float billow = std::abs(2.0f * smoothNoise2(u * 3.4f + 1.0f, w * 3.4f + 7.0f, 211) - 1.0f);
+            float torn = 0.07f * (ridged - 0.5f) + 0.05f * (billow - 0.5f);
+            const float strandField = 1.0f - std::abs(2.0f * smoothNoise2(w * 7.0f + 2.0f, u * 0.9f + 4.0f, 212) - 1.0f);
+            torn += 0.05f * smoothstep(0.55f, 0.95f, strandField);
+            torn -= 0.09f * smoothstep(0.72f, 0.92f, smoothNoise2(u * 4.2f + 8.0f, w * 4.2f + 1.0f, 213));
+            for (const Crease &c : creases)
+            {
+                const float rx = u - c.cx, ry = w - c.cy;
+                const float along = rx * c.dx + ry * c.dy, across = -rx * c.dy + ry * c.dx;
+                const float fade = 1.0f - smoothstep(0.27f, 0.45f, std::abs(along));
+                torn += c.sign * 0.07f * std::max(-1.0f, std::min(1.0f, across / 0.03f)) * 0.5f * fade;
+                torn -= 0.04f * fade * std::exp(-(across / 0.025f) * (across / 0.025f));
+            }
+            torn = std::max(-0.15f, std::min(0.15f, torn));
+            const float weight = smoothstep(0.0f, 0.25f, 1.0f - v.t) * (limb ? smoothstep(0.0f, 0.25f, v.t) : 1.0f);
+            v.h += weight * torn * unit;
+        }
+    }
+
+    // ---- Model-space vertices, validation ----------------------------------
+    const size_t base = cap.vertices.size();
+    for (const V &p : boundary)
+        cap.vertices.push_back({p, normal, 0, 0}); // the rim is the cut itself, bit for bit
+    for (size_t k = n; k < lv.size(); ++k)
+        cap.vertices.push_back({localWorld(lv[k].x, lv[k].y, lv[k].h), normal, 0, 0});
+    bool valid = true, negative = false;
+    const auto check = [&](const LocalTriangle &t) {
+        const V &pa = cap.vertices[base + t.v[0]].p, &pb = cap.vertices[base + t.v[1]].p, &pc = cap.vertices[base + t.v[2]].p;
+        const V face = cross3(sub3(pb, pa), sub3(pc, pa));
+        const float length = std::sqrt(dot3(face, face));
+        const float planar = 0.5f * dot3(face, normal);
+        if (planar < minArea || !(dot3(face, normal) >= 0.05f * length))
+        {
+            if (valid && strength == 1.0f)
+                CAP_STAT(planar < 0 ? 5 : (planar < minArea ? 6 : 7));
+            if (planar < 0)
+                negative = true;
+            valid = false;
+        }
+    };
+    for (const LocalTriangle &t : tris)
+        check(t);
     if (!valid)
     {
         cap.vertices.resize(base);
         return negative ? RingResult::NotStarShaped : RingResult::Folded;
     }
-    // Smooth normals from the real surface.
-    std::vector<V> accumulated(cap.vertices.size() - base, V{0, 0, 0});
-    for (const auto &t : tris)
+
+    // ---- Ragged flaps at the rim -------------------------------------------
+    // A few small torn tissue flaps attached to rim edges, in the skin / blood
+    // film material: some fold inward over the cut and rise, some droop out.
+    // The rim vertices stay the exact (welded) cut points.
+    std::vector<LocalTriangle> flapTris;
+    if (flaps && n >= 5)
     {
-        const V &a = cap.vertices[t[0]].p, &b = cap.vertices[t[1]].p, &c = cap.vertices[t[2]].p;
+        size_t made = 0;
+        bool previous = false;
+        for (size_t i = 0; i < n && made < 4; ++i)
+        {
+            const bool pick = !previous && positionNoise(boundary[i], 60) > 0.6f;
+            previous = pick;
+            if (!pick)
+                continue;
+            const V &p0 = boundary[i], &p1 = boundary[(i + 1) % n];
+            const V mid = scale3(add(p0, p1), 0.5f);
+            const V edge = sub3(p1, p0);
+            const float length = std::sqrt(dot3(edge, edge));
+            const V toRim = sub3(mid, centre);
+            const V outward = normalize3(sub3(toRim, scale3(normal, dot3(toRim, normal))));
+            const bool inward = positionNoise(boundary[i], 61) > 0.5f;
+            const float reach = std::min(length * (0.45f + 0.5f * positionNoise(boundary[i], 62)), 0.09f * radius);
+            const float lift = (inward ? 1.0f : -0.6f) * (0.03f + 0.04f * positionNoise(boundary[i], 63)) * radius * strength;
+            const V apex = add(add(mid, scale3(outward, inward ? -reach : reach)), scale3(normal, lift));
+            const V face = cross3(sub3(p1, p0), sub3(apex, p0));
+            const float len = std::sqrt(dot3(face, face));
+            if (!(len > 1e-9f) || std::abs(dot3(face, normal)) < 0.15f * len)
+                continue; // would be edge-on to the cut plane
+            const uint32_t apexIndex = static_cast<uint32_t>(cap.vertices.size() - base);
+            cap.vertices.push_back({apex, normal, 0, 0});
+            if (dot3(face, normal) > 0)
+                flapTris.push_back({{static_cast<uint32_t>(i), static_cast<uint32_t>((i + 1) % n), apexIndex}, kZoneSkin});
+            else
+                flapTris.push_back({{static_cast<uint32_t>((i + 1) % n), static_cast<uint32_t>(i), apexIndex}, kZoneSkin});
+            ++made;
+            CAP_STAT(9);
+        }
+    }
+    for (const LocalTriangle &t : flapTris)
+        check(t);
+    if (!valid)
+    {
+        cap.vertices.resize(base);
+        return negative ? RingResult::NotStarShaped : RingResult::Folded;
+    }
+    tris.insert(tris.end(), flapTris.begin(), flapTris.end());
+
+    // ---- Normals: smooth, with faceted creases ------------------------------
+    std::vector<V> accumulated(cap.vertices.size() - base, V{0, 0, 0});
+    std::vector<V> faceNormal(tris.size());
+    for (size_t t = 0; t < tris.size(); ++t)
+    {
+        const V &a = cap.vertices[base + tris[t].v[0]].p, &b = cap.vertices[base + tris[t].v[1]].p,
+                &c = cap.vertices[base + tris[t].v[2]].p;
         const V face = cross3(sub3(b, a), sub3(c, a));
-        for (const uint32_t v : t)
-            accumulated[v - base] = add(accumulated[v - base], face);
+        faceNormal[t] = normalize3(face);
+        for (const uint32_t v : tris[t].v)
+            accumulated[v] = add(accumulated[v], face);
     }
     for (size_t k = 0; k < accumulated.size(); ++k)
     {
         const V smoothed = normalize3(accumulated[k]);
         cap.vertices[base + k].n = dot3(smoothed, normal) > 0.1f ? smoothed : normal;
+    }
+    // Steep muscle triangles (a crease or cliff) get their own flat-shaded
+    // vertices, so the tear catches light sharply; flaps are flat too.
+    for (size_t t = 0; t < tris.size(); ++t)
+    {
+        float lo = 1e30f, hi = -1e30f, longest = 0.0f;
+        for (int e = 0; e < 3; ++e)
+        {
+            const LocalVertex *va = e < 3 && tris[t].v[e] < lv.size() ? &lv[tris[t].v[e]] : nullptr;
+            const LocalVertex *vb = tris[t].v[(e + 1) % 3] < lv.size() ? &lv[tris[t].v[(e + 1) % 3]] : nullptr;
+            if (!va || !vb)
+                continue;
+            lo = std::min(lo, va->h);
+            hi = std::max(hi, va->h);
+            longest = std::max(longest, std::sqrt((va->x - vb->x) * (va->x - vb->x) + (va->y - vb->y) * (va->y - vb->y)));
+        }
+        const bool flap = tris[t].zone == kZoneSkin && tris[t].v[2] >= lv.size();
+        const bool steep = tris[t].zone == kZoneMuscle && longest > 1e-9f && (hi - lo) / longest > 0.45f;
+        if (!steep && !flap)
+            continue;
+        for (uint32_t &v : tris[t].v)
+        {
+            CapVertex copy = cap.vertices[base + v];
+            copy.n = faceNormal[t];
+            v = static_cast<uint32_t>(cap.vertices.size() - base);
+            cap.vertices.push_back(copy);
+        }
     }
     for (size_t k = base; k < cap.vertices.size(); ++k)
     {
@@ -1651,9 +1928,9 @@ RingResult addRingCap(CapMesh &cap, const std::vector<V> &points, V normal, V ce
         cap.vertices[k].u = dot3(p, tangent) * uvScale;
         cap.vertices[k].v = dot3(p, bitangent) * uvScale;
     }
-    for (size_t t = 0; t < tris.size(); ++t)
-        for (const uint32_t v : tris[t])
-            cap.indices[triZone[t]].push_back(v);
+    for (const LocalTriangle &t : tris)
+        for (const uint32_t v : t.v)
+            cap.indices[t.zone].push_back(static_cast<uint32_t>(base + v));
     return RingResult::Built;
 }
 // The plain fan from the loop centroid: the fallback for loops that are
@@ -1954,7 +2231,7 @@ bool addEarCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, f
     return true;
 }
 void addCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, float newellLength, bool limb,
-            bool rings, bool bands, float uvScale)
+            bool rings, bool bands, bool flaps, float uvScale)
 {
     const size_t n = points.size();
     float radius = 0, planarity = 0;
@@ -2003,7 +2280,7 @@ void addCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, floa
         for (const V &pivot : pivots)
             for (const float strength : {1.0f, 0.6f, 0.3f})
             {
-                const RingResult result = addRingCap(cap, points, normal, pivot, limb, uvScale, radius, strength);
+                const RingResult result = addRingCap(cap, points, normal, pivot, limb, uvScale, radius, strength, flaps);
                 if (result == RingResult::Built)
                 {
                     CAP_STAT(attempt < 3 ? attempt : 2);
@@ -2365,7 +2642,7 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                         normal = scale3(normal, -1.0f);
                         std::reverse(points.begin(), points.end());
                     }
-                    addCap(caps, points, normal, center, std::sqrt(dot3(newell, newell)), limb, options.capRings, options.capBands, options.capUvScale);
+                    addCap(caps, points, normal, center, std::sqrt(dot3(newell, newell)), limb, options.capRings, options.capBands, options.capFlaps, options.capUvScale);
                 }
                 GIB_PHASE(10); // cap triangles
                 if (caps.triangles() > 1000000)
