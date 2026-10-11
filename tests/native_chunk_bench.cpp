@@ -39,7 +39,7 @@ using namespace BZROpenShim::NativeChunks;
 namespace BZROpenShim::NativeChunks
 {
 extern double g_gibPhaseMs[11];
-extern double g_gibCapStats[9]; // native_chunk_mesh.cpp, OPENSHIM_NATIVE_CHUNK_PHASES
+extern double g_gibCapStats[10]; // native_chunk_mesh.cpp, OPENSHIM_NATIVE_CHUNK_PHASES
 }
 namespace fs = std::filesystem;
 
@@ -529,6 +529,7 @@ int main(int argc, char **argv)
                 "fan %.0f\n",
                 g_gibCapStats[0] + g_gibCapStats[1] + g_gibCapStats[2], g_gibCapStats[0], g_gibCapStats[1],
                 g_gibCapStats[2], g_gibCapStats[3] + g_gibCapStats[4], g_gibCapStats[4], g_gibCapStats[8]);
+    std::printf("rim flaps made: %.0f\n", g_gibCapStats[9]);
     std::printf("first fold at full strength: negative area %.0f, tiny area %.0f, steep %.0f\n", g_gibCapStats[5],
                 g_gibCapStats[6], g_gibCapStats[7]);
     std::ostream *csv = &std::cout;
