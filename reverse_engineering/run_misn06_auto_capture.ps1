@@ -493,6 +493,8 @@ foreach ($delayMs in $SpaceDelaysMs) {
     $liveShimOffset = $preShimOffset
     $liveBzOffset = $preBzOffset
 
+    if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
+    Assert-BZRSafeToLaunch
     $gameProc = Start-Process -FilePath $gameExe -ArgumentList $MissionArgs -WorkingDirectory $GameRoot -PassThru
     $windowWaitSeconds = [Math]::Min(
         $MainWindowTimeoutSeconds,

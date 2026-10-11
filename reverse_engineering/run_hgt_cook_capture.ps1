@@ -65,6 +65,7 @@ function Invoke-CookArm {
     if (Test-Path $cooked) { Remove-Item $cooked -Force }
 
     $argList = @($MissionBzn) + $ExtraArgs
+    Assert-BZRSafeToLaunch
     $proc = Start-Process -FilePath $exe -ArgumentList $argList `
         -WorkingDirectory $GameRoot -PassThru
 

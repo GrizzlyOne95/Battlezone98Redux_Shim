@@ -128,6 +128,8 @@ spinSeconds = $($SpinSeconds.ToString("0.0###", $invariant))
     }
     [Environment]::SetEnvironmentVariable("OPENSHIM_PROFILE_OGRE_ANIMATION", "1", "Process")
 
+    if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
+    Assert-BZRSafeToLaunch
     $process = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" `
         -WorkingDirectory $GameRoot -PassThru
 
