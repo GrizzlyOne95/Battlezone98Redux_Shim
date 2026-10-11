@@ -1446,23 +1446,23 @@ struct CapLayer
 // the relief noise has interior vertices to move; lifts domed outward for muscle,
 // recessed for fat/clot, bone proud, marrow sunk (the centre vertex).
 // {scale, lift, smoothing, jitter, radial, relief, zone}
-constexpr CapLayer kPlainLayers[] = {{0.97f, -0.01f, 0.3f, 1.0f, 0.00f, 0.010f, kZoneSkin},
-                                     {0.925f, -0.02f, 0.5f, 7.0f, 0.00f, 0.015f, kZoneFat},
-                                     {0.865f, -0.025f, 0.6f, 4.0f, 0.03f, 0.020f, kZoneClot},
-                                     {0.80f, -0.025f, 0.8f, 3.0f, 0.04f, 0.020f, kZoneClot},
-                                     {0.66f, 0.000f, 1.0f, 1.0f, 0.03f, 0.035f, kZoneMuscle},
-                                     {0.50f, 0.020f, 1.0f, 1.0f, 0.03f, 0.040f, kZoneMuscle},
-                                     {0.30f, 0.040f, 1.0f, 1.0f, 0.03f, 0.040f, kZoneMuscle}};
-constexpr CapLayer kLimbLayers[] = {{0.97f, -0.01f, 0.3f, 1.0f, 0.00f, 0.010f, kZoneSkin},
-                                    {0.925f, -0.02f, 0.5f, 7.0f, 0.00f, 0.015f, kZoneFat},
-                                    {0.865f, -0.025f, 0.6f, 4.0f, 0.03f, 0.020f, kZoneClot},
-                                    {0.80f, -0.025f, 0.8f, 3.0f, 0.04f, 0.020f, kZoneClot},
-                                    {0.68f, 0.000f, 1.0f, 1.0f, 0.03f, 0.030f, kZoneMuscle},
-                                    {0.55f, 0.015f, 1.0f, 1.0f, 0.03f, 0.035f, kZoneMuscle},
-                                    {0.42f, 0.025f, 1.0f, 1.0f, 0.04f, 0.035f, kZoneMuscle},
-                                    {0.30f, 0.030f, 1.0f, 1.0f, 0.05f, 0.030f, kZoneMuscle},
-                                    {0.22f, 0.030f, 1.0f, 1.0f, 0.07f, 0.030f, kZoneMuscle},
-                                    {0.13f, 0.050f, 1.0f, 1.0f, 0.16f, 0.020f, kZoneBone}};
+constexpr CapLayer kPlainLayers[] = {{0.97f, -0.015f, 0.3f, 1.0f, 0.00f, 0.015f, kZoneSkin},
+                                     {0.925f, -0.050f, 0.5f, 7.0f, 0.00f, 0.030f, kZoneFat},
+                                     {0.865f, -0.060f, 0.6f, 4.0f, 0.03f, 0.040f, kZoneClot},
+                                     {0.80f, -0.065f, 0.8f, 3.0f, 0.04f, 0.040f, kZoneClot},
+                                     {0.66f, 0.000f, 1.0f, 1.0f, 0.03f, 0.080f, kZoneMuscle},
+                                     {0.50f, 0.050f, 1.0f, 1.0f, 0.03f, 0.100f, kZoneMuscle},
+                                     {0.30f, 0.090f, 1.0f, 1.0f, 0.03f, 0.100f, kZoneMuscle}};
+constexpr CapLayer kLimbLayers[] = {{0.97f, -0.015f, 0.3f, 1.0f, 0.00f, 0.015f, kZoneSkin},
+                                    {0.925f, -0.050f, 0.5f, 7.0f, 0.00f, 0.030f, kZoneFat},
+                                    {0.865f, -0.060f, 0.6f, 4.0f, 0.03f, 0.040f, kZoneClot},
+                                    {0.80f, -0.065f, 0.8f, 3.0f, 0.04f, 0.040f, kZoneClot},
+                                    {0.68f, 0.000f, 1.0f, 1.0f, 0.03f, 0.070f, kZoneMuscle},
+                                    {0.55f, 0.040f, 1.0f, 1.0f, 0.03f, 0.090f, kZoneMuscle},
+                                    {0.42f, 0.060f, 1.0f, 1.0f, 0.04f, 0.100f, kZoneMuscle},
+                                    {0.30f, 0.070f, 1.0f, 1.0f, 0.05f, 0.090f, kZoneMuscle},
+                                    {0.22f, 0.070f, 1.0f, 1.0f, 0.07f, 0.070f, kZoneMuscle},
+                                    {0.13f, 0.140f, 1.0f, 1.0f, 0.16f, 0.030f, kZoneBone}};
 // Torn-tissue cap over one cut loop. `points` are the welded boundary points,
 // `normal` faces away from the piece. The rim is the boundary itself (it must
 // seal the skin); every inner ring is an in-plane Laplacian-smoothed copy of
@@ -1547,9 +1547,21 @@ RingResult addRingCap(CapMesh &cap, const std::vector<V> &points, V normal, V ce
             nextRho[i] = std::max(std::min(blendRho * ratio + jr + rr, rho[i] * 0.97f), 0.03f * radius);
             // Smooth lumpy relief along the normal, from the ring's own plane position.
             const float px = nextRho[i] * std::cos(angle[i]), py = nextRho[i] * std::sin(angle[i]);
-            const float lump = (2.0f * smoothNoise2(px / (0.45f * radius) + 7.0f, py / (0.45f * radius) + 3.0f,
-                                                    100 + static_cast<uint32_t>(j)) - 1.0f);
-            nextHeight[i] = blendHeight * ratio * 0.5f + (layer.lift + layer.relief * lump) * radius * strength + jz;
+            // Two octaves: broad torn swells and a smaller lumpy layer.
+            const float lump = 0.65f * (2.0f * smoothNoise2(px / (0.8f * radius) + 7.0f, py / (0.8f * radius) + 3.0f,
+                                                            100 + static_cast<uint32_t>(j)) - 1.0f) +
+                               0.35f * (2.0f * smoothNoise2(px / (0.3f * radius) + 1.0f, py / (0.3f * radius) + 9.0f,
+                                                            140 + static_cast<uint32_t>(j)) - 1.0f);
+            // A few small torn ridges / tags of tissue on the muscle, away from the rim.
+            float tag = 0.0f;
+            if (layer.bandZone == kZoneMuscle)
+            {
+                const float field = smoothNoise2(px / (0.22f * radius) + 4.0f, py / (0.22f * radius) + 2.0f, 180);
+                const float gate = smoothNoise2(px / (0.7f * radius) + 5.0f, py / (0.7f * radius) + 8.0f, 181);
+                const float edgeDistance = std::abs(field - 0.5f);
+                tag = (1.0f - std::min(1.0f, edgeDistance / 0.06f)) * std::max(0.0f, std::min(1.0f, (gate - 0.55f) / 0.2f)) * 0.07f;
+            }
+            nextHeight[i] = blendHeight * ratio * 0.5f + (layer.lift + layer.relief * lump + tag) * radius * strength + jz;
         }
         previousScale = s;
         rho = std::move(nextRho);
@@ -1559,7 +1571,7 @@ RingResult addRingCap(CapMesh &cap, const std::vector<V> &points, V normal, V ce
             next[i] = {rho[i] * std::cos(angle[i]), rho[i] * std::sin(angle[i]), height[i]};
         rings.push_back(std::move(next));
     }
-    const float centreLift = (limb ? -0.03f - 0.02f * positionNoise(centre, 40) : 0.05f + 0.03f * positionNoise(centre, 40)) * radius * strength;
+    const float centreLift = (limb ? -0.09f - 0.04f * positionNoise(centre, 40) : 0.09f + 0.05f * positionNoise(centre, 40)) * radius * strength;
 
     // Positions (centre is ring-local origin).
     const auto world = [&](const std::array<float, 3> &q) {

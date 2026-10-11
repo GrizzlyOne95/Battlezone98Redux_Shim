@@ -579,7 +579,17 @@ void gibTests()
                 lowY = std::min(lowY, q[1]);
                 highY = std::max(highY, q[1]);
             }
-            Require(highY - lowY > 0.02f, "cap interior has normal-direction relief, not a plane");
+            // Loop radius is ~0.7: deep relief is a few percent to ~10% of that.
+            Require(highY - lowY > 0.07f, "cap interior has deep normal-direction relief, not a plane");
+            // Every displaced triangle still faces out of the cut (root cap: +Y in its frame).
+            bool facing = true;
+            for (size_t t = 0; t + 2 < rootCap.indices.size(); t += 3)
+            {
+                const auto &a0 = rootCap.positions[rootCap.indices[t]], &b0 = rootCap.positions[rootCap.indices[t + 1]],
+                           &c0 = rootCap.positions[rootCap.indices[t + 2]];
+                facing = facing && cross(minus(b0, a0), minus(c0, a0))[1] > 0;
+            }
+            Require(facing, "no displaced cap triangle is flipped against the cut normal");
         }
         std::vector<GibPiece> repeat;
         Require(ExtractGibs(mesh, skeleton, GibOptions{}, repeat, error) &&
