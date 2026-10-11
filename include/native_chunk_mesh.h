@@ -76,6 +76,8 @@ struct GibOptions
     // Loops that rings cannot follow are ear-clipped; with this on, a thin skin
     // and fat band is inset along the rim where it does not self-intersect.
     bool capBands = true;
+    // Small torn tissue flaps along the rim of ringed caps (skin/blood-film material).
+    bool capFlaps = true;
 };
 struct GibPiece
 {

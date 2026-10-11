@@ -25,7 +25,7 @@ namespace BZROpenShim::NativeChunks
 // of each generated file's first line / TGA id, which is how the runtime
 // recognises (and replaces) a stale generated copy, while a file without the
 // marker is the user's and is left alone.
-inline constexpr const char *kGibFleshVersion = "v7";
+inline constexpr const char *kGibFleshVersion = "v8";
 inline constexpr const char *kGibFleshMaterialName = "openshim_gib_flesh";
 inline constexpr const char *kGibFleshMaterialFile = "openshim_gib_flesh.material";
 // Skin, fat, bone and marrow live in their own file so a mod can restyle the
