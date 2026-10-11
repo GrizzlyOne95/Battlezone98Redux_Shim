@@ -62,7 +62,7 @@ if (-not $python) {
 New-Item -ItemType Directory -Path $snapshotRoot -Force | Out-Null
 
 if ($KillExistingGame) {
-    Get-Process $processBaseName -ErrorAction SilentlyContinue | Stop-Process -Force
+    if (-not (Get-Command Stop-BZRGame -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }; Get-Process $processBaseName -ErrorAction SilentlyContinue | ForEach-Object { Stop-BZRGame -Id $_.Id }
     Start-Sleep -Seconds 2
 }
 
@@ -150,7 +150,7 @@ if (-not $outputDir) {
 Start-Sleep -Seconds $PostCaptureWaitSeconds
 
 if ($KillGameAfterCapture) {
-    Get-Process $processBaseName -ErrorAction SilentlyContinue | Stop-Process -Force
+    if (-not (Get-Command Stop-BZRGame -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }; Get-Process $processBaseName -ErrorAction SilentlyContinue | ForEach-Object { Stop-BZRGame -Id $_.Id }
     Start-Sleep -Seconds 2
 }
 

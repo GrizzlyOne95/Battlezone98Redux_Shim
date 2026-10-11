@@ -425,7 +425,7 @@ else {
 
 if ($DeployShim) {
     if (-not (Test-Path $shimSource)) { throw "Shim not built: $shimSource" }
-    Get-Process battlezone98redux -ErrorAction SilentlyContinue | Stop-Process -Force
+    if (-not (Get-Command Stop-BZRGame -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\..\reverse_engineering\BZRHarness.ps1" }; Get-Process battlezone98redux -ErrorAction SilentlyContinue | ForEach-Object { Stop-BZRGame -Id $_.Id }
     Start-Sleep -Seconds 3
     $shimTarget = Join-Path $GameRoot "winmm.dll"
     Copy-Item -LiteralPath $shimSource -Destination $shimTarget -Force
@@ -444,7 +444,7 @@ $runs = @()
 try {
     foreach ($mode in $Modes) {
         if ($KillExistingGame) {
-            Get-Process battlezone98redux -ErrorAction SilentlyContinue | Stop-Process -Force
+            if (-not (Get-Command Stop-BZRGame -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\..\reverse_engineering\BZRHarness.ps1" }; Get-Process battlezone98redux -ErrorAction SilentlyContinue | ForEach-Object { Stop-BZRGame -Id $_.Id }
             Start-Sleep -Seconds 2
         }
 

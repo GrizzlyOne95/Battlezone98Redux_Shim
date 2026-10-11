@@ -35,7 +35,7 @@ foreach ($required in @($binDll, $patches, (Join-Path $resDir "resources.version
 }
 
 function Stop-Game {
-    Get-Process battlezone98redux -ErrorAction SilentlyContinue | Stop-Process -Force
+    if (-not (Get-Command Stop-BZRGame -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\..\reverse_engineering\BZRHarness.ps1" }; Get-Process battlezone98redux -ErrorAction SilentlyContinue | ForEach-Object { Stop-BZRGame -Id $_.Id }
     Start-Sleep -Milliseconds 2500
 }
 

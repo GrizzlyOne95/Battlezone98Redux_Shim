@@ -17,7 +17,7 @@ if (-not (Test-Path $gameExe)) { throw "exe not found: $gameExe" }
 if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
 
 if ($KillExisting) {
-    # Graceful only: Stop-BZRGame sends WM_CLOSE and escalates only if ignored.
+    # Graceful only: Stop-BZRGame sends WM_CLOSE and never force-kills.
     Stop-BZRGame
 }
 

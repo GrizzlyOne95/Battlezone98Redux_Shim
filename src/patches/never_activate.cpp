@@ -39,6 +39,14 @@ namespace BZROpenShim
         // SW_SHOWNOACTIVATE), SetFocus (blocked unless the target's top-level
         // window already is the foreground window).
         //
+        // OS auto-activation: when the user's foreground window closes or
+        // minimizes, Windows activates the next top-level window in z-order,
+        // which is our bottom-most game window. Top-level windows therefore get
+        // WS_EX_NOACTIVATE at creation (plus WS_EX_APPWINDOW to keep the taskbar
+        // button), and SetWindowLongA/W re-add it whenever GWL_EXSTYLE is written.
+        // The GetActiveWindow fake below is a pure hook answer and does not depend
+        // on real activation, so it is unaffected.
+        //
         // Z-order: SHOWNOACTIVATE / NOACTIVATE still put a window on top, over
         // the user's fullscreen app, so every show and every SetWindowPos z-order
         // request on a top-level window ends at HWND_BOTTOM, and WS_EX_TOPMOST is
@@ -50,6 +58,11 @@ namespace BZROpenShim
         // by WM_ACTIVATEAPP. Activation is blocked, so the flag would stay 0 and
         // the sim would idle. Only the EXECUTABLE's GetActiveWindow import reports
         // the game window; focus (GetFocus), keyboard and raw mouse stay real.
+        //
+        // A physical click on the game window (WH_GETMESSAGE hook; button physically
+        // down and cursor over the window, so harness PostMessage clicks do not
+        // count) clears WS_EX_NOACTIVATE, activates the window, and stands down
+        // every suppression for the rest of the session.
         //
         // Off by default; with the flag unset no import is touched.
 
@@ -69,13 +82,16 @@ namespace BZROpenShim
             kCreateWindowExW,
             kSetFocus,
             kGetActiveWindow,
+            kSetWindowLongA,
+            kSetWindowLongW,
             kSlotCount
         };
 
         const char* const kNames[kSlotCount] = {
             "ShowWindow", "ShowWindowAsync", "SetForegroundWindow", "BringWindowToTop",
             "SetActiveWindow", "SetWindowPos", "SwitchToThisWindow", "AllowSetForegroundWindow",
-            "CreateWindowExA", "CreateWindowExW", "SetFocus", "GetActiveWindow"};
+            "CreateWindowExA", "CreateWindowExW", "SetFocus", "GetActiveWindow",
+            "SetWindowLongA", "SetWindowLongW"};
 
         using FnShowWindow = BOOL(WINAPI*)(HWND, int);
         using FnSetWindowPos = BOOL(WINAPI*)(HWND, HWND, int, int, int, int, UINT);
@@ -83,6 +99,8 @@ namespace BZROpenShim
         using FnCreateWindowExW = HWND(WINAPI*)(DWORD, LPCWSTR, LPCWSTR, DWORD, int, int, int, int, HWND, HMENU, HINSTANCE, LPVOID);
         using FnSetFocus = HWND(WINAPI*)(HWND);
         using FnGetActiveWindow = HWND(WINAPI*)();
+        using FnBoolHwnd = BOOL(WINAPI*)(HWND);
+        using FnSetWindowLong = LONG(WINAPI*)(HWND, int, LONG);
 
         void* s_hooks[kSlotCount] = {};
         void* s_real[kSlotCount] = {};
@@ -92,6 +110,10 @@ namespace BZROpenShim
         void* s_notificationCookie = nullptr;
         volatile long s_logged[kSlotCount] = {};
         volatile long s_sweepLogBudget = 6;
+        volatile long s_noActivateLogged = 0;
+        volatile long s_userActivated = 0; // a physical click on the game window lifts every suppression
+        HHOOK s_msgHook = nullptr;
+        DWORD s_msgHookThread = 0;
         HMODULE s_exe = nullptr;
         HWND volatile s_gameWindow = nullptr;
         volatile long s_gameWindowIsOgre = 0;
@@ -112,6 +134,8 @@ namespace BZROpenShim
                 hwnd, reinterpret_cast<HWND>(Policy::kHwndBottom), 0, 0, 0, 0, Policy::BottomPushFlags());
         }
 
+        void InstallMessageHook(HWND hwnd); // defined after Note/Log helpers
+
         // Remembers the game window (the Ogre render window) so the exe's
         // GetActiveWindow import can report it. Only top-level windows count.
         void MaybeRecordGameWindow(HWND hwnd)
@@ -126,6 +150,8 @@ namespace BZROpenShim
                 s_gameWindow = hwnd;
                 s_gameWindowIsOgre = isOgre ? 1 : 0;
             }
+            if (s_gameWindow == hwnd)
+                InstallMessageHook(hwnd);
         }
 
         // One-shot per API: names the module and offset of the first caller so a
@@ -154,8 +180,66 @@ namespace BZROpenShim
             Log(L"[NOACTIVATE] Never-activate mode; suppressed %hs (caller %ls+0x%X)\n", what, path, offset);
         }
 
+        void NoteExStyleApplied()
+        {
+            if (InterlockedExchange(&s_noActivateLogged, 1) == 0)
+                Log(L"[NOACTIVATE] WS_EX_NOACTIVATE applied to game window\n");
+        }
+
+        // The user physically clicked the game window: allow activation from now on.
+        void ActivateForUser(HWND game)
+        {
+            if (InterlockedExchange(&s_userActivated, 1) != 0)
+                return;
+            if (s_real[kSetWindowLongW])
+            {
+                const LONG ex = GetWindowLongW(game, GWL_EXSTYLE);
+                reinterpret_cast<FnSetWindowLong>(s_real[kSetWindowLongW])(
+                    game, GWL_EXSTYLE, ex & ~static_cast<LONG>(Policy::kWsExNoActivate));
+            }
+            if (s_real[kSetForegroundWindow])
+                reinterpret_cast<FnBoolHwnd>(s_real[kSetForegroundWindow])(game);
+            Log(L"[NOACTIVATE] user clicked the game window; activation allowed\n");
+        }
+
+        // WH_GETMESSAGE on the game's UI thread. Hardware clicks and posted
+        // messages both arrive here; only a button that is physically down with
+        // the cursor over the window counts, which PostMessage never produces.
+        LRESULT CALLBACK GetMessageProc(int code, WPARAM wParam, LPARAM lParam)
+        {
+            const HWND game = s_gameWindow;
+            if (code == HC_ACTION && wParam == PM_REMOVE && lParam && game && !s_userActivated)
+            {
+                const MSG* msg = reinterpret_cast<const MSG*>(lParam);
+                if (Policy::IsButtonDownMessage(msg->message))
+                {
+                    POINT pt = {};
+                    RECT rc = {};
+                    const bool inside = GetCursorPos(&pt) && GetWindowRect(game, &rc) && PtInRect(&rc, pt);
+                    const bool isGame = msg->hwnd && GetAncestor(msg->hwnd, GA_ROOT) == game;
+                    const bool down = (GetAsyncKeyState(Policy::ButtonVirtualKey(msg->message)) & 0x8000) != 0;
+                    if (Policy::IsUserClick(msg->message, isGame, inside, down))
+                        ActivateForUser(game);
+                }
+            }
+            return CallNextHookEx(nullptr, code, wParam, lParam);
+        }
+
+        void InstallMessageHook(HWND hwnd)
+        {
+            const DWORD tid = GetWindowThreadProcessId(hwnd, nullptr);
+            if (!tid || tid == s_msgHookThread || !s_self)
+                return;
+            if (s_msgHook)
+                UnhookWindowsHookEx(s_msgHook);
+            s_msgHook = SetWindowsHookExW(WH_GETMESSAGE, &GetMessageProc, s_self, tid);
+            s_msgHookThread = s_msgHook ? tid : 0;
+        }
+
         BOOL WINAPI ShowWindowHook(HWND hwnd, int cmd)
         {
+            if (!Policy::ShouldSuppress(s_userActivated != 0))
+                return reinterpret_cast<FnShowWindow>(s_real[kShowWindow])(hwnd, cmd);
             const int mapped = Policy::NoActivateShowCommand(cmd);
             if (mapped != cmd)
                 Note(kShowWindow, "ShowWindow activation", _ReturnAddress());
@@ -170,6 +254,8 @@ namespace BZROpenShim
 
         BOOL WINAPI ShowWindowAsyncHook(HWND hwnd, int cmd)
         {
+            if (!Policy::ShouldSuppress(s_userActivated != 0))
+                return reinterpret_cast<FnShowWindow>(s_real[kShowWindowAsync])(hwnd, cmd);
             const int mapped = Policy::NoActivateShowCommand(cmd);
             if (mapped != cmd)
                 Note(kShowWindowAsync, "ShowWindowAsync activation", _ReturnAddress());
@@ -179,37 +265,52 @@ namespace BZROpenShim
             return result;
         }
 
-        BOOL WINAPI SetForegroundWindowHook(HWND)
+        BOOL WINAPI SetForegroundWindowHook(HWND hwnd)
         {
+            if (!Policy::ShouldSuppress(s_userActivated != 0))
+                return reinterpret_cast<FnBoolHwnd>(s_real[kSetForegroundWindow])(hwnd);
             Note(kSetForegroundWindow, "SetForegroundWindow", _ReturnAddress());
             return TRUE;
         }
 
-        BOOL WINAPI BringWindowToTopHook(HWND)
+        BOOL WINAPI BringWindowToTopHook(HWND hwnd)
         {
+            if (!Policy::ShouldSuppress(s_userActivated != 0))
+                return reinterpret_cast<FnBoolHwnd>(s_real[kBringWindowToTop])(hwnd);
             Note(kBringWindowToTop, "BringWindowToTop", _ReturnAddress());
             return TRUE;
         }
 
-        HWND WINAPI SetActiveWindowHook(HWND)
+        HWND WINAPI SetActiveWindowHook(HWND hwnd)
         {
+            if (!Policy::ShouldSuppress(s_userActivated != 0))
+                return reinterpret_cast<FnSetFocus>(s_real[kSetActiveWindow])(hwnd);
             Note(kSetActiveWindow, "SetActiveWindow", _ReturnAddress());
             return GetActiveWindow(); // SetActiveWindow returns the previous active window
         }
 
-        void WINAPI SwitchToThisWindowHook(HWND, BOOL)
+        void WINAPI SwitchToThisWindowHook(HWND hwnd, BOOL altTab)
         {
+            if (!Policy::ShouldSuppress(s_userActivated != 0))
+            {
+                reinterpret_cast<void(WINAPI*)(HWND, BOOL)>(s_real[kSwitchToThisWindow])(hwnd, altTab);
+                return;
+            }
             Note(kSwitchToThisWindow, "SwitchToThisWindow", _ReturnAddress());
         }
 
-        BOOL WINAPI AllowSetForegroundWindowHook(DWORD)
+        BOOL WINAPI AllowSetForegroundWindowHook(DWORD pid)
         {
+            if (!Policy::ShouldSuppress(s_userActivated != 0))
+                return reinterpret_cast<BOOL(WINAPI*)(DWORD)>(s_real[kAllowSetForegroundWindow])(pid);
             Note(kAllowSetForegroundWindow, "AllowSetForegroundWindow", _ReturnAddress());
             return TRUE;
         }
 
         BOOL WINAPI SetWindowPosHook(HWND hwnd, HWND after, int x, int y, int cx, int cy, UINT flags)
         {
+            if (!Policy::ShouldSuppress(s_userActivated != 0))
+                return reinterpret_cast<FnSetWindowPos>(s_real[kSetWindowPos])(hwnd, after, x, y, cx, cy, flags);
             if (!(flags & Policy::kSwpNoActivate))
                 Note(kSetWindowPos, "SetWindowPos activation", _ReturnAddress());
             flags = Policy::NoActivateWindowPosFlags(flags);
@@ -234,6 +335,10 @@ namespace BZROpenShim
                 style = Policy::StyleWithoutVisible(style);
             }
             ex = Policy::StyleExWithoutTopmost(ex);
+            const DWORD exA = Policy::CreateExStyle(ex, style, parent != nullptr);
+            if (exA != ex)
+                NoteExStyleApplied();
+            ex = exA;
             HWND hwnd = reinterpret_cast<FnCreateWindowExA>(s_real[kCreateWindowExA])(
                 ex, cls, name, style, x, y, w, h, parent, menu, inst, param);
             if (hwnd && defer)
@@ -255,6 +360,10 @@ namespace BZROpenShim
                 style = Policy::StyleWithoutVisible(style);
             }
             ex = Policy::StyleExWithoutTopmost(ex);
+            const DWORD exW = Policy::CreateExStyle(ex, style, parent != nullptr);
+            if (exW != ex)
+                NoteExStyleApplied();
+            ex = exW;
             HWND hwnd = reinterpret_cast<FnCreateWindowExW>(s_real[kCreateWindowExW])(
                 ex, cls, name, style, x, y, w, h, parent, menu, inst, param);
             if (hwnd && defer)
@@ -266,9 +375,36 @@ namespace BZROpenShim
             return hwnd;
         }
 
+        // Keeps WS_EX_NOACTIVATE on top-level windows when the caller rewrites
+        // GWL_EXSTYLE. (SetWindowLongPtr is only a macro on 32-bit; no export.)
+        LONG SetWindowLongImpl(Slot slot, HWND hwnd, int index, LONG value)
+        {
+            if (index == Policy::kGwlExStyle && Policy::ShouldSuppress(s_userActivated != 0))
+            {
+                const LONG fixedValue = static_cast<LONG>(
+                    Policy::SetWindowLongValue(index, static_cast<std::uint32_t>(value), IsTopLevel(hwnd)));
+                if (fixedValue != value)
+                {
+                    NoteExStyleApplied();
+                    value = fixedValue;
+                }
+            }
+            return reinterpret_cast<FnSetWindowLong>(s_real[slot])(hwnd, index, value);
+        }
+
+        LONG WINAPI SetWindowLongAHook(HWND hwnd, int index, LONG value)
+        {
+            return SetWindowLongImpl(kSetWindowLongA, hwnd, index, value);
+        }
+
+        LONG WINAPI SetWindowLongWHook(HWND hwnd, int index, LONG value)
+        {
+            return SetWindowLongImpl(kSetWindowLongW, hwnd, index, value);
+        }
+
         HWND WINAPI SetFocusHook(HWND hwnd)
         {
-            if (hwnd)
+            if (hwnd && Policy::ShouldSuppress(s_userActivated != 0))
             {
                 const HWND root = GetAncestor(hwnd, GA_ROOT);
                 const HWND foreground = GetForegroundWindow();
@@ -392,7 +528,8 @@ namespace BZROpenShim
                 reinterpret_cast<void*>(&SwitchToThisWindowHook), reinterpret_cast<void*>(&AllowSetForegroundWindowHook),
                 reinterpret_cast<void*>(&CreateWindowExAHook), reinterpret_cast<void*>(&CreateWindowExWHook),
                 reinterpret_cast<void*>(&SetFocusHook),
-                reinterpret_cast<void*>(&GetActiveWindowHook)};
+                reinterpret_cast<void*>(&GetActiveWindowHook),
+                reinterpret_cast<void*>(&SetWindowLongAHook), reinterpret_cast<void*>(&SetWindowLongWHook)};
             bool resolved = user32 != nullptr;
             for (int i = 0; i < kSlotCount; ++i)
             {
@@ -401,7 +538,7 @@ namespace BZROpenShim
                 // The hooks that forward to the real function need a target.
                 if (!s_real[i] && (i == kShowWindow || i == kShowWindowAsync || i == kSetWindowPos ||
                                    i == kCreateWindowExA || i == kCreateWindowExW || i == kSetFocus ||
-                                   i == kGetActiveWindow))
+                                   i == kGetActiveWindow || i == kSetWindowLongA || i == kSetWindowLongW))
                     resolved = false;
             }
             if (!resolved)
