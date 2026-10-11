@@ -83,6 +83,132 @@ namespace BZROpenShim
             return s_moduleBase;
         }
 
+        uintptr_t ExpectedGameObjectGetTeamAddr()
+        {
+            // Cached once bound: the reticle getter asks per visible selection.
+            static uintptr_t s_expected = 0;
+            if (s_expected == 0)
+            {
+                const uintptr_t addr = HookEngine::EngineAddress("GameObjectGetTeam");
+                const uintptr_t base = GetMainModuleBase();
+                if (addr)
+                    s_expected = base ? base + (addr - kGogPreferredImageBase) : addr;
+            }
+            return s_expected;
+        }
+
+        uintptr_t FindMainImageImportSlot(const char* dllName, const char* importName)
+        {
+            const uintptr_t base = GetMainModuleBase();
+            if (!base || !dllName || !importName)
+                return 0;
+            __try
+            {
+                const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+                if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+                    return 0;
+                const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
+                if (nt->Signature != IMAGE_NT_SIGNATURE)
+                    return 0;
+                const IMAGE_DATA_DIRECTORY& dir =
+                    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+                if (dir.VirtualAddress == 0)
+                    return 0;
+                for (auto* desc = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(base + dir.VirtualAddress);
+                     desc->Name != 0;
+                     ++desc)
+                {
+                    if (_stricmp(reinterpret_cast<const char*>(base + desc->Name), dllName) != 0)
+                        continue;
+                    if (desc->OriginalFirstThunk == 0)
+                        return 0;
+                    const auto* names =
+                        reinterpret_cast<const IMAGE_THUNK_DATA32*>(base + desc->OriginalFirstThunk);
+                    for (size_t i = 0; names[i].u1.AddressOfData != 0; ++i)
+                    {
+                        if (IMAGE_SNAP_BY_ORDINAL32(names[i].u1.Ordinal))
+                            continue;
+                        const auto* byName = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(
+                            base + names[i].u1.AddressOfData);
+                        if (strcmp(reinterpret_cast<const char*>(byName->Name), importName) == 0)
+                            return base + desc->FirstThunk + i * sizeof(IMAGE_THUNK_DATA32);
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            return 0;
+        }
+
+        uintptr_t QueuedLoadPathBufferAddr()
+        {
+            static uintptr_t s_addr = 0;
+            if (s_addr == 0)
+                s_addr = HookEngine::EngineAddress("QueuedLoadPathBuffer");
+            return s_addr;
+        }
+
+        uintptr_t QueuedLoadNameBufferAddr()
+        {
+            static uintptr_t s_addr = 0;
+            if (s_addr == 0)
+                s_addr = HookEngine::EngineAddress("QueuedLoadNameBuffer");
+            return s_addr;
+        }
+
+        uintptr_t TerrainGetIntersectionAddr()
+        {
+            static uintptr_t s_addr = 0;
+            if (s_addr == 0)
+                s_addr = HookEngine::EngineAddress("TerrainGetIntersection");
+            return s_addr;
+        }
+
+        uintptr_t ViewRecordAddr()
+        {
+            static uintptr_t s_addr = 0;
+            if (s_addr == 0)
+                s_addr = HookEngine::EngineAddress("ViewRecord");
+            return s_addr;
+        }
+
+        bool IsKnownOgreMainBuild(HMODULE ogreMain)
+        {
+            // SHA-256 E5E693960B95AD0D60733A3B688464A6C6CBA234E86950698F9C2BEA4ACFEB45,
+            // identical on GOG and Steam (see ogre_enhanced_light_selection.cpp).
+            constexpr DWORD kKnownOgreTimestamp = 0x5866BF6A;
+            constexpr DWORD kKnownOgreImageSize = 0x00A65000;
+            static const bool known = [ogreMain] {
+                __try
+                {
+                    const auto base = reinterpret_cast<uintptr_t>(ogreMain);
+                    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+                    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
+                    const bool match = dos->e_magic == IMAGE_DOS_SIGNATURE &&
+                                       nt->Signature == IMAGE_NT_SIGNATURE &&
+                                       nt->FileHeader.TimeDateStamp == kKnownOgreTimestamp &&
+                                       nt->OptionalHeader.SizeOfImage == kKnownOgreImageSize;
+                    if (!match)
+                        Log(L"[BUILD] OgreMain.dll is not the known build; offset-resolved Ogre helpers stand down\n");
+                    return match;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+            }();
+            return known;
+        }
+
+        uintptr_t WorldRenderOriginAddr()
+        {
+            static uintptr_t s_addr = 0;
+            if (s_addr == 0)
+                s_addr = HookEngine::EngineAddress("WorldRenderOrigin");
+            return s_addr;
+        }
+
         uint32_t ResolveRel32Target(uint8_t* callInstr)
         {
             if (!callInstr || callInstr[0] != 0xE8)

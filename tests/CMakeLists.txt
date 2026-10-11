@@ -12,6 +12,11 @@ target_include_directories(p2p_reliable_send_policy_tests PRIVATE ../include)
 target_compile_features(p2p_reliable_send_policy_tests PRIVATE cxx_std_14)
 add_test(NAME p2p_reliable_send_policy_tests COMMAND p2p_reliable_send_policy_tests)
 
+add_executable(p2p_early_unreliable_policy_tests p2p_early_unreliable_policy_tests.cpp)
+target_include_directories(p2p_early_unreliable_policy_tests PRIVATE ../include)
+target_compile_features(p2p_early_unreliable_policy_tests PRIVATE cxx_std_14)
+add_test(NAME p2p_early_unreliable_policy_tests COMMAND p2p_early_unreliable_policy_tests)
+
 if(WIN32)
     add_executable(win32_last_error_scope_tests win32_last_error_scope_tests.cpp)
     target_include_directories(win32_last_error_scope_tests PRIVATE ../include)
@@ -24,11 +29,23 @@ endif()
 # executable, Windows process APIs, Frida, pefile or capstone.
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
+    execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import PIL"
+        RESULT_VARIABLE OPENSHIM_PIL_IMPORT_RESULT OUTPUT_QUIET ERROR_QUIET)
+    if(OPENSHIM_PIL_IMPORT_RESULT EQUAL 0)
+        add_test(NAME terrain_paint_pack_tests
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_paint_pack_tests.py")
+        add_test(NAME terrain_hd_pack_tests
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_hd_pack_tests.py")
+    else()
+        message(STATUS "terrain_hd_pack_tests needs Pillow; install it to qualify texture pack changes")
+    endif()
     add_test(NAME weapon_presentation_live_capture_tests
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../reverse_engineering/test_weapon_presentation_live.py")
 endif()
 find_program(OPENSHIM_NODE_EXECUTABLE NAMES node nodejs)
 if(OPENSHIM_NODE_EXECUTABLE)
+    add_test(NAME terrain_paint_codec_tests
+        COMMAND "${OPENSHIM_NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_paint_codec_tests.js")
     add_test(NAME weapon_presentation_probe_tests
         COMMAND "${OPENSHIM_NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../reverse_engineering/test_weapon_presentation_probe.js")
 endif()
@@ -57,6 +74,18 @@ openshim_add_test(ogre_entity_reload_tests STD 17 SOURCES
     ogre_entity_reload_tests.cpp
 )
 openshim_add_test(unit_damage_tests STD 20 SOURCES unit_damage_tests.cpp)
+openshim_add_test(terrain_paint_tests STD 17 SOURCES terrain_paint_tests.cpp)
+
+if(WIN32)
+    openshim_add_test(terrain_paint_gpu_tests STD 17 SOURCES terrain_paint_gpu_tests.cpp)
+    target_link_libraries(terrain_paint_gpu_tests PRIVATE d3d11 d3dcompiler)
+    openshim_add_test(terrain_hd_texture_copy_tests STD 17 SOURCES terrain_hd_texture_copy_tests.cpp)
+    target_link_libraries(terrain_hd_texture_copy_tests PRIVATE d3d11)
+    openshim_add_test(terrain_microrelief_gpu_tests STD 17 SOURCES terrain_microrelief_gpu_tests.cpp)
+    target_link_libraries(terrain_microrelief_gpu_tests PRIVATE d3d11 d3dcompiler)
+    target_compile_definitions(terrain_microrelief_gpu_tests PRIVATE
+        TERRAIN_TESS_SHADER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_terrain_tessellation_test.hlsl")
+endif()
 
 openshim_add_test(native_chunk_mesh_tests STD 20 SOURCES
     native_chunk_mesh_tests.cpp
@@ -284,6 +313,22 @@ openshim_add_test(terrain_atlas_rect_repair_tests STD 20 SOURCES
     terrain_atlas_rect_repair_tests.cpp
     ../src/patches/terrain_atlas_rect_repair.cpp
 )
+
+# Which patches.json entries apply to the running exe build. Pure nlohmann.
+add_executable(build_overlay_tests
+    build_overlay_tests.cpp
+    ../src/engine/build_overlay.cpp
+)
+target_include_directories(build_overlay_tests PRIVATE ../include ../third_party)
+target_compile_definitions(build_overlay_tests PRIVATE
+    BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json")
+target_compile_features(build_overlay_tests PRIVATE cxx_std_20)
+if(MSVC)
+    target_compile_options(build_overlay_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(build_overlay_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME build_overlay_tests COMMAND build_overlay_tests)
 
 add_executable(resolve_table_tests
     resolve_table_tests.cpp

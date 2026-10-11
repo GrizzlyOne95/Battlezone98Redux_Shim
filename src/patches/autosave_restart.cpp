@@ -89,13 +89,30 @@ namespace BZROpenShim
 
         constexpr int kLoadSaveState = 8;
 
-        constexpr uintptr_t kLoadScreenSelectionFlagAddr = 0x00918133;
+        // engine_addresses rows; the load button and restart handlers leave
+        // stock behaviour alone when they do not bind.
+        uint32_t g_LoadScreenSelectionFlagAddr = 0;
 
-        constexpr uintptr_t kMissionSaveFlagAddr = 0x009173B7;
+        uint32_t g_MissionSaveFlagAddr = 0;
 
-        constexpr uintptr_t kOldMissionModeAddr = 0x00918314;
+        uint32_t g_OldMissionModeAddr = 0;
 
-        constexpr uintptr_t kUiScreenTypeAddr = 0x00918328;
+        uint32_t g_UiScreenTypeAddr = 0;
+
+        static bool AutoSaveRestartAddressesBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow bind[] = {
+                    { "LoadScreenSelectionFlag", &g_LoadScreenSelectionFlagAddr },
+                    { "MissionSaveFlag", &g_MissionSaveFlagAddr },
+                    { "OldMissionMode", &g_OldMissionModeAddr },
+                    { "UiCurrentScreenType", &g_UiScreenTypeAddr },
+                };
+                return HookEngine::BindEngineRows("AutoSave load/restart", bind) &&
+                       QueuedLoadPathBufferAddr() != 0 && QueuedLoadNameBufferAddr() != 0;
+            }();
+            return bound;
+        }
 
         static bool AutoSaveFileExists()
         {
@@ -193,9 +210,11 @@ namespace BZROpenShim
                 return;
             }
 
+            if (!AutoSaveRestartAddressesBound())
+                return;
             if (BZROpenShim::UiPerf::IsEnabled())
                 BZROpenShim::UiPerf::NotifyShellRequest(0x17);
-            *reinterpret_cast<uint8_t*>(kLoadScreenSelectionFlagAddr) = 1;
+            *reinterpret_cast<uint8_t*>(g_LoadScreenSelectionFlagAddr) = 1;
             g_BzrFn_UiDialogSetEnabled(dialog, 0);
             g_BzrFn_LoadScreenPrep();
             g_BzrFn_UiDialogAdvance(dialog, 0x17);
@@ -211,8 +230,8 @@ namespace BZROpenShim
             if (!autoSavePath || !autoSavePath[0])
                 return false;
 
-            auto* queuedPath = reinterpret_cast<char*>(kQueuedLoadPathBufferAddr);
-            auto* queuedName = reinterpret_cast<char*>(kQueuedLoadNameBufferAddr);
+            auto* queuedPath = reinterpret_cast<char*>(QueuedLoadPathBufferAddr());
+            auto* queuedName = reinterpret_cast<char*>(QueuedLoadNameBufferAddr());
             if (!queuedPath || !queuedName)
                 return false;
 
@@ -226,8 +245,8 @@ namespace BZROpenShim
 
         static bool RefreshQueuedPathFromMissionName()
         {
-            auto* queuedPath = reinterpret_cast<char*>(kQueuedLoadPathBufferAddr);
-            auto* queuedName = reinterpret_cast<const char*>(kQueuedLoadNameBufferAddr);
+            auto* queuedPath = reinterpret_cast<char*>(QueuedLoadPathBufferAddr());
+            auto* queuedName = reinterpret_cast<const char*>(QueuedLoadNameBufferAddr());
             if (!queuedPath || !queuedName || !queuedName[0])
                 return false;
 
@@ -262,11 +281,13 @@ namespace BZROpenShim
                 return;
             }
 
-            auto* missionSaveFlag = reinterpret_cast<uint8_t*>(kMissionSaveFlagAddr);
-            auto* oldMissionMode = reinterpret_cast<uint32_t*>(kOldMissionModeAddr);
-            auto* screenType = reinterpret_cast<uint32_t*>(kUiScreenTypeAddr);
-            auto* queuedPath = reinterpret_cast<const char*>(kQueuedLoadPathBufferAddr);
-            auto* queuedName = reinterpret_cast<const char*>(kQueuedLoadNameBufferAddr);
+            if (!AutoSaveRestartAddressesBound())
+                return;
+            auto* missionSaveFlag = reinterpret_cast<uint8_t*>(g_MissionSaveFlagAddr);
+            auto* oldMissionMode = reinterpret_cast<uint32_t*>(g_OldMissionModeAddr);
+            auto* screenType = reinterpret_cast<uint32_t*>(g_UiScreenTypeAddr);
+            auto* queuedPath = reinterpret_cast<const char*>(QueuedLoadPathBufferAddr());
+            auto* queuedName = reinterpret_cast<const char*>(QueuedLoadNameBufferAddr());
 
             const uint8_t previousMissionSave = *missionSaveFlag;
             const uint32_t previousMissionMode = *oldMissionMode;
@@ -336,7 +357,7 @@ namespace BZROpenShim
                 return;
             }
 
-            auto* queuedPath = reinterpret_cast<char*>(kQueuedLoadPathBufferAddr);
+            auto* queuedPath = reinterpret_cast<char*>(QueuedLoadPathBufferAddr());
             Log(L"[AUTOSAVE] Auto-save queued for stock save-load state path=%hs\n",
                 queuedPath);
             g_BzrFn_SetShellState(kLoadSaveState);

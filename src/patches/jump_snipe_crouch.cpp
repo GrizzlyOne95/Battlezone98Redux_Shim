@@ -3,6 +3,7 @@
 // its bridge setter, split out of bzr_hooks.cpp. The Person::Simulate
 // research probe stays there; shared helpers come from bzr_hooks_internal.h.
 #include "bzr_hooks.h"
+#include "hook_engine.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "patcher.h"
@@ -27,7 +28,12 @@ namespace BZROpenShim
         // jumpHeld <= sniper" makes the (jumpHeld && sniper) case crouch like
         // 1.5 while leaving every other path byte-identical. See
         // reverse_engineering/jump_sniping_crouch_fix_20260713.md.
-        constexpr uintptr_t kGogPersonCrouchBranchAddr = 0x0059DEA5;
+        //
+        // The site is the PersonCrouchBranch row. The patched form leans on
+        // jumpHeld and sniperSelected being adjacent frame bytes, which the
+        // row's guard cannot prove, so both byte forms stay fixed: a build
+        // that moves either slot fails the guard and the fix stands down.
+        static uintptr_t g_PersonCrouchBranchAddr = 0;
         constexpr size_t kPersonCrouchBranchPatchLen = 11;
         // movzbl [ebp-0x352],eax ; test al,al ; je 0x59DED6
         constexpr uint8_t kPersonCrouchBranchExpected[kPersonCrouchBranchPatchLen] =
@@ -50,7 +56,7 @@ namespace BZROpenShim
 
         static bool WritePersonCrouchBranchBytes(const uint8_t* bytes)
         {
-            auto* target = reinterpret_cast<uint8_t*>(kGogPersonCrouchBranchAddr);
+            auto* target = reinterpret_cast<uint8_t*>(g_PersonCrouchBranchAddr);
             DWORD oldProtect = 0;
             if (!VirtualProtect(target,
                                 kPersonCrouchBranchPatchLen,
@@ -58,7 +64,7 @@ namespace BZROpenShim
                                 &oldProtect))
             {
                 Log(L"[JUMPSNIPE] Crouch fix VirtualProtect failed at 0x%08X\n",
-                    static_cast<uint32_t>(kGogPersonCrouchBranchAddr));
+                    static_cast<uint32_t>(g_PersonCrouchBranchAddr));
                 return false;
             }
 
@@ -74,8 +80,23 @@ namespace BZROpenShim
         // applied only when a script has enabled it AND we are not in a network
         // game (net id 0). Guarded by the exact expected/patched bytes so it
         // no-ops on any build (e.g. Steam, which relocates Person::Simulate).
+        static bool PersonCrouchBranchBound()
+        {
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "PersonCrouchBranch", &g_PersonCrouchBranchAddr },
+                };
+                return HookEngine::BindEngineRows("Jump-snipe crouch", rows);
+            }();
+            return bound;
+        }
+
         void RefreshJumpSnipeCrouchPatchState()
         {
+            if (!g_JumpSnipeCrouchEnabled && !g_JumpSnipeCrouchPatchActive)
+                return;
+            if (!PersonCrouchBranchBound())
+                return;
             const bool wantActive =
                 g_JumpSnipeCrouchEnabled && (ReadLocalPlayerNetIdValue() == 0);
             if (wantActive == g_JumpSnipeCrouchPatchActive)
@@ -83,7 +104,7 @@ namespace BZROpenShim
 
             if (wantActive)
             {
-                if (!ExpectedBytesMatchAt(kGogPersonCrouchBranchAddr,
+                if (!ExpectedBytesMatchAt(g_PersonCrouchBranchAddr,
                                           kPersonCrouchBranchExpected,
                                           sizeof(kPersonCrouchBranchExpected)))
                 {
@@ -93,12 +114,12 @@ namespace BZROpenShim
                 {
                     g_JumpSnipeCrouchPatchActive = true;
                     Log(L"[JUMPSNIPE] Applied legacy crouch-on-landing fix at 0x%08X (SP-only)\n",
-                        static_cast<uint32_t>(kGogPersonCrouchBranchAddr));
+                        static_cast<uint32_t>(g_PersonCrouchBranchAddr));
                 }
             }
             else
             {
-                if (ExpectedBytesMatchAt(kGogPersonCrouchBranchAddr,
+                if (ExpectedBytesMatchAt(g_PersonCrouchBranchAddr,
                                          kPersonCrouchBranchPatched,
                                          sizeof(kPersonCrouchBranchPatched)))
                 {
@@ -106,7 +127,7 @@ namespace BZROpenShim
                     {
                         g_JumpSnipeCrouchPatchActive = false;
                         Log(L"[JUMPSNIPE] Reverted crouch-on-landing fix at 0x%08X\n",
-                            static_cast<uint32_t>(kGogPersonCrouchBranchAddr));
+                            static_cast<uint32_t>(g_PersonCrouchBranchAddr));
                     }
                 }
                 else

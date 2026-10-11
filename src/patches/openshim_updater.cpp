@@ -901,7 +901,7 @@ namespace BZROpenShim
         CloseFinishedWorker();
         if (IsBusy(g_State.load(std::memory_order_acquire)))
             return false;
-        if (!IsCompatibleGameVersion() || !IsPatchingComplete())
+        if (!HookEngine::IsKnownBuild() || !IsPatchingComplete())
         {
             SetState(OpenShimUpdateState::Unsupported,
                      "Update checking is unavailable on an unsupported Battlezone build.");

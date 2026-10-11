@@ -21,12 +21,37 @@ from the intended arm), FLOW_FAIL (scenario verdict), then per arm
 STRICT_PASS / LOSS for the fix and REPRODUCED / NOT_REPRODUCED for the stock
 control. The generic native-network-health verdict is reported unchanged and
 is not used for the strict result.
+
+Impaired runs (flow-inputs.json "impair": a relay impairment spec applied once
+the mission loaded) replay each link in the order the receiver got it: relay
+drops are left out and delayed, reordered or duplicated copies are placed at
+their delivery time. A run that passes its gameplay checks under impairment
+is IMPAIRED_OK, since some gaps are then expected. Every run also reports
+update blackouts: from the first update a receiver rejects as future-stamped
+until it next accepts one from that peer, the time the player sees that peer
+frozen.
+
+Hit-registration and warp proxies (per directed link and per run, field "delivery"):
+BZRNet game-state packets are unreliable final-fragment kind-0 packets whose
+payload starts with tag '_' (0x5F); payload byte 1 is the ordnance (shot) block
+length, > 0 when the packet carries newly fired shots. Delivery is the same
+native accept rule as above (a packet counts as delivered when the receiver
+model accepts it; relay-dropped and rejected packets are lost). Reported:
+stateUpdates (sent/delivered/ratio), shotPackets (the same for ordnance > 0,
+plus send->delivery latency; a lost one is a shot that never appears on the peer)
+and updateGaps (time between consecutive delivered '_' packets on a link; a long
+gap is a position snap when updates resume). Needs datagramHex in the relay
+trace (payloadCapture); rows without it are counted as noPayload. The default
+figures follow the run's own receive rule; the same trace under both rules is
+under modeledStock / modeledEarly. Gaps include any idle time between lobby and
+mission, so read them with the trace span in mind.
 """
 import argparse
 import collections
 import datetime
 import glob
 import json
+import math
 import os
 import re
 import statistics
@@ -45,34 +70,210 @@ def load_ports(run):
     return ports
 
 
-def analyse_link(packets):
+HOLD_SPAN_LIMIT = 1 << 20
+EARLY_MAX_AHEAD = 4096  # include/p2p_early_unreliable_policy.h kMaxAhead
+U32 = 0xFFFFFFFF
+
+
+def replay_link(packets, early=False):
+    """Accept rule over one link in delivery order. early=True adds the opt-in
+    receiver policy (p2p_early_unreliable_policy.h): a final-fragment unreliable
+    kind-0 packet stamped 1..4096 past expected is delivered while no multi-
+    fragment reliable message is partly received. Expected advances only on
+    accepted reliable packets. Stock mode keeps the legacy comparisons."""
     expected = None
     gaps = dups = rejected = 0
+    blackouts, blackout_from, at = [], None, None
+    reassembling = False  # accepted reliable fragment without 0x40 not yet completed
+    accepted = []  # unreliable rows the receiver delivered, in delivery order
+    for r in packets:
+        t = r["transport"]
+        if t["kindNibble"] != 0:
+            continue
+        seq = t["seqA"]
+        at = r.get("deliveredMs", r["tsUnixMs"])
+        flags = int(t["flagsByte"], 16)
+        reliable = bool(flags & 0x80)
+        if expected is None:
+            expected = seq
+        ahead = (seq - expected) & U32 if early else seq - expected
+        if seq == expected:
+            if reliable:
+                expected = (seq + 1) & U32 if early else seq + 1
+                reassembling = not flags & 0x40
+            else:
+                accepted.append(r)
+                if blackout_from is not None:
+                    blackouts.append(at - blackout_from)
+                    blackout_from = None
+        elif early and not reliable and flags & 0x40 and not reassembling and 1 <= ahead <= EARLY_MAX_AHEAD:
+            accepted.append(r)
+            if blackout_from is not None:
+                blackouts.append(at - blackout_from)
+                blackout_from = None
+        elif (0 < ahead <= U32 // 2) if early else ahead > 0:
+            gaps += 1
+            rejected += not reliable
+            if not reliable and blackout_from is None:
+                blackout_from = at
+        elif reliable:
+            dups += 1
+        else:
+            rejected += 1
+    if blackout_from is not None:
+        blackouts.append(at - blackout_from)
+    return {"gaps": gaps, "dups": dups, "rejected": rejected, "blackouts": blackouts, "accepted": accepted}
+
+
+def percentile(sorted_values, pct):
+    """Nearest-rank percentile of an ascending list (0 when empty)."""
+    if not sorted_values:
+        return 0
+    return sorted_values[max(0, math.ceil(pct / 100.0 * len(sorted_values)) - 1)]
+
+
+def reliable_flow(all_rows, forwarded):
+    """Reliable delivery and NAK acceptance on one link under the stock rule.
+
+    all_rows: every traced row of the link, any disposition (relay arrival order).
+    forwarded: forwarded rows as delivered() orders them.
+    Delay is first relay arrival of a reliable kind-0 stamp to the first
+    forwarded copy accepted in order (expected advances only on in-order
+    reliable). A kind-6 NAK carries the sender's next reliable stamp, so it is
+    compared with the expected of this same link at its delivery time."""
+    first_seen, copies, wire_bytes = {}, collections.Counter(), 0
+    for r in all_rows:
+        t = r["transport"]
+        if t["kindNibble"] == 0 and int(t["flagsByte"], 16) & 0x80:
+            first_seen.setdefault(t["seqA"], r["tsUnixMs"])
+            copies[t["seqA"]] += 1
+            wire_bytes += t.get("wireBytes", r.get("wireBytes", 0))
+    accepted_at, expected = {}, None
+    nak = {"equal": 0, "ahead": 0, "behind": 0, "noExpectation": 0}
+    for r in forwarded:
+        t = r["transport"]
+        seq, at = t["seqA"], r.get("deliveredMs", r["tsUnixMs"])
+        if t["kindNibble"] == 0:
+            reliable = int(t["flagsByte"], 16) & 0x80
+            if expected is None:
+                expected = seq
+            if reliable and seq == expected:
+                accepted_at.setdefault(seq, at)
+                expected = (seq + 1) & U32
+        elif t["kindNibble"] == 6:
+            if expected is None:
+                nak["noExpectation"] += 1
+            else:
+                ahead = (seq - expected) & U32
+                nak["equal" if ahead == 0 else "ahead" if ahead <= U32 // 2 else "behind"] += 1
+    delays = [accepted_at[k] - first_seen[k] for k in accepted_at if k in first_seen]
+    return {"delays": delays, "stamps": len(first_seen), "undelivered": len(set(first_seen) - set(accepted_at)),
+            "retransmitCopies": sum(n - 1 for n in copies.values()), "bytes": wire_bytes, "nak": nak}
+
+
+STATE_TAG = 0x5F  # '_' BZRNet game-state packet
+GAP_THRESHOLDS_MS = (250, 500)
+
+
+def state_packet(r):
+    """None when r is not a '_' state packet; else True for a shot packet
+    (ordnance length byte > 0), False for a plain update, and "nopayload"
+    when the trace row carries no datagram bytes to classify."""
+    t = r["transport"]
+    flags = int(t["flagsByte"], 16)
+    if t["kindNibble"] != 0 or flags & 0x80 or not flags & 0x40:
+        return None
+    hexed = r.get("datagramHex")
+    if hexed is None:
+        return "nopayload"
+    payload = bytes.fromhex(hexed)[t.get("headerBytes", 18):]
+    if len(payload) < 2 or payload[0] != STATE_TAG:
+        return None
+    return payload[1] > 0
+
+
+def state_delivery(sent_rows, accepted_rows):
+    """Raw per-link delivery facts: sent_rows is every traced row of the
+    directed link (any disposition), accepted_rows the receiver model's
+    delivered unreliable rows. Counted per packetId, first accepted copy."""
+    sent, no_payload = {}, 0
+    for r in sent_rows:
+        kind = state_packet(r)
+        if kind == "nopayload":
+            no_payload += 1
+        elif kind is not None:
+            sent.setdefault(r["packetId"], (r["tsUnixMs"], kind))
+    got = {}
+    for r in accepted_rows:
+        if r["packetId"] in sent:
+            got.setdefault(r["packetId"], r["deliveredMs"])
+    times = sorted(got.values())
+    return {
+        "updSent": len(sent), "updDelivered": len(got),
+        "shotSent": sum(1 for _, k in sent.values() if k), "shotDelivered": sum(1 for p in got if sent[p][1]),
+        "shotLatencies": [got[p] - sent[p][0] for p in got if sent[p][1]],
+        "gaps": [b - a for a, b in zip(times, times[1:])],
+        "noPayload": no_payload,
+    }
+
+
+def merge_delivery(raws):
+    out = {"updSent": 0, "updDelivered": 0, "shotSent": 0, "shotDelivered": 0, "noPayload": 0,
+           "shotLatencies": [], "gaps": []}
+    for raw in raws:
+        for k in ("updSent", "updDelivered", "shotSent", "shotDelivered", "noPayload"):
+            out[k] += raw[k]
+        out["shotLatencies"] += raw["shotLatencies"]
+        out["gaps"] += raw["gaps"]
+    return out
+
+
+def ratio(part, whole):
+    return round(part / whole, 5) if whole else None
+
+
+def delivery_summary(raw):
+    lat, gaps = sorted(raw["shotLatencies"]), sorted(raw["gaps"])
+    return {
+        "stateUpdates": {"sent": raw["updSent"], "delivered": raw["updDelivered"],
+                         "lost": raw["updSent"] - raw["updDelivered"],
+                         "deliveryRatio": ratio(raw["updDelivered"], raw["updSent"])},
+        "shotPackets": {"sent": raw["shotSent"], "delivered": raw["shotDelivered"],
+                        "lost": raw["shotSent"] - raw["shotDelivered"],
+                        "deliveryRatio": ratio(raw["shotDelivered"], raw["shotSent"]),
+                        "latencyP50Ms": percentile(lat, 50), "latencyP95Ms": percentile(lat, 95)},
+        "updateGaps": {"count": len(gaps), "p95Ms": percentile(gaps, 95), "p99Ms": percentile(gaps, 99),
+                       "maxMs": gaps[-1] if gaps else 0}
+                      | {f"over{t}Ms": sum(1 for g in gaps if g > t) for t in GAP_THRESHOLDS_MS},
+        "noPayload": raw["noPayload"],
+    }
+
+
+def modeled(replay):
+    stats = blackout_stats(replay["blackouts"])
+    return {"blackoutTotalMs": stats["blackoutTotalMs"], "blackoutMaxMs": stats["blackoutMaxMs"],
+            "unreliableRejected": replay["rejected"]}
+
+
+def analyse_link(packets, early=False):
     first_tx, queued_by, high = {}, {}, -1
     for r in packets:
         t = r["transport"]
         if t["kindNibble"] != 0:
             continue
+        # ts: when the sender sent it (relay arrival).
         seq, ts = t["seqA"], r["tsUnixMs"]
         reliable = bool(int(t["flagsByte"], 16) & 0x80)
-        if expected is None:
-            expected = seq
-        if seq == expected:
-            if reliable:
-                expected = seq + 1
-        elif seq > expected:
-            gaps += 1
-            rejected += not reliable
-        elif reliable:
-            dups += 1
-        else:
-            rejected += 1
         if reliable:
             first_tx.setdefault(seq, ts)
         else:
-            for k in range(high + 1, seq):
+            # A stamp wrapping or jumping far ahead is not a plausible backlog; do not enumerate it.
+            for k in range(high + 1, seq if seq - high <= HOLD_SPAN_LIMIT else high + 1):
                 queued_by.setdefault(k, ts)
             high = max(high, seq - 1)
+    stock, early_replay = replay_link(packets), replay_link(packets, True)
+    used = early_replay if early else stock
+    gaps, dups, rejected = used["gaps"], used["dups"], used["rejected"]
     late = sorted(first_tx[k] - queued_by[k] for k in first_tx
                   if k in queued_by and first_tx[k] > queued_by[k])
     return {
@@ -83,7 +284,47 @@ def analyse_link(packets):
         "reliableHeld": len(late),
         "holdMedianMs": statistics.median(late) if late else 0,
         "holdMaxMs": late[-1] if late else 0,
+        "modeledStock": modeled(stock),
+        "modeledEarly": modeled(early_replay),
+    } | blackout_stats(used["blackouts"])
+
+
+LONG_BLACKOUT_MS = 500
+
+
+def blackout_stats(blackouts):
+    return {
+        "blackouts": len(blackouts),
+        "blackoutTotalMs": round(sum(blackouts), 3),
+        "blackoutMaxMs": round(max(blackouts, default=0), 3),
+        "blackoutsOver500Ms": sum(1 for b in blackouts if b >= LONG_BLACKOUT_MS),
     }
+
+
+def delivered(rows):
+    """Forwarded trace rows as the receiver got them: one row per copy sent,
+    at its delivery time, in delivery order (stable for equal times).
+
+    rows are one directed stream in relay arrival order. The relay never lets
+    a delayed datagram overtake an earlier one unless reorder= picked it, so
+    each copy is floored at the previous in-order copy's delivery time;
+    rebuilding times from the millisecond trace stamp plus the logged delay
+    alone can invert neighbours that the relay sent at one shared deadline."""
+    out = []
+    floor = None
+    for r in rows:
+        impairment = r.get("impairment") or {}
+        delays = impairment.get("delaysMs")
+        reordered = bool(impairment.get("reordered"))
+        for d in (delays if delays else [0]):
+            at = r["tsUnixMs"] + d
+            if floor is not None and at < floor:
+                at = floor if not reordered else at
+            if not reordered:
+                floor = at
+            out.append(r | {"deliveredMs": at})
+    out.sort(key=lambda r: r["deliveredMs"])
+    return out
 
 
 def fix_state(run):
@@ -204,8 +445,20 @@ def flow_breakdown(flow):
     return ("PASS" if not failed else "FAIL"), capture_seen and not capture_failed, failed
 
 
-def score(run, arm=None, clients=4, gpu_query=None):
+def modeled_summary(links, key, link_minutes):
+    total = sum(v[key]["blackoutTotalMs"] for v in links.values())
+    return {"blackoutSPerLinkMinute": round(total / 1000.0 / link_minutes, 4) if link_minutes else None,
+            "worstBlackoutMs": max((v[key]["blackoutMaxMs"] for v in links.values()), default=0),
+            "unreliableRejected": sum(v[key]["unreliableRejected"] for v in links.values())}
+
+
+def score(run, arm=None, clients=4, gpu_query=None, timers=None):
     run = os.path.abspath(run)
+    early = False
+    if timers is not None:
+        from p2p_retry_timing import parse_timers, token_of
+        values = parse_timers(timers)
+        early = bool(values[2])
     result = {"run": os.path.basename(run), "runDir": run, "arm": arm, "problems": []}
     flow = load_json(os.path.join(run, "flow-summary.json"))
     health = load_json(os.path.join(run, "native-network-health.json"))
@@ -217,10 +470,11 @@ def score(run, arm=None, clients=4, gpu_query=None):
         result["missionObservedS"] = {f"c{c['client']}": c.get("missionObservedSeconds") for c in health.get("clients", [])}
 
     links, span, malformed = {}, 0.0, 0
+    result["reliableDelivery"] = result["nakAcceptance"] = result["delivery"] = None
     if os.path.exists(trace_path):
-        rows = []
+        rows, traced = [], []
         with open(trace_path, encoding="utf-8") as f:
-            for line in f:
+            for n, line in enumerate(f):
                 if not line.strip():
                     continue
                 try:
@@ -228,27 +482,76 @@ def score(run, arm=None, clients=4, gpu_query=None):
                 except ValueError:
                     malformed += 1
                     continue
-                if "transport" in r and r.get("disposition", "forwarded") == "forwarded":
-                    rows.append(r)
+                if "transport" in r:
+                    r.setdefault("packetId", f"row{n}")
+                    traced.append(r)
+                    if r.get("disposition", "forwarded") == "forwarded":
+                        rows.append(r)
         if rows:
             span = (rows[-1]["tsUnixMs"] - rows[0]["tsUnixMs"]) / 1000
         ports = load_ports(run)
-        streams = collections.defaultdict(list)
+        streams, all_streams = collections.defaultdict(list), collections.defaultdict(list)
         for r in rows:
             streams[(r["source"].rsplit(":", 1)[1], r["target"].rsplit(":", 1)[1])].append(r)
+        for r in traced:
+            all_streams[(r["source"].rsplit(":", 1)[1], r["target"].rsplit(":", 1)[1])].append(r)
+        flows = {}
         for (src, dst), packets in streams.items():
-            links[f"{ports.get(src, src)}->{ports.get(dst, dst)}"] = analyse_link(packets)
+            name = f"{ports.get(src, src)}->{ports.get(dst, dst)}"
+            links[name] = analyse_link(delivered(packets), early)
+            flows[name] = reliable_flow(all_streams[(src, dst)], delivered(packets))
+        for (src, dst), packets in all_streams.items():  # links whose every copy was dropped
+            name = f"{ports.get(src, src)}->{ports.get(dst, dst)}"
+            if name not in flows:
+                flows[name] = reliable_flow(packets, [])
+        raws = {"stock": {}, "early": {}}
+        for key, sent_rows in all_streams.items():
+            name = f"{ports.get(key[0], key[0])}->{ports.get(key[1], key[1])}"
+            order = delivered(streams.get(key, []))
+            for tag, flag in (("stock", False), ("early", True)):
+                raws[tag][name] = state_delivery(sent_rows, replay_link(order, flag)["accepted"])
+        raws["used"] = raws["early" if early else "stock"]
+        result["delivery"] = {"rule": "early" if early else "stock"} | {
+            out_key: {"total": delivery_summary(merge_delivery(raws[tag].values())),
+                      "perLink": {n: delivery_summary(v) for n, v in sorted(raws[tag].items())}}
+            for out_key, tag in (("used", "used"), ("modeledStock", "stock"), ("modeledEarly", "early"))}
+        delays = sorted(d for f in flows.values() for d in f["delays"])
+        result["reliableDelivery"] = {
+            "count": len(delays), "p50Ms": percentile(delays, 50), "p95Ms": percentile(delays, 95),
+            "p99Ms": percentile(delays, 99), "maxMs": delays[-1] if delays else 0,
+            "stamps": sum(f["stamps"] for f in flows.values()),
+            "undelivered": sum(f["undelivered"] for f in flows.values()),
+            "reliableRetransmitCopies": sum(f["retransmitCopies"] for f in flows.values()),
+            "reliableBytes": sum(f["bytes"] for f in flows.values())}
+        nak = {k: sum(f["nak"][k] for f in flows.values()) for k in ("equal", "ahead", "behind", "noExpectation")}
+        result["nakAcceptance"] = nak | {"perLink": {n: f["nak"] for n, f in sorted(flows.items()) if any(f["nak"].values())}}
     result["traceSpanS"] = span
     result["links"] = dict(sorted(links.items()))
     totals = collections.Counter()
     for v in links.values():
-        for k in ("futureStampedGaps", "unreliableRejected", "duplicateReliable", "reliableMessages", "reliableHeld"):
+        for k in ("futureStampedGaps", "unreliableRejected", "duplicateReliable", "reliableMessages", "reliableHeld",
+                  "blackouts", "blackoutTotalMs", "blackoutsOver500Ms"):
             totals[k] += v[k]
     result["totals"] = dict(totals)
     result["maxHoldMs"] = max((v["holdMaxMs"] for v in links.values()), default=0)
+    result["maxBlackoutMs"] = max((v["blackoutMaxMs"] for v in links.values()), default=0)
+    link_minutes = len(links) * span / 60.0
+    result["blackoutSPerLinkMinute"] = round(totals["blackoutTotalMs"] / 1000.0 / link_minutes, 4) if link_minutes else None
+    # Both rules on the same trace, whatever arm ran; the legacy fields above follow the run's own rule.
+    result["earlyModel"] = early
+    result["modeledStock"] = modeled_summary(links, "modeledStock", link_minutes)
+    result["modeledEarly"] = modeled_summary(links, "modeledEarly", link_minutes)
+    inputs = load_json(os.path.join(run, "flow-inputs.json")) or {}
+    result["impair"] = inputs.get("impair") or ""
+    final = load_json(os.path.join(run, "relay-impairment-final.json"))
+    result["impairment"] = (final or {}).get("impairment")
     result["worstLink"] = max(links, key=lambda k: links[k]["futureStampedGaps"]) if links else None
 
     result["fix"], result["fixPerClient"] = fix_state(run)
+    if timers is not None:
+        from p2p_retry_timing import verify_run
+        result["timers"] = token_of(*values)
+        result["timerEvidence"] = verify_run(run, result["timers"], clients)
     start, end = run_window(run)
     result["crashes"] = crash_evidence(run, start, end)
     # None means the event log could not be read: evidence unavailable, never
@@ -271,6 +574,9 @@ def score(run, arm=None, clients=4, gpu_query=None):
         incomplete.append("harness capture-completeness check missing or failed")
     if result["gpuEvents"] is None:
         incomplete.append("GPU event evidence unavailable")
+    if result["impair"] and not (result["impairment"] or {}).get("matched"):
+        # The spec never reached the relay, or the relay never applied it.
+        incomplete.append("impairment counters missing or nothing impaired")
 
     if incomplete:
         result["class"] = "INCOMPLETE"
@@ -284,14 +590,77 @@ def score(run, arm=None, clients=4, gpu_query=None):
         # log agreeing with it.
         result["class"] = "ARM_MISMATCH"
         result["problems"].append(f"intended {arm}, clients {result['fixPerClient']}")
+    elif timers is not None and result["timerEvidence"]["status"] != "verified":
+        result["class"] = "ARM_MISMATCH"
+        result["problems"].append(f"retry timer evidence mismatch: {result['timerEvidence']['clients']}")
     elif result["gameplayVerdict"] != "PASS":
         result["class"] = "FLOW_FAIL"
         result["problems"] += result["gameplayFailures"]
+    elif result["impair"]:
+        result["class"] = "IMPAIRED_OK"
     elif arm == "on":
         result["class"] = "STRICT_PASS" if totals["futureStampedGaps"] == 0 else "LOSS"
     else:
         result["class"] = "REPRODUCED" if totals["futureStampedGaps"] else "NOT_REPRODUCED"
     return result
+
+
+def pct(x):
+    return "n/a" if x is None else f"{100 * x:.2f}%"
+
+
+def delivery_report(scores):
+    """(summary rows, markdown lines) for the hit-registration and warp proxies
+    of every score that has them. Rows are grouped by impairment, arm and
+    timers. Counts add up across runs and the ratio comes from the sums; the
+    percentile, maximum and latency columns are the worst single run (the
+    per-run samples are not kept in the score files)."""
+    groups = collections.OrderedDict()
+    per_run = []
+    for s in scores:
+        d = ((s.get("delivery") or {}).get("used") or {}).get("total")
+        if not d:
+            continue
+        per_run.append((s, d))
+        g = groups.setdefault((s.get("impair") or "", s.get("arm") or "none", s.get("timers") or ""), [])
+        g.append(d)
+    rows = []
+    for (impair, arm, timers), ds in groups.items():
+        su, sp, ug = ([d[k] for d in ds] for k in ("stateUpdates", "shotPackets", "updateGaps"))
+        sent, got = sum(x["sent"] for x in su), sum(x["delivered"] for x in su)
+        ssent, sgot = sum(x["sent"] for x in sp), sum(x["delivered"] for x in sp)
+        rows.append({
+            "impair": impair, "arm": arm, "timers": timers, "runs": len(ds),
+            "stateSent": sent, "stateDelivered": got, "stateDeliveryRatio": ratio(got, sent),
+            "shotSent": ssent, "shotDelivered": sgot, "shotLost": ssent - sgot, "shotDeliveryRatio": ratio(sgot, ssent),
+            "shotLatencyP50MsWorstRun": max(x["latencyP50Ms"] for x in sp),
+            "shotLatencyP95MsWorstRun": max(x["latencyP95Ms"] for x in sp),
+            "gapP95MsWorstRun": max(x["p95Ms"] for x in ug), "gapP99MsWorstRun": max(x["p99Ms"] for x in ug),
+            "gapMaxMs": max(x["maxMs"] for x in ug),
+            "gapsOver250Ms": sum(x["over250Ms"] for x in ug), "gapsOver500Ms": sum(x["over500Ms"] for x in ug),
+            "noPayload": sum(d["noPayload"] for d in ds)})
+    lines = []
+    if rows:
+        lines += ["", "Hit-registration and warp proxies (arm rule, `_` state packets; ratios from summed counts, "
+                      "latency and gap percentiles are the worst single run):", "",
+                  "| Impairment | Arm | Timers ms | Runs | State pkts delivered | Shot pkts lost / sent | Shot delivery | "
+                  "Shot latency p50/p95 ms | Gap p95/p99/max ms | Gaps >250 ms | Gaps >500 ms | No payload |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+        for r in rows:
+            lines.append(f"| `{r['impair']}` | {r['arm']} | {r['timers'] or 'unspecified'} | {r['runs']} | "
+                         f"{r['stateDelivered']}/{r['stateSent']} ({pct(r['stateDeliveryRatio'])}) | "
+                         f"{r['shotLost']}/{r['shotSent']} | {pct(r['shotDeliveryRatio'])} | "
+                         f"{r['shotLatencyP50MsWorstRun']:.0f}/{r['shotLatencyP95MsWorstRun']:.0f} | "
+                         f"{r['gapP95MsWorstRun']:.0f}/{r['gapP99MsWorstRun']:.0f}/{r['gapMaxMs']:.0f} | "
+                         f"{r['gapsOver250Ms']} | {r['gapsOver500Ms']} | {r['noPayload']} |")
+        lines += ["", "| # | Run | Arm | State delivery | Shot pkts lost / sent | Shot latency p95 ms | Gap p99 / max ms | "
+                      "Gaps >250 / >500 ms |", "|---|---|---|---|---|---|---|---|"]
+        for s, d in per_run:
+            su, sp, ug = d["stateUpdates"], d["shotPackets"], d["updateGaps"]
+            lines.append(f"| {s.get('index')} | {s.get('run')} | {s.get('arm')} | {pct(su['deliveryRatio'])} | "
+                         f"{sp['lost']}/{sp['sent']} | {sp['latencyP95Ms']:.0f} | {ug['p99Ms']:.0f} / {ug['maxMs']:.0f} | "
+                         f"{ug['over250Ms']} / {ug['over500Ms']} |")
+    return rows, lines
 
 
 INFRA_CLASSES = ("INCOMPLETE", "CRASH", "GPU", "ARM_MISMATCH", "FLOW_FAIL", "UNSCORED")
@@ -330,6 +699,11 @@ def aggregate(matrix):
                 problems.append(f"planned run {p['index']} ({p['arm']} p{p['pass']} {p['case']}) scored {len(got)} times")
             elif got[0].get("run") != p["run"] or got[0].get("arm") != p["arm"]:
                 problems.append(f"planned run {p['index']} scored as {got[0].get('run')} arm {got[0].get('arm')}")
+            elif p.get("timers") and (got[0].get("timers") != p["timers"] or
+                                      (got[0].get("timerEvidence") or {}).get("status") != "verified"):
+                problems.append(f"planned run {p['index']} lacks verified timers {p['timers']}")
+            elif p.get("timers") and (got[0].get("impair") or "") != (p.get("impair") or ""):
+                problems.append(f"planned run {p['index']} impairment differs from its timer comparison arm")
         extra = sorted(set(by_index) - {p["index"] for p in plan})
         if extra:
             problems.append(f"scores outside the plan: {extra}")
@@ -342,6 +716,8 @@ def aggregate(matrix):
         c[s["class"]] += 1
         for k, v in s.get("totals", {}).items():
             c[k] += v
+    if any(p.get("impair") or p.get("timers") for p in plan):
+        return aggregate_impaired(matrix, plan, scores, problems)
     planned_arms = sorted({p["arm"] for p in plan})
     for arm in planned_arms:
         if not by_arm[arm]["runs"]:
@@ -356,6 +732,7 @@ def aggregate(matrix):
         comparison = "REPRODUCED" if off["REPRODUCED"] else "NOT_REPRODUCED"
     else:
         comparison = "NO_CONTROL"
+    delivery_rows, delivery_lines = delivery_report(scores)
     summary = {
         "matrix": matrix,
         "verdict": "PASS" if acceptance == "PASS" and comparison == "REPRODUCED" else "FAIL",
@@ -367,6 +744,7 @@ def aggregate(matrix):
         "planned": len(plan), "scored": len(scores), "problems": problems,
         "stockReproduced": f"{off['REPRODUCED']}/{off['runs']}",
         "byArm": {k: dict(v) for k, v in by_arm.items()},
+        "delivery": delivery_rows,
         "runs": [{k: s.get(k) for k in ("index", "run", "case", "pass", "arm", "class", "flowVerdict", "gameplayVerdict",
                                         "healthStatus", "traceSpanS", "maxHoldMs", "worstLink", "gpuEvents", "problems")}
                  | {"gaps": s.get("totals", {}).get("futureStampedGaps"),
@@ -395,6 +773,96 @@ def aggregate(matrix):
         lines.append(f"| {r['index']} | {r['run']} | {r['arm']} | {r['class']} | {r['gameplayVerdict']} | {r['healthStatus']} | "
                      f"{(r['traceSpanS'] or 0):.0f} | {r['gaps']} | {r['held']}/{r['reliable']} | {r['maxHoldMs']} | "
                      f"{r['worstLink']} | {r['gpuEvents']} | {notes.replace('|', '/')} |")
+    lines += delivery_lines
+    with open(os.path.join(matrix, "summary.md"), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print("\n".join(lines))
+    return summary
+
+
+HARD_FAIL_CLASSES = ("INCOMPLETE", "CRASH", "GPU", "ARM_MISMATCH", "UNSCORED")
+
+
+def aggregate_impaired(matrix, plan, scores, problems):
+    """An impairment matrix: every fix-ON run must stay playable (IMPAIRED_OK)
+    and no stock-control run may fail for infrastructure reasons. A stock run
+    whose gameplay fails under impairment is evidence, not a failure. The
+    arms are then compared per impairment profile."""
+    groups = collections.OrderedDict()
+    for p in plan:
+        groups.setdefault((p.get("impair") or "", p["arm"], p.get("timers") or ""), collections.Counter())
+    for s in scores:
+        c = groups.setdefault((s.get("impair") or "", s.get("arm") or "none", s.get("timers") or ""), collections.Counter())
+        c["runs"] += 1
+        c[s["class"]] += 1
+        for k, v in s.get("totals", {}).items():
+            c[k] += v
+        c["linkMinutes"] += len(s.get("links") or {}) * (s.get("traceSpanS") or 0) / 60.0
+        c["maxBlackoutMs"] = max(c["maxBlackoutMs"], s.get("maxBlackoutMs") or 0)
+        imp = s.get("impairment") or {}
+        c["relayMatched"] += imp.get("matched", 0)
+        c["relayDropped"] += sum(imp.get(k, 0) for k in ("dropped_loss", "dropped_outage", "dropped_queue"))
+    for s in scores:
+        wanted = "IMPAIRED_OK" if s.get("impair") else "STRICT_PASS"
+        if s.get("arm") == "on" and s["class"] != wanted:
+            problems.append(f"fix-ON run {s.get('index')} ({s.get('impair')}) is {s['class']}")
+        if s.get("arm") == "off" and s["class"] in HARD_FAIL_CLASSES:
+            problems.append(f"stock run {s.get('index')} ({s.get('impair')}) failed for infrastructure: {s['class']}")
+    rows = []
+    for (impair, arm, timers), c in groups.items():
+        lm = c["linkMinutes"]
+        rows.append({
+            "impair": impair, "arm": arm, "runs": c["runs"],
+            "timers": timers,
+            "classes": {k: v for k, v in c.items() if k.isupper()},
+            "relayDropPct": round(100.0 * c["relayDropped"] / c["relayMatched"], 2) if c["relayMatched"] else None,
+            "gapsPer1000Reliable": round(1000.0 * c["futureStampedGaps"] / c["reliableMessages"], 2) if c["reliableMessages"] else None,
+            "blackoutSPerLinkMinute": round(c["blackoutTotalMs"] / 1000.0 / lm, 4) if lm else None,
+            "blackoutsOver500MsPerLinkMinute": round(c["blackoutsOver500Ms"] / lm, 4) if lm else None,
+            "maxBlackoutMs": c["maxBlackoutMs"],
+            "duplicateReliable": c["duplicateReliable"],
+            "reliableMessages": c["reliableMessages"],
+        })
+    acceptance = "PASS" if not problems else "FAIL"
+    delivery_rows, delivery_lines = delivery_report(scores)
+    summary = {
+        "matrix": matrix, "kind": "impairment",
+        "delivery": delivery_rows,
+        "verdict": acceptance, "acceptance": acceptance,
+        "acceptanceRule": "plan complete; intended timer arms verified when specified; every fix-ON impaired run IMPAIRED_OK "
+                          "(complete capture, impairment applied, no crash/GPU event, gameplay PASS), clean run STRICT_PASS; "
+                          "no stock-control infrastructure failure. Native-health qualification remains separate.",
+        "planned": len(plan), "scored": len(scores), "problems": problems,
+        "groups": rows,
+        "runs": [{k: s.get(k) for k in ("index", "run", "case", "pass", "arm", "impair", "timers", "timerEvidence", "class", "gameplayVerdict",
+                                        "healthStatus", "traceSpanS", "maxBlackoutMs", "blackoutSPerLinkMinute",
+                                        "worstLink", "gpuEvents", "problems")}
+                 | {"gaps": s.get("totals", {}).get("futureStampedGaps"),
+                    "longBlackouts": s.get("totals", {}).get("blackoutsOver500Ms"),
+                    "crashes": len(s.get("crashes") or [])} for s in scores],
+    }
+    with open(os.path.join(matrix, "summary.json"), "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=1)
+    lines = ["# P2P impairment matrix", "",
+             f"Matrix: `{os.path.basename(os.path.normpath(matrix))}`, {len(scores)}/{len(plan)} planned runs scored", "",
+             f"**Verdict: {acceptance}**", "", f"- Acceptance: {summary['acceptanceRule']}",
+             "- Blackout: a receiver rejecting a peer's updates as future-stamped until it next accepts one."]
+    lines += [f"- Problem: {p}" for p in problems]
+    lines += ["", "| Impairment | Arm | Timers ms | Runs | Classes | Relay drop % | Gaps / 1000 reliable | Blackout s / link-min | "
+              ">=500 ms blackouts / link-min | Max blackout ms | Duplicates / reliable |", "|---|---|---|---|---|---|---|---|---|---|---|"]
+    for r in rows:
+        classes = ", ".join(f"{k} {v}" for k, v in sorted(r["classes"].items()))
+        lines.append(f"| `{r['impair']}` | {r['arm']} | {r['timers'] or 'unspecified'} | {r['runs']} | {classes} | {r['relayDropPct']} | "
+                     f"{r['gapsPer1000Reliable']} | {r['blackoutSPerLinkMinute']} | {r['blackoutsOver500MsPerLinkMinute']} | "
+                     f"{r['maxBlackoutMs']:.0f} | {r['duplicateReliable']} / {r['reliableMessages']} |")
+    lines += ["", "| # | Run | Arm | Impairment | Class | Gameplay | Span s | Gaps | Blackout s/link-min | Max blackout ms | "
+              "GPU | Notes |", "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for r in summary["runs"]:
+        notes = "; ".join(r.get("problems") or []) + (f" {r['crashes']} crash record(s)" if r.get("crashes") else "")
+        lines.append(f"| {r['index']} | {r['run']} | {r['arm']} | `{r['impair']}` | {r['class']} | {r['gameplayVerdict']} | "
+                     f"{(r['traceSpanS'] or 0):.0f} | {r['gaps']} | {r['blackoutSPerLinkMinute']} | "
+                     f"{(r['maxBlackoutMs'] or 0):.0f} | {r['gpuEvents']} | {notes.replace('|', '/')} |")
+    lines += delivery_lines
     with open(os.path.join(matrix, "summary.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     print("\n".join(lines))
@@ -408,16 +876,27 @@ def main():
     s.add_argument("run")
     s.add_argument("--arm", choices=("on", "off"))
     s.add_argument("--clients", type=int, default=4)
+    s.add_argument("--timers", help="intended first/interval[+early] ms; requires matching archived INI and native apply logs")
     s.add_argument("--case", default=None)
     s.add_argument("--pass-index", type=int, default=None)
     s.add_argument("--index", type=int, default=None, help="position in the matrix plan")
+    s.add_argument("--impair", default=None, help="the plan's impairment spec (checked against flow-inputs.json)")
     s.add_argument("--out")
     a = sub.add_parser("aggregate")
     a.add_argument("matrix")
     args = ap.parse_args()
     if args.cmd == "score":
-        r = score(args.run, args.arm, args.clients)
+        if args.timers is not None:
+            from p2p_retry_timing import parse_timers
+            try:
+                parse_timers(args.timers)
+            except ValueError as error:
+                ap.error(str(error))
+        r = score(args.run, args.arm, args.clients, timers=args.timers)
         r["case"], r["pass"], r["index"] = args.case, args.pass_index, args.index
+        if args.impair is not None and args.impair != r["impair"]:
+            r["class"] = "ARM_MISMATCH"
+            r["problems"].append(f"planned impairment {args.impair!r}, run used {r['impair']!r}")
         text = json.dumps(r, indent=1)
         if args.out:
             os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -426,7 +905,13 @@ def main():
         t = r["totals"]
         print(f"[score] {r['run']}: {r['class']} arm={r['arm']} fix={r['fix']} flow={r['flowVerdict']} "
               f"health={r['healthStatus']} gaps={t.get('futureStampedGaps', 0)} held={t.get('reliableHeld', 0)}/"
-              f"{t.get('reliableMessages', 0)} gpu={r['gpuEvents']} crashes={len(r['crashes'])}")
+              f"{t.get('reliableMessages', 0)} blackout={t.get('blackoutTotalMs', 0) / 1000:.1f}s "
+              f"max={r['maxBlackoutMs']:.0f}ms gpu={r['gpuEvents']} crashes={len(r['crashes'])}")
+        d = ((r.get("delivery") or {}).get("used") or {}).get("total")
+        if d:
+            print(f"[score] state {pct(d['stateUpdates']['deliveryRatio'])} shots lost {d['shotPackets']['lost']}/"
+                  f"{d['shotPackets']['sent']} gaps>250ms={d['updateGaps']['over250Ms']} >500ms={d['updateGaps']['over500Ms']} "
+                  f"max={d['updateGaps']['maxMs']:.0f}ms")
     else:
         aggregate(args.matrix)
 

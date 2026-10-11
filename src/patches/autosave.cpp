@@ -9,6 +9,7 @@
 // reverse-engineering/testing. OpenShim does not link or require EXU/Lua.
 
 #include "autosave.h"
+#include "hook_engine.h"
 #include "engine_globals.h"
 #include "autosave_gate.h"
 #include "BZROpenShim.h"
@@ -34,21 +35,57 @@
 
 namespace BZROpenShim
 {
+    namespace Hooks
+    {
+        bool VtableTypeNameMatches(uintptr_t vtableAddress, const char* expectedName);
+    }
+
     namespace
     {
         using NativeSaveGameFn = bool(__cdecl*)(char*, int);
         using WorldUpdateRenderQueueFn = void(__thiscall*)(void*, void*);
         using MissionSaveFlag = volatile uint8_t*;
 
-        constexpr uintptr_t kIsNetGameAddr = 0x00917F7B;
-        constexpr uintptr_t kEditModeAddr = 0x009454B8;
-        constexpr uintptr_t kQueuedLoadNameBufferAddr = 0x00915540;
+        // engine_addresses rows, bound together in AutoSaveAddressesBound().
+        uintptr_t g_IsNetGameAddr = 0;
+        uintptr_t g_EditModeAddr = 0;
+        uintptr_t g_QueuedLoadNameBufferAddr = 0;
+        uintptr_t g_CurrentAiMissionAddr = 0;
         constexpr size_t kQueuedLoadNameBufferLen = 16;
 
-        // Existing patch-catalog slot for LegacyWorld::updateRenderQueue.
+        // Existing patch-catalog slot for LegacyWorld::updateRenderQueue:
+        // slot 32 of the DynamicGeometry vtable, checked by RTTI name.
         // Installed after RunPatcher() so this chains either stock BZR or the
         // OpenShim wrapper already present in the slot.
-        constexpr uintptr_t kWorldUpdateRenderQueueVtableSlot = 0x00892728;
+        uintptr_t g_WorldUpdateRenderQueueVtableSlot = 0;
+        constexpr size_t kWorldUpdateRenderQueueVtableIndex = 32;
+
+        bool AutoSaveAddressesBound()
+        {
+            static const bool bound = [] {
+                uint32_t vtable = 0;
+                const HookEngine::EngineRow rows[] = {
+                    { "IsNetGameFlag", &g_IsNetGameAddr },
+                    { "TerrainEditMode", &g_EditModeAddr },
+                    { "QueuedLoadNameBuffer", &g_QueuedLoadNameBufferAddr },
+                    { "CurrentAiMission", &g_CurrentAiMissionAddr },
+                    { "DynamicGeometryVtable", &vtable },
+                };
+                if (!HookEngine::BindEngineRows("AutoSave", rows))
+                    return false;
+                if (!Hooks::VtableTypeNameMatches(vtable, ".?AVDynamicGeometry@@"))
+                {
+                    LogShimA(LogLevel::Warn, "autosave",
+                             "DynamicGeometry RTTI mismatch at vtable 0x%08X; AutoSave stands down",
+                             static_cast<unsigned>(vtable));
+                    return false;
+                }
+                g_WorldUpdateRenderQueueVtableSlot =
+                    vtable + kWorldUpdateRenderQueueVtableIndex * sizeof(void*);
+                return true;
+            }();
+            return bound;
+        }
 
         constexpr DWORD kDefaultIntervalSeconds = 120;
         constexpr DWORD kDefaultInitialDelaySeconds = 10;
@@ -122,7 +159,7 @@ namespace BZROpenShim
             __try
             {
                 const auto* text =
-                    reinterpret_cast<const volatile char*>(kQueuedLoadNameBufferAddr);
+                    reinterpret_cast<const volatile char*>(g_QueuedLoadNameBufferAddr);
                 for (size_t index = 0; index < kQueuedLoadNameBufferLen; ++index)
                 {
                     const char ch = text[index];
@@ -392,7 +429,7 @@ namespace BZROpenShim
         bool IsTerrainEditActive() noexcept
         {
             uint8_t editMode = 0;
-            if (SafeReadByte(kEditModeAddr, editMode) && editMode != 0)
+            if (SafeReadByte(g_EditModeAddr, editMode) && editMode != 0)
                 return true;
             return false;
         }
@@ -416,7 +453,7 @@ namespace BZROpenShim
             uint8_t isNetGame = 0;
             void* userObject = nullptr;
             const ShellUiState ui = ReadShellUiState();
-            if (!SafeReadByte(kIsNetGameAddr, isNetGame) ||
+            if (!SafeReadByte(g_IsNetGameAddr, isNetGame) ||
                 !SafeReadPointer(EngineGlobals::UserObjectSlot(), userObject) ||
                 !ui.readable)
             {
@@ -711,7 +748,7 @@ namespace BZROpenShim
 
         bool InstallMainThreadHook()
         {
-            auto* const slot = reinterpret_cast<PVOID volatile*>(kWorldUpdateRenderQueueVtableSlot);
+            auto* const slot = reinterpret_cast<PVOID volatile*>(g_WorldUpdateRenderQueueVtableSlot);
             void* current = nullptr;
             __try
             {
@@ -736,7 +773,7 @@ namespace BZROpenShim
 
             DWORD oldProtect = 0;
             if (!VirtualProtect(
-                    reinterpret_cast<void*>(kWorldUpdateRenderQueueVtableSlot),
+                    reinterpret_cast<void*>(g_WorldUpdateRenderQueueVtableSlot),
                     sizeof(void*), PAGE_READWRITE, &oldProtect))
             {
                 LogShimA(LogLevel::Error, "autosave", "VirtualProtect failed for update hook (err=%lu)", GetLastError());
@@ -748,11 +785,11 @@ namespace BZROpenShim
 
             DWORD ignored = 0;
             VirtualProtect(
-                reinterpret_cast<void*>(kWorldUpdateRenderQueueVtableSlot),
+                reinterpret_cast<void*>(g_WorldUpdateRenderQueueVtableSlot),
                 sizeof(void*), oldProtect, &ignored);
             FlushInstructionCache(
                 GetCurrentProcess(),
-                reinterpret_cast<void*>(kWorldUpdateRenderQueueVtableSlot),
+                reinterpret_cast<void*>(g_WorldUpdateRenderQueueVtableSlot),
                 sizeof(void*));
 
             if (observed != current)
@@ -777,12 +814,12 @@ namespace BZROpenShim
             if (!g_hookInstalled || !g_previousWorldUpdateRenderQueue)
                 return;
 
-            auto* const slot = reinterpret_cast<PVOID volatile*>(kWorldUpdateRenderQueueVtableSlot);
+            auto* const slot = reinterpret_cast<PVOID volatile*>(g_WorldUpdateRenderQueueVtableSlot);
             void* const hook = reinterpret_cast<void*>(&AutoSaveWorldUpdateRenderQueueHook);
 
             DWORD oldProtect = 0;
             if (!VirtualProtect(
-                    reinterpret_cast<void*>(kWorldUpdateRenderQueueVtableSlot),
+                    reinterpret_cast<void*>(g_WorldUpdateRenderQueueVtableSlot),
                     sizeof(void*), PAGE_READWRITE, &oldProtect))
             {
                 return;
@@ -795,7 +832,7 @@ namespace BZROpenShim
 
             DWORD ignored = 0;
             VirtualProtect(
-                reinterpret_cast<void*>(kWorldUpdateRenderQueueVtableSlot),
+                reinterpret_cast<void*>(g_WorldUpdateRenderQueueVtableSlot),
                 sizeof(void*), oldProtect, &ignored);
 
             g_hookInstalled = false;
@@ -807,6 +844,8 @@ namespace BZROpenShim
     {
         if (g_hookInstalled)
             return true;
+        if (!AutoSaveAddressesBound())
+            return false;
 
         g_gameDirectory = GetGameDirectory();
         if (g_gameDirectory.empty())
@@ -867,12 +906,12 @@ namespace BZROpenShim
             // Re-check the gate rather than inheriting the caller's: the settings
             // page is reachable independently of it, and InitializeAutoSave
             // resolves version-specific addresses.
-            if (!IsCompatibleGameVersion())
+            if (!AutoSaveAddressesBound())
             {
                 LogShimA(
                     LogLevel::Warn,
                     "autosave",
-                    "Cannot enable AutoSave: this build did not pass the version check");
+                    "Cannot enable AutoSave: its engine addresses do not bind on this build");
                 return false;
             }
             return InitializeAutoSave();
@@ -1004,6 +1043,21 @@ namespace BZROpenShim
                     IsTerrainEditActive() ? 1u : 0u);
                 s_lastDeferLogTick = now;
                 s_lastDeferReason = gate.reason;
+            }
+            return;
+        }
+
+        // SaveGame serializes the current AiMission without a null check, and
+        // the player object can exist while that global is still (or already)
+        // null: observed as a 0xC0000005 at 0x005D7593 about 10 s into a mission.
+        void* aiMission = nullptr;
+        if (!SafeReadPointer(g_CurrentAiMissionAddr, aiMission) || !aiMission)
+        {
+            static ULONGLONG s_lastNoMissionLogTick = 0;
+            if (now - s_lastNoMissionLogTick >= 5000ULL)
+            {
+                LogShimA(LogLevel::Debug, "autosave", "Deferring autosave: no current AiMission yet");
+                s_lastNoMissionLogTick = now;
             }
             return;
         }
