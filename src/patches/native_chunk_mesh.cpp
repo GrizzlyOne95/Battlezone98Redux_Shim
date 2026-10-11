@@ -746,7 +746,7 @@ struct PhaseClock
 #define GIB_PHASE_BEGIN PhaseClock phaseClock
 #define GIB_PHASE(n) phaseClock.mark(n)
 // Cap outcomes: rings at full / 0.6 / 0.3 strength, fan (not eligible), fan (folded).
-double g_gibCapStats[8] = {};
+double g_gibCapStats[9] = {};
 #define CAP_STAT(i) (g_gibCapStats[i] += 1.0)
 #else
 #define CAP_STAT(i) ((void)0)
@@ -1374,6 +1374,7 @@ enum CapZone : size_t
 };
 struct CapMesh
 {
+    uint32_t ringLoops = 0, earLoops = 0, fanLoops = 0; // how each cut loop was closed
     std::vector<CapVertex> vertices;
     std::vector<uint32_t> indices[kZoneCount];
     size_t triangles() const
@@ -1618,8 +1619,282 @@ void addFanCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, f
         cap.indices[kZoneMuscle].push_back(p1);
     }
 }
+// ---- Ear-clipped caps -------------------------------------------------------
+// Loops that rings cannot follow (not star-shaped, non-planar, tiny, three
+// points) are triangulated as the polygons they are: projected into the cap
+// plane (Newell normal) and ear-clipped, so a simple loop of n points gives
+// exactly n-2 triangles and no flaps. Where it does not self-intersect, a thin
+// skin band and a fat band are inset along the rim edges; otherwise the whole
+// loop is muscle.
+struct P2
+{
+    float x, y;
+};
+float cross2(const P2 &o, const P2 &a, const P2 &b)
+{
+    return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+bool segmentsCross(const P2 &a, const P2 &b, const P2 &c, const P2 &d)
+{
+    const float d1 = cross2(a, b, c), d2 = cross2(a, b, d), d3 = cross2(c, d, a), d4 = cross2(c, d, b);
+    return ((d1 > 0) != (d2 > 0)) && ((d3 > 0) != (d4 > 0)) && d1 != 0 && d2 != 0 && d3 != 0 && d4 != 0;
+}
+// Does the closed polygon cross itself? (O(n^2); callers cap n.) On a hit,
+// `first`/`second` are the indices of the two crossing edges' start points.
+bool selfIntersects(const std::vector<P2> &poly, size_t *first = nullptr, size_t *second = nullptr)
+{
+    const size_t n = poly.size();
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = i + 2; j < n; ++j)
+        {
+            if (i == 0 && j == n - 1)
+                continue;
+            if (segmentsCross(poly[i], poly[(i + 1) % n], poly[j], poly[(j + 1) % n]))
+            {
+                if (first)
+                    *first = i;
+                if (second)
+                    *second = j;
+                return true;
+            }
+        }
+    return false;
+}
+// Ear-clips a CCW polygon. Returns index triples into `poly`; empty on failure.
+// Collinear vertices are removed without a triangle once no true ear remains.
+std::vector<std::array<uint32_t, 3>> earClip(const std::vector<P2> &poly, float epsilon)
+{
+    const size_t n = poly.size();
+    std::vector<std::array<uint32_t, 3>> out;
+    std::vector<uint32_t> idx(n);
+    for (size_t i = 0; i < n; ++i)
+        idx[i] = static_cast<uint32_t>(i);
+    size_t guard = 0;
+    while (idx.size() > 3 && guard++ < n * n + 8)
+    {
+        bool clipped = false;
+        for (size_t k = 0; k < idx.size() && !clipped; ++k)
+        {
+            const size_t m = idx.size();
+            const uint32_t ia = idx[(k + m - 1) % m], ib = idx[k], ic = idx[(k + 1) % m];
+            const P2 &a = poly[ia], &b = poly[ib], &c = poly[ic];
+            if (!(cross2(a, b, c) > epsilon))
+                continue;
+            bool empty = true;
+            for (size_t q = 0; q < m && empty; ++q)
+            {
+                const uint32_t iq = idx[q];
+                if (iq == ia || iq == ib || iq == ic)
+                    continue;
+                const P2 &p = poly[iq];
+                if (cross2(a, b, p) >= -epsilon && cross2(b, c, p) >= -epsilon && cross2(c, a, p) >= -epsilon)
+                    empty = false;
+            }
+            if (!empty)
+                continue;
+            out.push_back({ia, ib, ic});
+            idx.erase(idx.begin() + static_cast<std::ptrdiff_t>(k));
+            clipped = true;
+        }
+        if (clipped)
+            continue;
+        // No ear: drop a collinear/degenerate vertex (no triangle), else fail.
+        bool dropped = false;
+        for (size_t k = 0; k < idx.size() && !dropped; ++k)
+        {
+            const size_t m = idx.size();
+            if (std::abs(cross2(poly[idx[(k + m - 1) % m]], poly[idx[k]], poly[idx[(k + 1) % m]])) <= epsilon)
+            {
+                idx.erase(idx.begin() + static_cast<std::ptrdiff_t>(k));
+                dropped = true;
+            }
+        }
+        if (!dropped)
+            return {};
+    }
+    if (idx.size() == 3 && cross2(poly[idx[0]], poly[idx[1]], poly[idx[2]]) > epsilon)
+        out.push_back({idx[0], idx[1], idx[2]});
+    return out;
+}
+// Returns false when the loop cannot be ear-clipped (self-intersecting or
+// degenerate); `banded` tells whether the inset skin/fat bands were built.
+bool addEarCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, float uvScale, bool wantBands,
+               bool &banded)
+{
+    banded = false;
+    size_t n = points.size();
+    if (n < 3 || n > 300)
+        return false;
+    if (n == 3)
+    {
+        // A triangle is its own triangulation (no allocation: svapcbed has tens
+        // of thousands of these).
+        const size_t base3 = cap.vertices.size();
+        const V tangent3 = normalize3(cross3(normal, std::abs(normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
+        const V bitangent3 = cross3(normal, tangent3);
+        for (const V &p : points)
+            cap.vertices.push_back({p, normal, dot3(p, tangent3) * uvScale, dot3(p, bitangent3) * uvScale});
+        const V face = cross3(sub3(points[1], points[0]), sub3(points[2], points[0]));
+        if (!(dot3(face, face) > 0))
+        {
+            cap.vertices.resize(base3);
+            return false;
+        }
+        const bool flip = dot3(face, normal) < 0;
+        auto &list = cap.indices[kZoneMuscle];
+        list.push_back(static_cast<uint32_t>(base3));
+        list.push_back(static_cast<uint32_t>(base3 + (flip ? 2 : 1)));
+        list.push_back(static_cast<uint32_t>(base3 + (flip ? 1 : 2)));
+        return true;
+    }
+    const V tangent = normalize3(cross3(normal, std::abs(normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
+    const V bitangent = cross3(normal, tangent);
+    std::vector<P2> poly(n);
+    std::vector<float> height(n);
+    float extent = 0;
+    for (size_t i = 0; i < n; ++i)
+    {
+        const V d = sub3(points[i], centre);
+        poly[i] = {dot3(d, tangent), dot3(d, bitangent)};
+        height[i] = dot3(d, normal);
+        extent = std::max(extent, std::max(std::abs(poly[i].x), std::abs(poly[i].y)));
+    }
+    if (!(extent > 1e-6f))
+        return false;
+    std::vector<V> boundary = points;
+    double area2 = 0;
+    for (size_t i = 0; i < n; ++i)
+        area2 += static_cast<double>(poly[i].x) * poly[(i + 1) % n].y - static_cast<double>(poly[(i + 1) % n].x) * poly[i].y;
+    if (area2 < 0)
+    {
+        std::reverse(poly.begin(), poly.end());
+        std::reverse(height.begin(), height.end());
+        std::reverse(boundary.begin(), boundary.end());
+    }
+    const float epsilon = 1e-7f * extent * extent;
+    // A self-crossing loop: remove the sharpest spike vertex among the
+    // vertices of the crossing edges and look again (a handful of times).
+    for (int repair = 0; repair < 8; ++repair)
+    {
+        size_t e0 = 0, e1 = 0;
+        if (!selfIntersects(poly, &e0, &e1))
+            break;
+        if (n <= 3)
+            return false;
+        const size_t candidates[4] = {e0, (e0 + 1) % n, e1, (e1 + 1) % n};
+        size_t worst = candidates[0];
+        float best = 1e30f;
+        for (const size_t c : candidates)
+        {
+            const float turn = std::abs(cross2(poly[(c + n - 1) % n], poly[c], poly[(c + 1) % n]));
+            if (turn < best)
+            {
+                best = turn;
+                worst = c;
+            }
+        }
+        poly.erase(poly.begin() + static_cast<std::ptrdiff_t>(worst));
+        height.erase(height.begin() + static_cast<std::ptrdiff_t>(worst));
+        boundary.erase(boundary.begin() + static_cast<std::ptrdiff_t>(worst));
+        --n;
+    }
+    if (selfIntersects(poly))
+        return false;
+    const auto position = [&](const P2 &p, float h) {
+        return add(add(centre, add(scale3(tangent, p.x), scale3(bitangent, p.y))), scale3(normal, h));
+    };
+    const size_t base = cap.vertices.size();
+    const auto pushVertex = [&](V p) {
+        cap.vertices.push_back({p, normal, dot3(p, tangent) * uvScale, dot3(p, bitangent) * uvScale});
+    };
+    // Rim vertices exactly as given.
+    for (const V &p : boundary)
+        pushVertex(p);
+
+    // Inset rings along the rim edges (skin ~5% of the extent, fat ~8% more),
+    // kept only when each is simple, wound the same way and every band
+    // triangle has positive area.
+    std::vector<std::vector<P2>> insets;
+    std::vector<std::vector<float>> insetHeight;
+    if (wantBands && n >= 5 && n <= 256)
+    {
+        const float depth[2] = {0.05f * extent, 0.13f * extent};
+        for (const float d : depth)
+        {
+            std::vector<P2> ring(n);
+            std::vector<float> h(n);
+            for (size_t i = 0; i < n; ++i)
+            {
+                const P2 &prev = poly[(i + n - 1) % n], &cur = poly[i], &next = poly[(i + 1) % n];
+                const auto left = [](const P2 &a, const P2 &b) {
+                    const float ex = b.x - a.x, ey = b.y - a.y, l = std::sqrt(ex * ex + ey * ey);
+                    return l > 1e-12f ? P2{-ey / l, ex / l} : P2{0, 0};
+                };
+                const P2 l0 = left(prev, cur), l1 = left(cur, next);
+                P2 m{l0.x + l1.x, l0.y + l1.y};
+                const float ml = std::sqrt(m.x * m.x + m.y * m.y);
+                if (ml < 1e-6f)
+                {
+                    ring.clear();
+                    break;
+                }
+                m = {m.x / ml, m.y / ml};
+                const float miter = std::max(0.35f, m.x * l1.x + m.y * l1.y);
+                ring[i] = {cur.x + m.x * d / miter, cur.y + m.y * d / miter};
+                h[i] = height[i] * (d < depth[1] ? 0.7f : 0.45f) - 0.01f * extent;
+            }
+            if (ring.empty() || selfIntersects(ring))
+                break;
+            double a = 0;
+            for (size_t i = 0; i < n; ++i)
+                a += static_cast<double>(ring[i].x) * ring[(i + 1) % n].y - static_cast<double>(ring[(i + 1) % n].x) * ring[i].y;
+            if (a <= 0)
+                break;
+            const std::vector<P2> &outer = insets.empty() ? poly : insets.back();
+            bool ok = true;
+            for (size_t i = 0; i < n && ok; ++i)
+            {
+                const size_t j = (i + 1) % n;
+                ok = cross2(outer[i], outer[j], ring[j]) > epsilon && cross2(outer[i], ring[j], ring[i]) > epsilon;
+            }
+            if (!ok)
+                break;
+            insets.push_back(std::move(ring));
+            insetHeight.push_back(std::move(h));
+        }
+    }
+    const std::vector<P2> &inner = insets.empty() ? poly : insets.back();
+    const auto interior = earClip(inner, epsilon);
+    if (interior.empty())
+    {
+        cap.vertices.resize(base);
+        return false;
+    }
+    banded = !insets.empty();
+    // Inset ring vertices follow the rim in order.
+    for (size_t r = 0; r < insets.size(); ++r)
+        for (size_t i = 0; i < n; ++i)
+            pushVertex(position(insets[r][i], insetHeight[r][i]));
+    const auto ringIndex = [&](size_t ring, size_t i) { return static_cast<uint32_t>(base + ring * n + i % n); };
+    const size_t zones[2] = {kZoneSkin, kZoneFat};
+    for (size_t r = 0; r < insets.size(); ++r)
+        for (size_t i = 0; i < n; ++i)
+        {
+            auto &list = cap.indices[zones[r]];
+            list.insert(list.end(), {ringIndex(r, i), ringIndex(r, i + 1), ringIndex(r + 1, i + 1)});
+            list.insert(list.end(), {ringIndex(r, i), ringIndex(r + 1, i + 1), ringIndex(r + 1, i)});
+        }
+    const size_t last = insets.size();
+    for (const auto &t : interior)
+    {
+        const size_t zone = kZoneMuscle;
+        auto &list = cap.indices[zone];
+        list.insert(list.end(), {ringIndex(last, t[0]), ringIndex(last, t[1]), ringIndex(last, t[2])});
+    }
+    return true;
+}
 void addCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, float newellLength, bool limb,
-            bool rings, float uvScale)
+            bool rings, bool bands, float uvScale)
 {
     const size_t n = points.size();
     float radius = 0, planarity = 0;
@@ -1672,6 +1947,7 @@ void addCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, floa
                 if (result == RingResult::Built)
                 {
                     CAP_STAT(attempt < 3 ? attempt : 2);
+                    ++cap.ringLoops;
                     return;
                 }
                 ++attempt;
@@ -1679,7 +1955,20 @@ void addCap(CapMesh &cap, const std::vector<V> &points, V normal, V centre, floa
                     break; // a weaker inset cannot fix the loop's shape; try the next pivot
             }
     }
-    CAP_STAT(ringed ? 4 : 3);
+    // Not ringable: triangulate the polygon itself. The fan from the centroid
+    // is the very last resort (self-intersecting or degenerate loops).
+    if (newellLength > 1e-9f)
+    {
+        bool banded = false;
+        if (addEarCap(cap, points, normal, centre, uvScale, bands, banded))
+        {
+            CAP_STAT(banded ? 4 : 3);
+            ++cap.earLoops;
+            return;
+        }
+    }
+    CAP_STAT(8);
+    ++cap.fanLoops;
     addFanCap(cap, points, normal, centre, uvScale);
 }
 } // namespace
@@ -2016,8 +2305,7 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
                         normal = scale3(normal, -1.0f);
                         std::reverse(points.begin(), points.end());
                     }
-                    addCap(caps, points, normal, center, std::sqrt(dot3(newell, newell)), limb, options.capRings,
-                           options.capUvScale);
+                    addCap(caps, points, normal, center, std::sqrt(dot3(newell, newell)), limb, options.capRings, options.capBands, options.capUvScale);
                 }
                 GIB_PHASE(10); // cap triangles
                 if (caps.triangles() > 1000000)
@@ -2156,6 +2444,9 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
             gib.boneName = bone.name;
             gib.radius = radius;
             gib.capTriangles = static_cast<uint32_t>(caps.triangles());
+            gib.capRingLoops = caps.ringLoops;
+            gib.capEarLoops = caps.earLoops;
+            gib.capFanLoops = caps.fanLoops;
             gib.weapon = isWeapon;
             gibs.push_back(std::move(gib));
             GIB_PHASE(7); // serialize

@@ -585,17 +585,31 @@ void gibTests()
                     !parseCap(plain[0].piece.mesh).has("openshim_gib_flesh_bone"),
                 "the limb pattern is an option; empty disables the bone ring");
 
-        // Plain fan: rings off, and loops that are degenerate stay a fan.
-        GibOptions fan;
-        fan.capRings = false;
+        // Rings off: the loop is ear-clipped as the polygon it is, n-2
+        // triangles over the rim vertices only (no centre vertex, no fan).
+        GibOptions ear;
+        ear.capRings = false;
+        ear.capBands = false;
         std::vector<GibPiece> flat;
-        Require(ExtractGibs(mesh, skeleton, fan, flat, error) && flat[1].capTriangles == 4 &&
-                    flat[0].capTriangles == 4,
-                "ring caps can be switched off for the plain fan");
-        const auto fanCap = parseCap(flat[1].piece.mesh);
-        Require(fanCap.positions.size() == 5 && closedWinding(fanCap, 4) && allFinite(fanCap) &&
-                    fanCap.trianglesByMaterial.size() == 1 && fanCap.has("openshim_gib_flesh"),
-                "the fan is a closed rim plus centre in the muscle material");
+        Require(ExtractGibs(mesh, skeleton, ear, flat, error) && flat[1].capTriangles == 2 &&
+                    flat[0].capTriangles == 2 && flat[1].capEarLoops == 1 && flat[1].capFanLoops == 0 &&
+                    flat[1].capRingLoops == 0,
+                "an ear-clipped simple loop has n-2 triangles and is counted as ear-clipped");
+        const auto earCap = parseCap(flat[1].piece.mesh);
+        Require(earCap.positions.size() == 4 && closedWinding(earCap, 4) && allFinite(earCap) &&
+                    windingMatchesNormals(earCap) && earCap.trianglesByMaterial.size() == 1 &&
+                    earCap.has("openshim_gib_flesh"),
+                "the ear-clipped cap is closed, wound with its normal, in the muscle material");
+        // With bands on (the default) the same loop gets skin and fat insets
+        // where it does not self-intersect; a 4-point loop is too small to inset.
+        GibOptions bandedOptions;
+        bandedOptions.capRings = false;
+        std::vector<GibPiece> banded;
+        Require(ExtractGibs(mesh, skeleton, bandedOptions, banded, error) && banded[1].capEarLoops == 1,
+                "bands are optional on ear-clipped loops");
+        Require(flat[1].capRingLoops == 0 && ExtractGibs(mesh, skeleton, GibOptions{}, flat, error) &&
+                    flat[1].capRingLoops == 1 && flat[1].capFanLoops == 0,
+                "the default close of a square loop is ringed");
         auto tiny = gibFixtureSubs();
         for (auto &sub : tiny)
             for (auto &p : sub.positions)
@@ -603,9 +617,11 @@ void gibTests()
                     c *= 1.5e-3f;
         std::vector<GibPiece> small;
         Require(ExtractGibs(gibFixtureMesh(tiny), skeleton, GibOptions{}, small, error) && small.size() == 3 &&
-                    small[1].capTriangles == 4,
-                "a tiny loop falls back to the fan");
-        // A very non-planar loop (opposite corners lifted: a saddle).
+                    small[1].capTriangles == 2 && small[1].capEarLoops == 1 && small[1].capFanLoops == 0,
+                "a tiny loop is ear-clipped, not fanned");
+        // A very non-planar loop (opposite corners lifted: a saddle): rings
+        // do not apply, but its projection is a simple square, so it is
+        // ear-clipped over the exact rim vertices.
         auto warped = gibFixtureSubs();
         for (auto &sub : warped)
             for (auto &p : sub.positions)
@@ -613,8 +629,8 @@ void gibTests()
                     p[1] = 2.2f;
         std::vector<GibPiece> bent;
         Require(ExtractGibs(gibFixtureMesh(warped), skeleton, GibOptions{}, bent, error) && bent.size() == 3 &&
-                    bent[1].capTriangles == 4 && bent[0].capTriangles == 4,
-                "a very non-planar loop falls back to the fan");
+                    bent[1].capTriangles == 2 && bent[0].capTriangles == 2 && bent[1].capFanLoops == 0,
+                "a very non-planar loop is ear-clipped, not fanned");
     }
 
     GibOptions merge;
@@ -741,6 +757,17 @@ int printGibs(const char *meshPath, const char *skeletonPath)
                     static_cast<double>(gib.piece.center[1]), static_cast<double>(gib.piece.center[2]));
     }
     std::printf("%zu gibs, %u triangles\n", gibs.size(), static_cast<unsigned>(triangles));
+    uint32_t rings = 0, ears = 0, fans = 0;
+    for (const auto &gib : gibs)
+    {
+        rings += gib.capRingLoops;
+        ears += gib.capEarLoops;
+        fans += gib.capFanLoops;
+    }
+    std::printf("cut loops: %u ringed, %u ear-clipped, %u fan\n", rings, ears, fans);
+    // Centroid fans are the very last resort: a real pilot has almost none.
+    if (fans * 10 > rings + ears + fans)
+        return 1;
     // A humanoid must come apart into limbs, not one lump or a hundred bits.
     return gibs.size() >= 6 && gibs.size() <= 32 ? 0 : 1;
 }

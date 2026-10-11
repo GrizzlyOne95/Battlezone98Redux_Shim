@@ -39,7 +39,7 @@ using namespace BZROpenShim::NativeChunks;
 namespace BZROpenShim::NativeChunks
 {
 extern double g_gibPhaseMs[11];
-extern double g_gibCapStats[8]; // native_chunk_mesh.cpp, OPENSHIM_NATIVE_CHUNK_PHASES
+extern double g_gibCapStats[9]; // native_chunk_mesh.cpp, OPENSHIM_NATIVE_CHUNK_PHASES
 }
 namespace fs = std::filesystem;
 
@@ -534,8 +534,10 @@ int main(int argc, char **argv)
             std::printf("  %-14s %9.4f  (%4.1f%%)\n", names[i], g_gibPhaseMs[i] / calls,
                         total > 0 ? 100.0 * g_gibPhaseMs[i] / total : 0.0);
     }
-    std::printf("cap loops: rings full %.0f, rings 0.6 %.0f, rings 0.3 %.0f, fan (ineligible) %.0f, fan (folded) %.0f\n",
-                g_gibCapStats[0], g_gibCapStats[1], g_gibCapStats[2], g_gibCapStats[3], g_gibCapStats[4]);
+    std::printf("cap loops: rings %.0f (full %.0f, 0.6 %.0f, 0.3 %.0f), ear-clipped %.0f (with skin/fat bands %.0f), "
+                "fan %.0f\n",
+                g_gibCapStats[0] + g_gibCapStats[1] + g_gibCapStats[2], g_gibCapStats[0], g_gibCapStats[1],
+                g_gibCapStats[2], g_gibCapStats[3] + g_gibCapStats[4], g_gibCapStats[4], g_gibCapStats[8]);
     std::printf("first fold at full strength: negative area %.0f, tiny area %.0f, steep %.0f\n", g_gibCapStats[5],
                 g_gibCapStats[6], g_gibCapStats[7]);
     std::ostream *csv = &std::cout;
