@@ -106,7 +106,9 @@ bool MakeWorkDir(std::wstring& dir) {
 std::wstring PowerShellPath() {
     wchar_t win[MAX_PATH + 1];
     UINT n = GetWindowsDirectoryW(win, MAX_PATH);
-    if (n == 0 || n > MAX_PATH) return L"powershell.exe";
+    // Only the system copy: a bare "powershell.exe" would be searched for in
+    // this exe's own folder first (often Downloads), where anything can sit.
+    if (n == 0 || n > MAX_PATH) return std::wstring();
     const std::wstring tail = L"\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
     // This is a 32-bit process. Under WOW64 prefer the 64-bit PowerShell
     // (Sysnative) so the script sees the native registry and Program Files.
@@ -114,7 +116,7 @@ std::wstring PowerShellPath() {
     if (GetFileAttributesW(native.c_str()) != INVALID_FILE_ATTRIBUTES) return native;
     std::wstring plain = std::wstring(win) + tail;
     if (GetFileAttributesW(plain.c_str()) != INVALID_FILE_ATTRIBUTES) return plain;
-    return L"powershell.exe";
+    return std::wstring();
 }
 
 // Standard Windows argv quoting (the inverse of CommandLineToArgvW).
@@ -226,7 +228,16 @@ int wmain() {
     }
 
     {
-        std::wstring cmd = Quote(PowerShellPath()) + L" -NoProfile -ExecutionPolicy Bypass -File " + Quote(scriptPath);
+        const std::wstring powershell = PowerShellPath();
+        if (powershell.empty()) {
+            std::printf("Windows PowerShell was not found in the Windows folder.\n");
+            goto done;
+        }
+        // Launched from PowerShell 7, the inherited PSModulePath points at its
+        // modules and Windows PowerShell 5.1 then cannot load Get-FileHash.
+        // Without the variable, 5.1 rebuilds its own default.
+        SetEnvironmentVariableW(L"PSModulePath", nullptr);
+        std::wstring cmd = Quote(powershell) + L" -NoProfile -ExecutionPolicy Bypass -File " + Quote(scriptPath);
         for (const auto& a : passthrough) cmd += L" " + Quote(a);
 
         STARTUPINFOW si{};
@@ -234,7 +245,7 @@ int wmain() {
         PROCESS_INFORMATION pi{};
         std::vector<wchar_t> buf(cmd.begin(), cmd.end());
         buf.push_back(L'\0');
-        if (!CreateProcessW(nullptr, buf.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi)) {
+        if (!CreateProcessW(powershell.c_str(), buf.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi)) {
             std::printf("Could not start PowerShell (error %lu).\n", GetLastError());
             goto done;
         }

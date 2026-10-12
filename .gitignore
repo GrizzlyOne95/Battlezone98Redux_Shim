@@ -124,3 +124,7 @@ tmp/*.obj
 # The leaked Redux PDB lives in the private Battlezone_Source repository
 # (BZ1/Redux/bzrpdb.zip); a local extract must never be committed here.
 /battlezone98redux.pdb
+
+# Intermediates from building the installer project outside the solution
+installer/*/Release/
+installer/*/Debug/
