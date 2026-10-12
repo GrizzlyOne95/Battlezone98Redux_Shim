@@ -230,6 +230,7 @@ namespace BZROpenShim
             bool proxyVisible = true;
             bool tessellationTest = false;
             bool tessellationAdaptive = false;
+            std::string surfaceManifest;
             float tessellationTargetPixels = 12.0f;
             bool tessellationWireframe = false;
             int tessellationFactor = 2;
@@ -857,6 +858,7 @@ namespace BZROpenShim
                 config.hdEnabled = true;
             ReadEnvString("OPENSHIM_TERRAIN_HD_MANIFEST", config.hdManifest);
             ReadEnvString("OPENSHIM_TERRAIN_HD_EXPORT", config.hdExportPath);
+            ReadEnvString("OPENSHIM_TERRAIN_SURFACE_MANIFEST", config.surfaceManifest);
             int debugOverride = 0;
             if (ReadEnvInt("OPENSHIM_TERRAIN_SEMANTIC_DEBUG", debugOverride))
                 config.semanticDebugMode = debugOverride;
@@ -936,7 +938,7 @@ namespace BZROpenShim
                 config.semanticFrameCaptures = 0;
                 config.followCamera = true;
             }
-            if (config.hdEnabled || !config.hdExportPath.empty())
+            if (config.hdEnabled || !config.hdExportPath.empty() || !config.surfaceManifest.empty())
             {
                 config.proxyEnabled = config.semanticRenderer = false;
                 config.followCamera = true;
@@ -3341,6 +3343,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         void RefreshTerrainMicroReliefBounds(void* zone);
         void RestoreTerrainMicroReliefBounds();
         void RestoreNativeTerrainHd();
+        void RestoreNativeTerrainSurface();
         void ResetNativeTerrainHd();
         #include "terrain_tessellation_test.inl"
 
@@ -4008,6 +4011,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 DestroyProxySceneObjectsByName(reasonName, destroyEntity, destroyNode);
 
             RestoreNativeTerrainTessellationTest();
+            RestoreNativeTerrainSurface();
             RestoreNativeTerrainHd();
             ResetNativeTerrainHd();
             RemoveSemanticResources(reasonName);
@@ -4649,6 +4653,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         #include "terrain_microrelief_bounds.inl"
         #include "terrain_paint_capture.inl"
         #include "terrain_native_hd.inl"
+        #include "terrain_surface_normals.inl"
         #include "terrain_atlas_export.inl"
 
         bool GetActiveCameraPosition(void*& camera, Vector3& position)
@@ -4983,10 +4988,11 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         static_cast<double>(best.cameraDistance),
                         g_proxy.sourceMeshName.c_str());
                     if (!g_config.hdExportPath.empty()) ExportNativeTerrainAtlas();
+                    if (!g_config.surfaceManifest.empty()) InstallNativeTerrainSurface();
                     if (g_config.hdEnabled) InstallNativeTerrainHd();
                     if (g_config.tessellationTest)
                         InstallNativeTerrainTessellationTest();
-                    else if (!g_config.hdEnabled && g_config.hdExportPath.empty())
+                    else if (!g_config.hdEnabled && g_config.hdExportPath.empty() && g_config.surfaceManifest.empty())
                         CreateProxy();
                     CaptureSemantics(true);
                     BuildAndValidateSemanticVertices(true);
@@ -5454,7 +5460,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
         if (!g_config.proxyEnabled && !g_config.semanticCapture &&
             !g_config.semanticValidateUv && !g_config.semanticRenderer &&
-            !g_config.tessellationTest && !g_config.hdEnabled && g_config.hdExportPath.empty())
+            !g_config.tessellationTest && !g_config.hdEnabled && g_config.hdExportPath.empty() && g_config.surfaceManifest.empty())
             return;
         g_shutdown.store(false);
         LogShimA(LogLevel::Info, "terrain-proxy",
@@ -5550,6 +5556,23 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
         ++g_teardownDepth;
         g_teardownIncludesClear = g_teardownIncludesClear || clearScene;
+    }
+
+    bool TerrainSurfaceNormalBound(ID3D11DeviceContext* context)
+    {
+        if(!context||context->GetType()!=D3D11_DEVICE_CONTEXT_IMMEDIATE||!g_active.load()||g_shutdown.load()) return false;
+        std::unique_lock<std::mutex> lock(g_mutex,std::try_to_lock);
+        if(!lock.owns_lock()||!g_SurfaceTexture.rep||!g_ogre.getD3D11Texture2D) return false;
+        ID3D11ShaderResourceView* view=nullptr; ID3D11Resource* resource=nullptr;
+        context->PSGetShaderResources(2,1,&view);
+        D3D11_SHADER_RESOURCE_VIEW_DESC description{};
+        if(view) view->GetDesc(&description);
+        if(view) view->GetResource(&resource);
+        const bool matches=resource&&resource==g_ogre.getD3D11Texture2D(g_SurfaceTexture.rep)&&
+            description.ViewDimension==D3D11_SRV_DIMENSION_TEXTURE2D&&
+            (description.Format==DXGI_FORMAT_R8G8B8A8_UNORM||description.Format==DXGI_FORMAT_B8G8R8A8_UNORM);
+        if(resource) resource->Release(); if(view) view->Release();
+        return matches;
     }
 
     void TerrainProxySceneTeardownComplete(void* sceneManager, bool clearScene)

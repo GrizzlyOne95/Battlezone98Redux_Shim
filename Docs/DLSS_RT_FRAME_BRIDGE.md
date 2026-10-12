@@ -267,6 +267,12 @@ factor-4 relief lane: shared projected edges request fractional-even factors
 checks and a combined GOG capture pass. Broad cluster/camera seam acceptance,
 authored materials and complete DXR geometry remain open.
 
+`-TerrainSurfaceManifest <generated.json>` now stages an optional guarded
+height-derived normal atlas for the relief lane. Fresh bound PS-resource/GPU
+raster and complete normal-pass restoration evidence qualify a surface report.
+It changes normal lighting; it does not implement texture-driven geometry
+heights. Authoring, schema and evidence: [terrain-surface-materials.md](terrain-surface-materials.md).
+
 ### Transport build
 
 From the repository root on native Windows with Visual Studio and Windows SDK:

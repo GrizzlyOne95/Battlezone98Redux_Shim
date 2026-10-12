@@ -1,4 +1,5 @@
 #pragma once
+struct ID3D11DeviceContext;
 
 namespace BZROpenShim
 {
@@ -28,4 +29,7 @@ namespace BZROpenShim
     // capture is configured; it exists so parity captures can be taken at a
     // reproducible frame index rather than at an arbitrary wall-clock moment.
     void TerrainProxyRenderFrameTick();
+    // Read-only immediate-context draw evidence. Fails closed if the terrain
+    // owner cannot be locked or the actual PS resource differs from our atlas.
+    bool TerrainSurfaceNormalBound(ID3D11DeviceContext* context);
 }

@@ -8,6 +8,7 @@ struct TerrainTessQuery
     unsigned polls = 0;
     unsigned attempts = 0;
     unsigned skipCandidates = 0;
+    bool authoredNormal=false;
 };
 TerrainTessQuery g_TessQueries[4]; // ordinary/tessellated, with and without HD diffuse tiles
 bool g_TessStatisticsEnabled = false;
@@ -26,11 +27,12 @@ void PollTerrainTessQueries(ID3D11DeviceContext* context)
         if (result == S_OK)
         {
             LogShimA(LogLevel::Info, "terrain-tess",
-                "[TERRAIN-TESS] GPU statistics tessellated=%u iaPrimitives=%llu hsInvocations=%llu dsInvocations=%llu clipPrimitives=%llu psInvocations=%llu hdTiles=%u",
-                kind & 1u, data.IAPrimitives, data.HSInvocations, data.DSInvocations, data.CPrimitives, data.PSInvocations, kind >= 2 ? 1u : 0u);
+                "[TERRAIN-TESS] GPU statistics tessellated=%u iaPrimitives=%llu hsInvocations=%llu dsInvocations=%llu clipPrimitives=%llu psInvocations=%llu hdTiles=%u authoredNormal=%u",
+                kind & 1u, data.IAPrimitives, data.HSInvocations, data.DSInvocations, data.CPrimitives, data.PSInvocations, kind >= 2 ? 1u : 0u,sample.authoredNormal?1u:0u);
             // A native submission can be completely clipped. Try a bounded
             // number of other clusters rather than accepting that as pixels.
-            if (kind != 0 && (data.CPrimitives < 128 || data.PSInvocations < 1024) && sample.attempts < 16)
+            if (kind != 0 && (data.CPrimitives < 128 || data.PSInvocations < 1024 ||
+                (GetEnvironmentVariableA("OPENSHIM_TERRAIN_SURFACE_MANIFEST",nullptr,0)>0&&!sample.authoredNormal)) && sample.attempts < 16)
             {
                 sample.attempted = false;
                 // Do not repeatedly sample the first (often occluded) cluster
@@ -134,6 +136,7 @@ ID3D11Query* BeginTerrainTessQuery(ID3D11DeviceContext* context, UINT count,
         return nullptr;
     }
     sample.attempted = true;
+    sample.authoredNormal=TerrainSurfaceNormalBound(context);
     sample.ended = false;
     sample.polls = 0;
     ++sample.attempts;
