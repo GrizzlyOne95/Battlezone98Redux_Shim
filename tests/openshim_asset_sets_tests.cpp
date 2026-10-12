@@ -233,7 +233,7 @@ return {
         Check(!fs::exists(live / "stale.txt"), "files outside the set are dropped by the directory swap");
         Check(!fs::exists(live.parent_path() / "enhanced.old"), "old directory is removed after the swap");
 
-        // Validator failure on the source refuses and leaves the live copy.
+        // Validator failure refuses and leaves the live copy.
         const OpenShimAssetSet bad = MakeSet("renderer", "openshim\\renderer\\enhanced",
             "openshim\\renderer\\enhanced", item,
             { { "resources.version", "2" }, { "a.glsl", "x" } });
@@ -249,6 +249,43 @@ return {
         fs::remove(live / "openshim_set.sha256");
         outcome = SyncOpenShimAssetSet(item, game, lying, VersionIsThree);
         Check(outcome.result == OpenShimAssetSyncResult::Refused, "set hash that differs from its file list is refused");
+    }
+
+    void TestRendererPayloadNamedSource()
+    {
+        TempDir temp;
+        const fs::path item = temp.path / "item";
+        const fs::path game = temp.path / "game";
+        const OpenShimAssetSet set = MakeSet("renderer", "openshim\\renderer\\enhanced",
+            "openshim\\renderer\\enhanced", item,
+            { { "resources.version", "3" }, { "a.program", "vertex_program A hlsl {}" } });
+        const fs::path source = item / "openshim" / "renderer" / "enhanced";
+        const fs::path live = game / "openshim" / "renderer" / "enhanced";
+
+        // CR ships the Ogre script as a.program.payload so the game's mod scan
+        // never parses it; the installed copy gets the real name.
+        fs::rename(source / "a.program", source / "a.program.payload");
+        auto outcome = SyncOpenShimAssetSet(item, game, set, VersionIsThree);
+        Check(outcome.result == OpenShimAssetSyncResult::Installed && outcome.filesInstalled == 2,
+              std::string("payload-named source installs: ") + outcome.detail);
+        Check(Get(live / "a.program") == "vertex_program A hlsl {}" &&
+              !fs::exists(live / "a.program.payload"),
+              "payload-named file is installed under its real name");
+
+        // A corrupt payload is refused like any other source file.
+        fs::remove(live / "openshim_set.sha256");
+        Put(source / "a.program.payload", "tampered");
+        outcome = SyncOpenShimAssetSet(item, game, set, VersionIsThree);
+        Check(outcome.result == OpenShimAssetSyncResult::Refused, "corrupt payload-named source is refused");
+
+        // A staged copy that fails validation is refused and leaves the live copy.
+        const OpenShimAssetSet bad = MakeSet("renderer", "openshim\\renderer\\enhanced",
+            "openshim\\renderer\\enhanced", item,
+            { { "resources.version", "2" }, { "a.program", "x" } });
+        fs::rename(source / "a.program", source / "a.program.payload");
+        outcome = SyncOpenShimAssetSet(item, game, bad, VersionIsThree);
+        Check(outcome.result == OpenShimAssetSyncResult::Refused, "invalid payload-named set is refused");
+        Check(Get(live / "a.program") == "vertex_program A hlsl {}", "refused payload set leaves the live copy");
     }
 
     void TestWidgetsSync()
@@ -294,6 +331,7 @@ int main()
     TestSha256AndSetHash();
     TestParse();
     TestRendererSync();
+    TestRendererPayloadNamedSource();
     TestWidgetsSync();
 
     if (OpenShimTest::FailureCount() == 0)
