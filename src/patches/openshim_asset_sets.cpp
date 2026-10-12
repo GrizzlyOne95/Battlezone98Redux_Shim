@@ -358,6 +358,18 @@ namespace BZROpenShim
             uint64_t total_ = 0;
         };
 
+        // The Workshop item may ship a file as "<path>.payload" so the game's
+        // own resource scan of the active mod does not parse a second copy of
+        // OpenShim's Ogre scripts; the installed copy always takes the plain name.
+        fs::path WorkshopSourceFile(const fs::path& source, const std::string& relative)
+        {
+            const fs::path plain = source / ToPath(relative);
+            fs::path payload = plain;
+            payload += ".payload";
+            std::error_code ec;
+            return fs::is_regular_file(payload, ec) ? payload : plain;
+        }
+
         bool VerifyFile(const fs::path& file, const OpenShimAssetFile& entry, std::string& problem)
         {
             std::string hex;
@@ -428,7 +440,7 @@ namespace BZROpenShim
                 const fs::path target = pending / ToPath(entry.path);
                 fs::create_directories(target.parent_path(), ec);
                 ec.clear();
-                fs::copy_file(source / ToPath(entry.path), target, fs::copy_options::overwrite_existing, ec);
+                fs::copy_file(WorkshopSourceFile(source, entry.path), target, fs::copy_options::overwrite_existing, ec);
                 std::string problem;
                 if (ec || !VerifyFile(target, entry, problem))
                     return fail(OpenShimAssetSyncResult::Refused, "could not stage " + entry.path);
@@ -491,7 +503,7 @@ namespace BZROpenShim
                 ec.clear();
                 fs::create_directories(target.parent_path(), ec);
                 ec.clear();
-                fs::copy_file(source / ToPath(entry.path), temporary, fs::copy_options::overwrite_existing, ec);
+                fs::copy_file(WorkshopSourceFile(source, entry.path), temporary, fs::copy_options::overwrite_existing, ec);
                 if (!ec && VerifyFile(temporary, entry, problem))
                     fs::rename(temporary, target, ec);
                 else if (!ec)
@@ -609,17 +621,14 @@ namespace BZROpenShim
         for (const auto& entry : set.entries)
         {
             std::string problem;
-            if (!VerifyFile(source / ToPath(entry.path), entry, problem))
+            if (!VerifyFile(WorkshopSourceFile(source, entry.path), entry, problem))
                 return Outcome(OpenShimAssetSyncResult::Refused, "Workshop copy: " + problem);
         }
 
+        // The renderer validator runs on the staged copy, where every file has
+        // its installed name; a payload-named source cannot be validated as is.
         if (set.name == kRendererSet)
-        {
-            std::string problem;
-            if (validator && !validator(source, problem))
-                return Outcome(OpenShimAssetSyncResult::Refused, "Workshop copy failed validation: " + problem);
             return SyncRenderer(source, destination, set, validator);
-        }
         return SyncWidgets(source, destination, set);
     }
 }
