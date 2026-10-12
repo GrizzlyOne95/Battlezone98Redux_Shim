@@ -1,0 +1,13 @@
+// Resources for OpenShimSetup.exe. The version resource is the shared one
+// (src/engine/version.rc, OPENSHIM_MODULE_SETUP) and is compiled separately.
+//
+// RCDATA ids: 1 install script, 2 uninstall script, 3 OpenShim-Suite.zip,
+// 4 the zip's expected SHA-256 as 64 hex characters. 3 and 4 exist only in a
+// release build; the project writes them into embedded_suite.inc (see
+// OpenShimSetup.vcxproj), and the file is empty for a development build.
+#include <windows.h>
+
+1 RCDATA "..\..\scripts\install_windows.ps1"
+2 RCDATA "..\..\scripts\uninstall_windows.ps1"
+
+#include "embedded_suite.inc"
