@@ -9,12 +9,33 @@ param(
     [switch]$DepthSweep,
     [switch]$Camera,
     [switch]$ShaderCameraTrace,
-    [switch]$CameraMotion
+    [switch]$CameraMotion,
+    [switch]$SceneColor,
+    [ValidateSet('pre-clear', 'before-overlay')][string]$SceneStage = 'before-overlay',
+    [string]$StreamlineDirectory = '',
+    [switch]$VisibleRayTracing,
+    [switch]$StreamlineDevelopment,
+    [switch]$RecordWindow,
+    [switch]$RecordFrames,
+    [ValidateRange(0, 1800)][int]$WaitForGameExitSeconds = 0
 )
 
 $ErrorActionPreference = 'Stop'
-if ($CameraMotion) { $Camera = $true }
+if ($StreamlineDirectory) {
+    $StreamlineDirectory = (Resolve-Path -LiteralPath $StreamlineDirectory).Path
+    $SceneColor = $true
+    if ($DepthClearOrdinal -eq 0) { $DepthClearOrdinal = 3 }
+    if ($DepthSweep -or $SceneStage -ne 'before-overlay') { throw 'DLSS-G preview requires one before-overlay scene boundary' }
+}
+if ($VisibleRayTracing) {
+    $SceneColor = $true
+    if ($DepthClearOrdinal -eq 0) { $DepthClearOrdinal = 3 }
+    if ($DepthSweep -or $SceneStage -ne 'before-overlay') { throw 'DXR preview requires one before-overlay scene boundary' }
+}
+if ($StreamlineDevelopment -and -not $StreamlineDirectory) { throw 'Development preview requires the development SDK runtime directory' }
+if ($CameraMotion -or $SceneColor) { $Camera = $true }
 if ($DepthSweep -or $Camera) { $Depth = $true }
+if ($SceneColor -and -not $DepthSweep -and $DepthClearOrdinal -eq 0) { throw 'SceneColor requires a positive pre-clear ordinal or DepthSweep' }
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $GameRoot = (Resolve-Path -LiteralPath $GameRoot).Path
 $gameExe = Join-Path $GameRoot 'battlezone98redux.exe'
@@ -42,10 +63,23 @@ function Read-SharedText([string]$Path) {
     } finally { $stream.Dispose() }
 }
 try {
-    try { $locked = $mutex.WaitOne([TimeSpan]::FromSeconds(5)) }
-    catch [System.Threading.AbandonedMutexException] { $locked = $true }
-    if (-not $locked) { throw 'Another game harness owns the launch lock' }
-    if (Get-Process -Name battlezone98redux -ErrorAction SilentlyContinue) { throw 'Game already running; leave it untouched' }
+    $launchDeadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(5, $WaitForGameExitSeconds))
+    $waitingReported = $false
+    while ($true) {
+        try { $locked = $mutex.WaitOne([TimeSpan]::FromSeconds(1)) }
+        catch [System.Threading.AbandonedMutexException] { $locked = $true }
+        $anotherGame = Get-Process -Name battlezone98redux -ErrorAction SilentlyContinue
+        if ($locked -and -not $anotherGame) { break }
+        if ($locked) { $mutex.ReleaseMutex(); $locked = $false }
+        if ($WaitForGameExitSeconds -eq 0 -or [DateTime]::UtcNow -ge $launchDeadline) {
+            throw 'Game or harness already running; leave it untouched'
+        }
+        if (-not $waitingReported) {
+            Write-Host 'Waiting for the other game/harness to exit normally before deployment'
+            $waitingReported = $true
+        }
+        Start-Sleep -Milliseconds 500
+    }
     if (Test-Path -LiteralPath (Join-Path $GameRoot 'ogre.cfg.bzrharness-backup')) {
         throw 'An earlier harness left an Ogre.cfg backup; recover that run before testing'
     }
@@ -79,11 +113,13 @@ try {
         OPENSHIM_FRAME_BRIDGE = '1'; OPENSHIM_RUN_IN_BACKGROUND = '1';
         OPENSHIM_DX11_SCENE_DEPTH_DIAG = $(if ($Depth) { '0' } else { '1' })
         OPENSHIM_FRAME_BRIDGE_DEPTH = $(if ($Depth) { '1' } else { '0' })
+        OPENSHIM_FRAME_BRIDGE_SCENE_COLOR = $(if ($SceneColor) { '1' } else { '0' })
     }.GetEnumerator()) {
         $environment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
     }
     . (Join-Path $repoRoot 'reverse_engineering/BZRHarness.ps1')
+    if ($StreamlineDirectory) { $null = Set-BZROgreWindowed -GameRoot $GameRoot -VideoMode '1280 x 720' }
     Assert-BZRSafeToLaunch
     & (Join-Path $repoRoot 'scripts/Deploy-OpenShim.ps1') -GameDir $GameRoot
     $launchTime = Get-Date
@@ -126,9 +162,11 @@ try {
         $completed = @($records | Where-Object { $_.type -eq 'complete' })
         $variants = @($records | Where-Object { $_.type -eq 'variant' })
         $draws = @($records | Where-Object { $_.type -eq 'draw-group' })
+        $objects = @($records | Where-Object { $_.type -eq 'object-transform-group' })
         if ($completed.Count -ne 1 -or $completed[0].reason -ne 'frame-limit' -or $completed[0].frames -ne 30 -or
             $completed[0].errors -ne 0 -or $completed[0].overflow -ne 0 -or $variants.Count -eq 0 -or
             $completed[0].variants -ne $variants.Count -or $completed[0].drawGroups -ne $draws.Count -or
+            $completed[0].objectTransformGroups -ne $objects.Count -or
             $completed[0].drawCalls -le 0 -or $completed[0].linkedDrawCalls -le 0) {
             throw 'Shader camera trace incomplete, invalid or overflowed; retain diagnostics without qualifying matrices'
         }
@@ -143,10 +181,20 @@ try {
         }
         if ($Camera) { $presenterArgs += '--require-camera' }
         if ($CameraMotion) { $presenterArgs += @('--capture-camera-motion-pfm', (Join-Path $outputRoot "game-camera-motion$suffix.pfm")) }
-        & $presenter @presenterArgs |
-            Tee-Object -FilePath (Join-Path $outputRoot "consumer$suffix.log")
-        if ($LASTEXITCODE -ne 0) { throw "Real-game GPU import/capture failed at clear ordinal $ordinal" }
-        Write-Host "PASS real-game color import: $capture (DLSS/RT still pending)"
+        if ($SceneColor) { $presenterArgs += @('--capture-scene-bmp', (Join-Path $outputRoot "game-scene$suffix.bmp"), '--scene-stage', $SceneStage) }
+        if ($StreamlineDirectory) { $presenterArgs += @('--streamline-dir', $StreamlineDirectory, '--fg-report', (Join-Path $outputRoot 'dlss-fg-report.json')) }
+        if ($VisibleRayTracing) { $presenterArgs += @('--rt-visible-ao', '--capture-rt-bmp', (Join-Path $outputRoot 'game-dxr-ao.bmp')) }
+        if ($RecordWindow) { $presenterArgs += @('--record-window', (Join-Path $outputRoot 'demo-window.bzrvid')) }
+        if ($RecordFrames) { $presenterArgs += @('--record-frames', (Join-Path $outputRoot 'demo-rendered.bzrvid')) }
+        if ($StreamlineDevelopment) {
+            $presenterArgs += '--streamline-development'
+        }
+        Push-Location $outputRoot
+        try {
+            & $presenter @presenterArgs | Tee-Object -FilePath (Join-Path $outputRoot "consumer$suffix.log")
+            if ($LASTEXITCODE -ne 0) { throw "Real-game GPU import/capture failed at clear ordinal $ordinal" }
+        } finally { Pop-Location }
+        Write-Host "PASS real-game capture: $capture (inspect SDK and DXR reports for effective preview state)"
     }
 } finally {
     try {

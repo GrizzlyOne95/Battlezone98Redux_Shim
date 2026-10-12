@@ -1,6 +1,11 @@
 #include "frame_bridge_camera_observer.h"
 #include <Windows.h>
 #include <string>
+#include "bzr_options_ui.h"
+#include "openshim_preset_migration.h"
+#include "shim_log.h"
+#include <cstring>
+#include <atomic>
 
 namespace BZROpenShim::FrameBridge
 {
@@ -104,6 +109,84 @@ namespace BZROpenShim::FrameBridge
             snapshot.status = static_cast<std::uint32_t>(CameraStatus::Invalid);
             return false;
         }
+        return true;
+    }
+
+    namespace
+    {
+        using ParameterMatrix = const float*(__thiscall*)(void*);
+        InlineDetour32 overlayViewDetour{}, overlayProjectionDetour{};
+        void* volatile parameterView = nullptr;
+        void* volatile parameterProjection = nullptr;
+        ParameterMatrix ParameterFunction(void* volatile& slot)
+        { return reinterpret_cast<ParameterMatrix>(InterlockedCompareExchangePointer(&slot, nullptr, nullptr)); }
+        std::atomic<void(*)(bool)> overlayNotify{nullptr};
+        thread_local bool checkingOverlay = false;
+        bool GuardedOverlayMatch(void* source)
+        {
+            __try { return IdentityOverlayMatrices(ParameterFunction(parameterView)(source), ParameterFunction(parameterProjection)(source)); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+        void MaybeOverlay(void* source)
+        {
+            const auto notify = overlayNotify.load(std::memory_order_acquire);
+            if (!notify || checkingOverlay) return;
+            checkingOverlay = true;
+            notify(GuardedOverlayMatch(source));
+            checkingOverlay = false;
+        }
+        const float* __fastcall OverlayView(void* source, void*)
+        {
+            const float* result = ParameterFunction(parameterView)(source);
+            MaybeOverlay(source); return result;
+        }
+        const float* __fastcall OverlayProjection(void* source, void*)
+        {
+            const float* result = ParameterFunction(parameterProjection)(source);
+            MaybeOverlay(source); return result;
+        }
+        std::uint8_t* OverlayExportBody(HMODULE module, const char* name)
+        {
+            auto* body = reinterpret_cast<std::uint8_t*>(GetProcAddress(module, name));
+            const auto base = reinterpret_cast<std::uintptr_t>(module);
+            const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+            const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(base + dos->e_lfanew);
+            const std::size_t size = nt->OptionalHeader.SizeOfImage;
+            const auto inModule = [base, size](const std::uint8_t* address) {
+                const auto va = reinterpret_cast<std::uintptr_t>(address);
+                return va >= base && va - base <= size && size - (va - base) >= 16;
+            };
+            for (unsigned i = 0; inModule(body) && body[0] == 0xE9 && i < 4; ++i)
+            {
+                std::int32_t relative{}; std::memcpy(&relative, body + 1, sizeof(relative)); body += 5 + relative;
+            }
+            return inModule(body) && body[0] != 0xE9 ? body : nullptr;
+        }
+    }
+    bool InstallIdentityOverlayObserver(void(*notify)(bool))
+    {
+        static bool attempted = false;
+        if (attempted) return overlayNotify.load() != nullptr;
+        HMODULE module = GetModuleHandleW(L"OgreMain.dll");
+        if (!module || !notify) return false;
+        attempted = true;
+        wchar_t path[MAX_PATH]{};
+        const DWORD length = GetModuleFileNameW(module, path, MAX_PATH);
+        std::string hash;
+        if (!length || length >= MAX_PATH || !TryComputeFileSha256Hex(std::filesystem::path(path), hash) ||
+            hash != "e5e693960b95ad0d60733a3b688464a6c6cba234e86950698f9c2bea4acfeb45") return false;
+        auto* view = OverlayExportBody(module, "?getViewMatrix@AutoParamDataSource@Ogre@@UBEABVMatrix4@2@XZ");
+        auto* projection = OverlayExportBody(module, "?getProjectionMatrix@AutoParamDataSource@Ogre@@UBEABVMatrix4@2@XZ");
+        const std::uint8_t viewBytes[] = {0x56,0x8B,0xF1,0x80,0xBE,0x51,0x4B,0,0,0};
+        const std::uint8_t projectionBytes[] = {0x56,0x8B,0xF1,0x80,0xBE,0x52,0x4B,0,0,0};
+        if (!view || !projection || !ExpectedBytesMatchAt(reinterpret_cast<std::uintptr_t>(view), viewBytes, sizeof(viewBytes)) ||
+            !ExpectedBytesMatchAt(reinterpret_cast<std::uintptr_t>(projection), projectionBytes, sizeof(projectionBytes))) return false;
+        if (!InstallInlineDetour32(overlayViewDetour, reinterpret_cast<std::uintptr_t>(view), reinterpret_cast<void*>(&OverlayView),
+            sizeof(viewBytes), viewBytes, sizeof(viewBytes), &parameterView)) return false;
+        if (!InstallInlineDetour32(overlayProjectionDetour, reinterpret_cast<std::uintptr_t>(projection), reinterpret_cast<void*>(&OverlayProjection),
+            sizeof(projectionBytes), projectionBytes, sizeof(projectionBytes), &parameterProjection)) return false;
+        overlayNotify.store(notify, std::memory_order_release);
+        LogShimA(LogLevel::Info, "frame-bridge", "[FrameBridge] qualified identity overlay parameter observers installed; HUD coverage unqualified");
         return true;
     }
 }

@@ -8,14 +8,16 @@
 namespace BZROpenShim::FrameBridge
 {
     constexpr std::uint32_t kMagic = 0x3146424f; // OBF1
-    constexpr std::uint32_t kVersion = 4;
+    constexpr std::uint32_t kVersion = 5;
     constexpr std::uint32_t kMaxDimension = 8192;
     enum class SlotState : std::int32_t { Free = 0, Writing = 1, Ready = 2, Reading = 3 };
     enum class DepthStatus : std::uint32_t { Disabled = 0, Candidate = 1, Missing = 2, Unsupported = 3, Failed = 4 };
+    enum class SceneColorStatus : std::uint32_t { Disabled = 0, Candidate = 1, Missing = 2, Unsupported = 3, Failed = 4 };
+    enum class SceneColorSource : std::uint32_t { Unavailable = 0, BoundTarget = 1, PresentBackbuffer = 2 };
 
     // Cross-process wire ABI: no pointers, size_t, COM interfaces, or std::atomic.
     // Handles belong to producerPid and MUST be duplicated before use. All
-    // mutable fields are protected by the slot state, except active/consumerPid/requestedDepthClear,
+    // mutable fields are protected by the slot state, except active/consumerPid/requestedDepthClear/requestedSceneStage,
     // which use Win32 interlocked operations. Interlocked publication supplies
     // CPU ordering; the shared fence supplies GPU ordering.
     struct alignas(64) SharedFrame
@@ -47,16 +49,24 @@ namespace BZROpenShim::FrameBridge
         std::uint32_t depthCapturedOrdinal;
         std::uint32_t depthMatchingClears;
         CameraSnapshot camera;
-        std::uint64_t reserved[2]; // Explicit padding preserves the 64-byte wire alignment.
+        std::uint64_t sceneColorHandle; // Optional pre-clear color, same ownership/fence as depth.
+        std::uint32_t sceneColorStatus;
+        std::uint32_t sceneColorCapturedOrdinal; // Manual boundary; not a semantic HUD-free guarantee.
+        std::uint32_t sceneColorSource;
+        std::uint32_t sceneColorStage; // 0=pre-clear, 1=before identity overlay DrawIndexed.
+        std::int32_t requestedSceneStage; // Consumer control, interlocked.
+        std::uint32_t reserved32;
+        std::uint64_t reserved64[6]; // Explicit padding for the 64-byte alignment.
     };
     static_assert(std::is_standard_layout_v<SharedFrame>);
-    static_assert(sizeof(SharedFrame) == 384);
+    static_assert(sizeof(SharedFrame) == 448);
     static_assert(offsetof(SharedFrame, camera) == 128);
     static_assert(offsetof(SharedFrame, textureHandle) == 48);
     static_assert(offsetof(SharedFrame, frameId) == 64);
     static_assert(offsetof(SharedFrame, depthTextureHandle) == 88);
     static_assert(offsetof(SharedFrame, depthStatus) == 104);
     static_assert(offsetof(SharedFrame, requestedDepthClear) == 116);
+    static_assert(offsetof(SharedFrame, sceneColorHandle) == 368);
 
     inline bool ValidDescriptor(const SharedFrame& frame, std::uint32_t pid)
     {
@@ -91,5 +101,14 @@ namespace BZROpenShim::FrameBridge
             frame.camera.observationQpc <= frame.captureQpc &&
             frame.camera.clearOrdinal == frame.depthCapturedOrdinal &&
             frame.camera.stage == (frame.depthCapturedOrdinal ? 1u : 0u);
+    }
+    inline bool ValidSceneColorFrame(const SharedFrame& frame)
+    {
+        return ValidCameraFrame(frame) && frame.sceneColorHandle != 0 &&
+            frame.sceneColorStatus == static_cast<std::uint32_t>(SceneColorStatus::Candidate) &&
+            (frame.sceneColorSource == static_cast<std::uint32_t>(SceneColorSource::BoundTarget) ||
+             frame.sceneColorSource == static_cast<std::uint32_t>(SceneColorSource::PresentBackbuffer)) &&
+            frame.sceneColorStage <= 1 &&
+            frame.sceneColorCapturedOrdinal > 0 && frame.sceneColorCapturedOrdinal == frame.depthCapturedOrdinal;
     }
 }

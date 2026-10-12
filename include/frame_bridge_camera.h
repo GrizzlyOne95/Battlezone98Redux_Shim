@@ -10,6 +10,18 @@
 namespace BZROpenShim::FrameBridge
 {
     enum class CameraStatus : std::uint32_t { Unavailable = 0, Observed = 1, Invalid = 2 };
+    inline bool IdentityOverlayMatrices(const float* view, const float* projection)
+    {
+        if (!view || !projection) return false;
+        for (unsigned i = 0; i < 16; ++i)
+        {
+            const float v = i % 5 == 0 ? 1.0f : 0.0f;
+            const float p = i == 10 || i == 11 ? 0.5f : v;
+            if (!std::isfinite(view[i]) || !std::isfinite(projection[i]) ||
+                std::fabs(view[i] - v) > 1e-5f || std::fabs(projection[i] - p) > 1e-5f) return false;
+        }
+        return true;
+    }
     enum class CameraMatrixSource : std::uint32_t { Unknown = 0, ViewportRS = 1, CameraForShaders = 2, Synthetic = 3 };
     inline const char* CameraMatrixSourceName(std::uint32_t source)
     {

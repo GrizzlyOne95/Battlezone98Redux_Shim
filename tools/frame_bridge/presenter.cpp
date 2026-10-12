@@ -1,5 +1,10 @@
 #include "frame_bridge_producer.h"
 #include "frame_bridge_history.h"
+#include "gpu_motion.h"
+#include "streamline_fg.h"
+#include "visible_rt.h"
+#include "gpu_blit.h"
+#include "window_recorder.h"
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <cstdio>
@@ -12,6 +17,7 @@
 #include <cstring>
 #include <algorithm>
 #include <iomanip>
+#include <filesystem>
 
 namespace
 {
@@ -47,6 +53,8 @@ namespace
     public:
         ~Consumer()
         {
+            try { recorder_.Stop(); } catch (const std::exception& e) { std::fprintf(stderr, "RECORDING ERROR: %s\n", e.what()); }
+            frameGeneration_.Shutdown(); // DXGI/device objects still alive.
             // Never acknowledge a frame with outstanding GPU reads, even on an
             // error. A stalled helper disables capture until the game restarts.
             if (frame_)
@@ -57,7 +65,10 @@ namespace
             if (window_ && IsWindow(window_)) DestroyWindow(window_);
         }
         void Open(DWORD pid, bool show, bool verify, const std::string& capturePath,
-            bool verifyDepth, const std::string& depthPath, UINT depthClearOrdinal, bool requireCamera, const std::string& motionPath)
+            bool verifyDepth, const std::string& depthPath, UINT depthClearOrdinal, bool requireCamera, const std::string& motionPath,
+            const std::string& scenePath, bool verifyScene, UINT sceneStage,
+            const std::wstring& streamlineDirectory, const std::string& fgReport, bool visibleAO, const std::string& rtCapture, bool development,
+            const std::string& recording, const std::string& rendererRecording)
         {
             verify_ = verify;
             capturePath_ = capturePath;
@@ -65,11 +76,29 @@ namespace
             depthPath_ = depthPath;
             requireCamera_ = requireCamera;
             motionPath_ = motionPath;
+            scenePath_ = scenePath; verifyScene_ = verifyScene;
+            sceneStage_ = sceneStage;
+            fgMode_ = !streamlineDirectory.empty(); fgReport_ = fgReport;
+            rtMode_ = visibleAO; rtPath_ = rtCapture;
+            development_ = development;
+            if (!rendererRecording.empty())
+            {
+                rendererRecording_.open(rendererRecording, std::ios::binary | std::ios::trunc);
+                if (!rendererRecording_) throw std::runtime_error("open rendered-frame recording");
+            }
+            if (fgMode_)
+                frameGeneration_.Initialize(streamlineDirectory, (std::filesystem::absolute(fgReport).parent_path() / L"streamline").wstring(), development);
             mapping_.value = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, MappingName(pid).c_str());
             if (!mapping_.value) throw std::runtime_error("producer mapping unavailable; start source/capture first");
             frame_ = static_cast<SharedFrame*>(MapViewOfFile(mapping_.value, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SharedFrame)));
             if (!frame_ || ReadInterlocked(frame_->active) != 1 || !ValidDescriptor(*frame_, pid))
                 throw std::runtime_error("inactive or invalid frame bridge descriptor");
+            if (rendererRecording_.is_open())
+            {
+                rendererRecording_.write("BZRINP1\0", 8);
+                rendererRecording_.write(reinterpret_cast<const char*>(&frame_->width), 4);
+                rendererRecording_.write(reinterpret_cast<const char*>(&frame_->height), 4);
+            }
             if (!Claim(frame_->consumerPid, 0, static_cast<LONG>(GetCurrentProcessId())))
             {
                 // Do not clear another consumer's claim on destruction.
@@ -79,6 +108,7 @@ namespace
             }
             ownsConsumer_ = true;
             Exchange(frame_->requestedDepthClear, static_cast<LONG>(depthClearOrdinal));
+            Exchange(frame_->requestedSceneStage, static_cast<LONG>(sceneStage));
             producer_.value = OpenProcess(PROCESS_DUP_HANDLE | SYNCHRONIZE, FALSE, pid);
             if (!producer_.value) throw std::runtime_error("cannot open producer for handle duplication");
             const auto duplicate = [&](std::uint64_t remote, Handle& local)
@@ -91,13 +121,39 @@ namespace
             duplicate(frame_->textureHandle, texture);
             duplicate(frame_->readyFenceHandle, ready);
             Require(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory_)), "CreateDXGIFactory2");
+            if (fgMode_)
+            {
+                auto* proxy = factory_.Detach(); frameGeneration_.Upgrade(reinterpret_cast<void**>(&proxy)); factory_.Attach(proxy);
+            }
             ComPtr<IDXGIAdapter1> adapter;
             const LUID luid{frame_->adapterLuidLow, frame_->adapterLuidHigh};
             Require(factory_->EnumAdapterByLuid(luid, IID_PPV_ARGS(&adapter)), "match producer adapter");
             Require(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device_)), "D3D12CreateDevice");
+            if (fgMode_)
+            {
+                frameGeneration_.SetDevice(device_.Get(), luid, frame_->width, frame_->height, static_cast<DXGI_FORMAT>(frame_->format),
+                    rtMode_ ? DXGI_FORMAT_R8G8B8A8_UNORM : static_cast<DXGI_FORMAT>(frame_->format));
+                // Only queue creation needs the proxy. Resources and command
+                // lists continue using the original native D3D12 device.
+                device_.CopyTo(&queueDevice_);
+                auto* proxy = queueDevice_.Detach(); frameGeneration_.Upgrade(reinterpret_cast<void**>(&proxy)); queueDevice_.Attach(proxy);
+            }
             Require(device_->OpenSharedHandle(texture.value, IID_PPV_ARGS(&color_)), "open shared color");
             Require(device_->OpenSharedHandle(ready.value, IID_PPV_ARGS(&ready_)), "open shared fence");
-            if (verifyDepth || !depthPath.empty())
+            if (!scenePath.empty() || verifyScene || fgMode_ || rtMode_)
+            {
+                if (!frame_->sceneColorHandle) throw std::runtime_error("producer pre-clear scene color is disabled");
+                Handle scene;
+                duplicate(frame_->sceneColorHandle, scene);
+                Require(device_->OpenSharedHandle(scene.value, IID_PPV_ARGS(&sceneColor_)), "open shared scene color");
+                const auto desc = sceneColor_->GetDesc();
+                if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.Width != frame_->width || desc.Height != frame_->height ||
+                    desc.Format != static_cast<DXGI_FORMAT>(frame_->format) || desc.SampleDesc.Count != 1 || desc.MipLevels != 1 || desc.DepthOrArraySize != 1)
+                    throw std::runtime_error("scene color texture does not match descriptor");
+                CreateReadback(sceneColor_.Get(), sceneReadback_, sceneFootprint_, sceneReadbackBytes_);
+                if (fgMode_ || rtMode_) CreatePrivateTexture(sceneColor_.Get(), fgScene_);
+            }
+            if (verifyDepth || !depthPath.empty() || fgMode_ || rtMode_)
             {
                 if (!frame_->depthTextureHandle) throw std::runtime_error("producer depth capture is disabled");
                 Handle depth;
@@ -109,6 +165,8 @@ namespace
                     desc.SampleDesc.Count != 1 || desc.MipLevels != 1 || desc.DepthOrArraySize != 1)
                     throw std::runtime_error("depth GPU texture does not match descriptor");
                 CreateReadback(depth_.Get(), depthReadback_, depthFootprint_, depthReadbackBytes_);
+                if (fgMode_ || rtMode_) CreatePrivateTexture(depth_.Get(), fgDepth_);
+                if (fgMode_) gpuMotion_.Initialize(device_.Get(), fgDepth_.Get());
             }
             const auto colorDesc = color_->GetDesc();
             if (colorDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
@@ -116,9 +174,16 @@ namespace
                 colorDesc.Format != static_cast<DXGI_FORMAT>(frame_->format) ||
                 colorDesc.SampleDesc.Count != 1 || colorDesc.MipLevels != 1 || colorDesc.DepthOrArraySize != 1)
                 throw std::runtime_error("GPU texture does not match wire descriptor");
+            if (rtMode_)
+            {
+                CreatePrivateTexture(color_.Get(), rtFinal_);
+                rayTracing_.Initialize(device_.Get(), fgDepth_.Get(), fgScene_.Get(), rtFinal_.Get());
+                blit_.Initialize(device_.Get(), rayTracing_.FinalOutput(), static_cast<DXGI_FORMAT>(frame_->format));
+                if (!rtPath_.empty() || rendererRecording_.is_open()) CreateReadback(rayTracing_.FinalOutput(), rtReadback_, rtFootprint_, rtReadbackBytes_);
+            }
             D3D12_COMMAND_QUEUE_DESC queueDesc{};
             queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-            Require(device_->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&queue_)), "CreateCommandQueue");
+            Require((fgMode_ ? queueDevice_.Get() : device_.Get())->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&queue_)), "CreateCommandQueue");
             Require(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator_)), "CreateCommandAllocator");
             Require(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator_.Get(), nullptr, IID_PPV_ARGS(&commands_)), "CreateCommandList");
             Require(commands_->Close(), "initial command list close");
@@ -126,7 +191,7 @@ namespace
             event_.value = CreateEventW(nullptr, FALSE, FALSE, nullptr);
             if (!event_.value) throw std::runtime_error("cannot create fence completion event");
 
-            if (verify || !capturePath.empty())
+            if (verify || !capturePath.empty() || rendererRecording_.is_open())
             {
                 UINT rows = 0;
                 UINT64 rowBytes = 0;
@@ -146,11 +211,13 @@ namespace
                     D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback_)), "create verification readback");
             }
             if (show) CreateWindowAndSwapChain();
+            if (!recording.empty()) recorder_.Start(window_, recording);
             D3D12_FEATURE_DATA_D3D12_OPTIONS5 options{};
             const HRESULT rayQuery = device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options, sizeof(options));
-            std::printf("CONSUMER pointer_bits=%zu size=%ux%u DXR_tier=%u query=0x%08lx DLSS=not-integrated RT=not-integrated\n",
+            std::printf("CONSUMER pointer_bits=%zu size=%ux%u DXR_tier=%u query=0x%08lx DLSS=%s RT=%s\n",
                 sizeof(void*) * 8, frame_->width, frame_->height,
-                static_cast<unsigned>(options.RaytracingTier), static_cast<unsigned long>(rayQuery));
+                static_cast<unsigned>(options.RaytracingTier), static_cast<unsigned long>(rayQuery), fgMode_ ? "experimental-camera-motion-preview" : "not-integrated",
+                rtMode_ ? "experimental-visible-geometry-DXR-AO" : "not-integrated");
             std::fflush(stdout);
         }
 
@@ -163,7 +230,8 @@ namespace
             // resulting color frame is valid but depth is Missing. For a paired
             // artifact, wait at most 120 additional frames, never save stale z.
             while (consumed < limit || (((!depthPath_.empty() && !lastDepthValid) ||
-                (!motionPath_.empty() && !lastPair_.comparable)) && consumed < limit + 120))
+                (!motionPath_.empty() && !lastPair_.comparable) || (!scenePath_.empty() && !lastSceneValid_) ||
+                (!rtPath_.empty() && !lastRtValid_)) && consumed < limit + 120))
             {
                 MSG message{};
                 while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
@@ -187,14 +255,21 @@ namespace
                     id, frame_->captureQpc};
                 lastCamera_ = frame_->camera;
                 lastCameraValid_ = ValidCameraFrame(*frame_);
+                lastSceneValid_ = ValidSceneColorFrame(*frame_) && frame_->sceneColorStage == sceneStage_;
+                lastSceneStatus_ = frame_->sceneColorStatus; lastSceneOrdinal_ = frame_->sceneColorCapturedOrdinal;
+                lastSceneSource_ = frame_->sceneColorSource;
+                lastSceneStage_ = frame_->sceneColorStage;
                 lastPair_ = history_.Push(*frame_);
                 const bool validDepth = ValidDepthFrame(*frame_);
+                lastRtValid_ = rtMode_ && validDepth && lastCameraValid_ && lastSceneValid_ && InspectPerspective(lastCamera_).recognized;
                 lastDepthValid = validDepth && (!requireCamera_ || lastCameraValid_);
                 if (validDepth) ++depthCandidates_;
                 else ++depthUnavailable_;
                 if (verifyDepth_ && !validDepth) throw std::runtime_error("synthetic frame lacks valid depth");
+                if (verifyScene_ && !lastSceneValid_) throw std::runtime_error("synthetic frame lacks scene color/depth/camera pair");
                 if (id == 0 || id <= lastFrame_) throw std::runtime_error("non-monotonic frame ID");
                 WaitGpu(ready_.Get(), id);
+                if (fgMode_) frameGeneration_.Begin(lastPair_, consumed + 1, validDepth && lastCameraValid_ && lastSceneValid_);
                 Require(allocator_->Reset(), "Reset allocator");
                 Require(commands_->Reset(allocator_.Get(), nullptr), "Reset commands");
                 Barrier(color_.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -206,7 +281,7 @@ namespace
                     commands_->CopyResource(backbuffer.Get(), color_.Get());
                     Barrier(backbuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
                 }
-                if (verify_ || (!capturePath_.empty() && consumed + 1 >= limit))
+                if (verify_ || rendererRecording_.is_open() || (!capturePath_.empty() && consumed + 1 >= limit))
                 {
                     D3D12_TEXTURE_COPY_LOCATION source{};
                     source.pResource = color_.Get();
@@ -231,12 +306,57 @@ namespace
                     Barrier(depth_.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON);
                 }
                 Barrier(color_.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON);
+                if (sceneColor_ && lastSceneValid_ && (verifyScene_ || consumed + 1 >= limit))
+                {
+                    Barrier(sceneColor_.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE);
+                    D3D12_TEXTURE_COPY_LOCATION source{};
+                    source.pResource = sceneColor_.Get(); source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+                    D3D12_TEXTURE_COPY_LOCATION destination{};
+                    destination.pResource = sceneReadback_.Get(); destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+                    destination.PlacedFootprint = sceneFootprint_;
+                    commands_->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+                    Barrier(sceneColor_.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON);
+                }
+                if (fgMode_ || rtMode_)
+                {
+                    if (validDepth && lastSceneValid_ && lastCameraValid_)
+                    {
+                        CopyPrivate(depth_.Get(), fgDepth_.Get()); CopyPrivate(sceneColor_.Get(), fgScene_.Get());
+                        if (fgMode_)
+                        {
+                            Barrier(fgDepth_.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                            gpuMotion_.Record(commands_.Get(), lastPair_);
+                            Barrier(fgDepth_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON);
+                        }
+                    }
+                    if (lastRtValid_)
+                    {
+                        CopyPrivate(color_.Get(), rtFinal_.Get()); rayTracing_.Record(commands_.Get(), lastCamera_); ++rtFrames_;
+                        if (backbuffer) blit_.Record(commands_.Get(), backbuffer.Get());
+                        if (rendererRecording_.is_open() || (!rtPath_.empty() && consumed + 1 >= limit))
+                        {
+                            auto* output = rayTracing_.FinalOutput();
+                            Barrier(output, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE);
+                            D3D12_TEXTURE_COPY_LOCATION source{}; source.pResource = output; source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+                            D3D12_TEXTURE_COPY_LOCATION target{}; target.pResource = rtReadback_.Get();
+                            target.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT; target.PlacedFootprint = rtFootprint_;
+                            commands_->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
+                            Barrier(output, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON);
+                        }
+                    }
+                    // These are private helper copies. Returning the shared
+                    // slot cannot allow the game to overwrite SDK inputs.
+                    if (fgMode_) frameGeneration_.Tag(commands_.Get(), fgDepth_.Get(), gpuMotion_.Output(),
+                        rtMode_ && lastRtValid_ ? rayTracing_.SceneOutput() : fgScene_.Get());
+                }
                 Require(commands_->Close(), "Close commands");
                 ID3D12CommandList* lists[] = {commands_.Get()};
                 queue_->ExecuteCommandLists(1, lists);
-                Require(queue_->Signal(done_.Get(), id), "signal copy completion");
-                WaitGpu(done_.Get(), id);
+                if (fgMode_) frameGeneration_.Submitted();
+                Require(queue_->Signal(done_.Get(), id * 2), "signal copy completion");
+                WaitGpu(done_.Get(), id * 2);
                 if (verify_) VerifyPixels(id);
+                if (verifyScene_) VerifyPixels(id, true);
                 if (verifyDepth_) VerifyDepth(id);
                 LARGE_INTEGER now{};
                 QueryPerformanceCounter(&now);
@@ -248,7 +368,27 @@ namespace
                 reading_ = false;
                 lastFrame_ = id;
                 ++consumed;
-                if (swapchain_) Require(swapchain_->Present(1, 0), "Present");
+                const unsigned additionalBeforePresent = frameGeneration_.AdditionalPresents();
+                if (swapchain_)
+                {
+                    if (fgMode_) frameGeneration_.BeforePresent();
+                    Require(swapchain_->Present(fgMode_ ? 0 : 1, 0), "Present");
+                    if (fgMode_)
+                    {
+                        frameGeneration_.AfterPresent();
+                        if (consumed % 30 == 0)
+                        {
+                            const auto title = L"Battlezone experimental preview | DLSS FG extra presents: " +
+                                std::to_wstring(frameGeneration_.AdditionalPresents()) +
+                                (rtMode_ ? L" | hardware DXR AO (visible geometry)" : L" | camera motion only");
+                            SetWindowTextW(window_, title.c_str());
+                        }
+                        // SDK input work is blocked onto this presenting
+                        // queue. Drain after Present before reusing copies.
+                        Require(queue_->Signal(done_.Get(), id * 2 + 1), "signal SDK input completion"); WaitGpu(done_.Get(), id * 2 + 1);
+                    }
+                }
+                if (rendererRecording_.is_open()) RecordRenderedFrame(additionalBeforePresent);
                 deadline = GetTickCount64() + timeoutMs;
             }
             std::printf("CONSUMER frames=%u last_frame=%llu verified=%s max_capture_to_copy_ms=%.3f\n",
@@ -264,9 +404,89 @@ namespace
             if (!capturePath_.empty()) SaveCapture();
             if (!depthPath_.empty()) SaveDepth();
             if (!motionPath_.empty()) SaveCameraMotion();
+            if (rtMode_)
+            {
+                std::printf("DXR_AO traced_frames=%u triangle_capacity=%u rays_per_surface_pixel=8 visible_geometry_only=yes\n", rtFrames_, rayTracing_.TriangleCapacity());
+                if (!rtPath_.empty())
+                {
+                    if (!lastRtValid_) throw std::runtime_error("final frame lacks valid DXR inputs");
+                    SaveCapture(false, true);
+                    std::ofstream out(rtPath_ + ".json");
+                    out << "{\n  \"previewOnly\": true,\n  \"hardwareDXR\": true,\n  \"visibleDepthGeometryOnly\": true,\n  \"hudMaskQualified\": false,\n  \"frameId\": " << lastFrame_
+                        << ",\n  \"tracedFrames\": " << rtFrames_ << ",\n  \"triangleCapacity\": " << rayTracing_.TriangleCapacity() << ",\n  \"raysPerSurfacePixel\": 8\n}\n";
+                    if (!out) throw std::runtime_error("save DXR capture metadata");
+                }
+            }
+            if (!scenePath_.empty())
+            {
+                if (!lastSceneValid_) throw std::runtime_error("final frame lacks scene color/depth/camera pair");
+                SaveCapture(true);
+                std::ofstream metadata(scenePath_ + ".json", std::ios::trunc);
+                metadata << "{\n  \"candidateOnly\": true,\n  \"hudFreeQualified\": false,\n  \"protocolVersion\": " << kVersion
+                    << ",\n  \"frameId\": " << lastFrame_ << ",\n  \"capturedClearOrdinal\": " << lastSceneOrdinal_
+                    << ",\n  \"status\": " << lastSceneStatus_ << ",\n  \"source\": " << lastSceneSource_
+                    << ",\n  \"stage\": " << lastSceneStage_
+                    << ",\n  \"width\": " << frame_->width << ",\n  \"height\": " << frame_->height << ",\n  \"cameraObservation\": ";
+                WriteCamera(metadata); metadata << "\n}\n"; metadata.close();
+                if (!metadata) throw std::runtime_error("cannot save scene color metadata");
+            }
+            if (fgMode_) frameGeneration_.SaveReport(fgReport_);
+            recorder_.Stop();
+            if (rendererRecording_.is_open())
+            {
+                rendererRecording_.close();
+                if (!rendererRecording_) throw std::runtime_error("finish rendered-frame recording");
+                std::printf("RECORDING source=renderer-input-frames frames=%u (SDK-generated images are not captured)\n", consumed);
+            }
             return consumed;
         }
     private:
+        void RecordRenderedFrame(unsigned additionalBeforePresent)
+        {
+            auto* resource = lastRtValid_ ? rtReadback_.Get() : readback_.Get();
+            const auto& footprint = lastRtValid_ ? rtFootprint_ : footprint_;
+            const auto bytes = lastRtValid_ ? rtReadbackBytes_ : readbackBytes_;
+            const bool rgba = lastRtValid_ || frame_->format == DXGI_FORMAT_R8G8B8A8_UNORM;
+            unsigned char* mapped = nullptr; D3D12_RANGE range{0, bytes};
+            Require(resource->Map(0, &range, reinterpret_cast<void**>(&mapped)), "map rendered recording");
+            std::vector<unsigned char> row(static_cast<SIZE_T>(frame_->width) * 4);
+            LARGE_INTEGER now{}, frequency{}; QueryPerformanceCounter(&now); QueryPerformanceFrequency(&frequency);
+            const std::int64_t time = static_cast<std::int64_t>(static_cast<double>(now.QuadPart) * 10000000.0 / frequency.QuadPart);
+            const std::uint32_t extra = frameGeneration_.AdditionalPresents();
+            const std::uint32_t flags = (lastRtValid_ ? 1u : 0u) | (fgMode_ && frameGeneration_.Enabled() ? 2u : 0u) |
+                (extra > additionalBeforePresent ? 4u : 0u);
+            rendererRecording_.write(reinterpret_cast<const char*>(&time), 8);
+            rendererRecording_.write(reinterpret_cast<const char*>(&lastFrame_), 8);
+            rendererRecording_.write(reinterpret_cast<const char*>(&extra), 4);
+            rendererRecording_.write(reinterpret_cast<const char*>(&flags), 4);
+            for (UINT y = 0; y < frame_->height; ++y)
+            {
+                const auto* source = mapped + footprint.Offset + static_cast<SIZE_T>(y) * footprint.Footprint.RowPitch;
+                for (UINT x = 0; x < frame_->width; ++x)
+                {
+                    row[x * 4] = source[x * 4 + (rgba ? 2 : 0)]; row[x * 4 + 1] = source[x * 4 + 1];
+                    row[x * 4 + 2] = source[x * 4 + (rgba ? 0 : 2)]; row[x * 4 + 3] = source[x * 4 + 3];
+                }
+                rendererRecording_.write(reinterpret_cast<const char*>(row.data()), static_cast<std::streamsize>(row.size()));
+            }
+            const D3D12_RANGE none{0, 0}; resource->Unmap(0, &none);
+            if (!rendererRecording_) throw std::runtime_error("write rendered-frame recording");
+        }
+        void CreatePrivateTexture(ID3D12Resource* source, ComPtr<ID3D12Resource>& output)
+        {
+            D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+            auto desc = source->GetDesc(); desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+            Require(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COMMON,
+                nullptr, IID_PPV_ARGS(&output)), "create private SDK input");
+        }
+        void CopyPrivate(ID3D12Resource* source, ID3D12Resource* output)
+        {
+            Barrier(source, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE);
+            Barrier(output, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+            commands_->CopyResource(output, source);
+            Barrier(output, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON);
+            Barrier(source, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON);
+        }
         void CreateReadback(ID3D12Resource* texture, ComPtr<ID3D12Resource>& buffer,
             D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint, SIZE_T& bytes)
         {
@@ -430,8 +650,12 @@ namespace
                 static_cast<unsigned long long>(lastPair_.previousFrame), static_cast<unsigned long long>(lastPair_.currentFrame),
                 valid, maximum, motionPath_.c_str());
         }
-        void SaveCapture()
+        void SaveCapture(bool scene = false, bool rt = false)
         {
+            auto* readback = rt ? rtReadback_.Get() : scene ? sceneReadback_.Get() : readback_.Get();
+            const auto& footprint = rt ? rtFootprint_ : scene ? sceneFootprint_ : footprint_;
+            const auto bytes = rt ? rtReadbackBytes_ : scene ? sceneReadbackBytes_ : readbackBytes_;
+            const auto& path = rt ? rtPath_ : scene ? scenePath_ : capturePath_;
             // BMP stores BGRA pixels. Strip D3D12's padded row pitch and swizzle
             // RGBA input; a negative height keeps the GPU's top-to-bottom order.
             const DWORD pixelBytes = frame_->width * frame_->height * 4;
@@ -449,28 +673,29 @@ namespace
             info.biSizeImage = pixelBytes;
             std::vector<unsigned char> pixels(pixelBytes);
             unsigned char* data = nullptr;
-            const D3D12_RANGE range{0, readbackBytes_};
-            Require(readback_->Map(0, &range, reinterpret_cast<void**>(&data)), "map capture pixels");
+            const D3D12_RANGE range{0, bytes};
+            Require(readback->Map(0, &range, reinterpret_cast<void**>(&data)), "map capture pixels");
             for (UINT y = 0; y < frame_->height; ++y)
                 for (UINT x = 0; x < frame_->width; ++x)
                 {
-                    const auto* source = data + static_cast<SIZE_T>(y) * footprint_.Footprint.RowPitch + x * 4;
+                    const auto* source = data + static_cast<SIZE_T>(y) * footprint.Footprint.RowPitch + x * 4;
                     auto* destination = pixels.data() + (static_cast<SIZE_T>(y) * frame_->width + x) * 4;
-                    const bool rgba = frame_->format == DXGI_FORMAT_R8G8B8A8_UNORM;
+                    const bool rgba = rt || frame_->format == DXGI_FORMAT_R8G8B8A8_UNORM;
                     destination[0] = source[rgba ? 2 : 0];
                     destination[1] = source[1];
                     destination[2] = source[rgba ? 0 : 2];
                     destination[3] = source[3];
                 }
             const D3D12_RANGE written{0, 0};
-            readback_->Unmap(0, &written);
-            std::ofstream output(capturePath_, std::ios::binary | std::ios::trunc);
+            readback->Unmap(0, &written);
+            std::ofstream output(path, std::ios::binary | std::ios::trunc);
             output.write(reinterpret_cast<const char*>(&file), sizeof(file));
             output.write(reinterpret_cast<const char*>(&info), sizeof(info));
             output.write(reinterpret_cast<const char*>(pixels.data()), pixelBytes);
             output.close();
             if (!output) throw std::runtime_error("cannot save capture BMP");
-            std::printf("CAPTURE frame=%llu path=%s\n", static_cast<unsigned long long>(lastFrame_), capturePath_.c_str());
+            std::printf("%s frame=%llu path=%s\n", rt ? "DXR_AO_CAPTURE visible_geometry_only=yes" : scene ? "SCENE_COLOR candidate_only=yes" : "CAPTURE",
+                static_cast<unsigned long long>(lastFrame_), path.c_str());
         }
         void WaitGpu(ID3D12Fence* fence, UINT64 value)
         {
@@ -491,23 +716,32 @@ namespace
             barrier.Transition.StateAfter = after;
             commands_->ResourceBarrier(1, &barrier);
         }
-        void VerifyPixels(UINT64 id)
+        void VerifyPixels(UINT64 id, bool scene = false)
         {
+            auto* readback = scene ? sceneReadback_.Get() : readback_.Get();
+            const auto& footprint = scene ? sceneFootprint_ : footprint_;
+            const auto bytes = scene ? sceneReadbackBytes_ : readbackBytes_;
             const bool rgba = frame_->format == DXGI_FORMAT_R8G8B8A8_UNORM;
             const unsigned char red = static_cast<unsigned char>(id & 255);
-            const unsigned char expected[] = {rgba ? red : static_cast<unsigned char>(64),
-                static_cast<unsigned char>((id >> 8) & 255), rgba ? static_cast<unsigned char>(64) : red, 255};
+            const unsigned char blue = scene ? 128 : 64;
+            const unsigned char expected[] = {rgba ? red : blue,
+                static_cast<unsigned char>((id >> 8) & 255), rgba ? blue : red, 255};
             unsigned char* data = nullptr;
-            D3D12_RANGE range{0, readbackBytes_};
-            Require(readback_->Map(0, &range, reinterpret_cast<void**>(&data)), "map verification pixels");
+            D3D12_RANGE range{0, bytes};
+            Require(readback->Map(0, &range, reinterpret_cast<void**>(&data)), "map verification pixels");
             bool valid = true;
             for (UINT y = 0; y < frame_->height && valid; ++y)
                 for (UINT x = 0; x < frame_->width && valid; ++x)
                     for (UINT c = 0; c < 4; ++c)
-                        if (data[static_cast<SIZE_T>(y) * footprint_.Footprint.RowPitch + x * 4 + c] != expected[c])
-                        { valid = false; break; }
+                        if (data[static_cast<SIZE_T>(y) * footprint.Footprint.RowPitch + x * 4 + c] != expected[c])
+                        {
+                            std::fprintf(stderr, "PIXEL_MISMATCH scene=%u frame=%llu x=%u y=%u channel=%u expected=%u actual=%u\n",
+                                scene ? 1u : 0u, static_cast<unsigned long long>(id), x, y, c, expected[c],
+                                data[static_cast<SIZE_T>(y) * footprint.Footprint.RowPitch + x * 4 + c]);
+                            valid = false; break;
+                        }
             const D3D12_RANGE written{0, 0};
-            readback_->Unmap(0, &written);
+            readback->Unmap(0, &written);
             if (!valid) throw std::runtime_error("GPU pixel verification failed: stale/torn/wrong frame");
         }
         void CreateWindowAndSwapChain()
@@ -518,11 +752,24 @@ namespace
             wc.lpszClassName = L"OpenShimFrameBridgePresenter";
             if (!RegisterClassW(&wc)) throw std::runtime_error("RegisterClass failed");
             constexpr DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU;
+            // DLSS-G deliberately suspends interpolation for an unfocused
+            // window. Its explicitly requested demo uses normal window startup.
+            const DWORD extendedStyle = fgMode_ && !development_ ? 0 : WS_EX_NOACTIVATE;
             RECT rect{0, 0, static_cast<LONG>(frame_->width), static_cast<LONG>(frame_->height)};
-            AdjustWindowRectEx(&rect, style, FALSE, WS_EX_NOACTIVATE);
-            window_ = CreateWindowExW(WS_EX_NOACTIVATE, wc.lpszClassName,
-                L"OpenShim DX12 frame transport preview (DLSS/RT pending)", style,
-                CW_USEDEFAULT, CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top,
+            AdjustWindowRectEx(&rect, style, FALSE, extendedStyle);
+            MONITORINFO monitor{sizeof(MONITORINFO)};
+            const auto primary = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+            if (!GetMonitorInfoW(primary, &monitor)) throw std::runtime_error("preview monitor unavailable");
+            // Keep this helper on an attached monitor and leave room for the
+            // source game. Completely covering its window can suspend Ogre's
+            // rendering while simulation continues, starving the transport.
+            // The swapchain retains the full source extent; only its preview
+            // window is scaled down for this two-window experiment.
+            const LONG windowWidth = std::min(rect.right - rect.left, (monitor.rcWork.right - monitor.rcWork.left) / 2);
+            const LONG windowHeight = std::min(rect.bottom - rect.top, (monitor.rcWork.bottom - monitor.rcWork.top) / 2);
+            window_ = CreateWindowExW(extendedStyle, wc.lpszClassName,
+                fgMode_ ? L"Battlezone experimental DLSS Frame Generation preview" : rtMode_ ? L"Battlezone hardware DXR AO preview (visible geometry)" : L"OpenShim DX12 frame transport preview (DLSS/RT pending)", style,
+                monitor.rcWork.right - windowWidth - 16, monitor.rcWork.bottom - windowHeight - 16, windowWidth, windowHeight,
                 nullptr, nullptr, wc.hInstance, nullptr);
             if (!window_) throw std::runtime_error("CreateWindow failed");
             DXGI_SWAP_CHAIN_DESC1 desc{};
@@ -537,7 +784,21 @@ namespace
             Require(factory_->CreateSwapChainForHwnd(queue_.Get(), window_, &desc, nullptr, nullptr, &swap), "CreateSwapChainForHwnd");
             Require(swap.As(&swapchain_), "IDXGISwapChain3");
             Require(factory_->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER), "disable exclusive fullscreen");
-            ShowWindow(window_, SW_SHOWNOACTIVATE);
+            ShowWindow(window_, fgMode_ && !development_ ? SW_SHOWNORMAL : SW_SHOWNOACTIVATE);
+            // STARTUPINFO can override the first ShowWindow call in a child
+            // launched from a harness. An explicit second show keeps only
+            // this requested helper window visible without taking focus.
+            if (!IsWindowVisible(window_) || IsIconic(window_)) ShowWindow(window_, SW_SHOWNOACTIVATE);
+            RECT actual{}; GetWindowRect(window_, &actual);
+            std::printf("PREVIEW visible=%u iconic=%u rect=%ld,%ld,%ld,%ld\n", IsWindowVisible(window_) ? 1u : 0u,
+                IsIconic(window_) ? 1u : 0u, actual.left, actual.top, actual.right, actual.bottom);
+            if (fgMode_ && !development_)
+            {
+                // One startup request for this explicit interactive demo.
+                // Never refocus it while the user works in another window.
+                const bool focused = SetForegroundWindow(window_) != FALSE;
+                std::printf("DLSSG preview_foreground_request=%s (focus is required by NVIDIA)\n", focused ? "accepted" : "denied");
+            }
         }
         Handle mapping_, producer_, event_;
         SharedFrame* frame_ = nullptr;
@@ -558,6 +819,12 @@ namespace
         std::string motionPath_;
         CameraHistory history_;
         CapturedCameraPair lastPair_{};
+        std::string scenePath_;
+        bool verifyScene_ = false, lastSceneValid_ = false;
+        std::uint32_t lastSceneStatus_ = 0, lastSceneOrdinal_ = 0, lastSceneSource_ = 0, lastSceneStage_ = 0, sceneStage_ = 0;
+        ComPtr<ID3D12Resource> sceneColor_, sceneReadback_;
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT sceneFootprint_{};
+        SIZE_T sceneReadbackBytes_ = 0;
         bool ownsConsumer_ = false;
         bool reading_ = false;
         UINT64 lastFrame_ = 0;
@@ -575,6 +842,23 @@ namespace
         SIZE_T readbackBytes_ = 0;
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT depthFootprint_{};
         SIZE_T depthReadbackBytes_ = 0;
+        bool fgMode_ = false;
+        bool development_ = false;
+        std::string fgReport_;
+        ComPtr<ID3D12Device> queueDevice_;
+        ComPtr<ID3D12Resource> fgScene_, fgDepth_;
+        GpuCameraMotion gpuMotion_;
+        StreamlineFrameGeneration frameGeneration_;
+        bool rtMode_ = false, lastRtValid_ = false;
+        unsigned rtFrames_ = 0;
+        std::string rtPath_;
+        ComPtr<ID3D12Resource> rtFinal_, rtReadback_;
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT rtFootprint_{};
+        SIZE_T rtReadbackBytes_ = 0;
+        VisibleRayTracing rayTracing_;
+        GpuBlit blit_;
+        OwnWindowRecorder recorder_;
+        std::ofstream rendererRecording_;
     };
 }
 
@@ -591,6 +875,16 @@ int main(int argc, char** argv)
     UINT depthClearOrdinal = 0;
     bool requireCamera = false;
     std::string motionPath;
+    std::string scenePath;
+    bool verifyScene = false;
+    UINT sceneStage = 0;
+    std::wstring streamlineDirectory;
+    std::string fgReport;
+    bool visibleAO = false;
+    std::string rtCapture;
+    bool development = false;
+    std::string recording;
+    std::string rendererRecording;
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg(argv[i]);
@@ -598,6 +892,32 @@ int main(int argc, char** argv)
         else if (arg == "--show") show = true;
         else if (arg == "--verify-depth") verifyDepth = true;
         else if (arg == "--require-camera") requireCamera = true;
+        else if (arg == "--verify-scene") verifyScene = true;
+        else if (arg == "--rt-visible-ao") visibleAO = true;
+        else if (arg == "--streamline-development") development = true;
+        else if (arg == "--record-window" && i + 1 < argc) { recording = argv[++i]; show = true; }
+        else if (arg == "--record-frames" && i + 1 < argc) rendererRecording = argv[++i];
+        else if (arg == "--capture-rt-bmp" && i + 1 < argc) rtCapture = argv[++i];
+        else if (arg == "--streamline-dir" && i + 1 < argc)
+        {
+            const auto length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, argv[i+1], -1, nullptr, 0);
+            if (length <= 1) return 2;
+            streamlineDirectory.resize(static_cast<size_t>(length));
+            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, argv[++i], -1, streamlineDirectory.data(), length);
+            streamlineDirectory.pop_back(); show = true;
+        }
+        else if (arg == "--fg-report" && i + 1 < argc) fgReport = argv[++i];
+        else if (arg == "--scene-stage" && i + 1 < argc)
+        {
+            const std::string value(argv[++i]);
+            if (value == "before-overlay") sceneStage = 1;
+            else if (value != "pre-clear") return 2;
+        }
+        else if (arg == "--capture-scene-bmp" && i + 1 < argc)
+        {
+            scenePath = argv[++i];
+            if (scenePath.empty()) return 2;
+        }
         else if (arg == "--capture-camera-motion-pfm" && i + 1 < argc)
         {
             motionPath = argv[++i];
@@ -631,7 +951,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            std::fprintf(stderr, "usage: frame_bridge_presenter --pid N [--frames N] [--timeout-ms N] [--show] [--verify] [--capture-bmp PATH] [--verify-depth] [--capture-depth-pfm PATH] [--depth-clear-ordinal 0..8] [--require-camera] [--capture-camera-motion-pfm PATH]\n");
+            std::fprintf(stderr, "usage: frame_bridge_presenter --pid N [--frames N] [--timeout-ms N] [--show] [--verify] [--capture-bmp PATH] [--verify-depth] [--capture-depth-pfm PATH] [--depth-clear-ordinal 0..8] [--require-camera] [--capture-camera-motion-pfm PATH] [--capture-scene-bmp PATH] [--verify-scene] [--scene-stage pre-clear|before-overlay] [--streamline-dir SDK_BIN_PATH --fg-report PATH] [--streamline-development] [--rt-visible-ao --capture-rt-bmp PATH] [--record-window PATH] [--record-frames PATH]\n");
             return 2;
         }
     }
@@ -639,10 +959,19 @@ int main(int argc, char** argv)
     if (requireCamera && depthPath.empty()) return 2;
     if (!motionPath.empty() && (depthPath.empty() || frames < 2)) return 2;
     if (!motionPath.empty()) requireCamera = true;
+    if ((!scenePath.empty() || verifyScene) && !depthClearOrdinal) return 2;
+    if (!scenePath.empty() && depthPath.empty()) return 2;
+    if (!scenePath.empty()) requireCamera = true;
+    if (!streamlineDirectory.empty() && (!depthClearOrdinal || fgReport.empty())) return 2;
+    if (streamlineDirectory.empty() && !fgReport.empty()) return 2;
+    if (visibleAO && !depthClearOrdinal) return 2;
+    if (!visibleAO && !rtCapture.empty()) return 2;
+    if (development && streamlineDirectory.empty()) return 2;
     try
     {
         Consumer consumer;
-        consumer.Open(pid, show, verify, capturePath, verifyDepth, depthPath, depthClearOrdinal, requireCamera, motionPath);
+        consumer.Open(pid, show, verify, capturePath, verifyDepth, depthPath, depthClearOrdinal, requireCamera, motionPath, scenePath, verifyScene, sceneStage,
+            streamlineDirectory, fgReport, visibleAO, rtCapture, development, recording, rendererRecording);
         return consumer.Run(frames, timeoutMs) >= frames ? 0 : 1;
     }
     catch (const std::exception& error)

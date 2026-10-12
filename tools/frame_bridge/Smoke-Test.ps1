@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
     [switch]$Show,
-    [ValidateSet('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra', 'depth', 'depth-msaa4', 'depth-motion')]
-    [string[]]$Cases = @('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra', 'depth', 'depth-msaa4', 'depth-motion')
+    [ValidateSet('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra', 'depth', 'depth-msaa4', 'depth-motion', 'depth-scene', 'depth-scene-msaa4', 'depth-scene-bgra')]
+    [string[]]$Cases = @('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra', 'depth', 'depth-msaa4', 'depth-motion', 'depth-scene', 'depth-scene-msaa4', 'depth-scene-bgra')
 )
 
 Set-StrictMode -Version Latest
@@ -19,11 +19,12 @@ foreach ($case in $Cases) {
     $outFile = Join-Path $buildRoot "bridge-$case.out.log"
     $errFile = Join-Path $buildRoot "bridge-$case.err.log"
     $sourceArgs = @('10')
-    if ($case -in @('msaa4', 'depth-msaa4')) { $sourceArgs += '--msaa' }
+    if ($case -in @('msaa4', 'depth-msaa4', 'depth-scene-msaa4')) { $sourceArgs += '--msaa' }
     if ($case -like 'depth*') { $sourceArgs += @('--depth', '--padded') }
     if ($case -eq 'depth-motion') { $sourceArgs += '--motion-fixture' }
+    if ($case -like 'depth-scene*') { $sourceArgs += '--scene-color' }
     if ($case -like 'padded-*') { $sourceArgs += '--padded' }
-    if ($case -eq 'padded-bgra') { $sourceArgs += '--bgra' }
+    if ($case -in @('padded-bgra', 'depth-scene-bgra')) { $sourceArgs += '--bgra' }
     # No elevation, injection or interactive helper window. The source exits on
     # its own deadline, including on a failing consumer. Never force-stop games.
     $sourceProcess = Start-Process -FilePath $sourceExe -ArgumentList $sourceArgs -WindowStyle Hidden `
@@ -71,6 +72,10 @@ foreach ($case in $Cases) {
             $motionFile = Join-Path $buildRoot 'bridge-camera-motion.pfm'
             $presenterArgs += @('--capture-camera-motion-pfm', $motionFile)
         }
+        if ($case -like 'depth-scene*') {
+            $sceneFile = Join-Path $buildRoot "bridge-$case-scene.bmp"
+            $presenterArgs += @('--capture-scene-bmp', $sceneFile, '--depth-clear-ordinal', '1', '--verify-scene')
+        }
         if ($Show) { $presenterArgs += '--show' }
         & $presenterExe @presenterArgs
         if ($LASTEXITCODE -ne 0) { throw "$case pixel verification failed" }
@@ -95,7 +100,7 @@ foreach ($case in $Cases) {
                 -not $metadata.candidateOnly -or $metadata.sourceFormat -ne 45) { throw 'Invalid depth capture metadata' }
             $expectedTranslation = if ($case -eq 'depth-motion') { $metadata.frameId / 1000.0 } else { $metadata.frameId }
             if (-not $metadata.cameraObservation.valid -or [Math]::Abs($metadata.cameraObservation.view[3] - $expectedTranslation) -gt 0.000001 -or
-                -not $metadata.cameraObservation.recognizedPerspective -or $metadata.protocolVersion -ne 4 -or
+                -not $metadata.cameraObservation.recognizedPerspective -or $metadata.protocolVersion -ne 5 -or
                 $metadata.cameraObservation.matrixSource -ne 'synthetic' -or
                 $metadata.cameraObservation.projection.Count -ne 16) { throw 'Stale or invalid camera artifact' }
             $depthBytes = [System.IO.File]::ReadAllBytes($depthFile)
@@ -146,10 +151,23 @@ foreach ($case in $Cases) {
                 if ($validCount -ne $motionMetadata.validPixels) { throw 'Motion validity count mismatch' }
             }
         }
+        if ($case -like 'depth-scene*') {
+            $sceneMetadata = Get-Content -LiteralPath ($sceneFile + '.json') -Raw | ConvertFrom-Json
+            if ($sceneMetadata.protocolVersion -ne 5 -or $sceneMetadata.frameId -ne 120 -or
+                $sceneMetadata.capturedClearOrdinal -ne 1 -or -not $sceneMetadata.cameraObservation.valid -or
+                $sceneMetadata.hudFreeQualified -or -not $sceneMetadata.candidateOnly) { throw 'Invalid scene metadata' }
+            $sceneBytes = [IO.File]::ReadAllBytes($sceneFile)
+            if ($sceneBytes.Length -ne $bytes.Length) { throw 'Invalid scene BMP size' }
+            for ($pixel = 54; $pixel -lt $sceneBytes.Length; $pixel += 4) {
+                if ($sceneBytes[$pixel] -ne 128 -or $sceneBytes[$pixel + 1] -ne 0 -or
+                    $sceneBytes[$pixel + 2] -ne 120 -or $sceneBytes[$pixel + 3] -ne 255) { throw 'Stale/final/wrong scene pixels' }
+            }
+        }
         # Reconnect while the producer is still alive; ownership must be
         # returned after GPU completion and frame numbering must stay aligned.
         $reconnectArgs = @('--pid', "$($sourceProcess.Id)", '--frames', '80', '--verify')
         if ($case -like 'depth*') { $reconnectArgs += '--verify-depth' }
+        if ($case -like 'depth-scene*') { $reconnectArgs += @('--verify-scene', '--depth-clear-ordinal', '1') }
         & $presenterExe @reconnectArgs
         if ($LASTEXITCODE -ne 0) { throw "$case reconnect failed" }
     } catch { $failure = $_ }

@@ -18,6 +18,9 @@ int main()
     using OpenShimTest::Check;
     Check(ValidDescriptor(f, 42), "valid x86/x64 wire descriptor");
     Check(!ValidDescriptor(f, 43), "reject mismatched producer identity");
+    f.version = 4;
+    Check(!ValidDescriptor(f, 42), "reject V4 descriptor without scene-color semantics");
+    f.version = kVersion;
     f.version = 3;
     Check(!ValidDescriptor(f, 42), "reject V3 camera matrices without explicit convention");
     f.version = kVersion;
@@ -74,5 +77,6 @@ int main()
     Check(!ValidDepthFrame(f), "reject impossible capture ordinal");
     f.depthMatchingClears = 3;
     Check(ValidDepthFrame(f), "valid pre-clear candidate metadata");
+    Check(!ValidSceneColorFrame(f), "missing scene color/camera cannot be a matched frame");
     return OpenShimTest::ExitCode();
 }

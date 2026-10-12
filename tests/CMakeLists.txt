@@ -166,6 +166,19 @@ openshim_add_test(bzn_save_path_tests STD 20 SOURCES
 )
 
 if(WIN32 AND MSVC)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+        openshim_add_test(hook_engine_thread_snapshot_tests STD 20 SOURCES
+            hook_engine_thread_snapshot_tests.cpp
+            ../src/engine/hook_engine.cpp
+            ../src/engine/build_overlay.cpp
+            ../src/engine/resolve_table.cpp
+            ../src/patches/hook_patch_helpers.cpp
+            ../src/engine/x86_length.cpp
+        )
+        target_link_libraries(hook_engine_thread_snapshot_tests PRIVATE psapi)
+        target_compile_definitions(hook_engine_thread_snapshot_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        set_tests_properties(hook_engine_thread_snapshot_tests PROPERTIES TIMEOUT 15)
+    endif()
     # file_io_hooks.cpp (included directly by the test) is the runtime half of
     # the file-I/O seam, so the bootstrap half has to be linked with it. Note
     # game_log_path.cpp is deliberately NOT linked: the test supplies its own

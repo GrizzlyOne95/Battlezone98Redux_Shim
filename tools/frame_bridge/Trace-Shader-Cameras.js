@@ -14,7 +14,13 @@ function body(module, name) {
         if (address.compare(module.base) < 0 || address.add(32).compare(module.base.add(module.size)) > 0)
             throw new Error('Export thunk left module: ' + name);
         if (address.readU8() !== 0xe9) return address;
-        address = address.add(5 + address.add(1).readS32());
+        const next = address.add(5 + address.add(1).readS32());
+        // Allow the task's qualified native parameter observer at an export
+        // body; attach there and observe its normal return. Other external
+        // trampolines still fail closed.
+        const owner = Process.findModuleByAddress(next);
+        if (owner && owner.name.toLowerCase() === 'openshim.dll') return address;
+        address = next;
     }
     throw new Error('Export thunk chain too long: ' + name);
 }
@@ -23,6 +29,8 @@ function getter(name, result = 'pointer') {
 }
 const cameraOf = getter('?getCurrentCamera@AutoParamDataSource@Ogre@@QBEPBVCamera@2@XZ');
 const renderableOf = getter('?getCurrentRenderable@AutoParamDataSource@Ogre@@UBEPBVRenderable@2@XZ');
+const worldCountOf = getter('?getWorldMatrixCount@AutoParamDataSource@Ogre@@UBEIXZ', 'uint');
+const cameraPositionOf = getter('?getDerivedPosition@Camera@Ogre@@QBEABVVector3@2@XZ');
 const viewportOf = getter('?_getViewport@RenderSystem@Ogre@@UAEPAVViewport@2@XZ');
 const widthOf = getter('?getActualWidth@Viewport@Ogre@@QBEHXZ', 'int');
 const heightOf = getter('?getActualHeight@Viewport@Ogre@@QBEHXZ', 'int');
@@ -44,6 +52,7 @@ const variants = new Map();
 const parameters = new Map();
 const draws = new Map();
 const drawHooks = new Set();
+const transforms = new Map();
 const listeners = [];
 const maxFrames = 30, maxVariants = 128, maxSources = 32;
 let drawCalls = 0, linkedDrawCalls = 0;
@@ -87,8 +96,10 @@ function finish(reason) {
     for (const listener of listeners) listener.detach();
     for (const variant of variants.values()) emit(variant);
     for (const draw of draws.values()) emit(draw);
+    for (const transform of transforms.values()) emit(transform);
     emit({ type: 'complete', reason, frames: Math.max(0, frame - 1), variants: variants.size, errors, overflow,
         drawGroups: draws.size, drawCalls, linkedDrawCalls,
+        objectTransformGroups: transforms.size,
         qualification: 'parameter-binding-draw-observations-only' });
 }
 
@@ -100,7 +111,7 @@ for (const name of [
 ]) attach(ogre, name, { onEnter(args) { guarded(() => {
     const state = source(this.context.ecx, this.threadId);
     if (state) {
-        state.view = null; state.projection = null; state.variantKey = null;
+        state.view = null; state.projection = null; state.variantKey = null; state.world = null;
         // Observe the flag rather than infer origin policy from zeros.
         if (name.includes('setCurrentCamera')) state.cameraRelative = (args[1].toUInt32() & 255) !== 0;
     }
@@ -116,6 +127,27 @@ attach(ogre, '?_renderScene@SceneManager@Ogre@@UAEXPAVCamera@2@PAVViewport@2@_N@
         this.entered = true;
     }); },
     onLeave() { if (this.entered) context(this.threadId).scenes.pop(); }
+});
+
+attach(ogre, '?getWorldMatrix@AutoParamDataSource@Ogre@@UBEABVMatrix4@2@XZ', {
+    onEnter() { this.source = this.context.ecx; },
+    onLeave(result) { guarded(() => {
+        const ctx = context(this.threadId);
+        if (frame === 0 || ctx.readingWorld) return;
+        const state = source(this.source, this.threadId);
+        if (!state) return;
+        const renderable = renderableOf(this.source);
+        if (renderable.isNull()) { state.world = null; return; }
+        let count;
+        ctx.readingWorld = true;
+        try { count = worldCountOf(this.source); } finally { ctx.readingWorld = false; }
+        if (!count || count > 256) { state.world = null; ++overflow; return; }
+        const camera = cameraOf(this.source);
+        if (camera.isNull()) { state.world = null; return; }
+        const position = Array.from(new Float32Array(cameraPositionOf(camera).readByteArray(12)));
+        if (!position.every(Number.isFinite)) throw new Error('Nonfinite camera origin');
+        state.world = { matrix: matrix(result), count, renderable: renderable.toString(), position };
+    }); }
 });
 attach(dx11, '?clearFrameBuffer@D3D11RenderSystem@Ogre@@UAEXIABVColourValue@2@MG@Z', {
     onEnter(args) { guarded(() => {
@@ -142,7 +174,7 @@ for (const [kind, name] of [
         if (!state.view || !state.projection) return;
         const ctx = context(this.threadId);
         const scene = ctx.scenes[ctx.scenes.length - 1];
-        if (!scene || scene.width < 500 || scene.height < 500) return;
+        if (!scene || scene.width < 1 || scene.height < 1 || scene.width > 8192 || scene.height > 8192) return;
         const camera = cameraOf(this.source);
         if (camera.isNull()) return;
         const renderable = renderableOf(this.source).toString();
@@ -183,7 +215,7 @@ attach(ogre, '?_updateAutoParams@GpuProgramParameters@Ogre@@QAEXPBVAutoParamData
         if (!state || !state.variantKey) return;
         const key = this.threadId + ':' + this.parameter;
         if (!parameters.has(key) && parameters.size >= 1024) { ++overflow; return; }
-        parameters.set(key, { variantKey: state.variantKey, frame });
+        parameters.set(key, { variantKey: state.variantKey, frame, world: state.world || null });
     }); }
 });
 attach(dx11, '?bindGpuProgramParameters@D3D11RenderSystem@Ogre@@UAEXW4GpuProgramType@2@V?$SharedPtr@VGpuProgramParameters@Ogre@@@2@G@Z', {
@@ -216,6 +248,38 @@ function com(object, slot, result, args) {
         ['pointer', ...args], 'stdcall');
 }
 function release(object) { if (!object.isNull()) com(object, 2, 'uint', [])(object); }
+function recordTransform(observation, scene, clears) {
+    if (!observation.world || !scene) return;
+    const world = observation.world, variant = variants.get(observation.variantKey);
+    const close = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 0.0001);
+    const expectedView = variant.cameraViewForShaders.slice();
+    if (variant.cameraRelative === true) for (const at of [3, 7, 11]) expectedView[at] = 0;
+    const affine = world.matrix.slice(12).every((v, i) => Math.abs(v - (i === 3 ? 1 : 0)) < 0.0001);
+    const rigidCandidate = world.count === 1 && affine && variant.cameraRelative !== null &&
+        close(variant.view, expectedView) && close(variant.projection, variant.cameraProjectionWithRSDepth) &&
+        Math.abs(variant.projection[15]) < 0.0001 && Math.abs(variant.projection[14]) > 0.9;
+    const absolute = world.matrix.slice();
+    if (rigidCandidate && variant.cameraRelative) for (let i = 0; i < 3; ++i) absolute[i * 4 + 3] += world.position[i];
+    const key = JSON.stringify([world.renderable, scene.width, scene.height, clears, variant.parameterCamera, world.count, rigidCandidate]);
+    if (!transforms.has(key)) {
+        if (transforms.size >= 2048) { ++overflow; return; }
+        transforms.set(key, { type: 'object-transform-group', renderable: world.renderable, width: scene.width, height: scene.height,
+            precedingViewportDepthClears: clears, parameterCamera: variant.parameterCamera,
+            transformCount: world.count, rigidCandidate, lifetimeQualified: false,
+            matrixSpace: rigidCandidate ? 'absolute-world-candidate' : 'raw-auto-param-first-matrix',
+            firstFrame: frame, lastFrame: frame, calls: 0, consecutivePairs: 0, changedPairs: 0, withinFrameConflicts: 0,
+            firstMatrix: absolute.slice(), lastMatrix: absolute.slice(), cameraRelative: variant.cameraRelative });
+    }
+    const record = transforms.get(key);
+    if (record.calls) {
+        const changed = !close(record.lastMatrix, absolute);
+        if (frame === record.lastFrame && changed) ++record.withinFrameConflicts;
+        else if (frame === record.lastFrame + 1) {
+            ++record.consecutivePairs; if (changed) ++record.changedPairs;
+        }
+    }
+    ++record.calls; record.lastFrame = frame; record.lastMatrix = absolute;
+}
 function bindingsAtDraw(immediate) {
     const bufferOut = Memory.alloc(4), depthOut = Memory.alloc(4), stateOut = Memory.alloc(4), stencil = Memory.alloc(4);
     bufferOut.writePointer(ptr(0)); depthOut.writePointer(ptr(0)); stateOut.writePointer(ptr(0));
@@ -269,6 +333,7 @@ function attachDraws(immediate) {
                 const scene = ctx.scenes[ctx.scenes.length - 1];
                 const clears = scene ? ctx.clears.get(scene.width + 'x' + scene.height) || 0 : 0;
                 const variantKey = linked ? observation.variantKey : null;
+                if (linked) recordTransform(observation, scene, clears);
                 const key = JSON.stringify([name, scene && scene.width, scene && scene.height, clears,
                     bindings.depth, bindings.buffer, bindings.depthPolicy, variantKey]);
                 if (!draws.has(key)) {
