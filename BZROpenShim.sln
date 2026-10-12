@@ -19,6 +19,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BZLoaderHostTest", "BZLoade
 		{B86AE723-BE19-4C0E-B7A3-FAE86DBF7BE2} = {B86AE723-BE19-4C0E-B7A3-FAE86DBF7BE2}
 	EndProjectSection
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OpenShimSetup", "installer\OpenShimSetup\OpenShimSetup.vcxproj", "{3D0F6B52-8A1E-4C77-9B4A-2E5C7F91A6D3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -47,6 +49,10 @@ Global
 		{9649D3EF-8C24-4A67-8079-05DD51CC482B}.Debug|Win32.Build.0 = Debug|Win32
 		{9649D3EF-8C24-4A67-8079-05DD51CC482B}.Release|Win32.ActiveCfg = Release|Win32
 		{9649D3EF-8C24-4A67-8079-05DD51CC482B}.Release|Win32.Build.0 = Release|Win32
+		{3D0F6B52-8A1E-4C77-9B4A-2E5C7F91A6D3}.Debug|Win32.ActiveCfg = Debug|Win32
+		{3D0F6B52-8A1E-4C77-9B4A-2E5C7F91A6D3}.Debug|Win32.Build.0 = Debug|Win32
+		{3D0F6B52-8A1E-4C77-9B4A-2E5C7F91A6D3}.Release|Win32.ActiveCfg = Release|Win32
+		{3D0F6B52-8A1E-4C77-9B4A-2E5C7F91A6D3}.Release|Win32.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
