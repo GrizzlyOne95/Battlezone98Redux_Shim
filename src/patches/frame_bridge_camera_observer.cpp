@@ -114,6 +114,64 @@ namespace BZROpenShim::FrameBridge
 
     namespace
     {
+        struct EffectApi
+        {
+            Api camera;
+            void* (__thiscall* bound)(void*) = nullptr;
+            void* (__thiscall* shader)(void*) = nullptr;
+            const std::string& (__thiscall* name)(void*) = nullptr;
+        };
+        bool ModuleHash(HMODULE module,const char* expected)
+        {
+            wchar_t path[MAX_PATH]{}; std::string hash;
+            const auto length=GetModuleFileNameW(module,path,MAX_PATH);
+            return length&&length<MAX_PATH&&TryComputeFileSha256Hex(std::filesystem::path(path),hash)&&hash==expected;
+        }
+        bool GuardedEffect(const EffectApi& api,const std::string& rendererName,void*& shader,std::uint32_t& width,std::uint32_t& height)
+        {
+            __try
+            {
+                void* root=api.camera.root(); if(!root) return false;
+                void* renderer=api.camera.renderer(root); if(!renderer||renderer!=api.camera.rendererByName(root,rendererName)) return false;
+                void* viewport=api.camera.viewport(renderer); if(!viewport) return false;
+                const int w=api.camera.width(viewport),h=api.camera.height(viewport);
+                if(w<=0||h<=0||w>8192||h>8192) return false;
+                void* program=api.bound(renderer); if(!program) return false;
+                const std::string& name=api.name(program);
+                // Pass names refer to the unified program. The renderer binds
+                // its concrete HLSL4 delegate; require that exact identity.
+                constexpr char expected[]="Effect_fragmentHLSL4";
+                if(name.size()!=sizeof(expected)-1||std::memcmp(name.data(),expected,sizeof(expected)-1)) return false;
+                shader=api.shader(program); width=static_cast<std::uint32_t>(w); height=static_cast<std::uint32_t>(h);
+                static unsigned observations=0;
+                if(observations++<3) LogShimA(LogLevel::Info,"frame-bridge","[FrameBridge] reference bound program='%.*s' viewport=%dx%d shader=%p",static_cast<int>(name.size()),name.data(),w,h,shader);
+                return shader!=nullptr;
+            }
+            __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+    }
+    bool ObserveBoundEffectProgram(void*& pixelShader,std::uint32_t& width,std::uint32_t& height)
+    {
+        pixelShader=nullptr; width=height=0;
+        static EffectApi api; static bool attempted=false,ready=false;
+        if(!attempted)
+        {
+            HMODULE ogre=GetModuleHandleW(L"OgreMain.dll"),dx11=GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
+            if(!ogre||!dx11) return false;
+            attempted=true;
+            ready=ModuleHash(ogre,"e5e693960b95ad0d60733a3b688464a6c6cba234e86950698f9c2bea4acfeb45")&&
+                ModuleHash(dx11,"78a1d8e13c8bd71983b09a39a3dcf7783e6c34dde577de3b9202460db500aae0")&&Resolve(api.camera)&&
+                Bind(dx11,api.bound,"?_getBoundFragmentProgram@D3D11RenderSystem@Ogre@@QBEPAVD3D11HLSLProgram@2@XZ")&&
+                Bind(dx11,api.shader,"?getPixelShader@D3D11HLSLProgram@Ogre@@QBEPAUID3D11PixelShader@@XZ")&&
+                Bind(ogre,api.name,"?getName@Resource@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+            if(ready) LogShimA(LogLevel::Info,"frame-bridge","[FrameBridge] bound effect program reference APIs qualified");
+        }
+        static const std::string rendererName("Direct3D11 Rendering Subsystem");
+        return ready&&GuardedEffect(api,rendererName,pixelShader,width,height);
+    }
+
+    namespace
+    {
         using ParameterMatrix = const float*(__thiscall*)(void*);
         InlineDetour32 overlayViewDetour{}, overlayProjectionDetour{};
         void* volatile parameterView = nullptr;

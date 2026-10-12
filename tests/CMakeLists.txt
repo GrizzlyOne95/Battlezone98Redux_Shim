@@ -6,6 +6,10 @@ project(BzrNetProtocolTests LANGUAGES CXX)
 # suite can be configured, built, and run with plain CMake + CTest:
 #   cmake -S tests -B tests/build && cmake --build tests/build -j && ctest --test-dir tests/build --output-on-failure
 enable_testing()
+add_executable(frame_bridge_layer_policy_tests frame_bridge_layer_policy_tests.cpp)
+target_include_directories(frame_bridge_layer_policy_tests PRIVATE ../include)
+target_compile_features(frame_bridge_layer_policy_tests PRIVATE cxx_std_17)
+add_test(NAME frame_bridge_layer_policy_tests COMMAND frame_bridge_layer_policy_tests)
 
 add_executable(p2p_reliable_send_policy_tests p2p_reliable_send_policy_tests.cpp)
 target_include_directories(p2p_reliable_send_policy_tests PRIVATE ../include)
@@ -29,6 +33,8 @@ endif()
 # executable, Windows process APIs, Frida, pefile or capstone.
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
+    add_test(NAME frame_bridge_scene_layer_inspection_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/frame_bridge_scene_layer_inspection_tests.py")
     execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import PIL"
         RESULT_VARIABLE OPENSHIM_PIL_IMPORT_RESULT OUTPUT_QUIET ERROR_QUIET)
     if(OPENSHIM_PIL_IMPORT_RESULT EQUAL 0)

@@ -1,7 +1,8 @@
 // Bounded, read-only Ogre parameter trace. Load with bzr-frida.cmd against
 // the PID owned by Game-Smoke-Test.ps1 -ShaderCameraTrace. Never spawn the game
 // with Frida, eternalize this script, or use --kill-on-exit.
-// Export names are the only locators; no object offsets or build RVAs.
+// Export names locate engine objects; no game object offsets or build RVAs.
+// Returned strings use the bounded MSVC x86 ABI, checked against PlayerCam.
 'use strict';
 
 const ogre = Process.getModuleByName('OgreMain.dll');
@@ -31,6 +32,15 @@ const cameraOf = getter('?getCurrentCamera@AutoParamDataSource@Ogre@@QBEPBVCamer
 const renderableOf = getter('?getCurrentRenderable@AutoParamDataSource@Ogre@@UBEPBVRenderable@2@XZ');
 const worldCountOf = getter('?getWorldMatrixCount@AutoParamDataSource@Ogre@@UBEIXZ', 'uint');
 const cameraPositionOf = getter('?getDerivedPosition@Camera@Ogre@@QBEABVVector3@2@XZ');
+const cameraNameOf = getter('?getName@MovableObject@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ');
+const passOf = getter('?getCurrentPass@AutoParamDataSource@Ogre@@UBEPBVPass@2@XZ');
+const techniqueOf = getter('?getParent@Pass@Ogre@@QBEPAVTechnique@2@XZ');
+const materialOf = getter('?getParent@Technique@Ogre@@QBEPAVMaterial@2@XZ');
+const materialNameOf = getter('?getName@Resource@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ');
+const passNameOf = getter('?getName@Pass@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ');
+const fragmentNameOf = getter('?getFragmentProgramName@Pass@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ');
+const alphaFunctionOf = getter('?getAlphaRejectFunction@Pass@Ogre@@QBE?AW4CompareFunction@2@XZ','uint');
+const alphaValueOf = getter('?getAlphaRejectValue@Pass@Ogre@@QBEEXZ','uchar');
 const viewportOf = getter('?_getViewport@RenderSystem@Ogre@@UAEPAVViewport@2@XZ');
 const widthOf = getter('?getActualWidth@Viewport@Ogre@@QBEHXZ', 'int');
 const heightOf = getter('?getActualHeight@Viewport@Ogre@@QBEHXZ', 'int');
@@ -53,9 +63,32 @@ const parameters = new Map();
 const draws = new Map();
 const drawHooks = new Set();
 const transforms = new Map();
+const orderedDraws = [];
 const listeners = [];
 const maxFrames = 30, maxVariants = 128, maxSources = 32;
 let drawCalls = 0, linkedDrawCalls = 0;
+let stringLayoutChecked=false;
+function stringOf(value) {
+    if(value.isNull()) throw new Error('Null returned Ogre string');
+    const size=value.add(16).readU32(),capacity=value.add(20).readU32();
+    if(size>512||capacity<size||capacity>1024*1024) throw new Error('Returned string ABI/bounds mismatch');
+    const data=capacity<16?value:value.readPointer();
+    const text=size?data.readUtf8String(size):'';
+    if(text.includes('\u0000')) throw new Error('Embedded null in observed name');
+    return text;
+}
+function passInfo(source) {
+    if(!stringLayoutChecked) {
+        const camera=cameraOf(source);
+        if(camera.isNull()||stringOf(cameraNameOf(camera))!=='PlayerCam') return null;
+        stringLayoutChecked=true;
+    }
+    const pass=passOf(source);
+    if(pass.isNull()) return null;
+    const technique=techniqueOf(pass),material=technique.isNull()?ptr(0):materialOf(technique);
+    return {material:material.isNull()?null:stringOf(materialNameOf(material)),pass:stringOf(passNameOf(pass)),
+        fragmentProgram:stringOf(fragmentNameOf(pass)),alphaRejectFunction:alphaFunctionOf(pass),alphaRejectValue:alphaValueOf(pass)};
+}
 function emit(value) { console.log(JSON.stringify(value)); }
 function matrix(pointer) {
     if (pointer.isNull()) throw new Error('Null matrix');
@@ -66,7 +99,7 @@ function matrix(pointer) {
 function context(thread) {
     if (!contexts.has(thread)) {
         if (contexts.size >= 32) throw new Error('Thread observation limit exceeded');
-        contexts.set(thread, { scenes: [], clears: new Map(), bindings: [], renders: [], vertex: null, apiDepth: 0 });
+        contexts.set(thread, { scenes: [], clears: new Map(), bindings: [], renders: [], vertex: null, apiDepth: 0, drawOrdinal: 0 });
     }
     return contexts.get(thread);
 }
@@ -97,9 +130,12 @@ function finish(reason) {
     for (const variant of variants.values()) emit(variant);
     for (const draw of draws.values()) emit(draw);
     for (const transform of transforms.values()) emit(transform);
+    for (const draw of orderedDraws) emit(draw);
     emit({ type: 'complete', reason, frames: Math.max(0, frame - 1), variants: variants.size, errors, overflow,
         drawGroups: draws.size, drawCalls, linkedDrawCalls,
         objectTransformGroups: transforms.size,
+        orderedDraws: orderedDraws.length, orderedFrames: Math.min(3, Math.max(0, frame - 1)),
+        stringLayoutChecked,
         qualification: 'parameter-binding-draw-observations-only' });
 }
 
@@ -215,7 +251,7 @@ attach(ogre, '?_updateAutoParams@GpuProgramParameters@Ogre@@QAEXPBVAutoParamData
         if (!state || !state.variantKey) return;
         const key = this.threadId + ':' + this.parameter;
         if (!parameters.has(key) && parameters.size >= 1024) { ++overflow; return; }
-        parameters.set(key, { variantKey: state.variantKey, frame, world: state.world || null });
+        parameters.set(key, { variantKey: state.variantKey, frame, world: state.world || null, pass:passInfo(this.source) });
     }); }
 });
 attach(dx11, '?bindGpuProgramParameters@D3D11RenderSystem@Ogre@@UAEXW4GpuProgramType@2@V?$SharedPtr@VGpuProgramParameters@Ogre@@@2@G@Z', {
@@ -283,29 +319,58 @@ function recordTransform(observation, scene, clears) {
 function bindingsAtDraw(immediate) {
     const bufferOut = Memory.alloc(4), depthOut = Memory.alloc(4), stateOut = Memory.alloc(4), stencil = Memory.alloc(4);
     bufferOut.writePointer(ptr(0)); depthOut.writePointer(ptr(0)); stateOut.writePointer(ptr(0));
-    let buffer = ptr(0), depth = ptr(0), depthState = ptr(0);
+    const blendOut=Memory.alloc(4), factors=Memory.alloc(16), mask=Memory.alloc(4), targetOut=Memory.alloc(4), shaderOut=Memory.alloc(4);
+    blendOut.writePointer(ptr(0)); targetOut.writePointer(ptr(0)); shaderOut.writePointer(ptr(0));
+    let buffer = ptr(0), depth = ptr(0), depthState = ptr(0), blend=ptr(0), target=ptr(0), resource=ptr(0), shader=ptr(0);
     try {
         // Documented D3D11 API slots; getters AddRef, balanced in finally.
         com(immediate, 72, 'void', ['uint', 'uint', 'pointer'])(immediate, 0, 1, bufferOut);
         buffer = bufferOut.readPointer();
-        com(immediate, 89, 'void', ['uint', 'pointer', 'pointer'])(immediate, 0, ptr(0), depthOut);
+        com(immediate, 89, 'void', ['uint', 'pointer', 'pointer'])(immediate, 1, targetOut, depthOut);
         depth = depthOut.readPointer();
+        target = targetOut.readPointer();
         com(immediate, 92, 'void', ['pointer', 'pointer'])(immediate, stateOut, stencil);
         depthState = stateOut.readPointer();
-        let depthPolicy = null;
+        let depthPolicy = { enabled:true, writeMask:1, comparison:2, defaultState:true };
         if (!depthState.isNull()) {
             const desc = Memory.alloc(52);
             com(depthState, 7, 'void', ['pointer'])(depthState, desc);
-            depthPolicy = { enabled: desc.readU32() !== 0, writeMask: desc.add(4).readU32(), comparison: desc.add(8).readU32() };
+            depthPolicy = { enabled: desc.readU32() !== 0, writeMask: desc.add(4).readU32(), comparison: desc.add(8).readU32(), defaultState:false };
         }
+        com(immediate,91,'void',['pointer','pointer','pointer'])(immediate,blendOut,factors,mask);
+        blend=blendOut.readPointer();
+        let blendPolicy={enabled:false,alphaToCoverage:false,independent:false,source:2,destination:1,operation:1,
+            sourceAlpha:2,destinationAlpha:1,operationAlpha:1,writeMask:15,defaultState:true};
+        if(!blend.isNull()) {
+            const desc=Memory.alloc(264); com(blend,7,'void',['pointer'])(blend,desc);
+            const rt=desc.add(8);
+            blendPolicy={enabled:rt.readU32()!==0,alphaToCoverage:desc.readU32()!==0,independent:desc.add(4).readU32()!==0,
+                source:rt.add(4).readU32(),destination:rt.add(8).readU32(),operation:rt.add(12).readU32(),
+                sourceAlpha:rt.add(16).readU32(),destinationAlpha:rt.add(20).readU32(),operationAlpha:rt.add(24).readU32(),
+                writeMask:rt.add(28).readU8(),defaultState:false};
+        }
+        blendPolicy.sampleMask=mask.readU32();
+        let targetDescription=null;
+        if(!target.isNull()) {
+            const out=Memory.alloc(4); out.writePointer(ptr(0)); com(target,7,'void',['pointer'])(target,out); resource=out.readPointer();
+            if(!resource.isNull()) {
+                const type=Memory.alloc(4); com(resource,7,'void',['pointer'])(resource,type);
+                if(type.readU32()===3) { // D3D11_RESOURCE_DIMENSION_TEXTURE2D.
+                    const desc=Memory.alloc(44); com(resource,10,'void',['pointer'])(resource,desc);
+                    targetDescription={width:desc.readU32(),height:desc.add(4).readU32(),format:desc.add(16).readU32(),samples:desc.add(20).readU32()};
+                }
+            }
+        }
+        com(immediate,74,'void',['pointer','pointer','pointer'])(immediate,shaderOut,ptr(0),ptr(0)); shader=shaderOut.readPointer();
         let description = null;
         if (!depth.isNull()) {
             const desc = Memory.alloc(24);
             com(depth, 8, 'void', ['pointer'])(depth, desc);
             description = { format: desc.readU32(), dimension: desc.add(4).readU32() };
         }
-        return { buffer: buffer.toString(), depth: depth.toString(), depthDescription: description, depthPolicy };
-    } finally { release(depthState); release(depth); release(buffer); }
+        return { buffer: buffer.toString(), depth: depth.toString(), depthDescription: description, depthPolicy,
+            blendPolicy,target:target.toString(),targetDescription,pixelShader:shader.toString() };
+    } finally { release(shader); release(resource); release(target); release(blend); release(depthState); release(depth); release(buffer); }
 }
 function attachDraws(immediate) {
     for (const [slot, name] of [[12, 'DrawIndexed'], [13, 'Draw'], [20, 'DrawIndexedInstanced'],
@@ -334,19 +399,37 @@ function attachDraws(immediate) {
                 const clears = scene ? ctx.clears.get(scene.width + 'x' + scene.height) || 0 : 0;
                 const variantKey = linked ? observation.variantKey : null;
                 if (linked) recordTransform(observation, scene, clears);
+                const variant=linked?variants.get(variantKey):null;
+                const identity=!!(variant&&variant.view.every((v,i)=>Math.abs(v-(i%5===0?1:0))<.00001));
+                const b=bindings.blendPolicy,d=bindings.depthPolicy;
+                const mixes=b.enabled&&!(b.source===2&&b.destination===1&&b.operation===1);
+                const policyCandidate=identity?'identity-overlay':b.alphaToCoverage?'alpha-coverage':mixes?'blended':
+                    d.enabled&&d.writeMask===1?'opaque-depth-write':'unblended-no-depth-write';
                 const key = JSON.stringify([name, scene && scene.width, scene && scene.height, clears,
-                    bindings.depth, bindings.buffer, bindings.depthPolicy, variantKey]);
+                    bindings.depth, bindings.buffer, bindings.depthPolicy,bindings.blendPolicy,bindings.target,bindings.pixelShader,linked?observation.pass:null,variantKey]);
                 if (!draws.has(key)) {
-                    if (draws.size >= 512) { ++overflow; return; }
+                    if (draws.size >= 2048) { ++overflow; return; }
                     draws.set(key, { type: 'draw-group', method: name, firstFrame: frame, lastFrame: frame,
                         calls: 0, width: scene ? scene.width : 0, height: scene ? scene.height : 0,
                         precedingViewportDepthClears: clears, depthView: bindings.depth,
                         depthDescription: bindings.depthDescription, vertexConstantBuffer: bindings.buffer,
                         depthPolicy: bindings.depthPolicy,
+                        blendPolicy:bindings.blendPolicy,renderTarget:bindings.target,targetDescription:bindings.targetDescription,
+                        pixelShader:bindings.pixelShader,policyCandidate,
+                        passObservation:linked?observation.pass:null,
                         linked, parameterCamera: linked ? variants.get(variantKey).parameterCamera : null,
                         matrixVariant: linked ? Array.from(variants.keys()).indexOf(variantKey) : null });
                 }
                 const draw = draws.get(key); ++draw.calls; draw.lastFrame = frame;
+                ++ctx.drawOrdinal;
+                if(frame<=3) {
+                    if(orderedDraws.length>=4096) { ++overflow; return; }
+                    orderedDraws.push({type:'draw-order',frame,thread:this.threadId,ordinal:ctx.drawOrdinal,
+                        group:Array.from(draws.keys()).indexOf(key),method:name,
+                        count:slot===38||slot===39||slot===40?null:args[1].toUInt32(),
+                        width:draw.width,height:draw.height,precedingViewportDepthClears:clears,
+                        policyCandidate,renderable:linked&&observation.world?observation.world.renderable:null});
+                }
             }); },
             onLeave() { if (this.entered) --context(this.threadId).apiDepth; }
         }));
@@ -370,7 +453,7 @@ attach(ogre, '?_fireFrameEnded@Root@Ogre@@QAE_NAAUFrameEvent@2@@Z', {
         ++frame;
         states.clear();
         parameters.clear();
-        for (const ctx of contexts.values()) { ctx.clears.clear(); ctx.vertex = null; }
+        for (const ctx of contexts.values()) { ctx.clears.clear(); ctx.vertex = null; ctx.drawOrdinal=0; }
         if (frame > maxFrames) finish('frame-limit');
     }); }
 });

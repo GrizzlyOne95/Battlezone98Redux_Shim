@@ -6,6 +6,7 @@
 #include "shim_log.h"
 #include "frame_bridge_producer.h"
 #include "frame_bridge_camera_observer.h"
+#include "frame_bridge_layer_policy.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -43,6 +44,8 @@ namespace BZROpenShim
         std::atomic<bool> g_FrameBridgeEnabled{ false };
         std::atomic<bool> g_FrameBridgeDepthEnabled{ false };
         std::atomic<bool> g_FrameBridgeSceneColorEnabled{ false };
+        std::atomic<bool> g_WorldEffectsReferenceEnabled{ false },g_ReferenceObserverReady{ false };
+        std::atomic<unsigned> g_WorldEffectsReferenceSkipped{ 0 };
         Microsoft::WRL::ComPtr<IDXGISwapChain> g_FrameBridgeSceneSwapChain;
         thread_local bool g_BridgeIdentityOverlayParameters = false;
         using FnBridgeDrawIndexed = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, UINT, UINT, INT);
@@ -944,9 +947,65 @@ namespace BZROpenShim
             catch (...) { LogShimA(LogLevel::Warn, kComponent, "[FrameBridge] overlay observation failed; frame remains unqualified"); }
         }
 
+        bool SuppressReferenceEffect(ID3D11DeviceContext* context)
+        {
+            if(!g_WorldEffectsReferenceEnabled.load()||!g_ReferenceObserverReady.load()||g_BridgeIdentityOverlayParameters||!g_FrameBridgeEnabled.load()||g_ShutdownRequested.load()) return false;
+            try
+            {
+                std::lock_guard<std::mutex> lock(g_FrameBridgeMutex);
+                if(!g_FrameBridgeSceneSwapChain||!g_FrameBridge.Active()) return false;
+                void* expectedShader=nullptr; std::uint32_t width=0,height=0;
+                if(!FrameBridge::ObserveBoundEffectProgram(expectedShader,width,height)) return false;
+                DXGI_SWAP_CHAIN_DESC swap{}; if(FAILED(g_FrameBridgeSceneSwapChain->GetDesc(&swap))) return false;
+                Microsoft::WRL::ComPtr<ID3D11PixelShader> shader;
+                context->PSGetShader(&shader,nullptr,nullptr);
+                Microsoft::WRL::ComPtr<ID3D11DepthStencilState> depthState;
+                Microsoft::WRL::ComPtr<ID3D11BlendState> blendState;
+                UINT stencil=0,sampleMask=0; FLOAT factors[4]{};
+                context->OMGetDepthStencilState(&depthState,&stencil); context->OMGetBlendState(&blendState,factors,&sampleMask);
+                if(!depthState||!blendState||sampleMask!=0xFFFFFFFFu) return false;
+                D3D11_DEPTH_STENCIL_DESC depth{}; D3D11_BLEND_DESC blend{};
+                depthState->GetDesc(&depth); blendState->GetDesc(&blend);
+                UINT views=1; D3D11_VIEWPORT viewport{}; context->RSGetViewports(&views,&viewport);
+                Microsoft::WRL::ComPtr<ID3D11RenderTargetView> target;
+                Microsoft::WRL::ComPtr<ID3D11DepthStencilView> depthView;
+                Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+                Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+                context->OMGetRenderTargets(1,&target,&depthView);
+                if(!target||!depthView) return false; target->GetResource(&resource);
+                if(FAILED(resource.As(&texture))) return false;
+                D3D11_TEXTURE2D_DESC description{}; texture->GetDesc(&description);
+                Microsoft::WRL::ComPtr<ID3D11Resource> depthResource;
+                Microsoft::WRL::ComPtr<ID3D11Texture2D> depthTexture;
+                depthView->GetResource(&depthResource); if(FAILED(depthResource.As(&depthTexture))) return false;
+                D3D11_TEXTURE2D_DESC depthDescription{}; depthTexture->GetDesc(&depthDescription);
+                if(depthDescription.Width!=description.Width||depthDescription.Height!=description.Height||depthDescription.SampleDesc.Count!=description.SampleDesc.Count) return false;
+                FrameBridge::WorldEffectFacts facts{};
+                facts.requested=true; facts.qualifiedApis=true; facts.effectProgram=true;
+                facts.boundShaderMatches=shader.Get()==expectedShader; facts.identityOverlay=g_BridgeIdentityOverlayParameters;
+                facts.immediate=context->GetType()==D3D11_DEVICE_CONTEXT_IMMEDIATE;
+                facts.depthEnabled=depth.DepthEnable!=FALSE; facts.depthWrites=depth.DepthWriteMask!=D3D11_DEPTH_WRITE_MASK_ZERO;
+                const auto& rt=blend.RenderTarget[0]; facts.blendEnabled=rt.BlendEnable!=FALSE; facts.alphaToCoverage=blend.AlphaToCoverageEnable!=FALSE;
+                facts.sourceBlend=rt.SrcBlend; facts.destinationBlend=rt.DestBlend; facts.blendOperation=rt.BlendOp; facts.colorWriteMask=rt.RenderTargetWriteMask;
+                facts.viewportMatches=views==1&&viewport.TopLeftX==0&&viewport.TopLeftY==0&&viewport.Width==static_cast<float>(width)&&viewport.Height==static_cast<float>(height);
+                facts.targetMatches=width==swap.BufferDesc.Width&&height==swap.BufferDesc.Height&&description.Width==width&&description.Height==height&&description.Format==swap.BufferDesc.Format;
+                if(!FrameBridge::SuppressWorldEffectReference(facts))
+                {
+                    static unsigned declined=0;
+                    if(declined++<8) LogShimA(LogLevel::Info,kComponent,"[FrameBridge] reference effect declined shaderMatch=%u identity=%u depth=%u writes=%u blend=%u src=%u dst=%u op=%u mask=%u viewportMatch=%u targetMatch=%u dims=%ux%u swap=%ux%u target=%ux%u formats=%u/%u",facts.boundShaderMatches?1u:0u,facts.identityOverlay?1u:0u,facts.depthEnabled?1u:0u,facts.depthWrites?1u:0u,facts.blendEnabled?1u:0u,facts.sourceBlend,facts.destinationBlend,facts.blendOperation,facts.colorWriteMask,facts.viewportMatches?1u:0u,facts.targetMatches?1u:0u,width,height,swap.BufferDesc.Width,swap.BufferDesc.Height,description.Width,description.Height,static_cast<unsigned>(swap.BufferDesc.Format),static_cast<unsigned>(description.Format));
+                    return false;
+                }
+                const auto calls=g_WorldEffectsReferenceSkipped.fetch_add(1)+1;
+                if(calls<=3||calls%300==0) LogShimA(LogLevel::Info,kComponent,"[FrameBridge] world-effect reference skipped=%u program=Effect_fragment size=%ux%u; terrain/sky/identity HUD retained",calls,width,height);
+                return true;
+            }
+            catch(...) { return false; }
+        }
+
         void STDMETHODCALLTYPE HookBridgeDrawIndexed(ID3D11DeviceContext* context, UINT count, UINT start, INT base)
         {
             if (g_BridgeIdentityOverlayParameters && g_FrameBridgeSceneColorEnabled.load()) ObserveBridgeOverlay(context);
+            if(SuppressReferenceEffect(context)) return;
             if (g_RealBridgeDrawIndexed) g_RealBridgeDrawIndexed(context, count, start, base);
         }
 
@@ -1008,8 +1067,11 @@ namespace BZROpenShim
                 {
                     g_FrameBridgeOwner = swapChain;
                     if (g_FrameBridgeSceneColorEnabled.load()) g_FrameBridgeSceneSwapChain = swapChain;
-                    if (g_FrameBridgeSceneColorEnabled.load() && !FrameBridge::InstallIdentityOverlayObserver(&ObserveBridgeOverlayParameters))
-                        LogShimA(LogLevel::Warn, kComponent, "[FrameBridge] identity overlay observer unavailable; before-overlay captures fail closed");
+                    if (g_FrameBridgeSceneColorEnabled.load())
+                    {
+                        g_ReferenceObserverReady.store(FrameBridge::InstallIdentityOverlayObserver(&ObserveBridgeOverlayParameters));
+                        if(!g_ReferenceObserverReady.load()) LogShimA(LogLevel::Warn, kComponent, "[FrameBridge] identity overlay observer unavailable; before-overlay captures fail closed");
+                    }
                     LogShimA(LogLevel::Info, kComponent,
                         "[FrameBridge] transport ready pid=%lu size=%ux%u depthCandidate=%u; original Present retained; DLSS and ray tracing not integrated",
                         GetCurrentProcessId(), desc.Width, desc.Height, g_FrameBridgeDepthEnabled.load() ? 1u : 0u);
@@ -1343,6 +1405,11 @@ namespace BZROpenShim
         char sceneValue[8]{};
         const DWORD sceneLength = GetEnvironmentVariableA("OPENSHIM_FRAME_BRIDGE_SCENE_COLOR", sceneValue, sizeof(sceneValue));
         g_FrameBridgeSceneColorEnabled.store(g_FrameBridgeDepthEnabled.load() && sceneLength == 1 && sceneValue[0] == '1');
+        char referenceValue[8]{};
+        const DWORD referenceLength=GetEnvironmentVariableA("OPENSHIM_FRAME_BRIDGE_WORLD_EFFECTS_REFERENCE",referenceValue,sizeof(referenceValue));
+        g_WorldEffectsReferenceEnabled.store(g_FrameBridgeSceneColorEnabled.load()&&referenceLength==1&&referenceValue[0]=='1');
+        g_WorldEffectsReferenceSkipped.store(0);
+        if(g_WorldEffectsReferenceEnabled.load()) LogShimA(LogLevel::Warn,kComponent,"[FrameBridge] world-effects reference requested: verified non-depth-writing Effect_fragment draws may be omitted; diagnostic only, opacity mask unavailable");
         if ((!fxaa && !bridge) || g_DiscoveryThread)
             return;
 

@@ -188,3 +188,43 @@ the near-corner fixture retains hardware occlusion. Additional haze checks cover
 the near exclusion distance and maximum cap. This corrects the observed artifacts
 through conservative depth confidence and preset tuning; it does not qualify
 general particle opacity, HUD alpha or physically correct atmosphere.
+
+## Scene-layer reference milestone
+
+The bounded material/draw probe now records exact D3D11 blend/depth policies,
+color target/sample layout, pixel shader identity and exported Ogre pass/material
+names. Ordered observations cover three frames within the normal 30-frame trace.
+Names are copied while getters are valid; native material object offsets are not
+read. String ABI decoding is bounded and checked against PlayerCam. Analysis
+keeps opacity and opaque-scene qualification false.
+
+The normal GOG trace `build/game-bridge-20261012-121444-414/` completed 30 frames
+with seven variants, 7145 linked draws, 499 transform groups, 714 ordered draws,
+zero errors/overflow, and checked string decoding. Each sampled main-view frame
+had 140 depth-writing draws after its first world-effect candidate. Terrain
+atlas/glow blending, sky and smoke therefore cannot be separated by a generic
+first-blended-draw snapshot.
+
+The explicit reference run `build/game-bridge-20261012-121245-883/` imported 120
+1600x900 frames and logged at least 23700 omitted effect draws over the whole
+launch. It intentionally suppresses qualified main-view `DrawIndexed` calls of
+the bound `Effect_fragmentHLSL4` delegate, after matching its actual PS binding,
+depth/blend/target/viewport policy and excluding identity HUD. Inspection showed
+geyser smoke absent while terrain/buildings/sky/cockpit and HUD remained.
+The ordinary run imported another 120 frames with smoke present and no omitted
+draws. Both restored all 60 files with hashes after graceful exit.
+
+`build/battlezone-scene-layer-reference.png` compares these separate runs. It
+establishes a reference for further work, not an authoritative opacity mask,
+complete opaque render product or playable enhancement. There is no separate
+transparent layer yet. The reference harness rejects FG/DXR/cinematic/Frida
+combinations, requires actual suppression evidence and emits explicit limits.
+
+All 103 native tests and script syntax checks passed. The native predicate
+declines ordinary gameplay, depth-writing terrain/glow, identity HUD, unmatched
+shaders, unknown programs and unsupported target/blend policies. Layer-analysis
+tests distinguish those classes and reject unchecked observations. Initial
+reference attempts safely omitted no draws because material program names differ
+from concrete bound HLSL delegate names; the exact delegate identity was then
+observed and validated. DLL identity pins limit this to the qualified native GOG
+build; Steam/Proton/Wine and other missions remain unqualified.
