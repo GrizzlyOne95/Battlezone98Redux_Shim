@@ -35,6 +35,8 @@ ctest --test-dir build/frame-bridge-x64 -C Release --output-on-failure
 ./tools/frame_bridge/Smoke-Test.ps1
 # Optional: also exercise the DX12 swapchain preview without activating it.
 ./tools/frame_bridge/Smoke-Test.ps1 -Show
+# Target the analytic moving-camera lane during development:
+./tools/frame_bridge/Smoke-Test.ps1 -Cases depth-motion
 ```
 
 The smoke uses a **real x86 process** and x64 DX12 consumer. Each published
@@ -78,6 +80,9 @@ logs the process ID:
 # Bounded shader-parameter reads, detached before the final capture:
 ./tools/frame_bridge/Game-Smoke-Test.ps1 -Camera -DepthClearOrdinal 2 -Mission misn03.bzn -ShaderCameraTrace
 python tools/frame_bridge/Inspect-Shader-Cameras.py build/<run>/shader-camera-trace.jsonl
+# CPU camera-motion diagnostic, explicitly omitting object motion and HUD:
+./tools/frame_bridge/Game-Smoke-Test.ps1 -CameraMotion -DepthClearOrdinal 2 -Mission misn03.bzn -ShaderCameraTrace
+python tools/frame_bridge/Inspect-Camera-Motion.py build/<run>/game-camera-motion.pfm --color build/<run>/game-frame.bmp
 # Inspect a PFM with Python + Pillow; contrast is not linearized depth:
 python tools/frame_bridge/Inspect-Capture.py build/<run>/game-depth.pfm --color build/<run>/game-frame.bmp
 ```
@@ -206,7 +211,7 @@ perspective inspector checks near/far endpoints and positive clip W for both
 forward-Z signs. It recognizes standard/reversed and finite/infinite far planes;
 orthographic, oblique, asymmetric or transposed cases stay unqualified. These
 facts describe the observed matrix, not a guarantee that the entire depth texture
-uses it. No linear-depth product or motion vectors are produced yet.
+uses it. No linear-depth product or game-ready dense motion vectors are produced.
 
 The bounded `-ShaderCameraTrace` tool observes exported AutoParamDataSource
 view/projection getter results, copying values while each getter is live and
@@ -217,7 +222,17 @@ bounded variant/source/thread storage, detaches, and never spawns or terminates
 the game. The harness rejects errors, overflow or incomplete results. Its output
 includes executable/DLL/script hashes and the PID/command; trace addresses and
 matrices remain in ignored build artifacts. These counters observe Ogre clears,
-not the bridge's exact matching DSV clear ordinal or individual shader draws.
+not the bridge's exact matching DSV clear ordinal.
+
+The trace now follows `_updateAutoParams` into vertex parameter binding and
+`getConstantBuffer`, then observes actual D3D11 Draw/DrawIndexed/instanced calls
+inside Ogre `_render`. At each draw it checks the bound VS constant buffer's
+identity and records the bound DSV format/dimension and depth-test/write policy.
+All COM getter references are released immediately. Context-vtable changes are
+handled by bounded reattachment, and nested wrapper forwarding is counted once.
+Parameter associations reset each frame and on camera/renderable changes;
+unlinked draws stay explicitly unlinked. This proves an observed update/bind/draw
+identity chain, not matrix content in the buffer or shader semantics/coverage.
 
 The first clean vehicle trace found three 4096x4096 shadow cameras, two main
 1600x900 parameter groups with zeroed view translations, and a final identity
@@ -250,12 +265,51 @@ GOG qualification on 2026-10-11:
   distinguish world/cockpit passes or prove their shader matrices are identical.
   The next trace must observe the actual draw/AutoParam camera and projection,
   including cockpit/secondary views and camera cuts, before temporal history or
-  camera-reprojected motion can be labeled usable by DLSS.
+camera-reprojected motion can be labeled usable by DLSS. Draw linkage now covers
+the tested primary passes; per-shader constant layout, semantic geometry/HUD
+coverage and mission/camera lifecycle remain open.
 
 Pure camera tests cover both handedness signs, reversed depth, infinite far,
 transposition, off-axis projections, invalid clip ranges/matrices/names, boundary
 and extent mismatches and future observation timestamps. Producer GPU tests
 cover metadata preservation and camera invalidation/recovery beside depth.
+
+## Captured camera history and motion diagnostic
+
+The companion keeps two owned camera observations and accepts a diagnostic pair
+only for consecutive captured IDs, increasing capture/observation timestamps,
+an interval of at most 250 ms, matching producer/adapter/resource identities,
+camera names/identities, dimensions, projection/clip/source convention and depth
+format/sample/reduction/boundary. Missing inputs clear history. Discontinuities
+reseed history; an explicit reset also suppresses pairing. The current wire does
+not count original game Presents or provide authoritative camera-cut events, so
+this is captured-frame continuity, not qualified engine temporal history.
+
+`--capture-camera-motion-pfm PATH` requires `--capture-depth-pfm`, at least two
+frames and a matching camera pair. It waits within the existing 120-extra-frame
+bound for complete history and fails closed if no comparable pair arrives. The
+CPU diagnostic applies `previousVP * inverse(currentVP)` to each current depth
+pixel center, using the **absolute shader-camera view**. Camera-relative world
+translations must not be subtracted again. Only recognized centered perspective
+inputs are accepted, including reversed depth and infinite far. Background,
+non-finite depth, behind-camera and offscreen prior projections are invalid.
+
+The RGB float PFM stores previous-minus-current X/Y in top-down pixel units and
+a validity channel, with bottom-up little-endian PFM storage. Invalid pixels
+have zero channels and validity zero. Metadata includes both captured IDs,
+the prior view, interval and `diagnosticOnly=true`, `dlssReady=false`. It uses
+current depth and assumes a static world; there is no object/skinning motion,
+prior-depth occlusion validation, HUD policy, per-draw override coverage or
+qualified camera-cut handling. It is never tagged to Streamline or composited
+into the game. The inspector checks payload/metadata consistency and creates a
+motion comparison image with an explicit pixel color scale.
+
+Tests check analytic lateral/vertical translation and rotation, stationary
+pixels, standard/reversed/infinite projection, offscreen/behind-camera points,
+missing inputs and history resets. A separate synthetic moving-camera fixture
+shifts the view by 0.001 per captured frame. Its cross-process smoke checks every
+RGB motion pixel against analytic perspective motion derived from actual GPU
+depth readback, including the offscreen validity mask and matching 119/120 IDs.
 
 ## Transport and failure contract
 
@@ -338,7 +392,7 @@ of ray-traced pixels; more output presents are not evidence of correct DLSS.
 Native Windows checkpoint, 2026-10-11:
 
 - Release Win32 suite build succeeded.
-- All 99 engine-independent regression tests passed (including camera validation).
+- All 100 engine-independent regression tests passed (including camera/history validation).
 - Wire descriptor, producer GPU lifecycle and depth extraction tests passed in x86 and x64.
 - The x86-to-x64 smoke verified all pixels of 400 frames: 120 followed by a
   reconnect of 80, for both single-sample and 4x MSAA sources. The first consumer
@@ -374,6 +428,22 @@ Native Windows checkpoint, 2026-10-11:
 - V4 on-foot mission repeated 30 clean trace frames (eight groups including an
   additional 512x512 camera), then imported 120 frames with the same labelled
   negative-view-Z shader baseline. All 60 deployment/config hashes restored.
+- Draw-policy vehicle trace: 30 clean frames, 7105 observed D3D11 draws, 7015
+  linked to same-frame camera parameters and matching VS constant buffers.
+  The 90 unlinked calls used an 800x450 pass without a complete camera pair.
+  The final 1600x900 identity-matrix group had depth testing disabled or writes
+  disabled. Semantic world/cockpit coverage and buffer contents remain open.
+- The vehicle run imported 120 frames and wrote a 119/120 camera-motion
+  diagnostic with 985152 valid pixels, maximum 4.70e-10 pixels for the stationary
+  camera. This checks plumbing; moving-game camera accuracy is unverified.
+- The on-foot run imported 120 frames after a clean 30-frame trace of 6930
+  draws (6840 linked, 90 half-resolution calls unlinked). Its stationary-camera
+  diagnostic had 769629 valid pixels and maximum 7.28e-10 pixels. Both mission
+  runs restored all 60 deployment/config hashes after graceful exit.
+- Extended smoke verified 1400 synthetic color frames, including 600 paired
+  depth/camera frames. The new moving-camera lane checked all motion pixels:
+  59911 valid and 362 offscreen pixels, maximum 1.59790313 pixels. All five helper
+  tests pass in x86/x64; all 100 regression tests pass.
 - Qualified main scene depth/cameras, gameplay input/focus, Steam, Proton/Wine, coordinated
   presentation takeover, real latency, DLSS and ray-traced effects are unverified.
 
@@ -388,6 +458,8 @@ the supported bundle before deliberate architecture/packaging review.
 - [Microsoft D3D11/D3D12 interop and synchronization](https://learn.microsoft.com/en-us/windows/win32/direct3d12/direct3d-12-with-direct3d-11--direct-2d-and-gdi)
 - [Microsoft shared NT texture handles](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_2/nf-dxgi1_2-idxgiresource1-createsharedhandle)
 - [Microsoft depth/format-family copies and sample-layout requirements](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-copyresource)
+- [Microsoft bound vertex constant-buffer ownership](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-vsgetconstantbuffers)
+- [Microsoft bound depth-test/write state ownership](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-omgetdepthstencilstate)
 - [NVIDIA DLSS Frame Generation integration](https://github.com/NVIDIA-RTX/Streamline/blob/main/docs/ProgrammingGuideDLSS_G.md)
 - [NVIDIA sample](https://github.com/NVIDIA-RTX/Streamline_Sample)
 - [Ogre AutoParamDataSource camera-relative and shader projection semantics](https://github.com/OGRECave/ogre/blob/v1.10.0/OgreMain/src/OgreAutoParamDataSource.cpp)

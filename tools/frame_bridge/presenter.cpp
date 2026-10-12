@@ -1,4 +1,5 @@
 #include "frame_bridge_producer.h"
+#include "frame_bridge_history.h"
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <cstdio>
@@ -56,13 +57,14 @@ namespace
             if (window_ && IsWindow(window_)) DestroyWindow(window_);
         }
         void Open(DWORD pid, bool show, bool verify, const std::string& capturePath,
-            bool verifyDepth, const std::string& depthPath, UINT depthClearOrdinal, bool requireCamera)
+            bool verifyDepth, const std::string& depthPath, UINT depthClearOrdinal, bool requireCamera, const std::string& motionPath)
         {
             verify_ = verify;
             capturePath_ = capturePath;
             verifyDepth_ = verifyDepth;
             depthPath_ = depthPath;
             requireCamera_ = requireCamera;
+            motionPath_ = motionPath;
             mapping_.value = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, MappingName(pid).c_str());
             if (!mapping_.value) throw std::runtime_error("producer mapping unavailable; start source/capture first");
             frame_ = static_cast<SharedFrame*>(MapViewOfFile(mapping_.value, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SharedFrame)));
@@ -160,7 +162,8 @@ namespace
             // A pre-clear can occur while the prior slot is still Reading. The
             // resulting color frame is valid but depth is Missing. For a paired
             // artifact, wait at most 120 additional frames, never save stale z.
-            while (consumed < limit || (!depthPath_.empty() && !lastDepthValid && consumed < limit + 120))
+            while (consumed < limit || (((!depthPath_.empty() && !lastDepthValid) ||
+                (!motionPath_.empty() && !lastPair_.comparable)) && consumed < limit + 120))
             {
                 MSG message{};
                 while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
@@ -184,6 +187,7 @@ namespace
                     id, frame_->captureQpc};
                 lastCamera_ = frame_->camera;
                 lastCameraValid_ = ValidCameraFrame(*frame_);
+                lastPair_ = history_.Push(*frame_);
                 const bool validDepth = ValidDepthFrame(*frame_);
                 lastDepthValid = validDepth && (!requireCamera_ || lastCameraValid_);
                 if (validDepth) ++depthCandidates_;
@@ -259,6 +263,7 @@ namespace
                 facts.reversed ? 1u : 0u, facts.aspect, facts.verticalFovDegrees);
             if (!capturePath_.empty()) SaveCapture();
             if (!depthPath_.empty()) SaveDepth();
+            if (!motionPath_.empty()) SaveCameraMotion();
             return consumed;
         }
     private:
@@ -297,7 +302,13 @@ namespace
         }
         void VerifyDepth(UINT64 id)
         {
-            if (!lastCameraValid_ || std::fabs(lastCamera_.view[3] - static_cast<float>(id)) > 0.000001f ||
+            if (!lastCameraValid_) throw std::runtime_error("synthetic camera observation invalid");
+            const bool motionFixture = std::strcmp(lastCamera_.name, "SyntheticMotionCamera") == 0;
+            const bool idFixture = std::strcmp(lastCamera_.name, "SyntheticFrameCamera") == 0;
+            const float translation = motionFixture ? static_cast<float>(id) / 1000.0f : static_cast<float>(id);
+            if ((!motionFixture && !idFixture) ||
+                lastCamera_.matrixSource != static_cast<std::uint32_t>(CameraMatrixSource::Synthetic) ||
+                std::fabs(lastCamera_.view[3] - translation) > 0.000001f ||
                 !InspectPerspective(lastCamera_).recognized)
                 throw std::runtime_error("synthetic camera metadata does not match GPU frame ID/projection");
             const auto pixels = ReadDepthPixels();
@@ -373,6 +384,51 @@ namespace
                         << ",\n    \"projectionAspect\": " << facts.aspect << ",\n    \"verticalFovDegrees\": " << facts.verticalFovDegrees;
             }
             output << "\n  }";
+        }
+        void SaveCameraMotion()
+        {
+            CameraReprojection motion;
+            if (!lastCameraValid_ || !motion.Prepare(lastPair_))
+                throw std::runtime_error("camera motion diagnostic lacks comparable captured history");
+            const auto depth = ReadDepthPixels();
+            std::ofstream output(motionPath_, std::ios::binary | std::ios::trunc);
+            if (!output) throw std::runtime_error("cannot open camera motion PFM");
+            // RGB float PFM: previous-minus-current X/Y in pixels, validity in B.
+            // Zero vectors with validity=0 are absent data, never DLSS tags.
+            output << "PF\n" << frame_->width << " " << frame_->height << "\n-1.0\n";
+            std::vector<float> row(static_cast<SIZE_T>(frame_->width) * 3);
+            unsigned valid = 0;
+            double maximum = 0;
+            for (UINT y = frame_->height; y > 0; --y)
+            {
+                for (UINT x = 0; x < frame_->width; ++x)
+                {
+                    const auto pixel = motion.Pixel(x, y - 1, depth[static_cast<SIZE_T>(y - 1) * frame_->width + x]);
+                    row[x * 3] = pixel.x; row[x * 3 + 1] = pixel.y; row[x * 3 + 2] = pixel.valid;
+                    if (pixel.valid) { ++valid; maximum = std::max(maximum, std::hypot(static_cast<double>(pixel.x), pixel.y)); }
+                }
+                output.write(reinterpret_cast<const char*>(row.data()), static_cast<std::streamsize>(row.size() * sizeof(float)));
+            }
+            output.close();
+            if (!output) throw std::runtime_error("cannot save camera motion PFM");
+            std::ofstream metadata(motionPath_ + ".json", std::ios::trunc);
+            metadata << std::setprecision(9) << "{\n  \"diagnosticOnly\": true,\n  \"dlssReady\": false,"
+                << "\n  \"model\": \"static scene, absolute camera reprojection\","
+                << "\n  \"channels\": \"previous-minus-current pixel X, pixel Y, validity\","
+                << "\n  \"width\": " << frame_->width << ",\n  \"height\": " << frame_->height
+                << ",\n  \"previousFrameId\": " << lastPair_.previousFrame << ",\n  \"currentFrameId\": " << lastPair_.currentFrame
+                << ",\n  \"intervalSeconds\": " << lastPair_.intervalSeconds
+                << ",\n  \"history\": \"captured frames; original presents and camera cuts unqualified\","
+                << "\n  \"missing\": \"object/skinning motion, previous-depth occlusion, HUD and per-draw overrides\","
+                << "\n  \"validPixels\": " << valid << ",\n  \"maximumPixels\": " << maximum
+                << ",\n  \"previousView\": [";
+            for (unsigned i = 0; i < 16; ++i) metadata << (i ? ", " : "") << lastPair_.previous.view[i];
+            metadata << "],\n  \"currentCamera\": "; WriteCamera(metadata); metadata << "\n}\n";
+            metadata.close();
+            if (!metadata) throw std::runtime_error("cannot save camera motion metadata");
+            std::printf("CAMERA_MOTION diagnostic_only=yes previous=%llu current=%llu valid_pixels=%u max_pixels=%.9g path=%s\n",
+                static_cast<unsigned long long>(lastPair_.previousFrame), static_cast<unsigned long long>(lastPair_.currentFrame),
+                valid, maximum, motionPath_.c_str());
         }
         void SaveCapture()
         {
@@ -499,6 +555,9 @@ namespace
         CameraSnapshot lastCamera_{};
         bool lastCameraValid_ = false;
         bool requireCamera_ = false;
+        std::string motionPath_;
+        CameraHistory history_;
+        CapturedCameraPair lastPair_{};
         bool ownsConsumer_ = false;
         bool reading_ = false;
         UINT64 lastFrame_ = 0;
@@ -531,6 +590,7 @@ int main(int argc, char** argv)
     bool verifyDepth = false;
     UINT depthClearOrdinal = 0;
     bool requireCamera = false;
+    std::string motionPath;
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg(argv[i]);
@@ -538,6 +598,11 @@ int main(int argc, char** argv)
         else if (arg == "--show") show = true;
         else if (arg == "--verify-depth") verifyDepth = true;
         else if (arg == "--require-camera") requireCamera = true;
+        else if (arg == "--capture-camera-motion-pfm" && i + 1 < argc)
+        {
+            motionPath = argv[++i];
+            if (motionPath.empty()) return 2;
+        }
         else if (arg == "--depth-clear-ordinal" && i + 1 < argc)
         {
             char* end = nullptr;
@@ -566,16 +631,18 @@ int main(int argc, char** argv)
         }
         else
         {
-            std::fprintf(stderr, "usage: frame_bridge_presenter --pid N [--frames N] [--timeout-ms N] [--show] [--verify] [--capture-bmp PATH] [--verify-depth] [--capture-depth-pfm PATH] [--depth-clear-ordinal 0..8] [--require-camera]\n");
+            std::fprintf(stderr, "usage: frame_bridge_presenter --pid N [--frames N] [--timeout-ms N] [--show] [--verify] [--capture-bmp PATH] [--verify-depth] [--capture-depth-pfm PATH] [--depth-clear-ordinal 0..8] [--require-camera] [--capture-camera-motion-pfm PATH]\n");
             return 2;
         }
     }
     if (!pid) return 2;
     if (requireCamera && depthPath.empty()) return 2;
+    if (!motionPath.empty() && (depthPath.empty() || frames < 2)) return 2;
+    if (!motionPath.empty()) requireCamera = true;
     try
     {
         Consumer consumer;
-        consumer.Open(pid, show, verify, capturePath, verifyDepth, depthPath, depthClearOrdinal, requireCamera);
+        consumer.Open(pid, show, verify, capturePath, verifyDepth, depthPath, depthClearOrdinal, requireCamera, motionPath);
         return consumer.Run(frames, timeoutMs) >= frames ? 0 : 1;
     }
     catch (const std::exception& error)

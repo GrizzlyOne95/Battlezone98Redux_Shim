@@ -12,6 +12,7 @@ int main(int argc, char** argv)
     bool padded = false;
     bool bgra = false;
     bool depthEnabled = false;
+    bool motionFixture = false;
     for (int i = 2; i < argc; ++i)
     {
         const std::string arg(argv[i]);
@@ -19,6 +20,7 @@ int main(int argc, char** argv)
         else if (arg == "--padded") padded = true;
         else if (arg == "--bgra") bgra = true;
         else if (arg == "--depth") depthEnabled = true;
+        else if (arg == "--motion-fixture") { depthEnabled = true; motionFixture = true; }
         else return 2;
     }
     if (seconds == 0 || seconds > 300) return 2;
@@ -77,9 +79,9 @@ int main(int argc, char** argv)
             camera.matrixSource = static_cast<std::uint32_t>(CameraMatrixSource::Synthetic);
             camera.width = desc.Width; camera.height = desc.Height;
             camera.cameraIdentity = 1;
-            std::snprintf(camera.name, sizeof(camera.name), "SyntheticFrameCamera");
+            std::snprintf(camera.name, sizeof(camera.name), "%s", motionFixture ? "SyntheticMotionCamera" : "SyntheticFrameCamera");
             camera.view[0] = camera.view[5] = camera.view[10] = camera.view[15] = 1;
-            camera.view[3] = static_cast<float>(id);
+            camera.view[3] = motionFixture ? static_cast<float>(id) / 1000.0f : static_cast<float>(id);
             camera.nearClip = 0.1f; camera.farClip = 1000;
             const float q = camera.farClip / (camera.farClip - camera.nearClip);
             camera.projection[0] = 2.0f * static_cast<float>(desc.Height) / static_cast<float>(desc.Width);

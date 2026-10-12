@@ -17,6 +17,8 @@ add_executable(frame_bridge_protocol_tests ../../tests/frame_bridge_protocol_tes
 add_test(NAME frame_bridge_protocol COMMAND frame_bridge_protocol_tests)
 add_executable(frame_bridge_camera_tests ../../tests/frame_bridge_camera_tests.cpp)
 add_test(NAME frame_bridge_camera COMMAND frame_bridge_camera_tests)
+add_executable(frame_bridge_history_tests ../../tests/frame_bridge_history_tests.cpp)
+add_test(NAME frame_bridge_history COMMAND frame_bridge_history_tests)
 add_executable(frame_bridge_producer_gpu_tests ../../tests/frame_bridge_producer_gpu_tests.cpp ../../src/engine/frame_bridge_producer.cpp ../../src/engine/frame_bridge_depth.cpp)
 target_link_libraries(frame_bridge_producer_gpu_tests PRIVATE d3d11 dxgi)
 add_executable(frame_bridge_depth_gpu_tests ../../tests/frame_bridge_depth_gpu_tests.cpp ../../src/engine/frame_bridge_depth.cpp)

@@ -8,10 +8,12 @@ param(
     [ValidateRange(0, 8)][int]$DepthClearOrdinal = 0,
     [switch]$DepthSweep,
     [switch]$Camera,
-    [switch]$ShaderCameraTrace
+    [switch]$ShaderCameraTrace,
+    [switch]$CameraMotion
 )
 
 $ErrorActionPreference = 'Stop'
+if ($CameraMotion) { $Camera = $true }
 if ($DepthSweep -or $Camera) { $Depth = $true }
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $GameRoot = (Resolve-Path -LiteralPath $GameRoot).Path
@@ -123,9 +125,11 @@ try {
         $records = @($trace -split '\r?\n' | Where-Object { $_.StartsWith('{') } | ForEach-Object { $_ | ConvertFrom-Json })
         $completed = @($records | Where-Object { $_.type -eq 'complete' })
         $variants = @($records | Where-Object { $_.type -eq 'variant' })
+        $draws = @($records | Where-Object { $_.type -eq 'draw-group' })
         if ($completed.Count -ne 1 -or $completed[0].reason -ne 'frame-limit' -or $completed[0].frames -ne 30 -or
             $completed[0].errors -ne 0 -or $completed[0].overflow -ne 0 -or $variants.Count -eq 0 -or
-            $completed[0].variants -ne $variants.Count) {
+            $completed[0].variants -ne $variants.Count -or $completed[0].drawGroups -ne $draws.Count -or
+            $completed[0].drawCalls -le 0 -or $completed[0].linkedDrawCalls -le 0) {
             throw 'Shader camera trace incomplete, invalid or overflowed; retain diagnostics without qualifying matrices'
         }
     }
@@ -138,6 +142,7 @@ try {
             $presenterArgs += @('--capture-depth-pfm', (Join-Path $outputRoot "game-depth$suffix.pfm"), '--depth-clear-ordinal', "$ordinal")
         }
         if ($Camera) { $presenterArgs += '--require-camera' }
+        if ($CameraMotion) { $presenterArgs += @('--capture-camera-motion-pfm', (Join-Path $outputRoot "game-camera-motion$suffix.pfm")) }
         & $presenter @presenterArgs |
             Tee-Object -FilePath (Join-Path $outputRoot "consumer$suffix.log")
         if ($LASTEXITCODE -ne 0) { throw "Real-game GPU import/capture failed at clear ordinal $ordinal" }
