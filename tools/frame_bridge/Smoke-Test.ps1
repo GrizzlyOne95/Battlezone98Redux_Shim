@@ -11,11 +11,12 @@ foreach ($file in @($sourceExe, $presenterExe)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Build first: $file" }
 }
 
-foreach ($case in @('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra')) {
+foreach ($case in @('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra', 'depth', 'depth-msaa4')) {
     $outFile = Join-Path $buildRoot "bridge-$case.out.log"
     $errFile = Join-Path $buildRoot "bridge-$case.err.log"
     $sourceArgs = @('10')
-    if ($case -eq 'msaa4') { $sourceArgs += '--msaa' }
+    if ($case -in @('msaa4', 'depth-msaa4')) { $sourceArgs += '--msaa' }
+    if ($case -like 'depth*') { $sourceArgs += @('--depth', '--padded') }
     if ($case -like 'padded-*') { $sourceArgs += '--padded' }
     if ($case -eq 'padded-bgra') { $sourceArgs += '--bgra' }
     # No elevation, injection or interactive helper window. The source exits on
@@ -57,14 +58,18 @@ foreach ($case in @('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra')) {
         $presenterArgs = @('--pid', "$($sourceProcess.Id)", '--frames', '120', '--verify')
         $captureFile = Join-Path $buildRoot "bridge-$case.bmp"
         $presenterArgs += @('--capture-bmp', $captureFile)
+        if ($case -like 'depth*') {
+            $depthFile = Join-Path $buildRoot "bridge-$case.pfm"
+            $presenterArgs += @('--verify-depth', '--capture-depth-pfm', $depthFile)
+        }
         if ($Show) { $presenterArgs += '--show' }
         & $presenterExe @presenterArgs
         if ($LASTEXITCODE -ne 0) { throw "$case pixel verification failed" }
         # Validate saved BGRA layout separately from the consumer's GPU checks.
         # Odd width exercises the padded final row footprint caught by gameplay.
         $bytes = [System.IO.File]::ReadAllBytes($captureFile)
-        $width = if ($case -like 'padded-*') { 333 } else { 320 }
-        $height = if ($case -like 'padded-*') { 181 } else { 180 }
+        $width = if ($case -like 'padded-*' -or $case -like 'depth*') { 333 } else { 320 }
+        $height = if ($case -like 'padded-*' -or $case -like 'depth*') { 181 } else { 180 }
         if ($bytes.Length -ne 54 + $width * $height * 4 -or
             [BitConverter]::ToUInt16($bytes, 0) -ne 0x4d42 -or
             [BitConverter]::ToInt32($bytes, 18) -ne $width -or
@@ -75,9 +80,27 @@ foreach ($case in @('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra')) {
                 throw "Invalid BMP color at byte $pixel"
             }
         }
+        if ($case -like 'depth*') {
+            $metadata = Get-Content -LiteralPath ($depthFile + '.json') -Raw | ConvertFrom-Json
+            if ($metadata.frameId -ne 120 -or $metadata.width -ne $width -or $metadata.height -ne $height -or
+                -not $metadata.candidateOnly -or $metadata.sourceFormat -ne 45) { throw 'Invalid depth capture metadata' }
+            $depthBytes = [System.IO.File]::ReadAllBytes($depthFile)
+            $header = [Text.Encoding]::ASCII.GetBytes("Pf`n$width $height`n-1.0`n")
+            if ($depthBytes.Length -ne $header.Length + $width * $height * 4) { throw 'Invalid PFM size' }
+            for ($byte = 0; $byte -lt $header.Length; ++$byte) {
+                if ($depthBytes[$byte] -ne $header[$byte]) { throw 'Invalid PFM header' }
+            }
+            for ($byte = $header.Length; $byte -lt $depthBytes.Length; $byte += 4) {
+                if ([Math]::Abs([BitConverter]::ToSingle($depthBytes, $byte) - 120.0 / 1024.0) -gt 0.000001) {
+                    throw "Invalid PFM depth at byte $byte"
+                }
+            }
+        }
         # Reconnect while the producer is still alive; ownership must be
         # returned after GPU completion and frame numbering must stay aligned.
-        & $presenterExe --pid $sourceProcess.Id --frames 80 --verify
+        $reconnectArgs = @('--pid', "$($sourceProcess.Id)", '--frames', '80', '--verify')
+        if ($case -like 'depth*') { $reconnectArgs += '--verify-depth' }
+        & $presenterExe @reconnectArgs
         if ($LASTEXITCODE -ne 0) { throw "$case reconnect failed" }
     } catch { $failure = $_ }
     finally {

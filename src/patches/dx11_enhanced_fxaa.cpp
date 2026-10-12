@@ -39,6 +39,7 @@ namespace BZROpenShim
         std::atomic<bool> g_ShutdownRequested{ false };
         std::atomic<bool> g_FxaaEnabled{ false };
         std::atomic<bool> g_FrameBridgeEnabled{ false };
+        std::atomic<bool> g_FrameBridgeDepthEnabled{ false };
         std::atomic<bool> g_PermanentFault{ false };
         std::atomic<bool> g_UnsupportedFormatLogged{ false };
         uintptr_t g_DiscoveryThread = 0;
@@ -66,6 +67,9 @@ namespace BZROpenShim
 
         using FnSwapChainPresent = HRESULT(STDMETHODCALLTYPE*)(
             IDXGISwapChain*, UINT, UINT);
+        using FnClearDepth = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, ID3D11DepthStencilView*, UINT, FLOAT, UINT8);
+        FnClearDepth g_RealBridgeClearDepth = nullptr;
+        std::atomic<unsigned> g_BridgeClearCalls{ 0 };
 
         using FnD3DCompile = HRESULT(WINAPI*)(
             LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO*, ID3DInclude*,
@@ -916,6 +920,40 @@ namespace BZROpenShim
             return true;
         }
 
+        void STDMETHODCALLTYPE HookBridgeClearDepth(ID3D11DeviceContext* context, ID3D11DepthStencilView* view,
+            UINT flags, FLOAT depth, UINT8 stencil)
+        {
+            const unsigned call = g_BridgeClearCalls.fetch_add(1) + 1;
+            if (call <= 8)
+            {
+                Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+                Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+                D3D11_TEXTURE2D_DESC desc{};
+                if (view) { view->GetResource(&resource); resource.As(&texture); }
+                if (texture) texture->GetDesc(&desc);
+                LogShimA(LogLevel::Info, kComponent,
+                    "[FrameBridge] clear observed call=%u context=%p type=%u flags=%u depth=%g size=%ux%u format=%u samples=%u",
+                    call, context, static_cast<unsigned>(context->GetType()), flags, depth, desc.Width, desc.Height,
+                    static_cast<unsigned>(desc.Format), desc.SampleDesc.Count);
+            }
+            if (g_FrameBridgeEnabled.load() && g_FrameBridgeDepthEnabled.load() && !g_ShutdownRequested.load())
+            {
+                try
+                {
+                    std::lock_guard<std::mutex> lock(g_FrameBridgeMutex);
+                    g_FrameBridge.BeforeDepthClear(context, view, flags);
+                }
+                catch (...)
+                {
+                    g_FrameBridgeEnabled.store(false);
+                    std::lock_guard<std::mutex> bridgeLock(g_FrameBridgeMutex);
+                    g_FrameBridge.Stop();
+                    LogShimA(LogLevel::Warn, kComponent, "[FrameBridge] pre-clear observation failed; capture disabled");
+                }
+            }
+            if (g_RealBridgeClearDepth) g_RealBridgeClearDepth(context, view, flags, depth, stencil);
+        }
+
         void CaptureFrameBridge(IDXGISwapChain* swapChain)
         {
             if (!g_FrameBridgeEnabled.load(std::memory_order_acquire)) return;
@@ -931,16 +969,33 @@ namespace BZROpenShim
             {
                 D3D11_TEXTURE2D_DESC desc{};
                 color->GetDesc(&desc);
-                hr = g_FrameBridge.Start(device.Get(), desc);
+                hr = g_FrameBridge.Start(device.Get(), desc, g_FrameBridgeDepthEnabled.load());
                 if (SUCCEEDED(hr))
                 {
                     g_FrameBridgeOwner = swapChain;
                     LogShimA(LogLevel::Info, kComponent,
-                        "[FrameBridge] color transport ready pid=%lu size=%ux%u; original Present retained; DLSS and ray tracing not integrated",
-                        GetCurrentProcessId(), desc.Width, desc.Height);
+                        "[FrameBridge] transport ready pid=%lu size=%ux%u depthCandidate=%u; original Present retained; DLSS and ray tracing not integrated",
+                        GetCurrentProcessId(), desc.Width, desc.Height, g_FrameBridgeDepthEnabled.load() ? 1u : 0u);
                 }
             }
-            if (SUCCEEDED(hr)) hr = g_FrameBridge.Publish(color.Get());
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> depth;
+            if (SUCCEEDED(hr) && g_FrameBridgeDepthEnabled.load())
+            {
+                Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+                Microsoft::WRL::ComPtr<ID3D11DepthStencilView> dsv;
+                Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+                device->GetImmediateContext(&context);
+                // The game can replace its context vtable; reassert the
+                // documented ClearDepthStencilView slot at each Present.
+                PatchComVtableEntry(context.Get(), 53, &HookBridgeClearDepth, g_RealBridgeClearDepth,
+                    "ID3D11DeviceContext::ClearDepthStencilView (frame bridge)");
+                context->OMGetRenderTargets(0, nullptr, &dsv);
+                if (dsv) { dsv->GetResource(&resource); resource.As(&depth); }
+                // Present-bound depth is an observed candidate, not proof of a
+                // main-world pass. Size/format checks and per-frame validity
+                // are enforced by the producer; game resources stay untouched.
+            }
+            if (SUCCEEDED(hr)) hr = g_FrameBridge.Publish(color.Get(), depth.Get());
             if (FAILED(hr))
             {
                 g_FrameBridgeEnabled.store(false, std::memory_order_release);
@@ -975,6 +1030,8 @@ namespace BZROpenShim
                 catch (...)
                 {
                     g_FrameBridgeEnabled.store(false, std::memory_order_release);
+                    std::lock_guard<std::mutex> bridgeLock(g_FrameBridgeMutex);
+                    g_FrameBridge.Stop();
                     LogShimA(LogLevel::Warn, kComponent,
                         "[FrameBridge] unexpected capture exception; capture disabled and original presentation retained");
                 }
@@ -1219,12 +1276,22 @@ namespace BZROpenShim
         }
     }
 
+    void ReassertFrameBridgeDepthHook(ID3D11DeviceContext* context)
+    {
+        if (context && g_FrameBridgeEnabled.load() && g_FrameBridgeDepthEnabled.load() && !g_ShutdownRequested.load())
+            PatchComVtableEntry(context, 53, &HookBridgeClearDepth, g_RealBridgeClearDepth,
+                "ID3D11DeviceContext::ClearDepthStencilView (frame bridge after OM bind)");
+    }
+
     void InitializeDx11EnhancedFxaa()
     {
         const bool fxaa = FxaaRequested();
         char bridgeValue[8]{};
         const DWORD bridgeLength = GetEnvironmentVariableA("OPENSHIM_FRAME_BRIDGE", bridgeValue, sizeof(bridgeValue));
         const bool bridge = bridgeLength == 1 && bridgeValue[0] == '1';
+        char depthValue[8]{};
+        const DWORD depthLength = GetEnvironmentVariableA("OPENSHIM_FRAME_BRIDGE_DEPTH", depthValue, sizeof(depthValue));
+        g_FrameBridgeDepthEnabled.store(bridge && depthLength == 1 && depthValue[0] == '1');
         if ((!fxaa && !bridge) || g_DiscoveryThread)
             return;
 
