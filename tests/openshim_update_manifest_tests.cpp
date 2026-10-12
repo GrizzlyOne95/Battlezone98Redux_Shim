@@ -130,6 +130,30 @@ return {
               "an empty manifest must be rejected");
     }
 
+    // The asset-set sections are additive: a build that predates them must
+    // keep accepting a manifest that carries them.
+    void TestAssetSectionsAreIgnored()
+    {
+        const std::string sections = R"LUA(    assetSets = {
+        renderer = { source = "openshim\\renderer\\enhanced", destination = "openshim\\renderer\\enhanced", sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", files = 1 },
+        customWidgets = { source = "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets", destination = "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets", sha256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", files = 1 },
+    },
+    assetFiles = {
+        { set = "renderer", path = "resources.version", sha256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", size = 2 },
+        { set = "customWidgets", path = "uiline.png", sha256 = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", size = 3 },
+    },
+)LUA";
+        // After the payloads table, as Campaign Reimagined emits it.
+        const std::string text = Replace(kValidManifest, "    },\n}\n", "    },\n" + sections + "}\n");
+        OpenShimUpdateManifest manifest;
+        std::string error;
+        Check(ParseOpenShimUpdateManifest(text, manifest, error),
+              std::string("manifest with assetSets/assetFiles still parses: ") + error);
+        Check(manifest.version == "1.2.3.4" && manifest.size == 1234 &&
+              manifest.helper.size == 4567 && manifest.sha256 == std::string(64, 'a'),
+              "asset sections do not disturb the scalar or payload fields");
+    }
+
     void TestVersionParsing()
     {
         std::vector<uint32_t> parts;
@@ -179,6 +203,7 @@ return {
 int main()
 {
     TestManifestShape();
+    TestAssetSectionsAreIgnored();
     TestVersionParsing();
     TestVersionComparison();
 
