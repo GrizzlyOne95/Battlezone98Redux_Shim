@@ -8,20 +8,30 @@
 //
 // Plain #ifdef and string literals only -- rc.exe's preprocessor is not the
 // C one, and # stringification of a define is not dependable there.
+#define OSM_PRODUCT  "BZR Open Shim"
+#define OSM_FILETYPE 0x2L  // VFT_DLL
 #if defined(OPENSHIM_MODULE_BZLOADER)
 #  define OSM_FILENAME "bzloader.dll"
 #  define OSM_DESC     "BZR Open Shim - BZLoader plugin host"
 #elif defined(OPENSHIM_MODULE_PLUGIN)
 #  define OSM_FILENAME "openshim.dll"
 #  define OSM_DESC     "BZR Open Shim - runtime plugin"
+#elif defined(OPENSHIM_MODULE_SETUP)
+// The standalone installer is an executable, not a module of the load chain.
+#  undef  OSM_PRODUCT
+#  undef  OSM_FILETYPE
+#  define OSM_PRODUCT  "OpenShim Setup"
+#  define OSM_FILETYPE 0x1L  // VFT_APP
+#  define OSM_FILENAME "OpenShimSetup.exe"
+#  define OSM_DESC     "OpenShim Setup"
 #else
 #  define OSM_FILENAME "winmm.dll"
 #  define OSM_DESC     "BZR Open Shim - Native Patch Extension"
 #endif
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,49
- PRODUCTVERSION 1,0,0,49
+ FILEVERSION 1,0,0,50
+ PRODUCTVERSION 1,0,0,50
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -29,7 +39,7 @@ VS_VERSION_INFO VERSIONINFO
  FILEFLAGS 0x0L
 #endif
  FILEOS 0x40004L
- FILETYPE 0x2L
+ FILETYPE OSM_FILETYPE
  FILESUBTYPE 0x0L
 BEGIN
     BLOCK "StringFileInfo"
@@ -38,12 +48,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "BZR Open Shim Contributors"
             VALUE "FileDescription", OSM_DESC
-            VALUE "FileVersion", "1.0.0.49"
+            VALUE "FileVersion", "1.0.0.50"
             VALUE "InternalName", OSM_FILENAME
             VALUE "LegalCopyright", "Copyright (C) 2025"
             VALUE "OriginalFilename", OSM_FILENAME
-            VALUE "ProductName", "BZR Open Shim"
-            VALUE "ProductVersion", "1.0.0.49"
+            VALUE "ProductName", OSM_PRODUCT
+            VALUE "ProductVersion", "1.0.0.50"
         END
     END
     BLOCK "VarFileInfo"
