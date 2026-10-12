@@ -3,6 +3,7 @@
 #include "gpu_motion.h"
 #include "streamline_fg.h"
 #include "visible_rt.h"
+#include "frame_bridge_native_lease.h"
 #include "visual_enhancements.h"
 #include "gpu_blit.h"
 #include "window_recorder.h"
@@ -42,6 +43,15 @@ namespace
         Handle(const Handle&) = delete;
         Handle& operator=(const Handle&) = delete;
     };
+    std::filesystem::path NativeUtf8Path(const std::string& text)
+    {
+        const int count=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),static_cast<int>(text.size()),nullptr,0);
+        if(count<=0) throw std::runtime_error("invalid UTF-8 native snapshot path");
+        std::wstring wide(static_cast<size_t>(count),L'\0');
+        if(MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),static_cast<int>(text.size()),wide.data(),count)!=count)
+            throw std::runtime_error("native snapshot path conversion failed");
+        return std::filesystem::path(wide);
+    }
     LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
     {
         if (message == WM_CLOSE) { DestroyWindow(window); return 0; }
@@ -69,7 +79,8 @@ namespace
             bool verifyDepth, const std::string& depthPath, UINT depthClearOrdinal, bool requireCamera, const std::string& motionPath,
             const std::string& scenePath, bool verifyScene, UINT sceneStage,
             const std::wstring& streamlineDirectory, const std::string& fgReport, bool visibleAO, const std::string& rtCapture, bool development,
-            const std::string& recording, const std::string& rendererRecording, bool visuals, const std::string& visualCapture, const std::string& visualSceneCapture)
+            const std::string& recording, const std::string& rendererRecording, bool visuals, const std::string& visualCapture, const std::string& visualSceneCapture,
+            const std::string& nativePrefix,bool nativeProbe)
         {
             verify_ = verify;
             capturePath_ = capturePath;
@@ -81,6 +92,7 @@ namespace
             sceneStage_ = sceneStage;
             fgMode_ = !streamlineDirectory.empty(); fgReport_ = fgReport;
             rtMode_ = visibleAO; rtPath_ = rtCapture;
+            nativePrefix_=nativePrefix; nativeProbe_=nativeProbe;
             visualMode_ = visuals; visualPath_ = visualCapture;
             visualScenePath_ = visualSceneCapture;
             development_ = development;
@@ -227,7 +239,7 @@ namespace
             std::printf("CONSUMER pointer_bits=%zu size=%ux%u DXR_tier=%u query=0x%08lx DLSS=%s RT=%s\n",
                 sizeof(void*) * 8, frame_->width, frame_->height,
                 static_cast<unsigned>(options.RaytracingTier), static_cast<unsigned long>(rayQuery), fgMode_ ? "experimental-camera-motion-preview" : "not-integrated",
-                rtMode_ ? "experimental-visible-geometry-DXR-AO" : "not-integrated");
+                rtMode_ ? (nativePrefix_.empty()?"experimental-visible-geometry-DXR-AO":"experimental-native-zone-DXR-AO") : "not-integrated");
             std::fflush(stdout);
             if (visualMode_) std::printf("DX12_VISUALS requested=cinematic bloom=on depth_haze=on color_grade=on SDR=yes HUD_mask_qualified=no\n");
         }
@@ -273,6 +285,7 @@ namespace
                 lastPair_ = history_.Push(*frame_);
                 const bool validDepth = ValidDepthFrame(*frame_);
                 lastRtValid_ = rtMode_ && validDepth && lastCameraValid_ && lastSceneValid_ && InspectPerspective(lastCamera_).recognized;
+                UpdateNativeGeometry(); // Prior loop drained all helper GPU work.
                 lastVisualValid_ = visualMode_ && validDepth && lastCameraValid_ && lastSceneValid_ && InspectPerspective(lastCamera_).recognized;
                 lastDepthValid = validDepth && (!requireCamera_ || lastCameraValid_);
                 if (validDepth) ++depthCandidates_;
@@ -345,6 +358,13 @@ namespace
                     if (lastRtValid_)
                     {
                         rayTracing_.Record(commands_.Get(), lastCamera_); ++rtFrames_;
+                        if(!nativePrefix_.empty()) {
+                            if(lastNativeValid_) ++nativeFrames_; else ++nativeInactiveFrames_;
+                            if(nativeProbe_&&!nativeRefreshSent_&&nativeFrames_>=30) {
+                                nativeLease_.RequestRefresh(); nativeRefreshSent_=true;
+                                std::printf("DXR_NATIVE refresh requested after_frames=%u\n",nativeFrames_);
+                            }
+                        }
                         if (backbuffer && !visualMode_) blit_.Record(commands_.Get(), backbuffer.Get());
                         if (rendererRecording_.is_open() || (!rtPath_.empty() && consumed + 1 >= limit))
                         {
@@ -419,7 +439,7 @@ namespace
                             const auto title = L"Battlezone experimental preview | DLSS FG extra presents: " +
                                 std::to_wstring(frameGeneration_.AdditionalPresents()) +
                                 (visualMode_ ? L" | bloom + depth haze + color grade" : L"") +
-                                (rtMode_ ? L" | hardware DXR AO (visible geometry)" : L" | camera motion only");
+                                (rtMode_ ? (lastNativeValid_?L" | hardware DXR AO (native terrain)":L" | hardware DXR AO (visible depth)") : L" | camera motion only");
                             SetWindowTextW(window_, title.c_str());
                         }
                         // SDK input work is blocked onto this presenting
@@ -445,13 +465,17 @@ namespace
             if (!motionPath_.empty()) SaveCameraMotion();
             if (rtMode_)
             {
-                std::printf("DXR_AO traced_frames=%u triangle_capacity=%u rays_per_surface_pixel=8 visible_geometry_only=yes\n", rtFrames_, rayTracing_.TriangleCapacity());
+                std::printf("DXR_AO traced_frames=%u triangle_capacity=%u rays_per_surface_pixel=8 visible_geometry_only=%s\n", rtFrames_, rayTracing_.TriangleCapacity(),nativePrefix_.empty()?"yes":"no (native lease per frame)");
+                if(!nativePrefix_.empty()) std::printf("DXR_NATIVE live_frames=%u inactive_frames=%u revisions_loaded=%u invalidations=%u last_revision=%llu triangles=%u last_frame_native=%u\n",
+                    nativeFrames_,nativeInactiveFrames_,nativeLoads_,nativeInvalidations_,nativeRevision_,rayTracing_.NativeTriangleCount(),lastNativeValid_?1:0);
                 if (!rtPath_.empty())
                 {
                     if (!lastRtValid_) throw std::runtime_error("final frame lacks valid DXR inputs");
                     SaveCapture(false, true);
                     std::ofstream out(rtPath_ + ".json");
-                    out << "{\n  \"previewOnly\": true,\n  \"hardwareDXR\": true,\n  \"visibleDepthGeometryOnly\": true,\n  \"hudMaskQualified\": false,\n  \"frameId\": " << lastFrame_
+                    out << "{\n  \"previewOnly\": true,\n  \"hardwareDXR\": true,\n  \"visibleDepthGeometryOnly\": " << (lastNativeValid_?"false":"true") << ",\n  \"nativeGeometryLiveFrames\": " << nativeFrames_
+                        << ",\n  \"nativeGeometryRevision\": " << nativeRevision_ << ",\n  \"nativeGeometryTriangles\": " << rayTracing_.NativeTriangleCount()
+                        << ",\n  \"nativeGeometryLeaseMatched\": " << (lastNativeValid_?"true":"false") << ",\n  \"hudMaskQualified\": false,\n  \"frameId\": " << lastFrame_
                         << ",\n  \"tracedFrames\": " << rtFrames_ << ",\n  \"triangleCapacity\": " << rayTracing_.TriangleCapacity() << ",\n  \"raysPerSurfacePixel\": 8\n}\n";
                     if (!out) throw std::runtime_error("save DXR capture metadata");
                 }
@@ -751,7 +775,8 @@ namespace
             output.write(reinterpret_cast<const char*>(pixels.data()), pixelBytes);
             output.close();
             if (!output) throw std::runtime_error("cannot save capture BMP");
-            std::printf("%s frame=%llu path=%s\n", visualScene ? "DX12_ENHANCED_SCENE_CAPTURE candidate_only=yes" : visual ? "DX12_CINEMATIC_CAPTURE" : rt ? "DXR_AO_CAPTURE visible_geometry_only=yes" : scene ? "SCENE_COLOR candidate_only=yes" : "CAPTURE",
+            std::printf("%s frame=%llu path=%s\n", visualScene ? "DX12_ENHANCED_SCENE_CAPTURE candidate_only=yes" : visual ? "DX12_CINEMATIC_CAPTURE" : rt ?
+                (lastNativeValid_?"DXR_AO_CAPTURE native_zone_geometry=yes":"DXR_AO_CAPTURE visible_geometry_only=yes") : scene ? "SCENE_COLOR candidate_only=yes" : "CAPTURE",
                 static_cast<unsigned long long>(lastFrame_), path.c_str());
         }
         void WaitGpu(ID3D12Fence* fence, UINT64 value)
@@ -912,7 +937,50 @@ namespace
         ComPtr<ID3D12Resource> rtFinal_, rtReadback_;
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT rtFootprint_{};
         SIZE_T rtReadbackBytes_ = 0;
+        void UpdateNativeGeometry()
+        {
+            lastNativeValid_=false;
+            if(nativePrefix_.empty()) return;
+            NativeGeometryLeaseState lease{};
+            const bool ready=nativeLease_.Open(frame_->producerPid,false)&&nativeLease_.Read(lease);
+            if(!lastRtValid_&&ready) return; // No trace; retain idle immutable resources.
+            const bool valid=lastRtValid_&&ready&&
+                lastCamera_.matrixSource==static_cast<uint32_t>(CameraMatrixSource::CameraForShaders)&&
+                NativeLeaseMatchesFrame(lease,frame_->producerPid,lastCamera_.observationQpc,frame_->captureQpc,frame_->qpcFrequency);
+            if(valid&&lease.revision!=nativeFailedRevision_) {
+                try {
+                    if(lease.revision!=nativeRevision_) {
+                        std::ifstream input(NativeUtf8Path(nativePrefix_+".g"+std::to_string(lease.revision)+".bin"),std::ios::binary);
+                        auto snapshot=ReadNativeGeometry(input);
+                        if(snapshot.header.producerPid!=lease.producerPid||snapshot.header.missionGeneration!=lease.missionGeneration||
+                            snapshot.header.payloadHash!=lease.payloadHash||snapshot.header.vertices/3!=lease.triangles)
+                            throw std::runtime_error("native snapshot and lease identity differ");
+                        // Recheck after file I/O; a rebuild/mission reset may
+                        // have invalidated the lease while bytes were loaded.
+                        NativeGeometryLeaseState current{};
+                        if(!nativeLease_.Read(current)||current.revision!=lease.revision||current.payloadHash!=lease.payloadHash||
+                            !NativeLeaseMatchesFrame(current,frame_->producerPid,lastCamera_.observationQpc,frame_->captureQpc,frame_->qpcFrequency))
+                        {
+                            if(nativeRevision_)++nativeInvalidations_;
+                            rayTracing_.ClearNativeGeometry(); nativeRevision_=0; return;
+                        }
+                        rayTracing_.SetNativeGeometry(device_.Get(),snapshot); nativeRevision_=lease.revision; ++nativeLoads_;
+                        std::printf("DXR_NATIVE loaded revision=%llu generation=%u triangles=%u hash=%llu\n",nativeRevision_,lease.missionGeneration,lease.triangles,lease.payloadHash);
+                    }
+                    lastNativeValid_=true; return;
+                } catch(const std::exception& error) {
+                    nativeFailedRevision_=lease.revision;
+                    std::fprintf(stderr,"DXR_NATIVE declined revision=%llu: %s; depth-only fallback\n",lease.revision,error.what());
+                }
+            }
+            if(nativeRevision_) { ++nativeInvalidations_; rayTracing_.ClearNativeGeometry(); nativeRevision_=0; }
+        }
         VisibleRayTracing rayTracing_;
+        NativeGeometryLease nativeLease_;
+        std::string nativePrefix_;
+        uint64_t nativeRevision_=0,nativeFailedRevision_=0;
+        unsigned nativeFrames_=0,nativeInactiveFrames_=0,nativeLoads_=0,nativeInvalidations_=0;
+        bool lastNativeValid_=false,nativeProbe_=false,nativeRefreshSent_=false;
         VisualEnhancements visuals_;
         bool visualMode_ = false, lastVisualValid_ = false;
         unsigned visualFrames_ = 0;
@@ -956,6 +1024,8 @@ int main(int argc, char** argv)
     bool visuals = false;
     std::string visualCapture;
     std::string visualSceneCapture;
+    std::string nativePrefix;
+    bool nativeProbe=false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg(argv[i]);
@@ -965,6 +1035,8 @@ int main(int argc, char** argv)
         else if (arg == "--require-camera") requireCamera = true;
         else if (arg == "--verify-scene") verifyScene = true;
         else if (arg == "--rt-visible-ao") visibleAO = true;
+        else if (arg == "--native-terrain-live-prefix" && i + 1 < argc) nativePrefix=argv[++i];
+        else if (arg == "--native-terrain-refresh-probe") nativeProbe=true;
         else if (arg == "--streamline-development") development = true;
         else if (arg == "--visual-preset" && i + 1 < argc)
         {
@@ -1031,10 +1103,12 @@ int main(int argc, char** argv)
         {
             std::fprintf(stderr, "usage: frame_bridge_presenter --pid N [--frames N] [--timeout-ms N] [--show] [--verify] [--capture-bmp PATH] [--verify-depth] [--capture-depth-pfm PATH] [--depth-clear-ordinal 0..8] [--require-camera] [--capture-camera-motion-pfm PATH] [--capture-scene-bmp PATH] [--verify-scene] [--scene-stage pre-clear|before-overlay] [--streamline-dir SDK_BIN_PATH --fg-report PATH] [--streamline-development] [--rt-visible-ao --capture-rt-bmp PATH] [--record-window PATH] [--record-frames PATH]\n");
             std::fprintf(stderr, "cinematic options: --visual-preset cinematic [--capture-enhanced-bmp PATH] [--capture-enhanced-scene-bmp PATH]\n");
+            std::fprintf(stderr, "native terrain options: --native-terrain-live-prefix ABSOLUTE_PREFIX [--native-terrain-refresh-probe]\n");
             return 2;
         }
     }
     if (!pid) return 2;
+    if((!nativePrefix.empty()&&!visibleAO)||(nativeProbe&&nativePrefix.empty())) return 2;
     if (requireCamera && depthPath.empty()) return 2;
     if (!motionPath.empty() && (depthPath.empty() || frames < 2)) return 2;
     if (!motionPath.empty()) requireCamera = true;
@@ -1050,9 +1124,10 @@ int main(int argc, char** argv)
     if (!visuals && (!visualCapture.empty() || !visualSceneCapture.empty())) return 2;
     try
     {
+        if(!nativePrefix.empty()&&!NativeUtf8Path(nativePrefix).is_absolute()) return 2;
         Consumer consumer;
         consumer.Open(pid, show, verify, capturePath, verifyDepth, depthPath, depthClearOrdinal, requireCamera, motionPath, scenePath, verifyScene, sceneStage,
-            streamlineDirectory, fgReport, visibleAO, rtCapture, development, recording, rendererRecording, visuals, visualCapture, visualSceneCapture);
+            streamlineDirectory, fgReport, visibleAO, rtCapture, development, recording, rendererRecording, visuals, visualCapture, visualSceneCapture,nativePrefix,nativeProbe);
         return consumer.Run(frames, timeoutMs) >= frames ? 0 : 1;
     }
     catch (const std::exception& error)

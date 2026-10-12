@@ -16,9 +16,10 @@ namespace BZROpenShim::FrameBridge
         void Initialize(ID3D12Device* device, ID3D12Resource* depth, ID3D12Resource* scene, ID3D12Resource* finalColor);
         // Caller completes the prior submission before reusing upload data.
         void Record(ID3D12GraphicsCommandList* commands, const CameraSnapshot& camera);
-        // Set before recording any work. Explicit static world-space snapshot;
-        // caller validates that it matches the captured mission/base geometry.
+        // Set/replace only after prior GPU work completes. Explicit world-space
+        // snapshot; caller validates the captured mission/generation lease.
         void SetNativeGeometry(ID3D12Device* device, const NativeGeometry& snapshot);
+        void ClearNativeGeometry(); // Prior submission must be complete.
         unsigned NativeTriangleCount() const { return nativeTriangles_; }
         ID3D12Resource* SceneOutput() const { return sceneOutput_.Get(); }
         ID3D12Resource* FinalOutput() const { return finalOutput_.Get(); }
@@ -28,7 +29,7 @@ namespace BZROpenShim::FrameBridge
         Microsoft::WRL::ComPtr<ID3D12Resource> nativeVertices_,nativeBlas_,nativeScratch_;
         D3D12_RAYTRACING_GEOMETRY_DESC nativeGeometry_{};
         unsigned nativeTriangles_=0;
-        bool recorded_=false;
+        bool nativeBuilt_=false;
         Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap_;
         Microsoft::WRL::ComPtr<ID3D12RootSignature> root_;
         Microsoft::WRL::ComPtr<ID3D12PipelineState> meshPipeline_, rayPipeline_;

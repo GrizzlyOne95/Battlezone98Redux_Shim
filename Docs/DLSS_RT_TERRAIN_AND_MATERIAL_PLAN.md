@@ -69,7 +69,7 @@ are in [DLSS_RT_DEMO_VALIDATION_20261012.md](DLSS_RT_DEMO_VALIDATION_20261012.md
 | Adaptive subdivision (prototype implemented) | Bounded projected shared-edge factors from both endpoints and Ogre's active viewport, using fractional-even factors 2..4 | GPU reversal/finite/viewport response and fractional raster coverage pass; live combined demo passes. Extended cross-cluster camera motion and performance comparison remain open |
 | Authored height displacement (GPU candidate implemented) | Signed R32 meter atlas, guarded tile edges and explicit mip-zero domain samples; native submission binding pending | 96 actual domain/SO GPU runs cover geometry/normal/depth/shadow-receiver agreement and orientation/fallback. Live resource ownership, contacts and broad camera/cluster acceptance remain open |
 | Detail shading and materials | Add material detail normals and roughness with explicit channel/color-space rules; retain compatible stock maps and lighting | Tangent/orientation correctness, stable distant mips, no brightened buildings or atlas bleed; review each planet's assets |
-| Native terrain geometry for DXR (static zone snapshot implemented) | Owned native position/height/index/transform export and a separate world BLAS in diagnostic replay; live generation/invalidation pending | Native occluder absent from depth passes hardware rays. Sixteen-cluster GOG capture/replay passes. Full-map/live deformation/relief, map/device retirement and terrain sunlight shadows remain open |
+| Native terrain geometry for DXR (live selected-zone prototype) | Owned native streams/transforms, world BLAS and revisioned validity lease with dirty/mission invalidation | Static replay and live GOG refresh/fallback/reload pass. Actual deformation/mission/device cycling, full-map/object/relief coverage and terrain sunlight shadows remain open |
 | Temporal reconstruction | Add dynamic object/terrain motion, camera-cut handling and transparent reactive coverage before DLAA/DLSS SR | History rejection on particles/disocclusion, stationary UI, moving units and changing terrain; the current camera-only FG preview remains distinct |
 | Lighting and runtime | Recover linear scene lighting before SDR clipping; add measured queue/fence/pacing improvements | HDR/alpha/material contract tested before exposure/tone mapping; separate engine/GPU/bridge timings establish actual benefit |
 
@@ -101,8 +101,10 @@ casters or offscreen occluders.
 The separate [native terrain snapshot](DXR_NATIVE_TERRAIN_SNAPSHOT.md) now feeds
 base native triangles into a world-space BLAS for exact-frame diagnostic replay.
 It includes sixteen clusters in the selected zone independently of screen
-coverage. The live presenter remains depth-only; full scene ownership, dirty
-generation transport, relief matching and shadow lighting are still required.
+coverage. The default-off live presenter now accepts the zone under a
+revisioned validity lease and falls back during renewal. Full scene ownership,
+deformation/device qualification, relief matching and shadow lighting remain
+required; the refresh probe does not change terrain.
 
 Triplanar cliff texturing, height-aware terrain blending, improved particle
 lighting and a proper linear/HDR scene are worthwhile extensions once their

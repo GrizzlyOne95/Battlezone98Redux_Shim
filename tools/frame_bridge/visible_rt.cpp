@@ -89,7 +89,8 @@ namespace BZROpenShim::FrameBridge
     }
     void VisibleRayTracing::SetNativeGeometry(ID3D12Device* device,const NativeGeometry& snapshot)
     {
-        if(recorded_||nativeTriangles_||!ValidGeometry(snapshot)) throw std::runtime_error("native DXR snapshot invalid or already recording");
+        if(!ValidGeometry(snapshot)) throw std::runtime_error("native DXR snapshot invalid");
+        ClearNativeGeometry(); // Caller guarantees prior GPU completion.
         ComPtr<ID3D12Device5> dxr; Check(device->QueryInterface(IID_PPV_ARGS(&dxr)),"native DXR device");
         nativeVertices_=Buffer(device,snapshot.vertices.size()*12,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_HEAP_TYPE_UPLOAD);
         void* mapped=nullptr; D3D12_RANGE none{0,0}; Check(nativeVertices_->Map(0,&none,&mapped),"map native DXR vertices");
@@ -145,12 +146,13 @@ namespace BZROpenShim::FrameBridge
         build.Inputs.DescsLayout=D3D12_ELEMENTS_LAYOUT_ARRAY; build.Inputs.pGeometryDescs=&geometry_;
         build.DestAccelerationStructureData=blas_->GetGPUVirtualAddress(); build.ScratchAccelerationStructureData=scratch_->GetGPUVirtualAddress();
         dxr->BuildRaytracingAccelerationStructure(&build,0,nullptr); UAV(list,blas_.Get()); UAV(list,scratch_.Get());
-        if(nativeTriangles_&&!recorded_)
+        if(nativeTriangles_&&!nativeBuilt_)
         {
             auto nativeBuild=build; nativeBuild.Inputs.pGeometryDescs=&nativeGeometry_;
             nativeBuild.Inputs.Flags=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
             nativeBuild.DestAccelerationStructureData=nativeBlas_->GetGPUVirtualAddress(); nativeBuild.ScratchAccelerationStructureData=nativeScratch_->GetGPUVirtualAddress();
             dxr->BuildRaytracingAccelerationStructure(&nativeBuild,0,nullptr); UAV(list,nativeBlas_.Get());
+            nativeBuilt_=true;
         }
         build.Inputs.Type=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL; build.Inputs.InstanceDescs=instances_->GetGPUVirtualAddress();
         build.Inputs.NumDescs=nativeTriangles_?2:1;
@@ -160,12 +162,17 @@ namespace BZROpenShim::FrameBridge
         for(auto* resource : {sceneOutput_.Get(),finalOutput_.Get()}) Transition(list,resource,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_COMMON);
         Transition(list,vertices_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COMMON);
         for(auto* resource : {depth_,scene_,final_}) Transition(list,resource,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COMMON);
-        recorded_=true;
+    }
+    void VisibleRayTracing::ClearNativeGeometry()
+    {
+        nativeVertices_.Reset(); nativeBlas_.Reset(); nativeScratch_.Reset();
+        nativeGeometry_={}; nativeTriangles_=0; nativeBuilt_=false;
     }
 #else
     void VisibleRayTracing::Initialize(ID3D12Device*,ID3D12Resource*,ID3D12Resource*,ID3D12Resource*)
     { throw std::runtime_error("configure FRAME_BRIDGE_DXR=ON with dxc to build the visible DXR AO preview"); }
     void VisibleRayTracing::Record(ID3D12GraphicsCommandList*,const CameraSnapshot&) {}
     void VisibleRayTracing::SetNativeGeometry(ID3D12Device*,const NativeGeometry&) { throw std::runtime_error("native geometry needs DXR build"); }
+    void VisibleRayTracing::ClearNativeGeometry() {}
 #endif
 }
