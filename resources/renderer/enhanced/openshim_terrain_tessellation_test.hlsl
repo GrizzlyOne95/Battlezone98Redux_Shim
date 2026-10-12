@@ -1,10 +1,32 @@
-// Zero-displacement submission experiment. Consumes the ordinary terrain VS
+// Native terrain subdivision experiment. Consumes the ordinary terrain VS
 // outputs; COLOR0 is already swizzled, and UV/height decoding stays in that VS.
 #ifndef OPENSHIM_TESS_FACTOR
 #define OPENSHIM_TESS_FACTOR 1
 #endif
 #ifndef OPENSHIM_RELIEF_AMPLITUDE
 #define OPENSHIM_RELIEF_AMPLITUDE 0
+#endif
+#ifndef OPENSHIM_TESS_TARGET_PIXELS
+#define OPENSHIM_TESS_TARGET_PIXELS 12
+#endif
+
+#if defined(OPENSHIM_TESS_ADAPTIVE)
+// Ogre ACT_VIEWPORT_SIZE supplies width/height and their reciprocals per pass.
+float4 tessViewport;
+// Only shared endpoints and viewport affect an edge. Material UVs, normals
+// and the triangle's third vertex must not change its subdivision request.
+float TerrainAdaptiveEdge(float4 a, float4 b, float2 viewport)
+{
+    if (!all(isfinite(a)) || !all(isfinite(b)) || !all(isfinite(viewport)) ||
+        any(viewport <= 0.0) || any(viewport > 16384.0) || min(a.w,b.w) <= 0.0001)
+        return OPENSHIM_TESS_FACTOR;
+    float2 pixels = (a.xy / a.w - b.xy / b.w) * viewport * 0.5;
+    float extent = length(pixels);
+    if (!isfinite(extent)) return OPENSHIM_TESS_FACTOR;
+    // Fractional-even retains at least two segments and moves new samples
+    // continuously between 2 and the configured cap. Never cull invalid edges.
+    return clamp(extent / OPENSHIM_TESS_TARGET_PIXELS, 2.0, OPENSHIM_TESS_FACTOR);
+}
 #endif
 
 #if defined(OPENSHIM_RELIEF_TEST)
@@ -102,13 +124,24 @@ struct TerrainTessFactors
 TerrainTessFactors TerrainPatchConstants(InputPatch<TerrainTessVertex, 3> p)
 {
     TerrainTessFactors f;
+#if defined(OPENSHIM_TESS_ADAPTIVE)
+    f.edge[0] = TerrainAdaptiveEdge(p[1].position,p[2].position,tessViewport.xy);
+    f.edge[1] = TerrainAdaptiveEdge(p[2].position,p[0].position,tessViewport.xy);
+    f.edge[2] = TerrainAdaptiveEdge(p[0].position,p[1].position,tessViewport.xy);
+    f.inside = max(f.edge[0],max(f.edge[1],f.edge[2]));
+#else
     f.edge[0] = f.edge[1] = f.edge[2] = OPENSHIM_TESS_FACTOR;
     f.inside = OPENSHIM_TESS_FACTOR;
+#endif
     return f;
 }
 
 [domain("tri")]
+#if defined(OPENSHIM_TESS_ADAPTIVE)
+[partitioning("fractional_even")]
+#else
 [partitioning("integer")]
+#endif
 [outputtopology("triangle_cw")]
 [outputcontrolpoints(3)]
 [patchconstantfunc("TerrainPatchConstants")]

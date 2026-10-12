@@ -229,6 +229,8 @@ namespace BZROpenShim
             bool proxyEnabled = false;
             bool proxyVisible = true;
             bool tessellationTest = false;
+            bool tessellationAdaptive = false;
+            float tessellationTargetPixels = 12.0f;
             bool tessellationWireframe = false;
             int tessellationFactor = 2;
             bool microReliefTest = false;
@@ -899,6 +901,11 @@ namespace BZROpenShim
                 config.semanticFrameCaptureMinCoverage > 1.0f)
                 config.semanticFrameCaptureMinCoverage = 0.005f;
             config.tessellationTest = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_TEST");
+            config.tessellationAdaptive = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE");
+            float targetPixels = 12.0f;
+            if (ReadEnvFloat("OPENSHIM_TERRAIN_TESSELLATION_TARGET_PIXELS", targetPixels) &&
+                std::isfinite(targetPixels) && targetPixels >= 4.0f && targetPixels <= 64.0f)
+                config.tessellationTargetPixels = targetPixels;
             config.tessellationWireframe = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_WIREFRAME");
             config.microReliefTest = IsEnvEnabled("OPENSHIM_TERRAIN_MICRO_RELIEF_TEST");
             float reliefAmplitude = 0.25f;
@@ -914,6 +921,12 @@ namespace BZROpenShim
             if (ReadEnvInt("OPENSHIM_TERRAIN_TESSELLATION_FACTOR", factor) &&
                 (factor == 1 || factor == 2 || factor == 4))
                 config.tessellationFactor = factor;
+            if (config.tessellationAdaptive && config.tessellationFactor != 4)
+            {
+                LogShimA(LogLevel::Warn, "terrain-tess", "[TERRAIN-TESS] adaptive request declined: factor-4 cap required; fixed subdivision retained");
+                config.tessellationAdaptive = false;
+            }
+            config.tessellationTest = config.tessellationTest || config.tessellationAdaptive;
             if (config.tessellationTest)
             {
                 // Native HD tiles can share the tessellation stages. Disable only

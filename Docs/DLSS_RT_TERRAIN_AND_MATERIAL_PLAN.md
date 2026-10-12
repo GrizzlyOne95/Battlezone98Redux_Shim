@@ -50,8 +50,9 @@ amplitude, actual visible tessellated GPU submissions, matching restored
 material-pass counts, complete bounds restoration and clean exit. An install
 message or old session's statistics cannot qualify a run. Wireframe is disabled
 for this lane, and the particle-omission reference cannot be combined with it.
-The report explicitly leaves adaptive subdivision, material height maps,
-full terrain geometry export and performance qualification false.
+The report distinguishes fixed and adaptive subdivision. Material height maps,
+full terrain geometry export, cross-cluster camera-motion acceptance and
+performance qualification remain false.
 
 The 2026-10-12 GOG `misn03` run imported 120 frames at 1280x720, with 111
 effective DXR/cinematic frames and 111 extra SDK presentations reported by
@@ -65,7 +66,7 @@ are in [DLSS_RT_DEMO_VALIDATION_20261012.md](DLSS_RT_DEMO_VALIDATION_20261012.md
 | Milestone | Concrete work | Required evidence |
 |---|---|---|
 | Native tessellation plus bridge | Exercise the existing micro-relief shader with owned scene/depth captures, DXR AO and optional DLSS-G | Fresh GPU patch/HS/DS/raster statistics, real captured scene, complete restoration; no FPS claim |
-| Adaptive subdivision | Derive a bounded shared-edge factor from both edge endpoints and the active projection/viewport; choose fractional partitioning and transitions deliberately | Shared duplicated edges agree, no cracks across clusters, near-plane/behind-camera inputs remain finite, camera/viewport changes are stable; GPU cost compared with fixed factors |
+| Adaptive subdivision (prototype implemented) | Bounded projected shared-edge factors from both endpoints and Ogre's active viewport, using fractional-even factors 2..4 | GPU reversal/finite/viewport response and fractional raster coverage pass; live combined demo passes. Extended cross-cluster camera motion and performance comparison remain open |
 | Authored height displacement | Extend the tile material contract with linear height data, scale/bias and mips; bind domain-stage samples through qualified Ogre APIs | Correct tile orientation/transition boundaries, displacement/depth/normal agreement, bounded contacts, stationary relief under camera motion, safe missing-art fallback |
 | Detail shading and materials | Add material detail normals and roughness with explicit channel/color-space rules; retain compatible stock maps and lighting | Tangent/orientation correctness, stable distant mips, no brightened buildings or atlas bleed; review each planet's assets |
 | Complete terrain geometry for DXR | Export owned native vertex/index/transform data with generation IDs and height/material invalidation | Hidden/offscreen terrain can cast shadows, deformation updates color/depth/BLAS coherently, map/device changes cannot retain old terrain |
@@ -103,6 +104,51 @@ material/layer inputs exist. Mesh shaders, sampler feedback and variable-rate
 shading are later optimization candidates. Profile the engine, tessellation,
 copies, DXR and presentation first; the DX12 companion does not remove the
 Win32 engine's CPU limits, draw submission or address-space limit.
+
+## Adaptive prototype checkpoint
+
+Add `-TerrainAdaptive -TerrainTargetPixels 12` to the combined command above.
+The lane requires `-TerrainMicroRelief` and a factor-4 maximum. Target pixels
+are bounded to 4..64; larger values request less subdivision. The native flag
+`OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE=1` defaults off, and
+`OPENSHIM_TERRAIN_TESSELLATION_TARGET_PIXELS` defaults to 12. No persistent UI
+or INI setting was added.
+
+The hull shader measures projected endpoint separation in pixels and requests
+`clamp(length/targetPixels, 2, 4)` per shared edge. Its interior uses the maximum
+edge request. It uses fractional-even partitioning; fixed modes retain integer
+partitioning. Nonfinite values, invalid viewport dimensions and nonpositive or
+very small endpoint W values retain the cap rather than culling terrain.
+The displacement function and its object-space phase do not change with LOD.
+
+The new hull parameter uses the hash-qualified Ogre exported parameter APIs,
+requires an actual single float4 constant, and binds the logical slot to
+`ACT_VIEWPORT_SIZE=111` from the public
+[Ogre 1.10 parameter contract](https://github.com/OGRECave/ogre/blob/v1.10.0/OgreMain/include/OgreGpuProgramParams.h).
+Ogre updates width/height and reciprocal dimensions for the active pass; no
+fixed window size or guessed GPU buffer offset is used. Shader source hashes
+include adaptive policy/target values, keeping cached variants distinct.
+
+All 104 regressions and 150 shader compilation/interface checks pass. New GPU
+tests execute the actual shipped function and hull/domain stages on WARP:
+edge reversal, finite conservative fallback, distance/resolution response,
+continuous requests, and complete coverage across a two-triangle shared
+diagonal at fractional factors. Distant/near test draws recorded 36/144 domain
+invocations; this is test-device evidence, not a game benchmark.
+
+GOG `misn03` run `build/game-bridge-20261012-124653-034/` imported 120 frames at
+1266x513. The actual native terrain sample recorded 89600 domain invocations
+for 12800 patches and rasterized pixels. All 27 passes and 144 padded bounds
+were restored, with clean process exit and all 60 file hashes restored. DXR and
+cinematic effects executed on 110 frames; DLSS-G reported 110 extra SDK
+presentations with final status zero. The captured enhanced scene was inspected.
+An earlier run installed/rasterized correctly but the bridge disabled itself
+on a game-window resize; it supplies no qualified combined capture.
+
+The short live run establishes integration, not broad watertightness or an FPS
+gain. Duplicated cluster endpoints can carry slightly different floating-point
+transforms, and authored height seams are not yet available. Longer camera,
+viewport, contact, deformation and cross-cluster tests remain required.
 
 ## Qualification limits
 
