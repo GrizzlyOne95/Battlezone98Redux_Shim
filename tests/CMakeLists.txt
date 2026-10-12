@@ -368,6 +368,10 @@ openshim_add_test(openshim_update_support_tests STD 20 SOURCES
     openshim_update_support_tests.cpp
     ../src/patches/openshim_update_support.cpp
 )
+openshim_add_test(openshim_auto_update_tests STD 20 SOURCES
+    openshim_auto_update_tests.cpp
+    ../src/patches/openshim_auto_update.cpp
+)
 
 # The OPENSHIM_*/BZR_* environment redirect: which openshim.ini key each
 # legacy name reads, how values are normalised, and the INI-before-launch-
