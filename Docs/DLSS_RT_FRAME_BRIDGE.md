@@ -90,6 +90,65 @@ denoising or authoritative object/camera lifecycle yet.
 
 ## Build and reproduce
 
+### Optional DX12 cinematic effects
+
+`--visual-preset cinematic` / `Game-Smoke-Test.ps1 -VisualEnhancements` enables
+three additional GPU effects: half-resolution separable bloom, distance haze
+from reconstructed view-space depth, and exposure/contrast/saturation grading.
+They are SDR raster post effects, not additional ray tracing, HDR reconstruction
+or physically calibrated mission lighting. Bloom uses the captured scene before
+the observed HUD boundary. The haze color/density is an artistic preset; clear
+sky and invalid depth receive no haze. A power contrast curve preserves dark
+detail instead of clipping shadows around a linear contrast pivot.
+
+The pass runs after optional DXR AO and tags its processed scene to DLSS when FG
+is requested. Outputs, bloom intermediates and original input copies are helper
+owned; normal private-input/fence lifetimes still apply. Final compositing adds
+an effect delta to the original raster image and smoothly attenuates it where
+scene/final differences suggest HUD coverage, retaining the original FXAA
+detail. This remains an approximate mask: low-opacity or identical-color HUD,
+particles and depth silhouettes need engine-aware validation.
+
+```powershell
+./tools/frame_bridge/Game-Smoke-Test.ps1 -Mission misn03.bzn -Frames 180 `
+  -VisualEnhancements -VisibleRayTracing `
+  -StreamlineDirectory C:/path/to/streamline-sdk-v2.14.1/bin/x64/development `
+  -StreamlineDevelopment -RecordFrames
+# Also works without Streamline or DXR:
+./tools/frame_bridge/Game-Smoke-Test.ps1 -Mission misn03.bzn -VisualEnhancements
+```
+
+The harness saves matched `game-frame.bmp`, `game-scene.bmp`,
+`game-cinematic.bmp` and `game-cinematic-scene.bmp`, with effective frame counts
+and qualification limits in `game-cinematic.bmp.json`. Direct helper options
+`--capture-enhanced-bmp` and `--capture-enhanced-scene-bmp` permit headless
+captures; use `--show` for the optional preview window.
+
+Local follow-up validation imported 180 GOG frames at 1280x681, executed the
+cinematic and DXR passes on 166 valid frames, and reported 166 extra DLSS SDK
+presentations with final status zero. The matched scene comparison changed
+418681 pixels by more than two channel levels; the final HUD view changed
+190855. Actual image pairs and the 13.73-second labeled renderer-input video
+were visually inspected. These counts establish effect execution, not general
+visual correctness. The provisional depth/opacity assumptions still cause
+artifacts around transparent smoke and some silhouettes.
+
+All nine x64 helper/GPU tests and 101 native regressions passed. New GPU checks
+cover every pixel of odd RGBA/BGRA neutral inputs, exact distinct-HUD/alpha
+preservation, depth-dependent haze, clear/NaN depth, bloom spread and history
+clearing, independent exposure changes and finite parameter rejection. A
+90-frame x86-to-x64 cinematic run also passed without SDK/DXR or a helper window.
+The combined game's 60 deployment/config files were restored and hash-checked.
+
+WGC again received zero frames in the first cinematic live run while the SDK
+logged display-configuration query failures. The subsequent renderer-input run
+completed successfully. The earlier successful output-window recording remains
+valid; smaller placement does not guarantee WGC availability in every desktop
+context. Input recordings are explicitly labeled and do not independently
+capture/count generated images.
+
+### Transport build
+
 From the repository root on native Windows with Visual Studio and Windows SDK:
 
 ```powershell

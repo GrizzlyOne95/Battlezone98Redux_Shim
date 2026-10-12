@@ -47,7 +47,7 @@ with args.recording.open('rb') as source:
                 if len(info)!=16:
                     raise ValueError('Truncated renderer frame metadata')
                 frame,extra,flags=struct.unpack('<QII',info)
-                if frame<=last_frame or extra<last_extra or flags>7:
+                if frame<=last_frame or extra<last_extra or flags>15:
                     raise ValueError('Invalid renderer frame evidence')
                 last_frame,last_extra=frame,extra
             if previous_time is not None and time<=previous_time:
@@ -59,7 +59,7 @@ with args.recording.open('rb') as source:
                 image=Image.frombytes('RGBA',(width,height),pixels,'raw','BGRA')
                 draw=ImageDraw.Draw(image)
                 draw.rectangle((0,0,width,42),fill=(12,16,20,255))
-                draw.text((8,5),f'Battlezone experimental preview | Hardware DXR AO: {"ON" if flags&1 else "OFF"} | DLSS SDK extra presents: {extra}',fill='white')
+                draw.text((8,5),f'Battlezone preview | DX12 cinematic: {"ON" if flags&8 else "OFF"} | DXR AO: {"ON" if flags&1 else "OFF"} | DLSS SDK extra presents: {extra}',fill='white')
                 draw.text((8,23),'Recorded renderer input frames; generated-frame count comes from SDK telemetry. Camera motion only / visible geometry only.',fill='#bbbbbb')
                 pixels=image.tobytes('raw','BGRA')
             if first_time is None:
