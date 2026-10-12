@@ -91,6 +91,13 @@ terrain-owner lock and compares the actual PS t2 resource plus its linear SRV
 format. Pipeline statistics must show visible terrain rasterization with that
 resource bound. Installation messages alone do not qualify a capture.
 
+Terrain discovery can run before the `OpenShimEnhanced` resource group is
+initialized. The normal installer now waits for its exported group-readiness
+API, then retries on the existing game-thread render tick. The wait is bounded
+to 600 observations and real failures finish the attempt for that mission.
+The mission reset clears this state. Surface GPU queries wait for the actual
+normal resource rather than exhausting their samples during bootstrap.
+
 `terrain-surface-report.json` requires fresh PID-tagged installation, bound
 resource/raster evidence and full normal-pass restoration. The usual terrain
 report additionally verifies tessellation/material/bounds cleanup and clean
@@ -128,11 +135,42 @@ normal mip data, source bounds, identity and no-output-on-rejection.
 
 ## Next geometry step
 
+The candidate height resource and shader are now implemented and GPU-tested;
+native submission binding is still pending. `--geometry-height` adds a separate
+`<prefix>_height.dds` and `<prefix>_height.json` to the normal authoring outputs.
+It uses signed R32_FLOAT world-meter heights, one mip and explicit bilinear
+`Load` sampling. Unedited rectangles are zero. A flat band of
+`ceil(atlasWidth / 160) + 2` pixels precedes the quintic taper to cover Redux's
+quantized UV endpoint inset and a bilinear footprint. Conflicting float heights
+on aliased rectangles decline even when their quantized normals are identical.
+The height manifest records the maximum absolute sample and marks native
+integration unqualified. It cannot be used with `-TerrainSurfaceManifest`.
+Future geometry integration must retain the stock normal map for this same
+height art or separate finer detail; applying both the generated height normals
+and the matching geometric slope would count the authored slope twice.
+
+`OPENSHIM_HEIGHT_TEST` selects the candidate path in the shipped terrain test
+shader; the native installer does **not** set this define. The shader computes
+the UV-to-object-XZ Jacobian from the three control points, handles reflected
+and rotated mappings, samples explicit height meters, and uses the existing
+normal/tangent/clip/depth/shadow-receiver displacement updates. Invalid samples,
+missing textures or degenerate geometry/UV Jacobians retain base geometry.
+Camera translation does not change the texture's height at a fixed UV.
+
+The Win32 WARP test captures actual `TerrainDomain` output through geometry
+stream output. Its 96 runs cover flat/sloped bases, signed height planes,
+rotation/reflection, translated cameras, zero seam bands, invalid/missing
+textures and pixel-stage resource retention. This establishes GPU geometry
+behavior, not game integration, cross-cluster camera acceptance, performance,
+or displaced shadow casting. All 160 shader/interface checks and 106 CTest
+tests pass, including nine surface authoring cases.
+
 Texture-driven domain displacement must have its own height resource, physical
 scale, stable tile UVs, explicit mip policy, geometry normal/depth update and
 owned binding/restoration. An RGB normal atlas cannot supply authoritative
-height values after the fact. The current builder consumes height art and emits
-normal data; it does not silently enable a height texture path.
+height values after the fact. The builder emits normal data by default and an
+explicit candidate height resource with `--geometry-height`; neither output
+silently enables a native domain texture binding.
 
 Public Ogre 1.10 exposes domain binding types, but the stock DX11 implementation
 uses a render-operation texture list and a current binding-type switch when it
@@ -145,3 +183,12 @@ An owned draw-scoped resource path is another candidate, with exact program and
 target checks plus restoration before the next draw. Neither path is implemented
 by this checkpoint. Complete DXR terrain geometry, displaced shadow casting,
 contacts and the broader platform matrix remain separate work.
+
+Released-renderer static qualification used Ghidra against SHA256
+`78A1D8E13C8BD71983B09A39A3DCF7783E6C34DDE577DE3B9202460DB500AAE0`,
+the named `_render` export and its independent domain/fragment resource-call
+branches. It confirmed a shared binding-mode field gating stage texture arrays;
+the released enum values differ from public 1.10, another reason to avoid
+unqualified SDK assumptions. The named `getDomainShader` export returns a
+borrowed native domain shader. This is static evidence, not a qualified detour
+or lifetime/submission proof. Raw analysis output stays local.

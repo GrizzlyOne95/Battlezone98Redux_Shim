@@ -97,8 +97,15 @@ def main():
                     actual = signature(stage_files[stage], tag,
                                        (stage, tag) in (("hs", b"OSGN"), ("ds", b"ISGN")))
                     assert actual == expected, (defines, factor, stage, tag, expected, actual)
+        # The native installer does not enable height resources yet. Compile
+        # the candidate DS and audit its interface against every native VS.
+        height = compile_shader('openshim_terrain_tessellation_test.hlsl', 'ds_5_0', 'TerrainDomain',
+                                f'{index}-height-ds', ['/D', 'OPENSHIM_RELIEF_TEST=1',
+                                '/D', 'OPENSHIM_HEIGHT_TEST=1', '/D', 'OPENSHIM_RELIEF_AMPLITUDE=1'])
+        for tag in (b'ISGN', b'OSGN'):
+            assert signature(height, tag, tag == b'ISGN') == expected, (defines, 'height', tag)
     print(f"PASS: {compiled} shaders; {len(variants)} terrain permutations; "
-          "factors 1/2/4, adaptive and micro-relief; VS -> HS -> DS signatures and registers match.")
+          "factors 1/2/4, adaptive, micro-relief and candidate texture-height DS; VS -> HS -> DS signatures and registers match.")
 
 
 if __name__ == "__main__":

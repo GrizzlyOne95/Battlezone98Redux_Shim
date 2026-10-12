@@ -5,6 +5,8 @@ std::vector<TerrainSurfacePass> g_SurfacePasses;
 OgreSharedPtr g_SurfaceTexture;
 std::string g_SurfaceMaterial;
 void* g_SurfaceMaterialIdentity=nullptr;
+bool g_SurfaceAttemptFinished=false;
+unsigned g_SurfaceBootstrapPolls=0;
 
 void RestoreNativeTerrainSurface()
 {
@@ -37,17 +39,37 @@ void RestoreNativeTerrainSurface()
     for(auto& entry:g_SurfacePasses) ReleaseCloneHandoff(entry.original);
     g_SurfacePasses.clear(); ReleaseCloneHandoff(g_SurfaceTexture);
     g_SurfaceMaterial.clear(); g_SurfaceMaterialIdentity=nullptr;
+    g_SurfaceAttemptFinished=false; g_SurfaceBootstrapPolls=0;
 }
 
 bool InstallNativeTerrainSurface()
 {
-    if(g_config.surfaceManifest.empty()||!g_SurfacePasses.empty()) return false;
+    if(g_config.surfaceManifest.empty()||g_SurfaceAttemptFinished||!g_SurfacePasses.empty()) return false;
     OgreSharedPtr material,texture;
     try
     {
+        // Terrain discovery can precede the renderer's payload bootstrap.
+        // Defer on the game thread; do not promote a transient resource miss
+        // to a permanent material failure or register a second directory.
+        HMODULE ogre=GetModuleHandleW(L"OgreMain.dll");
+        using GetGroups=void* (__cdecl*)();
+        using GroupState=bool (__thiscall*)(void*,const std::string&);
+        auto groups=Resolve<GetGroups>(ogre,"?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ");
+        auto exists=Resolve<GroupState>(ogre,"?resourceGroupExists@ResourceGroupManager@Ogre@@QAE_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+        auto ready=Resolve<GroupState>(ogre,"?isResourceGroupInitialised@ResourceGroupManager@Ogre@@QAE_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+        if(!groups||!exists||!ready) throw std::runtime_error("surface resource-group readiness API unavailable");
+        void* manager=groups(); const std::string group="OpenShimEnhanced";
+        if(!manager||!exists(manager,group)||!ready(manager,group))
+        {
+            if(++g_SurfaceBootstrapPolls>=600) throw std::runtime_error("surface resource-group bootstrap deadline exhausted");
+            if(g_SurfaceBootstrapPolls==1) LogShimA(LogLevel::Info,"terrain-surface","[TERRAIN-SURFACE] waiting for Enhanced resource-group initialization");
+            return false;
+        }
+        g_SurfaceAttemptFinished=true;
         ResolveNativeHdApi();
         std::string hash;
-        if(!VerifyModuleHash(GetModuleHandleW(L"RenderSystem_Direct3D11.dll"),
+        HMODULE renderer=GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
+        if(!renderer||!VerifyModuleHash(renderer,
             "78A1D8E13C8BD71983B09A39A3DCF7783E6C34DDE577DE3B9202460DB500AAE0",hash))
             throw std::runtime_error("surface renderer identity declined");
         std::ifstream stream(ResolveHdManifestPath(g_config.surfaceManifest),std::ios::binary);
@@ -117,5 +139,6 @@ bool InstallNativeTerrainSurface()
     }
     catch(const std::exception& error) { LogShimA(LogLevel::Warn,"terrain-surface","[TERRAIN-SURFACE] declined: %s; original normals retained",error.what()); }
     catch(...) { LogShimA(LogLevel::Warn,"terrain-surface","[TERRAIN-SURFACE] declined after Ogre exception; original normals retained"); }
-    ReleaseCloneHandoff(material); ReleaseCloneHandoff(texture); RestoreNativeTerrainSurface(); return false;
+    ReleaseCloneHandoff(material); ReleaseCloneHandoff(texture); RestoreNativeTerrainSurface();
+    g_SurfaceAttemptFinished=true; return false;
 }

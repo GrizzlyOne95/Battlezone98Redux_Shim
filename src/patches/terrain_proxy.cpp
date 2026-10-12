@@ -5508,10 +5508,13 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
     {
         // Cheap early-out: this runs on every rendered world frame and must
         // cost nothing when the opt-in capture is off.
-        if (g_config.semanticFrameCaptures <= 0 || !g_active.load() ||
+        if ((g_config.semanticFrameCaptures <= 0 && g_config.surfaceManifest.empty()) || !g_active.load() ||
             g_shutdown.load())
             return;
         std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_config.surfaceManifest.empty() && !g_SurfaceAttemptFinished &&
+            g_proxy.sourceEntity && !g_proxy.tearingDown)
+            InstallNativeTerrainSurface();
         if (!g_proxy.proxyCreated || g_proxy.tearingDown)
             return;
         ++g_semanticRenderFrames;

@@ -26,8 +26,9 @@ namespace BZROpenShim
 
     // Called once per rendered world frame from the existing legacy world
     // render-queue detour. Does nothing unless the opt-in Phase 3A frame
-    // capture is configured; it exists so parity captures can be taken at a
-    // reproducible frame index rather than at an arbitrary wall-clock moment.
+    // capture is configured or an authored normal atlas awaits its resource
+    // group. Parity captures use a reproducible frame index; deferred surface
+    // installation stays on the game thread.
     void TerrainProxyRenderFrameTick();
     // Read-only immediate-context draw evidence. Fails closed if the terrain
     // owner cannot be locked or the actual PS resource differs from our atlas.

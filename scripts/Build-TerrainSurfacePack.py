@@ -43,7 +43,7 @@ def renormalize(image):
     return result
 
 
-def height_normals(stock, height, amplitude, tile_meters, edge_pixels):
+def height_normals(stock, height, amplitude, tile_meters, edge_pixels, zero_guard=0):
     """Linear height in [0,1]; quintic envelope gives zero edge height/slope."""
     size = stock.width
     if stock.height != size or height.size != stock.size:
@@ -54,8 +54,10 @@ def height_normals(stock, height, amplitude, tile_meters, edge_pixels):
         raise ValueError('tileMeters must be finite and in 1..100')
     if type(edge_pixels) is not int or not 2 <= edge_pixels <= size // 2:
         raise ValueError('edgePixels must be 2..half the tile size')
+    if type(zero_guard) is not int or zero_guard < 0 or (zero_guard > 0 and zero_guard + edge_pixels >= size // 2):
+        raise ValueError('zero guard leaves no height interior')
     def fade(x):
-        t = min(1., min(x, size - 1 - x) / edge_pixels)
+        t = max(0., min(1., (min(x, size - 1 - x) - zero_guard) / edge_pixels))
         return t**3 * (t * (t * 6 - 15) + 10)
     raw = list(samples(height))
     if any(not math.isfinite(h) or not 0 <= h <= 1 for h in raw):
@@ -108,7 +110,16 @@ def dds_bytes(levels):
     return b'DDS ' + struct.pack('<31I', *header) + b''.join(level.convert('RGBA').tobytes() for level in levels)
 
 
-def build(capture_path, normal_atlas_path, recipe_path, source_root, output, prefix='openshim_surface'):
+def height_dds_bytes(size, values):
+    """One-mip signed R32_FLOAT DDS (legacy D3DFMT_R32F=114), in meters."""
+    header = [124, 0x100f, size, size, size * 4, 0, 0] + [0] * 11
+    header += [32, 4, 114, 0, 0, 0, 0, 0] + [0x1000, 0, 0, 0, 0]
+    if len(values) != size * size or any(not math.isfinite(v) or abs(v) > 1 for v in values):
+        raise ValueError('height DDS needs bounded finite meter samples')
+    return b'DDS ' + struct.pack('<31I', *header) + struct.pack('<' + 'f' * len(values), *values)
+
+
+def build(capture_path, normal_atlas_path, recipe_path, source_root, output, prefix='openshim_surface', geometry_height=False):
     if not re.fullmatch(r'[a-z][a-z0-9_]{0,63}', prefix):
         raise ValueError('prefix must be a lowercase resource name')
     capture = hd.read_json(capture_path)
@@ -130,7 +141,7 @@ def build(capture_path, normal_atlas_path, recipe_path, source_root, output, pre
     if not isinstance(edits, dict) or not edits:
         raise ValueError('recipe needs explicit engine tile heights')
     root = Path(source_root).resolve()
-    boxes, rows = {}, []
+    boxes, rows, height_boxes = {}, [], {}
     for key, entry in edits.items():
         if not re.fullmatch(r'0|[1-9][0-9]*', key) or key not in tiles or not isinstance(entry, dict):
             raise ValueError('unknown/invalid engine tile override')
@@ -144,14 +155,22 @@ def build(capture_path, normal_atlas_path, recipe_path, source_root, output, pre
                 raise ValueError('selected height overlaps another non-identical atlas rectangle')
         size = (box[2] - box[0], box[3] - box[1])
         height, identity = read_height(root, entry['height'], size)
+        # Redux quantizes atlas UVs to 160 steps. Keep a zero band beyond
+        # that half-step plus a bilinear footprint on a future geometry path.
+        # Source rectangles must be large enough for both this and the taper.
+        guard = math.ceil(atlas.width / 160) + 2 if geometry_height else 0
         normal, values = height_normals(atlas.crop(box), height, entry.get('heightMeters', .25),
-                                       recipe.get('tileMeters', 20), recipe.get('edgePixels', max(2, size[0] // 8)))
+                                       recipe.get('tileMeters', 20), recipe.get('edgePixels', max(2, size[0] // 8)), guard)
         digest = hashlib.sha256(normal.tobytes()).hexdigest()
         if box in boxes and boxes[box][0] != digest:
             raise ValueError('different heights target aliased engine tile rectangles')
+        if box in height_boxes and height_boxes[box] != values:
+            raise ValueError('different geometry heights target aliased engine tile rectangles')
         boxes[box] = (digest, normal)
+        height_boxes[box] = values
         rows.append({'engineIndex': int(key), 'aliasedEngineIndices': sorted(aliases), 'box': box, 'source': identity,
-                     'heightMeters': entry.get('heightMeters', .25), 'heightMinimum': min(values), 'heightMaximum': max(values)})
+                     'heightMeters': entry.get('heightMeters', .25), 'heightMinimum': min(values), 'heightMaximum': max(values),
+                     'geometryZeroGuardPixels': guard})
     for box, (_, normal) in boxes.items():
         atlas.paste(normal, box[:2])
     levels = [atlas]
@@ -164,14 +183,36 @@ def build(capture_path, normal_atlas_path, recipe_path, source_root, output, pre
                 'normalAtlas': resource, 'width': atlas.width, 'height': atlas.height,
                 'normalEncoding': 'rgb-xyz-linear', 'heightUsage': 'normal-lighting-only'}
     report = {'schema': 'bzr-openshim-terrain-surface-report-v1', 'heightGeometry': False,
+              'geometryHeightGenerated': geometry_height,
               'normalSourceSha256': hashlib.sha256(Path(normal_atlas_path).read_bytes()).hexdigest(),
               'mipLevels': len(levels), 'tiles': rows, 'normalAtlasSha256': hashlib.sha256(dds_bytes(levels)).hexdigest()}
     output = Path(output)
     targets = [output / resource, output / (prefix + '.json'), output / (prefix + '_report.json')]
+    height_data = None
+    if geometry_height:
+        height_pixels = [0.] * (atlas.width * atlas.height)
+        for box, values in height_boxes.items():
+            tile_width = box[2] - box[0]
+            for y in range(box[1], box[3]):
+                start = (y - box[1]) * tile_width
+                height_pixels[y * atlas.width + box[0]:y * atlas.width + box[2]] = values[start:start + tile_width]
+        height_data = height_dds_bytes(atlas.width, height_pixels)
+        height_resource = prefix + '_height.dds'
+        height_manifest = {'schema': 'bzr-openshim-terrain-height-v1', 'material': capture['material'],
+                           'sourceDiffuseResource': capture['diffuseResource'], 'sourceNormalResource': source_normal,
+                           'heightAtlas': height_resource, 'width': atlas.width, 'height': atlas.height,
+                           'heightEncoding': 'r32-float-meters', 'samplePolicy': 'bilinear-load-mip-zero',
+                           'maximumAbsoluteHeight': max(abs(v) for v in height_pixels),
+                           'zeroGuardPixels': math.ceil(atlas.width / 160) + 2, 'nativeIntegrationQualified': False}
+        report['heightAtlasSha256'] = hashlib.sha256(height_data).hexdigest()
+        targets += [output / height_resource, output / (prefix + '_height.json')]
     if any(p.exists() for p in targets):
         raise ValueError('output exists; choose a new directory/prefix')
     output.mkdir(parents=True, exist_ok=True)
     targets[0].write_bytes(dds_bytes(levels))
+    if height_data is not None:
+        targets[3].write_bytes(height_data)
+        targets[4].write_text(json.dumps(height_manifest, indent=2) + '\n', encoding='utf-8')
     targets[2].write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     targets[1].write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
     return targets[1], report
@@ -182,9 +223,11 @@ def main():
     for name in ('capture', 'normal-atlas', 'recipe', 'source-root', 'output'):
         parser.add_argument('--' + name, required=True, type=Path)
     parser.add_argument('--prefix', default='openshim_surface')
+    parser.add_argument('--geometry-height', action='store_true', help='also author an experimental R32 height atlas; native binding is not enabled')
     args = parser.parse_args()
-    path, report = build(args.capture, args.normal_atlas, args.recipe, args.source_root, args.output, args.prefix)
-    print(f'BUILT {path}: {len(report["tiles"])} authored height tiles, {report["mipLevels"]} linear normal mips; geometry unchanged')
+    path, report = build(args.capture, args.normal_atlas, args.recipe, args.source_root, args.output, args.prefix, args.geometry_height)
+    candidate = '; candidate R32 height atlas also authored' if args.geometry_height else ''
+    print(f'BUILT {path}: {len(report["tiles"])} authored height tiles, {report["mipLevels"]} linear normal mips{candidate}; native geometry unchanged')
 
 
 if __name__ == '__main__':

@@ -67,7 +67,7 @@ are in [DLSS_RT_DEMO_VALIDATION_20261012.md](DLSS_RT_DEMO_VALIDATION_20261012.md
 |---|---|---|
 | Native tessellation plus bridge | Exercise the existing micro-relief shader with owned scene/depth captures, DXR AO and optional DLSS-G | Fresh GPU patch/HS/DS/raster statistics, real captured scene, complete restoration; no FPS claim |
 | Adaptive subdivision (prototype implemented) | Bounded projected shared-edge factors from both endpoints and Ogre's active viewport, using fractional-even factors 2..4 | GPU reversal/finite/viewport response and fractional raster coverage pass; live combined demo passes. Extended cross-cluster camera motion and performance comparison remain open |
-| Authored height displacement | Extend the tile material contract with linear height data, scale/bias and mips; bind domain-stage samples through qualified Ogre APIs | Correct tile orientation/transition boundaries, displacement/depth/normal agreement, bounded contacts, stationary relief under camera motion, safe missing-art fallback |
+| Authored height displacement (GPU candidate implemented) | Signed R32 meter atlas, guarded tile edges and explicit mip-zero domain samples; native submission binding pending | 96 actual domain/SO GPU runs cover geometry/normal/depth/shadow-receiver agreement and orientation/fallback. Live resource ownership, contacts and broad camera/cluster acceptance remain open |
 | Detail shading and materials | Add material detail normals and roughness with explicit channel/color-space rules; retain compatible stock maps and lighting | Tangent/orientation correctness, stable distant mips, no brightened buildings or atlas bleed; review each planet's assets |
 | Complete terrain geometry for DXR | Export owned native vertex/index/transform data with generation IDs and height/material invalidation | Hidden/offscreen terrain can cast shadows, deformation updates color/depth/BLAS coherently, map/device changes cannot retain old terrain |
 | Temporal reconstruction | Add dynamic object/terrain motion, camera-cut handling and transparent reactive coverage before DLAA/DLSS SR | History rejection on particles/disocclusion, stationary UI, moving units and changing terrain; the current camera-only FG preview remains distinct |
@@ -167,6 +167,15 @@ arrays and roughness are still pending. The ridge test art validates the path
 and is not a finished terrain artwork pack.
 
 ## Qualification limits
+
+The candidate texture-height shader now displaces geometry in isolated WARP
+domain-stage tests. It is not enabled by the native material installer. The
+authoring tool's optional height manifest declares native integration
+unqualified, and the existing game capture remains procedural relief plus
+normal mapping. The shipped backend's shared texture-stage switch was checked
+through released-module static analysis; a safely restored submission binding
+still needs live qualification. All 106 CTest tests and 160 shader/interface
+checks pass. See the surface-material document for the exact evidence boundary.
 
 The original game still presents. Tessellation is currently native DX11; DX12
 consumes its images. The helper does not rerender the complete terrain scene.

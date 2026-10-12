@@ -368,3 +368,45 @@ commands, limitations and next domain-resource requirement are documented in
 [terrain-surface-materials.md](terrain-surface-materials.md). Height artwork
 currently changes normals only; geometric relief remains procedural. Full
 texture-driven domain displacement is not implemented.
+
+## Texture-height GPU candidate and surface startup follow-up
+
+The authoring tool now optionally emits a one-mip signed R32_FLOAT height atlas
+in meters and a separate unqualified native-height manifest. Zero guard bands
+precede its quintic taper. Conflicting floating-point heights on alias tiles
+are rejected even when their RGB normal values quantize identically.
+
+The shipped test shader has a default-inactive `OPENSHIM_HEIGHT_TEST` candidate.
+Actual `TerrainDomain` execution and geometry stream output pass 96 Win32 WARP
+runs: signed texture heights move geometry, retain base slopes, support rotated
+and reflected UVs, and update normal/tangent/clip/depth/shadow-receiver outputs.
+Camera translation, zero-border seams, degenerate UVs, invalid/missing heights
+and unchanged PS resources are checked. All 160 shader/interface compilations
+and 106 CTest tests pass (nine authoring cases). This is GPU geometry evidence;
+the native game installer does not select the candidate or bind its resource.
+No live texture-displaced game geometry, shadow casting or FPS gain is claimed.
+
+A native control exposed a startup race: PID 40292, local
+`build/game-bridge-20261012-155553-879/`, requested the staged normal texture
+before `OpenShimEnhanced` registration. It retained original normals, captured
+60 bridge frames, restored terrain and 62 file hashes, and exited cleanly. Its
+surface qualification correctly failed. The installer now defers until the
+existing resource group is initialized, retries on the game-thread render tick
+with a 600-observation bound, and delays GPU samples until the actual normal
+resource is bound. Real errors still finish the attempt for that mission.
+
+The corrected Win32 Release build passed the follow-up control: PID 71268,
+`build/game-bridge-20261012-160045-586/`, 120 frames at 1268x513 with 116 matched
+depth candidates. Actual authored-normal binding and visible terrain produced
+190036 domain and 104840 pixel invocations. All six normal bindings, 27 terrain
+passes, 144 bounds and 62 deployment/config file hashes restored with exit zero.
+The scene capture was inspected. This run exercises existing procedural relief
+and normal mapping; DXR/DLSS were not requested. Its bootstrap happened before
+terrain selection, so a deliberately delayed-bootstrap sequence remains to be
+qualified separately.
+
+The Enhanced fork parity command was run before shader work and reported 14
+missing CR counterparts in the current sibling checkout. None of those 14
+shared shaders were changed; only the separate terrain tessellation experiment
+was extended. General CR shader parity is therefore unavailable, not passed.
+GOG native and WARP evidence does not establish Steam/Proton/Wine compatibility.

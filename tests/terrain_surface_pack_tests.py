@@ -38,6 +38,10 @@ class SurfacePack(unittest.TestCase):
         for sample in (float('nan'),-1,2):
             with self.assertRaises(ValueError):
                 surface.height_normals(normal,Image.new('F',normal.size,sample),.25,20,2)
+        # The normal-only contract permits a taper reaching half the tile.
+        surface.height_normals(normal,Image.new('F',normal.size,.5),.25,20,8)
+        with self.assertRaises(ValueError):
+            surface.height_normals(normal,Image.new('F',normal.size,.5),.25,20,8,1)
 
     def fixture(self,root):
         capture={'schema':'bzr-openshim-terrain-atlas-v1','material':'MN_DETAIL_ATLAS','diffuseResource':'moon_atlas_d.dds',
@@ -107,6 +111,43 @@ class SurfacePack(unittest.TestCase):
         for p in surface.samples(mip):
             length=math.sqrt(sum((v/127.5-1)**2 for v in p[:3]))
             self.assertAlmostEqual(length,1,delta=.01)
+
+    def test_geometry_height_dds_is_signed_linear_with_zero_guard(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp); self.fixture(root)
+            # Non-neutral art makes the additional geometry resource observable.
+            path,report=surface.build(root/'capture.json',root/'normal.png',root/'recipe.json',root,root/'out',geometry_height=True)
+            self.assertTrue(report['geometryHeightGenerated'])
+            self.assertFalse(report['heightGeometry'])  # no native integration claim
+            manifest=json.loads((path.parent/'openshim_surface_height.json').read_text())
+            self.assertEqual(manifest['heightEncoding'],'r32-float-meters')
+            self.assertEqual(manifest['samplePolicy'],'bilinear-load-mip-zero')
+            self.assertFalse(manifest['nativeIntegrationQualified'])
+            data=(path.parent/manifest['heightAtlas']).read_bytes()
+            header=struct.unpack('<31I',data[4:128])
+            self.assertEqual(header[20],114)  # D3DFMT_R32F, not UNORM or sRGB
+            self.assertEqual(header[6],0)
+            heights=struct.unpack('<16384f',data[128:])
+            self.assertGreater(heights[32*128+32],.3)
+            self.assertAlmostEqual(manifest['maximumAbsoluteHeight'],max(abs(v) for v in heights),places=6)
+            guard=manifest['zeroGuardPixels']
+            for y in range(64):
+                for x in range(64):
+                    if min(x,y,63-x,63-y)<=guard:
+                        self.assertEqual(heights[y*128+x],0)
+            self.assertTrue(all(heights[y*128+x]==0 for y in range(128) for x in range(64,128)))
+
+    def test_height_aliases_check_float_values_even_when_normals_quantize_equal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp); _,recipe=self.fixture(root)
+            # Tiny amplitudes collapse to the same 8-bit normal but must not
+            # silently alias different signed geometry data.
+            recipe['tiles']={'7':{'height':'height.png','heightMeters':1e-8},
+                             '19':{'height':'height.png','heightMeters':2e-8}}
+            (root/'recipe.json').write_text(json.dumps(recipe))
+            with self.assertRaises(ValueError):
+                surface.build(root/'capture.json',root/'normal.png',root/'recipe.json',root,root/'out',geometry_height=True)
+            self.assertFalse((root/'out').exists())
 
 
 if __name__=='__main__': unittest.main()
