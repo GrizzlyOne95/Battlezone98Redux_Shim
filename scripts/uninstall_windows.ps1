@@ -430,8 +430,13 @@ foreach ($gameDir in $gamePaths) {
     # player put there is reported and left.
     $openshimDir = Join-Path $gameDir "openshim"
     $renderDir = Join-Path $openshimDir "renderer\enhanced"
-    if (Test-Path -LiteralPath $renderDir -PathType Container) {
-        Remove-Planned -Path $renderDir -Recurse
+    # The in-game asset sync keeps a marker in the folder and swaps it through
+    # .pending/.old siblings; remove those along with the folder itself.
+    Remove-IfPresent (Join-Path $renderDir "openshim_set.sha256")
+    foreach ($leftover in @($renderDir, "$renderDir.pending", "$renderDir.old")) {
+        if (Test-Path -LiteralPath $leftover -PathType Container) {
+            Remove-Planned -Path $leftover -Recurse
+        }
     }
     Remove-IfPresent (Join-Path $openshimDir "OpenShimAssets.ini")
     Remove-DirectoryIfEmpty (Join-Path $openshimDir "renderer")
@@ -445,6 +450,7 @@ foreach ($gameDir in $gamePaths) {
     # widgets, so it goes only when those four were all it contained.
     $uiDir = Join-Path $gameDir "BZ_ASSETS_CORE\common\ui\CustomWidgets"
     foreach ($tile in $uiTiles) { Remove-IfPresent (Join-Path $uiDir $tile) }
+    Remove-IfPresent (Join-Path $uiDir "openshim_widgets.sha256")
     Remove-DirectoryIfEmpty $uiDir
 
     # Installer-owned copy of the shipped preset, and the updater's status file.
