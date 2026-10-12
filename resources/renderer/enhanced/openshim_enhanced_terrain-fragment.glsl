@@ -110,6 +110,28 @@ vec3 safe_normalize(in vec3 v)
 	return (lenSq > 1e-8) ? v * inversesqrt(lenSq) : vec3(0.0, 0.0, 0.0);
 }
 
+#if defined(OG_RETRO_MODE)
+// Retro reproduces Battlezone 1.5's D3D terrain lighting, read from the 1.5.2
+// decompile (ComputeNormal, BuildShadows, PrecomputeIllumination): a grey luma
+// of max(N.L, 0) with cast shadows set to zero, then floored at inShadow
+// (56/255). There is no ambient term, no detail texture and no colour. 1.5's
+// light totals 1.0, which Redux splits into ambient + sun from the same TRN
+// values, so that sum scales N.L and stock maps match exactly. The floor stays
+// absolute, as it was in 1.5, so a darkened scene bottoms out at 56/255.
+const float OG15_LUMA_FLOOR = 56.0 / 255.0;
+
+float og15_luma(in vec3 c)
+{
+	return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
+vec3 og15_terrain_light(in vec3 ambient, in vec3 sun, in float ndl, in float castShadow)
+{
+	float total = og15_luma(ambient) + og15_luma(sun);
+	return vec3(clamp(max(total * max(ndl, 0.0) * castShadow, OG15_LUMA_FLOOR), 0.0, 1.0));
+}
+#endif
+
 #if defined(ENHANCED_MODE)
 vec3 sharpen_normal_map(in vec3 normalTex)
 {
@@ -136,6 +158,10 @@ void ComputeSpotlightTerms(
 }
 
 uniform vec4 sceneAmbient;
+#if defined(VERTEX_LIGHTING) && defined(OG_RETRO_MODE)
+// Recovers N.L from the vertex result; bound by the OG Lowest programs.
+uniform vec4 lightDiffuse[MAX_LIGHTS];
+#endif
 #if !defined(VERTEX_LIGHTING)
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
 uniform float materialShininess;
@@ -200,30 +226,42 @@ void main()
 		shadow = PCF_Filter(shadowMap3, vLightSpacePos3, invShadowMapSize3.xy);
 	}
 #endif
-#if defined(ENHANCED_MODE)
+#if defined(OG_RETRO_MODE)
+	// 1.5's baked terrain shadows are hard: full sun or none. The raw filtered
+	// value is kept; og15_terrain_light applies the floor.
+#elif defined(ENHANCED_MODE)
 	// deeper shadow floor gives enhanced mode more contact grounding
 	shadow = shadow * 0.78 + 0.22;
 #else
 	shadow = shadow * 0.7 + 0.3;
 #endif
+#endif
+
 #if defined(OG_RETRO_MODE)
-	shadow = shadow * 0.5 + 0.5;
+#if defined(SHADOWRECEIVER)
+	float og15CastShadow = shadow;
+#else
+	float og15CastShadow = 1.0;
 #endif
 #endif
 
 #if defined(VERTEX_LIGHTING)
 
 	// combine ambient and shadowed light result
-#if defined(RETRO_UNLIT_MODE)
+#if defined(OG_RETRO_MODE)
+	// The shared vertex program wrote sun * max(N.L, 0); divide the sun back out.
+	float og15Sun = og15_luma(lightDiffuse[0].xyz);
+	float og15Ndl = (og15Sun > 1e-4) ? og15_luma(vLightResult) / og15Sun : 0.0;
+	vec3 lightResult = og15_terrain_light(sceneAmbient.xyz, lightDiffuse[0].xyz, og15Ndl, og15CastShadow);
+#if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
+	vec3 specularResult = vec3(0.0, 0.0, 0.0);
+#endif
+#elif defined(RETRO_UNLIT_MODE)
 	vec3 lightResult = vLightResult;
 #if defined(SHADOWRECEIVER)
 	lightResult *= shadow;
 #endif
-#if defined(OG_RETRO_MODE)
-	lightResult += max(sceneAmbient.xyz * 1.10, vec3(0.22, 0.22, 0.22));
-#else
 	lightResult += sceneAmbient.xyz;
-#endif
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
 	vec3 specularResult = vec3(0.0, 0.0, 0.0);
 #endif
@@ -232,11 +270,7 @@ void main()
 #if defined(SHADOWRECEIVER)
 	lightResult *= shadow;
 #endif
-#if defined(OG_RETRO_MODE)
-	lightResult += max(sceneAmbient.xyz * 1.10, vec3(0.22, 0.22, 0.22));
-#else
 	lightResult += sceneAmbient.xyz;
-#endif
 
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
 	vec3 specularResult = vSpecularResult;
@@ -282,7 +316,15 @@ void main()
 
 	// start with ambient light and no specular
 #if defined(OG_RETRO_MODE)
-	vec3 lightResult = max(sceneAmbient.xyz * 1.10, vec3(0.22, 0.22, 0.22));
+	float og15Ndl = 0.0;
+	vec3 og15SunColour = vec3(0.0, 0.0, 0.0);
+	if (lightCount > 0.0)
+	{
+		vec3 toSun = safe_normalize(lightPosition[0].xyz - (viewPos * lightPosition[0].w));
+		og15Ndl = dot(safe_normalize(vViewNormal), toSun);
+		og15SunColour = lightDiffuse[0].xyz;
+	}
+	vec3 lightResult = og15_terrain_light(sceneAmbient.xyz, og15SunColour, og15Ndl, og15CastShadow);
 #else
 	vec3 lightResult = sceneAmbient.xyz;
 #endif
@@ -290,7 +332,9 @@ void main()
 	vec3 specularResult = vec3(0.0, 0.0, 0.0);
 #endif
 
-#if defined(RETRO_UNLIT_MODE)
+#if defined(OG_RETRO_MODE)
+	// Fully lit above.
+#elif defined(RETRO_UNLIT_MODE)
 	if (lightCount > 0.0)
 	{
 		const int i = 0;
@@ -305,9 +349,6 @@ void main()
 #endif
 
 		float diffuseTerm = max(dot(viewNormal, pixelToLight), 0.0);
-#if defined(OG_RETRO_MODE)
-		diffuseTerm = clamp(diffuseTerm * 0.55 + 0.20, 0.0, 1.0);
-#endif
 		lightResult.xyz += lightDiffuse[i].xyz * (attenuation * diffuseTerm);
 	}
 #else
@@ -354,9 +395,6 @@ void main()
 
 		// accumulate diffuse lighting
 		float diffuseTerm = max(dot(viewNormal, pixelToLight), 0.0);
-#if defined(OG_RETRO_MODE)
-		diffuseTerm = clamp(diffuseTerm * 0.55 + 0.20, 0.0, 1.0);
-#endif
 		attenuation *= diffuseTerm;
 		lightResult.xyz += lightDiffuse[i].xyz * attenuation;
 
@@ -428,9 +466,8 @@ void main()
 	float detailDistance = clamp(vDepth * 0.025, 0.0, 1.0);
 	vec3 detailColor = mix(detailTex, fullbrightDetail, detailDistance);
 #endif
-#if defined(OG_RETRO_MODE)
-	oColor.xyz = mix(oColor.xyz, oColor.xyz * detailColor, diffuseTex.w * 0.35);
-#else
+	// Retro skips this: 1.5 had no terrain detail texture.
+#if !defined(OG_RETRO_MODE)
 	oColor.xyz = mix(oColor.xyz, oColor.xyz * detailColor, diffuseTex.w);
 #endif
 #endif
@@ -440,7 +477,13 @@ void main()
 	oColor.xyz = mix(oColor.xyz, fogColour.xyz, fogValue);
 
 	// output alpha
+#if defined(OG_RETRO_MODE)
+	// 1.5 drew each terrain tile opaque, so Retro ignores Redux's faded patch
+	// edges (as TerrainTileBlend = 0 does) and leaves the tiles unblended.
+	oColor.a = 1.0;
+#else
 	oColor.a = vColor.a;
+#endif
 
 	gl_FragData[0] = oColor;
 
