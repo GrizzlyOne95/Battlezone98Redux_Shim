@@ -247,6 +247,22 @@ opacity. The next implementation must keep opaque color/depth, transparent
 coverage/contribution and HUD in separate owned, synchronized resources without
 omitting effects from the playable game.
 
+### Terrain and modern material track
+
+The bridge demo can now request the existing native terrain tessellation and
+procedural displacement with `-TerrainMicroRelief`, optional factors 1/2/4
+and a bounded amplitude. The native renderer produces the subdivided surface
+before its scene color/depth reach DX12; this does not export complete terrain
+geometry. Fresh GPU rasterization and post-exit material/bounds restoration
+must pass before `terrain-bridge-report.json` qualifies the combined lane.
+The switch defaults off and does not edit persistent terrain settings.
+
+The concrete path to adaptive subdivision, authored height/normal/roughness
+materials, complete terrain DXR geometry and temporal reconstruction is in
+[DLSS_RT_TERRAIN_AND_MATERIAL_PLAN.md](DLSS_RT_TERRAIN_AND_MATERIAL_PLAN.md).
+Fixed-factor procedural relief is the starting point; those later features
+remain planned.
+
 ### Transport build
 
 From the repository root on native Windows with Visual Studio and Windows SDK:

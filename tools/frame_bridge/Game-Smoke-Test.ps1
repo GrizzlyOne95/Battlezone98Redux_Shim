@@ -16,6 +16,9 @@ param(
     [switch]$VisibleRayTracing,
     [switch]$VisualEnhancements,
     [switch]$WorldEffectsReference,
+    [switch]$TerrainMicroRelief,
+    [ValidateSet(1, 2, 4)][int]$TerrainTessellationFactor = 4,
+    [ValidateRange(0.001, 1)][float]$TerrainReliefAmplitude = 0.25,
     [switch]$StreamlineDevelopment,
     [switch]$RecordWindow,
     [switch]$RecordFrames,
@@ -24,8 +27,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if ($WorldEffectsReference) {
-    if ($StreamlineDirectory -or $VisibleRayTracing -or $VisualEnhancements -or $ShaderCameraTrace) { throw 'World-effects reference is a separate diagnostic, without effects or runtime tracing' }
+    if ($StreamlineDirectory -or $VisibleRayTracing -or $VisualEnhancements -or $ShaderCameraTrace -or $TerrainMicroRelief) { throw 'World-effects reference is a separate diagnostic, without effects or runtime tracing' }
     if ($DepthSweep -or $SceneStage -ne 'before-overlay') { throw 'World-effects reference requires one before-overlay scene capture' }
+    $SceneColor=$true
+    if ($DepthClearOrdinal -eq 0) { $DepthClearOrdinal=3 }
+}
+if ($TerrainMicroRelief) {
+    if ($DepthSweep -or $SceneStage -ne 'before-overlay') { throw 'Terrain micro-relief requires one before-overlay scene capture' }
     $SceneColor=$true
     if ($DepthClearOrdinal -eq 0) { $DepthClearOrdinal=3 }
 }
@@ -63,6 +71,7 @@ if ($Mission -notmatch '^[A-Za-z0-9_./-]+\.bzn$') { throw 'Mission must be a sim
 $mutex = [System.Threading.Mutex]::new($false, 'Local\BZROpenShimGameLaunch')
 $locked = $false
 $game = $null
+$gameExitCode = $null
 $snapshot = @()
 $environment = @{}
 $restoreErrors = @()
@@ -128,6 +137,11 @@ try {
         OPENSHIM_FRAME_BRIDGE_DEPTH = $(if ($Depth) { '1' } else { '0' })
         OPENSHIM_FRAME_BRIDGE_SCENE_COLOR = $(if ($SceneColor) { '1' } else { '0' })
         OPENSHIM_FRAME_BRIDGE_WORLD_EFFECTS_REFERENCE = $(if ($WorldEffectsReference) { '1' } else { '0' })
+        OPENSHIM_TERRAIN_TESSELLATION_TEST = $(if ($TerrainMicroRelief) { '1' } else { '0' })
+        OPENSHIM_TERRAIN_MICRO_RELIEF_TEST = $(if ($TerrainMicroRelief) { '1' } else { '0' })
+        OPENSHIM_TERRAIN_TESSELLATION_FACTOR = "$TerrainTessellationFactor"
+        OPENSHIM_TERRAIN_MICRO_RELIEF_AMPLITUDE = $TerrainReliefAmplitude.ToString('R', [Globalization.CultureInfo]::InvariantCulture)
+        OPENSHIM_TERRAIN_TESSELLATION_WIREFRAME = '0'
     }.GetEnumerator()) {
         $environment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
@@ -138,6 +152,9 @@ try {
     & (Join-Path $repoRoot 'scripts/Deploy-OpenShim.ps1') -GameDir $GameRoot
     $launchTime = Get-Date
     $game = Start-BZRGameProcess -FilePath $gameExe -ArgumentList @('/renderer:dx11', $Mission) -WorkingDirectory $GameRoot -PassThru
+    # Start-BZRGameProcess returns Get-Process, rather than Process.Start's
+    # retained handle. Open it while alive so exit status survives PID removal.
+    $null = $game.Handle
     Write-Host "GAME pid=$($game.Id) output=$outputRoot"
     $deadline = [DateTime]::UtcNow.AddSeconds($InitTimeoutSeconds)
     $initialized = $false
@@ -226,6 +243,7 @@ try {
 } finally {
     try {
         if ($game) { Stop-BZRGame -Id $game.Id -TimeoutSeconds 30 -NoForce }
+        if ($game -and $game.WaitForExit(0)) { $gameExitCode=$game.ExitCode }
     } finally {
         $stillRunning = $game -and (Get-Process -Id $game.Id -ErrorAction SilentlyContinue)
         if ($stillRunning) {
@@ -267,4 +285,35 @@ try {
         $mutex.Dispose()
         if ($restoreErrors.Count -gt 0) { throw ($restoreErrors -join [Environment]::NewLine) }
     }
+}
+if ($TerrainMicroRelief) {
+    # Validate only this launch, after graceful exit has emitted cleanup proof.
+    # Installation messages alone do not establish rasterized tessellation.
+    $terrainLines=@((Read-SharedText (Join-Path $outputRoot 'openshim.log')) -split '\r?\n' |
+        Where-Object { $_ -match ("\[pid:" + $game.Id + " ") })
+    $terrainText=$terrainLines -join "`n"
+    $install=[regex]::Matches($terrainText, 'shared native material installed .*factor=(\d+) displacement=([0-9.]+) wireframe=0 passes=(\d+)')
+    $statistics=@([regex]::Matches($terrainText, 'GPU statistics tessellated=1 iaPrimitives=(\d+) hsInvocations=(\d+) dsInvocations=(\d+) clipPrimitives=(\d+) psInvocations=(\d+) hdTiles=(\d+)') |
+        Where-Object { [uint64]$_.Groups[1].Value -eq 12800 -and [uint64]$_.Groups[2].Value -gt 0 -and
+            [uint64]$_.Groups[3].Value -gt 0 -and [uint64]$_.Groups[4].Value -ge 128 -and [uint64]$_.Groups[5].Value -ge 1024 })
+    $bounds=[regex]::Matches($terrainText, 'micro-relief render bounds restored meshes=(\d+) tracked=(\d+)')
+    $material=[regex]::Matches($terrainText, 'shared material restored source="[^"]+" passes=(\d+)')
+    if ($install.Count -ne 1 -or [int]$install[0].Groups[1].Value -ne $TerrainTessellationFactor -or
+        [Math]::Abs([float]::Parse($install[0].Groups[2].Value, [Globalization.CultureInfo]::InvariantCulture) - $TerrainReliefAmplitude) -gt 0.00051 -or
+        $statistics.Count -eq 0 -or $bounds.Count -ne 1 -or [int]$bounds[0].Groups[1].Value -le 0 -or
+        $bounds[0].Groups[1].Value -ne $bounds[0].Groups[2].Value -or $material.Count -ne 1 -or
+        $material[0].Groups[1].Value -ne $install[0].Groups[3].Value -or $null -eq $gameExitCode -or $gameExitCode -ne 0) {
+        throw 'Terrain bridge capture lacks fresh-session rasterization, requested parameters or complete clean restoration; leave output unqualified'
+    }
+    $sample=$statistics[0]
+    @{ pid=$game.Id; nativeTessellationRasterized=$true; bridgeCaptureCompleted=$true;
+        gameExitCode=$gameExitCode; factor=$TerrainTessellationFactor; displacementAmplitude=$TerrainReliefAmplitude; displacementSource='procedural micro-relief';
+        iaPrimitives=[uint64]$sample.Groups[1].Value; hullInvocations=[uint64]$sample.Groups[2].Value;
+        domainInvocations=[uint64]$sample.Groups[3].Value; clippedPrimitives=[uint64]$sample.Groups[4].Value;
+        pixelInvocations=[uint64]$sample.Groups[5].Value; restoredMeshes=[int]$bounds[0].Groups[1].Value;
+        restoredPasses=[int]$material[0].Groups[1].Value; gameplayTerrainChanged=$false;
+        adaptiveSubdivision=$false; materialHeightMaps=$false; fullTerrainGeometryExport=$false;
+        sameFrameUntessellatedComparison=$false; performanceQualified=$false } |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outputRoot 'terrain-bridge-report.json')
+    Write-Host "PASS native terrain -> DX12 bridge: factor=$TerrainTessellationFactor amplitude=$TerrainReliefAmplitude; rasterization and cleanup verified"
 }
