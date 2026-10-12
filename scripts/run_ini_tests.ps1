@@ -242,6 +242,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Acts only after a GPU reset, to keep the recreated D3D11 device alive.
     "Graphics/D3D11DeviceLossRecovery",
 
+    # Stages OpenShim updates from the Workshop on the main menu (Steam only,
+    # never in multiplayer); installs only at game exit. Default on by design.
+    "Updater/AutoStage",
+
     # Proven Redux regressions that are hard-disabled in network games.
     "SinglePlayer/JumpSnipeCrouch",
     "SinglePlayer/SatelliteVisibilityFix"
