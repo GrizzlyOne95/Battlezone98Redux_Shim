@@ -20,6 +20,7 @@
 #include "terrain_hd_texture_copy.h"
 #include "terrain_paint.h"
 #include "frame_bridge_native_geometry.h"
+#include "frame_bridge_native_lease.h"
 
 #include <algorithm>
 #include <array>
@@ -233,6 +234,7 @@ namespace BZROpenShim
             bool tessellationAdaptive = false;
             std::string surfaceManifest;
             std::string geometryExport;
+            bool geometryLive=false;
             float tessellationTargetPixels = 12.0f;
             bool tessellationWireframe = false;
             int tessellationFactor = 2;
@@ -862,6 +864,7 @@ namespace BZROpenShim
             ReadEnvString("OPENSHIM_TERRAIN_HD_EXPORT", config.hdExportPath);
             ReadEnvString("OPENSHIM_TERRAIN_SURFACE_MANIFEST", config.surfaceManifest);
             ReadEnvString("OPENSHIM_TERRAIN_GEOMETRY_EXPORT", config.geometryExport);
+            config.geometryLive=IsEnvEnabled("OPENSHIM_TERRAIN_GEOMETRY_LIVE")&&!config.geometryExport.empty();
             int debugOverride = 0;
             if (ReadEnvInt("OPENSHIM_TERRAIN_SEMANTIC_DEBUG", debugOverride))
                 config.semanticDebugMode = debugOverride;
@@ -3879,6 +3882,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
 
         void ResetNativeGeometryExport();
+        void InvalidateNativeGeometry(const char* reason);
         void ResetSelectedState()
         {
             g_proxy = {};
@@ -5034,6 +5038,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             try
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
+                if(g_config.geometryLive&&g_proxy.selected&&g_proxy.zone==constructedZone)
+                    InvalidateNativeGeometry("selected-zone-constructed");
                 RefreshTerrainMicroReliefBounds(zone);
                 RefreshNativeTerrainHd(zone, false);
                 ObserveZone(zone);
@@ -5079,6 +5085,14 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             if (g_active.load(std::memory_order_acquire) && !g_shutdown.load())
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
+                if(g_config.geometryLive&&g_proxy.selected&&g_proxy.zone==zone)
+                    for(size_t i=0;i<16;++i) {
+                        uint8_t full=0,height=0,next=0;
+                        if(!SafeReadZoneByte(zone,kFullDirtyOffset+i,full)||!SafeReadZoneByte(zone,kHeightDirtyOffset+i,height)||
+                            !SafeReadZoneByte(zone,kHeightDirtyNextOffset+i,next)||full||height||next) {
+                            InvalidateNativeGeometry("zone-dirty-before-rebuild"); break;
+                        }
+                    }
                 if (g_config.hdEnabled)
                     for (size_t index = 0; index < 16; ++index)
                     {

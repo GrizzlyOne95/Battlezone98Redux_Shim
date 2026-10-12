@@ -21,6 +21,8 @@ add_executable(frame_bridge_history_tests ../../tests/frame_bridge_history_tests
 add_test(NAME frame_bridge_history COMMAND frame_bridge_history_tests)
 add_executable(frame_bridge_native_geometry_tests ../../tests/frame_bridge_native_geometry_tests.cpp)
 add_test(NAME frame_bridge_native_geometry COMMAND frame_bridge_native_geometry_tests)
+add_executable(frame_bridge_native_lease_tests ../../tests/frame_bridge_native_lease_tests.cpp)
+add_test(NAME frame_bridge_native_lease COMMAND frame_bridge_native_lease_tests)
 add_executable(frame_bridge_producer_gpu_tests ../../tests/frame_bridge_producer_gpu_tests.cpp ../../src/engine/frame_bridge_producer.cpp ../../src/engine/frame_bridge_depth.cpp)
 target_link_libraries(frame_bridge_producer_gpu_tests PRIVATE d3d11 dxgi)
 add_executable(frame_bridge_depth_gpu_tests ../../tests/frame_bridge_depth_gpu_tests.cpp ../../src/engine/frame_bridge_depth.cpp)

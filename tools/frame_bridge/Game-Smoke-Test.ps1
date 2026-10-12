@@ -20,6 +20,8 @@ param(
     [switch]$TerrainAdaptive,
     [string]$TerrainSurfaceManifest = '',
     [switch]$NativeTerrainSnapshot,
+    [switch]$NativeTerrainLive,
+    [switch]$NativeTerrainRefreshProbe,
     [ValidateRange(4, 64)][float]$TerrainTargetPixels = 12,
     [ValidateSet(1, 2, 4)][int]$TerrainTessellationFactor = 4,
     [ValidateRange(0.001, 1)][float]$TerrainReliefAmplitude = 0.25,
@@ -30,6 +32,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($NativeTerrainLive) { $NativeTerrainSnapshot=$true; $VisibleRayTracing=$true }
+if ($NativeTerrainRefreshProbe -and -not $NativeTerrainLive) { throw 'Native refresh probe requires NativeTerrainLive' }
 if ($TerrainAdaptive -and (-not $TerrainMicroRelief -or $TerrainTessellationFactor -ne 4)) { throw 'TerrainAdaptive requires TerrainMicroRelief with factor-4 cap' }
 if ($TerrainSurfaceManifest -and -not $TerrainMicroRelief) { throw 'Surface capture requires TerrainMicroRelief for native GPU draw evidence' }
 if ($NativeTerrainSnapshot -and ($TerrainMicroRelief -or $TerrainSurfaceManifest)) { throw 'Native geometry snapshot requires undisplaced base terrain' }
@@ -168,6 +172,7 @@ try {
         OPENSHIM_TERRAIN_TESSELLATION_TARGET_PIXELS = $TerrainTargetPixels.ToString('R', [Globalization.CultureInfo]::InvariantCulture)
         OPENSHIM_TERRAIN_SURFACE_MANIFEST = $(if ($TerrainSurfaceManifest) { Join-Path $GameRoot $surfaceRelativeManifest } else { '' })
         OPENSHIM_TERRAIN_GEOMETRY_EXPORT = $(if ($NativeTerrainSnapshot) { Join-Path $outputRoot 'native-terrain.bin' } else { '' })
+        OPENSHIM_TERRAIN_GEOMETRY_LIVE = $(if ($NativeTerrainLive) { '1' } else { '0' })
     }.GetEnumerator()) {
         $environment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
@@ -245,6 +250,8 @@ try {
         if ($SceneColor) { $presenterArgs += @('--capture-scene-bmp', (Join-Path $outputRoot "game-scene$suffix.bmp"), '--scene-stage', $SceneStage) }
         if ($StreamlineDirectory) { $presenterArgs += @('--streamline-dir', $StreamlineDirectory, '--fg-report', (Join-Path $outputRoot 'dlss-fg-report.json')) }
         if ($VisibleRayTracing) { $presenterArgs += @('--rt-visible-ao', '--capture-rt-bmp', (Join-Path $outputRoot 'game-dxr-ao.bmp')) }
+        if ($NativeTerrainLive) { $presenterArgs += @('--native-terrain-live-prefix', (Join-Path $outputRoot 'native-terrain.bin')) }
+        if ($NativeTerrainRefreshProbe) { $presenterArgs += '--native-terrain-refresh-probe' }
         if ($VisualEnhancements) {
             $presenterArgs += @('--show', '--visual-preset', 'cinematic', '--capture-enhanced-bmp', (Join-Path $outputRoot 'game-cinematic.bmp'),
                 '--capture-enhanced-scene-bmp', (Join-Path $outputRoot 'game-cinematic-scene.bmp'))
@@ -318,6 +325,17 @@ try {
 }
 if ($NativeTerrainSnapshot) {
     $geometryPath=Join-Path $outputRoot 'native-terrain.bin'
+    if($NativeTerrainLive) {
+        $consumerLog=Read-SharedText (Join-Path $outputRoot 'consumer.log')
+        $nativeReport=[regex]::Match($consumerLog,'DXR_NATIVE live_frames=(\d+) inactive_frames=(\d+) revisions_loaded=(\d+) invalidations=(\d+) last_revision=(\d+) triangles=(\d+) last_frame_native=(\d+)')
+        if(-not $nativeReport.Success -or [int]$nativeReport.Groups[1].Value -le 0 -or $nativeReport.Groups[7].Value -ne '1' -or $nativeReport.Groups[6].Value -ne '204800') { throw 'Native live capture lacks actual leased ray frames' }
+        if($NativeTerrainRefreshProbe -and ([int]$nativeReport.Groups[3].Value -lt 2 -or [int]$nativeReport.Groups[4].Value -lt 1 -or [int]$nativeReport.Groups[5].Value -lt 2)) { throw 'Native refresh probe did not invalidate and reload the lease' }
+        $geometryPath += '.g'+$nativeReport.Groups[5].Value+'.bin'
+        @{ nativeLiveFrames=[int]$nativeReport.Groups[1].Value; inactiveFrames=[int]$nativeReport.Groups[2].Value;
+            loads=[int]$nativeReport.Groups[3].Value; invalidations=[int]$nativeReport.Groups[4].Value;
+            lastRevision=[uint64]$nativeReport.Groups[5].Value; refreshProbeRequested=[bool]$NativeTerrainRefreshProbe;
+            terrainDeformationQualified=$false; fullSceneQualified=$false } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outputRoot 'native-live-report.json')
+    }
     if (-not (Test-Path -LiteralPath $geometryPath -PathType Leaf)) { throw 'Native terrain snapshot missing; inspect fresh terrain-geometry log' }
     $geometry=Get-Content -LiteralPath ($geometryPath+'.json') -Raw | ConvertFrom-Json
     $geometryLog=Read-SharedText (Join-Path $outputRoot 'openshim.log')

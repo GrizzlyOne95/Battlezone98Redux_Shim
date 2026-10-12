@@ -2,7 +2,21 @@
 // no claim of live deformation, complete map coverage or tessellated relief.
 unsigned g_GeometryExportTicks=0;
 bool g_GeometryExportFinished=false;
-void ResetNativeGeometryExport() { g_GeometryExportTicks=0; g_GeometryExportFinished=false; }
+FrameBridge::NativeGeometryLease g_NativeLease;
+FrameBridge::NativeGeometryLeaseState g_PendingNativeLease;
+bool g_NativeLeasePending=false;
+uint64_t g_NativeRevision=0;
+void InvalidateNativeGeometry(const char* reason)
+{
+    if(!g_config.geometryLive) return;
+    g_NativeLease.Invalidate(); g_NativeLeasePending=false;
+    if(g_GeometryExportFinished) LogShimA(LogLevel::Info,"terrain-geometry","[TERRAIN-GEOMETRY] lease invalidated revision=%llu reason=%s",g_NativeRevision,reason);
+    g_GeometryExportTicks=0; g_GeometryExportFinished=false;
+}
+void ResetNativeGeometryExport() {
+    InvalidateNativeGeometry("mission-owner-reset");
+    g_GeometryExportTicks=0; g_GeometryExportFinished=false;
+}
 
 bool ReadNativeIndexBytes(void* buffer,std::vector<uint8_t>& bytes)
 {
@@ -33,6 +47,14 @@ bool ReadNativeIndexBytes(void* buffer,std::vector<uint8_t>& bytes)
 
 void ExportNativeTerrainGeometry()
 {
+    if(g_config.geometryLive) {
+        if(!g_NativeLease.Open(GetCurrentProcessId(),true)) return;
+        if(g_NativeLease.TakeRefreshRequest()) InvalidateNativeGeometry("consumer-refresh-probe");
+        if(g_NativeLeasePending&&g_NativeLease.Publish(g_PendingNativeLease)) {
+            g_NativeLeasePending=false;
+            LogShimA(LogLevel::Info,"terrain-geometry","[TERRAIN-GEOMETRY] lease ready revision=%llu hash=%llu validFromQpc=%llu",g_NativeRevision,g_PendingNativeLease.payloadHash,g_PendingNativeLease.validFromQpc);
+        }
+    }
     if(g_GeometryExportFinished||++g_GeometryExportTicks<120) return;
     g_GeometryExportFinished=true;
     try
@@ -103,7 +125,8 @@ void ExportNativeTerrainGeometry()
             clusters.push_back({{"mesh",candidate.meshName},{"zone",{zoneX,zoneZ}},{"cluster",{x,z}},
                 {"worldTransform",std::vector<float>(matrix,matrix+16)},{"minimumY",minY},{"maximumY",maxY}});
         }
-        const auto path=std::filesystem::path(g_config.geometryExport);
+        const uint64_t revision=g_config.geometryLive?++g_NativeRevision:0;
+        const auto path=std::filesystem::path(g_config.geometryExport+(g_config.geometryLive?".g"+std::to_string(revision)+".bin":""));
         if(!path.is_absolute()||std::filesystem::exists(path)||std::filesystem::exists(path.string()+".json")) throw std::runtime_error("native snapshot needs a new absolute output path");
         std::ofstream out(path,std::ios::binary); FrameBridge::WriteNativeGeometry(out,snapshot); out.close();
         nlohmann::json report={{"schema","bzr-native-terrain-snapshot-v1"},{"pid",GetCurrentProcessId()},
@@ -113,6 +136,15 @@ void ExportNativeTerrainGeometry()
             {"offscreenNativeClustersIncluded",true},{"payloadHash",FrameBridge::GeometryHash(snapshot.vertices)}};
         std::ofstream metadata(path.string()+".json"); metadata<<report.dump(2)<<'\n';
         if(!metadata) throw std::runtime_error("native snapshot metadata write failed");
+        metadata.close();
+        if(g_config.geometryLive) {
+            LARGE_INTEGER now{},frequency{}; QueryPerformanceCounter(&now); QueryPerformanceFrequency(&frequency);
+            g_PendingNativeLease={}; g_PendingNativeLease.producerPid=GetCurrentProcessId();
+            g_PendingNativeLease.missionGeneration=g_missionGeneration; g_PendingNativeLease.revision=revision;
+            g_PendingNativeLease.payloadHash=FrameBridge::GeometryHash(snapshot.vertices);
+            g_PendingNativeLease.validFromQpc=static_cast<uint64_t>(now.QuadPart); g_PendingNativeLease.qpcFrequency=static_cast<uint64_t>(frequency.QuadPart);
+            g_PendingNativeLease.triangles=static_cast<uint32_t>(snapshot.vertices.size()/3); g_NativeLeasePending=true;
+        }
         LogShimA(LogLevel::Info,"terrain-geometry","[TERRAIN-GEOMETRY] snapshot exported clusters=%u vertices=%zu triangles=%zu generation=%u baseNative=1 worldSpace=1 path=\"%s\"",snapshot.header.clusters,snapshot.vertices.size(),snapshot.vertices.size()/3,g_missionGeneration,path.string().c_str());
     }
     catch(const std::exception& error) { LogShimA(LogLevel::Warn,"terrain-geometry","[TERRAIN-GEOMETRY] snapshot declined: %s",error.what()); }

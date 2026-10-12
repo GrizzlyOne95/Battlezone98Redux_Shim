@@ -69,7 +69,8 @@ namespace
         D3D12_HEAP_PROPERTIES heap{}; heap.Type=type; ComPtr<ID3D12Resource> resource;
         Check(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,state,nullptr,IID_PPV_ARGS(&resource))); return resource;
     }
-    std::vector<unsigned char> Render(const Input& input,const NativeGeometry* native=nullptr)
+    std::vector<unsigned char> Render(const Input& input,const NativeGeometry* native=nullptr,
+        const NativeGeometry* replacement=nullptr,bool retire=false)
     {
         ComPtr<ID3D12Device> device; Check(D3D12CreateDevice(nullptr,D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device)));
         D3D12_COMMAND_QUEUE_DESC q{}; ComPtr<ID3D12CommandQueue> queue; Check(device->CreateCommandQueue(&q,IID_PPV_ARGS(&queue)));
@@ -101,11 +102,25 @@ namespace
         Barrier(list.Get(),rt.FinalOutput(),D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_COPY_SOURCE);
         D3D12_TEXTURE_COPY_LOCATION from{}; from.pResource=rt.FinalOutput(); from.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
         D3D12_TEXTURE_COPY_LOCATION to{}; to.pResource=readback.Get(); to.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT; to.PlacedFootprint=foot;
-        list->CopyTextureRegion(&to,0,0,0,&from,nullptr); Check(list->Close());
+        list->CopyTextureRegion(&to,0,0,0,&from,nullptr);
+        Barrier(list.Get(),rt.FinalOutput(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_COMMON); Check(list->Close());
         ID3D12CommandList* lists[]={list.Get()}; queue->ExecuteCommandLists(1,lists);
         ComPtr<ID3D12Fence> fence; Check(device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence)));
         HANDLE event=CreateEventW(nullptr,FALSE,FALSE,nullptr); Require(event!=nullptr,"DXR test event");
         Check(queue->Signal(fence.Get(),1)); Check(fence->SetEventOnCompletion(1,event)); Require(WaitForSingleObject(event,5000)==WAIT_OBJECT_0,"bounded DXR completion");
+        if(replacement||retire) {
+            // Exercise actual in-place live-resource replacement/retirement
+            // only after the first submission has completed on the GPU.
+            if(replacement) rt.SetNativeGeometry(device.Get(),*replacement); else rt.ClearNativeGeometry();
+            Check(allocator->Reset()); Check(list->Reset(allocator.Get(),nullptr));
+            rt.Record(list.Get(),input.camera);
+            Barrier(list.Get(),rt.FinalOutput(),D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_COPY_SOURCE);
+            list->CopyTextureRegion(&to,0,0,0,&from,nullptr);
+            Barrier(list.Get(),rt.FinalOutput(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_COMMON);
+            Check(list->Close()); queue->ExecuteCommandLists(1,lists);
+            Check(queue->Signal(fence.Get(),2)); Check(fence->SetEventOnCompletion(2,event));
+            Require(WaitForSingleObject(event,5000)==WAIT_OBJECT_0,"bounded replacement DXR completion");
+        }
         unsigned char* mapped=nullptr; D3D12_RANGE range{0,static_cast<SIZE_T>(bytes)}; Check(readback->Map(0,&range,reinterpret_cast<void**>(&mapped)));
         std::vector<unsigned char> pixels(input.width*input.height*4);
         for(unsigned y=0;y<input.height;++y) std::memcpy(pixels.data()+y*input.width*4,mapped+foot.Offset+y*foot.Footprint.RowPitch,input.width*4);
@@ -168,6 +183,8 @@ int main(int argc,char** argv)
     coplanar.header.payloadHash=GeometryHash(coplanar.vertices);
     Require(Render(plane,&coplanar)==plane.final,"duplicate coplanar native terrain adds no false self-occlusion");
     auto worldOcclusion=Render(plane,&native); unsigned nativeDarker=0;
+    Require(Render(plane,&native,&coplanar)==plane.final,"replacement native BLAS removes old occluder after GPU completion");
+    Require(Render(plane,&native,nullptr,true)==plane.final,"retiring native BLAS restores depth-only rays after GPU completion");
     for(size_t i=0;i<worldOcclusion.size();i+=4) if(worldOcclusion[i]+2<plane.final[i]) ++nativeDarker;
     Require(nativeDarker>100,"native occluder absent from depth affects real hardware rays");
     auto translated=plane; translated.camera.view[3]=-37; translated.camera.view[7]=12; translated.camera.view[11]=-19;

@@ -429,3 +429,30 @@ The real labeled comparison was inspected. This is a static snapshot from the
 same mission, not synchronized live native scene transport or full RT shadows.
 All 107 native, seven x86 helper and ten x64 helper/GPU tests pass. Earlier
 declined/invalid-input attempts are recorded separately in the snapshot doc.
+
+## Live native terrain validity and renewal checkpoint
+
+A separate 64-byte Win32 mapping/mutex publishes native snapshot PID, mission,
+revision/hash/count and earliest valid camera QPC. The helper checks the clock,
+frame ordering and snapshot ownership and rechecks after I/O. Native terrain
+dirty flags, selected-zone construction and mission reset invalidate Ready;
+renewed immutable files rebuild the native BLAS only after preceding GPU work
+has completed. The ordinary V5 color/depth transport remains unchanged.
+
+GOG misn03 PID 29556, `build/game-bridge-20261012-175414-392/`, imported 240
+1600x900 frames. Hardware DXR processed 212 matched inputs; 205 used leased
+native terrain and seven fell back to depth-only during renewal. A refresh
+request after thirty native ray frames invalidated revision one, loaded
+revision two and ended with a valid native final frame. Both geometry hashes
+were identical: this is real renewal plumbing on unchanged terrain, not a
+deformation test. Mission exit invalidated revision two, returned zero and
+restored all 60 deployment/config file hashes.
+
+The inspected original/live-AO comparison used the same captured frame 240.
+Combined depth/native AO darkened 47343 pixels by more than two levels, maximum
+channel change 72. It does not isolate the added native geometry contribution.
+Native terrain coverage is still one zone and the UI/particle mask is still
+provisional. All 108 native, eight x86 and eleven x64 helper/GPU tests pass,
+including child-process lease contention/invalidation and hardware BLAS
+replacement/retirement. Actual deformation, mission/device cycling, broad
+camera movement, custom material geometry and Steam/Proton/Wine remain open.
