@@ -146,11 +146,19 @@ int main(int argc,char** argv)
         const auto pixels=Render(input,neutral,bgra); PreservedHUD(input,pixels);
         for(unsigned i=0;i<pixels.size();++i) Require(std::abs(int(pixels[i])-int(input.final[i]))<=1,"neutral preset preserves every odd-extent RGBA/BGRA pixel");
     }
-    auto haze=neutral; haze.hazeDensity=.02f; haze.hazeStart=0; haze.hazeColor={.7f,.75f,.8f};
+    auto haze=neutral; haze.hazeDensity=.02f; haze.hazeStart=0; haze.hazeMaximum=1; haze.hazeColor={.7f,.75f,.8f};
     auto pixels=Render(input,haze); PreservedHUD(input,pixels);
     const auto blue=[&](unsigned x,unsigned y){return pixels[(y*input.width+x)*4+2];};
     Require(blue(50,16)>blue(10,16)+60,"distant depth receives stronger haze than nearby depth");
     Require(blue(10,4)==40&&blue(11,4)==40,"NaN depth and clear sky receive no haze");
+    auto distantOnly=neutral; distantOnly.hazeDensity=.1f; distantOnly.hazeStart=120;
+    pixels=Render(input,distantOnly); PreservedHUD(input,pixels);
+    for(unsigned i=0;i<pixels.size();++i) Require(std::abs(int(pixels[i])-int(input.final[i]))<=1,"nearby surfaces remain free of the distant haze preset");
+    auto capped=haze; capped.hazeMaximum=.1f;
+    const auto cappedPixels=Render(input,capped);
+    const auto farBlue=(16*input.width+50)*4+2;
+    const auto fullHazePixels=Render(input,haze);
+    Require(cappedPixels[farBlue]+40<fullHazePixels[farBlue],"haze maximum caps the atmospheric lift");
     auto bloom=neutral; bloom.bloomThreshold=.1f; bloom.bloomStrength=1;
     for(unsigned y=15;y<18;++y) for(unsigned x=34;x<37;++x)
         for(unsigned ch=0;ch<3;++ch) input.scene[(y*input.width+x)*4+ch]=input.final[(y*input.width+x)*4+ch]=255;

@@ -15,7 +15,7 @@ cbuffer Params : register(b0) {
     uint Width; uint Height; uint BloomWidth; uint BloomHeight;
     float ClearDepth; float Exposure; float Contrast; float Saturation;
     float BloomThreshold; float BloomStrength; float HazeDensity; float HazeStart;
-    float3 HazeColor; float Padding;
+    float3 HazeColor; float HazeMaximum;
 };
 float3 Linear(float3 value) {
     return float3(value.r<=.04045?value.r/12.92:pow(max((value.r+.055)/1.055,0),2.4),
@@ -79,7 +79,7 @@ void Composite(uint3 id:SV_DispatchThreadID) {
     float4 v=mul(ClipToView,float4(uv.x*2-1,1-uv.y*2,z,1));
     if(isfinite(z)&&z>=0&&z<=1&&z!=ClearDepth&&all(isfinite(v))&&abs(v.w)>1e-8) {
         float distance=length(v.xyz/v.w);
-        float haze=1-exp(-max(distance-HazeStart,0)*HazeDensity);
+        float haze=min(HazeMaximum,1-exp(-max(distance-HazeStart,0)*HazeDensity));
         c=lerp(c,Linear(HazeColor),haze);
     }
     // A power contrast curve preserves dark cockpit detail; a linear pivot

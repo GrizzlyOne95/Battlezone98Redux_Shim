@@ -147,6 +147,45 @@ valid; smaller placement does not guarantee WGC availability in every desktop
 context. Input recordings are explicitly labeled and do not independently
 capture/count generated images.
 
+### Geyser self-occlusion and nearby haze correction
+
+The first cinematic comparison exposed black flecks over the geyser and a
+blue-grey lift on nearby buildings. Isolating the same captured frame showed
+the flecks already in AO-only output. The original ray origin used full-resolution
+depth while the BLAS represented two-pixel triangles, so an origin could lie
+behind its own coarse surface. D24 quantization amplified distant self-hits.
+
+AO now reconstructs the exact traced triangle plane and projects its ray origin
+onto that plane. The offset covers eight D24 quantization steps in view units
+and skips geometry when that uncertainty approaches the AO radius. Mesh edges
+are bounded by the smaller of 3.5% of view distance and one eighth of the AO
+radius. AO also skips a four-pixel neighborhood with invalid/discontinuous depth.
+This deliberately reduces distant and narrow contact AO; it does not identify
+particle opacity or supply an authoritative transparency mask.
+
+Haze now starts at **120 view units**, with density **0.00035** and maximum blend
+**0.25**, instead of starting at 20 with density 0.0015. The marked buildings
+were around 62–66 view units away, so they receive no extra haze. Bloom and color
+grading remain active, and distant haze is still available without washing out
+those nearby surfaces. The haze maximum is finite/bounded and passed separately
+in the unchanged 32-dword shader constant layout.
+
+Replaying the exact marked 1280x681 frame through hardware DXR reduced pixels
+darkened by more than five channel levels in the 100x140 geyser crop from **443
+to 3**, with maximum darkening **149 to 8**. A new native GOG combined run
+(`build/game-bridge-20261012-114439-494/`) imported **181** 1280x720 frames,
+executed corrected cinematic/DXR output on **166**, and reported **166** extra
+SDK presentations with final status zero. It waited one additional frame for a
+valid final pair. Matched scene/cinematic captures and a labeled 13.93-second
+renderer-input video were inspected; all 60 deployed/config files were restored
+and hash-checked after graceful exit.
+
+All nine x64 GPU/helper and 101 native regression tests passed; the no-SDK build
+also passed. The added tests require a coarse D24-quantized distant plane to
+remain free of false AO, while the near corner still produces occlusion. Haze
+tests check the haze-free near region and maximum blend cap. General translucent
+smoke, HUD opacity, camera motion and other missions still require qualification.
+
 ### Transport build
 
 From the repository root on native Windows with Visual Studio and Windows SDK:

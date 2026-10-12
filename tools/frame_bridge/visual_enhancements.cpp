@@ -22,7 +22,7 @@ namespace BZROpenShim::FrameBridge
             const auto bounded=[](float v,float low,float high) { return std::isfinite(v)&&v>=low&&v<=high; };
             if (!bounded(s.exposure,.1f,4)||!bounded(s.contrast,0,2)||!bounded(s.saturation,0,2)||
                 !bounded(s.bloomThreshold,0,1)||!bounded(s.bloomStrength,0,2)||!bounded(s.hazeDensity,0,.1f)||
-                !bounded(s.hazeStart,0,10000)||std::any_of(s.hazeColor.begin(),s.hazeColor.end(),[&](float v){return !bounded(v,0,1);}))
+                !bounded(s.hazeStart,0,10000)||!bounded(s.hazeMaximum,0,1)||std::any_of(s.hazeColor.begin(),s.hazeColor.end(),[&](float v){return !bounded(v,0,1);}))
                 throw std::runtime_error("visual preset parameters outside finite bounds");
         }
     }
@@ -90,13 +90,14 @@ namespace BZROpenShim::FrameBridge
         if(!facts.recognized||!Inverse(projection,inverse)||camera.width!=width_||camera.height!=height_)
             throw std::runtime_error("visual preset requires a matched perspective camera");
         struct Constants { float inverse[16]; unsigned width,height,bloomWidth,bloomHeight; float clear,exposure,contrast,saturation;
-            float threshold,bloom,density,start; float color[3],padding; } c{};
+            float threshold,bloom,density,start; float color[3],maximum; } c{};
         static_assert(sizeof(c)==32*4,"visual shader constants layout");
         for(unsigned i=0;i<16;++i) c.inverse[i]=static_cast<float>(inverse[i]);
         c.width=width_; c.height=height_; c.bloomWidth=bloomWidth_; c.bloomHeight=bloomHeight_; c.clear=facts.reversed?0.0f:1.0f;
         c.exposure=settings.exposure; c.contrast=settings.contrast; c.saturation=settings.saturation;
         c.threshold=settings.bloomThreshold; c.bloom=settings.bloomStrength; c.density=settings.hazeDensity; c.start=settings.hazeStart;
         std::copy(settings.hazeColor.begin(),settings.hazeColor.end(),c.color);
+        c.maximum=settings.hazeMaximum;
         const auto transitionInputs=[&](D3D12_RESOURCE_STATES before,D3D12_RESOURCE_STATES after) {
             for(unsigned i=0;i<inputs_.size();++i)
                 if(std::find(inputs_.begin(),inputs_.begin()+i,inputs_[i])==inputs_.begin()+i) Transition(list,inputs_[i],before,after);

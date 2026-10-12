@@ -134,4 +134,22 @@ int main(int argc,char** argv)
         else Require(darker==0,"single plane has no self-occlusion");
         std::printf("PASS DXR analytic %s darker_pixels=%u\n",corner?"corner":"plane",darker);
     }
+    // A distant sloping plane quantized to D24 has no geometric occluder.
+    // Its coarse two-pixel mesh is not fine enough for a four-unit AO radius:
+    // decline that geometry rather than turn quantization into black flecks.
+    auto distant=Fixture(false); distant.camera.farClip=1000;
+    const float q=1000.0f/(1000.0f-distant.camera.nearClip);
+    distant.camera.projection[10]=-q; distant.camera.projection[11]=-q*distant.camera.nearClip;
+    for(unsigned y=0;y<distant.height;++y) for(unsigned x=0;x<distant.width;++x)
+    {
+        const float nx=(2*(x+.5f)/distant.width-1)/distant.camera.projection[0];
+        const float ny=(1-2*(y+.5f)/distant.height)/distant.camera.projection[5];
+        const float distance=110.0f/(1+.12f*nx+.06f*ny);
+        const float z=q-q*distant.camera.nearClip/distance;
+        distant.depth[y*distant.width+x]=std::round(z*16777215.0f)/16777215.0f;
+    }
+    const auto pixels=Render(distant);
+    Require(pixels==distant.final,"under-resolved distant D24 plane has no false self-occlusion");
+    std::puts("PASS DXR coarse distant D24 plane preserved without self-shadow speckles");
+    return OpenShimTest::ExitCode();
 }
