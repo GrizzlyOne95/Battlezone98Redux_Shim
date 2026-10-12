@@ -42,6 +42,7 @@
 #include "pilot_fp_animation_trace.h"
 #include "walker_cockpit_trace.h"
 #include "openshim_sdk_v2.h"
+#include "openshim_asset_sync.h"
 #include "openshim_updater.h"
 #include "render_profile_runtime.h"
 #include "ui_performance.h"
@@ -94,6 +95,9 @@ static void RunPatchStage(const char* stage, Fn&& fn)
 static unsigned __stdcall PatchThreadProc(void*)
 {
     PATCH_STAGE(BZROpenShim::UiPerf::Initialize());
+    // Keeps the Enhanced renderer resources and UI tiles in step with the
+    // Workshop item this build was updated from; runs on its own worker.
+    PATCH_STAGE(BZROpenShim::StartOpenShimAssetSync());
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "plugin", "Patch thread started");
     // BZLoader is emphatically not started from here any more. The loader owns
     // this module's lifecycle -- it is what called BZPlugin_Load to get us
@@ -252,6 +256,7 @@ namespace BZROpenShim
         BZROpenShim::UiPerfHooks::Shutdown();
         BZROpenShim::UiFileScan::Shutdown();
         BZROpenShim::ShutdownNativeCpuSampler();
+        BZROpenShim::ShutdownOpenShimAssetSync();
         BZROpenShim::ShutdownOpenShimUpdater();
         BZROpenShim::ShutdownOpenShimSdkV2();
         BZROpenShim::ShutdownWalkerCockpitTrace();
