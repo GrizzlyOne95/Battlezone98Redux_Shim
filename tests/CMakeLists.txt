@@ -38,6 +38,8 @@ if(Python3_Interpreter_FOUND)
     execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import PIL"
         RESULT_VARIABLE OPENSHIM_PIL_IMPORT_RESULT OUTPUT_QUIET ERROR_QUIET)
     if(OPENSHIM_PIL_IMPORT_RESULT EQUAL 0)
+        add_test(NAME frame_bridge_capture_pack_tests
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/frame_bridge_capture_pack_tests.py")
         add_test(NAME terrain_paint_pack_tests
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_paint_pack_tests.py")
         add_test(NAME terrain_hd_pack_tests

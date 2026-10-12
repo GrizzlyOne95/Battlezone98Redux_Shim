@@ -40,17 +40,21 @@ int main(int argc,char** argv)
     for(int fault=0;fault<7;++fault) {
         auto bad=lease;
         if(fault==0)bad.ready=0; if(fault==1)bad.revision=0; if(fault==2)bad.byteSize=0;
-        if(fault==3)bad.triangles=1000001; if(fault==4)bad.validFromQpc=0; if(fault==5)bad.magic=0; if(fault==6)bad.version=2;
+        if(fault==3)bad.triangles=1000001; if(fault==4)bad.validFromQpc=0; if(fault==5)bad.magic=0; if(fault==6)bad.version=1;
         Require(!NativeLeaseMatchesFrame(bad,7,100,110,1000),"invalid live native lease rejected");
     }
+    float sun[3]={0,1,0}; Require(ValidTerrainSun(sun),"unit world sun direction accepted");
+    sun[1]=2; Require(!ValidTerrainSun(sun),"scaled sun rejected");
+    sun[1]=NAN; Require(!ValidTerrainSun(sun),"nonfinite sun rejected");
+    lease.towardSun[1]=1; lease.sunValid=1;
 #ifdef _WIN32
     const auto pid=GetCurrentProcessId(); lease.producerPid=pid;
     NativeGeometryLease publisher,reader;
     Require(publisher.Open(pid,true)&&reader.Open(pid,false),"open named native lease");
     ChildRead(pid,false); Require(publisher.Publish(lease),"publish native lease"); ChildRead(pid,true);
-    NativeGeometryLeaseState read{}; Require(reader.Read(read)&&read.revision==1,"read stable revision");
+    NativeGeometryLeaseState read{}; Require(reader.Read(read)&&read.revision==1&&read.sunValid==1&&read.towardSun[1]==1,"read stable revision and sunlight");
     reader.RequestRefresh(); Require(publisher.TakeRefreshRequest()&&!publisher.TakeRefreshRequest(),"refresh request consumed once");
-    const auto name=L"Local\\OpenShim.NativeGeometry."+std::to_wstring(pid)+L".Mutex";
+    const auto name=L"Local\\OpenShim.NativeGeometry.v2."+std::to_wstring(pid)+L".Mutex";
     HANDLE mutex=OpenMutexW(SYNCHRONIZE|MUTEX_MODIFY_STATE,FALSE,name.c_str());
     Require(mutex&&WaitForSingleObject(mutex,0)==WAIT_OBJECT_0,"hold publication mutex");
     ChildRead(pid,false); publisher.Invalidate(); // Independent of busy reader/writer lock.

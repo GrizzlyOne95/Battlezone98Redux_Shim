@@ -1,5 +1,6 @@
 #include "visible_rt.h"
 #include "frame_bridge_history.h"
+#include "frame_bridge_native_lease.h"
 #include <stdexcept>
 #include <algorithm>
 #ifdef FRAME_BRIDGE_DXR
@@ -77,10 +78,11 @@ namespace BZROpenShim::FrameBridge
         device->CreateUnorderedAccessView(sceneOutput_.Get(),nullptr,&uav,cpu); cpu.ptr+=step;
         device->CreateUnorderedAccessView(finalOutput_.Get(),nullptr,&uav,cpu);
         D3D12_DESCRIPTOR_RANGE ranges[2]={{D3D12_DESCRIPTOR_RANGE_TYPE_SRV,3,0,0,0},{D3D12_DESCRIPTOR_RANGE_TYPE_UAV,3,0,0,3}};
-        D3D12_ROOT_PARAMETER parameters[3]{}; parameters[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; parameters[0].DescriptorTable={2,ranges};
+        D3D12_ROOT_PARAMETER parameters[4]{}; parameters[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; parameters[0].DescriptorTable={2,ranges};
         parameters[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV; parameters[1].Descriptor={3,0};
-        parameters[2].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; parameters[2].Constants={0,0,40};
-        D3D12_ROOT_SIGNATURE_DESC rd{}; rd.NumParameters=3; rd.pParameters=parameters;
+        parameters[2].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; parameters[2].Constants={0,0,48};
+        parameters[3].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV; parameters[3].Descriptor={4,0};
+        D3D12_ROOT_SIGNATURE_DESC rd{}; rd.NumParameters=4; rd.pParameters=parameters;
         ComPtr<ID3DBlob> blob,errors; Check(D3D12SerializeRootSignature(&rd,D3D_ROOT_SIGNATURE_VERSION_1,&blob,&errors),"serialize DXR compute root");
         Check(device->CreateRootSignature(0,blob->GetBufferPointer(),blob->GetBufferSize(),IID_PPV_ARGS(&root_)),"create DXR compute root");
         D3D12_COMPUTE_PIPELINE_STATE_DESC ps{}; ps.pRootSignature=root_.Get(); ps.CS={visibleRtMesh,sizeof(visibleRtMesh)};
@@ -122,11 +124,14 @@ namespace BZROpenShim::FrameBridge
             double dot=0; for(unsigned k=0;k<3;++k) dot+=view[a*4+k]*view[b*4+k];
             if(std::abs(dot-(a==b?1.0:0.0))>1e-4) throw std::runtime_error("DXR requires rigid camera view");
         }
-        struct Constants { float inverse[16]; unsigned width,height,columns,rows; float clear,radius,bias,strength; float toWorld[16]; } c{};
+        struct Constants { float inverse[16]; unsigned width,height,columns,rows; float clear,radius,bias,strength; float toWorld[16]; float towardSun[3]; unsigned shadowMode; float shadowDistance,shadowBias,shadowStrength; unsigned nativeTriangles; } c{};
+        static_assert(sizeof(Constants)==48*4);
         for(unsigned i=0;i<16;++i) c.inverse[i]=static_cast<float>(inverse[i]);
         c.width=width_; c.height=height_; c.columns=columns_; c.rows=rows_;
         c.clear=facts.reversed?0.0f:1.0f; c.radius=4.0f; c.bias=.015f; c.strength=.8f;
         for(unsigned i=0;i<16;++i) c.toWorld[i]=static_cast<float>(inverseView[i]);
+        std::memcpy(c.towardSun,towardSun_,sizeof(towardSun_)); c.shadowMode=shadowMode_;
+        c.shadowDistance=512; c.shadowBias=.05f; c.shadowStrength=.45f; c.nativeTriangles=nativeTriangles_;
         D3D12_RAYTRACING_INSTANCE_DESC instances[2]{};
         for(unsigned row=0;row<3;++row) for(unsigned col=0;col<4;++col) instances[0].Transform[row][col]=c.toWorld[row*4+col];
         instances[0].InstanceMask=1; instances[0].AccelerationStructure=blas_->GetGPUVirtualAddress();
@@ -139,7 +144,8 @@ namespace BZROpenShim::FrameBridge
         Transition(list,vertices_.Get(),D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         ID3D12DescriptorHeap* heaps[]={heap_.Get()}; list->SetDescriptorHeaps(1,heaps); list->SetComputeRootSignature(root_.Get());
         list->SetComputeRootDescriptorTable(0,heap_->GetGPUDescriptorHandleForHeapStart()); list->SetComputeRootShaderResourceView(1,tlas_->GetGPUVirtualAddress());
-        list->SetComputeRoot32BitConstants(2,40,&c,0); list->SetPipelineState(meshPipeline_.Get()); list->Dispatch((columns_+7)/8,(rows_+7)/8,1);
+        list->SetComputeRootShaderResourceView(3,nativeVertices_?nativeVertices_->GetGPUVirtualAddress():vertices_->GetGPUVirtualAddress());
+        list->SetComputeRoot32BitConstants(2,48,&c,0); list->SetPipelineState(meshPipeline_.Get()); list->Dispatch((columns_+7)/8,(rows_+7)/8,1);
         Transition(list,vertices_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build{}; build.Inputs.Type=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
         build.Inputs.Flags=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD; build.Inputs.NumDescs=1;
@@ -167,6 +173,7 @@ namespace BZROpenShim::FrameBridge
     {
         nativeVertices_.Reset(); nativeBlas_.Reset(); nativeScratch_.Reset();
         nativeGeometry_={}; nativeTriangles_=0; nativeBuilt_=false;
+        shadowMode_=0;
     }
 #else
     void VisibleRayTracing::Initialize(ID3D12Device*,ID3D12Resource*,ID3D12Resource*,ID3D12Resource*)
@@ -175,4 +182,10 @@ namespace BZROpenShim::FrameBridge
     void VisibleRayTracing::SetNativeGeometry(ID3D12Device*,const NativeGeometry&) { throw std::runtime_error("native geometry needs DXR build"); }
     void VisibleRayTracing::ClearNativeGeometry() {}
 #endif
+    void VisibleRayTracing::SetTerrainSun(const float* direction,unsigned mode)
+    {
+        shadowMode_=0;
+        if(mode>2||!direction||!ValidTerrainSun(direction)||!nativeTriangles_) return;
+        std::memcpy(towardSun_,direction,sizeof(towardSun_)); shadowMode_=mode;
+    }
 }

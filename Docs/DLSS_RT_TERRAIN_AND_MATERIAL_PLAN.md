@@ -103,8 +103,15 @@ base native triangles into a world-space BLAS for exact-frame diagnostic replay.
 It includes sixteen clusters in the selected zone independently of screen
 coverage. The default-off live presenter now accepts the zone under a
 revisioned validity lease and falls back during renewal. Full scene ownership,
-deformation/device qualification, relief matching and shadow lighting remain
-required; the refresh probe does not change terrain.
+deformation/device qualification, relief matching and lighting replacement remain
+required; the refresh probe does not change terrain. A further terrain-only
+sunlight visibility preview now uses the actual Ogre directional light and
+native geometric normals. Its native receiver depth match is deliberately
+strict, its SDR attenuation is artistic, and its green/magenta mask is a debug
+view. An exposed GOG base view executes rays without producing new terrain
+shadows. Native buildings/vehicles and a genuinely shadowed game camera pose
+are the next visual acceptance targets; hardware analytic offscreen shadows
+already pass. See the snapshot document for tests and live evidence.
 
 Triplanar cliff texturing, height-aware terrain blending, improved particle
 lighting and a proper linear/HDR scene are worthwhile extensions once their
