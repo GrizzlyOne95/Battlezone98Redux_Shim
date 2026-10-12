@@ -660,6 +660,9 @@ try {
         if ($artifacts.RenderSource) {
             Copy-ResourceDirectory -Source $artifacts.RenderSource `
                 -Destination (Join-Path $gameDir "openshim\renderer\enhanced")
+            # The in-game asset sync trusts this marker to describe the folder; the
+            # files just written may differ, so drop it and let the next start re-check.
+            Remove-Item -LiteralPath (Join-Path $gameDir "openshim\renderer\enhanced\openshim_set.sha256") -Force -ErrorAction SilentlyContinue
             Write-Host "  deployed Enhanced renderer resources"
         }
 
@@ -684,6 +687,7 @@ try {
                     Copy-Item -LiteralPath $tileSource -Destination $uiTarget -Force
                 }
             }
+            Remove-Item -LiteralPath (Join-Path $uiTarget "openshim_widgets.sha256") -Force -ErrorAction SilentlyContinue
             Write-Host "  deployed UI widget tiles"
         }
     }

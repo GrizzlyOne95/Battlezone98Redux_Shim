@@ -39,6 +39,8 @@ if(Python3_Interpreter_FOUND)
     else()
         message(STATUS "terrain_hd_pack_tests needs Pillow; install it to qualify texture pack changes")
     endif()
+    add_test(NAME ui_tiles_consistency_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/ui_tiles_consistency_tests.py")
     add_test(NAME weapon_presentation_live_capture_tests
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../reverse_engineering/test_weapon_presentation_live.py")
 endif()
@@ -363,6 +365,10 @@ openshim_add_test(x86_length_tests STD 20 SOURCES
 openshim_add_test(openshim_update_manifest_tests STD 20 SOURCES
     openshim_update_manifest_tests.cpp
     ../src/patches/openshim_update_manifest.cpp
+)
+openshim_add_test(openshim_asset_sets_tests STD 20 SOURCES
+    openshim_asset_sets_tests.cpp
+    ../src/patches/openshim_asset_sets.cpp
 )
 openshim_add_test(openshim_update_support_tests STD 20 SOURCES
     openshim_update_support_tests.cpp
