@@ -336,7 +336,8 @@ namespace
             if (!output) throw std::runtime_error("cannot save depth PFM");
             std::ofstream metadata(depthPath_ + ".json", std::ios::trunc);
             metadata << std::setprecision(9);
-            metadata << "{\n  \"candidateOnly\": true,\n  \"frameId\": " << lastDepth_.frameId << ",\n  \"captureQpc\": " << lastDepth_.captureQpc
+            metadata << "{\n  \"candidateOnly\": true,\n  \"protocolVersion\": " << kVersion
+                << ",\n  \"frameId\": " << lastDepth_.frameId << ",\n  \"captureQpc\": " << lastDepth_.captureQpc
                 << ",\n  \"width\": " << frame_->width << ",\n  \"height\": " << frame_->height << ",\n  \"sourceFormat\": " << lastDepth_.format
                 << ",\n  \"sourceSamples\": " << lastDepth_.samples << ",\n  \"reduction\": \"" << (lastDepth_.reduction ? "maximum" : "minimum")
                 << "\",\n  \"capturedClearOrdinal\": " << lastDepth_.ordinal << ",\n  \"matchingClears\": " << lastDepth_.clears
@@ -359,9 +360,11 @@ namespace
                     << ",\n    \"name\": \"" << camera.name << "\",\n    \"width\": " << camera.width << ",\n    \"height\": " << camera.height
                     << ",\n    \"nearClip\": " << camera.nearClip << ",\n    \"farClip\": " << camera.farClip
                     << ",\n    \"stage\": " << camera.stage << ",\n    \"clearOrdinal\": " << camera.clearOrdinal
-                    << ",\n    \"observationQpc\": " << camera.observationQpc << ",\n    \"layout\": \"Ogre row-major, column vectors\",\n    \"view\": [";
+                    << ",\n    \"observationQpc\": " << camera.observationQpc
+                    << ",\n    \"matrixSource\": \"" << CameraMatrixSourceName(camera.matrixSource)
+                    << "\",\n    \"layout\": \"Ogre row-major, column vectors\",\n    \"view\": [";
                 for (unsigned i = 0; i < 16; ++i) output << (i ? ", " : "") << camera.view[i];
-                output << "],\n    \"projectionRS\": [";
+                output << "],\n    \"projection\": [";
                 for (unsigned i = 0; i < 16; ++i) output << (i ? ", " : "") << camera.projection[i];
                 output << "],\n    \"recognizedPerspective\": " << (facts.recognized ? "true" : "false");
                 if (facts.recognized)

@@ -15,7 +15,7 @@ namespace BZROpenShim::FrameBridge
             void* (__thiscall* camera)(void*) = nullptr;
             int (__thiscall* width)(void*) = nullptr;
             int (__thiscall* height)(void*) = nullptr;
-            const float* (__thiscall* view)(void*) = nullptr;
+            const float* (__thiscall* view)(void*, bool) = nullptr;
             const float* (__thiscall* projection)(void*) = nullptr;
             float (__thiscall* nearClip)(void*) = nullptr;
             float (__thiscall* farClip)(void*) = nullptr;
@@ -37,8 +37,8 @@ namespace BZROpenShim::FrameBridge
                 Bind(module, api.camera, "?getCamera@Viewport@Ogre@@QBEPAVCamera@2@XZ") &&
                 Bind(module, api.width, "?getActualWidth@Viewport@Ogre@@QBEHXZ") &&
                 Bind(module, api.height, "?getActualHeight@Viewport@Ogre@@QBEHXZ") &&
-                Bind(module, api.view, "?getViewMatrix@Camera@Ogre@@UBEABVMatrix4@2@XZ") &&
-                Bind(module, api.projection, "?getProjectionMatrixRS@Frustum@Ogre@@UBEABVMatrix4@2@XZ") &&
+                Bind(module, api.view, "?getViewMatrix@Camera@Ogre@@QBEABVMatrix4@2@_N@Z") &&
+                Bind(module, api.projection, "?getProjectionMatrixWithRSDepth@Frustum@Ogre@@UBEABVMatrix4@2@XZ") &&
                 Bind(module, api.nearClip, "?getNearClipDistance@Camera@Ogre@@UBEMXZ") &&
                 Bind(module, api.farClip, "?getFarClipDistance@Camera@Ogre@@UBEMXZ") &&
                 Bind(module, api.name, "?getName@MovableObject@Ogre@@UBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
@@ -60,7 +60,10 @@ namespace BZROpenShim::FrameBridge
                 snapshot.width = static_cast<std::uint32_t>(width);
                 snapshot.height = static_cast<std::uint32_t>(height);
                 snapshot.cameraIdentity = reinterpret_cast<std::uintptr_t>(camera);
-                const float* view = api.view(camera);
+                // Match the camera baseline used by AutoParamDataSource. Its
+                // renderable overrides, camera-relative transforms and target
+                // flipping still require separate draw-level qualification.
+                const float* view = api.view(camera, true);
                 const float* projection = api.projection(camera);
                 if (!view || !projection) return false;
                 for (unsigned i = 0; i < 16; ++i) { snapshot.view[i] = view[i]; snapshot.projection[i] = projection[i]; }
@@ -79,6 +82,7 @@ namespace BZROpenShim::FrameBridge
                 QueryPerformanceCounter(&qpc);
                 snapshot.observationQpc = qpc.QuadPart;
                 snapshot.status = static_cast<std::uint32_t>(CameraStatus::Observed);
+                snapshot.matrixSource = static_cast<std::uint32_t>(CameraMatrixSource::CameraForShaders);
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER) { return false; }

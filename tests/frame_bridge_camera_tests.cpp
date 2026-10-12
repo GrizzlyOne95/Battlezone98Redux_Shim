@@ -11,6 +11,7 @@ int main()
     CameraSnapshot camera{};
     Check(!ValidCameraSnapshot(camera), "missing camera is not fabricated identity");
     camera.status = static_cast<std::uint32_t>(CameraStatus::Observed);
+    camera.matrixSource = static_cast<std::uint32_t>(CameraMatrixSource::Synthetic);
     camera.width = 1600; camera.height = 900;
     camera.cameraIdentity = 1234; camera.observationQpc = 42;
     constexpr char fixtureName[] = "SyntheticCamera";
@@ -26,6 +27,16 @@ int main()
         std::fabs(facts.aspect - 16.0 / 9.0) < 0.000001 && facts.verticalFovDegrees > 50 && facts.verticalFovDegrees < 55,
         "D3D right-handed perspective matches near/far device depth");
     auto changed = camera;
+    changed.matrixSource = 0;
+    Check(!ValidCameraSnapshot(changed), "unknown matrix convention is rejected");
+    changed.matrixSource = 4;
+    Check(!ValidCameraSnapshot(changed), "unsupported matrix convention is rejected");
+    changed = camera;
+    changed.matrixSource = static_cast<std::uint32_t>(CameraMatrixSource::CameraForShaders);
+    Check(ValidCameraSnapshot(changed), "explicit shader camera convention");
+    Check(std::strcmp(CameraMatrixSourceName(changed.matrixSource), "camera-for-shaders") == 0,
+        "shader baseline retains convention in artifacts");
+    changed = camera;
     changed.projection[10] *= -1; changed.projection[14] *= -1;
     facts = InspectPerspective(changed);
     Check(facts.recognized && facts.forwardSign == 1 && !facts.reversed, "recognize left-handed projection from positive clip w");

@@ -10,16 +10,29 @@
 namespace BZROpenShim::FrameBridge
 {
     enum class CameraStatus : std::uint32_t { Unavailable = 0, Observed = 1, Invalid = 2 };
+    enum class CameraMatrixSource : std::uint32_t { Unknown = 0, ViewportRS = 1, CameraForShaders = 2, Synthetic = 3 };
+    inline const char* CameraMatrixSourceName(std::uint32_t source)
+    {
+        switch (static_cast<CameraMatrixSource>(source))
+        {
+        case CameraMatrixSource::ViewportRS: return "viewport-rs";
+        case CameraMatrixSource::CameraForShaders: return "camera-for-shaders";
+        case CameraMatrixSource::Synthetic: return "synthetic";
+        default: return "unknown";
+        }
+    }
     // Exported Ogre viewport/camera getters at the capture boundary, not proof
-    // of the camera used by every earlier draw in this depth texture.
+    // of the camera used by every earlier draw in this depth texture. The
+    // CameraForShaders source retains the absolute camera view; it does not
+    // include per-renderable or camera-relative parameter overrides.
     struct CameraSnapshot
     {
         std::uint32_t status;
-        std::uint32_t width, height, reserved;
+        std::uint32_t width, height, matrixSource;
         std::uint64_t cameraIdentity; // Diagnostic identity only; never dereference outside producer.
         char name[64];
         float view[16]; // Ogre row-major; column-vector multiplication.
-        float projection[16]; // Frustum::getProjectionMatrixRS, including render-system adjustment.
+        float projection[16]; // Convention is explicit in matrixSource; never infer it from layout.
         float nearClip, farClip; // farClip=0 means infinite in Ogre.
         std::uint32_t stage; // 0=Present, 1=pre-clear observation.
         std::uint32_t clearOrdinal;
@@ -29,11 +42,14 @@ namespace BZROpenShim::FrameBridge
     static_assert(sizeof(CameraSnapshot) == 240);
     static_assert(sizeof(float) == 4 && std::numeric_limits<float>::is_iec559);
     static_assert(offsetof(CameraSnapshot, view) == 88);
+    static_assert(offsetof(CameraSnapshot, matrixSource) == 12);
     static_assert(offsetof(CameraSnapshot, observationQpc) == 232);
 
     inline bool ValidCameraSnapshot(const CameraSnapshot& camera)
     {
         if (camera.status != static_cast<std::uint32_t>(CameraStatus::Observed) ||
+            camera.matrixSource < static_cast<std::uint32_t>(CameraMatrixSource::ViewportRS) ||
+            camera.matrixSource > static_cast<std::uint32_t>(CameraMatrixSource::Synthetic) ||
             !camera.cameraIdentity || !camera.observationQpc || !camera.width || !camera.height ||
             camera.width > 8192 || camera.height > 8192 || camera.name[63] != 0 ||
             camera.stage > 1 || camera.clearOrdinal > 8 ||
