@@ -8,7 +8,7 @@
 namespace BZROpenShim::FrameBridge
 {
     constexpr std::uint32_t kMagic = 0x3146424f; // OBF1
-    constexpr std::uint32_t kVersion = 3;
+    constexpr std::uint32_t kVersion = 4;
     constexpr std::uint32_t kMaxDimension = 8192;
     enum class SlotState : std::int32_t { Free = 0, Writing = 1, Ready = 2, Reading = 3 };
     enum class DepthStatus : std::uint32_t { Disabled = 0, Candidate = 1, Missing = 2, Unsupported = 3, Failed = 4 };

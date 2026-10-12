@@ -8,6 +8,7 @@ namespace
         using namespace BZROpenShim::FrameBridge;
         camera = {};
         camera.status = static_cast<std::uint32_t>(CameraStatus::Observed);
+        camera.matrixSource = static_cast<std::uint32_t>(CameraMatrixSource::Synthetic);
         camera.width = 64; camera.height = 32;
         camera.cameraIdentity = 7; camera.observationQpc = 10;
         camera.view[0] = camera.view[5] = camera.view[10] = camera.view[15] = 1;

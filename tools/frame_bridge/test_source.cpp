@@ -74,6 +74,7 @@ int main(int argc, char** argv)
         if (depthEnabled)
         {
             camera.status = static_cast<std::uint32_t>(CameraStatus::Observed);
+            camera.matrixSource = static_cast<std::uint32_t>(CameraMatrixSource::Synthetic);
             camera.width = desc.Width; camera.height = desc.Height;
             camera.cameraIdentity = 1;
             std::snprintf(camera.name, sizeof(camera.name), "SyntheticFrameCamera");

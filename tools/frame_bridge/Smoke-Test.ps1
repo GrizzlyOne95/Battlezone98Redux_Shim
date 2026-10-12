@@ -85,7 +85,9 @@ foreach ($case in @('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra', 'dep
             if ($metadata.frameId -ne 120 -or $metadata.width -ne $width -or $metadata.height -ne $height -or
                 -not $metadata.candidateOnly -or $metadata.sourceFormat -ne 45) { throw 'Invalid depth capture metadata' }
             if (-not $metadata.cameraObservation.valid -or $metadata.cameraObservation.view[3] -ne $metadata.frameId -or
-                -not $metadata.cameraObservation.recognizedPerspective) { throw 'Stale or invalid camera artifact' }
+                -not $metadata.cameraObservation.recognizedPerspective -or $metadata.protocolVersion -ne 4 -or
+                $metadata.cameraObservation.matrixSource -ne 'synthetic' -or
+                $metadata.cameraObservation.projection.Count -ne 16) { throw 'Stale or invalid camera artifact' }
             $depthBytes = [System.IO.File]::ReadAllBytes($depthFile)
             $header = [Text.Encoding]::ASCII.GetBytes("Pf`n$width $height`n-1.0`n")
             if ($depthBytes.Length -ne $header.Length + $width * $height * 4) { throw 'Invalid PFM size' }

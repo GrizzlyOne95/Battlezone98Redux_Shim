@@ -7,7 +7,8 @@ param(
     [switch]$Depth,
     [ValidateRange(0, 8)][int]$DepthClearOrdinal = 0,
     [switch]$DepthSweep,
-    [switch]$Camera
+    [switch]$Camera,
+    [switch]$ShaderCameraTrace
 )
 
 $ErrorActionPreference = 'Stop'
@@ -103,6 +104,31 @@ try {
     if (-not $initialized) { throw 'Mission failed to initialize before deadline' }
     # Give depth's observation worker time to emit its 15-second registry report.
     Start-Sleep -Seconds 16
+    if ($ShaderCameraTrace) {
+        # Attach only to our harness-owned PID. The CLI timeout detaches; it
+        # must never terminate or eternalize instrumentation in the game.
+        $frida = Get-Command bzr-frida.cmd -ErrorAction Stop
+        [pscustomobject]@{
+            Backend = 'frida-cli'; Pid = $game.Id; Mission = $Mission
+            ExecutableSHA256 = (Get-FileHash -LiteralPath $gameExe -Algorithm SHA256).Hash
+            OgreSHA256 = (Get-FileHash -LiteralPath (Join-Path $GameRoot 'OgreMain.dll') -Algorithm SHA256).Hash
+            RendererSHA256 = (Get-FileHash -LiteralPath (Join-Path $GameRoot 'RenderSystem_Direct3D11.dll') -Algorithm SHA256).Hash
+            ScriptSHA256 = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'Trace-Shader-Cameras.js') -Algorithm SHA256).Hash
+            Arguments = @('-p', "$($game.Id)", '-q', '-t', '14', '--exit-on-error', '--no-auto-reload', '-l', (Join-Path $PSScriptRoot 'Trace-Shader-Cameras.js'))
+        } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $outputRoot 'shader-camera-trace.build.json')
+        & $frida.Source -p $game.Id -q -t 14 --exit-on-error --no-auto-reload -l (Join-Path $PSScriptRoot 'Trace-Shader-Cameras.js') |
+            Tee-Object -FilePath (Join-Path $outputRoot 'shader-camera-trace.jsonl')
+        if ($LASTEXITCODE -ne 0) { throw 'Shader camera trace failed' }
+        $trace = Read-SharedText (Join-Path $outputRoot 'shader-camera-trace.jsonl')
+        $records = @($trace -split '\r?\n' | Where-Object { $_.StartsWith('{') } | ForEach-Object { $_ | ConvertFrom-Json })
+        $completed = @($records | Where-Object { $_.type -eq 'complete' })
+        $variants = @($records | Where-Object { $_.type -eq 'variant' })
+        if ($completed.Count -ne 1 -or $completed[0].reason -ne 'frame-limit' -or $completed[0].frames -ne 30 -or
+            $completed[0].errors -ne 0 -or $completed[0].overflow -ne 0 -or $variants.Count -eq 0 -or
+            $completed[0].variants -ne $variants.Count) {
+            throw 'Shader camera trace incomplete, invalid or overflowed; retain diagnostics without qualifying matrices'
+        }
+    }
     $ordinals = if ($DepthSweep) { @(1, 2, 3) } else { @($DepthClearOrdinal) }
     foreach ($ordinal in $ordinals) {
         $suffix = if ($DepthSweep) { "-clear$ordinal" } else { '' }

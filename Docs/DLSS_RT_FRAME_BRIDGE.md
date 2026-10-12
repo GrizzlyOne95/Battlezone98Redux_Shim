@@ -75,6 +75,9 @@ logs the process ID:
 # Require a matched camera observation in each saved final pair:
 ./tools/frame_bridge/Game-Smoke-Test.ps1 -DepthSweep -Camera
 ./tools/frame_bridge/Game-Smoke-Test.ps1 -Camera -DepthClearOrdinal 2 -Mission misn03.bzn
+# Bounded shader-parameter reads, detached before the final capture:
+./tools/frame_bridge/Game-Smoke-Test.ps1 -Camera -DepthClearOrdinal 2 -Mission misn03.bzn -ShaderCameraTrace
+python tools/frame_bridge/Inspect-Shader-Cameras.py build/<run>/shader-camera-trace.jsonl
 # Inspect a PFM with Python + Pillow; contrast is not linearized depth:
 python tools/frame_bridge/Inspect-Capture.py build/<run>/game-depth.pfm --color build/<run>/game-frame.bmp
 ```
@@ -174,9 +177,10 @@ pass identity and draw-level projection qualification remain next.
 
 ## Camera observation foundation
 
-V3 appends an owned camera snapshot to the slot-protected descriptor. It reads
-the active DX11 render system's viewport through exported Ogre APIs, then reads
-that viewport's Camera view matrix and Frustum render-system projection matrix,
+V4 retains the owned camera snapshot and explicitly labels its matrix source.
+It reads the active DX11 render system's viewport through exported Ogre APIs,
+then reads that viewport's `Camera::getViewMatrix(true)` and
+`Frustum::getProjectionMatrixWithRSDepth()` as the **camera baseline for shaders**,
 near/far clip distances, dimensions and name. No camera pointers or native object
 offsets are dereferenced in the helper. A numeric identity is diagnostic only;
 the snapshot owns all matrix/name bytes and does not keep an Ogre object alive.
@@ -192,14 +196,37 @@ their existing camera metadata intact; missing snapshots cannot reuse old camera
 data. This is a **viewport observation**, not proof of the camera/projection used
 by each preceding draw. Native shader/AutoParam camera overrides may differ.
 
-The helper writes `cameraObservation` into the PFM sidecar. Matrices use Ogre
-row-major storage and column-vector multiplication; the projection is from
-`getProjectionMatrixRS`, not the unadjusted generic projection. The centered
+The helper writes `protocolVersion`, `cameraObservation.matrixSource`, `view`
+and `projection` into the PFM sidecar. Matrices use Ogre row-major storage and
+column-vector multiplication. The source distinguishes the camera shader
+baseline, the earlier viewport RS convention and synthetic fixtures; unknown
+sources are invalid. V3 descriptors are rejected rather than interpreting their
+old `projectionRS` as the shader baseline. The centered
 perspective inspector checks near/far endpoints and positive clip W for both
 forward-Z signs. It recognizes standard/reversed and finite/infinite far planes;
 orthographic, oblique, asymmetric or transposed cases stay unqualified. These
 facts describe the observed matrix, not a guarantee that the entire depth texture
 uses it. No linear-depth product or motion vectors are produced yet.
+
+The bounded `-ShaderCameraTrace` tool observes exported AutoParamDataSource
+view/projection getter results, copying values while each getter is live and
+invalidating pairs on camera/renderable changes. It records the camera-relative
+flag and groups reads by scene dimensions and preceding viewport depth clears.
+It discards the partial attachment frame, observes 30 complete frames with
+bounded variant/source/thread storage, detaches, and never spawns or terminates
+the game. The harness rejects errors, overflow or incomplete results. Its output
+includes executable/DLL/script hashes and the PID/command; trace addresses and
+matrices remain in ignored build artifacts. These counters observe Ogre clears,
+not the bridge's exact matching DSV clear ordinal or individual shader draws.
+
+The first clean vehicle trace found three 4096x4096 shadow cameras, two main
+1600x900 parameter groups with zeroed view translations, and a final identity
+view/projection override. The main projection matched `WithRSDepth`, differing
+from the earlier `getProjectionMatrixRS` in the Z/W signs. V4 therefore uses the
+shader-oriented projection with the absolute camera view. Camera-relative
+world transforms, per-renderable overrides, target flipping and actual constant
+buffer/draw/depth ownership still need qualification. A matching getter pair
+alone is not proof that all geometry in a depth texture used that pair.
 
 `--require-camera` with `--capture-depth-pfm` (or harness `-Camera`) requires a
 matching finite camera observation in the final pair. The same 120-extra-frame
@@ -214,7 +241,7 @@ GOG qualification on 2026-10-11:
 - `misn01.bzn`: camera-required ordinal 1/2/3 sweep imported 360 frames and saved
   three matched pairs at 1600x900 with 8x D24/S8 depth. All boundaries reported
   `PlayerCam`, near 0.0799999982, far 1125, aspect 1.77777784 and vertical FOV
-  64.3664372 degrees. The observed projection uses positive view Z and maps near
+  64.3664372 degrees. This earlier V3 projection uses positive view Z and maps near
   to approximately 0 and far to approximately 1 (standard depth).
 - `misn03.bzn`: another 120-frame camera-required capture saved non-flat depth
   and visually inspected cockpit/world color, with the same viewport camera and
@@ -234,7 +261,7 @@ cover metadata preservation and camera invalidation/recovery beside depth.
 
 - A versioned 384-byte wire descriptor contains only fixed-width fields, the
   adapter LUID, dimensions/format, timestamps and producer-local NT handle
-  values and owned camera data. V3 grows the V1/V2 descriptor's 128-byte prefix
+  values and owned camera data. V3 grew the V1/V2 descriptor's 128-byte prefix
   to 384 bytes; old helpers must be rebuilt and reject the new version. The helper duplicates
   handles from that PID; it never treats wire
   integers as pointers or directly uses a foreign handle.
@@ -248,7 +275,9 @@ cover metadata preservation and camera invalidation/recovery beside depth.
 - Capture never waits for a consumer. Busy slots skip frames. A crashed/stalled
   reader leaves the slot unavailable instead of allowing concurrent GPU writes.
   A clean reader exit allows reconnect. Crash recovery needs a new session.
-- V3 accepts RGBA8/BGRA8 SDR, one mip/array layer, and same-adapter sharing.
+- V4 keeps the 384-byte layout and adds an explicit camera matrix source in
+  previously reserved space, rejecting V3 to prevent projection ambiguity.
+- V4 accepts RGBA8/BGRA8 SDR, one mip/array layer, and same-adapter sharing.
   MSAA color is resolved to a single-sample shared texture. Optional raw candidate
   depth is shared R32_FLOAT with the same extent and fence/frame ID. Its per-frame
   status explicitly records disabled/missing/unsupported/failed input. Consumer
@@ -333,6 +362,18 @@ Native Windows checkpoint, 2026-10-11:
 - Camera-required GOG runs imported 360 sweep frames and 120 vehicle-mission
   frames, saving four final color/depth/camera pairs;
   wire, camera, producer GPU and depth GPU tests pass in x86/x64 (4/4 each).
+- Bounded GOG vehicle shader-camera trace completed 30 frames with six matrix
+  groups, zero read errors and no overflow, followed by a 120-frame matched
+  color/depth/camera capture. Deployment/config hashes were restored after exit.
+- V4 vehicle qualification repeated the clean 30-frame trace, directly observed
+  the camera-relative flag and matched both main parameter views to the camera
+  view with its translation removed. The 120-frame final pair labels
+  `camera-for-shaders`, with negative view Z and standard near/far endpoints.
+- V4 synthetic smoke verified 1200 color frames, including 400 synchronized
+  depth/camera frames with explicit `synthetic` matrix sources and V4 JSON.
+- V4 on-foot mission repeated 30 clean trace frames (eight groups including an
+  additional 512x512 camera), then imported 120 frames with the same labelled
+  negative-view-Z shader baseline. All 60 deployment/config hashes restored.
 - Qualified main scene depth/cameras, gameplay input/focus, Steam, Proton/Wine, coordinated
   presentation takeover, real latency, DLSS and ray-traced effects are unverified.
 
@@ -349,4 +390,5 @@ the supported bundle before deliberate architecture/packaging review.
 - [Microsoft depth/format-family copies and sample-layout requirements](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-copyresource)
 - [NVIDIA DLSS Frame Generation integration](https://github.com/NVIDIA-RTX/Streamline/blob/main/docs/ProgrammingGuideDLSS_G.md)
 - [NVIDIA sample](https://github.com/NVIDIA-RTX/Streamline_Sample)
+- [Ogre AutoParamDataSource camera-relative and shader projection semantics](https://github.com/OGRECave/ogre/blob/v1.10.0/OgreMain/src/OgreAutoParamDataSource.cpp)
 - [Microsoft DXR specification](https://microsoft.github.io/DirectX-Specs/d3d/Raytracing.html)

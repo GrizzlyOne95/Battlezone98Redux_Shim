@@ -18,6 +18,9 @@ int main()
     using OpenShimTest::Check;
     Check(ValidDescriptor(f, 42), "valid x86/x64 wire descriptor");
     Check(!ValidDescriptor(f, 43), "reject mismatched producer identity");
+    f.version = 3;
+    Check(!ValidDescriptor(f, 42), "reject V3 camera matrices without explicit convention");
+    f.version = kVersion;
     f.version++;
     Check(!ValidDescriptor(f, 42), "reject unsupported ABI");
     f.version = kVersion;
