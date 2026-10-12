@@ -129,6 +129,12 @@ ID3D11Query* BeginTerrainTessQuery(ID3D11DeviceContext* context, UINT count,
     if (hull) hull->Release();
     if (domain) domain->Release();
     if (tessellated != bound) return nullptr;
+    const bool authoredNormal=TerrainSurfaceNormalBound(context);
+    // Do not exhaust the bounded draw samples while Ogre's texture resource
+    // group is still starting. Requested surface captures require the actual
+    // resource to be bound before they consume a sampling attempt.
+    if(GetEnvironmentVariableA("OPENSHIM_TERRAIN_SURFACE_MANIFEST",nullptr,0)>0&&!authoredNormal)
+        return nullptr;
     auto& sample = g_TessQueries[kind];
     if (sample.skipCandidates)
     {
@@ -136,7 +142,7 @@ ID3D11Query* BeginTerrainTessQuery(ID3D11DeviceContext* context, UINT count,
         return nullptr;
     }
     sample.attempted = true;
-    sample.authoredNormal=TerrainSurfaceNormalBound(context);
+    sample.authoredNormal=authoredNormal;
     sample.ended = false;
     sample.polls = 0;
     ++sample.attempts;
