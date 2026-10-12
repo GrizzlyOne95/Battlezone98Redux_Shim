@@ -228,3 +228,52 @@ reference attempts safely omitted no draws because material program names differ
 from concrete bound HLSL delegate names; the exact delegate identity was then
 observed and validated. DLL identity pins limit this to the qualified native GOG
 build; Steam/Proton/Wine and other missions remain unqualified.
+
+## Native terrain plus DX12 preview checkpoint
+
+The bridge harness now has an explicit, default-off `-TerrainMicroRelief`
+lane, reusing the existing native terrain implementation rather than modifying
+the DX12 depth mesh to imitate terrain detail. Fixed factor 4 and procedural
+displacement amplitude 0.25 were exercised on GOG DX11 `misn03`, with the
+optional DXR AO, cinematic preset and signed development DLSS-G runtime.
+
+Qualified local run `build/game-bridge-20261012-123033-433/`, PID 67844:
+
+- The native `MN_DETAIL_ATLAS` material accepted 27 specialized passes and
+  padded 144 terrain mesh bounds. Runtime VS/HS/DS linkage was audited.
+- A visible native terrain submission recorded 12800 input patches, 12800
+  hull invocations, 243200 domain invocations, 33801 clipped primitives and
+  14404 pixel invocations. This is one sampled cluster, not a frame-wide
+  triangle count or performance measurement.
+- The companion imported 120 1280x720 frames. It used 111 matched input frames
+  for DXR AO and cinematic effects; nine lacked inputs. DLSS-G reported 111
+  extra SDK presentations, with final status zero and ten history resets.
+  Camera-only motion and helper-only Reflex remain unchanged.
+- Frame 120 scene, enhanced scene, final and depth captures were saved. The
+  enhanced scene was visually inspected: terrain, structures, geysers and
+  cockpit remained visible. These images do not establish a pixel-aligned
+  untessellated-versus-tessellated comparison or generated-frame quality.
+- Graceful shutdown returned code zero. All 27 material passes, all 144 padded
+  bounds and all 60 deployment/config files were restored. The report only
+  accepts this launch's PID-tagged installation, visible GPU statistics and
+  complete restoration evidence.
+
+All 103 existing CTest regressions passed. The shader compiler/linkage script
+passed 110 shader compilations across ten eligible terrain permutations, factors
+1/2/4 and micro-relief variants. Script parsing and incompatible
+particle-reference/terrain option rejection passed without another game launch.
+Replaying the final validator with another PID's otherwise-valid GPU/cleanup
+log also rejected the capture without emitting a qualification report.
+An initial combined capture rendered and restored correctly but was rejected
+by the new exit-code gate: the launch wrapper returned `Get-Process` without
+retaining its handle. The harness now opens the process handle while alive and
+records the exit code after graceful shutdown; only the rerun qualified.
+
+`terrain-bridge-report.json` deliberately marks adaptive subdivision, material
+height maps, full geometry export and performance qualification false. This
+adds a reproducible combined demo, not a new production tessellation renderer.
+The domain shader adds small procedural relief; it does not smooth large-scale
+terrain or change gameplay collision. DXR still reconstructs visible depth
+rather than consuming native hull/domain output or offscreen terrain geometry.
+See [DLSS_RT_TERRAIN_AND_MATERIAL_PLAN.md](DLSS_RT_TERRAIN_AND_MATERIAL_PLAN.md)
+for the next implementation and acceptance gates.
