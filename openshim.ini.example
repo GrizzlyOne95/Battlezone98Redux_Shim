@@ -1714,6 +1714,10 @@ StockFactionSet = as
 AllowNeutralAttackOrders = 0
 
 
+[Updater]
+; Stage a newer OpenShim from the Steam Workshop when the main menu first appears (Steam builds, never in multiplayer); it installs when you quit. 0 = manual "Check for Updates" only. Default: 1.
+AutoStage = 1
+
 [Career]
 
 ; Career statistics tracking. Records kills, deaths and missions played to
