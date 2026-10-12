@@ -163,6 +163,20 @@ namespace BZROpenShim
         }
 
         g_AiUnitTuningOverridesByObject[key] = entry;
+        if (EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE") ||
+            EnvFlagEnabled("OPENSHIM_TRACE_AI_UNIT_TUNING"))
+        {
+            Log(L"[AIUNIT] set craft=0x%08X engage=%.2f weaponMin=%.2f retarget=%.2f kite=%hs desired=%.2f enter=%.2f exit=%.2f strafe=%.2f\n",
+                static_cast<uint32_t>(key),
+                static_cast<double>(entry.engageRange),
+                static_cast<double>(entry.weaponRangeMin),
+                static_cast<double>(entry.retargetPeriod),
+                entry.hasKiteRanges ? "on" : "off",
+                static_cast<double>(entry.kiteDesiredRange),
+                static_cast<double>(entry.kiteEnterRange),
+                static_cast<double>(entry.kiteExitRange),
+                static_cast<double>(entry.kiteStrafe));
+        }
         if (!entry.hasKiteRanges)
             g_CombatKiteStateByObject.erase(key);
         return true;

@@ -45,6 +45,7 @@
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
+#include "odf_search_path.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -150,14 +151,8 @@ namespace BZROpenShim
             if (moduleDir.empty())
                 return candidates;
 
-            for (const auto& root : GetCampaignContentRootCandidates(moduleDir))
-            {
-                AppendUniquePath(candidates, root / "ODF");
-                AppendUniquePath(candidates, root / "_Release" / "ODF");
-                AppendUniquePath(candidates, root / "_Source" / "ODF");
-            }
-            candidates.push_back(moduleDir / "Edit" / "stock");
-            return candidates;
+            return OdfSearchPath::BuildOdfDirectoryCandidates(
+                GetCampaignContentRootCandidates(moduleDir), moduleDir);
         }
 
         bool TryParseFloatValue(const char* value, float& out)
@@ -264,27 +259,8 @@ namespace BZROpenShim
             if (!odfKey.hasValue)
                 return false;
 
-            const auto directories = GetProducerOdfDirectoryCandidates();
-            for (const auto& directory : directories)
-            {
-                std::error_code error;
-                const auto mpPath = directory / (std::string(odfKey.token) + "_mp.odf");
-                if (std::filesystem::exists(mpPath, error) && !error)
-                {
-                    outPath = mpPath;
-                    return true;
-                }
-
-                error.clear();
-                const auto normalPath = directory / (std::string(odfKey.token) + ".odf");
-                if (std::filesystem::exists(normalPath, error) && !error)
-                {
-                    outPath = normalPath;
-                    return true;
-                }
-            }
-
-            return false;
+            return OdfSearchPath::FindOdfFile(
+                GetProducerOdfDirectoryCandidates(), odfKey.token, outPath);
         }
     }
 

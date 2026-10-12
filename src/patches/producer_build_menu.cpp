@@ -2,6 +2,7 @@
 // BZR Open Shim - producer nested build menus (PRODMENU): Recycler, Factory
 // and ConstructionRig pages driven by a [Builder] ODF tree, through vtable
 // replacements for UpdateModeList / SetActiveMode / Deselect.
+#include "odf_search_path.h"
 #include "bzr_hooks.h"
 #include "bool_token.h"
 #include "bzr_object_layout.h"
@@ -342,26 +343,9 @@ namespace BZROpenShim
             if (cached != g_ProducerBuildMenuConfig.odfFileEntries.end())
                 return cached->second;
 
-            const auto directories = GetProducerOdfDirectoryCandidates();
             std::filesystem::path resolvedPath;
-            for (const auto& directory : directories)
-            {
-                std::error_code error;
-                const auto mpPath = directory / (std::string(producerKey.token) + "_mp.odf");
-                if (std::filesystem::exists(mpPath, error) && !error)
-                {
-                    resolvedPath = mpPath;
-                    break;
-                }
-
-                error.clear();
-                const auto normalPath = directory / (std::string(producerKey.token) + ".odf");
-                if (std::filesystem::exists(normalPath, error) && !error)
-                {
-                    resolvedPath = normalPath;
-                    break;
-                }
-            }
+            OdfSearchPath::FindOdfFile(
+                GetProducerOdfDirectoryCandidates(), producerKey.token, resolvedPath);
 
             if (!resolvedPath.empty())
             {
