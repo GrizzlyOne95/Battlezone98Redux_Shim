@@ -3,6 +3,7 @@ Texture2D<float> Depth : register(t0);
 Texture2D<float4> SceneColor : register(t1);
 Texture2D<float4> FinalColor : register(t2);
 RaytracingAccelerationStructure VisibleScene : register(t3);
+StructuredBuffer<float3> NativeVertices : register(t4);
 RWStructuredBuffer<float3> Vertices : register(u0);
 RWTexture2D<float4> SceneOutput : register(u1);
 RWTexture2D<float4> FinalOutput : register(u2);
@@ -11,6 +12,8 @@ cbuffer Params : register(b0) {
     uint Width; uint Height; uint Columns; uint Rows;
     float ClearDepth; float Radius; float Bias; float Strength;
     row_major float4x4 ViewToWorld;
+    float3 TowardSun; uint ShadowMode;
+    float ShadowDistance; float ShadowBias; float ShadowStrength; uint NativeTriangles;
 };
 bool Position(uint2 pixel, out float3 position) {
     float z=Depth.Load(int3(pixel,0));
@@ -79,13 +82,48 @@ void Mesh(uint3 id:SV_DispatchThreadID) {
     Triangle(offset+3,c,b,d,vc&&vb&&vd);
 }
 uint Hash(uint x) { x^=x>>16; x*=0x7feb352d; x^=x>>15; x*=0x846ca68b; return x^(x>>16); }
+bool TerrainShadow(float3 visible, out bool blocked) {
+    blocked=false;
+    if(ShadowMode==0||NativeTriangles==0||!all(isfinite(visible))) return false;
+    float3 origin=mul(ViewToWorld,float4(0,0,0,1)).xyz;
+    float3 world=mul(ViewToWorld,float4(visible,1)).xyz;
+    float3 cameraRay=world-origin;
+    float distance=length(cameraRay);
+    // Match the opaque native receiver against captured depth. Do not use the
+    // depth mesh as a sun occluder: particles/sky would produce false shadows.
+    float tolerance=max(ShadowBias,8*visible.z*visible.z*abs(ClipToView[3][2])/16777216);
+    if(tolerance>.5||distance<=tolerance) return false;
+    RayDesc receiverRay; receiverRay.Origin=origin; receiverRay.Direction=cameraRay/distance;
+    receiverRay.TMin=.001; receiverRay.TMax=distance+tolerance;
+    RayQuery<RAY_FLAG_FORCE_OPAQUE> receiver;
+    receiver.TraceRayInline(VisibleScene,RAY_FLAG_NONE,2,receiverRay);
+    while(receiver.Proceed()) {}
+    if(receiver.CommittedStatus()!=COMMITTED_TRIANGLE_HIT||abs(receiver.CommittedRayT()-distance)>tolerance) return false;
+    uint primitive=receiver.CommittedPrimitiveIndex();
+    if(primitive>=NativeTriangles) return false;
+    uint v=primitive*3;
+    float3 normal=cross(NativeVertices[v+1]-NativeVertices[v],NativeVertices[v+2]-NativeVertices[v]);
+    float n2=dot(normal,normal); if(n2<1e-12) return false;
+    normal*=rsqrt(n2); if(dot(normal,cameraRay)>0) normal=-normal;
+    // Backlit faces already receive no direct sunlight in the original renderer.
+    if(dot(normal,TowardSun)<=.02) return false;
+    float3 surface=origin+receiverRay.Direction*receiver.CommittedRayT();
+    RayDesc ray; ray.Origin=surface+normal*ShadowBias; ray.Direction=TowardSun;
+    ray.TMin=ShadowBias; ray.TMax=ShadowDistance;
+    RayQuery<RAY_FLAG_FORCE_OPAQUE|RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> shadow;
+    shadow.TraceRayInline(VisibleScene,RAY_FLAG_NONE,2,ray);
+    while(shadow.Proceed()) {}
+    blocked=shadow.CommittedStatus()==COMMITTED_TRIANGLE_HIT;
+    return true;
+}
 [numthreads(8,8,1)]
 void Rays(uint3 id:SV_DispatchThreadID) {
     if(id.x>=Width||id.y>=Height) return;
     float4 scene=SceneColor.Load(int3(id.xy,0)),final=FinalColor.Load(int3(id.xy,0));
     float factor=1;
     float3 p;
-    if(Position(id.xy,p) && id.x>0 && id.y>0 && id.x+1<Width && id.y+1<Height) {
+    bool positionValid=Position(id.xy,p);
+    if(ShadowMode!=2 && positionValid && id.x>0 && id.y>0 && id.x+1<Width && id.y+1<Height) {
         float3 surface,n;
         if(StableNeighborhood(id.xy,p)&&MeshSurface(id.xy,p,surface,n)) {
             // Eight depth quantization steps in view units cover adjacent
@@ -112,10 +150,19 @@ void Rays(uint3 id:SV_DispatchThreadID) {
             }
         }
     }
-    SceneOutput[id.xy]=float4(scene.rgb*factor,scene.a);
+    bool blocked=false;
+    bool receiver=false;
+    if(positionValid) receiver=TerrainShadow(p,blocked);
+    if(ShadowMode==1&&receiver&&blocked) factor*=1-ShadowStrength;
+    float3 result=scene.rgb*factor;
+    float3 diagnostic=blocked?float3(1,0,1):float3(0,1,.25);
+    if(ShadowMode==2&&receiver) result=lerp(scene.rgb,diagnostic,.85);
+    SceneOutput[id.xy]=float4(result,scene.a);
     // Conservative preview-only HUD difference mask. FXAA and identical HUD
     // colors make this approximate; no alpha/compositing qualification claim.
     float3 difference=abs(final.rgb-scene.rgb);
     bool same=max(difference.r,max(difference.g,difference.b))<2.0/255;
-    FinalOutput[id.xy]=float4(same?final.rgb*factor:final.rgb,final.a);
+    float3 finalResult=final.rgb*factor;
+    if(ShadowMode==2&&receiver) finalResult=lerp(final.rgb,diagnostic,.85);
+    FinalOutput[id.xy]=float4(same?finalResult:final.rgb,final.a);
 }

@@ -61,14 +61,15 @@ are never implicitly reused. Readback is repeated only after invalidation and
 120 new render observations. This settling interval is experimental and is not
 a measured streaming/performance policy.
 
-The producer and helper share a separate 64-byte named mapping and named mutex
-under `Local\\OpenShim.NativeGeometry.<pid>`. Header fields are copied under
+The producer and helper share a separate 80-byte V2 named mapping and named mutex
+under `Local\\OpenShim.NativeGeometry.v2.<pid>`. Header fields are copied under
 the mutex; Ready and the refresh request use Win32 interlocked operations.
 Readers/publishers use zero-timeout mutex acquisition. Busy access and abandoned
 reads decline; a publisher may reinitialize abandoned state before publication.
 Invalidation clears Ready independently of the mutex before engine
 zone rebuilding. The mapping contains PID, mission generation, revision,
-payload hash, triangle count, QPC frequency and the earliest valid camera QPC;
+payload hash, triangle count, QPC frequency, the earliest valid camera QPC and
+an optional unit world-space direction toward the game's sun;
 it contains no paths, pointers, COM objects or geometry bytes. The color/depth
 mailbox remains V5 and unchanged.
 
@@ -77,6 +78,7 @@ the existing native zone-processing call. A dirty/unreadable entry invalidates
 the lease. Selected-zone reconstruction and mission-owner reset invalidate it
 as well. New snapshot/metadata files close before the producer prepares a Ready
 publication. Missing API/build/layout guards retain depth-only fallback.
+Changes to the captured sun direction or its validity also invalidate the lease.
 
 The helper accepts only recognized camera-for-shaders frames with camera QPC
 at or after snapshot validity, correct capture ordering and matching QPC clock
@@ -168,6 +170,78 @@ original/processed comparison were inspected; AO darkened 47343 pixels by more
 than two levels, maximum channel change 72. This compares original raster with
 combined depth/native AO, not the incremental native-only contribution.
 
+## Terrain sunlight ray preview
+
+```powershell
+./tools/frame_bridge/Game-Smoke-Test.ps1 -Mission misn03.bzn -Frames 120 -TerrainShadows preview
+# Color diagnostic: green = matched sunlit terrain, magenta = terrain blocks sun.
+./tools/frame_bridge/Game-Smoke-Test.ps1 -Mission misn03.bzn -Frames 120 -TerrainShadows mask
+```
+
+Both modes imply native live terrain, matched scene/depth/camera capture and a
+visible separate DX12 window. Ordinary game presentation remains original.
+`--rt-terrain-shadows preview|mask` is the helper option, requiring an absolute
+live geometry prefix. No shipped INI/UI setting or release payload enables it.
+
+The adapter reuses the existing `TerrainMasterLight` engine row. Exact Ogre
+SHA-256 and the exported Light primary ShadowCaster vtable/type guard each
+read. The released sun constructor sets directional type and light direction;
+the exported `getDerivedDirection` supplies Ogre world coordinates. Rays use
+its negation, not the differently handed game sun-sprite global. Static Ghidra
+analysis established constructor/vtable/export semantics; live GOG PID 45868
+read unit toward-sun `(0.819152117, 0.573576510, 0)`. No raw address or new hook
+was introduced. The V2 lease transports the captured vector and invalidates if
+it changes or becomes unavailable; geometry binary V1 and frame mailbox V5 stay
+unchanged. The versioned mapping name avoids mixing the older 64-byte ABI.
+
+A primary camera ray against native instance mask 2 must match captured depth
+within a bounded bias/quantization tolerance. The native triangle supplies its
+geometric normal. Only matched, frontlit terrain receivers launch a 512-meter
+sun visibility ray, again against native mask 2. The visible depth mesh cannot
+cast these shadows. Missing sun/geometry and mismatched receivers decline.
+The bias is 5 cm; normal/material detail and MSAA silhouette coverage are still
+unqualified, and the strict depth match deliberately leaves receiver gaps.
+
+Preview multiplies the existing SDR raster lighting by 0.55 on blocked matched
+receivers, alongside AO. This is an artistic preview: ambient/direct light are
+not separated and existing raster shadows may be multiplied twice. Mask mode
+disables AO while showing matched lit/blocked coverage. Its colors are debug
+information. Geometry outside the selected zone cannot block sunlight, so a
+green pixel establishes no hit in captured geometry, not whole-map visibility.
+The final HUD difference mask is still approximate; alpha is retained.
+
+Hardware analytic tests establish an offscreen wall eight meters from the
+receiver casting onto 24816 pixels, with identical magenta blocked coverage,
+unchanged exposed half, no native-plane self-shadow and no shadow on mismatched
+receivers. Missing/invalid sun, alpha/HUD retention, world camera rotation and
+translation pass. Translation changes only the 193 pixels lying exactly on
+the hard-shadow boundary. All 109 native, eight x86 and eleven x64 helper/GPU
+tests pass, and the Win32 Release shim builds.
+
+GOG `misn03`, PID 45868, `build/game-bridge-20261012-181307-609/`, completed
+120 1600x900 imports and 106 live native-terrain sunlight ray frames. It exited
+zero and restored all 60 deployment/config hashes. A precise same-frame
+pre-overlay replay visibly marks 350887 matched sunlit terrain pixels and zero blocked
+pixels. The base view is exposed: new terrain sun shadows add no appreciable
+change there. The inspected debug coverage and cropped original/AO comparison
+explain why this view still looks similar; buildings/vehicles cannot cast
+native sunlight shadows yet. This is executed ray work, not a claimed visible
+terrain-shadow improvement at that pose.
+
+The first sun run declined because a nonexistent simple Light vtable export
+was requested; the released constructor exposed the correct primary table and
+the next run passed. A later `misn01` attempt exported terrain/sun but could not
+open the color mailbox and is not a qualified image capture. A further launch
+was refused while another user game was active; it was left untouched.
+
+Replay packaging now takes the nine-digit camera from matched depth metadata,
+checks camera/QPC/pass identity, and offers `--scene-only` to inspect the actual
+pre-overlay scene without final HUD pixels. The camera writer always preserves
+float round-trip precision. Packaging tests pin precision, row orientation,
+scene/final selection and mismatched-camera rejection. `Compare-RT-Captures.py`
+provides original/processed crops and an explicitly amplified pixel delta;
+the before/after colors are not graded to exaggerate the comparison.
+
 ## Remaining work
 
 The snapshot covers one selected native zone, not all loaded or offscreen map
@@ -177,15 +251,16 @@ revision publication are implemented; real deforming terrain, mission cycling,
 device/session reconnects and broad moving-camera qualification remain open.
 The prototype uses diagnostic file I/O and one selected zone, not a production
 geometry transport. Base triangles omit procedural/authored
-domain relief. Normal/material/opacity data, direct-light direction and linear
-lighting are still missing. The effect remains AO, with no ray-traced sunlight
-shadows, reflections, GI or denoiser. Camera origin conventions and broad moving
+domain relief. Normal/material/opacity data and linear direct/ambient lighting
+separation are still missing. Terrain sunlight rays are available only as the
+partial preview above; full-scene shadows, reflections, GI and a denoiser remain
+absent. Camera origin conventions and broad moving
 camera/terrain-deformation acceptance require further qualification before a
 live native geometry option is exposed. No FPS or latency gain is claimed.
 
 The next integration must qualify actual deformation/mission/device retirement,
-cover native objects and further zones, and compare ray geometry against native
-raster surfaces before enabling new shadow modes. Foreign/custom material
+cover native objects and further zones, and qualify receiver/MSAA/opacity and
+lighting replacement before enabling gameplay shadows. Foreign/custom material
 geometry behavior is not qualified by these captures. Windows/GOG is the captured
 lane; Steam, Proton/Wine and release packaging remain unverified. No native
 geometry assets or SDK binaries are shipped by this checkpoint.

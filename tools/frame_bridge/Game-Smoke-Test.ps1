@@ -22,6 +22,7 @@ param(
     [switch]$NativeTerrainSnapshot,
     [switch]$NativeTerrainLive,
     [switch]$NativeTerrainRefreshProbe,
+    [ValidateSet('off','preview','mask')][string]$TerrainShadows = 'off',
     [ValidateRange(4, 64)][float]$TerrainTargetPixels = 12,
     [ValidateSet(1, 2, 4)][int]$TerrainTessellationFactor = 4,
     [ValidateRange(0.001, 1)][float]$TerrainReliefAmplitude = 0.25,
@@ -32,6 +33,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($TerrainShadows -ne 'off') { $NativeTerrainLive=$true }
 if ($NativeTerrainLive) { $NativeTerrainSnapshot=$true; $VisibleRayTracing=$true }
 if ($NativeTerrainRefreshProbe -and -not $NativeTerrainLive) { throw 'Native refresh probe requires NativeTerrainLive' }
 if ($TerrainAdaptive -and (-not $TerrainMicroRelief -or $TerrainTessellationFactor -ne 4)) { throw 'TerrainAdaptive requires TerrainMicroRelief with factor-4 cap' }
@@ -252,6 +254,7 @@ try {
         if ($VisibleRayTracing) { $presenterArgs += @('--rt-visible-ao', '--capture-rt-bmp', (Join-Path $outputRoot 'game-dxr-ao.bmp')) }
         if ($NativeTerrainLive) { $presenterArgs += @('--native-terrain-live-prefix', (Join-Path $outputRoot 'native-terrain.bin')) }
         if ($NativeTerrainRefreshProbe) { $presenterArgs += '--native-terrain-refresh-probe' }
+        if ($TerrainShadows -ne 'off') { $presenterArgs += @('--rt-terrain-shadows',$TerrainShadows,'--show') }
         if ($VisualEnhancements) {
             $presenterArgs += @('--show', '--visual-preset', 'cinematic', '--capture-enhanced-bmp', (Join-Path $outputRoot 'game-cinematic.bmp'),
                 '--capture-enhanced-scene-bmp', (Join-Path $outputRoot 'game-cinematic-scene.bmp'))
@@ -338,6 +341,12 @@ if ($NativeTerrainSnapshot) {
     }
     if (-not (Test-Path -LiteralPath $geometryPath -PathType Leaf)) { throw 'Native terrain snapshot missing; inspect fresh terrain-geometry log' }
     $geometry=Get-Content -LiteralPath ($geometryPath+'.json') -Raw | ConvertFrom-Json
+    if ($TerrainShadows -ne 'off') {
+        $shadowMetadata=Get-Content -LiteralPath (Join-Path $outputRoot 'game-dxr-ao.bmp.json') -Raw | ConvertFrom-Json
+        $expectedMode=if($TerrainShadows -eq 'preview'){1}else{2}
+        if(-not $geometry.sunDirectionValid -or $shadowMetadata.terrainShadowMode -ne $expectedMode -or $shadowMetadata.terrainShadowFrames -le 0) { throw 'Terrain shadow capture lacks current sun direction or executed shadow frames' }
+        Write-Host "PASS terrain sunlight ray preview: mode=$TerrainShadows frames=$($shadowMetadata.terrainShadowFrames); one native zone, direct lighting replacement unqualified"
+    }
     $geometryLog=Read-SharedText (Join-Path $outputRoot 'openshim.log')
     $freshExport='\[pid:'+ $game.Id +' [^\]]*\].*\[TERRAIN-GEOMETRY\] snapshot exported clusters=16 vertices=614400 triangles=204800'
     if ($geometry.pid -ne $game.Id -or $geometry.clusters.Count -ne 16 -or -not $geometry.worldSpace -or -not $geometry.baseNativeGeometryOnly -or

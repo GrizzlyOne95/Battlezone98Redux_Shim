@@ -7,8 +7,8 @@
 namespace BZROpenShim::FrameBridge
 {
     // Hardware DXR prototype over a mesh reconstructed from visible depth.
-    // Optional owned static native triangles are available in diagnostic
-    // replay. Material normals, transparency and a complete live scene remain
+    // Optional leased native terrain supports AO and directional shadow previews.
+    // Material normals, transparency and a complete live scene remain
     // unavailable. This is not full-scene ray tracing.
     class VisibleRayTracing
     {
@@ -20,6 +20,10 @@ namespace BZROpenShim::FrameBridge
         // snapshot; caller validates the captured mission/generation lease.
         void SetNativeGeometry(ID3D12Device* device, const NativeGeometry& snapshot);
         void ClearNativeGeometry(); // Prior submission must be complete.
+        // 0: AO, 1: artistic shadow composite, 2: green lit / magenta blocked diagnostic.
+        // Direction must be the current game's unit world-space vector toward sun.
+        void SetTerrainSun(const float* direction, unsigned mode);
+        unsigned TerrainShadowMode() const { return shadowMode_; }
         unsigned NativeTriangleCount() const { return nativeTriangles_; }
         ID3D12Resource* SceneOutput() const { return sceneOutput_.Get(); }
         ID3D12Resource* FinalOutput() const { return finalOutput_.Get(); }
@@ -30,6 +34,8 @@ namespace BZROpenShim::FrameBridge
         D3D12_RAYTRACING_GEOMETRY_DESC nativeGeometry_{};
         unsigned nativeTriangles_=0;
         bool nativeBuilt_=false;
+        float towardSun_[3]{};
+        unsigned shadowMode_=0;
         Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap_;
         Microsoft::WRL::ComPtr<ID3D12RootSignature> root_;
         Microsoft::WRL::ComPtr<ID3D12PipelineState> meshPipeline_, rayPipeline_;

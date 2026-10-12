@@ -1,11 +1,52 @@
-// One owned, base-mesh snapshot of the selected zone. Static diagnostic only;
-// no claim of live deformation, complete map coverage or tessellated relief.
+// Owned base-mesh snapshots of one zone, with optional live validity leases.
+// No claim of complete map coverage or tessellated relief.
 unsigned g_GeometryExportTicks=0;
 bool g_GeometryExportFinished=false;
 FrameBridge::NativeGeometryLease g_NativeLease;
 FrameBridge::NativeGeometryLeaseState g_PendingNativeLease;
 bool g_NativeLeasePending=false;
 uint64_t g_NativeRevision=0;
+float g_CapturedTerrainSun[3]{};
+bool g_CapturedTerrainSunValid=false;
+uint32_t g_GeometrySunSlot=0;
+using GeometryLightType=int (__thiscall*)(void*);
+using GeometryLightDirection=const float* (__thiscall*)(void*);
+GeometryLightType g_GeometryLightType=nullptr;
+GeometryLightDirection g_GeometryLightDirection=nullptr;
+const void* g_GeometryLightVtable=nullptr;
+bool BindGeometrySun()
+{
+    static const bool bound=[] {
+        const HookEngine::EngineRow rows[]={{"TerrainMasterLight",&g_GeometrySunSlot}};
+        HMODULE ogre=GetModuleHandleW(L"OgreMain.dll");
+        std::string hash;
+        if(!VerifyModuleHash(ogre,kExpectedOgreSha256,hash)||!HookEngine::BindEngineRows("Native terrain sunlight",rows)) return false;
+        g_GeometryLightType=Resolve<GeometryLightType>(ogre,"?getType@Light@Ogre@@QBE?AW4LightTypes@12@XZ");
+        g_GeometryLightDirection=Resolve<GeometryLightDirection>(ogre,"?getDerivedDirection@Light@Ogre@@QBEABVVector3@2@XZ");
+        // Shipped Light ctor assigns this exported ShadowCaster primary table
+        // to the object at +0; AnimableObject is a secondary table at +4.
+        g_GeometryLightVtable=GetProcAddress(ogre,"??_7Light@Ogre@@6BShadowCaster@1@@");
+        return g_GeometryLightType&&g_GeometryLightDirection&&g_GeometryLightVtable;
+    }();
+    return bound;
+}
+bool ReadGeometrySun(float* towardSun)
+{
+    if(!BindGeometrySun()) return false;
+    // Game-thread callback; copy the exported world direction immediately.
+    // Never retain the engine light pointer across replacement/mission reset.
+    __try {
+        void* light=*reinterpret_cast<void* const*>(g_GeometrySunSlot);
+        if(!light||*static_cast<void**>(light)!=g_GeometryLightVtable||g_GeometryLightType(light)!=1) return false;
+        const float* direction=g_GeometryLightDirection(light);
+        if(!direction) return false;
+        const float lengthSquared=direction[0]*direction[0]+direction[1]*direction[1]+direction[2]*direction[2];
+        if(!std::isfinite(lengthSquared)||lengthSquared<.99f||lengthSquared>1.01f) return false;
+        const float inverseLength=1/std::sqrt(lengthSquared);
+        for(unsigned i=0;i<3;++i) towardSun[i]=-direction[i]*inverseLength;
+        return FrameBridge::ValidTerrainSun(towardSun);
+    } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
 void InvalidateNativeGeometry(const char* reason)
 {
     if(!g_config.geometryLive) return;
@@ -16,6 +57,7 @@ void InvalidateNativeGeometry(const char* reason)
 void ResetNativeGeometryExport() {
     InvalidateNativeGeometry("mission-owner-reset");
     g_GeometryExportTicks=0; g_GeometryExportFinished=false;
+    g_CapturedTerrainSunValid=false;
 }
 
 bool ReadNativeIndexBytes(void* buffer,std::vector<uint8_t>& bytes)
@@ -49,6 +91,12 @@ void ExportNativeTerrainGeometry()
 {
     if(g_config.geometryLive) {
         if(!g_NativeLease.Open(GetCurrentProcessId(),true)) return;
+        if(g_GeometryExportFinished&&g_NativeRevision) {
+            float sun[3]{}; const bool valid=ReadGeometrySun(sun);
+            bool changed=valid!=g_CapturedTerrainSunValid;
+            if(valid) for(unsigned i=0;i<3;++i) changed=changed||std::abs(sun[i]-g_CapturedTerrainSun[i])>1e-5f;
+            if(changed) InvalidateNativeGeometry("sun-direction-changed");
+        }
         if(g_NativeLease.TakeRefreshRequest()) InvalidateNativeGeometry("consumer-refresh-probe");
         if(g_NativeLeasePending&&g_NativeLease.Publish(g_PendingNativeLease)) {
             g_NativeLeasePending=false;
@@ -69,6 +117,7 @@ void ExportNativeTerrainGeometry()
         using GetTransform=const float* (__thiscall*)(void*);
         auto transform=Resolve<GetTransform>(GetModuleHandleW(L"OgreMain.dll"),"?_getFullTransform@Node@Ogre@@UBEABVMatrix4@2@XZ");
         if(!transform) throw std::runtime_error("native full-transform API unavailable");
+        g_CapturedTerrainSunValid=ReadGeometrySun(g_CapturedTerrainSun);
         FrameBridge::NativeGeometry snapshot;
         snapshot.header.producerPid=GetCurrentProcessId(); snapshot.header.missionGeneration=g_missionGeneration;
         snapshot.vertices.reserve(16*kExpectedIndices);
@@ -133,7 +182,9 @@ void ExportNativeTerrainGeometry()
             {"missionGeneration",g_missionGeneration},{"clusters",clusters},{"vertices",snapshot.vertices.size()},
             {"triangles",snapshot.vertices.size()/3},{"worldSpace",true},{"heightStreamSlot",2},
             {"baseNativeGeometryOnly",true},{"liveUpdatesQualified",false},{"fullMapCoverage",false},
-            {"offscreenNativeClustersIncluded",true},{"payloadHash",FrameBridge::GeometryHash(snapshot.vertices)}};
+            {"offscreenNativeClustersIncluded",true},{"payloadHash",FrameBridge::GeometryHash(snapshot.vertices)},
+            {"sunDirectionValid",g_CapturedTerrainSunValid},{"towardSunWorld",std::vector<float>(g_CapturedTerrainSun,g_CapturedTerrainSun+3)},
+            {"sunSource","TerrainMasterLight / Ogre::Light::getDerivedDirection (negated)"}};
         std::ofstream metadata(path.string()+".json"); metadata<<report.dump(2)<<'\n';
         if(!metadata) throw std::runtime_error("native snapshot metadata write failed");
         metadata.close();
@@ -144,8 +195,11 @@ void ExportNativeTerrainGeometry()
             g_PendingNativeLease.payloadHash=FrameBridge::GeometryHash(snapshot.vertices);
             g_PendingNativeLease.validFromQpc=static_cast<uint64_t>(now.QuadPart); g_PendingNativeLease.qpcFrequency=static_cast<uint64_t>(frequency.QuadPart);
             g_PendingNativeLease.triangles=static_cast<uint32_t>(snapshot.vertices.size()/3); g_NativeLeasePending=true;
+            g_PendingNativeLease.sunValid=g_CapturedTerrainSunValid?1:0;
+            memcpy(g_PendingNativeLease.towardSun,g_CapturedTerrainSun,sizeof(g_CapturedTerrainSun));
         }
         LogShimA(LogLevel::Info,"terrain-geometry","[TERRAIN-GEOMETRY] snapshot exported clusters=%u vertices=%zu triangles=%zu generation=%u baseNative=1 worldSpace=1 path=\"%s\"",snapshot.header.clusters,snapshot.vertices.size(),snapshot.vertices.size()/3,g_missionGeneration,path.string().c_str());
+        LogShimA(LogLevel::Info,"terrain-geometry","[TERRAIN-GEOMETRY] sun valid=%d towardWorld=(%.6f,%.6f,%.6f) source=TerrainMasterLight",g_CapturedTerrainSunValid?1:0,g_CapturedTerrainSun[0],g_CapturedTerrainSun[1],g_CapturedTerrainSun[2]);
     }
     catch(const std::exception& error) { LogShimA(LogLevel::Warn,"terrain-geometry","[TERRAIN-GEOMETRY] snapshot declined: %s",error.what()); }
     catch(...) { LogShimA(LogLevel::Warn,"terrain-geometry","[TERRAIN-GEOMETRY] snapshot declined after native exception"); }

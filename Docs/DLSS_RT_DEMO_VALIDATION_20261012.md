@@ -456,3 +456,44 @@ provisional. All 108 native, eight x86 and eleven x64 helper/GPU tests pass,
 including child-process lease contention/invalidation and hardware BLAS
 replacement/retirement. Actual deformation, mission/device cycling, broad
 camera movement, custom material geometry and Steam/Proton/Wine remain open.
+
+## Terrain sun visibility checkpoint
+
+The [terrain snapshot contract](DXR_NATIVE_TERRAIN_SNAPSHOT.md) now includes
+an optional real Ogre sunlight direction in an 80-byte V2 validity lease.
+The separate helper can trace matched native terrain receivers toward that sun
+or display green sunlit/magenta blocked coverage. Native instance mask 2 keeps
+depth particles and unqualified screen geometry out of sun occluders. The
+45-percent SDR attenuation is an artistic preview over existing raster lighting.
+It is not full-scene shadows or a direct/ambient lighting replacement.
+
+GOG misn03 PID 45868, `build/game-bridge-20261012-181307-609/`, imported 120
+1600x900 frames and executed 106 live native terrain sunlight ray frames.
+The copied world direction was `(0.819152117, 0.573576510, 0)`. Exit was zero
+and all 60 deployment/config hashes restored. A matched precise scene replay
+visibly marks 350887 sunlit receiver pixels and zero blocked pixels. The base
+is exposed: sunlight rays add no appreciable new shadow at this view. Contact
+AO remains subtle and native buildings/vehicles are absent. Cropped comparison
+and clearly labeled debug coverage were inspected; no lighting gain is inferred
+from execution counts.
+
+Real hardware analytic rays shadow 24816 pixels behind an offscreen wall beyond
+the AO radius; exposed pixels, invalid/missing sun, native self-shadow guards,
+receiver mismatch, alpha/HUD retention and world camera rotation/translation
+pass. Translation changes only the exact zero-width shadow boundary. All 109
+native, eight x86 and eleven x64 helper/GPU tests pass. A new replay regression
+pins nine-digit camera precision, same-camera/QPC identity, PFM row orientation
+and optional pre-overlay scene inspection. Earlier scene metadata's six-digit
+precision is no longer used for reconstruction; matched depth metadata supplies
+round-trippable camera floats.
+
+The first live sun run correctly declined a nonexistent vtable export; released
+constructor analysis identified the primary ShadowCaster export, and the next
+run passed. A later misn01 run exported native terrain/sun but failed to open
+the color mailbox and supplies no qualified visual evidence. A further launch
+was refused while another game session was active; it was left untouched.
+The namespace update and green/magenta coverage additions have child-process,
+GPU and captured-scene replay proof; a live run of that final variant remains
+to be repeated. Dynamic sunlight, deformation/mission/device cycling, a visibly
+shadowed game pose, native objects/full map, opacity/MSAA receivers, production
+lighting and Steam/Proton/Wine remain open.

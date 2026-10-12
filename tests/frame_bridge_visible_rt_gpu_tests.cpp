@@ -1,5 +1,6 @@
 #include "test_check.h"
 #include "visible_rt.h"
+#include "frame_bridge_native_lease.h"
 #include <d3d12.h>
 #include <vector>
 #include <fstream>
@@ -7,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <cstdlib>
 using namespace BZROpenShim::FrameBridge;
 using Microsoft::WRL::ComPtr;
 using OpenShimTest::Require;
@@ -70,7 +72,7 @@ namespace
         Check(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,state,nullptr,IID_PPV_ARGS(&resource))); return resource;
     }
     std::vector<unsigned char> Render(const Input& input,const NativeGeometry* native=nullptr,
-        const NativeGeometry* replacement=nullptr,bool retire=false)
+        const NativeGeometry* replacement=nullptr,bool retire=false,const float* sun=nullptr,unsigned shadowMode=0)
     {
         ComPtr<ID3D12Device> device; Check(D3D12CreateDevice(nullptr,D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device)));
         D3D12_COMMAND_QUEUE_DESC q{}; ComPtr<ID3D12CommandQueue> queue; Check(device->CreateCommandQueue(&q,IID_PPV_ARGS(&queue)));
@@ -95,6 +97,7 @@ namespace
         }
         VisibleRayTracing rt; rt.Initialize(device.Get(),textures[0].Get(),textures[1].Get(),textures[2].Get());
         if(native) rt.SetNativeGeometry(device.Get(),*native);
+        rt.SetTerrainSun(sun,shadowMode);
         rt.Record(list.Get(),input.camera);
         const auto desc=rt.FinalOutput()->GetDesc(); D3D12_PLACED_SUBRESOURCE_FOOTPRINT foot{}; UINT64 bytes=0;
         device->GetCopyableFootprints(&desc,0,1,0,&foot,nullptr,nullptr,&bytes);
@@ -130,15 +133,22 @@ namespace
 }
 int main(int argc,char** argv)
 {
-    if(argc==3||argc==4)
+    if(argc==3||argc==4||argc==8)
     {
         NativeGeometry mesh;
-        if(argc==4) { std::ifstream geometry(argv[3],std::ios::binary); mesh=ReadNativeGeometry(geometry); }
-        const auto input=ReadCapture(argv[1]); const auto pixels=Render(input,argc==4?&mesh:nullptr);
+        if(argc>=4) { std::ifstream geometry(argv[3],std::ios::binary); mesh=ReadNativeGeometry(geometry); }
+        float sun[3]{}; unsigned mode=0;
+        if(argc==8) {
+            for(unsigned i=0;i<3;++i) { char* end=nullptr; sun[i]=std::strtof(argv[4+i],&end); Require(end&&*end==0,"numeric sun direction"); }
+            Require(ValidTerrainSun(sun),"unit captured sun direction");
+            const std::string name(argv[7]); mode=name=="preview"?1:name=="mask"?2:0;
+            Require(mode!=0,"terrain shadow preview or mask mode");
+        }
+        const auto input=ReadCapture(argv[1]); const auto pixels=Render(input,argc>=4?&mesh:nullptr,nullptr,false,sun,mode);
         std::ofstream file(argv[2],std::ios::binary); file.write(reinterpret_cast<const char*>(pixels.data()),static_cast<std::streamsize>(pixels.size()));
         Require(file.good(),"save captured DXR RGBA output"); return 0;
     }
-    Require(argc==1,"usage: frame_bridge_visible_rt_gpu_tests [capture.bin output.rgba]");
+    Require(argc==1,"usage: frame_bridge_visible_rt_gpu_tests [capture.bin output.rgba [native.bin [sunX sunY sunZ preview|mask]]]");
     for(bool corner : {false,true})
     {
         const auto input=Fixture(corner); const auto pixels=Render(input); unsigned darker=0;
@@ -204,5 +214,59 @@ int main(int argc,char** argv)
     turn.header.payloadHash=GeometryHash(turn.vertices);
     Require(Render(rotated,&turn)==worldOcclusion,"native world rays agree under camera rotation");
     std::printf("PASS DXR native occluder absent from depth darker_pixels=%u; translation and rotation preserved\n",nativeDarker);
+    // Sun rays must see an offscreen native occluder eight meters beyond the
+    // receiver, outside the four-meter AO radius. Half the plane is blocked.
+    auto sunlight=coplanar;
+    const NativePoint wall[]={{-20,-20,5},{0,-20,5},{-20,20,5},
+                             {0,-20,5},{0,20,5},{-20,20,5}};
+    sunlight.vertices.insert(sunlight.vertices.end(),std::begin(wall),std::end(wall));
+    sunlight.header.vertices=static_cast<unsigned>(sunlight.vertices.size());
+    sunlight.header.payloadHash=GeometryHash(sunlight.vertices);
+    const float sun[3]={0,0,1},away[3]={0,0,-1},invalid[3]={0,0,2};
+    Require(Render(plane,&sunlight)==plane.final,"distant sun occluder adds no short-range AO");
+    Require(Render(plane,&sunlight,nullptr,false,invalid,1)==plane.final,"invalid sun fails closed");
+    Require(Render(plane,&sunlight,nullptr,false,away,1)==plane.final,"backlit receiver adds no shadow multiplication");
+    Require(Render(plane,nullptr,nullptr,false,sun,1)==plane.final,"missing native geometry disables sun shadows");
+    for(float value : {1.0f,NAN}) {
+        auto unavailable=plane; std::fill(unavailable.depth.begin(),unavailable.depth.end(),value);
+        Require(Render(unavailable,&sunlight,nullptr,false,sun,2)==unavailable.final,"clear/nonfinite depth never launches terrain sun receiver rays");
+    }
+    const auto shadow=Render(plane,&sunlight,nullptr,false,sun,1);
+    const auto mask=Render(plane,&sunlight,nullptr,false,sun,2);
+    unsigned shadowed=0,marked=0;
+    for(unsigned y=0;y<plane.height;++y) for(unsigned x=0;x<plane.width;++x) {
+        const auto i=(y*plane.width+x)*4;
+        Require(shadow[i+3]==plane.final[i+3]&&mask[i+3]==plane.final[i+3],"sun preview preserves alpha");
+        if(x<9&&y<9) { Require(std::memcmp(shadow.data()+i,plane.final.data()+i,4)==0&&std::memcmp(mask.data()+i,plane.final.data()+i,4)==0,"sun preview preserves distinct HUD"); continue; }
+        if(shadow[i]+2<plane.final[i]) ++shadowed;
+        if(mask[i]>220&&mask[i+1]<50&&mask[i+2]>220) ++marked;
+        if(x>plane.width/2+1) Require(std::memcmp(shadow.data()+i,plane.final.data()+i,4)==0,"sunlit half unchanged");
+    }
+    Require(shadowed>20000&&marked==shadowed,"offscreen native wall shadows only blocked half of terrain receiver");
+    Require(Render(plane,&coplanar,nullptr,false,sun,1)==plane.final,"native plane has no sun self-shadow");
+    auto behind=coplanar; for(auto& v:behind.vertices) v.z-=2;
+    behind.header.payloadHash=GeometryHash(behind.vertices);
+    Require(Render(plane,&behind,nullptr,false,sun,2)==plane.final,"depth mismatching native receiver is not marked");
+    auto movedSunlight=sunlight;
+    for(auto& v:movedSunlight.vertices) { v.x+=37; v.y-=12; v.z+=19; }
+    movedSunlight.header.payloadHash=GeometryHash(movedSunlight.vertices);
+    const auto translatedShadow=Render(translated,&movedSunlight,nullptr,false,sun,1);
+    unsigned shadowTranslationChanged=0;
+    for(unsigned y=0;y<plane.height;++y) for(unsigned x=0;x<plane.width;++x) {
+        const auto i=(y*plane.width+x)*4;
+        if(std::memcmp(translatedShadow.data()+i,shadow.data()+i,4)!=0) {
+            ++shadowTranslationChanged;
+            // The center sample lies exactly on the zero-width hard shadow
+            // boundary. Floating world translation may choose either side.
+            Require(x==plane.width/2,"translated sun shadows differ only on exact hard-shadow boundary");
+        }
+    }
+    std::printf("DXR sun translation changed_boundary_pixels=%u\n",shadowTranslationChanged);
+    auto turnedSunlight=sunlight;
+    for(auto& v:turnedSunlight.vertices) { float x=v.x; v.x=-v.z; v.z=x; }
+    turnedSunlight.header.payloadHash=GeometryHash(turnedSunlight.vertices);
+    const float turnedSun[3]={-1,0,0};
+    Require(Render(rotated,&turnedSunlight,nullptr,false,turnedSun,1)==shadow,"sun shadows preserve world camera rotation");
+    std::printf("PASS DXR terrain sunlight offscreen wall blocked_pixels=%u marked_pixels=%u\n",shadowed,marked);
     return OpenShimTest::ExitCode();
 }
