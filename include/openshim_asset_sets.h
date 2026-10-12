@@ -77,9 +77,11 @@ namespace BZROpenShim
     using OpenShimAssetSetValidator =
         std::function<bool(const std::filesystem::path&, std::string&)>;
 
-    // Syncs one set from `itemDir` into `gameDir`. renderer swaps the whole
-    // destination directory atomically (and runs `validator` on the source and
-    // on the pending copy); customWidgets replaces only the listed files and
+    // Syncs one set from `itemDir` into `gameDir`. Each listed file is read
+    // from "<path>.payload" in the Workshop item when that exists, else from
+    // "<path>", and is always installed as "<path>". renderer swaps the whole
+    // destination directory atomically (and runs `validator` on the pending
+    // copy before the swap); customWidgets replaces only the listed files and
     // never removes anything else in the folder.
     OpenShimAssetSyncOutcome SyncOpenShimAssetSet(
         const std::filesystem::path& itemDir,
