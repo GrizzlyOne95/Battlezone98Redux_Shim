@@ -319,3 +319,52 @@ motion acceptance, authored height maps, full geometry export and performance
 qualification remain false. Long movement/deformation/viewport tests are still
 required; matching synthetic endpoints does not prove native seams under every
 floating-point transform. No generated-frame quality or FPS gain is inferred.
+
+## Authored terrain normal-lighting checkpoint
+
+`Build-TerrainSurfacePack.py` now consumes a live engine tile/atlas capture and
+explicit single-channel linear height images. It produces a linear RGB normal
+atlas with original base-mip borders and renormalized mips. Engine-index aliases
+are reported; conflicts/partial rectangle overlaps, unknown IDs and escaped
+source paths decline before publication. Physical slope units, 8/16-bit/float
+height ranges and provenance are explicit. This does not emit geometry heights.
+
+The default-off native surface path requires the original material and
+diffuse/normal resource identities, compatible normal-mapped terrain programs
+and a linear RGBA8 texture descriptor. Original textures are retained and only
+our owned replacement bindings are restored. A read-only immediate-context
+check compares actual PS t2 resource and SRV format during pipeline-statistics
+samples. Capture qualification requires fresh visible GPU evidence and complete
+normal restoration, in addition to the existing terrain cleanup gate.
+
+The local test uses deliberately strong generated ridge height art over 13 used
+Moon engine indices; this is diagnostic art, not a finished terrain pack.
+The 1024x1024 atlas has 11 mip levels. PID 41680, run
+`build/game-bridge-20261012-144809-425/`, imported 120 1268x513 frames, installed
+six normal passes, and confirmed the actual resource at a visible draw with
+104886 pixel invocations. PID 29072, combined run
+`build/game-bridge-20261012-145351-651/`, imported 120 1266x513 frames, ran
+DXR/cinematic effects on 105 and reported 105 extra SDK presentations, final
+status zero. Its authored-normal sample had 151786 domain invocations and
+17251 pixel invocations. Both runs restored six normal bindings, 27 tessellation
+passes, 144 padded bounds and all 62 deployment/config files, with exit code zero.
+
+The baseline/surface scene captures were visually inspected. Their comparison
+shows changed terrain shading while buildings/sky/cockpit remain; these are
+separate runs, not identical game/particle state. No FPS, generated-image quality,
+full displacement or broad artistic/seam acceptance is inferred.
+
+Wrong Mars diffuse identity on Moon, PID 53148 in
+`build/game-bridge-20261012-152728-985/`, produced a fresh `no guarded
+normal-mapped terrain pass` decline and installed no normal replacement. All
+terrain resources and 62 files restored. The known game-window resize limitation
+disabled its bridge before helper connection, so this is native rejection
+evidence only. Earlier negative attempts failed before usable bridge capture;
+they are not promoted to a successful capture or completed surface report.
+
+Win32 Release build and all 105 CTest regressions pass, including seven
+surface-authoring cases. Python/script parsing checks pass. The schema,
+commands, limitations and next domain-resource requirement are documented in
+[terrain-surface-materials.md](terrain-surface-materials.md). Height artwork
+currently changes normals only; geometric relief remains procedural. Full
+texture-driven domain displacement is not implemented.

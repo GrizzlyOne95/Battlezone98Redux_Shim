@@ -150,6 +150,22 @@ gain. Duplicated cluster endpoints can carry slightly different floating-point
 transforms, and authored height seams are not yet available. Longer camera,
 viewport, contact, deformation and cross-cluster tests remain required.
 
+## Authored normal-lighting checkpoint
+
+Explicit engine tile height images now feed a border-preserving normal-atlas
+authoring tool and a default-off, guarded native normal replacement. Two live
+GOG captures passed actual bound-resource/raster checks and restored all six
+normal bindings, terrain resources and 62 deployment/config files. The combined
+120-frame preview executed DXR/cinematic on 105 frames and reported 105 extra
+SDK presentations with status zero. All 105 regressions pass.
+
+The detailed schema, authoring/capture commands and geometry-stage requirements
+are in [terrain-surface-materials.md](terrain-surface-materials.md). Height art
+currently changes normal lighting only. Procedural relief remains the source of
+geometry displacement; texture-driven heights, independent normal/height tile
+arrays and roughness are still pending. The ridge test art validates the path
+and is not a finished terrain artwork pack.
+
 ## Qualification limits
 
 The original game still presents. Tessellation is currently native DX11; DX12

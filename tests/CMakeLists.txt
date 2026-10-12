@@ -42,6 +42,8 @@ if(Python3_Interpreter_FOUND)
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_paint_pack_tests.py")
         add_test(NAME terrain_hd_pack_tests
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_hd_pack_tests.py")
+        add_test(NAME terrain_surface_pack_tests
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_surface_pack_tests.py")
     else()
         message(STATUS "terrain_hd_pack_tests needs Pillow; install it to qualify texture pack changes")
     endif()

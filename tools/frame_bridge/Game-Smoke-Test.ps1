@@ -18,6 +18,7 @@ param(
     [switch]$WorldEffectsReference,
     [switch]$TerrainMicroRelief,
     [switch]$TerrainAdaptive,
+    [string]$TerrainSurfaceManifest = '',
     [ValidateRange(4, 64)][float]$TerrainTargetPixels = 12,
     [ValidateSet(1, 2, 4)][int]$TerrainTessellationFactor = 4,
     [ValidateRange(0.001, 1)][float]$TerrainReliefAmplitude = 0.25,
@@ -29,6 +30,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if ($TerrainAdaptive -and (-not $TerrainMicroRelief -or $TerrainTessellationFactor -ne 4)) { throw 'TerrainAdaptive requires TerrainMicroRelief with factor-4 cap' }
+if ($TerrainSurfaceManifest -and -not $TerrainMicroRelief) { throw 'Surface capture requires TerrainMicroRelief for native GPU draw evidence' }
+$surfaceResource=''; $surfaceRelativeManifest=''
+if ($TerrainSurfaceManifest) {
+    $TerrainSurfaceManifest=(Resolve-Path -LiteralPath $TerrainSurfaceManifest).Path
+    $surfaceSpec=Get-Content -LiteralPath $TerrainSurfaceManifest -Raw | ConvertFrom-Json
+    $surfaceResource=[string]$surfaceSpec.normalAtlas
+    if ($surfaceResource -notmatch '^[a-z][a-z0-9_]{0,80}\.dds$') { throw 'Surface normal resource must be a simple DDS filename' }
+    $surfaceRelativeManifest='openshim/renderer/enhanced/' + [IO.Path]::GetFileName($TerrainSurfaceManifest)
+    if (-not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $TerrainSurfaceManifest) $surfaceResource) -PathType Leaf)) { throw 'Surface normal DDS missing beside manifest' }
+}
 if ($WorldEffectsReference) {
     if ($StreamlineDirectory -or $VisibleRayTracing -or $VisualEnhancements -or $ShaderCameraTrace -or $TerrainMicroRelief) { throw 'World-effects reference is a separate diagnostic, without effects or runtime tracing' }
     if ($DepthSweep -or $SceneStage -ne 'before-overlay') { throw 'World-effects reference requires one before-overlay scene capture' }
@@ -119,6 +130,11 @@ try {
         ForEach-Object { 'BZ_ASSETS_CORE/common/ui/CustomWidgets/' + $_.Name }
     $targets += Get-ChildItem -LiteralPath $GameRoot -File |
         Where-Object { $_.Extension -in @('.cfg', '.ini') } | ForEach-Object { $_.Name }
+    if ($TerrainSurfaceManifest) {
+        $surfaceRelativeResource='openshim/renderer/enhanced/' + $surfaceResource
+        if ($targets -contains $surfaceRelativeManifest -or $targets -contains $surfaceRelativeResource) { throw 'Surface pack collides with a deployment resource' }
+        $targets += @($surfaceRelativeManifest,$surfaceRelativeResource)
+    }
     foreach ($relative in ($targets | Sort-Object -Unique)) {
         $target = [System.IO.Path]::GetFullPath((Join-Path $GameRoot $relative))
         if (-not $target.StartsWith($GameRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Target outside game root' }
@@ -147,6 +163,7 @@ try {
         OPENSHIM_TERRAIN_TESSELLATION_WIREFRAME = '0'
         OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE = $(if ($TerrainAdaptive) { '1' } else { '0' })
         OPENSHIM_TERRAIN_TESSELLATION_TARGET_PIXELS = $TerrainTargetPixels.ToString('R', [Globalization.CultureInfo]::InvariantCulture)
+        OPENSHIM_TERRAIN_SURFACE_MANIFEST = $(if ($TerrainSurfaceManifest) { Join-Path $GameRoot $surfaceRelativeManifest } else { '' })
     }.GetEnumerator()) {
         $environment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
@@ -155,6 +172,10 @@ try {
     if ($StreamlineDirectory) { $null = Set-BZROgreWindowed -GameRoot $GameRoot -VideoMode '1280 x 720' }
     Assert-BZRSafeToLaunch
     & (Join-Path $repoRoot 'scripts/Deploy-OpenShim.ps1') -GameDir $GameRoot
+    if ($TerrainSurfaceManifest) {
+        Copy-Item -LiteralPath $TerrainSurfaceManifest -Destination (Join-Path $GameRoot $surfaceRelativeManifest) -Force
+        Copy-Item -LiteralPath (Join-Path (Split-Path -Parent $TerrainSurfaceManifest) $surfaceResource) -Destination (Join-Path $GameRoot $surfaceRelativeResource) -Force
+    }
     $launchTime = Get-Date
     $game = Start-BZRGameProcess -FilePath $gameExe -ArgumentList @('/renderer:dx11', $Mission) -WorkingDirectory $GameRoot -PassThru
     # Start-BZRGameProcess returns Get-Process, rather than Process.Start's
@@ -329,4 +350,23 @@ if ($TerrainMicroRelief) {
         sameFrameUntessellatedComparison=$false; performanceQualified=$false } |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outputRoot 'terrain-bridge-report.json')
     Write-Host "PASS native terrain -> DX12 bridge: factor=$TerrainTessellationFactor amplitude=$TerrainReliefAmplitude; rasterization and cleanup verified"
+    if ($TerrainSurfaceManifest) {
+        $surfaceInstalled=[regex]::Matches($terrainText,'\[TERRAIN-SURFACE\] normals installed .*passes=(\d+) .*linear=1 heightGeometry=0')
+        $surfaceRestored=[regex]::Matches($terrainText,'\[TERRAIN-SURFACE\] normals restored passes=(\d+) tracked=(\d+)')
+        # The standard statistics regex ends at hdTiles; qualify against the
+        # complete fresh-session log line as well as its visible GPU counts.
+        $surfaceVisible=@($terrainLines | Where-Object {
+            $_ -match 'GPU statistics tessellated=1.*authoredNormal=1' -and
+            [uint64]([regex]::Match($_,'clipPrimitives=(\d+)').Groups[1].Value) -ge 128 -and
+            [uint64]([regex]::Match($_,'psInvocations=(\d+)').Groups[1].Value) -ge 1024 })
+        if ($surfaceInstalled.Count -ne 1 -or $surfaceVisible.Count -eq 0 -or $surfaceRestored.Count -ne 1 -or
+            [int]$surfaceInstalled[0].Groups[1].Value -le 0 -or $surfaceRestored[0].Groups[1].Value -ne $surfaceInstalled[0].Groups[1].Value -or
+            $surfaceRestored[0].Groups[1].Value -ne $surfaceRestored[0].Groups[2].Value) { throw 'Authored normals lack fresh bound-resource draw/cleanup evidence; leave surface unqualified' }
+        @{ nativeAuthoredNormals=$true; normalEncoding='rgb-xyz-linear'; heightGeometry=$false;
+            pid=$game.Id; restoredPasses=[int]$surfaceRestored[0].Groups[1].Value;
+            normalAtlasSha256=(Get-FileHash -LiteralPath (Join-Path (Split-Path -Parent $TerrainSurfaceManifest) $surfaceResource)).Hash;
+            artisticAcceptance=$false; crossClusterCameraMotionQualified=$false } |
+            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outputRoot 'terrain-surface-report.json')
+        Write-Host 'PASS authored terrain normal atlas: actual bound GPU resource, visible rasterization and restoration verified; height affects lighting only'
+    }
 }

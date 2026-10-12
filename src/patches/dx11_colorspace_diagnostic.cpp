@@ -4,6 +4,7 @@
 #include "diagnostic_switch.h"
 #include "iat_patch.h"
 #include "shim_log.h"
+#include "terrain_proxy.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
