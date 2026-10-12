@@ -48,5 +48,75 @@ int main()
     producer.Stop();
     desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     Check(producer.Start(device.Get(), desc) == E_INVALIDARG && !producer.Active(), "reject unsupported HDR without leaving an active session");
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    Require(producer.Start(device.Get(), desc, true) == S_OK, "start color/depth producer");
+    mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, MappingName(GetCurrentProcessId()).c_str());
+    Require(mapping != nullptr, "open depth consumer metadata");
+    frame = static_cast<SharedFrame*>(MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SharedFrame)));
+    Require(frame != nullptr && frame->depthTextureHandle != 0, "shared depth handle published before active descriptor");
+    auto depthDesc = desc;
+    depthDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    depthDesc.SampleDesc.Count = 4;
+    ComPtr<ID3D11Texture2D> depth;
+    ComPtr<ID3D11DepthStencilView> depthView;
+    Require(SUCCEEDED(device->CreateTexture2D(&depthDesc, nullptr, &depth)), "create MSAA depth without SRV flag");
+    Require(SUCCEEDED(device->CreateDepthStencilView(depth.Get(), nullptr, &depthView)), "create source depth view");
+    context->ClearDepthStencilView(depthView.Get(), D3D11_CLEAR_DEPTH, 0.25f, 0);
+    Require(producer.Publish(texture.Get(), depth.Get()) == S_OK && ValidDepthFrame(*frame), "publish valid matching color/depth");
+    Check(producer.Publish(texture.Get()) == S_FALSE && ValidDepthFrame(*frame), "busy publication preserves both products and depth validity");
+    // This metadata-only reader submits no GPU work and therefore has no GPU
+    // reads to wait for before returning the slot.
+    const auto acknowledge = [&]() {
+        Require(Claim(frame->slotState, static_cast<LONG>(SlotState::Ready), static_cast<LONG>(SlotState::Reading)), "claim metadata slot");
+        Exchange(frame->slotState, static_cast<LONG>(SlotState::Free));
+    };
+    acknowledge();
+    Require(producer.Publish(texture.Get()) == S_OK, "publish color with missing depth");
+    Check(!ValidDepthFrame(*frame) && frame->depthStatus == static_cast<std::uint32_t>(DepthStatus::Missing) &&
+        frame->depthSourceFormat == 0, "missing frame invalidates previous depth and source metadata");
+    acknowledge();
+    depthDesc.Format = DXGI_FORMAT_D16_UNORM;
+    depthDesc.SampleDesc.Count = 1;
+    ComPtr<ID3D11Texture2D> unsupportedDepth;
+    Require(SUCCEEDED(device->CreateTexture2D(&depthDesc, nullptr, &unsupportedDepth)), "create unsupported depth format");
+    Require(producer.Publish(texture.Get(), unsupportedDepth.Get()) == S_OK, "unsupported depth keeps color capture alive");
+    Check(!ValidDepthFrame(*frame) && frame->depthStatus == static_cast<std::uint32_t>(DepthStatus::Unsupported), "unsupported frame rejects stale depth pixels");
+    acknowledge();
+    Require(producer.Publish(texture.Get(), depth.Get(), DepthReduction::Maximum) == S_OK && ValidDepthFrame(*frame) &&
+        frame->depthReduction == 1 && frame->depthSourceSamples == 4, "depth extraction recovers after rejected source");
+    acknowledge();
+    Exchange(frame->requestedDepthClear, 1);
+    producer.BeforeDepthClear(context.Get(), depthView.Get(), D3D11_CLEAR_DEPTH);
+    context->ClearDepthStencilView(depthView.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+    Require(producer.Publish(texture.Get()) == S_OK && ValidDepthFrame(*frame) &&
+        frame->depthCapturedOrdinal == 1 && frame->depthMatchingClears == 1, "pre-clear snapshot publishes with matching frame");
+    ComPtr<ID3D11Device1> device1;
+    ComPtr<ID3D11Texture2D> sharedDepth;
+    Require(SUCCEEDED(device.As(&device1)) && SUCCEEDED(device1->OpenSharedResource1(
+        reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(frame->depthTextureHandle)), IID_PPV_ARGS(&sharedDepth))), "open exported depth for pre-clear pixel check");
+    D3D11_TEXTURE2D_DESC readDesc{};
+    sharedDepth->GetDesc(&readDesc);
+    readDesc.BindFlags = readDesc.MiscFlags = 0;
+    readDesc.Usage = D3D11_USAGE_STAGING;
+    readDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ComPtr<ID3D11Texture2D> readback;
+    Require(SUCCEEDED(device->CreateTexture2D(&readDesc, nullptr, &readback)), "create snapshot readback");
+    context->CopyResource(readback.Get(), sharedDepth.Get());
+    D3D11_MAPPED_SUBRESOURCE pixels{};
+    Require(SUCCEEDED(context->Map(readback.Get(), 0, D3D11_MAP_READ, 0, &pixels)), "wait for snapshot GPU copy and map");
+    Check(*static_cast<const float*>(pixels.pData) > 0.24999f && *static_cast<const float*>(pixels.pData) < 0.25001f,
+        "pre-clear captured old depth before source was cleared to one");
+    context->Unmap(readback.Get(), 0);
+    producer.BeforeDepthClear(context.Get(), depthView.Get(), D3D11_CLEAR_DEPTH);
+    Check(ValidDepthFrame(*frame) && frame->depthCapturedOrdinal == 1, "pre-clear observer cannot mutate occupied metadata");
+    acknowledge();
+    // A publication without a new matching clear must not reuse the snapshot.
+    // Clear counting itself is reset by every Publish, including busy skips.
+    Check(producer.Publish(texture.Get()) == S_OK && !ValidDepthFrame(*frame), "pre-clear missing in next frame rejects retained snapshot");
+    producer.Stop();
+    Check(ReadInterlocked(frame->active) == 0, "color/depth shutdown is visible to retained consumer");
+    UnmapViewOfFile(frame);
+    CloseHandle(mapping);
     return OpenShimTest::ExitCode();
 }

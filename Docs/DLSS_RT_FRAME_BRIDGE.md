@@ -9,7 +9,7 @@ after checking open PRs and renderer history (2026-10-11).
 Battlezone and its native load chain stay Win32/DX11. An opt-in OpenShim
 presentation observer copies completed SDR color into a shared GPU texture.
 A separately built x64 DX12 diagnostic helper imports it on the same adapter.
-The helper can verify synthetic pixels, save a BMP, or display a non-activating preview.
+The helper can verify synthetic pixels, save color/depth artifacts, or display a non-activating preview.
 The normal game `Present` still runs. No input forwarding or presentation
 takeover exists at this milestone.
 
@@ -69,6 +69,11 @@ logs the process ID:
 ./build/frame-bridge-x64/Release/frame_bridge_presenter.exe --pid <game-pid> --frames 120 --capture-bmp build/game-frame.bmp
 # Reversible deployment, harness launch, mission capture and hash-checked restore:
 ./tools/frame_bridge/Game-Smoke-Test.ps1
+# Extra opt-in depth diagnostics. These are not qualified DLSS inputs.
+./tools/frame_bridge/Game-Smoke-Test.ps1 -Depth -DepthClearOrdinal 2
+./tools/frame_bridge/Game-Smoke-Test.ps1 -DepthSweep
+# Inspect a PFM with Python + Pillow; contrast is not linearized depth:
+python tools/frame_bridge/Inspect-Capture.py build/<run>/game-depth.pfm --color build/<run>/game-frame.bmp
 ```
 
 Do **not** pass `--verify` for game frames: that flag expects synthetic colors.
@@ -102,13 +107,49 @@ bindings alongside matching-size render targets. Other observed surfaces were
 cannot prove pass identity. Main-world versus cockpit clear timing, satellite,
 scope, mission transitions, resize and projection direction still need evidence.
 
-`DepthExtractor` is currently built only by the standalone GPU test tool. It
+`DepthExtractor` is built by the plugin and standalone GPU test tool. It
 copies D24/S8 or D32 depth to an owned typeless texture with matching sample
 layout, creates a depth-plane SRV and computes a single-sample R32_FLOAT result.
 It never modifies the game's source description and never uses color resolve
 for depth. The caller explicitly selects minimum or maximum across samples;
 these are raw device-depth values, not linear depth. No projection convention
-is assumed and this output is not yet exported or tagged as a DLSS input.
+is assumed. The optional V2 depth image is exported alongside color; it is not
+tagged as a DLSS input or advertised as qualified main scene depth.
+
+`OPENSHIM_FRAME_BRIDGE_DEPTH=1` additionally opts into depth capture, requiring
+`OPENSHIM_FRAME_BRIDGE=1`. It starts the existing scene-depth observer even when
+its separate diagnostic switch is off. The observer reasserts the clear hook
+after OM bindings because the runtime replaces context vtables during the frame.
+Attaching the clear hook only at Present produced no clear observations in the
+local run. Stock resource descriptions and real clears remain intact. The shader
+compiler is loaded from System32 when depth extraction initializes, so disabled
+and DX9 paths acquire no new mandatory compiler DLL import.
+
+The helper's `--depth-clear-ordinal 0..8` selects a diagnostic boundary. Zero
+extracts the depth bound at Present. Positive values snapshot immediately before
+the nth matching-size depth clear between Presents. These are manual selectors,
+not semantic world/cockpit pass identification. The private snapshot preserves
+the original sample layout, is reduced at Present and copied alongside color
+before a single shared fence signal. A busy prior slot can prevent an earlier
+snapshot; validity resets on each publication and missing sources never reuse
+prior depth as valid. Clear counts are lower bounds when hooks detach.
+
+`--capture-depth-pfm PATH` saves a valid final candidate as bottom-up little-endian
+float PFM with a JSON sidecar containing frame ID, timestamp, format, samples,
+reduction and clear boundary. Color/BMP and depth/PFM share the same mailbox frame.
+If the requested final frame lacks depth, artifact capture waits at most 120
+extra frames for a complete pair, then fails. The inspector makes percentile
+contrast previews; their brightness is not linear depth.
+
+The live GOG experiment at 1600x900 found Present-bound 8x D24/S8 was uniformly
+1.0, demonstrating why terminal capture alone is insufficient. Pre-clear ordinal
+2 produced a non-flat candidate in frame 120: minimum 0.678355277, maximum 1,
+770338 non-clear pixels. The saved comparison visibly contains terrain and
+nearby geometry. A same-session 1/2/3 sweep with the separate scene-depth switch
+off saved three pairs over 361 consumed frames. Ordinal 1 was entirely clear;
+ordinals 2 and 3 held non-flat geometry. This does not yet distinguish their
+pass semantics or establish world/cockpit projection compatibility. Missing
+pre-clear snapshots were reported and the final pair waited for valid depth.
 
 The caller must serialize immediate-context access and keep the extractor output
 unbound during extraction. The extractor restores the compute shader (including
@@ -122,14 +163,19 @@ textures without SRV bind flags. They verify every output pixel for both sample
 reductions, at 1/2/4/8 samples in both x86 and x64, including edge dispatches,
 preserved caller compute/DSV state, resize rejection and stopped state. The
 optional D3D11 debug layer was unavailable on this machine; tests report that
-limitation explicitly. Actual-game extraction and depth/frame synchronization
-are the next integration milestone.
+limitation explicitly. Producer tests also cover pre-clear snapshots surviving
+the real clear, missing/unsupported depth invalidation, occupied metadata,
+recovery and reset at each Present. Cross-process tests verify per-frame color
+and depth IDs, MSAA extraction, reconnects and PFM bytes. Semantic scene/cockpit
+pass identity, camera constants and projection qualification remain next.
 
 ## Transport and failure contract
 
 - A versioned 128-byte wire descriptor contains only fixed-width fields, the
   adapter LUID, dimensions/format, timestamps and producer-local NT handle
-  values. The helper duplicates handles from that PID; it never treats wire
+  values. V2 retains the 128-byte size and adds optional depth metadata/handle;
+  V1 helpers must be rebuilt and reject the new version. The helper duplicates
+  handles from that PID; it never treats wire
   integers as pointers or directly uses a foreign handle.
 - Named metadata lives in the session-local namespace and uses the creator's
   default Windows security descriptor. There is no elevation, global object,
@@ -141,9 +187,12 @@ are the next integration milestone.
 - Capture never waits for a consumer. Busy slots skip frames. A crashed/stalled
   reader leaves the slot unavailable instead of allowing concurrent GPU writes.
   A clean reader exit allows reconnect. Crash recovery needs a new session.
-- V1 accepts RGBA8/BGRA8 SDR, one mip/array layer, and same-adapter sharing.
-  MSAA color is resolved to a single-sample shared texture. HDR, cross-adapter
-  transport, scene depth and motion vectors are outside V1.
+- V2 accepts RGBA8/BGRA8 SDR, one mip/array layer, and same-adapter sharing.
+  MSAA color is resolved to a single-sample shared texture. Optional raw candidate
+  depth is shared R32_FLOAT with the same extent and fence/frame ID. Its per-frame
+  status explicitly records disabled/missing/unsupported/failed input. Consumer
+  clear selection uses a separate interlocked control word, never slot-owned
+  fields. HDR, cross-adapter transport, cameras and motion vectors remain absent.
 - Resizing or device replacement disables game capture for the session. Normal
   presentation continues; the helper exits on inactive metadata/producer death.
   Backbuffer references are local to the hook and released before `Present`.
@@ -211,7 +260,12 @@ Native Windows checkpoint, 2026-10-11:
   readback, 4x MSAA, reconnects and BMP pixel checks.
 - GOG `misn01.bzn`: 120 actual game frames imported to DX12, final BMP visually
   inspected; full development deployment/config surface restored with hashes.
-- Actual depth extraction, gameplay input/focus, Steam, Proton/Wine, coordinated
+- V2 smoke checked 1200 synthetic color frames, including 400 paired depth
+  frames, in x86-to-x64 single-sample/MSAA transport and reconnect lanes.
+- GOG pre-clear experiment saved matched raw depth/color at 1600x900, 8x D24/S8;
+  the same-session boundary sweep consumed 361 frames and produced three pairs.
+  All 60 deployment/config files were restored and hash-verified after exit.
+- Qualified main scene depth/cameras, gameplay input/focus, Steam, Proton/Wine, coordinated
   presentation takeover, real latency, DLSS and ray-traced effects are unverified.
 
 The helper is a standalone **development tool**, excluded from the suite's

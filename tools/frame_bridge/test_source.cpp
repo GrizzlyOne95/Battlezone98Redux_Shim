@@ -11,12 +11,14 @@ int main(int argc, char** argv)
     bool msaa = false;
     bool padded = false;
     bool bgra = false;
+    bool depthEnabled = false;
     for (int i = 2; i < argc; ++i)
     {
         const std::string arg(argv[i]);
         if (arg == "--msaa") msaa = true;
         else if (arg == "--padded") padded = true;
         else if (arg == "--bgra") bgra = true;
+        else if (arg == "--depth") depthEnabled = true;
         else return 2;
     }
     if (seconds == 0 || seconds > 300) return 2;
@@ -37,8 +39,18 @@ int main(int argc, char** argv)
     ComPtr<ID3D11RenderTargetView> rtv;
     if (SUCCEEDED(hr)) hr = device->CreateTexture2D(&desc, nullptr, &source);
     if (SUCCEEDED(hr)) hr = device->CreateRenderTargetView(source.Get(), nullptr, &rtv);
+    ComPtr<ID3D11Texture2D> depth;
+    ComPtr<ID3D11DepthStencilView> dsv;
+    if (SUCCEEDED(hr) && depthEnabled)
+    {
+        auto depthDesc = desc;
+        depthDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+        hr = device->CreateTexture2D(&depthDesc, nullptr, &depth);
+        if (SUCCEEDED(hr)) hr = device->CreateDepthStencilView(depth.Get(), nullptr, &dsv);
+    }
     Producer producer;
-    if (SUCCEEDED(hr)) hr = producer.Start(device.Get(), desc);
+    if (SUCCEEDED(hr)) hr = producer.Start(device.Get(), desc, depthEnabled);
     if (FAILED(hr)) { std::fprintf(stderr, "source initialization failed: 0x%08lx\n", static_cast<unsigned long>(hr)); return 1; }
     std::printf("SOURCE pid=%lu pointer_bits=%zu sample_count=%u\n", GetCurrentProcessId(), sizeof(void*) * 8, desc.SampleDesc.Count);
     std::fflush(stdout);
@@ -54,7 +66,9 @@ int main(int argc, char** argv)
         const float color[4] = {static_cast<float>(id & 255) / 255.0f,
             static_cast<float>((id >> 8) & 255) / 255.0f, 0.25f, 1.0f};
         context->ClearRenderTargetView(rtv.Get(), color);
-        hr = producer.Publish(source.Get());
+        if (dsv) context->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL,
+            static_cast<float>(id) / 1024.0f, 0);
+        hr = producer.Publish(source.Get(), depth.Get());
         if (FAILED(hr)) { std::fprintf(stderr, "publish failed: 0x%08lx\n", static_cast<unsigned long>(hr)); return 1; }
         if (hr == S_OK) ++published; else ++skipped;
         Sleep(8);

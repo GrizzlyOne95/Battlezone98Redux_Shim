@@ -24,6 +24,10 @@ namespace BZROpenShim
     // or OPENSHIM_DX11_SCENE_DEPTH_DIAG=1. A missing key fails closed, so stock
     // and Enhanced installs that have not opted in are untouched. Only
     // RenderSystem_Direct3D11.dll is watched; DX9 is never hooked.
+    // OPENSHIM_FRAME_BRIDGE=1 + OPENSHIM_FRAME_BRIDGE_DEPTH=1 also starts this
+    // observer and reasserts the bridge's separate clear hook after OM binds.
+    // That opt-in hook copies private diagnostic textures without changing
+    // game resource descriptions, clears or pipeline bindings.
     void InitializeDx11SceneDepth();
 
     // Stops the discovery and reporting worker and emits a final table. COM

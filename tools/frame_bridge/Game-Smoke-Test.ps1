@@ -3,10 +3,14 @@ param(
     [string]$GameRoot = 'C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux',
     [string]$Mission = 'misn01.bzn',
     [ValidateRange(10, 300)][int]$InitTimeoutSeconds = 180,
-    [ValidateRange(1, 10000)][int]$Frames = 120
+    [ValidateRange(1, 10000)][int]$Frames = 120,
+    [switch]$Depth,
+    [ValidateRange(0, 8)][int]$DepthClearOrdinal = 0,
+    [switch]$DepthSweep
 )
 
 $ErrorActionPreference = 'Stop'
+if ($DepthSweep) { $Depth = $true }
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $GameRoot = (Resolve-Path -LiteralPath $GameRoot).Path
 $gameExe = Join-Path $GameRoot 'battlezone98redux.exe'
@@ -69,7 +73,8 @@ try {
     foreach ($entry in @{
         BZR_LAUNCH_LOCK_HELD = "$PID"; BZR_FORCE_WINDOWED = '1';
         OPENSHIM_FRAME_BRIDGE = '1'; OPENSHIM_RUN_IN_BACKGROUND = '1';
-        OPENSHIM_DX11_SCENE_DEPTH_DIAG = '1'
+        OPENSHIM_DX11_SCENE_DEPTH_DIAG = $(if ($Depth) { '0' } else { '1' })
+        OPENSHIM_FRAME_BRIDGE_DEPTH = $(if ($Depth) { '1' } else { '0' })
     }.GetEnumerator()) {
         $environment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
@@ -97,11 +102,19 @@ try {
     if (-not $initialized) { throw 'Mission failed to initialize before deadline' }
     # Give depth's observation worker time to emit its 15-second registry report.
     Start-Sleep -Seconds 16
-    $capture = Join-Path $outputRoot 'game-frame.bmp'
-    & $presenter --pid $game.Id --frames $Frames --timeout-ms 15000 --capture-bmp $capture |
-        Tee-Object -FilePath (Join-Path $outputRoot 'consumer.log')
-    if ($LASTEXITCODE -ne 0) { throw 'Real-game GPU import/capture failed' }
-    Write-Host "PASS real-game color import: $capture (DLSS/RT still pending)"
+    $ordinals = if ($DepthSweep) { @(1, 2, 3) } else { @($DepthClearOrdinal) }
+    foreach ($ordinal in $ordinals) {
+        $suffix = if ($DepthSweep) { "-clear$ordinal" } else { '' }
+        $capture = Join-Path $outputRoot "game-frame$suffix.bmp"
+        $presenterArgs = @('--pid', "$($game.Id)", '--frames', "$Frames", '--timeout-ms', '15000', '--capture-bmp', $capture)
+        if ($Depth) {
+            $presenterArgs += @('--capture-depth-pfm', (Join-Path $outputRoot "game-depth$suffix.pfm"), '--depth-clear-ordinal', "$ordinal")
+        }
+        & $presenter @presenterArgs |
+            Tee-Object -FilePath (Join-Path $outputRoot "consumer$suffix.log")
+        if ($LASTEXITCODE -ne 0) { throw "Real-game GPU import/capture failed at clear ordinal $ordinal" }
+        Write-Host "PASS real-game color import: $capture (DLSS/RT still pending)"
+    }
 } finally {
     try {
         if ($game) { Stop-BZRGame -Id $game.Id -TimeoutSeconds 30 -NoForce }

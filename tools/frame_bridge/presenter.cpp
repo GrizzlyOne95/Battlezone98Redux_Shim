@@ -7,6 +7,9 @@
 #include <cstdlib>
 #include <fstream>
 #include <vector>
+#include <cmath>
+#include <cstring>
+#include <algorithm>
 
 namespace
 {
@@ -51,10 +54,13 @@ namespace
             }
             if (window_ && IsWindow(window_)) DestroyWindow(window_);
         }
-        void Open(DWORD pid, bool show, bool verify, const std::string& capturePath)
+        void Open(DWORD pid, bool show, bool verify, const std::string& capturePath,
+            bool verifyDepth, const std::string& depthPath, UINT depthClearOrdinal)
         {
             verify_ = verify;
             capturePath_ = capturePath;
+            verifyDepth_ = verifyDepth;
+            depthPath_ = depthPath;
             mapping_.value = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, MappingName(pid).c_str());
             if (!mapping_.value) throw std::runtime_error("producer mapping unavailable; start source/capture first");
             frame_ = static_cast<SharedFrame*>(MapViewOfFile(mapping_.value, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SharedFrame)));
@@ -68,6 +74,7 @@ namespace
                 throw std::runtime_error("mailbox already has a consumer");
             }
             ownsConsumer_ = true;
+            Exchange(frame_->requestedDepthClear, static_cast<LONG>(depthClearOrdinal));
             producer_.value = OpenProcess(PROCESS_DUP_HANDLE | SYNCHRONIZE, FALSE, pid);
             if (!producer_.value) throw std::runtime_error("cannot open producer for handle duplication");
             const auto duplicate = [&](std::uint64_t remote, Handle& local)
@@ -86,6 +93,19 @@ namespace
             Require(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device_)), "D3D12CreateDevice");
             Require(device_->OpenSharedHandle(texture.value, IID_PPV_ARGS(&color_)), "open shared color");
             Require(device_->OpenSharedHandle(ready.value, IID_PPV_ARGS(&ready_)), "open shared fence");
+            if (verifyDepth || !depthPath.empty())
+            {
+                if (!frame_->depthTextureHandle) throw std::runtime_error("producer depth capture is disabled");
+                Handle depth;
+                duplicate(frame_->depthTextureHandle, depth);
+                Require(device_->OpenSharedHandle(depth.value, IID_PPV_ARGS(&depth_)), "open shared depth");
+                const auto desc = depth_->GetDesc();
+                if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.Width != frame_->width ||
+                    desc.Height != frame_->height || desc.Format != DXGI_FORMAT_R32_FLOAT ||
+                    desc.SampleDesc.Count != 1 || desc.MipLevels != 1 || desc.DepthOrArraySize != 1)
+                    throw std::runtime_error("depth GPU texture does not match descriptor");
+                CreateReadback(depth_.Get(), depthReadback_, depthFootprint_, depthReadbackBytes_);
+            }
             const auto colorDesc = color_->GetDesc();
             if (colorDesc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
                 colorDesc.Width != frame_->width || colorDesc.Height != frame_->height ||
@@ -134,12 +154,16 @@ namespace
         {
             unsigned consumed = 0;
             ULONGLONG deadline = GetTickCount64() + timeoutMs;
-            while (consumed < limit)
+            bool lastDepthValid = false;
+            // A pre-clear can occur while the prior slot is still Reading. The
+            // resulting color frame is valid but depth is Missing. For a paired
+            // artifact, wait at most 120 additional frames, never save stale z.
+            while (consumed < limit || (!depthPath_.empty() && !lastDepthValid && consumed < limit + 120))
             {
                 MSG message{};
                 while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
                 {
-                    if (message.message == WM_QUIT) return consumed;
+                    if (message.message == WM_QUIT) throw std::runtime_error("preview closed before capture completed");
                     TranslateMessage(&message);
                     DispatchMessageW(&message);
                 }
@@ -153,6 +177,14 @@ namespace
                 }
                 reading_ = true;
                 const auto id = frame_->frameId;
+                lastDepth_ = {frame_->depthSourceFormat, frame_->depthSourceSamples, frame_->depthStatus,
+                    frame_->depthReduction, frame_->depthResult, frame_->depthCapturedOrdinal, frame_->depthMatchingClears,
+                    id, frame_->captureQpc};
+                const bool validDepth = ValidDepthFrame(*frame_);
+                lastDepthValid = validDepth;
+                if (validDepth) ++depthCandidates_;
+                else ++depthUnavailable_;
+                if (verifyDepth_ && !validDepth) throw std::runtime_error("synthetic frame lacks valid depth");
                 if (id == 0 || id <= lastFrame_) throw std::runtime_error("non-monotonic frame ID");
                 WaitGpu(ready_.Get(), id);
                 Require(allocator_->Reset(), "Reset allocator");
@@ -166,7 +198,7 @@ namespace
                     commands_->CopyResource(backbuffer.Get(), color_.Get());
                     Barrier(backbuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
                 }
-                if (verify_ || (!capturePath_.empty() && consumed + 1 == limit))
+                if (verify_ || (!capturePath_.empty() && consumed + 1 >= limit))
                 {
                     D3D12_TEXTURE_COPY_LOCATION source{};
                     source.pResource = color_.Get();
@@ -177,6 +209,19 @@ namespace
                     destination.PlacedFootprint = footprint_;
                     commands_->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
                 }
+                if (depth_ && validDepth && (verifyDepth_ || consumed + 1 >= limit))
+                {
+                    Barrier(depth_.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE);
+                    D3D12_TEXTURE_COPY_LOCATION source{};
+                    source.pResource = depth_.Get();
+                    source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+                    D3D12_TEXTURE_COPY_LOCATION destination{};
+                    destination.pResource = depthReadback_.Get();
+                    destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+                    destination.PlacedFootprint = depthFootprint_;
+                    commands_->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+                    Barrier(depth_.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON);
+                }
                 Barrier(color_.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON);
                 Require(commands_->Close(), "Close commands");
                 ID3D12CommandList* lists[] = {commands_.Get()};
@@ -184,6 +229,7 @@ namespace
                 Require(queue_->Signal(done_.Get(), id), "signal copy completion");
                 WaitGpu(done_.Get(), id);
                 if (verify_) VerifyPixels(id);
+                if (verifyDepth_) VerifyDepth(id);
                 LARGE_INTEGER now{};
                 QueryPerformanceCounter(&now);
                 const double delay = 1000.0 * static_cast<double>(now.QuadPart - frame_->captureQpc) /
@@ -197,12 +243,94 @@ namespace
                 if (swapchain_) Require(swapchain_->Present(1, 0), "Present");
                 deadline = GetTickCount64() + timeoutMs;
             }
-            if (!capturePath_.empty()) SaveCapture();
             std::printf("CONSUMER frames=%u last_frame=%llu verified=%s max_capture_to_copy_ms=%.3f\n",
                 consumed, static_cast<unsigned long long>(lastFrame_), verify_ ? "yes" : "no", maxDelayMs_);
+            std::printf("DEPTH candidate_frames=%u unavailable_frames=%u last_status=%u source_format=%u samples=%u hr=0x%08x captured_clear=%u matching_clears=%u\n",
+                depthCandidates_, depthUnavailable_, lastDepth_.status, lastDepth_.format, lastDepth_.samples, lastDepth_.result,
+                lastDepth_.ordinal, lastDepth_.clears);
+            if (!capturePath_.empty()) SaveCapture();
+            if (!depthPath_.empty()) SaveDepth();
             return consumed;
         }
     private:
+        void CreateReadback(ID3D12Resource* texture, ComPtr<ID3D12Resource>& buffer,
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT& footprint, SIZE_T& bytes)
+        {
+            const auto desc = texture->GetDesc();
+            UINT rows = 0;
+            UINT64 rowBytes = 0, total = 0;
+            device_->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, &rows, &rowBytes, &total);
+            bytes = static_cast<SIZE_T>(total);
+            D3D12_HEAP_PROPERTIES heap{};
+            heap.Type = D3D12_HEAP_TYPE_READBACK;
+            D3D12_RESOURCE_DESC output{};
+            output.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+            output.Width = total;
+            output.Height = 1;
+            output.DepthOrArraySize = output.MipLevels = 1;
+            output.SampleDesc.Count = 1;
+            output.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+            Require(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &output,
+                D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&buffer)), "create depth readback");
+        }
+        std::vector<float> ReadDepthPixels()
+        {
+            std::vector<float> pixels(static_cast<SIZE_T>(frame_->width) * frame_->height);
+            unsigned char* data = nullptr;
+            const D3D12_RANGE range{0, depthReadbackBytes_};
+            Require(depthReadback_->Map(0, &range, reinterpret_cast<void**>(&data)), "map depth pixels");
+            for (UINT y = 0; y < frame_->height; ++y)
+                std::memcpy(pixels.data() + static_cast<SIZE_T>(y) * frame_->width,
+                    data + static_cast<SIZE_T>(y) * depthFootprint_.Footprint.RowPitch, static_cast<SIZE_T>(frame_->width) * sizeof(float));
+            const D3D12_RANGE written{0, 0};
+            depthReadback_->Unmap(0, &written);
+            return pixels;
+        }
+        void VerifyDepth(UINT64 id)
+        {
+            const auto pixels = ReadDepthPixels();
+            const float expected = static_cast<float>(id) / 1024.0f;
+            for (float value : pixels)
+                if (!std::isfinite(value) || std::fabs(value - expected) > 0.000001f)
+                    throw std::runtime_error("depth verification failed: stale/torn/wrong frame");
+        }
+        void SaveDepth()
+        {
+            if (lastDepth_.status != static_cast<std::uint32_t>(DepthStatus::Candidate) || lastDepth_.result != 0)
+            {
+                std::fprintf(stderr, "DEPTH unavailable frame=%llu status=%u format=%u samples=%u hr=0x%08x\n",
+                    static_cast<unsigned long long>(lastDepth_.frameId), lastDepth_.status, lastDepth_.format, lastDepth_.samples, lastDepth_.result);
+                throw std::runtime_error("final frame has no valid candidate depth; stale pixels were not saved");
+            }
+            const auto pixels = ReadDepthPixels();
+            float minimum = 1, maximum = 0;
+            unsigned nonClear = 0;
+            for (float value : pixels)
+            {
+                if (!std::isfinite(value) || value < 0 || value > 1) throw std::runtime_error("depth outside device-depth range");
+                minimum = (std::min)(minimum, value);
+                maximum = (std::max)(maximum, value);
+                if (value > 0 && value < 1) ++nonClear;
+            }
+            // PFM uses bottom-to-top rows and negative scale for little endian.
+            std::ofstream output(depthPath_, std::ios::binary | std::ios::trunc);
+            output << "Pf\n" << frame_->width << ' ' << frame_->height << "\n-1.0\n";
+            for (UINT y = frame_->height; y > 0; --y)
+                output.write(reinterpret_cast<const char*>(pixels.data() + static_cast<SIZE_T>(y - 1) * frame_->width),
+                    static_cast<std::streamsize>(frame_->width) * sizeof(float));
+            output.close();
+            if (!output) throw std::runtime_error("cannot save depth PFM");
+            std::ofstream metadata(depthPath_ + ".json", std::ios::trunc);
+            metadata << "{\n  \"candidateOnly\": true,\n  \"frameId\": " << lastDepth_.frameId << ",\n  \"captureQpc\": " << lastDepth_.captureQpc
+                << ",\n  \"width\": " << frame_->width << ",\n  \"height\": " << frame_->height << ",\n  \"sourceFormat\": " << lastDepth_.format
+                << ",\n  \"sourceSamples\": " << lastDepth_.samples << ",\n  \"reduction\": \"" << (lastDepth_.reduction ? "maximum" : "minimum")
+                << "\",\n  \"capturedClearOrdinal\": " << lastDepth_.ordinal << ",\n  \"matchingClears\": " << lastDepth_.clears
+                << ",\n  \"depthConvention\": \"unqualified\"\n}\n";
+            metadata.close();
+            if (!metadata) throw std::runtime_error("cannot save depth metadata");
+            std::printf("DEPTH_CAPTURE frame=%llu min=%.9g max=%.9g non_clear_pixels=%u path=%s (raw candidate, convention unqualified)\n",
+                static_cast<unsigned long long>(lastDepth_.frameId), minimum, maximum, nonClear, depthPath_.c_str());
+        }
         void SaveCapture()
         {
             // BMP stores BGRA pixels. Strip D3D12's padded row pitch and swizzle
@@ -316,7 +444,15 @@ namespace
         SharedFrame* frame_ = nullptr;
         HWND window_ = nullptr;
         bool verify_ = false;
+        bool verifyDepth_ = false;
         std::string capturePath_;
+        std::string depthPath_;
+        struct DepthMetadata
+        {
+            std::uint32_t format, samples, status, reduction, result, ordinal, clears;
+            std::uint64_t frameId, captureQpc;
+        } lastDepth_{};
+        unsigned depthCandidates_ = 0, depthUnavailable_ = 0;
         bool ownsConsumer_ = false;
         bool reading_ = false;
         UINT64 lastFrame_ = 0;
@@ -324,6 +460,7 @@ namespace
         ComPtr<IDXGIFactory4> factory_;
         ComPtr<ID3D12Device> device_;
         ComPtr<ID3D12Resource> color_, readback_;
+        ComPtr<ID3D12Resource> depth_, depthReadback_;
         ComPtr<ID3D12Fence> ready_, done_;
         ComPtr<ID3D12CommandQueue> queue_;
         ComPtr<ID3D12CommandAllocator> allocator_;
@@ -331,6 +468,8 @@ namespace
         ComPtr<IDXGISwapChain3> swapchain_;
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint_{};
         SIZE_T readbackBytes_ = 0;
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT depthFootprint_{};
+        SIZE_T depthReadbackBytes_ = 0;
     };
 }
 
@@ -342,11 +481,27 @@ int main(int argc, char** argv)
     bool verify = false;
     bool show = false;
     std::string capturePath;
+    std::string depthPath;
+    bool verifyDepth = false;
+    UINT depthClearOrdinal = 0;
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg(argv[i]);
         if (arg == "--verify") verify = true;
         else if (arg == "--show") show = true;
+        else if (arg == "--verify-depth") verifyDepth = true;
+        else if (arg == "--depth-clear-ordinal" && i + 1 < argc)
+        {
+            char* end = nullptr;
+            const auto value = std::strtoul(argv[++i], &end, 10);
+            if (!*argv[i] || *end || value > 8) return 2;
+            depthClearOrdinal = value;
+        }
+        else if (arg == "--capture-depth-pfm" && i + 1 < argc)
+        {
+            depthPath = argv[++i];
+            if (depthPath.empty()) return 2;
+        }
         else if (arg == "--capture-bmp" && i + 1 < argc)
         {
             capturePath = argv[++i];
@@ -363,7 +518,7 @@ int main(int argc, char** argv)
         }
         else
         {
-            std::fprintf(stderr, "usage: frame_bridge_presenter --pid N [--frames N] [--timeout-ms N] [--show] [--verify] [--capture-bmp PATH]\n");
+            std::fprintf(stderr, "usage: frame_bridge_presenter --pid N [--frames N] [--timeout-ms N] [--show] [--verify] [--capture-bmp PATH] [--verify-depth] [--capture-depth-pfm PATH] [--depth-clear-ordinal 0..8]\n");
             return 2;
         }
     }
@@ -371,8 +526,8 @@ int main(int argc, char** argv)
     try
     {
         Consumer consumer;
-        consumer.Open(pid, show, verify, capturePath);
-        return consumer.Run(frames, timeoutMs) == frames ? 0 : 1;
+        consumer.Open(pid, show, verify, capturePath, verifyDepth, depthPath, depthClearOrdinal);
+        return consumer.Run(frames, timeoutMs) >= frames ? 0 : 1;
     }
     catch (const std::exception& error)
     {

@@ -65,6 +65,11 @@ void main(uint3 pixel : SV_DispatchThreadID)
             ID3D11ClassInstance* instances[D3D11_SHADER_MAX_INTERFACES]{};
             UINT instanceCount = D3D11_SHADER_MAX_INTERFACES;
         };
+        struct CompilerModule
+        {
+            HMODULE value = LoadLibraryExW(L"d3dcompiler_47.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+            ~CompilerModule() { if (value) FreeLibrary(value); }
+        };
     }
 
     void DepthExtractor::Stop()
@@ -117,8 +122,13 @@ void main(uint3 pixel : SV_DispatchThreadID)
         cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         if (SUCCEEDED(hr)) hr = device->CreateBuffer(&cb, nullptr, &constants_);
         const D3D_SHADER_MACRO defines[] = { {"MULTISAMPLED", "1"}, {nullptr, nullptr} };
+        // Keep the compiler optional for stock/DX9 and Wine installs. Blobs
+        // must die before the owning module; no new eager DLL import is added.
+        CompilerModule compiler;
+        const auto compile = compiler.value ? reinterpret_cast<decltype(&D3DCompile)>(GetProcAddress(compiler.value, "D3DCompile")) : nullptr;
+        if (SUCCEEDED(hr) && !compile) hr = HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
         Microsoft::WRL::ComPtr<ID3DBlob> bytecode, errors;
-        if (SUCCEEDED(hr)) hr = D3DCompile(kShader, std::strlen(kShader), "frame_bridge_depth", source.SampleDesc.Count > 1 ? defines : nullptr,
+        if (SUCCEEDED(hr)) hr = compile(kShader, std::strlen(kShader), "frame_bridge_depth", source.SampleDesc.Count > 1 ? defines : nullptr,
             nullptr, "main", "cs_5_0", D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS, 0, &bytecode, &errors);
         if (SUCCEEDED(hr)) hr = device->CreateComputeShader(bytecode->GetBufferPointer(), bytecode->GetBufferSize(), nullptr, &shader_);
         if (FAILED(hr)) Stop();

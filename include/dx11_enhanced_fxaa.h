@@ -1,4 +1,5 @@
 #pragma once
+struct ID3D11DeviceContext;
 
 #include <algorithm>
 
@@ -12,6 +13,9 @@ struct IDXGISwapChain;
 
 namespace BZROpenShim
 {
+    // Scene-depth observer calls after an OM bind: the runtime can exchange
+    // context vtables during rendering. Inert unless bridge depth is opted in.
+    void ReassertFrameBridgeDepthHook(ID3D11DeviceContext* context);
     namespace
     {
         // Implementation-only forward declaration. `long` is HRESULT's Win32
