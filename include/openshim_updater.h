@@ -22,6 +22,7 @@ namespace BZROpenShim
         uint64_t generation = 0;
         std::string message;
         bool busy = false;
+        std::string stagedVersion; // set once a suite is staged
     };
 
     // Begin and Poll must run on the game/UI thread because they call the
@@ -32,4 +33,20 @@ namespace BZROpenShim
     OpenShimUpdateSnapshot GetOpenShimUpdateSnapshot();
     void CancelOpenShimUpdateCheck(const char* reason);
     void ShutdownOpenShimUpdater();
+
+    // Automatic staging. Tick runs on the UI thread from the main-menu hook;
+    // the first call per process that passes the go/no-go policy starts a
+    // silent check (UpToDate/Unsupported/errors are only logged) and polls it
+    // on a UI-thread timer. When a suite is staged, the notice callback fires
+    // and GetOpenShimAutoStageNotice returns the text for the main menu.
+    using OpenShimNoticeCallback = void (*)();
+    void TickOpenShimAutoStage(OpenShimNoticeCallback onNotice);
+    bool GetOpenShimAutoStageNotice(std::string& text);
+
+    // "Restart now": only after a suite is staged, Steam builds only. Starts
+    // a hidden watcher that relaunches through Steam once the replacement
+    // helper reports state=complete, then asks the game to close through its
+    // normal window-close path. False (with error) leaves the game running.
+    bool CanRestartForOpenShimUpdate();
+    bool RestartGameForOpenShimUpdate(std::string& error);
 }

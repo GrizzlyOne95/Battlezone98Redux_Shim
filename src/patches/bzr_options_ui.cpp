@@ -3054,6 +3054,12 @@ namespace BZROpenShim
               "server: Rebellion or Custom) instead of going straight to the lobby. "
               "While on, the nickname and flag pickers move to that screen and are "
               "no longer built in the lobby. Read when Multiplayer is clicked." },
+            // defaultIndex 0 selects "1", matching an absent key (default on).
+            { "Auto-Install Updates", "Updater", "AutoStage", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::ReadOnNextUse,
+              "Check the Steam Workshop once when the main menu first appears and stage a newer OpenShim "
+              "to install when you quit. Never runs in multiplayer." },
             // defaultIndex 0 selects "1", which is what an absent key does: the
             // native tracker has always run, and turning the row off must be a
             // deliberate choice rather than the effect of a missing ini key.
@@ -3208,7 +3214,7 @@ namespace BZROpenShim
             "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname",
             "MP Setup Screen" };
         static const char* const kShimCategorySystem[] = {
-            kShimRowUpdateCheck, "Career Stats", "Reset Career Stats" };
+            kShimRowUpdateCheck, "Auto-Install Updates", "Career Stats", "Reset Career Stats" };
 
         struct ShimSettingsCategory
         {
@@ -3515,7 +3521,11 @@ namespace BZROpenShim
         static std::string ShimRowValueText(size_t row)
         {
             if (row == kShimPseudoRowUpdateCheck)
-                return GetOpenShimUpdateSnapshot().busy ? "Checking..." : "Check now";
+            {
+                if (GetOpenShimUpdateSnapshot().busy)
+                    return "Checking...";
+                return CanRestartForOpenShimUpdate() ? "Restart now" : "Check now";
+            }
             if (row == kShimPseudoRowKeyBindings)
                 return "Edit";
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
@@ -3688,7 +3698,12 @@ namespace BZROpenShim
             if (row == kShimPseudoRowUpdateCheck)
             {
                 DisarmShimSettingsAction();
-                StartShimUpdateCheck();
+                std::string restartError;
+                if (!CanRestartForOpenShimUpdate())
+                    StartShimUpdateCheck();
+                else if (!RestartGameForOpenShimUpdate(restartError))
+                    g_ShimCategoryUi.status = "Could not restart (" + restartError +
+                        "). Quit the game to install the update.";
             }
             else
             {
@@ -5199,6 +5214,9 @@ namespace BZROpenShim
         static void* g_CareerUiMainScreen = nullptr;
         static void* g_CareerUiOverlay = nullptr;
         static void* g_CareerUiButton = nullptr;
+        // Non-blocking line under the Career button once an update is staged.
+        static void* g_CareerUiUpdateNotice = nullptr;
+        static void OnAutoStageNotice();
 
         static void ResetCareerUiState();
         static void* ReadMainScreenSingleton();
@@ -5400,6 +5418,7 @@ namespace BZROpenShim
             g_CareerUiMainScreen = nullptr;
             g_CareerUiOverlay = nullptr;
             g_CareerUiButton = nullptr;
+            g_CareerUiUpdateNotice = nullptr;
         }
 
         // Runs from the MainScreen destructor detour after the engine's
@@ -5479,6 +5498,22 @@ namespace BZROpenShim
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CareerUiButton)));
         }
 
+        // Shows (or refreshes) the staged-update line on the title menu. The
+        // label is parented like the Career button, so it shares its lifetime
+        // rules: ResetCareerUiState drops it with the rest.
+        static void EnsureUpdateNotice()
+        {
+            std::string text;
+            if (!g_CareerUiOverlay || !GetOpenShimAutoStageNotice(text))
+                return;
+            if (g_CareerUiUpdateNotice && !UiViewHasChild(g_CareerUiOverlay, g_CareerUiUpdateNotice))
+                g_CareerUiUpdateNotice = nullptr;
+            if (!CreateInputBindingUiLabel(g_CareerUiUpdateNotice, g_CareerUiOverlay,
+                                           "OpenShimUpdateNotice_MainScreen", text.c_str(),
+                                           220.0f, 84.0f, 1000.0f, 40.0f))
+                Log(L"[UPDATER] could not show the staged-update notice on the title screen\n");
+        }
+
         // Poll tick. Cheap by design: one guarded pointer read in the common
         // case, and real work only when the title screen appears or changes.
         static void TickCareerUi()
@@ -5540,6 +5575,24 @@ namespace BZROpenShim
             }
 
             EnsureCareerUiButton();
+            EnsureUpdateNotice();
+            // First title menu of the process: start the automatic update
+            // check. Latched inside; later passes return immediately.
+            TickOpenShimAutoStage(&OnAutoStageNotice);
+        }
+
+        // The staging finishes seconds after the menu is up and no constructor
+        // pass follows, so the updater calls back to paint the notice.
+        static void OnAutoStageNotice()
+        {
+            __try
+            {
+                TickCareerUi();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                ResetCareerUiState();
+            }
         }
     }
 
