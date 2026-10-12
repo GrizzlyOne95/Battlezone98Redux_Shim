@@ -260,8 +260,12 @@ The switch defaults off and does not edit persistent terrain settings.
 The concrete path to adaptive subdivision, authored height/normal/roughness
 materials, complete terrain DXR geometry and temporal reconstruction is in
 [DLSS_RT_TERRAIN_AND_MATERIAL_PLAN.md](DLSS_RT_TERRAIN_AND_MATERIAL_PLAN.md).
-Fixed-factor procedural relief is the starting point; those later features
-remain planned.
+Fixed-factor procedural relief is the starting point. An opt-in adaptive
+prototype now uses `-TerrainAdaptive -TerrainTargetPixels 12` with the
+factor-4 relief lane: shared projected edges request fractional-even factors
+2..4 through an Ogre-updated hull viewport parameter. GPU edge/finite/raster
+checks and a combined GOG capture pass. Broad cluster/camera seam acceptance,
+authored materials and complete DXR geometry remain open.
 
 ### Transport build
 

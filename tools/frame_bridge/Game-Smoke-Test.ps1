@@ -17,6 +17,8 @@ param(
     [switch]$VisualEnhancements,
     [switch]$WorldEffectsReference,
     [switch]$TerrainMicroRelief,
+    [switch]$TerrainAdaptive,
+    [ValidateRange(4, 64)][float]$TerrainTargetPixels = 12,
     [ValidateSet(1, 2, 4)][int]$TerrainTessellationFactor = 4,
     [ValidateRange(0.001, 1)][float]$TerrainReliefAmplitude = 0.25,
     [switch]$StreamlineDevelopment,
@@ -26,6 +28,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($TerrainAdaptive -and (-not $TerrainMicroRelief -or $TerrainTessellationFactor -ne 4)) { throw 'TerrainAdaptive requires TerrainMicroRelief with factor-4 cap' }
 if ($WorldEffectsReference) {
     if ($StreamlineDirectory -or $VisibleRayTracing -or $VisualEnhancements -or $ShaderCameraTrace -or $TerrainMicroRelief) { throw 'World-effects reference is a separate diagnostic, without effects or runtime tracing' }
     if ($DepthSweep -or $SceneStage -ne 'before-overlay') { throw 'World-effects reference requires one before-overlay scene capture' }
@@ -142,6 +145,8 @@ try {
         OPENSHIM_TERRAIN_TESSELLATION_FACTOR = "$TerrainTessellationFactor"
         OPENSHIM_TERRAIN_MICRO_RELIEF_AMPLITUDE = $TerrainReliefAmplitude.ToString('R', [Globalization.CultureInfo]::InvariantCulture)
         OPENSHIM_TERRAIN_TESSELLATION_WIREFRAME = '0'
+        OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE = $(if ($TerrainAdaptive) { '1' } else { '0' })
+        OPENSHIM_TERRAIN_TESSELLATION_TARGET_PIXELS = $TerrainTargetPixels.ToString('R', [Globalization.CultureInfo]::InvariantCulture)
     }.GetEnumerator()) {
         $environment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
@@ -298,12 +303,17 @@ if ($TerrainMicroRelief) {
             [uint64]$_.Groups[3].Value -gt 0 -and [uint64]$_.Groups[4].Value -ge 128 -and [uint64]$_.Groups[5].Value -ge 1024 })
     $bounds=[regex]::Matches($terrainText, 'micro-relief render bounds restored meshes=(\d+) tracked=(\d+)')
     $material=[regex]::Matches($terrainText, 'shared material restored source="[^"]+" passes=(\d+)')
+    $adaptive=[regex]::Matches($terrainText, 'adaptive hull installed passes=(\d+) viewportAuto=111 partition=fractional_even minFactor=2 maxFactor=4 targetPixels=([0-9.]+)')
     if ($install.Count -ne 1 -or [int]$install[0].Groups[1].Value -ne $TerrainTessellationFactor -or
         [Math]::Abs([float]::Parse($install[0].Groups[2].Value, [Globalization.CultureInfo]::InvariantCulture) - $TerrainReliefAmplitude) -gt 0.00051 -or
         $statistics.Count -eq 0 -or $bounds.Count -ne 1 -or [int]$bounds[0].Groups[1].Value -le 0 -or
         $bounds[0].Groups[1].Value -ne $bounds[0].Groups[2].Value -or $material.Count -ne 1 -or
         $material[0].Groups[1].Value -ne $install[0].Groups[3].Value -or $null -eq $gameExitCode -or $gameExitCode -ne 0) {
         throw 'Terrain bridge capture lacks fresh-session rasterization, requested parameters or complete clean restoration; leave output unqualified'
+    }
+    if ($TerrainAdaptive -and ($adaptive.Count -ne 1 -or $adaptive[0].Groups[1].Value -ne $install[0].Groups[3].Value -or
+        [Math]::Abs([float]::Parse($adaptive[0].Groups[2].Value, [Globalization.CultureInfo]::InvariantCulture) - $TerrainTargetPixels) -gt 0.00051)) {
+        throw 'Adaptive terrain viewport/policy installation did not qualify; leave output unqualified'
     }
     $sample=$statistics[0]
     @{ pid=$game.Id; nativeTessellationRasterized=$true; bridgeCaptureCompleted=$true;
@@ -312,7 +322,10 @@ if ($TerrainMicroRelief) {
         domainInvocations=[uint64]$sample.Groups[3].Value; clippedPrimitives=[uint64]$sample.Groups[4].Value;
         pixelInvocations=[uint64]$sample.Groups[5].Value; restoredMeshes=[int]$bounds[0].Groups[1].Value;
         restoredPasses=[int]$material[0].Groups[1].Value; gameplayTerrainChanged=$false;
-        adaptiveSubdivision=$false; materialHeightMaps=$false; fullTerrainGeometryExport=$false;
+        adaptiveSubdivision=[bool]$TerrainAdaptive; targetEdgePixels=$TerrainTargetPixels;
+        subdivisionMinimum=$(if ($TerrainAdaptive) { 2 } else { $TerrainTessellationFactor });
+        partition=$(if ($TerrainAdaptive) { 'fractional_even' } else { 'integer' });
+        crossClusterCameraMotionQualified=$false; materialHeightMaps=$false; fullTerrainGeometryExport=$false;
         sameFrameUntessellatedComparison=$false; performanceQualified=$false } |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outputRoot 'terrain-bridge-report.json')
     Write-Host "PASS native terrain -> DX12 bridge: factor=$TerrainTessellationFactor amplitude=$TerrainReliefAmplitude; rasterization and cleanup verified"

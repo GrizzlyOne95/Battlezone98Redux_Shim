@@ -94,6 +94,10 @@ if(WIN32)
     target_link_libraries(terrain_microrelief_gpu_tests PRIVATE d3d11 d3dcompiler)
     target_compile_definitions(terrain_microrelief_gpu_tests PRIVATE
         TERRAIN_TESS_SHADER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_terrain_tessellation_test.hlsl")
+    openshim_add_test(terrain_adaptive_gpu_tests STD 17 SOURCES terrain_adaptive_gpu_tests.cpp)
+    target_link_libraries(terrain_adaptive_gpu_tests PRIVATE d3d11 d3dcompiler)
+    target_compile_definitions(terrain_adaptive_gpu_tests PRIVATE
+        TERRAIN_TESS_SHADER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_terrain_tessellation_test.hlsl")
 endif()
 
 openshim_add_test(native_chunk_mesh_tests STD 20 SOURCES

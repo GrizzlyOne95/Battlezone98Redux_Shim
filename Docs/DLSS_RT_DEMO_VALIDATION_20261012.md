@@ -277,3 +277,45 @@ terrain or change gameplay collision. DXR still reconstructs visible depth
 rather than consuming native hull/domain output or offscreen terrain geometry.
 See [DLSS_RT_TERRAIN_AND_MATERIAL_PLAN.md](DLSS_RT_TERRAIN_AND_MATERIAL_PLAN.md)
 for the next implementation and acceptance gates.
+
+## Adaptive terrain checkpoint
+
+The default-off native adaptive hull policy now measures shared projected
+edges using the current pass's viewport. It requests fractional-even factors
+2..4 with a bounded pixel target, preserving fixed displacement phase. Its
+new float4 parameter is validated and bound through hash-qualified exported
+Ogre APIs to the public viewport-size auto constant. Fixed modes remain integer.
+The harness's `-TerrainAdaptive` requires the factor-4 relief lane and records
+actual requested policy, rasterization and restoration in the terrain report.
+
+Local GOG `misn03` run `build/game-bridge-20261012-124653-034/`, PID 44252,
+imported 120 frames at 1266x513. The sampled visible terrain draw had 12800
+patches, 12800 hull invocations, 89600 domain invocations, 24872 clipped
+primitives and 3358 pixel invocations. This is below the previous uniform
+factor-4 sample's 243200 domain invocations for 12800 patches. Different
+captures/targets and sampled clusters prevent an FPS or frame-cost comparison.
+DXR/cinematic effects ran on 110 frames and DLSS-G reported 110 extra SDK
+presentations, final status zero. Frame 120 images/depth were saved and the
+enhanced scene was visually inspected. All 27 terrain passes, 144 padded bounds
+and 60 deployment/config file hashes were restored; the game exited with zero.
+
+The initial adaptive run `build/game-bridge-20261012-124422-365/` installed
+and rasterized correctly, but its window changed size and the bridge failed
+closed with `DXGI_ERROR_UNSUPPORTED`, leaving original game presentation active.
+The companion could not connect to that disabled producer. Native resources
+and all files restored; that run is not a qualified combined capture.
+
+All 104 CTest regressions pass. The new WARP test executes the shipped GPU edge
+policy with reversed endpoints, distance/resolution changes, degenerate edges,
+NaN/Inf/extreme coordinates, zero/invalid viewport and behind-camera W values.
+Actual fractional hull/domain draws cover a shared diagonal without raster
+gaps and produce fewer domain invocations in the distant-detail case (36 vs
+144 on WARP). The compiler/linkage script passes 150 shaders over ten terrain
+permutations, including adaptive with/without relief. Script parsing and
+unsupported adaptive flag/cap rejection also pass.
+
+`adaptiveSubdivision=true` records this bounded prototype. Cross-cluster camera
+motion acceptance, authored height maps, full geometry export and performance
+qualification remain false. Long movement/deformation/viewport tests are still
+required; matching synthetic endpoints does not prove native seams under every
+floating-point transform. No generated-frame quality or FPS gain is inferred.

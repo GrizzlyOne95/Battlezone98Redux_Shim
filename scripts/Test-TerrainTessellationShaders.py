@@ -82,21 +82,23 @@ def main():
 
         vertex = compile_shader(source, target, "terrain_vertex", f"{index}-vertex")
         expected = signature(vertex, b"OSGN")
-        for factor, relief in ((1, False), (2, False), (4, False), (2, True), (4, True)):
+        for factor, relief, adaptive in ((1, False, False), (2, False, False), (4, False, False),
+                                        (2, True, False), (4, True, False), (4, False, True), (4, True, True)):
             stage_files = {}
             for stage, entry in (("hs", "TerrainHull"), ("ds", "TerrainDomain")):
                 stage_files[stage] = compile_shader(
                     "openshim_terrain_tessellation_test.hlsl", stage + "_5_0", entry,
-                    f"{index}-{factor}-{'relief' if relief else 'baseline'}-{stage}",
+                    f"{index}-{factor}-{'relief' if relief else 'baseline'}-{'adaptive' if adaptive else 'fixed'}-{stage}",
                     ["/D", f"OPENSHIM_TESS_FACTOR={factor}"] +
-                    (["/D", "OPENSHIM_RELIEF_TEST=1", "/D", "OPENSHIM_RELIEF_AMPLITUDE=0.25"] if relief else []))
+                    (["/D", "OPENSHIM_RELIEF_TEST=1", "/D", "OPENSHIM_RELIEF_AMPLITUDE=0.25"] if relief else []) +
+                    (["/D", "OPENSHIM_TESS_ADAPTIVE=1", "/D", "OPENSHIM_TESS_TARGET_PIXELS=12"] if adaptive else []))
             for stage in ("hs", "ds"):
                 for tag in (b"ISGN", b"OSGN"):
                     actual = signature(stage_files[stage], tag,
                                        (stage, tag) in (("hs", b"OSGN"), ("ds", b"ISGN")))
                     assert actual == expected, (defines, factor, stage, tag, expected, actual)
     print(f"PASS: {compiled} shaders; {len(variants)} terrain permutations; "
-          "factors 1/2/4 and micro-relief; VS -> HS -> DS signatures and registers match.")
+          "factors 1/2/4, adaptive and micro-relief; VS -> HS -> DS signatures and registers match.")
 
 
 if __name__ == "__main__":

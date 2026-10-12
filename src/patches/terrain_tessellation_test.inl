@@ -9,6 +9,40 @@ struct TerrainTessPass
 std::vector<TerrainTessPass> g_TessPasses;
 std::string g_TessSourceMaterial;
 
+void ConfigureTerrainAdaptiveHull(void* pass)
+{
+    if (!g_config.tessellationAdaptive) return;
+    HMODULE ogre = GetModuleHandleW(L"OgreMain.dll");
+    auto getParameters = Resolve<FnGetGpuProgramParameters>(ogre,
+        "?getTessellationHullProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@XZ");
+    struct ConstantDefinition {
+        int type; uint32_t physical, logical, elementSize, arraySize; uint16_t variability;
+    };
+    using FindConstant = const ConstantDefinition* (__thiscall*)(void*, const std::string&, bool);
+    using SetAuto = void (__thiscall*)(void*, uint32_t, int, uint32_t);
+    auto find = Resolve<FindConstant>(ogre,
+        "?_findNamedConstantDefinition@GpuProgramParameters@Ogre@@QBEPBUGpuConstantDefinition@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+    auto set = Resolve<SetAuto>(ogre,
+        "?setAutoConstant@GpuProgramParameters@Ogre@@QAEXIW4AutoConstantType@12@I@Z");
+    if (!getParameters || !find || !set) throw std::runtime_error("adaptive hull parameter API unavailable");
+    OgreSharedPtr parameters;
+    getParameters(pass, &parameters);
+    if (!parameters.rep) throw std::runtime_error("adaptive hull parameters unavailable");
+    try
+    {
+        const auto* definition = find(parameters.rep, std::string("tessViewport"), false);
+        if (!definition || definition->type != 4 || definition->elementSize != 4 ||
+            definition->arraySize != 1 || definition->physical > 4096 || definition->logical > 4096)
+            throw std::runtime_error("adaptive viewport float4 contract unavailable");
+        // Public Ogre v1.10.0 AutoConstantType ACT_VIEWPORT_SIZE=111:
+        // width, height, reciprocal width, reciprocal height. The same exact
+        // released Ogre identity gate as all terrain adapters applies here.
+        set(parameters.rep, definition->logical, 111, 0);
+    }
+    catch (...) { ReleaseCloneHandoff(parameters); throw; }
+    ReleaseCloneHandoff(parameters);
+}
+
 // Optional Ogre parameter exports, guarded by the same released Ogre identity
 // as the terrain adapters. Use the logical matrix slot, not a guessed buffer
 // offset, so Ogre owns per-camera/per-light updates and stage constant binding.
@@ -199,6 +233,9 @@ bool InstallNativeTerrainTessellationTest()
         if (source.empty() || source.size() > 64 * 1024)
             throw std::runtime_error("test shader missing/invalid");
         source = "#define OPENSHIM_TESS_FACTOR " + std::to_string(g_config.tessellationFactor) + "\n" + source;
+        if (g_config.tessellationAdaptive)
+            source = "#define OPENSHIM_TESS_ADAPTIVE 1\n#define OPENSHIM_TESS_TARGET_PIXELS " +
+                std::to_string(g_config.tessellationTargetPixels) + "\n" + source;
         if (g_config.microReliefTest)
             source = "#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE " +
                 std::to_string(g_config.microReliefAmplitude) + "\n" + source;
@@ -300,6 +337,7 @@ bool InstallNativeTerrainTessellationTest()
                 }
                 g_ogre.setHullProgram(pass, found->second.first, true);
                 g_ogre.setDomainProgram(pass, found->second.second, true);
+                ConfigureTerrainAdaptiveHull(pass);
                 ConfigureTerrainMicroReliefDomain(pass, defines);
                 const OgreSharedPtr* hull = g_ogre.getHullProgram(pass);
                 const OgreSharedPtr* domain = g_ogre.getDomainProgram(pass);
@@ -332,6 +370,7 @@ bool InstallNativeTerrainTessellationTest()
             void* pass = g_ogre.getPass(g_ogre.getTechnique(sourceMaterial.rep, saved.technique), saved.pass);
             g_ogre.setHullProgram(pass, saved.hull, true);
             g_ogre.setDomainProgram(pass, saved.domain, true);
+            ConfigureTerrainAdaptiveHull(pass);
             // Stage parameters were audited on the clone. Copy the same
             // auto-constant setup onto the newly attached original usage.
             if (g_config.microReliefTest)
@@ -353,6 +392,8 @@ bool InstallNativeTerrainTessellationTest()
             g_config.tessellationWireframe ? 1 : 0,
             specialized, g_proxy.semanticProgramNames.size(), static_cast<unsigned>(level),
             g_proxy.materialName.c_str(), g_proxy.semanticMaterialName.c_str());
+        if (g_config.tessellationAdaptive)
+            LogShimA(LogLevel::Info, "terrain-tess", "[TERRAIN-TESS] adaptive hull installed passes=%u viewportAuto=111 partition=fractional_even minFactor=2 maxFactor=%d targetPixels=%.3f; shared-endpoint policy, fixed relief phase", specialized, g_config.tessellationFactor, g_config.tessellationTargetPixels);
         return true;
     }
     catch (const std::exception& error)
