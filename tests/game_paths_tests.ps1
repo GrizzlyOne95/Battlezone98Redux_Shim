@@ -147,7 +147,7 @@ try {
     Check ($r.Out -match "was not found") "none found is stated plainly"
     Check ($r.Out -match "does not contain battlezone98redux.exe") "a non-game folder is refused"
     Check ($r.Code -eq 0 -and $r.Out -match [regex]::Escape("Game folder: $fakeB")) "browse then accepts a valid folder"
-    $r = Invoke-Chooser "B;Q" @{ OPENSHIM_TEST_GAME_PATHS = $notGame; OPENSHIM_TEST_BROWSE = "" }
+    $r = Invoke-Chooser "B;Q" @{ OPENSHIM_TEST_GAME_PATHS = $notGame; OPENSHIM_TEST_BROWSE = ";" }
     Check ($r.Code -eq 1) "cancelled browse returns to the menu, Q quits"
 
     # Valid OPENSHIM_GAME_PATH skips the chooser but states the target.
