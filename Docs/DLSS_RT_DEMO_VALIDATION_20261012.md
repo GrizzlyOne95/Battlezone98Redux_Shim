@@ -149,3 +149,42 @@ visible artifacts remain around some smoke/silhouette regions. WGC returned zero
 frames in the first cinematic run with SDK display-query errors; the labeled
 renderer-input fallback subsequently passed. No output-window video is claimed
 for this preset run, and no generated-frame or FPS count is inferred from it.
+
+## Geyser and washed-building correction
+
+The annotated cinematic capture exposed self-shadow flecks in the geyser and
+excess nearby haze. AO-only isolation reproduced the flecks. Ray origins were
+derived from full-resolution depth while the BLAS used two-pixel triangles;
+coarse geometry and D24 quantization could place origins behind their own mesh.
+The revised shader projects origins onto the traced triangle plane, uses a
+depth-dependent eight-step quantization offset, bounds mesh edge size against
+the AO radius, and declines unstable depth neighborhoods. This sacrifices
+under-resolved/edge contact AO rather than treat it as reliable opacity data.
+
+On the exact previous 1280x681 capture, hardware replay reduced geyser-crop
+pixels darkened more than five channel levels from 443 to three, with maximum
+darkening 149 to eight. `build/geyser-ao-fix-isolation.png` shows original,
+previous AO and revised AO from that same capture; its crop is `(890,280)` to
+`(990,420)`. This is an offline GPU replay, distinct from live validation.
+
+Haze starts at 120 view units with density 0.00035 and maximum blend 0.25. The
+marked buildings were approximately 62–66 units away and are now outside its
+effect. These are artistic view-space settings, not calibrated atmospheric units.
+
+The live validation run `build/game-bridge-20261012-114439-494/` imported 181
+1280x720 frames, executed cinematic/DXR on 166, reported 166 extra SDK presents,
+and ended with status zero and 15 missing input frames. The harness waited one
+frame beyond the requested 180 for valid final inputs. Matched original/enhanced
+scene and final images were inspected; the geyser's heavy flecks were absent in
+the inspected frame and nearby building contrast was retained. The labeled input
+recording encoded to `build/battlezone-geyser-fixed-demo.mp4` (13.93 seconds).
+The same-frame scene/building comparison is
+`build/battlezone-geyser-building-fixed.png`. All 60 deployment/config hashes
+were restored after graceful game exit.
+
+Nine x64 helper/GPU tests and 101 native regressions passed, along with a no-SDK
+build. A new D24-quantized distant-plane fixture checks false self-occlusion;
+the near-corner fixture retains hardware occlusion. Additional haze checks cover
+the near exclusion distance and maximum cap. This corrects the observed artifacts
+through conservative depth confidence and preset tuning; it does not qualify
+general particle opacity, HUD alpha or physically correct atmosphere.

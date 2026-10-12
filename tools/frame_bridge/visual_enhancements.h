@@ -10,7 +10,7 @@ namespace BZROpenShim::FrameBridge
     {
         float exposure = 1.12f, contrast = 1.10f, saturation = 1.08f;
         float bloomThreshold = .55f, bloomStrength = .35f;
-        float hazeDensity = .0015f, hazeStart = 20.0f;
+        float hazeDensity = .00035f, hazeStart = 120.0f, hazeMaximum = .25f;
         std::array<float, 3> hazeColor{.24f, .30f, .38f}; // sRGB artistic preset.
     };
 
