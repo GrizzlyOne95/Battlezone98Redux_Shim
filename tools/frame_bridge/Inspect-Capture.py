@@ -65,6 +65,9 @@ def inspect(path, color):
         labels = ImageDraw.Draw(panel)
         labels.text((8, 8), f"Color: frame {metadata['frameId']}", fill="white")
         labels.text((width + 8, 8), "Raw depth candidate: percentile contrast, not linear depth", fill="white")
+        camera = metadata.get("cameraObservation", {})
+        if camera.get("valid"):
+            labels.text((width // 2, 8), f"Camera candidate: {camera['name']} near={camera['nearClip']:.3g} far={camera['farClip']:.5g}", fill="white")
         panel.save(path.with_suffix(".comparison.png"))
     print(json.dumps(stats, indent=2))
     print(f"Preview: {depth_path}")

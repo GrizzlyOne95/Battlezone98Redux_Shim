@@ -6,11 +6,12 @@ param(
     [ValidateRange(1, 10000)][int]$Frames = 120,
     [switch]$Depth,
     [ValidateRange(0, 8)][int]$DepthClearOrdinal = 0,
-    [switch]$DepthSweep
+    [switch]$DepthSweep,
+    [switch]$Camera
 )
 
 $ErrorActionPreference = 'Stop'
-if ($DepthSweep) { $Depth = $true }
+if ($DepthSweep -or $Camera) { $Depth = $true }
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $GameRoot = (Resolve-Path -LiteralPath $GameRoot).Path
 $gameExe = Join-Path $GameRoot 'battlezone98redux.exe'
@@ -110,6 +111,7 @@ try {
         if ($Depth) {
             $presenterArgs += @('--capture-depth-pfm', (Join-Path $outputRoot "game-depth$suffix.pfm"), '--depth-clear-ordinal', "$ordinal")
         }
+        if ($Camera) { $presenterArgs += '--require-camera' }
         & $presenter @presenterArgs |
             Tee-Object -FilePath (Join-Path $outputRoot "consumer$suffix.log")
         if ($LASTEXITCODE -ne 0) { throw "Real-game GPU import/capture failed at clear ordinal $ordinal" }

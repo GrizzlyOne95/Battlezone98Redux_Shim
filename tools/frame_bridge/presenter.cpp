@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstring>
 #include <algorithm>
+#include <iomanip>
 
 namespace
 {
@@ -55,12 +56,13 @@ namespace
             if (window_ && IsWindow(window_)) DestroyWindow(window_);
         }
         void Open(DWORD pid, bool show, bool verify, const std::string& capturePath,
-            bool verifyDepth, const std::string& depthPath, UINT depthClearOrdinal)
+            bool verifyDepth, const std::string& depthPath, UINT depthClearOrdinal, bool requireCamera)
         {
             verify_ = verify;
             capturePath_ = capturePath;
             verifyDepth_ = verifyDepth;
             depthPath_ = depthPath;
+            requireCamera_ = requireCamera;
             mapping_.value = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, MappingName(pid).c_str());
             if (!mapping_.value) throw std::runtime_error("producer mapping unavailable; start source/capture first");
             frame_ = static_cast<SharedFrame*>(MapViewOfFile(mapping_.value, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SharedFrame)));
@@ -180,8 +182,10 @@ namespace
                 lastDepth_ = {frame_->depthSourceFormat, frame_->depthSourceSamples, frame_->depthStatus,
                     frame_->depthReduction, frame_->depthResult, frame_->depthCapturedOrdinal, frame_->depthMatchingClears,
                     id, frame_->captureQpc};
+                lastCamera_ = frame_->camera;
+                lastCameraValid_ = ValidCameraFrame(*frame_);
                 const bool validDepth = ValidDepthFrame(*frame_);
-                lastDepthValid = validDepth;
+                lastDepthValid = validDepth && (!requireCamera_ || lastCameraValid_);
                 if (validDepth) ++depthCandidates_;
                 else ++depthUnavailable_;
                 if (verifyDepth_ && !validDepth) throw std::runtime_error("synthetic frame lacks valid depth");
@@ -248,6 +252,11 @@ namespace
             std::printf("DEPTH candidate_frames=%u unavailable_frames=%u last_status=%u source_format=%u samples=%u hr=0x%08x captured_clear=%u matching_clears=%u\n",
                 depthCandidates_, depthUnavailable_, lastDepth_.status, lastDepth_.format, lastDepth_.samples, lastDepth_.result,
                 lastDepth_.ordinal, lastDepth_.clears);
+            const auto facts = InspectPerspective(lastCamera_);
+            std::printf("CAMERA valid_observation=%s status=%u name=%s near=%.9g far=%.9g perspective=%s forward=%d reversed=%u aspect=%.6g fov_y=%.6g (pass identity unqualified)\n",
+                lastCameraValid_ ? "yes" : "no", lastCamera_.status, ValidCameraSnapshot(lastCamera_) ? lastCamera_.name : "unavailable",
+                lastCamera_.nearClip, lastCamera_.farClip, facts.recognized ? "recognized" : "unqualified", facts.forwardSign,
+                facts.reversed ? 1u : 0u, facts.aspect, facts.verticalFovDegrees);
             if (!capturePath_.empty()) SaveCapture();
             if (!depthPath_.empty()) SaveDepth();
             return consumed;
@@ -288,6 +297,9 @@ namespace
         }
         void VerifyDepth(UINT64 id)
         {
+            if (!lastCameraValid_ || std::fabs(lastCamera_.view[3] - static_cast<float>(id)) > 0.000001f ||
+                !InspectPerspective(lastCamera_).recognized)
+                throw std::runtime_error("synthetic camera metadata does not match GPU frame ID/projection");
             const auto pixels = ReadDepthPixels();
             const float expected = static_cast<float>(id) / 1024.0f;
             for (float value : pixels)
@@ -296,6 +308,8 @@ namespace
         }
         void SaveDepth()
         {
+            if (requireCamera_ && !lastCameraValid_)
+                throw std::runtime_error("final depth frame has no matching camera observation; camera capture failed closed");
             if (lastDepth_.status != static_cast<std::uint32_t>(DepthStatus::Candidate) || lastDepth_.result != 0)
             {
                 std::fprintf(stderr, "DEPTH unavailable frame=%llu status=%u format=%u samples=%u hr=0x%08x\n",
@@ -321,15 +335,41 @@ namespace
             output.close();
             if (!output) throw std::runtime_error("cannot save depth PFM");
             std::ofstream metadata(depthPath_ + ".json", std::ios::trunc);
+            metadata << std::setprecision(9);
             metadata << "{\n  \"candidateOnly\": true,\n  \"frameId\": " << lastDepth_.frameId << ",\n  \"captureQpc\": " << lastDepth_.captureQpc
                 << ",\n  \"width\": " << frame_->width << ",\n  \"height\": " << frame_->height << ",\n  \"sourceFormat\": " << lastDepth_.format
                 << ",\n  \"sourceSamples\": " << lastDepth_.samples << ",\n  \"reduction\": \"" << (lastDepth_.reduction ? "maximum" : "minimum")
                 << "\",\n  \"capturedClearOrdinal\": " << lastDepth_.ordinal << ",\n  \"matchingClears\": " << lastDepth_.clears
-                << ",\n  \"depthConvention\": \"unqualified\"\n}\n";
+                << ",\n  \"depthConvention\": \"unqualified\",\n  \"cameraObservation\": ";
+            WriteCamera(metadata);
+            metadata << "\n}\n";
             metadata.close();
             if (!metadata) throw std::runtime_error("cannot save depth metadata");
             std::printf("DEPTH_CAPTURE frame=%llu min=%.9g max=%.9g non_clear_pixels=%u path=%s (raw candidate, convention unqualified)\n",
                 static_cast<unsigned long long>(lastDepth_.frameId), minimum, maximum, nonClear, depthPath_.c_str());
+        }
+        void WriteCamera(std::ostream& output)
+        {
+            const auto& camera = lastCamera_;
+            const auto facts = InspectPerspective(camera);
+            output << "{\n    \"valid\": " << (lastCameraValid_ ? "true" : "false") << ",\n    \"status\": " << camera.status;
+            if (ValidCameraSnapshot(camera))
+            {
+                output << ",\n    \"candidateOnly\": true,\n    \"cameraIdentity\": " << camera.cameraIdentity
+                    << ",\n    \"name\": \"" << camera.name << "\",\n    \"width\": " << camera.width << ",\n    \"height\": " << camera.height
+                    << ",\n    \"nearClip\": " << camera.nearClip << ",\n    \"farClip\": " << camera.farClip
+                    << ",\n    \"stage\": " << camera.stage << ",\n    \"clearOrdinal\": " << camera.clearOrdinal
+                    << ",\n    \"observationQpc\": " << camera.observationQpc << ",\n    \"layout\": \"Ogre row-major, column vectors\",\n    \"view\": [";
+                for (unsigned i = 0; i < 16; ++i) output << (i ? ", " : "") << camera.view[i];
+                output << "],\n    \"projectionRS\": [";
+                for (unsigned i = 0; i < 16; ++i) output << (i ? ", " : "") << camera.projection[i];
+                output << "],\n    \"recognizedPerspective\": " << (facts.recognized ? "true" : "false");
+                if (facts.recognized)
+                    output << ",\n    \"forwardSign\": " << facts.forwardSign << ",\n    \"reversed\": " << (facts.reversed ? "true" : "false")
+                        << ",\n    \"projectedNearDepth\": " << facts.nearDepth << ",\n    \"projectedFarDepth\": " << facts.farDepth
+                        << ",\n    \"projectionAspect\": " << facts.aspect << ",\n    \"verticalFovDegrees\": " << facts.verticalFovDegrees;
+            }
+            output << "\n  }";
         }
         void SaveCapture()
         {
@@ -453,6 +493,9 @@ namespace
             std::uint64_t frameId, captureQpc;
         } lastDepth_{};
         unsigned depthCandidates_ = 0, depthUnavailable_ = 0;
+        CameraSnapshot lastCamera_{};
+        bool lastCameraValid_ = false;
+        bool requireCamera_ = false;
         bool ownsConsumer_ = false;
         bool reading_ = false;
         UINT64 lastFrame_ = 0;
@@ -484,12 +527,14 @@ int main(int argc, char** argv)
     std::string depthPath;
     bool verifyDepth = false;
     UINT depthClearOrdinal = 0;
+    bool requireCamera = false;
     for (int i = 1; i < argc; ++i)
     {
         const std::string arg(argv[i]);
         if (arg == "--verify") verify = true;
         else if (arg == "--show") show = true;
         else if (arg == "--verify-depth") verifyDepth = true;
+        else if (arg == "--require-camera") requireCamera = true;
         else if (arg == "--depth-clear-ordinal" && i + 1 < argc)
         {
             char* end = nullptr;
@@ -518,15 +563,16 @@ int main(int argc, char** argv)
         }
         else
         {
-            std::fprintf(stderr, "usage: frame_bridge_presenter --pid N [--frames N] [--timeout-ms N] [--show] [--verify] [--capture-bmp PATH] [--verify-depth] [--capture-depth-pfm PATH] [--depth-clear-ordinal 0..8]\n");
+            std::fprintf(stderr, "usage: frame_bridge_presenter --pid N [--frames N] [--timeout-ms N] [--show] [--verify] [--capture-bmp PATH] [--verify-depth] [--capture-depth-pfm PATH] [--depth-clear-ordinal 0..8] [--require-camera]\n");
             return 2;
         }
     }
     if (!pid) return 2;
+    if (requireCamera && depthPath.empty()) return 2;
     try
     {
         Consumer consumer;
-        consumer.Open(pid, show, verify, capturePath, verifyDepth, depthPath, depthClearOrdinal);
+        consumer.Open(pid, show, verify, capturePath, verifyDepth, depthPath, depthClearOrdinal, requireCamera);
         return consumer.Run(frames, timeoutMs) >= frames ? 0 : 1;
     }
     catch (const std::exception& error)
