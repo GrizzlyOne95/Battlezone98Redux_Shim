@@ -1,6 +1,25 @@
 #include "frame_bridge_producer.h"
 #include "test_check.h"
 
+namespace
+{
+    bool FixtureCamera(BZROpenShim::FrameBridge::CameraSnapshot& camera)
+    {
+        using namespace BZROpenShim::FrameBridge;
+        camera = {};
+        camera.status = static_cast<std::uint32_t>(CameraStatus::Observed);
+        camera.width = 64; camera.height = 32;
+        camera.cameraIdentity = 7; camera.observationQpc = 10;
+        camera.view[0] = camera.view[5] = camera.view[10] = camera.view[15] = 1;
+        camera.nearClip = 0.1f; camera.farClip = 100;
+        camera.projection[0] = 1; camera.projection[5] = 2;
+        camera.projection[10] = -100.0f / 99.9f;
+        camera.projection[11] = camera.projection[10] * camera.nearClip;
+        camera.projection[14] = -1;
+        return true;
+    }
+}
+
 int main()
 {
     using namespace BZROpenShim::FrameBridge;
@@ -63,8 +82,12 @@ int main()
     Require(SUCCEEDED(device->CreateTexture2D(&depthDesc, nullptr, &depth)), "create MSAA depth without SRV flag");
     Require(SUCCEEDED(device->CreateDepthStencilView(depth.Get(), nullptr, &depthView)), "create source depth view");
     context->ClearDepthStencilView(depthView.Get(), D3D11_CLEAR_DEPTH, 0.25f, 0);
-    Require(producer.Publish(texture.Get(), depth.Get()) == S_OK && ValidDepthFrame(*frame), "publish valid matching color/depth");
-    Check(producer.Publish(texture.Get()) == S_FALSE && ValidDepthFrame(*frame), "busy publication preserves both products and depth validity");
+    CameraSnapshot camera{};
+    FixtureCamera(camera);
+    Require(producer.Publish(texture.Get(), depth.Get(), DepthReduction::Minimum, &camera) == S_OK &&
+        ValidDepthFrame(*frame) && ValidCameraFrame(*frame), "publish valid matching color/depth/camera");
+    Check(producer.Publish(texture.Get()) == S_FALSE && ValidDepthFrame(*frame) && ValidCameraFrame(*frame) &&
+        frame->camera.cameraIdentity == 7, "busy publication preserves depth and camera metadata");
     // This metadata-only reader submits no GPU work and therefore has no GPU
     // reads to wait for before returning the slot.
     const auto acknowledge = [&]() {
@@ -73,7 +96,8 @@ int main()
     };
     acknowledge();
     Require(producer.Publish(texture.Get()) == S_OK, "publish color with missing depth");
-    Check(!ValidDepthFrame(*frame) && frame->depthStatus == static_cast<std::uint32_t>(DepthStatus::Missing) &&
+    Check(!ValidDepthFrame(*frame) && !ValidCameraFrame(*frame) && frame->camera.cameraIdentity == 0 &&
+        frame->depthStatus == static_cast<std::uint32_t>(DepthStatus::Missing) &&
         frame->depthSourceFormat == 0, "missing frame invalidates previous depth and source metadata");
     acknowledge();
     depthDesc.Format = DXGI_FORMAT_D16_UNORM;
@@ -87,10 +111,11 @@ int main()
         frame->depthReduction == 1 && frame->depthSourceSamples == 4, "depth extraction recovers after rejected source");
     acknowledge();
     Exchange(frame->requestedDepthClear, 1);
-    producer.BeforeDepthClear(context.Get(), depthView.Get(), D3D11_CLEAR_DEPTH);
+    producer.BeforeDepthClear(context.Get(), depthView.Get(), D3D11_CLEAR_DEPTH, &FixtureCamera);
     context->ClearDepthStencilView(depthView.Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
     Require(producer.Publish(texture.Get()) == S_OK && ValidDepthFrame(*frame) &&
-        frame->depthCapturedOrdinal == 1 && frame->depthMatchingClears == 1, "pre-clear snapshot publishes with matching frame");
+        frame->depthCapturedOrdinal == 1 && frame->depthMatchingClears == 1 && ValidCameraFrame(*frame) &&
+        frame->camera.clearOrdinal == 1 && frame->camera.stage == 1, "pre-clear snapshot publishes matching camera boundary");
     ComPtr<ID3D11Device1> device1;
     ComPtr<ID3D11Texture2D> sharedDepth;
     Require(SUCCEEDED(device.As(&device1)) && SUCCEEDED(device1->OpenSharedResource1(
@@ -113,7 +138,8 @@ int main()
     acknowledge();
     // A publication without a new matching clear must not reuse the snapshot.
     // Clear counting itself is reset by every Publish, including busy skips.
-    Check(producer.Publish(texture.Get()) == S_OK && !ValidDepthFrame(*frame), "pre-clear missing in next frame rejects retained snapshot");
+    Check(producer.Publish(texture.Get()) == S_OK && !ValidDepthFrame(*frame) && !ValidCameraFrame(*frame) &&
+        frame->camera.cameraIdentity == 0, "pre-clear missing in next frame rejects retained depth and camera");
     producer.Stop();
     Check(ReadInterlocked(frame->active) == 0, "color/depth shutdown is visible to retained consumer");
     UnmapViewOfFile(frame);

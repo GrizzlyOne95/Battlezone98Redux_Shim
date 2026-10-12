@@ -68,7 +68,29 @@ int main(int argc, char** argv)
         context->ClearRenderTargetView(rtv.Get(), color);
         if (dsv) context->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL,
             static_cast<float>(id) / 1024.0f, 0);
-        hr = producer.Publish(source.Get(), depth.Get());
+        // Synthetic camera is test data only. Its translation encodes the same
+        // ID as GPU color/depth so the reader can detect stale camera metadata.
+        CameraSnapshot camera{};
+        if (depthEnabled)
+        {
+            camera.status = static_cast<std::uint32_t>(CameraStatus::Observed);
+            camera.width = desc.Width; camera.height = desc.Height;
+            camera.cameraIdentity = 1;
+            std::snprintf(camera.name, sizeof(camera.name), "SyntheticFrameCamera");
+            camera.view[0] = camera.view[5] = camera.view[10] = camera.view[15] = 1;
+            camera.view[3] = static_cast<float>(id);
+            camera.nearClip = 0.1f; camera.farClip = 1000;
+            const float q = camera.farClip / (camera.farClip - camera.nearClip);
+            camera.projection[0] = 2.0f * static_cast<float>(desc.Height) / static_cast<float>(desc.Width);
+            camera.projection[5] = 2;
+            camera.projection[10] = -q;
+            camera.projection[11] = -q * camera.nearClip;
+            camera.projection[14] = -1;
+            LARGE_INTEGER qpc{};
+            QueryPerformanceCounter(&qpc);
+            camera.observationQpc = qpc.QuadPart;
+        }
+        hr = producer.Publish(source.Get(), depth.Get(), DepthReduction::Minimum, &camera);
         if (FAILED(hr)) { std::fprintf(stderr, "publish failed: 0x%08lx\n", static_cast<unsigned long>(hr)); return 1; }
         if (hr == S_OK) ++published; else ++skipped;
         Sleep(8);

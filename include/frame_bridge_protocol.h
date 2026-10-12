@@ -3,11 +3,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <type_traits>
+#include "frame_bridge_camera.h"
 
 namespace BZROpenShim::FrameBridge
 {
     constexpr std::uint32_t kMagic = 0x3146424f; // OBF1
-    constexpr std::uint32_t kVersion = 2;
+    constexpr std::uint32_t kVersion = 3;
     constexpr std::uint32_t kMaxDimension = 8192;
     enum class SlotState : std::int32_t { Free = 0, Writing = 1, Ready = 2, Reading = 3 };
     enum class DepthStatus : std::uint32_t { Disabled = 0, Candidate = 1, Missing = 2, Unsupported = 3, Failed = 4 };
@@ -45,9 +46,12 @@ namespace BZROpenShim::FrameBridge
         std::int32_t requestedDepthClear; // Consumer control: 0=Present, 1..8=nth matching pre-clear.
         std::uint32_t depthCapturedOrdinal;
         std::uint32_t depthMatchingClears;
+        CameraSnapshot camera;
+        std::uint64_t reserved[2]; // Explicit padding preserves the 64-byte wire alignment.
     };
     static_assert(std::is_standard_layout_v<SharedFrame>);
-    static_assert(sizeof(SharedFrame) == 128);
+    static_assert(sizeof(SharedFrame) == 384);
+    static_assert(offsetof(SharedFrame, camera) == 128);
     static_assert(offsetof(SharedFrame, textureHandle) == 48);
     static_assert(offsetof(SharedFrame, frameId) == 64);
     static_assert(offsetof(SharedFrame, depthTextureHandle) == 88);
@@ -79,5 +83,13 @@ namespace BZROpenShim::FrameBridge
             frame.depthResult == 0 && frame.depthReduction <= 1 && format && samples &&
             (frame.depthCapturedOrdinal == 0 || (frame.depthCapturedOrdinal <= 8 &&
                 frame.depthCapturedOrdinal <= frame.depthMatchingClears));
+    }
+    inline bool ValidCameraFrame(const SharedFrame& frame)
+    {
+        return ValidDepthFrame(frame) && ValidCameraSnapshot(frame.camera) &&
+            frame.camera.width == frame.width && frame.camera.height == frame.height &&
+            frame.camera.observationQpc <= frame.captureQpc &&
+            frame.camera.clearOrdinal == frame.depthCapturedOrdinal &&
+            frame.camera.stage == (frame.depthCapturedOrdinal ? 1u : 0u);
     }
 }

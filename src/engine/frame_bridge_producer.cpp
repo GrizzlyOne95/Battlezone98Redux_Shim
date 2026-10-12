@@ -93,7 +93,7 @@ namespace BZROpenShim::FrameBridge
         return S_OK;
     }
 
-    void Producer::BeforeDepthClear(ID3D11DeviceContext* context, ID3D11DepthStencilView* view, UINT flags)
+    void Producer::BeforeDepthClear(ID3D11DeviceContext* context, ID3D11DepthStencilView* view, UINT flags, CameraObserver observeCamera)
     {
         if (!Active() || !depth_ || !context || !view || !(flags & D3D11_CLEAR_DEPTH) ||
             context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE) return;
@@ -113,6 +113,13 @@ namespace BZROpenShim::FrameBridge
         if (ordinal < 1 || ordinal > 8 || matchingDepthClears_ != static_cast<UINT>(ordinal) ||
             ReadInterlocked(frame_->slotState) != static_cast<LONG>(SlotState::Free)) return;
         capturedDepthOrdinal_ = matchingDepthClears_;
+        preclearCamera_ = {};
+        if (observeCamera)
+        {
+            observeCamera(preclearCamera_);
+            preclearCamera_.stage = 1;
+            preclearCamera_.clearOrdinal = capturedDepthOrdinal_;
+        }
         if (!preclear_ || desc.Format != preclearDesc_.Format || desc.Width != preclearDesc_.Width ||
             desc.Height != preclearDesc_.Height || desc.SampleDesc.Count != preclearDesc_.SampleDesc.Count ||
             desc.SampleDesc.Quality != preclearDesc_.SampleDesc.Quality)
@@ -166,7 +173,7 @@ namespace BZROpenShim::FrameBridge
             (hr == DXGI_ERROR_UNSUPPORTED ? DepthStatus::Unsupported : DepthStatus::Failed));
     }
 
-    HRESULT Producer::Publish(ID3D11Texture2D* source, ID3D11Texture2D* depthSource, DepthReduction reduction)
+    HRESULT Producer::Publish(ID3D11Texture2D* source, ID3D11Texture2D* depthSource, DepthReduction reduction, const CameraSnapshot* presentCamera)
     {
         if (!source || !Active()) return E_UNEXPECTED;
         const UINT matchingClears = matchingDepthClears_;
@@ -196,6 +203,7 @@ namespace BZROpenShim::FrameBridge
         const LONG requestedOrdinal = ReadInterlocked(frame_->requestedDepthClear);
         frame_->depthCapturedOrdinal = 0;
         frame_->depthMatchingClears = matchingClears;
+        frame_->camera = {};
         if (requestedOrdinal == 0) CaptureDepth(depthSource, reduction);
         else
         {
@@ -210,6 +218,11 @@ namespace BZROpenShim::FrameBridge
                     frame_->depthResult = static_cast<std::uint32_t>(preclearResult_);
                 }
             }
+        }
+        if (ValidDepthFrame(*frame_))
+        {
+            if (requestedOrdinal == 0 && presentCamera) frame_->camera = *presentCamera;
+            else if (requestedOrdinal > 0 && capturedOrdinal == static_cast<UINT>(requestedOrdinal)) frame_->camera = preclearCamera_;
         }
         const std::uint64_t id = ++nextFrame_;
         HRESULT hr = context_->Signal(ready_.Get(), id);
@@ -238,6 +251,7 @@ namespace BZROpenShim::FrameBridge
         preclear_.Reset(); preclearDesc_ = {};
         matchingDepthClears_ = capturedDepthOrdinal_ = 0;
         preclearResult_ = S_OK;
+        preclearCamera_ = {};
         context_.Reset();
         device_.Reset();
         nextFrame_ = 0;

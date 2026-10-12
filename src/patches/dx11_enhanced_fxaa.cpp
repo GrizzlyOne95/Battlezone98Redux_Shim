@@ -5,6 +5,7 @@
 #include "dx11_enhanced_fxaa_resources.h"
 #include "shim_log.h"
 #include "frame_bridge_producer.h"
+#include "frame_bridge_camera_observer.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -941,7 +942,7 @@ namespace BZROpenShim
                 try
                 {
                     std::lock_guard<std::mutex> lock(g_FrameBridgeMutex);
-                    g_FrameBridge.BeforeDepthClear(context, view, flags);
+                    g_FrameBridge.BeforeDepthClear(context, view, flags, &FrameBridge::ObserveViewportCamera);
                 }
                 catch (...)
                 {
@@ -979,6 +980,7 @@ namespace BZROpenShim
                 }
             }
             Microsoft::WRL::ComPtr<ID3D11Texture2D> depth;
+            FrameBridge::CameraSnapshot camera{};
             if (SUCCEEDED(hr) && g_FrameBridgeDepthEnabled.load())
             {
                 Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
@@ -991,11 +993,12 @@ namespace BZROpenShim
                     "ID3D11DeviceContext::ClearDepthStencilView (frame bridge)");
                 context->OMGetRenderTargets(0, nullptr, &dsv);
                 if (dsv) { dsv->GetResource(&resource); resource.As(&depth); }
+                FrameBridge::ObserveViewportCamera(camera);
                 // Present-bound depth is an observed candidate, not proof of a
                 // main-world pass. Size/format checks and per-frame validity
                 // are enforced by the producer; game resources stay untouched.
             }
-            if (SUCCEEDED(hr)) hr = g_FrameBridge.Publish(color.Get(), depth.Get());
+            if (SUCCEEDED(hr)) hr = g_FrameBridge.Publish(color.Get(), depth.Get(), FrameBridge::DepthReduction::Minimum, &camera);
             if (FAILED(hr))
             {
                 g_FrameBridgeEnabled.store(false, std::memory_order_release);

@@ -72,6 +72,9 @@ logs the process ID:
 # Extra opt-in depth diagnostics. These are not qualified DLSS inputs.
 ./tools/frame_bridge/Game-Smoke-Test.ps1 -Depth -DepthClearOrdinal 2
 ./tools/frame_bridge/Game-Smoke-Test.ps1 -DepthSweep
+# Require a matched camera observation in each saved final pair:
+./tools/frame_bridge/Game-Smoke-Test.ps1 -DepthSweep -Camera
+./tools/frame_bridge/Game-Smoke-Test.ps1 -Camera -DepthClearOrdinal 2 -Mission misn03.bzn
 # Inspect a PFM with Python + Pillow; contrast is not linearized depth:
 python tools/frame_bridge/Inspect-Capture.py build/<run>/game-depth.pfm --color build/<run>/game-frame.bmp
 ```
@@ -113,7 +116,7 @@ layout, creates a depth-plane SRV and computes a single-sample R32_FLOAT result.
 It never modifies the game's source description and never uses color resolve
 for depth. The caller explicitly selects minimum or maximum across samples;
 these are raw device-depth values, not linear depth. No projection convention
-is assumed. The optional V2 depth image is exported alongside color; it is not
+is assumed. The optional depth image is exported alongside color; it is not
 tagged as a DLSS input or advertised as qualified main scene depth.
 
 `OPENSHIM_FRAME_BRIDGE_DEPTH=1` additionally opts into depth capture, requiring
@@ -167,14 +170,72 @@ limitation explicitly. Producer tests also cover pre-clear snapshots surviving
 the real clear, missing/unsupported depth invalidation, occupied metadata,
 recovery and reset at each Present. Cross-process tests verify per-frame color
 and depth IDs, MSAA extraction, reconnects and PFM bytes. Semantic scene/cockpit
-pass identity, camera constants and projection qualification remain next.
+pass identity and draw-level projection qualification remain next.
+
+## Camera observation foundation
+
+V3 appends an owned camera snapshot to the slot-protected descriptor. It reads
+the active DX11 render system's viewport through exported Ogre APIs, then reads
+that viewport's Camera view matrix and Frustum render-system projection matrix,
+near/far clip distances, dimensions and name. No camera pointers or native object
+offsets are dereferenced in the helper. A numeric identity is diagnostic only;
+the snapshot owns all matrix/name bytes and does not keep an Ogre object alive.
+Missing APIs, an inactive DX11 backend, invalid dimensions, non-finite data,
+singular/non-affine view transforms or guarded getter faults fail closed.
+
+For pre-clear capture, the camera is observed immediately at the selected depth
+snapshot boundary. For ordinal zero, it is observed at Present. It shares the
+color/depth frame ID and ownership handoff and is invalidated when that frame
+lacks depth. Its timestamp must precede the color capture, and its dimensions,
+stage and clear ordinal must match the depth candidate. Occupied mailboxes keep
+their existing camera metadata intact; missing snapshots cannot reuse old camera
+data. This is a **viewport observation**, not proof of the camera/projection used
+by each preceding draw. Native shader/AutoParam camera overrides may differ.
+
+The helper writes `cameraObservation` into the PFM sidecar. Matrices use Ogre
+row-major storage and column-vector multiplication; the projection is from
+`getProjectionMatrixRS`, not the unadjusted generic projection. The centered
+perspective inspector checks near/far endpoints and positive clip W for both
+forward-Z signs. It recognizes standard/reversed and finite/infinite far planes;
+orthographic, oblique, asymmetric or transposed cases stay unqualified. These
+facts describe the observed matrix, not a guarantee that the entire depth texture
+uses it. No linear-depth product or motion vectors are produced yet.
+
+`--require-camera` with `--capture-depth-pfm` (or harness `-Camera`) requires a
+matching finite camera observation in the final pair. The same 120-extra-frame
+bound applies when waiting for a complete pair; lack of camera data fails the
+capture instead of substituting identity matrices. The synthetic depth smoke
+uses explicitly artificial camera fixtures whose translation encodes the GPU
+frame ID, and verifies this ID and the projection in both live metadata and JSON.
+They never stand in for missing camera inputs in the game.
+
+GOG qualification on 2026-10-11:
+
+- `misn01.bzn`: camera-required ordinal 1/2/3 sweep imported 360 frames and saved
+  three matched pairs at 1600x900 with 8x D24/S8 depth. All boundaries reported
+  `PlayerCam`, near 0.0799999982, far 1125, aspect 1.77777784 and vertical FOV
+  64.3664372 degrees. The observed projection uses positive view Z and maps near
+  to approximately 0 and far to approximately 1 (standard depth).
+- `misn03.bzn`: another 120-frame camera-required capture saved non-flat depth
+  and visually inspected cockpit/world color, with the same viewport camera and
+  projection facts. All 60 deployment/config files restored with original hashes.
+- A viewport getter returning the same `PlayerCam` at each clear does **not**
+  distinguish world/cockpit passes or prove their shader matrices are identical.
+  The next trace must observe the actual draw/AutoParam camera and projection,
+  including cockpit/secondary views and camera cuts, before temporal history or
+  camera-reprojected motion can be labeled usable by DLSS.
+
+Pure camera tests cover both handedness signs, reversed depth, infinite far,
+transposition, off-axis projections, invalid clip ranges/matrices/names, boundary
+and extent mismatches and future observation timestamps. Producer GPU tests
+cover metadata preservation and camera invalidation/recovery beside depth.
 
 ## Transport and failure contract
 
-- A versioned 128-byte wire descriptor contains only fixed-width fields, the
+- A versioned 384-byte wire descriptor contains only fixed-width fields, the
   adapter LUID, dimensions/format, timestamps and producer-local NT handle
-  values. V2 retains the 128-byte size and adds optional depth metadata/handle;
-  V1 helpers must be rebuilt and reject the new version. The helper duplicates
+  values and owned camera data. V3 grows the V1/V2 descriptor's 128-byte prefix
+  to 384 bytes; old helpers must be rebuilt and reject the new version. The helper duplicates
   handles from that PID; it never treats wire
   integers as pointers or directly uses a foreign handle.
 - Named metadata lives in the session-local namespace and uses the creator's
@@ -187,12 +248,14 @@ pass identity, camera constants and projection qualification remain next.
 - Capture never waits for a consumer. Busy slots skip frames. A crashed/stalled
   reader leaves the slot unavailable instead of allowing concurrent GPU writes.
   A clean reader exit allows reconnect. Crash recovery needs a new session.
-- V2 accepts RGBA8/BGRA8 SDR, one mip/array layer, and same-adapter sharing.
+- V3 accepts RGBA8/BGRA8 SDR, one mip/array layer, and same-adapter sharing.
   MSAA color is resolved to a single-sample shared texture. Optional raw candidate
   depth is shared R32_FLOAT with the same extent and fence/frame ID. Its per-frame
   status explicitly records disabled/missing/unsupported/failed input. Consumer
   clear selection uses a separate interlocked control word, never slot-owned
-  fields. HDR, cross-adapter transport, cameras and motion vectors remain absent.
+  fields. A guarded viewport camera observation is optional and unqualified for
+  draw-level use. HDR, cross-adapter transport, camera history and motion vectors
+  remain absent.
 - Resizing or device replacement disables game capture for the session. Normal
   presentation continues; the helper exits on inactive metadata/producer death.
   Backbuffer references are local to the hook and released before `Present`.
@@ -246,7 +309,7 @@ of ray-traced pixels; more output presents are not evidence of correct DLSS.
 Native Windows checkpoint, 2026-10-11:
 
 - Release Win32 suite build succeeded.
-- All 98 engine-independent regression tests passed.
+- All 99 engine-independent regression tests passed (including camera validation).
 - Wire descriptor, producer GPU lifecycle and depth extraction tests passed in x86 and x64.
 - The x86-to-x64 smoke verified all pixels of 400 frames: 120 followed by a
   reconnect of 80, for both single-sample and 4x MSAA sources. The first consumer
@@ -265,6 +328,11 @@ Native Windows checkpoint, 2026-10-11:
 - GOG pre-clear experiment saved matched raw depth/color at 1600x900, 8x D24/S8;
   the same-session boundary sweep consumed 361 frames and produced three pairs.
   All 60 deployment/config files were restored and hash-verified after exit.
+- V3 smoke checked another 1200 synthetic color frames, including 400 paired
+  depth/camera frames with matching IDs, projection facts and JSON checks.
+- Camera-required GOG runs imported 360 sweep frames and 120 vehicle-mission
+  frames, saving four final color/depth/camera pairs;
+  wire, camera, producer GPU and depth GPU tests pass in x86/x64 (4/4 each).
 - Qualified main scene depth/cameras, gameplay input/focus, Steam, Proton/Wine, coordinated
   presentation takeover, real latency, DLSS and ray-traced effects are unverified.
 

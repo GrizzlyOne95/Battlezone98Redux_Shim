@@ -42,10 +42,12 @@ namespace BZROpenShim::FrameBridge
         Producer& operator=(const Producer&) = delete;
         HRESULT Start(ID3D11Device* device, const D3D11_TEXTURE2D_DESC& source, bool depthEnabled = false);
         HRESULT Publish(ID3D11Texture2D* source, ID3D11Texture2D* depthSource = nullptr,
-            DepthReduction reduction = DepthReduction::Minimum);
+            DepthReduction reduction = DepthReduction::Minimum, const CameraSnapshot* presentCamera = nullptr);
         // Diagnostic snapshot before the selected matching depth clear. Call
         // before the real clear, serialized with Publish on the render thread.
-        void BeforeDepthClear(ID3D11DeviceContext* context, ID3D11DepthStencilView* view, UINT flags);
+        using CameraObserver = bool(*)(CameraSnapshot&);
+        void BeforeDepthClear(ID3D11DeviceContext* context, ID3D11DepthStencilView* view, UINT flags,
+            CameraObserver observeCamera = nullptr);
         void Stop();
         bool Active() const { return frame_ && ReadInterlocked(frame_->active) == 1; }
     private:
@@ -59,6 +61,7 @@ namespace BZROpenShim::FrameBridge
         D3D11_TEXTURE2D_DESC preclearDesc_{};
         UINT matchingDepthClears_ = 0, capturedDepthOrdinal_ = 0;
         HRESULT preclearResult_ = S_OK;
+        CameraSnapshot preclearCamera_{};
         Microsoft::WRL::ComPtr<ID3D11Fence> ready_;
         D3D11_TEXTURE2D_DESC sourceDesc_{};
         HANDLE textureHandle_ = nullptr;
