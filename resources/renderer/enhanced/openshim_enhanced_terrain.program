@@ -2213,6 +2213,7 @@ fragment_program OSE_TerrainOGLowestPSSM_fragment unified
 		param_named_auto fogColour fog_colour
 		param_named_auto fogParams fog_params
 		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
 		param_named_auto invShadowMapSize1 inverse_texture_size 1
 		param_named_auto invShadowMapSize2 inverse_texture_size 2
 		param_named_auto invShadowMapSize3 inverse_texture_size 3
@@ -2232,6 +2233,7 @@ fragment_program OSE_TerrainOGLowestShadow_fragment unified
 		param_named_auto fogColour fog_colour
 		param_named_auto fogParams fog_params
 		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
 		param_named_auto invShadowMapSize1 inverse_texture_size 1
 	}
 }
@@ -2248,6 +2250,7 @@ fragment_program OSE_TerrainOGLowestNoShadow_fragment unified
 		param_named_auto fogColour fog_colour
 		param_named_auto fogParams fog_params
 		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
 	}
 }
 

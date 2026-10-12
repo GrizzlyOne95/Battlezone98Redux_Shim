@@ -277,6 +277,33 @@ float luminance_legacy(float3 c)
     return dot(c, float3(0.299, 0.587, 0.114));
 }
 
+#if defined(OG_RETRO_MODE)
+// Retro reproduces Battlezone 1.5's D3D object lighting, read from the 1.5.2
+// decompile (Apply_Simple_Light_Model): a grey per-vertex luma of
+// CarAmbient + (1 - CarAmbient) * N.L, where N.L at or below 0.01 counts as
+// unlit and CarAmbient never drops below inShadow (56/255). The light is white
+// and nothing else is added: no specular, normal or emissive maps and no cast
+// shadows. Redux feeds the same TRN values to Ogre (ambient = Sun_Ambient,
+// default CarAmbient; sun = Sun_Diffuse, default 1 - CarAmbient), so the scene
+// colours are reduced to their luminance here.
+static const float OG15_LUMA_FLOOR = 56.0 / 255.0;
+static const float OG15_NDOTL_CUTOFF = 0.01;
+
+// 1.5 interpolated a per-vertex luma (Gouraud); a renormalised interpolated
+// normal matches it closely on BZ's low-poly models.
+float og15_ndotl(float3 interpolatedNormal, float3 toLight)
+{
+    float ndl = dot(interpolatedNormal, toLight);
+    return (ndl > OG15_NDOTL_CUTOFF) ? ndl : 0.0;
+}
+
+float3 og15_object_light(float3 ambient, float sunTerm)
+{
+    float luma = max(luminance_legacy(ambient), OG15_LUMA_FLOOR) + sunTerm;
+    return saturate(luma).xxx;
+}
+#endif
+
 #if OSE_LINEAR_LIGHT_ACTIVE
 // Piecewise IEC 61966-2-1 sRGB transfer functions. These are deliberately the
 // real piecewise curves, not pow(x, 2.2) / pow(x, 1/2.2) approximations, so the
@@ -862,9 +889,6 @@ void base_vertex(
     float3 pixelToLight = safe_normalize(lightPosition[0].xyz - (vViewPosition * lightPosition[0].w));
 
     float attenuation = max(dot(vertexNormal, pixelToLight.xyz), 0.0);
-#if defined(OG_RETRO_MODE)
-    attenuation = saturate(attenuation * 0.55 + 0.20);
-#endif
     vLightResult = lightDiffuse[0].xyz * attenuation;
 
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
@@ -1071,28 +1095,30 @@ void base_fragment(
 #else
     shadow = PCF_Filter(shadowMap1, shadowSam1, vLightSpacePos1, invShadowMapSize1.xy, shadowBias);
 #endif
-#if defined(ENHANCED_MODE)
+#if defined(OG_RETRO_MODE)
+    // 1.5 never shadowed objects per pixel.
+    shadow = 1.0;
+#elif defined(ENHANCED_MODE)
     shadow = shadow * 0.78 + 0.22;
 #else
     shadow = shadow * 0.7 + 0.3;
-#endif
-#if defined(OG_RETRO_MODE)
-    shadow = shadow * 0.5 + 0.5;
 #endif
 #endif
 
 #if defined(VERTEX_LIGHTING)
 
-#if defined(RETRO_UNLIT_MODE)
+#if defined(OG_RETRO_MODE)
+    // The shared vertex program already wrote sun * max(N.L, 0) per vertex.
+    float3 lightResult = og15_object_light(sceneAmbient.xyz, luminance_legacy(vLightResult));
+#if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
+    float3 specularResult = float3(0.0, 0.0, 0.0);
+#endif
+#elif defined(RETRO_UNLIT_MODE)
     float3 lightResult = vLightResult;
 #if defined(SHADOWRECEIVER)
     lightResult *= shadow;
 #endif
-#if defined(OG_RETRO_MODE)
-    lightResult += max(sceneAmbient.xyz * 1.10, float3(0.22, 0.22, 0.22));
-#else
     lightResult += sceneAmbient.xyz;
-#endif
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float3 specularResult = float3(0.0, 0.0, 0.0);
 #endif
@@ -1101,11 +1127,7 @@ void base_fragment(
 #if defined(SHADOWRECEIVER)
     lightResult *= shadow;
 #endif
-#if defined(OG_RETRO_MODE)
-    lightResult += max(sceneAmbient.xyz * 1.10, float3(0.22, 0.22, 0.22));
-#else
     lightResult += sceneAmbient.xyz;
-#endif
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float3 specularResult = vSpecularResult;
 #endif
@@ -1162,7 +1184,13 @@ void base_fragment(
     float3 eyeDir = safe_normalize(-viewPos);
 
 #if defined(OG_RETRO_MODE)
-    float3 lightResult = max(sceneAmbient.xyz * 1.10, float3(0.22, 0.22, 0.22));
+    float sunTerm = 0.0;
+    if (lightCount > 0.0)
+    {
+        float3 toSun = safe_normalize(lightPosition[0].xyz - (viewPos * lightPosition[0].w));
+        sunTerm = luminance_legacy(lightDiffuse[0].xyz) * og15_ndotl(safe_normalize(vViewNormal), toSun);
+    }
+    float3 lightResult = og15_object_light(sceneAmbient.xyz, sunTerm);
 #elif defined(IBL_ENABLED)
     // Keep a small amount of the legacy flat ambient as a safety floor while the
     // directional irradiance cubemap becomes the primary ambient source.
@@ -1174,7 +1202,9 @@ void base_fragment(
     float3 specularResult = float3(0.0, 0.0, 0.0);
 #endif
 
-#if defined(RETRO_UNLIT_MODE)
+#if defined(OG_RETRO_MODE)
+    // Fully lit above.
+#elif defined(RETRO_UNLIT_MODE)
     if (lightCount > 0.0)
     {
         const int i = 0;
@@ -1189,9 +1219,6 @@ void base_fragment(
 #endif
 
         float diffuseTerm = max(dot(viewNormal, pixelToLight), 0.0);
-#if defined(OG_RETRO_MODE)
-        diffuseTerm = saturate(diffuseTerm * 0.55 + 0.20);
-#endif
         lightResult.xyz += lightDiffuse[i].xyz * (attenuation * diffuseTerm);
     }
 #else
@@ -1260,9 +1287,6 @@ void base_fragment(
                          * (OSE_PBR_DIFFUSE_COMPENSATION / OSE_PI);
 #else
         float diffuseTerm = max(dot(viewNormal, pixelToLight), 0.0);
-#if defined(OG_RETRO_MODE)
-        diffuseTerm = saturate(diffuseTerm * 0.55 + 0.20);
-#endif
         attenuation *= diffuseTerm;
         lightResult.xyz += lightDiffuse[i].xyz * attenuation;
 
