@@ -72,6 +72,7 @@ openshim_add_test(d3d11_buffer_mirror_policy_tests STD 17 SOURCES
 )
 openshim_add_test(frame_bridge_protocol_tests STD 17 SOURCES frame_bridge_protocol_tests.cpp)
 openshim_add_test(frame_bridge_camera_tests STD 17 SOURCES frame_bridge_camera_tests.cpp)
+openshim_add_test(frame_bridge_history_tests STD 17 SOURCES frame_bridge_history_tests.cpp)
 openshim_add_test(ogre_entity_reload_tests STD 17 SOURCES
     ogre_entity_reload_tests.cpp
 )

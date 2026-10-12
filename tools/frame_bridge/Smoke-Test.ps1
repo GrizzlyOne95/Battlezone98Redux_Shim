@@ -1,5 +1,9 @@
 [CmdletBinding()]
-param([switch]$Show)
+param(
+    [switch]$Show,
+    [ValidateSet('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra', 'depth', 'depth-msaa4', 'depth-motion')]
+    [string[]]$Cases = @('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra', 'depth', 'depth-msaa4', 'depth-motion')
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -11,12 +15,13 @@ foreach ($file in @($sourceExe, $presenterExe)) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Build first: $file" }
 }
 
-foreach ($case in @('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra', 'depth', 'depth-msaa4')) {
+foreach ($case in $Cases) {
     $outFile = Join-Path $buildRoot "bridge-$case.out.log"
     $errFile = Join-Path $buildRoot "bridge-$case.err.log"
     $sourceArgs = @('10')
     if ($case -in @('msaa4', 'depth-msaa4')) { $sourceArgs += '--msaa' }
     if ($case -like 'depth*') { $sourceArgs += @('--depth', '--padded') }
+    if ($case -eq 'depth-motion') { $sourceArgs += '--motion-fixture' }
     if ($case -like 'padded-*') { $sourceArgs += '--padded' }
     if ($case -eq 'padded-bgra') { $sourceArgs += '--bgra' }
     # No elevation, injection or interactive helper window. The source exits on
@@ -62,6 +67,10 @@ foreach ($case in @('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra', 'dep
             $depthFile = Join-Path $buildRoot "bridge-$case.pfm"
             $presenterArgs += @('--verify-depth', '--capture-depth-pfm', $depthFile)
         }
+        if ($case -eq 'depth-motion') {
+            $motionFile = Join-Path $buildRoot 'bridge-camera-motion.pfm'
+            $presenterArgs += @('--capture-camera-motion-pfm', $motionFile)
+        }
         if ($Show) { $presenterArgs += '--show' }
         & $presenterExe @presenterArgs
         if ($LASTEXITCODE -ne 0) { throw "$case pixel verification failed" }
@@ -84,7 +93,8 @@ foreach ($case in @('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra', 'dep
             $metadata = Get-Content -LiteralPath ($depthFile + '.json') -Raw | ConvertFrom-Json
             if ($metadata.frameId -ne 120 -or $metadata.width -ne $width -or $metadata.height -ne $height -or
                 -not $metadata.candidateOnly -or $metadata.sourceFormat -ne 45) { throw 'Invalid depth capture metadata' }
-            if (-not $metadata.cameraObservation.valid -or $metadata.cameraObservation.view[3] -ne $metadata.frameId -or
+            $expectedTranslation = if ($case -eq 'depth-motion') { $metadata.frameId / 1000.0 } else { $metadata.frameId }
+            if (-not $metadata.cameraObservation.valid -or [Math]::Abs($metadata.cameraObservation.view[3] - $expectedTranslation) -gt 0.000001 -or
                 -not $metadata.cameraObservation.recognizedPerspective -or $metadata.protocolVersion -ne 4 -or
                 $metadata.cameraObservation.matrixSource -ne 'synthetic' -or
                 $metadata.cameraObservation.projection.Count -ne 16) { throw 'Stale or invalid camera artifact' }
@@ -98,6 +108,42 @@ foreach ($case in @('single-sample', 'msaa4', 'padded-rgba', 'padded-bgra', 'dep
                 if ([Math]::Abs([BitConverter]::ToSingle($depthBytes, $byte) - 120.0 / 1024.0) -gt 0.000001) {
                     throw "Invalid PFM depth at byte $byte"
                 }
+            }
+            if ($case -eq 'depth-motion') {
+                $motionMetadata = Get-Content -LiteralPath ($motionFile + '.json') -Raw | ConvertFrom-Json
+                if (-not $motionMetadata.diagnosticOnly -or $motionMetadata.dlssReady -or
+                    $motionMetadata.currentFrameId -ne 120 -or $motionMetadata.previousFrameId -ne 119 -or
+                    $motionMetadata.validPixels -eq 0 -or $motionMetadata.maximumPixels -le 0) { throw 'Invalid camera motion metadata' }
+                $motionBytes = [IO.File]::ReadAllBytes($motionFile)
+                $motionHeader = [Text.Encoding]::ASCII.GetBytes("PF`n$width $height`n-1.0`n")
+                if ($motionBytes.Length -ne $motionHeader.Length + $width * $height * 12) { throw 'Invalid motion PFM size' }
+                for ($byte = 0; $byte -lt $motionHeader.Length; ++$byte) {
+                    if ($motionBytes[$byte] -ne $motionHeader[$byte]) { throw 'Invalid motion PFM header' }
+                }
+                # Analytic perspective translation: dx = deltaViewX * P00 * width/(2*z).
+                # z derives from the actual GPU D24 readback, not the requested clear.
+                $rawDepth = [BitConverter]::ToSingle($depthBytes, $header.Length)
+                $projection = $metadata.cameraObservation.projection
+                $distance = $projection[11] / ($rawDepth + $projection[10])
+                $deltaX = $motionMetadata.previousView[3] - $metadata.cameraObservation.view[3]
+                $expectedDx = $deltaX * $projection[0] * $width / (2 * $distance)
+                $validCount = 0
+                for ($y = 0; $y -lt $height; ++$y) {
+                    for ($x = 0; $x -lt $width; ++$x) {
+                        $at = $motionHeader.Length + ($y * $width + $x) * 12
+                        $dx = [BitConverter]::ToSingle($motionBytes, $at)
+                        $dy = [BitConverter]::ToSingle($motionBytes, $at + 4)
+                        $valid = [BitConverter]::ToSingle($motionBytes, $at + 8)
+                        $expectedValid = ($x + 0.5 + $expectedDx -ge 0 -and $x + 0.5 + $expectedDx -le $width)
+                        if ($expectedValid) {
+                            ++$validCount
+                            if ($valid -ne 1 -or [Math]::Abs($dx - $expectedDx) -gt 0.00001 -or [Math]::Abs($dy) -gt 0.00001) {
+                                throw "Incorrect analytic motion at $x,$y"
+                            }
+                        } elseif ($valid -ne 0 -or $dx -ne 0 -or $dy -ne 0) { throw 'Offscreen motion must be invalid' }
+                    }
+                }
+                if ($validCount -ne $motionMetadata.validPixels) { throw 'Motion validity count mismatch' }
             }
         }
         # Reconnect while the producer is still alive; ownership must be

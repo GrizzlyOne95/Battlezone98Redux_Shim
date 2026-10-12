@@ -32,13 +32,21 @@ const projectionRS = getter('?getProjectionMatrixRS@Frustum@Ogre@@UBEABVMatrix4@
 const projectionDepth = getter('?getProjectionMatrixWithRSDepth@Frustum@Ogre@@UBEABVMatrix4@2@XZ');
 const viewOf = new NativeFunction(body(ogre, '?getViewMatrix@Camera@Ogre@@QBEABVMatrix4@2@_N@Z'),
     'pointer', ['pointer', 'bool'], 'thiscall');
+const deviceOf = new NativeFunction(body(dx11, '?_getDevice@D3D11RenderSystem@Ogre@@QAEAAVD3D11Device@2@XZ'),
+    'pointer', ['pointer'], 'thiscall');
+const immediateOf = new NativeFunction(body(dx11, '?GetImmediateContext@D3D11Device@Ogre@@QAEPAUID3D11DeviceContext@@XZ'),
+    'pointer', ['pointer'], 'thiscall');
 
 let frame = 0, complete = false, errors = 0, overflow = 0;
 const states = new Map();
 const contexts = new Map();
 const variants = new Map();
+const parameters = new Map();
+const draws = new Map();
+const drawHooks = new Set();
 const listeners = [];
 const maxFrames = 30, maxVariants = 128, maxSources = 32;
+let drawCalls = 0, linkedDrawCalls = 0;
 function emit(value) { console.log(JSON.stringify(value)); }
 function matrix(pointer) {
     if (pointer.isNull()) throw new Error('Null matrix');
@@ -49,7 +57,7 @@ function matrix(pointer) {
 function context(thread) {
     if (!contexts.has(thread)) {
         if (contexts.size >= 32) throw new Error('Thread observation limit exceeded');
-        contexts.set(thread, { scenes: [], clears: new Map() });
+        contexts.set(thread, { scenes: [], clears: new Map(), bindings: [], renders: [], vertex: null, apiDepth: 0 });
     }
     return contexts.get(thread);
 }
@@ -78,8 +86,10 @@ function finish(reason) {
     complete = true;
     for (const listener of listeners) listener.detach();
     for (const variant of variants.values()) emit(variant);
+    for (const draw of draws.values()) emit(draw);
     emit({ type: 'complete', reason, frames: Math.max(0, frame - 1), variants: variants.size, errors, overflow,
-        qualification: 'parameter-getter-observations-only' });
+        drawGroups: draws.size, drawCalls, linkedDrawCalls,
+        qualification: 'parameter-binding-draw-observations-only' });
 }
 
 // Invalidate on renderable/camera changes. A pair is never assembled from
@@ -90,7 +100,7 @@ for (const name of [
 ]) attach(ogre, name, { onEnter(args) { guarded(() => {
     const state = source(this.context.ecx, this.threadId);
     if (state) {
-        state.view = null; state.projection = null;
+        state.view = null; state.projection = null; state.variantKey = null;
         // Observe the flag rather than infer origin policy from zeros.
         if (name.includes('setCurrentCamera')) state.cameraRelative = (args[1].toUInt32() & 255) !== 0;
     }
@@ -155,14 +165,147 @@ for (const [kind, name] of [
         }
         const variant = variants.get(key);
         ++variant.reads; variant.lastFrame = frame;
+        state.variantKey = key;
     }); }
+});
+
+// Cache only owned observation identities for this frame, never Ogre objects.
+// A partial parameter update can retain an earlier complete pair only for the
+// same source/renderable generation (setCurrentRenderable invalidates it).
+attach(ogre, '?_updateAutoParams@GpuProgramParameters@Ogre@@QAEXPBVAutoParamDataSource@2@G@Z', {
+    onEnter(args) {
+        this.parameter = this.context.ecx.toString(); this.source = args[0];
+        parameters.delete(this.threadId + ':' + this.parameter);
+    },
+    onLeave() { guarded(() => {
+        if (frame === 0) return;
+        const state = source(this.source, this.threadId);
+        if (!state || !state.variantKey) return;
+        const key = this.threadId + ':' + this.parameter;
+        if (!parameters.has(key) && parameters.size >= 1024) { ++overflow; return; }
+        parameters.set(key, { variantKey: state.variantKey, frame });
+    }); }
+});
+attach(dx11, '?bindGpuProgramParameters@D3D11RenderSystem@Ogre@@UAEXW4GpuProgramType@2@V?$SharedPtr@VGpuProgramParameters@Ogre@@@2@G@Z', {
+    onEnter(args) { guarded(() => {
+        const ctx = context(this.threadId);
+        if (ctx.bindings.length >= 16) throw new Error('Parameter binding recursion limit exceeded');
+        // GOG x86 exported ABI: enum + by-value two-pointer Ogre SharedPtr.
+        // The first SharedPtr word is the parameter identity. No fields read.
+        ctx.bindings.push({ stage: args[0].toUInt32(), parameter: args[1].toString(), buffer: null,
+            observation: parameters.get(this.threadId + ':' + args[1].toString()) || null });
+        this.entered = true;
+    }); },
+    onLeave() { guarded(() => {
+        if (!this.entered) return;
+        const ctx = context(this.threadId), binding = ctx.bindings.pop();
+        if (binding.stage === 0) ctx.vertex = binding;
+    }); }
+});
+attach(dx11, '?getConstantBuffer@D3D11HLSLProgram@Ogre@@QAEPAUID3D11Buffer@@V?$SharedPtr@VGpuProgramParameters@Ogre@@@2@G@Z', {
+    onEnter(args) { this.parameter = args[0].toString(); },
+    onLeave(result) { guarded(() => {
+        const stack = context(this.threadId).bindings;
+        const binding = stack[stack.length - 1];
+        if (binding && binding.parameter === this.parameter) binding.buffer = result.toString();
+    }); }
+});
+
+function com(object, slot, result, args) {
+    return new NativeFunction(object.readPointer().add(slot * 4).readPointer(), result,
+        ['pointer', ...args], 'stdcall');
+}
+function release(object) { if (!object.isNull()) com(object, 2, 'uint', [])(object); }
+function bindingsAtDraw(immediate) {
+    const bufferOut = Memory.alloc(4), depthOut = Memory.alloc(4), stateOut = Memory.alloc(4), stencil = Memory.alloc(4);
+    bufferOut.writePointer(ptr(0)); depthOut.writePointer(ptr(0)); stateOut.writePointer(ptr(0));
+    let buffer = ptr(0), depth = ptr(0), depthState = ptr(0);
+    try {
+        // Documented D3D11 API slots; getters AddRef, balanced in finally.
+        com(immediate, 72, 'void', ['uint', 'uint', 'pointer'])(immediate, 0, 1, bufferOut);
+        buffer = bufferOut.readPointer();
+        com(immediate, 89, 'void', ['uint', 'pointer', 'pointer'])(immediate, 0, ptr(0), depthOut);
+        depth = depthOut.readPointer();
+        com(immediate, 92, 'void', ['pointer', 'pointer'])(immediate, stateOut, stencil);
+        depthState = stateOut.readPointer();
+        let depthPolicy = null;
+        if (!depthState.isNull()) {
+            const desc = Memory.alloc(52);
+            com(depthState, 7, 'void', ['pointer'])(depthState, desc);
+            depthPolicy = { enabled: desc.readU32() !== 0, writeMask: desc.add(4).readU32(), comparison: desc.add(8).readU32() };
+        }
+        let description = null;
+        if (!depth.isNull()) {
+            const desc = Memory.alloc(24);
+            com(depth, 8, 'void', ['pointer'])(depth, desc);
+            description = { format: desc.readU32(), dimension: desc.add(4).readU32() };
+        }
+        return { buffer: buffer.toString(), depth: depth.toString(), depthDescription: description, depthPolicy };
+    } finally { release(depthState); release(depth); release(buffer); }
+}
+function attachDraws(immediate) {
+    for (const [slot, name] of [[12, 'DrawIndexed'], [13, 'Draw'], [20, 'DrawIndexedInstanced'],
+        [21, 'DrawInstanced'], [38, 'DrawAuto'], [39, 'DrawIndexedInstancedIndirect'], [40, 'DrawInstancedIndirect']]) {
+        const address = immediate.readPointer().add(slot * 4).readPointer();
+        const hookKey = name + ':' + address;
+        if (drawHooks.has(hookKey)) continue;
+        if (drawHooks.size >= 64) { ++overflow; return; }
+        drawHooks.add(hookKey);
+        listeners.push(Interceptor.attach(address, {
+            onEnter(args) { guarded(() => {
+                if (frame === 0) return;
+                const ctx = context(this.threadId), render = ctx.renders[ctx.renders.length - 1];
+                if (!render || !args[0].equals(render.immediate)) return;
+                // Wrapper/internal forwarding can hit multiple observed slots.
+                ++ctx.apiDepth; this.entered = true;
+                if (ctx.apiDepth !== 1) return;
+                ++drawCalls;
+                const bindings = bindingsAtDraw(args[0]);
+                const vertex = ctx.vertex;
+                const observation = vertex && vertex.observation;
+                const linked = !!(vertex && vertex.buffer && vertex.buffer !== '0x0' &&
+                    vertex.buffer === bindings.buffer && observation && observation.frame === frame);
+                if (linked) ++linkedDrawCalls;
+                const scene = ctx.scenes[ctx.scenes.length - 1];
+                const clears = scene ? ctx.clears.get(scene.width + 'x' + scene.height) || 0 : 0;
+                const variantKey = linked ? observation.variantKey : null;
+                const key = JSON.stringify([name, scene && scene.width, scene && scene.height, clears,
+                    bindings.depth, bindings.buffer, bindings.depthPolicy, variantKey]);
+                if (!draws.has(key)) {
+                    if (draws.size >= 512) { ++overflow; return; }
+                    draws.set(key, { type: 'draw-group', method: name, firstFrame: frame, lastFrame: frame,
+                        calls: 0, width: scene ? scene.width : 0, height: scene ? scene.height : 0,
+                        precedingViewportDepthClears: clears, depthView: bindings.depth,
+                        depthDescription: bindings.depthDescription, vertexConstantBuffer: bindings.buffer,
+                        depthPolicy: bindings.depthPolicy,
+                        linked, parameterCamera: linked ? variants.get(variantKey).parameterCamera : null,
+                        matrixVariant: linked ? Array.from(variants.keys()).indexOf(variantKey) : null });
+                }
+                const draw = draws.get(key); ++draw.calls; draw.lastFrame = frame;
+            }); },
+            onLeave() { if (this.entered) --context(this.threadId).apiDepth; }
+        }));
+        emit({ type: 'draw-hook', method: name, address: address.toString() });
+    }
+}
+attach(dx11, '?_render@D3D11RenderSystem@Ogre@@UAEXABVRenderOperation@2@@Z', {
+    onEnter() { guarded(() => {
+        const ctx = context(this.threadId);
+        if (ctx.renders.length >= 16) throw new Error('Render recursion limit exceeded');
+        const immediate = immediateOf(deviceOf(this.context.ecx));
+        if (immediate.isNull()) throw new Error('Missing immediate context');
+        attachDraws(immediate);
+        ctx.renders.push({ immediate }); this.entered = true;
+    }); },
+    onLeave() { if (this.entered) context(this.threadId).renders.pop(); }
 });
 
 attach(ogre, '?_fireFrameEnded@Root@Ogre@@QAE_NAAUFrameEvent@2@@Z', {
     onLeave() { guarded(() => {
         ++frame;
         states.clear();
-        for (const ctx of contexts.values()) ctx.clears.clear();
+        parameters.clear();
+        for (const ctx of contexts.values()) { ctx.clears.clear(); ctx.vertex = null; }
         if (frame > maxFrames) finish('frame-limit');
     }); }
 });

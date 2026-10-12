@@ -25,6 +25,15 @@ def inspect(path):
     variants = [item for item in records if item.get('type') == 'variant']
     if not variants or completion['variants'] != len(variants):
         raise ValueError('Trace has no consistent matrix observations')
+    draws = [item for item in records if item.get('type') == 'draw-group']
+    if completion.get('drawGroups') != len(draws) or sum(item['calls'] for item in draws) != completion.get('drawCalls'):
+        raise ValueError('Inconsistent observed draw accounting')
+    if sum(item['calls'] for item in draws if item['linked']) != completion.get('linkedDrawCalls'):
+        raise ValueError('Inconsistent linked draw accounting')
+    for item in draws:
+        if item['linked'] and (not isinstance(item['matrixVariant'], int) or
+                               not 0 <= item['matrixVariant'] < len(variants)):
+            raise ValueError('Draw refers to absent camera variant')
     identity = [1 if i % 5 == 0 else 0 for i in range(16)]
     rows = []
     for item in variants:
@@ -52,11 +61,12 @@ def inspect(path):
             'nearClip': item['nearClip'], 'farClip': item['farClip'],
         })
     summary = {
-        'candidateOnly': True, 'qualification': 'parameter-getter-observations-only',
+        'candidateOnly': True, 'qualification': 'parameter-binding-draw-observations-only',
         'completion': completion,
         'boundedTraceClean': completion['reason'] == 'frame-limit' and completion['frames'] == 30
             and completion['errors'] == 0 and completion['overflow'] == 0,
         'variants': rows,
+        'drawGroups': draws,
     }
     return summary
 
@@ -69,13 +79,15 @@ def main():
     output = args.trace.with_suffix('.summary.json')
     output.write_text(json.dumps(summary, indent=2, allow_nan=False) + '\n', encoding='utf-8')
     print(f"TRACE frames={summary['completion']['frames']} variants={len(summary['variants'])} "
-          f"clean={summary['boundedTraceClean']} (getter observations only)")
+          f"clean={summary['boundedTraceClean']} (draw/binding observations only)")
     for row in summary['variants']:
         print(f"  viewport={row['width']}x{row['height']} clear-segment={row['precedingViewportDepthClears']} reads={row['reads']} "
               f"camera={row['parameterCamera']} view-match={row['viewMatchesCameraForShaders']} "
               f"camera-relative-match={row['viewMatchesCameraRelative']} "
               f"identity-view={row['identityView']} RS-match={row['projectionMatchesRS']} "
               f"RS-depth-match={row['projectionMatchesRSDepth']}")
+    print(f"DRAWS total={summary['completion']['drawCalls']} linked={summary['completion']['linkedDrawCalls']} "
+          '(bound-buffer identity verified; contents and shader consumption unqualified)')
     print(output)
 
 
