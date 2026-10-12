@@ -114,3 +114,38 @@ Input/focus/Alt-Tab behavior, end-to-end latency, pacing, visual interpolation
 quality, dense object motion, camera cuts, complete HUD/material/geometry
 coverage, gameplay presentation takeover and Steam/Proton/Wine remain open.
 Reproduction commands are in [the frame bridge guide](DLSS_RT_FRAME_BRIDGE.md).
+
+## Cinematic DX12 follow-up
+
+An optional preset adds SDR scene bloom, depth haze and exposure/contrast/
+saturation grading. Its four compute passes extract/blur half-resolution scene
+highlights and composite the processed scene. It can run independently of
+Streamline/DXR. With both enabled, it processes the AO scene and supplies the
+enhanced scene to DLSS, preserving the private-resource completion boundaries.
+
+The follow-up live run is `build/game-bridge-20261012-110749-944/`: 180 imported
+1280x681 frames, 166 effective cinematic/DXR frames, 166 extra SDK presentations,
+14 missing input frames and final DLSS-G status zero. The labeled input recording
+encoded to `build/battlezone-cinematic-demo.mp4` (13.73 seconds). Its captured
+frames and matching `game-cinematic.bmp`/`game-cinematic-scene.bmp` were visually
+inspected. `build/battlezone-cinematic-before-after.png` compares the same scene
+frame before HUD; a separate HUD comparison is retained. The scene/final outputs
+changed 418681/190855 pixels by more than two levels. All 60 deployment/config
+files were restored after graceful exit.
+
+Nine x64 helper/GPU tests and 101 native regressions passed. The new hardware
+test checks neutral RGBA/BGRA inputs, distinct HUD and alpha, near/far haze,
+NaN/sky exclusion, bloom halos/history clearing, color grading, smooth handling
+of small raster differences and nonfinite parameter rejection. A standalone
+90-frame headless cinematic smoke passed without Streamline/DXR, exercising
+both scene and final readbacks plus recording; its synthetic producer exited
+on its own deadline.
+
+These are artistic SDR effects. Haze is not derived from authoritative mission
+atmosphere/lighting. Final compositing uses a smooth scene/final difference mask
+and adds the effect delta to the original raster pixels to retain FXAA detail.
+General HUD opacity, transparent smoke and depth silhouettes remain unqualified;
+visible artifacts remain around some smoke/silhouette regions. WGC returned zero
+frames in the first cinematic run with SDK display-query errors; the labeled
+renderer-input fallback subsequently passed. No output-window video is claimed
+for this preset run, and no generated-frame or FPS count is inferred from it.

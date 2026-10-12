@@ -14,6 +14,7 @@ param(
     [ValidateSet('pre-clear', 'before-overlay')][string]$SceneStage = 'before-overlay',
     [string]$StreamlineDirectory = '',
     [switch]$VisibleRayTracing,
+    [switch]$VisualEnhancements,
     [switch]$StreamlineDevelopment,
     [switch]$RecordWindow,
     [switch]$RecordFrames,
@@ -31,6 +32,11 @@ if ($VisibleRayTracing) {
     $SceneColor = $true
     if ($DepthClearOrdinal -eq 0) { $DepthClearOrdinal = 3 }
     if ($DepthSweep -or $SceneStage -ne 'before-overlay') { throw 'DXR preview requires one before-overlay scene boundary' }
+}
+if ($VisualEnhancements) {
+    $SceneColor = $true
+    if ($DepthClearOrdinal -eq 0) { $DepthClearOrdinal = 3 }
+    if ($DepthSweep -or $SceneStage -ne 'before-overlay') { throw 'Cinematic preview requires one before-overlay scene boundary' }
 }
 if ($StreamlineDevelopment -and -not $StreamlineDirectory) { throw 'Development preview requires the development SDK runtime directory' }
 if ($CameraMotion -or $SceneColor) { $Camera = $true }
@@ -184,6 +190,10 @@ try {
         if ($SceneColor) { $presenterArgs += @('--capture-scene-bmp', (Join-Path $outputRoot "game-scene$suffix.bmp"), '--scene-stage', $SceneStage) }
         if ($StreamlineDirectory) { $presenterArgs += @('--streamline-dir', $StreamlineDirectory, '--fg-report', (Join-Path $outputRoot 'dlss-fg-report.json')) }
         if ($VisibleRayTracing) { $presenterArgs += @('--rt-visible-ao', '--capture-rt-bmp', (Join-Path $outputRoot 'game-dxr-ao.bmp')) }
+        if ($VisualEnhancements) {
+            $presenterArgs += @('--show', '--visual-preset', 'cinematic', '--capture-enhanced-bmp', (Join-Path $outputRoot 'game-cinematic.bmp'),
+                '--capture-enhanced-scene-bmp', (Join-Path $outputRoot 'game-cinematic-scene.bmp'))
+        }
         if ($RecordWindow) { $presenterArgs += @('--record-window', (Join-Path $outputRoot 'demo-window.bzrvid')) }
         if ($RecordFrames) { $presenterArgs += @('--record-frames', (Join-Path $outputRoot 'demo-rendered.bzrvid')) }
         if ($StreamlineDevelopment) {
