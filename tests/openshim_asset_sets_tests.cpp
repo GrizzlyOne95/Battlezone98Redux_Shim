@@ -1,5 +1,6 @@
 #include "openshim_asset_sets.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -70,7 +71,11 @@ namespace
         set.destination = destination;
         for (const auto& file : files)
         {
-            Put(itemDir / fs::path(source) / file.first, file.second);
+            // Manifest paths use backslashes; on Linux those are filename
+            // characters, so write the fixture through '/' like the sync does.
+            std::string relative = source + "/" + file.first;
+            std::replace(relative.begin(), relative.end(), '\\', '/');
+            Put(itemDir / fs::path(relative), file.second);
             OpenShimAssetFile entry;
             entry.path = file.first;
             entry.sha256 = Sha256Hex(file.second.data(), file.second.size());
