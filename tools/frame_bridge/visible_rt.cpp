@@ -47,13 +47,13 @@ namespace BZROpenShim::FrameBridge
         input.Flags=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD; input.NumDescs=1;
         input.DescsLayout=D3D12_ELEMENTS_LAYOUT_ARRAY; input.pGeometryDescs=&geometry_;
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO bottom{},top{}; dxr->GetRaytracingAccelerationStructurePrebuildInfo(&input,&bottom);
-        input.Type=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL; input.pGeometryDescs=nullptr;
+        input.Type=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL; input.pGeometryDescs=nullptr; input.NumDescs=2;
         dxr->GetRaytracingAccelerationStructurePrebuildInfo(&input,&top);
         if(!bottom.ResultDataMaxSizeInBytes||!top.ResultDataMaxSizeInBytes) throw std::runtime_error("DXR acceleration structure requirements unavailable");
         blas_=Buffer(device,bottom.ResultDataMaxSizeInBytes,D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
         tlas_=Buffer(device,top.ResultDataMaxSizeInBytes,D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
         scratch_=Buffer(device,std::max(bottom.ScratchDataSizeInBytes,top.ScratchDataSizeInBytes),D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        instances_=Buffer(device,sizeof(D3D12_RAYTRACING_INSTANCE_DESC),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_HEAP_TYPE_UPLOAD);
+        instances_=Buffer(device,2*sizeof(D3D12_RAYTRACING_INSTANCE_DESC),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_HEAP_TYPE_UPLOAD);
         D3D12_RAYTRACING_INSTANCE_DESC instance{}; instance.Transform[0][0]=instance.Transform[1][1]=instance.Transform[2][2]=1;
         instance.InstanceMask=255; instance.AccelerationStructure=blas_->GetGPUVirtualAddress();
         void* mapped=nullptr; D3D12_RANGE none{0,0}; Check(instances_->Map(0,&none,&mapped),"map DXR instance");
@@ -79,7 +79,7 @@ namespace BZROpenShim::FrameBridge
         D3D12_DESCRIPTOR_RANGE ranges[2]={{D3D12_DESCRIPTOR_RANGE_TYPE_SRV,3,0,0,0},{D3D12_DESCRIPTOR_RANGE_TYPE_UAV,3,0,0,3}};
         D3D12_ROOT_PARAMETER parameters[3]{}; parameters[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; parameters[0].DescriptorTable={2,ranges};
         parameters[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV; parameters[1].Descriptor={3,0};
-        parameters[2].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; parameters[2].Constants={0,0,24};
+        parameters[2].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; parameters[2].Constants={0,0,40};
         D3D12_ROOT_SIGNATURE_DESC rd{}; rd.NumParameters=3; rd.pParameters=parameters;
         ComPtr<ID3DBlob> blob,errors; Check(D3D12SerializeRootSignature(&rd,D3D_ROOT_SIGNATURE_VERSION_1,&blob,&errors),"serialize DXR compute root");
         Check(device->CreateRootSignature(0,blob->GetBufferPointer(),blob->GetBufferSize(),IID_PPV_ARGS(&root_)),"create DXR compute root");
@@ -87,38 +87,85 @@ namespace BZROpenShim::FrameBridge
         Check(device->CreateComputePipelineState(&ps,IID_PPV_ARGS(&meshPipeline_)),"create DXR mesh pipeline"); ps.CS={visibleRtRays,sizeof(visibleRtRays)};
         Check(device->CreateComputePipelineState(&ps,IID_PPV_ARGS(&rayPipeline_)),"create inline DXR ray pipeline");
     }
+    void VisibleRayTracing::SetNativeGeometry(ID3D12Device* device,const NativeGeometry& snapshot)
+    {
+        if(recorded_||nativeTriangles_||!ValidGeometry(snapshot)) throw std::runtime_error("native DXR snapshot invalid or already recording");
+        ComPtr<ID3D12Device5> dxr; Check(device->QueryInterface(IID_PPV_ARGS(&dxr)),"native DXR device");
+        nativeVertices_=Buffer(device,snapshot.vertices.size()*12,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_HEAP_TYPE_UPLOAD);
+        void* mapped=nullptr; D3D12_RANGE none{0,0}; Check(nativeVertices_->Map(0,&none,&mapped),"map native DXR vertices");
+        std::memcpy(mapped,snapshot.vertices.data(),snapshot.vertices.size()*12); nativeVertices_->Unmap(0,nullptr);
+        nativeGeometry_.Type=D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES; nativeGeometry_.Flags=D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+        nativeGeometry_.Triangles.VertexBuffer={nativeVertices_->GetGPUVirtualAddress(),12}; nativeGeometry_.Triangles.VertexCount=snapshot.header.vertices;
+        nativeGeometry_.Triangles.VertexFormat=DXGI_FORMAT_R32G32B32_FLOAT;
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS input{};
+        input.Type=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL; input.NumDescs=1;
+        input.DescsLayout=D3D12_ELEMENTS_LAYOUT_ARRAY; input.pGeometryDescs=&nativeGeometry_;
+        input.Flags=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO info{}; dxr->GetRaytracingAccelerationStructurePrebuildInfo(&input,&info);
+        if(!info.ResultDataMaxSizeInBytes) throw std::runtime_error("native DXR BLAS requirements unavailable");
+        nativeBlas_=Buffer(device,info.ResultDataMaxSizeInBytes,D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+        nativeScratch_=Buffer(device,info.ScratchDataSizeInBytes,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        nativeTriangles_=snapshot.header.vertices/3;
+    }
     void VisibleRayTracing::Record(ID3D12GraphicsCommandList* list,const CameraSnapshot& camera)
     {
         MatrixD projection{},inverse{}; for(unsigned i=0;i<16;++i) projection[i]=camera.projection[i];
         const auto facts=InspectPerspective(camera);
         if(!facts.recognized||!Inverse(projection,inverse)) throw std::runtime_error("visible DXR camera convention unavailable");
-        struct Constants { float inverse[16]; unsigned width,height,columns,rows; float clear,radius,bias,strength; } c{};
+        MatrixD view{},inverseView{}; for(unsigned i=0;i<16;++i) view[i]=camera.view[i];
+        if(!Inverse(view,inverseView)) throw std::runtime_error("DXR native world/view conversion unavailable");
+        // Radius and bias are in meters. Reject scaled/sheared camera views
+        // rather than silently changing ray lengths in the native world BLAS.
+        for(unsigned a=0;a<3;++a) for(unsigned b=0;b<3;++b)
+        {
+            double dot=0; for(unsigned k=0;k<3;++k) dot+=view[a*4+k]*view[b*4+k];
+            if(std::abs(dot-(a==b?1.0:0.0))>1e-4) throw std::runtime_error("DXR requires rigid camera view");
+        }
+        struct Constants { float inverse[16]; unsigned width,height,columns,rows; float clear,radius,bias,strength; float toWorld[16]; } c{};
         for(unsigned i=0;i<16;++i) c.inverse[i]=static_cast<float>(inverse[i]);
         c.width=width_; c.height=height_; c.columns=columns_; c.rows=rows_;
         c.clear=facts.reversed?0.0f:1.0f; c.radius=4.0f; c.bias=.015f; c.strength=.8f;
+        for(unsigned i=0;i<16;++i) c.toWorld[i]=static_cast<float>(inverseView[i]);
+        D3D12_RAYTRACING_INSTANCE_DESC instances[2]{};
+        for(unsigned row=0;row<3;++row) for(unsigned col=0;col<4;++col) instances[0].Transform[row][col]=c.toWorld[row*4+col];
+        instances[0].InstanceMask=1; instances[0].AccelerationStructure=blas_->GetGPUVirtualAddress();
+        instances[1].Transform[0][0]=instances[1].Transform[1][1]=instances[1].Transform[2][2]=1;
+        instances[1].InstanceMask=2; instances[1].InstanceID=1; instances[1].AccelerationStructure=nativeBlas_?nativeBlas_->GetGPUVirtualAddress():0;
+        void* mapped=nullptr; D3D12_RANGE none{0,0}; Check(instances_->Map(0,&none,&mapped),"update owned DXR instances");
+        std::memcpy(mapped,instances,sizeof(instances)); instances_->Unmap(0,nullptr);
         ComPtr<ID3D12GraphicsCommandList4> dxr; Check(list->QueryInterface(IID_PPV_ARGS(&dxr)),"DXR command interface");
         for(auto* resource : {depth_,scene_,final_}) Transition(list,resource,D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         Transition(list,vertices_.Get(),D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         ID3D12DescriptorHeap* heaps[]={heap_.Get()}; list->SetDescriptorHeaps(1,heaps); list->SetComputeRootSignature(root_.Get());
         list->SetComputeRootDescriptorTable(0,heap_->GetGPUDescriptorHandleForHeapStart()); list->SetComputeRootShaderResourceView(1,tlas_->GetGPUVirtualAddress());
-        list->SetComputeRoot32BitConstants(2,24,&c,0); list->SetPipelineState(meshPipeline_.Get()); list->Dispatch((columns_+7)/8,(rows_+7)/8,1);
+        list->SetComputeRoot32BitConstants(2,40,&c,0); list->SetPipelineState(meshPipeline_.Get()); list->Dispatch((columns_+7)/8,(rows_+7)/8,1);
         Transition(list,vertices_.Get(),D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build{}; build.Inputs.Type=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
         build.Inputs.Flags=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD; build.Inputs.NumDescs=1;
         build.Inputs.DescsLayout=D3D12_ELEMENTS_LAYOUT_ARRAY; build.Inputs.pGeometryDescs=&geometry_;
         build.DestAccelerationStructureData=blas_->GetGPUVirtualAddress(); build.ScratchAccelerationStructureData=scratch_->GetGPUVirtualAddress();
         dxr->BuildRaytracingAccelerationStructure(&build,0,nullptr); UAV(list,blas_.Get()); UAV(list,scratch_.Get());
+        if(nativeTriangles_&&!recorded_)
+        {
+            auto nativeBuild=build; nativeBuild.Inputs.pGeometryDescs=&nativeGeometry_;
+            nativeBuild.Inputs.Flags=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+            nativeBuild.DestAccelerationStructureData=nativeBlas_->GetGPUVirtualAddress(); nativeBuild.ScratchAccelerationStructureData=nativeScratch_->GetGPUVirtualAddress();
+            dxr->BuildRaytracingAccelerationStructure(&nativeBuild,0,nullptr); UAV(list,nativeBlas_.Get());
+        }
         build.Inputs.Type=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL; build.Inputs.InstanceDescs=instances_->GetGPUVirtualAddress();
+        build.Inputs.NumDescs=nativeTriangles_?2:1;
         build.DestAccelerationStructureData=tlas_->GetGPUVirtualAddress(); dxr->BuildRaytracingAccelerationStructure(&build,0,nullptr); UAV(list,tlas_.Get());
         for(auto* resource : {sceneOutput_.Get(),finalOutput_.Get()}) Transition(list,resource,D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         list->SetPipelineState(rayPipeline_.Get()); list->Dispatch((width_+7)/8,(height_+7)/8,1);
         for(auto* resource : {sceneOutput_.Get(),finalOutput_.Get()}) Transition(list,resource,D3D12_RESOURCE_STATE_UNORDERED_ACCESS,D3D12_RESOURCE_STATE_COMMON);
         Transition(list,vertices_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COMMON);
         for(auto* resource : {depth_,scene_,final_}) Transition(list,resource,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COMMON);
+        recorded_=true;
     }
 #else
     void VisibleRayTracing::Initialize(ID3D12Device*,ID3D12Resource*,ID3D12Resource*,ID3D12Resource*)
     { throw std::runtime_error("configure FRAME_BRIDGE_DXR=ON with dxc to build the visible DXR AO preview"); }
     void VisibleRayTracing::Record(ID3D12GraphicsCommandList*,const CameraSnapshot&) {}
+    void VisibleRayTracing::SetNativeGeometry(ID3D12Device*,const NativeGeometry&) { throw std::runtime_error("native geometry needs DXR build"); }
 #endif
 }

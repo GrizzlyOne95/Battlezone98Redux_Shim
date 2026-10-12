@@ -10,6 +10,7 @@ cbuffer Params : register(b0) {
     row_major float4x4 ClipToView;
     uint Width; uint Height; uint Columns; uint Rows;
     float ClearDepth; float Radius; float Bias; float Strength;
+    row_major float4x4 ViewToWorld;
 };
 bool Position(uint2 pixel, out float3 position) {
     float z=Depth.Load(int3(pixel,0));
@@ -100,7 +101,8 @@ void Rays(uint3 id:SV_DispatchThreadID) {
                     float t=(sample+.5)/8;
                     float angle=rotation+sample*2.39996323;
                     float3 direction=normalize(tangent*cos(angle)*sqrt(t)+bitangent*sin(angle)*sqrt(t)+n*sqrt(1-t));
-                    RayDesc ray; ray.Origin=surface+n*offset; ray.Direction=direction; ray.TMin=offset; ray.TMax=Radius;
+                    RayDesc ray; ray.Origin=mul(ViewToWorld,float4(surface+n*offset,1)).xyz;
+                    ray.Direction=mul(ViewToWorld,float4(direction,0)).xyz; ray.TMin=offset; ray.TMax=Radius;
                     RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH|RAY_FLAG_FORCE_OPAQUE> query;
                     query.TraceRayInline(VisibleScene,RAY_FLAG_NONE,255,ray);
                     while(query.Proceed()) {}

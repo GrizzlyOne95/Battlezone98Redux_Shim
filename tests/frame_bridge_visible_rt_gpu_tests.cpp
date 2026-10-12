@@ -69,7 +69,7 @@ namespace
         D3D12_HEAP_PROPERTIES heap{}; heap.Type=type; ComPtr<ID3D12Resource> resource;
         Check(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,state,nullptr,IID_PPV_ARGS(&resource))); return resource;
     }
-    std::vector<unsigned char> Render(const Input& input)
+    std::vector<unsigned char> Render(const Input& input,const NativeGeometry* native=nullptr)
     {
         ComPtr<ID3D12Device> device; Check(D3D12CreateDevice(nullptr,D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device)));
         D3D12_COMMAND_QUEUE_DESC q{}; ComPtr<ID3D12CommandQueue> queue; Check(device->CreateCommandQueue(&q,IID_PPV_ARGS(&queue)));
@@ -92,7 +92,9 @@ namespace
             D3D12_TEXTURE_COPY_LOCATION to{}; to.pResource=textures[t].Get(); to.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
             list->CopyTextureRegion(&to,0,0,0,&from,nullptr); Barrier(list.Get(),textures[t].Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COMMON);
         }
-        VisibleRayTracing rt; rt.Initialize(device.Get(),textures[0].Get(),textures[1].Get(),textures[2].Get()); rt.Record(list.Get(),input.camera);
+        VisibleRayTracing rt; rt.Initialize(device.Get(),textures[0].Get(),textures[1].Get(),textures[2].Get());
+        if(native) rt.SetNativeGeometry(device.Get(),*native);
+        rt.Record(list.Get(),input.camera);
         const auto desc=rt.FinalOutput()->GetDesc(); D3D12_PLACED_SUBRESOURCE_FOOTPRINT foot{}; UINT64 bytes=0;
         device->GetCopyableFootprints(&desc,0,1,0,&foot,nullptr,nullptr,&bytes);
         auto readback=Buffer(device.Get(),bytes,D3D12_HEAP_TYPE_READBACK,D3D12_RESOURCE_STATE_COPY_DEST);
@@ -108,14 +110,16 @@ namespace
         std::vector<unsigned char> pixels(input.width*input.height*4);
         for(unsigned y=0;y<input.height;++y) std::memcpy(pixels.data()+y*input.width*4,mapped+foot.Offset+y*foot.Footprint.RowPitch,input.width*4);
         const D3D12_RANGE none{0,0}; readback->Unmap(0,&none); CloseHandle(event);
-        std::printf("DXR_CAPTURE triangles_capacity=%u pixels=%u\n",rt.TriangleCapacity(),input.width*input.height); return pixels;
+        std::printf("DXR_CAPTURE triangles_capacity=%u native_triangles=%u pixels=%u\n",rt.TriangleCapacity(),rt.NativeTriangleCount(),input.width*input.height); return pixels;
     }
 }
 int main(int argc,char** argv)
 {
-    if(argc==3)
+    if(argc==3||argc==4)
     {
-        const auto input=ReadCapture(argv[1]); const auto pixels=Render(input);
+        NativeGeometry mesh;
+        if(argc==4) { std::ifstream geometry(argv[3],std::ios::binary); mesh=ReadNativeGeometry(geometry); }
+        const auto input=ReadCapture(argv[1]); const auto pixels=Render(input,argc==4?&mesh:nullptr);
         std::ofstream file(argv[2],std::ios::binary); file.write(reinterpret_cast<const char*>(pixels.data()),static_cast<std::streamsize>(pixels.size()));
         Require(file.good(),"save captured DXR RGBA output"); return 0;
     }
@@ -151,5 +155,37 @@ int main(int argc,char** argv)
     const auto pixels=Render(distant);
     Require(pixels==distant.final,"under-resolved distant D24 plane has no false self-occlusion");
     std::puts("PASS DXR coarse distant D24 plane preserved without self-shadow speckles");
+    // This wall is not in the depth image: native world triangles alone must
+    // cause AO, and translating the camera/world together must preserve it.
+    auto plane=Fixture(false); NativeGeometry native;
+    native.header.producerPid=1; native.header.missionGeneration=1; native.header.clusters=1;
+    native.vertices={{-20,-.35f,-10},{20,-.35f,-10},{-20,-.35f,2},
+                     {20,-.35f,-10},{20,-.35f,2},{-20,-.35f,2}};
+    native.header.vertices=6; native.header.payloadHash=GeometryHash(native.vertices);
+    auto coplanar=native;
+    coplanar.vertices={{-20,-20,-3},{20,-20,-3},{-20,20,-3},
+                       {20,-20,-3},{20,20,-3},{-20,20,-3}};
+    coplanar.header.payloadHash=GeometryHash(coplanar.vertices);
+    Require(Render(plane,&coplanar)==plane.final,"duplicate coplanar native terrain adds no false self-occlusion");
+    auto worldOcclusion=Render(plane,&native); unsigned nativeDarker=0;
+    for(size_t i=0;i<worldOcclusion.size();i+=4) if(worldOcclusion[i]+2<plane.final[i]) ++nativeDarker;
+    Require(nativeDarker>100,"native occluder absent from depth affects real hardware rays");
+    auto translated=plane; translated.camera.view[3]=-37; translated.camera.view[7]=12; translated.camera.view[11]=-19;
+    auto moved=native; for(auto& p:moved.vertices) { p.x+=37; p.y-=12; p.z+=19; }
+    moved.header.payloadHash=GeometryHash(moved.vertices);
+    const auto movedPixels=Render(translated,&moved);
+    unsigned translationMax=0,translationOverOne=0;
+    for(size_t i=0;i<movedPixels.size();++i) {
+        unsigned delta=static_cast<unsigned>(std::abs(int(movedPixels[i])-int(worldOcclusion[i])));
+        translationMax=std::max(translationMax,delta); if(delta>1)++translationOverOne;
+    }
+    std::printf("DXR native translation max_channel_delta=%u channels_over_one=%u\n",translationMax,translationOverOne);
+    Require(translationMax<=1,"native and visible world-space rays agree within one SDR quantization step under camera translation");
+    // A rotated world/camera must also retain the same view-space result.
+    auto rotated=plane; rotated.camera.view[0]=0; rotated.camera.view[2]=1; rotated.camera.view[8]=-1; rotated.camera.view[10]=0;
+    auto turn=native; for(auto& p:turn.vertices) { const float x=p.x; p.x=-p.z; p.z=x; }
+    turn.header.payloadHash=GeometryHash(turn.vertices);
+    Require(Render(rotated,&turn)==worldOcclusion,"native world rays agree under camera rotation");
+    std::printf("PASS DXR native occluder absent from depth darker_pixels=%u; translation and rotation preserved\n",nativeDarker);
     return OpenShimTest::ExitCode();
 }

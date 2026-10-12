@@ -19,6 +19,7 @@ param(
     [switch]$TerrainMicroRelief,
     [switch]$TerrainAdaptive,
     [string]$TerrainSurfaceManifest = '',
+    [switch]$NativeTerrainSnapshot,
     [ValidateRange(4, 64)][float]$TerrainTargetPixels = 12,
     [ValidateSet(1, 2, 4)][int]$TerrainTessellationFactor = 4,
     [ValidateRange(0.001, 1)][float]$TerrainReliefAmplitude = 0.25,
@@ -31,6 +32,8 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($TerrainAdaptive -and (-not $TerrainMicroRelief -or $TerrainTessellationFactor -ne 4)) { throw 'TerrainAdaptive requires TerrainMicroRelief with factor-4 cap' }
 if ($TerrainSurfaceManifest -and -not $TerrainMicroRelief) { throw 'Surface capture requires TerrainMicroRelief for native GPU draw evidence' }
+if ($NativeTerrainSnapshot -and ($TerrainMicroRelief -or $TerrainSurfaceManifest)) { throw 'Native geometry snapshot requires undisplaced base terrain' }
+if ($NativeTerrainSnapshot) { $SceneColor=$true; $DepthClearOrdinal=3 }
 $surfaceResource=''; $surfaceRelativeManifest=''
 if ($TerrainSurfaceManifest) {
     $TerrainSurfaceManifest=(Resolve-Path -LiteralPath $TerrainSurfaceManifest).Path
@@ -164,6 +167,7 @@ try {
         OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE = $(if ($TerrainAdaptive) { '1' } else { '0' })
         OPENSHIM_TERRAIN_TESSELLATION_TARGET_PIXELS = $TerrainTargetPixels.ToString('R', [Globalization.CultureInfo]::InvariantCulture)
         OPENSHIM_TERRAIN_SURFACE_MANIFEST = $(if ($TerrainSurfaceManifest) { Join-Path $GameRoot $surfaceRelativeManifest } else { '' })
+        OPENSHIM_TERRAIN_GEOMETRY_EXPORT = $(if ($NativeTerrainSnapshot) { Join-Path $outputRoot 'native-terrain.bin' } else { '' })
     }.GetEnumerator()) {
         $environment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
@@ -311,6 +315,17 @@ try {
         $mutex.Dispose()
         if ($restoreErrors.Count -gt 0) { throw ($restoreErrors -join [Environment]::NewLine) }
     }
+}
+if ($NativeTerrainSnapshot) {
+    $geometryPath=Join-Path $outputRoot 'native-terrain.bin'
+    if (-not (Test-Path -LiteralPath $geometryPath -PathType Leaf)) { throw 'Native terrain snapshot missing; inspect fresh terrain-geometry log' }
+    $geometry=Get-Content -LiteralPath ($geometryPath+'.json') -Raw | ConvertFrom-Json
+    $geometryLog=Read-SharedText (Join-Path $outputRoot 'openshim.log')
+    $freshExport='\[pid:'+ $game.Id +' [^\]]*\].*\[TERRAIN-GEOMETRY\] snapshot exported clusters=16 vertices=614400 triangles=204800'
+    if ($geometry.pid -ne $game.Id -or $geometry.clusters.Count -ne 16 -or -not $geometry.worldSpace -or -not $geometry.baseNativeGeometryOnly -or
+        $geometry.vertices -ne 614400 -or (Get-Item -LiteralPath $geometryPath).Length -ne 7372848 -or
+        $geometryLog -notmatch $freshExport -or $null -eq $gameExitCode -or $gameExitCode -ne 0) { throw 'Native snapshot lacks owned PID/cluster/world identity, fresh export or clean exit' }
+    Write-Host "PASS native terrain snapshot: clusters=16 triangles=$($geometry.triangles); static base geometry only"
 }
 if ($TerrainMicroRelief) {
     # Validate only this launch, after graceful exit has emitted cleanup proof.
