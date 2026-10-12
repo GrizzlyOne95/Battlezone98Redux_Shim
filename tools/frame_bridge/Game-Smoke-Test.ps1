@@ -15,6 +15,7 @@ param(
     [string]$StreamlineDirectory = '',
     [switch]$VisibleRayTracing,
     [switch]$VisualEnhancements,
+    [switch]$WorldEffectsReference,
     [switch]$StreamlineDevelopment,
     [switch]$RecordWindow,
     [switch]$RecordFrames,
@@ -22,6 +23,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($WorldEffectsReference) {
+    if ($StreamlineDirectory -or $VisibleRayTracing -or $VisualEnhancements -or $ShaderCameraTrace) { throw 'World-effects reference is a separate diagnostic, without effects or runtime tracing' }
+    if ($DepthSweep -or $SceneStage -ne 'before-overlay') { throw 'World-effects reference requires one before-overlay scene capture' }
+    $SceneColor=$true
+    if ($DepthClearOrdinal -eq 0) { $DepthClearOrdinal=3 }
+}
 if ($StreamlineDirectory) {
     $StreamlineDirectory = (Resolve-Path -LiteralPath $StreamlineDirectory).Path
     $SceneColor = $true
@@ -120,6 +127,7 @@ try {
         OPENSHIM_DX11_SCENE_DEPTH_DIAG = $(if ($Depth) { '0' } else { '1' })
         OPENSHIM_FRAME_BRIDGE_DEPTH = $(if ($Depth) { '1' } else { '0' })
         OPENSHIM_FRAME_BRIDGE_SCENE_COLOR = $(if ($SceneColor) { '1' } else { '0' })
+        OPENSHIM_FRAME_BRIDGE_WORLD_EFFECTS_REFERENCE = $(if ($WorldEffectsReference) { '1' } else { '0' })
     }.GetEnumerator()) {
         $environment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
@@ -205,6 +213,15 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "Real-game GPU import/capture failed at clear ordinal $ordinal" }
         } finally { Pop-Location }
         Write-Host "PASS real-game capture: $capture (inspect SDK and DXR reports for effective preview state)"
+        if ($WorldEffectsReference) {
+            $referenceLog=Read-SharedText (Join-Path $GameRoot 'logs/openshim.log')
+            if ($referenceLog -notmatch 'bound effect program reference APIs qualified' -or $referenceLog -notmatch 'world-effect reference skipped=') {
+                throw 'World-effects reference did not qualify or omit any draws; leave output unqualified'
+            }
+            @{ diagnosticOnly=$true; opacityMaskQualified=$false; opaqueSceneQualified=$false; worldEffectProgram='Effect_fragment';
+                requiresBoundShaderMatch=$true; boundProgram='Effect_fragmentHLSL4'; preservesIdentityHUD=$true; observedSkip=$true } |
+                ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outputRoot 'world-effects-reference.json')
+        }
     }
 } finally {
     try {

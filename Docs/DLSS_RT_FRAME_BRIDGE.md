@@ -186,6 +186,67 @@ remain free of false AO, while the near corner still produces occlusion. Haze
 tests check the haze-free near region and maximum blend cap. General translucent
 smoke, HUD opacity, camera motion and other missions still require qualification.
 
+### Scene-layer roadmap: first reference milestone
+
+The next step toward proper scene separation now has a bounded draw/material
+probe and an opt-in world-effects reference capture. The trace records blend
+factors, depth policy, actual color-target extent/sample count, pixel shader,
+pass/material/fragment-program names and ordered draws for three frames. Engine
+objects are read through named exports. Returned strings use bounded MSVC x86
+string decoding, checked against the exported PlayerCam name; the trace fails
+on read errors/overflow. COM getter references are balanced and hooks detach
+after 30 complete frames. `Inspect-Scene-Layers.py` labels candidates while
+explicitly keeping `opacityMaskQualified=false` and `opaqueSceneQualified=false`.
+
+The actual GOG ordering disproves a generic "first blended draw" opaque boundary.
+Terrain atlas blending writes depth, the glow scene repeats terrain/geometry,
+and smoke/trails use non-depth-writing `Effect_fragment`. Sky uses a different
+program; identity HUD and glow composition follow separately. The first three
+main-view frames had **140 subsequent depth-writing draws** after the first
+world-effect candidate. A clean snapshot at that first effect would omit
+substantial later geometry. Native separation needs either a second owned render
+product or draw-level contribution/coverage export that preserves this ordering.
+
+```powershell
+./tools/frame_bridge/Game-Smoke-Test.ps1 -Mission misn03.bzn -Frames 120 `
+  -SceneColor -DepthClearOrdinal 3 -ShaderCameraTrace
+python tools/frame_bridge/Inspect-Scene-Layers.py build/<run>/shader-camera-trace.jsonl
+# Separate reference-only run: intentionally omits a verified world-effect
+# program's draws, while retaining terrain, sky and identity HUD.
+./tools/frame_bridge/Game-Smoke-Test.ps1 -Mission misn03.bzn -Frames 120 -WorldEffectsReference
+```
+
+`OPENSHIM_FRAME_BRIDGE_WORLD_EFFECTS_REFERENCE=1` is honored only with the
+scene/depth bridge. It does not ship enabled. This is a diagnostic render change,
+not a gameplay option or a per-pixel opacity mask. GOG Ogre/DX11 DLL hashes are
+qualified; the active renderer must be DX11. The concrete bound delegate must
+be exactly `Effect_fragmentHLSL4`, its exported pixel shader must match the
+actual PS binding, and the draw must use the full main viewport/target, matching
+depth extent/sample count, enabled depth testing without depth writes, ordinary
+source-alpha/additive blending, full color/sample masks, immediate context and
+non-identity matrices. Unknown states decline suppression. Only the observed
+`DrawIndexed` path is intercepted; this is not complete effect coverage.
+
+Local reference validation (`build/game-bridge-20261012-121245-883/`) imported
+120 1600x900 frames, logged at least 23700 omitted world-effect draws over the
+whole launch and saved matched color/depth/scene products. Geyser smoke was absent
+in the inspected reference; terrain, buildings, sky, cockpit and HUD remained.
+`world-effects-reference.json` records the diagnostic limits. A separate ordinary
+run (`build/game-bridge-20261012-121444-414/`) re-imported 120 frames with smoke
+present and no omitted-draw logs. Both runs restored all 60 deployment/config
+files after graceful exit. Their comparison is between separate runs, not a
+pixel-aligned before/after pair or a production opaque buffer.
+
+The ordinary 30-frame trace completed with seven variants, **7145 linked draws**,
+499 transform groups, 714 ordered draws, zero read errors and zero overflow.
+All **103 native regression tests** pass. New policy cases preserve terrain
+blends, sky/unknown programs, HUD, stale shader identities, secondary targets,
+partial viewports/writes and unqualified states. Layer-analysis tests reject
+unchecked observations and do not interpret terrain/glow blending as particle
+opacity. The next implementation must keep opaque color/depth, transparent
+coverage/contribution and HUD in separate owned, synchronized resources without
+omitting effects from the playable game.
+
 ### Transport build
 
 From the repository root on native Windows with Visual Studio and Windows SDK:

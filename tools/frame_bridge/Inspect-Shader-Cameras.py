@@ -34,6 +34,40 @@ def inspect(path):
         if item['linked'] and (not isinstance(item['matrixVariant'], int) or
                                not 0 <= item['matrixVariant'] < len(variants)):
             raise ValueError('Draw refers to absent camera variant')
+    ordered = [item for item in records if item.get('type') == 'draw-order']
+    if completion.get('orderedDraws', 0) != len(ordered):
+        raise ValueError('Inconsistent ordered draw accounting')
+    allowed_policy = {'identity-overlay', 'alpha-coverage', 'blended', 'opaque-depth-write', 'unblended-no-depth-write'}
+    ordinals = {}
+    observed_groups = {}
+    runs = []
+    for item in ordered:
+        key = (item['frame'], item['thread'])
+        if not 1 <= item['frame'] <= completion.get('orderedFrames', 0) or item['ordinal'] != ordinals.get(key, 0) + 1:
+            raise ValueError('Ordered draw sequence is incomplete or non-monotonic')
+        ordinals[key] = item['ordinal']
+        group = item['group']
+        if not isinstance(group, int) or not 0 <= group < len(draws):
+            raise ValueError('Ordered draw refers to absent group')
+        observed_groups[group] = observed_groups.get(group, 0) + 1
+        if observed_groups[group] > draws[group]['calls']:
+            raise ValueError('Ordered draw count exceeds group observations')
+        policy = item['policyCandidate']
+        if policy not in allowed_policy or policy != draws[group]['policyCandidate']:
+            raise ValueError('Ordered draw policy disagrees with observed group')
+        description = draws[group]['targetDescription']
+        signature = (item['frame'], item['thread'], item['width'], item['height'], item['precedingViewportDepthClears'],
+                     draws[group]['renderTarget'], policy)
+        if not runs or runs[-1]['signature'] != signature:
+            runs.append({'signature': signature, 'frame': item['frame'], 'width': item['width'], 'height': item['height'],
+                         'clearSegment': item['precedingViewportDepthClears'], 'policyCandidate': policy,
+                         'firstOrdinal': item['ordinal'], 'lastOrdinal': item['ordinal'], 'calls': 0,
+                         'renderTarget': draws[group]['renderTarget'], 'targetDescription': description})
+        run = runs[-1]
+        run['calls'] += 1
+        run['lastOrdinal'] = item['ordinal']
+    for run in runs:
+        del run['signature']
     objects = [item for item in records if item.get('type') == 'object-transform-group']
     if completion.get('objectTransformGroups', 0) != len(objects):
         raise ValueError('Inconsistent object observation accounting')
@@ -75,6 +109,8 @@ def inspect(path):
         'variants': rows,
         'drawGroups': draws,
         'objectTransformGroups': objects,
+        'orderedDraws': ordered,
+        'drawPolicyRuns': runs,
     }
     return summary
 
@@ -100,6 +136,14 @@ def main():
           f"single_transform_candidates={sum(r['rigidCandidate'] for r in summary['objectTransformGroups'])} "
           f"changed_groups={sum(r['changedPairs'] > 0 for r in summary['objectTransformGroups'])} "
           '(renderable lifetimes and dense object motion unqualified)')
+    print(f"ORDER draws={len(summary['orderedDraws'])} policy_runs={len(summary['drawPolicyRuns'])} "
+          '(blend/depth policies are candidates, not semantic opacity masks)')
+    for run in summary['drawPolicyRuns']:
+        target = run['targetDescription']
+        if run['frame'] == 1 and target and target['format'] in (28, 87):
+            print(f"  segment={run['clearSegment']} viewport={run['width']}x{run['height']} "
+                  f"target={target['width']}x{target['height']} samples={target['samples']} "
+                  f"draws={run['firstOrdinal']}..{run['lastOrdinal']} {run['policyCandidate']}")
     print(output)
 
 
