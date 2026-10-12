@@ -833,6 +833,11 @@ the supported bundle before deliberate architecture/packaging review.
 
 ## Primary references
 
+Native terrain geometry follow-up: [static snapshot and DXR replay](DXR_NATIVE_TERRAIN_SNAPSHOT.md)
+captures sixteen clusters without filtering by camera coverage, and builds a
+separate owned world-space BLAS in the GPU diagnostic. The live presenter is
+still depth-only; this is not a live full-scene or sunlight-shadow integration.
+
 - [Microsoft D3D11/D3D12 interop and synchronization](https://learn.microsoft.com/en-us/windows/win32/direct3d12/direct3d-12-with-direct3d-11--direct-2d-and-gdi)
 - [Microsoft shared NT texture handles](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_2/nf-dxgi1_2-idxgiresource1-createsharedhandle)
 - [Microsoft depth/format-family copies and sample-layout requirements](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-copyresource)

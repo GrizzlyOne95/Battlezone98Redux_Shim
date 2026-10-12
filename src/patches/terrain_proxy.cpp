@@ -19,6 +19,7 @@
 #include <d3d11.h>
 #include "terrain_hd_texture_copy.h"
 #include "terrain_paint.h"
+#include "frame_bridge_native_geometry.h"
 
 #include <algorithm>
 #include <array>
@@ -231,6 +232,7 @@ namespace BZROpenShim
             bool tessellationTest = false;
             bool tessellationAdaptive = false;
             std::string surfaceManifest;
+            std::string geometryExport;
             float tessellationTargetPixels = 12.0f;
             bool tessellationWireframe = false;
             int tessellationFactor = 2;
@@ -859,6 +861,7 @@ namespace BZROpenShim
             ReadEnvString("OPENSHIM_TERRAIN_HD_MANIFEST", config.hdManifest);
             ReadEnvString("OPENSHIM_TERRAIN_HD_EXPORT", config.hdExportPath);
             ReadEnvString("OPENSHIM_TERRAIN_SURFACE_MANIFEST", config.surfaceManifest);
+            ReadEnvString("OPENSHIM_TERRAIN_GEOMETRY_EXPORT", config.geometryExport);
             int debugOverride = 0;
             if (ReadEnvInt("OPENSHIM_TERRAIN_SEMANTIC_DEBUG", debugOverride))
                 config.semanticDebugMode = debugOverride;
@@ -938,7 +941,7 @@ namespace BZROpenShim
                 config.semanticFrameCaptures = 0;
                 config.followCamera = true;
             }
-            if (config.hdEnabled || !config.hdExportPath.empty() || !config.surfaceManifest.empty())
+            if (config.hdEnabled || !config.hdExportPath.empty() || !config.surfaceManifest.empty() || !config.geometryExport.empty())
             {
                 config.proxyEnabled = config.semanticRenderer = false;
                 config.followCamera = true;
@@ -3875,6 +3878,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             return true;
         }
 
+        void ResetNativeGeometryExport();
         void ResetSelectedState()
         {
             g_proxy = {};
@@ -3882,6 +3886,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             g_nextZoneOrdinal = 0;
             g_teardownDepth = 0;
             g_teardownIncludesClear = false;
+            ResetNativeGeometryExport();
         }
 
         // Is the proxy Entity still registered with the SceneManager?
@@ -4655,6 +4660,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         #include "terrain_native_hd.inl"
         #include "terrain_surface_normals.inl"
         #include "terrain_atlas_export.inl"
+        #include "terrain_geometry_export.inl"
 
         bool GetActiveCameraPosition(void*& camera, Vector3& position)
         {
@@ -4992,7 +4998,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                     if (g_config.hdEnabled) InstallNativeTerrainHd();
                     if (g_config.tessellationTest)
                         InstallNativeTerrainTessellationTest();
-                    else if (!g_config.hdEnabled && g_config.hdExportPath.empty() && g_config.surfaceManifest.empty())
+                    else if (!g_config.hdEnabled && g_config.hdExportPath.empty() && g_config.surfaceManifest.empty() && g_config.geometryExport.empty())
                         CreateProxy();
                     CaptureSemantics(true);
                     BuildAndValidateSemanticVertices(true);
@@ -5460,7 +5466,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
         if (!g_config.proxyEnabled && !g_config.semanticCapture &&
             !g_config.semanticValidateUv && !g_config.semanticRenderer &&
-            !g_config.tessellationTest && !g_config.hdEnabled && g_config.hdExportPath.empty() && g_config.surfaceManifest.empty())
+            !g_config.tessellationTest && !g_config.hdEnabled && g_config.hdExportPath.empty() && g_config.surfaceManifest.empty() && g_config.geometryExport.empty())
             return;
         g_shutdown.store(false);
         LogShimA(LogLevel::Info, "terrain-proxy",
@@ -5508,10 +5514,12 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
     {
         // Cheap early-out: this runs on every rendered world frame and must
         // cost nothing when the opt-in capture is off.
-        if ((g_config.semanticFrameCaptures <= 0 && g_config.surfaceManifest.empty()) || !g_active.load() ||
+        if ((g_config.semanticFrameCaptures <= 0 && g_config.surfaceManifest.empty() && g_config.geometryExport.empty()) || !g_active.load() ||
             g_shutdown.load())
             return;
         std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_config.geometryExport.empty() && g_proxy.selected && !g_proxy.tearingDown)
+            ExportNativeTerrainGeometry();
         if (!g_config.surfaceManifest.empty() && !g_SurfaceAttemptFinished &&
             g_proxy.sourceEntity && !g_proxy.tearingDown)
             InstallNativeTerrainSurface();

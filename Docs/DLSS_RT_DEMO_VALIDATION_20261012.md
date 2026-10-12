@@ -410,3 +410,22 @@ missing CR counterparts in the current sibling checkout. None of those 14
 shared shaders were changed; only the separate terrain tessellation experiment
 was extended. General CR shader parity is therefore unavailable, not passed.
 GOG native and WARP evidence does not establish Steam/Proton/Wine compatibility.
+
+## Native terrain DXR snapshot checkpoint
+
+The new [native terrain capture/replay](DXR_NATIVE_TERRAIN_SNAPSHOT.md) exports
+base position/height/index streams plus full node transforms from sixteen
+selected-zone clusters. It imports these owned world triangles into a second
+DXR BLAS alongside visible depth. Analytic hardware tests establish occlusion
+from geometry absent from depth, with translated/rotated world-camera agreement.
+
+PID 8592, GOG misn03, `build/game-bridge-20261012-170604-679/`, exported 204800
+native triangles and completed 60 1600x900 game frames, 57 depth-only DXR frames,
+graceful exit zero and all 60 file hash restorations. A paired frame-60 replay
+with native geometry darkened 7308 pixels by more than two levels versus the
+same depth-only AO, maximum channel change 57 and exact alpha preservation.
+102611 captured native triangles lie outside at least one view clip plane.
+The real labeled comparison was inspected. This is a static snapshot from the
+same mission, not synchronized live native scene transport or full RT shadows.
+All 107 native, seven x86 helper and ten x64 helper/GPU tests pass. Earlier
+declined/invalid-input attempts are recorded separately in the snapshot doc.
