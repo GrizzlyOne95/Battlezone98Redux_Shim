@@ -129,41 +129,180 @@ function Get-SteamLibraryRoots {
     $libraryRoots | Where-Object { $_ } | Select-Object -Unique
 }
 
-function Get-GamePaths {
+# GOG records the install folder in the registry (product id 1454067812), so a
+# custom GOG location is found there. Missing keys are normal and silent.
+function Get-GogRegistryPaths {
+    $found = New-Object System.Collections.Generic.List[string]
+    foreach ($location in @(
+        @{ Path = "HKLM:\SOFTWARE\WOW6432Node\GOG.com\Games\1454067812"; Name = "path" },
+        @{ Path = "HKLM:\SOFTWARE\GOG.com\Games\1454067812"; Name = "path" },
+        @{ Path = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\1454067812_is1"; Name = "InstallLocation" }
+    )) {
+        try {
+            $item = Get-ItemProperty -Path $location.Path -ErrorAction Stop
+            $value = [string]$item.($location.Name)
+            if ($value) { $found.Add($value.Trim().TrimEnd('\')) }
+        } catch { }
+    }
+    $found
+}
+
+function Add-DetectedInstall {
+    param(
+        [System.Collections.Generic.List[string]]$List,
+        [hashtable]$Sources,
+        [string]$Path,
+        [string]$Source
+    )
+    $before = $List.Count
+    Add-UniquePath -List $List -Path $Path
+    if ($List.Count -gt $before) { $Sources[$List[$List.Count - 1]] = $Source }
+}
+
+# Every install found, as objects with Path and Source (Steam, GOG or Other).
+function Get-GameInstalls {
     $paths = New-Object System.Collections.Generic.List[string]
+    $sources = @{}
     if ($requestedGamePath) {
         if (-not (Test-BzrGameDir $requestedGamePath)) {
             throw "OPENSHIM_GAME_PATH is not a Battlezone 98 Redux install: $requestedGamePath"
         }
-        Add-UniquePath -List $paths -Path $requestedGamePath
-        return $paths
+        Add-DetectedInstall -List $paths -Sources $sources -Path $requestedGamePath -Source "Other"
     }
-
-    foreach ($steamRoot in Get-SteamRoots) {
-        foreach ($libraryRoot in Get-SteamLibraryRoots -SteamRoot $steamRoot) {
-            $steamApps = Join-Path $libraryRoot "steamapps"
-            $manifest = Join-Path $steamApps "appmanifest_$steamAppId.acf"
-            $installDir = $defaultInstallDir
-            if (Test-Path -LiteralPath $manifest) {
-                foreach ($line in Get-Content -Path $manifest) {
-                    $match = [regex]::Match($line, '"installdir"\s+"([^"]+)"')
-                    if ($match.Success) {
-                        $installDir = $match.Groups[1].Value
-                        break
-                    }
-                }
-            }
-            $candidate = Join-Path $steamApps (Join-Path "common" $installDir)
-            if (Test-BzrGameDir $candidate) { Add-UniquePath -List $paths -Path $candidate }
+    elseif ($env:OPENSHIM_TEST_GAME_PATHS) {
+        # Test-only: replaces detection so a test can never reach a real install.
+        foreach ($candidate in $env:OPENSHIM_TEST_GAME_PATHS.Split(';')) {
+            if (Test-BzrGameDir $candidate) { Add-DetectedInstall -List $paths -Sources $sources -Path $candidate -Source "Other" }
         }
     }
+    else {
+        foreach ($steamRoot in Get-SteamRoots) {
+            foreach ($libraryRoot in Get-SteamLibraryRoots -SteamRoot $steamRoot) {
+                $steamApps = Join-Path $libraryRoot "steamapps"
+                $manifest = Join-Path $steamApps "appmanifest_$steamAppId.acf"
+                $installDir = $defaultInstallDir
+                if (Test-Path -LiteralPath $manifest) {
+                    foreach ($line in Get-Content -Path $manifest) {
+                        $match = [regex]::Match($line, '"installdir"\s+"([^"]+)"')
+                        if ($match.Success) {
+                            $installDir = $match.Groups[1].Value
+                            break
+                        }
+                    }
+                }
+                $candidate = Join-Path $steamApps (Join-Path "common" $installDir)
+                if (Test-BzrGameDir $candidate) { Add-DetectedInstall -List $paths -Sources $sources -Path $candidate -Source "Steam" }
+            }
+        }
 
-    foreach ($programFiles in Get-ProgramFilesRoots) {
-        $candidate = Join-Path $programFiles "GOG Galaxy\Games\Battlezone 98 Redux"
-        if (Test-BzrGameDir $candidate) { Add-UniquePath -List $paths -Path $candidate }
+        foreach ($candidate in Get-GogRegistryPaths) {
+            if (Test-BzrGameDir $candidate) { Add-DetectedInstall -List $paths -Sources $sources -Path $candidate -Source "GOG" }
+        }
+        foreach ($programFiles in Get-ProgramFilesRoots) {
+            $candidate = Join-Path $programFiles "GOG Galaxy\Games\Battlezone 98 Redux"
+            if (Test-BzrGameDir $candidate) { Add-DetectedInstall -List $paths -Sources $sources -Path $candidate -Source "GOG" }
+        }
+    }
+    foreach ($path in $paths) { [pscustomobject]@{ Path = $path; Source = $sources[$path] } }
+}
+
+function Get-GamePaths {
+    foreach ($install in @(Get-GameInstalls)) { $install.Path }
+}
+
+# --- interactive chooser: only when OpenShimSetup.exe sets OPENSHIM_INTERACTIVE=1 ---
+
+function Test-InteractiveSetup {
+    $env:OPENSHIM_INTERACTIVE -eq "1"
+}
+
+function Read-Answer {
+    param([string]$Prompt)
+    try { $answer = Read-Host $Prompt } catch { $answer = $null }
+    if ($null -eq $answer) { return "Q" }   # input closed: same as quitting
+    $answer.Trim()
+}
+
+# Folder picker. Returns a valid game folder, or $null if the user cancels.
+function Read-BrowsedGameDir {
+    $testResults = $null
+    if ($env:OPENSHIM_TEST_BROWSE) {
+        # Test-only: stands in for the dialog; an empty entry, or none left, is Cancel.
+        $testResults = New-Object System.Collections.Generic.Queue[string]
+        foreach ($entry in $env:OPENSHIM_TEST_BROWSE.Split(';')) { $testResults.Enqueue($entry) }
+    }
+    while ($true) {
+        $picked = $null
+        if ($null -ne $testResults) {
+            if ($testResults.Count -gt 0) { $picked = $testResults.Dequeue() }
+        }
+        elseif ([System.Threading.Thread]::CurrentThread.ApartmentState -eq "STA") {
+            Add-Type -AssemblyName System.Windows.Forms
+            $owner = New-Object System.Windows.Forms.Form
+            $owner.TopMost = $true
+            $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+            $dialog.Description = "Choose the Battlezone 98 Redux folder (the one that contains battlezone98redux.exe)."
+            if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { $picked = $dialog.SelectedPath }
+            $owner.Dispose()
+        }
+        else {
+            $picked = Read-Host "Type the full path of the Battlezone 98 Redux folder (leave empty to cancel)"
+        }
+        if (-not $picked) { return $null }
+        if (Test-BzrGameDir $picked) { return [System.IO.Path]::GetFullPath($picked) }
+        Write-Host "That folder does not contain battlezone98redux.exe, so it is not a Battlezone 98 Redux folder: $picked"
+    }
+}
+
+# Returns the game folders to work on. Without OPENSHIM_INTERACTIVE=1 this is
+# exactly Get-GamePaths (every install found). -Filter narrows the list shown.
+function Resolve-GamePaths {
+    param([string]$Action, [scriptblock]$Filter)
+    if (-not (Test-InteractiveSetup)) { return @(Get-GamePaths) }
+
+    $installs = @(Get-GameInstalls)
+    if ($requestedGamePath) {
+        Write-Host "Game folder: $($installs[0].Path)"
+        return @($installs[0].Path)
+    }
+    if ($Filter) {
+        $narrowed = @($installs | Where-Object { & $Filter $_.Path })
+        if ($narrowed.Count -gt 0) { $installs = $narrowed }
     }
 
-    return $paths
+    while ($true) {
+        if ($installs.Count -eq 0) {
+            Write-Host "Battlezone 98 Redux was not found on this computer."
+            $answer = Read-Answer "Press B to browse for the game folder, or Q to quit"
+        }
+        elseif ($installs.Count -eq 1) {
+            Write-Host "Battlezone 98 Redux was found here:"
+            Write-Host "  $($installs[0].Source) - $($installs[0].Path)"
+            $answer = Read-Answer "Press Enter to $Action it, B to browse for another folder, or Q to quit"
+            if ($answer -eq "") { return @($installs[0].Path) }
+        }
+        else {
+            Write-Host "Battlezone 98 Redux was found in these places:"
+            for ($i = 0; $i -lt $installs.Count; $i++) {
+                Write-Host ("  {0}. {1} - {2}" -f ($i + 1), $installs[$i].Source, $installs[$i].Path)
+            }
+            $answer = Read-Answer "Type a number to $Action that one, A for all of them, B to browse for another folder, or Q to quit"
+            if ($answer -match '^[aA]$') { return @($installs | ForEach-Object { $_.Path }) }
+            if ($answer -match '^\d+$' -and [int]$answer -ge 1 -and [int]$answer -le $installs.Count) {
+                return @($installs[[int]$answer - 1].Path)
+            }
+        }
+        if ($answer -match '^[qQ]$') {
+            Write-Host "Cancelled. Nothing was changed."
+            exit 1
+        }
+        if ($answer -match '^[bB]$') {
+            $browsed = Read-BrowsedGameDir
+            if ($browsed) { return @($browsed) }
+            continue
+        }
+        Write-Host "Please choose one of the options listed."
+    }
 }
 
 function Test-OpenShimDll {
@@ -533,7 +672,7 @@ function Deploy-PlayerIni {
     Write-Host "  reset openshim.ini (backup: $(Split-Path -Leaf $backup))"
 }
 
-$gamePaths = @(Get-GamePaths)
+$gamePaths = @(Resolve-GamePaths -Action "install into")
 if ($gamePaths.Count -eq 0) {
     throw "Could not find Battlezone 98 Redux. Set OPENSHIM_GAME_PATH to the game folder and run again."
 }

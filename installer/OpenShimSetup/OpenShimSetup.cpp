@@ -6,8 +6,15 @@
 //
 //   OpenShimSetup.exe              install (offline when a suite is embedded)
 //   OpenShimSetup.exe --uninstall  run uninstall_windows.ps1 instead
-//   --no-pause                     do not wait for Enter at the end
+//   <game folder>                  an existing folder (e.g. dragged onto the exe)
+//                                  is used as OPENSHIM_GAME_PATH, not passed on
+//   --no-pause                     do not wait for Enter at the end, and do not ask
+//                                  which install to use (scripted run)
+//   --quiet                        do not ask which install to use (all installs
+//                                  found, or OPENSHIM_GAME_PATH); still pauses
 //
+// With a console on stdin and neither flag, OPENSHIM_INTERACTIVE=1 is set so the
+// scripts list the installs found and let the user pick or browse for a folder.
 // Any other argument is handed to the script unchanged, and the environment
 // the scripts understand (OPENSHIM_GAME_PATH, OPENSHIM_RESET_INI, ...) is
 // inherited unchanged.
@@ -134,6 +141,16 @@ std::wstring Quote(const std::wstring& a) {
     return r;
 }
 
+bool IsDirectory(const std::wstring& path) {
+    DWORD attr = GetFileAttributesW(path.c_str());
+    return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
+bool HasConsoleInput() {
+    DWORD mode;
+    return GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) != 0;
+}
+
 void Pause() {
     DWORD mode;
     if (!GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode)) return;  // not interactive
@@ -153,11 +170,15 @@ int wmain() {
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     bool uninstall = false;
     bool pause = true;
+    bool quiet = false;
+    std::wstring gameDir;
     std::vector<std::wstring> passthrough;
     for (int i = 1; argv && i < argc; ++i) {
         std::wstring a = argv[i];
         if (a == L"--uninstall") uninstall = true;
-        else if (a == L"--no-pause") pause = false;
+        else if (a == L"--no-pause") { pause = false; quiet = true; }
+        else if (a == L"--quiet") quiet = true;
+        else if (gameDir.empty() && IsDirectory(a)) gameDir = a;
         else passthrough.push_back(a);
     }
     if (argv) LocalFree(argv);
@@ -237,6 +258,9 @@ int wmain() {
         // modules and Windows PowerShell 5.1 then cannot load Get-FileHash.
         // Without the variable, 5.1 rebuilds its own default.
         SetEnvironmentVariableW(L"PSModulePath", nullptr);
+        if (!gameDir.empty()) SetEnvironmentVariableW(L"OPENSHIM_GAME_PATH", gameDir.c_str());
+        // Ask which install to use only for a person at a console.
+        SetEnvironmentVariableW(L"OPENSHIM_INTERACTIVE", (!quiet && HasConsoleInput()) ? L"1" : nullptr);
         std::wstring cmd = Quote(powershell) + L" -NoProfile -ExecutionPolicy Bypass -File " + Quote(scriptPath);
         for (const auto& a : passthrough) cmd += L" " + Quote(a);
 
