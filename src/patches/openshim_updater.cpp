@@ -499,9 +499,16 @@ namespace BZROpenShim
             return quoted;
         }
 
+        // systemTool: a Windows console program (powershell.exe) that has to
+        // outlive the game. It exits at once when started DETACHED_PROCESS (no
+        // console at all), so it gets a hidden console from CREATE_NO_WINDOW.
+        // It must also not inherit winmm.dll's SetDllDirectory(<game dir>):
+        // with it, a 32-bit powershell maps OpenShim's proxy winmm.dll from the
+        // game folder and holds it open while the helper tries to replace it.
         bool LaunchHiddenProcess(const std::filesystem::path& executable,
                                  const std::vector<std::wstring>& arguments,
-                                 std::string& error)
+                                 std::string& error,
+                                 bool systemTool = false)
         {
             std::wstring commandLine = QuoteCommandLineArgument(executable.wstring());
             for (const auto& argument : arguments)
@@ -517,12 +524,31 @@ namespace BZROpenShim
             startup.dwFlags = STARTF_USESHOWWINDOW;
             startup.wShowWindow = SW_HIDE;
             PROCESS_INFORMATION process = {};
-            if (!CreateProcessW(executable.c_str(), mutableCommand.data(), nullptr, nullptr,
-                                FALSE, CREATE_NO_WINDOW | DETACHED_PROCESS |
-                                CREATE_BREAKAWAY_FROM_JOB,
-                                nullptr, nullptr, &startup, &process))
+            std::wstring savedDllDirectory;
+            std::wstring workingDirectory;
+            if (systemTool)
             {
-                error = std::error_code(static_cast<int>(GetLastError()),
+                // Child processes inherit the DLL directory, so clear it just
+                // for the CreateProcess call and put it back straight after.
+                wchar_t buffer[MAX_PATH] = {};
+                const DWORD length = GetDllDirectoryW(MAX_PATH, buffer);
+                if (length > 0 && length < MAX_PATH)
+                    savedDllDirectory.assign(buffer, length);
+                SetDllDirectoryW(nullptr);
+                workingDirectory = executable.parent_path().wstring();
+            }
+            const BOOL created = CreateProcessW(executable.c_str(), mutableCommand.data(),
+                nullptr, nullptr, FALSE,
+                (systemTool ? CREATE_NO_WINDOW : CREATE_NO_WINDOW | DETACHED_PROCESS) |
+                    CREATE_BREAKAWAY_FROM_JOB,
+                nullptr, workingDirectory.empty() ? nullptr : workingDirectory.c_str(),
+                &startup, &process);
+            const DWORD createError = GetLastError();
+            if (systemTool && !savedDllDirectory.empty())
+                SetDllDirectoryW(savedDllDirectory.c_str());
+            if (!created)
+            {
+                error = std::error_code(static_cast<int>(createError),
                                         std::system_category()).message();
                 return false;
             }
@@ -1138,7 +1164,7 @@ namespace BZROpenShim
             L"WindowsPowerShell" / L"v1.0" / L"powershell.exe";
         if (!LaunchHiddenProcess(powershell,
                 { L"-NoProfile", L"-WindowStyle", L"Hidden", L"-ExecutionPolicy", L"Bypass",
-                  L"-Command", script }, error))
+                  L"-Command", script }, error, true))
             return false;
 
         g_RestartRequested = true;
