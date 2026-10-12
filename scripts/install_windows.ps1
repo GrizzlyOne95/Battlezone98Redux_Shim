@@ -19,6 +19,13 @@
 # refreshes openshim.ini.canonical so startup migration has the current shipped
 # preset available. Set OPENSHIM_RESET_INI=1 for an explicit backup-and-reset.
 #
+# OPENSHIM_SUITE_ZIP=<path> is the offline mode OpenShimSetup.exe uses: that
+# local OpenShim-Suite.zip is deployed instead of downloading one. It is only
+# accepted together with OPENSHIM_SUITE_SHA256 (64 hex digits), and the zip is
+# verified against it before anything is expanded. Without both, the run is
+# refused. It takes precedence over a local checkout build, but not
+# OPENSHIM_DLL. With neither set, the download path above is unchanged.
+#
 # OPENSHIM_DLL is an advanced override and only proceeds when a matching
 # artifact set sits beside that DLL. No Steam launch options are required on
 # Windows.
@@ -262,6 +269,25 @@ function Get-ArtifactSet {
     }
 }
 
+# Expand a hash-verified suite zip and report which release it is. Shared by
+# the download and the offline path so both unpack identically.
+function Expand-SuiteZip {
+    param([string]$Zip, [string]$TempRoot)
+
+    $suite = Join-Path $TempRoot "suite"
+    Expand-Archive -LiteralPath $Zip -DestinationPath $suite -Force
+
+    $metadata = Join-Path $suite "release_metadata.json"
+    if (Test-Path -LiteralPath $metadata) {
+        $tag = [regex]::Match((Get-Content -LiteralPath $metadata -Raw), '"Tag"\s*:\s*"([^"]*)"')
+        if ($tag.Success) {
+            Write-Host "  bundle release: $($tag.Groups[1].Value)"
+        }
+    }
+
+    return $suite
+}
+
 function Get-SuiteBundle {
     param([string]$Base, [string]$TempRoot)
 
@@ -280,18 +306,27 @@ function Get-SuiteBundle {
     Assert-Hash -FilePath $zip -Expected $expected.ToLowerInvariant()
     Write-Host "  verified OpenShim-Suite.zip sha256=$($expected.ToLowerInvariant())"
 
-    $suite = Join-Path $TempRoot "suite"
-    Expand-Archive -LiteralPath $zip -DestinationPath $suite -Force
+    return (Expand-SuiteZip -Zip $zip -TempRoot $TempRoot)
+}
 
-    $metadata = Join-Path $suite "release_metadata.json"
-    if (Test-Path -LiteralPath $metadata) {
-        $tag = [regex]::Match((Get-Content -LiteralPath $metadata -Raw), '"Tag"\s*:\s*"([^"]*)"')
-        if ($tag.Success) {
-            Write-Host "  bundle release: $($tag.Groups[1].Value)"
-        }
+# Offline twin of Get-SuiteBundle for OpenShimSetup.exe, which carries the
+# release zip inside itself. A local zip is only as trustworthy as the hash it
+# is checked against, and Assert-Hash passes silently on an empty hash, so the
+# hash is required and validated here rather than left to that default.
+function Get-LocalSuiteBundle {
+    param([string]$Zip, [string]$Sha256, [string]$TempRoot)
+
+    if ($Sha256 -notmatch '^[0-9a-fA-F]{64}$') {
+        throw "OPENSHIM_SUITE_ZIP requires OPENSHIM_SUITE_SHA256 (64 hex digits) so the bundle can be verified. Refusing to deploy it."
     }
+    if (-not (Test-Path -LiteralPath $Zip -PathType Leaf)) {
+        throw "OPENSHIM_SUITE_ZIP does not name a file: $Zip"
+    }
+    Write-Host "Using local release bundle $Zip ..."
+    Assert-Hash -FilePath $Zip -Expected $Sha256.ToLowerInvariant()
+    Write-Host "  verified OpenShim-Suite.zip sha256=$($Sha256.ToLowerInvariant())"
 
-    return $suite
+    return (Expand-SuiteZip -Zip $Zip -TempRoot $TempRoot)
 }
 
 function Copy-ResourceDirectory {
@@ -528,7 +563,7 @@ try {
             throw "OPENSHIM_DLL requires patches.json, openshim.ini, and net.ini beside the DLL (or scripts\patches.json), plus bzloader.dll and plugins\openshim.dll if that DLL is a post-split bootstrap. Refusing to mix versions."
         }
         Write-Host "Using OPENSHIM_DLL with matched companions: $($artifacts.Dll)"
-    } elseif ($localRoot) {
+    } elseif ($localRoot -and -not $env:OPENSHIM_SUITE_ZIP) {
         $artifacts = Get-ArtifactSet -Root $localRoot
         if ($artifacts) {
             Write-Host "Using local Release build with matched companions: $($artifacts.Dll)"
@@ -547,7 +582,11 @@ try {
     if (-not $artifacts) {
         $base = "https://github.com/$repoSlug/releases/latest/download"
         try {
-            $suiteRoot = Get-SuiteBundle -Base $base -TempRoot $tempRoot
+            if ($env:OPENSHIM_SUITE_ZIP) {
+                $suiteRoot = Get-LocalSuiteBundle -Zip $env:OPENSHIM_SUITE_ZIP -Sha256 $env:OPENSHIM_SUITE_SHA256 -TempRoot $tempRoot
+            } else {
+                $suiteRoot = Get-SuiteBundle -Base $base -TempRoot $tempRoot
+            }
             $artifacts = Get-ArtifactSet -Root $suiteRoot
             if (-not $artifacts) {
                 throw "The release bundle is missing one of winmm.dll, bzloader.dll, plugins\openshim.dll, patches.json, openshim.ini, or net.ini."
