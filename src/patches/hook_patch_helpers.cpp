@@ -346,7 +346,8 @@ namespace BZROpenShim
                                       void* hook,
                                       size_t patchLen,
                                       const uint8_t* expectedBytes,
-                                      size_t expectedLen)
+                                      size_t expectedLen,
+                                      void* volatile* publishedTrampoline)
     {
         if (!target || !hook || patchLen < 5 || patchLen > detour.original.size())
             return false;
@@ -359,7 +360,10 @@ namespace BZROpenShim
         HookEngine::CodePatchLock lock;
 
         if (detour.trampoline)
+        {
+            if (publishedTrampoline) InterlockedExchangePointer(publishedTrampoline, detour.trampoline);
             return true;
+        }
 
         auto* targetBytes = reinterpret_cast<uint8_t*>(target);
         if (expectedBytes && expectedLen > 0)
@@ -428,8 +432,13 @@ namespace BZROpenShim
         memcpy(patchImage + 1, &hookRel, sizeof(hookRel));
         for (size_t i = 5; i < patchLen; ++i)
             patchImage[i] = 0x90;
+        // Publish the original callable before making the detour reachable.
+        // WriteMemory resumes other threads before returning; assigning a
+        // hook's original only after this function returns leaves a race.
+        void* previousTrampoline = publishedTrampoline ? InterlockedExchangePointer(publishedTrampoline, trampolineBytes) : nullptr;
         if (!HookEngine::WriteMemory(static_cast<uint32_t>(target), patchImage, patchLen))
         {
+            if (publishedTrampoline) InterlockedExchangePointer(publishedTrampoline, previousTrampoline);
             VirtualFree(trampolineBytes, 0, MEM_RELEASE);
             return false;
         }

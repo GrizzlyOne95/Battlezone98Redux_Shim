@@ -34,6 +34,13 @@ def inspect(path):
         if item['linked'] and (not isinstance(item['matrixVariant'], int) or
                                not 0 <= item['matrixVariant'] < len(variants)):
             raise ValueError('Draw refers to absent camera variant')
+    objects = [item for item in records if item.get('type') == 'object-transform-group']
+    if completion.get('objectTransformGroups', 0) != len(objects):
+        raise ValueError('Inconsistent object observation accounting')
+    for item in objects:
+        if not 1 <= item['transformCount'] <= 256 or item['lifetimeQualified'] is not False:
+            raise ValueError('Object count/lifetime observation invalid')
+        difference(item['firstMatrix'], item['lastMatrix'])
     identity = [1 if i % 5 == 0 else 0 for i in range(16)]
     rows = []
     for item in variants:
@@ -67,6 +74,7 @@ def inspect(path):
             and completion['errors'] == 0 and completion['overflow'] == 0,
         'variants': rows,
         'drawGroups': draws,
+        'objectTransformGroups': objects,
     }
     return summary
 
@@ -88,6 +96,10 @@ def main():
               f"RS-depth-match={row['projectionMatchesRSDepth']}")
     print(f"DRAWS total={summary['completion']['drawCalls']} linked={summary['completion']['linkedDrawCalls']} "
           '(bound-buffer identity verified; contents and shader consumption unqualified)')
+    print(f"OBJECTS groups={len(summary['objectTransformGroups'])} "
+          f"single_transform_candidates={sum(r['rigidCandidate'] for r in summary['objectTransformGroups'])} "
+          f"changed_groups={sum(r['changedPairs'] > 0 for r in summary['objectTransformGroups'])} "
+          '(renderable lifetimes and dense object motion unqualified)')
     print(output)
 
 

@@ -3,6 +3,12 @@
 #include <vector>
 #include <cstdlib>
 
+namespace
+{
+    BZROpenShim::FrameBridge::CameraSnapshot gSceneFixture{};
+    bool ObserveSceneFixture(BZROpenShim::FrameBridge::CameraSnapshot& camera) { camera = gSceneFixture; return true; }
+}
+
 int main(int argc, char** argv)
 {
     using namespace BZROpenShim::FrameBridge;
@@ -13,6 +19,8 @@ int main(int argc, char** argv)
     bool bgra = false;
     bool depthEnabled = false;
     bool motionFixture = false;
+    bool sceneEnabled = false;
+    bool demoResolution = false;
     for (int i = 2; i < argc; ++i)
     {
         const std::string arg(argv[i]);
@@ -21,6 +29,8 @@ int main(int argc, char** argv)
         else if (arg == "--bgra") bgra = true;
         else if (arg == "--depth") depthEnabled = true;
         else if (arg == "--motion-fixture") { depthEnabled = true; motionFixture = true; }
+        else if (arg == "--scene-color") { depthEnabled = true; sceneEnabled = true; }
+        else if (arg == "--demo-resolution") demoResolution = true;
         else return 2;
     }
     if (seconds == 0 || seconds > 300) return 2;
@@ -32,6 +42,7 @@ int main(int argc, char** argv)
     D3D11_TEXTURE2D_DESC desc{};
     desc.Width = padded ? 333u : 320u;
     desc.Height = padded ? 181u : 180u;
+    if (demoResolution) { desc.Width=1280; desc.Height=720; }
     desc.MipLevels = desc.ArraySize = 1;
     desc.Format = bgra ? DXGI_FORMAT_B8G8R8A8_UNORM : DXGI_FORMAT_R8G8B8A8_UNORM;
     desc.SampleDesc = {msaa ? 4u : 1u, 0};
@@ -52,8 +63,16 @@ int main(int argc, char** argv)
         if (SUCCEEDED(hr)) hr = device->CreateDepthStencilView(depth.Get(), nullptr, &dsv);
     }
     Producer producer;
-    if (SUCCEEDED(hr)) hr = producer.Start(device.Get(), desc, depthEnabled);
+    if (SUCCEEDED(hr)) hr = producer.Start(device.Get(), desc, depthEnabled, sceneEnabled);
     if (FAILED(hr)) { std::fprintf(stderr, "source initialization failed: 0x%08lx\n", static_cast<unsigned long>(hr)); return 1; }
+    if (sceneEnabled)
+    {
+        HANDLE mapping = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, MappingName(GetCurrentProcessId()).c_str());
+        auto* frame = mapping ? static_cast<SharedFrame*>(MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SharedFrame))) : nullptr;
+        if (!frame) { if (mapping) CloseHandle(mapping); return 1; }
+        Exchange(frame->requestedDepthClear, 1); // synthetic fixture's single boundary
+        UnmapViewOfFile(frame); CloseHandle(mapping);
+    }
     std::printf("SOURCE pid=%lu pointer_bits=%zu sample_count=%u\n", GetCurrentProcessId(), sizeof(void*) * 8, desc.SampleDesc.Count);
     std::fflush(stdout);
     const ULONGLONG end = GetTickCount64() + seconds * 1000ull;
@@ -92,6 +111,17 @@ int main(int argc, char** argv)
             LARGE_INTEGER qpc{};
             QueryPerformanceCounter(&qpc);
             camera.observationQpc = qpc.QuadPart;
+        }
+        if (sceneEnabled)
+        {
+            float sceneColor[4] = {color[0], color[1], 128.0f / 255.0f, 1};
+            context->ClearRenderTargetView(rtv.Get(), sceneColor);
+            ID3D11RenderTargetView* bound = rtv.Get();
+            context->OMSetRenderTargets(1, &bound, dsv.Get());
+            gSceneFixture = camera;
+            producer.BeforeDepthClear(context.Get(), dsv.Get(), D3D11_CLEAR_DEPTH, &ObserveSceneFixture);
+            context->ClearDepthStencilView(dsv.Get(), D3D11_CLEAR_DEPTH, 1, 0);
+            context->ClearRenderTargetView(rtv.Get(), color); // distinguish final from earlier scene bytes
         }
         hr = producer.Publish(source.Get(), depth.Get(), DepthReduction::Minimum, &camera);
         if (FAILED(hr)) { std::fprintf(stderr, "publish failed: 0x%08lx\n", static_cast<unsigned long>(hr)); return 1; }

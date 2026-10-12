@@ -137,7 +137,8 @@ namespace BZROpenShim
                                void* hook,
                                size_t patchLen,
                                const uint8_t* expectedBytes,
-                               size_t expectedLen);
+                               size_t expectedLen,
+                               void* volatile* publishedTrampoline = nullptr);
     bool ExpectedBytesMatchAt(uintptr_t address,
                               const uint8_t* expectedBytes,
                               size_t expectedLen);

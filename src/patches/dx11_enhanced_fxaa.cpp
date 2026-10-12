@@ -24,6 +24,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <stdexcept>
 
 namespace BZROpenShim
 {
@@ -41,6 +42,11 @@ namespace BZROpenShim
         std::atomic<bool> g_FxaaEnabled{ false };
         std::atomic<bool> g_FrameBridgeEnabled{ false };
         std::atomic<bool> g_FrameBridgeDepthEnabled{ false };
+        std::atomic<bool> g_FrameBridgeSceneColorEnabled{ false };
+        Microsoft::WRL::ComPtr<IDXGISwapChain> g_FrameBridgeSceneSwapChain;
+        thread_local bool g_BridgeIdentityOverlayParameters = false;
+        using FnBridgeDrawIndexed = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, UINT, UINT, INT);
+        FnBridgeDrawIndexed g_RealBridgeDrawIndexed = nullptr;
         std::atomic<bool> g_PermanentFault{ false };
         std::atomic<bool> g_UnsupportedFormatLogged{ false };
         uintptr_t g_DiscoveryThread = 0;
@@ -50,7 +56,7 @@ namespace BZROpenShim
         std::mutex g_RuntimeMutex;
         std::mutex g_FrameBridgeMutex;
         FrameBridge::Producer g_FrameBridge;
-        IDXGISwapChain* g_FrameBridgeOwner = nullptr; // identity only; never AddRef a swapchain
+        IDXGISwapChain* g_FrameBridgeOwner = nullptr; // identity only; scene probe owns a separate chain reference, never a buffer
 
         using FnD3D11CreateDevice = HRESULT(WINAPI*)(
             IDXGIAdapter*, D3D_DRIVER_TYPE, HMODULE, UINT,
@@ -921,6 +927,29 @@ namespace BZROpenShim
             return true;
         }
 
+        void ObserveBridgeOverlayParameters(bool identity) { g_BridgeIdentityOverlayParameters = identity; }
+        void ObserveBridgeOverlay(ID3D11DeviceContext* context)
+        {
+            if (!g_FrameBridgeEnabled.load() || g_ShutdownRequested.load()) return;
+            try
+            {
+                std::lock_guard<std::mutex> lock(g_FrameBridgeMutex);
+                if (!g_FrameBridge.AwaitingOverlay() || !g_FrameBridgeSceneSwapChain) return;
+                FrameBridge::CameraSnapshot camera{};
+                if (!FrameBridge::ObserveViewportCamera(camera)) return;
+                Microsoft::WRL::ComPtr<ID3D11Texture2D> backbuffer;
+                if (FAILED(g_FrameBridgeSceneSwapChain->GetBuffer(0, IID_PPV_ARGS(&backbuffer)))) return;
+                g_FrameBridge.BeforeOverlay(context, backbuffer.Get(), camera);
+            }
+            catch (...) { LogShimA(LogLevel::Warn, kComponent, "[FrameBridge] overlay observation failed; frame remains unqualified"); }
+        }
+
+        void STDMETHODCALLTYPE HookBridgeDrawIndexed(ID3D11DeviceContext* context, UINT count, UINT start, INT base)
+        {
+            if (g_BridgeIdentityOverlayParameters && g_FrameBridgeSceneColorEnabled.load()) ObserveBridgeOverlay(context);
+            if (g_RealBridgeDrawIndexed) g_RealBridgeDrawIndexed(context, count, start, base);
+        }
+
         void STDMETHODCALLTYPE HookBridgeClearDepth(ID3D11DeviceContext* context, ID3D11DepthStencilView* view,
             UINT flags, FLOAT depth, UINT8 stencil)
         {
@@ -942,13 +971,17 @@ namespace BZROpenShim
                 try
                 {
                     std::lock_guard<std::mutex> lock(g_FrameBridgeMutex);
-                    g_FrameBridge.BeforeDepthClear(context, view, flags, &FrameBridge::ObserveViewportCamera);
+                    Microsoft::WRL::ComPtr<ID3D11Texture2D> backbuffer;
+                    if (g_FrameBridgeSceneSwapChain && FAILED(g_FrameBridgeSceneSwapChain->GetBuffer(0, IID_PPV_ARGS(&backbuffer))))
+                        throw std::runtime_error("scene backbuffer unavailable");
+                    g_FrameBridge.BeforeDepthClear(context, view, flags, &FrameBridge::ObserveViewportCamera, backbuffer.Get());
                 }
                 catch (...)
                 {
                     g_FrameBridgeEnabled.store(false);
                     std::lock_guard<std::mutex> bridgeLock(g_FrameBridgeMutex);
                     g_FrameBridge.Stop();
+                    g_FrameBridgeSceneSwapChain.Reset();
                     LogShimA(LogLevel::Warn, kComponent, "[FrameBridge] pre-clear observation failed; capture disabled");
                 }
             }
@@ -970,10 +1003,13 @@ namespace BZROpenShim
             {
                 D3D11_TEXTURE2D_DESC desc{};
                 color->GetDesc(&desc);
-                hr = g_FrameBridge.Start(device.Get(), desc, g_FrameBridgeDepthEnabled.load());
+                hr = g_FrameBridge.Start(device.Get(), desc, g_FrameBridgeDepthEnabled.load(), g_FrameBridgeSceneColorEnabled.load());
                 if (SUCCEEDED(hr))
                 {
                     g_FrameBridgeOwner = swapChain;
+                    if (g_FrameBridgeSceneColorEnabled.load()) g_FrameBridgeSceneSwapChain = swapChain;
+                    if (g_FrameBridgeSceneColorEnabled.load() && !FrameBridge::InstallIdentityOverlayObserver(&ObserveBridgeOverlayParameters))
+                        LogShimA(LogLevel::Warn, kComponent, "[FrameBridge] identity overlay observer unavailable; before-overlay captures fail closed");
                     LogShimA(LogLevel::Info, kComponent,
                         "[FrameBridge] transport ready pid=%lu size=%ux%u depthCandidate=%u; original Present retained; DLSS and ray tracing not integrated",
                         GetCurrentProcessId(), desc.Width, desc.Height, g_FrameBridgeDepthEnabled.load() ? 1u : 0u);
@@ -991,6 +1027,8 @@ namespace BZROpenShim
                 // documented ClearDepthStencilView slot at each Present.
                 PatchComVtableEntry(context.Get(), 53, &HookBridgeClearDepth, g_RealBridgeClearDepth,
                     "ID3D11DeviceContext::ClearDepthStencilView (frame bridge)");
+                if (g_FrameBridgeSceneColorEnabled.load()) PatchComVtableEntry(context.Get(), 12, &HookBridgeDrawIndexed,
+                    g_RealBridgeDrawIndexed, "ID3D11DeviceContext::DrawIndexed (scene color)");
                 context->OMGetRenderTargets(0, nullptr, &dsv);
                 if (dsv) { dsv->GetResource(&resource); resource.As(&depth); }
                 FrameBridge::ObserveViewportCamera(camera);
@@ -999,10 +1037,12 @@ namespace BZROpenShim
                 // are enforced by the producer; game resources stay untouched.
             }
             if (SUCCEEDED(hr)) hr = g_FrameBridge.Publish(color.Get(), depth.Get(), FrameBridge::DepthReduction::Minimum, &camera);
+            g_BridgeIdentityOverlayParameters = false;
             if (FAILED(hr))
             {
                 g_FrameBridgeEnabled.store(false, std::memory_order_release);
                 g_FrameBridge.Stop();
+                g_FrameBridgeSceneSwapChain.Reset();
                 LogShimA(LogLevel::Warn, kComponent,
                     "[FrameBridge] capture disabled hr=0x%08lX (unsupported resource, resize or device loss); game presentation continues",
                     static_cast<unsigned long>(hr));
@@ -1035,6 +1075,7 @@ namespace BZROpenShim
                     g_FrameBridgeEnabled.store(false, std::memory_order_release);
                     std::lock_guard<std::mutex> bridgeLock(g_FrameBridgeMutex);
                     g_FrameBridge.Stop();
+                    g_FrameBridgeSceneSwapChain.Reset();
                     LogShimA(LogLevel::Warn, kComponent,
                         "[FrameBridge] unexpected capture exception; capture disabled and original presentation retained");
                 }
@@ -1282,8 +1323,12 @@ namespace BZROpenShim
     void ReassertFrameBridgeDepthHook(ID3D11DeviceContext* context)
     {
         if (context && g_FrameBridgeEnabled.load() && g_FrameBridgeDepthEnabled.load() && !g_ShutdownRequested.load())
+        {
             PatchComVtableEntry(context, 53, &HookBridgeClearDepth, g_RealBridgeClearDepth,
                 "ID3D11DeviceContext::ClearDepthStencilView (frame bridge after OM bind)");
+            if (g_FrameBridgeSceneColorEnabled.load()) PatchComVtableEntry(context, 12, &HookBridgeDrawIndexed,
+                g_RealBridgeDrawIndexed, "ID3D11DeviceContext::DrawIndexed (scene color after OM bind)");
+        }
     }
 
     void InitializeDx11EnhancedFxaa()
@@ -1295,6 +1340,9 @@ namespace BZROpenShim
         char depthValue[8]{};
         const DWORD depthLength = GetEnvironmentVariableA("OPENSHIM_FRAME_BRIDGE_DEPTH", depthValue, sizeof(depthValue));
         g_FrameBridgeDepthEnabled.store(bridge && depthLength == 1 && depthValue[0] == '1');
+        char sceneValue[8]{};
+        const DWORD sceneLength = GetEnvironmentVariableA("OPENSHIM_FRAME_BRIDGE_SCENE_COLOR", sceneValue, sizeof(sceneValue));
+        g_FrameBridgeSceneColorEnabled.store(g_FrameBridgeDepthEnabled.load() && sceneLength == 1 && sceneValue[0] == '1');
         if ((!fxaa && !bridge) || g_DiscoveryThread)
             return;
 
@@ -1331,6 +1379,7 @@ namespace BZROpenShim
         {
             std::lock_guard<std::mutex> bridgeLock(g_FrameBridgeMutex);
             g_FrameBridge.Stop();
+            g_FrameBridgeSceneSwapChain.Reset();
             g_FrameBridgeOwner = nullptr;
         }
 

@@ -8,6 +8,14 @@ int main()
 {
     using namespace BZROpenShim::FrameBridge;
     using OpenShimTest::Check;
+    float uiView[16]{}, uiProjection[16]{};
+    uiView[0] = uiView[5] = uiView[10] = uiView[15] = 1;
+    std::memcpy(uiProjection, uiView, sizeof(uiView)); uiProjection[10] = uiProjection[11] = 0.5f;
+    Check(IdentityOverlayMatrices(uiView, uiProjection), "observed Ogre D3D identity overlay pair");
+    uiView[3] = 1;
+    Check(!IdentityOverlayMatrices(uiView, uiProjection), "translated world view is not overlay");
+    uiView[3] = 0; uiProjection[14] = -1;
+    Check(!IdentityOverlayMatrices(uiView, uiProjection), "perspective view is not overlay");
     CameraSnapshot camera{};
     Check(!ValidCameraSnapshot(camera), "missing camera is not fabricated identity");
     camera.status = static_cast<std::uint32_t>(CameraStatus::Observed);
@@ -80,6 +88,20 @@ int main()
     frame.depthCapturedOrdinal = 2; frame.depthMatchingClears = 3;
     frame.camera = camera; frame.camera.stage = 1; frame.camera.clearOrdinal = 2;
     Check(ValidCameraFrame(frame), "matched camera/depth dimensions and observation boundary");
+    frame.sceneColorHandle = 7;
+    frame.sceneColorStatus = static_cast<std::uint32_t>(SceneColorStatus::Candidate);
+    frame.sceneColorCapturedOrdinal = 2;
+    frame.sceneColorSource = static_cast<std::uint32_t>(SceneColorSource::BoundTarget);
+    Check(ValidSceneColorFrame(frame), "scene color/depth/camera share pre-clear boundary");
+    frame.sceneColorSource = 3;
+    Check(!ValidSceneColorFrame(frame), "unknown scene color source invalid");
+    frame.sceneColorSource = static_cast<std::uint32_t>(SceneColorSource::PresentBackbuffer);
+    Check(ValidSceneColorFrame(frame), "explicit known present source");
+    frame.sceneColorCapturedOrdinal = 3;
+    Check(!ValidSceneColorFrame(frame), "scene color from another boundary is invalid");
+    frame.sceneColorCapturedOrdinal = 2;
+    frame.sceneColorStatus = static_cast<std::uint32_t>(SceneColorStatus::Missing);
+    Check(!ValidSceneColorFrame(frame), "stale scene pixels cannot remain valid");
     ++frame.camera.observationQpc;
     Check(!ValidCameraFrame(frame), "camera observation cannot occur after its captured color frame");
     --frame.camera.observationQpc;

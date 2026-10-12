@@ -40,21 +40,28 @@ namespace BZROpenShim::FrameBridge
         ~Producer() { Stop(); }
         Producer(const Producer&) = delete;
         Producer& operator=(const Producer&) = delete;
-        HRESULT Start(ID3D11Device* device, const D3D11_TEXTURE2D_DESC& source, bool depthEnabled = false);
+        HRESULT Start(ID3D11Device* device, const D3D11_TEXTURE2D_DESC& source, bool depthEnabled = false, bool sceneColorEnabled = false);
         HRESULT Publish(ID3D11Texture2D* source, ID3D11Texture2D* depthSource = nullptr,
             DepthReduction reduction = DepthReduction::Minimum, const CameraSnapshot* presentCamera = nullptr);
         // Diagnostic snapshot before the selected matching depth clear. Call
         // before the real clear, serialized with Publish on the render thread.
         using CameraObserver = bool(*)(CameraSnapshot&);
         void BeforeDepthClear(ID3D11DeviceContext* context, ID3D11DepthStencilView* view, UINT flags,
-            CameraObserver observeCamera = nullptr);
+            CameraObserver observeCamera = nullptr, ID3D11Texture2D* presentBackbuffer = nullptr);
         void Stop();
+        bool AwaitingOverlay() const;
+        void BeforeOverlay(ID3D11DeviceContext* context, ID3D11Texture2D* presentBackbuffer, const CameraSnapshot& camera);
         bool Active() const { return frame_ && ReadInterlocked(frame_->active) == 1; }
     private:
         Microsoft::WRL::ComPtr<ID3D11Device> device_;
         Microsoft::WRL::ComPtr<ID3D11DeviceContext4> context_;
         Microsoft::WRL::ComPtr<ID3D11Texture2D> color_;
         Microsoft::WRL::ComPtr<ID3D11Texture2D> depth_;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> sceneColor_, preclearColor_;
+        SceneColorStatus preclearColorStatus_ = SceneColorStatus::Missing;
+        SceneColorSource preclearColorSource_ = SceneColorSource::Unavailable;
+        bool overlayCaptured_ = false;
+        std::uint32_t preclearColorStage_ = 0;
         DepthExtractor extractor_;
         D3D11_TEXTURE2D_DESC depthDesc_{};
         Microsoft::WRL::ComPtr<ID3D11Texture2D> preclear_;
@@ -66,10 +73,13 @@ namespace BZROpenShim::FrameBridge
         D3D11_TEXTURE2D_DESC sourceDesc_{};
         HANDLE textureHandle_ = nullptr;
         HANDLE depthHandle_ = nullptr;
+        HANDLE sceneColorHandle_ = nullptr;
         HANDLE fenceHandle_ = nullptr;
         HANDLE mapping_ = nullptr;
         SharedFrame* frame_ = nullptr;
         std::uint64_t nextFrame_ = 0;
         void CaptureDepth(ID3D11Texture2D* source, DepthReduction reduction);
+        void CapturePreclearColor(ID3D11DeviceContext* context, ID3D11DepthStencilView* view,
+            const D3D11_TEXTURE2D_DESC& depthDesc, ID3D11Texture2D* presentBackbuffer);
     };
 }

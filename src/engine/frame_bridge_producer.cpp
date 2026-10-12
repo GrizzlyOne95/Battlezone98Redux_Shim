@@ -5,10 +5,10 @@
 namespace BZROpenShim::FrameBridge
 {
     using Microsoft::WRL::ComPtr;
-    HRESULT Producer::Start(ID3D11Device* device, const D3D11_TEXTURE2D_DESC& source, bool depthEnabled)
+    HRESULT Producer::Start(ID3D11Device* device, const D3D11_TEXTURE2D_DESC& source, bool depthEnabled, bool sceneColorEnabled)
     {
         Stop();
-        if (!device || source.Width == 0 || source.Height == 0 ||
+        if ((sceneColorEnabled && !depthEnabled) || !device || source.Width == 0 || source.Height == 0 ||
             source.Width > kMaxDimension || source.Height > kMaxDimension ||
             source.MipLevels != 1 || source.ArraySize != 1 ||
             (source.Format != DXGI_FORMAT_R8G8B8A8_UNORM &&
@@ -51,6 +51,17 @@ namespace BZROpenShim::FrameBridge
             if (SUCCEEDED(hr)) hr = resource->CreateSharedHandle(nullptr,
                 DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, nullptr, &depthHandle_);
         }
+        if (SUCCEEDED(hr) && sceneColorEnabled)
+        {
+            hr = device->CreateTexture2D(&desc, nullptr, &sceneColor_);
+            resource.Reset();
+            if (SUCCEEDED(hr)) hr = sceneColor_.As(&resource);
+            if (SUCCEEDED(hr)) hr = resource->CreateSharedHandle(nullptr,
+                DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, nullptr, &sceneColorHandle_);
+            auto privateDesc = desc;
+            privateDesc.MiscFlags = 0;
+            if (SUCCEEDED(hr)) hr = device->CreateTexture2D(&privateDesc, nullptr, &preclearColor_);
+        }
         if (SUCCEEDED(hr)) hr = device5->CreateFence(0, D3D11_FENCE_FLAG_SHARED, IID_PPV_ARGS(&ready_));
         if (SUCCEEDED(hr)) hr = ready_->CreateSharedHandle(nullptr, GENERIC_ALL, nullptr, &fenceHandle_);
         ComPtr<IDXGIDevice> dxgiDevice;
@@ -85,6 +96,7 @@ namespace BZROpenShim::FrameBridge
         frame_->adapterLuidHigh = adapterDesc.AdapterLuid.HighPart;
         frame_->textureHandle = reinterpret_cast<std::uintptr_t>(textureHandle_);
         frame_->depthTextureHandle = reinterpret_cast<std::uintptr_t>(depthHandle_);
+        frame_->sceneColorHandle = reinterpret_cast<std::uintptr_t>(sceneColorHandle_);
         frame_->readyFenceHandle = reinterpret_cast<std::uintptr_t>(fenceHandle_);
         LARGE_INTEGER frequency{};
         QueryPerformanceFrequency(&frequency);
@@ -93,7 +105,8 @@ namespace BZROpenShim::FrameBridge
         return S_OK;
     }
 
-    void Producer::BeforeDepthClear(ID3D11DeviceContext* context, ID3D11DepthStencilView* view, UINT flags, CameraObserver observeCamera)
+    void Producer::BeforeDepthClear(ID3D11DeviceContext* context, ID3D11DepthStencilView* view, UINT flags,
+        CameraObserver observeCamera, ID3D11Texture2D* presentBackbuffer)
     {
         if (!Active() || !depth_ || !context || !view || !(flags & D3D11_CLEAR_DEPTH) ||
             context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE) return;
@@ -113,6 +126,10 @@ namespace BZROpenShim::FrameBridge
         if (ordinal < 1 || ordinal > 8 || matchingDepthClears_ != static_cast<UINT>(ordinal) ||
             ReadInterlocked(frame_->slotState) != static_cast<LONG>(SlotState::Free)) return;
         capturedDepthOrdinal_ = matchingDepthClears_;
+        overlayCaptured_ = false;
+        preclearColorStatus_ = SceneColorStatus::Missing; preclearColorSource_ = SceneColorSource::Unavailable;
+        preclearColorStage_ = 0;
+        if (sceneColor_ && ReadInterlocked(frame_->requestedSceneStage) == 0) CapturePreclearColor(context, view, desc, presentBackbuffer);
         preclearCamera_ = {};
         if (observeCamera)
         {
@@ -139,6 +156,47 @@ namespace BZROpenShim::FrameBridge
             context->CopyResource(preclear_.Get(), source.Get());
             preclearResult_ = device_->GetDeviceRemovedReason();
         }
+    }
+
+    void Producer::CapturePreclearColor(ID3D11DeviceContext* context, ID3D11DepthStencilView* view,
+        const D3D11_TEXTURE2D_DESC& depthDesc, ID3D11Texture2D* presentBackbuffer)
+    {
+        preclearColorStatus_ = SceneColorStatus::Missing;
+        preclearColorSource_ = SceneColorSource::Unavailable;
+        ComPtr<ID3D11RenderTargetView> target;
+        ComPtr<ID3D11DepthStencilView> boundDepth;
+        context->OMGetRenderTargets(1, &target, &boundDepth);
+        if (boundDepth.Get() != view) return;
+        ComPtr<ID3D11Resource> resource;
+        ComPtr<ID3D11Texture2D> source;
+        if (presentBackbuffer) source = presentBackbuffer;
+        else
+        {
+            if (!target) return;
+            target->GetResource(&resource);
+            if (FAILED(resource.As(&source))) { preclearColorStatus_ = SceneColorStatus::Unsupported; return; }
+        }
+        ComPtr<ID3D11Device> sourceDevice;
+        source->GetDevice(&sourceDevice);
+        D3D11_TEXTURE2D_DESC desc{};
+        source->GetDesc(&desc);
+        if (sourceDevice.Get() != device_.Get() || desc.Width != sourceDesc_.Width || desc.Height != sourceDesc_.Height || desc.Format != sourceDesc_.Format ||
+            desc.ArraySize != 1 || desc.MipLevels != 1 ||
+            (!presentBackbuffer && (desc.SampleDesc.Count != depthDesc.SampleDesc.Count || desc.SampleDesc.Quality != depthDesc.SampleDesc.Quality)) ||
+            (desc.SampleDesc.Count != 1 && desc.SampleDesc.Count != 2 && desc.SampleDesc.Count != 4 && desc.SampleDesc.Count != 8))
+        { preclearColorStatus_ = SceneColorStatus::Unsupported; return; }
+        if (desc.SampleDesc.Count > 1)
+        {
+            UINT support = 0;
+            if (FAILED(device_->CheckFormatSupport(desc.Format, &support)) || !(support & D3D11_FORMAT_SUPPORT_MULTISAMPLE_RESOLVE))
+            { preclearColorStatus_ = SceneColorStatus::Unsupported; return; }
+            context->ResolveSubresource(preclearColor_.Get(), 0, source.Get(), 0, desc.Format);
+        }
+        else context->CopyResource(preclearColor_.Get(), source.Get());
+        preclearColorStatus_ = SUCCEEDED(device_->GetDeviceRemovedReason()) ? SceneColorStatus::Candidate : SceneColorStatus::Failed;
+        if (preclearColorStatus_ == SceneColorStatus::Candidate)
+            preclearColorSource_ = presentBackbuffer ? SceneColorSource::PresentBackbuffer : SceneColorSource::BoundTarget;
+        // All game view/resource references die before the real clear/Present.
     }
 
     void Producer::CaptureDepth(ID3D11Texture2D* source, DepthReduction reduction)
@@ -173,12 +231,49 @@ namespace BZROpenShim::FrameBridge
             (hr == DXGI_ERROR_UNSUPPORTED ? DepthStatus::Unsupported : DepthStatus::Failed));
     }
 
+    bool Producer::AwaitingOverlay() const
+    {
+        return Active() && sceneColor_ && !overlayCaptured_ && capturedDepthOrdinal_ > 0 &&
+            capturedDepthOrdinal_ == matchingDepthClears_ &&
+            ReadInterlocked(frame_->requestedSceneStage) == 1 &&
+            ReadInterlocked(frame_->slotState) == static_cast<LONG>(SlotState::Free);
+    }
+    void Producer::BeforeOverlay(ID3D11DeviceContext* context, ID3D11Texture2D* presentBackbuffer, const CameraSnapshot& camera)
+    {
+        if (!AwaitingOverlay() || !context || !presentBackbuffer || !ValidCameraSnapshot(camera) ||
+            !ValidCameraSnapshot(preclearCamera_) || camera.width != sourceDesc_.Width || camera.height != sourceDesc_.Height ||
+            camera.cameraIdentity != preclearCamera_.cameraIdentity || camera.matrixSource != preclearCamera_.matrixSource ||
+            camera.nearClip != preclearCamera_.nearClip || camera.farClip != preclearCamera_.farClip ||
+            std::memcmp(camera.view, preclearCamera_.view, sizeof(camera.view)) ||
+            std::memcmp(camera.projection, preclearCamera_.projection, sizeof(camera.projection))) return;
+        ComPtr<ID3D11Device> contextDevice;
+        context->GetDevice(&contextDevice);
+        if (contextDevice.Get() != device_.Get() || context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE) return;
+        // UI may already have changed the bound DSV after the last world clear.
+        // Use the private depth snapshot and explicitly supplied present color.
+        D3D11_TEXTURE2D_DESC desc{}; presentBackbuffer->GetDesc(&desc);
+        ComPtr<ID3D11Device> sourceDevice; presentBackbuffer->GetDevice(&sourceDevice);
+        if (sourceDevice.Get() != device_.Get() || desc.Width != sourceDesc_.Width || desc.Height != sourceDesc_.Height ||
+            desc.Format != sourceDesc_.Format || desc.ArraySize != 1 || desc.MipLevels != 1) return;
+        if (desc.SampleDesc.Count != 1 && desc.SampleDesc.Count != 2 && desc.SampleDesc.Count != 4 && desc.SampleDesc.Count != 8) return;
+        if (desc.SampleDesc.Count > 1)
+        {
+            UINT support = 0;
+            if (FAILED(device_->CheckFormatSupport(desc.Format, &support)) || !(support & D3D11_FORMAT_SUPPORT_MULTISAMPLE_RESOLVE)) return;
+            context->ResolveSubresource(preclearColor_.Get(), 0, presentBackbuffer, 0, desc.Format);
+        }
+        else context->CopyResource(preclearColor_.Get(), presentBackbuffer);
+        preclearColorStatus_ = SUCCEEDED(device_->GetDeviceRemovedReason()) ? SceneColorStatus::Candidate : SceneColorStatus::Failed;
+        preclearColorSource_ = SceneColorSource::PresentBackbuffer; preclearColorStage_ = 1; overlayCaptured_ = true;
+    }
+
     HRESULT Producer::Publish(ID3D11Texture2D* source, ID3D11Texture2D* depthSource, DepthReduction reduction, const CameraSnapshot* presentCamera)
     {
         if (!source || !Active()) return E_UNEXPECTED;
         const UINT matchingClears = matchingDepthClears_;
         const UINT capturedOrdinal = capturedDepthOrdinal_;
         matchingDepthClears_ = capturedDepthOrdinal_ = 0; // reset even when this Present is skipped
+        overlayCaptured_ = false;
         D3D11_TEXTURE2D_DESC desc{};
         source->GetDesc(&desc);
         ComPtr<ID3D11Device> sourceDevice;
@@ -204,6 +299,10 @@ namespace BZROpenShim::FrameBridge
         frame_->depthCapturedOrdinal = 0;
         frame_->depthMatchingClears = matchingClears;
         frame_->camera = {};
+        frame_->sceneColorStatus = static_cast<std::uint32_t>(sceneColor_ ? SceneColorStatus::Missing : SceneColorStatus::Disabled);
+        frame_->sceneColorCapturedOrdinal = 0;
+        frame_->sceneColorStage = 0;
+        frame_->sceneColorSource = static_cast<std::uint32_t>(SceneColorSource::Unavailable);
         if (requestedOrdinal == 0) CaptureDepth(depthSource, reduction);
         else
         {
@@ -224,6 +323,17 @@ namespace BZROpenShim::FrameBridge
             if (requestedOrdinal == 0 && presentCamera) frame_->camera = *presentCamera;
             else if (requestedOrdinal > 0 && capturedOrdinal == static_cast<UINT>(requestedOrdinal)) frame_->camera = preclearCamera_;
         }
+        if (sceneColor_ && requestedOrdinal > 0 && capturedOrdinal == static_cast<UINT>(requestedOrdinal) && ValidDepthFrame(*frame_))
+        {
+            frame_->sceneColorStatus = static_cast<std::uint32_t>(preclearColorStatus_);
+            if (preclearColorStatus_ == SceneColorStatus::Candidate)
+            {
+                context_->CopyResource(sceneColor_.Get(), preclearColor_.Get());
+                frame_->sceneColorCapturedOrdinal = capturedOrdinal;
+                frame_->sceneColorSource = static_cast<std::uint32_t>(preclearColorSource_);
+                frame_->sceneColorStage = preclearColorStage_;
+            }
+        }
         const std::uint64_t id = ++nextFrame_;
         HRESULT hr = context_->Signal(ready_.Get(), id);
         context_->Flush();
@@ -242,10 +352,14 @@ namespace BZROpenShim::FrameBridge
         if (mapping_) { CloseHandle(mapping_); mapping_ = nullptr; }
         if (textureHandle_) { CloseHandle(textureHandle_); textureHandle_ = nullptr; }
         if (depthHandle_) { CloseHandle(depthHandle_); depthHandle_ = nullptr; }
+        if (sceneColorHandle_) { CloseHandle(sceneColorHandle_); sceneColorHandle_ = nullptr; }
         if (fenceHandle_) { CloseHandle(fenceHandle_); fenceHandle_ = nullptr; }
         ready_.Reset();
         color_.Reset();
         depth_.Reset();
+        sceneColor_.Reset(); preclearColor_.Reset(); preclearColorStatus_ = SceneColorStatus::Missing;
+        preclearColorSource_ = SceneColorSource::Unavailable;
+        overlayCaptured_ = false; preclearColorStage_ = 0;
         extractor_.Stop();
         depthDesc_ = {};
         preclear_.Reset(); preclearDesc_ = {};

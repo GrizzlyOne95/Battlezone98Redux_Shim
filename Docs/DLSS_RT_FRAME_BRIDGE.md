@@ -1,6 +1,8 @@
 # Experimental DLSS / ray tracing bridge
 
-Status: frame transport prototype, **not working DLSS or ray tracing**.
+Status: a local GOG/RTX 5080 companion preview runs **experimental DLSS Frame
+Generation and hardware DXR ambient occlusion**. This is a renderer experiment,
+not a playable presentation replacement or complete scene ray tracing.
 Development branch: `agent/dlss-rt-bridge`, based on current `origin/main`
 after checking open PRs and renderer history (2026-10-11).
 
@@ -9,14 +11,82 @@ after checking open PRs and renderer history (2026-10-11).
 Battlezone and its native load chain stay Win32/DX11. An opt-in OpenShim
 presentation observer copies completed SDR color into a shared GPU texture.
 A separately built x64 DX12 diagnostic helper imports it on the same adapter.
-The helper can verify synthetic pixels, save color/depth artifacts, or display a non-activating preview.
+The helper verifies synthetic pixels, saves artifacts, and displays a preview.
+An explicit Streamline build owns a proxy DX12 swapchain for frame generation;
+an explicit DXR build traces rays against reconstructed visible depth geometry.
 The normal game `Present` still runs. No input forwarding or presentation
 takeover exists at this milestone.
 
 This proves a route around the 32-bit in-process SDK boundary without replacing
-Ogre or converting the game executable. It does not prove that Streamline will
-accept a complete cross-process host integration. Reflex/simulation timing,
-input focus, and presentation ownership remain explicit feasibility gates.
+Ogre or converting the game executable. Streamline accepts the helper's private
+copies and reports additional presentations. Reflex markers and pacing describe
+the helper, not the game simulation. Coordinated input/presentation, end-to-end
+latency, dense object motion and full geometry remain feasibility gates.
+
+## Current experimental demo
+
+Local validation on 2026-10-12 used NVIDIA Streamline **2.14.1**, an RTX 5080,
+GOG `misn03.bzn`, the shader-oriented PlayerCam projection, pre-clear depth
+ordinal 3, and scene color before the first identity overlay `DrawIndexed`.
+A combined run imported 600 actual game frames: the SDK reported **550 extra
+presentations** across 550 multi-present calls, with last `DLSSGStatus=0`.
+DXR AO ran on 550 valid frames, building up to 323584 visible triangles and
+tracing eight hemisphere rays per surface pixel. Missing inputs switched FG off
+for that frame; they did not reuse stale depth or camera data.
+A subsequent recorded window demo imported 180 game frames, reported 176 extra
+SDK presentations and executed 176 DXR frames. Windows Graphics Capture recorded
+342 frames from the helper's own output window, encoded to a visually inspected
+12.27-second clip. That capture count is not an independent generated-frame count.
+
+Build optional features from an explicitly downloaded local NVIDIA SDK:
+
+```powershell
+cmake -S tools/frame_bridge -B build/frame-bridge-x64 -A x64 `
+  -DFRAME_BRIDGE_STREAMLINE_SDK=C:/path/to/streamline-sdk-v2.14.1 `
+  -DFRAME_BRIDGE_DXR=ON -DFRAME_BRIDGE_RECORD_WINDOW=ON -DFRAME_BRIDGE_GPU_TESTS=ON
+cmake --build build/frame-bridge-x64 --config Release
+# Production SDK: interpolation requires the preview to have focus.
+./tools/frame_bridge/Game-Smoke-Test.ps1 -Mission misn03.bzn -Frames 240 `
+  -StreamlineDirectory C:/path/to/streamline-sdk-v2.14.1/bin/x64 -VisibleRayTracing
+# Explicit development diagnostic: stages signed development DLLs privately,
+# enables the SDK's runWhenNoFocus option, and retains its watermark.
+./tools/frame_bridge/Game-Smoke-Test.ps1 -Mission misn03.bzn -Frames 240 `
+  -StreamlineDirectory C:/path/to/streamline-sdk-v2.14.1/bin/x64/development `
+  -StreamlineDevelopment -VisibleRayTracing -RecordWindow -RecordFrames
+python tools/frame_bridge/Encode-Window-Recording.py `
+  build/<run>/demo-window.bzrvid build/<run>/battlezone-dlss-dxr-window-demo.mp4
+# Optional full-resolution video of renderer inputs, explicitly labeled:
+python tools/frame_bridge/Encode-Window-Recording.py `
+  build/<run>/demo-rendered.bzrvid build/<run>/battlezone-dlss-dxr-inputs.mp4
+```
+
+Streamline and DXR options default off at build time. SDK headers, DLLs, logs,
+recordings and game-derived images are local artifacts, excluded from release
+and deployment payloads. Runtime loading checks NVIDIA's embedded signature.
+Production mode loads the supplied runtime directly. Development mode stages a
+private copy beside its report, writes plugin JSON there, and must not ship.
+The helper never downloads runtimes. Its project GUID identifies this experiment,
+not a registered NVIDIA game application ID or production approval.
+
+`-RecordFrames` records the helper's GPU readback with frame IDs and SDK counters.
+Its labeled video shows rendered **input frames**, not the SDK's generated
+images. The helper's preview occupies at most half the primary work area's width
+and height, leaving part of the source game visible: covering its whole window
+caused a live source-rendering timeout while simulation continued. Its swapchain
+and recorded readback retain the source resolution.
+Optional `-RecordWindow` accepts only the helper's own HWND through
+Windows Graphics Capture. Earlier full-size live previews received no WGC frames
+and failed explicitly. The smaller preview recorded 342 live output frames in
+the final combined run. Neither mode
+captures the desktop. Both record timestamps, and the encoder samples that
+timeline at 60 Hz. Encoded FPS and repeated images are
+**not** a generated-frame count or pacing benchmark. The SDK report supplies
+presentation evidence independently. Camera-motion-only FG can produce artifacts
+on moving objects, animated pilots, particles, cockpit overrides and HUD edges.
+HUDless color/postprocessing parity and the conservative difference mask are
+not generally qualified. DXR only sees the current visible depth mesh: there is
+no hidden/offscreen geometry, complete material data, ray-traced reflection/GI,
+denoising or authoritative object/camera lifecycle yet.
 
 ## Build and reproduce
 
@@ -46,8 +116,9 @@ single-sample and 4x MSAA resolve paths are exercised, plus odd-width RGBA/BGRA
 readback and BMP channel/orientation checks. Synthetic sources exit
 on a deadline; backpressure is verified after the consumer exits.
 
-The helper reports hardware DXR capability separately from effective feature
-state. It explicitly prints `DLSS=not-integrated RT=not-integrated`. Capture to
+The plain helper reports hardware DXR capability separately from effective feature
+state and prints `DLSS=not-integrated RT=not-integrated`. Optional preview modes
+name their experimental state and emit SDK/DXR reports. Capture to
 GPU-copy timing includes startup/attach delay and verification readback; it is
 **not a gameplay latency measurement or a performance benchmark**.
 
@@ -83,6 +154,10 @@ python tools/frame_bridge/Inspect-Shader-Cameras.py build/<run>/shader-camera-tr
 # CPU camera-motion diagnostic, explicitly omitting object motion and HUD:
 ./tools/frame_bridge/Game-Smoke-Test.ps1 -CameraMotion -DepthClearOrdinal 2 -Mission misn03.bzn -ShaderCameraTrace
 python tools/frame_bridge/Inspect-Camera-Motion.py build/<run>/game-camera-motion.pfm --color build/<run>/game-frame.bmp
+# Matched pre-HUD scene candidate observed locally in vehicle/on-foot missions:
+./tools/frame_bridge/Game-Smoke-Test.ps1 -SceneColor -DepthClearOrdinal 3 -Mission misn03.bzn
+# Diagnose earlier boundaries; these can contain HUD or black render targets:
+./tools/frame_bridge/Game-Smoke-Test.ps1 -SceneColor -DepthSweep -SceneStage pre-clear
 # Inspect a PFM with Python + Pillow; contrast is not linearized depth:
 python tools/frame_bridge/Inspect-Capture.py build/<run>/game-depth.pfm --color build/<run>/game-frame.bmp
 ```
@@ -124,8 +199,9 @@ layout, creates a depth-plane SRV and computes a single-sample R32_FLOAT result.
 It never modifies the game's source description and never uses color resolve
 for depth. The caller explicitly selects minimum or maximum across samples;
 these are raw device-depth values, not linear depth. No projection convention
-is assumed. The optional depth image is exported alongside color; it is not
-tagged as a DLSS input or advertised as qualified main scene depth.
+is assumed. The optional depth image is exported alongside color as a candidate.
+The explicit experimental FG preview tags a private copy with its matched
+camera convention; complete scene/cockpit coverage is still unqualified.
 
 `OPENSHIM_FRAME_BRIDGE_DEPTH=1` additionally opts into depth capture, requiring
 `OPENSHIM_FRAME_BRIDGE=1`. It starts the existing scene-depth observer even when
@@ -182,7 +258,7 @@ pass identity and draw-level projection qualification remain next.
 
 ## Camera observation foundation
 
-V4 retains the owned camera snapshot and explicitly labels its matrix source.
+V5 retains the owned camera snapshot and explicitly labels its matrix source.
 It reads the active DX11 render system's viewport through exported Ogre APIs,
 then reads that viewport's `Camera::getViewMatrix(true)` and
 `Frustum::getProjectionMatrixWithRSDepth()` as the **camera baseline for shaders**,
@@ -313,15 +389,89 @@ depth readback, including the offscreen validity mask and matching 119/120 IDs.
 
 ## Transport and failure contract
 
-- A versioned 384-byte wire descriptor contains only fixed-width fields, the
+### V5 scene color and native overlay seam
+
+`OPENSHIM_FRAME_BRIDGE_SCENE_COLOR=1` requires the bridge and depth switches.
+It allocates a separate shared scene texture and a private capture texture.
+Both use the same slot/frame/fence as depth, camera and final color. Metadata
+records candidate/missing/unsupported/failed state, source, stage and the matched
+depth ordinal. Scene absence never reuses an earlier image as valid.
+
+Stage 0 captures before the selected depth clear, either from its bound RT0 or
+an explicitly supplied DXGI backbuffer. Local sweeps showed why this is only a
+diagnostic: matching RT0 images were black, and early backbuffer captures could
+already contain HUD. Stage 1 waits for a later overlay boundary. The native
+observer pins the released Ogre DLL hash, named AutoParam view/projection exports
+and prologues. It detects the observed identity view/overlay projection and
+captures the backbuffer before the first indexed overlay draw, after the
+full-screen compositor's non-indexed draw. The camera matrices must match the
+private depth snapshot; the first successful capture is latched for that frame.
+Temporary backbuffer references are released within the observation. A separately
+owned swapchain reference is reset on capture shutdown.
+
+Vehicle and on-foot GOG pairs showed terrain, craft and physical cockpit/weapon
+geometry in stage-1 scene color, with radar, gauges, labels and reticles absent.
+This is bounded local evidence, not a general HUD contract: other shaders can
+bypass AutoParam getters, inherited parameter state can be stale, and post-HUD
+FXAA makes scene/final differences unsuitable as an exact UI alpha layer.
+Metadata retains `candidateOnly=true` and `hudFreeQualified=false`.
+
+The render-thread export detours exposed a startup patcher deadlock: a cached
+thread snapshot created by a different writer could include and suspend its new
+caller while that caller held the patch mutex. Snapshot reuse now requires the
+same calling thread, and suspension independently excludes the current thread.
+A regression alternates real executable-memory writes from two OS threads and
+requires bounded completion. Overlay detours also publish their callable
+original before their jump becomes reachable; a concurrent-caller regression
+checks this through the actual inline helper. The affected local game was recovered and closed
+gracefully; test deployment files were restored with original hashes.
+
+The bounded shader trace also copies single world matrices and the native
+camera-relative origin through the observed parameter/bind/draw chain. A vehicle
+trace grouped 434 renderable observations, including 288 single-transform
+candidates and 19 changed groups. Renderable lifetimes, pointer reuse, mesh
+identity, skinning and dense object motion remain unqualified; no numeric native
+identity is used by the companion as a live pointer.
+
+### Experimental helper GPU work
+
+Streamline loads before DXGI use. Only factory/swapchain and command-queue
+creation use upgraded proxies; ordinary resources and lists use the native
+device. Depth and pre-HUD color are copied into private helper textures before
+releasing the shared slot. An independent GPU completion after SDK presentation
+protects these private inputs before reuse. Tokens, common constants, resource
+tags and helper Reflex present markers share the same helper frame index.
+Unsupported SDK/runtime/device paths fail the helper while ordinary game
+presentation remains active. Missing inputs clear tags and configure FG off.
+
+GPU camera motion reconstructs previous-minus-current pixel displacement from
+current depth and the captured camera pair. A rotation-only transform handles
+clear-depth sky, and offscreen correspondences retain displacement. Missing
+history uses the SDK reset flag; it is not qualified engine camera-cut handling.
+The GPU test checks 2211 pixels against analytic depth-dependent translation,
+including offscreen motion, sky translation rejection and invalid depth. The
+CPU PFM diagnostic remains separate and is never used as an SDK texture.
+
+The DXR prototype creates view-space triangles from a two-pixel depth grid,
+rejects silhouette bridges and invalid depth, builds BLAS/TLAS, and uses inline
+ray queries for ambient occlusion. It reconstructs normals from neighboring
+depth and traces eight bounded hemisphere rays. It writes a canonical RGBA
+scene plus an approximate HUD-preserving final image; a graphics blit supports
+RGBA/BGRA swapchains. Hardware tests require a flat plane to have no self-AO,
+a wall/floor corner to have actual ray occlusion, and distinct UI pixels to
+remain unchanged. Captured geometry and output can also be inspected offline
+using `Prepare-RT-Capture.py` and the GPU diagnostic executable.
+
+- A versioned 448-byte V5 wire descriptor contains only fixed-width fields, the
   adapter LUID, dimensions/format, timestamps and producer-local NT handle
   values and owned camera data. V3 grew the V1/V2 descriptor's 128-byte prefix
-  to 384 bytes; old helpers must be rebuilt and reject the new version. The helper duplicates
+  to 384 bytes; V5 adds scene color/source/stage and its interlocked selection.
+  Old helpers must be rebuilt and reject the new version. The helper duplicates
   handles from that PID; it never treats wire
   integers as pointers or directly uses a foreign handle.
 - Named metadata lives in the session-local namespace and uses the creator's
   default Windows security descriptor. There is no elevation, global object,
-  helper autostart, injected x64 DLL, or third-party SDK download.
+  helper autostart, injected x64 DLL, or runtime SDK download.
 - One consumer owns one slot. CPU publication uses interlocked transitions:
   Free -> Writing -> Ready -> Reading -> Free. A shared D3D11/D3D12 fence orders
   the producer's copy. The consumer returns Free only after its own GPU copy
@@ -331,14 +481,14 @@ depth readback, including the offscreen validity mask and matching 119/120 IDs.
   A clean reader exit allows reconnect. Crash recovery needs a new session.
 - V4 keeps the 384-byte layout and adds an explicit camera matrix source in
   previously reserved space, rejecting V3 to prevent projection ambiguity.
-- V4 accepts RGBA8/BGRA8 SDR, one mip/array layer, and same-adapter sharing.
+- V5 accepts RGBA8/BGRA8 SDR, one mip/array layer, and same-adapter sharing.
   MSAA color is resolved to a single-sample shared texture. Optional raw candidate
   depth is shared R32_FLOAT with the same extent and fence/frame ID. Its per-frame
   status explicitly records disabled/missing/unsupported/failed input. Consumer
   clear selection uses a separate interlocked control word, never slot-owned
   fields. A guarded viewport camera observation is optional and unqualified for
-  draw-level use. HDR, cross-adapter transport, camera history and motion vectors
-  remain absent.
+  draw-level use. HDR, cross-adapter transport, authoritative engine history and
+  dense object/animation motion remain absent.
 - Resizing or device replacement disables game capture for the session. Normal
   presentation continues; the helper exits on inactive metadata/producer death.
   Backbuffer references are local to the hook and released before `Present`.
@@ -357,10 +507,10 @@ depth readback, including the offscreen validity mask and matching 119/120 IDs.
    cockpit rendering and supported effects. Camera-only reconstruction is a
    restricted static-scene diagnostic, not full motion-vector support.
 5. Capture pre-HUD scene color and a UI alpha/color layer at the same resolution.
-6. Integrate signed NVIDIA Streamline binaries in the helper, check feature
+6. Expand the signed NVIDIA Streamline preview integration, check feature
    support/HAGS/driver requirements, and prove SL Reflex/frame IDs and timing
    represent the actual game simulation and final presentation across processes.
-7. Enable fixed 2x FG first. Validate buffers with NVIDIA's development tools,
+7. Qualify the experimental fixed 2x FG path. Validate buffers with NVIDIA's development tools,
    image quality, actual generated presents, end-to-end latency and safe fallback
    before considering Blackwell multi-frame generation.
 
@@ -375,8 +525,9 @@ The capture contract needs world-space geometry, indices, instance transforms,
 stable mesh/material identity, camera data and lights. It also needs alpha-test
 semantics and an explicit policy for animated/deformed geometry and destruction.
 
-Start with a static terrain/mesh export and a small DXR ray-query diagnostic.
-Then build/update BLAS/TLAS for real scene instances. The first game effect
+The current visible-depth DXR AO preview is a bounded ray-query experiment.
+Export static terrain/meshes, then build/update BLAS/TLAS for real scene instances
+to replace its incomplete visible-only geometry. A fully qualified game effect
 should be bounded ray-traced sun shadows or ambient occlusion, composited with
 the matched raster frame. Material/albedo/normal data and raster-lighting
 integration are required to avoid double-darkening an already shadowed color
@@ -388,6 +539,47 @@ RT and FG have separate effective states. A DXR-capable adapter is not evidence
 of ray-traced pixels; more output presents are not evidence of correct DLSS.
 
 ## Qualification and packaging
+
+Native Windows V5 checkpoint, 2026-10-12:
+
+- Release Win32 build succeeded; all **101** native regression tests passed.
+  The new test alternates executable patch writers across two OS threads and
+  executes a target concurrently while installing a detour, checking that its
+  original trampoline is published before the hook becomes reachable.
+- All **six x86** and **eight x64** helper tests passed, including owned scene
+  capture, analytical camera motion, and real hardware inline DXR. A plain x64
+  build without Streamline, DXR or WGC also succeeded.
+- The ten-lane x86-to-x64 smoke verified every pixel in **2000** color frames,
+  including **1200** depth/camera pairs and **600** scene-color pairs, with
+  reconnects, bounded backpressure, odd extents and RGBA/BGRA/MSAA coverage.
+- Real GOG `misn03.bzn` combined preview: **600** imported frames, **550** SDK
+  extra presentations, **550** multi-present calls, final status zero; **550**
+  DXR frames. A same-frame comparison changed 11484 of 649458 pixels by more
+  than two channel levels, with maximum darkening 52. This demonstrates
+  executed AO, not complete scene geometry or generally correct compositing.
+- An independent 240-frame combined run reported **223** extra presentations
+  and 223 DXR frames. WGC received zero frames in that live run and failed
+  explicitly. The final smaller preview imported **180** game frames, reported
+  **176** extra presentations and executed **176** DXR frames; WGC then recorded
+  **342** output-window frames. Its 12.27-second clip was visually inspected.
+- All live test deployments restored and hash-verified the 60-file configuration
+  and binary surface after graceful game exit. Other running game sessions are
+  left untouched; optional launch waiting still rechecks the shared harness lock.
+- GPU readback recording labels renderer inputs and associates frame IDs with
+  SDK counters. Generated images, pacing, input latency and gameplay quality
+  require separate validation; no FPS improvement is claimed.
+- Recorded combined GOG run: **360** imported frames, **350** extra SDK
+  presentations, **350** DXR frames and final SDK status zero. The labeled
+  25.05-second renderer-input video was encoded and visually inspected.
+  The smaller preview eliminated the observed source-frame timeout.
+- The final bounded trace completed 30 frames with seven camera variants, zero
+  read errors/overflow, and 7737 draws linked to matching same-frame bindings.
+  It observed 536 renderable transform groups, 368 single-transform candidates
+  and 22 changing groups. Buffer contents, renderable lifetimes and dense object
+  motion remain unqualified.
+
+See [the demo validation report](DLSS_RT_DEMO_VALIDATION_20261012.md) for current
+feature states, local evidence and remaining quality gates.
 
 Native Windows checkpoint, 2026-10-11:
 
@@ -445,7 +637,8 @@ Native Windows checkpoint, 2026-10-11:
   59911 valid and 362 offscreen pixels, maximum 1.59790313 pixels. All five helper
   tests pass in x86/x64; all 100 regression tests pass.
 - Qualified main scene depth/cameras, gameplay input/focus, Steam, Proton/Wine, coordinated
-  presentation takeover, real latency, DLSS and ray-traced effects are unverified.
+  presentation takeover, real latency, production-quality DLSS and complete
+  ray-traced effects remain unqualified; the local preview is experimental.
 
 The helper is a standalone **development tool**, excluded from the suite's
 deploy/release payload. The existing native game binaries remain Win32. Native
