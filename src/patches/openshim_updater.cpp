@@ -7,6 +7,7 @@
 #include "openshim_auto_update.h"
 #include "hook_engine.h"
 #include "memory_access.h"
+#include "openshim_update_internal.h"
 #include "openshim_update_manifest.h"
 #include "openshim_update_support.h"
 #include "openshim_assets.h"
@@ -1187,5 +1188,24 @@ namespace BZROpenShim
             g_WorkerThread = 0;
         }
         SetState(OpenShimUpdateState::Idle, {});
+    }
+
+    // The asset-set sync (openshim_asset_sync.cpp) shares these.
+    namespace UpdaterDetail
+    {
+        std::filesystem::path GetGameRoot()
+        {
+            return ::BZROpenShim::GetGameRoot();
+        }
+
+        bool FindWorkshopItemDirectory(std::filesystem::path& itemDirectory, std::string& error)
+        {
+            return ::BZROpenShim::FindWorkshopItemDirectory(itemDirectory, error);
+        }
+
+        bool ReadFileVersion(const std::filesystem::path& path, std::string& version)
+        {
+            return ::BZROpenShim::ReadFileVersion(path, version);
+        }
     }
 }

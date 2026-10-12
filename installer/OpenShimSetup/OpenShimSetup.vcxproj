@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    OpenShimSetup.exe: a thin native wrapper that carries install_windows.ps1,
+    uninstall_windows.ps1 and (in a release build) OpenShim-Suite.zip as
+    resources and runs the scripts offline.
+
+    To embed a release, pass both properties:
+      /p:OpenShimSuiteZip=C:\path\OpenShim-Suite.zip /p:OpenShimSuiteSha256=<64 hex>
+    Without them this is a development build that downloads the latest release.
+    Pass /p:OutDir=... /p:IntDir=... (trailing backslash) when building the
+    embedded variant next to a development build of the same project.
+  -->
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32"><Configuration>Debug</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32"><Configuration>Release</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{3D0F6B52-8A1E-4C77-9B4A-2E5C7F91A6D3}</ProjectGuid>
+    <RootNamespace>OpenShimSetup</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\'))</RepoRoot>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType><UseDebugLibraries>true</UseDebugLibraries><PlatformToolset>v143</PlatformToolset><CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType><UseDebugLibraries>false</UseDebugLibraries><PlatformToolset>v143</PlatformToolset><WholeProgramOptimization>true</WholeProgramOptimization><CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'"><TargetName>OpenShimSetup</TargetName><OutDir>$(RepoRoot)bin\Debug\</OutDir><IntDir>$(RepoRoot)obj\OpenShimSetup\Debug\</IntDir></PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'"><TargetName>OpenShimSetup</TargetName><OutDir>$(RepoRoot)bin\Release\</OutDir><IntDir>$(RepoRoot)obj\OpenShimSetup\Release\</IntDir></PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile><WarningLevel>Level4</WarningLevel><TreatWarningAsError>true</TreatWarningAsError><SDLCheck>true</SDLCheck><PreprocessorDefinitions>WIN32;_CONSOLE;WIN32_LEAN_AND_MEAN;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions><ConformanceMode>true</ConformanceMode><LanguageStandard>stdcpp20</LanguageStandard></ClCompile>
+    <ClCompile Condition="'$(Configuration)'=='Debug'"><RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary></ClCompile>
+    <ClCompile Condition="'$(Configuration)'=='Release'"><RuntimeLibrary>MultiThreaded</RuntimeLibrary></ClCompile>
+    <Link><SubSystem>Console</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation><AdditionalDependencies>bcrypt.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+    <ResourceCompile><AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup><ClCompile Include="OpenShimSetup.cpp" /></ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="OpenShimSetup.rc" />
+    <ResourceCompile Include="$(RepoRoot)src\engine\version.rc">
+      <PreprocessorDefinitions>OPENSHIM_MODULE_SETUP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+
+  <!-- Generates embedded_suite.inc: empty for a development build, the zip and
+       its hash as RCDATA 3 and 4 for a release build. Rewritten every build so
+       a new zip at the same path is never missed. -->
+  <Target Name="WriteEmbeddedSuite" BeforeTargets="ResourceCompile">
+    <PropertyGroup>
+      <_SuiteZipFull Condition="'$(OpenShimSuiteZip)'!=''">$([System.IO.Path]::GetFullPath('$(OpenShimSuiteZip)'))</_SuiteZipFull>
+      <_SuiteZipRc Condition="'$(_SuiteZipFull)'!=''">$(_SuiteZipFull.Replace('\','/'))</_SuiteZipRc>
+    </PropertyGroup>
+    <Error Condition="'$(OpenShimSuiteZip)'!='' And !Exists('$(_SuiteZipFull)')" Text="OpenShimSuiteZip does not exist: $(_SuiteZipFull)" />
+    <Error Condition="'$(OpenShimSuiteZip)'!='' And !$([System.Text.RegularExpressions.Regex]::IsMatch('$(OpenShimSuiteSha256)', '^[0-9a-fA-F]{64}$'))" Text="OpenShimSuiteZip needs OpenShimSuiteSha256 (64 hex digits)." />
+    <Error Condition="'$(OpenShimSuiteZip)'=='' And '$(OpenShimSuiteSha256)'!=''" Text="OpenShimSuiteSha256 was given without OpenShimSuiteZip." />
+    <MakeDir Directories="$(IntDir)" />
+    <WriteLinesToFile Condition="'$(OpenShimSuiteZip)'==''" File="$(IntDir)embedded_suite.inc" Lines="// development build: no embedded suite" Overwrite="true" />
+    <WriteLinesToFile Condition="'$(OpenShimSuiteZip)'!=''" File="$(IntDir)embedded_suite.inc"
+                      Lines="3 RCDATA &quot;$(_SuiteZipRc)&quot;;4 RCDATA { &quot;$(OpenShimSuiteSha256.ToLowerInvariant())&quot; }" Overwrite="true" />
+  </Target>
+</Project>
