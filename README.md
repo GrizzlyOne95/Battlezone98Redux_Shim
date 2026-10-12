@@ -23,8 +23,18 @@ is opt-in and awaiting editor qualification; it is not enabled by default.
 
 ### Windows
 
-Press Start, type `powershell`, Enter — the blue window, not Command Prompt.
-Paste this in:
+[**Download OpenShimSetup.exe**](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/releases/latest/download/OpenShimSetup.exe)
+and double-click it. It finds your Steam or GOG copy of Battlezone 98 Redux,
+installs OpenShim, and tells you when it is done. No launch options needed —
+just start the game. Windows may show a SmartScreen warning because the file
+is not code-signed yet; choose "More info", then "Run anyway".
+
+To uninstall, run it from a Command Prompt as `OpenShimSetup.exe --uninstall`.
+
+#### Advanced: PowerShell one-liner
+
+Same installer, no download. Press Start, type `powershell`, Enter — the blue
+window, not Command Prompt. Paste this in:
 
 ```powershell
 irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_windows.ps1 | iex
