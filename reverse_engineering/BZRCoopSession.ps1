@@ -167,6 +167,9 @@ function New-BZRCoopInstance {
     if (Test-Path -LiteralPath $shimIni) {
         $ini = [IO.File]::ReadAllText($shimIni)
         $ini = [regex]::Replace($ini, '(?m)^(\s*RawMouseInput\s*=\s*)\S+', '${1}0')
+        # Multiplayer opens the pre-lobby setup screen when the install enables it;
+        # the lobby script clicks straight from the title screen into the lounge.
+        $ini = [regex]::Replace($ini, '(?m)^(\s*PreLobby\s*=\s*)\S+', '${1}0')
         [IO.File]::WriteAllText($shimIni, $ini)
     }
     Copy-Item -LiteralPath (Join-Path $SourceRoot 'scripts') -Destination $dir -Recurse
