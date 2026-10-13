@@ -18,6 +18,8 @@ param(
     # Optional map pick on the host staging list: the row's y (x is fixed) and
     # the .bzn the lobby gameSettings must then name, e.g. 195 + misn02b.bzn.
     [int]$MapListY = 0,
+    # Clicks on the map list's scroll-down arrow before the row pick (a map past the 11 visible rows).
+    [int]$MapListScroll = 0,
     [string]$MapBzn = '',
     [switch]$SyncJoin,
     [switch]$Launch
@@ -57,6 +59,7 @@ $UI = @{
     SyncJoinToggle  = @(250, 359, 'C')
     PlayerLimit     = @(740, 365, 'C')
     MapList         = @(428, 0, 'C')
+    MapListDown     = @(447, 219, 'C')
 }
 $LayoutWidth = 1280
 
@@ -209,6 +212,7 @@ function Wait-NewSettings([string]$Version) {
 
 Start-Sleep -Seconds 2
 if ($MapListY) {
+    for ($i = 0; $i -lt $MapListScroll; $i++) { Click $hostClient $UI.MapListDown; Start-Sleep -Milliseconds 400 }
     # Row height follows the client size (12 px at 1280 wide, ~8.5 px at 584),
     # so try the 1280 row first, then walk the list until the map is selected.
     $tries = @($MapListY) + @(for ($y = 88; $y -le 230; $y += 8) { $y })
