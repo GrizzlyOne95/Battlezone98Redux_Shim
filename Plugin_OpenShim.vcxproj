@@ -236,6 +236,7 @@
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
     <ClCompile Include="src\patches\fog_wake_feature.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
+    <ClCompile Include="src\patches\lua_handle_sync.cpp" />
     <ClCompile Include="src\patches\mp_faction_restrict.cpp" />
     <ClCompile Include="src\patches\mp_ready_diagnostic.cpp" />
     <ClCompile Include="src\patches\mp_map_filter_extras.cpp" />
@@ -390,6 +391,8 @@
     <ClInclude Include="src\patches\bzr_hooks_internal.h" />
     <ClInclude Include="include\engine_globals.h" />
     <ClInclude Include="include\iat_patch.h" />
+    <ClInclude Include="include\lua_handle_sync.h" />
+    <ClInclude Include="include\lua_handle_sync_install.h" />
     <ClInclude Include="include\mp_faction_restrict.h" />
     <ClInclude Include="include\mp_ready_diagnostic.h" />
     <ClInclude Include="include\odf_compat.h" />
