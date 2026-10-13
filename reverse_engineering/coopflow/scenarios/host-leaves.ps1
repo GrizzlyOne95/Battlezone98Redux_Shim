@@ -55,7 +55,16 @@ Invoke-CRFlowStep 'host closes the game' {
 }
 
 Invoke-CRFlowStep 'guest detects the leader departure' {
-    foreach ($client in $guests) { Wait-CRFlow $client 'return role().leaderDeparted and role()' -TimeoutSeconds 60 }
+    foreach ($client in $guests) {
+        # The mission fails one second after it notices, and a failed mission stops
+        # servicing probe commands (the debrief view takes over). With many guests the
+        # poll can miss that second; the FailMission op is then the evidence.
+        try { Wait-CRFlow $client 'return role().leaderDeparted and role()' -TimeoutSeconds 60 }
+        catch {
+            if (-not @(Get-CRFlowEvents $client op | Where-Object { $_.op -eq 'FailMission' }).Count) { throw }
+            'leader departure observed through its FailMission (mission already over)'
+        }
+    }
 }
 
 Invoke-CRFlowStep 'guest fails the mission' {
