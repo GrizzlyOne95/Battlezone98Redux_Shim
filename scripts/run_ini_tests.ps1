@@ -170,6 +170,13 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # files players already have. Set it to 0 for stock session-only mutes.
     "Network/PersistentPlayerMute",
 
+    # Sender/receiver-side Lua Send/Receive fix: same four-byte wire payload,
+    # applied only to a handle that previously went out as id 0 and arrived
+    # as nil. A stock receiver still pushes nil for the reserved id, so a
+    # mixed lobby is no worse off; real network ids and the stock lookup are
+    # untouched. Signature-gated and fail-closed; 0 restores the stock path.
+    "Network/LuaMapObjectHandles",
+
     # Straight bug/stability fixes with no material mixed-client divergence.
     # MapRefreshFixes includes the multiplayer map-list refresh/jump and
     # selection-preservation repair and is deliberately part of the ON baseline.
@@ -353,6 +360,7 @@ $shippingPolicyChecks = @{
     "Network/NetImprovements" = "1"
     "Network/GovernorTuning" = "OpenShim"
     "Network/ReliableSendBacklogFix" = "1"
+    "Network/LuaMapObjectHandles" = "1"
     "Graphics/D3D11DeviceLossRecovery" = "1"
     "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "1"
