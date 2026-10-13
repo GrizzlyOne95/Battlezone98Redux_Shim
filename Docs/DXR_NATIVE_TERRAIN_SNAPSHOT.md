@@ -199,8 +199,10 @@ within a bounded bias/quantization tolerance. The native triangle supplies its
 geometric normal. Only matched, frontlit terrain receivers launch a 512-meter
 sun visibility ray, again against native mask 2. The visible depth mesh cannot
 cast these shadows. Missing sun/geometry and mismatched receivers decline.
-The bias is 5 cm; normal/material detail and MSAA silhouette coverage are still
-unqualified, and the strict depth match deliberately leaves receiver gaps.
+The bias is 5 cm. A follow-up derives a bounded within-pixel MSAA depth tolerance
+from the native plane and neighboring projection rays; normal/material detail
+and general silhouette coverage remain unqualified. See the building replay
+reference below for the matching correction and hardware evidence.
 
 Preview multiplies the existing SDR raster lighting by 0.55 on blocked matched
 receivers, alongside AO. This is an artistic preview: ambient/direct light are
@@ -244,8 +246,10 @@ the before/after colors are not graded to exaggerate the comparison.
 
 ## Remaining work
 
-The snapshot covers one selected native zone, not all loaded or offscreen map
-geometry. It omits native buildings, vehicles and particles, although visible
+The live snapshot covers one selected native zone, not all loaded or offscreen
+map geometry. [Building shadow replay](DXR_BUILDING_SHADOW_REPLAY.md) now adds
+captured stock building poses as occluders in a frozen diagnostic; these are not
+live leased casters. Vehicles and particles remain omitted, although visible
 depth may contribute some opaque surfaces. Dirty/mission invalidation and
 revision publication are implemented; real deforming terrain, mission cycling,
 device/session reconnects and broad moving-camera qualification remain open.

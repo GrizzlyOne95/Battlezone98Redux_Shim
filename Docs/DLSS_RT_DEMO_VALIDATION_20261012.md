@@ -497,3 +497,28 @@ GPU and captured-scene replay proof; a live run of that final variant remains
 to be repeated. Dynamic sunlight, deformation/mission/device cycling, a visibly
 shadowed game pose, native objects/full map, opacity/MSAA receivers, production
 lighting and Steam/Proton/Wine remain open.
+
+## Building shadow replay checkpoint
+
+The final V2 namespace/mask variant has now completed a live refresh control:
+GOG PID 39392, `build/game-bridge-20261012-231035-257/`, imported 180 frames,
+executed 163 DXR frames and 156 native terrain sunlight frames, with seven
+depth-only frames during renewal, two revisions and recovery after invalidation.
+Exit zero and all 60 restored file hashes qualify this control.
+
+The new [building capture/replay](DXR_BUILDING_SHADOW_REPLAY.md) exported 17
+submeshes / 60776 triangles. On frame 180 inputs, adding their captured poses
+to terrain-only DXR replay produced 4293 blocked sunlight-mask pixels and 4619
+preview pixels changed by more than two levels, maximum channel delta 48.
+Alpha remained exact; the ungraded before/after and mask were inspected. The
+preview delta also includes native AO; mask mode disables AO to isolate shadows.
+
+These are frozen poses, not live building geometry. Across refresh, fourteen
+submesh payloads stayed identical while three power-plant submeshes changed
+software pose despite unchanged world matrices. The snapshot is not synchronized
+with final color/depth. Live pose/deletion/visibility validity must precede live
+caster submission. All 110 native, eight x86 and eleven x64 helper/GPU tests pass,
+including separate caster/receiver semantics and actual within-pixel MSAA depth
+offsets. Other missions, custom material opacity, complete scene coverage and
+production lighting remain unqualified. Earlier declined captures are recorded
+in the building replay reference rather than counted as accepted evidence.

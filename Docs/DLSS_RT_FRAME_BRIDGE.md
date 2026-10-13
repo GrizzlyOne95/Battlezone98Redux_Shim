@@ -843,8 +843,11 @@ An additional opt-in terrain sunlight ray preview reads the actual Ogre sun
 direction and traces only native terrain receivers/occluders. Its color mask
 shows green matched sunlit receivers and magenta blocked receivers. The SDR
 shadow composite is artistic attenuation of existing lighting, not a direct
-lighting replacement. Buildings/vehicles, complete scene geometry and general
-opacity remain unavailable; normal game launches still use original presentation.
+lighting replacement. A separate [building shadow replay](DXR_BUILDING_SHADOW_REPLAY.md)
+adds captured stock building poses as native occluders and visibly shadows ground
+beside the hangar. Those poses are unsynchronized snapshots, not live leased
+casters. Vehicles, complete scene geometry and general opacity remain unavailable;
+normal game launches still use original presentation.
 
 - [Microsoft D3D11/D3D12 interop and synchronization](https://learn.microsoft.com/en-us/windows/win32/direct3d12/direct3d-12-with-direct3d-11--direct-2d-and-gdi)
 - [Microsoft shared NT texture handles](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_2/nf-dxgi1_2-idxgiresource1-createsharedhandle)

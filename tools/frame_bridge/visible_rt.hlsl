@@ -82,7 +82,7 @@ void Mesh(uint3 id:SV_DispatchThreadID) {
     Triangle(offset+3,c,b,d,vc&&vb&&vd);
 }
 uint Hash(uint x) { x^=x>>16; x*=0x7feb352d; x^=x>>15; x*=0x846ca68b; return x^(x>>16); }
-bool TerrainShadow(float3 visible, out bool blocked) {
+bool TerrainShadow(uint2 pixel,float3 visible, out bool blocked) {
     blocked=false;
     if(ShadowMode==0||NativeTriangles==0||!all(isfinite(visible))) return false;
     float3 origin=mul(ViewToWorld,float4(0,0,0,1)).xyz;
@@ -94,20 +94,42 @@ bool TerrainShadow(float3 visible, out bool blocked) {
     float tolerance=max(ShadowBias,8*visible.z*visible.z*abs(ClipToView[3][2])/16777216);
     if(tolerance>.5||distance<=tolerance) return false;
     RayDesc receiverRay; receiverRay.Origin=origin; receiverRay.Direction=cameraRay/distance;
-    receiverRay.TMin=.001; receiverRay.TMax=distance+tolerance;
+    receiverRay.TMin=.001; receiverRay.TMax=distance+2;
     RayQuery<RAY_FLAG_FORCE_OPAQUE> receiver;
     receiver.TraceRayInline(VisibleScene,RAY_FLAG_NONE,2,receiverRay);
     while(receiver.Proceed()) {}
-    if(receiver.CommittedStatus()!=COMMITTED_TRIANGLE_HIT||abs(receiver.CommittedRayT()-distance)>tolerance) return false;
+    if(receiver.CommittedStatus()!=COMMITTED_TRIANGLE_HIT) return false;
     uint primitive=receiver.CommittedPrimitiveIndex();
     if(primitive>=NativeTriangles) return false;
     uint v=primitive*3;
     float3 normal=cross(NativeVertices[v+1]-NativeVertices[v],NativeVertices[v+2]-NativeVertices[v]);
     float n2=dot(normal,normal); if(n2<1e-12) return false;
     normal*=rsqrt(n2); if(dot(normal,cameraRay)>0) normal=-normal;
+    float3 surface=origin+receiverRay.Direction*receiver.CommittedRayT();
+    // Resolved MSAA depth can come from a different sample inside this pixel.
+    // Bound that difference from the actual native plane and pixel rays, not a
+    // distance-dependent arbitrary receiver tolerance. Compare axial depth
+    // mapped onto the center ray: a front-facing plane has zero footprint.
+    float3 back=mul(ViewToWorld,float4(0,0,1,0)).xyz;
+    float centerBack=dot(back,receiverRay.Direction);
+    float plane=dot(normal,surface-origin);
+    float2 ndc=float2((pixel.x+.5)*2/Width-1,1-(pixel.y+.5)*2/Height);
+    float z=Depth.Load(int3(pixel,0));
+    float2 footprint=0;
+    [unroll] for(uint axis=0;axis<2;++axis) [unroll] for(int sign=-1;sign<=1;sign+=2) {
+        float2 shift=axis==0?float2(sign*2.0/Width,0):float2(0,sign*2.0/Height);
+        float4 v=mul(ClipToView,float4(ndc+shift,z,1));
+        float3 direction=normalize(mul(ViewToWorld,float4(v.xyz/v.w,0)).xyz);
+        float denominator=dot(normal,direction);
+        if(abs(denominator)<1e-6||abs(centerBack)<1e-6) return false;
+        float sampleDistance=plane/denominator*dot(back,direction)/centerBack;
+        float difference=abs(sampleDistance-receiver.CommittedRayT());
+        footprint[axis]=max(footprint[axis],difference);
+    }
+    tolerance+=.5*(footprint.x+footprint.y);
+    if(!isfinite(tolerance)||tolerance>2||abs(receiver.CommittedRayT()-distance)>tolerance) return false;
     // Backlit faces already receive no direct sunlight in the original renderer.
     if(dot(normal,TowardSun)<=.02) return false;
-    float3 surface=origin+receiverRay.Direction*receiver.CommittedRayT();
     RayDesc ray; ray.Origin=surface+normal*ShadowBias; ray.Direction=TowardSun;
     ray.TMin=ShadowBias; ray.TMax=ShadowDistance;
     RayQuery<RAY_FLAG_FORCE_OPAQUE|RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> shadow;
@@ -152,7 +174,7 @@ void Rays(uint3 id:SV_DispatchThreadID) {
     }
     bool blocked=false;
     bool receiver=false;
-    if(positionValid) receiver=TerrainShadow(p,blocked);
+    if(positionValid) receiver=TerrainShadow(id.xy,p,blocked);
     if(ShadowMode==1&&receiver&&blocked) factor*=1-ShadowStrength;
     float3 result=scene.rgb*factor;
     float3 diagnostic=blocked?float3(1,0,1):float3(0,1,.25);

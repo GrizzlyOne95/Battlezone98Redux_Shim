@@ -18,13 +18,16 @@ namespace BZROpenShim::FrameBridge
         void Record(ID3D12GraphicsCommandList* commands, const CameraSnapshot& camera);
         // Set/replace only after prior GPU work completes. Explicit world-space
         // snapshot; caller validates the captured mission/generation lease.
-        void SetNativeGeometry(ID3D12Device* device, const NativeGeometry& snapshot);
+        // Optional immutable caster snapshot is diagnostic replay only. It must
+        // share PID/mission with terrain and never becomes a terrain receiver.
+        void SetNativeGeometry(ID3D12Device* device, const NativeGeometry& snapshot, const NativeGeometry* casters=nullptr);
         void ClearNativeGeometry(); // Prior submission must be complete.
         // 0: AO, 1: artistic shadow composite, 2: green lit / magenta blocked diagnostic.
         // Direction must be the current game's unit world-space vector toward sun.
         void SetTerrainSun(const float* direction, unsigned mode);
         unsigned TerrainShadowMode() const { return shadowMode_; }
         unsigned NativeTriangleCount() const { return nativeTriangles_; }
+        unsigned NativeCasterTriangleCount() const { return nativeTriangles_-nativeReceiverTriangles_; }
         ID3D12Resource* SceneOutput() const { return sceneOutput_.Get(); }
         ID3D12Resource* FinalOutput() const { return finalOutput_.Get(); }
         unsigned TriangleCapacity() const { return triangles_; }
@@ -33,6 +36,7 @@ namespace BZROpenShim::FrameBridge
         Microsoft::WRL::ComPtr<ID3D12Resource> nativeVertices_,nativeBlas_,nativeScratch_;
         D3D12_RAYTRACING_GEOMETRY_DESC nativeGeometry_{};
         unsigned nativeTriangles_=0;
+        unsigned nativeReceiverTriangles_=0;
         bool nativeBuilt_=false;
         float towardSun_[3]{};
         unsigned shadowMode_=0;

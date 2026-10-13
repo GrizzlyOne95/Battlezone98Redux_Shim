@@ -20,6 +20,8 @@ param(
     [switch]$TerrainAdaptive,
     [string]$TerrainSurfaceManifest = '',
     [switch]$NativeTerrainSnapshot,
+    [switch]$NativeEntityInventory,
+    [switch]$NativeBuildingSnapshot,
     [switch]$NativeTerrainLive,
     [switch]$NativeTerrainRefreshProbe,
     [ValidateSet('off','preview','mask')][string]$TerrainShadows = 'off',
@@ -33,6 +35,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($NativeBuildingSnapshot) { $NativeEntityInventory=$true }
+if ($NativeEntityInventory) { $NativeTerrainSnapshot=$true }
 if ($TerrainShadows -ne 'off') { $NativeTerrainLive=$true }
 if ($NativeTerrainLive) { $NativeTerrainSnapshot=$true; $VisibleRayTracing=$true }
 if ($NativeTerrainRefreshProbe -and -not $NativeTerrainLive) { throw 'Native refresh probe requires NativeTerrainLive' }
@@ -175,6 +179,8 @@ try {
         OPENSHIM_TERRAIN_SURFACE_MANIFEST = $(if ($TerrainSurfaceManifest) { Join-Path $GameRoot $surfaceRelativeManifest } else { '' })
         OPENSHIM_TERRAIN_GEOMETRY_EXPORT = $(if ($NativeTerrainSnapshot) { Join-Path $outputRoot 'native-terrain.bin' } else { '' })
         OPENSHIM_TERRAIN_GEOMETRY_LIVE = $(if ($NativeTerrainLive) { '1' } else { '0' })
+        OPENSHIM_TERRAIN_GEOMETRY_ENTITIES = $(if ($NativeEntityInventory) { '1' } else { '0' })
+        OPENSHIM_TERRAIN_GEOMETRY_BUILDINGS = $(if ($NativeBuildingSnapshot) { '1' } else { '0' })
     }.GetEnumerator()) {
         $environment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
@@ -341,6 +347,22 @@ if ($NativeTerrainSnapshot) {
     }
     if (-not (Test-Path -LiteralPath $geometryPath -PathType Leaf)) { throw 'Native terrain snapshot missing; inspect fresh terrain-geometry log' }
     $geometry=Get-Content -LiteralPath ($geometryPath+'.json') -Raw | ConvertFrom-Json
+    if ($NativeEntityInventory) {
+        $inventoryPath=$geometryPath+'.entities.json'
+        if(-not (Test-Path -LiteralPath $inventoryPath -PathType Leaf)) { throw 'Native entity inventory missing; inspect fresh NATIVE-ENTITIES diagnostics' }
+        $inventory=Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
+        if($inventory.pid -ne $game.Id -or $inventory.entities.Count -le 0 -or $inventory.nodes -gt 8192) { throw 'Native entity inventory lacks owned PID or bounded scene entities' }
+        Write-Host "PASS native entity inventory: nodes=$($inventory.nodes) entities=$($inventory.entities.Count); pose/lifetime qualification remains separate"
+    }
+    if ($NativeBuildingSnapshot) {
+        $buildingPath=$geometryPath+'.buildings.bin'
+        if(-not (Test-Path -LiteralPath $buildingPath -PathType Leaf)) { throw 'Native building pose snapshot missing' }
+        $building=Get-Content -LiteralPath ($buildingPath+'.json') -Raw | ConvertFrom-Json
+        if($building.pid -ne $game.Id -or $building.missionGeneration -ne $geometry.missionGeneration -or $building.submeshes.Count -le 0 -or
+            $building.vertices -le 0 -or -not $building.worldSpace -or -not $building.snapshotPoseOnly -or $building.liveLifetimeQualified -or
+            (Get-Item -LiteralPath $buildingPath).Length -ne 48+12*$building.vertices) { throw 'Native building snapshot lacks owned world-space pose identity or bounded payload' }
+        Write-Host "PASS native building pose snapshot: submeshes=$($building.submeshes.Count) triangles=$($building.triangles); replay only, live lifetime unqualified"
+    }
     if ($TerrainShadows -ne 'off') {
         $shadowMetadata=Get-Content -LiteralPath (Join-Path $outputRoot 'game-dxr-ao.bmp.json') -Raw | ConvertFrom-Json
         $expectedMode=if($TerrainShadows -eq 'preview'){1}else{2}
