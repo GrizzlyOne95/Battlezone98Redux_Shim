@@ -137,6 +137,9 @@ leaves staging at "Vehicle not selected", and Ready never completes.
 | misn05 | `lose Override=misn05-coop Destroyed=factory` / `Destroyed=recycler` | Owner destroys Lemnos / Montana; `misn05l2.des` / `misn05l1.des` reaches both |
 | misn05 | `coop-respawn Override=misn05-coop` | Respawn near a settled teammate, simultaneous deaths use fallback, fifth death fails both |
 | misn05 | `host-leaves Override=misn05-coop` | Host closes gracefully; guest fails once and stays running |
+| misn06 | `win Override=misn06-coop` (4 clients) | Roles/alliances (team 7 allied, CCA 5 hostile), per-owner scrap, opening and Hephaestus path films with a local guest skip, guest-only discovery, guest-relayed IsInfo scans (`forceInfo` test hook; the relay, `I` message and 1 s expiry run unmodified), object-camera film, 5th Platoon film held while any player has an enemy within 400 m, launch pad scan, dust-off gate (Wyoming away / one player away / all in) and `misn06w1.des` on all |
+| misn06 | `lose Override=misn06-coop Destroyed=recycler` | Wyoming destroyed; `misn06l5.des` reaches every client |
+| misn06 | `host-leaves Override=misn06-coop` | Same generic scenario; guest fails once and stays running |
 | any | `film-preview` (`-ScenarioArgs @{ Path='endcin'; Variants=@('100,200,M.avrec','8000,9000,center'); Protect=@('avrec') }`) | Not a test: plays one camera path on the host with each height,speed,target (cm, cm/s, Lua handle or `center` = a pod at the path's middle) and screenshots it, to tune a film without playing up to it. Height/speed are cm: 100 is 1 m |
 | misn04 | `endfilm` | Jumps the host to the win and checks the closing film on both clients: camera pod on the Face summit, both cameras on `endcin`, pod removed, `misn04w1.des` on both. Does not need audio |
 | any | `host-leaves` | The host quits mid-mission; the guest detects leader departure, fails the mission and keeps running |
