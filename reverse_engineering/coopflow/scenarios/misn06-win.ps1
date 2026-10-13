@@ -100,7 +100,7 @@ return {
 }
 '@
     Add-CRFlowCheck 'Wyoming on team 1; CCA recycler on team 5; many CCA objects' ($world.avrecTeam -eq 1 -and $world.svrecTeam -eq 5 -and $world.cca -ge 20) $world
-    Add-CRFlowCheck '5th Platoon film units on support team 7' ($world.filmTeam -eq 7) $world
+    Add-CRFlowCheck 'opening-film 5th Platoon escorts stay on team 1 (team-7 units exist only for the later film)' ($world.filmTeam -eq 1 -and $world.support -eq 0) $world
     Add-CRFlowCheck 'offline placeholder craft removed' (-not $world.offlinePlaceholder) $world
     $world
 }

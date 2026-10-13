@@ -71,6 +71,11 @@ function Get-CRFlowStub([string]$Mission) {
 '@
         $infoLocals = @'
 
+                    -- misn06 keeps camera snapshots as named fields and tags frames "P"/"O".
+                    cameraPath = type(cameraFrame) == "table" and cameraFrame[2] or nil,
+                    cameraKind = type(cameraFrame) == "table" and cameraFrame[1] or nil,
+                    remotePath = type(remoteCamera) == "table" and remoteCamera.path or nil,
+                    remoteKind = type(remoteCamera) == "table" and remoteCamera.kind or nil,
                     infoReportAges = (function()
                         local ages = {}
                         for prefix, at in pairs(type(remoteInfo) == "table" and remoteInfo or {}) do ages[prefix] = GetTime() - at end
