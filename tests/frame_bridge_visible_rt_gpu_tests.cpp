@@ -72,7 +72,7 @@ namespace
         Check(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,state,nullptr,IID_PPV_ARGS(&resource))); return resource;
     }
     std::vector<unsigned char> Render(const Input& input,const NativeGeometry* native=nullptr,
-        const NativeGeometry* replacement=nullptr,bool retire=false,const float* sun=nullptr,unsigned shadowMode=0)
+        const NativeGeometry* replacement=nullptr,bool retire=false,const float* sun=nullptr,unsigned shadowMode=0,const NativeGeometry* casters=nullptr)
     {
         ComPtr<ID3D12Device> device; Check(D3D12CreateDevice(nullptr,D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device)));
         D3D12_COMMAND_QUEUE_DESC q{}; ComPtr<ID3D12CommandQueue> queue; Check(device->CreateCommandQueue(&q,IID_PPV_ARGS(&queue)));
@@ -96,7 +96,7 @@ namespace
             list->CopyTextureRegion(&to,0,0,0,&from,nullptr); Barrier(list.Get(),textures[t].Get(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COMMON);
         }
         VisibleRayTracing rt; rt.Initialize(device.Get(),textures[0].Get(),textures[1].Get(),textures[2].Get());
-        if(native) rt.SetNativeGeometry(device.Get(),*native);
+        if(native) rt.SetNativeGeometry(device.Get(),*native,casters);
         rt.SetTerrainSun(sun,shadowMode);
         rt.Record(list.Get(),input.camera);
         const auto desc=rt.FinalOutput()->GetDesc(); D3D12_PLACED_SUBRESOURCE_FOOTPRINT foot{}; UINT64 bytes=0;
@@ -128,27 +128,29 @@ namespace
         std::vector<unsigned char> pixels(input.width*input.height*4);
         for(unsigned y=0;y<input.height;++y) std::memcpy(pixels.data()+y*input.width*4,mapped+foot.Offset+y*foot.Footprint.RowPitch,input.width*4);
         const D3D12_RANGE none{0,0}; readback->Unmap(0,&none); CloseHandle(event);
-        std::printf("DXR_CAPTURE triangles_capacity=%u native_triangles=%u pixels=%u\n",rt.TriangleCapacity(),rt.NativeTriangleCount(),input.width*input.height); return pixels;
+        std::printf("DXR_CAPTURE triangles_capacity=%u native_triangles=%u caster_triangles=%u pixels=%u\n",rt.TriangleCapacity(),rt.NativeTriangleCount(),rt.NativeCasterTriangleCount(),input.width*input.height); return pixels;
     }
 }
 int main(int argc,char** argv)
 {
-    if(argc==3||argc==4||argc==8)
+    if(argc==3||argc==4||argc==8||argc==9)
     {
         NativeGeometry mesh;
         if(argc>=4) { std::ifstream geometry(argv[3],std::ios::binary); mesh=ReadNativeGeometry(geometry); }
         float sun[3]{}; unsigned mode=0;
-        if(argc==8) {
+        if(argc>=8) {
             for(unsigned i=0;i<3;++i) { char* end=nullptr; sun[i]=std::strtof(argv[4+i],&end); Require(end&&*end==0,"numeric sun direction"); }
             Require(ValidTerrainSun(sun),"unit captured sun direction");
             const std::string name(argv[7]); mode=name=="preview"?1:name=="mask"?2:0;
             Require(mode!=0,"terrain shadow preview or mask mode");
         }
-        const auto input=ReadCapture(argv[1]); const auto pixels=Render(input,argc>=4?&mesh:nullptr,nullptr,false,sun,mode);
+        NativeGeometry casters;
+        if(argc==9) { std::ifstream geometry(argv[8],std::ios::binary); casters=ReadNativeGeometry(geometry); }
+        const auto input=ReadCapture(argv[1]); const auto pixels=Render(input,argc>=4?&mesh:nullptr,nullptr,false,sun,mode,argc==9?&casters:nullptr);
         std::ofstream file(argv[2],std::ios::binary); file.write(reinterpret_cast<const char*>(pixels.data()),static_cast<std::streamsize>(pixels.size()));
         Require(file.good(),"save captured DXR RGBA output"); return 0;
     }
-    Require(argc==1,"usage: frame_bridge_visible_rt_gpu_tests [capture.bin output.rgba [native.bin [sunX sunY sunZ preview|mask]]]");
+    Require(argc==1,"usage: frame_bridge_visible_rt_gpu_tests [capture.bin output.rgba [native.bin [sunX sunY sunZ preview|mask [casters.bin]]]]");
     for(bool corner : {false,true})
     {
         const auto input=Fixture(corner); const auto pixels=Render(input); unsigned darker=0;
@@ -233,6 +235,13 @@ int main(int argc,char** argv)
     }
     const auto shadow=Render(plane,&sunlight,nullptr,false,sun,1);
     const auto mask=Render(plane,&sunlight,nullptr,false,sun,2);
+    auto separateCaster=coplanar; separateCaster.vertices.assign(std::begin(wall),std::end(wall));
+    separateCaster.header.payloadHash=GeometryHash(separateCaster.vertices);
+    Require(Render(plane,&coplanar,nullptr,false,sun,1,&separateCaster)==shadow,"separate owned caster casts same offscreen sun shadow on terrain");
+    Require(Render(plane,&coplanar,nullptr,false,sun,2,&separateCaster)==mask,"separate caster preserves terrain-only diagnostic receivers");
+    auto terrainBehind=coplanar; for(auto& v:terrainBehind.vertices) v.z-=2;
+    terrainBehind.header.payloadHash=GeometryHash(terrainBehind.vertices);
+    Require(Render(plane,&terrainBehind,nullptr,false,sun,2,&coplanar)==plane.final,"caster geometry never becomes a terrain receiver");
     unsigned shadowed=0,marked=0;
     for(unsigned y=0;y<plane.height;++y) for(unsigned x=0;x<plane.width;++x) {
         const auto i=(y*plane.width+x)*4;
@@ -268,5 +277,26 @@ int main(int argc,char** argv)
     const float turnedSun[3]={-1,0,0};
     Require(Render(rotated,&turnedSunlight,nullptr,false,turnedSun,1)==shadow,"sun shadows preserve world camera rotation");
     std::printf("PASS DXR terrain sunlight offscreen wall blocked_pixels=%u marked_pixels=%u\n",shadowed,marked);
+    // MSAA minimum depth is not necessarily the depth at the pixel center.
+    // A flat floor sampled below the center must still match its native plane.
+    auto sampleFloor=Fixture(false); auto nativeFloor=coplanar;
+    nativeFloor.vertices={{-1000,-.8f,-1000},{-1000,-.8f,-.1f},{1000,-.8f,-1000},
+                          {1000,-.8f,-1000},{-1000,-.8f,-.1f},{1000,-.8f,-.1f}};
+    nativeFloor.header.payloadHash=GeometryHash(nativeFloor.vertices);
+    const float floorQ=sampleFloor.camera.farClip/(sampleFloor.camera.farClip-sampleFloor.camera.nearClip);
+    for(unsigned y=0;y<sampleFloor.height;++y) for(unsigned x=0;x<sampleFloor.width;++x) {
+        const float sampleY=(1-2*(y+.5f+.4375f)/sampleFloor.height)/sampleFloor.camera.projection[5];
+        const float distance=sampleY<0?-.8f/sampleY:10000;
+        sampleFloor.depth[y*sampleFloor.width+x]=distance<sampleFloor.camera.farClip?floorQ-floorQ*sampleFloor.camera.nearClip/distance:1;
+    }
+    const float upwardSun[3]={0,1,0};
+    const auto sampleMask=Render(sampleFloor,&nativeFloor,nullptr,false,upwardSun,2);
+    unsigned sampleReceivers=0;
+    for(unsigned y=110;y<125;++y) for(unsigned x=30;x<220;++x) {
+        const auto i=(y*sampleFloor.width+x)*4;
+        if(sampleMask[i]<60&&sampleMask[i+1]>210&&sampleMask[i+2]<100) ++sampleReceivers;
+    }
+    Require(sampleReceivers==15*190,"native floor receiver survives a real within-pixel MSAA depth offset");
+    std::printf("PASS DXR native MSAA plane receiver pixels=%u\n",sampleReceivers);
     return OpenShimTest::ExitCode();
 }

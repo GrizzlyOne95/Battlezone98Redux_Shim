@@ -200,6 +200,7 @@ void ExportNativeTerrainGeometry()
         }
         LogShimA(LogLevel::Info,"terrain-geometry","[TERRAIN-GEOMETRY] snapshot exported clusters=%u vertices=%zu triangles=%zu generation=%u baseNative=1 worldSpace=1 path=\"%s\"",snapshot.header.clusters,snapshot.vertices.size(),snapshot.vertices.size()/3,g_missionGeneration,path.string().c_str());
         LogShimA(LogLevel::Info,"terrain-geometry","[TERRAIN-GEOMETRY] sun valid=%d towardWorld=(%.6f,%.6f,%.6f) source=TerrainMasterLight",g_CapturedTerrainSunValid?1:0,g_CapturedTerrainSun[0],g_CapturedTerrainSun[1],g_CapturedTerrainSun[2]);
+        if(g_config.geometryEntities) ExportGeometryEntityInventory(path);
     }
     catch(const std::exception& error) { LogShimA(LogLevel::Warn,"terrain-geometry","[TERRAIN-GEOMETRY] snapshot declined: %s",error.what()); }
     catch(...) { LogShimA(LogLevel::Warn,"terrain-geometry","[TERRAIN-GEOMETRY] snapshot declined after native exception"); }

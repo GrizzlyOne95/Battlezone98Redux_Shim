@@ -197,3 +197,12 @@ consumes its images. The helper does not rerender the complete terrain scene.
 This development lane is separate from a supported gameplay integration.
 Steam, Proton/Wine, other missions, editor/deformation and long camera/contact
 tests need separate acceptance. No assets or generated captures are committed.
+
+Native geometry follow-up: the companion now leases a selected base terrain
+zone and traces sunlight from the actual Ogre direction. A separate
+[building pose replay](DXR_BUILDING_SHADOW_REPLAY.md) adds real native building
+occluders and visibly shadows the hangar's surrounding ground. Plane-derived
+MSAA receiver matching improves ground coverage. Captured building poses are
+not live casters, and domain relief is still absent from these base triangles.
+Pose/lifetime transport, all zones, material opacity and direct-light replacement
+remain prerequisites for full gameplay shadows.

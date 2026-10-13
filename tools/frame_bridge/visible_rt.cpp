@@ -1,6 +1,7 @@
 #include "visible_rt.h"
 #include "frame_bridge_history.h"
 #include "frame_bridge_native_lease.h"
+#include "frame_bridge_native_mesh.h"
 #include <stdexcept>
 #include <algorithm>
 #ifdef FRAME_BRIDGE_DXR
@@ -89,16 +90,19 @@ namespace BZROpenShim::FrameBridge
         Check(device->CreateComputePipelineState(&ps,IID_PPV_ARGS(&meshPipeline_)),"create DXR mesh pipeline"); ps.CS={visibleRtRays,sizeof(visibleRtRays)};
         Check(device->CreateComputePipelineState(&ps,IID_PPV_ARGS(&rayPipeline_)),"create inline DXR ray pipeline");
     }
-    void VisibleRayTracing::SetNativeGeometry(ID3D12Device* device,const NativeGeometry& snapshot)
+    void VisibleRayTracing::SetNativeGeometry(ID3D12Device* device,const NativeGeometry& snapshot,const NativeGeometry* casters)
     {
-        if(!ValidGeometry(snapshot)) throw std::runtime_error("native DXR snapshot invalid");
+        if(!ValidGeometry(snapshot)||(casters&&!ValidNativeOccluderPair(snapshot,*casters))) throw std::runtime_error("native DXR receiver/caster snapshot invalid");
+        const auto pointCount=snapshot.vertices.size()+(casters?casters->vertices.size():0);
         ClearNativeGeometry(); // Caller guarantees prior GPU completion.
         ComPtr<ID3D12Device5> dxr; Check(device->QueryInterface(IID_PPV_ARGS(&dxr)),"native DXR device");
-        nativeVertices_=Buffer(device,snapshot.vertices.size()*12,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_HEAP_TYPE_UPLOAD);
+        nativeVertices_=Buffer(device,pointCount*12,D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_HEAP_TYPE_UPLOAD);
         void* mapped=nullptr; D3D12_RANGE none{0,0}; Check(nativeVertices_->Map(0,&none,&mapped),"map native DXR vertices");
-        std::memcpy(mapped,snapshot.vertices.data(),snapshot.vertices.size()*12); nativeVertices_->Unmap(0,nullptr);
+        std::memcpy(mapped,snapshot.vertices.data(),snapshot.vertices.size()*12);
+        if(casters) std::memcpy(static_cast<unsigned char*>(mapped)+snapshot.vertices.size()*12,casters->vertices.data(),casters->vertices.size()*12);
+        nativeVertices_->Unmap(0,nullptr);
         nativeGeometry_.Type=D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES; nativeGeometry_.Flags=D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-        nativeGeometry_.Triangles.VertexBuffer={nativeVertices_->GetGPUVirtualAddress(),12}; nativeGeometry_.Triangles.VertexCount=snapshot.header.vertices;
+        nativeGeometry_.Triangles.VertexBuffer={nativeVertices_->GetGPUVirtualAddress(),12}; nativeGeometry_.Triangles.VertexCount=static_cast<UINT>(pointCount);
         nativeGeometry_.Triangles.VertexFormat=DXGI_FORMAT_R32G32B32_FLOAT;
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS input{};
         input.Type=D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL; input.NumDescs=1;
@@ -108,7 +112,7 @@ namespace BZROpenShim::FrameBridge
         if(!info.ResultDataMaxSizeInBytes) throw std::runtime_error("native DXR BLAS requirements unavailable");
         nativeBlas_=Buffer(device,info.ResultDataMaxSizeInBytes,D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
         nativeScratch_=Buffer(device,info.ScratchDataSizeInBytes,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        nativeTriangles_=snapshot.header.vertices/3;
+        nativeTriangles_=static_cast<unsigned>(pointCount/3); nativeReceiverTriangles_=snapshot.header.vertices/3;
     }
     void VisibleRayTracing::Record(ID3D12GraphicsCommandList* list,const CameraSnapshot& camera)
     {
@@ -131,7 +135,7 @@ namespace BZROpenShim::FrameBridge
         c.clear=facts.reversed?0.0f:1.0f; c.radius=4.0f; c.bias=.015f; c.strength=.8f;
         for(unsigned i=0;i<16;++i) c.toWorld[i]=static_cast<float>(inverseView[i]);
         std::memcpy(c.towardSun,towardSun_,sizeof(towardSun_)); c.shadowMode=shadowMode_;
-        c.shadowDistance=512; c.shadowBias=.05f; c.shadowStrength=.45f; c.nativeTriangles=nativeTriangles_;
+        c.shadowDistance=512; c.shadowBias=.05f; c.shadowStrength=.45f; c.nativeTriangles=nativeReceiverTriangles_;
         D3D12_RAYTRACING_INSTANCE_DESC instances[2]{};
         for(unsigned row=0;row<3;++row) for(unsigned col=0;col<4;++col) instances[0].Transform[row][col]=c.toWorld[row*4+col];
         instances[0].InstanceMask=1; instances[0].AccelerationStructure=blas_->GetGPUVirtualAddress();
@@ -172,14 +176,14 @@ namespace BZROpenShim::FrameBridge
     void VisibleRayTracing::ClearNativeGeometry()
     {
         nativeVertices_.Reset(); nativeBlas_.Reset(); nativeScratch_.Reset();
-        nativeGeometry_={}; nativeTriangles_=0; nativeBuilt_=false;
+        nativeGeometry_={}; nativeTriangles_=nativeReceiverTriangles_=0; nativeBuilt_=false;
         shadowMode_=0;
     }
 #else
     void VisibleRayTracing::Initialize(ID3D12Device*,ID3D12Resource*,ID3D12Resource*,ID3D12Resource*)
     { throw std::runtime_error("configure FRAME_BRIDGE_DXR=ON with dxc to build the visible DXR AO preview"); }
     void VisibleRayTracing::Record(ID3D12GraphicsCommandList*,const CameraSnapshot&) {}
-    void VisibleRayTracing::SetNativeGeometry(ID3D12Device*,const NativeGeometry&) { throw std::runtime_error("native geometry needs DXR build"); }
+    void VisibleRayTracing::SetNativeGeometry(ID3D12Device*,const NativeGeometry&,const NativeGeometry*) { throw std::runtime_error("native geometry needs DXR build"); }
     void VisibleRayTracing::ClearNativeGeometry() {}
 #endif
     void VisibleRayTracing::SetTerrainSun(const float* direction,unsigned mode)

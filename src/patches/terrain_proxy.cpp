@@ -20,6 +20,7 @@
 #include "terrain_hd_texture_copy.h"
 #include "terrain_paint.h"
 #include "frame_bridge_native_geometry.h"
+#include "frame_bridge_native_mesh.h"
 #include "frame_bridge_native_lease.h"
 
 #include <algorithm>
@@ -235,6 +236,8 @@ namespace BZROpenShim
             std::string surfaceManifest;
             std::string geometryExport;
             bool geometryLive=false;
+            bool geometryEntities=false;
+            bool geometryBuildings=false;
             float tessellationTargetPixels = 12.0f;
             bool tessellationWireframe = false;
             int tessellationFactor = 2;
@@ -865,6 +868,8 @@ namespace BZROpenShim
             ReadEnvString("OPENSHIM_TERRAIN_SURFACE_MANIFEST", config.surfaceManifest);
             ReadEnvString("OPENSHIM_TERRAIN_GEOMETRY_EXPORT", config.geometryExport);
             config.geometryLive=IsEnvEnabled("OPENSHIM_TERRAIN_GEOMETRY_LIVE")&&!config.geometryExport.empty();
+            config.geometryEntities=IsEnvEnabled("OPENSHIM_TERRAIN_GEOMETRY_ENTITIES")&&!config.geometryExport.empty();
+            config.geometryBuildings=IsEnvEnabled("OPENSHIM_TERRAIN_GEOMETRY_BUILDINGS")&&config.geometryEntities;
             int debugOverride = 0;
             if (ReadEnvInt("OPENSHIM_TERRAIN_SEMANTIC_DEBUG", debugOverride))
                 config.semanticDebugMode = debugOverride;
@@ -4664,6 +4669,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         #include "terrain_native_hd.inl"
         #include "terrain_surface_normals.inl"
         #include "terrain_atlas_export.inl"
+        #include "terrain_geometry_entities.inl"
         #include "terrain_geometry_export.inl"
 
         bool GetActiveCameraPosition(void*& camera, Vector3& position)
