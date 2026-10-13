@@ -350,7 +350,7 @@ Invoke-CRFlowStep 'enemy removed; 5th Platoon film on every client with team-7 a
             if (-not $active) { throw "c$client lost the shared film after c$skipClient skipped" }
         }
         Add-CRFlowCheck "local skip on c$skipClient leaves the 5th Platoon film running for the others" $true $null
-        $fleet.skipper = $skipClient
+        $fleet | Add-Member -NotePropertyName skipper -NotePropertyValue $skipClient -Force
     }
     $fleet
 }
