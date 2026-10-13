@@ -119,6 +119,37 @@ Invoke-CRFlowStep 'C2 guest Send(own craft) resolves on the host' {
     Add-Finding 'C2' 'handles' "The guest's own craft handle sent with Send() matches the host's view of that player" $r @{ other = $o.value; seconds = $o.seconds }
 }
 
+# C3: a handle with no network id. Map-authored objects (geysers, beacons,
+# scenery) are never SetLocal'd, so stock Redux sends them as id 0 and the guest
+# receives nil. With OpenShim's [Network] LuaMapObjectHandles (on by default)
+# the host sends a label-derived id and the guest maps it back. Run with
+# OPENSHIM_LUA_MAPOBJECT_HANDLES=0 (or the ini key at 0) in the instances to
+# reproduce the stock result ('none' / 'local-only'). The host's openshim.log
+# gets "[LUAHANDLE] sending map object" lines only when the label path engaged,
+# which is what separates this from a case that merely had a real network id.
+Invoke-CRFlowStep 'C3 host Send(map-authored labelled object) resolves on the guest' {
+    $pick = Invoke-CRFlow $H @"
+local best
+for h in AllObjects() do
+    local l = GetLabel(h)
+    if l and l ~= '' and IsAlive(h) and h ~= me() then
+        local rank = (l:find('geyser') and 3) or (IsBuilding(h) and 2) or 1
+        if not best or rank > best.rank then best = { h = h, label = l, rank = rank, odf = GetOdf(h) } end
+    end
+end
+if not best then return nil end
+c3 = best.h
+return { label = best.label, odf = best.odf, rank = best.rank }
+"@
+    if (-not $pick) { throw 'no labelled object on the host to send; not classified' }
+    $label = $pick.label
+    Invoke-CRFlow $G 'inbox(); return true' | Out-Null
+    Invoke-CRFlow $H "Send(0, '~', 'C3', c3); return true" | Out-Null
+    $o = Poll $G "local m = inbox()[1]; if not m then return nil end; local a = m.args[2]; local h = a and a.handle; local mine = GetHandle('$label'); return { received = m.args[1], argCount = #m.args, valid = h ~= nil and IsValid(h), same = h ~= nil and mine ~= nil and h == mine, label = h and GetLabel(h), mine = mine and describe(mine) }"
+    $r = if (-not $o.value) { 'none' } elseif ($o.value.same) { 'replicated' } elseif ($o.value.valid) { 'diverged' } else { 'local-only' }
+    Add-Finding 'C3' 'handles' 'A map-authored (no network id) handle sent with Send() is the same labelled object on the guest' $r @{ sent = $pick; other = $o.value; seconds = $o.seconds }
+}
+
 # ---------------------------------------------------------------- names --
 Invoke-CRFlowStep 'D1 host SetObjectiveName / SetName' {
     $s = $script:b2spot
