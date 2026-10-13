@@ -2,11 +2,18 @@
 # (misn05-coop / misn06-coop, New-CRFlowOverride.ps1) from current CR/EXU
 # before running. Each case prepares four isolated clients and closes them.
 param([string]$BZRCoopRoot = 'C:\BZRCoop', [string]$Only = '', [string]$OpenShimRepo = '',
-      [ValidateSet('misn05', 'misn06', 'misn07', 'misn08')][string]$Mission = 'misn05')
+      [ValidateSet('misn05', 'misn06', 'misn07', 'misn08', 'misn09')][string]$Mission = 'misn05')
 $cases = if ($Mission -eq 'misn07') {
     @(
         'misn07 coop-smoke Override=misn07-coop',
         'misn07 host-leaves Override=misn07-coop'
+    )
+} elseif ($Mission -eq 'misn09') {
+    @(
+        'misn09 coop-smoke Override=misn09-coop',
+        # Test assists: convoy launch + scaling, Prescott's platoon + victory, team-5 AIP.
+        'misn09 assists Override=misn09-coop',
+        'misn09 host-leaves Override=misn09-coop'
     )
 } elseif ($Mission -eq 'misn08') {
     @(
