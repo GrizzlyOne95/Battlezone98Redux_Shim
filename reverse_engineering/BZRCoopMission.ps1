@@ -49,13 +49,42 @@ $script:CRFlowReplicatedOps = @('ClearObjectives', 'AddObjective', 'UpdateObject
 function Get-CRFlowStub([string]$Mission) {
     # Appended at the end of the mission chunk, so M/CRCoop/native/... resolve
     # to the mission's file-level locals; names a mission lacks resolve to nil.
+    $infoHooks, $infoOpts, $infoLocals = '', '', ''
+    if ($Mission -eq 'misn06') {
+        # misn06 reads IsInfo (the selected object's info panel, local UI state)
+        # five ways. Guests relay their own via "I" messages and the leader
+        # honours a report for one second. Real selection is not scriptable, so
+        # a test forces one prefix true inside the guest's native-IsInfo wrapper;
+        # the mission's own relay, wire message and expiry still run unmodified.
+        $infoHooks = @'
+
+        local realNativeIsInfo, forcedInfo = nativeIsInfo, {}
+        nativeIsInfo = function(prefix)
+            if forcedInfo[prefix] then return true end
+            return realNativeIsInfo(prefix)
+        end
+'@
+        $infoOpts = @'
+
+            forceInfo = function(prefix, on) forcedInfo[prefix] = on and true or nil; return true end,
+            isInfo = function(prefix) return IsInfo(prefix) end,
+'@
+        $infoLocals = @'
+
+                    infoReportAges = (function()
+                        local ages = {}
+                        for prefix, at in pairs(type(remoteInfo) == "table" and remoteInfo or {}) do ages[prefix] = GetTime() - at end
+                        return ages
+                    end)(),
+'@
+    }
 @"
 
 $script:CRFlowMarker
 do
     local ok, probe = pcall(require, "CRFlowProbe")
-    if ok and type(probe) == "table" then
-        probe.Attach({
+    if ok and type(probe) == "table" then$infoHooks
+        probe.Attach({$infoOpts
             mission = "$Mission",
             getM = function() return M end,
             CRCoop = CRCoop, exu = exu, native = native,
@@ -75,7 +104,7 @@ do
                     -- snapshot a guest is following (path, target odf).
                     cameraPath = type(cameraFrame) == "table" and cameraFrame[1] or nil,
                     remotePath = type(remoteCamera) == "table" and remoteCamera[2] or nil,
-                    remoteTargetOdf = type(remoteCamera) == "table" and IsValid(remoteCamera[5]) and GetOdf(remoteCamera[5]) or nil,
+                    remoteTargetOdf = type(remoteCamera) == "table" and IsValid(remoteCamera[5]) and GetOdf(remoteCamera[5]) or nil,$infoLocals
                 }
             end,
         })
