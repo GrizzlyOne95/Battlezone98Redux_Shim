@@ -28,7 +28,15 @@ function Move-ClientNear([int]$Client, $Xyz, [double]$Dist) {
         $Xyz[0].ToString($inv), $Xyz[1].ToString($inv), $Xyz[2].ToString($inv), $Dist.ToString($inv), ($Dist + 10).ToString($inv)
     Invoke-CRFlow $Client $lua | Out-Null
 }
-function Get-HostOps([string]$Op) { @(Get-CRFlowEvents $H op | Where-Object { $_.op -eq $Op }) }
+function Test-GuestOps([string]$Op, [string]$What) {
+    # Soft per-guest observation (recorded as a check) for markers on authored
+    # map objects, which a guest drops when the handle is not valid there.
+    foreach ($client in $guests) {
+        $ok = $true
+        try { Wait-CRFlowOp $client $Op -TimeoutSeconds 10 | Out-Null } catch { $ok = $false }
+        Add-CRFlowCheck "c$client received $What ($Op)" $ok $null
+    }
+}function Get-HostOps([string]$Op) { @(Get-CRFlowEvents $H op | Where-Object { $_.op -eq $Op }) }
 function Assert-NoResult([string]$Why, [int]$Seconds = 6) {
     Start-Sleep -Seconds $Seconds
     $state = Invoke-CRFlow $H 'return { reached = M.pickupreached, dustoff = M.dustoff, pending = M.coopPendingResult ~= nil, result = M.coopResult == true }'
@@ -95,6 +103,27 @@ return {
     Add-CRFlowCheck '5th Platoon film units on support team 7' ($world.filmTeam -eq 7) $world
     Add-CRFlowCheck 'offline placeholder craft removed' (-not $world.offlinePlaceholder) $world
     $world
+}
+
+Invoke-CRFlowStep 'authored map objects the leader marks resolve on every client' {
+    # The leader sends SetObjectiveOn/Name handles in the E stream; a guest drops
+    # a marker whose handle is not valid there. Compare label resolution per peer.
+    $labels = 'eggeizr1-1_geyser', 'obheph0_i76building', 'avrecy-1_recycler', 'svrecy-1_recycler', 'sblpad0_i76building', 'obstp25_i76building', 'obstp33_i76building'
+    $table = @{}
+    foreach ($client in $C) {
+        $row = @{}
+        foreach ($label in $labels) {
+            $d = Invoke-CRFlow $client "return describe(GetHandle('$label'))"
+            $row[$label] = if ($d.valid) { "$($d.odf)@$($d.pos -join ',')" } else { 'INVALID' }
+        }
+        $table["c$client"] = $row
+    }
+    foreach ($client in $guests) {
+        foreach ($label in $labels) {
+            Add-CRFlowCheck "label $label is valid on c$client" ($table["c$client"][$label] -ne 'INVALID') @{ host = $table["c$H"][$label]; guest = $table["c$client"][$label] }
+        }
+    }
+    $table
 }
 
 Invoke-CRFlowStep 'starting scrap applied by each owner to its own team' {
@@ -186,7 +215,7 @@ Invoke-CRFlowStep 'Hephaestus scan relayed from a guest: leader honours it, then
     Start-Sleep -Milliseconds 1800
     $expired = -not (Invoke-CRFlow $H 'return isInfo("obheph")')
     Add-CRFlowCheck 'guest IsInfo report expires on the leader about a second after the guest stops' $expired @{ ages = $age }
-    foreach ($client in $guests) { Wait-CRFlowOp $client SetObjectiveOff -TimeoutSeconds 10 | Out-Null }
+    Test-GuestOps SetObjectiveOff 'Hephaestus marker off'
     @{ reportAges = $age }
 }
 
@@ -265,7 +294,7 @@ Invoke-CRFlowStep 'both escorts destroyed; transport arrives and the launch pad 
     foreach ($client in $C) { Wait-CRFlowOp $client StartCockpitTimer -TimeoutSeconds 25 | Out-Null }
     $timer = Get-CRFlowEvents $guests[0] op | Where-Object { $_.op -eq 'StartCockpitTimer' } | Select-Object -First 1
     Add-CRFlowCheck 'cockpit timer 540/362/180 delivered with the leader values' (@($timer.args)[0] -eq 540 -and @($timer.args)[1] -eq 362) $timer.args
-    foreach ($client in $guests) { Wait-CRFlowOp $client SetObjectiveOn -TimeoutSeconds 10 | Out-Null }
+    Test-GuestOps SetObjectiveOn 'launch pad marker on'
     'misn0605 objective and timer on every client'
 }
 
