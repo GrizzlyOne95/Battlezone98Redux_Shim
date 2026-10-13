@@ -46,6 +46,8 @@ Invoke-CRFlowStep 'session ready and mission running on both' {
     }
 }
 
+# Read before the host leaves (the mission fails afterwards).
+Test-CRFlowUnresolvedCounter
 $hostPid = (Get-CRFlowClient $H).pid
 $script:CRFlowExpectedExit += $hostPid
 Invoke-CRFlowStep 'host closes the game' {

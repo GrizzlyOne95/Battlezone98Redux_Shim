@@ -18,6 +18,8 @@ Invoke-CRFlowStep 'all ready; shared opening objective and film' {
     # this short loss case (the four-peer health gate needs ten seconds).
     if ($C.Count -gt 2) { Start-Sleep -Seconds 10 }
 }
+# Read before the loss: a finished mission stops answering probe commands.
+Test-CRFlowUnresolvedCounter
 Invoke-CRFlowStep 'Wyoming destroyed by its owner; no victory' {
     $before = Invoke-CRFlow $H 'return { alive = IsAlive(M.avrec), odf = GetOdf(M.avrec), team = GetTeamNum(M.avrec) }'
     if (-not $before.alive -or $before.team -ne 1) { throw "Wyoming is not a live team-1 object: $(ConvertTo-Json $before -Compress)" }

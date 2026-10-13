@@ -550,6 +550,24 @@ function Test-CRFlowWorldParity([int]$HostClient = 0, [int[]]$Guests, [double]$T
     }
 }
 
+# CR's co-op label resolution (CR #186) counts every label a guest could not
+# resolve in 15 s in the mission's M.coopUnresolved (nil until the first guest
+# resolve runs). Records one check per client, once.
+$script:CRFlowUnresolvedChecked = @{}
+function Test-CRFlowUnresolvedCounter([int[]]$Clients) {
+    if (-not $PSBoundParameters.ContainsKey('Clients')) { $Clients = @(Get-CRFlowClientIndices) }
+    foreach ($i in $Clients) {
+        if ($script:CRFlowUnresolvedChecked[$i] -eq $script:CRFlowRun.runDir) { continue }
+        $counter = $null
+        try { $counter = Invoke-CRFlow $i 'return M.coopUnresolved or 0' -TimeoutSeconds 8 } catch { }
+        if ($null -eq $counter) {
+            Add-CRFlowCheck "c$i M.coopUnresolved == 0 (counter unreadable; the log check covers it)" $false $null -WarnOnly
+        } else {
+            Add-CRFlowCheck "c$i M.coopUnresolved == 0" ([int]$counter -eq 0) @{ coopUnresolved = $counter }
+        }
+        $script:CRFlowUnresolvedChecked[$i] = $script:CRFlowRun.runDir
+    }
+}
 function Test-CRFlowLogErrors([int[]]$Clients) {
     if (-not $PSBoundParameters.ContainsKey('Clients')) { $Clients = @(Get-CRFlowClientIndices) }
     foreach ($i in $Clients) {
@@ -563,6 +581,19 @@ function Test-CRFlowLogErrors([int[]]$Clients) {
         # "Fsm error" is the engine's own (e.g. "Camera Stack 0verfow" from an
         # unbalanced CameraFinish); it raises an in-game alert.
         Add-CRFlowCheck "c$i no Lua or engine script errors" ($hits.Count -eq 0) $hits
+        # CR's guest-side marker/label resolution (CR #186) logs "[coop] unresolved ..."
+        # and bumps M.coopUnresolved when a leader-sent label never resolves in 15 s.
+        $unresolved = @()
+        if ($log) {
+            $unresolved = @(Select-String -LiteralPath $log -SimpleMatch -Pattern '[coop] unresolved' |
+                Select-Object -Last 10 | ForEach-Object { $_.Line.Trim() })
+        }
+        Add-CRFlowCheck "c$i no unresolved co-op labels (log)" ($unresolved.Count -eq 0) $unresolved
+        # The Lua counter: scenarios that end the mission read it just before the
+        # ending (a finished mission stops answering probe commands); otherwise
+        # read it live here. A peer with no Lua state is a warning; the log check
+        # above still covers it.
+        Test-CRFlowUnresolvedCounter -Clients @($i)
         # Subtitle fallback prints a user-visible OGRE failure notice without
         # raising a Lua error. Include its dedicated diagnostics in the verdict.
         $overlayHits = @()

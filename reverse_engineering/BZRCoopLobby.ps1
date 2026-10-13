@@ -148,6 +148,17 @@ function Click($client, $xy) {
 
 # 1. Every client into the multiplayer lounge.
 foreach ($client in $allClients) { Click $client $UI.MainMultiPlayer }
+# A posted click is occasionally lost (the client sits on the main menu with
+# Multi Player highlighted, seen on the fourth client of back-to-back runs):
+# click again once for any client that has not entered the lounge after 15 s.
+$lostClickDeadline = (Get-Date).AddSeconds(15)
+while ((Get-Date) -lt $lostClickDeadline -and @($allClients | Where-Object { -not (Find-LogLine $_ 'fully entered lobby') }).Count) { Start-Sleep -Milliseconds 400 }
+foreach ($client in $allClients) {
+    if (-not (Find-LogLine $client 'fully entered lobby')) {
+        Write-Step "c$($client.index)-lounge-retry" 'ok' @{ evidence = 're-clicked Multi Player after 15 s without entering the lounge' }
+        Click $client $UI.MainMultiPlayer
+    }
+}
 foreach ($client in $allClients) {
     $null = Wait-Until "c$($client.index)-lounge" { Find-LogLine $client 'fully entered lobby' }
 }
