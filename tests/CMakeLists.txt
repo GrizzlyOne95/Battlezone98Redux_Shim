@@ -295,6 +295,10 @@ openshim_add_test(map_filter_extras_tests STD 14 SOURCES
     map_filter_extras_tests.cpp
 )
 
+openshim_add_test(lua_handle_sync_tests STD 14 SOURCES
+    lua_handle_sync_tests.cpp
+)
+
 openshim_add_test(memory_access_tests STD 20 SOURCES
     memory_access_tests.cpp
 )

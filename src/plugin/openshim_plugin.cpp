@@ -48,6 +48,7 @@
 #include "ui_performance.h"
 #include "ui_performance_hooks.h"
 #include "ui_file_scan_hooks.h"
+#include "lua_handle_sync_install.h"
 #include "mp_faction_restrict.h"
 #include "mp_ready_diagnostic.h"
 #include "BZROpenShim.h"
@@ -128,6 +129,13 @@ static unsigned __stdcall PatchThreadProc(void*)
     // inert until [Network] StockFactionsOnly is turned on, and the loader it
     // intercepts only runs when a multiplayer screen builds its vehicle list.
     PATCH_STAGE(BZROpenShim::MpFactionRestrict::InstallMpFactionRestrictIfPossible());
+
+    // Lua Send/Receive carries a Handle as the object's network id, which
+    // map-authored objects (geysers, beacons) never get, so receivers see nil.
+    // Two call sites in the Lua handle pack/unpack routines are rewritten to
+    // fall back to a label-derived id. Signature-gated and fail-closed;
+    // [Network] LuaMapObjectHandles = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::LuaHandleSync::InstallLuaHandleSyncIfPossible());
 
     // Explains a "Not Ready" multiplayer entry on the main menu. Read-only: it
     // reproduces the shell's own readiness decision from the same globals and

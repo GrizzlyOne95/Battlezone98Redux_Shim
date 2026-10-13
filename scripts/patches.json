@@ -1327,6 +1327,66 @@
       "fallback": "0x004E1138",
       "require_unique": true,
       "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); GameObjectClass Find successful new-class path: native BuildClass result saved at [EBP-4C], ECX=scope [EBP-3C], calls PopScope then returns saved class. Read CraftClass recoilName1..5 before pop; cache hits and failure path are excluded. Live-runtime qualification pending; installation gate is closed."
+    },
+    {
+      "name": "Lua::PackHandle id load call",
+      "pattern": "8B 4D FC 83 C1 18 E8 ?? ?? ?? ?? 89 45 F4 8B 4D 08 8B 11 8B 45 F4 89 02",
+      "offset": 6,
+      "mode": "address",
+      "fallback": "0x00505469",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `call DistributedObject::GetLocalID` inside Redux's Lua handle packer FUN_00505410 (1.5 PackHandle @0x0041911C) on exact GOG Redux 2.2.301. The packer converts the Lua value to a handle (0x004FF750), resolves it with GameObjectHandle::GetObj (0x004DA060), then loads `mov ecx,[ebp-4] / add ecx,0x18` (GameObject -> DistributedObject subobject) and calls the accessor at this site; the result is stored verbatim as the four wire bytes (`mov [edx],eax`). Anchored on the CALL, not its operand. The surrounding `83 C1 18` and the store sequence are in the signature, and the installer additionally requires the call to reach DistributedObject::GetLocalID. Verified by whole-image scan on 2026-10-13: one match. Rewritten by lua_handle_sync.cpp."
+    },
+    {
+      "name": "Lua::UnpackHandle object lookup call",
+      "pattern": "50 E8 ?? ?? ?? ?? 83 C4 04 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 FC 8B 4D FC 51 8B 55 0C 52 E8 ?? ?? ?? ??",
+      "offset": 1,
+      "mode": "address",
+      "fallback": "0x005054C6",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `call DistributedObject::GetGameObject` inside Redux's Lua handle unpacker FUN_00505490 (1.5 UnpackHandle @0x0041C1B7) on exact GOG Redux 2.2.301. The unpacker reads four wire bytes when the Lua type byte's low five bits (count) are non-zero, pushes them as the argument of this cdecl call (`push eax / call / add esp,4`), converts the returned GameObject* to a handle with 0x00477590 (0 for null) and pushes it or nil with 0x004FF770. Anchored on the CALL. The installer additionally requires the call to reach DistributedObject::GetGameObject. Verified by whole-image scan on 2026-10-13: one match. Rewritten by lua_handle_sync.cpp."
+    },
+    {
+      "name": "DistributedObject::GetLocalID",
+      "pattern": "55 8B EC 51 89 4D FC 8B 45 FC 8B 40 64 8B E5 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004B9A90",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "DistributedObject::GetID on exact GOG Redux 2.2.301: a __fastcall/thiscall leaf returning dwLocalID, `mov eax,[ecx+0x64]`. The 1.5 PDB build has GetID at 0x0048A252 returning dwLocalID, the field SetLocal (1.5 0x0048F80B) assigns as activnet_id << 16 | counter. The only caller used here is the Lua handle packer at 0x00505469, which reaches it with ecx = GameObject + 0x18. Whole-image scan 2026-10-13: one match. lua_handle_sync.cpp calls it for the stock id and requires the pack call site to target it."
+    },
+    {
+      "name": "DistributedObject::GetGameObject",
+      "pattern": "55 8B EC 83 EC 24 8D 4D FC E8 ?? ?? ?? ?? 8D 45 08 50 8D 4D E8 51 B9 ?? ?? ?? ?? E8",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004B9AB0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "DistributedObject::GetGameObject(dwLocalID) on exact GOG Redux 2.2.301: cdecl, one stack argument, looks the id up in two distributed-object maps (map objects 0x0094E29C, then 0x0094E28C; 1.5 checks localDistributedObjectMap then remoteDistributedObjectMap), returning the map value minus 0x18 (DistributedObject subobject -> GameObject) or 0. Used by the Lua handle unpacker at 0x005054C6. Whole-image scan 2026-10-13: one match. lua_handle_sync.cpp calls it first for every id and requires the unpack call site to target it."
+    },
+    {
+      "name": "GameObject::GetLabel",
+      "pattern": "55 8B EC 51 89 4D FC 8B 45 FC 8B 80 00 01 00 00 8B E5 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004623E0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GameObject::GetLabel on exact GOG Redux 2.2.301: __fastcall/thiscall leaf returning the char* label at GameObject+0x100 (1.5 GetLabel @0x00405A10 returns this->label). The Lua GetHandle(label) walker FUN_005C7E90 compares its argument against exactly this accessor's result for each object in the engine object vector, byte by byte and case-sensitively. Whole-image scan 2026-10-13: one match."
+    },
+    {
+      "name": "GameObject::objectList",
+      "pattern": "A1 ?? ?? ?? ?? 89 45 EC 8D 4D F8 E8 ?? ?? ?? ?? 8D 4D D8 51 8B 4D EC E8",
+      "offset": 1,
+      "mode": "abs32_operand",
+      "fallback": "0x00917A74",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Global holding the pointer to the engine's GameObject list (1.5 GameObject::objectList, a std::vector<GameObject*>) on exact GOG Redux 2.2.301, read from the `mov eax,[imm32]` that opens FUN_005C7E90, the Lua GetHandle(label) walker (its miss message is \"No object named \\\"%s\\\"\"). The walker passes that pointer as ECX to 0x0041FBD0 (begin = [ecx]) and 0x0041FC30 (end = [ecx+4]), i.e. _Myfirst at +0 and _Mylast at +4, then reads GetLabel on each element. Whole-image scan 2026-10-13: one match."
     }
   ],
   "engine_addresses": [
