@@ -140,6 +140,10 @@ leaves staging at "Vehicle not selected", and Ready never completes.
 | misn06 | `win Override=misn06-coop` (4 clients) | Roles/alliances (team 7 allied, CCA 5 hostile), per-owner scrap, opening and Hephaestus path films with a local guest skip, guest-only discovery, guest-relayed IsInfo scans (`forceInfo` test hook; the relay, `I` message and 1 s expiry run unmodified), object-camera film, 5th Platoon film held while any player has an enemy within 400 m, launch pad scan, dust-off gate (Wyoming away / one player away / all in) and `misn06w1.des` on all |
 | misn06 | `lose Override=misn06-coop Destroyed=recycler` | Wyoming destroyed; `misn06l5.des` reaches every client |
 | misn06 | `host-leaves Override=misn06-coop` | Same generic scenario; guest fails once and stays running |
+| misn07 | `coop-smoke Override=misn07-coop` (4 clients; `Run-BZRCoopFour.ps1 -Mission misn07`) | Minimal: load, reach gameplay, every peer alive on the full roster, presentation parity, no unresolved labels. No scripted win |
+| misn07 | `host-leaves Override=misn07-coop` | Generic scenario |
+| misn08 | `coop-smoke Override=misn08-coop Aip=1` | As misn07; `Aip=1` then forces `M.bad_news` (the story beat that runs `SetAIP("misn08.aip", 5)`) and watches team-5 object counts and scrap. Currently fails: the host crashes while loading the map |
+| misn08 | `host-leaves Override=misn08-coop` | Generic scenario |
 | any | `film-preview` (`-ScenarioArgs @{ Path='endcin'; Variants=@('100,200,M.avrec','8000,9000,center'); Protect=@('avrec') }`) | Not a test: plays one camera path on the host with each height,speed,target (cm, cm/s, Lua handle or `center` = a pod at the path's middle) and screenshots it, to tune a film without playing up to it. Height/speed are cm: 100 is 1 m |
 | misn04 | `endfilm` | Jumps the host to the win and checks the closing film on both clients: camera pod on the Face summit, both cameras on `endcin`, pod removed, `misn04w1.des` on both. Does not need audio |
 | any | `host-leaves` | The host quits mid-mission; the guest detects leader departure, fails the mission and keeps running |

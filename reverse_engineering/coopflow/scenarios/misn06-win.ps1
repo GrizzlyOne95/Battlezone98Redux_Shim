@@ -405,6 +405,8 @@ return describe(M.avrec)
     $d
 }
 
+# Read before the win: a finished mission stops answering probe commands.
+Test-CRFlowUnresolvedCounter
 Invoke-CRFlowStep "c$lastGuest joins: Wyoming and all $($C.Count) players inside 100 m; the win reaches everyone" {
     Move-ClientNear $lastGuest $dustoff 45
     $d = Invoke-CRFlow $H 'return { avrec = GetDistance(M.avrec, M.dustoffcam), players = (function() local r = {}; CRCoop.ForEachPlayerHandle(function(h) r[#r + 1] = GetDistance(h, M.dustoffcam) end); return r end)() }'
