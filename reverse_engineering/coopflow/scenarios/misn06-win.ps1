@@ -392,12 +392,13 @@ return describe(M.avrec)
 }
 
 Invoke-CRFlowStep "Wyoming at the dust-off point but c$lastGuest away: no extraction" {
+    # Away first: with Wyoming already home, the gate would fire the moment all players were in.
+    Move-ClientNear $lastGuest $dustoff 300
     Invoke-CRFlow $H @"
 local p = GetPositionNear(at($($dustoff[0].ToString($inv)), $($dustoff[1].ToString($inv)), $($dustoff[2].ToString($inv))), 40, 50)
 SetPosition(M.avrec, p)
 return describe(M.avrec)
 "@ | Out-Null
-    Move-ClientNear $lastGuest $dustoff 300
     $d = Invoke-CRFlow $H 'return { avrec = GetDistance(M.avrec, M.dustoffcam), players = (function() local r = {}; CRCoop.ForEachPlayerHandle(function(h) r[#r + 1] = GetDistance(h, M.dustoffcam) end); return r end)() }'
     if ($d.avrec -gt 100 -or @($d.players | Where-Object { $_ -gt 100 }).Count -ne 1) { throw "gate setup incorrect: $(ConvertTo-Json $d -Compress)" }
     Assert-NoResult "c$lastGuest away" | Out-Null
