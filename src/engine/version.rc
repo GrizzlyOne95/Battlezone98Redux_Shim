@@ -30,8 +30,8 @@
 #endif
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,51
- PRODUCTVERSION 1,0,0,51
+ FILEVERSION 1,0,0,52
+ PRODUCTVERSION 1,0,0,52
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -48,12 +48,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "BZR Open Shim Contributors"
             VALUE "FileDescription", OSM_DESC
-            VALUE "FileVersion", "1.0.0.51"
+            VALUE "FileVersion", "1.0.0.52"
             VALUE "InternalName", OSM_FILENAME
             VALUE "LegalCopyright", "Copyright (C) 2025"
             VALUE "OriginalFilename", OSM_FILENAME
             VALUE "ProductName", OSM_PRODUCT
-            VALUE "ProductVersion", "1.0.0.51"
+            VALUE "ProductVersion", "1.0.0.52"
         END
     END
     BLOCK "VarFileInfo"
