@@ -139,6 +139,11 @@ namespace BZROpenShim
             // section 12.1.
             { 0, HookEngine::PatchType::DWORD, {}, "HUD 2D Depth Floor Margin", false, {} },
             { 0, HookEngine::PatchType::BYTE1, { 0xEB }, "Vehicle List Mod Fix 3/4 (Always Update Vehicle Control)", false, {} },
+            // The UI render-frame catch (0x007C7340) quits the whole application with
+            // "complete render failure" once its quality ladder is exhausted. The Lua
+            // error alert renders through it, so one Ogre exception while it was up
+            // closed the game. JNE -> JMP keeps the log-and-continue branch.
+            { 0, HookEngine::PatchType::BYTE1, { 0xEB }, "UI Render Exception Fail-Soft", false, {} },
             // Rewrites the whole `push 0x10188` that supplies DSBUFFERDESC.dwFlags
             // for the streaming music buffer, adding DSBCAPS_GLOBALFOCUS (0x8000)
             // so DirectSound stops muting it when the game loses foreground. The
@@ -166,6 +171,11 @@ namespace BZROpenShim
             // Carrier::GetWeapon result for the selected mask; an empty
             // selected hardpoint gets a non-SNIP stand-in instead of null.
             { 0, HookEngine::PatchType::REL32, {}, "Person Sniper Scan Weapon Null Guard", false, {} },
+            // AI_Team_Compute_Other calls ScavengerProcess::GetScrapPosition on
+            // whatever AI process a team scavenger holds; a remote scavenger
+            // holds a NetProcess and the callee writes -1.0f past its 0x18-byte
+            // allocation. The call goes through a type-checking guard.
+            { 0, HookEngine::PatchType::REL32, {}, "Scavenger Process Scrap Position Guard", false, {} },
             // ShellCasings: the OrdnanceClass factory call of an accepted
             // Cannon/Mortar/SniperGun and MachineGun shot goes through a
             // bridge that runs the factory, then queues a cosmetic casing.

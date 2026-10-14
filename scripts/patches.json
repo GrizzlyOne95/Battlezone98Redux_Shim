@@ -269,6 +269,18 @@
       "identity": "Third Carrier::GetWeapon site in Person::Simulate (0x0059D340), sibling of Pilot Carrier Null Guard (0x0059D76D, same function). The loop at 0x0059D777 walks slots 0-4 of the selected mask returned by Carrier::GetSelected, calls Carrier::GetWeapon (0x00417F60) at 0x0059D7C3 for every set bit, and dereferences the result unconditionally: mov eax,[edx+8] at 0x0059D7D4, then cmp [eax+0xC],'SNIP' to set the crouch flag at [ebp-0x351]. GetWeapon returns null when the hardpoint mask at [carrier+0x2C] lacks that bit, so a selected-mask bit on an empty hardpoint faults. Observed on GOG Redux 2.2.301 in ISDF Chronicles isdfms10 (dump battlezone98redux.exe.54600.dmp): a jak person whose Lua removed its only weapon with GiveWeapon(h, nil, 0) kept selected=1 at [carrier+0x30] with hardpoint mask 0, EIP 0x0059D7D4 reading [0+8]. The result at [ebp-0x4B4] is read only by that SNIP test, so the guard returns a static non-SNIP stand-in for an empty slot. The earlier GetWeapon call at 0x0059D3F0 already null-checks and is left stock. Pattern verified single-match by whole-image scan on 2026-09-26."
     },
     {
+      "name": "Scavenger Process Scrap Position Guard",
+      "platforms": [
+        "gog"
+      ],
+      "pattern": "8B 4D DC E8 ?? ?? ?? ?? 8B 10 89 55 F0 8B 48 04 89 4D F4 8B 50 08 89 55 F8",
+      "offset": 4,
+      "expected_size": 4,
+      "fallback": "0x006A3962",
+      "require_unique": true,
+      "identity": "AI_Team_Compute_Other (0x006A3870) call of ScavengerProcess::GetScrapPosition (0x005C40B0) at 0x006A3961 on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413). The function enumerates GameObjects, keeps those whose class signature is 'SCAV' (cmp [eax+0x14],0x53434156 at 0x006A392C) and whose team matches the scanned team, fetches the AI process through GameObject+0xFC (0x0045BDF0) and tests only that it is non-null before calling GetScrapPosition with ECX = process. A scavenger owned by a remote peer holds a NetProcess there (vtable 0x00884BB4, a 0x18-byte allocation). GetScrapPosition checks [this+0x1C]==4 and [this+0x58]; otherwise it stores -1.0f (constant at 0x008A2EFC) at this+0x3C (0x005C4126), past the end of that allocation, onto the next heap entry header. Four intact dumps (PIDs 21756, 12396, 31700, 4708) show owner Scavenger (vtable 0x00886FE8) -> NetProcess, with BF800000 at header+4 exactly at process+0x3C; three more dumps carry the same signature (C:\\BZDumps\\analysis_20261014\\REPORT.md). The caller copies x/y/z from the returned pointer and promotes the scavenger only when y > 0.0f (comiss against 0x008A2498 at 0x006A397C, jbe 0x006A398C), so a vector with y = -1 is the existing no-scrap path. The guard redirects only this call: a process whose first word is one of the ScavengerProcess-family vtables (ScavengerProcess 0x008871D8, ScavengerFriend 0x00887190, ScavengerEnemy 0x008871B4, from the RTTI base-class walk) is forwarded to the stock function; anything else gets a static read-only {0,-1,0} and is never called into. The 17-byte window after the call pins the caller's copy-out of the result. Single match in the GOG image (whole-image scan 2026-10-14)."
+    },
+    {
       "name": "Shell Casings Cannon Shot Call",
       "pattern": "8B 85 B0 FD FF FF 8B 48 18 51 8D 55 BC 52 8B 85 B0 FD FF FF 8B 48 0C E8 ?? ?? ?? ?? 89 85 9C FD FF FF",
       "offset": 24,
@@ -1327,6 +1339,66 @@
       "fallback": "0x004E1138",
       "require_unique": true,
       "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); GameObjectClass Find successful new-class path: native BuildClass result saved at [EBP-4C], ECX=scope [EBP-3C], calls PopScope then returns saved class. Read CraftClass recoilName1..5 before pop; cache hits and failure path are excluded. Live-runtime qualification pending; installation gate is closed."
+    },
+    {
+      "name": "Lua::PackHandle id load call",
+      "pattern": "8B 4D FC 83 C1 18 E8 ?? ?? ?? ?? 89 45 F4 8B 4D 08 8B 11 8B 45 F4 89 02",
+      "offset": 6,
+      "mode": "address",
+      "fallback": "0x00505469",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `call DistributedObject::GetLocalID` inside Redux's Lua handle packer FUN_00505410 (1.5 PackHandle @0x0041911C) on exact GOG Redux 2.2.301. The packer converts the Lua value to a handle (0x004FF750), resolves it with GameObjectHandle::GetObj (0x004DA060), then loads `mov ecx,[ebp-4] / add ecx,0x18` (GameObject -> DistributedObject subobject) and calls the accessor at this site; the result is stored verbatim as the four wire bytes (`mov [edx],eax`). Anchored on the CALL, not its operand. The surrounding `83 C1 18` and the store sequence are in the signature, and the installer additionally requires the call to reach DistributedObject::GetLocalID. Verified by whole-image scan on 2026-10-13: one match. Rewritten by lua_handle_sync.cpp."
+    },
+    {
+      "name": "Lua::UnpackHandle object lookup call",
+      "pattern": "50 E8 ?? ?? ?? ?? 83 C4 04 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 FC 8B 4D FC 51 8B 55 0C 52 E8 ?? ?? ?? ??",
+      "offset": 1,
+      "mode": "address",
+      "fallback": "0x005054C6",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `call DistributedObject::GetGameObject` inside Redux's Lua handle unpacker FUN_00505490 (1.5 UnpackHandle @0x0041C1B7) on exact GOG Redux 2.2.301. The unpacker reads four wire bytes when the Lua type byte's low five bits (count) are non-zero, pushes them as the argument of this cdecl call (`push eax / call / add esp,4`), converts the returned GameObject* to a handle with 0x00477590 (0 for null) and pushes it or nil with 0x004FF770. Anchored on the CALL. The installer additionally requires the call to reach DistributedObject::GetGameObject. Verified by whole-image scan on 2026-10-13: one match. Rewritten by lua_handle_sync.cpp."
+    },
+    {
+      "name": "DistributedObject::GetLocalID",
+      "pattern": "55 8B EC 51 89 4D FC 8B 45 FC 8B 40 64 8B E5 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004B9A90",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "DistributedObject::GetID on exact GOG Redux 2.2.301: a __fastcall/thiscall leaf returning dwLocalID, `mov eax,[ecx+0x64]`. The 1.5 PDB build has GetID at 0x0048A252 returning dwLocalID, the field SetLocal (1.5 0x0048F80B) assigns as activnet_id << 16 | counter. The only caller used here is the Lua handle packer at 0x00505469, which reaches it with ecx = GameObject + 0x18. Whole-image scan 2026-10-13: one match. lua_handle_sync.cpp calls it for the stock id and requires the pack call site to target it."
+    },
+    {
+      "name": "DistributedObject::GetGameObject",
+      "pattern": "55 8B EC 83 EC 24 8D 4D FC E8 ?? ?? ?? ?? 8D 45 08 50 8D 4D E8 51 B9 ?? ?? ?? ?? E8",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004B9AB0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "DistributedObject::GetGameObject(dwLocalID) on exact GOG Redux 2.2.301: cdecl, one stack argument, looks the id up in two distributed-object maps (map objects 0x0094E29C, then 0x0094E28C; 1.5 checks localDistributedObjectMap then remoteDistributedObjectMap), returning the map value minus 0x18 (DistributedObject subobject -> GameObject) or 0. Used by the Lua handle unpacker at 0x005054C6. Whole-image scan 2026-10-13: one match. lua_handle_sync.cpp calls it first for every id and requires the unpack call site to target it."
+    },
+    {
+      "name": "GameObject::GetLabel",
+      "pattern": "55 8B EC 51 89 4D FC 8B 45 FC 8B 80 00 01 00 00 8B E5 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004623E0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GameObject::GetLabel on exact GOG Redux 2.2.301: __fastcall/thiscall leaf returning the char* label at GameObject+0x100 (1.5 GetLabel @0x00405A10 returns this->label). The Lua GetHandle(label) walker FUN_005C7E90 compares its argument against exactly this accessor's result for each object in the engine object vector, byte by byte and case-sensitively. Whole-image scan 2026-10-13: one match."
+    },
+    {
+      "name": "GameObject::objectList",
+      "pattern": "A1 ?? ?? ?? ?? 89 45 EC 8D 4D F8 E8 ?? ?? ?? ?? 8D 4D D8 51 8B 4D EC E8",
+      "offset": 1,
+      "mode": "abs32_operand",
+      "fallback": "0x00917A74",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Global holding the pointer to the engine's GameObject list (1.5 GameObject::objectList, a std::vector<GameObject*>) on exact GOG Redux 2.2.301, read from the `mov eax,[imm32]` that opens FUN_005C7E90, the Lua GetHandle(label) walker (its miss message is \"No object named \\\"%s\\\"\"). The walker passes that pointer as ECX to 0x0041FBD0 (begin = [ecx]) and 0x0041FC30 (end = [ecx+4]), i.e. _Myfirst at +0 and _Mylast at +4, then reads GetLabel on each element. Whole-image scan 2026-10-13: one match."
     }
   ],
   "engine_addresses": [
@@ -3570,6 +3642,65 @@
       "address": "0x008A0B94",
       "kind": "data",
       "identity": "cUI_View vtable (15 slots; RTTI .?AVcUI_View@@). OpenShim custom screens copy it and replace slots 0 and 5."
+    },
+    {
+      "name": "LuaFormationBinding",
+      "address": "0x005079B0",
+      "expected": "55 8B EC 83 EC 08 6A 01 8B 45 08 50 E8 8F 7D FF FF 83 C4 08 89 45 F8 6A 01 6A 02 8B 4D 08 51 E8 29 48 32 00 83 C4 0C 89 45 FC 6A 01 8B 55 FC 52 8B 45 F8 50 E8 97 6C 0C 00 83 C4 0C 33 C0 8B E5",
+      "identity": "Stock Lua binding for Formation on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): a byte-for-byte copy of the Recycle(unit, priority) binding at 0x00507970. Reads argument 1 with the handle getter 0x004FF750, argument 2 with luaL_optinteger(L, 2, 1), and calls native Formation 0x005CE680 as (me, thatInteger, 1). The lua_formation_fix.cpp installer requires the registration row to hold exactly this address and these bytes before it swaps in the repaired binding."
+    },
+    {
+      "name": "LuaGetHandle",
+      "address": "0x004FF750",
+      "expected": "55 8B EC 68 74 C1 87 00 8B 45 0C 50 8B 4D 08 51 E8 BB FB FF FF 83 C4 0C 5D C3",
+      "identity": "cdecl Lua handle getter GetHandle(L, index): pushes the string \"BZHandle\" (0x0087C174) and calls the userdata checker 0x004FF320, returning the handle. Used by Recycle/Formation bindings for argument 1 and by the Lua handle packer 0x00505410."
+    },
+    {
+      "name": "LuaType",
+      "address": "0x0082D490",
+      "expected": "55 8B EC FF 75 0C FF 75 08 E8 08 F0 FF FF 59 59 3D 18 ED 86 00 75 05 83 C8 FF 5D C3 8B 40 08 5D C3",
+      "identity": "lua_type(L, index) in the statically linked Lua 5.1: returns -1 for an invalid index (the 0x0086ED18 nil object), else the type tag at [obj+8]. luaL_optinteger 0x0082C1FD tests it with `jg` (type > 0) before reading a number, which pins nil = 0 and none = -1."
+    },
+    {
+      "name": "LuaOptInteger",
+      "address": "0x0082C1FD",
+      "expected": "55 8B EC FF 75 0C FF 75 08 E8 85 12 00 00 59 59 85 C0 7F 05 8B 45 10 5D",
+      "identity": "luaL_optinteger(L, narg, def) cdecl: returns def when lua_type(L, narg) <= 0, else luaL_checkinteger. Called with (L, 2, 1) by the stock Formation and Recycle bindings."
+    },
+    {
+      "name": "GameFormation",
+      "address": "0x005CE680",
+      "expected": "55 8B EC 83 EC 24 8B 45 08 50 E8 A1 3F E9 FF 83 C4 04 89 45 FC 83 7D FC 00 75 02 EB 37 8D 4D DC E8 3B 96 EA FF 8B 4D 10",
+      "identity": "Native Formation(Handle me, Handle him, int priority), cdecl: resolves me, builds an AiCommand with code 6 (FORMATION), who = argument 2, priority = argument 3, and issues it through 0x004DBAF0. Called by the stock Lua binding 0x005079B0 and which the repaired binding calls with the real leader handle."
+    },
+    {
+      "name": "LuaFormationRegistration",
+      "address": "0x00872370",
+      "kind": "data",
+      "identity": "Lua registration table row { \"Formation\" (0x0087CF64), 0x005079B0 } on exact GOG Redux 2.2.301, in .rdata between { Recycle, 0x00507970 } at 0x00872368 and { 0x0087D02C, 0x00507A00 } at 0x00872378. The installer reads the row at patch time and requires the name string to read Formation and the function pointer to equal the byte-guarded stock binding before it rewrites the pointer at +4."
+    },
+    {
+      "name": "ScavengerProcessGetScrapPosition",
+      "address": "0x005C40B0",
+      "expected": "55 8B EC 83 EC 24 A1 00 70 8E 00 33 C5 89 45 FC 89 4D EC 8B 45 EC 83 C0 38"
+    },
+    {
+      "name": "ScavengerProcessVtable",
+      "address": "0x008871D8",
+      "kind": "data",
+      "identity": "ScavengerProcess primary vtable (.?AVScavengerProcess@@, bases AiProcess, SObject); RTTI-verified at patch time."
+    },
+    {
+      "name": "ScavengerFriendVtable",
+      "address": "0x00887190",
+      "kind": "data",
+      "identity": "ScavengerFriend primary vtable (.?AVScavengerFriend@@, derives ScavengerProcess); RTTI-verified at patch time."
+    },
+    {
+      "name": "ScavengerEnemyVtable",
+      "address": "0x008871B4",
+      "kind": "data",
+      "identity": "ScavengerEnemy primary vtable (.?AVScavengerEnemy@@, derives ScavengerProcess); RTTI-verified at patch time."
     }
   ],
   "globals": [
@@ -3822,6 +3953,16 @@
       "expected_original": "C7 05 F4 98 91 00 00 00 00 00",
       "require_unique": true,
       "identity": "SetPlatform(int) at 0x004344B0 in GOG battlezone98redux.exe SHA256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413: stores the platform (0 pc, 1 osx, 2 ios) and writes 1 to the input-smoothing bypass flag 0x009198F4 only for ios, 0 otherwise (0x004344D7). Called from window init (0x00618D02) and the -platform command-line parser (0x007D5536); these are the flag's only writers. UserProcess::Execute (0x0060ABxx-0x0060B5xx) tests it at ten sites (0x60AEC5 .. 0x60B50C) to assign steer/pitch/throttle/strafe targets directly instead of low-passing them ((target-cur)*dt*5 analog, *1 keyboard; the BZ 1.5 decompile shows the same filter). BZCC exposes the same choice as options.play.smoothing. Pattern is a unique whole-image match on 2026-09-26; the payload rewrites the else-branch immediate so every SetPlatform call leaves smoothing off."
+    },
+    {
+      "name": "UI Render Exception Fail-Soft",
+      "pattern": "6A 01 E8 ?? ?? ?? ?? 83 C4 04 85 C0 75 2D E8 ?? ?? ?? ?? 83 F8 09 74 17 68 DC 07 8A 00",
+      "offset": 12,
+      "expected_size": 1,
+      "fallback": "0x007C734C",
+      "expected_original": "75",
+      "require_unique": true,
+      "identity": "The catch funclet Catch_007c7340 of the UI render-frame function at 0x007C7070 in GOG battlezone98redux.exe SHA256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413. That function wraps Ogre::Root::renderOneFrame; the catch calls the quality ladder at 0x007AE480 and, when it returns 0 (nothing left to lower), logs 'Closing application due to complete render failure' and sets the exit state (0x00434170(9)); otherwise it logs 'Ogre Rendering Exception Seen from UI' and resumes. The in-game Lua error alert (and every other UI-frame view) runs through it, so any Ogre exception thrown while it renders the scene, such as the per-frame shaderless-draw exception D3D11 raises for a fixed-function material, kills the application after two frames. The ordinary in-game render path only logs the same exception. The patch turns the JNE at 0x007C734C into JMP so the exhausted-ladder branch is never taken: the exception is logged and the frame is dropped, as in gameplay. See Docs/UI_RENDER_EXCEPTION_FAILSOFT.md."
     },
     {
       "name": "Artillery Weapon Mask Select Hook",
