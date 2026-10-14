@@ -66,6 +66,8 @@ if ($Action -ne 'Launch') {
 . "$PSScriptRoot\BZRCoopDiagnostics.ps1"
 
 $InstancesDir = Join-Path $BZRCoopRoot 'instances'
+# Scope the foreground watchdog to this session's instances (GameRoot is null above).
+$env:BZR_GAME_ROOT = $InstancesDir
 $RunsDir = Join-Path $BZRCoopRoot 'runs'
 $SessionFile = Join-Path $BZRCoopRoot 'session.json'
 # Rebellion's production matchmaking endpoint as seen in stock logs; a local

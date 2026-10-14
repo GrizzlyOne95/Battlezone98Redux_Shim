@@ -125,6 +125,12 @@ namespace BZROpenShim::RenderProfiles
         // snapshot covered that publish actually reached viewports.
         std::atomic<bool> s_reapplyPending { false };
         RequestApplyTracker s_applyTracker;
+        // The thread the engine calls setMaterialScheme on. EXU's Lua runs on
+        // it too, so a mission request can be applied immediately instead of
+        // waiting for the engine's next scheme call, which only viewport
+        // creation and the settings-apply paths make (mid-mission it may
+        // never come).
+        std::atomic<DWORD> s_engineThreadId { 0 };
 
         const char* BackendName(ActiveBackend backend)
         {
@@ -727,6 +733,10 @@ namespace BZROpenShim::RenderProfiles
         using FnRootGetSingletonPtr = void* (*)();
         using FnRootGetRenderSystem = void* (__thiscall*)(void*);
         using FnRsGetViewport = void* (__thiscall*)(void*);
+        using FnRootGetAutoWindow = void* (__thiscall*)(void*);
+        using FnRtGetNumViewports = unsigned short (__thiscall*)(void*);
+        using FnRtGetViewport = void* (__thiscall*)(void*, unsigned short);
+        using FnVpGetTarget = void* (__thiscall*)(void*);
         using FnVpGetScheme = const std::string& (__thiscall*)(void*);
         using FnVpSetScheme = void (__thiscall*)(void*, const std::string&);
         using FnCompositorGetSingletonPtr = void* (*)();
@@ -3342,8 +3352,9 @@ namespace BZROpenShim::RenderProfiles
             const FnViewportSetMaterialScheme original = OriginalSetMaterialSchemeFromIat();
 
             // The engine calls this from its own render thread, both on
-            // viewport creation and on the ~1 Hz reassert loop, which is
+            // viewport creation and from its settings-apply paths, which is
             // exactly where Ogre state may be touched safely.
+            s_engineThreadId.store(GetCurrentThreadId(), std::memory_order_release);
             EnsureEnhancedSchemeFallbackInstalled();
             EnsureNativeInputGuards();
 
@@ -3433,6 +3444,12 @@ namespace BZROpenShim::RenderProfiles
                 if (ReapplyEffectiveProfileToViewports("deferred apply"))
                 {
                     s_applyTracker.MarkApplied(coveredEpoch);
+                }
+                else
+                {
+                    // No viewport yet: keep the request for the next call
+                    // rather than dropping it.
+                    s_reapplyPending.store(true, std::memory_order_release);
                 }
             }
         }
@@ -3566,6 +3583,10 @@ namespace BZROpenShim::RenderProfiles
             FnRootGetSingletonPtr rootSingleton = nullptr;
             FnRootGetRenderSystem getRenderSystem = nullptr;
             FnRsGetViewport rsGetViewport = nullptr;
+            FnRootGetAutoWindow getAutoWindow = nullptr;
+            FnRtGetNumViewports rtGetNumViewports = nullptr;
+            FnRtGetViewport rtGetViewport = nullptr;
+            FnVpGetTarget vpGetTarget = nullptr;
             FnCompositorGetSingletonPtr compositorSingleton = nullptr;
             FnCompositorSetEnabled compositorSetEnabled = nullptr;
             bool attempted = false;
@@ -3593,6 +3614,14 @@ namespace BZROpenShim::RenderProfiles
                 ResolveOgreExport<FnRootGetRenderSystem>("?getRenderSystem@Root@Ogre@@QAEPAVRenderSystem@2@XZ");
             g_ogreViewportApi.rsGetViewport =
                 ResolveOgreExport<FnRsGetViewport>("?_getViewport@RenderSystem@Ogre@@UAEPAVViewport@2@XZ");
+            g_ogreViewportApi.getAutoWindow =
+                ResolveOgreExport<FnRootGetAutoWindow>("?getAutoCreatedWindow@Root@Ogre@@QAEPAVRenderWindow@2@XZ");
+            g_ogreViewportApi.rtGetNumViewports =
+                ResolveOgreExport<FnRtGetNumViewports>("?getNumViewports@RenderTarget@Ogre@@UBEGXZ");
+            g_ogreViewportApi.rtGetViewport =
+                ResolveOgreExport<FnRtGetViewport>("?getViewport@RenderTarget@Ogre@@UAEPAVViewport@2@G@Z");
+            g_ogreViewportApi.vpGetTarget =
+                ResolveOgreExport<FnVpGetTarget>("?getTarget@Viewport@Ogre@@QBEPAVRenderTarget@2@XZ");
             g_ogreViewportApi.compositorSingleton =
                 ResolveOgreExport<FnCompositorGetSingletonPtr>("?getSingletonPtr@CompositorManager@Ogre@@SAPAV12@XZ");
             g_ogreViewportApi.compositorSetEnabled =
@@ -3717,6 +3746,58 @@ namespace BZROpenShim::RenderProfiles
             }
         }
 
+        __declspec(noinline) static void* GuardedGetAutoWindow(
+            FnRootGetSingletonPtr rootSingleton, FnRootGetAutoWindow getAutoWindow)
+        {
+            __try
+            {
+                void* root = (rootSingleton != nullptr) ? rootSingleton() : nullptr;
+                return (root != nullptr && getAutoWindow != nullptr) ? getAutoWindow(root) : nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        __declspec(noinline) static void* GuardedGetViewportTarget(
+            FnVpGetTarget vpGetTarget, void* viewport)
+        {
+            __try
+            {
+                return (viewport != nullptr && vpGetTarget != nullptr) ? vpGetTarget(viewport) : nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        // Every viewport on a render target, walked the way the engine's own
+        // settings loop does (getNumViewports / getViewport(i)).
+        __declspec(noinline) static size_t GuardedGetTargetViewports(
+            FnRtGetNumViewports getNum, FnRtGetViewport getViewport, void* target,
+            void** out, size_t capacity)
+        {
+            size_t count = 0;
+            __try
+            {
+                if (target == nullptr || getNum == nullptr || getViewport == nullptr)
+                {
+                    return 0;
+                }
+                const unsigned short total = getNum(target);
+                for (unsigned short i = 0; i < total && count < capacity; ++i)
+                {
+                    out[count++] = getViewport(target, i);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            return count;
+        }
+
         size_t CollectActiveViewports(void** outViewports, size_t capacity)
         {
             EnsureOgreViewportApi();
@@ -3740,21 +3821,58 @@ namespace BZROpenShim::RenderProfiles
                 }
             };
 
-            addUnique(GuardedGetCurrentViewport(
+            void* current = GuardedGetCurrentViewport(
                 g_ogreViewportApi.rootSingleton,
                 g_ogreViewportApi.getRenderSystem,
-                g_ogreViewportApi.rsGetViewport));
+                g_ogreViewportApi.rsGetViewport);
+            addUnique(current);
+            // The render system's current viewport is only the one it last
+            // rendered (outside a frame that can be an overlay pass), so walk
+            // the game window and that viewport's own target as well.
+            void* window = GuardedGetAutoWindow(g_ogreViewportApi.rootSingleton,
+                                                g_ogreViewportApi.getAutoWindow);
+            void* currentTarget = GuardedGetViewportTarget(g_ogreViewportApi.vpGetTarget, current);
+            for (void* target : { window, currentTarget == window ? nullptr : currentTarget })
+            {
+                void* found[8] = {};
+                const size_t n = GuardedGetTargetViewports(
+                    g_ogreViewportApi.rtGetNumViewports, g_ogreViewportApi.rtGetViewport,
+                    target, found, 8);
+                for (size_t i = 0; i < n; ++i)
+                {
+                    addUnique(found[i]);
+                }
+            }
             return count;
         }
     } // anonymous namespace
+
+    // Applies the effective profile immediately when called on the engine's
+    // render thread. The pending flag stays set: the next scheme-hook drain
+    // reapplies idempotently, so an off-thread publish racing this one is
+    // still covered.
+    static void ApplyNowOnEngineThread(const char* context)
+    {
+        const DWORD engine = s_engineThreadId.load(std::memory_order_acquire);
+        if (engine == 0 || engine != GetCurrentThreadId() ||
+            !s_schemeTakeoverInstalled.load(std::memory_order_acquire))
+        {
+            return;
+        }
+        const uint64_t coveredEpoch = s_applyTracker.SnapshotPublished();
+        if (ReapplyEffectiveProfileToViewports(context))
+        {
+            s_applyTracker.MarkApplied(coveredEpoch);
+        }
+    }
 
     // Returns true when at least one active viewport was found and processed;
     // false means "nothing to apply to" (the request stays deferred from the
     // ABI's point of view).
     bool ReapplyEffectiveProfileToViewports(const char* context)
     {
-        void* viewports[4] = {};
-        const size_t count = CollectActiveViewports(viewports, 4);
+        void* viewports[8] = {};
+        const size_t count = CollectActiveViewports(viewports, 8);
         if (count == 0)
         {
             return false;
@@ -3833,8 +3951,10 @@ namespace BZROpenShim::RenderProfiles
             ReleaseSRWLockExclusive(&s_stateLock);
         }
         // The companion bridge can be called from any thread; defer the Ogre
-        // mutation to the game/render-thread scheme hook.
+        // mutation to the game/render-thread scheme hook, unless this is that
+        // thread (an EXU mission request), which can apply now.
         PublishReapplyPending();
+        ApplyNowOnEngineThread(context);
     }
 
     void ClearContentRenderProfileOverride(const char* context)
@@ -3851,6 +3971,7 @@ namespace BZROpenShim::RenderProfiles
         if (hadOverride)
         {
             PublishReapplyPending();
+            ApplyNowOnEngineThread(context);
         }
     }
 
