@@ -139,6 +139,11 @@ namespace BZROpenShim
             // section 12.1.
             { 0, HookEngine::PatchType::DWORD, {}, "HUD 2D Depth Floor Margin", false, {} },
             { 0, HookEngine::PatchType::BYTE1, { 0xEB }, "Vehicle List Mod Fix 3/4 (Always Update Vehicle Control)", false, {} },
+            // The UI render-frame catch (0x007C7340) quits the whole application with
+            // "complete render failure" once its quality ladder is exhausted. The Lua
+            // error alert renders through it, so one Ogre exception while it was up
+            // closed the game. JNE -> JMP keeps the log-and-continue branch.
+            { 0, HookEngine::PatchType::BYTE1, { 0xEB }, "UI Render Exception Fail-Soft", false, {} },
             // Rewrites the whole `push 0x10188` that supplies DSBUFFERDESC.dwFlags
             // for the streaming music buffer, adding DSBCAPS_GLOBALFOCUS (0x8000)
             // so DirectSound stops muting it when the game loses foreground. The

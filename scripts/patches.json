@@ -3955,6 +3955,16 @@
       "identity": "SetPlatform(int) at 0x004344B0 in GOG battlezone98redux.exe SHA256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413: stores the platform (0 pc, 1 osx, 2 ios) and writes 1 to the input-smoothing bypass flag 0x009198F4 only for ios, 0 otherwise (0x004344D7). Called from window init (0x00618D02) and the -platform command-line parser (0x007D5536); these are the flag's only writers. UserProcess::Execute (0x0060ABxx-0x0060B5xx) tests it at ten sites (0x60AEC5 .. 0x60B50C) to assign steer/pitch/throttle/strafe targets directly instead of low-passing them ((target-cur)*dt*5 analog, *1 keyboard; the BZ 1.5 decompile shows the same filter). BZCC exposes the same choice as options.play.smoothing. Pattern is a unique whole-image match on 2026-09-26; the payload rewrites the else-branch immediate so every SetPlatform call leaves smoothing off."
     },
     {
+      "name": "UI Render Exception Fail-Soft",
+      "pattern": "6A 01 E8 ?? ?? ?? ?? 83 C4 04 85 C0 75 2D E8 ?? ?? ?? ?? 83 F8 09 74 17 68 DC 07 8A 00",
+      "offset": 12,
+      "expected_size": 1,
+      "fallback": "0x007C734C",
+      "expected_original": "75",
+      "require_unique": true,
+      "identity": "The catch funclet Catch_007c7340 of the UI render-frame function at 0x007C7070 in GOG battlezone98redux.exe SHA256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413. That function wraps Ogre::Root::renderOneFrame; the catch calls the quality ladder at 0x007AE480 and, when it returns 0 (nothing left to lower), logs 'Closing application due to complete render failure' and sets the exit state (0x00434170(9)); otherwise it logs 'Ogre Rendering Exception Seen from UI' and resumes. The in-game Lua error alert (and every other UI-frame view) runs through it, so any Ogre exception thrown while it renders the scene, such as the per-frame shaderless-draw exception D3D11 raises for a fixed-function material, kills the application after two frames. The ordinary in-game render path only logs the same exception. The patch turns the JNE at 0x007C734C into JMP so the exhausted-ladder branch is never taken: the exception is logged and the frame is dropped, as in gameplay. See Docs/UI_RENDER_EXCEPTION_FAILSOFT.md."
+    },
+    {
       "name": "Artillery Weapon Mask Select Hook",
       "fallback": "0x00475DDC",
       "expected_original": "80 21 FA FF"
