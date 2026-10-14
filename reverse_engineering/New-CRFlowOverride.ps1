@@ -14,7 +14,7 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_-]*$')][string]$Name,
     [string]$CRRepo = 'C:\Users\iestu\Documents\GIT\Campaign-Reimagined',
     # Staged CR build the harness copies first; its commit is the diff base.
-    [string]$StagedContent = 'C:\Users\iestu\Documents\GIT\CR-release\Local\Workshop\content',
+    [string]$StagedContent = (Join-Path $env:USERPROFILE 'Documents\GIT\Campaign-Reimagined\Local\Workshop\content'),
     [string]$Base = '',
     [string[]]$Extra = @(),
     # Repository paths whose files ship flat in the Workshop content. New map
