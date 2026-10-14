@@ -205,6 +205,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Heap-corruption guard (a remote scavenger's NetProcess is not a
     # ScavengerProcess); active in network games, which is where it matters.
     "Fixes/ScavengerNetProcessGuard",
+    # Repairs a stock Lua binding that always raised for its documented
+    # arguments; scripts that worked keep the stock reading.
+    "Fixes/LuaFormationBinding",
     # Client-side cursor handling only; no simulation or wire effect.
     "Fixes/UnfocusedMouseRelease",
     "Fixes/CliMultiParameterOptions",
@@ -350,6 +353,7 @@ $shippingPolicyChecks = @{
     "Fixes/ConstructorRecycleStaleTarget" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
     "Fixes/ScavengerNetProcessGuard" = "1"
+    "Fixes/LuaFormationBinding" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"
     "Fixes/ProducerScriptPredicates" = "0"
     "Fixes/VehicleListModScoping" = "0"
