@@ -162,6 +162,20 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
 
     CompatConfig DefaultCompatConfig() noexcept;
 
+    // Materials OpenShim generates itself at runtime (the multiplayer vehicle
+    // flag billboards, "OpenShimFlag_<hash>") are plain fixed-function
+    // definitions. The user setting DX11LegacyMaterialCompat exists to gate
+    // conversion of third-party content; it must not also leave OpenShim's
+    // own materials shaderless, because D3D11 throws on every draw of one and
+    // the in-game Lua error alert turns that exception into a fatal "complete
+    // render failure". Returns true for names carrying the "OpenShim" prefix.
+    bool IsOpenShimOwnedMaterial(std::string_view materialName) noexcept;
+
+    // config with compatEnabled forced on for an OpenShim-owned material;
+    // every other field, and every other material, is returned unchanged.
+    CompatConfig EffectiveCompatConfigForMaterial(const CompatConfig& config,
+                                                  std::string_view materialName) noexcept;
+
     // Accepts the same boolean tokens as the rest of openshim.ini
     // (1/true/on/yes/enabled vs 0/false/off/no/disabled, case-insensitive,
     // ASCII-trimmed). Unknown text returns defaultValue.
