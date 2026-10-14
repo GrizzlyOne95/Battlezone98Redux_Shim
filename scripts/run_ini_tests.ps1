@@ -170,6 +170,13 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # files players already have. Set it to 0 for stock session-only mutes.
     "Network/PersistentPlayerMute",
 
+    # Sender/receiver-side Lua Send/Receive fix: same four-byte wire payload,
+    # applied only to a handle that previously went out as id 0 and arrived
+    # as nil. A stock receiver still pushes nil for the reserved id, so a
+    # mixed lobby is no worse off; real network ids and the stock lookup are
+    # untouched. Signature-gated and fail-closed; 0 restores the stock path.
+    "Network/LuaMapObjectHandles",
+
     # Straight bug/stability fixes with no material mixed-client divergence.
     # MapRefreshFixes includes the multiplayer map-list refresh/jump and
     # selection-preservation repair and is deliberately part of the ON baseline.
@@ -195,6 +202,12 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # stands down in network games with the other simulation fixes.
     "Fixes/ConstructorRecycleStaleTarget",
     "Fixes/MagnetZeroRangeGuard",
+    # Heap-corruption guard (a remote scavenger's NetProcess is not a
+    # ScavengerProcess); active in network games, which is where it matters.
+    "Fixes/ScavengerNetProcessGuard",
+    # Repairs a stock Lua binding that always raised for its documented
+    # arguments; scripts that worked keep the stock reading.
+    "Fixes/LuaFormationBinding",
     # Client-side cursor handling only; no simulation or wire effect.
     "Fixes/UnfocusedMouseRelease",
     "Fixes/CliMultiParameterOptions",
@@ -241,6 +254,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Network/EarlyUnreliableAccept",
     # Acts only after a GPU reset, to keep the recreated D3D11 device alive.
     "Graphics/D3D11DeviceLossRecovery",
+
+    # Stages OpenShim updates from the Workshop on the main menu (Steam only,
+    # never in multiplayer); installs only at game exit. Default on by design.
+    "Updater/AutoStage",
 
     # Proven Redux regressions that are hard-disabled in network games.
     "SinglePlayer/JumpSnipeCrouch",
@@ -335,6 +352,8 @@ $shippingPolicyChecks = @{
     "Fixes/ConstructorRemoteBuild" = "1"
     "Fixes/ConstructorRecycleStaleTarget" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
+    "Fixes/ScavengerNetProcessGuard" = "1"
+    "Fixes/LuaFormationBinding" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"
     "Fixes/ProducerScriptPredicates" = "0"
     "Fixes/VehicleListModScoping" = "0"
@@ -349,6 +368,7 @@ $shippingPolicyChecks = @{
     "Network/NetImprovements" = "1"
     "Network/GovernorTuning" = "OpenShim"
     "Network/ReliableSendBacklogFix" = "1"
+    "Network/LuaMapObjectHandles" = "1"
     "Graphics/D3D11DeviceLossRecovery" = "1"
     "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "1"

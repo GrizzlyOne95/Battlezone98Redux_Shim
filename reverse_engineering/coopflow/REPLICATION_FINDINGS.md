@@ -25,6 +25,7 @@ has to be built on.
 | B2 | guest | `RemoveObject` host-owned building | **diverged** | removed on the guest only; the host keeps it and never sends it back, so the guest stays wrong |
 | C1 | host | `Send(handle)` of a host-owned object | **replicated** | the guest receives the same object (`h == findNear(...)`) |
 | C2 | guest | `Send(me())` | **replicated** | equals the host's tracked handle for that player |
+| C3 | host | `Send(handle)` of a map-authored labelled object (no network id), `shot_geyser` in misn03 | **local-only** stock, **replicated** with `[Network] LuaMapObjectHandles = 1` | stock: the handle argument is dropped (`#args` 1 instead of 2); with the label remap the guest receives the same object as `GetHandle('shot_geyser')` within 0.2 s ([LUA_MAPOBJECT_HANDLES.md](../../docs/LUA_MAPOBJECT_HANDLES.md)) |
 | D1 | host | `SetObjectiveName` / `SetName` | **local-only** | the guest keeps the ODF name ("S-Power") |
 | F1 | host | `Damage` host-owned building | **replicated** | the guest sees health drop (1.0 -> 0.75) within 0.2 s |
 | F2 | guest | `Damage` host-owned building | **none** | no effect even on the guest's own copy; the host is unchanged |

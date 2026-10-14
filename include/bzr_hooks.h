@@ -51,6 +51,11 @@ namespace BZROpenShim
     void SetPersonCarrierGetWeaponOriginal(void* target);
     void* __fastcall PersonCarrierGetWeaponGuard(void* carrier, void* edx, int slot);
     void* __fastcall PersonSniperScanGetWeaponGuard(void* carrier, void* edx, int slot);
+    // AI_Team_Compute_Other's GetScrapPosition call (0x006A3961): verifies the
+    // call target and the three ScavengerProcess-family vtables, then arms the
+    // guard. False means the patcher must leave the stock call alone.
+    bool ConfigureScavengerProcessGuard(void* originalCallTarget);
+    const float* __fastcall ScavengerProcessScrapPositionGuard(void* process, void* edx);
     void SetHoverCraftTurboSoundResolves(void* soundFind, void* soundListHead);
     namespace Hooks
     {

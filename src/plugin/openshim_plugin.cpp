@@ -42,11 +42,14 @@
 #include "pilot_fp_animation_trace.h"
 #include "walker_cockpit_trace.h"
 #include "openshim_sdk_v2.h"
+#include "openshim_asset_sync.h"
 #include "openshim_updater.h"
 #include "render_profile_runtime.h"
 #include "ui_performance.h"
 #include "ui_performance_hooks.h"
 #include "ui_file_scan_hooks.h"
+#include "lua_formation_fix_install.h"
+#include "lua_handle_sync_install.h"
 #include "mp_faction_restrict.h"
 #include "mp_ready_diagnostic.h"
 #include "BZROpenShim.h"
@@ -94,6 +97,9 @@ static void RunPatchStage(const char* stage, Fn&& fn)
 static unsigned __stdcall PatchThreadProc(void*)
 {
     PATCH_STAGE(BZROpenShim::UiPerf::Initialize());
+    // Keeps the Enhanced renderer resources and UI tiles in step with the
+    // Workshop item this build was updated from; runs on its own worker.
+    PATCH_STAGE(BZROpenShim::StartOpenShimAssetSync());
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "plugin", "Patch thread started");
     // BZLoader is emphatically not started from here any more. The loader owns
     // this module's lifecycle -- it is what called BZPlugin_Load to get us
@@ -124,6 +130,19 @@ static unsigned __stdcall PatchThreadProc(void*)
     // inert until [Network] StockFactionsOnly is turned on, and the loader it
     // intercepts only runs when a multiplayer screen builds its vehicle list.
     PATCH_STAGE(BZROpenShim::MpFactionRestrict::InstallMpFactionRestrictIfPossible());
+
+    // Lua Send/Receive carries a Handle as the object's network id, which
+    // map-authored objects (geysers, beacons) never get, so receivers see nil.
+    // Two call sites in the Lua handle pack/unpack routines are rewritten to
+    // fall back to a label-derived id. Signature-gated and fail-closed;
+    // [Network] LuaMapObjectHandles = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::LuaHandleSync::InstallLuaHandleSyncIfPossible());
+
+    // Stock Lua Formation(me, him, priority) is a copy of the Recycle binding and
+    // reads the leader as an integer. Swaps the registration row for a repaired
+    // binding. Byte-guarded and fail-closed; [Fixes] LuaFormationBinding = 0 leaves
+    // the engine untouched.
+    PATCH_STAGE(BZROpenShim::LuaFormation::InstallLuaFormationFixIfPossible());
 
     // Explains a "Not Ready" multiplayer entry on the main menu. Read-only: it
     // reproduces the shell's own readiness decision from the same globals and
@@ -252,6 +271,7 @@ namespace BZROpenShim
         BZROpenShim::UiPerfHooks::Shutdown();
         BZROpenShim::UiFileScan::Shutdown();
         BZROpenShim::ShutdownNativeCpuSampler();
+        BZROpenShim::ShutdownOpenShimAssetSync();
         BZROpenShim::ShutdownOpenShimUpdater();
         BZROpenShim::ShutdownOpenShimSdkV2();
         BZROpenShim::ShutdownWalkerCockpitTrace();

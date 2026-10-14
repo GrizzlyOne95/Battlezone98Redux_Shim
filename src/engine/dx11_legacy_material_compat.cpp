@@ -275,6 +275,24 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         return CompatConfig{};
     }
 
+    bool IsOpenShimOwnedMaterial(std::string_view materialName) noexcept
+    {
+        constexpr std::string_view kPrefix = "OpenShim";
+        return materialName.size() > kPrefix.size() &&
+               materialName.substr(0, kPrefix.size()) == kPrefix;
+    }
+
+    CompatConfig EffectiveCompatConfigForMaterial(const CompatConfig& config,
+                                                  std::string_view materialName) noexcept
+    {
+        CompatConfig effective = config;
+        if (IsOpenShimOwnedMaterial(materialName))
+        {
+            effective.compatEnabled = true;
+        }
+        return effective;
+    }
+
     bool ParseCompatFlag(std::string_view raw, bool defaultValue) noexcept
     {
         bool value = defaultValue;

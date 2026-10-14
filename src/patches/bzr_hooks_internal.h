@@ -82,6 +82,7 @@ namespace BZROpenShim
     extern volatile long g_AipResolveTraceBudget;
     extern volatile long g_NeutralAttackOrderLogBudget;
     extern std::unordered_set<uintptr_t> g_PilotCarrierNullLoggedObjects;
+    extern bool g_ScavengerNetProcessGuardEnabled;
 
     using FnCommandHandler = void(__cdecl*)(uint16_t id, const char* cmd);
     using FnHelpLog = void(__cdecl*)(void* obj, const char* text);

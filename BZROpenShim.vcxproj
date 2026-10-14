@@ -216,7 +216,11 @@
     <ClInclude Include="include\openshim_ini.h" />
     <ClInclude Include="include\openshim_preset_migration.h" />
     <ClInclude Include="include\openshim_env_config.h" />
+    <ClInclude Include="include\openshim_asset_sets.h" />
+    <ClInclude Include="include\openshim_asset_sync.h" />
+    <ClInclude Include="include\openshim_auto_update.h" />
     <ClInclude Include="include\openshim_update_manifest.h" />
+    <ClInclude Include="include\openshim_update_internal.h" />
     <ClInclude Include="include\openshim_updater.h" />
     <ClInclude Include="include\ui_performance.h" />
     <ClInclude Include="include\ui_performance_hooks.h" />

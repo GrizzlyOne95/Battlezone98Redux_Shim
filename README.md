@@ -29,6 +29,8 @@ installs OpenShim, and tells you when it is done. No launch options needed —
 just start the game. Windows may show a SmartScreen warning because the file
 is not code-signed yet; choose "More info", then "Run anyway".
 
+It finds Steam and GOG installs (including GOG in a custom folder), asks which one to patch, and has a Browse option for any other folder; you can also drag the game folder onto the exe.
+
 To uninstall, run it from a Command Prompt as `OpenShimSetup.exe --uninstall`.
 
 #### Advanced: PowerShell one-liner

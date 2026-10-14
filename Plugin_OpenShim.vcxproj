@@ -236,6 +236,8 @@
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
     <ClCompile Include="src\patches\fog_wake_feature.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
+    <ClCompile Include="src\patches\lua_formation_fix.cpp" />
+    <ClCompile Include="src\patches\lua_handle_sync.cpp" />
     <ClCompile Include="src\patches\mp_faction_restrict.cpp" />
     <ClCompile Include="src\patches\mp_ready_diagnostic.cpp" />
     <ClCompile Include="src\patches\mp_map_filter_extras.cpp" />
@@ -270,6 +272,9 @@
     <ClCompile Include="src\patches\openshim_preset_migration.cpp" />
     <ClCompile Include="src\patches\openshim_sdk_provider.cpp" />
     <ClCompile Include="src\patches\geometry_contact_test.cpp" />
+    <ClCompile Include="src\patches\openshim_asset_sets.cpp" />
+    <ClCompile Include="src\patches\openshim_asset_sync.cpp" />
+    <ClCompile Include="src\patches\openshim_auto_update.cpp" />
     <ClCompile Include="src\patches\openshim_update_manifest.cpp" />
     <ClCompile Include="src\patches\openshim_update_support.cpp" />
     <ClCompile Include="src\patches\openshim_updater.cpp" />
@@ -387,6 +392,10 @@
     <ClInclude Include="src\patches\bzr_hooks_internal.h" />
     <ClInclude Include="include\engine_globals.h" />
     <ClInclude Include="include\iat_patch.h" />
+    <ClInclude Include="include\lua_formation_fix.h" />
+    <ClInclude Include="include\lua_formation_fix_install.h" />
+    <ClInclude Include="include\lua_handle_sync.h" />
+    <ClInclude Include="include\lua_handle_sync_install.h" />
     <ClInclude Include="include\mp_faction_restrict.h" />
     <ClInclude Include="include\mp_ready_diagnostic.h" />
     <ClInclude Include="include\odf_compat.h" />
@@ -404,8 +413,12 @@
     <ClInclude Include="include\openshim_preset_migration.h" />
     <ClInclude Include="include\openshim_env_config.h" />
     <ClInclude Include="include\openshim_env_mapping.h" />
+    <ClInclude Include="include\openshim_asset_sets.h" />
+    <ClInclude Include="include\openshim_asset_sync.h" />
+    <ClInclude Include="include\openshim_auto_update.h" />
     <ClInclude Include="include\openshim_update_manifest.h" />
     <ClInclude Include="include\openshim_update_support.h" />
+    <ClInclude Include="include\openshim_update_internal.h" />
     <ClInclude Include="include\openshim_updater.h" />
     <ClInclude Include="include\ui_performance.h" />
     <ClInclude Include="include\ui_performance_hooks.h" />
