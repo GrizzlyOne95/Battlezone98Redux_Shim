@@ -307,6 +307,12 @@ openshim_add_test(memory_access_tests STD 20 SOURCES
     memory_access_tests.cpp
 )
 
+if(WIN32 AND MSVC)
+    openshim_add_test(chunk_bridge_probe_tests STD 20 SOURCES
+        chunk_bridge_probe_tests.cpp
+    )
+endif()
+
 openshim_add_test(stable_id_list_tests STD 20 SOURCES
     stable_id_list_tests.cpp
 )
