@@ -256,6 +256,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "ScavengerNetProcessGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_LUA_FORMATION_FIX") ||
+            Equals(name, "BZR_DISABLE_LUA_FORMATION_FIX"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "LuaFormationBinding", true, out);
+        }
         // New switches: these two had no opt-out of any kind before.
         if (Equals(name, "OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||
             Equals(name, "BZR_DISABLE_PRODUCER_SCRIPT_PREDICATES"))
