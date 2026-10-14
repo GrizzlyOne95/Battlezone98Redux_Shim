@@ -292,8 +292,8 @@ Invoke-CRFlowStep 'ASSIST: move the securing tug to the NSDF recycler; victory m
     $won = $null
     try { $won = Wait-CRFlow $H 'return M.game_over == true and { t = GetTime(), sav = describe(M.sav) }' -TimeoutSeconds 45 } catch { }
     if (-not $won) {
-        $how = 'host-owned tug (htug) moved by the host'
-        Invoke-CRFlow $H ("if htug and IsValid(htug) then SetPosition(htug, at($($nsdfHome.x + 45), $($nsdfHome.y), $($nsdfHome.z + 45))) end; return true") | Out-Null
+        $how = 'host-owned tug (htug) and the relic it carries both moved by the host'
+        Invoke-CRFlow $H ("if htug and IsValid(htug) then SetPosition(htug, at($($nsdfHome.x + 45), $($nsdfHome.y), $($nsdfHome.z + 45))) end; if M.sav and IsValid(M.sav) then SetPosition(M.sav, at($($nsdfHome.x + 50), $($nsdfHome.y), $($nsdfHome.z + 50))) end; return { tugger = M.tugger and IsAlive(M.tugger), secure = M.sav_secure == true }") | Out-Null
         try { $won = Wait-CRFlow $H 'return M.game_over == true and { t = GetTime() }' -TimeoutSeconds 45 } catch { }
     }
     Add-CRFlowCheck "victory reached (assist: $how)" ([bool]$won) @{ moved = $moved; won = $won }
