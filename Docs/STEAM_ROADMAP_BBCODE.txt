@@ -50,6 +50,7 @@ These are source milestones, subject to the evidence scope above. Features with 
 [h3]Presentation, Input and Settings[/h3]
 
 [list]
+[*] [b]Custom planet videos (development)[/b] - opt-in per-video INI sidecars define intro-to-loop timing in seconds and a separate one-shot WAV. Local GOG DX11 checks passed for intro/skip/fallback, stock planet behavior, and rendering a 2048x1536/60 fps input with its configured loop point. DX9 and Steam/Proton/Wine qualification remain pending; this is not published.
 [*] [b]Settings and input[/b] - native nine-category Settings hub/pages and painted keybind editor, enabled by default, with preset migration, Raw Input controls/absolute device handling, briefing scrolling and build-version notice. The previously separate [code]ui/native-screens[/code] branch is included in the October 9 integration; full native UI assets are packaged. GOG hub/Video/Back/keybind smoke passes on the combined build. Steam/Proton/Wine and combined multiplayer qualification remain pending; this is local development integration, not a new published release.
 [*] [b]Renderer selection[/b] - startup DX9/DX11 selection through INI/command-line transport and Redux/Enhanced/Retro render-profile selection. Settings exposes Render Profile; it has no renderer-backend selector row.
 [*] [b]Lighting[/b] - player/AI headlight RGB, intensity, beam shaping and falloff/range repair; empty-craft running lights; team engine-flame colors; isolated sun fullscreen-flash suppression option.
