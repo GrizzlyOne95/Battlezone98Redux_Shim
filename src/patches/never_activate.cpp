@@ -451,9 +451,28 @@ namespace BZROpenShim
             return count;
         }
 
+        // PatchModule for a module taken from a snapshot. The Toolhelp list is a
+        // copy; it keeps nothing loaded, and a module such as PSAPI.DLL can
+        // unload between the snapshot and the read of its PE header (an access
+        // violation on MEM_FREE in about one launch in four). Hold a loader
+        // reference across the patch and skip a module that is already gone.
+        // The executable never unloads, so it is patched without a reference.
+        // Returns -1 for a module that was no longer loaded.
+        int PatchSnapshotModule(HMODULE module)
+        {
+            if (module == s_exe)
+                return PatchModule(module);
+            const HMODULE held = IatPatch::AcquireModuleReference(module);
+            if (!held)
+                return -1;
+            const int count = PatchModule(held);
+            IatPatch::ReleaseModuleReference(held);
+            return count;
+        }
+
         // Re-patching an already patched slot returns Patched without a write, so
         // the sweep reports slots covered, not slots newly written.
-        int SweepAllModules(int* modulesSeen)
+        int SweepAllModules(int* modulesSeen, int* modulesGone)
         {
             HANDLE snap = INVALID_HANDLE_VALUE;
             for (int attempt = 0; attempt < 5; ++attempt)
@@ -467,6 +486,7 @@ namespace BZROpenShim
             const HMODULE user32 = GetModuleHandleW(L"user32.dll");
             int total = 0;
             int seen = 0;
+            int gone = 0;
             MODULEENTRY32W entry = {};
             entry.dwSize = sizeof(entry);
             for (BOOL ok = Module32FirstW(snap, &entry); ok; ok = Module32NextW(snap, &entry))
@@ -474,12 +494,20 @@ namespace BZROpenShim
                 const HMODULE module = reinterpret_cast<HMODULE>(entry.modBaseAddr);
                 if (module == user32)
                     continue;
+                const int covered = PatchSnapshotModule(module);
+                if (covered < 0)
+                {
+                    ++gone;
+                    continue;
+                }
                 ++seen;
-                total += PatchModule(module);
+                total += covered;
             }
             CloseHandle(snap);
             if (modulesSeen)
                 *modulesSeen = seen;
+            if (modulesGone)
+                *modulesGone = gone;
             return total;
         }
 
@@ -495,6 +523,9 @@ namespace BZROpenShim
         using FnLdrRegisterDllNotification = LONG(NTAPI*)(ULONG, FnDllNotification, PVOID, PVOID*);
 
         // Runs under the loader lock: patch only, no logging, no allocation.
+        // No loader reference is taken here (the lock is already held, so the
+        // module cannot unload underneath this call); the header reads are
+        // SEH-guarded in IatPatch regardless.
         void CALLBACK OnDllNotification(ULONG reason, const DllNotificationData* data, PVOID)
         {
             if (reason == 1 /* LDR_DLL_NOTIFICATION_REASON_LOADED */ && data && data->DllBase)
@@ -562,8 +593,10 @@ namespace BZROpenShim
             return;
 
         int modules = 0;
-        const int covered = SweepAllModules(&modules);
+        int gone = 0;
+        const int covered = SweepAllModules(&modules, &gone);
         if (InterlockedDecrement(&s_sweepLogBudget) >= 0)
-            Log(L"[NOACTIVATE] sweep: %d user32 imports covered across %d modules\n", covered, modules);
+            Log(L"[NOACTIVATE] sweep: %d user32 imports covered across %d modules (%d unloaded before patching)\n",
+                covered, modules, gone);
     }
 }
