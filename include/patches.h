@@ -171,6 +171,11 @@ namespace BZROpenShim
             // Carrier::GetWeapon result for the selected mask; an empty
             // selected hardpoint gets a non-SNIP stand-in instead of null.
             { 0, HookEngine::PatchType::REL32, {}, "Person Sniper Scan Weapon Null Guard", false, {} },
+            // AI_Team_Compute_Other calls ScavengerProcess::GetScrapPosition on
+            // whatever AI process a team scavenger holds; a remote scavenger
+            // holds a NetProcess and the callee writes -1.0f past its 0x18-byte
+            // allocation. The call goes through a type-checking guard.
+            { 0, HookEngine::PatchType::REL32, {}, "Scavenger Process Scrap Position Guard", false, {} },
             // ShellCasings: the OrdnanceClass factory call of an accepted
             // Cannon/Mortar/SniperGun and MachineGun shot goes through a
             // bridge that runs the factory, then queues a cosmetic casing.

@@ -269,6 +269,18 @@
       "identity": "Third Carrier::GetWeapon site in Person::Simulate (0x0059D340), sibling of Pilot Carrier Null Guard (0x0059D76D, same function). The loop at 0x0059D777 walks slots 0-4 of the selected mask returned by Carrier::GetSelected, calls Carrier::GetWeapon (0x00417F60) at 0x0059D7C3 for every set bit, and dereferences the result unconditionally: mov eax,[edx+8] at 0x0059D7D4, then cmp [eax+0xC],'SNIP' to set the crouch flag at [ebp-0x351]. GetWeapon returns null when the hardpoint mask at [carrier+0x2C] lacks that bit, so a selected-mask bit on an empty hardpoint faults. Observed on GOG Redux 2.2.301 in ISDF Chronicles isdfms10 (dump battlezone98redux.exe.54600.dmp): a jak person whose Lua removed its only weapon with GiveWeapon(h, nil, 0) kept selected=1 at [carrier+0x30] with hardpoint mask 0, EIP 0x0059D7D4 reading [0+8]. The result at [ebp-0x4B4] is read only by that SNIP test, so the guard returns a static non-SNIP stand-in for an empty slot. The earlier GetWeapon call at 0x0059D3F0 already null-checks and is left stock. Pattern verified single-match by whole-image scan on 2026-09-26."
     },
     {
+      "name": "Scavenger Process Scrap Position Guard",
+      "platforms": [
+        "gog"
+      ],
+      "pattern": "8B 4D DC E8 ?? ?? ?? ?? 8B 10 89 55 F0 8B 48 04 89 4D F4 8B 50 08 89 55 F8",
+      "offset": 4,
+      "expected_size": 4,
+      "fallback": "0x006A3962",
+      "require_unique": true,
+      "identity": "AI_Team_Compute_Other (0x006A3870) call of ScavengerProcess::GetScrapPosition (0x005C40B0) at 0x006A3961 on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413). The function enumerates GameObjects, keeps those whose class signature is 'SCAV' (cmp [eax+0x14],0x53434156 at 0x006A392C) and whose team matches the scanned team, fetches the AI process through GameObject+0xFC (0x0045BDF0) and tests only that it is non-null before calling GetScrapPosition with ECX = process. A scavenger owned by a remote peer holds a NetProcess there (vtable 0x00884BB4, a 0x18-byte allocation). GetScrapPosition checks [this+0x1C]==4 and [this+0x58]; otherwise it stores -1.0f (constant at 0x008A2EFC) at this+0x3C (0x005C4126), past the end of that allocation, onto the next heap entry header. Four intact dumps (PIDs 21756, 12396, 31700, 4708) show owner Scavenger (vtable 0x00886FE8) -> NetProcess, with BF800000 at header+4 exactly at process+0x3C; three more dumps carry the same signature (C:\\BZDumps\\analysis_20261014\\REPORT.md). The caller copies x/y/z from the returned pointer and promotes the scavenger only when y > 0.0f (comiss against 0x008A2498 at 0x006A397C, jbe 0x006A398C), so a vector with y = -1 is the existing no-scrap path. The guard redirects only this call: a process whose first word is one of the ScavengerProcess-family vtables (ScavengerProcess 0x008871D8, ScavengerFriend 0x00887190, ScavengerEnemy 0x008871B4, from the RTTI base-class walk) is forwarded to the stock function; anything else gets a static read-only {0,-1,0} and is never called into. The 17-byte window after the call pins the caller's copy-out of the result. Single match in the GOG image (whole-image scan 2026-10-14)."
+    },
+    {
       "name": "Shell Casings Cannon Shot Call",
       "pattern": "8B 85 B0 FD FF FF 8B 48 18 51 8D 55 BC 52 8B 85 B0 FD FF FF 8B 48 0C E8 ?? ?? ?? ?? 89 85 9C FD FF FF",
       "offset": 24,
@@ -3630,6 +3642,65 @@
       "address": "0x008A0B94",
       "kind": "data",
       "identity": "cUI_View vtable (15 slots; RTTI .?AVcUI_View@@). OpenShim custom screens copy it and replace slots 0 and 5."
+    },
+    {
+      "name": "LuaFormationBinding",
+      "address": "0x005079B0",
+      "expected": "55 8B EC 83 EC 08 6A 01 8B 45 08 50 E8 8F 7D FF FF 83 C4 08 89 45 F8 6A 01 6A 02 8B 4D 08 51 E8 29 48 32 00 83 C4 0C 89 45 FC 6A 01 8B 55 FC 52 8B 45 F8 50 E8 97 6C 0C 00 83 C4 0C 33 C0 8B E5",
+      "identity": "Stock Lua binding for Formation on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): a byte-for-byte copy of the Recycle(unit, priority) binding at 0x00507970. Reads argument 1 with the handle getter 0x004FF750, argument 2 with luaL_optinteger(L, 2, 1), and calls native Formation 0x005CE680 as (me, thatInteger, 1). The lua_formation_fix.cpp installer requires the registration row to hold exactly this address and these bytes before it swaps in the repaired binding."
+    },
+    {
+      "name": "LuaGetHandle",
+      "address": "0x004FF750",
+      "expected": "55 8B EC 68 74 C1 87 00 8B 45 0C 50 8B 4D 08 51 E8 BB FB FF FF 83 C4 0C 5D C3",
+      "identity": "cdecl Lua handle getter GetHandle(L, index): pushes the string \"BZHandle\" (0x0087C174) and calls the userdata checker 0x004FF320, returning the handle. Used by Recycle/Formation bindings for argument 1 and by the Lua handle packer 0x00505410."
+    },
+    {
+      "name": "LuaType",
+      "address": "0x0082D490",
+      "expected": "55 8B EC FF 75 0C FF 75 08 E8 08 F0 FF FF 59 59 3D 18 ED 86 00 75 05 83 C8 FF 5D C3 8B 40 08 5D C3",
+      "identity": "lua_type(L, index) in the statically linked Lua 5.1: returns -1 for an invalid index (the 0x0086ED18 nil object), else the type tag at [obj+8]. luaL_optinteger 0x0082C1FD tests it with `jg` (type > 0) before reading a number, which pins nil = 0 and none = -1."
+    },
+    {
+      "name": "LuaOptInteger",
+      "address": "0x0082C1FD",
+      "expected": "55 8B EC FF 75 0C FF 75 08 E8 85 12 00 00 59 59 85 C0 7F 05 8B 45 10 5D",
+      "identity": "luaL_optinteger(L, narg, def) cdecl: returns def when lua_type(L, narg) <= 0, else luaL_checkinteger. Called with (L, 2, 1) by the stock Formation and Recycle bindings."
+    },
+    {
+      "name": "GameFormation",
+      "address": "0x005CE680",
+      "expected": "55 8B EC 83 EC 24 8B 45 08 50 E8 A1 3F E9 FF 83 C4 04 89 45 FC 83 7D FC 00 75 02 EB 37 8D 4D DC E8 3B 96 EA FF 8B 4D 10",
+      "identity": "Native Formation(Handle me, Handle him, int priority), cdecl: resolves me, builds an AiCommand with code 6 (FORMATION), who = argument 2, priority = argument 3, and issues it through 0x004DBAF0. Called by the stock Lua binding 0x005079B0 and which the repaired binding calls with the real leader handle."
+    },
+    {
+      "name": "LuaFormationRegistration",
+      "address": "0x00872370",
+      "kind": "data",
+      "identity": "Lua registration table row { \"Formation\" (0x0087CF64), 0x005079B0 } on exact GOG Redux 2.2.301, in .rdata between { Recycle, 0x00507970 } at 0x00872368 and { 0x0087D02C, 0x00507A00 } at 0x00872378. The installer reads the row at patch time and requires the name string to read Formation and the function pointer to equal the byte-guarded stock binding before it rewrites the pointer at +4."
+    },
+    {
+      "name": "ScavengerProcessGetScrapPosition",
+      "address": "0x005C40B0",
+      "expected": "55 8B EC 83 EC 24 A1 00 70 8E 00 33 C5 89 45 FC 89 4D EC 8B 45 EC 83 C0 38"
+    },
+    {
+      "name": "ScavengerProcessVtable",
+      "address": "0x008871D8",
+      "kind": "data",
+      "identity": "ScavengerProcess primary vtable (.?AVScavengerProcess@@, bases AiProcess, SObject); RTTI-verified at patch time."
+    },
+    {
+      "name": "ScavengerFriendVtable",
+      "address": "0x00887190",
+      "kind": "data",
+      "identity": "ScavengerFriend primary vtable (.?AVScavengerFriend@@, derives ScavengerProcess); RTTI-verified at patch time."
+    },
+    {
+      "name": "ScavengerEnemyVtable",
+      "address": "0x008871B4",
+      "kind": "data",
+      "identity": "ScavengerEnemy primary vtable (.?AVScavengerEnemy@@, derives ScavengerProcess); RTTI-verified at patch time."
     }
   ],
   "globals": [

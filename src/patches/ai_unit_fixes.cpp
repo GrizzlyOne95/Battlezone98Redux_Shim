@@ -42,6 +42,7 @@
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
+#include "scavenger_process_guard.h"
 #include <Windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -70,6 +71,7 @@ namespace BZROpenShim
 {
     std::unordered_set<uintptr_t> g_PilotCarrierNullLoggedObjects = {};
     volatile long g_NeutralAttackOrderLogBudget = 16;
+    bool g_ScavengerNetProcessGuardEnabled = true;
     volatile long g_AipResolveTraceBudget = 512;
     volatile long g_AipPrereqCensusEmitted = 0;
     std::vector<AiExtraMakerPair> g_AiExtraMakerPairs = {};
@@ -572,6 +574,135 @@ namespace BZROpenShim
                 slot);
         }
         return const_cast<SniperScanEmptyWeapon*>(&g_SniperScanEmptyWeapon);
+    }
+
+    // Production patch: AI_Team_Compute_Other's ScavengerProcess::GetScrapPosition
+    // call (0x006A3961) on a process that is not a ScavengerProcess.
+    //
+    // AI_Team_Compute_Other (0x006A3870) walks every GameObject, picks the
+    // 'SCAV' ones owned by the team being scanned, takes the AI process
+    // pointer at GameObject+0xFC and calls ScavengerProcess::GetScrapPosition
+    // (0x005C40B0) on it. It only tests that the pointer is non-null. A
+    // scavenger owned by a REMOTE peer carries a NetProcess there (vtable
+    // 0x00884BB4, a 0x18-byte allocation), and GetScrapPosition writes its
+    // "no position" sentinel, -1.0f, at this+0x3C (0x005C4126) -- past the
+    // end of that allocation, onto the next heap entry's header. The Windows
+    // heap notices later (0xC0000374) in an unrelated allocation or free.
+    // See Docs/SCAVENGER_NETPROCESS_OVERWRITE_20261014.md for the evidence.
+    //
+    // The guard takes the call site, not the callee, so every other caller
+    // of GetScrapPosition (all of them local ScavengerProcess code) keeps
+    // the stock path. A process whose first word is one of the three
+    // ScavengerProcess-family vtables is forwarded untouched. Anything else
+    // is answered with an independent read-only vector whose y is -1: the
+    // value stock GetScrapPosition itself reports for "no scrap position",
+    // which the caller already treats as "this scavenger contributes
+    // nothing" (it promotes the position only when y > 0). The rejected
+    // process is never called into and nothing is written to it.
+    namespace
+    {
+        using FnScavengerGetScrapPosition = const float* (__thiscall*)(void*);
+        FnScavengerGetScrapPosition g_BzrFn_ScavengerGetScrapPosition = nullptr;
+        ScavengerProcessGuard::Config g_ScavengerProcessGuardConfig = {};
+        volatile long g_ScavengerGuardRejectLogBudget = 8;
+
+        // First word of the object (its vtable), read under SEH so a dangling
+        // pointer degrades to "unreadable" instead of a fault in the AI pass.
+        bool TryReadFirstWord(const void* object, uintptr_t& outWord)
+        {
+            outWord = 0;
+            __try
+            {
+                outWord = *reinterpret_cast<const volatile uintptr_t*>(object);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                outWord = 0;
+                return false;
+            }
+        }
+    }
+
+    bool ConfigureScavengerProcessGuard(void* originalCallTarget)
+    {
+        struct Row
+        {
+            const char* engineRow;
+            const char* rttiName;
+        };
+        static const Row kVtableRows[] = {
+            { "ScavengerProcessVtable", ".?AVScavengerProcess@@" },
+            { "ScavengerFriendVtable",  ".?AVScavengerFriend@@" },
+            { "ScavengerEnemyVtable",   ".?AVScavengerEnemy@@" },
+        };
+
+        uint32_t expectedCallee = 0;
+        if (HookEngine::ResolveEngineAddress("ScavengerProcessGetScrapPosition", expectedCallee) !=
+                HookEngine::EngineAddressStatus::Bound ||
+            expectedCallee == 0 ||
+            reinterpret_cast<uintptr_t>(originalCallTarget) != expectedCallee)
+        {
+            Log(L"[SCAVGUARD] call identity failed original=%p expected=0x%08X; leaving stock call\n",
+                originalCallTarget, expectedCallee);
+            return false;
+        }
+
+        ScavengerProcessGuard::Config config = {};
+        for (const Row& row : kVtableRows)
+        {
+            uint32_t vtable = 0;
+            if (HookEngine::ResolveEngineAddress(row.engineRow, vtable) !=
+                    HookEngine::EngineAddressStatus::BoundData ||
+                !VtableTypeNameMatches(vtable, row.rttiName))
+            {
+                // A data row has no bytes to guard, so the RTTI name behind
+                // vtable[-1] is the identity check for each vtable.
+                Log(L"[SCAVGUARD] vtable %hs at 0x%08X does not carry RTTI %hs; leaving stock call\n",
+                    row.engineRow, vtable, row.rttiName);
+                return false;
+            }
+            config.vtables[config.count++] = vtable;
+        }
+        if (!ScavengerProcessGuard::ConfigIsUsable(config))
+        {
+            Log(L"[SCAVGUARD] vtable set is unusable; leaving stock call\n");
+            return false;
+        }
+
+        g_ScavengerProcessGuardConfig = config;
+        g_BzrFn_ScavengerGetScrapPosition =
+            reinterpret_cast<FnScavengerGetScrapPosition>(originalCallTarget);
+        Log(L"[SCAVGUARD] armed: GetScrapPosition=0x%08X vtables=0x%08X/0x%08X/0x%08X\n",
+            expectedCallee, static_cast<unsigned>(config.vtables[0]),
+            static_cast<unsigned>(config.vtables[1]), static_cast<unsigned>(config.vtables[2]));
+        return true;
+    }
+
+    const float* __fastcall ScavengerProcessScrapPositionGuard(void* process, void* /*edx*/)
+    {
+        if (!g_BzrFn_ScavengerGetScrapPosition)
+            return ScavengerProcessGuard::NoScrapPosition();  // never armed; do not guess
+        if (!g_ScavengerNetProcessGuardEnabled)
+            return g_BzrFn_ScavengerGetScrapPosition(process);
+
+        uintptr_t vtable = 0;
+        const bool readable = process && TryReadFirstWord(process, vtable);
+        const ScavengerProcessGuard::Verdict verdict = ScavengerProcessGuard::Classify(
+            g_ScavengerProcessGuardConfig, process, readable, vtable);
+        if (verdict == ScavengerProcessGuard::Verdict::Accept)
+            return g_BzrFn_ScavengerGetScrapPosition(process);
+
+        if (InterlockedDecrement(&g_ScavengerGuardRejectLogBudget) >= 0)
+        {
+            char rtti[96] = {};
+            const char* name = process ? TryGetRttiClassName(process, rtti, sizeof(rtti)) : "?";
+            Log(L"[SCAVGUARD] process=%p vtable=0x%08X rtti=%hs verdict=%hs; "
+                L"not a ScavengerProcess, skipping its scrap position (heap overwrite avoided)\n",
+                process, static_cast<unsigned>(vtable), name,
+                ScavengerProcessGuard::VerdictName(verdict));
+        }
+        return ScavengerProcessGuard::NoScrapPosition();
     }
 
     // Production patch: HoverCraft::UpdateSounds' turbo-stop lookup.
