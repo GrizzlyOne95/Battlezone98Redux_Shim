@@ -446,6 +446,30 @@ ConstructorRecycleStaleTarget = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX
 MagnetZeroRangeGuard = 1
 
+; Skip the strategic-AI scrap-position query for a scavenger whose AI process
+; is not a ScavengerProcess. A scavenger owned by a remote peer holds a
+; NetProcess, and stock AI_Team_Compute_Other calls ScavengerProcess::
+; GetScrapPosition on it anyway, which writes -1.0f past the end of that small
+; allocation and corrupts the next heap header (a 0xC0000374 crash minutes
+; later on the host when a team runs an AIP and a guest owns scavengers).
+; Genuine ScavengerProcess instances take the stock path unchanged. Active in
+; network games; GOG Redux 2.2.301 only (stands down on any other build).
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_SCAVENGER_NETPROCESS_GUARD
+ScavengerNetProcessGuard = 1
+
+; Repair the stock Lua Formation(unit, leader, priority) binding. Stock registers a
+; copy of the Recycle binding: it reads argument 2 as an integer, so passing the
+; leader handle raises "bad argument #2 to 'Formation' (number expected, got
+; userdata)", and Formation(unit) forms up on handle 1 with the priority ignored.
+; The repaired binding reads argument 2 as a handle and argument 3 as the priority
+; (default 1). An absent, nil or numeric argument 2 keeps the stock reading, so a
+; script that ran before still runs. GOG Redux 2.2.301 only; stands down on any
+; other build or if the registration row does not match.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_LUA_FORMATION_FIX
+LuaFormationBinding = 1
+
 ; Stop Redux pinning the OS cursor while it is minimized or in the
 ; background. In mouse-look the stock look reader re-clips the cursor and
 ; warps it to the window centre every frame, guarded only by a per-thread
@@ -1650,6 +1674,30 @@ PreLobby = 0
 ;                     OPENSHIM_ENABLE_PERSISTENT_PLAYER_MUTE,
 ;                     BZR_DISABLE_PERSISTENT_PLAYER_MUTE, BZR_ENABLE_PERSISTENT_PLAYER_MUTE
 PersistentPlayerMute = 1
+
+; Lua Send/Receive and map-authored objects.
+; Redux packs a Lua Handle into the network message as the object's network id
+; (DistributedObject::dwLocalID), which only objects created at run time by a
+; peer ever get. Objects authored into the map (.bzn) -- geysers, beacons,
+; scenery, anything a script reaches with GetHandle("label") -- have id 0, so a
+; Send(..., geyser) arrives on every other player as nil.
+;
+; ON  = when a handle has no network id but its object has a label that is
+;       unique among live objects, send the reserved id
+;       0x80000000 | fnv1a(label) & 0x7FFFFFFF in the same four bytes. A
+;       receiver running OpenShim maps it back to its own copy of the object
+;       with that label. Packet size is unchanged. Objects that already have a
+;       network id are sent exactly as before, and the stock lookup always
+;       wins on receive. Ambiguous labels (two live objects with one label, or
+;       two labels hashing alike) are not sent and arrive as nil.
+; OFF = stock behaviour.
+; A stock (non-OpenShim) receiver cannot find a reserved id and pushes nil,
+; the same result id 0 gave it, so a mixed lobby is no worse off.
+; Only the Lua handle packer and unpacker are touched; GetID, object creation
+; and every other consumer of network ids are stock.
+; Accepted: boolean. Default: ON. Restart required after changing.
+; Legacy env alias: OPENSHIM_LUA_MAPOBJECT_HANDLES
+LuaMapObjectHandles = 1
 
 ; Native BZRNet lobby-integration patch gate.
 ; Canonical:

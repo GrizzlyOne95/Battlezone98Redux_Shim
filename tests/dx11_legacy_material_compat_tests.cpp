@@ -1225,8 +1225,41 @@ void TestFixedFunctionEmissive()
           "textured, untextured and two-stage fragments declare it");
 }
 
+void TestOpenShimOwnedMaterials()
+{
+    std::printf("TestOpenShimOwnedMaterials\n");
+    Check(IsOpenShimOwnedMaterial("OpenShimFlag_97b629693a595be2"),
+          "flag billboard material is OpenShim-owned");
+    Check(!IsOpenShimOwnedMaterial("OpenShim"), "bare prefix is not a material");
+    Check(!IsOpenShimOwnedMaterial(""), "empty name is not owned");
+    Check(!IsOpenShimOwnedMaterial("xrain"), "mod material is not owned");
+    Check(!IsOpenShimOwnedMaterial("MyOpenShimFlag"), "prefix must lead the name");
+
+    CompatConfig off;
+    off.compatEnabled = false;
+    off.guardEnabled = true;
+    off.aggressiveEnabled = false;
+    const CompatConfig owned =
+        EffectiveCompatConfigForMaterial(off, "OpenShimFlag_97b629693a595be2");
+    Check(owned.compatEnabled, "owned material converts although compat is off");
+    Check(owned.guardEnabled && !owned.aggressiveEnabled,
+          "other settings are preserved");
+    const CompatConfig mod = EffectiveCompatConfigForMaterial(off, "xrain");
+    Check(!mod.compatEnabled, "third-party material still honours compat off");
+
+    // End to end through the policy: the flag pass is plain fixed function,
+    // which compat-off declines (shaderless) but the effective config converts.
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, FixedFuncDesc(1),
+                           off) == CompatPath::SkipShaderless,
+          "flag pass is declined under the raw user config");
+    Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, FixedFuncDesc(1),
+                           owned) == CompatPath::FixedFuncTextured,
+          "flag pass is converted under the effective config");
+}
+
 int main()
 {
+    TestOpenShimOwnedMaterials();
     TestFixedFunctionEmissive();
     TestNativeInputGuards();
     TestVertexInputFit();

@@ -2489,7 +2489,7 @@ namespace BZROpenShim::RenderProfiles
         void* RunDx11LegacyCompatLadder(const std::string& schemeName,
                                         void* material,
                                         unsigned short lodIndex,
-                                        const Dx11Compat::CompatConfig& config,
+                                        const Dx11Compat::CompatConfig& userConfig,
                                         const OgreTechniqueApi& techApi,
                                         const Dx11Compat::VertexInputs& inputs)
         {
@@ -2501,6 +2501,11 @@ namespace BZROpenShim::RenderProfiles
                     materialName = probed;
                 }
             }
+            // OpenShim's own runtime materials (the multiplayer flag
+            // billboards) are always converted, whatever the user chose for
+            // third-party content: left shaderless they throw on every draw.
+            const Dx11Compat::CompatConfig config =
+                Dx11Compat::EffectiveCompatConfigForMaterial(userConfig, materialName);
 
             // Collect every technique as a semantic-source candidate, even
             // unsupported ones: the generator still needs the best template.

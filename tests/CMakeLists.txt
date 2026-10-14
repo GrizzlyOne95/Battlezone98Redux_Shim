@@ -295,9 +295,23 @@ openshim_add_test(map_filter_extras_tests STD 14 SOURCES
     map_filter_extras_tests.cpp
 )
 
+openshim_add_test(lua_formation_fix_tests STD 14 SOURCES
+    lua_formation_fix_tests.cpp
+)
+
+openshim_add_test(lua_handle_sync_tests STD 14 SOURCES
+    lua_handle_sync_tests.cpp
+)
+
 openshim_add_test(memory_access_tests STD 20 SOURCES
     memory_access_tests.cpp
 )
+
+if(WIN32 AND MSVC)
+    openshim_add_test(chunk_bridge_probe_tests STD 20 SOURCES
+        chunk_bridge_probe_tests.cpp
+    )
+endif()
 
 openshim_add_test(stable_id_list_tests STD 20 SOURCES
     stable_id_list_tests.cpp
@@ -413,6 +427,10 @@ openshim_add_test(never_activate_policy_tests STD 20 SOURCES
 
 openshim_add_test(ai_range_policy_tests STD 20 SOURCES
     ai_range_policy_tests.cpp
+)
+
+openshim_add_test(scavenger_process_guard_tests STD 20 SOURCES
+    scavenger_process_guard_tests.cpp
 )
 
 openshim_add_test(lcbench_safety_policy_tests STD 20 SOURCES
