@@ -112,33 +112,49 @@ namespace IatPatch
             }
         };
 
+        // The module handle is only an address. A caller that took it from a
+        // snapshot (Toolhelp, the loader list, a DLL notification) can race an
+        // unload, and then even the first header read lands on MEM_FREE
+        // memory: PSAPI.DLL unloading mid-sweep faulted on `cmp word ptr
+        // [esi],dx` with dx = 'MZ' in about one launch in four. The header
+        // reads therefore sit under SEH here, so a vanished module is a
+        // Result::Faulted like any other race. Callers that can, should also
+        // hold a loader reference (AcquireModuleReference) so the module
+        // cannot disappear between this check and the later walk.
         inline bool TryGetMappedImageView(HMODULE module, MappedImageView& view)
         {
             if (!module)
                 return false;
             auto* base = reinterpret_cast<unsigned char*>(module);
 
-            // SizeOfImage is itself read out of the headers, so read the
-            // headers through a minimal view first and widen once trusted.
-            MappedImageView headerView{ base, 0x1000 };
-            const auto* dos = headerView.At<IMAGE_DOS_HEADER>(0);
-            if (!dos || dos->e_magic != IMAGE_DOS_SIGNATURE)
-                return false;
-            if (dos->e_lfanew < 0)
-                return false;
-            const auto* nt = headerView.At<IMAGE_NT_HEADERS>(
-                static_cast<DWORD>(dos->e_lfanew));
-            if (!nt || nt->Signature != IMAGE_NT_SIGNATURE)
-                return false;
-            if (nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC)
-                return false;
-            const DWORD imageSize = nt->OptionalHeader.SizeOfImage;
-            if (imageSize < 0x1000)
-                return false;
+            __try
+            {
+                // SizeOfImage is itself read out of the headers, so read the
+                // headers through a minimal view first and widen once trusted.
+                MappedImageView headerView{ base, 0x1000 };
+                const auto* dos = headerView.At<IMAGE_DOS_HEADER>(0);
+                if (!dos || dos->e_magic != IMAGE_DOS_SIGNATURE)
+                    return false;
+                if (dos->e_lfanew < 0)
+                    return false;
+                const auto* nt = headerView.At<IMAGE_NT_HEADERS>(
+                    static_cast<DWORD>(dos->e_lfanew));
+                if (!nt || nt->Signature != IMAGE_NT_SIGNATURE)
+                    return false;
+                if (nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC)
+                    return false;
+                const DWORD imageSize = nt->OptionalHeader.SizeOfImage;
+                if (imageSize < 0x1000)
+                    return false;
 
-            view.base = base;
-            view.size = imageSize;
-            return true;
+                view.base = base;
+                view.size = imageSize;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
         }
 
         // The whole walk lives here so the __try/__except sits in a scope with
@@ -326,6 +342,47 @@ namespace IatPatch
 
         return Detail::PatchImportGuarded(
             view, nullptr, functionName, nullptr, replacement, original, outSlot);
+    }
+
+    // Take a loader reference on a module known only by its base address, for
+    // the duration of a patch. A snapshot of the module list does not keep any
+    // module alive, so a module such as PSAPI.DLL can unload between the
+    // snapshot and the first read of its headers.
+    //
+    // GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT is deliberately NOT passed:
+    // that flag returns the handle without pinning anything. The lookup is
+    // taken under the loader lock, so it either finds a module that is still
+    // mapped (and increments its count) or fails because the module is gone.
+    //
+    // Returns the held module, or nullptr when the module is no longer loaded;
+    // the caller then skips it. Pair every non-null result with
+    // ReleaseModuleReference. Do not call this from inside a loader callback
+    // (DLL notification, DllMain): there the loader lock is already held and
+    // the module cannot unload, so no reference is needed.
+    inline HMODULE AcquireModuleReference(HMODULE module)
+    {
+        if (!module)
+            return nullptr;
+        HMODULE held = nullptr;
+        if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                                reinterpret_cast<LPCWSTR>(module), &held) ||
+            !held)
+            return nullptr;
+        if (held != module)
+        {
+            // The address now belongs to a different module than the snapshot
+            // named (unloaded, another one mapped over it). It is genuinely
+            // loaded, but it is not the module the caller asked about.
+            FreeLibrary(held);
+            return nullptr;
+        }
+        return held;
+    }
+
+    inline void ReleaseModuleReference(HMODULE held)
+    {
+        if (held)
+            FreeLibrary(held);
     }
 
     // Block until the loader has finished with `module`.
