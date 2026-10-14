@@ -419,6 +419,10 @@ openshim_add_test(ai_range_policy_tests STD 20 SOURCES
     ai_range_policy_tests.cpp
 )
 
+openshim_add_test(scavenger_process_guard_tests STD 20 SOURCES
+    scavenger_process_guard_tests.cpp
+)
+
 openshim_add_test(lcbench_safety_policy_tests STD 20 SOURCES
     lcbench_safety_policy_tests.cpp
 )

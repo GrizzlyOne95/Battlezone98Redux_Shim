@@ -964,6 +964,8 @@ namespace BZROpenShim
              "OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX", "BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"},
             {&g_UnfocusedMouseReleaseEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE", "BZR_DISABLE_UNFOCUSED_MOUSE_RELEASE"},
+            {&g_ScavengerNetProcessGuardEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_SCAVENGER_NETPROCESS_GUARD", "BZR_DISABLE_SCAVENGER_NETPROCESS_GUARD"},
             {&g_BriefingScrollFixEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_BRIEFING_SCROLL_FIX", "BZR_DISABLE_BRIEFING_SCROLL_FIX"},
             {&g_MultiRenderCountClampEnabled, EnvSwitches::Kind::KillSwitch,
