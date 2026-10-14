@@ -1,6 +1,7 @@
 // patcher.cpp
 // BZR Open Shim - runtime patcher implementation
 #include "patcher.h"
+#include "planet_video.h"
 #include "hook_engine.h"
 #include "patch_config_parse.h"
 #include "patches.h"
@@ -1074,7 +1075,11 @@ namespace BZROpenShim
         for (auto& p : patches) {
             if (p.type != HookEngine::PatchType::REL32 || !p.verified) continue;
             uint32_t target = 0;
-            if (p.name.find("Vehicle List Mod Fix 2/4") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(VehicleListModFix2));
+            if (p.name == "Custom Planet Video Playback") {
+                target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+                    PrepareCustomPlanetVideoHook(p.address - 1)));
+            }
+            else if (p.name.find("Vehicle List Mod Fix 2/4") != std::string::npos) target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(VehicleListModFix2));
             else if (p.name == "Chunk Render Resolve Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ChunkRenderResolveHook));
             else if (p.name == "Target Reticle Popup Recent-Hit Getter Hook") target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(TargetReticlePopupRecentHitGetterHook));
             else if (p.name == "World Builder Save Destination Dialog") {
