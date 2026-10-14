@@ -202,6 +202,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # stands down in network games with the other simulation fixes.
     "Fixes/ConstructorRecycleStaleTarget",
     "Fixes/MagnetZeroRangeGuard",
+    # Heap-corruption guard (a remote scavenger's NetProcess is not a
+    # ScavengerProcess); active in network games, which is where it matters.
+    "Fixes/ScavengerNetProcessGuard",
     # Client-side cursor handling only; no simulation or wire effect.
     "Fixes/UnfocusedMouseRelease",
     "Fixes/CliMultiParameterOptions",
@@ -346,6 +349,7 @@ $shippingPolicyChecks = @{
     "Fixes/ConstructorRemoteBuild" = "1"
     "Fixes/ConstructorRecycleStaleTarget" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
+    "Fixes/ScavengerNetProcessGuard" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"
     "Fixes/ProducerScriptPredicates" = "0"
     "Fixes/VehicleListModScoping" = "0"

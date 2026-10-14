@@ -1113,6 +1113,18 @@ namespace BZROpenShim
                 target = static_cast<uint32_t>(
                     reinterpret_cast<uintptr_t>(PersonSniperScanGetWeaponGuard));
             }
+            else if (p.name == "Scavenger Process Scrap Position Guard") {
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                // Verifies the call target against the pinned engine_addresses
+                // row and RTTI-checks all three ScavengerProcess-family vtables;
+                // any failure leaves the stock call in place.
+                if (!original || !ConfigureScavengerProcessGuard(original))
+                    continue;
+                target = static_cast<uint32_t>(
+                    reinterpret_cast<uintptr_t>(ScavengerProcessScrapPositionGuard));
+            }
             else if (IsShellCasingPatchName(p.name.c_str())) {
                 void* original = isSteam
                     ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
