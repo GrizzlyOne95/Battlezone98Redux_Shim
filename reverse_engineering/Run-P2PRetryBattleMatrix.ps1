@@ -8,6 +8,10 @@ configs/native apply logs, and restores the INIs after all games exit. A live
 game prevents restoration and the next launch; originals.json is retained for
 recovery. Native defaults remain unchanged. Prepare/deploy the full matching
 load chain and an active DX9 display mode before calling this script.
+Timer tokens are first/interval ms; append +early and/or +nak (or +nak0), in that order
+(e.g. 1000/2500+early+nak), to enable the opt-in EarlyUnreliableAccept and
+EarlyNakAccept receivers in that arm. +nak pins EarlyNakReorderMs 40; +nak0 pins
+it to 0 (the previous NAK gate) so the two gates can be A/B tested.
 Equal impairment seeds mean equal configured profiles, not identical traffic.
 .EXAMPLE
 ./Run-P2PRetryBattleMatrix.ps1 -BattleRepo C:\path\BZR-OpenShim-battleload -ServerRepo C:\path\server -DryRun
@@ -27,6 +31,7 @@ param(
     [string]$RunStamp = (Get-Date -Format 'yyyyMMdd-HHmmss'),
     [string]$CoopOverride = '',
     [switch]$AllowNoAudioEndpoint,
+    [ValidateSet('Classic','Strategy')][string]$Mode = 'Classic',
     [switch]$DryRun
 )
 $ErrorActionPreference = 'Stop'
@@ -37,6 +42,11 @@ $scorer = Join-Path $PSScriptRoot 'p2p_netfix_score.py'
 $ps51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 if ($RunStamp -notmatch '^[a-zA-Z0-9-]+$') { throw 'RunStamp must contain only letters, digits and hyphens.' }
 if ($Units % 2) { throw 'Units must be even.' }
+if ($Mode -eq 'Strategy') {
+    # One owned army per client (Run-BZRBattleLoad -Mode Strategy); no extras.
+    if ($Units % 4) { throw 'Strategy mode needs Units divisible by 4 (one army per client).' }
+    $Beacons = 0; $Powerups = 0
+}
 if (Get-Process battlezone98redux -ErrorAction SilentlyContinue) { throw 'A game is alive; nothing changed.' }
 . (Join-Path $PSScriptRoot 'BZRHarness.ps1')
 if (-not (Test-Path -LiteralPath $battle)) { throw "Missing battle harness: $battle" }
@@ -73,9 +83,9 @@ foreach ($pass in 1..$Passes) {
         $order = @($Timers)
         if ($pass % 2 -eq 0) { [array]::Reverse($order) }
         foreach ($timer in $order) {
-            $tag = $timer.Replace('/','x')
+            $tag = $timer.Replace('/','x').Replace('+early','e').Replace('+nak0','z').Replace('+nak','n')
             $plan += [pscustomobject]@{index=$plan.Count+1; arm='on'; pass=$pass; timers=$timer; impair=$Impair[$profileIndex];
-                case="nbattle ${Units}AI ${Beacons}beacons ${Powerups}powerups ${Seconds}s";
+                case="$(if ($Mode -eq 'Strategy') { 'sbattle' } else { 'nbattle' }) ${Units}AI ${Beacons}beacons ${Powerups}powerups ${Seconds}s";
                 run="retry-battle-t$tag-i$($profileIndex+1)-p$pass-$RunStamp"}
         }
     }
@@ -95,7 +105,8 @@ foreach ($name in @('Run-BZRBattleLoad.ps1','Run-BZRCoopMission.ps1','BZRCoopLau
 [ordered]@{started=(Get-Date).ToString('o'); clients=4; plan=$plan; sourceHashes=$hashes; toolHashes=$toolHashes;
     harnessHashes=$harnessHashes;
     coopOverrideSha256=$coopHash;
-    note='Fix ON in every arm; guarded timer overrides only; nondeterministic combat/traffic.'} |
+    note='Fix ON in every arm; guarded timer overrides plus explicit [Network] EarlyUnreliableAccept and EarlyNakAccept (tokens +early / +nak / +nak0 = 1, else 0; EarlyNakReorderMs 40 / 0 for +nak / +nak0), '+
+        'verified per client from the archived INI and [P2PRECV] native armed/unavailable/total log lines; nondeterministic combat/traffic.'} |
     ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $control 'matrix.json')
 $prior = @{}
 foreach ($key in @('OPENSHIM_DISABLE_RELIABLE_SEND_BACKLOG_FIX','BZR_DISABLE_RELIABLE_SEND_BACKLOG_FIX','BZRNET_FAULT_INJECT','BZR_FORCE_WINDOWED')) {
@@ -113,6 +124,10 @@ try {
                 '-Beacons',$Beacons,'-Powerups',$Powerups,'-RunName',$row.run,'-ServerRepo',$ServerRepo,'-Python',$Python,
                 '-InheritedLaunchLockOwner',$env:BZR_LAUNCH_LOCK_HELD)
             if ($row.impair) { $battleArgs += @('-Impair',$row.impair) }
+            if ($Mode -eq 'Strategy') {
+                if (-not (Get-Command $battle).Parameters.ContainsKey('Mode')) { throw 'Battle harness lacks -Mode Strategy.' }
+                $battleArgs += @('-Mode','Strategy')
+            }
             if ($AllowNoAudioEndpoint) { $battleArgs += '-AllowNoAudioEndpoint' }
             if ($CoopOverride) {
                 if ((Get-FileHash -LiteralPath $CoopOverride).Hash -ne $coopHash) { throw 'Co-op override changed between arms.' }

@@ -266,27 +266,22 @@ namespace BZROpenShim
 
         static InlineDetour32 g_CalcRangeCraftDetour = {};
 
+        // The AttackTask endpoints are GameObjects; their world transform lives
+        // on the _OBJ76 the GameObject points at, not inline. Reading it inline
+        // returned a constant (0, 0, -1) for every craft, so the craft-target
+        // distance was always zero and kiting never engaged.
         static bool TryGetGameObjectPosition(void* objectPtr,
                                              double& outX,
                                              double& outY,
                                              double& outZ)
         {
-            if (!objectPtr)
+            float position[3] = {};
+            if (!TryGetGameObjectWorldPosition(objectPtr, position))
                 return false;
-
-            __try
-            {
-                const auto* transform = reinterpret_cast<const LegacyMat3*>(
-                    reinterpret_cast<const uint8_t*>(objectPtr) + kObj76TransformOffset);
-                outX = transform->posit_x;
-                outY = transform->posit_y;
-                outZ = transform->posit_z;
-                return std::isfinite(outX) && std::isfinite(outY) && std::isfinite(outZ);
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
+            outX = position[0];
+            outY = position[1];
+            outZ = position[2];
+            return std::isfinite(outX) && std::isfinite(outY) && std::isfinite(outZ);
         }
 
         static bool TryReadAttackTaskEndpoints(const uint8_t* taskBytes,
@@ -760,6 +755,25 @@ namespace BZROpenShim
                 state.strafeDirection =
                     (reinterpret_cast<uintptr_t>(craft) & 0x10u) ? 1 : -1;
                 state.nextStrafeSwitchMs = 0;
+                // One line per target acquisition: proves the tuned craft reaches
+                // this hook even when it never closes to kiteEnterRange.
+                if (EnvFlagEnabled("OPENSHIM_TRACE_AI_KITE") || TraceAiRangeEnabled())
+                {
+                    const long remaining = InterlockedDecrement(&g_CombatKiteTraceBudget);
+                    if (remaining >= 0)
+                    {
+                        char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+                        TryGetObjectOdfToken(craft, odfToken);
+                        Log(L"[AIKITE] track craft=0x%08X odf=%hs target=0x%08X dist=%.2f enter=%.2f exit=%.2f remaining=%ld\n",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                            odfToken[0] ? odfToken : "-",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(target)),
+                            distance,
+                            static_cast<double>(tuning.kiteEnterRange),
+                            static_cast<double>(tuning.kiteExitRange),
+                            remaining);
+                    }
+                }
             }
 
             const bool wasRetreating = state.retreating;

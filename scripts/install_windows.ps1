@@ -19,6 +19,13 @@
 # refreshes openshim.ini.canonical so startup migration has the current shipped
 # preset available. Set OPENSHIM_RESET_INI=1 for an explicit backup-and-reset.
 #
+# OPENSHIM_SUITE_ZIP=<path> is the offline mode OpenShimSetup.exe uses: that
+# local OpenShim-Suite.zip is deployed instead of downloading one. It is only
+# accepted together with OPENSHIM_SUITE_SHA256 (64 hex digits), and the zip is
+# verified against it before anything is expanded. Without both, the run is
+# refused. It takes precedence over a local checkout build, but not
+# OPENSHIM_DLL. With neither set, the download path above is unchanged.
+#
 # OPENSHIM_DLL is an advanced override and only proceeds when a matching
 # artifact set sits beside that DLL. No Steam launch options are required on
 # Windows.
@@ -35,7 +42,7 @@ $steamAppId = "301650"
 $defaultInstallDir = "Battlezone 98 Redux"
 
 # UI tiles the game actually loads out of the custom-widget resource tree.
-$uiTiles = @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png", "osh_career_center.png",
+$uiTiles = @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png", "osh_career_center.png", "osh_prelobby_center.png",
     "osh_options_center.png", "osh_hub_center.png", "osh_category_center.png", "osh_tile_hv.png", "osh_tile_ck.png", "osh_value_hv.png", "osh_value_ck.png",
     "osh_keys_center.png", "osh_key_hv.png", "osh_key_ck.png", "osh_tool_hv.png", "osh_tool_ck.png")
 
@@ -122,41 +129,180 @@ function Get-SteamLibraryRoots {
     $libraryRoots | Where-Object { $_ } | Select-Object -Unique
 }
 
-function Get-GamePaths {
+# GOG records the install folder in the registry (product id 1454067812), so a
+# custom GOG location is found there. Missing keys are normal and silent.
+function Get-GogRegistryPaths {
+    $found = New-Object System.Collections.Generic.List[string]
+    foreach ($location in @(
+        @{ Path = "HKLM:\SOFTWARE\WOW6432Node\GOG.com\Games\1454067812"; Name = "path" },
+        @{ Path = "HKLM:\SOFTWARE\GOG.com\Games\1454067812"; Name = "path" },
+        @{ Path = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\1454067812_is1"; Name = "InstallLocation" }
+    )) {
+        try {
+            $item = Get-ItemProperty -Path $location.Path -ErrorAction Stop
+            $value = [string]$item.($location.Name)
+            if ($value) { $found.Add($value.Trim().TrimEnd('\')) }
+        } catch { }
+    }
+    $found
+}
+
+function Add-DetectedInstall {
+    param(
+        [System.Collections.Generic.List[string]]$List,
+        [hashtable]$Sources,
+        [string]$Path,
+        [string]$Source
+    )
+    $before = $List.Count
+    Add-UniquePath -List $List -Path $Path
+    if ($List.Count -gt $before) { $Sources[$List[$List.Count - 1]] = $Source }
+}
+
+# Every install found, as objects with Path and Source (Steam, GOG or Other).
+function Get-GameInstalls {
     $paths = New-Object System.Collections.Generic.List[string]
+    $sources = @{}
     if ($requestedGamePath) {
         if (-not (Test-BzrGameDir $requestedGamePath)) {
             throw "OPENSHIM_GAME_PATH is not a Battlezone 98 Redux install: $requestedGamePath"
         }
-        Add-UniquePath -List $paths -Path $requestedGamePath
-        return $paths
+        Add-DetectedInstall -List $paths -Sources $sources -Path $requestedGamePath -Source "Other"
     }
-
-    foreach ($steamRoot in Get-SteamRoots) {
-        foreach ($libraryRoot in Get-SteamLibraryRoots -SteamRoot $steamRoot) {
-            $steamApps = Join-Path $libraryRoot "steamapps"
-            $manifest = Join-Path $steamApps "appmanifest_$steamAppId.acf"
-            $installDir = $defaultInstallDir
-            if (Test-Path -LiteralPath $manifest) {
-                foreach ($line in Get-Content -Path $manifest) {
-                    $match = [regex]::Match($line, '"installdir"\s+"([^"]+)"')
-                    if ($match.Success) {
-                        $installDir = $match.Groups[1].Value
-                        break
-                    }
-                }
-            }
-            $candidate = Join-Path $steamApps (Join-Path "common" $installDir)
-            if (Test-BzrGameDir $candidate) { Add-UniquePath -List $paths -Path $candidate }
+    elseif ($env:OPENSHIM_TEST_GAME_PATHS) {
+        # Test-only: replaces detection so a test can never reach a real install.
+        foreach ($candidate in $env:OPENSHIM_TEST_GAME_PATHS.Split(';')) {
+            if (Test-BzrGameDir $candidate) { Add-DetectedInstall -List $paths -Sources $sources -Path $candidate -Source "Other" }
         }
     }
+    else {
+        foreach ($steamRoot in Get-SteamRoots) {
+            foreach ($libraryRoot in Get-SteamLibraryRoots -SteamRoot $steamRoot) {
+                $steamApps = Join-Path $libraryRoot "steamapps"
+                $manifest = Join-Path $steamApps "appmanifest_$steamAppId.acf"
+                $installDir = $defaultInstallDir
+                if (Test-Path -LiteralPath $manifest) {
+                    foreach ($line in Get-Content -Path $manifest) {
+                        $match = [regex]::Match($line, '"installdir"\s+"([^"]+)"')
+                        if ($match.Success) {
+                            $installDir = $match.Groups[1].Value
+                            break
+                        }
+                    }
+                }
+                $candidate = Join-Path $steamApps (Join-Path "common" $installDir)
+                if (Test-BzrGameDir $candidate) { Add-DetectedInstall -List $paths -Sources $sources -Path $candidate -Source "Steam" }
+            }
+        }
 
-    foreach ($programFiles in Get-ProgramFilesRoots) {
-        $candidate = Join-Path $programFiles "GOG Galaxy\Games\Battlezone 98 Redux"
-        if (Test-BzrGameDir $candidate) { Add-UniquePath -List $paths -Path $candidate }
+        foreach ($candidate in Get-GogRegistryPaths) {
+            if (Test-BzrGameDir $candidate) { Add-DetectedInstall -List $paths -Sources $sources -Path $candidate -Source "GOG" }
+        }
+        foreach ($programFiles in Get-ProgramFilesRoots) {
+            $candidate = Join-Path $programFiles "GOG Galaxy\Games\Battlezone 98 Redux"
+            if (Test-BzrGameDir $candidate) { Add-DetectedInstall -List $paths -Sources $sources -Path $candidate -Source "GOG" }
+        }
+    }
+    foreach ($path in $paths) { [pscustomobject]@{ Path = $path; Source = $sources[$path] } }
+}
+
+function Get-GamePaths {
+    foreach ($install in @(Get-GameInstalls)) { $install.Path }
+}
+
+# --- interactive chooser: only when OpenShimSetup.exe sets OPENSHIM_INTERACTIVE=1 ---
+
+function Test-InteractiveSetup {
+    $env:OPENSHIM_INTERACTIVE -eq "1"
+}
+
+function Read-Answer {
+    param([string]$Prompt)
+    try { $answer = Read-Host $Prompt } catch { $answer = $null }
+    if ($null -eq $answer) { return "Q" }   # input closed: same as quitting
+    $answer.Trim()
+}
+
+# Folder picker. Returns a valid game folder, or $null if the user cancels.
+function Read-BrowsedGameDir {
+    $testResults = $null
+    if ($env:OPENSHIM_TEST_BROWSE) {
+        # Test-only: stands in for the dialog; an empty entry, or none left, is Cancel.
+        $testResults = New-Object System.Collections.Generic.Queue[string]
+        foreach ($entry in $env:OPENSHIM_TEST_BROWSE.Split(';')) { $testResults.Enqueue($entry) }
+    }
+    while ($true) {
+        $picked = $null
+        if ($null -ne $testResults) {
+            if ($testResults.Count -gt 0) { $picked = $testResults.Dequeue() }
+        }
+        elseif ([System.Threading.Thread]::CurrentThread.ApartmentState -eq "STA") {
+            Add-Type -AssemblyName System.Windows.Forms
+            $owner = New-Object System.Windows.Forms.Form
+            $owner.TopMost = $true
+            $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+            $dialog.Description = "Choose the Battlezone 98 Redux folder (the one that contains battlezone98redux.exe)."
+            if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { $picked = $dialog.SelectedPath }
+            $owner.Dispose()
+        }
+        else {
+            $picked = Read-Host "Type the full path of the Battlezone 98 Redux folder (leave empty to cancel)"
+        }
+        if (-not $picked) { return $null }
+        if (Test-BzrGameDir $picked) { return [System.IO.Path]::GetFullPath($picked) }
+        Write-Host "That folder does not contain battlezone98redux.exe, so it is not a Battlezone 98 Redux folder: $picked"
+    }
+}
+
+# Returns the game folders to work on. Without OPENSHIM_INTERACTIVE=1 this is
+# exactly Get-GamePaths (every install found). -Filter narrows the list shown.
+function Resolve-GamePaths {
+    param([string]$Action, [scriptblock]$Filter)
+    if (-not (Test-InteractiveSetup)) { return @(Get-GamePaths) }
+
+    $installs = @(Get-GameInstalls)
+    if ($requestedGamePath) {
+        Write-Host "Game folder: $($installs[0].Path)"
+        return @($installs[0].Path)
+    }
+    if ($Filter) {
+        $narrowed = @($installs | Where-Object { & $Filter $_.Path })
+        if ($narrowed.Count -gt 0) { $installs = $narrowed }
     }
 
-    return $paths
+    while ($true) {
+        if ($installs.Count -eq 0) {
+            Write-Host "Battlezone 98 Redux was not found on this computer."
+            $answer = Read-Answer "Press B to browse for the game folder, or Q to quit"
+        }
+        elseif ($installs.Count -eq 1) {
+            Write-Host "Battlezone 98 Redux was found here:"
+            Write-Host "  $($installs[0].Source) - $($installs[0].Path)"
+            $answer = Read-Answer "Press Enter to $Action it, B to browse for another folder, or Q to quit"
+            if ($answer -eq "") { return @($installs[0].Path) }
+        }
+        else {
+            Write-Host "Battlezone 98 Redux was found in these places:"
+            for ($i = 0; $i -lt $installs.Count; $i++) {
+                Write-Host ("  {0}. {1} - {2}" -f ($i + 1), $installs[$i].Source, $installs[$i].Path)
+            }
+            $answer = Read-Answer "Type a number to $Action that one, A for all of them, B to browse for another folder, or Q to quit"
+            if ($answer -match '^[aA]$') { return @($installs | ForEach-Object { $_.Path }) }
+            if ($answer -match '^\d+$' -and [int]$answer -ge 1 -and [int]$answer -le $installs.Count) {
+                return @($installs[[int]$answer - 1].Path)
+            }
+        }
+        if ($answer -match '^[qQ]$') {
+            Write-Host "Cancelled. Nothing was changed."
+            exit 1
+        }
+        if ($answer -match '^[bB]$') {
+            $browsed = Read-BrowsedGameDir
+            if ($browsed) { return @($browsed) }
+            continue
+        }
+        Write-Host "Please choose one of the options listed."
+    }
 }
 
 function Test-OpenShimDll {
@@ -262,6 +408,25 @@ function Get-ArtifactSet {
     }
 }
 
+# Expand a hash-verified suite zip and report which release it is. Shared by
+# the download and the offline path so both unpack identically.
+function Expand-SuiteZip {
+    param([string]$Zip, [string]$TempRoot)
+
+    $suite = Join-Path $TempRoot "suite"
+    Expand-Archive -LiteralPath $Zip -DestinationPath $suite -Force
+
+    $metadata = Join-Path $suite "release_metadata.json"
+    if (Test-Path -LiteralPath $metadata) {
+        $tag = [regex]::Match((Get-Content -LiteralPath $metadata -Raw), '"Tag"\s*:\s*"([^"]*)"')
+        if ($tag.Success) {
+            Write-Host "  bundle release: $($tag.Groups[1].Value)"
+        }
+    }
+
+    return $suite
+}
+
 function Get-SuiteBundle {
     param([string]$Base, [string]$TempRoot)
 
@@ -280,18 +445,27 @@ function Get-SuiteBundle {
     Assert-Hash -FilePath $zip -Expected $expected.ToLowerInvariant()
     Write-Host "  verified OpenShim-Suite.zip sha256=$($expected.ToLowerInvariant())"
 
-    $suite = Join-Path $TempRoot "suite"
-    Expand-Archive -LiteralPath $zip -DestinationPath $suite -Force
+    return (Expand-SuiteZip -Zip $zip -TempRoot $TempRoot)
+}
 
-    $metadata = Join-Path $suite "release_metadata.json"
-    if (Test-Path -LiteralPath $metadata) {
-        $tag = [regex]::Match((Get-Content -LiteralPath $metadata -Raw), '"Tag"\s*:\s*"([^"]*)"')
-        if ($tag.Success) {
-            Write-Host "  bundle release: $($tag.Groups[1].Value)"
-        }
+# Offline twin of Get-SuiteBundle for OpenShimSetup.exe, which carries the
+# release zip inside itself. A local zip is only as trustworthy as the hash it
+# is checked against, and Assert-Hash passes silently on an empty hash, so the
+# hash is required and validated here rather than left to that default.
+function Get-LocalSuiteBundle {
+    param([string]$Zip, [string]$Sha256, [string]$TempRoot)
+
+    if ($Sha256 -notmatch '^[0-9a-fA-F]{64}$') {
+        throw "OPENSHIM_SUITE_ZIP requires OPENSHIM_SUITE_SHA256 (64 hex digits) so the bundle can be verified. Refusing to deploy it."
     }
+    if (-not (Test-Path -LiteralPath $Zip -PathType Leaf)) {
+        throw "OPENSHIM_SUITE_ZIP does not name a file: $Zip"
+    }
+    Write-Host "Using local release bundle $Zip ..."
+    Assert-Hash -FilePath $Zip -Expected $Sha256.ToLowerInvariant()
+    Write-Host "  verified OpenShim-Suite.zip sha256=$($Sha256.ToLowerInvariant())"
 
-    return $suite
+    return (Expand-SuiteZip -Zip $Zip -TempRoot $TempRoot)
 }
 
 function Copy-ResourceDirectory {
@@ -498,7 +672,7 @@ function Deploy-PlayerIni {
     Write-Host "  reset openshim.ini (backup: $(Split-Path -Leaf $backup))"
 }
 
-$gamePaths = @(Get-GamePaths)
+$gamePaths = @(Resolve-GamePaths -Action "install into")
 if ($gamePaths.Count -eq 0) {
     throw "Could not find Battlezone 98 Redux. Set OPENSHIM_GAME_PATH to the game folder and run again."
 }
@@ -528,7 +702,7 @@ try {
             throw "OPENSHIM_DLL requires patches.json, openshim.ini, and net.ini beside the DLL (or scripts\patches.json), plus bzloader.dll and plugins\openshim.dll if that DLL is a post-split bootstrap. Refusing to mix versions."
         }
         Write-Host "Using OPENSHIM_DLL with matched companions: $($artifacts.Dll)"
-    } elseif ($localRoot) {
+    } elseif ($localRoot -and -not $env:OPENSHIM_SUITE_ZIP) {
         $artifacts = Get-ArtifactSet -Root $localRoot
         if ($artifacts) {
             Write-Host "Using local Release build with matched companions: $($artifacts.Dll)"
@@ -547,7 +721,11 @@ try {
     if (-not $artifacts) {
         $base = "https://github.com/$repoSlug/releases/latest/download"
         try {
-            $suiteRoot = Get-SuiteBundle -Base $base -TempRoot $tempRoot
+            if ($env:OPENSHIM_SUITE_ZIP) {
+                $suiteRoot = Get-LocalSuiteBundle -Zip $env:OPENSHIM_SUITE_ZIP -Sha256 $env:OPENSHIM_SUITE_SHA256 -TempRoot $tempRoot
+            } else {
+                $suiteRoot = Get-SuiteBundle -Base $base -TempRoot $tempRoot
+            }
             $artifacts = Get-ArtifactSet -Root $suiteRoot
             if (-not $artifacts) {
                 throw "The release bundle is missing one of winmm.dll, bzloader.dll, plugins\openshim.dll, patches.json, openshim.ini, or net.ini."
@@ -621,6 +799,9 @@ try {
         if ($artifacts.RenderSource) {
             Copy-ResourceDirectory -Source $artifacts.RenderSource `
                 -Destination (Join-Path $gameDir "openshim\renderer\enhanced")
+            # The in-game asset sync trusts this marker to describe the folder; the
+            # files just written may differ, so drop it and let the next start re-check.
+            Remove-Item -LiteralPath (Join-Path $gameDir "openshim\renderer\enhanced\openshim_set.sha256") -Force -ErrorAction SilentlyContinue
             Write-Host "  deployed Enhanced renderer resources"
         }
 
@@ -645,6 +826,7 @@ try {
                     Copy-Item -LiteralPath $tileSource -Destination $uiTarget -Force
                 }
             }
+            Remove-Item -LiteralPath (Join-Path $uiTarget "openshim_widgets.sha256") -Force -ErrorAction SilentlyContinue
             Write-Host "  deployed UI widget tiles"
         }
     }

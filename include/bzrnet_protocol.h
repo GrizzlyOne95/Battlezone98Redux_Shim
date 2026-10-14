@@ -110,4 +110,70 @@ namespace BZROpenShim
         size_t length,
         size_t maxBytes,
         std::vector<WebSocketMessage>& out);
+
+    // --- Outbound platform-ticket withholding (client -> custom server) ---
+    //
+    // Scrubs the Steam/GOG app ticket out of client-to-server WebSocket text
+    // frames IN PLACE and without changing a byte count: the ticket string is
+    // replaced by "withheld" (or "" when the value is shorter than the marker)
+    // and the rest of the old value becomes JSON whitespace after the closing
+    // quote. Frame header, length and mask key are untouched; the payload is
+    // re-masked with the frame's own key.
+    //
+    // Fail-closed: anything that could carry a ticket but cannot be rewritten
+    // safely (a text frame split across calls, a fragmented message, RSV bits
+    // such as permessage-deflate, an oversized or unparseable frame) yields
+    // Rejected, and the state stays rejected. The caller must not send the
+    // bytes. Non-text frames, and text frames without a ticket key, pass
+    // through untouched.
+    constexpr size_t kTicketScrubMaxPayload = 256 * 1024;
+
+    enum class WebSocketScrubStatus { Unchanged, Rewritten, Rejected };
+
+    struct WebSocketTicketRewrite
+    {
+        const char* key = "";
+        size_t length = 0;   // original value length in bytes; never the value
+    };
+
+    struct WebSocketTicketScrubState
+    {
+        enum class Phase : uint8_t { Handshake, FrameHeader, FramePayload, Passthrough };
+        Phase phase = Phase::Handshake;
+        bool rejected = false;
+        std::vector<uint8_t> handshake;
+        uint8_t header[14] = {};
+        size_t headerLength = 0;
+        uint8_t opcode = 0;
+        uint8_t mask[4] = {};
+        uint64_t payloadRemaining = 0;
+    };
+
+    // `data` is a private copy of the bytes about to be sent. `rewrites` is
+    // appended to; `rejectReason` (optional) receives a static string.
+    WebSocketScrubStatus ScrubWebSocketTickets(
+        WebSocketTicketScrubState& state,
+        uint8_t* data,
+        size_t length,
+        std::vector<WebSocketTicketRewrite>& rewrites,
+        const char** rejectReason = nullptr);
+
+    // Per-call, frame-aligned mode for IOCP-style senders that may re-issue a
+    // partial tail, so no stream state can be trusted across calls. One call
+    // (the spans are its scatter/gather buffers) must be either the HTTP
+    // upgrade request ("GET " ... CRLF CRLF) or a whole number of complete
+    // frames starting at a frame boundary; anything else is Rejected. A
+    // rewrite is scattered back into the spans in place (length unchanged).
+    struct ByteSpan
+    {
+        uint8_t* data = nullptr;
+        size_t length = 0;
+    };
+    constexpr size_t kTicketScrubMaxCallBytes = 512 * 1024;
+
+    WebSocketScrubStatus ScrubWebSocketTicketsPerCall(
+        const ByteSpan* spans,
+        size_t count,
+        std::vector<WebSocketTicketRewrite>& rewrites,
+        const char** rejectReason = nullptr);
 }

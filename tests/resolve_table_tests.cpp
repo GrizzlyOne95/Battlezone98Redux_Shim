@@ -443,8 +443,8 @@ namespace
         const auto rows = ParseEngineAddressTable(text, &error);
         Check(error.empty(), "the shipped engine address table must have no rejected rows");
         // Rows are added as literal addresses move out of feature code, so the
-        // count only ever grows; 98 is where the table stood before that.
-        Check(rows.size() >= 98, "the shipped table keeps at least its original 98 engine addresses");
+        // count only ever grows; 100 is where the table stood before that.
+        Check(rows.size() >= 100, "the shipped table keeps at least its original 100 engine addresses");
         std::set<std::string> names;
         for (const auto& row : rows)
         {

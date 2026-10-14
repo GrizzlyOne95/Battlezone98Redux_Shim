@@ -2301,6 +2301,9 @@ fragment_program OSE_BaseOGLowNoShadow_fragment unified
 	default_params
 	{
 		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightCount light_count
 		param_named_auto diffuseColor surface_diffuse_colour
 		param_named_auto fogColour fog_colour
 		param_named_auto fogParams fog_params
@@ -2317,6 +2320,9 @@ fragment_program OSE_BaseOGLowShadow_fragment unified
 	default_params
 	{
 		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightCount light_count
 		param_named_auto diffuseColor surface_diffuse_colour
 		param_named_auto fogColour fog_colour
 		param_named_auto fogParams fog_params
@@ -2334,6 +2340,9 @@ fragment_program OSE_BaseOGLowPSSM_fragment unified
 	default_params
 	{
 		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 1
+		param_named_auto lightPosition light_position_view_space_array 1
+		param_named_auto lightCount light_count
 		param_named_auto diffuseColor surface_diffuse_colour
 		param_named_auto fogColour fog_colour
 		param_named_auto fogParams fog_params
@@ -2354,6 +2363,9 @@ fragment_program OSE_BaseOGMediumNoShadow_fragment unified
 	default_params
 	{
 		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightCount light_count
 		param_named_auto diffuseColor surface_diffuse_colour
 		param_named_auto fogColour fog_colour
 		param_named_auto fogParams fog_params
@@ -2370,6 +2382,9 @@ fragment_program OSE_BaseOGMediumShadow_fragment unified
 	default_params
 	{
 		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightCount light_count
 		param_named_auto diffuseColor surface_diffuse_colour
 		param_named_auto fogColour fog_colour
 		param_named_auto fogParams fog_params
@@ -2387,6 +2402,9 @@ fragment_program OSE_BaseOGMediumPSSM_fragment unified
 	default_params
 	{
 		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightCount light_count
 		param_named_auto diffuseColor surface_diffuse_colour
 		param_named_auto fogColour fog_colour
 		param_named_auto fogParams fog_params
@@ -2407,6 +2425,9 @@ fragment_program OSE_BaseOGHighNoShadow_fragment unified
 	default_params
 	{
 		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightCount light_count
 		param_named_auto diffuseColor surface_diffuse_colour
 		param_named_auto fogColour fog_colour
 		param_named_auto fogParams fog_params
@@ -2423,6 +2444,9 @@ fragment_program OSE_BaseOGHighShadow_fragment unified
 	default_params
 	{
 		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightCount light_count
 		param_named_auto diffuseColor surface_diffuse_colour
 		param_named_auto fogColour fog_colour
 		param_named_auto fogParams fog_params
@@ -2440,6 +2464,9 @@ fragment_program OSE_BaseOGHighPSSM_fragment unified
 	default_params
 	{
 		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 8
+		param_named_auto lightPosition light_position_view_space_array 8
+		param_named_auto lightCount light_count
 		param_named_auto diffuseColor surface_diffuse_colour
 		param_named_auto fogColour fog_colour
 		param_named_auto fogParams fog_params

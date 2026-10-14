@@ -86,7 +86,8 @@ try {
     Copy-Item -LiteralPath $fixture -Destination (Join-Path $missionRoot "lcbench.lua") -Force
     Write-Host "[lcwmine] deployed lcbench world + rmwmine.lua fixture"
 
-    $proc = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" `
+    Assert-BZRSafeToLaunch
+    $proc = Start-BZRGameProcess -FilePath $gameExe -ArgumentList "lcbench.bzn" `
         -WorkingDirectory $GameRoot -PassThru
     Write-Host "[lcwmine] launched PID=$($proc.Id)"
     $deadline = (Get-Date).AddSeconds($RunSeconds)

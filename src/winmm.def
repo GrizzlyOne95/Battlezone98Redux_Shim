@@ -291,3 +291,7 @@ EXPORTS
     OpenShimSetUnitDamageMultiplier
     OpenShimClearUnitDamageMultiplier
     OpenShimResetUnitDamageMultipliers
+    OpenShimGetGeometryContactCapabilities
+    OpenShimSetGeometryContact
+    OpenShimClearGeometryContact
+    OpenShimGetGeometryContactStats

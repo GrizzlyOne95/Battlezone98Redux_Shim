@@ -91,7 +91,8 @@ try {
     Write-Host "[lctug] deployed lcbench world + tug fixture"
 
     $t0 = Get-Date
-    Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot | Out-Null
+    Assert-BZRSafeToLaunch
+    Start-BZRGameProcess -FilePath $gameExe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot | Out-Null
     # battlezone98redux.exe re-execs: follow the process by name, not the
     # launch pid.
     $deadline = $t0.AddSeconds($RunSeconds)

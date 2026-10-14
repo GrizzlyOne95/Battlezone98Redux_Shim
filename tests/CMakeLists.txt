@@ -7,10 +7,25 @@ project(BzrNetProtocolTests LANGUAGES CXX)
 #   cmake -S tests -B tests/build && cmake --build tests/build -j && ctest --test-dir tests/build --output-on-failure
 enable_testing()
 
+add_executable(planet_video_policy_tests planet_video_policy_tests.cpp)
+target_include_directories(planet_video_policy_tests PRIVATE ../include)
+target_compile_features(planet_video_policy_tests PRIVATE cxx_std_17)
+if(MSVC)
+    target_compile_options(planet_video_policy_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(planet_video_policy_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME planet_video_policy_tests COMMAND planet_video_policy_tests)
+
 add_executable(p2p_reliable_send_policy_tests p2p_reliable_send_policy_tests.cpp)
 target_include_directories(p2p_reliable_send_policy_tests PRIVATE ../include)
 target_compile_features(p2p_reliable_send_policy_tests PRIVATE cxx_std_14)
 add_test(NAME p2p_reliable_send_policy_tests COMMAND p2p_reliable_send_policy_tests)
+
+add_executable(p2p_early_unreliable_policy_tests p2p_early_unreliable_policy_tests.cpp)
+target_include_directories(p2p_early_unreliable_policy_tests PRIVATE ../include)
+target_compile_features(p2p_early_unreliable_policy_tests PRIVATE cxx_std_14)
+add_test(NAME p2p_early_unreliable_policy_tests COMMAND p2p_early_unreliable_policy_tests)
 
 if(WIN32)
     add_executable(win32_last_error_scope_tests win32_last_error_scope_tests.cpp)
@@ -24,11 +39,27 @@ endif()
 # executable, Windows process APIs, Frida, pefile or capstone.
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
+    add_test(NAME planet_video_catalog_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/planet_video_catalog_tests.py")
+    execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import PIL"
+        RESULT_VARIABLE OPENSHIM_PIL_IMPORT_RESULT OUTPUT_QUIET ERROR_QUIET)
+    if(OPENSHIM_PIL_IMPORT_RESULT EQUAL 0)
+        add_test(NAME terrain_paint_pack_tests
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_paint_pack_tests.py")
+        add_test(NAME terrain_hd_pack_tests
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_hd_pack_tests.py")
+    else()
+        message(STATUS "terrain_hd_pack_tests needs Pillow; install it to qualify texture pack changes")
+    endif()
+    add_test(NAME ui_tiles_consistency_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/ui_tiles_consistency_tests.py")
     add_test(NAME weapon_presentation_live_capture_tests
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../reverse_engineering/test_weapon_presentation_live.py")
 endif()
 find_program(OPENSHIM_NODE_EXECUTABLE NAMES node nodejs)
 if(OPENSHIM_NODE_EXECUTABLE)
+    add_test(NAME terrain_paint_codec_tests
+        COMMAND "${OPENSHIM_NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_paint_codec_tests.js")
     add_test(NAME weapon_presentation_probe_tests
         COMMAND "${OPENSHIM_NODE_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../reverse_engineering/test_weapon_presentation_probe.js")
 endif()
@@ -53,12 +84,28 @@ endfunction()
 openshim_add_test(d3d11_buffer_mirror_policy_tests STD 17 SOURCES
     d3d11_buffer_mirror_policy_tests.cpp
 )
+openshim_add_test(ogre_entity_reload_tests STD 17 SOURCES
+    ogre_entity_reload_tests.cpp
+)
 openshim_add_test(unit_damage_tests STD 20 SOURCES unit_damage_tests.cpp)
+openshim_add_test(terrain_paint_tests STD 17 SOURCES terrain_paint_tests.cpp)
+
+if(WIN32)
+    openshim_add_test(terrain_paint_gpu_tests STD 17 SOURCES terrain_paint_gpu_tests.cpp)
+    target_link_libraries(terrain_paint_gpu_tests PRIVATE d3d11 d3dcompiler)
+    openshim_add_test(terrain_hd_texture_copy_tests STD 17 SOURCES terrain_hd_texture_copy_tests.cpp)
+    target_link_libraries(terrain_hd_texture_copy_tests PRIVATE d3d11)
+    openshim_add_test(terrain_microrelief_gpu_tests STD 17 SOURCES terrain_microrelief_gpu_tests.cpp)
+    target_link_libraries(terrain_microrelief_gpu_tests PRIVATE d3d11 d3dcompiler)
+    target_compile_definitions(terrain_microrelief_gpu_tests PRIVATE
+        TERRAIN_TESS_SHADER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_terrain_tessellation_test.hlsl")
+endif()
 
 openshim_add_test(native_chunk_mesh_tests STD 20 SOURCES
     native_chunk_mesh_tests.cpp
     ../src/patches/native_chunk_mesh.cpp
     ../src/patches/native_chunk_cache.cpp
+    ../src/patches/gib_flesh_texture.cpp
 )
 
 # SkinnedGibs offline check on a real skinned pilot: prints the runtime split
@@ -72,6 +119,11 @@ if(EXISTS "${OPENSHIM_GIB_SAMPLE_DIR}/ispilo.mesh" AND EXISTS "${OPENSHIM_GIB_SA
         COMMAND native_chunk_mesh_tests --gibs "${OPENSHIM_GIB_SAMPLE_DIR}/ispilo.mesh"
                 "${OPENSHIM_GIB_SAMPLE_DIR}/ispcc.skeleton")
 endif()
+
+openshim_add_test(native_chunk_prune_tests STD 20 SOURCES
+    native_chunk_prune_tests.cpp
+    ../src/patches/native_chunk_prune.cpp
+)
 
 openshim_add_test(shell_casing_physics_tests STD 20 SOURCES
     shell_casing_physics_tests.cpp
@@ -247,13 +299,31 @@ openshim_add_test(bool_token_tests STD 20 SOURCES
     bool_token_tests.cpp
 )
 
+openshim_add_test(matchmaking_server_tests STD 17 SOURCES
+    matchmaking_server_tests.cpp
+)
+
 openshim_add_test(map_filter_extras_tests STD 14 SOURCES
     map_filter_extras_tests.cpp
+)
+
+openshim_add_test(lua_formation_fix_tests STD 14 SOURCES
+    lua_formation_fix_tests.cpp
+)
+
+openshim_add_test(lua_handle_sync_tests STD 14 SOURCES
+    lua_handle_sync_tests.cpp
 )
 
 openshim_add_test(memory_access_tests STD 20 SOURCES
     memory_access_tests.cpp
 )
+
+if(WIN32 AND MSVC)
+    openshim_add_test(chunk_bridge_probe_tests STD 20 SOURCES
+        chunk_bridge_probe_tests.cpp
+    )
+endif()
 
 openshim_add_test(stable_id_list_tests STD 20 SOURCES
     stable_id_list_tests.cpp
@@ -322,9 +392,17 @@ openshim_add_test(openshim_update_manifest_tests STD 20 SOURCES
     openshim_update_manifest_tests.cpp
     ../src/patches/openshim_update_manifest.cpp
 )
+openshim_add_test(openshim_asset_sets_tests STD 20 SOURCES
+    openshim_asset_sets_tests.cpp
+    ../src/patches/openshim_asset_sets.cpp
+)
 openshim_add_test(openshim_update_support_tests STD 20 SOURCES
     openshim_update_support_tests.cpp
     ../src/patches/openshim_update_support.cpp
+)
+openshim_add_test(openshim_auto_update_tests STD 20 SOURCES
+    openshim_auto_update_tests.cpp
+    ../src/patches/openshim_auto_update.cpp
 )
 
 # The OPENSHIM_*/BZR_* environment redirect: which openshim.ini key each
@@ -351,8 +429,20 @@ target_compile_features(patch_config_parse_tests PRIVATE cxx_std_20)
 target_compile_definitions(patch_config_parse_tests PRIVATE
     BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json")
 
+openshim_add_test(background_run_policy_tests STD 20 SOURCES
+    background_run_policy_tests.cpp
+)
+
+openshim_add_test(never_activate_policy_tests STD 20 SOURCES
+    never_activate_policy_tests.cpp
+)
+
 openshim_add_test(ai_range_policy_tests STD 20 SOURCES
     ai_range_policy_tests.cpp
+)
+
+openshim_add_test(scavenger_process_guard_tests STD 20 SOURCES
+    scavenger_process_guard_tests.cpp
 )
 
 openshim_add_test(lcbench_safety_policy_tests STD 20 SOURCES
@@ -477,6 +567,10 @@ openshim_add_test(fog_wake_runtime_tests STD 20 SOURCES
 openshim_add_test(odf_compat_tests STD 20 SOURCES
     odf_compat_tests.cpp
     ../src/patches/odf_compat.cpp
+)
+
+openshim_add_test(odf_search_path_tests STD 20 SOURCES
+    odf_search_path_tests.cpp
 )
 
 openshim_add_test(enhanced_resource_bootstrap_tests STD 20 SOURCES
@@ -671,7 +765,28 @@ openshim_add_test(native_hud_layout_tests STD 20 SOURCES
 )
 
 if(WIN32 AND MSVC)
+    openshim_add_test(geometry_contact_lifetime_tests STD 20 SOURCES
+        geometry_contact_lifetime_tests.cpp
+    )
     openshim_add_test(live_reticle_team_tests STD 20 SOURCES
         live_reticle_team_tests.cpp
     )
+endif()
+
+# Host benchmark for runtime chunk/gib generation vs the on-disk cache. Built
+# with the suite but deliberately not a ctest test; run it by hand on a Release
+# build: native_chunk_bench [--csv f] [--tmp dir] <asset dir>...
+add_executable(native_chunk_bench
+    native_chunk_bench.cpp
+    ../src/patches/native_chunk_mesh.cpp
+    ../src/patches/native_chunk_cache.cpp
+    ../src/patches/gib_flesh_texture.cpp
+)
+target_include_directories(native_chunk_bench PRIVATE ../include)
+target_compile_features(native_chunk_bench PRIVATE cxx_std_20)
+target_compile_definitions(native_chunk_bench PRIVATE OPENSHIM_NATIVE_CHUNK_PHASES=1)
+if(MSVC)
+    target_compile_options(native_chunk_bench PRIVATE /W4 /WX)
+else()
+    target_compile_options(native_chunk_bench PRIVATE -Wall -Wextra -Werror)
 endif()

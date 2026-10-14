@@ -185,8 +185,14 @@ void fixedfunc_fragment(
 #endif
     oColor.xyz = albedo;
 
+    // The stock sky programs (sky-sm4.hlsl) never fog, and the sky materials
+    // declare fog_override true none. The sky dome sits at the far plane, so
+    // scene fog (black in space missions) would swallow all of it: the
+    // starfield went black under DX11LegacyMaterialCompat=1.
+#ifndef COMPAT_FAMILY_SKY
     float fogValue = saturate((vDepth - fogParams.y) * fogParams.w);
     oColor.xyz = lerp(oColor.xyz, fogColour.xyz, fogValue);
+#endif
 
     oColor.a = alpha;
 }

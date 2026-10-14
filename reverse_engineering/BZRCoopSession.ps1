@@ -66,6 +66,8 @@ if ($Action -ne 'Launch') {
 . "$PSScriptRoot\BZRCoopDiagnostics.ps1"
 
 $InstancesDir = Join-Path $BZRCoopRoot 'instances'
+# Scope the foreground watchdog to this session's instances (GameRoot is null above).
+$env:BZR_GAME_ROOT = $InstancesDir
 $RunsDir = Join-Path $BZRCoopRoot 'runs'
 $SessionFile = Join-Path $BZRCoopRoot 'session.json'
 # Rebellion's production matchmaking endpoint as seen in stock logs; a local
@@ -167,6 +169,9 @@ function New-BZRCoopInstance {
     if (Test-Path -LiteralPath $shimIni) {
         $ini = [IO.File]::ReadAllText($shimIni)
         $ini = [regex]::Replace($ini, '(?m)^(\s*RawMouseInput\s*=\s*)\S+', '${1}0')
+        # Multiplayer opens the pre-lobby setup screen when the install enables it;
+        # the lobby script clicks straight from the title screen into the lounge.
+        $ini = [regex]::Replace($ini, '(?m)^(\s*PreLobby\s*=\s*)\S+', '${1}0')
         [IO.File]::WriteAllText($shimIni, $ini)
     }
     Copy-Item -LiteralPath (Join-Path $SourceRoot 'scripts') -Destination $dir -Recurse
@@ -314,7 +319,8 @@ function Start-BZRCoopClients {
         }
         if ($i -gt 0) { Start-Sleep -Seconds $LaunchDelaySeconds }
         if ($MaxNetworkLogging) { Set-BZRCoopMaxNetworkLogging $inst }
-        $p = Start-Process -FilePath (Join-Path $inst 'battlezone98redux.exe') -WorkingDirectory $inst `
+        if ($i -eq 0) { Assert-BZRSafeToLaunch } else { Assert-BZRSafeToLaunch -AllowRunning }
+        $p = Start-BZRGameProcess -FilePath (Join-Path $inst 'battlezone98redux.exe') -WorkingDirectory $inst `
                 -ArgumentList $clientGameArgs -PassThru
         $session.clients += [ordered]@{ index = $i; pid = $p.Id; dir = $inst; launchedAtMs = $clock.ElapsedMilliseconds }
         Write-SessionFile $session

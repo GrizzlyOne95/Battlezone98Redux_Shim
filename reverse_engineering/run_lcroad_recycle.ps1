@@ -88,7 +88,8 @@ building = "$BuildingOdf"
 "@)
 
             $started = Get-Date
-            $process = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" `
+            Assert-BZRSafeToLaunch
+            $process = Start-BZRGameProcess -FilePath $gameExe -ArgumentList "lcbench.bzn" `
                 -WorkingDirectory $GameRoot -PassThru
             $exited = $process.WaitForExit($RunSeconds * 1000)
             if (-not $exited) { Stop-BZRGame -Id $process.Id }

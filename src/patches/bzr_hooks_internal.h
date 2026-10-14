@@ -82,6 +82,7 @@ namespace BZROpenShim
     extern volatile long g_AipResolveTraceBudget;
     extern volatile long g_NeutralAttackOrderLogBudget;
     extern std::unordered_set<uintptr_t> g_PilotCarrierNullLoggedObjects;
+    extern bool g_ScavengerNetProcessGuardEnabled;
 
     using FnCommandHandler = void(__cdecl*)(uint16_t id, const char* cmd);
     using FnHelpLog = void(__cdecl*)(void* obj, const char* text);
@@ -193,7 +194,10 @@ namespace BZROpenShim
                                             double maxX,
                                             double maxZ,
                                             void* outResults);
-    using FnRangeResultsGetNext = uint32_t(__thiscall*)(void* results, uint32_t** outHandlePtr);
+    // Returns bool in AL only: the exhausted path is `xor al, al`, so the upper
+    // EAX bytes are stale. Declared uint32_t, the loop never saw the end and
+    // walked off the grid (crash in RangeNext once a craft entered the box).
+    using FnRangeResultsGetNext = bool(__thiscall*)(void* results, uint32_t** outHandlePtr);
     extern FnShieldTowerSimulate g_BzrFn_BuildingSimulate;
     extern FnRangeSearch g_BzrFn_CollisionRangeSearch;
     extern FnGameObjectRelation g_BzrFn_GameObjectEnemyP;
@@ -810,6 +814,9 @@ namespace BZROpenShim
         void InstallRawMouseInputProcessHookIfPossible();
         bool ResolveRawMouseInputPreference(const char*& outSource);
 
+        // --- Background run test toggle (background_run.cpp) -------------------
+        void InstallBackgroundRunIfRequested();
+
         // --- Shadow far distance correction (shadow_far_distance_hook.cpp) -----
 
         // --- Engine flames (engine_flames.cpp) ---------------------------------
@@ -1148,6 +1155,7 @@ namespace BZROpenShim
         inline constexpr int kBzrRunStateUnknown = -1;
         void DeactivateAllChunkProxySceneResources(const wchar_t* reason);
         void InstallSceneTeardownForgetHooksIfPossible();
+        void InstallEntityReloadLifetimeHookIfPossible();
         bool TryReadBzrRunState(int& value);
         void InstallMissionTransitionSeamIfPossible();
         void PinDirect3DModulesForShutdown();
@@ -1199,6 +1207,8 @@ namespace BZROpenShim
         extern bool g_MagnetMineSimulateHookInstalled;
         extern TeamFilterCache g_MagnetMineTeamFilterCache;
         extern bool g_MagnetZeroRangeGuardEnabled;
+        extern bool g_UnfocusedMouseReleaseEnabled;
+        void InstallUnfocusedMouseReleaseIfPossible();
         extern volatile long g_MagnetZeroRangeLogBudget;
         extern bool g_ProximityMineSimulateHookInstalled;
         extern TeamFilterCache g_ProximityMineTeamFilterCache;
@@ -1553,6 +1563,9 @@ namespace BZROpenShim
         std::filesystem::path GetNativeChunkCacheDirectory();
         bool PrepareNativeChunkPayloads(void* entity, char* sourceName = nullptr, size_t capacity = 0);
         void ResetNativeChunkPayloads();
+        // Once per process, before WarmNativeChunkCaches: removes obsolete cache
+        // versions and expired/over-cap model folders ([General] ChunkCacheMax*).
+        void PruneNativeChunkCache();
 
         // --- SkinnedGibs (skinned_gibs.cpp) --------------------------------
         // Person deaths become rigid per-limb gibs split at runtime from the
@@ -1984,6 +1997,9 @@ namespace BZROpenShim
         bool ReadBzrNetNickname(char* out, size_t outSize);
         BzrNetNicknameResult ApplyBzrNetNicknameAuthoritative(
             const char* requestedValue, const char* source);
+        // Multiplayer pre-lobby apply: persists like the authoritative path,
+        // sends no live keys, recycles an authorised control connection.
+        BzrNetNicknameResult ApplyBzrNetNicknameForPreLobby(const char* nickname);
         const char* BzrNetNicknameResultName(BzrNetNicknameResult result);
         bool IsAcceptedBzrNetNicknameResult(BzrNetNicknameResult result);
 
@@ -2011,6 +2027,8 @@ namespace BZROpenShim
         void RevertPilotFlashlightToBaseline();
         void ForgetPilotFlashlight(const wchar_t* reason);
         void PilotFlashlightNotifyMissionRunStateChanged(bool enteringSimulation);
+        // Marks every cached light list dirty when the engine replaces the sun.
+        void WatchSunLightReplacement();
         bool IsPilotOnFoot(void* player);
     }
 }

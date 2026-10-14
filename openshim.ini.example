@@ -100,6 +100,13 @@ SettingsUi = 1
 ;                     BZR_DISABLE_CHUNK_EXPERIMENTS
 ChunkMeshes = 1
 
+; Generated chunk mesh cache (openshim/cache/chunks) pruning, once at startup.
+; Obsolete cache versions are always deleted. ChunkCacheMaxMB is the total size cap
+; (least recently used model folders go first; 0 = no cap). Default: 256.
+ChunkCacheMaxMB = 256
+; Days since a model folder was last used before it is deleted (0 = never). Default: 30.
+ChunkCacheMaxAgeDays = 30
+
 ; Skinned person gibs: when a pilot, soldier or zombie (any Person) is blown
 ; apart, its skinned body splits into rigid limb pieces (head, torso, arms,
 ; hands, legs, weapon...) posed where each limb was on the frame of death,
@@ -125,14 +132,15 @@ SkinnedGibsForce = 1.0
 ; Shell casings: when a cannon-like weapon fires, a small brass casing is
 ; ejected from the weapon's breech, tumbles, bounces off the terrain, the
 ; firing hull and nearby objects, then lies on the ground and sinks away.
-; Accepted: boolean. Default: ON. Needs no asset pack: the casing mesh and
+; Accepted: boolean. Default: OFF, including when this key is absent.
+; Needs no asset pack: the casing mesh and
 ; its openshim_casing_brass / openshim_casing_rim materials are generated in
 ; the chunk cache root (a chunk payload directory may ship its own
 ; openshim_casing.material, and a <weapon>_casing.mesh resource, for example
 ; gminigun_casing.mesh, replaces the casing for that weapon). Visual only:
 ; the shot itself is untouched, and 0 leaves the fire calls stock.
 ; Legacy env alias: OPENSHIM_DISABLE_SHELL_CASINGS
-ShellCasings = 1
+ShellCasings = 0
 ; Most casings alive at once (4..512). When full, the oldest casing already
 ; at rest is recycled first, then the oldest. Default: 48.
 ShellCasingsMax = 48
@@ -438,6 +446,42 @@ ConstructorRecycleStaleTarget = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX
 MagnetZeroRangeGuard = 1
 
+; Skip the strategic-AI scrap-position query for a scavenger whose AI process
+; is not a ScavengerProcess. A scavenger owned by a remote peer holds a
+; NetProcess, and stock AI_Team_Compute_Other calls ScavengerProcess::
+; GetScrapPosition on it anyway, which writes -1.0f past the end of that small
+; allocation and corrupts the next heap header (a 0xC0000374 crash minutes
+; later on the host when a team runs an AIP and a guest owns scavengers).
+; Genuine ScavengerProcess instances take the stock path unchanged. Active in
+; network games; GOG Redux 2.2.301 only (stands down on any other build).
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_SCAVENGER_NETPROCESS_GUARD
+ScavengerNetProcessGuard = 1
+
+; Repair the stock Lua Formation(unit, leader, priority) binding. Stock registers a
+; copy of the Recycle binding: it reads argument 2 as an integer, so passing the
+; leader handle raises "bad argument #2 to 'Formation' (number expected, got
+; userdata)", and Formation(unit) forms up on handle 1 with the priority ignored.
+; The repaired binding reads argument 2 as a handle and argument 3 as the priority
+; (default 1). An absent, nil or numeric argument 2 keeps the stock reading, so a
+; script that ran before still runs. GOG Redux 2.2.301 only; stands down on any
+; other build or if the registration row does not match.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_LUA_FORMATION_FIX
+LuaFormationBinding = 1
+
+; Stop Redux pinning the OS cursor while it is minimized or in the
+; background. In mouse-look the stock look reader re-clips the cursor and
+; warps it to the window centre every frame, guarded only by a per-thread
+; GetActiveWindow test that a minimized or backgrounded Redux still passes.
+; While another process owns the foreground, or Redux is minimized,
+; SetCursorPos is skipped and any ClipCursor rectangle becomes a release.
+; Focus returning restores stock behaviour on the next frame.
+; Client-side only; not gated in network games.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE
+UnfocusedMouseRelease = 1
+
 ; Extend the script-facing CanBuild / IsBusy producer predicates to base
 ; producers, so mission Lua sees the same answer for a base producer that it
 ; already gets for the derived ones.
@@ -628,6 +672,13 @@ D3D11DeviceLossRecovery = 1
 
 
 [Terrain]
+; Terrain Micro Detail in the OpenShim settings page. Off by default.
+; Experimental visual-only ground relief, using factor-4 DX11 tessellation and
+; a 0.25-world-unit maximum offset. Collision, placement and gameplay heights
+; are unchanged. Requires DX11 and a game restart; increases GPU cost.
+; Unsupported renderer/build/terrain contracts retain native terrain.
+TerrainMicroRelief = 0
+
 
 ; NOTE: terrain booleans below are integer flags; use 0/1.
 
@@ -768,6 +819,8 @@ TerrainSemanticFrameCaptureMinCoverage = 0.005
 ; Direct3D11 only: under any other active render system the whole terrain
 ; proxy path stays off and stock terrain is drawn.
 ; resources fail soft to the stock atlas.
+; Native full-resolution diffuse tile replacement (DX11). Requires a texture
+; pack manifest; existing tile placement, orientation and gameplay stay intact.
 TerrainHdEnabled = 0
 
 ; HD tile manifest path. Accepted: non-empty path string.
@@ -1427,6 +1480,54 @@ ReliableSendBacklogFix = 1
 ReliableFirstRetryMs = 1000
 ReliableRetryIntervalMs = 2500
 
+; BZRNet P2P early unreliable receive. Stock Redux accepts a packet only when
+; its stamp is the next reliable stamp it expects, and unreliable updates carry
+; the sender's next reliable stamp. So after one lost reliable fragment every
+; position update on that link is discarded until the retransmit arrives: a
+; round trip after the receiver's NAK, or up to the retry timers above when the
+; NAK is lost as well. On, an unreliable single-fragment update stamped past
+; the missing fragment is delivered instead; the NAK is still sent, reliable
+; messages stay strictly ordered, and stale updates are still discarded.
+; Receiver-side only: the wire format and the sender are unchanged, so it is
+; safe with stock peers. Updates may now be applied before an earlier reliable
+; message that is still being retransmitted. Logs [P2PRECV] totals.
+; Accepted: boolean. Default: ON (live-qualified 2026-10-10: loss, 256 kbit/s,
+; WAN). Restart required.
+; Kill switch: OPENSHIM_DISABLE_EARLY_UNRELIABLE_ACCEPT (or BZR_ prefix).
+; Sites: GOG 2.2.301 0x0075DA8D and 0x0075DB96; a signature mismatch keeps stock.
+EarlyUnreliableAccept = 1
+
+; BZRNet P2P early NAK receive. When a receiver drops an out-of-order packet it
+; sends a NAK (kind 6) that makes the sender retransmit at once, but the NAK
+; carries the requester's next reliable stamp and stock discards it silently
+; unless every reliable message the requester sent has already arrived. With
+; reliable traffic in flight both ways that is rarely true (91% of NAKs were
+; discarded in a 3%-loss battle), so lost reliable messages wait for the
+; ReliableFirstRetryMs / ReliableRetryIntervalMs timers instead. On, a NAK
+; stamped ahead is accepted and triggers the immediate resend it asks for.
+; Each resend pass is still capped at 5000 bytes / peer count. Receiver-side
+; only, same wire format, safe with stock peers. Logs [P2PRECV] totals.
+; Accepted: boolean. Default: OFF (3x lower reliable p95 on low-RTT lossy links,
+; small gain for about +40% resend bytes at WAN round trips). Restart required.
+; Kill switch: OPENSHIM_DISABLE_EARLY_NAK_ACCEPT (or BZR_ prefix).
+; Site: GOG 2.2.301 0x0075DA88; a signature mismatch keeps stock.
+EarlyNakAccept = 0
+
+; Repeat NAKs for the same missing message are ignored for this long, so one
+; loss triggers one immediate resend instead of one per dropped follower
+; (each resend pass re-sends the whole unacknowledged queue). A repeat after
+; the holdoff is honoured (the retransmission itself was lost).
+; Accepted: decimal 50-10000 ms. Default: 300. Used only with EarlyNakAccept.
+EarlyNakHoldoffMs = 300
+
+; A NAK for a missing message triggers a resend only if the peer is still
+; asking for that message this long after its first NAK. A datagram that was
+; merely late or reordered arrives inside the window and causes no resend
+; pass. 0 resends on the first NAK.
+; Accepted: decimal 0-1000 ms. Default: 0 (40 raised reliable p99 about 2x in
+; every impaired profile). Used only with EarlyNakAccept.
+EarlyNakReorderMs = 0
+
 ; Granular netcode tuning -- the send-rate governor, bandwidth floor/ceiling,
 ; ramp rates and auto-kick envelope -- lives in net.ini under [OpenShimSocket],
 ; because it is applied by the socket layer. See net.ini for what each value
@@ -1527,6 +1628,37 @@ LobbyReadouts = 1
 ;                     BZR_DISABLE_LOBBY_BAN_BUTTON, BZR_ENABLE_LOBBY_BAN_BUTTON
 LobbyBanButton = 1
 
+; Multiplayer pre-lobby: clicking Multiplayer on the title screen opens a setup
+; screen (nickname, flag, matchmaking server) before the lobby. Continue applies a
+; changed nickname -- reconnecting to the server so it takes effect -- and then
+; opens the lobby exactly as stock does. While this is ON the nickname and flag
+; pickers appear only on the setup screen and are not built in the lobby (the
+; net-route readout stays there; /nickname works either way).
+; Accepted: boolean. Default: OFF. Read when Multiplayer is clicked.
+; The Server row picks Rebellion or a Custom host (see Server below); it is
+; read-only, showing "<address> (test redirect)", when [OpenShimSocket]
+; MatchmakingRedirectAddress is set.
+PreLobby = 0
+
+; Matchmaking server: Rebellion's official one or a community/custom one.
+; Accepted: Rebellion, Custom. Blank/absent = no override: stock behaviour,
+; i.e. whatever the /bzrserver= launch switch gives, else Rebellion's server.
+; The multiplayer setup screen (PreLobby) edits this and CustomServer; Continue
+; saves a changed choice and reconnects to it. Read at startup too, so the first
+; connection and invites use the saved server. Needs NetImprovements on.
+; Precedence: net.ini MatchmakingRedirectAddress (test redirect) > this >
+; /bzrserver= > Rebellion.
+; SECURITY: a custom server receives your platform (Steam/GOG) sign-in ticket
+; in the BZRNet Authorization, exactly as Rebellion's does. Only choose a
+; server you trust.
+; Server =
+
+; Host name or IP of the custom server, used when Server = Custom.
+; Accepted: a bare host or IPv4 address, optionally with a ":1337" suffix. No
+; scheme (ws://), path or spaces. Only port 1337 is supported; any other port
+; is refused. Blank = none (Server = Custom then has no effect).
+; CustomServer =
+
 ; Remember muted players across sessions.
 ; Accepted: boolean. Default: ON. No restart required.
 ; ON  = a mute is written to mutes.cfg beside the shim, keyed by the same
@@ -1542,6 +1674,30 @@ LobbyBanButton = 1
 ;                     OPENSHIM_ENABLE_PERSISTENT_PLAYER_MUTE,
 ;                     BZR_DISABLE_PERSISTENT_PLAYER_MUTE, BZR_ENABLE_PERSISTENT_PLAYER_MUTE
 PersistentPlayerMute = 1
+
+; Lua Send/Receive and map-authored objects.
+; Redux packs a Lua Handle into the network message as the object's network id
+; (DistributedObject::dwLocalID), which only objects created at run time by a
+; peer ever get. Objects authored into the map (.bzn) -- geysers, beacons,
+; scenery, anything a script reaches with GetHandle("label") -- have id 0, so a
+; Send(..., geyser) arrives on every other player as nil.
+;
+; ON  = when a handle has no network id but its object has a label that is
+;       unique among live objects, send the reserved id
+;       0x80000000 | fnv1a(label) & 0x7FFFFFFF in the same four bytes. A
+;       receiver running OpenShim maps it back to its own copy of the object
+;       with that label. Packet size is unchanged. Objects that already have a
+;       network id are sent exactly as before, and the stock lookup always
+;       wins on receive. Ambiguous labels (two live objects with one label, or
+;       two labels hashing alike) are not sent and arrive as nil.
+; OFF = stock behaviour.
+; A stock (non-OpenShim) receiver cannot find a reserved id and pushes nil,
+; the same result id 0 gave it, so a mixed lobby is no worse off.
+; Only the Lua handle packer and unpacker are touched; GetID, object creation
+; and every other consumer of network ids are stock.
+; Accepted: boolean. Default: ON. Restart required after changing.
+; Legacy env alias: OPENSHIM_LUA_MAPOBJECT_HANDLES
+LuaMapObjectHandles = 1
 
 ; Native BZRNet lobby-integration patch gate.
 ; Canonical:
@@ -1606,6 +1762,10 @@ StockFactionSet = as
 AllowNeutralAttackOrders = 0
 
 
+[Updater]
+; Stage a newer OpenShim from the Steam Workshop when the main menu first appears (Steam builds, never in multiplayer); it installs when you quit. 0 = manual "Check for Updates" only. Default: 1.
+AutoStage = 1
+
 [Career]
 
 ; Career statistics tracking. Records kills, deaths and missions played to
@@ -1631,6 +1791,9 @@ StatsTracking = 1
 
 
 [SinglePlayer]
+; Experimental legacy-GEO vehicle contact for all supported craft. GOG only.
+; Stock fallback for unsupported/changed models. Restart required. Default OFF.
+VehicleGeometryContact = 0
 
 ; Every setting in this section is hard-disabled in network games regardless of
 ; its configured value. The gate is the local player's net id: non-zero means a
@@ -2036,6 +2199,23 @@ AttackRevealPerceivedTeam = 1
 ; Legacy env aliases to force it off: OPENSHIM_DISABLE_SATELLITE_VISIBILITY_FIX,
 ;                                     BZR_DISABLE_SATELLITE_VISIBILITY_FIX
 SatelliteVisibilityFix = 1
+
+[Testing]
+; Developer and automated-test aids. Off by default; not shown in the Settings UI.
+
+; RunInBackground: keep a single-player game simulating while its window is
+; unfocused. Normally Redux pauses the simulation, and a game launched without
+; focus sits on its load screen. When ON, OpenShim swallows WM_ACTIVATEAPP(FALSE)
+; (so nothing pauses or minimizes), raises the engine's app-active flag if it
+; started at 0, and turns ClipCursor / SetCursorPos / SetCursor into no-ops
+; (ClipCursor releases) whenever the game window is not the foreground window,
+; so an unfocused game never traps or warps your mouse.
+; Single-player and windowed only: inert in network games and in fullscreen.
+; Verifies GOG 2.2.301 code bytes at load and stays off on any mismatch
+; ([BGRUN] lines in the shim log). Restart required.
+; Accepted: boolean. Default: OFF.
+; Env override: OPENSHIM_RUN_IN_BACKGROUND=1
+RunInBackground = 0
 
 [Experimental]
 

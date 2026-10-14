@@ -328,6 +328,23 @@ float luminance_legacy(float3 c)
     return dot(c, float3(0.299, 0.587, 0.114));
 }
 
+#if defined(OG_RETRO_MODE)
+// Retro reproduces Battlezone 1.5's D3D terrain lighting, read from the 1.5.2
+// decompile (ComputeNormal, BuildShadows, PrecomputeIllumination): a grey luma
+// of max(N.L, 0) with cast shadows set to zero, then floored at inShadow
+// (56/255). There is no ambient term, no detail texture and no colour. 1.5's
+// light totals 1.0, which Redux splits into ambient + sun from the same TRN
+// values, so that sum scales N.L and stock maps match exactly. The floor stays
+// absolute, as it was in 1.5, so a darkened scene bottoms out at 56/255.
+static const float OG15_LUMA_FLOOR = 56.0 / 255.0;
+
+float3 og15_terrain_light(float3 ambient, float3 sun, float ndl, float castShadow)
+{
+    float total = luminance_legacy(ambient) + luminance_legacy(sun);
+    return saturate(max(total * max(ndl, 0.0) * castShadow, OG15_LUMA_FLOOR)).xxx;
+}
+#endif
+
 // -----------------------------------------------------------------------------
 // Detail normals
 // -----------------------------------------------------------------------------
@@ -1059,9 +1076,6 @@ void terrain_vertex(
     float3 pixelToLight = safe_normalize(lightPosition[0].xyz - (vViewPosition * lightPosition[0].w));
 
     float attenuation = max(dot(vertexNormal, pixelToLight.xyz), 0.0);
-#if defined(OG_RETRO_MODE)
-    attenuation = saturate(attenuation * 0.55 + 0.20);
-#endif
     vLightResult = lightDiffuse[0].xyz * attenuation;
 
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
@@ -1092,6 +1106,18 @@ void terrain_fragment(
     uniform SamplerState emissiveSam : register(s4),
 #endif
 #if defined(SHADOWRECEIVER)
+#if defined(OG_RETRO_MODE)
+    // The og- terrain passes carry only a diffuse map, so their shadow maps sit
+    // in texture units 1-3 (as inverse_texture_size 1-3 and the GLSL units say).
+    uniform Texture2D shadowMap1 : register(t1),
+    uniform SamplerState shadowSam1 : register(s1),
+#if defined(PSSM_ENABLED)
+    uniform Texture2D shadowMap2 : register(t2),
+    uniform SamplerState shadowSam2 : register(s2),
+    uniform Texture2D shadowMap3 : register(t3),
+    uniform SamplerState shadowSam3 : register(s3),
+#endif
+#else
     uniform Texture2D shadowMap1 : register(t5),
 #if OSE_ENHANCED_PSSM_V2_ACTIVE
     uniform SamplerComparisonState shadowSam1 : register(s5),
@@ -1110,6 +1136,7 @@ void terrain_fragment(
     uniform SamplerComparisonState shadowSam3 : register(s7),
 #else
     uniform SamplerState shadowSam3 : register(s7),
+#endif
 #endif
 #endif
 
@@ -1148,6 +1175,11 @@ void terrain_fragment(
 #endif
 
     uniform float4 sceneAmbient,
+
+#if defined(VERTEX_LIGHTING) && defined(OG_RETRO_MODE)
+    // Recovers N.L from the vertex result; bound by the OG Lowest programs.
+    uniform float4 lightDiffuse[MAX_LIGHTS],
+#endif
 
 #if !defined(VERTEX_LIGHTING)
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
@@ -1268,28 +1300,40 @@ void terrain_fragment(
 #else
     shadow = PCF_Filter(shadowMap1, shadowSam1, vLightSpacePos1, invShadowMapSize1.xy, shadowBias);
 #endif
-#if defined(ENHANCED_MODE)
+#if defined(OG_RETRO_MODE)
+    // 1.5's baked terrain shadows are hard: full sun or none. The raw filtered
+    // value is kept; og15_terrain_light applies the floor.
+#elif defined(ENHANCED_MODE)
     shadow = shadow * 0.78 + 0.22;
 #else
     shadow = shadow * 0.7 + 0.3;
 #endif
+#endif
+
 #if defined(OG_RETRO_MODE)
-    shadow = shadow * 0.5 + 0.5;
+#if defined(SHADOWRECEIVER)
+    float og15CastShadow = shadow;
+#else
+    float og15CastShadow = 1.0;
 #endif
 #endif
 
 #if defined(VERTEX_LIGHTING)
 
-#if defined(RETRO_UNLIT_MODE)
+#if defined(OG_RETRO_MODE)
+    // The shared vertex program wrote sun * max(N.L, 0); divide the sun back out.
+    float og15Sun = luminance_legacy(lightDiffuse[0].xyz);
+    float og15Ndl = (og15Sun > 1e-4) ? luminance_legacy(vLightResult) / og15Sun : 0.0;
+    float3 lightResult = og15_terrain_light(sceneAmbient.xyz, lightDiffuse[0].xyz, og15Ndl, og15CastShadow);
+#if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
+    float3 specularResult = float3(0.0, 0.0, 0.0);
+#endif
+#elif defined(RETRO_UNLIT_MODE)
     float3 lightResult = vLightResult;
 #if defined(SHADOWRECEIVER)
     lightResult *= shadow;
 #endif
-#if defined(OG_RETRO_MODE)
-    lightResult += max(sceneAmbient.xyz * 1.10, float3(0.22, 0.22, 0.22));
-#else
     lightResult += sceneAmbient.xyz;
-#endif
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float3 specularResult = float3(0.0, 0.0, 0.0);
 #endif
@@ -1298,11 +1342,7 @@ void terrain_fragment(
 #if defined(SHADOWRECEIVER)
     lightResult *= shadow;
 #endif
-#if defined(OG_RETRO_MODE)
-    lightResult += max(sceneAmbient.xyz * 1.10, float3(0.22, 0.22, 0.22));
-#else
     lightResult += sceneAmbient.xyz;
-#endif
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float3 specularResult = vSpecularResult;
 #endif
@@ -1453,7 +1493,15 @@ void terrain_fragment(
 #endif
 
 #if defined(OG_RETRO_MODE)
-    float3 lightResult = max(sceneAmbient.xyz * 1.10, float3(0.22, 0.22, 0.22));
+    float og15Ndl = 0.0;
+    float3 og15SunColour = float3(0.0, 0.0, 0.0);
+    if (lightCount > 0.0)
+    {
+        float3 toSun = safe_normalize(lightPosition[0].xyz - (viewPos * lightPosition[0].w));
+        og15Ndl = dot(safe_normalize(vViewNormal), toSun);
+        og15SunColour = lightDiffuse[0].xyz;
+    }
+    float3 lightResult = og15_terrain_light(sceneAmbient.xyz, og15SunColour, og15Ndl, og15CastShadow);
 #elif defined(IBL_ENABLED)
     float3 lightResult = sceneAmbient.xyz * OSE_IBL_LEGACY_AMBIENT_RETAIN;
 #else
@@ -1463,7 +1511,9 @@ void terrain_fragment(
     float3 specularResult = float3(0.0, 0.0, 0.0);
 #endif
 
-#if defined(RETRO_UNLIT_MODE)
+#if defined(OG_RETRO_MODE)
+    // Fully lit above.
+#elif defined(RETRO_UNLIT_MODE)
     if (lightCount > 0.0)
     {
         const int i = 0;
@@ -1478,9 +1528,6 @@ void terrain_fragment(
 #endif
 
         float diffuseTerm = max(dot(viewNormal, pixelToLight), 0.0);
-#if defined(OG_RETRO_MODE)
-        diffuseTerm = saturate(diffuseTerm * 0.55 + 0.20);
-#endif
         lightResult.xyz += lightDiffuse[i].xyz * (attenuation * diffuseTerm);
     }
 #else
@@ -1547,9 +1594,6 @@ void terrain_fragment(
                          * (OSE_PBR_DIFFUSE_COMPENSATION / OSE_PI);
 #else
         float diffuseTerm = max(dot(viewNormal, pixelToLight), 0.0);
-#if defined(OG_RETRO_MODE)
-        diffuseTerm = saturate(diffuseTerm * 0.55 + 0.20);
-#endif
         attenuation *= diffuseTerm;
         lightResult.xyz += lightDiffuse[i].xyz * attenuation;
 
@@ -1692,7 +1736,8 @@ void terrain_fragment(
     float3 detailColor = lerp(detailTex, fullbrightDetail, detailDistance);
 #endif
 #if defined(OG_RETRO_MODE)
-    float3 detailMultiplier = lerp(float3(1.0, 1.0, 1.0), detailColor, diffuseTex.a * 0.35);
+    // 1.5 had no terrain detail texture.
+    float3 detailMultiplier = float3(1.0, 1.0, 1.0);
 #else
     float3 detailMultiplier = lerp(float3(1.0, 1.0, 1.0), detailColor, diffuseTex.a);
 #endif
@@ -1773,7 +1818,13 @@ void terrain_fragment(
     oColor.rgb = linear_to_srgb(oColor.rgb);
 #endif
 
+#if defined(OG_RETRO_MODE)
+    // 1.5 drew each terrain tile opaque, so Retro ignores Redux's faded patch
+    // edges (as TerrainTileBlend = 0 does) and leaves the tiles unblended.
+    oColor.a = 1.0;
+#else
     oColor.a = vColor.a;
+#endif
 
 #if defined(LOGDEPTH_ENABLE)
     const float C = 0.1;

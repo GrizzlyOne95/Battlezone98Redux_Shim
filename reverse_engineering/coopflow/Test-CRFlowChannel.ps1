@@ -3,7 +3,7 @@
 # then two FakeClient.lua processes run the real probe while the real
 # Invoke-CRFlow / Wait-CRFlow / event reader drive them through files.
 # Run: powershell -ExecutionPolicy Bypass -File reverse_engineering\coopflow\Test-CRFlowChannel.ps1
-param([string]$MissionScript = (Join-Path $env:USERPROFILE 'Documents\GIT\CR-release\Scripts\misn03.lua'),
+param([string]$MissionScript = (Join-Path $env:USERPROFILE 'Documents\GIT\Campaign-Reimagined\Scripts\misn03.lua'),
       [string]$Lua = 'lua', [string]$Luac = 'luac')
 
 $ErrorActionPreference = 'Stop'

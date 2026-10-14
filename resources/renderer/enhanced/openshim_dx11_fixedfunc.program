@@ -324,12 +324,8 @@ fragment_program OSE_Compat_Sky_fragment hlsl
     target ps_4_0
     entry_point fixedfunc_fragment
 
+    // No fog: the stock sky programs never fog (sky dome sits at the far plane).
     preprocessor_defines COMPAT_FAMILY_SKY
-    default_params
-    {
-        param_named_auto fogColour fog_colour
-        param_named_auto fogParams fog_params
-    }
 }
 
 vertex_program OSE_Compat_Base_vertex hlsl

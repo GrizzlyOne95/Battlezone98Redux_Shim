@@ -1570,6 +1570,8 @@ namespace BZROpenShim
             }
         }
 
+        #include "terrain_tessellation_statistics.inl"
+
         void STDMETHODCALLTYPE HookDrawIndexed(
             ID3D11DeviceContext* self,
             UINT indexCount,
@@ -1600,6 +1602,11 @@ namespace BZROpenShim
             D3D11_PRIMITIVE_TOPOLOGY topology)
         {
             g_RealIASetPrimitiveTopology(self, topology);
+            if (g_TessStatisticsEnabled)
+            {
+                try { ObserveTerrainTessTopology(self); }
+                catch (...) { NoteObservationThrew("TerrainTessellationStatistics"); }
+            }
             if (topology == D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST)
             {
                 // Ogre has already bound the render operation's vertex and
@@ -2222,7 +2229,14 @@ namespace BZROpenShim
     void InitializeDx11ColorSpaceDiagnostic()
     {
         const bool colorSpaceRequested = DiagnosticRequested();
-        const bool terrainProbeRequested = TerrainProbeRequested();
+        char tessTest[16] = {};
+        const DWORD tessLength = GetEnvironmentVariableA(
+            "OPENSHIM_TERRAIN_TESSELLATION_TEST", tessTest, sizeof(tessTest));
+        g_TessStatisticsEnabled = tessLength > 0 && tessLength < sizeof(tessTest) &&
+            BoolToken::IsTruthy(tessTest, tessLength);
+        const bool terrainProbeRequested = TerrainProbeRequested() || g_TessStatisticsEnabled;
+        if (g_TessStatisticsEnabled)
+            LogShimA(LogLevel::Info, "terrain-tess", "[TERRAIN-TESS] GPU statistics observer requested");
         if (!colorSpaceRequested && !terrainProbeRequested)
             return;
         if (g_DiscoveryThread)
@@ -2261,6 +2275,7 @@ namespace BZROpenShim
     void ShutdownDx11ColorSpaceDiagnostic()
     {
         g_ShutdownRequested.store(true, std::memory_order_release);
+        ReleaseTerrainTessQueries();
 
         if (g_DiscoveryThread)
         {

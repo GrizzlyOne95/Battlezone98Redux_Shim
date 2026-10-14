@@ -71,6 +71,7 @@ it are the layout contract with each screen's code.
 | File | Used by |
 |---|---|
 | `osh_career_center.png` | Career screen |
+| `osh_prelobby_center.png` | Multiplayer pre-lobby screen |
 | `osh_options_center.png` | stock Options screen, five-slot column |
 | `osh_hub_center.png` | OpenShim Options hub |
 | `osh_category_center.png` | every OpenShim Options category screen |

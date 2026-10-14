@@ -113,6 +113,38 @@ vec3 safe_normalize(in vec3 v)
 	return (lenSq > 1e-8) ? v * inversesqrt(lenSq) : vec3(0.0, 0.0, 0.0);
 }
 
+#if defined(OG_RETRO_MODE)
+// Retro reproduces Battlezone 1.5's D3D object lighting, read from the 1.5.2
+// decompile (Apply_Simple_Light_Model): a grey per-vertex luma of
+// CarAmbient + (1 - CarAmbient) * N.L, where N.L at or below 0.01 counts as
+// unlit and CarAmbient never drops below inShadow (56/255). The light is white
+// and nothing else is added: no specular, normal or emissive maps and no cast
+// shadows. Redux feeds the same TRN values to Ogre (ambient = Sun_Ambient,
+// default CarAmbient; sun = Sun_Diffuse, default 1 - CarAmbient), so the scene
+// colours are reduced to their luminance here.
+const float OG15_LUMA_FLOOR = 56.0 / 255.0;
+const float OG15_NDOTL_CUTOFF = 0.01;
+
+float og15_luma(in vec3 c)
+{
+	return dot(c, vec3(0.299, 0.587, 0.114));
+}
+
+// 1.5 interpolated a per-vertex luma (Gouraud); a renormalised interpolated
+// normal matches it closely on BZ's low-poly models.
+float og15_ndotl(in vec3 interpolatedNormal, in vec3 toLight)
+{
+	float ndl = dot(interpolatedNormal, toLight);
+	return (ndl > OG15_NDOTL_CUTOFF) ? ndl : 0.0;
+}
+
+vec3 og15_object_light(in vec3 ambient, in float sunTerm)
+{
+	float luma = max(og15_luma(ambient), OG15_LUMA_FLOOR) + sunTerm;
+	return vec3(clamp(luma, 0.0, 1.0));
+}
+#endif
+
 #if defined(ENHANCED_MODE)
 vec3 sharpen_normal_map(in vec3 normalTex)
 {
@@ -206,30 +238,32 @@ void main()
 		shadow = PCF_Filter(shadowMap3, vLightSpacePos3, invShadowMapSize3.xy);
 	}
 #endif
-#if defined(ENHANCED_MODE)
+#if defined(OG_RETRO_MODE)
+	// 1.5 never shadowed objects per pixel.
+	shadow = 1.0;
+#elif defined(ENHANCED_MODE)
 	// deeper shadow floor gives enhanced mode more contact grounding
 	shadow = shadow * 0.78 + 0.22;
 #else
 	shadow = shadow * 0.7 + 0.3;
-#endif
-#if defined(OG_RETRO_MODE)
-	shadow = shadow * 0.5 + 0.5;
 #endif
 #endif
 
 #if defined(VERTEX_LIGHTING)
 
 	// combine ambient and shadowed light result
-#if defined(RETRO_UNLIT_MODE)
+#if defined(OG_RETRO_MODE)
+	// The shared vertex program already wrote sun * max(N.L, 0) per vertex.
+	vec3 lightResult = og15_object_light(sceneAmbient.xyz, og15_luma(vLightResult));
+#if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
+	vec3 specularResult = vec3(0.0, 0.0, 0.0);
+#endif
+#elif defined(RETRO_UNLIT_MODE)
 	vec3 lightResult = vLightResult;
 #if defined(SHADOWRECEIVER)
 	lightResult *= shadow;
 #endif
-#if defined(OG_RETRO_MODE)
-	lightResult += max(sceneAmbient.xyz * 1.10, vec3(0.22, 0.22, 0.22));
-#else
 	lightResult += sceneAmbient.xyz;
-#endif
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
 	vec3 specularResult = vec3(0.0, 0.0, 0.0);
 #endif
@@ -238,11 +272,7 @@ void main()
 #if defined(SHADOWRECEIVER)
 	lightResult *= shadow;
 #endif
-#if defined(OG_RETRO_MODE)
-	lightResult += max(sceneAmbient.xyz * 1.10, vec3(0.22, 0.22, 0.22));
-#else
 	lightResult += sceneAmbient.xyz;
-#endif
 
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
 	vec3 specularResult = vSpecularResult;
@@ -290,7 +320,13 @@ void main()
 
 	// start with ambient light and no specular
 #if defined(OG_RETRO_MODE)
-	vec3 lightResult = max(sceneAmbient.xyz * 1.10, vec3(0.22, 0.22, 0.22));
+	float sunTerm = 0.0;
+	if (lightCount > 0.0)
+	{
+		vec3 toSun = safe_normalize(lightPosition[0].xyz - (viewPos * lightPosition[0].w));
+		sunTerm = og15_luma(lightDiffuse[0].xyz) * og15_ndotl(safe_normalize(vViewNormal), toSun);
+	}
+	vec3 lightResult = og15_object_light(sceneAmbient.xyz, sunTerm);
 #else
 	vec3 lightResult = sceneAmbient.xyz;
 #endif
@@ -298,7 +334,9 @@ void main()
 	vec3 specularResult = vec3(0.0, 0.0, 0.0);
 #endif
 
-#if defined(RETRO_UNLIT_MODE)
+#if defined(OG_RETRO_MODE)
+	// Fully lit above.
+#elif defined(RETRO_UNLIT_MODE)
 	if (lightCount > 0.0)
 	{
 		const int i = 0;
@@ -313,9 +351,6 @@ void main()
 #endif
 
 		float diffuseTerm = max(dot(viewNormal, pixelToLight), 0.0);
-#if defined(OG_RETRO_MODE)
-		diffuseTerm = clamp(diffuseTerm * 0.55 + 0.20, 0.0, 1.0);
-#endif
 		lightResult.xyz += lightDiffuse[i].xyz * (attenuation * diffuseTerm);
 	}
 #else
@@ -358,9 +393,6 @@ void main()
 
 		// accumulate diffuse lighting
 		float diffuseTerm = max(dot(viewNormal, pixelToLight), 0.0);
-#if defined(OG_RETRO_MODE)
-		diffuseTerm = clamp(diffuseTerm * 0.55 + 0.20, 0.0, 1.0);
-#endif
 		attenuation *= diffuseTerm;
 		lightResult.xyz += lightDiffuse[i].xyz * attenuation;
 

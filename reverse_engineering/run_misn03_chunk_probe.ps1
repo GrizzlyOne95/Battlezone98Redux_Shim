@@ -62,7 +62,7 @@ if (-not $python) {
 New-Item -ItemType Directory -Path $snapshotRoot -Force | Out-Null
 
 if ($KillExistingGame) {
-    Get-Process $processBaseName -ErrorAction SilentlyContinue | Stop-Process -Force
+    if (-not (Get-Command Stop-BZRGame -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }; Get-Process $processBaseName -ErrorAction SilentlyContinue | ForEach-Object { Stop-BZRGame -Id $_.Id }
     Start-Sleep -Seconds 2
 }
 
@@ -105,7 +105,9 @@ $probeArgs = @(
 $probeProc = Start-Process -FilePath $python.Source -ArgumentList $probeArgs -PassThru `
     -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -WindowStyle Minimized
 
-$gameProc = Start-Process -FilePath $gameExe -ArgumentList "misn03.bzn" -PassThru -WorkingDirectory $GameRoot
+if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
+Assert-BZRSafeToLaunch
+$gameProc = Start-BZRGameProcess -FilePath $gameExe -ArgumentList "misn03.bzn" -PassThru -WorkingDirectory $GameRoot
 
 if ($StartupSettleSeconds -gt 0) {
     Start-Sleep -Seconds $StartupSettleSeconds
@@ -148,7 +150,7 @@ if (-not $outputDir) {
 Start-Sleep -Seconds $PostCaptureWaitSeconds
 
 if ($KillGameAfterCapture) {
-    Get-Process $processBaseName -ErrorAction SilentlyContinue | Stop-Process -Force
+    if (-not (Get-Command Stop-BZRGame -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }; Get-Process $processBaseName -ErrorAction SilentlyContinue | ForEach-Object { Stop-BZRGame -Id $_.Id }
     Start-Sleep -Seconds 2
 }
 

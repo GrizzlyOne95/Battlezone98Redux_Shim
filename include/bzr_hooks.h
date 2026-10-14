@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include "bzr_string.h"
 
@@ -31,6 +32,10 @@ namespace BZROpenShim
     // Runtime-resolved BZR pointers and helpers.
     void ResolveBzrHooks(bool isSteam);
     void RetryDeferredRuntimeHooks();
+    // OPENSHIM_NEVER_ACTIVATE: process-wide user32 activation hooks. Idempotent
+    // (each call re-sweeps loaded modules); a no-op unless the flag is set.
+    // See src/patches/never_activate.cpp.
+    void InstallNeverActivateHooks();
     // For a patch whose trampoline or hook depends on engine addresses from
     // the engine address table (scripts/patches.json "engine_addresses"):
     // the name of the first one that failed to bind, or nullptr when the
@@ -46,6 +51,11 @@ namespace BZROpenShim
     void SetPersonCarrierGetWeaponOriginal(void* target);
     void* __fastcall PersonCarrierGetWeaponGuard(void* carrier, void* edx, int slot);
     void* __fastcall PersonSniperScanGetWeaponGuard(void* carrier, void* edx, int slot);
+    // AI_Team_Compute_Other's GetScrapPosition call (0x006A3961): verifies the
+    // call target and the three ScavengerProcess-family vtables, then arms the
+    // guard. False means the patcher must leave the stock call alone.
+    bool ConfigureScavengerProcessGuard(void* originalCallTarget);
+    const float* __fastcall ScavengerProcessScrapPositionGuard(void* process, void* edx);
     void SetHoverCraftTurboSoundResolves(void* soundFind, void* soundListHead);
     namespace Hooks
     {
@@ -105,6 +115,35 @@ namespace BZROpenShim
     // Ban button helpers and callbacks.
     void BanButtonCreateHost();
     void BanButtonCreateClient();
+
+    // Multiplayer pre-lobby shell screen. lobby_ui.cpp owns the nickname and
+    // flag widgets it borrows from the lobby; prelobby_screen.cpp owns the
+    // screen. The widgets are children of the screen's centre panel and die
+    // with it.
+    // [Network] PreLobby, read now. When on, the nickname and flag pickers are
+    // built on the pre-lobby screen only, not on the host/client setup screens.
+    bool IsPreLobbyEnabled();
+    bool CreatePreLobbyNicknameAndFlagWidgets(
+        void* parent, float nicknameX, float nicknameY, float flagX, float flagY);
+    void ResetPreLobbyLobbyWidgets();
+    size_t GetPreLobbyLobbyWidgets(void** out, size_t capacity);
+    bool IsPreLobbyLobbyWidget(void* view);
+    void RefreshPreLobbyLobbyWidgets(bool visible);
+    bool PreLobbyGetPendingNickname(char* out, size_t outSize);
+    bool PreLobbyApplyNickname(const char* nickname, BzrNetNicknameResult& result);
+    void PreLobbyEndNicknameEdit();
+    bool PreLobbyForwardChar(uint8_t character);
+    // The custom matchmaking server host entry: a text entry edited like the
+    // nickname. PreLobbyForwardChar routes characters to whichever of the two
+    // is active. `text` is the initial value (blank shows a placeholder).
+    bool CreatePreLobbyServerEntry(
+        void* parent, float x, float y, float width, float height, const char* text);
+    void PreLobbySetServerEntryVisible(bool visible);
+    bool PreLobbyGetServerEntryText(char* out, size_t outSize);
+    void PreLobbySetServerEntryText(const char* text);
+    void PreLobbyEndServerEdit();
+    // Stock isNetworkInit (0x00764870): >0 authorised, 0 not yet, -1 unknown.
+    int QueryStockIsNetworkInit();
     void __cdecl BanButtonOnClickHost();
     void __cdecl BanButtonOnClickClient();
     void __cdecl BanButtonOnHoverHost(void* param);

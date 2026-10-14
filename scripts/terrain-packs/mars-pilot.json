@@ -1,0 +1,16 @@
+{
+  "schema": "bzr-openshim-terrain-art-v1",
+  "edgePixels": 32,
+  "matchStockColor": true,
+  "replacements": {
+    "MA00SA0.MAP": {"archive": "MarsDustySandDunes_PbrGenericSpecular4kBitmap.zip", "member": "MarsDustySandDunes_albedo.png"},
+    "MA00SB0.MAP": {"archive": "MarsDustySandDunes_PbrGenericSpecular4kBitmap.zip", "member": "MarsDustySandDunes_albedo.png"},
+    "MA00SC0.MAP": {"archive": "MarsDustySandDunes_PbrGenericSpecular4kBitmap.zip", "member": "MarsDustySandDunes_albedo.png"},
+    "MA11SA0.MAP": {"archive": "MarsSoilWithRockyDebris_PbrGenericSpecular4kBitmap.zip", "member": "MarsSoilWithRockyDebris_albedo.png"},
+    "MA11SB0.MAP": {"archive": "MarsSoilWithRockyDebris_PbrGenericSpecular4kBitmap.zip", "member": "MarsSoilWithRockyDebris_albedo.png"},
+    "MA11SC0.MAP": {"archive": "MarsSoilWithRockyDebris_PbrGenericSpecular4kBitmap.zip", "member": "MarsSoilWithRockyDebris_albedo.png"},
+    "MA44SA0.MAP": {"archive": "MarsCrackedRock_PbrGenericSpecular4kBitmap.zip", "member": "MarsCrackedRock_albedo.png"},
+    "MA44SB0.MAP": {"archive": "MarsCrackedRock_PbrGenericSpecular4kBitmap.zip", "member": "MarsCrackedRock_albedo.png"},
+    "MA44SC0.MAP": {"archive": "MarsCrackedRock_PbrGenericSpecular4kBitmap.zip", "member": "MarsCrackedRock_albedo.png"}
+  }
+}

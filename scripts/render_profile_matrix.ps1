@@ -35,7 +35,7 @@ foreach ($required in @($binDll, $patches, (Join-Path $resDir "resources.version
 }
 
 function Stop-Game {
-    Get-Process battlezone98redux -ErrorAction SilentlyContinue | Stop-Process -Force
+    if (-not (Get-Command Stop-BZRGame -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\..\reverse_engineering\BZRHarness.ps1" }; Get-Process battlezone98redux -ErrorAction SilentlyContinue | ForEach-Object { Stop-BZRGame -Id $_.Id }
     Start-Sleep -Milliseconds 2500
 }
 
@@ -91,6 +91,8 @@ function Invoke-Case {
         if ($attempt -eq 1) { & $Setup }
         Remove-Item $gameLog -Force -ErrorAction SilentlyContinue
         Start-Sleep -Milliseconds 600
+        if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\..\reverse_engineering\BZRHarness.ps1" }
+        Assert-BZRSafeToLaunch
         $proc = Start-Process -FilePath $gameExe -ArgumentList "lcbench.bzn" `
             -WorkingDirectory $GameRoot -PassThru
         Start-Sleep -Seconds $MissionSeconds

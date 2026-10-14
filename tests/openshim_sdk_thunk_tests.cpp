@@ -42,6 +42,19 @@ namespace
     }
 
     DWORD WINAPI FakeNativeHudCapabilities() { return 3; }
+    DWORD WINAPI FakeGeometryCapabilities() { return 1; }
+    DWORD g_GeometryHandle = 0;
+    BOOL g_GeometryEnabled = FALSE;
+    BOOL WINAPI FakeSetGeometry(DWORD h, BOOL enabled)
+    { g_GeometryHandle = h; g_GeometryEnabled = enabled; return TRUE; }
+    BOOL WINAPI FakeGeometryStats(DWORD h, DWORD* enabled, DWORD* parts, DWORD* faces,
+                                 DWORD* checks, DWORD* hits, DWORD* fallbacks)
+    {
+        if (h != g_GeometryHandle) return FALSE;
+        *enabled = g_GeometryEnabled ? 1u : 0u; *parts = 9; *faces = 1200;
+        *checks = 15; *hits = 3; *fallbacks = 2;
+        return TRUE;
+    }
 
     float WINAPI FakeGetRadarSizeScale() { return 2.5f; }
 
@@ -79,6 +92,9 @@ namespace
             .OpenShimImpl_SetNativeHudMeterRect = FakeSetHudSpriteRect,
             .OpenShimImpl_HasNativeDamageResistance = FakeClearAll,
             .OpenShimImpl_SetUnitDamageMultiplier = FakeSetDamage,
+            .OpenShimImpl_GetGeometryContactCapabilities = FakeGeometryCapabilities,
+            .OpenShimImpl_SetGeometryContact = FakeSetGeometry,
+            .OpenShimImpl_GetGeometryContactStats = FakeGeometryStats,
         };
         return t;
     }
@@ -142,6 +158,19 @@ int main()
     table.structSize = (uint32_t)offsetof(OpenShimSdkProviderTable, OpenShimImpl_HasNativeDamageResistance);
     CHECK(OpenShimHasNativeDamageResistance() == FALSE);
     CHECK(OpenShimSetUnitDamageMultiplier(damageObject, 7, .5f) == FALSE);
+    CHECK(OpenShimGetNativeHudLayoutCapabilities() == 3);
+    table.structSize = sizeof(table);
+
+    // Geometry fields append after HUD; every output argument keeps its order.
+    CHECK(OpenShimGetGeometryContactCapabilities() == 1);
+    CHECK(OpenShimSetGeometryContact(0xABC01234u, TRUE) == TRUE);
+    DWORD enabled = 0, parts = 0, faces = 0, checks = 0, hits = 0, fallbacks = 0;
+    CHECK(OpenShimGetGeometryContactStats(0xABC01234u, &enabled, &parts, &faces, &checks, &hits, &fallbacks) == TRUE);
+    CHECK(enabled == 1 && parts == 9 && faces == 1200 && checks == 15 && hits == 3 && fallbacks == 2);
+    table.structSize = (uint32_t)offsetof(OpenShimSdkProviderTable, OpenShimImpl_GetGeometryContactCapabilities);
+    CHECK(OpenShimGetGeometryContactCapabilities() == 0);
+    CHECK(OpenShimSetGeometryContact(0x123u, TRUE) == FALSE);
+    CHECK(OpenShimGetGeometryContactStats(0x123u, &enabled, &parts, &faces, &checks, &hits, &fallbacks) == FALSE);
     CHECK(OpenShimGetNativeHudLayoutCapabilities() == 3);
     table.structSize = sizeof(table);
 

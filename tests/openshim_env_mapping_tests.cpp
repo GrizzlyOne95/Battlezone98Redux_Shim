@@ -5,6 +5,7 @@
 // environment, so no plugin directory is involved.
 
 #include "openshim_env_mapping.h"
+#include "shell_casing_config.h"
 
 #include <cstdio>
 #include <cstring>
@@ -147,6 +148,11 @@ namespace
         ini.Set("Diagnostics", "TraceShellCasings", "1");
         Check(Mapped(ini, "OPENSHIM_TRACE_SHELL_CASINGS") == "1", "TraceShellCasings maps from [Diagnostics]");
 
+        ini.Set("General", "ChunkCacheMaxMB", "128");
+        Check(Mapped(ini, "OPENSHIM_CHUNK_CACHE_MAX_MB") == "128", "chunk cache size cap passes through raw");
+        ini.Set("General", "ChunkCacheMaxAgeDays", "7");
+        Check(Mapped(ini, "OPENSHIM_CHUNK_CACHE_MAX_AGE_DAYS") == "7", "chunk cache age limit passes through raw");
+
         // PathBlockFaces: inverted switch, trace from [Diagnostics].
         Check(Mapped(ini, "OPENSHIM_DISABLE_PATH_BLOCK_FACES") == "<none>", "unset PathBlockFaces keeps the code default");
         ini.Set("General", "PathBlockFaces", "0");
@@ -160,6 +166,16 @@ namespace
         // itself negative, so it is read as written.
         ini.Set("General", "DisableControlSmoothing", "1");
         Check(Mapped(ini, "OPENSHIM_DISABLE_CONTROL_SMOOTHING") == "1", "negative key is not inverted again");
+    }
+
+    void TestRunInBackgroundMapping()
+    {
+        FakeIni ini;
+        Check(Mapped(ini, "OPENSHIM_RUN_IN_BACKGROUND") == "<none>", "absent key leaves the toggle unset");
+        ini.Set("Testing", "RunInBackground", "1");
+        Check(Mapped(ini, "OPENSHIM_RUN_IN_BACKGROUND") == "1", "[Testing] RunInBackground maps to the env name");
+        ini.Set("Testing", "RunInBackground", "0");
+        Check(Mapped(ini, "OPENSHIM_RUN_IN_BACKGROUND") == "0", "[Testing] RunInBackground=0 maps to 0");
     }
 
     void TestNamesMatchWithoutCase()
@@ -279,6 +295,40 @@ namespace
               "producer default applies with the plugin directory");
     }
 
+    void TestShellCasingsDefaultOff()
+    {
+        FakeIni ini;
+        FakeEnv env;
+        auto enabled = [&](const FakeIni* settings) {
+            const IniReader reader = ini.Reader();
+            return BZROpenShim::ShellCasings::EnabledByEnvironment(
+                [&](const char* name, char* value, uint32_t size) {
+                    return GetEnvironmentValue(name, value, size, settings ? &reader : nullptr, env.Reader());
+                });
+        };
+        Check(!enabled(&ini), "missing ShellCasings key defaults off");
+        Check(!enabled(nullptr), "missing INI and environment default casings off");
+        ini.Set("General", "ShellCasings", "on");
+        Check(enabled(&ini), "ShellCasings = on explicitly enables casings");
+        ini.Set("General", "ShellCasings", "0");
+        Check(!enabled(&ini), "ShellCasings = 0 disables casings");
+        ini.Set("General", "ShellCasings", "garbage");
+        Check(!enabled(&ini), "malformed ShellCasings key defaults off");
+        for (const char* name : {"OPENSHIM_DISABLE_SHELL_CASINGS", "BZR_DISABLE_SHELL_CASINGS"})
+        {
+            env.values.clear();
+            env.values[name] = "0";
+            Check(enabled(nullptr), std::string(name) + " = 0 preserves legacy opt-in");
+            env.values[name] = "garbage";
+            Check(!enabled(nullptr), std::string(name) + " malformed stays off");
+        }
+        env.values["OPENSHIM_DISABLE_SHELL_CASINGS"] = "0";
+        env.values["BZR_DISABLE_SHELL_CASINGS"] = "1";
+        Check(!enabled(nullptr), "either disable alias vetoes explicit opt-in");
+        ini.Set("General", "ShellCasings", "1");
+        Check(enabled(&ini), "friendly INI key still takes precedence over launch environment");
+    }
+
     void TestCaptureNamesLetTheEnvironmentWin()
     {
         FakeIni ini;
@@ -300,6 +350,25 @@ namespace
         Check(IsCaptureOverrideName("bz_bzrnet_trace_queue"), "capture names match without case");
         Check(!IsCaptureOverrideName("OPENSHIM_TRACE_HITS"), "trace flags are not capture names");
         Check(!IsCaptureOverrideName(nullptr), "null is not a capture name");
+    }
+
+    void TestTerrainReliefUiAndHarnessPrecedence()
+    {
+        FakeIni ini;
+        FakeEnv env;
+        constexpr const char* name = "OPENSHIM_TERRAIN_MICRO_RELIEF_TEST";
+        Check(Lookup(name, &ini, env) == "<unset>", "absent relief setting does not opt in");
+        ini.Set("Terrain", "TerrainMicroRelief", "On");
+        Check(Lookup(name, &ini, env) == "1", "saved UI On enables relief without launch environment");
+        env.values[name] = "0";
+        Check(Lookup(name, &ini, env) == "0", "flat harness control overrides saved On");
+        ini.Set("Terrain", "TerrainMicroRelief", "Off");
+        env.values[name] = "1";
+        Check(Lookup(name, &ini, env) == "1", "relief harness overrides shipped Off");
+        env.values.clear();
+        Check(Lookup(name, &ini, env) == "0", "saved UI Off disables relief after harness ends");
+        ini.Set("Terrain", "TerrainMicroRelief", "invalid");
+        Check(Lookup(name, &ini, env) == "<unset>", "invalid relief setting does not opt in");
     }
 
     void TestEmptyNamesPassThrough()
@@ -342,6 +411,7 @@ int main()
 {
     TestBooleanKeysNormalise();
     TestDisableNamesInvertPositiveKeys();
+    TestRunInBackgroundMapping();
     TestNamesMatchWithoutCase();
     TestAbsentAndUnparseableKeys();
     TestFriendlyKeyBeatsEnvironmentSection();
@@ -350,7 +420,9 @@ int main()
     TestGovernorTuningWords();
     TestProducerMenusDefaultOnFromTheirOwnFile();
     TestIniBeatsLaunchEnvironment();
+    TestShellCasingsDefaultOff();
     TestCaptureNamesLetTheEnvironmentWin();
+    TestTerrainReliefUiAndHarnessPrecedence();
     TestEmptyNamesPassThrough();
     TestCopyContract();
 

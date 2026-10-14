@@ -23,6 +23,9 @@ namespace BZROpenShim::ShellScreens
     // OpenShim Options: the hub reached from the stock Options screen, and
     // one screen per settings category (base + category index).
     inline constexpr uint32_t kOptionsHubScreenId = kCustomScreenIdBase + 2;
+    // Multiplayer pre-lobby ([Network] PreLobby): nickname, flag and server
+    // status before the lobby.
+    inline constexpr uint32_t kPreLobbyScreenId = kCustomScreenIdBase + 3;
     inline constexpr uint32_t kOptionsCategoryScreenIdBase = kCustomScreenIdBase + 0x10;
 
     // Adds the screen's children to `screen` (a constructed Top Screen). Runs
@@ -33,6 +36,13 @@ namespace BZROpenShim::ShellScreens
     using BuildFn = bool (*)(void* screen);
     // Called as the shell destroys the screen, before its children go.
     using ClosedFn = void (*)(void* screen);
+    // Runs every frame the screen is live, after the stock per-frame update
+    // (cUI_View slot 13), on the UI thread. Runs under SEH; a fault is logged
+    // once and the screen carries on.
+    using TickFn = void (*)(void* screen);
+    // A typed character (cUI_View slot 2). Return true when consumed; false
+    // hands the character to the stock dispatcher.
+    using CharFn = bool (*)(void* screen, uint8_t ch);
 
     struct ScreenDef
     {
@@ -40,6 +50,8 @@ namespace BZROpenShim::ShellScreens
         const char* name;
         BuildFn build;
         ClosedFn closed;
+        TickFn tick = nullptr;
+        CharFn onChar = nullptr;
     };
 
     // Binds the engine rows and installs the factory detour on first use.

@@ -17,6 +17,8 @@
 #include <Windows.h>
 #include <bcrypt.h>
 #include <d3d11.h>
+#include "terrain_hd_texture_copy.h"
+#include "terrain_paint.h"
 
 #include <algorithm>
 #include <array>
@@ -169,16 +171,6 @@ namespace BZROpenShim
             float coverage = 0.0f;
         };
 
-        struct OgreBox
-        {
-            uint32_t left;
-            uint32_t top;
-            uint32_t right;
-            uint32_t bottom;
-            uint32_t front;
-            uint32_t back;
-        };
-
         struct OgreSharedPtr
         {
             void* rep = nullptr;
@@ -236,6 +228,11 @@ namespace BZROpenShim
         {
             bool proxyEnabled = false;
             bool proxyVisible = true;
+            bool tessellationTest = false;
+            bool tessellationWireframe = false;
+            int tessellationFactor = 2;
+            bool microReliefTest = false;
+            float microReliefAmplitude = 0.25f;
             bool semanticCapture = false;
             bool semanticDumpJson = true;
             bool semanticRenderer = false;
@@ -263,6 +260,7 @@ namespace BZROpenShim
             int followCameraReselectFrames = 300;
             bool hdEnabled = false;
             std::string hdManifest = "terrain_hd_tiles.json";
+            std::string hdExportPath;
             int zoneOrdinal = -1;
             int clusterOrdinal = -1;
             int zoneX = INT_MIN;
@@ -338,6 +336,8 @@ namespace BZROpenShim
         {
             uint32_t sliceCount = 0;
             std::string fallback;
+            std::string diffuseResource;
+            TerrainPaint::Config paint;
             std::unordered_map<uint32_t, std::string> tiles;
         };
 
@@ -453,10 +453,7 @@ namespace BZROpenShim
         using FnGetTextureUInt = uint32_t(__thiscall*)(void*);
         using FnGetTextureByte = uint8_t(__thiscall*)(void*);
         using FnGetTextureInt = int(__thiscall*)(void*);
-        using FnGetTextureBuffer = OgreSharedPtr* (__thiscall*)(
-            void*, OgreSharedPtr*, uint32_t, uint32_t);
-        using FnBlitPixelBuffer = void(__thiscall*)(
-            void*, const OgreSharedPtr&, const OgreBox&, const OgreBox&);
+        using FnGetD3D11Texture2D = ID3D11Texture2D* (__thiscall*)(void*);
         using FnGetViewport = void* (__thiscall*)(void*, uint16_t);
         using FnGetViewportCamera = void* (__thiscall*)(void*);
         using FnGetViewportInt = int(__thiscall*)(void*);
@@ -525,6 +522,15 @@ namespace BZROpenShim
             FnGetUnifiedDelegate getUnifiedDelegate = nullptr;
             FnGetGpuProgramParameters getVertexProgramParameters = nullptr;
             FnSetVertexProgram setVertexProgram = nullptr;
+            FnSetVertexProgram setHullProgram = nullptr;
+            FnSetVertexProgram setDomainProgram = nullptr;
+            FnGetGpuProgram getHullProgram = nullptr;
+            FnGetGpuProgram getDomainProgram = nullptr;
+            bool (__thiscall* hasHullProgram)(void*) = nullptr;
+            bool (__thiscall* hasDomainProgram)(void*) = nullptr;
+            bool (__thiscall* programSupported)(void*) = nullptr;
+            void (__thiscall* setPolygonMode)(void*, int) = nullptr;
+            int (__thiscall* getPolygonMode)(void*) = nullptr;
             FnSetVertexProgramParameters setVertexProgramParameters = nullptr;
             FnGetStringReference getProgramSource = nullptr;
             FnGetStringParameter getStringParameter = nullptr;
@@ -563,8 +569,7 @@ namespace BZROpenShim
             FnGetTextureByte getTextureMipmaps = nullptr;
             FnGetTextureInt getTextureType = nullptr;
             FnGetTextureInt getTextureFormat = nullptr;
-            FnGetTextureBuffer getTextureBuffer = nullptr;
-            FnBlitPixelBuffer blitPixelBuffer = nullptr;
+            FnGetD3D11Texture2D getD3D11Texture2D = nullptr;
             // Optional capture-framing APIs. Their absence disables only the
             // screen-rect diagnostic and the camera-aware selection mode; the
             // Phase 2/3A/3B render paths never depend on them.
@@ -849,6 +854,7 @@ namespace BZROpenShim
             if (IsEnvEnabled("OPENSHIM_TERRAIN_HD"))
                 config.hdEnabled = true;
             ReadEnvString("OPENSHIM_TERRAIN_HD_MANIFEST", config.hdManifest);
+            ReadEnvString("OPENSHIM_TERRAIN_HD_EXPORT", config.hdExportPath);
             int debugOverride = 0;
             if (ReadEnvInt("OPENSHIM_TERRAIN_SEMANTIC_DEBUG", debugOverride))
                 config.semanticDebugMode = debugOverride;
@@ -892,6 +898,36 @@ namespace BZROpenShim
             if (!(config.semanticFrameCaptureMinCoverage >= 0.0f) ||
                 config.semanticFrameCaptureMinCoverage > 1.0f)
                 config.semanticFrameCaptureMinCoverage = 0.005f;
+            config.tessellationTest = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_TEST");
+            config.tessellationWireframe = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_WIREFRAME");
+            config.microReliefTest = IsEnvEnabled("OPENSHIM_TERRAIN_MICRO_RELIEF_TEST");
+            float reliefAmplitude = 0.25f;
+            if (ReadEnvFloat("OPENSHIM_TERRAIN_MICRO_RELIEF_AMPLITUDE", reliefAmplitude) &&
+                std::isfinite(reliefAmplitude) && reliefAmplitude >= 0.0f && reliefAmplitude <= 1.0f)
+                config.microReliefAmplitude = reliefAmplitude;
+            config.tessellationTest = config.tessellationTest || config.microReliefTest;
+            if (config.microReliefAmplitude == 0.0f) config.microReliefTest = false;
+            // The persistent UI switch uses the visually qualified factor-4
+            // relief preset; plain submission tests keep their factor-2 default.
+            if (config.microReliefTest) config.tessellationFactor = 4;
+            int factor = 2;
+            if (ReadEnvInt("OPENSHIM_TERRAIN_TESSELLATION_FACTOR", factor) &&
+                (factor == 1 || factor == 2 || factor == 4))
+                config.tessellationFactor = factor;
+            if (config.tessellationTest)
+            {
+                // Native HD tiles can share the tessellation stages. Disable only
+                // the separate proxy experiment.
+                config.proxyEnabled = config.semanticRenderer = false;
+                config.semanticCapture = config.semanticValidateUv = false;
+                config.semanticFrameCaptures = 0;
+                config.followCamera = true;
+            }
+            if (config.hdEnabled || !config.hdExportPath.empty())
+            {
+                config.proxyEnabled = config.semanticRenderer = false;
+                config.followCamera = true;
+            }
             return config;
         }
 
@@ -960,6 +996,8 @@ namespace BZROpenShim
                         "sliceCount", 0u);
                     binding.fallback = materialIt.value().value(
                         "fallback", std::string());
+                    binding.diffuseResource = materialIt.value().value(
+                        "diffuseResource", std::string());
                     if (binding.sliceCount == 0 || binding.sliceCount > 256 ||
                         binding.fallback.empty())
                         throw std::runtime_error(
@@ -982,6 +1020,19 @@ namespace BZROpenShim
                             binding.tiles.emplace(static_cast<uint32_t>(index),
                                 tileIt.value().get<std::string>());
                         }
+                    }
+                    if (materialIt.value().contains("paint"))
+                    {
+                        const auto& paint = materialIt.value()["paint"];
+                        if (paint.value("schema", std::string()) != "bzr-openshim-terrain-paint-v1" ||
+                            paint.value("rowZero", std::string()) != "minZ" || binding.sliceCount != 5 ||
+                            binding.diffuseResource.empty() || binding.tiles.size() != 5)
+                            throw std::runtime_error("paint needs five explicit slices, atlas identity and minZ row order");
+                        binding.paint.enabled = true;
+                        binding.paint.fingerprint = paint.at("terrainFingerprint").get<std::string>();
+                        binding.paint.bounds = paint.at("boundsMeters").get<std::array<float, 4>>();
+                        binding.paint.repeatMeters = paint.at("repeatMeters").get<std::array<float, 4>>();
+                        binding.paint.Validate();
                     }
                     parsed.materials.emplace(materialIt.key(), std::move(binding));
                 }
@@ -1047,6 +1098,9 @@ namespace BZROpenShim
 
             BCRYPT_ALG_HANDLE algorithm = nullptr;
             BCRYPT_HASH_HANDLE hash = nullptr;
+            // The hash object buffer must outlive destroyHash below, which writes into it;
+            // declaring it inside the do-block freed it first (heap use-after-free).
+            std::vector<uint8_t> object;
             HANDLE file = INVALID_HANDLE_VALUE;
             bool ok = false;
             do
@@ -1064,7 +1118,7 @@ namespace BZROpenShim
                 {
                     break;
                 }
-                std::vector<uint8_t> object(objectBytes);
+                object.resize(objectBytes);
                 std::array<uint8_t, 32> digest = {};
                 if (createHash(algorithm, &hash, object.data(), objectBytes, nullptr, 0, 0) < 0)
                     break;
@@ -1199,6 +1253,25 @@ namespace BZROpenShim
                 "?getVertexProgram@Pass@Ogre@@QBEABV?$SharedPtr@VGpuProgram@Ogre@@@2@XZ");
             g_ogre.getUnifiedDelegate = Resolve<FnGetUnifiedDelegate>(module,
                 "?_getDelegate@UnifiedHighLevelGpuProgram@Ogre@@QBEABV?$SharedPtr@VHighLevelGpuProgram@Ogre@@@2@XZ");
+            // Optional APIs, used only by the native tessellation test.
+            g_ogre.setHullProgram = Resolve<FnSetVertexProgram>(module,
+                "?setTessellationHullProgram@Pass@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+            g_ogre.setDomainProgram = Resolve<FnSetVertexProgram>(module,
+                "?setTessellationDomainProgram@Pass@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+            g_ogre.getHullProgram = Resolve<FnGetGpuProgram>(module,
+                "?getTessellationHullProgram@Pass@Ogre@@QBEABV?$SharedPtr@VGpuProgram@Ogre@@@2@XZ");
+            g_ogre.getDomainProgram = Resolve<FnGetGpuProgram>(module,
+                "?getTessellationDomainProgram@Pass@Ogre@@QBEABV?$SharedPtr@VGpuProgram@Ogre@@@2@XZ");
+            g_ogre.hasHullProgram = Resolve<decltype(g_ogre.hasHullProgram)>(module,
+                "?hasTessellationHullProgram@Pass@Ogre@@QBE_NXZ");
+            g_ogre.hasDomainProgram = Resolve<decltype(g_ogre.hasDomainProgram)>(module,
+                "?hasTessellationDomainProgram@Pass@Ogre@@QBE_NXZ");
+            g_ogre.programSupported = Resolve<decltype(g_ogre.programSupported)>(module,
+                "?isSupported@GpuProgram@Ogre@@UBE_NXZ");
+            g_ogre.setPolygonMode = Resolve<decltype(g_ogre.setPolygonMode)>(module,
+                "?setPolygonMode@Pass@Ogre@@QAEXW4PolygonMode@2@@Z");
+            g_ogre.getPolygonMode = Resolve<decltype(g_ogre.getPolygonMode)>(module,
+                "?getPolygonMode@Pass@Ogre@@QBE?AW4PolygonMode@2@XZ");
             g_ogre.getVertexProgramParameters = Resolve<FnGetGpuProgramParameters>(module,
                 "?getVertexProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@XZ");
             g_ogre.setVertexProgram = Resolve<FnSetVertexProgram>(module,
@@ -1268,8 +1341,6 @@ namespace BZROpenShim
                 "?getTextureType@Texture@Ogre@@UBE?AW4TextureType@2@XZ");
             g_ogre.getTextureFormat = Resolve<FnGetTextureInt>(module,
                 "?getFormat@Texture@Ogre@@UBE?AW4PixelFormat@2@XZ");
-            g_ogre.blitPixelBuffer = Resolve<FnBlitPixelBuffer>(module,
-                "?blit@HardwarePixelBuffer@Ogre@@UAEXABVHardwarePixelBufferSharedPtr@2@ABUBox@2@1@Z");
             g_ogre.getViewport = Resolve<FnGetViewport>(module,
                 "?getViewport@RenderTarget@Ogre@@UAEPAVViewport@2@G@Z");
             g_ogre.getViewportCamera = Resolve<FnGetViewportCamera>(module,
@@ -1338,14 +1409,18 @@ namespace BZROpenShim
         {
             if (!g_d3d11RenderSystemConfirmed.load(std::memory_order_acquire))
                 return false;
-            if (g_ogre.getTextureBuffer)
+            if (g_ogre.getD3D11Texture2D)
                 return true;
             HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
             if (!renderer)
                 return false;
-            g_ogre.getTextureBuffer = Resolve<FnGetTextureBuffer>(renderer,
-                "?getBuffer@D3D11Texture@Ogre@@UAE?AVHardwarePixelBufferSharedPtr@2@II@Z");
-            return g_ogre.getTextureBuffer != nullptr;
+            std::string actual;
+            if (!VerifyModuleHash(renderer,
+                "78A1D8E13C8BD71983B09A39A3DCF7783E6C34DDE577DE3B9202460DB500AAE0", actual))
+                return false;
+            g_ogre.getD3D11Texture2D = Resolve<FnGetD3D11Texture2D>(renderer,
+                "?GetTex2D@D3D11Texture@Ogre@@QAEPAUID3D11Texture2D@@XZ");
+            return g_ogre.getD3D11Texture2D != nullptr;
         }
 
         bool SafeReadZoneInt(void* zone, size_t offset, int& value)
@@ -1570,6 +1645,21 @@ namespace BZROpenShim
             return true;
         }
 
+        // -renderer:dx9 still loads RenderSystem_Direct3D11.dll (plugins.cfg
+        // lists both), so the module being present proves nothing. Casting a
+        // D3D9HardwareVertexBuffer through the D3D11 getter returns a garbage
+        // "ID3D11Buffer". Besides the confirmed-render-system gate, accept only
+        // a buffer whose vtable is the exported D3D11HardwareVertexBuffer one.
+        const void* g_d3d11VertexBufferVtable = nullptr;
+
+        ID3D11Buffer* GetD3D11Buffer(void* ogreBuffer)
+        {
+            if (!ogreBuffer || !g_ogre.getD3D11VertexBuffer || !g_d3d11VertexBufferVtable ||
+                *static_cast<const void* const*>(ogreBuffer) != g_d3d11VertexBufferVtable)
+                return nullptr;
+            return g_ogre.getD3D11VertexBuffer(ogreBuffer);
+        }
+
         bool ResolveD3D11VertexBufferApi()
         {
             if (!g_d3d11RenderSystemConfirmed.load(std::memory_order_acquire))
@@ -1582,7 +1672,7 @@ namespace BZROpenShim
                 }
                 return false;
             }
-            if (g_ogre.getD3D11VertexBuffer)
+            if (g_ogre.getD3D11VertexBuffer && g_d3d11VertexBufferVtable)
                 return true;
             HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
             if (!renderer)
@@ -1590,7 +1680,9 @@ namespace BZROpenShim
             g_ogre.getD3D11VertexBuffer = Resolve<FnGetD3D11VertexBuffer>(
                 renderer,
                 "?getD3DVertexBuffer@D3D11HardwareVertexBuffer@Ogre@@QBEPAUID3D11Buffer@@XZ");
-            return g_ogre.getD3D11VertexBuffer != nullptr;
+            g_d3d11VertexBufferVtable = reinterpret_cast<const void*>(
+                GetProcAddress(renderer, "??_7D3D11HardwareVertexBuffer@Ogre@@6B@"));
+            return g_ogre.getD3D11VertexBuffer != nullptr && g_d3d11VertexBufferVtable != nullptr;
         }
 
         // SEH leaves: no C++ objects with destructors live in these frames,
@@ -1611,7 +1703,7 @@ namespace BZROpenShim
             {
                 do
                 {
-                    source = g_ogre.getD3D11VertexBuffer(ogreBuffer);
+                    source = GetD3D11Buffer(ogreBuffer);
                     if (!source)
                         break;
 
@@ -1674,7 +1766,7 @@ namespace BZROpenShim
             {
                 do
                 {
-                    buffer = g_ogre.getD3D11VertexBuffer(ogreBuffer);
+                    buffer = GetD3D11Buffer(ogreBuffer);
                     if (!buffer)
                         break;
                     D3D11_BUFFER_DESC description = {};
@@ -2482,7 +2574,7 @@ namespace BZROpenShim
                 g_ogre.createManualTexture && g_ogre.getTextureWidth &&
                 g_ogre.getTextureHeight && g_ogre.getTextureDepth &&
                 g_ogre.getTextureMipmaps && g_ogre.getTextureType &&
-                g_ogre.getTextureFormat && g_ogre.blitPixelBuffer &&
+                g_ogre.getTextureFormat &&
                 ResolveD3D11TextureApi();
         }
 
@@ -2535,33 +2627,11 @@ namespace BZROpenShim
                                 uint32_t height,
                                 uint32_t mipmaps)
         {
-            for (uint32_t mip = 0; mip <= mipmaps; ++mip)
-            {
-                OgreSharedPtr sourceBuffer;
-                OgreSharedPtr destinationBuffer;
-                g_ogre.getTextureBuffer(sourceTexture, &sourceBuffer, 0, mip);
-                g_ogre.getTextureBuffer(arrayTexture, &destinationBuffer, 0, mip);
-                if (!sourceBuffer.rep || !sourceBuffer.info ||
-                    !destinationBuffer.rep || !destinationBuffer.info)
-                {
-                    ReleaseCloneHandoff(sourceBuffer);
-                    ReleaseCloneHandoff(destinationBuffer);
-                    return false;
-                }
-                const uint32_t mipWidth = (std::max)(1u, width >> mip);
-                const uint32_t mipHeight = (std::max)(1u, height >> mip);
-                const OgreBox sourceBox = {
-                    0, 0, mipWidth, mipHeight, 0, 1
-                };
-                const OgreBox destinationBox = {
-                    0, 0, mipWidth, mipHeight, slice, slice + 1
-                };
-                g_ogre.blitPixelBuffer(destinationBuffer.rep, sourceBuffer,
-                    sourceBox, destinationBox);
-                ReleaseCloneHandoff(sourceBuffer);
-                ReleaseCloneHandoff(destinationBuffer);
-            }
-            return true;
+            if (!g_ogre.getD3D11Texture2D) return false;
+            // Exported getters return borrowed resources. Ogre owns both
+            // Texture shared pointers throughout this submission.
+            return TerrainHd::CopyTextureSlice(g_ogre.getD3D11Texture2D(arrayTexture),
+                g_ogre.getD3D11Texture2D(sourceTexture), slice, width, height, mipmaps);
         }
 
         // Reports which array slices the selected cluster actually samples, and
@@ -2572,6 +2642,12 @@ namespace BZROpenShim
         // visual "looks right" would be worth nothing.
         void LogTerrainHdTileCoverage(const TerrainHdMaterialBinding& binding)
         {
+            if (binding.paint.enabled)
+            {
+                LogShimA(LogLevel::Info, "terrain-hd",
+                    "[TERRAIN-PAINT] coverage uses four material layers and control slice4; native tile indices do not select diffuse slices");
+                return;
+            }
             std::map<uint32_t, uint32_t> usage;
             for (const TerrainSemantic::Vertex& vertex : g_proxy.semanticVertices)
                 ++usage[static_cast<uint32_t>(vertex.gpu.tileIndex)];
@@ -2629,7 +2705,7 @@ namespace BZROpenShim
             for (const TerrainSemantic::Vertex& vertex : g_proxy.semanticVertices)
                 maximumTileIndex = (std::max)(maximumTileIndex,
                     static_cast<uint32_t>(vertex.gpu.tileIndex));
-            if (maximumTileIndex >= binding.sliceCount)
+            if (!binding.paint.enabled && maximumTileIndex >= binding.sliceCount)
             {
                 LogShimA(LogLevel::Warn, "terrain-hd",
                     "[TERRAIN-HD] manifest has too few slices material=\"%s\" slices=%u selectedMaxTileIndex=%u; stock atlas retained",
@@ -3250,6 +3326,13 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 return false;
             }
         }
+
+        bool PrepareTerrainMicroReliefBounds();
+        void RefreshTerrainMicroReliefBounds(void* zone);
+        void RestoreTerrainMicroReliefBounds();
+        void RestoreNativeTerrainHd();
+        void ResetNativeTerrainHd();
+        #include "terrain_tessellation_test.inl"
 
         bool InstallSemanticMaterial()
         {
@@ -3914,6 +3997,9 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             if (destroyEntity || destroyNode)
                 DestroyProxySceneObjectsByName(reasonName, destroyEntity, destroyNode);
 
+            RestoreNativeTerrainTessellationTest();
+            RestoreNativeTerrainHd();
+            ResetNativeTerrainHd();
             RemoveSemanticResources(reasonName);
             ReleaseSemanticStreamOwnership(reasonName);
             RemoveProxyMeshResource();
@@ -4550,6 +4636,11 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             return true;
         }
 
+        #include "terrain_microrelief_bounds.inl"
+        #include "terrain_paint_capture.inl"
+        #include "terrain_native_hd.inl"
+        #include "terrain_atlas_export.inl"
+
         bool GetActiveCameraPosition(void*& camera, Vector3& position)
         {
             camera = nullptr;
@@ -4725,7 +4816,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 
         bool ObserveZone(void* zone)
         {
-            if (!zone || g_proxy.tearingDown || g_proxy.selected || !g_discoveryArmed)
+            if (!zone || g_proxy.tearingDown || !g_discoveryArmed ||
+                (g_proxy.selected && !g_config.microReliefTest && !g_config.hdEnabled))
                 return g_proxy.selected;
             int zoneX = 0;
             int zoneZ = 0;
@@ -4741,6 +4833,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 zoneOrdinal = g_nextZoneOrdinal++;
                 g_zoneOrdinals.emplace(zone, zoneOrdinal);
             }
+            if (g_proxy.selected) return true;
 
             const bool followCamera = FollowCameraUsable();
             void* camera = nullptr;
@@ -4760,6 +4853,11 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 // rather than settle for a cluster nobody will ever see.
                 return false;
             }
+            // Renderer construction exposes an identity camera at the origin
+            // before the mission camera is placed. Do not select that cluster.
+            if (g_config.tessellationTest && (!followCamera ||
+                (cameraPosition.x == 0.0f && cameraPosition.y == 0.0f && cameraPosition.z == 0.0f)))
+                return false;
 
             ClusterCandidate best;
             bool haveBest = false;
@@ -4874,7 +4972,12 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         static_cast<double>(g_config.followCameraAimDistance),
                         static_cast<double>(best.cameraDistance),
                         g_proxy.sourceMeshName.c_str());
-                    CreateProxy();
+                    if (!g_config.hdExportPath.empty()) ExportNativeTerrainAtlas();
+                    if (g_config.hdEnabled) InstallNativeTerrainHd();
+                    if (g_config.tessellationTest)
+                        InstallNativeTerrainTessellationTest();
+                    else if (!g_config.hdEnabled && g_config.hdExportPath.empty())
+                        CreateProxy();
                     CaptureSemantics(true);
                     BuildAndValidateSemanticVertices(true);
                     // With the proxy live, report where it actually lands on
@@ -4909,6 +5012,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             try
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
+                RefreshTerrainMicroReliefBounds(zone);
+                RefreshNativeTerrainHd(zone, false);
                 ObserveZone(zone);
             }
             catch (...)
@@ -4943,6 +5048,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 return;
             }
 
+            bool hdDirty = false;
             bool selectedZone = false;
             bool fullDirty = false;
             bool heightDirty = false;
@@ -4951,6 +5057,12 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             if (g_active.load(std::memory_order_acquire) && !g_shutdown.load())
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
+                if (g_config.hdEnabled)
+                    for (size_t index = 0; index < 16; ++index)
+                    {
+                        uint8_t dirty = 0;
+                        if (!SafeReadZoneByte(zone, kFullDirtyOffset + index, dirty) || dirty) hdDirty = true;
+                    }
                 selectedZone = g_proxy.selected && !g_proxy.tearingDown && g_proxy.zone == zone;
                 if (selectedZone)
                 {
@@ -4973,6 +5085,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             if (!g_active.load(std::memory_order_acquire) || g_shutdown.load())
                 return;
             std::lock_guard<std::mutex> lock(g_mutex);
+            RefreshTerrainMicroReliefBounds(zone);
+            RefreshNativeTerrainHd(zone, hdDirty);
             // The engine can destroy the proxy Entity at any point during a
             // mission change. Detect that by name before anything dereferences
             // the stored pointer, and forget so the next qualifying zone in
@@ -5040,7 +5154,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                     ForgetTerrainProxy(TerrainForgetReason::SourceMismatch, true, true);
                 }
             }
-            if (!g_proxy.selected && !g_proxy.tearingDown)
+            if (!g_proxy.tearingDown && (!g_proxy.selected || g_config.hdEnabled || g_config.microReliefTest))
                 ObserveZone(zone);
             if (selectedZone && !g_proxy.tearingDown && g_proxy.zone == zone &&
                 (fullDirty || heightDirty))
@@ -5319,17 +5433,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         g_config = ReadConfig();
         if (g_config.hdEnabled)
         {
-            // The HD smoke path is a Phase 3B specialization of the semantic
-            // proxy. One opt-in switch activates its two prerequisites so a
-            // missing secondary setting cannot silently turn the test into a
-            // stock-atlas run.
-            if (LoadTerrainHdManifest())
-            {
-                g_config.proxyEnabled = true;
-                g_config.semanticRenderer = true;
-            }
-            else
-                g_config.hdEnabled = false;
+            // HD replaces native diffuse sampling; no proxy is created.
+            if (!LoadTerrainHdManifest()) g_config.hdEnabled = false;
         }
         if (g_config.semanticRenderer && !g_config.proxyEnabled)
         {
@@ -5338,7 +5443,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             g_config.semanticRenderer = false;
         }
         if (!g_config.proxyEnabled && !g_config.semanticCapture &&
-            !g_config.semanticValidateUv && !g_config.semanticRenderer)
+            !g_config.semanticValidateUv && !g_config.semanticRenderer &&
+            !g_config.tessellationTest && !g_config.hdEnabled && g_config.hdExportPath.empty())
             return;
         g_shutdown.store(false);
         LogShimA(LogLevel::Info, "terrain-proxy",
@@ -5358,7 +5464,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         if (g_config.hdEnabled)
         {
             LogShimA(LogLevel::Info, "terrain-hd",
-                "[TERRAIN-HD] initialized manifest=\"%s\" proxy=1 semanticRenderer=1 stockFallback=enabled",
+                "[TERRAIN-HD] initialized manifest=\"%s\" native=1 proxy=0 stockFallback=enabled",
                 g_hdManifest.path.string().c_str());
         }
         g_worker = CreateThread(nullptr, 0, WorkerProc, nullptr, 0, nullptr);

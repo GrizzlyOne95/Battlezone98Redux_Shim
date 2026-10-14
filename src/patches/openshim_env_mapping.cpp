@@ -127,6 +127,8 @@ namespace
         {
             return TryReadMappedBool(ini, "Diagnostics", "TraceArtilleryMask", false, out);
         }
+        if (Equals(name, "OPENSHIM_RUN_IN_BACKGROUND"))
+            return TryReadMappedBool(ini, "Testing", "RunInBackground", false, out);
         if (Equals(name, "OPENSHIM_TRACE_SUN_FLASH"))
             return TryReadMappedBool(ini, "Diagnostics", "TraceSunFlash", false, out);
         if (Equals(name, "OPENSHIM_TRACE_BZN_LOAD"))
@@ -152,6 +154,11 @@ namespace
         {
             return TryReadMappedBool(ini, "General", "ChunkMeshes", true, out);
         }
+        // Chunk cache pruning limits: raw numbers, clamped by the pruner.
+        if (Equals(name, "OPENSHIM_CHUNK_CACHE_MAX_MB"))
+            return ini(IniFile::Main, "General", "ChunkCacheMaxMB", out);
+        if (Equals(name, "OPENSHIM_CHUNK_CACHE_MAX_AGE_DAYS"))
+            return ini(IniFile::Main, "General", "ChunkCacheMaxAgeDays", out);
         // SkinnedGibs: person deaths as rigid limb gibs. Independent of
         // ChunkMeshes; the numeric keys are read raw and clamped by the
         // feature.
@@ -238,6 +245,21 @@ namespace
             Equals(name, "BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"))
         {
             return TryReadMappedBool(ini, "Fixes", "MagnetZeroRangeGuard", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE") ||
+            Equals(name, "BZR_DISABLE_UNFOCUSED_MOUSE_RELEASE"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "UnfocusedMouseRelease", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_SCAVENGER_NETPROCESS_GUARD") ||
+            Equals(name, "BZR_DISABLE_SCAVENGER_NETPROCESS_GUARD"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "ScavengerNetProcessGuard", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_LUA_FORMATION_FIX") ||
+            Equals(name, "BZR_DISABLE_LUA_FORMATION_FIX"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "LuaFormationBinding", true, out);
         }
         // New switches: these two had no opt-out of any kind before.
         if (Equals(name, "OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||
@@ -344,6 +366,8 @@ namespace
         if (Equals(name, "OPENSHIM_DISABLE_SETTINGS_UI") || Equals(name, "BZR_DISABLE_SETTINGS_UI"))
             return TryReadMappedBool(ini, "General", "SettingsUi", true, out);
 
+        if (Equals(name, "OPENSHIM_TERRAIN_MICRO_RELIEF_TEST"))
+            return TryReadMappedBool(ini, "Terrain", "TerrainMicroRelief", false, out);
         if (Equals(name, "OPENSHIM_TERRAIN_SEMANTIC_LIFECYCLE_LOG"))
             return ini(IniFile::Main, "Terrain", "TerrainSemanticLifecycleLog", out);
         if (Equals(name, "OPENSHIM_TERRAIN_SEMANTIC_DEBUG"))
@@ -459,6 +483,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "TerrainAtlasRectRepair", false, out);
         }
+        // Lua Send/Receive label fallback for map-authored objects. Positive
+        // key, default ON: it only changes what a handle with no network id
+        // is sent as, and a stock receiver reads that exactly as before.
+        if (Equals(name, "OPENSHIM_LUA_MAPOBJECT_HANDLES"))
+            return TryReadMappedBool(ini, "Network", "LuaMapObjectHandles", false, out);
         if (Equals(name, "OPENSHIM_STOCK_FACTIONS_ONLY"))
             return TryReadMappedBool(ini, "Network", "StockFactionsOnly", false, out);
         if (Equals(name, "OPENSHIM_STOCK_FACTION_SET"))
@@ -509,7 +538,10 @@ namespace EnvConfig
                Equals(name, "BZ_BZRNET_TRACE_QUEUE") ||
                Equals(name, "OPENSHIM_BZRNET_TRACE_QUEUE") ||
                Equals(name, "OPENSHIM_RELAY_LOG_ALL_CONTROL") ||
-               Equals(name, "OPENSHIM_RELAY_LOG_DATAGRAMS");
+               Equals(name, "OPENSHIM_RELAY_LOG_DATAGRAMS") ||
+               // Keep relief harness On/Off controls independent of the saved
+               // UI choice, including a flat control with a saved On value.
+               Equals(name, "OPENSHIM_TERRAIN_MICRO_RELIEF_TEST");
     }
 
     bool TryReadFromIni(const char* name, const IniReader& ini, std::string& out)

@@ -361,7 +361,9 @@ recyclerOdf = "$RecyclerOdf"
 
     Write-Host "Starting satellite validation (fix=$Fix, renderer=$Renderer)"
     $startedAt = Get-Date
-    $process = Start-Process -FilePath $gameExe -ArgumentList $MissionArgs `
+    if (-not (Get-Command Assert-BZRSafeToLaunch -ErrorAction SilentlyContinue)) { . "$PSScriptRoot\BZRHarness.ps1" }
+    Assert-BZRSafeToLaunch
+    $process = Start-BZRGameProcess -FilePath $gameExe -ArgumentList $MissionArgs `
         -WorkingDirectory $GameRoot -PassThru
 
     $deadline = (Get-Date).AddSeconds($RunTimeoutSeconds)
