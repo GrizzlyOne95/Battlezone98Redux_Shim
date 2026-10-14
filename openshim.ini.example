@@ -446,6 +446,30 @@ ConstructorRecycleStaleTarget = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX
 MagnetZeroRangeGuard = 1
 
+; Skip the strategic-AI scrap-position query for a scavenger whose AI process
+; is not a ScavengerProcess. A scavenger owned by a remote peer holds a
+; NetProcess, and stock AI_Team_Compute_Other calls ScavengerProcess::
+; GetScrapPosition on it anyway, which writes -1.0f past the end of that small
+; allocation and corrupts the next heap header (a 0xC0000374 crash minutes
+; later on the host when a team runs an AIP and a guest owns scavengers).
+; Genuine ScavengerProcess instances take the stock path unchanged. Active in
+; network games; GOG Redux 2.2.301 only (stands down on any other build).
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_SCAVENGER_NETPROCESS_GUARD
+ScavengerNetProcessGuard = 1
+
+; Repair the stock Lua Formation(unit, leader, priority) binding. Stock registers a
+; copy of the Recycle binding: it reads argument 2 as an integer, so passing the
+; leader handle raises "bad argument #2 to 'Formation' (number expected, got
+; userdata)", and Formation(unit) forms up on handle 1 with the priority ignored.
+; The repaired binding reads argument 2 as a handle and argument 3 as the priority
+; (default 1). An absent, nil or numeric argument 2 keeps the stock reading, so a
+; script that ran before still runs. GOG Redux 2.2.301 only; stands down on any
+; other build or if the registration row does not match.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_LUA_FORMATION_FIX
+LuaFormationBinding = 1
+
 ; Stop Redux pinning the OS cursor while it is minimized or in the
 ; background. In mouse-look the stock look reader re-clips the cursor and
 ; warps it to the window centre every frame, guarded only by a per-thread
