@@ -1,4 +1,5 @@
 #pragma once
+struct ID3D11DeviceContext;
 
 #include <algorithm>
 
@@ -12,6 +13,9 @@ struct IDXGISwapChain;
 
 namespace BZROpenShim
 {
+    // Scene-depth observer calls after an OM bind: the runtime can exchange
+    // context vtables during rendering. Inert unless bridge depth is opted in.
+    void ReassertFrameBridgeDepthHook(ID3D11DeviceContext* context);
     namespace
     {
         // Implementation-only forward declaration. `long` is HRESULT's Win32
@@ -30,6 +34,8 @@ namespace BZROpenShim
     //   FXAA = 1
     //
     // or OPENSHIM_DX11_ENHANCED_FXAA=1.
+    // OPENSHIM_FRAME_BRIDGE=1 independently requests experimental color export
+    // for the x64 DX12 companion. It does not require FXAA or enable DLSS/RT.
     //
     // A missing key still fails closed, so existing stock/default DX11 installs
     // that have not adopted the Enhanced reference INI remain untouched. The

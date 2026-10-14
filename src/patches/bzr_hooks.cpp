@@ -1746,8 +1746,8 @@ namespace BZROpenShim
         SubmitSkinnedGibsToRenderQueue(renderQueue);
         SubmitShellCasingsToRenderQueue(renderQueue);
 
-        // Opt-in Phase 3A parity capture. Inert unless a semantic frame
-        // capture count is configured.
+        // Opt-in parity capture and deferred authored-normal installation.
+        // Inert unless one of those terrain experiments is configured.
         TerrainProxyRenderFrameTick();
 
         // This runs once per camera. The fog wake runtime steps a fixed cadence

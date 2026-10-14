@@ -6,6 +6,10 @@ project(BzrNetProtocolTests LANGUAGES CXX)
 # suite can be configured, built, and run with plain CMake + CTest:
 #   cmake -S tests -B tests/build && cmake --build tests/build -j && ctest --test-dir tests/build --output-on-failure
 enable_testing()
+add_executable(frame_bridge_layer_policy_tests frame_bridge_layer_policy_tests.cpp)
+target_include_directories(frame_bridge_layer_policy_tests PRIVATE ../include)
+target_compile_features(frame_bridge_layer_policy_tests PRIVATE cxx_std_17)
+add_test(NAME frame_bridge_layer_policy_tests COMMAND frame_bridge_layer_policy_tests)
 
 add_executable(p2p_reliable_send_policy_tests p2p_reliable_send_policy_tests.cpp)
 target_include_directories(p2p_reliable_send_policy_tests PRIVATE ../include)
@@ -29,13 +33,19 @@ endif()
 # executable, Windows process APIs, Frida, pefile or capstone.
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
+    add_test(NAME frame_bridge_scene_layer_inspection_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/frame_bridge_scene_layer_inspection_tests.py")
     execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import PIL"
         RESULT_VARIABLE OPENSHIM_PIL_IMPORT_RESULT OUTPUT_QUIET ERROR_QUIET)
     if(OPENSHIM_PIL_IMPORT_RESULT EQUAL 0)
+        add_test(NAME frame_bridge_capture_pack_tests
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/frame_bridge_capture_pack_tests.py")
         add_test(NAME terrain_paint_pack_tests
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_paint_pack_tests.py")
         add_test(NAME terrain_hd_pack_tests
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_hd_pack_tests.py")
+        add_test(NAME terrain_surface_pack_tests
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_surface_pack_tests.py")
     else()
         message(STATUS "terrain_hd_pack_tests needs Pillow; install it to qualify texture pack changes")
     endif()
@@ -72,6 +82,12 @@ endfunction()
 openshim_add_test(d3d11_buffer_mirror_policy_tests STD 17 SOURCES
     d3d11_buffer_mirror_policy_tests.cpp
 )
+openshim_add_test(frame_bridge_protocol_tests STD 17 SOURCES frame_bridge_protocol_tests.cpp)
+openshim_add_test(frame_bridge_camera_tests STD 17 SOURCES frame_bridge_camera_tests.cpp)
+openshim_add_test(frame_bridge_history_tests STD 17 SOURCES frame_bridge_history_tests.cpp)
+openshim_add_test(frame_bridge_native_geometry_tests STD 17 SOURCES frame_bridge_native_geometry_tests.cpp)
+openshim_add_test(frame_bridge_native_mesh_tests STD 17 SOURCES frame_bridge_native_mesh_tests.cpp)
+openshim_add_test(frame_bridge_native_lease_tests STD 17 SOURCES frame_bridge_native_lease_tests.cpp)
 openshim_add_test(ogre_entity_reload_tests STD 17 SOURCES
     ogre_entity_reload_tests.cpp
 )
@@ -86,6 +102,14 @@ if(WIN32)
     openshim_add_test(terrain_microrelief_gpu_tests STD 17 SOURCES terrain_microrelief_gpu_tests.cpp)
     target_link_libraries(terrain_microrelief_gpu_tests PRIVATE d3d11 d3dcompiler)
     target_compile_definitions(terrain_microrelief_gpu_tests PRIVATE
+        TERRAIN_TESS_SHADER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_terrain_tessellation_test.hlsl")
+    openshim_add_test(terrain_adaptive_gpu_tests STD 17 SOURCES terrain_adaptive_gpu_tests.cpp)
+    target_link_libraries(terrain_adaptive_gpu_tests PRIVATE d3d11 d3dcompiler)
+    target_compile_definitions(terrain_adaptive_gpu_tests PRIVATE
+        TERRAIN_TESS_SHADER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_terrain_tessellation_test.hlsl")
+    openshim_add_test(terrain_height_domain_gpu_tests STD 17 SOURCES terrain_height_domain_gpu_tests.cpp)
+    target_link_libraries(terrain_height_domain_gpu_tests PRIVATE d3d11 d3dcompiler dxguid)
+    target_compile_definitions(terrain_height_domain_gpu_tests PRIVATE
         TERRAIN_TESS_SHADER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_terrain_tessellation_test.hlsl")
 endif()
 
@@ -165,6 +189,19 @@ openshim_add_test(bzn_save_path_tests STD 20 SOURCES
 )
 
 if(WIN32 AND MSVC)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+        openshim_add_test(hook_engine_thread_snapshot_tests STD 20 SOURCES
+            hook_engine_thread_snapshot_tests.cpp
+            ../src/engine/hook_engine.cpp
+            ../src/engine/build_overlay.cpp
+            ../src/engine/resolve_table.cpp
+            ../src/patches/hook_patch_helpers.cpp
+            ../src/engine/x86_length.cpp
+        )
+        target_link_libraries(hook_engine_thread_snapshot_tests PRIVATE psapi)
+        target_compile_definitions(hook_engine_thread_snapshot_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        set_tests_properties(hook_engine_thread_snapshot_tests PROPERTIES TIMEOUT 15)
+    endif()
     # file_io_hooks.cpp (included directly by the test) is the runtime half of
     # the file-I/O seam, so the bootstrap half has to be linked with it. Note
     # game_log_path.cpp is deliberately NOT linked: the test supplies its own

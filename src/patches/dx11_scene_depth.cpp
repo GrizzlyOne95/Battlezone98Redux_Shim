@@ -42,6 +42,7 @@
 #include <string>
 
 #include "dx11_scene_depth.h"
+#include "dx11_enhanced_fxaa.h"
 #include "iat_patch.h"
 #include "com_vtable_patch.h"
 #include "diagnostic_switch.h"
@@ -149,6 +150,10 @@ namespace BZROpenShim
 
         bool DiagnosticRequested()
         {
+            char bridge[8]{}, depth[8]{};
+            if (GetEnvironmentVariableA("OPENSHIM_FRAME_BRIDGE", bridge, sizeof(bridge)) == 1 && bridge[0] == '1' &&
+                GetEnvironmentVariableA("OPENSHIM_FRAME_BRIDGE_DEPTH", depth, sizeof(depth)) == 1 && depth[0] == '1')
+                return true; // Bridge depth requires the OM observation seam.
             return BZROpenShim::DiagnosticSwitch::Requested(kEnvironmentSwitch, kIniSection, kIniKey);
         }
 
@@ -599,6 +604,7 @@ namespace BZROpenShim
 
             if (g_RealOMSetRenderTargets)
                 g_RealOMSetRenderTargets(context, numViews, renderTargetViews, depthStencilView);
+            ReassertFrameBridgeDepthHook(context);
         }
 
         void EnsureContextHook()

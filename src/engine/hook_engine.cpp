@@ -82,6 +82,9 @@ namespace HookEngine
                 for (Entry& thread : m_threads)
                 {
                     thread.ip = 0;
+                    // Even a future snapshot-cache mistake must not freeze
+                    // the thread responsible for resuming everyone else.
+                    if (thread.id == GetCurrentThreadId()) { thread.suspended = false; continue; }
                     thread.suspended = SuspendThread(thread.handle) != static_cast<DWORD>(-1);
                     if (!thread.suspended)
                         continue;
@@ -151,7 +154,7 @@ namespace HookEngine
         // The thread snapshot is system-wide and costs tens of milliseconds
         // (measured at ~40 ms a write on the dev box, four seconds over a
         // launch), so one is shared by every write that follows within
-        // kSnapshotMaxAgeMs, across lock scopes: the patcher's startup writes
+        // kSnapshotMaxAgeMs on the same calling thread, across lock scopes: startup writes
         // arrive one call apart and would otherwise each take their own. It
         // is renewed once it is older than that, so a thread started in the
         // meantime is still seen, and dropped at the last unlock once stale.
@@ -160,23 +163,31 @@ namespace HookEngine
         int g_LockDepth = 0;
         OtherThreads* g_Threads = nullptr;
         ULONGLONG g_ThreadsStamp = 0;
+        DWORD g_ThreadsOwner = 0;
 
         void DropThreadSnapshot()
         {
             delete g_Threads;
             g_Threads = nullptr;
+            g_ThreadsOwner = 0;
         }
 
         // Requires the lock to be held by the calling thread.
         OtherThreads& CurrentThreads()
         {
             const ULONGLONG now = GetTickCount64();
-            if (g_Threads && now - g_ThreadsStamp > kSnapshotMaxAgeMs)
+            // A snapshot excludes its creating thread. Reusing it from a
+            // different patcher can suspend the new caller itself while it
+            // holds the patch mutex, preventing every remaining writer from
+            // progressing. Never share snapshots across calling threads.
+            const DWORD owner = GetCurrentThreadId();
+            if (g_Threads && (g_ThreadsOwner != owner || now - g_ThreadsStamp > kSnapshotMaxAgeMs))
                 DropThreadSnapshot();
             if (!g_Threads)
             {
                 g_Threads = new OtherThreads();
                 g_ThreadsStamp = now;
+                g_ThreadsOwner = owner;
             }
             return *g_Threads;
         }
