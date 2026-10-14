@@ -19,7 +19,7 @@
 param(
     [Parameter(Mandatory)][string]$Mission,
     [string]$Scenario = 'win',
-    [string]$CampaignContent = (Join-Path $env:USERPROFILE 'Documents\GIT\CR-release\Local\Workshop\content'),
+    [string]$CampaignContent = (Join-Path $env:USERPROFILE 'Documents\GIT\Campaign-Reimagined\Local\Workshop\content'),
     [string]$ServerRepo = (Join-Path $env:USERPROFILE 'Documents\GIT\Battlezone98Redux_DedicatedServer'),
     [string]$Python = 'python',
     [string]$BZRCoopRoot = 'C:\BZRCoop',

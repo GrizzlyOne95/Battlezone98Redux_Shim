@@ -48,6 +48,7 @@
 #include "ui_performance.h"
 #include "ui_performance_hooks.h"
 #include "ui_file_scan_hooks.h"
+#include "lua_formation_fix_install.h"
 #include "lua_handle_sync_install.h"
 #include "mp_faction_restrict.h"
 #include "mp_ready_diagnostic.h"
@@ -136,6 +137,12 @@ static unsigned __stdcall PatchThreadProc(void*)
     // fall back to a label-derived id. Signature-gated and fail-closed;
     // [Network] LuaMapObjectHandles = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::LuaHandleSync::InstallLuaHandleSyncIfPossible());
+
+    // Stock Lua Formation(me, him, priority) is a copy of the Recycle binding and
+    // reads the leader as an integer. Swaps the registration row for a repaired
+    // binding. Byte-guarded and fail-closed; [Fixes] LuaFormationBinding = 0 leaves
+    // the engine untouched.
+    PATCH_STAGE(BZROpenShim::LuaFormation::InstallLuaFormationFixIfPossible());
 
     // Explains a "Not Ready" multiplayer entry on the main menu. Read-only: it
     // reproduces the shell's own readiness decision from the same globals and

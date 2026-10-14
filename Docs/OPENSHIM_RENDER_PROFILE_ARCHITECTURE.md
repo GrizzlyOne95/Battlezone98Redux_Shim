@@ -289,17 +289,19 @@ transition matrix, restart persistence through the actual UI.
    quality/performance refinement.
 3. **Retro glow drift**: glow suppression asserted on explicit reapplies;
    engine viewport rebuilds can transiently re-enable bloom until the next
-   reassert (~1 Hz) — acceptable for experimental status.
+   reassert — acceptable for experimental status.
 4. **Renderer forcing**: implemented as of the backend-selection seam
    (Seam A): `Renderer=DX9/DX11` steers startup via the pre-read Ogre.cfg
    transport, with requested/effective/reason diagnostics and a hard opt-out
    (`[Startup] BackendTransport=0`). The settings-UI backend row stays hidden
    until the runtime matrix has soaked across releases; see §2 and
    `reverse_engineering/renderer_startup_backend_selection_20260825.md` for
-   the ownership contract and validation evidence. Profile changes are applied
-   via a pending flag drained by the scheme hook on the game thread, so
-   viewport feedback lands within one ~1 Hz reassert pass rather than from an
-   unsafe off-thread apply.
+   the ownership contract and validation evidence. A profile change made on
+   the game thread (every EXU mission request) is applied to the window's
+   viewports immediately. One made off-thread sets a pending flag that the
+   scheme hook drains on the game thread; the engine only calls that hook on
+   viewport creation and its settings-apply paths, so an off-thread change can
+   wait until the next one. A drain that finds no viewport keeps the flag set.
 5. **CR duplicate removal** (Phase 14) happens in the CR repo only after
    parity validation above; both implementations coexist harmlessly meanwhile
    (disjoint program namespaces).
