@@ -32,6 +32,7 @@ param(
     [string]$OpenShimRepo = '',
     # Host map list row (stock shell, 1280x720). Empty = the known row for $Mission.
     [int]$MapListY = 0,
+    [int]$MapListScroll = -1,
     [hashtable]$ScenarioArgs = @{},
     # Folder of files copied over the staged CR content in all test
     # instances (try a content fix, e.g. a .vxt, without touching CR itself).
@@ -74,7 +75,10 @@ $guestIndices = @(1..($Clients - 1))
 # Rows in the host's "All Maps" list at 1280x720 (12 px pitch, first row 99).
 # The lobby step confirms the pick from the server's gameSettings, so a stale
 # row fails the run instead of testing the wrong map.
-$KnownMapRows = @{ misn05 = 128; misn03 = 147; misn02b = 159; misn04 = 171 }
+$KnownMapRows = @{ misn05 = 128; misn03 = 147; misn02b = 159; misn04 = 207; misn06 = 159; misn07 = 168; misn08 = 144; misn09 = 219; misn10 = 195; misn11 = 183 }
+# Scroll-down clicks before the row pick: the list shows 11 rows, so misn09 ("CR: Wrangling the Fleeing Herd Coop")
+# sits two rows below the fold; after two clicks it is the row at y=207 (misn10, "CR: The Race is On Coop", sorts just above "The Relic Discovered": y=195).
+$KnownMapScroll = @{ misn04 = 2; misn09 = 2; misn10 = 2; misn11 = 2 }
 $Ports = @(@{ p = 'TCP'; n = 1337 }, @{ p = 'UDP'; n = 1338 }, @{ p = 'UDP'; n = 1339 }, @{ p = 'TCP'; n = 8080 })
 $PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 
@@ -89,6 +93,7 @@ else {
     if (-not (Test-Path -LiteralPath $scenarioPath)) { $scenarioPath = Join-Path $PSScriptRoot "coopflow\scenarios\$Scenario.ps1" }
 }
 if (-not (Test-Path -LiteralPath $scenarioPath)) { throw "Scenario not found: $scenarioPath" }
+if ($MapListScroll -lt 0) { $MapListScroll = if ($KnownMapScroll.ContainsKey($Mission)) { $KnownMapScroll[$Mission] } else { 0 } }
 if (-not $MapListY) {
     if (-not $KnownMapRows.ContainsKey($Mission)) { throw "No known map row for $Mission; pass -MapListY." }
     $MapListY = $KnownMapRows[$Mission]
@@ -277,7 +282,7 @@ try {
     try {
         Invoke-CRFlowStep 'lobby: create, join, map, sync join, ready, launch' {
             Invoke-Child 'BZRCoopLobby.ps1' @('-BZRCoopRoot', $BZRCoopRoot, '-ServerLog', $serverLog,
-                '-MapListY', "$MapListY", '-MapBzn', "$Mission.bzn", '-SyncJoin', '-Launch')
+                '-MapListY', "$MapListY", '-MapListScroll', "$MapListScroll", '-MapBzn', "$Mission.bzn", '-SyncJoin', '-Launch')
             "$Mission.bzn"
         } | Out-Null
         Test-CRFlowRoster -ExpectedClients $Clients

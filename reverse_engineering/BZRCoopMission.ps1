@@ -49,13 +49,47 @@ $script:CRFlowReplicatedOps = @('ClearObjectives', 'AddObjective', 'UpdateObject
 function Get-CRFlowStub([string]$Mission) {
     # Appended at the end of the mission chunk, so M/CRCoop/native/... resolve
     # to the mission's file-level locals; names a mission lacks resolve to nil.
+    $infoHooks, $infoOpts, $infoLocals = '', '', ''
+    if ($Mission -eq 'misn06') {
+        # misn06 reads IsInfo (the selected object's info panel, local UI state)
+        # five ways. Guests relay their own via "I" messages and the leader
+        # honours a report for one second. Real selection is not scriptable, so
+        # a test forces one prefix true inside the guest's native-IsInfo wrapper;
+        # the mission's own relay, wire message and expiry still run unmodified.
+        $infoHooks = @'
+
+        local realNativeIsInfo, forcedInfo = nativeIsInfo, {}
+        nativeIsInfo = function(prefix)
+            if forcedInfo[prefix] then return true end
+            return realNativeIsInfo(prefix)
+        end
+'@
+        $infoOpts = @'
+
+            forceInfo = function(prefix, on) forcedInfo[prefix] = on and true or nil; return true end,
+            isInfo = function(prefix) return IsInfo(prefix) end,
+'@
+        $infoLocals = @'
+
+                    -- misn06 keeps camera snapshots as named fields and tags frames "P"/"O".
+                    cameraPath = type(cameraFrame) == "table" and cameraFrame[2] or nil,
+                    cameraKind = type(cameraFrame) == "table" and cameraFrame[1] or nil,
+                    remotePath = type(remoteCamera) == "table" and remoteCamera.path or nil,
+                    remoteKind = type(remoteCamera) == "table" and remoteCamera.kind or nil,
+                    infoReportAges = (function()
+                        local ages = {}
+                        for prefix, at in pairs(type(remoteInfo) == "table" and remoteInfo or {}) do ages[prefix] = GetTime() - at end
+                        return ages
+                    end)(),
+'@
+    }
 @"
 
 $script:CRFlowMarker
 do
     local ok, probe = pcall(require, "CRFlowProbe")
-    if ok and type(probe) == "table" then
-        probe.Attach({
+    if ok and type(probe) == "table" then$infoHooks
+        probe.Attach({$infoOpts
             mission = "$Mission",
             getM = function() return M end,
             CRCoop = CRCoop, exu = exu, native = native,
@@ -75,7 +109,7 @@ do
                     -- snapshot a guest is following (path, target odf).
                     cameraPath = type(cameraFrame) == "table" and cameraFrame[1] or nil,
                     remotePath = type(remoteCamera) == "table" and remoteCamera[2] or nil,
-                    remoteTargetOdf = type(remoteCamera) == "table" and IsValid(remoteCamera[5]) and GetOdf(remoteCamera[5]) or nil,
+                    remoteTargetOdf = type(remoteCamera) == "table" and IsValid(remoteCamera[5]) and GetOdf(remoteCamera[5]) or nil,$infoLocals
                 }
             end,
         })
@@ -516,6 +550,24 @@ function Test-CRFlowWorldParity([int]$HostClient = 0, [int[]]$Guests, [double]$T
     }
 }
 
+# CR's co-op label resolution (CR #186) counts every label a guest could not
+# resolve in 15 s in the mission's M.coopUnresolved (nil until the first guest
+# resolve runs). Records one check per client, once.
+$script:CRFlowUnresolvedChecked = @{}
+function Test-CRFlowUnresolvedCounter([int[]]$Clients) {
+    if (-not $PSBoundParameters.ContainsKey('Clients')) { $Clients = @(Get-CRFlowClientIndices) }
+    foreach ($i in $Clients) {
+        if ($script:CRFlowUnresolvedChecked[$i] -eq $script:CRFlowRun.runDir) { continue }
+        $counter = $null
+        try { $counter = Invoke-CRFlow $i 'return M.coopUnresolved or 0' -TimeoutSeconds 8 } catch { }
+        if ($null -eq $counter) {
+            Add-CRFlowCheck "c$i M.coopUnresolved == 0 (counter unreadable; the log check covers it)" $false $null -WarnOnly
+        } else {
+            Add-CRFlowCheck "c$i M.coopUnresolved == 0" ([int]$counter -eq 0) @{ coopUnresolved = $counter }
+        }
+        $script:CRFlowUnresolvedChecked[$i] = $script:CRFlowRun.runDir
+    }
+}
 function Test-CRFlowLogErrors([int[]]$Clients) {
     if (-not $PSBoundParameters.ContainsKey('Clients')) { $Clients = @(Get-CRFlowClientIndices) }
     foreach ($i in $Clients) {
@@ -529,6 +581,19 @@ function Test-CRFlowLogErrors([int[]]$Clients) {
         # "Fsm error" is the engine's own (e.g. "Camera Stack 0verfow" from an
         # unbalanced CameraFinish); it raises an in-game alert.
         Add-CRFlowCheck "c$i no Lua or engine script errors" ($hits.Count -eq 0) $hits
+        # CR's guest-side marker/label resolution (CR #186) logs "[coop] unresolved ..."
+        # and bumps M.coopUnresolved when a leader-sent label never resolves in 15 s.
+        $unresolved = @()
+        if ($log) {
+            $unresolved = @(Select-String -LiteralPath $log -SimpleMatch -Pattern '[coop] unresolved' |
+                Select-Object -Last 10 | ForEach-Object { $_.Line.Trim() })
+        }
+        Add-CRFlowCheck "c$i no unresolved co-op labels (log)" ($unresolved.Count -eq 0) $unresolved
+        # The Lua counter: scenarios that end the mission read it just before the
+        # ending (a finished mission stops answering probe commands); otherwise
+        # read it live here. A peer with no Lua state is a warning; the log check
+        # above still covers it.
+        Test-CRFlowUnresolvedCounter -Clients @($i)
         # Subtitle fallback prints a user-visible OGRE failure notice without
         # raising a Lua error. Include its dedicated diagnostics in the verdict.
         $overlayHits = @()
