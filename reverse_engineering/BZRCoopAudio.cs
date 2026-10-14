@@ -55,9 +55,12 @@ namespace BZRCoopAudio {
     }
     public static class Sessions {
         static void Check(int hr) { Marshal.ThrowExceptionForHR(hr); }
+        // Not "new DeviceEnumerator()": a process that also loaded BZRHarness's BZRAudio
+        // type registers that class for this CLSID first, and the cast then fails.
+        static object CreateEnumerator() { return Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E"))); }
         static void Release(object value) { if (value != null) Marshal.ReleaseComObject(value); }
         public static int ActiveRenderDeviceCount() {
-            object enumerator = new DeviceEnumerator();
+            object enumerator = CreateEnumerator();
             IDeviceCollection devices = null;
             try {
                 Check(((IDeviceEnumerator)enumerator).EnumAudioEndpoints(0, 1, out devices));
@@ -65,7 +68,7 @@ namespace BZRCoopAudio {
             } finally { Release(devices); Release(enumerator); }
         }
         public static int Mute(int processId) {
-            object enumerator = new DeviceEnumerator();
+            object enumerator = CreateEnumerator();
             IDeviceCollection devices = null;
             int muted = 0;
             try {
