@@ -2,18 +2,52 @@
 # (misn05-coop / misn06-coop, New-CRFlowOverride.ps1) from current CR/EXU
 # before running. Each case prepares four isolated clients and closes them.
 param([string]$BZRCoopRoot = 'C:\BZRCoop', [string]$Only = '', [string]$OpenShimRepo = '',
-      [ValidateSet('misn05', 'misn06', 'misn07', 'misn08', 'misn09')][string]$Mission = 'misn05')
+      [ValidateSet('misn05', 'misn06', 'misn07', 'misn08', 'misn09', 'misn10', 'misn11', 'aicore')][string]$Mission = 'misn05')
 $cases = if ($Mission -eq 'misn07') {
     @(
         'misn07 coop-smoke Override=misn07-coop',
         'misn07 host-leaves Override=misn07-coop'
+    )
+} elseif ($Mission -eq 'misn10') {
+    @(
+        'misn10 coop-smoke Override=misn10-coop',
+        'misn10 assists Override=misn10-coop',
+        # Same CR content with the Io weather object hook (Environment/CRIoWeather.OnObjectCreated in misn10.lua
+        # AddObject) disabled: the host client crashes within ~2 minutes of play with it (see the PR comment).
+        'misn10 assists Override=misn10-noweather',
+        # Split to fit the ~5 minute host lifetime: main assists, then the tug rebuild cap.
+        'misn10 assists Override=misn10-coop Part=main',
+        'misn10 assists Override=misn10-coop Part=tug',
+        'misn10 host-leaves Override=misn10-coop',
+        # OpenShim #469 validation: a guest-owned scavenger while the host runs the AIP, 13 minutes.
+        'misn10 scavguard Override=misn10-coop',
+        # Long idle for crash capture (page heap on the host instance): 900 s.
+        'misn10 coop-smoke Override=misn10-coop PlaySeconds=900',
+        # Bisect for the host heap corruption (0xC0000374): Io weather director fully disabled, 300 s idle.
+        'misn10 coop-smoke Override=misn10-noio PlaySeconds=300'
+    )
+} elseif ($Mission -eq 'misn11') {
+    @(
+        'misn11 coop-smoke Override=misn11-coop',
+        'misn11 assists Override=misn11-coop',
+        'misn11 host-leaves Override=misn11-coop'
+    )
+} elseif ($Mission -eq 'aicore') {
+    # aiCore in networked CR missions (the override holds the current CR aiCore and missions).
+    @(
+        'misn02b aicore-check Override=misn10-coop',
+        'misn03 aicore-check Override=misn10-coop',
+        'misn04 aicore-check Override=misn10-coop',
+        'misn05 aicore-check Override=misn10-coop'
     )
 } elseif ($Mission -eq 'misn09') {
     @(
         'misn09 coop-smoke Override=misn09-coop',
         # Test assists: convoy launch + scaling, Prescott's platoon + victory, team-5 AIP.
         'misn09 assists Override=misn09-coop',
-        'misn09 host-leaves Override=misn09-coop'
+        'misn09 host-leaves Override=misn09-coop',
+        # Control for the misn10 host heap corruption: the same idle length on misn09.
+        'misn09 coop-smoke Override=misn09-coop PlaySeconds=420'
     )
 } elseif ($Mission -eq 'misn08') {
     @(
