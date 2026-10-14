@@ -70,6 +70,9 @@ namespace BZROpenShim
 
             BCRYPT_ALG_HANDLE algorithm = nullptr;
             BCRYPT_HASH_HANDLE hash = nullptr;
+            // The hash object buffer must outlive destroyHash below, which writes into it;
+            // declaring it inside the do-block freed it first (heap use-after-free).
+            std::vector<uint8_t> object;
             HANDLE file = INVALID_HANDLE_VALUE;
             bool success = false;
             do
@@ -88,7 +91,7 @@ namespace BZROpenShim
                     break;
                 }
 
-                std::vector<uint8_t> object(objectSize);
+                object.resize(objectSize);
                 std::array<uint8_t, 32> digest = {};
                 if (createHash(algorithm, &hash, object.data(), objectSize, nullptr, 0, 0) < 0)
                     break;
