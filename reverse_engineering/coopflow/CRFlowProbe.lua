@@ -472,6 +472,17 @@ function Helpers.setCameraActive(v)
     return getLocals().localCameraActive == (v == true)
 end
 
+-- Mission-provided (misn06): force one guest-side IsInfo prefix on or off, or
+-- ask the mission's own (leader-honouring) IsInfo wrapper.
+function Helpers.forceInfo(prefix, on)
+    if not opts.forceInfo then return false end
+    return opts.forceInfo(prefix, on ~= false)
+end
+function Helpers.isInfo(prefix)
+    if not opts.isInfo then return nil end
+    return opts.isInfo(prefix) and true or false
+end
+
 function Helpers.craft(team)
     local list = {}
     for h in AllCraft() do
