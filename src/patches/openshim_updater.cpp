@@ -1,9 +1,13 @@
 #include "openshim_updater.h"
 
 #include "BZROpenShim.h"
+#include "bzr_hooks_internal.h"
+#include "bzr_options_ui.h"
 #include "bzr_string.h"
+#include "openshim_auto_update.h"
 #include "hook_engine.h"
 #include "memory_access.h"
+#include "openshim_update_internal.h"
 #include "openshim_update_manifest.h"
 #include "openshim_update_support.h"
 #include "openshim_assets.h"
@@ -78,6 +82,7 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_Generation{ 0 };
         std::mutex g_StatusMutex;
         std::string g_StatusMessage;
+        std::string g_StagedVersion; // guarded by g_StatusMutex
         std::atomic<bool> g_ShutdownRequested{ false };
         uintptr_t g_WorkerThread = 0;
         ULONGLONG g_CheckStartTick = 0;
@@ -495,9 +500,16 @@ namespace BZROpenShim
             return quoted;
         }
 
+        // systemTool: a Windows console program (powershell.exe) that has to
+        // outlive the game. It exits at once when started DETACHED_PROCESS (no
+        // console at all), so it gets a hidden console from CREATE_NO_WINDOW.
+        // It must also not inherit winmm.dll's SetDllDirectory(<game dir>):
+        // with it, a 32-bit powershell maps OpenShim's proxy winmm.dll from the
+        // game folder and holds it open while the helper tries to replace it.
         bool LaunchHiddenProcess(const std::filesystem::path& executable,
                                  const std::vector<std::wstring>& arguments,
-                                 std::string& error)
+                                 std::string& error,
+                                 bool systemTool = false)
         {
             std::wstring commandLine = QuoteCommandLineArgument(executable.wstring());
             for (const auto& argument : arguments)
@@ -513,12 +525,31 @@ namespace BZROpenShim
             startup.dwFlags = STARTF_USESHOWWINDOW;
             startup.wShowWindow = SW_HIDE;
             PROCESS_INFORMATION process = {};
-            if (!CreateProcessW(executable.c_str(), mutableCommand.data(), nullptr, nullptr,
-                                FALSE, CREATE_NO_WINDOW | DETACHED_PROCESS |
-                                CREATE_BREAKAWAY_FROM_JOB,
-                                nullptr, nullptr, &startup, &process))
+            std::wstring savedDllDirectory;
+            std::wstring workingDirectory;
+            if (systemTool)
             {
-                error = std::error_code(static_cast<int>(GetLastError()),
+                // Child processes inherit the DLL directory, so clear it just
+                // for the CreateProcess call and put it back straight after.
+                wchar_t buffer[MAX_PATH] = {};
+                const DWORD length = GetDllDirectoryW(MAX_PATH, buffer);
+                if (length > 0 && length < MAX_PATH)
+                    savedDllDirectory.assign(buffer, length);
+                SetDllDirectoryW(nullptr);
+                workingDirectory = executable.parent_path().wstring();
+            }
+            const BOOL created = CreateProcessW(executable.c_str(), mutableCommand.data(),
+                nullptr, nullptr, FALSE,
+                (systemTool ? CREATE_NO_WINDOW : CREATE_NO_WINDOW | DETACHED_PROCESS) |
+                    CREATE_BREAKAWAY_FROM_JOB,
+                nullptr, workingDirectory.empty() ? nullptr : workingDirectory.c_str(),
+                &startup, &process);
+            const DWORD createError = GetLastError();
+            if (systemTool && !savedDllDirectory.empty())
+                SetDllDirectoryW(savedDllDirectory.c_str());
+            if (!created)
+            {
+                error = std::error_code(static_cast<int>(createError),
                                         std::system_category()).message();
                 return false;
             }
@@ -819,6 +850,10 @@ namespace BZROpenShim
                 return;
             }
 
+            {
+                std::lock_guard<std::mutex> lock(g_StatusMutex);
+                g_StagedVersion = manifest.version;
+            }
             if (!StageSuite(itemDirectory, manifest, payloads, helper, error))
             {
                 SetState(OpenShimUpdateState::Failed,
@@ -977,6 +1012,8 @@ namespace BZROpenShim
         snapshot.busy = IsBusy(snapshot.state);
         std::lock_guard<std::mutex> lock(g_StatusMutex);
         snapshot.message = g_StatusMessage;
+        if (snapshot.state == OpenShimUpdateState::Staged)
+            snapshot.stagedVersion = g_StagedVersion;
         return snapshot;
     }
 
@@ -988,6 +1025,154 @@ namespace BZROpenShim
             SetState(OpenShimUpdateState::Failed,
                      reason && *reason ? reason : "The update check was cancelled.");
         }
+    }
+
+    namespace
+    {
+        // ---- automatic staging (UI thread only) ---------------------------
+        bool g_AutoStageRan = false;
+        UINT_PTR g_AutoStageTimer = 0;
+        OpenShimNoticeCallback g_AutoStageNoticeCallback = nullptr;
+        std::string g_AutoStageNotice;
+        bool g_RestartRequested = false;
+        constexpr unsigned kRestartWatcherTimeoutSeconds = 180;
+
+        // Same sources the rest of the shim treats as "a multiplayer session":
+        // the local player's net id and the engine's multiplayer byte. An
+        // unreadable value counts as in-session so the check fails closed.
+        bool InNetworkSession()
+        {
+            if (Hooks::ReadLocalPlayerNetIdValue() != 0)
+                return true;
+            __try
+            {
+                return *reinterpret_cast<volatile const uint8_t*>(0x00917F7B) != 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return true;
+            }
+        }
+
+        void CALLBACK AutoStageTimerProc(HWND, UINT, UINT_PTR, DWORD)
+        {
+            PollOpenShimUpdateCheck();
+            const OpenShimUpdateSnapshot update = GetOpenShimUpdateSnapshot();
+            if (update.busy)
+                return;
+            KillTimer(nullptr, g_AutoStageTimer);
+            g_AutoStageTimer = 0;
+            LogShimA(LogLevel::Info, kComponent, "Automatic update check finished: %s",
+                     update.message.c_str());
+            if (update.state != OpenShimUpdateState::Staged)
+                return;
+            g_AutoStageNotice = FormatAutoStageNotice(
+                update.stagedVersion.empty() ? std::string("update") : update.stagedVersion);
+            if (g_AutoStageNoticeCallback)
+                g_AutoStageNoticeCallback();
+        }
+
+        BOOL CALLBACK FindGameWindowProc(HWND window, LPARAM param)
+        {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(window, &pid);
+            if (pid != GetCurrentProcessId() || !IsWindowVisible(window) ||
+                GetWindow(window, GW_OWNER) != nullptr)
+                return TRUE;
+            *reinterpret_cast<HWND*>(param) = window;
+            return FALSE;
+        }
+    }
+
+    void TickOpenShimAutoStage(OpenShimNoticeCallback onNotice)
+    {
+        if (g_AutoStageRan)
+            return;
+        g_AutoStageNoticeCallback = onNotice;
+
+        AutoStageInputs inputs;
+        inputs.configEnabled = true;
+        TryGetUserConfigBool("Updater", "AutoStage", inputs.configEnabled);
+        inputs.steamBuild = GetBzrDistribution() == BzrDistribution::Steam;
+        inputs.alreadyRanThisProcess = g_AutoStageRan;
+        if (!inputs.configEnabled || !inputs.steamBuild)
+        {
+            g_AutoStageRan = true; // a final answer for this process
+            LogShimA(LogLevel::Info, kComponent, "Automatic update check skipped (%s)",
+                     inputs.configEnabled ? "not a Steam build" : "[Updater] AutoStage = 0");
+            return;
+        }
+        // Not latched: the title screen can return once the session is over.
+        inputs.inNetworkSession = InNetworkSession();
+        if (!ShouldAutoStageUpdate(inputs))
+            return;
+
+        g_AutoStageRan = true;
+        if (!BeginOpenShimUpdateCheck())
+        {
+            LogShimA(LogLevel::Info, kComponent, "Automatic update check not started: %s",
+                     GetOpenShimUpdateSnapshot().message.c_str());
+            return;
+        }
+        g_AutoStageTimer = SetTimer(nullptr, 0, 250, AutoStageTimerProc);
+        if (g_AutoStageTimer == 0)
+            CancelOpenShimUpdateCheck("Automatic update check could not schedule Workshop polling.");
+    }
+
+    bool GetOpenShimAutoStageNotice(std::string& text)
+    {
+        text = g_AutoStageNotice;
+        return !text.empty();
+    }
+
+    bool CanRestartForOpenShimUpdate()
+    {
+        return !g_RestartRequested && GetBzrDistribution() == BzrDistribution::Steam &&
+            g_State.load(std::memory_order_acquire) == OpenShimUpdateState::Staged;
+    }
+
+    bool RestartGameForOpenShimUpdate(std::string& error)
+    {
+        if (!CanRestartForOpenShimUpdate())
+        {
+            error = "no staged update to restart for";
+            return false;
+        }
+        HWND gameWindow = nullptr;
+        EnumWindows(FindGameWindowProc, reinterpret_cast<LPARAM>(&gameWindow));
+        if (!gameWindow)
+        {
+            error = "could not find the game window";
+            return false;
+        }
+
+        std::wstring script;
+        if (!BuildUpdateRestartWatcherScript(
+                (GetGameRoot() / L"openshim_update.status").wstring(), kSteamAppIdW,
+                kRestartWatcherTimeoutSeconds, script))
+        {
+            error = "could not build the restart watcher";
+            return false;
+        }
+        wchar_t systemDirectory[MAX_PATH] = {};
+        const UINT length = GetSystemDirectoryW(systemDirectory, MAX_PATH);
+        if (length == 0 || length >= MAX_PATH)
+        {
+            error = "could not locate Windows PowerShell";
+            return false;
+        }
+        const std::filesystem::path powershell = std::filesystem::path(systemDirectory) /
+            L"WindowsPowerShell" / L"v1.0" / L"powershell.exe";
+        if (!LaunchHiddenProcess(powershell,
+                { L"-NoProfile", L"-WindowStyle", L"Hidden", L"-ExecutionPolicy", L"Bypass",
+                  L"-Command", script }, error, true))
+            return false;
+
+        g_RestartRequested = true;
+        LogShimA(LogLevel::Info, kComponent,
+                 "Restart watcher started; asking the game to close for the update");
+        PostMessageW(gameWindow, WM_CLOSE, 0, 0);
+        return true;
     }
 
     void ShutdownOpenShimUpdater()
@@ -1003,5 +1188,24 @@ namespace BZROpenShim
             g_WorkerThread = 0;
         }
         SetState(OpenShimUpdateState::Idle, {});
+    }
+
+    // The asset-set sync (openshim_asset_sync.cpp) shares these.
+    namespace UpdaterDetail
+    {
+        std::filesystem::path GetGameRoot()
+        {
+            return ::BZROpenShim::GetGameRoot();
+        }
+
+        bool FindWorkshopItemDirectory(std::filesystem::path& itemDirectory, std::string& error)
+        {
+            return ::BZROpenShim::FindWorkshopItemDirectory(itemDirectory, error);
+        }
+
+        bool ReadFileVersion(const std::filesystem::path& path, std::string& version)
+        {
+            return ::BZROpenShim::ReadFileVersion(path, version);
+        }
     }
 }

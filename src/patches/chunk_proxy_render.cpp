@@ -22,6 +22,7 @@
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
 #include "native_chunk_prune.h"
+#include "chunk_bridge_probe.h"
 #include "x86_length.h"
 #include "ogre_shader_cache.h"
 #include "ogre_enhanced_light_selection.h"
@@ -4714,11 +4715,13 @@ namespace BZROpenShim
                     snapshot.directBridgeRoot = nullptr;
                 if (snapshot.directBridgeRoot)
                 {
-                    const auto* bridgeBytes = reinterpret_cast<const uint8_t*>(snapshot.directBridgeRoot);
-                    snapshot.directOgreEntity = *reinterpret_cast<void* const*>(bridgeBytes + 0x94);
-                    snapshot.directOgreLight = *reinterpret_cast<void* const*>(bridgeBytes + 0xA8);
+                    snapshot.directProbeOk = ChunkBridgeProbe::TryReadOgreLinks(
+                        snapshot.directBridgeRoot, snapshot.directOgreEntity, snapshot.directOgreLight);
                 }
-                snapshot.directProbeOk = true;
+                else
+                {
+                    snapshot.directProbeOk = true;
+                }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -4727,6 +4730,7 @@ namespace BZROpenShim
 
             __try
             {
+                snapshot.ownerProbeOk = true;
                 // Legacy OBJ76 layouts observed in Redux helpers place the owning GameObject*
                 // at +0x8C, which is the bridge we want to validate for native death chunks.
                 snapshot.legacyOwner = *reinterpret_cast<void* const*>(objectBytes + 0x8C);
@@ -4745,12 +4749,10 @@ namespace BZROpenShim
 
                     if (snapshot.ownerBridgeRoot)
                     {
-                        const auto* bridgeBytes = reinterpret_cast<const uint8_t*>(snapshot.ownerBridgeRoot);
-                        snapshot.ownerOgreEntity = *reinterpret_cast<void* const*>(bridgeBytes + 0x94);
-                        snapshot.ownerOgreLight = *reinterpret_cast<void* const*>(bridgeBytes + 0xA8);
+                        snapshot.ownerProbeOk = ChunkBridgeProbe::TryReadOgreLinks(
+                            snapshot.ownerBridgeRoot, snapshot.ownerOgreEntity, snapshot.ownerOgreLight);
                     }
                 }
-                snapshot.ownerProbeOk = true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {

@@ -39,6 +39,8 @@ if(Python3_Interpreter_FOUND)
     else()
         message(STATUS "terrain_hd_pack_tests needs Pillow; install it to qualify texture pack changes")
     endif()
+    add_test(NAME ui_tiles_consistency_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/ui_tiles_consistency_tests.py")
     add_test(NAME weapon_presentation_live_capture_tests
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../reverse_engineering/test_weapon_presentation_live.py")
 endif()
@@ -293,9 +295,23 @@ openshim_add_test(map_filter_extras_tests STD 14 SOURCES
     map_filter_extras_tests.cpp
 )
 
+openshim_add_test(lua_formation_fix_tests STD 14 SOURCES
+    lua_formation_fix_tests.cpp
+)
+
+openshim_add_test(lua_handle_sync_tests STD 14 SOURCES
+    lua_handle_sync_tests.cpp
+)
+
 openshim_add_test(memory_access_tests STD 20 SOURCES
     memory_access_tests.cpp
 )
+
+if(WIN32 AND MSVC)
+    openshim_add_test(chunk_bridge_probe_tests STD 20 SOURCES
+        chunk_bridge_probe_tests.cpp
+    )
+endif()
 
 openshim_add_test(stable_id_list_tests STD 20 SOURCES
     stable_id_list_tests.cpp
@@ -364,9 +380,17 @@ openshim_add_test(openshim_update_manifest_tests STD 20 SOURCES
     openshim_update_manifest_tests.cpp
     ../src/patches/openshim_update_manifest.cpp
 )
+openshim_add_test(openshim_asset_sets_tests STD 20 SOURCES
+    openshim_asset_sets_tests.cpp
+    ../src/patches/openshim_asset_sets.cpp
+)
 openshim_add_test(openshim_update_support_tests STD 20 SOURCES
     openshim_update_support_tests.cpp
     ../src/patches/openshim_update_support.cpp
+)
+openshim_add_test(openshim_auto_update_tests STD 20 SOURCES
+    openshim_auto_update_tests.cpp
+    ../src/patches/openshim_auto_update.cpp
 )
 
 # The OPENSHIM_*/BZR_* environment redirect: which openshim.ini key each
@@ -403,6 +427,10 @@ openshim_add_test(never_activate_policy_tests STD 20 SOURCES
 
 openshim_add_test(ai_range_policy_tests STD 20 SOURCES
     ai_range_policy_tests.cpp
+)
+
+openshim_add_test(scavenger_process_guard_tests STD 20 SOURCES
+    scavenger_process_guard_tests.cpp
 )
 
 openshim_add_test(lcbench_safety_policy_tests STD 20 SOURCES

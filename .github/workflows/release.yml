@@ -348,8 +348,18 @@ jobs:
           | `openshim.dll` | game root `plugins/` |
           | `patches.json` | game root `scripts/` |
           | `openshim.ini`, `net.ini` | game root |
+          | `resources/renderer/enhanced/*` (Suite zip) | game root `openshim/renderer/enhanced/` |
+          | `resources/openshim/OpenShimAssets.ini` (Suite zip) | game root `openshim/` |
+          | `resources/ui/custom_widgets/*.png` (Suite zip) | game root `BZ_ASSETS_CORE/common/ui/CustomWidgets/` |
 
-          `SHA256SUMS.txt` covers every one of these, and each module now
+          The Enhanced renderer stays unavailable without its resource set
+          (it checks `resources.version`), and the OpenShim menus draw
+          without their custom look when the UI tiles are missing. These
+          three only ship inside `OpenShim-Suite.zip`; copy just the `.png`
+          tiles, not the scripts beside them.
+
+          `SHA256SUMS.txt` covers the loose files and `OpenShim-Suite.zip`
+          itself (verify the zip before taking resources from it), and each module now
           carries its own version resource, so a crash report names the
           binary it came from.
 
