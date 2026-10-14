@@ -156,11 +156,76 @@ public static class BZRForegroundWatchdog
     public static string[] Snapshot() { lock (Gate) { return Events.ToArray(); } }
     public static bool IsRunning() { return Interlocked.CompareExchange(ref running, 0, 0) != 0; }
 
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool QueryFullProcessImageName(IntPtr hProcess, int flags, System.Text.StringBuilder name, ref int size);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+
+    // Install-root scope: when set, a process is "the game" only if its image path
+    // lies under one of these directories (each stored with a trailing backslash).
+    // Null = no scope (name-only, legacy behaviour).
+    static string[] Roots = null;
+
+    static string[] NormalizeRoots(string[] roots)
+    {
+        List<string> list = new List<string>();
+        if (roots != null)
+            foreach (string r in roots)
+            {
+                if (string.IsNullOrWhiteSpace(r)) continue;
+                string f;
+                try { f = Path.GetFullPath(r.Trim()); } catch { f = r.Trim(); }
+                list.Add(f.TrimEnd('\\', '/') + "\\");
+            }
+        return list.Count == 0 ? null : list.ToArray();
+    }
+
+    // Image path of a process, or null when it cannot be read (then: not ours).
+    static string ImagePath(Process p)
+    {
+        try { string f = p.MainModule.FileName; if (!string.IsNullOrEmpty(f)) return f; } catch { }
+        IntPtr h = IntPtr.Zero;
+        try
+        {
+            h = OpenProcess(0x1000, false, p.Id); // PROCESS_QUERY_LIMITED_INFORMATION
+            if (h == IntPtr.Zero) return null;
+            System.Text.StringBuilder sb = new System.Text.StringBuilder(1024);
+            int size = sb.Capacity;
+            return QueryFullProcessImageName(h, 0, sb, ref size) ? sb.ToString() : null;
+        }
+        catch { return null; }
+        finally { if (h != IntPtr.Zero) CloseHandle(h); }
+    }
+
+    static bool InScope(Process p)
+    {
+        string[] roots = Roots;
+        if (roots == null) return true;
+        string path = ImagePath(p);
+        if (string.IsNullOrEmpty(path)) return false;
+        foreach (string r in roots)
+            if (path.StartsWith(r, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
     static bool IsGame(uint pid, string gameName)
     {
         if (pid == 0) return false;
-        try { return string.Equals(Process.GetProcessById((int)pid).ProcessName, gameName, StringComparison.OrdinalIgnoreCase); }
+        try
+        {
+            Process p = Process.GetProcessById((int)pid);
+            return string.Equals(p.ProcessName, gameName, StringComparison.OrdinalIgnoreCase) && InScope(p);
+        }
         catch { return false; }
+    }
+
+    // Number of in-scope game processes (all of them when no root is set).
+    static int CountGames(string gameName)
+    {
+        int n = 0;
+        foreach (Process p in Process.GetProcessesByName(gameName))
+            if (InScope(p)) n++;
+        return n;
     }
 
     // Waits up to waitForGameMs for the game process to exist, then polls the
@@ -169,9 +234,15 @@ public static class BZRForegroundWatchdog
     // held it before. allowAttach enables the AttachThreadInput fallback.
     // More than maxSteals steals ends the run: WM_CLOSE (never a kill) is posted
     // to the game's windows. A run that keeps stealing must end itself.
-    public static bool Start(string gameName, int waitForGameMs, int watchMs, int intervalMs, bool allowAttach, int maxSteals)
+    // Scope: gameRoots limits "the game" to processes of that name whose image
+    // path is under one of the roots, so parallel runs from separate install dirs
+    // never count or close each other's games. With no roots the match is by name
+    // only, and the abort closes windows only when exactly one game process exists.
+    public static bool Start(string gameName, int waitForGameMs, int watchMs, int intervalMs, bool allowAttach, int maxSteals, string[] gameRoots)
     {
         if (Interlocked.CompareExchange(ref running, 1, 0) != 0) return false;
+        Roots = NormalizeRoots(gameRoots);
+        Note("watchdog scope: " + (Roots == null ? "none (name only)" : string.Join(" | ", Roots)));
         Thread t = new Thread(delegate() {
             try { Run(gameName, waitForGameMs, watchMs, intervalMs, allowAttach, maxSteals); }
             catch (Exception ex) { Note("watchdog error: " + ex.Message); }
@@ -227,11 +298,11 @@ public static class BZRForegroundWatchdog
 
             if (watch == null)
             {
-                if (Process.GetProcessesByName(gameName).Length > 0) { watch = Stopwatch.StartNew(); Note("game process seen; watching foreground for " + watchMs + " ms"); }
+                if (CountGames(gameName) > 0) { watch = Stopwatch.StartNew(); Note("game process seen; watching foreground for " + watchMs + " ms"); }
                 else if (wait.ElapsedMilliseconds > waitForGameMs) { Note("game never appeared; watchdog done"); return; }
             }
             else if (watch.ElapsedMilliseconds > watchMs) { Note("watchdog window over; reported " + reported + " steal(s)"); return; }
-            else if (Process.GetProcessesByName(gameName).Length == 0) { Note("game exited; reported " + reported + " steal(s)"); return; }
+            else if (CountGames(gameName) == 0) { Note("game exited; reported " + reported + " steal(s)"); return; }
 
             if (watch != null && PhysicalPressOverGame(gameName)) lastGamePress = Environment.TickCount;
             if (!gameFg)
@@ -283,6 +354,13 @@ public static class BZRForegroundWatchdog
                 if (!aborted && reported > maxSteals)
                 {
                     aborted = true;
+                    int games = CountGames(gameName);
+                    if (Roots == null && games != 1)
+                    {
+                        Note("aborted run skipped: " + games + " games running and no game root to scope by");
+                        Thread.Sleep(intervalMs);
+                        continue;
+                    }
                     int posted = CloseGameWindows(gameName);
                     Note("aborted run: repeated foreground steals (" + reported + " > " + maxSteals + "); posted WM_CLOSE to " + posted + " game window(s)");
                 }
@@ -525,6 +603,13 @@ function Start-BZRForegroundWatchdog {
         More than -MaxSteals steals (default 2) ends the run: WM_CLOSE (never
         TerminateProcess) is posted to the game's windows and "aborted run:
         repeated foreground steals" is logged.
+        Scope: "the game" is a battlezone98redux process whose image path is under
+        -GameRoot (one or more directories), else $script:BZRGameRoot, else env
+        BZR_GAME_ROOT (';'-separated). Games from other install dirs are never
+        counted or closed, so parallel runs cannot close each other. With no root
+        the match is name-only (legacy) and the abort posts WM_CLOSE only when
+        exactly one game process exists; otherwise it logs "aborted run skipped".
+        A process whose path cannot be read is treated as not ours.
         Disable with BZR_NO_FOREGROUND_WATCHDOG=1.
     #>
     [CmdletBinding()]
@@ -532,11 +617,16 @@ function Start-BZRForegroundWatchdog {
         [int]$WaitForGameSeconds = 60,
         [int]$WatchSeconds = 900,
         [int]$PollMilliseconds = 100,
-        [int]$MaxSteals = 2
+        [int]$MaxSteals = 2,
+        [string[]]$GameRoot
     )
     if ($env:BZR_NO_FOREGROUND_WATCHDOG -eq '1') { return $false }
+    $roots = @($GameRoot | Where-Object { $_ })
+    if ($roots.Count -eq 0 -and $script:BZRGameRoot) { $roots = @($script:BZRGameRoot) }
+    if ($roots.Count -eq 0 -and $env:BZR_GAME_ROOT) { $roots = @($env:BZR_GAME_ROOT -split ';' | Where-Object { $_ }) }
     [BZRForegroundWatchdog]::Start($script:BZRGameProcessName, $WaitForGameSeconds * 1000,
-        $WatchSeconds * 1000, $PollMilliseconds, ($env:BZR_WATCHDOG_NO_ATTACH -ne '1'), $MaxSteals)
+        $WatchSeconds * 1000, $PollMilliseconds, ($env:BZR_WATCHDOG_NO_ATTACH -ne '1'), $MaxSteals,
+        [string[]]$roots)
 }
 
 function Get-BZRForegroundWatchdogLog {
