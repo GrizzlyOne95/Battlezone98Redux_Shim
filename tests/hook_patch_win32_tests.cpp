@@ -103,6 +103,88 @@ namespace
         CHECK(slot == nullptr);
     }
 
+    // A module handle is only an address. After the module unloads the address
+    // is MEM_FREE and even the 'MZ' read faults; that was the NeverActivate
+    // sweep's startup crash (PSAPI.DLL unloading between the module snapshot
+    // and the header read). The patcher must report it, not die.
+    void TestPatchImportOnUnmappedModuleIsFaultedNotFatal()
+    {
+        void* hook = reinterpret_cast<void*>(&FakeGetTickCount);
+        void* region = VirtualAlloc(nullptr, 0x2000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        CHECK(region != nullptr);
+        if (!region)
+            return;
+        CHECK(VirtualFree(region, 0, MEM_RELEASE) != 0);
+
+        void* original = nullptr;
+        void** slot = nullptr;
+        HMODULE ghost = reinterpret_cast<HMODULE>(region);
+        CHECK(PatchImport(ghost, "kernel32.dll", "GetTickCount", hook, &original, &slot) ==
+              IatResult::Faulted);
+        CHECK(PatchImportFromAnyDll(ghost, "GetTickCount", hook, &original, &slot) ==
+              IatResult::Faulted);
+        CHECK(original == nullptr);
+        CHECK(slot == nullptr);
+
+        // Committed but not a PE image: also reported, never patched.
+        void* junk = VirtualAlloc(nullptr, 0x2000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        CHECK(junk != nullptr);
+        if (junk)
+        {
+            CHECK(PatchImport(reinterpret_cast<HMODULE>(junk), "kernel32.dll", "GetTickCount", hook,
+                              &original, &slot) == IatResult::Faulted);
+            VirtualFree(junk, 0, MEM_RELEASE);
+        }
+    }
+
+    bool IsMapped(HMODULE module)
+    {
+        MEMORY_BASIC_INFORMATION info = {};
+        return VirtualQuery(module, &info, sizeof(info)) == sizeof(info) && info.State == MEM_COMMIT;
+    }
+
+    // AcquireModuleReference must actually pin: the module stays mapped after
+    // every other holder lets go, and goes away once the reference is released.
+    void TestModuleReferencePinsAcrossAnUnload()
+    {
+        if (GetModuleHandleW(L"psapi.dll"))
+        {
+            std::printf("hook_patch_win32_tests: psapi.dll already loaded by someone else; "
+                        "pin test skipped\n");
+            return;
+        }
+        HMODULE module = LoadLibraryW(L"psapi.dll");
+        CHECK(module != nullptr);
+        if (!module)
+            return;
+
+        HMODULE held = BZROpenShim::IatPatch::AcquireModuleReference(module);
+        CHECK(held == module);
+        CHECK(FreeLibrary(module) != 0);  // the loader's own reference, as another thread would drop it
+
+        CHECK(IsMapped(module));          // still pinned by `held`
+        void* original = nullptr;
+        void** slot = nullptr;
+        // Walks the live image without faulting; psapi forwards to kernelbase
+        // so it imports nothing named GetTickCount.
+        const IatResult pinnedResult = PatchImport(module, "kernel32.dll", "GetTickCount",
+                                                   reinterpret_cast<void*>(&FakeGetTickCount), &original, &slot);
+        CHECK(pinnedResult == IatResult::NotFound);
+
+        BZROpenShim::IatPatch::ReleaseModuleReference(held);
+        if (GetModuleHandleW(L"psapi.dll") == nullptr)
+        {
+            // Truly gone now: the helper must refuse it and the patcher must
+            // report a fault instead of crashing.
+            CHECK(BZROpenShim::IatPatch::AcquireModuleReference(module) == nullptr);
+            CHECK(PatchImport(module, "kernel32.dll", "GetTickCount",
+                              reinterpret_cast<void*>(&FakeGetTickCount), &original, &slot) ==
+                  IatResult::Faulted);
+        }
+        CHECK(BZROpenShim::IatPatch::AcquireModuleReference(nullptr) == nullptr);
+        BZROpenShim::IatPatch::ReleaseModuleReference(nullptr);
+    }
+
     // A stand-in COM object: its first member points at a writable table.
     void* g_Vtable[4] = {};
     struct FakeObject
@@ -181,6 +263,8 @@ int main()
     TestPatchImportByDllName();
     TestPatchImportFromAnyDll();
     TestPatchImportNotFound();
+    TestPatchImportOnUnmappedModuleIsFaultedNotFatal();
+    TestModuleReferencePinsAcrossAnUnload();
     TestVtablePatchSavesOriginalOnce();
     TestVtablePatchForeignWrapperPolicy();
     TestVtablePatchTypedOverloadAndNulls();
