@@ -7,6 +7,16 @@ project(BzrNetProtocolTests LANGUAGES CXX)
 #   cmake -S tests -B tests/build && cmake --build tests/build -j && ctest --test-dir tests/build --output-on-failure
 enable_testing()
 
+add_executable(planet_video_policy_tests planet_video_policy_tests.cpp)
+target_include_directories(planet_video_policy_tests PRIVATE ../include)
+target_compile_features(planet_video_policy_tests PRIVATE cxx_std_17)
+if(MSVC)
+    target_compile_options(planet_video_policy_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(planet_video_policy_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME planet_video_policy_tests COMMAND planet_video_policy_tests)
+
 add_executable(p2p_reliable_send_policy_tests p2p_reliable_send_policy_tests.cpp)
 target_include_directories(p2p_reliable_send_policy_tests PRIVATE ../include)
 target_compile_features(p2p_reliable_send_policy_tests PRIVATE cxx_std_14)
@@ -29,6 +39,8 @@ endif()
 # executable, Windows process APIs, Frida, pefile or capstone.
 find_package(Python3 QUIET COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
+    add_test(NAME planet_video_catalog_tests
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/planet_video_catalog_tests.py")
     execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import PIL"
         RESULT_VARIABLE OPENSHIM_PIL_IMPORT_RESULT OUTPUT_QUIET ERROR_QUIET)
     if(OPENSHIM_PIL_IMPORT_RESULT EQUAL 0)

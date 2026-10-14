@@ -106,6 +106,9 @@ namespace BZROpenShim
 
         std::vector<HookEngine::PatchDef> patches =
         {
+            // Custom planets only; a .pvi sidecar opts into time-based loop
+            // points and screen-owned intro audio. Stock planet calls stay stock.
+            { 0, HookEngine::PatchType::REL32, {}, "Custom Planet Video Playback", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Map Sorting", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "GameObject Handle Stale Slot Guard", false, {} },
             // ODF legacy-section compatibility (odf_item_hooks.cpp): JMP5

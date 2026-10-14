@@ -9,6 +9,18 @@
   },
   "patches": [
     {
+      "name": "Custom Planet Video Playback",
+      "platforms": [
+        "gog"
+      ],
+      "pattern": "6A 00 8B 8D A8 0A FE FF 83 C1 7C E8 ?? ?? ?? ?? 50 8B 8D D4 0A FE FF E8 ?? ?? ?? ?? 6A 01 8B 8D D4 0A FE FF E8 ?? ?? ?? ?? EB 1A",
+      "offset": 37,
+      "expected_size": 4,
+      "fallback": "0x00790967",
+      "require_unique": true,
+      "identity": "Released GOG Redux 2.2.301 SHA256 8d71f56c...3377413 custom-video branch of cUI_Mission: reads planetDisplay at mission-record +0x7C, loads it, then calls cUI_View play(bool) at 0x007D3DD0 with true. Only this call is redirected. thiscall(view,bool), RET 4. Static disassembly verified 2026-10-14; runtime qualification recorded separately."
+    },
+    {
       "name": "P2P Reliable Send Backlog",
       "pattern": "8B 45 88 83 38 08 0F 85 4B 02 00 00 8B 4D 88 0F B6 51 1A 85 D2 0F 85 3C 02 00 00",
       "offset": 21,
@@ -375,6 +387,76 @@
     }
   ],
   "resolves": [
+    {
+      "name": "PlanetVideo::ViewPlay",
+      "pattern": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 40 01 00 00 00 74 14 0F B6 4D 08 51 8B 55 FC 8B 8A 40 01 00 00 FF 15 ?? ?? ?? ?? 8B E5 5D C2 04 00",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00000000",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Released GOG cUI_View video play(bool): +0x140 is the Ogre wrapper; imports OgreTheoraVideoClip::play(bool), RET 4. Called from custom cUI_Mission at 0x790966."
+    },
+    {
+      "name": "PlanetVideo::ViewPlayLoop",
+      "pattern": "55 8B EC 83 EC 08 89 4D FC 8B 45 FC 83 B8 40 01 00 00 00 74 5F 8B 4D FC 8B 89 40 01 00 00 FF 15 ?? ?? ?? ?? 89 45 F8 51 F3 0F 10 05 ?? ?? ?? ??",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00000000",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Released GOG cUI_View wrapper sets speed 1.0, optionally seeks argument frame, then calls imported playAndReplayFromFrame. RET 8. Stock Moon calls frame 96, Mars 76; thiscall(view,int,bool)."
+    },
+    {
+      "name": "PlanetVideo::MissionIntroSound",
+      "pattern": "55 8B EC 83 EC 34 A1 ?? ?? ?? ?? 33 C5 89 45 FC 89 4D CC 8B 45 CC 83 B8 60 01 00 00 00 74 12 8B 4D CC 8B 91 60 01 00 00",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00000000",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Released GOG cUI_Mission sound method: stock planet callers supply emspin.wav/mspin.wav. Stops previous +0x160 handle, installs stock completion callback, stores new handle at +0x160. RET 4, engine-owned screen lifetime."
+    },
+    {
+      "name": "PlanetVideo::MissionSlot",
+      "pattern": "8B 95 D0 0A FE FF 89 15 ?? ?? ?? ?? 68 44 01 00 00 FF 15 ?? ?? ?? ?? 83 C4 04",
+      "offset": 8,
+      "mode": "abs32_operand",
+      "fallback": "0x00000000",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Released GOG cUI_Mission ctor writes this singleton at 0x78F131 immediately before first child-view allocation. Stock sound completion also reads it. The hook passes the saved constructor this from this independently verified EBP-0x1F530 slot and requires it to match the current singleton."
+    },
+    {
+      "name": "PlanetVideo::GetItemSize",
+      "pattern": "8B 45 E0 83 C0 04 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 D4 8B 4D E0 83 C1 04 51 E8 ?? ?? ?? ?? 83 C4 04 89 45 CC 8B 55 CC 03 55 D4",
+      "offset": 7,
+      "mode": "rel32_target",
+      "fallback": "0x00000000",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "FileData ctor queries size at 0x588E60 before UseItem at 0x588E72; caller cleans one char* argument. Call-target resolve remains valid when ODF compatibility detours the entry. cdecl(const char*) -> size_t."
+    },
+    {
+      "name": "PlanetVideo::UseItem",
+      "pattern": "8B 45 E0 83 C0 04 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 D4 8B 4D E0 83 C1 04 51 E8 ?? ?? ?? ?? 83 C4 04 89 45 CC 8B 55 CC 03 55 D4",
+      "offset": 25,
+      "mode": "rel32_target",
+      "fallback": "0x00000000",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "FileData ctor loads bytes at 0x588E72 after size query; caller cleans one char* argument. Paired release at 0x5893B4. Resolve call target rather than detoured prologue. cdecl(const char*) -> void*."
+    },
+    {
+      "name": "PlanetVideo::UnlockItem",
+      "pattern": "8B 4D E0 83 C1 04 51 E8 ?? ?? ?? ?? 83 C4 04 C7 45 FC FF FF FF FF 8B 45 E0",
+      "offset": 7,
+      "mode": "rel32_target",
+      "fallback": "0x00000000",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "FileData ctor paired release at 0x5893B4 after size/use calls at 0x588E60/0x588E72. Caller cleans one char* argument. Call-target resolution retains existing ODF item hook locking behavior."
+    },
     {
       "name": "CollisionTest::GetProperties",
       "platforms": [
