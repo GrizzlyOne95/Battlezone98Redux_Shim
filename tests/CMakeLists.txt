@@ -569,6 +569,10 @@ openshim_add_test(odf_compat_tests STD 20 SOURCES
     ../src/patches/odf_compat.cpp
 )
 
+openshim_add_test(odf_search_path_tests STD 20 SOURCES
+    odf_search_path_tests.cpp
+)
+
 openshim_add_test(enhanced_resource_bootstrap_tests STD 20 SOURCES
     enhanced_resource_bootstrap_tests.cpp
     ../src/engine/enhanced_resource_bootstrap.cpp

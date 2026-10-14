@@ -651,12 +651,24 @@ namespace BZROpenShim
             outConfig = {};
 
             std::filesystem::path resolvedPath;
-            if (!TryResolveOdfFilePath(odfToken, resolvedPath))
-                return false;
-
             const ProducerBuildMenuEntry odfKey = NormalizeQuotedOdfToken(odfToken);
             if (!odfKey.hasValue)
                 return false;
+
+            if (!TryResolveOdfFilePath(odfToken, resolvedPath))
+            {
+                // Called once per ODF token (results, including misses, are
+                // cached by TryGetTeamFilterForObject); the budget bounds the
+                // total across token variety.
+                static volatile long s_notFoundLogBudget = 16;
+                if (InterlockedDecrement(&s_notFoundLogBudget) >= 0)
+                {
+                    Log(L"[%hs] team filter odf=%hs not found on disk; filter defaults to all teams\n",
+                        logTag ? logTag : "TEAMODF",
+                        odfKey.token);
+                }
+                return false;
+            }
 
             FILE* file = nullptr;
             if (fopen_s(&file, resolvedPath.string().c_str(), "r") != 0 || !file)

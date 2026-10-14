@@ -194,7 +194,10 @@ namespace BZROpenShim
                                             double maxX,
                                             double maxZ,
                                             void* outResults);
-    using FnRangeResultsGetNext = uint32_t(__thiscall*)(void* results, uint32_t** outHandlePtr);
+    // Returns bool in AL only: the exhausted path is `xor al, al`, so the upper
+    // EAX bytes are stale. Declared uint32_t, the loop never saw the end and
+    // walked off the grid (crash in RangeNext once a craft entered the box).
+    using FnRangeResultsGetNext = bool(__thiscall*)(void* results, uint32_t** outHandlePtr);
     extern FnShieldTowerSimulate g_BzrFn_BuildingSimulate;
     extern FnRangeSearch g_BzrFn_CollisionRangeSearch;
     extern FnGameObjectRelation g_BzrFn_GameObjectEnemyP;
