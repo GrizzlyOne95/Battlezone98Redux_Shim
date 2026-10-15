@@ -4,14 +4,19 @@
 // unpacks them to a private temp directory and runs the script with the
 // console inherited. All install logic stays in the scripts.
 //
-//   OpenShimSetup.exe              install (offline when a suite is embedded)
+//   OpenShimSetup.exe              choose Install, Repair, Update or Uninstall
+//   OpenShimSetup.exe --install    explicitly install the bundled release
+//   OpenShimSetup.exe --repair     restore missing/damaged suite files using the
+//                                  bundled release (versions must match)
+//   OpenShimSetup.exe --update     fetch the latest published suite, even when
+//                                  this exe has an older release embedded
 //   OpenShimSetup.exe --uninstall  run uninstall_windows.ps1 instead
 //   <game folder>                  an existing folder (e.g. dragged onto the exe)
 //                                  is used as OPENSHIM_GAME_PATH, not passed on
 //   --no-pause                     do not wait for Enter at the end, and do not ask
 //                                  which install to use (scripted run)
-//   --quiet                        do not ask which install to use (all installs
-//                                  found, or OPENSHIM_GAME_PATH); still pauses
+//   --quiet                        skip the action and folder menus (defaults to
+//                                  install/all detected folders); still pauses
 //
 // With a console on stdin and neither flag, OPENSHIM_INTERACTIVE=1 is set so the
 // scripts list the installs found and let the user pick or browse for a folder.
@@ -33,6 +38,48 @@ constexpr WORD kResInstall = 1;
 constexpr WORD kResUninstall = 2;
 constexpr WORD kResSuiteZip = 3;
 constexpr WORD kResSuiteSha = 4;
+
+enum class Operation { Install, Repair, Update, Uninstall };
+
+const wchar_t* OperationFlag(Operation op) {
+    switch (op) {
+    case Operation::Repair: return L"repair";
+    case Operation::Update: return L"update";
+    case Operation::Uninstall: return L"uninstall";
+    default: return L"install";
+    }
+}
+
+// Keep menu handling in the native wrapper. The scripts remain the only
+// authority for game-path validation and installation/deployment.
+bool ChooseOperation(Operation& op) {
+    std::printf("Choose an action:\n"
+                "  1. Install       Install the release included with Setup\n"
+                "  2. Repair        Restore the same installed version and missing files\n"
+                "  3. Update        Download and install the latest published release\n"
+                "  4. Uninstall     Remove OpenShim files (keep player settings)\n"
+                "  Q. Quit\n\n"
+                "Selection: ");
+    char input[64]{};
+    if (!std::fgets(input, sizeof input, stdin)) return false;
+    switch (input[0]) {
+    case '1': op = Operation::Install; break;
+    case '2': op = Operation::Repair; break;
+    case '3': op = Operation::Update; break;
+    case '4': op = Operation::Uninstall; break;
+    default: return false;
+    }
+    if (op == Operation::Uninstall) {
+        std::printf("\nUninstall preserves openshim.ini, net.ini and logs.\n"
+                    "Type YES to confirm removing OpenShim: ");
+        if (!std::fgets(input, sizeof input, stdin)) return false;
+        std::string answer(input);
+        while (!answer.empty() && (answer.back() == '\n' || answer.back() == '\r'))
+            answer.pop_back();
+        if (answer != "YES") return false;
+    }
+    return true;
+}
 
 struct Blob {
     const unsigned char* data = nullptr;
@@ -168,22 +215,44 @@ int wmain() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     int argc = 0;
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    bool uninstall = false;
+    Operation operation = Operation::Install;
+    bool operationSpecified = false;
+    bool operationConflict = false;
     bool pause = true;
     bool quiet = false;
     std::wstring gameDir;
     std::vector<std::wstring> passthrough;
     for (int i = 1; argv && i < argc; ++i) {
         std::wstring a = argv[i];
-        if (a == L"--uninstall") uninstall = true;
+        if (a == L"--install" || a == L"--repair" || a == L"--update" || a == L"--uninstall") {
+            Operation requested = a == L"--repair" ? Operation::Repair :
+                a == L"--update" ? Operation::Update :
+                a == L"--uninstall" ? Operation::Uninstall : Operation::Install;
+            if (operationSpecified) operationConflict = true;
+            operation = requested;
+            operationSpecified = true;
+        }
         else if (a == L"--no-pause") { pause = false; quiet = true; }
         else if (a == L"--quiet") quiet = true;
         else if (gameDir.empty() && IsDirectory(a)) gameDir = a;
         else passthrough.push_back(a);
     }
     if (argv) LocalFree(argv);
-
-    std::printf("OpenShim Setup %s\n\n", uninstall ? "(uninstall)" : "");
+    if (operationConflict) {
+        std::printf("Choose only one of --install, --repair, --update or --uninstall.\n");
+        if (pause) Pause();
+        return 2;
+    }
+    std::printf("OpenShim Setup\n\n");
+    if (!operationSpecified && !quiet && HasConsoleInput()) {
+        if (!ChooseOperation(operation)) {
+            std::printf("\nCancelled. Nothing was changed.\n");
+            return 0;
+        }
+    }
+    const bool uninstall = operation == Operation::Uninstall;
+    const bool update = operation == Operation::Update;
+    std::printf("Action: %ls\n\n", OperationFlag(operation));
 
     const Blob script = FindBlob(uninstall ? kResUninstall : kResInstall);
     const Blob zip = FindBlob(kResSuiteZip);
@@ -202,7 +271,7 @@ int wmain() {
         goto done;
     }
 
-    if (embedded && !uninstall) {
+    if (embedded && !uninstall && !update) {
         // Verify in memory first: a damaged or modified exe is refused before
         // anything touches the disk.
         std::string actual;
@@ -220,8 +289,9 @@ int wmain() {
         }
         std::printf("Embedded OpenShim bundle verified (sha256 %s).\n", actual.c_str());
     } else if (!uninstall) {
-        std::printf("This is a development build with no embedded OpenShim release.\n"
-                    "It will download the latest published release instead.\n");
+        std::printf("%s\n", update ?
+            "Update will download the latest published release (not the embedded bundle)." :
+            "No embedded release is available. The latest published suite will be downloaded.");
     }
 
     if (!MakeWorkDir(work)) {
@@ -234,12 +304,12 @@ int wmain() {
     scriptPath = scriptsDir + (uninstall ? L"\\uninstall_windows.ps1" : L"\\install_windows.ps1");
     zipPath = work + L"\\OpenShim-Suite.zip";
     if (!CreateDirectoryW(scriptsDir.c_str(), nullptr) || !WriteBlob(scriptPath, script) ||
-        (embedded && !uninstall && !WriteBlob(zipPath, zip))) {
+        (embedded && !uninstall && !update && !WriteBlob(zipPath, zip))) {
         std::printf("Could not unpack the installer (error %lu).\n", GetLastError());
         goto done;
     }
 
-    if (embedded && !uninstall) {
+    if (embedded && !uninstall && !update) {
         SetEnvironmentVariableW(L"OPENSHIM_SUITE_ZIP", zipPath.c_str());
         SetEnvironmentVariableW(L"OPENSHIM_SUITE_SHA256", std::wstring(expected.begin(), expected.end()).c_str());
     } else {
@@ -247,6 +317,9 @@ int wmain() {
         SetEnvironmentVariableW(L"OPENSHIM_SUITE_ZIP", nullptr);
         SetEnvironmentVariableW(L"OPENSHIM_SUITE_SHA256", nullptr);
     }
+    // The installer script enforces repair/update semantics and downgrade
+    // guards; the native wrapper only chooses which verified bundle to use.
+    SetEnvironmentVariableW(L"OPENSHIM_SETUP_ACTION", uninstall ? nullptr : OperationFlag(operation));
 
     {
         const std::wstring powershell = PowerShellPath();
