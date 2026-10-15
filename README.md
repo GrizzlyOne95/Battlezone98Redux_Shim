@@ -42,8 +42,8 @@ and double-click it. The setup menu now offers:
   dialog, *Also remove OpenShim settings, logs, crash dumps, and uploader data*,
   opts into a more complete cleanup. This removes OpenShim-owned logs and
   minidumps from the selected game folder(s), player settings/backups, and the
-  current Windows user's dedicated `%LOCALAPPDATA%\\openshim` and
-  `%APPDATA%\\openshim` folders (including pending uploader bundles and
+  current Windows user's dedicated `%LOCALAPPDATA%\openshim` and
+  `%APPDATA%\openshim` folders (including pending uploader bundles and
   saved webhook configuration). It **does not** remove shared `net.ini`,
   `BZLogger.txt`, other game logs, or unrelated mods. If Steam still has the
   OpenShim uploader launch option configured, remove that launch option
