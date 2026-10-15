@@ -11,6 +11,9 @@
 //   OpenShimSetup.exe --update     fetch the latest published suite, even when
 //                                  this exe has an older release embedded
 //   OpenShimSetup.exe --uninstall  run uninstall_windows.ps1 instead
+//   OpenShimSetup.exe --uninstall --purge-leftovers
+//                                  also remove OpenShim-owned logs, settings,
+//                                  crash dumps and per-user uploader files
 //   <game folder>                  an existing folder (e.g. dragged onto the exe)
 //                                  is used as OPENSHIM_GAME_PATH, not passed on
 //   --no-pause                     do not wait for Enter at the end, and do not ask
@@ -38,6 +41,8 @@ constexpr WORD kResInstall = 1;
 constexpr WORD kResUninstall = 2;
 constexpr WORD kResSuiteZip = 3;
 constexpr WORD kResSuiteSha = 4;
+constexpr WORD kUninstallDialogId = 101;
+constexpr int kPurgeCheckboxId = 1001;
 
 enum class Operation { Install, Repair, Update, Uninstall };
 
@@ -69,16 +74,41 @@ bool ChooseOperation(Operation& op) {
     case '4': op = Operation::Uninstall; break;
     default: return false;
     }
-    if (op == Operation::Uninstall) {
-        std::printf("\nUninstall preserves openshim.ini, net.ini and logs.\n"
-                    "Type YES to confirm removing OpenShim: ");
-        if (!std::fgets(input, sizeof input, stdin)) return false;
-        std::string answer(input);
-        while (!answer.empty() && (answer.back() == '\n' || answer.back() == '\r'))
-            answer.pop_back();
-        if (answer != "YES") return false;
-    }
     return true;
+}
+
+// A standard Windows dialog with an opt-in checkbox, shown once before any
+// removal. Quiet/automation clients use --purge-leftovers explicitly.
+INT_PTR CALLBACK UninstallOptionsProc(HWND dialog, UINT message, WPARAM wParam, LPARAM lParam) {
+    if (message == WM_INITDIALOG) {
+        SetWindowLongPtrW(dialog, DWLP_USER, lParam);
+        if (*reinterpret_cast<bool*>(lParam))
+            CheckDlgButton(dialog, kPurgeCheckboxId, BST_CHECKED);
+        return TRUE;
+    }
+    if (message == WM_COMMAND) {
+        switch (LOWORD(wParam)) {
+        case IDOK: {
+            auto* selected = reinterpret_cast<bool*>(GetWindowLongPtrW(dialog, DWLP_USER));
+            if (selected) *selected = IsDlgButtonChecked(dialog, kPurgeCheckboxId) == BST_CHECKED;
+            EndDialog(dialog, IDOK);
+            return TRUE;
+        }
+        case IDCANCEL:
+            EndDialog(dialog, IDCANCEL);
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+bool ConfirmUninstall(bool& purgeLeftovers) {
+    const INT_PTR result = DialogBoxParamW(GetModuleHandleW(nullptr),
+        MAKEINTRESOURCEW(kUninstallDialogId), nullptr, UninstallOptionsProc,
+        reinterpret_cast<LPARAM>(&purgeLeftovers));
+    if (result == -1)
+        std::printf("Could not display uninstall options (error %lu). Nothing was removed.\n", GetLastError());
+    return result == IDOK;
 }
 
 struct Blob {
@@ -218,6 +248,7 @@ int wmain() {
     Operation operation = Operation::Install;
     bool operationSpecified = false;
     bool operationConflict = false;
+    bool purgeLeftovers = false;
     bool pause = true;
     bool quiet = false;
     std::wstring gameDir;
@@ -232,6 +263,7 @@ int wmain() {
             operation = requested;
             operationSpecified = true;
         }
+        else if (a == L"--purge-leftovers") purgeLeftovers = true;
         else if (a == L"--no-pause") { pause = false; quiet = true; }
         else if (a == L"--quiet") quiet = true;
         else if (gameDir.empty() && IsDirectory(a)) gameDir = a;
@@ -251,6 +283,15 @@ int wmain() {
         }
     }
     const bool uninstall = operation == Operation::Uninstall;
+    if (purgeLeftovers && !uninstall) {
+        std::printf("--purge-leftovers requires --uninstall. Nothing was changed.\n");
+        if (pause) Pause();
+        return 2;
+    }
+    if (uninstall && !quiet && HasConsoleInput() && !ConfirmUninstall(purgeLeftovers)) {
+        std::printf("Cancelled. Nothing was changed.\n");
+        return 0;
+    }
     const bool update = operation == Operation::Update;
     std::printf("Action: %ls\n\n", OperationFlag(operation));
 
@@ -320,6 +361,9 @@ int wmain() {
     // The installer script enforces repair/update semantics and downgrade
     // guards; the native wrapper only chooses which verified bundle to use.
     SetEnvironmentVariableW(L"OPENSHIM_SETUP_ACTION", uninstall ? nullptr : OperationFlag(operation));
+    // A prior shell's cleanup setting must not silently turn a normal
+    // uninstall into full removal; the checkbox/flag is the sole UI opt-in.
+    SetEnvironmentVariableW(L"OPENSHIM_PURGE_LEFTOVERS", uninstall && purgeLeftovers ? L"1" : nullptr);
     // Update must use the latest published suite. An inherited developer DLL
     // override must not silently substitute local, potentially older bytes.
     if (update) SetEnvironmentVariableW(L"OPENSHIM_DLL", nullptr);
