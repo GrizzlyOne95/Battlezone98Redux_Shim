@@ -1984,6 +1984,57 @@ namespace BZROpenShim::RenderProfiles
             return decided;
         }
 
+        FnRgmInitialiseGroup s_originalInitialiseGroup = nullptr;
+
+        void __fastcall InitialiseResourceGroupHook(void* manager, void*,
+                                                   const std::string& group)
+        {
+            // CR's program wrappers compile while Modable is parsed. Waiting
+            // for a later viewport scheme change leaves their HLSL sources
+            // unavailable and can flood the lobby with shaderless DX11 draws.
+            // This callback runs on Ogre's caller thread, outside loader lock.
+            // Our own group uses the DLL export directly, so it cannot recurse
+            // through the executable's import slot.
+            if (group == "Modable")
+            {
+                EnsureEnhancedResourceGroup();
+            }
+            s_originalInitialiseGroup(manager, group);
+        }
+
+        void InstallResourceGroupBootstrap()
+        {
+            constexpr const char* name =
+                "?initialiseResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$"
+                "basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z";
+            const uintptr_t slot = Hooks::FindMainImageImportSlot("OgreMain.dll", name);
+            const FnRgmInitialiseGroup original =
+                ResolveOgreExport<FnRgmInitialiseGroup>(name);
+            if (!slot || !original ||
+                *reinterpret_cast<FnRgmInitialiseGroup*>(slot) != original)
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "resource bootstrap import identity unavailable; viewport bootstrap retained");
+                return;
+            }
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(reinterpret_cast<void*>(slot), sizeof(void*),
+                                PAGE_READWRITE, &oldProtect))
+            {
+                return;
+            }
+            s_originalInitialiseGroup = original;
+            void* previous = InterlockedCompareExchangePointer(
+                reinterpret_cast<void* volatile*>(slot),
+                reinterpret_cast<void*>(&InitialiseResourceGroupHook),
+                reinterpret_cast<void*>(original));
+            DWORD ignored = 0;
+            VirtualProtect(reinterpret_cast<void*>(slot), sizeof(void*), oldProtect, &ignored);
+            LogShimA(previous == reinterpret_cast<void*>(original) ? LogLevel::Info : LogLevel::Warn,
+                     kLogTag, "resource bootstrap before Modable parsing %s",
+                     previous == reinterpret_cast<void*>(original) ? "installed" : "skipped (import changed)");
+        }
+
         bool EnhancedResourcesAvailable()
         {
             return Boot::IsEnhancedCapabilityAvailable(
@@ -4060,6 +4111,7 @@ namespace BZROpenShim::RenderProfiles
         if (SchemeTakeoverAddressesBound())
         {
             InstallSchemeTakeover();
+            InstallResourceGroupBootstrap();
         }
         else
         {
