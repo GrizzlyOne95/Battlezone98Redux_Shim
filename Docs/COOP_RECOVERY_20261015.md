@@ -74,3 +74,33 @@ the source fixes and fresh EXU applied. Nothing was uploaded to Workshop.
 Further live assistance and mission checks are recorded in the continuation of
 this document. These controls do not establish full mission completion, remote
 two-PC play, Steam delivery or Proton/Wine qualification.
+
+## Continued native acceptance
+
+CR repairs and the closed-PDA V/Z polling fix are in draft
+[CR #214](https://github.com/GrizzlyOne95/Battlezone98Redux_CampaignReimagined/pull/214).
+This harness is draft [OpenShim #480](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/pull/480).
+Both Linux CTest and Release Win32 CI passed at `00212685b`.
+
+An additional lost background click left a guest's game row unselected, so Join
+was inert. Lobby automation now repeats only the idempotent row selection;
+Join remains a single submission. The subsequent lobby and native session passed.
+
+`recovery1015-assist-dx11-boarding/recovery1015-assist-dx11-services`
+passes eight steps / 14 checks on two DX11 clients. It covers terrain markers,
+expiry without destroying an existing objective, help/reply/cancel, same-object
+adoption and guest movement orders, recall, and native rescue arrival. A native
+probe confirmed the rescue craft empty at 28.04 m, command NONE. The user clarified
+that this is sufficient rescue acceptance: boarding is the stock walk-into-craft
+transition and H only hops out. No forced boarding or ownership mutation is used.
+
+The first transfer fixture ran before initializing the recipient id; its Lua
+false/reason tuple was mistakenly truthy to the fixture. The corrected fixture
+initializes the id and compares the service's first return explicitly with true.
+Only the subsequent successful run is acceptance. Earlier boarding and aiming
+fixture failures are retained, not reclassified as product failures.
+
+Physical X passed on both clients and native mouse aiming enabled a real J ping.
+The physical V closed-PDA failure then exposed a source bug in CR's network
+polling gate, now repaired in #214 with 24 edge/chat regression checks. Fresh
+three-client witness and later mission controls are still being recorded.

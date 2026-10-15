@@ -262,6 +262,10 @@ foreach ($guestClient in $guestClients) {
     $null = Wait-Until "c$($guestClient.index)-sees-game" { Find-LogLine $guestClient ("ID {0}, [^,]+, [^,]+, ~game~pub~~{1}" -f $lobbyId, [regex]::Escape($GameName)) }
     Click $guestClient $UI.LoungeFirstGame
     Start-Sleep -Milliseconds 400
+    # Re-select after background activation; selection is idempotent, while
+    # Join is submitted only once. A lost first selection leaves Join inert.
+    Click $guestClient $UI.LoungeFirstGame
+    Start-Sleep -Milliseconds 400
     Click $guestClient $UI.LoungeJoin
     $assigned = Wait-Until "host-assigned-c$($guestClient.index)" { Find-LogLine $hostClient ('Assigned Player ({0}) team (\d+), player id (\d+)' -f [regex]::Escape($guestDisplayName)) }
     if ([int]$assigned.Groups[2].Value -ne ($guestClient.index + 1)) { throw "Unexpected team assignment for $guestDisplayName" }
