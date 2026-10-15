@@ -108,7 +108,8 @@ int wmain()
         std::cerr << "no log lines carried this run's session id " << sessionId << '\n';
         return 3;
     }
-    if (!Contains(lines, "Lifecycle test plugin loaded") ||
+    if (!Contains(lines, "Lifecycle executable SHA-256 ") ||
+        !Contains(lines, "Lifecycle test plugin loaded") ||
         !Contains(lines, "Lifecycle test plugin shut down") ||
         !Contains(lines, "BZLoader shutdown complete"))
     {

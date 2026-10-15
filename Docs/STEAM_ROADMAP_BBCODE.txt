@@ -1,6 +1,6 @@
 [h1]OpenShim Progress Reference[/h1]
 
-[b]Updated: 2026-10-12. Source audit: 2026-10-07; native UI/network integration: 2026-10-09; release and installation: 2026-10-12.[/b]
+[b]Updated: 2026-10-15. Source audit: 2026-10-07; native UI/network integration: 2026-10-09; release and installation: 2026-10-12; startup hashing fix: 2026-10-15.[/b]
 
 Canonical progress reference for OpenShim, Extra Utilities (EXU), Campaign Reimagined (CR), bzfile and the community multiplayer server. OpenShim owns native engine fixes and shared settings; EXU owns reusable Lua/runtime APIs; CR and ISDF Chronicles provide consuming content; bzfile owns protected file/update primitives.
 
@@ -28,6 +28,7 @@ These are source milestones, subject to the evidence scope above. Features with 
 
 [list]
 [*] [b]Crash diagnostics[/b] - first-chance/unhandled logging and minidumps; fresh per-process reports distinguish caught exceptions from fatal crashes. Expensive research probes are opt-in and packet-path diagnostics are bounded or sampled.
+[*] [b]Startup hashing deadlock[/b] - executable verification and early preset hashing use the existing software SHA-256 core, avoiding a BCrypt provider/Windows DLL-loader lock inversion during Steam client initialization (also observed on GOG). Hash pins and patch guards remain enforced. Loader-lock regression and negative-control tests pass; Steam and Proton/Wine runtime qualification remains open. See [code]Docs/STARTUP_HASH_DEADLOCK.md[/code].
 [*] [b]Object and render lifetime repairs[/b] - first-person pilot tracer teardown, pilot hardpoint null-carrier guard, satellite/F9 stale target-camera teardown, GOG Inst4XMission stale-handle load, destruction-proxy mission transitions, stale GameObject rejection and save/load lifecycle hardening.
 [*] [b]Pilot flashlight[/b] - single-player spotlight and controls, default off under [code][SinglePlayer] PilotFlashlight[/code]. Boarding/ejection repair hides and retires lights until scene teardown, avoiding destruction while Ogre retains cached light references.
 [*] [b]Narrow crash guards[/b] - unsupported BMP decode failures, MagnetClass zero/invalid range, and MultiRender renderCount allocation clamp. Thumbnail fallback appearance remains open below.

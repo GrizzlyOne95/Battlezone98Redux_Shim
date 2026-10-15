@@ -5,7 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
-#include <bcrypt.h>
+#include "startup_file_sha256.h"
 
 #include <algorithm>
 #include <cstdarg>
@@ -13,8 +13,6 @@
 #include <cstring>
 #include <string>
 #include <vector>
-
-#pragma comment(lib, "bcrypt.lib")
 
 namespace
 {
@@ -122,72 +120,18 @@ namespace
 
     bool ComputeFileSha256(const std::wstring& path, char (&outHex)[65])
     {
-        HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
-                                  FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (file == INVALID_HANDLE_VALUE) return false;
-
-        BCRYPT_ALG_HANDLE algorithm = nullptr;
-        BCRYPT_HASH_HANDLE hash = nullptr;
-        std::vector<UCHAR> hashObject;
-        UCHAR digest[32] = {};
-        bool ok = false;
-
-        do
-        {
-            if (!BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(
-                    &algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0)))
-                break;
-
-            DWORD objectSize = 0;
-            DWORD produced = 0;
-            if (!BCRYPT_SUCCESS(BCryptGetProperty(
-                    algorithm, BCRYPT_OBJECT_LENGTH,
-                    reinterpret_cast<PUCHAR>(&objectSize), sizeof(objectSize),
-                    &produced, 0)))
-                break;
-
-            hashObject.resize(objectSize);
-            if (!BCRYPT_SUCCESS(BCryptCreateHash(algorithm, &hash, hashObject.data(),
-                                                 objectSize, nullptr, 0, 0)))
-                break;
-
-            std::vector<UCHAR> buffer(64 * 1024);
-            bool readFailed = false;
-            for (;;)
-            {
-                DWORD read = 0;
-                if (!ReadFile(file, buffer.data(),
-                              static_cast<DWORD>(buffer.size()), &read, nullptr))
-                {
-                    readFailed = true;
-                    break;
-                }
-                if (read == 0) break;
-                if (!BCRYPT_SUCCESS(BCryptHashData(hash, buffer.data(), read, 0)))
-                {
-                    readFailed = true;
-                    break;
-                }
-            }
-            if (readFailed) break;
-
-            if (!BCRYPT_SUCCESS(BCryptFinishHash(hash, digest, sizeof(digest), 0)))
-                break;
-
-            for (size_t i = 0; i < sizeof(digest); ++i)
-                _snprintf_s(outHex + i * 2, 3, _TRUNCATE, "%02x", digest[i]);
-            ok = true;
-        } while (false);
-
-        if (hash) BCryptDestroyHash(hash);
-        if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
-        CloseHandle(file);
-        return ok;
+        outHex[0] = '\0';
+        std::string hex;
+        uint64_t size = 0;
+        if (!BZROpenShim::TryHashStartupFile(path.c_str(), hex, size))
+            return false;
+        for (char& c : hex)
+            if (c >= 'A' && c <= 'F') c = static_cast<char>(c - 'A' + 'a');
+        std::memcpy(outHex, hex.c_str(), hex.size() + 1);
+        return true;
     }
 
-    // Lazy: only a plugin that pins an exact image pays for reading the whole
-    // executable, and it is computed at most once per process either way.
+    // Computed lazily and cached; unavailable hashes still refuse pinned plugins.
     const char* BZLOADER_CALL HostExecutableSha256()
     {
         AcquireSRWLockExclusive(&g_ShaLock);

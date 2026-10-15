@@ -13,7 +13,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
-#include <bcrypt.h>
+#include "startup_file_sha256.h"
 
 namespace
 {
@@ -26,11 +26,6 @@ namespace
         return std::filesystem::exists(path, ec);
     }
 }
-
-// bcrypt.lib is not yet in the default link; pragma pulls it for both
-// the DLL and the offline test builds without editing every vcxproj
-// configuration by hand.
-#pragma comment(lib, "bcrypt.lib")
 
 namespace BZROpenShim
 {
@@ -49,19 +44,6 @@ namespace BZROpenShim
 
     namespace
     {
-        std::string ToLowerHex(const uint8_t* data, size_t len)
-        {
-            static const char kHex[] = "0123456789abcdef";
-            std::string out;
-            out.reserve(len * 2);
-            for (size_t i = 0; i < len; ++i)
-            {
-                out.push_back(kHex[(data[i] >> 4) & 0xF]);
-                out.push_back(kHex[data[i] & 0xF]);
-            }
-            return out;
-        }
-
         bool EqualsIgnoreCase(const std::string& a, const std::string& b)
         {
             if (a.size() != b.size())
@@ -383,80 +365,11 @@ namespace BZROpenShim
     bool TryComputeFileSha256Hex(const std::filesystem::path& path,
                                  std::string& outLowerHex)
     {
-        outLowerHex.clear();
-        // Read file bytes exactly as stored (binary). SHA-256 over bytes.
-        std::ifstream f(path, std::ios::binary);
-        if (!f)
+        uint64_t size = 0;
+        if (!TryHashStartupFile(path.c_str(), outLowerHex, size))
             return false;
-        std::vector<uint8_t> data(
-            (std::istreambuf_iterator<char>(f)),
-            std::istreambuf_iterator<char>());
-        // f closed by RAII.
-
-        BCRYPT_ALG_HANDLE hAlg = nullptr;
-        BCRYPT_HASH_HANDLE hHash = nullptr;
-        NTSTATUS status = BCryptOpenAlgorithmProvider(
-            &hAlg, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
-        if (!BCRYPT_SUCCESS(status))
-            return false;
-
-        DWORD hashLen = 0;
-        DWORD result = 0;
-        status = BCryptGetProperty(hAlg,
-                                   BCRYPT_HASH_LENGTH,
-                                   reinterpret_cast<PUCHAR>(&hashLen),
-                                   sizeof(hashLen),
-                                   &result,
-                                   0);
-        if (!BCRYPT_SUCCESS(status))
-        {
-            BCryptCloseAlgorithmProvider(hAlg, 0);
-            return false;
-        }
-
-        DWORD objLen = 0;
-        status = BCryptGetProperty(hAlg,
-                                   BCRYPT_OBJECT_LENGTH,
-                                   reinterpret_cast<PUCHAR>(&objLen),
-                                   sizeof(objLen),
-                                   &result,
-                                   0);
-        if (!BCRYPT_SUCCESS(status))
-        {
-            BCryptCloseAlgorithmProvider(hAlg, 0);
-            return false;
-        }
-
-        std::vector<uint8_t> obj(objLen);
-        status = BCryptCreateHash(
-            hAlg, &hHash, obj.data(), objLen, nullptr, 0, 0);
-        if (!BCRYPT_SUCCESS(status))
-        {
-            BCryptCloseAlgorithmProvider(hAlg, 0);
-            return false;
-        }
-
-        // Empty file is valid: hash over zero bytes.
-        if (!data.empty())
-        {
-            status = BCryptHashData(
-                hHash, data.data(), static_cast<ULONG>(data.size()), 0);
-            if (!BCRYPT_SUCCESS(status))
-            {
-                BCryptDestroyHash(hHash);
-                BCryptCloseAlgorithmProvider(hAlg, 0);
-                return false;
-            }
-        }
-
-        std::vector<uint8_t> hash(hashLen);
-        status = BCryptFinishHash(hHash, hash.data(), hashLen, 0);
-        BCryptDestroyHash(hHash);
-        BCryptCloseAlgorithmProvider(hAlg, 0);
-        if (!BCRYPT_SUCCESS(status))
-            return false;
-
-        outLowerHex = ToLowerHex(hash.data(), hash.size());
+        for (char& c : outLowerHex)
+            if (c >= 'A' && c <= 'F') c = static_cast<char>(c - 'A' + 'a');
         return true;
     }
 
