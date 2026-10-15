@@ -387,7 +387,7 @@ function Remove-OpenShimLogs {
             continue
         }
         foreach ($file in Get-ChildItem -LiteralPath $logDir -File -Force) {
-            if ($file.Name -match '^(?:openshim(?:[._-].*)?|bzloader\.log|winmm_shim\.log)$') {
+            if ($file.Name -match '^(?:openshim.*\.(?:log|dmp)(?:\.\d+)?|bzloader\.log|winmm_shim\.log)$') {
                 Remove-Planned -Path $file.FullName
             }
         }
@@ -473,7 +473,9 @@ foreach ($gameDir in $gamePaths) {
     Write-Host "Game folder: $gameDir"
 
     # Load chain, plus the previous-version copies the Workshop updater keeps.
-    foreach ($relative in @("winmm.dll", "winmm.dll.previous", "bzloader.dll", "plugins\openshim.dll")) {
+    foreach ($relative in @("winmm.dll", "winmm.dll.previous",
+            "bzloader.dll", "bzloader.dll.previous",
+            "plugins\openshim.dll", "plugins\openshim.dll.previous")) {
         Remove-OpenShimBinary (Join-Path $gameDir $relative)
     }
     foreach ($relative in @("winmm.dll", "bzloader.dll", "plugins\openshim.dll")) {
