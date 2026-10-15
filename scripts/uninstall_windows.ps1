@@ -15,8 +15,11 @@
 # player's settings; net.ini in particular is a game file OpenShim replaced,
 # and the stock bytes are not known here.
 #
-#   OPENSHIM_PURGE_CONFIG=1   also remove openshim.ini and its backups
-#   OPENSHIM_DRY_RUN=1        print what would be removed, remove nothing
+#   OPENSHIM_PURGE_CONFIG=1      also remove openshim.ini and its backups
+#   OPENSHIM_PURGE_LEFTOVERS=1   additionally purge OpenShim logs, crash dumps,
+#                               settings, and current-user uploader/data folders.
+#                               Keeps net.ini and the game's shared logs.
+#   OPENSHIM_DRY_RUN=1           print removals without changing anything
 #
 # Keep this file pure ASCII: Windows PowerShell 5.1 reads a BOM-less UTF-8
 # script as ANSI, and one non-ASCII character breaks it for anyone who saves
@@ -52,7 +55,8 @@ function Get-Switch {
     }
 }
 
-$purgeConfig = Get-Switch "OPENSHIM_PURGE_CONFIG"
+$purgeLeftovers = Get-Switch "OPENSHIM_PURGE_LEFTOVERS"
+$purgeConfig = (Get-Switch "OPENSHIM_PURGE_CONFIG") -or $purgeLeftovers
 $dryRun = Get-Switch "OPENSHIM_DRY_RUN"
 
 # --- discovery: identical to install_windows.ps1 so both scripts find the ---
@@ -368,6 +372,64 @@ function Remove-DirectoryIfEmpty {
         Remove-Item -LiteralPath $Path -Force
         Write-Host "  removed empty folder $Path"
     }
+}
+
+# Only OpenShim's own names are removed from the shared game logs folder.
+# Never remove BZLogger.txt, BZOgreLogfile.log, or unrelated proxy logs.
+function Remove-OpenShimLogs {
+    param([string]$GameDir)
+    foreach ($logDir in @($GameDir, (Join-Path $GameDir "logs"))) {
+        if (-not (Test-Path -LiteralPath $logDir -PathType Container)) { continue }
+        $item = Get-Item -LiteralPath $logDir -Force
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            Write-Host "  KEEPING reparse-point log directory $logDir"
+            $script:kept++
+            continue
+        }
+        foreach ($file in Get-ChildItem -LiteralPath $logDir -File -Force) {
+            if ($file.Name -match '^(?:openshim(?:[._-].*)?|bzloader\.log|winmm_shim\.log)$') {
+                Remove-Planned -Path $file.FullName
+            }
+        }
+    }
+    Remove-DirectoryIfEmpty (Join-Path $GameDir "logs")
+}
+
+# Remove a *dedicated* OpenShim data tree without traversing any reparse
+# points (junctions/symlinks). Keep and report unfamiliar links.
+function Remove-OpenShimDataTree {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return }
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        Write-Host "  KEEPING reparse point $Path"
+        $script:kept++
+        return
+    }
+    foreach ($child in @(Get-ChildItem -LiteralPath $Path -Force)) {
+        if ($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            Write-Host "  KEEPING reparse point $($child.FullName)"
+            $script:kept++
+        } elseif ($child.PSIsContainer) {
+            Remove-OpenShimDataTree -Path $child.FullName
+        } else {
+            Remove-Planned -Path $child.FullName
+        }
+    }
+    Remove-DirectoryIfEmpty $Path
+}
+
+# Only immediate directories named openshim below existing rooted AppData
+# locations qualify. Never recurse over a user-supplied arbitrary directory.
+function Remove-OpenShimUserData {
+    param([string]$BaseDir)
+    if (-not $BaseDir -or -not [System.IO.Path]::IsPathRooted($BaseDir)) { return }
+    $base = [System.IO.Path]::GetFullPath($BaseDir).TrimEnd('\')
+    if (-not (Test-Path -LiteralPath $base -PathType Container)) { return }
+    $target = Join-Path $base "openshim"
+    if (-not (Test-Path -LiteralPath $target -PathType Container)) { return }
+    Write-Host "  dedicated current-user data: $target"
+    Remove-OpenShimDataTree -Path $target
 }
 
 function Test-GameRunningFrom {
