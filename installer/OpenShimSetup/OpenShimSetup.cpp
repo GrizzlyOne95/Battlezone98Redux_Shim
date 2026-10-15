@@ -320,6 +320,9 @@ int wmain() {
     // The installer script enforces repair/update semantics and downgrade
     // guards; the native wrapper only chooses which verified bundle to use.
     SetEnvironmentVariableW(L"OPENSHIM_SETUP_ACTION", uninstall ? nullptr : OperationFlag(operation));
+    // Update must use the latest published suite. An inherited developer DLL
+    // override must not silently substitute local, potentially older bytes.
+    if (update) SetEnvironmentVariableW(L"OPENSHIM_DLL", nullptr);
 
     {
         const std::wstring powershell = PowerShellPath();
