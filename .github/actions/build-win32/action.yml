@@ -180,6 +180,16 @@ runs:
       shell: pwsh
       run: ./tests/uninstall_windows_tests.ps1
 
+    - name: Test repair and update maintenance actions
+      shell: pwsh
+      run: ./tests/setup_maintenance_tests.ps1
+
+    - name: Test Setup command-line action conflicts
+      shell: pwsh
+      run: |
+        & ./bin/Release/OpenShimSetup.exe --install --repair --no-pause
+        if ($LASTEXITCODE -ne 2) { throw "Setup accepted conflicting maintenance action flags" }
+
     - name: Test Windows deployment verification
       shell: pwsh
       run: ./tests/verify_windows_tests.ps1
