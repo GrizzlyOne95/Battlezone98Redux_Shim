@@ -851,6 +851,15 @@ try {
     if ($null -eq $packageVersion) {
         throw "The suite's winmm.dll has no readable four-part file version. Refusing to deploy it."
     }
+    if ($setupAction -ne "install") {
+        foreach ($module in @($loaderDll, $pluginDll)) {
+            if (-not $module) { continue }
+            $moduleVersion = Get-OpenShimVersion -DllPath $module
+            if ($null -eq $moduleVersion -or $moduleVersion -ne $packageVersion) {
+                throw "The suite's load-chain binaries do not all report $packageVersion. Refusing a mixed-version $setupAction."
+            }
+        }
+    }
     $targets = New-Object System.Collections.Generic.List[string]
     foreach ($gameDir in $gamePaths) {
         $existingDll = Join-Path $gameDir "winmm.dll"
@@ -861,6 +870,16 @@ try {
             throw "Battlezone 98 Redux is running from $gameDir. Close the game and retry. Nothing was installed."
         }
         $installedVersion = Get-InstalledOpenShimVersion -GameDir $gameDir
+        # Check all surviving components, not just winmm.dll; a partial
+        # installation could contain a newer plugin than its bootstrap.
+        foreach ($component in @("winmm.dll", "bzloader.dll", "plugins\openshim.dll")) {
+            $componentPath = Join-Path $gameDir $component
+            if (-not (Test-OpenShimDll $componentPath)) { continue }
+            $componentVersion = Get-OpenShimVersion -DllPath $componentPath
+            if ($null -ne $componentVersion -and $componentVersion -gt $packageVersion) {
+                throw "Refusing to downgrade $component in $gameDir from $componentVersion to $packageVersion."
+            }
+        }
         if ($setupAction -ne "install" -and $null -eq $installedVersion) {
             throw "No versioned OpenShim installation was found in $gameDir. Use Install for a new or fully missing installation."
         }
