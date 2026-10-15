@@ -138,7 +138,8 @@ warnings, so physical-input acceptance does not qualify voice-over timing.
 
 The new [EXU draft #110](https://github.com/GrizzlyOne95/ExtraUtilities/pull/110)
 adds a guarded local kill-notice presentation switch and read-only native player
-stats snapshots. CR #214 defaults notices and the stock scoreboard off once per
+stats snapshots. [CR #215](https://github.com/GrizzlyOne95/Battlezone98Redux_CampaignReimagined/pull/215)
+defaults notices and the stock scoreboard off once per
 co-op mission while preserving M. `recovery1015-coop-hud-qualified` passes seven
 steps / 15 checks on two DX11 GOG clients: identity/stats parity, physical M toggle,
 reversible notices and a controlled guest death advancing deaths/lives on both
@@ -151,3 +152,7 @@ Native tests keep the same installed startup-hash DLL described above. The final
 HUD run replaces EXU with a fresh build of branch checkpoint `ef53397`; private
 stage/provenance manifests record hashes. No real-install deployment or public
 publication occurred. Windows Steam, Proton/Wine and two-PC qualification remain.
+
+The earlier CR #214 and OpenShim #480 merged upstream during validation. This
+documentation follow-up is [OpenShim #482](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/pull/482),
+branch `agent/coop-hud-checkpoint-20261015`, based on fresh main `8e61d7c8`.
