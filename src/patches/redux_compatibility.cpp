@@ -10,16 +10,14 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
-#include <bcrypt.h>
+#include "startup_file_sha256.h"
 
 #include <array>
 #include <climits>
 #include <cstdio>
 #include <cstring>
-#include <iomanip>
 #include <iterator>
 #include <limits>
-#include <sstream>
 
 namespace BZROpenShim
 {
@@ -38,106 +36,6 @@ namespace BZROpenShim
         SetLocaleFunction g_ReduxSetLocale = nullptr;
         ReduxFwrite g_ReduxFwrite = nullptr;
         char g_TrnBinaryMode[] = "wb";
-
-        bool ComputeSha256(const wchar_t* path, std::string& output, uint64_t& fileSize)
-        {
-            output.clear();
-            fileSize = 0;
-            HMODULE bcrypt = LoadLibraryW(L"bcrypt.dll");
-            if (!bcrypt)
-                return false;
-
-            const auto openProvider = reinterpret_cast<decltype(&BCryptOpenAlgorithmProvider)>(
-                GetProcAddress(bcrypt, "BCryptOpenAlgorithmProvider"));
-            const auto getProperty = reinterpret_cast<decltype(&BCryptGetProperty)>(
-                GetProcAddress(bcrypt, "BCryptGetProperty"));
-            const auto createHash = reinterpret_cast<decltype(&BCryptCreateHash)>(
-                GetProcAddress(bcrypt, "BCryptCreateHash"));
-            const auto hashData = reinterpret_cast<decltype(&BCryptHashData)>(
-                GetProcAddress(bcrypt, "BCryptHashData"));
-            const auto finishHash = reinterpret_cast<decltype(&BCryptFinishHash)>(
-                GetProcAddress(bcrypt, "BCryptFinishHash"));
-            const auto destroyHash = reinterpret_cast<decltype(&BCryptDestroyHash)>(
-                GetProcAddress(bcrypt, "BCryptDestroyHash"));
-            const auto closeProvider = reinterpret_cast<decltype(&BCryptCloseAlgorithmProvider)>(
-                GetProcAddress(bcrypt, "BCryptCloseAlgorithmProvider"));
-            if (!openProvider || !getProperty || !createHash || !hashData || !finishHash ||
-                !destroyHash || !closeProvider)
-            {
-                FreeLibrary(bcrypt);
-                return false;
-            }
-
-            BCRYPT_ALG_HANDLE algorithm = nullptr;
-            BCRYPT_HASH_HANDLE hash = nullptr;
-            // The hash object buffer must outlive destroyHash below, which writes into it;
-            // declaring it inside the do-block freed it first (heap use-after-free).
-            std::vector<uint8_t> object;
-            HANDLE file = INVALID_HANDLE_VALUE;
-            bool success = false;
-            do
-            {
-                if (openProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0)
-                    break;
-                DWORD objectSize = 0;
-                DWORD hashSize = 0;
-                DWORD resultSize = 0;
-                if (getProperty(algorithm, BCRYPT_OBJECT_LENGTH,
-                        reinterpret_cast<PUCHAR>(&objectSize), sizeof(objectSize), &resultSize, 0) < 0 ||
-                    getProperty(algorithm, BCRYPT_HASH_LENGTH,
-                        reinterpret_cast<PUCHAR>(&hashSize), sizeof(hashSize), &resultSize, 0) < 0 ||
-                    hashSize != 32)
-                {
-                    break;
-                }
-
-                object.resize(objectSize);
-                std::array<uint8_t, 32> digest = {};
-                if (createHash(algorithm, &hash, object.data(), objectSize, nullptr, 0, 0) < 0)
-                    break;
-
-                file = CreateFileW(path, GENERIC_READ,
-                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-                if (file == INVALID_HANDLE_VALUE)
-                    break;
-                LARGE_INTEGER size = {};
-                if (!GetFileSizeEx(file, &size) || size.QuadPart < 0)
-                    break;
-                fileSize = static_cast<uint64_t>(size.QuadPart);
-
-                std::array<uint8_t, 64 * 1024> buffer = {};
-                for (;;)
-                {
-                    DWORD read = 0;
-                    if (!ReadFile(file, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr))
-                        break;
-                    if (read == 0)
-                    {
-                        if (finishHash(hash, digest.data(), hashSize, 0) < 0)
-                            break;
-                        std::ostringstream text;
-                        text << std::uppercase << std::hex << std::setfill('0');
-                        for (const uint8_t byte : digest)
-                            text << std::setw(2) << static_cast<unsigned>(byte);
-                        output = text.str();
-                        success = true;
-                        break;
-                    }
-                    if (hashData(hash, buffer.data(), read, 0) < 0)
-                        break;
-                }
-            } while (false);
-
-            if (file != INVALID_HANDLE_VALUE)
-                CloseHandle(file);
-            if (hash)
-                destroyHash(hash);
-            if (algorithm)
-                closeProvider(algorithm, 0);
-            FreeLibrary(bcrypt);
-            return success;
-        }
 
         bool BytesEqual(uint32_t address, const uint8_t* expected, size_t size)
         {
@@ -328,7 +226,7 @@ namespace BZROpenShim
         wchar_t path[MAX_PATH] = {};
         const DWORD pathLength = GetModuleFileNameW(nullptr, path, MAX_PATH);
         if (pathLength > 0 && pathLength < MAX_PATH)
-            ComputeSha256(path, gate.sha256, gate.fileSize);
+            TryHashStartupFile(path, gate.sha256, gate.fileSize);
         const char* expectedHash = steam ? kSteamSha256 : kGogSha256;
         gate.supportedHash = !gate.sha256.empty() && gate.sha256 == expectedHash;
         gate.settledBytes = gate.supportedHash &&

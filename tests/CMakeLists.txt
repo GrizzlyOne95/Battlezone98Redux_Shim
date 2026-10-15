@@ -81,6 +81,26 @@ function(openshim_add_test name)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+add_executable(startup_sha256_tests startup_sha256_tests.cpp)
+target_include_directories(startup_sha256_tests PRIVATE ../include)
+target_compile_features(startup_sha256_tests PRIVATE cxx_std_17)
+if(MSVC)
+    target_compile_options(startup_sha256_tests PRIVATE /W4 /WX)
+else()
+    target_compile_options(startup_sha256_tests PRIVATE -Wall -Wextra -Werror)
+endif()
+if(WIN32)
+    add_library(startup_hash_loader_fixture SHARED startup_hash_loader_fixture.cpp)
+    add_dependencies(startup_sha256_tests startup_hash_loader_fixture)
+    # Exercise the probe's negative control separately in a fresh process.
+    add_test(NAME startup_sha256_loader_lock_tests COMMAND startup_sha256_tests
+        $<TARGET_FILE:startup_hash_loader_fixture>)
+    add_test(NAME startup_sha256_loader_control_tests COMMAND startup_sha256_tests
+        $<TARGET_FILE:startup_hash_loader_fixture> --loader-control)
+else()
+    add_test(NAME startup_sha256_tests COMMAND startup_sha256_tests)
+endif()
+
 openshim_add_test(d3d11_buffer_mirror_policy_tests STD 17 SOURCES
     d3d11_buffer_mirror_policy_tests.cpp
 )
