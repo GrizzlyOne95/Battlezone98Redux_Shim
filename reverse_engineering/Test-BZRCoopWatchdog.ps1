@@ -78,6 +78,20 @@ function Test-WatchdogDone([string]$RunDir) {
 function Test-Alive([int]$Id) { [bool](Get-Process -Id $Id -ErrorAction SilentlyContinue) }
 function Assert([bool]$Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
 
+# The game must receive WM_CLOSE even when it ignores it; never Kill().
+. $library
+$script:closedGame = $false
+function Stop-BZRGame {
+    param([int[]]$Id, [switch]$NoForce, [int]$TimeoutSeconds, $ErrorAction)
+    if ($Id[0] -ne 12345 -or -not $NoForce) { throw 'unsafe game close arguments' }
+    $script:closedGame = $true
+}
+$fakeGame = [pscustomobject]@{Id=12345; ProcessName='battlezone98redux'}
+$fakeGame | Add-Member ScriptMethod Kill { throw 'game must never be terminated' }
+$fakeGame | Add-Member ScriptMethod WaitForExit { throw 'game close belongs to Stop-BZRGame' }
+Stop-BZRCoopWatchdogProcess $fakeGame
+Assert $script:closedGame 'game close did not use Stop-BZRGame -NoForce'
+
 $started = @()
 try {
     $r = Invoke-FakeRun 'hung'

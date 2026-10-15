@@ -40,6 +40,18 @@ runs:
         cmake --build build/tests --config Release
         ctest --test-dir build/tests -C Release --output-on-failure
 
+    - name: Test co-op verdicts and graceful watchdog teardown
+      shell: pwsh
+      run: |
+        $ps51 = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+        $env:PSModulePath = $null
+        foreach ($test in @('reverse_engineering/coopflow/Test-CRFlowLogErrors.ps1',
+                            'reverse_engineering/coopflow/Test-CRFlowParticipants.ps1',
+                            'reverse_engineering/Test-BZRCoopWatchdog.ps1')) {
+          & $ps51 -NoProfile -ExecutionPolicy Bypass -File $test
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        }
+
     - name: Validate DX11 Enhanced FXAA shader
       shell: pwsh
       run: |

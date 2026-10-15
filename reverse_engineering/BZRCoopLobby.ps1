@@ -169,6 +169,11 @@ foreach ($client in $allClients) {
 # 2. Host creates the game.
 Click $hostClient $UI.LoungeCreate
 Start-Sleep -Milliseconds 800
+# The first posted click can only reactivate the background lounge after an
+# RDP resize. A second click opens it then; an already-open modal ignores
+# this point outside the dialog. No duplicate server request is submitted.
+Click $hostClient $UI.LoungeCreate
+Start-Sleep -Milliseconds 400
 Click $hostClient $UI.CreateNameField
 Start-Sleep -Milliseconds 200
 Send-BZRClientText $hostClient.pid $GameName
