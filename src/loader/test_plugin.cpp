@@ -6,6 +6,7 @@
 #include "bzloader_plugin.h"
 
 #include <string.h>
+#include <stdio.h>
 
 namespace
 {
@@ -48,6 +49,19 @@ extern "C" BZLOADER_API int32_t BZLOADER_CALL BZPlugin_Load(
         host->abiVersion != BZLOADER_ABI_VERSION || !host->log)
         return 0;
     g_Host = host;
+    if (host->structSize >= BZLOADER_FIELD_END(BZHostApi, getExecutableSha256) &&
+        host->getExecutableSha256)
+    {
+        const char* sha = host->getExecutableSha256();
+        if (!sha || strlen(sha) != 64) return 0;
+        for (size_t i = 0; i < 64; ++i)
+            if (!((sha[i] >= '0' && sha[i] <= '9') || (sha[i] >= 'a' && sha[i] <= 'f')))
+                return 0;
+        if (host->getExecutableSha256() != sha) return 0; // cached stable result
+        char message[100];
+        sprintf_s(message, "Lifecycle executable SHA-256 %s", sha);
+        host->log(BZ_HOST_LOG_INFO, "org.bzloader.test", message);
+    }
     g_Host->log(BZ_HOST_LOG_INFO, "org.bzloader.test", "Lifecycle test plugin loaded");
     return 1;
 }
