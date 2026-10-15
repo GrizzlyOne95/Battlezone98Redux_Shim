@@ -37,7 +37,7 @@
     <ClCompile><WarningLevel>Level4</WarningLevel><TreatWarningAsError>true</TreatWarningAsError><SDLCheck>true</SDLCheck><PreprocessorDefinitions>WIN32;_CONSOLE;WIN32_LEAN_AND_MEAN;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions><ConformanceMode>true</ConformanceMode><LanguageStandard>stdcpp20</LanguageStandard></ClCompile>
     <ClCompile Condition="'$(Configuration)'=='Debug'"><RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary></ClCompile>
     <ClCompile Condition="'$(Configuration)'=='Release'"><RuntimeLibrary>MultiThreaded</RuntimeLibrary></ClCompile>
-    <Link><SubSystem>Console</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation><AdditionalDependencies>bcrypt.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+    <Link><SubSystem>Console</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation><AdditionalDependencies>bcrypt.lib;shell32.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
     <ResourceCompile><AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup><ClCompile Include="OpenShimSetup.cpp" /></ItemGroup>
