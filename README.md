@@ -38,7 +38,17 @@ and double-click it. The setup menu now offers:
   same version, choose Repair instead.
 - **Uninstall** — remove OpenShim's deployed files and backups. Player
   configuration (`openshim.ini`), network settings (`net.ini`) and logs are
-  kept unless you explicitly request a configuration purge.
+  retained by default. A separate **unchecked checkbox** in the confirmation
+  dialog, *Also remove OpenShim settings, logs, crash dumps, and uploader data*,
+  opts into a more complete cleanup. This removes OpenShim-owned logs and
+  minidumps from the selected game folder(s), player settings/backups, and the
+  current Windows user's dedicated `%LOCALAPPDATA%\\openshim` and
+  `%APPDATA%\\openshim` folders (including pending uploader bundles and
+  saved webhook configuration). It **does not** remove shared `net.ini`,
+  `BZLogger.txt`, other game logs, or unrelated mods. If Steam still has the
+  OpenShim uploader launch option configured, remove that launch option
+  manually; the installer cannot modify it. The user-data folders are shared
+  across any OpenShim installations for that Windows account.
 
 It finds Steam and GOG installs (including custom GOG locations), asks which
 one to change, and lets you browse for another game folder. You can also drag
@@ -46,7 +56,11 @@ a game folder onto the executable. **Close the game before running any action.**
 No Windows launch options are needed after installation.
 
 For command-line or scripted use, supply `--install`, `--repair`,
-`--update` or `--uninstall`. `--quiet` skips interactive menus and defaults
+`--update` or `--uninstall`. To opt into full cleanup without a GUI, use
+`OpenShimSetup.exe --uninstall --purge-leftovers --quiet --no-pause`.
+The standalone PowerShell uninstaller accepts `OPENSHIM_PURGE_LEFTOVERS=1`
+and `OPENSHIM_DRY_RUN=1` to inspect the deletion plan beforehand.
+`--quiet` skips interactive menus and defaults
 to Install when no action is specified; `--no-pause` also avoids waiting for
 Enter on exit. `OPENSHIM_GAME_PATH` limits the operation to one game directory.
 
