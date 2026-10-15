@@ -544,9 +544,11 @@ MIT — see [LICENSE](LICENSE).
 
 ### AI-Assisted Development
 
-OpenShim is developed with the assistance of AI coding tools for tasks such as code drafting, analysis, documentation, test construction, and navigating large reverse-engineering workloads. Examples include Claude Fable (Fable cracked the final destruction chunks blockers) / Opus, and Codex GPT 5.5/5.6 Sol.
+This project is developed with the assistance of AI coding tools for tasks such as code drafting, analysis, documentation, test construction, and navigating large reverse-engineering workloads. Examples include Claude Fable (Fable cracked the final destruction chunks blockers) / Opus 5.5, and Codex GPT 5.5/5.6/6.1 Sol.
 
 AI output is treated as an implementation aid, not as authoritative reverse-engineering evidence. Native behavior, addresses, ABI assumptions, patch sites, and compatibility claims are verified against the actual game binaries, runtime traces, tests, or other reproducible evidence before being treated as established.
 
-All changes remain maintainer-directed and are reviewed, tested, and integrated through the same validation process regardless of how the initial code or analysis was produced. Multiplayer testing is all performed by active community members. 
+All changes remain maintainer-directed and are reviewed, tested, and integrated through the same validation process regardless of how the initial code or analysis was produced. Multiplayer testing is all performed by active community members and automated real client tests.
+
+The feature set and bug fixes would be far less complete without the assistance of these tools to speed up and improve development. 
 
