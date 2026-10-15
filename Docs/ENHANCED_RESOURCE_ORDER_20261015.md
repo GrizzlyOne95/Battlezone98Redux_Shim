@@ -20,7 +20,13 @@ re-enter the executable import hook. Group registration remains once per
 process. This uses the same Win32 game/Ogre ABI on all store/runtime lanes;
 Windows GOG evidence does not qualify Steam, Proton or Wine.
 
-Validation: Release Win32 build and all 110 CTest regressions pass. Native
-Mission 15 two-client DX11 Enhanced qualification is recorded in the CR handoff;
-the first corrected lobby observed zero rendering exceptions and zero missing
-Enhanced sources, with OpenShimEnhanced parsed before CR_static_ibl.program.
+Validation: Release Win32 build and all 110 CTest regressions pass. Native run `misn15-final7-20261015` passes nine assisted progression steps and
+24 checks on the configured local server with two isolated GOG 2.2.301 DX11
+Enhanced clients. Both clients survive validation with no caught rendering,
+Lua or unresolved-label errors; all 94 presentation operations match.
+OpenShimEnhanced parses before CR_static_ibl.program, with zero missing Enhanced
+source errors. Existing flat.dds texture warnings are separate from this repair.
+The run qualifies this exercised path, not final visual quality or other stores
+and compatibility runtimes. Private evidence is under
+`C:\BZRCoop\runs\misn15-final7-20261015`; stage and load-chain hashes are in
+`C:\BZRCoop\misn15-20261015\provenance-final7.json`.
