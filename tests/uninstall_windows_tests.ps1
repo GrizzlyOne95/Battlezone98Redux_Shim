@@ -46,8 +46,10 @@ function New-GameFixture {
     Write-Fixture $Root "winmm.dll.bak-20260101-000000" $openShimMarker
     Write-Fixture $Root "winmm.dll.bak-20260102-000000" $foreignMarker
     Write-Fixture $Root "bzloader.dll" $openShimMarker
+    Write-Fixture $Root "bzloader.dll.previous" $openShimMarker
     Write-Fixture $Root "bzloader.dll.bak-20260101-000000" $openShimMarker
     Write-Fixture $Root "plugins\openshim.dll" $openShimMarker
+    Write-Fixture $Root "plugins\openshim.dll.previous" $openShimMarker
     Write-Fixture $Root "plugins\openshim.dll.bak-20260101-000000" $openShimMarker
 
     # patches.json family.
@@ -83,6 +85,7 @@ function New-GameFixture {
     Write-Fixture $Root "logs\winmm_shim.log" "proxy"
     Write-Fixture $Root "logs\BZLogger.txt" "stock"
     Write-Fixture $Root "logs\other_mod.log" "other"
+    Write-Fixture $Root "logs\openshim_custom.mod" "not a log"
     Write-Fixture $Root "openshim.log" "fallback"
     Write-Fixture $Root "openshim.ini.example" "reference"
     Write-Fixture $Root "openshim_update.status" "state=complete"
@@ -143,8 +146,9 @@ try {
 
     $gone = @(
         "winmm.dll", "winmm.dll.previous", "winmm.dll.bak-20260101-000000",
-        "bzloader.dll", "bzloader.dll.bak-20260101-000000",
-        "plugins\openshim.dll", "plugins\openshim.dll.bak-20260101-000000", "plugins",
+        "bzloader.dll", "bzloader.dll.previous", "bzloader.dll.bak-20260101-000000",
+        "plugins\openshim.dll", "plugins\openshim.dll.previous",
+        "plugins\openshim.dll.bak-20260101-000000", "plugins",
         "scripts\patches.json", "scripts\patches.json.previous", "scripts\patches.json.bak-20260101-000000",
         "openshim\renderer\enhanced\resources.version", "openshim\renderer\enhanced", "openshim\renderer",
         "openshim\OpenShimAssets.ini", "openshim",
@@ -163,7 +167,7 @@ try {
         "openshim.ini", "openshim.ini.bak-20260101-000000", "openshim.ini.pre-reset-20260101-000000.bak",
         "net.ini", "net.ini.bak-20260101-000000", "net.ini.previous",
         "logs\openshim.log", "logs\openshim_crash.log", "logs\openshim_crash_20261015_150000.dmp",
-        "logs\bzloader.log", "logs\winmm_shim.log", "logs\BZLogger.txt", "logs\other_mod.log",
+        "logs\bzloader.log", "logs\winmm_shim.log", "logs\BZLogger.txt", "logs\other_mod.log", "logs\openshim_custom.mod",
         "openshim.log", "openshim.ini.example"
     )
     foreach ($relative in $kept) {
@@ -211,7 +215,7 @@ try {
     }
     foreach ($relative in @(
         "net.ini", "net.ini.previous", "net.ini.bak-20260101-000000",
-        "logs\BZLogger.txt", "logs\other_mod.log",
+        "logs\BZLogger.txt", "logs\other_mod.log", "logs\openshim_custom.mod",
         "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png"
     )) {
         Check (Test-Path -LiteralPath (Join-Path $game $relative)) "full-clean preserved: $relative"
