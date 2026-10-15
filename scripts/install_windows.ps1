@@ -521,11 +521,23 @@ function Get-LocalSuiteBundle {
 }
 
 function Copy-ResourceDirectory {
-    param([string]$Source, [string]$Destination)
+    param([string]$Source, [string]$Destination, [switch]$OnlyIfDifferent)
     if (-not (Test-Path -LiteralPath $Destination)) {
         New-Item -ItemType Directory -Force -Path $Destination | Out-Null
     }
-    Copy-Item -Path (Join-Path $Source "*") -Destination $Destination -Recurse -Force
+    $sourceFull = [System.IO.Path]::GetFullPath($Source).TrimEnd('\') + '\'
+    foreach ($file in Get-ChildItem -LiteralPath $Source -File -Recurse) {
+        $relative = $file.FullName.Substring($sourceFull.Length)
+        $target = Join-Path $Destination $relative
+        $parent = Split-Path -Parent $target
+        if (-not (Test-Path -LiteralPath $parent)) {
+            New-Item -ItemType Directory -Force -Path $parent | Out-Null
+        }
+        if ($OnlyIfDifferent -and (Test-Path -LiteralPath $target -PathType Leaf) -and
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash -eq
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash) { continue }
+        Copy-Item -LiteralPath $file.FullName -Destination $target -Force
+    }
 }
 
 function Get-FileFromUri {
@@ -678,7 +690,13 @@ function Add-DefenderExclusions {
 }
 
 function Backup-ThenCopy {
-    param([string]$Source, [string]$Dest, [string]$Stamp)
+    param([string]$Source, [string]$Dest, [string]$Stamp, [switch]$OnlyIfDifferent)
+    if ($OnlyIfDifferent -and (Test-Path -LiteralPath $Dest -PathType Leaf) -and
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $Source).Hash -eq
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $Dest).Hash) {
+        Write-Host "  unchanged $(Split-Path -Leaf $Dest)"
+        return
+    }
     $destDir = Split-Path -Parent $Dest
     if (-not (Test-Path -LiteralPath $destDir)) {
         New-Item -ItemType Directory -Force -Path $destDir | Out-Null
@@ -724,7 +742,16 @@ function Deploy-PlayerIni {
     Write-Host "  reset openshim.ini (backup: $(Split-Path -Leaf $backup))"
 }
 
-$gamePaths = @(Resolve-GamePaths -Action "install into")
+$actionPrompt = switch ($setupAction) {
+    "repair" { "repair OpenShim in" }
+    "update" { "update OpenShim in" }
+    default  { "install into" }
+}
+$gamePaths = @(Resolve-GamePaths -Action $actionPrompt -Filter {
+    param($dir)
+    if ($setupAction -eq "install") { return $true }
+    return ($null -ne (Get-InstalledOpenShimVersion -GameDir $dir))
+})
 if ($gamePaths.Count -eq 0) {
     throw "Could not find Battlezone 98 Redux. Set OPENSHIM_GAME_PATH to the game folder and run again."
 }
@@ -818,39 +845,74 @@ try {
     Assert-Hash -FilePath $openshimIni -Expected $hashes["openshim.ini"]
     Assert-Hash -FilePath $netIni -Expected $hashes["net.ini"]
 
-    # Refuse the whole run before touching anything: with several installs
-    # detected, throwing inside the copy loop would leave earlier game
-    # directories rewritten and later ones untouched.
+    # Preflight all target directories before writing any of them: a running
+    # game, a foreign proxy, or a downgrade must not leave partial updates.
+    $packageVersion = Get-OpenShimVersion -DllPath $dll
+    if ($null -eq $packageVersion) {
+        throw "The suite's winmm.dll has no readable four-part file version. Refusing to deploy it."
+    }
+    $targets = New-Object System.Collections.Generic.List[string]
     foreach ($gameDir in $gamePaths) {
         $existingDll = Join-Path $gameDir "winmm.dll"
         if ((Test-Path -LiteralPath $existingDll) -and -not (Test-OpenShimDll $existingDll)) {
             throw "Refusing to overwrite non-OpenShim winmm.dll in $gameDir. Remove or rename that proxy first. Nothing was installed."
         }
+        if (Test-GameRunningFrom -GameDir $gameDir) {
+            throw "Battlezone 98 Redux is running from $gameDir. Close the game and retry. Nothing was installed."
+        }
+        $installedVersion = Get-InstalledOpenShimVersion -GameDir $gameDir
+        if ($setupAction -ne "install" -and $null -eq $installedVersion) {
+            throw "No versioned OpenShim installation was found in $gameDir. Use Install for a new or fully missing installation."
+        }
+        if ($null -ne $installedVersion) {
+            if ($installedVersion -gt $packageVersion) {
+                throw "Refusing to downgrade OpenShim in $gameDir from $installedVersion to $packageVersion. Download a newer installer."
+            }
+            if ($setupAction -eq "repair" -and $installedVersion -ne $packageVersion) {
+                throw "Repair requires installed version $installedVersion to match bundle version $packageVersion. Choose Update instead."
+            }
+            if ($setupAction -eq "update" -and $installedVersion -eq $packageVersion) {
+                Write-Host "Already up to date in $gameDir ($installedVersion). Choose Repair to restore missing files."
+                continue
+            }
+        }
+        $targets.Add($gameDir)
     }
 
+    if ($targets.Count -eq 0) {
+        Write-Host "No updates are necessary."
+        return
+    }
+    $gamePaths = @($targets.ToArray())
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
     foreach ($gameDir in $gamePaths) {
         Write-Host ""
-        Write-Host "Installing OpenShim to: $gameDir"
+        Write-Host "$($setupAction.ToUpperInvariant()) OpenShim in: $gameDir"
+        $onlyChanged = $setupAction -eq "repair"
         $destDll = Join-Path $gameDir "winmm.dll"
-        Backup-ThenCopy -Source $dll -Dest $destDll -Stamp $stamp
+        Backup-ThenCopy -Source $dll -Dest $destDll -Stamp $stamp -OnlyIfDifferent:$onlyChanged
         # The rest of the load chain. bzloader.dll sits beside the bootstrap
         # because that is the directory winmm.dll looks in, and the plugin goes
         # under plugins\ because that is where the loader enumerates. Absent
         # for a pre-split monolith, which carries no loader by design.
         if ($loaderDll) {
-            Backup-ThenCopy -Source $loaderDll -Dest (Join-Path $gameDir "bzloader.dll") -Stamp $stamp
+            Backup-ThenCopy -Source $loaderDll -Dest (Join-Path $gameDir "bzloader.dll") -Stamp $stamp -OnlyIfDifferent:$onlyChanged
         }
         if ($pluginDll) {
-            Backup-ThenCopy -Source $pluginDll -Dest (Join-Path $gameDir "plugins\openshim.dll") -Stamp $stamp
+            Backup-ThenCopy -Source $pluginDll -Dest (Join-Path $gameDir "plugins\openshim.dll") -Stamp $stamp -OnlyIfDifferent:$onlyChanged
         }
-        Backup-ThenCopy -Source $patches -Dest (Join-Path $gameDir "scripts\patches.json") -Stamp $stamp
+        Backup-ThenCopy -Source $patches -Dest (Join-Path $gameDir "scripts\patches.json") -Stamp $stamp -OnlyIfDifferent:$onlyChanged
         Deploy-PlayerIni -Source $openshimIni -GameDir $gameDir -Stamp $stamp -Reset $resetIni
-        Backup-ThenCopy -Source $netIni -Dest (Join-Path $gameDir "net.ini") -Stamp $stamp
+        $netTarget = Join-Path $gameDir "net.ini"
+        if ($onlyChanged -and (Test-Path -LiteralPath $netTarget -PathType Leaf)) {
+            Write-Host "  preserved existing net.ini (custom network settings)"
+        } else {
+            Backup-ThenCopy -Source $netIni -Dest $netTarget -Stamp $stamp
+        }
 
         if ($artifacts.RenderSource) {
             Copy-ResourceDirectory -Source $artifacts.RenderSource `
-                -Destination (Join-Path $gameDir "openshim\renderer\enhanced")
+                -Destination (Join-Path $gameDir "openshim\renderer\enhanced") -OnlyIfDifferent:$onlyChanged
             # The in-game asset sync trusts this marker to describe the folder; the
             # files just written may differ, so drop it and let the next start re-check.
             Remove-Item -LiteralPath (Join-Path $gameDir "openshim\renderer\enhanced\openshim_set.sha256") -Force -ErrorAction SilentlyContinue
@@ -1016,7 +1078,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "Install complete." -ForegroundColor Green
+    Write-Host "$($setupAction.Substring(0,1).ToUpperInvariant() + $setupAction.Substring(1)) complete." -ForegroundColor Green
     if ($wrapperReady) {
         Write-Host "OpenShim DLL: OK    Log uploader: OK" -ForegroundColor Green
     } elseif ($wrapperFailed) {
