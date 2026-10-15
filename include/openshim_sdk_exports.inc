@@ -112,6 +112,9 @@ OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetGeometryContact, OpenShimImp
 OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimClearGeometryContact, OpenShimImpl_ClearGeometryContact, (void), (), FALSE)
 OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimGetGeometryContactStats, OpenShimImpl_GetGeometryContactStats, (DWORD handle, DWORD* enabled, DWORD* parts, DWORD* faces, DWORD* checks, DWORD* hits, DWORD* fallbacks), (handle, enabled, parts, faces, checks, hits, fallbacks), FALSE)
 
+// Local-client BZR UDP observations; copied versioned record, no payload/addresses.
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimGetNetworkTrafficSnapshot, OpenShimImpl_GetNetworkTrafficSnapshot, (void* output, DWORD size), (output, size), FALSE)
+
 #ifdef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED
 #undef OPENSHIM_SDK_EXPORT_APPEND
 #undef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED

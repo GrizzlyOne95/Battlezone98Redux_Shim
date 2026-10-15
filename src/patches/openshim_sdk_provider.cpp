@@ -18,6 +18,8 @@
 #include "hook_engine.h"
 #include <cstdio>
 
+extern "C" BOOL WINAPI OpenShimImpl_GetNetworkTrafficSnapshot(void* output, DWORD size);
+
 namespace
 {
     void LogHudBridgeCall(const char* functionName, const char* spriteName)
@@ -817,6 +819,7 @@ namespace
         .OpenShimImpl_SetGeometryContact = OpenShimImpl_SetGeometryContact,
         .OpenShimImpl_ClearGeometryContact = OpenShimImpl_ClearGeometryContact,
         .OpenShimImpl_GetGeometryContactStats = OpenShimImpl_GetGeometryContactStats,
+        .OpenShimImpl_GetNetworkTrafficSnapshot = OpenShimImpl_GetNetworkTrafficSnapshot,
     };
 
     // Designated initializers enforce order but not completeness: a slot left

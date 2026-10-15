@@ -793,6 +793,8 @@ if(WIN32 AND MSVC)
     )
 endif()
 
+openshim_add_test(network_traffic_tests STD 17 SOURCES network_traffic_tests.cpp)
+
 # Host benchmark for runtime chunk/gib generation vs the on-disk cache. Built
 # with the suite but deliberately not a ctest test; run it by hand on a Release
 # build: native_chunk_bench [--csv f] [--tmp dir] <asset dir>...

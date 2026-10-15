@@ -314,3 +314,4 @@ OpenShimGetGeometryContactCapabilities@0
 OpenShimSetGeometryContact@8
 OpenShimClearGeometryContact@0
 OpenShimGetGeometryContactStats@28
+OpenShimGetNetworkTrafficSnapshot@8
