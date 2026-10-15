@@ -121,6 +121,7 @@ if ($Attach) {
     # A scenario that ends the session unevenly (host leaves) sets this.
     if (-not $script:CRFlowSkipParity) { Test-CRFlowPresentationParity 0 $guestIndices }
     Test-CRFlowLogErrors $clientIndices
+    Test-CRFlowClientLiveness
     $summary = Complete-CRFlowRun -Outcome $outcome
     Write-Host "[run] session left up; stop with BZRCoopPlay.ps1 -Stop"
     if ($summary.verdict -eq 'PASS') { exit 0 }
@@ -298,6 +299,7 @@ try {
     # A scenario that ends the session unevenly (host leaves) sets this.
     if (-not $script:CRFlowSkipParity) { Test-CRFlowPresentationParity 0 $guestIndices }
     Test-CRFlowLogErrors $clientIndices
+    Test-CRFlowClientLiveness
     if ($Impair) {
         # Final relay counters, before the server stops.
         try {

@@ -104,3 +104,20 @@ Physical X passed on both clients and native mouse aiming enabled a real J ping.
 The physical V closed-PDA failure then exposed a source bug in CR's network
 polling gate, now repaired in #214 with 24 edge/chat regression checks. Fresh
 three-client witness and later mission controls are still being recorded.
+
+## End-of-validation exit guard
+
+The three-client witness run completed all nine scenario steps, including the
+original unit's team/ownership change on the witness. Switching to intentional
+foreground aiming then tripped BZRHarness's existing anti-focus-steal watchdog.
+Its log records WM_CLOSE to scoped test clients; all exited with code 0 and no
+new dump. The emitted PASS is not full acceptance because the clients disappeared
+during final validation. Keep that artifact as bounded step evidence only.
+
+The runner now records a mandatory final process-liveness check after log/probe
+validation, honoring CRFlowExpectedExit for intentional departure scenarios.
+Five regression cases cover live peers, a late unexpected exit, intentional host
+departure, a missing coordinator, and an entirely exited session with clean logs.
+The hands-on rerun explicitly disables only the foreground-focus watchdog via
+its existing BZR_NO_FOREGROUND_WATCHDOG switch. Windowed mode and the graceful
+session/hard-timeout teardown policies remain in force.

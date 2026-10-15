@@ -47,6 +47,7 @@ runs:
         $env:PSModulePath = $null
         foreach ($test in @('reverse_engineering/coopflow/Test-CRFlowLogErrors.ps1',
                             'reverse_engineering/coopflow/Test-CRFlowParticipants.ps1',
+                            'reverse_engineering/coopflow/Test-CRFlowClientLiveness.ps1',
                             'reverse_engineering/Test-BZRCoopWatchdog.ps1')) {
           & $ps51 -NoProfile -ExecutionPolicy Bypass -File $test
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

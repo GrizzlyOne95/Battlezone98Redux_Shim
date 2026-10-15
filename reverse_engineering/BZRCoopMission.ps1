@@ -224,6 +224,17 @@ function Assert-CRFlowClientsAlive {
     }
 }
 
+# Check again after log/probe validation: a probe's missing counter can be a
+# warning after a mission ends, but an unexpected process exit must fail.
+function Test-CRFlowClientLiveness {
+    try {
+        Assert-CRFlowClientsAlive
+        Add-CRFlowCheck 'all expected client processes survive validation' $true
+    } catch {
+        Add-CRFlowCheck 'all expected client processes survive validation' $false $_.Exception.Message
+    }
+}
+
 function Get-CRFlowLogPath($Client) {
     Get-ChildItem -LiteralPath $Client.dir, (Join-Path $Client.dir 'logs') -Filter 'BZLogger.txt' -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
