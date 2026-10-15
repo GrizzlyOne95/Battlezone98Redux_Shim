@@ -121,3 +121,33 @@ departure, a missing coordinator, and an entirely exited session with clean logs
 The hands-on rerun explicitly disables only the foreground-focus watchdog via
 its existing BZR_NO_FOREGROUND_WATCHDOG switch. Windowed mode and the graceful
 session/hard-timeout teardown policies remain in force.
+
+## Final local acceptance
+
+`recovery1015-assist-three-final` passes nine steps / 22 checks including all
+three clients alive at final validation. A nested physical-input run passes five
+steps / 22 checks: X, native terrain-reticle J, closed-PDA V, Backspace cancel and
+chat suppression without replay. Full physical Z aim-to-transfer remains open;
+the experimental placement did not establish its native reticle precondition.
+
+DX11 Enhanced controls for missions 12, 13 and 14 each pass four steps / 18 checks
+with two clients, 45 seconds of observation, parity and final process survival.
+They establish startup/render health, not full mission completion. Mission 15
+was neither edited nor launched. Long assistance sessions have audio-pool
+warnings, so physical-input acceptance does not qualify voice-over timing.
+
+The new [EXU draft #110](https://github.com/GrizzlyOne95/ExtraUtilities/pull/110)
+adds a guarded local kill-notice presentation switch and read-only native player
+stats snapshots. CR #214 defaults notices and the stock scoreboard off once per
+co-op mission while preserving M. `recovery1015-coop-hud-qualified` passes seven
+steps / 15 checks on two DX11 GOG clients: identity/stats parity, physical M toggle,
+reversible notices and a controlled guest death advancing deaths/lives on both
+peers with notices hidden and kills unchanged. Clean Lua/Ogre checks and final
+client survival pass. Both clients and the loopback server were stopped gracefully.
+
+OpenShim Linux CTest and Release Win32 CI pass at `e635493c9`, which incorporates
+the upstream main merge containing the already-tested startup-hash fix (#479).
+Native tests keep the same installed startup-hash DLL described above. The final
+HUD run replaces EXU with a fresh build of branch checkpoint `ef53397`; private
+stage/provenance manifests record hashes. No real-install deployment or public
+publication occurred. Windows Steam, Proton/Wine and two-PC qualification remain.
