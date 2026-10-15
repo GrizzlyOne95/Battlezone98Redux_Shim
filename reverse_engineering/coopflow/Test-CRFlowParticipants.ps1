@@ -45,7 +45,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $fixtureRoot 'c3.log'), 'Lua error: fourth client')
     Reset-Checks
     Test-CRFlowLogErrors
-    Check ($script:CRFlowRun.checks.Count -eq 16 -and @($script:CRFlowRun.checks | Where-Object status -eq fail).Count -eq 1) 'fourth-client script errors affect verdict'
+    Check (@($script:CRFlowRun.checks | Where-Object { $_.check -like '*no Lua or engine script errors' }).Count -eq 4 -and @($script:CRFlowRun.checks | Where-Object status -eq fail).Count -eq 1) 'fourth-client script errors affect verdict'
     [IO.File]::WriteAllText((Join-Path $fixtureRoot 'c3.log'), '')
     $overlayFixture = Join-Path $fixtureRoot 'campaignReimagined_subtitle_overlay_errors.log'
     [IO.File]::WriteAllText($overlayFixture, '[11.3] reason=overlay-unavailable mode=play')

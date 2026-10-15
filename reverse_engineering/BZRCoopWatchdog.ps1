@@ -15,7 +15,7 @@
 #   teardown  the runner's flow-teardown marker.
 # Either starts -FailureGraceSeconds for the runner to finish by itself. The
 # grace expiring, or -HardTimeoutSeconds since start, makes the watchdog stop
-# the clients (forced, evidence copied), coordinator, server and any other
+# the clients (WM_CLOSE only, evidence copied), coordinator, server and any other
 # runner children, wait -KillGraceSeconds, then write a FAIL
 # flow-summary.json if none exists and kill the runner (nonzero exit).
 # Whenever the runner exits, the coordinator and server are stopped; after a
@@ -51,11 +51,26 @@ function Set-BZRCoopWatchdogPid([string]$RunDir, [string]$Name, [int]$ProcessId)
     $pids | ConvertTo-Json | Set-Content -LiteralPath $path
 }
 
+# Keep the game/D3D process out of generic child-process termination.
+function Stop-BZRCoopWatchdogProcess($Process) {
+    if ($Process.ProcessName -ieq 'battlezone98redux') {
+        Stop-BZRGame -Id $Process.Id -NoForce -TimeoutSeconds 10 -ErrorAction Continue
+        return
+    }
+    $Process.Kill()
+    [void]$Process.WaitForExit(10000)
+}
+
 function Watch-BZRCoopRun {
     param([Parameter(Mandatory)][int]$ParentPid, [Parameter(Mandatory)][long]$ParentStartTicks, [Parameter(Mandatory)][string]$RunDir,
           [string]$SessionFile = 'C:\BZRCoop\session.json', [int]$HardTimeoutSeconds = 0,
           [int]$FailureGraceSeconds = 300, [int]$KillGraceSeconds = 60, [int]$PollSeconds = 2)
     $ErrorActionPreference = 'Stop'
+    # This process only closes games; it must not acquire a new launch lock.
+    $priorLock = $env:BZR_LAUNCH_LOCK_HELD
+    $env:BZR_LAUNCH_LOCK_HELD = "$PID-nolaunch"
+    try { . "$PSScriptRoot\BZRHarness.ps1" }
+    finally { $env:BZR_LAUNCH_LOCK_HELD = $priorLock }
     $log = Join-Path $RunDir 'watchdog.log'
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $clients = @{}  # pid -> @{ index; dir; start }
@@ -133,10 +148,22 @@ function Watch-BZRCoopRun {
                 $queue.Enqueue($c)
             }
         }
+        # A coordinator keeps the launch mutex while an unresponsive game is
+        # alive. Preserve its whole tree so another run cannot take that lock.
+        foreach ($entry in $order) {
+            $game = Get-Process -Id $entry.ProcessId -ErrorAction SilentlyContinue
+            if ($game -and $game.ProcessName -ieq 'battlezone98redux') {
+                Stop-BZRCoopWatchdogProcess $game
+                if (Get-Process -Id $game.Id -ErrorAction SilentlyContinue) {
+                    Write-Log "left $Label tree running: game $($game.Id) ignored WM_CLOSE"
+                    return
+                }
+            }
+        }
         foreach ($p in $order) {
             $proc = Get-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
             if (-not $proc) { continue }
-            try { $proc.Kill(); [void]$proc.WaitForExit(10000); Write-Log "stopped $Label pid $($p.ProcessId)" } catch { }
+            try { Stop-BZRCoopWatchdogProcess $proc; Write-Log "stopped $Label pid $($p.ProcessId)" } catch { }
         }
     }
 
@@ -145,7 +172,7 @@ function Watch-BZRCoopRun {
             $c = $clients[$id]
             $p = Get-Process -Id $id -ErrorAction SilentlyContinue
             if ($p -and (-not $c.start -or $p.StartTime -eq $c.start)) {
-                try { $p.Kill(); [void]$p.WaitForExit(10000); Write-Log "stopped client $($c.index) pid $id" }
+                try { Stop-BZRCoopWatchdogProcess $p; Write-Log "stopped client $($c.index) pid $id" }
                 catch { Write-Log "client $($c.index) pid ${id}: $_" }
             }
             # The evidence BZRCoopSession.ps1 -Action Stop copies; its copy wins.
@@ -161,7 +188,7 @@ function Watch-BZRCoopRun {
         }
         if ($clients.Count -and (Test-Path -LiteralPath $SessionFile)) {
             $session = try { Get-Content -LiteralPath $SessionFile -Raw | ConvertFrom-Json } catch { $null }
-            if ($session -and (Test-SameRun $session)) { Remove-Item -LiteralPath $SessionFile -Force -ErrorAction SilentlyContinue }
+            if ($session -and (Test-SameRun $session) -and -not @($clients.Keys | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue }).Count) { Remove-Item -LiteralPath $SessionFile -Force -ErrorAction SilentlyContinue }
         }
     }
 

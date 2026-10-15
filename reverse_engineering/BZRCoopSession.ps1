@@ -317,6 +317,13 @@ function Start-BZRCoopClients {
         if (-not (Test-Path -LiteralPath (Join-Path $inst 'battlezone98redux.exe'))) {
             throw "Instance $i is not prepared; run -Action Prepare first."
         }
+        if ($Matchmaking -eq 'local') {
+            # Same-PC peers share one public/loopback address. Stock route
+            # selection can accept the lobby but reject their gameplay UDP
+            # source, leaving both clients in Network Part 2 indefinitely.
+            # Pin only these disposable clients to the private server relay.
+            Set-BZRCoopIniValue (Join-Path $inst 'openshim.ini') 'Network' 'RoutePreference' 'Relay'
+        }
         if ($i -gt 0) { Start-Sleep -Seconds $LaunchDelaySeconds }
         if ($MaxNetworkLogging) { Set-BZRCoopMaxNetworkLogging $inst }
         if ($i -eq 0) { Assert-BZRSafeToLaunch } else { Assert-BZRSafeToLaunch -AllowRunning }

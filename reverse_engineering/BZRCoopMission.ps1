@@ -224,6 +224,17 @@ function Assert-CRFlowClientsAlive {
     }
 }
 
+# Check again after log/probe validation: a probe's missing counter can be a
+# warning after a mission ends, but an unexpected process exit must fail.
+function Test-CRFlowClientLiveness {
+    try {
+        Assert-CRFlowClientsAlive
+        Add-CRFlowCheck 'all expected client processes survive validation' $true
+    } catch {
+        Add-CRFlowCheck 'all expected client processes survive validation' $false $_.Exception.Message
+    }
+}
+
 function Get-CRFlowLogPath($Client) {
     Get-ChildItem -LiteralPath $Client.dir, (Join-Path $Client.dir 'logs') -Filter 'BZLogger.txt' -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
@@ -581,6 +592,13 @@ function Test-CRFlowLogErrors([int[]]$Clients) {
         # "Fsm error" is the engine's own (e.g. "Camera Stack 0verfow" from an
         # unbalanced CameraFinish); it raises an in-game alert.
         Add-CRFlowCheck "c$i no Lua or engine script errors" ($hits.Count -eq 0) $hits
+        # Ogre draw failures can be caught while Lua and probes keep running.
+        # A responsive mission is not evidence that its frames are rendering.
+        $renderHits = if ($log) {
+            @(Select-String -LiteralPath $log -SimpleMatch -Pattern 'Ogre Rendering Exception Seen' |
+                Select-Object -Last 10 | ForEach-Object { $_.Line.Trim() })
+        } else { @() }
+        Add-CRFlowCheck "c$i no Ogre rendering exceptions" ($renderHits.Count -eq 0) $renderHits
         # CR's guest-side marker/label resolution (CR #186) logs "[coop] unresolved ..."
         # and bumps M.coopUnresolved when a leader-sent label never resolves in 15 s.
         $unresolved = @()

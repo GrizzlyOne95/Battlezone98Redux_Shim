@@ -169,6 +169,11 @@ foreach ($client in $allClients) {
 # 2. Host creates the game.
 Click $hostClient $UI.LoungeCreate
 Start-Sleep -Milliseconds 800
+# The first posted click can only reactivate the background lounge after an
+# RDP resize. A second click opens it then; an already-open modal ignores
+# this point outside the dialog. No duplicate server request is submitted.
+Click $hostClient $UI.LoungeCreate
+Start-Sleep -Milliseconds 400
 Click $hostClient $UI.CreateNameField
 Start-Sleep -Milliseconds 200
 Send-BZRClientText $hostClient.pid $GameName
@@ -255,6 +260,10 @@ $assignments = @()
 foreach ($guestClient in $guestClients) {
     $guestDisplayName = if ($guestClient.index -eq 1) { $GuestName } else { "BZRCoop$($guestClient.index + 1)" }
     $null = Wait-Until "c$($guestClient.index)-sees-game" { Find-LogLine $guestClient ("ID {0}, [^,]+, [^,]+, ~game~pub~~{1}" -f $lobbyId, [regex]::Escape($GameName)) }
+    Click $guestClient $UI.LoungeFirstGame
+    Start-Sleep -Milliseconds 400
+    # Re-select after background activation; selection is idempotent, while
+    # Join is submitted only once. A lost first selection leaves Join inert.
     Click $guestClient $UI.LoungeFirstGame
     Start-Sleep -Milliseconds 400
     Click $guestClient $UI.LoungeJoin
