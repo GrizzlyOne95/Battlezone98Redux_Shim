@@ -527,6 +527,18 @@ foreach ($gameDir in $gamePaths) {
             Remove-Planned -Path $reset.FullName
         }
     }
+    if ($purgeLeftovers) {
+        Remove-IfPresent (Join-Path $gameDir "openshim.ini.example")
+        Remove-OpenShimLogs -GameDir $gameDir
+    }
+}
+
+if ($purgeLeftovers) {
+    # The uploader/outbox and webhook settings belong to this Windows user,
+    # shared by any OpenShim installs. Do not change Steam launch options.
+    Write-Host "Purging current-user OpenShim data (shared by any OpenShim installations):"
+    Remove-OpenShimUserData -BaseDir $env:LOCALAPPDATA
+    Remove-OpenShimUserData -BaseDir $env:APPDATA
 }
 
 Write-Host ""
@@ -535,16 +547,23 @@ if ($dryRun) {
 } else {
     Write-Host "Uninstall complete: $($script:removed) item(s) removed, $($script:kept) kept."
 }
-if ($purgeConfig) {
+if ($purgeLeftovers) {
+    Write-Host "OpenShim-owned settings, logs, crash dumps, and current-user data cleanup requested."
+    Write-Host "Shared net.ini, BZLogger.txt, generic game logs, and unrelated mod files were kept."
+    Write-Host "If configured, CLEAR the OpenShim upload wrapper from Steam Launch Options."
+    Write-Host "This uninstaller cannot edit Steam launch options for you."
+} elseif ($purgeConfig) {
     Write-Host "openshim.ini and its backups were removed (OPENSHIM_PURGE_CONFIG). net.ini and logs were left in place."
 } else {
     Write-Host "openshim.ini, net.ini, their backups, and logs were left in place."
-    Write-Host "Set OPENSHIM_PURGE_CONFIG=1 and run again to remove openshim.ini as well."
+    Write-Host "Set OPENSHIM_PURGE_CONFIG=1 for settings, or OPENSHIM_PURGE_LEFTOVERS=1 for full cleanup."
 }
-$wrapDir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "openshim" } else { "" }
-if ($wrapDir -and (Test-Path -LiteralPath $wrapDir)) {
-    Write-Host "The optional log-upload wrapper is still installed at $wrapDir;"
-    Write-Host "delete that folder and clear the Steam launch option that names it if you set one."
+if (-not $purgeLeftovers) {
+    $wrapDir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "openshim" } else { "" }
+    if ($wrapDir -and (Test-Path -LiteralPath $wrapDir)) {
+        Write-Host "The optional log-upload wrapper is still installed at $wrapDir;"
+        Write-Host "delete that folder and clear the Steam launch option that names it if you set one."
+    }
 }
 if ($script:failed.Count -gt 0) {
     throw "$($script:failed.Count) item(s) could not be removed (listed above as FAILED). Close anything using them and run again."
