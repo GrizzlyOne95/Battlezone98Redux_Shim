@@ -49,7 +49,7 @@ every('protect', 1, function()
 end)
 return #tasks()
 '@ | Out-Null
-    foreach ($c in $H, $G) { Invoke-CRFlow $c "every('selfheal', 1, function() heal(me()) end); return true" | Out-Null }
+    foreach ($c in Get-CRFlowClientIndices) { Invoke-CRFlow $c "every('selfheal', 1, function() heal(me()) end); return true" | Out-Null }
     'protect + selfheal'
 }
 
@@ -243,4 +243,4 @@ Invoke-CRFlowStep 'win reaches both clients (after the closing audio)' {
     @{ hostAt = $a.t; guestAt = $b.t }
 }
 
-Test-CRFlowResultParity -Expect SucceedMission -Debrief 'misn02w1.des' -Clients @($H, $G)
+Test-CRFlowResultParity -Expect SucceedMission -Debrief 'misn02w1.des' -Clients @(Get-CRFlowClientIndices)

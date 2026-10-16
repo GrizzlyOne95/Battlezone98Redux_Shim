@@ -56,7 +56,7 @@ every('protect', 1, function()
 end)
 return #tasks()
 '@ | Out-Null
-    foreach ($c in $H, $G) { Invoke-CRFlow $c "every('selfheal', 1, function() heal(me()) end); return true" | Out-Null }
+    foreach ($c in Get-CRFlowClientIndices) { Invoke-CRFlow $c "every('selfheal', 1, function() heal(me()) end); return true" | Out-Null }
     'protect + selfheal'
 }
 
@@ -159,8 +159,10 @@ Invoke-CRFlowStep 'host alone at the pad does not finish' {
     'waiting for guest'
 }
 
-Invoke-CRFlowStep 'both players at the launch pad -> outro' {
-    Invoke-CRFlow $G 'return tp(M.launch, 35)' | Out-Null
+Invoke-CRFlowStep 'every human reaches the launch pad -> outro' {
+    foreach ($client in @(Get-CRFlowClientIndices | Where-Object { $_ -ne $H })) {
+        Invoke-CRFlow $client 'return tp(M.launch, 35)' | Out-Null
+    }
     Wait-CRFlow $H 'return M.final_objective' -TimeoutSeconds 30 | Out-Null
     Wait-CRFlow $H 'return M.startfinishingmovie' -TimeoutSeconds 15
 }
@@ -189,4 +191,4 @@ Invoke-CRFlowStep 'win reaches both clients' {
     @{ hostAt = $a.t; guestAt = $b.t; naturalOutro = $natural }
 }
 
-Test-CRFlowResultParity -Expect SucceedMission -Debrief 'misn03w1.des' -Clients @($H, $G)
+Test-CRFlowResultParity -Expect SucceedMission -Debrief 'misn03w1.des' -Clients @(Get-CRFlowClientIndices)
