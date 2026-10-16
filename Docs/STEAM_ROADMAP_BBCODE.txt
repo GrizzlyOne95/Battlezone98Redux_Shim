@@ -8,6 +8,13 @@ Canonical progress reference for OpenShim, Extra Utilities (EXU), Campaign Reima
 
 The source audit, pinned revisions and historical evidence are in [code]Docs/ROADMAP_CODE_VALIDATION_20261007.md[/code]. The October 9 combined branch, deployment hashes, GOG menu verification and remaining network gates are in [code]Docs/NETWORK_UI_INTEGRATION_20261009.md[/code]. Current-main APIs and consuming mod source do not establish inclusion in an older bundled DLL. Local GOG results do not qualify Steam, Proton or Wine.
 
+[h2]Mission 15 development checkpoint (2026-10-15)[/h2]
+
+[list]
+[*] [b]CR Mission 15 co-op prototype[/b] - [url=https://github.com/GrizzlyOne95/Battlezone98Redux_CampaignReimagined/pull/221]draft CR #221[/url] uses the shipped misn15b layout, required CCA/Massachusetts recovery, optional Alaska survivors, shared 75-scrap withdrawal, Titan weather sensors and a map-specific MAT/HG2 methane surface. Tartarus warns, dispatches guardians and deploys forty bolt mines if close intrusion persists. The configured native local server with two GOG DX11 Enhanced clients passed nine assisted progression steps and 24 checks, including guest recovery, replicated mines and shared victory; 94 presentation operations match. Unassisted difficulty, physical mine damage, final shoreline appearance, native save/load, four-client and Steam/Proton/Wine qualification remain open. Not published.
+[*] [b]DX11 multiplayer shader resource order[/b] - [url=https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/pull/488]draft OpenShim #488[/url] registers verified Enhanced shader sources before Modable is parsed. The corrected two-client Mission 15 run has no Lua, caught rendering or unresolved-label errors; both clients survive validation. Release Win32 and 110 CTest regressions pass. Other runtime/store lanes remain unqualified.
+[/list]
+
 [h2]Release and Installation[/h2]
 
 [list]
