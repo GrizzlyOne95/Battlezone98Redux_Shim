@@ -725,4 +725,10 @@ Probe._test = { Helpers = Helpers, tick = tick, snapshot = snapshot, runCommand 
         for k in pairs(vars) do vars[k] = nil end
     end }
 
+-- Test-only canonical dispatch plan for missions with per-human panels.
+-- Native op logs remain independent evidence of what each client applied.
+function Probe.RecordPresentationPlan(target, op, ...)
+    emit("presentation-plan", {target=target or 0, op=op, args={...}})
+end
+
 return Probe

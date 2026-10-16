@@ -9,7 +9,10 @@ $script:participantCount = 4
 function Check([bool]$Ok, [string]$Message) { if (-not $Ok) { throw $Message }; $script:checks++ }
 function Get-CRFlowSession { @{ clients = @(0..($script:participantCount - 1) | ForEach-Object { [pscustomobject]@{ index = $_; dir = $fixtureRoot } }) } }
 function Reset-Checks { $script:CRFlowRun = @{ checks = New-Object Collections.ArrayList } }
-function Get-CRFlowEvents([int]$Client, [string]$Kind) { if ($Kind -eq 'op') { $script:fixtureEvents[$Client] } }
+function Get-CRFlowEvents([int]$Client, [string]$Kind) {
+    if ($Kind -eq 'op') { $script:fixtureEvents[$Client] }
+    elseif ($Kind -eq 'presentation-plan' -and $Client -eq 0) { $script:fixturePlan }
+}
 function Get-CRFlowLogPath($Client) { Join-Path $fixtureRoot "c$($Client.index).log" }
 function Event([string]$Op, $Arguments) { [pscustomobject]@{ op = $Op; args = @($Arguments) } }
 try {
@@ -27,6 +30,22 @@ try {
     Reset-Checks
     Test-CRFlowPresentationParity
     Check ($script:CRFlowRun.checks.Count -eq 3 -and -not @($script:CRFlowRun.checks | Where-Object status -eq fail).Count) 'three guests compared with host'
+    $script:fixturePlan = @()
+    foreach ($client in 0..3) {
+        $script:fixtureEvents[$client] = @(Event AddObjective @("personal-$client.otf", 'white'))
+        $planned = Event AddObjective @("personal-$client.otf", 'white')
+        $planned | Add-Member target ($client+1)
+        $script:fixturePlan += $planned
+    }
+    Reset-Checks
+    Test-CRFlowPresentationParity
+    Check ($script:CRFlowRun.checks.Count -eq 4 -and -not @($script:CRFlowRun.checks | Where-Object status -eq fail).Count) 'each native panel matches its targeted host dispatch plan'
+    $script:fixtureEvents[3] = @(Event AddObjective @('wrong-panel.otf', 'white'))
+    Reset-Checks
+    Test-CRFlowPresentationParity
+    Check (@($script:CRFlowRun.checks | Where-Object status -eq fail).Count -eq 1) 'wrong fourth-client targeted panel rejected'
+    $script:fixturePlan = @()
+    foreach ($client in 0..3) { $script:fixtureEvents[$client] = @(Event AddObjective @('test.otf', 'white')) }
     $script:participantCount = 2
     Reset-Checks
     Test-CRFlowPresentationParity

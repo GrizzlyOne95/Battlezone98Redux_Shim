@@ -97,6 +97,15 @@ return ff('^apc_spawn_time$')
 Invoke-CRFlowStep 'evacuation film plays on both clients' {
     Wait-CRFlow $H 'return M.camera_ready and L().localCameraActive' -TimeoutSeconds 30 | Out-Null
     Wait-CRFlow $G 'return L().localCameraActive' -TimeoutSeconds 20 | Out-Null
+    $script:evacProps = @(Invoke-CRFlow $H 'local out={};for i=1,5 do local h=M["prop"..i];if IsAlive(h) then out[#out+1]=describe(h) end end;return out')
+    foreach ($client in @(Get-CRFlowClientIndices | Where-Object { $_ -ne $H })) {
+        Invoke-CRFlow $client 'qualificationProps={};return true' | Out-Null
+        foreach ($prop in $script:evacProps) {
+            $lua = 'local h=GetHandle("'+$prop.label+'");if not IsValid(h) then h=findNear("'+$prop.odf+'",'+$prop.pos[0]+','+$prop.pos[2]+',120) end; if IsValid(h) then qualificationProps[#qualificationProps+1]=h end;return IsValid(h)'
+            $found = Invoke-CRFlow $client $lua
+            Add-CRFlowCheck "c$client sees evacuation prop $($prop.odf) before cleanup" ([bool]$found) $found
+        }
+    }
     @{ host = Invoke-CRFlow $H 'return L()'; guest = Invoke-CRFlow $G 'return L()' }
 }
 
@@ -133,9 +142,12 @@ Invoke-CRFlowStep 'both cameras released after the film' {
 
 Invoke-CRFlowStep 'cinematic props removed on both' {
     Wait-CRFlow $H 'return M.remove_props' -TimeoutSeconds 30 | Out-Null
-    $count = @(Get-CRFlowEvents $G op | Where-Object op -eq 'RemoveObject').Count
-    if ($count -lt 1) { throw 'guest received no RemoveObject' }
-    @{ guestRemoveObject = $count }
+    foreach ($client in @(Get-CRFlowClientIndices | Where-Object { $_ -ne $H })) {
+        Wait-CRFlow $client 'local alive=0;for _,h in ipairs(qualificationProps or {}) do if IsValid(h) and IsAlive(h) then alive=alive+1 end end;return alive==0' -TimeoutSeconds 20 | Out-Null
+    }
+    # The owner's native deletion may arrive before the presentation event;
+    # that event then deliberately skips a gone handle. Verify world removal.
+    $true
 }
 
 Invoke-CRFlowStep 'transports reach the launch pad' {
