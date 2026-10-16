@@ -52,11 +52,13 @@ function Get-CRFlowStub([string]$Mission) {
     $infoHooks, $infoOpts, $infoLocals, $planHook = '', '', '', ''
     if ($Mission -eq 'misn12') {
         $planHook = @'
-        local plannedPresent = Present
-        Present = function(op, ...)
-            probe.RecordPresentationPlan(TARGETED_OPS[op] and focusTeam or 0, op, ...)
-            return plannedPresent(op, ...)
-        end
+        -- Mission 12 already reaches Lua 5.1's main-chunk local limit.
+        Present = (function(plannedPresent)
+            return function(op, ...)
+                probe.RecordPresentationPlan(TARGETED_OPS[op] and focusTeam or 0, op, ...)
+                return plannedPresent(op, ...)
+            end
+        end)(Present)
 '@
     }
     if ($Mission -eq 'misn06') {

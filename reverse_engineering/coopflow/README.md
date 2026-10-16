@@ -94,6 +94,12 @@ use `-StopOnFailure` too.
 fourth-client presentation, duplicate result, script error, directional alliance
 or craft owner.
 
+Before a campaign matrix, run `Test-CRFlowMissionParsing.ps1 -CampaignScripts
+<CR-checkout>\Scripts` using Lua 5.1. It compiles each complete mission with its
+appended probe without executing it. Mission 12 already reaches the main chunk's
+200-local limit with the probe attached; instrumentation wrappers must keep their
+extra locals inside a separate function scope.
+
 `misn02b-onfoot` holds the misn02b fixes: a pilot-only `.vxt`, spawns beside
 the vehicles, camera-stack-safe `CameraFinish`, film shots that advance when
 the leader's path ends, and the intro route renamed from `player_path` (see
