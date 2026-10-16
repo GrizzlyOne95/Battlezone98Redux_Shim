@@ -99,3 +99,8 @@ finally {
     foreach ($name in $variables) { [Environment]::SetEnvironmentVariable($name, $previous[$name]) }
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# The last child deliberately rejects Update on an empty install (exit 1).
+# GitHub's pwsh wrapper otherwise propagates that expected native exit even
+# after every assertion passed. An unexpected result still throws above.
+exit 0

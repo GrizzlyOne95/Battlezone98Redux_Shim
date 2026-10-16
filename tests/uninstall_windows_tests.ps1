@@ -46,8 +46,10 @@ function New-GameFixture {
     Write-Fixture $Root "winmm.dll.bak-20260101-000000" $openShimMarker
     Write-Fixture $Root "winmm.dll.bak-20260102-000000" $foreignMarker
     Write-Fixture $Root "bzloader.dll" $openShimMarker
+    Write-Fixture $Root "bzloader.dll.previous" $openShimMarker
     Write-Fixture $Root "bzloader.dll.bak-20260101-000000" $openShimMarker
     Write-Fixture $Root "plugins\openshim.dll" $openShimMarker
+    Write-Fixture $Root "plugins\openshim.dll.previous" $openShimMarker
     Write-Fixture $Root "plugins\openshim.dll.bak-20260101-000000" $openShimMarker
 
     # patches.json family.
@@ -77,17 +79,40 @@ function New-GameFixture {
     Write-Fixture $Root "net.ini.bak-20260101-000000" "[Network]"
     Write-Fixture $Root "net.ini.previous" "[Network]"
     Write-Fixture $Root "logs\openshim.log" "log"
+    Write-Fixture $Root "logs\openshim_crash.log" "crash"
+    Write-Fixture $Root "logs\openshim_crash_20261015_150000.dmp" "dump"
+    Write-Fixture $Root "logs\bzloader.log" "loader"
+    Write-Fixture $Root "logs\winmm_shim.log" "proxy"
+    Write-Fixture $Root "logs\BZLogger.txt" "stock"
+    Write-Fixture $Root "logs\other_mod.log" "other"
+    Write-Fixture $Root "logs\openshim_custom.mod" "not a log"
+    Write-Fixture $Root "openshim.log" "fallback"
+    Write-Fixture $Root "openshim.ini.example" "reference"
     Write-Fixture $Root "openshim_update.status" "state=complete"
+
+    # Current-user folders are dedicated to OpenShim and removed only by the
+    # explicit full-clean option. Tests redirect AppData away from the machine.
+    $localRoot = Join-Path $script:root "LocalAppData"
+    $roamingRoot = Join-Path $script:root "RoamingAppData"
+    Write-Fixture $localRoot "openshim\openshim_wrap.ps1" "wrapper"
+    Write-Fixture $localRoot "openshim\outbox\failed.zip" "bundle"
+    Write-Fixture $localRoot "openshim\openshim_wrap.log" "log"
+    Write-Fixture $localRoot "not-openshim\keep.txt" "keep"
+    Write-Fixture $roamingRoot "openshim\upload.conf" "secret"
+    Write-Fixture $roamingRoot "not-openshim\keep.txt" "keep"
 }
 
 function Invoke-Uninstaller {
     param([string]$GameDir, [hashtable]$Env = @{})
     $saved = @{}
-    foreach ($name in @("OPENSHIM_GAME_PATH", "OPENSHIM_DRY_RUN", "OPENSHIM_PURGE_CONFIG")) {
+    foreach ($name in @("OPENSHIM_GAME_PATH", "OPENSHIM_DRY_RUN", "OPENSHIM_PURGE_CONFIG",
+                           "OPENSHIM_PURGE_LEFTOVERS", "LOCALAPPDATA", "APPDATA")) {
         $saved[$name] = [Environment]::GetEnvironmentVariable($name)
         [Environment]::SetEnvironmentVariable($name, $null)
     }
     [Environment]::SetEnvironmentVariable("OPENSHIM_GAME_PATH", $GameDir)
+    [Environment]::SetEnvironmentVariable("LOCALAPPDATA", (Join-Path $script:root "LocalAppData"))
+    [Environment]::SetEnvironmentVariable("APPDATA", (Join-Path $script:root "RoamingAppData"))
     foreach ($name in $Env.Keys) { [Environment]::SetEnvironmentVariable($name, $Env[$name]) }
     try {
         # Write-Host lands on the information stream, so merge every stream.
@@ -121,8 +146,9 @@ try {
 
     $gone = @(
         "winmm.dll", "winmm.dll.previous", "winmm.dll.bak-20260101-000000",
-        "bzloader.dll", "bzloader.dll.bak-20260101-000000",
-        "plugins\openshim.dll", "plugins\openshim.dll.bak-20260101-000000", "plugins",
+        "bzloader.dll", "bzloader.dll.previous", "bzloader.dll.bak-20260101-000000",
+        "plugins\openshim.dll", "plugins\openshim.dll.previous",
+        "plugins\openshim.dll.bak-20260101-000000", "plugins",
         "scripts\patches.json", "scripts\patches.json.previous", "scripts\patches.json.bak-20260101-000000",
         "openshim\renderer\enhanced\resources.version", "openshim\renderer\enhanced", "openshim\renderer",
         "openshim\OpenShimAssets.ini", "openshim",
@@ -140,7 +166,9 @@ try {
         "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png", "BZ_ASSETS_CORE\common\ui\CustomWidgets",
         "openshim.ini", "openshim.ini.bak-20260101-000000", "openshim.ini.pre-reset-20260101-000000.bak",
         "net.ini", "net.ini.bak-20260101-000000", "net.ini.previous",
-        "logs\openshim.log"
+        "logs\openshim.log", "logs\openshim_crash.log", "logs\openshim_crash_20261015_150000.dmp",
+        "logs\bzloader.log", "logs\winmm_shim.log", "logs\BZLogger.txt", "logs\other_mod.log", "logs\openshim_custom.mod",
+        "openshim.log", "openshim.ini.example"
     )
     foreach ($relative in $kept) {
         Check (Test-Path -LiteralPath (Join-Path $game $relative)) "kept: $relative"
@@ -158,6 +186,47 @@ try {
     foreach ($relative in @("net.ini", "net.ini.bak-20260101-000000", "net.ini.previous", "logs\openshim.log")) {
         Check (Test-Path -LiteralPath (Join-Path $game $relative)) "purge kept: $relative"
     }
+
+    # --- opt-in complete cleanup of OpenShim-only logs and per-user data ---------
+    New-GameFixture $game
+    $allBefore = @(
+        (Join-Path $game "logs\openshim.log"),
+        (Join-Path $script:root "LocalAppData\openshim\outbox\failed.zip"),
+        (Join-Path $script:root "RoamingAppData\openshim\upload.conf")
+    )
+    $result = Invoke-Uninstaller -GameDir $game -Env @{
+        OPENSHIM_PURGE_LEFTOVERS = "1"
+        OPENSHIM_DRY_RUN = "1"
+    }
+    Check $result.Ok "full-clean dry run completes: $($result.Output)"
+    foreach ($file in $allBefore) {
+        Check (Test-Path -LiteralPath $file) "full-clean dry run retains: $file"
+    }
+
+    New-GameFixture $game
+    $result = Invoke-Uninstaller -GameDir $game -Env @{ OPENSHIM_PURGE_LEFTOVERS = "1" }
+    Check $result.Ok "full-clean completes: $($result.Output)"
+    foreach ($relative in @(
+        "openshim.ini", "openshim.ini.bak-20260101-000000", "openshim.ini.pre-reset-20260101-000000.bak",
+        "openshim.ini.example", "openshim.log", "logs\openshim.log", "logs\openshim_crash.log",
+        "logs\openshim_crash_20261015_150000.dmp", "logs\bzloader.log", "logs\winmm_shim.log"
+    )) {
+        Check (-not (Test-Path -LiteralPath (Join-Path $game $relative))) "full-clean removed: $relative"
+    }
+    foreach ($relative in @(
+        "net.ini", "net.ini.previous", "net.ini.bak-20260101-000000",
+        "logs\BZLogger.txt", "logs\other_mod.log", "logs\openshim_custom.mod",
+        "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png"
+    )) {
+        Check (Test-Path -LiteralPath (Join-Path $game $relative)) "full-clean preserved: $relative"
+    }
+    foreach ($relative in @("LocalAppData\openshim", "RoamingAppData\openshim")) {
+        Check (-not (Test-Path -LiteralPath (Join-Path $script:root $relative))) "full-clean removed user data: $relative"
+    }
+    foreach ($relative in @("LocalAppData\not-openshim\keep.txt", "RoamingAppData\not-openshim\keep.txt")) {
+        Check (Test-Path -LiteralPath (Join-Path $script:root $relative)) "full-clean preserved other user data: $relative"
+    }
+    Check ($result.Output -match "CLEAR the OpenShim upload wrapper") "full-clean warns to clear Steam launch option"
 
     # --- a foreign winmm.dll is never removed --------------------------------------
     New-GameFixture $game

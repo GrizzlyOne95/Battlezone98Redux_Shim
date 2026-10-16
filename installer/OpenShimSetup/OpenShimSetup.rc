@@ -10,4 +10,19 @@
 1 RCDATA "..\..\scripts\install_windows.ps1"
 2 RCDATA "..\..\scripts\uninstall_windows.ps1"
 
+// Modal Win32 uninstall options: a real unchecked checkbox, not a destructive
+// default. Console-only / quiet runs use the explicit --purge-leftovers flag.
+101 DIALOGEX 0, 0, 320, 144
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "OpenShim - Uninstall"
+FONT 9, "Segoe UI"
+BEGIN
+    LTEXT "Remove OpenShim from the selected Battlezone installation(s)?", -1, 12, 10, 296, 18
+    CONTROL "Also remove OpenShim settings, logs, crash dumps, and uploader data", 1001, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 12, 37, 296, 23
+    LTEXT "Leaves stock game files, shared net.ini and unrelated mods untouched.", -1, 12, 65, 296, 12
+    LTEXT "If checked: uploader data is shared; clear its Steam launch option manually.", -1, 12, 82, 296, 24
+    DEFPUSHBUTTON "Uninstall", IDOK, 193, 116, 55, 16
+    PUSHBUTTON "Cancel", IDCANCEL, 254, 116, 54, 16
+END
+
 #include "embedded_suite.inc"
