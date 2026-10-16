@@ -49,7 +49,18 @@ $script:CRFlowReplicatedOps = @('ClearObjectives', 'AddObjective', 'UpdateObject
 function Get-CRFlowStub([string]$Mission) {
     # Appended at the end of the mission chunk, so M/CRCoop/native/... resolve
     # to the mission's file-level locals; names a mission lacks resolve to nil.
-    $infoHooks, $infoOpts, $infoLocals = '', '', ''
+    $infoHooks, $infoOpts, $infoLocals, $planHook = '', '', '', ''
+    if ($Mission -eq 'misn12') {
+        $planHook = @'
+        -- Mission 12 already reaches Lua 5.1's main-chunk local limit.
+        Present = (function(plannedPresent)
+            return function(op, ...)
+                probe.RecordPresentationPlan(TARGETED_OPS[op] and focusTeam or 0, op, ...)
+                return plannedPresent(op, ...)
+            end
+        end)(Present)
+'@
+    }
     if ($Mission -eq 'misn06') {
         # misn06 reads IsInfo (the selected object's info panel, local UI state)
         # five ways. Guests relay their own via "I" messages and the leader
@@ -113,6 +124,7 @@ do
                 }
             end,
         })
+$planHook
     else
         print("[CRFLOW] {\"k\":\"error\",\"msg\":\"require CRFlowProbe failed: " .. tostring(probe):gsub('[\\"]', "'") .. "\"} #END")
     end
@@ -491,7 +503,24 @@ function Test-CRFlowPresentationParity([int]$HostClient = 0, [int[]]$Guests) {
     # objects natively without a presentation event, which logs on the host only.
     $streamOp = { $_.op -in $script:CRFlowReplicatedOps -and $_.op -ne 'RemoveObject' }
     $hostOps = @(Get-CRFlowEvents $HostClient op | Where-Object $streamOp | ForEach-Object { Get-CRFlowOpSignature $_ })
-    foreach ($g in $Guests) {
+    $plan = @(Get-CRFlowEvents $HostClient 'presentation-plan' | Where-Object { $_ -and $_.op })
+    $observers = if ($plan.Count) { @($HostClient) + @($Guests) } else { @($Guests) }
+    foreach ($g in $observers) {
+        if ($plan.Count) {
+            # Team assignments are already proven by Test-CRFlowRoster. Filter
+            # the canonical host dispatch plan, not another player's panel.
+            $team = $g + 1
+            $dedupe = @{}
+            $hostOps = @($plan | Where-Object { $_.target -eq 0 -or $_.target -eq $team } | Where-Object $streamOp | ForEach-Object {
+                $signature = Get-CRFlowOpSignature $_
+                $key = $_.op + ':' + $_.args[0].label
+                if ($_.op -in 'SetObjectiveName','SetMaxHealth') {
+                    if ($dedupe[$key] -eq $signature) { return }
+                    $dedupe[$key] = $signature
+                }
+                $signature
+            })
+        }
         $guestOps = @(Get-CRFlowEvents $g op | Where-Object $streamOp | ForEach-Object { Get-CRFlowOpSignature $_ })
         $first = -1
         for ($i = 0; $i -lt [math]::Min($hostOps.Count, $guestOps.Count); $i++) {
@@ -507,7 +536,7 @@ function Test-CRFlowPresentationParity([int]$HostClient = 0, [int[]]$Guests) {
         } elseif ($guestOps.Count -gt $hostOps.Count) {
             $detail.guestExtra = @($guestOps[$hostOps.Count..($guestOps.Count - 1)] | Select-Object -First 8)
         }
-        Add-CRFlowCheck "presentation stream host=c$HostClient guest=c$g ($($hostOps.Count) ops)" `
+        Add-CRFlowCheck "presentation stream host=c$HostClient guest=c$g ($($hostOps.Count) ops; targeted plan=$([bool]$plan.Count))" `
             ($first -lt 0 -and $hostOps.Count -eq $guestOps.Count -and $hostOps.Count -gt 0) $detail
     }
 }

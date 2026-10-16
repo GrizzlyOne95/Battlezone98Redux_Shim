@@ -2010,6 +2010,12 @@ namespace BZROpenShim::RenderProfiles
             const uintptr_t slot = Hooks::FindMainImageImportSlot("OgreMain.dll", name);
             const FnRgmInitialiseGroup original =
                 ResolveOgreExport<FnRgmInitialiseGroup>(name);
+            if (slot && s_originalInitialiseGroup == original &&
+                *reinterpret_cast<void**>(slot) ==
+                    reinterpret_cast<void*>(&InitialiseResourceGroupHook))
+            {
+                return;
+            }
             if (!slot || !original ||
                 *reinterpret_cast<FnRgmInitialiseGroup*>(slot) != original)
             {
@@ -4040,6 +4046,11 @@ namespace BZROpenShim::RenderProfiles
     // checks plus a single protected IAT pointer swap. The backend transport
     // itself runs later, on the game thread, from inside the intercepted
     // startup Ogre::ConfigFile::load. Idempotent.
+
+    void InstallEnhancedResourceBootstrap()
+    {
+        InstallResourceGroupBootstrap();
+    }
 
     void InitializeOgreRenderProfiles()
     {

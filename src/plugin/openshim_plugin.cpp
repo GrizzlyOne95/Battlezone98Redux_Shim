@@ -96,6 +96,10 @@ static void RunPatchStage(const char* stage, Fn&& fn)
 
 static unsigned __stdcall PatchThreadProc(void*)
 {
+    // Four-client cold starts can parse Modable before RunPatcher finishes.
+    // Arm the import-only bootstrap first; no Ogre resource API is called
+    // until the game itself initialises a resource group outside loader lock.
+    PATCH_STAGE(BZROpenShim::RenderProfiles::InstallEnhancedResourceBootstrap());
     PATCH_STAGE(BZROpenShim::UiPerf::Initialize());
     // Keeps the Enhanced renderer resources and UI tiles in step with the
     // Workshop item this build was updated from; runs on its own worker.
