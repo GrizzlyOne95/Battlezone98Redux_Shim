@@ -551,12 +551,19 @@ function Test-CRFlowResultParity([string]$Expect, [string]$Debrief = '', [int[]]
     }
 }
 
-function Test-CRFlowTransport([int]$HostClient = 0, [int[]]$Guests) {
+function Test-CRFlowTransport([int]$HostClient = 0, [int[]]$Guests, [ValidateRange(0,60)][int]$TimeoutSeconds = 15) {
     if (-not $PSBoundParameters.ContainsKey('Guests')) { $Guests = @(Get-CRFlowClientIndices | Where-Object { $_ -ne $HostClient }) }
     $sent = Invoke-CRFlow $HostClient 'return L().events' -TimeoutSeconds 10
     foreach ($g in $Guests) {
         $got = Invoke-CRFlow $g 'return L().receivedEvent' -TimeoutSeconds 10
-        Add-CRFlowCheck "event stream delivered to c$g" ($null -ne $sent -and $sent -eq $got) @{ hostEvents = $sent; guestReceived = $got }
+        # These are independent live samples. Wait for the sampled watermark;
+        # the host may also append more events before the guest is queried.
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        while ($null -ne $sent -and ($null -eq $got -or $got -lt $sent) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 200
+            $got = Invoke-CRFlow $g 'return L().receivedEvent' -TimeoutSeconds 10
+        }
+        Add-CRFlowCheck "event stream delivered to c$g" ($null -ne $sent -and $null -ne $got -and $got -ge $sent) @{ hostEvents = $sent; guestReceived = $got }
     }
 }
 
