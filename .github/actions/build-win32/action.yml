@@ -189,6 +189,8 @@ runs:
       run: |
         & ./bin/Release/OpenShimSetup.exe --install --repair --no-pause
         if ($LASTEXITCODE -ne 2) { throw "Setup accepted conflicting maintenance action flags" }
+        & ./bin/Release/OpenShimSetup.exe --install --purge-leftovers --no-pause
+        if ($LASTEXITCODE -ne 2) { throw "Setup accepted --purge-leftovers without uninstall" }
 
     - name: Test Windows deployment verification
       shell: pwsh
