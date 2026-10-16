@@ -26,9 +26,15 @@
 # refused. It takes precedence over a local checkout build, but not
 # OPENSHIM_DLL. With neither set, the download path above is unchanged.
 #
-# OPENSHIM_DLL is an advanced override and only proceeds when a matching
-# artifact set sits beside that DLL. No Steam launch options are required on
+# OPENSHIM_SETUP_ACTION=install|repair|update is used by the Setup menu:
+# repair restores the *same* installed version and only copies changed files;
+# update requires a strictly newer release. Both require an existing OpenShim
+# installation and will never downgrade it. Without this variable, the legacy
+# installation behavior is retained. No Steam launch options are required on
 # Windows.
+#
+# OPENSHIM_DLL is an advanced override and only proceeds when a matching
+# artifact set sits beside that DLL.
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -64,6 +70,13 @@ function Get-ResetIniRequested {
 }
 
 $resetIni = Get-ResetIniRequested
+$setupAction = if ($env:OPENSHIM_SETUP_ACTION) { $env:OPENSHIM_SETUP_ACTION.Trim().ToLowerInvariant() } else { "install" }
+if ($setupAction -notin @("install", "repair", "update")) {
+    throw "OPENSHIM_SETUP_ACTION must be install, repair or update."
+}
+if ($setupAction -ne "install" -and $resetIni) {
+    throw "OPENSHIM_RESET_INI is not allowed during $setupAction; use --install for an explicit reset."
+}
 
 function Test-BzrGameDir {
     param([string]$Dir)
@@ -312,6 +325,45 @@ function Test-OpenShimDll {
     return $raw.Contains("OpenShim")
 }
 
+# The three native modules share the same four-component Windows file version.
+# Reject missing or malformed resources rather than assuming a higher version
+# from a lexicographic string comparison (e.g. 1.0.0.9 vs 1.0.0.10).
+function Get-OpenShimVersion {
+    param([string]$DllPath)
+    if (-not (Test-Path -LiteralPath $DllPath -PathType Leaf)) { return $null }
+    $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($DllPath)
+    if ($info.FileVersion -notmatch '^\d+\.\d+\.\d+\.\d+$') { return $null }
+    try { return [version]::Parse($info.FileVersion) } catch { return $null }
+}
+
+function Get-InstalledOpenShimVersion {
+    param([string]$GameDir)
+    # Missing bootstrap DLL is a common reason to choose Repair. Consult the
+    # remaining loader/plugin before declaring the install absent.
+    foreach ($relative in @("winmm.dll", "bzloader.dll", "plugins\openshim.dll")) {
+        $candidate = Join-Path $GameDir $relative
+        if (Test-OpenShimDll $candidate) {
+            $version = Get-OpenShimVersion $candidate
+            if ($null -ne $version) { return $version }
+        }
+    }
+    return $null
+}
+
+function Test-GameRunningFrom {
+    param([string]$GameDir)
+    $prefix = [System.IO.Path]::GetFullPath($GameDir).TrimEnd('\') + '\'
+    foreach ($process in Get-Process -Name "battlezone98redux", "BZR" -ErrorAction SilentlyContinue) {
+        try {
+            $path = $process.Path
+            if ($path -and $path.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        } catch { }
+    }
+    return $false
+}
+
 # Resolve one artifact set out of a tree. OpenShim-Suite.zip mirrors the
 # repository layout on purpose, so the extracted bundle, a local checkout, and
 # a flat directory beside an explicit OPENSHIM_DLL all resolve here. Returns
@@ -469,11 +521,23 @@ function Get-LocalSuiteBundle {
 }
 
 function Copy-ResourceDirectory {
-    param([string]$Source, [string]$Destination)
+    param([string]$Source, [string]$Destination, [switch]$OnlyIfDifferent)
     if (-not (Test-Path -LiteralPath $Destination)) {
         New-Item -ItemType Directory -Force -Path $Destination | Out-Null
     }
-    Copy-Item -Path (Join-Path $Source "*") -Destination $Destination -Recurse -Force
+    $sourceFull = [System.IO.Path]::GetFullPath($Source).TrimEnd('\') + '\'
+    foreach ($file in Get-ChildItem -LiteralPath $Source -File -Recurse) {
+        $relative = $file.FullName.Substring($sourceFull.Length)
+        $target = Join-Path $Destination $relative
+        $parent = Split-Path -Parent $target
+        if (-not (Test-Path -LiteralPath $parent)) {
+            New-Item -ItemType Directory -Force -Path $parent | Out-Null
+        }
+        if ($OnlyIfDifferent -and (Test-Path -LiteralPath $target -PathType Leaf) -and
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $target).Hash -eq
+            (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash) { continue }
+        Copy-Item -LiteralPath $file.FullName -Destination $target -Force
+    }
 }
 
 function Get-FileFromUri {
@@ -626,7 +690,13 @@ function Add-DefenderExclusions {
 }
 
 function Backup-ThenCopy {
-    param([string]$Source, [string]$Dest, [string]$Stamp)
+    param([string]$Source, [string]$Dest, [string]$Stamp, [switch]$OnlyIfDifferent)
+    if ($OnlyIfDifferent -and (Test-Path -LiteralPath $Dest -PathType Leaf) -and
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $Source).Hash -eq
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $Dest).Hash) {
+        Write-Host "  unchanged $(Split-Path -Leaf $Dest)"
+        return
+    }
     $destDir = Split-Path -Parent $Dest
     if (-not (Test-Path -LiteralPath $destDir)) {
         New-Item -ItemType Directory -Force -Path $destDir | Out-Null
@@ -672,7 +742,16 @@ function Deploy-PlayerIni {
     Write-Host "  reset openshim.ini (backup: $(Split-Path -Leaf $backup))"
 }
 
-$gamePaths = @(Resolve-GamePaths -Action "install into")
+$actionPrompt = switch ($setupAction) {
+    "repair" { "repair OpenShim in" }
+    "update" { "update OpenShim in" }
+    default  { "install into" }
+}
+$gamePaths = @(Resolve-GamePaths -Action $actionPrompt -Filter {
+    param($dir)
+    if ($setupAction -eq "install") { return $true }
+    return ($null -ne (Get-InstalledOpenShimVersion -GameDir $dir))
+})
 if ($gamePaths.Count -eq 0) {
     throw "Could not find Battlezone 98 Redux. Set OPENSHIM_GAME_PATH to the game folder and run again."
 }
@@ -766,39 +845,93 @@ try {
     Assert-Hash -FilePath $openshimIni -Expected $hashes["openshim.ini"]
     Assert-Hash -FilePath $netIni -Expected $hashes["net.ini"]
 
-    # Refuse the whole run before touching anything: with several installs
-    # detected, throwing inside the copy loop would leave earlier game
-    # directories rewritten and later ones untouched.
+    # Preflight all target directories before writing any of them: a running
+    # game, a foreign proxy, or a downgrade must not leave partial updates.
+    $packageVersion = Get-OpenShimVersion -DllPath $dll
+    if ($null -eq $packageVersion) {
+        throw "The suite's winmm.dll has no readable four-part file version. Refusing to deploy it."
+    }
+    if ($setupAction -ne "install") {
+        foreach ($module in @($loaderDll, $pluginDll)) {
+            if (-not $module) { continue }
+            $moduleVersion = Get-OpenShimVersion -DllPath $module
+            if ($null -eq $moduleVersion -or $moduleVersion -ne $packageVersion) {
+                throw "The suite's load-chain binaries do not all report $packageVersion. Refusing a mixed-version $setupAction."
+            }
+        }
+    }
+    $targets = New-Object System.Collections.Generic.List[string]
     foreach ($gameDir in $gamePaths) {
         $existingDll = Join-Path $gameDir "winmm.dll"
         if ((Test-Path -LiteralPath $existingDll) -and -not (Test-OpenShimDll $existingDll)) {
             throw "Refusing to overwrite non-OpenShim winmm.dll in $gameDir. Remove or rename that proxy first. Nothing was installed."
         }
+        if (Test-GameRunningFrom -GameDir $gameDir) {
+            throw "Battlezone 98 Redux is running from $gameDir. Close the game and retry. Nothing was installed."
+        }
+        $installedVersion = Get-InstalledOpenShimVersion -GameDir $gameDir
+        # Check all surviving components, not just winmm.dll; a partial
+        # installation could contain a newer plugin than its bootstrap.
+        foreach ($component in @("winmm.dll", "bzloader.dll", "plugins\openshim.dll")) {
+            $componentPath = Join-Path $gameDir $component
+            if (-not (Test-OpenShimDll $componentPath)) { continue }
+            $componentVersion = Get-OpenShimVersion -DllPath $componentPath
+            if ($null -ne $componentVersion -and $componentVersion -gt $packageVersion) {
+                throw "Refusing to downgrade $component in $gameDir from $componentVersion to $packageVersion."
+            }
+        }
+        if ($setupAction -ne "install" -and $null -eq $installedVersion) {
+            throw "No versioned OpenShim installation was found in $gameDir. Use Install for a new or fully missing installation."
+        }
+        if ($null -ne $installedVersion) {
+            if ($installedVersion -gt $packageVersion) {
+                throw "Refusing to downgrade OpenShim in $gameDir from $installedVersion to $packageVersion. Download a newer installer."
+            }
+            if ($setupAction -eq "repair" -and $installedVersion -ne $packageVersion) {
+                throw "Repair requires installed version $installedVersion to match bundle version $packageVersion. Choose Update instead."
+            }
+            if ($setupAction -eq "update" -and $installedVersion -eq $packageVersion) {
+                Write-Host "Already up to date in $gameDir ($installedVersion). Choose Repair to restore missing files."
+                continue
+            }
+        }
+        $targets.Add($gameDir)
     }
 
+    if ($targets.Count -eq 0) {
+        Write-Host "No updates are necessary."
+        return
+    }
+    $gamePaths = @($targets.ToArray())
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
     foreach ($gameDir in $gamePaths) {
         Write-Host ""
-        Write-Host "Installing OpenShim to: $gameDir"
+        Write-Host "$($setupAction.ToUpperInvariant()) OpenShim in: $gameDir"
+        $onlyChanged = $setupAction -eq "repair"
         $destDll = Join-Path $gameDir "winmm.dll"
-        Backup-ThenCopy -Source $dll -Dest $destDll -Stamp $stamp
+        Backup-ThenCopy -Source $dll -Dest $destDll -Stamp $stamp -OnlyIfDifferent:$onlyChanged
         # The rest of the load chain. bzloader.dll sits beside the bootstrap
         # because that is the directory winmm.dll looks in, and the plugin goes
         # under plugins\ because that is where the loader enumerates. Absent
         # for a pre-split monolith, which carries no loader by design.
         if ($loaderDll) {
-            Backup-ThenCopy -Source $loaderDll -Dest (Join-Path $gameDir "bzloader.dll") -Stamp $stamp
+            Backup-ThenCopy -Source $loaderDll -Dest (Join-Path $gameDir "bzloader.dll") -Stamp $stamp -OnlyIfDifferent:$onlyChanged
         }
         if ($pluginDll) {
-            Backup-ThenCopy -Source $pluginDll -Dest (Join-Path $gameDir "plugins\openshim.dll") -Stamp $stamp
+            Backup-ThenCopy -Source $pluginDll -Dest (Join-Path $gameDir "plugins\openshim.dll") -Stamp $stamp -OnlyIfDifferent:$onlyChanged
         }
-        Backup-ThenCopy -Source $patches -Dest (Join-Path $gameDir "scripts\patches.json") -Stamp $stamp
+        Backup-ThenCopy -Source $patches -Dest (Join-Path $gameDir "scripts\patches.json") -Stamp $stamp -OnlyIfDifferent:$onlyChanged
         Deploy-PlayerIni -Source $openshimIni -GameDir $gameDir -Stamp $stamp -Reset $resetIni
-        Backup-ThenCopy -Source $netIni -Dest (Join-Path $gameDir "net.ini") -Stamp $stamp
+        $netTarget = Join-Path $gameDir "net.ini"
+        if ($onlyChanged -and (Test-Path -LiteralPath $netTarget -PathType Leaf)) {
+            Write-Host "  preserved existing net.ini (custom network settings)"
+        } else {
+            Backup-ThenCopy -Source $netIni -Dest $netTarget -Stamp $stamp
+        }
 
         if ($artifacts.RenderSource) {
             Copy-ResourceDirectory -Source $artifacts.RenderSource `
-                -Destination (Join-Path $gameDir "openshim\renderer\enhanced")
+                -Destination (Join-Path $gameDir "openshim\renderer\enhanced") -OnlyIfDifferent:$onlyChanged
             # The in-game asset sync trusts this marker to describe the folder; the
             # files just written may differ, so drop it and let the next start re-check.
             Remove-Item -LiteralPath (Join-Path $gameDir "openshim\renderer\enhanced\openshim_set.sha256") -Force -ErrorAction SilentlyContinue
@@ -964,7 +1097,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "Install complete." -ForegroundColor Green
+    Write-Host "$($setupAction.Substring(0,1).ToUpperInvariant() + $setupAction.Substring(1)) complete." -ForegroundColor Green
     if ($wrapperReady) {
         Write-Host "OpenShim DLL: OK    Log uploader: OK" -ForegroundColor Green
     } elseif ($wrapperFailed) {

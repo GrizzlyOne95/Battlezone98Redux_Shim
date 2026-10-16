@@ -24,14 +24,34 @@ is opt-in and awaiting editor qualification; it is not enabled by default.
 ### Windows
 
 [**Download OpenShimSetup.exe**](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/releases/latest/download/OpenShimSetup.exe)
-and double-click it. It finds your Steam or GOG copy of Battlezone 98 Redux,
-installs OpenShim, and tells you when it is done. No launch options needed —
-just start the game. Windows may show a SmartScreen warning because the file
-is not code-signed yet; choose "More info", then "Run anyway".
+and double-click it. The setup menu now offers:
 
-It finds Steam and GOG installs (including GOG in a custom folder), asks which one to patch, and has a Browse option for any other folder; you can also drag the game folder onto the exe.
+- **Install** — install the version bundled inside the executable (or the
+  latest published release for a development build).
+- **Repair** — restore missing or changed OpenShim files from the bundled
+  version; refuses to substitute a different version. Unchanged files are not
+  backed up again. Existing `openshim.ini`, `net.ini`, and unrelated mod files
+  are preserved.
+- **Update** — download and verify the **latest published release**, even
+  when the executable has an older release embedded. If that version is already
+  installed, no files change; downgrades are refused. For damaged files at the
+  same version, choose Repair instead.
+- **Uninstall** — remove OpenShim's deployed files and backups. Player
+  configuration (`openshim.ini`), network settings (`net.ini`) and logs are
+  kept unless you explicitly request a configuration purge.
 
-To uninstall, run it from a Command Prompt as `OpenShimSetup.exe --uninstall`.
+It finds Steam and GOG installs (including custom GOG locations), asks which
+one to change, and lets you browse for another game folder. You can also drag
+a game folder onto the executable. **Close the game before running any action.**
+No Windows launch options are needed after installation.
+
+For command-line or scripted use, supply `--install`, `--repair`,
+`--update` or `--uninstall`. `--quiet` skips interactive menus and defaults
+to Install when no action is specified; `--no-pause` also avoids waiting for
+Enter on exit. `OPENSHIM_GAME_PATH` limits the operation to one game directory.
+
+Windows may display a SmartScreen warning because OpenShimSetup.exe is not
+code-signed yet; inspect the release and its hashes before choosing to run it.
 
 #### Advanced: PowerShell one-liner
 
