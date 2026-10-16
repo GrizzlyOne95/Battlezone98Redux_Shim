@@ -43,6 +43,11 @@ namespace BZROpenShim::RenderProfiles
     // gate: address-dependent work fails closed on unsupported builds.
     void InitializeOgreRenderProfiles();
 
+    // Arm the named Ogre resource-group import before the expensive patch
+    // sweep. Only swaps an identity-checked import here; resource registration
+    // runs later on the caller thread when Modable is actually initialised.
+    void InstallEnhancedResourceBootstrap();
+
     // Re-reads openshim.ini and re-resolves. Called by the settings UI after a
     // lossless ini write (ShimSettingApplyGroup::RenderProfile).
     void ReloadRenderProfileConfig();
