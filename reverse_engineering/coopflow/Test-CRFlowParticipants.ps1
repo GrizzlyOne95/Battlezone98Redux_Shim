@@ -73,6 +73,28 @@ try {
     Check (@($script:CRFlowRun.checks | Where-Object { $_.status -eq 'fail' -and $_.check -eq 'c3 subtitle overlay healthy' }).Count -eq 1) 'subtitle fallback notice affects verdict'
     Remove-Item -LiteralPath $overlayFixture
 
+    $script:transportReads = 0
+    $script:transportReceived = 73
+    $script:transportAdvances = $true
+    function Invoke-CRFlow([int]$Client, [string]$Lua, [int]$TimeoutSeconds) {
+        if ($Client -eq 0) { return 74 }
+        $script:transportReads++
+        if ($script:transportAdvances -and $script:transportReads -gt 1) { return 74 }
+        return $script:transportReceived
+    }
+    Reset-Checks
+    Test-CRFlowTransport -Guests @(3) -TimeoutSeconds 1
+    Check ($script:transportReads -ge 2 -and $script:CRFlowRun.checks[0].status -eq 'pass') 'guest catches the sampled event watermark within the deadline'
+    $script:transportAdvances = $false
+    $script:transportReceived = 75
+    Reset-Checks
+    Test-CRFlowTransport -Guests @(3) -TimeoutSeconds 0
+    Check ($script:CRFlowRun.checks[0].status -eq 'pass') 'guest ahead of the earlier host sample accepted'
+    $script:transportReceived = 73
+    Reset-Checks
+    Test-CRFlowTransport -Guests @(3) -TimeoutSeconds 0
+    Check ($script:CRFlowRun.checks[0].status -eq 'fail') 'undelivered fourth-client event still rejected'
+
     function Invoke-CRFlowStep([string]$Name, [scriptblock]$Body) { & $Body }
     function Wait-CRFlowEvent { $true }
     function Wait-CRFlow([int]$Client) {
