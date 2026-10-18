@@ -261,6 +261,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "LuaFormationBinding", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_LUA_SEND_LENGTH_FIX") ||
+            Equals(name, "BZR_DISABLE_LUA_SEND_LENGTH_FIX"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "LuaSendLengthUnsigned", true, out);
+        }
         // New switches: these two had no opt-out of any kind before.
         if (Equals(name, "OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||
             Equals(name, "BZR_DISABLE_PRODUCER_SCRIPT_PREDICATES"))

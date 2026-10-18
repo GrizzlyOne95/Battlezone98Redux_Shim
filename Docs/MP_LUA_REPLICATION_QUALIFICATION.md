@@ -84,11 +84,18 @@ the decompiler's guessed signatures into native declarations.
    be a safe stock-wire contract; lengths of 256 or more additionally wrap the
    byte written by the encoder. This was established statically, **not by
    sending a dangerous packet to a live peer**.
+   **OpenShim fix (2026-10-18):** `[Fixes] LuaSendLengthUnsigned` flips the
+   decoder load to `MOVZX` and makes the encoder reject lengths above 255
+   through its stock does-not-fit exit; see
+   `Docs/LUA_SEND_STRING_LENGTH_20261018.md`. It protects only patched
+   receivers, so mixed sessions keep the 127-byte limit.
 6. **PROVEN:** table entry counts use a similar one-byte extension and signed
    decoder (`0x00505a10`, `0x00505b50`, `MOVSX` at `0x00505b70`). At 128 entries
    the decoded loop count becomes negative and cursor alignment fails. Recursive
    encoding has no visible cycle detection. Keep tables outside the initial
    protocol until bounded type/depth/count rules are qualified.
+   The same OpenShim fix covers the table count (`MOVZX` at `0x00505b70`, counts
+   above 255 rejected by the encoder); it adds no depth or cycle bound.
 7. **PROVEN:** the explicit weapon-slot guard at `0x00612f23..0x00612f2d`
    cannot reject an integer: it only reaches its failure branch for an integer
    below zero and at least five. `0x00417f40` then directly indexes the slot.
@@ -98,6 +105,7 @@ the decompiler's guessed signatures into native declarations.
 The probe uses scalar payloads, at most eight values, strings at most 127 bytes,
 and a conservative total packing estimate at most 200 bytes. These are probe
 constraints, not a claim that a production transport contract is established.
+The 127-byte string limit stays while stock or pre-fix OpenShim peers can join.
 
 ## Qualification harness
 

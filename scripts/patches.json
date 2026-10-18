@@ -1443,6 +1443,46 @@
       "identity": "The `call DistributedObject::GetGameObject` inside Redux's Lua handle unpacker FUN_00505490 (1.5 UnpackHandle @0x0041C1B7) on exact GOG Redux 2.2.301. The unpacker reads four wire bytes when the Lua type byte's low five bits (count) are non-zero, pushes them as the argument of this cdecl call (`push eax / call / add esp,4`), converts the returned GameObject* to a handle with 0x00477590 (0 for null) and pushes it or nil with 0x004FF770. Anchored on the CALL. The installer additionally requires the call to reach DistributedObject::GetGameObject. Verified by whole-image scan on 2026-10-13: one match. Rewritten by lua_handle_sync.cpp."
     },
     {
+      "name": "Lua::UnpackString length extension load",
+      "pattern": "83 7D FC 1F 75 18 8B 45 08 8B 08 0F BE 11 89",
+      "offset": 11,
+      "mode": "address",
+      "fallback": "0x005059CE",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `movsx edx, byte [ecx]` that reads the one-byte length extension inside Redux's Lua string unpacker FUN_005059B0 on exact GOG Redux 2.2.301. The type byte's low five bits hold the length; 31 (`cmp [ebp-4],0x1F / jne`) means the next wire byte is the length. MOVSX turns 128..255 into a negative length and the receiver faults in the string push (exe+0x430A0E). lua_send_length.cpp flips the second byte to B6 (MOVZX). Verified by whole-image scan on 2026-10-18: one match. Rewritten by lua_send_length.cpp."
+    },
+    {
+      "name": "Lua::UnpackTable count extension load",
+      "pattern": "83 7D F8 1F 75 18 8B 45 08 8B 08 0F BE 11 89",
+      "offset": 11,
+      "mode": "address",
+      "fallback": "0x00505B70",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `movsx edx, byte [ecx]` that reads the one-byte count extension inside Redux's Lua table unpacker FUN_00505B50 on exact GOG Redux 2.2.301 (count at [ebp-8], 31 means an extension byte follows). Same sign bug as the string unpacker. lua_send_length.cpp flips the second byte to B6 (MOVZX). Verified by whole-image scan on 2026-10-18: one match. Rewritten by lua_send_length.cpp."
+    },
+    {
+      "name": "Lua::PackString length room check",
+      "pattern": "8B 55 08 8B 02 8B 4D FC 8D 54 08 01 3B 55 0C 72 04 32 C0 EB",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00505944",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The buffer-room check on the extension path of Redux's Lua string packer FUN_005058D0 on exact GOG Redux 2.2.301, reached by `cmp [ebp-4],0x1F / jae` when the lua_tolstring length is 31 or more. The packer later stores only the low byte of the length (`mov cl,[ebp-4]`), so 256+ wraps. lua_send_length.cpp detours the first 12 bytes (no relative operands) to a stub that rejects lengths above 255 through the check's own `xor al,al` exit at +0x11, then replays them. Verified by whole-image scan on 2026-10-18: one match. Rewritten by lua_send_length.cpp."
+    },
+    {
+      "name": "Lua::PackTable count room check",
+      "pattern": "8B 45 08 8B 08 83 C1 01 3B 4D 0C 72 07 32 C0 E9 ?? ?? ?? ?? 8B 55 08 8B 02 0F BE 48 FF 83 C1 1F",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00505A7A",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The buffer-room check on the extension path of Redux's Lua table packer FUN_00505A10 on exact GOG Redux 2.2.301, reached by `cmp [ebp-4],0x1F / jge` after lua_next counted the entries. The packer stores only the low byte of the count, so 256+ wraps. lua_send_length.cpp detours the first 8 bytes (no relative operands) to a stub that rejects counts above 255 through the check's own `xor al,al` exit at +0x0D, then replays them. Verified by whole-image scan on 2026-10-18: one match. Rewritten by lua_send_length.cpp."
+    },
+    {
       "name": "DistributedObject::GetLocalID",
       "pattern": "55 8B EC 51 89 4D FC 8B 45 FC 8B 40 64 8B E5 5D C3",
       "offset": 0,

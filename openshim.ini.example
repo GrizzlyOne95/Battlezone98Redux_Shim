@@ -470,6 +470,19 @@ ScavengerNetProcessGuard = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_LUA_FORMATION_FIX
 LuaFormationBinding = 1
 
+; Make Lua Send carry strings and tables of 128..255 entries. The packet codec
+; stores a length above 30 in one extension byte, and the stock decoders read it
+; signed: a Send string of 128..255 bytes faults every receiving peer (access
+; violation in lua_pushlstring). The two decoder loads become unsigned, and the
+; encoders refuse a length above 255 (which would wrap) through the same path
+; Send already uses for an argument that does not fit the packet: the argument
+; is dropped and logged. A peer without this fix still crashes on 128..255, so
+; mixed sessions should keep strings at 127 bytes or less. GOG Redux 2.2.301
+; only; stands down on any other build or if a site does not match.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_LUA_SEND_LENGTH_FIX
+LuaSendLengthUnsigned = 1
+
 ; Stop Redux pinning the OS cursor while it is minimized or in the
 ; background. In mouse-look the stock look reader re-clips the cursor and
 ; warps it to the window centre every frame, guarded only by a per-thread

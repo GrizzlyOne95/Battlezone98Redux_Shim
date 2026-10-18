@@ -49,6 +49,7 @@
 #include "ui_performance_hooks.h"
 #include "ui_file_scan_hooks.h"
 #include "lua_formation_fix_install.h"
+#include "lua_send_length_install.h"
 #include "lua_handle_sync_install.h"
 #include "mp_faction_restrict.h"
 #include "mp_ready_diagnostic.h"
@@ -147,6 +148,12 @@ static unsigned __stdcall PatchThreadProc(void*)
     // binding. Byte-guarded and fail-closed; [Fixes] LuaFormationBinding = 0 leaves
     // the engine untouched.
     PATCH_STAGE(BZROpenShim::LuaFormation::InstallLuaFormationFixIfPossible());
+
+    // Lua Send strings and tables longer than 127 entries crash every receiver:
+    // the packet decoders sign-extend the length byte. Two decoder loads become
+    // movzx and the encoders refuse lengths above 255. Byte-guarded and
+    // fail-closed; [Fixes] LuaSendLengthUnsigned = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::LuaSendLength::InstallLuaSendLengthFixIfPossible());
 
     // Explains a "Not Ready" multiplayer entry on the main menu. Read-only: it
     // reproduces the shell's own readiness decision from the same globals and

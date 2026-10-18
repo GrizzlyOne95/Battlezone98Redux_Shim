@@ -331,6 +331,10 @@ openshim_add_test(lua_formation_fix_tests STD 14 SOURCES
     lua_formation_fix_tests.cpp
 )
 
+openshim_add_test(lua_send_length_tests STD 14 SOURCES
+    lua_send_length_tests.cpp
+)
+
 openshim_add_test(lua_handle_sync_tests STD 14 SOURCES
     lua_handle_sync_tests.cpp
 )
