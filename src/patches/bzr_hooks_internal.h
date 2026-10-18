@@ -415,6 +415,8 @@ namespace BZROpenShim
         using FnOgreManualObjectGetBoundingRadius = float(__thiscall*)(void*);
 
         // Cached GetProcAddress on OgreMain.dll; one warning per missing name.
+        // The cache is keyed by the name's address first, so pass a string
+        // literal (or other storage that never changes), never a buffer.
         void* ResolveOgreProcRaw(const char* name);
         template<typename T>
         T ResolveOgreProc(const char* name)

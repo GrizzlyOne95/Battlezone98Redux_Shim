@@ -51,6 +51,7 @@
 #include <objidl.h>
 #include <gdiplus.h>
 #include <array>
+#include <atomic>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -264,8 +265,20 @@ namespace BZROpenShim
 
         bool IsExuModuleLoaded()
         {
-            return GetModuleHandleA("exu.dll") != nullptr ||
-                   GetModuleHandleA("ExtraUtilities.dll") != nullptr;
+            // The headlight gate asks every rendered frame, and EXU comes and
+            // goes with a mission's Lua state, so look again, but at most four
+            // times a second: two loader lookups a frame were ~0.2% of misn17.
+            static std::atomic<ULONGLONG> s_nextCheck{ 0 };
+            static std::atomic<bool> s_loaded{ false };
+            const ULONGLONG now = GetTickCount64();
+            if (now >= s_nextCheck.load(std::memory_order_relaxed))
+            {
+                s_loaded.store(GetModuleHandleA("exu.dll") != nullptr ||
+                               GetModuleHandleA("ExtraUtilities.dll") != nullptr,
+                               std::memory_order_relaxed);
+                s_nextCheck.store(now + 250, std::memory_order_relaxed);
+            }
+            return s_loaded.load(std::memory_order_relaxed);
         }
 
         // Generic protected in-place byte write (VirtualProtect + memcpy + flush).
