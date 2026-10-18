@@ -49,6 +49,7 @@
 #include <objidl.h>
 #include <gdiplus.h>
 #include <array>
+#include <atomic>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -96,19 +97,42 @@ namespace BZROpenShim
 
             static std::mutex cacheMutex;
             static std::unordered_map<std::string, void*> cache;
+            // Callers pass string literals and some resolve every frame: look
+            // the pointer up first, so a hit neither builds a std::string from
+            // a long mangled name nor asks the loader for OgreMain again.
+            static std::unordered_map<const char*, void*> byPointer;
+            static std::atomic<HMODULE> s_ogreMain{ nullptr };
 
-            const HMODULE ogreMain = GetModuleHandleA("OgreMain.dll");
+            {
+                std::lock_guard<std::mutex> lock(cacheMutex);
+                const auto hit = byPointer.find(name);
+                if (hit != byPointer.end())
+                    return hit->second;
+            }
+
+            // OgreMain is the game's own import and never unloads, so a
+            // non-null handle stays good; a null one is asked again next time.
+            HMODULE ogreMain = s_ogreMain.load(std::memory_order_acquire);
             if (!ogreMain)
-                return nullptr;
+            {
+                ogreMain = GetModuleHandleA("OgreMain.dll");
+                if (!ogreMain)
+                    return nullptr;
+                s_ogreMain.store(ogreMain, std::memory_order_release);
+            }
 
             std::lock_guard<std::mutex> lock(cacheMutex);
             const auto existing = cache.find(name);
             if (existing != cache.end())
+            {
+                byPointer.emplace(name, existing->second);
                 return existing->second;
+            }
 
             void* const resolved =
                 reinterpret_cast<void*>(GetProcAddress(ogreMain, name));
             cache.emplace(name, resolved);
+            byPointer.emplace(name, resolved);
             if (!resolved)
             {
                 // One warning per distinct name, for the lifetime of the

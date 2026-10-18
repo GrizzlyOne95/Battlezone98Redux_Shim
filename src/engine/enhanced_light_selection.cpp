@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <unordered_set>
 
 namespace BZROpenShim::EnhancedLights
@@ -58,6 +59,53 @@ namespace BZROpenShim::EnhancedLights
             hash *= kPrime;
         }
         return hash;
+    }
+
+    namespace
+    {
+        // A previous selection holds at most one budget of IDs (24 on the
+        // high tier), and this runs once per renderable per frame: a linear
+        // scan beats building a hash set every call. The set is built only
+        // past the limit because MSVC's unordered_set allocates even empty.
+        class PreviousSelection
+        {
+        public:
+            explicit PreviousSelection(std::span<const std::uint64_t> ids)
+                : m_ids(ids)
+            {
+                if (ids.size() > kLinearLimit)
+                    m_set.emplace(ids.begin(), ids.end());
+            }
+
+            bool Contains(std::uint64_t id) const
+            {
+                if (m_set)
+                    return m_set->contains(id);
+                return std::find(m_ids.begin(), m_ids.end(), id) != m_ids.end();
+            }
+
+        private:
+            static constexpr std::size_t kLinearLimit = 32;
+            std::span<const std::uint64_t> m_ids;
+            std::optional<std::unordered_set<std::uint64_t>> m_set;
+        };
+
+        inline bool RanksBefore(const RankedCandidate& a, const RankedCandidate& b)
+        {
+            const bool aDirectional = a.light.type == LightType::Directional;
+            const bool bDirectional = b.light.type == LightType::Directional;
+            if (aDirectional != bDirectional)
+                return aDirectional;
+            if (aDirectional)
+                return false;
+            if (a.effectiveInfluence != b.effectiveInfluence)
+                return a.effectiveInfluence > b.effectiveInfluence;
+            if (a.rawInfluence != b.rawInfluence)
+                return a.rawInfluence > b.rawInfluence;
+            if (a.light.stableId != b.light.stableId)
+                return a.light.stableId < b.light.stableId;
+            return a.originalOrder < b.originalOrder;
+        }
     }
 
     std::size_t BudgetForEnhancedScheme(std::string_view scheme)
@@ -117,18 +165,17 @@ namespace BZROpenShim::EnhancedLights
         return std::isfinite(influence) ? std::max(influence, 0.0f) : 0.0f;
     }
 
-    std::vector<RankedCandidate> RankCandidates(
+    void RankCandidatesInto(
         std::span<const Candidate> candidates,
         const Vec3& objectCenter,
         float objectRadius,
         std::span<const std::uint64_t> previouslySelected,
-        const RankConfig& config)
+        const RankConfig& config,
+        std::vector<RankedCandidate>& ranked)
     {
-        std::unordered_set<std::uint64_t> previousSet;
-        previousSet.reserve(previouslySelected.size());
-        previousSet.insert(previouslySelected.begin(), previouslySelected.end());
+        const PreviousSelection previousSet(previouslySelected);
 
-        std::vector<RankedCandidate> ranked;
+        ranked.clear();
         ranked.reserve(candidates.size());
         for (std::size_t index = 0; index < candidates.size(); ++index)
         {
@@ -137,7 +184,7 @@ namespace BZROpenShim::EnhancedLights
             entry.originalOrder = index;
             entry.rawInfluence = EstimateInfluence(
                 entry.light, objectCenter, objectRadius, &entry.surfaceDistance);
-            entry.retained = previousSet.contains(entry.light.stableId);
+            entry.retained = previousSet.Contains(entry.light.stableId);
             entry.effectiveInfluence = entry.rawInfluence;
             if (entry.retained && std::isfinite(entry.effectiveInfluence))
             {
@@ -146,26 +193,23 @@ namespace BZROpenShim::EnhancedLights
             ranked.push_back(entry);
         }
 
-        // Stable sort intentionally preserves the producer order of directional
-        // lights. Redux/CR expect the PSSM sun to remain the first light.
+        // Stable sort intentionally preserves the producer order of
+        // directional lights. Redux/CR expect the PSSM sun to remain the first
+        // light. (MSVC insertion-sorts 32 or fewer without allocating.)
         std::stable_sort(ranked.begin(), ranked.end(),
-            [](const RankedCandidate& a, const RankedCandidate& b)
-            {
-                const bool aDirectional = a.light.type == LightType::Directional;
-                const bool bDirectional = b.light.type == LightType::Directional;
-                if (aDirectional != bDirectional)
-                    return aDirectional;
-                if (aDirectional)
-                    return false;
-                if (a.effectiveInfluence != b.effectiveInfluence)
-                    return a.effectiveInfluence > b.effectiveInfluence;
-                if (a.rawInfluence != b.rawInfluence)
-                    return a.rawInfluence > b.rawInfluence;
-                if (a.light.stableId != b.light.stableId)
-                    return a.light.stableId < b.light.stableId;
-                return a.originalOrder < b.originalOrder;
-            });
+            [](const RankedCandidate& a, const RankedCandidate& b) { return RanksBefore(a, b); });
+    }
 
+    std::vector<RankedCandidate> RankCandidates(
+        std::span<const Candidate> candidates,
+        const Vec3& objectCenter,
+        float objectRadius,
+        std::span<const std::uint64_t> previouslySelected,
+        const RankConfig& config)
+    {
+        std::vector<RankedCandidate> ranked;
+        RankCandidatesInto(candidates, objectCenter, objectRadius,
+            previouslySelected, config, ranked);
         return ranked;
     }
 
@@ -180,12 +224,10 @@ namespace BZROpenShim::EnhancedLights
         if (stats.selected > 0)
             stats.cutoffInfluence = ranked[stats.selected - 1].rawInfluence;
 
-        std::unordered_set<std::uint64_t> previousSet;
-        previousSet.reserve(previouslySelected.size());
-        previousSet.insert(previouslySelected.begin(), previouslySelected.end());
+        const PreviousSelection previousSet(previouslySelected);
         for (std::size_t i = 0; i < stats.selected; ++i)
         {
-            if (!previousSet.contains(ranked[i].light.stableId))
+            if (!previousSet.Contains(ranked[i].light.stableId))
                 ++stats.replacements;
         }
         return stats;

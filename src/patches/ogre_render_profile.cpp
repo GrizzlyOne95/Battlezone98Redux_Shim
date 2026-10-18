@@ -1051,6 +1051,9 @@ namespace BZROpenShim::RenderProfiles
             const std::string& (__thiscall*)(const void*);
         using FnTechniqueGetLodIndex = unsigned short(__thiscall*)(const void*);
         using FnTechniqueIsSupported = bool(__thiscall*)(const void*);
+        using FnTechniqueGetSchemeIndex = unsigned short(__thiscall*)(const void*);
+        using FnMaterialManagerGetSchemeIndex =
+            unsigned short(__thiscall*)(void*, const std::string&);
 
         struct OgreTechniqueApi
         {
@@ -1059,6 +1062,13 @@ namespace BZROpenShim::RenderProfiles
             FnTechniqueGetSchemeName getSchemeName = nullptr;
             FnTechniqueGetLodIndex getLodIndex = nullptr;
             FnTechniqueIsSupported isSupported = nullptr;
+            // Optional: lets the fallback compare schemes by index.
+            // getSchemeName maps the index back to a name through
+            // MaterialManager on every call, which made the per-draw fallback
+            // ~2% of a frame on a busy map.
+            FnTechniqueGetSchemeIndex getSchemeIndex = nullptr;
+            FnMaterialManagerGetSingletonPtr getMaterialManager = nullptr;
+            FnMaterialManagerGetSchemeIndex managerSchemeIndex = nullptr;
 
             bool Valid() const
             {
@@ -1088,6 +1098,16 @@ namespace BZROpenShim::RenderProfiles
                 resolved.isSupported =
                     ResolveOgreExport<FnTechniqueIsSupported>(
                         "?isSupported@Technique@Ogre@@QBE_NXZ");
+                resolved.getSchemeIndex =
+                    ResolveOgreExport<FnTechniqueGetSchemeIndex>(
+                        "?_getSchemeIndex@Technique@Ogre@@QBEGXZ");
+                resolved.getMaterialManager =
+                    ResolveOgreExport<FnMaterialManagerGetSingletonPtr>(
+                        "?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
+                resolved.managerSchemeIndex =
+                    ResolveOgreExport<FnMaterialManagerGetSchemeIndex>(
+                        "?_getSchemeIndex@MaterialManager@Ogre@@UAEGABV?$basic_string@DU?"
+                        "$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
                 return resolved;
             }();
             return api;
@@ -1121,6 +1141,28 @@ namespace BZROpenShim::RenderProfiles
                 return nullptr;
             }
 
+            // MaterialManager never removes or renumbers a scheme, so the
+            // index the base name maps to stands for the life of the process.
+            // Ask the manager for it up front: on a map whose materials have
+            // no base-scheme technique, learning it from a matching technique
+            // never happens. (_getSchemeIndex registers an unknown name, which
+            // is harmless: a scheme with no techniques draws nothing.)
+            thread_local std::unordered_map<std::string, unsigned short> t_baseSchemeIndex;
+            const std::string baseName(base);
+            auto learned = t_baseSchemeIndex.find(baseName);
+            if (learned == t_baseSchemeIndex.end() && api.getSchemeIndex != nullptr &&
+                api.getMaterialManager != nullptr && api.managerSchemeIndex != nullptr)
+            {
+                if (void* const manager = api.getMaterialManager())
+                {
+                    learned = t_baseSchemeIndex
+                                  .emplace(baseName, api.managerSchemeIndex(manager, baseName))
+                                  .first;
+                }
+            }
+            const bool byIndex = learned != t_baseSchemeIndex.end();
+            const unsigned short baseIndex = byIndex ? learned->second : 0;
+
             void* schemeMatch = nullptr;
             const unsigned short count = api.getNumTechniques(material);
             for (unsigned short i = 0; i < count; ++i)
@@ -1136,9 +1178,24 @@ namespace BZROpenShim::RenderProfiles
                 {
                     continue;
                 }
-                if (std::string_view(api.getSchemeName(technique)) != base)
+                if (byIndex)
                 {
-                    continue;
+                    if (api.getSchemeIndex(technique) != baseIndex)
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    if (std::string_view(api.getSchemeName(technique)) != base)
+                    {
+                        continue;
+                    }
+                    if (api.getSchemeIndex != nullptr)
+                    {
+                        t_baseSchemeIndex.emplace(baseName,
+                                                  api.getSchemeIndex(technique));
+                    }
                 }
                 if (api.getLodIndex(technique) == lodIndex)
                 {

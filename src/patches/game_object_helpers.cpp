@@ -169,6 +169,46 @@ namespace BZROpenShim
             return ReadLocalPlayerNetIdValue() == 0;
         }
 
+        // The executable's own image stays mapped and readable for the life
+        // of the process, and every GameObject vtable lives inside it, so a
+        // vtable pointer there needs no VirtualQuery. The flag and headlight
+        // walks check one for every object, every frame.
+        bool IsInsideMainImage(const void* address, size_t length)
+        {
+            static const std::pair<uintptr_t, uintptr_t> s_range = [] {
+                const auto base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
+                if (base == 0)
+                    return std::pair<uintptr_t, uintptr_t>{ 0, 0 };
+                __try
+                {
+                    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+                    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+                    if (dos->e_magic != IMAGE_DOS_SIGNATURE || nt->Signature != IMAGE_NT_SIGNATURE)
+                        return std::pair<uintptr_t, uintptr_t>{ 0, 0 };
+                    return std::pair<uintptr_t, uintptr_t>{ base, base + nt->OptionalHeader.SizeOfImage };
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return std::pair<uintptr_t, uintptr_t>{ 0, 0 };
+                }
+            }();
+            const auto start = reinterpret_cast<uintptr_t>(address);
+            return s_range.first != 0 && start >= s_range.first &&
+                   length <= s_range.second - s_range.first &&
+                   start - s_range.first <= (s_range.second - s_range.first) - length;
+        }
+
+        bool IsReadableCommitted(const void* address, size_t length)
+        {
+            if (IsInsideMainImage(address, length))
+                return true;
+            MEMORY_BASIC_INFORMATION mbi = {};
+            if (VirtualQuery(address, &mbi, sizeof(mbi)) != sizeof(mbi))
+                return false;
+            return mbi.State == MEM_COMMIT &&
+                   BZROpenShim::MemoryAccess::ProtectionAllows(mbi.Protect, BZROpenShim::MemoryAccess::Access::Read);
+        }
+
         bool TryGetGameObjectFieldBase(void* objectPtr, uint8_t*& outBase)
         {
             outBase = nullptr;
@@ -176,12 +216,9 @@ namespace BZROpenShim
             if (address < 0x00010000 || (address % sizeof(void*)) != 0)
                 return false;
 
-            MEMORY_BASIC_INFORMATION mbi = {};
-            if (VirtualQuery(objectPtr, &mbi, sizeof(mbi)) != sizeof(mbi))
-                return false;
-            if (mbi.State != MEM_COMMIT || !BZROpenShim::MemoryAccess::ProtectionAllows(mbi.Protect, BZROpenShim::MemoryAccess::Access::Read))
-                return false;
-
+            // No VirtualQuery for the object: GameObjects are heap-allocated,
+            // so the image fast path never applies, every read below is under
+            // __try, and the query ran for every object, every frame.
             __try
             {
                 auto* bytes = reinterpret_cast<uint8_t*>(objectPtr);
@@ -189,10 +226,7 @@ namespace BZROpenShim
                 if (!vtable)
                     return false;
 
-                MEMORY_BASIC_INFORMATION vtableInfo = {};
-                if (VirtualQuery(vtable, &vtableInfo, sizeof(vtableInfo)) != sizeof(vtableInfo))
-                    return false;
-                if (vtableInfo.State != MEM_COMMIT || !BZROpenShim::MemoryAccess::ProtectionAllows(vtableInfo.Protect, BZROpenShim::MemoryAccess::Access::Read))
+                if (!IsReadableCommitted(vtable, 1))
                     return false;
 
                 // Absolute VA, matching kGogGameObjectFriendPAddr and the rest
