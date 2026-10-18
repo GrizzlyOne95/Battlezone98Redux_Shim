@@ -35,10 +35,23 @@
 // hold the stack guard page, and touching a guard page from another thread
 // would clear the guard bit without growing the stack properly, so "at or above
 // ESP" is a correctness requirement here rather than a plausibility check.
+//
+// Process exit
+// ------------
+// ExitProcess first terminates every other thread (NtTerminateProcess(NULL))
+// and only then runs DLL_PROCESS_DETACH, so a detach-time join is too late. If
+// the sampler suspends the exiting thread while that thread waits inside that
+// first NtTerminateProcess, the kernel then kills the sampler before its
+// ResumeThread, and the exiting thread stays suspended forever: the process
+// hangs in NtTerminateProcess with thread 0 at suspend count 1 (seen on
+// 2026-10-18 during misn17 profiling). The sampler therefore redirects the
+// CRT's ExitProcess import while it runs and joins its worker before letting
+// exit proceed. The worker also gets to write its end chunk that way.
 
 #include "native_cpu_sampler.h"
 #include "bool_token.h"
 #include "diagnostic_output_cap.h"
+#include "iat_patch.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -201,6 +214,11 @@ namespace BZROpenShim
         std::atomic<bool> g_Running{ false };
         HANDLE g_WorkerThread = nullptr;
         HANDLE g_WakeEvent = nullptr;
+
+        using ExitProcessFn = void(WINAPI*)(UINT);
+        void* g_RealExitProcess = nullptr;
+        bool g_ExitHookInstalled = false;
+        constexpr DWORD kExitJoinMs = 3000;
 
         uint32_t g_RequestedHz = kDefaultHz;
         uint32_t g_RequestedDepth = kDefaultDepth;
@@ -1065,6 +1083,104 @@ namespace BZROpenShim
         }
     }
 
+    namespace
+    {
+        // Asks the worker to stop and waits for it, leaving the handles alone
+        // so a later ShutdownNativeCpuSampler still sees a valid (signalled)
+        // thread. Returns the wait result, or WAIT_OBJECT_0 when no worker ran.
+        DWORD StopWorker(DWORD timeoutMs)
+        {
+            if (!g_WorkerThread)
+            {
+                return WAIT_OBJECT_0;
+            }
+            g_ShutdownRequested.store(true, std::memory_order_release);
+            if (g_WakeEvent)
+            {
+                SetEvent(g_WakeEvent);
+            }
+            return WaitForSingleObject(g_WorkerThread, timeoutMs);
+        }
+
+        // Runs on whichever thread calls ExitProcess, before any other thread
+        // is terminated. The CRT has released its exit lock by now, and the
+        // worker's teardown takes only the log and file locks, so the bounded
+        // join cannot deadlock; on a timeout exit proceeds as it did before.
+        void WINAPI ExitProcessHook(UINT exitCode)
+        {
+            if (g_Running.load(std::memory_order_acquire))
+            {
+                LogShimA(LogLevel::Info, kComponent,
+                         "ExitProcess(%u): stopping sampler before thread termination",
+                         exitCode);
+                if (StopWorker(kExitJoinMs) != WAIT_OBJECT_0)
+                {
+                    LogShimA(LogLevel::Warn, kComponent,
+                             "Sampler did not stop within %lu ms of ExitProcess; "
+                             "exiting anyway",
+                             kExitJoinMs);
+                }
+            }
+            auto real = reinterpret_cast<ExitProcessFn>(g_RealExitProcess);
+            if (!real)
+            {
+                real = reinterpret_cast<ExitProcessFn>(
+                    GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "ExitProcess"));
+            }
+            real(exitCode);
+        }
+
+        // The game exits through MSVCR120's exit()/_exit(), which reach
+        // ExitProcess through that DLL's own import table; the executable
+        // imports no ExitProcess of its own but is covered in case a build
+        // does. A module that does not import it is not an error.
+        void InstallExitHook()
+        {
+            if (g_ExitHookInstalled)
+            {
+                return;
+            }
+            const HMODULE modules[] = {
+                GetModuleHandleW(nullptr),
+                GetModuleHandleW(L"msvcr120.dll"),
+            };
+            const char* const names[] = { "exe", "msvcr120.dll" };
+            uint32_t patched = 0;
+            for (size_t index = 0; index < sizeof(modules) / sizeof(modules[0]); ++index)
+            {
+                if (!modules[index])
+                {
+                    continue;
+                }
+                const IatPatch::Result result = IatPatch::PatchImportFromAnyDll(
+                    modules[index], "ExitProcess",
+                    reinterpret_cast<void*>(&ExitProcessHook), &g_RealExitProcess);
+                if (result == IatPatch::Result::Patched)
+                {
+                    ++patched;
+                }
+                else if (result == IatPatch::Result::Faulted)
+                {
+                    LogShimA(LogLevel::Warn, kComponent,
+                             "Could not redirect ExitProcess in %s", names[index]);
+                }
+            }
+            g_ExitHookInstalled = patched != 0;
+            if (patched == 0)
+            {
+                LogShimA(LogLevel::Warn, kComponent,
+                         "No ExitProcess import redirected; process exit can hang "
+                         "if it lands inside a suspend window");
+            }
+            else
+            {
+                LogShimA(LogLevel::Info, kComponent,
+                         "ExitProcess redirected in %u module(s) so exit joins the sampler",
+                         patched);
+            }
+        }
+    }
+
     bool IsNativeCpuSamplerRequested()
     {
         std::string value;
@@ -1118,7 +1234,9 @@ namespace BZROpenShim
             CloseHandle(g_WakeEvent);
             g_WakeEvent = nullptr;
             LogShimA(LogLevel::Error, kComponent, "Cannot start sampler thread");
+            return;
         }
+        InstallExitHook();
     }
 
     void ShutdownNativeCpuSampler()
@@ -1127,15 +1245,10 @@ namespace BZROpenShim
         {
             return;
         }
-        g_ShutdownRequested.store(true, std::memory_order_release);
-        if (g_WakeEvent)
-        {
-            SetEvent(g_WakeEvent);
-        }
         // Bounded join. If the sampler misses the window, leave the thread
         // handle and its wake event alone: closing them under a still-running
         // worker hands it an invalid event and frees state it can still touch.
-        const DWORD wait = WaitForSingleObject(g_WorkerThread, 5000);
+        const DWORD wait = StopWorker(5000);
         if (wait != WAIT_OBJECT_0)
         {
             LogShimA(LogLevel::Warn, kComponent,
