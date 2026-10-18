@@ -44,12 +44,12 @@ int main()
         for (const std::size_t budget : budgets)
         {
             std::vector<std::uint64_t> previous;
+            std::vector<RankedCandidate> ranked;
             const auto begin = std::chrono::steady_clock::now();
             std::uint64_t checksum = 0;
             for (int iteration = 0; iteration < iterations; ++iteration)
             {
-                const auto ranked = RankCandidates(
-                    lights, {}, 3.0f, previous, { budget, 0.05f });
+                RankCandidatesInto(lights, {}, 3.0f, previous, { budget, 0.05f }, ranked);
                 previous.clear();
                 const std::size_t selected = std::min(budget, ranked.size());
                 for (std::size_t i = 0; i < selected; ++i)

@@ -106,6 +106,16 @@ namespace BZROpenShim::EnhancedLights
         std::span<const std::uint64_t> previouslySelected,
         const RankConfig& config = {});
 
+    // RankCandidates into a caller-owned vector (cleared first), so a caller
+    // that ranks once per renderable per frame does not allocate each time.
+    void RankCandidatesInto(
+        std::span<const Candidate> candidates,
+        const Vec3& objectCenter,
+        float objectRadius,
+        std::span<const std::uint64_t> previouslySelected,
+        const RankConfig& config,
+        std::vector<RankedCandidate>& out);
+
     SelectionStats MeasureSelection(
         std::span<const RankedCandidate> ranked,
         std::span<const std::uint64_t> previouslySelected,

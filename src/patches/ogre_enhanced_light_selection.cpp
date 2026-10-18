@@ -31,6 +31,7 @@ namespace BZROpenShim
         constexpr DWORD kExpectedOgreImageSize = 0x00A65000;
         constexpr uintptr_t kPopulateLightListBodyRva = 0x003B3930;
         constexpr std::size_t kPopulateHookLength = 5;
+        constexpr std::size_t kOgreDefaultPassLights = 8;
         constexpr std::size_t kMaxCandidateCount = 4096;
         constexpr std::size_t kMaxHistoryEntries = 4096;
         constexpr std::size_t kMaxTraceRecords = 64;
@@ -370,8 +371,11 @@ namespace BZROpenShim
                 out->attenuationConstant = g_Api.getConstant(light);
                 out->attenuationLinear = g_Api.getLinear(light);
                 out->attenuationQuadratic = g_Api.getQuadratic(light);
-                out->spotInnerCos = std::cos(*inner * 0.5f);
-                out->spotOuterCos = std::cos(*outer * 0.5f);
+                if (out->type == LightType::Spot)
+                {
+                    out->spotInnerCos = std::cos(*inner * 0.5f);
+                    out->spotOuterCos = std::cos(*outer * 0.5f);
+                }
                 out->spotFalloff = g_Api.getFalloff(light);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -538,6 +542,17 @@ namespace BZROpenShim
             std::size_t candidateCount = 0;
             if (!ReadLightList(destination, &listBegin, &candidateCount) || candidateCount == 0)
                 return;
+            // Ranking only decides which lights a pass drops. When every
+            // candidate fits both the scheme budget and Ogre's default pass
+            // limit of 8 (no CR or stock Enhanced pass sets max_lights), each
+            // one reaches the shader in any order, and stock already puts the
+            // directional sun first. Skipping the history here only costs the
+            // 5% retention bonus the next time this list overflows.
+            if (candidateCount <= std::min<std::size_t>(budget, kOgreDefaultPassLights)
+                && !g_TraceEnabled)
+            {
+                return;
+            }
 
             // Reused across calls; the hook runs once per renderable per frame.
             thread_local std::vector<void*> stockOrder;
@@ -561,8 +576,8 @@ namespace BZROpenShim
 
             GetPreviousSelection(destination, center, radius, populationIndex, previous);
             const RankConfig config = { budget, kDefaultRetentionBonus };
-            const std::vector<RankedCandidate> ranked = RankCandidates(
-                candidates, center, radius, previous, config);
+            thread_local std::vector<RankedCandidate> ranked;
+            RankCandidatesInto(candidates, center, radius, previous, config, ranked);
 
             TraceSelection(scheme, stockOrder, ranked, previous, budget, populationIndex);
 
