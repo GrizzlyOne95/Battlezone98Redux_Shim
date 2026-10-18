@@ -60,6 +60,35 @@ namespace BZROpenShim::EnhancedLights
         return hash;
     }
 
+    namespace
+    {
+        // A previous selection holds at most one budget of IDs (24 on the
+        // high tier), and this runs once per renderable per frame: a linear
+        // scan beats building a hash set every call.
+        class PreviousSelection
+        {
+        public:
+            explicit PreviousSelection(std::span<const std::uint64_t> ids)
+                : m_ids(ids)
+            {
+                if (ids.size() > kLinearLimit)
+                    m_set.insert(ids.begin(), ids.end());
+            }
+
+            bool Contains(std::uint64_t id) const
+            {
+                if (m_ids.size() > kLinearLimit)
+                    return m_set.contains(id);
+                return std::find(m_ids.begin(), m_ids.end(), id) != m_ids.end();
+            }
+
+        private:
+            static constexpr std::size_t kLinearLimit = 32;
+            std::span<const std::uint64_t> m_ids;
+            std::unordered_set<std::uint64_t> m_set;
+        };
+    }
+
     std::size_t BudgetForEnhancedScheme(std::string_view scheme)
     {
         if (!scheme.starts_with("en-"))
@@ -124,9 +153,7 @@ namespace BZROpenShim::EnhancedLights
         std::span<const std::uint64_t> previouslySelected,
         const RankConfig& config)
     {
-        std::unordered_set<std::uint64_t> previousSet;
-        previousSet.reserve(previouslySelected.size());
-        previousSet.insert(previouslySelected.begin(), previouslySelected.end());
+        const PreviousSelection previousSet(previouslySelected);
 
         std::vector<RankedCandidate> ranked;
         ranked.reserve(candidates.size());
@@ -137,7 +164,7 @@ namespace BZROpenShim::EnhancedLights
             entry.originalOrder = index;
             entry.rawInfluence = EstimateInfluence(
                 entry.light, objectCenter, objectRadius, &entry.surfaceDistance);
-            entry.retained = previousSet.contains(entry.light.stableId);
+            entry.retained = previousSet.Contains(entry.light.stableId);
             entry.effectiveInfluence = entry.rawInfluence;
             if (entry.retained && std::isfinite(entry.effectiveInfluence))
             {
@@ -180,12 +207,10 @@ namespace BZROpenShim::EnhancedLights
         if (stats.selected > 0)
             stats.cutoffInfluence = ranked[stats.selected - 1].rawInfluence;
 
-        std::unordered_set<std::uint64_t> previousSet;
-        previousSet.reserve(previouslySelected.size());
-        previousSet.insert(previouslySelected.begin(), previouslySelected.end());
+        const PreviousSelection previousSet(previouslySelected);
         for (std::size_t i = 0; i < stats.selected; ++i)
         {
-            if (!previousSet.contains(ranked[i].light.stableId))
+            if (!previousSet.Contains(ranked[i].light.stableId))
                 ++stats.replacements;
         }
         return stats;

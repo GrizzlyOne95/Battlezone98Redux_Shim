@@ -991,6 +991,19 @@ namespace BZROpenShim
         if (!g_config.enabled || !g_nativeSaveGame || g_saveDisabledForProcess)
             return;
 
+        // Outside a single-player mission (the shell, any network game) the
+        // only question is whether one has started, and a quarter second is
+        // soon enough to notice. The observation reads a dozen globals through
+        // guarded queries, and this hook runs for every camera every frame.
+        static ULONGLONG s_nextIdleObserve = 0;
+        if (!g_missionActive)
+        {
+            const ULONGLONG idleNow = GetTickCount64();
+            if (idleNow < s_nextIdleObserve)
+                return;
+            s_nextIdleObserve = idleNow + 250;
+        }
+
         const AutoSaveGate::ObservedState gateState = ObserveState();
         if (!IsSinglePlayerMissionActive(gateState))
         {

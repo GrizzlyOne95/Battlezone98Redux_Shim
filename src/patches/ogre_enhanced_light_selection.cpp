@@ -398,13 +398,16 @@ namespace BZROpenShim
             return std::sqrt(x * x + y * y + z * z);
         }
 
-        std::vector<std::uint64_t> GetPreviousSelection(
-            void* list, const Vec3& center, float radius, std::uint64_t useCounter)
+        // Fills out (cleared first) rather than returning a vector: this runs
+        // once per renderable per frame and the caller reuses its buffer.
+        void GetPreviousSelection(void* list, const Vec3& center, float radius,
+                                  std::uint64_t useCounter, std::vector<std::uint64_t>& out)
         {
+            out.clear();
             std::scoped_lock lock(g_HistoryMutex);
             const auto found = g_History.find(list);
             if (found == g_History.end() || !found->second.initialized)
-                return {};
+                return;
 
             SelectionHistory& history = found->second;
             const float resetDistance = std::max(100.0f, std::max(radius, history.radius) * 8.0f);
@@ -415,10 +418,10 @@ namespace BZROpenShim
             {
                 history.selected.clear();
                 history.initialized = false;
-                return {};
+                return;
             }
             history.lastUse = useCounter;
-            return history.selected;
+            out.assign(history.selected.begin(), history.selected.end());
         }
 
         void StoreSelection(void* list, const Vec3& center, float radius,
@@ -536,9 +539,12 @@ namespace BZROpenShim
             if (!ReadLightList(destination, &listBegin, &candidateCount) || candidateCount == 0)
                 return;
 
-            std::vector<void*> stockOrder(listBegin, listBegin + candidateCount);
-            std::vector<Candidate> candidates;
-            candidates.reserve(candidateCount);
+            // Reused across calls; the hook runs once per renderable per frame.
+            thread_local std::vector<void*> stockOrder;
+            thread_local std::vector<Candidate> candidates;
+            thread_local std::vector<std::uint64_t> previous;
+            stockOrder.assign(listBegin, listBegin + candidateCount);
+            candidates.clear();
             for (void* light : stockOrder)
             {
                 Candidate candidate = {};
@@ -553,15 +559,19 @@ namespace BZROpenShim
             g_CandidateTotal.fetch_add(candidateCount, std::memory_order_relaxed);
             UpdateMaxCandidates(candidateCount);
 
-            const std::vector<std::uint64_t> previous =
-                GetPreviousSelection(destination, center, radius, populationIndex);
+            GetPreviousSelection(destination, center, radius, populationIndex, previous);
             const RankConfig config = { budget, kDefaultRetentionBonus };
             const std::vector<RankedCandidate> ranked = RankCandidates(
                 candidates, center, radius, previous, config);
 
             TraceSelection(scheme, stockOrder, ranked, previous, budget, populationIndex);
 
-            if (g_SelectionEnabled && !WriteRankedLightList(destination, ranked))
+            // Ogre's list is already correct (and its hash current) when the
+            // ranking kept the stock order, which is the common one-light case.
+            bool reordered = false;
+            for (std::size_t i = 0; i < ranked.size() && !reordered; ++i)
+                reordered = reinterpret_cast<void*>(ranked[i].light.opaque) != stockOrder[i];
+            if (g_SelectionEnabled && reordered && !WriteRankedLightList(destination, ranked))
             {
                 LogShimA(LogLevel::Warn, "LIGHTSEL",
                     "failed to rewrite verified Ogre light list; stock order retained");

@@ -310,8 +310,15 @@ class PdbTable:
             os.environ.get("LOCALAPPDATA", os.environ.get("TEMP", ".")),
             "Temp", "openshim_symcache")
         os.makedirs(cache_root, exist_ok=True)
-        stem = "%s.%s" % (os.path.basename(pdb_path),
-                          os.path.basename(os.path.dirname(pdb_path)))
+        # Keyed by the PDB's own identity, not its folder: every local build
+        # writes bin/Release/plugins/openshim.pdb, and a folder-keyed cache
+        # handed a rebuilt PDB the previous build's symbols, so every shim
+        # frame was named after whatever function used to sit at that RVA.
+        # A relink can keep the GUID, so the size and write time count too.
+        info = os.stat(pdb_path)
+        stem = "%s.%s.%x.%x" % (os.path.basename(pdb_path),
+                                read_pdb_key(pdb_path) or "nokey",
+                                info.st_size, int(info.st_mtime))
 
         def dump(kind: str) -> str:
             cached = os.path.join(cache_root, "%s.%s.txt" % (stem, kind))
@@ -381,15 +388,20 @@ class PdbTable:
             # only way to tell "OpenShim is on the stack" from "OpenShim is the
             # cost". The GUID check below still rejects a stale local PDB.
             candidates.append(pdb_path)
+            # A PDB's own age counts writes and legitimately runs ahead of the
+            # age recorded in the module, so a GUID match alone is accepted.
+            # But an incremental relink keeps the GUID too, which leaves older
+            # builds' PDBs with the same GUID in the symbol caches: try exact
+            # GUID+age matches first, or a rebuilt shim is named from a stale
+            # PDB and every frame lands on the wrong function.
+            matches = []
             for candidate in candidates:
                 if not os.path.exists(candidate):
                     continue
-                # Only the GUID is compared. A PDB's own age counts writes and
-                # legitimately runs ahead of the age recorded in the module,
-                # so requiring both to match rejects correct symbols.
                 found_key = read_pdb_key(candidate)
-                if not found_key or found_key[:32] != pdb_key[:32]:
-                    continue
+                if found_key and found_key[:32] == pdb_key[:32]:
+                    matches.append((found_key != pdb_key, len(matches), candidate))
+            for _inexact, _order, candidate in sorted(matches):
                 try:
                     table = PdbTable(module_path, candidate)
                 except Exception:
