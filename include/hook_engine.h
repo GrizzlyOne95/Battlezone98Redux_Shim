@@ -124,6 +124,20 @@ namespace HookEngine
         return BindEngineRows(feature, rows, N);
     }
 
+    // Code sites inside another DLL ("module_addresses" in patches.json),
+    // bound all or nothing like BindEngineRows. `module` is the mapped DLL's
+    // base address. A row binds when its module name is that DLL's file name,
+    // the DLL's PE TimeDateStamp and SizeOfImage are the build the row names,
+    // and the guard bytes match at base + rva; its output is then that
+    // address. Any failure zeroes every output, logs one line naming the
+    // failed rows, and returns false.
+    bool BindModuleRows(const char* feature, const void* module, const EngineRow* rows, size_t count);
+    template <size_t N>
+    bool BindModuleRows(const char* feature, const void* module, const EngineRow (&rows)[N])
+    {
+        return BindModuleRows(feature, module, rows, N);
+    }
+
     // Locates scripts/patches.json: working directory first, then the exe's
     // own directory, since the game is routinely launched from elsewhere.
     // Empty when neither exists.

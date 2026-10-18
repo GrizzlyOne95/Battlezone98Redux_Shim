@@ -774,6 +774,7 @@ namespace HookEngine
         bool g_ResolveTableLoaded = false;
         std::vector<BZROpenShim::ResolveTarget> g_ResolveTable;
         std::vector<BZROpenShim::EngineAddressEntry> g_EngineAddressTable;
+        std::vector<BZROpenShim::ModuleAddressEntry> g_ModuleAddressTable;
         // Only successes are cached. A failure is usually "the module is not
         // mapped yet", and callers are expected to ask again.
         std::map<std::string, uint32_t> g_ResolveCache;
@@ -800,6 +801,14 @@ namespace HookEngine
             {
                 BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "resolve",
                     "[ADDR] engine address table has rejected rows: %s", engineError.c_str());
+            }
+
+            std::string moduleError;
+            g_ModuleAddressTable = BZROpenShim::ParseModuleAddressTable(text, &moduleError);
+            if (!moduleError.empty())
+            {
+                BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "resolve",
+                    "[ADDR] module address table has rejected rows: %s", moduleError.c_str());
             }
 
             std::string error;
@@ -1119,6 +1128,70 @@ namespace HookEngine
                 status == EngineAddressStatus::Mismatch ? "guard bytes differ" : "is unreadable");
         }
         return 0;
+    }
+
+    bool BindModuleRows(const char* feature, const void* module, const EngineRow* rows, size_t count)
+    {
+        for (size_t i = 0; i < count; ++i)
+            *rows[i].out = 0;
+        if (!module) return false;
+
+        const auto* base = static_cast<const uint8_t*>(module);
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+            base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+        const uint32_t stamp = nt->FileHeader.TimeDateStamp;
+        const uint32_t size = nt->OptionalHeader.SizeOfImage;
+
+        char path[MAX_PATH] = {};
+        GetModuleFileNameA(static_cast<HMODULE>(const_cast<void*>(module)), path, MAX_PATH);
+        const char* fileName = strrchr(path, '\\');
+        fileName = fileName ? fileName + 1 : path;
+
+        std::vector<const BZROpenShim::ModuleAddressEntry*> entries(count, nullptr);
+        {
+            std::lock_guard<std::mutex> lock(g_ResolveMutex);
+            LoadResolveTableLocked();
+            for (size_t i = 0; i < count; ++i)
+                for (const auto& candidate : g_ModuleAddressTable)
+                    if (candidate.name == rows[i].name)
+                        entries[i] = &candidate;
+        }
+
+        std::string failed;
+        for (size_t i = 0; i < count; ++i)
+        {
+            const BZROpenShim::ModuleAddressEntry* entry = entries[i];
+            const char* why = nullptr;
+            if (!entry)
+                why = "no row";
+            else if (_stricmp(entry->module.c_str(), fileName) != 0)
+                why = "row names another module";
+            else if (entry->timeDateStamp != stamp || entry->sizeOfImage != size)
+                why = "module build differs";
+            else if (entry->rva + entry->expected.size() > size)
+                why = "outside the image";
+            else if (!BZROpenShim::EngineAddressBytesMatch(entry->expected, base + entry->rva,
+                                                           entry->expected.size()))
+                why = "guard bytes differ";
+            if (why)
+                failed += std::string(failed.empty() ? "" : ", ") + rows[i].name + " (" + why + ")";
+        }
+        if (!failed.empty())
+        {
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "resolve",
+                "[ADDR] %s stands down: %s (module %s stamp 0x%08X size 0x%X)",
+                feature, failed.c_str(), fileName, stamp, size);
+            return false;
+        }
+
+        for (size_t i = 0; i < count; ++i)
+        {
+            *rows[i].out = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(base)) + entries[i]->rva;
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "resolve",
+                "[ADDR] %s bound %s at %s+0x%X (%s)", feature, rows[i].name, fileName,
+                entries[i]->rva, entries[i]->identity.c_str());
+        }
+        return true;
     }
 
 }

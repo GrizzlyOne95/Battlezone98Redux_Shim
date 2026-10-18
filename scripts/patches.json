@@ -3825,6 +3825,71 @@
       "identity": "ScavengerEnemy primary vtable (.?AVScavengerEnemy@@, derives ScavengerProcess); RTTI-verified at patch time."
     }
   ],
+  "module_addresses": [
+    {
+      "name": "D3D11HLSLGetConstantBuffer",
+      "module": "RenderSystem_Direct3D11.dll",
+      "time_date_stamp": "0x586F03D3",
+      "size_of_image": "0x000F3000",
+      "rva": "0x000340D0",
+      "expected": "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 81 EC CC 00 00 00 A1",
+      "identity": "Ogre 1.10.0 D3D11HLSLProgram::getConstantBuffer(GpuProgramParametersSharedPtr, uint16) body: the target of its export's incremental-link thunk (the installer checks the export jumps here). Guarded prologue only; the loop it owns is guarded by D3D11HLSLGetConstantBufferDefinitionCall."
+    },
+    {
+      "name": "D3D11HLSLGetConstantBufferDefinitionCall",
+      "module": "RenderSystem_Direct3D11.dll",
+      "time_date_stamp": "0x586F03D3",
+      "size_of_image": "0x000F3000",
+      "rva": "0x00034160",
+      "expected": "8B 4D 08 53 FF 15 ?? ?? ?? ?? 8B F8 FF 37 FF 15 ?? ?? ?? ?? 83 C4 04 84 C0 74 0E 8B 4D 08 8B 47 04 8B 49 20 8D 04 81 EB 2A 8B 0F 8D 41 EA 83 F8 03 77 08 8B 45 08 8B 40 40 EB 12 8D 41 D8 83 F8 03 0F 87 8D 00 00 00 8B 45 08 8B 40 50 8B 4F 04 8D 04 88 FF 73 18 50",
+      "identity": "Inside getConstantBuffer's loop over mShaderVars (ebx = &ShaderVarWithPosInBuf, stride 0x20): mov ecx,params; push ebx; call [IAT GpuProgramParameters::getConstantDefinition] at +4 (patched to nop; call rel32); then isFloat(def.constType) through the IAT at +0x0E selects params+0x20 (float), constType 0x16..0x19 params+0x40 (int) or 0x28..0x2B params+0x50 (uint), indexed by def.physicalIndex, and pushes var.size (+0x18) for the memcpy. Only def+0 and def+4 are read. Both IAT slots are checked against the OgreMain exports at install; the operands are relocated, so wildcarded here."
+    },
+    {
+      "name": "D3D11HLSLUnloadHighLevelImplThunk",
+      "module": "RenderSystem_Direct3D11.dll",
+      "time_date_stamp": "0x586F03D3",
+      "size_of_image": "0x000F3000",
+      "rva": "0x0000306C",
+      "expected": "E9 5F 64 03 00",
+      "identity": "Incremental-link thunk for D3D11HLSLProgram::unloadHighLevelImpl (export ?unloadHighLevelImpl@D3D11HLSLProgram@Ogre@@MAEXXZ; the installer checks the export address equals this row). The literal rel32 pins its target to D3D11HLSLUnloadHighLevelImpl. Its only reference is program vtable slot 0x158 (RVA 0xA2B94); notifyDeviceLost calls it through that slot."
+    },
+    {
+      "name": "D3D11HLSLUnloadHighLevelImpl",
+      "module": "RenderSystem_Direct3D11.dll",
+      "time_date_stamp": "0x586F03D3",
+      "size_of_image": "0x000F3000",
+      "rva": "0x000394D0",
+      "expected": "56 57 8B F9 8B 87 30 02 00 00 8D B7 30 02 00 00 8B CE FF 70 04",
+      "identity": "D3D11HLSLProgram::unloadHighLevelImpl body: clears mSlotMap and mBufferInfoMap (the shader variables the constant cache is keyed by live in mBufferInfoMap). Reached only from D3D11HLSLUnloadHighLevelImplThunk."
+    },
+    {
+      "name": "D3D11HLSLBuildConstantDefinitionsThunk",
+      "module": "RenderSystem_Direct3D11.dll",
+      "time_date_stamp": "0x586F03D3",
+      "size_of_image": "0x000F3000",
+      "rva": "0x00002CBB",
+      "expected": "E9 C0 B0 02 00",
+      "identity": "Incremental-link thunk for D3D11HLSLProgram::buildConstantDefinitions (export ?buildConstantDefinitions@D3D11HLSLProgram@Ogre@@UBEXXZ; checked equal at install). The literal rel32 pins its target. It straddles a cache line, so the vtable slot is patched rather than the thunk."
+    },
+    {
+      "name": "D3D11HLSLBuildConstantDefinitions",
+      "module": "RenderSystem_Direct3D11.dll",
+      "time_date_stamp": "0x586F03D3",
+      "size_of_image": "0x000F3000",
+      "rva": "0x0002DD80",
+      "expected": "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 81 EC 48 01 00 00",
+      "identity": "D3D11HLSLProgram::buildConstantDefinitions body: createParameterMappingStructures(true) allocates the new named-constant set. Reached only from D3D11HLSLBuildConstantDefinitionsThunk."
+    },
+    {
+      "name": "D3D11HLSLBuildConstantDefinitionsVtableSlot",
+      "module": "RenderSystem_Direct3D11.dll",
+      "time_date_stamp": "0x586F03D3",
+      "size_of_image": "0x000F3000",
+      "rva": "0x000A2B9C",
+      "expected": "?? ?? ?? ??",
+      "identity": "D3D11HLSLProgram vtable slot 0x160 (vtable RVA 0xA2A3C), the only reference to D3D11HLSLBuildConstantDefinitionsThunk in the image. The value is relocated, so the installer checks it equals the bound thunk instead of guarding bytes."
+    }
+  ],
   "globals": [
     {
       "name": "Map Sorting",
