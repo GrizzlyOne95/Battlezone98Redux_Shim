@@ -24,6 +24,7 @@
 #include "ogre_script_import_cache.h"
 #include "resource_walk_stat_cache.h"
 #include "ogre_enhanced_light_selection.h"
+#include "d3d11_constant_lookup_cache.h"
 #include "render_effect_intent.h"
 #include "render_profile_runtime.h"
 #include "native_ui.h"
@@ -1614,6 +1615,7 @@ namespace BZROpenShim
         HookEngine::CodePatchLock lock;
         InstallPondClassLabelSupportIfPossible();
         InstallEnhancedLightSelectionIfPossible();
+        InstallD3D11ConstantLookupCacheIfPossible();
         InstallShadowFarOverrideIfPossible();
         InstallJumpSnipingProbeIfRequested();
         InstallUnitTurboHooksIfPossible();

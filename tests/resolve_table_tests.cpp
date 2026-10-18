@@ -428,6 +428,43 @@ namespace
         Check(!EngineAddressBytesMatch({}, same, sizeof(same)), "an empty guard never matches");
     }
 
+    void TestModuleAddressRows()
+    {
+        const char* json = R"({
+            "module_addresses": [
+                { "name": "Good", "module": "R.dll", "time_date_stamp": "0x586F03D3", "size_of_image": "0xF3000",
+                  "rva": "0x34160", "expected": "8B 4D ?? 53", "identity": "why" },
+                { "name": "NoModule", "time_date_stamp": "0x1", "size_of_image": "0x1000", "rva": "0x10", "expected": "55" },
+                { "name": "NoStamp", "module": "R.dll", "size_of_image": "0x1000", "rva": "0x10", "expected": "55" },
+                { "name": "RvaOutside", "module": "R.dll", "time_date_stamp": "0x1", "size_of_image": "0x1000",
+                  "rva": "0x1000", "expected": "55" },
+                { "name": "NoBytes", "module": "R.dll", "time_date_stamp": "0x1", "size_of_image": "0x1000", "rva": "0x10" },
+                { "name": "Good", "module": "R.dll", "time_date_stamp": "0x1", "size_of_image": "0x1000",
+                  "rva": "0x10", "expected": "55" }
+            ]
+        })";
+        std::string error;
+        const auto rows = ParseModuleAddressTable(json, &error);
+        Check(rows.size() == 1, "only the well-formed module row survives");
+        Check(!error.empty(), "each rejected module row is reported");
+        if (rows.size() == 1)
+        {
+            Check(rows[0].name == "Good" && rows[0].module == "R.dll" && rows[0].timeDateStamp == 0x586F03D3u &&
+                      rows[0].sizeOfImage == 0xF3000u && rows[0].rva == 0x34160u && rows[0].identity == "why",
+                  "a module row keeps its module build, rva and identity");
+            Check(rows[0].expected.size() == 4 && rows[0].expected[2] == 0x100,
+                  "a module row keeps its guard bytes, wildcards included");
+        }
+        Check(error.find("repeats an earlier name") != std::string::npos,
+              "a duplicate module row name is rejected");
+        Check(error.find("does not name its module build") != std::string::npos,
+              "a module row without its build is rejected");
+
+        std::string none;
+        Check(ParseModuleAddressTable(R"({"patches": []})", &none).empty() && none.empty(),
+              "a file without module_addresses yields no rows and no error");
+    }
+
     void TestShippedEngineAddressTable()
     {
 #ifndef BZR_PATCHES_JSON
@@ -452,6 +489,13 @@ namespace
             if (!row.isData)
                 Check(row.expected.size() >= 8, "every code row guards at least 8 bytes: " + row.name);
         }
+
+        std::string moduleError;
+        const auto moduleRows = ParseModuleAddressTable(text, &moduleError);
+        Check(moduleError.empty(), "the shipped module address table must have no rejected rows");
+        Check(moduleRows.size() >= 7, "the shipped module table keeps the D3D11 constant cache rows");
+        for (const auto& row : moduleRows)
+            Check(names.insert(row.name).second, "module address names are unique: " + row.name);
 #endif
     }
 }
@@ -466,6 +510,7 @@ int main()
     TestShippedTableMatchesTheOriginalArrays();
     TestEngineAddressRows();
     TestEngineAddressBytesMatch();
+    TestModuleAddressRows();
     TestShippedEngineAddressTable();
 
     if (OpenShimTest::FailureCount() != 0)

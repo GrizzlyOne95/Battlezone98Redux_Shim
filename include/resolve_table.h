@@ -119,4 +119,28 @@ namespace BZROpenShim
     bool EngineAddressBytesMatch(const std::vector<uint16_t>& expected,
                                  const uint8_t* actual,
                                  size_t actualLen);
+
+    // One element of the "module_addresses" array in patches.json: a code
+    // site inside a DLL other than the exe (an Ogre render system, say),
+    // recorded as an RVA. A DLL's build is independent of the exe's, so a
+    // row names the module build it was taken from - the PE TimeDateStamp
+    // and SizeOfImage - and binds only on that build with matching guard
+    // bytes. Build overlays never touch this table.
+    struct ModuleAddressEntry
+    {
+        std::string name;
+        std::string module;          // file name, compared case-insensitively
+        uint32_t timeDateStamp = 0;
+        uint32_t sizeOfImage = 0;
+        uint32_t rva = 0;
+        std::vector<uint16_t> expected;
+        std::string identity;
+    };
+
+    // Parses the "module_addresses" array. A row needs a unique non-empty
+    // "name", a non-empty "module", non-zero hex "time_date_stamp",
+    // "size_of_image" and "rva", and a parseable non-empty "expected". Bad
+    // rows are reported and skipped individually.
+    std::vector<ModuleAddressEntry> ParseModuleAddressTable(const std::string& jsonText,
+                                                            std::string* error = nullptr);
 }

@@ -363,4 +363,103 @@ namespace BZROpenShim
 
         return entries;
     }
+
+    std::vector<ModuleAddressEntry> ParseModuleAddressTable(const std::string& jsonText,
+                                                            std::string* error)
+    {
+        std::vector<ModuleAddressEntry> entries;
+
+        nlohmann::json root;
+        try
+        {
+            root = nlohmann::json::parse(jsonText);
+        }
+        catch (const std::exception& e)
+        {
+            AppendError(error, std::string("patches.json did not parse: ") + e.what());
+            return entries;
+        }
+
+        if (!root.is_object() || !root.contains("module_addresses"))
+            return entries;
+
+        const nlohmann::json& rows = root["module_addresses"];
+        if (!rows.is_array())
+        {
+            AppendError(error, "\"module_addresses\" must be an array");
+            return entries;
+        }
+
+        const auto hexField = [](const nlohmann::json& row, const char* key, uint32_t& out) {
+            bool ok = false;
+            if (row.contains(key) && row[key].is_string())
+                out = ParseHexAddress(row[key].get<std::string>(), ok);
+            return ok && out != 0;
+        };
+
+        size_t index = 0;
+        for (const auto& row : rows)
+        {
+            const std::string where = "module_addresses[" + std::to_string(index++) + "]";
+
+            if (!row.is_object())
+            {
+                AppendError(error, where + " is not an object");
+                continue;
+            }
+
+            ModuleAddressEntry entry;
+            if (!row.contains("name") || !row["name"].is_string() ||
+                row["name"].get<std::string>().empty())
+            {
+                AppendError(error, where + " has no \"name\"");
+                continue;
+            }
+            entry.name = row["name"].get<std::string>();
+
+            bool duplicate = false;
+            for (const auto& existing : entries)
+                duplicate = duplicate || existing.name == entry.name;
+            if (duplicate)
+            {
+                AppendError(error, where + " (" + entry.name + ") repeats an earlier name");
+                continue;
+            }
+
+            if (row.contains("module") && row["module"].is_string())
+                entry.module = row["module"].get<std::string>();
+            if (entry.module.empty())
+            {
+                AppendError(error, where + " (" + entry.name + ") has no \"module\"");
+                continue;
+            }
+
+            if (!hexField(row, "time_date_stamp", entry.timeDateStamp) ||
+                !hexField(row, "size_of_image", entry.sizeOfImage))
+            {
+                AppendError(error, where + " (" + entry.name + ") does not name its module build");
+                continue;
+            }
+            if (!hexField(row, "rva", entry.rva) || entry.rva >= entry.sizeOfImage)
+            {
+                AppendError(error, where + " (" + entry.name + ") has no valid \"rva\"");
+                continue;
+            }
+
+            if (row.contains("expected") && row["expected"].is_string())
+                entry.expected = ParseIdaPatternText(row["expected"].get<std::string>());
+            if (entry.expected.empty())
+            {
+                AppendError(error, where + " (" + entry.name + ") has no parseable \"expected\"");
+                continue;
+            }
+
+            if (row.contains("identity") && row["identity"].is_string())
+                entry.identity = row["identity"].get<std::string>();
+
+            entries.push_back(std::move(entry));
+        }
+
+        return entries;
+    }
 }
