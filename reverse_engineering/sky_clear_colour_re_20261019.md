@@ -144,4 +144,24 @@ terrain, which restores the TRN value.
 
 ## Live check
 
-LIVE_CHECK_PLACEHOLDER
+2026-10-19, GOG install, windowed. The harness took the launch lock and used no
+focus input. The test ran the lcbench world with a fixture that loaded the EXU
+branch's own `exu.dll` through `package.cpath`.
+
+| Step | Lua result | `GetSkyClearColor` | bytes at `0x02CD9120` (ReadProcessMemory) |
+|---|---|---|---|
+| start, then sky dome/plane/box disabled | - | 0,0,0 | 0 0 0 |
+| `SetSkyClearColor(1,0,0)` | `true` | 1,0,0 | 255 0 0 |
+| `SetSkyClearColor(2,0,0)` | error "requires r, g, b in 0..1" | unchanged | - |
+| `ResetSkyClearColor()` | - | 0,0,0 | 0 0 0 |
+| `SetSkyClearColor({r=0,g=0.25,b=1})` | `true` | 0,0.251,1 | 0 64 255 |
+
+Pixels:
+
+- The sky visible at the left edge of the client area turned red. Its average
+  R rose from 12 at baseline to 71 under the red override; it sits behind the
+  translucent HUD panel.
+- A terrain control patch in the same frames stayed at 24/27/25.
+- The red background was also confirmed by eye during the run.
+
+Every step was SEH-clean, and the game shut down through `Stop-BZRGame`.
