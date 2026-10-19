@@ -5,6 +5,7 @@
 // registry that drives the multiplayer gate, split out of bzr_hooks.cpp.
 #include "bzr_hooks.h"
 #include "hud_feedback.h"
+#include "hud_palette.h"
 #include "bzr_object_layout.h"
 #include "bzr_hooks_internal.h"
 #include "engine_globals.h"
@@ -723,6 +724,9 @@ namespace BZROpenShim
             break;
         case ShimSettingApplyGroup::HudFeedback:
             HudFeedback::ReloadConfig();
+            break;
+        case ShimSettingApplyGroup::HudPalette:
+            HudPalette::ReloadConfig();
             break;
         case ShimSettingApplyGroup::BzrNetRoute:
             // Only the route preference re-applies live; the port is latched on

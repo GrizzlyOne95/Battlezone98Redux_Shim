@@ -914,10 +914,27 @@ HitMarkerSize = 100
 HitMarkerOpacity = 100
 ; Default follows the selected ScrapPilotHud layout: stock palette or the
 ; original legacy scrap-blue/pilot-green split. Layout/backplates are unchanged.
-; Choices: Default, White, Blue, Green, Cyan, Amber, Magenta.
+; Choices: Default, White, Blue, Green, Cyan, Amber, Magenta, Red, Yellow.
 ; INI also accepts #RRGGBB or 0xAARRGGBB (native packed ARGB).
 ScrapHudColor = Default
 PilotHudColor = Default
+; HUD Colors: Default roles inherit HudColorPreset (Stock/Classic/HighContrast).
+; Explicit role colors override the base palette; INI accepts #RRGGBB / 0xAARRGGBB.
+HudColorPreset = Stock
+RadarBackgroundOpacity = Default
+RadarGridColor = Default
+RadarFriendlyColor = Default
+RadarEnemyColor = Default
+RadarNeutralColor = Default
+HullHighColor = Default
+HullMediumColor = Default
+HullLowColor = Default
+AmmoHudColor = Default
+UnitHealthHighColor = Default
+UnitHealthMediumColor = Default
+UnitHealthLowColor = Default
+UnitAmmoColor = Default
+UnitEmptyColor = Default
 
 ; Under-attack audio alert frequency.
 ; Canonical values:

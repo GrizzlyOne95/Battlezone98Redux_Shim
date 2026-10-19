@@ -1,5 +1,6 @@
 #include "native_hud_runtime.h"
 #include "hud_feedback.h"
+#include "hud_palette.h"
 #include "geometry_contact_test.h"
 #include "bzr_hooks.h"
 #include "env_switch_table.h"
@@ -1727,6 +1728,7 @@ namespace BZROpenShim
         // ever run. See include/openshim_events.h.
         TickOpenShimEventLayer();
         HudFeedback::Tick();
+        HudPalette::Tick();
 
         // Sample after the stock world queue update, when Ogre has evaluated
         // the entity materials and its hardware-animation decision is current.

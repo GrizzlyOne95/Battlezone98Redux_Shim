@@ -26,6 +26,8 @@ namespace BZROpenShim::HudColors
         if (Equals(text, "Cyan")) return 0xFF40FFFFu;
         if (Equals(text, "Amber")) return 0xFFFFC040u;
         if (Equals(text, "Magenta")) return 0xFFFF60FFu;
+        if (Equals(text, "Red")) return 0xFFFF4040u;
+        if (Equals(text, "Yellow")) return 0xFFFFFF40u;
         if (text.size() > 0 && text[0] == '#') text.remove_prefix(1);
         else if (text.size() > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) text.remove_prefix(2);
         else return std::nullopt;
