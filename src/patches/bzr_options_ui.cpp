@@ -2691,6 +2691,8 @@ namespace BZROpenShim
         static const char* const kShimSettingsScavengerAltKeys[] = { "ScavengerPathing" };
         static const char* const kShimSettingsBindsUiAltKeys[] = { "CustomBindingUi" };
         static const char* const kShimSettingsRenderProfileValues[] = { "Retro", "Redux", "Enhanced" };
+        static const char* const kShimSettingsFovValues[] = { "0", "60", "70", "80", "90", "100", "110", "120" };
+        static const char* const kShimSettingsFovLabels[] = { "Stock (80)", "60", "70", "80", "90", "100", "110", "120" };
         // 0 disables the override and leaves the stock engine limit alone; the
         // runtime clamps anything above 256, so 256 is the top of the ladder.
         static const char* const kShimSettingsSoundChannelValues[] = { "0", "64", "128", "192", "256" };
@@ -2702,6 +2704,11 @@ namespace BZROpenShim
 
         static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
         {
+            { "Field of View", "Display", "FieldOfView", nullptr, 0,
+              kShimSettingsFovValues, kShimSettingsFovLabels, 8, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Cockpit and chase base FOV in degrees (4:3 reference); widescreen expands horizontally. "
+              "Stock is 80. Satellite and target cameras keep their own angles. Restart required." },
             // Deliberately NO Renderer (DX9/DX11) row: the runtime only parses
             // the [Graphics] Renderer preference and reports requested-vs-
             // effective divergence; it does not yet steer which render system
@@ -3188,7 +3195,7 @@ namespace BZROpenShim
         constexpr size_t kShimCategoryMaxRows = 2 * kShimCategoryRowsPerColumn;
 
         static const char* const kShimCategoryVideo[] = {
-            "Render Profile", "DX11 FXAA", "DX11 Local Lights", "Sun Flashbang", "Jet Flames",
+            "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "Sun Flashbang", "Jet Flames",
             "Empty Craft Lights", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes",
             "HD Terrain Tiles", "Terrain Micro Detail" };
         static const char* const kShimCategoryLighting[] = {

@@ -38,6 +38,7 @@
 #include "lcbench_safety_policy.h"
 #include "hook_engine.h"
 #include "ui_performance.h"
+#include "camera_fov_policy.h"
 #include "openshim_events.h"
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
@@ -46,6 +47,7 @@
 #include <objidl.h>
 #include <gdiplus.h>
 #include <array>
+#include <atomic>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -910,6 +912,78 @@ namespace BZROpenShim
                                                     uint32_t paneBits,
                                                     uint32_t farBits,
                                                     uint32_t zoomBits);
+
+        static InlineDetour32 g_PlayerFovDetour = {};
+        static std::atomic<FnBuildCameraRecord> g_PlayerFovBuildOriginal{ nullptr };
+        static int g_PlayerFovDegrees = 0;
+        static uint32_t g_PlayerFovCalls[5] = {};
+
+        static void* __cdecl BuildPlayerCameraFovHook(void* outBuf, void* viewport,
+                                                     uint32_t fovBits, uint32_t paneBits,
+                                                     uint32_t farBits, uint32_t zoomBits)
+        {
+            // The patch writer resumes other threads before returning its
+            // trampoline. A camera call in that publication window must wait
+            // for the original instead of calling a null pointer.
+            auto original = g_PlayerFovBuildOriginal.load(std::memory_order_acquire);
+            while (!original)
+            {
+                YieldProcessor();
+                original = g_PlayerFovBuildOriginal.load(std::memory_order_acquire);
+            }
+            const auto caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
+            bool playerView = false;
+            for (const uint32_t site : g_PlayerFovCalls)
+                playerView = playerView || caller == site + 5;
+            return original(outBuf, viewport,
+                CameraFovPolicy::SelectFovBits(fovBits, g_PlayerFovDegrees, playerView),
+                paneBits, farBits, zoomBits);
+        }
+
+        void InstallPlayerFovIfPossible()
+        {
+            if (g_PlayerFovBuildOriginal.load(std::memory_order_acquire))
+                return;
+            // Snapshot once: changing this preference in Options requires a
+            // restart, including restoring Stock. No hook is installed for 0.
+            static bool configRead = false;
+            if (!configRead)
+            {
+                std::string value;
+                if (TryGetUserConfigString("Display", "FieldOfView", value))
+                    g_PlayerFovDegrees = CameraFovPolicy::ParseDegrees(value.c_str());
+                configRead = true;
+            }
+            if (g_PlayerFovDegrees == 0)
+                return;
+
+            static int bound = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "BuildCameraRecord", &g_BuildCameraRecordAddr },
+                { "PlayerFovInitCall", &g_PlayerFovCalls[0] },
+                { "PlayerFovCockpitCall", &g_PlayerFovCalls[1] },
+                { "PlayerFovCockpitNoZCall", &g_PlayerFovCalls[2] },
+                { "PlayerFovCraftCall", &g_PlayerFovCalls[3] },
+                { "PlayerFovChaseCall", &g_PlayerFovCalls[4] },
+            };
+            if (!BindUiCameraRows("Player field of view", rows, bound))
+                return;
+
+            // One entry detour makes installation atomic across the five
+            // callers. Scripted/free/satellite/PiP callers pass through, as
+            // does the cinematic satellite-zoom repair's direct builder call.
+            static const uint8_t expected[] = {
+                0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x48, 0x02, 0x00, 0x00
+            };
+            if (!InstallInlineDetour32(g_PlayerFovDetour, g_BuildCameraRecordAddr,
+                    reinterpret_cast<void*>(BuildPlayerCameraFovHook), sizeof(expected),
+                    expected, sizeof(expected)))
+                return;
+            g_PlayerFovBuildOriginal.store(
+                reinterpret_cast<FnBuildCameraRecord>(g_PlayerFovDetour.trampoline), std::memory_order_release);
+            Log(L"[FOV] Installed player base FOV=%d degrees (4:3 reference); cockpit/chase only\n",
+                g_PlayerFovDegrees);
+        }
 
         static void RestoreCockpitCameraRecordForCinematic(int32_t viewMode)
         {

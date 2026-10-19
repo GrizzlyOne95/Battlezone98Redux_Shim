@@ -1412,6 +1412,7 @@ namespace BZROpenShim
         void InstallQuakeReplayFadeIfPossible();
         void InstallTargetCamSatelliteFixIfPossible();
         void InstallCinematicSatelliteZoomFixIfPossible();
+        void InstallPlayerFovIfPossible();
 
         inline constexpr long kQuakeReplayFadeSecondsDefault = 5;
 

@@ -1036,6 +1036,7 @@ namespace BZROpenShim
             {"InstallQuakeReplayFadeIfPossible", &InstallQuakeReplayFadeIfPossible},
             {"InstallTargetCamSatelliteFixIfPossible", &InstallTargetCamSatelliteFixIfPossible},
             {"InstallCinematicSatelliteZoomFixIfPossible", &InstallCinematicSatelliteZoomFixIfPossible},
+            {"InstallPlayerFovIfPossible", &InstallPlayerFovIfPossible},
             {"InstallUnfocusedMouseReleaseIfPossible", &InstallUnfocusedMouseReleaseIfPossible},
         };
         RunInitSteps(kFixInstallSteps);
@@ -1647,6 +1648,7 @@ namespace BZROpenShim
 		InstallQuakeReplayFadeIfPossible();
 		InstallTargetCamSatelliteFixIfPossible();
 		InstallCinematicSatelliteZoomFixIfPossible();
+		InstallPlayerFovIfPossible();
 		InstallUnfocusedMouseReleaseIfPossible();
         InstallAiTuningHooksIfPossible();
         InstallConstructorRemoteBuildFixIfPossible();
