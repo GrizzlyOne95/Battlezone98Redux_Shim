@@ -29,6 +29,13 @@ Before writing one-off tooling, check whether these already cover the task:
 - Subsystem-specific `reverse_engineering/run_*_probe.*` scripts — prefer an existing probe when it matches the target.
 - `reverse_engineering/tooling_smoke_pipeline.ps1` — bounded offline triage that writes a compact report plus raw artifacts under ignored `reverse_engineering/tooling_smoke/`.
 
+## Model Formats (SDF/VDF/GEO/ANIM, Ogre mesh/skeleton)
+Never hand-roll a reader or writer for these formats. Use the sibling libraries:
+- **Read:** Battlezone98_Modding_Toolbox `battlezone/meshes/legacy.py` (`read_sdf`, `read_vdf`, `read_geo`, `AnimSequence`, `AnimTrack`). Its `legacy_port.py` handles cockpit and person animation.
+- **Read and write:** BZ98RBlenderToolKit `bz98tools/bzrmodelporter/` (`bzbwd2.py` + `bzbwd2_serializer.py` for SDF/VDF, `bzgeo*`, `ogremesh*`, `ogreskeleton*`). To import it without Blender, put `bz98tools/` on `sys.path` and import `bzrmodelporter.*`, because the package root imports `bpy`.
+
+If one of them is missing something, fix it in that repository, or report the gap. Campaign Reimagined imports both through `Tools/bzmodellibs.py`.
+
 ## Practical Workflows
 
 - **Before a new patch/signature:** qualify the PE with static triage, locate semantics with Ghidra, then run a native live launch and capture the target bytes from its PID. Compare expected bytes/build facts before writing a patch.
