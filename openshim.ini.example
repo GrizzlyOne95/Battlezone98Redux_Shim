@@ -891,6 +891,23 @@ SceneDepthDiagnostic = 0
 ; Satellite and target-camera angles are untouched. Cinematics may inherit the
 ; current player angle, as in stock; explicit scripted camera setters are untouched.
 FieldOfView = 0
+; Opt-in native reticle/hit feedback, currently GOG 2.2.301. Changes apply live.
+; Stock (default) preserves the engine's artwork. Other styles: Cross, Dot, CrossDot.
+; Color: White, Green, Cyan, Amber; applies to custom art/contact brackets only.
+ReticleStyle = Stock
+ReticleColor = White
+; Size percent 50-200; thickness 1-3; opacity percent 25-100. UI-scale aware.
+ReticleSize = 100
+ReticleThickness = 2
+ReticleOpacity = 100
+ReticleOutline = 0
+; Contact feedback uses only the stock reticle's current object. No aiming change.
+ReactiveReticle = 0
+; Confirmed health loss from the local player's weapon, not attempted damage.
+; Hit markers and reactions are disabled in network games.
+HitMarkers = 0
+; Fade duration in milliseconds, 60-400 (menu: 80, 120, 180, 250).
+HitMarkerDuration = 120
 
 ; Under-attack audio alert frequency.
 ; Canonical values:

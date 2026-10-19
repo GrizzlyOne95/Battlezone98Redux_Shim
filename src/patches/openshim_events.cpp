@@ -120,7 +120,7 @@ namespace BZROpenShim
             static_cast<uint64_t>(static_cast<uint32_t>(slot2)) |
             (static_cast<uint64_t>(static_cast<uint32_t>(slot3)) << 32);
 
-        if (type == OpenShimEventType::SimDamage)
+        if (type == OpenShimEventType::SimDamage || type == OpenShimEventType::SimDamageApplied)
         {
             // In-process only; see the note on OpenShimEventType. Built by hand
             // rather than routed through PublishOpenShimEvent so it never

@@ -68,13 +68,20 @@ companions):
 | `SimDamage` | victim handle | damager handle | victim is local player | damager is local player |
 | `SimKill` | victim handle | damager handle | victim is local player | damager is local player |
 | `SimTeamDeath` | killed team | killer team | — | — |
+| `SimDamageApplied` | victim handle | local damager handle | 0 | 1 |
 
 The four `int32` slots are packed into the record's `arg0`/`arg1` by
 `PublishSimEvent` and unpacked by `SimEventArg`.
 
-`SimDamage` is delivered to in-process sinks **only**. It fires per damage
-application; letting it into the 256-entry polling queue would evict the
+`SimDamage` and `SimDamageApplied` are delivered to in-process sinks **only**. They fire per damage
+application; letting them into the 256-entry polling queue would evict the
 lifecycle events companions actually poll for.
+
+`SimDamageApplied` is an optional, GOG single-player producer enabled by
+`[Display] HitMarkers`. It verifies health decreased after the original damage
+handler and validates the same object lifetime. It is independent of career
+tracking and is not a general-purpose damage API. See [HUD_FEEDBACK.md](HUD_FEEDBACK.md)
+for native boundaries and current runtime qualification.
 
 ## 3. Event sources, and the evidence for them
 

@@ -63,9 +63,9 @@ namespace BZROpenShim
     // ABI-stable record's arg0/arg1 exactly as documented on OpenShimEventType.
     //
     // Every simulation event reaches in-process sinks. All of them except
-    // SimDamage are ALSO forwarded to the SDK polling queue for companion DLLs;
-    // SimDamage fires per damage application and would evict the lifecycle
-    // events companions actually poll for.
+    // SimDamage and SimDamageApplied are ALSO forwarded to the SDK polling
+    // queue for companion DLLs; frequent damage events would evict the
+    // lifecycle events companions actually poll for.
     bool PublishSimEvent(OpenShimEventType type,
                          int32_t slot0 = 0,
                          int32_t slot1 = 0,

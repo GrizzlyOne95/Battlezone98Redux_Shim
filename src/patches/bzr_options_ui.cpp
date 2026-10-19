@@ -8,6 +8,7 @@
 #include "shell_screens.h"
 #include "hook_engine.h"
 #include "bool_token.h"
+#include "hud_feedback.h"
 
 #include "autosave.h"
 #include "bzr_hooks.h"
@@ -2693,6 +2694,17 @@ namespace BZROpenShim
         static const char* const kShimSettingsRenderProfileValues[] = { "Retro", "Redux", "Enhanced" };
         static const char* const kShimSettingsFovValues[] = { "0", "60", "70", "80", "90", "100", "110", "120" };
         static const char* const kShimSettingsFovLabels[] = { "Stock (80)", "60", "70", "80", "90", "100", "110", "120" };
+        static const char* const kShimReticleStyles[] = { "Stock", "Cross", "Dot", "CrossDot" };
+        static const char* const kShimReticleStyleLabels[] = { "Stock", "Cross", "Dot", "Cross + Dot" };
+        static const char* const kShimReticleColors[] = { "White", "Green", "Cyan", "Amber" };
+        static const char* const kShimReticleSizes[] = { "75", "100", "150" };
+        static const char* const kShimReticleSizeLabels[] = { "Small", "Normal", "Large" };
+        static const char* const kShimReticleThickness[] = { "1", "2", "3" };
+        static const char* const kShimReticleThicknessLabels[] = { "Thin", "Normal", "Thick" };
+        static const char* const kShimReticleOpacity[] = { "50", "75", "100" };
+        static const char* const kShimReticleOpacityLabels[] = { "50%", "75%", "100%" };
+        static const char* const kShimHitDurations[] = { "80", "120", "180", "250" };
+        static const char* const kShimHitDurationLabels[] = { "80 ms", "120 ms", "180 ms", "250 ms" };
         // 0 disables the override and leaves the stock engine limit alone; the
         // runtime clamps anything above 256, so 256 is the top of the ladder.
         static const char* const kShimSettingsSoundChannelValues[] = { "0", "64", "128", "192", "256" };
@@ -2704,6 +2716,35 @@ namespace BZROpenShim
 
         static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
         {
+            { "Reticle Style", "Display", "ReticleStyle", nullptr, 0,
+              kShimReticleStyles, kShimReticleStyleLabels, 4, 0, ShimSettingApplyGroup::HudFeedback,
+              "Stock artwork, cross, dot, or cross plus dot at the stock aim point. Applies live. GOG 2.2.301." },
+            { "Reticle Color", "Display", "ReticleColor", nullptr, 0,
+              kShimReticleColors, kShimReticleColors, 4, 0, ShimSettingApplyGroup::HudFeedback,
+              "Color of custom reticles and target-contact brackets; stock artwork keeps its own colors." },
+            { "Reticle Size", "Display", "ReticleSize", nullptr, 0,
+              kShimReticleSizes, kShimReticleSizeLabels, 3, 1, ShimSettingApplyGroup::HudFeedback,
+              "Scale custom reticles and feedback with the game's current UI scale. Applies live." },
+            { "Reticle Thickness", "Display", "ReticleThickness", nullptr, 0,
+              kShimReticleThickness, kShimReticleThicknessLabels, 3, 1, ShimSettingApplyGroup::HudFeedback,
+              "Line thickness for custom reticles and feedback. Applies live." },
+            { "Reticle Outline", "Display", "ReticleOutline", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0, ShimSettingApplyGroup::HudFeedback,
+              "Dark outline for custom reticles and feedback, for contrast on bright terrain. Applies live." },
+            { "Reticle Opacity", "Display", "ReticleOpacity", nullptr, 0,
+              kShimReticleOpacity, kShimReticleOpacityLabels, 3, 2, ShimSettingApplyGroup::HudFeedback,
+              "Opacity of custom reticles and feedback. Stock artwork is unchanged." },
+            { "Reactive Reticle", "Display", "ReactiveReticle", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0, ShimSettingApplyGroup::HudFeedback,
+              "Contract a custom cross and add brackets when the stock reticle detects an object. "
+              "Visual feedback only; no aim/spread change or team classification. Single player only." },
+            { "Hit Markers", "Display", "HitMarkers", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0, ShimSettingApplyGroup::HudFeedback,
+              "Brief white ticks when your weapon actually reduces another object's health. "
+              "No marker for blocked/zero damage, collisions, self hits or AI shots. Single player only." },
+            { "Hit Marker Duration", "Display", "HitMarkerDuration", nullptr, 0,
+              kShimHitDurations, kShimHitDurationLabels, 4, 1, ShimSettingApplyGroup::HudFeedback,
+              "How long confirmed-hit ticks remain visible before fading. Applies live." },
             { "Field of View", "Display", "FieldOfView", nullptr, 0,
               kShimSettingsFovValues, kShimSettingsFovLabels, 8, 0,
               ShimSettingApplyGroup::RestartRequired,
@@ -3204,7 +3245,9 @@ namespace BZROpenShim
         static const char* const kShimCategoryAudio[] = {
             "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
         static const char* const kShimCategoryHud[] = {
-            "Scrap/Pilot HUD", "Radar Size", "Target Popup", "MP Vehicle Flags", "Show Own MP Flag" };
+            "Scrap/Pilot HUD", "Radar Size", "Target Popup", "MP Vehicle Flags", "Show Own MP Flag",
+            "Reticle Style", "Reticle Color", "Reticle Size", "Reticle Thickness", "Reticle Outline",
+            "Reticle Opacity", "Reactive Reticle", "Hit Markers", "Hit Marker Duration" };
         static const char* const kShimCategoryControls[] = {
             kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Unsmoothed Controls",
             "Satellite Zoom Out", "Satellite Pan Speed", "Editor Placement", "Background Mouse" };
@@ -3263,6 +3306,8 @@ namespace BZROpenShim
             sizeof(kShimSettingsCategories) / sizeof(kShimSettingsCategories[0]);
         static_assert(sizeof(kShimCategoryGameplay) / sizeof(kShimCategoryGameplay[0]) <= kShimCategoryMaxRows,
                       "a category screen shows at most 16 rows");
+        static_assert(sizeof(kShimCategoryHud) / sizeof(kShimCategoryHud[0]) <= kShimCategoryMaxRows,
+                      "HUD controls must fit the category screen");
 
         // Hub geometry (HUB_LAYOUT).
         constexpr Shell::Rect kShimTitleRect = { 470.0f, 132.0f, 500.0f, 56.0f };
@@ -3375,6 +3420,8 @@ namespace BZROpenShim
         // Null when the row can be used; otherwise why not.
         static const char* ShimSettingUnavailableReason(const ShimSettingDescriptor& setting)
         {
+            if (setting.applyGroup == ShimSettingApplyGroup::HudFeedback)
+                return HudFeedback::UnavailableReason();
             const auto caps = Assets::GetAssetCapabilities();
             if (caps.state == Assets::AssetPackState::Unknown || !setting.section || !setting.key)
                 return nullptr;
@@ -3676,6 +3723,8 @@ namespace BZROpenShim
             bool liveApplyOk = true;
             if (setting.applyGroup == ShimSettingApplyGroup::AutoSave)
                 liveApplyOk = ReloadAutoSaveConfig();
+            else if (setting.applyGroup == ShimSettingApplyGroup::HudFeedback)
+                liveApplyOk = HudFeedback::ReloadConfig();
             else
                 ApplyShimSettingLive(setting.applyGroup);
 

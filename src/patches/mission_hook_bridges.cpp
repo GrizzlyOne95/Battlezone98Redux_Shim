@@ -4,6 +4,7 @@
 // turret aim pitch), the mission-reset that restores them, and the
 // mission-running query, split out of bzr_hooks.cpp.
 #include "native_hud_runtime.h"
+#include "hud_feedback.h"
 #include "bzr_hooks.h"
 #include "env_switch_table.h"
 #include "bool_token.h"
@@ -229,6 +230,7 @@ namespace BZROpenShim
         // to tear down still cannot leak a request.
         RenderEffects::Reset();
         NativeHud::Runtime::ResetMission();
+        HudFeedback::ResetMission();
         g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
         g_WeaponMaskCarrierBiasEnabled = kWeaponMaskCarrierBiasEnabledDefault;
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;

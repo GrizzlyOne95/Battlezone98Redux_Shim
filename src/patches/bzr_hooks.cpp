@@ -1,4 +1,5 @@
 #include "native_hud_runtime.h"
+#include "hud_feedback.h"
 #include "geometry_contact_test.h"
 #include "bzr_hooks.h"
 #include "env_switch_table.h"
@@ -473,6 +474,7 @@ namespace BZROpenShim
         g_AttackRevealEnabled = kAttackRevealEnabledDefault;
         ClearCareerPendingVictims();
         ResetInProcessEventQueue();
+        HudFeedback::ResetMission();
         // Registered features revert to their resting state (jump-snipe enable
         // -> default + MP-gated re-apply; Display prefs -> openshim.ini baseline).
         RevertRegisteredFeaturesToBaseline();
@@ -1724,6 +1726,7 @@ namespace BZROpenShim
         // from arbitrary engine hook contexts; this is the only place sinks
         // ever run. See include/openshim_events.h.
         TickOpenShimEventLayer();
+        HudFeedback::Tick();
 
         // Sample after the stock world queue update, when Ogre has evaluated
         // the entity materials and its hardware-animation decision is current.
