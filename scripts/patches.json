@@ -2452,6 +2452,36 @@
       "identity": "HUD 2D filled-rect helper, cdecl (buffer, x1, y1, x2, y2, colour, mode); mode 0 passes the colour through."
     },
     {
+      "name": "HudFadeCommandRender",
+      "address": "0x004A08E0",
+      "expected": "55 8B EC 81 EC 38 06 00 00 A1 00 70 8E 00 33 C5 89 45 FC 56 57 89 8D BC FD FF FF",
+      "identity": "Native command-interface renderer: thiscall self, no stack arguments. ECX is saved at EBP-0x244; full function includes artwork/text/bar draws plus native command input and menu sounds. The wrapper always executes the original function. Released GOG 2.2.301 SHA256 8D71F56C...3377413, static Ghidra/Capstone semantics and native ReadProcessMemory PID 34640 on 2026-10-19; full expected bytes matched."
+    },
+    {
+      "name": "HudFadeCommandRenderSlot",
+      "address": "0x00877E68",
+      "identity": "Native command-interface vtable render slot 6 (class vtable at 0x00877E50, assigned by its released constructor). Slot ownership must equal the independently guarded HudFadeCommandRender before shared helper installation and again immediately before replacement. Other features own lifecycle slots 4 and 7. Native ReadProcessMemory PID 34640 matched the original four-byte pointer 0x004A08E0 on 2026-10-19.",
+      "kind": "data"
+    },
+    {
+      "name": "HudFadeCommandBindings",
+      "address": "0x008E7C50",
+      "expected": "79 98 91 00 7A 98 91 00 7B 98 91 00 7C 98 91 00 7D 98 91 00 7E 98 91 00 7F 98 91 00 80 98 91 00 81 98 91 00 78 98 91 00 8E 98 91 00 8F 98 91 00 8B 98 91 00",
+      "identity": "Read-only table of thirteen pointers to native command row-action bytes, consumed by the released renderer. Used with its ten group-action bytes, menu activation and pointer row hit-testing; physical keyboard keys are not polled. Released GOG 2.2.301 SHA256 8D71F56C...3377413, static Ghidra/Capstone semantics and native ReadProcessMemory PID 34640 on 2026-10-19; full expected bytes matched."
+    },
+    {
+      "name": "HudFadeCommandInputs",
+      "address": "0x00919870",
+      "kind": "data",
+      "identity": "Native resolved command action block read by the guarded renderer: pointer action at +0, menu activation +0x1D, ten group actions +0x20..+0x29. Row-action pointers are independently guarded by HudFadeCommandBindings. No simulation writes or OS key polling."
+    },
+    {
+      "name": "HudFadeCommandMouse",
+      "address": "0x009175A0",
+      "kind": "data",
+      "identity": "Two native command pointer coordinates (x,y) supplied by CommandUI rendering to the row hit-test; use only with the pointer-action byte and CommandMenuRowRects. Guarded native renderer xrefs qualify these reads; faults fail fully visible."
+    },
+    {
       "name": "HudFadeColorSprite",
       "address": "0x0068F030",
       "expected": "55 8B EC 51 8B 45 08 83 E0 07 89 45 FC 83 7D FC 02",
