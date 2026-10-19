@@ -135,6 +135,7 @@
     <ClCompile Include="src\engine\render_effect_intent.cpp" />
     <ClCompile Include="src\engine\native_hud_layout.cpp" />
     <ClCompile Include="src\patches\native_hud_runtime.cpp" />
+    <ClCompile Include="src\patches\hud_feedback.cpp" />
     <ClCompile Include="src\engine\scene_depth_facts.cpp" />
     <ClCompile Include="src\engine\render_profile.cpp" />
     <ClCompile Include="src\engine\render_profile_resources.cpp" />

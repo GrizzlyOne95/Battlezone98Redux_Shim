@@ -2254,6 +2254,48 @@
       "identity": "HUD 2D filled-rect helper, cdecl (buffer, x1, y1, x2, y2, colour, mode); mode 0 passes the colour through."
     },
     {
+      "name": "HudFeedbackReticleCall",
+      "address": "0x005BC339",
+      "expected": "E8 22 02 0D 00 83 C4 18 8B 8D DC FD FF FF 83 B9 C8 00 00 00 00",
+      "identity": "Released GOG 2.2.301 Reticle HUD callback at 0x005BC170, vtable slot 9: first call to the six-argument sprite helper submits the main reticle at projected x/y with flags 0x250004. Later calls draw weapon lock side markers and are excluded. Frida live PID50980 2026-10-19 matched all bytes and observed sprite 415, viewport 0x02CECEE0 and UI scales 2/2."
+    },
+    {
+      "name": "HudFeedbackSprite",
+      "address": "0x0068C560",
+      "expected": "55 8B EC 81 EC A8 00 00 00 A1 00 70 8E 00",
+      "identity": "Released GOG 2.2.301 six-argument cdecl sprite helper (viewport, spriteId, x, y, flags, float scale). Reticle HUD caller uses center alignment and pane-relative coordinates; the function reads atlas dimensions and uses the UI scale pair. Live PID50980 entry bytes matched."
+    },
+    {
+      "name": "HudFeedbackScale",
+      "address": "0x00689EB0",
+      "expected": "55 8B EC A1 1C 04 BF 02 8B 15 20 04 BF 02 5D C3",
+      "identity": "Released GOG 2.2.301 UI scale getter returns the x/y float bits in EAX/EDX, consumed by the native sprite helper for width/height. Live PID50980 bytes matched; both values were 2.0."
+    },
+    {
+      "name": "HudFeedbackBuildingDamage",
+      "address": "0x0047EF10",
+      "expected": "55 8B EC 81 EC E0 00 00 00 A1 00 70 8E 00",
+      "identity": "Released GOG 2.2.301 Building DamageAlloc distributedObject entry: this=complete+0x18, DAMAGE* and second stack argument; RET 8 at 0x0047F32D. Calls SetDamageFlags before health subtraction; forwarded receivers recurse through virtual slot 0x38. Live PID50980 entry bytes matched."
+    },
+    {
+      "name": "HudFeedbackCraftDamage",
+      "address": "0x004AA630",
+      "expected": "55 8B EC 81 EC B4 01 00 00 A1 00 70 8E 00",
+      "identity": "Released GOG 2.2.301 Craft DamageAlloc distributedObject entry: this=complete+0x18, two stack args, RET 8 at 0x004AAE96. Effective damage/difficulty/resistance happen within this function before AddHealth; confirmation compares the same full handle's health ratio across the original call. Live PID50980 bytes matched."
+    },
+    {
+      "name": "HudFeedbackPersonDamage",
+      "address": "0x005A0C90",
+      "expected": "55 8B EC 81 EC 80 00 00 00 A1 00 70 8E 00",
+      "identity": "Released GOG 2.2.301 Person DamageAlloc distributedObject entry, this=complete+0x18, two stack args; RET 8 at 0x005A116E. Contains invulnerability checks, source-specific adjustment, health loss and death handling. Live PID50980 bytes matched."
+    },
+    {
+      "name": "HudFeedbackPowerupDamage",
+      "address": "0x005AA330",
+      "expected": "55 8B EC 81 EC D8 00 00 00 A1 00 70 8E 00",
+      "identity": "Released GOG 2.2.301 Powerup DamageAlloc distributedObject entry, this=complete+0x18, two stack args; RET 8 at 0x005AA639. Calls SetDamageFlags, applies health loss and flags depletion. Live PID50980 bytes matched."
+    },
+    {
       "name": "HudSpriteSubmit",
       "address": "0x0068CA30",
       "expected": "55 8B EC 81 EC 98 00 00 00 A1 00 70 8E 00",

@@ -86,6 +86,10 @@ namespace BZROpenShim
         SimDamage                  = 9,
         SimKill                    = 10,
         SimTeamDeath               = 11,
+        // Qualified local-player weapon damage with a verified health decrease.
+        // Same identity slots as SimDamage; in-process only, single player.
+        // Optional producer: active only when hit feedback is enabled.
+        SimDamageApplied           = 12,
     };
 
     // ABI-stable copied event record. No pointers into Battlezone/Ogre memory
