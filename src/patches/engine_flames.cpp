@@ -42,6 +42,8 @@
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
+#include "engine_flame_color.h"
+#include "odf_item_hooks.h"
 #include <Windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -65,6 +67,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
+#include <memory>
 
 namespace BZROpenShim
 {
@@ -108,9 +111,9 @@ namespace BZROpenShim
 
         constexpr int kEngineFlameColorGreen = 3;
 
-        // Faction-only colors. EXU's public per-team color ABI intentionally
+        // Local ODF/faction colors. EXU's public per-team color ABI intentionally
         // remains the stock 0..3 range above; these values are selected only by
-        // the local ODF-faction fallback when JetFlames is enabled.
+        // an ODF override or the faction fallback when JetFlames is enabled.
         constexpr int kEngineFlameColorOrange = 4;
 
         constexpr int kEngineFlameColorBlackDog = 5;
@@ -566,9 +569,8 @@ namespace BZROpenShim
                 g_EngineFlamePrimaryBlackDogTexture != 0 ? "yes" : "no");
         }
 
-        // Walks GameObject -> GameObjectClass -> ODF label and returns the
-        // lowercased first character (the faction code). Mirrors the engine's own
-        // GetClassLabel chain; SEH-guarded so a malformed object can never fault
+        // Walks GameObject -> GameObjectClass -> ODF name. Mirrors the engine's
+        // GetOdf chain; SEH-guarded so a malformed object can never fault
         // the render path. Build-independent (no hardcoded addresses), so it also
         // works on the Steam executable.
         bool TryGetCraftOdfName(void* craftPtr, char* out, size_t outSize)
@@ -613,34 +615,133 @@ namespace BZROpenShim
             }
         }
 
-        static bool TryGetCraftFactionChar(void* craftPtr, char& outFaction)
+        static std::unordered_map<std::string, int> g_EngineFlameOdfColors;
+
+        struct alignas(16) RgbFlameManager
         {
-            outFaction = 0;
-            char odf[16] = {};
-            if (!TryGetCraftOdfName(craftPtr, odf, sizeof(odf)))
-                return false;
-            outFaction = static_cast<char>(
-                std::tolower(static_cast<unsigned char>(odf[0])));
-            return outFaction != 0;
+            unsigned char bytes[kEngineFlameObjectSize] = {};
+        };
+
+        struct RgbFlameVariants
+        {
+            RgbFlameManager primary[3];
+            RgbFlameManager secondary[3];
+        };
+
+        // Stock red/green/blue textures share the exhaust silhouette. Rendering
+        // their isolated channels additively supplies arbitrary RGB without a
+        // new asset or tinting another craft's queued flames.
+        static std::unordered_map<int, std::unique_ptr<RgbFlameVariants>> g_RgbFlameVariants;
+        static thread_local uint32_t g_FlameSubmitRgb = 0xFFFFFFFFu;
+        static InlineDetour32 g_FlameSpriteColourDetour;
+        using FnSpriteColour = uint32_t(__cdecl*)(uint32_t, uint32_t);
+        static FnSpriteColour g_OriginalFlameSpriteColour = nullptr;
+
+        static uint32_t __cdecl FlameSpriteColourHook(uint32_t mode, uint32_t palette)
+        {
+            const uint32_t stock = g_OriginalFlameSpriteColour(mode, palette);
+            return g_FlameSubmitRgb == 0xFFFFFFFFu ? stock
+                : EngineFlameColor::TintVertex(stock, g_FlameSubmitRgb);
         }
 
-        // Faction -> flame color fallback used when JetFlames is enabled and no
-        // EXU per-team color applies. a=NSDF blue, s=CCA orange, c=CRA green,
-        // b=Black Dog blood red; anything else keeps stock (default).
-        static int ResolveFactionEngineFlameColor(void* craftPtr)
+        static bool EnsureFlameRgbHook()
         {
-            char faction = 0;
-            if (!TryGetCraftFactionChar(craftPtr, faction))
-                return kEngineFlameColorDefault;
-
-            switch (faction)
+            if (g_OriginalFlameSpriteColour)
+                return true;
+            static bool attempted = false;
+            if (attempted)
+                return false;
+            attempted = true;
+            const uintptr_t address = HookEngine::ResolveNamedAddress("EngineFlame::SpriteColour");
+            constexpr uint8_t prologue[] = {0x55, 0x8B, 0xEC, 0x51, 0x8B, 0x45, 0x08};
+            if (!address || !InstallInlineDetour32(g_FlameSpriteColourDetour, address,
+                    reinterpret_cast<void*>(FlameSpriteColourHook), sizeof(prologue), prologue, sizeof(prologue)))
             {
-            case 'a': return kEngineFlameColorBlue;
-            case 's': return kEngineFlameColorOrange;
-            case 'c': return kEngineFlameColorGreen;
-            case 'b': return kEngineFlameColorBlackDog;
-            default:  return kEngineFlameColorDefault;
+                Log(L"[FLAME] RGB sprite color hook unavailable; keeping stock flames\n");
+                return false;
             }
+            g_OriginalFlameSpriteColour = reinterpret_cast<FnSpriteColour>(g_FlameSpriteColourDetour.trampoline);
+            Log(L"[FLAME] RGB sprite color hook installed at 0x%08X\n", static_cast<uint32_t>(address));
+            return true;
+        }
+
+        static RgbFlameVariants* GetRgbFlameVariants(int color)
+        {
+            const auto cached = g_RgbFlameVariants.find(color);
+            if (cached != g_RgbFlameVariants.end())
+                return cached->second.get();
+            EnsureEngineFlameVariantsInitialized();
+            if (!g_EngineFlameVariantsInitialized || !g_EngineFlamePrimaryRedTexture ||
+                !g_EngineFlamePrimaryGreenTexture || !g_EngineFlamePrimaryBlueTexture || !EnsureFlameRgbHook())
+                return nullptr;
+            // Bound allocation for unusually large mod sets; failure stays stock.
+            if (g_RgbFlameVariants.size() >= 64)
+                return nullptr;
+            auto variants = std::make_unique<RgbFlameVariants>();
+            const int textures[] = {g_EngineFlamePrimaryRedTexture,
+                g_EngineFlamePrimaryGreenTexture, g_EngineFlamePrimaryBlueTexture};
+            for (int i = 0; i < 3; ++i)
+            {
+                CloneEngineFlameManager(variants->primary[i].bytes, GetEngineFlamePrimary(), textures[i]);
+                CloneEngineFlameManager(variants->secondary[i].bytes, GetEngineFlameSecondary(), textures[i]);
+            }
+            auto* result = variants.get();
+            g_RgbFlameVariants.emplace(color, std::move(variants));
+            Log(L"[FLAME] RGB flame queues initialized rgb=0x%06X\n", color & 0xFFFFFF);
+            return result;
+        }
+
+        static void ControlRgbFlames(bool primary)
+        {
+            for (const auto& entry : g_RgbFlameVariants)
+                for (auto& manager : primary ? entry.second->primary : entry.second->secondary)
+                    g_BzrFn_EngineFlameControl(manager.bytes);
+        }
+
+        static void SubmitRgbFlames(bool primary, void* camera)
+        {
+            for (const auto& entry : g_RgbFlameVariants)
+            {
+                auto* managers = primary ? entry.second->primary : entry.second->secondary;
+                for (int i = 0; i < 3; ++i)
+                {
+                    const int shift = 16 - 8 * i;
+                    const uint32_t channel = static_cast<uint32_t>(entry.first) & (0xFFu << shift);
+                    struct TintScope
+                    {
+                        uint32_t previous = g_FlameSubmitRgb;
+                        ~TintScope() { g_FlameSubmitRgb = previous; }
+                    } scope;
+                    g_FlameSubmitRgb = channel;
+                    g_BzrFn_EngineFlameSubmit(managers[i].bytes, camera);
+                }
+            }
+        }
+
+        void ResetEngineFlameOdfColors()
+        {
+            g_EngineFlameOdfColors.clear();
+            g_RgbFlameVariants.clear();
+        }
+
+        static int ResolveOdfEngineFlameColor(const char* odf)
+        {
+            if (!odf || !*odf)
+                return EngineFlameColor::Unspecified;
+            const auto cached = g_EngineFlameOdfColors.find(odf);
+            if (cached != g_EngineFlameOdfColors.end())
+                return cached->second;
+            std::string text;
+            const std::string filename = std::string(odf) + ".odf";
+            int color = EngineFlameColor::Unspecified;
+            if (OdfReadItemText(filename.c_str(), text))
+            {
+                color = EngineFlameColor::ReadOdf(text);
+                if (color != EngineFlameColor::Unspecified)
+                    Log(L"[FLAME] ODF '%hs' [HoverCraftClass] flameColor=%d\n", odf, color);
+            }
+            g_EngineFlameOdfColors.emplace(odf, color);
+            return color;
         }
 
         void InitializeJetFlamesConfig()
@@ -662,7 +763,7 @@ namespace BZROpenShim
                 enabled = false;
 
             g_JetFlamesEnabled = enabled;
-            Log(L"[FLAME] Faction jet flames %hs (a=blue s=orange c=green b=blood-red; EXU per-team colors win)\n",
+            Log(L"[FLAME] Faction jet flames %hs (a=blue s=orange c=green b=blood-red; EXU > HoverCraft flameColor > faction)\n",
                 enabled ? "enabled" : "disabled");
         }
 
@@ -697,7 +798,7 @@ namespace BZROpenShim
                 reinterpret_cast<void*>(g_BzrFn_GetTeamNum));
         }
 
-        static void* SelectEngineFlameManager(void* originalManager, void* craftPtr)
+        static void* SelectEngineFlameManager(void* originalManager, void* craftPtr, void* (&extra)[2])
         {
             if (!originalManager || !craftPtr)
             {
@@ -728,14 +829,17 @@ namespace BZROpenShim
             }
 
             const int team = g_BzrFn_GetTeamNum(static_cast<int>(handle));
-            // EXU per-team color wins; when it has no opinion (default) and the
-            // faction jet flames preference is on, tint by the unit's faction.
+            // EXU per-team color wins, then the explicit ODF choice (even stock
+            // default), then the optional faction preference.
             const int exuColor = ResolveTeamEngineFlameColor(team);
-            int color = exuColor;
-            char faction = 0;
-            const bool haveFaction = TryGetCraftFactionChar(craftPtr, faction);
-            if (color == kEngineFlameColorDefault && g_JetFlamesEnabled && haveFaction)
-                color = ResolveFactionEngineFlameColor(craftPtr);
+            char odf[16] = {};
+            const bool haveFaction = TryGetCraftOdfName(craftPtr, odf, sizeof(odf));
+            for (char& c : odf)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            const char faction = odf[0];
+            const int odfColor = exuColor == kEngineFlameColorDefault
+                ? ResolveOdfEngineFlameColor(odf) : EngineFlameColor::Unspecified;
+            const int color = EngineFlameColor::Select(exuColor, odfColor, g_JetFlamesEnabled, faction);
 
             // Diagnostics (opt-in via OPENSHIM_TRACE_JET_FLAMES): log the first
             // several routing decisions so a stock mission shows how the unit's
@@ -747,9 +851,6 @@ namespace BZROpenShim
                 // point of the line below, and reading them before they are
                 // initialised printed five zeroes that read as a texture bug.
                 EnsureEngineFlameVariantsInitialized();
-
-                char odf[16] = {};
-                TryGetCraftOdfName(craftPtr, odf, sizeof(odf));
 
                 // One line per distinct craft type. Budgeting by call count
                 // instead spent all 24 entries on a single craft inside one
@@ -770,11 +871,11 @@ namespace BZROpenShim
                 {
                     strncpy_s(s_seenOdf[s_seenCount], odf, _TRUNCATE);
                     ++s_seenCount;
-                    Log(L"[FLAME] route craft=0x%p handle=0x%08X team=%d odf='%hs' faction='%c' exuColor=%d final=%d tex(b=0x%08X r=0x%08X g=0x%08X o=0x%08X bd=0x%08X)\n",
+                    Log(L"[FLAME] route craft=0x%p handle=0x%08X team=%d odf='%hs' faction='%c' exuColor=%d odfColor=%d final=%d tex(b=0x%08X r=0x%08X g=0x%08X o=0x%08X bd=0x%08X)\n",
                         craftPtr, handle, team,
                         odf[0] ? odf : "<none>",
                         haveFaction && faction ? faction : '?',
-                        exuColor, color,
+                        exuColor, odfColor, color,
                         static_cast<uint32_t>(g_EngineFlamePrimaryBlueTexture),
                         static_cast<uint32_t>(g_EngineFlamePrimaryRedTexture),
                         static_cast<uint32_t>(g_EngineFlamePrimaryGreenTexture),
@@ -785,6 +886,19 @@ namespace BZROpenShim
 
             if (color == kEngineFlameColorDefault)
                 return originalManager;
+
+            if (EngineFlameColor::IsRgb(color))
+            {
+                if (auto* variants = GetRgbFlameVariants(color))
+                {
+                    auto* managers = originalManager == GetEngineFlamePrimary()
+                        ? variants->primary : variants->secondary;
+                    extra[0] = managers[1].bytes;
+                    extra[1] = managers[2].bytes;
+                    return managers[0].bytes;
+                }
+                return originalManager;
+            }
 
             EnsureEngineFlameVariantsInitialized();
 
@@ -868,8 +982,12 @@ namespace BZROpenShim
         EnsureEngineFlameVtableHooksInstalled(managerPtr);
 
         const float scale = *reinterpret_cast<const float*>(&scaleBits);
-        void* selectedManager = SelectEngineFlameManager(managerPtr, craftPtr);
+        void* extra[2] = {};
+        void* selectedManager = SelectEngineFlameManager(managerPtr, craftPtr, extra);
         g_BzrFn_EngineFlameAddFlame(selectedManager, transform, scale);
+        for (void* manager : extra)
+            if (manager)
+                g_BzrFn_EngineFlameAddFlame(manager, transform, scale);
     }
 
     void __fastcall EngineFlameControlHook(void* thisPtr, void* /*edx*/)
@@ -882,6 +1000,7 @@ namespace BZROpenShim
 
         if (thisPtr == GetEngineFlamePrimary())
         {
+            ControlRgbFlames(true);
             if (g_EngineFlamePrimaryBlueTexture != 0)
                 g_BzrFn_EngineFlameControl(g_EngineFlamePrimaryBlue);
             if (g_EngineFlamePrimaryRedTexture != 0)
@@ -897,6 +1016,7 @@ namespace BZROpenShim
 
         if (thisPtr == GetEngineFlameSecondary())
         {
+            ControlRgbFlames(false);
             if (g_EngineFlamePrimaryBlueTexture != 0)
                 g_BzrFn_EngineFlameControl(g_EngineFlameSecondaryBlue);
             if (g_EngineFlamePrimaryRedTexture != 0)
@@ -922,6 +1042,7 @@ namespace BZROpenShim
 
         if (thisPtr == GetEngineFlamePrimary())
         {
+            SubmitRgbFlames(true, camera);
             if (g_EngineFlamePrimaryBlueTexture != 0)
                 g_BzrFn_EngineFlameSubmit(g_EngineFlamePrimaryBlue, camera);
             if (g_EngineFlamePrimaryRedTexture != 0)
@@ -937,6 +1058,7 @@ namespace BZROpenShim
 
         if (thisPtr == GetEngineFlameSecondary())
         {
+            SubmitRgbFlames(false, camera);
             if (g_EngineFlamePrimaryBlueTexture != 0)
                 g_BzrFn_EngineFlameSubmit(g_EngineFlameSecondaryBlue, camera);
             if (g_EngineFlamePrimaryRedTexture != 0)
