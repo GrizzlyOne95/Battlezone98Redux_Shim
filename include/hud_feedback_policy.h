@@ -22,6 +22,9 @@ namespace BZROpenShim::HudFeedback
         bool reactive = false;
         bool hits = false;
         int hitDurationMs = 120;
+        uint32_t hitColor = 0xFFFFFFFFu;
+        int hitSizePercent = 100;
+        int hitOpacity = 100;
         bool NeedsDraw() const { return style != Style::Stock || reactive || hits; }
     };
 
@@ -149,13 +152,16 @@ namespace BZROpenShim::HudFeedback
         }
         if (std::isfinite(hitStrength) && hitStrength > 0)
         {
-            const uint32_t hitAlpha = static_cast<uint32_t>(alpha * std::min(hitStrength, 1.0f));
+            const uint32_t hitAlpha = static_cast<uint32_t>(
+                std::clamp(settings.hitOpacity, 25, 100) * 255 / 100 * std::min(hitStrength, 1.0f));
+            const float hitSize = static_cast<float>(std::clamp(settings.hitSizePercent, 50, 200)) / percent;
             for (const int dx : {-1, 1}) for (const int dy : {-1, 1})
                 for (int step = 0; step < 4; ++step)
                 {
                     const float px = dx * (11.0f + step);
                     const float py = dy * (11.0f + step);
-                    rect(px - half, py - half, px + half, py + half, 0xFFFFFFu, hitAlpha);
+                    rect((px - half) * hitSize, (py - half) * hitSize,
+                         (px + half) * hitSize, (py + half) * hitSize, settings.hitColor, hitAlpha);
                 }
         }
         plan.replacesStock = settings.style != Style::Stock && plan.count != 0;

@@ -9,6 +9,7 @@
 #include "hook_engine.h"
 #include "patcher.h"
 #include "shim_log.h"
+#include "hud_color_policy.h"
 
 #include <Windows.h>
 
@@ -299,7 +300,24 @@ namespace BZROpenShim
 
         static int g_ScrapPilotHudPanelsVisibleApplied = -1;  // -1 = not applied yet
 
-        static bool g_ScrapPilotHudLegacyColorsActive = false;
+        static bool g_ScrapPilotHudLegacyColorsActive = false; // alignment only
+        static std::array<uint32_t, 4> g_ScrapPilotHudColorOperands = {};
+        static std::array<std::optional<uint32_t>, 2> g_ScrapPilotHudColors = {};
+        alignas(4) static uint32_t g_ScrapPilotHudCustomColors[2] = {0xFFFFFFFFu, 0xFFFFFFFFu};
+
+        void ReloadScrapPilotHudColors()
+        {
+            const char* keys[] = {"ScrapHudColor", "PilotHudColor"};
+            for (size_t i = 0; i < 2; ++i)
+            {
+                std::string text;
+                g_ScrapPilotHudColors[i] = TryGetUserConfigString("Display", keys[i], text)
+                    ? HudColors::Parse(text) : std::nullopt;
+                if (g_ScrapPilotHudColors[i])
+                    InterlockedExchange(reinterpret_cast<volatile LONG*>(&g_ScrapPilotHudCustomColors[i]),
+                                        static_cast<LONG>(*g_ScrapPilotHudColors[i]));
+            }
+        }
 
         static bool g_ScrapPilotHudColorGuardMismatchLogged = false;
 
@@ -773,17 +791,27 @@ namespace BZROpenShim
         // way 1.5's Font_Print_String took it. Reverting writes both back.
         static void SetScrapPilotHudLegacyColorsActive(bool active)
         {
-            if (active == g_ScrapPilotHudLegacyColorsActive)
-                return;
-
             const uint8_t* expectedAlign =
-                active ? kScrapPilotHudTextCentreAlign : kScrapPilotHudTextLeftAlign;
+                g_ScrapPilotHudLegacyColorsActive ? kScrapPilotHudTextLeftAlign : kScrapPilotHudTextCentreAlign;
             const uint8_t* desiredAlign =
                 active ? kScrapPilotHudTextLeftAlign : kScrapPilotHudTextCentreAlign;
 
             const auto legacyColorFor = [](const ScrapPilotHudTextSite& site) {
                 return site.legacyBlue ? g_ScrapHud.colorBlue : g_ScrapHud.colorGreen;
             };
+
+            std::array<uint32_t, 4> desiredOperands = {};
+            for (size_t i = 0; i < desiredOperands.size(); ++i)
+            {
+                const auto& site = kScrapPilotHudTextSites[i];
+                const size_t group = site.legacyBlue ? 0 : 1;
+                if (!g_ScrapPilotHudColorOperands[i]) g_ScrapPilotHudColorOperands[i] = g_ScrapHud.colorWhite;
+                desiredOperands[i] = g_ScrapPilotHudColors[group]
+                    ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g_ScrapPilotHudCustomColors[group]))
+                    : active ? legacyColorFor(site) : g_ScrapHud.colorWhite;
+            }
+            if (active == g_ScrapPilotHudLegacyColorsActive && desiredOperands == g_ScrapPilotHudColorOperands)
+                return;
 
             for (size_t i = 0; i < std::size(kScrapPilotHudTextSites); ++i)
             {
@@ -792,7 +820,7 @@ namespace BZROpenShim
                 size_t expectedLen = 0;
                 for (size_t index = 0; index < site.colorOpcodeLen; ++index)
                     expected[expectedLen++] = site.colorOpcode[index];
-                const uint32_t currentOperand = active ? g_ScrapHud.colorWhite : legacyColorFor(site);
+                const uint32_t currentOperand = g_ScrapPilotHudColorOperands[i];
                 std::memcpy(expected + expectedLen, &currentOperand, sizeof(currentOperand));
                 expectedLen += sizeof(currentOperand);
 
@@ -812,7 +840,7 @@ namespace BZROpenShim
             for (size_t i = 0; i < std::size(kScrapPilotHudTextSites); ++i)
             {
                 const ScrapPilotHudTextSite& site = kScrapPilotHudTextSites[i];
-                const uint32_t operand = active ? legacyColorFor(site) : g_ScrapHud.colorWhite;
+                const uint32_t operand = desiredOperands[i];
                 uint8_t operandBytes[sizeof(operand)] = {};
                 std::memcpy(operandBytes, &operand, sizeof(operand));
                 if (!WritePatchBytes(
@@ -827,10 +855,12 @@ namespace BZROpenShim
             }
 
             g_ScrapPilotHudLegacyColorsActive = active;
+            g_ScrapPilotHudColorOperands = desiredOperands;
             g_ScrapPilotHudColorGuardMismatchLogged = false;
-            Log(L"[HUD] Scrap/pilot text %hs\n",
-                active ? "legacy (scrap blue / pilot green, left aligned)"
-                       : "stock (white, centred)");
+            Log(L"[HUD] Scrap/pilot text layout=%hs scrap=%hs pilot=%hs\n",
+                active ? "legacy, left aligned" : "stock, centred",
+                g_ScrapPilotHudColors[0] ? "custom" : "layout palette",
+                g_ScrapPilotHudColors[1] ? "custom" : "layout palette");
         }
 
         void RefreshScrapPilotHudLayout()

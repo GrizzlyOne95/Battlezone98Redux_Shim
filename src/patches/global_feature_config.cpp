@@ -271,6 +271,7 @@ namespace BZROpenShim
                 }
             }
 
+            ReloadScrapPilotHudColors();
             g_ShotConvergenceBaselineEnabled = true;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "WeaponConvergence", value))
                 g_ShotConvergenceBaselineEnabled = value;

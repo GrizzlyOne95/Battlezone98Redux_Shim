@@ -9,6 +9,8 @@
 #include "hook_engine.h"
 #include "bool_token.h"
 #include "hud_feedback.h"
+#include "hud_color_policy.h"
+#include "ui_screen_fit.h"
 
 #include "autosave.h"
 #include "bzr_hooks.h"
@@ -1999,10 +2001,14 @@ namespace BZROpenShim
                 // file works in is the fixed 1080-tall logical UI space. At 4K
                 // the raw measure comes back 2x the rendered logical width and
                 // over-truncates ("Attack Al..."), verified in-game 2026-07-17.
-                // Normalize by the display height; the game renders fullscreen.
-                const int screenH = GetSystemMetrics(SM_CYSCREEN);
-                if (screenH > 1080)
-                    width = width * 1080.0f / static_cast<float>(screenH);
+                // Use this game's client area, including small windowed runs.
+                // Desktop height under-measures text when the window is smaller
+                // than the monitor, letting descriptions escape their boxes.
+                // Options panels also fit narrow windows: native fonts already
+                // follow that width limit, so normalize by the fitted canvas.
+                float clientW = 0, clientH = 0;
+                if (!ShellScreens::ClientSize(clientW, clientH)) return false;
+                width = UiScreenFit::TextWidthInDesignSpace(width, clientH, ShellScreens::ActiveLayoutScale());
                 *outWidth = width;
                 return true;
             }
@@ -2697,6 +2703,7 @@ namespace BZROpenShim
         static const char* const kShimReticleStyles[] = { "Stock", "Cross", "Dot", "CrossDot" };
         static const char* const kShimReticleStyleLabels[] = { "Stock", "Cross", "Dot", "Cross + Dot" };
         static const char* const kShimReticleColors[] = { "White", "Green", "Cyan", "Amber" };
+        static const char* const kShimMeterColors[] = { "Default", "White", "Blue", "Green", "Cyan", "Amber", "Magenta" };
         static const char* const kShimReticleSizes[] = { "75", "100", "150" };
         static const char* const kShimReticleSizeLabels[] = { "Small", "Normal", "Large" };
         static const char* const kShimReticleThickness[] = { "1", "2", "3" };
@@ -2729,22 +2736,37 @@ namespace BZROpenShim
               kShimReticleThickness, kShimReticleThicknessLabels, 3, 1, ShimSettingApplyGroup::HudFeedback,
               "Line thickness for custom reticles and feedback. Applies live." },
             { "Reticle Outline", "Display", "ReticleOutline", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0, ShimSettingApplyGroup::HudFeedback,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
               "Dark outline for custom reticles and feedback, for contrast on bright terrain. Applies live." },
             { "Reticle Opacity", "Display", "ReticleOpacity", nullptr, 0,
               kShimReticleOpacity, kShimReticleOpacityLabels, 3, 2, ShimSettingApplyGroup::HudFeedback,
               "Opacity of custom reticles and feedback. Stock artwork is unchanged." },
             { "Reactive Reticle", "Display", "ReactiveReticle", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0, ShimSettingApplyGroup::HudFeedback,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
               "Contract a custom cross and add brackets when the stock reticle detects an object. "
               "Visual feedback only; no aim/spread change or team classification. Single player only." },
             { "Hit Markers", "Display", "HitMarkers", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0, ShimSettingApplyGroup::HudFeedback,
-              "Brief white ticks when your weapon actually reduces another object's health. "
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
+              "Brief ticks when your weapon actually reduces another object's health. "
               "No marker for blocked/zero damage, collisions, self hits or AI shots. Single player only." },
-            { "Hit Marker Duration", "Display", "HitMarkerDuration", nullptr, 0,
+            { "Marker Duration", "Display", "HitMarkerDuration", nullptr, 0,
               kShimHitDurations, kShimHitDurationLabels, 4, 1, ShimSettingApplyGroup::HudFeedback,
               "How long confirmed-hit ticks remain visible before fading. Applies live." },
+            { "Marker Color", "Display", "HitMarkerColor", nullptr, 0,
+              kShimReticleColors, kShimReticleColors, 4, 0, ShimSettingApplyGroup::HudFeedback,
+              "Hit tick color, independent of reticle color. Applies live." },
+            { "Marker Size", "Display", "HitMarkerSize", nullptr, 0,
+              kShimReticleSizes, kShimReticleSizeLabels, 3, 1, ShimSettingApplyGroup::HudFeedback,
+              "Hit tick scale, independent of reticle size. Applies live." },
+            { "Marker Opacity", "Display", "HitMarkerOpacity", nullptr, 0,
+              kShimReticleOpacity, kShimReticleOpacityLabels, 3, 2, ShimSettingApplyGroup::HudFeedback,
+              "Hit tick opacity, independent of reticle opacity. Applies live." },
+            { "Scrap Color", "Display", "ScrapHudColor", nullptr, 0,
+              kShimMeterColors, kShimMeterColors, 7, 0, ShimSettingApplyGroup::GlobalImprovement,
+              "Scrap title/value color. Default preserves the selected Stock/Legacy palette. Layout and plates stay as selected." },
+            { "Pilot Color", "Display", "PilotHudColor", nullptr, 0,
+              kShimMeterColors, kShimMeterColors, 7, 0, ShimSettingApplyGroup::GlobalImprovement,
+              "Pilot title/value color. Default preserves the selected Stock/Legacy palette. Independent of scrap color." },
             { "Field of View", "Display", "FieldOfView", nullptr, 0,
               kShimSettingsFovValues, kShimSettingsFovLabels, 8, 0,
               ShimSettingApplyGroup::RestartRequired,
@@ -3226,9 +3248,11 @@ namespace BZROpenShim
         // Rows that are not openshim.ini settings: they run something.
         constexpr const char* kShimRowUpdateCheck = "OpenShim Updates";
         constexpr const char* kShimRowKeyBindings = "Key Bindings";
+        constexpr const char* kShimRowReticle = "Reticle & Hits";
         constexpr size_t kShimPseudoRowUpdateCheck = kShimSettingsRegistryCount + 0;
         constexpr size_t kShimPseudoRowKeyBindings = kShimSettingsRegistryCount + 1;
-        constexpr size_t kShimNoRow = kShimSettingsRegistryCount + 2;
+        constexpr size_t kShimPseudoRowReticle = kShimSettingsRegistryCount + 2;
+        constexpr size_t kShimNoRow = static_cast<size_t>(-1);
         // Stock cUI_OptionsInput (key bindings), as the stock Input button uses.
         constexpr uint32_t kStockOptionsInputScreenId = 0x15;
 
@@ -3245,9 +3269,12 @@ namespace BZROpenShim
         static const char* const kShimCategoryAudio[] = {
             "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
         static const char* const kShimCategoryHud[] = {
-            "Scrap/Pilot HUD", "Radar Size", "Target Popup", "MP Vehicle Flags", "Show Own MP Flag",
+            "Scrap/Pilot HUD", "Scrap Color", "Pilot Color", "Radar Size", "Target Popup",
+            "MP Vehicle Flags", "Show Own MP Flag", kShimRowReticle };
+        static const char* const kShimCategoryReticle[] = {
             "Reticle Style", "Reticle Color", "Reticle Size", "Reticle Thickness", "Reticle Outline",
-            "Reticle Opacity", "Reactive Reticle", "Hit Markers", "Hit Marker Duration" };
+            "Reticle Opacity", "Reactive Reticle", "Hit Markers", "Marker Duration",
+            "Marker Color", "Marker Size", "Marker Opacity" };
         static const char* const kShimCategoryControls[] = {
             kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Unsmoothed Controls",
             "Satellite Zoom Out", "Satellite Pan Speed", "Editor Placement", "Background Mouse" };
@@ -3300,14 +3327,21 @@ namespace BZROpenShim
                 kShimCategoryNetwork),
             BZR_SHIM_CATEGORY("System", "SYSTEM",
                 "OpenShim updates and career statistics.", kShimCategorySystem),
+            // Subpage reached from HUD; the existing nine-tile hub stays intact.
+            BZR_SHIM_CATEGORY("Reticle", "RETICLE / HIT FEEDBACK",
+                "Custom reticle appearance and single-player feedback.", kShimCategoryReticle),
         };
 #undef BZR_SHIM_CATEGORY
         constexpr size_t kShimSettingsCategoryCount =
             sizeof(kShimSettingsCategories) / sizeof(kShimSettingsCategories[0]);
+        constexpr size_t kShimHubCategoryCount = kShimSettingsCategoryCount - 1;
+        constexpr size_t kShimReticleCategory = kShimSettingsCategoryCount - 1;
         static_assert(sizeof(kShimCategoryGameplay) / sizeof(kShimCategoryGameplay[0]) <= kShimCategoryMaxRows,
                       "a category screen shows at most 16 rows");
         static_assert(sizeof(kShimCategoryHud) / sizeof(kShimCategoryHud[0]) <= kShimCategoryMaxRows,
                       "HUD controls must fit the category screen");
+        static_assert(sizeof(kShimCategoryReticle) / sizeof(kShimCategoryReticle[0]) <= 12,
+                      "reticle controls must leave room for the live preview");
 
         // Hub geometry (HUB_LAYOUT).
         constexpr Shell::Rect kShimTitleRect = { 470.0f, 132.0f, 500.0f, 56.0f };
@@ -3380,6 +3414,8 @@ namespace BZROpenShim
                 return kShimPseudoRowUpdateCheck;
             if (std::strcmp(label, kShimRowKeyBindings) == 0)
                 return kShimPseudoRowKeyBindings;
+            if (std::strcmp(label, kShimRowReticle) == 0)
+                return kShimPseudoRowReticle;
             for (size_t index = 0; index < kShimSettingsRegistryCount; ++index)
             {
                 if (std::strcmp(g_ShimSettingsRegistry[index].label, label) == 0)
@@ -3452,6 +3488,8 @@ namespace BZROpenShim
             size_t rowCount = 0;
             std::array<size_t, kShimCategoryMaxRows> rows = {};
             std::array<void*, kShimCategoryMaxRows> values = {};
+            std::array<void*, 96> previewQuads = {};
+            void* previewNote = nullptr;
             void* info[3] = {};
             std::string status;
         };
@@ -3492,7 +3530,7 @@ namespace BZROpenShim
             float x = 0.0f, y = 0.0f;
             if (Shell::CursorDesignPoint(x, y))
             {
-                for (size_t i = 0; i < kShimSettingsCategoryCount; ++i)
+                for (size_t i = 0; i < kShimHubCategoryCount; ++i)
                 {
                     if (Shell::Contains(ShimHubTileRect(i), x, y))
                     {
@@ -3547,7 +3585,7 @@ namespace BZROpenShim
 
             const Shell::ButtonSkin skin = ShimSlotSkin("osh_tile_hv.png", "osh_tile_ck.png");
             char name[64] = {};
-            for (size_t i = 0; i < kShimSettingsCategoryCount; ++i)
+            for (size_t i = 0; i < kShimHubCategoryCount; ++i)
             {
                 _snprintf_s(name, _TRUNCATE, "OpenShimHub_%s", kShimSettingsCategories[i].name);
                 Shell::AddButton(panel, panel, name, ShimHubTileRect(i), kShimSettingsCategories[i].name,
@@ -3582,10 +3620,19 @@ namespace BZROpenShim
             }
             if (row == kShimPseudoRowKeyBindings)
                 return "Edit";
+            if (row == kShimPseudoRowReticle)
+                return "Open";
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (ShimSettingUnavailableReason(setting))
                 return "Unavailable";
             std::string text = setting.valueLabels[GetShimSettingCurrentIndex(setting)];
+            if (std::strcmp(setting.key, "ScrapHudColor") == 0 || std::strcmp(setting.key, "PilotHudColor") == 0)
+            {
+                std::string configured;
+                if (TryGetUserConfigString(setting.section, setting.key, configured) && !configured.empty() &&
+                    (configured[0] == '#' || configured[0] == '0') && HudColors::Parse(configured))
+                    text = "Custom";
+            }
             if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
                 text += " *";
             return text;
@@ -3597,6 +3644,8 @@ namespace BZROpenShim
                 return kShimRowUpdateCheck;
             if (row == kShimPseudoRowKeyBindings)
                 return kShimRowKeyBindings;
+            if (row == kShimPseudoRowReticle)
+                return kShimRowReticle;
             return g_ShimSettingsRegistry[row].label;
         }
 
@@ -3606,6 +3655,8 @@ namespace BZROpenShim
                 return "Check the Steam Workshop for a newer OpenShim and stage it for the next launch.";
             if (row == kShimPseudoRowKeyBindings)
                 return "Open the key-binding editor for keyboard commands and game keys.";
+            if (row == kShimPseudoRowReticle)
+                return "Open reticle styling, hit-marker controls and a live appearance preview.";
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (const char* reason = ShimSettingUnavailableReason(setting))
                 return reason;
@@ -3636,6 +3687,41 @@ namespace BZROpenShim
                 width);
         }
 
+        static void RefreshShimReticlePreview()
+        {
+            auto& ui = g_ShimCategoryUi;
+            if (ui.category != kShimReticleCategory || !ui.previewQuads[0]) return;
+            const auto settings = HudFeedback::PreviewSettings();
+            size_t used = 0;
+            bool ok = true;
+            for (int sample = 0; sample < 3; ++sample)
+            {
+                const auto plan = HudFeedback::MakeDrawPlan(settings, 820 + 150 * sample, 550, 2, 2,
+                    {750, 490, 1200, 620, 0}, sample != 0, sample == 2 ? 1.0f : 0.0f);
+                for (size_t i = 0; i < plan.count && used < ui.previewQuads.size(); ++i)
+                {
+                    const auto& r = plan.rects[i];
+                    void* quad = ui.previewQuads[used++];
+                    ok = Shell::SetPanelRectColor(quad,
+                        {static_cast<float>(r.left), static_cast<float>(r.top),
+                         static_cast<float>(r.right - r.left + 1), static_cast<float>(r.bottom - r.top + 1)},
+                        r.color) && ok;
+                    // Decorative quads must never intercept the page's input.
+                    if (g_BzrFn_UiSetActive) g_BzrFn_UiSetActive(quad, ok ? 1 : 0);
+                    *reinterpret_cast<uint8_t*>(static_cast<uint8_t*>(quad) + kUiViewInputActiveOffset) = 0;
+                }
+            }
+            for (; used < ui.previewQuads.size(); ++used)
+                if (g_BzrFn_UiSetActive) g_BzrFn_UiSetActive(ui.previewQuads[used], 0);
+            if (!ok && g_BzrFn_UiSetActive)
+                for (void* quad : ui.previewQuads) g_BzrFn_UiSetActive(quad, 0);
+            SetInputBindingUiLabelTextFitted(ui.previewNote,
+                !ok ? "Preview unavailable on this build."
+                    : settings.style == HudFeedback::Style::Stock
+                        ? "Stock art stays in game."
+                        : "Sample hit is shown even when off.", 420.0f);
+        }
+
         static void RefreshShimCategoryValues()
         {
             ShimCategoryUi& ui = g_ShimCategoryUi;
@@ -3643,6 +3729,7 @@ namespace BZROpenShim
                 SetInputBindingUiButtonTextFitted(ui.values[slot], ShimRowValueText(ui.rows[slot]).c_str(),
                                                   kShimValueW - 20.0f);
             ShowShimCategoryDefaultInfo();
+            RefreshShimReticlePreview();
         }
 
         static void __cdecl OnShimCategoryHover(void* /*param*/)
@@ -3745,6 +3832,12 @@ namespace BZROpenShim
             if (!ui.screen || slot >= ui.rowCount)
                 return;
             const size_t row = ui.rows[slot];
+            if (row == kShimPseudoRowReticle)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen, Shell::kOptionsCategoryScreenIdBase + static_cast<uint32_t>(kShimReticleCategory));
+                return;
+            }
             if (row == kShimPseudoRowKeyBindings)
             {
                 DisarmShimSettingsAction();
@@ -3796,8 +3889,9 @@ namespace BZROpenShim
             if (GetOpenShimUpdateSnapshot().busy)
                 EnsureShimSettingsUpdateTimer();
 
-            const char* texture =
-                Shell::IsTextureDeployed(kShimCategoryPanelTexture) ? kShimCategoryPanelTexture : nullptr;
+            const char* panelTexture = category == kShimReticleCategory && Shell::IsTextureDeployed("osh_reticle_center.png")
+                ? "osh_reticle_center.png" : kShimCategoryPanelTexture;
+            const char* texture = Shell::IsTextureDeployed(panelTexture) ? panelTexture : nullptr;
             void* panel = Shell::AddPanel(screen, nullptr, "OpenShimCategory_Overlay",
                                           { 0.0f, 0.0f, 1440.0f, 1080.0f }, texture);
             if (!panel)
@@ -3827,6 +3921,29 @@ namespace BZROpenShim
             {
                 _snprintf_s(name, _TRUNCATE, "OpenShimCategory_Info%zu", line);
                 ui.info[line] = Shell::AddLabel(panel, panel, name, ShimInfoLine(kShimCategoryInfo, line), "");
+            }
+            if (category == kShimReticleCategory)
+            {
+                HudFeedback::ReloadConfig();
+                const char* captions[] = {"Idle", "Contact", "Sample hit"};
+                for (int sample = 0; sample < 3; ++sample)
+                {
+                    _snprintf_s(name, _TRUNCATE, "ReticlePreviewCaption%d", sample);
+                    Shell::AddLabel(panel, panel, name, {775.0f + sample * 150.0f, 470, 130, 28}, captions[sample]);
+                }
+                ui.previewNote = Shell::AddLabel(panel, panel, "ReticlePreviewNote", {752, 640, 440, 28}, "");
+                if (Shell::IsTextureDeployed("osh_preview_white.png"))
+                {
+                    for (size_t i = 0; i < ui.previewQuads.size(); ++i)
+                    {
+                        _snprintf_s(name, _TRUNCATE, "ReticlePreviewQuad%zu", i);
+                        ui.previewQuads[i] = Shell::AddPanel(panel, panel, name, {800, 550, 1, 1},
+                                                           "osh_preview_white.png", Shell::kControlFlags);
+                        if (!ui.previewQuads[i]) return false;
+                        if (g_BzrFn_UiSetActive) g_BzrFn_UiSetActive(ui.previewQuads[i], 0);
+                    }
+                }
+                else SetInputBindingUiLabelText(ui.previewNote, "Preview artwork is not installed.");
             }
             RefreshShimCategoryValues();
             Log(L"[SETTINGSUI] %hs screen built: %u rows\n", def.name, static_cast<unsigned>(ui.rowCount));

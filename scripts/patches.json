@@ -3838,6 +3838,12 @@
       "identity": "cUI_View vtable (15 slots; RTTI .?AVcUI_View@@). OpenShim custom screens copy it and replace slots 0 and 5."
     },
     {
+      "name": "UiViewReflow",
+      "address": "0x007D3380",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC 8B 45 FC 51 F3 0F 10 80 F8 00 00 00",
+      "identity": "Released GOG 2.2.301 cUI_View vtable slot 12. Recomputes screen bounds from original design floats +0xEC..0xF8, begins update of its ManualObject section, emits the existing quad with ColourValue +0x104 through 0x007D2E20, then ends the section and recurses into children. Only shim-owned decorative preview panels use this adapter. Static bytes and live released bytes must match."
+    },
+    {
       "name": "LuaFormationBinding",
       "address": "0x005079B0",
       "expected": "55 8B EC 83 EC 08 6A 01 8B 45 08 50 E8 8F 7D FF FF 83 C4 08 89 45 F8 6A 01 6A 02 8B 4D 08 51 E8 29 48 32 00 83 C4 0C 89 45 FC 6A 01 8B 55 FC 52 8B 45 F8 50 E8 97 6C 0C 00 83 C4 0C 33 C0 8B E5",

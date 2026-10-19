@@ -621,6 +621,7 @@ namespace BZROpenShim
         extern ULONGLONG g_ScrapPilotHudLastRefreshTick;
         extern bool g_ScrapPilotHudLegacyLayoutEnabled;
         void RefreshScrapPilotHudLayout();
+        void ReloadScrapPilotHudColors();
         void RevertScrapPilotHudToBaseline();
 
         // --- Career statistics and PKTRACE (career_stats.cpp) ------------------

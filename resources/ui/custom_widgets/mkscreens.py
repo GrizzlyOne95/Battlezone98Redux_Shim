@@ -311,17 +311,19 @@ def hub_center():
     return img.resize((W, H), Image.LANCZOS)
 
 
-def category_center():
+def category_center(reticle=False):
     img, d = new_panel()
     title_plate(d, *CATEGORY_LAYOUT['title'])
     L = CATEGORY_LAYOUT
-    for (bx, by, bw, bh) in L['columns']:
+    for column, (bx, by, bw, bh) in enumerate(L['columns']):
         poly(d, chamfer_poly(bx, by, bw, bh, 14), fill=BOX, outline=HILITE, width=2)
-        for r in range(L['rows']):
+        for r in range(4 if reticle and column == 1 else L['rows']):
             y = by + L['row_top'] + r * L['row_pitch']
             vx = bx + bw - L['pad'] - L['value_w']
             text_well(d, bx + L['pad'], y, vx - bx - L['pad'] - 10, L['row_h'])
             slot(d, vx, y, L['value_w'], L['row_h'])
+        if reticle and column == 1:
+            poly(d, chamfer_poly(752, 458, 444, 204, 8), fill=(0, 0, 0, 255), outline=LINE, width=2)
     info_box(d, *L['info'])
     return img.resize((W, H), Image.LANCZOS)
 
@@ -360,11 +362,13 @@ def keys_center():
 
 def main():
     outputs = {
+        'osh_preview_white.png': Image.new('RGBA', (2, 2), (255, 255, 255, 255)),
         'osh_career_center.png': career_center(),
         'osh_prelobby_center.png': prelobby_center(),
         'osh_options_center.png': options_center(),
         'osh_hub_center.png': hub_center(),
         'osh_category_center.png': category_center(),
+        'osh_reticle_center.png': category_center(reticle=True),
         'osh_tile_hv.png': slot_texture(*TILE_SIZE, SLOT_HOVER),
         'osh_tile_ck.png': slot_texture(*TILE_SIZE, SLOT_PRESS),
         'osh_value_hv.png': slot_texture(*VALUE_SIZE, SLOT_HOVER),
