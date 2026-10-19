@@ -10,4 +10,6 @@ namespace BZROpenShim::ContextualHud
     bool ResourceDrawAdaptersNeeded() noexcept;
     float BeginDraw(Group group) noexcept;
     void EndDraw(float previous) noexcept;
+    // Direct radar grid geometry bypasses the normal sprite/fill color helpers.
+    float RadarDrawOpacity() noexcept;
 }

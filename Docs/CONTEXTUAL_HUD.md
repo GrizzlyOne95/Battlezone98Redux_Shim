@@ -3,14 +3,17 @@
 Default-off local presentation controls for the released GOG 2.2.301 game.
 OpenShim Options → HUD → HUD Fading contains independent controls for the
 weapon list, scrap meter, pilot meter and command interface. The separate
-HUD -> Meter Fading page adds cockpit hull and ammo controls. Existing colors,
+HUD -> Meter Fading page adds cockpit hull and ammo controls. HUD -> Radar
+Fading adds complete cockpit-radar fading and an option to keep the compass visible.
+Existing colors,
 Stock/Legacy layout, native scaling, text, alignment, backplates and gameplay
 remain as selected.
 
 ## Controls and behavior
 
-All twenty-four keys are in `[Display]` and apply live. For each prefix
-`WeaponList`, `ScrapHud`, `PilotHud`, `CommandHud`, `HullHud` and `AmmoHud`:
+All twenty-nine fade keys are in `[Display]` and apply live. For each prefix
+`WeaponList`, `ScrapHud`, `PilotHud`, `CommandHud`, `HullHud`, `AmmoHud` and
+`RadarHud`:
 
 | Suffix | Default | Menu | INI range |
 | --- | --- | --- | --- |
@@ -20,8 +23,10 @@ All twenty-four keys are in `[Display]` and apply live. For each prefix
 | `FadeDuration` | 500 | Instant / Fast / Normal / Slow | 0–5000 ms |
 
 Fast/Normal/Slow are 200/500/1000 ms. Invalid values use the defaults.
-`CommandHudIdleOpacity` defaults to 0 (Hidden), rather than 25. All six Fade
+`CommandHudIdleOpacity` defaults to 0 (Hidden), rather than 25. All seven Fade
 switches still default Off. Compact Cmd rows describe the command controls.
+`RadarCompassAlwaysVisible` defaults to 0; On keeps the four native compass
+letters visible while the rest of the radar fades.
 Opacity multiplies native alpha; existing dimming/transparency and RGB are preserved.
 Disabled groups remain fully native. A fresh all-Off launch installs no new
 adapters. Once installed, Off forwards native colors without removing detours.
@@ -39,6 +44,9 @@ toward its own idle opacity. Relevant changes restore full opacity immediately:
   The native all-available-weapons-unaffordable warning keeps the group visible.
   The group includes label/fill, remaining-shot text and all three cost-marker
   rectangles. Zero-cost weapons do not create an empty-ammo warning.
+- Radar: native range/compact-mode and target changes, active command contexts,
+  ping animation, newly native-visible contacts, and recent-hit alerts on native
+  visible contacts. Contact movement and draw order do not refresh the hold.
 - Commands: the native row/group actions, command-menu activation, or a native
   pointer action hitting a command row. An active unit selection, category,
   menu navigation or nested build page stays fully visible until it closes.
@@ -50,7 +58,7 @@ reveal the others. A player/team change, mission reset or config apply starts
 a new hold. Shell/pause/unreadable snapshot state fails fully visible and
 discards fade history. Geometry is still submitted with alpha zero for Hidden;
 native status rendering and its warning/audio side effects always execute.
-Reticle, radar and objectives remain outside the fade scopes.
+Reticle, tactical MapRadar, target camera and objectives remain outside the fade scopes.
 The remaining native draw owners, incomplete alpha paths and suggested reveal
 policies are mapped in [HUD_ELEMENT_MAP.md](HUD_ELEMENT_MAP.md). That research
 does not enable additional fading or qualify new hooks.
@@ -135,7 +143,7 @@ No leaked PDB or decompiler output is committed.
 The new portable policy test covers holds, smooth/instant fades, Hidden,
 independent activity, clock reversal, identity/reset behavior and alpha/RGB
 preservation, repeated command activity and separate safe-frame/render samples.
-All 118 Windows CTest tests and INI completeness (257 settings),
+All 118 Windows CTest tests and INI completeness (262 settings),
 conservative defaults, writer (23) and migration (67) checks pass. The new
 policy test passes GCC under WSL with C++17 and warnings as errors.
 
@@ -243,3 +251,87 @@ save, warning audio, faction/view/lifecycle variants, multiplayer and the full
 store/renderer/platform matrix remain unverified. Previously deferred command
 visual checks remain pending as requested. No interactive game test was added
 for this extension.
+
+## Cockpit radar extension
+
+Default-off `[Display] RadarHudFade`, `RadarHudIdleOpacity=25`,
+`RadarHudFadeDelay=2500`, `RadarHudFadeDuration=500` and
+`RadarCompassAlwaysVisible=0` apply live from the five-row Radar Fading page.
+The nine-tile hub and existing subpage IDs retain their order. Full cockpit
+radar scope includes backdrop, terrain grid, compass, contacts, ping/alert
+artwork, native command links and raw diamond markers. Tactical MapRadar and
+world target/camera overlays retain their own native rendering.
+
+The released CockpitRadar vtable render slot 6 is independently verified to
+point to the guarded renderer before shared helpers install and again before
+replacement. The original callback always executes: native eligibility/range
+filtering, ping refresh, command presentation, sounds and drawing are retained.
+Grid/backdrop/contact palette CALLs have a single cached owner shared by tint
+and fade, so either feature may initialize first. The grid multiplies alpha
+after tint and restores its original packed color on every exit. Direct diamond
+geometry has its own scoped packed-alpha adapter; other sprites and lines use
+the existing color helpers. Compass exceptions restore only the surrounding
+scope's opacity for that one sprite loop, then restore radar opacity.
+
+Activity reads native presentation state and the current player's explicit
+target/radar state, with owner and class checks. It does not sample contact
+positions, disclose hidden teams or add an object enumeration. A dedicated
+radar CALL after native visibility/range filtering forwards the original
+last-hit getter and copies that contact's full handle. A fixed 256-handle
+history detects additions independent of order; disappearing contacts do not
+restart the hold. Overflow or invalid identities request full visibility.
+A native-visible contact's recent-hit window conservatively keeps the radar
+visible, including enemy contacts, without reclassifying hidden actual teams.
+
+The whole radar uses one opacity per native render. Contact additions and
+recent-hit alerts discovered during drawing reveal the complete next frame,
+with at most one render of latency; earlier layers are not left at a different
+opacity within that render. Explicit range/mode/target changes and ping state
+are sampled before drawing. Active command contexts keep their links visible.
+Unreadable fields, missing owner and alternate/touch layout stay fully visible.
+Owner, mission, config, native-radar-disable and instance changes clear history.
+
+Released GOG SHA256 and baseline ReadProcessMemory PID 5780, 2026-10-19,
+matched the renderer, slot pointer, compass/contact-time/diamond CALLs and
+native accessors before authoring patches. Ghidra/xrefs and Capstone establish
+ECX self, original float-return conventions and caller cleanup. One raw diamond
+CALL belongs to cockpit radar; its caller supplies six stack slots (0x18 cleanup),
+which are all forwarded even though the helper uses only five. No private PDB
+or decompiler output is committed.
+
+Release Win32 build, all 118 Windows CTest cases, INI completeness (262),
+conservative defaults, writer/migration checks, and WSL GCC policy tests pass.
+Policy checks cover contact arrival/reappearance, reorder/duplicate/removal
+stability, bounded overflow and owner/mission history reset.
+
+Local GOG/DX11 native acceptance on 2026-10-19:
+
+- PID 20856: all observed radar layers reached 25% of their native alpha:
+  backdrop, cyan-tinted terrain grid, contacts/lines, compass and 330 raw
+  target-diamond draws. Grid packed colors were restored after every draw.
+  New native-visible contacts and target changes restored the whole group;
+  contact movement alone did not refresh it. Periodic native ping animation
+  also revealed the radar, as intended.
+- PID 37356: Hidden reached zero alpha on the same paths, including 330 raw
+  target-diamond draws. Keep Compass retained native compass alpha throughout.
+  No grid-restore mismatches occurred. Across both traces, 760,807 color-helper
+  calls outside the radar scope retained their original complete color.
+- PID 45552: a deliberately mismatched renderer guard refused radar setup
+  before installing shared fade helpers. All 50 checked fade/shared-radar
+  code windows plus the native radar slot pointer remained original. The
+  deployed catalog was restored after the run.
+- PID 38356: fresh all-Off mission startup leaves the same 50 code windows
+  plus radar dispatch pointer original. No radar/fade adapters are logged.
+  This checks startup behavior, not a long-session or lifecycle qualification.
+
+All four runs shut down through the harness. Temporary INI, Lua and catalog
+bytes were restored; all three deployed DLLs and the catalog match this build's
+SHA256 hashes, and the harness Ogre backup is removed.
+
+The fixture's script Damage call did not independently qualify recent-hit
+alert revelation; native combat-alert timing/appearance and active-command,
+range/compact-mode changes remain acceptance work.
+Interactive appearance and Radar Fading fit/navigation/apply/save remain pending
+under the user's earlier interactive-validation deferral, as do command/meter
+visual checks and the broader renderer, store, lifecycle and multiplayer matrix.
+Local probes/fixtures/logs are ignored under `bin/radar-fade/`.

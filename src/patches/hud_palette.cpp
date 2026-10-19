@@ -35,6 +35,8 @@ namespace BZROpenShim::HudPalette
         uint32_t g_friend = 0, g_enemy = 0, g_flash = 0;
         uint32_t g_ammoSites[2]{};
         bool g_ammoReady = false;
+        uint32_t g_radarSites[3]{};
+        bool g_radarReady = false;
 
         Settings Read()
         {
@@ -60,11 +62,11 @@ namespace BZROpenShim::HudPalette
             {
                 // The native radar passes its current projected grid. The
                 // released grid submitter reads its color at +0x20018.
-                if (color && grid)
+                if ((color || ContextualHud::RadarDrawOpacity() < 1) && grid)
                 {
                     slot = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(grid) + 0x20018);
                     saved = *slot;
-                    *slot = KeepAlpha(saved, *color);
+                    *slot = ContextualHud::ScaleAlpha(color ? KeepAlpha(saved,*color) : saved,ContextualHud::RadarDrawOpacity());
                     changed = true;
                 }
             }
@@ -183,6 +185,34 @@ namespace BZROpenShim::HudPalette
         return g_ammoReady;
     }
 
+    bool BindRadarDrawAdapters()
+    {
+        static int bound = 0;
+        if (!bound)
+        {
+            const HookEngine::EngineRow rows[] = {
+                {"HudPaletteGridSubmit",&g_grid}, {"HudPaletteSizedSprite",&g_sprite},
+                {"HudPaletteSpriteTint",&g_tint}, {"HudPaletteSpriteColors",&g_spritePalette},
+                {"HudSpriteRectTable",&g_spriteTable}, {"HudSpriteNameCount",&g_spriteCount},
+                {"HudPaletteContactColor",&g_contact}, {"HudPaletteFriendTeam",&g_friend}, {"HudPaletteEnemyTeam",&g_enemy},
+                {"HudPaletteGridCall",&g_radarSites[0]}, {"HudPaletteBackgroundCall",&g_radarSites[1]},
+                {"HudPaletteContactCall",&g_radarSites[2]},
+            };
+            bound = HookEngine::BindEngineRows("Radar draws",rows) ? 1 : -1;
+        }
+        return bound > 0;
+    }
+    bool InstallRadarDrawAdapters()
+    {
+        if (g_radarReady) return true;
+        if (!BindRadarDrawAdapters()) return false;
+        bool ok = RedirectCallTarget(g_radarSites[0],g_grid,reinterpret_cast<uintptr_t>(GridDraw));
+        ok = RedirectCallTarget(g_radarSites[1],g_sprite,reinterpret_cast<uintptr_t>(BackgroundSprite)) && ok;
+        ok = RedirectCallTarget(g_radarSites[2],g_contact,reinterpret_cast<uintptr_t>(ContactColor)) && ok;
+        g_radarReady = ok;
+        return ok;
+    }
+
     const char* UnavailableReason()
     {
         return g_IsSteamExe || !IsCompatibleGameVersion()
@@ -245,9 +275,6 @@ namespace BZROpenShim::HudPalette
                     {"HudPaletteDamageFlash", &g_flash},
                     {"HudSpriteRectTable", &g_spriteTable},
                     {"HudSpriteNameCount", &g_spriteCount},
-                    {"HudPaletteGridCall", &sites[0]},
-                    {"HudPaletteBackgroundCall", &sites[1]},
-                    {"HudPaletteContactCall", &sites[2]},
                     {"HudPaletteHullCall", &sites[3]},
                     {"HudPaletteUnitGauge00", &sites[6]},
                     {"HudPaletteUnitGauge01", &sites[7]},
@@ -269,11 +296,9 @@ namespace BZROpenShim::HudPalette
                 };
                 bound = HookEngine::BindEngineRows("HUD palette", rows) ? 1 : -1;
             }
-            if (bound < 0 || !BindAmmoDrawAdapters()) return false;
+            if (bound < 0 || !BindAmmoDrawAdapters() || !BindRadarDrawAdapters()) return false;
             bool ok = InstallAmmoDrawAdapters();
-            ok = RedirectCallTarget(sites[0], g_grid, reinterpret_cast<uintptr_t>(GridDraw)) && ok;
-            ok = RedirectCallTarget(sites[1], g_sprite, reinterpret_cast<uintptr_t>(BackgroundSprite)) && ok;
-            ok = RedirectCallTarget(sites[2], g_contact, reinterpret_cast<uintptr_t>(ContactColor)) && ok;
+            ok = InstallRadarDrawAdapters() && ok;
             ok = RedirectCallTarget(sites[3], g_hull, reinterpret_cast<uintptr_t>(HullColor)) && ok;
             ok = RedirectCallTarget(sites[6], g_gauge, reinterpret_cast<uintptr_t>(UnitGauge<true>)) && ok;
             ok = RedirectCallTarget(sites[7], g_gauge, reinterpret_cast<uintptr_t>(UnitGauge<false>)) && ok;

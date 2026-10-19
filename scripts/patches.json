@@ -2452,6 +2452,90 @@
       "identity": "HUD 2D filled-rect helper, cdecl (buffer, x1, y1, x2, y2, colour, mode); mode 0 passes the colour through."
     },
     {
+      "name": "HudFadeRadarRender",
+      "address": "0x00493EC0",
+      "expected": "55 8B EC 81 EC 48 03 00 00 A1 00 70 8E 00 33 C5 89 45 FC 56",
+      "identity": "CockpitRadar render entry, ECX self/no stack args, vtable slot 6. Native renderer includes visibility/range filtering, ping/alert state, grid, backdrop, compass, contacts and command links; original always executes. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra/xrefs/Capstone semantics and native ReadProcessMemory PID 5780 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeRadarContactTimeCall",
+      "address": "0x00494BA5",
+      "expected": "E8 96 84 FD FF D9 9D 48 FE FF FF 0F B6 8D CF FE FF FF 85 C9",
+      "identity": "Radar-only thiscall last-damage-time query after native eligibility/range filtering has built its contact list. ECX is the current native-visible complete object; float ST0 result stored to EBP-0x1B8. Observations copy full handles only, never enumerate additional objects. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra/xrefs/Capstone semantics and native ReadProcessMemory PID 5780 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeRadarContactTime",
+      "address": "0x0046D040",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC D9 80 E8 01 00 00 8B E5 5D C3",
+      "identity": "Complete-object last-damage-time accessor, reads float +0x1E8 to ST0, no stack args. Forward result unchanged; visible recent-hit contacts keep radar alerts visible. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra/xrefs/Capstone semantics and native ReadProcessMemory PID 5780 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeRadarTime",
+      "address": "0x00822DA0",
+      "expected": "55 8B EC D9 05 3C 1B CC 02 5D C3 CC CC CC CC CC 55 8B EC 8B 45 0C",
+      "identity": "Native game-local time getter, float ST0 from 0x02CC1B3C; same clock used by released radar last-hit/alert comparison. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra/xrefs/Capstone semantics and native ReadProcessMemory PID 5780 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeRadarTarget",
+      "address": "0x00462610",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 1C 02 00 00 51 E8 3A 7A 07 00",
+      "identity": "Complete-object current-target accessor, reads full handle +0x21C then resolves it through native GetObj. No stack args. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra/xrefs/Capstone semantics and native ReadProcessMemory PID 5780 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeRadarRange",
+      "address": "0x00492D40",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 80 98 01 00 00 8B E5 5D C3",
+      "identity": "Complete-object radar-state accessor, reads +0x198. Released renderer uses radius float +0, pulse float +4 and pulse-active byte +8. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra/xrefs/Capstone semantics and native ReadProcessMemory PID 5780 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeRadarCompass",
+      "address": "0x004944D0",
+      "expected": "E8 8B 80 1F 00 83 C4 18 E9 59 FF FF FF 8D 8D 88 FE FF FF 51",
+      "identity": "Six-argument cdecl sprite CALL for four E/N/W/S sprites, caller cleanup 0x18; resolved ID table at 0x008E7738 stride eight. Dedicated keep-visible exception within radar scope only. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra/xrefs/Capstone semantics and native ReadProcessMemory PID 5780 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeRadarDiamond",
+      "address": "0x0068AED0",
+      "expected": "55 8B EC 83 EC 24 A1 00 70 8E 00 33 C5 89 45 FC 8B 45 0C 03 45 14",
+      "identity": "Native diamond marker, viewport/x/y/radius/color plus caller mode slot; radar caller cleanup 0x18. Helper submits direct raw-color vertices through 0x00687550 and bypasses mode-to-color helpers. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra/xrefs/Capstone semantics and native ReadProcessMemory PID 5780 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeRadarDiamondCall0",
+      "address": "0x00496334",
+      "expected": "E8 97 4B 1F 00 83 C4 18 E9 71 E5 FF FF F3 0F 10 85 1C FE FF FF",
+      "identity": "Only cockpit-radar diamond marker CALL, caller cleanup 0x18. Forward all six slots; scale packed alpha once for the direct geometry path. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra/xrefs/Capstone semantics and native ReadProcessMemory PID 5780 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeRadarRenderSlot",
+      "address": "0x008770C4",
+      "kind": "data",
+      "identity": "CockpitRadar vtable 0x008770AC render slot 6. Before shared-helper installation and slot replacement, runtime must verify pointer equals independently guarded HudFadeRadarRender; native PID 5780 matched 0x00493EC0."
+    },
+    {
+      "name": "HudFadeRadarMode",
+      "address": "0x00979FC0",
+      "kind": "data",
+      "identity": "Native command presentation mode consumed by radar switch (mode minus 2). Baseline 2; 3..7 are active command contexts. Guarded renderer xrefs qualify the read."
+    },
+    {
+      "name": "HudFadeRadarGroup",
+      "address": "0x00979F9C",
+      "kind": "data",
+      "identity": "Native command group selection read by cockpit radar; -1 when none. Only presentation identity, never object visibility."
+    },
+    {
+      "name": "HudFadeRadarUnit",
+      "address": "0x00979FB8",
+      "kind": "data",
+      "identity": "Native unit-row selection read by cockpit radar; -1 when none. Only presentation identity."
+    },
+    {
+      "name": "HudFadeRadarShow",
+      "address": "0x008EAAAC",
+      "kind": "data",
+      "identity": "Native cockpit-radar visibility flag read at the guarded renderer outer gate. Native Off rendering remains authoritative; idle history clears while disabled."
+    },
+    {
       "name": "HudFadeMeterFillRect",
       "address": "0x0068AF70",
       "expected": "55 8B EC 8B 45 20 50 8B 4D 1C 51 E8 D0 FC FF FF 83 C4 08 50",

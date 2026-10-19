@@ -7,4 +7,6 @@ namespace BZROpenShim::HudPalette
     // Single owner for the cockpit ammo CALLs shared by tint and idle fade.
     bool BindAmmoDrawAdapters();
     bool InstallAmmoDrawAdapters();
+    bool BindRadarDrawAdapters();
+    bool InstallRadarDrawAdapters();
 }

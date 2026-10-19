@@ -39,8 +39,9 @@ namespace BZROpenShim::ContextualHud
         Settings g_settings;
         State g_state;
         bool g_read = false;
-        std::atomic<bool> g_ready{false}, g_resources{false}, g_commandsReady{false}, g_metersReady{false};
-        std::atomic<float> g_opacity[kGroups] = {1,1,1,1,1,1};
+        std::atomic<bool> g_ready{false}, g_resources{false}, g_commandsReady{false}, g_metersReady{false}, g_radarReady{false};
+        std::atomic<bool> g_keepCompass{false};
+        std::atomic<float> g_opacity[kGroups] = {1,1,1,1,1,1,1};
         thread_local float g_drawOpacity = 1;
         uint64_t g_retry = 0;
         uint32_t g_color[2]{}, g_text = 0, g_font = 0, g_sprite = 0, g_sizedSprite = 0;
@@ -54,6 +55,183 @@ namespace BZROpenShim::ContextualHud
         int g_commandBound = 0;
         uint32_t g_meterRender = 0, g_meterSites[6]{}, g_maxAmmo = 0, g_health = 0, g_maxHealth = 0, g_equipped = 0, g_fill = 0;
         int g_meterBound = 0;
+        constexpr size_t kRadar = static_cast<size_t>(Group::Radar);
+        uint32_t g_radarRender = 0, g_radarSlot = 0, g_radarContactCall = 0, g_radarContactTime = 0, g_radarTime = 0;
+        uint32_t g_radarCompass = 0, g_radarDiamondCall = 0, g_radarDiamond = 0, g_radarTarget = 0, g_radarRange = 0;
+        uint32_t g_radarCompact = 0, g_radarMode = 0, g_radarGroup = 0, g_radarUnit = 0, g_radarShow = 0, g_radarAlt = 0;
+        uintptr_t g_radarInstance = 0; // Identity token only.
+        uint64_t g_radarOwner = 0;
+        int g_radarBound = 0;
+        RadarContacts g_radarContacts;
+        struct RadarFrame
+        {
+            RadarContacts contacts;
+            uint64_t owner = 0, value = 0;
+            uint32_t player = 0;
+            float time = 0;
+            bool active = false, alert = false;
+        };
+        thread_local RadarFrame g_radarFrame;
+        thread_local bool g_inRadar = false;
+        thread_local float g_beforeRadarOpacity = 1;
+
+        bool ReadRadarFrame(void* self, RadarFrame& frame, bool& interacting) noexcept
+        {
+            __try
+            {
+                if (!self || *reinterpret_cast<const uintptr_t*>(self) + 6*sizeof(uintptr_t) != g_radarSlot ||
+                    *reinterpret_cast<const uint8_t*>(g_radarAlt) || !*reinterpret_cast<const int*>(g_radarShow)) return false;
+                void* player = reinterpret_cast<Current>(g_getPlayer)();
+                if (!player) return false;
+                frame.player = static_cast<uint32_t>(reinterpret_cast<Handle>(g_GameObjectGetHandleAddr)(player));
+                void* target = reinterpret_cast<Pointer>(g_radarTarget)(player);
+                const uint32_t handle = target ? static_cast<uint32_t>(reinterpret_cast<Handle>(g_GameObjectGetHandleAddr)(target)) : 0;
+                const int compact = *reinterpret_cast<const int*>(g_radarCompact);
+                const int mode = *reinterpret_cast<const int*>(g_radarMode);
+                const int group = *reinterpret_cast<const int*>(g_radarGroup);
+                const int unit = *reinterpret_cast<const int*>(g_radarUnit);
+                if (compact < 0 || compact > 1 || mode < 2 || mode > 7 || group < -1 || group > 12 || unit < -1 || unit > 12) return false;
+                const auto* range = static_cast<const uint8_t*>(reinterpret_cast<Pointer>(g_radarRange)(player));
+                if (!range) return false;
+                const float radius = *reinterpret_cast<const float*>(range);
+                const float pulse = *reinterpret_cast<const float*>(range+4);
+                const float ping = *reinterpret_cast<const float*>(static_cast<const uint8_t*>(self)+0x70);
+                frame.time = reinterpret_cast<float(__cdecl*)()>(g_radarTime)();
+                if (!std::isfinite(radius) || radius <= 0 || radius > 1000000 || !std::isfinite(pulse) ||
+                    !std::isfinite(ping) || !std::isfinite(frame.time)) return false;
+                uint32_t radiusBits = 0;
+                std::memcpy(&radiusBits,&radius,sizeof(radius));
+                frame.value = (static_cast<uint64_t>(handle)<<32) | radiusBits;
+                for (int value : {compact,mode,group,unit}) frame.value = (frame.value ^ static_cast<uint32_t>(value))*1099511628211ull;
+                interacting = mode > 2 || group >= 0 || unit >= 0 || ping > 0 || (range[8] && pulse > 0);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+        void StartRadarFrame(void* self)
+        {
+            g_radarFrame = {};
+            bool interacting = false;
+            const bool readable = ReadRadarFrame(self,g_radarFrame,interacting);
+            const uint64_t now = GetTickCount64();
+            float opacity = 1;
+            AcquireSRWLockExclusive(&g_lock);
+            auto& activity = g_state.groups[kRadar];
+            if (readable && g_settings.groups[kRadar].enabled && g_state.owner &&
+                static_cast<uint32_t>(g_state.owner >> 32) == g_radarFrame.player)
+            {
+                const uintptr_t instance = reinterpret_cast<uintptr_t>(self);
+                if (instance != g_radarInstance || g_radarOwner != g_state.owner)
+                { activity = {}; g_radarContacts = {}; g_radarInstance = instance; g_radarOwner = g_state.owner; }
+                g_radarFrame.owner = g_state.owner;
+                g_radarFrame.active = true;
+                g_radarFrame.contacts = g_radarContacts;
+                g_radarFrame.contacts.Begin();
+                activity.Observe(g_radarFrame.value,now,interacting);
+                opacity = activity.Opacity(g_settings.groups[kRadar],now);
+            }
+            else { activity = {}; g_radarContacts = {}; g_radarInstance = 0; g_radarOwner = 0; }
+            g_opacity[kRadar].store(opacity,std::memory_order_relaxed);
+            ReleaseSRWLockExclusive(&g_lock);
+        }
+        void FinishRadarFrame()
+        {
+            if (!g_radarFrame.active) return;
+            AcquireSRWLockExclusive(&g_lock);
+            if (g_state.owner == g_radarFrame.owner && g_radarOwner == g_radarFrame.owner)
+            {
+                // Native visibility/range filtering precedes the observed CALL.
+                // Commit after drawing: every layer uses the same opacity this
+                // frame; a newly drawn contact reveals the whole next frame.
+                auto& activity = g_state.groups[kRadar];
+                const auto now = GetTickCount64();
+                activity.Observe(g_radarFrame.value,now,g_radarFrame.alert ||
+                    g_radarFrame.contacts.added || g_radarFrame.contacts.invalid);
+                g_radarFrame.contacts.Commit();
+                g_radarContacts = g_radarFrame.contacts;
+                g_opacity[kRadar].store(activity.Opacity(g_settings.groups[kRadar],now),std::memory_order_relaxed);
+            }
+            ReleaseSRWLockExclusive(&g_lock);
+        }
+        float __fastcall RadarContactTime(void* object, void*)
+        {
+            const float result = reinterpret_cast<Health>(g_radarContactTime)(object);
+            if (g_inRadar && g_radarFrame.active)
+            {
+                __try
+                {
+                    g_radarFrame.contacts.Observe(static_cast<uint32_t>(reinterpret_cast<Handle>(g_GameObjectGetHandleAddr)(object)));
+                    // Conservatively retain alerts for any native-visible,
+                    // recently damaged contact, without reading hidden teams.
+                    if (std::isfinite(result) && result > 0 && result <= g_radarFrame.time && result+2 > g_radarFrame.time)
+                        g_radarFrame.alert = true;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) { g_radarFrame.contacts.invalid = true; }
+            }
+            return result;
+        }
+        void __cdecl RadarCompass(void* v, int id, int x, int y, uint32_t flags, float scale)
+        {
+            const float saved = g_drawOpacity;
+            if (g_inRadar && g_keepCompass.load(std::memory_order_relaxed)) g_drawOpacity = g_beforeRadarOpacity;
+            __try { reinterpret_cast<Sprite>(g_sprite)(v,id,x,y,flags,scale); }
+            __finally { g_drawOpacity = saved; }
+        }
+        void __cdecl RadarDiamond(void* v, int x, int y, int radius, uint32_t color, uint32_t mode)
+        {
+            using Diamond = void(__cdecl*)(void*,int,int,int,uint32_t,uint32_t);
+            reinterpret_cast<Diamond>(g_radarDiamond)(v,x,y,radius,ScaleAlpha(color,RadarDrawOpacity()),mode);
+        }
+        void __fastcall RadarDraw(void* self, void*)
+        {
+            const auto original = reinterpret_cast<CommandRender>(g_radarRender);
+            if (!g_radarReady.load(std::memory_order_acquire) || g_inRadar) { original(self); return; }
+            StartRadarFrame(self);
+            g_beforeRadarOpacity = g_drawOpacity;
+            const float previous = BeginDraw(Group::Radar);
+            g_inRadar = true;
+            // Native ping, command links, sounds and radar refresh always run.
+            __try { original(self); }
+            __finally { FinishRadarFrame(); g_inRadar = false; EndDraw(previous); }
+        }
+        bool BindRadar()
+        {
+            if (!g_radarBound)
+            {
+                const HookEngine::EngineRow rows[] = {
+                    {"HudFadeRadarRender",&g_radarRender}, {"HudFadeRadarRenderSlot",&g_radarSlot},
+                    {"HudFadeRadarContactTimeCall",&g_radarContactCall}, {"HudFadeRadarContactTime",&g_radarContactTime},
+                    {"HudFadeRadarTime",&g_radarTime}, {"HudFadeRadarTarget",&g_radarTarget}, {"HudFadeRadarRange",&g_radarRange},
+                    {"HudFadeRadarCompass",&g_radarCompass}, {"HudFadeRadarDiamond",&g_radarDiamond},
+                    {"HudFadeRadarDiamondCall0",&g_radarDiamondCall}, {"RadarCompactMode",&g_radarCompact},
+                    {"HudFadeRadarMode",&g_radarMode}, {"HudFadeRadarGroup",&g_radarGroup}, {"HudFadeRadarUnit",&g_radarUnit},
+                    {"HudFadeRadarShow",&g_radarShow}, {"CommandMenuAltLayoutFlag",&g_radarAlt},
+                };
+                g_radarBound = HookEngine::BindEngineRows("Radar HUD fading",rows) && HudPalette::BindRadarDrawAdapters() ? 1 : -1;
+                uint32_t target = 0; SIZE_T read = 0;
+                if (g_radarBound > 0 && (!ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(g_radarSlot),&target,4,&read) || read!=4 || target!=g_radarRender))
+                { g_radarBound = -1; Log(L"[HUDFADE] Radar stands down: render slot ownership differs\n"); }
+            }
+            return g_radarBound > 0;
+        }
+        bool InstallRadar()
+        {
+            if (g_radarReady.load(std::memory_order_acquire)) return true;
+            if (!BindRadar()) return false;
+            bool ok = HudPalette::InstallRadarDrawAdapters();
+            ok = RedirectCallTarget(g_radarContactCall,g_radarContactTime,reinterpret_cast<uintptr_t>(RadarContactTime)) && ok;
+            ok = RedirectCallTarget(g_radarCompass,g_sprite,reinterpret_cast<uintptr_t>(RadarCompass)) && ok;
+            ok = RedirectCallTarget(g_radarDiamondCall,g_radarDiamond,reinterpret_cast<uintptr_t>(RadarDiamond)) && ok;
+            if (!ok) return false;
+            HookEngine::CodePatchLock lock;
+            uint32_t target = 0; SIZE_T read = 0;
+            if (!ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(g_radarSlot),&target,4,&read) || read!=4 || target!=g_radarRender) return false;
+            const uint32_t hook = reinterpret_cast<uint32_t>(RadarDraw);
+            if (!WritePatchBytes(g_radarSlot,reinterpret_cast<const uint8_t*>(&hook),4)) return false;
+            g_radarReady.store(true,std::memory_order_release);
+            Log(L"[HUDFADE] Complete cockpit radar and compass scopes installed\n");
+            return true;
+        }
         struct MeterSample { bool readable = false, hullWarning = false, ammoWarning = false; uint64_t hull = 0, ammo = 0; };
 
         MeterSample SampleMeters(void* player, void* carrier, uint64_t weaponState, uint32_t ammo) noexcept
@@ -368,19 +546,22 @@ namespace BZROpenShim::ContextualHud
         {
             const bool commands = settings.groups[kCommands].enabled;
             const bool meters = settings.groups[static_cast<size_t>(Group::Hull)].enabled || settings.groups[static_cast<size_t>(Group::Ammo)].enabled;
+            const bool radar = settings.groups[kRadar].enabled;
             // Qualify the command-specific region before installing shared
             // helpers for a command-only configuration. A refused command
             // adapter must not disable the other independently enabled groups.
             const bool commandBound = !commands || BindCommand();
             const bool meterBound = !meters || BindMeters();
+            const bool radarBound = !radar || BindRadar();
             bool otherGroups = false;
             for (size_t i = 0; i < kSafeFrameGroups; ++i)
                 otherGroups = otherGroups || settings.groups[i].enabled;
-            if (!otherGroups && !(commands && commandBound) && !(meters && meterBound)) return false;
+            if (!otherGroups && !(commands && commandBound) && !(meters && meterBound) && !(radar && radarBound)) return false;
             if (!Install()) return false;
             const bool commandOk = commandBound && (!commands || InstallCommand());
             const bool meterOk = meterBound && (!meters || InstallMeters());
-            return commandOk && meterOk;
+            const bool radarOk = radarBound && (!radar || InstallRadar());
+            return commandOk && meterOk && radarOk;
         }
 
         bool Snapshot(uint64_t& identity, std::array<uint64_t,kGroups>& values, MeterSample& meters) noexcept
@@ -434,24 +615,27 @@ namespace BZROpenShim::ContextualHud
     }
 
     bool ResourceDrawAdaptersNeeded() noexcept { return g_ready.load(std::memory_order_acquire) && g_resources.load(std::memory_order_relaxed); }
+    float RadarDrawOpacity() noexcept { return g_inRadar && g_radarFrame.active ? g_drawOpacity : 1; }
     float BeginDraw(Group group) noexcept
     {
         const float previous = g_drawOpacity;
         const bool meter = group == Group::Hull || group == Group::Ammo;
-        if (g_ready.load(std::memory_order_acquire) && (!meter || g_metersReady.load(std::memory_order_acquire)) && static_cast<size_t>(group) < kGroups)
+        if (g_ready.load(std::memory_order_acquire) && (!meter || g_metersReady.load(std::memory_order_acquire)) &&
+            (group != Group::Radar || g_radarReady.load(std::memory_order_acquire)) && static_cast<size_t>(group) < kGroups)
             g_drawOpacity *= g_opacity[static_cast<size_t>(group)].load(std::memory_order_relaxed);
         return previous;
     }
     void EndDraw(float previous) noexcept { g_drawOpacity = previous; }
     void ResetMission() noexcept
     {
-        AcquireSRWLockExclusive(&g_lock); g_state.Reset(); g_commandInstance = 0; ReleaseSRWLockExclusive(&g_lock);
+        AcquireSRWLockExclusive(&g_lock); g_state.Reset(); g_commandInstance = 0;
+        g_radarInstance = 0; g_radarOwner = 0; g_radarContacts = {}; ReleaseSRWLockExclusive(&g_lock);
         for (auto& opacity : g_opacity) opacity.store(1,std::memory_order_relaxed);
     }
     bool ReloadConfig()
     {
         Settings settings;
-        const char* prefixes[] = {"WeaponList", "ScrapHud", "PilotHud", "CommandHud", "HullHud", "AmmoHud"};
+        const char* prefixes[] = {"WeaponList", "ScrapHud", "PilotHud", "CommandHud", "HullHud", "AmmoHud", "RadarHud"};
         for (size_t i = 0; i < kGroups; ++i)
         {
             auto& group = settings.groups[i];
@@ -461,7 +645,10 @@ namespace BZROpenShim::ContextualHud
             group.delayMs = Integer(prefix + "FadeDelay",2500,0,30000);
             group.fadeMs = Integer(prefix + "FadeDuration",500,0,5000);
         }
-        AcquireSRWLockExclusive(&g_lock); g_settings = settings; g_state.Reset(); g_commandInstance = 0; ReleaseSRWLockExclusive(&g_lock);
+        TryGetUserConfigBool("Display","RadarCompassAlwaysVisible",settings.radarCompassAlwaysVisible);
+        g_keepCompass.store(settings.radarCompassAlwaysVisible,std::memory_order_relaxed);
+        AcquireSRWLockExclusive(&g_lock); g_settings = settings; g_state.Reset(); g_commandInstance = 0;
+        g_radarInstance = 0; g_radarOwner = 0; g_radarContacts = {}; ReleaseSRWLockExclusive(&g_lock);
         for (auto& opacity : g_opacity) opacity.store(1,std::memory_order_relaxed);
         g_read = true;
         g_resources.store(settings.groups[1].enabled || settings.groups[2].enabled,std::memory_order_relaxed);
@@ -485,7 +672,8 @@ namespace BZROpenShim::ContextualHud
         if (!g_ready.load(std::memory_order_acquire) ||
             (settings.groups[kCommands].enabled && !g_commandsReady.load(std::memory_order_acquire)) ||
             ((settings.groups[static_cast<size_t>(Group::Hull)].enabled || settings.groups[static_cast<size_t>(Group::Ammo)].enabled) &&
-             !g_metersReady.load(std::memory_order_acquire)))
+             !g_metersReady.load(std::memory_order_acquire)) ||
+            (settings.groups[kRadar].enabled && !g_radarReady.load(std::memory_order_acquire)))
         {
             if (now >= g_retry)
             {
