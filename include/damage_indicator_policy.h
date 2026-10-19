@@ -35,21 +35,22 @@ namespace BZROpenShim::HudFeedback
         Direction direction; // source minus victim at impact, never a tracked object
         float severity = 0;
         int victim = 0;
+        int attacker = 0; // full generation-bearing handle, never an arena slot
     };
 
     struct IncomingPulses
     {
         std::array<IncomingPulse, 8> entries{};
         void Reset() { entries = {}; }
-        void Add(uint64_t now, int durationMs, int victim, Direction direction, float healthLoss)
+        void Add(uint64_t now, int durationMs, int victim, int attacker, Direction direction, float healthLoss)
         {
-            if (!victim || !Normalize(direction) || !std::isfinite(healthLoss) || healthLoss <= 0) return;
+            if (!victim || !attacker || victim == attacker || !Normalize(direction) ||
+                !std::isfinite(healthLoss) || healthLoss <= 0) return;
             IncomingPulse* selected = nullptr;
             for (auto& entry : entries)
             {
                 const bool active = entry.victim == victim && entry.pulse.Strength(now, durationMs) > 0;
-                if (active && entry.direction.x * direction.x + entry.direction.y * direction.y +
-                    entry.direction.z * direction.z > 0.94f)
+                if (entry.victim == victim && entry.attacker == attacker)
                 {
                     selected = &entry;
                     break;
@@ -62,6 +63,7 @@ namespace BZROpenShim::HudFeedback
             selected->direction = direction;
             selected->severity = std::clamp(healthLoss / 0.2f, 0.0f, 1.0f);
             selected->victim = victim;
+            selected->attacker = attacker;
             selected->pulse.Start(now);
         }
     };
@@ -92,8 +94,61 @@ namespace BZROpenShim::HudFeedback
         return std::isfinite(angle);
     }
 
+    struct OwnerTicks
+    {
+        std::array<float, 8> strengths{};
+        size_t count = 0;
+    };
+
+    struct IncomingArc
+    {
+        float angle = 0, strength = 0, severity = 0;
+        OwnerTicks owners;
+    };
+
+    struct IncomingArcs
+    {
+        std::array<IncomingArc, 8> entries{};
+        size_t count = 0;
+    };
+
+    inline IncomingArcs GroupIncomingArcs(const IncomingPulses& pulses, uint64_t now, int durationMs,
+        int victim, const std::array<float, 9>& inverse)
+    {
+        IncomingArcs result;
+        if (!victim) return result;
+        for (const auto& pulse : pulses.entries)
+        {
+            const float strength = pulse.pulse.Strength(now, durationMs);
+            float angle = 0;
+            if (pulse.victim != victim || !pulse.attacker || strength <= 0 ||
+                !ViewBearing(pulse.direction, inverse, angle)) continue;
+            IncomingArc* selected = nullptr;
+            for (size_t i = 0; i < result.count; ++i)
+            {
+                // Compare projected bearings, including across the +/-pi seam.
+                if (std::cos(angle - result.entries[i].angle) > 0.94f)
+                {
+                    selected = &result.entries[i];
+                    break;
+                }
+            }
+            if (!selected)
+            {
+                if (result.count == result.entries.size()) continue;
+                selected = &result.entries[result.count++];
+                selected->angle = angle;
+            }
+            selected->strength = std::max(selected->strength, strength);
+            selected->severity = std::max(selected->severity, pulse.severity);
+            if (selected->owners.count < selected->owners.strengths.size())
+                selected->owners.strengths[selected->owners.count++] = strength;
+        }
+        return result;
+    }
+
     inline DrawPlan MakeDamageIndicatorPlan(const DamageIndicatorSettings& settings, int x, int y,
-        float sx, float sy, Rect clip, float angle, float strength, float severity)
+        float sx, float sy, Rect clip, float angle, float strength, float severity, const OwnerTicks& owners = {})
     {
         DrawPlan plan;
         if (!std::isfinite(angle) || !std::isfinite(strength) || !std::isfinite(severity) || strength <= 0 ||
@@ -138,6 +193,39 @@ namespace BZROpenShim::HudFeedback
             const int r = std::min(clip.right - 1, x + static_cast<int>(std::lround((px + thickness / 2) * sx)));
             const int b = std::min(clip.bottom - 1, y + static_cast<int>(std::lround((py + thickness / 2) * sy)));
             if (l <= r && t <= b) plan.rects[plan.count++] = {l,t,r,b,(static_cast<uint32_t>(alpha) << 24) | (settings.color & 0xFFFFFFu)};
+        }
+        const size_t ownerCount = std::min(owners.count, owners.strengths.size());
+        // Draw all tick edges before their fills so dense ticks remain clear.
+        for (int pass = 0; pass < 2; ++pass)
+        for (size_t owner = 0; owner < ownerCount; ++owner)
+        {
+            const float fade = owners.strengths[owner];
+            if (!std::isfinite(fade) || fade <= 0) continue;
+            const uint32_t tickAlpha = static_cast<uint32_t>(255 * std::clamp(settings.opacity, 25, 100) *
+                0.01f * std::min(fade, 1.0f));
+            if (!tickAlpha) continue;
+            // One short radial stroke per attacker, spaced along the arc.
+            // Same-owner hits update one record, so pellets cannot add ticks.
+            const float offset = ownerCount == 1 ? 0 :
+                -0.28f + 0.56f * static_cast<float>(owner) / static_cast<float>(ownerCount - 1);
+            const float a = angle + offset;
+            for (int step = 0; step < 4; ++step)
+            {
+                const float r = radius + (-2.0f + 2.0f * step) * scale;
+                const float px = std::sin(a) * r, py = -std::cos(a) * r;
+                const int l = x + static_cast<int>(std::lround((px - 0.75f * scale) * sx));
+                const int t = y + static_cast<int>(std::lround((py - 0.75f * scale) * sy));
+                const int right = x + static_cast<int>(std::lround((px + 0.75f * scale) * sx));
+                const int b = y + static_cast<int>(std::lround((py + 0.75f * scale) * sy));
+                const auto add = [&](int left, int top, int rr, int bottom, uint32_t color) {
+                    left = std::max(left, clip.left); top = std::max(top, clip.top);
+                    rr = std::min(rr, clip.right - 1); bottom = std::min(bottom, clip.bottom - 1);
+                    if (left <= rr && top <= bottom && plan.count < plan.rects.size())
+                        plan.rects[plan.count++] = {left,top,rr,bottom,color};
+                };
+                if (pass == 0) add(l-1,t-1,right+1,b+1,tickAlpha << 24);
+                else add(l,t,right,b,(tickAlpha << 24) | (settings.color & 0xFFFFFFu));
+            }
         }
         return plan;
     }

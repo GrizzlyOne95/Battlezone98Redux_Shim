@@ -50,11 +50,13 @@ so Stock previews show optional feedback only. Preview panes use a fixed
 design-space scale, rather than promising an exact physical pixel size for
 every in-game UI scale.
 
-The initial preview is qualified only for GOG DX11. It uses 96 owned native
+The initial preview is qualified only for GOG DX11. It uses owned native
 UI quads, with a guarded `UiViewReflow` adapter and a 2x2 white texture. The
 stock UI shader applies BGRA correction to Ogre-generated vertex colors;
 the preview compensates in its own producer without changing shared shaders.
 Missing artwork, another backend or a failed guard disables only the preview.
+The shared preview pool now supports 192 quads for the incoming-damage page's
+one/two/three-attacker arc samples.
 The existing nine-tile hub is unchanged; HUD links to this subpage, keeping
 all twelve appearance/feedback controls reachable without truncating rows.
 

@@ -173,12 +173,12 @@ namespace BZROpenShim::HudFeedback
             if (valid && singlePlayer && incomingSettings.enabled && ReadView(inverse, player))
             {
                 const auto now = GetTickCount64();
-                for (const auto& entry : incoming.entries)
+                const auto groups = GroupIncomingArcs(incoming, now, incomingSettings.durationMs, player, inverse);
+                for (size_t group = 0; group < groups.count; ++group)
                 {
-                    const float fade = entry.pulse.Strength(now, incomingSettings.durationMs);
-                    float angle = 0;
-                    if (entry.victim != player || fade <= 0 || !ViewBearing(entry.direction, inverse, angle)) continue;
-                    const auto arcs = MakeDamageIndicatorPlan(incomingSettings, x, y, sx, sy, clip, angle, fade, entry.severity);
+                    const auto& entry = groups.entries[group];
+                    const auto arcs = MakeDamageIndicatorPlan(incomingSettings, x, y, sx, sy, clip,
+                        entry.angle, entry.strength, entry.severity, entry.owners);
                     for (size_t i = 0; i < arcs.count; ++i)
                     {
                         const auto& r = arcs.rects[i];
@@ -278,7 +278,7 @@ namespace BZROpenShim::HudFeedback
                 AcquireSRWLockExclusive(&g_stateLock);
                 if (g_incomingSettings.enabled)
                     g_incoming.Add(GetTickCount64(), g_incomingSettings.durationMs,
-                        context.sample.victim, context.direction, context.sample.before - context.sample.after);
+                        context.sample.victim, context.sample.attacker, context.direction, context.sample.before - context.sample.after);
                 ReleaseSRWLockExclusive(&g_stateLock);
             }
         }

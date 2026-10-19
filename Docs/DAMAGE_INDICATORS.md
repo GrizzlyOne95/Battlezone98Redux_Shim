@@ -2,7 +2,7 @@
 
 Experimental, default-off feedback for the released GOG 2.2.301 executable.
 OpenShim Options → HUD → Damage Indicators contains a separate five-control
-page and front/right/rear appearance samples. Stock and Legacy scrap/pilot
+page and appearance samples for one, two and three attackers. Stock and Legacy scrap/pilot
 layouts, native HUD scaling and outgoing hit-marker styling remain independent.
 
 ## Controls
@@ -36,8 +36,18 @@ position supplies bearing; this initial adapter does not claim the explosion
 center or an exact ballistic arrival vector. Health loss as a fraction of
 maximum health controls thickness and brightness, saturating at 20 percent.
 The first half of the configured duration holds; the second half fades.
-Eight bounded pulses support multiple directions, refreshing nearby bearings
-and replacing the oldest when full.
+Up to eight recent attackers are stored, each identified by its full handle.
+Hits from one attacker refresh that attacker's existing pulse and captured
+direction. Different attackers sharing a nearby screen bearing (about 20°)
+share one arc, with one short radial tick per attacker. Thus repeated shots
+and pellets from one owner still show one tick; two owners show two ticks.
+Each owner's tick fades and expires independently, so continued fire from one
+does not keep another owner's count alive. A new hit from a moving attacker
+updates its single record rather than counting it in two directions. Grouping
+uses projected bearings, including across the rear +/-180° seam. Multiple
+direction groups draw together. At capacity, a new attacker replaces the
+least recently refreshed record. This is a count of recent damaging owners,
+not a census of nearby enemies or a persistent attacker tracker.
 
 Feedback is limited to single-player cockpit/chase views. Other views,
 unreadable session state and multiplayer suppress drawing; safe-frame cleanup
@@ -55,7 +65,7 @@ Both source and victim handles must round-trip before the stock call; the
 victim must still round-trip afterward. The damager and damage-source fields
 must exist and differ, matching the existing outgoing weapon-hit eligibility.
 
-Incoming hooks copy only the source-minus-victim vector, victim handle, loss
+Incoming hooks copy only the source-minus-victim vector, victim/attacker handles, loss
 and tick into fixed storage under the feature lock. No object pointer is kept;
 there is no allocation, rendering or logging in the hook. Existing in-process
 `SimDamageApplied` events remain outgoing-hit events and are produced only
@@ -71,10 +81,13 @@ are cockpit/chase. Invalid data skips drawing.
 
 The existing guarded main-reticle CALL and filled-rectangle helper draw clipped
 owned geometry without replacing Stock art. Each arc uses 16 edge quads and
-16 foreground quads. All outlines precede their fills. Native UI scale applies
+16 foreground quads, plus eight clipped quads per owner tick (four outlined
+cells). Tick outlines precede all tick fills, and an eight-owner arc fits the
+existing 96-rectangle draw plan. Native UI scale applies
 to radius and thickness; size and opacity do not reuse reticle settings.
-The five-control page reuses the existing preview artwork/quads and layout,
-keeping the nine-tile hub intact. No new game asset or runtime dependency is
+The five-control page reuses the existing preview artwork and layout; its
+owned preview pool supports 192 quads to fit the three counted samples.
+The nine-tile hub stays intact. No new game asset or runtime dependency is
 introduced. Fresh defaults install none of the feedback adapters. Once installed,
 disabled adapters forward stock behavior until restart.
 
@@ -117,6 +130,26 @@ Exact released GOG executable SHA-256:
   backward, and 150 red fill samples below the aim point during that interval.
   This qualifies camera-relative rear placement without claiming that every
   weapon can hit from every physical approach direction.
+
+### Per-attacker tick follow-up
+
+The Release Win32 build and all 117 Windows tests pass after adding owner
+counts. The portable policy test also passes GCC with warnings as errors.
+Tests cover repeated pellets, independent refresh/expiry, an owner moving
+between direction groups, the rear angle seam, full-handle generations,
+capacity replacement, independent tick alpha and clipped eight-tick geometry.
+
+GOG DX11 PID 32752 exercised two native firing owners. Frida observed steady
+frames with 20 colored quads for one owner (16 arc + 4 tick), 24 for two owners
+sharing one arc, and 40 for two separate one-owner arcs. Continuous repeated
+fire retained those counts rather than adding ticks. Visual inspection showed
+two radial strokes on the shared arc and one stroke on each separated arc.
+The fixture's third firing source did not deliver damage to the player, so
+three-owner native combat is not claimed by this run.
+Frontend PID 3036 displayed the complete one/two/three-attacker previews
+with the feature disabled. The preview note was shortened after the compact
+window exposed truncation; the shorter text reuses the visibly contained
+first sentence.
 
 Broad weapon/source coverage, long mission/restart/save/load,
 eject/re-enter, view/resolution/HUD-scale combinations, actual multiplayer

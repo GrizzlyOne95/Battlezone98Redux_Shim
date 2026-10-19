@@ -2733,7 +2733,7 @@ namespace BZROpenShim
         {
             { "Incoming Damage", "Display", "DamageIndicators", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
-              "Brief arcs toward the firing source when a weapon reduces your health. Larger hits are stronger. Cockpit/chase, single player only. Applies live." },
+              "Arcs toward incoming weapon damage. One tick per recent attacker; repeated hits refresh its tick. Up to eight attackers. Single-player cockpit/chase." },
             { "Damage Color", "Display", "DamageIndicatorColor", nullptr, 0,
               kShimDamageColors, kShimDamageColors, 8, 0, ShimSettingApplyGroup::HudFeedback,
               "Incoming-damage arc color, independent of reticle and hit-marker colors. Applies live." },
@@ -3581,7 +3581,7 @@ namespace BZROpenShim
             size_t rowCount = 0;
             std::array<size_t, kShimCategoryMaxRows> rows = {};
             std::array<void*, kShimCategoryMaxRows> values = {};
-            std::array<void*, 96> previewQuads = {};
+            std::array<void*, 192> previewQuads = {};
             void* previewNote = nullptr;
             void* info[3] = {};
             std::string status;
@@ -3802,9 +3802,12 @@ namespace BZROpenShim
             bool ok = true;
             for (int sample = 0; sample < 3; ++sample)
             {
+                HudFeedback::OwnerTicks owners;
+                owners.count = static_cast<size_t>(sample + 1);
+                owners.strengths.fill(1.0f);
                 const auto plan = ui.category == kShimDamageCategory
                     ? HudFeedback::MakeDamageIndicatorPlan(damageSettings, 820 + 150 * sample, 550, 1, 1,
-                        {750, 490, 1200, 620, 0}, sample * 1.57079633f, 1, 0.75f)
+                        {750, 490, 1200, 620, 0}, sample * 1.57079633f, 1, 0.75f, owners)
                     : HudFeedback::MakeDrawPlan(settings, 820 + 150 * sample, 550, 2, 2,
                         {750, 490, 1200, 620, 0}, sample != 0, sample == 2 ? 1.0f : 0.0f);
                 for (size_t i = 0; i < plan.count && used < ui.previewQuads.size(); ++i)
@@ -3826,7 +3829,7 @@ namespace BZROpenShim
                 for (void* quad : ui.previewQuads) g_BzrFn_UiSetActive(quad, 0);
             SetInputBindingUiLabelTextFitted(ui.previewNote,
                 !ok ? "Preview unavailable on this build."
-                    : ui.category == kShimDamageCategory ? "Sample arcs are shown even when off."
+                    : ui.category == kShimDamageCategory ? "One tick per attacker."
                     : settings.style == HudFeedback::Style::Stock
                         ? "Stock art stays in game."
                         : "Sample hit is shown even when off.", 420.0f);
@@ -4050,7 +4053,7 @@ namespace BZROpenShim
             {
                 HudFeedback::ReloadConfig();
                 const char* captions[] = {"Idle", "Contact", "Sample hit"};
-                const char* damageCaptions[] = {"Front", "Right", "Rear"};
+                const char* damageCaptions[] = {"1 attacker", "2 attackers", "3 attackers"};
                 for (int sample = 0; sample < 3; ++sample)
                 {
                     _snprintf_s(name, _TRUNCATE, "ReticlePreviewCaption%d", sample);
