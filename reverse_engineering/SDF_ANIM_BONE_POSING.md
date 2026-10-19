@@ -25,6 +25,11 @@ mirrored in Z.
   doors in `abhang` are the outlier, so don't use them as the reference.
 - Stock skeletons are rooted at `U3DMesh`. A custom skeleton rooted at the body GEO also works: both
   keep model-space vertices and parent-relative bone positions.
+- ANIM element records are `(start, length, loop, speed)`. A negative length plays backwards from
+  `start`, as `abhang`'s closing element does (start 30, length −31). The repairdepot constructor
+  plays only element 0, so a model can be made to close on creation by reversing element 0 alone:
+  the four bytes before each record's speed float are its length, the four before that its start.
+  Verified in game in 2026-10 (CR `avdropx`, the dropship ramps fold shut).
 
 ## When a custom animated part looks wrong
 
