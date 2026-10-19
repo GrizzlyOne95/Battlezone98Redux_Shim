@@ -70,6 +70,27 @@ int main()
     state.Observe(21,values,12000,commands);
     Check(!state.groups[commands].observed,"a new player invalidates render-sampled command history");
 
+    Check(HullWarning(24,100) && !HullWarning(25,100),"hull warning matches the native strict 25-percent threshold");
+    Check(HullWarning(1,0) && HullWarning(std::numeric_limits<float>::quiet_NaN(),100),"invalid hull values fail visible");
+    Check(AmmoWarning(9,3,{10,20,0,0,0}),"all available weapons unaffordable pins the ammo meter");
+    Check(!AmmoWarning(10,3,{10,20,0,0,0}),"one affordable available weapon clears the native warning");
+    Check(!AmmoWarning(0,1,{0,0,0,0,0}),"zero-cost weapons do not create an empty-ammo warning");
+    Check(!AmmoWarning(0,0,{0,0,0,0,0}),"no weapons does not create an ammo warning");
+    const size_t hull = static_cast<size_t>(Group::Hull), ammo = static_cast<size_t>(Group::Ammo);
+    state.groups[hull].Observe(100,1000);
+    state.groups[ammo].Observe(100,1000);
+    state.groups[hull].Observe(24,5000,HullWarning(24,100));
+    Check(state.groups[hull].Opacity(fade,5000)==1 && state.groups[ammo].Opacity(fade,5000)==0,
+        "hull warnings reveal only hull while unchanged ammo remains hidden");
+    state.groups[hull].Observe(24,15000,true);
+    Check(state.groups[hull].Opacity(fade,16000)==1,"persistent critical state keeps refreshing the hold");
+    state.groups[hull].Observe(50,16000);
+    Check(state.groups[hull].Opacity(fade,17000)==1 && state.groups[hull].Opacity(fade,17500)==0,
+        "repair clears the warning and starts a fresh idle hold");
+    state.groups[ammo].Observe(99,18000);
+    Check(state.groups[ammo].Opacity(fade,18000)==1 && state.groups[hull].Opacity(fade,18000)==0,
+        "spending or refilling ammo reveals it independently of hull");
+
     Check(ScaleAlpha(0x804080FF,0.25f)==0x204080FF,"multiply native alpha while preserving RGB");
     Check(ScaleAlpha(0x004080FF,0.25f)==0x004080FF,"native transparency remains transparent");
     Check(ScaleAlpha(0x804080FF,1)==0x804080FF,"full opacity is byte identical");

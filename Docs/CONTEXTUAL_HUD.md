@@ -2,14 +2,15 @@
 
 Default-off local presentation controls for the released GOG 2.2.301 game.
 OpenShim Options → HUD → HUD Fading contains independent controls for the
-weapon list, scrap meter, pilot meter and command interface. Existing colors,
+weapon list, scrap meter, pilot meter and command interface. The separate
+HUD -> Meter Fading page adds cockpit hull and ammo controls. Existing colors,
 Stock/Legacy layout, native scaling, text, alignment, backplates and gameplay
 remain as selected.
 
 ## Controls and behavior
 
-All sixteen keys are in `[Display]` and apply live. For each prefix
-`WeaponList`, `ScrapHud`, `PilotHud` and `CommandHud`:
+All twenty-four keys are in `[Display]` and apply live. For each prefix
+`WeaponList`, `ScrapHud`, `PilotHud`, `CommandHud`, `HullHud` and `AmmoHud`:
 
 | Suffix | Default | Menu | INI range |
 | --- | --- | --- | --- |
@@ -19,7 +20,7 @@ All sixteen keys are in `[Display]` and apply live. For each prefix
 | `FadeDuration` | 500 | Instant / Fast / Normal / Slow | 0–5000 ms |
 
 Fast/Normal/Slow are 200/500/1000 ms. Invalid values use the defaults.
-`CommandHudIdleOpacity` defaults to 0 (Hidden), rather than 25. All four Fade
+`CommandHudIdleOpacity` defaults to 0 (Hidden), rather than 25. All six Fade
 switches still default Off. Compact Cmd rows describe the command controls.
 Opacity multiplies native alpha; existing dimming/transparency and RGB are preserved.
 Disabled groups remain fully native. A fresh all-Off launch installs no new
@@ -32,6 +33,12 @@ toward its own idle opacity. Relevant changes restore full opacity immediately:
   Firing, spending or replenishing ammo therefore keeps/reveals the list.
 - Scrap: current scrap or maximum capacity.
 - Pilots: current available pilots or maximum capacity.
+- Hull: current health or maximum health changes. Health below the native
+  strict 25% threshold stays visible; repairs start a fresh hold.
+- Ammo: spending/refill, capacity, weapon selection/loadout or ammo-cost changes.
+  The native all-available-weapons-unaffordable warning keeps the group visible.
+  The group includes label/fill, remaining-shot text and all three cost-marker
+  rectangles. Zero-cost weapons do not create an empty-ammo warning.
 - Commands: the native row/group actions, command-menu activation, or a native
   pointer action hitting a command row. An active unit selection, category,
   menu navigation or nested build page stays fully visible until it closes.
@@ -43,8 +50,7 @@ reveal the others. A player/team change, mission reset or config apply starts
 a new hold. Shell/pause/unreadable snapshot state fails fully visible and
 discards fade history. Geometry is still submitted with alpha zero for Hidden;
 native status rendering and its warning/audio side effects always execute.
-Hull/ammo bars, reticle, radar and objectives are outside the scopes.
-This initial batch does not add fading for those groups.
+Reticle, radar and objectives remain outside the fade scopes.
 The remaining native draw owners, incomplete alpha paths and suggested reveal
 policies are mapped in [HUD_ELEMENT_MAP.md](HUD_ELEMENT_MAP.md). That research
 does not enable additional fading or qualify new hooks.
@@ -101,6 +107,22 @@ The initial adapter is gated to GOG 2.2.301. Steam is disabled; Steam, Wine,
 Proton and other renderers require qualification before release. There are no
 new dependencies, paths, asset files, SDK APIs or mission overrides.
 
+The hull/ammo extension scopes two hull sprite CALLs, ammo shots text and
+three cost-marker filled rectangles. The two ammo sprite CALLs retain a single
+owner in HudPalette, shared by color and fade. Cached binding/installation
+allows either feature to initialize first without guarding or redirecting the
+other feature's wrapper as though it were stock. Palette guards still qualify
+before palette installation. Idle fade multiplies final alpha after tint.
+
+Meter activity samples the released current/max-health and max-ammo accessors,
+plus copied weapon costs and selection/loadout state. Displayed interpolation
+is not an activity source. The existing owner round-trip and mission reset
+rules apply; unreadable samples fail visible. Native pane clipping, UVs,
+warning sounds and status updates always execute. A partial/refused meter
+installation keeps both meter opacities at one and does not stop other enabled
+fade groups. All new addresses/guards are named catalog rows; the existing
+outline helper is distinct from the filled-rectangle cost-marker helper.
+
 ## Qualification
 
 Released executable SHA-256:
@@ -113,7 +135,7 @@ No leaked PDB or decompiler output is committed.
 The new portable policy test covers holds, smooth/instant fades, Hidden,
 independent activity, clock reversal, identity/reset behavior and alpha/RGB
 preservation, repeated command activity and separate safe-frame/render samples.
-All 118 Windows CTest tests and INI completeness (249 settings),
+All 118 Windows CTest tests and INI completeness (257 settings),
 conservative defaults, writer (23) and migration (67) checks pass. The new
 policy test passes GCC under WSL with C++17 and warnings as errors.
 
@@ -180,3 +202,44 @@ acceptance is inferred from the successful build or smoke run.
 Local fixture/probe output is under ignored `bin/command-hud/`.
 
 Local probes/fixtures/logs are ignored under `bin/contextual-hud/`.
+
+## Hull/ammo extension qualification
+
+Released GOG DX11, 2026-10-19: native ReadProcessMemory PID 31232 matched the
+meter renderer, six new draw CALLs, two shared ammo sprite CALLs and four value/
+weapon accessors before patch authoring. The distinct filled-rect helper was
+also inspected statically and matched live PID 48744. An initial installation
+attempt used the existing outline-helper alias for cost markers; native CALL
+ownership refused those redirects and both meters stayed visible. That run is
+not accepted fade evidence. The final catalog binds the actual filled helper.
+
+The final Release Win32 build, all 118 Windows tests, INI completeness (257),
+conservative defaults, writer (23), migration (67), and portable policy tests
+under WSL GCC C++17 with warnings as errors pass. New policy checks cover
+warning thresholds, zero-cost weapons, independent histories and warning-clear
+holds. Local fixtures/traces are ignored under `bin/hull-ammo/`.
+
+PID 24852: enabled independent hull/ammo fades reached 25% alpha through smooth
+intermediate steps. Current-health and ammo changes revealed their respective
+groups; critical hull health stayed visible. Cyan hull and Yellow ammo RGB
+remained fixed; ammo count/cost-marker RGB remained native. Weapon draws stayed
+at 100% and all 1,200,276 sampled color-helper calls outside the meter scopes
+matched native output. The full native renderer continued executing.
+
+PID 48028: Hidden reached zero alpha for hull artwork and all ammo submissions.
+At steady critical health, hull remained at 100% while ammo stayed hidden;
+setting ammo to zero restored all ammo submissions to 100%. Repair/refill
+cleared the warning holds and both groups faded again. The weapon list stayed
+at 100%; all 2,167,900 out-of-scope color-helper calls matched native output.
+
+PID 34176: a deliberately mismatched hull-label guard refused the meter group.
+Native reads matched all 38 checked fade/shared-ammo source regions, including
+both color-helper entrypoints and every new meter CALL. Fresh Off PID 44788
+matched the same 38 regions. The test configuration, fixture, catalog and
+window settings were restored after each run.
+
+Interactive appearance, final Meter Fading page fit/navigation/apply/
+save, warning audio, faction/view/lifecycle variants, multiplayer and the full
+store/renderer/platform matrix remain unverified. Previously deferred command
+visual checks remain pending as requested. No interactive game test was added
+for this extension.

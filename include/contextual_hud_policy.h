@@ -7,7 +7,7 @@
 
 namespace BZROpenShim::ContextualHud
 {
-    enum class Group : size_t { Weapons, Scrap, Pilots, Commands, Count };
+    enum class Group : size_t { Weapons, Scrap, Pilots, Commands, Hull, Ammo, Count };
     constexpr size_t kGroups = static_cast<size_t>(Group::Count);
     struct GroupSettings { bool enabled = false; int idlePercent = 25; int delayMs = 2500; int fadeMs = 500; };
     struct Settings
@@ -49,6 +49,20 @@ namespace BZROpenShim::ContextualHud
             for (size_t i = 0; i < std::min(count, kGroups); ++i) groups[i].Observe(values[i], now);
         }
     };
+    inline bool HullWarning(float health, float maximum)
+    {
+        // Invalid meters must remain visible, too.
+        return !std::isfinite(health) || !std::isfinite(maximum) || maximum <= 0 ||
+            health < 0 || health / maximum < 0.25f;
+    }
+    inline bool AmmoWarning(uint32_t ammo, uint32_t available, const std::array<uint32_t, 5>& costs)
+    {
+        uint32_t insufficient = 0;
+        for (size_t i = 0; i < costs.size(); ++i)
+            if (ammo < costs[i]) insufficient |= 1u << i;
+        // Same all-available-weapons-unaffordable condition as native status.
+        return insufficient != 0 && insufficient == available;
+    }
     inline uint32_t ScaleAlpha(uint32_t color, float opacity)
     {
         if (!std::isfinite(opacity) || opacity >= 1) return color;
