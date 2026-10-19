@@ -5,6 +5,7 @@
 // registry that drives the multiplayer gate, split out of bzr_hooks.cpp.
 #include "bzr_hooks.h"
 #include "hud_feedback.h"
+#include "contextual_hud.h"
 #include "hud_palette.h"
 #include "bzr_object_layout.h"
 #include "bzr_hooks_internal.h"
@@ -724,6 +725,9 @@ namespace BZROpenShim
             break;
         case ShimSettingApplyGroup::HudFeedback:
             HudFeedback::ReloadConfig();
+            break;
+        case ShimSettingApplyGroup::ContextualHud:
+            ContextualHud::ReloadConfig();
             break;
         case ShimSettingApplyGroup::HudPalette:
             HudPalette::ReloadConfig();
