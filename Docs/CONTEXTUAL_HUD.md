@@ -95,10 +95,29 @@ pilot changes, smoothly fade and settle at 25% native alpha. Custom Amber scrap
 and Cyan pilot RGB stayed unchanged. All 1,388,097 color-helper calls outside
 those scopes matched native results exactly during the 36-second probe.
 
-Legacy-layout and guard-refusal acceptance are in progress. UI fit/live apply
-could not be captured: the Windows screenshot helper returned `GetCursorPos
-failed: Access is denied (0x80070005)` again after a fresh window selection.
-Required follow-up includes UI fit/live apply, weapon selection/loadout,
+The enabled Legacy run (PID 43564, DX11) passed the same independent activity
+checks, including the reconstructed plates and native text. All 172,200
+out-of-scope color calls matched native output, while Amber/Cyan text retained
+its RGB. A deliberate `HudFadeWeaponText` expected-byte mismatch (PID 41576)
+logged that Contextual HUD stood down; native reads confirmed all 22 new guard
+windows remained original, including both helper entrypoints and all draw CALLs.
+An earlier Legacy probe attached before initialization due to a stale readiness
+line and was discarded; the accepted probes wait for the current PID's readiness.
+
+Menu navigation and weapon Fade Off/On apply/save passed in PID 30056. At the
+small test window, long row labels clipped; the final labels use compact names
+such as Weapon Idle, Weapon Delay and Weapon Speed. The rebuilt HUD category
+and all twelve fading rows fit without clipping in PID 30612. The right-column
+Pilot Idle control changed 25% to 50%, reported Applied and saved the correct
+INI key. The Release build, all 118 tests and INI checks pass after the label fix.
+
+The Windows deployment verifier confirms the source catalog and absence of
+stale patch configuration. Its overall result fails the existing version
+precedence check: the development build and installed mod bundle both report
+1.0.0.53. No release version was changed for this feature; test launches deploy
+the complete current DLL/catalog set, with final artifact hashes checked.
+
+Required follow-up includes weapon selection/loadout,
 long missions, save/load, eject/re-enter, resolutions/scales and the full
 renderer/store/platform matrix. Multiplayer presentation is unqualified.
 
