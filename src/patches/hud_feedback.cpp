@@ -241,12 +241,17 @@ namespace BZROpenShim::HudFeedback
         }
     }
 
+    Settings PreviewSettings() { return ReadSettings(); }
+
     bool ReloadConfig()
     {
         Settings settings;
         std::string text;
         if (TryGetUserConfigString("Display", "ReticleStyle", text)) settings.style = ParseStyle(text);
         if (TryGetUserConfigString("Display", "ReticleColor", text)) settings.color = ParseColor(text);
+        if (TryGetUserConfigString("Display", "HitMarkerColor", text)) settings.hitColor = ParseColor(text);
+        settings.hitSizePercent = ReadInteger("HitMarkerSize", 100, 50, 200);
+        settings.hitOpacity = ReadInteger("HitMarkerOpacity", 100, 25, 100);
         settings.sizePercent = ReadInteger("ReticleSize", 100, 50, 200);
         settings.thickness = ReadInteger("ReticleThickness", 2, 1, 3);
         settings.opacity = ReadInteger("ReticleOpacity", 100, 25, 100);

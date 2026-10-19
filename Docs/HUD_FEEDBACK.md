@@ -1,7 +1,7 @@
 # Reticle and hit feedback
 
 Experimental, opt-in native feedback for the released GOG 2.2.301 executable.
-OpenShim Options → HUD contains the controls. Stock style, reactive feedback
+OpenShim Options → HUD → Reticle & Hits contains the controls. Stock style, reactive feedback
 off and hit markers off are the shipped defaults; this combination installs
 none of the new adapters.
 
@@ -20,8 +20,11 @@ All controls apply live and persist in `[Display]` in `openshim.ini`.
 | `ReactiveReticle` | Off, On | 0 |
 | `HitMarkers` | Off, On | 0 |
 | `HitMarkerDuration` | 80, 120, 180, 250 ms | 120 |
+| `HitMarkerColor` | White, Green, Cyan, Amber | White |
+| `HitMarkerSize` | Small (75), Normal (100), Large (150) | 100 |
+| `HitMarkerOpacity` | 50, 75, 100 percent | 100 |
 
-The INI also accepts size 50–200, opacity 25–100 and duration 60–400.
+The INI also accepts reticle/hit size 50–200, opacity 25–100 and duration 60–400.
 Unknown styles preserve Stock; unknown colors use White. Styling affects the
 custom geometry and feedback, leaving the Stock sprite's appearance alone.
 The reticle follows the engine's projected aim point and UI scale. It does
@@ -31,12 +34,29 @@ Reactive feedback contracts the custom cross's gap and adds two side brackets
 when the stock reticle already has an object. Brackets also work with Stock
 art. This is generic contact feedback, without friend/enemy classification.
 
-Hit feedback adds short white diagonal ticks, holding for half the configured
+Hit feedback adds short diagonal ticks (white by default), holding for half the configured
 duration and fading for the remainder. A successive hit refreshes one pulse.
 It requires verified health loss from the local player's weapon against
 another live object. Immune/zero damage, healing, collision/environmental
 damage, self damage, AI damage and stale object identities do not qualify.
 There is no separate kill marker, hit sound or damage number.
+
+Hit color, size and opacity are independent of reticle color, size and opacity.
+Line thickness and outline still follow the corresponding reticle controls.
+The subpage shows live idle, contact and sample-hit geometry using the same
+draw-plan function. The sample hit is shown even when Hit Markers is off;
+the preview never produces a simulation event. Stock artwork stays in game,
+so Stock previews show optional feedback only. Preview panes use a fixed
+design-space scale, rather than promising an exact physical pixel size for
+every in-game UI scale.
+
+The initial preview is qualified only for GOG DX11. It uses 96 owned native
+UI quads, with a guarded `UiViewReflow` adapter and a 2x2 white texture. The
+stock UI shader applies BGRA correction to Ogre-generated vertex colors;
+the preview compensates in its own producer without changing shared shaders.
+Missing artwork, another backend or a failed guard disables only the preview.
+The existing nine-tile hub is unchanged; HUD links to this subpage, keeping
+all twelve appearance/feedback controls reachable without truncating rows.
 
 Reactive feedback and hit confirmation are disabled in network sessions;
 custom static reticle styles remain cosmetic. Unreadable session state fails
@@ -118,11 +138,43 @@ Reticle submission observed sprite 415, flags 0x250004 and UI scale 2/2.
 
 Remaining acceptance: broad weapon/source coverage; long mission/restart/save/load
 sessions; other view modes, resolutions and renderers; live multiplayer
-suppression; Steam/Proton/Wine qualification. A narrow local portrait window
-crops the existing two-column Options layout, and the local direct-mission
-pause menu rendered black with both feedback enabled and Stock/Off. These
-observations do not qualify the full Options layout or pause-menu path.
+suppression; Steam/Proton/Wine qualification. The local direct-mission pause
+menu rendered black with both feedback enabled and Stock/Off. This observation
+does not qualify the pause-menu path. The narrow-window Options crop observed
+in this initial pass is addressed by the customization follow-up below.
 
 Raw probes and fixture output are local scratch under ignored
 `bin/hud-feedback/`; no decompiler output, game binaries or private symbols
 are part of this feature.
+
+### Customization follow-up, 2026-10-19
+
+Frontend PID 14856 verified independent meter-color controls and the retained
+Stock/Legacy switch. PID 38092 verified HUD-to-Reticle navigation, all twelve
+controls, live geometry changes and independent marker-color application.
+The initial subpage action sentinel collision was corrected before acceptance.
+The three feedback toggle rows now default to Off when their INI keys are
+absent, matching the runtime defaults. Released UI reflow bytes were captured
+from PID 42864 before using the adapter.
+
+Frontend PID 35672 visually verified corrected cyan reticles and amber
+sample-hit ticks. Changing reticle opacity to 50% left marker opacity at 75%
+and updated the preview immediately. Escape returned to HUD. The preview
+uses owned screen widgets, and no HUD events are published by its samples.
+
+The layout follow-up moves the twelve reticle controls onto their own page,
+shortens repeated marker labels and reserves a separate preview card. Compact
+window runs verified two-line descriptions contained in the info panel.
+The narrow-window fit now centers the complete options canvas and maps hover
+coordinates through the same transform. Its first live pass exposed a second
+font-scale correction, which was removed because native fonts already fit
+the viewport width. The corrected build and all 115 Windows tests pass;
+final visual verification of that font correction and narrow-window click
+targets was interrupted and remains pending. Reopen a page after changing
+window aspect to rebuild its fit.
+
+A frontend startup stall in PID 36164 was traced to the existing multiplayer
+readiness diagnostic's thread suspension while the main thread was inside
+the graphics driver. Debugger resumption allowed a graceful close; subsequent
+isolated fixtures disabled that diagnostic using its existing environment
+override. This work does not change the diagnostic or thread-suspension code.

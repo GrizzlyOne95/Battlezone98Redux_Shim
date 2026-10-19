@@ -75,6 +75,8 @@ it are the layout contract with each screen's code.
 | `osh_options_center.png` | stock Options screen, five-slot column |
 | `osh_hub_center.png` | OpenShim Options hub |
 | `osh_category_center.png` | every OpenShim Options category screen |
+| `osh_preview_white.png` | 2x2 white source for owned, tinted live reticle-preview quads |
+| `osh_reticle_center.png` | twelve reticle/feedback controls and a dedicated preview card |
 | `osh_tile_hv.png`, `osh_tile_ck.png` | hub tiles, hover / pressed (300x100) |
 | `osh_value_hv.png`, `osh_value_ck.png` | category value cells, hover / pressed (196x42) |
 | `osh_keys_center.png` | key-binding editor on the stock Input screen |

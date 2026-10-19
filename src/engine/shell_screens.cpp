@@ -37,6 +37,9 @@
 // it, so Back from a stock screen opened over an OpenShim one works too.
 
 #include "shell_screens.h"
+#include "BZROpenShim.h"
+#include "render_profile_runtime.h"
+#include "ui_screen_fit.h"
 
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
@@ -45,6 +48,7 @@
 #include <windows.h>
 
 #include <cstring>
+#include <cmath>
 #include <filesystem>
 
 namespace BZROpenShim
@@ -117,6 +121,8 @@ namespace BZROpenShim::ShellScreens
         {
             uint32_t id;
             void* screen;
+            void* panel;
+            float scale;
         };
         LiveEntry g_Live[kMaxScreens] = {};
 
@@ -223,6 +229,8 @@ namespace BZROpenShim::ShellScreens
                 if (entry.id == id)
                 {
                     entry.screen = screen;
+                    entry.panel = nullptr;
+                    entry.scale = 1.0f;
                     return;
                 }
             }
@@ -230,7 +238,7 @@ namespace BZROpenShim::ShellScreens
             {
                 if (entry.id == 0)
                 {
-                    entry = { id, screen };
+                    entry = { id, screen, nullptr, 1.0f };
                     return;
                 }
             }
@@ -382,6 +390,7 @@ namespace BZROpenShim::ShellScreens
                 if (entry.screen != self)
                     continue;
                 entry.screen = nullptr;
+                entry.panel = nullptr;
                 if (const ScreenDef* def = FindDef(entry.id))
                 {
                     Log(L"[SHELLUI] closing screen %hs\n", def->name);
@@ -409,6 +418,21 @@ namespace BZROpenShim::ShellScreens
             if (memory)
                 std::memset(memory, 0, size);
             return memory;
+        }
+
+        struct ClientExtent { LONG width = 0, height = 0; };
+        BOOL CALLBACK ReadClientExtent(HWND window, LPARAM param)
+        {
+            DWORD process = 0;
+            GetWindowThreadProcessId(window, &process);
+            RECT rect{};
+            if (process == GetCurrentProcessId() && IsWindowVisible(window) && GetClientRect(window, &rect))
+            {
+                auto& best = *reinterpret_cast<ClientExtent*>(param);
+                if (static_cast<int64_t>(rect.right) * rect.bottom > static_cast<int64_t>(best.width) * best.height)
+                    best = {rect.right, rect.bottom};
+            }
+            return TRUE;
         }
 
         int FloatBits(float value)
@@ -475,7 +499,29 @@ namespace BZROpenShim::ShellScreens
         void* memory = AllocWidget(kUiViewSize);
         if (!memory)
             return nullptr;
-        void* view = g_BzrFn_OverlayCtor(memory, name, r.x, r.y, r.w, r.h, flags, layoutParent, 0);
+        Rect fitted = r;
+        LiveEntry* owner = nullptr;
+        for (auto& entry : g_Live)
+            if (entry.screen == container &&
+                (entry.id == kOptionsHubScreenId ||
+                 (entry.id >= kOptionsCategoryScreenIdBase && entry.id < kOptionsCategoryScreenIdBase + 16)))
+                owner = &entry;
+        if (owner && !layoutParent && (flags & 0x40))
+        {
+            float width = 0, height = 0;
+            if (ClientSize(width, height))
+            {
+                owner->scale = UiScreenFit::Calculate(width, height).RelativeToHeight(height);
+                fitted = {r.x * owner->scale, (1080.0f - r.h * owner->scale) * .5f,
+                          r.w * owner->scale, r.h * owner->scale};
+            }
+        }
+        else
+        {
+            const float scale = WidgetLayoutScale(layoutParent);
+            fitted = {r.x * scale, r.y * scale, r.w * scale, r.h * scale};
+        }
+        void* view = g_BzrFn_OverlayCtor(memory, name, fitted.x, fitted.y, fitted.w, fitted.h, flags, layoutParent, 0);
         if (!view)
             return nullptr;
         if (g_BzrFn_UiSetActive)
@@ -483,6 +529,7 @@ namespace BZROpenShim::ShellScreens
         if (texture && *texture && g_BzrFn_SetTextureOff)
             g_BzrFn_SetTextureOff(view, texture);
         g_BzrFn_AddChild(container, view, 0);
+        if (owner) owner->panel = view;
         return view;
     }
 
@@ -494,14 +541,58 @@ namespace BZROpenShim::ShellScreens
         void* memory = AllocWidget(kUiTextSize);
         if (!memory)
             return nullptr;
-        void* label = g_BzrFn_LabelCtor(memory, name, r.x, r.y, r.w, r.h, flags, layoutParent, 0);
+        const float scale = WidgetLayoutScale(layoutParent);
+        void* label = g_BzrFn_LabelCtor(memory, name, r.x * scale, r.y * scale, r.w * scale, r.h * scale,
+                                      flags, layoutParent, 0);
         if (!label)
             return nullptr;
         g_BzrFn_AddChild(container, label, 0);
+        // Native fonts already use min(viewport width/640, height/480).
+        // Unlike view bounds they therefore already follow this 4:3 fit;
+        // applying the layout correction again would shrink the text twice.
         SetLabelText(label, text);
         if (g_BzrFn_UiSetActive)
             g_BzrFn_UiSetActive(label, 1);
         return label;
+    }
+
+    static bool ReflowPanelGuarded(void* panel, const Rect& rect, uint32_t argb, uint32_t reflow)
+    {
+        __try
+        {
+            auto* bytes = static_cast<uint8_t*>(panel);
+            // Released cUI_View ctor: original design bounds +0xEC; RGBA
+            // ColourValue +0x104. Its reflow recalculates the actual viewport
+            // bounds and updates the owned ManualObject's existing section.
+            std::memcpy(bytes + 0xEC, &rect, sizeof(rect));
+            // This stock DX11 UI material applies the native BGRA correction
+            // to Ogre-generated ManualObject colors too. Compensate only our
+            // owned preview producer; leave shared materials/shaders intact.
+            const float rgba[] = {(argb & 255) / 255.0f, ((argb >> 8) & 255) / 255.0f,
+                                  ((argb >> 16) & 255) / 255.0f, (argb >> 24) / 255.0f};
+            std::memcpy(bytes + 0x104, rgba, sizeof(rgba));
+            reinterpret_cast<void(__thiscall*)(void*)>(reflow)(panel);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+
+    bool SetPanelRectColor(void* panel, const Rect& rect, uint32_t argb)
+    {
+        if (GetBzrDistribution() != BzrDistribution::GOG || !IsCompatibleGameVersion() ||
+            RenderProfiles::IdentifyActiveRenderSystem() != 1) return false;
+        static uint32_t reflow = 0;
+        static const bool bound = [] {
+            const HookEngine::EngineRow rows[] = {{"UiViewReflow", &reflow}};
+            return HookEngine::BindEngineRows("UI preview quad", rows);
+        }();
+        if (!bound || !panel || !std::isfinite(rect.x) || !std::isfinite(rect.y) ||
+            !std::isfinite(rect.w) || !std::isfinite(rect.h) || rect.w <= 0 || rect.h <= 0 ||
+            rect.x < -65535 || rect.y < -65535 || rect.x + rect.w > 65535 || rect.y + rect.h > 65535)
+            return false;
+        const float scale = WidgetLayoutScale(panel);
+        const Rect fitted{rect.x * scale, rect.y * scale, rect.w * scale, rect.h * scale};
+        return ReflowPanelGuarded(panel, fitted, argb, reflow);
     }
 
     void* AddButton(void* container, void* layoutParent, const char* name, const Rect& r,
@@ -513,8 +604,9 @@ namespace BZROpenShim::ShellScreens
         void* memory = AllocWidget(kUiButtonSize);
         if (!memory)
             return nullptr;
-        void* button = g_BzrFn_ButtonCtor(memory, name, r.x, r.y, r.w, r.h, kControlFlags,
-                                          layoutParent, FloatBits(textOffset), 0);
+        const float scale = WidgetLayoutScale(layoutParent);
+        void* button = g_BzrFn_ButtonCtor(memory, name, r.x * scale, r.y * scale, r.w * scale, r.h * scale,
+                                        kControlFlags, layoutParent, FloatBits(textOffset * scale), 0);
         if (!button)
             return nullptr;
         if (skin.off && g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(button, skin.off);
@@ -536,6 +628,38 @@ namespace BZROpenShim::ShellScreens
         return button;
     }
 
+    bool ClientSize(float& width, float& height)
+    {
+        ClientExtent extent;
+        EnumWindows(ReadClientExtent, reinterpret_cast<LPARAM>(&extent));
+        if (extent.width <= 0 || extent.height <= 0) return false;
+        width = static_cast<float>(extent.width);
+        height = static_cast<float>(extent.height);
+        return true;
+    }
+
+    float WidgetLayoutScale(void* widget)
+    {
+        __try
+        {
+            for (int depth = 0; widget && depth < 16; ++depth)
+            {
+                for (const auto& entry : g_Live)
+                    if (entry.screen && entry.panel == widget) return entry.scale;
+                widget = *reinterpret_cast<void**>(static_cast<uint8_t*>(widget) + 0x13C);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+        return 1.0f;
+    }
+
+    float ActiveLayoutScale()
+    {
+        for (const auto& entry : g_Live)
+            if (entry.screen && entry.panel) return entry.scale;
+        return 1.0f;
+    }
+
     bool CursorDesignPoint(float& x, float& y)
     {
         HWND window = GetForegroundWindow();
@@ -544,10 +668,12 @@ namespace BZROpenShim::ShellScreens
         if (!window || !GetCursorPos(&cursor) || !ScreenToClient(window, &cursor) ||
             !GetClientRect(window, &client) || client.bottom <= 0)
             return false;
-        const float scale = static_cast<float>(client.bottom) / 1080.0f;
+        const float contentScale = ActiveLayoutScale();
+        const float scale = static_cast<float>(client.bottom) / 1080.0f * contentScale;
         const float offsetX = (static_cast<float>(client.right) - 1440.0f * scale) * 0.5f;
+        const float offsetY = (static_cast<float>(client.bottom) - 1080.0f * scale) * 0.5f;
         x = (static_cast<float>(cursor.x) - offsetX) / scale;
-        y = static_cast<float>(cursor.y) / scale;
+        y = (static_cast<float>(cursor.y) - offsetY) / scale;
         return true;
     }
 

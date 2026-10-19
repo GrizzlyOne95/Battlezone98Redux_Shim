@@ -83,6 +83,28 @@ int main()
     Check(!ConfirmsHit(sample), "invalid health data does not confirm");
 
     Pulse pulse;
+    settings = {};
+    settings.hitColor = ParseColor("Amber");
+    settings.hitOpacity = 75;
+    settings.hitSizePercent = 150;
+    const auto hitOnly = MakeDrawPlan(settings, 500, 350, 2, 2, pane, false, 1);
+    settings.opacity = 25;
+    settings.sizePercent = 75;
+    const auto resizedReticle = MakeDrawPlan(settings, 500, 350, 2, 2, pane, false, 1);
+    Check(hitOnly.count == 16 && resizedReticle.count == hitOnly.count, "hit-only preview uses bounded geometry");
+    for (size_t i = 0; i < hitOnly.count; ++i)
+    {
+        const auto& a = hitOnly.rects[i]; const auto& b = resizedReticle.rects[i];
+        Check(a.left == b.left && a.top == b.top && a.right == b.right && a.bottom == b.bottom && a.color == b.color,
+              "hit size/opacity stay independent of reticle size/opacity");
+        Check(a.color == 0xBFFFC040u, "hit tint and opacity use their independent native ARGB values");
+    }
+    settings.style = Style::CrossDot; settings.reactive = true; settings.outline = true;
+    size_t previewCount = 0;
+    for (int i = 0; i < 3; ++i)
+        previewCount += MakeDrawPlan(settings, 820 + i * 150, 550, 2, 2,
+                                    {750, 490, 1200, 620, 0}, i != 0, i == 2 ? 1.0f : 0.0f).count;
+    Check(previewCount <= 96, "all three UI samples fit their owned quad pool");
     Check(pulse.Strength(100, 120) == 0, "no initial hit pulse");
     pulse.Start(100);
     Check(pulse.Strength(100, 120) == 1 && pulse.Strength(160, 120) == 1, "hold first half of duration");

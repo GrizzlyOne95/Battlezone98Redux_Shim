@@ -1,7 +1,38 @@
 # HUD colour customization — plan
 
-Status: **not started.** This records a decision and a scope so the work can be
-picked up cleanly, and so the idea is not re-derived from scratch.
+Status: **scrap/pilot customization implemented, opt-in; radar colors remain
+unimplemented.** OpenShim Options → HUD keeps the existing `Scrap/Pilot HUD`
+Stock/Legacy choice and adds independent Scrap Color and Pilot Color controls.
+
+## Player controls
+
+`[Display] ScrapHudColor` and `PilotHudColor` default to `Default`, which uses
+the selected layout's existing native palette: white in Stock, scrap blue and
+pilot green in Legacy. Choosing a color changes each readout's title and value
+together. It does not move the readout, change alignment, alter plate geometry,
+or modify other HUD colors. Both settings apply live and persist separately
+from the Stock/Legacy layout setting.
+
+Menu choices are Default, White, Blue, Green, Cyan, Amber and Magenta. The INI
+also accepts `#RRGGBB` and `0xAARRGGBB`; explicit alpha is preserved. Invalid
+values fall back to the layout palette. Custom hex values display as Custom
+in Options. Choosing Default restores the native palette references.
+
+## Native implementation
+
+The existing guarded four string-color operands in `scrap_pilot_hud.cpp` can
+reference either their original engine palette globals or two aligned,
+shim-owned ARGB values. The shared engine palette is never recolored. The
+alignment decision still comes exclusively from the layout switch; its
+backplate hooks, command-menu-relative anchor, viewport clamp and mission
+position overrides retain their existing paths. Layout palette references
+remain live, so engine palette reloads still work with Default.
+
+These are process-wide player preferences, independent of campaign PDA
+presets. EXU already relinquishes its four HUD color hooks when the OpenShim
+restore export is present; this work adds no competing Lua color hooks or
+new reusable Lua API. The portable parser has malformed-input, preset,
+ARGB-order and alpha tests. No new native address is needed for meter colors.
 
 ## Why this lives in OpenShim, not Campaign Reimagined
 
@@ -27,10 +58,11 @@ EXU exports exactly two HUD colour setters, both taking packed ARGB:
 - `SetScrapHudColor`
 - `SetPilotHudColor`
 
-Today they are called from one place, `PersistentConfig.ApplyScrapPilotHudLayout`,
+Historically they were called from `PersistentConfig.ApplyScrapPilotHudLayout`,
 with hardcoded constants selected by `ScrapPilotHudLayout` — legacy uses
 `0xFF007FFF` for scrap and `0xFF00FF00` for pilot, stock uses `0xFFFFFFFF`
-(white, meaning "do not tint").
+(white, meaning "do not tint"). OpenShim owns native text colors when its HUD
+bridge is available; the current player controls are implemented here.
 
 OpenShim already understands the radar deeply: `bzr_hooks.cpp` hooks the layout
 builder at `0x00492EC0` and knows `CockpitRadar::Render` at `0x0049405B`, along
@@ -46,23 +78,40 @@ setting can exist. That is the expensive half of this work.
 
 ## Scope, in two independent pieces
 
-1. **Scrap / pilot HUD tint.** Cheap. The setters exist and OpenShim already
-   owns the layout. This is a colour source swap plus a settings-page row,
-   with `defaultIndex` matching today's hardcoded constants so an absent key
-   changes nothing.
+1. **Scrap / pilot HUD tint.** Implemented with two independent settings.
+   Missing keys and Default preserve the selected layout's colors.
 2. **Radar icon colour.** Expensive. Needs new native API first, per above.
 
-## Open design question — settle before building rows
+## Selected design
 
-The legacy layout distinguishes scrap (blue) from pilot (green). A single "HUD
-tint" setting collapses that distinction. Options:
+Two independent color settings preserve the legacy blue/green distinction by
+default and let players choose different contrast for each readout.
 
-- two independent colour settings;
-- one base colour plus a fixed hue offset for the second;
-- a preset table of coordinated pairs, which is closest to how CR's PDA presets
-  already read.
+## Local qualification, 2026-10-19
 
-This changes the shape of the settings rows, so decide first.
+Released GOG 2.2.301 / DX11, using the serialized harness and temporary INI
+settings that were restored after each run:
+
+| Run | Result |
+| --- | --- |
+| PID 54068, Legacy + Amber/Cyan | Colored titles and values visibly retain stacked black plates; native text remains left-aligned. |
+| PID 43996, Stock + Amber/Cyan | Colored titles and values visibly retain centered Stock panels. All four alignment immediates remain 1 and both submit CALLs retain original bytes. |
+| PID 37508, Stock + Default | All four color operands use the original white palette address; geometry equals Stock + custom colors. |
+| PID 36028, Legacy + Default | Original blue/green palette references and left alignment restore; legacy geometry and plates remain selected. |
+
+Across the inspected runs, shared palette values remain White `0xFFFFFFFF`,
+Blue `0xFF007FFF`, Green `0xFF00FF00`. Custom values use shim-owned storage.
+Frontend controls independently save/apply both colors and still switch
+Stock/Legacy. Full save/load, resize/UI-scale and cross-platform acceptance
+remain separate gates. A debugger-invoked reload experiment raised Frida
+system errors and is not counted as live-transition acceptance; fresh-process
+snapshots above provide the native evidence.
+
+Release Win32 build and all 115 Windows CTest cases pass. The three changed
+portable HUD/layout policy tests also compile with GCC `-Wall -Wextra -Werror` and
+pass under WSL. INI completeness (213 settings), shipping policy, writer and
+migration checks pass. Full Linux-suite logs were not retained across the
+local WSL session; no new full Linux-suite result is claimed here.
 
 ## Colour-order finding
 

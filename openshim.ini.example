@@ -908,6 +908,16 @@ ReactiveReticle = 0
 HitMarkers = 0
 ; Fade duration in milliseconds, 60-400 (menu: 80, 120, 180, 250).
 HitMarkerDuration = 120
+; Independent hit-marker color, size percent 50-200, opacity percent 25-100.
+HitMarkerColor = White
+HitMarkerSize = 100
+HitMarkerOpacity = 100
+; Default follows the selected ScrapPilotHud layout: stock palette or the
+; original legacy scrap-blue/pilot-green split. Layout/backplates are unchanged.
+; Choices: Default, White, Blue, Green, Cyan, Amber, Magenta.
+; INI also accepts #RRGGBB or 0xAARRGGBB (native packed ARGB).
+ScrapHudColor = Default
+PilotHudColor = Default
 
 ; Under-attack audio alert frequency.
 ; Canonical values:

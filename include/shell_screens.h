@@ -116,6 +116,12 @@ namespace BZROpenShim::ShellScreens
                     const char* text, const ButtonSkin& skin, float textScale,
                     float textOffset, void(__cdecl* onClick)(), HoverFn onHover = nullptr);
     void SetLabelText(void* label, const char* text);
+    // Owned decorative panels only. Rebuilds their quad after a design-space
+    // rectangle/tint change. False when the released UI adapter is unavailable.
+    bool SetPanelRectColor(void* panel, const Rect& rect, uint32_t argb);
+    float WidgetLayoutScale(void* widget);
+    float ActiveLayoutScale();
+    bool ClientSize(float& width, float& height);
 
     // The cursor in the 1440x1080 design space of the centred content area
     // (the shell scales by client height and centres horizontally). False
