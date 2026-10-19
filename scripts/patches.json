@@ -3244,6 +3244,36 @@
       "identity": "camera record builder (fov, zoom, ...)"
     },
     {
+      "name": "PlayerFovInitCall",
+      "address": "0x0061A1B6",
+      "expected": "E8 B5 E1 06 00 83 C4 18 B9 76 00 00 00 8B F0 BF E0 AA 8E 00",
+      "identity": "Released GOG 2.2.301 main-view initialization reset branch calls BuildCameraRecord with the stock 80-degree base angle, then copies 0x76 dwords into the main record. Other resize/auxiliary-camera branches are excluded."
+    },
+    {
+      "name": "PlayerFovCockpitCall",
+      "address": "0x0061A85C",
+      "expected": "E8 0F DB 06 00 83 C4 18 B9 76 00 00 00 8B F0 8B BD C0 FD FF FF",
+      "identity": "Released GOG 2.2.301 cockpit view setter 0x0061A780: BuildCameraRecord(out, viewport, 80deg, pane, far, currentZoom), then selects view mode 0."
+    },
+    {
+      "name": "PlayerFovCockpitNoZCall",
+      "address": "0x0061AA1C",
+      "expected": "E8 4F D9 06 00 83 C4 18 B9 76 00 00 00 8B F0 8B BD C0 FD FF FF",
+      "identity": "Released GOG 2.2.301 alternate cockpit setter 0x0061A940: main record, stock 80deg, existing zoom, view mode 0; differs in cockpit visibility flags."
+    },
+    {
+      "name": "PlayerFovCraftCall",
+      "address": "0x0061ABDC",
+      "expected": "E8 8F D7 06 00 83 C4 18 B9 76 00 00 00 8B F0 8B BD C0 FD FF FF",
+      "identity": "Released GOG 2.2.301 cockpit-hidden craft setter 0x0061AB00: main record, stock 80deg, existing zoom, view mode 0."
+    },
+    {
+      "name": "PlayerFovChaseCall",
+      "address": "0x0061B2EC",
+      "expected": "E8 7F D0 06 00 83 C4 18 B9 76 00 00 00 8B F0 8B BD C0 FD FF FF",
+      "identity": "Released GOG 2.2.301 chase-view setter 0x0061B210: main record, stock 80deg, zoom 1; selects view mode 1. Free/scripted/satellite camera setters are excluded."
+    },
+    {
       "name": "CockpitFovBits",
       "address": "0x0087256C",
       "kind": "data",

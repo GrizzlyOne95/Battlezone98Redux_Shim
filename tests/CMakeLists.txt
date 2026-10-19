@@ -81,6 +81,8 @@ function(openshim_add_test name)
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 
+openshim_add_test(camera_fov_policy_tests STD 17 SOURCES camera_fov_policy_tests.cpp)
+
 add_executable(startup_sha256_tests startup_sha256_tests.cpp)
 target_include_directories(startup_sha256_tests PRIVATE ../include)
 target_compile_features(startup_sha256_tests PRIVATE cxx_std_17)

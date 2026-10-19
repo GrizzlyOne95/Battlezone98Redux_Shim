@@ -886,6 +886,11 @@ SceneDepthDiagnostic = 0
 
 
 [Display]
+; Player cockpit/chase base FOV in degrees, referenced to 4:3. 0 = stock 80.
+; Accepts integers 60-120; invalid values use stock. Restart required.
+; Satellite and target-camera angles are untouched. Cinematics may inherit the
+; current player angle, as in stock; explicit scripted camera setters are untouched.
+FieldOfView = 0
 
 ; Under-attack audio alert frequency.
 ; Canonical values:
