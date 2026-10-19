@@ -42,5 +42,7 @@ mirrored in Z.
 Worked case (2026-10-19, prototype `avdropo` dropship ramp): runs 8–20 showed only a slab and a
 small patch at the stern. The ANIM data and the swing direction were correct throughout. The ramp's
 inner cap had been generated wound inward, so once the ramp was open the deck was culled, leaving
-only the backs of the decal plates. Flipping those six triangles (and their normals and the tangent
-`w`) fixed it.
+only the backs of the decal plates. The generator built both end caps of a closed loft in the same
+ring order, so one cap was always inward, and its signed-volume repair then depended on where the
+part sat: a second ramp at the bow came out with every face reversed. Recomputing face normals on
+each loft in Blender before export fixed both ramps.
