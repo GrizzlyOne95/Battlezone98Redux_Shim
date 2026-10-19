@@ -60,7 +60,11 @@ satellite rendering. Satellite passthrough is covered by static call-site
 exclusion and the policy tests; an interactive satellite smoke remains pending.
 
 Unit tests cover parsing, safe bounds, degree conversion and passthrough of
-non-player/nonstandard camera inputs. Steam, Proton and Wine runtime behavior
+non-player/nonstandard camera inputs. All 112 Win32 CTests and all 91 Linux
+CTests passed, along with the Release Win32 solution build, INI/migration checks
+and loader host integration test. Linux tests ran in Ubuntu 24.04 under WSL;
+this validates portable host code, not game execution under Proton or Wine.
+Steam, Proton and Wine runtime behavior
 remains unverified; their address and byte guards must pass independently.
 Visual menu inspection is also unverified: the computer-use capture helper
 failed with monitor-capture/access-denied errors on this desktop session.
