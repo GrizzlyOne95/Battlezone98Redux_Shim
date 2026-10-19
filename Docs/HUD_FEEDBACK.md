@@ -94,6 +94,10 @@ transitions, resets and configuration changes clear the pulse. Career stats
 need not be enabled. All four entry guards must bind before installation;
 partial detour installation forwards stock calls without publishing hits.
 
+The incoming-damage extension in `Docs/DAMAGE_INDICATORS.md` also uses these
+four wrappers when enabled. It stores copied directional pulses independently
+of outgoing hit markers; `SimDamageApplied` retains its outgoing-only meaning.
+
 ## Qualification, 2026-10-19
 
 Released GOG executable SHA-256:
