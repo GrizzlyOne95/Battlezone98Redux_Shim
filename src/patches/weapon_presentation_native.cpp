@@ -132,7 +132,15 @@ namespace BZROpenShim::Hooks
         }
 
         struct ClassFlash { uint64_t name = 0; WP::FlashConfig config; };
-        struct CraftConfig { uint64_t name = 0; std::array<std::optional<WP::MeshId>, 5> nodes; };
+        struct RecoilSlot
+        {
+            std::optional<WP::MeshId> node;
+            bool animationPresent = false;
+            WP::AnimationBinding animation;
+            float distance = WP::kRecoilKick;
+            float returnSpeed = WP::kRecoilReturnSpeed;
+        };
+        struct CraftConfig { uint64_t name = 0; std::array<RecoilSlot, 5> slots; };
         struct WeaponState
         {
             uint64_t lifetime = 0;
@@ -159,6 +167,23 @@ namespace BZROpenShim::Hooks
         std::unordered_map<uintptr_t, NodeKey> g_NodeByAddress;
 
         enum class ValueStatus { Missing, Present, Invalid };
+
+        // EXU owns Ogre animation/FPS target resolution. Resolve per operation
+        // while holding a module reference; never retain a callback across an
+        // EXU mission unload. No LoadLibrary or hard-coded content paths.
+        int ExuAnimation(const WP::Identity& owner, const std::string& clip,
+            bool cockpit, int mode, float time, float* length = nullptr) noexcept
+        {
+            HMODULE module = nullptr;
+            if (!GetModuleHandleExW(0, L"exu.dll", &module)) return mode == 2 ? 1 : 0;
+            using Call = int (__cdecl*)(uint32_t, const char*, int, int, float, float*);
+            auto call = reinterpret_cast<Call>(GetProcAddress(module, "EXU_OdfRecoilAnimation"));
+            if (!call) call = reinterpret_cast<Call>(GetProcAddress(module, "_EXU_OdfRecoilAnimation"));
+            const int result = call ? call(static_cast<uint32_t>(owner.lifetime), clip.c_str(),
+                cockpit ? 1 : 0, mode, time, length) : (mode == 2 ? 1 : 0);
+            FreeLibrary(module);
+            return result;
+        }
         // Copy while Redux's own scope is alive. No parser string escapes it.
         ValueStatus ReadValue(void* scope, uint32_t section, uint32_t key,
             char (&out)[kMaxValueBytes]) noexcept
@@ -220,15 +245,41 @@ namespace BZROpenShim::Hooks
             {
                 CraftConfig result;
                 if (!Read(objectClass, kObjectClassName, result.name)) return;
-                constexpr std::array<std::string_view, 5> keys =
-                    { "recoilName1", "recoilName2", "recoilName3", "recoilName4", "recoilName5" };
-                for (size_t i = 0; i < keys.size(); ++i)
+                for (size_t i = 0; i < result.slots.size(); ++i)
                 {
+                    auto& slot = result.slots[i];
+                    const auto suffix = std::to_string(i + 1);
+                    auto readNumber = [&](const char* prefix, float fallback) {
+                        char raw[kMaxValueBytes] = {};
+                        const auto status = ReadValue(scope, Policy::Hash("CraftClass"),
+                            Policy::Hash(std::string(prefix) + suffix), raw);
+                        return status == ValueStatus::Missing ? fallback : Policy::Duration(raw);
+                    };
+                    slot.distance = readNumber("recoilDistance", WP::kRecoilKick);
+                    slot.returnSpeed = readNumber("recoilReturn", WP::kRecoilReturnSpeed);
+                    slot.animation.playbackRate = readNumber("recoilPlaybackRate", 1);
                     char value[kMaxValueBytes] = {};
-                    if (ReadValue(scope, Policy::Hash("CraftClass"), Policy::Hash(keys[i]), value) !=
-                        ValueStatus::Present) continue;
-                    const auto name = Policy::Name(value);
-                    if (name) result.nodes[i] = WP::ParseMeshId(*name);
+                    if (ReadValue(scope, Policy::Hash("CraftClass"), Policy::Hash("recoilName" + suffix), value) ==
+                        ValueStatus::Present)
+                    {
+                        const auto name = Policy::Name(value);
+                        if (name) slot.node = WP::ParseMeshId(*name);
+                    }
+                    const auto animStatus = ReadValue(scope, Policy::Hash("CraftClass"),
+                        Policy::Hash("recoilAnimation" + suffix), value);
+                    slot.animationPresent = animStatus != ValueStatus::Missing;
+                    if (animStatus == ValueStatus::Present)
+                    {
+                        const auto name = Policy::Name(value);
+                        if (name) slot.animation.clip = *name;
+                    }
+                    if (ReadValue(scope, Policy::Hash("CraftClass"), Policy::Hash("recoilCockpit" + suffix), value) !=
+                        ValueStatus::Missing)
+                    {
+                        const auto flag = Policy::Trim(value);
+                        if (flag == "0" || flag == "false") slot.animation.cockpit = false;
+                        else if (flag != "1" && flag != "true") slot.animation.playbackRate = 0;
+                    }
                 }
                 if (g_CraftClasses.size() < WP::kMaxBindings || g_CraftClasses.count(objectClass))
                     g_CraftClasses.insert_or_assign(objectClass, std::move(result));
@@ -314,8 +365,22 @@ namespace BZROpenShim::Hooks
                     selected = slot;
                 }
             }
-            if (selected < 0 || !config->second.nodes[selected]) return;
-            const auto id = *config->second.nodes[selected];
+            if (selected < 0) return;
+            const auto& slot = config->second.slots[selected];
+            if (slot.animationPresent)
+            {
+                auto animation = slot.animation;
+                // An explicit clip wins even if unavailable: never silently
+                // slide a barrel that an authored animation was meant to own.
+                animation.length = 1;
+                if (!animation.Valid() || !ExuAnimation(state.owner, animation.clip, false, 0, 0, &animation.length)) return;
+                if (animation.Valid()) request.animation = std::move(animation);
+                return;
+            }
+            if (!slot.node) return;
+            if (!std::isfinite(slot.distance) || slot.distance <= 0 || slot.distance > 10 ||
+                !std::isfinite(slot.returnSpeed) || slot.returnSpeed <= 0 || slot.returnSpeed > 100) return;
+            const auto id = *slot.node;
             const auto found = WP::FindMeshNode(reinterpret_cast<uintptr_t>(state.root), id, ReadMesh, nullptr);
             WP::Matrix rest;
             if (found.status != WP::MeshLookupStatus::Found ||
@@ -340,7 +405,7 @@ namespace BZROpenShim::Hooks
                 try { g_NodeByAddress.emplace(found.node, key); }
                 catch (...) { g_Nodes.erase(key); state.node = {}; throw; }
             }
-            request.recoil = WP::RecoilBinding{ state.node, rest };
+            request.recoil = WP::RecoilBinding{ state.node, rest, slot.distance, slot.returnSpeed };
         }
 
         void __cdecl ObserveShot(void* weapon, const WP::Matrix* finalPose,
@@ -380,6 +445,9 @@ namespace BZROpenShim::Hooks
                     const auto token = runtime->Bind(request);
                     if (!token) return;
                     state.token = *token;
+                    LogShimA(LogLevel::Info, "WEAPONFX", "recoil bound handle=%u mode=%s clip=%s",
+                        static_cast<unsigned>(state.owner.lifetime), request.animation ? "animation" : "node",
+                        request.animation ? request.animation->clip.c_str() : "");
                 }
                 WP::Matrix current;
                 if (!CurrentWeaponPose(weapon, state, current) || state.root != ownerRoot)
@@ -443,6 +511,13 @@ namespace BZROpenShim::Hooks
         class NativeBackend final : public WP::Backend
         {
         public:
+            bool ApplyAnimation(const WP::Identity& owner, const WP::AnimationBinding& animation,
+                float time, bool active) noexcept override
+            {
+                if (animation.cockpit)
+                    ExuAnimation(owner, animation.clip, true, active ? 1 : 2, time);
+                return ExuAnimation(owner, animation.clip, false, active ? 1 : 2, time) != 0;
+            }
             bool CreateFlash(std::string_view effect, const WP::Matrix& pose, void*& storage) noexcept override
             {
                 if (storage || effect.empty() || effect.size() >= 64 || !WP::ValidPose(pose)) return false;
@@ -673,8 +748,16 @@ namespace BZROpenShim::Hooks
         {
             TryGetUserConfigBool("SinglePlayer", "MuzzleFlash", g_Settings.muzzleFlash);
             TryGetUserConfigBool("SinglePlayer", "MeshRecoil", g_Settings.meshRecoil);
+            wchar_t trial[4] = {};
+            const bool recoilTrial = GetEnvironmentVariableW(L"OPENSHIM_TRIAL_ODF_RECOIL", trial, 4) == 1 && trial[0] == L'1';
+            if (recoilTrial)
+            {
+                g_Settings.meshRecoil = true;
+                g_Settings.muzzleFlash = false; // isolate recoil from unqualified native flash lifetimes
+                LogShimA(LogLevel::Warn, "WEAPONFX", "explicit ODF recoil trial; GOG/SP cannon only, native flashes excluded");
+            }
             if (!g_Settings.muzzleFlash && !g_Settings.meshRecoil) return;
-            if (!kNativePresentationLiveQualified)
+            if (!kNativePresentationLiveQualified && !recoilTrial)
             {
                 LogShimA(LogLevel::Warn, "WEAPONFX", "native candidate inactive: Windows lifetime/order qualification pending");
                 return;

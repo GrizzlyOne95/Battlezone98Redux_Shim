@@ -85,6 +85,17 @@ namespace BZROpenShim::WeaponPresentation
     {
         Identity node;
         Matrix unrecoiledPose = WeaponConvergence::Identity();
+        float distance = kRecoilKick;
+        float returnSpeed = kRecoilReturnSpeed;
+    };
+
+    struct AnimationBinding
+    {
+        std::string clip;
+        float length = 0.0f;
+        float playbackRate = 1.0f;
+        bool cockpit = true;
+        bool Valid() const noexcept;
     };
 
     struct BindRequest
@@ -93,6 +104,8 @@ namespace BZROpenShim::WeaponPresentation
         Identity weapon;
         FlashConfig flash;
         std::optional<RecoilBinding> recoil;
+        // A present animation takes precedence over the generated node slide.
+        std::optional<AnimationBinding> animation;
     };
 
     struct ShotResult
@@ -120,6 +133,8 @@ namespace BZROpenShim::WeaponPresentation
         // This writes a presentation pose only; never the gameplay MAT_3D.
         virtual bool ApplyRecoil(const Identity& owner, const Identity& node,
             const Matrix& visualPose) noexcept = 0;
+        virtual bool ApplyAnimation(const Identity&, const AnimationBinding&,
+            float, bool) noexcept { return false; }
     };
 
     struct Snapshot
@@ -128,6 +143,7 @@ namespace BZROpenShim::WeaponPresentation
         size_t retiredBindings = 0;
         size_t nativeAttachments = 0;
         size_t sharedRecoilNodes = 0;
+        size_t sharedAnimationClips = 0;
     };
 
     class Runtime

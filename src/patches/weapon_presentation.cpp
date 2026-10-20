@@ -11,6 +11,14 @@
 
 namespace BZROpenShim::WeaponPresentation
 {
+    bool AnimationBinding::Valid() const noexcept
+    {
+        return !clip.empty() && clip.size() <= 63 &&
+            std::all_of(clip.begin(), clip.end(), [](unsigned char c) { return c >= 0x21 && c <= 0x7e; }) &&
+            std::isfinite(length) && length > 0 && length <= 60 &&
+            std::isfinite(playbackRate) && playbackRate > 0 && playbackRate <= 50;
+    }
+
     bool FlashConfig::Valid() const noexcept
     {
         return !effect.empty() && effect.size() < 128 &&
@@ -112,6 +120,7 @@ namespace BZROpenShim::WeaponPresentation
     struct Runtime::Impl
     {
         using RecoilKey = std::pair<Identity, Identity>;
+        using AnimationKey = std::pair<Identity, std::string>;
         struct Weapon
         {
             BindingToken token;
@@ -119,6 +128,7 @@ namespace BZROpenShim::WeaponPresentation
             Identity identity;
             FlashConfig config;
             std::optional<RecoilKey> recoil;
+            std::optional<AnimationKey> animation;
             Matrix muzzle = WeaponConvergence::Identity();
             float remaining = 0.0f;
             void* renderer = nullptr;
@@ -134,6 +144,8 @@ namespace BZROpenShim::WeaponPresentation
             double restY = 0.0;
             double restZ = 0.0;
             float displacement = 0.0f;
+            float distance = kRecoilKick;
+            float returnSpeed = kRecoilReturnSpeed;
             size_t references = 0;
             bool dirty = false;
             bool presented = false;
@@ -148,6 +160,16 @@ namespace BZROpenShim::WeaponPresentation
             }
         };
 
+        struct Animation
+        {
+            AnimationBinding config;
+            float time = 0;
+            size_t references = 0;
+            bool active = false;
+            bool dirty = false;
+            bool presented = false;
+        };
+
         Settings settings;
         bool singleplayer = false;
         bool running = false;
@@ -159,6 +181,7 @@ namespace BZROpenShim::WeaponPresentation
         // address a native ParticleRender may keep for its back-reference.
         std::map<uint64_t, std::unique_ptr<Weapon>> weapons;
         std::map<RecoilKey, Recoil> recoils;
+        std::map<AnimationKey, Animation> animations;
 
         bool Active() const noexcept
         {
@@ -181,6 +204,15 @@ namespace BZROpenShim::WeaponPresentation
                 return;
             weapon.retired = true;
             weapon.remaining = 0.0f;
+            if (weapon.animation)
+            {
+                auto it = animations.find(*weapon.animation);
+                if (it != animations.end() && it->second.references && --it->second.references == 0)
+                {
+                    it->second.active = false;
+                    it->second.dirty = it->second.presented;
+                }
+            }
             if (weapon.recoil)
             {
                 const auto it = recoils.find(*weapon.recoil);
@@ -238,6 +270,11 @@ namespace BZROpenShim::WeaponPresentation
         }
         if (!settings.meshRecoil)
         {
+            for (auto& entry : impl_->animations)
+            {
+                entry.second.active = false;
+                entry.second.dirty = entry.second.presented;
+            }
             for (auto& entry : impl_->recoils)
             {
                 entry.second.displacement = 0.0f;
@@ -266,15 +303,21 @@ namespace BZROpenShim::WeaponPresentation
             if (!entry.second->retired && entry.second->identity.address == request.weapon.address)
                 return std::nullopt; // replacement must release the old token first
         }
-        const bool validRecoil = request.recoil && request.recoil->node.Valid() &&
-            ValidPose(request.recoil->unrecoiledPose);
+        const bool validAnimation = request.animation && request.animation->Valid();
+        const bool validRecoil = !request.animation && request.recoil && request.recoil->node.Valid() &&
+            ValidPose(request.recoil->unrecoiledPose) && std::isfinite(request.recoil->distance) &&
+            request.recoil->distance > 0 && request.recoil->distance <= 10 &&
+            std::isfinite(request.recoil->returnSpeed) && request.recoil->returnSpeed > 0 &&
+            request.recoil->returnSpeed <= 100;
+        if (validAnimation && impl_->animations.size() >= kMaxBindings &&
+            !impl_->animations.count({request.owner, request.animation->clip})) return std::nullopt;
         // A failed visual restoration can retain a controller after its last
         // weapon record is gone. Bound that table independently of weapons.
         if (validRecoil && impl_->recoils.size() >= kMaxBindings &&
             impl_->recoils.find({ request.owner, request.recoil->node }) == impl_->recoils.end())
             return std::nullopt;
         if (!(impl_->settings.muzzleFlash && request.flash.Valid()) &&
-            !(impl_->settings.meshRecoil && validRecoil))
+            !(impl_->settings.meshRecoil && (validRecoil || validAnimation)))
             return std::nullopt;
 
         auto weapon = std::make_unique<Impl::Weapon>();
@@ -289,6 +332,24 @@ namespace BZROpenShim::WeaponPresentation
         auto inserted = impl_->weapons.emplace(serial, std::move(weapon));
         try
         {
+            if (validAnimation)
+            {
+                const Impl::AnimationKey key{request.owner, request.animation->clip};
+                auto it = impl_->animations.find(key);
+                if (it != impl_->animations.end() && (it->second.config.length != request.animation->length ||
+                    it->second.config.playbackRate != request.animation->playbackRate ||
+                    it->second.config.cockpit != request.animation->cockpit ||
+                    (it->second.references == 0 && it->second.presented)))
+                { impl_->weapons.erase(inserted.first); return std::nullopt; }
+                // Copy the key before incrementing references (allocation can throw).
+                inserted.first->second->animation = key;
+                if (it == impl_->animations.end())
+                {
+                    Impl::Animation anim; anim.config = *request.animation;
+                    it = impl_->animations.emplace(key, std::move(anim)).first;
+                }
+                ++it->second.references;
+            }
             if (validRecoil)
             {
                 const Impl::RecoilKey key = { request.owner, request.recoil->node };
@@ -306,8 +367,13 @@ namespace BZROpenShim::WeaponPresentation
                     recoil.restX = recoil.current.positionX;
                     recoil.restY = recoil.current.positionY;
                     recoil.restZ = recoil.current.positionZ;
+                    recoil.distance = request.recoil->distance;
+                    recoil.returnSpeed = request.recoil->returnSpeed;
                     recoilIt = impl_->recoils.emplace(key, recoil).first;
                 }
+                else if (recoilIt->second.distance != request.recoil->distance ||
+                    recoilIt->second.returnSpeed != request.recoil->returnSpeed)
+                { impl_->weapons.erase(inserted.first); return std::nullopt; }
                 ++recoilIt->second.references;
                 inserted.first->second->recoil = key;
             }
@@ -358,7 +424,18 @@ namespace BZROpenShim::WeaponPresentation
             const auto it = impl_->recoils.find(*weapon->recoil);
             if (it != impl_->recoils.end())
             {
-                it->second.displacement = -kRecoilKick;
+                it->second.displacement = -it->second.distance;
+                it->second.dirty = true;
+                result.recoilReset = true;
+            }
+        }
+        if (impl_->settings.meshRecoil && weapon->animation)
+        {
+            auto it = impl_->animations.find(*weapon->animation);
+            if (it != impl_->animations.end())
+            {
+                it->second.time = 0;
+                it->second.active = true;
                 it->second.dirty = true;
                 result.recoilReset = true;
             }
@@ -424,13 +501,21 @@ namespace BZROpenShim::WeaponPresentation
                 weapon.remaining = std::max(0.0f, weapon.remaining - dt);
         }
         // Iterate the shared-node table, not five slots or every weapon.
+        for (auto& entry : impl_->animations)
+        {
+            auto& anim = entry.second;
+            if (!anim.active) continue;
+            anim.time = std::min(anim.config.length, anim.time + dt * anim.config.playbackRate);
+            anim.active = anim.time < anim.config.length;
+            anim.dirty = true;
+        }
         for (auto& entry : impl_->recoils)
         {
             auto& recoil = entry.second;
             if (recoil.displacement < 0.0f)
             {
                 recoil.displacement = std::min(0.0f,
-                    recoil.displacement + kRecoilReturnSpeed * dt);
+                    recoil.displacement + recoil.returnSpeed * dt);
                 recoil.dirty = true;
             }
         }
@@ -439,6 +524,20 @@ namespace BZROpenShim::WeaponPresentation
 
     void Runtime::SynchronizeVisuals(Backend& backend) noexcept
     {
+        for (auto it = impl_->animations.begin(); it != impl_->animations.end();)
+        {
+            auto& anim = it->second;
+            // A failed backend call can still have partially changed a target.
+            // Retain restoration responsibility even before its first success.
+            if (anim.dirty && anim.active) anim.presented = true;
+            if (anim.dirty && backend.ApplyAnimation(it->first.first, anim.config, anim.time, anim.active))
+            {
+                anim.dirty = false;
+                anim.presented = anim.active;
+            }
+            if (anim.references == 0 && !anim.presented && !anim.dirty) it = impl_->animations.erase(it);
+            else ++it;
+        }
         for (auto it = impl_->weapons.begin(); it != impl_->weapons.end();)
         {
             Impl::Weapon& weapon = *it->second;
@@ -505,6 +604,7 @@ namespace BZROpenShim::WeaponPresentation
             // Retain every non-null back-reference slot until detach/expiry;
             // the native object list may outlive the Ogre scene manager.
             impl_->recoils.clear();
+            impl_->animations.clear();
             for (auto it = impl_->weapons.begin(); it != impl_->weapons.end();)
             {
                 if (it->second->retired && !it->second->renderer)
@@ -521,6 +621,7 @@ namespace BZROpenShim::WeaponPresentation
             entry.second->renderer = nullptr;
         impl_->weapons.clear();
         impl_->recoils.clear();
+        impl_->animations.clear();
         impl_->RetireAll();
     }
 
@@ -528,6 +629,7 @@ namespace BZROpenShim::WeaponPresentation
     {
         Snapshot result;
         result.sharedRecoilNodes = impl_->recoils.size();
+        result.sharedAnimationClips = impl_->animations.size();
         for (const auto& entry : impl_->weapons)
         {
             if (entry.second->retired)

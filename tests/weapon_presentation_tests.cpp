@@ -42,6 +42,15 @@ namespace
         bool failCreate = false;
         bool failUpdate = false;
         bool failRecoil = false;
+        struct AnimationCall { float time; bool active; };
+        std::vector<AnimationCall> animationCalls;
+        bool failAnimation = false;
+        bool ApplyAnimation(const WP::Identity&, const WP::AnimationBinding&,
+            float time, bool active) noexcept override
+        {
+            animationCalls.push_back({time, active});
+            return !failAnimation;
+        }
 
         bool CreateFlash(std::string_view effect, const WP::Matrix& pose,
             void*& storage) noexcept override
@@ -129,6 +138,82 @@ namespace
         runtime.SynchronizeVisuals(backend);
         Require(runtime.Inspect().nativeAttachments == 0, "test left a native attachment alive");
         runtime.InvalidateResources();
+    }
+
+    void TestAnimationRecoil()
+    {
+        FakeBackend backend;
+        WP::Runtime runtime;
+        Start(runtime, false, true);
+        auto request = Request();
+        request.animation = WP::AnimationBinding{"recoil", 0.3f, 2.0f, true};
+        const auto token = Bind(runtime, request);
+        const auto shared = Bind(runtime, [&] { auto r = request; r.weapon.address++; return r; }());
+        Require(runtime.Fire(token, 1, WC::Identity()).recoilReset, "clip shot not accepted");
+        Require(!runtime.Fire(token, 1, WC::Identity()).observed, "duplicate logical shot restarted clip");
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.animationCalls.size() == 1 && backend.animationCalls.back().active,
+            "clip not started");
+        Require(backend.recoilPoses.empty(), "clip and node slide both applied");
+        runtime.BeginSimulationStep(1, 0.05f);
+        runtime.SynchronizeVisuals(backend);
+        Near(backend.animationCalls.back().time, 0.1, "clip speed or shared timing wrong");
+        runtime.BeginSimulationStep(1, 0.05f);
+        runtime.BeginSimulationStep(2, 0);
+        runtime.SynchronizeVisuals(backend);
+        Near(backend.animationCalls.back().time, 0.1, "pause/duplicate step advanced clip");
+        runtime.Fire(shared, 1, WC::Identity());
+        runtime.SynchronizeVisuals(backend);
+        Near(backend.animationCalls.back().time, 0, "second slot did not restart shared clip");
+        runtime.BeginSimulationStep(3, 0.2f);
+        runtime.SynchronizeVisuals(backend);
+        Require(!backend.animationCalls.back().active, "finished clip not restored");
+        runtime.Fire(token, 2, WC::Identity());
+        runtime.SynchronizeVisuals(backend);
+        backend.failAnimation = true;
+        runtime.SetSession(false, true);
+        runtime.SynchronizeVisuals(backend);
+        Require(!backend.animationCalls.back().active, "MP transition did not request restoration");
+        const auto attempts = backend.animationCalls.size();
+        backend.failAnimation = false;
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.animationCalls.size() == attempts + 1, "failed clip restoration not retried");
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.animationCalls.size() == attempts + 1, "restored clip still retained");
+        Require(runtime.Inspect().sharedAnimationClips == 0, "restored clip leaked a controller");
+        runtime.InvalidateResources();
+
+        WP::Runtime invalid;
+        Start(invalid, false, true);
+        for (float rate : {0.0f, -1.0f, 51.0f, std::numeric_limits<float>::quiet_NaN()})
+        {
+            request.animation->playbackRate = rate;
+            Require(!invalid.Bind(request), "invalid clip fell back to node slide");
+        }
+        request.animation.reset();
+        request.recoil->distance = 0.25f;
+        request.recoil->returnSpeed = 0.5f;
+        const auto slide = Bind(invalid, request);
+        invalid.Fire(slide, 1, WC::Identity());
+        Near(invalid.RecoilDisplacement(owner, node), -0.25, "custom distance ignored");
+        invalid.BeginSimulationStep(1, 0.25f);
+        Near(invalid.RecoilDisplacement(owner, node), -0.125, "custom return speed ignored");
+        Finish(invalid, backend);
+
+        WP::Runtime partial;
+        Start(partial, false, true);
+        request.animation = WP::AnimationBinding{"recoil", 0.3f, 1, false};
+        const auto partialToken = Bind(partial, request);
+        backend.failAnimation = true;
+        partial.Fire(partialToken, 1, WC::Identity());
+        partial.SynchronizeVisuals(backend);
+        partial.Release(partialToken);
+        partial.SynchronizeVisuals(backend);
+        Require(!backend.animationCalls.back().active, "partial application lost restoration responsibility");
+        backend.failAnimation = false;
+        partial.SynchronizeVisuals(backend);
+        Require(partial.Inspect().sharedAnimationClips == 0, "partial application restoration leaked");
+        partial.InvalidateResources();
     }
 
     void TestConfigurationAndIds()
@@ -598,6 +683,7 @@ namespace
 
 int main()
 {
+    TestAnimationRecoil();
     TestConfigurationAndIds();
     TestBoundedMeshLookup();
     TestOptInAndSessionGates();
