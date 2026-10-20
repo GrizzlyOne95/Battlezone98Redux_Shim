@@ -45,6 +45,9 @@ discards fade history. Geometry is still submitted with alpha zero for Hidden;
 native status rendering and its warning/audio side effects always execute.
 Hull/ammo bars, reticle, radar and objectives are outside the scopes.
 This initial batch does not add fading for those groups.
+The remaining native draw owners, incomplete alpha paths and suggested reveal
+policies are mapped in [HUD_ELEMENT_MAP.md](HUD_ELEMENT_MAP.md). That research
+does not enable additional fading or qualify new hooks.
 
 ## Native adapter
 
