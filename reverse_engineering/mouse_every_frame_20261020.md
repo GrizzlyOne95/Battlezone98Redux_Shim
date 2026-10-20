@@ -16,9 +16,10 @@ or the options menu row **Per-Frame Mouse**. Default off. Restart required.
 - **Sensitivity should not change.** Steer reads a per-second rate and pitch
   reads an accumulated position (see below). The one exception is raw-input
   acceleration, covered under *Expected effects*.
-- **Not yet felt by a person.** The automated run below proves the patch
-  engages, the batch closes every frame and nothing breaks. Whether aim feels
-  better needs a physical-console test with a real mouse (see the end).
+- **Not yet felt by a person.** The automated runs below prove the patch
+  installs and combat runs normally. They were unfocused, so the reader never
+  ran. Per-frame bucket closes and the feel of aim both still need a
+  physical-console test (see the end).
 
 ## What the engine does (GOG Redux 2.2.301)
 
@@ -166,15 +167,48 @@ previous read applied. With the patch active it should equal N. Stock at
 
 - **Checks run:**
   - `scripts/run_ini_tests.ps1`;
-  - CTest `-A Win32`: `patch_registration_tests`, `patch_config_parse_tests`,
-    `resolve_table_tests`, `shared_bzr_docs_check`;
+  - CTest `-A Win32` (6/6): `patch_registration_tests`,
+    `patch_config_parse_tests`, `resolve_table_tests`, `shared_bzr_docs_check`,
+    `env_switch_table_tests`, `openshim_env_mapping_tests`;
   - a Release Win32 build of `BZROpenShim`, `BZLoader` and `Plugin_OpenShim`
     (no warnings in the new file).
 - **Live run:** see the next section.
 
 ### Live run
 
-LIVE_RESULTS_PLACEHOLDER
+**Setup.** GOG Redux 2.2.301 with the Release build deployed. The run used
+`lcbench.bzn` through `BZRHarness.ps1`, under the launch lock, windowed, with
+the harness defaults `OPENSHIM_NEVER_ACTIVATE=1` and
+`OPENSHIM_NEVER_CAPTURE_MOUSE=1`, and with `OPENSHIM_MOUSE_EVERY_FRAME=1`. The
+installed `openshim.ini` has Unsmoothed Controls on, so both runs also patched
+`DisableControlSmoothing`.
+
+**Results (two runs, 2026-10-20).**
+
+- **Run 1.**
+  - `[OK] Disable Control Smoothing wrote 10 bytes to 0x004344D7`.
+  - `[MouseEveryFrame] enabled: bucket compare 0x00623C0F -> shim threshold`.
+  - `MouseReadChannels::TimeStepCall`, `BucketThreshold` and `Accumulator`
+    were each a single scan match, and each agreed with its fallback.
+  - `TimeStep` scanned 0 matches and used its fallback. Its `rel32_target`
+    offset pointed at the rel32 rather than at the `E8`.
+  - The benchmark reached `benchmark-end` after 30 s and exited through
+    `Stop-BZRGame`.
+- **Run 2,** after fixing that offset to 0:
+  - `TimeStep matches=1 scan=0x00822D60 agree=yes`;
+  - the patch was enabled again;
+  - `benchmark-end` after 30 s.
+- **Both runs:** no stand-down line and no new errors in `openshim.log`.
+
+**What this proves.** The patch installs next to `DisableControlSmoothing` and
+`PreciseTimestep`, and combat runs normally with it in place.
+
+**What it does not prove.** Because the harness never activates the window,
+`GetActiveWindow()` never matches. The reader therefore returns at its focus
+check before reaching the TimeStep call, so these runs logged no
+`[MouseEveryFrame] last N reads` lines. Proving per-frame bucket closes needs a
+focused run (`BZR_ALLOW_FOREGROUND_LAUNCH=1`, `OPENSHIM_NEVER_ACTIVATE=0`). That
+run is part of the console test below.
 
 ## Still needed: physical-console feel test
 
@@ -191,6 +225,9 @@ Run this at the physical console with a real mouse and a high-refresh display
      180° turn by eye in both arms.
    - **Jitter at low mouse polling rates** (125/250 Hz) with smoothing off.
    - **Raw Mouse Input on:** acceleration feels the same.
-4. Join a multiplayer game with the setting on. Feel should match stock, and
+4. After the `1` arm, check `logs\openshim.log` for the
+   `[MouseEveryFrame] last N reads` lines. Expect P = N and
+   "bucket already closed" close to N. Stock at 144 fps gives about N/3.
+5. Join a multiplayer game with the setting on. Feel should match stock, and
    the diagnostic lines logged during the net game should show 0 per-frame
    reads.
