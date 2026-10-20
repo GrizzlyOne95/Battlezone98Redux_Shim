@@ -18,6 +18,9 @@ that animation and presentation stay exactly stock?
   entity's bone matrices are unchanged), gated on a pose-change-rate
   measurement. GPU skinning stays an option only if the user accepts
   sub-pixel, non-bit-exact output.
+- **Update (same day): the measurement says no.** Only 4–27% of skinned
+  vertices have an unchanged palette, about 5% with 80 craft moving or
+  fighting. See *Pose-change rate*.
 
 ## Phase 1 measurements
 
@@ -172,6 +175,122 @@ These come from the loose material scripts in the GOG install.
    - CPU fallback for anything else.
    - Expected win: up to the skin ms in the tables above, minus GPU cost and
      the per-entity bone upload, so roughly 2–3 ms at 80 craft.
+
+## Pose-change rate (palette reuse probe, 2026-10-20)
+
+Recommendation step 1, measured. **Verdict: do not build the whole-palette
+skip cache.** An unchanged palette is common by call count, but those calls
+are the small submeshes. The big body mesh changes almost every frame, so
+the skips would cover only 4–27% of skinned vertices, and about 5% with 80
+craft moving or fighting.
+
+### Method
+
+- `HookSoftwareVertexBlend` (`ogre_animation_profiler/ogre_hooks.inl`) now
+  copies the bone matrices it is passed, up to 8 per call.
+  - It keys them by the target vertex data. That is the entity's own
+    `mSkelAnimVertexData`; the source data is shared per mesh.
+  - It compares them byte-for-byte with that target's previous skin.
+  - It reports a `[OgreProfile][Palette]` line every interval, and
+    `analyze_live_combat_benchmark.ps1` adds `palette_*` columns for it.
+  - It runs only under `ProfileOgreAnimation`, outside the timed region.
+- `same` = palette byte-identical to the previous skin of that target. Every
+  such skin was exactly one frame after the last one, and there were no
+  same-frame repeats.
+- `sameVert%` = the vertices those skins cover, as a share of all compared
+  vertices. A skip cache saves roughly this share of the skin ms, minus
+  its own compare cost.
+- Setup is as in Phase 1: DX11, windowed, VSync off, `lcbench`, units at
+  50 m facing the camera, 8 one-second samples (7 where noted), same
+  winmm build plus the probe.
+- `movement`, `combat` and `flight` were added after review, because mission
+  craft move and fight. `idle` is the best case for a cache, not the
+  typical one.
+
+### Results
+
+| unit | scenario | craft | skin calls/f | skin ms | same % (calls) | **same % (verts)** | ≤1e-5 noise / changed |
+|---|---|---:|---:|---:|---:|---:|---:|
+| svfigh | idle | 20 | 63.0 | 0.61 | 44.5 | **19.4** | 20.4 / 35.0 |
+| svfigh | idle | 40 | 123.0 | 1.29 | 39.0 | **11.2** | 26.6 / 75.0 |
+| svfigh | idle | 80 | 243.0 | 2.73 | 36.6 | **7.6** | 32.8 / 153.9 |
+| svfigh | firing | 20 | 39.0 | 0.36 | 53.8 | **33.2** | 9.6 / 18.0 |
+| svfigh | firing | 40 | 82.1 | 0.78 | 43.3 | **17.5** | 14.3 / 46.5 |
+| svfigh | firing | 80 | 193.0 | 2.28 | 37.6 | **9.0** | 12.9 / 120.5 |
+| svfigh | movement | 20 | 41.6 | 0.41 | 38.2 | **10.6** | 1.4 / 25.7 |
+| svfigh | movement | 40 | 98.6 | 1.03 | 35.4 | **6.0** | 3.1 / 63.7 |
+| svfigh | movement | 80 (7) | 197.9 | 2.24 | 34.6 | **4.3** | 3.0 / 129.5 |
+| svfigh | combat | 20 | 36.3 | 0.33 | 38.9 | **11.7** | 0.2 / 22.2 |
+| svfigh | combat | 40 | 60.7 | 0.56 | 37.0 | **8.6** | 0.3 / 38.4 |
+| svfigh | combat | 80 | 138.1 | 1.51 | 34.8 | **5.0** | 0.7 / 90.1 |
+| svfigh | flight | 20 | 33.0 | 0.30 | 48.1 | **25.1** | 8.5 / 17.1 |
+| svfigh | flight | 40 | 63.0 | 0.63 | 41.1 | **14.5** | 10.4 / 37.1 |
+| svfigh | flight | 80 (7) | 123.2 | 1.33 | 37.6 | **9.2** | 11.3 / 76.8 |
+| avtank | idle | 20 | — | — | ~74.6 | **~26.6** | run incomplete; last interval only |
+| avtank | idle | 40 | 123.0 | 1.58 | 70.4 | **14.4** | 6.9 / 36.4 |
+| avtank | idle | 80 | 242.8 | 2.97 | 68.5 | **9.0** | 8.4 / 76.5 |
+| avtank | firing | 20 | 33.2 | 0.35 | 73.4 | **23.2** | 0.7 / 8.8 |
+| avtank | firing | 40 | 73.7 | 0.81 | 69.6 | **12.1** | 1.2 / 22.1 |
+| avtank | firing | 80 | 188.9 | 2.46 | 67.9 | **7.0** | 2.2 / 59.3 |
+| avtank | movement | 20 | 40.1 | 0.41 | 69.2 | **10.9** | 1.2 / 12.4 |
+| avtank | movement | 40 | 88.1 | 0.97 | 67.8 | **7.0** | 1.1 / 28.4 |
+| avtank | movement | 80 | 169.0 | 2.12 | 67.3 | **5.6** | 0.8 / 55.3 |
+| avtank | combat | 20 | 40.3 | 0.42 | 69.2 | **10.9** | 0.0 / 12.4 |
+| avtank | combat | 40 | 65.7 | 0.71 | 68.3 | **8.3** | 0.0 / 20.9 |
+| avtank | combat | 80 | 149.3 | 1.92 | 67.3 | **5.7** | 0.0 / 48.6 |
+
+The last column lists changed skins per frame whose every element moved by at
+most 1e-5, out of all changed skins per frame. The avtank firing-80 run also
+had 57 skins per interval it could not track (probe table contention). That
+is too few to matter.
+
+### Which bones change
+
+The probe has no bone names, so the part names below are inferred, not
+measured.
+- **avtank:** the unchanged skins are the 3-matrix submeshes. The changing
+  skin is the large submesh with 6–7 matrices.
+  - In it, matrix slots 0–2 never changed in any scenario.
+  - Slots 3–5 changed together on 76–95% of skins. Every change touched
+    rotation, never translation alone.
+  - So about half the bones of the body mesh animate every frame and the
+    other half are static. Turret or hover parts would fit, unconfirmed.
+- **svfigh:** changed skins split exactly 50/50.
+  - In half, one matrix changes (slot 0 of a ~2-matrix submesh, ~30% of the
+    time).
+  - In the other half, all three matrices of a 3-matrix submesh change,
+    with slot 2 changing on 83–98% of skins.
+  - At idle and in flight, many changes are ≤1e-5 float noise, consistent
+    with a damped wing or hover settle. That noise disappears under
+    movement and combat, where the changes are real motion.
+- **Both units:** the share of unchanged vertices falls as craft count rises
+  (about 20–30% at 20 craft, 4–9% at 80). It also falls when craft move. A
+  per-entity whole-palette check therefore helps least in exactly the
+  case that costs most.
+
+### Recommendation
+
+- **Do not build the whole-palette skip cache.** At 80 craft it would save
+  about 0.1–0.27 ms of 1.5–3.0 ms skin time. It would cost:
+  - persistent per-entity blended buffers, about 156 KB per fighter, about
+    12 MB at 80;
+  - a palette compare on every skin;
+  - a new fail-closed lifetime surface around Ogre's temp-buffer checkout.
+  A tolerance-based check (treating the ≤1e-5 noise as unchanged) would not
+  be exact, so it is out under the stock-identical rule.
+- **Possible exact follow-up, not measured:** per-bone partial re-skinning.
+  Rigs are rigid-part, and in avtank half the body's bones never move.
+  Re-blending only the vertices that reference changed matrix slots, and
+  keeping the rest from last frame, could save far more than whole-palette
+  skips.
+  - It still needs the persistent buffers above.
+  - Its payoff depends on the vertex share per bone, which this probe does
+    not measure.
+  - Exactness depends on Ogre's SSE path producing per-vertex results
+    independent of batch membership, which is plausible but unverified.
+  - Measure that vertex share before designing it.
+- Hardware skinning remains the only route to removing most of the cost,
+  under the sub-pixel caveat above.
 
 ## Tooling changes in this workstream
 

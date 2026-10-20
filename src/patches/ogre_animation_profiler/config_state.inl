@@ -37,11 +37,13 @@
 #include <atomic>
 #include <bit>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <string>
 #include <utility>
 #include <vector>
@@ -578,6 +580,43 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_BlendMatrixTotal{ 0 };
         std::atomic<uint64_t> g_BlendMatrixMax{ 0 };
         std::atomic<uint64_t> g_BlendNormalsCalls{ 0 };
+
+        // Palette-reuse probe: would an exact "skip re-skinning when the bone
+        // palette is unchanged" cache pay off? Keyed by the per-entity target
+        // vertex data, compared byte-for-byte against that target's last skin.
+        constexpr size_t kPaletteSlotCount = 2048;
+        constexpr size_t kPaletteMaxMatrices = 8;
+        constexpr size_t kPaletteMatrixFloats = 16;
+        struct PaletteSlot
+        {
+            std::atomic<uintptr_t> key{ 0 };
+            std::atomic<uint32_t> busy{ 0 };
+            uint64_t frame = 0;
+            uint32_t matrixCount = 0;
+            float matrices[kPaletteMaxMatrices][kPaletteMatrixFloats]{};
+        };
+        PaletteSlot* g_PaletteSlots = nullptr;
+        std::atomic<uint32_t> g_PaletteSlotsState{ 0 };
+        // Unchanged vs the target's previous skin in an earlier frame.
+        std::atomic<uint64_t> g_PaletteSameCalls{ 0 };
+        std::atomic<uint64_t> g_PaletteSameVertices{ 0 };
+        // Subset of "same" whose previous skin was exactly the previous frame.
+        std::atomic<uint64_t> g_PaletteSameConsecutiveCalls{ 0 };
+        std::atomic<uint64_t> g_PaletteChangedCalls{ 0 };
+        std::atomic<uint64_t> g_PaletteChangedVertices{ 0 };
+        // Changed, but every element within 1e-5: float noise, not motion.
+        std::atomic<uint64_t> g_PaletteNoiseCalls{ 0 };
+        std::atomic<uint64_t> g_PaletteRepeatSameFrameCalls{ 0 };
+        std::atomic<uint64_t> g_PaletteFirstCalls{ 0 };
+        std::atomic<uint64_t> g_PaletteUntrackedCalls{ 0 };
+        // For changed palettes: which matrix slots moved, how many, and whether
+        // the change touched rotation/scale or only translation.
+        std::array<std::atomic<uint64_t>, kPaletteMaxMatrices> g_PaletteIndexChanged{};
+        std::array<std::atomic<uint64_t>, kPaletteMaxMatrices> g_PaletteIndexSeen{};
+        std::array<std::atomic<uint64_t>, 4> g_PaletteChangedCountBuckets{};
+        std::atomic<uint64_t> g_PaletteAllChangedCalls{ 0 };
+        std::atomic<uint64_t> g_PaletteRotationChangedMatrices{ 0 };
+        std::atomic<uint64_t> g_PaletteTranslationOnlyMatrices{ 0 };
         std::atomic<uint64_t> g_AnimationMaxTicks{ 0 };
         std::atomic<uint64_t> g_SoftwareBlendMaxTicks{ 0 };
         std::atomic<uint64_t> g_RenderQueueCalls{ 0 };

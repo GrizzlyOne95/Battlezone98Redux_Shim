@@ -356,6 +356,58 @@
                 static_cast<unsigned long long>(skinnedNotRendered),
                 unnecessaryPct);
 
+            {
+                const uint64_t paletteSame = g_PaletteSameCalls.exchange(0, std::memory_order_acq_rel);
+                const uint64_t paletteSameVertices = g_PaletteSameVertices.exchange(0, std::memory_order_acq_rel);
+                const uint64_t paletteSameConsecutive = g_PaletteSameConsecutiveCalls.exchange(0, std::memory_order_acq_rel);
+                const uint64_t paletteChanged = g_PaletteChangedCalls.exchange(0, std::memory_order_acq_rel);
+                const uint64_t paletteChangedVertices = g_PaletteChangedVertices.exchange(0, std::memory_order_acq_rel);
+                const uint64_t paletteNoise = g_PaletteNoiseCalls.exchange(0, std::memory_order_acq_rel);
+                const uint64_t paletteRepeat = g_PaletteRepeatSameFrameCalls.exchange(0, std::memory_order_acq_rel);
+                const uint64_t paletteFirst = g_PaletteFirstCalls.exchange(0, std::memory_order_acq_rel);
+                const uint64_t paletteUntracked = g_PaletteUntrackedCalls.exchange(0, std::memory_order_acq_rel);
+                const uint64_t paletteAllChanged = g_PaletteAllChangedCalls.exchange(0, std::memory_order_acq_rel);
+                const uint64_t paletteRotation = g_PaletteRotationChangedMatrices.exchange(0, std::memory_order_acq_rel);
+                const uint64_t paletteTranslation = g_PaletteTranslationOnlyMatrices.exchange(0, std::memory_order_acq_rel);
+                uint64_t changedBuckets[4]{};
+                for (size_t i = 0; i < 4; ++i)
+                    changedBuckets[i] = g_PaletteChangedCountBuckets[i].exchange(0, std::memory_order_acq_rel);
+                double indexChangedPct[kPaletteMaxMatrices]{};
+                for (size_t i = 0; i < kPaletteMaxMatrices; ++i)
+                {
+                    const uint64_t changed = g_PaletteIndexChanged[i].exchange(0, std::memory_order_acq_rel);
+                    const uint64_t seen = g_PaletteIndexSeen[i].exchange(0, std::memory_order_acq_rel);
+                    indexChangedPct[i] = seen ? 100.0 * static_cast<double>(changed) / static_cast<double>(seen) : 0.0;
+                }
+                const uint64_t compared = paletteSame + paletteChanged;
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[OgreProfile][Palette] same=%.2f/f sameVerts=%.0f/f samePct=%.1f%% sameVertPct=%.1f%% consecutive=%.2f/f changed=%.2f/f noise=%.2f/f repeat=%.2f/f first=%llu untracked=%llu | changedCount=[%llu,%llu,%llu,%llu] allChanged=%.1f%% rotMat=%llu transOnlyMat=%llu | idxChangedPct=[%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f]",
+                    static_cast<double>(paletteSame) / frameDivisor,
+                    static_cast<double>(paletteSameVertices) / frameDivisor,
+                    compared ? 100.0 * static_cast<double>(paletteSame) / static_cast<double>(compared) : 0.0,
+                    (paletteSameVertices + paletteChangedVertices)
+                        ? 100.0 * static_cast<double>(paletteSameVertices) /
+                            static_cast<double>(paletteSameVertices + paletteChangedVertices)
+                        : 0.0,
+                    static_cast<double>(paletteSameConsecutive) / frameDivisor,
+                    static_cast<double>(paletteChanged) / frameDivisor,
+                    static_cast<double>(paletteNoise) / frameDivisor,
+                    static_cast<double>(paletteRepeat) / frameDivisor,
+                    static_cast<unsigned long long>(paletteFirst),
+                    static_cast<unsigned long long>(paletteUntracked),
+                    static_cast<unsigned long long>(changedBuckets[0]),
+                    static_cast<unsigned long long>(changedBuckets[1]),
+                    static_cast<unsigned long long>(changedBuckets[2]),
+                    static_cast<unsigned long long>(changedBuckets[3]),
+                    paletteChanged ? 100.0 * static_cast<double>(paletteAllChanged) / static_cast<double>(paletteChanged) : 0.0,
+                    static_cast<unsigned long long>(paletteRotation),
+                    static_cast<unsigned long long>(paletteTranslation),
+                    indexChangedPct[0], indexChangedPct[1], indexChangedPct[2], indexChangedPct[3],
+                    indexChangedPct[4], indexChangedPct[5], indexChangedPct[6], indexChangedPct[7]);
+            }
+
             LogShimA(
                 LogLevel::Info,
                 kComponent,

@@ -274,6 +274,7 @@ $results = foreach ($metadataFile in $metadataFiles) {
     $skinSourceByStamp = @{}
     $dynamicByStamp = @{}
     $passesByStamp = @{}
+    $paletteByStamp = @{}
     foreach ($record in $records) {
         if ($record.Line -match '\[OgreProfile\]\[SkinMeta\]') {
             $skinByStamp[$record.StampText] = $record.Line
@@ -289,8 +290,12 @@ $results = foreach ($metadataFile in $metadataFiles) {
             $dynamicByStamp[$record.StampText] = $record.Line
         } elseif ($record.Line -match '\[OgreProfile\]\[Passes\]') {
             $passesByStamp[$record.StampText] = $record.Line
+        } elseif ($record.Line -match '\[OgreProfile\]\[Palette\]') {
+            $paletteByStamp[$record.StampText] = $record.Line
         }
     }
+    $paletteLines = @($records |
+        Where-Object { $_.Line -match '\[OgreProfile\]\[Palette\]' })
 
     $d3d9Lines = @($records |
         Where-Object { $_.Line -match '\[OgreProfile\]\[D3D9\]' })
@@ -325,6 +330,21 @@ $results = foreach ($metadataFile in $metadataFiles) {
         }
         $dynamicLine = $dynamicByStamp[$sample.StampText]
         $passesLine = $passesByStamp[$sample.StampText]
+        $paletteLine = $paletteByStamp[$sample.StampText]
+        if (-not $paletteLine -and $sampleOrdinal -lt $paletteLines.Count) {
+            $paletteLine = $paletteLines[$sampleOrdinal].Line
+        }
+        # Per-matrix-slot change rates: which bones of a rigid-part rig move.
+        $paletteIndexPct = @($null, $null, $null)
+        if ($paletteLine) {
+            $indexMatch = [regex]::Match($paletteLine, 'idxChangedPct=\[(?<values>[^\]]*)\]')
+            if ($indexMatch.Success) {
+                $values = $indexMatch.Groups['values'].Value -split ','
+                for ($i = 0; $i -lt 3 -and $i -lt $values.Count; $i++) {
+                    $paletteIndexPct[$i] = [double]$values[$i]
+                }
+            }
+        }
         $dupAnim = Get-Number $sample.Line "dupAnim"
         $dupSkin = Get-Number $sample.Line "dupSkin"
         $dupRenderQueue = Get-Number $skinLine "duplicateRenderQueue"
@@ -390,6 +410,23 @@ $results = foreach ($metadataFile in $metadataFiles) {
             shadow_animation_calls_per_frame = Get-Number $passesLine "animShadow"
             main_skin_calls_per_frame = Get-Number $passesLine "skinMain"
             shadow_skin_calls_per_frame = Get-Number $passesLine "skinShadow"
+            # Palette-reuse probe: skins whose bone palette is byte-identical
+            # to that entity's previous skin (what an exact skip cache saves).
+            palette_same_calls_per_frame = Get-Number $paletteLine "same"
+            palette_same_vertices_per_frame = Get-Number $paletteLine "sameVerts"
+            palette_same_percent = Get-Number $paletteLine "samePct"
+            palette_same_vertex_percent = Get-Number $paletteLine "sameVertPct"
+            palette_same_consecutive_per_frame = Get-Number $paletteLine "consecutive"
+            palette_changed_calls_per_frame = Get-Number $paletteLine "changed"
+            palette_noise_calls_per_frame = Get-Number $paletteLine "noise"
+            palette_repeat_same_frame_per_frame = Get-Number $paletteLine "repeat"
+            palette_untracked = Get-Number $paletteLine "untracked"
+            palette_all_changed_percent = Get-Number $paletteLine "allChanged"
+            palette_rotation_matrices = Get-Number $paletteLine "rotMat"
+            palette_translation_only_matrices = Get-Number $paletteLine "transOnlyMat"
+            palette_index0_changed_percent = $paletteIndexPct[0]
+            palette_index1_changed_percent = $paletteIndexPct[1]
+            palette_index2_changed_percent = $paletteIndexPct[2]
         }
     }
 
