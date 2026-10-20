@@ -80,6 +80,35 @@ The stock model is not claimed to have an authored `recoil` clip.
 The helper reads the local extracted stock ODF or an existing loose override;
 it does not distribute stock game assets or modify gatstab/model files.
 
+### Authored clip on the stock tank
+
+`Prepare-AvtankAnimationTrial.py` authors `osh_recoil` into a local copy of
+the stock avtank skeleton. The stock `Take_001` has no animation tracks.
+The helper uses the sibling Modding Toolbox skeleton codec, first requiring
+a byte-identical stock round trip. It inserts identity animation-only parents
+above `AGR11BGA` (world) and `AGR21bga` (cockpit); existing bone transforms,
+mesh bytes and vertex weights stay intact. Both new tracks start 0.30 m back
+and ease monotonically to rest over 0.12 s. `--distance` and `--duration`
+customize the authored motion; the ODF playback rate scales its timing.
+
+```powershell
+python ./reverse_engineering/Prepare-AvtankAnimationTrial.py `
+  --output "$env:TEMP\avtank-animation-trial"
+```
+
+The output directory must be new. It contains `avtank.mesh`, `avtank.skeleton`,
+an `avtank.odf` selecting `osh_recoil` with cockpit playback, and a hash manifest.
+No game files are installed by this helper. For a later live trial, temporarily
+mount the matched mesh/skeleton in the test mod and use the generated ship ODF;
+back up and restore every override. Do not commit the generated game assets.
+
+Offline inspection confirmed two monotonic tracks with correct kick/rest
+endpoints, preserved original clips/bone transforms, and 113 existing weighted
+vertices on each barrel bone. Live clip playback, aiming coexistence and cockpit
+resolution remain unverified: the user requested leaving the active co-op game
+running, so the authored-clip launch was deferred. The node-slide smoke result
+below does not qualify these newly authored animation tracks.
+
 Build/deploy the complete OpenShim chain with `scripts/Deploy-OpenShim.ps1`.
 For clip tests also deploy the matching EXU build to the mod's EXU location.
 Launch through `BZRHarness.ps1` with `BZR_FORCE_WINDOWED=1` and the explicit
