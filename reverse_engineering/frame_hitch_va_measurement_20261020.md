@@ -27,6 +27,8 @@ The analyzer is `reverse_engineering/analyze_frame_hitches.py`.
 The rare large hitches have real game-side stacks and are worth a follow-up.
 For example, one 114 ms frame at +172 s in misn18 was 70% inside one engine
 call chain, and one 48 ms frame was in the sound path (0x004378F0 / 0x0043A170).
+Both are explained in [Mid-mission spike causes](#mid-mission-spike-causes)
+below. The 114 ms frame is a mission-script spawn, not mission end.
 
 ## Runs
 
@@ -214,4 +216,67 @@ That build resolved `SetLoopTimes` through its fallback address, because the `re
    plus a waitable object) behind a setting, and A/B it with this telemetry.
    The pacing line is the metric.
 3. Use the sampled worst-hitch list to chase the rare >40 ms game-side spikes
-   (a sound path, and one long engine chain at mission end).
+   (a sound path, and one long engine chain at mission end). Done; see
+   [Mid-mission spike causes](#mid-mission-spike-causes). The "mission end"
+   chain was a mid-mission spawn.
+
+## Mid-mission spike causes
+
+Branch `agent/frame-spike-causes`, stacked on `agent/precise-timestep`.
+
+### Runs
+
+The deployed DLL was the same for every run. Each run used 1920x1080 windowed over RDP and frame telemetry. The sampled runs also used the 1 kHz CPU sampler at depth 48.
+
+| run | length | post-load median | post-load frames ≥ 2× median or 40 ms |
+|---|---|---|---|
+| stock misn18, sampled | 420 s | 17.0 ms | +148.3 s, +172.5 s, +274.6 s, +402.5 s, plus RDP Present slot misses |
+| stock misn18, telemetry only | 420 s | 18.6 ms | the same four times, plus misses |
+| CR crsetup, weather Severe, sampled | 300 s | 14.1 ms | +138.6 s, +269.2 s, plus one miss |
+
+"Post-load" means from 8 s after the last frame over 1 s within the first 90 s, and never earlier than +12 s. Frames are then grouped by the call chain that holds most of their main-thread samples. The sampler inflates syscall-heavy frames: the spawn frame below was 114 ms sampled and 49 ms unsampled in the first capture. So costs are quoted from the telemetry-only run where possible.
+
+In crsetup, the load tail extends to about +15 s:
+- texture `prepare` under the mission-start loop 0x00617110;
+- the first ever music Play, at 249 ms, mostly in DirectSound/audio-service ALPC.
+
+Both are load-time costs and are left out.
+
+### Ranked causes
+
+1. **Music track change.** This is the most frequent, and it is now fixed in part.
+   - **How often:** once per track, about every 126–130 s in both missions. The times repeat run to run: misn18 at +148, +274 and +402 s.
+   - **Cost:** the frame is 48–49 ms unsampled in misn18 and 48–70 ms sampled in CR, against a 17–19 ms median.
+   - **Chain:** the per-frame music update 0x0043A170 → 0x00437B00 notices the end of the track, stops it (0x00437A70, which frees the cached file) and calls track start 0x004378F0. All of it runs on the main thread.
+   - **Main-thread work, 7–15 ms of the frame, broken down:**
+     - **Opening the file, 0–7 ms.** The size probe 0x00481A60 → 0x00481A80 → `_fsopen` 0x00829150 sits in `ZwCreateFile`. It is near zero when the file is in cache. In CR it was 5–7 ms, because the tracks were cold.
+     - **Reading the file, 1–3 ms.** 0x00481AF0 → 0x00481B80 reads the whole 1.5–3.7 MB `.ogg` into the resource cache.
+     - **Constructor decode, 3–4 ms.** OggManager setup 0x0043F050 builds the streaming sound (0x0043EC90 → constructor 0x00416830). The constructor calls FillBufferWithSound 0x00416E10 and decodes a 3 s DirectSound buffer.
+     - **Play decode, 2–3 ms.** OggManager::Play 0x0043F320 calls Reset 0x00416CF0, which does `ov_raw_seek` to 0 and zeroes every stream position. It then calls FillBufferWithSound again over the same 3 s.
+   - **The constructor decode is never heard.** Every path that makes a track audible goes through Play (0x00437800, 0x004378F0, and 0x00437B00 → 0x0043F9E0 → 0x0043F320). Play rewinds and refills before the buffer starts.
+   - **Fix:** `[Fixes] MusicSingleFill` (default ON; `OPENSHIM_DISABLE_MUSIC_SINGLE_FILL=1` turns it off). It replaces that one call at 0x004168E9, `E8 rel32` → `add esp,8; nop; nop`. The call is `__thiscall` with two stack arguments and its result is unused. The patch first checks that the call still targets FillBufferWithSound. Both addresses are named resolves in `scripts/patches.json`.
+   - **A/B, same build, misn18, 300 s each, over RDP:**
+
+     | arm | +148 s frame | +274 s frame | median |
+     |---|---|---|---|
+     | `OPENSHIM_DISABLE_MUSIC_SINGLE_FILL=1` (off), telemetry | 42.4 ms | 41.3 ms | 16.6 ms |
+     | on, telemetry | 36.9 ms | 31.8 ms | 16.5 ms |
+     | on, sampled | 37.4 ms | 38.2 ms | 16.3 ms |
+
+     - In the sampled "on" run, no samples remain under the constructor 0x00416830, and the main-thread music samples per track start fall from 7–9 to 5.
+     - Track changes still land every ~126 s (BZLogger `Starting Music Playback`), so each track streams through to its end.
+     - Audibility was not checked by ear: there was no audio over RDP.
+     - RDP rounds frames to ~33 ms slots, so the deltas are approximate.
+   - **Not fixed: opening and reading the file.** These are the remaining cost; with cold files they are the larger part. Prefetching the next track on a worker thread would warm the OS cache and the on-access scan. The next index is deterministic: the current index + 1, skipping the excluded track, wrapping at the upper bound (0x008E75F0–0x008E7600). It is a follow-up because it needs the engine's music path resolution, and mods can override tracks.
+2. **First spawn of an object class not yet loaded.** This is the most expensive single event, and it is rare.
+   - **When:** misn18 +172.4 s, 111 ms plus 51 ms over two frames, unsampled.
+   - **Chain:** 0x0045BF90 → the misn18 native mission script 0x005522E0 / 0x0054FE40 → BuildObject 0x005C8250 / 0x005C8380 / 0x005C82B0 → GameObjectClass load 0x004E1190 → the Ogre entity/mesh create 0x0067F480 (`%.*s.mesh`).
+   - **What it loads:** the Ogre log shows `hvsav.mesh`, `hvsav.skeleton` and three 2048² DXT1 textures (`hvsav00_D/_S/_E.dds`, about 8 MB) at that second. In other words, the script spawns the first Scavenger of the mission.
+   - **Where the samples are:** 45 of 81 samples are in `ZwReadFile`, reached through Ogre `FileStreamDataStream::read` → `std::istream::read` → the exe's streambuf underflow 0x00421520 → 0x00417E60 (`getc`) → `_filbuf`. In other words, the data is read in 4 KB CRT buffer refills. In the first capture `ZwCreateFile` via the Ogre FileSystemArchive open 0x006687B0 → 0x004220F0 → `_Fiopen` 0x00423150 also showed.
+   - **How often:** about once per class per mission, so a handful per mission.
+   - **No contained fix.** It would need either preloading every class a script might build, which is unknown in advance, or a larger-buffer streambuf for Ogre resource reads. The second might be worth measuring on its own.
+3. **RDP Present slot misses.** Not game work.
+   - **Where:** misn18 +252.5 s and +332.5 s, and CR +84.8 s; each 38–46 ms.
+   - **What they are:** 73% `ZwDelayExecution` inside the DXGI Present sleep, with no game frame over 2 ms. A frame just misses a ~33 ms RDP slot and waits for the next. They need a physical-console run to judge.
+
+One unsampled outlier is unexplained: misn18 telemetry +121.0 s, 56 ms. It did not recur in the sampled run.

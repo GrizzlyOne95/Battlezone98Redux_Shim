@@ -204,6 +204,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Whole-millisecond sim step quantisation; replaces only the float step,
     # never the game clock, and stands down in network games.
     "Fixes/PreciseTimestep",
+    # Skips a music decode that Play overwrites before it is heard; audio only.
+    "Fixes/MusicSingleFill",
     "Fixes/MagnetZeroRangeGuard",
     # Heap-corruption guard (a remote scavenger's NetProcess is not a
     # ScavengerProcess); active in network games, which is where it matters.
@@ -369,6 +371,7 @@ $shippingPolicyChecks = @{
     "Fixes/ConstructorRemoteBuild" = "1"
     "Fixes/ConstructorRecycleStaleTarget" = "1"
     "Fixes/PreciseTimestep" = "1"
+    "Fixes/MusicSingleFill" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
     "Fixes/ScavengerNetProcessGuard" = "1"
     "Fixes/LuaFormationBinding" = "1"

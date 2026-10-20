@@ -40,6 +40,7 @@
 #include "ogre_animation_profiler.h"
 #include "native_cpu_sampler.h"
 #include "perf_telemetry.h"
+#include "music_single_fill.h"
 #include "precise_timestep.h"
 #include "pilot_fp_animation_trace.h"
 #include "walker_cockpit_trace.h"
@@ -209,6 +210,8 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializePerfTelemetry());
     // Opt-in QPC-precise simulation step ([Experimental] PreciseTimestep).
     PATCH_STAGE(BZROpenShim::InitializePreciseTimestep());
+    // Skip the redundant first decode at music track start ([Fixes] MusicSingleFill).
+    PATCH_STAGE(BZROpenShim::InitializeMusicSingleFill());
     PATCH_STAGE(BZROpenShim::InitializeNativeCpuSampler());
 
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");
