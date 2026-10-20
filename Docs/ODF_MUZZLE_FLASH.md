@@ -59,6 +59,22 @@ points down local -Z after its simulation-to-render conversion, as documented
 by `Definitions/Flash.lua` in EXU. This feature does not create art or convert
 legacy `draw_geom` assets automatically.
 
+EXU's `examples/odf_cannon_flash` now supplies original texture-free artwork:
+`exu_small_flash.mesh` (0.85 m long, 0.24 m maximum gas radius) replaces the
+BZ2-style mesh selection for small ordnance; `exu_heavy_flash.mesh` (2.35 m,
+0.88 m) supplies a larger flash. Both use the same additive HLSL material with
+hot-core colour, soft gas sheets and static turbulence. Select Amber or Blue
+with `flashMaterial`; mesh, timing, start/end scale, offset and roll are ODF
+controls. Brightness, colour and turbulence remain material parameters, and
+the authored shape remains in the mesh. See EXU's example README for setup and
+the shared-Toolbox mesh generator. Replace the ODF mesh selection rather than
+overwriting BZ2 artwork.
+
+The avtank/gatstab visual preset uses `flashOffset = "0.20 0.10 2.41"` to reach
+the stock model's visible barrel tip from its native weapon hardpoint. This
+is craft-specific and must be measured for another model. Existing stock
+projectile geometry/effects remain visible and are not replaced by `flashMesh`.
+
 The new `flashMesh` takes precedence over legacy `flashName` in the OpenShim
 trial. Existing ISDFC Lua flash/recoil profiles are not migrated automatically;
 disable the corresponding Lua flash producer when moving an already scripted
@@ -118,3 +134,14 @@ returned to rest. A bounded instrumented sample checked 33 completed firing
 matrices unchanged after the native presentation bridge. The load chain,
 resources, EXU placement and temporary mission/weapon files were restored.
 This proves the GOG smoke path only; the wider qualification gates above remain.
+
+The subsequent original-art checks used EXU's small/Amber (81 flashes),
+heavy/Amber (82) and heavy/Blue (82) meshes/materials on GOG/DX11. Each reported
+zero failed/orphaned effects and zero live flashes at shutdown; the resources
+loaded without DX11 shader/uniform/material parse errors. Captures show the
+small and heavy bursts, and the final heavy/Amber run confirms the barrel-tip
+preset above. Meshes round-trip through the shared Toolbox codec, regenerate
+byte-identically and have finite vertices/nondegenerate triangles. Both shader
+stages compile for DX11 and DX9; DX9 runtime remains unverified. Temporary game
+files/configuration were restored. EXU's example README records the material
+controls, shader-cache versioning and local BZ2/BZCC reference findings.
