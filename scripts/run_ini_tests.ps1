@@ -268,6 +268,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "General/EditorSaveToSourceFolder",
     # Acts only after a GPU reset, to keep the recreated D3D11 device alive.
     "Graphics/D3D11DeviceLossRecovery",
+    # Chooses how opt-in hit/contact feedback draws the stock reticle art;
+    # inert while HitMarkers and ReactiveReticle stay at their shipped 0.
+    "Display/StockReticleShader",
 
     # Stages OpenShim updates from the Workshop on the main menu (Steam only,
     # never in multiplayer); installs only at game exit. Default on by design.
