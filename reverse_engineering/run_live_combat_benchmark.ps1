@@ -177,11 +177,22 @@ if ($ExternalPresentMon) {
     }
 }
 
+# Launch serialization, graceful shutdown and BZR_FORCE_WINDOWED come from the
+# shared harness. It is loaded only after argument validation: with
+# BZR_FORCE_WINDOWED=1 it backs up and rewrites ogre.cfg on load.
+# Never force-kill the game: with a live D3D device that can hard-lock the
+# workstation (AGENTS.md).
+. (Join-Path $PSScriptRoot "BZRHarness.ps1")
+$launchLock = Enter-BZRLaunchLock
 if ($KillExisting) {
-    Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue |
-        Stop-Process -Force
+    Stop-BZRGame -TimeoutSeconds 60
     Start-Sleep -Seconds 2
+    if (Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue) {
+        Exit-BZRLaunchLock $launchLock
+        throw "Battlezone ignored WM_CLOSE and is still running; not launching."
+    }
 } elseif (Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue) {
+    Exit-BZRLaunchLock $launchLock
     throw "Battlezone is already running. Stop it or pass -KillExisting."
 }
 
@@ -466,8 +477,10 @@ try {
                         }
 
                         if (-not $process.HasExited) {
-                            Stop-Process -Id $process.Id -Force
-                            $process.WaitForExit()
+                            Stop-BZRGame -Id $process.Id -TimeoutSeconds 60
+                            if (-not $process.WaitForExit(5000)) {
+                                throw "$runId ignored WM_CLOSE and is still running; aborting the session."
+                            }
                         }
                         if ($presentMon) {
                             # Explicit session termination asks PresentMon to
@@ -557,9 +570,11 @@ try {
         }
     }
 } finally {
-    Get-Process -Name "battlezone98redux" -ErrorAction SilentlyContinue |
-        Stop-Process -Force
+    if ($process -and -not $process.HasExited) {
+        Stop-BZRGame -Id $process.Id -TimeoutSeconds 60
+    }
     [System.IO.File]::WriteAllText($ogreConfig, $originalOgreConfig)
+    $null = Restore-BZROrphanedOgreConfig -GameRoot $GameRoot
     if (Test-Path -LiteralPath $sourceMissionConfig) {
         Copy-Item -LiteralPath $sourceMissionConfig `
             -Destination $missionConfig -Force
@@ -577,6 +592,7 @@ try {
         [Environment]::SetEnvironmentVariable(
             $samplerEnvName, $priorSamplerEnv[$samplerEnvName], "Process")
     }
+    Exit-BZRLaunchLock $launchLock
 }
 
 Write-Host "Benchmark session complete: $sessionRoot"
