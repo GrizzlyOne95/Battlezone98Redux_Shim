@@ -363,6 +363,7 @@ namespace BZROpenShim
             std::array<uint8_t, 256> sliceRemap = TerrainHdMaterial::IdentityRemap();
             bool compact = false;
             bool releaseSourceTextures = false;
+            float microReliefScale = 1.0f;
             std::vector<TerrainHdMaterial::RectBinding> tileRects;
             std::array<TerrainHdChannel, 3> channels;
         };
@@ -619,6 +620,7 @@ namespace BZROpenShim
         };
 
         TerrainConfig g_config;
+        float g_activeTerrainReliefAmplitude = 0.0f;
         ProxyState g_proxy;
         OgreApi g_ogre;
         TerrainHdManifest g_hdManifest;
@@ -1047,6 +1049,9 @@ namespace BZROpenShim
                         "fallback", std::string());
                     binding.diffuseResource = materialIt.value().value(
                         "diffuseResource", std::string());
+                    binding.microReliefScale = materialIt.value().value("microReliefScale", 1.0f);
+                    if (!TerrainHdMaterial::ValidMicroReliefScale(binding.microReliefScale))
+                        throw std::runtime_error("microReliefScale must be finite and within 0..4");
                     if (binding.sliceCount == 0 || binding.sliceCount > 256 ||
                         binding.fallback.empty())
                         throw std::runtime_error(

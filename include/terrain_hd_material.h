@@ -10,6 +10,21 @@
 
 namespace BZROpenShim::TerrainHdMaterial
 {
+    inline bool ValidMicroReliefScale(float scale)
+    {
+        return std::isfinite(scale) && scale >= 0.0f && scale <= 4.0f;
+    }
+
+    // Keep the existing one-meter displacement envelope, including when a
+    // diagnostic environment override changes the baseline amplitude.
+    inline float ScaledMicroReliefAmplitude(float base, float scale)
+    {
+        if (!std::isfinite(base) || base < 0.0f || base > 1.0f ||
+            !ValidMicroReliefScale(scale)) return 0.0f;
+        const float amplitude = base * scale;
+        return amplitude > 1.0f ? 1.0f : amplitude;
+    }
+
     inline bool ProfileAllowsTiles(uint32_t backend, uint32_t profile)
     {
         return backend == uint32_t(RenderProfiles::ActiveBackend::DX11) &&

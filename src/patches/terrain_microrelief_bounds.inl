@@ -56,9 +56,9 @@ void UpdateTerrainReliefZoneBounds(void* zone)
         // that fresh baseline, then pad once; never accumulate displacement.
         TerrainReliefBounds saved = { candidate.mesh, *current, *current,
             g_ogre.getRadius(candidate.mesh), 0 };
-        saved.expanded.minimum.y -= g_config.microReliefAmplitude;
-        saved.expanded.maximum.y += g_config.microReliefAmplitude;
-        saved.expandedRadius = saved.originalRadius + g_config.microReliefAmplitude;
+        saved.expanded.minimum.y -= g_activeTerrainReliefAmplitude;
+        saved.expanded.maximum.y += g_activeTerrainReliefAmplitude;
+        saved.expandedRadius = saved.originalRadius + g_activeTerrainReliefAmplitude;
         g_ReliefBounds[candidate.meshName] = saved;
         g_ogre.setBounds(candidate.mesh, saved.expanded, false);
         g_ogre.setRadius(candidate.mesh, saved.expandedRadius);
@@ -76,7 +76,7 @@ bool PrepareTerrainMicroReliefBounds()
         for (const auto& zone : g_zoneOrdinals) UpdateTerrainReliefZoneBounds(zone.first);
         if (g_ReliefBounds.empty()) return false;
         g_ReliefBoundsActive = true;
-        LogShimA(LogLevel::Info, "terrain-tess", "[TERRAIN-TESS] micro-relief render bounds padded meshes=%zu amplitude=%.3f", g_ReliefBounds.size(), g_config.microReliefAmplitude);
+        LogShimA(LogLevel::Info, "terrain-tess", "[TERRAIN-TESS] micro-relief render bounds padded meshes=%zu amplitude=%.3f", g_ReliefBounds.size(), g_activeTerrainReliefAmplitude);
         return true;
     }
     catch (...) { RestoreTerrainMicroReliefBounds(); return false; }
