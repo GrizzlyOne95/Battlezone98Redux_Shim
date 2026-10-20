@@ -168,6 +168,16 @@ ShellCasingsClasses = cannon,mortar,machinegun,snipergun,-gquake,-gsandbag
 ; Legacy env alias: OPENSHIM_DISABLE_PATH_BLOCK_FACES
 PathBlockFaces = 1
 
+; Custom Campaigns screen without the Modable rebuild. Stock clears and
+; re-initialises the Ogre "Modable" resource group (~1100 material scripts)
+; when the list opens and again on Back, only to show names, descriptions and
+; previews. ON keeps the campaign mounts but skips both rebuilds; the chosen
+; campaign's content still loads in full when its mission screen opens.
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Fast Campaign List".
+; Legacy env alias: OPENSHIM_DISABLE_CAMPAIGN_LIST_LIGHT_MOUNT
+CampaignListLightMount = 1
+
 ; Redux multiplayer map-list refresh/selection preservation fixes.
 ; Accepted: boolean. Default: ON.
 ; Exposed on the OpenShim Settings page as "Map List Fixes".

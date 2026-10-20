@@ -246,6 +246,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # sets pathBlock = "faces"/"none". No stock or unflagged content changes.
     "General/PathBlockFaces",
 
+    # Skips only the Modable rebuild the Custom Campaigns list and its Back
+    # do for display; the campaign's own mount still rebuilds in full.
+    "General/CampaignListLightMount",
+
     # Qualified socket/netcode baseline.
     "Network/NetImprovements",
     # Sender-side native netcode fix: same wire format, so no mixed-client

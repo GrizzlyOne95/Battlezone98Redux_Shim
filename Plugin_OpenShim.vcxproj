@@ -174,6 +174,7 @@
     <ClCompile Include="src\patches\shell_casings.cpp" />
 
     <ClCompile Include="src\patches\path_block.cpp" />
+    <ClCompile Include="src\patches\campaign_list_light_mount.cpp" />
     <ClCompile Include="src\patches\chunk_proxy_render.cpp" />
     <ClCompile Include="src\patches\config_helpers.cpp" />
     <ClCompile Include="src\patches\diag_jump_snipe_probe.cpp" />
@@ -312,6 +313,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
+    <ClInclude Include="include\campaign_list_light_mount.h" />
     <ClInclude Include="include\background_run_policy.h" />
     <ClInclude Include="include\never_activate_policy.h" />
     <ClInclude Include="include\render_effect_intent.h" />

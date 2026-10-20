@@ -153,6 +153,13 @@ namespace
         ini.Set("General", "ChunkCacheMaxAgeDays", "7");
         Check(Mapped(ini, "OPENSHIM_CHUNK_CACHE_MAX_AGE_DAYS") == "7", "chunk cache age limit passes through raw");
 
+        // CampaignListLightMount: inverted switch.
+        Check(Mapped(ini, "OPENSHIM_DISABLE_CAMPAIGN_LIST_LIGHT_MOUNT") == "<none>", "unset CampaignListLightMount keeps the code default");
+        ini.Set("General", "CampaignListLightMount", "0");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_CAMPAIGN_LIST_LIGHT_MOUNT") == "1", "CampaignListLightMount = 0 reads as DISABLE=1");
+        ini.Set("General", "CampaignListLightMount", "1");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_CAMPAIGN_LIST_LIGHT_MOUNT") == "0", "CampaignListLightMount = 1 reads as DISABLE=0");
+
         // PathBlockFaces: inverted switch, trace from [Diagnostics].
         Check(Mapped(ini, "OPENSHIM_DISABLE_PATH_BLOCK_FACES") == "<none>", "unset PathBlockFaces keeps the code default");
         ini.Set("General", "PathBlockFaces", "0");

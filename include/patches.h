@@ -191,6 +191,14 @@ namespace BZROpenShim
             // collision solids; every other object keeps the stock box.
             // Removed at startup when [General] PathBlockFaces = 0.
             { 0, HookEngine::PatchType::JMP5, {}, "Path Block Faces BlockCells Hook", false, {} },
+            // CampaignListLightMount: the Custom Campaigns list mounts every
+            // addon campaign but skips the Modable clear+initialise; Back skips
+            // it again when the group still holds the main set. All four sites
+            // or none. Removed at startup when [General] CampaignListLightMount = 0.
+            { 0, HookEngine::PatchType::JMP5, {}, "Campaign List Light Mount List Store", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Campaign List Light Mount List Gate", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Campaign List Light Mount Main Store", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Campaign List Light Mount Main Gate", false, {} },
             // LensFlare::~LensFlare at 0x004F9250 runs from an atexit thunk
             // during CRT exit, after Ogre::MaterialManager has been destroyed.
             // It calls getSingleton and dereferences the null result twice for

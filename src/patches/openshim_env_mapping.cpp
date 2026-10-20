@@ -189,6 +189,10 @@ namespace
         // for ODFs that opt in. Its own inverted switch, default ON.
         if (Equals(name, "OPENSHIM_DISABLE_PATH_BLOCK_FACES"))
             return TryReadMappedBool(ini, "General", "PathBlockFaces", true, out);
+        // CampaignListLightMount: Custom Campaigns list without the Modable
+        // rebuild. Inverted switch, default ON.
+        if (Equals(name, "OPENSHIM_DISABLE_CAMPAIGN_LIST_LIGHT_MOUNT"))
+            return TryReadMappedBool(ini, "General", "CampaignListLightMount", true, out);
         if (Equals(name, "OPENSHIM_TRACE_PATH_BLOCK"))
             return TryReadMappedBool(ini, "Diagnostics", "TracePathBlock", false, out);
         if (Equals(name, "OPENSHIM_DISABLE_MAP_REFRESH_FIXES") ||

@@ -19,6 +19,7 @@
 #include "redux_compatibility.h"
 #include "p2p_reliable_send_fix.h"
 #include "shell_casing_config.h"
+#include "campaign_list_light_mount.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -445,6 +446,15 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
+    // [General] CampaignListLightMount (default ON) arrives inverted through
+    // the env mapping; off leaves both Modable setters stock.
+    static bool ShouldEnableCampaignListLightMount() {
+        static int s_cached = -1;
+        if (s_cached < 0)
+            s_cached = EnvFlagEnabledByName("OPENSHIM_DISABLE_CAMPAIGN_LIST_LIGHT_MOUNT") ? 0 : 1;
+        return s_cached != 0;
+    }
+
     static bool IsLobbyBzrnetIntegrationPatchName(const char* name) {
         if (!name) return false;
         return strcmp(name, "Lobby BZRNET Integration HOST") == 0 || strcmp(name, "Lobby BZRNET Integration CLIENT") == 0;
@@ -560,6 +570,9 @@ namespace BZROpenShim
         }
         if (!ShouldEnablePathBlockFaces()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsPathBlockFacesPatchName(p.name.c_str()); }), patches.end());
+        }
+        if (!ShouldEnableCampaignListLightMount()) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return CampaignListLightMount::IsPatchName(p.name.c_str()); }), patches.end());
         }
     }
 
@@ -1028,6 +1041,34 @@ namespace BZROpenShim
         struct M { const char* n; void* f; } m[] = {
             {"ODF UseItem Hook", (void*)OdfUseItemDetour}, {"ODF GetItemSize Hook", (void*)OdfGetItemSizeDetour}, {"ODF UnlockItem Hook", (void*)OdfUnlockItemDetour}, {"Map Sorting", (void*)Trampoline_Probe_MapSorting}, {"GameObject Handle Stale Slot Guard", (void*)GameObjectHandleGetObjHardened}, {"Map List Rewrite for Hop-Fix 1/3", (void*)Trampoline_HopFix1}, {"Map List Rewrite for Hop-Fix 2/3", (void*)Trampoline_HopFix2}, {"Map List Rewrite for Hop-Fix 3/3", (void*)Trampoline_HopFix3}, {"Map List Fix Support 1/3", (void*)Trampoline_MapListFixSupport1}, {"Vehicle List Mod Fix 1/4 (Force Mod-Scoped Assets 1/3)", (void*)Trampoline_VehicleListModFix1}, {"Vehicle List Mod Fix 4/4 (Force Mod-Scoped Assets 3/3)", (void*)Trampoline_VehicleListModFix4}, {"Lobby BZRNET Integration HOST", (void*)Trampoline_BzrnetHost}, {"Lobby BZRNET Integration CLIENT", (void*)Trampoline_BzrnetClient}, {"Custom Command /help Handler", (void*)Trampoline_CommandHelp}, {"Joiner Event Hook", (void*)Trampoline_JoinerEventHook}, {"Ban Button Hook 1/2", (void*)Trampoline_BanButtonHook1}, {"Ban Button Hook 2/2", (void*)Trampoline_BanButtonHook2}, {"AutoSave Load Button Hook", (void*)Trampoline_AutoSaveLoadButtonHook}, {"Restart Mission Hook Pause", (void*)Trampoline_RestartMissionPauseHook}, {"Restart Mission Hook Failure", (void*)Trampoline_RestartMissionFailureHook}, {"TurretCraft Aim Pitch Multiplier", (void*)Trampoline_TurretCraftAimPitchMultiplier}, {"TurretTank Aim Pitch Multiplier", (void*)Trampoline_TurretTankAimPitchMultiplier}, {"Under Attack Alert Hook 1/2", (void*)Trampoline_UnderAttackAlertHook1}, {"Under Attack Alert Hook 2/2", (void*)Trampoline_UnderAttackAlertHook2}, {"Offensive Attack Reveal Hook", (void*)Trampoline_OffensiveAttackRevealHook}, {"TurretTank Attack Reveal Hook", (void*)Trampoline_TurretTankAttackRevealHook}, {"LensFlare MaterialManager Guard 1/2", (void*)Trampoline_LensFlareMatMgrGuard1}, {"LensFlare MaterialManager Guard 2/2", (void*)Trampoline_LensFlareMatMgrGuard2},
         };
+        // CampaignListLightMount is all-or-nothing: a store without its gate
+        // (or a list half without the main half) would leave the group stale.
+        {
+            std::vector<HookEngine::PatchDef*> sites;
+            for (auto& p : patches)
+                if (CampaignListLightMount::IsPatchName(p.name.c_str())) sites.push_back(&p);
+            if (!sites.empty()) {
+                bool ok = sites.size() == static_cast<size_t>(CampaignListLightMount::kSiteCount);
+                std::vector<std::pair<void*, size_t>> detours;
+                for (auto* p : sites) {
+                    size_t len = 0;
+                    void* detour = (ok && p->type == HookEngine::PatchType::JMP5 && p->verified)
+                        ? CampaignListLightMount::PrepareSite(p->name, p->address, len) : nullptr;
+                    if (!detour) ok = false;
+                    detours.emplace_back(detour, len);
+                }
+                for (size_t i = 0; i < sites.size(); ++i) {
+                    if (ok) {
+                        sites[i]->payload = HookEngine::MakeJmp5Payload(sites[i]->address,
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(detours[i].first)), detours[i].second);
+                    } else {
+                        sites[i]->verified = false;
+                    }
+                }
+                if (!ok)
+                    Log(L"[CampaignListLightMount] not all four sites verified; Custom Campaigns keeps the stock Modable rebuild\n");
+            }
+        }
         for (auto& p : patches) {
             if (p.type != HookEngine::PatchType::JMP5 || !p.verified) continue;
             // The ODF item detours cannot serve a request without a trampoline

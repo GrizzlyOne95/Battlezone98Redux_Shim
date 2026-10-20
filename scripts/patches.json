@@ -320,6 +320,42 @@
       "identity": "BlockCells(GameObject*, bool add) at 0x00468A70 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), cdecl. Its callers are ProcessBuildings 0x00469C70 (call 0x00469D77, the map PostLoad pass reached from AiUtilFeature::PostLoad 0x0046B0CA), AiUtilFeature::AddObject 0x0046B100 (0x0046B18A, add=1) and AiUtilFeature::DeleteObject 0x0046B1A0 (0x0046B22A, add=0), whose class filters (class 2/10/5 or sig TURR, minus PROX/GEIZ/SFLD/SPWN) match BZ 1.5's, plus five Producer/ConstructionRig deploy calls (0x005AC047, 0x005AC0A8, 0x005AC95B, 0x005AD46D, 0x005AFF38); whole-image E8 scan 2026-10-05. Body: cmp [cellType 0x0260D178],0; class+0x1C == 5 takes the perimeter branch; otherwise get_obj_bounding_box 0x0062E650 and the matrix [obj+0xF4]+0x20 build the quad at 0x0260D158 (count 4 at 0x00917380) and BuildingCells 0x004698A0 runs UpdateCells 0x004690F0 with BuildingBlock 0x004693C0 or BuildingUnblock 0x004697C0. PathBlockFaces detours the entry (JMP5 over the 6-byte push ebp/mov ebp,esp/sub esp,64h prologue, relocated to a trampoline); the stock body always runs first. Single match in the GOG image (scan 2026-10-05)."
     },
     {
+      "name": "Campaign List Light Mount List Store",
+      "pattern": "83 B8 8C 00 00 00 03 75 05 E9 ?? ?? ?? ?? 8B 8D 40 FF FF FF C7 81 8C 00 00 00 03 00 00 00 E8",
+      "offset": 20,
+      "expected_size": 10,
+      "fallback": "0x0076AB79",
+      "require_unique": true,
+      "identity": "Mode store `mov dword [ecx+8Ch],3` at 0x0076AB79 in the Custom Campaigns list mount setter 0x0076AB20 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), after the stock same-mode guard (cmp [eax+8Ch],3). Its only caller is the shell screen factory 0x007C7AD0 case 0x20 (Custom Campaigns, vtable 0x0089D8D8). The setter unmounts (0x00667E40), mounts each addon campaign through the engine file system (0x006679C0, priority 10), then clears and initialises the Ogre Modable group. The detour records the mode being replaced and replays the store. Single match in the GOG image (scan 2026-10-20)."
+    },
+    {
+      "name": "Campaign List Light Mount List Gate",
+      "pattern": "68 ?? ?? ?? ?? 8D 4D A8 E8 ?? ?? ?? ?? C6 45 FC 07 8D 4D A8 51 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C6 45 FC 00 8D 4D A8 E8 ?? ?? ?? ?? 68 ?? ?? ?? ?? 8D 8D 78 FF FF FF E8 ?? ?? ?? ?? C6 45 FC 08 8D 95 78 FF FF FF 52 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C6 45 FC 00 8D 8D 78 FF FF FF E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? C7 45 FC FF FF FF FF 8D 4D 90 E8",
+      "offset": 0,
+      "expected_size": 5,
+      "fallback": "0x0076ADBF",
+      "require_unique": true,
+      "identity": "`push \"Modable\"` (literal 0x00892AE8) at 0x0076ADBF opening the clear+initialise block of the list mount setter 0x0076AB20 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): call [0x0086990C] OgreMain ResourceGroupManager::clearResourceGroup at +0x1D, call [0x00869910] initialiseResourceGroup at +0x52, skip target call 0x00434440 at +0x67; SEH state 0 at both ends. The detour verifies both IAT slots by import name and the literal at patch time. The pattern carries the setter's tail because without it the identical block of the campaign mount setter 0x0076B350 (0x0076B6E4) also matches. Single match (scan 2026-10-20)."
+    },
+    {
+      "name": "Campaign List Light Mount Main Store",
+      "pattern": "83 B8 8C 00 00 00 04 75 05 E9 ?? ?? ?? ?? 8B 4D B8 C7 81 8C 00 00 00 04 00 00 00 E8",
+      "offset": 17,
+      "expected_size": 10,
+      "fallback": "0x0076A07D",
+      "require_unique": true,
+      "identity": "Mode store `mov dword [ecx+8Ch],4` at 0x0076A07D in the main mount setter 0x0076A030 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), after the stock same-mode guard (cmp [eax+8Ch],4). Back from Custom Campaigns reaches it. The detour records the mode being replaced and replays the store. Single match in the GOG image (scan 2026-10-20)."
+    },
+    {
+      "name": "Campaign List Light Mount Main Gate",
+      "pattern": "68 ?? ?? ?? ?? 8D 4D D8 E8 ?? ?? ?? ?? C7 45 FC 02 00 00 00 8D 4D D8 51 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C7 45 FC FF FF FF FF 8D 4D D8 E8 ?? ?? ?? ?? 68 ?? ?? ?? ?? 8D 4D C0 E8 ?? ?? ?? ?? C7 45 FC 03 00 00 00 8D 55 C0 52 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C7 45 FC FF FF FF FF 8D 4D C0 E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 8B 4D F4 64 89 0D 00 00 00 00",
+      "offset": 0,
+      "expected_size": 5,
+      "fallback": "0x0076A16D",
+      "require_unique": true,
+      "identity": "`push \"Modable\"` at 0x0076A16D opening the clear+initialise block of the main mount setter 0x0076A030 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): call [0x0086990C] clearResourceGroup at +0x20, call [0x00869910] initialiseResourceGroup at +0x55, skip target call 0x00434440 at +0x6A; SEH state -1 at both ends. Skipped only when the list was entered from mode 4 by the light mount and the mode is still 3. Single match (scan 2026-10-20)."
+    },
+    {
       "name": "HoverCraft Turbo Sound Stop Guard",
       "pattern": "8B 85 20 FF FF FF 8B 88 F4 00 00 00 51 8B 95 1C FF FF FF 81 C2 B0 05 00 00 52 E8 ?? ?? ?? ?? 83 C4 08 89 85 E0 FE FF FF 8B 85 E0 FE FF FF 50 E8 ?? ?? ?? ?? 83 C4 04 8B 8D 20 FF FF FF C7 81 C4 02 00 00 00 00 00 00",
       "offset": 27,
