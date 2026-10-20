@@ -42,6 +42,7 @@
 #include "perf_telemetry.h"
 #include "precise_timestep.h"
 #include "mouse_every_frame.h"
+#include "thread_scheduling.h"
 #include "pilot_fp_animation_trace.h"
 #include "walker_cockpit_trace.h"
 #include "openshim_sdk_v2.h"
@@ -212,6 +213,9 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializePreciseTimestep());
     // Opt-in per-frame mouse look ([Experimental] MouseEveryFrame).
     PATCH_STAGE(BZROpenShim::InitializeMouseEveryFrame());
+    // MMCSS + power-throttling opt-out ([Fixes] ThreadScheduling). After perf
+    // telemetry so its renderOneFrame import hook chains telemetry's.
+    PATCH_STAGE(BZROpenShim::InitializeThreadScheduling());
     PATCH_STAGE(BZROpenShim::InitializeNativeCpuSampler());
 
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");
@@ -294,6 +298,7 @@ namespace BZROpenShim
         BZROpenShim::UiFileScan::Shutdown();
         BZROpenShim::ShutdownNativeCpuSampler();
         BZROpenShim::ShutdownPerfTelemetry();
+        BZROpenShim::ShutdownThreadScheduling();
         BZROpenShim::ShutdownOpenShimAssetSync();
         BZROpenShim::ShutdownOpenShimUpdater();
         BZROpenShim::ShutdownOpenShimSdkV2();

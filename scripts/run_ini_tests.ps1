@@ -220,6 +220,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # marks infinite, so Ogre culls them. The exe creates no Ogre scene query,
     # so no gameplay decision can read the box.
     "Fixes/RestoreCraftBounds",
+    # MMCSS registration and power-throttling opt-out; scheduling only.
+    "Fixes/ThreadScheduling",
     "Fixes/CliMultiParameterOptions",
 
     # Menu-only rendering repair, no simulation or wire effect. The Create Game
@@ -382,6 +384,7 @@ $shippingPolicyChecks = @{
     "Fixes/LuaSendLengthUnsigned" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"
     "Fixes/RestoreCraftBounds" = "1"
+    "Fixes/ThreadScheduling" = "1"
     "Fixes/ProducerScriptPredicates" = "0"
     "Fixes/VehicleListModScoping" = "0"
     "Fixes/CliMultiParameterOptions" = "1"

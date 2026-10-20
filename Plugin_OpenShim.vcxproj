@@ -257,6 +257,7 @@
     <ClCompile Include="src\patches\perf_telemetry.cpp" />
     <ClCompile Include="src\patches\precise_timestep.cpp" />
     <ClCompile Include="src\patches\mouse_every_frame.cpp" />
+    <ClCompile Include="src\patches\thread_scheduling.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
     <ClCompile Include="src\patches\numeric_locale_compat.cpp" />
     <ClCompile Include="src\patches\odf_compat.cpp" />
@@ -403,6 +404,7 @@
     <ClInclude Include="include\perf_telemetry.h" />
     <ClInclude Include="include\precise_timestep.h" />
     <ClInclude Include="include\mouse_every_frame.h" />
+    <ClInclude Include="include\thread_scheduling.h" />
     <ClInclude Include="include\net_optimizer.h" />
     <ClInclude Include="include\net_reorder_core.h" />
     <ClInclude Include="include\shim_log.h" />
