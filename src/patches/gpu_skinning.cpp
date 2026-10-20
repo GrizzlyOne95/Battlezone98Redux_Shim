@@ -14,7 +14,10 @@
 //    to their world-space equivalents, because under hardware skinning the
 //    "world" matrix Ogre supplies is bone 0's;
 //  - a skinned shadow caster program on each pass, merged by Ogre's
-//    deriveShadowCasterPass in place of the stock caster vertex program.
+//    deriveShadowCasterPass in place of the stock caster vertex program, or,
+//    for a technique that names its own shadow_caster_material, a skinned
+//    clone of that material put in the clone technique's place;
+//  - a bone palette sized per entity (64, 128 or 256 bones).
 //
 // An entity is switched only when every sub-entity converts and Ogre then
 // reports hardware animation enabled; otherwise its stock materials return.
@@ -52,10 +55,17 @@ namespace BZROpenShim
         constexpr const char* kProgramRoot = "OpenShim/GpuSkinVP/";
         // SceneManager::setShadowTextureCasterMaterial target used by the exe.
         constexpr const char* kCasterMaterialName = "Ogre/DepthShadowmap/Caster/Float";
-        // Palette capacity of every generated program. world_matrix_array_3x4
-        // writes one 3x4 per blend-index entry without a bounds check, so an
-        // entity with more bones than this must never get a skinned material.
-        constexpr int kMaxBones = 64;
+        // Palette capacities the generated programs come in.
+        // world_matrix_array_3x4 writes one 3x4 per bone matrix without a
+        // bounds check, so an entity only ever gets a palette at least as big
+        // as its bone count. 64 covers every stock craft and keeps their
+        // program and clone names; larger skeletons (ISDF Chronicles'
+        // ivatank has 79) get the next size up instead of the CPU. 256 is
+        // Ogre's OGRE_MAX_NUM_BONES and 768 float4 fit an SM4 constant buffer.
+        constexpr int kPaletteSizes[] = { 64, 128, 256 };
+        // Ogre::SharedPtrInfo::useCount in the shipped OgreMain.dll (see
+        // ogre_script_import_cache.cpp), not the header's +4.
+        constexpr size_t kSharedPtrUseCountOffset = 0x14;
         // New entities are picked up this often; converted ones are verified
         // every frame.
         constexpr uint32_t kConvertIntervalFrames = 15;
@@ -289,6 +299,30 @@ namespace BZROpenShim
         // and whose parameters seed each skinned caster's.
         void* g_casterPass = nullptr;
         SharedPtr g_casterMaterial;
+        // Offset of Technique::mShadowCasterMaterial, read from the exported
+        // getter's code (Ogre exports no setter); 0 when the code does not
+        // match, which keeps techniques with a caster material on the CPU.
+        size_t g_techniqueCasterOffset = 0;
+
+        int PaletteFor(int boneMatrices)
+        {
+            for (int size : kPaletteSizes)
+            {
+                if (boneMatrices <= size)
+                    return size;
+            }
+            return 0;
+        }
+
+        // "w4" for the stock 64-bone palette, "w4b128" otherwise; used in
+        // cache keys and in generated program and clone names.
+        std::string VariantTag(int weights, int palette)
+        {
+            std::string tag = "w" + std::to_string(weights);
+            if (palette != kPaletteSizes[0])
+                tag += "b" + std::to_string(palette);
+            return tag;
+        }
 
         // ------------------------------------------------------------------
         // Ogre SharedPtr reference helpers (see terrain_proxy.cpp: the raw ABI
@@ -299,7 +333,7 @@ namespace BZROpenShim
             if (!pointer.rep || !pointer.info)
                 return;
             auto* count = reinterpret_cast<volatile LONG*>(
-                reinterpret_cast<uint8_t*>(pointer.info) + sizeof(void*));
+                reinterpret_cast<uint8_t*>(pointer.info) + kSharedPtrUseCountOffset);
             InterlockedIncrement(count);
         }
 
@@ -310,7 +344,7 @@ namespace BZROpenShim
             if (pointer.rep && pointer.info)
             {
                 auto* count = reinterpret_cast<volatile LONG*>(
-                    reinterpret_cast<uint8_t*>(pointer.info) + sizeof(void*));
+                    reinterpret_cast<uint8_t*>(pointer.info) + kSharedPtrUseCountOffset);
                 if (InterlockedCompareExchange(count, 0, 0) > 1)
                     InterlockedDecrement(count);
             }
@@ -354,6 +388,40 @@ namespace BZROpenShim
         }
 
         // ------------------------------------------------------------------
+
+        // Technique::getShadowCasterMaterial in the shipped OgreMain.dll is,
+        // after the incremental-link jmp thunk:
+        //   push ebp; mov ebp,esp; push ecx; mov eax,[ebp+8];
+        //   mov edx,[ecx+N]; mov ecx,[ecx+N+4]; ...
+        // i.e. a by-value copy of the SharedPtr member at N. Anything else
+        // returns 0 and caster materials keep their technique on the CPU.
+        size_t DecodeCasterMaterialOffset(const void* getter)
+        {
+            const uint8_t* code = static_cast<const uint8_t*>(getter);
+            __try
+            {
+                for (int hops = 0; code && code[0] == 0xE9 && hops < 4; ++hops)
+                {
+                    int32_t rel = 0;
+                    std::memcpy(&rel, code + 1, sizeof(rel));
+                    code = code + 5 + rel;
+                }
+                static const uint8_t kPrologue[] = { 0x55, 0x8B, 0xEC, 0x51, 0x8B, 0x45, 0x08, 0x8B, 0x51 };
+                if (!code || std::memcmp(code, kPrologue, sizeof(kPrologue)) != 0)
+                    return 0;
+                const uint8_t offset = code[9];
+                if (code[10] != 0x8B || code[11] != 0x49 || code[12] != static_cast<uint8_t>(offset + 4) ||
+                    offset < 0x10 || offset >= 0x7C)
+                {
+                    return 0;
+                }
+                return offset;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return 0;
+            }
+        }
 
         bool ResolveApi()
         {
@@ -467,6 +535,8 @@ namespace BZROpenShim
                     ++missing;
             }
             g_apiAvailable = missing == 0;
+            if (g_apiAvailable)
+                g_techniqueCasterOffset = DecodeCasterMaterialOffset(reinterpret_cast<const void*>(o.getShadowCasterMaterial));
             if (!g_apiAvailable)
             {
                 LogShimA(LogLevel::Warn, kComponent,
@@ -562,7 +632,7 @@ namespace BZROpenShim
         }
 
         // Returns the skinned twin's name, creating and compiling it once.
-        std::string SkinnedProgramFor(void* program, int weights, ConversionError& error)
+        std::string SkinnedProgramFor(void* program, int weights, int palette, ConversionError& error)
         {
             void* concrete = ConcreteProgram(program);
             if (!concrete)
@@ -571,7 +641,8 @@ namespace BZROpenShim
                 return {};
             }
             const std::string concreteName = NameOf(concrete);
-            const std::string key = concreteName + "|w" + std::to_string(weights);
+            const std::string tag = VariantTag(weights, palette);
+            const std::string key = concreteName + "|" + tag;
             const auto cached = g_programs.find(key);
             if (cached != g_programs.end())
             {
@@ -599,17 +670,17 @@ namespace BZROpenShim
                 return fail(Reject::TransformRefused, "no source");
 
             const std::string entry = GetParameter(concrete, "entry_point");
+            const std::string defines = GetParameter(concrete, "preprocessor_defines");
             const GpuSkinning::SkinnedSourceResult skinned =
-                GpuSkinning::MakeSkinnedVertexSource(*source, entry, weights, kMaxBones);
+                GpuSkinning::MakeSkinnedVertexSource(*source, entry, weights, palette, defines);
             if (!skinned.ok)
                 return fail(Reject::TransformRefused, skinned.error);
 
-            const std::string defines = GetParameter(concrete, "preprocessor_defines");
             const std::string columnMajor = GetParameter(concrete, "column_major_matrices");
             char hash[17];
             sprintf_s(hash, "%016llx", GpuSkinning::HashText(
                 skinned.source + "\n" + target + "\n" + entry + "\n" + defines + "\n" + columnMajor));
-            const std::string name = std::string(kProgramRoot) + "w" + std::to_string(weights) + "/" + hash;
+            const std::string name = std::string(kProgramRoot) + tag + "/" + hash;
 
             void* manager = g_ogre.programManager();
             if (!manager)
@@ -651,8 +722,8 @@ namespace BZROpenShim
 
             ++g_stats.programs;
             LogShimA(LogLevel::Info, kComponent,
-                "[GPUSKIN] program %s from %s weights=%d position=%s normal=%s",
-                name.c_str(), concreteName.c_str(), weights,
+                "[GPUSKIN] program %s from %s weights=%d bones=%d position=%s normal=%s",
+                name.c_str(), concreteName.c_str(), weights, palette,
                 skinned.positionParam.c_str(),
                 skinned.normalParam.empty() ? "-" : skinned.normalParam.c_str());
             g_programs[key] = { name, ConversionError{} };
@@ -685,7 +756,10 @@ namespace BZROpenShim
             return true;
         }
 
-        bool ConvertPass(void* technique, void* pass, int weights, ConversionError& error)
+        // `asCaster` converts a pass of a technique's custom shadow caster
+        // material: Ogre renders that pass itself as the caster, so it gets no
+        // caster program of its own.
+        bool ConvertPass(void* pass, int weights, int palette, bool asCaster, ConversionError& error)
         {
             if (!g_ogre.hasVertexProgram(pass))
             {
@@ -702,12 +776,20 @@ namespace BZROpenShim
                 error = { Reject::ProgramCasterOverride, "" };
                 return false;
             }
-            (void)technique;
-
             const SharedPtr* program = g_ogre.getVertexProgram(pass);
-            const std::string skinnedName = SkinnedProgramFor(program ? program->rep : nullptr, weights, error);
+            const std::string skinnedName = SkinnedProgramFor(program ? program->rep : nullptr, weights, palette, error);
             if (skinnedName.empty())
                 return false;
+
+            if (asCaster)
+            {
+                g_ogre.setVertexProgram(pass, skinnedName, false);
+                SharedPtr params;
+                g_ogre.getVertexProgramParameters(pass, &params);
+                const bool ready = PrepareParameters(params.rep, error);
+                Release(params);
+                return ready;
+            }
 
             if (!EnsureCasterPass())
             {
@@ -715,7 +797,7 @@ namespace BZROpenShim
                 return false;
             }
             const SharedPtr* casterProgram = g_ogre.getVertexProgram(g_casterPass);
-            const std::string casterName = SkinnedProgramFor(casterProgram ? casterProgram->rep : nullptr, weights, error);
+            const std::string casterName = SkinnedProgramFor(casterProgram ? casterProgram->rep : nullptr, weights, palette, error);
             if (casterName.empty())
                 return false;
 
@@ -760,11 +842,38 @@ namespace BZROpenShim
                 g_ogre.removeResource(manager, name);
         }
 
-        // Returns the clone (borrowed) for a source material, or null.
-        const CloneRecord* CloneFor(void* source, int weights, ConversionError& error)
+        // Points a clone technique at a skinned caster material. The getter
+        // must agree with the decoded slot before and after the write.
+        bool SetTechniqueCasterMaterial(void* technique, const SharedPtr& material)
+        {
+            if (g_techniqueCasterOffset == 0 || !material.rep)
+                return false;
+            auto* slot = reinterpret_cast<SharedPtr*>(static_cast<uint8_t*>(technique) + g_techniqueCasterOffset);
+            SharedPtr before;
+            g_ogre.getShadowCasterMaterial(technique, &before);
+            const bool slotMatches = before.rep == slot->rep && before.info == slot->info;
+            Release(before);
+            if (!slotMatches)
+                return false;
+            AddRef(material);
+            SharedPtr old = *slot;
+            *slot = material;
+            Release(old);
+            SharedPtr after;
+            g_ogre.getShadowCasterMaterial(technique, &after);
+            const bool written = after.rep == material.rep;
+            Release(after);
+            return written;
+        }
+
+        // Returns the clone (borrowed) for a source material, or null. With
+        // `asCaster` the source is a technique's shadow_caster_material and
+        // the clone's passes become skinned casters.
+        const CloneRecord* CloneFor(void* source, int weights, int palette, bool asCaster, ConversionError& error)
         {
             const std::string sourceName = NameOf(source);
-            const std::string key = sourceName + "|w" + std::to_string(weights);
+            const std::string tag = VariantTag(weights, palette);
+            const std::string key = (asCaster ? "caster:" : "") + sourceName + "|" + tag;
             const auto cached = g_clones.find(key);
             if (cached != g_clones.end())
             {
@@ -786,7 +895,7 @@ namespace BZROpenShim
             };
 
             record.cloneName = std::string(kCloneRoot) + std::to_string(g_generation) +
-                "/w" + std::to_string(weights) + "/" + sourceName;
+                "/" + tag + (asCaster ? "/caster/" : "/") + sourceName;
             void* manager = g_ogre.materialManager();
             if (!manager)
                 return fail({ Reject::CloneFailed, "no material manager" });
@@ -804,17 +913,34 @@ namespace BZROpenShim
                 ++supported;
                 SharedPtr casterMaterial;
                 g_ogre.getShadowCasterMaterial(technique, &casterMaterial);
-                const bool hasCasterMaterial = casterMaterial.rep != nullptr;
-                Release(casterMaterial);
-                if (hasCasterMaterial)
-                    return fail({ Reject::ShadowCasterMaterial, "" });
+                if (casterMaterial.rep)
+                {
+                    // Ogre draws the caster material's own first pass as this
+                    // technique's shadow caster, so it must skin too.
+                    const std::string casterName = NameOf(casterMaterial.rep);
+                    if (asCaster)
+                    {
+                        Release(casterMaterial);
+                        return fail({ Reject::ShadowCasterMaterial, "nested " + casterName });
+                    }
+                    ConversionError why;
+                    const CloneRecord* caster = CloneFor(casterMaterial.rep, weights, palette, true, why);
+                    Release(casterMaterial);
+                    if (!caster)
+                    {
+                        return fail({ Reject::ShadowCasterMaterial,
+                            casterName + " " + RejectName(why.reason) + ":" + why.detail });
+                    }
+                    if (!SetTechniqueCasterMaterial(technique, caster->clone))
+                        return fail({ Reject::ShadowCasterMaterial, casterName + " slot" });
+                }
 
                 const uint16_t passes = g_ogre.getNumPasses(technique);
                 for (uint16_t p = 0; p < passes; ++p)
                 {
                     void* pass = g_ogre.getPass(technique, p);
                     ConversionError why;
-                    if (!pass || !ConvertPass(technique, pass, weights, why))
+                    if (!pass || !ConvertPass(pass, weights, palette, asCaster, why))
                         return fail(why);
                 }
             }
@@ -875,7 +1001,7 @@ namespace BZROpenShim
                 error = { Reject::NoSkeleton, "" };
             else if (g_ogre.entityHasVertexAnimation(entity))
                 error = { Reject::VertexAnimation, "" };
-            else if (g_ogre.entityBoneMatrices(entity) > kMaxBones)
+            else if (PaletteFor(g_ogre.entityBoneMatrices(entity)) == 0)
                 error = { Reject::TooManyBones, std::to_string(g_ogre.entityBoneMatrices(entity)) };
             else if (g_ogre.entitySoftwareRequests(entity) > 0)
                 error = { Reject::SoftwareRequests, "" };
@@ -927,6 +1053,7 @@ namespace BZROpenShim
                 error = { Reject::NoMesh, "no sub-entities" };
                 return false;
             }
+            const int palette = PaletteFor(g_ogre.entityBoneMatrices(entity));
             if (record.originals.size() != count)
             {
                 record = {};
@@ -962,7 +1089,7 @@ namespace BZROpenShim
                 const int weights = WeightsForSubEntity(mesh->rep, i, error);
                 if (weights == 0)
                     return false;
-                const CloneRecord* clone = CloneFor(current->rep, weights, error);
+                const CloneRecord* clone = CloneFor(current->rep, weights, palette, false, error);
                 if (!clone)
                 {
                     error.detail = currentName + " " + error.detail;
