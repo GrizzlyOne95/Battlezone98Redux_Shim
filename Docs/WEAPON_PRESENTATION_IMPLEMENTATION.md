@@ -2,17 +2,21 @@
 
 Implementation milestone: 2026-10-01.
 
-**Status: the runtime, lifecycle bridge and GOG cannon native adapter candidate
-are implemented. The native installer is deliberately closed until live Windows
-qualification. This branch does not yet produce visible effects in the game.**
+**Current status (2026-10-20): the bounded authored-ODF GOG/SP cannon path is
+opt-in through OpenShim Settings > Video > Muzzle Flashes / Muzzle Recoil.
+Both default OFF, require restart and require authored ODF/assets. Mesh/node
+smoke evidence and remaining gates are recorded in `ODF_MUZZLE_FLASH.md` and
+`ODF_RECOIL_TRIAL.md`. This document also retains the original native candidate
+research and its broader qualification checklist.**
 
 The scope is singleplayer muzzle flash and primary mesh recoil. Existing weapon
 convergence remains the aiming implementation. The bridge uses the existing
 `IsSinglePlayerSession()` predicate, including its unreadable-state rejection,
 and requires the verified mission seam to report a running mission. There are
 no multiplayer packets, SDK exports or Lua events. `SinglePlayer/MuzzleFlash`
-and `SinglePlayer/MeshRecoil` both default to 0. While qualification is pending,
-setting either key only logs why the native candidate remains inactive.
+and `SinglePlayer/MeshRecoil` both default to 0. These are the master switches
+for authored ODF mesh/render effects and recoil respectively. No generic effect
+is synthesized; developer environment flags cannot override OFF settings.
 
 The [research handoff](https://github.com/GrizzlyOne95/Battlezone_Source/pull/12)
 contains the pinned Redux integration map and original evidence. The GOG
@@ -56,10 +60,11 @@ baseline writer before support is added.
 
 `RegisterQualifiedWeaponPresentationBackend` is an internal connection point,
 not a claim of runtime qualification. The candidate supplies a caller, guarded
-by `kNativePresentationLiveQualified = false`. Normal settings install no
-candidate hooks while that gate is closed. The explicit GOG/SP ODF trial
-switches described in `ODF_RECOIL_TRIAL.md` permit the bounded experimental
-path; they do not enable the old native flash renderer. Registration runs lazily on the pinned
+by exact-GOG/SP/mission and byte guards. `kNativePresentationLiveQualified =
+false` still excludes legacy `flashName` and broader activation. The master
+settings described in `ODF_RECOIL_TRIAL.md` permit the bounded experimental
+authored path, including explicit weapon `muzzleRender` definitions alongside
+EXU mesh flashes. Registration runs lazily on the pinned
 engine thread. A producer on another thread forwards stock behavior.
 
 The actual GOG executable was transferred through a private GitHub Actions ZIP,

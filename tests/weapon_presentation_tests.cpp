@@ -260,6 +260,115 @@ namespace
         Finish(independent, backend);
     }
 
+    void TestMuzzleRenderAlongsideMesh()
+    {
+        namespace Policy = WP::NativePolicy;
+        const auto render = Policy::ResolveMuzzleRenderConfig({}, {"\"MyGun.render\"", "0.20", std::nullopt}, {1, 2, 3});
+        Require(render.Valid() && render.effect == "MyGun.render" && render.offset.z == 3, "render defaults/offset failed");
+        Require(Policy::ResolveMuzzleRenderConfig(render, {}, {}).effect == render.effect, "render did not inherit");
+        Require(!Policy::ResolveMuzzleRenderConfig(render, {"\"\"", {}, {}}, {}).Valid(), "render explicit off ignored");
+        for (const auto bad : {"NaN", "0", "5.01", "0.1suffix"})
+            Require(!Policy::ResolveMuzzleRenderConfig(render, {{}, bad, {}}, {}).Valid(), "bad render duration inherited");
+        for (const auto bad : {"1 2", "21 0 0", "1 2 3 4", "NaN 0 0"})
+            Require(!Policy::ResolveMuzzleRenderConfig(render, {{}, {}, bad}, {}).Valid(), "bad render offset inherited");
+        for (const auto bad : {"\"bad", "two names", "a\nb"})
+            Require(!Policy::ResolveMuzzleRenderConfig(render, {bad, {}, {}}, {}).Valid(), "bad render name accepted");
+
+        FakeBackend backend;
+        WP::Runtime runtime; Start(runtime);
+        auto request = Request();
+        request.flash = Policy::ResolveMeshFlashConfig({}, {"\"Small.mesh\"", {}, "0.05", {}, {}, "\"0 0 4\"", {}});
+        request.flash.muzzleRender = render;
+        const auto token = Bind(runtime, request);
+        auto pose = WC::Identity();
+        pose.rightX = 0; pose.rightZ = -1; pose.frontX = 1; pose.frontZ = 0;
+        pose.positionX = 10; pose.positionY = 20; pose.positionZ = 30;
+        const auto original = pose;
+        Require(runtime.Fire(token, 1, pose).flashStarted, "combined shot ignored");
+        runtime.BeginSimulationStep(1, .02f);
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.creates == 1 && backend.meshCreates == 1, "render and mesh did not coexist");
+        Near(backend.meshLifetime, .03, "pending mesh timer restarted");
+        Near(backend.meshPose.positionX, 14, "mesh offset wrong");
+        Near(backend.renderers[0].pose.positionX, 13, "render forward offset wrong");
+        Near(backend.renderers[0].pose.positionY, 22, "render up offset wrong");
+        Near(backend.renderers[0].pose.positionZ, 29, "render right offset wrong");
+        Require(std::memcmp(&pose, &original, sizeof(pose)) == 0, "render offset changed firing matrix");
+        Require(!runtime.Fire(token, 1, pose).observed, "duplicate shot spawned effects");
+        runtime.BeginSimulationStep(2, .04f);
+        runtime.SynchronizeVisuals(backend);
+        Require(runtime.Inspect().nativeAttachments == 1 && runtime.Inspect().meshFlashAttachments == 0,
+            "short flash cancelled longer render effect");
+        Require(runtime.Fire(token, 2, pose).flashStarted, "active render blocked next short mesh flash");
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.creates == 1 && backend.meshCreates == 2, "active render restarted with next mesh flash");
+        pose.positionX = 20;
+        runtime.SetMuzzlePose(token, pose);
+        runtime.BeginSimulationStep(3, 0);
+        runtime.SynchronizeVisuals(backend);
+        Near(backend.renderers[0].pose.positionX, 23, "render did not follow refreshed muzzle");
+        Require(backend.creates == 1, "pause duplicated render effect");
+        backend.failDetach = true;
+        runtime.BeginSimulationStep(4, .15f);
+        runtime.SynchronizeVisuals(backend);
+        Require(runtime.Inspect().nativeAttachments == 1, "failed render detach freed stable slot");
+        runtime.Release(token);
+        runtime.BeginSceneTeardown(); runtime.EndSceneTeardown();
+        Require(runtime.Inspect().retiredBindings == 1, "scene loss discarded native back-reference");
+        backend.failDetach = false;
+        runtime.SynchronizeVisuals(backend);
+        Require(runtime.Inspect().retiredBindings == 0, "combined cleanup failed");
+        Finish(runtime, backend);
+
+        // Render-only weapons and independent partial-failure cleanup.
+        for (bool failMesh : {false, true})
+        {
+            WP::Runtime isolated; FakeBackend failures; Start(isolated);
+            failures.failMeshCreate = failMesh; failures.failCreate = !failMesh;
+            request.flash.muzzleRender = render;
+            const auto bound = Bind(isolated, request);
+            const auto shot = isolated.Fire(bound, 1, WC::Identity());
+            Require(shot.flashStarted && shot.recoilReset, "effect failure disabled recoil");
+            isolated.SynchronizeVisuals(failures);
+            Require(failures.creates == 1 && failures.meshCreates == 1, "one failed effect suppressed the other");
+            Finish(isolated, failures);
+        }
+        WP::Runtime renderOnly; FakeBackend alone; Start(renderOnly, true, false);
+        request.recoil.reset(); request.flash = {}; request.flash.muzzleRender = render;
+        const auto only = Bind(renderOnly, request);
+        renderOnly.Fire(only, 1, WC::Identity());
+        renderOnly.BeginSimulationStep(1, .21f);
+        renderOnly.SynchronizeVisuals(alone);
+        Require(alone.creates == 0 && alone.meshCreates == 0, "expired pending render created late");
+        renderOnly.Fire(only, 2, WC::Identity()); renderOnly.SynchronizeVisuals(alone);
+        Require(alone.creates == 1 && alone.meshCreates == 0, "render-only weapon failed");
+        renderOnly.Configure({false, true}); renderOnly.SynchronizeVisuals(alone);
+        Require(renderOnly.Inspect().nativeAttachments == 0, "settings disable retained render effect");
+        Finish(renderOnly, alone);
+
+        for (bool flashes : {false, true}) for (bool recoil : {false, true})
+        {
+            WP::Runtime gated; FakeBackend controlled; Start(gated, flashes, recoil);
+            auto configured = Request(); configured.flash = request.flash;
+            configured.flash.mesh = "Small.mesh"; configured.flash.duration = .08f;
+            const auto bound = gated.Bind(configured);
+            Require(bound.has_value() == (flashes || recoil), "master settings did not gate binding");
+            if (bound)
+            {
+                const auto shot = gated.Fire(*bound, 1, WC::Identity());
+                Require(shot.flashStarted == flashes && shot.recoilReset == recoil, "master settings channels crossed");
+                gated.SynchronizeVisuals(controlled);
+                Require(controlled.creates == (flashes ? 1 : 0) && controlled.meshCreates == (flashes ? 1 : 0),
+                    "flash master switch did not gate both render channels");
+                Require(controlled.recoilPoses.empty() == !recoil, "recoil master switch ignored");
+            }
+            Finish(gated, controlled);
+        }
+        WP::Runtime unauthored; Start(unauthored);
+        auto stock = Request(); stock.flash = {}; stock.recoil.reset();
+        Require(!unauthored.Bind(stock), "enabled settings synthesized a generic stock effect");
+    }
+
     void TestAnimationRecoil()
     {
         FakeBackend backend;
@@ -804,6 +913,7 @@ namespace
 int main()
 {
     TestMeshFlashPolicyAndRuntime();
+    TestMuzzleRenderAlongsideMesh();
     TestAnimationRecoil();
     TestConfigurationAndIds();
     TestBoundedMeshLookup();

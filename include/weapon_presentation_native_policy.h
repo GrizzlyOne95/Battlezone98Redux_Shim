@@ -80,6 +80,52 @@ namespace BZROpenShim::WeaponPresentation::NativePolicy
             ? value : std::numeric_limits<float>::quiet_NaN();
     }
 
+    inline std::optional<WeaponConvergence::Vec3> Offset(std::string_view text) noexcept
+    {
+        const auto name = Name(text);
+        if (!name) return std::nullopt;
+        auto remaining = Trim(*name);
+        float values[3]{};
+        for (float& value : values)
+        {
+            remaining = Trim(remaining);
+            if (!remaining.empty() && remaining.front() == '+') remaining.remove_prefix(1);
+            if (remaining.empty()) return std::nullopt;
+            const auto parsed = std::from_chars(remaining.data(), remaining.data() + remaining.size(), value);
+            if (parsed.ec != std::errc{} || !std::isfinite(value) || std::fabs(value) > 20) return std::nullopt;
+            if (parsed.ptr != remaining.data() + remaining.size() && *parsed.ptr != ' ' && *parsed.ptr != '\t') return std::nullopt;
+            remaining.remove_prefix(static_cast<size_t>(parsed.ptr - remaining.data()));
+        }
+        if (!Trim(remaining).empty()) return std::nullopt;
+        return WeaponConvergence::Vec3{values[0], values[1], values[2]};
+    }
+
+    struct MuzzleRenderFields
+    {
+        std::optional<std::string_view> effect, duration, offset;
+    };
+
+    inline MuzzleRenderConfig ResolveMuzzleRenderConfig(const MuzzleRenderConfig& parent,
+        const MuzzleRenderFields& fields, const WeaponConvergence::Vec3& defaultOffset)
+    {
+        MuzzleRenderConfig result = parent.Valid() ? parent : MuzzleRenderConfig{};
+        if (!parent.Valid()) result.offset = defaultOffset;
+        if (fields.effect)
+        {
+            const auto name = Name(*fields.effect);
+            if (!name || name->empty()) return {};
+            result.effect = *name;
+        }
+        if (fields.duration) result.duration = Scalar(*fields.duration);
+        if (fields.offset)
+        {
+            const auto offset = Offset(*fields.offset);
+            if (!offset) return {};
+            result.offset = *offset;
+        }
+        return result.Valid() ? result : MuzzleRenderConfig{};
+    }
+
     // No filesystem lookups: names are engine resource names, preserving case.
     // Explicitly empty/invalid mesh disables the flash, including inheritance.
     inline FlashConfig ResolveMeshFlashConfig(const FlashConfig& parent, const MeshFlashFields& fields)
@@ -105,22 +151,9 @@ namespace BZROpenShim::WeaponPresentation::NativePolicy
         if (fields.roll) result.rollDegrees = Scalar(*fields.roll);
         if (fields.offset)
         {
-            auto name = Name(*fields.offset);
-            if (!name) return {};
-            auto remaining = Trim(*name);
-            float values[3]{};
-            for (float& value : values)
-            {
-                remaining = Trim(remaining);
-                if (!remaining.empty() && remaining.front() == '+') remaining.remove_prefix(1);
-                if (remaining.empty()) return {};
-                auto parsed = std::from_chars(remaining.data(), remaining.data() + remaining.size(), value);
-                if (parsed.ec != std::errc{} || !std::isfinite(value)) return {};
-                if (parsed.ptr != remaining.data() + remaining.size() && *parsed.ptr != ' ' && *parsed.ptr != '\t') return {};
-                remaining.remove_prefix(static_cast<size_t>(parsed.ptr - remaining.data()));
-            }
-            if (!Trim(remaining).empty()) return {};
-            result.offset = {values[0], values[1], values[2]};
+            const auto offset = Offset(*fields.offset);
+            if (!offset) return {};
+            result.offset = *offset;
         }
         return result.IsMesh() && result.Valid() ? result : FlashConfig{};
     }

@@ -2,8 +2,10 @@
 
 2026-10-20: experimental source on `agent/odf-recoil-trial` in OpenShim and
 EXU. This is a GOG 2.2.301 single-player cannon trial, not a release-qualified
-feature. Normal installation remains disabled. Live firing, visual, model
-reload and scene-lifetime acceptance are pending.
+feature. OpenShim Settings > Video > Muzzle Recoil (INI `[SinglePlayer]
+MeshRecoil`) is the master switch, default OFF; restart required. Enabling it
+requires authored craft ODF nodes/clips and compatible model assets. It supplies
+no generic animation. Model reload and scene-lifetime acceptance remain pending.
 
 OpenShim owns accepted cannon shots, slot selection and the simulation clock.
 Node slides need only OpenShim. Authored clips additionally need the companion
@@ -111,11 +113,13 @@ below does not qualify these newly authored animation tracks.
 
 Build/deploy the complete OpenShim chain with `scripts/Deploy-OpenShim.ps1`.
 For clip tests also deploy the matching EXU build to the mod's EXU location.
-Launch through `BZRHarness.ps1` with `BZR_FORCE_WINDOWED=1` and the explicit
-environment variable `OPENSHIM_TRIAL_ODF_RECOIL=1`. This enables only the
-exact-build, byte-guarded SP cannon recoil candidate. The separate
-`OPENSHIM_TRIAL_ODF_FLASH=1` opts into EXU-rendered ODF mesh flashes; the old
-native ParticleRender flash backend remains excluded. `kNativePresentationLiveQualified` remains false for normal use.
+Enable Muzzle Recoil before launching through `BZRHarness.ps1` with
+`BZR_FORCE_WINDOWED=1`. This permits only the exact-build, byte-guarded GOG/SP
+cannon ODF path. Muzzle Flashes is the separate master switch for weapon-authored
+mesh flashes and `muzzleRender` smoke/light. Old developer environment flags no
+longer bypass either master switch. `kNativePresentationLiveQualified` remains
+false for broader/legacy activation; this bounded path requires explicit ODF
+configuration and opt-in settings.
 Stop only the owned PID through `Stop-BZRGame -Id`; preserve other agents'
 running games. See the existing weapon-presentation live qualification guide
 for byte/ABI evidence collection before running the candidate.
@@ -138,7 +142,7 @@ of visual travel relative to the unchanged native node pose, and 33 completed
 shots whose 64-byte firing matrices were unchanged after the bridge returned.
 EXU reported 210 spawned flashes, zero failures/orphans, and zero live effects
 at shutdown. Screenshots show the flash. These are smoke-test observations,
-not general lifetime or descendant-motion acceptance; the normal gate stays false.
+not general lifetime or descendant-motion acceptance; broader qualification remains open.
 
 The authored fixture is
 `reverse_engineering/test_missions/weapon_presentation/avtank_odf_trial.lua`.

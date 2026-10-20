@@ -5,12 +5,20 @@ The `agent/odf-recoil-trial` branches in OpenShim and EXU let a weapon select a
 accepted cannon shot and muzzle pose; EXU uses the same mesh pool, owner-follow
 logic, render-space conversion and pause-aware lifetime as `exu.flash.Spawn`.
 
-This remains an explicit GOG 2.2.301 single-player cannon trial. It needs both
-matching DLLs, EXU loaded by the mission (usually `require("exu")`), and
-`OPENSHIM_TRIAL_ODF_FLASH=1` in the game's launch environment. The existing
-`OPENSHIM_TRIAL_ODF_RECOIL=1` is independent; set both to test both effects.
-Normal activation remains disabled. The older native ParticleRender flash
-candidate stays excluded from this trial.
+This remains an experimental GOG 2.2.301 single-player cannon feature.
+In OpenShim Settings > Video, **Muzzle Flashes** is the master switch for both
+the mesh flash and companion muzzle render effects. **Muzzle Recoil** controls
+recoil independently. Both default OFF and require a game restart. Their INI
+keys remain `[SinglePlayer] MuzzleFlash` and `MeshRecoil`.
+
+Turning a switch on grants permission to use authored ODF configuration; it
+does not add a generic effect to stock weapons. Mesh flashes need matching
+OpenShim/EXU DLLs, EXU loaded by the mission (usually `require("exu")`), and
+the referenced mesh/material assets. Native `muzzleRender` effects need
+OpenShim and an authored engine render definition. Old developer environment
+flags no longer enable effects or override an OFF setting. The exact-build,
+byte, SP and mission guards remain enforced. Legacy `flashName` activation
+and broader native qualification remain closed.
 
 ## Minimal setup
 
@@ -80,6 +88,48 @@ trial. Existing ISDFC Lua flash/recoil profiles are not migrated automatically;
 disable the corresponding Lua flash producer when moving an already scripted
 weapon to native ODF ownership. Existing ordnance effects are not stripped.
 
+## Companion smoke, light and render layers
+
+Put these keys in the **weapon** ODF's `[WeaponClass]`, alongside `flashMesh`:
+
+```ini
+muzzleRender = "oshmuzz.render"
+muzzleRenderDuration = 0.09
+muzzleRenderOffset = "0.20 0.10 2.41"
+```
+
+`muzzleRender` names an engine render resource (`file.section`), not an Ogre
+material or mesh. The optional original `examples/odf_muzzle_render/oshmuzz.odf`
+combines `draw_twirl_trail` smoke and `draw_light` using `draw_multi`. Copy it
+into the mod's normal ODF resources to use the example. Author another definition
+to change smoke density/velocity, colours, textures, light or layer count.
+Nothing installs this example on every weapon.
+
+The emission attachment lasts `muzzleRenderDuration` seconds of simulation
+time (default 0.08; 0.005..5). Individual emitted smoke particles use the render
+definition's `emitLife`; they can linger after attachment detaches. Pause does
+not advance the controller's deadline. The render is updated at the followed
+muzzle while attached, then detached through stock renderer ownership; it does
+not use EXU's mesh pool. Native renderer/particle timing remains engine-owned.
+
+`muzzleRenderOffset` uses right/up/forward metres, each within -20..20. For a
+new configuration it defaults to the resolved `flashOffset` (zero for a
+render-only weapon). An inherited render configuration keeps its authored
+offset until explicitly overridden. The identifier preserves case and is
+1..63 printable ASCII characters without spaces or quotes. Absent render
+fields inherit; `muzzleRender = ""` disables that channel. Malformed fields
+disable only the render channel. Mesh scale, material and roll do not change
+native render properties; configure those in the render definition.
+
+Render-only weapons are supported. Mesh and native render channels have
+independent simulation deadlines: an active smoke emitter does not block the
+next short flash, and a failed mesh does not suppress the render effect or
+recoil. A still-active render channel is not restarted by repeated shots.
+Failed detach retains the stable pointer slot for native cleanup retries,
+including through scene teardown. Effects are never created from rejected or
+duplicate shot notifications. These controls require the Muzzle Flashes master
+switch; they never alter projectile matrices or gameplay values.
+
 ## gatstab preparation helper
 
 To prepare a complete weapon override from the locally extracted stock ODF:
@@ -87,7 +137,8 @@ To prepare a complete weapon override from the locally extracted stock ODF:
 ```powershell
 ./reverse_engineering/Prepare-OdfMuzzleFlashTrial.ps1 `
   -Weapon gatstab -Mesh "my_muzzle.mesh" -Material "MyMod/MuzzleFlash" `
-  -Scale 1.5 -EndScale 0.25 -Offset 0,0,0.15
+  -Scale 1.5 -EndScale 0.25 -Offset 0,0,0.15 `
+  -MuzzleRender "oshmuzz.render" -MuzzleRenderDuration 0.09
 ```
 
 Preview is the default and prints the generated ODF path. Add `-Install` to
@@ -95,6 +146,9 @@ write `addon/gatstab.odf` with a restore receipt; use `-RestoreReceipt <path>`
 to undo it. Existing authored flash keys are refused instead of duplicated.
 The helper preserves weapon gameplay values and formats numbers independently
 of the host locale. It does not copy meshes/materials or replace any DLLs.
+Omit `-Mesh` and supply `-MuzzleRender` to prepare a render-only override;
+`-MuzzleRenderOffset` overrides the helper's default of using `-Offset` for
+both channels. Existing render keys are refused along with existing flash keys.
 
 Deploy the complete OpenShim chain with `scripts/Deploy-OpenShim.ps1` and the
 matching EXU to the mod's existing EXU location before a live test. Use the
@@ -114,7 +168,8 @@ cancel a reused ID or a Lua-owned flash); OpenShim retains no Ogre pointers. Exp
 disable, weapon replacement and SP departure cancel only this controller's
 IDs. EXU's existing Lua-state and scene cleanup handles resource loss/unload.
 The Lua `exu.flash.Spawn` API uses the same refactored spawn operation and keeps
-its existing behavior.
+its existing behavior. These master switches control OpenShim's ODF producers;
+a mission's separate Lua effect producer retains its own policy.
 
 Host coverage includes defaults/inheritance/opt-out, invalid fields, local-axis
 offsets without projectile mutation, pending lifetime, pause, no restarts,
@@ -145,3 +200,15 @@ byte-identically and have finite vertices/nondegenerate triangles. Both shader
 stages compile for DX11 and DX9; DX9 runtime remains unverified. Temporary game
 files/configuration were restored. EXU's example README records the material
 controls, shader-cache versioning and local BZ2/BZCC reference findings.
+
+The weapon `muzzleRender` extension and master-switch follow-up pass the Win32
+Release build, 120 Windows CTests, INI writer/migration/default checks and
+GCC/WSL runtime/policy checks with warnings treated as errors. Coverage includes
+both channels together, separate deadlines/offsets, pending expiry, pause,
+partial factory failure, detach retries through scene loss, render-only weapons,
+all four master-switch combinations and enabled settings without authored data.
+The helper passed mesh+render and render-only install/restore, UTF-16 preservation,
+invariant formatting and malformed/duplicate key refusal. The new smoke/light
+and settings UI live check is deferred while the user's Instance6 co-op game is
+running; the earlier mesh/node evidence does not qualify this native render path.
+Steam, DX9 runtime, Proton/Wine and broader lifecycle qualification remain open.

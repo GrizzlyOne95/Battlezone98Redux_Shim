@@ -31,8 +31,9 @@ namespace BZROpenShim::Hooks
 
         // Static instructions/ABI are qualified against the hash below.
         // Static analysis cannot qualify engine thread ordering, Ogre/native
-        // lifetime, renderer visibility or model reload. This is deliberately
-        // closed until those actual Windows tests have been recorded.
+        // lifetime, renderer visibility or model reload. This broader/legacy
+        // activation gate stays closed; settings allow the bounded authored
+        // ODF experimental path below, still exact-GOG/SP and byte guarded.
         constexpr bool kNativePresentationLiveQualified = false;
         constexpr char kGogSha256[] =
             "8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413";
@@ -83,8 +84,10 @@ namespace BZROpenShim::Hooks
         uint64_t g_LifetimeSerial = 0;
         uint64_t g_SimulationSerial = 0;
         WP::Settings g_Settings;
-        bool g_TrialMeshFlashOnly = false;
+        bool g_AuthoredOdfOnly = true;
         bool g_MeshFlashUnavailableLogged = false;
+        bool g_RenderUnavailableLogged = false;
+        unsigned g_RenderCreates = 0, g_RenderDetaches = 0;
 
         template<class T> bool Read(const void* pointer, size_t offset, T& out) noexcept
         {
@@ -262,7 +265,36 @@ namespace BZROpenShim::Hooks
                     else if (!explicitOff)
                         LogShimA(LogLevel::Warn, "WEAPONFX", "ODF=%s mesh flash settings rejected; check resource names, duration, scale, offset and roll", odf);
                 }
-                if (g_TrialMeshFlashOnly && !result.config.IsMesh()) result.config = {};
+                if (g_AuthoredOdfOnly && !result.config.IsMesh()) result.config = {};
+                // Explicit weapon ODF render effects are independent of the
+                // mesh channel. Never reinterpret legacy flashName as opt-in.
+                constexpr std::array<std::string_view, 3> renderKeys = {
+                    "muzzleRender", "muzzleRenderDuration", "muzzleRenderOffset"};
+                std::array<std::array<char, kMaxValueBytes>, 3> renderValues{};
+                std::array<std::optional<std::string_view>, 3> renderFields;
+                for (size_t i = 0; i < renderKeys.size(); ++i)
+                {
+                    char raw[kMaxValueBytes] = {};
+                    const auto status = ReadValue(scope, Policy::Hash("WeaponClass"), Policy::Hash(renderKeys[i]), raw);
+                    if (status == ValueStatus::Missing) continue;
+                    std::memcpy(renderValues[i].data(), raw, sizeof(raw));
+                    renderFields[i] = status == ValueStatus::Present ? std::string_view(renderValues[i].data()) : std::string_view("\"");
+                }
+                result.config.muzzleRender = Policy::ResolveMuzzleRenderConfig(inherited.muzzleRender,
+                    {renderFields[0], renderFields[1], renderFields[2]}, result.config.offset);
+                if (result.config.muzzleRender.Valid())
+                {
+                    char odf[9] = {}; std::memcpy(odf, &result.name, 8);
+                    const auto& render = result.config.muzzleRender;
+                    LogShimA(LogLevel::Info, "WEAPONFX", "ODF=%s muzzleRender=%s duration=%.3f offset=%.2f,%.2f,%.2f",
+                        odf, render.effect.c_str(), render.duration, render.offset.x, render.offset.y, render.offset.z);
+                }
+                else if (renderFields[0] || renderFields[1] || renderFields[2])
+                {
+                    const auto requestedRender = renderFields[0] ? Policy::Name(*renderFields[0]) : std::nullopt;
+                    if (!requestedRender || !requestedRender->empty())
+                        LogShimA(LogLevel::Warn, "WEAPONFX", "weapon muzzleRender rejected; check name, duration and offset; mesh/recoil remain independent");
+                }
                 if (g_FlashClasses.size() < WP::kMaxBindings || g_FlashClasses.count(objectClass))
                     g_FlashClasses.insert_or_assign(objectClass, std::move(result));
             }
@@ -601,12 +633,25 @@ namespace BZROpenShim::Hooks
                 if (storage || effect.empty() || effect.size() >= 64 || !WP::ValidPose(pose)) return false;
                 char name[64] = {};
                 std::memcpy(name, effect.data(), effect.size());
-                return CreateNativeFlash(name, &pose, &storage);
+                const bool created = CreateNativeFlash(name, &pose, &storage);
+                if (created && ++g_RenderCreates <= 3)
+                    LogShimA(LogLevel::Info, "WEAPONFX", "muzzle render created effect=%s count=%u", name, g_RenderCreates);
+                else if (!created && !g_RenderUnavailableLogged)
+                {
+                    LogShimA(LogLevel::Warn, "WEAPONFX", "muzzle render declined effect=%s; check mod ODF render resource; mesh/recoil remain independent", name);
+                    g_RenderUnavailableLogged = true;
+                }
+                return created;
             }
             bool UpdateFlash(void*& storage, const WP::Matrix& pose) noexcept override
             { return WP::ValidPose(pose) && UpdateNativeFlash(&storage, &pose); }
             bool DetachFlash(void*& storage) noexcept override
-            { return DetachNativeFlash(&storage); }
+            {
+                const bool detached = DetachNativeFlash(&storage);
+                if (detached && ++g_RenderDetaches <= 3)
+                    LogShimA(LogLevel::Info, "WEAPONFX", "muzzle render detached count=%u", g_RenderDetaches);
+                return detached;
+            }
             bool ApplyRecoil(const WP::Identity& owner, const WP::Identity& node,
                 const WP::Matrix& visual) noexcept override
             {
@@ -826,22 +871,13 @@ namespace BZROpenShim::Hooks
         {
             TryGetUserConfigBool("SinglePlayer", "MuzzleFlash", g_Settings.muzzleFlash);
             TryGetUserConfigBool("SinglePlayer", "MeshRecoil", g_Settings.meshRecoil);
-            wchar_t trial[4] = {};
-            const bool recoilTrial = GetEnvironmentVariableW(L"OPENSHIM_TRIAL_ODF_RECOIL", trial, 4) == 1 && trial[0] == L'1';
-            const bool flashTrial = GetEnvironmentVariableW(L"OPENSHIM_TRIAL_ODF_FLASH", trial, 4) == 1 && trial[0] == L'1';
-            if (recoilTrial || flashTrial)
-            {
-                g_Settings.meshRecoil = recoilTrial;
-                g_Settings.muzzleFlash = flashTrial;
-                g_TrialMeshFlashOnly = true; // never enable the unqualified native ParticleRender backend
-                LogShimA(LogLevel::Warn, "WEAPONFX", "explicit ODF trial; GOG/SP cannon, recoil=%d EXU mesh flashes=%d", recoilTrial, flashTrial);
-            }
             if (!g_Settings.muzzleFlash && !g_Settings.meshRecoil) return;
-            if (!kNativePresentationLiveQualified && !recoilTrial && !flashTrial)
-            {
-                LogShimA(LogLevel::Warn, "WEAPONFX", "native candidate inactive: Windows lifetime/order qualification pending");
-                return;
-            }
+            // Settings are the master switches, including for developer runs.
+            // The bounded authored-ODF path has its own exact-GOG/SP guards;
+            // blanket/legacy flashName activation remains unqualified.
+            g_AuthoredOdfOnly = !kNativePresentationLiveQualified;
+            LogShimA(LogLevel::Warn, "WEAPONFX", "authored ODF presentation requested; GOG/SP cannon, MuzzleFlash=%d MeshRecoil=%d; assets/config required",
+                g_Settings.muzzleFlash, g_Settings.meshRecoil);
             if (!g_MissionSeamInstalled || !ExactGogImage() || !InstallCandidate())
                 LogShimA(LogLevel::Warn, "WEAPONFX", "native candidate inactive: build/site/lifecycle guard failed");
         }

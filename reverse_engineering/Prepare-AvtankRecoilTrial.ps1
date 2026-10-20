@@ -5,7 +5,8 @@ Creates a reversible loose avtank ODF override for the stock gatstab trial.
 No model or weapon gameplay data is rewritten. AGR11BGA is avtank's world
 barrel geometry, independently read with the shared Toolbox VDF reader.
 Use -RestoreReceipt to remove this override or restore the original file.
-The DLL trial additionally needs OPENSHIM_TRIAL_ODF_RECOIL=1 at launch.
+Enable OpenShim Settings > Video > Muzzle Recoil (SinglePlayer/MeshRecoil=1)
+and restart the game to permit the authored ODF recoil trial.
 #>
 [CmdletBinding(DefaultParameterSetName = 'Prepare')]
 param(

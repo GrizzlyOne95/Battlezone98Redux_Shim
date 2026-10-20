@@ -24,6 +24,14 @@ namespace BZROpenShim::WeaponPresentation
     inline constexpr size_t kMeshIdBytes = 8;
     inline constexpr size_t kMaxBindings = 4096;
 
+    struct MuzzleRenderConfig
+    {
+        std::string effect;
+        float duration = 0.08f;
+        WeaponConvergence::Vec3 offset = {};
+        bool Valid() const noexcept;
+    };
+
     struct FlashConfig
     {
         std::string effect;
@@ -34,6 +42,7 @@ namespace BZROpenShim::WeaponPresentation
         float finishScale = 1;
         WeaponConvergence::Vec3 offset = {};
         float rollDegrees = 0;
+        MuzzleRenderConfig muzzleRender = {};
         bool IsMesh() const noexcept { return !mesh.empty(); }
         bool Valid() const noexcept;
     };

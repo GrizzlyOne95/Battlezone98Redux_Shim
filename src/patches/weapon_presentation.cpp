@@ -26,6 +26,15 @@ namespace BZROpenShim::WeaponPresentation
             std::isfinite(playbackRate) && playbackRate > 0 && playbackRate <= 50;
     }
 
+    bool MuzzleRenderConfig::Valid() const noexcept
+    {
+        return !effect.empty() && effect.size() <= 63 &&
+            std::all_of(effect.begin(), effect.end(), [](unsigned char c) { return c >= 0x21 && c <= 0x7e && c != '"'; }) &&
+            std::isfinite(duration) && duration >= 0.005f && duration <= 5 &&
+            std::isfinite(offset.x) && std::isfinite(offset.y) && std::isfinite(offset.z) &&
+            std::fabs(offset.x) <= 20 && std::fabs(offset.y) <= 20 && std::fabs(offset.z) <= 20;
+    }
+
     bool FlashConfig::Valid() const noexcept
     {
         if (IsMesh())
@@ -43,9 +52,9 @@ namespace BZROpenShim::WeaponPresentation
                 std::fabs(offset.x) <= 20 && std::fabs(offset.y) <= 20 && std::fabs(offset.z) <= 20 &&
                 std::isfinite(rollDegrees) && std::fabs(rollDegrees) <= 360;
         }
-        return !effect.empty() && effect.size() < 128 &&
+        return muzzleRender.Valid() || (!effect.empty() && effect.size() < 128 &&
             effect.find('\0') == std::string::npos &&
-            std::isfinite(duration) && duration > 0.0f;
+            std::isfinite(duration) && duration > 0.0f);
     }
 
     FlashConfig ResolveFlashConfig(const FlashConfig& parent,
@@ -152,11 +161,14 @@ namespace BZROpenShim::WeaponPresentation
             std::optional<RecoilKey> recoil;
             std::optional<AnimationKey> animation;
             Matrix muzzle = WeaponConvergence::Identity();
+            Matrix renderMuzzle = WeaponConvergence::Identity();
             float remaining = 0.0f;
+            float renderRemaining = 0.0f;
             void* renderer = nullptr;
             MeshFlashToken meshFlash;
             uint64_t lastShot = 0;
             bool createAttempted = false;
+            bool renderCreateAttempted = false;
             bool muzzleDirty = false;
             bool retired = false;
         };
@@ -227,6 +239,7 @@ namespace BZROpenShim::WeaponPresentation
                 return;
             weapon.retired = true;
             weapon.remaining = 0.0f;
+            weapon.renderRemaining = 0.0f;
             if (weapon.animation)
             {
                 auto it = animations.find(*weapon.animation);
@@ -289,7 +302,10 @@ namespace BZROpenShim::WeaponPresentation
         if (!settings.muzzleFlash)
         {
             for (auto& entry : impl_->weapons)
+            {
                 entry.second->remaining = 0.0f;
+                entry.second->renderRemaining = 0.0f;
+            }
         }
         if (!settings.meshRecoil)
         {
@@ -431,9 +447,7 @@ namespace BZROpenShim::WeaponPresentation
         ShotResult result = { true, false, false };
         if (impl_->settings.muzzleFlash && weapon->config.Valid())
         {
-            if (weapon->createAttempted && !weapon->renderer && !weapon->meshFlash)
-                weapon->remaining = 0.0f; // renderer self-expired; allow next shot
-            if (weapon->remaining <= 0.0f && !weapon->renderer && !weapon->meshFlash)
+            if (weapon->config.IsMesh() && weapon->remaining <= 0.0f && !weapon->meshFlash)
             {
                 weapon->remaining = weapon->config.duration;
                 weapon->muzzle = committedPose;
@@ -441,6 +455,18 @@ namespace BZROpenShim::WeaponPresentation
                     weapon->muzzle = MeshFlashPose(committedPose, weapon->config.offset);
                 weapon->muzzleDirty = true;
                 weapon->createAttempted = false;
+                result.flashStarted = true;
+            }
+            const auto& render = weapon->config.muzzleRender;
+            const bool legacy = !weapon->config.IsMesh() && !weapon->config.effect.empty();
+            if (weapon->renderCreateAttempted && !weapon->renderer)
+                weapon->renderRemaining = 0; // native self-expiry; allow the next accepted shot
+            if ((render.Valid() || legacy) && weapon->renderRemaining <= 0 && !weapon->renderer)
+            {
+                weapon->renderRemaining = render.Valid() ? render.duration : weapon->config.duration;
+                weapon->renderMuzzle = render.Valid() ? MeshFlashPose(committedPose, render.offset) : committedPose;
+                weapon->muzzleDirty = true;
+                weapon->renderCreateAttempted = false;
                 result.flashStarted = true;
             }
         }
@@ -476,6 +502,8 @@ namespace BZROpenShim::WeaponPresentation
         if (!weapon)
             return false;
         weapon->muzzle = weapon->config.IsMesh() ? MeshFlashPose(worldPose, weapon->config.offset) : worldPose;
+        weapon->renderMuzzle = weapon->config.muzzleRender.Valid()
+            ? MeshFlashPose(worldPose, weapon->config.muzzleRender.offset) : worldPose;
         weapon->muzzleDirty = true;
         return true;
     }
@@ -524,6 +552,8 @@ namespace BZROpenShim::WeaponPresentation
             auto& weapon = *entry.second;
             if (!weapon.retired && weapon.remaining > 0.0f)
                 weapon.remaining = std::max(0.0f, weapon.remaining - dt);
+            if (!weapon.retired && weapon.renderRemaining > 0)
+                weapon.renderRemaining = std::max(0.0f, weapon.renderRemaining - dt);
         }
         // Iterate the shared-node table, not five slots or every weapon.
         for (auto& entry : impl_->animations)
@@ -571,8 +601,6 @@ namespace BZROpenShim::WeaponPresentation
                 if (!impl_->Active() || weapon.retired || weapon.remaining <= 0)
                 {
                     if (weapon.meshFlash) (void)backend.CancelMeshFlash(weapon.meshFlash);
-                    if (weapon.retired && !weapon.meshFlash)
-                    { it = impl_->weapons.erase(it); continue; }
                 }
                 else if (!weapon.createAttempted)
                 {
@@ -580,33 +608,33 @@ namespace BZROpenShim::WeaponPresentation
                     if (!backend.CreateMeshFlash(weapon.config, weapon.owner, weapon.muzzle,
                         weapon.remaining, weapon.meshFlash) || !weapon.meshFlash) weapon.remaining = 0;
                 }
-                ++it;
-                continue;
             }
-            if (!impl_->Active() || weapon.retired || weapon.remaining <= 0.0f)
+            if (!impl_->Active() || weapon.retired || weapon.renderRemaining <= 0.0f)
             {
                 if (weapon.renderer)
                     (void)backend.DetachFlash(weapon.renderer);
-                if (weapon.retired && !weapon.renderer)
+                if (weapon.retired && !weapon.renderer && !weapon.meshFlash)
                 {
                     it = impl_->weapons.erase(it);
                     continue;
                 }
             }
-            else if (!weapon.createAttempted)
+            else if (!weapon.renderCreateAttempted)
             {
-                weapon.createAttempted = true;
-                if (!backend.CreateFlash(weapon.config.effect, weapon.muzzle, weapon.renderer) ||
+                weapon.renderCreateAttempted = true;
+                const auto& effect = weapon.config.muzzleRender.Valid()
+                    ? weapon.config.muzzleRender.effect : weapon.config.effect;
+                if (!backend.CreateFlash(effect, weapon.renderMuzzle, weapon.renderer) ||
                     !weapon.renderer)
-                    weapon.remaining = 0.0f;
+                    weapon.renderRemaining = 0.0f;
                 weapon.muzzleDirty = false;
             }
             else if (!weapon.renderer)
-                weapon.remaining = 0.0f; // self-expiry; never recreate without a shot
+                weapon.renderRemaining = 0.0f; // self-expiry; never recreate without a shot
             else if (weapon.muzzleDirty)
             {
-                if (!backend.UpdateFlash(weapon.renderer, weapon.muzzle))
-                    weapon.remaining = 0.0f;
+                if (!backend.UpdateFlash(weapon.renderer, weapon.renderMuzzle))
+                    weapon.renderRemaining = 0.0f;
                 weapon.muzzleDirty = false;
             }
             ++it;
@@ -649,7 +677,7 @@ namespace BZROpenShim::WeaponPresentation
             impl_->animations.clear();
             for (auto it = impl_->weapons.begin(); it != impl_->weapons.end();)
             {
-                if (it->second->retired && !it->second->renderer)
+                if (it->second->retired && !it->second->renderer && !it->second->meshFlash)
                     it = impl_->weapons.erase(it);
                 else
                     ++it;
