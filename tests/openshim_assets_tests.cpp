@@ -541,6 +541,9 @@ void TestTerrainHdCapability()
     auto caps = EvaluateAssetCapabilitiesAtWithManifest(dir, manifest);
     // dir has terrain file now, so should be true
     Check(caps.terrainHd, "terrain true when manifest claims and file exists");
+    caps = EvaluateAssetCapabilitiesAtWithManifest(dir,
+        "[OpenShimAssets]\nFormatVersion=1\nCompatibilityVersion=1\nTerrainHd=0\n");
+    Check(caps.terrainHd, "separately authored terrain pack available without editing the suite manifest");
 
     // Remove file, re-evaluate -> false
     std::filesystem::remove(dir / "terrain_hd_tiles.json", g_ec);

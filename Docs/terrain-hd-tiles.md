@@ -3,8 +3,11 @@
 `HD Terrain Tiles` in OpenShim Options enables experimental DX11 diffuse tile
 replacement. Version 2 packs also support independent normal, specular and
 emissive tiles. A texture pack is required; the option does not create new artwork.
-Restart the game after changing it. It is off by default and works with
-`Terrain Micro Detail`.
+Restart the game after changing the tile option. It is off by default and works
+with `Terrain Micro Detail`. Activation also requires the **effective DX11
+Enhanced profile**. Redux/Retro retain the ordinary atlas without allocating
+HD arrays. Leaving Enhanced during a mission restores the atlas material and
+native streams; returning to Enhanced rearms native discovery.
 
 Each terrain tile samples an independent texture-array slice at its full image
 resolution. The existing map chooses the tile ID, rotation and transition. The
@@ -18,10 +21,27 @@ the pack explicitly replaces a supported material channel.
 
 Use `bzr-openshim-terrain-hd-v2` for source-authored material tiles. Each
 material requires a `diffuseResource` identity guard, `sliceCount` (1..256),
-`fallback`, `tiles`, and a **256-entry** `sliceRemap` array. Its entry at each
-native tile ID selects a physical array slice. For example, 18 distinct Mars
+`fallback`, `tiles`, and either a **256-entry** `sliceRemap` array or `tileRects`.
+A remap entry at each native tile ID selects a physical array slice. For example, 18 distinct Mars
 tiles occupy 18 slices even when many native tile IDs refer to the same art.
 The CPU's native tile identities and UV parity checks remain unchanged.
+
+For painless authoring, generate `tileRects` from the selected CSV's alias and
+rectangle metadata, with entries such as
+`{"rect":[0,0,0.125,0.125],"slice":0}`. OpenShim matches these against the
+running engine's table, so no preliminary game capture or hand-authored native
+ID table is needed. Choose one mapping form, not both. Every used native
+rectangle must resolve unambiguously; unknown/conflicting rectangles decline
+the pack. This reads only layout metadata, never atlas image pixels. Keep the
+material and channel identity guards accurate when changing a map's material.
+
+`releaseSourceTextures: true` declares the tile images to be transient array
+upload inputs. OpenShim removes manager references only for input resources it
+created, unloading each override after copying it and keeping the fallback
+until all slices are populated. Resources already present before the upload
+are preserved. Default is
+false for shared-resource packs. This is ownership cleanup, not a guarantee
+that a graphics driver's caches immediately return their memory.
 
 Optional `normal`, `specular`, and `emissive` objects each contain an exact
 `sourceResource` guard, `fallback`, and `tiles` with every physical slice:
@@ -55,13 +75,15 @@ CR's `Tools/Build-MarsHdTileSources.py` exports the saved Stock World Terrain HD
 revision 6 Mars recipe **before its packing stage**. It uses the individual
 material cache, authored normal/reflectance inputs, existing corrections and
 shared transition masks. It never crops the installed atlas. The companion CR
-document `Docs/MARS_HD_TERRAIN_EXAMPLE.md` describes its reproducible local
-`misn04` example and native capture binding. The capture now includes exact
-normal/specular/emissive resource names so the authoring tool need not guess.
+document `Docs/MARS_HD_TERRAIN_EXAMPLE.md` describes the one-command
+`Tools/New-MarsHdTerrainExample.ps1` workflow: generate editable DDS files,
+prepare automatic mapping, and optionally preview without a capture/bind step.
+Existing DDS art edits survive subsequent previews. The native capture remains
+available for diagnosing a different material's exact channel identities.
 
 At 1024 pixels with complete mips, 18 BC1 diffuse slices, RGB24 normals
 (typically RGBA8 on the GPU), and BC1 specular slices use about 120 MiB of array
-storage, plus Ogre source caches and semantic streams. Emissive arrays are
+storage, plus Ogre/driver source caches and semantic streams. Emissive arrays are
 optional; the current Mars source has intentionally black emissive maps.
 
 Validation on 2026-10-20: all 111 CTests pass, the 72 exported source DDS files
@@ -76,6 +98,51 @@ seam/rotation art acceptance, performance and other platforms remain open.
 GPU query evidence reports
 `hdMaterialMask` (normal=1, specular=2, emissive=4) only when the exact owned
 arrays are bound at a native terrain submission.
+
+### 32-bit application RAM
+
+The Windows/GOG executable tested here has `LARGE_ADDRESS_AWARE` set. The local
+probe records its actual PE flag, private commit and lifetime peak commit, plus
+a read-only `VirtualQueryEx` scan for committed/reserved/free address space and
+the largest free region. Private commit is not the same as total occupied
+virtual address space or GPU VRAM. See Microsoft's
+[process counters](https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-process_memory_counters_ex)
+and [address-space query](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualqueryex).
+
+An initial `misn04` A/B with the same Enhanced profile and camera measured
+352 MiB atlas versus 527 MiB HD private commit at both 1K and 2K. Changing native
+HD semantic streams from CPU-mappable dynamic buffers to GPU-default buffers
+saved about 85 MiB in the 2K trial. The final fresh A/B measured about 443 MiB
+for 1K, 442 MiB for 2K and 353 MiB atlas, about
+90 MiB extra. The upload still supports complete terrain-rebuild refreshes via
+`UpdateSubresource`, without a persistent CPU mapping or Ogre shadow buffer.
+The semantic payload is still about 80.4 MiB across 320 meshes.
+
+The 1K run peaked at 612 MiB private commit. The 2K HD lifetime private-commit
+peak was 883 MiB versus 430 MiB for the atlas; peak occupied VA was 1,546 MiB
+versus 1,068 MiB. Settled free VA was 2,910 MiB versus 3,040 MiB, with a largest
+free block of about 2,045 MiB in all three runs. The 1K default therefore has
+a substantially smaller measured loading peak than 2K.
+Evidence: CR local `run-20261020-132505` (atlas PID 13348),
+`run-20261020-133006` (1K PID 61980) and `run-20261020-133056` (2K PID 10228),
+`memory.json`. These are short mission
+benchmarks, not worst-case campaign/co-op/save-load budgets. Steam/Proton/Wine
+memory and long-session fragmentation remain unqualified.
+
+Repeated profile changes originally accumulated roughly 90 MiB private commit
+per HD reload. The terrain handoff helper used a reference-count assumption
+that did not match the released Ogre build. Copy/release now use Ogre's own
+exported operations under the existing exact-module gate, including final
+control-block destruction inside Ogre. No control-block byte offset is used.
+The three-cycle GOG trial (PID 55196, CR local `run-20261020-131930`) returned
+to 359.9, 360.6 and 361.3 MiB in Redux; HD settled at 447.3 MiB after the final
+resume. EXU was loaded only as that trial's profile-switch driver. All 320
+retired streams reported one remaining binding-owned reference before removal,
+and all passes/resources/files were restored. The screenshot was inspected.
+This is a bounded regression check, not a long-session leak proof.
+Startup Redux was also tested with HD opted in (PID 18404, CR local
+`run-20261020-133145`): the effective-profile gate retained the atlas and no
+HD array/material allocation occurred.
 
 The released Ogre backend subtracts two levels from explicit compressed-array
 mip requests, while its source loader already reports the shortened chain.

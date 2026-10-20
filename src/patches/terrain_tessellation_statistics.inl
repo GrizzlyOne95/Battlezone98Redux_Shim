@@ -131,6 +131,12 @@ ID3D11Query* BeginTerrainTessQuery(ID3D11DeviceContext* context, UINT count,
     if (domain) domain->Release();
     if (tessellated != bound) return nullptr;
     const bool authoredNormal=TerrainSurfaceNormalBound(context);
+    const unsigned materialMask = BZROpenShim::TerrainHdMaterialBoundMask(context);
+    // Source-pack trials need a pass that actually uses their optional maps.
+    // A distant diffuse-only LOD must not consume the bounded capture first.
+    if (GetEnvironmentVariableA("OPENSHIM_TERRAIN_HD_REQUIRE_MATERIAL_MAPS", nullptr, 0) > 0 &&
+        hdTiles && (materialMask & 3u) != 3u)
+        return nullptr;
     // Do not exhaust the bounded draw samples while Ogre's texture resource
     // group is still starting. Requested surface captures require the actual
     // resource to be bound before they consume a sampling attempt.
@@ -144,7 +150,7 @@ ID3D11Query* BeginTerrainTessQuery(ID3D11DeviceContext* context, UINT count,
     }
     sample.attempted = true;
     sample.authoredNormal=authoredNormal;
-    sample.hdMaterialMask = BZROpenShim::TerrainHdMaterialBoundMask(context);
+    sample.hdMaterialMask = materialMask;
     sample.ended = false;
     sample.polls = 0;
     ++sample.attempts;

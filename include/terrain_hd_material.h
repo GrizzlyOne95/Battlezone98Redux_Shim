@@ -4,11 +4,45 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
+#include <cmath>
+#include "render_profile.h"
 
 namespace BZROpenShim::TerrainHdMaterial
 {
+    inline bool ProfileAllowsTiles(uint32_t backend, uint32_t profile)
+    {
+        return backend == uint32_t(RenderProfiles::ActiveBackend::DX11) &&
+            profile == RenderProfiles::Abi::kProfileEnhanced;
+    }
+
+    struct RectBinding { std::array<float, 4> rect; uint8_t slice; };
+    inline bool ValidRect(const std::array<float, 4>& rect)
+    {
+        for (float value : rect) if (!std::isfinite(value)) return false;
+        return rect[0] >= 0 && rect[1] >= 0 && rect[2] > 0 && rect[3] > 0 &&
+            rect[0] + rect[2] <= 1.000001f && rect[1] + rect[3] <= 1.000001f;
+    }
+    inline bool FindRectSlice(const std::vector<RectBinding>& bindings,
+        const std::array<float, 4>& rect, uint8_t& slice)
+    {
+        if (!ValidRect(rect)) return false;
+        bool found = false;
+        for (const auto& binding : bindings)
+        {
+            bool matches = true;
+            for (unsigned c = 0; c < 4; ++c)
+                matches = matches && std::abs(binding.rect[c] - rect[c]) <= 0.000001f;
+            if (!matches) continue;
+            if (found && slice != binding.slice) return false;
+            slice = binding.slice; found = true;
+        }
+        return found;
+    }
+
     inline bool HasDefine(const std::string& defines, std::string_view name)
     {
+        if (name.empty()) return false;
         const auto identifier = [](char c) { return (c >= 'a' && c <= 'z') ||
             (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'; };
         size_t at = 0;

@@ -181,6 +181,9 @@ namespace BZROpenShim
             void* rep = nullptr;
             void* info = nullptr;
         };
+        using FnSharedPtrRelease = void(__thiscall*)(OgreSharedPtr*);
+        using FnSharedPtrCopy = void(__thiscall*)(OgreSharedPtr*, const OgreSharedPtr&);
+        using FnSharedPtrCount = uint32_t(__thiscall*)(const OgreSharedPtr*);
 
         struct VertexDataPrefix
         {
@@ -359,6 +362,8 @@ namespace BZROpenShim
             std::unordered_map<uint32_t, std::string> tiles;
             std::array<uint8_t, 256> sliceRemap = TerrainHdMaterial::IdentityRemap();
             bool compact = false;
+            bool releaseSourceTextures = false;
+            std::vector<TerrainHdMaterial::RectBinding> tileRects;
             std::array<TerrainHdChannel, 3> channels;
         };
         std::array<std::string, 3> g_hdChannelResources;
@@ -565,6 +570,10 @@ namespace BZROpenShim
             FnLoadResource loadResource = nullptr;
             FnGetMeshManager getMeshManager = nullptr;
             FnRemoveResource removeResource = nullptr;
+            FnRemoveResource unloadResource = nullptr;
+            FnSharedPtrRelease releaseSharedPtr = nullptr;
+            FnSharedPtrCopy copySharedPtr = nullptr;
+            FnSharedPtrCount sharedPtrCount = nullptr;
             // Optional: only the semantic debug visualization and the
             // slot-3 declaration audit use these. An unresolved entry
             // degrades that diagnostic; it never disables Phase 2/3A.
@@ -1065,16 +1074,37 @@ namespace BZROpenShim
                     {
                         if (g_config.proxyEnabled || binding.diffuseResource.empty())
                             throw std::runtime_error("HD material packs require native terrain and diffuse identity");
-                        const auto& remap = materialIt.value().at("sliceRemap");
-                        if (!remap.is_array() || remap.size() != 256)
-                            throw std::runtime_error("sliceRemap requires all 256 logical tile IDs");
-                        for (unsigned i = 0; i < 256; ++i)
+                        if (materialIt.value().contains("tileRects"))
                         {
-                            if (!remap[i].is_number_unsigned() || remap[i].get<unsigned>() >= binding.sliceCount)
-                                throw std::runtime_error("sliceRemap contains an invalid physical slice");
-                            binding.sliceRemap[i] = uint8_t(remap[i].get<unsigned>());
+                            if (materialIt.value().contains("sliceRemap"))
+                                throw std::runtime_error("choose tileRects or sliceRemap, not both");
+                            const auto& rects = materialIt.value().at("tileRects");
+                            if (!rects.is_array() || rects.empty() || rects.size() > 256)
+                                throw std::runtime_error("tileRects requires 1..256 source rectangles");
+                            for (const auto& entry : rects)
+                            {
+                                const auto rect = entry.at("rect").get<std::array<float, 4>>();
+                                const auto& slice = entry.at("slice");
+                                if (!TerrainHdMaterial::ValidRect(rect) || !slice.is_number_unsigned() ||
+                                    slice.get<unsigned>() >= binding.sliceCount)
+                                    throw std::runtime_error("invalid tileRects entry");
+                                binding.tileRects.push_back({rect, uint8_t(slice.get<unsigned>())});
+                            }
+                        }
+                        else
+                        {
+                            const auto& remap = materialIt.value().at("sliceRemap");
+                            if (!remap.is_array() || remap.size() != 256)
+                                throw std::runtime_error("sliceRemap requires all 256 logical tile IDs");
+                            for (unsigned i = 0; i < 256; ++i)
+                            {
+                                if (!remap[i].is_number_unsigned() || remap[i].get<unsigned>() >= binding.sliceCount)
+                                    throw std::runtime_error("sliceRemap contains an invalid physical slice");
+                                binding.sliceRemap[i] = uint8_t(remap[i].get<unsigned>());
+                            }
                         }
                         binding.compact = true;
+                        binding.releaseSourceTextures = materialIt.value().value("releaseSourceTextures", false);
                         constexpr const char* names[] = {"normal", "specular", "emissive"};
                         for (unsigned c = 0; c < 3; ++c)
                         {
@@ -1250,6 +1280,16 @@ namespace BZROpenShim
 
         bool ResolveOgreApi(HMODULE module)
         {
+            // Exact Ogre hash is checked before this resolver runs. These
+            // exported SharedPtr operations touch only the common two-pointer
+            // representation and its polymorphic control block, never T.
+            // Keep control-block layout and final destruction inside Ogre.
+            g_ogre.releaseSharedPtr = Resolve<FnSharedPtrRelease>(module,
+                "?setNull@?$SharedPtr@VHardwareVertexBuffer@Ogre@@@Ogre@@QAEXXZ");
+            g_ogre.copySharedPtr = Resolve<FnSharedPtrCopy>(module,
+                "??0HardwareVertexBufferSharedPtr@Ogre@@QAE@ABV01@@Z");
+            g_ogre.sharedPtrCount = Resolve<FnSharedPtrCount>(module,
+                "?useCount@?$SharedPtr@VHardwareVertexBuffer@Ogre@@@Ogre@@QBEIXZ");
             g_ogre.cloneMesh = Resolve<FnMeshClone>(module,
                 "?clone@Mesh@Ogre@@QAE?AV?$SharedPtr@VMesh@Ogre@@@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@0@Z");
             g_ogre.createEntity = Resolve<FnCreateEntityFromMesh>(module,
@@ -1370,6 +1410,8 @@ namespace BZROpenShim
             g_ogre.getMeshManager = Resolve<FnGetMeshManager>(module, "?getSingletonPtr@MeshManager@Ogre@@SAPAV12@XZ");
             g_ogre.removeResource = Resolve<FnRemoveResource>(module,
                 "?remove@ResourceManager@Ogre@@UAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            g_ogre.unloadResource = Resolve<FnRemoveResource>(module,
+                "?unload@ResourceManager@Ogre@@UAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
             g_ogre.getFragmentProgram = Resolve<FnGetGpuProgram>(module,
                 "?getFragmentProgram@Pass@Ogre@@QBEABV?$SharedPtr@VGpuProgram@Ogre@@@2@XZ");
             g_ogre.getFragmentProgramParameters = Resolve<FnGetGpuProgramParameters>(module,
@@ -1444,6 +1486,8 @@ namespace BZROpenShim
                 "?getDerivedOrientation@Camera@Ogre@@QBEABVQuaternion@2@XZ");
 
             const void* const required[] = {
+                reinterpret_cast<void*>(g_ogre.releaseSharedPtr), reinterpret_cast<void*>(g_ogre.copySharedPtr),
+                reinterpret_cast<void*>(g_ogre.sharedPtrCount),
                 reinterpret_cast<void*>(g_ogre.cloneMesh), reinterpret_cast<void*>(g_ogre.createEntity),
                 reinterpret_cast<void*>(g_ogre.getResourceName), reinterpret_cast<void*>(g_ogre.getNumSubMeshes),
                 reinterpret_cast<void*>(g_ogre.getSubEntity), reinterpret_cast<void*>(g_ogre.getRenderOperation),
@@ -1666,15 +1710,9 @@ namespace BZROpenShim
                 return true;
             __try
             {
-                auto* count = reinterpret_cast<volatile LONG*>(
-                    reinterpret_cast<uint8_t*>(pointer.info) + sizeof(void*));
-                const LONG current = InterlockedCompareExchange(count, 0, 0);
-                if (current <= 1)
-                    return false;
-                InterlockedDecrement(count);
-                pointer.rep = nullptr;
-                pointer.info = nullptr;
-                return true;
+                if (!g_ogre.releaseSharedPtr || !GetModuleHandleW(L"OgreMain.dll")) return false;
+                g_ogre.releaseSharedPtr(&pointer);
+                return !pointer.rep && !pointer.info;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -1846,9 +1884,12 @@ namespace BZROpenShim
                         break;
                     D3D11_BUFFER_DESC description = {};
                     buffer->GetDesc(&description);
-                    if (description.ByteWidth < byteCount ||
-                        description.Usage != D3D11_USAGE_DYNAMIC ||
-                        !(description.CPUAccessFlags & D3D11_CPU_ACCESS_WRITE))
+                    const bool dynamic = description.Usage == D3D11_USAGE_DYNAMIC &&
+                        (description.CPUAccessFlags & D3D11_CPU_ACCESS_WRITE);
+                    const bool gpuOnly = description.Usage == D3D11_USAGE_DEFAULT &&
+                        description.CPUAccessFlags == 0 && description.ByteWidth == byteCount &&
+                        description.BindFlags == D3D11_BIND_VERTEX_BUFFER;
+                    if (description.ByteWidth < byteCount || (!dynamic && !gpuOnly))
                         break;
                     buffer->GetDevice(&device);
                     if (!device)
@@ -1856,6 +1897,15 @@ namespace BZROpenShim
                     device->GetImmediateContext(&context);
                     if (!context)
                         break;
+                    if (gpuOnly)
+                    {
+                        // Native HD streams change only on a terrain rebuild.
+                        // Keep them in DEFAULT memory without a persistent CPU
+                        // mapping; the caller's complete upload is snapped here.
+                        context->UpdateSubresource(buffer, 0, nullptr, bytes, 0, 0);
+                        ok = true;
+                        break;
+                    }
                     D3D11_MAPPED_SUBRESOURCE mapping = {};
                     if (FAILED(context->Map(buffer, 0,
                             D3D11_MAP_WRITE_DISCARD, 0, &mapping)) ||
@@ -2010,10 +2060,18 @@ namespace BZROpenShim
                 return false;
             __try
             {
-                auto* count = reinterpret_cast<volatile LONG*>(
-                    reinterpret_cast<uint8_t*>(pointer.info) + sizeof(void*));
-                InterlockedIncrement(count);
-                return true;
+                if (!g_ogre.copySharedPtr || !g_ogre.sharedPtrCount) return false;
+                const uint32_t before = g_ogre.sharedPtrCount(&pointer);
+                if (!before) return false;
+                OgreSharedPtr handoff;
+                g_ogre.copySharedPtr(&handoff, pointer);
+                // The following by-value Ogre setter consumes this additional
+                // reference. The original caller-owned pointer is released
+                // separately; this raw ABI carrier has no C++ destructor.
+                if (handoff.rep == pointer.rep && handoff.info == pointer.info &&
+                    g_ogre.sharedPtrCount(&pointer) == before + 1) return true;
+                ReleaseCloneHandoff(handoff);
+                return false;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -2662,7 +2720,11 @@ namespace BZROpenShim
                 try
                 {
                     if (g_ogre.getTextureManager && g_ogre.removeResource)
-                        if (void* manager = g_ogre.getTextureManager()) g_ogre.removeResource(manager, name);
+                        if (void* manager = g_ogre.getTextureManager())
+                        {
+                            if (g_ogre.unloadResource) g_ogre.unloadResource(manager, name);
+                            g_ogre.removeResource(manager, name);
+                        }
                     LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] material channel released reason=%s name=%s", reason, name.c_str());
                 }
                 catch (...) { LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-HD] channel removal declined name=%s", name.c_str()); }
@@ -2675,7 +2737,10 @@ namespace BZROpenShim
                 if (g_ogre.getTextureManager && g_ogre.removeResource)
                 {
                     if (void* manager = g_ogre.getTextureManager())
+                    {
+                        if (g_ogre.unloadResource) g_ogre.unloadResource(manager, g_proxy.hdTextureName);
                         g_ogre.removeResource(manager, g_proxy.hdTextureName);
+                    }
                 }
             }
             catch (...)
@@ -2817,8 +2882,41 @@ namespace BZROpenShim
             if (!textureManager)
                 return false;
             OgreSharedPtr fallbackTexture;
+            // Only drop resources this upload created, and only when the pack
+            // explicitly declares its tile files to be transient upload inputs.
+            using ResourceExists = bool(__thiscall*)(void*, const std::string&);
+            const auto resourceExists = binding.releaseSourceTextures ? Resolve<ResourceExists>(
+                GetModuleHandleW(L"OgreMain.dll"),
+                "?resourceExists@ResourceManager@Ogre@@UAE_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z") : nullptr;
+            std::vector<std::string> uploadSources;
+            const auto rememberNewSource = [&](const std::string& name) {
+                if (resourceExists && g_ogre.unloadResource && !resourceExists(textureManager, name) &&
+                    std::find(uploadSources.begin(), uploadSources.end(), name) == uploadSources.end())
+                    uploadSources.push_back(name);
+            };
+            size_t released = 0;
+            const auto releaseUploadSource = [&](const std::string& name) {
+                const auto owned = std::find(uploadSources.begin(), uploadSources.end(), name);
+                if (owned == uploadSources.end()) return;
+                try
+                {
+                    // Removal alone can leave payloads alive through Ogre's
+                    // resource references. Retire our input GPU payload first.
+                    g_ogre.unloadResource(textureManager, name);
+                    g_ogre.removeResource(textureManager, name);
+                    uploadSources.erase(owned); ++released;
+                }
+                catch (...) { LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-HD] upload cache release declined resource=%s", name.c_str()); }
+            };
+            const auto releaseUploadSources = [&]() {
+                const auto remaining = uploadSources;
+                for (const auto& name : remaining) releaseUploadSource(name);
+                if (released) LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] transient source textures released count=%zu channel=%d", released, channel);
+                uploadSources.clear();
+            };
             try
             {
+                rememberNewSource(binding.fallback);
                 if (!LoadTerrainHdSourceTexture(textureManager,
                         binding.fallback, fallbackTexture, binding.compact))
                 {
@@ -2826,6 +2924,7 @@ namespace BZROpenShim
                         "[TERRAIN-HD] fallback texture failed resource=\"%s\"; stock atlas retained",
                         binding.fallback.c_str());
                     ReleaseCloneHandoff(fallbackTexture);
+                    releaseUploadSources();
                     return false;
                 }
                 const uint32_t width = g_ogre.getTextureWidth(fallbackTexture.rep);
@@ -2835,6 +2934,7 @@ namespace BZROpenShim
                 if (width == 0 || height == 0 || format == kOgrePixelFormatUnknown)
                 {
                     ReleaseCloneHandoff(fallbackTexture);
+                    releaseUploadSources();
                     return false;
                 }
 
@@ -2867,6 +2967,7 @@ namespace BZROpenShim
                         ownedName.c_str(), binding.sliceCount);
                     ReleaseCloneHandoff(fallbackTexture);
                     ReleaseCloneHandoff(arrayTexture);
+                    releaseUploadSources();
                     RemoveTerrainHdTextureResource("create-failed");
                     return false;
                 }
@@ -2881,6 +2982,7 @@ namespace BZROpenShim
                     void* source = fallbackTexture.rep;
                     if (resource != binding.fallback)
                     {
+                        rememberNewSource(resource);
                         if (!LoadTerrainHdSourceTexture(textureManager,
                                 resource, sourceTexture, binding.compact))
                         {
@@ -2908,9 +3010,11 @@ namespace BZROpenShim
                         throw std::runtime_error("tile contract/copy failed");
                     }
                     ReleaseCloneHandoff(sourceTexture);
+                    if (resource != binding.fallback) releaseUploadSource(resource);
                 }
 
                 ReleaseCloneHandoff(fallbackTexture);
+                releaseUploadSources();
                 if (channel >= 0)
                     g_hdChannelNativeTextures.at(size_t(channel)) = g_ogre.getD3D11Texture2D(arrayTexture.rep);
                 if (channel < 0)
@@ -2933,6 +3037,7 @@ namespace BZROpenShim
             catch (...)
             {
                 ReleaseCloneHandoff(fallbackTexture);
+                releaseUploadSources();
                 ReleaseCloneHandoff(arrayTexture);
                 RemoveTerrainHdTextureResource("build-failed");
                 return false;
@@ -2966,6 +3071,7 @@ namespace BZROpenShim
                     {
                         for (const std::string& name : g_proxy.semanticProgramNames)
                         {
+                            if (g_ogre.unloadResource) g_ogre.unloadResource(manager, name);
                             g_ogre.removeResource(manager, name);
                             ++g_semanticProgramsRemovedTotal;
                         }
@@ -5624,10 +5730,11 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
     {
         // Cheap early-out: this runs on every rendered world frame and must
         // cost nothing when the opt-in capture is off.
-        if ((g_config.semanticFrameCaptures <= 0 && g_config.surfaceManifest.empty() && g_config.geometryExport.empty()) || !g_active.load() ||
+        if ((g_config.semanticFrameCaptures <= 0 && g_config.surfaceManifest.empty() && g_config.geometryExport.empty() && !g_config.hdEnabled) || !g_active.load() ||
             g_shutdown.load())
             return;
         std::lock_guard<std::mutex> lock(g_mutex);
+        UpdateNativeTerrainHdProfile();
         if (!g_config.geometryExport.empty() && g_proxy.selected && !g_proxy.tearingDown)
             ExportNativeTerrainGeometry();
         if (!g_config.surfaceManifest.empty() && !g_SurfaceAttemptFinished &&

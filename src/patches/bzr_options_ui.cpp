@@ -2728,8 +2728,8 @@ namespace BZROpenShim
             { "HD Terrain Tiles", "Terrain", "TerrainHdEnabled", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
-              "Experimental full-resolution terrain diffuse tiles. Requires a terrain_hd_tiles.json "
-              "texture pack. Keeps existing tile placement and collision. DX11 only. Restart required." },
+              "Full-resolution authored terrain tiles, with optional normal/specular maps. "
+              "Requires a compatible pack and DX11 Enhanced; other profiles keep the original atlas. Restart required." },
             { "Terrain Micro Detail", "Terrain", "TerrainMicroRelief", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,

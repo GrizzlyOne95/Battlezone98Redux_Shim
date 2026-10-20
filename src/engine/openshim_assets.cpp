@@ -714,7 +714,10 @@ AssetCapabilities EvaluateAssetCapabilitiesAtWithManifest(
         caps.destructionChunks = manifestCaps.destructionChunks && haveChunks;
         caps.enhancedResources = manifestCaps.enhancedResources && haveEnhanced;
         caps.customUiAssets = manifestCaps.customUiAssets;
-        caps.terrainHd = manifestCaps.terrainHd && haveTerrain;
+        // Authored HD packs can be installed independently of the base suite.
+        // TerrainHd=0 means the suite ships none, not that a user's separately
+        // configured pack is forbidden. Actual activation remains opt-in.
+        caps.terrainHd = haveTerrain;
         caps.packDetected = true; // canonical pack identity
         caps.manifestDetected = true;
         caps.state = AssetPackState::Detected;

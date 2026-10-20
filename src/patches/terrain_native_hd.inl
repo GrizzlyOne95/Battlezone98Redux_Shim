@@ -13,10 +13,18 @@ std::map<std::string, NativeHdStream> g_HdStreams;
 std::vector<NativeHdPass> g_HdPasses;
 std::string g_HdSourceMaterial, g_HdBackupMaterial;
 bool g_HdActive = false, g_HdDeclined = false;
+bool g_HdProfileSuspended = false;
+std::array<bool, 256> g_HdTileMapped{};
 TerrainPaint::Config g_HdPaint;
 std::array<uint8_t, 256> g_HdSliceRemap = TerrainHdMaterial::IdentityRemap();
 std::array<bool, 3> g_HdChannelEnabled{};
-void ResetNativeTerrainHd() { g_HdDeclined = false; }
+void ResetNativeTerrainHd() { g_HdDeclined = false; g_HdProfileSuspended = false; }
+
+bool HdProfileAllowed()
+{
+    return TerrainHdMaterial::ProfileAllowsTiles(RenderProfiles::Exports::GetActiveBackend(),
+        RenderProfiles::Exports::GetEffectiveRenderProfile());
+}
 
 using HdCreateBinding = void* (__thiscall*)(void*);
 using HdDestroyBinding = void (__thiscall*)(void*, void*);
@@ -122,6 +130,7 @@ void RestoreNativeTerrainHd()
     catch (...) { LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-HD] material restoration declined"); }
     ReleaseCloneHandoff(source); ReleaseCloneHandoff(backup);
     unsigned restored = 0;
+    int minReferences = INT_MAX, maxReferences = 0;
     void* meshManager = GetModuleHandleW(L"OgreMain.dll") ? g_ogre.getMeshManager() : nullptr;
     void* bufferManager = GetModuleHandleW(L"OgreMain.dll") ? g_ogre.getHardwareBufferManager() : nullptr;
     // Never remove inputs while a source shader still needs them. The mesh
@@ -147,6 +156,13 @@ void RestoreNativeTerrainHd()
                     throw std::runtime_error("HD restoration binding layout changed");
                 const auto* current = g_ogre.getBuffer(data->binding, 3);
                 if (!current || current->rep != entry.second.buffer) throw std::runtime_error("HD slot owner changed");
+                int references = 0;
+                if (current->info && g_ogre.sharedPtrCount)
+                {
+                    references = int(g_ogre.sharedPtrCount(current));
+                    minReferences = (std::min)(minReferences, references);
+                    maxReferences = (std::max)(maxReferences, references);
+                }
                 void* manager = bufferManager;
                 cleanBinding = g_hdCreateBinding(manager);
                 if (!cleanBinding) throw std::runtime_error("HD restoration binding unavailable");
@@ -154,6 +170,8 @@ void RestoreNativeTerrainHd()
                 for (uint16_t slot = 0; slot < 3; ++slot)
                     g_ogre.setVertexBinding(cleanBinding, slot, *g_ogre.getBuffer(data->binding, slot));
                 g_hdCopyBinding(data->binding, cleanBinding);
+                if (g_hdBindingCount(data->binding) != 3 || g_ogre.isBufferBound(data->binding, 3))
+                    throw std::runtime_error("HD stream binding retirement failed");
                 for (uint16_t semantic = 2; semantic <= 4; ++semantic)
                     g_hdRemoveElement(data->declaration, 7, semantic);
                 g_hdDestroyBinding(manager, cleanBinding); cleanBinding = nullptr;
@@ -164,7 +182,7 @@ void RestoreNativeTerrainHd()
         ReleaseCloneHandoff(mesh);
     }
     if (!g_HdStreams.empty()) LogShimA(LogLevel::Info, "terrain-hd",
-        "[TERRAIN-HD] native streams restored meshes=%u tracked=%zu", restored, g_HdStreams.size());
+        "[TERRAIN-HD] native streams restored meshes=%u tracked=%zu sharedRefsBefore=%d..%d", restored, g_HdStreams.size(), minReferences, maxReferences);
     g_HdStreams.clear(); g_HdPasses.clear(); g_HdSourceMaterial.clear();
     g_HdSliceRemap = TerrainHdMaterial::IdentityRemap(); g_HdChannelEnabled = {};
     if (!g_HdBackupMaterial.empty())
@@ -260,7 +278,8 @@ void UpdateNativeHdZone(void* zone, bool dirty)
                 const auto world = TerrainPaint::WorldXZ(x, z, translation.x, translation.z);
                 gpu.localU = world[0]; gpu.localV = world[1]; gpu.tileIndex = 0;
             }
-            else if (!TerrainHdMaterial::Remap(g_HdSliceRemap, gpu.tileIndex, g_proxy.hdSliceCount, gpu.tileIndex))
+            else if (!g_HdTileMapped[gpu.tileIndex] ||
+                !TerrainHdMaterial::Remap(g_HdSliceRemap, gpu.tileIndex, g_proxy.hdSliceCount, gpu.tileIndex))
                 throw std::runtime_error("native HD manifest slice missing");
             upload.push_back(gpu);
         }
@@ -283,7 +302,7 @@ void UpdateNativeHdZone(void* zone, bool dirty)
         try
         {
             g_ogre.createVertexBuffer(g_ogre.getHardwareBufferManager(), &buffer,
-                sizeof(TerrainSemantic::GpuVertex), uint32_t(upload.size()), 14, false);
+                sizeof(TerrainSemantic::GpuVertex), uint32_t(upload.size()), 5, false);
             if (!buffer.rep || !buffer.info || !WriteD3D11VertexBuffer(buffer.rep, upload.data(), size))
                 throw std::runtime_error("native HD stream upload failed");
             // Record ownership before mutating the declaration, for rollback.
@@ -314,6 +333,14 @@ void RefreshNativeTerrainHd(void* zone, bool dirty)
 bool InstallNativeTerrainHd()
 {
     if (!g_config.hdEnabled || g_HdDeclined) return false;
+    if (!HdProfileAllowed())
+    {
+        if (!g_HdProfileSuspended) LogShimA(LogLevel::Info, "terrain-hd",
+            "[TERRAIN-HD] stock atlas retained: effective DX11 Enhanced profile required; HD arrays not allocated");
+        g_HdProfileSuspended = true;
+        return false;
+    }
+    g_HdProfileSuspended = false;
     if (g_HdActive) return true;
     OgreSharedPtr source, backup, array, program;
     std::array<OgreSharedPtr, 3> channelArrays{};
@@ -331,6 +358,19 @@ bool InstallNativeTerrainHd()
         const auto* binding = FindTerrainHdBinding(g_proxy.materialName);
         if (!binding) throw std::runtime_error("native HD manifest binding missing");
         g_HdSliceRemap = binding->sliceRemap;
+        g_HdTileMapped.fill(true);
+        if (!binding->tileRects.empty())
+        {
+            void* manager = g_terrainManager();
+            if (!manager) throw std::runtime_error("HD native tile table unavailable");
+            g_HdTileMapped.fill(false);
+            for (unsigned i = 0; i < 256; ++i)
+            {
+                const auto* rect = g_atlasRectAt(manager, i);
+                if (rect) g_HdTileMapped[i] = TerrainHdMaterial::FindRectSlice(binding->tileRects,
+                    {rect->u, rect->v, rect->w, rect->h}, g_HdSliceRemap[i]);
+            }
+        }
         for (unsigned c = 0; c < 3; ++c) g_HdChannelEnabled[c] = binding->channels[c].enabled;
         if (!g_config.surfaceManifest.empty() && std::any_of(g_HdChannelEnabled.begin(), g_HdChannelEnabled.end(), [](bool value){return value;}))
             throw std::runtime_error("HD material channels and surface-atlas override cannot own the same bindings");
@@ -487,4 +527,26 @@ bool InstallNativeTerrainHd()
     RestoreNativeTerrainHd(); RemoveSemanticResources("native-hd-declined");
     g_HdDeclined = true;
     return false;
+}
+
+// Runs on the existing world-render seam, before terrain submission. Restore
+// while the scene is alive; reactivation rediscoveries use the native zone seam.
+void UpdateNativeTerrainHdProfile()
+{
+    if (!g_config.hdEnabled || g_proxy.tearingDown) return;
+    if (!HdProfileAllowed())
+    {
+        if (!g_HdActive) return;
+        RestoreNativeTerrainTessellationTest();
+        RestoreNativeTerrainHd();
+        RemoveSemanticResources("profile-fallback");
+        g_HdProfileSuspended = true;
+        LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] profile fallback restored stock atlas");
+    }
+    else if (g_HdProfileSuspended && !g_HdDeclined)
+    {
+        g_HdProfileSuspended = false;
+        g_proxy.selected = false;
+        LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] Enhanced resumed; native tile discovery rearmed");
+    }
 }

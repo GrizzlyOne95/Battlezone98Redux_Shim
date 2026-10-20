@@ -4,12 +4,27 @@
 #include <fstream>
 #include <iterator>
 #include <iostream>
+#include <limits>
 
 namespace HD = BZROpenShim::TerrainHdMaterial;
 using OpenShimTest::Require;
 
 int main(int argc, char** argv)
 {
+    Require(HD::ProfileAllowsTiles(1, 3) && !HD::ProfileAllowsTiles(0, 3) &&
+        !HD::ProfileAllowsTiles(1, 2) && !HD::ProfileAllowsTiles(1, 1) && !HD::ProfileAllowsTiles(1, 0),
+        "HD tiles escaped the effective DX11 Enhanced profile gate");
+    std::vector<HD::RectBinding> rects = {{{0, 0, .125f, .125f}, 3}, {{.125f, 0, .125f, .125f}, 7}};
+    uint8_t mapped = 0;
+    Require(HD::FindRectSlice(rects, {.125f, 0, .125f, .125f}, mapped) && mapped == 7,
+        "native rectangle mapping depended on numeric tile ID");
+    Require(!HD::FindRectSlice(rects, {.5f, 0, .125f, .125f}, mapped), "unknown rectangle accepted");
+    rects.push_back({{0, 0, .125f, .125f}, 4});
+    Require(!HD::FindRectSlice(rects, {0, 0, .125f, .125f}, mapped), "ambiguous rectangle accepted");
+    Require(!HD::ValidRect({0, 0, 0, 1}) && !HD::ValidRect({.9f, 0, .2f, 1}) &&
+        !HD::ValidRect({std::numeric_limits<float>::quiet_NaN(), 0, 1, 1}) &&
+        HD::ValidRect({0, 0, 1, 1}), "malformed source rectangles accepted");
+    Require(!HD::HasDefine("NORMALMAP_ENABLED", ""), "empty define lookup did not terminate");
     Require(HD::HasDefine("MAX_LIGHTS=1,NORMALMAP_ENABLED,SPECULARMAP_ENABLED=1", "NORMALMAP_ENABLED") &&
         !HD::HasDefine("NO_NORMALMAP_ENABLED,NORMALMAP_ENABLED_DEBUG", "NORMALMAP_ENABLED"),
         "per-pass channel defines were confused with unrelated flags");
