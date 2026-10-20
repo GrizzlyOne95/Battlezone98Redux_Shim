@@ -367,6 +367,7 @@ namespace BZROpenShim
             bool compact = false;
             bool releaseSourceTextures = false;
             float microReliefScale = 1.0f;
+            TerrainHdMaterial::DetailTuning detail;
             std::string heightTexture;
             std::vector<TerrainHdMaterial::RectBinding> tileRects;
             std::array<TerrainHdChannel, 3> channels;
@@ -1056,6 +1057,11 @@ namespace BZROpenShim
                     binding.microReliefScale = materialIt.value().value("microReliefScale", 1.0f);
                     if (!TerrainHdMaterial::ValidMicroReliefScale(binding.microReliefScale))
                         throw std::runtime_error("microReliefScale must be finite and within 0..4");
+                    binding.detail.contrast = materialIt.value().value("detailContrast", .55f);
+                    binding.detail.normalStrength = materialIt.value().value("detailNormalStrength", 2.2f);
+                    binding.detail.nearNormalScale = materialIt.value().value("detailNormalNearScale", .55f);
+                    if (!TerrainHdMaterial::ValidDetailTuning(binding.detail))
+                        throw std::runtime_error("detail tuning must be finite: contrast/near scale 0..1, normal strength 0..4");
                     binding.heightTexture = materialIt.value().value("heightTexture", std::string());
                     if (!binding.heightTexture.empty() &&
                         materialIt.value().value("heightEncoding", std::string()) != "signed-unit-r32")
