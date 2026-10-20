@@ -1730,6 +1730,8 @@ namespace BZROpenShim
         // from arbitrary engine hook contexts; this is the only place sinks
         // ever run. See include/openshim_events.h.
         TickOpenShimEventLayer();
+        // The HUD installers below write sites only this thread executes.
+        HookEngine::NoteFrameThread();
         HudFeedback::Tick();
         ContextualHud::Tick();
         HudPalette::Tick();

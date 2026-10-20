@@ -9,6 +9,7 @@
 #include <psapi.h>
 #include <tlhelp32.h>
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -195,6 +196,38 @@ namespace HookEngine
         g_CodePatchMutex.unlock();
     }
 
+    namespace
+    {
+        std::atomic<DWORD> g_FrameThread{0};
+        thread_local int t_FrameSitesDepth = 0;
+
+        // True when the caller is inside a FrameThreadSitesScope that
+        // engaged, so its code writes need not hold the other threads.
+        bool WritingFrameThreadSites()
+        {
+            return t_FrameSitesDepth > 0;
+        }
+    }
+
+    void NoteFrameThread()
+    {
+        g_FrameThread.store(GetCurrentThreadId(), std::memory_order_relaxed);
+    }
+
+    FrameThreadSitesScope::FrameThreadSitesScope()
+    {
+        const DWORD frame = g_FrameThread.load(std::memory_order_relaxed);
+        m_engaged = frame != 0 && frame == GetCurrentThreadId();
+        if (m_engaged)
+            ++t_FrameSitesDepth;
+    }
+
+    FrameThreadSitesScope::~FrameThreadSitesScope()
+    {
+        if (m_engaged)
+            --t_FrameSitesDepth;
+    }
+
     std::vector<uint16_t> ParseIdaPattern(const std::string& hex)
     {
         // One parser for both the "patches" and "resolves" arrays; it lives in
@@ -226,11 +259,16 @@ namespace HookEngine
 
         bool ok = false;
         DWORD busyThread = 0;
-        if (!IsExecutableProtection(oldProtect))
+        if (!IsExecutableProtection(oldProtect) || WritingFrameThreadSites())
         {
             // Data, not code: nothing executes it, so a plain copy is enough.
+            // Likewise code only the calling frame thread executes; see
+            // FrameThreadSitesScope.
+            const bool code = IsExecutableProtection(oldProtect);
             SIZE_T written = 0;
             ok = WriteProcessMemory(hProc, ptr, data, len, &written) && written == len;
+            if (code)
+                FlushInstructionCache(hProc, ptr, len);
         }
         else
         {

@@ -634,6 +634,8 @@ namespace BZROpenShim::ContextualHud
     }
     bool ReloadConfig()
     {
+        // The HUD sites run on the frame thread only.
+        HookEngine::FrameThreadSitesScope frameSites;
         Settings settings;
         const char* prefixes[] = {"WeaponList", "ScrapHud", "PilotHud", "CommandHud", "HullHud", "AmmoHud", "RadarHud"};
         for (size_t i = 0; i < kGroups; ++i)
@@ -664,6 +666,8 @@ namespace BZROpenShim::ContextualHud
     }
     void Tick()
     {
+        // The HUD sites run on the frame thread only.
+        HookEngine::FrameThreadSitesScope frameSites;
         if (!g_read) { ReloadConfig(); return; }
         Settings settings;
         AcquireSRWLockShared(&g_lock); settings = g_settings; ReleaseSRWLockShared(&g_lock);
