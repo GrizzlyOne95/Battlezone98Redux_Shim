@@ -62,6 +62,30 @@ namespace HookEngine
         CodePatchLock& operator=(const CodePatchLock&) = delete;
     };
 
+    // Records the calling thread as the one that runs the frame (the world
+    // render-queue callback). Called every frame; cheap.
+    void NoteFrameThread();
+
+    // Declares that the code sites written in this scope are executed by the
+    // frame thread alone (HUD draw calls, the simulation's damage entries),
+    // so when the scope is opened on that thread its code writes go in
+    // without suspending the other threads: none of them can be inside a
+    // site, and the frame thread is busy writing. Suspending from the frame
+    // thread deadlocked in NtSuspendThread at the main menu (the HUD
+    // installers retry from the frame) as it had during plugin load. On any
+    // other thread, or before NoteFrameThread has run, the scope does
+    // nothing and writes keep the usual suspension.
+    class FrameThreadSitesScope
+    {
+    public:
+        FrameThreadSitesScope();
+        ~FrameThreadSitesScope();
+        FrameThreadSitesScope(const FrameThreadSitesScope&) = delete;
+        FrameThreadSitesScope& operator=(const FrameThreadSitesScope&) = delete;
+    private:
+        bool m_engaged;
+    };
+
     // Pattern Scanning.
     //
     // missesAreProvisional says a retry pass is still to come, so a

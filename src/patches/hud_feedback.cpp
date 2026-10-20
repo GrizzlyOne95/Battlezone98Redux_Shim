@@ -353,6 +353,8 @@ namespace BZROpenShim::HudFeedback
 
     bool ReloadConfig()
     {
+        // The HUD and damage sites run on the frame thread only.
+        HookEngine::FrameThreadSitesScope frameSites;
         Settings settings;
         std::string text;
         if (TryGetUserConfigString("Display", "ReticleStyle", text)) settings.style = ParseStyle(text);
@@ -403,6 +405,8 @@ namespace BZROpenShim::HudFeedback
 
     void Tick()
     {
+        // The HUD and damage sites run on the frame thread only.
+        HookEngine::FrameThreadSitesScope frameSites;
         if (!g_configRead) { ReloadConfig(); return; }
         if (!g_needsDraw.load(std::memory_order_relaxed)) return;
         const Settings settings = ReadSettings();
