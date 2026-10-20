@@ -920,6 +920,14 @@ RadarHudIdleOpacity = 25
 RadarHudFadeDelay = 2500
 RadarHudFadeDuration = 500
 RadarCompassAlwaysVisible = 0
+; Main-menu image colorization. RGB 0-255; off preserves original artwork.
+MenuTheme = 0
+MenuThemeRed = 255
+MenuThemeGreen = 0
+MenuThemeBlue = 0
+; Saturation 0-100%; white level 0-200% (100 preserves original brightness).
+MenuThemeSaturation = 100
+MenuThemeWhiteLevel = 100
 ; Player cockpit/chase base FOV in degrees, referenced to 4:3. 0 = stock 80.
 ; Accepts integers 60-120; invalid values use stock. Restart required.
 ; Satellite and target-camera angles are untouched. Cinematics may inherit the

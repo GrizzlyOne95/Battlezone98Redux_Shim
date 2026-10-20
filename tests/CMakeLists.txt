@@ -825,3 +825,5 @@ if(MSVC)
 else()
     target_compile_options(native_chunk_bench PRIVATE -Wall -Wextra -Werror)
 endif()
+
+openshim_add_test(menu_theme_policy_tests STD 17 SOURCES menu_theme_policy_tests.cpp)

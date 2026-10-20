@@ -1,3 +1,4 @@
+#include "menu_theme.h"
 // Input-binding UI replacement + OpenShim settings screen (options-shell
 // sub-pages injected over cUI_OptionsInput / cUI_OptionsParent). Split out of
 // bzr_hooks.cpp; the shared engine-binding surface (resolved fn pointers,
@@ -3416,6 +3417,7 @@ namespace BZROpenShim
         constexpr const char* kShimRowFading = "HUD Fading";
         constexpr const char* kShimRowMeters = "Meter Fading";
         constexpr const char* kShimRowRadar = "Radar Fading";
+        constexpr const char* kShimRowMenuTheme = "Menu Colors";
         constexpr size_t kShimPseudoRowUpdateCheck = kShimSettingsRegistryCount + 0;
         constexpr size_t kShimPseudoRowKeyBindings = kShimSettingsRegistryCount + 1;
         constexpr size_t kShimPseudoRowReticle = kShimSettingsRegistryCount + 2;
@@ -3424,6 +3426,7 @@ namespace BZROpenShim
         constexpr size_t kShimPseudoRowFading = kShimSettingsRegistryCount + 5;
         constexpr size_t kShimPseudoRowMeters = kShimSettingsRegistryCount + 6;
         constexpr size_t kShimPseudoRowRadar = kShimSettingsRegistryCount + 7;
+        constexpr size_t kShimPseudoRowMenuTheme = kShimSettingsRegistryCount + 8;
         constexpr size_t kShimNoRow = static_cast<size_t>(-1);
         // Stock cUI_OptionsInput (key bindings), as the stock Input button uses.
         constexpr uint32_t kStockOptionsInputScreenId = 0x15;
@@ -3434,7 +3437,7 @@ namespace BZROpenShim
         static const char* const kShimCategoryVideo[] = {
             "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "Sun Flashbang", "Jet Flames",
             "Empty Craft Lights", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes",
-            "HD Terrain Tiles", "Terrain Micro Detail" };
+            "HD Terrain Tiles", "Terrain Micro Detail", kShimRowMenuTheme };
         static const char* const kShimCategoryLighting[] = {
             "Player Headlight", "Headlight Brightness", "Headlight Color", "Headlight Beam",
             "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam" };
@@ -3633,6 +3636,8 @@ namespace BZROpenShim
                 return kShimPseudoRowFading;
             if (std::strcmp(label, kShimRowMeters) == 0)
                 return kShimPseudoRowMeters;
+            if (std::strcmp(label, kShimRowMenuTheme) == 0)
+                return kShimPseudoRowMenuTheme;
             if (std::strcmp(label, kShimRowRadar) == 0)
                 return kShimPseudoRowRadar;
             for (size_t index = 0; index < kShimSettingsRegistryCount; ++index)
@@ -3843,12 +3848,14 @@ namespace BZROpenShim
             }
             if (row == kShimPseudoRowKeyBindings)
                 return "Edit";
-            if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading || row == kShimPseudoRowMeters || row == kShimPseudoRowRadar)
+            if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading || row == kShimPseudoRowMeters || row == kShimPseudoRowRadar || row == kShimPseudoRowMenuTheme)
                 return "Open";
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (ShimSettingUnavailableReason(setting))
                 return "Unavailable";
             std::string text = setting.valueLabels[GetShimSettingCurrentIndex(setting)];
+            if (IsShimSettingActionRow(setting) || !setting.key)
+                return text;
             if (std::strcmp(setting.key, "ScrapHudColor") == 0 || std::strcmp(setting.key, "PilotHudColor") == 0 ||
                 std::strcmp(setting.key, "DamageIndicatorColor") == 0 ||
                 (setting.applyGroup == ShimSettingApplyGroup::HudPalette &&
@@ -3881,6 +3888,8 @@ namespace BZROpenShim
                 return kShimRowFading;
             if (row == kShimPseudoRowMeters)
                 return kShimRowMeters;
+            if (row == kShimPseudoRowMenuTheme)
+                return kShimRowMenuTheme;
             if (row == kShimPseudoRowRadar)
                 return kShimRowRadar;
             return g_ShimSettingsRegistry[row].label;
@@ -3902,6 +3911,8 @@ namespace BZROpenShim
                 return "Fade weapons, resource meters and the command interface independently when idle; relevant activity reveals them.";
             if (row == kShimPseudoRowMeters)
                 return "Fade cockpit hull and ammo independently, including labels and shot-cost markers. Critical warnings stay visible.";
+            if (row == kShimPseudoRowMenuTheme)
+                return "Live RGB sliders for the main menu image artwork. Apply saves; Stock restores original colors.";
             if (row == kShimPseudoRowRadar)
                 return "Fade the complete cockpit radar while idle; native-visible alerts and activity reveal it. Optionally keep the compass visible.";
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
@@ -4091,6 +4102,12 @@ namespace BZROpenShim
             if (!ui.screen || slot >= ui.rowCount)
                 return;
             const size_t row = ui.rows[slot];
+            if (row == kShimPseudoRowMenuTheme)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen,MenuTheme::ScreenId);
+                return;
+            }
             if (row == kShimPseudoRowRadar)
             {
                 DisarmShimSettingsAction();
@@ -4185,6 +4202,9 @@ namespace BZROpenShim
                                           { 0.0f, 0.0f, 1440.0f, 1080.0f }, texture);
             if (!panel)
                 return false;
+            const bool backReady = Shell::AddButton(panel, nullptr, "OpenShimCategory_Back", kShimBackRect, "Back",
+                                    Shell::kSkinTopCorner, 1.0f, kShimBackTextOffset,
+                                    &OnShimCategoryBack) != nullptr;
             Shell::AddLabel(panel, panel, "OpenShimCategory_Title", kShimTitleRect, def.title,
                             Shell::kTitleLabelFlags);
 
@@ -4238,9 +4258,7 @@ namespace BZROpenShim
             }
             RefreshShimCategoryValues();
             Log(L"[SETTINGSUI] %hs screen built: %u rows\n", def.name, static_cast<unsigned>(ui.rowCount));
-            return Shell::AddButton(panel, nullptr, "OpenShimCategory_Back", kShimBackRect, "Back",
-                                    Shell::kSkinTopCorner, 1.0f, kShimBackTextOffset,
-                                    &OnShimCategoryBack) != nullptr;
+            return backReady;
         }
 
         template <size_t I>
@@ -4275,6 +4293,7 @@ namespace BZROpenShim
                                                  &OnShimCategoryClosed }))
                         return false;
                 }
+                MenuTheme::RegisterScreen();
                 return true;
             }();
             return registered;
@@ -6172,6 +6191,22 @@ namespace BZROpenShim
     // Thin public wrapper so features outside the settings page (the lobby
     // nickname entry) can persist a single key through the same lossless
     // writer, keeping comments, ordering and the .openshim.bak backup intact.
+    bool WriteShimUserConfigValues(const ShimConfigValue* values,size_t count)
+    {
+        if(!values||!count||count>32)return false;
+        const auto path=GetUserConfigPath();if(path.empty())return false;
+        InputBindingDocument document;document.loaded=true;document.lines=ReadTextFileLines(path);
+        for(size_t i=0;i<count;++i)
+        {
+            if(!values[i].section||!values[i].key||!values[i].value)return false;
+            UpdateIniDocumentValueLossless(document.lines,values[i].section,values[i].key,nullptr,0,values[i].value);
+        }
+        std::string error;
+        const bool ok=WriteInputBindingDocumentAtomic(path,document,error);
+        if(!ok)Log(L"[SETTINGSUI] Could not save settings group: %hs\n",error.c_str());
+        return ok;
+    }
+
     bool WriteShimUserConfigValue(const char* section, const char* key, const char* value)
     {
         if (!section || !key || !value)

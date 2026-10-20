@@ -168,7 +168,8 @@ namespace BZROpenShim::RenderProfiles
             }
 
             const std::string name = it->path().filename().string();
-            bool expected = false;
+            // Optional menu-only shader: its absence cannot disable Enhanced.
+            bool expected = it.depth()==0 && name=="openshim_menu_theme.program";
             for (size_t i = 0; it.depth() == 0 && i < RequiredEnhancedResourceCount(); ++i)
             {
                 if (name == kRequiredEnhancedResources[i])
