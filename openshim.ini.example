@@ -286,6 +286,15 @@ OgreMaterialCollisionGuard = 1
 ; Exposed on the OpenShim Settings page as "Editor Placement".
 EditorOverheadPlacementOrder = 1
 
+; World Builder source-folder saves. Saving a map in the editor writes it back
+; to the folder it was loaded from (BZN, and TRN/HG2/MAT when terrain changed)
+; instead of the root addon folder. A prompt shows the actual destination and
+; the files it may overwrite; Cancel is the default and cancels the whole save.
+; Workshop downloads are never written to. See Docs/BZN_SAVE_SOURCE.md.
+; Accepted: boolean. Default: ON since 2026-10-19 (an absent key is ON).
+; Restart required. Legacy kill switch: BZR_BZN_SAVE_SOURCE=0.
+EditorSaveToSourceFolder = 1
+
 ; Suppress the stale "under attack" growl that fires the instant you hop out.
 ;
 ; The cockpit radar warns about any friendly whose enemyShot timestamp is
@@ -1588,9 +1597,10 @@ ReliableSendBacklogFix = 1
 ; independent of ReliableSendBacklogFix. Accepted: decimal 50-10000; the stock
 ; value, malformed text or anything out of range leaves the timer untouched.
 ; A stock timer logs [SKIP] with payload=0 because no write is required.
-; Restart required after changing. Stock until qualified.
-ReliableFirstRetryMs = 1000
-ReliableRetryIntervalMs = 2500
+; Restart required after changing. Default 300 / 800 since 2026-10-19 (an absent
+; key uses it too); 1000 / 2500 restores stock.
+ReliableFirstRetryMs = 300
+ReliableRetryIntervalMs = 800
 
 ; BZRNet P2P early unreliable receive. Stock Redux accepts a packet only when
 ; its stamp is the next reliable stamp it expects, and unreliable updates carry
@@ -1619,11 +1629,12 @@ EarlyUnreliableAccept = 1
 ; stamped ahead is accepted and triggers the immediate resend it asks for.
 ; Each resend pass is still capped at 5000 bytes / peer count. Receiver-side
 ; only, same wire format, safe with stock peers. Logs [P2PRECV] totals.
-; Accepted: boolean. Default: OFF (3x lower reliable p95 on low-RTT lossy links,
-; small gain for about +40% resend bytes at WAN round trips). Restart required.
+; Accepted: boolean. Default: ON since 2026-10-19 (3x lower reliable p95 on
+; low-RTT lossy links; at WAN round trips a smaller gain for about +40% resend
+; bytes). Restart required.
 ; Kill switch: OPENSHIM_DISABLE_EARLY_NAK_ACCEPT (or BZR_ prefix).
 ; Site: GOG 2.2.301 0x0075DA88; a signature mismatch keeps stock.
-EarlyNakAccept = 0
+EarlyNakAccept = 1
 
 ; Repeat NAKs for the same missing message are ignored for this long, so one
 ; loss triggers one immediate resend instead of one per dropped follower

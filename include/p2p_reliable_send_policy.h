@@ -6,6 +6,9 @@ namespace BZROpenShim {
 namespace P2PReliable {
 constexpr uint32_t kFirstRetryStockMs = 1000;
 constexpr uint32_t kRetryIntervalStockMs = 2500;
+// Shipped defaults, used when the INI key is absent.
+constexpr uint32_t kFirstRetryDefaultMs = 300;
+constexpr uint32_t kRetryIntervalDefaultMs = 800;
 constexpr uint32_t kRetryMinMs = 50;
 constexpr uint32_t kRetryMaxMs = 10000;
 

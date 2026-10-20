@@ -83,22 +83,25 @@ namespace BZROpenShim
 
                 const char* key = nullptr;
                 uint32_t stockMs = 0;
+                uint32_t defaultMs = 0;
                 if (patch.name == "P2P Reliable First Retry")
                 {
                     key = "ReliableFirstRetryMs";
                     stockMs = P2PReliable::kFirstRetryStockMs;
+                    defaultMs = P2PReliable::kFirstRetryDefaultMs;
                 }
                 else if (patch.name == "P2P Reliable Retry Interval")
                 {
                     key = "ReliableRetryIntervalMs";
                     stockMs = P2PReliable::kRetryIntervalStockMs;
+                    defaultMs = P2PReliable::kRetryIntervalDefaultMs;
                 }
                 else continue;
 
+                uint32_t ms = defaultMs;
                 std::string text;
-                if (!TryGetUserConfigString("Network", key, text)) continue;
-                uint32_t ms = stockMs;
-                if (!P2PReliable::ParseRetryMs(text, ms))
+                if (TryGetUserConfigString("Network", key, text) &&
+                    !P2PReliable::ParseRetryMs(text, ms))
                 {
                     Log(L"[P2PSEND] Invalid %hs; decimal %u-%u ms required; stock %u ms kept\n",
                         key, P2PReliable::kRetryMinMs, P2PReliable::kRetryMaxMs, stockMs);
