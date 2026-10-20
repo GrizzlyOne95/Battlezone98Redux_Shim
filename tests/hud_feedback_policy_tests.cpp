@@ -168,5 +168,29 @@ int main()
         const auto big = MakeDrawPlan(worst, 500, 350, 8, 8, pane, true, 1, Relation::Enemy, 1, 4);
         Check(big.count <= 96, "worst-case tinted, kicked, four-target plan fits storage");
     }
+    {
+        // Stock reticle ghost pulse.
+        Check(GhostDurationMs(120) == 240 && GhostDurationMs(10) == 200 && GhostDurationMs(900) == 600,
+              "ripple duration is bounded and outlives the tick marker");
+        Pulse ghost; ghost.Start(1000);
+        Check(ghost.Progress(999, 240) < 0 && ghost.Progress(1240, 240) < 0, "idle outside the window");
+        Check(std::abs(ghost.Progress(1120, 240) - 0.5f) < 1e-4f, "progress is linear in time");
+        Check(MakeGhostPlan(-1, 0, 1, 0xFFFFFF, 100).count == 0, "idle pulse draws nothing");
+        Check(MakeGhostPlan(std::numeric_limits<float>::quiet_NaN(), 0, 1, 0xFFFFFF, 100).count == 0,
+              "non-finite progress draws nothing");
+        const auto early = MakeGhostPlan(0.1f, 1, 1, 0xFFFFFF, 100);
+        const auto late = MakeGhostPlan(0.8f, 0, 1, 0xFFFFFF, 100);
+        Check(early.count == 1 && late.count == 1, "one target makes one ring");
+        Check(late.rings[0].scale > early.rings[0].scale, "the ring travels outward");
+        Check((late.rings[0].argb >> 24) < (early.rings[0].argb >> 24), "the ring fades as it travels");
+        Check((early.rings[0].argb & 0xFFFFFFu) == 0xFFFFFFu, "rings keep the art's own colors under white");
+        Check(early.baseScale > 1.0f && late.baseScale == 1.0f, "the reticle pops on the hit then settles");
+        const auto many = MakeGhostPlan(0.5f, 0, 9, 0xFFFFFF, 100);
+        Check(many.count == 4 && many.rings[0].scale > many.rings[3].scale, "targets add trailing rings, capped at four");
+        Check(MakeGhostPlan(0.5f, 0, 4, 0xFFFFFF, 100).rings[0].scale > MakeGhostPlan(0.5f, 0, 1, 0xFFFFFF, 100).rings[0].scale,
+              "more targets reach farther");
+        Check((MakeGhostPlan(0.1f, 0, 1, 0xFFFFFF, 25).rings[0].argb >> 24) <
+              (MakeGhostPlan(0.1f, 0, 1, 0xFFFFFF, 100).rings[0].argb >> 24), "hit opacity scales the rings");
+    }
     return OpenShimTest::ExitCode();
 }
