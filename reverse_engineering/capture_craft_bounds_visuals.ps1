@@ -69,6 +69,7 @@ $originalMissionConfig = if (Test-Path -LiteralPath $missionConfig) {
 $ownedVariables = @(
     "OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING",
     "OPENSHIM_RESTORE_CRAFT_BOUNDS",
+    "OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS",
     "OPENSHIM_RESTORE_CRAFT_BOUNDS_SCALE",
     "OPENSHIM_PROFILE_OGRE_ANIMATION")
 $priorValues = @{}
@@ -116,8 +117,15 @@ spinSeconds = $($SpinSeconds.ToString("0.0###", $invariant))
         "stock" {
             [Environment]::SetEnvironmentVariable(
                 "OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING", "1", "Process")
+            # Restore is default ON since it shipped in [Fixes]; this env alias
+            # only wins while the deployed openshim.ini has no RestoreCraftBounds key.
+            [Environment]::SetEnvironmentVariable(
+                "OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS", "1", "Process")
         }
-        "private" { }
+        "private" {
+            [Environment]::SetEnvironmentVariable(
+                "OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS", "1", "Process")
+        }
         "restore" {
             [Environment]::SetEnvironmentVariable(
                 "OPENSHIM_RESTORE_CRAFT_BOUNDS", "1", "Process")

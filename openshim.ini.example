@@ -516,6 +516,20 @@ LuaSendLengthUnsigned = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE
 UnfocusedMouseRelease = 1
 
+; Give craft meshes their real bounding box back. Redux's first-person entity
+; builder marks the cockpit model never-culled, but for craft with no dedicated
+; cockpit mesh (tanks, scouts, bombers, minelayers...) that model is the craft's
+; own shared mesh, so every world instance gets an infinite Ogre box and is
+; drawn and shadowed by every camera wherever it is. This hands Ogre the mesh's
+; serialized box, inflated 2x about its centre, so Ogre's own frustum and
+; shadow-cascade tests work. *_c, *_fp and *_cockpit models keep their infinite
+; box, and a mesh with no usable serialized box is left alone. Renderer only:
+; the executable creates no Ogre scene query, so collision, targeting and AI
+; never see the box. See reverse_engineering/craft_bounds_architecture_20260822.md.
+; Accepted: boolean. Default: ON. Not gated in network games.
+; Env alias to force it off: OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS
+RestoreCraftBounds = 1
+
 ; Extend the script-facing CanBuild / IsBusy producer predicates to base
 ; producers, so mission Lua sees the same answer for a base producer that it
 ; already gets for the derived ones.

@@ -1102,14 +1102,13 @@ namespace BZROpenShim
              "OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING", "BZR_DISABLE_ENTITY_FRUSTUM_CULLING"},
             {&g_FrustumCullCensusEnabled, EnvSwitches::Kind::OptIn,
              "OPENSHIM_FRUSTUM_CULL_CENSUS", "BZR_FRUSTUM_CULL_CENSUS"},
-            // Second, independent repair experiment: restore finite Ogre
-            // bounds on the shared craft meshes instead of emulating the
-            // frustum test privately. Opt-in, and it stands the private cull
-            // down by default so the two mechanisms are never measured on
-            // top of each other. Set OPENSHIM_FRUSTUM_CULL_WITH_RESTORE=1 to
-            // run both deliberately.
-            {&g_RestoreCraftBoundsEnabled, EnvSwitches::Kind::OptIn,
-             "OPENSHIM_RESTORE_CRAFT_BOUNDS", "BZR_RESTORE_CRAFT_BOUNDS"},
+            // Restore finite Ogre bounds on the shared craft meshes instead of
+            // emulating the frustum test privately ([Fixes] RestoreCraftBounds,
+            // default ON). It stands the private cull down so the two
+            // mechanisms never run on top of each other; set
+            // OPENSHIM_FRUSTUM_CULL_WITH_RESTORE=1 to run both deliberately.
+            {&g_RestoreCraftBoundsEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS", "BZR_DISABLE_RESTORE_CRAFT_BOUNDS"},
             {&g_BoundsTraceEnabled, EnvSwitches::Kind::OptIn,
              "OPENSHIM_BOUNDS_TRACE", "BZR_BOUNDS_TRACE"},
         };
