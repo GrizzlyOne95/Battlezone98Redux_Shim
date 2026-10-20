@@ -399,6 +399,7 @@ namespace BZROpenShim
 
     bool SetRawMouseInputEnabledFromBridge(bool enabled)
     {
+        HookEngine::FrameThreadSitesScope frameSites;
         if (!RawMouseInputSignaturesMatch())
             return false;
 

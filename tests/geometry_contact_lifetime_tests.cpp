@@ -86,6 +86,8 @@ namespace HookEngine
 {
     CodePatchLock::CodePatchLock() {}
     CodePatchLock::~CodePatchLock() {}
+    FrameThreadSitesScope::FrameThreadSitesScope() : m_engaged(false) {}
+    FrameThreadSitesScope::~FrameThreadSitesScope() {}
     uint32_t ResolveNamedAddress(const char*) { return 0; }
 }
 namespace BZROpenShim

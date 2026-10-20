@@ -1659,6 +1659,7 @@ namespace BZROpenShim
 
         void InstallCareerStatsMpHookIfPossible()
         {
+            HookEngine::FrameThreadSitesScope frameSites;
             if (!CareerStatsAddressesBound()) return;
             if (g_CareerStatsMpHookInstalled)
                 return;
