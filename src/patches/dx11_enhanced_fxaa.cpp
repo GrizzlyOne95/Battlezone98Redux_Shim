@@ -5,6 +5,9 @@
 #include "dx11_enhanced_fxaa_resources.h"
 #include "engine_globals.h"
 #include "shim_log.h"
+#include "frame_bridge_producer.h"
+#include "frame_bridge_camera_observer.h"
+#include "frame_bridge_layer_policy.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -23,6 +26,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <stdexcept>
 
 namespace BZROpenShim
 {
@@ -38,6 +42,15 @@ namespace BZROpenShim
 
         std::atomic<bool> g_ShutdownRequested{ false };
         std::atomic<bool> g_FxaaEnabled{ false };
+        std::atomic<bool> g_FrameBridgeEnabled{ false };
+        std::atomic<bool> g_FrameBridgeDepthEnabled{ false };
+        std::atomic<bool> g_FrameBridgeSceneColorEnabled{ false };
+        std::atomic<bool> g_WorldEffectsReferenceEnabled{ false },g_ReferenceObserverReady{ false };
+        std::atomic<unsigned> g_WorldEffectsReferenceSkipped{ 0 };
+        Microsoft::WRL::ComPtr<IDXGISwapChain> g_FrameBridgeSceneSwapChain;
+        thread_local bool g_BridgeIdentityOverlayParameters = false;
+        using FnBridgeDrawIndexed = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, UINT, UINT, INT);
+        FnBridgeDrawIndexed g_RealBridgeDrawIndexed = nullptr;
         std::atomic<bool> g_PermanentFault{ false };
         std::atomic<bool> g_UnsupportedFormatLogged{ false };
         uintptr_t g_DiscoveryThread = 0;
@@ -45,6 +58,9 @@ namespace BZROpenShim
 
         std::mutex g_HookMutex;
         std::mutex g_RuntimeMutex;
+        std::mutex g_FrameBridgeMutex;
+        FrameBridge::Producer g_FrameBridge;
+        IDXGISwapChain* g_FrameBridgeOwner = nullptr; // identity only; scene probe owns a separate chain reference, never a buffer
 
         using FnD3D11CreateDevice = HRESULT(WINAPI*)(
             IDXGIAdapter*, D3D_DRIVER_TYPE, HMODULE, UINT,
@@ -62,6 +78,9 @@ namespace BZROpenShim
 
         using FnSwapChainPresent = HRESULT(STDMETHODCALLTYPE*)(
             IDXGISwapChain*, UINT, UINT);
+        using FnClearDepth = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, ID3D11DepthStencilView*, UINT, FLOAT, UINT8);
+        FnClearDepth g_RealBridgeClearDepth = nullptr;
+        std::atomic<unsigned> g_BridgeClearCalls{ 0 };
 
         using FnD3DCompile = HRESULT(WINAPI*)(
             LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO*, ID3DInclude*,
@@ -1155,6 +1174,188 @@ namespace BZROpenShim
             return true;
         }
 
+        void ObserveBridgeOverlayParameters(bool identity) { g_BridgeIdentityOverlayParameters = identity; }
+        void ObserveBridgeOverlay(ID3D11DeviceContext* context)
+        {
+            if (!g_FrameBridgeEnabled.load() || g_ShutdownRequested.load()) return;
+            try
+            {
+                std::lock_guard<std::mutex> lock(g_FrameBridgeMutex);
+                if (!g_FrameBridge.AwaitingOverlay() || !g_FrameBridgeSceneSwapChain) return;
+                FrameBridge::CameraSnapshot camera{};
+                if (!FrameBridge::ObserveViewportCamera(camera)) return;
+                Microsoft::WRL::ComPtr<ID3D11Texture2D> backbuffer;
+                if (FAILED(g_FrameBridgeSceneSwapChain->GetBuffer(0, IID_PPV_ARGS(&backbuffer)))) return;
+                g_FrameBridge.BeforeOverlay(context, backbuffer.Get(), camera);
+            }
+            catch (...) { LogShimA(LogLevel::Warn, kComponent, "[FrameBridge] overlay observation failed; frame remains unqualified"); }
+        }
+
+        bool SuppressReferenceEffect(ID3D11DeviceContext* context)
+        {
+            if(!g_WorldEffectsReferenceEnabled.load()||!g_ReferenceObserverReady.load()||g_BridgeIdentityOverlayParameters||!g_FrameBridgeEnabled.load()||g_ShutdownRequested.load()) return false;
+            try
+            {
+                std::lock_guard<std::mutex> lock(g_FrameBridgeMutex);
+                if(!g_FrameBridgeSceneSwapChain||!g_FrameBridge.Active()) return false;
+                void* expectedShader=nullptr; std::uint32_t width=0,height=0;
+                if(!FrameBridge::ObserveBoundEffectProgram(expectedShader,width,height)) return false;
+                DXGI_SWAP_CHAIN_DESC swap{}; if(FAILED(g_FrameBridgeSceneSwapChain->GetDesc(&swap))) return false;
+                Microsoft::WRL::ComPtr<ID3D11PixelShader> shader;
+                context->PSGetShader(&shader,nullptr,nullptr);
+                Microsoft::WRL::ComPtr<ID3D11DepthStencilState> depthState;
+                Microsoft::WRL::ComPtr<ID3D11BlendState> blendState;
+                UINT stencil=0,sampleMask=0; FLOAT factors[4]{};
+                context->OMGetDepthStencilState(&depthState,&stencil); context->OMGetBlendState(&blendState,factors,&sampleMask);
+                if(!depthState||!blendState||sampleMask!=0xFFFFFFFFu) return false;
+                D3D11_DEPTH_STENCIL_DESC depth{}; D3D11_BLEND_DESC blend{};
+                depthState->GetDesc(&depth); blendState->GetDesc(&blend);
+                UINT views=1; D3D11_VIEWPORT viewport{}; context->RSGetViewports(&views,&viewport);
+                Microsoft::WRL::ComPtr<ID3D11RenderTargetView> target;
+                Microsoft::WRL::ComPtr<ID3D11DepthStencilView> depthView;
+                Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+                Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+                context->OMGetRenderTargets(1,&target,&depthView);
+                if(!target||!depthView) return false; target->GetResource(&resource);
+                if(FAILED(resource.As(&texture))) return false;
+                D3D11_TEXTURE2D_DESC description{}; texture->GetDesc(&description);
+                Microsoft::WRL::ComPtr<ID3D11Resource> depthResource;
+                Microsoft::WRL::ComPtr<ID3D11Texture2D> depthTexture;
+                depthView->GetResource(&depthResource); if(FAILED(depthResource.As(&depthTexture))) return false;
+                D3D11_TEXTURE2D_DESC depthDescription{}; depthTexture->GetDesc(&depthDescription);
+                if(depthDescription.Width!=description.Width||depthDescription.Height!=description.Height||depthDescription.SampleDesc.Count!=description.SampleDesc.Count) return false;
+                FrameBridge::WorldEffectFacts facts{};
+                facts.requested=true; facts.qualifiedApis=true; facts.effectProgram=true;
+                facts.boundShaderMatches=shader.Get()==expectedShader; facts.identityOverlay=g_BridgeIdentityOverlayParameters;
+                facts.immediate=context->GetType()==D3D11_DEVICE_CONTEXT_IMMEDIATE;
+                facts.depthEnabled=depth.DepthEnable!=FALSE; facts.depthWrites=depth.DepthWriteMask!=D3D11_DEPTH_WRITE_MASK_ZERO;
+                const auto& rt=blend.RenderTarget[0]; facts.blendEnabled=rt.BlendEnable!=FALSE; facts.alphaToCoverage=blend.AlphaToCoverageEnable!=FALSE;
+                facts.sourceBlend=rt.SrcBlend; facts.destinationBlend=rt.DestBlend; facts.blendOperation=rt.BlendOp; facts.colorWriteMask=rt.RenderTargetWriteMask;
+                facts.viewportMatches=views==1&&viewport.TopLeftX==0&&viewport.TopLeftY==0&&viewport.Width==static_cast<float>(width)&&viewport.Height==static_cast<float>(height);
+                facts.targetMatches=width==swap.BufferDesc.Width&&height==swap.BufferDesc.Height&&description.Width==width&&description.Height==height&&description.Format==swap.BufferDesc.Format;
+                if(!FrameBridge::SuppressWorldEffectReference(facts))
+                {
+                    static unsigned declined=0;
+                    if(declined++<8) LogShimA(LogLevel::Info,kComponent,"[FrameBridge] reference effect declined shaderMatch=%u identity=%u depth=%u writes=%u blend=%u src=%u dst=%u op=%u mask=%u viewportMatch=%u targetMatch=%u dims=%ux%u swap=%ux%u target=%ux%u formats=%u/%u",facts.boundShaderMatches?1u:0u,facts.identityOverlay?1u:0u,facts.depthEnabled?1u:0u,facts.depthWrites?1u:0u,facts.blendEnabled?1u:0u,facts.sourceBlend,facts.destinationBlend,facts.blendOperation,facts.colorWriteMask,facts.viewportMatches?1u:0u,facts.targetMatches?1u:0u,width,height,swap.BufferDesc.Width,swap.BufferDesc.Height,description.Width,description.Height,static_cast<unsigned>(swap.BufferDesc.Format),static_cast<unsigned>(description.Format));
+                    return false;
+                }
+                const auto calls=g_WorldEffectsReferenceSkipped.fetch_add(1)+1;
+                if(calls<=3||calls%300==0) LogShimA(LogLevel::Info,kComponent,"[FrameBridge] world-effect reference skipped=%u program=Effect_fragment size=%ux%u; terrain/sky/identity HUD retained",calls,width,height);
+                return true;
+            }
+            catch(...) { return false; }
+        }
+
+        void STDMETHODCALLTYPE HookBridgeDrawIndexed(ID3D11DeviceContext* context, UINT count, UINT start, INT base)
+        {
+            if (g_BridgeIdentityOverlayParameters && g_FrameBridgeSceneColorEnabled.load()) ObserveBridgeOverlay(context);
+            if(SuppressReferenceEffect(context)) return;
+            if (g_RealBridgeDrawIndexed) g_RealBridgeDrawIndexed(context, count, start, base);
+        }
+
+        void STDMETHODCALLTYPE HookBridgeClearDepth(ID3D11DeviceContext* context, ID3D11DepthStencilView* view,
+            UINT flags, FLOAT depth, UINT8 stencil)
+        {
+            const unsigned call = g_BridgeClearCalls.fetch_add(1) + 1;
+            if (call <= 8)
+            {
+                Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+                Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+                D3D11_TEXTURE2D_DESC desc{};
+                if (view) { view->GetResource(&resource); resource.As(&texture); }
+                if (texture) texture->GetDesc(&desc);
+                LogShimA(LogLevel::Info, kComponent,
+                    "[FrameBridge] clear observed call=%u context=%p type=%u flags=%u depth=%g size=%ux%u format=%u samples=%u",
+                    call, context, static_cast<unsigned>(context->GetType()), flags, depth, desc.Width, desc.Height,
+                    static_cast<unsigned>(desc.Format), desc.SampleDesc.Count);
+            }
+            if (g_FrameBridgeEnabled.load() && g_FrameBridgeDepthEnabled.load() && !g_ShutdownRequested.load())
+            {
+                try
+                {
+                    std::lock_guard<std::mutex> lock(g_FrameBridgeMutex);
+                    Microsoft::WRL::ComPtr<ID3D11Texture2D> backbuffer;
+                    if (g_FrameBridgeSceneSwapChain && FAILED(g_FrameBridgeSceneSwapChain->GetBuffer(0, IID_PPV_ARGS(&backbuffer))))
+                        throw std::runtime_error("scene backbuffer unavailable");
+                    g_FrameBridge.BeforeDepthClear(context, view, flags, &FrameBridge::ObserveViewportCamera, backbuffer.Get());
+                }
+                catch (...)
+                {
+                    g_FrameBridgeEnabled.store(false);
+                    std::lock_guard<std::mutex> bridgeLock(g_FrameBridgeMutex);
+                    g_FrameBridge.Stop();
+                    g_FrameBridgeSceneSwapChain.Reset();
+                    LogShimA(LogLevel::Warn, kComponent, "[FrameBridge] pre-clear observation failed; capture disabled");
+                }
+            }
+            if (g_RealBridgeClearDepth) g_RealBridgeClearDepth(context, view, flags, depth, stencil);
+        }
+
+        void CaptureFrameBridge(IDXGISwapChain* swapChain)
+        {
+            if (!g_FrameBridgeEnabled.load(std::memory_order_acquire)) return;
+            std::lock_guard<std::mutex> lock(g_FrameBridgeMutex);
+            if (!g_FrameBridgeEnabled.load(std::memory_order_acquire) ||
+                g_ShutdownRequested.load(std::memory_order_acquire) ||
+                (g_FrameBridgeOwner && g_FrameBridgeOwner != swapChain)) return;
+            Microsoft::WRL::ComPtr<ID3D11Device> device;
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> color;
+            HRESULT hr = swapChain->GetDevice(IID_PPV_ARGS(&device));
+            if (SUCCEEDED(hr)) hr = swapChain->GetBuffer(0, IID_PPV_ARGS(&color));
+            if (SUCCEEDED(hr) && !g_FrameBridge.Active())
+            {
+                D3D11_TEXTURE2D_DESC desc{};
+                color->GetDesc(&desc);
+                hr = g_FrameBridge.Start(device.Get(), desc, g_FrameBridgeDepthEnabled.load(), g_FrameBridgeSceneColorEnabled.load());
+                if (SUCCEEDED(hr))
+                {
+                    g_FrameBridgeOwner = swapChain;
+                    if (g_FrameBridgeSceneColorEnabled.load()) g_FrameBridgeSceneSwapChain = swapChain;
+                    if (g_FrameBridgeSceneColorEnabled.load())
+                    {
+                        g_ReferenceObserverReady.store(FrameBridge::InstallIdentityOverlayObserver(&ObserveBridgeOverlayParameters));
+                        if(!g_ReferenceObserverReady.load()) LogShimA(LogLevel::Warn, kComponent, "[FrameBridge] identity overlay observer unavailable; before-overlay captures fail closed");
+                    }
+                    LogShimA(LogLevel::Info, kComponent,
+                        "[FrameBridge] transport ready pid=%lu size=%ux%u depthCandidate=%u; original Present retained; DLSS and ray tracing not integrated",
+                        GetCurrentProcessId(), desc.Width, desc.Height, g_FrameBridgeDepthEnabled.load() ? 1u : 0u);
+                }
+            }
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> depth;
+            FrameBridge::CameraSnapshot camera{};
+            if (SUCCEEDED(hr) && g_FrameBridgeDepthEnabled.load())
+            {
+                Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+                Microsoft::WRL::ComPtr<ID3D11DepthStencilView> dsv;
+                Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+                device->GetImmediateContext(&context);
+                // The game can replace its context vtable; reassert the
+                // documented ClearDepthStencilView slot at each Present.
+                PatchComVtableEntry(context.Get(), 53, &HookBridgeClearDepth, g_RealBridgeClearDepth,
+                    "ID3D11DeviceContext::ClearDepthStencilView (frame bridge)");
+                if (g_FrameBridgeSceneColorEnabled.load()) PatchComVtableEntry(context.Get(), 12, &HookBridgeDrawIndexed,
+                    g_RealBridgeDrawIndexed, "ID3D11DeviceContext::DrawIndexed (scene color)");
+                context->OMGetRenderTargets(0, nullptr, &dsv);
+                if (dsv) { dsv->GetResource(&resource); resource.As(&depth); }
+                FrameBridge::ObserveViewportCamera(camera);
+                // Present-bound depth is an observed candidate, not proof of a
+                // main-world pass. Size/format checks and per-frame validity
+                // are enforced by the producer; game resources stay untouched.
+            }
+            if (SUCCEEDED(hr)) hr = g_FrameBridge.Publish(color.Get(), depth.Get(), FrameBridge::DepthReduction::Minimum, &camera);
+            g_BridgeIdentityOverlayParameters = false;
+            if (FAILED(hr))
+            {
+                g_FrameBridgeEnabled.store(false, std::memory_order_release);
+                g_FrameBridge.Stop();
+                g_FrameBridgeSceneSwapChain.Reset();
+                LogShimA(LogLevel::Warn, kComponent,
+                    "[FrameBridge] capture disabled hr=0x%08lX (unsupported resource, resize or device loss); game presentation continues",
+                    static_cast<unsigned long>(hr));
+            }
+            // color/device references die before the real Present/ResizeBuffers.
+        }
+
         HRESULT STDMETHODCALLTYPE HookPresent(
             IDXGISwapChain* self,
             UINT syncInterval,
@@ -1164,7 +1365,6 @@ namespace BZROpenShim
                 return E_FAIL;
 
             if ((flags & DXGI_PRESENT_TEST) != 0 ||
-                !g_FxaaEnabled.load(std::memory_order_acquire) ||
                 g_ShutdownRequested.load(std::memory_order_acquire))
             {
                 return g_RealPresent(self, syncInterval, flags);
@@ -1177,19 +1377,33 @@ namespace BZROpenShim
                 // The scene pass draws inside the frame from the render queue
                 // listener; Present only readies the device resources for it
                 // and opens the next frame. Without the listener, the
-                // whole-frame pass runs here as before.
-                if (EnsureSceneListener())
+                // whole-frame pass runs here as before. The frame bridge can
+                // keep this hook installed with FXAA off.
+                if (g_FxaaEnabled.load(std::memory_order_acquire))
                 {
-                    g_ScenePassDoneThisFrame = false;
-                    if (PassAllowed())
+                    if (EnsureSceneListener())
                     {
-                        std::lock_guard<std::mutex> lock(g_RuntimeMutex);
-                        EnsureRuntimeFromSwapChain(self);
+                        g_ScenePassDoneThisFrame = false;
+                        if (PassAllowed())
+                        {
+                            std::lock_guard<std::mutex> lock(g_RuntimeMutex);
+                            EnsureRuntimeFromSwapChain(self);
+                        }
+                    }
+                    else
+                    {
+                        ApplyFxaa(self);
                     }
                 }
-                else
+                try { CaptureFrameBridge(self); }
+                catch (...)
                 {
-                    ApplyFxaa(self);
+                    g_FrameBridgeEnabled.store(false, std::memory_order_release);
+                    std::lock_guard<std::mutex> bridgeLock(g_FrameBridgeMutex);
+                    g_FrameBridge.Stop();
+                    g_FrameBridgeSceneSwapChain.Reset();
+                    LogShimA(LogLevel::Warn, kComponent,
+                        "[FrameBridge] unexpected capture exception; capture disabled and original presentation retained");
                 }
                 s_InPresent = false;
             }
@@ -1215,13 +1429,15 @@ namespace BZROpenShim
                     LogShimA(
                         LogLevel::Info,
                         kComponent,
-                        "[DX11 Enhanced FXAA] attached to swapchain=0x%p format=%s(%u) size=%ux%u buffers=%u; scene pass runs at the world/UI seam, whole-frame pass at Present only as fallback",
+                        "[DX11 presentation] attached to swapchain=0x%p format=%s(%u) size=%ux%u buffers=%u FXAA=%u FrameBridge=%u; FXAA scene pass runs at the world/UI seam, whole-frame pass at Present only as fallback",
                         swapChain,
                         DxgiFormatName(desc.BufferDesc.Format),
                         static_cast<unsigned>(desc.BufferDesc.Format),
                         desc.BufferDesc.Width,
                         desc.BufferDesc.Height,
-                        desc.BufferCount);
+                        desc.BufferCount,
+                        g_FxaaEnabled.load() ? 1u : 0u,
+                        g_FrameBridgeEnabled.load() ? 1u : 0u);
                 }
             }
         }
@@ -1397,7 +1613,8 @@ namespace BZROpenShim
             LogShimA(
                 LogLevel::Info,
                 kComponent,
-                "[DX11 Enhanced FXAA] experimental FXAA 3.11 requested; waiting for RenderSystem_Direct3D11.dll (DX9 is never hooked)");
+                "[DX11 presentation] requested FXAA=%u FrameBridge=%u; waiting for RenderSystem_Direct3D11.dll (DX9 is never hooked)",
+                g_FxaaEnabled.load() ? 1u : 0u, g_FrameBridgeEnabled.load() ? 1u : 0u);
 
             for (unsigned attempt = 0;
                  attempt < kDiscoveryAttempts &&
@@ -1410,7 +1627,7 @@ namespace BZROpenShim
                     LogShimA(
                         LogLevel::Info,
                         kComponent,
-                        "[DX11 Enhanced FXAA] Direct3D11 renderer found module=0x%p; enabling Enhanced-only presentation experiment",
+                        "[DX11 presentation] Direct3D11 renderer found module=0x%p; installing requested presentation experiments",
                         renderer);
                     PatchRendererImports(renderer);
                     return 0;
@@ -1429,12 +1646,39 @@ namespace BZROpenShim
         }
     }
 
+    void ReassertFrameBridgeDepthHook(ID3D11DeviceContext* context)
+    {
+        if (context && g_FrameBridgeEnabled.load() && g_FrameBridgeDepthEnabled.load() && !g_ShutdownRequested.load())
+        {
+            PatchComVtableEntry(context, 53, &HookBridgeClearDepth, g_RealBridgeClearDepth,
+                "ID3D11DeviceContext::ClearDepthStencilView (frame bridge after OM bind)");
+            if (g_FrameBridgeSceneColorEnabled.load()) PatchComVtableEntry(context, 12, &HookBridgeDrawIndexed,
+                g_RealBridgeDrawIndexed, "ID3D11DeviceContext::DrawIndexed (scene color after OM bind)");
+        }
+    }
+
     void InitializeDx11EnhancedFxaa()
     {
-        if (!FxaaRequested() || g_DiscoveryThread)
+        const bool fxaa = FxaaRequested();
+        char bridgeValue[8]{};
+        const DWORD bridgeLength = GetEnvironmentVariableA("OPENSHIM_FRAME_BRIDGE", bridgeValue, sizeof(bridgeValue));
+        const bool bridge = bridgeLength == 1 && bridgeValue[0] == '1';
+        char depthValue[8]{};
+        const DWORD depthLength = GetEnvironmentVariableA("OPENSHIM_FRAME_BRIDGE_DEPTH", depthValue, sizeof(depthValue));
+        g_FrameBridgeDepthEnabled.store(bridge && depthLength == 1 && depthValue[0] == '1');
+        char sceneValue[8]{};
+        const DWORD sceneLength = GetEnvironmentVariableA("OPENSHIM_FRAME_BRIDGE_SCENE_COLOR", sceneValue, sizeof(sceneValue));
+        g_FrameBridgeSceneColorEnabled.store(g_FrameBridgeDepthEnabled.load() && sceneLength == 1 && sceneValue[0] == '1');
+        char referenceValue[8]{};
+        const DWORD referenceLength=GetEnvironmentVariableA("OPENSHIM_FRAME_BRIDGE_WORLD_EFFECTS_REFERENCE",referenceValue,sizeof(referenceValue));
+        g_WorldEffectsReferenceEnabled.store(g_FrameBridgeSceneColorEnabled.load()&&referenceLength==1&&referenceValue[0]=='1');
+        g_WorldEffectsReferenceSkipped.store(0);
+        if(g_WorldEffectsReferenceEnabled.load()) LogShimA(LogLevel::Warn,kComponent,"[FrameBridge] world-effects reference requested: verified non-depth-writing Effect_fragment draws may be omitted; diagnostic only, opacity mask unavailable");
+        if ((!fxaa && !bridge) || g_DiscoveryThread)
             return;
 
-        g_FxaaEnabled.store(true, std::memory_order_release);
+        g_FxaaEnabled.store(fxaa, std::memory_order_release);
+        g_FrameBridgeEnabled.store(bridge, std::memory_order_release);
         g_PermanentFault.store(false, std::memory_order_release);
         g_ShutdownRequested.store(false, std::memory_order_release);
         g_DiscoveryThread = _beginthreadex(
@@ -1448,6 +1692,7 @@ namespace BZROpenShim
         if (!g_DiscoveryThread)
         {
             g_FxaaEnabled.store(false, std::memory_order_release);
+            g_FrameBridgeEnabled.store(false, std::memory_order_release);
             LogShimA(
                 LogLevel::Warn,
                 kComponent,
@@ -1459,7 +1704,15 @@ namespace BZROpenShim
     void ShutdownDx11EnhancedFxaa()
     {
         g_FxaaEnabled.store(false, std::memory_order_release);
+        g_FrameBridgeEnabled.store(false, std::memory_order_release);
         g_ShutdownRequested.store(true, std::memory_order_release);
+
+        {
+            std::lock_guard<std::mutex> bridgeLock(g_FrameBridgeMutex);
+            g_FrameBridge.Stop();
+            g_FrameBridgeSceneSwapChain.Reset();
+            g_FrameBridgeOwner = nullptr;
+        }
 
         if (g_DiscoveryThread)
         {

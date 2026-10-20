@@ -1,10 +1,35 @@
-// Zero-displacement submission experiment. Consumes the ordinary terrain VS
+// Native terrain subdivision experiment. Consumes the ordinary terrain VS
 // outputs; COLOR0 is already swizzled, and UV/height decoding stays in that VS.
 #ifndef OPENSHIM_TESS_FACTOR
 #define OPENSHIM_TESS_FACTOR 1
 #endif
 #ifndef OPENSHIM_RELIEF_AMPLITUDE
 #define OPENSHIM_RELIEF_AMPLITUDE 0
+#endif
+#ifndef OPENSHIM_TESS_TARGET_PIXELS
+#define OPENSHIM_TESS_TARGET_PIXELS 12
+#endif
+#if defined(OPENSHIM_HEIGHT_TEST) && (!defined(OPENSHIM_RELIEF_TEST) || defined(VERTEX_LIGHTING))
+#error Texture height needs the qualified per-pixel relief interface
+#endif
+
+#if defined(OPENSHIM_TESS_ADAPTIVE)
+// Ogre ACT_VIEWPORT_SIZE supplies width/height and their reciprocals per pass.
+float4 tessViewport;
+// Only shared endpoints and viewport affect an edge. Material UVs, normals
+// and the triangle's third vertex must not change its subdivision request.
+float TerrainAdaptiveEdge(float4 a, float4 b, float2 viewport)
+{
+    if (!all(isfinite(a)) || !all(isfinite(b)) || !all(isfinite(viewport)) ||
+        any(viewport <= 0.0) || any(viewport > 16384.0) || min(a.w,b.w) <= 0.0001)
+        return OPENSHIM_TESS_FACTOR;
+    float2 pixels = (a.xy / a.w - b.xy / b.w) * viewport * 0.5;
+    float extent = length(pixels);
+    if (!isfinite(extent)) return OPENSHIM_TESS_FACTOR;
+    // Fractional-even retains at least two segments and moves new samples
+    // continuously between 2 and the configured cap. Never cull invalid edges.
+    return clamp(extent / OPENSHIM_TESS_TARGET_PIXELS, 2.0, OPENSHIM_TESS_FACTOR);
+}
 #endif
 
 #if defined(OPENSHIM_RELIEF_TEST)
@@ -59,6 +84,56 @@ float2 TerrainReliefObjectXZ(float3 viewPosition, float4x4 inverseWorldView)
 {
     return mul(inverseWorldView, float4(viewPosition, 1.0)).xz;
 }
+
+#if defined(OPENSHIM_HEIGHT_TEST)
+// Experimental GPU-qualified path; the native material installer does not
+// enable this define until submission/resource ownership is qualified.
+// An explicit signed R32_FLOAT height atlas stores world meters. Mip zero
+// with manual bilinear Load needs no sampler or implicit DS derivatives.
+Texture2D<float> terrainHeightAtlas : register(t127);
+
+float3 TerrainHeightSample(float2 uv)
+{
+    uint width, height;
+    terrainHeightAtlas.GetDimensions(width, height);
+    if (width < 2 || height < 2 || !all(isfinite(uv))) return 0.0;
+    float2 size = float2(width, height);
+    float2 pixel = clamp(uv * size - 0.5, 0.0, size - 1.0);
+    int2 lo = int2(floor(pixel));
+    int2 hi = min(lo + 1, int2(width - 1, height - 1));
+    float2 f = frac(pixel);
+    float a = terrainHeightAtlas.Load(int3(lo,0));
+    float b = terrainHeightAtlas.Load(int3(hi.x,lo.y,0));
+    float c = terrainHeightAtlas.Load(int3(lo.x,hi.y,0));
+    float d = terrainHeightAtlas.Load(int3(hi,0));
+    if (!all(isfinite(float4(a,b,c,d))) ||
+        any(abs(float4(a,b,c,d)) > OPENSHIM_RELIEF_AMPLITUDE)) return 0.0;
+    float value = lerp(lerp(a,b,f.x),lerp(c,d,f.x),f.y);
+    float2 gradient = float2(lerp(b-a,d-c,f.y),lerp(c-a,d-b,f.x)) * size;
+    if (uv.x * size.x - 0.5 < 0.0 || uv.x * size.x - 0.5 > size.x - 1.0) gradient.x = 0;
+    if (uv.y * size.y - 0.5 < 0.0 || uv.y * size.y - 0.5 > size.y - 1.0) gradient.y = 0;
+    return float3(value, gradient);
+}
+
+float3 TerrainHeightRelief(float2 uv, float2 xz0, float2 xz1, float2 xz2,
+                          float2 uv0, float2 uv1, float2 uv2)
+{
+    float2 e1 = xz1 - xz0, e2 = xz2 - xz0;
+    float determinant = e1.x * e2.y - e1.y * e2.x;
+    float areaScale = max(dot(e1,e1),dot(e2,e2));
+    if (!all(isfinite(float4(e1,e2))) || !all(isfinite(float4(uv1-uv0,uv2-uv0))) ||
+        !isfinite(determinant) || areaScale <= 0.0 || abs(determinant) <= areaScale * 1e-6) return 0.0;
+    float2 t1 = uv1 - uv0, t2 = uv2 - uv0;
+    float uvDeterminant = t1.x * t2.y - t1.y * t2.x;
+    float uvScale = max(dot(t1,t1),dot(t2,t2));
+    if (!isfinite(uvDeterminant) || uvScale <= 0.0 || abs(uvDeterminant) <= uvScale * 1e-6) return 0.0;
+    float2 uvDx = (t1 * e2.y - t2 * e1.y) / determinant;
+    float2 uvDz = (t2 * e1.x - t1 * e2.x) / determinant;
+    float3 sample = TerrainHeightSample(uv);
+    float3 result = float3(sample.x, dot(sample.yz,uvDx), dot(sample.yz,uvDz));
+    return all(isfinite(result)) ? result : 0.0;
+}
+#endif
 #endif
 
 struct TerrainTessVertex
@@ -102,13 +177,24 @@ struct TerrainTessFactors
 TerrainTessFactors TerrainPatchConstants(InputPatch<TerrainTessVertex, 3> p)
 {
     TerrainTessFactors f;
+#if defined(OPENSHIM_TESS_ADAPTIVE)
+    f.edge[0] = TerrainAdaptiveEdge(p[1].position,p[2].position,tessViewport.xy);
+    f.edge[1] = TerrainAdaptiveEdge(p[2].position,p[0].position,tessViewport.xy);
+    f.edge[2] = TerrainAdaptiveEdge(p[0].position,p[1].position,tessViewport.xy);
+    f.inside = max(f.edge[0],max(f.edge[1],f.edge[2]));
+#else
     f.edge[0] = f.edge[1] = f.edge[2] = OPENSHIM_TESS_FACTOR;
     f.inside = OPENSHIM_TESS_FACTOR;
+#endif
     return f;
 }
 
 [domain("tri")]
+#if defined(OPENSHIM_TESS_ADAPTIVE)
+[partitioning("fractional_even")]
+#else
 [partitioning("integer")]
+#endif
 [outputtopology("triangle_cw")]
 [outputcontrolpoints(3)]
 [patchconstantfunc("TerrainPatchConstants")]
@@ -154,7 +240,15 @@ TerrainTessVertex TerrainDomain(TerrainTessFactors f, float3 b : SV_DomainLocati
 // Recover native object position with inverse WORLD-view, which remains
 // valid when Ogre subtracts the camera origin from world/view transforms.
 #if defined(OPENSHIM_RELIEF_TEST)
+#if defined(OPENSHIM_HEIGHT_TEST)
+    float3 relief = TerrainHeightRelief(o.uv,
+        TerrainReliefObjectXZ(p[0].viewPosition, reliefInverseWorldView),
+        TerrainReliefObjectXZ(p[1].viewPosition, reliefInverseWorldView),
+        TerrainReliefObjectXZ(p[2].viewPosition, reliefInverseWorldView),
+        p[0].uv, p[1].uv, p[2].uv);
+#else
     float3 relief = TerrainMicroRelief(TerrainReliefObjectXZ(o.viewPosition, reliefInverseWorldView));
+#endif
     float3 worldNormal = normalize(mul(reliefInverseView, float4(o.normal, 0.0)).xyz);
     // The differential of (x,y,z) -> (x,y+h(x,z),z) transforms the normal
     // by inverse transpose; this preserves native slopes and adds relief.

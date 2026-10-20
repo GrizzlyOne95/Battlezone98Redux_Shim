@@ -96,7 +96,7 @@ namespace BZROpenShim
     uintptr_t g_GameObjectGetHandleAddr = 1;
     void LogShimA(LogLevel, const char*, const char*, ...) {}
     bool TryGetUserConfigBool(const char*, const char*, bool& out) { out = requested; return requested; }
-    bool InstallInlineDetour32(InlineDetour32&, uintptr_t, void*, size_t, const uint8_t*, size_t) { return false; }
+    bool InstallInlineDetour32(InlineDetour32&, uintptr_t, void*, size_t, const uint8_t*, size_t, void* volatile*) { return false; }
     void* __cdecl GameObjectFromHandleGog(int handle)
     {
         auto it = live.find(handle);

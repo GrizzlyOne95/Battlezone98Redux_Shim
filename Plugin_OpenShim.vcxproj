@@ -242,6 +242,9 @@
     <ClCompile Include="src\patches\d3d11_device_loss_recovery.cpp" />
     <ClCompile Include="src\patches\dxgi_flip_model.cpp" />
     <ClCompile Include="src\patches\dx11_enhanced_fxaa.cpp" />
+    <ClCompile Include="src\engine\frame_bridge_producer.cpp" />
+    <ClCompile Include="src\engine\frame_bridge_depth.cpp" />
+    <ClCompile Include="src\patches\frame_bridge_camera_observer.cpp" />
     <ClCompile Include="src\patches\dx11_scene_depth.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
     <ClCompile Include="src\patches\fog_wake_feature.cpp" />
@@ -382,6 +385,11 @@
     <ClInclude Include="include\dx11_scene_depth.h" />
     <ClInclude Include="include\scene_depth_facts.h" />
     <ClInclude Include="include\dx11_enhanced_fxaa.h" />
+    <ClInclude Include="include\frame_bridge_protocol.h" />
+    <ClInclude Include="include\frame_bridge_producer.h" />
+    <ClInclude Include="include\frame_bridge_depth.h" />
+    <ClInclude Include="include\frame_bridge_camera.h" />
+    <ClInclude Include="include\frame_bridge_camera_observer.h" />
     <ClInclude Include="include\dx11_enhanced_fxaa_resources.h" />
     <ClInclude Include="include\ogre_animation_profiler.h" />
     <ClInclude Include="include\pilot_fp_animation_trace.h" />

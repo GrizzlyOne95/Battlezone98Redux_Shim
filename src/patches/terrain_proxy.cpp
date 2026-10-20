@@ -19,6 +19,9 @@
 #include <d3d11.h>
 #include "terrain_hd_texture_copy.h"
 #include "terrain_paint.h"
+#include "frame_bridge_native_geometry.h"
+#include "frame_bridge_native_mesh.h"
+#include "frame_bridge_native_lease.h"
 
 #include <algorithm>
 #include <array>
@@ -229,6 +232,13 @@ namespace BZROpenShim
             bool proxyEnabled = false;
             bool proxyVisible = true;
             bool tessellationTest = false;
+            bool tessellationAdaptive = false;
+            std::string surfaceManifest;
+            std::string geometryExport;
+            bool geometryLive=false;
+            bool geometryEntities=false;
+            bool geometryBuildings=false;
+            float tessellationTargetPixels = 12.0f;
             bool tessellationWireframe = false;
             int tessellationFactor = 2;
             bool microReliefTest = false;
@@ -855,6 +865,11 @@ namespace BZROpenShim
                 config.hdEnabled = true;
             ReadEnvString("OPENSHIM_TERRAIN_HD_MANIFEST", config.hdManifest);
             ReadEnvString("OPENSHIM_TERRAIN_HD_EXPORT", config.hdExportPath);
+            ReadEnvString("OPENSHIM_TERRAIN_SURFACE_MANIFEST", config.surfaceManifest);
+            ReadEnvString("OPENSHIM_TERRAIN_GEOMETRY_EXPORT", config.geometryExport);
+            config.geometryLive=IsEnvEnabled("OPENSHIM_TERRAIN_GEOMETRY_LIVE")&&!config.geometryExport.empty();
+            config.geometryEntities=IsEnvEnabled("OPENSHIM_TERRAIN_GEOMETRY_ENTITIES")&&!config.geometryExport.empty();
+            config.geometryBuildings=IsEnvEnabled("OPENSHIM_TERRAIN_GEOMETRY_BUILDINGS")&&config.geometryEntities;
             int debugOverride = 0;
             if (ReadEnvInt("OPENSHIM_TERRAIN_SEMANTIC_DEBUG", debugOverride))
                 config.semanticDebugMode = debugOverride;
@@ -899,6 +914,11 @@ namespace BZROpenShim
                 config.semanticFrameCaptureMinCoverage > 1.0f)
                 config.semanticFrameCaptureMinCoverage = 0.005f;
             config.tessellationTest = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_TEST");
+            config.tessellationAdaptive = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE");
+            float targetPixels = 12.0f;
+            if (ReadEnvFloat("OPENSHIM_TERRAIN_TESSELLATION_TARGET_PIXELS", targetPixels) &&
+                std::isfinite(targetPixels) && targetPixels >= 4.0f && targetPixels <= 64.0f)
+                config.tessellationTargetPixels = targetPixels;
             config.tessellationWireframe = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_WIREFRAME");
             config.microReliefTest = IsEnvEnabled("OPENSHIM_TERRAIN_MICRO_RELIEF_TEST");
             float reliefAmplitude = 0.25f;
@@ -914,6 +934,12 @@ namespace BZROpenShim
             if (ReadEnvInt("OPENSHIM_TERRAIN_TESSELLATION_FACTOR", factor) &&
                 (factor == 1 || factor == 2 || factor == 4))
                 config.tessellationFactor = factor;
+            if (config.tessellationAdaptive && config.tessellationFactor != 4)
+            {
+                LogShimA(LogLevel::Warn, "terrain-tess", "[TERRAIN-TESS] adaptive request declined: factor-4 cap required; fixed subdivision retained");
+                config.tessellationAdaptive = false;
+            }
+            config.tessellationTest = config.tessellationTest || config.tessellationAdaptive;
             if (config.tessellationTest)
             {
                 // Native HD tiles can share the tessellation stages. Disable only
@@ -923,7 +949,7 @@ namespace BZROpenShim
                 config.semanticFrameCaptures = 0;
                 config.followCamera = true;
             }
-            if (config.hdEnabled || !config.hdExportPath.empty())
+            if (config.hdEnabled || !config.hdExportPath.empty() || !config.surfaceManifest.empty() || !config.geometryExport.empty())
             {
                 config.proxyEnabled = config.semanticRenderer = false;
                 config.followCamera = true;
@@ -3331,6 +3357,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         void RefreshTerrainMicroReliefBounds(void* zone);
         void RestoreTerrainMicroReliefBounds();
         void RestoreNativeTerrainHd();
+        void RestoreNativeTerrainSurface();
         void ResetNativeTerrainHd();
         #include "terrain_tessellation_test.inl"
 
@@ -3862,6 +3889,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             return true;
         }
 
+        void ResetNativeGeometryExport();
+        void InvalidateNativeGeometry(const char* reason);
         void ResetSelectedState()
         {
             g_proxy = {};
@@ -3869,6 +3898,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             g_nextZoneOrdinal = 0;
             g_teardownDepth = 0;
             g_teardownIncludesClear = false;
+            ResetNativeGeometryExport();
         }
 
         // Is the proxy Entity still registered with the SceneManager?
@@ -3998,6 +4028,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 DestroyProxySceneObjectsByName(reasonName, destroyEntity, destroyNode);
 
             RestoreNativeTerrainTessellationTest();
+            RestoreNativeTerrainSurface();
             RestoreNativeTerrainHd();
             ResetNativeTerrainHd();
             RemoveSemanticResources(reasonName);
@@ -4639,7 +4670,10 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         #include "terrain_microrelief_bounds.inl"
         #include "terrain_paint_capture.inl"
         #include "terrain_native_hd.inl"
+        #include "terrain_surface_normals.inl"
         #include "terrain_atlas_export.inl"
+        #include "terrain_geometry_entities.inl"
+        #include "terrain_geometry_export.inl"
 
         bool GetActiveCameraPosition(void*& camera, Vector3& position)
         {
@@ -4973,10 +5007,11 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         static_cast<double>(best.cameraDistance),
                         g_proxy.sourceMeshName.c_str());
                     if (!g_config.hdExportPath.empty()) ExportNativeTerrainAtlas();
+                    if (!g_config.surfaceManifest.empty()) InstallNativeTerrainSurface();
                     if (g_config.hdEnabled) InstallNativeTerrainHd();
                     if (g_config.tessellationTest)
                         InstallNativeTerrainTessellationTest();
-                    else if (!g_config.hdEnabled && g_config.hdExportPath.empty())
+                    else if (!g_config.hdEnabled && g_config.hdExportPath.empty() && g_config.surfaceManifest.empty() && g_config.geometryExport.empty())
                         CreateProxy();
                     CaptureSemantics(true);
                     BuildAndValidateSemanticVertices(true);
@@ -5012,6 +5047,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             try
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
+                if(g_config.geometryLive&&g_proxy.selected&&g_proxy.zone==constructedZone)
+                    InvalidateNativeGeometry("selected-zone-constructed");
                 RefreshTerrainMicroReliefBounds(zone);
                 RefreshNativeTerrainHd(zone, false);
                 ObserveZone(zone);
@@ -5057,6 +5094,14 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             if (g_active.load(std::memory_order_acquire) && !g_shutdown.load())
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
+                if(g_config.geometryLive&&g_proxy.selected&&g_proxy.zone==zone)
+                    for(size_t i=0;i<16;++i) {
+                        uint8_t full=0,height=0,next=0;
+                        if(!SafeReadZoneByte(zone,kFullDirtyOffset+i,full)||!SafeReadZoneByte(zone,kHeightDirtyOffset+i,height)||
+                            !SafeReadZoneByte(zone,kHeightDirtyNextOffset+i,next)||full||height||next) {
+                            InvalidateNativeGeometry("zone-dirty-before-rebuild"); break;
+                        }
+                    }
                 if (g_config.hdEnabled)
                     for (size_t index = 0; index < 16; ++index)
                     {
@@ -5444,7 +5489,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
         if (!g_config.proxyEnabled && !g_config.semanticCapture &&
             !g_config.semanticValidateUv && !g_config.semanticRenderer &&
-            !g_config.tessellationTest && !g_config.hdEnabled && g_config.hdExportPath.empty())
+            !g_config.tessellationTest && !g_config.hdEnabled && g_config.hdExportPath.empty() && g_config.surfaceManifest.empty() && g_config.geometryExport.empty())
             return;
         g_shutdown.store(false);
         LogShimA(LogLevel::Info, "terrain-proxy",
@@ -5492,10 +5537,15 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
     {
         // Cheap early-out: this runs on every rendered world frame and must
         // cost nothing when the opt-in capture is off.
-        if (g_config.semanticFrameCaptures <= 0 || !g_active.load() ||
+        if ((g_config.semanticFrameCaptures <= 0 && g_config.surfaceManifest.empty() && g_config.geometryExport.empty()) || !g_active.load() ||
             g_shutdown.load())
             return;
         std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_config.geometryExport.empty() && g_proxy.selected && !g_proxy.tearingDown)
+            ExportNativeTerrainGeometry();
+        if (!g_config.surfaceManifest.empty() && !g_SurfaceAttemptFinished &&
+            g_proxy.sourceEntity && !g_proxy.tearingDown)
+            InstallNativeTerrainSurface();
         if (!g_proxy.proxyCreated || g_proxy.tearingDown)
             return;
         ++g_semanticRenderFrames;
@@ -5540,6 +5590,23 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
         ++g_teardownDepth;
         g_teardownIncludesClear = g_teardownIncludesClear || clearScene;
+    }
+
+    bool TerrainSurfaceNormalBound(ID3D11DeviceContext* context)
+    {
+        if(!context||context->GetType()!=D3D11_DEVICE_CONTEXT_IMMEDIATE||!g_active.load()||g_shutdown.load()) return false;
+        std::unique_lock<std::mutex> lock(g_mutex,std::try_to_lock);
+        if(!lock.owns_lock()||!g_SurfaceTexture.rep||!g_ogre.getD3D11Texture2D) return false;
+        ID3D11ShaderResourceView* view=nullptr; ID3D11Resource* resource=nullptr;
+        context->PSGetShaderResources(2,1,&view);
+        D3D11_SHADER_RESOURCE_VIEW_DESC description{};
+        if(view) view->GetDesc(&description);
+        if(view) view->GetResource(&resource);
+        const bool matches=resource&&resource==g_ogre.getD3D11Texture2D(g_SurfaceTexture.rep)&&
+            description.ViewDimension==D3D11_SRV_DIMENSION_TEXTURE2D&&
+            (description.Format==DXGI_FORMAT_R8G8B8A8_UNORM||description.Format==DXGI_FORMAT_B8G8R8A8_UNORM);
+        if(resource) resource->Release(); if(view) view->Release();
+        return matches;
     }
 
     void TerrainProxySceneTeardownComplete(void* sceneManager, bool clearScene)
