@@ -34,6 +34,7 @@
 #include "autosave.h"
 #include "dx11_colorspace_diagnostic.h"
 #include "d3d11_device_loss_recovery.h"
+#include "dxgi_flip_model.h"
 #include "dx11_enhanced_fxaa.h"
 #include "dx11_scene_depth.h"
 #include "terrain_proxy.h"
@@ -119,6 +120,9 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializeOgreAnimationProfiler());
     PATCH_STAGE(BZROpenShim::InitializeDx11ColorSpaceDiagnostic());
     PATCH_STAGE(BZROpenShim::InitializeD3D11DeviceLossRecovery());
+    // Opt-in; hooks the shared DXGI factory vtable before Ogre makes its
+    // render window, so it must arm here rather than wait for the renderer.
+    PATCH_STAGE(BZROpenShim::InitializeDxgiFlipModel());
     PATCH_STAGE(BZROpenShim::InitializeDx11EnhancedFxaa());
     // Phase A depth qualification: observation only, and off unless asked
     // for. Starts after the FXAA path so that when both are enabled the
