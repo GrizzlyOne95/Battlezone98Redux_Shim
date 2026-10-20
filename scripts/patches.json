@@ -320,6 +320,96 @@
       "identity": "BlockCells(GameObject*, bool add) at 0x00468A70 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), cdecl. Its callers are ProcessBuildings 0x00469C70 (call 0x00469D77, the map PostLoad pass reached from AiUtilFeature::PostLoad 0x0046B0CA), AiUtilFeature::AddObject 0x0046B100 (0x0046B18A, add=1) and AiUtilFeature::DeleteObject 0x0046B1A0 (0x0046B22A, add=0), whose class filters (class 2/10/5 or sig TURR, minus PROX/GEIZ/SFLD/SPWN) match BZ 1.5's, plus five Producer/ConstructionRig deploy calls (0x005AC047, 0x005AC0A8, 0x005AC95B, 0x005AD46D, 0x005AFF38); whole-image E8 scan 2026-10-05. Body: cmp [cellType 0x0260D178],0; class+0x1C == 5 takes the perimeter branch; otherwise get_obj_bounding_box 0x0062E650 and the matrix [obj+0xF4]+0x20 build the quad at 0x0260D158 (count 4 at 0x00917380) and BuildingCells 0x004698A0 runs UpdateCells 0x004690F0 with BuildingBlock 0x004693C0 or BuildingUnblock 0x004697C0. PathBlockFaces detours the entry (JMP5 over the 6-byte push ebp/mov ebp,esp/sub esp,64h prologue, relocated to a trampoline); the stock body always runs first. Single match in the GOG image (scan 2026-10-05)."
     },
     {
+      "name": "Deferred Modable Rebuild Main Store",
+      "pattern": "83 B8 8C 00 00 00 04 75 05 E9 ?? ?? ?? ?? 8B 4D B8 C7 81 8C 00 00 00 04 00 00 00 E8",
+      "offset": 17,
+      "expected_size": 10,
+      "fallback": "0x0076A07D",
+      "require_unique": true,
+      "identity": "Mode store `mov dword [ecx+8Ch],4` at 0x0076A07D in the main mount setter 0x0076A030 (buildMainResources) on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), after the stock same-mode guard (cmp [eax+8Ch],4); ECX is `this`. The next instruction, call 0x00434420, is the pre-rebuild helper the deferred flush reuses. The detour records the mode being replaced and replays the store. Single match (scan 2026-10-20)."
+    },
+    {
+      "name": "Deferred Modable Rebuild Main Gate",
+      "pattern": "68 ?? ?? ?? ?? 8D 4D D8 E8 ?? ?? ?? ?? C7 45 FC 02 00 00 00 8D 4D D8 51 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C7 45 FC FF FF FF FF 8D 4D D8 E8 ?? ?? ?? ?? 68 ?? ?? ?? ?? 8D 4D C0 E8 ?? ?? ?? ?? C7 45 FC 03 00 00 00 8D 55 C0 52 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C7 45 FC FF FF FF FF 8D 4D C0 E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 8B 4D F4 64 89 0D 00 00 00 00",
+      "offset": 0,
+      "expected_size": 5,
+      "fallback": "0x0076A16D",
+      "require_unique": true,
+      "identity": "`push \"Modable\"` (literal 0x00892AE8) at 0x0076A16D opening the clear+initialise block of the main mount setter 0x0076A030 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): call [0x0086990C] OgreMain ResourceGroupManager::clearResourceGroup at +0x20, call [0x00869910] initialiseResourceGroup at +0x55, skip target call 0x00434440 (post-rebuild reload) at +0x6A; SEH state equal at both ends. The detour verifies both IAT slots by import name and the literal at patch time. The flush reuses its string ctor (call at +0x08), getSingleton slot (+0x18) and string dtor (+0x30). The pattern carries the setter's epilogue to stay unique. Single match (scan 2026-10-20)."
+    },
+    {
+      "name": "Deferred Modable Rebuild IA Store",
+      "pattern": "83 B8 8C 00 00 00 01 75 05 E9 ?? ?? ?? ?? 8B 4D B8 C7 81 8C 00 00 00 01 00 00 00 68",
+      "offset": 17,
+      "expected_size": 10,
+      "fallback": "0x0076A47D",
+      "require_unique": true,
+      "identity": "Mode store `mov dword [ecx+8Ch],1` at 0x0076A47D in the Instant Action mount setter 0x0076A430 (buildIAResources) on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), after the stock same-mode guard (cmp [eax+8Ch],1); ECX is `this`. Called by screen factory 0x007C7AD0 case 0x1B and the re-apply 0x007681D0. The detour records the mode being replaced and replays the store. Single match (scan 2026-10-20)."
+    },
+    {
+      "name": "Deferred Modable Rebuild IA Gate",
+      "pattern": "68 ?? ?? ?? ?? 8D 4D D8 E8 ?? ?? ?? ?? C7 45 FC 02 00 00 00 8D 55 D8 52 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C7 45 FC FF FF FF FF 8D 4D D8 E8 ?? ?? ?? ?? 68 ?? ?? ?? ?? 8D 4D C0 E8 ?? ?? ?? ?? C7 45 FC 03 00 00 00 8D 45 C0 50 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C7 45 FC FF FF FF FF 8D 4D C0 E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 C4 04",
+      "offset": 0,
+      "expected_size": 5,
+      "fallback": "0x0076A564",
+      "require_unique": true,
+      "identity": "`push \"Modable\"` (literal 0x00892AE8) at 0x0076A564 opening the clear+initialise block of the Instant Action mount setter 0x0076A430 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): call [0x0086990C] OgreMain ResourceGroupManager::clearResourceGroup at +0x20, call [0x00869910] initialiseResourceGroup at +0x55, skip target call 0x00434440 (post-rebuild reload) at +0x6A; SEH state equal at both ends. The detour verifies both IAT slots by import name and the literal at patch time. The register choices (8D 55 D8 52 / 8D 45 C0 50) tell it apart from the MP setter's identical block. Single match (scan 2026-10-20)."
+    },
+    {
+      "name": "Deferred Modable Rebuild MP Store",
+      "pattern": "83 B8 8C 00 00 00 02 75 05 E9 ?? ?? ?? ?? 8B 4D B8 C7 81 8C 00 00 00 02 00 00 00",
+      "offset": 17,
+      "expected_size": 10,
+      "fallback": "0x0076A28D",
+      "require_unique": true,
+      "identity": "Mode store `mov dword [ecx+8Ch],2` at 0x0076A28D in the multiplayer mount setter 0x0076A240 (buildMPResources) on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), after the stock same-mode guard (cmp [eax+8Ch],2); ECX is `this`. Called by screen factory 0x007C7AD0 cases 0xE (lounge) and 0xF (game room) and the re-apply 0x007681D0; 0x4D into the setter. The detour records the mode being replaced and replays the store. Single match (scan 2026-10-20)."
+    },
+    {
+      "name": "Deferred Modable Rebuild MP Gate",
+      "pattern": "68 ?? ?? ?? ?? 8D 4D D8 E8 ?? ?? ?? ?? C7 45 FC 02 00 00 00 8D 45 D8 50 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C7 45 FC FF FF FF FF 8D 4D D8 E8 ?? ?? ?? ?? 68 ?? ?? ?? ?? 8D 4D C0 E8 ?? ?? ?? ?? C7 45 FC 03 00 00 00 8D 4D C0 51 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C7 45 FC FF FF FF FF 8D 4D C0 E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 C4 04",
+      "offset": 0,
+      "expected_size": 5,
+      "fallback": "0x0076A392",
+      "require_unique": true,
+      "identity": "`push \"Modable\"` (literal 0x00892AE8) at 0x0076A392 opening the clear+initialise block of the multiplayer mount setter 0x0076A240 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): call [0x0086990C] OgreMain ResourceGroupManager::clearResourceGroup at +0x20, call [0x00869910] initialiseResourceGroup at +0x55, skip target call 0x00434440 (post-rebuild reload) at +0x6A; SEH state equal at both ends. The detour verifies both IAT slots by import name and the literal at patch time. Single match (scan 2026-10-20)."
+    },
+    {
+      "name": "Deferred Modable Rebuild List Store",
+      "pattern": "83 B8 8C 00 00 00 03 75 05 E9 ?? ?? ?? ?? 8B 8D 40 FF FF FF C7 81 8C 00 00 00 03 00 00 00 E8",
+      "offset": 20,
+      "expected_size": 10,
+      "fallback": "0x0076AB79",
+      "require_unique": true,
+      "identity": "Mode store `mov dword [ecx+8Ch],3` at 0x0076AB79 in the Custom Campaigns list mount setter 0x0076AB20 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), after the stock same-mode guard (cmp [eax+8Ch],3). Its only caller is the shell screen factory 0x007C7AD0 case 0x20 (Custom Campaigns, vtable 0x0089D8D8). The setter unmounts (0x00667E40), mounts each addon campaign through the engine file system (0x006679C0, priority 10), then clears and initialises the Ogre Modable group. The detour records the mode being replaced and replays the store. Single match in the GOG image (scan 2026-10-20)."
+    },
+    {
+      "name": "Deferred Modable Rebuild List Gate",
+      "pattern": "68 ?? ?? ?? ?? 8D 4D A8 E8 ?? ?? ?? ?? C6 45 FC 07 8D 4D A8 51 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C6 45 FC 00 8D 4D A8 E8 ?? ?? ?? ?? 68 ?? ?? ?? ?? 8D 8D 78 FF FF FF E8 ?? ?? ?? ?? C6 45 FC 08 8D 95 78 FF FF FF 52 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C6 45 FC 00 8D 8D 78 FF FF FF E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? C7 45 FC FF FF FF FF 8D 4D 90 E8",
+      "offset": 0,
+      "expected_size": 5,
+      "fallback": "0x0076ADBF",
+      "require_unique": true,
+      "identity": "`push \"Modable\"` (literal 0x00892AE8) at 0x0076ADBF opening the clear+initialise block of the list mount setter 0x0076AB20 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): call [0x0086990C] OgreMain ResourceGroupManager::clearResourceGroup at +0x1D, call [0x00869910] initialiseResourceGroup at +0x52, skip target call 0x00434440 at +0x67; SEH state 0 at both ends. The detour verifies both IAT slots by import name and the literal at patch time. The pattern carries the setter's tail because without it the identical block of the campaign mount setter 0x0076B350 (0x0076B6E4) also matches. Single match (scan 2026-10-20)."
+    },
+    {
+      "name": "Deferred Modable Rebuild Mission Mount Call",
+      "pattern": "E8 ?? ?? ?? ?? 83 3D ?? ?? ?? ?? 00 74 13 8B 45 0C 50 8B 4D 08 51 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 5D C3",
+      "offset": 29,
+      "expected_size": 4,
+      "fallback": "0x007647E0",
+      "require_unique": true,
+      "identity": "rel32 operand of `call 0x0076E6C0` (E8 at 0x007647DF) in the mission content mount 0x007647C0 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413). 0x007647C0 unloads Modable (0x006839B0), then, when the resource manager [0x00945478] exists, calls 0x0076E6C0 (thiscall, two args, RET 8), which picks the mission's mount setter (0x0076AE60, 0x0076A600, 0x0076A030 or 0x0076B350). Every mission start reaches 0x007647C0: sim startup 0x00616FC0, the loading UI 0x005D4980, auto-load 0x004FDAB0 and load slot 0x004FDDC0; the full .bzn load (0x004FC490 mode 0) comes after it. The bridge calls the original and then runs any Modable rebuild the shell deferred, before world, ODF or material loading. Single match (scan 2026-10-20)."
+    },
+    {
+      "name": "Deferred Modable Rebuild MP Room Mount Call",
+      "pattern": "6A 33 E8 ?? ?? ?? ?? 83 C4 0C E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ?? 68 D8 01 00 00 FF 15",
+      "offset": 18,
+      "expected_size": 4,
+      "fallback": "0x007C855C",
+      "require_unique": true,
+      "identity": "rel32 operand of `call 0x0076A240` (E8 at 0x007C855B) in screen factory 0x007C7AD0 case 0xF, the multiplayer game room (operator new 0x1D8, constructor 0x00796880), on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413); ECX is the resource manager from 0x00764790. The room hosts cUI_Multiplayer_VehicleSelect (0x007A9590), whose VehiclePreview window draws craft with their materials. The bridge calls the setter and then runs any Modable rebuild the lounge deferred. The `push 1D8h` operand tells it apart from the six other factory cases with the same call shape. Single match (scan 2026-10-20)."
+    },
+    {
       "name": "HoverCraft Turbo Sound Stop Guard",
       "pattern": "8B 85 20 FF FF FF 8B 88 F4 00 00 00 51 8B 95 1C FF FF FF 81 C2 B0 05 00 00 52 E8 ?? ?? ?? ?? 83 C4 08 89 85 E0 FE FF FF 8B 85 E0 FE FF FF 50 E8 ?? ?? ?? ?? 83 C4 04 8B 8D 20 FF FF FF C7 81 C4 02 00 00 00 00 00 00",
       "offset": 27,

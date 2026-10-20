@@ -246,6 +246,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # sets pathBlock = "faces"/"none". No stock or unflagged content changes.
     "General/PathBlockFaces",
 
+    # Defers only the Modable rebuild menu screens do for display; mission
+    # mounts and the MP game room still rebuild in full.
+    "General/FastMenuTransitions",
+
     # Qualified socket/netcode baseline.
     "Network/NetImprovements",
     # Sender-side native netcode fix: same wire format, so no mixed-client
