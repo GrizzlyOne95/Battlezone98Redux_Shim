@@ -1,5 +1,4 @@
-// Native HD diffuse tiles. Included after ClusterCandidate and semantic decoding.
-// Geometry, native heights, gameplay and stock non-diffuse maps are unchanged.
+// Native HD tile material arrays. Geometry, heights and gameplay stay native.
 struct NativeHdStream
 {
     void* mesh; VertexDataPrefix* data; void* buffer;
@@ -8,12 +7,15 @@ struct NativeHdPass
 {
     uint16_t technique, pass;
     std::string vertex, fragment;
+    std::array<bool, 3> channels{};
 };
 std::map<std::string, NativeHdStream> g_HdStreams;
 std::vector<NativeHdPass> g_HdPasses;
 std::string g_HdSourceMaterial, g_HdBackupMaterial;
 bool g_HdActive = false, g_HdDeclined = false;
 TerrainPaint::Config g_HdPaint;
+std::array<uint8_t, 256> g_HdSliceRemap = TerrainHdMaterial::IdentityRemap();
+std::array<bool, 3> g_HdChannelEnabled{};
 void ResetNativeTerrainHd() { g_HdDeclined = false; }
 
 using HdCreateBinding = void* (__thiscall*)(void*);
@@ -105,6 +107,13 @@ void RestoreNativeTerrainHd()
                 const auto* texture = g_hdGetTexture(g_ogre.getTextureUnitState(original, 0));
                 if (!texture || !texture->rep) throw std::runtime_error("HD original diffuse texture unavailable");
                 g_ogre.setTexture(g_ogre.getTextureUnitState(pass, 0), *texture);
+                for (unsigned c = 0; c < 3; ++c)
+                {
+                    if (!saved.channels[c]) continue;
+                    const auto* originalTexture = g_hdGetTexture(g_ogre.getTextureUnitState(original, uint16_t(c + 2)));
+                    if (!originalTexture || !originalTexture->rep) throw std::runtime_error("HD original material channel unavailable");
+                    g_ogre.setTexture(g_ogre.getTextureUnitState(pass, uint16_t(c + 2)), *originalTexture);
+                }
             }
             materialRestored = true;
             LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] shared native material restored passes=%zu", g_HdPasses.size());
@@ -157,6 +166,7 @@ void RestoreNativeTerrainHd()
     if (!g_HdStreams.empty()) LogShimA(LogLevel::Info, "terrain-hd",
         "[TERRAIN-HD] native streams restored meshes=%u tracked=%zu", restored, g_HdStreams.size());
     g_HdStreams.clear(); g_HdPasses.clear(); g_HdSourceMaterial.clear();
+    g_HdSliceRemap = TerrainHdMaterial::IdentityRemap(); g_HdChannelEnabled = {};
     if (!g_HdBackupMaterial.empty())
     {
         try
@@ -250,7 +260,8 @@ void UpdateNativeHdZone(void* zone, bool dirty)
                 const auto world = TerrainPaint::WorldXZ(x, z, translation.x, translation.z);
                 gpu.localU = world[0]; gpu.localV = world[1]; gpu.tileIndex = 0;
             }
-            else if (gpu.tileIndex >= g_proxy.hdSliceCount) throw std::runtime_error("native HD manifest slice missing");
+            else if (!TerrainHdMaterial::Remap(g_HdSliceRemap, gpu.tileIndex, g_proxy.hdSliceCount, gpu.tileIndex))
+                throw std::runtime_error("native HD manifest slice missing");
             upload.push_back(gpu);
         }
         const uint32_t size = uint32_t(upload.size() * sizeof(TerrainSemantic::GpuVertex));
@@ -305,6 +316,7 @@ bool InstallNativeTerrainHd()
     if (!g_config.hdEnabled || g_HdDeclined) return false;
     if (g_HdActive) return true;
     OgreSharedPtr source, backup, array, program;
+    std::array<OgreSharedPtr, 3> channelArrays{};
     try
     {
         ResolveNativeHdApi();
@@ -318,6 +330,10 @@ bool InstallNativeTerrainHd()
         g_proxy.materialName = *g_ogre.getMaterialName(sub);
         const auto* binding = FindTerrainHdBinding(g_proxy.materialName);
         if (!binding) throw std::runtime_error("native HD manifest binding missing");
+        g_HdSliceRemap = binding->sliceRemap;
+        for (unsigned c = 0; c < 3; ++c) g_HdChannelEnabled[c] = binding->channels[c].enabled;
+        if (!g_config.surfaceManifest.empty() && std::any_of(g_HdChannelEnabled.begin(), g_HdChannelEnabled.end(), [](bool value){return value;}))
+            throw std::runtime_error("HD material channels and surface-atlas override cannot own the same bindings");
         g_proxy.generation = ++g_resourceSerial;
         g_proxy.semanticMaterialGeneration = ++g_semanticMaterialSerial;
         g_proxy.semanticMaterialName = "OpenShim/TerrainNativeHD/Backup/" + std::to_string(g_proxy.semanticMaterialGeneration);
@@ -356,7 +372,17 @@ bool InstallNativeTerrainHd()
             !TerrainSemantic::BuildVertices(ProvideNativeHdCell, &selected, g_proxy.semanticVertices))
             throw std::runtime_error("native HD selected tile semantics unavailable");
         if (!BuildTerrainHdTextureArray(*binding, array)) throw std::runtime_error("native HD texture array declined");
+        for (unsigned c = 0; c < 3; ++c)
+        {
+            if (!g_HdChannelEnabled[c]) continue;
+            auto channel = *binding;
+            channel.fallback = binding->channels[c].fallback;
+            channel.tiles = binding->channels[c].tiles;
+            if (!BuildTerrainHdTextureArray(channel, channelArrays[c], int(c)))
+                throw std::runtime_error("native HD material array declined");
+        }
         std::map<std::string, std::string> cache;
+        std::map<std::string, std::array<bool, 3>> programChannels;
         const auto generate = [&](const OgreSharedPtr* input, bool pixel) -> std::string {
             if (!input || !input->rep) return {};
             const std::string* text = g_ogre.getProgramSource(input->rep);
@@ -372,6 +398,8 @@ bool InstallNativeTerrainHd()
             std::string generated; bool debug = false;
             if (!(pixel ? BuildSemanticFragmentSource(*text, false, true, generated) :
                 BuildSemanticProgramSource(*text, true, true, 0, key, generated, debug))) return {};
+            if (pixel && !TerrainHdMaterial::Specialize(generated, g_HdChannelEnabled))
+                throw std::runtime_error("HD material shader contract unavailable");
             if (binding->paint.enabled && !TerrainPaint::Specialize(generated, pixel, binding->paint))
                 throw std::runtime_error("native paint shader specialization declined");
             const std::string name = "OpenShim/TerrainNativeHD/" + std::to_string(g_proxy.semanticMaterialGeneration) +
@@ -386,6 +414,14 @@ bool InstallNativeTerrainHd()
                 throw std::runtime_error("native HD program parameters declined");
             g_ogre.loadResource(program.rep, true);
             if (!g_ogre.programSupported(program.rep)) throw std::runtime_error("native HD shader unsupported");
+            if (pixel)
+            {
+                constexpr const char* flags[] = {"NORMALMAP_ENABLED", "SPECULARMAP_ENABLED", "EMISSIVEMAP_ENABLED"};
+                std::array<bool, 3> channels{};
+                for (unsigned c = 0; c < 3; ++c)
+                    channels[c] = g_HdChannelEnabled[c] && TerrainHdMaterial::HasDefine(defines, flags[c]);
+                programChannels.emplace(name, channels);
+            }
             ReleaseCloneHandoff(program); cache.emplace(key, name); return name;
         };
         for (uint16_t t = 0; t < g_ogre.getNumTechniques(backup.rep); ++t)
@@ -405,9 +441,24 @@ bool InstallNativeTerrainHd()
             if (vs.empty()) continue;
             const std::string ps = generate(g_ogre.getFragmentProgram(pass), true);
             if (ps.empty() || !g_ogre.getNumTextureUnitStates(pass)) throw std::runtime_error("native HD matching fragment unavailable");
-            g_HdPasses.push_back({t,p,vs,ps});
+            const auto channels = programChannels.at(ps);
+            for (unsigned c = 0; c < 3; ++c)
+            {
+                if (!channels[c]) continue;
+                if (g_ogre.getNumTextureUnitStates(pass) <= c + 2)
+                    throw std::runtime_error("HD material pass has no guarded channel");
+                const auto* resource = g_hdGetTextureName(g_ogre.getTextureUnitState(pass, uint16_t(c + 2)));
+                if (!resource || *resource != binding->channels[c].sourceResource)
+                    throw std::runtime_error("HD material source identity mismatch: slot=" + std::to_string(c + 2) +
+                        " expected=" + binding->channels[c].sourceResource + " actual=" + (resource ? *resource : "<missing>"));
+            }
+            g_HdPasses.push_back({t,p,vs,ps,channels});
         }
         if (g_HdPasses.empty()) throw std::runtime_error("native HD compatible terrain passes unavailable");
+        for (unsigned c = 0; c < 3; ++c)
+            if (g_HdChannelEnabled[c] && std::none_of(g_HdPasses.begin(), g_HdPasses.end(),
+                [c](const NativeHdPass& pass){return pass.channels[c];}))
+                throw std::runtime_error("HD material channel has no compatible shader pass");
         for (const auto& zone : g_zoneOrdinals) UpdateNativeHdZone(zone.first, false);
         if (g_HdStreams.empty()) throw std::runtime_error("native HD compatible clusters unavailable");
         g_HdSourceMaterial = g_proxy.materialName; // rollback before first write
@@ -417,6 +468,8 @@ bool InstallNativeTerrainHd()
             void* original = g_ogre.getPass(g_ogre.getTechnique(backup.rep, saved.technique), saved.pass);
             CopyHdPrograms(pass, original, saved.vertex, saved.fragment);
             g_ogre.setTexture(g_ogre.getTextureUnitState(pass, 0), array);
+            for (unsigned c = 0; c < 3; ++c)
+                if (saved.channels[c]) g_ogre.setTexture(g_ogre.getTextureUnitState(pass, uint16_t(c + 2)), channelArrays[c]);
         }
         g_HdActive = true;
         LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] shared native material installed source=\"%s\" passes=%zu meshes=%zu size=%ux%u slices=%u packedUV=exact",
@@ -424,11 +477,13 @@ bool InstallNativeTerrainHd()
         if (g_HdPaint.enabled) LogShimA(LogLevel::Info, "terrain-hd",
             "[TERRAIN-PAINT] four-layer diffuse installed weights=slice4 coordinates=native-world-XZ alpha=opaque");
         ReleaseCloneHandoff(source); ReleaseCloneHandoff(backup); ReleaseCloneHandoff(array);
+        for (auto& channel : channelArrays) ReleaseCloneHandoff(channel);
         return true;
     }
     catch (const std::exception& error) { LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-HD] native tiles declined: %s; stock atlas retained", error.what()); }
     catch (...) { LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-HD] native tiles declined after Ogre exception"); }
     ReleaseCloneHandoff(program); ReleaseCloneHandoff(source); ReleaseCloneHandoff(backup); ReleaseCloneHandoff(array);
+    for (auto& channel : channelArrays) ReleaseCloneHandoff(channel);
     RestoreNativeTerrainHd(); RemoveSemanticResources("native-hd-declined");
     g_HdDeclined = true;
     return false;

@@ -81,6 +81,11 @@ int main()
 {
     try
     {
+        check(BZROpenShim::TerrainHd::OgreArrayMipRequest(8, DXGI_FORMAT_BC1_UNORM) == 10,
+            "released Ogre BC mip subtraction not compensated");
+        check(BZROpenShim::TerrainHd::OgreArrayMipRequest(0, DXGI_FORMAT_BC1_UNORM) == 0 &&
+            BZROpenShim::TerrainHd::OgreArrayMipRequest(10, DXGI_FORMAT_R8G8B8A8_UNORM) == 10,
+            "single-level or uncompressed mip request changed");
         ComPtr<ID3D11Device> device; ComPtr<ID3D11DeviceContext> context;
         ok(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
             D3D11_SDK_VERSION, &device, nullptr, &context));

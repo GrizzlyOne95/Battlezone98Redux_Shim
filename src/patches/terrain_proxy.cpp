@@ -18,6 +18,7 @@
 #include <bcrypt.h>
 #include <d3d11.h>
 #include "terrain_hd_texture_copy.h"
+#include "terrain_hd_material.h"
 #include "terrain_paint.h"
 #include "frame_bridge_native_geometry.h"
 #include "frame_bridge_native_mesh.h"
@@ -110,6 +111,7 @@ namespace BZROpenShim
         constexpr int kOgreTextureType2DArray = 5;
         constexpr int kOgreTextureUsageStaticWriteOnly = 5;
         constexpr int kOgreMipDefault = -1;
+        constexpr int kOgreMipUnlimited = 0x7fffffff;
         constexpr int kOgrePixelFormatUnknown = 0;
 
         const char* SemanticDebugModeName(int mode)
@@ -342,6 +344,12 @@ namespace BZROpenShim
             uint32_t hdMipmaps = 0;
         };
 
+        struct TerrainHdChannel
+        {
+            bool enabled = false;
+            std::string sourceResource, fallback;
+            std::unordered_map<uint32_t, std::string> tiles;
+        };
         struct TerrainHdMaterialBinding
         {
             uint32_t sliceCount = 0;
@@ -349,7 +357,13 @@ namespace BZROpenShim
             std::string diffuseResource;
             TerrainPaint::Config paint;
             std::unordered_map<uint32_t, std::string> tiles;
+            std::array<uint8_t, 256> sliceRemap = TerrainHdMaterial::IdentityRemap();
+            bool compact = false;
+            std::array<TerrainHdChannel, 3> channels;
         };
+        std::array<std::string, 3> g_hdChannelResources;
+        // Borrowed from the owned Ogre arrays; cleared before removing them.
+        std::array<ID3D11Texture2D*, 3> g_hdChannelNativeTextures{};
 
         struct TerrainHdManifest
         {
@@ -999,8 +1013,8 @@ namespace BZROpenShim
                 }
                 nlohmann::json root;
                 stream >> root;
-                if (root.value("schema", std::string()) !=
-                        "bzr-openshim-terrain-hd-v1" ||
+                const auto schema = root.value("schema", std::string());
+                if ((schema != "bzr-openshim-terrain-hd-v1" && schema != "bzr-openshim-terrain-hd-v2") ||
                     !root.contains("materials") ||
                     !root["materials"].is_object())
                 {
@@ -1047,6 +1061,43 @@ namespace BZROpenShim
                                 tileIt.value().get<std::string>());
                         }
                     }
+                    if (schema == "bzr-openshim-terrain-hd-v2")
+                    {
+                        if (g_config.proxyEnabled || binding.diffuseResource.empty())
+                            throw std::runtime_error("HD material packs require native terrain and diffuse identity");
+                        const auto& remap = materialIt.value().at("sliceRemap");
+                        if (!remap.is_array() || remap.size() != 256)
+                            throw std::runtime_error("sliceRemap requires all 256 logical tile IDs");
+                        for (unsigned i = 0; i < 256; ++i)
+                        {
+                            if (!remap[i].is_number_unsigned() || remap[i].get<unsigned>() >= binding.sliceCount)
+                                throw std::runtime_error("sliceRemap contains an invalid physical slice");
+                            binding.sliceRemap[i] = uint8_t(remap[i].get<unsigned>());
+                        }
+                        binding.compact = true;
+                        constexpr const char* names[] = {"normal", "specular", "emissive"};
+                        for (unsigned c = 0; c < 3; ++c)
+                        {
+                            if (!materialIt.value().contains(names[c])) continue;
+                            const auto& entry = materialIt.value().at(names[c]);
+                            auto& channel = binding.channels[c];
+                            channel.sourceResource = entry.at("sourceResource").get<std::string>();
+                            channel.fallback = entry.at("fallback").get<std::string>();
+                            if (channel.sourceResource.empty() || channel.fallback.empty() ||
+                                (c == 0 && entry.value("encoding", std::string()) != "rgb-xyz-linear"))
+                                throw std::runtime_error("HD material channel identity/normal encoding missing");
+                            const auto& tiles = entry.at("tiles");
+                            if (!tiles.is_object() || tiles.size() != binding.sliceCount)
+                                throw std::runtime_error("HD channel requires every physical slice");
+                            for (unsigned i = 0; i < binding.sliceCount; ++i)
+                            {
+                                const auto name = tiles.at(std::to_string(i)).get<std::string>();
+                                if (name.empty()) throw std::runtime_error("HD channel resource missing");
+                                channel.tiles.emplace(i, name);
+                            }
+                            channel.enabled = true;
+                        }
+                    }
                     if (materialIt.value().contains("paint"))
                     {
                         const auto& paint = materialIt.value()["paint"];
@@ -1054,6 +1105,7 @@ namespace BZROpenShim
                             paint.value("rowZero", std::string()) != "minZ" || binding.sliceCount != 5 ||
                             binding.diffuseResource.empty() || binding.tiles.size() != 5)
                             throw std::runtime_error("paint needs five explicit slices, atlas identity and minZ row order");
+                        if (binding.compact) throw std::runtime_error("compact material arrays do not support paint mode");
                         binding.paint.enabled = true;
                         binding.paint.fingerprint = paint.at("terrainFingerprint").get<std::string>();
                         binding.paint.bounds = paint.at("boundsMeters").get<std::array<float, 4>>();
@@ -2603,6 +2655,19 @@ namespace BZROpenShim
 
         void RemoveTerrainHdTextureResource(const char* reason)
         {
+            g_hdChannelNativeTextures.fill(nullptr);
+            for (auto& name : g_hdChannelResources)
+            {
+                if (name.empty()) continue;
+                try
+                {
+                    if (g_ogre.getTextureManager && g_ogre.removeResource)
+                        if (void* manager = g_ogre.getTextureManager()) g_ogre.removeResource(manager, name);
+                    LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] material channel released reason=%s name=%s", reason, name.c_str());
+                }
+                catch (...) { LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-HD] channel removal declined name=%s", name.c_str()); }
+                name.clear();
+            }
             if (g_proxy.hdTextureName.empty())
                 return;
             try
@@ -2633,11 +2698,11 @@ namespace BZROpenShim
 
         bool LoadTerrainHdSourceTexture(void* textureManager,
                                         const std::string& resource,
-                                        OgreSharedPtr& texture)
+                                        OgreSharedPtr& texture, bool fullMips = false)
         {
             const std::string autodetect = "Autodetect";
             g_ogre.loadTexture(textureManager, &texture, resource, autodetect,
-                kOgreTextureType2D, kOgreMipDefault, 1.0f, false,
+                kOgreTextureType2D, fullMips ? kOgreMipUnlimited : kOgreMipDefault, 1.0f, false,
                 kOgrePixelFormatUnknown, false);
             return texture.rep && texture.info &&
                 g_ogre.getTextureType(texture.rep) == kOgreTextureType2D;
@@ -2653,8 +2718,19 @@ namespace BZROpenShim
             if (!g_ogre.getD3D11Texture2D) return false;
             // Exported getters return borrowed resources. Ogre owns both
             // Texture shared pointers throughout this submission.
-            return TerrainHd::CopyTextureSlice(g_ogre.getD3D11Texture2D(arrayTexture),
-                g_ogre.getD3D11Texture2D(sourceTexture), slice, width, height, mipmaps);
+            auto* destination = g_ogre.getD3D11Texture2D(arrayTexture);
+            auto* source = g_ogre.getD3D11Texture2D(sourceTexture);
+            const bool copied = TerrainHd::CopyTextureSlice(destination, source, slice, width, height, mipmaps);
+            if (!copied && source && destination)
+            {
+                D3D11_TEXTURE2D_DESC src{}, dst{};
+                source->GetDesc(&src); destination->GetDesc(&dst);
+                LogShimA(LogLevel::Warn, "terrain-hd",
+                    "[TERRAIN-HD] copy descriptors src=%ux%u/m%u/a%u/f%u dst=%ux%u/m%u/a%u/f%u expectedMips=%u",
+                    src.Width, src.Height, src.MipLevels, src.ArraySize, unsigned(src.Format),
+                    dst.Width, dst.Height, dst.MipLevels, dst.ArraySize, unsigned(dst.Format), mipmaps + 1);
+            }
+            return copied;
         }
 
         // Reports which array slices the selected cluster actually samples, and
@@ -2716,7 +2792,7 @@ namespace BZROpenShim
 
         bool BuildTerrainHdTextureArray(
             const TerrainHdMaterialBinding& binding,
-            OgreSharedPtr& arrayTexture)
+            OgreSharedPtr& arrayTexture, int channel = -1)
         {
             if (!TerrainHdApiAvailable())
             {
@@ -2728,7 +2804,7 @@ namespace BZROpenShim
             for (const TerrainSemantic::Vertex& vertex : g_proxy.semanticVertices)
                 maximumTileIndex = (std::max)(maximumTileIndex,
                     static_cast<uint32_t>(vertex.gpu.tileIndex));
-            if (!binding.paint.enabled && maximumTileIndex >= binding.sliceCount)
+            if (!binding.paint.enabled && !binding.compact && maximumTileIndex >= binding.sliceCount)
             {
                 LogShimA(LogLevel::Warn, "terrain-hd",
                     "[TERRAIN-HD] manifest has too few slices material=\"%s\" slices=%u selectedMaxTileIndex=%u; stock atlas retained",
@@ -2744,7 +2820,7 @@ namespace BZROpenShim
             try
             {
                 if (!LoadTerrainHdSourceTexture(textureManager,
-                        binding.fallback, fallbackTexture))
+                        binding.fallback, fallbackTexture, binding.compact))
                 {
                     LogShimA(LogLevel::Warn, "terrain-hd",
                         "[TERRAIN-HD] fallback texture failed resource=\"%s\"; stock atlas retained",
@@ -2762,15 +2838,24 @@ namespace BZROpenShim
                     return false;
                 }
 
-                g_proxy.hdTextureName = "OpenShim/TerrainHD/Diffuse/" +
+                std::string& ownedName = channel < 0 ? g_proxy.hdTextureName : g_hdChannelResources.at(size_t(channel));
+                ownedName = "OpenShim/TerrainHD/Channel" + std::to_string(channel) + "/" +
                     std::to_string(g_proxy.generation) + "/" +
                     std::to_string(g_proxy.semanticMaterialGeneration);
                 const std::string group = "General";
                 const std::string empty;
+                int arrayMips = static_cast<int>(mipmaps);
+                if (binding.compact)
+                {
+                    auto* native = g_ogre.getD3D11Texture2D(fallbackTexture.rep);
+                    if (!native) throw std::runtime_error("HD source texture descriptor unavailable");
+                    D3D11_TEXTURE2D_DESC description{}; native->GetDesc(&description);
+                    arrayMips = TerrainHd::OgreArrayMipRequest(mipmaps, description.Format);
+                }
                 g_ogre.createManualTexture(textureManager, &arrayTexture,
-                    g_proxy.hdTextureName, group, kOgreTextureType2DArray,
+                    ownedName, group, kOgreTextureType2DArray,
                     width, height, binding.sliceCount,
-                    static_cast<int>(mipmaps), format,
+                    arrayMips, format,
                     kOgreTextureUsageStaticWriteOnly, nullptr, false, 0, empty);
                 if (!arrayTexture.rep || !arrayTexture.info ||
                     g_ogre.getTextureType(arrayTexture.rep) !=
@@ -2779,7 +2864,7 @@ namespace BZROpenShim
                 {
                     LogShimA(LogLevel::Warn, "terrain-hd",
                         "[TERRAIN-HD] Ogre failed to create array name=\"%s\" slices=%u; stock atlas retained",
-                        g_proxy.hdTextureName.c_str(), binding.sliceCount);
+                        ownedName.c_str(), binding.sliceCount);
                     ReleaseCloneHandoff(fallbackTexture);
                     ReleaseCloneHandoff(arrayTexture);
                     RemoveTerrainHdTextureResource("create-failed");
@@ -2797,7 +2882,7 @@ namespace BZROpenShim
                     if (resource != binding.fallback)
                     {
                         if (!LoadTerrainHdSourceTexture(textureManager,
-                                resource, sourceTexture))
+                                resource, sourceTexture, binding.compact))
                         {
                             LogShimA(LogLevel::Warn, "terrain-hd",
                                 "[TERRAIN-HD] tile load failed slice=%u resource=\"%s\"; stock atlas retained",
@@ -2826,18 +2911,23 @@ namespace BZROpenShim
                 }
 
                 ReleaseCloneHandoff(fallbackTexture);
-                g_proxy.hdDiffuseFallback = binding.fallback;
-                g_proxy.hdSliceCount = binding.sliceCount;
-                g_proxy.hdWidth = width;
-                g_proxy.hdHeight = height;
-                g_proxy.hdMipmaps = mipmaps;
+                if (channel >= 0)
+                    g_hdChannelNativeTextures.at(size_t(channel)) = g_ogre.getD3D11Texture2D(arrayTexture.rep);
+                if (channel < 0)
+                {
+                    g_proxy.hdDiffuseFallback = binding.fallback;
+                    g_proxy.hdSliceCount = binding.sliceCount;
+                    g_proxy.hdWidth = width;
+                    g_proxy.hdHeight = height;
+                    g_proxy.hdMipmaps = mipmaps;
+                }
                 LogShimA(LogLevel::Info, "terrain-hd",
                     "[TERRAIN-HD] array ready material=\"%s\" name=\"%s\" slices=%u overrides=%zu selectedMaxTileIndex=%u size=%ux%u mips=%u format=%d fallback=\"%s\"",
-                    g_proxy.materialName.c_str(), g_proxy.hdTextureName.c_str(),
+                    g_proxy.materialName.c_str(), ownedName.c_str(),
                     binding.sliceCount, overrideCopies, maximumTileIndex,
                     width, height, mipmaps + 1, format,
                     binding.fallback.c_str());
-                LogTerrainHdTileCoverage(binding);
+                if (channel < 0 && !binding.compact) LogTerrainHdTileCoverage(binding);
                 return true;
             }
             catch (...)
@@ -5587,6 +5677,30 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
         ++g_teardownDepth;
         g_teardownIncludesClear = g_teardownIncludesClear || clearScene;
+    }
+
+    unsigned TerrainHdMaterialBoundMask(ID3D11DeviceContext* context)
+    {
+        if (!context || context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE ||
+            !g_active.load() || g_shutdown.load()) return 0;
+        std::unique_lock<std::mutex> lock(g_mutex, std::try_to_lock);
+        if (!lock.owns_lock() || !g_HdActive) return 0;
+        unsigned mask = 0;
+        for (unsigned c = 0; c < 3; ++c)
+        {
+            if (!g_hdChannelNativeTextures[c]) continue;
+            ID3D11ShaderResourceView* view = nullptr;
+            ID3D11Resource* resource = nullptr;
+            context->PSGetShaderResources(c + 2, 1, &view);
+            D3D11_SHADER_RESOURCE_VIEW_DESC desc{};
+            if (view) { view->GetDesc(&desc); view->GetResource(&resource); }
+            if (resource == g_hdChannelNativeTextures[c] &&
+                desc.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2DARRAY)
+                mask |= 1u << c;
+            if (resource) resource->Release();
+            if (view) view->Release();
+        }
+        return mask;
     }
 
     bool TerrainSurfaceNormalBound(ID3D11DeviceContext* context)

@@ -9,6 +9,7 @@ struct TerrainTessQuery
     unsigned attempts = 0;
     unsigned skipCandidates = 0;
     bool authoredNormal=false;
+    unsigned hdMaterialMask = 0;
 };
 TerrainTessQuery g_TessQueries[4]; // ordinary/tessellated, with and without HD diffuse tiles
 bool g_TessStatisticsEnabled = false;
@@ -27,8 +28,8 @@ void PollTerrainTessQueries(ID3D11DeviceContext* context)
         if (result == S_OK)
         {
             LogShimA(LogLevel::Info, "terrain-tess",
-                "[TERRAIN-TESS] GPU statistics tessellated=%u iaPrimitives=%llu hsInvocations=%llu dsInvocations=%llu clipPrimitives=%llu psInvocations=%llu hdTiles=%u authoredNormal=%u",
-                kind & 1u, data.IAPrimitives, data.HSInvocations, data.DSInvocations, data.CPrimitives, data.PSInvocations, kind >= 2 ? 1u : 0u,sample.authoredNormal?1u:0u);
+                "[TERRAIN-TESS] GPU statistics tessellated=%u iaPrimitives=%llu hsInvocations=%llu dsInvocations=%llu clipPrimitives=%llu psInvocations=%llu hdTiles=%u authoredNormal=%u hdMaterialMask=%u",
+                kind & 1u, data.IAPrimitives, data.HSInvocations, data.DSInvocations, data.CPrimitives, data.PSInvocations, kind >= 2 ? 1u : 0u,sample.authoredNormal?1u:0u, sample.hdMaterialMask);
             // A native submission can be completely clipped. Try a bounded
             // number of other clusters rather than accepting that as pixels.
             if (kind != 0 && (data.CPrimitives < 128 || data.PSInvocations < 1024 ||
@@ -143,6 +144,7 @@ ID3D11Query* BeginTerrainTessQuery(ID3D11DeviceContext* context, UINT count,
     }
     sample.attempted = true;
     sample.authoredNormal=authoredNormal;
+    sample.hdMaterialMask = BZROpenShim::TerrainHdMaterialBoundMask(context);
     sample.ended = false;
     sample.polls = 0;
     ++sample.attempts;

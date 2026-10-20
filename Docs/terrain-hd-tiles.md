@@ -1,7 +1,8 @@
 # Full-resolution terrain tiles
 
 `HD Terrain Tiles` in OpenShim Options enables experimental DX11 diffuse tile
-replacement. A texture pack is required; the option does not create new artwork.
+replacement. Version 2 packs also support independent normal, specular and
+emissive tiles. A texture pack is required; the option does not create new artwork.
 Restart the game after changing it. It is off by default and works with
 `Terrain Micro Detail`.
 
@@ -10,7 +11,81 @@ resolution. The existing map chooses the tile ID, rotation and transition. The
 renderer adds local tile UVs to native terrain meshes and specializes their
 shared material. No proxy mesh is used. Heights, triangles, collision, AI and
 gameplay terrain files are unchanged. Stock normal, detail, specular, emissive,
-lighting, fog and shadow maps retain their existing atlas coordinates.
+lighting, fog and shadow maps retain their existing atlas coordinates unless
+the pack explicitly replaces a supported material channel.
+
+## Source material packs (v2, experimental)
+
+Use `bzr-openshim-terrain-hd-v2` for source-authored material tiles. Each
+material requires a `diffuseResource` identity guard, `sliceCount` (1..256),
+`fallback`, `tiles`, and a **256-entry** `sliceRemap` array. Its entry at each
+native tile ID selects a physical array slice. For example, 18 distinct Mars
+tiles occupy 18 slices even when many native tile IDs refer to the same art.
+The CPU's native tile identities and UV parity checks remain unchanged.
+
+Optional `normal`, `specular`, and `emissive` objects each contain an exact
+`sourceResource` guard, `fallback`, and `tiles` with every physical slice:
+
+```json
+"normal": {
+  "sourceResource": "ST_MARS_ATLAS_N_RGB8.dds",
+  "encoding": "rgb-xyz-linear",
+  "fallback": "crhd_mars_ma00sa0_n.dds",
+  "tiles": { "0": "crhd_mars_ma00sa0_n.dds" }
+}
+```
+
+This fragment illustrates a one-slice channel; list all slices in a real pack.
+Normal tiles use linear RGB XYZ normals in the engine's tangent convention.
+Their tangent frame follows oriented local tile UVs, avoiding quantized atlas
+derivatives. Specular retains the existing shader's intensity interpretation;
+this is not a new metal/rough material model. Diffuse color conversion and all
+lighting remain with the selected terrain shader. The stock detail layer stays
+separate. Each channel may have its own resolution/format, but its slices must
+agree on dimensions, format and mip count. Missing channels retain stock maps.
+
+All configured arrays and shader variants must succeed before the shared
+material is changed. A mismatched source channel, unsupported shader contract,
+missing tile, or conflicting surface-normal manifest declines the whole pack.
+V2 requires native terrain and cannot be combined with four-material paint.
+Exit restores all replaced texture units and native programs/streams and removes
+owned arrays. Version 1 diffuse packs remain supported.
+
+CR's `Tools/Build-MarsHdTileSources.py` exports the saved Stock World Terrain HD
+revision 6 Mars recipe **before its packing stage**. It uses the individual
+material cache, authored normal/reflectance inputs, existing corrections and
+shared transition masks. It never crops the installed atlas. The companion CR
+document `Docs/MARS_HD_TERRAIN_EXAMPLE.md` describes its reproducible local
+`misn04` example and native capture binding. The capture now includes exact
+normal/specular/emissive resource names so the authoring tool need not guess.
+
+At 1024 pixels with complete mips, 18 BC1 diffuse slices, RGB24 normals
+(typically RGBA8 on the GPU), and BC1 specular slices use about 120 MiB of array
+storage, plus Ogre source caches and semantic streams. Emissive arrays are
+optional; the current Mars source has intentionally black emissive maps.
+
+Validation on 2026-10-20: all 111 CTests pass, the 72 exported source DDS files
+have complete mip payloads, and the specialized PS4 shader compiles in ordinary,
+shadow, PSSM v2 and IBL variants. Windows/GOG DX11 CR `misn04` PID 44572 rendered
+the source pack using CR's Enhanced/IBL selecting material: 320 meshes passed
+packed-UV parity and 82 passes installed/restored. A rasterized native draw
+reported 12,172 pixel invocations with `hdTiles=1 hdMaterialMask=3`. All 320
+streams, three arrays and 57 programs were restored/released, and the helper
+restored 130 temporary files by hash. The screenshot was inspected. Broader
+seam/rotation art acceptance, performance and other platforms remain open.
+GPU query evidence reports
+`hdMaterialMask` (normal=1, specular=2, emissive=4) only when the exact owned
+arrays are bound at a native terrain submission.
+
+The released Ogre backend subtracts two levels from explicit compressed-array
+mip requests, while its source loader already reports the shortened chain.
+V2 compensates that request and still requires exact GPU descriptor equality
+before copying. The live 1024-pixel arrays contained nine BC1 diffuse/specular
+levels and eleven RGB normal levels; exported files retain all eleven levels.
+This behavior also appears in the
+[upstream Ogre 1.10 implementation](https://github.com/OGRECave/ogre/blob/v1.10.0/RenderSystems/Direct3D11/src/OgreD3D11Texture.cpp#L455-L458).
+Each pass guards/binds only channels enabled in its real shader defines; lower
+detail techniques retain their omitted-map bindings.
 
 ## Creating a pack
 
