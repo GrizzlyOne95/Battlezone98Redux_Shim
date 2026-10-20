@@ -2738,6 +2738,18 @@ namespace BZROpenShim
 
         static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
         {
+            { "Cmd Fade", "Display", "CommandHudFade", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::ContextualHud,
+              "Fade the whole command interface: frame, icons, text and bars. Command input reveals it; an active selection or submenu keeps it visible. Applies live." },
+            { "Cmd Idle", "Display", "CommandHudIdleOpacity", nullptr, 0,
+              kShimFadeOpacities, kShimFadeOpacityLabels, 4, 0, ShimSettingApplyGroup::ContextualHud,
+              "Command interface opacity when idle. Hidden removes its visuals until you use it again; its native input handling stays active." },
+            { "Cmd Delay", "Display", "CommandHudFadeDelay", nullptr, 0,
+              kShimFadeDelays, kShimFadeDelayLabels, 3, 1, ShimSettingApplyGroup::ContextualHud,
+              "How long the command interface remains fully visible after command activity or closing a selection/submenu." },
+            { "Cmd Speed", "Display", "CommandHudFadeDuration", nullptr, 0,
+              kShimFadeDurations, kShimFadeDurationLabels, 4, 2, ShimSettingApplyGroup::ContextualHud,
+              "Command interface fade duration. Sprite artwork and text use the same smooth opacity; command activity restores full opacity immediately." },
             { "Weapon Fade", "Display", "WeaponListFade", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::ContextualHud,
               "Fade the weapon list when idle; selection, loadout or ammo changes reveal it. Preserves native colors and layout. Applies live." },
@@ -3391,7 +3403,8 @@ namespace BZROpenShim
         static const char* const kShimCategoryFading[] = {
             "Weapon Fade", "Weapon Idle", "Weapon Delay", "Weapon Speed",
             "Scrap Fade", "Scrap Idle", "Scrap Delay", "Scrap Speed",
-            "Pilot Fade", "Pilot Idle", "Pilot Delay", "Pilot Speed" };
+            "Pilot Fade", "Pilot Idle", "Pilot Delay", "Pilot Speed",
+            "Cmd Fade", "Cmd Idle", "Cmd Delay", "Cmd Speed" };
         static const char* const kShimCategoryDamage[] = {
             "Incoming Damage", "Damage Color", "Damage Size", "Damage Opacity", "Damage Duration" };
         static const char* const kShimCategoryReticle[] = {
@@ -3462,7 +3475,7 @@ namespace BZROpenShim
             BZR_SHIM_CATEGORY("Damage", "DAMAGE INDICATORS",
                 "Directional feedback for incoming weapon damage in single player.", kShimCategoryDamage),
             BZR_SHIM_CATEGORY("Fading", "CONTEXTUAL HUD",
-                "Independent idle opacity and timing for weapon, scrap and pilot displays.", kShimCategoryFading),
+                "Independent idle opacity and timing for weapons, resources and the command interface.", kShimCategoryFading),
         };
 #undef BZR_SHIM_CATEGORY
         constexpr size_t kShimSettingsCategoryCount =
@@ -3822,7 +3835,7 @@ namespace BZROpenShim
             if (row == kShimPseudoRowDamage)
                 return "Customize incoming-damage arcs and preview front, right and rear directions.";
             if (row == kShimPseudoRowFading)
-                return "Fade the weapon list and resource meters independently when idle; relevant changes reveal them.";
+                return "Fade weapons, resource meters and the command interface independently when idle; relevant activity reveals them.";
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (const char* reason = ShimSettingUnavailableReason(setting))
                 return reason;

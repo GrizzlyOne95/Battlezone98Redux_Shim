@@ -7,7 +7,7 @@
 
 namespace BZROpenShim::ContextualHud
 {
-    enum class Group : size_t { Weapons, Scrap, Pilots, Count };
+    enum class Group : size_t { Weapons, Scrap, Pilots, Commands, Count };
     constexpr size_t kGroups = static_cast<size_t>(Group::Count);
     struct GroupSettings { bool enabled = false; int idlePercent = 25; int delayMs = 2500; int fadeMs = 500; };
     struct Settings
@@ -19,9 +19,9 @@ namespace BZROpenShim::ContextualHud
     {
         bool observed = false;
         uint64_t value = 0, changedAt = 0;
-        void Observe(uint64_t next, uint64_t now)
+        void Observe(uint64_t next, uint64_t now, bool interacting = false)
         {
-            if (!observed || value != next || now < changedAt) changedAt = now;
+            if (interacting || !observed || value != next || now < changedAt) changedAt = now;
             observed = true; value = next;
         }
         float Opacity(const GroupSettings& settings, uint64_t now) const
@@ -42,11 +42,11 @@ namespace BZROpenShim::ContextualHud
         uint64_t owner = 0;
         std::array<Activity, kGroups> groups{};
         void Reset() { *this = {}; }
-        void Observe(uint64_t identity, const std::array<uint64_t, kGroups>& values, uint64_t now)
+        void Observe(uint64_t identity, const std::array<uint64_t, kGroups>& values, uint64_t now, size_t count = kGroups)
         {
             if (!identity) { Reset(); return; }
             if (identity != owner) { Reset(); owner = identity; }
-            for (size_t i = 0; i < kGroups; ++i) groups[i].Observe(values[i], now);
+            for (size_t i = 0; i < std::min(count, kGroups); ++i) groups[i].Observe(values[i], now);
         }
     };
     inline uint32_t ScaleAlpha(uint32_t color, float opacity)

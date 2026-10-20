@@ -27,13 +27,16 @@ namespace BZROpenShim::ContextualHud
         using Pointer = void*(__thiscall*)(void*);
         using Weapon = void*(__thiscall*)(void*, int);
         using Handle = int(__thiscall*)(void*);
+        using CommandRender = void(__thiscall*)(void*);
+        constexpr size_t kSafeFrameGroups = static_cast<size_t>(Group::Commands);
+        constexpr size_t kCommands = static_cast<size_t>(Group::Commands);
 
         SRWLOCK g_lock = SRWLOCK_INIT;
         Settings g_settings;
         State g_state;
         bool g_read = false;
-        std::atomic<bool> g_ready{false}, g_resources{false};
-        std::atomic<float> g_opacity[kGroups] = {1,1,1};
+        std::atomic<bool> g_ready{false}, g_resources{false}, g_commandsReady{false};
+        std::atomic<float> g_opacity[kGroups] = {1,1,1,1};
         thread_local float g_drawOpacity = 1;
         uint64_t g_retry = 0;
         uint32_t g_color[2]{}, g_text = 0, g_font = 0, g_sprite = 0, g_sizedSprite = 0;
@@ -41,6 +44,142 @@ namespace BZROpenShim::ContextualHud
         uint32_t g_sites[7]{};
         InlineDetour32 g_detours[2]{};
         std::atomic<uintptr_t> g_originalColor[2]{};
+        uint32_t g_commandRender = 0, g_commandSlot = 0, g_commandBindings = 0;
+        uint32_t g_commandInputs = 0, g_commandMouse = 0, g_commandRects = 0, g_commandAlt = 0;
+        uintptr_t g_commandInstance = 0; // Identity only; never dereferenced after a draw.
+        int g_commandBound = 0;
+
+        struct CommandSample { uint64_t value = 0; bool interacting = false; };
+        bool ReadCommandSample(void* self, CommandSample& sample) noexcept
+        {
+            __try
+            {
+                const auto* bytes = static_cast<const uint8_t*>(self);
+                // The released class's render slot identifies this instance.
+                // Other OpenShim features own different slots in this vtable.
+                if (!self || *reinterpret_cast<const uintptr_t*>(self) + 6 * sizeof(uintptr_t) != g_commandSlot)
+                    return false;
+                // Touch/alternate layout uses a different interaction path;
+                // leave it fully visible until that path is qualified.
+                if (*reinterpret_cast<const uint8_t*>(g_commandAlt)) return false;
+                const int selected = *reinterpret_cast<const int*>(bytes + 0x188);
+                const int category = *reinterpret_cast<const int*>(bytes + 0x117C);
+                const int navigation = *reinterpret_cast<const int*>(bytes + 0x119C);
+                if (selected < 0 || selected > 91 || category < -1 || category > 10 || navigation < 0 || navigation > 3)
+                    return false;
+                const auto node = *reinterpret_cast<const uintptr_t*>(bytes + 0x1180);
+                const bool nested = node && *reinterpret_cast<const uintptr_t*>(node) != 0;
+                sample.interacting = selected > 0 || category >= 0 || navigation != 0 || nested;
+                uint64_t value = static_cast<uint32_t>(category);
+                const auto mix = [&](uintptr_t next) { value = (value ^ next) * 1099511628211ull; };
+                mix(selected); mix(navigation); mix(node);
+                for (int i = 0; i < selected; ++i)
+                    mix(*reinterpret_cast<const uint32_t*>(bytes + 0x1C + i * sizeof(uint32_t)));
+                sample.value = value;
+
+                // Native action bytes cover rebinding/controller inputs too.
+                // These are the thirteen row actions and ten unit-group actions
+                // read by the released renderer, not physical Windows keys.
+                const auto* inputs = reinterpret_cast<const uint8_t*>(g_commandInputs);
+                for (size_t i = 0; i < 13; ++i)
+                    sample.interacting = sample.interacting ||
+                        **reinterpret_cast<const uint8_t* const*>(g_commandBindings + i * sizeof(uintptr_t)) != 0;
+                for (size_t i = 0; i < 10; ++i)
+                    sample.interacting = sample.interacting || inputs[0x20 + i] != 0;
+                sample.interacting = sample.interacting || inputs[0x1D] != 0;
+
+                // A world click or firing alone must not reveal the panel.
+                // The native pointer action counts only inside its own rows.
+                if (inputs[0])
+                {
+                    const auto* mouse = reinterpret_cast<const int*>(g_commandMouse);
+                    const auto* rows = reinterpret_cast<const int*>(g_commandRects);
+                    for (size_t i = 0; i < 13; ++i)
+                        if (mouse[0] >= rows[i*4] && mouse[0] <= rows[i*4+2] &&
+                            mouse[1] >= rows[i*4+1] && mouse[1] <= rows[i*4+3])
+                            sample.interacting = true;
+                }
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+
+        void UpdateCommandOpacity(void* self)
+        {
+            CommandSample sample;
+            const bool readable = ReadCommandSample(self,sample);
+            const uint64_t now = GetTickCount64();
+            float opacity = 1;
+            AcquireSRWLockExclusive(&g_lock);
+            auto& activity = g_state.groups[kCommands];
+            if (!readable || !g_state.owner || !g_settings.groups[kCommands].enabled)
+            {
+                activity = {};
+                g_commandInstance = 0;
+            }
+            else
+            {
+                const uintptr_t instance = reinterpret_cast<uintptr_t>(self);
+                if (instance != g_commandInstance) { activity = {}; g_commandInstance = instance; }
+                activity.Observe(sample.value,now,sample.interacting);
+                opacity = activity.Opacity(g_settings.groups[kCommands],now);
+            }
+            ReleaseSRWLockExclusive(&g_lock);
+            g_opacity[kCommands].store(opacity,std::memory_order_relaxed);
+        }
+
+        void __fastcall CommandDraw(void* self, void*)
+        {
+            if (g_commandsReady.load(std::memory_order_acquire)) UpdateCommandOpacity(self);
+            const float previous = BeginDraw(Group::Commands);
+            // Rendering also processes native command input, selection and
+            // menu sounds. Always execute it, including when alpha is zero.
+            __try { reinterpret_cast<CommandRender>(g_commandRender)(self); }
+            __finally { EndDraw(previous); }
+        }
+
+        bool BindCommand()
+        {
+            if (!g_commandBound)
+            {
+                const HookEngine::EngineRow rows[] = {
+                    {"HudFadeCommandRender",&g_commandRender}, {"HudFadeCommandRenderSlot",&g_commandSlot},
+                    {"HudFadeCommandBindings",&g_commandBindings}, {"HudFadeCommandInputs",&g_commandInputs},
+                    {"HudFadeCommandMouse",&g_commandMouse}, {"CommandMenuRowRects",&g_commandRects},
+                    {"CommandMenuAltLayoutFlag",&g_commandAlt},
+                };
+                g_commandBound = HookEngine::BindEngineRows("Command HUD fading",rows) ? 1 : -1;
+                if (g_commandBound > 0)
+                {
+                    uint32_t target = 0;
+                    SIZE_T read = 0;
+                    if (!ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(g_commandSlot),
+                        &target,sizeof(target),&read) || read != sizeof(target) || target != g_commandRender)
+                    {
+                        g_commandBound = -1;
+                        Log(L"[HUDFADE] Command interface stands down: render slot ownership differs\n");
+                    }
+                }
+            }
+            return g_commandBound > 0;
+        }
+
+        bool InstallCommand()
+        {
+            if (g_commandsReady.load(std::memory_order_acquire)) return true;
+            if (!BindCommand()) return false;
+            HookEngine::CodePatchLock lock;
+            const uint32_t hook = reinterpret_cast<uint32_t>(CommandDraw);
+            uint32_t current = 0;
+            SIZE_T read = 0;
+            if (!ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(g_commandSlot),
+                &current,sizeof(current),&read) || read != sizeof(current) || current != g_commandRender)
+                return false;
+            if (!WritePatchBytes(g_commandSlot,reinterpret_cast<const uint8_t*>(&hook),sizeof(hook))) return false;
+            g_commandsReady.store(true,std::memory_order_release);
+            Log(L"[HUDFADE] Command interface sprite/text scope installed\n");
+            return true;
+        }
 
         template<size_t Index>
         uint32_t __cdecl ColorHook(uint32_t a, uint32_t b)
@@ -127,6 +266,21 @@ namespace BZROpenShim::ContextualHud
             return ok;
         }
 
+        bool InstallForSettings(const Settings& settings)
+        {
+            const bool commands = settings.groups[kCommands].enabled;
+            // Qualify the command-specific region before installing shared
+            // helpers for a command-only configuration. A refused command
+            // adapter must not disable the other independently enabled groups.
+            const bool commandBound = !commands || BindCommand();
+            bool otherGroups = false;
+            for (size_t i = 0; i < kSafeFrameGroups; ++i)
+                otherGroups = otherGroups || settings.groups[i].enabled;
+            if (!commandBound && !otherGroups) return false;
+            if (!Install()) return false;
+            return commandBound && (!commands || InstallCommand());
+        }
+
         bool Snapshot(uint64_t& identity, std::array<uint64_t,kGroups>& values) noexcept
         {
             __try
@@ -187,29 +341,29 @@ namespace BZROpenShim::ContextualHud
     void EndDraw(float previous) noexcept { g_drawOpacity = previous; }
     void ResetMission() noexcept
     {
-        AcquireSRWLockExclusive(&g_lock); g_state.Reset(); ReleaseSRWLockExclusive(&g_lock);
+        AcquireSRWLockExclusive(&g_lock); g_state.Reset(); g_commandInstance = 0; ReleaseSRWLockExclusive(&g_lock);
         for (auto& opacity : g_opacity) opacity.store(1,std::memory_order_relaxed);
     }
     bool ReloadConfig()
     {
         Settings settings;
-        const char* prefixes[] = {"WeaponList", "ScrapHud", "PilotHud"};
+        const char* prefixes[] = {"WeaponList", "ScrapHud", "PilotHud", "CommandHud"};
         for (size_t i = 0; i < kGroups; ++i)
         {
             auto& group = settings.groups[i];
             const std::string prefix = prefixes[i];
             TryGetUserConfigBool("Display",(prefix + "Fade").c_str(),group.enabled);
-            group.idlePercent = Integer(prefix + "IdleOpacity",25,0,100);
+            group.idlePercent = Integer(prefix + "IdleOpacity",i == kCommands ? 0 : 25,0,100);
             group.delayMs = Integer(prefix + "FadeDelay",2500,0,30000);
             group.fadeMs = Integer(prefix + "FadeDuration",500,0,5000);
         }
-        AcquireSRWLockExclusive(&g_lock); g_settings = settings; g_state.Reset(); ReleaseSRWLockExclusive(&g_lock);
+        AcquireSRWLockExclusive(&g_lock); g_settings = settings; g_state.Reset(); g_commandInstance = 0; ReleaseSRWLockExclusive(&g_lock);
         for (auto& opacity : g_opacity) opacity.store(1,std::memory_order_relaxed);
         g_read = true;
         g_resources.store(settings.groups[1].enabled || settings.groups[2].enabled,std::memory_order_relaxed);
         if (!settings.Active()) { RefreshScrapPilotHudLayout(); return true; }
         if (g_IsSteamExe || !IsCompatibleGameVersion()) return false;
-        const bool installed = Install();
+        const bool installed = InstallForSettings(settings);
         RefreshScrapPilotHudLayout();
         return installed;
     }
@@ -224,20 +378,26 @@ namespace BZROpenShim::ContextualHud
         AcquireSRWLockShared(&g_lock); settings = g_settings; ReleaseSRWLockShared(&g_lock);
         if (!settings.Active() || g_IsSteamExe || !IsCompatibleGameVersion()) return;
         const uint64_t now = GetTickCount64();
-        if (!g_ready.load(std::memory_order_acquire))
+        if (!g_ready.load(std::memory_order_acquire) ||
+            (settings.groups[kCommands].enabled && !g_commandsReady.load(std::memory_order_acquire)))
         {
-            if (now < g_retry) return;
-            g_retry = now + 1000;
-            if (!Install()) return;
-            RefreshScrapPilotHudLayout();
+            if (now >= g_retry)
+            {
+                g_retry = now + 1000;
+                InstallForSettings(settings);
+                RefreshScrapPilotHudLayout();
+            }
+            if (!g_ready.load(std::memory_order_acquire)) return;
         }
         uint64_t owner = 0;
         std::array<uint64_t,kGroups> values{};
         const auto ui = ReadShellUiState();
         if (!ui.readable || ui.wrapperActive || ui.screenPresent || !Snapshot(owner,values)) { ResetMission(); return; }
         AcquireSRWLockExclusive(&g_lock);
-        g_state.Observe(owner,values,now);
-        for (size_t i = 0; i < kGroups; ++i)
+        // The command renderer owns its own activity sample; stable resource
+        // observations must not overwrite input/menu activity recorded there.
+        g_state.Observe(owner,values,now,kSafeFrameGroups);
+        for (size_t i = 0; i < kSafeFrameGroups; ++i)
             g_opacity[i].store(g_state.groups[i].Opacity(settings.groups[i],now),std::memory_order_relaxed);
         ReleaseSRWLockExclusive(&g_lock);
     }

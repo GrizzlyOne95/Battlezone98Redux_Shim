@@ -51,6 +51,25 @@ int main()
     state.Observe(12,values,10000);state.Reset();
     Check(!state.groups[0].observed,"mission/config reset removes fade history");
 
+    // Commands are sampled inside their native renderer, after the safe-frame
+    // driver samples the other groups. Unchanged active menus must remain visible.
+    const size_t commands = static_cast<size_t>(Group::Commands);
+    fade = {true,0,1000,500};
+    state.Observe(20,values,1000,commands);
+    Check(!state.groups[commands].observed,"safe-frame observations leave command history untouched");
+    state.groups[commands].Observe(7,1000);
+    Check(state.groups[commands].Opacity(fade,3000)==0,"idle command interface can fade completely away");
+    state.groups[commands].Observe(7,3000,true);
+    Check(state.groups[commands].Opacity(fade,3000)==1,"repeated command input reveals an unchanged menu");
+    state.groups[commands].Observe(7,10000,true);
+    state.Observe(20,values,10000,commands);
+    Check(state.groups[commands].Opacity(fade,11000)==1,"an active menu refreshes the hold independently of other groups");
+    state.groups[commands].Observe(7,11000);
+    Check(state.groups[commands].Opacity(fade,11500)==0,"idle fade resumes after the final active frame");
+    Check(state.groups[0].changedAt==1000,"command activity never reveals the weapon list");
+    state.Observe(21,values,12000,commands);
+    Check(!state.groups[commands].observed,"a new player invalidates render-sampled command history");
+
     Check(ScaleAlpha(0x804080FF,0.25f)==0x204080FF,"multiply native alpha while preserving RGB");
     Check(ScaleAlpha(0x004080FF,0.25f)==0x004080FF,"native transparency remains transparent");
     Check(ScaleAlpha(0x804080FF,1)==0x804080FF,"full opacity is byte identical");
