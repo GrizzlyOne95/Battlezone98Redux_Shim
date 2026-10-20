@@ -146,6 +146,17 @@ public static class BZRForegroundWatchdog
         return IsGame(upid, gameName);
     }
 
+    // True when a physical mouse button, Alt, Tab or a Windows key is down (or was
+    // pressed since the last poll), wherever the cursor is. Clicking the game's
+    // taskbar button or thumbnail, Alt-Tab and Win+number all switch to the game
+    // without a press over the game window itself.
+    static bool PhysicalSwitchInput()
+    {
+        foreach (int vk in new int[] { 0x01, 0x02, 0x04, 0x09, 0x12, 0x5B, 0x5C })
+            if ((GetAsyncKeyState(vk) & 0x8001) != 0) return true;
+        return false;
+    }
+
     static void Note(string text)
     {
         string line = DateTime.Now.ToString("HH:mm:ss.fff") + " " + text;
@@ -290,6 +301,7 @@ public static class BZRForegroundWatchdog
         Stopwatch watch = null;
         int reported = 0;
         long lastGamePress = long.MinValue;
+        long lastSwitchInput = long.MinValue;
         while (true)
         {
             IntPtr fg = GetForegroundWindow();
@@ -306,6 +318,7 @@ public static class BZRForegroundWatchdog
             else if (CountGames(gameName) == 0) { Note("game exited; reported " + reported + " steal(s)"); return; }
 
             if (watch != null && PhysicalPressOverGame(gameName)) lastGamePress = Environment.TickCount;
+            if (watch != null && PhysicalSwitchInput()) lastSwitchInput = Environment.TickCount;
             if (!gameFg)
             {
                 if (fg != IntPtr.Zero)
@@ -318,6 +331,12 @@ public static class BZRForegroundWatchdog
             {
                 // The user clicked the game window: activation is intentional.
                 Note("user activated the game window (intentional); not a steal, focus left alone, watchdog done");
+                return;
+            }
+            else if (watch != null && lastSwitchInput != long.MinValue && unchecked(Environment.TickCount - (int)lastSwitchInput) < 1500)
+            {
+                // The user switched to the game (taskbar, thumbnail, Alt-Tab, Win+N).
+                Note("user switched to the game (" + previousDesc + "); not a steal, focus left alone, watchdog done");
                 return;
             }
             else if (watch != null)
