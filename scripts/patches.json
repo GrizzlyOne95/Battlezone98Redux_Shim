@@ -1534,6 +1534,204 @@
   ],
   "engine_addresses": [
     {
+      "name": "HudPaletteGridSubmit",
+      "address": "0x0043FB30",
+      "expected": "55 8B EC 81 EC 30 08 00 00 A1 00 70 8E 00 33 C5 89 45 FC 8B 45 0C 89 85 D4 F7 FF FF 8B 4D 0C 8B",
+      "identity": "Radar projected-grid submitter, cdecl(viewport, grid). Reads dimensions at grid+0x20000/+0x20004 and ARGB color at +0x20018; submits native line strips. Released GOG static bytes matched live PID 43392 on 2026-10-19."
+    },
+    {
+      "name": "HudPaletteGaugeSubmit",
+      "address": "0x004C0000",
+      "expected": "55 8B EC 83 EC 1C A1 00 70 8E 00 33 C5 89 45 FC 8B 45 10 8B 08 89 4D EC 8B 55 10 8B 42 04 89 45",
+      "identity": "Command/selection horizontal gauge, cdecl(viewport, float ratio, inclusive rect*, filled ARGB, empty ARGB); clips both native filled rectangles without changing values. Released GOG static bytes matched live PID 43392 on 2026-10-19."
+    },
+    {
+      "name": "HudPaletteHullColor",
+      "address": "0x005DB9B0",
+      "expected": "55 8B EC F3 0F 10 45 08 0F 2F 05 84 25 8A 00 72 09 A1 B0 75 91 00 EB 35 EB 33 F3 0F 10 45 08 0F",
+      "identity": "Cockpit health color selection, cdecl(float ratio), returns native ARGB in EAX with 0.25/0.5 transitions. Released GOG static bytes matched live PID 43392 on 2026-10-19."
+    },
+    {
+      "name": "HudPaletteContactColor",
+      "address": "0x00492CE0",
+      "expected": "55 8B EC 83 EC 08 89 4D FC 8B 45 FC 8B 88 F4 00 00 00 8B 51 14 81 E2 00 02 00 00 74 0E 8B 45 FC",
+      "identity": "Radar contact color, thiscall(complete object), reads color at +0x16C or +0x170 according to definition flags. Only the normal radar caller is redirected; alert/special branches remain stock. Released GOG static bytes matched live PID 43392 on 2026-10-19."
+    },
+    {
+      "name": "HudPaletteFriendTeam",
+      "address": "0x004DB560",
+      "expected": "55 8B EC 83 EC 08 89 4D FC 8B 45 FC 83 B8 7C 01 00 00 00 74 28 83 7D 08 00 7C 22 8B 4D 08 51 8B",
+      "identity": "GameObject::FriendP(int team), thiscall on complete object, ret 4; delegates through its native team-list policy. Released GOG static bytes matched live PID 43392 on 2026-10-19."
+    },
+    {
+      "name": "HudPaletteEnemyTeam",
+      "address": "0x004DB600",
+      "expected": "55 8B EC 83 EC 08 89 4D FC 8B 45 FC 83 B8 7C 01 00 00 00 74 28 83 7D 08 00 7C 22 8B 4D 08 51 8B",
+      "identity": "GameObject::EnemyP(int team), thiscall on complete object, ret 4; delegates through its native team-list policy. Released GOG static bytes matched live PID 43392 on 2026-10-19."
+    },
+    {
+      "name": "HudPaletteSizedSprite",
+      "address": "0x0068CA30",
+      "expected": "55 8B EC 81 EC 98 00 00 00 A1 00 70 8E 00 33 C5 89 45 FC 83 7D 10 00 7C 0B 8B 45 10 3B 05 00 0F",
+      "identity": "Sized sprite submitter, cdecl(viewport, material, id, x,y,w,h, flags, z), nine arguments. Stock low flag bits 5 use current sprite tint; all alignment/clipping bits are preserved. Released GOG static bytes matched live PID 43392 on 2026-10-19."
+    },
+    {
+      "name": "HudPaletteSpriteTint",
+      "address": "0x00920EF8",
+      "kind": "data",
+      "identity": "Native sprite tint written by released SetColor at 0x00417990, consumed only by low flag bits 5 in 0x0068F030."
+    },
+    {
+      "name": "HudPaletteSpriteColors",
+      "address": "0x008ED788",
+      "kind": "data",
+      "identity": "Sixteen packed sprite palette entries indexed by HUD sprite record flags low nibble in released sized sprite renderer."
+    },
+    {
+      "name": "HudPaletteDamageFlash",
+      "address": "0x0091757C",
+      "kind": "data",
+      "identity": "Bright red native damage flash; command unit gauge overrides preserve this transient foreground."
+    },
+    {
+      "name": "HudPaletteGridCall",
+      "address": "0x00493E9C",
+      "expected": "E8 8F BC FA FF 83 C4 08",
+      "identity": "Radar-only call from terrain-wireframe draw to projected-grid submitter. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteBackgroundCall",
+      "address": "0x00493E47",
+      "expected": "E8 E4 8B 1F 00 83 C4 24",
+      "identity": "Radar backdrop sized-sprite draw; nine-argument ABI and sprite 0x399 observed live. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteContactCall",
+      "address": "0x00494CFF",
+      "expected": "E8 DC DF FF FF 25 FF FF FF 00",
+      "identity": "Normal radar contact color fetch; the caller subsequently supplies its animated alpha and preserves special attack branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteHullCall",
+      "address": "0x005DCC3D",
+      "expected": "E8 6E ED FF FF 83 C4 04",
+      "identity": "Player status renderer health-color selection before its label and fill draws; native displayed ratio supplied on stack. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteAmmoLabelCall",
+      "address": "0x005DD0C4",
+      "expected": "E8 67 F9 0A 00 83 C4 24",
+      "identity": "Player status ammo label sized-sprite draw. IDs 0x39A / 0x104 and pane-clipped fill observed live; retain original geometry and texture. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteAmmoFillCall",
+      "address": "0x005DD1C5",
+      "expected": "E8 66 F8 0A 00 83 C4 24",
+      "identity": "Player status ammo fill sized-sprite draw. IDs 0x39A / 0x104 and pane-clipped fill observed live; retain original geometry and texture. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge00",
+      "address": "0x004A2FC7",
+      "expected": "E8 34 D0 01 00 83 C4 14",
+      "identity": "Command renderer health gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge01",
+      "address": "0x004A3053",
+      "expected": "E8 A8 CF 01 00 83 C4 14",
+      "identity": "Command renderer ammo gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge02",
+      "address": "0x004A3806",
+      "expected": "E8 F5 C7 01 00 83 C4 14",
+      "identity": "Command renderer health gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge03",
+      "address": "0x004A38CB",
+      "expected": "E8 30 C7 01 00 83 C4 14",
+      "identity": "Command renderer ammo gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge04",
+      "address": "0x004A3C07",
+      "expected": "E8 F4 C3 01 00 83 C4 14",
+      "identity": "Command renderer health gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge05",
+      "address": "0x004A3C94",
+      "expected": "E8 67 C3 01 00 83 C4 14",
+      "identity": "Command renderer ammo gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge06",
+      "address": "0x004A43B8",
+      "expected": "E8 43 BC 01 00 83 C4 14",
+      "identity": "Command renderer health gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge07",
+      "address": "0x004A447D",
+      "expected": "E8 7E BB 01 00 83 C4 14",
+      "identity": "Command renderer ammo gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge08",
+      "address": "0x004A47B9",
+      "expected": "E8 42 B8 01 00 83 C4 14",
+      "identity": "Command renderer health gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge09",
+      "address": "0x004A4846",
+      "expected": "E8 B5 B7 01 00 83 C4 14",
+      "identity": "Command renderer ammo gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge10",
+      "address": "0x004A4E25",
+      "expected": "E8 D6 B1 01 00 83 C4 14",
+      "identity": "Command renderer health gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge11",
+      "address": "0x004A4EB2",
+      "expected": "E8 49 B1 01 00 83 C4 14",
+      "identity": "Command renderer ammo gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge12",
+      "address": "0x004A5E14",
+      "expected": "E8 E7 A1 01 00 83 C4 14",
+      "identity": "Command renderer health gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge13",
+      "address": "0x004A5E5C",
+      "expected": "E8 9F A1 01 00 83 C4 14",
+      "identity": "Command renderer ammo gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge14",
+      "address": "0x004A674C",
+      "expected": "E8 AF 98 01 00 83 C4 14",
+      "identity": "Command renderer health gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge15",
+      "address": "0x004A6854",
+      "expected": "E8 A7 97 01 00 83 C4 14",
+      "identity": "Command renderer ammo gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
+      "name": "HudPaletteUnitGauge16",
+      "address": "0x004A68B6",
+      "expected": "E8 45 97 01 00 83 C4 14",
+      "identity": "Command renderer ammo gauge. Five stack arguments and caller cleanup 0x14; health follows ratio color helper/damage flash, ammo uses its independent source. Final two ammo sites are alternate layout branches. Direct CALL and destination matched the exact released GOG image and live PID 43392."
+    },
+    {
       "name": "GAS_SetMaxVoices",
       "address": "0x0043A660",
       "expected": "55 8B EC 83 3D 94 55 91 00 00 75 02 EB 0B A1 94 55 91 00 8B 4D 08 89 48 04",

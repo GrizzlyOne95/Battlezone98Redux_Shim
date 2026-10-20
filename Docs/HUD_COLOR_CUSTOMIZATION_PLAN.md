@@ -1,7 +1,9 @@
 # HUD colour customization — plan
 
-Status: **scrap/pilot customization implemented, opt-in; radar colors remain
-unimplemented.** OpenShim Options → HUD keeps the existing `Scrap/Pilot HUD`
+Status: **scrap/pilot customization implemented, opt-in.** Radar grid/contact,
+cockpit meter and unit-bar preferences are implemented separately in
+[`HUD_PALETTE.md`](HUD_PALETTE.md), with native acceptance tracked there.
+OpenShim Options → HUD keeps the existing `Scrap/Pilot HUD`
 Stock/Legacy choice and adds independent Scrap Color and Pilot Color controls.
 
 ## Player controls
@@ -13,7 +15,7 @@ together. It does not move the readout, change alignment, alter plate geometry,
 or modify other HUD colors. Both settings apply live and persist separately
 from the Stock/Legacy layout setting.
 
-Menu choices are Default, White, Blue, Green, Cyan, Amber and Magenta. The INI
+Menu choices are Default, White, Blue, Green, Cyan, Amber, Magenta, Red and Yellow. The INI
 also accepts `#RRGGBB` and `0xAARRGGBB`; explicit alpha is preserved. Invalid
 values fall back to the layout palette. Custom hex values display as Custom
 in Options. Choosing Default restores the native palette references.
@@ -69,18 +71,19 @@ builder at `0x00492EC0` and knows `CockpitRadar::Render` at `0x0049405B`, along
 with the projection and backdrop globals. That is geometry, not colour, but it
 means the render path is already mapped.
 
-## What is missing
+## Radar follow-up
 
-**There is no radar icon colour setter at all.** No EXU export, and nothing in
-OpenShim's sources sets blip colour. Adding it means locating where
-`CockpitRadar::Render` picks blip colours and exposing a setter before any
-setting can exist. That is the expensive half of this work.
+The player-facing radar grid and normal-contact colors now use isolated
+native draw adapters in OpenShim. Special/alert icons retain native colors,
+and ambiguous/disguised identities retain stock appearance. A reusable EXU
+radar color API remains out of scope; these are persistent player preferences.
 
 ## Scope, in two independent pieces
 
 1. **Scrap / pilot HUD tint.** Implemented with two independent settings.
    Missing keys and Default preserve the selected layout's colors.
-2. **Radar icon colour.** Expensive. Needs new native API first, per above.
+2. **Radar and meter colors.** Implemented as persistent player preferences;
+   see the separate HUD palette document for scope and qualification.
 
 ## Selected design
 

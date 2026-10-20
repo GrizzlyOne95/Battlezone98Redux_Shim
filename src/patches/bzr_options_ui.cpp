@@ -10,6 +10,7 @@
 #include "bool_token.h"
 #include "hud_feedback.h"
 #include "hud_color_policy.h"
+#include "hud_palette.h"
 #include "ui_screen_fit.h"
 
 #include "autosave.h"
@@ -2703,7 +2704,11 @@ namespace BZROpenShim
         static const char* const kShimReticleStyles[] = { "Stock", "Cross", "Dot", "CrossDot" };
         static const char* const kShimReticleStyleLabels[] = { "Stock", "Cross", "Dot", "Cross + Dot" };
         static const char* const kShimReticleColors[] = { "White", "Green", "Cyan", "Amber" };
-        static const char* const kShimMeterColors[] = { "Default", "White", "Blue", "Green", "Cyan", "Amber", "Magenta" };
+        static const char* const kShimMeterColors[] = { "Default", "White", "Blue", "Green", "Cyan", "Amber", "Magenta", "Red", "Yellow" };
+        static const char* const kShimPaletteColors[] = { "Default", "White", "Blue", "Green", "Cyan", "Amber", "Magenta", "Red", "Yellow" };
+        static const char* const kShimPalettePresets[] = { "Stock", "Classic", "HighContrast" };
+        static const char* const kShimPalettePresetLabels[] = { "Stock", "Classic", "High Contrast" };
+        static const char* const kShimBackgroundOpacity[] = { "Default", "0", "25", "50", "75", "100" };
         static const char* const kShimReticleSizes[] = { "75", "100", "150" };
         static const char* const kShimReticleSizeLabels[] = { "Small", "Normal", "Large" };
         static const char* const kShimReticleThickness[] = { "1", "2", "3" };
@@ -2762,11 +2767,56 @@ namespace BZROpenShim
               kShimReticleOpacity, kShimReticleOpacityLabels, 3, 2, ShimSettingApplyGroup::HudFeedback,
               "Hit tick opacity, independent of reticle opacity. Applies live." },
             { "Scrap Color", "Display", "ScrapHudColor", nullptr, 0,
-              kShimMeterColors, kShimMeterColors, 7, 0, ShimSettingApplyGroup::GlobalImprovement,
+              kShimMeterColors, kShimMeterColors, 9, 0, ShimSettingApplyGroup::GlobalImprovement,
               "Scrap title/value color. Default preserves the selected Stock/Legacy palette. Layout and plates stay as selected." },
             { "Pilot Color", "Display", "PilotHudColor", nullptr, 0,
-              kShimMeterColors, kShimMeterColors, 7, 0, ShimSettingApplyGroup::GlobalImprovement,
+              kShimMeterColors, kShimMeterColors, 9, 0, ShimSettingApplyGroup::GlobalImprovement,
               "Pilot title/value color. Default preserves the selected Stock/Legacy palette. Independent of scrap color." },
+            { "Base Palette", "Display", "HudColorPreset", nullptr, 0,
+              kShimPalettePresets, kShimPalettePresetLabels, 3, 0, ShimSettingApplyGroup::HudPalette,
+              "Base colors for Default rows: Stock, Classic or High Contrast. Explicit color choices stay independent. Scrap/pilot and reticle settings are separate." },
+            { "Radar Backdrop", "Display", "RadarBackgroundOpacity", nullptr, 0,
+              kShimBackgroundOpacity, kShimBackgroundOpacity, 6, 0, ShimSettingApplyGroup::HudPalette,
+              "Radar backdrop opacity (percent). Default follows the base palette. Terrain lines and contacts remain visible independently." },
+            { "Radar Lines", "Display", "RadarGridColor", nullptr, 0,
+              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
+              "Terrain grid tint. Native line opacity, radar geometry and contacts remain unchanged. Default follows the base palette." },
+            { "Friendly Blips", "Display", "RadarFriendlyColor", nullptr, 0,
+              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
+              "Normal friendly radar contact tint. Native dimming and alpha animation remain; disguised or ambiguous identities retain native colors. Default follows the base palette." },
+            { "Enemy Blips", "Display", "RadarEnemyColor", nullptr, 0,
+              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
+              "Normal enemy radar contact tint. Special alert markers retain their stock appearance. Default follows the base palette." },
+            { "Neutral Blips", "Display", "RadarNeutralColor", nullptr, 0,
+              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
+              "Normal neutral radar contact tint. Contacts are only recolored when native identity is unambiguous. Default follows the base palette." },
+            { "Hull Healthy", "Display", "HullHighColor", nullptr, 0,
+              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
+              "Cockpit health color at 50 percent or more. Native smoothing, fill and warnings remain. Default follows the base palette." },
+            { "Hull Damaged", "Display", "HullMediumColor", nullptr, 0,
+              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
+              "Cockpit health color from 25 to below 50 percent. Thresholds remain native. Default follows the base palette." },
+            { "Hull Critical", "Display", "HullLowColor", nullptr, 0,
+              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
+              "Cockpit health color below 25 percent. Thresholds remain native. Default follows the base palette." },
+            { "Cockpit Ammo", "Display", "AmmoHudColor", nullptr, 0,
+              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
+              "Cockpit ammo bar and label tint. Shot-cost ticks and remaining-shots text keep their native colors. Default follows the base palette." },
+            { "Unit Healthy", "Display", "UnitHealthHighColor", nullptr, 0,
+              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
+              "Command and selection health bars at 50 percent or more. Native recent-damage flashes remain. Default follows the base palette." },
+            { "Unit Damaged", "Display", "UnitHealthMediumColor", nullptr, 0,
+              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
+              "Command and selection health bars from 25 to below 50 percent. Native recent-damage flashes remain. Default follows the base palette." },
+            { "Unit Critical", "Display", "UnitHealthLowColor", nullptr, 0,
+              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
+              "Command and selection health bars below 25 percent. Native recent-damage flashes remain. Default follows the base palette." },
+            { "Unit Ammo", "Display", "UnitAmmoColor", nullptr, 0,
+              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
+              "Command and selection ammo-bar fill color, independent of cockpit ammo. Default follows the base palette." },
+            { "Empty Bars", "Display", "UnitEmptyColor", nullptr, 0,
+              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
+              "Unfilled portions of command and selection health/ammo bars. Does not affect cockpit textures. Default follows the base palette." },
             { "Field of View", "Display", "FieldOfView", nullptr, 0,
               kShimSettingsFovValues, kShimSettingsFovLabels, 8, 0,
               ShimSettingApplyGroup::RestartRequired,
@@ -3249,9 +3299,11 @@ namespace BZROpenShim
         constexpr const char* kShimRowUpdateCheck = "OpenShim Updates";
         constexpr const char* kShimRowKeyBindings = "Key Bindings";
         constexpr const char* kShimRowReticle = "Reticle & Hits";
+        constexpr const char* kShimRowPalette = "HUD Colors";
         constexpr size_t kShimPseudoRowUpdateCheck = kShimSettingsRegistryCount + 0;
         constexpr size_t kShimPseudoRowKeyBindings = kShimSettingsRegistryCount + 1;
         constexpr size_t kShimPseudoRowReticle = kShimSettingsRegistryCount + 2;
+        constexpr size_t kShimPseudoRowPalette = kShimSettingsRegistryCount + 3;
         constexpr size_t kShimNoRow = static_cast<size_t>(-1);
         // Stock cUI_OptionsInput (key bindings), as the stock Input button uses.
         constexpr uint32_t kStockOptionsInputScreenId = 0x15;
@@ -3270,11 +3322,15 @@ namespace BZROpenShim
             "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
         static const char* const kShimCategoryHud[] = {
             "Scrap/Pilot HUD", "Scrap Color", "Pilot Color", "Radar Size", "Target Popup",
-            "MP Vehicle Flags", "Show Own MP Flag", kShimRowReticle };
+            "MP Vehicle Flags", "Show Own MP Flag", kShimRowReticle, kShimRowPalette };
         static const char* const kShimCategoryReticle[] = {
             "Reticle Style", "Reticle Color", "Reticle Size", "Reticle Thickness", "Reticle Outline",
             "Reticle Opacity", "Reactive Reticle", "Hit Markers", "Marker Duration",
             "Marker Color", "Marker Size", "Marker Opacity" };
+        static const char* const kShimCategoryPalette[] = {
+            "Base Palette", "Radar Lines", "Radar Backdrop", "Friendly Blips", "Enemy Blips", "Neutral Blips",
+            "Hull Healthy", "Hull Damaged", "Hull Critical", "Cockpit Ammo", "Unit Healthy", "Unit Damaged",
+            "Unit Critical", "Unit Ammo", "Empty Bars" };
         static const char* const kShimCategoryControls[] = {
             kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Unsmoothed Controls",
             "Satellite Zoom Out", "Satellite Pan Speed", "Editor Placement", "Background Mouse" };
@@ -3330,18 +3386,23 @@ namespace BZROpenShim
             // Subpage reached from HUD; the existing nine-tile hub stays intact.
             BZR_SHIM_CATEGORY("Reticle", "RETICLE / HIT FEEDBACK",
                 "Custom reticle appearance and single-player feedback.", kShimCategoryReticle),
+            BZR_SHIM_CATEGORY("HUD Colors", "HUD COLORS",
+                "Radar, cockpit meters and unit-bar colors. Default rows follow the base palette.", kShimCategoryPalette),
         };
 #undef BZR_SHIM_CATEGORY
         constexpr size_t kShimSettingsCategoryCount =
             sizeof(kShimSettingsCategories) / sizeof(kShimSettingsCategories[0]);
-        constexpr size_t kShimHubCategoryCount = kShimSettingsCategoryCount - 1;
-        constexpr size_t kShimReticleCategory = kShimSettingsCategoryCount - 1;
+        constexpr size_t kShimHubCategoryCount = kShimSettingsCategoryCount - 2;
+        constexpr size_t kShimReticleCategory = kShimSettingsCategoryCount - 2;
+        constexpr size_t kShimPaletteCategory = kShimSettingsCategoryCount - 1;
         static_assert(sizeof(kShimCategoryGameplay) / sizeof(kShimCategoryGameplay[0]) <= kShimCategoryMaxRows,
                       "a category screen shows at most 16 rows");
         static_assert(sizeof(kShimCategoryHud) / sizeof(kShimCategoryHud[0]) <= kShimCategoryMaxRows,
                       "HUD controls must fit the category screen");
         static_assert(sizeof(kShimCategoryReticle) / sizeof(kShimCategoryReticle[0]) <= 12,
                       "reticle controls must leave room for the live preview");
+        static_assert(std::size(kShimCategoryPalette) <= kShimCategoryMaxRows,
+                      "HUD colors must fit without overflowing category slots");
 
         // Hub geometry (HUB_LAYOUT).
         constexpr Shell::Rect kShimTitleRect = { 470.0f, 132.0f, 500.0f, 56.0f };
@@ -3416,6 +3477,8 @@ namespace BZROpenShim
                 return kShimPseudoRowKeyBindings;
             if (std::strcmp(label, kShimRowReticle) == 0)
                 return kShimPseudoRowReticle;
+            if (std::strcmp(label, kShimRowPalette) == 0)
+                return kShimPseudoRowPalette;
             for (size_t index = 0; index < kShimSettingsRegistryCount; ++index)
             {
                 if (std::strcmp(g_ShimSettingsRegistry[index].label, label) == 0)
@@ -3458,6 +3521,8 @@ namespace BZROpenShim
         {
             if (setting.applyGroup == ShimSettingApplyGroup::HudFeedback)
                 return HudFeedback::UnavailableReason();
+            if (setting.applyGroup == ShimSettingApplyGroup::HudPalette)
+                return HudPalette::UnavailableReason();
             const auto caps = Assets::GetAssetCapabilities();
             if (caps.state == Assets::AssetPackState::Unknown || !setting.section || !setting.key)
                 return nullptr;
@@ -3620,13 +3685,16 @@ namespace BZROpenShim
             }
             if (row == kShimPseudoRowKeyBindings)
                 return "Edit";
-            if (row == kShimPseudoRowReticle)
+            if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette)
                 return "Open";
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (ShimSettingUnavailableReason(setting))
                 return "Unavailable";
             std::string text = setting.valueLabels[GetShimSettingCurrentIndex(setting)];
-            if (std::strcmp(setting.key, "ScrapHudColor") == 0 || std::strcmp(setting.key, "PilotHudColor") == 0)
+            if (std::strcmp(setting.key, "ScrapHudColor") == 0 || std::strcmp(setting.key, "PilotHudColor") == 0 ||
+                (setting.applyGroup == ShimSettingApplyGroup::HudPalette &&
+                 std::strcmp(setting.key, "HudColorPreset") != 0 &&
+                 std::strcmp(setting.key, "RadarBackgroundOpacity") != 0))
             {
                 std::string configured;
                 if (TryGetUserConfigString(setting.section, setting.key, configured) && !configured.empty() &&
@@ -3646,6 +3714,8 @@ namespace BZROpenShim
                 return kShimRowKeyBindings;
             if (row == kShimPseudoRowReticle)
                 return kShimRowReticle;
+            if (row == kShimPseudoRowPalette)
+                return kShimRowPalette;
             return g_ShimSettingsRegistry[row].label;
         }
 
@@ -3657,6 +3727,8 @@ namespace BZROpenShim
                 return "Open the key-binding editor for keyboard commands and game keys.";
             if (row == kShimPseudoRowReticle)
                 return "Open reticle styling, hit-marker controls and a live appearance preview.";
+            if (row == kShimPseudoRowPalette)
+                return "Customize radar lines, normal contacts, cockpit health/ammo and unit-bar colors.";
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (const char* reason = ShimSettingUnavailableReason(setting))
                 return reason;
@@ -3812,6 +3884,8 @@ namespace BZROpenShim
                 liveApplyOk = ReloadAutoSaveConfig();
             else if (setting.applyGroup == ShimSettingApplyGroup::HudFeedback)
                 liveApplyOk = HudFeedback::ReloadConfig();
+            else if (setting.applyGroup == ShimSettingApplyGroup::HudPalette)
+                liveApplyOk = HudPalette::ReloadConfig();
             else
                 ApplyShimSettingLive(setting.applyGroup);
 
@@ -3832,6 +3906,12 @@ namespace BZROpenShim
             if (!ui.screen || slot >= ui.rowCount)
                 return;
             const size_t row = ui.rows[slot];
+            if (row == kShimPseudoRowPalette)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen, Shell::kOptionsCategoryScreenIdBase + static_cast<uint32_t>(kShimPaletteCategory));
+                return;
+            }
             if (row == kShimPseudoRowReticle)
             {
                 DisarmShimSettingsAction();

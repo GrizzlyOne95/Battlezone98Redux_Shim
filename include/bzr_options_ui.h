@@ -166,6 +166,7 @@ namespace BZROpenShim
         PilotFlashlight,    // latched initializer; the latch is cleared and re-run
         AutoSave,           // ReloadAutoSaveConfig re-reads the ini and applies immediately
         HudFeedback,        // reticle/hit feedback: saved and applied live when qualified
+        HudPalette,         // isolated radar and meter color draws
         BzrNetRoute,        // the engine re-reads the relay flag per connection attempt
         RenderProfile,      // RenderProfiles::ReloadRenderProfileConfig re-reads + reapplies live
         LiveEngineToggle,   // plain runtime flags (hop-out alert, satellite
