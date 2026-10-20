@@ -86,9 +86,8 @@ float2 TerrainReliefObjectXZ(float3 viewPosition, float4x4 inverseWorldView)
 }
 
 #if defined(OPENSHIM_HEIGHT_TEST)
-// Experimental GPU-qualified path; the native material installer does not
-// enable this define until submission/resource ownership is qualified.
-// An explicit signed R32_FLOAT height atlas stores world meters. Mip zero
+// Native packs can opt into signed-unit R32 heights, scaled by their relief
+// amplitude. The older GPU candidate uses explicit world meters. Mip zero
 // with manual bilinear Load needs no sampler or implicit DS derivatives.
 Texture2D<float> terrainHeightAtlas : register(t127);
 
@@ -106,6 +105,12 @@ float3 TerrainHeightSample(float2 uv)
     float b = terrainHeightAtlas.Load(int3(hi.x,lo.y,0));
     float c = terrainHeightAtlas.Load(int3(lo.x,hi.y,0));
     float d = terrainHeightAtlas.Load(int3(hi,0));
+#if defined(OPENSHIM_HEIGHT_NORMALIZED)
+    a *= OPENSHIM_RELIEF_AMPLITUDE;
+    b *= OPENSHIM_RELIEF_AMPLITUDE;
+    c *= OPENSHIM_RELIEF_AMPLITUDE;
+    d *= OPENSHIM_RELIEF_AMPLITUDE;
+#endif
     if (!all(isfinite(float4(a,b,c,d))) ||
         any(abs(float4(a,b,c,d)) > OPENSHIM_RELIEF_AMPLITUDE)) return 0.0;
     float value = lerp(lerp(a,b,f.x),lerp(c,d,f.x),f.y);

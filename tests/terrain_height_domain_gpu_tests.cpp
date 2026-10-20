@@ -15,7 +15,9 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "terrain_height_domain_binding.h"
 using Microsoft::WRL::ComPtr;
+static bool normalizedHeight = false;
 static void check(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
 static void ok(HRESULT result) { check(SUCCEEDED(result), "D3D11 height-domain operation failed"); }
 struct Vertex { float position[4], view[3], uv[2], normal[3], tangent[3]; };
@@ -24,7 +26,7 @@ static_assert(sizeof(Output)==28*sizeof(float));
 static ComPtr<ID3DBlob> compile(const std::string& source, const char* entry, const char* target)
 {
     const D3D_SHADER_MACRO macros[]={{"OPENSHIM_RELIEF_TEST","1"},{"OPENSHIM_HEIGHT_TEST","1"},
-        {"OPENSHIM_RELIEF_AMPLITUDE","1"},{"OPENSHIM_TESS_FACTOR","4"},
+        {"OPENSHIM_RELIEF_AMPLITUDE",normalizedHeight ? ".625" : "1"},{"OPENSHIM_TESS_FACTOR","4"},
         {"NORMALMAP_ENABLED","1"},{"VERTEX_TANGENTS","1"},{"SHADOWRECEIVER","1"},{"PSSM_ENABLED","1"},{nullptr,nullptr}};
     ComPtr<ID3DBlob> code,errors;
     HRESULT result=D3DCompile(source.data(),source.size(),nullptr,macros,nullptr,entry,target,D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&errors);
@@ -80,12 +82,14 @@ static ComPtr<ID3D11ShaderResourceView> height_texture(ID3D11Device* device, int
     ok(device->CreateTexture2D(&desc,&data,&texture)); ComPtr<ID3D11ShaderResourceView> view;
     ok(device->CreateShaderResourceView(texture.Get(),nullptr,&view)); return view;
 }
-int main()
+static int run(bool normalized)
 {
+    normalizedHeight = normalized;
     try
     {
         std::ifstream file(TERRAIN_TESS_SHADER_PATH,std::ios::binary);
         std::string source((std::istreambuf_iterator<char>(file)),{});
+        if (normalized) source = "#define OPENSHIM_HEIGHT_NORMALIZED 1\n" + source;
         check(!source.empty(),"terrain shader missing");
         source+=R"(
 struct TestInput { float4 position:POSITION; float3 view:TEXCOORD0; float2 uv:TEXCOORD1; float3 normal:NORMAL; float3 tangent:TANGENT; };
@@ -130,6 +134,28 @@ void Capture(triangle TerrainTessVertex input[3],inout TriangleStream<TerrainTes
         ok(device->CreateBuffer(&outDesc,nullptr,&staging));
         auto sentinel=height_texture(device.Get(),0); ID3D11ShaderResourceView* psSentinel=sentinel.Get();
         context->PSSetShaderResources(2,1,&psSentinel);
+        {
+            BZROpenShim::TerrainHeight::DomainBinding binding;
+            auto previous=height_texture(device.Get(),1), foreign=height_texture(device.Get(),4);
+            auto* previousRaw=previous.Get(); context->DSSetShaderResources(127,1,&previousRaw);
+            binding.view=sentinel; binding.domains.emplace_back(domain.Get());
+            binding.Select(context.Get(),domain.Get());
+            check(binding.Bound(context.Get()),"owned height not bound to exact domain");
+            binding.Select(context.Get(),domain.Get());
+            check(binding.binds==1,"repeat domain bind overwrote saved resource");
+            context->DSSetShader(nullptr,nullptr,0); binding.Select(context.Get(),nullptr);
+            ComPtr<ID3D11ShaderResourceView> restored;
+            context->DSGetShaderResources(127,1,&restored);
+            check(restored.Get()==previous.Get()&&binding.restores==1,"foreign domain did not restore original DS resource");
+            context->DSSetShader(domain.Get(),nullptr,0); binding.Select(context.Get(),domain.Get());
+            auto* foreignRaw=foreign.Get(); context->DSSetShaderResources(127,1,&foreignRaw);
+            context->DSSetShader(nullptr,nullptr,0); binding.Select(context.Get(),nullptr);
+            restored.Reset(); context->DSGetShaderResources(127,1,&restored);
+            check(restored.Get()==foreign.Get()&&binding.binds==binding.restores,"height restore overwrote a foreign writer");
+            context->DSSetShader(domain.Get(),nullptr,0); binding.Select(context.Get(),domain.Get());
+            binding.Reset(); restored.Reset(); context->DSGetShaderResources(127,1,&restored);
+            check(restored.Get()==foreign.Get(),"mission cleanup failed to restore prior resource");
+        }
         unsigned runs=0;
         for (int orientation=0;orientation<4;++orientation)
         for (float eye:{0.f,320.f})
@@ -174,7 +200,7 @@ void Capture(triangle TerrainTessVertex input[3],inout TriangleStream<TerrainTes
                 const float h=o.view[1]-baseY;
                 for (size_t n=0;n<sizeof(Output)/sizeof(float);++n)
                 { float value; std::memcpy(&value,reinterpret_cast<const unsigned char*>(&o)+n*sizeof(float),sizeof(float)); check(std::isfinite(value),"nonfinite domain output"); }
-                check(std::abs(h)<=1,"height exceeded padded bounds");
+                check(std::abs(h)<=(normalized ? .625f : 1.f),"height exceeded padded bounds");
                 if (std::abs(h)>.001f) ++displaced;
                 check(std::abs(o.position[1]-o.view[1])<1e-5f,"height did not move clip geometry");
                 check(std::abs(o.position[2]-(o.view[2]+.25f*o.view[1]))<1e-4f,"clip depth not displaced consistently");
@@ -183,9 +209,10 @@ void Capture(triangle TerrainTessVertex input[3],inout TriangleStream<TerrainTes
                 const float u=o.uv[0],v=o.uv[1];
                 if (field==1&&orientation<3&&u>.02f&&u<.98f&&v>.02f&&v<.98f)
                 {
-                    ++interior; check(std::abs(h-(.3f*u+.2f*v-.25f))<2e-5f,"domain height differs from signed texture meters");
-                    float dx=.3f/20,dz=.2f/20;
-                    if (orientation==1) { dx=-.2f/20; dz=.3f/20; }
+                    const float gain=normalized ? .625f : 1.f;
+                    ++interior; check(std::abs(h-gain*(.3f*u+.2f*v-.25f))<2e-5f,"domain height differs from scaled signed texture");
+                    float dx=gain*.3f/20,dz=gain*.2f/20;
+                    if (orientation==1) { dx=-gain*.2f/20; dz=gain*.3f/20; }
                     if (orientation==2) dx=-dx;
                     const float totalX=slope+dx,totalZ=slope*.5f+dz;
                     float length=std::sqrt(totalX*totalX+1+totalZ*totalZ);
@@ -211,3 +238,4 @@ void Capture(triangle TerrainTessVertex input[3],inout TriangleStream<TerrainTes
     }
     catch(const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }
 }
+int main() { if (run(false)) return 1; return run(true); }

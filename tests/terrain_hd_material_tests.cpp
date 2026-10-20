@@ -1,4 +1,5 @@
 #include "terrain_hd_material.h"
+#include "terrain_height_texture.h"
 #include "test_check.h"
 #include <filesystem>
 #include <fstream>
@@ -11,6 +12,24 @@ using OpenShimTest::Require;
 
 int main(int argc, char** argv)
 {
+    std::vector<uint8_t> heightBytes(128+16*16*4,0);
+    auto word=[&](size_t offset,uint32_t value){std::memcpy(heightBytes.data()+offset,&value,4);};
+    std::memcpy(heightBytes.data(),"DDS ",4);
+    word(4,124);word(12,16);word(16,16);word(20,64);word(76,32);word(80,4);word(84,114);
+    auto expectHeightReject=[&](){
+        bool rejected=false;
+        try{(void)BZROpenShim::TerrainHeight::Decode(heightBytes);}catch(const std::runtime_error&){rejected=true;}
+        Require(rejected,"unsafe height DDS accepted");
+    };
+    Require(BZROpenShim::TerrainHeight::Decode(heightBytes).values.size()==256,"bounded R32 height rejected");
+    word(112,0x200);expectHeightReject();word(112,0);
+    word(28,2);expectHeightReject();word(28,0);
+    word(84,113);expectHeightReject();word(84,114);
+    word(128,0x7fc00000);expectHeightReject(); // NaN
+    word(128,0x40000000);expectHeightReject(); // +2 exceeds normalized envelope
+    word(128,0xbf800000); // -1 is a valid crater floor
+    Require(BZROpenShim::TerrainHeight::Decode(heightBytes).values[0]==-1,"negative crater height rejected");
+    heightBytes.pop_back();expectHeightReject();
     Require(HD::ScaledMicroReliefAmplitude(.25f, 2.5f) == .625f &&
         HD::ScaledMicroReliefAmplitude(.25f, 1.f) == .25f &&
         HD::ScaledMicroReliefAmplitude(.25f, 0.f) == 0.f &&

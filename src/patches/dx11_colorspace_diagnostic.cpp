@@ -5,6 +5,7 @@
 #include "iat_patch.h"
 #include "shim_log.h"
 #include "terrain_proxy.h"
+#include "terrain_height_texture.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -79,6 +80,7 @@ namespace BZROpenShim
         std::atomic<uintptr_t> g_BackbufferIdentity{ 0 };
         std::atomic<bool> g_ColorSpaceDiagnosticEnabled{ false };
         std::atomic<bool> g_TerrainProbeEnabled{ false };
+        std::atomic<bool> g_HeightBindingRequested{ false };
         std::atomic<unsigned> g_TerrainCaptureCount{ 0 };
         uintptr_t g_DiscoveryThread = 0;
 
@@ -150,6 +152,9 @@ namespace BZROpenShim
 
         using FnContextPSSetShaderResources = void(STDMETHODCALLTYPE*)(
             ID3D11DeviceContext*, UINT, UINT, ID3D11ShaderResourceView* const*);
+        using FnContextDSSetShader = void(STDMETHODCALLTYPE*)(
+            ID3D11DeviceContext*, ID3D11DomainShader*, ID3D11ClassInstance* const*, UINT);
+        FnContextDSSetShader g_RealDSSetShader = nullptr;
 
         using FnContextOMSetRenderTargets = void(STDMETHODCALLTYPE*)(
             ID3D11DeviceContext*, UINT, ID3D11RenderTargetView* const*, ID3D11DepthStencilView*);
@@ -1546,6 +1551,14 @@ namespace BZROpenShim
             }
         }
 
+        void STDMETHODCALLTYPE HookDSSetShader(ID3D11DeviceContext* self,
+            ID3D11DomainShader* shader, ID3D11ClassInstance* const* classes, UINT count)
+        {
+            g_RealDSSetShader(self, shader, classes, count);
+            try { TerrainHeightDomainChanged(self, shader); }
+            catch (...) { NoteObservationThrew("DSSetShader height binding"); }
+        }
+
         void STDMETHODCALLTYPE HookOMSetRenderTargets(
             ID3D11DeviceContext* self,
             UINT numViews,
@@ -1757,6 +1770,13 @@ namespace BZROpenShim
                 LogCurrentViewports(context, "device-capture");
             }
 
+            if (g_TerrainProbeEnabled.load(std::memory_order_acquire) ||
+                g_HeightBindingRequested.load(std::memory_order_acquire))
+            {
+                const bool domainHook = PatchComVtableEntry(context, TerrainHeight::kDomainShaderSetterSlot, &HookDSSetShader,
+                    g_RealDSSetShader, "ID3D11DeviceContext::DSSetShader (owned terrain height)");
+                if (domainHook) { TerrainHeightDomainHookInstalled(); ++attached; }
+            }
             if (g_TerrainProbeEnabled.load(std::memory_order_acquire))
             {
                 attached += PatchComVtableEntry(
@@ -2236,15 +2256,21 @@ namespace BZROpenShim
         g_TessStatisticsEnabled = tessLength > 0 && tessLength < sizeof(tessTest) &&
             BoolToken::IsTruthy(tessTest, tessLength);
         const bool terrainProbeRequested = TerrainProbeRequested() || g_TessStatisticsEnabled;
+        const bool heightBindingRequested =
+            DiagnosticSwitch::Requested("OPENSHIM_TERRAIN_MICRO_RELIEF_TEST", "Terrain", "TerrainMicroRelief") &&
+            DiagnosticSwitch::Requested("OPENSHIM_TERRAIN_HD", "Terrain", "TerrainHdEnabled");
         if (g_TessStatisticsEnabled)
             LogShimA(LogLevel::Info, "terrain-tess", "[TERRAIN-TESS] GPU statistics observer requested");
-        if (!colorSpaceRequested && !terrainProbeRequested)
+        if (!colorSpaceRequested && !terrainProbeRequested && !heightBindingRequested)
             return;
         if (g_DiscoveryThread)
             return;
 
         g_ColorSpaceDiagnosticEnabled.store(colorSpaceRequested, std::memory_order_release);
         g_TerrainProbeEnabled.store(terrainProbeRequested, std::memory_order_release);
+        g_HeightBindingRequested.store(heightBindingRequested, std::memory_order_release);
+        if (heightBindingRequested)
+            LogShimA(LogLevel::Info, "terrain-height", "[TERRAIN-HEIGHT] domain binding requested by terrain feature settings");
         if (terrainProbeRequested)
         {
             g_TerrainProbeConfig = ReadTerrainProbeConfig();
