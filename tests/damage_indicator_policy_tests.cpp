@@ -120,6 +120,28 @@ int main()
                         r.left <= r.right && r.top <= r.bottom, "edge arcs stay inside current pane");
                 }
             }
+    {
+        // A fresh hit kicks the arc outward and thicker; more attackers press harder.
+        DamageIndicatorSettings dim = settings; dim.opacity = 50;
+        const auto calm = MakeDamageIndicatorPlan(dim,500,350,1,1,clip,0,1,0.5f,{},0,1);
+        const auto kicked = MakeDamageIndicatorPlan(dim,500,350,1,1,clip,0,1,0.5f,{},1,1);
+        const auto pressed = MakeDamageIndicatorPlan(dim,500,350,1,1,clip,0,1,0.5f,{},0,4);
+        const auto mobbed = MakeDamageIndicatorPlan(dim,500,350,1,1,clip,0,1,0.5f,{},0,99);
+        const auto height = [](const DrawPlan& p) { return p.rects[16].bottom - p.rects[16].top; };
+        Check(calm.count == 32 && kicked.count == 32 && pressed.count == 32, "kick and pressure add no geometry");
+        Check(kicked.rects[16].top < calm.rects[16].top, "kick pushes the arc outward");
+        Check(height(kicked) > height(calm) && height(pressed) > height(calm), "kick and pressure thicken the arc");
+        Check((pressed.rects[16].color >> 24) > (calm.rects[16].color >> 24), "pressure brightens the arc");
+        Check(height(mobbed) == height(pressed), "pressure caps at four attackers");
+        Check(MakeDamageIndicatorPlan(dim,500,350,1,1,clip,0,1,0.5f,{},
+              std::numeric_limits<float>::quiet_NaN(),1).rects[16].top == calm.rects[16].top, "bad kick is ignored");
+        IncomingPulses two;
+        two.Add(5000,600,1,2,{0,0,1},0.1f);
+        two.Add(5300,600,1,3,{1,0,0},0.1f);
+        const auto g = GroupIncomingArcs(two,5300,600,1,identity);
+        Check(g.attackers == 2 && g.count == 2, "attackers are counted across directions");
+        Check(g.entries[0].kick == 0 && g.entries[1].kick == 1, "only the fresh hit's arc kicks");
+    }
     Check(MakeDamageIndicatorPlan(settings,500,350,1,1,clip,0,0,1).count == 0, "expired arc draws nothing");
     Check(MakeDamageIndicatorPlan(settings,500,350,9,1,clip,0,1,1).count == 0, "bad scale fails closed");
     Check(MakeDamageIndicatorPlan(settings,99,350,1,1,clip,0,1,1).count == 0, "off-pane aim fails closed");

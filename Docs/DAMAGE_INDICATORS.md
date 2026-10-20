@@ -36,6 +36,11 @@ position supplies bearing; this initial adapter does not claim the explosion
 center or an exact ballistic arrival vector. Health loss as a fraction of
 maximum health controls thickness and brightness, saturating at 20 percent.
 The first half of the configured duration holds; the second half fades.
+Each new hit kicks its arc slightly outward and thicker, easing out over the
+first 45 percent of the duration. The number of distinct recent attackers
+across all directions adds pressure: each one beyond the first (up to four)
+makes every arc 20 percent thicker and brighter, so focused fire reads
+differently from a single attacker.
 Up to eight recent attackers are stored, each identified by its full handle.
 Hits from one attacker refresh that attacker's existing pulse and captured
 direction. Different attackers sharing a nearby screen bearing (about 20°)

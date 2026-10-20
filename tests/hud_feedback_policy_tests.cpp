@@ -103,7 +103,8 @@ int main()
     size_t previewCount = 0;
     for (int i = 0; i < 3; ++i)
         previewCount += MakeDrawPlan(settings, 820 + i * 150, 550, 2, 2,
-                                    {750, 490, 1200, 620, 0}, i != 0, i == 2 ? 1.0f : 0.0f).count;
+                                    {750, 490, 1200, 620, 0}, i != 0, i == 2 ? 1.0f : 0.0f,
+                                    i == 1 ? Relation::Enemy : i == 2 ? Relation::Friend : Relation::None).count;
     Check(previewCount <= 96, "all three UI samples fit their owned quad pool");
     Check(pulse.Strength(100, 120) == 0, "no initial hit pulse");
     pulse.Start(100);
@@ -114,5 +115,58 @@ int main()
     Check(pulse.Strength(209, 120) == 0, "backward clock does not revive stale feedback");
     pulse.Reset();
     Check(pulse.Strength(220, 120) == 0, "mission reset removes feedback");
+    // Team tint: only reactive contact changes color; neutral/unclassified keep it.
+    {
+        Settings tint; tint.style = Style::Cross; tint.reactive = true; tint.color = 0xFFFFFFFFu;
+        const auto rgb = [&](bool contact, Relation relation) {
+            return MakeDrawPlan(tint, 500, 350, 1, 1, pane, contact, 0, relation).rects[0].color & 0xFFFFFFu;
+        };
+        Check(rgb(true, Relation::Enemy) == (kEnemyColor & 0xFFFFFFu), "enemy contact tints red");
+        Check(rgb(true, Relation::Friend) == (kFriendColor & 0xFFFFFFu), "friendly contact tints green");
+        Check(rgb(true, Relation::Neutral) == 0xFFFFFFu && rgb(true, Relation::None) == 0xFFFFFFu,
+              "neutral and unclassified contacts keep the configured color");
+        Check(rgb(false, Relation::Enemy) == 0xFFFFFFu, "no contact means no tint");
+        tint.reactive = false;
+        Check(rgb(true, Relation::Enemy) == 0xFFFFFFu, "tint requires ReactiveReticle");
+        tint.style = Style::Stock; tint.reactive = true;
+        const auto stockContact = MakeDrawPlan(tint, 500, 350, 1, 1, pane, true, 0, Relation::Friend);
+        Check(stockContact.count == 2 && !stockContact.replacesStock &&
+              (stockContact.rects[0].color & 0xFFFFFFu) == (kFriendColor & 0xFFFFFFu),
+              "stock sprite stays; only brackets take the tint");
+    }
+    // Hit pulse: the kick pops the ticks outward, then they settle.
+    {
+        Pulse kick;
+        kick.Start(1000, 7);
+        Check(kick.Kick(1000, 200) == 1 && std::abs(kick.Kick(1045, 200) - 0.25f) < 1e-4f && kick.Kick(1090, 200) == 0 &&
+              kick.Kick(999, 200) == 0, "kick eases from impact to zero by 45 percent");
+        Settings marker; marker.hits = true;
+        const auto settled = MakeDrawPlan(marker, 500, 350, 1, 1, pane, false, 1, Relation::None, 0, 1);
+        const auto popped = MakeDrawPlan(marker, 500, 350, 1, 1, pane, false, 1, Relation::None, 1, 1);
+        Check(settled.count == 16 && popped.count == 16, "the kick does not add geometry");
+        Check(popped.rects[0].left < settled.rects[0].left, "the kick pushes ticks outward");
+        Check(popped.rects[0].right - popped.rects[0].left > settled.rects[0].right - settled.rects[0].left,
+              "the kick thickens ticks");
+        const auto bad = MakeDrawPlan(marker, 500, 350, 1, 1, pane, false, 1, Relation::None,
+                                      std::numeric_limits<float>::quiet_NaN(), 1);
+        Check(bad.count == 16 && bad.rects[0].left == settled.rects[0].left, "non-finite kick is ignored");
+        // Distinct victims scale the marker; repeat hits on one target do not.
+        kick.Start(1010, 7);
+        Check(kick.Targets(1010, 200) == 1, "repeat hits on one victim count once");
+        kick.Start(1020, 8); kick.Start(1030, 9);
+        Check(kick.Targets(1030, 200) == 3, "distinct victims are counted");
+        Check(kick.Targets(1215, 200) == 2, "victims expire with the duration");
+        Check(kick.Targets(1300, 200) == 0, "no pulse means no targets");
+        const auto three = MakeDrawPlan(marker, 500, 350, 1, 1, pane, false, 1, Relation::None, 1, 3);
+        Check(three.count == 24 && three.rects[0].left < popped.rects[0].left, "more targets: longer, larger ticks");
+        Check(MakeDrawPlan(marker, 500, 350, 1, 1, pane, false, 1, Relation::None, 1, 99).count == 28,
+              "target scaling caps at four");
+        Pulse plain; plain.Start(100);
+        Check(plain.Targets(100, 120) == 1, "a pulse without victim handles still counts one target");
+        Settings worst; worst.style = Style::CrossDot; worst.reactive = true; worst.outline = true;
+        worst.hits = true; worst.sizePercent = 200; worst.hitSizePercent = 200; worst.thickness = 3;
+        const auto big = MakeDrawPlan(worst, 500, 350, 8, 8, pane, true, 1, Relation::Enemy, 1, 4);
+        Check(big.count <= 96, "worst-case tinted, kicked, four-target plan fits storage");
+    }
     return OpenShimTest::ExitCode();
 }

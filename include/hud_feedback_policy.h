@@ -76,18 +76,67 @@ namespace BZROpenShim::HudFeedback
             s.before > 0.0f && s.after < s.before;
     }
 
+    // How the local player relates to the stock reticle's current object.
+    // None means no classification (no contact, ambiguous or disguised).
+    enum class Relation { None, Neutral, Friend, Enemy };
+
+    inline constexpr uint32_t kFriendColor = 0xFF40FF40u;
+    inline constexpr uint32_t kEnemyColor = 0xFFFF4040u;
+
+    inline uint32_t RelationColor(Relation relation, uint32_t fallback)
+    {
+        if (relation == Relation::Friend) return kFriendColor;
+        if (relation == Relation::Enemy) return kEnemyColor;
+        return fallback;
+    }
+
     struct Pulse
     {
         uint64_t started = 0;
         bool active = false;
+        // Distinct victims confirmed recently, so splash hitting several
+        // objects reads larger than one. Full handles; never object pointers.
+        std::array<int, 8> victims{};
+        std::array<uint64_t, 8> victimTicks{};
         void Start(uint64_t now) { started = now; active = true; }
-        void Reset() { active = false; }
+        void Start(uint64_t now, int victim)
+        {
+            Start(now);
+            if (!victim) return;
+            size_t slot = 0;
+            for (size_t i = 0; i < victims.size(); ++i)
+            {
+                if (victims[i] == victim) { slot = i; break; }
+                if (victimTicks[i] < victimTicks[slot]) slot = i;
+            }
+            victims[slot] = victim;
+            victimTicks[slot] = now;
+        }
+        void Reset() { active = false; victims = {}; victimTicks = {}; }
         float Strength(uint64_t now, int durationMs) const
         {
             if (!active || now < started || durationMs <= 0) return 0;
             const uint64_t elapsed = now - started;
             if (elapsed >= static_cast<uint64_t>(durationMs)) return 0;
             return std::min(1.0f, 2.0f * (1.0f - static_cast<float>(elapsed) / durationMs));
+        }
+        // 1 at the confirming hit, easing to 0 over the first 45 percent of
+        // the duration: the marker pops outward and settles while it holds.
+        float Kick(uint64_t now, int durationMs) const
+        {
+            if (!active || now < started || durationMs <= 0) return 0;
+            const float progress = static_cast<float>(now - started) / durationMs;
+            if (progress >= 0.45f) return 0;
+            const float k = 1.0f - progress / 0.45f;
+            return k * k;
+        }
+        int Targets(uint64_t now, int durationMs) const
+        {
+            if (Strength(now, durationMs) <= 0) return 0;
+            int count = 0;
+            for (size_t i = 0; i < victims.size(); ++i)
+                if (victims[i] && victimTicks[i] <= now && now - victimTicks[i] < static_cast<uint64_t>(durationMs)) ++count;
+            return std::max(count, 1);
         }
     };
 
@@ -100,7 +149,8 @@ namespace BZROpenShim::HudFeedback
     };
 
     inline DrawPlan MakeDrawPlan(const Settings& settings, int x, int y, float scaleX, float scaleY,
-                                Rect clip, bool contact, float hitStrength)
+                                Rect clip, bool contact, float hitStrength,
+                                Relation relation = Relation::None, float hitKick = 0, int hitTargets = 1)
     {
         DrawPlan plan;
         // Reject corrupt/stale panes and unreasonable scales before rounding.
@@ -130,24 +180,27 @@ namespace BZROpenShim::HudFeedback
             add(left, top, right, bottom, (a << 24) | (rgb & 0xFFFFFFu));
         };
         const bool reacts = settings.reactive && contact;
+        // Reactive feedback tints the reticle by team relation; an
+        // unclassified or neutral contact keeps the configured color.
+        const uint32_t color = reacts ? RelationColor(relation, settings.color) : settings.color;
         const float gap = reacts ? 1.0f : 3.0f;
         const float half = width * 0.5f;
         if (settings.style == Style::Cross || settings.style == Style::CrossDot)
         {
-            rect(-8, -half, -gap, half, settings.color, alpha);
-            rect(gap, -half, 8, half, settings.color, alpha);
-            rect(-half, -8, half, -gap, settings.color, alpha);
-            rect(-half, gap, half, 8, settings.color, alpha);
+            rect(-8, -half, -gap, half, color, alpha);
+            rect(gap, -half, 8, half, color, alpha);
+            rect(-half, -8, half, -gap, color, alpha);
+            rect(-half, gap, half, 8, color, alpha);
         }
         if (settings.style == Style::Dot || settings.style == Style::CrossDot)
-            rect(-half, -half, half, half, settings.color, alpha);
+            rect(-half, -half, half, half, color, alpha);
         // Contact brackets also work with the unmodified stock sprite.
         if (reacts)
         {
             for (const int sign : {-1, 1})
             {
                 const float side = sign * 11.0f;
-                rect(side - half, -3, side + half, 3, settings.color, alpha);
+                rect(side - half, -3, side + half, 3, color, alpha);
             }
         }
         if (std::isfinite(hitStrength) && hitStrength > 0)
@@ -155,13 +208,21 @@ namespace BZROpenShim::HudFeedback
             const uint32_t hitAlpha = static_cast<uint32_t>(
                 std::clamp(settings.hitOpacity, 25, 100) * 255 / 100 * std::min(hitStrength, 1.0f));
             const float hitSize = static_cast<float>(std::clamp(settings.hitSizePercent, 50, 200)) / percent;
+            const float kick = std::isfinite(hitKick) ? std::clamp(hitKick, 0.0f, 1.0f) : 0.0f;
+            // More targets confirmed in one window (splash, sweeps) read as
+            // a bigger, longer marker: up to four targets add 30 percent each.
+            const int targets = std::clamp(hitTargets, 1, 4);
+            const float boost = 1.0f + 0.3f * static_cast<float>(targets - 1);
+            const float push = kick * 5.0f * boost;
+            const float tick = half * (1.0f + 0.5f * kick);
+            const int steps = 4 + (targets - 1);
             for (const int dx : {-1, 1}) for (const int dy : {-1, 1})
-                for (int step = 0; step < 4; ++step)
+                for (int step = 0; step < steps; ++step)
                 {
-                    const float px = dx * (11.0f + step);
-                    const float py = dy * (11.0f + step);
-                    rect((px - half) * hitSize, (py - half) * hitSize,
-                         (px + half) * hitSize, (py + half) * hitSize, settings.hitColor, hitAlpha);
+                    const float px = dx * (11.0f + push + step);
+                    const float py = dy * (11.0f + push + step);
+                    rect((px - tick) * hitSize, (py - tick) * hitSize,
+                         (px + tick) * hitSize, (py + tick) * hitSize, settings.hitColor, hitAlpha);
                 }
         }
         plan.replacesStock = settings.style != Style::Stock && plan.count != 0;
