@@ -143,6 +143,8 @@ namespace
             return TryReadMappedBool(ini, "Experimental", "MouseEveryFrame", false, out);
         if (Equals(name, "OPENSHIM_DISABLE_THREAD_SCHEDULING"))
             return TryReadMappedBool(ini, "Fixes", "ThreadScheduling", true, out);
+        if (Equals(name, "OPENSHIM_DISABLE_MUSIC_SINGLE_FILL"))
+            return TryReadMappedBool(ini, "Fixes", "MusicSingleFill", true, out);
 
         // Working runtime features use positive INI keys; legacy DISABLE_*
         // environment names are inverted here so old call-site semantics remain

@@ -40,6 +40,7 @@
 #include "ogre_animation_profiler.h"
 #include "native_cpu_sampler.h"
 #include "perf_telemetry.h"
+#include "music_single_fill.h"
 #include "precise_timestep.h"
 #include "mouse_every_frame.h"
 #include "thread_scheduling.h"
@@ -216,6 +217,8 @@ static unsigned __stdcall PatchThreadProc(void*)
     // MMCSS + power-throttling opt-out ([Fixes] ThreadScheduling). After perf
     // telemetry so its renderOneFrame import hook chains telemetry's.
     PATCH_STAGE(BZROpenShim::InitializeThreadScheduling());
+    // Skip the redundant first decode at music track start ([Fixes] MusicSingleFill).
+    PATCH_STAGE(BZROpenShim::InitializeMusicSingleFill());
     PATCH_STAGE(BZROpenShim::InitializeNativeCpuSampler());
 
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");

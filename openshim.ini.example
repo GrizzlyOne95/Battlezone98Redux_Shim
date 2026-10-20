@@ -471,6 +471,16 @@ ConstructorRecycleStaleTarget = 1
 ; Env alias to force it off: OPENSHIM_DISABLE_PRECISE_TIMESTEP
 PreciseTimestep = 1
 
+; Starting a music track runs on the main thread: it reads the whole .ogg,
+; builds the streaming sound, whose constructor decodes a 3 s buffer, and then
+; plays it, which rewinds the stream and decodes the same 3 s again. The first
+; decode is never heard. This skips it, removing about a quarter to a third of
+; the 40-50 ms hitch at each track change. Playback is unchanged. See
+; reverse_engineering/frame_hitch_va_measurement_20261020.md.
+; Accepted: boolean. Default: ON. Client-local audio; also runs in network games.
+; Env alias to force it off: OPENSHIM_DISABLE_MUSIC_SINGLE_FILL
+MusicSingleFill = 1
+
 ; Skip magnet-mine attraction when the ODF declares a non-finite or
 ; non-positive range, which otherwise faults. Base Mine::Simulate still runs,
 ; so mine lifetime and removal are unchanged. Only content with a broken range

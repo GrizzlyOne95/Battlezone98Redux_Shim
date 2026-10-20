@@ -195,6 +195,7 @@
     <ClInclude Include="include\diagnostic_output_cap.h" />
     <ClInclude Include="include\native_cpu_sampler.h" />
     <ClInclude Include="include\perf_telemetry.h" />
+    <ClInclude Include="include\music_single_fill.h" />
     <ClInclude Include="include\precise_timestep.h" />
     <ClInclude Include="include\mouse_every_frame.h" />
     <ClInclude Include="include\thread_scheduling.h" />
