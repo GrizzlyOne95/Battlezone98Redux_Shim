@@ -203,7 +203,7 @@ That build resolved `SetLoopTimes` through its fallback address, because the `re
 ### Next
 
 1. Physical console, 144 Hz or uncapped: repeat the lcbench off/on rounds (off = `OPENSHIM_DISABLE_PRECISE_TIMESTEP=1`), then look at the step error line and judge motion by eye.
-2. A separate experiment that removes the 60 Hz mouse bucket in 0x00623B20 (per-frame mouse at high refresh). This is the likelier aim win.
+2. A separate experiment that removes the 60 Hz mouse bucket in 0x00623B20 (per-frame mouse at high refresh). This is the likelier aim win. Prototyped as `[Experimental] MouseEveryFrame`; see `mouse_every_frame_20261020.md`.
 
 ## Recommended next steps
 

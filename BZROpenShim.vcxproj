@@ -194,6 +194,7 @@
     <ClInclude Include="include\native_cpu_sampler.h" />
     <ClInclude Include="include\perf_telemetry.h" />
     <ClInclude Include="include\precise_timestep.h" />
+    <ClInclude Include="include\mouse_every_frame.h" />
     <ClInclude Include="include\net_optimizer.h" />
     <ClInclude Include="include\net_reorder_core.h" />
     <ClInclude Include="include\shim_log.h" />

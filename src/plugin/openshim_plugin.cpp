@@ -41,6 +41,7 @@
 #include "native_cpu_sampler.h"
 #include "perf_telemetry.h"
 #include "precise_timestep.h"
+#include "mouse_every_frame.h"
 #include "pilot_fp_animation_trace.h"
 #include "walker_cockpit_trace.h"
 #include "openshim_sdk_v2.h"
@@ -209,6 +210,8 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializePerfTelemetry());
     // Opt-in QPC-precise simulation step ([Experimental] PreciseTimestep).
     PATCH_STAGE(BZROpenShim::InitializePreciseTimestep());
+    // Opt-in per-frame mouse look ([Experimental] MouseEveryFrame).
+    PATCH_STAGE(BZROpenShim::InitializeMouseEveryFrame());
     PATCH_STAGE(BZROpenShim::InitializeNativeCpuSampler());
 
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");
