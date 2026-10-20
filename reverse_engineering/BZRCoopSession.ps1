@@ -111,9 +111,13 @@ function Install-OpenShimBuild([string]$Dir) {
         Copy-Item -LiteralPath $src -Destination (Join-Path $Dir $rel) -Force
     }
     Copy-Item -LiteralPath (Join-Path $OpenShimRepo 'scripts\patches.json') -Destination (Join-Path $Dir 'scripts\patches.json') -Force
+    # Mirrored, not copied over: the instance's openshim folder starts as a
+    # copy of the real install's, and a file a newer build added there (say
+    # openshim_menu_theme.program) shadows this build's payload, so Enhanced
+    # refuses the whole set and CR's shaders have nothing to load.
     $render = Join-Path $Dir 'openshim\renderer\enhanced'
-    New-Item -ItemType Directory -Path $render -Force | Out-Null
-    Copy-Item -Path (Join-Path $OpenShimRepo 'resources\renderer\enhanced\*') -Destination $render -Force
+    robocopy (Join-Path $OpenShimRepo 'resources\renderer\enhanced') $render /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "robocopy of the build's renderer resources failed ($LASTEXITCODE)" }
     $assets = Join-Path $OpenShimRepo 'resources\openshim\OpenShimAssets.ini'
     if (Test-Path -LiteralPath $assets) { Copy-Item -LiteralPath $assets -Destination (Join-Path $Dir 'openshim') -Force }
 }
