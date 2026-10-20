@@ -41,6 +41,7 @@
 #include "game_log_path.h"
 #include "iat_patch.h"
 #include "native_cpu_sampler.h"
+#include "precise_timestep.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -165,9 +166,16 @@ namespace BZROpenShim
             uint64_t renderEndQpc;
             int32_t runState;
             uint32_t flags;
+            // The simulation step this frame's sim tick ran with, sampled at
+            // renderOneFrame. SetLoopTimes measured it as the previous loop
+            // period, so it pairs with the previous record's interval.
+            uint32_t rawStepMs;
+            float stepSeconds;
         };
-        static_assert(sizeof(FrameRecord) == 24, "frame record layout is part of the file format");
+        static_assert(sizeof(FrameRecord) == 32, "frame record layout is part of the file format");
         constexpr uint32_t kFrameFlagHitch = 1u << 0;
+        constexpr uint32_t kFrameFlagPreciseStep = 1u << 1;
+        constexpr uint32_t kFrameFlagStepUnknown = 1u << 2;
 
         enum class VaReason : int
         {
@@ -810,7 +818,21 @@ namespace BZROpenShim
                 ReleaseSRWLockExclusive(&g_FrameLock);
             }
 
-            g_Pending = FrameRecord{ nowQpc, 0, runState, 0 };
+            g_Pending = FrameRecord{ nowQpc, 0, runState, 0, 0, 0.0f };
+            TimestepSample step{};
+            if (ReadTimestepSample(step))
+            {
+                g_Pending.rawStepMs = step.rawMs;
+                g_Pending.stepSeconds = step.stepSeconds;
+                if (step.precise)
+                {
+                    g_Pending.flags |= kFrameFlagPreciseStep;
+                }
+            }
+            else
+            {
+                g_Pending.flags |= kFrameFlagStepUnknown;
+            }
             g_HavePending = true;
             ++g_FrameIndex;
         }

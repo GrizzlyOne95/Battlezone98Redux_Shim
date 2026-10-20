@@ -252,6 +252,7 @@
     <ClCompile Include="src\patches\mp_vehicle_preview_fix.cpp" />
     <ClCompile Include="src\patches\native_cpu_sampler.cpp" />
     <ClCompile Include="src\patches\perf_telemetry.cpp" />
+    <ClCompile Include="src\patches\precise_timestep.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
     <ClCompile Include="src\patches\numeric_locale_compat.cpp" />
     <ClCompile Include="src\patches\odf_compat.cpp" />
@@ -394,6 +395,7 @@
     <ClInclude Include="include\diagnostic_output_cap.h" />
     <ClInclude Include="include\native_cpu_sampler.h" />
     <ClInclude Include="include\perf_telemetry.h" />
+    <ClInclude Include="include\precise_timestep.h" />
     <ClInclude Include="include\net_optimizer.h" />
     <ClInclude Include="include\net_reorder_core.h" />
     <ClInclude Include="include\shim_log.h" />

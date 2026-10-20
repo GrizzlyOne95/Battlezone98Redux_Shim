@@ -2371,6 +2371,20 @@ RunInBackground = 0
 ; Default 0. See Docs/INTERACTIVE_FOG_WAKES.md for the remaining milestones.
 InteractiveFogWakes = 0
 
+; ---------------------------------------------------------------------------
+; Precise simulation timestep
+; ---------------------------------------------------------------------------
+; Redux measures each frame in whole milliseconds and hands the simulation that
+; rounded value, so at 144 fps the step alternates 6 and 7 ms while the screen
+; advances 6.94 ms every frame. When on, the per-frame step becomes the measured
+; QPC frame interval; the integer game clock, timers and networking are left
+; unchanged. Single player only: network games, pauses and any frame the two
+; clocks disagree on keep the engine's own step.
+;
+; Default 0. Experimental; see
+; reverse_engineering/frame_hitch_va_measurement_20261020.md.
+PreciseTimestep = 0
+
 [NativeUiDiagnostics]
 ; Development only; shown commented out for the same reason as the
 ; [Diagnostics] development switches above.

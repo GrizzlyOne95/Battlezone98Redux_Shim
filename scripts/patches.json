@@ -478,6 +478,76 @@
   ],
   "resolves": [
     {
+      "name": "SetLoopTimes::FrameCall",
+      "pattern": "68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 C4 04 E8 ?? ?? ?? ?? 83 7D 08 00 75 05 E8",
+      "offset": 13,
+      "mode": "address",
+      "fallback": "0x006182F6",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "SetLoopTimes 0x00822AE0 on GOG Redux 2.2.301 (void(void), no stack args): spins Sleep(1) on the boost posix_time millisecond clock 0x00822E60, then stores the integer dt and its float forms. This is the E8 call at 0x006182F6 in the per-frame entry 0x00618270, after a one-argument cdecl call and before `cmp [ebp+8],0; jne`; the frame function 0x00618130 follows. The menu/load loop 0x00617110 has its own call at 0x0061725F, which is not this site. Redirected by PreciseTimestep."
+    },
+    {
+      "name": "SetLoopTimes",
+      "pattern": "68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 C4 04 E8 ?? ?? ?? ?? 83 7D 08 00 75 05 E8",
+      "offset": 14,
+      "mode": "rel32_target",
+      "fallback": "0x00822AE0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "SetLoopTimes 0x00822AE0 on GOG Redux 2.2.301 (void(void), no stack args): spins Sleep(1) on the boost posix_time millisecond clock 0x00822E60, then stores the integer dt and its float forms. Target of the frame-entry call SetLoopTimes::FrameCall. PreciseTimestep calls it from its wrapper and then rewrites only the float step globals."
+    },
+    {
+      "name": "Timestep::RawMs",
+      "pattern": "A1 ?? ?? ?? ?? A3 ?? ?? ?? ?? 81 3D ?? ?? ?? ?? C8 00 00 00 76 0A C7 05",
+      "offset": 6,
+      "mode": "abs32_operand",
+      "fallback": "0x0094679C",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "SetLoopTimes 0x00822AE0 on GOG Redux 2.2.301 (void(void), no stack args): spins Sleep(1) on the boost posix_time millisecond clock 0x00822E60, then stores the integer dt and its float forms. `mov eax,[clamped]; mov [raw],eax; cmp [clamped],0xC8; jbe` - the uint32 dt copied before the 200 ms clamp. No readers outside SetLoopTimes. Read by perf telemetry and PreciseTimestep."
+    },
+    {
+      "name": "Timestep::ClampedMs",
+      "pattern": "A1 ?? ?? ?? ?? A3 ?? ?? ?? ?? 81 3D ?? ?? ?? ?? C8 00 00 00 76 0A C7 05",
+      "offset": 12,
+      "mode": "abs32_operand",
+      "fallback": "0x00946794",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "SetLoopTimes 0x00822AE0 on GOG Redux 2.2.301 (void(void), no stack args): spins Sleep(1) on the boost posix_time millisecond clock 0x00822E60, then stores the integer dt and its float forms. Operand of `cmp [x],0xC8` in the same sequence: the uint32 dt clamped to 200, zero while paused in single player. No readers outside SetLoopTimes. Read by PreciseTimestep."
+    },
+    {
+      "name": "Timestep::Seconds",
+      "pattern": "F3 0F 11 05 ?? ?? ?? ?? 8B 15 ?? ?? ?? ?? 89 55 F0 F2 0F 2A 45 F0",
+      "offset": 4,
+      "mode": "abs32_operand",
+      "fallback": "0x00946790",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "SetLoopTimes 0x00822AE0 on GOG Redux 2.2.301 (void(void), no stack args): spins Sleep(1) on the boost posix_time millisecond clock 0x00822E60, then stores the integer dt and its float forms. movss store of clamped dt * 0.001: the float step returned by the TimeStep getter 0x00822D60 (about 80 callers: sim 0x00618060, mouse 0x00623B20, physics, AI). Read by perf telemetry; written by PreciseTimestep."
+    },
+    {
+      "name": "Timestep::UnclampedSeconds",
+      "pattern": "F3 0F 11 05 ?? ?? ?? ?? F3 0F 10 05 ?? ?? ?? ?? 0F 2E 05 ?? ?? ?? ?? 9F F6 C4 44",
+      "offset": 4,
+      "mode": "abs32_operand",
+      "fallback": "0x00946788",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "SetLoopTimes 0x00822AE0 on GOG Redux 2.2.301 (void(void), no stack args): spins Sleep(1) on the boost posix_time millisecond clock 0x00822E60, then stores the integer dt and its float forms. movss store of unclamped dt * 0.001, just before the step is compared with 0.0; returned by getter 0x00822D70. Written by PreciseTimestep."
+    },
+    {
+      "name": "Timestep::Inverse",
+      "pattern": "F3 0F 10 45 EC F3 0F 11 05 ?? ?? ?? ?? 8B 15 ?? ?? ?? ?? 89 55 E8",
+      "offset": 9,
+      "mode": "abs32_operand",
+      "fallback": "0x02CC1B34",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "SetLoopTimes 0x00822AE0 on GOG Redux 2.2.301 (void(void), no stack args): spins Sleep(1) on the boost posix_time millisecond clock 0x00822E60, then stores the integer dt and its float forms. movss store of 1/step (HUGE when the step is 0). One write, no readers found. Written by PreciseTimestep to stay consistent."
+    },
+    {
       "name": "PlanetVideo::ViewPlay",
       "pattern": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 40 01 00 00 00 74 14 0F B6 4D 08 51 8B 55 FC 8B 8A 40 01 00 00 FF 15 ?? ?? ?? ?? 8B E5 5D C2 04 00",
       "offset": 0,
