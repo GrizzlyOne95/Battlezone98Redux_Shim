@@ -56,7 +56,12 @@ param(
     [ValidateRange(50, 4000)]
     [int]$SampleHz = 1000,
     [ValidateRange(1, 64)]
-    [int]$SampleDepth = 48
+    [int]$SampleDepth = 48,
+    # Frame-boundary and address-space telemetry (OPENSHIM_PERF_TELEMETRY):
+    # per-frame timestamps, hitch lines and periodic VirtualQuery reports. It
+    # is implied by -SampleCpu; pass it alone for a run whose hitch rates and
+    # magnitudes are not inflated by the sampler's thread suspension.
+    [switch]$PerfTelemetry
 )
 
 $ErrorActionPreference = "Stop"
@@ -203,7 +208,8 @@ $samplerEnvNames = @(
     "OPENSHIM_PROFILE_NATIVE_CPU",
     "OPENSHIM_PROFILE_NATIVE_CPU_HZ",
     "OPENSHIM_PROFILE_NATIVE_CPU_DEPTH",
-    "OPENSHIM_PROFILE_NATIVE_CPU_LABEL")
+    "OPENSHIM_PROFILE_NATIVE_CPU_LABEL",
+    "OPENSHIM_PERF_TELEMETRY")
 $priorSamplerEnv = @{}
 foreach ($samplerEnvName in $samplerEnvNames) {
     $priorSamplerEnv[$samplerEnvName] =
@@ -350,6 +356,14 @@ try {
         "OPENSHIM_PROFILE_NATIVE_CPU_DEPTH",
         $(if ($SampleCpu) { "$SampleDepth" } else { $null }),
         "Process")
+    [Environment]::SetEnvironmentVariable(
+        "OPENSHIM_PERF_TELEMETRY",
+        $(if ($PerfTelemetry -or $SampleCpu) { "1" } else { $null }),
+        "Process")
+    $telemetryFiles = @(
+        @{ Filter = "openshim_cpu_samples_*.bin"; Name = "cpu_samples.bin"; Wanted = [bool]$SampleCpu },
+        @{ Filter = "openshim_frames_*.bin"; Name = "frames.bin"; Wanted = [bool]($SampleCpu -or $PerfTelemetry) },
+        @{ Filter = "openshim_va_*.csv"; Name = "va.csv"; Wanted = [bool]($SampleCpu -or $PerfTelemetry) })
 
     foreach ($rendererName in $Renderer) {
         Set-RendererConfig $rendererName
@@ -389,7 +403,7 @@ try {
                         }
                         $runRoot = Join-Path $sessionRoot $runId
                         New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
-                        if ($SampleCpu) {
+                        if ($SampleCpu -or $PerfTelemetry) {
                             # The sampler names its file after the label and the
                             # process id, so a previous run's file can never be
                             # mistaken for this one's. Clear leftovers anyway:
@@ -397,10 +411,12 @@ try {
                             # pair in the game log directory.
                             [Environment]::SetEnvironmentVariable(
                                 "OPENSHIM_PROFILE_NATIVE_CPU_LABEL", $runId, "Process")
-                            Get-ChildItem -LiteralPath $gameLogRoot `
-                                -Filter "openshim_cpu_samples_*.bin" `
-                                -ErrorAction SilentlyContinue |
-                                Remove-Item -Force -ErrorAction SilentlyContinue
+                            foreach ($telemetryFile in $telemetryFiles) {
+                                Get-ChildItem -LiteralPath $gameLogRoot `
+                                    -Filter $telemetryFile.Filter `
+                                    -ErrorAction SilentlyContinue |
+                                    Remove-Item -Force -ErrorAction SilentlyContinue
+                            }
                         }
                         Write-Host "Starting $runId"
                         $startedAt = Get-Date
@@ -505,16 +521,17 @@ try {
                         }
                         Copy-LogIfPresent $shimLog (Join-Path $runRoot "openshim.log")
                         Copy-LogIfPresent $profileCsv (Join-Path $runRoot "profile.csv")
-                        if ($SampleCpu) {
-                            $sampleFiles = @(Get-ChildItem -LiteralPath $gameLogRoot `
-                                -Filter "openshim_cpu_samples_*.bin" `
+                        foreach ($telemetryFile in $telemetryFiles) {
+                            if (-not $telemetryFile.Wanted) { continue }
+                            $found = @(Get-ChildItem -LiteralPath $gameLogRoot `
+                                -Filter $telemetryFile.Filter `
                                 -ErrorAction SilentlyContinue)
-                            foreach ($sampleFile in $sampleFiles) {
-                                Move-Item -LiteralPath $sampleFile.FullName `
-                                    -Destination (Join-Path $runRoot "cpu_samples.bin") -Force
+                            foreach ($foundFile in $found) {
+                                Move-Item -LiteralPath $foundFile.FullName `
+                                    -Destination (Join-Path $runRoot $telemetryFile.Name) -Force
                             }
-                            if ($sampleFiles.Count -eq 0) {
-                                Write-Warning "$runId requested CPU sampling but produced no sample file"
+                            if ($found.Count -eq 0) {
+                                Write-Warning "$runId produced no $($telemetryFile.Name)"
                             }
                         }
 
@@ -534,6 +551,7 @@ try {
                             cpu_sampler_enabled = [bool]$SampleCpu
                             cpu_sampler_hz = $(if ($SampleCpu) { $SampleHz } else { 0 })
                             cpu_sampler_depth = $(if ($SampleCpu) { $SampleDepth } else { 0 })
+                            perf_telemetry = [bool]($PerfTelemetry -or $SampleCpu)
                             warmup_seconds = $WarmupSeconds
                             measure_seconds = $MeasureSeconds
                             cluster_count = $ClusterCount
