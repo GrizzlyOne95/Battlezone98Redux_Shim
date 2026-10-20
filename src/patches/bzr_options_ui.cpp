@@ -2861,11 +2861,11 @@ namespace BZROpenShim
               "Opacity of custom reticles and feedback. Stock artwork is unchanged." },
             { "Reactive Reticle", "Display", "ReactiveReticle", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
-              "Contract a custom cross and add brackets when the stock reticle detects an object. "
-              "Visual feedback only; no aim/spread change or team classification. Single player only." },
+              "Over a target, contract a custom cross, add brackets and tint red for enemies or green for allies. "
+              "Visual only; disguised units stay untinted. Single player only." },
             { "Hit Markers", "Display", "HitMarkers", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
-              "Brief ticks when your weapon actually reduces another object's health. "
+              "Ticks pop out when your weapon actually reduces health; hitting several targets at once enlarges them. "
               "No marker for blocked/zero damage, collisions, self hits or AI shots. Single player only." },
             { "Marker Duration", "Display", "HitMarkerDuration", nullptr, 0,
               kShimHitDurations, kShimHitDurationLabels, 4, 1, ShimSettingApplyGroup::HudFeedback,
@@ -3974,7 +3974,9 @@ namespace BZROpenShim
                     ? HudFeedback::MakeDamageIndicatorPlan(damageSettings, 820 + 150 * sample, 550, 1, 1,
                         {750, 490, 1200, 620, 0}, sample * 1.57079633f, 1, 0.75f, owners)
                     : HudFeedback::MakeDrawPlan(settings, 820 + 150 * sample, 550, 2, 2,
-                        {750, 490, 1200, 620, 0}, sample != 0, sample == 2 ? 1.0f : 0.0f);
+                        {750, 490, 1200, 620, 0}, sample != 0, sample == 2 ? 1.0f : 0.0f,
+                        sample == 1 ? HudFeedback::Relation::Enemy
+                                    : sample == 2 ? HudFeedback::Relation::Friend : HudFeedback::Relation::None);
                 for (size_t i = 0; i < plan.count && used < ui.previewQuads.size(); ++i)
                 {
                     const auto& r = plan.rects[i];

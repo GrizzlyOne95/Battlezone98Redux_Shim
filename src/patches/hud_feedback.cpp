@@ -3,6 +3,7 @@
 #include "hud_color_policy.h"
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
+#include "bzr_object_layout.h"
 #include "bzr_options_ui.h"
 #include "game_state.h"
 #include "hook_engine.h"
@@ -26,6 +27,7 @@ namespace BZROpenShim::HudFeedback
         using Scale = uint64_t(__cdecl*)();
         using Damage = uint32_t(__thiscall*)(void*, void*, uint32_t);
         using GetHandle = int(__thiscall*)(void*);
+        using TeamRelation = bool(__thiscall*)(void*, int);
 
         SRWLOCK g_stateLock = SRWLOCK_INIT;
         Settings g_settings;
@@ -43,6 +45,8 @@ namespace BZROpenShim::HudFeedback
         uint32_t g_sprite = 0, g_fill = 0, g_scale = 0, g_drawCall = 0, g_reticle = 0;
         uint32_t g_cameraRecord = 0, g_viewRecord = 0;
         bool g_cameraReady = false;
+        uint32_t g_friendTeam = 0, g_enemyTeam = 0;
+        bool g_relationReady = false;
         int g_indicatorPlayer = 0; // safe-frame thread only
         uint32_t g_damageSites[4] = {};
         InlineDetour32 g_damageDetours[4] = {};
@@ -105,6 +109,34 @@ namespace BZROpenShim::HudFeedback
             return static_cast<int>(value);
         }
 
+        // Classifies the stock reticle's current object against the local
+        // player, using the same native team policy and disguise rule as the
+        // radar palette. Any doubt returns None, which keeps the base color.
+        Relation ClassifyContact(void* object) noexcept
+        {
+            if (!g_relationReady || !object || !g_GameObjectGetHandleAddr || !g_BzrFn_GetPlayerHandle) return Relation::None;
+            __try
+            {
+                // Released code treats Reticle+0xAC as a complete GameObject;
+                // require its handle to round-trip before reading any field.
+                const int handle = reinterpret_cast<GetHandle>(g_GameObjectGetHandleAddr)(object);
+                if (!handle || GameObjectFromHandleGog(handle) != object) return Relation::None;
+                const int playerHandle = g_BzrFn_GetPlayerHandle();
+                void* player = playerHandle ? GameObjectFromHandleGog(playerHandle) : nullptr;
+                if (!player || player == object) return Relation::None;
+                const auto* bytes = static_cast<const uint8_t*>(object);
+                const int team = *reinterpret_cast<const int*>(bytes + ObjectLayout::kGameObjectActualTeam);
+                const int perceived = *reinterpret_cast<const int*>(bytes + ObjectLayout::kGameObjectPerceivedTeam);
+                // Never reveal a disguised object's real team.
+                if (team < 0 || team >= 16 || team != perceived) return Relation::None;
+                if (team == 0) return Relation::Neutral;
+                if (reinterpret_cast<TeamRelation>(g_enemyTeam)(player, team)) return Relation::Enemy;
+                if (reinterpret_cast<TeamRelation>(g_friendTeam)(player, team)) return Relation::Friend;
+                return Relation::Neutral;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return Relation::None; }
+        }
+
         // Called at the one stock main-reticle sprite submission. Its x/y are
         // the engine's projected aim point, not a guessed screen center.
         void __cdecl DrawReticle(void* viewport, int sprite, int x, int y, uint32_t flags, float scale)
@@ -129,6 +161,7 @@ namespace BZROpenShim::HudFeedback
             Rect clip;
             float sx = 0, sy = 0;
             bool contact = false;
+            void* contactObject = nullptr;
             bool valid = false;
             __try
             {
@@ -151,7 +184,8 @@ namespace BZROpenShim::HudFeedback
                 const uint32_t bitsY = static_cast<uint32_t>(pair >> 32);
                 std::memcpy(&sx, &bitsX, sizeof(sx));
                 std::memcpy(&sy, &bitsY, sizeof(sy));
-                contact = *reinterpret_cast<void* const*>(g_reticle + 0xAC) != nullptr;
+                contactObject = *reinterpret_cast<void* const*>(g_reticle + 0xAC);
+                contact = contactObject != nullptr;
                 valid = coordinatesValid;
             }
             __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -159,9 +193,14 @@ namespace BZROpenShim::HudFeedback
             const bool singlePlayer = IsSinglePlayerSession();
             Settings effective = settings;
             effective.reactive = effective.reactive && singlePlayer;
-            const float strength = settings.hits && singlePlayer
-                ? pulse.Strength(GetTickCount64(), settings.hitDurationMs) : 0.0f;
-            const DrawPlan plan = valid ? MakeDrawPlan(effective, x, y, sx, sy, clip, contact, strength) : DrawPlan{};
+            const uint64_t frameNow = GetTickCount64();
+            const bool hitsOn = settings.hits && singlePlayer;
+            const float strength = hitsOn ? pulse.Strength(frameNow, settings.hitDurationMs) : 0.0f;
+            const float kick = hitsOn ? pulse.Kick(frameNow, settings.hitDurationMs) : 0.0f;
+            const int targets = hitsOn ? pulse.Targets(frameNow, settings.hitDurationMs) : 1;
+            const Relation relation = valid && effective.reactive && contact ? ClassifyContact(contactObject) : Relation::None;
+            const DrawPlan plan = valid
+                ? MakeDrawPlan(effective, x, y, sx, sy, clip, contact, strength, relation, kick, targets) : DrawPlan{};
             if (!plan.replacesStock) original(viewport, sprite, stockX, stockY, flags, scale);
             for (size_t i = 0; i < plan.count; ++i)
             {
@@ -178,7 +217,7 @@ namespace BZROpenShim::HudFeedback
                 {
                     const auto& entry = groups.entries[group];
                     const auto arcs = MakeDamageIndicatorPlan(incomingSettings, x, y, sx, sy, clip,
-                        entry.angle, entry.strength, entry.severity, entry.owners);
+                        entry.angle, entry.strength, entry.severity, entry.owners, entry.kick, groups.attackers);
                     for (size_t i = 0; i < arcs.count; ++i)
                     {
                         const auto& r = arcs.rects[i];
@@ -199,8 +238,14 @@ namespace BZROpenShim::HudFeedback
                 {"HudFillRect", &g_fill}, {"HudFeedbackScale", &g_scale}, {"ReticleGlobal", &g_reticle},
             };
             if (!HookEngine::BindEngineRows("HUD feedback draw", rows)) return false;
+            // Optional: team tint stands down alone if these rows fail.
+            const HookEngine::EngineRow relationRows[] = {
+                {"HudPaletteFriendTeam", &g_friendTeam}, {"HudPaletteEnemyTeam", &g_enemyTeam},
+            };
+            g_relationReady = HookEngine::BindEngineRows("Reticle team tint", relationRows);
             g_drawReady = RedirectCallTarget(g_drawCall, g_sprite, reinterpret_cast<uintptr_t>(DrawReticle));
-            if (g_drawReady) Log(L"[HUDFEEDBACK] Stock main-reticle draw adapter installed\n");
+            if (g_drawReady) Log(L"[HUDFEEDBACK] Stock main-reticle draw adapter installed (team tint %ls)\n",
+                g_relationReady ? L"ready" : L"unavailable");
             return g_drawReady;
         }
 
@@ -334,7 +379,7 @@ namespace BZROpenShim::HudFeedback
             const auto ui = ReadShellUiState();
             if (!ui.readable || ui.wrapperActive || ui.screenPresent) return;
             AcquireSRWLockExclusive(&g_stateLock);
-            g_pulse.Start(event.tickMs);
+            g_pulse.Start(event.tickMs, SimEventArg(event, 0));
             ReleaseSRWLockExclusive(&g_stateLock);
             if (InterlockedDecrement(&g_hitLogBudget) >= 0)
                 Log(L"[HUDFEEDBACK] Confirmed player hit victim=%d attacker=%d\n", SimEventArg(event, 0), SimEventArg(event, 1));

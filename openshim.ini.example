@@ -965,6 +965,7 @@ ReticleThickness = 2
 ReticleOpacity = 100
 ReticleOutline = 0
 ; Contact feedback uses only the stock reticle's current object. No aiming change.
+; It tints red over enemies and green over allies (neutral/disguised: ReticleColor).
 ReactiveReticle = 0
 ; Confirmed health loss from the local player's weapon, not attempted damage.
 ; Hit markers and reactions are disabled in network games.

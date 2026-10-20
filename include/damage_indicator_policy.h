@@ -103,6 +103,7 @@ namespace BZROpenShim::HudFeedback
     struct IncomingArc
     {
         float angle = 0, strength = 0, severity = 0;
+        float kick = 0; // freshest hit in this direction; 1 at impact
         OwnerTicks owners;
     };
 
@@ -110,6 +111,7 @@ namespace BZROpenShim::HudFeedback
     {
         std::array<IncomingArc, 8> entries{};
         size_t count = 0;
+        size_t attackers = 0; // distinct recent damaging owners, all directions
     };
 
     inline IncomingArcs GroupIncomingArcs(const IncomingPulses& pulses, uint64_t now, int durationMs,
@@ -141,6 +143,8 @@ namespace BZROpenShim::HudFeedback
             }
             selected->strength = std::max(selected->strength, strength);
             selected->severity = std::max(selected->severity, pulse.severity);
+            selected->kick = std::max(selected->kick, pulse.pulse.Kick(now, durationMs));
+            ++result.attackers;
             if (selected->owners.count < selected->owners.strengths.size())
                 selected->owners.strengths[selected->owners.count++] = strength;
         }
@@ -148,9 +152,15 @@ namespace BZROpenShim::HudFeedback
     }
 
     inline DrawPlan MakeDamageIndicatorPlan(const DamageIndicatorSettings& settings, int x, int y,
-        float sx, float sy, Rect clip, float angle, float strength, float severity, const OwnerTicks& owners = {})
+        float sx, float sy, Rect clip, float angle, float strength, float severity, const OwnerTicks& owners = {},
+        float kick = 0, size_t attackers = 1)
     {
         DrawPlan plan;
+        if (!std::isfinite(kick)) kick = 0;
+        kick = std::clamp(kick, 0.0f, 1.0f);
+        // Pressure: each additional active attacker (up to four) makes every
+        // arc heavier and brighter, so being focused reads differently.
+        const float pressure = 1.0f + 0.2f * static_cast<float>(std::clamp<size_t>(attackers, 1, 4) - 1);
         if (!std::isfinite(angle) || !std::isfinite(strength) || !std::isfinite(severity) || strength <= 0 ||
             !std::isfinite(sx) || !std::isfinite(sy) || sx < 0.1f || sy < 0.1f || sx > 8 || sy > 8 ||
             clip.left < -65535 || clip.top < -65535 || clip.right > 65535 || clip.bottom > 65535 ||
@@ -158,11 +168,12 @@ namespace BZROpenShim::HudFeedback
             x < clip.left || x >= clip.right || y < clip.top || y >= clip.bottom) return plan;
         const float scale = std::clamp(settings.sizePercent, 50, 200) * 0.01f;
         const float weight = std::clamp(severity, 0.0f, 1.0f);
-        const int alpha = static_cast<int>(255 * std::clamp(settings.opacity, 25, 100) * 0.01f *
-            std::min(strength, 1.0f) * (0.55f + 0.45f * weight));
+        const int alpha = std::min(255, static_cast<int>(255 * std::clamp(settings.opacity, 25, 100) * 0.01f *
+            std::min(strength, 1.0f) * std::min(1.0f, (0.55f + 0.45f * weight) * (pressure + 0.35f * kick))));
         if (!alpha) return plan;
-        const float radius = 34 * scale;
-        const float thickness = (2 + 2 * weight) * scale;
+        // Each new hit kicks the arc outward and thicker, then it settles.
+        const float radius = 34 * scale * (1.0f + 0.12f * kick);
+        const float thickness = (2 + 2 * weight) * scale * pressure * (1.0f + 0.6f * kick);
         // Sixteen small quads approximate a 48-degree arc, with a black edge.
         for (int step = 0; step < 16; ++step)
         {

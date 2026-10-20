@@ -32,10 +32,21 @@ not change weapon spread, aim, projectile behavior or convergence.
 
 Reactive feedback contracts the custom cross's gap and adds two side brackets
 when the stock reticle already has an object. Brackets also work with Stock
-art. This is generic contact feedback, without friend/enemy classification.
+art. The custom cross, dot and brackets turn red over an enemy and green over
+an ally, using the engine's own radar-palette predicates for the local player.
+Team 0 (neutral), unknown teams and objects whose perceived team differs from
+their actual team (disguised units) keep the configured color, so the tint
+never reveals more than the radar does. The Stock sprite itself is not
+recolored; with Stock art only the brackets carry the tint. The tint is part of
+Reactive Reticle and has no separate setting.
 
 Hit feedback adds short diagonal ticks (white by default), holding for half the configured
 duration and fading for the remainder. A successive hit refreshes one pulse.
+Each confirmed hit also kicks the ticks outward and thicker; the kick eases out
+over the first 45 percent of the duration, so sustained fire reads as a pulse
+per hit. Distinct victims confirmed within one duration (splash, sweeps) make
+the marker larger and longer, up to four targets; repeated hits on one target
+count once. The geometry stays within the shared 96-quad budget.
 It requires verified health loss from the local player's weapon against
 another live object. Immune/zero damage, healing, collision/environmental
 damage, self damage, AI damage and stale object identities do not qualify.
@@ -184,3 +195,16 @@ readiness diagnostic's thread suspension while the main thread was inside
 the graphics driver. Debugger resumption allowed a graceful close; subsequent
 isolated fixtures disabled that diagnostic using its existing environment
 override. This work does not change the diagnostic or thread-suspension code.
+
+## Team tint and hit pulse qualification, 2026-10-20
+
+- Release Win32 solution build passed; all 120 Windows CTest suites passed.
+- Instance6 (GOG 2.2.301, DX11 windowed), lcbench Lua fixture, CrossDot style,
+  PID 52992 and a repeat run: the log reported `draw adapter installed (team
+  tint ready)`. A stationary team-2 svtank 30 m ahead turned the cross and
+  brackets red; a team-1 avtank in the same spot turned them green. The stock
+  command line agreed in each case ("No Action Tank" and "Select Tank").
+- With the player firing at the enemy, white ticks were captured popped
+  outward on the confirming frame and settled closer in on the next frames.
+  `Confirmed player hit` was logged. Two side attackers then produced two
+  independent incoming arcs with owner ticks.
