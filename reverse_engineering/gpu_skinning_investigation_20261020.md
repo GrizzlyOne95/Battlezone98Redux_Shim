@@ -409,6 +409,124 @@ with zero rejects, reverts, faults or crashes.
     close-up craft.
   - Close-range and shadow-heavy views still need a look in play.
 
+### Mod craft (ISDF Chronicles, Campaign Reimagined)
+
+**Verdict:**
+- Mod craft that use stock or CR shaders convert cleanly.
+- Craft that use **ISDF Chronicles' own HLSL** stay on the CPU.
+- The usual blocker is a single sub-entity, such as glass, a canopy or a
+  glare quad. Because conversion is all-or-nothing per entity, that one
+  sub-entity keeps the whole craft on the CPU.
+- Every reject is a fail-closed fallback to stock rendering. There were no
+  faults, reverts or visual breakage.
+
+**Method:**
+- Same build as above, arm 1 only, idle scenario, 20 craft, DX11, windowed.
+- The A/B wrapper ran over each craft. Each run's `[GPUSKIN] mission summary`
+  and `stays on CPU` lines are in its `openshim.log` copy.
+- CR is always loaded, because it lives in `mods\3686673790`.
+- ISDFC assets are only on the asset path while one of ISDFC's own missions
+  is loaded. A junction under `addon\lcbench` is **not** indexed.
+- For these runs the wrapper hard-linked ISDFC's flat asset files into
+  `addon\lcbench`:
+  - Types linked: `.odf .mesh .skeleton .material .program .hlsl` and
+    textures.
+  - Not linked: Lua, ini, bzn or terrain files.
+  - Every link was removed in a `finally` block. Leftover = 0.
+- Two tooling gates silently substituted avtank and had to be opened first:
+  - `lcbench.lua` kept its own unit whitelist.
+  - The benchmark's `-UnitOdf` had a `ValidateSet`.
+  - Both gates are opened in this commit (see Tooling changes below).
+- A spawn check is needed: a missing ODF logs
+  `GameObject "x.odf" not found` in BZLogger, and the run still "passes" with
+  `converted=1` (the player only).
+
+| craft | source | material / shaders | result | reject (detail) |
+|---|---|---|---|---|
+| avtank (control) | stock name, CR loaded | stock BZBase | converted 21/21 | — |
+| bvwalk | CR | `CR_BZBase` | converted 21/21 | — |
+| cvhaul | CR | `CR_BZBase` | converted 21/21 | — |
+| fvarc | ISDFC | inherits `BZBase` | converted 21/21 | — |
+| ovheph | ISDFC | inherits `BZBase`/`BZBaseCockpit`, 11 clones | converted 21/21 | — |
+| ivwalk | ISDFC | engine-default | converted 21/21 | — |
+| bvhover | ISDFC | engine-default | converted 21/21 | — |
+| fvtank, fvsentry, fvscout | ISDFC | `*_glarenew` → `ISDFC_FF_Lit1_vertex` | CPU | `transform-refused`: POSITION or NORMAL input is conditional |
+| jvtank | ISDFC | `ISDFC_CockpitGlass` → `ISDFC_FF_Unlit1_vertex` | CPU | `transform-refused`: same |
+| evtank, hvtank, ivscout | ISDFC | glass/canopy → `ISDFC_Surface_PSSM_vertex_HLSL4` | CPU | `transform-refused`: same |
+| cvdtank | ISDFC | `cc111101 : ISDFC/Cutout` | CPU | `technique-shadow-caster-material` |
+| ivatank | ISDFC | — | CPU | `too-many-bones` (79 > 64) |
+| zvmech | ISDFC | — | invalid run | an ISDFC hardpoint ODF error dialog was on screen (seen by the user; nothing in BZLogger), so only 2-5 entities spawned and both arms ran at 17 fps |
+
+**Single-run fps, arm 0 → arm 1:**
+- fvarc 415 → 358, ivwalk 239 → 300, ovheph 261 → 253.
+- These single runs are inside run-to-run noise (fvarc ranged 340-415 across
+  this session's runs), so they show no speed result either way.
+- An interleaved A/B like the avtank one above is needed before claiming a
+  mod-craft gain.
+
+**zvmech** runs are invalid. A hardpoint ODF error dialog stayed on screen
+through both arms. The user saw it; BZLogger and `openshim.log` record no error
+text. That explains the 17 fps and the few spawned entities. The likely cause
+is a weapon ODF that zvmech names but that the flat hard-link set did not
+supply, or one that ISDFC resolves only inside its own missions. That is
+unconfirmed. Rerun after finding the hardpoint ODF.
+
+**Plan per reject reason:**
+
+1. **Conditional POSITION/NORMAL** (7 of 13 ISDFC craft).
+   - **What blocks it:**
+     - ISDFC's programs select their entry signature by
+       `preprocessor_defines`.
+     - `ff_vertex` guards `iNormal : NORMAL` with
+       `#if defined(LIT) && !defined(LIT_FLAT)`.
+     - `surface_vertex` picks `COLOR0` or `NORMAL` with
+       `#if defined(PARTICLE_COLOUR)`.
+   - **Fix: extend the HLSL transform.**
+     - Read the program's `preprocessor_defines` parameter.
+     - Evaluate the `#if/#ifdef/#ifndef/#else/#endif` lines inside the entry
+       signature with a small `defined()/!/&&/||` evaluator, so only active
+       parameters remain.
+     - Refuse as now when an expression is outside that grammar.
+     - Host tests can cover both ISDFC shapes.
+   - **Watch:** `surface_vertex` also has a struct output
+     (`out SurfaceV2F o`), so check that output handling still passes once
+     the conditional is resolved.
+   - **Fallback: a modder-facing contract.** POSITION and NORMAL must be
+     unconditional entry parameters. Even then, a define-free signature is
+     the safest shape for modders.
+2. **`technique-shadow-caster-material`** (cvdtank).
+   - **What blocks it:** an alpha-tested cutout technique names its own
+     `shadow_caster_material` (`ISDFC/CutoutCaster/...`). Converting only the
+     main material would leave the shadow in bind pose.
+   - **Fix:**
+     - Clone the named caster material with the same transform and point the
+       clone's technique at that skinned caster.
+     - Keep the reject when the caster's program does not convert.
+   - This is a code extension, not a contract issue.
+3. **`too-many-bones`** (ivatank, 79).
+   - **What blocks it:** `kMaxBones = 64` is the palette baked into every
+     generated program, not a hardware limit. An SM4 constant buffer holds
+     4096 float4, and 128 3x4 bones use 384.
+   - **Fix: extend the palette.**
+     - Raise the cap to 128, or size palettes per entity in steps (`b64`,
+       `b128` in the program and clone names).
+     - Keep the bounds-check rationale: the palette must be at least
+       `entityBoneMatrices`.
+4. **No `world-auto-constant` or `compile-error` rejects were seen.** The
+   auto-constant remap already covers everything these mods use, so no remap
+   extension is needed yet.
+
+**Not covered:**
+- CR or ISDFC missions in play (only lcbench).
+- DX9.
+- Close-range visual parity of the converted mod craft.
+- One unrelated crash (`std::bad_alloc` from `D3D11HLSLProgram` during
+  first-frame rendering). It happened in a first-batch run that spawned
+  stock avtank, before any `[GPUSKIN]` line was logged. The same
+  configuration did not repeat it, and older dumps in `logs\` are DX9
+  compile throws with a different stack. The dump is
+  `logs\openshim_crash_20261020_174618.dmp`.
+
 ### Pitfalls hit while building it
 
 - **Non-virtual exports:**
@@ -433,6 +551,13 @@ with zero rejects, reverts, faults or crashes.
 - It stops runs with `Stop-BZRGame -Id`.
 - It refuses to continue if the game ignores WM_CLOSE.
 - It restores `ogre.cfg` via the harness.
+
+Mod craft support:
+- `-UnitOdf` accepts any plain ODF base name (a `ValidatePattern`, not a
+  `ValidateSet`).
+- `lcbench.lua` no longer replaces unknown names with avtank.
+- A missing ODF is still silent at the benchmark level. Check BZLogger for
+  `GameObject "x.odf" not found` before trusting a run.
 
 Notes for reruns:
 - `-KillExisting` now means "close gracefully".
