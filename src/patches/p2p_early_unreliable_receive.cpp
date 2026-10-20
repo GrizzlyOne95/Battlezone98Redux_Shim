@@ -222,7 +222,7 @@ namespace BZROpenShim
             if (EnvFlagEnabled("OPENSHIM_DISABLE_EARLY_UNRELIABLE_ACCEPT") ||
                 EnvFlagEnabled("BZR_DISABLE_EARLY_UNRELIABLE_ACCEPT"))
                 enabled = false;
-            bool nakEnabled = false;
+            bool nakEnabled = true;  // default on since 2026-10-19
             TryGetUserConfigBool("Network", "EarlyNakAccept", nakEnabled);
             if (EnvFlagEnabled("OPENSHIM_DISABLE_EARLY_NAK_ACCEPT") ||
                 EnvFlagEnabled("BZR_DISABLE_EARLY_NAK_ACCEPT"))

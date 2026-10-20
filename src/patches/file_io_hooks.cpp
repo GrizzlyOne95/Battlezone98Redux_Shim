@@ -7,6 +7,7 @@
 #include "file_io_hooks.h"
 
 #include "bootstrap_file_io.h"
+#include "bool_token.h"
 
 #include "bzn_load_trace.h"
 #include "bzn_save_path.h"
@@ -443,13 +444,36 @@ namespace BZROpenShim
 
         static bool BznSourceSaveEnabled()
         {
-            // Opt-in while the supported editor/runtime matrix is qualified.
-            // Routing itself is confined to the native editor filename dialog.
+            // On by default; [General] EditorSaveToSourceFolder = 0 turns it off,
+            // and the legacy BZR_BZN_SAVE_SOURCE=0 still does too. Routing itself
+            // is confined to the native editor filename dialog.
             static const bool enabled = []
             {
                 char value[8] = {};
-                return GetEnvironmentVariableA("BZR_BZN_SAVE_SOURCE", value,
-                    static_cast<DWORD>(sizeof(value))) == 1 && value[0] == '1';
+                if (GetEnvironmentVariableA("BZR_BZN_SAVE_SOURCE", value,
+                        static_cast<DWORD>(sizeof(value))) == 1 && value[0] == '0')
+                    return false;
+
+                const std::filesystem::path& rootAddon = GetRootAddonPath();
+                if (rootAddon.empty())
+                    return true;
+                const std::filesystem::path iniPath = rootAddon.parent_path() / L"openshim.ini";
+                // A sentinel default detects a missing key: a present key
+                // (even blank) never yields the sentinel byte.
+                constexpr wchar_t kUnsetSentinel[] = L"\x01__openshim_unset__";
+                wchar_t setting[64] = {};
+                GetPrivateProfileStringW(L"General", L"EditorSaveToSourceFolder", kUnsetSentinel,
+                    setting, static_cast<DWORD>(_countof(setting)), iniPath.c_str());
+                if (setting[0] == L'\0' || std::wcscmp(setting, kUnsetSentinel) == 0)
+                    return true;
+
+                // Bool tokens are ASCII; anything wider fails the parse below.
+                char narrow[64] = {};
+                for (size_t i = 0; i + 1 < _countof(narrow) && setting[i]; ++i)
+                    narrow[i] = setting[i] < 0x80 ? static_cast<char>(setting[i]) : '?';
+                // An unrecognized value turns the routing off.
+                bool on = false;
+                return BZROpenShim::BoolToken::TryParse(narrow, on) && on;
             }();
             return enabled;
         }
