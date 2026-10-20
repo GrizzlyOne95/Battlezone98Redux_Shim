@@ -86,19 +86,50 @@ Mars campaign mission with a base, AI and weather together.
 
 ## Simulation rate (for the "BZCC has a lower tick rate" question)
 
-From the 1.5 source and the Redux decompile (confidence medium-high; the
-Redux timestep function itself was not decompiled):
+Traced in Ghidra on the GOG exe, 2026-10-20.
 
-- **There is no fixed tick rate.** `NormalFrames` (1.5) and the Redux frame
-  function at 0x00618130 run one simulation step per rendered frame.
-- **The timestep is variable.** 1.5's `SetLoopTimes` averages the last two
-  real frame times and clamps them to 200 ms.
-- **Nothing is interpolated, and nothing needs to be.** Rendering draws the
-  state that was just simulated.
+**The loop.** 0x00618270 is the per-frame entry. It calls 0x00822AE0, the
+Redux `SetLoopTimes`, and then the frame function 0x00618130. 0x00618130 runs
+input, net execute, AI and the world sim tick (0x006175C0), then render prep
+(0x00682540). Each of them is called once. There is no accumulator, no
+fixed-step loop and no interpolation. **The simulation runs once per rendered
+frame, and nothing waits for a tick.**
 
-So BZR's simulation already runs at the render rate. A low fixed tick, as
-described for BZCC, does not apply here. The judder seen in these runs is
-present pacing.
+**The timestep (0x00822AE0):**
+- **Clock.** It reads 0x00822E60, which is a `boost::posix_time` clock: the
+  helper raises boost date_time's "could not convert calendar time to UTC time"
+  error. That is wall-clock system time, converted to whole milliseconds.
+- **Wait.** It calls `Sleep(1)` until that millisecond value changes, then
+  takes `dt = now - prev` as an integer number of milliseconds. Multiplayer
+  replaces this with a net-time path.
+- **Clamp.** It copies the raw dt to 0x0094679C, clamps the working value to
+  200 ms, and stores `dt * 0.001` as the float timestep at 0x00946790. The
+  getter 0x00822D60 returns it, and 0x00618060 passes it to the sim.
+- **No smoothing.** 1.5 averaged the last two frame times. Redux uses each
+  frame's raw dt.
+- `prev` only advances when dt is non-zero, so total game time never drifts.
+  Only the per-frame step is quantised.
+
+**What this means:**
+- A low fixed tick, as described for BZCC, does not apply to BZR. The
+  simulation already runs at the render rate.
+- **The step is quantised to whole milliseconds and not smoothed** (high
+  confidence). At 144 fps the true frame time of 6.94 ms becomes alternating
+  6 and 7 ms steps, a ±7% per-frame velocity wobble. At 60 fps it is 16/17 ms
+  (±3%).
+- **Hypothesis, unmeasured:** this wobble may add to the "feels uneven"
+  impression at high refresh rates. A possible fix is an OpenShim hook that
+  writes a QPC-precise float step to 0x00946790. It would keep the integer
+  millisecond accumulators unchanged, so game time and networking stay
+  identical. Measure first: log the raw dt (0x0094679C) next to the
+  frame QPC in the telemetry.
+- The clock is system time, not a monotonic counter. A backward clock
+  adjustment wraps the unsigned dt, and the 200 ms clamp turns it into one long
+  step.
+- The exe imports `timeBeginPeriod`, so `Sleep(1)` and system-time granularity
+  are expected to be about 1 ms. This is not verified at runtime.
+
+The judder captured in these runs is Present pacing, not the timestep.
 
 ## Recommended next steps
 
