@@ -516,6 +516,72 @@ unconfirmed. Rerun after finding the hardpoint ODF.
    auto-constant remap already covers everything these mods use, so no remap
    extension is needed yet.
 
+### Mod-craft fixes (stacked on the measurement PR)
+
+**Result:** with the fixes below, every ISDFC craft that stayed on the CPU
+converts fully: `converted=21` (ivscout 25, after one reconvert),
+`rejects={}`. The stock and CR controls are unchanged.
+
+| craft | was | now | programs from ISDFC shaders |
+|---|---|---|---|
+| fvtank, fvsentry, fvscout | conditional input | converted 21/21 | `ISDFC_FF_Lit1_vertex`, `ISDFC_FF_Unlit1_vertex` |
+| jvtank | conditional input | converted 21/21 | `ISDFC_FF_Unlit1_vertex` |
+| evtank, hvtank | conditional input | converted 21/21 | `ISDFC_Surface{,_Shadow,_PSSM}_vertex_HLSL4` |
+| ivscout | conditional input | converted 25/25 | same, plus `ISDFC_FF_Unlit1_vertex` |
+| cvdtank | caster material | converted 21/21 | `ISDFC_Surface_Caster_vertex_HLSL4` for the skinned caster clone |
+| ivatank | 79 bones | converted 21/21 | `w1b128` programs (`bones=128`) |
+| avtank, cvhaul (controls) | converted 21/21 | converted 21/21 | unchanged names, 14 programs |
+
+**What changed:**
+1. **Preprocessor conditionals.** The HLSL transform evaluates
+   `#if/#ifdef/#ifndef/#elif/#else/#endif` before it looks for the entry. It
+   uses the program's `preprocessor_defines` (split on `,` or `;`; a bare name
+   is `1`) and the file's own active `#define`/`#undef` lines.
+   - The evaluator handles integer arithmetic, comparisons, `&& || !` and
+     `defined`. Undefined names count as 0.
+   - It refuses, and keeps the old "input is conditional" reject, when it
+     meets:
+     - a function-like or empty macro in an expression;
+     - an active `#include` or `#error`;
+     - a compiler-implicit name (`__*`, `SHADER_MODEL*`, `OGRE_*`);
+     - an unbalanced `#if`.
+   - The emitted source keeps every directive. Edits land at the original
+     offsets, so the compiler still sees the same conditionals.
+2. **Custom `shadow_caster_material`.** The caster material is cloned with
+   its passes skinned as casters (those passes get no caster program of their
+   own). The clone technique's caster slot then points at that clone.
+   - Ogre exports no setter, so the slot offset is decoded at resolve time
+     from `Technique::getShadowCasterMaterial`'s code (`+0x48` in the GOG
+     DLL).
+   - The getter must agree with the slot before and after the write.
+   - On any mismatch it stays a `technique-shadow-caster-material` reject.
+3. **Bone palette per entity.** Each entity gets the smallest palette from
+   64, 128 or 256 bones that holds its bone count. Programs and clones for a
+   64-bone palette keep their stock names (`w1/...`); others get `w1b128/...`.
+4. **Fixed-function fallback techniques.** ISDFC follows each shader
+   technique with a DX9 fixed-function copy in the same scheme. This reject
+   only became visible once (1) was fixed: `no-vertex-program` on
+   `ISDFC_CockpitGlass` and `*_glarenew`.
+   - Ogre only uses the first supported technique per scheme and LOD
+     index, so later ones are left unconverted.
+   - The existing supported-technique count check fails the clone if the
+     skinned technique ever drops out.
+5. **`SharedPtrInfo::useCount` offset.** `AddRef`/`Release` used `+4`. The
+   shipped OgreMain has the count at `+0x14`, as the other OpenShim Ogre code
+   already uses. Whether the old offset caused anything visible is unknown;
+   it is not tied to the `bad_alloc` dump below.
+
+**Not covered by the fix runs:**
+- Visual parity: close-range and shadow views of the converted ISDFC craft,
+  including cvdtank's cutout shadow.
+- Speed: single runs only, no interleaved A/B.
+- zvmech.
+- One fix run (fvtank, first try) ended in a crash. The dump
+  `logs\openshim_crash_20261020_183730.dmp` is a null read in
+  `dsound!CCommandManager::ExecuteCommand` on an MMDevAPI worker handling an
+  audio session disconnect. No OpenShim or Ogre frames are on that stack.
+  The fvtank rerun was clean.
+
 **Not covered:**
 - CR or ISDFC missions in play (only lcbench).
 - DX9.
