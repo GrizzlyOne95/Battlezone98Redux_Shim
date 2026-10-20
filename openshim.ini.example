@@ -2371,6 +2371,18 @@ RunInBackground = 0
 ; Default 0. See Docs/INTERACTIVE_FOG_WAKES.md for the remaining milestones.
 InteractiveFogWakes = 0
 
+; GpuSkinning: hardware skinning for skeletal craft (Direct3D 11 only).
+; Each eligible craft gets runtime clones of its materials whose vertex
+; programs, including the shadow caster, are skinned twins of the installed
+; HLSL. Craft whose materials, programs or vertex formats cannot be proven
+; compatible stay on Ogre's CPU path; any fault disables the feature until
+; the game restarts. Read when a mission starts. Output is not bit-identical:
+; silhouettes can move by sub-pixel amounts.
+;
+; Default 0. Env: OPENSHIM_GPU_SKINNING.
+; See reverse_engineering/gpu_skinning_investigation_20261020.md.
+GpuSkinning = 0
+
 [NativeUiDiagnostics]
 ; Development only; shown commented out for the same reason as the
 ; [Diagnostics] development switches above.

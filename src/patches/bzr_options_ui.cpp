@@ -3097,6 +3097,13 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
               "Enable authored craft ODF barrel-node or animation recoil. Requires model nodes/clips and ODF configuration; no generic fallback. Clips need EXU. Experimental GOG single-player cannons. Restart required." },
+            // Absent key = off, so defaultIndex 1 selects "0" (Off).
+            { "GPU Skinning", "Experimental", "GpuSkinning", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              ShimSettingApplyGroup::ReadOnNextUse,
+              "Experimental, DX11 only: animate craft on the GPU instead of the CPU, which "
+              "frees CPU time with many craft on screen. Edges may differ from stock by a "
+              "fraction of a pixel. Takes effect on the next mission load." },
             { "Reticle Convergence", "SinglePlayer", "PlayerReticleConvergence",
               kShimSettingsReticleConvAltKeys, 1,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -3449,7 +3456,8 @@ namespace BZROpenShim
         static const char* const kShimCategoryVideo[] = {
             "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "Sun Flashbang", "Jet Flames",
             "Empty Craft Lights", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes",
-            "HD Terrain Tiles", "Terrain Micro Detail", "Muzzle Flashes", "Muzzle Recoil", kShimRowMenuTheme };
+            "HD Terrain Tiles", "Terrain Micro Detail", "Muzzle Flashes", "Muzzle Recoil", "GPU Skinning",
+            kShimRowMenuTheme };
         static const char* const kShimCategoryLighting[] = {
             "Player Headlight", "Headlight Brightness", "Headlight Color", "Headlight Beam",
             "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam" };

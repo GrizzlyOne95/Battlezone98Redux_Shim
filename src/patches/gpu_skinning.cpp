@@ -1,0 +1,1244 @@
+// gpu_skinning.cpp
+// BZR Open Shim - experimental hardware skinning for skeletal craft (DX11).
+//
+// Ogre 1.10 already supports hardware skinning: an Entity whose materials'
+// vertex programs all declare includes_skeletal_animation skips
+// Mesh::softwareVertexBlend, renders its original vertex data (which carries
+// the compiled BLENDINDICES/BLENDWEIGHT elements) and supplies the bone
+// palette through world_matrix_array_3x4. Stock materials have no such
+// programs, so this file builds them at runtime:
+//
+//  - per (source material, weights per vertex) a material clone whose every
+//    supported pass binds a skinned twin of its installed HLSL vertex program
+//    (see gpu_skinning_hlsl.h), with world-dependent auto constants remapped
+//    to their world-space equivalents, because under hardware skinning the
+//    "world" matrix Ogre supplies is bone 0's;
+//  - a skinned shadow caster program on each pass, merged by Ogre's
+//    deriveShadowCasterPass in place of the stock caster vertex program.
+//
+// An entity is switched only when every sub-entity converts and Ogre then
+// reports hardware animation enabled; otherwise its stock materials return.
+// A clone material rendered with CPU-blended vertices would transform them
+// twice, so converted entities are re-verified at the start of every frame,
+// before anything renders. Any fault latches the feature off for the process.
+#include "gpu_skinning.h"
+
+#include "bzr_hooks_internal.h"
+#include "bzr_options_ui.h"
+#include "gpu_skinning_hlsl.h"
+#include "render_profile_runtime.h"
+#include "shim_log.h"
+
+#include <Windows.h>
+
+#include <atomic>
+#include <cstdint>
+#include <cstring>
+#include <new>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+namespace BZROpenShim
+{
+    namespace
+    {
+        using Hooks::ResolveOgreProc;
+
+        constexpr const char* kComponent = "gpu-skinning";
+        constexpr const char* kCloneRoot = "OpenShim/GpuSkin/";
+        constexpr const char* kProgramRoot = "OpenShim/GpuSkinVP/";
+        // SceneManager::setShadowTextureCasterMaterial target used by the exe.
+        constexpr const char* kCasterMaterialName = "Ogre/DepthShadowmap/Caster/Float";
+        // Palette capacity of every generated program. world_matrix_array_3x4
+        // writes one 3x4 per blend-index entry without a bounds check, so an
+        // entity with more bones than this must never get a skinned material.
+        constexpr int kMaxBones = 64;
+        // New entities are picked up this often; converted ones are verified
+        // every frame.
+        constexpr uint32_t kConvertIntervalFrames = 15;
+        constexpr int kGpuProgramTypeVertex = 0;
+
+        // Ogre::AutoConstantType values used below (OgreGpuProgramParams.h, 1.10).
+        constexpr int kActWorldMatrixArray3x4 = 4;
+
+        // Ogre::VertexElementSemantic / VertexElementType.
+        constexpr int kVesBlendWeights = 2;
+        constexpr int kVesBlendIndices = 3;
+        constexpr int kVetFloat1 = 0;
+        constexpr int kVetFloat4 = 3;
+        constexpr int kVetUByte4 = 9;
+
+        struct SharedPtr
+        {
+            void* rep = nullptr;
+            void* info = nullptr;
+        };
+
+        // Ogre::GpuProgramParameters::AutoConstantEntry (20 bytes on x86).
+        struct AutoConstantEntry
+        {
+            int paramType;
+            uint32_t physicalIndex;
+            uint32_t elementCount;
+            uint32_t data;
+            uint16_t variability;
+        };
+
+        using FnSingleton = void* (__cdecl*)();
+        using FnVoid = void(__thiscall*)(void*);
+        using FnBool = bool(__thiscall*)(void*);
+        using FnU16 = uint16_t(__thiscall*)(void*);
+        using FnU32 = uint32_t(__thiscall*)(void*);
+        using FnInt = int(__thiscall*)(void*);
+        using FnPtrAt16 = void* (__thiscall*)(void*, uint16_t);
+        using FnPtrAt32 = void* (__thiscall*)(void*, uint32_t);
+        using FnStringRef = const std::string* (__thiscall*)(void*);
+        using FnSharedRef = const SharedPtr* (__thiscall*)(void*);
+        using FnSharedByValue = SharedPtr* (__thiscall*)(void*, SharedPtr*);
+        using FnSetString = void(__thiscall*)(void*, const std::string&);
+        using FnSetStringBool = void(__thiscall*)(void*, const std::string&, bool);
+        using FnSetBool = void(__thiscall*)(void*, bool);
+        using FnGetByName = SharedPtr* (__thiscall*)(void*, SharedPtr*, const std::string&, const std::string&);
+        using FnCloneMaterial = SharedPtr* (__thiscall*)(void*, SharedPtr*, const std::string&, bool, const std::string&);
+        using FnCreateProgram = SharedPtr* (__thiscall*)(void*, SharedPtr*, const std::string&, const std::string&, const std::string&, int);
+        using FnGetParameter = std::string* (__thiscall*)(void*, std::string*, const std::string&);
+        using FnSetParameter = bool(__thiscall*)(void*, const std::string&, const std::string&);
+        using FnSetMaterial = void(__thiscall*)(void*, const SharedPtr&);
+        using FnCopyMatching = void(__thiscall*)(void*, const void*);
+        using FnGetAutoEntry = AutoConstantEntry* (__thiscall*)(void*, uint32_t);
+        using FnSetNamedAuto = void(__thiscall*)(void*, const std::string&, int, uint32_t);
+        using FnFindNamedConstant = const void* (__thiscall*)(void*, const std::string&, bool);
+        using FnFindElement = const void* (__thiscall*)(void*, int, uint16_t);
+        using FnElementType = int(__thiscall*)(const void*);
+        using FnFrameListener = void(__thiscall*)(void*, void*);
+
+        struct OgreApi
+        {
+            FnSingleton rootSingleton = nullptr;
+            FnFrameListener addFrameListener = nullptr;
+            FnSingleton materialManager = nullptr;
+            FnSingleton programManager = nullptr;
+            FnGetByName getMaterialByName = nullptr;
+            FnGetByName getProgramByName = nullptr;
+            FnSetString removeResource = nullptr;
+            FnCloneMaterial cloneMaterial = nullptr;
+            FnStringRef resourceName = nullptr;
+            FnStringRef resourceGroup = nullptr;
+            FnSetBool loadResource = nullptr;
+            FnU16 getNumTechniques = nullptr;
+            FnU16 getNumSupportedTechniques = nullptr;
+            FnPtrAt16 getTechnique = nullptr;
+            FnBool techniqueSupported = nullptr;
+            FnU16 getNumPasses = nullptr;
+            FnPtrAt16 getPass = nullptr;
+            FnSharedByValue getShadowCasterMaterial = nullptr;
+            FnBool hasVertexProgram = nullptr;
+            FnSharedRef getVertexProgram = nullptr;
+            FnSharedByValue getVertexProgramParameters = nullptr;
+            FnSetStringBool setVertexProgram = nullptr;
+            FnStringRef getShadowCasterVertexProgramName = nullptr;
+            FnStringRef getShadowReceiverVertexProgramName = nullptr;
+            FnSetString setShadowCasterVertexProgram = nullptr;
+            FnSharedByValue getShadowCasterVertexProgramParameters = nullptr;
+            FnSharedRef unifiedDelegate = nullptr;
+            FnStringRef programSource = nullptr;
+            FnStringRef programLanguage = nullptr;
+            FnSetString setProgramSource = nullptr;
+            FnBool programSkeletal = nullptr;
+            FnSetBool setProgramSkeletal = nullptr;
+            FnBool programCompileError = nullptr;
+            FnGetParameter getParameter = nullptr;
+            FnSetParameter setParameter = nullptr;
+            FnCreateProgram createProgram = nullptr;
+            FnU32 getAutoConstantCount = nullptr;
+            FnGetAutoEntry getAutoConstantEntry = nullptr;
+            FnCopyMatching copyMatchingNamedConstants = nullptr;
+            FnSetNamedAuto setNamedAutoConstant = nullptr;
+            FnFindNamedConstant findNamedConstant = nullptr;
+            FnBool entityInitialised = nullptr;
+            FnBool entityHasSkeleton = nullptr;
+            FnBool entityHasVertexAnimation = nullptr;
+            FnBool entityHardwareAnimation = nullptr;
+            FnU16 entityBoneMatrices = nullptr;
+            FnInt entitySoftwareRequests = nullptr;
+            FnSharedRef entityMesh = nullptr;
+            FnU32 entitySubEntityCount = nullptr;
+            FnPtrAt32 entitySubEntity = nullptr;
+            FnSharedRef subEntityMaterial = nullptr;
+            FnSetMaterial subEntitySetMaterial = nullptr;
+            FnPtrAt16 meshVertexDataByTrackHandle = nullptr;
+            FnFindElement findElementBySemantic = nullptr;
+            FnElementType elementType = nullptr;
+        };
+
+        OgreApi g_ogre;
+        bool g_apiResolved = false;
+        bool g_apiAvailable = false;
+
+        // Process-lifetime latch: a fault anywhere turns the feature off until
+        // the game restarts.
+        std::atomic<bool> g_failed{false};
+        // True between mission start and end when the setting was on, the
+        // renderer is Direct3D 11 and the API resolved.
+        std::atomic<bool> g_active{false};
+        bool g_listenerInstalled = false;
+        uint32_t g_generation = 0;
+        uint32_t g_frame = 0;
+
+        enum class Reject : int
+        {
+            NotInitialised,
+            NoSkeleton,
+            VertexAnimation,
+            TooManyBones,
+            SoftwareRequests,
+            NoMesh,
+            NoBlendData,
+            BlendFormat,
+            CloneFailed,
+            ShadowCasterMaterial,
+            NoVertexProgram,
+            ProgramNotHlsl4,
+            ProgramAlreadySkeletal,
+            ProgramReceiverOverride,
+            ProgramCasterOverride,
+            TransformRefused,
+            CompileError,
+            WorldAutoConstant,
+            BonesUniformMissing,
+            TechniqueLostSupport,
+            HardwareNotEnabled,
+            Count,
+        };
+
+        const char* RejectName(Reject reason)
+        {
+            switch (reason)
+            {
+            case Reject::NotInitialised: return "not-initialised";
+            case Reject::NoSkeleton: return "no-skeleton";
+            case Reject::VertexAnimation: return "vertex-animation";
+            case Reject::TooManyBones: return "too-many-bones";
+            case Reject::SoftwareRequests: return "software-requests";
+            case Reject::NoMesh: return "no-mesh";
+            case Reject::NoBlendData: return "no-blend-data";
+            case Reject::BlendFormat: return "blend-format";
+            case Reject::CloneFailed: return "clone-failed";
+            case Reject::ShadowCasterMaterial: return "technique-shadow-caster-material";
+            case Reject::NoVertexProgram: return "no-vertex-program";
+            case Reject::ProgramNotHlsl4: return "program-not-hlsl-sm4";
+            case Reject::ProgramAlreadySkeletal: return "program-already-skeletal";
+            case Reject::ProgramReceiverOverride: return "pass-shadow-receiver-program";
+            case Reject::ProgramCasterOverride: return "pass-shadow-caster-program";
+            case Reject::TransformRefused: return "transform-refused";
+            case Reject::CompileError: return "compile-error";
+            case Reject::WorldAutoConstant: return "world-auto-constant";
+            case Reject::BonesUniformMissing: return "bones-uniform-missing";
+            case Reject::TechniqueLostSupport: return "technique-lost-support";
+            case Reject::HardwareNotEnabled: return "hardware-not-enabled";
+            default: return "?";
+            }
+        }
+
+        struct Stats
+        {
+            uint32_t converted = 0;
+            uint32_t reverted = 0;
+            uint32_t reconverted = 0;
+            uint32_t clones = 0;
+            uint32_t programs = 0;
+            uint32_t programsReused = 0;
+            uint32_t rejects[static_cast<int>(Reject::Count)] = {};
+        };
+        Stats g_stats;
+
+        struct ConversionError
+        {
+            Reject reason = Reject::CloneFailed;
+            std::string detail;
+        };
+
+        // Per source material + weight count: the clone name, or empty after a
+        // failure (so a refused material is not retried every scan).
+        struct CloneRecord
+        {
+            std::string cloneName;
+            SharedPtr clone;
+            ConversionError error;
+        };
+        std::unordered_map<std::string, CloneRecord> g_clones;
+        // Per concrete program + weight count + role: generated program name,
+        // or empty after a failure.
+        std::unordered_map<std::string, std::pair<std::string, ConversionError>> g_programs;
+        std::unordered_set<std::string> g_loggedRejects;
+
+        struct EntityRecord
+        {
+            std::vector<std::string> originals;
+            std::vector<std::string> clones;
+            std::vector<int> weights;
+        };
+        std::unordered_map<void*, EntityRecord> g_converted;
+        std::unordered_set<void*> g_rejected;
+
+        // Caster material pass whose vertex program the skinned caster twins,
+        // and whose parameters seed each skinned caster's.
+        void* g_casterPass = nullptr;
+        SharedPtr g_casterMaterial;
+
+        // ------------------------------------------------------------------
+        // Ogre SharedPtr reference helpers (see terrain_proxy.cpp: the raw ABI
+        // calls do not run SharedPtr's copy constructor or destructor).
+
+        void AddRef(const SharedPtr& pointer)
+        {
+            if (!pointer.rep || !pointer.info)
+                return;
+            auto* count = reinterpret_cast<volatile LONG*>(
+                reinterpret_cast<uint8_t*>(pointer.info) + sizeof(void*));
+            InterlockedIncrement(count);
+        }
+
+        // Drops a reference the caller owns. Never drops the last one, so it
+        // cannot free; an object that would need freeing is leaked instead.
+        void Release(SharedPtr& pointer)
+        {
+            if (pointer.rep && pointer.info)
+            {
+                auto* count = reinterpret_cast<volatile LONG*>(
+                    reinterpret_cast<uint8_t*>(pointer.info) + sizeof(void*));
+                if (InterlockedCompareExchange(count, 0, 0) > 1)
+                    InterlockedDecrement(count);
+            }
+            pointer = {};
+        }
+
+        std::string GetParameter(void* object, const char* name)
+        {
+            alignas(std::string) unsigned char storage[sizeof(std::string)];
+            std::string* value = g_ogre.getParameter(
+                object, reinterpret_cast<std::string*>(storage), std::string(name));
+            std::string result = std::move(*value);
+            value->~basic_string();
+            return result;
+        }
+
+        std::string NameOf(void* resource)
+        {
+            const std::string* name = resource ? g_ogre.resourceName(resource) : nullptr;
+            return name ? *name : std::string();
+        }
+
+        bool StartsWith(const std::string& text, const char* prefix)
+        {
+            return text.compare(0, std::strlen(prefix), prefix) == 0;
+        }
+
+        bool RttiContains(const void* object, const char* needle)
+        {
+            char buffer[128];
+            const char* name = Hooks::TryGetRttiClassName(object, buffer, sizeof(buffer));
+            return name && std::strstr(name, needle) != nullptr;
+        }
+
+        void LogRejectOnce(const std::string& key, Reject reason, const std::string& detail)
+        {
+            if (g_loggedRejects.size() > 256 || !g_loggedRejects.insert(key).second)
+                return;
+            LogShimA(LogLevel::Info, kComponent, "[GPUSKIN] stays on CPU: %s reason=%s %s",
+                key.c_str(), RejectName(reason), detail.c_str());
+        }
+
+        // ------------------------------------------------------------------
+
+        bool ResolveApi()
+        {
+            if (g_apiResolved)
+                return g_apiAvailable;
+            g_apiResolved = true;
+
+#define OS_STR "?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@"
+            OgreApi& o = g_ogre;
+            o.rootSingleton = ResolveOgreProc<FnSingleton>("?getSingletonPtr@Root@Ogre@@SAPAV12@XZ");
+            o.addFrameListener = ResolveOgreProc<FnFrameListener>("?addFrameListener@Root@Ogre@@QAEXPAVFrameListener@2@@Z");
+            o.materialManager = ResolveOgreProc<FnSingleton>("?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
+            o.programManager = ResolveOgreProc<FnSingleton>("?getSingletonPtr@HighLevelGpuProgramManager@Ogre@@SAPAV12@XZ");
+            o.getMaterialByName = ResolveOgreProc<FnGetByName>(
+                "?getByName@MaterialManager@Ogre@@QAE?AV?$SharedPtr@VMaterial@Ogre@@@2@ABV" OS_STR "@0@Z");
+            o.getProgramByName = ResolveOgreProc<FnGetByName>(
+                "?getByName@HighLevelGpuProgramManager@Ogre@@QAE?AV?$SharedPtr@VHighLevelGpuProgram@Ogre@@@2@ABV" OS_STR "@0@Z");
+            o.removeResource = ResolveOgreProc<FnSetString>("?remove@ResourceManager@Ogre@@UAEXABV" OS_STR "@@Z");
+            o.cloneMaterial = ResolveOgreProc<FnCloneMaterial>(
+                "?clone@Material@Ogre@@QBE?AV?$SharedPtr@VMaterial@Ogre@@@2@ABV" OS_STR "@_N0@Z");
+            o.resourceName = ResolveOgreProc<FnStringRef>("?getName@Resource@Ogre@@UBEABV" OS_STR "@XZ");
+            o.resourceGroup = ResolveOgreProc<FnStringRef>("?getGroup@Resource@Ogre@@UBEABV" OS_STR "@XZ");
+            o.loadResource = ResolveOgreProc<FnSetBool>("?load@Resource@Ogre@@UAEX_N@Z");
+            o.getNumTechniques = ResolveOgreProc<FnU16>("?getNumTechniques@Material@Ogre@@QBEGXZ");
+            o.getNumSupportedTechniques = ResolveOgreProc<FnU16>("?getNumSupportedTechniques@Material@Ogre@@QBEGXZ");
+            o.getTechnique = ResolveOgreProc<FnPtrAt16>("?getTechnique@Material@Ogre@@QAEPAVTechnique@2@G@Z");
+            o.techniqueSupported = ResolveOgreProc<FnBool>("?isSupported@Technique@Ogre@@QBE_NXZ");
+            o.getNumPasses = ResolveOgreProc<FnU16>("?getNumPasses@Technique@Ogre@@QBEGXZ");
+            o.getPass = ResolveOgreProc<FnPtrAt16>("?getPass@Technique@Ogre@@QAEPAVPass@2@G@Z");
+            o.getShadowCasterMaterial = ResolveOgreProc<FnSharedByValue>(
+                "?getShadowCasterMaterial@Technique@Ogre@@QBE?AV?$SharedPtr@VMaterial@Ogre@@@2@XZ");
+            o.hasVertexProgram = ResolveOgreProc<FnBool>("?hasVertexProgram@Pass@Ogre@@QBE_NXZ");
+            o.getVertexProgram = ResolveOgreProc<FnSharedRef>(
+                "?getVertexProgram@Pass@Ogre@@QBEABV?$SharedPtr@VGpuProgram@Ogre@@@2@XZ");
+            o.getVertexProgramParameters = ResolveOgreProc<FnSharedByValue>(
+                "?getVertexProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@XZ");
+            o.setVertexProgram = ResolveOgreProc<FnSetStringBool>(
+                "?setVertexProgram@Pass@Ogre@@QAEXABV" OS_STR "@_N@Z");
+            o.getShadowCasterVertexProgramName = ResolveOgreProc<FnStringRef>(
+                "?getShadowCasterVertexProgramName@Pass@Ogre@@QBEABV" OS_STR "@XZ");
+            o.getShadowReceiverVertexProgramName = ResolveOgreProc<FnStringRef>(
+                "?getShadowReceiverVertexProgramName@Pass@Ogre@@QBEABV" OS_STR "@XZ");
+            o.setShadowCasterVertexProgram = ResolveOgreProc<FnSetString>(
+                "?setShadowCasterVertexProgram@Pass@Ogre@@QAEXABV" OS_STR "@@Z");
+            o.getShadowCasterVertexProgramParameters = ResolveOgreProc<FnSharedByValue>(
+                "?getShadowCasterVertexProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@XZ");
+            o.unifiedDelegate = ResolveOgreProc<FnSharedRef>(
+                "?_getDelegate@UnifiedHighLevelGpuProgram@Ogre@@QBEABV?$SharedPtr@VHighLevelGpuProgram@Ogre@@@2@XZ");
+            o.programSource = ResolveOgreProc<FnStringRef>("?getSource@GpuProgram@Ogre@@UBEABV" OS_STR "@XZ");
+            o.programLanguage = ResolveOgreProc<FnStringRef>("?getLanguage@GpuProgram@Ogre@@UBEABV" OS_STR "@XZ");
+            o.setProgramSource = ResolveOgreProc<FnSetString>("?setSource@GpuProgram@Ogre@@UAEXABV" OS_STR "@@Z");
+            o.programSkeletal = ResolveOgreProc<FnBool>("?isSkeletalAnimationIncluded@GpuProgram@Ogre@@UBE_NXZ");
+            o.setProgramSkeletal = ResolveOgreProc<FnSetBool>("?setSkeletalAnimationIncluded@GpuProgram@Ogre@@UAEX_N@Z");
+            o.programCompileError = ResolveOgreProc<FnBool>("?hasCompileError@GpuProgram@Ogre@@UBE_NXZ");
+            o.getParameter = ResolveOgreProc<FnGetParameter>(
+                "?getParameter@StringInterface@Ogre@@UBE?AV" OS_STR "@ABV34@@Z");
+            o.setParameter = ResolveOgreProc<FnSetParameter>(
+                "?setParameter@StringInterface@Ogre@@UAE_NABV" OS_STR "@0@Z");
+            o.createProgram = ResolveOgreProc<FnCreateProgram>(
+                "?createProgram@HighLevelGpuProgramManager@Ogre@@QAE?AV?$SharedPtr@VHighLevelGpuProgram@Ogre@@@2@ABV" OS_STR "@00W4GpuProgramType@2@@Z");
+            o.getAutoConstantCount = ResolveOgreProc<FnU32>("?getAutoConstantCount@GpuProgramParameters@Ogre@@QBEIXZ");
+            o.getAutoConstantEntry = ResolveOgreProc<FnGetAutoEntry>(
+                "?getAutoConstantEntry@GpuProgramParameters@Ogre@@QAEPAVAutoConstantEntry@12@I@Z");
+            o.copyMatchingNamedConstants = ResolveOgreProc<FnCopyMatching>(
+                "?copyMatchingNamedConstantsFrom@GpuProgramParameters@Ogre@@QAEXABV12@@Z");
+            o.setNamedAutoConstant = ResolveOgreProc<FnSetNamedAuto>(
+                "?setNamedAutoConstant@GpuProgramParameters@Ogre@@QAEXABV" OS_STR "@W4AutoConstantType@12@I@Z");
+            o.findNamedConstant = ResolveOgreProc<FnFindNamedConstant>(
+                "?_findNamedConstantDefinition@GpuProgramParameters@Ogre@@QBEPBUGpuConstantDefinition@2@ABV" OS_STR "@_N@Z");
+            o.entityInitialised = ResolveOgreProc<FnBool>("?isInitialised@Entity@Ogre@@QBE_NXZ");
+            o.entityHasSkeleton = ResolveOgreProc<FnBool>("?hasSkeleton@Entity@Ogre@@QBE_NXZ");
+            o.entityHasVertexAnimation = ResolveOgreProc<FnBool>("?hasVertexAnimation@Entity@Ogre@@QBE_NXZ");
+            o.entityHardwareAnimation = ResolveOgreProc<FnBool>("?isHardwareAnimationEnabled@Entity@Ogre@@QAE_NXZ");
+            o.entityBoneMatrices = ResolveOgreProc<FnU16>("?_getNumBoneMatrices@Entity@Ogre@@QBEGXZ");
+            o.entitySoftwareRequests = ResolveOgreProc<FnInt>("?getSoftwareAnimationRequests@Entity@Ogre@@QBEHXZ");
+            o.entityMesh = ResolveOgreProc<FnSharedRef>("?getMesh@Entity@Ogre@@QBEABV?$SharedPtr@VMesh@Ogre@@@2@XZ");
+            o.entitySubEntityCount = ResolveOgreProc<FnU32>("?getNumSubEntities@Entity@Ogre@@QBEIXZ");
+            o.entitySubEntity = ResolveOgreProc<FnPtrAt32>("?getSubEntity@Entity@Ogre@@QBEPAVSubEntity@2@I@Z");
+            o.subEntityMaterial = ResolveOgreProc<FnSharedRef>(
+                "?getMaterial@SubEntity@Ogre@@UBEABV?$SharedPtr@VMaterial@Ogre@@@2@XZ");
+            o.subEntitySetMaterial = ResolveOgreProc<FnSetMaterial>(
+                "?setMaterial@SubEntity@Ogre@@QAEXABV?$SharedPtr@VMaterial@Ogre@@@2@@Z");
+            o.meshVertexDataByTrackHandle = ResolveOgreProc<FnPtrAt16>(
+                "?getVertexDataByTrackHandle@Mesh@Ogre@@QAEPAVVertexData@2@G@Z");
+            o.findElementBySemantic = ResolveOgreProc<FnFindElement>(
+                "?findElementBySemantic@VertexDeclaration@Ogre@@UBEPBVVertexElement@2@W4VertexElementSemantic@2@G@Z");
+            o.elementType = ResolveOgreProc<FnElementType>("?getType@VertexElement@Ogre@@QBE?AW4VertexElementType@2@XZ");
+#undef OS_STR
+
+            const void* const required[] = {
+                o.rootSingleton, o.addFrameListener, o.materialManager, o.programManager,
+                o.getMaterialByName, o.getProgramByName, o.removeResource, o.cloneMaterial,
+                o.resourceName, o.resourceGroup, o.loadResource, o.getNumTechniques,
+                o.getNumSupportedTechniques, o.getTechnique, o.techniqueSupported, o.getNumPasses,
+                o.getPass, o.getShadowCasterMaterial, o.hasVertexProgram, o.getVertexProgram,
+                o.getVertexProgramParameters, o.setVertexProgram, o.getShadowCasterVertexProgramName,
+                o.getShadowReceiverVertexProgramName, o.setShadowCasterVertexProgram,
+                o.getShadowCasterVertexProgramParameters, o.unifiedDelegate, o.programSource,
+                o.programLanguage, o.setProgramSource, o.programSkeletal, o.setProgramSkeletal,
+                o.programCompileError, o.getParameter, o.setParameter, o.createProgram,
+                o.getAutoConstantCount, o.getAutoConstantEntry, o.copyMatchingNamedConstants,
+                o.setNamedAutoConstant, o.findNamedConstant, o.entityInitialised, o.entityHasSkeleton,
+                o.entityHasVertexAnimation, o.entityHardwareAnimation, o.entityBoneMatrices,
+                o.entitySoftwareRequests, o.entityMesh, o.entitySubEntityCount, o.entitySubEntity,
+                o.subEntityMaterial, o.subEntitySetMaterial, o.meshVertexDataByTrackHandle,
+                o.findElementBySemantic, o.elementType,
+            };
+            size_t missing = 0;
+            for (const void* proc : required)
+            {
+                if (!proc)
+                    ++missing;
+            }
+            g_apiAvailable = missing == 0;
+            if (!g_apiAvailable)
+            {
+                LogShimA(LogLevel::Warn, kComponent,
+                    "[GPUSKIN] disabled: %zu required OgreMain exports missing", missing);
+            }
+            return g_apiAvailable;
+        }
+
+        // ------------------------------------------------------------------
+        // Auto constants. Under hardware skinning Ogre's "world" matrix is
+        // bone 0, and the skinned position is already in world space, so every
+        // world-relative binding becomes its world-space (identity world)
+        // equivalent. Bindings that need the real world matrix are refused.
+
+        int RemapAutoConstant(int type)
+        {
+            switch (type)
+            {
+            case 24: return 16;  // worldviewproj -> viewproj
+            case 20: return 8;   // worldview -> view
+            case 21: return 9;   // inverse_worldview -> inverse_view
+            case 22: return 10;  // transpose_worldview -> transpose_view
+            case 23: return 11;  // inverse_transpose_worldview -> inverse_transpose_view
+            case 25: return 17;  // inverse_worldviewproj -> inverse_viewproj
+            case 26: return 18;  // transpose_worldviewproj -> transpose_viewproj
+            case 27: return 19;  // inverse_transpose_worldviewproj -> inverse_transpose_viewproj
+            case 82: return 80;  // texture_worldviewproj -> texture_viewproj
+            case 83: return 81;  // texture_worldviewproj_array -> texture_viewproj_array
+            case 86: return 84;  // spotlight_worldviewproj -> spotlight_viewproj
+            case 87: return 85;  // spotlight_worldviewproj_array -> spotlight_viewproj_array
+            case 45: return 44;  // light_position_object_space -> light_position
+            case 48: return 47;  // light_direction_object_space -> light_direction
+            case 60: return 59;  // light_position_object_space_array -> light_position_array
+            case 63: return 62;  // light_direction_object_space_array -> light_direction_array
+            case 79: return 78;  // camera_position_object_space -> camera_position
+            case 131: return 130; // lod_camera_position_object_space -> lod_camera_position
+            case 0: case 1: case 2: case 3:  // world matrix family
+            case 4: case 5: case 6: case 7:  // world matrix arrays (already skinned)
+            case 50: case 65:                // light distance in object space
+                return -1;
+            default:
+                return type;
+            }
+        }
+
+        bool PrepareParameters(void* params, ConversionError& error)
+        {
+            if (!params)
+            {
+                error = { Reject::BonesUniformMissing, "no parameters" };
+                return false;
+            }
+            const uint32_t count = g_ogre.getAutoConstantCount(params);
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                AutoConstantEntry* entry = g_ogre.getAutoConstantEntry(params, i);
+                if (!entry)
+                    continue;
+                const int mapped = RemapAutoConstant(entry->paramType);
+                if (mapped < 0)
+                {
+                    error = { Reject::WorldAutoConstant, "auto=" + std::to_string(entry->paramType) };
+                    return false;
+                }
+                // Variability stays: the world-relative types are per-object,
+                // a superset of the global ones they become.
+                entry->paramType = mapped;
+            }
+            const std::string bones = GpuSkinning::kBonePaletteUniform;
+            if (!g_ogre.findNamedConstant(params, bones, false))
+            {
+                error = { Reject::BonesUniformMissing, "" };
+                return false;
+            }
+            g_ogre.setNamedAutoConstant(params, bones, kActWorldMatrixArray3x4, 0);
+            return true;
+        }
+
+        // ------------------------------------------------------------------
+        // Programs.
+
+        // The HLSL program that carries source: unified programs delegate.
+        void* ConcreteProgram(void* program)
+        {
+            if (!program)
+                return nullptr;
+            if (RttiContains(program, "UnifiedHighLevelGpuProgram@Ogre"))
+            {
+                const SharedPtr* delegate = g_ogre.unifiedDelegate(program);
+                return delegate ? delegate->rep : nullptr;
+            }
+            return program;
+        }
+
+        // Returns the skinned twin's name, creating and compiling it once.
+        std::string SkinnedProgramFor(void* program, int weights, ConversionError& error)
+        {
+            void* concrete = ConcreteProgram(program);
+            if (!concrete)
+            {
+                error = { Reject::NoVertexProgram, "no delegate" };
+                return {};
+            }
+            const std::string concreteName = NameOf(concrete);
+            const std::string key = concreteName + "|w" + std::to_string(weights);
+            const auto cached = g_programs.find(key);
+            if (cached != g_programs.end())
+            {
+                error = cached->second.second;
+                return cached->second.first;
+            }
+
+            auto fail = [&](Reject reason, const std::string& detail) {
+                error = { reason, concreteName + " " + detail };
+                g_programs[key] = { std::string(), error };
+                return std::string();
+            };
+
+            const std::string* language = g_ogre.programLanguage(concrete);
+            if (!language || *language != "hlsl" || !RttiContains(concrete, "D3D11HLSLProgram"))
+                return fail(Reject::ProgramNotHlsl4, "language=" + (language ? *language : std::string("?")));
+            const std::string target = GetParameter(concrete, "target");
+            if (target.rfind("vs_4", 0) != 0 && target.rfind("vs_5", 0) != 0)
+                return fail(Reject::ProgramNotHlsl4, "target=" + target);
+            if (g_ogre.programSkeletal(concrete))
+                return fail(Reject::ProgramAlreadySkeletal, "");
+            const std::string* source = g_ogre.programSource(concrete);
+            if (!source || source->empty())
+                return fail(Reject::TransformRefused, "no source");
+
+            const std::string entry = GetParameter(concrete, "entry_point");
+            const GpuSkinning::SkinnedSourceResult skinned =
+                GpuSkinning::MakeSkinnedVertexSource(*source, entry, weights, kMaxBones);
+            if (!skinned.ok)
+                return fail(Reject::TransformRefused, skinned.error);
+
+            const std::string defines = GetParameter(concrete, "preprocessor_defines");
+            const std::string columnMajor = GetParameter(concrete, "column_major_matrices");
+            char hash[17];
+            sprintf_s(hash, "%016llx", GpuSkinning::HashText(
+                skinned.source + "\n" + target + "\n" + entry + "\n" + defines + "\n" + columnMajor));
+            const std::string name = std::string(kProgramRoot) + "w" + std::to_string(weights) + "/" + hash;
+
+            void* manager = g_ogre.programManager();
+            if (!manager)
+                return fail(Reject::CompileError, "no program manager");
+            const std::string& group = *g_ogre.resourceGroup(concrete);
+
+            SharedPtr existing;
+            g_ogre.getProgramByName(manager, &existing, name, group);
+            if (existing.rep)
+            {
+                const bool usable = !g_ogre.programCompileError(existing.rep);
+                Release(existing);
+                if (!usable)
+                    return fail(Reject::CompileError, name);
+                ++g_stats.programsReused;
+                g_programs[key] = { name, ConversionError{} };
+                return name;
+            }
+
+            SharedPtr created;
+            g_ogre.createProgram(manager, &created, name, group, std::string("hlsl"), kGpuProgramTypeVertex);
+            if (!created.rep)
+                return fail(Reject::CompileError, "create failed");
+            g_ogre.setProgramSource(created.rep, skinned.source);
+            bool parametersSet =
+                g_ogre.setParameter(created.rep, std::string("target"), target) &&
+                g_ogre.setParameter(created.rep, std::string("entry_point"), entry);
+            if (!defines.empty())
+                parametersSet = g_ogre.setParameter(created.rep, std::string("preprocessor_defines"), defines) && parametersSet;
+            if (!columnMajor.empty())
+                parametersSet = g_ogre.setParameter(created.rep, std::string("column_major_matrices"), columnMajor) && parametersSet;
+            g_ogre.setProgramSkeletal(created.rep, true);
+            if (parametersSet)
+                g_ogre.loadResource(created.rep, false);
+            const bool compiled = parametersSet && !g_ogre.programCompileError(created.rep);
+            Release(created);
+            if (!compiled)
+                return fail(Reject::CompileError, name + " from " + concreteName);
+
+            ++g_stats.programs;
+            LogShimA(LogLevel::Info, kComponent,
+                "[GPUSKIN] program %s from %s weights=%d position=%s normal=%s",
+                name.c_str(), concreteName.c_str(), weights,
+                skinned.positionParam.c_str(),
+                skinned.normalParam.empty() ? "-" : skinned.normalParam.c_str());
+            g_programs[key] = { name, ConversionError{} };
+            return name;
+        }
+
+        bool EnsureCasterPass()
+        {
+            if (g_casterPass)
+                return true;
+            void* manager = g_ogre.materialManager();
+            if (!manager)
+                return false;
+            SharedPtr material;
+            g_ogre.getMaterialByName(manager, &material, std::string(kCasterMaterialName), std::string("Autodetect"));
+            if (!material.rep)
+                return false;
+            void* technique = g_ogre.getNumTechniques(material.rep) > 0
+                ? g_ogre.getTechnique(material.rep, 0) : nullptr;
+            void* pass = technique && g_ogre.getNumPasses(technique) > 0
+                ? g_ogre.getPass(technique, 0) : nullptr;
+            if (!pass || !g_ogre.hasVertexProgram(pass))
+            {
+                Release(material);
+                return false;
+            }
+            // Keep the reference: the pass must outlive every clone using it.
+            g_casterMaterial = material;
+            g_casterPass = pass;
+            return true;
+        }
+
+        bool ConvertPass(void* technique, void* pass, int weights, ConversionError& error)
+        {
+            if (!g_ogre.hasVertexProgram(pass))
+            {
+                error = { Reject::NoVertexProgram, "" };
+                return false;
+            }
+            if (!g_ogre.getShadowReceiverVertexProgramName(pass)->empty())
+            {
+                error = { Reject::ProgramReceiverOverride, "" };
+                return false;
+            }
+            if (!g_ogre.getShadowCasterVertexProgramName(pass)->empty())
+            {
+                error = { Reject::ProgramCasterOverride, "" };
+                return false;
+            }
+            (void)technique;
+
+            const SharedPtr* program = g_ogre.getVertexProgram(pass);
+            const std::string skinnedName = SkinnedProgramFor(program ? program->rep : nullptr, weights, error);
+            if (skinnedName.empty())
+                return false;
+
+            if (!EnsureCasterPass())
+            {
+                error = { Reject::NoVertexProgram, std::string("caster material ") + kCasterMaterialName };
+                return false;
+            }
+            const SharedPtr* casterProgram = g_ogre.getVertexProgram(g_casterPass);
+            const std::string casterName = SkinnedProgramFor(casterProgram ? casterProgram->rep : nullptr, weights, error);
+            if (casterName.empty())
+                return false;
+
+            // Pass::setVertexProgram rebuilds the parameters for the new
+            // program and copies every matching named constant and auto
+            // binding across (GpuProgramUsage::recreateParameters).
+            g_ogre.setVertexProgram(pass, skinnedName, false);
+            SharedPtr params;
+            g_ogre.getVertexProgramParameters(pass, &params);
+            const bool mainReady = PrepareParameters(params.rep, error);
+            Release(params);
+            if (!mainReady)
+                return false;
+
+            g_ogre.setShadowCasterVertexProgram(pass, casterName);
+            SharedPtr casterParams;
+            g_ogre.getShadowCasterVertexProgramParameters(pass, &casterParams);
+            SharedPtr stockCasterParams;
+            g_ogre.getVertexProgramParameters(g_casterPass, &stockCasterParams);
+            bool casterReady = false;
+            if (casterParams.rep && stockCasterParams.rep)
+            {
+                g_ogre.copyMatchingNamedConstants(casterParams.rep, stockCasterParams.rep);
+                casterReady = PrepareParameters(casterParams.rep, error);
+            }
+            else
+            {
+                error = { Reject::BonesUniformMissing, "caster parameters" };
+            }
+            Release(stockCasterParams);
+            Release(casterParams);
+            return casterReady;
+        }
+
+        // ------------------------------------------------------------------
+        // Materials.
+
+        void RemoveMaterial(const std::string& name)
+        {
+            void* manager = g_ogre.materialManager();
+            if (manager)
+                g_ogre.removeResource(manager, name);
+        }
+
+        // Returns the clone (borrowed) for a source material, or null.
+        const CloneRecord* CloneFor(void* source, int weights, ConversionError& error)
+        {
+            const std::string sourceName = NameOf(source);
+            const std::string key = sourceName + "|w" + std::to_string(weights);
+            const auto cached = g_clones.find(key);
+            if (cached != g_clones.end())
+            {
+                error = cached->second.error;
+                return cached->second.clone.rep ? &cached->second : nullptr;
+            }
+
+            CloneRecord& record = g_clones[key];
+            auto fail = [&](const ConversionError& why) -> const CloneRecord* {
+                if (record.clone.rep)
+                {
+                    Release(record.clone);
+                    RemoveMaterial(record.cloneName);
+                }
+                record.cloneName.clear();
+                record.error = why;
+                error = why;
+                return nullptr;
+            };
+
+            record.cloneName = std::string(kCloneRoot) + std::to_string(g_generation) +
+                "/w" + std::to_string(weights) + "/" + sourceName;
+            void* manager = g_ogre.materialManager();
+            if (!manager)
+                return fail({ Reject::CloneFailed, "no material manager" });
+            g_ogre.cloneMaterial(source, &record.clone, record.cloneName, false, std::string());
+            if (!record.clone.rep)
+                return fail({ Reject::CloneFailed, record.cloneName });
+
+            uint16_t supported = 0;
+            const uint16_t techniques = g_ogre.getNumTechniques(record.clone.rep);
+            for (uint16_t t = 0; t < techniques; ++t)
+            {
+                void* technique = g_ogre.getTechnique(record.clone.rep, t);
+                if (!technique || !g_ogre.techniqueSupported(technique))
+                    continue;
+                ++supported;
+                SharedPtr casterMaterial;
+                g_ogre.getShadowCasterMaterial(technique, &casterMaterial);
+                const bool hasCasterMaterial = casterMaterial.rep != nullptr;
+                Release(casterMaterial);
+                if (hasCasterMaterial)
+                    return fail({ Reject::ShadowCasterMaterial, "" });
+
+                const uint16_t passes = g_ogre.getNumPasses(technique);
+                for (uint16_t p = 0; p < passes; ++p)
+                {
+                    void* pass = g_ogre.getPass(technique, p);
+                    ConversionError why;
+                    if (!pass || !ConvertPass(technique, pass, weights, why))
+                        return fail(why);
+                }
+            }
+            if (supported == 0)
+                return fail({ Reject::TechniqueLostSupport, "no supported technique" });
+
+            // Edits marked the clone for recompilation; loading compiles it,
+            // and a skinned program that is unsupported drops its technique.
+            g_ogre.loadResource(record.clone.rep, false);
+            const uint16_t stillSupported = g_ogre.getNumSupportedTechniques(record.clone.rep);
+            if (stillSupported != supported)
+            {
+                return fail({ Reject::TechniqueLostSupport,
+                    std::to_string(stillSupported) + "/" + std::to_string(supported) });
+            }
+
+            ++g_stats.clones;
+            record.error = {};
+            error = {};
+            return &record;
+        }
+
+        // ------------------------------------------------------------------
+        // Entities.
+
+        // Weights per vertex from the sub-entity's skinned vertex data, or 0.
+        int WeightsForSubEntity(void* mesh, uint32_t index, ConversionError& error)
+        {
+            void* vertexData = g_ogre.meshVertexDataByTrackHandle(mesh, static_cast<uint16_t>(index + 1));
+            if (!vertexData)
+                vertexData = g_ogre.meshVertexDataByTrackHandle(mesh, 0);
+            void* declaration = vertexData
+                ? *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(vertexData) + sizeof(void*))
+                : nullptr;
+            const void* weights = declaration ? g_ogre.findElementBySemantic(declaration, kVesBlendWeights, 0) : nullptr;
+            const void* indices = declaration ? g_ogre.findElementBySemantic(declaration, kVesBlendIndices, 0) : nullptr;
+            if (!weights || !indices)
+            {
+                error = { Reject::NoBlendData, "" };
+                return 0;
+            }
+            const int weightType = g_ogre.elementType(weights);
+            const int indexType = g_ogre.elementType(indices);
+            if (indexType != kVetUByte4 || weightType < kVetFloat1 || weightType > kVetFloat4)
+            {
+                error = { Reject::BlendFormat,
+                    "weights=" + std::to_string(weightType) + " indices=" + std::to_string(indexType) };
+                return 0;
+            }
+            return weightType - kVetFloat1 + 1;
+        }
+
+        bool EntityEligible(void* entity, ConversionError& error)
+        {
+            if (!g_ogre.entityInitialised(entity))
+                error = { Reject::NotInitialised, "" };
+            else if (!g_ogre.entityHasSkeleton(entity))
+                error = { Reject::NoSkeleton, "" };
+            else if (g_ogre.entityHasVertexAnimation(entity))
+                error = { Reject::VertexAnimation, "" };
+            else if (g_ogre.entityBoneMatrices(entity) > kMaxBones)
+                error = { Reject::TooManyBones, std::to_string(g_ogre.entityBoneMatrices(entity)) };
+            else if (g_ogre.entitySoftwareRequests(entity) > 0)
+                error = { Reject::SoftwareRequests, "" };
+            else
+                return true;
+            return false;
+        }
+
+        void SetSubEntityMaterialByName(void* subEntity, const std::string& name)
+        {
+            void* manager = g_ogre.materialManager();
+            SharedPtr material;
+            if (manager)
+                g_ogre.getMaterialByName(manager, &material, name, std::string("Autodetect"));
+            if (material.rep)
+                g_ogre.subEntitySetMaterial(subEntity, material);
+            Release(material);
+        }
+
+        void RevertEntity(void* entity, const EntityRecord& record)
+        {
+            const uint32_t count = g_ogre.entitySubEntityCount(entity);
+            for (uint32_t i = 0; i < count && i < record.originals.size(); ++i)
+            {
+                void* sub = g_ogre.entitySubEntity(entity, i);
+                if (!sub)
+                    continue;
+                if (NameOf(g_ogre.subEntityMaterial(sub)->rep) != record.originals[i])
+                    SetSubEntityMaterialByName(sub, record.originals[i]);
+            }
+        }
+
+        // Converts every sub-entity not already on its clone. `record` holds
+        // the stock names; a sub-entity whose current material is neither its
+        // recorded clone nor a clone at all was re-assigned by the game.
+        bool ConvertEntity(void* entity, EntityRecord& record, ConversionError& error)
+        {
+            if (!EntityEligible(entity, error))
+                return false;
+            const SharedPtr* mesh = g_ogre.entityMesh(entity);
+            if (!mesh || !mesh->rep)
+            {
+                error = { Reject::NoMesh, "" };
+                return false;
+            }
+            const uint32_t count = g_ogre.entitySubEntityCount(entity);
+            if (count == 0)
+            {
+                error = { Reject::NoMesh, "no sub-entities" };
+                return false;
+            }
+            if (record.originals.size() != count)
+            {
+                record = {};
+                record.originals.resize(count);
+                record.clones.resize(count);
+                record.weights.resize(count);
+            }
+
+            struct Pending
+            {
+                void* sub;
+                const CloneRecord* clone;
+            };
+            std::vector<Pending> pending;
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                void* sub = g_ogre.entitySubEntity(entity, i);
+                const SharedPtr* current = sub ? g_ogre.subEntityMaterial(sub) : nullptr;
+                if (!current || !current->rep)
+                {
+                    error = { Reject::NoMesh, "sub-entity without material" };
+                    return false;
+                }
+                const std::string currentName = NameOf(current->rep);
+                if (!record.clones[i].empty() && currentName == record.clones[i])
+                    continue;
+                if (StartsWith(currentName, kCloneRoot))
+                {
+                    // Another entity's clone, or one from an earlier mission.
+                    error = { Reject::CloneFailed, "foreign clone " + currentName };
+                    return false;
+                }
+                const int weights = WeightsForSubEntity(mesh->rep, i, error);
+                if (weights == 0)
+                    return false;
+                const CloneRecord* clone = CloneFor(current->rep, weights, error);
+                if (!clone)
+                {
+                    error.detail = currentName + " " + error.detail;
+                    return false;
+                }
+                record.originals[i] = currentName;
+                record.clones[i] = clone->cloneName;
+                record.weights[i] = weights;
+                pending.push_back({ sub, clone });
+            }
+
+            for (const Pending& item : pending)
+                g_ogre.subEntitySetMaterial(item.sub, item.clone->clone);
+
+            // Ogre decides from the materials now bound; anything short of
+            // full hardware animation must not keep a skinned material.
+            if (!g_ogre.entityHardwareAnimation(entity))
+            {
+                RevertEntity(entity, record);
+                error = { Reject::HardwareNotEnabled, "" };
+                return false;
+            }
+            return true;
+        }
+
+        bool EntityOnClones(void* entity, const EntityRecord& record)
+        {
+            const uint32_t count = g_ogre.entitySubEntityCount(entity);
+            if (count != record.clones.size())
+                return false;
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                void* sub = g_ogre.entitySubEntity(entity, i);
+                const SharedPtr* current = sub ? g_ogre.subEntityMaterial(sub) : nullptr;
+                if (!current || current->rep == nullptr || NameOf(current->rep) != record.clones[i])
+                    return false;
+            }
+            return true;
+        }
+
+        void CountReject(void* entity, const ConversionError& error)
+        {
+            ++g_stats.rejects[static_cast<int>(error.reason)];
+            char key[64];
+            sprintf_s(key, "entity=%p", entity);
+            LogRejectOnce(RejectName(error.reason) + std::string(":") + error.detail, error.reason, key);
+        }
+
+        void ScanFrame()
+        {
+            static void* s_objects[Hooks::kGameObjectArenaSlotCapacity];
+            const size_t total =
+                Hooks::CollectLiveGameObjectsFromArena(s_objects, Hooks::kGameObjectArenaSlotCapacity);
+            const bool convertPass = (g_frame++ % kConvertIntervalFrames) == 0;
+
+            std::unordered_set<void*> live;
+            live.reserve(total * 2);
+            for (size_t index = 0; index < total; ++index)
+            {
+                void* obj76 = nullptr;
+                if (!Hooks::TryGetGameObjectObj76(s_objects[index], obj76) || !obj76)
+                    continue;
+                const Hooks::ChunkBridgeSnapshot snapshot =
+                    Hooks::CaptureChunkBridgeSnapshot(reinterpret_cast<const uint8_t*>(obj76));
+                void* const candidates[] = { snapshot.directOgreEntity, snapshot.ownerOgreEntity };
+                for (void* entity : candidates)
+                {
+                    if (!entity || !live.insert(entity).second)
+                        continue;
+
+                    const auto converted = g_converted.find(entity);
+                    if (converted != g_converted.end())
+                    {
+                        if (EntityOnClones(entity, converted->second))
+                            continue;
+                        // The game re-assigned a material since last frame:
+                        // convert the newcomer or put the whole entity back.
+                        ConversionError error;
+                        if (ConvertEntity(entity, converted->second, error))
+                        {
+                            ++g_stats.reconverted;
+                            continue;
+                        }
+                        RevertEntity(entity, converted->second);
+                        ++g_stats.reverted;
+                        CountReject(entity, error);
+                        g_converted.erase(converted);
+                        g_rejected.insert(entity);
+                        continue;
+                    }
+                    if (!convertPass || g_rejected.count(entity) != 0)
+                        continue;
+                    char rtti[64];
+                    const char* className = Hooks::TryGetRttiClassName(entity, rtti, sizeof(rtti));
+                    if (!className || std::strcmp(className, ".?AVEntity@Ogre@@") != 0)
+                    {
+                        g_rejected.insert(entity);
+                        continue;
+                    }
+
+                    EntityRecord record;
+                    ConversionError error;
+                    if (ConvertEntity(entity, record, error))
+                    {
+                        if (g_stats.converted == 0)
+                        {
+                            LogShimA(LogLevel::Info, kComponent,
+                                "[GPUSKIN] first entity on hardware skinning: %s (%zu sub-entities)",
+                                record.clones.empty() ? "?" : record.clones[0].c_str(), record.clones.size());
+                        }
+                        ++g_stats.converted;
+                        g_converted.emplace(entity, std::move(record));
+                    }
+                    else
+                    {
+                        CountReject(entity, error);
+                        g_rejected.insert(entity);
+                    }
+                }
+            }
+
+            // Entities no longer in the arena are not touched again: their
+            // pointers may be dangling, and a reused address starts fresh.
+            for (auto it = g_converted.begin(); it != g_converted.end();)
+                it = live.count(it->first) ? std::next(it) : g_converted.erase(it);
+            if (convertPass)
+            {
+                for (auto it = g_rejected.begin(); it != g_rejected.end();)
+                    it = live.count(*it) ? std::next(it) : g_rejected.erase(it);
+            }
+        }
+
+        void Disable(const char* why)
+        {
+            g_failed.store(true, std::memory_order_release);
+            g_active.store(false, std::memory_order_release);
+            LogShimA(LogLevel::Error, kComponent,
+                "[GPUSKIN] disabled for this session: %s (converted=%u)", why, g_stats.converted);
+        }
+
+        bool ScanFrameCxx()
+        {
+            try
+            {
+                ScanFrame();
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        // No destructible locals: SEH and C++ unwinding do not mix in one frame.
+        void ScanFrameGuarded()
+        {
+            bool ok = false;
+            __try
+            {
+                ok = ScanFrameCxx();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                ok = false;
+            }
+            if (!ok)
+                Disable("fault during entity scan");
+        }
+
+        // Ogre::FrameListener, laid out to its vtable: frameStarted,
+        // frameRenderingQueued, frameEnded, virtual destructor. Root fires
+        // frameStarted from renderOneFrame before any scene rendering.
+        class FrameListener
+        {
+        public:
+            virtual bool frameStarted(const void*)
+            {
+                if (g_active.load(std::memory_order_acquire) && !g_failed.load(std::memory_order_acquire))
+                    ScanFrameGuarded();
+                return true;
+            }
+            virtual bool frameRenderingQueued(const void*) { return true; }
+            virtual bool frameEnded(const void*) { return true; }
+            virtual ~FrameListener() = default;
+        };
+        FrameListener g_listener;
+
+        void LogMissionSummary()
+        {
+            std::string rejects;
+            for (int i = 0; i < static_cast<int>(Reject::Count); ++i)
+            {
+                if (g_stats.rejects[i] == 0)
+                    continue;
+                if (!rejects.empty())
+                    rejects += ",";
+                rejects += RejectName(static_cast<Reject>(i));
+                rejects += "=" + std::to_string(g_stats.rejects[i]);
+            }
+            LogShimA(LogLevel::Info, kComponent,
+                "[GPUSKIN] mission summary: converted=%u reconverted=%u reverted=%u clones=%u programs=%u reused=%u rejects={%s}",
+                g_stats.converted, g_stats.reconverted, g_stats.reverted, g_stats.clones,
+                g_stats.programs, g_stats.programsReused, rejects.c_str());
+        }
+
+        void ReleaseMissionStateCxx()
+        {
+            try
+            {
+                for (auto& entry : g_clones)
+                {
+                    if (!entry.second.clone.rep)
+                        continue;
+                    Release(entry.second.clone);
+                    // Live entities keep their own reference to the clone.
+                    RemoveMaterial(entry.second.cloneName);
+                }
+            }
+            catch (...)
+            {
+                Disable("fault releasing mission clones");
+            }
+            g_clones.clear();
+            g_programs.clear();
+            g_converted.clear();
+            g_rejected.clear();
+        }
+
+        bool ReadEnabledSetting()
+        {
+            bool enabled = false;
+            if (TryGetUserConfigBool("Experimental", "GpuSkinning", enabled))
+                return enabled;
+            return EnvFlagEnabled("OPENSHIM_GPU_SKINNING");
+        }
+    }
+
+    void GpuSkinningNotifyMissionRunStateChanged(bool running)
+    {
+        if (!running)
+        {
+            if (!g_active.exchange(false))
+                return;
+            LogMissionSummary();
+            ReleaseMissionStateCxx();
+            return;
+        }
+
+        if (g_failed.load(std::memory_order_acquire) || !ReadEnabledSetting())
+            return;
+        if (RenderProfiles::IdentifyActiveRenderSystem() != 1)
+        {
+            LogShimA(LogLevel::Info, kComponent, "[GPUSKIN] enabled but renderer is not Direct3D 11; CPU skinning kept");
+            return;
+        }
+        if (!ResolveApi())
+            return;
+        ++g_generation;
+        g_stats = {};
+        g_loggedRejects.clear();
+        g_frame = 0;
+        g_active.store(true, std::memory_order_release);
+        LogShimA(LogLevel::Info, kComponent, "[GPUSKIN] enabled for mission generation %u", g_generation);
+    }
+
+    void GpuSkinningRenderFrameTick()
+    {
+        if (g_listenerInstalled || !g_active.load(std::memory_order_acquire))
+            return;
+        g_listenerInstalled = true;
+        void* root = g_ogre.rootSingleton ? g_ogre.rootSingleton() : nullptr;
+        if (!root)
+        {
+            Disable("Ogre Root unavailable");
+            return;
+        }
+        g_ogre.addFrameListener(root, &g_listener);
+        LogShimA(LogLevel::Info, kComponent, "[GPUSKIN] frame listener installed");
+    }
+}

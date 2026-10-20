@@ -135,6 +135,8 @@ namespace
             return TryReadMappedBool(ini, "Diagnostics", "TraceBznLoad", false, out);
         if (Equals(name, "OPENSHIM_INTERACTIVE_FOG_WAKES"))
             return TryReadMappedBool(ini, "Experimental", "InteractiveFogWakes", false, out);
+        if (Equals(name, "OPENSHIM_GPU_SKINNING"))
+            return TryReadMappedBool(ini, "Experimental", "GpuSkinning", false, out);
 
         // Working runtime features use positive INI keys; legacy DISABLE_*
         // environment names are inverted here so old call-site semantics remain
