@@ -990,6 +990,10 @@ HitMarkerDuration = 120
 HitMarkerColor = White
 HitMarkerSize = 100
 HitMarkerOpacity = 100
+; Stock-art reticle on DX11 only: a runtime shader recolors it red/green with
+; ReactiveReticle and ripples its own art outward on hits. 0 draws stock art
+; with sprite-only tinted ghost rings instead. Other backends always use those.
+StockReticleShader = 1
 ; Incoming weapon damage: arcs toward the firing source at impact. Single player.
 ; Independent of reticle/hit markers; follows native HUD scale. Applies live.
 DamageIndicators = 0

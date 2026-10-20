@@ -137,6 +137,7 @@
     <ClCompile Include="src\engine\native_hud_layout.cpp" />
     <ClCompile Include="src\patches\native_hud_runtime.cpp" />
     <ClCompile Include="src\patches\hud_feedback.cpp" />
+    <ClCompile Include="src\patches\stock_reticle_fx.cpp" />
     <ClCompile Include="src\patches\contextual_hud.cpp" />
     <ClCompile Include="src\patches\menu_theme.cpp" />
     <ClCompile Include="src\patches\hud_palette.cpp" />

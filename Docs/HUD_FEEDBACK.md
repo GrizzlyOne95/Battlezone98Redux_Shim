@@ -23,6 +23,7 @@ All controls apply live and persist in `[Display]` in `openshim.ini`.
 | `HitMarkerColor` | White, Green, Cyan, Amber | White |
 | `HitMarkerSize` | Small (75), Normal (100), Large (150) | 100 |
 | `HitMarkerOpacity` | 50, 75, 100 percent | 100 |
+| `StockReticleShader` | Off, On (Stock Shader) | 1 |
 
 The INI also accepts reticle/hit size 50–200, opacity 25–100 and duration 60–400.
 Unknown styles preserve Stock; unknown colors use White. Styling affects the
@@ -36,9 +37,36 @@ art. The custom cross, dot and brackets turn red over an enemy and green over
 an ally, using the engine's own radar-palette predicates for the local player.
 Team 0 (neutral), unknown teams and objects whose perceived team differs from
 their actual team (disguised units) keep the configured color, so the tint
-never reveals more than the radar does. The Stock sprite itself is not
-recolored; with Stock art only the brackets carry the tint. The tint is part of
-Reactive Reticle and has no separate setting.
+never reveals more than the radar does. With Stock art on DX11 the sprite
+itself is also recolored through the stock-art shader (below); elsewhere only
+the brackets carry the tint. The tint is part of Reactive Reticle and has no
+separate setting.
+
+### Stock-art effects
+
+With `ReticleStyle=Stock`, hit markers also ripple the weapon's own reticle
+art. Each confirmed hit pops the sprite about 12 percent larger and sends up to
+four copies outward, which fade as they travel. Up to four distinct targets make
+the ripple wider and the pop larger. The ripple runs for twice the hit duration,
+bounded to 200–600 ms, and is colored by `HitMarkerColor` and `HitMarkerOpacity`.
+
+On DX11, `StockReticleShader=1` (default) draws the reticle through
+`OpenShim_ReticleFx_fragmentHLSL4`, an optional program in the enhanced
+resource payload. The sprite's own atlas material is cloned per atlas
+(`OpenShim/ReticleFx/N`). The stock atlas cell is submitted through the native
+sized-sprite path (`HudPaletteSizedSprite`), on a quad enlarged so the ripple
+can leave the cell. Every sample stays inside that cell, so neighboring atlas
+art never bleeds in. The shader recolors the art by brightness to the team
+tint, flashes it toward white on the hit kick and composites the rings. Only
+the visible reticle changes; other HUD sprites keep their materials.
+
+Elsewhere, or with `StockReticleShader=0`, a missing program, a failed clone or
+a mirrored/uncentered submission, the ripple uses sprite-only ghost copies. The
+native palette-tint mode draws them (`HudPaletteSpriteTint`, restored after
+each copy), and the stock art keeps its own colors. Without that global only the
+ripple stands down. Shader constants are per material, so one shaded reticle is
+drawn per frame, which is all the stock HUD submits. Mission reset drops the
+cached clones; later draws clone again from the current sprite table.
 
 Hit feedback adds short diagonal ticks (white by default), holding for half the configured
 duration and fading for the remainder. A successive hit refreshes one pulse.
@@ -66,10 +94,14 @@ UI quads, with a guarded `UiViewReflow` adapter and a 2x2 white texture. The
 stock UI shader applies BGRA correction to Ogre-generated vertex colors;
 the preview compensates in its own producer without changing shared shaders.
 Missing artwork, another backend or a failed guard disables only the preview.
+The thirteenth row, Stock Shader, sits in the right column at y 458–500 of the
+1440x1080 design space. The preview samples, their clip and the note therefore
+start 20 units lower than before (clip y 510–640, note at y 650), clearing the
+info box at y 690. The damage page shares that geometry.
 The shared preview pool now supports 192 quads for the incoming-damage page's
 one/two/three-attacker arc samples.
 The existing nine-tile hub is unchanged; HUD links to this subpage, keeping
-all twelve appearance/feedback controls reachable without truncating rows.
+all thirteen appearance/feedback controls reachable without truncating rows.
 
 Reactive feedback and hit confirmation are disabled in network sessions;
 custom static reticle styles remain cosmetic. Unreadable session state fails
@@ -208,3 +240,20 @@ override. This work does not change the diagnostic or thread-suspension code.
   outward on the confirming frame and settled closer in on the next frames.
   `Confirmed player hit` was logged. Two side attackers then produced two
   independent incoming arcs with owner ticks.
+
+## Stock-art ripple and shader qualification, 2026-10-20
+
+- Release Win32 plugin build passed; all 120 Windows CTest suites passed.
+- Instance6 (GOG 2.2.301, DX11 windowed), lcbench Lua fixture, Stock style,
+  `HitMarkerDuration=400`. The workstation was locked, so frames were captured
+  in-process via Ogre `RenderTarget::writeContentsToFile` with a local-only
+  build; that hook is not part of this change.
+- `StockReticleShader=1`: the log reported `ripple ready` and `Stock reticle
+  shader material OpenShim/ReticleFx/1 ready for sprite 415`. Over the team-2
+  svtank the yellow/green stock art drew red; over the team-1 avtank it drew
+  green. During fire the art flashed and copies of its arms travelled outward
+  and faded between hits. The DX11 compatibility layer logs `instantiate
+  declined ... reason=excluded-class` for the clone, the normal outcome for UI
+  materials; the clone's own technique renders.
+- `StockReticleShader=0`: the stock colors stayed unchanged over both teams, and
+  each confirmed hit sent ghost copies of the stock art outward.

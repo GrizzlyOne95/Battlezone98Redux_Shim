@@ -25,6 +25,9 @@ namespace BZROpenShim::HudFeedback
         uint32_t hitColor = 0xFFFFFFFFu;
         int hitSizePercent = 100;
         int hitOpacity = 100;
+        // Stock-style reticle effects through the runtime shader material;
+        // off falls back to the sprite-only ripple.
+        bool stockShader = true;
         bool NeedsDraw() const { return style != Style::Stock || reactive || hits; }
     };
 
@@ -130,6 +133,14 @@ namespace BZROpenShim::HudFeedback
             const float k = 1.0f - progress / 0.45f;
             return k * k;
         }
+        // 0 at the confirming hit rising to 1 at durationMs; -1 when idle.
+        float Progress(uint64_t now, int durationMs) const
+        {
+            if (!active || now < started || durationMs <= 0) return -1;
+            const uint64_t elapsed = now - started;
+            if (elapsed >= static_cast<uint64_t>(durationMs)) return -1;
+            return static_cast<float>(elapsed) / durationMs;
+        }
         int Targets(uint64_t now, int durationMs) const
         {
             if (Strength(now, durationMs) <= 0) return 0;
@@ -139,6 +150,43 @@ namespace BZROpenShim::HudFeedback
             return std::max(count, 1);
         }
     };
+
+    // The stock sprite reticle's own hit pulse: the weapon's reticle art
+    // ripples outward as fading copies, and the reticle itself pops. The
+    // copies use the native sprite tint, so their ARGB multiplies the art.
+    struct GhostRing { float scale = 1; uint32_t argb = 0; };
+    struct GhostPlan
+    {
+        float baseScale = 1;  // multiplier for the stock reticle draw
+        std::array<GhostRing, 4> rings = {};
+        size_t count = 0;
+    };
+
+    // The ripple outlives the short tick marker so the expansion reads.
+    inline int GhostDurationMs(int hitDurationMs) { return std::clamp(hitDurationMs * 2, 200, 600); }
+
+    inline GhostPlan MakeGhostPlan(float progress, float kick, int targets, uint32_t rgb, int opacity)
+    {
+        GhostPlan plan;
+        if (!std::isfinite(progress) || progress < 0 || progress >= 1) return plan;
+        const int n = std::clamp(targets, 1, 4);
+        const float k = std::isfinite(kick) ? std::clamp(kick, 0.0f, 1.0f) : 0.0f;
+        plan.baseScale = 1.0f + 0.12f * k * (1.0f + 0.25f * static_cast<float>(n - 1));
+        // More targets: more, wider rings, each trailing the last.
+        const float reach = 0.55f + 0.15f * static_cast<float>(n - 1);
+        const float peak = static_cast<float>(std::clamp(opacity, 25, 100)) * 0.01f * 0.85f;
+        for (int i = 0; i < n; ++i)
+        {
+            const float p = (progress - 0.12f * static_cast<float>(i)) / (1.0f - 0.12f * static_cast<float>(i));
+            if (p <= 0 || p >= 1) continue;
+            const float ease = 1.0f - (1.0f - p) * (1.0f - p);
+            const float fade = (1.0f - p) * (1.0f - p);
+            const uint32_t a = static_cast<uint32_t>(std::lround(255.0f * peak * fade));
+            if (a == 0) continue;
+            plan.rings[plan.count++] = {1.0f + reach * ease, (a << 24) | (rgb & 0xFFFFFFu)};
+        }
+        return plan;
+    }
 
     struct Rect { int left = 0, top = 0, right = 0, bottom = 0; uint32_t color = 0; };
     struct DrawPlan

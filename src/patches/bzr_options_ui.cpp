@@ -2879,6 +2879,10 @@ namespace BZROpenShim
             { "Marker Opacity", "Display", "HitMarkerOpacity", nullptr, 0,
               kShimReticleOpacity, kShimReticleOpacityLabels, 3, 2, ShimSettingApplyGroup::HudFeedback,
               "Hit tick opacity, independent of reticle opacity. Applies live." },
+            { "Stock Shader", "Display", "StockReticleShader", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0, ShimSettingApplyGroup::HudFeedback,
+              "Stock artwork on DX11: tint it red/green with Reactive Reticle and ripple its own art on hits. "
+              "Off keeps stock colors with a sprite-only ripple. Applies live." },
             { "Scrap Color", "Display", "ScrapHudColor", nullptr, 0,
               kShimMeterColors, kShimMeterColors, 9, 0, ShimSettingApplyGroup::GlobalImprovement,
               "Scrap title/value color. Default preserves the selected Stock/Legacy palette. Layout and plates stay as selected." },
@@ -3486,7 +3490,7 @@ namespace BZROpenShim
         static const char* const kShimCategoryReticle[] = {
             "Reticle Style", "Reticle Color", "Reticle Size", "Reticle Thickness", "Reticle Outline",
             "Reticle Opacity", "Reactive Reticle", "Hit Markers", "Marker Duration",
-            "Marker Color", "Marker Size", "Marker Opacity" };
+            "Marker Color", "Marker Size", "Marker Opacity", "Stock Shader" };
         static const char* const kShimCategoryPalette[] = {
             "Base Palette", "Radar Lines", "Radar Backdrop", "Friendly Blips", "Enemy Blips", "Neutral Blips",
             "Hull Healthy", "Hull Damaged", "Hull Critical", "Cockpit Ammo", "Unit Healthy", "Unit Damaged",
@@ -3571,7 +3575,8 @@ namespace BZROpenShim
                       "a category screen shows at most 16 rows");
         static_assert(sizeof(kShimCategoryHud) / sizeof(kShimCategoryHud[0]) <= kShimCategoryMaxRows,
                       "HUD controls must fit the category screen");
-        static_assert(sizeof(kShimCategoryReticle) / sizeof(kShimCategoryReticle[0]) <= 12,
+        // Slot 12 is the right column's fifth row (y 458-500), above the preview clip at y 510.
+        static_assert(sizeof(kShimCategoryReticle) / sizeof(kShimCategoryReticle[0]) <= 13,
                       "reticle controls must leave room for the live preview");
         static_assert(std::size(kShimCategoryPalette) <= kShimCategoryMaxRows,
                       "HUD colors must fit without overflowing category slots");
@@ -3984,10 +3989,10 @@ namespace BZROpenShim
                 owners.count = static_cast<size_t>(sample + 1);
                 owners.strengths.fill(1.0f);
                 const auto plan = ui.category == kShimDamageCategory
-                    ? HudFeedback::MakeDamageIndicatorPlan(damageSettings, 820 + 150 * sample, 550, 1, 1,
-                        {750, 490, 1200, 620, 0}, sample * 1.57079633f, 1, 0.75f, owners)
-                    : HudFeedback::MakeDrawPlan(settings, 820 + 150 * sample, 550, 2, 2,
-                        {750, 490, 1200, 620, 0}, sample != 0, sample == 2 ? 1.0f : 0.0f,
+                    ? HudFeedback::MakeDamageIndicatorPlan(damageSettings, 820 + 150 * sample, 570, 1, 1,
+                        {750, 510, 1200, 640, 0}, sample * 1.57079633f, 1, 0.75f, owners)
+                    : HudFeedback::MakeDrawPlan(settings, 820 + 150 * sample, 570, 2, 2,
+                        {750, 510, 1200, 640, 0}, sample != 0, sample == 2 ? 1.0f : 0.0f,
                         sample == 1 ? HudFeedback::Relation::Enemy
                                     : sample == 2 ? HudFeedback::Relation::Friend : HudFeedback::Relation::None);
                 for (size_t i = 0; i < plan.count && used < ui.previewQuads.size(); ++i)
@@ -4269,13 +4274,13 @@ namespace BZROpenShim
                     Shell::AddLabel(panel, panel, name, {775.0f + sample * 150.0f, 470, 130, 28},
                         category == kShimDamageCategory ? damageCaptions[sample] : captions[sample]);
                 }
-                ui.previewNote = Shell::AddLabel(panel, panel, "ReticlePreviewNote", {752, 640, 440, 28}, "");
+                ui.previewNote = Shell::AddLabel(panel, panel, "ReticlePreviewNote", {752, 650, 440, 28}, "");
                 if (Shell::IsTextureDeployed("osh_preview_white.png"))
                 {
                     for (size_t i = 0; i < ui.previewQuads.size(); ++i)
                     {
                         _snprintf_s(name, _TRUNCATE, "ReticlePreviewQuad%zu", i);
-                        ui.previewQuads[i] = Shell::AddPanel(panel, panel, name, {800, 550, 1, 1},
+                        ui.previewQuads[i] = Shell::AddPanel(panel, panel, name, {800, 570, 1, 1},
                                                            "osh_preview_white.png", Shell::kControlFlags);
                         if (!ui.previewQuads[i]) return false;
                         if (g_BzrFn_UiSetActive) g_BzrFn_UiSetActive(ui.previewQuads[i], 0);

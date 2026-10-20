@@ -80,6 +80,20 @@ void TestOptionalMenuShader()
     std::filesystem::remove_all(dir,g_errc);
 }
 
+void TestOptionalReticleShader()
+{
+    const auto dir=MakeScratchDir("reticle_shader");PopulateValidSet(dir);
+    std::string problem;
+    std::ofstream(dir/"openshim_reticle_fx.program") << "optional payload";
+    Check(Validate(dir,problem),"optional reticle shader is an accepted top-level script");
+    std::filesystem::remove(dir/"openshim_reticle_fx.program",g_errc);
+    Check(Validate(dir,problem),"absent optional reticle shader never disables Enhanced");
+    std::filesystem::create_directories(dir/"copy");
+    std::ofstream(dir/"copy"/"openshim_reticle_fx.program") << "shadow";
+    Check(!Validate(dir,problem),"nested reticle shader duplicate is refused like other shadow scripts");
+    std::filesystem::remove_all(dir,g_errc);
+}
+
 void TestSingleRemovedMandatoryFileFails()
 {
     std::printf("TestSingleRemovedMandatoryFileFails\n");
@@ -260,6 +274,7 @@ int main()
 {
     TestCompleteSetValidates();
     TestOptionalMenuShader();
+    TestOptionalReticleShader();
     TestSingleRemovedMandatoryFileFails();
     TestEmptiedMandatoryFileFails();
     TestVersionMarkerContract();

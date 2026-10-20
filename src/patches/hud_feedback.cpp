@@ -10,9 +10,11 @@
 #include "openshim_events.h"
 #include "patcher.h"
 #include "shim_log.h"
+#include "stock_reticle_fx.h"
 
 #include <Windows.h>
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -47,6 +49,8 @@ namespace BZROpenShim::HudFeedback
         bool g_cameraReady = false;
         uint32_t g_friendTeam = 0, g_enemyTeam = 0;
         bool g_relationReady = false;
+        uint32_t g_tint = 0;
+        bool g_ghostReady = false;
         int g_indicatorPlayer = 0; // safe-frame thread only
         uint32_t g_damageSites[4] = {};
         InlineDetour32 g_damageDetours[4] = {};
@@ -137,6 +141,17 @@ namespace BZROpenShim::HudFeedback
             __except (EXCEPTION_EXECUTE_HANDLER) { return Relation::None; }
         }
 
+        // Draws the stock reticle sprite through the native tint mode, which
+        // replaces the sprite's palette color (alpha included) with argb.
+        void TintedStock(void* viewport, int sprite, int x, int y, uint32_t flags, float scale, uint32_t argb) noexcept
+        {
+            auto* tint = reinterpret_cast<uint32_t*>(g_tint);
+            const uint32_t saved = *tint;
+            *tint = argb;
+            __try { reinterpret_cast<Sprite>(g_sprite)(viewport, sprite, x, y, (flags & ~7u) | 5u, scale); }
+            __finally { *tint = saved; }
+        }
+
         // Called at the one stock main-reticle sprite submission. Its x/y are
         // the engine's projected aim point, not a guessed screen center.
         void __cdecl DrawReticle(void* viewport, int sprite, int x, int y, uint32_t flags, float scale)
@@ -201,7 +216,38 @@ namespace BZROpenShim::HudFeedback
             const Relation relation = valid && effective.reactive && contact ? ClassifyContact(contactObject) : Relation::None;
             const DrawPlan plan = valid
                 ? MakeDrawPlan(effective, x, y, sx, sy, clip, contact, strength, relation, kick, targets) : DrawPlan{};
-            if (!plan.replacesStock) original(viewport, sprite, stockX, stockY, flags, scale);
+            if (!plan.replacesStock)
+            {
+                // The ripple scales about the aim point, so it needs the
+                // stock centering bits; otherwise the art would grow from a corner.
+                GhostPlan ghost;
+                if (valid && hitsOn && (flags & 0x50000u) == 0x50000u)
+                {
+                    const int ghostMs = GhostDurationMs(settings.hitDurationMs);
+                    ghost = MakeGhostPlan(pulse.Progress(frameNow, ghostMs), kick,
+                        pulse.Targets(frameNow, ghostMs), settings.hitColor, settings.hitOpacity);
+                }
+                // Team tint recolors the stock art only through the shader:
+                // the native tint would multiply already-colored art to mud.
+                const bool tinted = relation == Relation::Friend || relation == Relation::Enemy;
+                bool shaded = false;
+                if (valid && settings.stockShader && (tinted || ghost.count || ghost.baseScale > 1.0f))
+                {
+                    StockReticleFx::Frame fx;
+                    fx.sprite = sprite; fx.x = stockX; fx.y = stockY; fx.flags = flags; fx.scale = scale;
+                    fx.uiScaleX = sx; fx.uiScaleY = sy; fx.ghost = ghost; fx.ringRgb = settings.hitColor;
+                    fx.tintRgb = RelationColor(relation, 0xFFFFFF); fx.tintAmount = tinted ? 0.85f : 0.0f;
+                    fx.flash = 0.5f * kick;
+                    shaded = StockReticleFx::Draw(viewport, fx);
+                }
+                if (!shaded)
+                {
+                    const float base = scale > 0 && std::isfinite(scale) ? scale : 1.0f;
+                    original(viewport, sprite, stockX, stockY, flags, base * ghost.baseScale);
+                    for (size_t i = 0; g_ghostReady && i < ghost.count; ++i)
+                        TintedStock(viewport, sprite, stockX, stockY, flags, base * ghost.rings[i].scale, ghost.rings[i].argb);
+                }
+            }
             for (size_t i = 0; i < plan.count; ++i)
             {
                 const auto& r = plan.rects[i];
@@ -243,9 +289,12 @@ namespace BZROpenShim::HudFeedback
                 {"HudPaletteFriendTeam", &g_friendTeam}, {"HudPaletteEnemyTeam", &g_enemyTeam},
             };
             g_relationReady = HookEngine::BindEngineRows("Reticle team tint", relationRows);
+            // Optional: the stock-art hit ripple stands down alone without the tint global.
+            const HookEngine::EngineRow ghostRows[] = { {"HudPaletteSpriteTint", &g_tint} };
+            g_ghostReady = HookEngine::BindEngineRows("Stock reticle ripple", ghostRows);
             g_drawReady = RedirectCallTarget(g_drawCall, g_sprite, reinterpret_cast<uintptr_t>(DrawReticle));
-            if (g_drawReady) Log(L"[HUDFEEDBACK] Stock main-reticle draw adapter installed (team tint %ls)\n",
-                g_relationReady ? L"ready" : L"unavailable");
+            if (g_drawReady) Log(L"[HUDFEEDBACK] Stock main-reticle draw adapter installed (team tint %ls, ripple %ls)\n",
+                g_relationReady ? L"ready" : L"unavailable", g_ghostReady ? L"ready" : L"unavailable");
             return g_drawReady;
         }
 
@@ -414,6 +463,7 @@ namespace BZROpenShim::HudFeedback
         TryGetUserConfigBool("Display", "ReticleOutline", settings.outline);
         TryGetUserConfigBool("Display", "ReactiveReticle", settings.reactive);
         TryGetUserConfigBool("Display", "HitMarkers", settings.hits);
+        TryGetUserConfigBool("Display", "StockReticleShader", settings.stockShader);
         DamageIndicatorSettings incoming;
         TryGetUserConfigBool("Display", "DamageIndicators", incoming.enabled);
         if (TryGetUserConfigString("Display", "DamageIndicatorColor", text))
@@ -480,6 +530,7 @@ namespace BZROpenShim::HudFeedback
 
     void ResetMission() noexcept
     {
+        StockReticleFx::Invalidate();
         AcquireSRWLockExclusive(&g_stateLock);
         g_pulse.Reset();
         g_incoming.Reset();

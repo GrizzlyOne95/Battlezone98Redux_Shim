@@ -1,0 +1,16 @@
+// Optional stock reticle shader; independent of the selected scene profile.
+fragment_program OpenShim_ReticleFx_fragmentHLSL4 hlsl
+{
+    source openshim_reticle_fx.hlsl
+    entry_point ReticleFxFragment
+    target ps_4_0
+    default_params
+    {
+        param_named fxCell float4 0 0 1 1
+        param_named fxShape float4 1 1 0 0
+        param_named fxTint float4 1 1 1 0
+        param_named fxRingScale float4 1 1 1 1
+        param_named fxRingAlpha float4 0 0 0 0
+        param_named fxRingColor float4 1 1 1 1
+    }
+}
