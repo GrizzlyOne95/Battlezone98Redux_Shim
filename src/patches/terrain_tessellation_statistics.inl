@@ -10,6 +10,7 @@ struct TerrainTessQuery
     unsigned skipCandidates = 0;
     bool authoredNormal=false;
     unsigned hdMaterialMask = 0;
+    bool heightTexture = false;
 };
 TerrainTessQuery g_TessQueries[4]; // ordinary/tessellated, with and without HD diffuse tiles
 bool g_TessStatisticsEnabled = false;
@@ -28,8 +29,8 @@ void PollTerrainTessQueries(ID3D11DeviceContext* context)
         if (result == S_OK)
         {
             LogShimA(LogLevel::Info, "terrain-tess",
-                "[TERRAIN-TESS] GPU statistics tessellated=%u iaPrimitives=%llu hsInvocations=%llu dsInvocations=%llu clipPrimitives=%llu psInvocations=%llu hdTiles=%u authoredNormal=%u hdMaterialMask=%u",
-                kind & 1u, data.IAPrimitives, data.HSInvocations, data.DSInvocations, data.CPrimitives, data.PSInvocations, kind >= 2 ? 1u : 0u,sample.authoredNormal?1u:0u, sample.hdMaterialMask);
+                "[TERRAIN-TESS] GPU statistics tessellated=%u iaPrimitives=%llu hsInvocations=%llu dsInvocations=%llu clipPrimitives=%llu psInvocations=%llu hdTiles=%u authoredNormal=%u hdMaterialMask=%u heightTexture=%u",
+                kind & 1u, data.IAPrimitives, data.HSInvocations, data.DSInvocations, data.CPrimitives, data.PSInvocations, kind >= 2 ? 1u : 0u,sample.authoredNormal?1u:0u, sample.hdMaterialMask, sample.heightTexture ? 1u : 0u);
             // A native submission can be completely clipped. Try a bounded
             // number of other clusters rather than accepting that as pixels.
             if (kind != 0 && (data.CPrimitives < 128 || data.PSInvocations < 1024 ||
@@ -132,6 +133,9 @@ ID3D11Query* BeginTerrainTessQuery(ID3D11DeviceContext* context, UINT count,
     if (tessellated != bound) return nullptr;
     const bool authoredNormal=TerrainSurfaceNormalBound(context);
     const unsigned materialMask = BZROpenShim::TerrainHdMaterialBoundMask(context);
+    const bool heightTexture = BZROpenShim::TerrainHeightTextureBound(context);
+    if (hdTiles && tessellated && GetEnvironmentVariableA("OPENSHIM_TERRAIN_HEIGHT_REQUIRE", nullptr, 0) > 0 && !heightTexture)
+        return nullptr;
     // Source-pack trials need a pass that actually uses their optional maps.
     // A distant diffuse-only LOD must not consume the bounded capture first.
     if (GetEnvironmentVariableA("OPENSHIM_TERRAIN_HD_REQUIRE_MATERIAL_MAPS", nullptr, 0) > 0 &&
@@ -151,6 +155,7 @@ ID3D11Query* BeginTerrainTessQuery(ID3D11DeviceContext* context, UINT count,
     sample.attempted = true;
     sample.authoredNormal=authoredNormal;
     sample.hdMaterialMask = materialMask;
+    sample.heightTexture = heightTexture;
     sample.ended = false;
     sample.polls = 0;
     ++sample.attempts;

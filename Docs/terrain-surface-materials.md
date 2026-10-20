@@ -135,8 +135,10 @@ normal mip data, source bounds, identity and no-output-on-rejection.
 
 ## Next geometry step
 
-The candidate height resource and shader are now implemented and GPU-tested;
-native submission binding is still pending. `--geometry-height` adds a separate
+Native HD packs now have an opt-in signed-unit texture binding, described in
+[terrain-hd-tiles.md](terrain-hd-tiles.md), with actual Windows/GOG raster and
+restoration proof. The older standalone surface builder below emits **world
+meters**, a separate contract that is not directly consumed by that new option. `--geometry-height` adds a separate
 `<prefix>_height.dds` and `<prefix>_height.json` to the normal authoring outputs.
 It uses signed R32_FLOAT world-meter heights, one mip and explicit bilinear
 `Load` sampling. Unedited rectangles are zero. A flat band of
@@ -149,8 +151,9 @@ Future geometry integration must retain the stock normal map for this same
 height art or separate finer detail; applying both the generated height normals
 and the matching geometric slope would count the authored slope twice.
 
-`OPENSHIM_HEIGHT_TEST` selects the candidate path in the shipped terrain test
-shader; the native installer does **not** set this define. The shader computes
+`OPENSHIM_HEIGHT_TEST` selects texture sampling in the shipped terrain shader.
+The native HD installer now sets it with `OPENSHIM_HEIGHT_NORMALIZED` for an
+explicit signed-unit height pack; the older GPU test also retains meter mode. The shader computes
 the UV-to-object-XZ Jacobian from the three control points, handles reflected
 and rotated mappings, samples explicit height meters, and uses the existing
 normal/tangent/clip/depth/shadow-receiver displacement updates. Invalid samples,
@@ -179,9 +182,10 @@ qualified on the released renderer while verifying both PS and DS resources;
 API existence alone is insufficient. See
 [Ogre texture binding types](https://github.com/OGRECave/ogre/blob/v1.10.0/OgreMain/include/OgreTextureUnitState.h)
 and [DX11 stage binding](https://github.com/OGRECave/ogre/blob/v1.10.0/RenderSystems/Direct3D11/src/OgreD3D11RenderSystem.cpp).
-An owned draw-scoped resource path is another candidate, with exact program and
-target checks plus restoration before the next draw. Neither path is implemented
-by this checkpoint. Complete DXR terrain geometry, displaced shadow casting,
+The current native checkpoint instead uses the public domain-shader setter
+with exact owned shader COM identities and saved/restored DS t127 resources.
+Its GPU tests cover foreign writers and PS retention, and the Moon game trial
+confirms actual binding, rasterization and balanced restoration scopes. Complete DXR terrain geometry, displaced shadow casting,
 contacts and the broader platform matrix remain separate work.
 
 Released-renderer static qualification used Ghidra against SHA256
@@ -190,5 +194,5 @@ the named `_render` export and its independent domain/fragment resource-call
 branches. It confirmed a shared binding-mode field gating stage texture arrays;
 the released enum values differ from public 1.10, another reason to avoid
 unqualified SDK assumptions. The named `getDomainShader` export returns a
-borrowed native domain shader. This is static evidence, not a qualified detour
-or lifetime/submission proof. Raw analysis output stays local.
+borrowed native domain shader. That was static evidence; the newer HD checkpoint above adds native
+submission/lifetime proof for its specific guarded shader-setter path. Raw analysis output stays local.

@@ -14,8 +14,9 @@ namespace BZROpenShim
     //   [Diagnostics]
     //   TerrainRenderProbe = 1
     //
-    // or OPENSHIM_TERRAIN_RENDER_PROBE=1. Both observers leave Ogre and D3D11
-    // render state unchanged. If DX11 is not active, discovery times out
+    // or OPENSHIM_TERRAIN_RENDER_PROBE=1. Observers leave render state unchanged;
+    // the separate opt-in height path binds/restores DS t127 only for its exact
+    // owned domain shaders. If DX11 is not active, discovery times out
     // without installing hooks.
     void InitializeDx11ColorSpaceDiagnostic();
 

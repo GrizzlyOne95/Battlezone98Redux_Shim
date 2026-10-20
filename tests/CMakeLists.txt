@@ -150,6 +150,7 @@ if(WIN32)
         TERRAIN_TESS_SHADER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_terrain_tessellation_test.hlsl")
     openshim_add_test(terrain_height_domain_gpu_tests STD 17 SOURCES terrain_height_domain_gpu_tests.cpp)
     target_link_libraries(terrain_height_domain_gpu_tests PRIVATE d3d11 d3dcompiler dxguid)
+    openshim_add_test(terrain_height_hook_abi_tests STD 17 SOURCES terrain_height_hook_abi_tests.cpp)
     target_compile_definitions(terrain_height_domain_gpu_tests PRIVATE
         TERRAIN_TESS_SHADER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_terrain_tessellation_test.hlsl")
 endif()

@@ -147,6 +147,7 @@ std::string TerrainProgramSignature(void* program, const char* tag, bool control
 
 void RestoreNativeTerrainTessellationTest()
 {
+    RestoreTerrainHeightTexture();
     if (g_TessSourceMaterial.empty())
     {
         RestoreTerrainMicroReliefBounds();
@@ -248,16 +249,25 @@ bool InstallNativeTerrainTessellationTest()
             throw std::runtime_error("native material unavailable");
         g_proxy.materialName = *material;
         float reliefScale = 1.0f;
+        const TerrainHdMaterialBinding* hdBinding = nullptr;
         // Only use art direction from the successfully installed HD pack.
         // Missing/declined packs and non-Enhanced profiles retain the baseline.
         if (!g_proxy.hdTextureName.empty())
-            if (const auto* binding = FindTerrainHdBinding(*material))
-                reliefScale = binding->microReliefScale;
+        {
+            hdBinding = FindTerrainHdBinding(*material);
+            if (hdBinding) reliefScale = hdBinding->microReliefScale;
+        }
         g_activeTerrainReliefAmplitude = g_config.microReliefTest ?
             TerrainHdMaterial::ScaledMicroReliefAmplitude(g_config.microReliefAmplitude, reliefScale) : 0.0f;
         if (g_activeTerrainReliefAmplitude > 0.0f)
             source = "#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE " +
                 std::to_string(g_activeTerrainReliefAmplitude) + "\n" + source;
+        const bool textureHeight = g_activeTerrainReliefAmplitude > 0.0f && hdBinding && !hdBinding->heightTexture.empty();
+        if (textureHeight)
+        {
+            PrepareTerrainHeightTexture(buffer, hdBinding->heightTexture);
+            source = "#define OPENSHIM_HEIGHT_TEST 1\n#define OPENSHIM_HEIGHT_NORMALIZED 1\n" + source;
+        }
         void* materialManager = g_ogre.getMaterialManager();
         void* programManager = g_ogre.getHighLevelProgramManager();
         if (!materialManager || !programManager)
@@ -336,6 +346,7 @@ bool InstallNativeTerrainTessellationTest()
                         g_ogre.loadResource(program.rep, true);
                         if (!g_ogre.programSupported(program.rep))
                             throw std::runtime_error("shader compilation unsupported");
+                        if (textureHeight && stage == 1) RegisterTerrainHeightDomain(program.rep);
                         const std::string actualInput = TerrainProgramSignature(program.rep, "ISGN", stage == 1);
                         const std::string actualOutput = TerrainProgramSignature(program.rep, "OSGN", stage == 0);
                         if (expected != actualInput || expected != actualOutput)

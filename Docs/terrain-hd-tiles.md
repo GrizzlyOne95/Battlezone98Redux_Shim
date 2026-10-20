@@ -76,6 +76,45 @@ amplitude, capped at the existing one-meter envelope; `0` flattens relief.
 Restart after editing the manifest. Failed/missing packs retain baseline
 relief. CR exposes a value for each world in `Config/cr_terrain_hd.json`.
 
+An optional `heightTexture` replaces the procedural field when micro detail
+is enabled and the guarded HD pack installs. It is a **file path relative to
+the manifest**, using case-correct `/` separators, paired with
+`"heightEncoding": "signed-unit-r32"`. Absolute/drive-relative/parent paths
+decline. Unlike D/N/S/E Ogre resource names, this file is read directly into an
+owned GPU texture, with no retained Ogre image/source cache. The narrow format
+is one-mip, ordinary 2D legacy DDS D3DFMT_R32F (114), 16..4096 pixels per axis.
+Every sample must be finite within -1..1. It is multiplied by the effective
+relief amplitude (including `microReliefScale`); zero is neutral. It is not the
+older world-meter height DDS contract. Missing/invalid requested height art
+declines tessellation and restores the HD/native material owner.
+
+The texture uses the original atlas UV/layout solely as a geometry lookup.
+It must author exact flat borders covering quantized UV insets and the bilinear
+footprint. The existing GPU-tested domain kernel handles rotated/reflected
+UVs and updates normals/tangents, clip/depth and shadow receiver coordinates.
+It replaces noise and does not also generate matching normal-map slopes.
+Collision, shadow casting and DXR terrain geometry remain separate.
+
+The public D3D11 `DSSetShader` hook (ordinal pinned against the Windows SDK)
+binds t127 only for exact owned domain shader COM objects. Leaving them restores
+the previous slot; a foreign replacement is preserved. Mission/profile cleanup
+restores any remaining scope and releases owned resources. PS bindings are
+untouched. No requested height means no height allocation or substitution.
+
+Windows/GOG Moon PID 61460 confirmed actual DS t127 height plus HD mask 7 on a
+rasterized native draw (243,200 DS / 59,949 PS invocations), with 1,626 balanced
+binding/restoration scopes and all 136 staged files restored. PID 48852 passed
+a closer ground-region view with 1,202 balanced scopes. Both screenshots were
+inspected. The five CR art tests and 112 native tests pass, including 192 actual
+GPU domain-output cases in signed-meter and scaled signed-unit modes, ownership/
+restore/foreign-writer/PS preservation and malformed height input. The Release
+Win32 load chain builds. Profile/device cycling and Steam/Proton/Wine runtime
+are unverified; this remains an opt-in prototype.
+The ordinary-settings trial PID 59068 also passed without a diagnostic
+tessellation flag or terrain probe: both terrain feature settings installed
+0.625 m texture relief, with 1,056 balanced binding scopes and all 136 files
+restored. Its close screenshot was inspected.
+
 The 2026-10-20 Windows/GOG Moon trial (PID 56724) installed factor-4 native
 terrain with `displacement=0.625` for the 2.5 scale. All 144 mesh bounds used
 the same amplitude; an actual native draw reported 243,200 DS invocations,

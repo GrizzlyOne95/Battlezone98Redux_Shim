@@ -1,5 +1,6 @@
 #pragma once
 struct ID3D11DeviceContext;
+struct ID3D11DomainShader;
 
 namespace BZROpenShim
 {
@@ -34,4 +35,8 @@ namespace BZROpenShim
     // owner cannot be locked or the actual PS resource differs from our atlas.
     bool TerrainSurfaceNormalBound(ID3D11DeviceContext* context);
     unsigned TerrainHdMaterialBoundMask(ID3D11DeviceContext* context);
+    // Exact owned-domain shader identity gates the opt-in height resource.
+    void TerrainHeightDomainHookInstalled();
+    void TerrainHeightDomainChanged(ID3D11DeviceContext* context, ID3D11DomainShader* shader);
+    bool TerrainHeightTextureBound(ID3D11DeviceContext* context);
 }

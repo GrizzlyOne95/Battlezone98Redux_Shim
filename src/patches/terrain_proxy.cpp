@@ -17,6 +17,9 @@
 #include <Windows.h>
 #include <bcrypt.h>
 #include <d3d11.h>
+#include <wrl/client.h>
+#include "terrain_height_texture.h"
+#include "terrain_height_domain_binding.h"
 #include "terrain_hd_texture_copy.h"
 #include "terrain_hd_material.h"
 #include "terrain_paint.h"
@@ -364,6 +367,7 @@ namespace BZROpenShim
             bool compact = false;
             bool releaseSourceTextures = false;
             float microReliefScale = 1.0f;
+            std::string heightTexture;
             std::vector<TerrainHdMaterial::RectBinding> tileRects;
             std::array<TerrainHdChannel, 3> channels;
         };
@@ -1052,6 +1056,10 @@ namespace BZROpenShim
                     binding.microReliefScale = materialIt.value().value("microReliefScale", 1.0f);
                     if (!TerrainHdMaterial::ValidMicroReliefScale(binding.microReliefScale))
                         throw std::runtime_error("microReliefScale must be finite and within 0..4");
+                    binding.heightTexture = materialIt.value().value("heightTexture", std::string());
+                    if (!binding.heightTexture.empty() &&
+                        materialIt.value().value("heightEncoding", std::string()) != "signed-unit-r32")
+                        throw std::runtime_error("heightTexture requires signed-unit-r32 encoding");
                     if (binding.sliceCount == 0 || binding.sliceCount > 256 ||
                         binding.fallback.empty())
                         throw std::runtime_error(
@@ -3560,6 +3568,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         void RestoreNativeTerrainHd();
         void RestoreNativeTerrainSurface();
         void ResetNativeTerrainHd();
+        #include "terrain_height_binding.inl"
         #include "terrain_tessellation_test.inl"
 
         bool InstallSemanticMaterial()
@@ -5792,6 +5801,21 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
         ++g_teardownDepth;
         g_teardownIncludesClear = g_teardownIncludesClear || clearScene;
+    }
+
+    void TerrainHeightDomainHookInstalled() { g_heightHookReady.store(true); }
+
+    void TerrainHeightDomainChanged(ID3D11DeviceContext* context, ID3D11DomainShader* shader)
+    {
+        if (!g_heightActive.load(std::memory_order_relaxed)) return;
+        std::lock_guard<std::mutex> lock(g_heightMutex);
+        g_heightBinding.Select(context, shader);
+    }
+
+    bool TerrainHeightTextureBound(ID3D11DeviceContext* context)
+    {
+        std::lock_guard<std::mutex> lock(g_heightMutex);
+        return g_heightBinding.Bound(context);
     }
 
     unsigned TerrainHdMaterialBoundMask(ID3D11DeviceContext* context)
