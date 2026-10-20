@@ -85,6 +85,7 @@ openshim_add_test(camera_fov_policy_tests STD 17 SOURCES camera_fov_policy_tests
 openshim_add_test(hud_feedback_policy_tests STD 17 SOURCES hud_feedback_policy_tests.cpp)
 openshim_add_test(hud_color_policy_tests STD 17 SOURCES hud_color_policy_tests.cpp)
 openshim_add_test(hud_palette_policy_tests STD 17 SOURCES hud_palette_policy_tests.cpp)
+openshim_add_test(engine_flame_color_tests STD 17 SOURCES engine_flame_color_tests.cpp)
 openshim_add_test(ui_screen_fit_tests STD 17 SOURCES ui_screen_fit_tests.cpp)
 
 add_executable(startup_sha256_tests startup_sha256_tests.cpp)

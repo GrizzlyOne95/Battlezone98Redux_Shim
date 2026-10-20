@@ -436,6 +436,7 @@ namespace BZROpenShim
 
                 ResetPathBlockState(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);
+                ResetEngineFlameOdfColors();
                 WeaponPresentationMissionRunStateChanged(false);
                 GeometryContactTest::Clear();
                 PilotFlashlightNotifyMissionRunStateChanged(false);
