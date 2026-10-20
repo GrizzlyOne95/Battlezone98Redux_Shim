@@ -48,7 +48,7 @@ void ConfigureTerrainAdaptiveHull(void* pass)
 // offset, so Ogre owns per-camera/per-light updates and stage constant binding.
 void ConfigureTerrainMicroReliefDomain(void* pass, const std::string& defines)
 {
-    if (!g_config.microReliefTest) return;
+    if (!g_config.microReliefTest || g_activeTerrainReliefAmplitude <= 0.0f) return;
     HMODULE ogre = GetModuleHandleW(L"OgreMain.dll");
     auto getParameters = Resolve<FnGetGpuProgramParameters>(ogre,
         "?getTessellationDomainProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@XZ");
@@ -147,7 +147,12 @@ std::string TerrainProgramSignature(void* program, const char* tag, bool control
 
 void RestoreNativeTerrainTessellationTest()
 {
-    if (g_TessSourceMaterial.empty()) { RestoreTerrainMicroReliefBounds(); return; }
+    if (g_TessSourceMaterial.empty())
+    {
+        RestoreTerrainMicroReliefBounds();
+        g_activeTerrainReliefAmplitude = 0.0f;
+        return;
+    }
     OgreSharedPtr material;
     try
     {
@@ -180,6 +185,7 @@ void RestoreNativeTerrainTessellationTest()
         LogShimA(LogLevel::Warn, "terrain-tess", "[TERRAIN-TESS] shared material restore raised an Ogre exception");
     }
     RestoreTerrainMicroReliefBounds();
+    g_activeTerrainReliefAmplitude = 0.0f;
     g_TessPasses.clear();
     g_TessSourceMaterial.clear();
 }
@@ -236,15 +242,22 @@ bool InstallNativeTerrainTessellationTest()
         if (g_config.tessellationAdaptive)
             source = "#define OPENSHIM_TESS_ADAPTIVE 1\n#define OPENSHIM_TESS_TARGET_PIXELS " +
                 std::to_string(g_config.tessellationTargetPixels) + "\n" + source;
-        if (g_config.microReliefTest)
-            source = "#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE " +
-                std::to_string(g_config.microReliefAmplitude) + "\n" + source;
-
         const std::string group = "Autodetect";
         const std::string* material = g_ogre.getMaterialName(subEntity);
         if (!material || material->empty())
             throw std::runtime_error("native material unavailable");
         g_proxy.materialName = *material;
+        float reliefScale = 1.0f;
+        // Only use art direction from the successfully installed HD pack.
+        // Missing/declined packs and non-Enhanced profiles retain the baseline.
+        if (!g_proxy.hdTextureName.empty())
+            if (const auto* binding = FindTerrainHdBinding(*material))
+                reliefScale = binding->microReliefScale;
+        g_activeTerrainReliefAmplitude = g_config.microReliefTest ?
+            TerrainHdMaterial::ScaledMicroReliefAmplitude(g_config.microReliefAmplitude, reliefScale) : 0.0f;
+        if (g_activeTerrainReliefAmplitude > 0.0f)
+            source = "#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE " +
+                std::to_string(g_activeTerrainReliefAmplitude) + "\n" + source;
         void* materialManager = g_ogre.getMaterialManager();
         void* programManager = g_ogre.getHighLevelProgramManager();
         if (!materialManager || !programManager)
@@ -358,7 +371,7 @@ bool InstallNativeTerrainTessellationTest()
         }
         if (!specialized)
             throw std::runtime_error("no compatible per-pixel terrain pass");
-        if (g_config.microReliefTest && !PrepareTerrainMicroReliefBounds())
+        if (g_activeTerrainReliefAmplitude > 0.0f && !PrepareTerrainMicroReliefBounds())
             throw std::runtime_error("relief bounds could not be prepared");
         // Assigning a clone to the discovered Entity did not reach observed
         // submissions. Specialize its shared terrain material so native
@@ -388,7 +401,7 @@ bool InstallNativeTerrainTessellationTest()
         LogShimA(LogLevel::Info, "terrain-tess",
             "[TERRAIN-TESS] shared native material installed discoveryZone=(%d,%d) discoveryCluster=(%d,%d) factor=%d displacement=%.3f wireframe=%d passes=%u programs=%zu featureLevel=0x%X source=\"%s\" test=\"%s\"",
             g_proxy.zoneX, g_proxy.zoneZ, g_proxy.clusterX, g_proxy.clusterZ,
-            g_config.tessellationFactor, g_config.microReliefTest ? g_config.microReliefAmplitude : 0.0f,
+            g_config.tessellationFactor, g_activeTerrainReliefAmplitude,
             g_config.tessellationWireframe ? 1 : 0,
             specialized, g_proxy.semanticProgramNames.size(), static_cast<unsigned>(level),
             g_proxy.materialName.c_str(), g_proxy.semanticMaterialName.c_str());

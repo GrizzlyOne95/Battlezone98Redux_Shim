@@ -68,6 +68,21 @@ All configured arrays and shader variants must succeed before the shared
 material is changed. A mismatched source channel, unsupported shader contract,
 missing tile, or conflicting surface-normal manifest declines the whole pack.
 V2 requires native terrain and cannot be combined with four-material paint.
+An optional per-material `microReliefScale` (finite **0..4**, default **1**)
+scales Terrain Micro Detail's procedural displacement after that HD pack has
+successfully installed. It does not enable micro detail or derive geometry
+heights from normal maps. The shader and culling bounds use the same scaled
+amplitude, capped at the existing one-meter envelope; `0` flattens relief.
+Restart after editing the manifest. Failed/missing packs retain baseline
+relief. CR exposes a value for each world in `Config/cr_terrain_hd.json`.
+
+The 2026-10-20 Windows/GOG Moon trial (PID 56724) installed factor-4 native
+terrain with `displacement=0.625` for the 2.5 scale. All 144 mesh bounds used
+the same amplitude; an actual native draw reported 243,200 DS invocations,
+50,555 PS invocations and `hdMaterialMask=7`. All 82 passes, 144 bounds/streams
+and 135 staged files restored. The screenshot was inspected. All 111 CTests
+pass and the Release Win32 load chain builds. Other world art settings and
+Steam/Proton/Wine runtime remain unverified.
 Exit restores all replaced texture units and native programs/streams and removes
 owned arrays. Version 1 diffuse packs remain supported.
 

@@ -11,6 +11,15 @@ using OpenShimTest::Require;
 
 int main(int argc, char** argv)
 {
+    Require(HD::ScaledMicroReliefAmplitude(.25f, 2.5f) == .625f &&
+        HD::ScaledMicroReliefAmplitude(.25f, 1.f) == .25f &&
+        HD::ScaledMicroReliefAmplitude(.25f, 0.f) == 0.f &&
+        HD::ScaledMicroReliefAmplitude(1.f, 4.f) == 1.f,
+        "world relief scale lost baseline, off or displacement envelope");
+    Require(!HD::ValidMicroReliefScale(-1.f) && !HD::ValidMicroReliefScale(4.01f) &&
+        !HD::ValidMicroReliefScale(std::numeric_limits<float>::quiet_NaN()) &&
+        !HD::ValidMicroReliefScale(std::numeric_limits<float>::infinity()),
+        "unsafe relief scale accepted");
     Require(HD::ProfileAllowsTiles(1, 3) && !HD::ProfileAllowsTiles(0, 3) &&
         !HD::ProfileAllowsTiles(1, 2) && !HD::ProfileAllowsTiles(1, 1) && !HD::ProfileAllowsTiles(1, 0),
         "HD tiles escaped the effective DX11 Enhanced profile gate");
