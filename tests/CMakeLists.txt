@@ -247,6 +247,11 @@ openshim_add_test(enhanced_light_selection_tests STD 20 SOURCES
     ../src/engine/enhanced_light_selection.cpp
 )
 
+openshim_add_test(gpu_skinning_hlsl_tests STD 14 SOURCES
+    gpu_skinning_hlsl_tests.cpp
+    ../src/engine/gpu_skinning_hlsl.cpp
+)
+
 add_executable(enhanced_light_selection_bench
     enhanced_light_selection_bench.cpp
     ../src/engine/enhanced_light_selection.cpp
