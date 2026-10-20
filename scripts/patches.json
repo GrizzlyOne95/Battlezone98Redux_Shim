@@ -725,6 +725,15 @@
       "identity": "First HoverCraft::Simulate (0x004EA300) exhaust emit site; the CALL at 0x004EAD77 targets EngineFlame::AddFlame 0x004C8800, cross-checked against the EngineFlame vtable at 0x0087918C in reverse_engineering/engine_flame_color_notes.md. The anchor is the E8 opcode, not its rel32 operand."
     },
     {
+      "name": "EngineFlame::SpriteColour",
+      "pattern": "55 8B EC 51 8B 45 08 83 E0 07 89 45 FC 83 7D FC 02 74 1B 83 7D FC 03 74 24 83 7D FC 05 74 2D 8B 45 0C 25 FF FF FF 00 0D 00 00 00 FF",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0068F030",
+      "require_unique": true,
+      "identity": "Released GOG 2.2.301 sprite packed-color helper: masks mode with 7, preserves RGB and selects alpha FF/A0/60 for normal/2/3, or the explicit packed-color global for mode 5; plain RET, cdecl(mode, paletteRGB). EngineFlame::Submit's three textured quads reach it through the sprite quad submit helper. Static disassembly of the released executable SHA256 8d71f56c...3377413 and ReadProcessMemory on live GOG PID37352 (2026-10-19) agree on the 17-byte entry. RGB flame submission overrides only packed RGB within a thread-local scope and retains this helper's stock alpha. The first seven bytes are complete non-relative instructions."
+    },
+    {
       "name": "GetTeamNum",
       "pattern": "8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 FC 83 7D FC 00 75 04 33 C0 EB 11 8B 4D FC 83 C1 18 8B 55 FC 8B 42 18 8B 50 04 FF D2",
       "offset": -4,

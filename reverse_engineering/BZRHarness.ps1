@@ -146,6 +146,17 @@ public static class BZRForegroundWatchdog
         return IsGame(upid, gameName);
     }
 
+    // True when a physical mouse button, Alt, Tab or a Windows key is down (or was
+    // pressed since the last poll), wherever the cursor is. Clicking the game's
+    // taskbar button or thumbnail, Alt-Tab and Win+number all switch to the game
+    // without a press over the game window itself.
+    static bool PhysicalSwitchInput()
+    {
+        foreach (int vk in new int[] { 0x01, 0x02, 0x04, 0x09, 0x12, 0x5B, 0x5C })
+            if ((GetAsyncKeyState(vk) & 0x8001) != 0) return true;
+        return false;
+    }
+
     static void Note(string text)
     {
         string line = DateTime.Now.ToString("HH:mm:ss.fff") + " " + text;
@@ -232,8 +243,9 @@ public static class BZRForegroundWatchdog
     // foreground window every intervalMs for watchMs. If it ever belongs to the
     // game, logs FOREGROUND-STOLEN and hands the foreground back to whatever
     // held it before. allowAttach enables the AttachThreadInput fallback.
-    // More than maxSteals steals ends the run: WM_CLOSE (never a kill) is posted
-    // to the game's windows. A run that keeps stealing must end itself.
+    // maxSteals < 0 (the default) never closes the game: a steal is logged and
+    // undone, nothing more. With maxSteals >= 0, more than maxSteals steals ends
+    // the run: WM_CLOSE (never a kill) is posted to the game's windows.
     // Scope: gameRoots limits "the game" to processes of that name whose image
     // path is under one of the roots, so parallel runs from separate install dirs
     // never count or close each other's games. With no roots the match is by name
@@ -289,6 +301,7 @@ public static class BZRForegroundWatchdog
         Stopwatch watch = null;
         int reported = 0;
         long lastGamePress = long.MinValue;
+        long lastSwitchInput = long.MinValue;
         while (true)
         {
             IntPtr fg = GetForegroundWindow();
@@ -305,6 +318,7 @@ public static class BZRForegroundWatchdog
             else if (CountGames(gameName) == 0) { Note("game exited; reported " + reported + " steal(s)"); return; }
 
             if (watch != null && PhysicalPressOverGame(gameName)) lastGamePress = Environment.TickCount;
+            if (watch != null && PhysicalSwitchInput()) lastSwitchInput = Environment.TickCount;
             if (!gameFg)
             {
                 if (fg != IntPtr.Zero)
@@ -317,6 +331,12 @@ public static class BZRForegroundWatchdog
             {
                 // The user clicked the game window: activation is intentional.
                 Note("user activated the game window (intentional); not a steal, focus left alone, watchdog done");
+                return;
+            }
+            else if (watch != null && lastSwitchInput != long.MinValue && unchecked(Environment.TickCount - (int)lastSwitchInput) < 1500)
+            {
+                // The user switched to the game (taskbar, thumbnail, Alt-Tab, Win+N).
+                Note("user switched to the game (" + previousDesc + "); not a steal, focus left alone, watchdog done");
                 return;
             }
             else if (watch != null)
@@ -351,7 +371,7 @@ public static class BZRForegroundWatchdog
                     }
                     else Note("foreground restored to previous window");
                 }
-                if (!aborted && reported > maxSteals)
+                if (!aborted && maxSteals >= 0 && reported > maxSteals)
                 {
                     aborted = true;
                     int games = CountGames(gameName);
@@ -600,9 +620,11 @@ function Start-BZRForegroundWatchdog {
         previous foreground window. The AttachThreadInput fallback runs only when
         plain SetForegroundWindow failed (on by default; BZR_WATCHDOG_NO_ATTACH=1
         turns it off), followed by SwitchToThisWindow if the game still holds it.
-        More than -MaxSteals steals (default 2) ends the run: WM_CLOSE (never
-        TerminateProcess) is posted to the game's windows and "aborted run:
-        repeated foreground steals" is logged.
+        The watchdog never closes the game by default (-MaxSteals -1): a user
+        clicking in and out of a window must not end a test. Opt in with
+        -MaxSteals N or env BZR_WATCHDOG_MAX_STEALS=N; then more than N steals
+        ends the run: WM_CLOSE (never TerminateProcess) is posted to the game's
+        windows and "aborted run: repeated foreground steals" is logged.
         Scope: "the game" is a battlezone98redux process whose image path is under
         -GameRoot (one or more directories), else $script:BZRGameRoot, else env
         BZR_GAME_ROOT (';'-separated). Games from other install dirs are never
@@ -617,10 +639,13 @@ function Start-BZRForegroundWatchdog {
         [int]$WaitForGameSeconds = 60,
         [int]$WatchSeconds = 900,
         [int]$PollMilliseconds = 100,
-        [int]$MaxSteals = 2,
+        [int]$MaxSteals = -1,
         [string[]]$GameRoot
     )
     if ($env:BZR_NO_FOREGROUND_WATCHDOG -eq '1') { return $false }
+    if (-not $PSBoundParameters.ContainsKey('MaxSteals') -and $env:BZR_WATCHDOG_MAX_STEALS -match '^\d+$') {
+        $MaxSteals = [int]$env:BZR_WATCHDOG_MAX_STEALS
+    }
     $roots = @($GameRoot | Where-Object { $_ })
     if ($roots.Count -eq 0 -and $script:BZRGameRoot) { $roots = @($script:BZRGameRoot) }
     if ($roots.Count -eq 0 -and $env:BZR_GAME_ROOT) { $roots = @($env:BZR_GAME_ROOT -split ';' | Where-Object { $_ }) }

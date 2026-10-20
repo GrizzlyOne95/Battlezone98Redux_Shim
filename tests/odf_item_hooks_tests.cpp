@@ -298,6 +298,48 @@ void TestEngineNullOnAHitIsMirrored()
     Check(item.locks == 0 && OdfItemHookTest::CachedItemCount() == 0, "the one real holder releases");
 }
 
+void TestOwnedOdfRead()
+{
+    ResetEngine();
+    OdfItemHookTest::SetOptions(false, false, false);
+    FakeItem& item = AddItem("avtank.odf", "[HoverCraft]\nflameColor=green\n");
+    std::string text;
+    Check(OdfReadItemText("avtank.odf", text) && text == item.bytes,
+          "ODF read uses the engine-selected item even with compatibility options disabled");
+    Check(item.locks == 0 && item.useCalls == 1 && item.unlockCalls == 1,
+          "owned read releases its engine lock before returning");
+    item.bytes = "replaced";
+    Check(text == "[HoverCraft]\nflameColor=green\n", "result owns its bytes after engine release");
+    Check(!OdfReadItemText("missing.odf", text) && text.empty() && g_unknownUnlocks == 0,
+          "missing items return empty without an unmatched unlock");
+    Check(!OdfReadItemText(nullptr, text) && !OdfReadItemText("bad.mesh", text),
+          "only ODF names accepted");
+
+    void* guarded = VirtualAlloc(nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_NOACCESS);
+    Check(guarded != nullptr, "guard page allocated for owned reader");
+    item.servePtr = guarded;
+    item.serveSize = 64;
+    Check(!OdfReadItemText("avtank.odf", text) && text.empty() && item.locks == 0,
+          "unreadable bytes fail closed and release the lock");
+    item.serveSize = 9u * 1024u * 1024u;
+    Check(!OdfReadItemText("avtank.odf", text) && item.locks == 0,
+          "oversized reads fail closed and release the lock");
+    VirtualFree(guarded, 0, MEM_RELEASE);
+
+    ResetEngine();
+    OdfItemHookTest::SetOptions(true, false, false);
+    FakeItem& shared = AddItem("magnet.odf", kLegacyMagnet);
+    void* holder = OdfUseItemDetour("magnet.odf");
+    Check(OdfReadItemText("magnet.odf", text) && text == kLegacyMagnet,
+          "owned reader sees original text alongside compatibility rewrite holders");
+    Check(shared.locks == 1 && OdfItemHookTest::CachedRefcount("magnet.odf") == 1 && holder,
+          "owned reader does not disturb another holder's record or engine lock");
+    OdfUnlockItemDetour("magnet.odf");
+    Check(shared.locks == 0, "remaining holder releases normally");
+    OdfItemHookTest::SetEngine(nullptr, nullptr, nullptr);
+    Check(!OdfReadItemText("magnet.odf", text) && text.empty(), "unavailable loader fails closed");
+}
+
 } // namespace
 
 int main()
@@ -311,6 +353,7 @@ int main()
     TestUnknownAndNullNames();
     TestUnreadableBytesStillTakeARecord();
     TestEngineNullOnAHitIsMirrored();
+    TestOwnedOdfRead();
 
     OdfItemHookTest::ResetCache();
     if (OpenShimTest::FailureCount() == 0)

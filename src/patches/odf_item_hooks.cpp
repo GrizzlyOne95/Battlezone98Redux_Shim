@@ -282,6 +282,40 @@ bool OdfInstallUnlockItemHook(uint32_t siteAddress)
     return true;
 }
 
+bool OdfReadItemText(const char* name, std::string& out)
+{
+    out.clear();
+    if (!name || !OdfCompat::IsOdfFileName(name) || !g_OriginalUseItem ||
+        !g_OriginalGetItemSize || !g_OriginalUnlockItem)
+        return false;
+
+    std::lock_guard<std::recursive_mutex> lock(g_OdfMutex);
+    bool faulted = false;
+    const void* bytes = SafeCallUseItem(name, faulted);
+    if (faulted || !bytes)
+        return false;
+    struct ItemLock
+    {
+        const char* name;
+        ~ItemLock() { bool fault = false; SafeCallUnlockItem(name, fault); }
+    } itemLock{ name };
+
+    const size_t size = SafeCallGetItemSize(name, faulted);
+    if (faulted || size == 0 || size > kMaxPatchedBytes)
+        return false;
+    try
+    {
+        out.resize(size);
+        if (SafeReadEngineBytes(bytes, out.data(), size))
+            return true;
+    }
+    catch (...)
+    {
+    }
+    out.clear();
+    return false;
+}
+
 void* __cdecl OdfUseItemDetour(const char* name)
 {
     // Without a trampoline there is no such thing as failing closed here: the

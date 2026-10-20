@@ -859,6 +859,7 @@ namespace BZROpenShim
         void ResolveEngineFlameRuntimeTargets();
         bool TryGetCraftOdfName(void* craftPtr, char* out, size_t outSize);
         void InitializeJetFlamesConfig();
+        void ResetEngineFlameOdfColors();
 
         // --- AI and unit fixes (ai_unit_fixes.cpp) -----------------------------
         inline constexpr size_t kPersonCarrierOffset = 0x1A0;      // PDB 0x198
