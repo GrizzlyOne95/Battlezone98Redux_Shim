@@ -49,6 +49,7 @@
 #include "bzn_load_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
+#include "perf_telemetry.h"
 #include <Windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -459,6 +460,7 @@ namespace BZROpenShim
                 NotifyExuMissionSimulationState(true);
             }
             TerrainProxyMissionRunStateChanged(previous, current);
+            PerfTelemetryMissionRunStateChanged(previous, current);
         }
 
         void InstallMissionTransitionSeamIfPossible()

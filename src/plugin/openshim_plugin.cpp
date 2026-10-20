@@ -39,6 +39,7 @@
 #include "terrain_proxy.h"
 #include "ogre_animation_profiler.h"
 #include "native_cpu_sampler.h"
+#include "perf_telemetry.h"
 #include "pilot_fp_animation_trace.h"
 #include "walker_cockpit_trace.h"
 #include "openshim_sdk_v2.h"
@@ -201,6 +202,10 @@ static unsigned __stdcall PatchThreadProc(void*)
     // process and their cost has to be visible in the capture rather than
     // hidden from it. It is dormant unless OPENSHIM_PROFILE_NATIVE_CPU asks
     // for it.
+    // Frame-hitch and address-space telemetry. Starts before the sampler so
+    // a sampled run always has frame boundaries recorded beside it. Dormant
+    // unless OPENSHIM_PERF_TELEMETRY or OPENSHIM_PROFILE_NATIVE_CPU asks.
+    PATCH_STAGE(BZROpenShim::InitializePerfTelemetry());
     PATCH_STAGE(BZROpenShim::InitializeNativeCpuSampler());
 
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");
@@ -282,6 +287,7 @@ namespace BZROpenShim
         BZROpenShim::UiPerfHooks::Shutdown();
         BZROpenShim::UiFileScan::Shutdown();
         BZROpenShim::ShutdownNativeCpuSampler();
+        BZROpenShim::ShutdownPerfTelemetry();
         BZROpenShim::ShutdownOpenShimAssetSync();
         BZROpenShim::ShutdownOpenShimUpdater();
         BZROpenShim::ShutdownOpenShimSdkV2();
