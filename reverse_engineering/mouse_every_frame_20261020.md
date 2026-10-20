@@ -16,10 +16,11 @@ or the options menu row **Per-Frame Mouse**. Default off. Restart required.
 - **Sensitivity should not change.** Steer reads a per-second rate and pitch
   reads an accumulated position (see below). The one exception is raw-input
   acceleration, covered under *Expected effects*.
-- **Not yet felt by a person.** The automated runs below prove the patch
-  installs and combat runs normally. They were unfocused, so the reader never
-  ran. Per-frame bucket closes and the feel of aim both still need a
-  physical-console test (see the end).
+- **Confirmed per frame, not yet felt by a person.**
+  - The background runs below show the patch installs and combat runs normally.
+  - A focused run at about 390 fps closed the bucket on 18000 of 18000 reads.
+  - Whether aim feels better needs a physical-console test with a real mouse
+    (see the end).
 
 ## What the engine does (GOG Redux 2.2.301)
 
@@ -206,9 +207,25 @@ installed `openshim.ini` has Unsmoothed Controls on, so both runs also patched
 **What it does not prove.** Because the harness never activates the window,
 `GetActiveWindow()` never matches. The reader therefore returns at its focus
 check before reaching the TimeStep call, so these runs logged no
-`[MouseEveryFrame] last N reads` lines. Proving per-frame bucket closes needs a
-focused run (`BZR_ALLOW_FOREGROUND_LAUNCH=1`, `OPENSHIM_NEVER_ACTIVATE=0`). That
-run is part of the console test below.
+`[MouseEveryFrame] last N reads` lines.
+
+**Focused runs (owner consented to focus being taken).** The settings were
+`BZR_ALLOW_FOREGROUND_LAUNCH=1`, `BZR_NO_FOREGROUND_WATCHDOG=1`,
+`OPENSHIM_NEVER_ACTIVATE=0` and `OPENSHIM_NEVER_CAPTURE_MOUSE=1`. The last one
+skips only the cursor recentre; the reader still runs. The game window was
+focused once after launch and stayed in front the whole time.
+
+- **VSync on (about 58 fps, 60 Hz display).** Fewer than 3000 reads in 50 s,
+  so no stats line. At 60 fps the engine's integer 17 ms step already reaches
+  0.016666, so stock closes nearly every frame too. This run cannot tell stock
+  and patched apart.
+- **VSync off for the run (BZLogger 367–429 fps).** Six stats lines in 60 s,
+  every one `last 3000 reads: 3000 per-frame threshold, 3000 with the bucket
+  already closed`. So the bucket closed on every frame. Stock at that rate
+  (2–3 ms steps) closes about one frame in seven. `Ogre.cfg` was set back to
+  `VSync=Yes` afterwards.
+
+The batch removal is confirmed. What still needs a person is how aim feels.
 
 ## Still needed: physical-console feel test
 
