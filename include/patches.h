@@ -191,6 +191,21 @@ namespace BZROpenShim
             // collision solids; every other object keeps the stock box.
             // Removed at startup when [General] PathBlockFaces = 0.
             { 0, HookEngine::PatchType::JMP5, {}, "Path Block Faces BlockCells Hook", false, {} },
+            // FastMenuTransitions: main menu, Instant Action, Multiplayer and
+            // Custom Campaigns keep their mounts but skip the Modable
+            // clear+initialise while the group holds the main set; the mission
+            // mount and the MP game room catch it up. All ten sites or none.
+            // Removed at startup when [General] FastMenuTransitions = 0.
+            { 0, HookEngine::PatchType::JMP5, {}, "Deferred Modable Rebuild Main Store", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Deferred Modable Rebuild Main Gate", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Deferred Modable Rebuild IA Store", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Deferred Modable Rebuild IA Gate", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Deferred Modable Rebuild MP Store", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Deferred Modable Rebuild MP Gate", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Deferred Modable Rebuild List Store", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Deferred Modable Rebuild List Gate", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Deferred Modable Rebuild Mission Mount Call", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Deferred Modable Rebuild MP Room Mount Call", false, {} },
             // LensFlare::~LensFlare at 0x004F9250 runs from an atexit thunk
             // during CRT exit, after Ogre::MaterialManager has been destroyed.
             // It calls getSingleton and dereferences the null result twice for

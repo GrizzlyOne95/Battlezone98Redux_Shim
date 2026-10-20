@@ -3,6 +3,7 @@
 #include "com_vtable_patch.h"
 #include "diagnostic_switch.h"
 #include "dx11_enhanced_fxaa_resources.h"
+#include "engine_globals.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -754,34 +755,353 @@ namespace BZROpenShim
             return true;
         }
 
-        bool ApplyFxaa(IDXGISwapChain* swapChain)
+        bool AcceptTargetFormat(DXGI_FORMAT format, UINT width, UINT height, const char* where)
         {
-            if (!swapChain ||
-                !g_FxaaEnabled.load(std::memory_order_acquire) ||
-                g_ShutdownRequested.load(std::memory_order_acquire) ||
-                g_PermanentFault.load(std::memory_order_acquire))
+            if (width != 0 && height != 0 && IsSupportedEncodedLdrFormat(format))
             {
-                return false;
+                g_UnsupportedFormatLogged.store(false, std::memory_order_release);
+                return true;
             }
+            if (!g_UnsupportedFormatLogged.exchange(true, std::memory_order_acq_rel))
+            {
+                LogShimA(
+                    LogLevel::Warn,
+                    kComponent,
+                    "[DX11 Enhanced FXAA] skipped unsupported %s format=%s(%u) size=%ux%u; only ordinary 8-bit UNORM LDR targets are accepted because FXAA runs on encoded/non-linear RGB",
+                    where,
+                    DxgiFormatName(format),
+                    static_cast<unsigned>(format),
+                    width,
+                    height);
+            }
+            return false;
+        }
 
-            std::lock_guard<std::mutex> lock(g_RuntimeMutex);
+        // Copies or resolves `source` into the input texture and draws FXAA
+        // into `targetRtv` (a view of `source`). The caller holds
+        // g_RuntimeMutex and has made the device resources ready. Every
+        // context state the pass touches is restored before returning.
+        bool RunFxaaPass(
+            ID3D11Texture2D* source,
+            const D3D11_TEXTURE2D_DESC& sourceDesc,
+            DXGI_FORMAT viewFormat,
+            ID3D11RenderTargetView* targetRtv)
+        {
+            D3D11_TEXTURE2D_DESC inputDesc = sourceDesc;
+            inputDesc.Format = viewFormat;
+            if (!EnsureSourceResources(inputDesc))
+                return false;
 
+            // Capture before unbinding the game's targets. The RAII object
+            // restores every state we mutate, including shader class
+            // instances and predication, before control returns to Ogre.
+            SavedContextState saved(g_Runtime.context);
+
+            g_Runtime.context->SetPredication(nullptr, FALSE);
+            g_Runtime.context->OMSetRenderTargets(0, nullptr, nullptr);
+
+            if (sourceDesc.SampleDesc.Count > 1)
+                g_Runtime.context->ResolveSubresource(g_Runtime.inputTexture, 0, source, 0, viewFormat);
+            else
+                g_Runtime.context->CopySubresourceRegion(g_Runtime.inputTexture, 0, 0, 0, 0, source, 0, nullptr);
+
+            g_Runtime.context->OMSetRenderTargets(1, &targetRtv, nullptr);
+
+            const FLOAT blendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+            g_Runtime.context->OMSetBlendState(nullptr, blendFactor, 0xFFFFFFFFu);
+            g_Runtime.context->OMSetDepthStencilState(g_Runtime.depthStencilState, 0);
+            g_Runtime.context->RSSetState(g_Runtime.rasterizerState);
+
+            D3D11_VIEWPORT viewport = {};
+            viewport.Width = static_cast<float>(sourceDesc.Width);
+            viewport.Height = static_cast<float>(sourceDesc.Height);
+            viewport.MaxDepth = 1.0f;
+            g_Runtime.context->RSSetViewports(1, &viewport);
+
+            g_Runtime.context->IASetInputLayout(nullptr);
+            g_Runtime.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            g_Runtime.context->VSSetShader(g_Runtime.vertexShader, nullptr, 0);
+            g_Runtime.context->GSSetShader(nullptr, nullptr, 0);
+            g_Runtime.context->HSSetShader(nullptr, nullptr, 0);
+            g_Runtime.context->DSSetShader(nullptr, nullptr, 0);
+            g_Runtime.context->PSSetShader(g_Runtime.pixelShader, nullptr, 0);
+            g_Runtime.context->PSSetShaderResources(0, 1, &g_Runtime.inputSrv);
+            g_Runtime.context->PSSetSamplers(0, 1, &g_Runtime.sampler);
+            g_Runtime.context->PSSetConstantBuffers(0, 1, &g_Runtime.frameConstants);
+
+            g_Runtime.context->Draw(3, 0);
+
+            // Explicitly unbind our SRV before the saved game state is put
+            // back. This also guarantees the input texture is no longer a
+            // read dependency when the next frame copies into it.
+            ID3D11ShaderResourceView* nullSrv = nullptr;
+            g_Runtime.context->PSSetShaderResources(0, 1, &nullSrv);
+            return true;
+        }
+
+        bool PassAllowed()
+        {
+            return g_FxaaEnabled.load(std::memory_order_acquire) &&
+                !g_ShutdownRequested.load(std::memory_order_acquire) &&
+                !g_PermanentFault.load(std::memory_order_acquire);
+        }
+
+        bool EnsureRuntimeFromSwapChain(IDXGISwapChain* swapChain)
+        {
             ID3D11Device* device = nullptr;
             HRESULT hr = swapChain->GetDevice(
                 __uuidof(ID3D11Device),
                 reinterpret_cast<void**>(&device));
             if (FAILED(hr) || !device)
                 return false;
+            const bool ready = EnsureDeviceResources(device);
+            SafeRelease(device);
+            return ready;
+        }
 
-            if (!EnsureDeviceResources(device))
+        // Scene pass: FXAA on whatever colour target the main viewport is
+        // rendering into (the backbuffer, or Glow's rt_output) at the
+        // world/HUD seam, so screen-space UI, text and the HUD drawn after it
+        // stay sharp.
+        UINT g_ScenePassLogs = 0;
+
+        bool ApplyFxaaToBoundTarget(unsigned queueGroup)
+        {
+            if (!PassAllowed())
+                return false;
+
+            std::lock_guard<std::mutex> lock(g_RuntimeMutex);
+            if (!g_Runtime.context || !g_Runtime.vertexShader || !g_Runtime.pixelShader)
+                return false;
+
+            ID3D11RenderTargetView* rtv = nullptr;
+            ID3D11DepthStencilView* dsv = nullptr;
+            g_Runtime.context->OMGetRenderTargets(1, &rtv, &dsv);
+            SafeRelease(dsv);
+            if (!rtv)
+                return false;
+
+            D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+            rtv->GetDesc(&rtvDesc);
+            ID3D11Resource* resource = nullptr;
+            rtv->GetResource(&resource);
+            ID3D11Texture2D* texture = nullptr;
+            if (resource)
+                resource->QueryInterface(__uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&texture));
+            SafeRelease(resource);
+
+            bool ran = false;
+            if (texture)
             {
-                SafeRelease(device);
+                D3D11_TEXTURE2D_DESC desc = {};
+                texture->GetDesc(&desc);
+                const bool wholeSurface = desc.ArraySize == 1 &&
+                    ((rtvDesc.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2D && rtvDesc.Texture2D.MipSlice == 0) ||
+                     rtvDesc.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2DMS);
+                if (wholeSurface && AcceptTargetFormat(rtvDesc.Format, desc.Width, desc.Height, "scene target"))
+                    ran = RunFxaaPass(texture, desc, rtvDesc.Format, rtv);
+
+                if (g_ScenePassLogs < 3)
+                {
+                    ++g_ScenePassLogs;
+                    LogShimA(
+                        LogLevel::Info,
+                        kComponent,
+                        "[DX11 Enhanced FXAA] scene pass at render queue group %u ran=%u target=0x%p %ux%u %s samples=%u view=%u",
+                        queueGroup,
+                        ran ? 1u : 0u,
+                        texture,
+                        desc.Width,
+                        desc.Height,
+                        DxgiFormatName(rtvDesc.Format),
+                        desc.SampleDesc.Count,
+                        static_cast<unsigned>(rtvDesc.ViewDimension));
+                }
+            }
+
+            SafeRelease(texture);
+            SafeRelease(rtv);
+            return ran;
+        }
+
+        // Ogre::RenderQueueListener as OgreMain 1.x lays it out (five virtual
+        // slots: deleting dtor, preRenderQueues, postRenderQueues,
+        // renderQueueStarted, renderQueueEnded; checked against the stock
+        // listeners at 0x0087B894 and 0x00892260). The String& is never read.
+        class SceneBoundaryListener
+        {
+        public:
+            virtual ~SceneBoundaryListener() = default;
+            virtual void preRenderQueues() {}
+            virtual void postRenderQueues() {}
+            virtual void renderQueueStarted(unsigned char queueGroup, const void* invocation, bool& skip);
+            virtual void renderQueueEnded(unsigned char, const void*, bool&) {}
+        };
+
+        // Groups 60 and up are screen-space (cUI widgets and text at
+        // 60 + nesting depth, the HUD at 100); everything below is world.
+        // Redux's own Glow listener treats 100 as the seam; starting at 60
+        // also keeps screen-space text out of the pass, at the cost of
+        // leaving the rare group-95 fading meshes unfiltered when such text
+        // is present.
+        constexpr unsigned kFirstScreenSpaceGroup = 60;
+
+        using FnRootSingleton = void*(__cdecl*)();
+        using FnRootRenderSystem = void*(__thiscall*)(void*);
+        using FnRenderSystemViewport = void*(__thiscall*)(void*);
+        using FnAddRenderQueueListener = void(__thiscall*)(void*, void*);
+
+        SceneBoundaryListener g_SceneListener;
+        FnRenderSystemViewport g_OgreCurrentViewport = nullptr;
+        void* g_OgreRenderSystem = nullptr;
+        uintptr_t g_RenderGlobalsSlot = 0;
+        void* g_RegisteredSceneManager = nullptr;
+        bool g_SceneListenerFailed = false;
+        bool g_ScenePassDoneThisFrame = false;
+
+        bool IsMainViewportRendering()
+        {
+            __try
+            {
+                const uintptr_t record = *reinterpret_cast<const uintptr_t*>(g_RenderGlobalsSlot);
+                if (!record)
+                    return false;
+                void* mainViewport = *reinterpret_cast<void* const*>(record + 0x1C);
+                return mainViewport && g_OgreCurrentViewport(g_OgreRenderSystem) == mainViewport;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
                 return false;
             }
-            SafeRelease(device);
+        }
+
+        void SceneBoundaryListener::renderQueueStarted(unsigned char queueGroup, const void*, bool&)
+        {
+            if (queueGroup < kFirstScreenSpaceGroup || g_ScenePassDoneThisFrame ||
+                !g_RegisteredSceneManager || !IsMainViewportRendering())
+            {
+                return;
+            }
+            g_ScenePassDoneThisFrame = true;
+            ApplyFxaaToBoundTarget(queueGroup);
+        }
+
+        bool ResolveSceneListenerApis()
+        {
+            HMODULE ogre = GetModuleHandleW(L"OgreMain.dll");
+            g_RenderGlobalsSlot = EngineGlobals::RenderGlobals();
+            if (!ogre || !g_RenderGlobalsSlot)
+                return false;
+            auto root = reinterpret_cast<FnRootSingleton>(
+                GetProcAddress(ogre, "?getSingletonPtr@Root@Ogre@@SAPAV12@XZ"));
+            auto renderSystem = reinterpret_cast<FnRootRenderSystem>(
+                GetProcAddress(ogre, "?getRenderSystem@Root@Ogre@@QAEPAVRenderSystem@2@XZ"));
+            g_OgreCurrentViewport = reinterpret_cast<FnRenderSystemViewport>(
+                GetProcAddress(ogre, "?_getViewport@RenderSystem@Ogre@@UAEPAVViewport@2@XZ"));
+            if (!root || !renderSystem || !g_OgreCurrentViewport)
+                return false;
+            __try
+            {
+                void* rootObject = root();
+                g_OgreRenderSystem = rootObject ? renderSystem(rootObject) : nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                g_OgreRenderSystem = nullptr;
+            }
+            return g_OgreRenderSystem != nullptr;
+        }
+
+        bool AddListenerGuarded(FnAddRenderQueueListener add, void* sceneManager)
+        {
+            __try
+            {
+                add(sceneManager, &g_SceneListener);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        void* ReadSceneManagerGuarded()
+        {
+            __try
+            {
+                const uintptr_t record = *reinterpret_cast<const uintptr_t*>(g_RenderGlobalsSlot);
+                return record ? *reinterpret_cast<void* const*>(record + 0x08) : nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
+        // Called from Present on the render thread. Registers the listener
+        // once the SceneManager exists, and again if it is ever replaced.
+        // False means the scene pass is unavailable for this process and
+        // Present keeps the whole-frame pass.
+        bool EnsureSceneListener()
+        {
+            if (g_SceneListenerFailed)
+                return false;
+
+            static FnAddRenderQueueListener s_add = nullptr;
+            if (!s_add)
+            {
+                HMODULE ogre = GetModuleHandleW(L"OgreMain.dll");
+                s_add = ogre ? reinterpret_cast<FnAddRenderQueueListener>(GetProcAddress(
+                    ogre, "?addRenderQueueListener@SceneManager@Ogre@@UAEXPAVRenderQueueListener@2@@Z")) : nullptr;
+                if (!s_add || !ResolveSceneListenerApis())
+                {
+                    g_SceneListenerFailed = true;
+                    LogShimA(
+                        LogLevel::Warn,
+                        kComponent,
+                        "[DX11 Enhanced FXAA] Ogre render queue APIs or RenderGlobals unavailable; FXAA stays at Present and also covers HUD/text");
+                    return false;
+                }
+            }
+
+            void* sceneManager = ReadSceneManagerGuarded();
+            if (!sceneManager)
+                return g_RegisteredSceneManager != nullptr;
+            if (sceneManager == g_RegisteredSceneManager)
+                return true;
+
+            if (!AddListenerGuarded(s_add, sceneManager))
+            {
+                g_SceneListenerFailed = true;
+                g_RegisteredSceneManager = nullptr;
+                LogShimA(
+                    LogLevel::Warn,
+                    kComponent,
+                    "[DX11 Enhanced FXAA] addRenderQueueListener faulted on SceneManager=0x%p; FXAA stays at Present",
+                    sceneManager);
+                return false;
+            }
+            g_RegisteredSceneManager = sceneManager;
+            LogShimA(
+                LogLevel::Info,
+                kComponent,
+                "[DX11 Enhanced FXAA] scene pass armed on SceneManager=0x%p: FXAA runs before render queue group %u on the main viewport, so UI, text and HUD are not filtered",
+                sceneManager,
+                kFirstScreenSpaceGroup);
+            return true;
+        }
+
+        bool ApplyFxaa(IDXGISwapChain* swapChain)
+        {
+            if (!swapChain || !PassAllowed())
+                return false;
+
+            std::lock_guard<std::mutex> lock(g_RuntimeMutex);
+            if (!EnsureRuntimeFromSwapChain(swapChain))
+                return false;
 
             ID3D11Texture2D* backbuffer = nullptr;
-            hr = swapChain->GetBuffer(
+            HRESULT hr = swapChain->GetBuffer(
                 0,
                 __uuidof(ID3D11Texture2D),
                 reinterpret_cast<void**>(&backbuffer));
@@ -791,26 +1111,7 @@ namespace BZROpenShim
             D3D11_TEXTURE2D_DESC backbufferDesc = {};
             backbuffer->GetDesc(&backbufferDesc);
 
-            if (backbufferDesc.Width == 0 || backbufferDesc.Height == 0 ||
-                !IsSupportedEncodedLdrFormat(backbufferDesc.Format))
-            {
-                if (!g_UnsupportedFormatLogged.exchange(true, std::memory_order_acq_rel))
-                {
-                    LogShimA(
-                        LogLevel::Warn,
-                        kComponent,
-                        "[DX11 Enhanced FXAA] skipped unsupported presentation format=%s(%u) size=%ux%u; only ordinary 8-bit UNORM LDR targets are accepted because FXAA runs on encoded/non-linear RGB",
-                        DxgiFormatName(backbufferDesc.Format),
-                        static_cast<unsigned>(backbufferDesc.Format),
-                        backbufferDesc.Width,
-                        backbufferDesc.Height);
-                }
-                SafeRelease(backbuffer);
-                return false;
-            }
-
-            g_UnsupportedFormatLogged.store(false, std::memory_order_release);
-            if (!EnsureSourceResources(backbufferDesc))
+            if (!AcceptTargetFormat(backbufferDesc.Format, backbufferDesc.Width, backbufferDesc.Height, "presentation"))
             {
                 SafeRelease(backbuffer);
                 return false;
@@ -844,64 +1145,7 @@ namespace BZROpenShim
                 return false;
             }
 
-            {
-                // Capture before unbinding the game's targets. The RAII object
-                // restores every state we mutate, including shader class
-                // instances and predication, before Present reaches Ogre/DXGI.
-                SavedContextState saved(g_Runtime.context);
-
-                g_Runtime.context->SetPredication(nullptr, FALSE);
-                g_Runtime.context->OMSetRenderTargets(0, nullptr, nullptr);
-
-                if (backbufferDesc.SampleDesc.Count > 1)
-                {
-                    g_Runtime.context->ResolveSubresource(
-                        g_Runtime.inputTexture,
-                        0,
-                        backbuffer,
-                        0,
-                        backbufferDesc.Format);
-                }
-                else
-                {
-                    g_Runtime.context->CopyResource(g_Runtime.inputTexture, backbuffer);
-                }
-
-                g_Runtime.context->OMSetRenderTargets(1, &backbufferRtv, nullptr);
-
-                const FLOAT blendFactor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-                g_Runtime.context->OMSetBlendState(nullptr, blendFactor, 0xFFFFFFFFu);
-                g_Runtime.context->OMSetDepthStencilState(g_Runtime.depthStencilState, 0);
-                g_Runtime.context->RSSetState(g_Runtime.rasterizerState);
-
-                D3D11_VIEWPORT viewport = {};
-                viewport.TopLeftX = 0.0f;
-                viewport.TopLeftY = 0.0f;
-                viewport.Width = static_cast<float>(backbufferDesc.Width);
-                viewport.Height = static_cast<float>(backbufferDesc.Height);
-                viewport.MinDepth = 0.0f;
-                viewport.MaxDepth = 1.0f;
-                g_Runtime.context->RSSetViewports(1, &viewport);
-
-                g_Runtime.context->IASetInputLayout(nullptr);
-                g_Runtime.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-                g_Runtime.context->VSSetShader(g_Runtime.vertexShader, nullptr, 0);
-                g_Runtime.context->GSSetShader(nullptr, nullptr, 0);
-                g_Runtime.context->HSSetShader(nullptr, nullptr, 0);
-                g_Runtime.context->DSSetShader(nullptr, nullptr, 0);
-                g_Runtime.context->PSSetShader(g_Runtime.pixelShader, nullptr, 0);
-                g_Runtime.context->PSSetShaderResources(0, 1, &g_Runtime.inputSrv);
-                g_Runtime.context->PSSetSamplers(0, 1, &g_Runtime.sampler);
-                g_Runtime.context->PSSetConstantBuffers(0, 1, &g_Runtime.frameConstants);
-
-                g_Runtime.context->Draw(3, 0);
-
-                // Explicitly unbind our SRV before the saved game state is put
-                // back. This also guarantees the input texture is no longer a
-                // read dependency when the next frame copies into it.
-                ID3D11ShaderResourceView* nullSrv = nullptr;
-                g_Runtime.context->PSSetShaderResources(0, 1, &nullSrv);
-            }
+            RunFxaaPass(backbuffer, backbufferDesc, backbufferDesc.Format, backbufferRtv);
 
             // Never hold a swapchain-backbuffer reference across Present. DXGI
             // requires all such references to be released before ResizeBuffers;
@@ -930,7 +1174,23 @@ namespace BZROpenShim
             if (!s_InPresent)
             {
                 s_InPresent = true;
-                ApplyFxaa(self);
+                // The scene pass draws inside the frame from the render queue
+                // listener; Present only readies the device resources for it
+                // and opens the next frame. Without the listener, the
+                // whole-frame pass runs here as before.
+                if (EnsureSceneListener())
+                {
+                    g_ScenePassDoneThisFrame = false;
+                    if (PassAllowed())
+                    {
+                        std::lock_guard<std::mutex> lock(g_RuntimeMutex);
+                        EnsureRuntimeFromSwapChain(self);
+                    }
+                }
+                else
+                {
+                    ApplyFxaa(self);
+                }
                 s_InPresent = false;
             }
 
@@ -955,7 +1215,7 @@ namespace BZROpenShim
                     LogShimA(
                         LogLevel::Info,
                         kComponent,
-                        "[DX11 Enhanced FXAA] attached to swapchain=0x%p format=%s(%u) size=%ux%u buffers=%u; pass executes immediately before Present",
+                        "[DX11 Enhanced FXAA] attached to swapchain=0x%p format=%s(%u) size=%ux%u buffers=%u; scene pass runs at the world/UI seam, whole-frame pass at Present only as fallback",
                         swapChain,
                         DxgiFormatName(desc.BufferDesc.Format),
                         static_cast<unsigned>(desc.BufferDesc.Format),

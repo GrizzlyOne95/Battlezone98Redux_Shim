@@ -42,21 +42,23 @@ The original `Fxaa3_11.h` is embedded into `winmm.dll` as RCDATA and supplied to
 
 ## Render order and color space
 
-FXAA runs from an `IDXGISwapChain::Present` wrapper. Immediately before the real `Present` call, OpenShim:
+FXAA filters the 3D scene only. Screen-space UI, text and the HUD are drawn after it and stay sharp.
 
-1. obtains the current swapchain backbuffer;
+OpenShim registers an `Ogre::RenderQueueListener` on the scene manager (`RenderGlobals` record +0x08) through OgreMain's exported `SceneManager::addRenderQueueListener`. The listener fires at the first render queue group of 60 or above, once per frame, and only while the main viewport (record +0x1C, compared with `RenderSystem::_getViewport()`) is rendering. Groups below 60 are world: sky, opaque world and cockpit, terrain, world sprites and, when no screen-space text intervenes, the transparent world group 95. Groups 60 and up are cUI widgets and text (60 + nesting depth) and the HUD (100). The sniper and target-camera viewports, shadow passes and the glow mask pass therefore never trigger it. At that point the pass:
+
+1. reads the render target the main viewport is drawing into (the backbuffer, or Glow's `rt_output` while Glow is on);
 2. captures every D3D11 state that the FXAA pass changes;
 3. unbinds the game's render target;
-4. copies or resolves the completed backbuffer into a single-sample shader-resource texture;
-5. runs FXAA into the backbuffer with a full-screen triangle;
-6. unbinds the FXAA SRV;
-7. restores the captured game state;
-8. releases all backbuffer/RTV references; and
-9. calls the original `Present`.
+4. copies or resolves that target into a single-sample shader-resource texture;
+5. runs FXAA back into it with a full-screen triangle and no depth target;
+6. unbinds the FXAA SRV; and
+7. restores the captured game state, so Ogre draws the UI on top of the filtered scene.
 
-This places FXAA after the scene's normal rendering/tonemapping work and before presentation.
+The format check applies to the render target view's format (see below). Present only prepares the device resources and starts a new frame for the listener. The listener is registered once the scene manager exists, and again if the scene manager pointer ever changes; it is never removed, because the engine's scene manager outlives the swapchain hook.
 
-FXAA 3.11 with `FXAA_GREEN_AS_LUMA` expects perceptual/non-linear LDR input. The first milestone therefore **fails closed unless the backbuffer is an ordinary 8-bit UNORM presentation format**:
+If the Ogre exports or `RenderGlobals` cannot be resolved, or registration faults, OpenShim logs one warning and falls back to the original whole-frame pass immediately before `Present`, which also filters the HUD and text. Shell screens with no 3D viewport are not filtered.
+
+FXAA 3.11 with `FXAA_GREEN_AS_LUMA` expects perceptual/non-linear LDR input. The first milestone therefore **fails closed unless the target is an ordinary 8-bit UNORM format**:
 
 - `DXGI_FORMAT_R8G8B8A8_UNORM`
 - `DXGI_FORMAT_B8G8R8A8_UNORM`
@@ -78,7 +80,7 @@ The pass preserves/restores:
 - PS slot 0 SRV/sampler/constant buffer; and
 - D3D11 predication.
 
-No swapchain-backbuffer pointer or RTV is retained across `Present`. That is required because outstanding backbuffer references can make `ResizeBuffers` fail during fullscreen/window-size transitions.
+No render-target, swapchain-backbuffer pointer or RTV is retained after the pass. That is required because outstanding backbuffer references can make `ResizeBuffers` fail during fullscreen/window-size transitions.
 
 The intermediate SRV is recreated automatically when width, height, or presentation format changes.
 
@@ -109,7 +111,7 @@ For the first in-game proof run:
 6. compare identical camera positions with FXAA off/on; and
 7. test alt-tab, fullscreen/windowed transitions, resolution changes, mission restart, and shutdown.
 
-The critical visual checks are edge cleanup, excess softening of textures/HUD, thin-geometry loss, dark/non-green edge behavior from `GREEN_AS_LUMA`, and whether any UI should ultimately be excluded from the pass.
+The critical visual checks are edge cleanup, excess softening of textures/HUD, thin-geometry loss, dark/non-green edge behavior from `GREEN_AS_LUMA`, and that HUD/UI text stays pixel-identical to an FXAA-off run (the scene pass excludes it).
 
 ## Deliberately deferred
 
