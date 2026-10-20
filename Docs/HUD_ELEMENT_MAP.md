@@ -1,10 +1,10 @@
 # Remaining native HUD elements
 
-Research checkpoint: 2026-10-19. The subsequent hull/ammo fade implementation
-and its acceptance are tracked in [CONTEXTUAL_HUD.md](CONTEXTUAL_HUD.md); the
+Research checkpoint: 2026-10-19. The subsequent hull/ammo and cockpit-radar fade implementations
+and their acceptance are tracked in [CONTEXTUAL_HUD.md](CONTEXTUAL_HUD.md); the
 inventory below records the original research candidates. The map itself adds
 no hooks, settings or enabled capabilities. Implemented fades now cover weapons,
-scrap, pilots, commands and cockpit hull/ammo; their acceptance remains separate
+scrap, pilots, commands, cockpit hull/ammo and radar; their acceptance remains separate
 from the static candidates below.
 
 ## Evidence boundary

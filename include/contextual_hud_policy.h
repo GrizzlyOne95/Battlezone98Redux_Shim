@@ -7,12 +7,13 @@
 
 namespace BZROpenShim::ContextualHud
 {
-    enum class Group : size_t { Weapons, Scrap, Pilots, Commands, Hull, Ammo, Count };
+    enum class Group : size_t { Weapons, Scrap, Pilots, Commands, Hull, Ammo, Radar, Count };
     constexpr size_t kGroups = static_cast<size_t>(Group::Count);
     struct GroupSettings { bool enabled = false; int idlePercent = 25; int delayMs = 2500; int fadeMs = 500; };
     struct Settings
     {
         std::array<GroupSettings, kGroups> groups{};
+        bool radarCompassAlwaysVisible = false;
         bool Active() const { for (const auto& g : groups) if (g.enabled) return true; return false; }
     };
     struct Activity
@@ -48,6 +49,24 @@ namespace BZROpenShim::ContextualHud
             if (identity != owner) { Reset(); owner = identity; }
             for (size_t i = 0; i < std::min(count, kGroups); ++i) groups[i].Observe(values[i], now);
         }
+    };
+    struct RadarContacts
+    {
+        static constexpr size_t Capacity = 256;
+        std::array<uint32_t,Capacity> previous{}, current{};
+        size_t previousCount = 0, count = 0;
+        bool added = false, invalid = false;
+        void Begin() { count = 0; added = invalid = false; }
+        void Observe(uint32_t handle)
+        {
+            if (!handle) { invalid = true; return; }
+            if (std::find(current.begin(),current.begin()+count,handle) != current.begin()+count) return;
+            if (count == Capacity) { invalid = true; return; }
+            current[count++] = handle;
+            if (std::find(previous.begin(),previous.begin()+previousCount,handle) == previous.begin()+previousCount)
+                added = true;
+        }
+        void Commit() { previous = current; previousCount = count; }
     };
     inline bool HullWarning(float health, float maximum)
     {
