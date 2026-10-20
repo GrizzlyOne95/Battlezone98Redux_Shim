@@ -391,6 +391,7 @@ namespace BZROpenShim::GeometryContactTest
 
         bool Install()
         {
+            HookEngine::FrameThreadSitesScope frameSites;
             if (g_original) return true;
             if (!Resolve()) return false;
             const auto address = HookEngine::ResolveNamedAddress("CollisionTest::CarEntityCheck");

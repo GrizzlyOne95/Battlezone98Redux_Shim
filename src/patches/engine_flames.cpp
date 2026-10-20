@@ -646,6 +646,7 @@ namespace BZROpenShim
 
         static bool EnsureFlameRgbHook()
         {
+            HookEngine::FrameThreadSitesScope frameSites;
             if (g_OriginalFlameSpriteColour)
                 return true;
             static bool attempted = false;
