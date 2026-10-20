@@ -131,7 +131,7 @@ frame, and nothing waits for a tick.**
 
 The judder captured in these runs is Present pacing, not the timestep.
 
-## Precise timestep experiment (branch `agent/precise-timestep`)
+## Precise timestep (branch `agent/precise-timestep`)
 
 Added on 2026-10-20, stacked on the telemetry above.
 
@@ -162,11 +162,11 @@ These findings come from Ghidra xrefs on the GOG exe, plus 1.5 source where Redu
 
 ### The hook
 
-`[Experimental] PreciseTimestep = 1` (or `OPENSHIM_PRECISE_TIMESTEP=1`) redirects the frame-loop call to SetLoopTimes (0x006182F6, resolve `SetLoopTimes::FrameCall`) through a wrapper.
+`[Fixes] PreciseTimestep` (default ON; `= 0` or `OPENSHIM_DISABLE_PRECISE_TIMESTEP=1` turns it off) redirects the frame-loop call to SetLoopTimes (0x006182F6, resolve `SetLoopTimes::FrameCall`) through a wrapper.
 
 - **What it does.** After the real function runs, the wrapper replaces the three float globals (step, unclamped step and inverse) with the QPC interval between consecutive frame-loop calls.
 - **When it keeps the engine value:**
-  - in network games;
+  - in network games (it is a SinglePlayer-tier entry in the multiplayer gate registry, and the wrapper also checks the engine's net-game byte every frame);
   - when dt is 0 (paused);
   - at the 200 ms clamp;
   - when the two clocks disagree by more than 1.5 ms.
@@ -189,9 +189,20 @@ These findings come from Ghidra xrefs on the GOG exe, plus 1.5 source where Redu
 - **Over RDP the gain is small** (relative error p50 2.9% → 2.3%). The RDP compositor makes frames alternate about 8/31 ms. The remaining error is the phase difference between the SetLoopTimes and renderOneFrame boundaries, which no step fix removes.
 - **The case the hook targets was not captured with the hook on.** Only the r1 "off" run happened to escape the RDP throttle, at 169 fps. There the stock step was off by a median 7.7% per frame, and by up to 35% at p99. That high-refresh condition still needs an "on" run at the physical console, together with the flip-model A/B (PR #524).
 
+### Default-on smoke run
+
+A default-on run with no env override, lcbench combat 40 unthrottled, gave these numbers:
+- 160 fps;
+- 99.0% precise frames;
+- step error p50 2.9%, against 7.7% for the stock r1 "off" run at 169 fps;
+- step jitter 0.29 ms, against 1.0 ms stock;
+- drift −72 ms over 46 s.
+
+That build resolved `SetLoopTimes` through its fallback address, because the `rel32_target` offset pointed one byte past the `E8`. The offset is now 13, which is the call opcode.
+
 ### Next
 
-1. Physical console, 144 Hz or uncapped: repeat the lcbench off/on rounds with `OPENSHIM_PRECISE_TIMESTEP`, then look at the step error line and judge motion by eye.
+1. Physical console, 144 Hz or uncapped: repeat the lcbench off/on rounds (off = `OPENSHIM_DISABLE_PRECISE_TIMESTEP=1`), then look at the step error line and judge motion by eye.
 2. A separate experiment that removes the 60 Hz mouse bucket in 0x00623B20 (per-frame mouse at high refresh). This is the likelier aim win.
 
 ## Recommended next steps

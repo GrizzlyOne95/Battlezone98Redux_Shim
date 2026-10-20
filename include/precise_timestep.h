@@ -12,12 +12,13 @@ namespace BZROpenShim
 {
     // Redux's SetLoopTimes (GOG 0x00822AE0) measures each frame in whole
     // milliseconds of system time and hands the sim `dt * 0.001` unsmoothed,
-    // so at 144 fps the step alternates 6 and 7 ms. When
-    // [Experimental] PreciseTimestep = 1 (or OPENSHIM_PRECISE_TIMESTEP=1) the
+    // so at 144 fps the step alternates 6 and 7 ms. Unless
+    // [Fixes] PreciseTimestep = 0 (or OPENSHIM_DISABLE_PRECISE_TIMESTEP=1) the
     // per-frame call to it is redirected through a wrapper that replaces only
     // the float step with the QPC-measured frame interval. The integer
     // millisecond clocks are left untouched, so game time, timers and
-    // networking are unchanged. Network games, pauses, the 200 ms clamp and
+    // networking are unchanged. It is a SinglePlayer-tier feature in the
+    // multiplayer gate registry; network games, pauses, the 200 ms clamp and
     // any interval that disagrees with the engine's own by more than a
     // tolerance all keep the engine value.
     void InitializePreciseTimestep();

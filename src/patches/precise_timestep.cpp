@@ -70,6 +70,11 @@ namespace BZROpenShim
         double g_DebtMs = 0.0;   // sum(engine ms) - sum(precise ms)
         bool g_LastPrecise = false;
 
+        // The openshim.ini answer, and that answer AND'd with the single-player
+        // predicate by the multiplayer gate (RefreshPreciseTimestepState).
+        bool g_Enabled = false;
+        std::atomic<bool> g_Active{false};
+
         uint64_t ReadQpc()
         {
             LARGE_INTEGER value{};
@@ -125,7 +130,10 @@ namespace BZROpenShim
 
             const uint32_t engineMs = At<uint32_t>(g_Globals.clampedMs);
             const uint32_t rawMs = At<uint32_t>(g_Globals.rawMs);
-            const bool netGame = At<uint8_t>(g_Globals.isNetGame) != 0;
+            // The registry gate can lag a session change by one reconcile, so
+            // the engine's own net-game byte is checked here as well.
+            const bool netGame = !g_Active.load(std::memory_order_relaxed) ||
+                                 At<uint8_t>(g_Globals.isNetGame) != 0;
             if (last == 0 || netGame || engineMs == 0 || rawMs >= kEngineClampMs)
             {
                 g_DebtMs = 0.0;
@@ -154,19 +162,29 @@ namespace BZROpenShim
             g_LastPrecise = true;
         }
 
+        // [Fixes] PreciseTimestep, default ON. The kill-switch name maps to
+        // the inverted ini key in openshim_env_mapping.cpp.
         bool ReadEnabledSetting()
         {
-            bool enabled = false;
-            if (TryGetUserConfigBool("Experimental", "PreciseTimestep", enabled) && enabled)
-                return true;
-            return EnvFlagEnabled("OPENSHIM_PRECISE_TIMESTEP");
+            return !EnvFlagEnabled("OPENSHIM_DISABLE_PRECISE_TIMESTEP");
+        }
+    }
+
+    namespace Hooks
+    {
+        void RefreshPreciseTimestepState()
+        {
+            g_Active.store(g_Enabled && IsSinglePlayerSession(), std::memory_order_relaxed);
         }
     }
 
     void InitializePreciseTimestep()
     {
         if (!ReadEnabledSetting())
+        {
+            LogShimA(LogLevel::Info, kComponent, "[PreciseTimestep] disabled by [Fixes] PreciseTimestep = 0");
             return;
+        }
         if (!BindGlobals())
         {
             LogShimA(LogLevel::Warn, kComponent, "[PreciseTimestep] stands down: globals unresolved");
@@ -186,11 +204,15 @@ namespace BZROpenShim
         QueryPerformanceFrequency(&frequency);
         g_QpcToMs = 1000.0 / static_cast<double>(frequency.QuadPart);
         g_RealSetLoopTimes = reinterpret_cast<FnSetLoopTimes>(static_cast<uintptr_t>(target));
+        g_Enabled = true;
+        Hooks::RefreshPreciseTimestepState();
         if (!Hooks::RedirectCallTarget(callSite, target, reinterpret_cast<uintptr_t>(&SetLoopTimesHook)))
         {
             LogShimA(LogLevel::Warn, kComponent,
                      "[PreciseTimestep] stands down: call at 0x%08X does not target 0x%08X",
                      callSite, target);
+            g_Enabled = false;
+            Hooks::RefreshPreciseTimestepState();
             return;
         }
         LogShimA(LogLevel::Info, kComponent,
