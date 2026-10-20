@@ -10,6 +10,7 @@
 #include "patcher.h"
 #include "shim_log.h"
 #include "hud_color_policy.h"
+#include "contextual_hud.h"
 
 #include <Windows.h>
 
@@ -696,18 +697,26 @@ namespace BZROpenShim
             void* buffer, void* material, int spriteId,
             int x, int y, int w, int h, int a, int b)
         {
-            DrawScrapPilotHudPlate(buffer, kScrapPilotHudScrapPanelPoint, kScrapPlate);
-            reinterpret_cast<FnHudSpriteSubmit>(g_ScrapHud.spriteSubmit)(
-                buffer, material, spriteId, x, y, w, h, a, b);
+            const float previous = ContextualHud::BeginDraw(ContextualHud::Group::Scrap);
+            __try
+            {
+                DrawScrapPilotHudPlate(buffer, kScrapPilotHudScrapPanelPoint, kScrapPlate);
+                reinterpret_cast<FnHudSpriteSubmit>(g_ScrapHud.spriteSubmit)(buffer,material,spriteId,x,y,w,h,a,b);
+            }
+            __finally { ContextualHud::EndDraw(previous); }
         }
 
         static void __cdecl PilotPanelSubmitHook(
             void* buffer, void* material, int spriteId,
             int x, int y, int w, int h, int a, int b)
         {
-            DrawScrapPilotHudPlate(buffer, kScrapPilotHudPilotPanelPoint, kPilotPlate);
-            reinterpret_cast<FnHudSpriteSubmit>(g_ScrapHud.spriteSubmit)(
-                buffer, material, spriteId, x, y, w, h, a, b);
+            const float previous = ContextualHud::BeginDraw(ContextualHud::Group::Pilots);
+            __try
+            {
+                DrawScrapPilotHudPlate(buffer, kScrapPilotHudPilotPanelPoint, kPilotPlate);
+                reinterpret_cast<FnHudSpriteSubmit>(g_ScrapHud.spriteSubmit)(buffer,material,spriteId,x,y,w,h,a,b);
+            }
+            __finally { ContextualHud::EndDraw(previous); }
         }
 
         static bool WriteScrapPilotHudSubmitCall(uintptr_t callAddr, const void* target)
@@ -720,8 +729,9 @@ namespace BZROpenShim
             return WritePatchBytes(callAddr, patch, sizeof(patch));
         }
 
-        // Retargets the two backplate submit calls at the stock sprite draw so
-        // legacy mode can put the BZ 1.5 plate down in their place.
+        // Retargets the backplate calls for Legacy artwork or scoped opacity.
+        // The same adapters own both uses, so toggling layouts cannot replace
+        // another feature's redirect.
         static void SetScrapPilotHudPlateHookActive(bool active)
         {
             if (active == g_ScrapPilotHudPlateHookActive)
@@ -781,7 +791,7 @@ namespace BZROpenShim
 
             g_ScrapPilotHudPlateHookActive = active;
             g_ScrapPilotHudPlateGuardMismatchLogged = false;
-            Log(L"[HUD] Scrap/pilot legacy plate %hs\n",
+            Log(L"[HUD] Scrap/pilot plate adapters %hs\n",
                 active ? "installed" : "removed");
         }
 
@@ -910,7 +920,7 @@ namespace BZROpenShim
             }
 
             SetScrapPilotHudLegacyColorsActive(g_ScrapPilotHudLegacyLayoutEnabled);
-            SetScrapPilotHudPlateHookActive(g_ScrapPilotHudLegacyLayoutEnabled);
+            SetScrapPilotHudPlateHookActive(g_ScrapPilotHudLegacyLayoutEnabled || ContextualHud::ResourceDrawAdaptersNeeded());
         }
 
         void RevertScrapPilotHudToBaseline()

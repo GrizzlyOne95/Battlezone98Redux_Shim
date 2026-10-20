@@ -1,5 +1,6 @@
 #include "native_hud_runtime.h"
 #include "hud_feedback.h"
+#include "contextual_hud.h"
 #include "hud_palette.h"
 #include "geometry_contact_test.h"
 #include "bzr_hooks.h"
@@ -477,6 +478,7 @@ namespace BZROpenShim
         ClearCareerPendingVictims();
         ResetInProcessEventQueue();
         HudFeedback::ResetMission();
+        ContextualHud::ResetMission();
         // Registered features revert to their resting state (jump-snipe enable
         // -> default + MP-gated re-apply; Display prefs -> openshim.ini baseline).
         RevertRegisteredFeaturesToBaseline();
@@ -1729,6 +1731,7 @@ namespace BZROpenShim
         // ever run. See include/openshim_events.h.
         TickOpenShimEventLayer();
         HudFeedback::Tick();
+        ContextualHud::Tick();
         HudPalette::Tick();
 
         // Sample after the stock world queue update, when Ogre has evaluated

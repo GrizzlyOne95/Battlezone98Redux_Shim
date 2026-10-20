@@ -2461,6 +2461,138 @@
       "identity": "HUD 2D filled-rect helper, cdecl (buffer, x1, y1, x2, y2, colour, mode); mode 0 passes the colour through."
     },
     {
+      "name": "HudFadeColorSprite",
+      "address": "0x0068F030",
+      "expected": "55 8B EC 51 8B 45 08 83 E0 07 89 45 FC 83 7D FC 02",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Sprite mode-to-ARGB helper, cdecl(flags, paletteColor); both native sprite functions call it after palette lookup. Scoped alpha is applied to its return value. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeColorFill",
+      "address": "0x0068AC50",
+      "expected": "55 8B EC 51 8B 45 0C 83 E0 07 89 45 FC 8B 4D FC",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Filled rectangle mode-to-ARGB helper, cdecl(color, flags), called by HudFillRect's line helper. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeText",
+      "address": "0x004C0100",
+      "expected": "55 8B EC 51 8B 45 18 50 8B 4D 14 51 8B 55 1C 52",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Twelve-stack-argument cdecl HUD text renderer; four resource CALLs have caller cleanup 0x30. Color/font/alignment remain native. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeFont",
+      "address": "0x00689D10",
+      "expected": "55 8B EC 83 EC 1C C7 45 F8 00 00 00 00 8B 45 10",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Five-stack-argument cdecl native glyph-string draw; weapon-name CALL has caller cleanup 0x14. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeGetTeam",
+      "address": "0x00462370",
+      "expected": "55 8B EC A1 70 7A 91 00 5D C3 CC CC CC CC CC CC",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Local Team pointer getter used by ScrapGauge::Render; returned object supplies the four guarded resource getters. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeGetPlayer",
+      "address": "0x00417C70",
+      "expected": "55 8B EC A1 FC 7A 91 00 5D C3 CC CC CC CC CC CC",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Current controlled complete GameObject getter used by StatusDisplay::Render before the carrier/ammo getters. Full handle must round-trip. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeGetScrap",
+      "address": "0x005E10B0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 80 6C 01 00 00",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Team current scrap getter: [this+0x16C] XOR 0x33333333; ScrapGauge formats it before max scrap. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeGetMaxScrap",
+      "address": "0x005E1190",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 80 70 01 00 00",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Team scrap capacity getter: [this+0x170]. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeGetPilots",
+      "address": "0x005E1220",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 80 74 01 00 00",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Team current pilot getter: [this+0x174]. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeGetMaxPilots",
+      "address": "0x0045BBA0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 80 78 01 00 00",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Team pilot capacity getter: [this+0x178]. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeGetCarrier",
+      "address": "0x00417CA0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 80 A0 01 00 00",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. GameObject carrier getter: [this+0x1A0]; StatusDisplay checks for null before weapon getters. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeGetSelected",
+      "address": "0x00417F90",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 40 30 8B E5 5D",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Carrier selected weapon mask getter: [this+0x30]. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeGetLinkable",
+      "address": "0x00417FB0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 40 34 8B E5 5D",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Carrier available/linkable mask getter: [this+0x34]. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeGetAmmo",
+      "address": "0x00417C80",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 80 10 02 00 00",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Complete GameObject current ammo getter: [this+0x210] XOR 0x33333333. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeGetWeapon",
+      "address": "0x00417F40",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 08 8B 4D FC 8B 44 81 04",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Carrier hardpoint class getter: thiscall(slot), [this+4+slot*4], RET 4; StatusDisplay enumerates five slots. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeScrapTitle",
+      "address": "0x005C7167",
+      "expected": "E8 94 8F EF FF 83 C4 30 8B 4D E0 E8 19 A0 01 00",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Scrap title text CALL within ScrapGauge::Render; native text/color/layout are forwarded unchanged. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeScrapValue",
+      "address": "0x005C71C8",
+      "expected": "E8 33 8F EF FF 83 C4 30 E8 DB 2C 0C 00",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Scrap current/capacity text CALL within ScrapGauge::Render, separate from pilot strings. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadePilotTitle",
+      "address": "0x005C732D",
+      "expected": "E8 CE 8D EF FF 83 C4 30 8B 4D E0 E8 63 48 E9 FF",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Pilot title text CALL within ScrapGauge::Render. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadePilotValue",
+      "address": "0x005C738F",
+      "expected": "E8 6C 8D EF FF 83 C4 30 8B 4D FC 33 CD",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. Pilot current/capacity text CALL within ScrapGauge::Render. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeWeaponPlate",
+      "address": "0x005DC843",
+      "expected": "E8 E8 01 0B 00 83 C4 24 F3 0F 10 85 E0 FE FF FF",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. StatusDisplay::Render weapon-list backdrop sized-sprite CALL. The hull/ammo drawing and warning code follow and are outside this scope. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeWeaponIcon",
+      "address": "0x005DCAB5",
+      "expected": "E8 A6 FA 0A 00 83 C4 18 83 7D 94 00",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. StatusDisplay::Render hardpoint icon six-argument sprite CALL, inside the five-slot list loop. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
+      "name": "HudFadeWeaponText",
+      "address": "0x005DCB37",
+      "expected": "E8 D4 D1 0A 00 83 C4 14 E9 83 FB FF FF",
+      "identity": "Exact released GOG 2.2.301 SHA256 8D71F56C...3377413. StatusDisplay::Render localized weapon-name five-argument font CALL, inside the list loop; ammo count text is a later, separate call. Semantics inspected in released Ghidra/disassembly; complete expected bytes matched native ReadProcessMemory PID 21984 on 2026-10-19."
+    },
+    {
       "name": "HudFeedbackReticleCall",
       "address": "0x005BC339",
       "expected": "E8 22 02 0D 00 83 C4 18 8B 8D DC FD FF FF 83 B9 C8 00 00 00 00",
