@@ -50,11 +50,13 @@ so Stock previews show optional feedback only. Preview panes use a fixed
 design-space scale, rather than promising an exact physical pixel size for
 every in-game UI scale.
 
-The initial preview is qualified only for GOG DX11. It uses 96 owned native
+The initial preview is qualified only for GOG DX11. It uses owned native
 UI quads, with a guarded `UiViewReflow` adapter and a 2x2 white texture. The
 stock UI shader applies BGRA correction to Ogre-generated vertex colors;
 the preview compensates in its own producer without changing shared shaders.
 Missing artwork, another backend or a failed guard disables only the preview.
+The shared preview pool now supports 192 quads for the incoming-damage page's
+one/two/three-attacker arc samples.
 The existing nine-tile hub is unchanged; HUD links to this subpage, keeping
 all twelve appearance/feedback controls reachable without truncating rows.
 
@@ -93,6 +95,10 @@ event drain and rejects expired events before starting a pulse. Mission
 transitions, resets and configuration changes clear the pulse. Career stats
 need not be enabled. All four entry guards must bind before installation;
 partial detour installation forwards stock calls without publishing hits.
+
+The incoming-damage extension in `Docs/DAMAGE_INDICATORS.md` also uses these
+four wrappers when enabled. It stores copied directional pulses independently
+of outgoing hit markers; `SimDamageApplied` retains its outgoing-only meaning.
 
 ## Qualification, 2026-10-19
 

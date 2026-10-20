@@ -912,6 +912,14 @@ HitMarkerDuration = 120
 HitMarkerColor = White
 HitMarkerSize = 100
 HitMarkerOpacity = 100
+; Incoming weapon damage: arcs toward the firing source at impact. Single player.
+; Independent of reticle/hit markers; follows native HUD scale. Applies live.
+DamageIndicators = 0
+; Red/Amber/White/Cyan/Magenta/Green/Blue/Yellow or #RRGGBB / 0xAARRGGBB (RGB only).
+DamageIndicatorColor = Red
+DamageIndicatorSize = 100
+DamageIndicatorOpacity = 75
+DamageIndicatorDuration = 600
 ; Default follows the selected ScrapPilotHud layout: stock palette or the
 ; original legacy scrap-blue/pilot-green split. Layout/backplates are unchanged.
 ; Choices: Default, White, Blue, Green, Cyan, Amber, Magenta, Red, Yellow.

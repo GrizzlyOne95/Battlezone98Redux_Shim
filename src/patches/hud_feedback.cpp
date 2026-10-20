@@ -1,5 +1,6 @@
 #include "hud_feedback.h"
 #include "hud_feedback_policy.h"
+#include "hud_color_policy.h"
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
@@ -29,19 +30,61 @@ namespace BZROpenShim::HudFeedback
         SRWLOCK g_stateLock = SRWLOCK_INIT;
         Settings g_settings;
         Pulse g_pulse;
+        DamageIndicatorSettings g_incomingSettings;
+        IncomingPulses g_incoming;
         bool g_configRead = false; // game/UI thread only
         bool g_subscribed = false;
         bool g_drawReady = false;
         uint64_t g_nextInstall = 0;
         std::atomic<bool> g_hitsEnabled{false};
+        std::atomic<bool> g_incomingEnabled{false};
         std::atomic<bool> g_needsDraw{false};
         std::atomic<bool> g_damageReady{false};
         uint32_t g_sprite = 0, g_fill = 0, g_scale = 0, g_drawCall = 0, g_reticle = 0;
+        uint32_t g_cameraRecord = 0, g_viewRecord = 0;
+        bool g_cameraReady = false;
+        int g_indicatorPlayer = 0; // safe-frame thread only
         uint32_t g_damageSites[4] = {};
         InlineDetour32 g_damageDetours[4] = {};
         std::atomic<uintptr_t> g_originalDamage[4] = {};
         LONG g_drawLog = 1;
         LONG g_hitLogBudget = 8;
+
+        bool NeedsDamage(const Settings& settings)
+        {
+            return settings.hits || g_incomingEnabled.load(std::memory_order_relaxed);
+        }
+
+        bool InstallCamera()
+        {
+            if (g_cameraReady) return true;
+            const HookEngine::EngineRow rows[] = {
+                {"GetCameraRecord", &g_cameraRecord}, {"ViewRecord", &g_viewRecord},
+            };
+            g_cameraReady = HookEngine::BindEngineRows("Damage indicator camera", rows);
+            if (g_cameraReady) Log(L"[HUDFEEDBACK] Incoming damage uses main-view inverse rotation (cockpit/chase only)\n");
+            return g_cameraReady;
+        }
+
+        bool ReadView(std::array<float, 9>& inverse, int& player) noexcept
+        {
+            if (!g_cameraReady || !g_BzrFn_GetPlayerHandle) return false;
+            __try
+            {
+                const int mode = *reinterpret_cast<const int*>(g_viewRecord + 8);
+                // Cockpit and chase only; auxiliary/cinematic/overview panes
+                // must not display another view's incoming-damage information.
+                if (mode != 0 && mode != 1) return false;
+                player = g_BzrFn_GetPlayerHandle();
+                if (!player || !GameObjectFromHandleGog(player)) return false;
+                using CameraRecord = const uint8_t*(__cdecl*)();
+                const auto* record = reinterpret_cast<CameraRecord>(g_cameraRecord)();
+                if (!record) return false;
+                std::memcpy(inverse.data(), record + 0x40, sizeof(float) * inverse.size());
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
 
         Settings ReadSettings(Pulse* pulse = nullptr)
         {
@@ -70,8 +113,14 @@ namespace BZROpenShim::HudFeedback
             const auto original = reinterpret_cast<Sprite>(g_sprite);
             Pulse pulse;
             const Settings settings = ReadSettings(&pulse);
+            DamageIndicatorSettings incomingSettings;
+            IncomingPulses incoming;
+            AcquireSRWLockShared(&g_stateLock);
+            incomingSettings = g_incomingSettings;
+            incoming = g_incoming;
+            ReleaseSRWLockShared(&g_stateLock);
             const ShellUiState ui = ReadShellUiState();
-            if (!settings.NeedsDraw() || !ui.readable || ui.wrapperActive || ui.screenPresent)
+            if ((!settings.NeedsDraw() && !incomingSettings.enabled) || !ui.readable || ui.wrapperActive || ui.screenPresent)
             {
                 original(viewport, sprite, x, y, flags, scale);
                 return;
@@ -119,6 +168,24 @@ namespace BZROpenShim::HudFeedback
                 const auto& r = plan.rects[i];
                 reinterpret_cast<Fill>(g_fill)(viewport, r.left, r.top, r.right, r.bottom, r.color, 0);
             }
+            std::array<float, 9> inverse{};
+            int player = 0;
+            if (valid && singlePlayer && incomingSettings.enabled && ReadView(inverse, player))
+            {
+                const auto now = GetTickCount64();
+                const auto groups = GroupIncomingArcs(incoming, now, incomingSettings.durationMs, player, inverse);
+                for (size_t group = 0; group < groups.count; ++group)
+                {
+                    const auto& entry = groups.entries[group];
+                    const auto arcs = MakeDamageIndicatorPlan(incomingSettings, x, y, sx, sy, clip,
+                        entry.angle, entry.strength, entry.severity, entry.owners);
+                    for (size_t i = 0; i < arcs.count; ++i)
+                    {
+                        const auto& r = arcs.rects[i];
+                        reinterpret_cast<Fill>(g_fill)(viewport, r.left, r.top, r.right, r.bottom, r.color, 0);
+                    }
+                }
+            }
             if (plan.count && InterlockedExchange(&g_drawLog, 0))
                 Log(L"[HUDFEEDBACK] Draw at stock aim point (%d,%d), scale=(%.2f,%.2f), rects=%zu\n",
                     x, y, sx, sy, plan.count);
@@ -137,13 +204,20 @@ namespace BZROpenShim::HudFeedback
             return g_drawReady;
         }
 
-        struct DamageContext { DamageSample sample; void* object = nullptr; };
+        struct DamageContext
+        {
+            DamageSample sample;
+            void* object = nullptr;
+            bool localVictim = false;
+            bool hasDirection = false;
+            Direction direction;
+        };
 
         DamageContext BeforeDamage(void* receiver, void* damage) noexcept
         {
             DamageContext context;
             if (!g_damageReady.load(std::memory_order_acquire) ||
-                !g_hitsEnabled.load(std::memory_order_relaxed) || !IsSinglePlayerSession() ||
+                (!g_hitsEnabled.load(std::memory_order_relaxed) && !g_incomingEnabled.load(std::memory_order_relaxed)) || !IsSinglePlayerSession() ||
                 !receiver || !damage || !g_GameObjectGetHandleAddr ||
                 !g_BzrFn_GetPlayerHandle || !g_BzrFn_ResolveObj76GameObject)
                 return context;
@@ -158,9 +232,22 @@ namespace BZROpenShim::HudFeedback
                 if (!attacker) return {};
                 const auto get = reinterpret_cast<GetHandle>(g_GameObjectGetHandleAddr);
                 context.sample.attacker = get(attacker);
-                context.sample.localAttacker = context.sample.attacker == g_BzrFn_GetPlayerHandle();
-                if (!context.sample.localAttacker || context.sample.attacker == 0) return {};
+                const int player = g_BzrFn_GetPlayerHandle();
+                context.sample.localAttacker = context.sample.attacker == player;
                 context.sample.victim = get(context.object);
+                context.localVictim = player != 0 && context.sample.victim == player;
+                if (!context.sample.attacker || (!context.sample.localAttacker && !context.localVictim) ||
+                    GameObjectFromHandleGog(context.sample.attacker) != attacker ||
+                    GameObjectFromHandleGog(context.sample.victim) != context.object) return {};
+                if (context.localVictim && g_incomingEnabled.load(std::memory_order_relaxed))
+                {
+                    float source[3]{}, victim[3]{};
+                    if (TryGetGameObjectWorldPosition(attacker, source) && TryGetGameObjectWorldPosition(context.object, victim))
+                    {
+                        context.direction = {source[0] - victim[0], source[1] - victim[1], source[2] - victim[2]};
+                        context.hasDirection = Normalize(context.direction);
+                    }
+                }
                 context.sample.before = *reinterpret_cast<const float*>(static_cast<const uint8_t*>(context.object) + 0x200);
                 context.sample.weaponSource = true;
                 context.sample.singlePlayer = true;
@@ -171,16 +258,29 @@ namespace BZROpenShim::HudFeedback
 
         void AfterDamage(DamageContext context) noexcept
         {
-            if (!context.sample.localAttacker || !context.object) return;
+            if ((!context.sample.localAttacker && !context.localVictim) || !context.object) return;
             __try
             {
                 context.sample.sameLifetime = GameObjectFromHandleGog(context.sample.victim) == context.object;
                 if (!context.sample.sameLifetime) return;
                 context.sample.after = *reinterpret_cast<const float*>(static_cast<const uint8_t*>(context.object) + 0x200);
+                context.localVictim = context.localVictim && g_BzrFn_GetPlayerHandle &&
+                    context.sample.victim == g_BzrFn_GetPlayerHandle();
             }
             __except (EXCEPTION_EXECUTE_HANDLER) { return; }
-            if (ConfirmsHit(context.sample))
+            if (g_hitsEnabled.load(std::memory_order_relaxed) && ConfirmsHit(context.sample))
                 PublishSimEvent(OpenShimEventType::SimDamageApplied, context.sample.victim, context.sample.attacker, 0, 1);
+            if (g_incomingEnabled.load(std::memory_order_relaxed) && context.hasDirection &&
+                IsSinglePlayerSession() && ConfirmsIncoming(context.sample, context.localVictim))
+            {
+                // Copy values only; no object pointer survives this callback.
+                // Fixed storage, no allocation and no rendering in the hook.
+                AcquireSRWLockExclusive(&g_stateLock);
+                if (g_incomingSettings.enabled)
+                    g_incoming.Add(GetTickCount64(), g_incomingSettings.durationMs,
+                        context.sample.victim, context.sample.attacker, context.direction, context.sample.before - context.sample.after);
+                ReleaseSRWLockExclusive(&g_stateLock);
+            }
         }
 
         template<size_t Index>
@@ -243,6 +343,14 @@ namespace BZROpenShim::HudFeedback
 
     Settings PreviewSettings() { return ReadSettings(); }
 
+    DamageIndicatorSettings PreviewDamageSettings()
+    {
+        AcquireSRWLockShared(&g_stateLock);
+        const auto settings = g_incomingSettings;
+        ReleaseSRWLockShared(&g_stateLock);
+        return settings;
+    }
+
     bool ReloadConfig()
     {
         Settings settings;
@@ -259,21 +367,32 @@ namespace BZROpenShim::HudFeedback
         TryGetUserConfigBool("Display", "ReticleOutline", settings.outline);
         TryGetUserConfigBool("Display", "ReactiveReticle", settings.reactive);
         TryGetUserConfigBool("Display", "HitMarkers", settings.hits);
+        DamageIndicatorSettings incoming;
+        TryGetUserConfigBool("Display", "DamageIndicators", incoming.enabled);
+        if (TryGetUserConfigString("Display", "DamageIndicatorColor", text))
+            if (const auto color = HudColors::Parse(text)) incoming.color = *color;
+        incoming.sizePercent = ReadInteger("DamageIndicatorSize", 100, 50, 200);
+        incoming.opacity = ReadInteger("DamageIndicatorOpacity", 75, 25, 100);
+        incoming.durationMs = ReadInteger("DamageIndicatorDuration", 600, 150, 2000);
         AcquireSRWLockExclusive(&g_stateLock);
         g_settings = settings;
         g_pulse.Reset();
+        g_incomingSettings = incoming;
+        g_incoming.Reset();
         ReleaseSRWLockExclusive(&g_stateLock);
         g_hitsEnabled.store(settings.hits, std::memory_order_relaxed);
-        g_needsDraw.store(settings.NeedsDraw(), std::memory_order_relaxed);
+        g_incomingEnabled.store(incoming.enabled, std::memory_order_relaxed);
+        g_needsDraw.store(settings.NeedsDraw() || incoming.enabled, std::memory_order_relaxed);
         g_configRead = true;
         InterlockedExchange(&g_drawLog, 1);
-        if (settings.hits && !g_subscribed) g_subscribed = SubscribeEvents(EventSink, nullptr);
-        if (!settings.hits && g_subscribed) { UnsubscribeEvents(EventSink, nullptr); g_subscribed = false; }
-        if (!settings.NeedsDraw()) return true;
+        if (NeedsDamage(settings) && !g_subscribed) g_subscribed = SubscribeEvents(EventSink, nullptr);
+        if (!NeedsDamage(settings) && g_subscribed) { UnsubscribeEvents(EventSink, nullptr); g_subscribed = false; }
+        if (!settings.NeedsDraw() && !incoming.enabled) return true;
         // This first adapter is deliberately GOG-only until the other native
         // ABIs have independent runtime qualification. No new dependencies.
         if (g_IsSteamExe || !IsCompatibleGameVersion()) return false;
-        return InstallDraw() && (!settings.hits || (g_subscribed && InstallDamage()));
+        return (!incoming.enabled || InstallCamera()) && InstallDraw() &&
+            (!NeedsDamage(settings) || (g_subscribed && InstallDamage()));
     }
 
     const char* UnavailableReason()
@@ -287,18 +406,34 @@ namespace BZROpenShim::HudFeedback
         if (!g_configRead) { ReloadConfig(); return; }
         if (!g_needsDraw.load(std::memory_order_relaxed)) return;
         const Settings settings = ReadSettings();
-        if (!settings.NeedsDraw() || g_IsSteamExe || !IsCompatibleGameVersion()) return;
-        if (g_drawReady && (!settings.hits || g_damageReady.load(std::memory_order_acquire))) return;
+        if (g_IsSteamExe || !IsCompatibleGameVersion()) return;
+        if (g_incomingEnabled.load(std::memory_order_relaxed))
+        {
+            std::array<float, 9> inverse{};
+            int player = 0;
+            if (!IsSinglePlayerSession() || !ReadView(inverse, player)) player = 0;
+            if (player != g_indicatorPlayer || !player)
+            {
+                AcquireSRWLockExclusive(&g_stateLock);
+                g_incoming.Reset();
+                ReleaseSRWLockExclusive(&g_stateLock);
+                g_indicatorPlayer = player;
+            }
+        }
+        if (g_drawReady && (!g_incomingEnabled.load(std::memory_order_relaxed) || g_cameraReady) &&
+            (!NeedsDamage(settings) || g_damageReady.load(std::memory_order_acquire))) return;
         const uint64_t now = GetTickCount64();
         if (now < g_nextInstall) return;
         g_nextInstall = now + 1000;
-        if (InstallDraw() && settings.hits && g_subscribed) InstallDamage();
+        if (g_incomingEnabled.load(std::memory_order_relaxed) && !InstallCamera()) return;
+        if (InstallDraw() && NeedsDamage(settings) && g_subscribed) InstallDamage();
     }
 
     void ResetMission() noexcept
     {
         AcquireSRWLockExclusive(&g_stateLock);
         g_pulse.Reset();
+        g_incoming.Reset();
         ReleaseSRWLockExclusive(&g_stateLock);
         InterlockedExchange(&g_hitLogBudget, 8);
     }
