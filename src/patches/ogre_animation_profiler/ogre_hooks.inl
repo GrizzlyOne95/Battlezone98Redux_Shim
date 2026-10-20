@@ -288,6 +288,135 @@
             }
         }
 
+        PaletteSlot* FindOrClaimPaletteSlot(const void* target)
+        {
+            uint32_t state = g_PaletteSlotsState.load(std::memory_order_acquire);
+            if (state == 0)
+            {
+                uint32_t expected = 0;
+                if (g_PaletteSlotsState.compare_exchange_strong(expected, 1, std::memory_order_acq_rel))
+                {
+                    g_PaletteSlots = new (std::nothrow) PaletteSlot[kPaletteSlotCount];
+                    g_PaletteSlotsState.store(g_PaletteSlots ? 2u : 3u, std::memory_order_release);
+                }
+                state = g_PaletteSlotsState.load(std::memory_order_acquire);
+            }
+            if (state != 2 || !target)
+                return nullptr;
+
+            const uintptr_t key = reinterpret_cast<uintptr_t>(target);
+            size_t index = static_cast<size_t>((key >> 4) * 2654435761u) & (kPaletteSlotCount - 1);
+            for (size_t probe = 0; probe < 32; ++probe)
+            {
+                PaletteSlot& slot = g_PaletteSlots[(index + probe) & (kPaletteSlotCount - 1)];
+                uintptr_t current = slot.key.load(std::memory_order_acquire);
+                if (current == key)
+                    return &slot;
+                if (current == 0 &&
+                    slot.key.compare_exchange_strong(current, key, std::memory_order_acq_rel))
+                    return &slot;
+                if (current == key)
+                    return &slot;
+            }
+            return nullptr;
+        }
+
+        // Diagnostic only: classifies this skin's palette against the palette
+        // the same target used last time. Ogre's software path passes
+        // object-space bone matrices, so craft motion alone does not change it.
+        void RecordPaletteReuse(
+            const Ogre::VertexData* targetVertexData,
+            const void* const* blendMatrices,
+            size_t numMatrices,
+            size_t vertices)
+        {
+            PaletteSlot* slot = numMatrices <= kPaletteMaxMatrices && blendMatrices
+                ? FindOrClaimPaletteSlot(targetVertexData)
+                : nullptr;
+            uint32_t idle = 0;
+            if (!slot || !slot->busy.compare_exchange_strong(idle, 1, std::memory_order_acquire))
+            {
+                g_PaletteUntrackedCalls.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+
+            const uint64_t frame = g_FrameEpoch.load(std::memory_order_relaxed);
+            float current[kPaletteMaxMatrices][kPaletteMatrixFloats];
+            for (size_t i = 0; i < numMatrices; ++i)
+            {
+                const void* matrix = blendMatrices[i];
+                if (matrix)
+                    std::memcpy(current[i], matrix, sizeof(current[i]));
+                else
+                    std::memset(current[i], 0, sizeof(current[i]));
+            }
+
+            if (slot->frame == 0 || slot->matrixCount != numMatrices)
+            {
+                g_PaletteFirstCalls.fetch_add(1, std::memory_order_relaxed);
+            }
+            else
+            {
+                size_t changedCount = 0;
+                bool noiseOnly = true;
+                for (size_t i = 0; i < numMatrices; ++i)
+                {
+                    g_PaletteIndexSeen[i].fetch_add(1, std::memory_order_relaxed);
+                    if (std::memcmp(current[i], slot->matrices[i], sizeof(current[i])) == 0)
+                        continue;
+                    ++changedCount;
+                    g_PaletteIndexChanged[i].fetch_add(1, std::memory_order_relaxed);
+                    bool rotationChanged = false;
+                    for (size_t e = 0; e < kPaletteMatrixFloats; ++e)
+                    {
+                        const float a = current[i][e];
+                        const float b = slot->matrices[i][e];
+                        if (std::memcmp(&a, &b, sizeof(a)) == 0)
+                            continue;
+                        if (e != 3 && e != 7 && e != 11)
+                            rotationChanged = true;
+                        if (!(std::fabs(a - b) <= 1e-5f))
+                            noiseOnly = false;
+                    }
+                    if (rotationChanged)
+                        g_PaletteRotationChangedMatrices.fetch_add(1, std::memory_order_relaxed);
+                    else
+                        g_PaletteTranslationOnlyMatrices.fetch_add(1, std::memory_order_relaxed);
+                }
+
+                if (changedCount == 0)
+                {
+                    if (slot->frame == frame)
+                    {
+                        g_PaletteRepeatSameFrameCalls.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    else
+                    {
+                        g_PaletteSameCalls.fetch_add(1, std::memory_order_relaxed);
+                        g_PaletteSameVertices.fetch_add(vertices, std::memory_order_relaxed);
+                        if (slot->frame + 1 == frame)
+                            g_PaletteSameConsecutiveCalls.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
+                else
+                {
+                    g_PaletteChangedCalls.fetch_add(1, std::memory_order_relaxed);
+                    g_PaletteChangedVertices.fetch_add(vertices, std::memory_order_relaxed);
+                    if (noiseOnly)
+                        g_PaletteNoiseCalls.fetch_add(1, std::memory_order_relaxed);
+                    if (changedCount == numMatrices)
+                        g_PaletteAllChangedCalls.fetch_add(1, std::memory_order_relaxed);
+                    g_PaletteChangedCountBuckets[(std::min)(changedCount, size_t{ 4 }) - 1]
+                        .fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+
+            std::memcpy(slot->matrices, current, numMatrices * sizeof(current[0]));
+            slot->matrixCount = static_cast<uint32_t>(numMatrices);
+            slot->frame = frame;
+            slot->busy.store(0, std::memory_order_release);
+        }
+
         void __cdecl HookSoftwareVertexBlend(
             const Ogre::VertexData* sourceVertexData,
             const Ogre::VertexData* targetVertexData,
@@ -355,6 +484,7 @@
 
             SourceProfileSlot* sourceSlot = FindOrClaimSourceSlot(sourceVertexData, vertices);
             CaptureSourceLayout(sourceSlot, sourceVertexData);
+            RecordPaletteReuse(targetVertexData, blendMatrices, numMatrices, vertices);
             const uint64_t start = ReadQpc();
             {
                 SoftwareBlendScope scope;
