@@ -339,6 +339,7 @@ namespace BZROpenShim
         g_MultiplayerFlagRenderSets.clear();
         g_EngineFlameVariantsInitialized = false;
         g_EngineFlameVariantsInitAttempted = false;
+        ResetEngineFlameOdfColors();
         g_EngineFlamePrimaryBlueTexture = 0;
         g_EngineFlamePrimaryRedTexture = 0;
         g_EngineFlamePrimaryGreenTexture = 0;
