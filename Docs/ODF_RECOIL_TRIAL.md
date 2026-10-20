@@ -99,11 +99,27 @@ priority, shared-clip timing, repeated shots, playback rate, pause and duplicate
 steps, invalid clips, generated slide settings, multiplayer departure and
 restoration retries after partial backend failures. These are host checks.
 
-Two unrelated co-op clients were active while the prototype was prepared.
-They were left running; no owned live firing/visual qualification is claimed.
-The next live checks are avtank barrel/descendant motion without altered shot
-origin, and an existing ISDFC clip on world/cockpit targets with its Lua recoil
-profile disabled. Follow with repeated fire, weapon swaps, pause, destruction,
+On 2026-10-20 an owned windowed GOG/DX11 avtank/gatstab smoke test bound
+`AGR11BGA` and rendered EXU mesh flashes during normal AI cannon fire. The live
+trace exposed the earlier misidentified cannon site; the corrected call and
+caller frame are documented in the implementation/qualification guides.
+A complete bounded baseline trace passed with no read errors or event cap.
+An instrumented effects run observed 820 barrel pose writes, 0..0.300000012 m
+of visual travel relative to the unchanged native node pose, and 33 completed
+shots whose 64-byte firing matrices were unchanged after the bridge returned.
+EXU reported 210 spawned flashes, zero failures/orphans, and zero live effects
+at shutdown. Screenshots show the flash. These are smoke-test observations,
+not general lifetime or descendant-motion acceptance; the normal gate stays false.
+
+The authored fixture is
+`reverse_engineering/test_missions/weapon_presentation/avtank_odf_trial.lua`.
+Use it temporarily as `lcbench.lua` with the prepared ODFs, EXU on the mission's
+Lua DLL search path, and locally supplied flash resources; restore those files
+and the complete deployed load chain after testing. The fixture uses stock
+`Attack`, not Lua `FireAt`, and contains no Lua flash producer.
+
+Remaining checks include an existing ISDFC clip on world/cockpit targets with
+its Lua recoil profile disabled, descendant motion, weapon swaps, pause, destruction,
 save/load, model replacement, mission/scene transitions and SP/MP gates.
 Steam, Proton and Wine remain unqualified and the exact GOG image guard
 rejects other executable identities. No publication is included.

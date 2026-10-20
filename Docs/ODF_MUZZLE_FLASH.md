@@ -109,5 +109,12 @@ Steam/Proton/Wine remain separate qualification gates. No publication is claimed
 Current checkpoint: OpenShim/EXU Release Win32 builds and 120/120 Windows CTests
 pass, as do EXU hardening validation and HardeningSmoke. Helper preview/install/
 restore was checked with invariant decimal formatting and UTF-16 preservation.
-The shared harness refused the attempted live launch because another GOG game
-was running; that process and its deployed files were left untouched.
+The 2026-10-20 windowed GOG/DX11 avtank/gatstab smoke test loaded the matching
+EXU and authored `isdfc_sflash.mesh`/`isdfc_sflash`, 0.12 s, scale 2 -> 0.25,
+and offset `0 0 0.15` through the weapon ODF. No Lua flash producer was used.
+Screenshots show the flash; EXU counted 210 spawns, zero failures/orphans and
+zero live flashes at shutdown. Recoil simultaneously travelled 0.30 m and
+returned to rest. A bounded instrumented sample checked 33 completed firing
+matrices unchanged after the native presentation bridge. The load chain,
+resources, EXU placement and temporary mission/weapon files were restored.
+This proves the GOG smoke path only; the wider qualification gates above remain.

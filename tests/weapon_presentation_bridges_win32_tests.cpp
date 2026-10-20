@@ -80,9 +80,9 @@ namespace
             push ebx
             push esi
             push edi
-            sub esp, 190h
+            sub esp, 250h
             mov eax, dword ptr [ebp+8]
-            mov dword ptr [ebp-190h], eax
+            mov dword ptr [ebp-250h], eax
             mov ebx, 12345678h
             mov esi, 23456789h
             mov edi, 3456789Ah
@@ -97,7 +97,7 @@ namespace
             jne failed
             cmp edi, 3456789Ah
             jne failed
-            lea edx, [ebp-19Ch]
+            lea edx, [ebp-25Ch]
             cmp esp, edx
             jne failed
             mov dword ptr [g_RegistersPreserved], 1

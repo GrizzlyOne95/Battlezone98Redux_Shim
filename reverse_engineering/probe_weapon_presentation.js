@@ -152,7 +152,7 @@ function start(input) {
                 if (!this.selected) return;
                 // At callee entry EBP is still the CALLER's frame. Never use
                 // generic args at the middle-of-function cannon call site.
-                const weapon = at(this.context.ebp, -0x190);
+                const weapon = at(this.context.ebp, -0x250);
                 this.weapon = pointer(weapon);
                 this.pose = at(this.context.sp, 4);
                 emit('cannon_factory', this, {

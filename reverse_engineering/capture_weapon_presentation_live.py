@@ -183,6 +183,16 @@ def observe(pid, config, seconds, events_path, check_process):
     return summary
 
 
+def executable_module(modules, executable):
+    # Toolhelp can report the executable in both native and WOW64 lists.
+    # Collapse identical mappings while still rejecting distinct images.
+    matches = {(m.base, m.size): m for m in modules
+               if Path(m.path).resolve() == executable}
+    if len(matches) != 1:
+        raise ValueError("Cannot uniquely identify the process's executable module")
+    return next(iter(matches.values()))
+
+
 def capture(args, report):
     if sys.platform != "win32":
         raise RuntimeError("Live capture requires Windows; no live evidence was collected")
@@ -198,10 +208,7 @@ def capture(args, report):
     executable = Path(proc.exe()).resolve()
     if proc.name().lower() != "battlezone98redux.exe" or executable.name.lower() != "battlezone98redux.exe":
         raise ValueError("PID is not the stock Redux executable")
-    modules = [m for m in enumerate_modules(args.pid) if Path(m.path).resolve() == executable]
-    if len(modules) != 1:
-        raise ValueError("Cannot uniquely identify the process's executable module")
-    module = modules[0]
+    module = executable_module(enumerate_modules(args.pid), executable)
     static = qualify(executable, args.catalog)
     pe = pefile.PE(str(executable), fast_load=True)
     try:

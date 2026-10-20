@@ -56,9 +56,10 @@ baseline writer before support is added.
 
 `RegisterQualifiedWeaponPresentationBackend` is an internal connection point,
 not a claim of runtime qualification. The candidate supplies a caller, guarded
-by `kNativePresentationLiveQualified = false`. Initialization records requests
-but installs no candidate hooks and allocates no presentation runtime while
-that gate is closed. Once qualified, registration runs lazily on the pinned
+by `kNativePresentationLiveQualified = false`. Normal settings install no
+candidate hooks while that gate is closed. The explicit GOG/SP ODF trial
+switches described in `ODF_RECOIL_TRIAL.md` permit the bounded experimental
+path; they do not enable the old native flash renderer. Registration runs lazily on the pinned
 engine thread. A producer on another thread forwards stock behavior.
 
 The actual GOG executable was transferred through a private GitHub Actions ZIP,
@@ -69,7 +70,7 @@ write. Static evidence is separate from live qualification.
 
 | Native surface | Resolved site | Recovered contract |
 |---|---|---|
-| Cannon accepted factory call | `0x005A7195` | ECX=OrdnanceClass; final Matrix and owner OBJ on stack; original RET 8/EAX retained; weapon recovered from caller `[EBP-190]` |
+| Cannon accepted factory call | `0x0048F54F` | ECX=OrdnanceClass; final Matrix and owner OBJ on stack; original RET 8/EAX retained; weapon recovered from caller `[EBP-250]`; corrected after live gatstab observation on 2026-10-20 |
 | Weapon ODF scope pop | `0x00611DE4` | ECX=live ParameterDB scope; class at caller `[EBP-3C]`; read flashName/flashDuration before original pop |
 | Craft ODF scope pop | `0x004E1138` | Successful new-class path only; class at caller `[EBP-4C]`; read recoilName1..5 before original pop |
 | Global simulation | `0x00611270` | cdecl(float dt), plain RET; tick once before original weapon list pass |
@@ -102,8 +103,9 @@ families and hot enabling after class loading are not implemented.
 ### Required before activation
 
 `AGENT_TOOLING.md` requires a native live launch and target-byte capture before
-patch installation. This Linux environment cannot perform that Windows/game
-qualification. Keep the gate closed until the following evidence is recorded:
+patch installation. The 2026-10-20 GOG/DX11 smoke run corrected the cannon site
+and verified node slide/EXU mesh flashes (see `ODF_RECOIL_TRIAL.md`). Keep the
+normal gate closed until the broader evidence below is recorded:
 
 1. Capture exact GOG build identity, settled PID, all fourteen resolves, three
    call targets and five stolen instruction ranges. Check startup timing so

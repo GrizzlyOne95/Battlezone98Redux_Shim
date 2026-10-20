@@ -87,7 +87,7 @@ function harness(limit = 4096, failHook = 0) {
     assert.equal(started.installed_listeners, 9);
     assert.equal(started.activation_qualified, false);
     const weapon = 0x100000, matrix = 0x110000, root = 0x120000, objectClass = 0x130000;
-    h.memory.writeUInt32LE(weapon, h.ebp - 0x190);
+    h.memory.writeUInt32LE(weapon, h.ebp - 0x250);
     h.memory.writeUInt32LE(objectClass, h.ebp - 0x3c);
     h.memory.writeUInt32LE(objectClass + 4, h.ebp - 0x4c);
     for (let i = 0; i < 9; ++i) h.memory.writeFloatLE(i + 0.25, matrix + i * 4);

@@ -88,7 +88,7 @@ function is called by the observer, and no renderer is created by it.
 | Event | What is recorded |
 |---|---|
 | `weapon_ctor`, `weapon_ctor_return`, `weapon_dtor` | ECX/native result, constructor arguments and a trace-only generation; never a substitute for the game's owner identity |
-| `cannon_factory`, `cannon_factory_return` | Only calls returning to the qualified cannon site; caller `[EBP-190]`, ECX class, stack Matrix/owner, copied entry/return matrices and actual native result |
+| `cannon_factory`, `cannon_factory_return` | Only calls returning to the qualified cannon site; caller `[EBP-250]`, ECX class, stack Matrix/owner, copied entry/return matrices and actual native result |
 | `weapon_scope_pop`, `craft_scope_pop` | Live scope ECX and caller-frame class before the original scope pop; unrelated callers are ignored |
 | `simulation_begin`, `simulation_end` | Actual float dt, thread, sequence and observed pass number; rendered frames do not supply dt |
 | `set_weapon` | Carrier, slot, old pointer before stock replacement and new pointer |
