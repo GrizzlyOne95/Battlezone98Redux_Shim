@@ -1,6 +1,7 @@
 #include "weapon_presentation_native.h"
 #include "weapon_presentation_call_bridges.h"
 #include "weapon_presentation_native_policy.h"
+#include "odf_flash_bridge.h"
 #include "weapon_presentation_hooks.h"
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
@@ -82,6 +83,8 @@ namespace BZROpenShim::Hooks
         uint64_t g_LifetimeSerial = 0;
         uint64_t g_SimulationSerial = 0;
         WP::Settings g_Settings;
+        bool g_TrialMeshFlashOnly = false;
+        bool g_MeshFlashUnavailableLogged = false;
 
         template<class T> bool Read(const void* pointer, size_t offset, T& out) noexcept
         {
@@ -231,6 +234,35 @@ namespace BZROpenShim::Hooks
                     durationValue = ds == ValueStatus::Present ? Policy::Duration(duration)
                         : std::numeric_limits<float>::quiet_NaN();
                 result.config = WP::ResolveFlashConfig(inherited, nameValue, durationValue);
+                constexpr std::array<std::string_view, 7> meshKeys = {
+                    "flashMesh", "flashMaterial", "flashDuration", "flashScale", "flashEndScale", "flashOffset", "flashRoll"};
+                std::array<std::array<char, kMaxValueBytes>, 7> meshValues{};
+                std::array<std::optional<std::string_view>, 7> meshFields;
+                for (size_t i = 0; i < meshKeys.size(); ++i)
+                {
+                    // ReadValue takes a fixed native buffer; its owned copy is
+                    // kept alive through the complete policy parse below.
+                    char raw[kMaxValueBytes] = {};
+                    const auto status = ReadValue(scope, Policy::Hash("WeaponClass"), Policy::Hash(meshKeys[i]), raw);
+                    if (status == ValueStatus::Missing) continue;
+                    std::memcpy(meshValues[i].data(), raw, sizeof(raw));
+                    meshFields[i] = status == ValueStatus::Present ? std::string_view(meshValues[i].data()) : std::string_view("\"");
+                }
+                if (inherited.IsMesh() || meshFields[0])
+                {
+                    result.config = Policy::ResolveMeshFlashConfig(inherited, {meshFields[0], meshFields[1], meshFields[2],
+                        meshFields[3], meshFields[4], meshFields[5], meshFields[6]});
+                    const auto requestedName = meshFields[0] ? Policy::Name(*meshFields[0]) : std::nullopt;
+                    const bool explicitOff = requestedName && requestedName->empty();
+                    char odf[9] = {};
+                    std::memcpy(odf, &result.name, 8);
+                    if (result.config.IsMesh())
+                        LogShimA(LogLevel::Info, "WEAPONFX", "ODF=%s flashMesh=%s duration=%.3f scale=%.2f->%.2f",
+                            odf, result.config.mesh.c_str(), result.config.duration, result.config.startScale, result.config.finishScale);
+                    else if (!explicitOff)
+                        LogShimA(LogLevel::Warn, "WEAPONFX", "ODF=%s mesh flash settings rejected; check resource names, duration, scale, offset and roll", odf);
+                }
+                if (g_TrialMeshFlashOnly && !result.config.IsMesh()) result.config = {};
                 if (g_FlashClasses.size() < WP::kMaxBindings || g_FlashClasses.count(objectClass))
                     g_FlashClasses.insert_or_assign(objectClass, std::move(result));
             }
@@ -445,9 +477,9 @@ namespace BZROpenShim::Hooks
                     const auto token = runtime->Bind(request);
                     if (!token) return;
                     state.token = *token;
-                    LogShimA(LogLevel::Info, "WEAPONFX", "recoil bound handle=%u mode=%s clip=%s",
-                        static_cast<unsigned>(state.owner.lifetime), request.animation ? "animation" : "node",
-                        request.animation ? request.animation->clip.c_str() : "");
+                    LogShimA(LogLevel::Info, "WEAPONFX", "presentation bound handle=%u recoil=%s clip=%s flashMesh=%s",
+                        static_cast<unsigned>(state.owner.lifetime), request.animation ? "animation" : request.recoil ? "node" : "none",
+                        request.animation ? request.animation->clip.c_str() : "", request.flash.mesh.c_str());
                 }
                 WP::Matrix current;
                 if (!CurrentWeaponPose(weapon, state, current) || state.root != ownerRoot)
@@ -511,6 +543,52 @@ namespace BZROpenShim::Hooks
         class NativeBackend final : public WP::Backend
         {
         public:
+            bool CreateMeshFlash(const WP::FlashConfig& config, const WP::Identity& owner,
+                const WP::Matrix& pose, float remaining, WP::MeshFlashToken& token) noexcept override
+            {
+                if (token || !config.IsMesh() || !config.Valid() || !WP::ValidPose(pose) || remaining < 0.005f) return false;
+                BzrOdfFlashBridge::Spec spec;
+                spec.cookie = NextLifetime();
+                if (!spec.cookie) return false;
+                spec.owner = static_cast<uint32_t>(owner.lifetime);
+                spec.mesh = config.mesh.c_str(); spec.material = config.material.c_str();
+                const float values[12] = {pose.rightX, pose.rightY, pose.rightZ, pose.upX, pose.upY, pose.upZ,
+                    pose.frontX, pose.frontY, pose.frontZ, static_cast<float>(pose.positionX),
+                    static_cast<float>(pose.positionY), static_cast<float>(pose.positionZ)};
+                std::copy(std::begin(values), std::end(values), spec.pose);
+                spec.duration = remaining; spec.startScale = config.startScale; spec.finishScale = config.finishScale;
+                spec.rollRadians = config.rollDegrees * 0.01745329251994329577f;
+                HMODULE module = nullptr;
+                if (!GetModuleHandleExW(0, L"exu.dll", &module))
+                {
+                    if (!g_MeshFlashUnavailableLogged)
+                        LogShimA(LogLevel::Warn, "WEAPONFX", "mesh flashes need the companion EXU loaded by this mission; recoil remains independent");
+                    g_MeshFlashUnavailableLogged = true;
+                    return false;
+                }
+                using Spawn = uint32_t (__cdecl*)(const BzrOdfFlashBridge::Spec*);
+                auto spawn = reinterpret_cast<Spawn>(GetProcAddress(module, "EXU_SpawnOdfFlash"));
+                if (!spawn) spawn = reinterpret_cast<Spawn>(GetProcAddress(module, "_EXU_SpawnOdfFlash"));
+                if (spawn) token.id = spawn(&spec);
+                if (token.id) token.cookie = spec.cookie;
+                FreeLibrary(module);
+                if (!token && !g_MeshFlashUnavailableLogged)
+                    LogShimA(LogLevel::Warn, "WEAPONFX", "EXU mesh flash declined mesh=%s; verify companion export, assets and exu.log", config.mesh.c_str());
+                if (!token) g_MeshFlashUnavailableLogged = true;
+                return static_cast<bool>(token);
+            }
+            bool CancelMeshFlash(WP::MeshFlashToken& token) noexcept override
+            {
+                HMODULE module = nullptr;
+                if (!token || !GetModuleHandleExW(0, L"exu.dll", &module)) { token = {}; return true; }
+                using Cancel = int (__cdecl*)(uint32_t, uint64_t);
+                auto cancel = reinterpret_cast<Cancel>(GetProcAddress(module, "EXU_CancelOdfFlash"));
+                if (!cancel) cancel = reinterpret_cast<Cancel>(GetProcAddress(module, "_EXU_CancelOdfFlash"));
+                const bool done = cancel && cancel(token.id, token.cookie);
+                FreeLibrary(module);
+                if (done) token = {};
+                return done;
+            }
             bool ApplyAnimation(const WP::Identity& owner, const WP::AnimationBinding& animation,
                 float time, bool active) noexcept override
             {
@@ -750,14 +828,16 @@ namespace BZROpenShim::Hooks
             TryGetUserConfigBool("SinglePlayer", "MeshRecoil", g_Settings.meshRecoil);
             wchar_t trial[4] = {};
             const bool recoilTrial = GetEnvironmentVariableW(L"OPENSHIM_TRIAL_ODF_RECOIL", trial, 4) == 1 && trial[0] == L'1';
-            if (recoilTrial)
+            const bool flashTrial = GetEnvironmentVariableW(L"OPENSHIM_TRIAL_ODF_FLASH", trial, 4) == 1 && trial[0] == L'1';
+            if (recoilTrial || flashTrial)
             {
-                g_Settings.meshRecoil = true;
-                g_Settings.muzzleFlash = false; // isolate recoil from unqualified native flash lifetimes
-                LogShimA(LogLevel::Warn, "WEAPONFX", "explicit ODF recoil trial; GOG/SP cannon only, native flashes excluded");
+                g_Settings.meshRecoil = recoilTrial;
+                g_Settings.muzzleFlash = flashTrial;
+                g_TrialMeshFlashOnly = true; // never enable the unqualified native ParticleRender backend
+                LogShimA(LogLevel::Warn, "WEAPONFX", "explicit ODF trial; GOG/SP cannon, recoil=%d EXU mesh flashes=%d", recoilTrial, flashTrial);
             }
             if (!g_Settings.muzzleFlash && !g_Settings.meshRecoil) return;
-            if (!kNativePresentationLiveQualified && !recoilTrial)
+            if (!kNativePresentationLiveQualified && !recoilTrial && !flashTrial)
             {
                 LogShimA(LogLevel::Warn, "WEAPONFX", "native candidate inactive: Windows lifetime/order qualification pending");
                 return;

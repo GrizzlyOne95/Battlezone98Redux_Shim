@@ -56,7 +56,8 @@ Accepted bounds: clip name 1..63 printable non-space ASCII characters, clip
 length at most 60 seconds, playback rate greater than zero and at most 50,
 distance greater than zero and at most 10, return greater than zero and at
 most 100. Malformed values disable the affected path. This trial reads ship
-slot settings; it does not yet supply weapon-level defaults or new flashes.
+slot settings; it does not yet supply weapon-level recoil defaults.
+Weapon ODF mesh flashes are now described in [ODF_MUZZLE_FLASH.md](ODF_MUZZLE_FLASH.md).
 
 ## avtank / gatstab setup
 
@@ -83,8 +84,9 @@ Build/deploy the complete OpenShim chain with `scripts/Deploy-OpenShim.ps1`.
 For clip tests also deploy the matching EXU build to the mod's EXU location.
 Launch through `BZRHarness.ps1` with `BZR_FORCE_WINDOWED=1` and the explicit
 environment variable `OPENSHIM_TRIAL_ODF_RECOIL=1`. This enables only the
-exact-build, byte-guarded SP cannon candidate and forces its native muzzle
-flashes off. `kNativePresentationLiveQualified` remains false for normal use.
+exact-build, byte-guarded SP cannon recoil candidate. The separate
+`OPENSHIM_TRIAL_ODF_FLASH=1` opts into EXU-rendered ODF mesh flashes; the old
+native ParticleRender flash backend remains excluded. `kNativePresentationLiveQualified` remains false for normal use.
 Stop only the owned PID through `Stop-BZRGame -Id`; preserve other agents'
 running games. See the existing weapon-presentation live qualification guide
 for byte/ABI evidence collection before running the candidate.

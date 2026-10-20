@@ -1,4 +1,6 @@
 #include "weapon_presentation.h"
+#include "weapon_presentation_native_policy.h"
+#include "odf_flash_bridge.h"
 #include "test_check.h"
 
 #include <cmath>
@@ -45,6 +47,26 @@ namespace
         struct AnimationCall { float time; bool active; };
         std::vector<AnimationCall> animationCalls;
         bool failAnimation = false;
+        int meshCreates = 0, meshCancels = 0;
+        bool failMeshCreate = false, failMeshCancel = false;
+        WP::FlashConfig meshConfig;
+        WP::Matrix meshPose = WC::Identity();
+        float meshLifetime = 0;
+        bool CreateMeshFlash(const WP::FlashConfig& config, const WP::Identity& flashOwner,
+            const WP::Matrix& pose, float lifetime, WP::MeshFlashToken& token) noexcept override
+        {
+            Require(flashOwner == owner, "wrong mesh flash owner");
+            ++meshCreates; meshConfig = config; meshPose = pose; meshLifetime = lifetime;
+            token = {static_cast<uint32_t>(100 + meshCreates), static_cast<uint64_t>(meshCreates)};
+            return !failMeshCreate;
+        }
+        bool CancelMeshFlash(WP::MeshFlashToken& token) noexcept override
+        {
+            Require(token.id >= 101 && token.cookie != 0, "invalid pool token cancelled");
+            ++meshCancels;
+            if (failMeshCancel) return false;
+            token = {}; return true;
+        }
         bool ApplyAnimation(const WP::Identity&, const WP::AnimationBinding&,
             float time, bool active) noexcept override
         {
@@ -138,6 +160,104 @@ namespace
         runtime.SynchronizeVisuals(backend);
         Require(runtime.Inspect().nativeAttachments == 0, "test left a native attachment alive");
         runtime.InvalidateResources();
+    }
+
+    void TestMeshFlashPolicyAndRuntime()
+    {
+        Require(BzrOdfFlashBridge::Matches(1, 42, 1, 42), "owned pool ID refused");
+        Require(!BzrOdfFlashBridge::Matches(1, 43, 1, 42), "old mission cookie cancelled a reused pool ID");
+        Require(!BzrOdfFlashBridge::Matches(1, 0, 1, 42), "native cancellation could target a Lua flash");
+        Require(!BzrOdfFlashBridge::Matches(1, 0, 1, 0), "zero cookie claimed ownership");
+        namespace Policy = WP::NativePolicy;
+        Policy::MeshFlashFields fields;
+        fields.mesh = "\"MyFlash.mesh\"";
+        auto config = Policy::ResolveMeshFlashConfig({}, fields);
+        Require(config.Valid() && config.mesh == "MyFlash.mesh" && config.material.empty(), "mesh-only defaults failed");
+        Near(config.duration, 0.08, "default flash lifetime wrong");
+        fields.material = "\"Custom/Flash\"";
+        fields.scale = "2"; fields.endScale = "0"; fields.offset = "\"1 2 3\""; fields.roll = "-45";
+        config = Policy::ResolveMeshFlashConfig({}, fields);
+        Require(config.Valid() && config.material == "Custom/Flash", "custom mesh config refused");
+        Near(config.finishScale, 0, "shrink-to-zero refused");
+        auto inherited = Policy::ResolveMeshFlashConfig(config, {});
+        Require(inherited.mesh == config.mesh && inherited.material == config.material && inherited.offset.z == 3,
+            "mesh settings not inherited");
+        Policy::MeshFlashFields override;
+        override.material = "\"\"";
+        Require(Policy::ResolveMeshFlashConfig(config, override).material.empty(), "mesh material not explicitly cleared");
+        override.mesh = "\"\"";
+        Require(!Policy::ResolveMeshFlashConfig(config, override).Valid(), "empty mesh did not opt out");
+        override = {}; override.offset = "1 2 3 4";
+        Require(!Policy::ResolveMeshFlashConfig(config, override).Valid(), "extra offset component accepted");
+        for (const auto bad : {"1 2", "1,2,3", "1 2 NaN", "21 0 0", "1 2 3suffix", "\"bad"})
+        {
+            override.offset = bad;
+            Require(!Policy::ResolveMeshFlashConfig(config, override).Valid(), "invalid flash offset accepted");
+        }
+        override = {};
+        for (const auto bad : {"0", "-1", "5.01", "nan", "0.1suffix"})
+        {
+            override.duration = bad;
+            Require(!Policy::ResolveMeshFlashConfig(config, override).Valid(), "invalid flash lifetime accepted");
+        }
+        override = {}; override.scale = "101";
+        Require(!Policy::ResolveMeshFlashConfig(config, override).Valid(), "oversized mesh flash accepted");
+        override = {}; override.roll = "361";
+        Require(!Policy::ResolveMeshFlashConfig(config, override).Valid(), "unbounded flash roll accepted");
+
+        FakeBackend backend;
+        WP::Runtime runtime;
+        Start(runtime, true, false);
+        auto request = Request(); request.recoil.reset(); request.flash = config;
+        auto token = Bind(runtime, request);
+        auto pose = WC::Identity();
+        pose.rightX = 0; pose.rightZ = -1; pose.frontX = 1; pose.frontZ = 0;
+        pose.positionX = 10; pose.positionY = 20; pose.positionZ = 30;
+        const auto original = pose;
+        Require(runtime.Fire(token, 1, pose).flashStarted, "mesh flash shot ignored");
+        runtime.SetMuzzlePose(token, pose); // native refresh must retain the authored offset
+        runtime.BeginSimulationStep(1, 0.02f);
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.meshCreates == 1 && backend.creates == 0, "mesh flash used legacy native renderer");
+        Near(backend.meshLifetime, 0.06, "pending mesh flash lifetime restarted at render");
+        Near(backend.meshPose.positionX, 13, "offset did not follow muzzle front");
+        Near(backend.meshPose.positionY, 22, "offset did not follow muzzle up");
+        Near(backend.meshPose.positionZ, 29, "offset did not follow muzzle right");
+        Require(std::memcmp(&pose, &original, sizeof(pose)) == 0, "flash offset changed projectile pose");
+        Require(!runtime.Fire(token, 2, pose).flashStarted, "active mesh flash restarted");
+        runtime.BeginSimulationStep(2, 0);
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.meshCreates == 1, "paused frame duplicated mesh flash");
+        backend.failMeshCancel = true;
+        runtime.SetSession(false, true);
+        runtime.SynchronizeVisuals(backend);
+        Require(runtime.Inspect().meshFlashAttachments == 1, "failed cancellation lost its pool id");
+        backend.failMeshCancel = false;
+        runtime.SynchronizeVisuals(backend);
+        Require(runtime.Inspect().meshFlashAttachments == 0 && runtime.Inspect().bindings == 0,
+            "mesh flash not cancelled on MP departure");
+        runtime.InvalidateResources();
+
+        WP::Runtime delayed;
+        Start(delayed, true, false);
+        token = Bind(delayed, request);
+        delayed.Fire(token, 1, pose);
+        delayed.BeginSimulationStep(1, 0.2f);
+        delayed.SynchronizeVisuals(backend);
+        Require(backend.meshCreates == 1, "expired pending mesh flash appeared late");
+        Finish(delayed, backend);
+
+        WP::Runtime independent;
+        Start(independent, true, true);
+        request = Request(); request.flash = config;
+        token = Bind(independent, request);
+        backend.failMeshCreate = true;
+        const auto shot = independent.Fire(token, 1, pose);
+        independent.SynchronizeVisuals(backend);
+        Require(shot.recoilReset && !backend.recoilPoses.empty(), "flash failure suppressed independent recoil");
+        independent.SynchronizeVisuals(backend); // retire partial backend state
+        Require(independent.Inspect().meshFlashAttachments == 0, "failed mesh spawn id leaked");
+        Finish(independent, backend);
     }
 
     void TestAnimationRecoil()
@@ -683,6 +803,7 @@ namespace
 
 int main()
 {
+    TestMeshFlashPolicyAndRuntime();
     TestAnimationRecoil();
     TestConfigurationAndIds();
     TestBoundedMeshLookup();

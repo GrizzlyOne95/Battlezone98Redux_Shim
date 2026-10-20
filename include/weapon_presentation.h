@@ -28,6 +28,13 @@ namespace BZROpenShim::WeaponPresentation
     {
         std::string effect;
         float duration = 0.0f;
+        std::string mesh = {};
+        std::string material = {};
+        float startScale = 1;
+        float finishScale = 1;
+        WeaponConvergence::Vec3 offset = {};
+        float rollDegrees = 0;
+        bool IsMesh() const noexcept { return !mesh.empty(); }
         bool Valid() const noexcept;
     };
 
@@ -115,6 +122,13 @@ namespace BZROpenShim::WeaponPresentation
         bool recoilReset = false;
     };
 
+    struct MeshFlashToken
+    {
+        uint32_t id = 0;
+        uint64_t cookie = 0;
+        explicit operator bool() const noexcept { return id != 0; }
+    };
+
     class Backend
     {
     public:
@@ -135,6 +149,10 @@ namespace BZROpenShim::WeaponPresentation
             const Matrix& visualPose) noexcept = 0;
         virtual bool ApplyAnimation(const Identity&, const AnimationBinding&,
             float, bool) noexcept { return false; }
+        // EXU owns these pool entries. IDs are values, never native pointers.
+        virtual bool CreateMeshFlash(const FlashConfig&, const Identity&,
+            const Matrix&, float, MeshFlashToken&) noexcept { return false; }
+        virtual bool CancelMeshFlash(MeshFlashToken&) noexcept { return false; }
     };
 
     struct Snapshot
@@ -144,6 +162,7 @@ namespace BZROpenShim::WeaponPresentation
         size_t nativeAttachments = 0;
         size_t sharedRecoilNodes = 0;
         size_t sharedAnimationClips = 0;
+        size_t meshFlashAttachments = 0;
     };
 
     class Runtime
