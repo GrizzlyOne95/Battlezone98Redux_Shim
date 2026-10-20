@@ -387,6 +387,55 @@ int main()
               "6c: revision bumped to current");
     }
 
+    // 6d. revision 3 -> 4: the netcode defaults move only where still stock,
+    // and a revision 2 file collects both steps.
+    {
+        fs::path r3 = tmpRoot / "rev3_network.ini";
+        fs::path canonical = tmpRoot / "canonical6d.ini";
+        WriteLines(canonical, MakeCanonicalLines());
+        WriteLines(r3, {
+            "; OpenShimPresetRevision = 3",
+            "",
+            "[General]",
+            "SettingsUi = 1",
+            "",
+            "[Network]",
+            "ReliableFirstRetryMs = 1000",
+            "ReliableRetryIntervalMs = 1500",
+            "EarlyNakAccept = 0",
+        });
+        auto r = MigratePresetFileIfNeeded(r3, canonical);
+        Check(r.action == MigrationAction::SurgicalFixed,
+              "6d: revision 3 file is migrated, not skipped");
+        Check(FileContains(r3, "EarlyNakAccept = 1"),
+              "6d: EarlyNakAccept turned on");
+        Check(FileContains(r3, "ReliableFirstRetryMs = 300"),
+              "6d: stock first retry moved to 300");
+        Check(FileContains(r3, "ReliableRetryIntervalMs = 1500"),
+              "6d: player-chosen retry interval kept");
+        Check(FileContains(r3, CurrentRevisionMarker()),
+              "6d: revision bumped to current");
+
+        fs::path r2 = tmpRoot / "rev2_network.ini";
+        WriteLines(r2, {
+            "; OpenShimPresetRevision = 2",
+            "",
+            "[General]",
+            "SettingsUi = 0",
+            "",
+            "[Network]",
+            "EarlyNakAccept = 0",
+            "ReliableRetryIntervalMs = 2500",
+        });
+        MigratePresetFileIfNeeded(r2, canonical);
+        Check(FileContains(r2, "SettingsUi = 1"),
+              "6d: revision 2 step still applied");
+        Check(FileContains(r2, "EarlyNakAccept = 1"),
+              "6d: revision 3 step chained after revision 2");
+        Check(FileContains(r2, "ReliableRetryIntervalMs = 800"),
+              "6d: stock retry interval moved to 800");
+    }
+
     // 7. unknown/custom file -> untouched
     {
         fs::path custom = tmpRoot / "custom.ini";

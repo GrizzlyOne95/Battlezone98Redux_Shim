@@ -314,25 +314,38 @@ namespace BZROpenShim
             { "General", "CustomBindsUi", "0", "1" },
         };
 
-        // Which narrow fixups apply when migrating away from `fromRevision`.
-        // Returns nullptr for a revision with no known fixups, in which case
-        // the file only has its marker restamped.
-        const SurgicalEntry* SurgicalTableForRevision(int fromRevision,
-                                                      size_t& outCount)
+        // Revision 3 -> 4. Netcode defaults turned on at the user's request on
+        // 2026-10-19: early NAK accept and the shorter 300 / 800 ms reliable
+        // resend timers. Only values still at the old shipped default move.
+        const SurgicalEntry kRevision3SurgicalTable[] = {
+            { "Network", "EarlyNakAccept", "0", "1" },
+            { "Network", "ReliableFirstRetryMs", "1000", "300" },
+            { "Network", "ReliableRetryIntervalMs", "2500", "800" },
+        };
+
+        // Narrow fixups that apply when migrating away from `fromRevision`:
+        // that revision's table and every later one, in order, so a file
+        // several revisions behind collects each step. Empty for an unknown
+        // revision, in which case the file only has its marker restamped.
+        std::vector<SurgicalEntry> SurgicalEntriesForRevision(int fromRevision)
         {
-            outCount = 0;
-            if (fromRevision == kLegacyBadPresetRevision)
+            std::vector<SurgicalEntry> entries;
+            const auto append = [&entries](const SurgicalEntry* table, size_t count)
             {
-                outCount = sizeof(kSurgicalTable) / sizeof(kSurgicalTable[0]);
-                return kSurgicalTable;
-            }
-            if (fromRevision == 2)
-            {
-                outCount = sizeof(kRevision2SurgicalTable) /
-                           sizeof(kRevision2SurgicalTable[0]);
-                return kRevision2SurgicalTable;
-            }
-            return nullptr;
+                entries.insert(entries.end(), table, table + count);
+            };
+            if (fromRevision < kLegacyBadPresetRevision ||
+                fromRevision >= kCurrentPresetRevision)
+                return entries;
+            if (fromRevision <= kLegacyBadPresetRevision)
+                append(kSurgicalTable, sizeof(kSurgicalTable) / sizeof(kSurgicalTable[0]));
+            if (fromRevision <= 2)
+                append(kRevision2SurgicalTable,
+                       sizeof(kRevision2SurgicalTable) / sizeof(kRevision2SurgicalTable[0]));
+            if (fromRevision <= 3)
+                append(kRevision3SurgicalTable,
+                       sizeof(kRevision3SurgicalTable) / sizeof(kRevision3SurgicalTable[0]));
+            return entries;
         }
 
         bool ValueMatchesOld(const std::string& current,
@@ -639,7 +652,7 @@ namespace BZROpenShim
                 // Reuse the surgical table on the existingLines, then write
                 // atomically via the same safe path as Case B.
                 bool anyChanged = false;
-                for (const auto& entry : kSurgicalTable)
+                for (const auto& entry : SurgicalEntriesForRevision(kLegacyBadPresetRevision))
                 {
                     std::string sectionValue;
                     bool inSection = false;
@@ -800,9 +813,11 @@ namespace BZROpenShim
         //
         // If marker is absent, we cannot reliably know it's an old preset vs.
         // a truly custom file, so we must NOT do narrow fixup. That is Case C.
-        size_t surgicalCount = 0;
+        const std::vector<SurgicalEntry> surgicalEntries =
+            hasRev ? SurgicalEntriesForRevision(existingRev) : std::vector<SurgicalEntry>{};
         const SurgicalEntry* surgicalTable =
-            hasRev ? SurgicalTableForRevision(existingRev, surgicalCount) : nullptr;
+            surgicalEntries.empty() ? nullptr : surgicalEntries.data();
+        const size_t surgicalCount = surgicalEntries.size();
 
         if (surgicalTable != nullptr)
         {

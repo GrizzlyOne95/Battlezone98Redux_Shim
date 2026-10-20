@@ -153,6 +153,13 @@ namespace
         ini.Set("General", "ChunkCacheMaxAgeDays", "7");
         Check(Mapped(ini, "OPENSHIM_CHUNK_CACHE_MAX_AGE_DAYS") == "7", "chunk cache age limit passes through raw");
 
+        // FastMenuTransitions: inverted switch.
+        Check(Mapped(ini, "OPENSHIM_DISABLE_FAST_MENU_TRANSITIONS") == "<none>", "unset FastMenuTransitions keeps the code default");
+        ini.Set("General", "FastMenuTransitions", "0");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_FAST_MENU_TRANSITIONS") == "1", "FastMenuTransitions = 0 reads as DISABLE=1");
+        ini.Set("General", "FastMenuTransitions", "1");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_FAST_MENU_TRANSITIONS") == "0", "FastMenuTransitions = 1 reads as DISABLE=0");
+
         // PathBlockFaces: inverted switch, trace from [Diagnostics].
         Check(Mapped(ini, "OPENSHIM_DISABLE_PATH_BLOCK_FACES") == "<none>", "unset PathBlockFaces keeps the code default");
         ini.Set("General", "PathBlockFaces", "0");

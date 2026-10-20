@@ -1730,6 +1730,8 @@ namespace BZROpenShim
         // from arbitrary engine hook contexts; this is the only place sinks
         // ever run. See include/openshim_events.h.
         TickOpenShimEventLayer();
+        // The HUD installers below write sites only this thread executes.
+        HookEngine::NoteFrameThread();
         HudFeedback::Tick();
         ContextualHud::Tick();
         HudPalette::Tick();
@@ -1791,9 +1793,16 @@ namespace BZROpenShim
         if (!g_CareerStatsMpHookInstalled)
             InstallCareerStatsMpHookIfPossible();
         if (ShouldTracePlayerKills() && !g_DistributedRecordDeathIntHookInstalled)
+        {
+            // Scoped here: the installer's own __try rules out a local with a destructor.
+            HookEngine::FrameThreadSitesScope frameSites;
             InstallDistributedRecordDeathIntHookIfPossible();
+        }
         if (g_MpauthEnabled && !g_MpauthHooksInstalled)
+        {
+            HookEngine::FrameThreadSitesScope frameSites;
             InstallMpauthHooksIfPossible();
+        }
         if (!g_RadarLayoutHookInstalled)
             InstallRadarLayoutHookIfPossible();
         if (!g_ChunkEffectCreateHooksInstalled)

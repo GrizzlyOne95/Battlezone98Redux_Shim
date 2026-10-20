@@ -246,6 +246,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # sets pathBlock = "faces"/"none". No stock or unflagged content changes.
     "General/PathBlockFaces",
 
+    # Defers only the Modable rebuild menu screens do for display; mission
+    # mounts and the MP game room still rebuild in full.
+    "General/FastMenuTransitions",
+
     # Qualified socket/netcode baseline.
     "Network/NetImprovements",
     # Sender-side native netcode fix: same wire format, so no mixed-client
@@ -255,6 +259,13 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # divergence; future-stamped position updates are applied instead of
     # dropped behind a lost reliable fragment. Live-qualified 2026-10-10.
     "Network/EarlyUnreliableAccept",
+    # Receiver-side: honours NAKs stamped ahead instead of dropping them, so a
+    # lost reliable message is resent at once. Same wire format. Default on
+    # 2026-10-19 at the user's request after the 2026-10-10 matrices.
+    "Network/EarlyNakAccept",
+    # Editor-only: routes World Builder saves to the map's source folder
+    # behind an actual-destination prompt. Inert outside /edit saves.
+    "General/EditorSaveToSourceFolder",
     # Acts only after a GPU reset, to keep the recreated D3D11 device alive.
     "Graphics/D3D11DeviceLossRecovery",
 
@@ -311,10 +322,10 @@ $stockValueChecks = @{
     "Display/UnitVoFeedback" = "Normal"
     "Network/RoutePreference" = "Stock"
     "Network/LobbyBzrnetIntegration" = "0"
-    "Network/ReliableFirstRetryMs" = "1000"
-    "Network/ReliableRetryIntervalMs" = "2500"
+    "Network/ReliableFirstRetryMs" = "300"
+    "Network/ReliableRetryIntervalMs" = "800"
     "Network/EarlyUnreliableAccept" = "1"
-    "Network/EarlyNakAccept" = "0"
+    "Network/EarlyNakAccept" = "1"
     "Network/EarlyNakHoldoffMs" = "300"
     "Network/EarlyNakReorderMs" = "0"
     "SinglePlayer/HeadlightColor" = "Stock"

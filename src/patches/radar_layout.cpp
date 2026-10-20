@@ -198,6 +198,7 @@ namespace BZROpenShim
 
         void InstallRadarLayoutHookIfPossible()
         {
+            HookEngine::FrameThreadSitesScope frameSites;
             if (!RadarLayoutAddressesBound()) return;
             if (g_RadarLayoutHookInstalled)
                 return;

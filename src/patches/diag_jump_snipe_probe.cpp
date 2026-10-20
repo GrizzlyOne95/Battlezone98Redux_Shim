@@ -362,6 +362,7 @@ namespace BZROpenShim
 
         void InstallJumpSnipingProbeIfRequested()
         {
+            HookEngine::FrameThreadSitesScope frameSites;
             if (!ShouldEnableJumpSnipingProbe() || g_JumpSnipeProbeInstalled)
                 return;
 

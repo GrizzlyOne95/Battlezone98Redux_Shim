@@ -1,7 +1,7 @@
 # World Builder source-folder saves
 
-Status: implemented, opt-in, with Win32 integration tests and live GOG hook-site
-verification. The editor round-trip and remaining supported runtimes still need
+Status: implemented, on by default since 2026-10-19, with Win32 integration
+tests and live GOG hook-site verification. The editor round-trip and remaining supported runtimes still need
 qualification before release. No game DLL or user map was replaced for this work.
 
 ## Behavior
@@ -32,15 +32,16 @@ Those hooks only observe successful source reads and perform existing log/TRN
 normalization duties. Ordinary savegames, autosaves and non-editor file writes
 therefore do not acquire new routing or prompts.
 
-## Enable for qualification
+## Setting
 
 ```ini
-[Environment]
-BZR_BZN_SAVE_SOURCE=1
+[General]
+EditorSaveToSourceFolder = 1
 ```
 
-Only the exact value `1` enables this feature. Restart to change it; default is
-off. Use backed-up test maps. Ship the matching `scripts/patches.json` with the
+On by default; an absent key is on. `0` (or any unrecognized value) restores
+stock root-addon saves, as does the legacy `BZR_BZN_SAVE_SOURCE=0`. Restart to
+change it. Ship the matching `scripts/patches.json` with the
 DLL. A missing/ambiguous call-site signature or unexpected native dialog target
 leaves the native call unchanged; no low-level write-routing fallback exists.
 
