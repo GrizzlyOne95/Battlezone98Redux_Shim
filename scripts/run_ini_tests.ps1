@@ -201,6 +201,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Confirmed stale-target defect; releases only the losing constructor and
     # stands down in network games with the other simulation fixes.
     "Fixes/ConstructorRecycleStaleTarget",
+    # Whole-millisecond sim step quantisation; replaces only the float step,
+    # never the game clock, and stands down in network games.
+    "Fixes/PreciseTimestep",
     "Fixes/MagnetZeroRangeGuard",
     # Heap-corruption guard (a remote scavenger's NetProcess is not a
     # ScavengerProcess); active in network games, which is where it matters.
@@ -372,6 +375,7 @@ $shippingPolicyChecks = @{
     "Fixes/TugCargoPostLoad" = "1"
     "Fixes/ConstructorRemoteBuild" = "1"
     "Fixes/ConstructorRecycleStaleTarget" = "1"
+    "Fixes/PreciseTimestep" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
     "Fixes/ScavengerNetProcessGuard" = "1"
     "Fixes/LuaFormationBinding" = "1"

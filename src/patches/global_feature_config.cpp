@@ -608,6 +608,10 @@ namespace BZROpenShim
               nullptr, &RefreshConstructorRecycleStaleTargetFixState },
             { "ConstructorRemoteBuild", FeatureTier::SinglePlayer,
               nullptr, &RefreshConstructorRemoteBuildFixState },
+            // Rewrites the float sim step every frame (precise_timestep.cpp);
+            // peers integrate the stock step, so it stands down online.
+            { "PreciseTimestep", FeatureTier::SinglePlayer,
+              nullptr, &RefreshPreciseTimestepState },
         };
 
         // Restore every registered feature to its resting state (mission end).

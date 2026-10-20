@@ -366,9 +366,9 @@ ExplainMultiplayerNotReady = 1
 ; Everything in this section defaults to ON. These are bug fixes, not
 ; enhancements, and normal play wants them on.
 ;
-; The first seven -- ApcAlliedTargetDeploy, SplinterUndead, OwnedObjectReveal,
-; HowitzerUndeployedRetaliation, TugCargoPostLoad, ConstructorRemoteBuild and
-; ConstructorRecycleStaleTarget --
+; The first eight -- ApcAlliedTargetDeploy, SplinterUndead, OwnedObjectReveal,
+; HowitzerUndeployedRetaliation, TugCargoPostLoad, ConstructorRemoteBuild,
+; ConstructorRecycleStaleTarget and PreciseTimestep --
 ; change simulation behaviour, and none of them is negotiated with peers, so
 ; they are gated on the net id exactly the way [SinglePlayer] features are:
 ; they stand down for the duration of a network game and a lobby that mixes
@@ -458,6 +458,18 @@ ConstructorRemoteBuild = 1
 ; Accepted: boolean. Default: ON. Stands down in a network game.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_CONSTRUCTOR_RECYCLE_FIX
 ConstructorRecycleStaleTarget = 1
+
+; Redux measures each frame in whole milliseconds and hands the simulation that
+; rounded value, so at 144 fps the step alternates 6 and 7 ms while the screen
+; advances 6.94 ms every frame, and motion is off by up to about 15% on a given
+; frame. This feeds the simulation the measured (QPC) frame interval instead.
+; Only the float step changes: the integer game clock, timers and networking
+; are untouched. Pauses, the 200 ms clamp and any frame the two clocks disagree
+; on keep the engine's own step. See
+; reverse_engineering/frame_hitch_va_measurement_20261020.md.
+; Accepted: boolean. Default: ON. Stands down in a network game.
+; Env alias to force it off: OPENSHIM_DISABLE_PRECISE_TIMESTEP
+PreciseTimestep = 1
 
 ; Skip magnet-mine attraction when the ODF declares a non-finite or
 ; non-positive range, which otherwise faults. Base Mine::Simulate still runs,

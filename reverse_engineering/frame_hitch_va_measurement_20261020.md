@@ -131,6 +131,80 @@ frame, and nothing waits for a tick.**
 
 The judder captured in these runs is Present pacing, not the timestep.
 
+## Precise timestep (branch `agent/precise-timestep`)
+
+Added on 2026-10-20, stacked on the telemetry above.
+
+### What the step drives
+
+These findings come from Ghidra xrefs on the GOG exe, plus 1.5 source where Redux functions were not found.
+
+- **Only one path reads the float step.** Every consumer reads 0x00946790 through the getter 0x00822D60, which has about 80 callers. They include:
+  - the sim entry 0x00618060;
+  - mouse input 0x00623B20;
+  - UserProcess and AI;
+  - physics, weapons and render clusters.
+
+  Nothing outside SetLoopTimes reads the integer copies 0x00946794 and 0x0094679C. 1/step (0x02CC1B34) is written but never read.
+- **Game time is separate.** The integer game clock (0x02CC1B28, getter 0x00822D90, 15 callers: timers and net) accumulates the integer dt inside SetLoopTimes. A float-step override therefore cannot desync game time or networking.
+- **Motion integrates the step directly** (1.5 source, medium confidence):
+  - HoverCraft uses explicit Euler, `pos += vel * dt`;
+  - friction is capped by `1/dt`;
+  - there are no `dt²` terms.
+
+  A ±1 ms step error at 144 fps moves a craft about 15% too far or too short on that frame. The cockpit camera copies the craft matrix, so the error reaches the screen unfiltered.
+- **Mouse aim is bucketed** (high confidence, Redux 0x00623B20, the same as 1.5 `giddi_read_channels`).
+  - Mouse deltas are applied only once the summed step reaches 1/60 s.
+  - The rate output is `delta / accumulated step`.
+  - At 144 fps a bucket closes after 3 frames of 6/7/7 ms. Mouse response is therefore quantised to about 60 Hz at any frame rate.
+  - A precise step only makes bucket lengths exact. **Removing the 60 Hz mouse bucket is a separate patch.** It is the bigger aim-responsiveness lever at high refresh.
+- **Stick steering and pitch** pass through a dt-dependent low-pass, `s += (in - s) * dt * 5` (1.5 source). Step jitter adds a small wobble to it.
+
+### The hook
+
+`[Fixes] PreciseTimestep` (default ON; `= 0` or `OPENSHIM_DISABLE_PRECISE_TIMESTEP=1` turns it off) redirects the frame-loop call to SetLoopTimes (0x006182F6, resolve `SetLoopTimes::FrameCall`) through a wrapper.
+
+- **What it does.** After the real function runs, the wrapper replaces the three float globals (step, unclamped step and inverse) with the QPC interval between consecutive frame-loop calls.
+- **When it keeps the engine value:**
+  - in network games (it is a SinglePlayer-tier entry in the multiplayer gate registry, and the wrapper also checks the engine's net-game byte every frame);
+  - when dt is 0 (paused);
+  - at the 200 ms clamp;
+  - when the two clocks disagree by more than 1.5 ms.
+- **Drift.** A small feedback term, 10% of the running difference capped at 0.25 ms per frame, keeps Σstep tracking the integer clock.
+- **Telemetry.** Frame records grew to 32 bytes: raw integer ms, float step and a "precise" flag. The analyzer prints step-vs-real error, step jitter and drift, and still reads old 24-byte captures.
+
+### A/B, lcbench combat 40, 1920x1080 windowed, over RDP
+
+| run | fps | step error vs render interval, p50 (relative) | p99 | precise frames | drift over about 46 s |
+|---|---|---|---|---|---|
+| r1 off | 169 | 0.43 ms (7.7%) | 1.88 ms | 0% | −127 ms |
+| r1–r4 off, RDP-throttled | 48–49 | 0.50–0.52 ms (2.8–2.9%) | 2.5–2.6 ms | 0% | −8 to −109 ms |
+| r1–r4 on, RDP-throttled | 48–49 | 0.39–0.47 ms (2.3–2.7%) | 2.5–3.2 ms | 98.9–99.4% | −2 to −147 ms |
+
+**Reading it:**
+- **The hook works.**
+  - It is active on 99% of frames; the rest are load-tail and spike frames.
+  - Game time does not drift.
+  - Combat ran normally in all four "on" arms.
+- **Over RDP the gain is small** (relative error p50 2.9% → 2.3%). The RDP compositor makes frames alternate about 8/31 ms. The remaining error is the phase difference between the SetLoopTimes and renderOneFrame boundaries, which no step fix removes.
+- **The case the hook targets was not captured with the hook on.** Only the r1 "off" run happened to escape the RDP throttle, at 169 fps. There the stock step was off by a median 7.7% per frame, and by up to 35% at p99. That high-refresh condition still needs an "on" run at the physical console, together with the flip-model A/B (PR #524).
+
+### Default-on smoke run
+
+A default-on run with no env override, lcbench combat 40 unthrottled, gave these numbers:
+- 160 fps;
+- 99.0% precise frames;
+- step error p50 2.9%, against 7.7% for the stock r1 "off" run at 169 fps;
+- step jitter 0.29 ms, against 1.0 ms stock;
+- drift −72 ms over 46 s.
+
+That build resolved `SetLoopTimes` through its fallback address, because the `rel32_target` offset pointed one byte past the `E8`. The offset is now 13, which is the call opcode.
+
+### Next
+
+1. Physical console, 144 Hz or uncapped: repeat the lcbench off/on rounds (off = `OPENSHIM_DISABLE_PRECISE_TIMESTEP=1`), then look at the step error line and judge motion by eye.
+2. A separate experiment that removes the 60 Hz mouse bucket in 0x00623B20 (per-frame mouse at high refresh). This is the likelier aim win.
+
 ## Recommended next steps
 
 1. Repeat one lcbench and one CR weather pass **at the physical console**,

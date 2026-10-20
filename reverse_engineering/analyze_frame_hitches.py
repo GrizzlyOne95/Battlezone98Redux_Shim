@@ -47,6 +47,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 FRAME_MAGIC = b"OSFRAME1"
 FRAME_FLAG_HITCH = 1
+FRAME_FLAG_PRECISE_STEP = 2
+FRAME_FLAG_STEP_UNKNOWN = 4
 RUN_STARTED = 5
 
 
@@ -64,13 +66,22 @@ class Frames:
         self.render_end: list[int] = []
         self.run_state: list[int] = []
         self.flags: list[int] = []
+        # Records of 32 bytes or more also carry the simulation step
+        # (SetLoopTimes raw integer ms and the float step the sim read).
+        self.has_step = record_size >= 32
+        self.raw_step_ms: list[int] = []
+        self.step_seconds: list[float] = []
         for index in range(count):
-            begin, render_end, run_state, flags = struct.unpack_from(
-                "<QQiI", data, header_size + index * record_size)
+            offset = header_size + index * record_size
+            begin, render_end, run_state, flags = struct.unpack_from("<QQiI", data, offset)
             self.begin.append(begin)
             self.render_end.append(render_end)
             self.run_state.append(run_state)
             self.flags.append(flags)
+            if self.has_step:
+                raw_ms, step = struct.unpack_from("<If", data, offset + 24)
+                self.raw_step_ms.append(raw_ms)
+                self.step_seconds.append(step)
 
     def __len__(self) -> int:
         return len(self.begin)
@@ -147,6 +158,47 @@ def print_frame_summary(frames: Frames, selected: list[int], hitches: set[int]) 
         if render_share and normal_share:
             print("renderOneFrame    : %.0f%% of hitch frames vs %.0f%% of normal frames" % (
                 100.0 * statistics.fmean(render_share), 100.0 * statistics.fmean(normal_share)))
+
+
+def print_step_summary(frames: Frames, selected: list[int]) -> None:
+    """How the simulation step tracks real frame time.
+
+    SetLoopTimes measures the step as the previous loop period, so record i's
+    step pairs with record i-1's interval. The error is what the sim moves
+    things by that the screen did not get, per frame.
+    """
+    if not frames.has_step:
+        return
+    rows = []
+    for i in selected:
+        if i == 0 or frames.flags[i] & FRAME_FLAG_STEP_UNKNOWN:
+            continue
+        real = frames.interval_ms(i - 1)
+        step = frames.step_seconds[i] * 1000.0
+        # Spike frames (loads, the 200 ms clamp) are not quantisation: the
+        # render and sim boundaries drift apart around them.
+        if real is None or real >= 100.0 or step <= 0.0 or frames.raw_step_ms[i] >= 200:
+            continue
+        rows.append((step, real, frames.flags[i] & FRAME_FLAG_PRECISE_STEP))
+    if len(rows) < 3:
+        print("sim step          : no usable step samples")
+        return
+    errors = sorted(abs(step - real) for step, real, _ in rows)
+    relative = sorted(abs(step - real) / real for step, real, _ in rows if real > 0.0)
+    jitter = sorted(abs(b[0] - a[0]) for a, b in zip(rows, rows[1:]))
+    precise = sum(1 for row in rows if row[2])
+    values = collections.Counter(frames.raw_step_ms[i] for i in selected if i > 0)
+    print("sim step          : %d frames, precise=%.1f%%  common raw ms: %s" % (
+        len(rows), 100.0 * precise / len(rows),
+        "  ".join("%d:%d" % pair for pair in values.most_common(5))))
+    print("step vs real      : |error| mean=%.3f p50=%.3f p99=%.3f ms  relative p50=%.1f%% p99=%.1f%%" % (
+        statistics.fmean(errors), percentile(errors, 0.50), percentile(errors, 0.99),
+        100.0 * percentile(relative, 0.50), 100.0 * percentile(relative, 0.99)))
+    print("step jitter       : median |step[i]-step[i-1]|=%.3f ms  p90=%.3f ms" % (
+        percentile(jitter, 0.50), percentile(jitter, 0.90)))
+    drift = sum(step - real for step, real, _ in rows)
+    print("step drift        : sum(step) - sum(real) = %.1f ms over %.1f s" % (
+        drift, sum(real for _, real, _ in rows) / 1000.0))
 
 
 def attribute(frames: Frames, selected: list[int], hitches: set[int], samples_path: str,
@@ -280,6 +332,7 @@ def main(argv: list[str]) -> int:
     print("=== %s ===" % args.frames)
     print("process id        : %d  main thread=%d" % (frames.process_id, frames.main_tid))
     print_frame_summary(frames, selected, hitches)
+    print_step_summary(frames, selected)
     if args.samples:
         attribute(frames, selected, hitches, args.samples, args.functions, args.top, args.per_hitch)
     if args.va:

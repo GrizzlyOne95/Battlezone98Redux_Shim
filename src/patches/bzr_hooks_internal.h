@@ -1496,6 +1496,7 @@ namespace BZROpenShim
         void RefreshSplinterUndeadFixState();
         void RefreshTugCargoPostLoadFixState();
         void RefreshConstructorRecycleStaleTargetFixState();
+        void RefreshPreciseTimestepState();
         void RefreshHowitzerUndeployedRetaliationFixState();
         void RefreshConstructorRemoteBuildFixState();
         void InitializeGlobalImprovementConfig();

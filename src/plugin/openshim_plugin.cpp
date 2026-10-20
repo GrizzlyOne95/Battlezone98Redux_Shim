@@ -40,6 +40,7 @@
 #include "ogre_animation_profiler.h"
 #include "native_cpu_sampler.h"
 #include "perf_telemetry.h"
+#include "precise_timestep.h"
 #include "pilot_fp_animation_trace.h"
 #include "walker_cockpit_trace.h"
 #include "openshim_sdk_v2.h"
@@ -206,6 +207,8 @@ static unsigned __stdcall PatchThreadProc(void*)
     // a sampled run always has frame boundaries recorded beside it. Dormant
     // unless OPENSHIM_PERF_TELEMETRY or OPENSHIM_PROFILE_NATIVE_CPU asks.
     PATCH_STAGE(BZROpenShim::InitializePerfTelemetry());
+    // Opt-in QPC-precise simulation step ([Experimental] PreciseTimestep).
+    PATCH_STAGE(BZROpenShim::InitializePreciseTimestep());
     PATCH_STAGE(BZROpenShim::InitializeNativeCpuSampler());
 
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");
