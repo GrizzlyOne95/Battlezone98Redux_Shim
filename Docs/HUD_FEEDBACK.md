@@ -23,7 +23,7 @@ All controls apply live and persist in `[Display]` in `openshim.ini`.
 | `HitMarkerColor` | White, Green, Cyan, Amber | White |
 | `HitMarkerSize` | Small (75), Normal (100), Large (150) | 100 |
 | `HitMarkerOpacity` | 50, 75, 100 percent | 100 |
-| `StockReticleShader` | INI only | 1 |
+| `StockReticleShader` | Off, On (Stock Shader) | 1 |
 
 The INI also accepts reticle/hit size 50–200, opacity 25–100 and duration 60–400.
 Unknown styles preserve Stock; unknown colors use White. Styling affects the
@@ -94,10 +94,14 @@ UI quads, with a guarded `UiViewReflow` adapter and a 2x2 white texture. The
 stock UI shader applies BGRA correction to Ogre-generated vertex colors;
 the preview compensates in its own producer without changing shared shaders.
 Missing artwork, another backend or a failed guard disables only the preview.
+The thirteenth row, Stock Shader, sits in the right column at y 458–500 of the
+1440x1080 design space. The preview samples, their clip and the note therefore
+start 20 units lower than before (clip y 510–640, note at y 650), clearing the
+info box at y 690. The damage page shares that geometry.
 The shared preview pool now supports 192 quads for the incoming-damage page's
 one/two/three-attacker arc samples.
 The existing nine-tile hub is unchanged; HUD links to this subpage, keeping
-all twelve appearance/feedback controls reachable without truncating rows.
+all thirteen appearance/feedback controls reachable without truncating rows.
 
 Reactive feedback and hit confirmation are disabled in network sessions;
 custom static reticle styles remain cosmetic. Unreadable session state fails
