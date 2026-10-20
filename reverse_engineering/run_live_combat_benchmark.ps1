@@ -131,9 +131,17 @@ function Start-BenchmarkGame {
     )
 
     $commandLine = if ($Arguments) { "`"$Exe`" $Arguments" } else { "`"$Exe`"" }
+    # A WMI-created process takes the WMI host's environment, not this one, so
+    # every OPENSHIM_* switch set above would silently never reach the game.
+    # Hand the whole current environment over explicitly.
+    $environment = @(foreach ($entry in [Environment]::GetEnvironmentVariables().GetEnumerator()) {
+        "{0}={1}" -f $entry.Key, $entry.Value
+    })
+    $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{
+        ShowWindow = [uint16]4; EnvironmentVariables = [string[]]$environment }
     $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
         -Arguments @{ CommandLine = $commandLine; CurrentDirectory = $WorkingDirectory;
-                     ProcessStartupInformation = (New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]4 }) }
+                     ProcessStartupInformation = $startup }
 
     if ($result.ReturnValue -ne 0 -or -not $result.ProcessId) {
         throw "WMI process create failed (ReturnValue=$($result.ReturnValue)) for $commandLine"

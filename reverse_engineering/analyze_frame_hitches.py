@@ -123,6 +123,16 @@ def print_frame_summary(frames: Frames, selected: list[int], hitches: set[int]) 
             "%s:%d" % (key, buckets[key]) for key in
             ("<8ms", "<16ms", "<33ms", "<50ms", "<100ms", "<250ms", "<1000ms", ">=1s")
             if buckets[key]))
+    # Pacing: an even 20 ms cadence and an 8/31 ms alternation have the same
+    # mean and p50 but feel completely different. Count consecutive pairs where
+    # one frame is at least twice its neighbour (and 4 ms longer).
+    ordered = [frames.interval_ms(i) for i in selected]
+    if len(ordered) > 2:
+        deltas = sorted(abs(b - a) for a, b in zip(ordered, ordered[1:]))
+        uneven = sum(1 for a, b in zip(ordered, ordered[1:])
+                     if max(a, b) >= 2.0 * min(a, b) and max(a, b) - min(a, b) >= 4.0)
+        print("pacing            : median |dt[i]-dt[i-1]|=%.2f ms  uneven pairs=%.1f%%" % (
+            percentile(deltas, 0.50), 100.0 * uneven / (len(ordered) - 1)))
     # Render share: renderOneFrame's own time inside the frame. A hitch whose
     # extra time is outside render is simulation/Lua/IO; inside is Ogre/driver.
     if hitches:

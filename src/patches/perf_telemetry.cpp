@@ -224,6 +224,15 @@ namespace BZROpenShim
         uint32_t g_WindowHitchLines = 0;
         double g_ReferenceP50Ms = 0.0;
         bool g_HaveReference = false;
+        // Rolling reference: the median of the last kReferenceFrames intervals,
+        // refreshed every kReferenceRefreshFrames. A per-window reference turns
+        // every step change in load (units spawning) into a run of "hitches".
+        constexpr size_t kReferenceFrames = 120;
+        constexpr uint32_t kReferenceRefreshFrames = 15;
+        double g_ReferenceRing[kReferenceFrames] = {};
+        size_t g_ReferenceCount = 0;
+        size_t g_ReferenceNext = 0;
+        uint32_t g_ReferenceSinceRefresh = 0;
 
         bool g_InMission = false;
         uint64_t g_MissionStartQpc = 0;
@@ -670,6 +679,9 @@ namespace BZROpenShim
                 // The first frames after a load are the loading tail; let the
                 // reference median re-establish itself before judging hitches.
                 g_HaveReference = false;
+                g_ReferenceCount = 0;
+                g_ReferenceNext = 0;
+                g_ReferenceSinceRefresh = 0;
             }
             else if (transition < 0 && g_InMission)
             {
@@ -694,11 +706,6 @@ namespace BZROpenShim
                          g_Window.MeanMs(), g_Window.Percentile(0.50), g_Window.Percentile(0.95),
                          g_Window.Percentile(0.99), g_Window.maxMs, g_WindowHitches, runState);
             }
-            if (g_Window.frames >= kMinReferenceFrames)
-            {
-                g_ReferenceP50Ms = g_Window.Percentile(0.50);
-                g_HaveReference = true;
-            }
             g_Window.Reset();
             g_WindowStartQpc = nowQpc;
             g_WindowHitches = 0;
@@ -711,6 +718,27 @@ namespace BZROpenShim
             ReleaseSRWLockExclusive(&g_FrameLock);
         }
 
+        void AddReferenceInterval(double intervalMs)
+        {
+            g_ReferenceRing[g_ReferenceNext] = intervalMs;
+            g_ReferenceNext = (g_ReferenceNext + 1) % kReferenceFrames;
+            if (g_ReferenceCount < kReferenceFrames)
+            {
+                ++g_ReferenceCount;
+            }
+            if (++g_ReferenceSinceRefresh < kReferenceRefreshFrames || g_ReferenceCount < kMinReferenceFrames)
+            {
+                return;
+            }
+            g_ReferenceSinceRefresh = 0;
+            double sorted[kReferenceFrames];
+            std::copy(g_ReferenceRing, g_ReferenceRing + g_ReferenceCount, sorted);
+            double* middle = sorted + g_ReferenceCount / 2;
+            std::nth_element(sorted, middle, sorted + g_ReferenceCount);
+            g_ReferenceP50Ms = *middle;
+            g_HaveReference = true;
+        }
+
         void OnFrameBegin(uint64_t nowQpc)
         {
             if (g_MainThreadId == 0)
@@ -720,6 +748,13 @@ namespace BZROpenShim
                 LogShimA(LogLevel::Info, kComponent,
                          "First frame on thread %lu; frame boundary = renderOneFrame",
                          g_MainThreadId);
+                // A command-line mission is already running when the first
+                // frame arrives, so the SetRunning seam never reports entry.
+                int none = 0;
+                if (ReadRunState() == Hooks::kBzrRunStateStarted)
+                {
+                    g_PendingTransition.compare_exchange_strong(none, 1, std::memory_order_acq_rel);
+                }
             }
 
             const int runState = ReadRunState();
@@ -753,6 +788,7 @@ namespace BZROpenShim
                     }
                 }
                 g_Window.Add(intervalMs);
+                AddReferenceInterval(intervalMs);
                 if (g_InMission)
                 {
                     g_Mission.Add(intervalMs);
