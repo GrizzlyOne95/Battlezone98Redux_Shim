@@ -145,7 +145,6 @@ namespace BZROpenShim
             FnSharedByValue getShadowCasterVertexProgramParameters = nullptr;
             FnSharedRef unifiedDelegate = nullptr;
             FnStringRef programSource = nullptr;
-            FnStringRef programLanguage = nullptr;
             FnSetString setProgramSource = nullptr;
             FnBool programSkeletal = nullptr;
             FnSetBool setProgramSkeletal = nullptr;
@@ -185,6 +184,8 @@ namespace BZROpenShim
         // renderer is Direct3D 11 and the API resolved.
         std::atomic<bool> g_active{false};
         bool g_listenerInstalled = false;
+        // Set once the setting has been read for the current mission.
+        bool g_missionEvaluated = false;
         uint32_t g_generation = 0;
         uint32_t g_frame = 0;
 
@@ -367,14 +368,14 @@ namespace BZROpenShim
             o.materialManager = ResolveOgreProc<FnSingleton>("?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
             o.programManager = ResolveOgreProc<FnSingleton>("?getSingletonPtr@HighLevelGpuProgramManager@Ogre@@SAPAV12@XZ");
             o.getMaterialByName = ResolveOgreProc<FnGetByName>(
-                "?getByName@MaterialManager@Ogre@@QAE?AV?$SharedPtr@VMaterial@Ogre@@@2@ABV" OS_STR "@0@Z");
+                "?getByName@MaterialManager@Ogre@@QAE?AV?$SharedPtr@VMaterial@Ogre@@@2@ABV" OS_STR "0@Z");
             o.getProgramByName = ResolveOgreProc<FnGetByName>(
-                "?getByName@HighLevelGpuProgramManager@Ogre@@QAE?AV?$SharedPtr@VHighLevelGpuProgram@Ogre@@@2@ABV" OS_STR "@0@Z");
-            o.removeResource = ResolveOgreProc<FnSetString>("?remove@ResourceManager@Ogre@@UAEXABV" OS_STR "@@Z");
+                "?getByName@HighLevelGpuProgramManager@Ogre@@QAE?AV?$SharedPtr@VHighLevelGpuProgram@Ogre@@@2@ABV" OS_STR "0@Z");
+            o.removeResource = ResolveOgreProc<FnSetString>("?remove@ResourceManager@Ogre@@UAEXABV" OS_STR "@Z");
             o.cloneMaterial = ResolveOgreProc<FnCloneMaterial>(
-                "?clone@Material@Ogre@@QBE?AV?$SharedPtr@VMaterial@Ogre@@@2@ABV" OS_STR "@_N0@Z");
-            o.resourceName = ResolveOgreProc<FnStringRef>("?getName@Resource@Ogre@@UBEABV" OS_STR "@XZ");
-            o.resourceGroup = ResolveOgreProc<FnStringRef>("?getGroup@Resource@Ogre@@UBEABV" OS_STR "@XZ");
+                "?clone@Material@Ogre@@QBE?AV?$SharedPtr@VMaterial@Ogre@@@2@ABV" OS_STR "_N0@Z");
+            o.resourceName = ResolveOgreProc<FnStringRef>("?getName@Resource@Ogre@@UBEABV" OS_STR "XZ");
+            o.resourceGroup = ResolveOgreProc<FnStringRef>("?getGroup@Resource@Ogre@@UBEABV" OS_STR "XZ");
             o.loadResource = ResolveOgreProc<FnSetBool>("?load@Resource@Ogre@@UAEX_N@Z");
             o.getNumTechniques = ResolveOgreProc<FnU16>("?getNumTechniques@Material@Ogre@@QBEGXZ");
             o.getNumSupportedTechniques = ResolveOgreProc<FnU16>("?getNumSupportedTechniques@Material@Ogre@@QBEGXZ");
@@ -390,38 +391,37 @@ namespace BZROpenShim
             o.getVertexProgramParameters = ResolveOgreProc<FnSharedByValue>(
                 "?getVertexProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@XZ");
             o.setVertexProgram = ResolveOgreProc<FnSetStringBool>(
-                "?setVertexProgram@Pass@Ogre@@QAEXABV" OS_STR "@_N@Z");
+                "?setVertexProgram@Pass@Ogre@@QAEXABV" OS_STR "_N@Z");
             o.getShadowCasterVertexProgramName = ResolveOgreProc<FnStringRef>(
-                "?getShadowCasterVertexProgramName@Pass@Ogre@@QBEABV" OS_STR "@XZ");
+                "?getShadowCasterVertexProgramName@Pass@Ogre@@QBEABV" OS_STR "XZ");
             o.getShadowReceiverVertexProgramName = ResolveOgreProc<FnStringRef>(
-                "?getShadowReceiverVertexProgramName@Pass@Ogre@@QBEABV" OS_STR "@XZ");
+                "?getShadowReceiverVertexProgramName@Pass@Ogre@@QBEABV" OS_STR "XZ");
             o.setShadowCasterVertexProgram = ResolveOgreProc<FnSetString>(
-                "?setShadowCasterVertexProgram@Pass@Ogre@@QAEXABV" OS_STR "@@Z");
+                "?setShadowCasterVertexProgram@Pass@Ogre@@QAEXABV" OS_STR "@Z");
             o.getShadowCasterVertexProgramParameters = ResolveOgreProc<FnSharedByValue>(
                 "?getShadowCasterVertexProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@XZ");
             o.unifiedDelegate = ResolveOgreProc<FnSharedRef>(
                 "?_getDelegate@UnifiedHighLevelGpuProgram@Ogre@@QBEABV?$SharedPtr@VHighLevelGpuProgram@Ogre@@@2@XZ");
-            o.programSource = ResolveOgreProc<FnStringRef>("?getSource@GpuProgram@Ogre@@UBEABV" OS_STR "@XZ");
-            o.programLanguage = ResolveOgreProc<FnStringRef>("?getLanguage@GpuProgram@Ogre@@UBEABV" OS_STR "@XZ");
-            o.setProgramSource = ResolveOgreProc<FnSetString>("?setSource@GpuProgram@Ogre@@UAEXABV" OS_STR "@@Z");
+            o.programSource = ResolveOgreProc<FnStringRef>("?getSource@GpuProgram@Ogre@@UBEABV" OS_STR "XZ");
+            o.setProgramSource = ResolveOgreProc<FnSetString>("?setSource@GpuProgram@Ogre@@UAEXABV" OS_STR "@Z");
             o.programSkeletal = ResolveOgreProc<FnBool>("?isSkeletalAnimationIncluded@GpuProgram@Ogre@@UBE_NXZ");
             o.setProgramSkeletal = ResolveOgreProc<FnSetBool>("?setSkeletalAnimationIncluded@GpuProgram@Ogre@@UAEX_N@Z");
             o.programCompileError = ResolveOgreProc<FnBool>("?hasCompileError@GpuProgram@Ogre@@UBE_NXZ");
             o.getParameter = ResolveOgreProc<FnGetParameter>(
-                "?getParameter@StringInterface@Ogre@@UBE?AV" OS_STR "@ABV34@@Z");
+                "?getParameter@StringInterface@Ogre@@UBE?AV" OS_STR "ABV34@@Z");
             o.setParameter = ResolveOgreProc<FnSetParameter>(
-                "?setParameter@StringInterface@Ogre@@UAE_NABV" OS_STR "@0@Z");
+                "?setParameter@StringInterface@Ogre@@UAE_NABV" OS_STR "0@Z");
             o.createProgram = ResolveOgreProc<FnCreateProgram>(
-                "?createProgram@HighLevelGpuProgramManager@Ogre@@QAE?AV?$SharedPtr@VHighLevelGpuProgram@Ogre@@@2@ABV" OS_STR "@00W4GpuProgramType@2@@Z");
+                "?createProgram@HighLevelGpuProgramManager@Ogre@@QAE?AV?$SharedPtr@VHighLevelGpuProgram@Ogre@@@2@ABV" OS_STR "00W4GpuProgramType@2@@Z");
             o.getAutoConstantCount = ResolveOgreProc<FnU32>("?getAutoConstantCount@GpuProgramParameters@Ogre@@QBEIXZ");
             o.getAutoConstantEntry = ResolveOgreProc<FnGetAutoEntry>(
                 "?getAutoConstantEntry@GpuProgramParameters@Ogre@@QAEPAVAutoConstantEntry@12@I@Z");
             o.copyMatchingNamedConstants = ResolveOgreProc<FnCopyMatching>(
                 "?copyMatchingNamedConstantsFrom@GpuProgramParameters@Ogre@@QAEXABV12@@Z");
             o.setNamedAutoConstant = ResolveOgreProc<FnSetNamedAuto>(
-                "?setNamedAutoConstant@GpuProgramParameters@Ogre@@QAEXABV" OS_STR "@W4AutoConstantType@12@I@Z");
+                "?setNamedAutoConstant@GpuProgramParameters@Ogre@@QAEXABV" OS_STR "W4AutoConstantType@12@I@Z");
             o.findNamedConstant = ResolveOgreProc<FnFindNamedConstant>(
-                "?_findNamedConstantDefinition@GpuProgramParameters@Ogre@@QBEPBUGpuConstantDefinition@2@ABV" OS_STR "@_N@Z");
+                "?_findNamedConstantDefinition@GpuProgramParameters@Ogre@@QBEPBUGpuConstantDefinition@2@ABV" OS_STR "_N@Z");
             o.entityInitialised = ResolveOgreProc<FnBool>("?isInitialised@Entity@Ogre@@QBE_NXZ");
             o.entityHasSkeleton = ResolveOgreProc<FnBool>("?hasSkeleton@Entity@Ogre@@QBE_NXZ");
             o.entityHasVertexAnimation = ResolveOgreProc<FnBool>("?hasVertexAnimation@Entity@Ogre@@QBE_NXZ");
@@ -451,7 +451,7 @@ namespace BZROpenShim
                 o.getVertexProgramParameters, o.setVertexProgram, o.getShadowCasterVertexProgramName,
                 o.getShadowReceiverVertexProgramName, o.setShadowCasterVertexProgram,
                 o.getShadowCasterVertexProgramParameters, o.unifiedDelegate, o.programSource,
-                o.programLanguage, o.setProgramSource, o.programSkeletal, o.setProgramSkeletal,
+                o.setProgramSource, o.programSkeletal, o.setProgramSkeletal,
                 o.programCompileError, o.getParameter, o.setParameter, o.createProgram,
                 o.getAutoConstantCount, o.getAutoConstantEntry, o.copyMatchingNamedConstants,
                 o.setNamedAutoConstant, o.findNamedConstant, o.entityInitialised, o.entityHasSkeleton,
@@ -585,9 +585,10 @@ namespace BZROpenShim
                 return std::string();
             };
 
-            const std::string* language = g_ogre.programLanguage(concrete);
-            if (!language || *language != "hlsl" || !RttiContains(concrete, "D3D11HLSLProgram"))
-                return fail(Reject::ProgramNotHlsl4, "language=" + (language ? *language : std::string("?")));
+            // The class, not getLanguage: the export is GpuProgram's own
+            // implementation ("asm"), and a direct call skips the override.
+            if (!RttiContains(concrete, "D3D11HLSLProgram"))
+                return fail(Reject::ProgramNotHlsl4, "class");
             const std::string target = GetParameter(concrete, "target");
             if (target.rfind("vs_4", 0) != 0 && target.rfind("vs_5", 0) != 0)
                 return fail(Reject::ProgramNotHlsl4, "target=" + target);
@@ -1203,6 +1204,7 @@ namespace BZROpenShim
     {
         if (!running)
         {
+            g_missionEvaluated = false;
             if (!g_active.exchange(false))
                 return;
             LogMissionSummary();
@@ -1210,6 +1212,7 @@ namespace BZROpenShim
             return;
         }
 
+        g_missionEvaluated = true;
         if (g_failed.load(std::memory_order_acquire) || !ReadEnabledSetting())
             return;
         if (RenderProfiles::IdentifyActiveRenderSystem() != 1)
@@ -1229,6 +1232,11 @@ namespace BZROpenShim
 
     void GpuSkinningRenderFrameTick()
     {
+        // A mission started from the command line is already RUN_STARTED
+        // when the transition seam installs, so no start notification comes;
+        // the first world render of a mission stands in for it.
+        if (!g_missionEvaluated)
+            GpuSkinningNotifyMissionRunStateChanged(true);
         if (g_listenerInstalled || !g_active.load(std::memory_order_acquire))
             return;
         g_listenerInstalled = true;
