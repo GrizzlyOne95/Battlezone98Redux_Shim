@@ -25,6 +25,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace BZROpenShim
 {
@@ -36,6 +37,11 @@ namespace BZROpenShim
 bool OdfInstallUseItemHook(uint32_t siteAddress);
 bool OdfInstallGetItemSizeHook(uint32_t siteAddress);
 bool OdfInstallUnlockItemHook(uint32_t siteAddress);
+
+// Copies a game-selected ODF (including archive items) using the verified
+// original item-loader trio. Releases the engine lock before returning.
+// False when unavailable, missing, oversized or unreadable; out is then empty.
+bool OdfReadItemText(const char* name, std::string& out);
 
 // Detour targets (wired via FillJmp5Payloads by name).
 void* __cdecl OdfUseItemDetour(const char* name);
