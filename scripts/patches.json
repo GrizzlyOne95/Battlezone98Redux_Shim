@@ -1496,12 +1496,12 @@
     },
     {
       "name": "WeaponPresentation::CannonShotCall",
-      "pattern": "8B 95 70 FE FF FF 8B 42 18 50 8D 8D 74 FF FF FF 51 8B 95 70 FE FF FF 8B 4A 0C E8 56 FE FD FF 89 85 6C FE FF FF 8B 85",
-      "offset": 26,
+      "pattern": "8B 85 B0 FD FF FF 8B 48 18 51 8D 55 BC 52 8B 85 B0 FD FF FF 8B 48 0C E8 9C 7A 0F 00 89 85 9C FD FF FF 8B 8D",
+      "offset": 23,
       "mode": "address",
-      "fallback": "0x005A7195",
+      "fallback": "0x0048F54F",
       "require_unique": true,
-      "identity": "Static qualification: exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413 (2026-10-01); Only the native cannon path after trigger/cooldown/ammo acceptance. Caller weapon is [EBP-190], final copied Matrix is [EBP-8C], owner is weapon+18 and ECX=weapon+0C. E8 calls OrdnanceFactory and following store preserves EAX at [EBP-194]. Live-runtime qualification pending; installation gate is closed."
+      "identity": "Exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413; corrected 2026-10-20 after live gatstab shots returned to 0x0048F554 instead of the former, incorrectly labelled 0x005A7195 site. Released-image disassembly and Ghidra identify the accepted cannon burst loop in FUN_0048EFE0. Caller weapon is [EBP-250], copied final Matrix is [EBP-44], owner is weapon+18 and ECX=weapon+0C. E8 calls OrdnanceFactory and following store preserves EAX at [EBP-264]. Full native lifecycle/visual qualification remains gated."
     },
     {
       "name": "WeaponPresentation::WeaponClassPopCall",

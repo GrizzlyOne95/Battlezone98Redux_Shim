@@ -1,4 +1,6 @@
 #include "weapon_presentation.h"
+#include "weapon_presentation_native_policy.h"
+#include "odf_flash_bridge.h"
 #include "test_check.h"
 
 #include <cmath>
@@ -42,6 +44,35 @@ namespace
         bool failCreate = false;
         bool failUpdate = false;
         bool failRecoil = false;
+        struct AnimationCall { float time; bool active; };
+        std::vector<AnimationCall> animationCalls;
+        bool failAnimation = false;
+        int meshCreates = 0, meshCancels = 0;
+        bool failMeshCreate = false, failMeshCancel = false;
+        WP::FlashConfig meshConfig;
+        WP::Matrix meshPose = WC::Identity();
+        float meshLifetime = 0;
+        bool CreateMeshFlash(const WP::FlashConfig& config, const WP::Identity& flashOwner,
+            const WP::Matrix& pose, float lifetime, WP::MeshFlashToken& token) noexcept override
+        {
+            Require(flashOwner == owner, "wrong mesh flash owner");
+            ++meshCreates; meshConfig = config; meshPose = pose; meshLifetime = lifetime;
+            token = {static_cast<uint32_t>(100 + meshCreates), static_cast<uint64_t>(meshCreates)};
+            return !failMeshCreate;
+        }
+        bool CancelMeshFlash(WP::MeshFlashToken& token) noexcept override
+        {
+            Require(token.id >= 101 && token.cookie != 0, "invalid pool token cancelled");
+            ++meshCancels;
+            if (failMeshCancel) return false;
+            token = {}; return true;
+        }
+        bool ApplyAnimation(const WP::Identity&, const WP::AnimationBinding&,
+            float time, bool active) noexcept override
+        {
+            animationCalls.push_back({time, active});
+            return !failAnimation;
+        }
 
         bool CreateFlash(std::string_view effect, const WP::Matrix& pose,
             void*& storage) noexcept override
@@ -129,6 +160,289 @@ namespace
         runtime.SynchronizeVisuals(backend);
         Require(runtime.Inspect().nativeAttachments == 0, "test left a native attachment alive");
         runtime.InvalidateResources();
+    }
+
+    void TestMeshFlashPolicyAndRuntime()
+    {
+        Require(BzrOdfFlashBridge::Matches(1, 42, 1, 42), "owned pool ID refused");
+        Require(!BzrOdfFlashBridge::Matches(1, 43, 1, 42), "old mission cookie cancelled a reused pool ID");
+        Require(!BzrOdfFlashBridge::Matches(1, 0, 1, 42), "native cancellation could target a Lua flash");
+        Require(!BzrOdfFlashBridge::Matches(1, 0, 1, 0), "zero cookie claimed ownership");
+        namespace Policy = WP::NativePolicy;
+        Policy::MeshFlashFields fields;
+        fields.mesh = "\"MyFlash.mesh\"";
+        auto config = Policy::ResolveMeshFlashConfig({}, fields);
+        Require(config.Valid() && config.mesh == "MyFlash.mesh" && config.material.empty(), "mesh-only defaults failed");
+        Near(config.duration, 0.08, "default flash lifetime wrong");
+        fields.material = "\"Custom/Flash\"";
+        fields.scale = "2"; fields.endScale = "0"; fields.offset = "\"1 2 3\""; fields.roll = "-45";
+        config = Policy::ResolveMeshFlashConfig({}, fields);
+        Require(config.Valid() && config.material == "Custom/Flash", "custom mesh config refused");
+        Near(config.finishScale, 0, "shrink-to-zero refused");
+        auto inherited = Policy::ResolveMeshFlashConfig(config, {});
+        Require(inherited.mesh == config.mesh && inherited.material == config.material && inherited.offset.z == 3,
+            "mesh settings not inherited");
+        Policy::MeshFlashFields override;
+        override.material = "\"\"";
+        Require(Policy::ResolveMeshFlashConfig(config, override).material.empty(), "mesh material not explicitly cleared");
+        override.mesh = "\"\"";
+        Require(!Policy::ResolveMeshFlashConfig(config, override).Valid(), "empty mesh did not opt out");
+        override = {}; override.offset = "1 2 3 4";
+        Require(!Policy::ResolveMeshFlashConfig(config, override).Valid(), "extra offset component accepted");
+        for (const auto bad : {"1 2", "1,2,3", "1 2 NaN", "21 0 0", "1 2 3suffix", "\"bad"})
+        {
+            override.offset = bad;
+            Require(!Policy::ResolveMeshFlashConfig(config, override).Valid(), "invalid flash offset accepted");
+        }
+        override = {};
+        for (const auto bad : {"0", "-1", "5.01", "nan", "0.1suffix"})
+        {
+            override.duration = bad;
+            Require(!Policy::ResolveMeshFlashConfig(config, override).Valid(), "invalid flash lifetime accepted");
+        }
+        override = {}; override.scale = "101";
+        Require(!Policy::ResolveMeshFlashConfig(config, override).Valid(), "oversized mesh flash accepted");
+        override = {}; override.roll = "361";
+        Require(!Policy::ResolveMeshFlashConfig(config, override).Valid(), "unbounded flash roll accepted");
+
+        FakeBackend backend;
+        WP::Runtime runtime;
+        Start(runtime, true, false);
+        auto request = Request(); request.recoil.reset(); request.flash = config;
+        auto token = Bind(runtime, request);
+        auto pose = WC::Identity();
+        pose.rightX = 0; pose.rightZ = -1; pose.frontX = 1; pose.frontZ = 0;
+        pose.positionX = 10; pose.positionY = 20; pose.positionZ = 30;
+        const auto original = pose;
+        Require(runtime.Fire(token, 1, pose).flashStarted, "mesh flash shot ignored");
+        runtime.SetMuzzlePose(token, pose); // native refresh must retain the authored offset
+        runtime.BeginSimulationStep(1, 0.02f);
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.meshCreates == 1 && backend.creates == 0, "mesh flash used legacy native renderer");
+        Near(backend.meshLifetime, 0.06, "pending mesh flash lifetime restarted at render");
+        Near(backend.meshPose.positionX, 13, "offset did not follow muzzle front");
+        Near(backend.meshPose.positionY, 22, "offset did not follow muzzle up");
+        Near(backend.meshPose.positionZ, 29, "offset did not follow muzzle right");
+        Require(std::memcmp(&pose, &original, sizeof(pose)) == 0, "flash offset changed projectile pose");
+        Require(!runtime.Fire(token, 2, pose).flashStarted, "active mesh flash restarted");
+        runtime.BeginSimulationStep(2, 0);
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.meshCreates == 1, "paused frame duplicated mesh flash");
+        backend.failMeshCancel = true;
+        runtime.SetSession(false, true);
+        runtime.SynchronizeVisuals(backend);
+        Require(runtime.Inspect().meshFlashAttachments == 1, "failed cancellation lost its pool id");
+        backend.failMeshCancel = false;
+        runtime.SynchronizeVisuals(backend);
+        Require(runtime.Inspect().meshFlashAttachments == 0 && runtime.Inspect().bindings == 0,
+            "mesh flash not cancelled on MP departure");
+        runtime.InvalidateResources();
+
+        WP::Runtime delayed;
+        Start(delayed, true, false);
+        token = Bind(delayed, request);
+        delayed.Fire(token, 1, pose);
+        delayed.BeginSimulationStep(1, 0.2f);
+        delayed.SynchronizeVisuals(backend);
+        Require(backend.meshCreates == 1, "expired pending mesh flash appeared late");
+        Finish(delayed, backend);
+
+        WP::Runtime independent;
+        Start(independent, true, true);
+        request = Request(); request.flash = config;
+        token = Bind(independent, request);
+        backend.failMeshCreate = true;
+        const auto shot = independent.Fire(token, 1, pose);
+        independent.SynchronizeVisuals(backend);
+        Require(shot.recoilReset && !backend.recoilPoses.empty(), "flash failure suppressed independent recoil");
+        independent.SynchronizeVisuals(backend); // retire partial backend state
+        Require(independent.Inspect().meshFlashAttachments == 0, "failed mesh spawn id leaked");
+        Finish(independent, backend);
+    }
+
+    void TestMuzzleRenderAlongsideMesh()
+    {
+        namespace Policy = WP::NativePolicy;
+        const auto render = Policy::ResolveMuzzleRenderConfig({}, {"\"MyGun.render\"", "0.20", std::nullopt}, {1, 2, 3});
+        Require(render.Valid() && render.effect == "MyGun.render" && render.offset.z == 3, "render defaults/offset failed");
+        Require(Policy::ResolveMuzzleRenderConfig(render, {}, {}).effect == render.effect, "render did not inherit");
+        Require(!Policy::ResolveMuzzleRenderConfig(render, {"\"\"", {}, {}}, {}).Valid(), "render explicit off ignored");
+        for (const auto bad : {"NaN", "0", "5.01", "0.1suffix"})
+            Require(!Policy::ResolveMuzzleRenderConfig(render, {{}, bad, {}}, {}).Valid(), "bad render duration inherited");
+        for (const auto bad : {"1 2", "21 0 0", "1 2 3 4", "NaN 0 0"})
+            Require(!Policy::ResolveMuzzleRenderConfig(render, {{}, {}, bad}, {}).Valid(), "bad render offset inherited");
+        for (const auto bad : {"\"bad", "two names", "a\nb"})
+            Require(!Policy::ResolveMuzzleRenderConfig(render, {bad, {}, {}}, {}).Valid(), "bad render name accepted");
+
+        FakeBackend backend;
+        WP::Runtime runtime; Start(runtime);
+        auto request = Request();
+        request.flash = Policy::ResolveMeshFlashConfig({}, {"\"Small.mesh\"", {}, "0.05", {}, {}, "\"0 0 4\"", {}});
+        request.flash.muzzleRender = render;
+        const auto token = Bind(runtime, request);
+        auto pose = WC::Identity();
+        pose.rightX = 0; pose.rightZ = -1; pose.frontX = 1; pose.frontZ = 0;
+        pose.positionX = 10; pose.positionY = 20; pose.positionZ = 30;
+        const auto original = pose;
+        Require(runtime.Fire(token, 1, pose).flashStarted, "combined shot ignored");
+        runtime.BeginSimulationStep(1, .02f);
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.creates == 1 && backend.meshCreates == 1, "render and mesh did not coexist");
+        Near(backend.meshLifetime, .03, "pending mesh timer restarted");
+        Near(backend.meshPose.positionX, 14, "mesh offset wrong");
+        Near(backend.renderers[0].pose.positionX, 13, "render forward offset wrong");
+        Near(backend.renderers[0].pose.positionY, 22, "render up offset wrong");
+        Near(backend.renderers[0].pose.positionZ, 29, "render right offset wrong");
+        Require(std::memcmp(&pose, &original, sizeof(pose)) == 0, "render offset changed firing matrix");
+        Require(!runtime.Fire(token, 1, pose).observed, "duplicate shot spawned effects");
+        runtime.BeginSimulationStep(2, .04f);
+        runtime.SynchronizeVisuals(backend);
+        Require(runtime.Inspect().nativeAttachments == 1 && runtime.Inspect().meshFlashAttachments == 0,
+            "short flash cancelled longer render effect");
+        Require(runtime.Fire(token, 2, pose).flashStarted, "active render blocked next short mesh flash");
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.creates == 1 && backend.meshCreates == 2, "active render restarted with next mesh flash");
+        pose.positionX = 20;
+        runtime.SetMuzzlePose(token, pose);
+        runtime.BeginSimulationStep(3, 0);
+        runtime.SynchronizeVisuals(backend);
+        Near(backend.renderers[0].pose.positionX, 23, "render did not follow refreshed muzzle");
+        Require(backend.creates == 1, "pause duplicated render effect");
+        backend.failDetach = true;
+        runtime.BeginSimulationStep(4, .15f);
+        runtime.SynchronizeVisuals(backend);
+        Require(runtime.Inspect().nativeAttachments == 1, "failed render detach freed stable slot");
+        runtime.Release(token);
+        runtime.BeginSceneTeardown(); runtime.EndSceneTeardown();
+        Require(runtime.Inspect().retiredBindings == 1, "scene loss discarded native back-reference");
+        backend.failDetach = false;
+        runtime.SynchronizeVisuals(backend);
+        Require(runtime.Inspect().retiredBindings == 0, "combined cleanup failed");
+        Finish(runtime, backend);
+
+        // Render-only weapons and independent partial-failure cleanup.
+        for (bool failMesh : {false, true})
+        {
+            WP::Runtime isolated; FakeBackend failures; Start(isolated);
+            failures.failMeshCreate = failMesh; failures.failCreate = !failMesh;
+            request.flash.muzzleRender = render;
+            const auto bound = Bind(isolated, request);
+            const auto shot = isolated.Fire(bound, 1, WC::Identity());
+            Require(shot.flashStarted && shot.recoilReset, "effect failure disabled recoil");
+            isolated.SynchronizeVisuals(failures);
+            Require(failures.creates == 1 && failures.meshCreates == 1, "one failed effect suppressed the other");
+            Finish(isolated, failures);
+        }
+        WP::Runtime renderOnly; FakeBackend alone; Start(renderOnly, true, false);
+        request.recoil.reset(); request.flash = {}; request.flash.muzzleRender = render;
+        const auto only = Bind(renderOnly, request);
+        renderOnly.Fire(only, 1, WC::Identity());
+        renderOnly.BeginSimulationStep(1, .21f);
+        renderOnly.SynchronizeVisuals(alone);
+        Require(alone.creates == 0 && alone.meshCreates == 0, "expired pending render created late");
+        renderOnly.Fire(only, 2, WC::Identity()); renderOnly.SynchronizeVisuals(alone);
+        Require(alone.creates == 1 && alone.meshCreates == 0, "render-only weapon failed");
+        renderOnly.Configure({false, true}); renderOnly.SynchronizeVisuals(alone);
+        Require(renderOnly.Inspect().nativeAttachments == 0, "settings disable retained render effect");
+        Finish(renderOnly, alone);
+
+        for (bool flashes : {false, true}) for (bool recoil : {false, true})
+        {
+            WP::Runtime gated; FakeBackend controlled; Start(gated, flashes, recoil);
+            auto configured = Request(); configured.flash = request.flash;
+            configured.flash.mesh = "Small.mesh"; configured.flash.duration = .08f;
+            const auto bound = gated.Bind(configured);
+            Require(bound.has_value() == (flashes || recoil), "master settings did not gate binding");
+            if (bound)
+            {
+                const auto shot = gated.Fire(*bound, 1, WC::Identity());
+                Require(shot.flashStarted == flashes && shot.recoilReset == recoil, "master settings channels crossed");
+                gated.SynchronizeVisuals(controlled);
+                Require(controlled.creates == (flashes ? 1 : 0) && controlled.meshCreates == (flashes ? 1 : 0),
+                    "flash master switch did not gate both render channels");
+                Require(controlled.recoilPoses.empty() == !recoil, "recoil master switch ignored");
+            }
+            Finish(gated, controlled);
+        }
+        WP::Runtime unauthored; Start(unauthored);
+        auto stock = Request(); stock.flash = {}; stock.recoil.reset();
+        Require(!unauthored.Bind(stock), "enabled settings synthesized a generic stock effect");
+    }
+
+    void TestAnimationRecoil()
+    {
+        FakeBackend backend;
+        WP::Runtime runtime;
+        Start(runtime, false, true);
+        auto request = Request();
+        request.animation = WP::AnimationBinding{"recoil", 0.3f, 2.0f, true};
+        const auto token = Bind(runtime, request);
+        const auto shared = Bind(runtime, [&] { auto r = request; r.weapon.address++; return r; }());
+        Require(runtime.Fire(token, 1, WC::Identity()).recoilReset, "clip shot not accepted");
+        Require(!runtime.Fire(token, 1, WC::Identity()).observed, "duplicate logical shot restarted clip");
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.animationCalls.size() == 1 && backend.animationCalls.back().active,
+            "clip not started");
+        Require(backend.recoilPoses.empty(), "clip and node slide both applied");
+        runtime.BeginSimulationStep(1, 0.05f);
+        runtime.SynchronizeVisuals(backend);
+        Near(backend.animationCalls.back().time, 0.1, "clip speed or shared timing wrong");
+        runtime.BeginSimulationStep(1, 0.05f);
+        runtime.BeginSimulationStep(2, 0);
+        runtime.SynchronizeVisuals(backend);
+        Near(backend.animationCalls.back().time, 0.1, "pause/duplicate step advanced clip");
+        runtime.Fire(shared, 1, WC::Identity());
+        runtime.SynchronizeVisuals(backend);
+        Near(backend.animationCalls.back().time, 0, "second slot did not restart shared clip");
+        runtime.BeginSimulationStep(3, 0.2f);
+        runtime.SynchronizeVisuals(backend);
+        Require(!backend.animationCalls.back().active, "finished clip not restored");
+        runtime.Fire(token, 2, WC::Identity());
+        runtime.SynchronizeVisuals(backend);
+        backend.failAnimation = true;
+        runtime.SetSession(false, true);
+        runtime.SynchronizeVisuals(backend);
+        Require(!backend.animationCalls.back().active, "MP transition did not request restoration");
+        const auto attempts = backend.animationCalls.size();
+        backend.failAnimation = false;
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.animationCalls.size() == attempts + 1, "failed clip restoration not retried");
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.animationCalls.size() == attempts + 1, "restored clip still retained");
+        Require(runtime.Inspect().sharedAnimationClips == 0, "restored clip leaked a controller");
+        runtime.InvalidateResources();
+
+        WP::Runtime invalid;
+        Start(invalid, false, true);
+        for (float rate : {0.0f, -1.0f, 51.0f, std::numeric_limits<float>::quiet_NaN()})
+        {
+            request.animation->playbackRate = rate;
+            Require(!invalid.Bind(request), "invalid clip fell back to node slide");
+        }
+        request.animation.reset();
+        request.recoil->distance = 0.25f;
+        request.recoil->returnSpeed = 0.5f;
+        const auto slide = Bind(invalid, request);
+        invalid.Fire(slide, 1, WC::Identity());
+        Near(invalid.RecoilDisplacement(owner, node), -0.25, "custom distance ignored");
+        invalid.BeginSimulationStep(1, 0.25f);
+        Near(invalid.RecoilDisplacement(owner, node), -0.125, "custom return speed ignored");
+        Finish(invalid, backend);
+
+        WP::Runtime partial;
+        Start(partial, false, true);
+        request.animation = WP::AnimationBinding{"recoil", 0.3f, 1, false};
+        const auto partialToken = Bind(partial, request);
+        backend.failAnimation = true;
+        partial.Fire(partialToken, 1, WC::Identity());
+        partial.SynchronizeVisuals(backend);
+        partial.Release(partialToken);
+        partial.SynchronizeVisuals(backend);
+        Require(!backend.animationCalls.back().active, "partial application lost restoration responsibility");
+        backend.failAnimation = false;
+        partial.SynchronizeVisuals(backend);
+        Require(partial.Inspect().sharedAnimationClips == 0, "partial application restoration leaked");
+        partial.InvalidateResources();
     }
 
     void TestConfigurationAndIds()
@@ -598,6 +912,9 @@ namespace
 
 int main()
 {
+    TestMeshFlashPolicyAndRuntime();
+    TestMuzzleRenderAlongsideMesh();
+    TestAnimationRecoil();
     TestConfigurationAndIds();
     TestBoundedMeshLookup();
     TestOptInAndSessionGates();

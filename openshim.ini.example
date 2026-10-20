@@ -1951,8 +1951,10 @@ VehicleGeometryContact = 0
 ; From the player's perspective this requires manually targeting a unit.
 ; Accepted: boolean. Default: ON.
 WeaponConvergence = 1
-; Native cannon presentation candidate; activation is held until Windows
-; lifetime/order qualification. These keys currently only request diagnostics.
+; Master switches for experimental authored GOG/SP cannon presentation.
+; Restart required. No generic effects: mods must supply ODF configuration
+; and matching assets. MuzzleFlash gates flashMesh plus muzzleRender smoke/light.
+; Mesh flashes and recoil clips need EXU; native render effects/node slides do not.
 MuzzleFlash = 0
 MeshRecoil = 0
 

@@ -24,10 +24,26 @@ namespace BZROpenShim::WeaponPresentation
     inline constexpr size_t kMeshIdBytes = 8;
     inline constexpr size_t kMaxBindings = 4096;
 
+    struct MuzzleRenderConfig
+    {
+        std::string effect;
+        float duration = 0.08f;
+        WeaponConvergence::Vec3 offset = {};
+        bool Valid() const noexcept;
+    };
+
     struct FlashConfig
     {
         std::string effect;
         float duration = 0.0f;
+        std::string mesh = {};
+        std::string material = {};
+        float startScale = 1;
+        float finishScale = 1;
+        WeaponConvergence::Vec3 offset = {};
+        float rollDegrees = 0;
+        MuzzleRenderConfig muzzleRender = {};
+        bool IsMesh() const noexcept { return !mesh.empty(); }
         bool Valid() const noexcept;
     };
 
@@ -85,6 +101,17 @@ namespace BZROpenShim::WeaponPresentation
     {
         Identity node;
         Matrix unrecoiledPose = WeaponConvergence::Identity();
+        float distance = kRecoilKick;
+        float returnSpeed = kRecoilReturnSpeed;
+    };
+
+    struct AnimationBinding
+    {
+        std::string clip;
+        float length = 0.0f;
+        float playbackRate = 1.0f;
+        bool cockpit = true;
+        bool Valid() const noexcept;
     };
 
     struct BindRequest
@@ -93,6 +120,8 @@ namespace BZROpenShim::WeaponPresentation
         Identity weapon;
         FlashConfig flash;
         std::optional<RecoilBinding> recoil;
+        // A present animation takes precedence over the generated node slide.
+        std::optional<AnimationBinding> animation;
     };
 
     struct ShotResult
@@ -100,6 +129,13 @@ namespace BZROpenShim::WeaponPresentation
         bool observed = false;
         bool flashStarted = false;
         bool recoilReset = false;
+    };
+
+    struct MeshFlashToken
+    {
+        uint32_t id = 0;
+        uint64_t cookie = 0;
+        explicit operator bool() const noexcept { return id != 0; }
     };
 
     class Backend
@@ -120,6 +156,12 @@ namespace BZROpenShim::WeaponPresentation
         // This writes a presentation pose only; never the gameplay MAT_3D.
         virtual bool ApplyRecoil(const Identity& owner, const Identity& node,
             const Matrix& visualPose) noexcept = 0;
+        virtual bool ApplyAnimation(const Identity&, const AnimationBinding&,
+            float, bool) noexcept { return false; }
+        // EXU owns these pool entries. IDs are values, never native pointers.
+        virtual bool CreateMeshFlash(const FlashConfig&, const Identity&,
+            const Matrix&, float, MeshFlashToken&) noexcept { return false; }
+        virtual bool CancelMeshFlash(MeshFlashToken&) noexcept { return false; }
     };
 
     struct Snapshot
@@ -128,6 +170,8 @@ namespace BZROpenShim::WeaponPresentation
         size_t retiredBindings = 0;
         size_t nativeAttachments = 0;
         size_t sharedRecoilNodes = 0;
+        size_t sharedAnimationClips = 0;
+        size_t meshFlashAttachments = 0;
     };
 
     class Runtime

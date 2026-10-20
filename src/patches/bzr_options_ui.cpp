@@ -3089,6 +3089,14 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::GlobalImprovement,
               "Walker-style convergence on an explicitly targeted craft. Single player only." },
+            { "Muzzle Flashes", "SinglePlayer", "MuzzleFlash", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Enable authored weapon ODF mesh flashes and muzzle render effects (smoke/light). Requires mod assets and ODF configuration; no generic fallback. Experimental GOG single-player cannons. Restart required." },
+            { "Muzzle Recoil", "SinglePlayer", "MeshRecoil", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Enable authored craft ODF barrel-node or animation recoil. Requires model nodes/clips and ODF configuration; no generic fallback. Clips need EXU. Experimental GOG single-player cannons. Restart required." },
             { "Reticle Convergence", "SinglePlayer", "PlayerReticleConvergence",
               kShimSettingsReticleConvAltKeys, 1,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -3441,7 +3449,7 @@ namespace BZROpenShim
         static const char* const kShimCategoryVideo[] = {
             "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "Sun Flashbang", "Jet Flames",
             "Empty Craft Lights", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes",
-            "HD Terrain Tiles", "Terrain Micro Detail", kShimRowMenuTheme };
+            "HD Terrain Tiles", "Terrain Micro Detail", "Muzzle Flashes", "Muzzle Recoil", kShimRowMenuTheme };
         static const char* const kShimCategoryLighting[] = {
             "Player Headlight", "Headlight Brightness", "Headlight Color", "Headlight Beam",
             "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam" };

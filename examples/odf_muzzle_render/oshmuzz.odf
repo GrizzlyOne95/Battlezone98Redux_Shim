@@ -1,0 +1,37 @@
+// Original muzzle smoke/light example. Uses stock Redux textures.
+// Select from the WEAPON's [WeaponClass]: muzzleRender = "oshmuzz.render"
+// muzzleRenderDuration controls attached emission, not smoke particle lifetime.
+
+[Render]
+renderBase = "draw_multi"
+renderCount = 2
+renderName1 = "oshmuzz.smoke"
+renderName2 = "oshmuzz.light"
+
+[Smoke]
+renderBase = "draw_twirl_trail"
+emitDelay = 0.018
+emitDelayVar = 0.004
+emitVelocity = "0.0 0.9 2.0"
+emitVariance = "0.5 0.5 0.6"
+emitInherit = "0.15 0.15 0.15"
+emitLife = 0.45
+textureName = "smoke2.tga"
+startColor = "205 195 180 85"
+finishColor = "150 145 135 0"
+startRadius = 0.12
+finishRadius = 0.55
+animateTime = 0.45
+rotationRate = 1.5
+
+[Light]
+renderBase = "draw_light"
+startColor = "255 190 105 180"
+finishColor = "255 115 40 0"
+startRadius = 2.0
+finishRadius = 0.0
+animateTime = 0.06
+attenuateConstant = 0.0
+attenuateLinear = 0.0
+attenuateQuadratic = 1.0
+lensFlare = false

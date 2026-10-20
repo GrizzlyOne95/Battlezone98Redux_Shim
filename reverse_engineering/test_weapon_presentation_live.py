@@ -12,11 +12,23 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from capture_weapon_presentation_live import (  # noqa: E402
-    bounded_float, catalog_rows, main, observe, trace_config, verify_sites,
+    bounded_float, catalog_rows, executable_module, main, observe, trace_config, verify_sites,
 )
 
 
 class CaptureTests(unittest.TestCase):
+    def test_wow64_duplicate_mapping_and_distinct_images(self):
+        executable = Path("battlezone98redux.exe").resolve()
+        module = types.SimpleNamespace(path=str(executable), base=0x400000, size=0x100000)
+        duplicate = copy.copy(module)
+        unrelated = types.SimpleNamespace(path="other.dll", base=0x500000, size=0x1000)
+        self.assertIs(executable_module([module, duplicate, unrelated], executable), duplicate)
+        for modules in ([], [unrelated],
+                        [module, types.SimpleNamespace(path=str(executable), base=0x500000, size=module.size)],
+                        [module, types.SimpleNamespace(path=str(executable), base=module.base, size=module.size + 1)]):
+            with self.subTest(modules=modules), self.assertRaisesRegex(ValueError, "uniquely identify"):
+                executable_module(modules, executable)
+
     def setUp(self):
         catalog = json.loads((Path(__file__).resolve().parents[1] / "scripts/patches.json").read_text())
         self.rows = catalog_rows(catalog)
