@@ -905,6 +905,15 @@ CommandHudFade = 0
 CommandHudIdleOpacity = 0
 CommandHudFadeDelay = 2500
 CommandHudFadeDuration = 500
+; Independent cockpit meters; native critical warnings keep them visible.
+HullHudFade = 0
+HullHudIdleOpacity = 25
+HullHudFadeDelay = 2500
+HullHudFadeDuration = 500
+AmmoHudFade = 0
+AmmoHudIdleOpacity = 25
+AmmoHudFadeDelay = 2500
+AmmoHudFadeDuration = 500
 ; Player cockpit/chase base FOV in degrees, referenced to 4:3. 0 = stock 80.
 ; Accepts integers 60-120; invalid values use stock. Restart required.
 ; Satellite and target-camera angles are untouched. Cinematics may inherit the

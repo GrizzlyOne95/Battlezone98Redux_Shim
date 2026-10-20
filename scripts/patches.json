@@ -2461,6 +2461,78 @@
       "identity": "HUD 2D filled-rect helper, cdecl (buffer, x1, y1, x2, y2, colour, mode); mode 0 passes the colour through."
     },
     {
+      "name": "HudFadeMeterFillRect",
+      "address": "0x0068AF70",
+      "expected": "55 8B EC 8B 45 20 50 8B 4D 1C 51 E8 D0 FC FF FF 83 C4 08 50",
+      "identity": "Filled rectangle (distinct from HudFillRect outline helper), cdecl(viewport,x1,y1,x2,y2,color,mode), used by all three native shot-cost marker CALLs; caller cleanup 0x1C. Released GOG 2.2.301 Ghidra semantics and native ReadProcessMemory PID 48744 on 2026-10-19 matched this complete window."
+    },
+    {
+      "name": "HudFadeMeterRender",
+      "address": "0x005DC300",
+      "expected": "55 8B EC 81 EC 2C 02 00 00 A1 00 70 8E 00 33 C5 89 45 FC 89 4D C0",
+      "identity": "StatusDisplay renderer, thiscall self; runs weapons, hull/ammo draws and warning sounds. Entry guards meter/weapon-cost sampling semantics, not redirected. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra semantics and native ReadProcessMemory PID 31232 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeHullLabel",
+      "address": "0x005DCDF4",
+      "expected": "E8 37 FC 0A 00 83 C4 24 8B 55 C0 F3 0F 10 05 04 26 8A 00",
+      "identity": "Hull label nine-argument cdecl sized-sprite CALL; caller cleanup 0x24. Preserves native tint and pane. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra semantics and native ReadProcessMemory PID 31232 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeHullFill",
+      "address": "0x005DCEF5",
+      "expected": "E8 36 FB 0A 00 83 C4 24 8B 15 80 75 91 00",
+      "identity": "Hull fill nine-argument cdecl sized-sprite CALL; caller cleanup 0x24. Native pane clipping and smoothed ratio remain. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra semantics and native ReadProcessMemory PID 31232 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeAmmoText",
+      "address": "0x005DD2F8",
+      "expected": "E8 13 CA 0A 00 83 C4 14 0F B6 05 67 55 91 00",
+      "identity": "Remaining-shots five-argument cdecl font CALL, caller cleanup 0x14. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra semantics and native ReadProcessMemory PID 31232 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeAmmoMark0",
+      "address": "0x005DD3EE",
+      "expected": "E8 7D DB 0A 00 83 C4 1C 6A 00 8B 0D 5C 75 91 00",
+      "identity": "First shot-cost marker seven-argument cdecl filled-rect CALL, caller cleanup 0x1C. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra semantics and native ReadProcessMemory PID 31232 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeAmmoMark1",
+      "address": "0x005DD41E",
+      "expected": "E8 4D DB 0A 00 83 C4 1C 6A 00 8B 0D 5C 75 91 00",
+      "identity": "Second shot-cost marker seven-argument cdecl filled-rect CALL, caller cleanup 0x1C. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra semantics and native ReadProcessMemory PID 31232 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeAmmoMark2",
+      "address": "0x005DD44E",
+      "expected": "E8 1D DB 0A 00 83 C4 1C 8B 4D FC 33 CD",
+      "identity": "Third shot-cost marker seven-argument cdecl filled-rect CALL, caller cleanup 0x1C. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra semantics and native ReadProcessMemory PID 31232 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeMaxAmmo",
+      "address": "0x0046D060",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 80 14 02 00 00 35 33 33 33 33",
+      "identity": "Complete-object thiscall max-ammo accessor, reads +0x214 XOR 0x33333333; no stack args. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra semantics and native ReadProcessMemory PID 31232 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeHealth",
+      "address": "0x0046FBD0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC D9 80 04 02 00 00 8B E5 5D C3",
+      "identity": "Complete-object thiscall current health accessor, float return via ST0, reads +0x204; Lua GetCurHealth wrapper reaches it through 0x005CCF10. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra semantics and native ReadProcessMemory PID 31232 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeMaxHealth",
+      "address": "0x004624F0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC D9 80 08 02 00 00 8B E5 5D C3",
+      "identity": "Complete-object thiscall maximum health accessor, float return via ST0, reads +0x208; Lua GetMaxHealth reaches it through 0x005CCF40. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra semantics and native ReadProcessMemory PID 31232 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudFadeEquippedWeapon",
+      "address": "0x00417F60",
+      "expected": "55 8B EC 51 89 4D FC B8 01 00 00 00 8B 4D 08 D3 E0 8B 4D FC",
+      "identity": "Carrier thiscall weapon-instance accessor, int slot stack arg/RET 4; returns +0x18[slot] when available mask +0x2C includes it. Status renderer reads returned weapon +0xB0 ammo cost. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra semantics and native ReadProcessMemory PID 31232 on 2026-10-19 matched the complete expected window."
+    },
+    {
       "name": "HudFadeCommandRender",
       "address": "0x004A08E0",
       "expected": "55 8B EC 81 EC 38 06 00 00 A1 00 70 8E 00 33 C5 89 45 FC 56 57 89 8D BC FD FF FF",

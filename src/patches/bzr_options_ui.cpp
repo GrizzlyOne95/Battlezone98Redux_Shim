@@ -2738,6 +2738,30 @@ namespace BZROpenShim
 
         static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
         {
+            { "Hull Fade", "Display", "HullHudFade", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::ContextualHud,
+              "Fade the cockpit hull meter and its labels when idle. Relevant value changes reveal it; native critical warnings keep it visible. Applies live." },
+            { "Hull Idle", "Display", "HullHudIdleOpacity", nullptr, 0,
+              kShimFadeOpacities, kShimFadeOpacityLabels, 4, 1, ShimSettingApplyGroup::ContextualHud,
+              "Idle opacity for the cockpit hull group. Hidden keeps native status and warning handling active." },
+            { "Hull Delay", "Display", "HullHudFadeDelay", nullptr, 0,
+              kShimFadeDelays, kShimFadeDelayLabels, 3, 1, ShimSettingApplyGroup::ContextualHud,
+              "Full-opacity hold after hull activity or a critical warning clears." },
+            { "Hull Speed", "Display", "HullHudFadeDuration", nullptr, 0,
+              kShimFadeDurations, kShimFadeDurationLabels, 4, 2, ShimSettingApplyGroup::ContextualHud,
+              "Smooth fade duration for cockpit hull artwork and labels; relevant activity reveals them immediately." },
+            { "Ammo Fade", "Display", "AmmoHudFade", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::ContextualHud,
+              "Fade the cockpit ammo meter and its labels when idle. Relevant value changes reveal it; native critical warnings keep it visible. Applies live." },
+            { "Ammo Idle", "Display", "AmmoHudIdleOpacity", nullptr, 0,
+              kShimFadeOpacities, kShimFadeOpacityLabels, 4, 1, ShimSettingApplyGroup::ContextualHud,
+              "Idle opacity for the cockpit ammo group. Hidden keeps native status and warning handling active." },
+            { "Ammo Delay", "Display", "AmmoHudFadeDelay", nullptr, 0,
+              kShimFadeDelays, kShimFadeDelayLabels, 3, 1, ShimSettingApplyGroup::ContextualHud,
+              "Full-opacity hold after ammo activity or a critical warning clears." },
+            { "Ammo Speed", "Display", "AmmoHudFadeDuration", nullptr, 0,
+              kShimFadeDurations, kShimFadeDurationLabels, 4, 2, ShimSettingApplyGroup::ContextualHud,
+              "Smooth fade duration for cockpit ammo artwork and labels; relevant activity reveals them immediately." },
             { "Cmd Fade", "Display", "CommandHudFade", nullptr, 0,
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::ContextualHud,
               "Fade the whole command interface: frame, icons, text and bars. Command input reveals it; an active selection or submenu keeps it visible. Applies live." },
@@ -3375,12 +3399,14 @@ namespace BZROpenShim
         constexpr const char* kShimRowPalette = "HUD Colors";
         constexpr const char* kShimRowDamage = "Damage Indicators";
         constexpr const char* kShimRowFading = "HUD Fading";
+        constexpr const char* kShimRowMeters = "Meter Fading";
         constexpr size_t kShimPseudoRowUpdateCheck = kShimSettingsRegistryCount + 0;
         constexpr size_t kShimPseudoRowKeyBindings = kShimSettingsRegistryCount + 1;
         constexpr size_t kShimPseudoRowReticle = kShimSettingsRegistryCount + 2;
         constexpr size_t kShimPseudoRowPalette = kShimSettingsRegistryCount + 3;
         constexpr size_t kShimPseudoRowDamage = kShimSettingsRegistryCount + 4;
         constexpr size_t kShimPseudoRowFading = kShimSettingsRegistryCount + 5;
+        constexpr size_t kShimPseudoRowMeters = kShimSettingsRegistryCount + 6;
         constexpr size_t kShimNoRow = static_cast<size_t>(-1);
         // Stock cUI_OptionsInput (key bindings), as the stock Input button uses.
         constexpr uint32_t kStockOptionsInputScreenId = 0x15;
@@ -3399,7 +3425,10 @@ namespace BZROpenShim
             "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
         static const char* const kShimCategoryHud[] = {
             "Scrap/Pilot HUD", "Scrap Color", "Pilot Color", "Radar Size", "Target Popup",
-            "MP Vehicle Flags", "Show Own MP Flag", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading };
+            "MP Vehicle Flags", "Show Own MP Flag", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters };
+        static const char* const kShimCategoryMeters[] = {
+            "Hull Fade", "Hull Idle", "Hull Delay", "Hull Speed",
+            "Ammo Fade", "Ammo Idle", "Ammo Delay", "Ammo Speed" };
         static const char* const kShimCategoryFading[] = {
             "Weapon Fade", "Weapon Idle", "Weapon Delay", "Weapon Speed",
             "Scrap Fade", "Scrap Idle", "Scrap Delay", "Scrap Speed",
@@ -3476,15 +3505,18 @@ namespace BZROpenShim
                 "Directional feedback for incoming weapon damage in single player.", kShimCategoryDamage),
             BZR_SHIM_CATEGORY("Fading", "CONTEXTUAL HUD",
                 "Independent idle opacity and timing for weapons, resources and the command interface.", kShimCategoryFading),
+            BZR_SHIM_CATEGORY("Meter Fading", "METER FADING",
+                "Independent cockpit hull and ammo fading; critical warnings stay visible.", kShimCategoryMeters),
         };
 #undef BZR_SHIM_CATEGORY
         constexpr size_t kShimSettingsCategoryCount =
             sizeof(kShimSettingsCategories) / sizeof(kShimSettingsCategories[0]);
-        constexpr size_t kShimHubCategoryCount = kShimSettingsCategoryCount - 4;
-        constexpr size_t kShimReticleCategory = kShimSettingsCategoryCount - 4;
-        constexpr size_t kShimPaletteCategory = kShimSettingsCategoryCount - 3;
-        constexpr size_t kShimDamageCategory = kShimSettingsCategoryCount - 2;
-        constexpr size_t kShimFadingCategory = kShimSettingsCategoryCount - 1;
+        constexpr size_t kShimHubCategoryCount = kShimSettingsCategoryCount - 5;
+        constexpr size_t kShimReticleCategory = kShimSettingsCategoryCount - 5;
+        constexpr size_t kShimPaletteCategory = kShimSettingsCategoryCount - 4;
+        constexpr size_t kShimDamageCategory = kShimSettingsCategoryCount - 3;
+        constexpr size_t kShimFadingCategory = kShimSettingsCategoryCount - 2;
+        constexpr size_t kShimMetersCategory = kShimSettingsCategoryCount - 1;
         static_assert(sizeof(kShimCategoryGameplay) / sizeof(kShimCategoryGameplay[0]) <= kShimCategoryMaxRows,
                       "a category screen shows at most 16 rows");
         static_assert(sizeof(kShimCategoryHud) / sizeof(kShimCategoryHud[0]) <= kShimCategoryMaxRows,
@@ -3495,6 +3527,7 @@ namespace BZROpenShim
                       "HUD colors must fit without overflowing category slots");
         static_assert(std::size(kShimCategoryDamage) <= 8, "damage controls leave room for the preview");
         static_assert(std::size(kShimCategoryFading) <= kShimCategoryMaxRows, "fading controls must fit the page");
+        static_assert(std::size(kShimCategoryMeters) <= kShimCategoryMaxRows, "meter controls must fit the page");
 
         // Hub geometry (HUB_LAYOUT).
         constexpr Shell::Rect kShimTitleRect = { 470.0f, 132.0f, 500.0f, 56.0f };
@@ -3575,6 +3608,8 @@ namespace BZROpenShim
                 return kShimPseudoRowDamage;
             if (std::strcmp(label, kShimRowFading) == 0)
                 return kShimPseudoRowFading;
+            if (std::strcmp(label, kShimRowMeters) == 0)
+                return kShimPseudoRowMeters;
             for (size_t index = 0; index < kShimSettingsRegistryCount; ++index)
             {
                 if (std::strcmp(g_ShimSettingsRegistry[index].label, label) == 0)
@@ -3783,7 +3818,7 @@ namespace BZROpenShim
             }
             if (row == kShimPseudoRowKeyBindings)
                 return "Edit";
-            if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading)
+            if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading || row == kShimPseudoRowMeters)
                 return "Open";
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (ShimSettingUnavailableReason(setting))
@@ -3819,6 +3854,8 @@ namespace BZROpenShim
                 return kShimRowDamage;
             if (row == kShimPseudoRowFading)
                 return kShimRowFading;
+            if (row == kShimPseudoRowMeters)
+                return kShimRowMeters;
             return g_ShimSettingsRegistry[row].label;
         }
 
@@ -3836,6 +3873,8 @@ namespace BZROpenShim
                 return "Customize incoming-damage arcs and preview front, right and rear directions.";
             if (row == kShimPseudoRowFading)
                 return "Fade weapons, resource meters and the command interface independently when idle; relevant activity reveals them.";
+            if (row == kShimPseudoRowMeters)
+                return "Fade cockpit hull and ammo independently, including labels and shot-cost markers. Critical warnings stay visible.";
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (const char* reason = ShimSettingUnavailableReason(setting))
                 return reason;
@@ -4023,6 +4062,12 @@ namespace BZROpenShim
             if (!ui.screen || slot >= ui.rowCount)
                 return;
             const size_t row = ui.rows[slot];
+            if (row == kShimPseudoRowMeters)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen, Shell::kOptionsCategoryScreenIdBase + static_cast<uint32_t>(kShimMetersCategory));
+                return;
+            }
             if (row == kShimPseudoRowFading)
             {
                 DisarmShimSettingsAction();

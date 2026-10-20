@@ -1,4 +1,5 @@
 #include "hud_palette.h"
+#include "contextual_hud.h"
 #include "BZROpenShim.h"
 #include "hud_palette_policy.h"
 #include "bzr_hooks.h"
@@ -32,6 +33,8 @@ namespace BZROpenShim::HudPalette
         uint32_t g_sprite = 0, g_grid = 0, g_gauge = 0, g_hull = 0, g_contact = 0;
         uint32_t g_tint = 0, g_spriteTable = 0, g_spriteCount = 0, g_spritePalette = 0;
         uint32_t g_friend = 0, g_enemy = 0, g_flash = 0;
+        uint32_t g_ammoSites[2]{};
+        bool g_ammoReady = false;
 
         Settings Read()
         {
@@ -82,7 +85,9 @@ namespace BZROpenShim::HudPalette
 
         void __cdecl AmmoSprite(void* v, void* m, int id, int x, int y, int w, int h, uint32_t f, float z)
         {
-            TintedSprite(v, m, id, x, y, w, h, f, z, Read()[Role::Ammo]);
+            const float previous = ContextualHud::BeginDraw(ContextualHud::Group::Ammo);
+            __try { TintedSprite(v, m, id, x, y, w, h, f, z, Read()[Role::Ammo]); }
+            __finally { ContextualHud::EndDraw(previous); }
         }
 
         void __cdecl BackgroundSprite(void* v, void* m, int id, int x, int y, int w, int h, uint32_t f, float z)
@@ -156,6 +161,28 @@ namespace BZROpenShim::HudPalette
         bool Install();
     }
 
+    bool BindAmmoDrawAdapters()
+    {
+        static int bound = 0;
+        if (!bound)
+        {
+            const HookEngine::EngineRow rows[] = {
+                {"HudPaletteSizedSprite",&g_sprite}, {"HudPaletteSpriteTint",&g_tint},
+                {"HudPaletteAmmoLabelCall",&g_ammoSites[0]}, {"HudPaletteAmmoFillCall",&g_ammoSites[1]},
+            };
+            bound = HookEngine::BindEngineRows("Cockpit ammo draws",rows) ? 1 : -1;
+        }
+        return bound > 0;
+    }
+    bool InstallAmmoDrawAdapters()
+    {
+        if (g_ammoReady) return true;
+        if (!BindAmmoDrawAdapters()) return false;
+        g_ammoReady = RedirectCallTarget(g_ammoSites[0],g_sprite,reinterpret_cast<uintptr_t>(AmmoSprite)) &&
+            RedirectCallTarget(g_ammoSites[1],g_sprite,reinterpret_cast<uintptr_t>(AmmoSprite));
+        return g_ammoReady;
+    }
+
     const char* UnavailableReason()
     {
         return g_IsSteamExe || !IsCompatibleGameVersion()
@@ -222,8 +249,6 @@ namespace BZROpenShim::HudPalette
                     {"HudPaletteBackgroundCall", &sites[1]},
                     {"HudPaletteContactCall", &sites[2]},
                     {"HudPaletteHullCall", &sites[3]},
-                    {"HudPaletteAmmoLabelCall", &sites[4]},
-                    {"HudPaletteAmmoFillCall", &sites[5]},
                     {"HudPaletteUnitGauge00", &sites[6]},
                     {"HudPaletteUnitGauge01", &sites[7]},
                     {"HudPaletteUnitGauge02", &sites[8]},
@@ -244,14 +269,12 @@ namespace BZROpenShim::HudPalette
                 };
                 bound = HookEngine::BindEngineRows("HUD palette", rows) ? 1 : -1;
             }
-            if (bound < 0) return false;
-            bool ok = true;
+            if (bound < 0 || !BindAmmoDrawAdapters()) return false;
+            bool ok = InstallAmmoDrawAdapters();
             ok = RedirectCallTarget(sites[0], g_grid, reinterpret_cast<uintptr_t>(GridDraw)) && ok;
             ok = RedirectCallTarget(sites[1], g_sprite, reinterpret_cast<uintptr_t>(BackgroundSprite)) && ok;
             ok = RedirectCallTarget(sites[2], g_contact, reinterpret_cast<uintptr_t>(ContactColor)) && ok;
             ok = RedirectCallTarget(sites[3], g_hull, reinterpret_cast<uintptr_t>(HullColor)) && ok;
-            ok = RedirectCallTarget(sites[4], g_sprite, reinterpret_cast<uintptr_t>(AmmoSprite)) && ok;
-            ok = RedirectCallTarget(sites[5], g_sprite, reinterpret_cast<uintptr_t>(AmmoSprite)) && ok;
             ok = RedirectCallTarget(sites[6], g_gauge, reinterpret_cast<uintptr_t>(UnitGauge<true>)) && ok;
             ok = RedirectCallTarget(sites[7], g_gauge, reinterpret_cast<uintptr_t>(UnitGauge<false>)) && ok;
             ok = RedirectCallTarget(sites[8], g_gauge, reinterpret_cast<uintptr_t>(UnitGauge<true>)) && ok;

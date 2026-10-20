@@ -1,4 +1,5 @@
 #include "contextual_hud.h"
+#include "hud_palette.h"
 #include "BZROpenShim.h"
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
@@ -10,6 +11,7 @@
 #include <Windows.h>
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 namespace BZROpenShim::ContextualHud
@@ -28,6 +30,8 @@ namespace BZROpenShim::ContextualHud
         using Weapon = void*(__thiscall*)(void*, int);
         using Handle = int(__thiscall*)(void*);
         using CommandRender = void(__thiscall*)(void*);
+        using Health = float(__thiscall*)(void*);
+        using Fill = void(__cdecl*)(void*, int, int, int, int, uint32_t, uint32_t);
         constexpr size_t kSafeFrameGroups = static_cast<size_t>(Group::Commands);
         constexpr size_t kCommands = static_cast<size_t>(Group::Commands);
 
@@ -35,8 +39,8 @@ namespace BZROpenShim::ContextualHud
         Settings g_settings;
         State g_state;
         bool g_read = false;
-        std::atomic<bool> g_ready{false}, g_resources{false}, g_commandsReady{false};
-        std::atomic<float> g_opacity[kGroups] = {1,1,1,1};
+        std::atomic<bool> g_ready{false}, g_resources{false}, g_commandsReady{false}, g_metersReady{false};
+        std::atomic<float> g_opacity[kGroups] = {1,1,1,1,1,1};
         thread_local float g_drawOpacity = 1;
         uint64_t g_retry = 0;
         uint32_t g_color[2]{}, g_text = 0, g_font = 0, g_sprite = 0, g_sizedSprite = 0;
@@ -48,6 +52,67 @@ namespace BZROpenShim::ContextualHud
         uint32_t g_commandInputs = 0, g_commandMouse = 0, g_commandRects = 0, g_commandAlt = 0;
         uintptr_t g_commandInstance = 0; // Identity only; never dereferenced after a draw.
         int g_commandBound = 0;
+        uint32_t g_meterRender = 0, g_meterSites[6]{}, g_maxAmmo = 0, g_health = 0, g_maxHealth = 0, g_equipped = 0, g_fill = 0;
+        int g_meterBound = 0;
+        struct MeterSample { bool readable = false, hullWarning = false, ammoWarning = false; uint64_t hull = 0, ammo = 0; };
+
+        MeterSample SampleMeters(void* player, void* carrier, uint64_t weaponState, uint32_t ammo) noexcept
+        {
+            MeterSample sample;
+            if (!g_metersReady.load(std::memory_order_acquire)) return sample;
+            __try
+            {
+                const float health = reinterpret_cast<Health>(g_health)(player);
+                const float maximum = reinterpret_cast<Health>(g_maxHealth)(player);
+                const uint32_t capacity = reinterpret_cast<Value>(g_maxAmmo)(player);
+                if (!std::isfinite(health) || !std::isfinite(maximum) || health < 0 || maximum <= 0 ||
+                    health > 100000000 || maximum > 100000000 || ammo > 100000000u || capacity > 100000000u)
+                    return sample;
+                uint32_t healthBits = 0, maximumBits = 0;
+                std::memcpy(&healthBits,&health,sizeof(health));
+                std::memcpy(&maximumBits,&maximum,sizeof(maximum));
+                sample.hull = (static_cast<uint64_t>(healthBits) << 32) | maximumBits;
+                sample.hullWarning = HullWarning(health,maximum);
+                std::array<uint32_t,5> costs{};
+                uint32_t available = 0;
+                sample.ammo = (weaponState ^ capacity) * 1099511628211ull;
+                if (carrier)
+                {
+                    available = reinterpret_cast<Value>(g_linkable)(carrier);
+                    if (available & ~31u) return {};
+                    for (int slot = 0; slot < 5; ++slot)
+                    {
+                        void* weapon = reinterpret_cast<Weapon>(g_equipped)(carrier,slot);
+                        // Same released weapon instance/cost field used by the
+                        // guarded status renderer. No pointer survives the sample.
+                        if (weapon) costs[slot] = *reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(weapon) + 0xB0);
+                        if (costs[slot] > 100000000u) return {};
+                        sample.ammo = (sample.ammo ^ costs[slot]) * 1099511628211ull;
+                    }
+                }
+                sample.ammoWarning = AmmoWarning(ammo,available,costs);
+                sample.readable = true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return {}; }
+            return sample;
+        }
+
+        bool BindMeters()
+        {
+            if (!g_meterBound)
+            {
+                const HookEngine::EngineRow rows[] = {
+                    {"HudFadeMeterRender",&g_meterRender},
+                    {"HudFadeHullLabel",&g_meterSites[0]}, {"HudFadeHullFill",&g_meterSites[1]},
+                    {"HudFadeAmmoText",&g_meterSites[2]}, {"HudFadeAmmoMark0",&g_meterSites[3]},
+                    {"HudFadeAmmoMark1",&g_meterSites[4]}, {"HudFadeAmmoMark2",&g_meterSites[5]},
+                    {"HudFadeMaxAmmo",&g_maxAmmo}, {"HudFadeHealth",&g_health},
+                    {"HudFadeMaxHealth",&g_maxHealth}, {"HudFadeEquippedWeapon",&g_equipped}, {"HudFadeMeterFillRect",&g_fill},
+                };
+                g_meterBound = HookEngine::BindEngineRows("Hull/ammo HUD fading",rows) && HudPalette::BindAmmoDrawAdapters() ? 1 : -1;
+            }
+            return g_meterBound > 0;
+        }
 
         struct CommandSample { uint64_t value = 0; bool interacting = false; };
         bool ReadCommandSample(void* self, CommandSample& sample) noexcept
@@ -216,6 +281,39 @@ namespace BZROpenShim::ContextualHud
             __finally { EndDraw(previous); }
         }
 
+        void __cdecl HullSprite(void* v, void* material, int id, int x, int y, int w, int h, uint32_t flags, float z)
+        {
+            const float previous = BeginDraw(Group::Hull);
+            __try { reinterpret_cast<SizedSprite>(g_sizedSprite)(v,material,id,x,y,w,h,flags,z); }
+            __finally { EndDraw(previous); }
+        }
+        void __cdecl AmmoText(void* font, void* v, int x, int y, const char* text)
+        {
+            const float previous = BeginDraw(Group::Ammo);
+            __try { reinterpret_cast<Font>(g_font)(font,v,x,y,text); }
+            __finally { EndDraw(previous); }
+        }
+        void __cdecl AmmoMark(void* v, int x1, int y1, int x2, int y2, uint32_t color, uint32_t mode)
+        {
+            const float previous = BeginDraw(Group::Ammo);
+            __try { reinterpret_cast<Fill>(g_fill)(v,x1,y1,x2,y2,color,mode); }
+            __finally { EndDraw(previous); }
+        }
+        bool InstallMeters()
+        {
+            if (g_metersReady.load(std::memory_order_acquire)) return true;
+            if (!BindMeters()) return false;
+            bool ok = HudPalette::InstallAmmoDrawAdapters();
+            ok = RedirectCallTarget(g_meterSites[0],g_sizedSprite,reinterpret_cast<uintptr_t>(HullSprite)) && ok;
+            ok = RedirectCallTarget(g_meterSites[1],g_sizedSprite,reinterpret_cast<uintptr_t>(HullSprite)) && ok;
+            ok = RedirectCallTarget(g_meterSites[2],g_font,reinterpret_cast<uintptr_t>(AmmoText)) && ok;
+            for (size_t i = 3; i < 6; ++i)
+                ok = RedirectCallTarget(g_meterSites[i],g_fill,reinterpret_cast<uintptr_t>(AmmoMark)) && ok;
+            g_metersReady.store(ok,std::memory_order_release);
+            if (ok) Log(L"[HUDFADE] Hull/ammo sprite, shots-text and cost-marker scopes installed\n");
+            return ok;
+        }
+
         bool Install()
         {
             if (g_ready.load(std::memory_order_acquire)) return true;
@@ -269,19 +367,23 @@ namespace BZROpenShim::ContextualHud
         bool InstallForSettings(const Settings& settings)
         {
             const bool commands = settings.groups[kCommands].enabled;
+            const bool meters = settings.groups[static_cast<size_t>(Group::Hull)].enabled || settings.groups[static_cast<size_t>(Group::Ammo)].enabled;
             // Qualify the command-specific region before installing shared
             // helpers for a command-only configuration. A refused command
             // adapter must not disable the other independently enabled groups.
             const bool commandBound = !commands || BindCommand();
+            const bool meterBound = !meters || BindMeters();
             bool otherGroups = false;
             for (size_t i = 0; i < kSafeFrameGroups; ++i)
                 otherGroups = otherGroups || settings.groups[i].enabled;
-            if (!commandBound && !otherGroups) return false;
+            if (!otherGroups && !(commands && commandBound) && !(meters && meterBound)) return false;
             if (!Install()) return false;
-            return commandBound && (!commands || InstallCommand());
+            const bool commandOk = commandBound && (!commands || InstallCommand());
+            const bool meterOk = meterBound && (!meters || InstallMeters());
+            return commandOk && meterOk;
         }
 
-        bool Snapshot(uint64_t& identity, std::array<uint64_t,kGroups>& values) noexcept
+        bool Snapshot(uint64_t& identity, std::array<uint64_t,kGroups>& values, MeterSample& meters) noexcept
         {
             __try
             {
@@ -315,6 +417,7 @@ namespace BZROpenShim::ContextualHud
                         mix(reinterpret_cast<uintptr_t>(reinterpret_cast<Weapon>(g_weapon)(carrier,slot)));
                 }
                 values[0] = weaponState;
+                meters = SampleMeters(player,carrier,weaponState,ammo);
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
@@ -334,7 +437,8 @@ namespace BZROpenShim::ContextualHud
     float BeginDraw(Group group) noexcept
     {
         const float previous = g_drawOpacity;
-        if (g_ready.load(std::memory_order_acquire) && static_cast<size_t>(group) < kGroups)
+        const bool meter = group == Group::Hull || group == Group::Ammo;
+        if (g_ready.load(std::memory_order_acquire) && (!meter || g_metersReady.load(std::memory_order_acquire)) && static_cast<size_t>(group) < kGroups)
             g_drawOpacity *= g_opacity[static_cast<size_t>(group)].load(std::memory_order_relaxed);
         return previous;
     }
@@ -347,7 +451,7 @@ namespace BZROpenShim::ContextualHud
     bool ReloadConfig()
     {
         Settings settings;
-        const char* prefixes[] = {"WeaponList", "ScrapHud", "PilotHud", "CommandHud"};
+        const char* prefixes[] = {"WeaponList", "ScrapHud", "PilotHud", "CommandHud", "HullHud", "AmmoHud"};
         for (size_t i = 0; i < kGroups; ++i)
         {
             auto& group = settings.groups[i];
@@ -379,7 +483,9 @@ namespace BZROpenShim::ContextualHud
         if (!settings.Active() || g_IsSteamExe || !IsCompatibleGameVersion()) return;
         const uint64_t now = GetTickCount64();
         if (!g_ready.load(std::memory_order_acquire) ||
-            (settings.groups[kCommands].enabled && !g_commandsReady.load(std::memory_order_acquire)))
+            (settings.groups[kCommands].enabled && !g_commandsReady.load(std::memory_order_acquire)) ||
+            ((settings.groups[static_cast<size_t>(Group::Hull)].enabled || settings.groups[static_cast<size_t>(Group::Ammo)].enabled) &&
+             !g_metersReady.load(std::memory_order_acquire)))
         {
             if (now >= g_retry)
             {
@@ -391,14 +497,24 @@ namespace BZROpenShim::ContextualHud
         }
         uint64_t owner = 0;
         std::array<uint64_t,kGroups> values{};
+        MeterSample meters;
         const auto ui = ReadShellUiState();
-        if (!ui.readable || ui.wrapperActive || ui.screenPresent || !Snapshot(owner,values)) { ResetMission(); return; }
+        if (!ui.readable || ui.wrapperActive || ui.screenPresent || !Snapshot(owner,values,meters)) { ResetMission(); return; }
         AcquireSRWLockExclusive(&g_lock);
         // The command renderer owns its own activity sample; stable resource
         // observations must not overwrite input/menu activity recorded there.
         g_state.Observe(owner,values,now,kSafeFrameGroups);
         for (size_t i = 0; i < kSafeFrameGroups; ++i)
             g_opacity[i].store(g_state.groups[i].Opacity(settings.groups[i],now),std::memory_order_relaxed);
+        for (size_t i = static_cast<size_t>(Group::Hull); i <= static_cast<size_t>(Group::Ammo); ++i)
+        {
+            auto& activity = g_state.groups[i];
+            if (meters.readable)
+                activity.Observe(i == static_cast<size_t>(Group::Hull) ? meters.hull : meters.ammo,now,
+                    i == static_cast<size_t>(Group::Hull) ? meters.hullWarning : meters.ammoWarning);
+            else activity = {};
+            g_opacity[i].store(activity.Opacity(settings.groups[i],now),std::memory_order_relaxed);
+        }
         ReleaseSRWLockExclusive(&g_lock);
     }
 }
