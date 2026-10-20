@@ -188,7 +188,11 @@ namespace BZROpenShim
         // on activation is allowed for the rest of the session. Posted clicks
         // (BZRWindowInput.ps1 uses PostMessage) must not count; they leave the
         // physical button state and the cursor untouched, so a click counts only
-        // when the button is physically down AND the cursor is over the window.
+        // when the button is physically down AND the game window is the window
+        // under the cursor (WindowFromPoint), not merely when the cursor is in
+        // its rectangle: the game sits at the bottom of the z-order beneath the
+        // user's windows, so a posted click that coincides with the user
+        // pressing a button in their own window would otherwise count.
         constexpr std::uint32_t kWmLButtonDown = 0x0201;
         constexpr std::uint32_t kWmRButtonDown = 0x0204;
         constexpr std::uint32_t kWmMButtonDown = 0x0207;
@@ -202,9 +206,9 @@ namespace BZROpenShim
                    msg == kWmNcLButtonDown || msg == kWmNcRButtonDown || msg == kWmNcMButtonDown;
         }
 
-        inline bool IsUserClick(std::uint32_t msg, bool targetIsGameWindow, bool cursorInsideWindow, bool buttonPhysicallyDown)
+        inline bool IsUserClick(std::uint32_t msg, bool targetIsGameWindow, bool gameWindowUnderCursor, bool buttonPhysicallyDown)
         {
-            return IsButtonDownMessage(msg) && targetIsGameWindow && cursorInsideWindow && buttonPhysicallyDown;
+            return IsButtonDownMessage(msg) && targetIsGameWindow && gameWindowUnderCursor && buttonPhysicallyDown;
         }
 
         // Virtual key to poll for the physical state of a button-down message.
