@@ -36,7 +36,7 @@ $requestedGamePath = if ($env:OPENSHIM_GAME_PATH) { $env:OPENSHIM_GAME_PATH } el
 # Everything else in that folder belongs to the game or to the player.
 $uiTiles = @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png", "osh_career_center.png", "osh_prelobby_center.png",
     "osh_options_center.png", "osh_hub_center.png", "osh_category_center.png", "osh_tile_hv.png", "osh_tile_ck.png", "osh_value_hv.png", "osh_value_ck.png",
-    "osh_keys_center.png", "osh_key_hv.png", "osh_key_ck.png", "osh_tool_hv.png", "osh_tool_ck.png", "osh_preview_white.png", "osh_reticle_center.png")
+    "osh_keys_center.png", "osh_key_hv.png", "osh_key_ck.png", "osh_tool_hv.png", "osh_tool_ck.png", "osh_preview_white.png", "osh_reticle_center.png", "osh_menu_theme_center.png")
 
 function Get-Switch {
     param([string]$Name)

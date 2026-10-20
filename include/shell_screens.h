@@ -83,6 +83,12 @@ namespace BZROpenShim::ShellScreens
         const char* on;
     };
 
+    // Native slider owned by its container; values and range are finite 0..255.
+    bool SlidersAvailable();
+    void* AddSlider(void* container, void* layoutParent, const char* name, const Rect& rect, float maximum, float value);
+    bool SetSliderValue(void* slider,float value);
+    float SliderValue(void* slider);
+
     // Stock skins.
     extern const ButtonSkin kSkinTopCorner;   // topcorner / topcrnhv / topcrnck, 342x77
     extern const ButtonSkin kSkinToMainMenu;  // tomnoff / tomnon / tomnclk, 369x68

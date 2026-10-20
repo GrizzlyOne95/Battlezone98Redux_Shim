@@ -66,6 +66,20 @@ void TestCompleteSetValidates()
     std::filesystem::remove_all(dir, g_errc);
 }
 
+void TestOptionalMenuShader()
+{
+    const auto dir=MakeScratchDir("menu_shader");PopulateValidSet(dir);
+    std::string problem;
+    std::ofstream(dir/"openshim_menu_theme.program") << "optional payload";
+    Check(Validate(dir,problem),"optional menu shader is an accepted top-level script");
+    std::filesystem::remove(dir/"openshim_menu_theme.program",g_errc);
+    Check(Validate(dir,problem),"absent optional menu shader never disables Enhanced");
+    std::filesystem::create_directories(dir/"copy");
+    std::ofstream(dir/"copy"/"openshim_menu_theme.program") << "shadow";
+    Check(!Validate(dir,problem),"nested menu shader duplicate is refused like other shadow scripts");
+    std::filesystem::remove_all(dir,g_errc);
+}
+
 void TestSingleRemovedMandatoryFileFails()
 {
     std::printf("TestSingleRemovedMandatoryFileFails\n");
@@ -245,6 +259,7 @@ void TestAbsentDirectoryFails()
 int main()
 {
     TestCompleteSetValidates();
+    TestOptionalMenuShader();
     TestSingleRemovedMandatoryFileFails();
     TestEmptiedMandatoryFileFails();
     TestVersionMarkerContract();

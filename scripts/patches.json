@@ -4354,6 +4354,24 @@
       "identity": "cUI_View vtable (15 slots; RTTI .?AVcUI_View@@). OpenShim custom screens copy it and replace slots 0 and 5."
     },
     {
+      "name": "UiSliderCtor",
+      "address": "0x7cbd60",
+      "expected": "55 8B EC 6A FF 68 C4 25 86 00 64 A1 00 00 00 00 50 83 EC 78",
+      "identity": "cUI_Slider constructor, thiscall seven stack arguments, ret 0x1C; native OptionsAudio allocates 0x164. Constructor initializes maximum +0x14C=10, value +0x150=0, owned bar +0x148 and null callback +0x160. Released GOG 2.2.301 Ghidra/Capstone semantics; complete static and live ReadProcessMemory windows agree at PID 40884 on 2026-10-19 before authoring this row."
+    },
+    {
+      "name": "UiSliderSetValue",
+      "address": "0x7cc2d0",
+      "expected": "55 8B EC 51 89 4D FC F3 0F 10 45 08 0F 2F 05 98 24 8A 00 72",
+      "identity": "Native slider SetValue(float), thiscall ret 4; accepts 0..maximum at +0x14C, writes +0x150 and updates the bar geometry. Released GOG 2.2.301 Ghidra/Capstone semantics; complete static and live ReadProcessMemory windows agree at PID 40884 on 2026-10-19 before authoring this row."
+    },
+    {
+      "name": "UiSliderValue",
+      "address": "0x7cc320",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC D9 80 50 01 00 00 8B E5 5D C3",
+      "identity": "Native slider value accessor, ECX self, no stack arguments; returns float +0x150 in ST0. Native audio callback uses this same accessor. Released GOG 2.2.301 Ghidra/Capstone semantics; complete static and live ReadProcessMemory windows agree at PID 40884 on 2026-10-19 before authoring this row."
+    },
+    {
       "name": "UiViewReflow",
       "address": "0x007D3380",
       "expected": "55 8B EC 83 EC 0C 89 4D FC 8B 45 FC 51 F3 0F 10 80 F8 00 00 00",

@@ -1,3 +1,4 @@
+#include "menu_theme.h"
 // ui_camera_fixes.cpp
 // BZR Open Shim - stock UI and camera fixes: guarded briefing/archive
 // scrolling, the multiplayer render-count clamp, the thumbnail BMP
@@ -606,6 +607,7 @@ namespace BZROpenShim
                 }
                 result = outMaterialSlot;
             }
+            MenuTheme::ImageMaterialReady(static_cast<const char*>(nameArg),outMaterialSlot);
             return result;
         }
 
@@ -629,7 +631,7 @@ namespace BZROpenShim
 
         void InstallThumbnailBmpGuardIfPossible()
         {
-            if (!g_ThumbnailBmpGuardEnabled || g_ThumbnailBmpGuardInstalled)
+            if ((!g_ThumbnailBmpGuardEnabled && !MenuTheme::ImageAdapterNeeded()) || g_ThumbnailBmpGuardInstalled)
                 return;
             static int s_bound = 0;
             const HookEngine::EngineRow rows[] = {

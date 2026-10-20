@@ -85,3 +85,7 @@ it are the layout contract with each screen's code.
 
 The buttons have no idle texture: at rest they show the slot painted into the
 panel, as the stock option buttons do.
+
+`osh_menu_theme_center.png` provides the five-slider Menu Colors page. Its
+layout contract is `MENU_THEME_LAYOUT` in `mkscreens.py` and
+`src/patches/menu_theme.cpp`; deploy/install/uninstall include the panel.

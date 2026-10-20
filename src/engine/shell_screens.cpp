@@ -595,6 +595,48 @@ namespace BZROpenShim::ShellScreens
         return ReflowPanelGuarded(panel, fitted, argb, reflow);
     }
 
+    namespace
+    {
+        using SliderCtor=void*(__thiscall*)(void*,const char*,float,float,float,float,uint32_t,void*);
+        using SliderSet=void(__thiscall*)(void*,float);
+        using SliderGet=float(__thiscall*)(void*);
+        uint32_t g_SliderCtor=0,g_SliderSet=0,g_SliderGet=0;
+    }
+    bool SlidersAvailable()
+    {
+        static int bound=0;
+        if(!bound)
+        {
+            const HookEngine::EngineRow rows[]={{"UiSliderCtor",&g_SliderCtor},{"UiSliderSetValue",&g_SliderSet},{"UiSliderValue",&g_SliderGet}};
+            bound=HookEngine::BindEngineRows("Menu RGB sliders",rows)?1:-1;
+        }
+        return bound>0;
+    }
+    void* AddSlider(void* container,void* layoutParent,const char* name,const Rect& rect,float maximum,float value)
+    {
+        if(!container||!g_Bound||!SlidersAvailable()||!std::isfinite(maximum)||maximum<=0||maximum>255||
+            !std::isfinite(value)||value<0||value>maximum)return nullptr;
+        void* memory=AllocWidget(0x164); // released constructor call sites allocate this exact size
+        if(!memory)return nullptr;
+        const float scale=WidgetLayoutScale(layoutParent);
+        void* slider=reinterpret_cast<SliderCtor>(g_SliderCtor)(memory,name,rect.x*scale,rect.y*scale,rect.w*scale,rect.h*scale,kControlFlags,layoutParent);
+        if(!slider)return nullptr;
+        *reinterpret_cast<float*>(static_cast<uint8_t*>(slider)+0x14C)=maximum;
+        reinterpret_cast<SliderSet>(g_SliderSet)(slider,value);
+        g_BzrFn_AddChild(container,slider,0);
+        if(g_BzrFn_UiSetActive)g_BzrFn_UiSetActive(slider,1);
+        return slider;
+    }
+    bool SetSliderValue(void* slider,float value)
+    {
+        if(!slider||!SlidersAvailable()||!std::isfinite(value)||value<0||value>255)return false;
+        reinterpret_cast<SliderSet>(g_SliderSet)(slider,value);return true;
+    }
+    float SliderValue(void* slider)
+    {
+        return slider&&SlidersAvailable()?reinterpret_cast<SliderGet>(g_SliderGet)(slider):-1;
+    }
+
     void* AddButton(void* container, void* layoutParent, const char* name, const Rect& r,
                     const char* text, const ButtonSkin& skin, float textScale,
                     float textOffset, void(__cdecl* onClick)(), HoverFn onHover)

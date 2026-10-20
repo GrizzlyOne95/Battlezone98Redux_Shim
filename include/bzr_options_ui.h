@@ -186,6 +186,8 @@ namespace BZROpenShim
 
     // Persist one openshim.ini key through the settings page's lossless writer
     // (comments, ordering and the .openshim.bak backup are preserved).
+    struct ShimConfigValue { const char* section; const char* key; const char* value; };
+    bool WriteShimUserConfigValues(const ShimConfigValue* values,size_t count);
     bool WriteShimUserConfigValue(const char* section, const char* key, const char* value);
 
     // --- options-UI entry points (implemented in bzr_options_ui.cpp) ---

@@ -1,0 +1,12 @@
+// Optional menu image shader; independent of the selected scene profile.
+fragment_program OpenShim_MenuTheme_fragmentHLSL4 hlsl
+{
+    source openshim_menu_theme.hlsl
+    entry_point MenuThemeFragment
+    target ps_4_0
+    default_params
+    {
+        param_named menuTheme float4 0 0 0 0
+        param_named menuLevels float4 1 1 0 0
+    }
+}

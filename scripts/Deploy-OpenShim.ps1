@@ -134,7 +134,7 @@ if (Test-Path -LiteralPath $assetManifestSource) {
 # missing-texture panels.
 $uiFiles = @(
     'osh_preview_white.png',
-    'osh_reticle_center.png',
+    'osh_reticle_center.png', 'osh_menu_theme_center.png',
     'uiline.png', 'uiplate.png', 'uibtn.png', 'uibtnhv.png',
     'osh_career_center.png',
     'osh_prelobby_center.png',

@@ -360,8 +360,21 @@ def keys_center():
     return img.resize((W, H), Image.LANCZOS)
 
 
+# MENU_THEME_LAYOUT: native slider page in src/patches/menu_theme.cpp.
+def menu_theme_center():
+    img = Image.new('RGBA', (s(W), s(H)), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    frame(d)
+    title_plate(d, 470, 132, 500, 56)
+    box(d, 244, 224, 952, 478, header_h=82)
+    box(d, 244, 714, 952, 132, header_h=8)
+    info_box(d, 244, 865, 952, 62)
+    return img.resize((W, H), Image.LANCZOS)
+
+
 def main():
     outputs = {
+        'osh_menu_theme_center.png': menu_theme_center(),
         'osh_preview_white.png': Image.new('RGBA', (2, 2), (255, 255, 255, 255)),
         'osh_career_center.png': career_center(),
         'osh_prelobby_center.png': prelobby_center(),
