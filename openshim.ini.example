@@ -528,6 +528,18 @@ LuaSendLengthUnsigned = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE
 UnfocusedMouseRelease = 1
 
+; Improve how Windows schedules the game's frame thread. Most frame hitches
+; are waits on Present; these reduce scheduler-caused ones rather than raise
+; the average frame rate. The thread that runs the frame loop registers with
+; the Multimedia Class Scheduler Service under the "Games" task on its first
+; frame (reverted at shutdown), and the process opts out of power throttling
+; (EcoQoS execution speed and timer-resolution throttling). Both APIs are
+; looked up at runtime; where Windows or Wine/Proton lacks one, it is logged
+; and skipped. Scheduling only; not gated in network games.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_THREAD_SCHEDULING
+ThreadScheduling = 1
+
 ; Extend the script-facing CanBuild / IsBusy producer predicates to base
 ; producers, so mission Lua sees the same answer for a base producer that it
 ; already gets for the derived ones.

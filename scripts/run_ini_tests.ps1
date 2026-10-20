@@ -216,6 +216,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Fixes/LuaSendLengthUnsigned",
     # Client-side cursor handling only; no simulation or wire effect.
     "Fixes/UnfocusedMouseRelease",
+    # MMCSS registration and power-throttling opt-out; scheduling only.
+    "Fixes/ThreadScheduling",
     "Fixes/CliMultiParameterOptions",
 
     # Menu-only rendering repair, no simulation or wire effect. The Create Game
@@ -374,6 +376,7 @@ $shippingPolicyChecks = @{
     "Fixes/LuaFormationBinding" = "1"
     "Fixes/LuaSendLengthUnsigned" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"
+    "Fixes/ThreadScheduling" = "1"
     "Fixes/ProducerScriptPredicates" = "0"
     "Fixes/VehicleListModScoping" = "0"
     "Fixes/CliMultiParameterOptions" = "1"

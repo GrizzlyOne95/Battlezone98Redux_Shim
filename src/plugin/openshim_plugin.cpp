@@ -41,6 +41,7 @@
 #include "native_cpu_sampler.h"
 #include "perf_telemetry.h"
 #include "precise_timestep.h"
+#include "thread_scheduling.h"
 #include "pilot_fp_animation_trace.h"
 #include "walker_cockpit_trace.h"
 #include "openshim_sdk_v2.h"
@@ -209,6 +210,9 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializePerfTelemetry());
     // Opt-in QPC-precise simulation step ([Experimental] PreciseTimestep).
     PATCH_STAGE(BZROpenShim::InitializePreciseTimestep());
+    // MMCSS + power-throttling opt-out ([Fixes] ThreadScheduling). After perf
+    // telemetry so its renderOneFrame import hook chains telemetry's.
+    PATCH_STAGE(BZROpenShim::InitializeThreadScheduling());
     PATCH_STAGE(BZROpenShim::InitializeNativeCpuSampler());
 
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");
@@ -291,6 +295,7 @@ namespace BZROpenShim
         BZROpenShim::UiFileScan::Shutdown();
         BZROpenShim::ShutdownNativeCpuSampler();
         BZROpenShim::ShutdownPerfTelemetry();
+        BZROpenShim::ShutdownThreadScheduling();
         BZROpenShim::ShutdownOpenShimAssetSync();
         BZROpenShim::ShutdownOpenShimUpdater();
         BZROpenShim::ShutdownOpenShimSdkV2();
