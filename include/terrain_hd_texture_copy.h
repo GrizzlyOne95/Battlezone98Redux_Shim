@@ -4,6 +4,16 @@
 
 namespace BZROpenShim::TerrainHd
 {
+// Ogre 1.10 D3D11Texture::_create2DTex subtracts two levels from explicit
+// BC requests. Match an already-loaded source, then still verify real GPU
+// descriptors in CopyTextureSlice. Single-level textures need no adjustment.
+inline int OgreArrayMipRequest(UINT additionalMips, DXGI_FORMAT format)
+{
+    const bool compressed = (format >= DXGI_FORMAT_BC1_TYPELESS && format <= DXGI_FORMAT_BC5_SNORM) ||
+        (format >= DXGI_FORMAT_BC6H_TYPELESS && format <= DXGI_FORMAT_BC7_UNORM_SRGB);
+    return int(additionalMips + (compressed && additionalMips ? 2u : 0u));
+}
+
 // Copy explicit 2D mip subresources to one array slice. Ogre's pixel-buffer
 // blit may invoke mip generation and is not a safe array upload primitive in
 // the released DX11 backend. This path never rescales or generates mipmaps.

@@ -33,4 +33,5 @@ namespace BZROpenShim
     // Read-only immediate-context draw evidence. Fails closed if the terrain
     // owner cannot be locked or the actual PS resource differs from our atlas.
     bool TerrainSurfaceNormalBound(ID3D11DeviceContext* context);
+    unsigned TerrainHdMaterialBoundMask(ID3D11DeviceContext* context);
 }

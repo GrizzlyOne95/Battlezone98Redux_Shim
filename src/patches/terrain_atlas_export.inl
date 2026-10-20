@@ -35,6 +35,15 @@ void ExportNativeTerrainAtlas()
             {"tiles", nlohmann::json::object()}, {"usedIndices", nlohmann::json::array()}
         };
         root["paintMap"] = CaptureTerrainPaintMap();
+        root["channelResources"] = nlohmann::json::object();
+        const char* channelNames[] = {"normal", "specular", "emissive"};
+        for (unsigned c = 0; c < 3; ++c)
+        {
+            if (g_ogre.getNumTextureUnitStates(pass) <= c + 2) continue;
+            const auto* channel = getTexture(g_ogre.getTextureUnitState(pass, uint16_t(c + 2)));
+            if (channel && channel->rep)
+                root["channelResources"][channelNames[c]] = *g_ogre.getResourceName(channel->rep);
+        }
         void* manager = g_terrainManager();
         if (!manager) throw std::runtime_error("atlas export terrain manager unavailable");
         // The validated released-build table has 256 entries. CSV row order

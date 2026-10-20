@@ -1,5 +1,29 @@
 # Battlezone 98 Redux terrain render path
 
+## Current ownership correction (2026-10-20)
+
+The older retained-handoff notes below describe the original prototype and are
+superseded by the HD source-pack memory work. Repeated Enhanced profile changes
+exposed about 90 MiB of accumulated private commit per HD reload. The handoff
+helper assumed a control-block layout that did not match the released Ogre
+build, so it retained returned pointers rather than releasing their references.
+
+The terrain path now resolves Ogre's exported `SharedPtr` copy constructor,
+`setNull` and `useCount`, behind its existing exact Ogre SHA-256 gate. Inspection
+of those released exports establishes the common two-pointer ABI: the operations
+act on the polymorphic control block, not the pointee type. Copy/release and
+final destruction stay in Ogre; OpenShim no longer reads or writes a guessed
+reference-count offset. By-value parameter setters receive one native copied
+reference, separately from the getter's caller-owned reference.
+
+Native vertex bindings own HD semantic buffers. Restoration verifies that slot
+3 is absent and the binding count is three before declaring a stream retired.
+The log records counts through the engine's `useCount` export. HD streams use
+GPU-default buffers without an Ogre shadow buffer or persistent CPU mapping;
+complete terrain rebuilds refresh them through `UpdateSubresource`. See
+[HD terrain tiles](terrain-hd-tiles.md) for the measured 32-bit budget and
+current qualification limits.
+
 ## Phase 1 result
 
 The released Redux renderer can reproduce one stock terrain cluster without

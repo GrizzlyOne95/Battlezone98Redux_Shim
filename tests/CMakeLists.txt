@@ -349,6 +349,9 @@ openshim_add_test(terrain_semantic_tests STD 20 SOURCES
     terrain_semantic_tests.cpp
     ../src/patches/terrain_semantic.cpp
 )
+openshim_add_test(terrain_hd_material_tests STD 20 SOURCES
+    terrain_hd_material_tests.cpp
+)
 
 # These three used to run only from scripts/run_*_tests.ps1, which no CI lane
 # calls (audit P2-7).
