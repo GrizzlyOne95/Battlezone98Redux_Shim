@@ -142,6 +142,8 @@ namespace BZROpenShim
             FnU16 getNumSupportedTechniques = nullptr;
             FnPtrAt16 getTechnique = nullptr;
             FnBool techniqueSupported = nullptr;
+            FnU16 techniqueSchemeIndex = nullptr;
+            FnU16 techniqueLodIndex = nullptr;
             FnU16 getNumPasses = nullptr;
             FnPtrAt16 getPass = nullptr;
             FnSharedByValue getShadowCasterMaterial = nullptr;
@@ -449,6 +451,8 @@ namespace BZROpenShim
             o.getNumSupportedTechniques = ResolveOgreProc<FnU16>("?getNumSupportedTechniques@Material@Ogre@@QBEGXZ");
             o.getTechnique = ResolveOgreProc<FnPtrAt16>("?getTechnique@Material@Ogre@@QAEPAVTechnique@2@G@Z");
             o.techniqueSupported = ResolveOgreProc<FnBool>("?isSupported@Technique@Ogre@@QBE_NXZ");
+            o.techniqueSchemeIndex = ResolveOgreProc<FnU16>("?_getSchemeIndex@Technique@Ogre@@QBEGXZ");
+            o.techniqueLodIndex = ResolveOgreProc<FnU16>("?getLodIndex@Technique@Ogre@@QBEGXZ");
             o.getNumPasses = ResolveOgreProc<FnU16>("?getNumPasses@Technique@Ogre@@QBEGXZ");
             o.getPass = ResolveOgreProc<FnPtrAt16>("?getPass@Technique@Ogre@@QAEPAVPass@2@G@Z");
             o.getShadowCasterMaterial = ResolveOgreProc<FnSharedByValue>(
@@ -514,7 +518,8 @@ namespace BZROpenShim
                 o.rootSingleton, o.addFrameListener, o.materialManager, o.programManager,
                 o.getMaterialByName, o.getProgramByName, o.removeResource, o.cloneMaterial,
                 o.resourceName, o.resourceGroup, o.loadResource, o.getNumTechniques,
-                o.getNumSupportedTechniques, o.getTechnique, o.techniqueSupported, o.getNumPasses,
+                o.getNumSupportedTechniques, o.getTechnique, o.techniqueSupported,
+                o.techniqueSchemeIndex, o.techniqueLodIndex, o.getNumPasses,
                 o.getPass, o.getShadowCasterMaterial, o.hasVertexProgram, o.getVertexProgram,
                 o.getVertexProgramParameters, o.setVertexProgram, o.getShadowCasterVertexProgramName,
                 o.getShadowReceiverVertexProgramName, o.setShadowCasterVertexProgram,
@@ -904,6 +909,7 @@ namespace BZROpenShim
                 return fail({ Reject::CloneFailed, record.cloneName });
 
             uint16_t supported = 0;
+            std::unordered_set<uint32_t> selectable;
             const uint16_t techniques = g_ogre.getNumTechniques(record.clone.rep);
             for (uint16_t t = 0; t < techniques; ++t)
             {
@@ -911,6 +917,14 @@ namespace BZROpenShim
                 if (!technique || !g_ogre.techniqueSupported(technique))
                     continue;
                 ++supported;
+                // Ogre picks the first supported technique per scheme and LOD;
+                // a later one (ISDFC's fixed-function DX9 fallbacks) never
+                // draws while that one stays supported, which the
+                // stillSupported check below enforces.
+                const uint32_t slot = (static_cast<uint32_t>(g_ogre.techniqueSchemeIndex(technique)) << 16) |
+                    g_ogre.techniqueLodIndex(technique);
+                if (!selectable.insert(slot).second)
+                    continue;
                 SharedPtr casterMaterial;
                 g_ogre.getShadowCasterMaterial(technique, &casterMaterial);
                 if (casterMaterial.rep)
