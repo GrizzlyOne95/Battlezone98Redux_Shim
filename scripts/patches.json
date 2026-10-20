@@ -478,6 +478,46 @@
   ],
   "resolves": [
     {
+      "name": "MouseReadChannels::TimeStepCall",
+      "pattern": "E8 ?? ?? ?? ?? D9 5D F4 F3 0F 10 45 F4 F3 0F 58 05 ?? ?? ?? ?? F3 0F 11 05 ?? ?? ?? ?? F3 0F 10 05 ?? ?? ?? ?? 0F 2F 05 ?? ?? ?? ?? 76 07 33 C0 E9 ?? ?? ?? ?? A1 ?? ?? ?? ?? 8B 48 38",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00623BF2",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Mouse giddi_read_channels 0x00623B20 on GOG Redux 2.2.301 (int __cdecl(MOUSE_DATA*, long* analog, ulong* discrete); reached only through the mouse driver table entry 0x008EC6FC; BZ 1.5 giddi_read_channels 0x004BDDB7 is the same code). `call TimeStep; fstp [ebp-0xC]; addss xmm0,[accum 0x02A17470]; movss [accum],xmm0; movss xmm0,[0x008A24F4]=0.016666f; comiss xmm0,[accum]; jbe apply; xor eax,eax; jmp exit; mov eax,[0x0094672C]; mov ecx,[eax+0x38]` (the profile sensitivity index). Pattern is a unique whole-image match on 2026-10-20. This is the E8 call to the TimeStep getter 0x00822D60 at 0x00623BF2; MouseEveryFrame redirects it to a wrapper that sets its bucket threshold."
+    },
+    {
+      "name": "MouseReadChannels::BucketThreshold",
+      "pattern": "E8 ?? ?? ?? ?? D9 5D F4 F3 0F 10 45 F4 F3 0F 58 05 ?? ?? ?? ?? F3 0F 11 05 ?? ?? ?? ?? F3 0F 10 05 ?? ?? ?? ?? 0F 2F 05 ?? ?? ?? ?? 76 07 33 C0 E9 ?? ?? ?? ?? A1 ?? ?? ?? ?? 8B 48 38",
+      "offset": 33,
+      "mode": "address",
+      "fallback": "0x00623C13",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Mouse giddi_read_channels 0x00623B20 on GOG Redux 2.2.301 (int __cdecl(MOUSE_DATA*, long* analog, ulong* discrete); reached only through the mouse driver table entry 0x008EC6FC; BZ 1.5 giddi_read_channels 0x004BDDB7 is the same code). `call TimeStep; fstp [ebp-0xC]; addss xmm0,[accum 0x02A17470]; movss [accum],xmm0; movss xmm0,[0x008A24F4]=0.016666f; comiss xmm0,[accum]; jbe apply; xor eax,eax; jmp exit; mov eax,[0x0094672C]; mov ecx,[eax+0x38]` (the profile sensitivity index). Pattern is a unique whole-image match on 2026-10-20. This is the code address of the m32 operand of `movss xmm0,[0x008A24F4]` (instruction 0x00623C0F, operand 0x00623C13). MouseEveryFrame checks the opcode and that the operand names 0.016666f, then repoints the operand at a shim float. The constant itself is shared (0x006A3490's 60 Hz team tick reads it too) and is never written."
+    },
+    {
+      "name": "MouseReadChannels::Accumulator",
+      "pattern": "E8 ?? ?? ?? ?? D9 5D F4 F3 0F 10 45 F4 F3 0F 58 05 ?? ?? ?? ?? F3 0F 11 05 ?? ?? ?? ?? F3 0F 10 05 ?? ?? ?? ?? 0F 2F 05 ?? ?? ?? ?? 76 07 33 C0 E9 ?? ?? ?? ?? A1 ?? ?? ?? ?? 8B 48 38",
+      "offset": 17,
+      "mode": "abs32_operand",
+      "fallback": "0x02A17470",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Mouse giddi_read_channels 0x00623B20 on GOG Redux 2.2.301 (int __cdecl(MOUSE_DATA*, long* analog, ulong* discrete); reached only through the mouse driver table entry 0x008EC6FC; BZ 1.5 giddi_read_channels 0x004BDDB7 is the same code). `call TimeStep; fstp [ebp-0xC]; addss xmm0,[accum 0x02A17470]; movss [accum],xmm0; movss xmm0,[0x008A24F4]=0.016666f; comiss xmm0,[accum]; jbe apply; xor eax,eax; jmp exit; mov eax,[0x0094672C]; mov ecx,[eax+0x38]` (the profile sensitivity index). Pattern is a unique whole-image match on 2026-10-20. The m32 operand of `addss xmm0,[m32]` (0x00623BFF): the float step accumulator 0x02A17470, zeroed when the bucket closes, when the window loses focus, and by the reset 0x00623A30. MouseEveryFrame only reads it for its per-frame diagnostic line."
+    },
+    {
+      "name": "TimeStep",
+      "pattern": "E8 ?? ?? ?? ?? D9 5D F4 F3 0F 10 45 F4 F3 0F 58 05 ?? ?? ?? ?? F3 0F 11 05 ?? ?? ?? ?? F3 0F 10 05 ?? ?? ?? ?? 0F 2F 05 ?? ?? ?? ?? 76 07 33 C0 E9 ?? ?? ?? ?? A1 ?? ?? ?? ?? 8B 48 38",
+      "offset": 0,
+      "mode": "rel32_target",
+      "fallback": "0x00822D60",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Mouse giddi_read_channels 0x00623B20 on GOG Redux 2.2.301 (int __cdecl(MOUSE_DATA*, long* analog, ulong* discrete); reached only through the mouse driver table entry 0x008EC6FC; BZ 1.5 giddi_read_channels 0x004BDDB7 is the same code). `call TimeStep; fstp [ebp-0xC]; addss xmm0,[accum 0x02A17470]; movss [accum],xmm0; movss xmm0,[0x008A24F4]=0.016666f; comiss xmm0,[accum]; jbe apply; xor eax,eax; jmp exit; mov eax,[0x0094672C]; mov ecx,[eax+0x38]` (the profile sensitivity index). Pattern is a unique whole-image match on 2026-10-20. Target of that call: the float TimeStep getter 0x00822D60 (float __cdecl(void), fld [0x00946790]; about 80 callers). MouseEveryFrame calls it from its wrapper."
+    },
+    {
       "name": "SetLoopTimes::FrameCall",
       "pattern": "68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 C4 04 E8 ?? ?? ?? ?? 83 7D 08 00 75 05 E8",
       "offset": 13,

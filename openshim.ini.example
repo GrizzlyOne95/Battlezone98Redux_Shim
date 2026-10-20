@@ -2413,6 +2413,20 @@ InteractiveFogWakes = 0
 ; See reverse_engineering/gpu_skinning_investigation_20261020.md.
 GpuSkinning = 0
 
+; ---------------------------------------------------------------------------
+; Per-frame mouse look
+; ---------------------------------------------------------------------------
+; Redux gathers mouse movement and applies it only once 1/60 s of simulation
+; has passed, so mouse steer and pitch update at about 60 Hz whatever the frame
+; rate. When on, the movement is applied every frame. Steer reads a per-second
+; rate and pitch an accumulated position, so sensitivity is unchanged. Works
+; with or without DisableControlSmoothing and RawMouseInput; the benefit is
+; largest with DisableControlSmoothing = 1. Single player only: network games
+; and paused frames keep the stock 1/60 s batch.
+;
+; Default 0. Experimental; see reverse_engineering/mouse_every_frame_20261020.md.
+MouseEveryFrame = 0
+
 [NativeUiDiagnostics]
 ; Development only; shown commented out for the same reason as the
 ; [Diagnostics] development switches above.
