@@ -18,6 +18,14 @@ that animation and presentation stay exactly stock?
   entity's bone matrices are unchanged), gated on a pose-change-rate
   measurement. GPU skinning stays an option only if the user accepts
   sub-pixel, non-bit-exact output.
+- **Update (Phase 3):**
+  - The pose probe ruled out the skip cache.
+  - The user accepted sub-pixel differences, provided GPU skinning is a
+    toggle.
+  - It is now built as `[Experimental] GpuSkinning` (default off), with a
+    Video menu row "GPU Skinning".
+  - At 80 idle craft on DX11 it raises fps by about 75% (98 → 175).
+  - See *Phase 3*.
 
 ## Phase 1 measurements
 
@@ -83,7 +91,7 @@ skinned craft.
 - Under `firing`, fewer entities are visible or animated per frame (frustum and
   effects), so the absolute skin cost is lower and the effects dominate.
 
-## Phase 2 findings (design only; not built)
+## Phase 2 findings (design; built in Phase 3)
 
 ### Materials that would need a skinned vertex program
 
@@ -172,6 +180,131 @@ These come from the loose material scripts in the GOG install.
    - CPU fallback for anything else.
    - Expected win: up to the skin ms in the tables above, minus GPU cost and
      the per-entity bone upload, so roughly 2–3 ms at 80 craft.
+
+## Phase 3: hardware skinning, built behind a toggle
+
+The design follows Phase 2. Code is in `src/patches/gpu_skinning.cpp`, and the
+HLSL transform is in `gpu_skinning_hlsl.cpp` with host tests.
+
+### What it does
+
+- **Setting:**
+  - `[Experimental] GpuSkinning = 0|1`, default 0; env var
+    `OPENSHIM_GPU_SKINNING`.
+  - Video menu row "GPU Skinning".
+  - It is read when a mission starts, so a change applies on the next mission
+    load.
+  - A command-line launch gives no run-state transition, so the first world
+    render evaluates the setting instead.
+  - DX11 only. There is no multiplayer gate: each client's skinning is local
+    presentation.
+- **Programs:**
+  - Every installed HLSL4 vertex program a craft pass uses gets a skinned
+    twin, generated at runtime from the program's own source.
+  - Nothing is shipped.
+  - World-dependent auto constants are remapped, because under hardware
+    skinning Ogre's "world" is bone 0.
+  - A skinned `Ogre/DepthShadowmap/CasterVP_HLSL4` replaces the caster vertex
+    program, so shadows follow the pose.
+- **Materials:**
+  - A clone is made per (source material, weights per vertex).
+  - It is named `OpenShim/GpuSkin/<gen>/w<N>/<material>`.
+  - Non-skeletal users of BZBase keep the stock material.
+- **Per-entity fail-closed:**
+  - An entity switches only if every sub-entity converts and Ogre then
+    reports `isHardwareAnimationEnabled`. Otherwise its stock materials
+    return.
+  - Converted entities are re-verified every frame before rendering.
+  - A 64-bone cap applies.
+  - A new candidate must pass an RTTI check for `Ogre::Entity`.
+  - Any SEH or C++ fault latches the feature off for the process.
+- **Logging:**
+  - Each mission ends with `[GPUSKIN] mission summary: converted=…
+    rejects={…}`.
+
+### Results (DX11, windowed, VSync off, profiler on, same session for both arms)
+
+All 12 GPU runs converted every craft (count + 1, which includes the player),
+with zero rejects, reverts, faults or crashes.
+
+- **Interleaved check:**
+  - The 80-craft idle runs used the arm order stock, GPU, stock, GPU, to rule
+    out drift.
+  - avtank: 98 / 175 / 95 / 174 fps.
+  - svfigh: 102 / 176 / 101 / 175 fps.
+- **Sweep:**
+  - The table below has one run per cell.
+  - The stock fps is below Phase 1 because the machine was more loaded this
+    session. Compare the arms with each other, not with Phase 1.
+
+| unit | scenario | craft | stock fps | GPU fps | stock skin ms | GPU skin ms |
+|---|---|---:|---:|---:|---:|---:|
+| avtank | idle | 20 | 269 | 346 | 0.49 | 0.02 |
+| avtank | idle | 40 | 167 | 267 | 1.04 | 0.08 |
+| avtank | idle | 80 | 97 | 178 | 2.11 | 0.03 |
+| avtank | firing | 20 | 170 | 181 | 0.25 | 0.03 |
+| avtank | firing | 40 | 107 | 122 | 0.60 | 0.03 |
+| avtank | firing | 80 | 56 | 71 | 1.72 | 0.06 |
+| svfigh | idle | 20 | 278 | 343 | 0.40 | 0.02 |
+| svfigh | idle | 40 | 176 | 261 | 0.89 | 0.03 |
+| svfigh | idle | 80 | 102 | 177 | 1.87 | 0.03 |
+| svfigh | firing | 20 | 217 | 233 | 0.25 | 0.02 |
+| svfigh | firing | 40 | 141 | 165 | 0.53 | 0.03 |
+| svfigh | firing | 80 | 56 | 67 | 1.54 | 0.04 |
+
+- **Frame time:**
+  - The saving is larger than the skin ms alone. At 80 idle craft, frame time
+    drops by about 4.6 ms, while skinning plus its buffer `Map` accounted for
+    about 2.3 ms.
+  - The remainder is most likely driver-side work for about 240 dynamic
+    vertex-buffer uploads per frame (inferred, not measured).
+  - The GPU arm still makes about 3 CPU skin calls per frame. That entity has
+    not been identified.
+- **Visual parity (method):**
+  - 20 craft per run, arm order stock, GPU, stock, GPU, for avtank and svfigh.
+  - Each run captured 6 frames via `PrintWindow(PW_RENDERFULLCONTENT)`, so
+    there was no foreground change and no input.
+  - Frames were compared at matched indices.
+  - Runs are not frame-locked, so stock against stock is the noise floor.
+
+| unit | pair | mean abs diff | pixels > 8 |
+|---|---|---:|---:|
+| avtank | stock vs stock | 2.09 | 3.8% |
+| avtank | GPU vs GPU | 1.39 | 3.2% |
+| avtank | stock vs GPU | 1.10 | 2.5% |
+| svfigh | stock vs stock | 1.22 | 3.3% |
+| svfigh | GPU vs GPU | 0.14 | 0.4% |
+| svfigh | stock vs GPU | 0.70 | 1.9% |
+
+- **Visual parity (findings):**
+  - Stock-vs-GPU differences are within run-to-run noise.
+  - A zoomed side-by-side shows the same poses (svfigh wings deployed),
+    lighting, engine glow and silhouettes.
+  - No craft rendered in bind pose.
+- **Limits of this check:**
+  - The craft are small, about 30 px at 50 m in a 584x900 window, and partly
+    behind the HUD.
+  - It rules out gross errors: wrong pose, double transform, lost shadow or
+    lost texture.
+  - It cannot see sub-pixel edge flips, or specular and normal detail on a
+    close-up craft.
+  - Close-range and shadow-heavy views still need a look in play.
+
+### Pitfalls hit while building it
+
+- **Non-virtual exports:**
+  - Calling an exported virtual such as `GpuProgram::getLanguage` through its
+    export runs the base implementation and skips the override.
+  - Every HLSL4 program then reported `asm`.
+  - The fix identifies `D3D11HLSLProgram` by RTTI instead.
+- **Mangled names:**
+  - In the hand-written mangled names, the `std::string` fragment is followed
+    directly by the next token, with no extra `@`.
+  - All required exports are checked at resolve time, and the feature stays
+    off if any is missing.
+- **DX11COMPAT warning:** the `[DX11COMPAT] unsupported custom programs …
+  action=skip` warning is logged for the clones exactly as it is for stock
+  `avtank00`, so it is pre-existing.
 
 ## Tooling changes in this workstream
 

@@ -122,6 +122,7 @@
     <ClCompile Include="src\engine\enhanced_resource_bootstrap.cpp" />
     <ClCompile Include="src\engine\fog_wake.cpp" />
     <ClCompile Include="src\engine\fog_wake_runtime.cpp" />
+    <ClCompile Include="src\engine\gpu_skinning_hlsl.cpp" />
     <ClCompile Include="src\engine\game_log_path.cpp" />
     <ClCompile Include="src\engine\hook_engine.cpp" />
     <ClCompile Include="src\engine\native_ui.cpp" />
@@ -242,6 +243,7 @@
     <ClCompile Include="src\patches\dx11_scene_depth.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
     <ClCompile Include="src\patches\fog_wake_feature.cpp" />
+    <ClCompile Include="src\patches\gpu_skinning.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
     <ClCompile Include="src\patches\lua_formation_fix.cpp" />
     <ClCompile Include="src\patches\lua_send_length.cpp" />
@@ -322,6 +324,8 @@
     <ClInclude Include="include\fog_wake.h" />
     <ClInclude Include="include\fog_wake_runtime.h" />
     <ClInclude Include="include\fog_wake_feature.h" />
+    <ClInclude Include="include\gpu_skinning.h" />
+    <ClInclude Include="include\gpu_skinning_hlsl.h" />
     <ClInclude Include="include\mp_vehicle_preview_fix.h" />
     <ClInclude Include="include\bzn_save_path.h" />
     <ClInclude Include="include\bzloader_bootstrap.h" />

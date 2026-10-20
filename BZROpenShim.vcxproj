@@ -141,6 +141,8 @@
     <ClInclude Include="include\fog_wake.h" />
     <ClInclude Include="include\fog_wake_runtime.h" />
     <ClInclude Include="include\fog_wake_feature.h" />
+    <ClInclude Include="include\gpu_skinning.h" />
+    <ClInclude Include="include\gpu_skinning_hlsl.h" />
     <ClInclude Include="include\mp_vehicle_preview_fix.h" />
     <ClInclude Include="include\bzn_save_path.h" />
     <ClInclude Include="include\bzloader_bootstrap.h" />
