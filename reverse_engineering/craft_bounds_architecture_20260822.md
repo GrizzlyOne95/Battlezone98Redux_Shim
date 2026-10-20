@@ -594,3 +594,32 @@ Restoration wins on every axis that matters:
 * **A custom per-cascade shadow policy** -- unnecessary. Ogre does it correctly
   once the bounds are correct, which is exactly the outcome Phase 7 was written
   to look for.
+
+## Shipped default ON (2026-10-20)
+
+The restore moved from `OPENSHIM_RESTORE_CRAFT_BOUNDS=1` to `[Fixes]
+RestoreCraftBounds`, default ON, with a "Craft Culling" row on the shim's Fixes
+page. `OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS=1` forces it off while the ini has
+no `RestoreCraftBounds` key (an ini key wins over the environment).
+
+Why it had been opt-in: it was introduced as the second of two competing
+repairs (beside PR #47's private cull) and kept behind an env switch while the
+A/B matrix ran, and an audit later found a stale asset box could be reused at a
+recycled mesh address. That is fixed by the `Mesh::~Mesh` detour and the
+name-hash identity in `RememberedMeshBoundsTable` (host-tested).
+
+What makes default ON acceptable:
+
+* Renderer only. The executable creates no Ogre scene query, so collision,
+  targeting and AI never read Ogre bounds; it needs no multiplayer gate.
+* `*_c`, `*_fp` and `*_cockpit` meshes keep the infinite box, so the cockpit
+  view is unchanged; walkers, turrets and pilots are untouched by construction.
+* New guard: a serialized box with a non-finite value, or an axis thinner than
+  0.05 units (inverted or flat), is not trusted and the mesh keeps the stock
+  infinite box. Counted with `unknownAsset` in `[RESTOREBOUNDS]`.
+* Fail-closed: missing OgreMain exports or a guard mismatch stand it down.
+* The private cull still stands down while the restore is active.
+
+Not yet exercised live: satellite view, cinematic cameras, save/load, and mod
+craft whose serialized bounds may be wrong. Under-inflation can only clip a
+craft visually (pop at the screen edge), never crash; the menu row turns it off.

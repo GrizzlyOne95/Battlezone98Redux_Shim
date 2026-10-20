@@ -31,6 +31,7 @@ $root = Join-Path $PSScriptRoot "snapshots\craft_bounds\$Label"
 $ownedVariables = @(
     "OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING",
     "OPENSHIM_RESTORE_CRAFT_BOUNDS",
+    "OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS",
     "OPENSHIM_RESTORE_CRAFT_BOUNDS_SCALE",
     "OPENSHIM_RESTORE_CRAFT_BOUNDS_MODE",
     "OPENSHIM_RESTORE_CRAFT_BOUNDS_SCOPE",
@@ -74,9 +75,15 @@ foreach ($modeName in $Mode) {
         "stock" {
             [Environment]::SetEnvironmentVariable(
                 "OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING", "1", "Process")
+            # Restore is default ON since it shipped in [Fixes]; this env alias
+            # only wins while the deployed openshim.ini has no RestoreCraftBounds key.
+            [Environment]::SetEnvironmentVariable(
+                "OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS", "1", "Process")
         }
         "private" {
             # PR #47 defaults: private culling on, bounds untouched.
+            [Environment]::SetEnvironmentVariable(
+                "OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS", "1", "Process")
         }
         "restore" {
             [Environment]::SetEnvironmentVariable(

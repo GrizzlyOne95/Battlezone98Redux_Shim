@@ -213,6 +213,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Fixes/LuaSendLengthUnsigned",
     # Client-side cursor handling only; no simulation or wire effect.
     "Fixes/UnfocusedMouseRelease",
+    # Renderer-only: restores the asset bounding box on craft meshes Redux
+    # marks infinite, so Ogre culls them. The exe creates no Ogre scene query,
+    # so no gameplay decision can read the box.
+    "Fixes/RestoreCraftBounds",
     "Fixes/CliMultiParameterOptions",
 
     # Menu-only rendering repair, no simulation or wire effect. The Create Game
@@ -370,6 +374,7 @@ $shippingPolicyChecks = @{
     "Fixes/LuaFormationBinding" = "1"
     "Fixes/LuaSendLengthUnsigned" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"
+    "Fixes/RestoreCraftBounds" = "1"
     "Fixes/ProducerScriptPredicates" = "0"
     "Fixes/VehicleListModScoping" = "0"
     "Fixes/CliMultiParameterOptions" = "1"

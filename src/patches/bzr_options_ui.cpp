@@ -3247,6 +3247,11 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
               "Clear a dead constructor's remote build state. Single player only. Restart required." },
+            { "Craft Culling", "Fixes", "RestoreCraftBounds", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Give craft their real bounding boxes so off-screen and distant craft are "
+              "skipped by the camera and shadows. Rendering only. Restart required." },
             { "Net Route", "Network", "RoutePreference", nullptr, 0,
               kShimSettingsNetRouteValues, kShimSettingsNetRouteLabels, 3, 0,
               ShimSettingApplyGroup::BzrNetRoute,

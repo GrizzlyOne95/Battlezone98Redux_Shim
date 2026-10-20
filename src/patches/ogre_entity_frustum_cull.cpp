@@ -44,7 +44,7 @@
 //
 // Two repairs live in this file
 // -----------------------------
-// 1. RESTORED BOUNDS (`OPENSHIM_RESTORE_CRAFT_BOUNDS=1`) -- the current
+// 1. RESTORED BOUNDS ([Fixes] RestoreCraftBounds, default ON) -- the current
 //    architecture. `Mesh::_setBounds` substitutes a finite box, derived from the
 //    serializer's own M_MESH_BOUNDS box, on exactly the meshes that were handed
 //    an infinite one. Ogre's native visibility traversal then works normally.
@@ -110,7 +110,8 @@
 // asked for.
 //
 // Controls:
-//   OPENSHIM_RESTORE_CRAFT_BOUNDS=1             restore finite bounds
+//   OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS=1     keep stock infinite bounds
+//                                               ([Fixes] RestoreCraftBounds = 0)
 //   OPENSHIM_RESTORE_CRAFT_BOUNDS_SCALE=<k>     centre inflation, default 2.0
 //   OPENSHIM_RESTORE_CRAFT_BOUNDS_SCOPE=all     do not exempt *_c/*_fp/*_cockpit
 //   OPENSHIM_RESTORE_CRAFT_BOUNDS_MODE=observe  decide and trace, change nothing
@@ -199,9 +200,11 @@ static float g_FrustumCullMargin = 0.25f;
 
 // ------------------------------------------------ restored craft bounds -----
 //
-// Independent, opt-in experiment: instead of emulating culling privately,
-// repair the renderer state that made culling impossible. See the block comment
-// above MeshSetBoundsHook for the located call site and the reasoning.
+// Instead of emulating culling privately, repair the renderer state that made
+// culling impossible. Default ON ([Fixes] RestoreCraftBounds); the switch table
+// in bzr_hooks.cpp sets this before install. See the block comment above
+// MeshSetBoundsHook for the located call site and the reasoning, and
+// reverse_engineering/craft_bounds_architecture_20260822.md for the evidence.
 bool g_RestoreCraftBoundsEnabled = false;
 static float g_RestoreCraftBoundsScale = 2.0f;
 static bool g_RestoreCraftBoundsAllMeshes = false;
@@ -1033,6 +1036,24 @@ static void TraceBoundsDecision(
         GetCurrentThreadId());
 }
 
+// Smallest axis extent, in world units, a serialized box may have and still be
+// trusted to contain a craft. Real craft are metres across on every axis.
+constexpr float kMinRestorableAxisExtent = 0.05f;
+
+static bool AssetBoxUsableForRestore(const RememberedMeshBounds& entry)
+{
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        const float lo = entry.assetMinimum[axis];
+        const float hi = entry.assetMaximum[axis];
+        if (!std::isfinite(lo) || !std::isfinite(hi))
+            return false;
+        if (hi - lo < kMinRestorableAxisExtent)
+            return false;
+    }
+    return true;
+}
+
 // Fills `out` with min[3],max[3] and returns true when this _setBounds call
 // should be replaced. Runs inside the caller's __try.
 static bool DecideRestoredBounds(
@@ -1065,6 +1086,16 @@ static bool DecideRestoredBounds(
     {
         if (extent == 2u)
             ++g_RestoreBoundsExcluded;
+        return false;
+    }
+
+    // A culling box is only as good as the serialized one it is built from. A
+    // mesh whose exporter wrote a non-finite, inverted or flat box would be
+    // culled while on screen, so it keeps the stock infinite box instead.
+    if (!AssetBoxUsableForRestore(*entry))
+    {
+        if (extent == 2u)
+            ++g_RestoreBoundsUnknownAsset;
         return false;
     }
 
@@ -1197,7 +1228,7 @@ static void __fastcall MeshSetBoundsHook(
 {
     const void* const callSite = _ReturnAddress();
 
-    // With OPENSHIM_RESTORE_CRAFT_BOUNDS off this is observe-only, exactly as
+    // With RestoreCraftBounds off this is observe-only, exactly as
     // the first repair experiment shipped it: the asset's finite box is
     // captured on its way past so the private cull has something to fall back
     // on, and Ogre's own state is left exactly as Redux wants it.

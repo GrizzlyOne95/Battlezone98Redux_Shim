@@ -252,6 +252,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "MagnetZeroRangeGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS") ||
+            Equals(name, "BZR_DISABLE_RESTORE_CRAFT_BOUNDS"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "RestoreCraftBounds", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE") ||
             Equals(name, "BZR_DISABLE_UNFOCUSED_MOUSE_RELEASE"))
         {
