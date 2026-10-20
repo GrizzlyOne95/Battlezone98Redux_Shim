@@ -425,6 +425,7 @@ namespace BZROpenShim
         // first attempt during startup can legitimately find nothing to match.
         static void EnsureOrdnanceVelocityDetours()
         {
+            HookEngine::FrameThreadSitesScope frameSites;
             if (g_OrdnanceSpawnVelocityDetourInstalled && g_CannonLeadVelocityDetourInstalled)
                 return;
             if (g_OrdnanceVelocityDetourAttempts >= kOrdnanceVelocityDetourMaxAttempts)

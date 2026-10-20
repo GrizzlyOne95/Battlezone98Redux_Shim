@@ -1793,9 +1793,16 @@ namespace BZROpenShim
         if (!g_CareerStatsMpHookInstalled)
             InstallCareerStatsMpHookIfPossible();
         if (ShouldTracePlayerKills() && !g_DistributedRecordDeathIntHookInstalled)
+        {
+            // Scoped here: the installer's own __try rules out a local with a destructor.
+            HookEngine::FrameThreadSitesScope frameSites;
             InstallDistributedRecordDeathIntHookIfPossible();
+        }
         if (g_MpauthEnabled && !g_MpauthHooksInstalled)
+        {
+            HookEngine::FrameThreadSitesScope frameSites;
             InstallMpauthHooksIfPossible();
+        }
         if (!g_RadarLayoutHookInstalled)
             InstallRadarLayoutHookIfPossible();
         if (!g_ChunkEffectCreateHooksInstalled)

@@ -72,6 +72,7 @@ namespace
 
     bool EnsureHook()
     {
+        HookEngine::FrameThreadSitesScope frameSites;
         if (g_Resume) return true;
         if (BZROpenShim::g_IsSteamExe || !BZROpenShim::IsCompatibleGameVersion()) return false;
         const auto site = HookEngine::ResolveNamedAddress("Craft::EffectiveDamageResistanceSite");
