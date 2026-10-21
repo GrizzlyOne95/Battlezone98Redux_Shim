@@ -63,6 +63,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <string>
@@ -251,6 +252,83 @@ namespace BZROpenShim
             return NormalizeProducerBuildMenuToken(normalized);
         }
 
+        // Resolving an ODF used to enumerate every addon/mods/packaged_mods/
+        // Workshop root and then stat two names in each candidate directory.
+        // AI tuning does that for each craft, weapon and ordnance it meets for
+        // the first time, so the first engagements of a mission paid it on
+        // the game thread. The directories are now snapshotted once and
+        // re-snapshotted off-thread whenever a world goes live, so a mod
+        // change between missions is still picked up.
+        static SRWLOCK g_OdfIndexLock = SRWLOCK_INIT;
+        static std::shared_ptr<const OdfSearchPath::OdfDirectoryIndex> g_OdfIndex;
+        static volatile long g_OdfIndexRebuildInFlight = 0;
+
+        static std::shared_ptr<const OdfSearchPath::OdfDirectoryIndex> BuildOdfIndexSnapshot()
+        {
+            return std::make_shared<const OdfSearchPath::OdfDirectoryIndex>(
+                OdfSearchPath::BuildOdfDirectoryIndex(GetProducerOdfDirectoryCandidates()));
+        }
+
+        static void PublishOdfIndex(std::shared_ptr<const OdfSearchPath::OdfDirectoryIndex> index)
+        {
+            AcquireSRWLockExclusive(&g_OdfIndexLock);
+            g_OdfIndex = std::move(index);
+            ReleaseSRWLockExclusive(&g_OdfIndexLock);
+        }
+
+        static std::shared_ptr<const OdfSearchPath::OdfDirectoryIndex> GetOdfIndex()
+        {
+            AcquireSRWLockShared(&g_OdfIndexLock);
+            std::shared_ptr<const OdfSearchPath::OdfDirectoryIndex> index = g_OdfIndex;
+            ReleaseSRWLockShared(&g_OdfIndexLock);
+            if (index)
+                return index;
+
+            // First lookup before any background build finished.
+            index = BuildOdfIndexSnapshot();
+            PublishOdfIndex(index);
+            return index;
+        }
+
+        static DWORD WINAPI OdfIndexRebuildThreadProc(LPVOID)
+        {
+            try
+            {
+                PublishOdfIndex(BuildOdfIndexSnapshot());
+            }
+            catch (...)
+            {
+                // Keep the previous snapshot; a lookup builds one if none exists.
+            }
+            InterlockedExchange(&g_OdfIndexRebuildInFlight, 0);
+            return 0;
+        }
+
+        void RequestOdfIndexRebuild()
+        {
+            if (InterlockedCompareExchange(&g_OdfIndexRebuildInFlight, 1, 0) != 0)
+                return;
+
+            HANDLE thread = CreateThread(nullptr, 0, OdfIndexRebuildThreadProc, nullptr, 0, nullptr);
+            if (!thread)
+            {
+                InterlockedExchange(&g_OdfIndexRebuildInFlight, 0);
+                return;
+            }
+            CloseHandle(thread);
+        }
+
+        void TickOdfIndexWorldEdge()
+        {
+            static bool s_WorldWasLive = false;
+            const bool live = SatelliteWorldIsLive();
+            if (live == s_WorldWasLive)
+                return;
+            s_WorldWasLive = live;
+            if (live)
+                RequestOdfIndexRebuild();
+        }
+
         bool TryResolveOdfFilePath(const char* odfToken, std::filesystem::path& outPath)
         {
             outPath.clear();
@@ -259,8 +337,14 @@ namespace BZROpenShim
             if (!odfKey.hasValue)
                 return false;
 
-            return OdfSearchPath::FindOdfFile(
-                GetProducerOdfDirectoryCandidates(), odfKey.token, outPath);
+            return FindIndexedOdfFile(odfKey.token, outPath);
+        }
+
+        bool FindIndexedOdfFile(const std::string& token, std::filesystem::path& outPath)
+        {
+            outPath.clear();
+            const auto index = GetOdfIndex();
+            return index && OdfSearchPath::FindOdfFileInIndex(*index, token, outPath);
         }
     }
 

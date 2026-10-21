@@ -264,6 +264,7 @@ namespace BZROpenShim
         static void TickOpenShimEventLayer()
         {
             TickCareerSessionState();
+            TickOdfIndexWorldEdge();
             TickCareerPendingVictims();
             DispatchPendingEvents();
         }
