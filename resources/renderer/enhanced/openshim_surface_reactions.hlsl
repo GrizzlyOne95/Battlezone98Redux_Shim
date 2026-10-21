@@ -36,7 +36,9 @@ float3 ose_water_normal(float3 viewPosition, float3 normal, float wetness,
 {
     water = 0.0;
     float nearFade = 1.0 - smoothstep(12.0, 28.0, length(viewPosition));
-    if (wetness < 0.002 || nearFade <= 0.0) return normal;
+    // Uniform-only early out: every derivative below runs before any per-pixel
+    // branch, so quads straddling the fade distance keep valid gradients.
+    if (wetness < 0.002) return normal;
     float3 local = mul(viewToLocal, float4(viewPosition, 1.0)).xyz;
     float3 geometric = abs(cross(ddx(local), ddy(local)));
     bool top = geometric.y >= max(geometric.x, geometric.z);
@@ -71,6 +73,7 @@ float3 ose_water_normal(float3 viewPosition, float3 normal, float wetness,
         (sign(determinant) / max(abs(determinant), 0.000001));
     gradient *= min(1.0, 0.30 * rsqrt(max(dot(gradient, gradient), 0.000001)));
     float3 result = normal - gradient;
+    if (nearFade <= 0.0) { water = 0.0; return normal; }
     return result * rsqrt(max(dot(result, result), 0.000001));
 }
 

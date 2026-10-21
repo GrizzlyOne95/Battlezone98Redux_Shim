@@ -966,7 +966,7 @@ namespace BZROpenShim::Hooks
     extern "C" __declspec(dllexport) int __cdecl OpenShimGetWeaponMuzzle(
         uint32_t handle, int slot, float* outPosition) noexcept
     {
-        if (!outPosition || slot < 0 || slot >= 5 || !ActiveRuntime()) return 0;
+        if (!outPosition || slot < 0 || slot >= 5 || !ActiveRuntime() || !EngineThread()) return 0;
         void* owner = GameObjectFromHandleGog(static_cast<int>(handle));
         void* carrier = nullptr;
         void* weapon = nullptr;

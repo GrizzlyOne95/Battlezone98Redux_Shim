@@ -1409,7 +1409,6 @@ void base_fragment(
 
     float3 reactiveGlow;
     oColor.xyz = ose_surface_finish(oColor.xyz, vSurfacePosition, vTexCoord, reactiveGlow, OSE_SURFACE_ARGUMENTS);
-    oColor.xyz *= 1.0 - reactiveWater.x * 0.10;
     float3 emissiveContribution = reactiveGlow;
 #if !defined(ENHANCED_MODE)
     oColor.xyz += reactiveGlow;

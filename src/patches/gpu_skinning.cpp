@@ -303,7 +303,14 @@ namespace BZROpenShim
         };
         std::unordered_map<void*, EntityRecord> g_converted;
         DWORD g_variantThread = 0;
-        struct SurfaceVariantChange { unsigned int index; std::string before,after; };
+        struct SurfaceVariantChange { unsigned int index; std::string before,after; uint32_t age=0; };
+        // A change for an entity not yet converted stays pending this many
+        // frames before it is dropped; the queue is capped at kMaxPendingVariants.
+        constexpr uint32_t kVariantMaxAgeFrames=120;
+        constexpr size_t kMaxPendingVariants=64;
+        uint32_t g_variantDiagCount=0;
+        // Rate-limited: the first few events, then every 256th.
+        bool VariantDiagDue(){const uint32_t n=g_variantDiagCount++;return n<8 || (n&255)==0;}
         std::mutex g_variantMutex;
         std::unordered_map<void*,std::vector<SurfaceVariantChange>> g_pendingVariants;
         size_t g_pendingVariantCount=0;
@@ -1683,6 +1690,7 @@ namespace BZROpenShim
         {
             g_variantThread = GetCurrentThreadId();
             std::unordered_map<void*,std::vector<SurfaceVariantChange>> variants;
+            std::unordered_set<void*> variantsHandled;
             {
                 std::lock_guard<std::mutex> lock(g_variantMutex);
                 variants.swap(g_pendingVariants);g_pendingVariantCount=0;
@@ -1719,8 +1727,11 @@ namespace BZROpenShim
                         // arena walk has proved this entity is still live.
                         const auto changes=variants.find(entity);
                         if (changes!=variants.end())
+                        {
+                            variantsHandled.insert(entity);
                             for (const auto& change:changes->second)
                                 AdoptSurfaceVariantNow(entity,change.index,change.before.c_str(),change.after.c_str());
+                        }
                         if (EntityOnClones(entity, converted->second))
                             continue;
                         // The game re-assigned a material since last frame:
@@ -1767,6 +1778,32 @@ namespace BZROpenShim
                         g_rejected.insert(entity);
                     }
                 }
+            }
+
+            // Changes for entities not yet converted (or skipped this frame)
+            // stay pending for a bounded number of frames, then expire.
+            if (!variants.empty())
+            {
+                uint32_t expired=0;
+                std::lock_guard<std::mutex> lock(g_variantMutex);
+                for (auto& entry:variants)
+                {
+                    if (variantsHandled.count(entry.first)) continue;
+                    for (auto& change:entry.second)
+                    {
+                        auto& slot=g_pendingVariants[entry.first];
+                        bool superseded=false;
+                        for (const auto& fresh:slot) if (fresh.index==change.index) superseded=true;
+                        if (superseded) continue;
+                        if (++change.age>kVariantMaxAgeFrames || g_pendingVariantCount>=kMaxPendingVariants)
+                        { ++expired; continue; }
+                        slot.push_back(std::move(change));++g_pendingVariantCount;
+                    }
+                    if (g_pendingVariants[entry.first].empty()) g_pendingVariants.erase(entry.first);
+                }
+                if (expired && VariantDiagDue())
+                    LogShimA(LogLevel::Warn, kComponent,
+                        "[GPUSKIN] %u surface-variant change(s) expired unapplied (entity never converted)",expired);
             }
 
             // Entities no longer in the arena are not touched again: their
@@ -1987,11 +2024,14 @@ namespace BZROpenShim
             const auto* current=sub ? g_ogre.subEntityMaterial(sub) : nullptr;
             if (!current || !current->rep || NameOf(current->rep)!=after) return 0;
             SharedPtr original;
+            bool same=false;
+            try
+            {
             g_ogre.getMaterialByName(g_ogre.materialManager(),&original,
                 found->second.surfaceBases[index],std::string("Autodetect"));
-            if (!original.rep) return 0;
+            if (!original.rep) { Release(original); return 0; }
             const auto count=g_ogre.getNumTechniques(original.rep);
-            bool same=count<=128 && count==g_ogre.getNumTechniques(current->rep);
+            same=count<=128 && count==g_ogre.getNumTechniques(current->rep);
             for (uint16_t t=0;same && t<count;++t)
             {
                 void* a=g_ogre.getTechnique(original.rep,t);
@@ -2006,6 +2046,8 @@ namespace BZROpenShim
                     if (same && av) same=g_ogre.getVertexProgram(ap)->rep==g_ogre.getVertexProgram(bp)->rep;
                 }
             }
+            }
+            catch (...) { Release(original); throw; }
             Release(original);
             if (!same || !g_ogre.entityHardwareAnimation(entity)) return 0;
             found->second.clones[index]=after;
@@ -2026,7 +2068,13 @@ namespace BZROpenShim
             if (found!=g_pendingVariants.end())
                 for (auto& change:found->second)
                     if (change.index==index) { change.after=after;return 1; }
-            if (g_pendingVariantCount>=64) return 0;
+            if (g_pendingVariantCount>=kMaxPendingVariants)
+            {
+                if (VariantDiagDue())
+                    LogShimA(LogLevel::Warn, kComponent,
+                        "[GPUSKIN] surface-variant queue full (%zu); change dropped",g_pendingVariantCount);
+                return 0;
+            }
             g_pendingVariants[entity].push_back({index,before,after});++g_pendingVariantCount;
             return 1;
         }
