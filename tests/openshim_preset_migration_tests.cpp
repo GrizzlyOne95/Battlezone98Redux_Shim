@@ -436,6 +436,129 @@ int main()
               "6d: stock retry interval moved to 800");
     }
 
+    // 6e. revision 4 -> 5: seven stock-bug fixes turned on. Only values still at
+    // the old shipped 0 move, a value the player already set to 1 is left
+    // alone, and older revisions collect every earlier table too.
+    {
+        fs::path r4 = tmpRoot / "rev4_fixes_off.ini";
+        fs::path canonical = tmpRoot / "canonical6e.ini";
+        WriteLines(canonical, MakeCanonicalLines());
+        WriteLines(r4, {
+            "; OpenShimPresetRevision = 4",
+            "",
+            "[Fixes]",
+            "AiMultiProducerMakers = 0",
+            "ProducerScriptPredicates = 0",
+            "TerrainAtlasRectRepair = 0",
+            "DX11LegacyMaterialCompat = 0",
+            "VehicleListModScoping = 0",
+            "",
+            "[SinglePlayer]",
+            "PilotTeamRestore = 0",
+            "",
+            "[ODF]",
+            "LegacySectionRemap = 0",
+            "LogUnknownOdfSections = 0",
+            "CrashValueGuards = 0",
+        });
+        auto r = MigratePresetFileIfNeeded(r4, canonical);
+        Check(r.action == MigrationAction::SurgicalFixed,
+              "6e: revision 4 file is migrated, not skipped");
+        Check(r.fromRevision == 4,
+              "6e: reports migrating from revision 4");
+        Check(FileContains(r4, "AiMultiProducerMakers = 1"),
+              "6e: AiMultiProducerMakers on");
+        Check(FileContains(r4, "ProducerScriptPredicates = 1"),
+              "6e: ProducerScriptPredicates on");
+        Check(FileContains(r4, "TerrainAtlasRectRepair = 1"),
+              "6e: TerrainAtlasRectRepair on");
+        Check(FileContains(r4, "DX11LegacyMaterialCompat = 1"),
+              "6e: DX11LegacyMaterialCompat on");
+        Check(FileContains(r4, "PilotTeamRestore = 1"),
+              "6e: PilotTeamRestore on");
+        Check(FileContains(r4, "LegacySectionRemap = 1"),
+              "6e: LegacySectionRemap on");
+        Check(FileContains(r4, "CrashValueGuards = 1"),
+              "6e: CrashValueGuards on");
+        Check(FileContains(r4, "VehicleListModScoping = 0"),
+              "6e: VehicleListModScoping left off");
+        Check(FileContains(r4, "LogUnknownOdfSections = 0"),
+              "6e: LogUnknownOdfSections left off");
+        Check(FileContains(r4, "OpenShimPresetRevision = 5"),
+              "6e: marker becomes 5");
+        Check(FileContains(r4, CurrentRevisionMarker()),
+              "6e: marker is the current revision");
+
+        // A player value already at 1 stays; one that is neither stays too.
+        fs::path r4b = tmpRoot / "rev4_fixes_mixed.ini";
+        WriteLines(r4b, {
+            "; OpenShimPresetRevision = 4",
+            "",
+            "[Fixes]",
+            "AiMultiProducerMakers = 1",
+            "TerrainAtlasRectRepair = 0",
+            "",
+            "[ODF]",
+            "CrashValueGuards = 2",
+        });
+        MigratePresetFileIfNeeded(r4b, canonical);
+        Check(FileContains(r4b, "AiMultiProducerMakers = 1"),
+              "6e: already-on value left alone");
+        Check(FileContains(r4b, "TerrainAtlasRectRepair = 1"),
+              "6e: off value in a mixed file still moves");
+        Check(FileContains(r4b, "CrashValueGuards = 2"),
+              "6e: non-shipped value preserved");
+
+        // An already-current file is not touched again.
+        fs::path r5 = tmpRoot / "rev5_player_off.ini";
+        WriteLines(r5, {
+            "; OpenShimPresetRevision = 5",
+            "",
+            "[Fixes]",
+            "TerrainAtlasRectRepair = 0",
+        });
+        auto r5res = MigratePresetFileIfNeeded(r5, canonical);
+        Check(r5res.action == MigrationAction::None &&
+                  FileContains(r5, "TerrainAtlasRectRepair = 0"),
+              "6e: revision 5 player 0 is respected");
+
+        // A revision 3 file collects the revision 3 -> 4 and 4 -> 5 steps.
+        fs::path r3 = tmpRoot / "rev3_chain.ini";
+        WriteLines(r3, {
+            "; OpenShimPresetRevision = 3",
+            "",
+            "[Network]",
+            "EarlyNakAccept = 0",
+            "",
+            "[SinglePlayer]",
+            "PilotTeamRestore = 0",
+        });
+        MigratePresetFileIfNeeded(r3, canonical);
+        Check(FileContains(r3, "EarlyNakAccept = 1") &&
+                  FileContains(r3, "PilotTeamRestore = 1"),
+              "6e: revision 3 file collects the revision 4 and 5 tables");
+
+        // A revision 1 file collects every table.
+        fs::path r1 = tmpRoot / "rev1_chain.ini";
+        WriteLines(r1, {
+            "; OpenShimPresetRevision = 1",
+            "",
+            "[General]",
+            "SettingsUi = 0",
+            "",
+            "[Network]",
+            "EarlyNakAccept = 0",
+            "",
+            "[ODF]",
+            "LegacySectionRemap = 0",
+        });
+        MigratePresetFileIfNeeded(r1, canonical);
+        Check(FileContains(r1, "SettingsUi = 1") &&
+                  FileContains(r1, "EarlyNakAccept = 1") &&
+                  FileContains(r1, "LegacySectionRemap = 1"),
+              "6e: revision 1 file collects every table");
+    }
+
     // 7. unknown/custom file -> untouched
     {
         fs::path custom = tmpRoot / "custom.ini";

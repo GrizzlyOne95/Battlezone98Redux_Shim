@@ -323,6 +323,19 @@ namespace BZROpenShim
             { "Network", "ReliableRetryIntervalMs", "2500", "800" },
         };
 
+        // Revision 4 -> 5. Seven stock-bug fixes turned on by default at the
+        // user's request on 2026-10-21. Only values still at the old shipped 0
+        // move; a player who set anything else keeps it.
+        const SurgicalEntry kRevision4SurgicalTable[] = {
+            { "Fixes", "AiMultiProducerMakers", "0", "1" },
+            { "Fixes", "ProducerScriptPredicates", "0", "1" },
+            { "Fixes", "TerrainAtlasRectRepair", "0", "1" },
+            { "Fixes", "DX11LegacyMaterialCompat", "0", "1" },
+            { "SinglePlayer", "PilotTeamRestore", "0", "1" },
+            { "ODF", "CrashValueGuards", "0", "1" },
+            { "ODF", "LegacySectionRemap", "0", "1" },
+        };
+
         // Narrow fixups that apply when migrating away from `fromRevision`:
         // that revision's table and every later one, in order, so a file
         // several revisions behind collects each step. Empty for an unknown
@@ -345,6 +358,9 @@ namespace BZROpenShim
             if (fromRevision <= 3)
                 append(kRevision3SurgicalTable,
                        sizeof(kRevision3SurgicalTable) / sizeof(kRevision3SurgicalTable[0]));
+            if (fromRevision <= 4)
+                append(kRevision4SurgicalTable,
+                       sizeof(kRevision4SurgicalTable) / sizeof(kRevision4SurgicalTable[0]));
             return entries;
         }
 

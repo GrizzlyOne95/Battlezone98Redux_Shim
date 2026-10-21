@@ -48,6 +48,18 @@
 //              in bzr_options_ui.cpp and the env-config mapping), so this
 //              only ever affects files carrying an explicit 0.
 //
+//   Revision 5: seven stock-bug fixes turned on by default at the user's
+//              request on 2026-10-21:
+//                 Fixes/AiMultiProducerMakers     = 1  (was 0)
+//                 Fixes/ProducerScriptPredicates  = 1  (was 0)
+//                 Fixes/TerrainAtlasRectRepair    = 1  (was 0)
+//                 Fixes/DX11LegacyMaterialCompat  = 1  (was 0)
+//                 SinglePlayer/PilotTeamRestore   = 1  (was 0)
+//                 ODF/CrashValueGuards            = 1  (was 0)
+//                 ODF/LegacySectionRemap          = 1  (was 0)
+//              Only values still at the old shipped 0 move; a player who set
+//              anything else keeps it. The absent-key defaults are ON as well.
+//
 // Migration policy is implemented here so it works for:
 //   - Campaign Reimagined Workshop users
 //   - standalone OpenShim releases
@@ -62,7 +74,7 @@
 namespace BZROpenShim
 {
 
-    constexpr int kCurrentPresetRevision = 4;
+    constexpr int kCurrentPresetRevision = 5;
     constexpr int kLegacyBadPresetRevision = 1;
 
     // SHA-256 of the exact e81d8b0a player preset as a Windows checkout

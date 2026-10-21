@@ -109,7 +109,7 @@ namespace BZROpenShim
         static constexpr int kMaxPackedTeam = 15;
 
         static bool g_PilotTeamRestoreConfigInitialized = false;
-        static bool g_PilotTeamRestoreEnabled = false;
+        static bool g_PilotTeamRestoreEnabled = true;
         static bool g_PilotTeamRestoreRuntimeActive = false;
         // The offsets above are only trusted once the running build has agreed
         // with them on a case that MUST agree. While the player is in a craft

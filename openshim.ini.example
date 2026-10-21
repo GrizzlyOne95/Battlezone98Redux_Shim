@@ -632,9 +632,8 @@ CliMultiParameterOptions = 1
 ; touched, and only a coordinate with a single strictly-nearest cell is
 ; moved, so a deliberately packed atlas is left exactly as authored. Every
 ; decision is reported in the log under [ATLASFIX].
-; Accepted: boolean. Default: OFF. Restart required.
-; Off until a live run confirms the redirect reaches Redux's atlas parser;
-; the correction itself is verified against all eleven shipped CSVs.
+; Accepted: boolean. Default: ON. Restart required.
+; The correction is verified against all eleven shipped CSVs.
 ; Legacy env aliases: OPENSHIM_TERRAIN_ATLAS_RECT_REPAIR,
 ;                     BZR_TERRAIN_ATLAS_RECT_REPAIR
 TerrainAtlasRectRepair = 1
@@ -664,9 +663,8 @@ EnhancedSchemeFallback = 1
 ; OSE_FixedFunc_* shaders, preserving source pass state through clone
 ; semantics and caching by (material, scheme, lod, source, variant). No mod
 ; files are rewritten; DX9 and native DX11 materials are untouched.
-; Accepted: boolean. Default: ON (reference value; the player preset ships
-; OFF until the live DX11 mod corpus qualifies technique instantiation --
-; the probe fails closed to bounded diagnostics until then).
+; Accepted: boolean. Default: ON. The probe fails closed to bounded
+; diagnostics where technique instantiation is not available.
 ; See also DX11ShaderlessDrawGuard / DX11LegacyMaterialAggressive below.
 DX11LegacyMaterialCompat = 1
 ; DX11 shaderless-draw safety guard. When a draw would reach D3D11 without
@@ -2357,13 +2355,13 @@ PilotFlashlightBone = 11POV
 ; operative guard is not Team::FriendP's `n < 1`; it is the `-1 < param_2` test
 ; one level up in GameObject::FriendP(int), which -1 fails outright.
 ;
-; Confirmed on the scripted test route, not yet on a hand-driven boarding, and
-; it writes to engine state -- so it still ships OFF.
+; Confirmed on the scripted test route. It writes to engine state, and ships
+; ON.
 ;
 ; Stands down for the duration of a network game.
-; Accepted: boolean. Default: OFF.
+; Accepted: boolean. Default: ON.
 ; Env override to enable: OPENSHIM_PILOT_TEAM_RESTORE
-PilotTeamRestore = 0
+PilotTeamRestore = 1
 
 
 
@@ -2583,13 +2581,13 @@ DynamicGeometryMaterialCache = 0
 ; 1.5 tolerated legacy spellings ([MagnetClass], [FlareBuildingClass],
 ; [ScavengerCraftClass], [SprayBuildngClass], bare [GameObject]/[SprayBomb]).
 ; LegacySectionRemap renames those headers to canonical form as ODFs load so
-; legacy mods resolve again. Off by default: stock behavior is Redux-strict.
-LegacySectionRemap = 0
+; legacy mods resolve again. On by default; set 0 for Redux-strict stock parsing.
+LegacySectionRemap = 1
 ; LogUnknownOdfSections reports section headers seen in neither the loader
 ; set nor the retail corpus (once per file+section). Diagnostic only.
 LogUnknownOdfSections = 0
 ; CrashValueGuards clamps ODF values verified to crash engine code
 ; (MagnetMine fieldRadius 0, negative ChargeGun ordnanceCount / Launcher
 ; targetCount) and reports FlareMine/SprayBuilding sections missing
-; payloadName. Off by default.
-CrashValueGuards = 0
+; payloadName. On by default.
+CrashValueGuards = 1
