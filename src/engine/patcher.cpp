@@ -1465,6 +1465,7 @@ namespace BZROpenShim
             } catch (...) {
                 Log(L"[CONFIG] preset migration threw a non-standard exception; openshim.ini used as found\n");
             }
+            OpenShimInvalidateEnvIniCache();
             // If migration migrated or failed, subsequent config reads will
             // either see the new file or (for quarantined settings) the
             // fail-closed in-memory fallback. No further reload is needed
