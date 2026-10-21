@@ -1575,7 +1575,6 @@ namespace BZROpenShim
             {"InitializeGlobalTurboConfig", &InitializeGlobalTurboConfig},
             {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
             {"InitializePilotFlashlightConfig", &InitializePilotFlashlightConfig},
-            {"InstallWeaponPresentationNativeIfRequested", &InstallWeaponPresentationNativeIfRequested},
             {"InitializeVehicleGeometryContact", &GeometryContactTest::InitializeGlobal},
             {"InstallEmissionLightFixIfPossible", &InstallEmissionLightFixIfPossible},
             {"VerifyExpectedOgreExportsIfPossible", &VerifyExpectedOgreExportsIfPossible},

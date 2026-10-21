@@ -31,6 +31,8 @@
 #include "native_chunk_prune.h"
 #include "shell_casing_physics.h"
 #include "shell_casing_config.h"
+#include "shell_casing_policy.h"
+#include "weapon_presentation_call_bridges.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -224,8 +226,12 @@ namespace BZROpenShim
                 int shooterHandle;
                 SC::WeaponKind kind;
                 int ammoCost;
+                SC::CasingType casingType;
                 char odf[20];
             };
+            struct ClassCasing { std::array<char, 20> odf{}; SC::CasingType type = SC::CasingType::None; };
+            std::unordered_map<void*, ClassCasing> g_ClassCasings; // bounded; lookup never allocates
+            bool g_ClassCasingOverflow = false;
             std::array<PendingShot, kMaxPendingShots> g_Pending;
             size_t g_PendingCount = 0;
             uint32_t g_DroppedShots = 0;
@@ -913,7 +919,7 @@ namespace BZROpenShim
                 }
 
                 const SC::KindDefaults defaults = SC::DefaultsFor(shot.kind);
-                const float length = SC::CasingLength(shot.kind, shot.ammoCost);
+                const float length = SC::CasingTypeLength(shot.casingType);
                 SC::EjectParams params;
                 params.barrelLength = defaults.barrelLength;
                 params.speed = defaults.speed;
@@ -1102,12 +1108,23 @@ namespace BZROpenShim
                 g_StatGroundHits = g_StatObjectHits = g_StatSubmits = 0;
             }
 
+            bool CopyCasingOdfSeh(void* objectClass, char* out) noexcept
+            {
+                __try
+                {
+                    const char* name = static_cast<const char*>(objectClass) + kWeaponClassOdfOffset;
+                    size_t i = 0;
+                    for (; i < 16 && name[i] >= 0x20 && name[i] < 0x7f; ++i) out[i] = name[i];
+                    return i > 0;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+            }
+
             // ---- Shot bridge ----------------------------------------------------------
-            void* g_ShellCasingFactory = nullptr;
-            void* g_ShellCasingObserver = nullptr;
+
             volatile LONG g_FirstShotLogged = 0;
 
-            void __cdecl ObserveShellCasingShot(void* weapon, const void* matrix, void* ownerObj76,
+            void __cdecl ObserveShellCasingShot(void* weapon, const WeaponPresentation::Matrix* matrix, void* ownerObj76,
                                                 void* ordnance) noexcept
             {
                 if (!weapon || !matrix || !ordnance || !g_Config.initialized || !g_Config.enabled)
@@ -1122,6 +1139,12 @@ namespace BZROpenShim
                 PendingShot& shot = g_Pending[g_PendingCount];
                 if (!ReadWeaponFieldsSeh(weapon, vtable, weaponClass, shot.odf, shot.ammoCost))
                     return;
+                shot.casingType = g_ClassCasingOverflow ? SC::CasingType::None : SC::StockCasingType(shot.odf);
+                const auto authored = g_ClassCasings.find(weaponClass);
+                if (authored != g_ClassCasings.end() &&
+                    std::strncmp(authored->second.odf.data(), shot.odf, sizeof(shot.odf)) == 0)
+                    shot.casingType = authored->second.type;
+                if (shot.casingType == SC::CasingType::None) { ++g_StatFiltered; return; }
                 shot.kind = KindForVtable(weapon, vtable);
                 bool allowed = false;
                 try
@@ -1156,43 +1179,6 @@ namespace BZROpenShim
                 ++g_PendingCount;
             }
 
-            // Replaces the E8 to the OrdnanceClass factory at both shot sites.
-            // Both callers keep the weapon (their ECX) at [EBP-250h] and pass
-            // the final Matrix* and owner OBJ76 on the stack; the factory is
-            // thiscall on the OrdnanceClass in ECX and returns with RET 8.
-            // The factory runs first and its EAX is returned untouched.
-            __declspec(naked) void ShellCasingShotBridgeImpl()
-            {
-                __asm
-                {
-                    push ebp
-                    mov ebp, esp
-                    push ebx
-                    push esi
-                    push edi
-                    mov esi, dword ptr [ebp]
-                    mov esi, dword ptr [esi - 250h]
-                    mov edi, dword ptr [ebp + 8]
-                    mov ebx, dword ptr [ebp + 0Ch]
-                    push ebx
-                    push edi
-                    call dword ptr [g_ShellCasingFactory]
-                    push eax
-                    push eax
-                    push ebx
-                    push edi
-                    push esi
-                    call dword ptr [g_ShellCasingObserver]
-                    add esp, 10h
-                    pop eax
-                    pop edi
-                    pop esi
-                    pop ebx
-                    mov esp, ebp
-                    pop ebp
-                    ret 8
-                }
-            }
         } // namespace
 
         bool IsShellCasingsEnabled()
@@ -1379,13 +1365,31 @@ namespace BZROpenShim
         void SetShellCasingFactoryOriginal(void* factory)
         {
             InitializeConfig();
-            g_ShellCasingFactory = factory;
-            g_ShellCasingObserver = reinterpret_cast<void*>(&ObserveShellCasingShot);
+            WeaponPresentation::NativeBridges::ConfigureShotFactory(
+                reinterpret_cast<WeaponPresentation::NativeBridges::Factory>(factory), ObserveShellCasingShot);
         }
 
         void* GetShellCasingShotBridgeAddress()
         {
-            return reinterpret_cast<void*>(&ShellCasingShotBridgeImpl);
+            return reinterpret_cast<void*>(&WeaponPresentation::NativeBridges::CannonOrdnanceCallBridge);
+        }
+
+        void ObserveShellCasingClass(void* objectClass, const char* casingType) noexcept
+        {
+            if (!objectClass || !IsShellCasingsEnabled()) return;
+            // The class contains the original ODF filename, not its 8-byte tag.
+            // Copy within SEH before doing any STL work.
+            ClassCasing entry;
+            const bool read = CopyCasingOdfSeh(objectClass, entry.odf.data());
+            try
+            {
+                g_ClassCasings.erase(objectClass);
+                if (!read || !casingType) return; // missing: conservative stock fallback
+                entry.type = SC::ParseCasingType(casingType);
+                if (g_ClassCasings.size() < 512) g_ClassCasings.emplace(objectClass, entry);
+                else g_ClassCasingOverflow = true; // cannot lose an explicit "none" and emit stock brass
+            }
+            catch (...) { g_ClassCasingOverflow = true; }
         }
 
         void EnsureShellCasingAssets(
