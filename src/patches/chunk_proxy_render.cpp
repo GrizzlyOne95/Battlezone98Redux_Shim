@@ -37,6 +37,7 @@
 #include "shadow_far_distance.h"
 #include "sun_flash.h"
 #include "chunk_batch_invalidation.h"
+#include "destruction_finish_bridge.h"
 #include "native_chunk_cache.h"
 #include "ai_range_policy.h"
 #include "lcbench_safety_policy.h"
@@ -285,7 +286,7 @@ namespace BZROpenShim
 
         static int64_t g_GenericChunkBatchQpcFrequency = 0;
 
-        static const std::string g_GenericChunkBatchMaterialName = "scarpmat2";
+        static std::string g_GenericChunkBatchMaterialName = "scarpmat2";
 
         static const std::string g_GenericChunkBatchMaterialGroup = "General";
 
@@ -1447,6 +1448,7 @@ namespace BZROpenShim
 
             slot.sceneNode = sceneNode;
             slot.entity = entity;
+            ApplyDestructionFinish(entity);
             slot.sceneManager = sceneManager;
             g_ChunkMeshProxyLastRetryTick = 0;
             g_ChunkMeshProxyFailureLogged = false;
@@ -3819,6 +3821,7 @@ namespace BZROpenShim
             {
                 if (!g_GenericChunkBatchManualObject)
                 {
+                    g_GenericChunkBatchMaterialName = DestructionFinishMaterial("scarpmat2");
                     void* const rootNode = getRootSceneNode(sceneManager);
                     const OgreVector3 origin = { 0.0f, 0.0f, 0.0f };
                     const OgreQuaternion identity = { 1.0f, 0.0f, 0.0f, 0.0f };

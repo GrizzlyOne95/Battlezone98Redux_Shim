@@ -1,3 +1,4 @@
+#include "openshim_surface_reactions.hlsl"
 // Force OG retro mode to ignore modern map contributions even if a program
 // variant accidentally leaves those feature defines enabled.
 #if defined(OG_RETRO_MODE)
@@ -170,6 +171,7 @@ void base_vertex(
 #endif
 
 	out float2 vTexCoord : TEXCOORD0,
+    out float3 vSurfacePosition : TEXCOORD8,
 
 #if !defined(VERTEX_LIGHTING)
 	out float3 vViewNormal : TEXCOORD1,
@@ -199,6 +201,7 @@ void base_vertex(
 	float3 vViewPosition, vViewNormal;
 #endif
 	vViewPosition = mul(worldViewMat, float4(iPosition.xyz, 1.0)).xyz;
+    vSurfacePosition = vViewPosition;
 	vViewNormal = mul(worldViewMat, float4(iNormal.xyz, 0.0)).xyz;
 #if !defined(VERTEX_LIGHTING) && defined(NORMALMAP_ENABLED) && defined(VERTEX_TANGENTS)
 	vViewTangent = mul(worldViewMat, float4(iTangent.xyz, 0.0)).xyz;
@@ -239,6 +242,7 @@ void base_vertex(
 // -------------------------------------------
 
 void base_fragment(
+    OSE_SURFACE_UNIFORMS
 	uniform sampler2D diffuseMap : register(s0),
 #if defined(NORMALMAP_ENABLED) 
 	uniform sampler2D normalMap : register(s1),
@@ -294,6 +298,7 @@ void base_fragment(
 #endif
 #endif
 	in float2 vTexCoord : TEXCOORD0,
+    in float3 vSurfacePosition : TEXCOORD8,
 #if !defined(VERTEX_LIGHTING)
 	in float3 vViewNormal : TEXCOORD1,
 #if defined(NORMALMAP_ENABLED) && defined(VERTEX_TANGENTS)
@@ -535,10 +540,14 @@ void base_fragment(
 	oColor.xyz = lightResult.xyz * diffuseTex.xyz * diffuseColor.xyz;
 
 #if defined(SPECULARMAP_ENABLED)
-	oColor.xyz += specularResult.xyz;
+	oColor.xyz += specularResult.xyz * (1.0 + saturate(surfaceState.x) * 0.65);
 #elif defined(SPECULAR_ENABLED)
-	oColor.xyz += specularResult.xyz;
+	oColor.xyz += specularResult.xyz * (1.0 + saturate(surfaceState.x) * 0.65);
 #endif
+
+float3 reactiveGlow;
+    oColor.xyz = ose_surface_finish(oColor.xyz, vSurfacePosition, vTexCoord, reactiveGlow, OSE_SURFACE_ARGUMENTS);
+    oColor.xyz += reactiveGlow;
 
 #if defined(EMISSIVEMAP_ENABLED)
 	// emissive texture
@@ -547,9 +556,9 @@ void base_fragment(
 	// Runtime material variants drive this continuously for optional running-light
 	// pulsing. Empty craft use a zero emissive value and remain fully dark.
 	float emissiveIntensity = saturate(max(materialEmissive.x, max(materialEmissive.y, materialEmissive.z)));
-	oColor.xyz += emissiveTex.xyz * emissiveIntensity;
+	oColor.xyz += emissiveTex.xyz * emissiveIntensity * ose_surface_emissive_scale(surfaceState, surfaceMode);
 #else
-	oColor.xyz += emissiveTex.xyz;
+	oColor.xyz += emissiveTex.xyz * ose_surface_emissive_scale(surfaceState, surfaceMode);
 #endif
 #endif
 

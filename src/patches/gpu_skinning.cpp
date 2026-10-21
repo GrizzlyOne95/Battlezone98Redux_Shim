@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <cstring>
 #include <new>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -47,6 +48,7 @@
 
 namespace BZROpenShim
 {
+    int AdoptSurfaceVariantNow(void* entity, unsigned int index, const char* before, const char* after);
     namespace
     {
         using Hooks::ResolveOgreProc;
@@ -293,9 +295,18 @@ namespace BZROpenShim
         {
             std::vector<std::string> originals;
             std::vector<std::string> clones;
+            // Stable GPU templates remain manager-owned until mission teardown.
+            // EXU may release the previous surface variant before we drain its
+            // restoration notification on the render thread.
+            std::vector<std::string> surfaceBases;
             std::vector<int> weights;
         };
         std::unordered_map<void*, EntityRecord> g_converted;
+        DWORD g_variantThread = 0;
+        struct SurfaceVariantChange { unsigned int index; std::string before,after; };
+        std::mutex g_variantMutex;
+        std::unordered_map<void*,std::vector<SurfaceVariantChange>> g_pendingVariants;
+        size_t g_pendingVariantCount=0;
         std::unordered_set<void*> g_rejected;
 
         // Bridge root -> VirtualQuery verdict. Querying every root every frame
@@ -1522,6 +1533,7 @@ namespace BZROpenShim
                 record = {};
                 record.originals.resize(count);
                 record.clones.resize(count);
+                record.surfaceBases.resize(count);
                 record.weights.resize(count);
             }
 
@@ -1560,6 +1572,7 @@ namespace BZROpenShim
                 }
                 record.originals[i] = currentName;
                 record.clones[i] = clone->cloneName;
+                record.surfaceBases[i] = clone->cloneName;
                 record.weights[i] = weights;
                 pending.push_back({ sub, clone });
             }
@@ -1668,6 +1681,12 @@ namespace BZROpenShim
 
         void ScanFrame()
         {
+            g_variantThread = GetCurrentThreadId();
+            std::unordered_map<void*,std::vector<SurfaceVariantChange>> variants;
+            {
+                std::lock_guard<std::mutex> lock(g_variantMutex);
+                variants.swap(g_pendingVariants);g_pendingVariantCount=0;
+            }
             static void* s_objects[Hooks::kGameObjectArenaSlotCapacity];
             const size_t total =
                 Hooks::CollectLiveGameObjectsFromArena(s_objects, Hooks::kGameObjectArenaSlotCapacity);
@@ -1696,6 +1715,12 @@ namespace BZROpenShim
                     const auto converted = g_converted.find(entity);
                     if (converted != g_converted.end())
                     {
+                        // Resolve queued assignments only after the existing
+                        // arena walk has proved this entity is still live.
+                        const auto changes=variants.find(entity);
+                        if (changes!=variants.end())
+                            for (const auto& change:changes->second)
+                                AdoptSurfaceVariantNow(entity,change.index,change.before.c_str(),change.after.c_str());
                         if (EntityOnClones(entity, converted->second))
                             continue;
                         // The game re-assigned a material since last frame:
@@ -1838,6 +1863,11 @@ namespace BZROpenShim
 
         void ReleaseMissionStateCxx()
         {
+            {
+                std::lock_guard<std::mutex> lock(g_variantMutex);
+                g_pendingVariants.clear();g_pendingVariantCount=0;
+            }
+            g_variantThread=0;
             try
             {
                 // Twins first: the instancing layer must find nothing once
@@ -1937,6 +1967,70 @@ namespace BZROpenShim
         g_frame = 0;
         g_active.store(true, std::memory_order_release);
         LogShimA(LogLevel::Info, kComponent, "[GPUSKIN] enabled for mission generation %u", g_generation);
+    }
+
+    // A material owner may clone an already-skinned material to change only
+    // fragment constants/textures. Accept the assignment without cloning its
+    // vertex program again, and without reverting the owner's next update.
+    int AdoptSurfaceVariantNow(
+        void* entity, unsigned int index, const char* before, const char* after)
+    {
+        if (!g_active.load() || g_failed.load() || GetCurrentThreadId()!=g_variantThread ||
+            !entity || !before || !after) return 0;
+        try
+        {
+            auto found=g_converted.find(entity);
+            if (found==g_converted.end() || index>=found->second.clones.size() ||
+                index>=found->second.surfaceBases.size() ||
+                found->second.clones[index]!=before) return 0;
+            void* sub=g_ogre.entitySubEntity(entity,index);
+            const auto* current=sub ? g_ogre.subEntityMaterial(sub) : nullptr;
+            if (!current || !current->rep || NameOf(current->rep)!=after) return 0;
+            SharedPtr original;
+            g_ogre.getMaterialByName(g_ogre.materialManager(),&original,
+                found->second.surfaceBases[index],std::string("Autodetect"));
+            if (!original.rep) return 0;
+            const auto count=g_ogre.getNumTechniques(original.rep);
+            bool same=count<=128 && count==g_ogre.getNumTechniques(current->rep);
+            for (uint16_t t=0;same && t<count;++t)
+            {
+                void* a=g_ogre.getTechnique(original.rep,t);
+                void* b=g_ogre.getTechnique(current->rep,t);
+                const auto pc=g_ogre.getNumPasses(a);
+                same=pc<=32 && pc==g_ogre.getNumPasses(b);
+                for (uint16_t p=0;same && p<pc;++p)
+                {
+                    void* ap=g_ogre.getPass(a,p);void* bp=g_ogre.getPass(b,p);
+                    const bool av=g_ogre.hasVertexProgram(ap),bv=g_ogre.hasVertexProgram(bp);
+                    same=av==bv;
+                    if (same && av) same=g_ogre.getVertexProgram(ap)->rep==g_ogre.getVertexProgram(bp)->rep;
+                }
+            }
+            Release(original);
+            if (!same || !g_ogre.entityHardwareAnimation(entity)) return 0;
+            found->second.clones[index]=after;
+            return 1;
+        }
+        catch (...) { return 0; }
+    }
+
+    extern "C" __declspec(dllexport) int __cdecl OpenShimAdoptSurfaceVariant(
+        void* entity, unsigned int index, const char* before, const char* after)
+    {
+        if (!g_active.load() || !entity || !before || !after || index>=64) return 0;
+        try
+        {
+            if (strnlen_s(before,513)>512 || strnlen_s(after,513)>512) return 0;
+            std::lock_guard<std::mutex> lock(g_variantMutex);
+            auto found=g_pendingVariants.find(entity);
+            if (found!=g_pendingVariants.end())
+                for (auto& change:found->second)
+                    if (change.index==index) { change.after=after;return 1; }
+            if (g_pendingVariantCount>=64) return 0;
+            g_pendingVariants[entity].push_back({index,before,after});++g_pendingVariantCount;
+            return 1;
+        }
+        catch (...) { return 0; }
     }
 
     void GpuSkinningRenderFrameTick()

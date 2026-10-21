@@ -23,7 +23,8 @@ namespace BZROpenShim::RenderProfiles
     //    emulation plus OSE_Compat_* family adapters). A v2 deployment next
     //    to a v3 DLL would enable the compat probe with missing shader
     //    assets, so the pairing must fail closed instead.
-    constexpr char kEnhancedResourcesVersion[] = "3";
+    // 4: reactive surface include and object-local vertex interpolant.
+    constexpr char kEnhancedResourcesVersion[] = "4";
 
     // Repository-relative name of the mandatory resource directory, as laid
     // out under the game install.

@@ -25,6 +25,7 @@ namespace BZROpenShim::RenderProfiles
             "openshim_enhanced_base-fragment.glsl",
             "openshim_enhanced_base-sm3.hlsl",
             "openshim_enhanced_base-sm4.hlsl",
+            "openshim_surface_reactions.hlsl",
             "openshim_enhanced_terrain.program",
             "openshim_enhanced_terrain-vertex.glsl",
             "openshim_enhanced_terrain-fragment.glsl",

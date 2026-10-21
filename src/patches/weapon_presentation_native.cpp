@@ -102,6 +102,18 @@ namespace BZROpenShim::Hooks
             __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
         }
 
+        int WriteMuzzlePoint(float* out, const WP::Matrix& pose) noexcept
+        {
+            __try
+            {
+                out[0] = static_cast<float>(pose.positionX);
+                out[1] = static_cast<float>(pose.positionY);
+                out[2] = static_cast<float>(pose.positionZ);
+                return 1;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+        }
+
         uint64_t NextLifetime() noexcept
         {
             return g_LifetimeSerial == std::numeric_limits<uint64_t>::max()
@@ -946,6 +958,28 @@ namespace BZROpenShim::Hooks
             }
         }
         catch (...) {}
+    }
+
+    // Optional read-only presentation bridge. The point uses precisely the
+    // current, corrected firing mount used by the native muzzle flash adapter.
+    // O(1) carrier-slot lookup; no object/weapon enumeration or native mutation.
+    extern "C" __declspec(dllexport) int __cdecl OpenShimGetWeaponMuzzle(
+        uint32_t handle, int slot, float* outPosition) noexcept
+    {
+        if (!outPosition || slot < 0 || slot >= 5 || !ActiveRuntime()) return 0;
+        void* owner = GameObjectFromHandleGog(static_cast<int>(handle));
+        void* carrier = nullptr;
+        void* weapon = nullptr;
+        if (!owner || !Read(owner, kCarrier, carrier) || !carrier ||
+            !Read(carrier, kCarrierSlots + slot * sizeof(void*), weapon)) return 0;
+        const auto found = g_Weapons.find(weapon);
+        if (found == g_Weapons.end() || found->second.owner.lifetime != handle ||
+            found->second.owner.address != reinterpret_cast<uintptr_t>(owner) || !found->second.token.Valid()) return 0;
+        WP::Matrix pose;
+        if (!CurrentWeaponPose(weapon, found->second, pose)) return 0;
+        pose = WeaponConvergence::Multiply(found->second.correction, pose);
+        if (!WP::ValidPose(pose)) return 0;
+        return WriteMuzzlePoint(outPosition, pose);
     }
 
     void RetireWeaponPresentationNativeBindings() noexcept
