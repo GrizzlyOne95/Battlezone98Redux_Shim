@@ -244,6 +244,21 @@ namespace BZROpenShim
 
         static SRWLOCK g_CareerStatsLock = SRWLOCK_INIT;
 
+        // Kill and death counters not yet in career_stats.cfg, guarded by
+        // g_CareerStatsLock. Loading, rewriting and swapping the whole file on
+        // the game thread for every local kill showed up as a frame hitch in
+        // 40-craft battles; the counters are queued here instead and a worker
+        // writes them once the burst settles (kCareerStatsFlushDelayMs). Every
+        // load merges them, so a save from any other path carries them too,
+        // and a successful save clears them.
+        static std::unordered_map<std::string, int> g_CareerPendingIncrements;
+
+        static HANDLE g_CareerFlushEvent = nullptr;
+
+        static volatile long g_CareerFlushWorkerStarted = 0;
+
+        constexpr DWORD kCareerStatsFlushDelayMs = 1000;
+
         static volatile long g_CareerStatsMpSessionWorkerStarted = 0;
 
         static bool g_CareerStatsMpMatchRecorded = false;
@@ -504,7 +519,7 @@ namespace BZROpenShim
             return "offline";
         }
 
-        static void LoadCareerStatsFile(std::unordered_map<std::string, std::string>& outData)
+        static void ReadCareerStatsFile(std::unordered_map<std::string, std::string>& outData)
         {
             outData.clear();
 
@@ -529,12 +544,33 @@ namespace BZROpenShim
             }
         }
 
+        static void MergeCareerPendingIncrementsLocked(std::unordered_map<std::string, std::string>& data);
+
+        // The file plus any queued counters. Caller holds g_CareerStatsLock.
+        static void LoadCareerStatsFile(std::unordered_map<std::string, std::string>& outData)
+        {
+            ReadCareerStatsFile(outData);
+            MergeCareerPendingIncrementsLocked(outData);
+        }
+
+        static bool WriteCareerStatsFile(const std::unordered_map<std::string, std::string>& data);
+
+        // Caller holds g_CareerStatsLock. `data` came from LoadCareerStatsFile
+        // (or is a deliberate reset), so once it is on disk nothing is pending.
+        static bool SaveCareerStatsFile(const std::unordered_map<std::string, std::string>& data)
+        {
+            if (!WriteCareerStatsFile(data))
+                return false;
+            g_CareerPendingIncrements.clear();
+            return true;
+        }
+
         // Written through a temp file and swapped into place. Truncating the
         // real file first meant a crash mid-write (and this shim ships a crash
         // logger precisely because crashes happen) left career_stats.cfg empty
         // or half-written, losing the player's whole career record. RecordDeath
         // saves often, so that window came around constantly.
-        static bool SaveCareerStatsFile(const std::unordered_map<std::string, std::string>& data)
+        static bool WriteCareerStatsFile(const std::unordered_map<std::string, std::string>& data)
         {
             const std::filesystem::path path = GetCareerStatsPath();
             const std::filesystem::path tempPath =
@@ -625,6 +661,80 @@ namespace BZROpenShim
                                                 int amount)
         {
             data[key] = std::to_string(GetCareerStatsInteger(data, key) + amount);
+        }
+
+        static void MergeCareerPendingIncrementsLocked(std::unordered_map<std::string, std::string>& data)
+        {
+            for (const auto& pending : g_CareerPendingIncrements)
+                IncrementCareerStatsInteger(data, pending.first, pending.second);
+        }
+
+        // Caller holds g_CareerStatsLock.
+        static void QueueCareerIncrementLocked(const std::string& key, int amount)
+        {
+            g_CareerPendingIncrements[key] += amount;
+        }
+
+        static void FlushCareerPendingIncrements(const char* reason)
+        {
+            AcquireSRWLockExclusive(&g_CareerStatsLock);
+            if (!g_CareerPendingIncrements.empty())
+            {
+                std::unordered_map<std::string, std::string> data;
+                LoadCareerStatsFile(data);
+                data["meta.version"] = "1";
+                if (!SaveCareerStatsFile(data))
+                {
+                    const std::string path = GetCareerStatsPath().string();
+                    Log(L"[CAREER] Failed writing queued career stats (%hs): %hs\n",
+                        reason, path.c_str());
+                }
+            }
+            ReleaseSRWLockExclusive(&g_CareerStatsLock);
+        }
+
+        static DWORD WINAPI CareerStatsFlushThreadProc(LPVOID)
+        {
+            while (true)
+            {
+                WaitForSingleObject(g_CareerFlushEvent, INFINITE);
+                // Let a volley's worth of kills land in one write.
+                Sleep(kCareerStatsFlushDelayMs);
+                FlushCareerPendingIncrements("worker");
+            }
+        }
+
+        // Wakes the writer, starting it on first use. If it cannot start,
+        // saves on the calling thread as before the writer existed.
+        static void SignalCareerFlush()
+        {
+            if (InterlockedCompareExchange(&g_CareerFlushWorkerStarted, 1, 0) == 0)
+            {
+                g_CareerFlushEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+                HANDLE threadHandle = g_CareerFlushEvent
+                    ? CreateThread(nullptr, 0, CareerStatsFlushThreadProc, nullptr, 0, nullptr)
+                    : nullptr;
+                if (!threadHandle)
+                {
+                    Log(L"[CAREER] Failed starting career stats writer (err=%lu); saving on the game thread\n",
+                        GetLastError());
+                    if (g_CareerFlushEvent)
+                    {
+                        CloseHandle(g_CareerFlushEvent);
+                        g_CareerFlushEvent = nullptr;
+                    }
+                    InterlockedExchange(&g_CareerFlushWorkerStarted, 2);
+                }
+                else
+                {
+                    CloseHandle(threadHandle);
+                    InterlockedExchange(&g_CareerFlushWorkerStarted, 3);
+                }
+            }
+            if (g_CareerFlushWorkerStarted == 3)
+                SetEvent(g_CareerFlushEvent);
+            else if (g_CareerFlushWorkerStarted == 2)
+                FlushCareerPendingIncrements("no-worker");
         }
 
         static bool EnsureMultiplayerCareerSessionRecordedLocked(
@@ -784,15 +894,40 @@ namespace BZROpenShim
             if (!localDeath && !localKill)
                 return;
 
+            const std::string profileKey = ResolveCareerStatsProfileKey();
+            const std::string missionKey = ResolveCareerStatsMissionKey();
+            const std::string profilePrefix = "profile." + profileKey;
+
             AcquireSRWLockExclusive(&g_CareerStatsLock);
+
+            // The match start is already on disk for this profile and mission:
+            // only counters change, so queue them like the single-player path.
+            if (!missionKey.empty() &&
+                g_CareerStatsMpMatchRecorded &&
+                g_CareerStatsMpMatchProfileKey == profileKey &&
+                g_CareerStatsMpMatchMissionKey == missionKey)
+            {
+                if (localKill)
+                {
+                    QueueCareerIncrementLocked(profilePrefix + ".career.totalKills", 1);
+                    QueueCareerIncrementLocked(profilePrefix + ".career.mpKills", 1);
+                    QueueCareerIncrementLocked(profilePrefix + ".mission." + missionKey + ".kills", 1);
+                }
+                if (localDeath)
+                {
+                    QueueCareerIncrementLocked(profilePrefix + ".career.totalDeaths", 1);
+                    QueueCareerIncrementLocked(profilePrefix + ".career.mpDeaths", 1);
+                    QueueCareerIncrementLocked(profilePrefix + ".mission." + missionKey + ".deaths", 1);
+                }
+                ReleaseSRWLockExclusive(&g_CareerStatsLock);
+                SignalCareerFlush();
+                return;
+            }
 
             std::unordered_map<std::string, std::string> data;
             LoadCareerStatsFile(data);
             data["meta.version"] = "1";
 
-            const std::string profileKey = ResolveCareerStatsProfileKey();
-            const std::string missionKey = ResolveCareerStatsMissionKey();
-            const std::string profilePrefix = "profile." + profileKey;
             const bool previousRecorded = g_CareerStatsMpMatchRecorded;
             const std::string previousProfileKey = g_CareerStatsMpMatchProfileKey;
             const std::string previousMissionKey = g_CareerStatsMpMatchMissionKey;
@@ -1361,38 +1496,30 @@ namespace BZROpenShim
             if (!localDeath && !localKill)
                 return;
 
-            AcquireSRWLockExclusive(&g_CareerStatsLock);
-
-            std::unordered_map<std::string, std::string> data;
-            LoadCareerStatsFile(data);
-            data["meta.version"] = "1";
-
+            // Engine reads stay here on the game thread; only the file work
+            // moves to the writer.
             const std::string profileKey = ResolveCareerStatsProfileKey();
             const std::string missionKey = ResolveCareerStatsMissionKey();
             const std::string profilePrefix = "profile." + profileKey;
 
+            AcquireSRWLockExclusive(&g_CareerStatsLock);
             if (localKill)
             {
-                IncrementCareerStatsInteger(data, profilePrefix + ".career.totalKills", 1);
-                IncrementCareerStatsInteger(data, profilePrefix + ".career.spKills", 1);
+                QueueCareerIncrementLocked(profilePrefix + ".career.totalKills", 1);
+                QueueCareerIncrementLocked(profilePrefix + ".career.spKills", 1);
                 if (!missionKey.empty())
-                    IncrementCareerStatsInteger(data, profilePrefix + ".mission." + missionKey + ".kills", 1);
+                    QueueCareerIncrementLocked(profilePrefix + ".mission." + missionKey + ".kills", 1);
             }
             if (localDeath)
             {
-                IncrementCareerStatsInteger(data, profilePrefix + ".career.totalDeaths", 1);
-                IncrementCareerStatsInteger(data, profilePrefix + ".career.spDeaths", 1);
+                QueueCareerIncrementLocked(profilePrefix + ".career.totalDeaths", 1);
+                QueueCareerIncrementLocked(profilePrefix + ".career.spDeaths", 1);
                 if (!missionKey.empty())
-                    IncrementCareerStatsInteger(data, profilePrefix + ".mission." + missionKey + ".deaths", 1);
+                    QueueCareerIncrementLocked(profilePrefix + ".mission." + missionKey + ".deaths", 1);
             }
-
-            if (!SaveCareerStatsFile(data))
-            {
-                const std::string path = GetCareerStatsPath().string();
-                Log(L"[CAREER] Failed writing single-player career stats file: %hs\n", path.c_str());
-            }
-
             ReleaseSRWLockExclusive(&g_CareerStatsLock);
+
+            SignalCareerFlush();
         }
 
         // One mission play per single-player session. The multiplayer
@@ -1463,6 +1590,9 @@ namespace BZROpenShim
                 break;
             case OpenShimEventType::SimSessionEnded:
                 ClearCareerPendingVictims();
+                // Ended is drained on the next world's first frame; let the
+                // writer take it rather than stall that frame.
+                SignalCareerFlush();
                 break;
             default:
                 break;

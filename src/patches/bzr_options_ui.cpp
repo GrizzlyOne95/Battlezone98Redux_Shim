@@ -1063,6 +1063,7 @@ namespace BZROpenShim
                 return false;
             }
 
+            OpenShimInvalidateEnvIniCache();
             return true;
         }
 

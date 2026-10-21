@@ -562,12 +562,10 @@ namespace BZROpenShim
                 bridgeSnapshot ? bridgeSnapshot->gameObject : nullptr,
             };
 
-            std::unordered_set<uintptr_t> seen;
-            seen.reserve(std::size(candidates));
-            for (const void* candidate : candidates)
+            for (size_t index = 0; index < std::size(candidates); ++index)
             {
-                const uintptr_t key = reinterpret_cast<uintptr_t>(candidate);
-                if (!candidate || !seen.insert(key).second)
+                const void* const candidate = candidates[index];
+                if (!candidate || std::find(candidates, candidates + index, candidate) != candidates + index)
                     continue;
 
                 if (TryGetChunkProxyPosition(
@@ -603,12 +601,10 @@ namespace BZROpenShim
                 slot.sourceRootGameObject,
             };
 
-            std::unordered_set<uintptr_t> seen;
-            seen.reserve(std::size(candidates));
-            for (const void* candidate : candidates)
+            for (size_t index = 0; index < std::size(candidates); ++index)
             {
-                const uintptr_t key = reinterpret_cast<uintptr_t>(candidate);
-                if (!candidate || !seen.insert(key).second)
+                const void* const candidate = candidates[index];
+                if (!candidate || std::find(candidates, candidates + index, candidate) != candidates + index)
                     continue;
 
                 if (TryGetChunkProxyTransform(
@@ -640,17 +636,14 @@ namespace BZROpenShim
                 slot.sourceRootObject,
             };
 
-            std::unordered_set<uintptr_t> seen;
-            seen.reserve(std::size(candidates));
-
             bool found = false;
             double bestScore = 0.0;
             ChunkProxyTransform bestTransform = {};
             const void* bestAnchorObject = nullptr;
-            for (const void* candidate : candidates)
+            for (size_t index = 0; index < std::size(candidates); ++index)
             {
-                const uintptr_t key = reinterpret_cast<uintptr_t>(candidate);
-                if (!candidate || !seen.insert(key).second)
+                const void* const candidate = candidates[index];
+                if (!candidate || std::find(candidates, candidates + index, candidate) != candidates + index)
                     continue;
 
                 ChunkProxyTransform anchorTransform = {};
@@ -694,11 +687,10 @@ namespace BZROpenShim
 
             if (!found)
             {
-                seen.clear();
-                for (const void* candidate : candidates)
+                for (size_t index = 0; index < std::size(candidates); ++index)
                 {
-                    const uintptr_t key = reinterpret_cast<uintptr_t>(candidate);
-                    if (!candidate || !seen.insert(key).second)
+                    const void* const candidate = candidates[index];
+                    if (!candidate || std::find(candidates, candidates + index, candidate) != candidates + index)
                         continue;
 
                     float anchorX = 0.0f;
@@ -4254,6 +4246,7 @@ namespace BZROpenShim
             const uint8_t* objectBytes,
             const void* geomRef,
             const char* geomName,
+            const ChunkBridgeSnapshot& bridgeSnapshot,
             float positionX,
             float positionY,
             float positionZ)
@@ -4305,7 +4298,6 @@ namespace BZROpenShim
                     char resolvedMeshName[sizeof(slot.proofMeshName)] = {};
                     ChunkObjectLinkProbe probe = {};
                     CaptureChunkObjectLinkProbe(objectBytes, probe);
-                    const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
                     const char* preferredMeshName =
                         probe.cachedMeshName[0] ? probe.cachedMeshName : bridgeSnapshot.ownerResolvedMeshName;
                     slot.geomRef = geomRef;
@@ -4357,7 +4349,6 @@ namespace BZROpenShim
             freeSlot->geomRef = geomRef;
             ChunkObjectLinkProbe probe = {};
             CaptureChunkObjectLinkProbe(objectBytes, probe);
-            const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(objectBytes);
             const char* preferredMeshName =
                 probe.cachedMeshName[0] ? probe.cachedMeshName : bridgeSnapshot.ownerResolvedMeshName;
             if (geomName && *geomName)
@@ -4554,12 +4545,66 @@ namespace BZROpenShim
             }
         }
 
+        // Bridge root -> VirtualQuery verdict for the per-tick active-list
+        // walk, the same scheme as gpu_skinning's ScanFrame: querying both
+        // roots of every live chunk every tick was 0.3-0.9 ms of an 80-craft
+        // battle. A readable root stays trusted while it keeps appearing (SEH
+        // still guards the reads); an unreadable one is re-queried every 16
+        // walks. Roots unseen for a walk are dropped.
+        struct ChunkBridgeRootProbe
+        {
+            bool readable = false;
+            uint32_t seenWalk = 0;
+        };
+        static std::unordered_map<const void*, ChunkBridgeRootProbe> g_ChunkBridgeRootProbes;
+        static uint32_t g_ChunkBridgeRootProbeWalk = 0;
+
+        static bool TryReadOgreLinksCached(const void* root, void*& entity, void*& light)
+        {
+            auto [it, inserted] = g_ChunkBridgeRootProbes.try_emplace(root);
+            ChunkBridgeRootProbe& probe = it->second;
+            probe.seenWalk = g_ChunkBridgeRootProbeWalk;
+            if (inserted || (!probe.readable && (g_ChunkBridgeRootProbeWalk % 16) == 0))
+            {
+                probe.readable = ChunkBridgeProbe::TryReadOgreLinks(root, entity, light);
+                return probe.readable;
+            }
+            if (!probe.readable)
+            {
+                entity = nullptr;
+                light = nullptr;
+                return false;
+            }
+            probe.readable = ChunkBridgeProbe::TryReadOgreLinksUnchecked(root, entity, light);
+            return probe.readable;
+        }
+
+        static void PruneChunkBridgeRootProbes()
+        {
+            for (auto it = g_ChunkBridgeRootProbes.begin(); it != g_ChunkBridgeRootProbes.end();)
+            {
+                it = it->second.seenWalk == g_ChunkBridgeRootProbeWalk
+                    ? std::next(it)
+                    : g_ChunkBridgeRootProbes.erase(it);
+            }
+        }
+
+        static bool TryReadSnapshotOgreLinks(const void* root, void*& entity, void*& light, bool useRootCache)
+        {
+            return useRootCache
+                ? TryReadOgreLinksCached(root, entity, light)
+                : ChunkBridgeProbe::TryReadOgreLinks(root, entity, light);
+        }
+
+        static ChunkBridgeSnapshot CaptureChunkBridgeSnapshotImpl(const uint8_t* objectBytes, bool useRootCache);
+
         void TrackChunkEffectActiveEntries(void* thisPtr)
         {
             if ((!g_EnableChunkProxyDebug && !g_EnableChunkMeshProxy && !g_TraceChunkEffectRuntime) || !thisPtr)
                 return;
 
             PruneChunkResolvedBindingsIfNeeded();
+            ++g_ChunkBridgeRootProbeWalk;
 
             const auto* thisBytes = reinterpret_cast<const uint8_t*>(thisPtr);
             __try
@@ -4594,7 +4639,7 @@ namespace BZROpenShim
                         FindChunkResolvedBindingEntryForGeom(entry.objectBytes, geomName);
                     if (binding)
                         TouchChunkResolvedBinding(entry.objectBytes);
-                    const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshot(entry.objectBytes);
+                    const ChunkBridgeSnapshot bridgeSnapshot = CaptureChunkBridgeSnapshotImpl(entry.objectBytes, true);
                     float positionX = 0.0f;
                     float positionY = 0.0f;
                     float positionZ = 0.0f;
@@ -4615,6 +4660,7 @@ namespace BZROpenShim
                         entry.objectBytes,
                         geomRef,
                         geomName,
+                        bridgeSnapshot,
                         positionX,
                         positionY,
                         positionZ);
@@ -4623,6 +4669,7 @@ namespace BZROpenShim
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
             }
+            PruneChunkBridgeRootProbes();
         }
 
         // A proxy slot is keyed by the chunk object's address, and the engine
@@ -4702,7 +4749,7 @@ namespace BZROpenShim
             return address >= 0x00010000 && (address % sizeof(void*)) == 0;
         }
 
-        ChunkBridgeSnapshot CaptureChunkBridgeSnapshot(const uint8_t* objectBytes)
+        static ChunkBridgeSnapshot CaptureChunkBridgeSnapshotImpl(const uint8_t* objectBytes, bool useRootCache)
         {
             ChunkBridgeSnapshot snapshot = {};
             if (!objectBytes)
@@ -4715,8 +4762,8 @@ namespace BZROpenShim
                     snapshot.directBridgeRoot = nullptr;
                 if (snapshot.directBridgeRoot)
                 {
-                    snapshot.directProbeOk = ChunkBridgeProbe::TryReadOgreLinks(
-                        snapshot.directBridgeRoot, snapshot.directOgreEntity, snapshot.directOgreLight);
+                    snapshot.directProbeOk = TryReadSnapshotOgreLinks(
+                        snapshot.directBridgeRoot, snapshot.directOgreEntity, snapshot.directOgreLight, useRootCache);
                 }
                 else
                 {
@@ -4749,8 +4796,8 @@ namespace BZROpenShim
 
                     if (snapshot.ownerBridgeRoot)
                     {
-                        snapshot.ownerProbeOk = ChunkBridgeProbe::TryReadOgreLinks(
-                            snapshot.ownerBridgeRoot, snapshot.ownerOgreEntity, snapshot.ownerOgreLight);
+                        snapshot.ownerProbeOk = TryReadSnapshotOgreLinks(
+                            snapshot.ownerBridgeRoot, snapshot.ownerOgreEntity, snapshot.ownerOgreLight, useRootCache);
                     }
                 }
             }
@@ -4779,6 +4826,11 @@ namespace BZROpenShim
             }
 
             return snapshot;
+        }
+
+        ChunkBridgeSnapshot CaptureChunkBridgeSnapshot(const uint8_t* objectBytes)
+        {
+            return CaptureChunkBridgeSnapshotImpl(objectBytes, false);
         }
 
         static void LogChunkClassProbe(const uint8_t* objectBytes)

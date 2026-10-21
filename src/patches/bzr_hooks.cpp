@@ -265,6 +265,7 @@ namespace BZROpenShim
         static void TickOpenShimEventLayer()
         {
             TickCareerSessionState();
+            TickOdfIndexWorldEdge();
             TickCareerPendingVictims();
             DispatchPendingEvents();
         }
@@ -1585,6 +1586,7 @@ namespace BZROpenShim
             // is only honoured while the P2P socket is still closed.
             {"InitializeBzrNetConfig", &InitializeBzrNetConfig},
             {"InstallBzrNetRouteObserverIfPossible", &InstallBzrNetRouteObserverIfPossible},
+            {"InstallStockLogThrottleIfPossible", &InstallStockLogThrottleIfPossible},
             {"InstallMapFilterExtrasIfEnabled", &InstallMapFilterExtrasIfEnabled},
             {"EnsureInputBindingPopulateHookScaffold", &EnsureInputBindingPopulateHookScaffold},
             {"EnsureOptionsParentCtorHookScaffold", &EnsureOptionsParentCtorHookScaffold},
