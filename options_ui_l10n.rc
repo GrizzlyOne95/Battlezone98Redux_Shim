@@ -1,0 +1,7 @@
+#include "include/options_ui_l10n_resources.h"
+#include <windows.h>
+
+// The options-screen translations ship inside the plugin DLL so a stale or
+// missing loose file can never blank the page; a loose
+// openshim_localization.csv next to openshim.ini overrides it for testing.
+IDR_OPENSHIM_LOCALIZATION RCDATA "resources/localization/openshim_localization.csv"

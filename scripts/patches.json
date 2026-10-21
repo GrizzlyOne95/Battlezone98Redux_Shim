@@ -4406,6 +4406,12 @@
       "identity": "global UI char size Y float"
     },
     {
+      "name": "GameLanguageGet",
+      "address": "0x0081DEE0",
+      "expected": "55 8B EC A1 2C 67 94 00 83 78 4C 00 75 07",
+      "identity": "cdecl int() game language 1..7 (En Fr De Es It Pt Ru): reads the play_options language at [0x0094672C]+0x4C, else the system-LCID mapper FUN_00437380; the localization lookup FUN_0081CB40 indexes its row with this minus one, and the 'Game Language Is' logger FUN_0081DF00 calls it"
+    },
+    {
       "name": "RecycleTaskScrapDistanceCall",
       "address": "0x005B680E",
       "expected": "E8 9D B8 EA FF 83 C4 18 D9 5D BC F3 0F 10 45 BC",
