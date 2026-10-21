@@ -815,6 +815,7 @@ namespace BZROpenShim::Hooks
             const uint32_t slot = HookEngine::ResolveNamedAddress("WeaponPresentation::SetWeapon");
             const uint32_t model = HookEngine::ResolveNamedAddress("WeaponPresentation::ModelPose");
             const uint32_t fire = HookEngine::ResolveNamedAddress("WeaponPresentation::CannonShotCall");
+            const uint32_t machineFire = HookEngine::ResolveNamedAddress("WeaponPresentation::MachineGunShotCall");
             const uint32_t weaponPop = HookEngine::ResolveNamedAddress("WeaponPresentation::WeaponClassPopCall");
             const uint32_t craftPop = HookEngine::ResolveNamedAddress("WeaponPresentation::CraftClassPopCall");
             const uint32_t factory = HookEngine::ResolveNamedAddress("WeaponPresentation::OrdnanceFactory");
@@ -823,9 +824,10 @@ namespace BZROpenShim::Hooks
             const uint32_t find = HookEngine::ResolveNamedAddress("WeaponPresentation::RenderFind");
             const uint32_t update = HookEngine::ResolveNamedAddress("WeaponPresentation::RenderUpdate");
             const uint32_t detach = HookEngine::ResolveNamedAddress("WeaponPresentation::RenderDetach");
-            if (!ctor || !dtor || !sim || !slot || !model || !fire || !weaponPop || !craftPop ||
+            if (!ctor || !dtor || !sim || !slot || !model || !fire || !machineFire || !weaponPop || !craftPop ||
                 !factory || !pop || !rawGet || !find || !update || !detach) return false;
             if (HookEngine::ResolveRelCallTarget(fire) != reinterpret_cast<void*>(factory) ||
+                HookEngine::ResolveRelCallTarget(machineFire) != reinterpret_cast<void*>(factory) ||
                 HookEngine::ResolveRelCallTarget(weaponPop) != reinterpret_cast<void*>(pop) ||
                 HookEngine::ResolveRelCallTarget(craftPop) != reinterpret_cast<void*>(pop)) return false;
             g_RawGet = reinterpret_cast<RawGet>(rawGet);
@@ -855,6 +857,7 @@ namespace BZROpenShim::Hooks
                     modelBytes, sizeof(modelBytes))) return false;
             g_ModelPose = reinterpret_cast<ModelPose>(g_ModelDetour.trampoline);
             if (!ReplaceCall(fire, reinterpret_cast<void*>(Bridges::CannonOrdnanceCallBridge), reinterpret_cast<void*>(factory)) ||
+                !ReplaceCall(machineFire, reinterpret_cast<void*>(Bridges::CannonOrdnanceCallBridge), reinterpret_cast<void*>(factory)) ||
                 !ReplaceCall(weaponPop, reinterpret_cast<void*>(Bridges::WeaponClassScopePopBridge), reinterpret_cast<void*>(pop)) ||
                 !ReplaceCall(craftPop, reinterpret_cast<void*>(Bridges::CraftClassScopePopBridge), reinterpret_cast<void*>(pop))) return false;
             g_Ready = true;
@@ -876,7 +879,7 @@ namespace BZROpenShim::Hooks
             // The bounded authored-ODF path has its own exact-GOG/SP guards;
             // blanket/legacy flashName activation remains unqualified.
             g_AuthoredOdfOnly = !kNativePresentationLiveQualified;
-            LogShimA(LogLevel::Warn, "WEAPONFX", "authored ODF presentation requested; GOG/SP cannon, MuzzleFlash=%d MeshRecoil=%d; assets/config required",
+            LogShimA(LogLevel::Warn, "WEAPONFX", "authored ODF presentation requested; GOG/SP cannon+machinegun, MuzzleFlash=%d MeshRecoil=%d; assets/config required",
                 g_Settings.muzzleFlash, g_Settings.meshRecoil);
             if (!g_MissionSeamInstalled || !ExactGogImage() || !InstallCandidate())
                 LogShimA(LogLevel::Warn, "WEAPONFX", "native candidate inactive: build/site/lifecycle guard failed");

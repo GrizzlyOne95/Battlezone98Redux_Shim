@@ -1634,6 +1634,15 @@
       "identity": "Exact GOG Redux 2.2.301 SHA-256 8d71f56c...3377413; corrected 2026-10-20 after live gatstab shots returned to 0x0048F554 instead of the former, incorrectly labelled 0x005A7195 site. Released-image disassembly and Ghidra identify the accepted cannon burst loop in FUN_0048EFE0. Caller weapon is [EBP-250], copied final Matrix is [EBP-44], owner is weapon+18 and ECX=weapon+0C. E8 calls OrdnanceFactory and following store preserves EAX at [EBP-264]. Full native lifecycle/visual qualification remains gated."
     },
     {
+      "name": "WeaponPresentation::MachineGunShotCall",
+      "pattern": "8B 95 B0 FD FF FF 8B 42 18 50 8D 4D BC 51 8B 95 B0 FD FF FF 8B 4A 0C E8 B1 B1 07 00 89 85 98 FD FF FF 8B 85 98 FD",
+      "offset": 23,
+      "mode": "address",
+      "fallback": "0x0050BE3A",
+      "require_unique": true,
+      "identity": "GOG 2.2.301 accepted MachineGun::Simulate shot, corroborated by the existing Shell Casings MachineGun Shot Call qualification and shipping-image disassembly (2026-10-21). Same weapon [EBP-250], final Matrix [EBP-44], ECX=OrdnanceClass and stack Matrix/owner ABI as Cannon; factory 0x00586FF0 RET 8. The original caller stores returned EAX at [EBP-268]. Reuses the tested factory bridge; exact image and original callee checks remain mandatory, foreign hooks fail closed. Machinegun effects remain pending live qualification."
+    },
+    {
       "name": "WeaponPresentation::WeaponClassPopCall",
       "pattern": "C7 45 FC FF FF FF FF 8D 4D C0 E8 47 77 F7 FF 8B 45 C4 8B 4D F4 64 89",
       "offset": 10,

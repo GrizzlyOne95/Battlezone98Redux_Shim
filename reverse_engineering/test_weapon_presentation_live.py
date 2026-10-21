@@ -43,6 +43,7 @@ class CaptureTests(unittest.TestCase):
             pattern = bytes.fromhex(row["pattern"])
             self.memory[start:start + len(pattern)] = pattern
         for name, target in (("CannonShotCall", "OrdnanceFactory"),
+                             ("MachineGunShotCall", "OrdnanceFactory"),
                              ("WeaponClassPopCall", "PopScope"), ("CraftClassPopCall", "PopScope")):
             site = int(self.static["sites"][name], 0)
             self.static["call_targets"][name] = {"site": hex(site), "bytes": self.read(site, 5).hex(),
@@ -61,9 +62,9 @@ class CaptureTests(unittest.TestCase):
 
     def test_exact_capture_and_trace_guard_coverage(self):
         verified = self.verify()
-        self.assertEqual((len(verified["sites"]), len(verified["calls"]), len(verified["steals"])), (14, 3, 5))
+        self.assertEqual((len(verified["sites"]), len(verified["calls"]), len(verified["steals"])), (15, 4, 5))
         config = trace_config(verified, 42, r"C:\GOG\battlezone98redux.exe", 4096, ["barrel"])
-        self.assertEqual(len(config["guards"]), 14)
+        self.assertEqual(len(config["guards"]), 15)
         self.assertNotIn("activation_qualified", verified)  # bytes alone grant no activation
 
     def test_patched_prologue_rejected(self):

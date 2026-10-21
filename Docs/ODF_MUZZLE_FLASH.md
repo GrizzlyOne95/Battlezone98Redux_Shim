@@ -1,5 +1,20 @@
 # Custom ODF muzzle flashes (trial)
 
+2026-10-21 follow-up: the authored ODF producer now also observes the separately
+qualified MachineGun factory call, covering minigun/chaingun configuration with
+the same tested bridge ABI. Cannon's existing simulation path includes Mortar
+and SniperGun. This extends source coverage, not live qualification: machinegun
+installation/visual behavior remains pending. Exact-GOG/SP/settings guards are
+unchanged. Beam/charge/launcher/detonator/popper producers are not supplied by
+this extension. CR's first 100-weapon inventory and 74 authored selections are
+documented in CR `Docs/WEAPON_PRESENTATION_ROLLOUT.md`.
+
+The machinegun call uses the existing Shell Casings-qualified site and is
+checked for its original OrdnanceFactory callee before any hook is installed.
+Like the existing cannon trial, this fails closed if another producer already
+owns either call; it does not chain or overwrite a foreign Shell Casings hook.
+Both options should not be treated as qualified together.
+
 The `agent/odf-recoil-trial` branches in OpenShim and EXU let a weapon select a
 3D muzzle flash without a mission-specific shot handler. OpenShim supplies the
 accepted cannon shot and muzzle pose; EXU uses the same mesh pool, owner-follow

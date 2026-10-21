@@ -22,7 +22,7 @@ def qualify(executable, catalog):
         raise ValueError("Unexpected PE architecture/base")
     rows = [r for r in json.loads(catalog.read_text())["resolves"]
             if r["name"].startswith("WeaponPresentation::")]
-    if len(rows) != 14:
+    if len(rows) != 15:
         raise ValueError("Native qualification catalog is incomplete")
     image = pe.get_memory_mapped_image()
     sites = {}
@@ -45,6 +45,7 @@ def qualify(executable, catalog):
 
     call_targets = {}
     for name, target in [("CannonShotCall", "OrdnanceFactory"),
+                         ("MachineGunShotCall", "OrdnanceFactory"),
                          ("WeaponClassPopCall", "PopScope"),
                          ("CraftClassPopCall", "PopScope")]:
         va = sites[name]
