@@ -222,6 +222,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # marks infinite, so Ogre culls them. The exe creates no Ogre scene query,
     # so no gameplay decision can read the box.
     "Fixes/RestoreCraftBounds",
+    # Renderer-only DynamicGeometry batching CPU savings; pixel-identical.
+    "Fixes/DynamicGeometryPieceReuse",
+    "Fixes/DynamicGeometryFastSort",
     # MMCSS registration and power-throttling opt-out; scheduling only.
     "Fixes/ThreadScheduling",
     "Fixes/CliMultiParameterOptions",
@@ -387,6 +390,8 @@ $shippingPolicyChecks = @{
     "Fixes/LuaSendLengthUnsigned" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"
     "Fixes/RestoreCraftBounds" = "1"
+    "Fixes/DynamicGeometryPieceReuse" = "1"
+    "Fixes/DynamicGeometryFastSort" = "1"
     "Fixes/ThreadScheduling" = "1"
     "Fixes/ProducerScriptPredicates" = "0"
     "Fixes/VehicleListModScoping" = "0"

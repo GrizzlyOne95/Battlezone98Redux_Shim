@@ -3428,7 +3428,31 @@
       "name": "DynamicGeometryPrepare",
       "address": "0x00678CD0",
       "expected": "55 8B EC 6A FF 68 50 F3 84 00 64 A1 00 00 00 00",
-      "identity": "DynamicGeometry::prepareForSubmit; opt-in Ogre profiler observer"
+      "identity": "DynamicGeometry::prepareForSubmit; Ogre profiler observer and DynamicGeometry piece-reuse frame tick"
+    },
+    {
+      "name": "DynamicGeometryBeginByMaterial",
+      "address": "0x00679D70",
+      "expected": "55 8B EC 83 EC 08 56 89 4D FC F3 0F 10 05 98 24",
+      "identity": "DynamicGeometry::begin(const MaterialPtr&, OperationType, float viewDepth); __thiscall ret 0xC; piece reuse detours it"
+    },
+    {
+      "name": "DynamicGeometryBeginByName",
+      "address": "0x00679BC0",
+      "expected": "55 8B EC 6A FF 68 48 A0 84 00 64 A1 00 00 00 00",
+      "identity": "DynamicGeometry::begin(const String& materialName, OperationType, float viewDepth); __thiscall ret 0xC; piece reuse and material cache detour it"
+    },
+    {
+      "name": "DynamicGeometrySortLess",
+      "address": "0x00678950",
+      "expected": "55 8B EC 51 56 83 7D 08 00 75 0D 83 7D 0C 00 74",
+      "identity": "prepareForSubmit main std::sort comparator (cdecl bool(batch*, batch*)): group, depth key desc, blended, material, op, identity flags, creation index"
+    },
+    {
+      "name": "DynamicGeometryOpaqueSortLess",
+      "address": "0x00678B40",
+      "expected": "55 8B EC 51 56 83 7D 08 00 75 0D 83 7D 0C 00 74",
+      "identity": "prepareForSubmit opaque-run re-sort comparator (cdecl bool(batch*, batch*)): main order without depth key and blended"
     },
     {
       "name": "GetPlayerHandle",

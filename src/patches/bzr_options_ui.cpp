@@ -3272,6 +3272,16 @@ namespace BZROpenShim
               ShimSettingApplyGroup::RestartRequired,
               "Give craft their real bounding boxes so off-screen and distant craft are "
               "skipped by the camera and shadows. Rendering only. Restart required." },
+            { "Effect Batching", "Fixes", "DynamicGeometryPieceReuse", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Add smoke, fire and tracer sprites to the current batch when they would be "
+              "merged into it anyway, instead of opening a new one. Same pixels, less CPU. Restart required." },
+            { "Effect Sort", "Fixes", "DynamicGeometryFastSort", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Sort effect-sprite batches without calling into Ogre for every compare. "
+              "Same order, same pixels. Restart required." },
             { "Net Route", "Network", "RoutePreference", nullptr, 0,
               kShimSettingsNetRouteValues, kShimSettingsNetRouteLabels, 3, 0,
               ShimSettingApplyGroup::BzrNetRoute,
