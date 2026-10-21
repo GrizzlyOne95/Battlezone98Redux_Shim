@@ -274,6 +274,35 @@ rendering. Then the render rate is F = (1000 − S·H) / R.
 5. Defer the fixed tick, instancing and StaticGeometry (levers 6-8) until the
    above have landed; re-measure first.
 
+## Follow-up: levers 2 and 5 prototyped, dropped (2026-10-20)
+
+A prototype put all three trims behind off-by-default switches. It used a
+`Camera::_renderScene` detour to identify the pass, and the private-cull
+suppression path (`processVisibleObject` → skip `Entity::_updateRenderQueue`)
+to drop objects. One clean-arm rep was taken (GpuSkinning 1, PSSM 2048, avtank)
+before the study was stopped. The patch is not on any branch.
+
+| Lever | What it removed | Frame-time effect |
+|---|---|---|
+| Glow trim, terrain kept as occluder | 214 of 26.7k glow submissions a second at idle 80 (only sky: `EARTHGOOD.MAP`, `MILKYWAY.MAP`, `STARS.MAP`) | None measurable |
+| Glow trim, terrain dropped too | 35% (idle 80) to 57% (combat 40) of glow submissions | Within noise, and it lets glow show through terrain: not shippable |
+| Glow trim, small-object cut at 0.03 rad | 0 | None |
+| Far cascade every 2nd / 3rd frame | Cascade-2 submissions 29k → 15k / 10k a second at idle 80; 0 refusals | Within noise. The ceiling is about 0.25-0.33 ms, from cascade 2's 0.5 ms. |
+| Caster cut in cascades 1-2, 0.04 / 0.08 rad | 0 / 727 of about 28k at idle 80; 3-8% in combat 40 | Within noise |
+
+- **Noise:** run-to-run noise at this rep count was about ±0.4 ms, and the base
+  idle-80 run hitched (5.50 ms against 4.81 ms in phase 1). Nothing above is a
+  gain larger than that noise.
+- **Why glow has nothing to give:** BZBase craft carry real emissive maps, and
+  terrain's black-emissive atlas has to stay in the pass as a depth occluder.
+  The glow pass is therefore close to minimal already for this content.
+- **Why the caster cut has nothing to give:** with bounds restored, avtank's
+  radius is about 4.3 m, which is still above 0.04 rad out to about 107 m.
+  Distant casters are what cascade 2 holds, and there are few of them.
+- **Revised levers:** treat lever 5 as dead for stock-like content. Treat
+  lever 2 as at most +5%, not worth a one-frame-stale far cascade until bigger
+  levers land.
+
 ## Reproducing
 
 ```powershell
