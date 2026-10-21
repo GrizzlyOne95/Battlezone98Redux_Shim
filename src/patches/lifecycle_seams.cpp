@@ -21,6 +21,7 @@
 #include "patches.h"
 #include "patcher.h"
 #include "fog_wake_feature.h"
+#include "gpu_instancing.h"
 #include "gpu_skinning.h"
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
@@ -443,6 +444,7 @@ namespace BZROpenShim
                 GeometryContactTest::Clear();
                 PilotFlashlightNotifyMissionRunStateChanged(false);
                 FogWakeNotifyMissionRunStateChanged(false);
+                GpuInstancingNotifyMissionRunStateChanged(false);
                 GpuSkinningNotifyMissionRunStateChanged(false);
                 NotifyExuMissionSimulationState(false);
                 NativeHud::Runtime::ResetMission();

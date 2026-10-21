@@ -59,6 +59,22 @@ namespace BZROpenShim
             int maxBones,
             const std::string& defines = std::string());
 
+        // Per-instance input the instanced transform adds. Ogre's D3D11 input
+        // layout must name every shader input in the vertex declaration, so
+        // the instance index arrives as a declared stream, not SV_InstanceID.
+        constexpr const char* kInstanceBaseInput = "osGpuInstBase";
+        constexpr const char* kInstanceBaseSemantic = "TEXCOORD15";
+
+        // Turns a MakeSkinnedVertexSource result into its instanced twin, for
+        // draws that concatenate several objects' palettes: widens the palette
+        // to maxBones, adds a per-instance `float osGpuInstBase : TEXCOORD15`
+        // holding the instance's first palette bone, and offsets every blend
+        // index by it. Refuses (ok == false) when the text is not exactly one
+        // skinned entry, or already uses TEXCOORD15.
+        SkinnedSourceResult MakeInstancedSkinnedVertexSource(
+            const std::string& skinnedSource,
+            int maxBones);
+
         // FNV-1a over the text, for program names: Ogre's microcode cache is
         // keyed by program name, so a name must change when its source does.
         unsigned long long HashText(const std::string& text);

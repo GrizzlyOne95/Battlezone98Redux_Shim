@@ -883,6 +883,440 @@ namespace BZROpenShim
             return written;
         }
 
+        // ------------------------------------------------------------------
+        // Instanced twins, for gpu_instancing.cpp. Each clone gets a second
+        // clone whose eligible passes bind an instanced variant of their
+        // skinned programs (a 256-bone palette indexed from a per-instance
+        // base). A twin is never bound to an entity: the instancing layer
+        // reaches it only through g_twinPasses, at draw time.
+
+        constexpr const char* kTwinRoot = "OpenShim/GpuInst/";
+        constexpr int kInstancedMaxBones = 256;
+
+        // Ogre::GpuConstantDefinition (x86): the fields read here.
+        struct GpuConstantDefinition
+        {
+            int constType;
+            uint32_t physicalIndex;
+            uint32_t logicalIndex;
+            uint32_t elementSize;
+            uint32_t arraySize;
+        };
+
+        struct TwinApi
+        {
+            FnBool hasFragmentProgram = nullptr;
+            FnSharedByValue getFragmentProgramParameters = nullptr;
+            FnBool iteratePerLight = nullptr;
+            FnBool isTransparent = nullptr;
+            FnU16 startLight = nullptr;
+            FnU32 lightMask = nullptr;
+        };
+        TwinApi g_twinApi;
+        bool g_twinApiResolved = false;
+        bool g_twinApiAvailable = false;
+
+        // Read with the mission's other settings.
+        bool g_buildTwins = false;
+
+        struct TwinRecord
+        {
+            std::string name;
+            SharedPtr material;
+        };
+        // By clone name.
+        std::unordered_map<std::string, TwinRecord> g_twins;
+        struct TwinPass
+        {
+            void* pass;
+            GpuSkinningTwinLights lights;
+        };
+        // Clone pass -> twin pass, for every pass that has a usable twin.
+        std::unordered_map<const void*, TwinPass> g_twinPasses;
+        // Skinned program name -> instanced program name, or empty after a failure.
+        std::unordered_map<std::string, std::string> g_instancedPrograms;
+
+        struct TwinStats
+        {
+            uint32_t twins = 0;
+            uint32_t passes = 0;
+            uint32_t refusedPasses = 0;
+            uint32_t failedTwins = 0;
+        };
+        TwinStats g_twinStats;
+
+        bool ResolveTwinApi()
+        {
+            if (g_twinApiResolved)
+                return g_twinApiAvailable;
+            g_twinApiResolved = true;
+            TwinApi& t = g_twinApi;
+            t.hasFragmentProgram = ResolveOgreProc<FnBool>("?hasFragmentProgram@Pass@Ogre@@QBE_NXZ");
+            t.getFragmentProgramParameters = ResolveOgreProc<FnSharedByValue>(
+                "?getFragmentProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@XZ");
+            t.iteratePerLight = ResolveOgreProc<FnBool>("?getIteratePerLight@Pass@Ogre@@QBE_NXZ");
+            t.isTransparent = ResolveOgreProc<FnBool>("?isTransparent@Pass@Ogre@@QBE_NXZ");
+            // Optional: without them every twin compares whole light lists.
+            t.startLight = ResolveOgreProc<FnU16>("?getStartLight@Pass@Ogre@@QBEGXZ");
+            t.lightMask = ResolveOgreProc<FnU32>("?getLightMask@Pass@Ogre@@QBEIXZ");
+            g_twinApiAvailable = t.hasFragmentProgram && t.getFragmentProgramParameters &&
+                t.iteratePerLight && t.isTransparent;
+            if (!g_twinApiAvailable)
+                LogShimA(LogLevel::Warn, kComponent, "[GPUINST] twins disabled: OgreMain exports missing");
+            return g_twinApiAvailable;
+        }
+
+        // Auto constants whose value depends on the renderable being drawn
+        // (Ogre's GPV_PER_OBJECT set plus the object-space light and texture
+        // projections, which read the world matrix). One instanced draw
+        // supplies the leader's value for every instance, so a pass using
+        // any of them, other than the palette itself, cannot be instanced.
+        bool IsObjectDependentAuto(int type)
+        {
+            switch (type)
+            {
+            case 0: case 1: case 2: case 3: case 4: case 5: case 6: case 7:
+            case 20: case 21: case 22: case 23: case 24: case 25: case 26: case 27:
+            case 45: case 48: case 50: case 60: case 63: case 65:
+            case 79: case 82: case 83: case 86: case 87:
+            case 88: case 120: case 131:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        // `palette` is the bone palette's physical index, or null when the
+        // parameters must have no per-object binding at all.
+        bool ParametersInstanceable(void* params, const uint32_t* palette, std::string& detail)
+        {
+            const uint32_t count = g_ogre.getAutoConstantCount(params);
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                const AutoConstantEntry* entry = g_ogre.getAutoConstantEntry(params, i);
+                if (!entry || !IsObjectDependentAuto(entry->paramType))
+                    continue;
+                if (palette && entry->paramType == kActWorldMatrixArray3x4 && entry->physicalIndex == *palette)
+                    continue;
+                detail = "auto=" + std::to_string(entry->paramType);
+                return false;
+            }
+            return true;
+        }
+
+        // Widens `use` to the light list entries these parameters read
+        // (AutoConstantType, OgreGpuProgramParams.h 1.10). Indexed values read
+        // entry `data`; arrays read the first `data` entries. Object-space
+        // light values never get here: IsObjectDependentAuto refuses them.
+        void AccumulateLightUse(void* params, GpuSkinningTwinLights& use)
+        {
+            const uint32_t count = params ? g_ogre.getAutoConstantCount(params) : 0;
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                const AutoConstantEntry* entry = g_ogre.getAutoConstantEntry(params, i);
+                if (!entry)
+                    continue;
+                uint32_t depth = 0;
+                switch (entry->paramType)
+                {
+                case 38:   // light_count
+                    use.count = true;
+                    break;
+                case 40: case 41: case 42: case 43: case 44: case 46: case 47: case 49:
+                case 51: case 52: case 53: case 70: case 71: case 74: case 75: case 77:
+                case 84: case 132:
+                    depth = entry->data + 1;
+                    break;
+                case 54: case 55: case 56: case 57: case 58: case 59: case 61: case 62:
+                case 64: case 66: case 67: case 72: case 73: case 76: case 85:
+                    depth = entry->data;
+                    break;
+                default:
+                    // A type newer than ACT_LIGHT_CUSTOM may be per light.
+                    if (entry->paramType > 132)
+                    {
+                        depth = 0xFFFF;
+                        use.count = true;
+                    }
+                    break;
+                }
+                if (depth > use.depth)
+                    use.depth = static_cast<uint16_t>(depth > 0xFFFF ? 0xFFFF : depth);
+            }
+        }
+
+        bool PrepareInstancedParameters(void* params, std::string& detail)
+        {
+            const std::string bones = GpuSkinning::kBonePaletteUniform;
+            const auto* palette = params
+                ? static_cast<const GpuConstantDefinition*>(g_ogre.findNamedConstant(params, bones, false))
+                : nullptr;
+            if (!palette || palette->arraySize < static_cast<uint32_t>(kInstancedMaxBones * 3))
+            {
+                detail = "palette";
+                return false;
+            }
+            // Re-issue the binding so its element count covers the wider array.
+            g_ogre.setNamedAutoConstant(params, bones, kActWorldMatrixArray3x4, 0);
+            return ParametersInstanceable(params, &palette->physicalIndex, detail);
+        }
+
+        // Returns the instanced variant of one of this file's skinned
+        // programs, creating and compiling it once; empty on refusal.
+        std::string InstancedProgramFor(void* program, std::string& detail)
+        {
+            void* concrete = ConcreteProgram(program);
+            const std::string skinnedName = NameOf(concrete);
+            if (!concrete || !StartsWith(skinnedName, kProgramRoot))
+            {
+                detail = "not a skinned program";
+                return {};
+            }
+            const auto cached = g_instancedPrograms.find(skinnedName);
+            if (cached != g_instancedPrograms.end())
+            {
+                if (cached->second.empty())
+                    detail = "program refused earlier";
+                return cached->second;
+            }
+            std::string& slot = g_instancedPrograms[skinnedName];
+
+            const std::string* source = g_ogre.programSource(concrete);
+            const GpuSkinning::SkinnedSourceResult instanced = source
+                ? GpuSkinning::MakeInstancedSkinnedVertexSource(*source, kInstancedMaxBones)
+                : GpuSkinning::SkinnedSourceResult{};
+            if (!instanced.ok)
+            {
+                detail = skinnedName + " " + (source ? instanced.error : std::string("no source"));
+                return {};
+            }
+            const std::string target = GetParameter(concrete, "target");
+            const std::string entry = GetParameter(concrete, "entry_point");
+            const std::string defines = GetParameter(concrete, "preprocessor_defines");
+            const std::string columnMajor = GetParameter(concrete, "column_major_matrices");
+            char hash[17];
+            sprintf_s(hash, "%016llx", GpuSkinning::HashText(
+                instanced.source + "\n" + target + "\n" + entry + "\n" + defines + "\n" + columnMajor));
+            const std::string name = std::string(kProgramRoot) + "inst/" + hash;
+
+            void* manager = g_ogre.programManager();
+            if (!manager)
+            {
+                detail = "no program manager";
+                return {};
+            }
+            const std::string& group = *g_ogre.resourceGroup(concrete);
+            SharedPtr existing;
+            g_ogre.getProgramByName(manager, &existing, name, group);
+            if (existing.rep)
+            {
+                const bool usable = !g_ogre.programCompileError(existing.rep);
+                Release(existing);
+                if (!usable)
+                {
+                    detail = "compile error " + name;
+                    return {};
+                }
+                slot = name;
+                return name;
+            }
+
+            SharedPtr created;
+            g_ogre.createProgram(manager, &created, name, group, std::string("hlsl"), kGpuProgramTypeVertex);
+            if (!created.rep)
+            {
+                detail = "create failed " + name;
+                return {};
+            }
+            g_ogre.setProgramSource(created.rep, instanced.source);
+            bool parametersSet =
+                g_ogre.setParameter(created.rep, std::string("target"), target) &&
+                g_ogre.setParameter(created.rep, std::string("entry_point"), entry);
+            if (!defines.empty())
+                parametersSet = g_ogre.setParameter(created.rep, std::string("preprocessor_defines"), defines) && parametersSet;
+            if (!columnMajor.empty())
+                parametersSet = g_ogre.setParameter(created.rep, std::string("column_major_matrices"), columnMajor) && parametersSet;
+            g_ogre.setProgramSkeletal(created.rep, true);
+            if (parametersSet)
+                g_ogre.loadResource(created.rep, false);
+            const bool compiled = parametersSet && !g_ogre.programCompileError(created.rep);
+            Release(created);
+            if (!compiled)
+            {
+                detail = "compile error " + name + " from " + skinnedName;
+                return {};
+            }
+            LogShimA(LogLevel::Info, kComponent, "[GPUINST] program %s from %s", name.c_str(), skinnedName.c_str());
+            slot = name;
+            return name;
+        }
+
+        // Rebinds one twin pass to instanced programs. The pass starts as an
+        // exact copy of the clone's.
+        bool ConvertTwinPass(void* pass, GpuSkinningTwinLights& lights, std::string& detail)
+        {
+            if (g_twinApi.iteratePerLight(pass) || g_twinApi.isTransparent(pass))
+            {
+                detail = "per-light or transparent pass";
+                return false;
+            }
+            if (g_twinApi.hasFragmentProgram(pass))
+            {
+                SharedPtr fragmentParams;
+                g_twinApi.getFragmentProgramParameters(pass, &fragmentParams);
+                const bool ok = fragmentParams.rep && ParametersInstanceable(fragmentParams.rep, nullptr, detail);
+                Release(fragmentParams);
+                if (!ok)
+                {
+                    detail = "fragment " + detail;
+                    return false;
+                }
+            }
+            const SharedPtr* program = g_ogre.getVertexProgram(pass);
+            const std::string instanced = InstancedProgramFor(program ? program->rep : nullptr, detail);
+            if (instanced.empty())
+                return false;
+
+            const std::string casterSkinned = *g_ogre.getShadowCasterVertexProgramName(pass);
+            void* manager = g_ogre.programManager();
+            SharedPtr casterProgram;
+            if (manager && !casterSkinned.empty())
+                g_ogre.getProgramByName(manager, &casterProgram, casterSkinned, std::string("Autodetect"));
+            const std::string casterInstanced = casterProgram.rep
+                ? InstancedProgramFor(casterProgram.rep, detail) : std::string();
+            Release(casterProgram);
+            if (casterInstanced.empty())
+            {
+                detail = "caster " + detail;
+                return false;
+            }
+
+            // As in ConvertPass, rebinding recreates the parameters and copies
+            // every matching constant and auto binding across.
+            g_ogre.setVertexProgram(pass, instanced, false);
+            SharedPtr params;
+            g_ogre.getVertexProgramParameters(pass, &params);
+            const bool mainReady = PrepareInstancedParameters(params.rep, detail);
+            Release(params);
+            if (!mainReady)
+                return false;
+
+            g_ogre.setShadowCasterVertexProgram(pass, casterInstanced);
+            SharedPtr casterParams;
+            g_ogre.getShadowCasterVertexProgramParameters(pass, &casterParams);
+            const bool casterReady = PrepareInstancedParameters(casterParams.rep, detail);
+            if (!casterReady)
+            {
+                Release(casterParams);
+                detail = "caster " + detail;
+                return false;
+            }
+
+            // Ogre filters the light list itself when a pass starts past the
+            // first light or masks lights; batching then keys on all of it.
+            if (!g_twinApi.startLight || !g_twinApi.lightMask ||
+                g_twinApi.startLight(pass) != 0 || g_twinApi.lightMask(pass) != 0xFFFFFFFFu)
+            {
+                Release(casterParams);
+                return true;
+            }
+            lights.depth = 0;
+            lights.count = false;
+            AccumulateLightUse(casterParams.rep, lights);
+            Release(casterParams);
+            g_ogre.getVertexProgramParameters(pass, &params);
+            AccumulateLightUse(params.rep, lights);
+            Release(params);
+            if (g_twinApi.hasFragmentProgram(pass))
+            {
+                SharedPtr fragmentParams;
+                g_twinApi.getFragmentProgramParameters(pass, &fragmentParams);
+                AccumulateLightUse(fragmentParams.rep, lights);
+                Release(fragmentParams);
+            }
+            return true;
+        }
+
+        void BuildInstancedTwin(const CloneRecord& record)
+        {
+            if (!g_buildTwins || !record.clone.rep || g_twins.count(record.cloneName) || !ResolveTwinApi())
+                return;
+            TwinRecord& twin = g_twins[record.cloneName];
+            twin.name = std::string(kTwinRoot) + record.cloneName.substr(std::strlen(kCloneRoot));
+            g_ogre.cloneMaterial(record.clone.rep, &twin.material, twin.name, false, std::string());
+            if (!twin.material.rep)
+            {
+                ++g_twinStats.failedTwins;
+                LogRejectOnce("twin:" + record.cloneName, Reject::CloneFailed, "instanced twin clone failed");
+                return;
+            }
+
+            std::vector<std::pair<const void*, TwinPass>> pairs;
+            uint16_t supported = 0;
+            const uint16_t techniques = g_ogre.getNumTechniques(record.clone.rep);
+            for (uint16_t t = 0; t < techniques; ++t)
+            {
+                void* cloneTechnique = g_ogre.getTechnique(record.clone.rep, t);
+                void* twinTechnique = g_ogre.getTechnique(twin.material.rep, t);
+                if (!cloneTechnique || !twinTechnique || !g_ogre.techniqueSupported(cloneTechnique))
+                    continue;
+                ++supported;
+                const uint16_t passes = g_ogre.getNumPasses(cloneTechnique);
+                if (g_ogre.getNumPasses(twinTechnique) != passes)
+                    continue;
+                for (uint16_t p = 0; p < passes; ++p)
+                {
+                    void* clonePass = g_ogre.getPass(cloneTechnique, p);
+                    void* twinPass = g_ogre.getPass(twinTechnique, p);
+                    std::string detail;
+                    TwinPass converted{ twinPass, {} };
+                    if (clonePass && twinPass && ConvertTwinPass(twinPass, converted.lights, detail))
+                    {
+                        pairs.emplace_back(clonePass, converted);
+                        continue;
+                    }
+                    ++g_twinStats.refusedPasses;
+                    if (g_loggedRejects.size() <= 256 && g_loggedRejects.insert("twin-pass:" + detail).second)
+                    {
+                        LogShimA(LogLevel::Info, kComponent, "[GPUINST] pass not instanced: %s pass=%u/%u %s",
+                            record.cloneName.c_str(), t, p, detail.c_str());
+                    }
+                }
+            }
+
+            g_ogre.loadResource(twin.material.rep, false);
+            if (pairs.empty() || g_ogre.getNumSupportedTechniques(twin.material.rep) != supported)
+            {
+                if (!pairs.empty())
+                {
+                    ++g_twinStats.failedTwins;
+                    LogShimA(LogLevel::Info, kComponent, "[GPUINST] twin %s lost technique support",
+                        twin.name.c_str());
+                }
+                Release(twin.material);
+                RemoveMaterial(twin.name);
+                return;
+            }
+            for (const auto& pair : pairs)
+                g_twinPasses[pair.first] = pair.second;
+            ++g_twinStats.twins;
+            g_twinStats.passes += static_cast<uint32_t>(pairs.size());
+        }
+
+        void ReleaseTwins()
+        {
+            g_twinPasses.clear();
+            for (auto& entry : g_twins)
+            {
+                if (!entry.second.material.rep)
+                    continue;
+                Release(entry.second.material);
+                RemoveMaterial(entry.second.name);
+            }
+            g_twins.clear();
+            g_instancedPrograms.clear();
+        }
+
         // Returns the clone (borrowed) for a source material, or null. With
         // `asCaster` the source is a technique's shadow_caster_material and
         // the clone's passes become skinned casters.
@@ -986,6 +1420,9 @@ namespace BZROpenShim
             ++g_stats.clones;
             record.error = {};
             error = {};
+            // Caster clones (from #538) never had twins; keep it that way.
+            if (!asCaster)
+                BuildInstancedTwin(record);
             return &record;
         }
 
@@ -1391,12 +1828,21 @@ namespace BZROpenShim
                 "[GPUSKIN] mission summary: converted=%u reconverted=%u reverted=%u clones=%u programs=%u reused=%u rejects={%s}",
                 g_stats.converted, g_stats.reconverted, g_stats.reverted, g_stats.clones,
                 g_stats.programs, g_stats.programsReused, rejects.c_str());
+            if (g_buildTwins)
+            {
+                LogShimA(LogLevel::Info, kComponent,
+                    "[GPUINST] twin summary: twins=%u passes=%u refused_passes=%u failed=%u",
+                    g_twinStats.twins, g_twinStats.passes, g_twinStats.refusedPasses, g_twinStats.failedTwins);
+            }
         }
 
         void ReleaseMissionStateCxx()
         {
             try
             {
+                // Twins first: the instancing layer must find nothing once
+                // the clones they copy are gone.
+                ReleaseTwins();
                 for (auto& entry : g_clones)
                 {
                     if (!entry.second.clone.rep)
@@ -1429,6 +1875,36 @@ namespace BZROpenShim
                 return true;
             return EnvFlagEnabled("OPENSHIM_GPU_SKINNING");
         }
+
+        bool ReadInstancingSetting()
+        {
+            bool enabled = false;
+            if (TryGetUserConfigBool("Experimental", "GpuInstancing", enabled))
+                return enabled;
+            return EnvFlagEnabled("OPENSHIM_GPU_INSTANCING");
+        }
+    }
+
+    bool GpuSkinningInstancingActive()
+    {
+        return g_buildTwins && g_active.load(std::memory_order_acquire) &&
+            !g_failed.load(std::memory_order_acquire);
+    }
+
+    void* GpuSkinningInstancedTwinPass(const void* pass, GpuSkinningTwinLights* lights)
+    {
+        if (!GpuSkinningInstancingActive())
+            return nullptr;
+        const auto twin = g_twinPasses.find(pass);
+        if (twin == g_twinPasses.end())
+            return nullptr;
+        *lights = twin->second.lights;
+        return twin->second.pass;
+    }
+
+    uint32_t GpuSkinningGeneration()
+    {
+        return g_generation;
     }
 
     void GpuSkinningNotifyMissionRunStateChanged(bool running)
@@ -1455,6 +1931,8 @@ namespace BZROpenShim
             return;
         ++g_generation;
         g_stats = {};
+        g_buildTwins = ReadInstancingSetting();
+        g_twinStats = {};
         g_loggedRejects.clear();
         g_frame = 0;
         g_active.store(true, std::memory_order_release);

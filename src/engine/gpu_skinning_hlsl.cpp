@@ -963,5 +963,77 @@ namespace BZROpenShim
             result.ok = true;
             return result;
         }
+
+        SkinnedSourceResult MakeInstancedSkinnedVertexSource(const std::string& skinnedSource, int maxBones)
+        {
+            SkinnedSourceResult result;
+            if (maxBones < 1 || maxBones > 256)
+            {
+                result.error = "max bones out of range";
+                return result;
+            }
+            std::string upper = skinnedSource;
+            for (char& c : upper)
+                c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            if (upper.find(kInstanceBaseSemantic) != std::string::npos)
+            {
+                result.error = "source already uses TEXCOORD15";
+                return result;
+            }
+
+            const std::string palette = std::string("uniform float4 ") + kBonePaletteUniform + "[";
+            const size_t paletteAt = skinnedSource.find(palette);
+            if (paletteAt == std::string::npos || skinnedSource.find(palette, paletteAt + 1) != std::string::npos)
+            {
+                result.error = "bone palette not found exactly once";
+                return result;
+            }
+            const size_t countAt = paletteAt + palette.size();
+            const size_t countEnd = skinnedSource.find(']', countAt);
+            if (countEnd == std::string::npos)
+            {
+                result.error = "bone palette size not closed";
+                return result;
+            }
+            const std::string weightsInput = "in float4 osGpuSkinWeights : BLENDWEIGHT,";
+            const size_t weightsAt = skinnedSource.find(weightsInput);
+            if (weightsAt == std::string::npos || weightsAt < countEnd)
+            {
+                result.error = "blend weight input not found";
+                return result;
+            }
+
+            std::string out = skinnedSource.substr(0, countAt) + std::to_string(maxBones * 3);
+            out.append(skinnedSource, countEnd, weightsAt + weightsInput.size() - countEnd);
+            out += std::string("\n\tin float ") + kInstanceBaseInput + " : " + kInstanceBaseSemantic + ",";
+            std::string rest = skinnedSource.substr(weightsAt + weightsInput.size());
+
+            const std::string rowPrefix = "uint osGpuSkinRow = osGpuSkinIndices.";
+            size_t rewrites = 0;
+            for (size_t at = rest.find(rowPrefix); at != std::string::npos; at = rest.find(rowPrefix, at + 1))
+            {
+                const size_t laneAt = at + rowPrefix.size();
+                const std::string tail = " * 3;";
+                if (laneAt >= rest.size() || rest.compare(laneAt + 1, tail.size(), tail) != 0)
+                {
+                    result.error = "unexpected palette row expression";
+                    return result;
+                }
+                const std::string replacement = std::string("uint osGpuSkinRow = (osGpuSkinIndices.") +
+                    rest[laneAt] + " + (uint)" + kInstanceBaseInput + ") * 3;";
+                rest.replace(at, laneAt + 1 + tail.size() - at, replacement);
+                at += replacement.size() - 1;
+                ++rewrites;
+            }
+            if (rewrites == 0)
+            {
+                result.error = "no palette row to offset";
+                return result;
+            }
+            out += rest;
+            result.source = std::move(out);
+            result.ok = true;
+            return result;
+        }
     }
 }

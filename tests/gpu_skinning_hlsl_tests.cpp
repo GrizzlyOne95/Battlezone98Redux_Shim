@@ -241,6 +241,39 @@ int main()
               "entry name match respects identifier boundaries");
     }
 
+    // Instanced twins of skinned output.
+    {
+        const SkinnedSourceResult skinned = MakeSkinnedVertexSource(kBaseLike, "base_vertex", 3, 64);
+        const SkinnedSourceResult r = MakeInstancedSkinnedVertexSource(skinned.source, 256);
+        Check(r.ok, "skinned source gets an instanced twin");
+        Check(Contains(r.source, "uniform float4 osGpuSkinBones[768]") && !Contains(r.source, "[192]"),
+              "instanced palette is widened");
+        Check(Contains(r.source, "in float osGpuInstBase : TEXCOORD15,"), "adds the per-instance base input");
+        Check(CountOf(r.source, "(osGpuSkinIndices.") == 3 &&
+              Contains(r.source, "uint osGpuSkinRow = (osGpuSkinIndices.z + (uint)osGpuInstBase) * 3;"),
+              "every blend index is offset by the instance base");
+        Check(!Contains(r.source, "osGpuSkinRow = osGpuSkinIndices."), "no row is left unoffset");
+        Check(r.source.find("osGpuInstBase : TEXCOORD15") < r.source.find("out float4 oPosition"),
+              "instance input stays in the parameter list");
+    }
+    {
+        const SkinnedSourceResult skinned = MakeSkinnedVertexSource(kTexturedLike, "textured_vertex", 4, 64);
+        const SkinnedSourceResult r = MakeInstancedSkinnedVertexSource(skinned.source, 128);
+        Check(r.ok && Contains(r.source, "osGpuSkinBones[384]") && CountOf(r.source, "+ (uint)osGpuInstBase") == 4,
+              "four weights offset four rows");
+    }
+    {
+        const std::string texcoord15 =
+            "void vs(float4 p : POSITION, float2 t : texcoord15, out float4 o : SV_POSITION) { o = p; }\n";
+        const SkinnedSourceResult skinned = MakeSkinnedVertexSource(texcoord15, "vs", 2, 8);
+        Check(skinned.ok && !MakeInstancedSkinnedVertexSource(skinned.source, 256).ok,
+              "an existing TEXCOORD15 input refuses instancing");
+    }
+    Check(!MakeInstancedSkinnedVertexSource(kTexturedLike, 256).ok, "unskinned source is refused");
+    Check(!MakeInstancedSkinnedVertexSource(
+              MakeSkinnedVertexSource(kTexturedLike, "textured_vertex", 1, 8).source, 257).ok,
+          "palette over 256 bones is refused");
+
     Check(HashText("abc") == HashText("abc") && HashText("abc") != HashText("abd"), "hash is stable and source-sensitive");
     Check(HashText("") == 1469598103934665603ULL, "hash is FNV-1a 64");
     return OpenShimTest::ExitCode();
