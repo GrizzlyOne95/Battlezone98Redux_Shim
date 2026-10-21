@@ -337,3 +337,126 @@ Reading:
 - **Next.** Combat would gain more if light-list differences did not split
   groups. That needs the light list moved out of the key, for example per
   instance lights, which is a larger change than this prototype.
+
+### 6.3 Combat: what splits the groups, and the light key (Fix A)
+
+#### Split statistics
+
+A diagnostic build classified every eligible member that drew alone, in one
+combat 40 mission (5,149 frames):
+
+| Measure | Value |
+|---|---|
+| Eligible members | 496,887 |
+| Groups | 171,039 |
+| Alone because peers had a different light list | 123,318 |
+| Alone for any other reason (bones, shadow role, handedness, mesh, pass) | 3 |
+| Groups whose only split from another group was the light list | 155,592 |
+| Members with a different material on the same mesh data | 0 |
+| Mesh LOD variants (index data per vertex data) | none |
+| Lights per member | mean 2.51, max 14 |
+| Group sizes 1 / 2-3 / 4-7 / 8-15 / 16-31 / 32+ | 123,321 / 22,554 / 12,798 / 7,092 / 2,004 / 3,270 |
+
+At idle every member has one light (the sun), and nothing splits. In combat
+the light list is the only splitter. There is no team, damage, material,
+LOD, shadow-caster or handedness splitting.
+
+#### Which passes render, and what they read
+
+The bench craft use stock `BZBase` materials (`avtank00`, `avtank01`,
+`avheadlight00`). Twins are built for every technique, but at GOG's
+settings two passes carry the draws:
+
+- **Main view.** Scheme `high-noshadow`, material LOD 0, `BaseHighNoShadow`.
+  This is about half of the craft draws. The fragment program reads 8-entry
+  light arrays and `light_count`.
+- **Glow.** Scheme `glow`. This is the other half. It reads no lights.
+- **Lower tiers.** The `BaseLow*` (1 light) and `BaseLowest*` (vertex-lit,
+  1 light) programs serve material LOD 2 and the low schemes.
+
+The stock fragment shader has no range cutoff:
+`saturate(1 / (c + l*d + q*d*d))` stays above zero past a light's range. A
+union or shared-nearest-N light set would therefore light craft with lights
+that the stock path does not apply to them. Such a set cannot be exact.
+
+The OpenShim enhanced profile was active in these runs, but its 24-light
+`OSE_BaseEN*` programs did not reach the bench craft. They also read
+`light_count`, so they would behave like the main pass below.
+
+#### Fix A: compare only what the pass reads
+
+Each twin pass records how far into the light list its programs read:
+
+- indexed light values: their index plus one;
+- light arrays: their size;
+- `light_count`: the list length.
+
+Members group when their lists agree that far. A pass falls back to the
+whole list in three cases: it sets a start light or a light mask, Ogre lacks
+the getters, or a program binds an auto constant newer than
+`ACT_LIGHT_CUSTOM`. The result is exact, with no visible change.
+
+| Pass | Light depth | Effect |
+|---|---|---|
+| Main (`BaseHigh*`, `BaseMedium*`) | 8 + count | unchanged: whole lists still compared |
+| Glow | 0 | groups regardless of lights |
+| `BaseLow*`, `BaseLowest*` | 1 | groups on the nearest light only |
+
+#### Upper bound: ignore lights entirely
+
+A diagnostic arm grouped members regardless of light lists. That is visually
+wrong, but it caps what any light-independent key could gain, including
+per-instance light data. Runs were 3 interleaved repeats, combat 40:
+
+| Arm | Frame time | Draws/frame |
+|---|---|---|
+| GpuInstancing 0 | 5.07 ms (4.80-5.29) | 525 |
+| Fix A (first build, see note) | 4.48 ms (4.29-4.82) | 372 |
+| Ignore lights | 4.67 ms (4.58-4.79) | 329 |
+
+Note: the Fix A arm used an earlier rule that compared whole lists for any
+auto constant past `ACT_CUSTOM`. The glow program binds
+`inverse_texture_size`, so under that rule glow still compared whole lists.
+The committed rule fixes this.
+
+Ignoring lights saves only another 43 draws per frame, and frame time does
+not improve beyond noise. In combat, most of the remaining draws are not
+craft. Among stock-path render calls:
+
+- `DynamicGeometryBatch` effects (flame, smoke, dirt) are about 36%;
+- terrain is about 19%.
+
+#### Fix A benchmark (committed build)
+
+Runs were 3 interleaved repeats. Parity: the tank region differs from
+`GpuInstancing=0` in 89 and 345 of 93,600 pixels (shots 2 and 3). Every
+craft renders.
+
+| Scenario | GpuInstancing 0 | GpuInstancing 1 | Δ |
+|---|---|---|---|
+| combat 40 | 5.25 ms (5.11-5.39), 564 draws/frame | 4.91 ms (4.72-5.06), 369 draws/frame | −0.34 ms |
+| idle 80 | 4.13 ms (4.04-4.24), 601 draws/frame | 3.26 ms (3.22-3.29), 131 draws/frame | −0.87 ms (−21%) |
+
+#### Combat 80: the ceiling decides against per-instance light data
+
+The same interleaved comparison ran at 80 craft. The Fix A and
+ignore-lights arms used one build (committed Fix A plus an environment-gated
+ignore switch).
+
+| Arm | Frame time | Draws/frame |
+|---|---|---|
+| GpuInstancing 0 | 8.05 ms (7.70-8.29) | 771 |
+| Fix A | 7.52 ms (7.18-7.94) | 395 |
+| Ignore lights | 7.47 ms (7.32-7.62), 2 valid runs | 363 |
+
+The third ignore-lights repeat, and its rerun, ran capped at about 50 fps
+for the whole window. That points to the host (window focus) and not the
+build, so both were discarded.
+
+Decision: **stop at Fix A.** The ceiling for any light-independent grouping
+sits 0.05 ms below Fix A at 80 craft and 0.19 ms above it at 40, and in both
+cases it falls inside the run-to-run ranges. A per-instance light shader path
+would rewrite the main fragment programs (stock `base-sm4.hlsl`, and the
+enhanced and CR variants), yet could recover at most the last ~30-40 draws
+per frame. The rest of the combat frame is effects and terrain, which this
+feature does not touch.
