@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace BZROpenShim
 {
     // Experimental hardware skinning for skeletal craft on Direct3D 11.
@@ -21,4 +23,12 @@ namespace BZROpenShim
     // Called from the render queue hook on the render thread. Installs the
     // frame listener that does the work at frame start; otherwise one load.
     void GpuSkinningRenderFrameTick();
+
+    // Instanced twins for gpu_instancing.h. True while the mission's
+    // GpuSkinning and GpuInstancing settings are both on and nothing failed.
+    bool GpuSkinningInstancingActive();
+    // The instanced twin of a skinned clone's pass (render thread), or null.
+    void* GpuSkinningInstancedTwinPass(const void* pass);
+    // Increments at every mission start that enables the feature.
+    uint32_t GpuSkinningGeneration();
 }

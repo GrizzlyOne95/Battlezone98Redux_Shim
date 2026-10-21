@@ -2447,6 +2447,16 @@ InteractiveFogWakes = 0
 ; See reverse_engineering/gpu_skinning_investigation_20261020.md.
 GpuSkinning = 0
 
+; GpuInstancing: draw GPU-skinned craft that share a mesh and material pass as
+; one instanced draw (Direct3D 11 only). Requires GpuSkinning = 1; does
+; nothing without it. Craft whose pass, vertex format, lights or handedness
+; differ render singly as before; any fault disables the feature until the
+; game restarts. Read when a mission starts.
+;
+; Default 0. Env: OPENSHIM_GPU_INSTANCING.
+; See reverse_engineering/gpu_instancing_design_20261021.md.
+GpuInstancing = 0
+
 ; ---------------------------------------------------------------------------
 ; Per-frame mouse look
 ; ---------------------------------------------------------------------------
