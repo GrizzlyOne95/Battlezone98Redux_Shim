@@ -101,7 +101,8 @@ unsigned StockFallbackKind(std::string_view seed);
 unsigned StockFallbackBatchKind(std::string_view resource);
 // ShellCasings: a unit-length cartridge case along local +Z (centred, rim and
 // base at -Z, open mouth at +Z) with `sides` facets (6..32), position/normal/
-// uv0, in two submeshes using openshim_casing_brass and openshim_casing_rim.
+// uv0 (brushed finish atlas), in two submeshes using openshim_casing_brass
+// and openshim_casing_rim; recessed primer and a real hollow mouth.
 // Deterministic; an out-of-range side count returns an empty piece.
 Piece CasingMesh(unsigned sides);
 } // namespace BZROpenShim::NativeChunks

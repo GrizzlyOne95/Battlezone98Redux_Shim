@@ -18,6 +18,7 @@ namespace
     void* g_Result = nullptr;
     void* g_ExpectedScope = nullptr;
     unsigned g_Order = 0;
+    unsigned g_CasingCalls = 0, g_FlashCalls = 0;
     unsigned g_PopCalls = 0;
     unsigned g_WeaponClassCalls = 0;
     unsigned g_CraftClassCalls = 0;
@@ -38,12 +39,22 @@ namespace
 
     void __cdecl Shot(void* weapon, const Matrix* pose, void* owner, void* result) noexcept
     {
-        Require(g_Order++ == 1, "observer ran before factory");
+        Require(g_Order >= 1, "observer ran before factory");
+        ++g_Order;
+        ++g_FlashCalls;
         Require(weapon == g_ExpectedWeapon && pose == g_ExpectedPose && owner == g_ExpectedOwner &&
             result == g_Result, "shot observer recovered wrong frame/arguments");
         __asm { mov eax, 11223344h }
         __asm { mov ecx, 55667788h }
         __asm { mov edx, 12345678h }
+    }
+
+    void __cdecl Casing(void* weapon, const Matrix* pose, void* owner, void* result) noexcept
+    {
+        Require(g_Order++ == 1 && weapon == g_ExpectedWeapon && pose == g_ExpectedPose &&
+            owner == g_ExpectedOwner && result == g_Result, "casing recovered wrong accepted-shot arguments");
+        ++g_CasingCalls;
+        __asm { mov eax, 0BADF00Dh }
     }
 
     void __cdecl WeaponClass(void* scope, void* objectClass) noexcept
@@ -152,14 +163,23 @@ int main()
     const Matrix pose = BZROpenShim::WeaponConvergence::Identity();
     g_ExpectedWeapon = &weapon; g_ExpectedClass = &objectClass; g_ExpectedOwner = &owner;
     g_ExpectedPose = &pose; g_ExpectedScope = &scope;
-    Bridges::Configure(reinterpret_cast<Bridges::Factory>(Factory),
-        reinterpret_cast<Bridges::PopScope>(Pop), Shot, WeaponClass, CraftClass);
-    for (void* result : { static_cast<void*>(&ordnance), static_cast<void*>(nullptr) })
+    for (bool casings : {false, true}) for (bool flashes : {false, true})
     {
-        g_Order = 0; g_Result = result;
-        Require(InvokeCannon(&weapon, &objectClass, &pose, &owner) == result,
-            "observer clobbered native factory EAX");
-        Require(g_Order == 2 && g_RegistersPreserved == 1, "callee cleanup or nonvolatile registers changed");
+        Bridges::ConfigureShotFactory(reinterpret_cast<Bridges::Factory>(Factory), casings ? Casing : nullptr);
+        // ODF-only installation must not clear the qualified shared factory.
+        Bridges::Configure(nullptr, reinterpret_cast<Bridges::PopScope>(Pop),
+            flashes ? Shot : nullptr, WeaponClass, CraftClass);
+        for (void* result : { static_cast<void*>(&ordnance), static_cast<void*>(nullptr) })
+        {
+            g_Order = 0; g_Result = result; g_CasingCalls = g_FlashCalls = 0;
+            Require(InvokeCannon(&weapon, &objectClass, &pose, &owner) == result,
+                "observer clobbered native factory EAX");
+            const unsigned expected = result ? 1u + static_cast<unsigned>(casings) + static_cast<unsigned>(flashes) : 1u;
+            Require(g_Order == expected && g_RegistersPreserved == 1,
+                "factory count, callee cleanup or nonvolatile registers changed");
+            Require(g_CasingCalls == (result && casings ? 1u : 0u) &&
+                g_FlashCalls == (result && flashes ? 1u : 0u), "effect duplicated or emitted on failed shot");
+        }
     }
     InvokeWeaponScope(&scope, &objectClass);
     InvokeCraftScope(&scope, &objectClass);
