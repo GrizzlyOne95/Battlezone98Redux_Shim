@@ -135,8 +135,22 @@ local function readConfig()
     if not VALID_SCENARIOS[scenario] then
         scenario = "idle"
     end
+    -- Mod craft (ISDF Chronicles' fvtank, CR's cvhaul) are not in the stock
+    -- list; accept any plain ODF name. OpenODF returns a handle even for a
+    -- missing file, so this only rejects malformed names: a missing ODF shows
+    -- up as BZLogger 'GameObject "x.odf" not found' and no spawned units.
     if not VALID_UNIT_ODFS[unitOdf] then
-        unitOdf = "avtank"
+        local plain = type(unitOdf) == "string" and
+            unitOdf:match("^[%w_]+$") ~= nil
+        local ok, handle = false, nil
+        if plain then
+            ok, handle = pcall(OpenODF, unitOdf)
+        end
+        if not (ok and handle) then
+            print("lcbench: unitOdf " .. tostring(unitOdf) ..
+                " not found, using avtank")
+            unitOdf = "avtank"
+        end
     end
     count = math.max(0, math.min(200, math.floor(count or 20)))
     if scenario == "quiet" then
