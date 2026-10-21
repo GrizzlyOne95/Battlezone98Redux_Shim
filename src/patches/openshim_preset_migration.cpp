@@ -329,6 +329,7 @@ namespace BZROpenShim
         const SurgicalEntry kRevision4SurgicalTable[] = {
             { "Fixes", "AiMultiProducerMakers", "0", "1" },
             { "Fixes", "ProducerScriptPredicates", "0", "1" },
+            { "Fixes", "VehicleListModScoping", "0", "1" },
             { "Fixes", "TerrainAtlasRectRepair", "0", "1" },
             { "Fixes", "DX11LegacyMaterialCompat", "0", "1" },
             { "SinglePlayer", "PilotTeamRestore", "0", "1" },

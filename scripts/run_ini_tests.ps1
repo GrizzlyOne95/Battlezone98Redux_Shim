@@ -187,9 +187,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
 
     # Qualified [Fixes] entries. The seven simulation fixes below stand down in
     # network games; MagnetZeroRangeGuard is defensive; the CLI parser repair
-    # has no gameplay effect. VehicleListModScoping stays off in the player
-    # preset because it reloads the waiting-room vehicle list and replaces
-    # BZP's faction-only .vxt with stock ships.
+    # has no gameplay effect. VehicleListModScoping reloads the selected
+    # map's own waiting-room .vxt.
     "Fixes/ApcAlliedTargetDeploy",
     "Fixes/SplinterUndead",
     # Confirmed owner-attribution defect; the fix mutates perceivedTeam only in
@@ -306,6 +305,7 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # 2026-10-21 (preset revision 5).
     "Fixes/AiMultiProducerMakers",
     "Fixes/ProducerScriptPredicates",
+    "Fixes/VehicleListModScoping",
     "Fixes/TerrainAtlasRectRepair",
     "Fixes/DX11LegacyMaterialCompat",
     "SinglePlayer/PilotTeamRestore",
@@ -412,7 +412,7 @@ $shippingPolicyChecks = @{
     "Fixes/DynamicGeometryFastSort" = "1"
     "Fixes/ThreadScheduling" = "1"
     "Fixes/ProducerScriptPredicates" = "1"
-    "Fixes/VehicleListModScoping" = "0"
+    "Fixes/VehicleListModScoping" = "1"
     "Fixes/CliMultiParameterOptions" = "1"
     "Fixes/DX11LegacyMaterialCompat" = "1"
     "Fixes/TerrainAtlasRectRepair" = "1"

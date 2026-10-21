@@ -436,7 +436,7 @@ int main()
               "6d: stock retry interval moved to 800");
     }
 
-    // 6e. revision 4 -> 5: seven stock-bug fixes turned on. Only values still at
+    // 6e. revision 4 -> 5: eight stock-bug fixes turned on. Only values still at
     // the old shipped 0 move, a value the player already set to 1 is left
     // alone, and older revisions collect every earlier table too.
     {
@@ -480,8 +480,8 @@ int main()
               "6e: LegacySectionRemap on");
         Check(FileContains(r4, "CrashValueGuards = 1"),
               "6e: CrashValueGuards on");
-        Check(FileContains(r4, "VehicleListModScoping = 0"),
-              "6e: VehicleListModScoping left off");
+        Check(FileContains(r4, "VehicleListModScoping = 1"),
+              "6e: VehicleListModScoping on");
         Check(FileContains(r4, "LogUnknownOdfSections = 0"),
               "6e: LogUnknownOdfSections left off");
         Check(FileContains(r4, "OpenShimPresetRevision = 5"),

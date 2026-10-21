@@ -48,10 +48,12 @@
 //              in bzr_options_ui.cpp and the env-config mapping), so this
 //              only ever affects files carrying an explicit 0.
 //
-//   Revision 5: seven stock-bug fixes turned on by default at the user's
+//   Revision 5: eight stock-bug fixes turned on by default at the user's
 //              request on 2026-10-21:
 //                 Fixes/AiMultiProducerMakers     = 1  (was 0)
 //                 Fixes/ProducerScriptPredicates  = 1  (was 0)
+//                 Fixes/VehicleListModScoping     = 1  (was 0; its .vxt
+//                                                       name was fixed)
 //                 Fixes/TerrainAtlasRectRepair    = 1  (was 0)
 //                 Fixes/DX11LegacyMaterialCompat  = 1  (was 0)
 //                 SinglePlayer/PilotTeamRestore   = 1  (was 0)
