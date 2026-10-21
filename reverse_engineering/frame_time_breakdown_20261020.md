@@ -303,6 +303,32 @@ before the study was stopped. The patch is not on any branch.
   lever 2 as at most +5%, not worth a one-frame-stale far cascade until bigger
   levers land.
 
+## Correction: lever 3 is an OpenShim experiment, not stock (2026-10-20)
+
+The shared GOG `openshim.ini` had two non-default settings during every run
+above: `VehicleGeometryContact = 1` (experimental, default OFF) and
+`ChunkMeshes = 1`. Symbolizing the idle-80 samples against the matching
+`openshim.pdb` changes two rows.
+
+- **`0x442E70` is the stock collision broadphase.** It sweeps an AABB per
+  object and then tests every mover-mover and mover-other pair; its only caller
+  is `0x618130`. Of its 5.9% of idle-80 samples, 5.2% is
+  `GeometryContactTest::ContactHook` / `GeometryCall` / `TreeUnchanged`
+  (`src/patches/geometry_contact_test.cpp`) plus the stock narrow phase that
+  hook triggers. With the default setting the stock loop is about 0.7%
+  (~0.03 ms). **Lever 3 is withdrawn.** The cost belongs to the experiment:
+  about 0.25 ms at idle 80 when it is enabled.
+- **Lever 4 is confirmed:** `ScanFrame` is 7.5% of idle-80 samples (about
+  0.36 ms), spent in `CaptureChunkBridgeSnapshot` → `ChunkBridgeProbe::TryReadOgreLinks`
+  → `MemoryAccess::RangeAllows` (two `VirtualQuery` calls per live object per
+  frame), so all 7.5% of that sits in the probe. The fix is a cache keyed by GameObject on its Ogre-link tuple, with
+  the full probe run only when the tuple changes.
+- **OpenShim's own share** (excluding the stock and Ogre callees it wraps) is
+  15 / 21 / 18% of samples at idle 20 / idle 80 / combat 40. `ScanFrame` is the
+  largest named item. The `RenderOneFrameHook` self-time of 3-7% has no
+  OpenShim child above 0.15%, so it is probably unwound-stack attribution, not
+  real work; this is unverified.
+
 ## Reproducing
 
 ```powershell
