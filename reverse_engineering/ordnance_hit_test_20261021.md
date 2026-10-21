@@ -162,7 +162,21 @@ along the hull heading without aiming, so most shells hit the ground.
 
 With the snap, every tested craft hit had its effect moved (110 of 110).
 
-Cast cost: average 7–9 µs, maximum about 0.2 ms (the first BVH build). Six BVH
+Frame times, lcbench at 40 avtanks, DX11, background run, PresentMon:
+
+| Arm | combat mean / p95 / p99 ms | firing mean / p95 / p99 ms |
+|---|---|---|
+| base (both off) | 5.76 / 16.14 / 24.69 | 5.23 / 6.35 / 7.29 |
+| visual | 5.17 / 5.63 / 6.04 | 5.34 / 6.57 / 7.44 |
+| visual + gameplay | 5.22 / 5.88 / 6.30 | 5.44 / 6.22 / 7.14 |
+
+The spread is run-to-run noise. The base combat tail and a single 435 ms
+stall in the gameplay firing run are not attributable to the hook. Hook counts
+at 40 avtanks: visual combat 700 engine hits, every effect moved (368 snaps),
+average cast 5.4 µs. Gameplay combat: 1556 tested, 1069 passed through, average
+cast 3.1 µs.
+
+Cast cost: average 3–10 µs, maximum about 0.2 ms (the first BVH build). Six BVH
 builds for avtank, 293 triangles, 0.18 ms total build time.
 
 ## Known limitations and a future gameplay tier
