@@ -1587,6 +1587,7 @@ namespace BZROpenShim
             {"InitializeBzrNetConfig", &InitializeBzrNetConfig},
             {"InstallBzrNetRouteObserverIfPossible", &InstallBzrNetRouteObserverIfPossible},
             {"InstallStockLogThrottleIfPossible", &InstallStockLogThrottleIfPossible},
+            {"InstallAttackTaskLazyNearestIfRequested", &InstallAttackTaskLazyNearestIfRequested},
             {"InstallMapFilterExtrasIfEnabled", &InstallMapFilterExtrasIfEnabled},
             {"EnsureInputBindingPopulateHookScaffold", &EnsureInputBindingPopulateHookScaffold},
             {"EnsureOptionsParentCtorHookScaffold", &EnsureOptionsParentCtorHookScaffold},

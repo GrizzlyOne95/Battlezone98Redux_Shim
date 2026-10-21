@@ -612,6 +612,10 @@ namespace BZROpenShim
             // peers integrate the stock step, so it stands down online.
             { "PreciseTimestep", FeatureTier::SinglePlayer,
               nullptr, &RefreshPreciseTimestepState },
+            // Defers AttackTask's NearestVehicle scan to its readers. Shown
+            // exact in single player only; peers run the stock order.
+            { "AttackTaskLazyNearest", FeatureTier::SinglePlayer,
+              nullptr, &RefreshAttackTaskLazyNearestState },
         };
 
         // Restore every registered feature to its resting state (mission end).
