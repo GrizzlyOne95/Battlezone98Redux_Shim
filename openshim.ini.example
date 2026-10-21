@@ -2443,9 +2443,9 @@ InteractiveFogWakes = 0
 ; the game restarts. Read when a mission starts. Output is not bit-identical:
 ; silhouettes can move by sub-pixel amounts.
 ;
-; Default 0. Env: OPENSHIM_GPU_SKINNING.
+; Default 1 (absent key = on). Env: OPENSHIM_GPU_SKINNING (0 turns it off).
 ; See reverse_engineering/gpu_skinning_investigation_20261020.md.
-GpuSkinning = 0
+GpuSkinning = 1
 
 ; ---------------------------------------------------------------------------
 ; Per-frame mouse look

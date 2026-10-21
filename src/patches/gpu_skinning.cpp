@@ -1191,11 +1191,16 @@ namespace BZROpenShim
             g_rejected.clear();
         }
 
+        // Default ON. An explicit ini value wins; otherwise a set
+        // OPENSHIM_GPU_SKINNING (0 or 1) decides, so A/B scripts keep working.
         bool ReadEnabledSetting()
         {
-            bool enabled = false;
+            bool enabled = true;
             if (TryGetUserConfigBool("Experimental", "GpuSkinning", enabled))
                 return enabled;
+            char value[16] = {};
+            if (GetEnvironmentVariableA("OPENSHIM_GPU_SKINNING", value, sizeof(value)) == 0)
+                return true;
             return EnvFlagEnabled("OPENSHIM_GPU_SKINNING");
         }
     }
