@@ -33,6 +33,21 @@ float2 ose_water_hash(float2 cell)
     return frac((p.xx + p.yz) * p.zy);
 }
 
+// One bead layer. About half the cells stay dry and the rest vary in size,
+// so the pattern does not read as a grid.
+float ose_water_bead(float2 grid)
+{
+    float2 cell = floor(grid);
+    float2 random = ose_water_hash(cell);
+    float2 extra = ose_water_hash(cell + 71.37);
+    float size = (0.45 + extra.y * 0.55) * step(0.55, extra.x);
+    float2 delta = (frac(grid) - (0.25 + random * 0.5)) / (float2(0.15, 0.19) * max(size, 0.001));
+    float bead = saturate(1.0 - dot(delta, delta)) * step(0.001, size);
+    bead *= bead;
+    // Derivative filtering removes subpixel beads before they glitter.
+    return bead * (1.0 - smoothstep(0.25, 0.75, max(fwidth(grid.x), fwidth(grid.y))));
+}
+
 // Near High-quality Enhanced objects only. One procedural height evaluation,
 // no textures, passes, particles or CPU animation. Derivative filtering removes
 // subpixel beads before they can glitter on distant craft.
@@ -48,12 +63,9 @@ float3 ose_water_normal(float3 viewPosition, float3 normal, float wetness,
     float3 geometric = abs(cross(ddx(local), ddy(local)));
     bool top = geometric.y >= max(geometric.x, geometric.z);
     float2 plane = top ? local.xz : (geometric.z >= geometric.x ? local.xy : local.zy);
-    float2 grid = plane * 12.0;
-    float2 random = ose_water_hash(floor(grid));
-    float2 delta = (frac(grid) - (0.22 + random * 0.56)) / float2(0.16, 0.21);
-    float bead = saturate(1.0 - dot(delta, delta));
-    bead *= bead;
-    float beadFilter = 1.0 - smoothstep(0.25, 0.75, max(fwidth(grid.x), fwidth(grid.y)));
+    // Two sparse layers at unrelated scales and a rotation hide both lattices.
+    float2 rotated = float2(plane.x * 0.8 - plane.y * 0.6, plane.x * 0.6 + plane.y * 0.8);
+    float bead = max(ose_water_bead(plane * 19.0), ose_water_bead(rotated * 27.0 + 0.37));
     // Local Y is down the upright hull. Horizontal decks retain beads;
     // vertical faces get sparse narrow trails and a moving runoff head.
     float column = plane.x * 3.7;
@@ -66,10 +78,10 @@ float3 ose_water_normal(float3 viewPosition, float3 normal, float wetness,
     float head = smoothstep(0.70, 0.94, flow) * (1.0 - smoothstep(0.94, 1.0, flow));
     float run = trail * (0.25 + head * 0.75) * (top ? 0.55 : 1.0);
     float strength = wetness * nearFade;
-    water = float4((bead * beadFilter * 0.4 + run * 0.8) * strength,
-                   bead * (1.0 - bead) * 4.0 * beadFilter,
+    water = float4((bead * 0.4 + run * 0.8) * strength,
+                   bead * (1.0 - bead) * 4.0,
                    run, strength);
-    float height = (bead * beadFilter * 0.0018 + run * 0.0012) * strength;
+    float height = (bead * 0.0018 + run * 0.0012) * strength;
     // Surface-gradient bump mapping retains the authored normal and UV art.
     float3 dx = ddx(viewPosition), dy = ddy(viewPosition);
     float3 r1 = cross(dy, normal), r2 = cross(normal, dx);
