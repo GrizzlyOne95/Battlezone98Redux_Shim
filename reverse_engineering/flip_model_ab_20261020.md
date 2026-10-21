@@ -13,7 +13,7 @@ Driver: `reverse_engineering/run_flip_model_ab.ps1`.
 | VSync reaches the flip chain | yes: `first present: syncInterval=1 flags=0x0 hr=0x00000000` |
 | Stock arm leaves the swap chain alone | yes, no `[DXGI Flip]` line beyond nothing-armed |
 | crsetup.lua restored after the weather harness | byte-for-byte |
-| **Console pacing A/B (lcbench combat 40, crwx; windowed + fullscreen)** | **not run yet; the user must be at the physical console** |
+| Console pacing A/B (lcbench combat 40, crwx; windowed + fullscreen) | done 2026-10-20 at the physical console: no gain windowed; exclusive fullscreen was black, now falls back (see Console results) |
 
 ## Why the numbers below are not results
 
@@ -36,7 +36,56 @@ change and not a pacing win. The first console run has to answer this before
 anything else, ideally with `-PresentMon` so the present mode is recorded
 (Hardware: Independent Flip / Composed: Flip / Composed: Copy).
 
-## Console runs (to do)
+## Console results (2026-10-20, physical console)
+
+240 Hz monitor, `-PresentMon -Repeat 2`, VSync=Yes, windowed 1920x1080,
+fullscreen 2560x1440, 10 s skipped. Snapshot `snapshots/flip_model_ab/20261020_184659`.
+
+| run | flip active | fps | p50 / p90 / p99 ms | pacing median abs dt delta | uneven pairs | present modes |
+|---|---|---|---|---|---|---|
+| lcbench_windowed_stock_r1 | False | 184.0 | 5.26 / 6.82 / 8.18 | 0.24 ms | 0.2% | Composed: Flip:8554 |
+| lcbench_windowed_flip_r1 | True | 177.5 | 5.33 / 6.61 / 10.04 | 0.21 ms | 0.3% | Composed: Flip:8189 |
+| lcbench_windowed_flip_r2 | True | 179.9 | 5.32 / 7.18 / 8.61 | 0.22 ms | 0.2% | Composed: Flip:8306 |
+| lcbench_windowed_stock_r2 | False | 130.4 | 7.46 / 9.56 / 11.29 | 0.28 ms | 0.2% | Composed: Flip:6009 |
+| lcbench_fullscreen_stock_r1 | False | 138.3 | 6.62 / 9.56 / 11.26 | 0.22 ms | 0.2% | Hardware: Independent Flip:6523 |
+| lcbench_fullscreen_flip_r1 | True | 125.3 | 7.47 / 9.84 / 11.56 | 0.25 ms | 0.2% |  |
+| lcbench_fullscreen_flip_r2 | True | 125.9 | 7.60 / 9.21 / 10.93 | 0.32 ms | 0.2% |  |
+| lcbench_fullscreen_stock_r2 | False | 153.8 | 6.47 / 7.63 / 9.50 | 0.21 ms | 0.2% | Hardware: Independent Flip:7263 |
+| crwx_windowed_stock_r1 | False | 235.6 | 4.21 / 4.59 / 5.56 | 0.26 ms | 0.1% | Composed: Flip:21293 |
+| crwx_windowed_flip_r1 | True | 235.9 | 4.20 / 4.77 / 6.12 | 0.38 ms | 0.1% | Composed: Flip:21274 |
+| crwx_windowed_flip_r2 | True | 236.0 | 4.21 / 4.52 / 4.96 | 0.25 ms | 0.1% | Composed: Flip:21275 |
+| crwx_windowed_stock_r2 | False | 235.6 | 4.20 / 4.48 / 4.87 | 0.22 ms | 0.1% | Composed: Flip:21314 |
+| crwx_fullscreen_stock_r1 | False | 328.7 | 2.95 / 3.24 / 3.70 | 0.10 ms | 0.1% | Hardware: Independent Flip:30069 |
+| crwx_fullscreen_flip_r1 | True | 284.3 | 3.37 / 3.86 / 4.76 | 0.11 ms | 0.1% |  |
+| crwx_fullscreen_flip_r2 | True | 274.8 | 3.46 / 4.18 / 4.75 | 0.11 ms | 0.0% |  |
+| crwx_fullscreen_stock_r2 | False | 319.0 | 3.04 / 3.53 / 4.05 | 0.12 ms | 0.0% | Hardware: Independent Flip:29183 |
+
+- **Windowed: no gain.** Windows 11 already presents the stock blt chain as
+  `Composed: Flip`, so both arms reach the compositor the same way. fps, p99
+  and pacing differ by less than the repeat-to-repeat noise (stock lcbench
+  alone moved 184 → 130 fps between repeats).
+- **VSync caps flip.** crwx windowed sits at 236 fps in both arms, the 240 Hz
+  cap; lcbench never reaches 240, so the cap does not apply there.
+- **Exclusive fullscreen flip was broken.** The waitable chain is refused
+  (`0x887A0001`), the plain flip chain is created with `DXGI_STATUS_OCCLUDED`
+  (`0x087A0001`), and every Present returns `DXGI_ERROR_INVALID_CALL`
+  (`first present: ... hr=0x887A0001`): a black screen while the game keeps
+  simulating, so the fullscreen flip rows above (no PresentMon present mode)
+  are invalid. Stock fullscreen already runs as `Hardware: Independent Flip`,
+  the best path DXGI offers. `IneligibleReason` now keeps Ogre's chain when
+  `Windowed` is FALSE. Live check (`20261020_191313`, crwx fullscreen, flip
+  arm): `kept Ogre's swap chain ... exclusive fullscreen`, 330.6 fps,
+  `Hardware: Independent Flip:10505`.
+- **Unrelated, open:** stock exclusive fullscreen crwx runs at 319-329 fps on
+  the 240 Hz monitor with VSync=Yes, so VSync does not cap exclusive
+  fullscreen. Not investigated here.
+- Not covered: switching a windowed flip chain to fullscreen at runtime
+  (`SetFullscreenState`) was not exercised.
+
+Verdict: keep `DxgiFlipModel = 0`. It is safe windowed and now falls back in
+exclusive fullscreen, but it buys nothing measurable on Windows 11.
+
+## Console runs (how to repeat)
 
 At the physical console, with nothing else on screen:
 

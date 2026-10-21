@@ -154,6 +154,12 @@ namespace BZROpenShim
                 return "sample count is zero";
             if (!desc.OutputWindow)
                 return "no output window";
+            // Exclusive fullscreen: the flip chain is created (as OCCLUDED, and
+            // without the waitable flag) but every Present fails with
+            // DXGI_ERROR_INVALID_CALL, so the screen stays black. Exclusive
+            // fullscreen already bypasses the compositor, so keep Ogre's chain.
+            if (!desc.Windowed)
+                return "exclusive fullscreen (flip-model Present fails there)";
             return nullptr;
         }
 
