@@ -262,6 +262,21 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "MagnetZeroRangeGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_DG_PIECE_REUSE") ||
+            Equals(name, "BZR_DISABLE_DG_PIECE_REUSE"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "DynamicGeometryPieceReuse", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DG_MATERIAL_CACHE") ||
+            Equals(name, "BZR_DG_MATERIAL_CACHE"))
+        {
+            return TryReadMappedBool(ini, "Experimental", "DynamicGeometryMaterialCache", false, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_DG_FAST_SORT") ||
+            Equals(name, "BZR_DISABLE_DG_FAST_SORT"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "DynamicGeometryFastSort", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS") ||
             Equals(name, "BZR_DISABLE_RESTORE_CRAFT_BOUNDS"))
         {

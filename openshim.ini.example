@@ -552,6 +552,24 @@ UnfocusedMouseRelease = 1
 ; Env alias to force it off: OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS
 RestoreCraftBounds = 1
 
+; Effect sprites (smoke, flames, tracers, explosions) are drawn through
+; Redux's DynamicGeometry, which opens a new batch piece whenever the squared
+; view depth differs even slightly, then sorts and re-merges those pieces every
+; frame. These two are renderer-only CPU savings with pixel-identical output;
+; see reverse_engineering/dynamic_geometry_begin_sort_20261021.md.
+;
+; DynamicGeometryPieceReuse: append to the current piece instead of opening a
+; new one when the new piece would get the same depth key (so it would sort
+; right after it and be merged into it anyway).
+; Accepted: boolean. Default: ON. Not gated in network games.
+; Env alias to force it off: OPENSHIM_DISABLE_DG_PIECE_REUSE
+DynamicGeometryPieceReuse = 1
+; DynamicGeometryFastSort: the per-frame piece sort reads its fields directly
+; instead of calling into OgreMain for each compare; identical order.
+; Accepted: boolean. Default: ON. Not gated in network games.
+; Env alias to force it off: OPENSHIM_DISABLE_DG_FAST_SORT
+DynamicGeometryFastSort = 1
+
 ; Improve how Windows schedules the game's frame thread. Most frame hitches
 ; are waits on Present; these reduce scheduler-caused ones rather than raise
 ; the average frame rate. The thread that runs the frame loop registers with
@@ -2470,6 +2488,15 @@ GpuInstancing = 0
 ;
 ; Default 0. Experimental; see reverse_engineering/mouse_every_frame_20261020.md.
 MouseEveryFrame = 0
+
+; DynamicGeometryMaterialCache: skip the MaterialManager name lookup when a
+; by-name DynamicGeometry begin asks for the material the current piece already
+; holds. Pixel-identical, but measured combat issues only about 10 by-name
+; begins per frame and the cache never hit, so it buys nothing today.
+; Accepted: boolean. Not gated in network games.
+; Default 0. Env: OPENSHIM_DG_MATERIAL_CACHE.
+; See reverse_engineering/dynamic_geometry_begin_sort_20261021.md.
+DynamicGeometryMaterialCache = 0
 
 [NativeUiDiagnostics]
 ; Development only; shown commented out for the same reason as the
