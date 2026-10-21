@@ -935,10 +935,15 @@ TerrainSemanticFrameCaptureMinCoverage = 0.005
 ; pack manifest; existing tile placement, orientation and gameplay stay intact.
 TerrainHdEnabled = 0
 
-; HD tile manifest path. Accepted: non-empty path string.
-; Relative paths resolve from battlezone98redux.exe; absolute paths are allowed.
-; Default: terrain_hd_tiles.json
-TerrainHdManifest = terrain_hd_tiles.json
+; HD tile manifest. Accepted: auto, or a path string.
+; auto (or empty): find the separately installed HD terrain pack, searching the
+; game folder, then addon\, mods\, packaged_mods\ and Steam Workshop item
+; folders for terrain_hd_tiles.json, then cr_terrain_hd.json. The pack folder is
+; mounted as an Ogre resource location automatically.
+; Relative paths resolve from battlezone98redux.exe; absolute paths are allowed
+; and override discovery. A relative path that does not exist falls back to auto.
+; Default: auto
+TerrainHdManifest = auto
 
 
 [DX11Enhanced]

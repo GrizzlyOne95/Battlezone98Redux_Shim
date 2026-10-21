@@ -273,10 +273,10 @@ Enable the option or set:
 ```ini
 [Terrain]
 TerrainHdEnabled = 1
-TerrainHdManifest = terrain_hd_tiles.json
+TerrainHdManifest = auto
 ```
 
-The manifest path may also be absolute. Image names are Ogre resource names,
+The manifest path may also be explicit (relative to the game folder, or absolute). Image names are Ogre resource names,
 not filesystem paths relative to the manifest. Preserve filename case for
 Proton/Wine. Missing/incompatible resources or unknown native layouts decline
 the replacement and retain stock terrain. The native path currently requires
@@ -289,6 +289,28 @@ cache. Additional semantic vertex buffers cost approximately 80 MiB for the
 320-mesh test mission. Compressed DDS can reduce texture memory. Editor tile
 changes refresh the semantic buffers after native full rebuilds; mission exit
 restores native shaders, diffuse textures and buffer declarations.
+
+## Pack discovery and the separate-pack layout
+
+The HD terrain pack is a separately subscribed Workshop item (or a GOG
+`mods\<id>\` folder) holding `cr_terrain_hd.json` plus flat `crhd_*.dds` images.
+BZR does not honor Workshop dependencies, so OpenShim finds and mounts it
+itself. With the shipped `TerrainHdManifest = auto` (or an empty value) the
+manifest is searched, first match wins, in: the game folder, then each
+subfolder (sorted by name) of `addon\`, `mods\`, `packaged_mods\` and the Steam
+`workshop\content\301650\` directory, for `terrain_hd_tiles.json` then
+`cr_terrain_hd.json`, directly in each root. An explicit absolute path, or a
+relative path that exists under the game folder, overrides discovery; a relative
+path that does not exist (for example the legacy `terrain_hd_tiles.json` in an
+old ini) falls back to discovery. The chosen file is logged once as
+`[TERRAIN-HD] manifest resolved path="..." source=explicit|auto`.
+
+The capability probe and the loader share one resolver
+(`ResolveTerrainHdManifestAt`), so the Options UI and the renderer agree. Before
+the first tile loads, the manifest's folder is added as a non-recursive
+FileSystem location in an Ogre group named `OpenShimTerrainHd`, unless the first
+texture is already resolvable (Redux mounted the folder itself). Any failure
+logs a warning and keeps the stock atlas.
 
 ## Visible diagnostic test
 

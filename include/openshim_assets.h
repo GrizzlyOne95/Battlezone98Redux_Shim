@@ -30,7 +30,12 @@ constexpr const char* kAssetManifestExpectedCompatibilityVersion = "1";
 // Default value of openshim.ini [Terrain] TerrainHdManifest. Kept in sync with
 // terrain_proxy.cpp's ReadConfig() default so the capability probe and the
 // loader resolve the same file.
-constexpr const char* kDefaultTerrainHdManifest = "terrain_hd_tiles.json";
+// "auto" (or empty) discovers the separately-subscribed HD terrain pack.
+constexpr const char* kDefaultTerrainHdManifest = "auto";
+// Manifest file names auto-discovery looks for, in priority order, directly in
+// each root (game folder, then addon/mods/packaged_mods/Workshop item folders).
+constexpr const char* kTerrainHdManifestNames[] = {"terrain_hd_tiles.json",
+                                                   "cr_terrain_hd.json"};
 
 enum class AssetPackState : uint8_t
 {
@@ -125,11 +130,21 @@ bool ProbeEnhancedResourcesAt(const std::filesystem::path& gameDir,
                               std::string& outProblem,
                               std::filesystem::path* outResourceDir = nullptr);
 
-// Resolves the HD terrain manifest exactly as terrain_proxy.cpp's
-// ResolveHdManifestPath() does, so the capability probe and the loader always
-// agree on which file is authoritative: an absolute configuredManifest is used
-// verbatim, a relative one is taken against gameDir, and an empty one yields an
-// empty path (HD terrain has no manifest to load).
+// Resolves the HD terrain manifest; the single resolver shared by the capability
+// probe and terrain_proxy.cpp's loader so they always agree. An absolute
+// configuredManifest is used verbatim; a relative one that exists under gameDir
+// is used. Empty, "auto", or a relative value that does not exist triggers
+// auto-discovery: gameDir, then GetCampaignContentRootCandidates(gameDir)
+// (sorted by name), for kTerrainHdManifestNames. Returns an empty path when
+// nothing is found. outAuto (optional) reports whether auto-discovery chose the
+// file; outProblem (optional) receives a diagnostic on failure.
+std::filesystem::path ResolveTerrainHdManifestAt(
+    const std::filesystem::path& gameDir,
+    const std::string& configuredManifest,
+    bool* outAuto = nullptr,
+    std::string* outProblem = nullptr);
+
+// Path-only convenience wrapper over ResolveTerrainHdManifestAt().
 std::filesystem::path ResolveTerrainHdManifestPathAt(
     const std::filesystem::path& gameDir,
     const std::string& configuredManifest);

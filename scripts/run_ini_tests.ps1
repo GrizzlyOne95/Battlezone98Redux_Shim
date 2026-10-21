@@ -290,6 +290,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # 2026-10-21 at the user's request (+30% fps in a 40-craft fight).
     "Experimental/GpuSkinning",
 
+    # A manifest locator, not a toggle: "auto" only chooses where to look for
+    # the separate HD terrain pack. TerrainHdEnabled stays 0 and gates use.
+    "Terrain/TerrainHdManifest",
+
     # Stages OpenShim updates from the Workshop on the main menu (Steam only,
     # never in multiplayer); installs only at game exit. Default on by design.
     "Updater/AutoStage",

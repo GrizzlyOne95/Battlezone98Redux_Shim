@@ -76,6 +76,7 @@ void AppendImmediateSubdirectories(
     std::error_code ec;
     if (!std::filesystem::exists(parent, ec) || ec)
         return;
+    std::vector<std::filesystem::path> found;
     for (std::filesystem::directory_iterator it(parent, ec), end;
          !ec && it != end;
          it.increment(ec))
@@ -84,8 +85,13 @@ void AppendImmediateSubdirectories(
             break;
         const auto& entry = *it;
         if (entry.is_directory(ec) && !ec)
-            AppendUniquePath(results, entry.path());
+            found.push_back(entry.path());
     }
+    // Directory iteration order is filesystem-defined; sort so discovery
+    // results are deterministic.
+    std::sort(found.begin(), found.end());
+    for (const auto& p : found)
+        AppendUniquePath(results, p);
 }
 
 std::vector<std::filesystem::path> GetCampaignContentRootCandidates(
@@ -583,21 +589,89 @@ bool ProbeEnhancedResourcesAt(const std::filesystem::path& gameDir,
     return false;
 }
 
+namespace
+{
+bool IsAutoTerrainHdValue(const std::string& configured)
+{
+    return configured.empty() || AssetStringEqualsNoCase(configured, "auto");
+}
+
+std::filesystem::path DiscoverTerrainHdManifestAt(
+    const std::filesystem::path& gameDir)
+{
+    if (gameDir.empty())
+        return {};
+    std::vector<std::filesystem::path> roots;
+    AppendUniquePath(roots, gameDir);
+    for (const auto& candidate : GetCampaignContentRootCandidates(gameDir))
+        AppendUniquePath(roots, candidate);
+    for (const auto& root : roots)
+    {
+        for (const char* name : kTerrainHdManifestNames)
+        {
+            const auto candidate = root / name;
+            if (FileExistsNonEmpty(candidate))
+                return candidate.lexically_normal();
+        }
+    }
+    return {};
+}
+} // anonymous
+
+std::filesystem::path ResolveTerrainHdManifestAt(
+    const std::filesystem::path& gameDir,
+    const std::string& configuredManifest,
+    bool* outAuto,
+    std::string* outProblem)
+{
+    if (outAuto != nullptr)
+        *outAuto = false;
+    if (outProblem != nullptr)
+        outProblem->clear();
+    const std::string configured = TrimAssetString(configuredManifest);
+    if (!IsAutoTerrainHdValue(configured))
+    {
+        std::filesystem::path path(configured);
+        if (path.is_absolute())
+            return path.lexically_normal();
+        if (!gameDir.empty())
+        {
+            const auto full = (gameDir / path).lexically_normal();
+            if (FileExistsNonEmpty(full))
+                return full;
+        }
+        // Legacy relative value (e.g. terrain_hd_tiles.json left in an old
+        // openshim.ini) that is not present: fall through to auto-discovery.
+    }
+    if (gameDir.empty())
+    {
+        if (outProblem != nullptr)
+            *outProblem = "game directory unavailable";
+        return {};
+    }
+    const auto found = DiscoverTerrainHdManifestAt(gameDir);
+    if (!found.empty())
+    {
+        if (outAuto != nullptr)
+            *outAuto = true;
+        return found;
+    }
+    if (outProblem != nullptr)
+    {
+        *outProblem = "terrain HD manifest not found (searched game folder, addon, mods,"
+                      " packaged_mods and Workshop items for terrain_hd_tiles.json /"
+                      " cr_terrain_hd.json)";
+        if (!IsAutoTerrainHdValue(configured))
+            *outProblem += "; configured path \"" + configured + "\" does not exist";
+    }
+    return {};
+}
+
 std::filesystem::path ResolveTerrainHdManifestPathAt(
     const std::filesystem::path& gameDir,
     const std::string& configuredManifest)
 {
-    // Mirrors terrain_proxy.cpp ResolveHdManifestPath(): absolute wins, relative
-    // is resolved against the game directory, empty means "no manifest".
-    const std::string configured = TrimAssetString(configuredManifest);
-    if (configured.empty())
-        return {};
-    std::filesystem::path path(configured);
-    if (path.is_absolute())
-        return path.lexically_normal();
-    if (gameDir.empty())
-        return {};
-    return (gameDir / path).lexically_normal();
+    return ResolveTerrainHdManifestAt(gameDir, configuredManifest, nullptr, nullptr);
 }
 
 bool ProbeTerrainHdAt(const std::filesystem::path& gameDir,
@@ -605,17 +679,15 @@ bool ProbeTerrainHdAt(const std::filesystem::path& gameDir,
                       std::string& outProblem)
 {
     outProblem.clear();
-    const std::filesystem::path manifest =
-        ResolveTerrainHdManifestPathAt(gameDir, configuredManifest);
+    const std::filesystem::path manifest = ResolveTerrainHdManifestAt(
+        gameDir, configuredManifest, nullptr, &outProblem);
     if (manifest.empty())
-    {
-        outProblem = TrimAssetString(configuredManifest).empty()
-                         ? "terrain HD manifest not configured"
-                         : "game directory unavailable";
         return false;
-    }
     if (FileExistsNonEmpty(manifest))
+    {
+        outProblem.clear();
         return true;
+    }
     outProblem = "terrain HD manifest not found at " + manifest.string();
     return false;
 }
