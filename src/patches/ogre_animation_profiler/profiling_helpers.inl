@@ -428,6 +428,38 @@
             destination[count] = '\0';
         }
 
+        PassTimeSlot* FindOrClaimPassSlot(const void* viewport)
+        {
+            if (!viewport)
+                return nullptr;
+            const uintptr_t key = reinterpret_cast<uintptr_t>(viewport);
+            const size_t start = HashPointer(viewport) & (kCameraTableSize - 1);
+            for (size_t probe = 0; probe < kCameraTableSize; ++probe)
+            {
+                PassTimeSlot& slot =
+                    g_PassTimeSlots[(start + probe) & (kCameraTableSize - 1)];
+                uintptr_t current = slot.key.load(std::memory_order_relaxed);
+                if (current == key)
+                    return &slot;
+                if (current == 0 && slot.key.compare_exchange_strong(
+                        current, key,
+                        std::memory_order_relaxed,
+                        std::memory_order_relaxed))
+                {
+                    return &slot;
+                }
+            }
+            return nullptr;
+        }
+
+        void CountPassDraw()
+        {
+            if (PassTimeSlot* passSlot = t_CurrentPassSlot)
+                passSlot->draws.fetch_add(1, std::memory_order_relaxed);
+            else
+                g_DrawsOutsideScene.fetch_add(1, std::memory_order_relaxed);
+        }
+
         CameraProfileSlot* FindOrClaimCameraSlot(const void* pointer)
         {
             if (!pointer)
