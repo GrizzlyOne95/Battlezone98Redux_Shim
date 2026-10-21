@@ -39,6 +39,46 @@ physics, lifetime/sinking, resource guards and `<weapon>_casing.mesh` override
 remain in effect. The filter cannot force brass onto a weapon marked `none`.
 The old class/ammo-cost size inference is replaced by the explicit type.
 
+Optional `casingMesh = "MyMod/Brass.mesh"` selects an Ogre mesh resource from
+the already loaded mod/resource groups. Preserve filename case. Ship the mesh
+and its referenced materials/textures. This key is read at the same exact-GOG
+ODF scope seam as casingType. A missing/empty key tries `<weapon>_casing.mesh`,
+then the generated case. An explicit missing resource suppresses that casing;
+malformed paths, traversal, absolute filenames, non-`.mesh` names and names
+over 120 characters are rejected. A changed class/mesh choice gets a separate
+resource cache key. Resolution happens outside the firing hook, once per choice.
+
+Author one rigid case centred at the origin, unit length 1 along local +Z,
+base at Z=-0.5 and mouth at Z=+0.5. The type uniformly scales the entire mesh
+by 0.12/0.24/0.40; collision still uses the existing approximate casing sphere.
+The mesh supplies its material names; there is no separate casingMaterial key.
+CR's `ODF/gminigun.odf` includes a commented, regeneration-safe example.
+
+## Brass finish
+
+The default now inherits stock `BZBase`, following the existing generated gib
+material path for DX9/DX11 shader selection. The previous material was a plain
+fixed-function pass with solid colours. The default's 256x128 diffuse/specular
+atlas adds longitudinal brushing, fine scratches, annealed neck discolouration,
+machined rim marks, a pale primer with a firing-pin mark, and low-specular soot.
+Highlights respond to view/light direction through the stock shader; no glow,
+reflection capture, overlay pass, per-casing texture or per-frame synthesis was
+added. Two shared RGB textures total 192 KiB of pixel data before mipmaps.
+
+The mesh now has a hollow mouth and inset primer with correctly oriented inner
+walls: 200 triangles at ten sides, up from 120, retaining two submeshes. Texture
+atlas V regions are body .02..48, rim .62, soot .76, primer .90. A custom mesh
+may supply its own UVs and materials instead.
+
+Marked generated materials/textures refresh on the next resource setup if their
+bytes differ, fixing the previous keep-existing-file behavior. Unmarked custom
+files remain untouched; a pack material override removes only owned generated
+copies so the pack wins resource lookup. No installed game files were deployed.
+
+An offline Blender study uses the actual exported mesh and diffuse texture with
+an approximate metallic material. It is useful for inspecting form/UV/colour;
+it is not an Ogre capture or in-game acceptance evidence.
+
 Ejection still uses the native muzzle matrix and the existing estimated breech
 offset, shooter velocity and tumble. It follows the firing mount of each craft;
 this change does not author model-specific ejection ports or barrel-tip fits.
@@ -56,8 +96,10 @@ Casings are local cosmetic entities and send no network messages.
   nonvolatile registers and stack cleanup. Scope callbacks still run before
   the native PopScope. The policy test covers invalid values, filename
   normalization, ballistic sizes and energy/launcher/unknown suppression.
-- Release Win32 DLL build and 137 Win32 CTests passed. The stock executable static check passed 15 named
+- Release Win32 DLL build and 138 Win32 CTests passed. The stock executable static check passed 15 named
   resolves, four call destinations and five complete instruction steals.
+- Independent Toolbox decode verified every generated triangle's winding against
+  its normals, no degenerate faces, valid atlas UVs and inward hollow-mouth walls.
 - Live visual placement, resource loading, pause, scene replacement, save/load,
   sustained-fire performance, co-op and Proton/Wine remain pending.
 

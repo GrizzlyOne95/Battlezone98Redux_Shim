@@ -65,7 +65,7 @@ namespace BZROpenShim
         void SetShellCasingFactoryOriginal(void* factory);
         void* GetShellCasingShotBridgeAddress();
         // Called at the live WeaponClass ODF scope seam, not from the shot hook.
-        void ObserveShellCasingClass(void* objectClass, const char* casingType) noexcept;
+        void ObserveShellCasingClass(void* objectClass, const char* casingType, const char* casingMesh) noexcept;
 
         // PathBlockFaces (path_block.cpp): BlockCells entry detour. Install
         // builds the prologue trampoline and resolves the grid globals; false

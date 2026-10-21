@@ -20,8 +20,8 @@
 // contact uses each nearby GameObject's Ogre entity bounds placed by its scene
 // node (an oriented box), found through the engine's collision grid.
 //
-// [General] ShellCasings = 0 removes the two call patches at startup and
-// leaves every entry point below inert.
+// [General] ShellCasings = 0 leaves the casing emitter inert. The shared
+// shot patches can remain for independently enabled muzzle flashes/recoil.
 
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
@@ -32,6 +32,7 @@
 #include "shell_casing_physics.h"
 #include "shell_casing_config.h"
 #include "shell_casing_policy.h"
+#include "shell_casing_finish.h"
 #include "weapon_presentation_call_bridges.h"
 #include <algorithm>
 #include <array>
@@ -90,7 +91,7 @@ namespace BZROpenShim
             constexpr const char* kCasingMeshRelative = OPENSHIM_CHUNK_CACHE_CASINGS_DIR "openshim_casing.mesh";
             constexpr unsigned kCasingSides = 10;
             constexpr const char* kCasingMaterialFile = "openshim_casing.material";
-            constexpr const char* kCasingMaterialMarker = "// OpenShim ShellCasings default casing materials";
+            constexpr const char* kCasingMaterialMarker = SC::kFinishMarker;
 
             // Released-layout contracts (GOG Redux 2.2.301). Weapon: +0x08
             // WeaponClass, +0x0C OrdnanceClass, +0x18 owner OBJ76 (Cannon::
@@ -228,8 +229,9 @@ namespace BZROpenShim
                 int ammoCost;
                 SC::CasingType casingType;
                 char odf[20];
+                char mesh[128];
             };
-            struct ClassCasing { std::array<char, 20> odf{}; SC::CasingType type = SC::CasingType::None; };
+            struct ClassCasing { std::array<char, 20> odf{}; char mesh[128] = {}; SC::CasingType type = SC::CasingType::None; };
             std::unordered_map<void*, ClassCasing> g_ClassCasings; // bounded; lookup never allocates
             bool g_ClassCasingOverflow = false;
             std::array<PendingShot, kMaxPendingShots> g_Pending;
@@ -463,22 +465,24 @@ namespace BZROpenShim
             std::unordered_map<std::string, std::string> g_MeshForWeapon;
             std::vector<std::string> g_FailedMeshes;
 
-            const std::string& MeshForWeapon(const char* odf)
+            const std::string& MeshForWeapon(const char* odf, const char* authoredMesh)
             {
                 static const std::string generated = kCasingMeshResource;
                 std::string base = SC::NormalizeToken(odf ? odf : "");
                 if (base.empty())
                     return generated;
-                auto found = g_MeshForWeapon.find(base);
+                const bool explicitMesh = authoredMesh && *authoredMesh;
+                const std::string key = base + "|" + (explicitMesh ? authoredMesh : "");
+                auto found = g_MeshForWeapon.find(key);
                 if (found != g_MeshForWeapon.end())
                     return found->second;
-                std::string chosen = generated;
+                std::string chosen = explicitMesh ? std::string{} : generated;
                 const OgreCasingApi& api = GetOgreApi();
                 if (api.resourceGroupManager && api.resourceExistsInAnyGroup)
                 {
                     void* manager = ResourceGroupManagerSeh(api);
                     bool exists = false;
-                    const std::string candidate = base + "_casing.mesh";
+                    const std::string candidate = explicitMesh ? authoredMesh : base + "_casing.mesh";
                     if (manager && ResourceExistsSeh(api, manager, candidate, exists) && exists)
                         chosen = candidate;
                 }
@@ -489,7 +493,7 @@ namespace BZROpenShim
                 }
                 if (g_MeshForWeapon.size() > 512)
                     g_MeshForWeapon.clear();
-                return g_MeshForWeapon.emplace(std::move(base), std::move(chosen)).first->second;
+                return g_MeshForWeapon.emplace(key, std::move(chosen)).first->second;
             }
 
             // ---- Pool ------------------------------------------------------------
@@ -904,7 +908,8 @@ namespace BZROpenShim
                     return;
                 }
 
-                const std::string& mesh = MeshForWeapon(shot.odf);
+                const std::string& mesh = MeshForWeapon(shot.odf, shot.mesh);
+                if (mesh.empty()) return; // explicit missing/invalid resource never substitutes unrelated brass
                 if (std::find(g_FailedMeshes.begin(), g_FailedMeshes.end(), mesh) != g_FailedMeshes.end())
                     return;
                 CasingSlot* slot = AcquireSlot(mesh, sceneManager);
@@ -1140,10 +1145,14 @@ namespace BZROpenShim
                 if (!ReadWeaponFieldsSeh(weapon, vtable, weaponClass, shot.odf, shot.ammoCost))
                     return;
                 shot.casingType = g_ClassCasingOverflow ? SC::CasingType::None : SC::StockCasingType(shot.odf);
+                shot.mesh[0] = 0;
                 const auto authored = g_ClassCasings.find(weaponClass);
                 if (authored != g_ClassCasings.end() &&
                     std::strncmp(authored->second.odf.data(), shot.odf, sizeof(shot.odf)) == 0)
+                {
                     shot.casingType = authored->second.type;
+                    std::memcpy(shot.mesh, authored->second.mesh, sizeof(shot.mesh));
+                }
                 if (shot.casingType == SC::CasingType::None) { ++g_StatFiltered; return; }
                 shot.kind = KindForVtable(weapon, vtable);
                 bool allowed = false;
@@ -1374,7 +1383,7 @@ namespace BZROpenShim
             return reinterpret_cast<void*>(&WeaponPresentation::NativeBridges::CannonOrdnanceCallBridge);
         }
 
-        void ObserveShellCasingClass(void* objectClass, const char* casingType) noexcept
+        void ObserveShellCasingClass(void* objectClass, const char* casingType, const char* casingMesh) noexcept
         {
             if (!objectClass || !IsShellCasingsEnabled()) return;
             // The class contains the original ODF filename, not its 8-byte tag.
@@ -1384,8 +1393,9 @@ namespace BZROpenShim
             try
             {
                 g_ClassCasings.erase(objectClass);
-                if (!read || !casingType) return; // missing: conservative stock fallback
-                entry.type = SC::ParseCasingType(casingType);
+                if (!read || (!casingType && !casingMesh)) return; // missing: conservative stock fallback
+                entry.type = casingType ? SC::ParseCasingType(casingType) : SC::StockCasingType(entry.odf.data());
+                if (casingMesh && !SC::ParseCasingMesh(casingMesh, entry.mesh)) entry.type = SC::CasingType::None;
                 if (g_ClassCasings.size() < 512) g_ClassCasings.emplace(objectClass, entry);
                 else g_ClassCasingOverflow = true; // cannot lose an explicit "none" and emit stock brass
             }
@@ -1443,45 +1453,54 @@ namespace BZROpenShim
                             existing.close();
                             std::filesystem::remove(ours, ec);
                         }
+                        // Let a pack provide matching textures without a
+                        // generated duplicate winning resource discovery.
+                        for (const auto* file : {SC::kFinishDiffuse, SC::kFinishSpecular})
+                        {
+                            const auto path = cacheRoot / file;
+                            std::ifstream texture(path, std::ios::binary);
+                            std::vector<uint8_t> header(64);
+                            texture.read(reinterpret_cast<char*>(header.data()), static_cast<std::streamsize>(header.size()));
+                            header.resize(static_cast<size_t>(texture.gcount()));
+                            texture.close();
+                            if (SC::IsGeneratedFinishTga(header)) std::filesystem::remove(path, ec);
+                        }
                         LogChunkDiagnostic("shellcasings", L"[SHELLCASINGS] casing materials overridden by %hs\n",
                                            (directory / kCasingMaterialFile).string().c_str());
                         return;
                     }
                     ec.clear();
                 }
+                // Upgrade only marked generated materials. Unmarked files
+                // belong to the user, even when placed directly in the cache.
                 if (std::filesystem::exists(ours, ec))
-                    return;
+                {
+                    std::ifstream existing(ours);
+                    std::string first;
+                    if (!existing || !std::getline(existing, first) || first.rfind(kCasingMaterialMarker, 0) != 0)
+                        return;
+                }
                 std::filesystem::create_directories(cacheRoot, ec);
+                for (bool specular : {false, true})
+                {
+                    const auto path = cacheRoot / (specular ? SC::kFinishSpecular : SC::kFinishDiffuse);
+                    const auto data = SC::FinishTga(specular);
+                    std::ifstream input(path, std::ios::binary);
+                    const std::vector<uint8_t> existing((std::istreambuf_iterator<char>(input)), {});
+                    input.close();
+                    if (!existing.empty() && !SC::IsGeneratedFinishTga(existing)) continue;
+                    if (existing == data) continue;
+                    std::ofstream texture(path, std::ios::binary | std::ios::trunc);
+                    texture.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+                    if (!texture) return; // do not publish a material with incomplete default textures
+                }
+                const std::string script = SC::FinishMaterialScript();
+                std::ifstream input(ours, std::ios::binary);
+                const std::string existing((std::istreambuf_iterator<char>(input)), {});
+                if (existing == script) return;
+                input.close();
                 std::ofstream output(ours, std::ios::binary | std::ios::trunc);
-                output << kCasingMaterialMarker << " (generated; do not edit).\n"
-                       << "// Override it with an openshim_casing.material at the top of a chunk payload\n"
-                       << "// directory (<mod>/chunkMeshes/ or BZ_ASSETS/common/models/OpenShimChunkPayloads/).\n"
-                       << "material openshim_casing_brass\n"
-                       << "{\n"
-                       << "    technique\n"
-                       << "    {\n"
-                       << "        pass\n"
-                       << "        {\n"
-                       << "            ambient 0.45 0.34 0.12\n"
-                       << "            diffuse 0.85 0.64 0.24\n"
-                       << "            specular 0.9 0.8 0.5 48\n"
-                       << "            normalise_normals on\n"
-                       << "        }\n"
-                       << "    }\n"
-                       << "}\n"
-                       << "material openshim_casing_rim\n"
-                       << "{\n"
-                       << "    technique\n"
-                       << "    {\n"
-                       << "        pass\n"
-                       << "        {\n"
-                       << "            ambient 0.2 0.14 0.06\n"
-                       << "            diffuse 0.38 0.27 0.11\n"
-                       << "            specular 0.4 0.35 0.25 24\n"
-                       << "            normalise_normals on\n"
-                       << "        }\n"
-                       << "    }\n"
-                       << "}\n";
+                output << script;
                 output.close();
                 LogChunkDiagnostic("shellcasings", L"[SHELLCASINGS] wrote default casing materials %hs ok=%u\n",
                                    ours.string().c_str(), output ? 1u : 0u);

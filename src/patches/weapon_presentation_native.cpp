@@ -217,7 +217,10 @@ namespace BZROpenShim::Hooks
             if (!g_ClassReady || !EngineThread() || !scope || !objectClass) return;
             char casing[kMaxValueBytes] = {};
             const auto casingStatus = ReadValue(scope, Policy::Hash("WeaponClass"), Policy::Hash("casingType"), casing);
-            ObserveShellCasingClass(objectClass, casingStatus == ValueStatus::Missing ? nullptr : casing);
+            char casingMesh[kMaxValueBytes] = {};
+            const auto meshStatus = ReadValue(scope, Policy::Hash("WeaponClass"), Policy::Hash("casingMesh"), casingMesh);
+            ObserveShellCasingClass(objectClass, casingStatus == ValueStatus::Missing ? nullptr : casing,
+                meshStatus == ValueStatus::Missing ? nullptr : meshStatus == ValueStatus::Present ? casingMesh : "\"");
             if (!g_Ready) return;
             g_FlashClasses.erase(objectClass); // failed/reloaded read cannot retain stale configuration
             try

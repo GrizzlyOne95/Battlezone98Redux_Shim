@@ -4,6 +4,15 @@ using namespace BZROpenShim::ShellCasings;
 using OpenShimTest::Check;
 int main()
 {
+    char mesh[128] = {};
+    Check(ParseCasingMesh(" \"MyPack/Brass.mesh\" ", mesh) && std::string_view(mesh) == "MyPack/Brass.mesh",
+        "explicit resource preserves case");
+    Check(ParseCasingMesh("\"\"", mesh) && !mesh[0], "empty selects normal mesh convention");
+    for (auto value : {"../brass.mesh", "C:/brass.mesh", "/brass.mesh", "a\\brass.mesh", "brass.sdf", "\"unterminated.mesh", "a.mesh|b"})
+        Check(!ParseCasingMesh(value, mesh) && !mesh[0], "reject unsafe/malformed resource");
+    char longName[130] = {};
+    for (int i = 0; i < 124; ++i) longName[i] = 'a';
+    Check(!ParseCasingMesh(longName, mesh), "never truncate an explicit resource");
     Check(ParseCasingType(" \"small\"\r\n") == CasingType::Small, "quoted small");
     Check(ParseCasingType("medium") == CasingType::Medium, "medium");
     Check(ParseCasingType("large") == CasingType::Large, "large");
