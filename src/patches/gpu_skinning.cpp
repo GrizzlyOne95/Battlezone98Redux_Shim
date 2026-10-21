@@ -26,6 +26,7 @@
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "gpu_skinning_hlsl.h"
+#include "memory_access.h"
 #include "render_profile_runtime.h"
 #include "shim_log.h"
 
@@ -284,6 +285,17 @@ namespace BZROpenShim
         };
         std::unordered_map<void*, EntityRecord> g_converted;
         std::unordered_set<void*> g_rejected;
+
+        // Bridge root -> VirtualQuery verdict. Querying every root every frame
+        // cost ~7% of an 80-craft frame. A readable root stays trusted while it
+        // keeps appearing (SEH still guards the reads); an unreadable one is
+        // re-queried on convert passes. Roots unseen for a frame are dropped.
+        struct RootProbe
+        {
+            bool readable = false;
+            uint32_t seenFrame = 0;
+        };
+        std::unordered_map<void*, RootProbe> g_rootProbes;
 
         // Caster material pass whose vertex program the skinned caster twins,
         // and whose parameters seed each skinned caster's.
@@ -1011,11 +1023,77 @@ namespace BZROpenShim
             LogRejectOnce(RejectName(error.reason) + std::string(":") + error.detail, error.reason, key);
         }
 
+        bool IsPointerShaped(const void* candidate)
+        {
+            const uintptr_t address = reinterpret_cast<uintptr_t>(candidate);
+            return address >= 0x00010000 && (address % sizeof(void*)) == 0;
+        }
+
+        // The same OBJ76 reads as Hooks::CaptureChunkBridgeSnapshot: the
+        // direct bridge root at +0xF0, and the legacy owner (+0x8C)'s +0xF0.
+        void ReadBridgeRoots(const uint8_t* obj76, void*& directRoot, void*& ownerRoot)
+        {
+            directRoot = nullptr;
+            ownerRoot = nullptr;
+            __try
+            {
+                void* const root = *reinterpret_cast<void* const*>(obj76 + 0xF0);
+                if (IsPointerShaped(root))
+                    directRoot = root;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            __try
+            {
+                void* const owner = *reinterpret_cast<void* const*>(obj76 + 0x8C);
+                if (IsPointerShaped(owner))
+                {
+                    void* const root = *reinterpret_cast<void* const*>(static_cast<const uint8_t*>(owner) + 0xF0);
+                    if (IsPointerShaped(root))
+                        ownerRoot = root;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        bool ReadRootEntity(const void* root, void*& entity)
+        {
+            __try
+            {
+                entity = *reinterpret_cast<void* const*>(static_cast<const uint8_t*>(root) + 0x94);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                entity = nullptr;
+                return false;
+            }
+        }
+
+        void* ResolveRootEntity(void* root, uint32_t frame, bool convertPass)
+        {
+            if (!root)
+                return nullptr;
+            auto [it, inserted] = g_rootProbes.try_emplace(root);
+            RootProbe& probe = it->second;
+            if (inserted || (!probe.readable && convertPass))
+                probe.readable = MemoryAccess::IsReadable(root, 0xA8 + sizeof(void*));
+            probe.seenFrame = frame;
+            void* entity = nullptr;
+            if (probe.readable && !ReadRootEntity(root, entity))
+                probe.readable = false;
+            return entity;
+        }
+
         void ScanFrame()
         {
             static void* s_objects[Hooks::kGameObjectArenaSlotCapacity];
             const size_t total =
                 Hooks::CollectLiveGameObjectsFromArena(s_objects, Hooks::kGameObjectArenaSlotCapacity);
+            const uint32_t frame = g_frame;
             const bool convertPass = (g_frame++ % kConvertIntervalFrames) == 0;
 
             std::unordered_set<void*> live;
@@ -1025,9 +1103,13 @@ namespace BZROpenShim
                 void* obj76 = nullptr;
                 if (!Hooks::TryGetGameObjectObj76(s_objects[index], obj76) || !obj76)
                     continue;
-                const Hooks::ChunkBridgeSnapshot snapshot =
-                    Hooks::CaptureChunkBridgeSnapshot(reinterpret_cast<const uint8_t*>(obj76));
-                void* const candidates[] = { snapshot.directOgreEntity, snapshot.ownerOgreEntity };
+                void* directRoot = nullptr;
+                void* ownerRoot = nullptr;
+                ReadBridgeRoots(static_cast<const uint8_t*>(obj76), directRoot, ownerRoot);
+                void* const candidates[] = {
+                    ResolveRootEntity(directRoot, frame, convertPass),
+                    ResolveRootEntity(ownerRoot, frame, convertPass),
+                };
                 for (void* entity : candidates)
                 {
                     if (!entity || !live.insert(entity).second)
@@ -1088,6 +1170,8 @@ namespace BZROpenShim
             // pointers may be dangling, and a reused address starts fresh.
             for (auto it = g_converted.begin(); it != g_converted.end();)
                 it = live.count(it->first) ? std::next(it) : g_converted.erase(it);
+            for (auto it = g_rootProbes.begin(); it != g_rootProbes.end();)
+                it = it->second.seenFrame == frame ? std::next(it) : g_rootProbes.erase(it);
             if (convertPass)
             {
                 for (auto it = g_rejected.begin(); it != g_rejected.end();)
@@ -1189,6 +1273,7 @@ namespace BZROpenShim
             g_programs.clear();
             g_converted.clear();
             g_rejected.clear();
+            g_rootProbes.clear();
         }
 
         bool ReadEnabledSetting()
