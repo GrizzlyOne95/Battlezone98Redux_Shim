@@ -758,8 +758,8 @@ D3D11DeviceLossRecovery = 1
 ;   queue at most OPENSHIM_DXGI_FLIP_LATENCY (1-3, default 1) deep and the next
 ;   frame starts when the queue has room. Flip model cannot multisample the
 ;   back buffer, so with FSAA the game renders into an MSAA proxy that is
-;   resolved at Present. sRGB back buffers and any request DXGI refuses keep
-;   the stock swap chain. Logged under [DXGI Flip].
+;   resolved at Present. Windowed only: exclusive fullscreen, sRGB back
+;   buffers and any request DXGI refuses keep the stock swap chain. Logged under [DXGI Flip].
 ;   Env: OPENSHIM_DXGI_FLIP_MODEL=1 (wins over this key);
 ;   OPENSHIM_DXGI_FLIP_WAITABLE=0 keeps flip model without the waitable object.
 DxgiFlipModel = 0

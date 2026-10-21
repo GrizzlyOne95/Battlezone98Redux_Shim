@@ -39,8 +39,13 @@ int main(int argc,char** argv)
     Require(!NativeLeaseMatchesFrame(lease,7,100,110,999),"clock domain mismatch rejected");
     for(int fault=0;fault<7;++fault) {
         auto bad=lease;
-        if(fault==0)bad.ready=0; if(fault==1)bad.revision=0; if(fault==2)bad.byteSize=0;
-        if(fault==3)bad.triangles=1000001; if(fault==4)bad.validFromQpc=0; if(fault==5)bad.magic=0; if(fault==6)bad.version=1;
+        if(fault==0)bad.ready=0;
+        if(fault==1)bad.revision=0;
+        if(fault==2)bad.byteSize=0;
+        if(fault==3)bad.triangles=1000001;
+        if(fault==4)bad.validFromQpc=0;
+        if(fault==5)bad.magic=0;
+        if(fault==6)bad.version=1;
         Require(!NativeLeaseMatchesFrame(bad,7,100,110,1000),"invalid live native lease rejected");
     }
     float sun[3]={0,1,0}; Require(ValidTerrainSun(sun),"unit world sun direction accepted");
