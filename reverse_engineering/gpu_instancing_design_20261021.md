@@ -248,20 +248,23 @@ The draw needs no closing `_setPass`. Every flush point is followed by a
 
 ## 6. Results (prototype, 2026-10-21)
 
-### 6.1 Status: batches over 1 render one craft
+### 6.1 Status: every craft renders
 
 The prototype installs, batches and fails closed:
 
 - no faults;
 - `decl_refused=0`;
 - `max_batch=20` at 20 tanks;
-- about 28,950 instanced draws per idle-20 mission.
+- about 28,000 instanced draws per idle-20 mission.
 
-**It is not correct yet.** With `GpuInstancing=1`, a batch of N tanks shows
-one tank, not N. With `GpuInstancing=0`, every tank renders, matching the
-baseline.
+With `GpuInstancing=1` all 20 tanks of the parity scene render. The tank region
+of the screenshot differs from the `GpuInstancing=0` shot by 164-254 pixels
+(animation noise); the broken build differed by about 5,600.
 
-What the diagnostics showed (temporary env hooks, since removed):
+#### The bug: a non-virtual unlock left the instance stream at zero
+
+The first build drew one tank per batch. Diagnostics (temporary env hooks,
+since removed):
 
 | Test | Result | Meaning |
 |---|---|---|
@@ -269,8 +272,25 @@ What the diagnostics showed (temporary env hooks, since removed):
 | Twin VS scaled 3× (`osGpuSkinPos * 3`) | Every craft vanishes | The instanced twin is the program actually bound. |
 | Per-instance base forced to 100000 for every instance | Same single tank as `i·K` | The value in the instance stream never reaches the shader. |
 
-So every instance appears to use palette slot 0. Either the TEXCOORD15
-per-instance element reads 0, or only instance 0 is rasterised.
+A RenderDoc 1.46 capture of an idle-20 frame then showed:
+
+- six `DrawIndexedInstanced` calls, each with `InstanceCount` 20;
+- the TEXCOORD15 element is `R32_FLOAT` at input slot 3, per-instance, step
+  rate 1, and the VS reads it;
+- slot 3 is bound, with stride 4 and offset 0;
+- **the buffer's GPU contents are all zero**, so post-VS positions are
+  identical for instances 0-3.
+
+**Cause.** The instance buffer was unlocked through the exported
+`HardwareBuffer::unlock`, called directly. `D3D11HardwareVertexBuffer`
+overrides `unlock` to forward to its inner `D3D11HardwareBuffer`, which does
+the `Unmap` (or the staging copy). The direct call ran only the base class
+body, so the data written through the lock never reached the GPU. The 2-arg
+`lock` wrapper was fine: it dispatches virtually to `lockImpl`.
+
+**Fix.** At install, the shim finds `unlock`'s slot in the exported
+`HardwareBuffer` vtable (fails closed if it is absent or not unique) and calls
+it through the buffer's own vptr.
 
 What was ruled out along the way:
 
@@ -280,42 +300,40 @@ What was ruled out along the way:
   reads as success.** Always check the mission summary's `batches` before
   trusting a screenshot.
 - **Static instance buffer.** Switching it to dynamic write-only with a
-  discard lock changed nothing.
+  discard lock changed nothing; the dynamic buffer was kept.
+- **Calling Ogre virtuals through their exports.** Any exported virtual whose
+  derived class overrides it must be called through the vtable. Binding the
+  export is only safe for non-virtual functions or classes with no override.
 
-Next step: a RenderDoc capture of one instanced `DrawIndexedInstanced`, to
-read:
-
-- `InstanceCount`;
-- the TEXCOORD15 element's `InputSlot`, `InputSlotClass` and step rate;
-- the buffer bound at that slot, with its stride, offset and contents;
-- the VS input for instances 1 and up.
-
-### 6.2 Benchmark (estimates the cost of the broken path, not a validated gain)
+### 6.2 Benchmark (fixed build, every craft rendering)
 
 Setup:
 
 - `run_live_combat_benchmark.ps1 -UnitOdf avtank`, GpuSkinning 1, DX11,
   windowed;
-- 3 repeats per arm;
+- 3 repeats per arm, interleaved (0 and 1 alternate within each repeat);
 - 8 s measure window; seconds above 100 fps averaged, weighted by frame count.
 
-The instanced draws still submit all N instances, and their vertices are
-skinned. So the vertex work and the CPU submission savings are representative.
-Pixel work is not: the stacked instances fail depth, so the numbers are
-optimistic.
+Every `GpuInstancing=1` run engaged: `decl_refused=0`, no faults,
+`max_batch=80` at idle and 40 in combat.
 
 | Scenario | Arm | GpuInstancing 0 | GpuInstancing 1 | Δ |
 |---|---|---|---|---|
-| idle 80 | clean | 4.10 ms (4.03-4.21), 601 draws/frame | 3.32 ms (3.29-3.34), 130 draws/frame | −0.78 ms (−19%) |
-| idle 80 | `-SampleCpu` | 4.55 ms (4.30-4.83) | 3.51 ms (3.44-3.57) | −1.04 ms |
-| combat 40 | clean | 5.54 ms (5.14-6.18), 530 draws/frame | 4.97 ms (4.86-5.10), 409 draws/frame | −0.57 ms (noisy baseline) |
-| combat 40 | `-SampleCpu` | 5.21 ms (5.09-5.30) | 4.94 ms (4.72-5.11) | −0.27 ms |
+| idle 80 | clean | 4.13 ms (4.02-4.23), 601 draws/frame | 3.26 ms (3.23-3.31), 131 draws/frame | −0.87 ms (−21%) |
+| idle 80 | `-SampleCpu` | 4.57 ms (4.44-4.77) | 3.50 ms (3.45-3.59) | −1.07 ms |
+| combat 40 | clean | 5.07 ms (4.91-5.19), 502 draws/frame | 4.92 ms (4.71-5.13), 422 draws/frame | −0.15 ms (within noise) |
+| combat 40 | `-SampleCpu` | 5.46 ms (5.40-5.52), 557 draws/frame | 4.75 ms (4.07-5.22), 353 draws/frame | −0.71 ms (one outlier at 4.07) |
 
 Reading:
 
-- **Idle.** Draws fall by 78%, and frame time by about 0.8 ms. That is
-  inside the 0.6-1.2 ms estimate of section 5.
-- **Combat.** Explosion lights split the groups, so only about 23% of draws
-  go. The gain is about 0.3-0.6 ms, within noise of the slow r1 baseline.
-- **These numbers must be re-measured** once the instanced path renders every
-  craft.
+- **Idle.** Draws fall by 78%, and frame time by 0.87 ms with no overlap
+  between the arms. That is inside the 0.6-1.2 ms estimate of section 5. The
+  broken build measured almost the same (−0.78 ms), so pixel work from the
+  extra instances is not a significant cost here.
+- **Combat.** Explosion lights split the groups: about a third of deferred
+  members still draw alone (`singles` ≈ 130-180k per mission), and draws fall
+  by only 16-37%. The clean arm's gain is inside run-to-run noise; the
+  sampled arm suggests up to 0.7 ms but rests on one fast run.
+- **Next.** Combat would gain more if light-list differences did not split
+  groups. That needs the light list moved out of the key, for example per
+  instance lights, which is a larger change than this prototype.

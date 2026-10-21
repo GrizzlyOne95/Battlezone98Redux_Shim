@@ -186,12 +186,17 @@ namespace BZROpenShim
             FnGetElement getElement = nullptr;
             FnLock lock = nullptr;
             FnVoid unlock = nullptr;
+            void** hardwareBufferVtable = nullptr;
         };
 
         OgreApi g_ogre;
         int g_slotGetRenderOperation = -1;
         int g_slotGetWorldTransforms = -1;
         int g_slotGetNumWorldTransforms = -1;
+        // D3D11HardwareVertexBuffer overrides unlock to forward to its inner
+        // buffer; the exported HardwareBuffer::unlock called directly never
+        // unmaps it, and the GPU copy stays zero. So unlock goes through here.
+        int g_slotUnlock = -1;
         // The leader's vtable during an instanced draw: SubEntity's with three
         // overrides. Slot -1 keeps the RTTI locator.
         void* g_leaderVtableStorage[kVtableCopySlots + 1] = {};
@@ -364,6 +369,7 @@ namespace BZROpenShim
             OS_BIND(getElement, "?getElement@VertexDeclaration@Ogre@@QBEPBVVertexElement@2@G@Z");
             OS_BIND(lock, "?lock@HardwareBuffer@Ogre@@QAEPAXW4LockOptions@12@W4UploadOptions@12@@Z");
             OS_BIND(unlock, "?unlock@HardwareBuffer@Ogre@@UAEXXZ");
+            OS_BIND(hardwareBufferVtable, "??_7HardwareBuffer@Ogre@@6B@");
             if (!Bind(accept, "?acceptVisitor@QueuedRenderableCollection@Ogre@@QBEXPAVQueuedRenderableVisitor@2@W4OrganisationMode@12@@Z"))
             {
                 missing = "QueuedRenderableCollection::acceptVisitor";
@@ -458,7 +464,8 @@ namespace BZROpenShim
                 return nullptr;
             for (uint32_t i = 0; i < kPaletteBones; ++i)
                 bases[i] = static_cast<float>(i * bones);
-            g_ogre.unlock(buffer.rep);
+            auto unlock = reinterpret_cast<FnVoid>((*static_cast<void***>(buffer.rep))[g_slotUnlock]);
+            unlock(buffer.rep);
             // Kept for the process: a kilobyte per palette size.
             return &g_instanceBuffers.emplace(bones, buffer).first->second;
         }
@@ -925,6 +932,13 @@ namespace BZROpenShim
             {
                 LogShimA(LogLevel::Warn, kComponent, "[GPUINST] not installed: SubEntity vtable slots not found (%d,%d,%d)",
                     g_slotGetRenderOperation, g_slotGetWorldTransforms, g_slotGetNumWorldTransforms);
+                return;
+            }
+            g_slotUnlock = Readable(g_ogre.hardwareBufferVtable, kVtableCopySlots * sizeof(void*))
+                ? FindSlot(g_ogre.hardwareBufferVtable, reinterpret_cast<void*>(g_ogre.unlock)) : -1;
+            if (g_slotUnlock < 0)
+            {
+                LogShimA(LogLevel::Warn, kComponent, "[GPUINST] not installed: HardwareBuffer::unlock slot not found");
                 return;
             }
             std::memcpy(g_leaderVtableStorage, subEntity - 1, sizeof(g_leaderVtableStorage));
