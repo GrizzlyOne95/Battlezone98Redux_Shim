@@ -76,6 +76,25 @@ amplitude, capped at the existing one-meter envelope; `0` flattens relief.
 Restart after editing the manifest. Failed/missing packs retain baseline
 relief. CR exposes a value for each world in `Config/cr_terrain_hd.json`.
 
+The same per-material object accepts independent detail controls (all finite):
+
+| Field | Range | Default | Effect |
+|---|---|---|---|
+| `detailContrast` | 0..1 | 0.55 | Brightness modulation around neutral detail; zero removes its colour modulation. |
+| `detailNormalStrength` | 0..4 | 2.2 | Luminance-gradient detail normal strength; zero disables both detail-normal layers. |
+| `detailNormalNearScale` | 0..1 | 0.55 | Relative strength of the finer 32x normal layer. |
+
+These apply only to the owned native HD DX11 Enhanced fragment programs.
+They leave authored D/N/S/E textures and geometry amplitude independent.
+Defaults retain the current source exactly, including Mars's existing look.
+Changed values specialize the shader before its existing source-hashed cache
+name is calculated, so materials cannot share stale tuned variants. No extra
+texture, uniform, slot or persistent source image is allocated. Unknown shader
+contracts or invalid values decline installation and retain the stock owner.
+Restart after editing; use the `[TERRAIN-HD] detail tuning` log to verify the
+actual material/values. Detail-map resolution remains the existing 2048px
+contract. DX9/Retro/Redux fallback is unchanged.
+
 An optional `heightTexture` replaces the procedural field when micro detail
 is enabled and the guarded HD pack installs. It is a **file path relative to
 the manifest**, using case-correct `/` separators, paired with

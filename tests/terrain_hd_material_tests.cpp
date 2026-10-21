@@ -71,6 +71,30 @@ int main(int argc, char** argv)
     std::ifstream file(path);
     const std::string original{std::istreambuf_iterator<char>(file), {}};
     Require(!original.empty(), "authoritative terrain shader missing");
+    auto detailDefault = original;
+    Require(HD::SpecializeDetail(detailDefault, {}) && detailDefault == original,
+        "default world detail tuning changed the existing shader");
+    auto detailOff = original;
+    Require(HD::SpecializeDetail(detailOff, {0, 0, 0}) && detailOff != original &&
+        detailOff.find("OSE_TERRAIN_DETAIL_NORMAL_STRENGTH = 0;") != std::string::npos,
+        "independent detail off controls not specialized");
+    auto detailOther = original;
+    Require(HD::SpecializeDetail(detailOther, {.35f, 1.1f, .2f}) && detailOther != detailOff &&
+        original == detailDefault, "world tuning shared source/cache identity");
+    for (const auto invalid : {HD::DetailTuning{-1, 2.2f, .55f}, {1.01f, 2.2f, .55f},
+        {.55f, 4.01f, .55f}, {.55f, -1, .55f}, {.55f, 2.2f, 1.01f},
+        {.55f, std::numeric_limits<float>::infinity(), .55f},
+        {std::numeric_limits<float>::quiet_NaN(), 2.2f, .55f}})
+    {
+        auto untouched = original;
+        Require(!HD::SpecializeDetail(untouched, invalid) && untouched == original,
+            "invalid detail tuning accepted or partly changed shader");
+    }
+    auto foreignDetail = original;
+    foreignDetail.erase(foreignDetail.find("static const float OSE_TERRAIN_DETAIL_CONTRAST"), 1);
+    const auto foreignBefore = foreignDetail;
+    Require(!HD::SpecializeDetail(foreignDetail, {0,0,0}) && foreignDetail == foreignBefore,
+        "unknown detail shader contract partly mutated");
     auto shader = original;
     Require(HD::Specialize(shader, {true, true, true}), "authoritative shader contract declined");
     Require(shader.find("Texture2DArray normalMap") != std::string::npos &&
@@ -99,6 +123,7 @@ int main(int argc, char** argv)
         Require(HD::ReplaceOnce(shader, "diffuseMap.Sample(diffuseSam, vTexCoord)",
             "diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice))"), "diffuse sample missing");
         Require(HD::Specialize(shader, {true, true, true}), "full PS specialization failed");
+        Require(HD::SpecializeDetail(shader, {.35f,1.1f,.2f}), "tuned HD PS specialization failed");
         std::ofstream out(argv[1]); out << shader;
         Require(bool(out), "specialized PS output failed");
     }
