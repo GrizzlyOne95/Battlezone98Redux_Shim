@@ -282,6 +282,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Chooses how opt-in hit/contact feedback draws the stock reticle art;
     # inert while HitMarkers and ReactiveReticle stay at their shipped 0.
     "Display/StockReticleShader",
+    # Render-only, DX11: skins craft on the GPU; anything it cannot prove
+    # compatible stays on the CPU path and any fault turns it off. Default on
+    # 2026-10-21 at the user's request (+30% fps in a 40-craft fight).
+    "Experimental/GpuSkinning",
 
     # Stages OpenShim updates from the Workshop on the main menu (Steam only,
     # never in multiplayer); installs only at game exit. Default on by design.

@@ -2,9 +2,9 @@
 
 namespace BZROpenShim
 {
-    // Experimental hardware skinning for skeletal craft on Direct3D 11.
+    // Hardware skinning for skeletal craft on Direct3D 11.
     //
-    // Off unless [Experimental] GpuSkinning = 1 (or OPENSHIM_GPU_SKINNING).
+    // On unless [Experimental] GpuSkinning = 0 (or OPENSHIM_GPU_SKINNING=0).
     // The setting is read when a mission starts, so a change applies on the
     // next mission load. Each eligible entity gets runtime clones of its
     // materials whose vertex programs (and shadow caster program) are
