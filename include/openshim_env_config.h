@@ -17,4 +17,9 @@
 // macros would otherwise break normal std::min/std::max use elsewhere.
 DWORD WINAPI OpenShimGetEnvironmentVariableA(LPCSTR name, LPSTR buffer, DWORD size);
 
+// The redirect caches ini answers (re-validated against the file's write time
+// and size every 250 ms). Call this after OpenShim rewrites an ini so the
+// next read sees the new values immediately.
+void OpenShimInvalidateEnvIniCache();
+
 #define GetEnvironmentVariableA OpenShimGetEnvironmentVariableA

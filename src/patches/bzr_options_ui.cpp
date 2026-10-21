@@ -1063,6 +1063,7 @@ namespace BZROpenShim
                 return false;
             }
 
+            OpenShimInvalidateEnvIniCache();
             return true;
         }
 
@@ -3105,11 +3106,11 @@ namespace BZROpenShim
               kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::RestartRequired,
               "Enable authored craft ODF barrel-node or animation recoil. Requires model nodes/clips and ODF configuration; no generic fallback. Clips need EXU. Experimental GOG single-player cannons. Restart required." },
-            // Absent key = off, so defaultIndex 1 selects "0" (Off).
+            // Absent key = on, so defaultIndex 0 selects "1" (On).
             { "GPU Skinning", "Experimental", "GpuSkinning", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
               ShimSettingApplyGroup::ReadOnNextUse,
-              "Experimental, DX11 only: animate craft on the GPU instead of the CPU, which "
+              "DX11 only: animate craft on the GPU instead of the CPU, which "
               "frees CPU time with many craft on screen. Edges may differ from stock by a "
               "fraction of a pixel. Takes effect on the next mission load." },
             { "Reticle Convergence", "SinglePlayer", "PlayerReticleConvergence",
@@ -3272,6 +3273,16 @@ namespace BZROpenShim
               ShimSettingApplyGroup::RestartRequired,
               "Give craft their real bounding boxes so off-screen and distant craft are "
               "skipped by the camera and shadows. Rendering only. Restart required." },
+            { "Effect Batching", "Fixes", "DynamicGeometryPieceReuse", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Add smoke, fire and tracer sprites to the current batch when they would be "
+              "merged into it anyway, instead of opening a new one. Same pixels, less CPU. Restart required." },
+            { "Effect Sort", "Fixes", "DynamicGeometryFastSort", nullptr, 0,
+              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+              ShimSettingApplyGroup::RestartRequired,
+              "Sort effect-sprite batches without calling into Ogre for every compare. "
+              "Same order, same pixels. Restart required." },
             { "Net Route", "Network", "RoutePreference", nullptr, 0,
               kShimSettingsNetRouteValues, kShimSettingsNetRouteLabels, 3, 0,
               ShimSettingApplyGroup::BzrNetRoute,

@@ -60,8 +60,9 @@ namespace BZROpenShim
         // the game window; focus (GetFocus), keyboard and raw mouse stay real.
         //
         // A physical click on the game window (WH_GETMESSAGE hook; button physically
-        // down and cursor over the window, so harness PostMessage clicks do not
-        // count) clears WS_EX_NOACTIVATE, activates the window, and stands down
+        // down and the game window is the one under the cursor, so harness
+        // PostMessage clicks do not count, even while the user is clicking
+        // elsewhere) clears WS_EX_NOACTIVATE, activates the window, and stands down
         // every suppression for the rest of the session.
         //
         // Off by default; with the flag unset no import is touched.
@@ -112,6 +113,7 @@ namespace BZROpenShim
         volatile long s_sweepLogBudget = 6;
         volatile long s_noActivateLogged = 0;
         volatile long s_userActivated = 0; // a physical click on the game window lifts every suppression
+        volatile long s_clickRejectLogged = 0;
         HHOOK s_msgHook = nullptr;
         DWORD s_msgHookThread = 0;
         HMODULE s_exe = nullptr;
@@ -203,8 +205,18 @@ namespace BZROpenShim
         }
 
         // WH_GETMESSAGE on the game's UI thread. Hardware clicks and posted
-        // messages both arrive here; only a button that is physically down with
-        // the cursor over the window counts, which PostMessage never produces.
+        // messages both arrive here; only a button that is physically down
+        // while the game window is the window under the cursor counts.
+        //
+        // The cursor test was once "inside the game window's rectangle". The
+        // game window sits at the bottom of the z-order, under whatever the
+        // user is working in, so its rectangle usually covers the cursor. A
+        // harness click (BZRWindowInput Click, PostMessage) landing while the
+        // user pressed a button in their own window (taskbar, Discord, the
+        // Claude app) passed all three tests; ActivateForUser then called the
+        // real SetForegroundWindow from this module (which the IAT sweep skips)
+        // and lifted every suppression, so the game's own SetForegroundWindow
+        // (exe+0x218EF7) kept the foreground against the watchdog.
         LRESULT CALLBACK GetMessageProc(int code, WPARAM wParam, LPARAM lParam)
         {
             const HWND game = s_gameWindow;
@@ -214,12 +226,17 @@ namespace BZROpenShim
                 if (Policy::IsButtonDownMessage(msg->message))
                 {
                     POINT pt = {};
-                    RECT rc = {};
-                    const bool inside = GetCursorPos(&pt) && GetWindowRect(game, &rc) && PtInRect(&rc, pt);
+                    HWND under = nullptr;
+                    if (GetCursorPos(&pt))
+                        under = WindowFromPoint(pt);
+                    const bool overGame = under && GetAncestor(under, GA_ROOT) == game;
                     const bool isGame = msg->hwnd && GetAncestor(msg->hwnd, GA_ROOT) == game;
                     const bool down = (GetAsyncKeyState(Policy::ButtonVirtualKey(msg->message)) & 0x8000) != 0;
-                    if (Policy::IsUserClick(msg->message, isGame, inside, down))
+                    if (Policy::IsUserClick(msg->message, isGame, overGame, down))
                         ActivateForUser(game);
+                    else if (isGame && down && !overGame &&
+                             InterlockedExchange(&s_clickRejectLogged, 1) == 0)
+                        Log(L"[NOACTIVATE] ignored a click on the game window while the button was down over another window\n");
                 }
             }
             return CallNextHookEx(nullptr, code, wParam, lParam);

@@ -154,6 +154,7 @@
     <ClCompile Include="src\patches\autosave.cpp" />
     <ClCompile Include="src\patches\bzn_load_trace.cpp" />
     <ClCompile Include="src\patches\bzr_hooks.cpp" />
+    <ClCompile Include="src\patches\ai_nearest_vehicle_lazy.cpp" />
     <ClCompile Include="src\patches\ai_odf_tuning.cpp" />
     <ClCompile Include="src\patches\ai_unit_fixes.cpp" />
     <ClCompile Include="src\patches\ai_weapon_mask.cpp" />
@@ -197,6 +198,8 @@
     <ClCompile Include="src\patches\moderation.cpp" />
     <ClCompile Include="src\patches\multiplayer_vehicle_flags.cpp" />
     <ClCompile Include="src\patches\odf_helpers.cpp" />
+    <ClCompile Include="src\patches\stock_log_throttle.cpp" />
+    <ClCompile Include="src\patches\gas_copy_pool.cpp" />
     <ClCompile Include="src\patches\ogre_dedupe_crash_fixes.cpp" />
     <ClCompile Include="src\patches\ogre_script_import_cache.cpp" />
     <ClCompile Include="src\patches\resource_walk_stat_cache.cpp" />
@@ -248,6 +251,7 @@
     <ClCompile Include="src\patches\dx11_scene_depth.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
     <ClCompile Include="src\patches\fog_wake_feature.cpp" />
+    <ClCompile Include="src\patches\gpu_instancing.cpp" />
     <ClCompile Include="src\patches\gpu_skinning.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
     <ClCompile Include="src\patches\lua_formation_fix.cpp" />
@@ -334,6 +338,7 @@
     <ClInclude Include="include\fog_wake.h" />
     <ClInclude Include="include\fog_wake_runtime.h" />
     <ClInclude Include="include\fog_wake_feature.h" />
+    <ClInclude Include="include\gpu_instancing.h" />
     <ClInclude Include="include\gpu_skinning.h" />
     <ClInclude Include="include\gpu_skinning_hlsl.h" />
     <ClInclude Include="include\mp_vehicle_preview_fix.h" />
@@ -374,6 +379,7 @@
     <ClInclude Include="include\bzrnet_trace.h" />
     <ClInclude Include="include\bzrnet_instrumentation.h" />
     <ClInclude Include="include\crash_logger.h" />
+    <ClInclude Include="include\gas_copy_pool.h" />
     <ClInclude Include="include\bzr_string.h" />
     <ClInclude Include="include\d3d_startup_hooks.h" />
     <ClInclude Include="include\dx11_colorspace_diagnostic.h" />

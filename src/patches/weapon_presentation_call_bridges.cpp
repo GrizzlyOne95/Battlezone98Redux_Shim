@@ -25,7 +25,7 @@ namespace BZROpenShim::WeaponPresentation::NativeBridges
         g_CraftClass = craftClass;
     }
 
-    // Original cannon caller frame: weapon at [ebp-250h]. Original factory ABI:
+    // Cannon and MachineGun caller frame: weapon at [ebp-250h]. Original factory ABI:
     // ECX=OrdnanceClass; [esp+4]=final Matrix; [esp+8]=owner OBJ; RET 8.
     // Observe after factory return, preserving its EAX and nonvolatile regs.
     __declspec(naked) void CannonOrdnanceCallBridge()

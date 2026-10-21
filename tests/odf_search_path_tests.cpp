@@ -73,6 +73,26 @@ int main()
     CHECK(!FindOdfFile(dirs, "nothere", out));
     CHECK(out.empty());
 
+    // The index answers exactly what the stat-based lookup answers.
+    Touch(flat / "readme.txt");
+    Touch(flat / "UPPER.ODF");
+    const OdfDirectoryIndex index = BuildOdfDirectoryIndex(dirs);
+    CHECK(index.directories.size() == dirs.size());
+    for (const char* token : {"sxshield", "dup", "mpfirst", "stockonly", "nothere", "readme"})
+    {
+        fs::path statPath;
+        fs::path indexPath;
+        const bool statFound = FindOdfFile(dirs, token, statPath);
+        CHECK(FindOdfFileInIndex(index, token, indexPath) == statFound);
+        CHECK(statFound ? Same(statPath, indexPath) : indexPath.empty());
+    }
+
+    // Names fold to lower case, as Windows resolves them.
+    CHECK(FindOdfFileInIndex(index, "upper", out));
+    CHECK(Same(out, flat / "UPPER.ODF"));
+    CHECK(FindOdfFileInIndex(index, "SXShield", out));
+    CHECK(Same(out, flat / "sxshield.odf"));
+
     std::error_code ec;
     fs::remove_all(base, ec);
     return ::OpenShimTest::ExitCode();

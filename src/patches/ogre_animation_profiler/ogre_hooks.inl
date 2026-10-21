@@ -55,9 +55,32 @@
                         1, std::memory_order_relaxed);
                 }
             }
-            SceneRenderScope scope;
-            SceneCameraScope cameraScope(camera);
-            real(self, camera, viewport, includeOverlays);
+            PassTimeSlot* passSlot = FindOrClaimPassSlot(viewport);
+            if (passSlot)
+            {
+                passSlot->camera.store(
+                    reinterpret_cast<uintptr_t>(camera), std::memory_order_relaxed);
+                passSlot->depth.store(t_SceneRenderDepth, std::memory_order_relaxed);
+                passSlot->renders.fetch_add(1, std::memory_order_relaxed);
+            }
+            PassTimeSlot* const parentPass = t_CurrentPassSlot;
+            const uint64_t parentChildTicks = t_PassChildTicks;
+            t_CurrentPassSlot = passSlot;
+            t_PassChildTicks = 0;
+            const uint64_t passStart = ReadQpc();
+            {
+                SceneRenderScope scope;
+                SceneCameraScope cameraScope(camera);
+                real(self, camera, viewport, includeOverlays);
+            }
+            const uint64_t passElapsed = ReadQpc() - passStart;
+            if (passSlot)
+            {
+                passSlot->inclusiveTicks.fetch_add(passElapsed, std::memory_order_relaxed);
+                passSlot->childTicks.fetch_add(t_PassChildTicks, std::memory_order_relaxed);
+            }
+            t_CurrentPassSlot = parentPass;
+            t_PassChildTicks = parentChildTicks + passElapsed;
         }
 
         void __fastcall HookSceneManagerRenderSingleObject(
@@ -156,6 +179,7 @@
             BloomAdd(g_RenderEntityBloom, self);
             EntityProfileSlot* entitySlot = FindOrClaimEntitySlot(self);
             CaptureEntityMetadata(entitySlot, self);
+            bool rqDuplicate = false;
             if (entitySlot)
             {
                 entitySlot->renderQueueCalls.fetch_add(1, std::memory_order_relaxed);
@@ -166,13 +190,31 @@
                         frame, std::memory_order_relaxed);
                     if (previous == frame)
                     {
+                        rqDuplicate = true;
                         g_DuplicateRenderQueueSameFrame.fetch_add(
                             1, std::memory_order_relaxed);
+                        if (t_SceneRenderDepth > 1)
+                        {
+                            g_DuplicateRenderQueueShadow.fetch_add(
+                                1, std::memory_order_relaxed);
+                        }
                     }
                 }
             }
-            RenderQueueScope scope(self);
-            g_RealEntityUpdateRenderQueue(self, renderQueue);
+            const uint64_t rqStart = ReadQpc();
+            {
+                RenderQueueScope scope(self);
+                g_RealEntityUpdateRenderQueue(self, renderQueue);
+            }
+            const uint64_t rqElapsed = ReadQpc() - rqStart;
+            g_RenderQueueTicks.fetch_add(rqElapsed, std::memory_order_relaxed);
+            if (rqDuplicate)
+                g_DuplicateRenderQueueTicks.fetch_add(rqElapsed, std::memory_order_relaxed);
+            if (PassTimeSlot* passSlot = t_CurrentPassSlot)
+            {
+                passSlot->renderQueueCalls.fetch_add(1, std::memory_order_relaxed);
+                passSlot->renderQueueTicks.fetch_add(rqElapsed, std::memory_order_relaxed);
+            }
         }
 
         bool __fastcall HookEntityGetCastShadows(const void* self, void*)
@@ -231,12 +273,22 @@
                 : 0;
             EntityProfileSlot* entitySlot = FindOrClaimEntitySlot(self);
             CaptureEntityMetadata(entitySlot, self);
+            bool animationDuplicate = false;
             if (entitySlot && frameTracking)
             {
                 const uint64_t previous =
                     entitySlot->lastAnimationFrame.exchange(frame, std::memory_order_relaxed);
                 if (previous == frame)
+                {
+                    animationDuplicate = true;
                     g_DuplicateAnimationSameFrame.fetch_add(1, std::memory_order_relaxed);
+                    if (!renderDriven)
+                        g_DuplicateAnimationExternal.fetch_add(1, std::memory_order_relaxed);
+                    else if (t_SceneRenderDepth > 1)
+                        g_DuplicateAnimationShadow.fetch_add(1, std::memory_order_relaxed);
+                    else
+                        g_DuplicateAnimationMain.fetch_add(1, std::memory_order_relaxed);
+                }
             }
 
             g_AnimationCalls.fetch_add(1, std::memory_order_relaxed);
@@ -256,6 +308,17 @@
             }
             const uint64_t elapsed = ReadQpc() - start;
 
+            if (animationDuplicate)
+            {
+                g_DuplicateAnimationTicks.fetch_add(elapsed, std::memory_order_relaxed);
+                g_DuplicateAnimationBlendCalls.fetch_add(
+                    blendCallsForAnimation, std::memory_order_relaxed);
+            }
+            else if (entitySlot && frameTracking)
+            {
+                g_FirstAnimationCalls.fetch_add(1, std::memory_order_relaxed);
+                g_FirstAnimationTicks.fetch_add(elapsed, std::memory_order_relaxed);
+            }
             g_AnimationTicks.fetch_add(elapsed, std::memory_order_relaxed);
             g_AnimationLatencyBuckets[LatencyBucket(elapsed)].fetch_add(1, std::memory_order_relaxed);
             AtomicMax(g_AnimationMaxTicks, elapsed);

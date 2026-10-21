@@ -956,6 +956,8 @@ namespace BZROpenShim
         bool TryApplySelectedFlagThroughEngine(const char* source);
         bool TryApplyCachedFlagPayload(const char* source);
         void InstallBzrNetRouteObserverIfPossible();
+        void InstallStockLogThrottleIfPossible();
+        void InstallAttackTaskLazyNearestIfRequested();
         void InstallMapFilterExtrasIfEnabled();
         // Hands a character to the Create Game map search box while it is
         // being edited; false leaves it to the caller. mp_map_filter_extras.cpp.
@@ -1208,6 +1210,12 @@ namespace BZROpenShim
                                                   size_t outSize);
         bool TryParseBoolValue(const char* value, bool& out);
         bool TryResolveOdfFilePath(const char* odfToken, std::filesystem::path& outPath);
+        // Looks a normalized token up in the ODF directory snapshot.
+        bool FindIndexedOdfFile(const std::string& token, std::filesystem::path& outPath);
+        // Re-snapshots the ODF directories off-thread.
+        void RequestOdfIndexRebuild();
+        // Per frame: requests a rebuild when a world goes live.
+        void TickOdfIndexWorldEdge();
         extern bool g_MagnetMineSimulateHookInstalled;
         extern TeamFilterCache g_MagnetMineTeamFilterCache;
         extern bool g_MagnetZeroRangeGuardEnabled;
@@ -1497,6 +1505,7 @@ namespace BZROpenShim
         void RefreshTugCargoPostLoadFixState();
         void RefreshConstructorRecycleStaleTargetFixState();
         void RefreshPreciseTimestepState();
+        void RefreshAttackTaskLazyNearestState();
         void RefreshHowitzerUndeployedRetaliationFixState();
         void RefreshConstructorRemoteBuildFixState();
         void InitializeGlobalImprovementConfig();
