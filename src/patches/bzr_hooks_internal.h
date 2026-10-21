@@ -956,6 +956,7 @@ namespace BZROpenShim
         bool TryApplySelectedFlagThroughEngine(const char* source);
         bool TryApplyCachedFlagPayload(const char* source);
         void InstallBzrNetRouteObserverIfPossible();
+        void InstallStockLogThrottleIfPossible();
         void InstallMapFilterExtrasIfEnabled();
         // Hands a character to the Create Game map search box while it is
         // being edited; false leaves it to the caller. mp_map_filter_extras.cpp.

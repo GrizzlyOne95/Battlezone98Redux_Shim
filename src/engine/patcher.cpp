@@ -20,6 +20,7 @@
 #include "p2p_reliable_send_fix.h"
 #include "shell_casing_config.h"
 #include "deferred_modable_rebuild.h"
+#include "gas_copy_pool.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -1540,6 +1541,8 @@ namespace BZROpenShim
         BZROpenShim::VerifyCliMultiParameterOptionFix();
         const ReduxCompatibilityGate compatibilityGate = PrepareReduxCompatibilityGate(isSteam);
         StartSoundChannelOverride(isSteam);
+        // Before FirstGAS runs: the pool can only move while it is empty.
+        Hooks::InstallGasCopyPoolIfPossible();
         g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForDistribution(patches, distribution); FilterPatchesForRuntime(patches, distribution);
         // On Steam a first-pass miss is not yet a verdict: the retry loop below
         // follows. Report it as pending rather than failed.

@@ -197,6 +197,8 @@
     <ClCompile Include="src\patches\moderation.cpp" />
     <ClCompile Include="src\patches\multiplayer_vehicle_flags.cpp" />
     <ClCompile Include="src\patches\odf_helpers.cpp" />
+    <ClCompile Include="src\patches\stock_log_throttle.cpp" />
+    <ClCompile Include="src\patches\gas_copy_pool.cpp" />
     <ClCompile Include="src\patches\ogre_dedupe_crash_fixes.cpp" />
     <ClCompile Include="src\patches\ogre_script_import_cache.cpp" />
     <ClCompile Include="src\patches\resource_walk_stat_cache.cpp" />
@@ -374,6 +376,7 @@
     <ClInclude Include="include\bzrnet_trace.h" />
     <ClInclude Include="include\bzrnet_instrumentation.h" />
     <ClInclude Include="include\crash_logger.h" />
+    <ClInclude Include="include\gas_copy_pool.h" />
     <ClInclude Include="include\bzr_string.h" />
     <ClInclude Include="include\d3d_startup_hooks.h" />
     <ClInclude Include="include\dx11_colorspace_diagnostic.h" />
