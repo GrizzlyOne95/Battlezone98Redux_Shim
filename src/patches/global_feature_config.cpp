@@ -45,6 +45,7 @@
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
+#include "mesh_impact.h"
 #include <Windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -596,6 +597,9 @@ namespace BZROpenShim
             // once at startup and never scripted, so the gate is all they need.
             { "ApcAlliedTargetDeploy", FeatureTier::SinglePlayer,
               nullptr, &RefreshApcAlliedTargetDeployFixState },
+            // Gameplay trial only; the visual tier is Display and needs no gate.
+            { "MeshAccurateHits", FeatureTier::SinglePlayer,
+              nullptr, &MeshImpact::RefreshGate },
             { "SplinterUndead", FeatureTier::SinglePlayer,
               nullptr, &RefreshSplinterUndeadFixState },
             { "HowitzerUndeployedRetaliation", FeatureTier::SinglePlayer,

@@ -375,6 +375,8 @@ foreach ($entry in $stockValueChecks.GetEnumerator()) {
 # catch-all for newly added settings.
 $shippingPolicyChecks = @{
     "SinglePlayer/VehicleGeometryContact" = "0"
+    "SinglePlayer/MeshAccurateHits" = "0"
+    "Display/MeshAccurateImpacts" = "0"
     "General/CustomBindsUi" = "1"
     "General/SettingsUi" = "1"
     "General/MapRefreshFixes" = "1"

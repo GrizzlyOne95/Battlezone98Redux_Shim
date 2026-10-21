@@ -4268,6 +4268,18 @@
       "identity": "ExplosionClass::Build thiscall (matrix, owner obj), ret 8"
     },
     {
+      "name": "BulletCollisionEntry",
+      "address": "0x00480F40",
+      "expected": "55 8B EC 81 EC AC 00 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "Bullet::Collision thiscall (float* t, double* endPos, float* normal) -> nearest root obj or 0, ret 0xC; called from Bullet::Simulate 0x00480627, Beam 0x0047B44B, Bolt 0x0047CDA5"
+    },
+    {
+      "name": "ExplosionInitEffectSite",
+      "address": "0x004CA0C1",
+      "expected": "8B 85 68 FF FF FF 8B 48 08 83 79 64 00 74 36",
+      "identity": "Explosion::Init (0x004C9AB0) after the splash loop (branch target of 0x004C9E0C/0x004C9F07): mov eax,[ebp-0x98] (explosion); mov ecx,[eax+8] (class); then class+0x64 render effect"
+    },
+    {
       "name": "ProximityMineNetFlag",
       "address": "0x00571C40",
       "expected": "55 8B EC A0 7B 7F 91 00 5D C3 CC CC",

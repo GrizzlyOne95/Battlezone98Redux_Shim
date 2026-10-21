@@ -370,6 +370,7 @@ openshim_add_test(ogre_profiler_algorithms_tests STD 17 SOURCES
     ogre_profiler_algorithms_tests.cpp
 )
 
+openshim_add_test(mesh_impact_geometry_tests STD 17 SOURCES mesh_impact_geometry_tests.cpp)
 openshim_add_test(dynamic_geometry_batching_tests STD 17 SOURCES
     dynamic_geometry_batching_tests.cpp
 )
