@@ -6,10 +6,27 @@
 #include <string_view>
 #include <vector>
 #include <cmath>
+#include <iomanip>
+#include <locale>
+#include <sstream>
 #include "render_profile.h"
 
 namespace BZROpenShim::TerrainHdMaterial
 {
+    struct DetailTuning
+    {
+        float contrast = .55f;
+        float normalStrength = 2.2f;
+        float nearNormalScale = .55f;
+    };
+
+    inline bool ValidDetailTuning(const DetailTuning& value)
+    {
+        return std::isfinite(value.contrast) && value.contrast >= 0 && value.contrast <= 1 &&
+            std::isfinite(value.normalStrength) && value.normalStrength >= 0 && value.normalStrength <= 4 &&
+            std::isfinite(value.nearNormalScale) && value.nearNormalScale >= 0 && value.nearNormalScale <= 1;
+    }
+
     inline bool ValidMicroReliefScale(float scale)
     {
         return std::isfinite(scale) && scale >= 0.0f && scale <= 4.0f;
@@ -91,6 +108,31 @@ namespace BZROpenShim::TerrainHdMaterial
         const auto at = source.find(from);
         if (at == std::string::npos || source.find(from, at + from.size()) != std::string::npos) return false;
         source.replace(at, from.size(), to); return true;
+    }
+
+    // SourceHashSuffix includes this output, isolating Ogre's cache per material.
+    // Defaults preserve the existing source byte-for-byte; no shared uniform.
+    inline bool SpecializeDetail(std::string& source, const DetailTuning& value)
+    {
+        if (!ValidDetailTuning(value)) return false;
+        const DetailTuning defaults;
+        if (value.contrast == defaults.contrast && value.normalStrength == defaults.normalStrength &&
+            value.nearNormalScale == defaults.nearNormalScale) return true;
+        const auto constant = [](const char* name, float number) {
+            std::ostringstream text;
+            text.imbue(std::locale::classic());
+            text << "static const float " << name << " = " << std::setprecision(9) << number << ";";
+            return text.str();
+        };
+        auto result = source;
+        if (!ReplaceOnce(result, "static const float OSE_TERRAIN_DETAIL_CONTRAST = 0.55;",
+                constant("OSE_TERRAIN_DETAIL_CONTRAST", value.contrast)) ||
+            !ReplaceOnce(result, "static const float OSE_TERRAIN_DETAIL_NORMAL_STRENGTH = 2.2;",
+                constant("OSE_TERRAIN_DETAIL_NORMAL_STRENGTH", value.normalStrength)) ||
+            !ReplaceOnce(result, "static const float OSE_TERRAIN_DETAIL_NORMAL_NEAR_SCALE = 0.55;",
+                constant("OSE_TERRAIN_DETAIL_NORMAL_NEAR_SCALE", value.nearNormalScale))) return false;
+        source.swap(result);
+        return true;
     }
 
     // These are the released per-pixel terrain shader contracts, not a rewrite

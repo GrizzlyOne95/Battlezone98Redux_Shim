@@ -440,6 +440,8 @@ bool InstallNativeTerrainHd()
                 BuildSemanticProgramSource(*text, true, true, 0, key, generated, debug))) return {};
             if (pixel && !TerrainHdMaterial::Specialize(generated, g_HdChannelEnabled))
                 throw std::runtime_error("HD material shader contract unavailable");
+            if (pixel && !TerrainHdMaterial::SpecializeDetail(generated, binding->detail))
+                throw std::runtime_error("HD detail tuning shader contract unavailable");
             if (binding->paint.enabled && !TerrainPaint::Specialize(generated, pixel, binding->paint))
                 throw std::runtime_error("native paint shader specialization declined");
             const std::string name = "OpenShim/TerrainNativeHD/" + std::to_string(g_proxy.semanticMaterialGeneration) +
@@ -512,6 +514,9 @@ bool InstallNativeTerrainHd()
                 if (saved.channels[c]) g_ogre.setTexture(g_ogre.getTextureUnitState(pass, uint16_t(c + 2)), channelArrays[c]);
         }
         g_HdActive = true;
+        LogShimA(LogLevel::Info, "terrain-hd",
+            "[TERRAIN-HD] detail tuning material=\"%s\" contrast=%.3f normalStrength=%.3f nearScale=%.3f",
+            g_HdSourceMaterial.c_str(), binding->detail.contrast, binding->detail.normalStrength, binding->detail.nearNormalScale);
         LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] shared native material installed source=\"%s\" passes=%zu meshes=%zu size=%ux%u slices=%u packedUV=exact",
             g_HdSourceMaterial.c_str(), g_HdPasses.size(), g_HdStreams.size(), g_proxy.hdWidth, g_proxy.hdHeight, g_proxy.hdSliceCount);
         if (g_HdPaint.enabled) LogShimA(LogLevel::Info, "terrain-hd",
