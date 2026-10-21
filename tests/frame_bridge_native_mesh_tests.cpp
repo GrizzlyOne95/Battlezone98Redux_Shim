@@ -25,10 +25,16 @@ int main()
     Require(DecodeNativeIndexedMesh(wide,vertices,wideIndices)[0].x==28,"32-bit indices supported");
     for(unsigned fault=0;fault<12;++fault) {
         auto bad=draw; auto v=vertices; auto ix=indices;
-        if(fault==0)bad.positionOffset=22; if(fault==1)bad.vertexStart=UINT32_MAX; if(fault==2)bad.indexStart=UINT32_MAX;
-        if(fault==3)bad.indexCount=2; if(fault==4)bad.indexBytes=1; if(fault==5)v.pop_back(); if(fault==6)ix.pop_back();
+        if(fault==0)bad.positionOffset=22;
+        if(fault==1)bad.vertexStart=UINT32_MAX;
+        if(fault==2)bad.indexStart=UINT32_MAX;
+        if(fault==3)bad.indexCount=2;
+        if(fault==4)bad.indexBytes=1;
+        if(fault==5)v.pop_back();
+        if(fault==6)ix.pop_back();
         if(fault==7) { std::uint16_t index=3; std::memcpy(ix.data()+4,&index,2); }
-        if(fault==8)bad.world[15]=0; if(fault==9)bad.world[0]=std::numeric_limits<float>::quiet_NaN();
+        if(fault==8)bad.world[15]=0;
+        if(fault==9)bad.world[0]=std::numeric_limits<float>::quiet_NaN();
         if(fault==10) { float w=2; std::memcpy(v.data()+3*24+16,&w,4); }
         if(fault==11) { float x=std::numeric_limits<float>::infinity(); std::memcpy(v.data()+3*24+4,&x,4); }
         bool rejected=false; try { DecodeNativeIndexedMesh(bad,v,ix); } catch(const std::exception&) { rejected=true; }
