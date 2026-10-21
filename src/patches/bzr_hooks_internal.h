@@ -957,6 +957,7 @@ namespace BZROpenShim
         bool TryApplyCachedFlagPayload(const char* source);
         void InstallBzrNetRouteObserverIfPossible();
         void InstallStockLogThrottleIfPossible();
+        void InstallAttackTaskLazyNearestIfRequested();
         void InstallMapFilterExtrasIfEnabled();
         // Hands a character to the Create Game map search box while it is
         // being edited; false leaves it to the caller. mp_map_filter_extras.cpp.
@@ -1504,6 +1505,7 @@ namespace BZROpenShim
         void RefreshTugCargoPostLoadFixState();
         void RefreshConstructorRecycleStaleTargetFixState();
         void RefreshPreciseTimestepState();
+        void RefreshAttackTaskLazyNearestState();
         void RefreshHowitzerUndeployedRetaliationFixState();
         void RefreshConstructorRemoteBuildFixState();
         void InitializeGlobalImprovementConfig();

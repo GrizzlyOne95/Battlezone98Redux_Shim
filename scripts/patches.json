@@ -4415,6 +4415,66 @@
       "identity": "AttackTask::DoState; the AI kite tuning detours it"
     },
     {
+      "name": "UnitTaskNearestVehicle",
+      "address": "0x00463FC0",
+      "expected": "55 8B EC 83 EC 28 F3 0F 10 05 B0 2E",
+      "identity": "UnitTask::NearestVehicle, GameObject* cdecl(craft, const Vector* position): closest vehicle in the object list, first minimum in list order; AttackTask's lazy NearestVehicle (OPENSHIM_AI_LAZY_NEAREST) calls it"
+    },
+    {
+      "name": "UnitTaskDoGoto",
+      "address": "0x00601250",
+      "expected": "55 8B EC 81 EC D8 00 00 00 A1 00 70",
+      "identity": "UnitTask::DoGoto (thiscall, no stack args); reads avoidObj +0x7C. Target of AttackTask's lazy NearestVehicle (OPENSHIM_AI_LAZY_NEAREST) reader thunk"
+    },
+    {
+      "name": "UnitTaskDoFollow",
+      "address": "0x00607DB0",
+      "expected": "55 8B EC 81 EC 34 01 00 00 A1 00 70",
+      "identity": "UnitTask::DoFollow (thiscall, no stack args); reads avoidObj +0x7C. Target of AttackTask's lazy NearestVehicle (OPENSHIM_AI_LAZY_NEAREST) reader thunk"
+    },
+    {
+      "name": "UnitTaskUpdateSpecial",
+      "address": "0x00605560",
+      "expected": "55 8B EC 83 EC 3C 89 4D F8 8B 45 F8",
+      "identity": "UnitTask::UpdateSpecial (thiscall); reads avoidObj +0x7C only with a special weapon (+0xB8). Target of AttackTask's lazy NearestVehicle (OPENSHIM_AI_LAZY_NEAREST) reader thunk"
+    },
+    {
+      "name": "AttackTaskNearestVehicleCall",
+      "address": "0x00478BAA",
+      "expected": "8B 4D FC 8B 51 10 52 E8 0A B4 FE FF 83 C4 08 8B 4D FC 89 41 7C",
+      "identity": "AttackTask::DoState prolog: push craft; call NearestVehicle (+7); mov [task+0x7C],eax. The lazy NearestVehicle (OPENSHIM_AI_LAZY_NEAREST) redirects the call and reads the task from [ebp-4]"
+    },
+    {
+      "name": "AttackTaskDoGotoCallA",
+      "address": "0x0047912B",
+      "expected": "8B 4D FC E8 1D 81 18 00 E9 F9 02",
+      "identity": "AttackTask::DoState: mov ecx,[ebp-4]; call DoGoto (+3). The lazy NearestVehicle (OPENSHIM_AI_LAZY_NEAREST) resolves avoidObj first"
+    },
+    {
+      "name": "AttackTaskDoGotoCallB",
+      "address": "0x004792BC",
+      "expected": "8B 4D FC E8 8C 7F 18 00 E9 68 01",
+      "identity": "AttackTask::DoState: mov ecx,[ebp-4]; call DoGoto (+3). The lazy NearestVehicle (OPENSHIM_AI_LAZY_NEAREST) resolves avoidObj first"
+    },
+    {
+      "name": "AttackTaskDoGotoCallC",
+      "address": "0x004793FE",
+      "expected": "8B 4D FC E8 4A 7E 18 00 8B 55 F4",
+      "identity": "AttackTask::DoState: mov ecx,[ebp-4]; call DoGoto (+3). The lazy NearestVehicle (OPENSHIM_AI_LAZY_NEAREST) resolves avoidObj first"
+    },
+    {
+      "name": "AttackTaskDoFollowCall",
+      "address": "0x004791F1",
+      "expected": "8B 4D FC E8 B7 EB 18 00 E9 33 02",
+      "identity": "AttackTask::DoState: mov ecx,[ebp-4]; call DoFollow (+3). The lazy NearestVehicle (OPENSHIM_AI_LAZY_NEAREST) resolves avoidObj first"
+    },
+    {
+      "name": "AttackTaskUpdateSpecialCall",
+      "address": "0x004795A4",
+      "expected": "8B 4D FC E8 B4 BF 18 00 8B E5 5D",
+      "identity": "AttackTask::DoState epilog: mov ecx,[ebp-4]; call UpdateSpecial (+3). The lazy NearestVehicle (OPENSHIM_AI_LAZY_NEAREST) resolves avoidObj first when a special weapon is fitted"
+    },
+    {
       "name": "TerrainBlocksCraft",
       "address": "0x00466D40",
       "expected": "55 8B EC 51 8B 45 08 51 F3 0F 10 40 08",
