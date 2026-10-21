@@ -1,6 +1,6 @@
 # Reactive surface prototype
 
-OpenShim supplies zero-default surface uniforms in its HLSL object shaders,
+OpenShim supplies zero-default surface uniforms in its DX11 Enhanced HLSL object shaders,
 an optional leased EXU debris-material bridge, and the existing qualified
 weapon presentation adapter's real firing-mount positions. EXU owns material
 references and local-point conversion; Campaign Reimagined owns event queues,
@@ -37,6 +37,11 @@ Runoff uses the upright object's local Y axis and a rigid parent transform.
 Banked/articulated models need further visual qualification; this is not fluid
 simulation or bone-following damage. Medium/Low and non-HLSL paths do not gain
 the detailed water layer. Unsupported APIs or programs retain their source.
+
+Reactive surfaces are DX11 Enhanced only. Stock (Redux) and Retro programs declare
+no surface uniforms and compile to the stock output; they keep only the shared
+object-position interpolant, because their vertex programs also feed Enhanced
+fragments. DX9 (SM3) shaders are frozen at stock: DX9 is fixes-only.
 
 ## Validation and remaining work
 

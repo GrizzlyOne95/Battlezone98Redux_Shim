@@ -1407,11 +1407,12 @@ void base_fragment(
     oColor.xyz += specularResult.xyz;
 #endif
 
+    float3 emissiveContribution = float3(0.0, 0.0, 0.0);
+#if defined(ENHANCED_MODE)
+    // Reactive surfaces are Enhanced-only; Stock/Retro keep the stock output.
     float3 reactiveGlow;
     oColor.xyz = ose_surface_finish(oColor.xyz, vSurfacePosition, vTexCoord, reactiveGlow, OSE_SURFACE_ARGUMENTS);
-    float3 emissiveContribution = reactiveGlow;
-#if !defined(ENHANCED_MODE)
-    oColor.xyz += reactiveGlow;
+    emissiveContribution = reactiveGlow;
 #endif
 #if defined(EMISSIVEMAP_ENABLED)
     float3 emissiveTex = emissiveMap.Sample(emissiveSam, vTexCoord).xyz;
@@ -1429,7 +1430,7 @@ void base_fragment(
     float emissiveIntensity = max(1.0, materialEmissiveIntensity);
     emissiveContribution += emissiveTex.xyz * emissiveIntensity * ose_surface_emissive_scale(surfaceState, surfaceMode);
 #else
-    oColor.xyz += emissiveTex.xyz * ose_surface_emissive_scale(surfaceState, surfaceMode);
+    oColor.xyz += emissiveTex.xyz;
 #endif
 #endif
 

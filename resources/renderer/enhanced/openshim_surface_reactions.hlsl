@@ -4,12 +4,17 @@
 // Keep these in the entry point's uniform parameter list alongside the base
 // lighting constants. Global uniforms create a separate $Globals cbuffer from
 // HLSL's $Params; the retail Ogre DX11 path cannot bind that layout correctly.
+// Enhanced programs only: Stock/Retro declare none of these uniforms.
+#if defined(ENHANCED_MODE)
 #define OSE_SURFACE_UNIFORMS \
     uniform float4 surfaceState, uniform float4 surfaceMode, \
     uniform float4 surfaceImpact0, uniform float4 surfaceImpact1, \
     uniform float4 surfaceImpactWeights, \
     uniform float4 surfaceMuzzle0, uniform float4 surfaceMuzzle1, \
     uniform float4x4 surfaceViewToLocal, uniform float surfaceRainTime,
+#else
+#define OSE_SURFACE_UNIFORMS
+#endif
 #define OSE_SURFACE_VALUES \
     float4 surfaceState, float4 surfaceMode, \
     float4 surfaceImpact0, float4 surfaceImpact1, \
