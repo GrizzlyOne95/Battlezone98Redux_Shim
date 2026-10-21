@@ -786,6 +786,8 @@ namespace BZROpenShim
             FnSharedByValue getFragmentProgramParameters = nullptr;
             FnBool iteratePerLight = nullptr;
             FnBool isTransparent = nullptr;
+            FnU16 startLight = nullptr;
+            FnU32 lightMask = nullptr;
         };
         TwinApi g_twinApi;
         bool g_twinApiResolved = false;
@@ -801,8 +803,13 @@ namespace BZROpenShim
         };
         // By clone name.
         std::unordered_map<std::string, TwinRecord> g_twins;
+        struct TwinPass
+        {
+            void* pass;
+            GpuSkinningTwinLights lights;
+        };
         // Clone pass -> twin pass, for every pass that has a usable twin.
-        std::unordered_map<const void*, void*> g_twinPasses;
+        std::unordered_map<const void*, TwinPass> g_twinPasses;
         // Skinned program name -> instanced program name, or empty after a failure.
         std::unordered_map<std::string, std::string> g_instancedPrograms;
 
@@ -826,6 +833,9 @@ namespace BZROpenShim
                 "?getFragmentProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@XZ");
             t.iteratePerLight = ResolveOgreProc<FnBool>("?getIteratePerLight@Pass@Ogre@@QBE_NXZ");
             t.isTransparent = ResolveOgreProc<FnBool>("?isTransparent@Pass@Ogre@@QBE_NXZ");
+            // Optional: without them every twin compares whole light lists.
+            t.startLight = ResolveOgreProc<FnU16>("?getStartLight@Pass@Ogre@@QBEGXZ");
+            t.lightMask = ResolveOgreProc<FnU32>("?getLightMask@Pass@Ogre@@QBEIXZ");
             g_twinApiAvailable = t.hasFragmentProgram && t.getFragmentProgramParameters &&
                 t.iteratePerLight && t.isTransparent;
             if (!g_twinApiAvailable)
@@ -869,6 +879,47 @@ namespace BZROpenShim
                 return false;
             }
             return true;
+        }
+
+        // Widens `use` to the light list entries these parameters read
+        // (AutoConstantType, OgreGpuProgramParams.h 1.10). Indexed values read
+        // entry `data`; arrays read the first `data` entries. Object-space
+        // light values never get here: IsObjectDependentAuto refuses them.
+        void AccumulateLightUse(void* params, GpuSkinningTwinLights& use)
+        {
+            const uint32_t count = params ? g_ogre.getAutoConstantCount(params) : 0;
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                const AutoConstantEntry* entry = g_ogre.getAutoConstantEntry(params, i);
+                if (!entry)
+                    continue;
+                uint32_t depth = 0;
+                switch (entry->paramType)
+                {
+                case 38:   // light_count
+                    use.count = true;
+                    break;
+                case 40: case 41: case 42: case 43: case 44: case 46: case 47: case 49:
+                case 51: case 52: case 53: case 70: case 71: case 74: case 75: case 77:
+                case 84: case 132:
+                    depth = entry->data + 1;
+                    break;
+                case 54: case 55: case 56: case 57: case 58: case 59: case 61: case 62:
+                case 64: case 66: case 67: case 72: case 73: case 76: case 85:
+                    depth = entry->data;
+                    break;
+                default:
+                    // A type newer than ACT_LIGHT_CUSTOM may be per light.
+                    if (entry->paramType > 132)
+                    {
+                        depth = 0xFFFF;
+                        use.count = true;
+                    }
+                    break;
+                }
+                if (depth > use.depth)
+                    use.depth = static_cast<uint16_t>(depth > 0xFFFF ? 0xFFFF : depth);
+            }
         }
 
         bool PrepareInstancedParameters(void* params, std::string& detail)
@@ -979,7 +1030,7 @@ namespace BZROpenShim
 
         // Rebinds one twin pass to instanced programs. The pass starts as an
         // exact copy of the clone's.
-        bool ConvertTwinPass(void* pass, std::string& detail)
+        bool ConvertTwinPass(void* pass, GpuSkinningTwinLights& lights, std::string& detail)
         {
             if (g_twinApi.iteratePerLight(pass) || g_twinApi.isTransparent(pass))
             {
@@ -1031,10 +1082,36 @@ namespace BZROpenShim
             SharedPtr casterParams;
             g_ogre.getShadowCasterVertexProgramParameters(pass, &casterParams);
             const bool casterReady = PrepareInstancedParameters(casterParams.rep, detail);
-            Release(casterParams);
             if (!casterReady)
+            {
+                Release(casterParams);
                 detail = "caster " + detail;
-            return casterReady;
+                return false;
+            }
+
+            // Ogre filters the light list itself when a pass starts past the
+            // first light or masks lights; batching then keys on all of it.
+            if (!g_twinApi.startLight || !g_twinApi.lightMask ||
+                g_twinApi.startLight(pass) != 0 || g_twinApi.lightMask(pass) != 0xFFFFFFFFu)
+            {
+                Release(casterParams);
+                return true;
+            }
+            lights.depth = 0;
+            lights.count = false;
+            AccumulateLightUse(casterParams.rep, lights);
+            Release(casterParams);
+            g_ogre.getVertexProgramParameters(pass, &params);
+            AccumulateLightUse(params.rep, lights);
+            Release(params);
+            if (g_twinApi.hasFragmentProgram(pass))
+            {
+                SharedPtr fragmentParams;
+                g_twinApi.getFragmentProgramParameters(pass, &fragmentParams);
+                AccumulateLightUse(fragmentParams.rep, lights);
+                Release(fragmentParams);
+            }
+            return true;
         }
 
         void BuildInstancedTwin(const CloneRecord& record)
@@ -1051,7 +1128,7 @@ namespace BZROpenShim
                 return;
             }
 
-            std::vector<std::pair<const void*, void*>> pairs;
+            std::vector<std::pair<const void*, TwinPass>> pairs;
             uint16_t supported = 0;
             const uint16_t techniques = g_ogre.getNumTechniques(record.clone.rep);
             for (uint16_t t = 0; t < techniques; ++t)
@@ -1069,9 +1146,10 @@ namespace BZROpenShim
                     void* clonePass = g_ogre.getPass(cloneTechnique, p);
                     void* twinPass = g_ogre.getPass(twinTechnique, p);
                     std::string detail;
-                    if (clonePass && twinPass && ConvertTwinPass(twinPass, detail))
+                    TwinPass converted{ twinPass, {} };
+                    if (clonePass && twinPass && ConvertTwinPass(twinPass, converted.lights, detail))
                     {
-                        pairs.emplace_back(clonePass, twinPass);
+                        pairs.emplace_back(clonePass, converted);
                         continue;
                     }
                     ++g_twinStats.refusedPasses;
@@ -1580,12 +1658,15 @@ namespace BZROpenShim
             !g_failed.load(std::memory_order_acquire);
     }
 
-    void* GpuSkinningInstancedTwinPass(const void* pass)
+    void* GpuSkinningInstancedTwinPass(const void* pass, GpuSkinningTwinLights* lights)
     {
         if (!GpuSkinningInstancingActive())
             return nullptr;
         const auto twin = g_twinPasses.find(pass);
-        return twin == g_twinPasses.end() ? nullptr : twin->second;
+        if (twin == g_twinPasses.end())
+            return nullptr;
+        *lights = twin->second.lights;
+        return twin->second.pass;
     }
 
     uint32_t GpuSkinningGeneration()

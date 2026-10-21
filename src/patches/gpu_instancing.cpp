@@ -36,6 +36,7 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -230,6 +231,7 @@ namespace BZROpenShim
             void* visitor = nullptr;
             const void* sourcePass = nullptr;
             void* twin = nullptr;
+            GpuSkinningTwinLights lights;
             std::vector<void*> members;
         };
         Pending g_pending;
@@ -432,16 +434,21 @@ namespace BZROpenShim
             return det < 0.0f;
         }
 
-        bool SameLights(const LightList* a, const LightList* b)
+        // Equal as far as the twin pass's programs read the lists: the first
+        // `use.depth` entries, and the lengths when `use.count`. Beyond that
+        // Ogre pads with blank lights, so a shorter list must match there too.
+        bool SameLights(const LightList* a, const LightList* b, const GpuSkinningTwinLights& use)
         {
             if (a == b)
                 return true;
-            if (!a || !b)
+            const size_t countA = a ? static_cast<size_t>(a->last - a->first) : 0;
+            const size_t countB = b ? static_cast<size_t>(b->last - b->first) : 0;
+            if (use.count && countA != countB)
                 return false;
-            const size_t count = static_cast<size_t>(a->last - a->first);
-            if (count != static_cast<size_t>(b->last - b->first))
+            const size_t depth = (std::min)(static_cast<size_t>(use.depth), (std::max)(countA, countB));
+            if (countA < depth || countB < depth)
                 return false;
-            return count == 0 || std::memcmp(a->first, b->first, count * sizeof(void*)) == 0;
+            return depth == 0 || std::memcmp(a->first, b->first, depth * sizeof(void*)) == 0;
         }
 
         // Instance n reads n * bones: the first palette bone of its palette.
@@ -634,7 +641,7 @@ namespace BZROpenShim
             return a.op.vertexData == b.op.vertexData && a.op.indexData == b.op.indexData &&
                 a.op.operationType == b.op.operationType && a.op.useIndexes == b.op.useIndexes &&
                 a.bones == b.bones && a.castsShadows == b.castsShadows &&
-                a.negativeScale == b.negativeScale && SameLights(a.lights, b.lights);
+                a.negativeScale == b.negativeScale && SameLights(a.lights, b.lights, g_pending.lights);
         }
 
         void FlushCore(Visitor* visitor)
@@ -852,7 +859,7 @@ namespace BZROpenShim
             {
                 void* sceneManager = static_cast<Visitor*>(visitor)->sceneManager;
                 if (sceneManager && !g_ogre.stateChangesSuppressed(sceneManager))
-                    g_pending.twin = GpuSkinningInstancedTwinPass(pass);
+                    g_pending.twin = GpuSkinningInstancedTwinPass(pass, &g_pending.lights);
             }
             return render;
         }

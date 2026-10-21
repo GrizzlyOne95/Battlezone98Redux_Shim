@@ -27,8 +27,16 @@ namespace BZROpenShim
     // Instanced twins for gpu_instancing.h. True while the mission's
     // GpuSkinning and GpuInstancing settings are both on and nothing failed.
     bool GpuSkinningInstancingActive();
+    // How much of a renderable's light list a twin pass's programs read: the
+    // first `depth` entries, and the list's length when `count`. Members whose
+    // lists agree on that much render identically from one instanced draw.
+    struct GpuSkinningTwinLights
+    {
+        uint16_t depth = 0xFFFF;
+        bool count = true;
+    };
     // The instanced twin of a skinned clone's pass (render thread), or null.
-    void* GpuSkinningInstancedTwinPass(const void* pass);
+    void* GpuSkinningInstancedTwinPass(const void* pass, GpuSkinningTwinLights* lights);
     // Increments at every mission start that enables the feature.
     uint32_t GpuSkinningGeneration();
 }
