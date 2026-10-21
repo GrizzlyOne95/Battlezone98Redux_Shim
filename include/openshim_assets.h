@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace BZROpenShim::Assets
 {
@@ -120,6 +121,11 @@ bool ParseAssetManifestContent(const std::string& text,
 // Exposed for tests.
 bool ProbeDestructionChunksAt(const std::filesystem::path& gameDir,
                               std::string& outProblem);
+
+// The content roots a mod or map pack can live in, in search order: each
+// immediate subdirectory of gameDir/addon, gameDir/mods, gameDir/packaged_mods
+// and (for a Steam install) the Workshop content folder. Sorted per parent.
+std::vector<std::filesystem::path> GetContentRootCandidates(const std::filesystem::path& gameDir);
 
 // Reuses RenderProfiles::ValidateDeployedResourceSetAt. The game-root
 // deployment is preferred, then addon/mods/packaged_mods and Steam Workshop
