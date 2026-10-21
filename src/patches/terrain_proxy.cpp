@@ -9,6 +9,7 @@
 #include "bzr_hooks.h"
 #include "bzr_options_ui.h"
 #include "shim_log.h"
+#include "openshim_assets.h"
 #include <nlohmann/json.hpp>
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -871,7 +872,7 @@ namespace BZROpenShim
             config.hdEnabled = GetPrivateProfileIntA(
                 "Terrain", "TerrainHdEnabled", 0, iniText.c_str()) != 0;
             config.hdManifest = ReadIniString(
-                iniText, "TerrainHdManifest", "terrain_hd_tiles.json");
+                iniText, "TerrainHdManifest", BZROpenShim::Assets::kDefaultTerrainHdManifest);
             config.zoneOrdinal = GetPrivateProfileIntA("Terrain", "TerrainProxyZone", -1, iniText.c_str());
             config.clusterOrdinal = GetPrivateProfileIntA("Terrain", "TerrainProxyCluster", -1, iniText.c_str());
             config.zoneX = GetPrivateProfileIntA("Terrain", "TerrainProxyZoneX", INT_MIN, iniText.c_str());
@@ -1008,13 +1009,29 @@ namespace BZROpenShim
             if (!g_config.hdEnabled)
                 return false;
 
-            const std::filesystem::path path =
-                ResolveHdManifestPath(g_config.hdManifest);
-            if (path.empty())
+            // Same resolver as the capability probe (openshim_assets.cpp):
+            // explicit path, else auto-discovery of the separately installed pack.
+            std::filesystem::path path;
             {
-                LogShimA(LogLevel::Warn, "terrain-hd",
-                    "[TERRAIN-HD] manifest path is empty; stock atlas retained");
-                return false;
+                wchar_t executable[MAX_PATH] = {};
+                const DWORD length = GetModuleFileNameW(nullptr, executable, MAX_PATH);
+                bool discovered = false;
+                std::string problem;
+                if (length > 0 && length < MAX_PATH)
+                    path = BZROpenShim::Assets::ResolveTerrainHdManifestAt(
+                        std::filesystem::path(executable).parent_path(),
+                        g_config.hdManifest, &discovered, &problem);
+                else
+                    problem = "game directory unavailable";
+                if (path.empty())
+                {
+                    LogShimA(LogLevel::Warn, "terrain-hd",
+                        "[TERRAIN-HD] %s; stock atlas retained", problem.c_str());
+                    return false;
+                }
+                LogShimA(LogLevel::Info, "terrain-hd",
+                    "[TERRAIN-HD] manifest resolved path=\"%s\" source=%s",
+                    path.string().c_str(), discovered ? "auto" : "explicit");
             }
 
             try
@@ -2783,10 +2800,75 @@ namespace BZROpenShim
             g_proxy.hdMipmaps = 0;
         }
 
+        // The separately-subscribed HD pack folder is not necessarily mounted by
+        // Redux (BZR ignores Workshop dependencies), so make the manifest's
+        // directory an Ogre resource location before the first tile loads. Once
+        // per directory; any failure leaves the existing soft-fail path.
+        void EnsureTerrainHdResourceLocation(const std::string& firstResource)
+        {
+            using FnGetRgm = void*(__cdecl*)();
+            using FnRgmExistsAny = bool(__thiscall*)(void*, const std::string&);
+            using FnRgmGroupExists = bool(__thiscall*)(void*, const std::string&);
+            using FnRgmCreate = void(__thiscall*)(void*, const std::string&, bool);
+            using FnRgmAddLocation = void(__thiscall*)(void*, const std::string&, const std::string&, const std::string&, bool, bool);
+            using FnRgmInit = void(__thiscall*)(void*, const std::string&);
+            static std::set<std::string> attempted;
+            if (g_hdManifest.path.empty()) return;
+            const std::string dir = g_hdManifest.path.parent_path().string();
+            if (dir.empty() || !attempted.insert(dir).second) return;
+            try
+            {
+                HMODULE ogre = GetModuleHandleW(L"OgreMain.dll");
+                if (!ogre) return;
+                const auto getRgm = Resolve<FnGetRgm>(ogre,
+                    "?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ");
+                const auto existsAny = Resolve<FnRgmExistsAny>(ogre,
+                    "?resourceExistsInAnyGroup@ResourceGroupManager@Ogre@@QAE_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+                const auto groupExists = Resolve<FnRgmGroupExists>(ogre,
+                    "?resourceGroupExists@ResourceGroupManager@Ogre@@QAE_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+                const auto create = Resolve<FnRgmCreate>(ogre,
+                    "?createResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+                const auto addLocation = Resolve<FnRgmAddLocation>(ogre,
+                    "?addResourceLocation@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@00_N1@Z");
+                const auto init = Resolve<FnRgmInit>(ogre,
+                    "?initialiseResourceGroup@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+                void* manager = getRgm ? getRgm() : nullptr;
+                if (!manager || !groupExists || !create || !addLocation || !init)
+                {
+                    LogShimA(LogLevel::Warn, "terrain-hd",
+                        "[TERRAIN-HD] Ogre resource manager unavailable; cannot mount pack folder=\"%s\"",
+                        dir.c_str());
+                    return;
+                }
+                if (existsAny && existsAny(manager, firstResource))
+                {
+                    LogShimA(LogLevel::Info, "terrain-hd",
+                        "[TERRAIN-HD] pack textures already resolvable (e.g. \"%s\"); folder not mounted",
+                        firstResource.c_str());
+                    return;
+                }
+                const std::string group = "OpenShimTerrainHd";
+                if (!groupExists(manager, group))
+                    create(manager, group, false);
+                addLocation(manager, dir, "FileSystem", group, false, false);
+                init(manager, group);
+                LogShimA(LogLevel::Info, "terrain-hd",
+                    "[TERRAIN-HD] mounted pack folder group=%s path=\"%s\"",
+                    group.c_str(), dir.c_str());
+            }
+            catch (...)
+            {
+                LogShimA(LogLevel::Warn, "terrain-hd",
+                    "[TERRAIN-HD] exception mounting pack folder=\"%s\"; stock atlas retained if textures fail",
+                    dir.c_str());
+            }
+        }
+
         bool LoadTerrainHdSourceTexture(void* textureManager,
                                         const std::string& resource,
                                         OgreSharedPtr& texture, bool fullMips = false)
         {
+            EnsureTerrainHdResourceLocation(resource);
             const std::string autodetect = "Autodetect";
             g_ogre.loadTexture(textureManager, &texture, resource, autodetect,
                 kOgreTextureType2D, fullMips ? kOgreMipUnlimited : kOgreMipDefault, 1.0f, false,
