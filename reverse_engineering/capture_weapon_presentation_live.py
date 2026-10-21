@@ -21,7 +21,7 @@ import time
 SITE_NAMES = frozenset((
     "WeaponCtor", "WeaponDtor", "SimulationPass", "SetWeapon", "ModelPose",
     "OrdnanceFactory", "PopScope", "RawGet", "RenderFind", "RenderUpdate",
-    "RenderDetach", "CannonShotCall", "WeaponClassPopCall", "CraftClassPopCall",
+    "RenderDetach", "CannonShotCall", "MachineGunShotCall", "WeaponClassPopCall", "CraftClassPopCall",
 ))
 PREFIX = "WeaponPresentation::"
 
@@ -90,7 +90,7 @@ def verify_sites(static, rows, sections, read_exact, image_base):
         if actual != bytes.fromhex(proof["bytes"]):
             raise ValueError(f"{name}: stolen instruction bytes disagree")
         result["steals"][name] = {"site": proof["site"], "size": proof["size"], "bytes": actual.hex(" ")}
-    if len(result["calls"]) != 3 or len(result["steals"]) != 5:
+    if len(result["calls"]) != 4 or len(result["steals"]) != 5:
         raise ValueError("Incomplete call/steal proof")
     return result
 
