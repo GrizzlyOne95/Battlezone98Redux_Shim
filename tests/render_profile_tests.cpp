@@ -89,36 +89,46 @@ void TestInheritFollowsUserPreference()
     ExpectEq(static_cast<uint32_t>(absentResult.effectiveProfile), static_cast<uint32_t>(Profile::Retro), "absent override -> user retro");
 }
 
-void TestDx9EnhancedIsCapabilityDependentNotFallback()
+void TestDx9EnhancedAlwaysFallsBackToRedux()
 {
-    std::printf("TestDx9EnhancedIsCapabilityDependentNotFallback\n");
+    std::printf("TestDx9EnhancedAlwaysFallsBackToRedux\n");
+    // Policy: DX9 is the legacy/stock backend (Stock and Retro only). An
+    // Enhanced request never becomes effective there, even with the
+    // mandatory resource set verified.
     ResolverInput dx9 = Baseline();
     dx9.requestedBackend = RendererBackend::Auto;
     dx9.detectedBackend = ActiveBackend::DX9;
     dx9.userProfile = Profile::Enhanced;
-    // Mandatory resource set verified: DX9 Enhanced is supported-but-limited.
-    // It must remain effective rather than silently degrading to Redux. The
-    // capability report is where the reduced feature set is visible
-    // (sharpening yes, modern pssm no). The broken-deployment counterpart is
-    // covered by TestDx9EnhancedAlsoRequiresMandatoryResources.
     dx9.capabilityMask = CapabilitiesForBackend(ActiveBackend::DX9) |
                          static_cast<uint32_t>(CapEnhancedResources);
 
     const ResolverResult legacy = ResolveRenderProfile(dx9);
-    // DX9 Enhanced is supported-but-limited: it must remain effective rather
-    // than silently degrading to Redux. The capability report is where the
-    // reduced feature set is visible (sharpening yes, modern pssm no).
-    ExpectEq(static_cast<uint32_t>(legacy.effectiveProfile), static_cast<uint32_t>(Profile::Enhanced), "dx9 enhanced stays effective");
-    Check(HasCapability(dx9.capabilityMask, CapNormalSharpening), "legacy sharpening bit present");
-    Check(!HasCapability(dx9.capabilityMask, CapModernPssm), "modern pssm bit absent on dx9");
-    Check(!HasCapability(dx9.capabilityMask, CapLinearLighting), "linear lighting bit absent on dx9");
+    ExpectEq(static_cast<uint32_t>(legacy.effectiveProfile), static_cast<uint32_t>(Profile::Redux), "dx9 user enhanced -> redux");
+    Check(legacy.fellBack, "dx9 enhanced reports fallback");
+    Check(std::strstr(legacy.reason, "requires DX11") != nullptr, "dx9 enhanced reason names DX11");
+    Check(!ProfileRequirementsMet(Profile::Enhanced, dx9.capabilityMask), "shared gate rejects enhanced on dx9 caps");
 
-    // A mission requesting Enhanced on DX9 gets the same treatment as the
-    // user preference path: effective Enhanced with the legacy feature set.
     dx9.contentOverridePresent = true;
     dx9.contentOverride = ContentRequest::Enhanced;
     const ResolverResult requested = ResolveRenderProfile(dx9);
-    ExpectEq(static_cast<uint32_t>(requested.effectiveProfile), static_cast<uint32_t>(Profile::Enhanced), "dx9 content enhanced stays effective");
+    ExpectEq(static_cast<uint32_t>(requested.effectiveProfile), static_cast<uint32_t>(Profile::Redux), "dx9 content enhanced -> redux");
+    Check(requested.fellBack, "dx9 content enhanced reports fallback");
+
+    // Retro stays available on DX9; so does Redux.
+    dx9.contentOverridePresent = false;
+    dx9.userProfile = Profile::Retro;
+    const ResolverResult retro = ResolveRenderProfile(dx9);
+    ExpectEq(static_cast<uint32_t>(retro.effectiveProfile), static_cast<uint32_t>(Profile::Retro), "dx9 retro stays effective");
+    Check(!retro.fellBack, "dx9 retro is not a fallback");
+    Check(ProfileRequirementsMet(Profile::Retro, dx9.capabilityMask), "shared gate allows retro on dx9");
+
+    // DX11 with the same resources still honors Enhanced.
+    ResolverInput dx11 = Baseline();
+    dx11.detectedBackend = ActiveBackend::DX11;
+    dx11.userProfile = Profile::Enhanced;
+    dx11.capabilityMask = CapabilitiesForBackend(ActiveBackend::DX11) |
+                          static_cast<uint32_t>(CapEnhancedResources);
+    ExpectEq(static_cast<uint32_t>(ResolveRenderProfile(dx11).effectiveProfile), static_cast<uint32_t>(Profile::Enhanced), "dx11 enhanced stays effective");
 }
 
 void TestSchemeLayerLossFallsBackWithReason()
@@ -267,26 +277,6 @@ void TestMandatoryResourceLossFallsBackToRedux()
              static_cast<uint32_t>(Profile::Redux), "override cannot bypass resource gate");
 }
 
-void TestDx9EnhancedAlsoRequiresMandatoryResources()
-{
-    std::printf("TestDx9EnhancedAlsoRequiresMandatoryResources\n");
-    // The mandatory set covers the SM3 delegates too, so the gate is
-    // backend-independent: DX9 Enhanced falls back exactly like DX11 when
-    // the deployment is broken.
-    ResolverInput dx9 = Baseline();
-    dx9.detectedBackend = ActiveBackend::DX9;
-    dx9.userProfile = Profile::Enhanced;
-    dx9.capabilityMask = CapabilitiesForBackend(ActiveBackend::DX9) |
-                         static_cast<uint32_t>(CapEnhancedResources);
-    ExpectEq(static_cast<uint32_t>(ResolveRenderProfile(dx9).effectiveProfile),
-             static_cast<uint32_t>(Profile::Enhanced), "dx9 enhanced with valid resources stays");
-
-    dx9.capabilityMask &= ~static_cast<uint32_t>(CapEnhancedResources);
-    const ResolverResult broken = ResolveRenderProfile(dx9);
-    ExpectEq(static_cast<uint32_t>(broken.effectiveProfile),
-             static_cast<uint32_t>(Profile::Redux), "dx9 enhanced falls back without resources");
-}
-
 void TestOptionalIblIsIndependentOfEnhancedGate()
 {
     std::printf("TestOptionalIblIsIndependentOfEnhancedGate\n");
@@ -305,15 +295,20 @@ void TestProfileRequirementsMetSharedGate()
 {
     std::printf("TestProfileRequirementsMetSharedGate\n");
     const uint32_t full = static_cast<uint32_t>(CapSchemeRewrite) |
-                          static_cast<uint32_t>(CapEnhancedResources);
-    const uint32_t noResources = static_cast<uint32_t>(CapSchemeRewrite);
+                          static_cast<uint32_t>(CapEnhancedResources) |
+                          static_cast<uint32_t>(CapObjectEnhanced);
+    const uint32_t noResources = static_cast<uint32_t>(CapSchemeRewrite) |
+                                 static_cast<uint32_t>(CapObjectEnhanced);
+    const uint32_t noDx11 = static_cast<uint32_t>(CapSchemeRewrite) |
+                            static_cast<uint32_t>(CapEnhancedResources);
     const uint32_t noScheme = static_cast<uint32_t>(CapEnhancedResources);
 
     // The shared gate used by BOTH ResolveRenderProfile and the runtime's
     // SupportsRenderProfile must keep the two in exact agreement.
-    Check(ProfileRequirementsMet(Profile::Enhanced, full), "enhanced needs both");
+    Check(ProfileRequirementsMet(Profile::Enhanced, full), "enhanced needs scheme, resources and DX11");
     Check(!ProfileRequirementsMet(Profile::Enhanced, noResources), "enhanced rejects missing resources");
     Check(!ProfileRequirementsMet(Profile::Enhanced, noScheme), "enhanced rejects missing scheme layer");
+    Check(!ProfileRequirementsMet(Profile::Enhanced, noDx11), "enhanced rejects missing DX11 capability");
     Check(ProfileRequirementsMet(Profile::Retro, noResources), "retro needs only scheme layer");
     Check(!ProfileRequirementsMet(Profile::Retro, noScheme), "retro rejects missing scheme layer");
     Check(ProfileRequirementsMet(Profile::Redux, 0u), "redux always available");
@@ -352,10 +347,9 @@ int main()
     TestCleanReduxBaseline();
     TestContentOverrideWinsOverUser();
     TestInheritFollowsUserPreference();
-    TestDx9EnhancedIsCapabilityDependentNotFallback();
+    TestDx9EnhancedAlwaysFallsBackToRedux();
     TestSchemeLayerLossFallsBackWithReason();
     TestMandatoryResourceLossFallsBackToRedux();
-    TestDx9EnhancedAlsoRequiresMandatoryResources();
     TestOptionalIblIsIndependentOfEnhancedGate();
     TestProfileRequirementsMetSharedGate();
     TestRequestedBackendMismatchIsReportedNotApplied();

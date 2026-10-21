@@ -84,18 +84,19 @@ content intent. Campaign Reimagined owns content and art direction.**
 - **Redux** — stock Battlezone 98 Redux rendering behavior as closely as
   practical on the selected backend. The compatibility baseline; the engine's
   native scheme flow passes through untouched (fail-open by construction).
-- **Enhanced** — OpenShim's canonical graphics upgrade. Supported on BOTH
-  backends, capability-dependent rather than all-or-nothing:
+- **Enhanced** — OpenShim's canonical graphics upgrade. DX11 only
+  (DX9 is the legacy/stock backend: Redux and Retro, fixes only):
   - DX11 (primary development platform): linear-lighting/colorspace path,
     enhanced terrain/object shader families, modern PSSM behavior (cascade
     blending, comparison PCF, receiver normal offset, terminal fade),
     contribution-ranked enhanced light selection, neutral IBL resources.
-  - DX9 (feature-frozen maintenance mode): proven legacy enhancements only —
-    distance-faded normal-map sharpening plus the SM3 enhanced technique
-    delegates. Correctness/crash fixes yes; new visual work targets DX11
-    first. A missing DX11-only bit is an expected report, NOT a fallback
-    failure: DX9+Enhanced remains effective rather than silently degrading
-    to Redux.
+  - DX9 (legacy, stable, stock, unupdated; fixes only): Redux and Retro only.
+    An Enhanced request on DX9 (user or content) never becomes effective: it
+    falls back to Redux with the reason "Enhanced requires DX11; DX9 runs
+    Stock/Retro only". The stored preference is untouched, so switching to
+    DX11 restores Enhanced. `ProfileRequirementsMet(Enhanced)` requires the
+    DX11-only `CapObjectEnhanced` bit so the resolver and
+    `SupportsRenderProfile` agree.
 - **Retro** — classic-style presentation through the `og-*` material scheme
   family (fewer texture units, simpler lighting, Glow compositor suppressed).
   Status: **experimental**. The scheme family legitimately exists (it is not
@@ -123,12 +124,13 @@ Examples:
 | DX11 | Redux | Inherit | Redux |
 | DX11 | Redux | Enhanced | Enhanced |
 | DX11 | Enhanced | Redux | Redux |
-| DX9 | Enhanced | Inherit | **Enhanced (legacy capability set)** |
+| DX9 | Enhanced | Inherit | **Redux (fallback: Enhanced requires DX11)** |
+| DX9 | Retro | Inherit | Retro |
 | any | Enhanced | – | Redux if scheme layer inactive OR mandatory resource set invalid, reason logged |
 
 Mandatory vs optional resources: `ValidateDeployedResourceSetAt` verifies the
 MANDATORY program/shader/texture set (granting `CapEnhancedResources`), which
-gates Enhanced itself on both backends; the IBL textures additionally grant
+gates Enhanced itself (DX11 only; DX9 never runs Enhanced); the IBL textures additionally grant
 `CapIblResources`, an OPTIONAL feature bit that can never gate the profile.
 `ResolveRenderProfile` and `SupportsRenderProfile(Enhanced)` share
 `ProfileRequirementsMet` so they can never disagree.
@@ -261,7 +263,7 @@ Automated (this branch):
 | DX11 + Enhanced + new EXU | canonical chain: bridge-capable EXU paired with shim; same asserts as above |
 | DX11 + Retro | effective Retro, `og-*` rewrites applied |
 | DX9 + Redux | backend observed DX9, baseline intact, legacy-only bits |
-| DX9 + Enhanced | **stays Enhanced** (no silent degrade), `en-*` SM3 delegates requested, DX11-only bits honestly absent, no fallback fired |
+| DX9 + Enhanced | effective Redux, fallback reason "Enhanced requires DX11; DX9 runs Stock/Retro only" (policy change; supersedes the earlier DX9-Enhanced PASS) |
 | resources.version mismatch | deterministic detection, `resources.compatible=no`, retrofit path gated while scheme layer stays intact |
 | resource set absent | clean detection line, CR-supplied techniques path unaffected |
 | old EXU + new shim | legacy EXU keeps working; new bridge untouched by it |

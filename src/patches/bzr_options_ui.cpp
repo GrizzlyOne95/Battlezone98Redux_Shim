@@ -22,6 +22,7 @@
 #include "openshim_ini.h"
 #include "openshim_updater.h"
 #include "patcher.h"
+#include "render_profile_runtime.h"
 #include "shim_log.h"
 #include "ui_decor.h"
 #include "BZROpenShim.h"
@@ -3911,6 +3912,11 @@ namespace BZROpenShim
             if (ShimSettingUnavailableReason(setting))
                 return "Unavailable";
             std::string text = setting.valueLabels[GetShimSettingCurrentIndex(setting)];
+            // Enhanced is DX11-only; the stored preference is kept (switching to
+            // DX11 restores it) but the row says it will not take effect here.
+            if (setting.applyGroup == ShimSettingApplyGroup::RenderProfile && text == "Enhanced" &&
+                BZROpenShim::RenderProfiles::IdentifyActiveRenderSystem() == 2)
+                return "Enhanced (DX11 only)";
             if (IsShimSettingActionRow(setting) || !setting.key)
                 return text;
             if (std::strcmp(setting.key, "ScrapHudColor") == 0 || std::strcmp(setting.key, "PilotHudColor") == 0 ||
@@ -3975,6 +3981,9 @@ namespace BZROpenShim
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (const char* reason = ShimSettingUnavailableReason(setting))
                 return reason;
+            if (setting.applyGroup == ShimSettingApplyGroup::RenderProfile &&
+                BZROpenShim::RenderProfiles::IdentifyActiveRenderSystem() == 2)
+                return "Enhanced requires DX11; on DX9 it falls back to Redux (Stock). Retro and Redux work on both. Your choice is kept for DX11.";
             return setting.description;
         }
 

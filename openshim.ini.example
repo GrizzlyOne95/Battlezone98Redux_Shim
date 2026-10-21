@@ -740,14 +740,12 @@ Renderer = Auto
 ; Canonical values:
 ;   Redux    = stock Battlezone 98 Redux rendering behavior as closely as
 ;              practical on the selected backend. Compatibility baseline.
-;   Enhanced = OpenShim's canonical graphics upgrade. Supported on BOTH
-;              backends and capability-dependent rather than all-or-nothing:
-;              DX11 carries the full modern feature set (linear lighting,
-;              enhanced terrain/object shader paths, modern PSSM behavior,
-;              contribution-ranked light selection); DX9 retains its proven
-;              legacy enhancements (normal-map sharpening and the SM3
-;              enhanced delegates) on a feature-frozen maintenance basis --
-;              correctness/crash fixes only, no new DX9 visual work planned.
+;   Enhanced = OpenShim's canonical graphics upgrade, DX11 only (linear
+;              lighting, enhanced terrain/object shader paths, modern PSSM
+;              behavior, contribution-ranked light selection). DX9 is the
+;              legacy/stock backend (Redux and Retro, fixes only): Enhanced
+;              on DX9 falls back to Redux, and this setting is kept so it
+;              applies again on DX11.
 ;   Retro    = deliberately classic-style presentation via the og-* material
 ;              scheme family. Experimental; see
 ;              Docs/OPENSHIM_RENDER_PROFILE_ARCHITECTURE.md for status.

@@ -16,8 +16,8 @@ decisions are exercised.
 * `render_profile_resources_tests` — valid set passes, single missing mandatory
   file fails, empty file fails, version mismatch fails, absent directory fails.
 * `render_profile_tests` — Enhanced without `CapEnhancedResources` cleanly
-  falls back to Redux with a reason; DX9 Enhanced with missing resources also
-  falls back; IBL loss is independent.
+  falls back to Redux with a reason; Enhanced on DX9 always falls back to Redux
+  (DX9 runs Stock/Retro only); IBL loss is independent.
 * `openshim_assets_tests` — manifest parsing (valid, missing Version,
   version mismatch, malformed, partial), destruction-chunk and enhanced-resource
   probing (absent vs present vs empty file), `EvaluateAssetCapabilitiesAt`
