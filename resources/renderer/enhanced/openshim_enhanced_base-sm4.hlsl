@@ -1,3 +1,4 @@
+#include "openshim_surface_reactions.hlsl"
 // DX11 SM4 shader path for the OpenShim canonical Enhanced renderer.
 // Enhanced mode uses the experimental legacy-compatible GGX direct-lighting model.
 // IBL_ENABLED layers static split-sum image-based lighting onto that DX11 path.
@@ -827,6 +828,7 @@ void base_vertex(
 #endif
 
     out float2 vTexCoord : TEXCOORD0,
+    out float3 vSurfacePosition : TEXCOORD8,
 
 #if !defined(VERTEX_LIGHTING)
     out float3 vViewNormal : TEXCOORD1,
@@ -855,6 +857,7 @@ void base_vertex(
     float3 vViewPosition, vViewNormal;
 #endif
     vViewPosition = mul(worldViewMat, float4(iPosition.xyz, 1.0)).xyz;
+    vSurfacePosition = vViewPosition;
     vViewNormal = mul(worldViewMat, float4(iNormal.xyz, 0.0)).xyz;
 #if !defined(VERTEX_LIGHTING) && defined(NORMALMAP_ENABLED) && defined(VERTEX_TANGENTS)
     vViewTangent = mul(worldViewMat, float4(iTangent.xyz, 0.0)).xyz;
@@ -900,6 +903,7 @@ void base_vertex(
 }
 
 void base_fragment(
+    OSE_SURFACE_UNIFORMS
     uniform Texture2D diffuseMap : register(t0),
     uniform SamplerState diffuseSam : register(s0),
 #if defined(NORMALMAP_ENABLED)
@@ -1000,6 +1004,7 @@ void base_fragment(
 #endif
 #endif
     in float2 vTexCoord : TEXCOORD0,
+    in float3 vSurfacePosition : TEXCOORD8,
 #if !defined(VERTEX_LIGHTING)
     in float3 vViewNormal : TEXCOORD1,
 #if defined(NORMALMAP_ENABLED) && defined(VERTEX_TANGENTS)
@@ -1022,6 +1027,7 @@ void base_fragment(
 #endif
 )
 {
+    float4 reactiveWater = 0.0;
 #if defined(SHADOWRECEIVER)
     // Geometric cosine for the slope term. VERTEX_LIGHTING permutations carry no
     // interpolated normal, so they fall back to the constant floor.
@@ -1156,6 +1162,11 @@ void base_fragment(
     float3 viewNormal = safe_normalize(vViewNormal);
 #endif
 
+#if defined(ENHANCED_MODE) && OSE_ENHANCED_LOD_TIER == 0
+    viewNormal = ose_water_normal(viewPos, viewNormal, saturate(surfaceState.x),
+                                 surfaceViewToLocal, surfaceRainTime, reactiveWater);
+#endif
+
 #if defined(SPECULARMAP_ENABLED)
     float3 specularTex = specularMap.Sample(specularSam, vTexCoord).xyz;
     float specularMask = saturate(luminance_legacy(specularTex));
@@ -1172,6 +1183,7 @@ void base_fragment(
 #if defined(ENHANCED_MODE)
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float surfaceRoughness = derive_legacy_roughness(materialShininess, specularMask);
+    surfaceRoughness = lerp(surfaceRoughness, max(0.13, surfaceRoughness * 0.48), saturate(surfaceState.x));
 #if defined(NORMALMAP_ENABLED)
     surfaceRoughness = filter_roughness_from_normal_variance(viewNormal, surfaceRoughness);
 #endif
@@ -1353,6 +1365,19 @@ void base_fragment(
     specularResult.xyz += prefilteredEnvironment
                         * (surfaceF0 * environmentBRDF.x + environmentBRDF.y)
                         * OSE_IBL_SPECULAR_INTENSITY;
+#if OSE_ENHANCED_LOD_TIER == 0
+    if (reactiveWater.w > 0.002)
+    {
+        // A separate clear wet coat must remain visible over matte paint. Use
+        // the existing environment, not emission or an opaque white decal.
+        float3 coatReflection = prefilteredEnvMap.SampleLevel(
+            prefilteredEnvSam, worldReflection, 0.35).xyz * environmentTint;
+        float grazing = pow(1.0 - NdotVForIBL, 3.0);
+        float coat = reactiveWater.w * (0.08 + grazing * 0.25 +
+                     reactiveWater.y * 0.80 + reactiveWater.z * 0.65);
+        specularResult.xyz += coatReflection * coat;
+    }
+#endif
 #elif defined(ENHANCED_MODE)
     // Phase-1 fallback when the IBL resources are not bound (or a compatibility
     // Enhanced delegate is selected). This preserves the previous visual floor.
@@ -1360,6 +1385,10 @@ void base_fragment(
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float3 grazingFresnel = fresnel_schlick(NdotVForFill, surfaceF0);
     lightResult.xyz += sceneAmbient.xyz * grazingFresnel * (1.0 - surfaceRoughness) * 0.20;
+#if OSE_ENHANCED_LOD_TIER == 0
+    specularResult.xyz += sceneAmbient.xyz * reactiveWater.w *
+        (0.08 + reactiveWater.y * 0.80 + reactiveWater.z * 0.65);
+#endif
 #else
     lightResult.xyz += sceneAmbient.xyz * pow(1.0 - NdotVForFill, 4.0) * 0.15;
 #endif
@@ -1379,6 +1408,12 @@ void base_fragment(
 #endif
 
     float3 emissiveContribution = float3(0.0, 0.0, 0.0);
+#if defined(ENHANCED_MODE)
+    // Reactive surfaces are Enhanced-only; Stock/Retro keep the stock output.
+    float3 reactiveGlow;
+    oColor.xyz = ose_surface_finish(oColor.xyz, vSurfacePosition, vTexCoord, reactiveGlow, OSE_SURFACE_ARGUMENTS);
+    emissiveContribution = reactiveGlow;
+#endif
 #if defined(EMISSIVEMAP_ENABLED)
     float3 emissiveTex = emissiveMap.Sample(emissiveSam, vTexCoord).xyz;
 #if OSE_LINEAR_LIGHT_ACTIVE
@@ -1393,7 +1428,7 @@ void base_fragment(
     // the Medium/Low/Lowest behavior (which adds the map at 1.0x).
     float materialEmissiveIntensity = max(materialEmissive.x, max(materialEmissive.y, materialEmissive.z));
     float emissiveIntensity = max(1.0, materialEmissiveIntensity);
-    emissiveContribution = emissiveTex.xyz * emissiveIntensity;
+    emissiveContribution += emissiveTex.xyz * emissiveIntensity * ose_surface_emissive_scale(surfaceState, surfaceMode);
 #else
     oColor.xyz += emissiveTex.xyz;
 #endif

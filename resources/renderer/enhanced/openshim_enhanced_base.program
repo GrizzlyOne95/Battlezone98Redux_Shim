@@ -2592,6 +2592,19 @@ fragment_program OSE_BaseENHighNoShadow_fragmentHLSL4 hlsl
 	target ps_4_0
 	entry_point base_fragment
 	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1
+
+    default_params
+    {
+        param_named_auto surfaceViewToLocal inverse_worldview_matrix
+        param_named_auto surfaceRainTime time_0_x 4000
+        param_named surfaceState float4 0 0 0 0
+        param_named surfaceMode float4 0 0 0 0
+        param_named surfaceImpact0 float4 0 0 0 0
+        param_named surfaceImpact1 float4 0 0 0 0
+        param_named surfaceImpactWeights float4 0 0 0 0
+        param_named surfaceMuzzle0 float4 0 0 0 0
+        param_named surfaceMuzzle1 float4 0 0 0 0
+    }
 }
 
 fragment_program OSE_BaseENHighShadow_fragmentHLSL4 hlsl
@@ -2600,6 +2613,19 @@ fragment_program OSE_BaseENHighShadow_fragmentHLSL4 hlsl
 	target ps_4_0
 	entry_point base_fragment
 	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=4,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1
+
+    default_params
+    {
+        param_named_auto surfaceViewToLocal inverse_worldview_matrix
+        param_named_auto surfaceRainTime time_0_x 4000
+        param_named surfaceState float4 0 0 0 0
+        param_named surfaceMode float4 0 0 0 0
+        param_named surfaceImpact0 float4 0 0 0 0
+        param_named surfaceImpact1 float4 0 0 0 0
+        param_named surfaceImpactWeights float4 0 0 0 0
+        param_named surfaceMuzzle0 float4 0 0 0 0
+        param_named surfaceMuzzle1 float4 0 0 0 0
+    }
 }
 
 fragment_program OSE_BaseENHighPSSM_fragmentHLSL4 hlsl
@@ -2608,6 +2634,19 @@ fragment_program OSE_BaseENHighPSSM_fragmentHLSL4 hlsl
 	target ps_4_0
 	entry_point base_fragment
 	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=4,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_PSSM_V2=1
+
+    default_params
+    {
+        param_named_auto surfaceViewToLocal inverse_worldview_matrix
+        param_named_auto surfaceRainTime time_0_x 4000
+        param_named surfaceState float4 0 0 0 0
+        param_named surfaceMode float4 0 0 0 0
+        param_named surfaceImpact0 float4 0 0 0 0
+        param_named surfaceImpact1 float4 0 0 0 0
+        param_named surfaceImpactWeights float4 0 0 0 0
+        param_named surfaceMuzzle0 float4 0 0 0 0
+        param_named surfaceMuzzle1 float4 0 0 0 0
+    }
 }
 
 fragment_program OSE_BaseENHighNoShadow_fragmentHLSL hlsl
@@ -2941,6 +2980,18 @@ fragment_program OSE_BaseENMediumNoShadow_fragmentHLSL4 hlsl
 	entry_point base_fragment
 
 	preprocessor_defines MAX_LIGHTS=8,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=1
+
+    default_params
+    {
+        param_named_auto surfaceViewToLocal inverse_worldview_matrix
+        param_named surfaceState float4 0 0 0 0
+        param_named surfaceMode float4 0 0 0 0
+        param_named surfaceImpact0 float4 0 0 0 0
+        param_named surfaceImpact1 float4 0 0 0 0
+        param_named surfaceImpactWeights float4 0 0 0 0
+        param_named surfaceMuzzle0 float4 0 0 0 0
+        param_named surfaceMuzzle1 float4 0 0 0 0
+    }
 }
 
 fragment_program OSE_BaseENMediumShadow_fragmentHLSL4 hlsl
@@ -2950,6 +3001,18 @@ fragment_program OSE_BaseENMediumShadow_fragmentHLSL4 hlsl
 	entry_point base_fragment
 
 	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=1
+
+    default_params
+    {
+        param_named_auto surfaceViewToLocal inverse_worldview_matrix
+        param_named surfaceState float4 0 0 0 0
+        param_named surfaceMode float4 0 0 0 0
+        param_named surfaceImpact0 float4 0 0 0 0
+        param_named surfaceImpact1 float4 0 0 0 0
+        param_named surfaceImpactWeights float4 0 0 0 0
+        param_named surfaceMuzzle0 float4 0 0 0 0
+        param_named surfaceMuzzle1 float4 0 0 0 0
+    }
 }
 
 fragment_program OSE_BaseENMediumPSSM_fragmentHLSL4 hlsl
@@ -2959,6 +3022,18 @@ fragment_program OSE_BaseENMediumPSSM_fragmentHLSL4 hlsl
 	entry_point base_fragment
 
 	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=1
+
+    default_params
+    {
+        param_named_auto surfaceViewToLocal inverse_worldview_matrix
+        param_named surfaceState float4 0 0 0 0
+        param_named surfaceMode float4 0 0 0 0
+        param_named surfaceImpact0 float4 0 0 0 0
+        param_named surfaceImpact1 float4 0 0 0 0
+        param_named surfaceImpactWeights float4 0 0 0 0
+        param_named surfaceMuzzle0 float4 0 0 0 0
+        param_named surfaceMuzzle1 float4 0 0 0 0
+    }
 }
 
 fragment_program OSE_BaseENLowNoShadow_fragmentHLSL4 hlsl
@@ -2968,6 +3043,18 @@ fragment_program OSE_BaseENLowNoShadow_fragmentHLSL4 hlsl
 	entry_point base_fragment
 
 	preprocessor_defines MAX_LIGHTS=1,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=2
+
+    default_params
+    {
+        param_named_auto surfaceViewToLocal inverse_worldview_matrix
+        param_named surfaceState float4 0 0 0 0
+        param_named surfaceMode float4 0 0 0 0
+        param_named surfaceImpact0 float4 0 0 0 0
+        param_named surfaceImpact1 float4 0 0 0 0
+        param_named surfaceImpactWeights float4 0 0 0 0
+        param_named surfaceMuzzle0 float4 0 0 0 0
+        param_named surfaceMuzzle1 float4 0 0 0 0
+    }
 }
 
 fragment_program OSE_BaseENLowShadow_fragmentHLSL4 hlsl
@@ -2977,6 +3064,18 @@ fragment_program OSE_BaseENLowShadow_fragmentHLSL4 hlsl
 	entry_point base_fragment
 
 	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=2
+
+    default_params
+    {
+        param_named_auto surfaceViewToLocal inverse_worldview_matrix
+        param_named surfaceState float4 0 0 0 0
+        param_named surfaceMode float4 0 0 0 0
+        param_named surfaceImpact0 float4 0 0 0 0
+        param_named surfaceImpact1 float4 0 0 0 0
+        param_named surfaceImpactWeights float4 0 0 0 0
+        param_named surfaceMuzzle0 float4 0 0 0 0
+        param_named surfaceMuzzle1 float4 0 0 0 0
+    }
 }
 
 fragment_program OSE_BaseENLowPSSM_fragmentHLSL4 hlsl
@@ -2986,4 +3085,16 @@ fragment_program OSE_BaseENLowPSSM_fragmentHLSL4 hlsl
 	entry_point base_fragment
 
 	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=2,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_LOD_TIER=2
+
+    default_params
+    {
+        param_named_auto surfaceViewToLocal inverse_worldview_matrix
+        param_named surfaceState float4 0 0 0 0
+        param_named surfaceMode float4 0 0 0 0
+        param_named surfaceImpact0 float4 0 0 0 0
+        param_named surfaceImpact1 float4 0 0 0 0
+        param_named surfaceImpactWeights float4 0 0 0 0
+        param_named surfaceMuzzle0 float4 0 0 0 0
+        param_named surfaceMuzzle1 float4 0 0 0 0
+    }
 }

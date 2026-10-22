@@ -37,6 +37,7 @@
 #include "shadow_far_distance.h"
 #include "sun_flash.h"
 #include "chunk_batch_invalidation.h"
+#include "destruction_finish_bridge.h"
 #include "native_chunk_cache.h"
 #include "ai_range_policy.h"
 #include "lcbench_safety_policy.h"
@@ -285,7 +286,7 @@ namespace BZROpenShim
 
         static int64_t g_GenericChunkBatchQpcFrequency = 0;
 
-        static const std::string g_GenericChunkBatchMaterialName = "scarpmat2";
+        static std::string g_GenericChunkBatchMaterialName = "scarpmat2";
 
         static const std::string g_GenericChunkBatchMaterialGroup = "General";
 
@@ -1447,6 +1448,7 @@ namespace BZROpenShim
 
             slot.sceneNode = sceneNode;
             slot.entity = entity;
+            ApplyDestructionFinish(entity);
             slot.sceneManager = sceneManager;
             g_ChunkMeshProxyLastRetryTick = 0;
             g_ChunkMeshProxyFailureLogged = false;
@@ -3111,6 +3113,31 @@ namespace BZROpenShim
                 g_GenericChunkBatchRuntimeAvailable ? 1u : 0u);
         }
 
+        // True when Ogre knows the material. Fails closed (false) on any
+        // fault or unresolved export. The guarded core holds no statics or
+        // unwinding objects: __try forbids them (C2712).
+        __declspec(noinline) static bool GuardedChunkMaterialExistsCore(
+            void* (*getManager)(), bool (__thiscall* exists)(void*, const std::string&),
+            const std::string& name)
+        {
+            __try
+            {
+                void* manager = getManager();
+                return manager && exists(manager, name);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+        static bool GuardedChunkMaterialExists(const std::string& name)
+        {
+            using FnGetManager = void* (*)();
+            using FnExists = bool (__thiscall*)(void*, const std::string&);
+            static FnGetManager getManager = ResolveOgreProc<FnGetManager>(
+                "?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
+            static FnExists exists = ResolveOgreProc<FnExists>(
+                "?resourceExists@ResourceManager@Ogre@@UAE_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            return getManager && exists && GuardedChunkMaterialExistsCore(getManager, exists, name);
+        }
+
         // High-resolution rebuild cost. Sampled unconditionally because the
         // rebuild path is already thousands of virtual Ogre calls, so two QPC
         // reads are noise -- and a cost figure that only exists when
@@ -3819,6 +3846,10 @@ namespace BZROpenShim
             {
                 if (!g_GenericChunkBatchManualObject)
                 {
+                    g_GenericChunkBatchMaterialName = DestructionFinishMaterial("scarpmat2");
+                    if (g_GenericChunkBatchMaterialName != "scarpmat2" &&
+                        !GuardedChunkMaterialExists(g_GenericChunkBatchMaterialName))
+                        g_GenericChunkBatchMaterialName = "scarpmat2";
                     void* const rootNode = getRootSceneNode(sceneManager);
                     const OgreVector3 origin = { 0.0f, 0.0f, 0.0f };
                     const OgreQuaternion identity = { 1.0f, 0.0f, 0.0f, 0.0f };

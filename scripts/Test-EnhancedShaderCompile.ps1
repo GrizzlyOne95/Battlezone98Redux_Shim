@@ -295,7 +295,9 @@ try {
         foreach ($d in $v.Defines) {
             if ($d -match "=") { $args += @("/D", $d) } else { $args += @("/D", "$d=1") }
         }
-        $args += @("/Fo", (Join-Path $outDir ("v{0}.cso" -f $index)), $sourcePath)
+        $assemblyPath = Join-Path $outDir ("v{0}.asm" -f $index)
+        $args += @("/Fo", (Join-Path $outDir ("v{0}.cso" -f $index)),
+                   "/Fc", $assemblyPath, $sourcePath)
 
         # fxc writes warnings to stderr and still exits 0. With the script-wide
         # $ErrorActionPreference = "Stop" in force, PowerShell promotes any
@@ -312,6 +314,16 @@ try {
         }
         finally {
             $ErrorActionPreference = $previousPreference
+        }
+
+        # fxc accepts $Globals plus $Params, but the retail Ogre DX11 binding
+        # path does not populate both correctly. Lighting goes black despite a
+        # successful compile. Validate the generated layout, not source syntax.
+        if ($code -eq 0 -and $v.Target -match '^[vp]s_[45]_' -and
+            $v.Source -eq 'openshim_enhanced_base-sm4.hlsl' -and
+            (Get-Content -Raw -LiteralPath $assemblyPath) -match '(?m)^dcl_constantbuffer\s+CB[1-9]') {
+            $code = 1
+            $output = 'Multiple constant buffers: keep reactive and base uniforms together in the entry point parameter list.'
         }
 
         if ($code -ne 0) {
