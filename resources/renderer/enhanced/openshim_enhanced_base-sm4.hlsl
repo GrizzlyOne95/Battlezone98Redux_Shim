@@ -407,6 +407,9 @@ static const float OSE_LOD_MIN_ROUGHNESS = 0.18;
 
 static const float OSE_PBR_DEFAULT_F0 = 0.04;
 static const float OSE_PBR_MAX_LEGACY_F0 = 0.45;
+// Spec-map peak at which F0 is no longer masked. The Redux Grizzly's spec map has
+// p10/p50/p90 0.008/0.16/0.37, so the median panel keeps 80% of its F0.
+static const float OSE_PBR_SPEC_MASK_FULL = 0.20;
 // Legacy light intensities were authored for non-normalized Lambert, so the
 // diffuse lobe is scaled by pi (diffuse weight (1-F), as in BZCC) while still
 // applying Fresnel energy sharing. Keep this equal in the base and terrain shaders.
@@ -657,9 +660,12 @@ float3 legacy_specular_to_f0(float3 specularTex)
     float strength = lerp(OSE_PBR_DEFAULT_F0, OSE_PBR_MAX_LEGACY_F0, pow(peak, 1.35));
     // Weakly blend toward the authored tint so old bright specular maps can read
     // as reflective without turning every high value into chrome.
-    return saturate(lerp(float3(OSE_PBR_DEFAULT_F0, OSE_PBR_DEFAULT_F0, OSE_PBR_DEFAULT_F0),
-                         tint * strength,
-                         saturate(peak * 0.90)));
+    float3 f0 = saturate(lerp(float3(OSE_PBR_DEFAULT_F0, OSE_PBR_DEFAULT_F0, OSE_PBR_DEFAULT_F0),
+                              tint * strength,
+                              saturate(peak * 0.90)));
+    // Dark spec texels (grime, seams, cavities) mask the reflection, as in Classic
+    // Redux and BZCC, where F0 is matSpec * specTex, instead of keeping the 0.04 floor.
+    return f0 * saturate(peak / OSE_PBR_SPEC_MASK_FULL);
 }
 
 float derive_legacy_roughness(float materialShininess, float specularMask)
