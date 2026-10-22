@@ -41,10 +41,21 @@
 //    through a hidden pointer (`ret 8`).
 //  - The first captured list must read useCount == 1 at +0x14 or the cache
 //    disables itself before it ever holds a reference.
+//
+// The same loadImportPath detour carries the Enhanced stock-base redirect
+// (stock_enhanced_base_redirect.h): while OpenShim's Enhanced resources are
+// ready, `import * from "BZBase.material"` / "BZTerrainBase.material" reads
+// OpenShim's generated copy, which adds en-* techniques on OSE_* programs.
+// Only the parsed file changes; Ogre still records the import under the stock
+// name, and imported objects only feed inheritance, so the redefined
+// BZBase/BZTerrainBase never reach the material manager. The two features
+// switch off independently.
 
 #include "ogre_script_import_cache.h"
 #include "bzr_options_ui.h"
+#include "render_profile_runtime.h"
 #include "shim_log.h"
+#include "stock_enhanced_base_redirect.h"
 
 #include <Windows.h>
 
@@ -76,6 +87,9 @@ namespace BZROpenShim
         using FnGetResourceGroup = const std::string&(__thiscall*)(const void*);
         using FnDeallocateBytes = void(__cdecl*)(void*);
         using FnSharedPtrInfoDtor = void(__thiscall*)(void*, unsigned);
+        using FnGetResourceGroupManager = void*(__cdecl*)();
+        using FnResourceExists = bool(__thiscall*)(void*, const std::string&, const std::string&);
+        using FnResourceExistsInAnyGroup = bool(__thiscall*)(void*, const std::string&);
 
         constexpr char kLoadImportPathExport[] =
             "?loadImportPath@ScriptCompiler@Ogre@@AAE?AV?$SharedPtr@V?$list@V?$SharedPtr@"
@@ -96,6 +110,13 @@ namespace BZROpenShim
             "?getResourceGroup@ScriptCompiler@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@"
             "V?$allocator@D@2@@std@@XZ";
         constexpr char kDeallocateBytesExport[] = "?deallocateBytes@StdAllocPolicy@Ogre@@SAXPAX@Z";
+        constexpr char kGetResourceGroupManagerExport[] = "?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ";
+        constexpr char kResourceExistsExport[] =
+            "?resourceExists@ResourceGroupManager@Ogre@@QAE_NABV?$basic_string@DU?$char_traits@D@std@@"
+            "V?$allocator@D@2@@std@@0@Z";
+        constexpr char kResourceExistsInAnyGroupExport[] =
+            "?resourceExistsInAnyGroup@ResourceGroupManager@Ogre@@QAE_NABV?$basic_string@DU?$char_traits@D@std@@"
+            "V?$allocator@D@2@@std@@@Z";
 
         // push ebp; mov ebp,esp; push -1 -- both bodies, then `push imm32` (SEH frame).
         constexpr uint8_t kExpectedPrologue[] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF };
@@ -107,8 +128,14 @@ namespace BZROpenShim
         FnConvertToAst g_ConvertToAst = nullptr;
         FnGetResourceGroup g_GetResourceGroup = nullptr;
         FnDeallocateBytes g_DeallocateBytes = nullptr;
+        FnGetResourceGroupManager g_GetResourceGroupManager = nullptr;
+        FnResourceExists g_ResourceExists = nullptr;
+        FnResourceExistsInAnyGroup g_ResourceExistsInAnyGroup = nullptr;
 
         bool g_Installed = false;
+        bool g_CacheEnabled = false;
+        bool g_RedirectEnabled = false;
+        bool g_TerrainOptedIn = false;
         bool g_FailureLogged = false;
         bool g_DisabledLogged = false;
         // Set once at runtime if the layout check fails; hooks then pass through.
@@ -119,7 +146,9 @@ namespace BZROpenShim
         ULONGLONG g_LastRequestTick = 0;
         uint32_t g_WaveHits = 0;
         uint32_t g_WaveMisses = 0;
+        uint32_t g_WaveRedirects = 0;
         uint32_t g_Waves = 0;
+        volatile LONG g_RedirectLogged = 0;
 
         thread_local OgreSharedPtrPod* t_CaptureSlot = nullptr;
 
@@ -154,12 +183,13 @@ namespace BZROpenShim
             if (g_LastRequestTick != 0 && now - g_LastRequestTick > kWaveGapMs)
             {
                 LogShimA(LogLevel::Info, kComponent,
-                         "[SCRIPTIMPORT] wave %u done: %u hits, %u parsed imports cached",
-                         g_Waves, g_WaveHits, g_WaveMisses);
+                         "[SCRIPTIMPORT] wave %u done: %u hits, %u parsed imports cached, "
+                         "%u stock base imports redirected to Enhanced",
+                         g_Waves, g_WaveHits, g_WaveMisses, g_WaveRedirects);
                 for (auto& entry : g_Cache)
                     Release(entry.second);
                 g_Cache.clear();
-                g_WaveHits = g_WaveMisses = 0;
+                g_WaveHits = g_WaveMisses = g_WaveRedirects = 0;
             }
             if (g_LastRequestTick == 0 || now - g_LastRequestTick > kWaveGapMs)
                 ++g_Waves;
@@ -200,11 +230,59 @@ namespace BZROpenShim
             return result;
         }
 
+        // Fills `payload` and returns true when this import should read
+        // OpenShim's Enhanced copy of a stock base instead. Every Ogre query
+        // is guarded: any surprise leaves the import stock.
+        bool ResolveStockBaseRedirect(void* compiler, const std::string& name, std::string& payload)
+        {
+            namespace Policy = StockEnhancedBase;
+            const Policy::Redirect* entry = Policy::RedirectForImport(name);
+            if (!g_RedirectEnabled || !entry)
+                return false;
+            const char* file = entry->payloadFile;
+
+            Policy::RedirectInputs in;
+            in.optInRequired = entry->optIn;
+            in.optedIn = g_TerrainOptedIn;
+            if (in.optInRequired && !in.optedIn)
+                return false;
+            in.enhancedResourcesReady = RenderProfiles::AreEnhancedResourcesReady();
+            if (!in.enhancedResourcesReady)
+                return false;
+            try
+            {
+                void* manager = g_GetResourceGroupManager();
+                if (!manager)
+                    return false;
+                payload = file;
+                in.shadowedInCompilingGroup = g_ResourceExists(manager, g_GetResourceGroup(compiler), name);
+                in.payloadPresent = g_ResourceExistsInAnyGroup(manager, payload);
+            }
+            catch (...)
+            {
+                return false;
+            }
+            if (!Policy::ShouldRedirect(in))
+                return false;
+
+            // Once per payload, so the terrain base shows up too.
+            const LONG bit = file == Policy::kRedirects[0].payloadFile ? 1 : 2;
+            if ((InterlockedOr(&g_RedirectLogged, bit) & bit) == 0)
+                LogShimA(LogLevel::Info, kComponent,
+                         "[SCRIPTIMPORT] Enhanced stock base active: %s -> %s (group=%s)",
+                         name.c_str(), file, g_GetResourceGroup(compiler).c_str());
+            return true;
+        }
+
         OgreSharedPtrPod* __fastcall LoadImportPathHook(void* compiler, void* /*edx*/,
                                                         OgreSharedPtrPod* ret,
-                                                        const std::string& name)
+                                                        const std::string& requested)
         {
-            if (g_LayoutRejected)
+            std::string redirected;
+            const bool redirect = ResolveStockBaseRedirect(compiler, requested, redirected);
+            const std::string& name = redirect ? redirected : requested;
+
+            if (!g_CacheEnabled || g_LayoutRejected)
                 return g_LoadImportPathOriginal(compiler, ret, name);
 
             const std::string key = CacheKey(compiler, name);
@@ -212,6 +290,8 @@ namespace BZROpenShim
             {
                 std::lock_guard<std::mutex> lock(g_Mutex);
                 BeginWaveIfIdleLocked();
+                if (redirect)
+                    ++g_WaveRedirects;
                 auto it = g_Cache.find(key);
                 if (it != g_Cache.end())
                 {
@@ -256,10 +336,10 @@ namespace BZROpenShim
             return result;
         }
 
-        bool DisabledByEnvironment()
+        bool DisabledByEnvironment(const char* name)
         {
             char value[16] = {};
-            const DWORD len = GetEnvironmentVariableA(kDisableSwitch, value, sizeof(value));
+            const DWORD len = GetEnvironmentVariableA(name, value, sizeof(value));
             if (len == 0 || len >= sizeof(value))
                 return false;
             return !(value[0] == '0' && value[1] == '\0');
@@ -290,15 +370,19 @@ namespace BZROpenShim
     {
         if (g_Installed)
             return;
-        if (DisabledByEnvironment())
+        const bool cacheEnabled = !DisabledByEnvironment(kDisableSwitch);
+        const bool redirectEnabled = !DisabledByEnvironment(StockEnhancedBase::kDisableSwitch);
+        if (!g_DisabledLogged && (!cacheEnabled || !redirectEnabled))
         {
-            if (!g_DisabledLogged)
-            {
-                g_DisabledLogged = true;
-                LogShimA(LogLevel::Info, kComponent, "[SCRIPTIMPORT] disabled by %s", kDisableSwitch);
-            }
-            return;
+            g_DisabledLogged = true;
+            if (!cacheEnabled)
+                LogShimA(LogLevel::Info, kComponent, "[SCRIPTIMPORT] cache disabled by %s", kDisableSwitch);
+            if (!redirectEnabled)
+                LogShimA(LogLevel::Info, kComponent, "[SCRIPTIMPORT] Enhanced stock base disabled by %s",
+                         StockEnhancedBase::kDisableSwitch);
         }
+        if (!cacheEnabled && !redirectEnabled)
+            return;
 
         HMODULE ogreMain = GetModuleHandleA("OgreMain.dll");
         if (!ogreMain)
@@ -344,11 +428,30 @@ namespace BZROpenShim
             return;
         }
         g_LoadImportPathOriginal = reinterpret_cast<FnLoadImportPath>(g_LoadImportPathDetour.trampoline);
+
+        // The redirect needs three more exports; without them only the cache runs.
+        g_GetResourceGroupManager = reinterpret_cast<FnGetResourceGroupManager>(
+            ResolveExportBody(ogreMain, kGetResourceGroupManagerExport));
+        g_ResourceExists = reinterpret_cast<FnResourceExists>(ResolveExportBody(ogreMain, kResourceExistsExport));
+        g_ResourceExistsInAnyGroup = reinterpret_cast<FnResourceExistsInAnyGroup>(
+            ResolveExportBody(ogreMain, kResourceExistsInAnyGroupExport));
+        const bool redirectResolved = g_GetResourceGroupManager && g_ResourceExists && g_ResourceExistsInAnyGroup;
+        if (redirectEnabled && !redirectResolved)
+            LogShimA(LogLevel::Warn, kComponent,
+                     "[SCRIPTIMPORT] Enhanced stock base not installed: a ResourceGroupManager export did not resolve");
+
+        g_CacheEnabled = cacheEnabled;
+        g_RedirectEnabled = redirectEnabled && redirectResolved;
+        // Same "=1" test as the disable switches, read as an opt-in.
+        g_TerrainOptedIn = DisabledByEnvironment(StockEnhancedBase::kTerrainOptInSwitch);
         g_Installed = true;
         LogShimA(LogLevel::Info, kComponent,
-                 "[SCRIPTIMPORT] installed loadImportPath=0x%08X parse=0x%08X (wave gap %u ms)",
+                 "[SCRIPTIMPORT] installed loadImportPath=0x%08X parse=0x%08X (wave gap %u ms) cache=%s "
+                 "enhanced-stock-base=%s terrain=%s",
                  static_cast<uint32_t>(reinterpret_cast<uintptr_t>(loadImportPath)),
                  static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parse)),
-                 static_cast<unsigned>(kWaveGapMs));
+                 static_cast<unsigned>(kWaveGapMs), g_CacheEnabled ? "on" : "off",
+                 g_RedirectEnabled ? "on" : "off",
+                 g_RedirectEnabled && g_TerrainOptedIn ? "on" : "off (opt in with OPENSHIM_ENABLE_ENHANCED_STOCK_TERRAIN=1)");
     }
 }

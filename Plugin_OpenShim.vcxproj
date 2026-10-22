@@ -412,6 +412,7 @@
     <ClInclude Include="include\trn_codec.h" />
     <ClInclude Include="include\ogre_shader_cache.h" />
     <ClInclude Include="include\ogre_script_import_cache.h" />
+    <ClInclude Include="include\stock_enhanced_base_redirect.h" />
     <ClInclude Include="include\resource_walk_stat_cache.h" />
     <ClInclude Include="include\ogre_enhanced_light_selection.h" />
     <ClInclude Include="include\enhanced_light_selection.h" />

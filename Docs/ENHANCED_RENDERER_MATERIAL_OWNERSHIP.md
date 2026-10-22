@@ -83,6 +83,19 @@ OpenShim/Effect
 
 The exact names are implementation details; the architectural constraint is that CR must no longer be the namespace owner of reusable renderer base materials.
 
+### Mounting decision (2026-10-22): redirect the two stock base imports
+
+Implemented as an import redirect, not a per-material copy pack. Stock materials do not define their own techniques: 213 stock material files start with `import * from "BZBase.material"` and the 7 detail atlases with `import * from "BZTerrainBase.material"`, then inherit `: BZBase` / `: BZTerrainBase`. So two files decide every stock entity and terrain material's technique list.
+
+- `resources/renderer/enhanced/openshim_stock_bzbase.import` and `openshim_stock_bzterrainbase.import` are the stock bases verbatim plus the `en-*` techniques of CR's `CR_BZBase`/`CR_BZBaseCockpit`/`CR_BZTerrainBase`, retargeted to renamed `OSEPassScheme*` / `OSETerrainPassScheme*` abstract passes and OpenShim `OSE_*` programs. They are generated, with provenance in the header, by `scripts/generate_stock_enhanced_base.py`; rerun it when either input changes.
+- The `ScriptCompiler::loadImportPath` detour in `src/patches/ogre_script_import_cache.cpp` reads that file instead of the stock base when: OpenShim's Enhanced resource group is ready, the compiling group does not ship its own base (a mod's `BZBase.material` wins), and the payload is deployed. Pure policy: `include/stock_enhanced_base_redirect.h`. Kill switch: `OPENSHIM_DISABLE_ENHANCED_STOCK_BASE=1`.
+- The terrain base is opt-in (`OPENSHIM_ENABLE_ENHANCED_STOCK_TERRAIN=1`). On lcbmars, stock terrain on the OSE terrain passes received no PSSM shadows: the Grizzly's ground shadow and the hill shading disappeared. This happened with both the PSSM-V2 pass and the plain OSE PSSM pass, and the shadows came back as soon as only the terrain redirect was removed (`Docs/images/enhanced_stock_base/terrain_optin_no_shadows_rear_close.png`). The vehicle base is unaffected and on by default. The cause is not yet known. Whether CR's own terrain has the same gap is unverified.
+- CR files that import plain `BZBase.material` rather than `CR_BZBase.material` get the Enhanced stock base too: 11 in the current CR deployment (`avdrop*`, `cr03rok`, `cr06*`, `cr17_*`, `TestGround`).
+- Why it is safe: Ogre records the import under the stock name, and imported objects only feed inheritance; they are never registered as materials. The `.import` extension keeps every resource group from parsing the files as scripts. So the redefined `BZBase` cannot collide with the stock one in `General`, and no material is mutated at runtime.
+- CR still wins in CR missions. CR's stock-named files shadow the stock ones in `Modable` and import `CR_BZBase.material`, which is never redirected. Nothing in CR or EXU changes. In `crsetup.bzn`, CR's programs loaded and Ogre reported no "already exists" or new compiler errors. The only errors were the two pre-existing `TestGround.material` lines, which also appear with the redirect off.
+- Non-`en-*` techniques are stock, so Classic, Redux, Retro and glow are unchanged. Retro (`og-*`) on stock content keeps falling back as before.
+- Scope limits: CR's image-based-lighting fragments (`CR_BaseIBL*`, `CR_TerrainIBL*`) are CR programs, so the stock copy uses the plain `OSE_*EN*` fragment of the same tier without IBL. Materials that declare their own techniques (skies, planets, clouds, smoke, sprites, other effects) do not inherit either base and are unaffected; OpenShim Enhanced effect materials remain a follow-up. The boot-time `Modable` parse happens before the Enhanced group exists and stays stock; the per-mission rebuild picks the redirect up.
+
 ## Phase 2: runtime material enhancement
 
 After Phase 1 is working and qualified, investigate reducing or eliminating the stock material-copy layer by adapting Ogre materials at runtime.
@@ -166,7 +179,7 @@ PR #191 establishes that scene depth, AO, depth-aware haze, soft-particle suppor
 - [ ] Enumerate CR `Shaders/` and classify generic renderer code versus CR-only shader behavior.
 - [ ] Enumerate CR `Materials/` and classify each file as renderer infrastructure, stock compatibility redirect, mixed, or CR-specific content.
 - [ ] Identify exact duplicates or near-duplicates already present under OpenShim `resources/renderer/enhanced/`.
-- [ ] Record stock origin/provenance for copied stock material definitions where practical.
+- [x] Record stock origin/provenance for copied stock material definitions where practical. (The two stock-base copies carry a generated provenance header.)
 
 ### OpenShim generic resources
 

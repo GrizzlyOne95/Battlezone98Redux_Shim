@@ -3968,6 +3968,11 @@ namespace BZROpenShim::RenderProfiles
         }
     } // anonymous namespace
 
+    bool AreEnhancedResourcesReady()
+    {
+        return EnhancedResourcesAvailable();
+    }
+
     // Applies the effective profile immediately when called on the engine's
     // render thread. The pending flag stays set: the next scheme-hook drain
     // reapplies idempotently, so an off-thread publish racing this one is
