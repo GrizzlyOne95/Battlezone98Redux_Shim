@@ -178,6 +178,9 @@ namespace BZROpenShim
         void* renderQueue, void* edx, void* renderable, uint8_t queueGroup);
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* edx, void* renderQueue);
     void __cdecl HandleUnderAttackAlert(float currentTime);
+    // Raises the hooked under-attack alert's cooldown so a timestamp at or
+    // below `time` no longer alerts; never lowers it.
+    void RaiseUnderAttackAlertFloor(float time);
     void __fastcall DamageRevealProbeHook(void* victim, void* edx, void* damage);
     void SetDamageFlagsOriginal(void* original);
     void SetSprayEmitterBuildOriginal(void* original);

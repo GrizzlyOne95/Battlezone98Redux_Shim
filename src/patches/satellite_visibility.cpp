@@ -681,8 +681,14 @@ namespace BZROpenShim
             if (!TryGetGameObjectFieldBase(previousObject, previousBase))
                 return;
 
-            auto* nextBeep = reinterpret_cast<float*>(RadarAttackAlertNextBeepAddr());
-            if (!nextBeep)
+            // The "Under Attack Alert Hook" patches replace that comiss block
+            // with HandleUnderAttackAlert, which keeps its own cooldown. With
+            // the hook in place the stock nextBeep is never read again (and its
+            // guard bytes are the hook's jump, so the row would not bind).
+            const bool alertHooked = g_RetAddr_UnderAttackAlertHook1 != nullptr;
+            auto* nextBeep = alertHooked ? nullptr
+                                         : reinterpret_cast<float*>(RadarAttackAlertNextBeepAddr());
+            if (!alertHooked && !nextBeep)
                 return;
 
             __try
@@ -696,6 +702,12 @@ namespace BZROpenShim
                 // there is nothing stale to suppress.
                 if (!(staleEnemyShot > 0.0f) || !std::isfinite(staleEnemyShot))
                     return;
+
+                if (alertHooked)
+                {
+                    RaiseUnderAttackAlertFloor(staleEnemyShot);
+                    return;
+                }
 
                 const float currentNextBeep = *nextBeep;
                 if (std::isfinite(currentNextBeep) && currentNextBeep >= staleEnemyShot)
