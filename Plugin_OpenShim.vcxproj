@@ -298,6 +298,7 @@
     <ClCompile Include="src\patches\openshim_preset_migration.cpp" />
     <ClCompile Include="src\patches\openshim_sdk_provider.cpp" />
     <ClCompile Include="src\patches\geometry_contact_test.cpp" />
+    <ClCompile Include="src\patches\mesh_impact.cpp" />
     <ClCompile Include="src\patches\openshim_asset_sets.cpp" />
     <ClCompile Include="src\patches\openshim_asset_sync.cpp" />
     <ClCompile Include="src\patches\openshim_auto_update.cpp" />

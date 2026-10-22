@@ -3,6 +3,7 @@
 #include "contextual_hud.h"
 #include "hud_palette.h"
 #include "geometry_contact_test.h"
+#include "mesh_impact.h"
 #include "bzr_hooks.h"
 #include "env_switch_table.h"
 #include "bool_token.h"
@@ -282,6 +283,7 @@ namespace BZROpenShim
         NativeHud::Runtime::SetAdapterCapabilities(0);
         ResetWeaponPresentationState();
         GeometryContactTest::Clear();
+        MeshImpact::Clear();
         g_BzrFn_EngineFlameAddFlame = nullptr;
         g_BzrFn_EngineFlameControl = nullptr;
         g_BzrFn_EngineFlameSubmit = nullptr;
@@ -1578,6 +1580,7 @@ namespace BZROpenShim
             {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
             {"InitializePilotFlashlightConfig", &InitializePilotFlashlightConfig},
             {"InitializeVehicleGeometryContact", &GeometryContactTest::InitializeGlobal},
+            {"InitializeMeshAccurateImpacts", &MeshImpact::InitializeGlobal},
             {"InstallEmissionLightFixIfPossible", &InstallEmissionLightFixIfPossible},
             {"VerifyExpectedOgreExportsIfPossible", &VerifyExpectedOgreExportsIfPossible},
             {"InitializeJetFlamesConfig", &InitializeJetFlamesConfig},

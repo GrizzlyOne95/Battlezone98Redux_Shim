@@ -985,6 +985,12 @@ SceneDepthDiagnostic = 0
 
 
 [Display]
+; Mesh-accurate impact effects. When a shot hits a craft, the impact sparks and
+; explosion are drawn on the hull instead of on the engine's hit sphere. Hit
+; outcome, damage and splash are unchanged, but the explosion object itself is
+; moved, so this applies in single player only and stands down in network games.
+; GOG only. Restart required. Default OFF.
+MeshAccurateImpacts = 0
 ; Optional contextual HUD fading; groups brighten on relevant value changes.
 ; Each group: idle opacity 0-100%, delay 0-30000 ms, smooth fade 0-5000 ms.
 WeaponListFade = 0
@@ -2012,6 +2018,10 @@ StatsTracking = 1
 ; Experimental legacy-GEO vehicle contact for all supported craft. GOG only.
 ; Stock fallback for unsupported/changed models. Restart required. Default OFF.
 VehicleGeometryContact = 0
+; Trial: shots hit the craft's real mesh. A shot that passes between parts (a
+; cannon and the body) misses and keeps flying; a hit lands on the hull. GOG
+; only. Restart required. Default OFF.
+MeshAccurateHits = 0
 
 ; Every setting in this section is hard-disabled in network games regardless of
 ; its configured value. The gate is the local player's net id: non-zero means a

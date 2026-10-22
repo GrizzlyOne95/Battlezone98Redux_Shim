@@ -37,6 +37,7 @@
 #include "weapon_convergence.h"
 #include "weapon_presentation_hooks.h"
 #include "geometry_contact_test.h"
+#include "mesh_impact.h"
 #include "headlight_falloff.h"
 #include "shadow_far_distance.h"
 #include "sun_flash.h"
@@ -100,6 +101,7 @@ namespace BZROpenShim
         static void __fastcall SceneManagerClearSceneHook(void* sceneManager, void* /*unusedEdx*/)
         {
             GeometryContactTest::Clear();
+            MeshImpact::Clear();
             if (g_OgreFn_ClearSceneOriginal)
                 WeaponPresentationSceneTeardownBegin();
             TerrainProxySceneTeardownBegin(sceneManager, true);
@@ -118,6 +120,7 @@ namespace BZROpenShim
         static void __fastcall SceneManagerDestroyAllMovablesHook(void* sceneManager, void* /*unusedEdx*/)
         {
             GeometryContactTest::Clear();
+            MeshImpact::Clear();
             if (g_OgreFn_DestroyAllMovablesOriginal)
                 WeaponPresentationSceneTeardownBegin();
             TerrainProxySceneTeardownBegin(sceneManager, false);
@@ -442,6 +445,7 @@ namespace BZROpenShim
                 ResetEngineFlameOdfColors();
                 WeaponPresentationMissionRunStateChanged(false);
                 GeometryContactTest::Clear();
+                MeshImpact::Clear();
                 PilotFlashlightNotifyMissionRunStateChanged(false);
                 FogWakeNotifyMissionRunStateChanged(false);
                 GpuInstancingNotifyMissionRunStateChanged(false);
