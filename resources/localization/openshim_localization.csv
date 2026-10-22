@@ -229,7 +229,7 @@ openshim_opt:AiWeaponMaskArtillery:desc~Artillery AI fires every fitted hardpoin
 openshim_opt:AiWeaponMaskMinelayer:label~AI Mine Volley~~~~~~
 openshim_opt:AiWeaponMaskMinelayer:desc~Minelayer AI honours weaponMask instead of hard-coding hardpoint 0. Single player only.~~~~~~
 openshim_opt:AiMultiProducerMakers:label~AI Multi-Producer~~~~~~
-openshim_opt:AiMultiProducerMakers:desc~A built class gets every producer that can make it, not just the first one found.~~~~~~
+openshim_opt:AiMultiProducerMakers:desc~A built class gets every producer that can make it, not just the first one found. Single player only.~~~~~~
 openshim_opt:AllowNeutralAttackOrders:label~Neutral Attack Orders~~~~~~
 openshim_opt:AllowNeutralAttackOrders:desc~Allow explicit player attack orders against team-0 neutral objects. Diplomacy and autonomous targeting remain stock.~~~~~~
 openshim_opt:Turbo:label~Global Turbo~~~~~~
