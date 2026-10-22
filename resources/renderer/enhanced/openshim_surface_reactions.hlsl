@@ -104,9 +104,10 @@ float ose_surface_mask(float3 position, float4 anchor)
     return mask * mask * step(0.001, anchor.w);
 }
 
-// Barrel heat: muzzle is the tip anchor, barrel the mount (xyz) and barrel
-// radius (w). The glow is even around the barrel from mount to tip, a little
-// hotter at the tip. With no mount it falls back to the round tip mask.
+// Barrel heat: muzzle is the tip anchor, barrel the far end of the heated
+// stretch (xyz) and barrel radius (w). The glow is even around the barrel and
+// fades from full at the tip to nothing at that end. With no end point it
+// falls back to the round tip mask.
 float ose_barrel_mask(float3 position, float4 muzzle, float4 barrel)
 {
     if (barrel.w < 0.001) return ose_surface_mask(position, muzzle);
@@ -114,7 +115,7 @@ float ose_barrel_mask(float3 position, float4 muzzle, float4 barrel)
     float t = saturate(dot(position - barrel.xyz, axis) / max(dot(axis, axis), 0.000001));
     float distance = length(position - (barrel.xyz + axis * t));
     float ring = 1.0 - smoothstep(barrel.w * 0.65, barrel.w, distance);
-    return ring * lerp(0.55, 1.0, t) * step(0.001, muzzle.w);
+    return ring * t * t * step(0.001, muzzle.w);
 }
 
 float3 ose_surface_finish(float3 source, float3 local, float2 uv, out float3 glow,
