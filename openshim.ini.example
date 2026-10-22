@@ -991,8 +991,9 @@ SceneDepthDiagnostic = 0
 
 [Display]
 ; Mesh-accurate impact effects. When a shot hits a craft, the impact sparks and
-; explosion are drawn on the hull instead of on the engine's hit sphere. Visual
-; only: hit outcome, damage and splash are unchanged, so it is safe online.
+; explosion are drawn on the hull instead of on the engine's hit sphere. Hit
+; outcome, damage and splash are unchanged, but the explosion object itself is
+; moved, so this applies in single player only and stands down in network games.
 ; GOG only. Restart required. Default OFF.
 MeshAccurateImpacts = 0
 ; Optional contextual HUD fading; groups brighten on relevant value changes.

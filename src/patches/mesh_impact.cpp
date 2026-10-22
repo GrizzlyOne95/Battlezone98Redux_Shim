@@ -419,22 +419,29 @@ namespace BZROpenShim::MeshImpact
             ++g_stats.engineHits;
             MaybeLog(false);
 
+            // Both tiers change simulation state (the gameplay tier the hit, the
+            // visual tier the explosion object's position), so both read the net
+            // id live and stand down in a network game, rather than trusting the
+            // cached gate.
+            const bool singlePlayer = Hooks::IsSinglePlayerSession();
+            const bool gameplay = g_gameplayRequested && singlePlayer;
+            if (!gameplay && (!g_visualRequested || !g_effectResume || !singlePlayer)) return root;
+
             Ray ray;
             CastResult result;
             if (!ReadRay(self, t0, end0, ray)) return root;
-            if (!g_gameplayActive)
+            if (!gameplay)
             {
                 const float speed = std::sqrt(ray.dir.x * ray.dir.x + ray.dir.y * ray.dir.y + ray.dir.z * ray.dir.z);
                 if (speed > 0.0f) ray.tmax += kVisualReach / speed;
             }
             if (!Evaluate(root, ray, result)) return root;
 
-            if (!g_gameplayActive)
+            if (!gameplay)
             {
                 // Visual tier: hand Explosion::Init the surface point the shot
                 // strikes, or for a sphere hit that never touches the hull, the
                 // nearest hull point. Too far from any hull keeps the engine's.
-                if (!g_visualRequested || !g_effectResume) return root;
                 if (result.hit)
                 {
                     for (int a = 0; a < 3; ++a)
