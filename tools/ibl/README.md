@@ -23,10 +23,15 @@ deterministic. The game directory is only read. After writing, the tool checks t
 - `BZ_ASSETS/pc/textures/TerrainTextures/BZ_TERRAIN_ATLASES_DIFF_DDS/<WORLD>_ATLAS_D.dds`: ground colour.
 
 Sky model: atmospheric worlds tile the sky texture on a plane (uv = dir.xz/dir.y) and fade to its mean
-colour toward the horizon, with the first three cloud layers lightly composited. Airless worlds
-(and Io) are about 0.003 linear black plus a flat disc of the primary planet billboard. The lower
-hemisphere is the mean linear terrain-atlas colour times 0.6, blended across +-10 degrees of the
-horizon. There is no sun. Io's disc placement is a guess (see constants at the top of the script).
+colour toward the horizon, with the first three cloud layers lightly composited. Io (`SkyType=1`)
+stretches `jupiter.map` once over a zenith plane, so the disc fills the sky down to about 20 degrees
+elevation, as it does in game. Airless worlds are about 0.003 linear black plus a flat disc of the
+primary planet billboard. Billboards on worlds with a sky texture (Saturn on Titan) are left out.
+The lower hemisphere is the mean linear terrain-atlas colour times 0.6, blended across +-10 degrees
+of the horizon. There is no sun.
+
+Checked in game (Grizzly on lcbmars, lcbio, lcbachil, lcbtitan): the sky colour and extent match;
+the azimuth convention only affects billboards and is unverified.
 
 ## Output format
 

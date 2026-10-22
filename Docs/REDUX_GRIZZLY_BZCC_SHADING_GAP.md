@@ -313,6 +313,43 @@ mostly a passing cloud shadow, not the swap: CR's terrain IBL programs didn't
 compile in this overlay, so terrain stays on the non-IBL path. Full frames
 are `bzr_ibl_{neutral,planet}_*.jpg`.
 
+### Other worlds
+
+The same recipe was run on `lcbio`, `lcbachil` and `lcbtitan`. Every run
+logged `prefilter=applied irradiance=applied` for its world.
+
+![Io, Achilles, Titan N/P](images/redux_grizzly_shading/bzr_ibl_np_worlds_crop2x.jpg)
+
+Rows from top: Io, Achilles, Titan. Neutral is on the left, the planet map on
+the right. Full frames are `bzr_ibl_np_<mission>_grid.jpg`.
+
+| World | Mean sRGB, N | Mean sRGB, P | Mean abs. difference |
+|---|---|---|---|
+| Io | (55, 33, 27) | (52, 30, 24) | 2.8 |
+| Achilles | (54, 57, 47) | (54, 57, 46) | 1.0 |
+| Titan | (66, 45, 29) | (64, 42, 24) | 3.5 |
+
+What the shots settled about the bake:
+
+- **Io.** The first bake guessed an 18° Jupiter disc at 40° elevation. In game,
+  `SkyType=1` stretches `jupiter.map` once over a sky plane centred on the
+  zenith. The banded disc then fills the sky down to about 20° elevation in
+  every direction, with black below. The bake now does the same
+  (`SKYTYPE1_HALF_EXTENT`). With the first bake the hull went darker than
+  neutral (difference 4.4); with this one it keeps more light on upward faces
+  (difference 2.8).
+- **Achilles.** It is not too bright. Its pale grey-green sky is close to the
+  neutral map, so the swap barely shows.
+- **Titan.** The orange sky warms the hull. In game, Saturn hangs about 15°
+  above the horizon. The bake leaves billboards out on worlds that have a
+  sky texture; at that size the effect on lighting is small.
+- **Azimuth convention.** Only billboards (Moon, Ganymede, Europa, Elysium)
+  depend on it, and it is still unverified.
+
+The change is a tint, not a relight. The CR IBL intensities (diffuse 0.20 to
+0.62, specular 0.25 to 0.82) keep the environment a minor term next to the
+sun and ambient.
+
 Limits:
 
 - Only IBL materials see the maps. In this configuration that means CR's
@@ -320,15 +357,9 @@ Limits:
   texture units, so stock materials keep the hemisphere fallback from
   prototype 2, which is tinted by fog and ambient. If #574 keeps those units,
   the stock path gets planet maps with no shader change.
-- Unchecked bake guesses:
-  - The azimuth convention.
-  - Io's Jupiter disc placement.
-  - Sky tile size taken as `SkyHeight`.
-  - Three cloud layers at 0.35.
-  - Achilles' map reads near-white and may be too bright.
-- Not yet captured: any world other than Mars, and a mid-session world
-  change. The restore and re-apply path is exercised only through the
-  dirty-generation logic.
+- Moon, Venus, Europa, Ganymede and Elysium have not been captured.
+- A mid-session world change has not been tested. Restoring and re-applying
+  has only been exercised through the dirty-generation logic.
 
 ## Follow-ups outside this change
 

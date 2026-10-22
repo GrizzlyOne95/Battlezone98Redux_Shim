@@ -51,8 +51,11 @@ SKY_TILE_SCALE = 1.0      # tileSize = SkyHeight * this (uv = dir.xz/dir.y * Sky
 CLOUD_STRENGTH = 0.35     # light cloud composite
 EQ_W, EQ_H = 1024, 512    # source radiance equirect (mip 0)
 EQ_SS = 2                 # supersampling per axis when building the equirect
-# Io's sky is jupiter.map with SkyType=1; the real placement is unknown, so guess.
-IO_JUPITER = dict(az=0.0, el=40.0, radius_deg=18.0)
+# SkyType=1 (Io, jupiter.map) stretches the sky texture ONCE over a plane
+# centred on the zenith instead of tiling it. In game the Jupiter disc edge
+# sits about 20 deg above the horizon in every direction; the plane half-width
+# in units of its height is set to match (disc radius 0.48 of the texture).
+SKYTYPE1_HALF_EXTENT = 2.9
 
 SKY_DIRS = ['pc/textures/sky', 'pc/textures/TRO/TERRAIN/SKY', 'common/textures/sky']
 
@@ -182,14 +185,15 @@ class PlanetSky:
         self.sprites: list[tuple[np.ndarray, np.ndarray, float]] = []  # (dir, colour, angular radius)
         self.cloud_layers: list[np.ndarray] = []
 
+        self.single_plane = None
         if sky_type == 1 and sky_name.strip():
             tex = find_texture(assets, sky_name)
-            col, _ = sprite_info(load_rgba_linear(tex))
-            self.sprites.append((az_el_dir(IO_JUPITER['az'], IO_JUPITER['el']), col,
-                                 math.radians(IO_JUPITER['radius_deg'])))
-            self.notes.append(f'SkyType=1 {sky_name}: treated as airless backdrop with a GUESSED '
-                              f'disc (az {IO_JUPITER["az"]}, el {IO_JUPITER["el"]}, '
-                              f'radius {IO_JUPITER["radius_deg"]} deg)')
+            if tex is None:
+                raise SystemExit(f'{self.name}: sky texture {sky_name!r} not found')
+            self.single_plane = load_rgba_linear(tex)[..., :3]
+            edge = math.degrees(math.atan(1.0 / (SKYTYPE1_HALF_EXTENT * 0.96)))
+            self.notes.append(f'SkyType=1 {sky_name}: one stretched zenith plane, disc edge '
+                              f'~{edge:.0f} deg elevation (matched to in-game shots)')
         elif sky_name.strip():
             tex = find_texture(assets, sky_name)
             if tex is None:
@@ -241,6 +245,13 @@ class PlanetSky:
                 a = c[..., 3:4] * CLOUD_STRENGTH * w
                 sky = sky * (1 - a) + c[..., :3] * a
             horizon = self.sky_mean
+        elif self.single_plane is not None:
+            uv = 0.5 + 0.5 * np.stack((d[..., 0], d[..., 2]), axis=-1)                 / (np.maximum(y, 1e-3)[..., None] * SKYTYPE1_HALF_EXTENT)
+            inside = ((uv >= 0) & (uv <= 1)).all(axis=-1)[..., None]
+            tex = sample_wrap(self.single_plane, np.clip(uv[..., 0], 0, 1), np.clip(uv[..., 1], 0, 1),
+                              wrap_v=False)
+            sky = np.where(inside, np.maximum(tex, AIRLESS_SKY), AIRLESS_SKY)
+            horizon = np.full(3, AIRLESS_SKY)
         else:
             sky = np.full(d.shape, AIRLESS_SKY)
             for sdir, col, rho in self.sprites:
