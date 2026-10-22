@@ -169,3 +169,14 @@ Write-Host ("UI resources deployed: {0} files" -f $uiFiles.Count)
 Write-Host ""
 Write-Host "patches.json verified: all $(@($repoJson.patches).Count + @($repoJson.globals).Count + @($repoJson.static_pointers).Count) declared names present."
 Write-Host "Backups written with suffix .bak-$stamp"
+
+# Advisory only: a stale loose copy in addon\ (or an enabled addon mod) silently
+# replaces the active Campaign Reimagined file of the same name, so a fixed CR
+# file never loads after a deploy. This never fails the deploy.
+$shadowCheck = Join-Path $PSScriptRoot 'Find-ShadowedModFiles.ps1'
+if (Test-Path -LiteralPath $shadowCheck) {
+    & $shadowCheck -GameDir $GameDir -Quiet
+    if ($LASTEXITCODE -eq 1) {
+        Write-Warning "Files in the active mod are overridden by different copies in addon\ or an enabled addon mod. Run scripts\Find-ShadowedModFiles.ps1 for the list."
+    }
+}
