@@ -189,6 +189,7 @@
     <ClInclude Include="include\ogre_enhanced_light_selection.h" />
     <ClInclude Include="include\enhanced_light_selection.h" />
     <ClInclude Include="include\sun_flash.h" />
+    <ClInclude Include="include\explosion_flash.h" />
     <ClInclude Include="include\terrain_proxy.h" />
     <ClInclude Include="include\terrain_semantic.h" />
     <ClInclude Include="include\ogre_runtime.h" />

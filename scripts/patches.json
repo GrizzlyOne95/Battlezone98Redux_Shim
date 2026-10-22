@@ -5046,6 +5046,16 @@
       "expected_original": "E8 14 FA FF"
     },
     {
+      "name": "Explosion Screen Flash Hook 1/2",
+      "fallback": "0x0047F606",
+      "expected_original": "B6 BE 01 00"
+    },
+    {
+      "name": "Explosion Screen Flash Hook 2/2",
+      "fallback": "0x004AD2C3",
+      "expected_original": "F9 E1 FE FF"
+    },
+    {
       "name": "Damage Reveal Probe 1/4",
       "fallback": "0x0047EFA0",
       "expected_original": "8C D1 05 00"

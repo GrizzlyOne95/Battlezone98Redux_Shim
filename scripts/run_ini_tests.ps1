@@ -352,6 +352,7 @@ $stockValueChecks = @{
     "General/RawMouseInput" = "0"
     "Graphics/RenderProfile" = "Redux"
     "Display/UnderAttackAlert" = "Normal"
+    "Display/ExplosionFlash" = "Stock"
     "Display/TargetPolicy" = "Default"
     "Display/ScrapPilotHud" = "Stock"
     "Display/UnitVoFeedback" = "Normal"
