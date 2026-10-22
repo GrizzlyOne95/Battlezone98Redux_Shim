@@ -81,6 +81,12 @@ content intent. Campaign Reimagined owns content and art direction.**
 
 ## 3. RenderProfile semantics
 
+The default is **Enhanced** (since 2026-10-22; it was Redux), both in the
+shipped openshim.ini and when the key is absent. It only becomes effective on
+DX11 with a verified resource set; otherwise the session resolves to Redux.
+The installer never overwrites an existing openshim.ini, so installs made
+before the change keep the `RenderProfile` they already have.
+
 - **Redux** — stock Battlezone 98 Redux rendering behavior as closely as
   practical on the selected backend. The compatibility baseline; the engine's
   native scheme flow passes through untouched (fail-open by construction).

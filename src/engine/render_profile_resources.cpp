@@ -40,6 +40,8 @@ namespace BZROpenShim::RenderProfiles
             "openshim_ibl_brdf_lut.dds",
             "openshim_ibl_neutral_irradiance.dds",
             "openshim_ibl_neutral_prefilter.dds",
+            "openshim_stock_bzbase.import",
+            "openshim_stock_bzterrainbase.import",
         };
     }
 

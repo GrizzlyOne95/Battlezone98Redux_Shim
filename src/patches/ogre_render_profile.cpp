@@ -105,7 +105,7 @@ namespace BZROpenShim::RenderProfiles
         // Set once the seam's record has been copied with selectionRan set;
         // until then s_bootRequest holds only what this module read itself.
         bool s_seededFromSeam = false;
-        Profile s_userProfile = Profile::Redux;
+        Profile s_userProfile = Profile::Enhanced;
         ContentRequest s_contentRequest = ContentRequest::Inherit;
         bool s_contentOverridePresent = false;
         ResolverResult s_effective {};

@@ -24,7 +24,10 @@ namespace BZROpenShim::RenderProfiles
     //    to a v3 DLL would enable the compat probe with missing shader
     //    assets, so the pairing must fail closed instead.
     // 4: reactive surface include and object-local vertex interpolant.
-    constexpr char kEnhancedResourcesVersion[] = "4";
+    // 5: stock BZBase/BZTerrainBase redirect imports
+    //    (openshim_stock_*.import). A v4 deployment next to a v5 DLL would
+    //    leave stock materials on the Redux shading under Enhanced.
+    constexpr char kEnhancedResourcesVersion[] = "5";
 
     // Repository-relative name of the mandatory resource directory, as laid
     // out under the game install.
