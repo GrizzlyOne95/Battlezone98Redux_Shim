@@ -1595,8 +1595,29 @@ material BZBase
         lod_index 0
 		pass : OSEPassSchemeENHighPSSMV2
 		{
-			fragment_program_ref OSE_BaseENHighPSSM_fragment
+			fragment_program_ref OSE_BaseIBLHighPSSM_fragment
 			{
+			}
+
+			texture_unit irradianceMap
+			{
+				texture_alias IrradianceMap
+				cubic_texture openshim_ibl_neutral_irradiance.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit prefilteredEnvMap
+			{
+				texture_alias PrefilteredEnvironmentMap
+				cubic_texture openshim_ibl_neutral_prefilter.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit brdfLut
+			{
+				texture_alias EnvironmentBrdfLut
+				texture openshim_ibl_brdf_lut.dds 2d
+				tex_address_mode clamp
 			}
 		}
 	}
@@ -1607,8 +1628,29 @@ material BZBase
         lod_index 0
 		pass : OSEPassSchemeHighPSSM
  		{
-			fragment_program_ref OSE_BaseENHighPSSM_fragment
+			fragment_program_ref OSE_BaseIBLHighPSSM_fragment
 			{
+			}
+
+			texture_unit irradianceMap
+			{
+				texture_alias IrradianceMap
+				cubic_texture openshim_ibl_neutral_irradiance.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit prefilteredEnvMap
+			{
+				texture_alias PrefilteredEnvironmentMap
+				cubic_texture openshim_ibl_neutral_prefilter.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit brdfLut
+			{
+				texture_alias EnvironmentBrdfLut
+				texture openshim_ibl_brdf_lut.dds 2d
+				tex_address_mode clamp
 			}
 		}
 	}
@@ -1643,8 +1685,29 @@ material BZBase
         lod_index 0
 		pass : OSEPassSchemeHigh
  		{
-			fragment_program_ref OSE_BaseENHighShadow_fragment
+			fragment_program_ref OSE_BaseIBLHighShadow_fragment
 			{
+			}
+
+			texture_unit irradianceMap
+			{
+				texture_alias IrradianceMap
+				cubic_texture openshim_ibl_neutral_irradiance.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit prefilteredEnvMap
+			{
+				texture_alias PrefilteredEnvironmentMap
+				cubic_texture openshim_ibl_neutral_prefilter.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit brdfLut
+			{
+				texture_alias EnvironmentBrdfLut
+				texture openshim_ibl_brdf_lut.dds 2d
+				tex_address_mode clamp
 			}
 		}
 	}
@@ -1679,8 +1742,29 @@ material BZBase
         lod_index 0
 		pass : OSEPassSchemeHighNoShadow
  		{
-			fragment_program_ref OSE_BaseENHighNoShadow_fragment
+			fragment_program_ref OSE_BaseIBLHighNoShadow_fragment
 			{
+			}
+
+			texture_unit irradianceMap
+			{
+				texture_alias IrradianceMap
+				cubic_texture openshim_ibl_neutral_irradiance.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit prefilteredEnvMap
+			{
+				texture_alias PrefilteredEnvironmentMap
+				cubic_texture openshim_ibl_neutral_prefilter.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit brdfLut
+			{
+				texture_alias EnvironmentBrdfLut
+				texture openshim_ibl_brdf_lut.dds 2d
+				tex_address_mode clamp
 			}
 		}
 	}
@@ -2173,8 +2257,29 @@ material BZBaseCockpit
         scheme en-high-pssm
 		pass : OSEPassSchemeHighNoShadow
  		{
-			fragment_program_ref OSE_BaseENHighNoShadow_fragment
+			fragment_program_ref OSE_BaseIBLHighNoShadow_fragment
 			{
+			}
+
+			texture_unit irradianceMap
+			{
+				texture_alias IrradianceMap
+				cubic_texture openshim_ibl_neutral_irradiance.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit prefilteredEnvMap
+			{
+				texture_alias PrefilteredEnvironmentMap
+				cubic_texture openshim_ibl_neutral_prefilter.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit brdfLut
+			{
+				texture_alias EnvironmentBrdfLut
+				texture openshim_ibl_brdf_lut.dds 2d
+				tex_address_mode clamp
 			}
 		}
 	}
@@ -2184,8 +2289,29 @@ material BZBaseCockpit
         scheme en-high
 		pass : OSEPassSchemeHighNoShadow
  		{
-			fragment_program_ref OSE_BaseENHighNoShadow_fragment
+			fragment_program_ref OSE_BaseIBLHighNoShadow_fragment
 			{
+			}
+
+			texture_unit irradianceMap
+			{
+				texture_alias IrradianceMap
+				cubic_texture openshim_ibl_neutral_irradiance.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit prefilteredEnvMap
+			{
+				texture_alias PrefilteredEnvironmentMap
+				cubic_texture openshim_ibl_neutral_prefilter.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit brdfLut
+			{
+				texture_alias EnvironmentBrdfLut
+				texture openshim_ibl_brdf_lut.dds 2d
+				tex_address_mode clamp
 			}
 		}
 	}
@@ -2195,8 +2321,29 @@ material BZBaseCockpit
         scheme en-high-noshadow
 		pass : OSEPassSchemeHighNoShadow
  		{
-			fragment_program_ref OSE_BaseENHighNoShadow_fragment
+			fragment_program_ref OSE_BaseIBLHighNoShadow_fragment
 			{
+			}
+
+			texture_unit irradianceMap
+			{
+				texture_alias IrradianceMap
+				cubic_texture openshim_ibl_neutral_irradiance.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit prefilteredEnvMap
+			{
+				texture_alias PrefilteredEnvironmentMap
+				cubic_texture openshim_ibl_neutral_prefilter.dds combinedUVW
+				tex_address_mode clamp
+			}
+
+			texture_unit brdfLut
+			{
+				texture_alias EnvironmentBrdfLut
+				texture openshim_ibl_brdf_lut.dds 2d
+				tex_address_mode clamp
 			}
 		}
 	}
