@@ -131,7 +131,9 @@ float3 ose_surface_finish(float3 source, float3 local, float2 uv, out float3 glo
     source *= 1.0 - damage * (0.10 + scratches * 0.45);
     float muzzle = max(ose_surface_mask(local, surfaceMuzzle0), ose_surface_mask(local, surfaceMuzzle1));
     float heat = saturate(surfaceState.z);
-    glow = float3(1.0, 0.20, 0.025) * (heat * heat * muzzle * 0.13);
+    // Linear emission: dull red when warm, orange near the cap. The old
+    // heat^2 * 0.13 peaked near 0.05 and could not be seen beside the flash.
+    glow = lerp(float3(0.90, 0.12, 0.01), float3(1.0, 0.38, 0.06), heat) * (heat * muzzle * 1.5);
     // Short-lived chunks: restrained hot cracks, not an opaque replacement.
     glow += float3(0.48, 0.075, 0.008) * fragment * smoothstep(0.91, 0.99, noise) * 0.32;
     return max(source, 0.0);
