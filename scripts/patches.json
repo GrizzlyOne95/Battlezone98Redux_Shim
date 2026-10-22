@@ -1195,6 +1195,16 @@
       "identity": "The `call FUN_00766900` that loads the map-supplied starting-vehicle pool `<mission>.vxt`, inside FUN_007A3E60 on exact GOG Redux 2.2.301. FUN_007A3E60 rewrites the mission filename's last four characters to \".vxt\" and loads it; FUN_00766900 falls back to \"netveh.odf\" when that file is absent, so this call site is where host/map pool authority enters. Anchored on the CALL; the trailing `mov edx,[ebp-0x2C] / mov dword [edx+0x38],-1` selection reset distinguishes it from the netveh site."
     },
     {
+      "name": "VehicleListLoad::IndexCheckCall",
+      "pattern": "8D 4D D8 E8 ?? ?? ?? ?? 50 E8 ?? ?? ?? ?? 83 C4 04 85 C0 75 0D 68 ?? ?? ?? ?? 8D 4D D8",
+      "offset": 9,
+      "mode": "address",
+      "fallback": "0x0076694D",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `call FUN_00481F10` inside the vehicle-list loader FUN_00766900 on exact GOG Redux 2.2.301 that asks the file index whether the requested pool (<mission>.vxt or netveh.odf) exists; `test eax,eax / jnz` then skips the `push \"netveh.odf\"` fallback, so only zero versus non-zero is read. FUN_00481F10 is a cdecl thunk over the index bsearch FUN_00829390 (global table 0x009468CC, count 0x009468C0). The pattern covers `lea ecx,[ebp-0x28] / call c_str / push eax`, the call, `add esp,4 / test eax,eax / jnz +0x0D` and the netveh push. Single match by whole-image scan on 2026-10-21. Install also requires the site to lie in the first 0x80 bytes of the resolved VehicleListLoad and the call target to hold the thunk bytes 55 8B EC 51 8B 45 08 50 E8."
+    },
+    {
       "name": "ShellRequest",
       "pattern": "55 8B EC 51 89 4D FC 8B 45 FC C6 40 27 01 8D 4D 08 51 8B 4D FC 83 C1 2C E8 ?? ?? ?? ?? 8B E5 5D C2 04 00",
       "offset": 0,
@@ -4404,6 +4414,12 @@
       "address": "0x02BF0420",
       "kind": "data",
       "identity": "global UI char size Y float"
+    },
+    {
+      "name": "GameLanguageGet",
+      "address": "0x0081DEE0",
+      "expected": "55 8B EC A1 2C 67 94 00 83 78 4C 00 75 07",
+      "identity": "cdecl int() game language 1..7 (En Fr De Es It Pt Ru): reads the play_options language at [0x0094672C]+0x4C, else the system-LCID mapper FUN_00437380; the localization lookup FUN_0081CB40 indexes its row with this minus one, and the 'Game Language Is' logger FUN_0081DF00 calls it"
     },
     {
       "name": "RecycleTaskScrapDistanceCall",

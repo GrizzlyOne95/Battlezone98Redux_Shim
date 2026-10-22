@@ -31,12 +31,13 @@ namespace BZROpenShim
 namespace OdfCompat
 {
 
-// Mirrors openshim.ini [ODF] keys. All default off (Redux-strict stock).
+// Mirrors openshim.ini [ODF] keys. The section remap and crash guards default
+// on; unknown-section logging is diagnostic and defaults off.
 struct Options
 {
-    bool remapLegacySections = false;
+    bool remapLegacySections = true;
     bool logUnknownSections = false;
-    bool guardCrashValues = false;
+    bool guardCrashValues = true;
 };
 
 struct SectionEvent

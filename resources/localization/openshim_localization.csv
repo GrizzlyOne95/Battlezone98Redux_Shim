@@ -1,0 +1,496 @@
+Key~English~French~German~Spanish~Italian~Russian~Portuguese
+~~~~~~~
+openshim_opt:RadarHudFade:label~Radar Fade~~~~~~
+openshim_opt:RadarHudFade:desc~Fade the cockpit radar as one group: backdrop, terrain lines, compass, contacts and command links. Native radar activity reveals it. Applies live.~~~~~~
+openshim_opt:RadarHudIdleOpacity:label~Radar Idle~~~~~~
+openshim_opt:RadarHudIdleOpacity:desc~Radar opacity when idle. Hidden keeps native visibility, alerts and ping/audio handling active.~~~~~~
+openshim_opt:RadarHudFadeDelay:label~Radar Delay~~~~~~
+openshim_opt:RadarHudFadeDelay:desc~Hold after radar range/mode or target changes, a newly native-visible contact, active commands or native-visible recent-hit alerts.~~~~~~
+openshim_opt:RadarHudFadeDuration:label~Radar Speed~~~~~~
+openshim_opt:RadarHudFadeDuration:desc~Smooth fade duration for all cockpit radar layers, preserving selected tints and native alpha.~~~~~~
+openshim_opt:RadarCompassAlwaysVisible:label~Keep Compass~~~~~~
+openshim_opt:RadarCompassAlwaysVisible:desc~Keep the four compass letters at native opacity while the rest of the radar fades. Off fades the compass with the radar.~~~~~~
+openshim_opt:HullHudFade:label~Hull Fade~~~~~~
+openshim_opt:HullHudFade:desc~Fade the cockpit hull meter and its labels when idle. Relevant value changes reveal it; native critical warnings keep it visible. Applies live.~~~~~~
+openshim_opt:HullHudIdleOpacity:label~Hull Idle~~~~~~
+openshim_opt:HullHudIdleOpacity:desc~Idle opacity for the cockpit hull group. Hidden keeps native status and warning handling active.~~~~~~
+openshim_opt:HullHudFadeDelay:label~Hull Delay~~~~~~
+openshim_opt:HullHudFadeDelay:desc~Full-opacity hold after hull activity or a critical warning clears.~~~~~~
+openshim_opt:HullHudFadeDuration:label~Hull Speed~~~~~~
+openshim_opt:HullHudFadeDuration:desc~Smooth fade duration for cockpit hull artwork and labels; relevant activity reveals them immediately.~~~~~~
+openshim_opt:AmmoHudFade:label~Ammo Fade~~~~~~
+openshim_opt:AmmoHudFade:desc~Fade the cockpit ammo meter and its labels when idle. Relevant value changes reveal it; native critical warnings keep it visible. Applies live.~~~~~~
+openshim_opt:AmmoHudIdleOpacity:label~Ammo Idle~~~~~~
+openshim_opt:AmmoHudIdleOpacity:desc~Idle opacity for the cockpit ammo group. Hidden keeps native status and warning handling active.~~~~~~
+openshim_opt:AmmoHudFadeDelay:label~Ammo Delay~~~~~~
+openshim_opt:AmmoHudFadeDelay:desc~Full-opacity hold after ammo activity or a critical warning clears.~~~~~~
+openshim_opt:AmmoHudFadeDuration:label~Ammo Speed~~~~~~
+openshim_opt:AmmoHudFadeDuration:desc~Smooth fade duration for cockpit ammo artwork and labels; relevant activity reveals them immediately.~~~~~~
+openshim_opt:CommandHudFade:label~Cmd Fade~~~~~~
+openshim_opt:CommandHudFade:desc~Fade the whole command interface: frame, icons, text and bars. Command input reveals it; an active selection or submenu keeps it visible. Applies live.~~~~~~
+openshim_opt:CommandHudIdleOpacity:label~Cmd Idle~~~~~~
+openshim_opt:CommandHudIdleOpacity:desc~Command interface opacity when idle. Hidden removes its visuals until you use it again; its native input handling stays active.~~~~~~
+openshim_opt:CommandHudFadeDelay:label~Cmd Delay~~~~~~
+openshim_opt:CommandHudFadeDelay:desc~How long the command interface remains fully visible after command activity or closing a selection/submenu.~~~~~~
+openshim_opt:CommandHudFadeDuration:label~Cmd Speed~~~~~~
+openshim_opt:CommandHudFadeDuration:desc~Command interface fade duration. Sprite artwork and text use the same smooth opacity; command activity restores full opacity immediately.~~~~~~
+openshim_opt:WeaponListFade:label~Weapon Fade~~~~~~
+openshim_opt:WeaponListFade:desc~Fade the weapon list when idle; selection, loadout or ammo changes reveal it. Preserves native colors and layout. Applies live.~~~~~~
+openshim_opt:WeaponListIdleOpacity:label~Weapon Idle~~~~~~
+openshim_opt:WeaponListIdleOpacity:desc~Opacity while this group is idle. Hidden reveals it again on relevant changes. Applies only when its Fade option is on.~~~~~~
+openshim_opt:WeaponListFadeDelay:label~Weapon Delay~~~~~~
+openshim_opt:WeaponListFadeDelay:desc~How long this group stays fully visible after activity, before fading toward its idle opacity.~~~~~~
+openshim_opt:WeaponListFadeDuration:label~Weapon Speed~~~~~~
+openshim_opt:WeaponListFadeDuration:desc~Smooth fade duration: Instant, Fast (200 ms), Normal (500 ms), Slow (1000 ms). Activity restores full opacity immediately.~~~~~~
+openshim_opt:ScrapHudFade:label~Scrap Fade~~~~~~
+openshim_opt:ScrapHudFade:desc~Fade this meter when idle; current or maximum resource changes reveal it. Preserves native colors and layout. Applies live.~~~~~~
+openshim_opt:ScrapHudIdleOpacity:label~Scrap Idle~~~~~~
+openshim_opt:ScrapHudIdleOpacity:desc~Opacity while this group is idle. Hidden reveals it again on relevant changes. Applies only when its Fade option is on.~~~~~~
+openshim_opt:ScrapHudFadeDelay:label~Scrap Delay~~~~~~
+openshim_opt:ScrapHudFadeDelay:desc~How long this group stays fully visible after activity, before fading toward its idle opacity.~~~~~~
+openshim_opt:ScrapHudFadeDuration:label~Scrap Speed~~~~~~
+openshim_opt:ScrapHudFadeDuration:desc~Smooth fade duration: Instant, Fast (200 ms), Normal (500 ms), Slow (1000 ms). Activity restores full opacity immediately.~~~~~~
+openshim_opt:PilotHudFade:label~Pilot Fade~~~~~~
+openshim_opt:PilotHudFade:desc~Fade this meter when idle; current or maximum resource changes reveal it. Preserves native colors and layout. Applies live.~~~~~~
+openshim_opt:PilotHudIdleOpacity:label~Pilot Idle~~~~~~
+openshim_opt:PilotHudIdleOpacity:desc~Opacity while this group is idle. Hidden reveals it again on relevant changes. Applies only when its Fade option is on.~~~~~~
+openshim_opt:PilotHudFadeDelay:label~Pilot Delay~~~~~~
+openshim_opt:PilotHudFadeDelay:desc~How long this group stays fully visible after activity, before fading toward its idle opacity.~~~~~~
+openshim_opt:PilotHudFadeDuration:label~Pilot Speed~~~~~~
+openshim_opt:PilotHudFadeDuration:desc~Smooth fade duration: Instant, Fast (200 ms), Normal (500 ms), Slow (1000 ms). Activity restores full opacity immediately.~~~~~~
+openshim_opt:DamageIndicators:label~Incoming Damage~~~~~~
+openshim_opt:DamageIndicators:desc~Arcs toward incoming weapon damage. One tick per recent attacker; repeated hits refresh its tick. Up to eight attackers. Single-player cockpit/chase.~~~~~~
+openshim_opt:DamageIndicatorColor:label~Damage Color~~~~~~
+openshim_opt:DamageIndicatorColor:desc~Incoming-damage arc color, independent of reticle and hit-marker colors. Applies live.~~~~~~
+openshim_opt:DamageIndicatorSize:label~Damage Size~~~~~~
+openshim_opt:DamageIndicatorSize:desc~Arc radius and thickness. Follows the game's native HUD scale. Applies live.~~~~~~
+openshim_opt:DamageIndicatorOpacity:label~Damage Opacity~~~~~~
+openshim_opt:DamageIndicatorOpacity:desc~Maximum incoming-damage arc opacity. Smaller hits are softer; larger hits are brighter and thicker.~~~~~~
+openshim_opt:DamageIndicatorDuration:label~Damage Duration~~~~~~
+openshim_opt:DamageIndicatorDuration:desc~Hold then fade over 300, 600 or 1000 milliseconds. Arcs rotate with your view and disappear when changing units.~~~~~~
+openshim_opt:ReticleStyle:label~Reticle Style~~~~~~
+openshim_opt:ReticleStyle:desc~Stock artwork, cross, dot, or cross plus dot at the stock aim point. Applies live. GOG 2.2.301.~~~~~~
+openshim_opt:ReticleColor:label~Reticle Color~~~~~~
+openshim_opt:ReticleColor:desc~Color of custom reticles and target-contact brackets; stock artwork keeps its own colors.~~~~~~
+openshim_opt:ReticleSize:label~Reticle Size~~~~~~
+openshim_opt:ReticleSize:desc~Scale custom reticles and feedback with the game's current UI scale. Applies live.~~~~~~
+openshim_opt:ReticleThickness:label~Reticle Thickness~~~~~~
+openshim_opt:ReticleThickness:desc~Line thickness for custom reticles and feedback. Applies live.~~~~~~
+openshim_opt:ReticleOutline:label~Reticle Outline~~~~~~
+openshim_opt:ReticleOutline:desc~Dark outline for custom reticles and feedback, for contrast on bright terrain. Applies live.~~~~~~
+openshim_opt:ReticleOpacity:label~Reticle Opacity~~~~~~
+openshim_opt:ReticleOpacity:desc~Opacity of custom reticles and feedback. Stock artwork is unchanged.~~~~~~
+openshim_opt:ReactiveReticle:label~Reactive Reticle~~~~~~
+openshim_opt:ReactiveReticle:desc~Over a target, contract a custom cross, add brackets and tint red for enemies or green for allies. Visual only; disguised units stay untinted. Single player only.~~~~~~
+openshim_opt:HitMarkers:label~Hit Markers~~~~~~
+openshim_opt:HitMarkers:desc~Ticks pop out when your weapon actually reduces health; hitting several targets at once enlarges them. No marker for blocked/zero damage, collisions, self hits or AI shots. Single player only.~~~~~~
+openshim_opt:HitMarkerDuration:label~Marker Duration~~~~~~
+openshim_opt:HitMarkerDuration:desc~How long confirmed-hit ticks remain visible before fading. Applies live.~~~~~~
+openshim_opt:HitMarkerColor:label~Marker Color~~~~~~
+openshim_opt:HitMarkerColor:desc~Hit tick color, independent of reticle color. Applies live.~~~~~~
+openshim_opt:HitMarkerSize:label~Marker Size~~~~~~
+openshim_opt:HitMarkerSize:desc~Hit tick scale, independent of reticle size. Applies live.~~~~~~
+openshim_opt:HitMarkerOpacity:label~Marker Opacity~~~~~~
+openshim_opt:HitMarkerOpacity:desc~Hit tick opacity, independent of reticle opacity. Applies live.~~~~~~
+openshim_opt:StockReticleShader:label~Stock Shader~~~~~~
+openshim_opt:StockReticleShader:desc~Stock artwork on DX11: tint it red/green with Reactive Reticle and ripple its own art on hits. Off keeps stock colors with a sprite-only ripple. Applies live.~~~~~~
+openshim_opt:ScrapHudColor:label~Scrap Color~~~~~~
+openshim_opt:ScrapHudColor:desc~Scrap title/value color. Default preserves the selected Stock/Legacy palette. Layout and plates stay as selected.~~~~~~
+openshim_opt:PilotHudColor:label~Pilot Color~~~~~~
+openshim_opt:PilotHudColor:desc~Pilot title/value color. Default preserves the selected Stock/Legacy palette. Independent of scrap color.~~~~~~
+openshim_opt:HudColorPreset:label~Base Palette~~~~~~
+openshim_opt:HudColorPreset:desc~Base colors for Default rows: Stock, Classic or High Contrast. Explicit color choices stay independent. Scrap/pilot and reticle settings are separate.~~~~~~
+openshim_opt:RadarBackgroundOpacity:label~Radar Backdrop~~~~~~
+openshim_opt:RadarBackgroundOpacity:desc~Radar backdrop opacity (percent). Default follows the base palette. Terrain lines and contacts remain visible independently.~~~~~~
+openshim_opt:RadarGridColor:label~Radar Lines~~~~~~
+openshim_opt:RadarGridColor:desc~Terrain grid tint. Native line opacity, radar geometry and contacts remain unchanged. Default follows the base palette.~~~~~~
+openshim_opt:RadarFriendlyColor:label~Friendly Blips~~~~~~
+openshim_opt:RadarFriendlyColor:desc~Normal friendly radar contact tint. Native dimming and alpha animation remain; disguised or ambiguous identities retain native colors. Default follows the base palette.~~~~~~
+openshim_opt:RadarEnemyColor:label~Enemy Blips~~~~~~
+openshim_opt:RadarEnemyColor:desc~Normal enemy radar contact tint. Special alert markers retain their stock appearance. Default follows the base palette.~~~~~~
+openshim_opt:RadarNeutralColor:label~Neutral Blips~~~~~~
+openshim_opt:RadarNeutralColor:desc~Normal neutral radar contact tint. Contacts are only recolored when native identity is unambiguous. Default follows the base palette.~~~~~~
+openshim_opt:HullHighColor:label~Hull Healthy~~~~~~
+openshim_opt:HullHighColor:desc~Cockpit health color at 50 percent or more. Native smoothing, fill and warnings remain. Default follows the base palette.~~~~~~
+openshim_opt:HullMediumColor:label~Hull Damaged~~~~~~
+openshim_opt:HullMediumColor:desc~Cockpit health color from 25 to below 50 percent. Thresholds remain native. Default follows the base palette.~~~~~~
+openshim_opt:HullLowColor:label~Hull Critical~~~~~~
+openshim_opt:HullLowColor:desc~Cockpit health color below 25 percent. Thresholds remain native. Default follows the base palette.~~~~~~
+openshim_opt:AmmoHudColor:label~Cockpit Ammo~~~~~~
+openshim_opt:AmmoHudColor:desc~Cockpit ammo bar and label tint. Shot-cost ticks and remaining-shots text keep their native colors. Default follows the base palette.~~~~~~
+openshim_opt:UnitHealthHighColor:label~Unit Healthy~~~~~~
+openshim_opt:UnitHealthHighColor:desc~Command and selection health bars at 50 percent or more. Native recent-damage flashes remain. Default follows the base palette.~~~~~~
+openshim_opt:UnitHealthMediumColor:label~Unit Damaged~~~~~~
+openshim_opt:UnitHealthMediumColor:desc~Command and selection health bars from 25 to below 50 percent. Native recent-damage flashes remain. Default follows the base palette.~~~~~~
+openshim_opt:UnitHealthLowColor:label~Unit Critical~~~~~~
+openshim_opt:UnitHealthLowColor:desc~Command and selection health bars below 25 percent. Native recent-damage flashes remain. Default follows the base palette.~~~~~~
+openshim_opt:UnitAmmoColor:label~Unit Ammo~~~~~~
+openshim_opt:UnitAmmoColor:desc~Command and selection ammo-bar fill color, independent of cockpit ammo. Default follows the base palette.~~~~~~
+openshim_opt:UnitEmptyColor:label~Empty Bars~~~~~~
+openshim_opt:UnitEmptyColor:desc~Unfilled portions of command and selection health/ammo bars. Does not affect cockpit textures. Default follows the base palette.~~~~~~
+openshim_opt:FieldOfView:label~Field of View~~~~~~
+openshim_opt:FieldOfView:desc~Cockpit and chase base FOV in degrees (4:3 reference); widescreen expands horizontally. Stock is 80. Satellite and target cameras keep their own angles. Restart required.~~~~~~
+openshim_opt:RenderProfile:label~Render Profile~~~~~~
+openshim_opt:RenderProfile:desc~Visual rendering policy: Redux (stock baseline), Enhanced, or Retro. Applies live.~~~~~~
+openshim_opt:FXAA:label~DX11 FXAA~~~~~~
+openshim_opt:FXAA:desc~FXAA 3.11 anti-aliasing pass on the DX11 Enhanced pipeline. DX11 only. Restart required.~~~~~~
+openshim_opt:EnhancedLightSelectionV2:label~DX11 Local Lights~~~~~~
+openshim_opt:EnhancedLightSelectionV2:desc~Contribution-ranked per-object local-light ordering. DX11 only. Restart required.~~~~~~
+openshim_opt:TerrainHdEnabled:label~HD Terrain Tiles~~~~~~
+openshim_opt:TerrainHdEnabled:desc~Full-resolution authored terrain tiles, with optional normal/specular maps. Requires a compatible pack and DX11 Enhanced; other profiles keep the original atlas. Restart required.~~~~~~
+openshim_opt:TerrainMicroRelief:label~Terrain Micro Detail~~~~~~
+openshim_opt:TerrainMicroRelief:desc~Experimental shallow ground relief. Visual only; collision is unchanged. DX11 only. Increases GPU cost. Restart required.~~~~~~
+openshim_opt:SunFlashbang:label~Sun Flashbang~~~~~~
+openshim_opt:SunFlashbang:desc~On is stock: looking near the sun paints a fullscreen white flash. Off suppresses only that flash.~~~~~~
+openshim_opt:UnderAttackAlert:label~Attack Alert~~~~~~
+openshim_opt:UnderAttackAlert:desc~Under-attack warning style: Normal, Minimal (quieter), or None.~~~~~~
+openshim_opt:SuppressHopOutAttackAlert:label~Hop-Out Alert Fix~~~~~~
+openshim_opt:SuppressHopOutAttackAlert:desc~Suppress the stale under-attack growl that fires the instant you hop out. Audio only.~~~~~~
+openshim_opt:TargetPolicy:label~Target Popup~~~~~~
+openshim_opt:TargetPolicy:desc~When the reticle target popup appears: always, neutral objects only, or explicit targets only.~~~~~~
+openshim_opt:ScrapPilotHud:label~Scrap/Pilot HUD~~~~~~
+openshim_opt:ScrapPilotHud:desc~Legacy BZ98-style scrap and pilot readout, or the stock Redux HUD.~~~~~~
+openshim_opt:RadarSizeScale:label~Radar Size~~~~~~
+openshim_opt:RadarSizeScale:desc~Scale the cockpit radar. The projection re-anchors to the backdrop so the mesh and its underlay stay concentric.~~~~~~
+openshim_opt:SatelliteZoomOut:label~Satellite Zoom Out~~~~~~
+openshim_opt:SatelliteZoomOut:desc~How much further than stock the satellite view can pull out. Single player only.~~~~~~
+openshim_opt:SatellitePanSpeed:label~Satellite Pan Speed~~~~~~
+openshim_opt:SatellitePanSpeed:desc~Satellite view pan speed, as a multiple of stock. Single player only.~~~~~~
+openshim_opt:JetFlames:label~Jet Flames~~~~~~
+openshim_opt:JetFlames:desc~Faction-colored engine flames on jets and thrusters.~~~~~~
+openshim_opt:EmptyCraftLights:label~Empty Craft Lights~~~~~~
+openshim_opt:EmptyCraftLights:desc~Keep emissive running lights lit on craft that have no pilot.~~~~~~
+openshim_opt:EmissivePulse:label~Emissive Pulse~~~~~~
+openshim_opt:EmissivePulse:desc~Vary occupied-craft emissive brightness with asynchronous organic pulses.~~~~~~
+openshim_opt:StarTwinkle:label~Star Twinkle~~~~~~
+openshim_opt:StarTwinkle:desc~Animate brightness variation in compatible star-sky materials.~~~~~~
+openshim_opt:UnitVoFeedback:label~Unit Voices~~~~~~
+openshim_opt:UnitVoFeedback:desc~Unit voice feedback: Normal, Reduced chatter, or None.~~~~~~
+openshim_opt:MultiplayerFlags:label~MP Vehicle Flags~~~~~~
+openshim_opt:MultiplayerFlags:desc~Multiplayer vehicle flags: the selection screen and the in-match renderer. Leave off for BZP/BZP-T; their waiting room is faction-only. Restart required.~~~~~~
+openshim_opt:MultiplayerFlagShowOwnCraft:label~Show Own MP Flag~~~~~~
+openshim_opt:MultiplayerFlagShowOwnCraft:desc~Also draw your own flag over your own craft; stock draws only other players'. Restart required.~~~~~~
+openshim_opt:ChunkMeshes:label~Death Chunk Meshes~~~~~~
+openshim_opt:ChunkMeshes:desc~Generate destruction pieces from the model's mesh and skeleton. Restart required.~~~~~~
+openshim_opt:FastMenuTransitions:label~Fast Menu Transitions~~~~~~
+openshim_opt:FastMenuTransitions:desc~Instant Action, Multiplayer and Custom Campaigns open and close without reloading every material; content loads once, before the mission or in the multiplayer game room. Restart required.~~~~~~
+openshim_opt:SoundChannels:label~Sound Channels~~~~~~
+openshim_opt:SoundChannels:desc~Simultaneous sound objects. Stock leaves the engine limit alone; 256 is the ceiling. Restart required.~~~~~~
+openshim_opt:MusicGlobalFocus:label~Background Music~~~~~~
+openshim_opt:MusicGlobalFocus:desc~Keep the soundtrack playing and fed while the game is not the foreground window. Restart required.~~~~~~
+openshim_opt:CustomBindsUi:label~Custom Keybinds~~~~~~
+openshim_opt:CustomBindsUi:desc~Key-binding editor on the Input options page. Restart required.~~~~~~
+openshim_opt:RawMouseInput:label~Raw Mouse Input~~~~~~
+openshim_opt:RawMouseInput:desc~Reads the mouse as raw input, bypassing Windows pointer acceleration. Does not remove aim smoothing; see Unsmoothed Controls. Restart required.~~~~~~
+openshim_opt:DisableControlSmoothing:label~Unsmoothed Controls~~~~~~
+openshim_opt:DisableControlSmoothing:desc~Steer, aim, throttle and strafe follow input directly instead of easing toward it, like BZ2's Control Smoothing Off. Affects mouse, keys and joystick. Restart required.~~~~~~
+openshim_opt:MouseEveryFrame:label~Per-Frame Mouse~~~~~~
+openshim_opt:MouseEveryFrame:desc~Experimental. Apply mouse steer and aim every frame instead of 60 times a second, so aim keeps up with high refresh rates. Sensitivity is unchanged. Single player only. Restart required.~~~~~~
+openshim_opt:OgreMaterialCollisionGuard:label~Material Guard~~~~~~
+openshim_opt:OgreMaterialCollisionGuard:desc~Survive duplicate Ogre material declarations that otherwise terminate the game. Restart required.~~~~~~
+openshim_opt:MapRefreshFixes:label~Map List Fixes~~~~~~
+openshim_opt:MapRefreshFixes:desc~Multiplayer map-list refresh and selection-preservation fixes. Restart required.~~~~~~
+openshim_opt:MapFilterExtras:label~Map Filters+~~~~~~
+openshim_opt:MapFilterExtras:desc~Create Game map list: 5+ Players and Stock Maps filters, plus a search box. Restart required.~~~~~~
+openshim_opt:EditorOverheadPlacementOrder:label~Editor Placement~~~~~~
+openshim_opt:EditorOverheadPlacementOrder:desc~BZ 1.5 view order so object placement works in the running overhead view. Needs /edit. Restart required.~~~~~~
+openshim_opt:Enabled:label~AutoSave~~~~~~
+openshim_opt:Enabled:desc~Rolling recovery save for single-player missions; manual saves remain your checkpoints.~~~~~~
+openshim_opt:IntervalSeconds:label~AutoSave Interval~~~~~~
+openshim_opt:IntervalSeconds:desc~How often OpenShim refreshes the rolling AutoSave recovery slot.~~~~~~
+openshim_opt:WeaponConvergence:label~Weapon Convergence~~~~~~
+openshim_opt:WeaponConvergence:desc~Walker-style convergence on an explicitly targeted craft. Single player only.~~~~~~
+openshim_opt:MuzzleFlash:label~Muzzle Flashes~~~~~~
+openshim_opt:MuzzleFlash:desc~Enable authored weapon ODF mesh flashes and muzzle render effects (smoke/light). Requires mod assets and ODF configuration; no generic fallback. Experimental GOG single-player cannons. Restart required.~~~~~~
+openshim_opt:MeshRecoil:label~Muzzle Recoil~~~~~~
+openshim_opt:MeshRecoil:desc~Enable authored craft ODF barrel-node or animation recoil. Requires model nodes/clips and ODF configuration; no generic fallback. Clips need EXU. Experimental GOG single-player cannons. Restart required.~~~~~~
+openshim_opt:GpuSkinning:label~GPU Skinning~~~~~~
+openshim_opt:GpuSkinning:desc~DX11 only: animate craft on the GPU instead of the CPU, which frees CPU time with many craft on screen. Edges may differ from stock by a fraction of a pixel. Takes effect on the next mission load.~~~~~~
+openshim_opt:PlayerReticleConvergence:label~Reticle Convergence~~~~~~
+openshim_opt:PlayerReticleConvergence:desc~Same convergence, but toward the smart-reticle world point; no target lock required. Single player only.~~~~~~
+openshim_opt:SmartReticleRange:label~Reticle Range~~~~~~
+openshim_opt:SmartReticleRange:desc~Smart-reticle targeting distance; Stock is Redux's 200. OpenShim's own value is single-player only. A mission that calls EXU SetReticleRange (BZP, Reloaded) is honored in network games too.~~~~~~
+openshim_opt:SmartScavengerPathing:label~Smart Scavengers~~~~~~
+openshim_opt:SmartScavengerPathing:desc~Smarter scavenger pathing to scrap. Single player only.~~~~~~
+openshim_opt:TurretAimPitch:label~Turret AA Pitch~~~~~~
+openshim_opt:TurretAimPitch:desc~Turrets pitch up to engage air targets. Single player only.~~~~~~
+openshim_opt:JumpSnipeCrouch:label~Jump-Snipe Crouch~~~~~~
+openshim_opt:JumpSnipeCrouch:desc~Classic crouch while sniping mid-jump. Single player only.~~~~~~
+openshim_opt:OrdnanceVelocityInheritance:label~Ordnance Velocity~~~~~~
+openshim_opt:OrdnanceVelocityInheritance:desc~Shots inherit the shooter's velocity, and cannon lead compensates for it. Single player only.~~~~~~
+openshim_opt:BomberAiRange:label~Bomber AI Range~~~~~~
+openshim_opt:BomberAiRange:desc~Bombers engage at the range their own weapon ODFs declare. Single player only.~~~~~~
+openshim_opt:AiWeaponMaskArtillery:label~AI Howitzer Volley~~~~~~
+openshim_opt:AiWeaponMaskArtillery:desc~Artillery AI fires every fitted hardpoint as one volley instead of the first. A stock howitzer fires four rounds per cycle. Single player only.~~~~~~
+openshim_opt:AiWeaponMaskMinelayer:label~AI Mine Volley~~~~~~
+openshim_opt:AiWeaponMaskMinelayer:desc~Minelayer AI honours weaponMask instead of hard-coding hardpoint 0. Single player only.~~~~~~
+openshim_opt:AiMultiProducerMakers:label~AI Multi-Producer~~~~~~
+openshim_opt:AiMultiProducerMakers:desc~A built class gets every producer that can make it, not just the first one found.~~~~~~
+openshim_opt:AllowNeutralAttackOrders:label~Neutral Attack Orders~~~~~~
+openshim_opt:AllowNeutralAttackOrders:desc~Allow explicit player attack orders against team-0 neutral objects. Diplomacy and autonomous targeting remain stock.~~~~~~
+openshim_opt:Turbo:label~Global Turbo~~~~~~
+openshim_opt:Turbo:desc~Turbo available on all drivable units. Single player only.~~~~~~
+openshim_opt:SatelliteVisibilityFix:label~Satellite Fog Of War~~~~~~
+openshim_opt:SatelliteVisibilityFix:desc~Restore the BZ 1.5 satellite gate so unilluminated enemies stay hidden. Single player only.~~~~~~
+openshim_opt:Headlights:label~Player Headlight~~~~~~
+openshim_opt:Headlights:desc~Headlight on your vehicle. Single player only.~~~~~~
+openshim_opt:HeadlightBrightness:label~Headlight Brightness~~~~~~
+openshim_opt:HeadlightBrightness:desc~Player-vehicle headlight intensity relative to stock. Applies live; single player only.~~~~~~
+openshim_opt:OtherHeadlights:label~AI Headlights~~~~~~
+openshim_opt:OtherHeadlights:desc~AI vehicles run headlights too. Single player only.~~~~~~
+openshim_opt:HeadlightColor:label~Headlight Color~~~~~~
+openshim_opt:HeadlightColor:desc~Headlight beam color; Rainbow cycles through colors.~~~~~~
+openshim_opt:HeadlightBeam:label~Headlight Beam~~~~~~
+openshim_opt:HeadlightBeam:desc~Headlight beam shape: Stock, Focused (narrow), or Wide.~~~~~~
+openshim_opt:PilotFlashlight:label~Pilot Flashlight~~~~~~
+openshim_opt:PilotFlashlight:desc~Flashlight on your pilot while on foot. Single player only.~~~~~~
+openshim_opt:PilotFlashlightColor:label~Pilot Light Color~~~~~~
+openshim_opt:PilotFlashlightColor:desc~Pilot flashlight color; Rainbow cycles through colors.~~~~~~
+openshim_opt:PilotFlashlightBeam:label~Pilot Light Beam~~~~~~
+openshim_opt:PilotFlashlightBeam:desc~Pilot flashlight beam shape: Stock, Focused (narrow), or Wide.~~~~~~
+openshim_opt:UnfocusedMouseRelease:label~Background Mouse~~~~~~
+openshim_opt:UnfocusedMouseRelease:desc~Stop Redux clipping and re-centring the mouse while it is minimized or in the background. Restart required.~~~~~~
+openshim_opt:ThreadScheduling:label~Thread Scheduling~~~~~~
+openshim_opt:ThreadScheduling:desc~Give the frame thread MMCSS Games priority and opt out of Windows power throttling. Restart required.~~~~~~
+openshim_opt:VehicleGeometryContact:label~Vehicle Geometry~~~~~~
+openshim_opt:VehicleGeometryContact:desc~Experimental vehicle contact against legacy hull geometry. All supported vehicles; single player, GOG only. Restart required.~~~~~~
+openshim_opt:ApcAlliedTargetDeploy:label~APC Allied Deploy~~~~~~
+openshim_opt:ApcAlliedTargetDeploy:desc~Let APC AI accept allied deploy targets. Single player only. Restart required.~~~~~~
+openshim_opt:SplinterUndead:label~Splinter Undead Fix~~~~~~
+openshim_opt:SplinterUndead:desc~Stop a destroyed splinter from spawning payload ordnance. Single player only. Restart required.~~~~~~
+openshim_opt:HowitzerUndeployedRetaliation:label~Howitzer Deploy Fix~~~~~~
+openshim_opt:HowitzerUndeployedRetaliation:desc~Stop an undeployed howitzer counter-sniping its attacker. Single player only. Restart required.~~~~~~
+openshim_opt:TugCargoPostLoad:label~Tug Cargo Deploy~~~~~~
+openshim_opt:TugCargoPostLoad:desc~Arm the stock deploy transition after a tug loads cargo. Single player only. Restart required.~~~~~~
+openshim_opt:ConstructorRecycleStaleTarget:label~Recycle Release Fix~~~~~~
+openshim_opt:ConstructorRecycleStaleTarget:desc~Free a constructor left deployed when another recycles its target first. Single player only. Restart required.~~~~~~
+openshim_opt:PreciseTimestep:label~Precise Timestep~~~~~~
+openshim_opt:PreciseTimestep:desc~Step the simulation by the measured frame time, not whole milliseconds. Single player only. Restart required.~~~~~~
+openshim_opt:MusicSingleFill:label~Music Track Start~~~~~~
+openshim_opt:MusicSingleFill:desc~Decode a new music track's first buffer once instead of twice, shortening the hitch at each track change. Restart required.~~~~~~
+openshim_opt:ConstructorRemoteBuild:label~Constructor Cleanup~~~~~~
+openshim_opt:ConstructorRemoteBuild:desc~Clear a dead constructor's remote build state. Single player only. Restart required.~~~~~~
+openshim_opt:RestoreCraftBounds:label~Craft Culling~~~~~~
+openshim_opt:RestoreCraftBounds:desc~Give craft their real bounding boxes so off-screen and distant craft are skipped by the camera and shadows. Rendering only. Restart required.~~~~~~
+openshim_opt:DynamicGeometryPieceReuse:label~Effect Batching~~~~~~
+openshim_opt:DynamicGeometryPieceReuse:desc~Add smoke, fire and tracer sprites to the current batch when they would be merged into it anyway, instead of opening a new one. Same pixels, less CPU. Restart required.~~~~~~
+openshim_opt:DynamicGeometryFastSort:label~Effect Sort~~~~~~
+openshim_opt:DynamicGeometryFastSort:desc~Sort effect-sprite batches without calling into Ogre for every compare. Same order, same pixels. Restart required.~~~~~~
+openshim_opt:RoutePreference:label~Net Route~~~~~~
+openshim_opt:RoutePreference:desc~Preferred peer path: try LAN then direct WAN, or force the BZRNet relay. Does not add LAN or direct-IP hosting.~~~~~~
+openshim_opt:NetImprovements:label~Net Improvements~~~~~~
+openshim_opt:NetImprovements:desc~OpenShim's socket layer as a whole. Off gives stock networking; turn it off to rule the shim out of a connection problem.~~~~~~
+openshim_opt:GovernorTuning:label~Net Tuning~~~~~~
+openshim_opt:GovernorTuning:desc~Bandwidth governor and host auto-kick. Stock matches players who are not running OpenShim; net.ini still overrides per value.~~~~~~
+openshim_opt:StockFactionsOnly:label~Stock Factions~~~~~~
+openshim_opt:StockFactionsOnly:desc~Restrict multiplayer starting vehicles to NSDF and CCA, as 1.5 did with Any Nation off. Local only, and it never adds craft the map withheld. Applies next time a vehicle list loads.~~~~~~
+openshim_opt:LobbyBanButton:label~Lobby Ban Button~~~~~~
+openshim_opt:LobbyBanButton:desc~Ban User button on the multiplayer waiting room. Off leaves BZP/BZP-T's faction picker alone; /ban still works. Restart required.~~~~~~
+openshim_opt:PersistentPlayerMute:label~Persistent Mutes~~~~~~
+openshim_opt:PersistentPlayerMute:desc~Remember muted players across sessions, by stable identity, so a rename or reconnect does not undo it. Off is stock: the mute lasts the session. Local only; /mute works either way and your mute list is kept.~~~~~~
+openshim_opt:LobbyReadouts:label~Lobby Readouts~~~~~~
+openshim_opt:LobbyReadouts:desc~Nickname field and route readout in the waiting-room left column. Does not cover BZP's faction picker. Restart required.~~~~~~
+openshim_opt:ReauthOnNicknameChange:label~Live Nickname~~~~~~
+openshim_opt:ReauthOnNicknameChange:desc~Experimental: recycle the lounge BZRNet connection after a nickname edit so stock reconnects and authorizes the new name. Expect a brief lounge drop / possible Not Ready flicker. In-match remains persist-only.~~~~~~
+openshim_opt:PreLobby:label~MP Setup Screen~~~~~~
+openshim_opt:PreLobby:desc~Multiplayer opens a setup screen first (nickname, flag, matchmaking server: Rebellion or Custom) instead of going straight to the lobby. While on, the nickname and flag pickers move to that screen and are no longer built in the lobby. Read when Multiplayer is clicked.~~~~~~
+openshim_opt:AutoStage:label~Auto-Install Updates~~~~~~
+openshim_opt:AutoStage:desc~Check the Steam Workshop once when the main menu first appears and stage a newer OpenShim to install when you quit. Never runs in multiplayer.~~~~~~
+openshim_opt:StatsTracking:label~Career Stats~~~~~~
+openshim_opt:StatsTracking:desc~Record kills, deaths and missions played to career_stats.cfg across single player and multiplayer. Local file only; nothing is uploaded, and no mission script is required.~~~~~~
+openshim_opt:ResetCareerStats:label~Reset Career Stats~~~~~~
+openshim_opt:ResetCareerStats:desc~Clear every recorded kill, death and mission play. Takes two clicks, and keeps the previous record as career_stats.cfg.openshim.bak. Does not turn tracking off.~~~~~~
+~~~~~~~
+openshim_value:On~On~~~~~~
+openshim_value:Off~Off~~~~~~
+openshim_value:Hidden~Hidden~~~~~~
+openshim_value:25%~25%~~~~~~
+openshim_value:50%~50%~~~~~~
+openshim_value:75%~75%~~~~~~
+openshim_value:1 s~1 s~~~~~~
+openshim_value:2.5 s~2.5 s~~~~~~
+openshim_value:5 s~5 s~~~~~~
+openshim_value:Instant~Instant~~~~~~
+openshim_value:Fast~Fast~~~~~~
+openshim_value:Normal~Normal~~~~~~
+openshim_value:Slow~Slow~~~~~~
+openshim_value:Red~Red~~~~~~
+openshim_value:Amber~Amber~~~~~~
+openshim_value:White~White~~~~~~
+openshim_value:Cyan~Cyan~~~~~~
+openshim_value:Magenta~Magenta~~~~~~
+openshim_value:Green~Green~~~~~~
+openshim_value:Blue~Blue~~~~~~
+openshim_value:Yellow~Yellow~~~~~~
+openshim_value:Small~Small~~~~~~
+openshim_value:Large~Large~~~~~~
+openshim_value:100%~100%~~~~~~
+openshim_value:Short~Short~~~~~~
+openshim_value:Long~Long~~~~~~
+openshim_value:Stock~Stock~~~~~~
+openshim_value:Cross~Cross~~~~~~
+openshim_value:Dot~Dot~~~~~~
+openshim_value:Cross + Dot~Cross + Dot~~~~~~
+openshim_value:Thin~Thin~~~~~~
+openshim_value:Thick~Thick~~~~~~
+openshim_value:80 ms~80 ms~~~~~~
+openshim_value:120 ms~120 ms~~~~~~
+openshim_value:180 ms~180 ms~~~~~~
+openshim_value:250 ms~250 ms~~~~~~
+openshim_value:Default~Default~~~~~~
+openshim_value:Classic~Classic~~~~~~
+openshim_value:High Contrast~High Contrast~~~~~~
+openshim_value:0~0~~~~~~
+openshim_value:25~25~~~~~~
+openshim_value:50~50~~~~~~
+openshim_value:75~75~~~~~~
+openshim_value:100~100~~~~~~
+openshim_value:Stock (80)~Stock (80)~~~~~~
+openshim_value:60~60~~~~~~
+openshim_value:70~70~~~~~~
+openshim_value:80~80~~~~~~
+openshim_value:90~90~~~~~~
+openshim_value:110~110~~~~~~
+openshim_value:120~120~~~~~~
+openshim_value:Retro~Retro~~~~~~
+openshim_value:Redux~Redux~~~~~~
+openshim_value:Enhanced~Enhanced~~~~~~
+openshim_value:Minimal~Minimal~~~~~~
+openshim_value:None~None~~~~~~
+openshim_value:Neutral Only~Neutral Only~~~~~~
+openshim_value:Explicit Only~Explicit Only~~~~~~
+openshim_value:Legacy~Legacy~~~~~~
+openshim_value:125%~125%~~~~~~
+openshim_value:150%~150%~~~~~~
+openshim_value:175%~175%~~~~~~
+openshim_value:200%~200%~~~~~~
+openshim_value:1.5x~1.5x~~~~~~
+openshim_value:2x~2x~~~~~~
+openshim_value:3x~3x~~~~~~
+openshim_value:Reduced~Reduced~~~~~~
+openshim_value:64~64~~~~~~
+openshim_value:128~128~~~~~~
+openshim_value:192~192~~~~~~
+openshim_value:256~256~~~~~~
+openshim_value:1 min~1 min~~~~~~
+openshim_value:2 min~2 min~~~~~~
+openshim_value:3 min~3 min~~~~~~
+openshim_value:5 min~5 min~~~~~~
+openshim_value:10 min~10 min~~~~~~
+openshim_value:300~300~~~~~~
+openshim_value:400~400~~~~~~
+openshim_value:500~500~~~~~~
+openshim_value:Orange~Orange~~~~~~
+openshim_value:Purple~Purple~~~~~~
+openshim_value:Teal~Teal~~~~~~
+openshim_value:Rainbow~Rainbow~~~~~~
+openshim_value:Focused~Focused~~~~~~
+openshim_value:Wide~Wide~~~~~~
+openshim_value:Prefer Direct~Prefer Direct~~~~~~
+openshim_value:Force Relay~Force Relay~~~~~~
+openshim_value:OpenShim~OpenShim~~~~~~
+openshim_value:Reset~Reset~~~~~~
+openshim_value:Confirm?~Confirm?~~~~~~
+~~~~~~~
+openshim_ui:row:OpenShimUpdates:label~OpenShim Updates~~~~~~
+openshim_ui:row:KeyBindings:label~Key Bindings~~~~~~
+openshim_ui:row:ReticleHits:label~Reticle & Hits~~~~~~
+openshim_ui:row:HUDColors:label~HUD Colors~~~~~~
+openshim_ui:row:DamageIndicators:label~Damage Indicators~~~~~~
+openshim_ui:row:HUDFading:label~HUD Fading~~~~~~
+openshim_ui:row:MeterFading:label~Meter Fading~~~~~~
+openshim_ui:row:RadarFading:label~Radar Fading~~~~~~
+openshim_ui:row:MenuColors:label~Menu Colors~~~~~~
+openshim_cat:Video:name~Video~~~~~~
+openshim_cat:Video:title~VIDEO~~~~~~
+openshim_cat:Video:blurb~Render profile, the DX11 Enhanced passes, and visual effects.~~~~~~
+openshim_cat:Lighting:name~Lighting~~~~~~
+openshim_cat:Lighting:title~LIGHTING~~~~~~
+openshim_cat:Lighting:blurb~Vehicle headlights and the pilot flashlight.~~~~~~
+openshim_cat:Audio:name~Audio~~~~~~
+openshim_cat:Audio:title~AUDIO~~~~~~
+openshim_cat:Audio:blurb~Sound channels, background music, unit voices and alerts.~~~~~~
+openshim_cat:HUD:name~HUD~~~~~~
+openshim_cat:HUD:title~HUD~~~~~~
+openshim_cat:HUD:blurb~Scrap and pilot readout, radar size, target popup and vehicle flags.~~~~~~
+openshim_cat:Controls:name~Controls~~~~~~
+openshim_cat:Controls:title~CONTROLS~~~~~~
+openshim_cat:Controls:blurb~Key bindings, raw mouse input, control smoothing and the satellite view.~~~~~~
+openshim_cat:Gameplay:name~Gameplay~~~~~~
+openshim_cat:Gameplay:title~GAMEPLAY~~~~~~
+openshim_cat:Gameplay:blurb~Single-player aiming, AI behaviour, turbo and AutoSave.~~~~~~
+openshim_cat:Fixes:name~Fixes~~~~~~
+openshim_cat:Fixes:title~FIXES~~~~~~
+openshim_cat:Fixes:blurb~Switches for confirmed Redux engine defects. Leave these on unless you are chasing a regression.~~~~~~
+openshim_cat:Network:name~Network~~~~~~
+openshim_cat:Network:title~NETWORK~~~~~~
+openshim_cat:Network:blurb~Connection route, the socket layer, lobby features and map lists.~~~~~~
+openshim_cat:System:name~System~~~~~~
+openshim_cat:System:title~SYSTEM~~~~~~
+openshim_cat:System:blurb~OpenShim updates and career statistics.~~~~~~
+openshim_cat:Reticle:name~Reticle~~~~~~
+openshim_cat:Reticle:title~RETICLE / HIT FEEDBACK~~~~~~
+openshim_cat:Reticle:blurb~Custom reticle appearance and single-player feedback.~~~~~~
+openshim_cat:HUDColors:name~HUD Colors~~~~~~
+openshim_cat:HUDColors:title~HUD COLORS~~~~~~
+openshim_cat:HUDColors:blurb~Radar, cockpit meters and unit-bar colors. Default rows follow the base palette.~~~~~~
+openshim_cat:Damage:name~Damage~~~~~~
+openshim_cat:Damage:title~DAMAGE INDICATORS~~~~~~
+openshim_cat:Damage:blurb~Directional feedback for incoming weapon damage in single player.~~~~~~
+openshim_cat:Fading:name~Fading~~~~~~
+openshim_cat:Fading:title~CONTEXTUAL HUD~~~~~~
+openshim_cat:Fading:blurb~Independent idle opacity and timing for weapons, resources and the command interface.~~~~~~
+openshim_cat:MeterFading:name~Meter Fading~~~~~~
+openshim_cat:MeterFading:title~METER FADING~~~~~~
+openshim_cat:MeterFading:blurb~Independent cockpit hull and ammo fading; critical warnings stay visible.~~~~~~
+openshim_cat:RadarFading:name~Radar Fading~~~~~~
+openshim_cat:RadarFading:title~RADAR FADING~~~~~~
+openshim_cat:RadarFading:blurb~Cockpit radar opacity and timing, with an independent compass exception.~~~~~~
+~~~~~~~
+openshim_ui:hub_saved_note~Changes are saved to openshim.ini as you make them. ~~~~~~
+openshim_ui:hub_title~OPENSHIM OPTIONS~~~~~~
+openshim_ui:back~Back~~~~~~
+openshim_ui:value_checking~Checking...~~~~~~
+openshim_ui:value_restart_now~Restart now~~~~~~
+openshim_ui:value_check_now~Check now~~~~~~
+openshim_ui:value_edit~Edit~~~~~~
+openshim_ui:value_open~Open~~~~~~
+openshim_ui:value_unavailable~Unavailable~~~~~~
+openshim_ui:value_enhanced_dx11_only~Enhanced (DX11 only)~~~~~~
+openshim_ui:value_custom~Custom~~~~~~
+openshim_ui:row:OpenShimUpdates:desc~Check the Steam Workshop for a newer OpenShim and stage it for the next launch.~~~~~~
+openshim_ui:row:KeyBindings:desc~Open the key-binding editor for keyboard commands and game keys.~~~~~~
+openshim_ui:row:ReticleHits:desc~Open reticle styling, hit-marker controls and a live appearance preview.~~~~~~
+openshim_ui:row:HUDColors:desc~Customize radar lines, normal contacts, cockpit health/ammo and unit-bar colors.~~~~~~
+openshim_ui:row:DamageIndicators:desc~Customize incoming-damage arcs and preview front, right and rear directions.~~~~~~
+openshim_ui:row:HUDFading:desc~Fade weapons, resource meters and the command interface independently when idle; relevant activity reveals them.~~~~~~
+openshim_ui:row:MeterFading:desc~Fade cockpit hull and ammo independently, including labels and shot-cost markers. Critical warnings stay visible.~~~~~~
+openshim_ui:row:MenuColors:desc~Live RGB sliders for the main menu image artwork. Apply saves; Stock restores original colors.~~~~~~
+openshim_ui:row:RadarFading:desc~Fade the complete cockpit radar while idle; native-visible alerts and activity reveal it. Optionally keep the compass visible.~~~~~~
+openshim_ui:render_profile_dx9_desc~Enhanced requires DX11; on DX9 it falls back to Redux (Stock). Retro and Redux work on both. Your choice is kept for DX11.~~~~~~
+openshim_ui:category_hint~Click a value to change it. Point at a setting to read what it does.~~~~~~
+openshim_ui:restart_note~* Takes effect after restarting Battlezone.~~~~~~
+openshim_ui:preview_unavailable~Preview unavailable on this build.~~~~~~
+openshim_ui:preview_damage_note~One tick per attacker.~~~~~~
+openshim_ui:preview_stock_note~Stock art stays in game.~~~~~~
+openshim_ui:preview_sample_note~Sample hit is shown even when off.~~~~~~
+openshim_ui:click_for~  Click for %s.~~~~~~
+openshim_ui:save_failed~Save failed: %s~~~~~~
+openshim_ui:status_after_restart~  (takes effect after restart)~~~~~~
+openshim_ui:status_next_use~  (takes effect the next time it is used)~~~~~~
+openshim_ui:status_apply_failed~  (saved; runtime apply failed - see openshim.log)~~~~~~
+openshim_ui:status_applied~  (applied)~~~~~~
+openshim_ui:restart_failed~Could not restart (%s). Quit the game to install the update.~~~~~~
+openshim_ui:preview_idle~Idle~~~~~~
+openshim_ui:preview_contact~Contact~~~~~~
+openshim_ui:preview_sample_hit~Sample hit~~~~~~
+openshim_ui:preview_attackers_1~1 attacker~~~~~~
+openshim_ui:preview_attackers_2~2 attackers~~~~~~
+openshim_ui:preview_attackers_3~3 attackers~~~~~~
+openshim_ui:preview_not_installed~Preview artwork is not installed.~~~~~~
+openshim_ui:action_confirm~%s: click again to confirm. This cannot be undone.~~~~~~
+openshim_ui:career_cleared~Career statistics cleared. The previous record was kept as career_stats.cfg.openshim.bak~~~~~~
+openshim_ui:career_already_empty~Career statistics were already empty; nothing changed.~~~~~~
+openshim_ui:career_reset_failed~Career reset failed; existing statistics were kept - see openshim.log~~~~~~
+openshim_ui:action_unwired~%s: no action is wired up for this row.~~~~~~
+openshim_ui:options_button~OpenShim Options~~~~~~

@@ -359,16 +359,16 @@ namespace BZROpenShim
     }
 
     // [Fixes] VehicleListModScoping. Forces mod-scoped asset resolution for the
-    // multiplayer vehicle list. Default off: it reloads that list and replaces
-    // BZP/BZP-T's faction-only waiting-room .vxt with stock ships. A modded
-    // lobby that needs the list to follow the selected workshop item can turn
-    // it on to compare.
+    // multiplayer vehicle list. Default on. It reloads the map's own .vxt and
+    // drops cached description files first, so a list or .des loaded for one
+    // mod does not leak into another. Before the 2026-10-21 name fix it loaded
+    // "<map>.bzn.vxt", fell back to netveh.odf and so replaced BZP/BZP-T's
+    // faction-only waiting-room list with stock ships.
     static bool ShouldEnableVehicleListModScoping() {
         static int s_cached = -1;
         if (s_cached >= 0) return s_cached != 0;
         if (EnvFlagEnabledByName("OPENSHIM_DISABLE_VEHICLE_LIST_MOD_SCOPING") || EnvFlagEnabledByName("BZR_DISABLE_VEHICLE_LIST_MOD_SCOPING")) { s_cached = 0; return false; }
-        if (EnvFlagEnabledByName("OPENSHIM_ENABLE_VEHICLE_LIST_MOD_SCOPING") || EnvFlagEnabledByName("BZR_ENABLE_VEHICLE_LIST_MOD_SCOPING")) { s_cached = 1; return true; }
-        s_cached = 0; return false;
+        s_cached = 1; return true;
     }
 
     static bool IsMapRefreshPatchName(const char* name) {
@@ -477,7 +477,8 @@ namespace BZROpenShim
     }
 
     // 1/4, 2/4 and 4/4 reload the starting-vehicle pool from mod-scoped
-    // assets. That is what replaces BZP's faction-only .vxt with stock ships.
+    // assets: 1/4 drops each cached description file before reading it, 2/4
+    // loads the selected map's own .vxt, 4/4 guards the netveh reload.
     // 3/4 is a one-byte "always update the select control" on the vehicle
     // picker. The map-list wheel is a different thiscall (ScrollUp 0x007CB500)
     // and does not use this byte.
