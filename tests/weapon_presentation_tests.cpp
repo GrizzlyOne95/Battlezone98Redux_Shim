@@ -260,6 +260,49 @@ namespace
         Finish(independent, backend);
     }
 
+    void TestCraftFlashOffsetOverride()
+    {
+        namespace Policy = WP::NativePolicy;
+        const auto base = Policy::ResolveMeshFlashConfig({}, {"\"Small.mesh\"", {}, "0.05", {}, {}, "\"0 0 0\"", {}});
+        Require(base.IsMesh(), "craft offset base mesh invalid");
+        const auto parsed = Policy::Offset("\"0.20 0.10 2.41\"");
+        Require(parsed && parsed->z == 2.41f, "craft flashOffset did not parse");
+        for (const auto bad : {"1 2", "21 0 0", "1 2 3 4", "NaN 0 0", "0 0 -20.5"})
+            Require(!Policy::Offset(bad), "invalid craft flashOffset accepted");
+
+        // Defaulted render offset follows the craft override.
+        auto defaulted = base;
+        defaulted.muzzleRender = Policy::ResolveMuzzleRenderConfig({}, {"\"R.render\"", {}, {}}, base.offset);
+        Policy::ApplyCraftFlashOffset(defaulted, true, *parsed);
+        Require(defaulted.offset.z == 2.41f && defaulted.muzzleRender.offset.z == 2.41f, "craft offset missed defaulted render");
+
+        // Explicit muzzleRenderOffset wins.
+        auto explicitRender = base;
+        explicitRender.muzzleRender = Policy::ResolveMuzzleRenderConfig({}, {"\"R.render\"", {}, "\"1 2 3\""}, base.offset);
+        Policy::ApplyCraftFlashOffset(explicitRender, false, *parsed);
+        Require(explicitRender.offset.z == 2.41f && explicitRender.muzzleRender.offset.z == 3, "craft offset overrode explicit render offset");
+
+        // Render-only weapon: the mesh channel stays absent.
+        WP::FlashConfig renderOnly;
+        renderOnly.muzzleRender = Policy::ResolveMuzzleRenderConfig({}, {"\"R.render\"", {}, {}}, {});
+        Policy::ApplyCraftFlashOffset(renderOnly, true, *parsed);
+        Require(!renderOnly.IsMesh() && renderOnly.muzzleRender.offset.z == 2.41f, "render-only craft offset wrong");
+
+        // The override reaches the placed flash.
+        FakeBackend backend;
+        WP::Runtime runtime; Start(runtime);
+        auto request = Request();
+        request.flash = base;
+        Policy::ApplyCraftFlashOffset(request.flash, false, *parsed);
+        const auto token = Bind(runtime, request);
+        auto pose = WC::Identity();
+        Require(runtime.Fire(token, 1, pose).flashStarted, "craft offset shot ignored");
+        runtime.BeginSimulationStep(1, .02f);
+        runtime.SynchronizeVisuals(backend);
+        Near(backend.meshPose.positionZ, 2.41, "craft forward offset not applied to mesh flash");
+        Finish(runtime, backend);
+    }
+
     void TestMuzzleRenderAlongsideMesh()
     {
         namespace Policy = WP::NativePolicy;
@@ -914,6 +957,7 @@ int main()
 {
     TestMeshFlashPolicyAndRuntime();
     TestMuzzleRenderAlongsideMesh();
+    TestCraftFlashOffsetOverride();
     TestAnimationRecoil();
     TestConfigurationAndIds();
     TestBoundedMeshLookup();

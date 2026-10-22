@@ -126,6 +126,16 @@ namespace BZROpenShim::WeaponPresentation::NativePolicy
         return result.Valid() ? result : MuzzleRenderConfig{};
     }
 
+    // Per-craft, per-slot override of the weapon's flash placement. Replaces the
+    // mesh offset; replaces the render offset only when it was defaulted from the
+    // mesh offset (an explicit muzzleRenderOffset wins).
+    inline void ApplyCraftFlashOffset(FlashConfig& flash, bool renderOffsetDefaulted,
+        const WeaponConvergence::Vec3& offset) noexcept
+    {
+        if (flash.IsMesh()) flash.offset = offset;
+        if (renderOffsetDefaulted && flash.muzzleRender.Valid()) flash.muzzleRender.offset = offset;
+    }
+
     // No filesystem lookups: names are engine resource names, preserving case.
     // Explicitly empty/invalid mesh disables the flash, including inheritance.
     inline FlashConfig ResolveMeshFlashConfig(const FlashConfig& parent, const MeshFlashFields& fields)
