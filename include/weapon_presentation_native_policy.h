@@ -136,6 +136,45 @@ namespace BZROpenShim::WeaponPresentation::NativePolicy
         if (renderOffsetDefaulted && flash.muzzleRender.Valid()) flash.muzzleRender.offset = offset;
     }
 
+    // Weapon presentation opt-in. Recoil needs a kick (weapon recoilKick, or the
+    // craft's recoilKick<N> which overrides it); a vehicle's mesh flash and
+    // muzzleRender layer need a craft flashOffset<N>. Persons have no fitted
+    // craft section and keep the weapon's flashOffset.
+    constexpr float kMaxRecoilKick = 4.0f;
+
+    // Absent is the caller's job (nullopt). A present value outside 0..4 or
+    // malformed is nullopt here and must be treated as absent after a WARN.
+    inline std::optional<float> Kick(std::string_view text) noexcept
+    {
+        const float value = Scalar(text);
+        if (!std::isfinite(value) || value < 0 || value > kMaxRecoilKick) return std::nullopt;
+        return value;
+    }
+
+    inline float EffectiveKick(std::optional<float> craftOverride, float weaponKick) noexcept
+    {
+        const float kick = craftOverride ? *craftOverride : weaponKick;
+        return std::isfinite(kick) && kick > 0 ? kick : 0.0f;
+    }
+
+    inline float ScaledRecoilDistance(float craftDistance, float kick) noexcept
+    {
+        return craftDistance * kick;
+    }
+
+    inline bool FlashAllowed(bool isPerson, bool hasCraftOffset) noexcept
+    {
+        return isPerson || hasCraftOffset;
+    }
+
+    // Removes the mesh flash and muzzleRender layer; legacy flashName is untouched.
+    inline void StripMeshAndRenderFlash(FlashConfig& flash) noexcept
+    {
+        flash.mesh.clear();
+        flash.material.clear();
+        flash.muzzleRender = {};
+    }
+
     // No filesystem lookups: names are engine resource names, preserving case.
     // Explicitly empty/invalid mesh disables the flash, including inheritance.
     inline FlashConfig ResolveMeshFlashConfig(const FlashConfig& parent, const MeshFlashFields& fields)

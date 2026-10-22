@@ -113,6 +113,27 @@ explicit `muzzleRenderOffset` on the weapon wins. A malformed value logs one
 keys change nothing. The effective offset is shown in the `presentation bound`
 log line (`flashOffset=x,y,z`).
 
+### Vehicles opt in with a craft offset
+
+Mesh flash is a two-sided opt-in. A weapon that names `flashMesh` (or
+`muzzleRender`) only draws on a **vehicle** when that craft's ODF has a valid
+`flashOffset<N>` for the slot that fires. Without it the mesh flash and the
+`muzzleRender` layer are both skipped for that craft and slot (legacy
+`flashName` is unaffected), and one Info line is logged per craft class and
+slot so authors can see why:
+
+```
+ODF=avtank slot 1 flash skipped: no flashOffset1
+```
+
+Persons/pilots have no fitted craft section, so they keep drawing at the
+weapon's own `flashOffset`. A person is recognised by the firing object's
+native RTTI class name containing `Person` (the test the pilot flashlight
+already uses); if that lookup fails the object is treated as a vehicle, so the
+flash fails closed. The `[SinglePlayer] MuzzleFlash` master switch still gates
+everything, with the same GOG/SP guards. The `presentation bound` log line ends
+with `flash=on` or `flash=off(no craft offset)`.
+
 The avtank/gatstab visual preset uses `flashOffset = "0.20 0.10 2.41"` to reach
 the stock model's visible barrel tip from its native weapon hardpoint. This
 is craft-specific and must be measured for another model. Existing stock

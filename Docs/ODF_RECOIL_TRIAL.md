@@ -42,6 +42,34 @@ the visual pose through the existing native-to-Ogre writer; it does not write
 the supplied gameplay matrix. Node mode currently targets the named world
 node, not a separate cockpit node or an arbitrary Ogre-only bone.
 
+### Recoil needs a kick
+
+Recoil is a two-sided opt-in. The weapon declares how hard it kicks and the
+craft declares where the recoil goes:
+
+```ini
+// weapon ODF
+[WeaponClass]
+recoilKick = 1.0        // 0..4, absent = 0 (no recoil), inherited
+
+// craft ODF, optional per-slot override
+[CraftClass]
+recoilKick1 = 0.15
+```
+
+Effective kick = craft `recoilKick<N>` if present and valid, otherwise the
+weapon's `recoilKick`. A kick of 0 (or none at all) means no recoil for that
+shot: no node slide and no `recoilAnimation` clip. A craft value of `0`
+disables a weapon that has a kick; a craft value enables a weapon that has
+none. The node slide distance is `recoilDistance<N>` multiplied by the kick;
+`recoilReturn<N>` is unchanged (the scaled distance must stay within 10). The
+kick is taken from the weapon actually fired in that slot, so an armory swap
+changes it. A value outside 0..4 or malformed logs one `recoilKick rejected`
+warning and is treated as absent. `[SinglePlayer] MeshRecoil` still gates
+everything. Examples: the Grizzly gatstab sets `recoilKick = 1.0`, the minigun
+sets none, and the Scout sets `recoilKick1 = 0.15` for a dual-minigun chatter.
+The `presentation bound` log line shows `kick=<v>`.
+
 Alternatively, use an animation already authored into the model:
 
 ```ini
