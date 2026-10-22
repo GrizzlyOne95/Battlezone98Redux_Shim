@@ -605,6 +605,42 @@ int main()
               "6f: Redux chosen after the revision is respected");
     }
 
+    // 6g. Revision 6 -> 7: HD terrain tiles became a default. The old
+    // shipped 0 moves once; a 0 set after the revision is stamped is kept.
+    {
+        fs::path canonical = tmpRoot / "canonical6g.ini";
+        WriteLines(canonical, MakeCanonicalLines());
+        fs::path off = tmpRoot / "rev6_terrain_hd_off.ini";
+        WriteLines(off, {
+            "; OpenShimPresetRevision = 6",
+            "",
+            "[Terrain]",
+            "TerrainHdEnabled = 0",
+            "TerrainMicroRelief = 0",
+        });
+        auto r = MigratePresetFileIfNeeded(off, canonical);
+        Check(r.action == MigrationAction::SurgicalFixed && r.fromRevision == 6,
+              "6g: revision 6 file is migrated");
+        Check(FileContains(off, "TerrainHdEnabled = 1"),
+              "6g: shipped TerrainHdEnabled 0 becomes 1");
+        Check(FileContains(off, "TerrainMicroRelief = 0"),
+              "6g: TerrainMicroRelief left off");
+        Check(FileContains(off, CurrentRevisionMarker()),
+              "6g: marker is the current revision");
+
+        fs::path chosen = tmpRoot / "rev7_terrain_hd_off.ini";
+        WriteLines(chosen, {
+            "; " + CurrentRevisionMarker(),
+            "",
+            "[Terrain]",
+            "TerrainHdEnabled = 0",
+        });
+        auto again = MigratePresetFileIfNeeded(chosen, canonical);
+        Check(again.action == MigrationAction::None &&
+                  FileContains(chosen, "TerrainHdEnabled = 0"),
+              "6g: a 0 chosen after the revision is respected");
+    }
+
     // 7. unknown/custom file -> untouched
     {
         fs::path custom = tmpRoot / "custom.ini";

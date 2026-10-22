@@ -871,7 +871,7 @@ namespace BZROpenShim
             config.followCameraReselectFrames = GetPrivateProfileIntA(
                 "Terrain", "TerrainProxyFollowCameraReselectFrames", 300, iniText.c_str());
             config.hdEnabled = GetPrivateProfileIntA(
-                "Terrain", "TerrainHdEnabled", 0, iniText.c_str()) != 0;
+                "Terrain", "TerrainHdEnabled", 1, iniText.c_str()) != 0;
             config.hdManifest = ReadIniString(
                 iniText, "TerrainHdManifest", BZROpenShim::Assets::kDefaultTerrainHdManifest);
             config.zoneOrdinal = GetPrivateProfileIntA("Terrain", "TerrainProxyZone", -1, iniText.c_str());
