@@ -11,6 +11,7 @@
     uniform float4 surfaceImpact0, uniform float4 surfaceImpact1, \
     uniform float4 surfaceImpactWeights, \
     uniform float4 surfaceMuzzle0, uniform float4 surfaceMuzzle1, \
+    uniform float4 surfaceBarrel0, uniform float4 surfaceBarrel1, \
     uniform float4x4 surfaceViewToLocal, uniform float surfaceRainTime,
 #else
 #define OSE_SURFACE_UNIFORMS
@@ -19,10 +20,12 @@
     float4 surfaceState, float4 surfaceMode, \
     float4 surfaceImpact0, float4 surfaceImpact1, \
     float4 surfaceImpactWeights, float4 surfaceMuzzle0, float4 surfaceMuzzle1, \
+    float4 surfaceBarrel0, float4 surfaceBarrel1, \
     float4x4 surfaceViewToLocal
 #define OSE_SURFACE_ARGUMENTS \
     surfaceState, surfaceMode, surfaceImpact0, surfaceImpact1, \
-    surfaceImpactWeights, surfaceMuzzle0, surfaceMuzzle1, surfaceViewToLocal
+    surfaceImpactWeights, surfaceMuzzle0, surfaceMuzzle1, \
+    surfaceBarrel0, surfaceBarrel1, surfaceViewToLocal
 // Ogre supplies the current draw's inverse transform. Passing view position
 // makes the masks work with CPU vertices and world-space GPU-skinned vertices.
 
@@ -101,6 +104,19 @@ float ose_surface_mask(float3 position, float4 anchor)
     return mask * mask * step(0.001, anchor.w);
 }
 
+// Barrel heat: muzzle is the tip anchor, barrel the mount (xyz) and barrel
+// radius (w). The glow is even around the barrel from mount to tip, a little
+// hotter at the tip. With no mount it falls back to the round tip mask.
+float ose_barrel_mask(float3 position, float4 muzzle, float4 barrel)
+{
+    if (barrel.w < 0.001) return ose_surface_mask(position, muzzle);
+    float3 axis = muzzle.xyz - barrel.xyz;
+    float t = saturate(dot(position - barrel.xyz, axis) / max(dot(axis, axis), 0.000001));
+    float distance = length(position - (barrel.xyz + axis * t));
+    float ring = 1.0 - smoothstep(barrel.w * 0.65, barrel.w, distance);
+    return ring * lerp(0.55, 1.0, t) * step(0.001, muzzle.w);
+}
+
 float3 ose_surface_finish(float3 source, float3 local, float2 uv, out float3 glow,
                          OSE_SURFACE_VALUES)
 {
@@ -129,9 +145,12 @@ float3 ose_surface_finish(float3 source, float3 local, float2 uv, out float3 glo
     // Fine surface damage keeps the original panels, markings and instruments.
     float scratches = smoothstep(0.965, 0.995, frac(uv.x * 91.0 + sin(uv.y * 31.0) * 0.55));
     source *= 1.0 - damage * (0.10 + scratches * 0.45);
-    float muzzle = max(ose_surface_mask(local, surfaceMuzzle0), ose_surface_mask(local, surfaceMuzzle1));
+    float muzzle = max(ose_barrel_mask(local, surfaceMuzzle0, surfaceBarrel0),
+                       ose_barrel_mask(local, surfaceMuzzle1, surfaceBarrel1));
     float heat = saturate(surfaceState.z);
-    glow = float3(1.0, 0.20, 0.025) * (heat * heat * muzzle * 0.13);
+    // Linear emission: dull red when warm, orange near the cap. The old
+    // heat^2 * 0.13 peaked near 0.05 and could not be seen beside the flash.
+    glow = lerp(float3(0.90, 0.12, 0.01), float3(1.0, 0.38, 0.06), heat) * (heat * muzzle * 1.5);
     // Short-lived chunks: restrained hot cracks, not an opaque replacement.
     glow += float3(0.48, 0.075, 0.008) * fragment * smoothstep(0.91, 0.99, noise) * 0.32;
     return max(source, 0.0);
