@@ -859,14 +859,17 @@ namespace BZROpenShim::Hooks
         }
 
         // Live, player-owned cockpit skeleton and the twin of this node, or null.
-        void* ResolveCockpitTwin(const NodeKey& key, const NodeState& record, void*& skeleton) noexcept
+        void* ResolveCockpitTwin(const NodeKey& key, const NodeState& record, void*& skeleton, bool& playerOwned) noexcept
         {
             skeleton = nullptr;
+            playerOwned = false;
             const auto& owner = key.first;
             void* user = nullptr;
             const uintptr_t slot = EngineGlobals::UserObjectSlot();
             if (!slot || !Read(reinterpret_cast<void*>(slot), 0, user) ||
-                reinterpret_cast<uintptr_t>(user) != owner.address || !CockpitOgreReady()) return nullptr;
+                reinterpret_cast<uintptr_t>(user) != owner.address) return nullptr;
+            playerOwned = true;
+            if (!CockpitOgreReady()) return nullptr;
             void* renderOwner = nullptr;
             void* bound = nullptr;
             if (!Read(user, kGameObjectRenderOwner, renderOwner) || !renderOwner ||
@@ -897,7 +900,8 @@ namespace BZROpenShim::Hooks
                     displacement = 0;
                 }
                 void* skeleton = nullptr;
-                void* twin = ResolveCockpitTwin(key, record, skeleton);
+                bool playerOwned = false;
+                void* twin = ResolveCockpitTwin(key, record, skeleton, playerOwned);
                 if (existing != g_CockpitTwins.end() &&
                     (existing->second.skeleton != skeleton || existing->second.bone != twin))
                 {
@@ -908,7 +912,7 @@ namespace BZROpenShim::Hooks
                 }
                 if (!twin)
                 {
-                    if (record.cockpit && displacement != 0) LogCockpitOnce(key, record, "skipped: no band-2 twin in player cockpit");
+                    if (playerOwned && record.cockpit && displacement != 0) LogCockpitOnce(key, record, "skipped: no band-2 twin in player cockpit");
                     return;
                 }
                 if (existing == g_CockpitTwins.end())
