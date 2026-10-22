@@ -13,6 +13,9 @@ Reference shots:
 - BZCC: `BZCC-Redux-Grizzly/screenshots/grizzly_ivtank_override_*.png`
 - BZR before/after: `Docs/images/redux_grizzly_shading/`
 
+The full BZCC decode (objects, terrain, water; all 1,179 programs) is in
+[bzcc_shader_reference/](bzcc_shader_reference/README.md).
+
 ## How the comparison was made
 
 - BZR: `resources/renderer/enhanced/openshim_enhanced_base-sm4.hlsl` (the `OSE_*`
@@ -36,6 +39,20 @@ the gap.**
 
 ## Findings, ranked by visual impact
 
+### 0. Outside CR missions, the stock Grizzly never reaches Enhanced
+
+Captured 2026-10-22 on the GOG install, stock `lcbmars.bzn`, Enhanced profile.
+The scheme rewrite requests `en-high-pssm`. Stock `BZBase.material` has no
+`en-*` technique, so OpenShim's enhanced scheme fallback uses the stock
+`high-pssm` technique: `BaseHighPSSM_fragment` (`MAX_LIGHTS=8`, no
+`ENHANCED_MODE`, no `OSE_LINEAR_LIGHT`, no IBL). That is gamma-space Blinn-Phong.
+
+Only CR's `CR_BZBase` routes stock names to `OSE_Base*`, and CR (mapType
+campaign / instant_action) is mounted only while one of its missions is being
+played. So in stock missions none of the Enhanced findings below apply yet.
+Making stock materials use Enhanced in every mission is being built separately
+(`Docs/ENHANCED_RENDERER_MATERIAL_OWNERSHIP.md` Phase 1/2).
+
 ### 1. Specular lobe is ~15x too narrow (fixed in the prototype)
 
 `legacy_shininess_to_roughness` returned `sqrt(2/(n+2))` and `distribution_ggx`
@@ -49,9 +66,11 @@ white and sparkles under motion), while the rest of the hull gets almost no
 specular. BZCC's Grizzly works out at alpha ~0.22 and its sheen is a broad,
 soft, Fresnel-driven lobe.
 
-BZCC detail: alpha^2 = 2/(exp(specTex.a * matSpec.w) + 2). The `exp` implies the
-material stores ln(power). That reading is an inference from the instruction
-stream, but it gives alpha ~0.22 for the shipped values, which matches the shots.
+BZCC detail: alpha^2 = 2/(2^(specTex.a * matSpec.w) + 2). DXBC `exp` is base 2,
+so the CPU stores log2(specular power) and this is exactly the Walter mapping.
+For the Grizzly's specularPower 38.44 (about 5.26 in log2, at full spec alpha)
+that gives alpha ~0.22. The CPU-side encoding is still to be confirmed with a
+frame capture.
 
 Prototype fix: return `sqrt(alpha)` so the squared value in the distribution is
 the Walter alpha. Shininess 127 -> perceptual 0.354 (alpha 0.125); stock
