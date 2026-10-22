@@ -366,19 +366,19 @@ ExplainMultiplayerNotReady = 1
 ; Everything in this section defaults to ON. These are bug fixes, not
 ; enhancements, and normal play wants them on.
 ;
-; The first eight -- ApcAlliedTargetDeploy, SplinterUndead, OwnedObjectReveal,
-; HowitzerUndeployedRetaliation, TugCargoPostLoad, ConstructorRemoteBuild,
-; ConstructorRecycleStaleTarget and PreciseTimestep --
+; Ten of them -- AiMultiProducerMakers, ApcAlliedTargetDeploy, SplinterUndead,
+; OwnedObjectReveal, HowitzerUndeployedRetaliation, TugCargoPostLoad,
+; ConstructorRemoteBuild, ConstructorRecycleStaleTarget, PreciseTimestep and
+; ProducerScriptPredicates --
 ; change simulation behaviour, and none of them is negotiated with peers, so
 ; they are gated on the net id exactly the way [SinglePlayer] features are:
 ; they stand down for the duration of a network game and a lobby that mixes
 ; OpenShim and stock Redux clients stays behaviourally identical. The gate is
 ; reconciled from the Ogre world-queue update every rendered frame and
 ; immediately whenever the net id changes, so a fix armed in single-player
-; cannot survive into a network game. MagnetZeroRangeGuard,
-; ProducerScriptPredicates and VehicleListModScoping are not gated: they only
-; change behaviour for content that is already broken, or for script-facing
-; queries, and have no simulation effect to diverge on.
+; cannot survive into a network game. MagnetZeroRangeGuard and
+; VehicleListModScoping are not gated: they only change behaviour for content
+; that is already broken, and have no simulation effect to diverge on.
 ;
 ; They are exposed as switches because a switchable fix is a bisectable fix:
 ; when something looks wrong and you are not sure whether OpenShim is
@@ -403,7 +403,8 @@ ExplainMultiplayerNotReady = 1
 ; Measured: with a custom producer and a mixed AIP, 0 stock units built before
 ; and 4 after. In stock-shaped content the effect is small but not nil -- five
 ; extra makers are registered, and one arm produced one extra unit inside a
-; 90-second window.
+; 90-second window. Single player only: in a network game the stock
+; first-producer table is kept so every peer's AI builds the same way.
 ; Accepted: boolean. Default: ON.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_AI_MULTI_PRODUCER_MAKERS
 AiMultiProducerMakers = 1
@@ -585,8 +586,8 @@ ThreadScheduling = 1
 ; Extend the script-facing CanBuild / IsBusy producer predicates to base
 ; producers, so mission Lua sees the same answer for a base producer that it
 ; already gets for the derived ones.
-; NOTE: this changes what mission scripts observe. If a script behaves
-; differently for one player in a lobby, check this first.
+; NOTE: this changes what mission scripts observe, so it applies in single
+; player only; network games get the stock answers on every peer.
 ; Accepted: boolean. Default: ON.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES
 ProducerScriptPredicates = 1

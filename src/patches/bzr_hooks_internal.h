@@ -864,6 +864,9 @@ namespace BZROpenShim
         // --- AI and unit fixes (ai_unit_fixes.cpp) -----------------------------
         inline constexpr size_t kPersonCarrierOffset = 0x1A0;      // PDB 0x198
         extern bool g_AiMultiProducerMakersEnabled;
+        extern bool g_AiMultiProducerMakersActive;
+        // Recompute the MP-gated flag from the live net id and return it.
+        bool RefreshAiMultiProducerMakersState();
         extern bool g_AipResolveTraceEnabled;
         extern bool g_AllowNeutralAttackOrders;
 
@@ -1368,6 +1371,8 @@ namespace BZROpenShim
         extern bool g_ConstructorRemoteBuildFixMismatchLogged;
         extern volatile long g_ConstructorRemoteBuildTraceBudget;
         extern bool g_ProducerScriptPredicateHooksEnabled;
+        extern bool g_ProducerScriptPredicatesActive;
+        bool RefreshProducerScriptPredicatesState();
         extern bool g_ProducerScriptPredicateHooksInstalled;
         extern InlineDetour32 g_ScriptCanBuildDetour;
         extern InlineDetour32 g_ScriptIsBusyDetour;
