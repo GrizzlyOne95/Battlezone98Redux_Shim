@@ -20,6 +20,7 @@
 #include "patches.h"
 #include "patcher.h"
 #include "fog_wake_feature.h"
+#include "gpu_instancing.h"
 #include "gpu_skinning.h"
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
@@ -264,6 +265,7 @@ namespace BZROpenShim
         static void TickOpenShimEventLayer()
         {
             TickCareerSessionState();
+            TickOdfIndexWorldEdge();
             TickCareerPendingVictims();
             DispatchPendingEvents();
         }
@@ -996,6 +998,7 @@ namespace BZROpenShim
              "OPENSHIM_DISABLE_CINECAM_FIX", "BZR_DISABLE_CINECAM_FIX"},
         };
         EnvSwitches::Apply(kFixKillSwitches, EnvFlagEnabled);
+        RefreshProducerScriptPredicatesState();
         RefreshTugCargoPostLoadFixState();
         RefreshConstructorRecycleStaleTargetFixState();
         RefreshApcAlliedTargetDeployFixState();
@@ -1574,7 +1577,6 @@ namespace BZROpenShim
             {"InitializeGlobalTurboConfig", &InitializeGlobalTurboConfig},
             {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
             {"InitializePilotFlashlightConfig", &InitializePilotFlashlightConfig},
-            {"InstallWeaponPresentationNativeIfRequested", &InstallWeaponPresentationNativeIfRequested},
             {"InitializeVehicleGeometryContact", &GeometryContactTest::InitializeGlobal},
             {"InstallEmissionLightFixIfPossible", &InstallEmissionLightFixIfPossible},
             {"VerifyExpectedOgreExportsIfPossible", &VerifyExpectedOgreExportsIfPossible},
@@ -1584,6 +1586,8 @@ namespace BZROpenShim
             // is only honoured while the P2P socket is still closed.
             {"InitializeBzrNetConfig", &InitializeBzrNetConfig},
             {"InstallBzrNetRouteObserverIfPossible", &InstallBzrNetRouteObserverIfPossible},
+            {"InstallStockLogThrottleIfPossible", &InstallStockLogThrottleIfPossible},
+            {"InstallAttackTaskLazyNearestIfRequested", &InstallAttackTaskLazyNearestIfRequested},
             {"InstallMapFilterExtrasIfEnabled", &InstallMapFilterExtrasIfEnabled},
             {"EnsureInputBindingPopulateHookScaffold", &EnsureInputBindingPopulateHookScaffold},
             {"EnsureOptionsParentCtorHookScaffold", &EnsureOptionsParentCtorHookScaffold},
@@ -1770,6 +1774,7 @@ namespace BZROpenShim
         // than extra simulation.
         FogWakeRenderFrameTick();
         GpuSkinningRenderFrameTick();
+        GpuInstancingRenderFrameTick();
     }
 
     void __fastcall ChunkEffectSimulateHook(void* thisPtr, void* /*edx*/, float dt)

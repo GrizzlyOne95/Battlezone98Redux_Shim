@@ -833,6 +833,14 @@ int main(int argc, char **argv)
     if (argc == 4 && std::string(argv[1]) == "--gibs")
         return printGibs(argv[2], argv[3]);
     using namespace BZROpenShim::NativeChunks;
+    if (argc == 3 && std::string(argv[1]) == "--casing-preview")
+    {
+        std::filesystem::create_directories(argv[2]);
+        const auto casing = CasingMesh(10);
+        std::ofstream output(std::filesystem::path(argv[2]) / "openshim_casing.mesh", std::ios::binary);
+        output.write(reinterpret_cast<const char*>(casing.mesh.data()), static_cast<std::streamsize>(casing.mesh.size()));
+        return output ? 0 : 1;
+    }
     std::vector<Piece> pieces;
     std::string error;
     if (argc >= 3)
@@ -894,9 +902,9 @@ int main(int argc, char **argv)
         Require(data.find("openshim_casing_brass") != std::string::npos &&
                     data.find("openshim_casing_rim") != std::string::npos && SkeletonName(casing.mesh).empty(),
                 "casing uses the brass and rim materials and no skeleton");
-        // Body 3 bands + rim band = 4 * 2 * sides; rim top annulus 2 * sides;
-        // base and mouth discs one fan triangle per side each.
-        Require(casing.triangles == 10u * (8u + 2u + 2u), "casing triangle count");
+        // Six bands (including inner mouth/primer walls), three annuli and
+        // two recessed discs; still only two submeshes and no extra passes.
+        Require(casing.triangles == 10u * 20u, "casing triangle count");
         Require(Extract(casing.mesh, skeleton, pieces, error) && pieces.size() == 1 &&
                     pieces[0].triangles == casing.triangles,
                 "casing mesh reloads through the Ogre mesh parser with every face");

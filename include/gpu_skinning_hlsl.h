@@ -27,6 +27,9 @@ namespace BZROpenShim
             // Parameter names the transform skinned, for logging.
             std::string positionParam;
             std::string normalParam;
+            // True when the source's #if structure was evaluated with the
+            // program's defines (so conditional parameters were decided).
+            bool conditionalsResolved = false;
         };
 
         // Rewrites `void <entryPoint>(...)` so that, before the original body
@@ -35,15 +38,41 @@ namespace BZROpenShim
         // Ogre's software path: sum_i(w_i * (M_i * p)) for positions, the 3x3
         // part for normals, then the normal is renormalised.
         //
+        // `defines` is the program's preprocessor_defines ("A,B=2;C"). The
+        // file's #if/#ifdef/#ifndef/#elif/#else structure, with its own
+        // #define/#undef lines, is evaluated against them, so the entry point
+        // and its signature are read as the compiler will see them. The output
+        // keeps every directive: the twin is compiled with the same defines.
+        //
         // Refuses (ok == false) rather than guess when the entry point is not
-        // found exactly once, does not return void, takes a struct input,
-        // declares POSITION/NORMAL under a preprocessor conditional, or already
-        // uses BLENDINDICES/BLENDWEIGHT. TANGENT/BINORMAL inputs pass through
-        // unskinned, because Ogre's software blend leaves them in bind pose too.
+        // found exactly once, does not return void, takes a struct input, or
+        // already uses BLENDINDICES/BLENDWEIGHT. A POSITION/NORMAL declared
+        // under a conditional is refused only when the conditionals cannot be
+        // evaluated: an active #include or #error, a function-like macro or a
+        // compiler/Ogre-defined name (__*, OGRE_*, SHADER_MODEL*) in a test.
+        // TANGENT/BINORMAL inputs pass through unskinned, because Ogre's
+        // software blend leaves them in bind pose too.
         SkinnedSourceResult MakeSkinnedVertexSource(
             const std::string& source,
             const std::string& entryPoint,
             int weightsPerVertex,
+            int maxBones,
+            const std::string& defines = std::string());
+
+        // Per-instance input the instanced transform adds. Ogre's D3D11 input
+        // layout must name every shader input in the vertex declaration, so
+        // the instance index arrives as a declared stream, not SV_InstanceID.
+        constexpr const char* kInstanceBaseInput = "osGpuInstBase";
+        constexpr const char* kInstanceBaseSemantic = "TEXCOORD15";
+
+        // Turns a MakeSkinnedVertexSource result into its instanced twin, for
+        // draws that concatenate several objects' palettes: widens the palette
+        // to maxBones, adds a per-instance `float osGpuInstBase : TEXCOORD15`
+        // holding the instance's first palette bone, and offsets every blend
+        // index by it. Refuses (ok == false) when the text is not exactly one
+        // skinned entry, or already uses TEXCOORD15.
+        SkinnedSourceResult MakeInstancedSkinnedVertexSource(
+            const std::string& skinnedSource,
             int maxBones);
 
         // FNV-1a over the text, for program names: Ogre's microcode cache is

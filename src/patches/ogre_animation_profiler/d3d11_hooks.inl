@@ -108,6 +108,7 @@
             if (g_Enabled.load(std::memory_order_relaxed))
             {
                 ++t_ThreadDrawCalls;
+                CountPassDraw();
                 g_DrawIndexedCalls.fetch_add(1, std::memory_order_relaxed);
                 g_DrawIndexedIndices.fetch_add(indexCount, std::memory_order_relaxed);
                 if (t_CurrentRenderContributor)
@@ -129,6 +130,7 @@
             if (g_Enabled.load(std::memory_order_relaxed))
             {
                 ++t_ThreadDrawCalls;
+                CountPassDraw();
                 g_DrawCalls.fetch_add(1, std::memory_order_relaxed);
                 g_DrawVertices.fetch_add(vertexCount, std::memory_order_relaxed);
                 if (t_CurrentRenderContributor)
@@ -218,6 +220,7 @@
             if (g_Enabled.load(std::memory_order_relaxed))
             {
                 ++t_ThreadDrawCalls;
+                CountPassDraw();
                 g_DrawIndexedInstancedCalls.fetch_add(1, std::memory_order_relaxed);
                 g_DrawIndexedInstancedIndices.fetch_add(
                     static_cast<uint64_t>(indexCountPerInstance) * instanceCount,
@@ -243,6 +246,7 @@
             if (g_Enabled.load(std::memory_order_relaxed))
             {
                 ++t_ThreadDrawCalls;
+                CountPassDraw();
                 g_DrawInstancedCalls.fetch_add(1, std::memory_order_relaxed);
                 g_DrawInstancedVertices.fetch_add(
                     static_cast<uint64_t>(vertexCountPerInstance) * instanceCount,
@@ -267,6 +271,7 @@
             if (g_Enabled.load(std::memory_order_relaxed))
             {
                 ++t_ThreadDrawCalls;
+                CountPassDraw();
                 g_DrawIndexedInstancedIndirectCalls.fetch_add(1, std::memory_order_relaxed);
             }
             g_RealDrawIndexedInstancedIndirect(self, args, offset);
@@ -278,6 +283,7 @@
             if (g_Enabled.load(std::memory_order_relaxed))
             {
                 ++t_ThreadDrawCalls;
+                CountPassDraw();
                 g_DrawInstancedIndirectCalls.fetch_add(1, std::memory_order_relaxed);
             }
             g_RealDrawInstancedIndirect(self, args, offset);

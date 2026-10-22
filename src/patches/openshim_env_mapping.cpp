@@ -137,6 +137,8 @@ namespace
             return TryReadMappedBool(ini, "Experimental", "InteractiveFogWakes", false, out);
         if (Equals(name, "OPENSHIM_GPU_SKINNING"))
             return TryReadMappedBool(ini, "Experimental", "GpuSkinning", false, out);
+        if (Equals(name, "OPENSHIM_GPU_INSTANCING"))
+            return TryReadMappedBool(ini, "Experimental", "GpuInstancing", false, out);
         if (Equals(name, "OPENSHIM_DISABLE_PRECISE_TIMESTEP"))
             return TryReadMappedBool(ini, "Fixes", "PreciseTimestep", true, out);
         if (Equals(name, "OPENSHIM_MOUSE_EVERY_FRAME"))
@@ -259,6 +261,21 @@ namespace
             Equals(name, "BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"))
         {
             return TryReadMappedBool(ini, "Fixes", "MagnetZeroRangeGuard", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_DG_PIECE_REUSE") ||
+            Equals(name, "BZR_DISABLE_DG_PIECE_REUSE"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "DynamicGeometryPieceReuse", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DG_MATERIAL_CACHE") ||
+            Equals(name, "BZR_DG_MATERIAL_CACHE"))
+        {
+            return TryReadMappedBool(ini, "Experimental", "DynamicGeometryMaterialCache", false, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_DG_FAST_SORT") ||
+            Equals(name, "BZR_DISABLE_DG_FAST_SORT"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "DynamicGeometryFastSort", true, out);
         }
         if (Equals(name, "OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS") ||
             Equals(name, "BZR_DISABLE_RESTORE_CRAFT_BOUNDS"))
@@ -498,10 +515,9 @@ namespace
             return TryReadMappedBool(ini, "Network", "ReauthOnNicknameChange", false, out);
         // Multiplayer starting-vehicle list: restore the 1.5 "Any Nation = OFF"
         // restricted pool. Positive key, default OFF, so absence is stock.
-        // Terrain detail-atlas rect repair. Positive key, default OFF: the
-        // correction itself is proven against all eleven shipped atlases, but
-        // the open-redirect that delivers it to Redux has not been confirmed
-        // on a live run yet.
+        // Terrain detail-atlas rect repair. Positive key, default ON (the
+        // reader in file_io_hooks.cpp treats absence as enabled): the
+        // correction is verified against all eleven shipped atlases.
         if (Equals(name, "OPENSHIM_TERRAIN_ATLAS_RECT_REPAIR") ||
             Equals(name, "BZR_TERRAIN_ATLAS_RECT_REPAIR"))
         {

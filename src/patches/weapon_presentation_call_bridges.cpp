@@ -1,4 +1,5 @@
 #include "weapon_presentation_call_bridges.h"
+#include <atomic>
 
 #if !defined(_MSC_VER) || !defined(_M_IX86)
 #error Weapon presentation call bridges require MSVC x86
@@ -10,7 +11,17 @@ namespace BZROpenShim::WeaponPresentation::NativeBridges
     {
         Factory g_Factory = nullptr;
         PopScope g_PopScope = nullptr;
-        ObserveShot g_Shot = nullptr;
+        std::atomic<ObserveShot> g_Shot{ nullptr };
+        std::atomic<ObserveShot> g_Casings{ nullptr };
+        uint32_t g_Sites[2] = {};
+
+        void __cdecl DispatchShot(void* weapon, const Matrix* pose, void* owner, void* result) noexcept
+        {
+            // A failed factory produces no accepted shot for either effect.
+            if (!result) return;
+            if (const auto observer = g_Casings.load()) observer(weapon, pose, owner, result);
+            if (const auto observer = g_Shot.load()) observer(weapon, pose, owner, result);
+        }
         ObserveClass g_WeaponClass = nullptr;
         ObserveClass g_CraftClass = nullptr;
     }
@@ -18,14 +29,23 @@ namespace BZROpenShim::WeaponPresentation::NativeBridges
     void Configure(Factory factory, PopScope popScope, ObserveShot shot,
         ObserveClass weaponClass, ObserveClass craftClass) noexcept
     {
-        g_Factory = factory;
-        g_PopScope = popScope;
-        g_Shot = shot;
-        g_WeaponClass = weaponClass;
-        g_CraftClass = craftClass;
+        if (!g_Factory && factory) g_Factory = factory;
+        if (!g_PopScope) g_PopScope = popScope;
+        g_Shot.store(shot);
+        if (!g_WeaponClass) g_WeaponClass = weaponClass;
+        if (!g_CraftClass) g_CraftClass = craftClass;
     }
 
-    // Original cannon caller frame: weapon at [ebp-250h]. Original factory ABI:
+    void ConfigureShotFactory(Factory factory, ObserveShot casings) noexcept
+    {
+        g_Factory = factory;
+        g_Casings.store(casings);
+    }
+
+    void RecordShotSite(bool machineGun, uint32_t site) noexcept { g_Sites[machineGun ? 1 : 0] = site; }
+    uint32_t ShotSite(bool machineGun) noexcept { return g_Sites[machineGun ? 1 : 0]; }
+
+    // Cannon and MachineGun caller frame: weapon at [ebp-250h]. Original factory ABI:
     // ECX=OrdnanceClass; [esp+4]=final Matrix; [esp+8]=owner OBJ; RET 8.
     // Observe after factory return, preserving its EAX and nonvolatile regs.
     __declspec(naked) void CannonOrdnanceCallBridge()
@@ -49,7 +69,7 @@ namespace BZROpenShim::WeaponPresentation::NativeBridges
             push ebx
             push edi
             push esi
-            call dword ptr [g_Shot]
+            call DispatchShot
             add esp, 10h
             pop eax
             pop edi

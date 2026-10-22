@@ -864,6 +864,9 @@ namespace BZROpenShim
         // --- AI and unit fixes (ai_unit_fixes.cpp) -----------------------------
         inline constexpr size_t kPersonCarrierOffset = 0x1A0;      // PDB 0x198
         extern bool g_AiMultiProducerMakersEnabled;
+        extern bool g_AiMultiProducerMakersActive;
+        // Recompute the MP-gated flag from the live net id and return it.
+        bool RefreshAiMultiProducerMakersState();
         extern bool g_AipResolveTraceEnabled;
         extern bool g_AllowNeutralAttackOrders;
 
@@ -956,6 +959,8 @@ namespace BZROpenShim
         bool TryApplySelectedFlagThroughEngine(const char* source);
         bool TryApplyCachedFlagPayload(const char* source);
         void InstallBzrNetRouteObserverIfPossible();
+        void InstallStockLogThrottleIfPossible();
+        void InstallAttackTaskLazyNearestIfRequested();
         void InstallMapFilterExtrasIfEnabled();
         // Hands a character to the Create Game map search box while it is
         // being edited; false leaves it to the caller. mp_map_filter_extras.cpp.
@@ -1208,6 +1213,12 @@ namespace BZROpenShim
                                                   size_t outSize);
         bool TryParseBoolValue(const char* value, bool& out);
         bool TryResolveOdfFilePath(const char* odfToken, std::filesystem::path& outPath);
+        // Looks a normalized token up in the ODF directory snapshot.
+        bool FindIndexedOdfFile(const std::string& token, std::filesystem::path& outPath);
+        // Re-snapshots the ODF directories off-thread.
+        void RequestOdfIndexRebuild();
+        // Per frame: requests a rebuild when a world goes live.
+        void TickOdfIndexWorldEdge();
         extern bool g_MagnetMineSimulateHookInstalled;
         extern TeamFilterCache g_MagnetMineTeamFilterCache;
         extern bool g_MagnetZeroRangeGuardEnabled;
@@ -1360,6 +1371,8 @@ namespace BZROpenShim
         extern bool g_ConstructorRemoteBuildFixMismatchLogged;
         extern volatile long g_ConstructorRemoteBuildTraceBudget;
         extern bool g_ProducerScriptPredicateHooksEnabled;
+        extern bool g_ProducerScriptPredicatesActive;
+        bool RefreshProducerScriptPredicatesState();
         extern bool g_ProducerScriptPredicateHooksInstalled;
         extern InlineDetour32 g_ScriptCanBuildDetour;
         extern InlineDetour32 g_ScriptIsBusyDetour;
@@ -1497,6 +1510,7 @@ namespace BZROpenShim
         void RefreshTugCargoPostLoadFixState();
         void RefreshConstructorRecycleStaleTargetFixState();
         void RefreshPreciseTimestepState();
+        void RefreshAttackTaskLazyNearestState();
         void RefreshHowitzerUndeployedRetaliationFixState();
         void RefreshConstructorRemoteBuildFixState();
         void InitializeGlobalImprovementConfig();

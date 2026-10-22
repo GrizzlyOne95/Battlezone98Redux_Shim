@@ -144,6 +144,12 @@ namespace BZROpenShim
 
         bool g_AiMultiProducerMakersEnabled = kAiMultiProducerMakersDefault;
 
+        // See the [Fixes] multiplayer gate note above. Both hooks also re-read
+        // the net id themselves: the maker table is built at mission load and
+        // mission Lua can query producers before the first frame reconciles.
+        bool g_AiMultiProducerMakersActive = kAiMultiProducerMakersDefault;
+        bool g_ProducerScriptPredicatesActive = true;
+
         // See the [Fixes] multiplayer gate note above.
         bool g_HowitzerUndeployedRetaliationFixActive =
             kHowitzerUndeployedRetaliationFixEnabledDefault;
@@ -244,6 +250,30 @@ namespace BZROpenShim
         {
             g_ConstructorRemoteBuildFixActive =
                 g_ConstructorRemoteBuildFixEnabled && IsSinglePlayerSession();
+        }
+
+        bool RefreshAiMultiProducerMakersState()
+        {
+            g_AiMultiProducerMakersActive =
+                g_AiMultiProducerMakersEnabled && IsSinglePlayerSession();
+            return g_AiMultiProducerMakersActive;
+        }
+
+        bool RefreshProducerScriptPredicatesState()
+        {
+            g_ProducerScriptPredicatesActive =
+                g_ProducerScriptPredicateHooksEnabled && IsSinglePlayerSession();
+            return g_ProducerScriptPredicatesActive;
+        }
+
+        static void RefreshAiMultiProducerMakersGate()
+        {
+            RefreshAiMultiProducerMakersState();
+        }
+
+        static void RefreshProducerScriptPredicatesGate()
+        {
+            RefreshProducerScriptPredicatesState();
         }
 
 
@@ -417,6 +447,7 @@ namespace BZROpenShim
             }
             if (EnvFlagEnabled("OPENSHIM_DISABLE_AI_MULTI_PRODUCER_MAKERS"))
                 g_AiMultiProducerMakersEnabled = false;
+            RefreshAiMultiProducerMakersState();
 
             g_TurretAimPitchBaselineEnabled = kTurretAimPitchEnabledDefault;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "TurretAimPitch", value))
@@ -612,6 +643,17 @@ namespace BZROpenShim
             // peers integrate the stock step, so it stands down online.
             { "PreciseTimestep", FeatureTier::SinglePlayer,
               nullptr, &RefreshPreciseTimestepState },
+            // Defers AttackTask's NearestVehicle scan to its readers. Shown
+            // exact in single player only; peers run the stock order.
+            { "AttackTaskLazyNearest", FeatureTier::SinglePlayer,
+              nullptr, &RefreshAttackTaskLazyNearestState },
+            // Extra makers change which producer the AI builds from, and the
+            // wider CanBuild / IsBusy answers change what mission Lua branches
+            // on. Peers run the stock answers, so both stand down online.
+            { "AiMultiProducerMakers", FeatureTier::SinglePlayer,
+              nullptr, &RefreshAiMultiProducerMakersGate },
+            { "ProducerScriptPredicates", FeatureTier::SinglePlayer,
+              nullptr, &RefreshProducerScriptPredicatesGate },
         };
 
         // Restore every registered feature to its resting state (mission end).

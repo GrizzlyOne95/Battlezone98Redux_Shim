@@ -135,13 +135,17 @@ namespace BZROpenShim
                 for (const char* name : { "OPENSHIM_TERRAIN_ATLAS_RECT_REPAIR",
                                           "BZR_TERRAIN_ATLAS_RECT_REPAIR" })
                 {
-                    if (GetEnvironmentVariableA(name, value, static_cast<DWORD>(sizeof(value))) == 1 &&
-                        value[0] == '1')
+                    if (GetEnvironmentVariableA(name, value, static_cast<DWORD>(sizeof(value))) == 1)
                     {
-                        return true;
+                        if (value[0] == '1')
+                            return true;
+                        if (value[0] == '0')
+                            return false;
                     }
                 }
-                return false;
+                // Absent key: ON. [Fixes] TerrainAtlasRectRepair = 0 (mapped to
+                // the env name above) is how it is turned off.
+                return true;
             }();
             return enabled;
         }

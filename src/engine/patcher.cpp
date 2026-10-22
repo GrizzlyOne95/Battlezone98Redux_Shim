@@ -11,6 +11,7 @@
 #include "d3d_startup_hooks.h"
 #include "file_io_hooks.h"
 #include "bzr_hooks.h"
+#include "bzr_options_ui.h"
 #include "openshim_preset_migration.h"
 #include "shim_log.h"
 #include "sun_flash.h"
@@ -19,7 +20,10 @@
 #include "redux_compatibility.h"
 #include "p2p_reliable_send_fix.h"
 #include "shell_casing_config.h"
+#include "weapon_presentation_call_bridges.h"
+#include "weapon_presentation_native.h"
 #include "deferred_modable_rebuild.h"
+#include "gas_copy_pool.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -355,16 +359,16 @@ namespace BZROpenShim
     }
 
     // [Fixes] VehicleListModScoping. Forces mod-scoped asset resolution for the
-    // multiplayer vehicle list. Default off: it reloads that list and replaces
-    // BZP/BZP-T's faction-only waiting-room .vxt with stock ships. A modded
-    // lobby that needs the list to follow the selected workshop item can turn
-    // it on to compare.
+    // multiplayer vehicle list. Default on. It reloads the map's own .vxt and
+    // drops cached description files first, so a list or .des loaded for one
+    // mod does not leak into another. Before the 2026-10-21 name fix it loaded
+    // "<map>.bzn.vxt", fell back to netveh.odf and so replaced BZP/BZP-T's
+    // faction-only waiting-room list with stock ships.
     static bool ShouldEnableVehicleListModScoping() {
         static int s_cached = -1;
         if (s_cached >= 0) return s_cached != 0;
         if (EnvFlagEnabledByName("OPENSHIM_DISABLE_VEHICLE_LIST_MOD_SCOPING") || EnvFlagEnabledByName("BZR_DISABLE_VEHICLE_LIST_MOD_SCOPING")) { s_cached = 0; return false; }
-        if (EnvFlagEnabledByName("OPENSHIM_ENABLE_VEHICLE_LIST_MOD_SCOPING") || EnvFlagEnabledByName("BZR_ENABLE_VEHICLE_LIST_MOD_SCOPING")) { s_cached = 1; return true; }
-        s_cached = 0; return false;
+        s_cached = 1; return true;
     }
 
     static bool IsMapRefreshPatchName(const char* name) {
@@ -425,7 +429,7 @@ namespace BZROpenShim
     static bool IsShellCasingPatchName(const char* name) { return name && strncmp(name, "Shell Casings ", 14) == 0; }
 
     // [General] ShellCasings (default OFF) arrives inverted through the env
-    // mapping; off means the two shot calls are never redirected.
+    // mapping. The shared shot sites also serve MuzzleFlash/MeshRecoil.
     static bool ShouldEnableShellCasings() {
         static int s_cached = -1;
         if (s_cached < 0)
@@ -473,7 +477,8 @@ namespace BZROpenShim
     }
 
     // 1/4, 2/4 and 4/4 reload the starting-vehicle pool from mod-scoped
-    // assets. That is what replaces BZP's faction-only .vxt with stock ships.
+    // assets: 1/4 drops each cached description file before reading it, 2/4
+    // loads the selected map's own .vxt, 4/4 guards the netveh reload.
     // 3/4 is a one-byte "always update the select control" on the vehicle
     // picker. The map-list wheel is a different thiscall (ScrollUp 0x007CB500)
     // and does not use this byte.
@@ -565,7 +570,10 @@ namespace BZROpenShim
         if (!ShouldEnableDisableControlSmoothing()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsDisableControlSmoothingPatchName(p.name.c_str()); }), patches.end());
         }
-        if (!ShouldEnableShellCasings()) {
+        bool muzzleFlash = false, meshRecoil = false;
+        TryGetUserConfigBool("SinglePlayer", "MuzzleFlash", muzzleFlash);
+        TryGetUserConfigBool("SinglePlayer", "MeshRecoil", meshRecoil);
+        if (!ShouldEnableShellCasings() && !muzzleFlash && !meshRecoil) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsShellCasingPatchName(p.name.c_str()); }), patches.end());
         }
         if (!ShouldEnablePathBlockFaces()) {
@@ -1465,6 +1473,7 @@ namespace BZROpenShim
             } catch (...) {
                 Log(L"[CONFIG] preset migration threw a non-standard exception; openshim.ini used as found\n");
             }
+            OpenShimInvalidateEnvIniCache();
             // If migration migrated or failed, subsequent config reads will
             // either see the new file or (for quarantined settings) the
             // fail-closed in-memory fallback. No further reload is needed
@@ -1539,6 +1548,8 @@ namespace BZROpenShim
         BZROpenShim::VerifyCliMultiParameterOptionFix();
         const ReduxCompatibilityGate compatibilityGate = PrepareReduxCompatibilityGate(isSteam);
         StartSoundChannelOverride(isSteam);
+        // Before FirstGAS runs: the pool can only move while it is empty.
+        Hooks::InstallGasCopyPoolIfPossible();
         g_Config.Load(); auto patches = BuildPatchList(); FilterPatchesForDistribution(patches, distribution); FilterPatchesForRuntime(patches, distribution);
         // On Steam a first-pass miss is not yet a verdict: the retry loop below
         // follows. Report it as pending rather than failed.
@@ -1611,12 +1622,18 @@ namespace BZROpenShim
             const auto& p = patches[i];
             if (applied[i]) {
                 app++;
+                if (IsShellCasingPatchName(p.name.c_str()))
+                    WeaponPresentation::NativeBridges::RecordShotSite(
+                        p.name == "Shell Casings MachineGun Shot Call", p.address - 1);
                 if (p.name == "Sun Screen Flash Contribution Hook") SunFlash::SetPatchInstalled(true);
                 Log(L"[OK]   %hs wrote %u bytes to 0x%08X\n", p.name.c_str(), static_cast<unsigned>(p.payload.size()), p.address);
             } else {
                 Log(L"[SKIP] %hs address=0x%08X verified=%hs payload=%u\n", p.name.c_str(), p.address, p.verified ? "yes" : "no", static_cast<unsigned>(p.payload.size()));
             }
         }
+        // Shared firing sites must be committed before the ODF/presentation
+        // installer validates/adopts them; it never competes for these calls.
+        Hooks::InstallWeaponPresentationNativeIfRequested();
         Log(L"[DONE] Applied=%d of %u\n", app, static_cast<unsigned>(patches.size()));
         // A patch this build knows about that still sits at address 0 either had
         // no scripts/patches.json entry (a deploy where winmm.dll moved and the

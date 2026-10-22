@@ -366,19 +366,19 @@ ExplainMultiplayerNotReady = 1
 ; Everything in this section defaults to ON. These are bug fixes, not
 ; enhancements, and normal play wants them on.
 ;
-; The first eight -- ApcAlliedTargetDeploy, SplinterUndead, OwnedObjectReveal,
-; HowitzerUndeployedRetaliation, TugCargoPostLoad, ConstructorRemoteBuild,
-; ConstructorRecycleStaleTarget and PreciseTimestep --
+; Ten of them -- AiMultiProducerMakers, ApcAlliedTargetDeploy, SplinterUndead,
+; OwnedObjectReveal, HowitzerUndeployedRetaliation, TugCargoPostLoad,
+; ConstructorRemoteBuild, ConstructorRecycleStaleTarget, PreciseTimestep and
+; ProducerScriptPredicates --
 ; change simulation behaviour, and none of them is negotiated with peers, so
 ; they are gated on the net id exactly the way [SinglePlayer] features are:
 ; they stand down for the duration of a network game and a lobby that mixes
 ; OpenShim and stock Redux clients stays behaviourally identical. The gate is
 ; reconciled from the Ogre world-queue update every rendered frame and
 ; immediately whenever the net id changes, so a fix armed in single-player
-; cannot survive into a network game. MagnetZeroRangeGuard,
-; ProducerScriptPredicates and VehicleListModScoping are not gated: they only
-; change behaviour for content that is already broken, or for script-facing
-; queries, and have no simulation effect to diverge on.
+; cannot survive into a network game. MagnetZeroRangeGuard and
+; VehicleListModScoping are not gated: they only change behaviour for content
+; that is already broken, and have no simulation effect to diverge on.
 ;
 ; They are exposed as switches because a switchable fix is a bisectable fix:
 ; when something looks wrong and you are not sure whether OpenShim is
@@ -403,7 +403,8 @@ ExplainMultiplayerNotReady = 1
 ; Measured: with a custom producer and a mixed AIP, 0 stock units built before
 ; and 4 after. In stock-shaped content the effect is small but not nil -- five
 ; extra makers are registered, and one arm produced one extra unit inside a
-; 90-second window.
+; 90-second window. Single player only: in a network game the stock
+; first-producer table is kept so every peer's AI builds the same way.
 ; Accepted: boolean. Default: ON.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_AI_MULTI_PRODUCER_MAKERS
 AiMultiProducerMakers = 1
@@ -552,6 +553,24 @@ UnfocusedMouseRelease = 1
 ; Env alias to force it off: OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS
 RestoreCraftBounds = 1
 
+; Effect sprites (smoke, flames, tracers, explosions) are drawn through
+; Redux's DynamicGeometry, which opens a new batch piece whenever the squared
+; view depth differs even slightly, then sorts and re-merges those pieces every
+; frame. These two are renderer-only CPU savings with pixel-identical output;
+; see reverse_engineering/dynamic_geometry_begin_sort_20261021.md.
+;
+; DynamicGeometryPieceReuse: append to the current piece instead of opening a
+; new one when the new piece would get the same depth key (so it would sort
+; right after it and be merged into it anyway).
+; Accepted: boolean. Default: ON. Not gated in network games.
+; Env alias to force it off: OPENSHIM_DISABLE_DG_PIECE_REUSE
+DynamicGeometryPieceReuse = 1
+; DynamicGeometryFastSort: the per-frame piece sort reads its fields directly
+; instead of calling into OgreMain for each compare; identical order.
+; Accepted: boolean. Default: ON. Not gated in network games.
+; Env alias to force it off: OPENSHIM_DISABLE_DG_FAST_SORT
+DynamicGeometryFastSort = 1
+
 ; Improve how Windows schedules the game's frame thread. Most frame hitches
 ; are waits on Present; these reduce scheduler-caused ones rather than raise
 ; the average frame rate. The thread that runs the frame loop registers with
@@ -567,21 +586,19 @@ ThreadScheduling = 1
 ; Extend the script-facing CanBuild / IsBusy producer predicates to base
 ; producers, so mission Lua sees the same answer for a base producer that it
 ; already gets for the derived ones.
-; NOTE: this changes what mission scripts observe. If a script behaves
-; differently for one player in a lobby, check this first.
+; NOTE: this changes what mission scripts observe, so it applies in single
+; player only; network games get the stock answers on every peer.
 ; Accepted: boolean. Default: ON.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES
 ProducerScriptPredicates = 1
 
 ; Force mod-scoped asset resolution for the multiplayer vehicle list.
 ; NOTE: this is the fix most likely to matter in a modded lobby, because it
-; changes which assets a client resolves for multiplayer vehicles. It also
-; reloads that list and will replace BZP/BZP-T's faction-only waiting-room
-; .vxt (NSDF/CCA/BDOG/CRA/Observer) with stock ships. The player preset
-; therefore ships it OFF. Turn it on only when a workshop map needs the
-; vehicle list to follow the selected mod.
-; Accepted: boolean. Default: OFF in the player preset (ON here as the
-; exhaustive reference). Restart required after changing.
+; changes which assets a client resolves for multiplayer vehicles. It loads
+; the selected map's own .vxt (so BZP/BZP-T keep their faction-only
+; NSDF/CCA/BDOG/CRA/Observer list) and drops cached description files
+; before reading them, so one mod's .des text does not leak into another.
+; Accepted: boolean. Default: ON. Restart required after changing.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_VEHICLE_LIST_MOD_SCOPING
 VehicleListModScoping = 1
 
@@ -614,9 +631,8 @@ CliMultiParameterOptions = 1
 ; touched, and only a coordinate with a single strictly-nearest cell is
 ; moved, so a deliberately packed atlas is left exactly as authored. Every
 ; decision is reported in the log under [ATLASFIX].
-; Accepted: boolean. Default: OFF. Restart required.
-; Off until a live run confirms the redirect reaches Redux's atlas parser;
-; the correction itself is verified against all eleven shipped CSVs.
+; Accepted: boolean. Default: ON. Restart required.
+; The correction is verified against all eleven shipped CSVs.
 ; Legacy env aliases: OPENSHIM_TERRAIN_ATLAS_RECT_REPAIR,
 ;                     BZR_TERRAIN_ATLAS_RECT_REPAIR
 TerrainAtlasRectRepair = 1
@@ -646,9 +662,8 @@ EnhancedSchemeFallback = 1
 ; OSE_FixedFunc_* shaders, preserving source pass state through clone
 ; semantics and caching by (material, scheme, lod, source, variant). No mod
 ; files are rewritten; DX9 and native DX11 materials are untouched.
-; Accepted: boolean. Default: ON (reference value; the player preset ships
-; OFF until the live DX11 mod corpus qualifies technique instantiation --
-; the probe fails closed to bounded diagnostics until then).
+; Accepted: boolean. Default: ON. The probe fails closed to bounded
+; diagnostics where technique instantiation is not available.
 ; See also DX11ShaderlessDrawGuard / DX11LegacyMaterialAggressive below.
 DX11LegacyMaterialCompat = 1
 ; DX11 shaderless-draw safety guard. When a draw would reach D3D11 without
@@ -722,14 +737,12 @@ Renderer = Auto
 ; Canonical values:
 ;   Redux    = stock Battlezone 98 Redux rendering behavior as closely as
 ;              practical on the selected backend. Compatibility baseline.
-;   Enhanced = OpenShim's canonical graphics upgrade. Supported on BOTH
-;              backends and capability-dependent rather than all-or-nothing:
-;              DX11 carries the full modern feature set (linear lighting,
-;              enhanced terrain/object shader paths, modern PSSM behavior,
-;              contribution-ranked light selection); DX9 retains its proven
-;              legacy enhancements (normal-map sharpening and the SM3
-;              enhanced delegates) on a feature-frozen maintenance basis --
-;              correctness/crash fixes only, no new DX9 visual work planned.
+;   Enhanced = OpenShim's canonical graphics upgrade, DX11 only (linear
+;              lighting, enhanced terrain/object shader paths, modern PSSM
+;              behavior, contribution-ranked light selection). DX9 is the
+;              legacy/stock backend (Redux and Retro, fixes only): Enhanced
+;              on DX9 falls back to Redux, and this setting is kept so it
+;              applies again on DX11.
 ;   Retro    = deliberately classic-style presentation via the og-* material
 ;              scheme family. Experimental; see
 ;              Docs/OPENSHIM_RENDER_PROFILE_ARCHITECTURE.md for status.
@@ -917,10 +930,15 @@ TerrainSemanticFrameCaptureMinCoverage = 0.005
 ; pack manifest; existing tile placement, orientation and gameplay stay intact.
 TerrainHdEnabled = 0
 
-; HD tile manifest path. Accepted: non-empty path string.
-; Relative paths resolve from battlezone98redux.exe; absolute paths are allowed.
-; Default: terrain_hd_tiles.json
-TerrainHdManifest = terrain_hd_tiles.json
+; HD tile manifest. Accepted: auto, or a path string.
+; auto (or empty): find the separately installed HD terrain pack, searching the
+; game folder, then addon\, mods\, packaged_mods\ and Steam Workshop item
+; folders for terrain_hd_tiles.json, then cr_terrain_hd.json. The pack folder is
+; mounted as an Ogre resource location automatically.
+; Relative paths resolve from battlezone98redux.exe; absolute paths are allowed
+; and override discovery. A relative path that does not exist falls back to auto.
+; Default: auto
+TerrainHdManifest = auto
 
 
 [DX11Enhanced]
@@ -2334,13 +2352,13 @@ PilotFlashlightBone = 11POV
 ; operative guard is not Team::FriendP's `n < 1`; it is the `-1 < param_2` test
 ; one level up in GameObject::FriendP(int), which -1 fails outright.
 ;
-; Confirmed on the scripted test route, not yet on a hand-driven boarding, and
-; it writes to engine state -- so it still ships OFF.
+; Confirmed on the scripted test route. It writes to engine state, and ships
+; ON.
 ;
 ; Stands down for the duration of a network game.
-; Accepted: boolean. Default: OFF.
+; Accepted: boolean. Default: ON.
 ; Env override to enable: OPENSHIM_PILOT_TEAM_RESTORE
-PilotTeamRestore = 0
+PilotTeamRestore = 1
 
 
 
@@ -2443,9 +2461,19 @@ InteractiveFogWakes = 0
 ; the game restarts. Read when a mission starts. Output is not bit-identical:
 ; silhouettes can move by sub-pixel amounts.
 ;
-; Default 0. Env: OPENSHIM_GPU_SKINNING.
+; Default 1 (absent key = on). Env: OPENSHIM_GPU_SKINNING (0 turns it off).
 ; See reverse_engineering/gpu_skinning_investigation_20261020.md.
-GpuSkinning = 0
+GpuSkinning = 1
+
+; GpuInstancing: draw GPU-skinned craft that share a mesh and material pass as
+; one instanced draw (Direct3D 11 only). Requires GpuSkinning = 1; does
+; nothing without it. Craft whose pass, vertex format, lights or handedness
+; differ render singly as before; any fault disables the feature until the
+; game restarts. Read when a mission starts.
+;
+; Default 0. Env: OPENSHIM_GPU_INSTANCING.
+; See reverse_engineering/gpu_instancing_design_20261021.md.
+GpuInstancing = 0
 
 ; ---------------------------------------------------------------------------
 ; Per-frame mouse look
@@ -2460,6 +2488,15 @@ GpuSkinning = 0
 ;
 ; Default 0. Experimental; see reverse_engineering/mouse_every_frame_20261020.md.
 MouseEveryFrame = 0
+
+; DynamicGeometryMaterialCache: skip the MaterialManager name lookup when a
+; by-name DynamicGeometry begin asks for the material the current piece already
+; holds. Pixel-identical, but measured combat issues only about 10 by-name
+; begins per frame and the cache never hit, so it buys nothing today.
+; Accepted: boolean. Not gated in network games.
+; Default 0. Env: OPENSHIM_DG_MATERIAL_CACHE.
+; See reverse_engineering/dynamic_geometry_begin_sort_20261021.md.
+DynamicGeometryMaterialCache = 0
 
 [NativeUiDiagnostics]
 ; Development only; shown commented out for the same reason as the
@@ -2541,13 +2578,13 @@ MouseEveryFrame = 0
 ; 1.5 tolerated legacy spellings ([MagnetClass], [FlareBuildingClass],
 ; [ScavengerCraftClass], [SprayBuildngClass], bare [GameObject]/[SprayBomb]).
 ; LegacySectionRemap renames those headers to canonical form as ODFs load so
-; legacy mods resolve again. Off by default: stock behavior is Redux-strict.
-LegacySectionRemap = 0
+; legacy mods resolve again. On by default; set 0 for Redux-strict stock parsing.
+LegacySectionRemap = 1
 ; LogUnknownOdfSections reports section headers seen in neither the loader
 ; set nor the retail corpus (once per file+section). Diagnostic only.
 LogUnknownOdfSections = 0
 ; CrashValueGuards clamps ODF values verified to crash engine code
 ; (MagnetMine fieldRadius 0, negative ChargeGun ordnanceCount / Launcher
 ; targetCount) and reports FlareMine/SprayBuilding sections missing
-; payloadName. Off by default.
-CrashValueGuards = 0
+; payloadName. On by default.
+CrashValueGuards = 1

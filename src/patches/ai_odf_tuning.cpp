@@ -561,7 +561,28 @@ namespace BZROpenShim
             }
         }
 
-        void __fastcall AttackTaskDoStateTuningHook(void* taskPtr, void* /*edx*/)
+        // OPENSHIM_PROFILE_ATTACK_TASK=1: splits this hook's time into the
+        // stock DoState it wraps and OpenShim's own work, logged every 5 s.
+        // Latched at install so the disabled path is one branch.
+        static bool g_AttackTaskProfileEnabled = false;
+        static LONGLONG g_AttackTaskProfileStockTicks = 0;
+
+        static void CallStockAttackTaskDoState(void* taskPtr)
+        {
+            if (!g_AttackTaskProfileEnabled)
+            {
+                g_BzrFn_AttackTaskDoState(taskPtr);
+                return;
+            }
+            LARGE_INTEGER before;
+            LARGE_INTEGER after;
+            QueryPerformanceCounter(&before);
+            g_BzrFn_AttackTaskDoState(taskPtr);
+            QueryPerformanceCounter(&after);
+            g_AttackTaskProfileStockTicks += after.QuadPart - before.QuadPart;
+        }
+
+        static void AttackTaskDoStateTuningBody(void* taskPtr)
         {
             if (!g_BzrFn_AttackTaskDoState || !taskPtr)
                 return;
@@ -571,7 +592,7 @@ namespace BZROpenShim
             void* target = nullptr;
             if (!TryReadAttackTaskEndpoints(taskBytes, craft, target))
             {
-                g_BzrFn_AttackTaskDoState(taskPtr);
+                CallStockAttackTaskDoState(taskPtr);
                 return;
             }
 
@@ -588,7 +609,7 @@ namespace BZROpenShim
             if (!isLegacyCraft && (!craft || !target || tuningIt == g_AiUnitTuningOverridesByObject.end()))
             {
                 g_CombatKiteStateByObject.erase(reinterpret_cast<uintptr_t>(craft));
-                g_BzrFn_AttackTaskDoState(taskPtr);
+                CallStockAttackTaskDoState(taskPtr);
                 return;
             }
 
@@ -613,7 +634,7 @@ namespace BZROpenShim
                 const bool haveStuckSample =
                     curBefore == kAttackTaskFleeState &&
                     TryReadAttackTaskStuckSample(taskBytes, stuckSampleTimeBefore, stuckSamplePosBefore);
-                g_BzrFn_AttackTaskDoState(taskPtr);
+                CallStockAttackTaskDoState(taskPtr);
                 int curAfter = 0, nextAfter = 0;
                 float startAfter = 0.0f;
                 TryGetTaskState(taskBytes, curAfter, nextAfter, startAfter);
@@ -718,7 +739,7 @@ namespace BZROpenShim
             if (!tuning.hasKiteRanges)
             {
                 g_CombatKiteStateByObject.erase(reinterpret_cast<uintptr_t>(craft));
-                g_BzrFn_AttackTaskDoState(taskPtr);
+                CallStockAttackTaskDoState(taskPtr);
                 return;
             }
 
@@ -731,7 +752,7 @@ namespace BZROpenShim
             if (!TryGetGameObjectPosition(craft, craftX, craftY, craftZ) ||
                 !TryGetGameObjectPosition(target, targetX, targetY, targetZ))
             {
-                g_BzrFn_AttackTaskDoState(taskPtr);
+                CallStockAttackTaskDoState(taskPtr);
                 return;
             }
 
@@ -742,7 +763,7 @@ namespace BZROpenShim
             const double distanceSqD = horizontalSq + (dy * dy);
             if (!std::isfinite(distanceSqD) || distanceSqD <= 0.0001 || horizontalSq <= 0.0001)
             {
-                g_BzrFn_AttackTaskDoState(taskPtr);
+                CallStockAttackTaskDoState(taskPtr);
                 return;
             }
 
@@ -858,7 +879,7 @@ namespace BZROpenShim
                 }
             }
 
-            g_BzrFn_AttackTaskDoState(taskPtr);
+            CallStockAttackTaskDoState(taskPtr);
 
             if (applied)
             {
@@ -905,6 +926,52 @@ namespace BZROpenShim
                         remaining);
                 }
             }
+        }
+
+        void __fastcall AttackTaskDoStateTuningHook(void* taskPtr, void* /*edx*/)
+        {
+            if (!g_AttackTaskProfileEnabled)
+            {
+                AttackTaskDoStateTuningBody(taskPtr);
+                return;
+            }
+
+            static LONGLONG s_totalTicks = 0;
+            static unsigned long s_calls = 0;
+            static ULONGLONG s_windowStartMs = 0;
+            static LONGLONG s_frequency = 0;
+            if (!s_frequency)
+            {
+                LARGE_INTEGER frequency;
+                QueryPerformanceFrequency(&frequency);
+                s_frequency = frequency.QuadPart > 0 ? frequency.QuadPart : 1;
+            }
+
+            LARGE_INTEGER before;
+            LARGE_INTEGER after;
+            QueryPerformanceCounter(&before);
+            AttackTaskDoStateTuningBody(taskPtr);
+            QueryPerformanceCounter(&after);
+            s_totalTicks += after.QuadPart - before.QuadPart;
+            ++s_calls;
+
+            const ULONGLONG nowMs = GetTickCount64();
+            if (!s_windowStartMs)
+                s_windowStartMs = nowMs;
+            if (nowMs - s_windowStartMs < 5000)
+                return;
+
+            const double toMs = 1000.0 / static_cast<double>(s_frequency);
+            const double totalMs = static_cast<double>(s_totalTicks) * toMs;
+            const double stockMs = static_cast<double>(g_AttackTaskProfileStockTicks) * toMs;
+            const double windowMs = static_cast<double>(nowMs - s_windowStartMs);
+            Log(L"[AIKITE] profile window=%.0fms calls=%lu total=%.3fms stock=%.3fms shim=%.3fms shim/call=%.2fus\n",
+                windowMs, s_calls, totalMs, stockMs, totalMs - stockMs,
+                s_calls ? (totalMs - stockMs) * 1000.0 / s_calls : 0.0);
+            s_totalTicks = 0;
+            g_AttackTaskProfileStockTicks = 0;
+            s_calls = 0;
+            s_windowStartMs = nowMs;
         }
 
         static void InstallAttackTaskKiteHookIfPossible()
@@ -954,6 +1021,7 @@ namespace BZROpenShim
                 g_BzrFn_AttackTaskDoState && g_BzrFn_TerrainGetIntersection;
             if (g_AttackTaskDoStateHookInstalled)
             {
+                g_AttackTaskProfileEnabled = EnvFlagEnabled("OPENSHIM_PROFILE_ATTACK_TASK");
                 Log(L"[AIKITE] Installed AttackTask::DoState hook entry=0x%08X trampoline=0x%08X terrainLos=0x%08X\n",
                     static_cast<uint32_t>(g_AttackTaskDoStateEntryAddr),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_AttackTaskDoStateDetour.trampoline)),

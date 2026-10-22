@@ -61,6 +61,9 @@ if(Python3_Interpreter_FOUND)
     else()
         message(STATUS "terrain_hd_pack_tests needs Pillow; install it to qualify texture pack changes")
     endif()
+    # The English column is generated from the C++ text; a stale table fails here.
+    add_test(NAME options_ui_l10n_sync_check
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/sync_options_localization.py" --check)
     add_test(NAME ui_tiles_consistency_tests
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/ui_tiles_consistency_tests.py")
     add_test(NAME weapon_presentation_live_capture_tests
@@ -134,6 +137,9 @@ openshim_add_test(ogre_entity_reload_tests STD 17 SOURCES
 )
 openshim_add_test(unit_damage_tests STD 20 SOURCES unit_damage_tests.cpp)
 openshim_add_test(terrain_paint_tests STD 17 SOURCES terrain_paint_tests.cpp)
+openshim_add_test(options_ui_l10n_tests STD 17 SOURCES options_ui_l10n_tests.cpp ../src/patches/options_ui_l10n.cpp)
+target_compile_definitions(options_ui_l10n_tests PRIVATE
+    OPENSHIM_L10N_TABLE="${CMAKE_CURRENT_SOURCE_DIR}/../resources/localization/openshim_localization.csv")
 
 if(WIN32)
     openshim_add_test(terrain_paint_gpu_tests STD 17 SOURCES terrain_paint_gpu_tests.cpp)
@@ -368,6 +374,10 @@ openshim_add_test(ui_decor_tests STD 20 SOURCES
 
 openshim_add_test(ogre_profiler_algorithms_tests STD 17 SOURCES
     ogre_profiler_algorithms_tests.cpp
+)
+
+openshim_add_test(dynamic_geometry_batching_tests STD 17 SOURCES
+    dynamic_geometry_batching_tests.cpp
 )
 
 openshim_add_test(bool_token_tests STD 20 SOURCES
@@ -674,6 +684,7 @@ if(WIN32 AND MSVC)
     add_executable(odf_item_hooks_tests
         odf_item_hooks_tests.cpp
         ../src/patches/odf_item_hooks.cpp
+        ../src/patches/map_folder_items.cpp
         ../src/patches/odf_compat.cpp
         ../src/engine/shim_log_sink.cpp
         ../src/engine/shim_log_client.cpp)
@@ -873,3 +884,6 @@ else()
 endif()
 
 openshim_add_test(menu_theme_policy_tests STD 17 SOURCES menu_theme_policy_tests.cpp)
+
+openshim_add_test(shell_casing_policy_tests STD 20 SOURCES shell_casing_policy_tests.cpp)
+openshim_add_test(shell_casing_finish_tests STD 20 SOURCES shell_casing_finish_tests.cpp)

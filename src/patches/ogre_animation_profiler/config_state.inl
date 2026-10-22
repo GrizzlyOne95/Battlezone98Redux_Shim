@@ -318,6 +318,24 @@ namespace BZROpenShim
             std::array<char, kEntityMetadataLength> cameraName{};
         };
 
+        // Per-viewport pass timing (frame-time breakdown probe). Keyed by the
+        // Viewport passed to SceneManager::_renderScene, so the main view, a
+        // compositor scene pass on the same camera, and each PSSM shadow
+        // texture land in separate rows. Inclusive time contains nested
+        // _renderScene calls; childTicks is that nested share.
+        struct PassTimeSlot
+        {
+            std::atomic<uintptr_t> key{ 0 };
+            std::atomic<uintptr_t> camera{ 0 };
+            std::atomic<uint32_t> depth{ 0 };
+            std::atomic<uint64_t> renders{ 0 };
+            std::atomic<uint64_t> inclusiveTicks{ 0 };
+            std::atomic<uint64_t> childTicks{ 0 };
+            std::atomic<uint64_t> draws{ 0 };
+            std::atomic<uint64_t> renderQueueCalls{ 0 };
+            std::atomic<uint64_t> renderQueueTicks{ 0 };
+        };
+
         struct RenderContributorSlot
         {
             std::atomic<uintptr_t> key{ 0 };
@@ -571,6 +589,18 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_BlendCallsInAnimations{ 0 };
         std::atomic<uint64_t> g_BlendVerticesInAnimations{ 0 };
         std::atomic<uint64_t> g_DuplicateAnimationSameFrame{ 0 };
+        // Breakdown of the same-frame repeats: what they cost and where from.
+        std::atomic<uint64_t> g_DuplicateAnimationTicks{ 0 };
+        std::atomic<uint64_t> g_DuplicateAnimationBlendCalls{ 0 };
+        std::atomic<uint64_t> g_DuplicateAnimationMain{ 0 };
+        std::atomic<uint64_t> g_DuplicateAnimationShadow{ 0 };
+        std::atomic<uint64_t> g_DuplicateAnimationExternal{ 0 };
+        std::atomic<uint64_t> g_FirstAnimationTicks{ 0 };
+        std::atomic<uint64_t> g_FirstAnimationCalls{ 0 };
+        std::atomic<uint64_t> g_DuplicateRenderQueueTicks{ 0 };
+        std::atomic<uint64_t> g_DuplicateRenderQueueShadow{ 0 };
+        std::atomic<uint64_t> g_RenderQueueTicks{ 0 };
+        std::atomic<uint64_t> g_DrawsOutsideScene{ 0 };
         std::atomic<uint64_t> g_DuplicateSkinSameFrame{ 0 };
         std::atomic<uint64_t> g_SoftwareBlendCalls{ 0 };
         std::atomic<uint64_t> g_SoftwareBlendVertices{ 0 };
@@ -725,6 +755,7 @@ namespace BZROpenShim
         std::array<DynamicMaterialProfileSlot, kDynamicMaterialTableSize>
             g_DynamicMaterialProfileSlots{};
         std::array<CameraProfileSlot, kCameraTableSize> g_CameraProfileSlots{};
+        std::array<PassTimeSlot, kCameraTableSize> g_PassTimeSlots{};
         std::array<RenderContributorSlot, kRenderContributorTableSize>
             g_RenderContributorSlots{};
 
@@ -738,6 +769,9 @@ namespace BZROpenShim
         thread_local uint64_t t_CurrentAnimationBlendVertices = 0;
         thread_local unsigned t_SoftwareBlendDepth = 0;
         thread_local unsigned t_SceneRenderDepth = 0;
+        thread_local PassTimeSlot* t_CurrentPassSlot = nullptr;
+        // Nested _renderScene time accumulated under the current pass.
+        thread_local uint64_t t_PassChildTicks = 0;
         thread_local uint64_t t_LastRenderContextCheckFrame = 0;
         // Monotonic per-thread count of API draw calls seen by the observers.
         // The render-system hooks snapshot it around the real _render call, so

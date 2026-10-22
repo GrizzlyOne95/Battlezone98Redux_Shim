@@ -16,6 +16,7 @@
 #include "odf_item_hooks.h"
 
 #include "bzr_options_ui.h"
+#include "map_folder_items.h"
 #include "odf_compat.h"
 #include "odf_item_prologue.h"
 #include "shim_log.h"
@@ -215,6 +216,26 @@ void* BuildTrampoline(uint32_t site, const char* hookName)
 bool g_UseItemHooked = false;
 bool g_GetItemSizeHooked = false;
 bool g_UnlockItemHooked = false;
+uint32_t g_UseItemSite = 0;
+uint32_t g_GetItemSizeSite = 0;
+uint32_t g_UnlockItemSite = 0;
+
+// The trampoline is built before the generic JMP5 writer redirects the site,
+// so "hooked" alone does not prove the detour is live. Read the site back.
+bool SiteJumpsTo(uint32_t site, const void* detour)
+{
+    if (site == 0)
+        return false;
+    uint8_t bytes[5] = {};
+    if (!SafeReadEngineBytes(reinterpret_cast<const void*>(static_cast<uintptr_t>(site)), bytes,
+                             sizeof(bytes)) ||
+        bytes[0] != 0xE9)
+        return false;
+    int32_t rel = 0;
+    std::memcpy(&rel, bytes + 1, sizeof(rel));
+    return site + 5u + static_cast<uint32_t>(rel) ==
+           static_cast<uint32_t>(reinterpret_cast<uintptr_t>(detour));
+}
 
 bool InstallOne(uint32_t site, const char* hookName, void** originalSlot)
 {
@@ -257,6 +278,7 @@ bool OdfInstallUseItemHook(uint32_t siteAddress)
     if (!InstallOne(siteAddress, "ODF UseItem Hook", reinterpret_cast<void**>(&g_OriginalUseItem)))
         return false;
     g_UseItemHooked = true;
+    g_UseItemSite = siteAddress;
     return true;
 }
 
@@ -268,6 +290,7 @@ bool OdfInstallGetItemSizeHook(uint32_t siteAddress)
                      reinterpret_cast<void**>(&g_OriginalGetItemSize)))
         return false;
     g_GetItemSizeHooked = true;
+    g_GetItemSizeSite = siteAddress;
     return true;
 }
 
@@ -279,7 +302,16 @@ bool OdfInstallUnlockItemHook(uint32_t siteAddress)
                      reinterpret_cast<void**>(&g_OriginalUnlockItem)))
         return false;
     g_UnlockItemHooked = true;
+    g_UnlockItemSite = siteAddress;
     return true;
+}
+
+bool OdfItemHooksInstalled()
+{
+    return g_UseItemHooked && g_GetItemSizeHooked && g_UnlockItemHooked &&
+           SiteJumpsTo(g_UseItemSite, reinterpret_cast<const void*>(&OdfUseItemDetour)) &&
+           SiteJumpsTo(g_GetItemSizeSite, reinterpret_cast<const void*>(&OdfGetItemSizeDetour)) &&
+           SiteJumpsTo(g_UnlockItemSite, reinterpret_cast<const void*>(&OdfUnlockItemDetour));
 }
 
 bool OdfReadItemText(const char* name, std::string& out)
@@ -336,6 +368,12 @@ void* __cdecl OdfUseItemDetour(const char* name)
         }
         return nullptr;
     }
+
+    // A lobby map's own file the engine index lacks; the engine never sees
+    // these names, so no engine lock is taken or released for them.
+    void* served = nullptr;
+    if (MapFolderItems::Acquire(name, served))
+        return served;
 
     if (!name || !OdfCompat::IsOdfFileName(name) || !OdfFeaturesArmed())
     {
@@ -466,6 +504,9 @@ size_t __cdecl OdfGetItemSizeDetour(const char* name)
     }
     if (!name)
         return 0;
+    size_t servedSize = 0;
+    if (MapFolderItems::Size(name, servedSize))
+        return servedSize;
     bool faulted = false;
     const size_t stock = SafeCallGetItemSize(name, faulted);
     if (faulted)
@@ -481,6 +522,8 @@ size_t __cdecl OdfGetItemSizeDetour(const char* name)
 
 void __cdecl OdfUnlockItemDetour(const char* name)
 {
+    if (name && MapFolderItems::Release(name))
+        return;
     if (g_OriginalUnlockItem && name)
     {
         bool faulted = false;

@@ -1,5 +1,15 @@
 # ODF recoil trial
 
+2026-10-21 inventory follow-up: CR `Docs/WEAPON_PRESENTATION_ROLLOUT.md` maps
+159 combat carriers plus 15 armory suppliers, 61 models and 330 weapon slots.
+Its generated CSV records exact hardpoints/parents, cockpit markers, clips,
+translation conflicts and 56 dedicated-barrel candidates on 17 distinct nodes.
+Candidates are not automatically enabled. MachineGun accepted-shot source
+coverage was added alongside Cannon (which includes Mortar/SniperGun); the new
+producer remains pending live proof. Walkers, light tanks and integrated pods
+often need authored helper parents/clips, preserving aim/locomotion, rather
+than moving a hull or whole turret. No new craft recoil keys were enabled.
+
 2026-10-20: experimental source on `agent/odf-recoil-trial` in OpenShim and
 EXU. This is a GOG 2.2.301 single-player cannon trial, not a release-qualified
 feature. OpenShim Settings > Video > Muzzle Recoil (INI `[SinglePlayer]

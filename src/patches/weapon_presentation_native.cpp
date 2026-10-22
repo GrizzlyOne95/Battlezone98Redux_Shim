@@ -78,6 +78,8 @@ namespace BZROpenShim::Hooks
         InlineDetour32 g_CtorDetour, g_DtorDetour, g_SimDetour, g_SlotDetour, g_ModelDetour;
         std::atomic<bool> g_Ready{ false };
         bool g_InstallAttempted = false;
+        std::atomic<bool> g_ClassReady{ false };
+        uint32_t g_WeaponScopeSite = 0;
         std::atomic<bool> g_ThreadMismatchLogged{ false };
         volatile LONG g_EngineThread = 0;
         size_t g_SceneDepth = 0;
@@ -211,7 +213,15 @@ namespace BZROpenShim::Hooks
 
         void __cdecl ObserveWeaponClass(void* scope, void* objectClass) noexcept
         {
-            if (!g_Ready || !EngineThread() || !scope || !objectClass) return;
+            if (!g_ClassReady) { HookEngine::CodePatchLock lock; }
+            if (!g_ClassReady || !EngineThread() || !scope || !objectClass) return;
+            char casing[kMaxValueBytes] = {};
+            const auto casingStatus = ReadValue(scope, Policy::Hash("WeaponClass"), Policy::Hash("casingType"), casing);
+            char casingMesh[kMaxValueBytes] = {};
+            const auto meshStatus = ReadValue(scope, Policy::Hash("WeaponClass"), Policy::Hash("casingMesh"), casingMesh);
+            ObserveShellCasingClass(objectClass, casingStatus == ValueStatus::Missing ? nullptr : casing,
+                meshStatus == ValueStatus::Missing ? nullptr : meshStatus == ValueStatus::Present ? casingMesh : "\"");
+            if (!g_Ready) return;
             g_FlashClasses.erase(objectClass); // failed/reloaded read cannot retain stale configuration
             try
             {
@@ -805,6 +815,21 @@ namespace BZROpenShim::Hooks
                 "Weapon presentation scoped call", true, std::vector<uint8_t>(bytes, bytes + 5) });
         }
 
+        bool InstallCasingClassObserver()
+        {
+            const uint32_t site = HookEngine::ResolveNamedAddress("WeaponPresentation::WeaponClassPopCall");
+            const uint32_t pop = HookEngine::ResolveNamedAddress("WeaponPresentation::PopScope");
+            const uint32_t raw = HookEngine::ResolveNamedAddress("WeaponPresentation::RawGet");
+            if (!site || !pop || !raw || HookEngine::ResolveRelCallTarget(site) != reinterpret_cast<void*>(pop)) return false;
+            g_RawGet = reinterpret_cast<RawGet>(raw);
+            Bridges::Configure(nullptr, reinterpret_cast<Bridges::PopScope>(pop), nullptr, ObserveWeaponClass, nullptr);
+            // Configure must retain the already-qualified shared factory.
+            if (!ReplaceCall(site, reinterpret_cast<void*>(Bridges::WeaponClassScopePopBridge), reinterpret_cast<void*>(pop))) return false;
+            g_WeaponScopeSite = site;
+            g_ClassReady = true;
+            return true;
+        }
+
         bool InstallCandidate()
         {
             // Resolve all semantic sites first. Partial install leaves observers
@@ -814,8 +839,10 @@ namespace BZROpenShim::Hooks
             const uint32_t sim = HookEngine::ResolveNamedAddress("WeaponPresentation::SimulationPass");
             const uint32_t slot = HookEngine::ResolveNamedAddress("WeaponPresentation::SetWeapon");
             const uint32_t model = HookEngine::ResolveNamedAddress("WeaponPresentation::ModelPose");
-            const uint32_t fire = HookEngine::ResolveNamedAddress("WeaponPresentation::CannonShotCall");
-            const uint32_t weaponPop = HookEngine::ResolveNamedAddress("WeaponPresentation::WeaponClassPopCall");
+            const uint32_t fire = Bridges::ShotSite(false);
+            const uint32_t machineFire = Bridges::ShotSite(true);
+            const uint32_t weaponPop = g_WeaponScopeSite ? g_WeaponScopeSite :
+                HookEngine::ResolveNamedAddress("WeaponPresentation::WeaponClassPopCall");
             const uint32_t craftPop = HookEngine::ResolveNamedAddress("WeaponPresentation::CraftClassPopCall");
             const uint32_t factory = HookEngine::ResolveNamedAddress("WeaponPresentation::OrdnanceFactory");
             const uint32_t pop = HookEngine::ResolveNamedAddress("WeaponPresentation::PopScope");
@@ -823,10 +850,12 @@ namespace BZROpenShim::Hooks
             const uint32_t find = HookEngine::ResolveNamedAddress("WeaponPresentation::RenderFind");
             const uint32_t update = HookEngine::ResolveNamedAddress("WeaponPresentation::RenderUpdate");
             const uint32_t detach = HookEngine::ResolveNamedAddress("WeaponPresentation::RenderDetach");
-            if (!ctor || !dtor || !sim || !slot || !model || !fire || !weaponPop || !craftPop ||
+            if (!ctor || !dtor || !sim || !slot || !model || !fire || !machineFire || !weaponPop || !craftPop ||
                 !factory || !pop || !rawGet || !find || !update || !detach) return false;
-            if (HookEngine::ResolveRelCallTarget(fire) != reinterpret_cast<void*>(factory) ||
-                HookEngine::ResolveRelCallTarget(weaponPop) != reinterpret_cast<void*>(pop) ||
+            if (HookEngine::ResolveRelCallTarget(fire) != GetShellCasingShotBridgeAddress() ||
+                HookEngine::ResolveRelCallTarget(machineFire) != GetShellCasingShotBridgeAddress() ||
+                HookEngine::ResolveRelCallTarget(weaponPop) != (g_ClassReady ?
+                    reinterpret_cast<void*>(Bridges::WeaponClassScopePopBridge) : reinterpret_cast<void*>(pop)) ||
                 HookEngine::ResolveRelCallTarget(craftPop) != reinterpret_cast<void*>(pop)) return false;
             g_RawGet = reinterpret_cast<RawGet>(rawGet);
             g_RenderFind = reinterpret_cast<RenderFind>(find);
@@ -854,9 +883,9 @@ namespace BZROpenShim::Hooks
             if (!InstallInlineDetour32(g_ModelDetour, model, reinterpret_cast<void*>(ModelPoseHook), 6,
                     modelBytes, sizeof(modelBytes))) return false;
             g_ModelPose = reinterpret_cast<ModelPose>(g_ModelDetour.trampoline);
-            if (!ReplaceCall(fire, reinterpret_cast<void*>(Bridges::CannonOrdnanceCallBridge), reinterpret_cast<void*>(factory)) ||
-                !ReplaceCall(weaponPop, reinterpret_cast<void*>(Bridges::WeaponClassScopePopBridge), reinterpret_cast<void*>(pop)) ||
+            if ((!g_ClassReady && !ReplaceCall(weaponPop, reinterpret_cast<void*>(Bridges::WeaponClassScopePopBridge), reinterpret_cast<void*>(pop))) ||
                 !ReplaceCall(craftPop, reinterpret_cast<void*>(Bridges::CraftClassScopePopBridge), reinterpret_cast<void*>(pop))) return false;
+            g_ClassReady = true;
             g_Ready = true;
             return true;
         }
@@ -871,14 +900,21 @@ namespace BZROpenShim::Hooks
         {
             TryGetUserConfigBool("SinglePlayer", "MuzzleFlash", g_Settings.muzzleFlash);
             TryGetUserConfigBool("SinglePlayer", "MeshRecoil", g_Settings.meshRecoil);
+            const bool casings = IsShellCasingsEnabled();
+            if (!casings && !g_Settings.muzzleFlash && !g_Settings.meshRecoil) return;
+            if (!ExactGogImage()) return;
+            // Independent from presentation/backend readiness. A failed flash
+            // install cannot prevent ODF energy weapons from opting out of brass.
+            if (casings)
+                LogShimA(LogLevel::Info, "SHELLCASINGS", "ODF casingType observer ready=%d", InstallCasingClassObserver());
             if (!g_Settings.muzzleFlash && !g_Settings.meshRecoil) return;
             // Settings are the master switches, including for developer runs.
             // The bounded authored-ODF path has its own exact-GOG/SP guards;
             // blanket/legacy flashName activation remains unqualified.
             g_AuthoredOdfOnly = !kNativePresentationLiveQualified;
-            LogShimA(LogLevel::Warn, "WEAPONFX", "authored ODF presentation requested; GOG/SP cannon, MuzzleFlash=%d MeshRecoil=%d; assets/config required",
+            LogShimA(LogLevel::Warn, "WEAPONFX", "authored ODF presentation requested; GOG/SP cannon+machinegun, MuzzleFlash=%d MeshRecoil=%d; assets/config required",
                 g_Settings.muzzleFlash, g_Settings.meshRecoil);
-            if (!g_MissionSeamInstalled || !ExactGogImage() || !InstallCandidate())
+            if (!g_MissionSeamInstalled || !InstallCandidate())
                 LogShimA(LogLevel::Warn, "WEAPONFX", "native candidate inactive: build/site/lifecycle guard failed");
         }
         catch (...) { LogShimA(LogLevel::Warn, "WEAPONFX", "native candidate installation failed; stock firing retained"); }

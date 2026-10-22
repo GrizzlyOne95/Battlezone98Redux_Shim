@@ -8,6 +8,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
 
 // The Win32 half of the redirect: the plugin directory, GetPrivateProfileStringA
 // and the real process environment. What a name maps to, and the order the
@@ -18,7 +19,7 @@ namespace
 {
     constexpr char kUnsetValue[] = "\x01__openshim_unset__";
 
-    std::filesystem::path GetModuleDirectory()
+    std::filesystem::path ComputeModuleDirectory()
     {
         char path[MAX_PATH] = {};
         const DWORD length = GetModuleFileNameA(nullptr, path, static_cast<DWORD>(sizeof(path)));
@@ -27,14 +28,17 @@ namespace
         return std::filesystem::path(path).parent_path();
     }
 
-    bool TryReadIniValue(const std::filesystem::path& path,
-                         const char* section,
-                         const char* key,
-                         std::string& out)
+    const std::filesystem::path& GetModuleDirectory()
     {
-        if (path.empty() || !section || !key)
-            return false;
+        static const std::filesystem::path s_directory = ComputeModuleDirectory();
+        return s_directory;
+    }
 
+    bool ReadIniValueFromDisk(const std::filesystem::path& path,
+                              const char* section,
+                              const char* key,
+                              std::string& out)
+    {
         char value[1024] = {};
         const DWORD length = GetPrivateProfileStringA(
             section,
@@ -49,6 +53,105 @@ namespace
         out.assign(value, length);
         return true;
     }
+
+    // Every redirected GetEnvironmentVariableA used to reach
+    // GetPrivateProfileStringA, which opens and parses the file. Uncached
+    // flag checks on damage and kill paths made that ~4.5 ms of an 80-craft
+    // volley frame. Answers are kept per (file, section, key); a file's cache
+    // is dropped when its write time or size changes (re-checked at most
+    // every 250 ms) or when OpenShim itself rewrites it.
+    struct IniFileStamp
+    {
+        ULONGLONG lastWrite = 0;
+        ULONGLONG size = 0;
+        bool exists = false;
+
+        bool operator==(const IniFileStamp& other) const
+        {
+            return lastWrite == other.lastWrite && size == other.size && exists == other.exists;
+        }
+    };
+
+    struct IniFileCache
+    {
+        IniFileStamp stamp;
+        ULONGLONG checkedTick = 0;
+        bool valid = false;
+        std::unordered_map<std::string, std::pair<bool, std::string>> values;
+    };
+
+    constexpr ULONGLONG kIniStampRecheckMs = 250;
+
+    SRWLOCK g_IniCacheLock = SRWLOCK_INIT;
+    std::unordered_map<std::string, IniFileCache> g_IniCache;
+
+    IniFileStamp ReadIniFileStamp(const std::filesystem::path& path)
+    {
+        IniFileStamp stamp;
+        WIN32_FILE_ATTRIBUTE_DATA data = {};
+        if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data))
+            return stamp;
+        stamp.exists = true;
+        stamp.lastWrite = (static_cast<ULONGLONG>(data.ftLastWriteTime.dwHighDateTime) << 32) |
+                          data.ftLastWriteTime.dwLowDateTime;
+        stamp.size = (static_cast<ULONGLONG>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+        return stamp;
+    }
+
+    bool TryReadIniValue(const std::filesystem::path& path,
+                         const char* section,
+                         const char* key,
+                         std::string& out)
+    {
+        if (path.empty() || !section || !key)
+            return false;
+
+        std::string valueKey(section);
+        valueKey.push_back('|');
+        valueKey.append(key);
+
+        AcquireSRWLockExclusive(&g_IniCacheLock);
+        IniFileCache& file = g_IniCache[path.string()];
+        const ULONGLONG now = GetTickCount64();
+        if (!file.valid || now - file.checkedTick >= kIniStampRecheckMs)
+        {
+            const IniFileStamp stamp = ReadIniFileStamp(path);
+            if (!file.valid || !(stamp == file.stamp))
+                file.values.clear();
+            file.stamp = stamp;
+            file.checkedTick = now;
+            file.valid = true;
+        }
+
+        const auto cached = file.values.find(valueKey);
+        if (cached != file.values.end())
+        {
+            const bool present = cached->second.first;
+            if (present)
+                out = cached->second.second;
+            ReleaseSRWLockExclusive(&g_IniCacheLock);
+            return present;
+        }
+        ReleaseSRWLockExclusive(&g_IniCacheLock);
+
+        std::string value;
+        const bool present = ReadIniValueFromDisk(path, section, key, value);
+
+        AcquireSRWLockExclusive(&g_IniCacheLock);
+        g_IniCache[path.string()].values.insert_or_assign(std::move(valueKey), std::make_pair(present, value));
+        ReleaseSRWLockExclusive(&g_IniCacheLock);
+
+        if (present)
+            out = std::move(value);
+        return present;
+    }
+}
+
+void OpenShimInvalidateEnvIniCache()
+{
+    AcquireSRWLockExclusive(&g_IniCacheLock);
+    g_IniCache.clear();
+    ReleaseSRWLockExclusive(&g_IniCacheLock);
 }
 
 DWORD WINAPI OpenShimGetEnvironmentVariableA(LPCSTR name, LPSTR buffer, DWORD size)
@@ -63,7 +166,7 @@ DWORD WINAPI OpenShimGetEnvironmentVariableA(LPCSTR name, LPSTR buffer, DWORD si
     if (!name || !*name)
         return ::GetEnvironmentVariableA(name, buffer, size);
 
-    const auto moduleDir = GetModuleDirectory();
+    const std::filesystem::path& moduleDir = GetModuleDirectory();
     if (moduleDir.empty())
         return GetEnvironmentValue(name, buffer, size, nullptr, processEnvironment);
 

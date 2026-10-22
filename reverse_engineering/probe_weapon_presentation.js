@@ -7,7 +7,7 @@
 const expectedNames = [
     'WeaponCtor', 'WeaponDtor', 'SimulationPass', 'SetWeapon', 'ModelPose',
     'OrdnanceFactory', 'PopScope', 'RawGet', 'RenderFind', 'RenderUpdate',
-    'RenderDetach', 'CannonShotCall', 'WeaponClassPopCall', 'CraftClassPopCall'
+    'RenderDetach', 'CannonShotCall', 'MachineGunShotCall', 'WeaponClassPopCall', 'CraftClassPopCall'
 ];
 let listeners = [];
 let timer = null;
@@ -95,7 +95,7 @@ function start(input) {
         !exe.base.equals(ptr(input.image_base)) || input.image_base !== '0x400000')
         throw new Error('Wrong live executable module');
     if (Object.keys(input.sites).sort().join() !== expectedNames.slice().sort().join() ||
-        input.guards.length !== 14 || !Number.isInteger(input.max_events) ||
+        input.guards.length !== expectedNames.length || !Number.isInteger(input.max_events) ||
         input.max_events < 1 || input.max_events > 20000 || !Array.isArray(input.model_ids) ||
         input.model_ids.length > 16 || input.model_ids.some(n => !/^[\x20-\x7e]{1,8}$/.test(n)))
         throw new Error('Incomplete or invalid observer configuration');
@@ -147,7 +147,8 @@ function start(input) {
         }});
         hook('OrdnanceFactory', {
             onEnter() {
-                this.selected = this.returnAddress.equals(sites.CannonShotCall.add(5)) &&
+                this.selected = (this.returnAddress.equals(sites.CannonShotCall.add(5)) ||
+                    this.returnAddress.equals(sites.MachineGunShotCall.add(5))) &&
                     admit('cannon_factory', this.threadId);
                 if (!this.selected) return;
                 // At callee entry EBP is still the CALLER's frame. Never use

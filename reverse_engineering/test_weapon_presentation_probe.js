@@ -95,6 +95,7 @@ function harness(limit = 4096, failHook = 0) {
     h.invoke('WeaponCtor', weapon, [0x140000, objectClass], weapon);
     h.invoke('OrdnanceFactory', objectClass, [matrix, root], 0x150000, Number(h.config.sites.CannonShotCall) + 5);
     h.invoke('OrdnanceFactory', objectClass, [matrix, root], 0, Number(h.config.sites.CannonShotCall) + 5);
+    h.invoke('OrdnanceFactory', objectClass, [matrix, root], 0x150000, Number(h.config.sites.MachineGunShotCall) + 5);
     h.invoke('OrdnanceFactory', objectClass, [matrix, root], 0x150000, 0x777777); // unrelated spawn
     h.invoke('PopScope', 0x160000, [], 0, Number(h.config.sites.WeaponClassPopCall) + 5);
     h.invoke('PopScope', 0x170000, [], 0, Number(h.config.sites.CraftClassPopCall) + 5);
@@ -113,13 +114,13 @@ function harness(limit = 4096, failHook = 0) {
     assert.equal(summary.complete, true);
     assert.equal(summary.tracked_weapons, 0);
     const shots = h.events.filter(e => e.kind === 'cannon_factory');
-    assert.equal(shots.length, 2);
+    assert.equal(shots.length, 3);
     assert.equal(shots[0].weapon, h.ptr(weapon).toString());
     assert.equal(shots[0].ordnance_class, h.ptr(objectClass).toString());
     assert.equal(shots[0].owner_root, h.ptr(root).toString());
     assert.equal(shots[0].observed_generation, 1);
     assert.deepEqual(Array.from(shots[0].final_pose.position), [100.5, 101.5, 102.5]);
-    assert.equal(h.events.filter(e => e.kind === 'cannon_factory_return' && e.accepted).length, 1);
+    assert.equal(h.events.filter(e => e.kind === 'cannon_factory_return' && e.accepted).length, 2);
     assert.equal(h.events.find(e => e.kind === 'weapon_scope_pop').object_class, h.ptr(objectClass).toString());
     assert.equal(h.events.find(e => e.kind === 'craft_scope_pop').object_class, h.ptr(objectClass + 4).toString());
     assert.equal(h.events.find(e => e.kind === 'simulation_begin').dt, 0.125);
