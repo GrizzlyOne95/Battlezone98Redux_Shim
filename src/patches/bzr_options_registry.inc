@@ -27,6 +27,7 @@ static const char* const kShimSettingsOnOffLabels[] = { "On", "Off" };
 static const char* const kShimSettingsAutoSaveIntervalValues[] = { "60", "120", "180", "300", "600" };
 static const char* const kShimSettingsAutoSaveIntervalLabels[] = { "1 min", "2 min", "3 min", "5 min", "10 min" };
 static const char* const kShimSettingsUnderAttackValues[] = { "Normal", "Minimal", "None" };
+static const char* const kShimSettingsExplosionFlashValues[] = { "Stock", "Soft", "Off" };
 static const char* const kShimSettingsUnitVoValues[] = { "Normal", "Reduced", "None" };
 static const char* const kShimSettingsTargetPolicyValues[] = { "Default", "NeutralOnly", "ExplicitOnly" };
 static const char* const kShimSettingsTargetPolicyLabels[] = { "Default", "Neutral Only", "Explicit Only" };
@@ -332,6 +333,14 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::LiveEngineToggle,
       "On is stock: looking near the sun paints a fullscreen white flash. Off suppresses only that flash." },
+    { "Explosion Flash", "Display", "ExplosionFlash", nullptr, 0,
+      kShimSettingsExplosionFlashValues, kShimSettingsExplosionFlashValues, 3, 0,
+      ShimSettingApplyGroup::LiveEngineToggle,
+      "Stock: a nearby explosion turns the whole screen white for one frame. Soft keeps a faint flicker. Off removes it." },
+    { "Damage Flash", "Display", "DamageFlash", nullptr, 0,
+      kShimSettingsExplosionFlashValues, kShimSettingsExplosionFlashValues, 3, 0,
+      ShimSettingApplyGroup::LiveEngineToggle,
+      "Stock: taking damage tints the whole screen red or orange. Soft makes the tint fainter. Off removes it." },
     { "Attack Alert", "Display", "UnderAttackAlert", nullptr, 0,
       kShimSettingsUnderAttackValues, kShimSettingsUnderAttackValues, 3, 0,
       ShimSettingApplyGroup::UnderAttackAlert,
