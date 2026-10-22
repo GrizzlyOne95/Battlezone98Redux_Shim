@@ -633,11 +633,14 @@ void compute_enhanced_atmosphere(
         OSE_ATMOS_EMISSIVE_TRANSMISSION);
 }
 
+// Legacy Blinn-Phong exponent n maps to GGX alpha = sqrt(2 / (n + 2)) (Walter et al.;
+// BZCC's object shaders use exactly this). distribution_ggx squares its roughness
+// input into alpha, so return perceptual roughness = sqrt(alpha).
 float legacy_shininess_to_roughness(float shininess)
 {
     float scaledShininess = max(shininess * OSE_PBR_SHININESS_SCALE, 0.0);
-    float roughness = sqrt(2.0 / (scaledShininess + 2.0));
-    return clamp(roughness, OSE_PBR_MIN_ROUGHNESS, OSE_PBR_MAX_ROUGHNESS);
+    float alpha = sqrt(2.0 / (scaledShininess + 2.0));
+    return clamp(sqrt(alpha), OSE_PBR_MIN_ROUGHNESS, OSE_PBR_MAX_ROUGHNESS);
 }
 
 float3 legacy_specular_to_f0(float3 specularTex)
