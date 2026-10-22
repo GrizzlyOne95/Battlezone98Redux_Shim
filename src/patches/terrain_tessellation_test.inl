@@ -259,15 +259,37 @@ bool InstallNativeTerrainTessellationTest()
         }
         g_activeTerrainReliefAmplitude = g_config.microReliefTest ?
             TerrainHdMaterial::ScaledMicroReliefAmplitude(g_config.microReliefAmplitude, reliefScale) : 0.0f;
+        // Full-material paint packs replace the noise with their own layer
+        // heights, in metres. The relief slider scales them (0.25 = authored).
+        const float paintHeightMeters = g_HdPaint.enabled && g_HdPaint.Material() ?
+            *std::max_element(g_HdPaint.heightMeters.begin(), g_HdPaint.heightMeters.end()) : 0.0f;
+        const bool paintHeight = g_activeTerrainReliefAmplitude > 0.0f && paintHeightMeters > 0.0f;
+        const float paintHeightScale = g_config.microReliefAmplitude / 0.25f;
+        if (paintHeight) g_activeTerrainReliefAmplitude = 0.5f * paintHeightMeters * paintHeightScale;
         if (g_activeTerrainReliefAmplitude > 0.0f)
             source = "#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE " +
                 std::to_string(g_activeTerrainReliefAmplitude) + "\n" + source;
-        const bool textureHeight = g_activeTerrainReliefAmplitude > 0.0f && hdBinding && !hdBinding->heightTexture.empty();
+        const bool textureHeight = !paintHeight && g_activeTerrainReliefAmplitude > 0.0f && hdBinding && !hdBinding->heightTexture.empty();
         if (textureHeight)
         {
             PrepareTerrainHeightTexture(buffer, hdBinding->heightTexture);
             source = "#define OPENSHIM_HEIGHT_TEST 1\n#define OPENSHIM_HEIGHT_NORMALIZED 1\n" + source;
         }
+        if (paintHeight)
+        {
+            PrepareTerrainPaintHeightTexture(g_hdDiffuseNativeTexture);
+            std::ostringstream defines; defines.imbue(std::locale::classic()); defines << std::setprecision(9) << std::scientific;
+            const auto vector = [&](const char* name, const std::array<float, 4>& v) {
+                defines << "#define " << name << " float4(" << v[0] << "," << v[1] << "," << v[2] << "," << v[3] << ")\n"; };
+            defines << "#define OPENSHIM_PAINT_HEIGHT 1\n";
+            vector("OPENSHIM_PAINT_BOUNDS", g_HdPaint.bounds);
+            vector("OPENSHIM_PAINT_REPEATS", g_HdPaint.repeatMeters);
+            vector("OPENSHIM_PAINT_HEIGHT_METERS", g_HdPaint.heightMeters);
+            defines << "#define OPENSHIM_PAINT_HEIGHT_BLEND " << g_HdPaint.heightBlend << "\n";
+            defines << "#define OPENSHIM_PAINT_HEIGHT_SCALE " << paintHeightScale << "\n";
+            source = defines.str() + source;
+        }
+        const bool domainTexture = textureHeight || paintHeight;
         void* materialManager = g_ogre.getMaterialManager();
         void* programManager = g_ogre.getHighLevelProgramManager();
         if (!materialManager || !programManager)
@@ -346,7 +368,7 @@ bool InstallNativeTerrainTessellationTest()
                         g_ogre.loadResource(program.rep, true);
                         if (!g_ogre.programSupported(program.rep))
                             throw std::runtime_error("shader compilation unsupported");
-                        if (textureHeight && stage == 1) RegisterTerrainHeightDomain(program.rep);
+                        if (domainTexture && stage == 1) RegisterTerrainHeightDomain(program.rep);
                         const std::string actualInput = TerrainProgramSignature(program.rep, "ISGN", stage == 1);
                         const std::string actualOutput = TerrainProgramSignature(program.rep, "OSGN", stage == 0);
                         if (expected != actualInput || expected != actualOutput)

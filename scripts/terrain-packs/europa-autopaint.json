@@ -1,0 +1,118 @@
+{
+  "schema": "bzr-openshim-terrain-autopaint-v1",
+  "material": "EU_DETAIL_ATLAS",
+  "diffuseResource": "europa_atlas_d.dds",
+  "typeNames": {
+    "0": "Thin Ice",
+    "1": "Frozen Tundra",
+    "2": "Snowy Rock",
+    "3": "Glacial",
+    "4": "Base"
+  },
+  "typeWeights": {
+    "0": [
+      1,
+      0,
+      0,
+      0
+    ],
+    "1": [
+      0,
+      1,
+      0,
+      0
+    ],
+    "2": [
+      0,
+      0,
+      1,
+      0
+    ],
+    "3": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "4": [
+      0,
+      1,
+      0,
+      0
+    ]
+  },
+  "transition": {
+    "cap": 0.3,
+    "diagonal": 0.5
+  },
+  "blurMeters": 14,
+  "outsideWeights": [
+    0,
+    1,
+    0,
+    0
+  ],
+  "variation": {
+    "meters": 200,
+    "amount": 0.4,
+    "types": {
+      "2": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "3": [
+        0,
+        1,
+        0,
+        0
+      ]
+    }
+  },
+  "slope": {
+    "weights": [
+      0,
+      0,
+      1,
+      0
+    ],
+    "startDegrees": 24,
+    "fullDegrees": 38
+  },
+  "layers": [
+    {
+      "name": "Thin ice",
+      "repeatMeters": 24,
+      "archive": "icelandic_glacier_vf0nbbtn_8k.zip",
+      "member": "Icelandic_Glacier_vf0nbbtn_8K_BaseColor.jpg",
+      "matchMean": "crhd_europa_eu00sa0_d.dds",
+      "heightMeters": 0.4
+    },
+    {
+      "name": "Frozen tundra",
+      "repeatMeters": 16,
+      "archive": "icelandic_sand_with_pebbles_tbklac1n_8k.zip",
+      "member": "Icelandic_Sand_With_Pebbles_tbklac1n_8K_BaseColor.jpg",
+      "matchMean": "crhd_europa_eu11sa0_d.dds",
+      "heightMeters": 0.3
+    },
+    {
+      "name": "Snowy rock",
+      "repeatMeters": 16,
+      "archive": "icelandic_rocky_ground_vglndb0g_8k.zip",
+      "member": "Icelandic_Rocky_Ground_vglndb0g_8K_BaseColor.jpg",
+      "matchMean": "crhd_europa_eu22sa0_d.dds",
+      "heightMeters": 1.0
+    },
+    {
+      "name": "Glacial",
+      "repeatMeters": 48,
+      "archive": "icelandic_glacier_vf0nbbtn_8k.zip",
+      "member": "Icelandic_Glacier_vf0nbbtn_8K_BaseColor.jpg",
+      "matchMean": "crhd_europa_eu33sa0_d.dds",
+      "heightMeters": 1.2
+    }
+  ],
+  "heightBlend": 0.5
+}

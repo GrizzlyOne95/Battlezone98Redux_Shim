@@ -1,0 +1,80 @@
+{
+  "schema": "bzr-openshim-terrain-hd-v1",
+  "materials": {
+    "EU_DETAIL_ATLAS": {
+      "sliceCount": 9,
+      "diffuseResource": "europa_atlas_d.dds",
+      "fallback": "openshim_europa_auto_layer0.png",
+      "tiles": {
+        "0": "openshim_europa_auto_layer0.png",
+        "1": "openshim_europa_auto_layer1.png",
+        "2": "openshim_europa_auto_layer2.png",
+        "3": "openshim_europa_auto_layer3.png",
+        "4": "openshim_europa_auto_misn12_control.png",
+        "5": "openshim_europa_auto_layer0_n.png",
+        "6": "openshim_europa_auto_layer1_n.png",
+        "7": "openshim_europa_auto_layer2_n.png",
+        "8": "openshim_europa_auto_layer3_n.png"
+      },
+      "paint": {
+        "schema": "bzr-openshim-terrain-paint-v1",
+        "rowZero": "minZ",
+        "repeatMeters": [
+          24,
+          16,
+          16,
+          48
+        ],
+        "maps": [
+          {
+            "terrainFingerprint": "69636621b1b6e510",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_europa_auto_misn12_control.png"
+          },
+          {
+            "terrainFingerprint": "becac6427a58ab6e",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_europa_auto_misn12_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "f8f8399777baffea",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_europa_auto_misn13_control.png"
+          },
+          {
+            "terrainFingerprint": "7e9dd58dc80601a6",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_europa_auto_misn13_stock_control.png"
+          }
+        ],
+        "heightBlend": 0.5,
+        "heightMeters": [
+          0.4,
+          0.3,
+          1.0,
+          1.2
+        ]
+      }
+    }
+  }
+}

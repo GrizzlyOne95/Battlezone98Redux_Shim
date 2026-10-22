@@ -1,0 +1,159 @@
+{
+  "schema": "bzr-openshim-terrain-autopaint-v1",
+  "material": "MN_DETAIL_ATLAS",
+  "diffuseResource": "moon_atlas_d.dds",
+  "typeNames": {
+    "0": [
+      "",
+      "moon dune"
+    ],
+    "3": [
+      "",
+      "moon rock"
+    ],
+    "4": [
+      "",
+      "base"
+    ],
+    "5": [
+      "",
+      "base"
+    ],
+    "6": [
+      "",
+      "base"
+    ]
+  },
+  "typeWeights": {
+    "0": [
+      1,
+      0,
+      0,
+      0
+    ],
+    "3": [
+      0,
+      1,
+      0,
+      0
+    ],
+    "4": [
+      0,
+      1,
+      0,
+      0
+    ],
+    "5": [
+      0,
+      1,
+      0,
+      0
+    ],
+    "6": [
+      0,
+      1,
+      0,
+      0
+    ]
+  },
+  "transition": {
+    "cap": 0.3,
+    "diagonal": 0.5
+  },
+  "blurMeters": 14,
+  "outsideWeights": [
+    1,
+    0,
+    0,
+    0
+  ],
+  "variation": {
+    "meters": 220,
+    "amount": 0.7,
+    "types": {
+      "0": [
+        0,
+        0,
+        1,
+        0
+      ],
+      "3": [
+        0,
+        0,
+        0,
+        1
+      ]
+    }
+  },
+  "slope": {
+    "weights": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "startDegrees": 24,
+    "fullDegrees": 38
+  },
+  "layers": [
+    {
+      "name": "Dust",
+      "repeatMeters": 24,
+      "file": "moon_dusted_01_diff_2k.png",
+      "matchMean": "crhd_moon_mn00sa0_d.dds",
+      "gain": [
+        0.9,
+        1.0,
+        1.09
+      ],
+      "heightMeters": 0.6,
+      "derivedReliefMeters": 0.6,
+      "specularScale": 0.6,
+      "craters": {
+        "count": 120,
+        "minMeters": 0.6,
+        "maxMeters": 5,
+        "seed": 11,
+        "detail": 0.15
+      }
+    },
+    {
+      "name": "Blue rock",
+      "repeatMeters": 16,
+      "archive": "icelandic_rocky_ground_vglndb0g_8k.zip",
+      "member": "Icelandic_Rocky_Ground_vglndb0g_8K_BaseColor.jpg",
+      "matchMean": "crhd_moon_mn33sa0_d.dds",
+      "heightMeters": 1.2
+    },
+    {
+      "name": "Cratered dust",
+      "repeatMeters": 40,
+      "file": "moon_meteor_02_diff_2k.png",
+      "matchMean": "crhd_moon_mn00sa0_d.dds",
+      "gain": [
+        0.9,
+        1.0,
+        1.09
+      ],
+      "heightMeters": 2.5,
+      "derivedReliefMeters": 2.5,
+      "specularScale": 0.6,
+      "craters": {
+        "count": 70,
+        "minMeters": 2,
+        "maxMeters": 18,
+        "seed": 5,
+        "detail": 0.08
+      }
+    },
+    {
+      "name": "Blue rock wide",
+      "repeatMeters": 40,
+      "archive": "icelandic_jagged_rock_ucumbgedy_8k.zip",
+      "member": "Icelandic_Jagged_Rock_ucumbgedy_8K_BaseColor.jpg",
+      "matchMean": "crhd_moon_mn33sa0_d.dds",
+      "heightMeters": 1.6
+    }
+  ],
+  "heightBlend": 0.5
+}

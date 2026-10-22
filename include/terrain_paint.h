@@ -2,6 +2,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <iomanip>
 #include <locale>
 #include <sstream>
@@ -18,6 +19,13 @@ namespace BZROpenShim::TerrainPaint
         // Native world metres: min X, min Z, max X, max Z. PNG row 0 is min Z.
         std::array<float, 4> bounds = {};
         std::array<float, 4> repeatMeters = {};
+        // 5 slices: diffuse 0-3, control 4. 9 slices adds the full material:
+        // diffuse alpha is specular, slices 5-8 hold tangent normal RGB with
+        // height in alpha, used for height-aware blending and displacement.
+        unsigned sliceCount = 5;
+        float heightBlend = 0.5f;
+        std::array<float, 4> heightMeters = {};
+        bool Material() const { return sliceCount == 9; }
         // Optional multi-map table. Several campaign maps share one atlas
         // material, so a single pack lists one entry per terrain shape; the
         // entry matching the live fingerprint and bounds supplies the control
@@ -39,6 +47,14 @@ namespace BZROpenShim::TerrainPaint
                 throw std::runtime_error("paint bounds must have positive extents");
             for (float v : repeatMeters) if (!std::isfinite(v) || v < 1 || v > 4096)
                 throw std::runtime_error("paint material repeats must be 1..4096 metres");
+            if (sliceCount != 5 && sliceCount != 9)
+                throw std::runtime_error("paint packs have 5 or 9 array slices");
+            if (!std::isfinite(heightBlend) || heightBlend < 0 || heightBlend > 4)
+                throw std::runtime_error("paint heightBlend must be 0..4");
+            for (float v : heightMeters) if (!std::isfinite(v) || v < 0 || v > 32)
+                throw std::runtime_error("paint heightMeters must be 0..32 metres");
+            if (!Material() && heightMeters != std::array<float, 4>{})
+                throw std::runtime_error("paint heightMeters needs the 9-slice material form");
             for (std::size_t i = 0; i < maps.size(); ++i)
             {
                 const auto& map = maps[i];
@@ -90,7 +106,7 @@ namespace BZROpenShim::TerrainPaint
 // mips at repeat boundaries. Do not depend on the native atlas sampler mode.
 #define OPENSHIM_PAINT_SAMPLE(tex, sam, uv) tex.SampleGrad(sam, float3(frac((uv).xy), (uv).z), ddx((uv).xy), ddy((uv).xy))
 #endif
-float4 OpenShimSampleTerrainPaint(Texture2DArray tex, SamplerState sam, float2 worldXZ)
+float4 OpenShimPaintWeights(Texture2DArray tex, SamplerState sam, float2 worldXZ)
 {
     uint width, height, slices;
     tex.GetDimensions(width, height, slices);
@@ -101,14 +117,48 @@ float4 OpenShimSampleTerrainPaint(Texture2DArray tex, SamplerState sam, float2 w
     float4 weights = max(tex.SampleLevel(sam, float3(clamp(paintUV, inset, 1.0-inset), 4), 0), 0);
     float total = dot(weights, float4(1,1,1,1));
     weights = total > 0.00001 ? weights / total : float4(1,0,0,0);
-    float3 rgb =
-        OPENSHIM_PAINT_SAMPLE(tex, sam, float3(worldXZ / openShimPaintRepeats.x, 0)).rgb * weights.x +
-        OPENSHIM_PAINT_SAMPLE(tex, sam, float3(worldXZ / openShimPaintRepeats.y, 1)).rgb * weights.y +
-        OPENSHIM_PAINT_SAMPLE(tex, sam, float3(worldXZ / openShimPaintRepeats.z, 2)).rgb * weights.z +
-        OPENSHIM_PAINT_SAMPLE(tex, sam, float3(worldXZ / openShimPaintRepeats.w, 3)).rgb * weights.w;
-    // The fourth control channel is a weight, never terrain transparency.
-    return float4(rgb, 1);
+#if OPENSHIM_PAINT_MATERIAL
+    // Height-aware blend: the taller layer wins inside a transition, so rock
+    // pokes through sand at its crests instead of cross-fading.
+    float4 heights = float4(
+        OPENSHIM_PAINT_SAMPLE(tex, sam, float3(worldXZ / openShimPaintRepeats.x, 5)).a,
+        OPENSHIM_PAINT_SAMPLE(tex, sam, float3(worldXZ / openShimPaintRepeats.y, 6)).a,
+        OPENSHIM_PAINT_SAMPLE(tex, sam, float3(worldXZ / openShimPaintRepeats.z, 7)).a,
+        OPENSHIM_PAINT_SAMPLE(tex, sam, float3(worldXZ / openShimPaintRepeats.w, 8)).a);
+    float4 lifted = weights + heights * openShimPaintHeightBlend;
+    float crest = max(max(lifted.x, lifted.y), max(lifted.z, lifted.w));
+    float4 kept = max(lifted - (crest - 0.2), 0) * step(0.002, weights);
+    float keptTotal = dot(kept, float4(1,1,1,1));
+    weights = keptTotal > 0.00001 ? kept / keptTotal : weights;
+#endif
+    return weights;
 }
+#define OPENSHIM_PAINT_LAYERS(tex, sam, worldXZ, weights, base) ( \
+    OPENSHIM_PAINT_SAMPLE(tex, sam, float3((worldXZ) / openShimPaintRepeats.x, (base) + 0)) * (weights).x + \
+    OPENSHIM_PAINT_SAMPLE(tex, sam, float3((worldXZ) / openShimPaintRepeats.y, (base) + 1)) * (weights).y + \
+    OPENSHIM_PAINT_SAMPLE(tex, sam, float3((worldXZ) / openShimPaintRepeats.z, (base) + 2)) * (weights).z + \
+    OPENSHIM_PAINT_SAMPLE(tex, sam, float3((worldXZ) / openShimPaintRepeats.w, (base) + 3)) * (weights).w)
+float4 OpenShimSampleTerrainPaint(Texture2DArray tex, SamplerState sam, float2 worldXZ)
+{
+    float4 weights = OpenShimPaintWeights(tex, sam, worldXZ);
+    // The fourth control channel is a weight, never terrain transparency, and
+    // diffuse alpha (specular in the material form) is not the detail weight.
+    return float4(OPENSHIM_PAINT_LAYERS(tex, sam, worldXZ, weights, 0).rgb, 1);
+}
+#if OPENSHIM_PAINT_MATERIAL
+// Packed tangent normal (mode 0 RGB: +x along world X, +y along world Z),
+// blended before unpacking; the lighting path renormalizes.
+float4 OpenShimSampleTerrainPaintNormal(Texture2DArray tex, SamplerState sam, float2 worldXZ)
+{
+    float4 weights = OpenShimPaintWeights(tex, sam, worldXZ);
+    return float4(OPENSHIM_PAINT_LAYERS(tex, sam, worldXZ, weights, 5).rgb, 1);
+}
+float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, float2 worldXZ)
+{
+    float4 weights = OpenShimPaintWeights(tex, sam, worldXZ);
+    return OPENSHIM_PAINT_LAYERS(tex, sam, worldXZ, weights, 0).aaa;
+}
+#endif
 )HLSL";
     }
     inline bool Specialize(std::string& source, bool pixel, const Config& config)
@@ -120,12 +170,39 @@ float4 OpenShimSampleTerrainPaint(Texture2DArray tex, SamplerState sam, float2 w
             const auto offset = source.find(token);
             if (offset == std::string::npos) return false;
             source.replace(offset, token.size(), "OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, openShimHdUV)");
+            if (config.Material())
+            {
+                // The paint array rides in t0, so normal and specular come from
+                // it too; the stock atlas maps would follow the wrong UVs.
+                // A pass that never samples a map (the glow pass has colour
+                // only) keeps that part unchanged; a pass that samples it in
+                // an unknown form declines.
+                struct Swap { const char* from; const char* to; const char* use; };
+                const Swap swaps[] = {
+                    {"normalMap.Sample(normalSam, vTexCoord)", "OpenShimSampleTerrainPaintNormal(diffuseMap, diffuseSam, openShimHdUV)", "normalMap.Sample"},
+                    {"specularMap.Sample(specularSam, vTexCoord).xyz", "OpenShimSampleTerrainPaintSpecular(diffuseMap, diffuseSam, openShimHdUV)", "specularMap.Sample"},
+                    {"cotangent_frame(geometryNormal, vViewPosition.xyz, vTexCoord)",
+                     "cotangent_frame(geometryNormal, vViewPosition.xyz, openShimHdUV)", "cotangent_frame(geometryNormal"},
+                    // Vertex tangents follow the stock atlas UVs; no terrain
+                    // program defines them today, but never mix the frames.
+                    {"float3x3 tbn = float3x3(baseTangent, binormal, baseNormal);",
+                     "float3x3 tbn = cotangent_frame(geometryNormal, vViewPosition.xyz, openShimHdUV);", nullptr},
+                };
+                for (const auto& swap : swaps)
+                {
+                    const auto at = source.find(swap.from);
+                    if (at == std::string::npos) { if (swap.use && source.find(swap.use) != std::string::npos) return false; continue; }
+                    source.replace(at, std::strlen(swap.from), swap.to);
+                }
+            }
             std::ostringstream constants; constants.imbue(std::locale::classic()); constants << std::setprecision(9) << std::scientific;
+            constants << "#define OPENSHIM_PAINT_MATERIAL " << (config.Material() ? 1 : 0) << "\n";
             constants << "static const float4 openShimPaintBounds = float4(";
             for (int i = 0; i < 4; ++i) constants << (i ? "," : "") << config.bounds[i];
             constants << ");\nstatic const float4 openShimPaintRepeats = float4(";
             for (int i = 0; i < 4; ++i) constants << (i ? "," : "") << config.repeatMeters[i];
-            source.insert(0, constants.str() + ");\n" + BlendHlsl());
+            constants << ");\nstatic const float openShimPaintHeightBlend = " << config.heightBlend;
+            source.insert(0, constants.str() + ";\n" + BlendHlsl());
         }
         else
         {

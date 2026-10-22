@@ -1,0 +1,100 @@
+{
+  "schema": "bzr-openshim-terrain-hd-v1",
+  "materials": {
+    "VE_DETAIL_ATLAS": {
+      "sliceCount": 9,
+      "diffuseResource": "venus_atlas_d.dds",
+      "fallback": "openshim_venus_auto_layer0.png",
+      "tiles": {
+        "0": "openshim_venus_auto_layer0.png",
+        "1": "openshim_venus_auto_layer1.png",
+        "2": "openshim_venus_auto_layer2.png",
+        "3": "openshim_venus_auto_layer3.png",
+        "4": "openshim_venus_auto_misn07_control.png",
+        "5": "openshim_venus_auto_layer0_n.png",
+        "6": "openshim_venus_auto_layer1_n.png",
+        "7": "openshim_venus_auto_layer2_n.png",
+        "8": "openshim_venus_auto_layer3_n.png"
+      },
+      "paint": {
+        "schema": "bzr-openshim-terrain-paint-v1",
+        "rowZero": "minZ",
+        "repeatMeters": [
+          18,
+          16,
+          20,
+          40
+        ],
+        "maps": [
+          {
+            "terrainFingerprint": "cca3217d3d8ec02c",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_venus_auto_misn07_control.png"
+          },
+          {
+            "terrainFingerprint": "b6671b747acc75ba",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_venus_auto_misn07_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "d2c132545d75be8f",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_venus_auto_misn08_control.png"
+          },
+          {
+            "terrainFingerprint": "2296f12e2dc04bb2",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_venus_auto_misn08_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "3ee49e58e8c11f45",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_venus_auto_misn09_control.png"
+          },
+          {
+            "terrainFingerprint": "c21819c07ec57d1c",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_venus_auto_misn09_stock_control.png"
+          }
+        ],
+        "heightBlend": 0.5,
+        "heightMeters": [
+          0.8,
+          0.15,
+          0.6,
+          1.8
+        ]
+      }
+    }
+  }
+}

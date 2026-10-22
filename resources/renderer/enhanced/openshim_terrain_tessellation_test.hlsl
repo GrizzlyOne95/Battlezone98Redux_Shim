@@ -12,6 +12,10 @@
 #if defined(OPENSHIM_HEIGHT_TEST) && (!defined(OPENSHIM_RELIEF_TEST) || defined(VERTEX_LIGHTING))
 #error Texture height needs the qualified per-pixel relief interface
 #endif
+#if defined(OPENSHIM_PAINT_HEIGHT) && (!defined(OPENSHIM_RELIEF_TEST) || !defined(OPENSHIM_TERRAIN_HD) || \
+    defined(OPENSHIM_HEIGHT_TEST) || defined(VERTEX_LIGHTING))
+#error Paint height needs the paint-mode HD interface and owns the domain texture slot
+#endif
 
 #if defined(OPENSHIM_TESS_ADAPTIVE)
 // Ogre ACT_VIEWPORT_SIZE supplies width/height and their reciprocals per pass.
@@ -139,6 +143,74 @@ float3 TerrainHeightRelief(float2 uv, float2 xz0, float2 xz1, float2 xz2,
     return all(isfinite(result)) ? result : 0.0;
 }
 #endif
+
+#if defined(OPENSHIM_PAINT_HEIGHT)
+// Full-material paint array: control in slice 4, layer heights in the alpha
+// of normal slices 5-8. hdUV carries native world XZ in paint mode. Heights
+// are a pure function of world XZ at a fixed mip per layer, so the two
+// patches on a shared edge displace it identically and no cracks open.
+Texture2DArray<float4> terrainPaintArray : register(t127);
+
+float4 TerrainPaintBilinear(float2 uv, uint slice, uint mip, bool wrap)
+{
+    uint width, height, elements, levels;
+    terrainPaintArray.GetDimensions(mip, width, height, elements, levels);
+    int2 size = int2(width, height);
+    float2 pixel = (wrap ? frac(uv) : uv) * float2(size) - 0.5;
+    if (!wrap) pixel = clamp(pixel, 0.0, float2(size - 1));
+    int2 lo = int2(floor(pixel));
+    float2 f = pixel - float2(lo);
+    int2 hi = min(lo + 1, size - 1);
+    if (wrap) { hi = lo + 1 >= size ? 0 : lo + 1; lo = lo < 0 ? size - 1 : lo; }
+    float4 a = terrainPaintArray.Load(int4(lo, slice, mip));
+    float4 b = terrainPaintArray.Load(int4(hi.x, lo.y, slice, mip));
+    float4 c = terrainPaintArray.Load(int4(lo.x, hi.y, slice, mip));
+    float4 d = terrainPaintArray.Load(int4(hi, slice, mip));
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+}
+
+uint TerrainPaintMip(float repeat)
+{
+    uint width, height, elements, levels;
+    terrainPaintArray.GetDimensions(0, width, height, elements, levels);
+    // Sample at roughly the finest tessellated vertex spacing (5 m native
+    // grid / factor); finer texels would only alias between vertices.
+    float spacing = 5.0 / OPENSHIM_TESS_FACTOR;
+    return uint(clamp(ceil(log2(max(spacing * width / repeat, 1.0))), 0.0, float(levels - 1)));
+}
+
+float TerrainPaintHeight(float2 worldXZ)
+{
+    if (!all(isfinite(worldXZ))) return 0.0;
+    float2 paintUV = (worldXZ - OPENSHIM_PAINT_BOUNDS.xy) / (OPENSHIM_PAINT_BOUNDS.zw - OPENSHIM_PAINT_BOUNDS.xy);
+    float4 weights = max(TerrainPaintBilinear(paintUV, 4, 0, false), 0);
+    float total = dot(weights, 1);
+    weights = total > 0.00001 ? weights / total : float4(1,0,0,0);
+    float4 repeats = OPENSHIM_PAINT_REPEATS;
+    float4 heights = float4(
+        TerrainPaintBilinear(worldXZ / repeats.x, 5, TerrainPaintMip(repeats.x), true).a,
+        TerrainPaintBilinear(worldXZ / repeats.y, 6, TerrainPaintMip(repeats.y), true).a,
+        TerrainPaintBilinear(worldXZ / repeats.z, 7, TerrainPaintMip(repeats.z), true).a,
+        TerrainPaintBilinear(worldXZ / repeats.w, 8, TerrainPaintMip(repeats.w), true).a);
+    // Same height-aware selection as the pixel shader.
+    float4 lifted = weights + heights * OPENSHIM_PAINT_HEIGHT_BLEND;
+    float crest = max(max(lifted.x, lifted.y), max(lifted.z, lifted.w));
+    float4 kept = max(lifted - (crest - 0.2), 0) * step(0.002, weights);
+    float keptTotal = dot(kept, 1);
+    weights = keptTotal > 0.00001 ? kept / keptTotal : weights;
+    float value = dot(weights, (heights - 0.5) * OPENSHIM_PAINT_HEIGHT_METERS) * OPENSHIM_PAINT_HEIGHT_SCALE;
+    return isfinite(value) ? clamp(value, -OPENSHIM_RELIEF_AMPLITUDE, OPENSHIM_RELIEF_AMPLITUDE) : 0.0;
+}
+
+float3 TerrainPaintRelief(float2 worldXZ)
+{
+    const float e = 0.5 * 5.0 / OPENSHIM_TESS_FACTOR;
+    float h = TerrainPaintHeight(worldXZ);
+    float dx = TerrainPaintHeight(worldXZ + float2(e, 0)) - TerrainPaintHeight(worldXZ - float2(e, 0));
+    float dz = TerrainPaintHeight(worldXZ + float2(0, e)) - TerrainPaintHeight(worldXZ - float2(0, e));
+    return float3(h, float2(dx, dz) / (2.0 * e));
+}
+#endif
 #endif
 
 struct TerrainTessVertex
@@ -245,7 +317,11 @@ TerrainTessVertex TerrainDomain(TerrainTessFactors f, float3 b : SV_DomainLocati
 // Recover native object position with inverse WORLD-view, which remains
 // valid when Ogre subtracts the camera origin from world/view transforms.
 #if defined(OPENSHIM_RELIEF_TEST)
-#if defined(OPENSHIM_HEIGHT_TEST)
+#if defined(OPENSHIM_PAINT_HEIGHT)
+    // hdUV is world XZ and object XZ differs only by translation, so the
+    // world-space gradient is already the object-space one.
+    float3 relief = TerrainPaintRelief(o.hdUV);
+#elif defined(OPENSHIM_HEIGHT_TEST)
     float3 relief = TerrainHeightRelief(o.uv,
         TerrainReliefObjectXZ(p[0].viewPosition, reliefInverseWorldView),
         TerrainReliefObjectXZ(p[1].viewPosition, reliefInverseWorldView),

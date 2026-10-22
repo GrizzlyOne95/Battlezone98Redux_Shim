@@ -1,0 +1,115 @@
+{
+  "schema": "bzr-openshim-terrain-autopaint-v1",
+  "material": "TI_DETAIL_ATLAS",
+  "diffuseResource": "titan_atlas_d.dds",
+  "typeNames": {
+    "0": [
+      "Methane Ocean",
+      ""
+    ],
+    "3": [
+      "Rock",
+      ""
+    ]
+  },
+  "typeWeights": {
+    "0": [
+      1,
+      0,
+      0,
+      0
+    ],
+    "1": [
+      0,
+      1,
+      0,
+      0
+    ],
+    "3": [
+      0,
+      1,
+      0,
+      0
+    ]
+  },
+  "transition": {
+    "cap": 0.3,
+    "diagonal": 0.5
+  },
+  "blurMeters": 14,
+  "outsideWeights": [
+    1,
+    0,
+    0,
+    0
+  ],
+  "variation": {
+    "meters": 220,
+    "amount": 0.6,
+    "types": {
+      "0": [
+        0,
+        0,
+        1,
+        0
+      ],
+      "1": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "3": [
+        0,
+        0,
+        0,
+        1
+      ]
+    }
+  },
+  "slope": {
+    "weights": [
+      0,
+      1,
+      0,
+      0
+    ],
+    "startDegrees": 24,
+    "fullDegrees": 38
+  },
+  "layers": [
+    {
+      "name": "Methane shore",
+      "repeatMeters": 20,
+      "archive": "beach_gravel_with_pebbles_uifndiulw_8k.zip",
+      "member": "Beach_Gravel_With_Pebbles_uifndiulw_8K_BaseColor.jpg",
+      "matchMean": "crhd_titan_ti00sa0_d.dds",
+      "heightMeters": 0.35
+    },
+    {
+      "name": "Rock",
+      "repeatMeters": 20,
+      "archive": "icelandic_jagged_rock_ucumbgedy_8k.zip",
+      "member": "Icelandic_Jagged_Rock_ucumbgedy_8K_BaseColor.jpg",
+      "matchMean": "crhd_titan_ti33sa0_d.dds",
+      "heightMeters": 1.4
+    },
+    {
+      "name": "Shore wide",
+      "repeatMeters": 40,
+      "archive": "sandy_beach_rock_udrkajbn_8k.zip",
+      "member": "Sandy_Beach_Rock_udrkajbn_8K_BaseColor.jpg",
+      "matchMean": "crhd_titan_ti00sb0_d.dds",
+      "heightMeters": 0.8
+    },
+    {
+      "name": "Rock wide",
+      "repeatMeters": 36,
+      "archive": "icelandic_rocky_ground_ve2kbizn_8k.zip",
+      "member": "Icelandic_Rocky_Ground_ve2kbizn_8K_BaseColor.jpg",
+      "matchMean": "crhd_titan_ti33sb0_d.dds",
+      "heightMeters": 1.2
+    }
+  ],
+  "heightBlend": 0.5
+}

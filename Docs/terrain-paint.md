@@ -83,7 +83,7 @@ three files, which is needed when a mission overrides only some of them (Campaig
 Reimagined overrides `misn05.hg2` but not its MAT or TRN). `--capture NAME=FILE`
 cross-checks that map against an `OPENSHIM_TERRAIN_HD_EXPORT` capture and
 declines on any disagreement. The output is one multi-map manifest
-(`<prefix>.json`), four layer PNGs shared by every map, one control PNG per
+(`<prefix>.json`), four layer PNGs (plus four normal+height PNGs in the material form) shared by every map, one control PNG per
 distinct layout (maps with identical MAT layouts share one) and, for touch-up, one
 standalone editor per map preloaded with the generated weights. Install the
 manifest beside the executable and the PNGs next to it, as for a hand-painted pack.
@@ -133,7 +133,10 @@ These facts were measured on stock `misn04` and are what the generator uses:
 
 `terrain_fingerprint()` reproduces `CaptureTerrainPaintMap()` from the HG2: FNV-1a
 over the zone count, then for each zone in `(x, z)` order its coordinates and its
-256 x 256 13-bit height samples (row-major, zero outside the file). It matches the
+256 x 256 height samples masked to 12 bits (row-major). Samples outside the file
+read the TRN pad height, `(int)([Size] Height / 0.1)` (0 when absent): the engine
+fills unloaded zones with a default zone of that height (Titan and `misn05` use
+`Height=50`, a pad of 500). It matches the
 in-game value for stock `misn04` (`73f9729303821983`, the hand-painted pack's
 fingerprint), confirmed again by a live capture (`zoneCount` 20, same bounds). No
 game launch is needed to author a pack for a map whose HG2 is at hand. The sample
@@ -147,99 +150,51 @@ both versions as separate map entries.
 | Map | Zones | Stock fingerprint (live) | CR fingerprint (live) |
 |---|---|---|---|
 | `misn04` | 4x3 | `73f9729303821983` (matches offline) | `cd7f44e80ffb7fc1` (matches offline) |
-| `misn05` | 3x3 | `04e39ffb0e80a25e` (offline `087ff2851a95085e` **disagrees**) | `5e4ef40b581c2c36` (offline `b239c56fe89ebe36` **disagrees**) |
+| `misn05` | 3x3 | `04e39ffb0e80a25e` (matches offline) | `5e4ef40b581c2c36` (matches offline) |
 | `misn06` | 4x4 | `9c77ccbdec3593fe` (matches offline) | `47910f1f7563463d` (matches offline) |
 
-The offline model reproduces four of the six maps. For `misn05` the bounds and
-zone count (16) match the live capture but the hash does not; the cause is not
-found (a 3x3 file is the only odd-sized one; a brute-force search over zone and
-sample offsets did not reproduce it). `--capture NAME=FILE --trust-capture` uses
-the live values for such a map, which is how `misn05` is packed here. Reading the
-live map from the decline message (it prints the actual fingerprint and bounds) or
-capturing once with `OPENSHIM_TERRAIN_HD_EXPORT` is the fallback.
+`misn05` and every Titan map disagreed until the pad height was modelled; all
+listed maps now reproduce offline. `--capture NAME=FILE --trust-capture` remains
+for a map the offline model cannot reproduce: read the live fingerprint and
+bounds from the decline message or capture once with `OPENSHIM_TERRAIN_HD_EXPORT`.
 
-### In-game results (GOG, DX11 Enhanced, `OPENSHIM_ENABLE_ENHANCED_STOCK_TERRAIN=1`)
+## Full material form (9 slices)
 
-Test missions were minimal text BZNs with the map's own terrain files and a Lua
-driver that teleported the player and parked a chase camera, so each run shows
-three spots. Before = HD tiles off; after = the generated multi-map pack.
+The auto-paint builder emits the full material by default (`"diffuseOnly": true`
+in a recipe keeps the five-slice form):
 
-| Mission (terrain files) | Selected entry | Result |
+| Slice | RGB | A |
 |---|---|---|
-| stock `misn04` | `73f9...` | painted; also compared with the hand-painted set |
-| CR `misn04` | `cd7f...` | painted |
-| CR `misn06` | `4791...` | painted |
-| stock `misn06` | `9c77...` | entry selected; shots not inspected |
-| stock and CR `misn05` | none | pack declined (offline fingerprint wrong); the packed live values were **not** re-run in game |
+| 0-3 | layer colour (sRGB) | specular mask, `(1 - roughness) * specularScale` |
+| 4 | control weights (RGBA) | |
+| 5-8 | tangent normal, `rgb * 2 - 1`, +x along world X, +y along world Z | height, median 0.5, 1st..99th percentile stretched to 0..1 |
 
-![stock misn04: before, auto, hand-painted](images/terrain_autopaint/misn04_stock_before_auto_hand.jpg)
-![CR misn04: before, auto](images/terrain_autopaint/misn04_cr_before_after.jpg)
-![CR misn06: before, auto](images/terrain_autopaint/misn06_cr_before_after.jpg)
+`paint.heightBlend` (default 0.5, range 0..4) lifts each weight by its layer
+height, keeps only layers within 0.2 of the tallest and renormalizes, so rock
+crests poke through dust inside transitions instead of cross-fading. The same
+blend drives the pixel shader and the tessellation domain shader.
+`paint.heightMeters` (per layer, 0..32) is the peak-to-peak displacement. With
+`[Terrain] TerrainMicroRelief = 1`, the domain shader reads the height slices
+from the same array (bound to DS `t127`), blends them like the pixel shader and
+displaces by `(h - 0.5) * heightMeters`, scaled by `microReliefAmplitude / 0.25`.
+Each layer reads one fixed mip, chosen from the tessellated vertex spacing and
+repeat length, so shared patch edges always agree and no cracks open.
 
-What the shots show: paint boundaries follow the stock layout (pale sand patches
-and cliff/rock faces sit where the stock tiles put them), the selection logic
-binds the right entry, and the runtime logs `multi-map entry selected` for each.
-They do not show parity of look: the four recipe layers share one brown palette,
-so the stock atlas's dark and red rock tiles become a similar brown. That is an
-artwork choice (layers 2 and 3 need darker albedo to carry the stock contrast),
-not a layout error. The "hand-painted" Mars set is the recipe's demonstration
-blobs, not a map-specific paint, and at these spots it is visually close to the
-auto result; no quantitative comparison was made. Pre-generated outputs
-(manifest and control maps, no artwork) are in
-`scripts/terrain-packs/generated/mars-auto/`; the layer PNGs are local.
+In the material form the paint replaces the stock normal and specular atlas
+samples, and the cotangent frame follows the paint UVs. Layer recipe fields:
 
-Existing tooling: CR's `Build-MarsHdTileSources.py` / `Build-MoonHdTerrain.py` and
-the Toolbox `hd_tiles.py` author per-tile v2 packs, a different runtime format;
-none derives paint weights or fingerprints from MAT/HG2, so this script reuses only
-OpenShim's own `Build-TerrainHdPack.py` and `Build-TerrainPaintPack.py` helpers.
+- `normal`, `height`, `roughness`: an archive member name, or a full source
+  entry. When omitted, members are found by suffix swap (`_BaseColor` to
+  `_Normal`, `_Displacement`, `_Roughness`; Poly Haven `diff` to `nor_gl`,
+  `disp`, `rough`).
+- Normal X and Y are each checked against the height gradient and flipped when
+  they disagree, so DirectX- and OpenGL-convention maps both work.
+- Missing maps are derived: height from the colour's high-passed luminance, the
+  normal from that height (`derivedReliefMeters`, default 0.25), and specular as
+  0.5.
+- `seamless` wrap-blends the normal, height and specular too.
 
-### Extending to other worlds
-
-1. List the world's campaign missions in `Config/crcampgn.ini`; the TRN's
-   `[Atlases] MaterialName` (for example `ve_detail_atlas`) is the manifest material
-   key, so one manifest can hold every world as a separate `materials` entry.
-2. Copy `scripts/terrain-packs/mars-autopaint.json`: set `diffuseResource` to the
-   world's atlas diffuse texture, `typeNames` to the TRN `[TextureTypeN]` comments
-   and `typeWeights` to the four layers that best match each type. The script
-   declines a TRN whose type names differ from the recipe, so a new world cannot
-   silently get Mars' mapping.
-3. Run the script over every mission of that world, both the stock and the CR copy
-   of the HG2 where they differ, and merge the `materials` entry into the shared
-   manifest. Confirm one map per world live (the `[TERRAIN-PAINT] map accepted
-   fingerprint=...` log line prints the live value, or use
-   `OPENSHIM_TERRAIN_HD_EXPORT` and `--capture`) before trusting the offline
-   fingerprint for the others.
-4. The layer artwork is the only per-world creative input. A TRN with more than four
-   visually distinct materials needs a `typeWeights` that folds some together; four
-   layers is the runtime limit.
-
-## Multi-map manifests
-
-Several campaign missions share one atlas material (`MA_DETAIL_ATLAS` for all of
-Mars), so a one-fingerprint manifest could only ever cover one of them. `paint` may
-now carry a `maps` table instead of a single `terrainFingerprint`/`boundsMeters`:
-
-```json
-"paint": {
-  "schema": "bzr-openshim-terrain-paint-v1",
-  "rowZero": "minZ",
-  "repeatMeters": [24, 16, 12, 24],
-  "maps": [
-    {"terrainFingerprint": "73f9729303821983", "boundsMeters": [-3190, -2570, 3210, 2550], "control": "mars_misn04_control.png"},
-    {"terrainFingerprint": "087ff2851a95085e", "boundsMeters": [-2550, -2570, 2570, 2550], "control": "mars_misn05_control.png"}
-  ]
-}
-```
-
-`tiles` still lists exactly five slices; slice 4 names the default control image.
-At install the runtime computes the live fingerprint and bounds (unchanged) and
-binds the control image of the entry matching **both**; no entry means the whole
-pack declines before binding anything and the stock atlas stays. The layers, the
-five-slice array size and every other guard are unchanged, and the single-map form
-still works. Log lines: `[TERRAIN-PAINT] multi-map entry selected fingerprint=...
-control=...`, or on a mismatch the decline message with the live map. Entries must
-be unique per fingerprint and bounds; at most 64. Unit tests cover selection and
-validation.
+Nine 2048-pixel RGBA8 slices with full mips cost about 192 MiB of video memory.
 
 ## Runtime format and guards
 
@@ -256,8 +211,8 @@ Paint extends `bzr-openshim-terrain-hd-v1` material bindings with:
 ```
 
 The illustration's fingerprint/bounds are placeholders; use the live capture.
-Exactly five explicit slices are required: four material images then one RGBA
-control image. The diffuse-resource identity guard is mandatory. Canonical
+Exactly five or nine explicit slices are required: four material images, one
+RGBA control image and, in the material form, four normal+height images. The diffuse-resource identity guard is mandatory. Canonical
 zone coordinates and every native height sample contribute to a 64-bit FNV
 map fingerprint. This is an accidental
 misapplication guard, not a security hash. Native sample-storage origins are
@@ -270,14 +225,14 @@ streams; painting requires rebuilding the pack and restarting the game.
 
 ## Current limits
 
-This is diffuse-only painting with the stock lighting pipeline. Normal,
-detail and specular maps retain their stock atlas coordinates, and materials
-are blended before the stock colour-space processing. Diffuse repetition is
+The five-slice form is diffuse-only: normal, detail and specular keep their stock
+atlas coordinates. The nine-slice form (above) replaces normal and specular;
+the detail map still uses stock coordinates. Materials are blended before the
+stock colour-space processing. Diffuse repetition is
 explicit, with
 UV gradients taken before wrapping so repeat boundaries do not select
-incorrect mip levels. Material height assets,
-height-based blending and physically based material maps are future work.
-The bounded procedural micro relief remains separate from the paint layers.
+incorrect mip levels. When the material form has non-zero `heightMeters`, the
+paint heights replace the procedural micro relief.
 
 The initial implementation packs control weights into slice 4 of the same
 texture array to reuse the validated native binding/upload/lifetime path.

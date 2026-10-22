@@ -1,10 +1,13 @@
 #include "terrain_paint.h"
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 using namespace BZROpenShim;
 static void check(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
-int main()
+int main(int argc, char** argv)
 {
     try
     {
@@ -52,7 +55,59 @@ int main()
             bool rejected = false; try { broken.Validate(); } catch (...) { rejected = true; }
             check(rejected, "invalid multi-map table accepted");
         }
-        std::cout << "PASS: map contracts, multi-map selection, native cluster seam and preserved auxiliary UVs\n";
+        // Full material form: 9 slices, normal/specular follow paint UVs.
+        TerrainPaint::Config material = config;
+        material.sliceCount = 9; material.heightMeters = {0.5f, 0, 2, 0};
+        material.Validate();
+        for (int bad = 0; bad < 3; ++bad)
+        {
+            TerrainPaint::Config broken = bad == 2 ? config : material;
+            if (bad == 0) broken.sliceCount = 7;
+            if (bad == 1) broken.heightMeters[0] = 40;
+            if (bad == 2) broken.heightMeters[1] = 1;
+            bool rejected = false; try { broken.Validate(); } catch (...) { rejected = true; }
+            check(rejected, "invalid paint material accepted");
+        }
+        const std::string pixelSource =
+            "float4 d = diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice));\n"
+            "float3x3 tbn = cotangent_frame(geometryNormal, vViewPosition.xyz, vTexCoord);\n"
+            "float3x3 tbn = float3x3(baseTangent, binormal, baseNormal);\n"
+            "float4 normalSample = normalMap.Sample(normalSam, vTexCoord);\n"
+            "float3 specularTex = specularMap.Sample(specularSam, vTexCoord).xyz;\n"
+            "float2 detail = vTexCoord * 8.0;\n";
+        std::string plain = pixelSource, full = pixelSource;
+        check(TerrainPaint::Specialize(plain, true, config) && TerrainPaint::Specialize(full, true, material), "paint PS specialization failed");
+        check(plain.find("normalMap.Sample(normalSam, vTexCoord)") != std::string::npos &&
+            plain.find("#define OPENSHIM_PAINT_MATERIAL 0") != std::string::npos, "diffuse-only paint touched stock normals");
+        check(full.find("normalMap.Sample") == std::string::npos && full.find("specularMap.Sample") == std::string::npos &&
+            full.find("OpenShimSampleTerrainPaintNormal(diffuseMap, diffuseSam, openShimHdUV)") != std::string::npos &&
+            full.find("cotangent_frame(geometryNormal, vViewPosition.xyz, openShimHdUV)") != std::string::npos &&
+            full.find("vTexCoord * 8.0") != std::string::npos &&
+            full.find("#define OPENSHIM_PAINT_MATERIAL 1") != std::string::npos, "material paint specialization incomplete");
+        // A colour-only pass (terrain glow) keeps working; a normal sample in
+        // an unknown form must decline rather than follow stock atlas UVs.
+        std::string noNormals = "float4 d = diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice));";
+        check(TerrainPaint::Specialize(noNormals, true, material) && noNormals.find("OpenShimSampleTerrainPaint(") != std::string::npos,
+            "material paint declined a colour-only pass");
+        std::string oddNormals = pixelSource;
+        oddNormals.replace(oddNormals.find("normalMap.Sample(normalSam, vTexCoord)"), 38, "normalMap.Sample(normalSam, uv2)");
+        check(!TerrainPaint::Specialize(oddNormals, true, material), "material paint accepted an unknown normal sample");
+        // The shipping enhanced terrain PS must keep every token the material
+        // form rewrites. With an argument, export it for fxc validation.
+        std::ifstream file(std::filesystem::path(__FILE__).parent_path().parent_path() /
+            "resources/renderer/enhanced/openshim_enhanced_terrain-sm4.hlsl");
+        std::string shipping{std::istreambuf_iterator<char>(file), {}};
+        const auto rewrite = [&](const std::string& from, const std::string& to) {
+            const auto at = shipping.find(from);
+            check(at != std::string::npos, "enhanced terrain PS contract missing");
+            shipping.replace(at, from.size(), to); };
+        rewrite("uniform Texture2D diffuseMap : register(t0),", "uniform Texture2DArray diffuseMap : register(t0),");
+        rewrite("in float2 vTexCoord : TEXCOORD0,",
+            "in float2 vTexCoord : TEXCOORD0,\n in float2 openShimHdUV : TEXCOORD9,\n in float openShimTileSlice : TEXCOORD10,");
+        rewrite("diffuseMap.Sample(diffuseSam, vTexCoord)", "diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice))");
+        check(TerrainPaint::Specialize(shipping, true, material), "shipping terrain PS rejected the material form");
+        if (argc == 2) { std::ofstream out(argv[1]); out << shipping; check(bool(out), "specialized PS export failed"); }
+        std::cout << "PASS: material form, map contracts, multi-map selection, native cluster seam and preserved auxiliary UVs\n";
         return 0;
     }
     catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

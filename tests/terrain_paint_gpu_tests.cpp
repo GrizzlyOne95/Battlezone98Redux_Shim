@@ -93,7 +93,54 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
         const float repeating[]={.375f,.875f,.375f,.875f,.625f,.25f,.25f};
         for(UINT i=0;i<count;++i)check(std::abs(values[i].r-repeating[i])<1e-5f,"native clamp sampler stopped material repetition");
         context->Unmap(staging.Get(),0);
-        std::cout<<"PASS: native PS4 compilation, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
+        // Full material form: specular in diffuse alpha, normal+height in 5-8,
+        // and the taller layer taking a 50/50 transition outright.
+        TerrainPaint::Config material = config; material.sliceCount = 9; material.heightBlend = 0.5f;
+        std::string materialSource = R"(
+Texture2DArray diffuseMap : register(t0);
+SamplerState diffuseSam : register(s0);
+RWStructuredBuffer<float4> results : register(u0);
+float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXCOORD10) : SV_TARGET
+{ float3 geometryNormal = float3(0,1,0); float3 vViewPosition = float3(openShimHdUV.x, 0, openShimHdUV.y); float2 vTexCoord = openShimHdUV;
+  float3x3 tbn = cotangent_frame(geometryNormal, vViewPosition.xyz, vTexCoord);
+  float4 n = normalMap.Sample(normalSam, vTexCoord); float3 s = specularMap.Sample(specularSam, vTexCoord).xyz;
+  return diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice)) + n + float4(mul(s, tbn), 0); }
+[numthreads(1,1,1)] void ComputeMain(uint3 id : SV_DispatchThreadID)
+{ float2 at = float2(1.5, 1.5); results[0] = OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, at);
+  results[1] = OpenShimSampleTerrainPaintNormal(diffuseMap, diffuseSam, at);
+  results[2] = float4(OpenShimSampleTerrainPaintSpecular(diffuseMap, diffuseSam, at), 1); }
+)";
+        const std::string frame = "float3x3 cotangent_frame(float3 N, float3 p, float2 uv) { return float3x3(ddx(p), ddy(p), N); }\n"
+            "Texture2D normalMap : register(t2); SamplerState normalSam : register(s2);\n"
+            "Texture2D specularMap : register(t3); SamplerState specularSam : register(s3);\n";
+        check(TerrainPaint::Specialize(materialSource, true, material), "material PS specialization failed");
+        materialSource = frame + materialSource;
+        ok(D3DCompile(materialSource.data(),materialSource.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors));
+        const std::string materialCompute = "#define OPENSHIM_PAINT_SAMPLE(tex,sam,uv) tex.SampleLevel(sam,float3(frac((uv).xy),(uv).z),0)\n" + materialSource;
+        compiled = D3DCompile(materialCompute.data(),materialCompute.size(),nullptr,nullptr,nullptr,"ComputeMain","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ComPtr<ID3D11ComputeShader> materialShader;
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&materialShader));
+        std::vector<Pixel> layers(16*9);
+        const Pixel diffuse[] = {{1,0,0,.1f},{0,1,0,.7f},{0,0,1,0},{1,1,0,0}};
+        const Pixel normals[] = {{.5f,.5f,1,0},{1,.5f,.5f,1},{.5f,.5f,1,0},{.5f,.5f,1,0}};  // alpha is height
+        for (unsigned i=0;i<16;++i)
+        {
+            for (unsigned l=0;l<4;++l) { layers[l*16+i]=diffuse[l]; layers[(5+l)*16+i]=normals[l]; }
+            layers[64+i]={.5f,.5f,0,0};
+        }
+        td.ArraySize=9; D3D11_SUBRESOURCE_DATA layerData[9]={};
+        for(unsigned i=0;i<9;++i)layerData[i]={layers.data()+16*i,4*sizeof(Pixel),0};
+        ComPtr<ID3D11Texture2D> materialTexture;ok(device->CreateTexture2D(&td,layerData,&materialTexture));
+        ComPtr<ID3D11ShaderResourceView> materialView;ok(device->CreateShaderResourceView(materialTexture.Get(),nullptr,&materialView));
+        context->CSSetShader(materialShader.Get(),nullptr,0);
+        ID3D11ShaderResourceView* materialViews[]={materialView.Get()};context->CSSetShaderResources(0,1,materialViews);
+        dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));values=static_cast<const Pixel*>(mapped.pData);
+        const Pixel taller[]={{0,1,0,1},{1,.5f,.5f,1},{.7f,.7f,.7f,1}};
+        for(UINT i=0;i<3;++i)for(unsigned c=0;c<4;++c)check(std::abs((&values[i].r)[c]-(&taller[i].r)[c])<1e-5f,"height blend/material channels failed");
+        context->Unmap(staging.Get(),0);
+        std::cout<<"PASS: native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
         return 0;
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

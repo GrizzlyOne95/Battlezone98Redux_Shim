@@ -24,9 +24,10 @@ from pathlib import Path
 import re
 import struct
 import sys
+import zipfile
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 _here = Path(__file__).parent
 
@@ -57,6 +58,10 @@ MAT_ZONE_CELLS = 64
 #     samples from start + 2 (a 10 m half-cell shift), so samples outside
 #     the file read as zero and a MAT cell c spans mesh samples 4c + 2 .. 4c + 6.
 MESH_SAMPLE_BIAS = 2
+# HG2 height units in metres. Inferred, not measured in game: at 0.1 m the MAT
+# rock cells of stock misn04/misn08/misn14 have a median slope of 27-35 degrees
+# and their other cells 0-8, which matches how those maps read in play.
+HEIGHT_UNIT_METERS = 0.1
 
 
 def world_to_sample(world_x, world_z, zones_x, zones_z):
@@ -88,10 +93,14 @@ def read_mat(path, zx, zz):
 
 
 def read_trn_types(path):
-    """Texture type index -> comment on its section header (e.g. 'Sandy')."""
+    """Texture type index -> name on its section header (e.g. 'Sandy').
+
+    Headers carry the name as a comment ('[TextureType0] // Sandy') or as bare
+    text ('[TextureType1] Liquid Sulphur', stock Venus and Io); many carry none.
+    """
     names = {}
     for line in Path(path).read_text(encoding="latin-1").splitlines():
-        match = re.match(r"\s*\[TextureType(\d+)\]\s*(?://\s*(.*?))?\s*$", line, re.IGNORECASE)
+        match = re.match(r"\s*\[TextureType(\d+)\]\s*(?://)?\s*(.*?)\s*$", line, re.IGNORECASE)
         if match:
             names.setdefault(int(match.group(1)), (match.group(2) or "").strip())
     return names
@@ -113,16 +122,35 @@ def _hash_u32(h, values):
     return h
 
 
-def terrain_fingerprint(zx, zz, plane):
+def read_trn_pad(path):
+    """Height the engine gives samples outside the HG2: (int)([Size] Height / 0.1).
+
+    The default zone that fills unloaded terrain takes this value (0 when the
+    TRN has no [Size] Height); stock Titan sets Height=50, so its border is 500.
+    """
+    section = ""
+    for line in Path(path).read_text(encoding="latin-1").splitlines():
+        header = re.match(r"\s*\[(\w+)\]", line)
+        if header:
+            section = header.group(1).lower()
+            continue
+        value = re.match(r"\s*Height\s*=\s*([-+0-9.eE]+)", line, re.IGNORECASE)
+        if section == "size" and value:
+            return int(np.float32(value.group(1)) / np.float32(0.1)) & 0xFFF
+    return 0
+
+
+def terrain_fingerprint(zx, zz, plane, pad=0):
     """Runtime CaptureTerrainPaintMap hash, reproduced from the HG2 alone.
 
     The engine builds (zx+1) x (zz+1) terrain zones; zone (i, j) covers file
-    samples [256*i - 128, 256*i + 128), anything outside the file reads zero.
-    Zones hash in (x, z) order, each as its coordinates then 256x256 heights.
+    samples [256*i - 128, 256*i + 128), anything outside the file reads the
+    TRN pad height (read_trn_pad). Zones hash in (x, z) order, each as its
+    coordinates then 256x256 heights masked to 12 bits.
     """
     nx, nz = zx + 1, zz + 1
-    padded = np.zeros((nz * ZONE_SAMPLES, nx * ZONE_SAMPLES), dtype=np.uint32)
-    padded[128:128 + plane.shape[0], 128:128 + plane.shape[1]] = plane
+    padded = np.full((nz * ZONE_SAMPLES, nx * ZONE_SAMPLES), pad, dtype=np.uint32)
+    padded[128:128 + plane.shape[0], 128:128 + plane.shape[1]] = plane & 0xFFF
     h = _hash_u32(_FNV_OFFSET, [nx * nz])
     for i in range(nx):
         for j in range(nz):
@@ -182,10 +210,58 @@ def blur(field, sigma_pixels):
     return field
 
 
-def rasterize(cells, zx, zz, bounds, size, recipe):
+def smoothstep(low, high, x):
+    t = np.clip((x - low) / (high - low), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def cell_slope_degrees(plane, cell_shape):
+    """Mean slope of each MAT cell's 4 x 4 height samples (cell c is sample 4c)."""
+    heights = plane.astype(np.float64) * HEIGHT_UNIT_METERS
+    gz, gx = np.gradient(heights, SAMPLE_METERS)
+    degrees = np.degrees(np.arctan(np.hypot(gx, gz)))
+    rows, cols = cell_shape
+    return degrees[:rows * CELL_SAMPLES, :cols * CELL_SAMPLES].reshape(rows, CELL_SAMPLES, cols, CELL_SAMPLES).mean(axis=(1, 3))
+
+
+def variation_noise(cell_shape, meters, seed):
+    """Smooth 0..1 patch field on the MAT cell grid; deterministic per seed."""
+    noise = np.random.default_rng(seed).random(cell_shape)
+    noise = blur(noise, meters / (CELL_SAMPLES * SAMPLE_METERS) / 2)
+    low, high = np.percentile(noise, (5, 95))
+    return smoothstep(0.3, 0.7, (noise - low) / max(high - low, 1e-9))
+
+
+def cell_field(cells, plane, recipe, seed):
+    """Per-cell RGBA weights: MAT types, then optional variation patches and slope.
+
+    variation: {"meters", "amount", "types": {type: weights}} blends each listed
+    type toward its alternate weights inside noise patches about `meters` wide,
+    so a map painted almost entirely with one type does not repeat one tile.
+    slope: {"weights", "startDegrees", "fullDegrees"} blends steep cells toward
+    a rock layer whatever their MAT type.
+    """
+    types = {int(k): v for k, v in recipe["typeWeights"].items()}
+    fallback = recipe.get("undefinedTypeWeights", [0, 1, 0, 0])
+    weights = cell_weights(cells, types, recipe["transition"], fallback)
+    variation = recipe.get("variation")
+    if variation:
+        amount = variation.get("amount", 0.5)
+        alternate = dict(types)
+        for index, vector in variation["types"].items():
+            alternate[int(index)] = [(1 - amount) * a + amount * b for a, b in zip(types[int(index)], vector)]
+        patches = variation_noise(cells.shape, variation.get("meters", 150), seed)[..., None]
+        weights = weights * (1 - patches) + cell_weights(cells, alternate, recipe["transition"], fallback) * patches
+    slope = recipe.get("slope")
+    if slope and plane is not None:
+        steep = smoothstep(slope["startDegrees"], slope["fullDegrees"], cell_slope_degrees(plane, cells.shape))[..., None]
+        weights = weights * (1 - steep) + np.asarray(slope["weights"], dtype=np.float64) * steep
+    return weights
+
+
+def rasterize(cells, zx, zz, bounds, size, recipe, plane=None, seed=0):
     """Weight map (size x size RGBA uint8), row 0 at minimum Z, normalised to 255."""
-    weights = cell_weights(cells, {int(k): v for k, v in recipe["typeWeights"].items()}, recipe["transition"],
-                           recipe.get("undefinedTypeWeights", [0, 1, 0, 0]))
+    weights = cell_field(cells, plane, recipe, seed)
     px = (np.arange(size) + 0.5) / size
     world_x = bounds[0] + px * (bounds[2] - bounds[0])
     world_z = bounds[1] + px * (bounds[3] - bounds[1])
@@ -220,12 +296,33 @@ def validate_recipe(recipe):
     for key in ("typeWeights", "typeNames", "transition"):
         if key not in recipe:
             raise ValueError(f"recipe is missing {key}")
+    for index, names in recipe["typeNames"].items():
+        if not (isinstance(names, str) or (isinstance(names, list) and names and all(isinstance(n, str) for n in names))):
+            raise ValueError(f"typeNames[{index}] must be a name or a non-empty list of names")
     for index, vector in recipe["typeWeights"].items():
         if not (0 <= int(index) <= 15) or len(vector) != 4 or any(v < 0 for v in vector) or sum(vector) <= 0:
             raise ValueError(f"typeWeights[{index}] needs four non-negative weights with a positive sum")
     for key in ("cap", "diagonal"):
         if not 0 <= recipe["transition"].get(key, -1) <= 1:
             raise ValueError("transition cap/diagonal must be 0..1")
+    def weight_vector(vector):
+        return isinstance(vector, list) and len(vector) == 4 and all(v >= 0 for v in vector) and sum(vector) > 0
+    if "variation" in recipe:
+        variation = recipe["variation"]
+        if not 0 < variation.get("amount", 0.5) <= 1 or not 20 <= variation.get("meters", 150) <= 2000:
+            raise ValueError("variation needs amount in (0,1] and meters from 20 to 2000")
+        for index, vector in variation.get("types", {}).items():
+            if index not in recipe["typeWeights"] or not weight_vector(vector):
+                raise ValueError(f"variation.types[{index}] needs a mapped type and four weights")
+    if not 0 <= recipe.get("heightBlend", 0.5) <= 4:
+        raise ValueError("heightBlend must be 0..4")
+    for layer in recipe["layers"]:
+        if not 0 <= layer.get("heightMeters", 0) <= 32 or not 0 < layer.get("specularScale", 1) <= 4:
+            raise ValueError(f"layer {layer.get('name')} needs heightMeters 0..32 and specularScale in (0,4]")
+    if "slope" in recipe:
+        slope = recipe["slope"]
+        if not weight_vector(slope.get("weights")) or not 0 <= slope.get("startDegrees", -1) < slope.get("fullDegrees", -1) <= 90:
+            raise ValueError("slope needs four weights and 0 <= startDegrees < fullDegrees <= 90")
 
 
 def load_map(name, files, recipe, capture_path, weight_size, trust_capture=False):
@@ -234,9 +331,12 @@ def load_map(name, files, recipe, capture_path, weight_size, trust_capture=False
     cells = read_mat(mat, zx, zz)
     types = read_trn_types(trn)
     for index, expected in recipe["typeNames"].items():
-        if types.get(int(index), "").lower() != expected.lower():
+        # A list accepts any of several names: the stock and Campaign
+        # Reimagined copies of one world often label (or omit) types differently.
+        accepted = [expected] if isinstance(expected, str) else expected
+        if types.get(int(index), "").lower() not in [e.lower() for e in accepted]:
             raise ValueError(f"{name}: TRN texture type {index} is '{types.get(int(index))}', "
-                             f"recipe expects '{expected}'; add a recipe for this world layout")
+                             f"recipe expects {accepted}; add a recipe for this world layout")
     # MAT words can name a type the TRN never defines (stock misn04 has nine
     # such cells in its last column). The engine draws its default tile there,
     # so the recipe supplies undefinedTypeWeights; large counts are an error.
@@ -244,7 +344,7 @@ def load_map(name, files, recipe, capture_path, weight_size, trust_capture=False
     undefined = ~(np.isin(base, [int(k) for k in recipe["typeWeights"]]) & np.isin(other, [int(k) for k in recipe["typeWeights"]]))
     if undefined.mean() > 0.01:
         raise ValueError(f"{name}: {undefined.sum()} cells use texture types the recipe does not map; add a world recipe")
-    fingerprint = terrain_fingerprint(zx, zz, plane)
+    fingerprint = terrain_fingerprint(zx, zz, plane, read_trn_pad(trn))
     bounds = terrain_bounds(zx, zz)
     source = "offline HG2"
     if capture_path:
@@ -257,10 +357,205 @@ def load_map(name, files, recipe, capture_path, weight_size, trust_capture=False
             raise ValueError(f"{name}: capture {capture['terrainFingerprint']} {capture['boundsMeters']} "
                              f"disagrees with the offline result {fingerprint} {bounds}")
         source = "offline HG2, confirmed by capture" if not trust_capture else "live capture (offline model disagrees or was bypassed)"
-    weights = rasterize(cells, zx, zz, bounds, weight_size, recipe)
+    weights = rasterize(cells, zx, zz, bounds, weight_size, recipe, plane, int(fingerprint[:8], 16) ^ recipe.get("variation", {}).get("seed", 0))
     return {"name": name, "zones": (zx, zz), "fingerprint": fingerprint, "bounds": bounds,
             "weights": weights, "source": source,
             "histogram": {int(t): int(c) for t, c in zip(*np.unique(cells >> 12, return_counts=True))}}
+
+
+def make_seamless(image):
+    """Wrap-blend a nearly tileable image so its edges meet when repeated.
+
+    The half-offset copy has the original's interior on its border, so it
+    wraps continuously; it replaces the original near the edges and fades out
+    toward the centre. Stock solid tiles mostly tile already; this hides the
+    few whose generated replacements left a visible edge.
+    """
+    a = np.asarray(image.convert("RGB"), dtype=np.float64)
+    h, w = a.shape[:2]
+    shifted = np.roll(a, (h // 2, w // 2), axis=(0, 1))
+    ry = 1 - np.abs(np.linspace(-1, 1, h))
+    rx = 1 - np.abs(np.linspace(-1, 1, w))
+    keep = np.clip(np.minimum.outer(ry, rx) * 4, 0, 1)[..., None]
+    return Image.fromarray(np.clip(a * keep + shifted * (1 - keep) + 0.5, 0, 255).astype(np.uint8))
+
+
+# Megascans and Poly Haven member names for each map, keyed by the colour map's suffix.
+_SIBLINGS = {"normal": ("Normal", "normal", "nor_gl", "nor_dx"),
+             "height": ("Displacement", "height", "disp"),
+             "roughness": ("Roughness", "roughness", "rough")}
+_COLOR_SUFFIXES = ("BaseColor", "Albedo", "albedo", "diff", "diffuse")
+
+
+def material_source(root, layer, kind):
+    """Source entry for a layer's normal/height/roughness map, or None.
+
+    An explicit layer[kind] is a member of the layer's archive (string) or a
+    full source entry (dict). Without one, archive members are found by the
+    usual suffix swap, for example _BaseColor.jpg -> _Normal.jpg.
+    """
+    explicit = layer.get(kind)
+    if isinstance(explicit, dict):
+        return explicit
+    if "archive" not in layer:
+        return {"file": explicit} if isinstance(explicit, str) else None
+    if isinstance(explicit, str):
+        return {"archive": layer["archive"], "member": explicit}
+    with zipfile.ZipFile(_hd.source_path(root, layer["archive"])) as archive:
+        names = set(archive.namelist())
+    stem, dot, extension = layer["member"].rpartition(".")
+    for color in _COLOR_SUFFIXES:
+        if stem.endswith(color):
+            for suffix in _SIBLINGS[kind]:
+                for ext in (extension, "jpg", "png", "exr"):
+                    candidate = f"{stem[:-len(color)]}{suffix}.{ext}"
+                    if candidate in names:
+                        return {"archive": layer["archive"], "member": candidate}
+    return None
+
+
+def wrap_blend(a):
+    """make_seamless for a float array of any channel count."""
+    h, w = a.shape[:2]
+    shifted = np.roll(a, (h // 2, w // 2), axis=(0, 1))
+    ry = 1 - np.abs(np.linspace(-1, 1, h))
+    rx = 1 - np.abs(np.linspace(-1, 1, w))
+    keep = np.clip(np.minimum.outer(ry, rx) * 4, 0, 1)
+    keep = keep[..., None] if a.ndim == 3 else keep
+    return a * keep + shifted * (1 - keep)
+
+
+def gray(image, size):
+    a = np.asarray(image.convert("RGB").resize((size, size), Image.Resampling.LANCZOS), dtype=np.float64) / 255
+    return a[..., 0]
+
+
+def normalize_height(h, clip=1):
+    """Centre on the median and stretch the clip..100-clip percentiles to 0..1."""
+    lo, mid, hi = np.percentile(h, (clip, 50, 100 - clip))
+    span = max(hi - lo, 1e-6)
+    return np.clip((h - mid) / span + 0.5, 0, 1)
+
+
+def height_slopes(h, meters, repeat):
+    """Metres of rise per metre along +column and +row of a tiling height."""
+    texel = repeat / h.shape[0]
+    dx = (np.roll(h, -1, axis=1) - np.roll(h, 1, axis=1)) * meters / (2 * texel)
+    dy = (np.roll(h, -1, axis=0) - np.roll(h, 1, axis=0)) * meters / (2 * texel)
+    return dx, dy
+
+
+def orient_normal(n, h):
+    """Flip normal X/Y so they agree with the height: +x along +column, +y along +row.
+
+    That matches the paint shader's cotangent frame (T along world X / +u,
+    B along world Z / +v). DirectX and OpenGL normal maps differ only in Y,
+    so each axis is checked against the height gradient instead of trusted.
+    """
+    dx, dy = height_slopes(h, 1, h.shape[0])
+    flips = []
+    for axis, slope in ((0, dx), (1, dy)):
+        agreement = float(np.mean(n[..., axis] * -slope))
+        if agreement < 0:
+            n[..., axis] = -n[..., axis]
+        flips.append(agreement < 0)
+    return n, flips
+
+
+def crater_field(size, repeat, craters):
+    """Tileable impact craters in metres: parabolic bowls with raised rims.
+
+    Diameters follow a power law between minMeters and maxMeters (many small,
+    few large) and depth is a fifth of the diameter, as on the Moon. Positions
+    wrap, so the field tiles exactly. Deterministic for a given seed.
+    """
+    rng = np.random.default_rng(craters.get("seed", 1))
+    lo, hi = craters.get("minMeters", 1), craters.get("maxMeters", 10)
+    texel = repeat / size
+    field = np.zeros((size, size))
+    for _ in range(int(craters.get("count", 40))):
+        u = rng.random()
+        diameter = lo * (hi / lo) ** (1 - np.sqrt(u))  # skewed toward small craters
+        radius = diameter / 2 / texel
+        extent = int(np.ceil(radius * 1.8)) + 1
+        cx, cy = rng.random(2) * size
+        offsets = np.arange(-extent, extent + 1)
+        xs = (int(cx) + offsets) % size
+        ys = (int(cy) + offsets) % size
+        dx = (int(cx) + offsets - cx)[None, :]
+        dy = (int(cy) + offsets - cy)[:, None]
+        r = np.sqrt(dx * dx + dy * dy) / radius
+        # Large craters are shallower for their size; floors flatten and rims sharpen.
+        depth = 0.2 * diameter ** 0.8
+        rim = 0.3 * depth
+        bowl = np.where(r < 1, (r ** 3 - 1) * depth + rim, rim * np.exp(-((r - 1) / 0.18) ** 2))
+        field[np.ix_(ys, xs)] += np.where(r < 1.8, bowl, 0)
+    return field
+
+
+def material_maps(root, layer, diffuse, size, repeat):
+    """(normal RGB, height, specular) planes for one layer plus their identity.
+
+    Missing maps are derived: height from the colour's high-passed luminance,
+    the normal from that height, specular as neutral 0.5.
+    """
+    identity = {}
+    def load(kind):
+        entry = material_source(root, layer, kind)
+        if entry is None:
+            return None
+        image, source = _hd.load_art(root, entry)
+        identity[kind] = source
+        return image
+    height_image = load("height")
+    if height_image is not None:
+        height = normalize_height(gray(height_image, size))
+    else:
+        lum = gray(diffuse, size)
+        blur = np.asarray(Image.fromarray((lum * 255).astype(np.uint8)).filter(
+            ImageFilter.GaussianBlur(max(size / 32, 1))), dtype=np.float64) / 255
+        height = normalize_height(lum - blur)
+        identity["height"] = "derived from colour luminance"
+    if layer.get("craters"):
+        # Craters carry the shape; the source height stays as fine texture.
+        craters = crater_field(size, repeat, layer["craters"])
+        height = normalize_height(craters / max(np.ptp(craters), 1e-6) + (height - 0.5) * layer["craters"].get("detail", 0.1), 0.05)
+        identity["craters"] = layer["craters"]
+    normal_image = None if layer.get("craters") else load("normal")
+    if normal_image is not None:
+        n = np.asarray(normal_image.convert("RGB").resize((size, size), Image.Resampling.LANCZOS), dtype=np.float64) / 127.5 - 1
+        n, flips = orient_normal(n, height)
+        identity["normalFlipXY"] = flips
+    else:
+        # Bump strength for derived normals: a few decimetres over the repeat.
+        dx, dy = height_slopes(height, layer.get("derivedReliefMeters", 0.25), repeat)
+        n = np.dstack((-dx, -dy, np.ones_like(dx)))
+        identity["normal"] = "derived from height"
+    rough_image = load("roughness")
+    if rough_image is not None:
+        specular = (1 - gray(rough_image, size)) * layer.get("specularScale", 1)
+    else:
+        specular = np.full((size, size), 0.5 * layer.get("specularScale", 1))
+    if layer.get("seamless"):
+        n, height, specular = wrap_blend(n), wrap_blend(height), wrap_blend(specular)
+    n /= np.maximum(np.linalg.norm(n, axis=2, keepdims=True), 1e-6)
+    return n, np.clip(height, 0, 1), np.clip(specular, 0, 1), identity
+
+
+def to_u8(a):
+    return np.clip(a * 255 + 0.5, 0, 255).astype(np.uint8)
+
+
+def match_mean(image, reference):
+    """Scale each channel so the image's mean colour equals the reference's.
+
+    Lets photographic layer art take the palette of a world's existing tiles
+    without repainting it.
+    """
+    a = np.asarray(image.convert("RGB"), dtype=np.float64)
+    target = np.asarray(reference.convert("RGB"), dtype=np.float64).reshape(-1, 3).mean(axis=0)
+    scale = target / np.maximum(a.reshape(-1, 3).mean(axis=0), 1e-6)
+    return Image.fromarray(np.clip(a * scale + 0.5, 0, 255).astype(np.uint8))
 
 
 def build_pack(maps, recipe, source_root, output, size, prefix, force):
@@ -268,23 +563,60 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
     if output.exists() and any(output.iterdir()) and not force:
         raise ValueError("output is non-empty; use --force")
     root = Path(source_root).resolve()
-    layers, identities, repeats = [], [], []
+    layers, identities, repeats, normals = [], [], [], []
+    # Full material (9 slices) unless the recipe asks for diffuse only.
+    material = not recipe.get("diffuseOnly", False)
     for layer in recipe["layers"]:
         repeat = layer.get("repeatMeters")
         if type(repeat) not in (int, float) or not 1 <= repeat <= 4096 or not layer.get("name"):
             raise ValueError("each layer needs a name and repeatMeters from 1 to 4096")
         art, identity = _hd.load_art(root, layer)
-        layers.append(art.resize((size, size), Image.Resampling.LANCZOS).convert("RGBA"))
+        art = art.resize((size, size), Image.Resampling.LANCZOS)
+        if layer.get("matchMean"):
+            reference, reference_identity = _hd.load_art(root, {"file": layer["matchMean"]})
+            art = match_mean(art, reference)
+            identity = dict(identity, matchMean=reference_identity)
+        if layer.get("gain"):
+            # Per-channel trim measured from in-game before/after shots.
+            gain = layer["gain"]
+            if len(gain) != 3 or not all(0.25 <= g <= 4 for g in gain):
+                raise ValueError("layer gain needs three factors from 0.25 to 4")
+            art = Image.fromarray(np.clip(np.asarray(art.convert("RGB"), dtype=np.float64) * gain + 0.5, 0, 255).astype(np.uint8))
+            identity = dict(identity, gain=gain)
+        if layer.get("seamless"):
+            art = make_seamless(art)
+            identity = dict(identity, seamless=True)
+        if material:
+            normal, height, specular, maps_identity = material_maps(root, layer, art, size, repeat)
+            identity = dict(identity, material=maps_identity)
+            # Diffuse alpha carries specular; the normal slice carries height.
+            rgb = np.asarray(art.convert("RGB"))
+            layers.append(Image.fromarray(np.dstack((rgb, to_u8(specular))), "RGBA"))
+            normals.append(Image.fromarray(np.dstack((to_u8(normal * 0.5 + 0.5), to_u8(height))), "RGBA"))
+        else:
+            layers.append(art.convert("RGBA"))
         identities.append(identity)
         repeats.append(repeat)
     capture_material = recipe.get("material", "MA_DETAIL_ATLAS")
     output.mkdir(parents=True, exist_ok=True)
     resources = [f"{prefix}_layer{i}.png" for i in range(4)]
-    for resource, image in zip(resources, layers):
+    normal_resources = [f"{prefix}_layer{i}_n.png" for i in range(4)] if material else []
+    for resource, image in zip(resources + normal_resources, layers + normals):
         image.save(output / resource)
-    entries, summary, controls = [], [], {}
+    entries, summary, controls, terrains = [], [], {}, {}
     for info in maps:
         weights = info["weights"]
+        # The runtime tells maps apart only by terrain, so two missions sharing
+        # one (CR misn15 and misn15b) need one entry and identical paint.
+        terrain = (info["fingerprint"], tuple(info["bounds"]))
+        if terrain in terrains:
+            if terrains[terrain]["weights"].tobytes() != weights.tobytes():
+                raise ValueError(f"{info['name']} and {terrains[terrain]['name']} share terrain {info['fingerprint']} "
+                                 "but paint differently; the runtime cannot tell them apart")
+            summary.append(dict({k: info[k] for k in ("name", "fingerprint", "bounds", "source", "histogram")},
+                                sharesEntryWith=terrains[terrain]["name"]))
+            continue
+        terrains[terrain] = info
         # Maps with identical layouts (for example the stock and Campaign
         # Reimagined copies of one mission) share a single control image.
         key = weights.tobytes()
@@ -299,9 +631,13 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
         summary.append({k: info[k] for k in ("name", "fingerprint", "bounds", "source", "histogram")})
     tiles = {str(i): name for i, name in enumerate(resources)}
     tiles["4"] = entries[0]["control"]
+    tiles.update({str(5 + i): name for i, name in enumerate(normal_resources)})
     paint = {"schema": "bzr-openshim-terrain-paint-v1", "rowZero": "minZ", "repeatMeters": repeats, "maps": entries}
+    if material:
+        paint["heightBlend"] = recipe.get("heightBlend", 0.5)
+        paint["heightMeters"] = [layer.get("heightMeters", 0) for layer in recipe["layers"]]
     manifest = {"schema": "bzr-openshim-terrain-hd-v1", "materials": {capture_material: {
-        "sliceCount": 5, "diffuseResource": recipe["diffuseResource"], "fallback": resources[0],
+        "sliceCount": 9 if material else 5, "diffuseResource": recipe["diffuseResource"], "fallback": resources[0],
         "tiles": tiles, "paint": paint}}}
     (output / f"{prefix}.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     project = {"schema": "bzr-openshim-terrain-autopaint-project-v1", "prefix": prefix, "materialSize": size,
@@ -315,7 +651,7 @@ def write_editors(maps, recipe, layers, repeats, identities, output, prefix, siz
     """One standalone editor per map, preloaded with the generated weights, for touch-up."""
     previews = []
     for image in layers:
-        stream = io.BytesIO(); image.resize((128, 128), Image.Resampling.LANCZOS).save(stream, format="PNG")
+        stream = io.BytesIO(); image.convert("RGB").resize((128, 128), Image.Resampling.LANCZOS).save(stream, format="PNG")
         previews.append("data:image/png;base64," + base64.b64encode(stream.getvalue()).decode("ascii"))
     template = (_here / "terrain-paint-editor.html").read_text(encoding="utf-8")
     code = (_here / "terrain-paint-codec.js").read_text(encoding="utf-8")

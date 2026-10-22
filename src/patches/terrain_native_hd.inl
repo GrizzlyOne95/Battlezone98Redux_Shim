@@ -15,7 +15,6 @@ std::string g_HdSourceMaterial, g_HdBackupMaterial;
 bool g_HdActive = false, g_HdDeclined = false;
 bool g_HdProfileSuspended = false;
 std::array<bool, 256> g_HdTileMapped{};
-TerrainPaint::Config g_HdPaint;
 std::array<uint8_t, 256> g_HdSliceRemap = TerrainHdMaterial::IdentityRemap();
 std::array<bool, 3> g_HdChannelEnabled{};
 void ResetNativeTerrainHd() { g_HdDeclined = false; g_HdProfileSuspended = false; }

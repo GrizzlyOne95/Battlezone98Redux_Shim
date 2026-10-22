@@ -377,6 +377,7 @@ namespace BZROpenShim
         std::array<std::string, 3> g_hdChannelResources;
         // Borrowed from the owned Ogre arrays; cleared before removing them.
         std::array<ID3D11Texture2D*, 3> g_hdChannelNativeTextures{};
+        ID3D11Texture2D* g_hdDiffuseNativeTexture = nullptr;
 
         struct TerrainHdManifest
         {
@@ -628,6 +629,8 @@ namespace BZROpenShim
 
         TerrainConfig g_config;
         float g_activeTerrainReliefAmplitude = 0.0f;
+        // Paint config accepted for the live mission (selected map entry).
+        TerrainPaint::Config g_HdPaint;
         ProxyState g_proxy;
         OgreApi g_ogre;
         TerrainHdManifest g_hdManifest;
@@ -1169,12 +1172,17 @@ namespace BZROpenShim
                     {
                         const auto& paint = materialIt.value()["paint"];
                         if (paint.value("schema", std::string()) != "bzr-openshim-terrain-paint-v1" ||
-                            paint.value("rowZero", std::string()) != "minZ" || binding.sliceCount != 5 ||
-                            binding.diffuseResource.empty() || binding.tiles.size() != 5)
-                            throw std::runtime_error("paint needs five explicit slices, atlas identity and minZ row order");
+                            paint.value("rowZero", std::string()) != "minZ" ||
+                            (binding.sliceCount != 5 && binding.sliceCount != 9) ||
+                            binding.diffuseResource.empty() || binding.tiles.size() != binding.sliceCount)
+                            throw std::runtime_error("paint needs five or nine explicit slices, atlas identity and minZ row order");
                         if (binding.compact) throw std::runtime_error("compact material arrays do not support paint mode");
                         binding.paint.enabled = true;
+                        binding.paint.sliceCount = binding.sliceCount;
                         binding.paint.repeatMeters = paint.at("repeatMeters").get<std::array<float, 4>>();
+                        binding.paint.heightBlend = paint.value("heightBlend", binding.paint.Material() ? 0.5f : 0.0f);
+                        if (paint.contains("heightMeters"))
+                            binding.paint.heightMeters = paint.at("heightMeters").get<std::array<float, 4>>();
                         if (paint.contains("maps"))
                         {
                             // Multi-map form: one entry per terrain shape sharing this
@@ -2775,6 +2783,7 @@ namespace BZROpenShim
         void RemoveTerrainHdTextureResource(const char* reason)
         {
             g_hdChannelNativeTextures.fill(nullptr);
+            g_hdDiffuseNativeTexture = nullptr;
             for (auto& name : g_hdChannelResources)
             {
                 if (name.empty()) continue;
@@ -3145,6 +3154,7 @@ namespace BZROpenShim
                     g_hdChannelNativeTextures.at(size_t(channel)) = g_ogre.getD3D11Texture2D(arrayTexture.rep);
                 if (channel < 0)
                 {
+                    g_hdDiffuseNativeTexture = g_ogre.getD3D11Texture2D(arrayTexture.rep);
                     g_proxy.hdDiffuseFallback = binding.fallback;
                     g_proxy.hdSliceCount = binding.sliceCount;
                     g_proxy.hdWidth = width;

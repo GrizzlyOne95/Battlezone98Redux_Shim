@@ -1,0 +1,131 @@
+{
+  "schema": "bzr-openshim-terrain-autopaint-v1",
+  "material": "AC_DETAIL_ATLAS",
+  "diffuseResource": "achilles_atlas_d.dds",
+  "typeNames": {
+    "0": "grass",
+    "1": "trees",
+    "2": "rocky rock",
+    "3": "river",
+    "4": "waterfall",
+    "5": "Base"
+  },
+  "typeWeights": {
+    "0": [
+      1,
+      0,
+      0,
+      0
+    ],
+    "1": [
+      0,
+      1,
+      0,
+      0
+    ],
+    "2": [
+      0,
+      0,
+      1,
+      0
+    ],
+    "3": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "4": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "5": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "transition": {
+    "cap": 0.3,
+    "diagonal": 0.5
+  },
+  "blurMeters": 14,
+  "undefinedTypeWeights": [
+    0,
+    0,
+    0,
+    1
+  ],
+  "outsideWeights": [
+    1,
+    0,
+    0,
+    0
+  ],
+  "variation": {
+    "meters": 180,
+    "amount": 0.35,
+    "types": {
+      "0": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "1": [
+        1,
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "slope": {
+    "weights": [
+      0,
+      0,
+      1,
+      0
+    ],
+    "startDegrees": 24,
+    "fullDegrees": 38
+  },
+  "layers": [
+    {
+      "name": "Grass",
+      "repeatMeters": 16,
+      "archive": "clover_patches_on_grass_sgmkajak_8k.zip",
+      "member": "Clover_Patches_on_Grass_sgmkajak_8K_BaseColor.jpg",
+      "matchMean": "crhd_achilles_ac00sa0_d.dds",
+      "heightMeters": 0.15
+    },
+    {
+      "name": "Forest floor",
+      "repeatMeters": 16,
+      "archive": "forest_floor_sfjmafua_8k.zip",
+      "member": "Forest_Floor_sfjmafua_8K_BaseColor.jpg",
+      "matchMean": "crhd_achilles_ac11sa0_d.dds",
+      "heightMeters": 0.25
+    },
+    {
+      "name": "Mossy rock",
+      "repeatMeters": 12,
+      "archive": "mossy_rocky_ground_vewmeehlw_8k.zip",
+      "member": "Mossy_Rocky_Ground_vewmeehlw_8K_BaseColor.jpg",
+      "matchMean": "crhd_achilles_ac22sa0_d.dds",
+      "heightMeters": 0.9
+    },
+    {
+      "name": "River gravel",
+      "repeatMeters": 18,
+      "archive": "beach_gravel_with_pebbles_uifndiulw_8k.zip",
+      "member": "Beach_Gravel_With_Pebbles_uifndiulw_8K_BaseColor.jpg",
+      "matchMean": "crhd_achilles_ac55sa0_d.dds",
+      "heightMeters": 0.35
+    }
+  ],
+  "heightBlend": 0.5
+}
