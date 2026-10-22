@@ -198,6 +198,21 @@ namespace BZROpenShim::RenderProfiles
     // unprefixed modern names report Redux (the engine-native baseline).
     Profile ProfileForMaterialScheme(std::string_view scheme);
 
+    // One-time move to the Enhanced default (2026-10-22). Installs made before
+    // it carry the old shipped "RenderProfile = Redux", which the installer
+    // never overwrites. The [Graphics] marker key records that the move ran,
+    // so a player who picks Redux afterwards keeps it.
+    inline constexpr char kProfileMigrationKey[] = "RenderProfileMigration";
+    enum class ProfileMigration : uint8_t
+    {
+        None,           // marker present: never touch the profile again
+        MarkOnly,       // write the marker, leave RenderProfile as it is
+        MoveToEnhanced, // write RenderProfile = Enhanced and the marker
+    };
+    ProfileMigration DecideProfileMigration(bool markerPresent,
+                                            bool profileParsed,
+                                            Profile profile);
+
     // What an explicit reapply may do to one viewport's scheme. Mirrors the
     // setMaterialScheme hook's fail-open rule: the engine's native bases and
     // our own prefixes carry the policy; a foreign scheme (a mod's own name,

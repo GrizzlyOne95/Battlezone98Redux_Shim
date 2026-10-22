@@ -342,6 +342,22 @@ void TestStableAbiRoundTrip()
     ExpectEq(Abi::kRequestStatusUnsupportedBuild, 3u, "unsupported-build frozen");
 }
 
+void TestProfileMigrationRunsOnce()
+{
+    std::printf("TestProfileMigrationRunsOnce\n");
+    auto decide = [](bool marker, bool parsed, Profile profile) {
+        return static_cast<uint32_t>(DecideProfileMigration(marker, parsed, profile));
+    };
+    const auto none = static_cast<uint32_t>(ProfileMigration::None);
+    const auto mark = static_cast<uint32_t>(ProfileMigration::MarkOnly);
+    const auto move = static_cast<uint32_t>(ProfileMigration::MoveToEnhanced);
+    ExpectEq(decide(false, true, Profile::Redux), move, "old Redux install moves to Enhanced");
+    ExpectEq(decide(false, true, Profile::Retro), mark, "Retro is kept");
+    ExpectEq(decide(false, true, Profile::Enhanced), mark, "Enhanced only gains the marker");
+    ExpectEq(decide(false, false, Profile::Redux), mark, "absent or unparseable key is kept");
+    ExpectEq(decide(true, true, Profile::Redux), none, "Redux chosen after the move sticks");
+}
+
 int main()
 {
     TestCleanReduxBaseline();
@@ -358,6 +374,7 @@ int main()
     TestSchemePolicyMapping();
     TestViewportReapplyFailsOpen();
     TestStableAbiRoundTrip();
+    TestProfileMigrationRunsOnce();
 
     if (OpenShimTest::FailureCount() != 0)
     {

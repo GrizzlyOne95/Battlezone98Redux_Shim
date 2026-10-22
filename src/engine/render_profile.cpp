@@ -89,6 +89,21 @@ namespace BZROpenShim::RenderProfiles
         return Profile::Redux;
     }
 
+    ProfileMigration DecideProfileMigration(bool markerPresent,
+                                            bool profileParsed,
+                                            Profile profile)
+    {
+        if (markerPresent)
+        {
+            return ProfileMigration::None;
+        }
+        // Only the old shipped default moves. Retro, Enhanced, an absent key
+        // and an unparseable value are left as they are.
+        return profileParsed && profile == Profile::Redux
+            ? ProfileMigration::MoveToEnhanced
+            : ProfileMigration::MarkOnly;
+    }
+
     bool BuildMaterialSchemeForProfile(Profile profile,
                                        std::string_view modernBase,
                                        char* outScheme,

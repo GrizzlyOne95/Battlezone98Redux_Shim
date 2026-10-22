@@ -232,6 +232,43 @@ namespace BZROpenShim::RenderProfiles
             }
         }
 
+        void MigrateProfileDefaultOnce()
+        {
+            // No ini means nothing to migrate; don't create one just for the marker.
+            std::error_code ec;
+            const auto iniPath = GetUserConfigPath();
+            if (iniPath.empty() || !std::filesystem::is_regular_file(iniPath, ec))
+            {
+                return;
+            }
+            std::string value;
+            const bool markerPresent =
+                TryGetUserConfigString("Graphics", kProfileMigrationKey, value);
+            Profile parsed = Profile::Redux;
+            const bool profileParsed =
+                !markerPresent &&
+                TryGetUserConfigString("Graphics", "RenderProfile", value) &&
+                ParseProfileText(TrimAsciiCopy(value).c_str(), parsed);
+            const ProfileMigration migration =
+                DecideProfileMigration(markerPresent, profileParsed, parsed);
+            if (migration == ProfileMigration::None)
+            {
+                return;
+            }
+            const bool move = migration == ProfileMigration::MoveToEnhanced;
+            const ShimConfigValue values[] = {
+                { "Graphics", "RenderProfile", "Enhanced" },
+                { "Graphics", kProfileMigrationKey, "1" },
+            };
+            const bool ok = move ? WriteShimUserConfigValues(values, 2)
+                                 : WriteShimUserConfigValues(values + 1, 1);
+            LogShimA(ok ? LogLevel::Info : LogLevel::Warn, kLogTag,
+                     "profile migration: %s%s",
+                     move ? "RenderProfile Redux -> Enhanced"
+                          : "marker only, RenderProfile kept",
+                     ok ? "" : " (ini write failed; retried next launch)");
+        }
+
         void LoadConfigLocked()
         {
             std::string value;
@@ -4155,6 +4192,7 @@ namespace BZROpenShim::RenderProfiles
             armed ? "startup ConfigFile::load interception active"
                   : "stock renderer selection remains authoritative");
 
+        MigrateProfileDefaultOnce();
         AcquireSRWLockExclusive(&s_stateLock);
         LoadConfigLocked();
         // s_bootRequest and s_transportWrittenThisBoot describe what the
