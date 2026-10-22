@@ -408,6 +408,50 @@ Filtering and MSAA:
 - MSAA is at parity. The test install's `ogre.cfg` has `FSAA=8` for Direct3D11,
   and the Ogre log confirms it. That matches BZCC's 8x.
 
+## Material inputs: same art, spec map now masks F0
+
+The BZCC addon's Grizzly (`ivgrzr00`) uses the same diffuse, specular and
+normal art as GOG's `avtank00`. Decoded top mips match (diffuse luminance
+correlation 0.9999, spec 0.9999, normal XY mean difference 0.005, same Y
+convention). Only the containers differ: BZCC stores colour maps as BC1 sRGB
+and normals as BC5; GOG uses DXT1 throughout. So the gap is in how each
+pipeline reads those maps, not in the maps.
+
+The Grizzly spec map has no alpha and its peak is 0.008/0.16/0.37 at
+p10/p50/p90. BZCC's F0 is `0.2 * specTex`, so dark texels (grime, seams,
+cavities) barely reflect: F0 0.002/0.032/0.072. Ours had a 0.04 floor:
+0.040/0.045/0.074. Every crevice reflected like clean paint.
+
+`legacy_specular_to_f0` now scales its result by
+`saturate(peak / OSE_PBR_SPEC_MASK_FULL)`, with `OSE_PBR_SPEC_MASK_FULL` set to
+0.20. That keeps the bright panels as before and keeps 80% of F0 on the
+median texel. Dark texels lose their reflection, which is what the spec map
+already meant in Classic Redux (`specTex * matSpec`). The mask feeds direct
+specular, the EnvBRDF fallback and IBL alike, because they all take
+`surfaceF0`. Materials without a spec map keep F0 0.04.
+
+![lcbmars front close: top before, bottom with the spec mask](images/redux_grizzly_shading/spec_mask_front_close.jpg)
+
+On lcbmars (sun behind the camera, per-planet IBL on) the change is small. On
+the hull, the darkest pixels drop about 12% (rear close, value 10 -> 8.8),
+mid-tones move less than 1%, and the bright panels do not move. Grime and seams
+read a little deeper, mostly where the environment reflection was lifting them.
+Expect more effect where the sun's highlight crosses grimy areas; a
+sun-facing view was not captured.
+
+Not changed:
+
+- Roughness. The addon bakes specularPower 38.44, giving roughness 0.47, while
+  the stock material says shininess 127, giving 0.38. The addon's value is its
+  author's retune, not a pipeline difference, so the stock shininess stays
+  authoritative.
+- Diffuse. BZCC's material diffuse is 0.8 against our 1.0. With our
+  diffuse normalisation (finding 4, exposure pass), the net hull albedo is
+  already within a few percent.
+- The sRGB question. If BZCC samples its BC1 sRGB spec map as sRGB, its F0
+  drops to about 0.004 at the median, nearly no specular at all. The raw-byte
+  reading is the one used above.
+
 ## Follow-ups outside this change
 
 - CR's `CR_*` shader fork: no longer applies. CR has no base or terrain shader
