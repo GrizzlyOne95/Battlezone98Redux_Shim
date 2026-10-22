@@ -281,14 +281,34 @@ namespace BZROpenShim
         if (g_BzrFn_VehicleListSet && listThis)
             g_BzrFn_VehicleListSet(listThis, title, subtitle);
 
+        // Stock (0x007A3E60) swaps the map's 4-char extension for ".vxt":
+        // "bzpmap.bzn" -> "bzpmap.vxt". Appending instead asked for
+        // "bzpmap.bzn.vxt", which never exists, so the load fell back to
+        // netveh.odf and BZP's faction-only list became stock ships. Stock
+        // also skips the load for a name too short to carry an extension.
         BzrString file;
         BzrStringInitEmpty(&file);
-        BzrStringCopy(&file, name);
-        BzrStringAppend(&file, ".vxt", 4);
+        const bool hasExtension = name->size >= 4;
+        if (hasExtension)
+        {
+            BzrStringAssign(&file, BzrStringData(name), name->size - 4);
+            BzrStringAppend(&file, ".vxt", 4);
+        }
 
         void* mgrThis = (g_BzrPtr_94548C && *g_BzrPtr_94548C) ? *g_BzrPtr_94548C : nullptr;
-        if (mgrThis)
+        if (mgrThis && hasExtension)
+        {
+            // The lobby re-selects on every data change; log each new file once.
+            static char s_lastLogged[64] = {};
+            const char* fileName = BzrStringData(&file);
+            if (std::strncmp(s_lastLogged, fileName, sizeof(s_lastLogged) - 1) != 0)
+            {
+                strncpy_s(s_lastLogged, fileName, _TRUNCATE);
+                Log(L"[VEHICLE] Waiting-room list for '%hs' loads '%hs'\n",
+                    BzrStringData(name), fileName);
+            }
             CallVehicleListLoadSafely(mgrThis, &file, "VehicleListModFix_Select");
+        }
 
         if (g_BzrFn_VehicleListRefresh1 && g_VehicleListContext)
             g_BzrFn_VehicleListRefresh1(g_VehicleListContext);
