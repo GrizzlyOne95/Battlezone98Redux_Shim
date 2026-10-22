@@ -427,6 +427,10 @@ openshim_add_test(terrain_tile_blend_tests STD 20 SOURCES
     terrain_tile_blend_tests.cpp
 )
 
+openshim_add_test(planet_environment_tests STD 17 SOURCES
+    planet_environment_tests.cpp
+)
+
 openshim_add_test(terrain_proxy_backend_gate_tests STD 20 SOURCES
     terrain_proxy_backend_gate_tests.cpp
 )

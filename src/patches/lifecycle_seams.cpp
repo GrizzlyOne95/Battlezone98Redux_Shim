@@ -16,6 +16,7 @@
 #include "openshim_assets.h"
 #include "terrain_proxy.h"
 #include "terrain_tile_blend.h"
+#include "planet_environment.h"
 #include "bzr_options_ui.h"
 #include "remembered_mesh_bounds_table.h"
 #include "patches.h"
@@ -463,6 +464,7 @@ namespace BZROpenShim
                 GpuSkinningNotifyMissionRunStateChanged(true);
                 PilotFlashlightNotifyMissionRunStateChanged(true);
                 ApplyTerrainTileBlendForCurrentMission();
+                ApplyPlanetEnvironmentForCurrentMission();
                 NotifyExuMissionSimulationState(true);
             }
             TerrainProxyMissionRunStateChanged(previous, current);

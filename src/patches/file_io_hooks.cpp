@@ -18,6 +18,7 @@
 #include "ui_performance.h"
 #include "trn_codec.h"
 #include "terrain_atlas_rect_repair.h"
+#include "planet_environment.h"
 
 #include <Windows.h>
 
@@ -262,7 +263,7 @@ namespace BZROpenShim
                                                   DWORD desiredAccess,
                                                   DWORD creationDisposition)
         {
-            if (requested.empty() || g_InAtlasRepair || !TerrainAtlasRectRepairEnabled())
+            if (requested.empty() || g_InAtlasRepair)
                 return requested;
             if (!IsPlainReadOpen(desiredAccess, creationDisposition))
                 return requested;
@@ -279,6 +280,12 @@ namespace BZROpenShim
             if (!TerrainAtlas::IsDetailAtlasCsvName(leaf))
                 return requested;
 
+            // The open names the world being loaded, whether or not the
+            // rect repair below is enabled.
+            RecordTerrainWorldCodeFromAtlasPath(leaf);
+            if (!TerrainAtlasRectRepairEnabled())
+                return requested;
+
             const std::wstring replacement = RepairedAtlasPathFor(requested);
             return replacement.empty() ? requested : replacement;
         }
@@ -291,10 +298,17 @@ namespace BZROpenShim
                                                  DWORD desiredAccess,
                                                  DWORD creationDisposition)
         {
-            if (requested.empty() || g_InAtlasRepair || !TerrainAtlasRectRepairEnabled())
+            if (requested.empty() || g_InAtlasRepair)
                 return requested;
             if (!IsPlainReadOpen(desiredAccess, creationDisposition))
                 return requested;
+            if (!TerrainAtlasRectRepairEnabled())
+            {
+                // The wide router below records the world; do the same here.
+                if (TerrainAtlas::IsDetailAtlasCsvName(requested))
+                    RecordTerrainWorldCodeFromAtlasPath(requested);
+                return requested;
+            }
 
             const int wideCount =
                 MultiByteToWideChar(CP_ACP, 0, requested.c_str(), -1, nullptr, 0);

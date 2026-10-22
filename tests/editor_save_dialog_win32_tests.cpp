@@ -56,6 +56,8 @@ namespace BZROpenShim
     // own analysis is covered by bzn_analysis_tests.
     void BznLoadTraceOnOpen(const wchar_t*, uint32_t) noexcept {}
     void BznLoadTraceOnOpenA(const char*, uint32_t) noexcept {}
+    // Terrain atlas opens feed the per-planet IBL swap (planet_environment.cpp).
+    void RecordTerrainWorldCodeFromAtlasPath(const std::string&) {}
 }
 namespace BZROpenShim::UiPerf
 {
