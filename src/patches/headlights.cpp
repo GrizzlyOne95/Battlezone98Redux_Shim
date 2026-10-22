@@ -30,8 +30,8 @@ namespace BZROpenShim
         // --- Stock headlights (SinglePlayer tier) -----------------------------
         // EXU exposed these Ogre Light calls first. OpenShim applies the same
         // controls directly to the stock GameObject list so campaign scripts are
-        // not required. The feature stands down in multiplayer and whenever EXU
-        // is loaded, leaving Campaign Reimagined's per-mission controls in charge.
+        // not required. The feature stands down in multiplayer only; it stays
+        // active with EXU because Campaign Reimagined defers these settings here.
         enum class HeadlightColourMode
         {
             Stock,
@@ -996,20 +996,18 @@ namespace BZROpenShim
 
         void RefreshHeadlightState()
         {
-            const bool exuLoaded = IsExuModuleLoaded();
+            // EXU only exposes Lua headlight APIs and CR defers its persisted
+            // headlight settings to OpenShim, so EXU presence is not a reason
+            // to stand down.
             const bool wantActive =
                 IsHeadlightFeatureConfigured() &&
-                ReadLocalPlayerNetIdValue() == 0 &&
-                !exuLoaded;
+                ReadLocalPlayerNetIdValue() == 0;
             if (!wantActive)
             {
                 if (g_HeadlightRuntimeActive || !g_HeadlightOriginalStates.empty())
                 {
-                    // Once EXU is present, do not write old stock values over a
-                    // campaign setting that may already have been applied.
-                    RestoreAllHeadlightStates(!exuLoaded);
-                    Log(L"[HEADLIGHT] Stood down (%hs)\n",
-                        exuLoaded ? "EXU authoritative" : "multiplayer/disabled");
+                    RestoreAllHeadlightStates(true);
+                    Log(L"[HEADLIGHT] Stood down (multiplayer/disabled)\n");
                 }
                 g_HeadlightRuntimeActive = false;
                 g_HeadlightLastRefreshTick = 0;
@@ -1271,7 +1269,7 @@ namespace BZROpenShim
             const char* beamName =
                 g_HeadlightBeamMode == HeadlightBeamMode::Focused ? "focused" :
                 (g_HeadlightBeamMode == HeadlightBeamMode::Wide ? "wide" : "stock");
-            Log(L"[HEADLIGHT] Baseline configured=%hs player=%hs other=%hs colour=%hs(%.2f,%.2f,%.2f) beam=%hs brightness=%.2f (SP-only; defers to EXU)\n",
+            Log(L"[HEADLIGHT] Baseline configured=%hs player=%hs other=%hs colour=%hs(%.2f,%.2f,%.2f) beam=%hs brightness=%.2f (SP-only)\n",
                 IsHeadlightFeatureConfigured() ? "yes" : "no",
                 g_HeadlightPlayerVisibleConfigured ? (g_HeadlightPlayerVisible ? "on" : "off") : "stock",
                 g_HeadlightOtherVisibleConfigured ? (g_HeadlightOtherVisible ? "on" : "off") : "stock",
@@ -1315,12 +1313,10 @@ namespace BZROpenShim
         //      recapture that follows records genuine stock values rather than
         //      the shim's own output.
         //
-        // The EXU rule is the same one RefreshHeadlightState applies: with EXU
-        // loaded the campaign owns these lights, so drop the baselines without
-        // writing them back.
+        // Baselines are written back first so the new config starts from stock.
         void ReapplyHeadlightConfigFromUserConfig()
         {
-            RestoreAllHeadlightStates(!IsExuModuleLoaded());
+            RestoreAllHeadlightStates(true);
             g_HeadlightConfigInitialized = false;
             g_HeadlightLastRefreshTick = 0;
             InitializeHeadlightConfig();
