@@ -167,7 +167,7 @@ highlights. Cheap to add: one dot product per light.
 4. Exposure pass: diffuse normalisation for objects and terrain together
    (finding 4). Ambient stays undecoded (finding 3). Also check that the
    Enhanced colour and normal samplers use 16x anisotropic filtering like BZCC,
-   and that MSAA is on: BZCC renders FP16 at 8x MSAA with no post stack.
+   and that MSAA is on: BZCC renders FP16 at 8x MSAA with no post stack. Done; see "Exposure pass" below.
 5. Per-planet environment maps (finding 2.3). Done for IBL materials; see
    below.
 
@@ -360,6 +360,53 @@ Limits:
 - Moon, Venus, Europa, Ganymede and Elysium have not been captured.
 - A mid-session world change has not been tested. Restoring and re-applying
   has only been exercised through the dirty-generation logic.
+
+## Exposure pass
+
+`OSE_PBR_DIFFUSE_COMPENSATION` is now `OSE_PI` in both
+`openshim_enhanced_base-sm4.hlsl` and `openshim_enhanced_terrain-sm4.hlsl`, so the
+diffuse weight is `(1 - F)` as in BZCC. Ambient is unchanged (finding 3).
+
+Measured on lcbmars and lcbtitan (Grizzly, close front and rear, linear light,
+pixels that changed between runs):
+
+| | 2.70 to pi |
+|---|---|
+| Grizzly | +3 to +5% (median per pixel +4 to +8%) |
+| Enhanced terrain | +9 to +10% |
+| Stock terrain | unchanged (pixel-identical) |
+
+The ceiling is +16% (pi / 2.70) on the direct sun term. The Grizzly gains less
+because ambient, environment and specular make up much of its lit colour. The
+ground gains nearly the full amount.
+
+Enhanced terrain is opt-in. By default (`enhanced-stock-base=on terrain=off` in
+openshim.log) stock objects get the Enhanced shader and terrain stays on the
+stock shader. Set `OPENSHIM_ENABLE_ENHANCED_STOCK_TERRAIN=1` to opt in. On the
+default path this change therefore brightens objects by about 4% against an
+unchanged ground. That is too small to make vehicles look like they float.
+
+![Stock terrain at 2.70; Enhanced terrain at 2.70; Enhanced terrain at pi](images/redux_grizzly_shading/bzr_exposure_pi_terrain.jpg)
+
+The capture shows a separate problem. With Enhanced terrain on, the Grizzly
+casts no shadow on the ground (rows 2 and 3), so it does look like it floats.
+The stock terrain shader receives the shadow (row 1). This has to be fixed
+before Enhanced terrain can be on by default. It is not caused by the diffuse
+change: the shadow is already missing at 2.70.
+
+These captures use the stock Mars atlas and heightmap. The painted HD Mars set
+(`openshim_mars_painted.json`) loads but is declined on lcbmars, because its
+terrain fingerprint belongs to another map.
+
+Filtering and MSAA:
+
+- Anisotropic filtering is at parity. At startup and when settings are applied,
+  the exe calls `MaterialManager::setDefaultTextureFiltering(TFO_ANISOTROPIC)`
+  and then `setDefaultAnisotropy(1 << (option - 1))`. Option 0 gives 1, which is
+  plain trilinear. No OpenShim material sets `filtering` or `max_anisotropy`, so
+  the Enhanced samplers follow the video option. 16x needs the top setting.
+- MSAA is at parity. The test install's `ogre.cfg` has `FSAA=8` for Direct3D11,
+  and the Ogre log confirms it. That matches BZCC's 8x.
 
 ## Follow-ups outside this change
 

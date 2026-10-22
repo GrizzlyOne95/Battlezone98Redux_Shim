@@ -523,7 +523,10 @@ static const float OSE_LOD_MIN_ROUGHNESS = 0.18;
 
 static const float OSE_PBR_DEFAULT_F0 = 0.04;
 static const float OSE_PBR_MAX_LEGACY_F0 = 0.45;
-static const float OSE_PBR_DIFFUSE_COMPENSATION = 2.70;
+// Legacy light intensities were authored for non-normalized Lambert, so the
+// diffuse lobe is scaled by pi (diffuse weight (1-F), as in BZCC) while still
+// applying Fresnel energy sharing. Keep this equal in the base and terrain shaders.
+static const float OSE_PBR_DIFFUSE_COMPENSATION = OSE_PI;
 static const float OSE_PBR_SPECULAR_COMPENSATION = 1.00;
 
 // Static IBL calibration. Keep synchronized with openshim_enhanced_base-sm4.hlsl, including the

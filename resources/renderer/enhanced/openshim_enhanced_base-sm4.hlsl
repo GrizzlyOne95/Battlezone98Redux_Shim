@@ -407,9 +407,10 @@ static const float OSE_LOD_MIN_ROUGHNESS = 0.18;
 
 static const float OSE_PBR_DEFAULT_F0 = 0.04;
 static const float OSE_PBR_MAX_LEGACY_F0 = 0.45;
-// Legacy light intensities were authored for non-normalized Lambert. This keeps
-// diffuse response recognizable while still applying Fresnel energy sharing.
-static const float OSE_PBR_DIFFUSE_COMPENSATION = 2.70;
+// Legacy light intensities were authored for non-normalized Lambert, so the
+// diffuse lobe is scaled by pi (diffuse weight (1-F), as in BZCC) while still
+// applying Fresnel energy sharing. Keep this equal in the base and terrain shaders.
+static const float OSE_PBR_DIFFUSE_COMPENSATION = OSE_PI;
 static const float OSE_PBR_SPECULAR_COMPENSATION = 1.00;
 
 // -----------------------------------------------------------------------------
