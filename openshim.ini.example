@@ -752,14 +752,6 @@ Renderer = Auto
 ; overrides are cleared automatically at mission end.
 RenderProfile = Enhanced
 
-; One-time migration marker. Accepted: 1. Default: absent.
-;   Installs from before Enhanced became the default carry RenderProfile =
-;   Redux, and the installer never overwrites openshim.ini. On the first launch
-;   without this key, OpenShim changes Redux to Enhanced (Retro and Enhanced
-;   are kept) and writes this key, so choosing Redux afterwards sticks.
-;   Logged under [RENDER] "profile migration". Shipped ini sets it to 1.
-RenderProfileMigration = 1
-
 ; Direct3D 11 device-loss recovery. Accepted: boolean. Default: 1.
 ;   When the display driver resets the GPU (a TDR), Ogre recreates its D3D11
 ;   device at once. Recreated inside the reset window, the new device is lost
