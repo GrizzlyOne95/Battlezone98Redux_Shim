@@ -76,7 +76,7 @@ $identLine    = Select-Last $shim '\[RENDER\] backend identified'
 $profileLine  = Select-Last $shim '\[RENDER\] profile\.user='
 $capsLine     = Select-Last $shim '\[RENDER\] enhanced\.supported='
 $bitsLine     = Select-Last $shim '\[RENDER\] enhanced\.sharpening='
-$fallbackLine = Select-Last $shim '\[RENDER\] fallback='
+$fallbackLine = Select-Last $shim '\[RENDER\] fallback=(?!.*\(provisional:)'
 
 $evidence = [ordered]@{
     collectedAt       = (Get-Date).ToString("o")

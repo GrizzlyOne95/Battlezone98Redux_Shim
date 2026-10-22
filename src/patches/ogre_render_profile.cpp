@@ -677,7 +677,14 @@ namespace BZROpenShim::RenderProfiles
 
             if (s_effective.fellBack && s_effective.reason[0] != '\0')
             {
-                LogShimA(LogLevel::Warn, kLogTag, "fallback=%s", s_effective.reason);
+                // Before the backend is observed the resolver runs on the DX9
+                // placeholder, so a fallback here is provisional, not a fault.
+                if (s_backendDetected)
+                    LogShimA(LogLevel::Warn, kLogTag, "fallback=%s", s_effective.reason);
+                else
+                    LogShimA(LogLevel::Info, kLogTag,
+                             "fallback=%s (provisional: backend not observed yet)",
+                             s_effective.reason);
             }
         }
 
