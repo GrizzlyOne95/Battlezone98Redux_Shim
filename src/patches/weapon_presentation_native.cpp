@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <limits>
 #include <map>
+#include <set>
 #include <string>
 #include <unordered_map>
 
@@ -156,6 +157,7 @@ namespace BZROpenShim::Hooks
             uint64_t name = 0;
             WP::FlashConfig config;
             bool renderOffsetDefaulted = false; // render offset came from the mesh offset, not muzzleRenderOffset
+            float kick = 0; // [WeaponClass] recoilKick, inherited; 0 = no recoil
         };
         struct RecoilSlot
         {
@@ -165,6 +167,7 @@ namespace BZROpenShim::Hooks
             float distance = WP::kRecoilKick;
             float returnSpeed = WP::kRecoilReturnSpeed;
             std::optional<WeaponConvergence::Vec3> flashOffset; // craft override, valid only
+            std::optional<float> kick; // craft recoilKick<N> override, valid only
         };
         struct CraftConfig { uint64_t name = 0; std::array<RecoilSlot, 5> slots; };
         struct WeaponState
@@ -188,6 +191,7 @@ namespace BZROpenShim::Hooks
         using NodeKey = std::pair<WP::Identity, WP::Identity>;
         std::unordered_map<void*, ClassFlash> g_FlashClasses;
         std::unordered_map<void*, CraftConfig> g_CraftClasses;
+        std::set<std::pair<uint64_t, int>> g_FlashSkipLogged; // once per craft class and slot
         std::unordered_map<void*, WeaponState> g_Weapons;
         std::map<NodeKey, NodeState> g_Nodes;
         std::unordered_map<uintptr_t, NodeKey> g_NodeByAddress;
@@ -249,6 +253,7 @@ namespace BZROpenShim::Hooks
                     !Read(objectClass, kClassParent, parent)) return;
                 WP::FlashConfig inherited;
                 bool inheritedRenderDefaulted = false;
+                float inheritedKick = 0;
                 auto found = g_FlashClasses.find(parent);
                 uint64_t parentName = 0;
                 if (found != g_FlashClasses.end() && Read(parent, kWeaponClassName, parentName) &&
@@ -256,6 +261,22 @@ namespace BZROpenShim::Hooks
                 {
                     inherited = found->second.config;
                     inheritedRenderDefaulted = found->second.renderOffsetDefaulted;
+                    inheritedKick = found->second.kick;
+                }
+                result.kick = inheritedKick;
+                {
+                    char raw[kMaxValueBytes] = {};
+                    const auto status = ReadValue(scope, Policy::Hash("WeaponClass"), Policy::Hash("recoilKick"), raw);
+                    if (status != ValueStatus::Missing)
+                    {
+                        const auto kick = status == ValueStatus::Present ? Policy::Kick(raw) : std::nullopt;
+                        if (kick) result.kick = *kick;
+                        else
+                        {
+                            char odf[9] = {}; std::memcpy(odf, &result.name, 8);
+                            LogShimA(LogLevel::Warn, "WEAPONFX", "ODF=%s recoilKick rejected; expected 0..%.0f; treated as absent", odf, Policy::kMaxRecoilKick);
+                        }
+                    }
                 }
                 char name[kMaxValueBytes] = {}, duration[kMaxValueBytes] = {};
                 const auto ns = ReadValue(scope, Policy::Hash("WeaponClass"), Policy::Hash("flashName"), name);
@@ -374,6 +395,16 @@ namespace BZROpenShim::Hooks
                             LogShimA(LogLevel::Warn, "WEAPONFX", "ODF=%s flashOffset%s rejected; expected \"right up forward\" within -20..20; weapon flashOffset kept", odf, suffix.c_str());
                         }
                     }
+                    if (ReadValue(scope, Policy::Hash("CraftClass"), Policy::Hash("recoilKick" + suffix), value) !=
+                        ValueStatus::Missing)
+                    {
+                        slot.kick = Policy::Kick(value);
+                        if (!slot.kick)
+                        {
+                            char odf[9] = {}; std::memcpy(odf, &result.name, 8);
+                            LogShimA(LogLevel::Warn, "WEAPONFX", "ODF=%s recoilKick%s rejected; expected 0..%.0f; weapon recoilKick kept", odf, suffix.c_str(), Policy::kMaxRecoilKick);
+                        }
+                    }
                     const auto animStatus = ReadValue(scope, Policy::Hash("CraftClass"),
                         Policy::Hash("recoilAnimation" + suffix), value);
                     slot.animationPresent = animStatus != ValueStatus::Missing;
@@ -452,33 +483,87 @@ namespace BZROpenShim::Hooks
             __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
         }
 
-        void BindRecoil(void* weapon, WeaponState& state, WP::BindRequest& request, bool renderOffsetDefaulted)
+        // Whether the firing object is a person/pilot. Persons have no fitted
+        // craft section. Uses the object's RTTI class name containing "Person"
+        // (same test as pilot_flashlight). Unknown identity counts as a vehicle,
+        // so the flash fails closed.
+        bool IsPersonObject(void* object) noexcept
         {
+            char className[128] = {};
+            const char* name = TryGetRttiClassName(object, className, sizeof(className));
+            return name && std::strstr(name, "Person") != nullptr;
+        }
+
+        struct BindDiagnostics
+        {
+            float kick = 0;
+            bool flashAllowed = true;
+        };
+
+        void BindRecoil(void* weapon, WeaponState& state, WP::BindRequest& request,
+            bool renderOffsetDefaulted, float weaponKick, BindDiagnostics& diag)
+        {
+            diag.kick = 0;
+            diag.flashAllowed = true;
             if (!g_Settings.meshRecoil && !g_Settings.muzzleFlash) return;
             void* owner = reinterpret_cast<void*>(state.owner.address);
-            void* carrier = nullptr;
-            void* objectClass = nullptr;
-            if (!Read(owner, kCarrier, carrier) || !ReadObjectClass(owner, objectClass)) return;
-            const auto config = g_CraftClasses.find(objectClass);
-            uint64_t name = 0;
-            if (config == g_CraftClasses.end() || !Read(objectClass, kObjectClassName, name) ||
-                name != config->second.name) return;
+            const bool person = IsPersonObject(owner);
+            const RecoilSlot* slotPtr = nullptr;
+            uint64_t craftName = 0;
             int selected = -1;
-            for (int slot = 0; slot < 5; ++slot)
             {
-                void* candidate = nullptr;
-                if (!Read(carrier, kCarrierSlots + slot * sizeof(void*), candidate)) return;
-                if (candidate == weapon)
+                void* carrier = nullptr;
+                void* objectClass = nullptr;
+                if (Read(owner, kCarrier, carrier) && ReadObjectClass(owner, objectClass))
                 {
-                    if (selected != -1) return; // ambiguous native slot identity
-                    selected = slot;
+                    const auto config = g_CraftClasses.find(objectClass);
+                    uint64_t name = 0;
+                    if (config != g_CraftClasses.end() && Read(objectClass, kObjectClassName, name) &&
+                        name == config->second.name)
+                    {
+                        bool ambiguous = false;
+                        for (int slot = 0; slot < 5; ++slot)
+                        {
+                            void* candidate = nullptr;
+                            if (!Read(carrier, kCarrierSlots + slot * sizeof(void*), candidate)) { ambiguous = true; break; }
+                            if (candidate == weapon)
+                            {
+                                if (selected != -1) { ambiguous = true; break; } // ambiguous native slot identity
+                                selected = slot;
+                            }
+                        }
+                        if (!ambiguous && selected >= 0)
+                        {
+                            slotPtr = &config->second.slots[selected];
+                            craftName = config->second.name;
+                        }
+                    }
                 }
             }
-            if (selected < 0) return;
-            const auto& slot = config->second.slots[selected];
-            if (slot.flashOffset && g_Settings.muzzleFlash)
-                WP::NativePolicy::ApplyCraftFlashOffset(request.flash, renderOffsetDefaulted, *slot.flashOffset);
-            if (!g_Settings.meshRecoil) return;
+            if (g_Settings.muzzleFlash)
+            {
+                const bool hasOffset = slotPtr && slotPtr->flashOffset;
+                if (hasOffset)
+                    WP::NativePolicy::ApplyCraftFlashOffset(request.flash, renderOffsetDefaulted, *slotPtr->flashOffset);
+                diag.flashAllowed = Policy::FlashAllowed(person, hasOffset);
+                if (!diag.flashAllowed)
+                {
+                    if (slotPtr && (request.flash.IsMesh() || request.flash.muzzleRender.Valid()) &&
+                        g_FlashSkipLogged.insert({ craftName, selected }).second)
+                    {
+                        char odf[9] = {}; std::memcpy(odf, &craftName, 8);
+                        LogShimA(LogLevel::Info, "WEAPONFX", "ODF=%s slot %d flash skipped: no flashOffset%d",
+                            odf, selected + 1, selected + 1);
+                    }
+                    Policy::StripMeshAndRenderFlash(request.flash);
+                }
+            }
+            if (!g_Settings.meshRecoil || !slotPtr) return;
+            const auto& slot = *slotPtr;
+            // Effective kick comes from the weapon actually fired in this slot.
+            const float kick = Policy::EffectiveKick(slot.kick, weaponKick);
+            diag.kick = kick;
+            if (kick <= 0) return;
             if (slot.animationPresent)
             {
                 auto animation = slot.animation;
@@ -490,7 +575,9 @@ namespace BZROpenShim::Hooks
                 return;
             }
             if (!slot.node) return;
+            const float distance = Policy::ScaledRecoilDistance(slot.distance, kick);
             if (!std::isfinite(slot.distance) || slot.distance <= 0 || slot.distance > 10 ||
+                !std::isfinite(distance) || distance <= 0 || distance > 10 ||
                 !std::isfinite(slot.returnSpeed) || slot.returnSpeed <= 0 || slot.returnSpeed > 100) return;
             const auto id = *slot.node;
             const auto found = WP::FindMeshNode(reinterpret_cast<uintptr_t>(state.root), id, ReadMesh, nullptr);
@@ -517,7 +604,7 @@ namespace BZROpenShim::Hooks
                 try { g_NodeByAddress.emplace(found.node, key); }
                 catch (...) { g_Nodes.erase(key); state.node = {}; throw; }
             }
-            request.recoil = WP::RecoilBinding{ state.node, rest, slot.distance, slot.returnSpeed };
+            request.recoil = WP::RecoilBinding{ state.node, rest, distance, slot.returnSpeed };
         }
 
         void __cdecl ObserveShot(void* weapon, const WP::Matrix* finalPose,
@@ -548,6 +635,7 @@ namespace BZROpenShim::Hooks
                     void* objectClass = nullptr;
                     uint64_t name = 0;
                     bool renderDefaulted = false;
+                    float weaponKick = 0;
                     if (Read(weapon, kWeaponClass, objectClass))
                     {
                         const auto config = g_FlashClasses.find(objectClass);
@@ -556,16 +644,19 @@ namespace BZROpenShim::Hooks
                         {
                             request.flash = config->second.config;
                             renderDefaulted = config->second.renderOffsetDefaulted;
+                            weaponKick = config->second.kick;
                         }
                     }
-                    BindRecoil(weapon, state, request, renderDefaulted);
+                    BindDiagnostics diag;
+                    BindRecoil(weapon, state, request, renderDefaulted, weaponKick, diag);
                     const auto token = runtime->Bind(request);
                     if (!token) return;
                     state.token = *token;
-                    LogShimA(LogLevel::Info, "WEAPONFX", "presentation bound handle=%u recoil=%s clip=%s flashMesh=%s flashOffset=%.2f,%.2f,%.2f",
+                    LogShimA(LogLevel::Info, "WEAPONFX", "presentation bound handle=%u recoil=%s clip=%s flashMesh=%s flashOffset=%.2f,%.2f,%.2f kick=%.2f flash=%s",
                         static_cast<unsigned>(state.owner.lifetime), request.animation ? "animation" : request.recoil ? "node" : "none",
                         request.animation ? request.animation->clip.c_str() : "", request.flash.mesh.c_str(),
-                        request.flash.offset.x, request.flash.offset.y, request.flash.offset.z);
+                        request.flash.offset.x, request.flash.offset.y, request.flash.offset.z,
+                        diag.kick, diag.flashAllowed ? "on" : "off(no craft offset)");
                 }
                 WP::Matrix current;
                 if (!CurrentWeaponPose(weapon, state, current) || state.root != ownerRoot)

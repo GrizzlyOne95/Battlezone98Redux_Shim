@@ -303,6 +303,91 @@ namespace
         Finish(runtime, backend);
     }
 
+    void TestRecoilKickOptIn()
+    {
+        namespace Policy = WP::NativePolicy;
+        // Parsing: 0..4 inclusive, everything else is invalid (caller WARNs, treats as absent).
+        for (const auto good : {"0", "0.15", "1.0", "4", "4.0", " 2 "})
+            Require(Policy::Kick(good).has_value(), "valid recoilKick rejected");
+        Require(*Policy::Kick("0.15") == 0.15f, "recoilKick value wrong");
+        for (const auto bad : {"-0.1", "4.01", "NaN", "inf", "", "abc", "1.0x", "1 2"})
+            Require(!Policy::Kick(bad), "invalid recoilKick accepted");
+
+        // Weapon kick alone.
+        Require(Policy::EffectiveKick(std::nullopt, 1.0f) == 1.0f, "weapon kick ignored");
+        Require(Policy::EffectiveKick(std::nullopt, 0.0f) == 0.0f, "absent kick must mean no recoil");
+        // Craft override replaces the weapon value, including a zero that disables it.
+        Require(Policy::EffectiveKick(0.25f, 1.0f) == 0.25f, "craft kick did not override weapon");
+        Require(Policy::EffectiveKick(0.0f, 1.0f) == 0.0f, "craft kick 0 did not disable weapon kick");
+        // A craft override enables a weapon that has no kick.
+        Require(Policy::EffectiveKick(0.15f, 0.0f) == 0.15f, "craft kick did not enable kickless weapon");
+
+        // Distance scales by the kick.
+        Near(Policy::ScaledRecoilDistance(0.6f, 1.0f), 0.6, "kick 1 changed distance");
+        Near(Policy::ScaledRecoilDistance(0.6f, 0.25f), 0.15, "kick did not scale distance");
+        Near(Policy::ScaledRecoilDistance(0.6f, 0.0f), 0.0, "kick 0 left a slide");
+    }
+
+    void TestFlashRequiresCraftOffsetForVehicles()
+    {
+        namespace Policy = WP::NativePolicy;
+        auto weaponFlash = Policy::ResolveMeshFlashConfig({}, {"\"Small.mesh\"", {}, "0.05", {}, {}, "\"0 0 1\"", {}});
+        weaponFlash.muzzleRender = Policy::ResolveMuzzleRenderConfig({}, {"\"R.render\"", {}, {}}, weaponFlash.offset);
+        Require(weaponFlash.IsMesh() && weaponFlash.muzzleRender.Valid(), "flash gate base invalid");
+
+        // Vehicle without a craft offset: no mesh flash and no muzzleRender layer.
+        Require(!Policy::FlashAllowed(false, false), "vehicle without flashOffset allowed a flash");
+        auto vehicle = weaponFlash;
+        Policy::StripMeshAndRenderFlash(vehicle);
+        Require(!vehicle.IsMesh() && !vehicle.muzzleRender.Valid(), "stripped flash kept a layer");
+
+        FakeBackend backend;
+        WP::Runtime runtime; Start(runtime);
+        auto request = Request();
+        request.flash = vehicle;
+        const auto token = Bind(runtime, request);
+        auto pose = WC::Identity();
+        const auto shot = runtime.Fire(token, 1, pose);
+        Require(!shot.flashStarted, "vehicle without offset started a flash");
+        runtime.BeginSimulationStep(1, .02f);
+        runtime.SynchronizeVisuals(backend);
+        Require(runtime.Inspect().meshFlashAttachments == 0, "vehicle without offset attached a mesh flash");
+        Finish(runtime, backend);
+
+        // Vehicle with a craft offset: flash drawn at the craft offset.
+        Require(Policy::FlashAllowed(false, true), "vehicle with flashOffset denied a flash");
+        const auto offset = Policy::Offset("\"0 0 3\"");
+        Require(offset.has_value(), "test offset invalid");
+        auto fitted = weaponFlash;
+        Policy::ApplyCraftFlashOffset(fitted, true, *offset);
+        Require(fitted.IsMesh() && fitted.muzzleRender.Valid(), "fitted vehicle lost a flash layer");
+        FakeBackend fittedBackend;
+        WP::Runtime fittedRuntime; Start(fittedRuntime);
+        auto fittedRequest = Request();
+        fittedRequest.flash = fitted;
+        const auto fittedToken = Bind(fittedRuntime, fittedRequest);
+        auto fittedPose = WC::Identity();
+        Require(fittedRuntime.Fire(fittedToken, 1, fittedPose).flashStarted, "fitted vehicle flash did not start");
+        fittedRuntime.BeginSimulationStep(1, .02f);
+        fittedRuntime.SynchronizeVisuals(fittedBackend);
+        Near(fittedBackend.meshPose.positionZ, 3, "fitted vehicle flash not at craft offset");
+        Finish(fittedRuntime, fittedBackend);
+
+        // A person keeps the weapon's own flashOffset.
+        Require(Policy::FlashAllowed(true, false), "person denied the weapon flashOffset");
+        FakeBackend personBackend;
+        WP::Runtime personRuntime; Start(personRuntime);
+        auto personRequest = Request();
+        personRequest.flash = weaponFlash;
+        const auto personToken = Bind(personRuntime, personRequest);
+        auto personPose = WC::Identity();
+        Require(personRuntime.Fire(personToken, 1, personPose).flashStarted, "person flash did not start");
+        personRuntime.BeginSimulationStep(1, .02f);
+        personRuntime.SynchronizeVisuals(personBackend);
+        Near(personBackend.meshPose.positionZ, 1, "person did not keep weapon flashOffset");
+        Finish(personRuntime, personBackend);
+    }
+
     void TestMuzzleRenderAlongsideMesh()
     {
         namespace Policy = WP::NativePolicy;
@@ -958,6 +1043,8 @@ int main()
     TestMeshFlashPolicyAndRuntime();
     TestMuzzleRenderAlongsideMesh();
     TestCraftFlashOffsetOverride();
+    TestRecoilKickOptIn();
+    TestFlashRequiresCraftOffsetForVehicles();
     TestAnimationRecoil();
     TestConfigurationAndIds();
     TestBoundedMeshLookup();
