@@ -15,7 +15,7 @@
 #include "openshim_preset_migration.h"
 #include "shim_log.h"
 #include "sun_flash.h"
-#include "explosion_flash.h"
+#include "screen_flash.h"
 #include "openshim_sdk_v2.h"
 #include "cli_multiparam_parser.h"
 #include "redux_compatibility.h"
@@ -1323,13 +1323,13 @@ namespace BZROpenShim
                 SunFlash::LoadConfig();
                 target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(SunFlash::ThunkAddress()));
             }
-            else if (p.name.rfind("Explosion Screen Flash Hook ", 0) == 0) {
+            else if (ScreenFlash::CallSiteIndex(p.name.c_str()) >= 0) {
                 // Same instruction-anchored check as the sun site, per site:
-                // mov ecx, ScreenFlash / call ScreenFlash::AddFlash.
-                const unsigned long site = p.name.back() == '2' ? 1ul : 0ul;
-                if (!ExplosionFlash::VerifyCallSite(site, isSteam ? 300 : 1, 10)) { Log(L"[EXPLFLASH] call site verify failed at 0x%08X; leaving stock flash in place\n", p.address); continue; }
-                ExplosionFlash::LoadConfig();
-                target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ExplosionFlash::ThunkAddress()));
+                // mov ecx, ScreenFlash / call the expected ScreenFlash method.
+                const auto site = static_cast<unsigned long>(ScreenFlash::CallSiteIndex(p.name.c_str()));
+                if (!ScreenFlash::VerifyCallSite(site, isSteam ? 300 : 1, 10)) { Log(L"[SCREENFLASH] call site verify failed at 0x%08X; leaving stock flash in place\n", p.address); continue; }
+                ScreenFlash::LoadConfig();
+                target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ScreenFlash::ThunkAddress(site)));
             }
             else if (p.name.find("Damage Reveal Probe") != std::string::npos) {
                 // The hook calls on to whatever this call reached, so take
@@ -1635,8 +1635,8 @@ namespace BZROpenShim
                     WeaponPresentation::NativeBridges::RecordShotSite(
                         p.name == "Shell Casings MachineGun Shot Call", p.address - 1);
                 if (p.name == "Sun Screen Flash Contribution Hook") SunFlash::SetPatchInstalled(true);
-                if (p.name.rfind("Explosion Screen Flash Hook ", 0) == 0)
-                    ExplosionFlash::SetPatchInstalled(p.name.back() == '2' ? 1ul : 0ul);
+                if (ScreenFlash::CallSiteIndex(p.name.c_str()) >= 0)
+                    ScreenFlash::SetPatchInstalled(static_cast<unsigned long>(ScreenFlash::CallSiteIndex(p.name.c_str())));
                 Log(L"[OK]   %hs wrote %u bytes to 0x%08X\n", p.name.c_str(), static_cast<unsigned>(p.payload.size()), p.address);
             } else {
                 Log(L"[SKIP] %hs address=0x%08X verified=%hs payload=%u\n", p.name.c_str(), p.address, p.verified ? "yes" : "no", static_cast<unsigned>(p.payload.size()));

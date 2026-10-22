@@ -256,9 +256,14 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::REL32, {}, "Sun Screen Flash Contribution Hook", false, {} },
             // The two explosion callers of the same ScreenFlash::AddFlash, so
             // [Display] ExplosionFlash can cap or drop the one-frame white
-            // strobe. See include/explosion_flash.h; verified like the sun site.
+            // strobe, and the three player-damage callers of AddColorFlash for
+            // [Display] DamageFlash. See include/screen_flash.h; each is
+            // verified like the sun site.
             { 0, HookEngine::PatchType::REL32, {}, "Explosion Screen Flash Hook 1/2", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Explosion Screen Flash Hook 2/2", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Damage Screen Flash Hook 1/3", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Damage Screen Flash Hook 2/3", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Damage Screen Flash Hook 3/3", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Damage Reveal Probe 1/4", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Damage Reveal Probe 2/4", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Damage Reveal Probe 3/4", false, {} },

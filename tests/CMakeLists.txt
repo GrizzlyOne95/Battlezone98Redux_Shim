@@ -348,8 +348,8 @@ openshim_add_test(sun_flash_tests STD 20 SOURCES
     sun_flash_tests.cpp
 )
 
-openshim_add_test(explosion_flash_tests STD 20 SOURCES
-    explosion_flash_tests.cpp
+openshim_add_test(screen_flash_tests STD 20 SOURCES
+    screen_flash_tests.cpp
 )
 
 openshim_add_test(env_switch_table_tests STD 20 SOURCES

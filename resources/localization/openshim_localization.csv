@@ -144,6 +144,8 @@ openshim_opt:SunFlashbang:label~Sun Flashbang~~~~~~
 openshim_opt:SunFlashbang:desc~On is stock: looking near the sun paints a fullscreen white flash. Off suppresses only that flash.~~~~~~
 openshim_opt:ExplosionFlash:label~Explosion Flash~~~~~~
 openshim_opt:ExplosionFlash:desc~Stock: a nearby explosion turns the whole screen white for one frame. Soft keeps a faint flicker. Off removes it.~~~~~~
+openshim_opt:DamageFlash:label~Damage Flash~~~~~~
+openshim_opt:DamageFlash:desc~Stock: taking damage tints the whole screen red or orange. Soft makes the tint fainter. Off removes it.~~~~~~
 openshim_opt:UnderAttackAlert:label~Attack Alert~~~~~~
 openshim_opt:UnderAttackAlert:desc~Under-attack warning style: Normal, Minimal (quieter), or None.~~~~~~
 openshim_opt:SuppressHopOutAttackAlert:label~Hop-Out Alert Fix~~~~~~

@@ -353,6 +353,7 @@ $stockValueChecks = @{
     "Graphics/RenderProfile" = "Redux"
     "Display/UnderAttackAlert" = "Normal"
     "Display/ExplosionFlash" = "Stock"
+    "Display/DamageFlash" = "Stock"
     "Display/TargetPolicy" = "Default"
     "Display/ScrapPilotHud" = "Stock"
     "Display/UnitVoFeedback" = "Normal"

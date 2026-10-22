@@ -1221,6 +1221,16 @@ SunFlashbang = 1
 ; the sun's contribution (SunFlashbang above).
 ExplosionFlash = Stock
 
+; Fullscreen red/orange tint when the player's craft takes damage.
+; Accepted: Stock | Soft | Off (1 = Stock, 0 = Off). Default: Stock.
+;   Stock = three damage paths add a coloured flash scaled by the damage
+;           taken (decay 5.0, so it fades over a few frames)
+;   Soft  = each damage flash is scaled to 35% of its stock strength
+;   Off   = taking damage adds no tint
+; Exposed on the OpenShim Settings page as "Damage Flash"; applies live.
+; Scripted colour fades (Lua ColorFade) and other event flashes are unchanged.
+DamageFlash = Stock
+
 ; Unit command/selection voice feedback.
 ; Canonical values:
 ;   Normal  = normal stock feedback

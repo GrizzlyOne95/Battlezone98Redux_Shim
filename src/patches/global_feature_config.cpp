@@ -36,7 +36,7 @@
 #include "headlight_falloff.h"
 #include "shadow_far_distance.h"
 #include "sun_flash.h"
-#include "explosion_flash.h"
+#include "screen_flash.h"
 #include "chunk_batch_invalidation.h"
 #include "ai_range_policy.h"
 #include "lcbench_safety_policy.h"
@@ -796,7 +796,7 @@ namespace BZROpenShim
             InitializeHopOutAttackAlertConfig();
             InitializeSatelliteVisibilityFixConfig(false);
             SunFlash::ReloadConfig();
-            ExplosionFlash::ReloadConfig();
+            ScreenFlash::ReloadConfig();
             break;
         case ShimSettingApplyGroup::ReadOnNextUse:
         case ShimSettingApplyGroup::RestartRequired:
