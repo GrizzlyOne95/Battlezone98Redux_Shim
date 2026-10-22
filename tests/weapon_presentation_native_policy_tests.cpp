@@ -50,5 +50,31 @@ int main()
     Require(!runtime.SetRecoilPose(request.owner, request.recoil->node, moved), "animated translation accepted");
     runtime.SetSession(false, true);
     Require(!runtime.TryGetVisualRecoilPose(request.owner, request.recoil->node, visual), "MP produced staged recoil");
+    // Cockpit twin rule, from real CR/stock VDF bands.
+    auto id = [](const char* name) { return *WP::ParseMeshId(name); };
+    Require(Policy::CockpitTwinMatches("AGR21bga", id("AGR11BGA")), "avtank cockpit barrel not matched");
+    Require(Policy::CockpitTwinMatches("SCZ21BGB", id("SCZ11BGB")), "svtank cockpit barrel not matched");
+    Require(Policy::CockpitTwinMatches("age21hed", id("age11hed")), "walker cockpit twin not matched");
+    Require(!Policy::CockpitTwinMatches("AGR11BGA", id("AGR11BGA")), "hidden band-1 bone matched itself");
+    Require(!Policy::CockpitTwinMatches("AGR21bgb", id("AGR11BGA")), "different slot matched");
+    Require(!Policy::CockpitTwinMatches("AGR21bg", id("AGR11BGA")), "length mismatch matched");
+    Require(!Policy::CockpitTwinMatches("AGR31bga", id("AGR21BGA")), "non band-1 node got a twin");
+    Require(!Policy::CockpitTwinMatches("ab2", id("ab1")), "short name got a twin");
+    Require(Policy::CockpitFlag(" 0 ") == false && Policy::CockpitFlag("true") == true &&
+        !Policy::CockpitFlag("yes"), "recoilCockpit flag parse changed");
+    {
+        WP::Matrix restPose = WC::Identity(), kicked = WC::Identity();
+        kicked.frontX = 0; kicked.frontY = 0; kicked.frontZ = 1;
+        restPose.positionZ = 2; kicked.positionZ = 2 - 0.3;
+        Require(std::abs(Policy::RecoilDisplacement(restPose, kicked) + 0.3f) < 1e-5f, "displacement sign/size wrong");
+        kicked.positionZ = 2; kicked.positionY = 5; // off-axis motion is not recoil
+        Require(Policy::RecoilDisplacement(restPose, kicked) == 0, "off-axis motion read as recoil");
+        const auto p = Policy::CockpitRecoilPosition({ 0.349f, 2.136f, 1.604f }, {}, -0.3f);
+        Require(p.x == 0.349f && p.y == 2.136f && std::abs(p.z - 1.304f) < 1e-5f, "identity bone did not slide back on +Z");
+        // 90 degrees about Y: +Z becomes +X.
+        const float s = std::sqrt(0.5f);
+        const auto f = Policy::BoneForward({ s, 0, s, 0 });
+        Require(std::abs(f.x - 1) < 1e-5f && std::abs(f.y) < 1e-5f && std::abs(f.z) < 1e-5f, "bone forward axis wrong");
+    }
     std::puts("weapon_presentation_native_policy_tests: all checks passed");
 }

@@ -167,6 +167,67 @@ namespace BZROpenShim::WeaponPresentation::NativePolicy
         return isPerson || hasCraftOffset;
     }
 
+    // recoilCockpit<N>: "1"/"true" or "0"/"false"; anything else is nullopt
+    // and the caller fails closed (no cockpit kick).
+    inline std::optional<bool> CockpitFlag(std::string_view text) noexcept
+    {
+        const auto flag = Trim(text);
+        if (flag == "1" || flag == "true") return true;
+        if (flag == "0" || flag == "false") return false;
+        return std::nullopt;
+    }
+
+    // Cockpit counterpart of a world recoil node. The native binder hides
+    // every VDF band-1 bone (name[3] == '1') in the cockpit entity and shows
+    // band 2. A cockpit that reuses the world mesh (CR avtank) draws its gun
+    // through the band-2 twin of the same slot: AGR11BGA -> AGR21bga,
+    // SCZ11BGB -> SCZ21BGB. Only name[3] changes; case is not preserved
+    // between bands, so the match ignores ASCII case. Names that are not
+    // band 1 have no twin.
+    inline bool CockpitTwinMatches(std::string_view bone, const MeshId& worldNode) noexcept
+    {
+        size_t length = 0;
+        while (length < worldNode.size() && worldNode[length]) ++length;
+        if (length < 4 || worldNode[3] != '1' || bone.size() != length) return false;
+        auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c + ('a' - 'A')) : c; };
+        for (size_t i = 0; i < length; ++i)
+        {
+            const char expected = i == 3 ? '2' : worldNode[i];
+            if (lower(bone[i]) != lower(expected)) return false;
+        }
+        return true;
+    }
+
+    // Signed slide along the node's own front axis; Visual() is
+    // rest + front * displacement, so this recovers displacement.
+    inline float RecoilDisplacement(const Matrix& rest, const Matrix& visual) noexcept
+    {
+        const double dx = visual.positionX - rest.positionX;
+        const double dy = visual.positionY - rest.positionY;
+        const double dz = visual.positionZ - rest.positionZ;
+        const double length = double(visual.frontX) * visual.frontX + double(visual.frontY) * visual.frontY +
+            double(visual.frontZ) * visual.frontZ;
+        if (!(length > 1e-6)) return 0.0f;
+        const double value = (dx * visual.frontX + dy * visual.frontY + dz * visual.frontZ) / length;
+        return std::isfinite(value) ? static_cast<float>(value) : 0.0f;
+    }
+
+    struct BoneQuat { float w = 1, x = 0, y = 0, z = 0; }; // Ogre::Quaternion order
+    struct BoneVec { float x = 0, y = 0, z = 0; };
+
+    // Ogre bone local +Z expressed in the parent's space. BZ->Ogre mirrors X
+    // only, so a node's BZ front axis stays the bone's +Z.
+    inline BoneVec BoneForward(const BoneQuat& q) noexcept
+    {
+        return { 2 * (q.x * q.z + q.w * q.y), 2 * (q.y * q.z - q.w * q.x), 1 - 2 * (q.x * q.x + q.y * q.y) };
+    }
+
+    inline BoneVec CockpitRecoilPosition(const BoneVec& rest, const BoneQuat& orientation, float displacement) noexcept
+    {
+        const auto f = BoneForward(orientation);
+        return { rest.x + f.x * displacement, rest.y + f.y * displacement, rest.z + f.z * displacement };
+    }
+
     // Removes the mesh flash and muzzleRender layer; legacy flashName is untouched.
     inline void StripMeshAndRenderFlash(FlashConfig& flash) noexcept
     {

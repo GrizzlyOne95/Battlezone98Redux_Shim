@@ -6,7 +6,9 @@
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
+#include "engine_globals.h"
 #include "hook_engine.h"
+#include "ogre_runtime.h"
 #include "openshim_preset_migration.h"
 #include "shim_log.h"
 
@@ -14,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -168,6 +171,7 @@ namespace BZROpenShim::Hooks
             float returnSpeed = WP::kRecoilReturnSpeed;
             std::optional<WeaponConvergence::Vec3> flashOffset; // craft override, valid only
             std::optional<float> kick; // craft recoilKick<N> override, valid only
+            bool cockpit = true; // recoilCockpit<N>; malformed = off
         };
         struct CraftConfig { uint64_t name = 0; std::array<RecoilSlot, 5> slots; };
         struct WeaponState
@@ -187,6 +191,7 @@ namespace BZROpenShim::Hooks
             WP::MeshId id = {};
             WP::Matrix rest = WeaponConvergence::Identity();
             bool supported = true;
+            bool cockpit = true; // drive the first-person band-2 twin
         };
         using NodeKey = std::pair<WP::Identity, WP::Identity>;
         std::unordered_map<void*, ClassFlash> g_FlashClasses;
@@ -417,6 +422,7 @@ namespace BZROpenShim::Hooks
                         ValueStatus::Missing)
                     {
                         const auto flag = Policy::Trim(value);
+                        slot.cockpit = Policy::CockpitFlag(flag).value_or(false);
                         if (flag == "0" || flag == "false") slot.animation.cockpit = false;
                         else if (flag != "1" && flag != "true") slot.animation.playbackRate = 0;
                     }
@@ -600,7 +606,7 @@ namespace BZROpenShim::Hooks
                 if (!generation) return;
                 state.node = { found.node, generation };
                 const NodeKey key = { state.owner, state.node };
-                g_Nodes.emplace(key, NodeState{ state.root, id, rest, true });
+                g_Nodes.emplace(key, NodeState{ state.root, id, rest, true, slot.cockpit });
                 try { g_NodeByAddress.emplace(found.node, key); }
                 catch (...) { g_Nodes.erase(key); state.node = {}; throw; }
             }
@@ -717,6 +723,224 @@ namespace BZROpenShim::Hooks
             __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
         }
 
+        // ---- First-person cockpit twin --------------------------------------
+        // ModelPose drives OBJ+0xC8 (world bone) and OBJ+0xCC (the same-named
+        // bone in the cockpit skeleton, bound by FUN_0067e430). When the
+        // cockpit reuses the world mesh, that CC bone is a hidden band-1 bone
+        // and the visible gun is its band-2 twin, which nothing binds. Drive the
+        // twin with the same slide, for the local player only. Every Ogre call
+        // is an exact OgreMain export; nothing is cached across frames except
+        // the rest pose of a twin in mid-kick, re-validated each apply.
+        constexpr size_t kObjCockpitBone = 0xCC;          // FUN_0067e430
+        constexpr size_t kGameObjectRenderOwner = 0xF0;    // walker_cockpit_trace
+        constexpr size_t kRenderOwnerCockpitSkeleton = 0xCC; // FUN_006802b0
+        constexpr unsigned kMaxCockpitBones = 512;
+
+        struct OgreVec { float x, y, z; };
+        struct OgreQuat { float w, x, y, z; };
+        using FnNumBones = unsigned short (__thiscall*)(void*);
+        using FnGetBone = void* (__thiscall*)(void*, unsigned short);
+        using FnGetName = const std::string& (__thiscall*)(void*);
+        using FnGetVec = const OgreVec& (__thiscall*)(void*);
+        using FnGetQuat = const OgreQuat& (__thiscall*)(void*);
+        using FnSetPos = void (__thiscall*)(void*, float, float, float);
+        using FnSetManual = void (__thiscall*)(void*, bool);
+        using FnIsManual = bool (__thiscall*)(void*);
+        struct CockpitOgre
+        {
+            FnNumBones numBones = nullptr; FnGetBone getBone = nullptr; FnGetName getName = nullptr;
+            FnGetVec getPosition = nullptr; FnGetQuat getOrientation = nullptr; FnSetPos setPosition = nullptr;
+            FnSetManual setManual = nullptr; FnIsManual isManual = nullptr;
+        } g_CockpitOgre;
+        int g_CockpitOgreState = 0; // 0 unresolved, 1 ready, -1 failed (latched)
+
+        struct CockpitTwin
+        {
+            void* skeleton = nullptr;
+            void* bone = nullptr;
+            OgreVec rest{};
+            OgreQuat orientation{};
+            bool wasManual = false;
+        };
+        std::map<NodeKey, CockpitTwin> g_CockpitTwins;
+        std::set<uint64_t> g_CockpitLogged;
+
+        void* UniqueOgreExport(const char* name)
+        {
+            const auto matches = OgreRuntime::FindExportsContaining(name);
+            for (const auto& match : matches) if (match.name == name) return match.address;
+            return nullptr;
+        }
+
+        bool CockpitOgreReady() noexcept
+        {
+            if (g_CockpitOgreState) return g_CockpitOgreState > 0;
+            if (!OgreRuntime::IsLoaded()) return false;
+            try
+            {
+                auto& o = g_CockpitOgre;
+                o.numBones = reinterpret_cast<FnNumBones>(UniqueOgreExport("?getNumBones@Skeleton@Ogre@@UBEGXZ"));
+                o.getBone = reinterpret_cast<FnGetBone>(UniqueOgreExport("?getBone@Skeleton@Ogre@@UBEPAVBone@2@G@Z"));
+                o.getName = reinterpret_cast<FnGetName>(UniqueOgreExport(
+                    "?getName@Node@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ"));
+                o.getPosition = reinterpret_cast<FnGetVec>(UniqueOgreExport("?getPosition@Node@Ogre@@UBEABVVector3@2@XZ"));
+                o.getOrientation = reinterpret_cast<FnGetQuat>(UniqueOgreExport("?getOrientation@Node@Ogre@@UBEABVQuaternion@2@XZ"));
+                o.setPosition = reinterpret_cast<FnSetPos>(UniqueOgreExport("?setPosition@Node@Ogre@@UAEXMMM@Z"));
+                o.setManual = reinterpret_cast<FnSetManual>(UniqueOgreExport("?setManuallyControlled@Bone@Ogre@@QAEX_N@Z"));
+                o.isManual = reinterpret_cast<FnIsManual>(UniqueOgreExport("?isManuallyControlled@Bone@Ogre@@QBE_NXZ"));
+                const bool ready = o.numBones && o.getBone && o.getName && o.getPosition && o.getOrientation &&
+                    o.setPosition && o.setManual && o.isManual;
+                g_CockpitOgreState = ready ? 1 : -1;
+                LogShimA(ready ? LogLevel::Info : LogLevel::Warn, "WEAPONFX", "cockpit recoil Ogre exports %s",
+                    ready ? "resolved" : "missing; cockpit recoil stays off");
+            }
+            catch (...) { g_CockpitOgreState = -1; }
+            return g_CockpitOgreState > 0;
+        }
+
+        bool OgreObject(const void* object) noexcept
+        {
+            void* vptr = nullptr;
+            return object && Read(object, 0, vptr) && OgreRuntime::ContainsAddress(vptr);
+        }
+
+        // Finds the band-2 twin of `bound` in `skeleton`; fails unless the
+        // skeleton also holds `bound` itself (proves it is this craft's cockpit).
+        void* FindCockpitTwinRaw(void* skeleton, void* bound, const WP::MeshId* id) noexcept
+        {
+            __try
+            {
+                const auto& o = g_CockpitOgre;
+                const unsigned count = o.numBones(skeleton);
+                if (!count || count > kMaxCockpitBones) return nullptr;
+                void* twin = nullptr;
+                bool owns = false;
+                for (unsigned i = 0; i < count; ++i)
+                {
+                    void* bone = o.getBone(skeleton, static_cast<unsigned short>(i));
+                    if (!bone) continue;
+                    if (bone == bound) { owns = true; continue; }
+                    const std::string& name = o.getName(bone);
+                    if (Policy::CockpitTwinMatches(std::string_view(name.data(), name.size()), *id))
+                    {
+                        if (twin) return nullptr; // ambiguous twin
+                        twin = bone;
+                    }
+                }
+                return owns ? twin : nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
+        }
+
+        bool ReadBoneRaw(void* bone, OgreVec& position, OgreQuat& orientation, bool& manual) noexcept
+        {
+            __try
+            {
+                position = g_CockpitOgre.getPosition(bone);
+                orientation = g_CockpitOgre.getOrientation(bone);
+                manual = g_CockpitOgre.isManual(bone);
+                return std::isfinite(position.x) && std::isfinite(position.y) && std::isfinite(position.z) &&
+                    std::isfinite(orientation.w) && std::isfinite(orientation.x) &&
+                    std::isfinite(orientation.y) && std::isfinite(orientation.z);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+
+        bool WriteBoneRaw(void* bone, const OgreVec& position, bool manual) noexcept
+        {
+            __try
+            {
+                if (manual) g_CockpitOgre.setManual(bone, true);
+                g_CockpitOgre.setPosition(bone, position.x, position.y, position.z);
+                if (!manual) g_CockpitOgre.setManual(bone, false);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+
+        // Live, player-owned cockpit skeleton and the twin of this node, or null.
+        void* ResolveCockpitTwin(const NodeKey& key, const NodeState& record, void*& skeleton) noexcept
+        {
+            skeleton = nullptr;
+            const auto& owner = key.first;
+            void* user = nullptr;
+            const uintptr_t slot = EngineGlobals::UserObjectSlot();
+            if (!slot || !Read(reinterpret_cast<void*>(slot), 0, user) ||
+                reinterpret_cast<uintptr_t>(user) != owner.address || !CockpitOgreReady()) return nullptr;
+            void* renderOwner = nullptr;
+            void* bound = nullptr;
+            if (!Read(user, kGameObjectRenderOwner, renderOwner) || !renderOwner ||
+                !Read(renderOwner, kRenderOwnerCockpitSkeleton, skeleton) || !OgreObject(skeleton) ||
+                !Read(reinterpret_cast<void*>(key.second.address), kObjCockpitBone, bound) || !OgreObject(bound))
+            { skeleton = nullptr; return nullptr; }
+            void* twin = FindCockpitTwinRaw(skeleton, bound, &record.id);
+            if (!twin) skeleton = nullptr;
+            return twin;
+        }
+
+        void LogCockpitOnce(const NodeKey& key, const NodeState& record, const char* outcome)
+        {
+            if (!g_CockpitLogged.insert(key.second.lifetime).second) return;
+            char node[9] = {}; std::memcpy(node, record.id.data(), 8);
+            LogShimA(LogLevel::Info, "WEAPONFX", "cockpit recoil node=%s %s", node, outcome);
+        }
+
+        // Called with every staged world pose; displacement 0 restores rest.
+        void ApplyCockpitTwin(const NodeKey& key, const NodeState& record, float displacement) noexcept
+        {
+            try
+            {
+                auto existing = g_CockpitTwins.find(key);
+                if (!record.cockpit)
+                {
+                    if (existing == g_CockpitTwins.end()) return;
+                    displacement = 0;
+                }
+                void* skeleton = nullptr;
+                void* twin = ResolveCockpitTwin(key, record, skeleton);
+                if (existing != g_CockpitTwins.end() &&
+                    (existing->second.skeleton != skeleton || existing->second.bone != twin))
+                {
+                    // Possession or cockpit rebuild: the old bone cannot be
+                    // proven live, so it is forgotten, never written.
+                    g_CockpitTwins.erase(existing);
+                    existing = g_CockpitTwins.end();
+                }
+                if (!twin)
+                {
+                    if (record.cockpit && displacement != 0) LogCockpitOnce(key, record, "skipped: no band-2 twin in player cockpit");
+                    return;
+                }
+                if (existing == g_CockpitTwins.end())
+                {
+                    if (displacement == 0) return; // never touched; nothing to restore
+                    CockpitTwin state;
+                    state.skeleton = skeleton; state.bone = twin;
+                    if (!ReadBoneRaw(twin, state.rest, state.orientation, state.wasManual)) return;
+                    existing = g_CockpitTwins.emplace(key, state).first;
+                    if (g_CockpitLogged.insert(key.second.lifetime).second)
+                    {
+                        char node[9] = {}; std::memcpy(node, record.id.data(), 8);
+                        const auto f = Policy::BoneForward({ state.orientation.w, state.orientation.x,
+                            state.orientation.y, state.orientation.z });
+                        LogShimA(LogLevel::Info, "WEAPONFX", "cockpit recoil node=%s driving band-2 twin rest=%.3f,%.3f,%.3f forward=%.3f,%.3f,%.3f kick=%.3f",
+                            node, state.rest.x, state.rest.y, state.rest.z, f.x, f.y, f.z, displacement);
+                    }
+                }
+                const auto& state = existing->second;
+                if (displacement == 0)
+                {
+                    WriteBoneRaw(twin, state.rest, state.wasManual);
+                    g_CockpitTwins.erase(existing);
+                    return;
+                }
+                const auto p = Policy::CockpitRecoilPosition({ state.rest.x, state.rest.y, state.rest.z },
+                    { state.orientation.w, state.orientation.x, state.orientation.y, state.orientation.z }, displacement);
+                if (!WriteBoneRaw(twin, { p.x, p.y, p.z }, true)) g_CockpitTwins.erase(existing);
+            }
+            catch (...) {}
+        }
+
         class NativeBackend final : public WP::Backend
         {
         public:
@@ -815,9 +1039,13 @@ namespace BZROpenShim::Hooks
                         current.positionY != rest.positionY || current.positionZ != rest.positionZ)
                     {
                         found->second.supported = false;
+                        ApplyCockpitTwin(found->first, found->second, 0);
                         return WriteModelPose(reinterpret_cast<void*>(node.address), &current);
                     }
-                    return WP::ValidPose(visual) && WriteModelPose(reinterpret_cast<void*>(node.address), &visual);
+                    if (!WP::ValidPose(visual) || !WriteModelPose(reinterpret_cast<void*>(node.address), &visual))
+                        return false;
+                    ApplyCockpitTwin(found->first, found->second, Policy::RecoilDisplacement(rest, visual));
+                    return true;
                 }
                 catch (...) { return false; }
             }
@@ -1125,6 +1353,7 @@ namespace BZROpenShim::Hooks
         {
             g_Nodes.clear();
             g_NodeByAddress.clear();
+            g_CockpitTwins.clear(); // the cockpit entity dies with the scene
         }
     }
 
