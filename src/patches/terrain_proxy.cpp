@@ -40,6 +40,7 @@
 #include <iomanip>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -1173,9 +1174,30 @@ namespace BZROpenShim
                             throw std::runtime_error("paint needs five explicit slices, atlas identity and minZ row order");
                         if (binding.compact) throw std::runtime_error("compact material arrays do not support paint mode");
                         binding.paint.enabled = true;
-                        binding.paint.fingerprint = paint.at("terrainFingerprint").get<std::string>();
-                        binding.paint.bounds = paint.at("boundsMeters").get<std::array<float, 4>>();
                         binding.paint.repeatMeters = paint.at("repeatMeters").get<std::array<float, 4>>();
+                        if (paint.contains("maps"))
+                        {
+                            // Multi-map form: one entry per terrain shape sharing this
+                            // atlas material. Tile "4" is only the default control.
+                            const auto& maps = paint.at("maps");
+                            if (!maps.is_array() || maps.empty() || maps.size() > 64)
+                                throw std::runtime_error("paint maps must list 1..64 terrains");
+                            for (const auto& entry : maps)
+                            {
+                                TerrainPaint::Config::MapEntry map;
+                                map.fingerprint = entry.at("terrainFingerprint").get<std::string>();
+                                map.bounds = entry.at("boundsMeters").get<std::array<float, 4>>();
+                                map.control = entry.at("control").get<std::string>();
+                                binding.paint.maps.push_back(std::move(map));
+                            }
+                            binding.paint.fingerprint = binding.paint.maps.front().fingerprint;
+                            binding.paint.bounds = binding.paint.maps.front().bounds;
+                        }
+                        else
+                        {
+                            binding.paint.fingerprint = paint.at("terrainFingerprint").get<std::string>();
+                            binding.paint.bounds = paint.at("boundsMeters").get<std::array<float, 4>>();
+                        }
                         binding.paint.Validate();
                     }
                     parsed.materials.emplace(materialIt.key(), std::move(binding));

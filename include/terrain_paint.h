@@ -7,6 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace BZROpenShim::TerrainPaint
 {
@@ -17,6 +18,17 @@ namespace BZROpenShim::TerrainPaint
         // Native world metres: min X, min Z, max X, max Z. PNG row 0 is min Z.
         std::array<float, 4> bounds = {};
         std::array<float, 4> repeatMeters = {};
+        // Optional multi-map table. Several campaign maps share one atlas
+        // material, so a single pack lists one entry per terrain shape; the
+        // entry matching the live fingerprint and bounds supplies the control
+        // image (array slice 4). Empty means the single-map form above.
+        struct MapEntry
+        {
+            std::string fingerprint;
+            std::array<float, 4> bounds = {};
+            std::string control;
+        };
+        std::vector<MapEntry> maps;
         void Validate() const
         {
             if (fingerprint.size() != 16 || fingerprint.find_first_not_of("0123456789abcdef") != std::string::npos)
@@ -27,8 +39,33 @@ namespace BZROpenShim::TerrainPaint
                 throw std::runtime_error("paint bounds must have positive extents");
             for (float v : repeatMeters) if (!std::isfinite(v) || v < 1 || v > 4096)
                 throw std::runtime_error("paint material repeats must be 1..4096 metres");
+            for (std::size_t i = 0; i < maps.size(); ++i)
+            {
+                const auto& map = maps[i];
+                if (map.fingerprint.size() != 16 || map.fingerprint.find_first_not_of("0123456789abcdef") != std::string::npos)
+                    throw std::runtime_error("paint map fingerprint must be 16 lowercase hex digits");
+                for (float v : map.bounds) if (!std::isfinite(v) || std::abs(v) > 1000000)
+                    throw std::runtime_error("paint map bounds must be finite native world metres");
+                if (map.bounds[2] <= map.bounds[0] || map.bounds[3] <= map.bounds[1])
+                    throw std::runtime_error("paint map bounds must have positive extents");
+                if (map.control.empty())
+                    throw std::runtime_error("paint map needs a control image resource");
+                for (std::size_t j = 0; j < i; ++j)
+                    if (maps[j].fingerprint == map.fingerprint && maps[j].bounds == map.bounds)
+                        throw std::runtime_error("paint map table lists the same terrain twice");
+            }
         }
     };
+
+    // Picks the table entry for the live terrain. A fingerprint or bounds
+    // mismatch selects nothing, so a pack never paints the wrong mission.
+    inline const Config::MapEntry* SelectMap(const Config& config, const std::string& fingerprint,
+        const std::array<float, 4>& bounds)
+    {
+        for (const auto& map : config.maps)
+            if (map.fingerprint == fingerprint && map.bounds == bounds) return &map;
+        return nullptr;
+    }
 
     inline void HashU32(std::uint64_t& hash, std::uint32_t value)
     {
