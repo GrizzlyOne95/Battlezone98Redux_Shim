@@ -21,6 +21,8 @@
 #include "openshim_assets.h"
 #include "openshim_ini.h"
 #include "openshim_updater.h"
+#include "options_ui_l10n.h"
+#include "options_ui_l10n_resources.h"
 #include "patcher.h"
 #include "render_profile_runtime.h"
 #include "shim_log.h"
@@ -2650,723 +2652,8 @@ namespace BZROpenShim
         }
 
 
-        struct ShimSettingDescriptor
-        {
-            const char* label;         // row label in the UI
-            const char* section;       // openshim.ini section
-            const char* key;           // canonical ini key
-            const char* const* altKeys;  // legacy key aliases replaced in-place
-            size_t altKeyCount;
-            const char* const* values;      // ini value written per option
-            const char* const* valueLabels; // display text per option
-            size_t valueCount;
-            size_t defaultIndex;       // shown when the key is absent/invalid
-            ShimSettingApplyGroup applyGroup;
-            const char* description;   // one sentence shown in the status label on hover
-        };
+#include "bzr_options_registry.inc"
 
-        static const char* const kShimSettingsOnOffValues[] = { "1", "0" };
-        // Action-row "values" are confirmation states, not settings. Index 0 is
-        // the resting cell, index 1 is what an armed row shows.
-        static const char* const kShimSettingsActionValues[] = { "Reset", "Confirm?" };
-        static const char* const kShimSettingsOnOffLabels[] = { "On", "Off" };
-        static const char* const kShimSettingsAutoSaveIntervalValues[] = { "60", "120", "180", "300", "600" };
-        static const char* const kShimSettingsAutoSaveIntervalLabels[] = { "1 min", "2 min", "3 min", "5 min", "10 min" };
-        static const char* const kShimSettingsUnderAttackValues[] = { "Normal", "Minimal", "None" };
-        static const char* const kShimSettingsUnitVoValues[] = { "Normal", "Reduced", "None" };
-        static const char* const kShimSettingsTargetPolicyValues[] = { "Default", "NeutralOnly", "ExplicitOnly" };
-        static const char* const kShimSettingsTargetPolicyLabels[] = { "Default", "Neutral Only", "Explicit Only" };
-        static const char* const kShimSettingsScrapHudValues[] = { "Legacy", "Stock" };
-        static const char* const kShimSettingsRadarScaleValues[] =
-            { "1.0", "1.25", "1.5", "1.75", "2.0" };
-        static const char* const kShimSettingsRadarScaleLabels[] =
-            { "Stock", "125%", "150%", "175%", "200%" };
-        static const char* const kShimSettingsSatelliteValues[] =
-            { "1.0", "1.5", "2.0", "3.0" };
-        static const char* const kShimSettingsSatelliteLabels[] =
-            { "Stock", "1.5x", "2x", "3x" };
-        static const char* const kShimSettingsHeadlightColorValues[] =
-        {
-            "Stock", "White", "Red", "Green", "Blue", "Yellow",
-            "Cyan", "Magenta", "Orange", "Purple", "Teal", "Rainbow"
-        };
-        static const char* const kShimSettingsHeadlightBeamValues[] = { "Stock", "Focused", "Wide" };
-        static const char* const kShimSettingsHeadlightBrightnessValues[] =
-            { "0.50", "0.75", "1.00", "1.25", "1.50" };
-        static const char* const kShimSettingsHeadlightBrightnessLabels[] =
-            { "50%", "75%", "100%", "125%", "150%" };
-        static const char* const kShimSettingsNetRouteValues[] = { "Stock", "Direct", "Relay" };
-        static const char* const kShimSettingsGovernorTuningValues[] = { "OpenShim", "Stock" };
-        static const char* const kShimSettingsNetRouteLabels[] = { "Stock", "Prefer Direct", "Force Relay" };
-        static const char* const kShimSettingsTargetPolicyAltKeys[] = { "TargetReticle" };
-        static const char* const kShimSettingsReticleConvAltKeys[] = { "SmartReticleConvergence" };
-        static const char* const kShimSettingsScavengerAltKeys[] = { "ScavengerPathing" };
-        static const char* const kShimSettingsBindsUiAltKeys[] = { "CustomBindingUi" };
-        static const char* const kShimSettingsRenderProfileValues[] = { "Retro", "Redux", "Enhanced" };
-        static const char* const kShimSettingsFovValues[] = { "0", "60", "70", "80", "90", "100", "110", "120" };
-        static const char* const kShimSettingsFovLabels[] = { "Stock (80)", "60", "70", "80", "90", "100", "110", "120" };
-        static const char* const kShimReticleStyles[] = { "Stock", "Cross", "Dot", "CrossDot" };
-        static const char* const kShimReticleStyleLabels[] = { "Stock", "Cross", "Dot", "Cross + Dot" };
-        static const char* const kShimReticleColors[] = { "White", "Green", "Cyan", "Amber" };
-        static const char* const kShimMeterColors[] = { "Default", "White", "Blue", "Green", "Cyan", "Amber", "Magenta", "Red", "Yellow" };
-        static const char* const kShimPaletteColors[] = { "Default", "White", "Blue", "Green", "Cyan", "Amber", "Magenta", "Red", "Yellow" };
-        static const char* const kShimPalettePresets[] = { "Stock", "Classic", "HighContrast" };
-        static const char* const kShimPalettePresetLabels[] = { "Stock", "Classic", "High Contrast" };
-        static const char* const kShimBackgroundOpacity[] = { "Default", "0", "25", "50", "75", "100" };
-        static const char* const kShimReticleSizes[] = { "75", "100", "150" };
-        static const char* const kShimReticleSizeLabels[] = { "Small", "Normal", "Large" };
-        static const char* const kShimReticleThickness[] = { "1", "2", "3" };
-        static const char* const kShimReticleThicknessLabels[] = { "Thin", "Normal", "Thick" };
-        static const char* const kShimReticleOpacity[] = { "50", "75", "100" };
-        static const char* const kShimReticleOpacityLabels[] = { "50%", "75%", "100%" };
-        static const char* const kShimDamageColors[] = { "Red", "Amber", "White", "Cyan", "Magenta", "Green", "Blue", "Yellow" };
-        static const char* const kShimFadeOpacities[] = { "0", "25", "50", "75" };
-        static const char* const kShimFadeOpacityLabels[] = { "Hidden", "25%", "50%", "75%" };
-        static const char* const kShimFadeDelays[] = { "1000", "2500", "5000" };
-        static const char* const kShimFadeDelayLabels[] = { "1 s", "2.5 s", "5 s" };
-        static const char* const kShimFadeDurations[] = { "0", "200", "500", "1000" };
-        static const char* const kShimFadeDurationLabels[] = { "Instant", "Fast", "Normal", "Slow" };
-        static const char* const kShimDamageDurations[] = { "300", "600", "1000" };
-        static const char* const kShimDamageDurationLabels[] = { "Short", "Normal", "Long" };
-        static const char* const kShimHitDurations[] = { "80", "120", "180", "250" };
-        static const char* const kShimHitDurationLabels[] = { "80 ms", "120 ms", "180 ms", "250 ms" };
-        // 0 disables the override and leaves the stock engine limit alone; the
-        // runtime clamps anything above 256, so 256 is the top of the ladder.
-        static const char* const kShimSettingsSoundChannelValues[] = { "0", "64", "128", "192", "256" };
-        static const char* const kShimSettingsSoundChannelLabels[] = { "Stock", "64", "128", "192", "256" };
-        // Redux ships 200. The runtime accepts any finite value in 1..10000
-        // from a hand-edited ini; these are the presets the page cycles.
-        static const char* const kShimSettingsReticleRangeValues[] = { "200", "300", "400", "500" };
-        static const char* const kShimSettingsReticleRangeLabels[] = { "Stock", "300", "400", "500" };
-
-        static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
-        {
-            { "Radar Fade", "Display", "RadarHudFade", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::ContextualHud,
-              "Fade the cockpit radar as one group: backdrop, terrain lines, compass, contacts and command links. Native radar activity reveals it. Applies live." },
-            { "Radar Idle", "Display", "RadarHudIdleOpacity", nullptr, 0,
-              kShimFadeOpacities, kShimFadeOpacityLabels, 4, 1, ShimSettingApplyGroup::ContextualHud,
-              "Radar opacity when idle. Hidden keeps native visibility, alerts and ping/audio handling active." },
-            { "Radar Delay", "Display", "RadarHudFadeDelay", nullptr, 0,
-              kShimFadeDelays, kShimFadeDelayLabels, 3, 1, ShimSettingApplyGroup::ContextualHud,
-              "Hold after radar range/mode or target changes, a newly native-visible contact, active commands or native-visible recent-hit alerts." },
-            { "Radar Speed", "Display", "RadarHudFadeDuration", nullptr, 0,
-              kShimFadeDurations, kShimFadeDurationLabels, 4, 2, ShimSettingApplyGroup::ContextualHud,
-              "Smooth fade duration for all cockpit radar layers, preserving selected tints and native alpha." },
-            { "Keep Compass", "Display", "RadarCompassAlwaysVisible", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::ContextualHud,
-              "Keep the four compass letters at native opacity while the rest of the radar fades. Off fades the compass with the radar." },
-            { "Hull Fade", "Display", "HullHudFade", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::ContextualHud,
-              "Fade the cockpit hull meter and its labels when idle. Relevant value changes reveal it; native critical warnings keep it visible. Applies live." },
-            { "Hull Idle", "Display", "HullHudIdleOpacity", nullptr, 0,
-              kShimFadeOpacities, kShimFadeOpacityLabels, 4, 1, ShimSettingApplyGroup::ContextualHud,
-              "Idle opacity for the cockpit hull group. Hidden keeps native status and warning handling active." },
-            { "Hull Delay", "Display", "HullHudFadeDelay", nullptr, 0,
-              kShimFadeDelays, kShimFadeDelayLabels, 3, 1, ShimSettingApplyGroup::ContextualHud,
-              "Full-opacity hold after hull activity or a critical warning clears." },
-            { "Hull Speed", "Display", "HullHudFadeDuration", nullptr, 0,
-              kShimFadeDurations, kShimFadeDurationLabels, 4, 2, ShimSettingApplyGroup::ContextualHud,
-              "Smooth fade duration for cockpit hull artwork and labels; relevant activity reveals them immediately." },
-            { "Ammo Fade", "Display", "AmmoHudFade", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::ContextualHud,
-              "Fade the cockpit ammo meter and its labels when idle. Relevant value changes reveal it; native critical warnings keep it visible. Applies live." },
-            { "Ammo Idle", "Display", "AmmoHudIdleOpacity", nullptr, 0,
-              kShimFadeOpacities, kShimFadeOpacityLabels, 4, 1, ShimSettingApplyGroup::ContextualHud,
-              "Idle opacity for the cockpit ammo group. Hidden keeps native status and warning handling active." },
-            { "Ammo Delay", "Display", "AmmoHudFadeDelay", nullptr, 0,
-              kShimFadeDelays, kShimFadeDelayLabels, 3, 1, ShimSettingApplyGroup::ContextualHud,
-              "Full-opacity hold after ammo activity or a critical warning clears." },
-            { "Ammo Speed", "Display", "AmmoHudFadeDuration", nullptr, 0,
-              kShimFadeDurations, kShimFadeDurationLabels, 4, 2, ShimSettingApplyGroup::ContextualHud,
-              "Smooth fade duration for cockpit ammo artwork and labels; relevant activity reveals them immediately." },
-            { "Cmd Fade", "Display", "CommandHudFade", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::ContextualHud,
-              "Fade the whole command interface: frame, icons, text and bars. Command input reveals it; an active selection or submenu keeps it visible. Applies live." },
-            { "Cmd Idle", "Display", "CommandHudIdleOpacity", nullptr, 0,
-              kShimFadeOpacities, kShimFadeOpacityLabels, 4, 0, ShimSettingApplyGroup::ContextualHud,
-              "Command interface opacity when idle. Hidden removes its visuals until you use it again; its native input handling stays active." },
-            { "Cmd Delay", "Display", "CommandHudFadeDelay", nullptr, 0,
-              kShimFadeDelays, kShimFadeDelayLabels, 3, 1, ShimSettingApplyGroup::ContextualHud,
-              "How long the command interface remains fully visible after command activity or closing a selection/submenu." },
-            { "Cmd Speed", "Display", "CommandHudFadeDuration", nullptr, 0,
-              kShimFadeDurations, kShimFadeDurationLabels, 4, 2, ShimSettingApplyGroup::ContextualHud,
-              "Command interface fade duration. Sprite artwork and text use the same smooth opacity; command activity restores full opacity immediately." },
-            { "Weapon Fade", "Display", "WeaponListFade", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::ContextualHud,
-              "Fade the weapon list when idle; selection, loadout or ammo changes reveal it. Preserves native colors and layout. Applies live." },
-            { "Weapon Idle", "Display", "WeaponListIdleOpacity", nullptr, 0,
-              kShimFadeOpacities, kShimFadeOpacityLabels, 4, 1, ShimSettingApplyGroup::ContextualHud,
-              "Opacity while this group is idle. Hidden reveals it again on relevant changes. Applies only when its Fade option is on." },
-            { "Weapon Delay", "Display", "WeaponListFadeDelay", nullptr, 0,
-              kShimFadeDelays, kShimFadeDelayLabels, 3, 1, ShimSettingApplyGroup::ContextualHud,
-              "How long this group stays fully visible after activity, before fading toward its idle opacity." },
-            { "Weapon Speed", "Display", "WeaponListFadeDuration", nullptr, 0,
-              kShimFadeDurations, kShimFadeDurationLabels, 4, 2, ShimSettingApplyGroup::ContextualHud,
-              "Smooth fade duration: Instant, Fast (200 ms), Normal (500 ms), Slow (1000 ms). Activity restores full opacity immediately." },
-            { "Scrap Fade", "Display", "ScrapHudFade", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::ContextualHud,
-              "Fade this meter when idle; current or maximum resource changes reveal it. Preserves native colors and layout. Applies live." },
-            { "Scrap Idle", "Display", "ScrapHudIdleOpacity", nullptr, 0,
-              kShimFadeOpacities, kShimFadeOpacityLabels, 4, 1, ShimSettingApplyGroup::ContextualHud,
-              "Opacity while this group is idle. Hidden reveals it again on relevant changes. Applies only when its Fade option is on." },
-            { "Scrap Delay", "Display", "ScrapHudFadeDelay", nullptr, 0,
-              kShimFadeDelays, kShimFadeDelayLabels, 3, 1, ShimSettingApplyGroup::ContextualHud,
-              "How long this group stays fully visible after activity, before fading toward its idle opacity." },
-            { "Scrap Speed", "Display", "ScrapHudFadeDuration", nullptr, 0,
-              kShimFadeDurations, kShimFadeDurationLabels, 4, 2, ShimSettingApplyGroup::ContextualHud,
-              "Smooth fade duration: Instant, Fast (200 ms), Normal (500 ms), Slow (1000 ms). Activity restores full opacity immediately." },
-            { "Pilot Fade", "Display", "PilotHudFade", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::ContextualHud,
-              "Fade this meter when idle; current or maximum resource changes reveal it. Preserves native colors and layout. Applies live." },
-            { "Pilot Idle", "Display", "PilotHudIdleOpacity", nullptr, 0,
-              kShimFadeOpacities, kShimFadeOpacityLabels, 4, 1, ShimSettingApplyGroup::ContextualHud,
-              "Opacity while this group is idle. Hidden reveals it again on relevant changes. Applies only when its Fade option is on." },
-            { "Pilot Delay", "Display", "PilotHudFadeDelay", nullptr, 0,
-              kShimFadeDelays, kShimFadeDelayLabels, 3, 1, ShimSettingApplyGroup::ContextualHud,
-              "How long this group stays fully visible after activity, before fading toward its idle opacity." },
-            { "Pilot Speed", "Display", "PilotHudFadeDuration", nullptr, 0,
-              kShimFadeDurations, kShimFadeDurationLabels, 4, 2, ShimSettingApplyGroup::ContextualHud,
-              "Smooth fade duration: Instant, Fast (200 ms), Normal (500 ms), Slow (1000 ms). Activity restores full opacity immediately." },
-            { "Incoming Damage", "Display", "DamageIndicators", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
-              "Arcs toward incoming weapon damage. One tick per recent attacker; repeated hits refresh its tick. Up to eight attackers. Single-player cockpit/chase." },
-            { "Damage Color", "Display", "DamageIndicatorColor", nullptr, 0,
-              kShimDamageColors, kShimDamageColors, 8, 0, ShimSettingApplyGroup::HudFeedback,
-              "Incoming-damage arc color, independent of reticle and hit-marker colors. Applies live." },
-            { "Damage Size", "Display", "DamageIndicatorSize", nullptr, 0,
-              kShimReticleSizes, kShimReticleSizeLabels, 3, 1, ShimSettingApplyGroup::HudFeedback,
-              "Arc radius and thickness. Follows the game's native HUD scale. Applies live." },
-            { "Damage Opacity", "Display", "DamageIndicatorOpacity", nullptr, 0,
-              kShimReticleOpacity, kShimReticleOpacityLabels, 3, 1, ShimSettingApplyGroup::HudFeedback,
-              "Maximum incoming-damage arc opacity. Smaller hits are softer; larger hits are brighter and thicker." },
-            { "Damage Duration", "Display", "DamageIndicatorDuration", nullptr, 0,
-              kShimDamageDurations, kShimDamageDurationLabels, 3, 1, ShimSettingApplyGroup::HudFeedback,
-              "Hold then fade over 300, 600 or 1000 milliseconds. Arcs rotate with your view and disappear when changing units." },
-            { "Reticle Style", "Display", "ReticleStyle", nullptr, 0,
-              kShimReticleStyles, kShimReticleStyleLabels, 4, 0, ShimSettingApplyGroup::HudFeedback,
-              "Stock artwork, cross, dot, or cross plus dot at the stock aim point. Applies live. GOG 2.2.301." },
-            { "Reticle Color", "Display", "ReticleColor", nullptr, 0,
-              kShimReticleColors, kShimReticleColors, 4, 0, ShimSettingApplyGroup::HudFeedback,
-              "Color of custom reticles and target-contact brackets; stock artwork keeps its own colors." },
-            { "Reticle Size", "Display", "ReticleSize", nullptr, 0,
-              kShimReticleSizes, kShimReticleSizeLabels, 3, 1, ShimSettingApplyGroup::HudFeedback,
-              "Scale custom reticles and feedback with the game's current UI scale. Applies live." },
-            { "Reticle Thickness", "Display", "ReticleThickness", nullptr, 0,
-              kShimReticleThickness, kShimReticleThicknessLabels, 3, 1, ShimSettingApplyGroup::HudFeedback,
-              "Line thickness for custom reticles and feedback. Applies live." },
-            { "Reticle Outline", "Display", "ReticleOutline", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
-              "Dark outline for custom reticles and feedback, for contrast on bright terrain. Applies live." },
-            { "Reticle Opacity", "Display", "ReticleOpacity", nullptr, 0,
-              kShimReticleOpacity, kShimReticleOpacityLabels, 3, 2, ShimSettingApplyGroup::HudFeedback,
-              "Opacity of custom reticles and feedback. Stock artwork is unchanged." },
-            { "Reactive Reticle", "Display", "ReactiveReticle", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
-              "Over a target, contract a custom cross, add brackets and tint red for enemies or green for allies. "
-              "Visual only; disguised units stay untinted. Single player only." },
-            { "Hit Markers", "Display", "HitMarkers", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
-              "Ticks pop out when your weapon actually reduces health; hitting several targets at once enlarges them. "
-              "No marker for blocked/zero damage, collisions, self hits or AI shots. Single player only." },
-            { "Marker Duration", "Display", "HitMarkerDuration", nullptr, 0,
-              kShimHitDurations, kShimHitDurationLabels, 4, 1, ShimSettingApplyGroup::HudFeedback,
-              "How long confirmed-hit ticks remain visible before fading. Applies live." },
-            { "Marker Color", "Display", "HitMarkerColor", nullptr, 0,
-              kShimReticleColors, kShimReticleColors, 4, 0, ShimSettingApplyGroup::HudFeedback,
-              "Hit tick color, independent of reticle color. Applies live." },
-            { "Marker Size", "Display", "HitMarkerSize", nullptr, 0,
-              kShimReticleSizes, kShimReticleSizeLabels, 3, 1, ShimSettingApplyGroup::HudFeedback,
-              "Hit tick scale, independent of reticle size. Applies live." },
-            { "Marker Opacity", "Display", "HitMarkerOpacity", nullptr, 0,
-              kShimReticleOpacity, kShimReticleOpacityLabels, 3, 2, ShimSettingApplyGroup::HudFeedback,
-              "Hit tick opacity, independent of reticle opacity. Applies live." },
-            { "Stock Shader", "Display", "StockReticleShader", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0, ShimSettingApplyGroup::HudFeedback,
-              "Stock artwork on DX11: tint it red/green with Reactive Reticle and ripple its own art on hits. "
-              "Off keeps stock colors with a sprite-only ripple. Applies live." },
-            { "Scrap Color", "Display", "ScrapHudColor", nullptr, 0,
-              kShimMeterColors, kShimMeterColors, 9, 0, ShimSettingApplyGroup::GlobalImprovement,
-              "Scrap title/value color. Default preserves the selected Stock/Legacy palette. Layout and plates stay as selected." },
-            { "Pilot Color", "Display", "PilotHudColor", nullptr, 0,
-              kShimMeterColors, kShimMeterColors, 9, 0, ShimSettingApplyGroup::GlobalImprovement,
-              "Pilot title/value color. Default preserves the selected Stock/Legacy palette. Independent of scrap color." },
-            { "Base Palette", "Display", "HudColorPreset", nullptr, 0,
-              kShimPalettePresets, kShimPalettePresetLabels, 3, 0, ShimSettingApplyGroup::HudPalette,
-              "Base colors for Default rows: Stock, Classic or High Contrast. Explicit color choices stay independent. Scrap/pilot and reticle settings are separate." },
-            { "Radar Backdrop", "Display", "RadarBackgroundOpacity", nullptr, 0,
-              kShimBackgroundOpacity, kShimBackgroundOpacity, 6, 0, ShimSettingApplyGroup::HudPalette,
-              "Radar backdrop opacity (percent). Default follows the base palette. Terrain lines and contacts remain visible independently." },
-            { "Radar Lines", "Display", "RadarGridColor", nullptr, 0,
-              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
-              "Terrain grid tint. Native line opacity, radar geometry and contacts remain unchanged. Default follows the base palette." },
-            { "Friendly Blips", "Display", "RadarFriendlyColor", nullptr, 0,
-              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
-              "Normal friendly radar contact tint. Native dimming and alpha animation remain; disguised or ambiguous identities retain native colors. Default follows the base palette." },
-            { "Enemy Blips", "Display", "RadarEnemyColor", nullptr, 0,
-              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
-              "Normal enemy radar contact tint. Special alert markers retain their stock appearance. Default follows the base palette." },
-            { "Neutral Blips", "Display", "RadarNeutralColor", nullptr, 0,
-              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
-              "Normal neutral radar contact tint. Contacts are only recolored when native identity is unambiguous. Default follows the base palette." },
-            { "Hull Healthy", "Display", "HullHighColor", nullptr, 0,
-              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
-              "Cockpit health color at 50 percent or more. Native smoothing, fill and warnings remain. Default follows the base palette." },
-            { "Hull Damaged", "Display", "HullMediumColor", nullptr, 0,
-              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
-              "Cockpit health color from 25 to below 50 percent. Thresholds remain native. Default follows the base palette." },
-            { "Hull Critical", "Display", "HullLowColor", nullptr, 0,
-              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
-              "Cockpit health color below 25 percent. Thresholds remain native. Default follows the base palette." },
-            { "Cockpit Ammo", "Display", "AmmoHudColor", nullptr, 0,
-              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
-              "Cockpit ammo bar and label tint. Shot-cost ticks and remaining-shots text keep their native colors. Default follows the base palette." },
-            { "Unit Healthy", "Display", "UnitHealthHighColor", nullptr, 0,
-              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
-              "Command and selection health bars at 50 percent or more. Native recent-damage flashes remain. Default follows the base palette." },
-            { "Unit Damaged", "Display", "UnitHealthMediumColor", nullptr, 0,
-              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
-              "Command and selection health bars from 25 to below 50 percent. Native recent-damage flashes remain. Default follows the base palette." },
-            { "Unit Critical", "Display", "UnitHealthLowColor", nullptr, 0,
-              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
-              "Command and selection health bars below 25 percent. Native recent-damage flashes remain. Default follows the base palette." },
-            { "Unit Ammo", "Display", "UnitAmmoColor", nullptr, 0,
-              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
-              "Command and selection ammo-bar fill color, independent of cockpit ammo. Default follows the base palette." },
-            { "Empty Bars", "Display", "UnitEmptyColor", nullptr, 0,
-              kShimPaletteColors, kShimPaletteColors, 9, 0, ShimSettingApplyGroup::HudPalette,
-              "Unfilled portions of command and selection health/ammo bars. Does not affect cockpit textures. Default follows the base palette." },
-            { "Field of View", "Display", "FieldOfView", nullptr, 0,
-              kShimSettingsFovValues, kShimSettingsFovLabels, 8, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Cockpit and chase base FOV in degrees (4:3 reference); widescreen expands horizontally. "
-              "Stock is 80. Satellite and target cameras keep their own angles. Restart required." },
-            // Deliberately NO Renderer (DX9/DX11) row: the runtime only parses
-            // the [Graphics] Renderer preference and reports requested-vs-
-            // effective divergence; it does not yet steer which render system
-            // the game starts on. Exposing it as a restart-required selector
-            // would promise a control that cannot deliver, so the row stays
-            // hidden until startup renderer selection is actually implemented
-            // (hand-edited openshim.ini values remain parsed and reported).
-            { "Render Profile", "Graphics", "RenderProfile", nullptr, 0,
-              kShimSettingsRenderProfileValues, kShimSettingsRenderProfileValues, 3, 1,
-              ShimSettingApplyGroup::RenderProfile,
-              "Visual rendering policy: Redux (stock baseline), Enhanced, or Retro. Applies live." },
-            // [DX11Enhanced] is the experimental DX11 pipeline. Both rows fail
-            // closed when the key is absent, which is what keeps an install
-            // that never opted into this ini on the stock path; the shipped
-            // openshim.ini opts in explicitly.
-            { "DX11 FXAA", "DX11Enhanced", "FXAA", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::RestartRequired,
-              "FXAA 3.11 anti-aliasing pass on the DX11 Enhanced pipeline. DX11 only. Restart required." },
-            { "DX11 Local Lights", "DX11Enhanced", "EnhancedLightSelectionV2", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Contribution-ranked per-object local-light ordering. DX11 only. Restart required." },
-            { "HD Terrain Tiles", "Terrain", "TerrainHdEnabled", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Full-resolution authored terrain tiles, with optional normal/specular maps. "
-              "Requires a compatible pack and DX11 Enhanced; other profiles keep the original atlas. Restart required." },
-            { "Terrain Micro Detail", "Terrain", "TerrainMicroRelief", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Experimental shallow ground relief. Visual only; collision is unchanged. "
-              "DX11 only. Increases GPU cost. Restart required." },
-            { "Sun Flashbang", "Display", "SunFlashbang", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::LiveEngineToggle,
-              "On is stock: looking near the sun paints a fullscreen white flash. Off suppresses only that flash." },
-            { "Attack Alert", "Display", "UnderAttackAlert", nullptr, 0,
-              kShimSettingsUnderAttackValues, kShimSettingsUnderAttackValues, 3, 0,
-              ShimSettingApplyGroup::UnderAttackAlert,
-              "Under-attack warning style: Normal, Minimal (quieter), or None." },
-            { "Hop-Out Alert Fix", "General", "SuppressHopOutAttackAlert", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::LiveEngineToggle,
-              "Suppress the stale under-attack growl that fires the instant you hop out. Audio only." },
-            { "Target Popup", "Display", "TargetPolicy",
-              kShimSettingsTargetPolicyAltKeys, 1,
-              kShimSettingsTargetPolicyValues, kShimSettingsTargetPolicyLabels, 3, 0,
-              ShimSettingApplyGroup::TargetReticle,
-              "When the reticle target popup appears: always, neutral objects only, or explicit targets only." },
-            { "Scrap/Pilot HUD", "Display", "ScrapPilotHud", nullptr, 0,
-              kShimSettingsScrapHudValues, kShimSettingsScrapHudValues, 2, 0,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Legacy BZ98-style scrap and pilot readout, or the stock Redux HUD." },
-            // Local HUD geometry, so this one is not single-player only.
-            { "Radar Size", "Display", "RadarSizeScale", nullptr, 0,
-              kShimSettingsRadarScaleValues, kShimSettingsRadarScaleLabels, 5, 0,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Scale the cockpit radar. The projection re-anchors to the backdrop so the "
-              "mesh and its underlay stay concentric." },
-            { "Satellite Zoom Out", "SinglePlayer", "SatelliteZoomOut", nullptr, 0,
-              kShimSettingsSatelliteValues, kShimSettingsSatelliteLabels, 4, 0,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "How much further than stock the satellite view can pull out. Single player only." },
-            { "Satellite Pan Speed", "SinglePlayer", "SatellitePanSpeed", nullptr, 0,
-              kShimSettingsSatelliteValues, kShimSettingsSatelliteLabels, 4, 0,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Satellite view pan speed, as a multiple of stock. Single player only." },
-            { "Jet Flames", "Display", "JetFlames", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::JetFlames,
-              "Faction-colored engine flames on jets and thrusters." },
-            { "Empty Craft Lights", "Display", "EmptyCraftLights", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::LiveEngineToggle,
-              "Keep emissive running lights lit on craft that have no pilot." },
-            { "Emissive Pulse", "Display", "EmissivePulse", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::LiveEngineToggle,
-              "Vary occupied-craft emissive brightness with asynchronous organic pulses." },
-            { "Star Twinkle", "Display", "StarTwinkle", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::LiveEngineToggle,
-              "Animate brightness variation in compatible star-sky materials." },
-            { "Unit Voices", "Display", "UnitVoFeedback", nullptr, 0,
-              kShimSettingsUnitVoValues, kShimSettingsUnitVoValues, 3, 0,
-              ShimSettingApplyGroup::UnitVo,
-              "Unit voice feedback: Normal, Reduced chatter, or None." },
-            { "MP Vehicle Flags", "Display", "MultiplayerFlags", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::RestartRequired,
-              "Multiplayer vehicle flags: the selection screen and the in-match renderer. "
-              "Leave off for BZP/BZP-T; their waiting room is faction-only. Restart required." },
-            { "Show Own MP Flag", "Display", "MultiplayerFlagShowOwnCraft", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::RestartRequired,
-              "Also draw your own flag over your own craft; stock draws only other players'. Restart required." },
-            { "Death Chunk Meshes", "General", "ChunkMeshes", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Generate destruction pieces from the model's mesh and skeleton. Restart required." },
-            { "Fast Menu Transitions", "General", "FastMenuTransitions", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Instant Action, Multiplayer and Custom Campaigns open and close without reloading every material; content loads once, before the mission or in the multiplayer game room. Restart required." },
-            { "Sound Channels", "General", "SoundChannels", nullptr, 0,
-              kShimSettingsSoundChannelValues, kShimSettingsSoundChannelLabels, 5, 4,
-              ShimSettingApplyGroup::RestartRequired,
-              "Simultaneous sound objects. Stock leaves the engine limit alone; 256 is the ceiling. Restart required." },
-            { "Background Music", "General", "MusicGlobalFocus", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Keep the soundtrack playing and fed while the game is not the foreground window. Restart required." },
-            { "Custom Keybinds", "General", "CustomBindsUi",
-              kShimSettingsBindsUiAltKeys, 1,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Key-binding editor on the Input options page. Restart required." },
-            { "Raw Mouse Input", "General", "RawMouseInput", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::RestartRequired,
-              "Reads the mouse as raw input, bypassing Windows pointer acceleration. Does not remove aim smoothing; see Unsmoothed Controls. Restart required." },
-            { "Unsmoothed Controls", "General", "DisableControlSmoothing", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::RestartRequired,
-              "Steer, aim, throttle and strafe follow input directly instead of easing toward it, like BZ2's Control Smoothing Off. Affects mouse, keys and joystick. Restart required." },
-            { "Per-Frame Mouse", "Experimental", "MouseEveryFrame", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::RestartRequired,
-              "Experimental. Apply mouse steer and aim every frame instead of 60 times a second, so aim keeps up with high refresh rates. Sensitivity is unchanged. Single player only. Restart required." },
-            { "Material Guard", "General", "OgreMaterialCollisionGuard", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Survive duplicate Ogre material declarations that otherwise terminate the game. Restart required." },
-            { "Map List Fixes", "General", "MapRefreshFixes", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Multiplayer map-list refresh and selection-preservation fixes. Restart required." },
-            { "Map Filters+", "General", "MapFilterExtras", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::RestartRequired,
-              "Create Game map list: 5+ Players and Stock Maps filters, plus a search box. Restart required." },
-            { "Editor Placement", "General", "EditorOverheadPlacementOrder", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "BZ 1.5 view order so object placement works in the running overhead view. Needs /edit. Restart required." },
-            { "AutoSave", "AutoSave", "Enabled", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::AutoSave,
-              "Rolling recovery save for single-player missions; manual saves remain your checkpoints." },
-            { "AutoSave Interval", "AutoSave", "IntervalSeconds", nullptr, 0,
-              kShimSettingsAutoSaveIntervalValues, kShimSettingsAutoSaveIntervalLabels, 5, 1,
-              ShimSettingApplyGroup::AutoSave,
-              "How often OpenShim refreshes the rolling AutoSave recovery slot." },
-            { "Weapon Convergence", "SinglePlayer", "WeaponConvergence", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Walker-style convergence on an explicitly targeted craft. Single player only." },
-            { "Muzzle Flashes", "SinglePlayer", "MuzzleFlash", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Enable authored weapon ODF mesh flashes and muzzle render effects (smoke/light). Requires mod assets and ODF configuration; no generic fallback. Experimental GOG single-player cannons. Restart required." },
-            { "Muzzle Recoil", "SinglePlayer", "MeshRecoil", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Enable authored craft ODF barrel-node or animation recoil. Requires model nodes/clips and ODF configuration; no generic fallback. Clips need EXU. Experimental GOG single-player cannons. Restart required." },
-            // Absent key = on, so defaultIndex 0 selects "1" (On).
-            { "GPU Skinning", "Experimental", "GpuSkinning", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::ReadOnNextUse,
-              "DX11 only: animate craft on the GPU instead of the CPU, which "
-              "frees CPU time with many craft on screen. Edges may differ from stock by a "
-              "fraction of a pixel. Takes effect on the next mission load." },
-            { "Reticle Convergence", "SinglePlayer", "PlayerReticleConvergence",
-              kShimSettingsReticleConvAltKeys, 1,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Same convergence, but toward the smart-reticle world point; no target lock required. Single player only." },
-            { "Reticle Range", "SinglePlayer", "SmartReticleRange", nullptr, 0,
-              kShimSettingsReticleRangeValues, kShimSettingsReticleRangeLabels, 4, 3,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Smart-reticle targeting distance; Stock is Redux's 200. OpenShim's own "
-              "value is single-player only. A mission that calls EXU SetReticleRange "
-              "(BZP, Reloaded) is honored in network games too." },
-            { "Smart Scavengers", "SinglePlayer", "SmartScavengerPathing",
-              kShimSettingsScavengerAltKeys, 1,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Smarter scavenger pathing to scrap. Single player only." },
-            { "Turret AA Pitch", "SinglePlayer", "TurretAimPitch", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Turrets pitch up to engage air targets. Single player only." },
-            { "Jump-Snipe Crouch", "SinglePlayer", "JumpSnipeCrouch", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Classic crouch while sniping mid-jump. Single player only." },
-            // Ships off, so the default index is "Off" (1) -- what an absent
-            // key does -- not what any preset happens to write.
-            { "Ordnance Velocity", "SinglePlayer", "OrdnanceVelocityInheritance", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Shots inherit the shooter's velocity, and cannon lead compensates for it. "
-              "Single player only." },
-            // AI behaviour switches that change stock content without any
-            // mission script, so they belong on the page rather than staying
-            // ini-only. Each default index is what an ABSENT key does, which
-            // is not the same as what a preset happens to ship.
-            { "Bomber AI Range", "SinglePlayer", "BomberAiRange", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Bombers engage at the range their own weapon ODFs declare. Single player only." },
-            { "AI Howitzer Volley", "SinglePlayer", "AiWeaponMaskArtillery", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Artillery AI fires every fitted hardpoint as one volley instead of the first. "
-              "A stock howitzer fires four rounds per cycle. Single player only." },
-            { "AI Mine Volley", "SinglePlayer", "AiWeaponMaskMinelayer", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Minelayer AI honours weaponMask instead of hard-coding hardpoint 0. "
-              "Single player only." },
-            // [Fixes] rather than [SinglePlayer], and it ships ON, so the
-            // default index is "On" (0).
-            { "AI Multi-Producer", "Fixes", "AiMultiProducerMakers", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "A built class gets every producer that can make it, not just the first one found." },
-            { "Neutral Attack Orders", "Gameplay", "AllowNeutralAttackOrders", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::GlobalImprovement,
-              "Allow explicit player attack orders against team-0 neutral objects. "
-              "Diplomacy and autonomous targeting remain stock." },
-            { "Global Turbo", "SinglePlayer", "Turbo", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::GlobalTurbo,
-              "Turbo available on all drivable units. Single player only." },
-            { "Satellite Fog Of War", "SinglePlayer", "SatelliteVisibilityFix", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::LiveEngineToggle,
-              "Restore the BZ 1.5 satellite gate so unilluminated enemies stay hidden. Single player only." },
-            { "Player Headlight", "SinglePlayer", "Headlights", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::Headlights,
-              "Headlight on your vehicle. Single player only." },
-            { "Headlight Brightness", "SinglePlayer", "HeadlightBrightness", nullptr, 0,
-              kShimSettingsHeadlightBrightnessValues, kShimSettingsHeadlightBrightnessLabels, 5, 2,
-              ShimSettingApplyGroup::Headlights,
-              "Player-vehicle headlight intensity relative to stock. Applies live; single player only." },
-            { "AI Headlights", "SinglePlayer", "OtherHeadlights", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::Headlights,
-              "AI vehicles run headlights too. Single player only." },
-            { "Headlight Color", "SinglePlayer", "HeadlightColor", nullptr, 0,
-              kShimSettingsHeadlightColorValues, kShimSettingsHeadlightColorValues, 12, 0,
-              ShimSettingApplyGroup::Headlights,
-              "Headlight beam color; Rainbow cycles through colors." },
-            { "Headlight Beam", "SinglePlayer", "HeadlightBeam", nullptr, 0,
-              kShimSettingsHeadlightBeamValues, kShimSettingsHeadlightBeamValues, 3, 0,
-              ShimSettingApplyGroup::Headlights,
-              "Headlight beam shape: Stock, Focused (narrow), or Wide." },
-            // Pilot flashlight. Not a stock light: no pilot skeleton has an
-            // hlgt bone, so OpenShim creates this one on the pilot's own scene
-            // node and destroys it when the player boards or the world ends.
-            // Default off, so the default index is "Off" (1), matching what an
-            // absent key does.
-            { "Pilot Flashlight", "SinglePlayer", "PilotFlashlight", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::PilotFlashlight,
-              "Flashlight on your pilot while on foot. Single player only." },
-            { "Pilot Light Color", "SinglePlayer", "PilotFlashlightColor", nullptr, 0,
-              kShimSettingsHeadlightColorValues, kShimSettingsHeadlightColorValues, 12, 0,
-              ShimSettingApplyGroup::PilotFlashlight,
-              "Pilot flashlight color; Rainbow cycles through colors." },
-            { "Pilot Light Beam", "SinglePlayer", "PilotFlashlightBeam", nullptr, 0,
-              kShimSettingsHeadlightBeamValues, kShimSettingsHeadlightBeamValues, 3, 0,
-              ShimSettingApplyGroup::PilotFlashlight,
-              "Pilot flashlight beam shape: Stock, Focused (narrow), or Wide." },
-            // [Fixes]: confirmed Redux engine defects. All seven default ON and
-            // normal single-player play wants them on -- they are switches so a
-            // suspected regression is bisectable. Each one changes simulation
-            // behaviour and none is negotiated with peers, so all seven stand
-            // down for the duration of a network game and a mixed OpenShim /
-            // stock lobby stays behaviourally identical.
-            { "Background Mouse", "Fixes", "UnfocusedMouseRelease", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Stop Redux clipping and re-centring the mouse while it is minimized or in the background. Restart required." },
-            { "Thread Scheduling", "Fixes", "ThreadScheduling", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Give the frame thread MMCSS Games priority and opt out of Windows power throttling. Restart required." },
-            { "Vehicle Geometry", "SinglePlayer", "VehicleGeometryContact", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::RestartRequired,
-              "Experimental vehicle contact against legacy hull geometry. All supported vehicles; single player, GOG only. Restart required." },
-            { "APC Allied Deploy", "Fixes", "ApcAlliedTargetDeploy", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Let APC AI accept allied deploy targets. Single player only. Restart required." },
-            { "Splinter Undead Fix", "Fixes", "SplinterUndead", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Stop a destroyed splinter from spawning payload ordnance. Single player only. Restart required." },
-            { "Howitzer Deploy Fix", "Fixes", "HowitzerUndeployedRetaliation", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Stop an undeployed howitzer counter-sniping its attacker. Single player only. Restart required." },
-            { "Tug Cargo Deploy", "Fixes", "TugCargoPostLoad", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Arm the stock deploy transition after a tug loads cargo. Single player only. Restart required." },
-            { "Recycle Release Fix", "Fixes", "ConstructorRecycleStaleTarget", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Free a constructor left deployed when another recycles its target first. Single player only. Restart required." },
-            { "Precise Timestep", "Fixes", "PreciseTimestep", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Step the simulation by the measured frame time, not whole milliseconds. Single player only. Restart required." },
-            { "Music Track Start", "Fixes", "MusicSingleFill", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Decode a new music track's first buffer once instead of twice, shortening the hitch at each track change. Restart required." },
-            { "Constructor Cleanup", "Fixes", "ConstructorRemoteBuild", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Clear a dead constructor's remote build state. Single player only. Restart required." },
-            { "Craft Culling", "Fixes", "RestoreCraftBounds", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Give craft their real bounding boxes so off-screen and distant craft are "
-              "skipped by the camera and shadows. Rendering only. Restart required." },
-            { "Effect Batching", "Fixes", "DynamicGeometryPieceReuse", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Add smoke, fire and tracer sprites to the current batch when they would be "
-              "merged into it anyway, instead of opening a new one. Same pixels, less CPU. Restart required." },
-            { "Effect Sort", "Fixes", "DynamicGeometryFastSort", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Sort effect-sprite batches without calling into Ogre for every compare. "
-              "Same order, same pixels. Restart required." },
-            { "Net Route", "Network", "RoutePreference", nullptr, 0,
-              kShimSettingsNetRouteValues, kShimSettingsNetRouteLabels, 3, 0,
-              ShimSettingApplyGroup::BzrNetRoute,
-              "Preferred peer path: try LAN then direct WAN, or force the BZRNet relay. "
-              "Does not add LAN or direct-IP hosting." },
-            { "Net Improvements", "Network", "NetImprovements", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "OpenShim's socket layer as a whole. Off gives stock networking; "
-              "turn it off to rule the shim out of a connection problem." },
-            { "Net Tuning", "Network", "GovernorTuning", nullptr, 0,
-              kShimSettingsGovernorTuningValues, kShimSettingsGovernorTuningValues, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Bandwidth governor and host auto-kick. Stock matches players who "
-              "are not running OpenShim; net.ini still overrides per value." },
-            // defaultIndex 1 selects "0", which is what an absent key does.
-            // RestartRequired here means "no live apply step": the hook re-reads
-            // the ini every time the multiplayer vehicle list is built, so the
-            // change lands on the next list load without a relaunch.
-            { "Stock Factions", "Network", "StockFactionsOnly", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::RestartRequired,
-              "Restrict multiplayer starting vehicles to NSDF and CCA, as 1.5 did with "
-              "Any Nation off. Local only, and it never adds craft the map withheld. "
-              "Applies next time a vehicle list loads." },
-            { "Lobby Ban Button", "Network", "LobbyBanButton", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::RestartRequired,
-              "Ban User button on the multiplayer waiting room. Off leaves BZP/BZP-T's "
-              "faction picker alone; /ban still works. Restart required." },
-            // defaultIndex 0 selects "1": an absent key persists, which is what
-            // the feature did before it had a key at all.
-            { "Persistent Mutes", "Network", "PersistentPlayerMute", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::ReadOnNextUse,
-              "Remember muted players across sessions, by stable identity, so a rename "
-              "or reconnect does not undo it. Off is stock: the mute lasts the session. "
-              "Local only; /mute works either way and your mute list is kept." },
-            { "Lobby Readouts", "Network", "LobbyReadouts", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Nickname field and route readout in the waiting-room left column. "
-              "Does not cover BZP's faction picker. Restart required." },
-            // Re-read on every nickname apply; no process restart is required
-            // for the next OK / /nickname to take the new value.
-            { "Live Nickname", "Network", "ReauthOnNicknameChange", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::ReadOnNextUse,
-              "Experimental: recycle the lounge BZRNet connection after a nickname "
-              "edit so stock reconnects and authorizes the new name. Expect a brief "
-              "lounge drop / possible Not Ready flicker. In-match remains persist-only." },
-            // Absent key = off, so defaultIndex 1 selects "0" (Off).
-            { "MP Setup Screen", "Network", "PreLobby", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-              ShimSettingApplyGroup::ReadOnNextUse,
-              "Multiplayer opens a setup screen first (nickname, flag, matchmaking "
-              "server: Rebellion or Custom) instead of going straight to the lobby. "
-              "While on, the nickname and flag pickers move to that screen and are "
-              "no longer built in the lobby. Read when Multiplayer is clicked." },
-            // defaultIndex 0 selects "1", matching an absent key (default on).
-            { "Auto-Install Updates", "Updater", "AutoStage", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::ReadOnNextUse,
-              "Check the Steam Workshop once when the main menu first appears and stage a newer OpenShim "
-              "to install when you quit. Never runs in multiplayer." },
-            // defaultIndex 0 selects "1", which is what an absent key does: the
-            // native tracker has always run, and turning the row off must be a
-            // deliberate choice rather than the effect of a missing ini key.
-            { "Career Stats", "Career", "StatsTracking", nullptr, 0,
-              kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
-              ShimSettingApplyGroup::RestartRequired,
-              "Record kills, deaths and missions played to career_stats.cfg across "
-              "single player and multiplayer. Local file only; nothing is uploaded, "
-              "and no mission script is required." },
-            // Action row: no ini key, no cycling. Section/key stay null so the
-            // settings reader and the lossless ini writer never touch it.
-            { "Reset Career Stats", nullptr, nullptr, nullptr, 0,
-              kShimSettingsActionValues, kShimSettingsActionValues, 2, 0,
-              ShimSettingApplyGroup::CareerStatsReset,
-              "Clear every recorded kill, death and mission play. Takes two clicks, "
-              "and keeps the previous record as career_stats.cfg.openshim.bak. "
-              "Does not turn tracking off." },
-        };
         // The screens list registry rows by category (kShimSettingsCategories).
         constexpr size_t kShimSettingsRegistryCount =
             sizeof(g_ShimSettingsRegistry) / sizeof(g_ShimSettingsRegistry[0]);
@@ -3464,16 +2751,164 @@ namespace BZROpenShim
         constexpr const char* kShimHubPanelTexture = "osh_hub_center.png";
         constexpr const char* kShimCategoryPanelTexture = "osh_category_center.png";
 
-        // Rows that are not openshim.ini settings: they run something.
-        constexpr const char* kShimRowUpdateCheck = "OpenShim Updates";
-        constexpr const char* kShimRowKeyBindings = "Key Bindings";
-        constexpr const char* kShimRowReticle = "Reticle & Hits";
-        constexpr const char* kShimRowPalette = "HUD Colors";
-        constexpr const char* kShimRowDamage = "Damage Indicators";
-        constexpr const char* kShimRowFading = "HUD Fading";
-        constexpr const char* kShimRowMeters = "Meter Fading";
-        constexpr const char* kShimRowRadar = "Radar Fading";
-        constexpr const char* kShimRowMenuTheme = "Menu Colors";
+#include "bzr_options_categories.inc"
+
+        // ---- localization ------------------------------------------------------
+        // Display text follows the game's language (Docs/OPTIONS_UI_LOCALIZATION.md).
+        // Everything else -- category matching, ini writes, logs -- keeps the
+        // English strings, which are also the fallback for any missing cell.
+        uint32_t g_GameLanguageGetAddr = 0; // cdecl int(), 1..7, play_options language
+        typedef int(__cdecl* FnGameLanguageGet)();
+        static int g_L10nModuleAnchor = 0;
+
+        static int ReadGameLanguage()
+        {
+            static int s_bindState = 0; // 0=unchecked 1=usable -1=unavailable
+            if (s_bindState == 0)
+            {
+                const HookEngine::EngineRow rows[] = { { "GameLanguageGet", &g_GameLanguageGetAddr } };
+                s_bindState = HookEngine::BindEngineRows("Options UI language", rows) ? 1 : -1;
+            }
+            if (s_bindState < 0)
+                return OptionsL10n::English;
+            int language = OptionsL10n::English;
+            __try
+            {
+                language = reinterpret_cast<FnGameLanguageGet>(g_GameLanguageGetAddr)();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                language = OptionsL10n::English;
+            }
+            return (language >= 1 && language <= OptionsL10n::kLanguageCount) ? language : OptionsL10n::English;
+        }
+
+        // A loose openshim_localization.csv next to openshim.ini wins over the
+        // copy built into the DLL, so a translator can test without a rebuild.
+        static bool LoadShimL10nText(std::string& text, std::wstring& source)
+        {
+            const auto config = GetUserConfigPath();
+            if (!config.empty())
+            {
+                const auto loose = config.parent_path() / L"openshim_localization.csv";
+                std::ifstream file(loose, std::ios::binary);
+                if (file)
+                {
+                    text.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+                    source = loose.wstring();
+                    return true;
+                }
+            }
+            HMODULE module = nullptr;
+            if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                    reinterpret_cast<LPCSTR>(&g_L10nModuleAnchor), &module))
+                return false;
+            HRSRC resource = FindResourceA(module, MAKEINTRESOURCEA(IDR_OPENSHIM_LOCALIZATION), RT_RCDATA);
+            HGLOBAL loaded = resource ? LoadResource(module, resource) : nullptr;
+            const void* data = loaded ? LockResource(loaded) : nullptr;
+            const DWORD size = resource ? SizeofResource(module, resource) : 0;
+            if (!data || size == 0)
+                return false;
+            text.assign(static_cast<const char*>(data), size);
+            source = L"embedded";
+            return true;
+        }
+
+        // Loaded once and never replaced, so the returned cell pointers stay
+        // valid for the life of the process. Edits to the loose file need a
+        // restart.
+        static const OptionsL10n::Table& ShimL10nTable()
+        {
+            static OptionsL10n::Table table;
+            static bool loaded = false;
+            if (!loaded)
+            {
+                loaded = true;
+                std::string text;
+                std::wstring source;
+                std::string error;
+                if (!LoadShimL10nText(text, source))
+                    Log(L"[SETTINGSUI] No localization table; options text stays English\n");
+                else if (!table.Parse(text, &error))
+                    Log(L"[SETTINGSUI] Localization table (%ls) rejected: %hs\n", source.c_str(), error.c_str());
+                else
+                    Log(L"[SETTINGSUI] Localization table (%ls): %zu keys\n", source.c_str(), table.Size());
+            }
+            return table;
+        }
+
+        static int ShimLanguage()
+        {
+            static int s_logged = 0;
+            const int language = ReadGameLanguage();
+            if (language != s_logged)
+            {
+                s_logged = language;
+                Log(L"[SETTINGSUI] Options text language %d (%hs)\n", language,
+                    OptionsL10n::kLanguageColumnNames[language - 1]);
+            }
+            return language;
+        }
+
+        static const char* PickShimText(const std::string* keys, size_t count, const char* english)
+        {
+            const int language = ShimLanguage();
+            if (language == OptionsL10n::English)
+                return english;
+            return OptionsL10n::Pick(ShimL10nTable(), language, keys, count, english);
+        }
+
+        // One UI string. scripts/sync_options_localization.py collects every
+        // literal call, so keep the key and the English on one line.
+        static const char* ShimText(const char* key, const char* english)
+        {
+            const std::string keys[] = { key };
+            return PickShimText(keys, 1, english);
+        }
+
+        // A template with one %s, filled without printf so a stray % in a
+        // translation cannot misformat; a template without %s gets the
+        // argument appended.
+        static std::string ShimFormat(const char* key, const char* english, const std::string& arg)
+        {
+            std::string text = ShimText(key, english);
+            const size_t at = text.find("%s");
+            if (at == std::string::npos)
+                return text + arg;
+            return text.replace(at, 2, arg);
+        }
+
+        static const char* ShimSettingLabel(const ShimSettingDescriptor& setting)
+        {
+            const std::string keys[] = { OptionsL10n::RowKey(setting.key, setting.label, "label") };
+            return PickShimText(keys, 1, setting.label);
+        }
+
+        static const char* ShimSettingDescription(const ShimSettingDescriptor& setting)
+        {
+            const std::string keys[] = { OptionsL10n::RowKey(setting.key, setting.label, "desc") };
+            return PickShimText(keys, 1, setting.description);
+        }
+
+        // The row's own value key first, then the shared wording ("On",
+        // "Stock"), then the English label.
+        static const char* ShimSettingValueLabel(const ShimSettingDescriptor& setting, size_t index)
+        {
+            const char* english = setting.valueLabels[index];
+            const std::string keys[] = {
+                OptionsL10n::RowValueKey(setting.key, setting.label, setting.values[index]),
+                OptionsL10n::CommonValueKey(english),
+            };
+            return PickShimText(keys, 2, english);
+        }
+
+        static const char* ShimCategoryText(const ShimSettingsCategory& category, const char* field,
+                                            const char* english)
+        {
+            const std::string keys[] = { OptionsL10n::CategoryKey(category.name, field) };
+            return PickShimText(keys, 1, english);
+        }
+
         constexpr size_t kShimPseudoRowUpdateCheck = kShimSettingsRegistryCount + 0;
         constexpr size_t kShimPseudoRowKeyBindings = kShimSettingsRegistryCount + 1;
         constexpr size_t kShimPseudoRowReticle = kShimSettingsRegistryCount + 2;
@@ -3490,106 +2925,6 @@ namespace BZROpenShim
         constexpr size_t kShimCategoryRowsPerColumn = 8;
         constexpr size_t kShimCategoryMaxRows = 2 * kShimCategoryRowsPerColumn;
 
-        static const char* const kShimCategoryVideo[] = {
-            "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "Sun Flashbang", "Jet Flames",
-            "Empty Craft Lights", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes",
-            "HD Terrain Tiles", "Terrain Micro Detail", "Muzzle Flashes", "Muzzle Recoil", "GPU Skinning",
-            kShimRowMenuTheme };
-        static const char* const kShimCategoryLighting[] = {
-            "Player Headlight", "Headlight Brightness", "Headlight Color", "Headlight Beam",
-            "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam" };
-        static const char* const kShimCategoryAudio[] = {
-            "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
-        static const char* const kShimCategoryHud[] = {
-            "Scrap/Pilot HUD", "Scrap Color", "Pilot Color", "Radar Size", "Target Popup",
-            "MP Vehicle Flags", "Show Own MP Flag", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters, kShimRowRadar };
-        static const char* const kShimCategoryRadar[] = {
-            "Radar Fade", "Radar Idle", "Radar Delay", "Radar Speed", "Keep Compass" };
-        static const char* const kShimCategoryMeters[] = {
-            "Hull Fade", "Hull Idle", "Hull Delay", "Hull Speed",
-            "Ammo Fade", "Ammo Idle", "Ammo Delay", "Ammo Speed" };
-        static const char* const kShimCategoryFading[] = {
-            "Weapon Fade", "Weapon Idle", "Weapon Delay", "Weapon Speed",
-            "Scrap Fade", "Scrap Idle", "Scrap Delay", "Scrap Speed",
-            "Pilot Fade", "Pilot Idle", "Pilot Delay", "Pilot Speed",
-            "Cmd Fade", "Cmd Idle", "Cmd Delay", "Cmd Speed" };
-        static const char* const kShimCategoryDamage[] = {
-            "Incoming Damage", "Damage Color", "Damage Size", "Damage Opacity", "Damage Duration" };
-        static const char* const kShimCategoryReticle[] = {
-            "Reticle Style", "Reticle Color", "Reticle Size", "Reticle Thickness", "Reticle Outline",
-            "Reticle Opacity", "Reactive Reticle", "Hit Markers", "Marker Duration",
-            "Marker Color", "Marker Size", "Marker Opacity", "Stock Shader" };
-        static const char* const kShimCategoryPalette[] = {
-            "Base Palette", "Radar Lines", "Radar Backdrop", "Friendly Blips", "Enemy Blips", "Neutral Blips",
-            "Hull Healthy", "Hull Damaged", "Hull Critical", "Cockpit Ammo", "Unit Healthy", "Unit Damaged",
-            "Unit Critical", "Unit Ammo", "Empty Bars" };
-        static const char* const kShimCategoryControls[] = {
-            kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Unsmoothed Controls",
-            "Satellite Zoom Out", "Satellite Pan Speed", "Editor Placement", "Background Mouse" };
-        static const char* const kShimCategoryGameplay[] = {
-            "Weapon Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
-            "Jump-Snipe Crouch", "Global Turbo", "Satellite Fog Of War", "Neutral Attack Orders",
-            "Smart Scavengers", "Turret AA Pitch", "Bomber AI Range", "AI Howitzer Volley",
-            "AI Mine Volley", "AutoSave", "AutoSave Interval", "Vehicle Geometry" };
-        static const char* const kShimCategoryFixes[] = {
-            "AI Multi-Producer", "APC Allied Deploy", "Splinter Undead Fix", "Howitzer Deploy Fix",
-            "Tug Cargo Deploy", "Recycle Release Fix", "Constructor Cleanup", "Material Guard" };
-        static const char* const kShimCategoryNetwork[] = {
-            "Net Route", "Net Improvements", "Net Tuning", "Stock Factions", "Map List Fixes",
-            "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname",
-            "MP Setup Screen" };
-        static const char* const kShimCategorySystem[] = {
-            kShimRowUpdateCheck, "Auto-Install Updates", "Career Stats", "Reset Career Stats" };
-
-        struct ShimSettingsCategory
-        {
-            const char* name;   // tile caption
-            const char* title;  // screen title
-            const char* blurb;  // hub hover text
-            const char* const* rows;
-            size_t rowCount;
-        };
-
-#define BZR_SHIM_CATEGORY(name, title, blurb, rows) \
-            { name, title, blurb, rows, sizeof(rows) / sizeof(rows[0]) }
-        static const ShimSettingsCategory kShimSettingsCategories[] =
-        {
-            BZR_SHIM_CATEGORY("Video", "VIDEO",
-                "Render profile, the DX11 Enhanced passes, and visual effects.", kShimCategoryVideo),
-            BZR_SHIM_CATEGORY("Lighting", "LIGHTING",
-                "Vehicle headlights and the pilot flashlight.", kShimCategoryLighting),
-            BZR_SHIM_CATEGORY("Audio", "AUDIO",
-                "Sound channels, background music, unit voices and alerts.", kShimCategoryAudio),
-            BZR_SHIM_CATEGORY("HUD", "HUD",
-                "Scrap and pilot readout, radar size, target popup and vehicle flags.", kShimCategoryHud),
-            BZR_SHIM_CATEGORY("Controls", "CONTROLS",
-                "Key bindings, raw mouse input, control smoothing and the satellite view.",
-                kShimCategoryControls),
-            BZR_SHIM_CATEGORY("Gameplay", "GAMEPLAY",
-                "Single-player aiming, AI behaviour, turbo and AutoSave.", kShimCategoryGameplay),
-            BZR_SHIM_CATEGORY("Fixes", "FIXES",
-                "Switches for confirmed Redux engine defects. Leave these on unless "
-                "you are chasing a regression.", kShimCategoryFixes),
-            BZR_SHIM_CATEGORY("Network", "NETWORK",
-                "Connection route, the socket layer, lobby features and map lists.",
-                kShimCategoryNetwork),
-            BZR_SHIM_CATEGORY("System", "SYSTEM",
-                "OpenShim updates and career statistics.", kShimCategorySystem),
-            // Subpage reached from HUD; the existing nine-tile hub stays intact.
-            BZR_SHIM_CATEGORY("Reticle", "RETICLE / HIT FEEDBACK",
-                "Custom reticle appearance and single-player feedback.", kShimCategoryReticle),
-            BZR_SHIM_CATEGORY("HUD Colors", "HUD COLORS",
-                "Radar, cockpit meters and unit-bar colors. Default rows follow the base palette.", kShimCategoryPalette),
-            BZR_SHIM_CATEGORY("Damage", "DAMAGE INDICATORS",
-                "Directional feedback for incoming weapon damage in single player.", kShimCategoryDamage),
-            BZR_SHIM_CATEGORY("Fading", "CONTEXTUAL HUD",
-                "Independent idle opacity and timing for weapons, resources and the command interface.", kShimCategoryFading),
-            BZR_SHIM_CATEGORY("Meter Fading", "METER FADING",
-                "Independent cockpit hull and ammo fading; critical warnings stay visible.", kShimCategoryMeters),
-            BZR_SHIM_CATEGORY("Radar Fading", "RADAR FADING",
-                "Cockpit radar opacity and timing, with an independent compass exception.", kShimCategoryRadar),
-        };
-#undef BZR_SHIM_CATEGORY
         constexpr size_t kShimSettingsCategoryCount =
             sizeof(kShimSettingsCategories) / sizeof(kShimSettingsCategories[0]);
         constexpr size_t kShimHubCategoryCount = kShimSettingsCategoryCount - 6;
@@ -3803,7 +3138,7 @@ namespace BZROpenShim
                 return;
             const float width = ShimInfoLine(kShimHubInfo, 0).w;
             const auto caps = Assets::GetAssetCapabilities();
-            std::string text = "Changes are saved to openshim.ini as you make them. ";
+            std::string text = ShimText("openshim_ui:hub_saved_note", "Changes are saved to openshim.ini as you make them. ");
             text += Assets::FormatAssetStatusForUi(caps);
             SetShimInfoText(g_ShimHubUi.info, text.c_str(), width);
             SetInputBindingUiLabelTextFitted(g_ShimHubUi.info[2], ShimRuntimeLine().c_str(), width);
@@ -3820,7 +3155,9 @@ namespace BZROpenShim
                 {
                     if (Shell::Contains(ShimHubTileRect(i), x, y))
                     {
-                        SetShimInfoText(g_ShimHubUi.info, kShimSettingsCategories[i].blurb,
+                        SetShimInfoText(g_ShimHubUi.info,
+                                        ShimCategoryText(kShimSettingsCategories[i], "blurb",
+                                                         kShimSettingsCategories[i].blurb),
                                         ShimInfoLine(kShimHubInfo, 0).w);
                         return;
                     }
@@ -3866,7 +3203,8 @@ namespace BZROpenShim
                                           { 0.0f, 0.0f, 1440.0f, 1080.0f }, texture);
             if (!panel)
                 return false;
-            Shell::AddLabel(panel, panel, "OpenShimHub_Title", kShimTitleRect, "OPENSHIM OPTIONS",
+            Shell::AddLabel(panel, panel, "OpenShimHub_Title", kShimTitleRect,
+                            ShimText("openshim_ui:hub_title", "OPENSHIM OPTIONS"),
                             Shell::kTitleLabelFlags);
 
             const Shell::ButtonSkin skin = ShimSlotSkin("osh_tile_hv.png", "osh_tile_ck.png");
@@ -3874,7 +3212,8 @@ namespace BZROpenShim
             for (size_t i = 0; i < kShimHubCategoryCount; ++i)
             {
                 _snprintf_s(name, _TRUNCATE, "OpenShimHub_%s", kShimSettingsCategories[i].name);
-                Shell::AddButton(panel, panel, name, ShimHubTileRect(i), kShimSettingsCategories[i].name,
+                Shell::AddButton(panel, panel, name, ShimHubTileRect(i),
+                                 ShimCategoryText(kShimSettingsCategories[i], "name", kShimSettingsCategories[i].name),
                                  skin, 1.3f, 0.0f, kShimHubTileClicks[i], &OnShimHubHover);
             }
             for (size_t line = 0; line < 3; ++line)
@@ -3884,7 +3223,8 @@ namespace BZROpenShim
                     Shell::AddLabel(panel, panel, name, ShimInfoLine(kShimHubInfo, line), "");
             }
             ShowShimHubDefaultInfo();
-            return Shell::AddButton(panel, nullptr, "OpenShimHub_Back", kShimBackRect, "Back",
+            return Shell::AddButton(panel, nullptr, "OpenShimHub_Back", kShimBackRect,
+                                    ShimText("openshim_ui:back", "Back"),
                                     Shell::kSkinTopCorner, 1.0f, kShimBackTextOffset,
                                     &OnShimHubBack) != nullptr;
         }
@@ -3901,22 +3241,25 @@ namespace BZROpenShim
             if (row == kShimPseudoRowUpdateCheck)
             {
                 if (GetOpenShimUpdateSnapshot().busy)
-                    return "Checking...";
-                return CanRestartForOpenShimUpdate() ? "Restart now" : "Check now";
+                    return ShimText("openshim_ui:value_checking", "Checking...");
+                return CanRestartForOpenShimUpdate() ? ShimText("openshim_ui:value_restart_now", "Restart now")
+                                                     : ShimText("openshim_ui:value_check_now", "Check now");
             }
             if (row == kShimPseudoRowKeyBindings)
-                return "Edit";
+                return ShimText("openshim_ui:value_edit", "Edit");
             if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading || row == kShimPseudoRowMeters || row == kShimPseudoRowRadar || row == kShimPseudoRowMenuTheme)
-                return "Open";
+                return ShimText("openshim_ui:value_open", "Open");
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (ShimSettingUnavailableReason(setting))
-                return "Unavailable";
-            std::string text = setting.valueLabels[GetShimSettingCurrentIndex(setting)];
+                return ShimText("openshim_ui:value_unavailable", "Unavailable");
+            const size_t current = GetShimSettingCurrentIndex(setting);
+            std::string text = ShimSettingValueLabel(setting, current);
             // Enhanced is DX11-only; the stored preference is kept (switching to
             // DX11 restores it) but the row says it will not take effect here.
-            if (setting.applyGroup == ShimSettingApplyGroup::RenderProfile && text == "Enhanced" &&
+            if (setting.applyGroup == ShimSettingApplyGroup::RenderProfile &&
+                std::strcmp(setting.values[current], "Enhanced") == 0 &&
                 BZROpenShim::RenderProfiles::IdentifyActiveRenderSystem() == 2)
-                return "Enhanced (DX11 only)";
+                return ShimText("openshim_ui:value_enhanced_dx11_only", "Enhanced (DX11 only)");
             if (IsShimSettingActionRow(setting) || !setting.key)
                 return text;
             if (std::strcmp(setting.key, "ScrapHudColor") == 0 || std::strcmp(setting.key, "PilotHudColor") == 0 ||
@@ -3928,63 +3271,70 @@ namespace BZROpenShim
                 std::string configured;
                 if (TryGetUserConfigString(setting.section, setting.key, configured) && !configured.empty() &&
                     (configured[0] == '#' || configured[0] == '0') && HudColors::Parse(configured))
-                    text = "Custom";
+                    text = ShimText("openshim_ui:value_custom", "Custom");
             }
             if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
                 text += " *";
             return text;
         }
 
+        // A non-setting row is named by the slug of its English label.
+        static const char* ShimPseudoRowLabel(const char* english)
+        {
+            const std::string keys[] = { "openshim_ui:row:" + OptionsL10n::Slug(english) + ":label" };
+            return PickShimText(keys, 1, english);
+        }
+
         static const char* ShimRowLabel(size_t row)
         {
             if (row == kShimPseudoRowUpdateCheck)
-                return kShimRowUpdateCheck;
+                return ShimPseudoRowLabel(kShimRowUpdateCheck);
             if (row == kShimPseudoRowKeyBindings)
-                return kShimRowKeyBindings;
+                return ShimPseudoRowLabel(kShimRowKeyBindings);
             if (row == kShimPseudoRowReticle)
-                return kShimRowReticle;
+                return ShimPseudoRowLabel(kShimRowReticle);
             if (row == kShimPseudoRowPalette)
-                return kShimRowPalette;
+                return ShimPseudoRowLabel(kShimRowPalette);
             if (row == kShimPseudoRowDamage)
-                return kShimRowDamage;
+                return ShimPseudoRowLabel(kShimRowDamage);
             if (row == kShimPseudoRowFading)
-                return kShimRowFading;
+                return ShimPseudoRowLabel(kShimRowFading);
             if (row == kShimPseudoRowMeters)
-                return kShimRowMeters;
+                return ShimPseudoRowLabel(kShimRowMeters);
             if (row == kShimPseudoRowMenuTheme)
-                return kShimRowMenuTheme;
+                return ShimPseudoRowLabel(kShimRowMenuTheme);
             if (row == kShimPseudoRowRadar)
-                return kShimRowRadar;
-            return g_ShimSettingsRegistry[row].label;
+                return ShimPseudoRowLabel(kShimRowRadar);
+            return ShimSettingLabel(g_ShimSettingsRegistry[row]);
         }
 
         static const char* ShimRowDescription(size_t row)
         {
             if (row == kShimPseudoRowUpdateCheck)
-                return "Check the Steam Workshop for a newer OpenShim and stage it for the next launch.";
+                return ShimText("openshim_ui:row:OpenShimUpdates:desc", "Check the Steam Workshop for a newer OpenShim and stage it for the next launch.");
             if (row == kShimPseudoRowKeyBindings)
-                return "Open the key-binding editor for keyboard commands and game keys.";
+                return ShimText("openshim_ui:row:KeyBindings:desc", "Open the key-binding editor for keyboard commands and game keys.");
             if (row == kShimPseudoRowReticle)
-                return "Open reticle styling, hit-marker controls and a live appearance preview.";
+                return ShimText("openshim_ui:row:ReticleHits:desc", "Open reticle styling, hit-marker controls and a live appearance preview.");
             if (row == kShimPseudoRowPalette)
-                return "Customize radar lines, normal contacts, cockpit health/ammo and unit-bar colors.";
+                return ShimText("openshim_ui:row:HUDColors:desc", "Customize radar lines, normal contacts, cockpit health/ammo and unit-bar colors.");
             if (row == kShimPseudoRowDamage)
-                return "Customize incoming-damage arcs and preview front, right and rear directions.";
+                return ShimText("openshim_ui:row:DamageIndicators:desc", "Customize incoming-damage arcs and preview front, right and rear directions.");
             if (row == kShimPseudoRowFading)
-                return "Fade weapons, resource meters and the command interface independently when idle; relevant activity reveals them.";
+                return ShimText("openshim_ui:row:HUDFading:desc", "Fade weapons, resource meters and the command interface independently when idle; relevant activity reveals them.");
             if (row == kShimPseudoRowMeters)
-                return "Fade cockpit hull and ammo independently, including labels and shot-cost markers. Critical warnings stay visible.";
+                return ShimText("openshim_ui:row:MeterFading:desc", "Fade cockpit hull and ammo independently, including labels and shot-cost markers. Critical warnings stay visible.");
             if (row == kShimPseudoRowMenuTheme)
-                return "Live RGB sliders for the main menu image artwork. Apply saves; Stock restores original colors.";
+                return ShimText("openshim_ui:row:MenuColors:desc", "Live RGB sliders for the main menu image artwork. Apply saves; Stock restores original colors.");
             if (row == kShimPseudoRowRadar)
-                return "Fade the complete cockpit radar while idle; native-visible alerts and activity reveal it. Optionally keep the compass visible.";
+                return ShimText("openshim_ui:row:RadarFading:desc", "Fade the complete cockpit radar while idle; native-visible alerts and activity reveal it. Optionally keep the compass visible.");
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (const char* reason = ShimSettingUnavailableReason(setting))
                 return reason;
             if (setting.applyGroup == ShimSettingApplyGroup::RenderProfile &&
                 BZROpenShim::RenderProfiles::IdentifyActiveRenderSystem() == 2)
-                return "Enhanced requires DX11; on DX9 it falls back to Redux (Stock). Retro and Redux work on both. Your choice is kept for DX11.";
-            return setting.description;
+                return ShimText("openshim_ui:render_profile_dx9_desc", "Enhanced requires DX11; on DX9 it falls back to Redux (Stock). Retro and Redux work on both. Your choice is kept for DX11.");
+            return ShimSettingDescription(setting);
         }
 
         static void ShowShimCategoryDefaultInfo()
@@ -3995,7 +3345,7 @@ namespace BZROpenShim
             const float width = ShimInfoLine(kShimCategoryInfo, 0).w;
             SetShimInfoText(ui.info,
                             ui.status.empty()
-                                ? "Click a value to change it. Point at a setting to read what it does."
+                                ? ShimText("openshim_ui:category_hint", "Click a value to change it. Point at a setting to read what it does.")
                                 : ui.status.c_str(),
                             width);
             bool anyRestart = false;
@@ -4007,7 +3357,8 @@ namespace BZROpenShim
             }
             SetInputBindingUiLabelTextFitted(
                 ui.info[2],
-                anyRestart ? "* Takes effect after restarting Battlezone." : ShimRuntimeLine().c_str(),
+                anyRestart ? ShimText("openshim_ui:restart_note", "* Takes effect after restarting Battlezone.")
+                           : ShimRuntimeLine().c_str(),
                 width);
         }
 
@@ -4049,11 +3400,11 @@ namespace BZROpenShim
             if (!ok && g_BzrFn_UiSetActive)
                 for (void* quad : ui.previewQuads) g_BzrFn_UiSetActive(quad, 0);
             SetInputBindingUiLabelTextFitted(ui.previewNote,
-                !ok ? "Preview unavailable on this build."
-                    : ui.category == kShimDamageCategory ? "One tick per attacker."
+                !ok ? ShimText("openshim_ui:preview_unavailable", "Preview unavailable on this build.")
+                    : ui.category == kShimDamageCategory ? ShimText("openshim_ui:preview_damage_note", "One tick per attacker.")
                     : settings.style == HudFeedback::Style::Stock
-                        ? "Stock art stays in game."
-                        : "Sample hit is shown even when off.", 420.0f);
+                        ? ShimText("openshim_ui:preview_stock_note", "Stock art stays in game.")
+                        : ShimText("openshim_ui:preview_sample_note", "Sample hit is shown even when off."), 420.0f);
         }
 
         static void RefreshShimCategoryValues()
@@ -4085,9 +3436,8 @@ namespace BZROpenShim
                     {
                         const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
                         const size_t current = GetShimSettingCurrentIndex(setting);
-                        text += "  Click for ";
-                        text += setting.valueLabels[(current + 1) % setting.valueCount];
-                        text += ".";
+                        text += ShimFormat("openshim_ui:click_for", "  Click for %s.",
+                                           ShimSettingValueLabel(setting, (current + 1) % setting.valueCount));
                     }
                     SetShimInfoText(ui.info, text.c_str(), ShimInfoLine(kShimCategoryInfo, 0).w);
                     return;
@@ -4136,7 +3486,7 @@ namespace BZROpenShim
             if (!WriteUserConfigValueLossless(setting.section, setting.key, setting.altKeys,
                                               setting.altKeyCount, setting.values[nextIndex], error))
             {
-                status = "Save failed: " + error;
+                status = ShimFormat("openshim_ui:save_failed", "Save failed: %s", error);
                 Log(L"[SETTINGSUI] Save failed for %hs: %hs\n", setting.key, error.c_str());
                 return;
             }
@@ -4153,15 +3503,15 @@ namespace BZROpenShim
             else
                 ApplyShimSettingLive(setting.applyGroup);
 
-            status = std::string(setting.label) + " = " + setting.valueLabels[nextIndex];
+            status = std::string(ShimSettingLabel(setting)) + " = " + ShimSettingValueLabel(setting, nextIndex);
             if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
-                status += "  (takes effect after restart)";
+                status += ShimText("openshim_ui:status_after_restart", "  (takes effect after restart)");
             else if (setting.applyGroup == ShimSettingApplyGroup::ReadOnNextUse)
-                status += "  (takes effect the next time it is used)";
+                status += ShimText("openshim_ui:status_next_use", "  (takes effect the next time it is used)");
             else if (!liveApplyOk)
-                status += "  (saved; runtime apply failed - see openshim.log)";
+                status += ShimText("openshim_ui:status_apply_failed", "  (saved; runtime apply failed - see openshim.log)");
             else
-                status += "  (applied)";
+                status += ShimText("openshim_ui:status_applied", "  (applied)");
         }
 
         static void OnShimCategoryRowClicked(size_t slot)
@@ -4225,8 +3575,8 @@ namespace BZROpenShim
                 if (!CanRestartForOpenShimUpdate())
                     StartShimUpdateCheck();
                 else if (!RestartGameForOpenShimUpdate(restartError))
-                    g_ShimCategoryUi.status = "Could not restart (" + restartError +
-                        "). Quit the game to install the update.";
+                    g_ShimCategoryUi.status = ShimFormat("openshim_ui:restart_failed",
+                        "Could not restart (%s). Quit the game to install the update.", restartError);
             }
             else
             {
@@ -4270,10 +3620,12 @@ namespace BZROpenShim
                                           { 0.0f, 0.0f, 1440.0f, 1080.0f }, texture);
             if (!panel)
                 return false;
-            const bool backReady = Shell::AddButton(panel, nullptr, "OpenShimCategory_Back", kShimBackRect, "Back",
+            const bool backReady = Shell::AddButton(panel, nullptr, "OpenShimCategory_Back", kShimBackRect,
+                                    ShimText("openshim_ui:back", "Back"),
                                     Shell::kSkinTopCorner, 1.0f, kShimBackTextOffset,
                                     &OnShimCategoryBack) != nullptr;
-            Shell::AddLabel(panel, panel, "OpenShimCategory_Title", kShimTitleRect, def.title,
+            Shell::AddLabel(panel, panel, "OpenShimCategory_Title", kShimTitleRect,
+                            ShimCategoryText(def, "title", def.title),
                             Shell::kTitleLabelFlags);
 
             const Shell::ButtonSkin skin = ShimSlotSkin("osh_value_hv.png", "osh_value_ck.png");
@@ -4302,8 +3654,14 @@ namespace BZROpenShim
             if (category == kShimReticleCategory || category == kShimDamageCategory)
             {
                 HudFeedback::ReloadConfig();
-                const char* captions[] = {"Idle", "Contact", "Sample hit"};
-                const char* damageCaptions[] = {"1 attacker", "2 attackers", "3 attackers"};
+                const char* captions[] = {
+                    ShimText("openshim_ui:preview_idle", "Idle"),
+                    ShimText("openshim_ui:preview_contact", "Contact"),
+                    ShimText("openshim_ui:preview_sample_hit", "Sample hit") };
+                const char* damageCaptions[] = {
+                    ShimText("openshim_ui:preview_attackers_1", "1 attacker"),
+                    ShimText("openshim_ui:preview_attackers_2", "2 attackers"),
+                    ShimText("openshim_ui:preview_attackers_3", "3 attackers") };
                 for (int sample = 0; sample < 3; ++sample)
                 {
                     _snprintf_s(name, _TRUNCATE, "ReticlePreviewCaption%d", sample);
@@ -4322,7 +3680,8 @@ namespace BZROpenShim
                         if (g_BzrFn_UiSetActive) g_BzrFn_UiSetActive(ui.previewQuads[i], 0);
                     }
                 }
-                else SetInputBindingUiLabelText(ui.previewNote, "Preview artwork is not installed.");
+                else SetInputBindingUiLabelText(ui.previewNote,
+                    ShimText("openshim_ui:preview_not_installed", "Preview artwork is not installed."));
             }
             RefreshShimCategoryValues();
             Log(L"[SETTINGSUI] %hs screen built: %u rows\n", def.name, static_cast<unsigned>(ui.rowCount));
@@ -4377,7 +3736,8 @@ namespace BZROpenShim
             if (g_ShimSettingsArmedActionIndex != settingIndex)
             {
                 g_ShimSettingsArmedActionIndex = settingIndex;
-                status = std::string(setting.label) + ": click again to confirm. This cannot be undone.";
+                status = ShimFormat("openshim_ui:action_confirm", "%s: click again to confirm. This cannot be undone.",
+                                    ShimSettingLabel(setting));
                 return;
             }
 
@@ -4389,19 +3749,19 @@ namespace BZROpenShim
                 switch (ResetCareerStatsFromBridge())
                 {
                 case CareerStatsResetResult::Cleared:
-                    status = "Career statistics cleared. The previous record was kept as "
-                             "career_stats.cfg.openshim.bak";
+                    status = ShimText("openshim_ui:career_cleared", "Career statistics cleared. The previous record was kept as career_stats.cfg.openshim.bak");
                     break;
                 case CareerStatsResetResult::AlreadyEmpty:
-                    status = "Career statistics were already empty; nothing changed.";
+                    status = ShimText("openshim_ui:career_already_empty", "Career statistics were already empty; nothing changed.");
                     break;
                 case CareerStatsResetResult::Failed:
-                    status = "Career reset failed; existing statistics were kept - see openshim.log";
+                    status = ShimText("openshim_ui:career_reset_failed", "Career reset failed; existing statistics were kept - see openshim.log");
                     break;
                 }
                 break;
             default:
-                status = std::string(setting.label) + ": no action is wired up for this row.";
+                status = ShimFormat("openshim_ui:action_unwired", "%s: no action is wired up for this row.",
+                                    ShimSettingLabel(setting));
                 break;
             }
         }
@@ -5629,13 +4989,13 @@ namespace BZROpenShim
             if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(button, "optionck.png");
             if (fiveSlots && g_BzrFn_SetButtonLabel)
             {
-                g_BzrFn_SetButtonLabel(button, "OpenShim Options");
+                g_BzrFn_SetButtonLabel(button, ShimText("openshim_ui:options_button", "OpenShim Options"));
                 if (g_BzrFn_SetButtonTextScale)
                     g_BzrFn_SetButtonTextScale(button, kOptionsButtonTextScale);
             }
             else
             {
-                SetInputBindingUiButtonTextFitted(button, "OpenShim Options", 390.0f);
+                SetInputBindingUiButtonTextFitted(button, ShimText("openshim_ui:options_button", "OpenShim Options"), 390.0f);
             }
             g_BzrFn_SetOnClick(button, reinterpret_cast<void*>(ShimSettingsMenuClick));
             g_BzrFn_SetOnHover(button, reinterpret_cast<void*>(InputBindingUiButtonOnHoverNoop));
