@@ -313,6 +313,7 @@
     <ClCompile Include="src\patches\redux_compatibility.cpp" />
     <ClCompile Include="src\patches\render_effect_intent_exports.cpp" />
     <ClCompile Include="src\patches\sun_flash.cpp" />
+    <ClCompile Include="src\patches\screen_flash.cpp" />
     <ClCompile Include="src\patches\terrain_atlas_rect_repair.cpp" />
     <ClCompile Include="src\patches\terrain_proxy.cpp" />
     <ClCompile Include="src\patches\terrain_semantic.cpp" />
@@ -415,6 +416,7 @@
     <ClInclude Include="include\ogre_enhanced_light_selection.h" />
     <ClInclude Include="include\enhanced_light_selection.h" />
     <ClInclude Include="include\sun_flash.h" />
+    <ClInclude Include="include\screen_flash.h" />
     <ClInclude Include="include\terrain_proxy.h" />
     <ClInclude Include="include\terrain_semantic.h" />
     <ClInclude Include="include\terrain_hd_texture_copy.h" />

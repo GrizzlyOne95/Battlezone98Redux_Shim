@@ -15,6 +15,7 @@
 #include "openshim_preset_migration.h"
 #include "shim_log.h"
 #include "sun_flash.h"
+#include "screen_flash.h"
 #include "openshim_sdk_v2.h"
 #include "cli_multiparam_parser.h"
 #include "redux_compatibility.h"
@@ -1322,6 +1323,14 @@ namespace BZROpenShim
                 SunFlash::LoadConfig();
                 target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(SunFlash::ThunkAddress()));
             }
+            else if (ScreenFlash::CallSiteIndex(p.name.c_str()) >= 0) {
+                // Same instruction-anchored check as the sun site, per site:
+                // mov ecx, ScreenFlash / call the expected ScreenFlash method.
+                const auto site = static_cast<unsigned long>(ScreenFlash::CallSiteIndex(p.name.c_str()));
+                if (!ScreenFlash::VerifyCallSite(site, isSteam ? 300 : 1, 10)) { Log(L"[SCREENFLASH] call site verify failed at 0x%08X; leaving stock flash in place\n", p.address); continue; }
+                ScreenFlash::LoadConfig();
+                target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ScreenFlash::ThunkAddress(site)));
+            }
             else if (p.name.find("Damage Reveal Probe") != std::string::npos) {
                 // The hook calls on to whatever this call reached, so take
                 // that from the call's own rel32 and require it to be the
@@ -1626,6 +1635,8 @@ namespace BZROpenShim
                     WeaponPresentation::NativeBridges::RecordShotSite(
                         p.name == "Shell Casings MachineGun Shot Call", p.address - 1);
                 if (p.name == "Sun Screen Flash Contribution Hook") SunFlash::SetPatchInstalled(true);
+                if (ScreenFlash::CallSiteIndex(p.name.c_str()) >= 0)
+                    ScreenFlash::SetPatchInstalled(static_cast<unsigned long>(ScreenFlash::CallSiteIndex(p.name.c_str())));
                 Log(L"[OK]   %hs wrote %u bytes to 0x%08X\n", p.name.c_str(), static_cast<unsigned>(p.payload.size()), p.address);
             } else {
                 Log(L"[SKIP] %hs address=0x%08X verified=%hs payload=%u\n", p.name.c_str(), p.address, p.verified ? "yes" : "no", static_cast<unsigned>(p.payload.size()));

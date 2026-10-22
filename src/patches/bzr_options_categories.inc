@@ -22,7 +22,8 @@ static const char* const kShimCategoryVideo[] = {
     kShimRowMenuTheme };
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Brightness", "Headlight Color", "Headlight Beam",
-    "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam" };
+    "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam",
+    "Explosion Flash" };
 static const char* const kShimCategoryAudio[] = {
     "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
 static const char* const kShimCategoryHud[] = {
@@ -39,7 +40,8 @@ static const char* const kShimCategoryFading[] = {
     "Pilot Fade", "Pilot Idle", "Pilot Delay", "Pilot Speed",
     "Cmd Fade", "Cmd Idle", "Cmd Delay", "Cmd Speed" };
 static const char* const kShimCategoryDamage[] = {
-    "Incoming Damage", "Damage Color", "Damage Size", "Damage Opacity", "Damage Duration" };
+    "Incoming Damage", "Damage Color", "Damage Size", "Damage Opacity", "Damage Duration",
+    "Damage Flash" };
 static const char* const kShimCategoryReticle[] = {
     "Reticle Style", "Reticle Color", "Reticle Size", "Reticle Thickness", "Reticle Outline",
     "Reticle Opacity", "Reactive Reticle", "Hit Markers", "Marker Duration",

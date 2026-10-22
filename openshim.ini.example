@@ -1207,6 +1207,30 @@ JetFlames = 0
 ; does not touch the explosion flashes that share the same ScreenFlash.
 SunFlashbang = 1
 
+; One-frame fullscreen white strobe from nearby explosions.
+; Accepted: Stock | Soft | Off (1 = Stock, 0 = Off). Default: Stock.
+;   Stock = two explosion routines add 3 * size / depth to the same
+;           ScreenFlash the sun uses. It clamps at 1.0 and lasts one frame,
+;           so any explosion closer than three times its size flashes the
+;           world, cockpit and HUD near-white for a single frame.
+;   Soft  = explosions may leave at most 0.25 pending per frame (56/255
+;           alpha): a flicker instead of a whiteout
+;   Off   = explosions add nothing
+; Exposed on the OpenShim Settings page as "Explosion Flash"; applies live.
+; The explosion's sprites, particles and point light are unchanged, and so is
+; the sun's contribution (SunFlashbang above).
+ExplosionFlash = Stock
+
+; Fullscreen red/orange tint when the player's craft takes damage.
+; Accepted: Stock | Soft | Off (1 = Stock, 0 = Off). Default: Stock.
+;   Stock = three damage paths add a coloured flash scaled by the damage
+;           taken (decay 5.0, so it fades over a few frames)
+;   Soft  = each damage flash is scaled to 35% of its stock strength
+;   Off   = taking damage adds no tint
+; Exposed on the OpenShim Settings page as "Damage Flash"; applies live.
+; Scripted colour fades (Lua ColorFade) and other event flashes are unchanged.
+DamageFlash = Stock
+
 ; Unit command/selection voice feedback.
 ; Canonical values:
 ;   Normal  = normal stock feedback
