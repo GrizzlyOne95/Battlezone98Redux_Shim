@@ -260,6 +260,14 @@ namespace BZROpenShim::RenderProfiles
         // verified on disk. Missing mandatory resources degrade cleanly to
         // Redux; the OPTIONAL IBL set only affects the CapIblResources bit
         // and can never gate the profile by itself.
+        // Policy: DX9 is the legacy/stock backend (fixes only; Stock and Retro).
+        // Enhanced is DX11-only regardless of who asked.
+        if (winning == Profile::Enhanced && result.effectiveBackend == ActiveBackend::DX9)
+        {
+            result.fellBack = true;
+            SetReason(result, "Enhanced requires DX11; DX9 runs Stock/Retro only");
+            winning = Profile::Redux;
+        }
         if (winning == Profile::Enhanced && !HasCapability(input.capabilityMask, CapSchemeRewrite))
         {
             result.fellBack = true;

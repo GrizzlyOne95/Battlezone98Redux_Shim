@@ -46,14 +46,11 @@ namespace BZROpenShim::RenderProfiles
     // Redux preserves stock Battlezone 98 Redux rendering behavior as closely
     // as practical on the selected backend; it is the compatibility baseline.
     //
-    // Enhanced is the canonical OpenShim graphics upgrade. It is supported on
-    // BOTH backends and is capability-dependent rather than all-or-nothing:
-    // DX11 carries the primary modern feature set (linear lighting, enhanced
-    // terrain/object shader paths, modern PSSM behavior, contribution-ranked
-    // light selection), while DX9 retains its proven legacy enhancements
-    // (normal-map sharpening and the SM3 enhanced technique delegates).
-    // DX9 Enhanced is feature-frozen except for correctness/crash fixes; new
-    // visual development targets DX11 first.
+    // Enhanced is the canonical OpenShim graphics upgrade and is DX11-only
+    // (linear lighting, enhanced terrain/object shader paths, modern PSSM
+    // behavior, contribution-ranked light selection). DX9 is the legacy,
+    // stable, stock backend (fixes only; Redux and Retro): an Enhanced
+    // request on DX9 always degrades to Redux with a reason.
     //
     // Retro deliberately reproduces a more classic Battlezone presentation via
     // the og-* material scheme family. It inherits whatever those schemes
@@ -150,8 +147,9 @@ namespace BZROpenShim::RenderProfiles
         return (mask & static_cast<uint32_t>(cap)) != 0u;
     }
 
-    // Enhanced is only honorable when BOTH hard requirements hold: the scheme
-    // policy layer must be installed AND the mandatory resource set verified.
+    // Enhanced is only honorable when ALL hard requirements hold: the scheme
+    // policy layer must be installed, the mandatory resource set verified, AND
+    // the backend must be DX11 (DX9 runs Stock/Retro only).
     // Retro requires only the scheme layer. Shared by the resolver and the
     // runtime's SupportsRenderProfile so both can never disagree.
     inline bool ProfileRequirementsMet(Profile profile, uint32_t mask) noexcept
@@ -159,8 +157,10 @@ namespace BZROpenShim::RenderProfiles
         switch (profile)
         {
         case Profile::Enhanced:
+            // CapObjectEnhanced is DX11-only, so DX9 can never honor Enhanced.
             return HasCapability(mask, CapSchemeRewrite) &&
-                   HasCapability(mask, CapEnhancedResources);
+                   HasCapability(mask, CapEnhancedResources) &&
+                   HasCapability(mask, CapObjectEnhanced);
         case Profile::Retro:
             return HasCapability(mask, CapSchemeRewrite);
         case Profile::Redux:
