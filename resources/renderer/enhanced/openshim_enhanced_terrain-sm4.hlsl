@@ -814,12 +814,16 @@ float3 sharpen_terrain_normal(float3 normalTex)
 }
 
 
-
+// Same mapping as the object shader: Blinn-Phong exponent n maps to GGX
+// alpha = sqrt(2 / (n + 2)) (Walter et al.; BZCC uses exactly this), returned as
+// perceptual roughness sqrt(alpha) because distribution_ggx squares it. Stock and
+// CR terrain shininess (31-127) lands below OSE_TERRAIN_PBR_MIN_ROUGHNESS either
+// way, so terrain shading today is set by that floor, not by this curve.
 float legacy_shininess_to_roughness(float shininess)
 {
     float scaledShininess = max(shininess * OSE_PBR_SHININESS_SCALE, 0.0);
-    float roughness = sqrt(2.0 / (scaledShininess + 2.0));
-    return clamp(roughness, OSE_PBR_MIN_ROUGHNESS, OSE_PBR_MAX_ROUGHNESS);
+    float alpha = sqrt(2.0 / (scaledShininess + 2.0));
+    return clamp(sqrt(alpha), OSE_PBR_MIN_ROUGHNESS, OSE_PBR_MAX_ROUGHNESS);
 }
 
 float3 legacy_specular_to_f0(float3 specularTex)

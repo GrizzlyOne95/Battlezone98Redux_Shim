@@ -410,6 +410,17 @@ Filtering and MSAA:
 
 ## Follow-ups outside this change
 
-- Apply the same mapping to CR's `CR_*` shader fork to restore parity.
-- Decide whether terrain should adopt the same mapping. Terrain shininess values
-  were tuned against the old curve.
+- CR's `CR_*` shader fork: no longer applies. CR has no base or terrain shader
+  of its own any more; `CR_BZBase`/`CR_BZTerrainBase` and `CR_static_ibl.program`
+  compile OpenShim's `openshim_enhanced_*-sm4.hlsl`, so CR already gets every
+  change here.
+- Terrain mapping: done; the terrain shader now uses the same Walter mapping.
+  It changes no pixel today. Stock atlases use shininess 63 (one uses 127) and
+  CR's terrain materials 31-127. Under either curve those map below
+  `OSE_TERRAIN_PBR_MIN_ROUGHNESS` (0.56; the new curve gives 0.35-0.49), so
+  terrain specular is set by that floor. The change keeps the two shaders
+  consistent if the floor is ever lowered.
+- Open question: the 0.56 terrain floor is what decides terrain sheen. BZCC's
+  terrain uses specular power 1024 scaled by the spec map's alpha (alpha 0.24
+  at half spec alpha), which can be glossier than our floor. Matching it needs
+  a BZCC terrain capture, not a curve change.
