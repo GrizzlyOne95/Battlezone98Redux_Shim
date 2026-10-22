@@ -8,3 +8,8 @@
 # ASCII BZN. A single normalised line ending kills the parse, so preserve the
 # bytes exactly rather than trusting each checkout's core.autocrlf.
 *.trn -text
+
+# The options localization table is ANSI with CRLF, like the game's own
+# localization_table.csv; scripts/sync_options_localization.py --check compares
+# bytes, so no checkout may rewrite it.
+resources/localization/*.csv -text

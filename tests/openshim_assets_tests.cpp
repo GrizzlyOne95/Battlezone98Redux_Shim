@@ -600,15 +600,14 @@ void TestTerrainHdConfiguredManifestPath()
     ExpectEqStr(ResolveTerrainHdManifestPathAt(dir, absolute.string()).string(),
                 absolute.lexically_normal().string(),
                 "absolute path resolves verbatim");
-    ExpectEqStr(ResolveTerrainHdManifestPathAt(dir, kDefaultTerrainHdManifest).string(),
-                (dir / kDefaultTerrainHdManifest).lexically_normal().string(),
+    ExpectEqStr(ResolveTerrainHdManifestPathAt(dir, "openshim/custom_hd.json").string(),
+                (dir / "openshim" / "custom_hd.json").lexically_normal().string(),
                 "relative path resolves against game dir");
 
-    // An empty configured value means HD terrain has no manifest at all, which
-    // is a distinct problem from "the file is missing".
-    Check(ResolveTerrainHdManifestPathAt(dir, "").empty(), "empty configured -> empty path");
+    // Empty / "auto" with nothing installed yields no manifest and a clear problem.
+    Check(ResolveTerrainHdManifestPathAt(dir, "").empty(), "empty configured -> nothing found");
     ExpectFalse(ProbeTerrainHdAt(dir, "", prob), "empty configured not available");
-    ExpectContains(prob, "not configured", "empty configured problem is specific");
+    ExpectContains(prob, "not found", "empty configured problem is specific");
 
     // A zero-byte manifest is not a usable payload.
     {
@@ -626,6 +625,91 @@ void TestTerrainHdConfiguredManifestPath()
 
     std::filesystem::remove_all(dir, g_ec);
     std::filesystem::remove_all(other, g_ec);
+}
+
+void WriteHdManifest(const std::filesystem::path& file)
+{
+    std::filesystem::create_directories(file.parent_path(), g_ec);
+    std::ofstream f(file, std::ios::binary);
+    f << "{\"schema\":\"bzr-openshim-terrain-hd-v2\"}";
+}
+
+void TestTerrainHdAutoDiscovery()
+{
+    std::printf("TestTerrainHdAutoDiscovery\n");
+    auto dir = MakeScratchDir("terrain_hd_auto");
+    bool isAuto = false;
+    std::string prob;
+
+    // Nothing installed: empty result with a descriptive problem.
+    for (const char* value : {"auto", "AUTO", "", "terrain_hd_tiles.json"})
+    {
+        isAuto = true;
+        Check(ResolveTerrainHdManifestAt(dir, value, &isAuto, &prob).empty(),
+              "nothing installed -> empty");
+        ExpectContains(prob, "not found", "nothing installed problem");
+        ExpectFalse(isAuto, "nothing installed is not auto");
+    }
+    ExpectFalse(ProbeTerrainHdAt(dir, "auto", prob), "probe false when nothing installed");
+
+    // mods\<id>\cr_terrain_hd.json
+    const auto modFile = dir / "mods" / "3686673999" / "cr_terrain_hd.json";
+    WriteHdManifest(modFile);
+    ExpectEqStr(ResolveTerrainHdManifestAt(dir, "auto", &isAuto, &prob).string(),
+                modFile.lexically_normal().string(), "mods item discovered");
+    Check(isAuto, "mods discovery reports auto");
+    Check(ProbeTerrainHdAt(dir, "auto", prob), "probe true for mods pack");
+
+    // Deterministic: first subfolder by name wins.
+    const auto earlier = dir / "mods" / "1000" / "terrain_hd_tiles.json";
+    WriteHdManifest(earlier);
+    ExpectEqStr(ResolveTerrainHdManifestPathAt(dir, "").string(),
+                earlier.lexically_normal().string(), "sorted subfolders, first wins");
+
+    // Within a root terrain_hd_tiles.json outranks cr_terrain_hd.json.
+    WriteHdManifest(dir / "mods" / "1000" / "cr_terrain_hd.json");
+    ExpectEqStr(ResolveTerrainHdManifestPathAt(dir, "auto").string(),
+                earlier.lexically_normal().string(), "tiles name outranks cr name");
+
+    // Game dir beats every mod folder.
+    const auto gameFile = dir / "cr_terrain_hd.json";
+    WriteHdManifest(gameFile);
+    ExpectEqStr(ResolveTerrainHdManifestAt(dir, "auto", &isAuto, &prob).string(),
+                gameFile.lexically_normal().string(), "game dir first");
+
+    // Legacy relative value that does not exist falls through to auto.
+    ExpectEqStr(ResolveTerrainHdManifestAt(dir, "missing_hd.json", &isAuto, &prob).string(),
+                gameFile.lexically_normal().string(), "missing relative falls back to auto");
+    Check(isAuto, "fallback reports auto");
+
+    // Explicit existing relative and absolute values are honoured, not auto.
+    ExpectEqStr(ResolveTerrainHdManifestAt(dir, "mods/3686673999/cr_terrain_hd.json",
+                                           &isAuto, &prob).string(),
+                (dir / "mods" / "3686673999" / "cr_terrain_hd.json").lexically_normal().string(),
+                "explicit relative honoured");
+    ExpectFalse(isAuto, "explicit relative is not auto");
+    auto other = MakeScratchDir("terrain_hd_auto_abs");
+    WriteHdManifest(other / "elsewhere.json");
+    ExpectEqStr(ResolveTerrainHdManifestAt(dir, (other / "elsewhere.json").string(),
+                                           &isAuto, &prob).string(),
+                (other / "elsewhere.json").lexically_normal().string(),
+                "explicit absolute honoured");
+    ExpectFalse(isAuto, "explicit absolute is not auto");
+
+    std::filesystem::remove_all(dir, g_ec);
+    std::filesystem::remove_all(other, g_ec);
+
+    // Steam Workshop content item (needs a steamapps/common game dir).
+    auto root = MakeScratchDir("terrain_hd_workshop");
+    const auto game = root / "steamapps" / "common" / "Battlezone 98 Redux";
+    std::filesystem::create_directories(game, g_ec);
+    const auto item = root / "steamapps" / "workshop" / "content" / "301650" /
+                      "3700000000" / "cr_terrain_hd.json";
+    WriteHdManifest(item);
+    ExpectEqStr(ResolveTerrainHdManifestAt(game, "auto", &isAuto, &prob).string(),
+                item.lexically_normal().string(), "workshop item discovered");
+    Check(isAuto, "workshop discovery reports auto");
+    std::filesystem::remove_all(root, g_ec);
 }
 
 void TestCapabilitySnapshotSurvivesRefresh()
@@ -769,6 +853,7 @@ int main()
     TestPackageVsCapabilitySeparation();
     TestTerrainHdCapability();
     TestTerrainHdConfiguredManifestPath();
+    TestTerrainHdAutoDiscovery();
     TestCapabilitySnapshotSurvivesRefresh();
     TestPerMeshPartialSafety();
     TestSemanticCleanupFxaa();

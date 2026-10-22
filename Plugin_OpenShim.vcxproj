@@ -235,6 +235,7 @@
     <ClCompile Include="src\patches\weapon_presentation_native.cpp" />
     <ClCompile Include="src\patches\weapon_presentation_call_bridges.cpp" />
     <ClCompile Include="src\patches\bzr_options_ui.cpp" />
+    <ClCompile Include="src\patches\options_ui_l10n.cpp" />
     <ClCompile Include="src\patches\bzrnet_instrumentation.cpp" />
     <ClCompile Include="src\patches\bzrnet_protocol.cpp" />
     <ClCompile Include="src\patches\bzrnet_trace.cpp" />
@@ -251,6 +252,7 @@
     <ClCompile Include="src\patches\dx11_scene_depth.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
     <ClCompile Include="src\patches\fog_wake_feature.cpp" />
+    <ClCompile Include="src\patches\gpu_instancing.cpp" />
     <ClCompile Include="src\patches\gpu_skinning.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
     <ClCompile Include="src\patches\lua_formation_fix.cpp" />
@@ -269,6 +271,7 @@
     <ClCompile Include="src\patches\net_optimizer.cpp" />
     <ClCompile Include="src\patches\numeric_locale_compat.cpp" />
     <ClCompile Include="src\patches\odf_compat.cpp" />
+    <ClCompile Include="src\patches\map_folder_items.cpp" />
     <ClCompile Include="src\patches\odf_item_hooks.cpp" />
     <!--
       C++14 on purpose, in these three files only: they are the only
@@ -337,6 +340,7 @@
     <ClInclude Include="include\fog_wake.h" />
     <ClInclude Include="include\fog_wake_runtime.h" />
     <ClInclude Include="include\fog_wake_feature.h" />
+    <ClInclude Include="include\gpu_instancing.h" />
     <ClInclude Include="include\gpu_skinning.h" />
     <ClInclude Include="include\gpu_skinning_hlsl.h" />
     <ClInclude Include="include\mp_vehicle_preview_fix.h" />
@@ -395,6 +399,8 @@
     <ClInclude Include="include\frame_bridge_camera.h" />
     <ClInclude Include="include\frame_bridge_camera_observer.h" />
     <ClInclude Include="include\dx11_enhanced_fxaa_resources.h" />
+    <ClInclude Include="include\options_ui_l10n.h" />
+    <ClInclude Include="include\options_ui_l10n_resources.h" />
     <ClInclude Include="include\ogre_animation_profiler.h" />
     <ClInclude Include="include\pilot_fp_animation_trace.h" />
     <ClInclude Include="include\walker_cockpit_trace.h" />
@@ -440,6 +446,7 @@
     <ClInclude Include="include\mp_faction_restrict.h" />
     <ClInclude Include="include\mp_ready_diagnostic.h" />
     <ClInclude Include="include\odf_compat.h" />
+    <ClInclude Include="include\map_folder_items.h" />
     <ClInclude Include="include\odf_item_hooks.h" />
     <ClInclude Include="include\odf_item_prologue.h" />
     <ClInclude Include="include\BZROpenShim.h" />
@@ -471,8 +478,12 @@
       <PreprocessorDefinitions>OPENSHIM_MODULE_PLUGIN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <ResourceCompile Include="dx11_enhanced_fxaa.rc" />
+    <ResourceCompile Include="options_ui_l10n.rc" />
     <None Include="src\winmm.def" />
     <None Include="shaders\dx11_enhanced_fxaa.hlsl" />
+    <None Include="src\patches\bzr_options_registry.inc" />
+    <None Include="src\patches\bzr_options_categories.inc" />
+    <None Include="resources\localization\openshim_localization.csv" />
     <None Include="README.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

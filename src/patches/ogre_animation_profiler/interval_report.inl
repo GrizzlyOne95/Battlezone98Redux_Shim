@@ -444,6 +444,82 @@
                     static_cast<double>(nestedCalls) / frameDivisor);
             }
 
+            for (PassTimeSlot& passSlot : g_PassTimeSlots)
+            {
+                const uint64_t renders = passSlot.renders.exchange(
+                    0, std::memory_order_acq_rel);
+                const uint64_t inclusive = passSlot.inclusiveTicks.exchange(
+                    0, std::memory_order_acq_rel);
+                const uint64_t child = passSlot.childTicks.exchange(
+                    0, std::memory_order_acq_rel);
+                const uint64_t passDraws = passSlot.draws.exchange(
+                    0, std::memory_order_acq_rel);
+                const uint64_t passRq = passSlot.renderQueueCalls.exchange(
+                    0, std::memory_order_acq_rel);
+                const uint64_t passRqTicks = passSlot.renderQueueTicks.exchange(
+                    0, std::memory_order_acq_rel);
+                if (!renders)
+                    continue;
+                const uintptr_t passCamera =
+                    passSlot.camera.load(std::memory_order_relaxed);
+                const char* passCameraName = "<unknown>";
+                for (const CameraProfileSlot& cameraSlot : g_CameraProfileSlots)
+                {
+                    if (cameraSlot.key.load(std::memory_order_relaxed) == passCamera &&
+                        cameraSlot.metadataState.load(std::memory_order_acquire) == 2 &&
+                        cameraSlot.cameraName[0])
+                    {
+                        passCameraName = cameraSlot.cameraName.data();
+                        break;
+                    }
+                }
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[OgreProfile][PassTime] viewport=0x%p camera=%s depth=%u renders=%.2f/f incl=%.3fms/f excl=%.3fms/f draws=%.1f/f rq=%.1f/f rqCPU=%.3fms/f",
+                    reinterpret_cast<void*>(passSlot.key.load(std::memory_order_relaxed)),
+                    passCameraName,
+                    passSlot.depth.load(std::memory_order_relaxed),
+                    static_cast<double>(renders) / frameDivisor,
+                    TicksToMs(inclusive) / frameDivisor,
+                    TicksToMs(inclusive >= child ? inclusive - child : 0) / frameDivisor,
+                    static_cast<double>(passDraws) / frameDivisor,
+                    static_cast<double>(passRq) / frameDivisor,
+                    TicksToMs(passRqTicks) / frameDivisor);
+            }
+            {
+                const uint64_t dupTicks = g_DuplicateAnimationTicks.exchange(0, std::memory_order_acq_rel);
+                const uint64_t dupBlend = g_DuplicateAnimationBlendCalls.exchange(0, std::memory_order_acq_rel);
+                const uint64_t dupMain = g_DuplicateAnimationMain.exchange(0, std::memory_order_acq_rel);
+                const uint64_t dupShadow = g_DuplicateAnimationShadow.exchange(0, std::memory_order_acq_rel);
+                const uint64_t dupExternal = g_DuplicateAnimationExternal.exchange(0, std::memory_order_acq_rel);
+                const uint64_t firstCalls = g_FirstAnimationCalls.exchange(0, std::memory_order_acq_rel);
+                const uint64_t firstTicks = g_FirstAnimationTicks.exchange(0, std::memory_order_acq_rel);
+                const uint64_t rqTicks = g_RenderQueueTicks.exchange(0, std::memory_order_acq_rel);
+                const uint64_t dupRqTicks = g_DuplicateRenderQueueTicks.exchange(0, std::memory_order_acq_rel);
+                const uint64_t dupRqShadow = g_DuplicateRenderQueueShadow.exchange(0, std::memory_order_acq_rel);
+                const uint64_t outsideDraws = g_DrawsOutsideScene.exchange(0, std::memory_order_acq_rel);
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    "[OgreProfile][Repeats] dupAnim=%.2f/f cpu=%.4fms/f perCall=%.2fus blends=%llu from[main=%llu shadow=%llu external=%llu] firstAnim=%.2f/f cpu=%.3fms/f perCall=%.2fus | rq cpu=%.3fms/f dupRq=%.2f/f shadowDup=%llu dupRqCpu=%.3fms/f | drawsOutsideScene=%.1f/f",
+                    static_cast<double>(duplicateAnimation) / frameDivisor,
+                    TicksToMs(dupTicks) / frameDivisor,
+                    duplicateAnimation ? 1000.0 * TicksToMs(dupTicks) / duplicateAnimation : 0.0,
+                    static_cast<unsigned long long>(dupBlend),
+                    static_cast<unsigned long long>(dupMain),
+                    static_cast<unsigned long long>(dupShadow),
+                    static_cast<unsigned long long>(dupExternal),
+                    static_cast<double>(firstCalls) / frameDivisor,
+                    TicksToMs(firstTicks) / frameDivisor,
+                    firstCalls ? 1000.0 * TicksToMs(firstTicks) / firstCalls : 0.0,
+                    TicksToMs(rqTicks) / frameDivisor,
+                    static_cast<double>(duplicateRenderQueue) / frameDivisor,
+                    static_cast<unsigned long long>(dupRqShadow),
+                    TicksToMs(dupRqTicks) / frameDivisor,
+                    static_cast<double>(outsideDraws) / frameDivisor);
+            }
+
             LogShimA(
                 LogLevel::Info,
                 kComponent,

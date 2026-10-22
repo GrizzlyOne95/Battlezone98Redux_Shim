@@ -38,6 +38,10 @@ bool OdfInstallUseItemHook(uint32_t siteAddress);
 bool OdfInstallGetItemSizeHook(uint32_t siteAddress);
 bool OdfInstallUnlockItemHook(uint32_t siteAddress);
 
+// True once all three detours are installed. Anything that serves items
+// through them (see map_folder_items.h) must check this first.
+bool OdfItemHooksInstalled();
+
 // Copies a game-selected ODF (including archive items) using the verified
 // original item-loader trio. Releases the engine lock before returning.
 // False when unavailable, missing, oversized or unreadable; out is then empty.

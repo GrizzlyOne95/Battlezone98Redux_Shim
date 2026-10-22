@@ -102,10 +102,23 @@ int main()
     Check(!MakeSkinnedVertexSource(kBaseLike, "base_vertex", 5, 64).ok, "five weights is refused");
     Check(!MakeSkinnedVertexSource(kBaseLike, "base_vertex", 2, 0).ok, "zero bones is refused");
     {
-        const std::string twice = std::string(kTexturedLike) +
-                                  "#if 0\n" + kTexturedLike + "#endif\n";
+        const std::string twice = std::string(kTexturedLike) + kTexturedLike;
         const SkinnedSourceResult r = MakeSkinnedVertexSource(twice, "textured_vertex", 2, 8);
         Check(!r.ok && Contains(r.error, "more than once"), "duplicate entry definitions are refused");
+    }
+    {
+        const std::string disabledCopy = std::string(kTexturedLike) +
+                                         "#if 0\n" + kTexturedLike + "#endif\n";
+        const SkinnedSourceResult r = MakeSkinnedVertexSource(disabledCopy, "textured_vertex", 2, 8);
+        Check(r.ok && r.conditionalsResolved && CountOf(r.source, "osGpuSkinIndices : BLENDINDICES") == 1,
+              "a copy under #if 0 is not a second entry");
+    }
+    {
+        const std::string unknowable = std::string(kTexturedLike) +
+                                       "#if __SHADER_TARGET_MAJOR > 4\n" + kTexturedLike + "#endif\n";
+        const SkinnedSourceResult r = MakeSkinnedVertexSource(unknowable, "textured_vertex", 2, 8);
+        Check(!r.ok && !r.conditionalsResolved && Contains(r.error, "more than once"),
+              "a compiler-defined test leaves the conditionals unresolved");
     }
     {
         const std::string nonVoid =
@@ -132,8 +145,92 @@ int main()
     {
         const std::string conditional =
             "void vs(\n#ifdef A\nfloat4 p : POSITION,\n#else\nfloat3 p : POSITION,\n#endif\nout float4 o : SV_POSITION) { o = 0; }\n";
-        const SkinnedSourceResult r = MakeSkinnedVertexSource(conditional, "vs", 2, 8);
-        Check(!r.ok, "conditional POSITION input is refused");
+        SkinnedSourceResult r = MakeSkinnedVertexSource(conditional, "vs", 2, 8);
+        Check(r.ok && Contains(r.source, "p = osGpuSkinPos;"), "undefined A selects the float3 POSITION");
+        r = MakeSkinnedVertexSource(conditional, "vs", 2, 8, "A");
+        Check(r.ok && Contains(r.source, "p = float4(osGpuSkinPos, 1.0);"), "defined A selects the float4 POSITION");
+        Check(Contains(r.source, "#ifdef A") && Contains(r.source, "#else"), "directives stay in the output");
+    }
+    {
+        const std::string unresolved =
+            "#include \"common.hlsl\"\n"
+            "void vs(\n#ifdef A\nfloat4 p : POSITION,\n#endif\nout float4 o : SV_POSITION) { o = 0; }\n";
+        const SkinnedSourceResult r = MakeSkinnedVertexSource(unresolved, "vs", 2, 8, "A");
+        Check(!r.ok && Contains(r.error, "conditional"), "an #include leaves a conditional POSITION refused");
+    }
+    {
+        // The fixed-function stand-in shape: NORMAL exists only for LIT && !LIT_FLAT.
+        const std::string ff =
+            "float4x4 wvpMat;\n"
+            "void ff_vertex(\n"
+            "    in float4 iPosition : POSITION,\n"
+            "#if defined(LIT) && !defined(LIT_FLAT)\n"
+            "    in float3 iNormal : NORMAL,\n"
+            "#endif\n"
+            "#ifdef VERTEX_COLOUR\n"
+            "    in float4 iColor : COLOR0,\n"
+            "#endif\n"
+            "    in float2 iTexCoord : TEXCOORD0,\n"
+            "    out float4 oPosition : SV_POSITION)\n"
+            "{\n    oPosition = mul(wvpMat, iPosition);\n}\n";
+        SkinnedSourceResult r = MakeSkinnedVertexSource(ff, "ff_vertex", 4, 64, "LIT=1");
+        Check(r.ok && r.normalParam == "iNormal", "LIT=1 skins the conditional NORMAL");
+        r = MakeSkinnedVertexSource(ff, "ff_vertex", 4, 64, "LIT=1,LIT_FLAT");
+        Check(r.ok && r.normalParam.empty(), "LIT_FLAT drops the NORMAL input");
+        r = MakeSkinnedVertexSource(ff, "ff_vertex", 4, 64);
+        Check(r.ok && r.normalParam.empty(), "unlit variant skins position only");
+    }
+    {
+        // The surface shape: in-file #defines derived from program defines, a
+        // COLOR0/NORMAL #if/#else, a struct output and a macro semantic.
+        const std::string surface =
+            "#if defined(SM4)\n#define POSITION_OUT SV_POSITION\n#else\n#define POSITION_OUT POSITION\n#endif\n"
+            "#ifndef MAX_LIGHTS\n#define MAX_LIGHTS 8\n#endif\n"
+            "#if defined(GLASS) || defined(CUTOUT)\n#if !defined(GLOW)\n#define LIT_SURFACE\n#endif\n#endif\n"
+            "#if MAX_LIGHTS >= 4 && SM4 == 1\n#define MANY \\\n    1\n#endif\n"
+            "#if MANY != 1\n#error continuation lost\n#endif\n"
+            "struct SurfaceV2F { float2 uv : TEXCOORD0; };\n"
+            "float4x4 wvpMat;\n"
+            "void surface_vertex(\n"
+            "\tin float4 iPosition : POSITION,\n"
+            "#if defined(PARTICLE_COLOUR)\n"
+            "\tin float4 iColour : COLOR0,\n"
+            "#else\n"
+            "\tin float3 iNormal : NORMAL,\n"
+            "#endif\n"
+            "\tin float2 iTexCoord : TEXCOORD0,\n"
+            "\tout SurfaceV2F o,\n"
+            "\tout float4 oPosition : POSITION_OUT\n"
+            ")\n{\n\toPosition = mul(wvpMat, iPosition);\n\to.uv = iTexCoord;\n}\n";
+        SkinnedSourceResult r = MakeSkinnedVertexSource(surface, "surface_vertex", 4, 64,
+                                                        "SM4=1,SHADOWRECEIVER=1,PSSM_ENABLED=1");
+        Check(r.ok && r.conditionalsResolved && r.normalParam == "iNormal", "surface variant skins NORMAL");
+        r = MakeSkinnedVertexSource(surface, "surface_vertex", 4, 64, "SM4=1;PARTICLE_COLOUR");
+        Check(r.ok && r.normalParam.empty(), "particle variant has no NORMAL");
+    }
+    {
+        const char* bad[] = {
+            "#if FN(1)\n#endif\n",
+            "#define FN(x) x\n#if FN\n#endif\n",
+            "#define EMPTY\n#if EMPTY\n#endif\n",
+            "#if 1 +\n#endif\n",
+            "#if 1\n",
+            "#endif\n",
+            "#if 1 / 0\n#endif\n",
+            "#error stop\n",
+        };
+        for (const char* prefix : bad)
+        {
+            const SkinnedSourceResult r =
+                MakeSkinnedVertexSource(std::string(prefix) + kTexturedLike, "textured_vertex", 2, 8);
+            Check(r.ok && !r.conditionalsResolved, "malformed or unknowable structure falls back unresolved");
+        }
+        const SkinnedSourceResult inactive = MakeSkinnedVertexSource(
+            std::string("#if 0\n#error never\n#include \"x\"\n#if FN(1)\n#endif\n#endif\n") + kTexturedLike,
+            "textured_vertex", 2, 8);
+        Check(inactive.ok && inactive.conditionalsResolved, "inactive branches are not evaluated");
+        Check(!MakeSkinnedVertexSource(kTexturedLike, "textured_vertex", 2, 8, "1BAD").conditionalsResolved,
+              "an invalid program define is not resolved");
     }
     {
         const std::string nameInsideOther =
@@ -143,6 +240,39 @@ int main()
         Check(r.ok && CountOf(r.source, "osGpuSkinIndices : BLENDINDICES") == 1,
               "entry name match respects identifier boundaries");
     }
+
+    // Instanced twins of skinned output.
+    {
+        const SkinnedSourceResult skinned = MakeSkinnedVertexSource(kBaseLike, "base_vertex", 3, 64);
+        const SkinnedSourceResult r = MakeInstancedSkinnedVertexSource(skinned.source, 256);
+        Check(r.ok, "skinned source gets an instanced twin");
+        Check(Contains(r.source, "uniform float4 osGpuSkinBones[768]") && !Contains(r.source, "[192]"),
+              "instanced palette is widened");
+        Check(Contains(r.source, "in float osGpuInstBase : TEXCOORD15,"), "adds the per-instance base input");
+        Check(CountOf(r.source, "(osGpuSkinIndices.") == 3 &&
+              Contains(r.source, "uint osGpuSkinRow = (osGpuSkinIndices.z + (uint)osGpuInstBase) * 3;"),
+              "every blend index is offset by the instance base");
+        Check(!Contains(r.source, "osGpuSkinRow = osGpuSkinIndices."), "no row is left unoffset");
+        Check(r.source.find("osGpuInstBase : TEXCOORD15") < r.source.find("out float4 oPosition"),
+              "instance input stays in the parameter list");
+    }
+    {
+        const SkinnedSourceResult skinned = MakeSkinnedVertexSource(kTexturedLike, "textured_vertex", 4, 64);
+        const SkinnedSourceResult r = MakeInstancedSkinnedVertexSource(skinned.source, 128);
+        Check(r.ok && Contains(r.source, "osGpuSkinBones[384]") && CountOf(r.source, "+ (uint)osGpuInstBase") == 4,
+              "four weights offset four rows");
+    }
+    {
+        const std::string texcoord15 =
+            "void vs(float4 p : POSITION, float2 t : texcoord15, out float4 o : SV_POSITION) { o = p; }\n";
+        const SkinnedSourceResult skinned = MakeSkinnedVertexSource(texcoord15, "vs", 2, 8);
+        Check(skinned.ok && !MakeInstancedSkinnedVertexSource(skinned.source, 256).ok,
+              "an existing TEXCOORD15 input refuses instancing");
+    }
+    Check(!MakeInstancedSkinnedVertexSource(kTexturedLike, 256).ok, "unskinned source is refused");
+    Check(!MakeInstancedSkinnedVertexSource(
+              MakeSkinnedVertexSource(kTexturedLike, "textured_vertex", 1, 8).source, 257).ok,
+          "palette over 256 bones is refused");
 
     Check(HashText("abc") == HashText("abc") && HashText("abc") != HashText("abd"), "hash is stable and source-sensitive");
     Check(HashText("") == 1469598103934665603ULL, "hash is FNV-1a 64");

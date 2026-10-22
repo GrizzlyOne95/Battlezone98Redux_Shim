@@ -76,6 +76,25 @@ amplitude, capped at the existing one-meter envelope; `0` flattens relief.
 Restart after editing the manifest. Failed/missing packs retain baseline
 relief. CR exposes a value for each world in `Config/cr_terrain_hd.json`.
 
+The same per-material object accepts independent detail controls (all finite):
+
+| Field | Range | Default | Effect |
+|---|---|---|---|
+| `detailContrast` | 0..1 | 0.55 | Brightness modulation around neutral detail; zero removes its colour modulation. |
+| `detailNormalStrength` | 0..4 | 2.2 | Luminance-gradient detail normal strength; zero disables both detail-normal layers. |
+| `detailNormalNearScale` | 0..1 | 0.55 | Relative strength of the finer 32x normal layer. |
+
+These apply only to the owned native HD DX11 Enhanced fragment programs.
+They leave authored D/N/S/E textures and geometry amplitude independent.
+Defaults retain the current source exactly, including Mars's existing look.
+Changed values specialize the shader before its existing source-hashed cache
+name is calculated, so materials cannot share stale tuned variants. No extra
+texture, uniform, slot or persistent source image is allocated. Unknown shader
+contracts or invalid values decline installation and retain the stock owner.
+Restart after editing; use the `[TERRAIN-HD] detail tuning` log to verify the
+actual material/values. Detail-map resolution remains the existing 2048px
+contract. DX9/Retro/Redux fallback is unchanged.
+
 An optional `heightTexture` replaces the procedural field when micro detail
 is enabled and the guarded HD pack installs. It is a **file path relative to
 the manifest**, using case-correct `/` separators, paired with
@@ -254,10 +273,10 @@ Enable the option or set:
 ```ini
 [Terrain]
 TerrainHdEnabled = 1
-TerrainHdManifest = terrain_hd_tiles.json
+TerrainHdManifest = auto
 ```
 
-The manifest path may also be absolute. Image names are Ogre resource names,
+The manifest path may also be explicit (relative to the game folder, or absolute). Image names are Ogre resource names,
 not filesystem paths relative to the manifest. Preserve filename case for
 Proton/Wine. Missing/incompatible resources or unknown native layouts decline
 the replacement and retain stock terrain. The native path currently requires
@@ -270,6 +289,28 @@ cache. Additional semantic vertex buffers cost approximately 80 MiB for the
 320-mesh test mission. Compressed DDS can reduce texture memory. Editor tile
 changes refresh the semantic buffers after native full rebuilds; mission exit
 restores native shaders, diffuse textures and buffer declarations.
+
+## Pack discovery and the separate-pack layout
+
+The HD terrain pack is a separately subscribed Workshop item (or a GOG
+`mods\<id>\` folder) holding `cr_terrain_hd.json` plus flat `crhd_*.dds` images.
+BZR does not honor Workshop dependencies, so OpenShim finds and mounts it
+itself. With the shipped `TerrainHdManifest = auto` (or an empty value) the
+manifest is searched, first match wins, in: the game folder, then each
+subfolder (sorted by name) of `addon\`, `mods\`, `packaged_mods\` and the Steam
+`workshop\content\301650\` directory, for `terrain_hd_tiles.json` then
+`cr_terrain_hd.json`, directly in each root. An explicit absolute path, or a
+relative path that exists under the game folder, overrides discovery; a relative
+path that does not exist (for example the legacy `terrain_hd_tiles.json` in an
+old ini) falls back to discovery. The chosen file is logged once as
+`[TERRAIN-HD] manifest resolved path="..." source=explicit|auto`.
+
+The capability probe and the loader share one resolver
+(`ResolveTerrainHdManifestAt`), so the Options UI and the renderer agree. Before
+the first tile loads, the manifest's folder is added as a non-recursive
+FileSystem location in an Ogre group named `OpenShimTerrainHd`, unless the first
+texture is already resolvable (Redux mounted the folder itself). Any failure
+logs a warning and keeps the stock atlas.
 
 ## Visible diagnostic test
 

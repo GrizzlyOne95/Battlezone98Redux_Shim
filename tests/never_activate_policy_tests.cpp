@@ -99,7 +99,10 @@ namespace
         Check(IsUserClick(0x0201, true, true, true), "physical click inside the window counts");
         Check(IsUserClick(0x00A1, true, true, true), "physical non-client click counts");
         Check(!IsUserClick(0x0201, true, true, false), "posted click (button not physically down) is ignored");
-        Check(!IsUserClick(0x0201, true, false, true), "click with the cursor outside the window is ignored");
+        Check(!IsUserClick(0x0201, true, false, true), "click while another window is under the cursor is ignored");
+        // The 2026-10-19 leak: a harness PostMessage click reaches the buried game
+        // window while the user presses a button in their own window on top of it.
+        Check(!IsUserClick(0x0201, true, false, true), "posted click during a user press on another window is ignored");
         Check(!IsUserClick(0x0201, false, true, true), "click on another window is ignored");
         Check(!IsUserClick(0x0200, true, true, true), "mouse move is not a click");
         Check(!IsUserClick(0x0202, true, true, true), "button up is not a click");
