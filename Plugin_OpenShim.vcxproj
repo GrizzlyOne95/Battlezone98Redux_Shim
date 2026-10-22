@@ -271,6 +271,7 @@
     <ClCompile Include="src\patches\net_optimizer.cpp" />
     <ClCompile Include="src\patches\numeric_locale_compat.cpp" />
     <ClCompile Include="src\patches\odf_compat.cpp" />
+    <ClCompile Include="src\patches\map_folder_items.cpp" />
     <ClCompile Include="src\patches\odf_item_hooks.cpp" />
     <!--
       C++14 on purpose, in these three files only: they are the only
@@ -445,6 +446,7 @@
     <ClInclude Include="include\mp_faction_restrict.h" />
     <ClInclude Include="include\mp_ready_diagnostic.h" />
     <ClInclude Include="include\odf_compat.h" />
+    <ClInclude Include="include\map_folder_items.h" />
     <ClInclude Include="include\odf_item_hooks.h" />
     <ClInclude Include="include\odf_item_prologue.h" />
     <ClInclude Include="include\BZROpenShim.h" />

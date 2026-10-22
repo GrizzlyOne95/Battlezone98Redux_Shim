@@ -14,6 +14,7 @@
 // Copyright (C) 2026 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
 
+#include "map_folder_items.h"
 #include "odf_item_hooks.h"
 #include "shim_log.h"
 #include "shim_log_sink.h"
@@ -27,6 +28,8 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <string>
 #include <vector>
@@ -340,6 +343,85 @@ void TestOwnedOdfRead()
     Check(!OdfReadItemText("magnet.odf", text) && text.empty(), "unavailable loader fails closed");
 }
 
+// The waiting room's file index lacks a map pack's folder, so the store
+// serves that folder's own .vxt/.des/.odf through the detours, and only names
+// the index does not have.
+bool __cdecl FakeIndexHas(const char* name)
+{
+    return name && g_engine.count(Lower(name)) != 0;
+}
+
+void WriteFile(const std::filesystem::path& p, const char* text)
+{
+    std::ofstream out(p, std::ios::binary);
+    out << text;
+}
+
+void TestMapFolderItemsServeOnlyIndexGaps()
+{
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "openshim_map_folder_items_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    const fs::path pack = root / "3686673790";
+    const fs::path other = root / "other";
+    fs::create_directories(pack);
+    fs::create_directories(other);
+    const char* kVxt = "avobserv avobserv.des\tx\tNSDF\r\n";
+    WriteFile(pack / "uarracda.vxt", kVxt);
+    WriteFile(pack / "uarracda.bzn", "bzn");
+    WriteFile(pack / "avobserv.des", "NSDF Observer");
+    WriteFile(pack / "avtank.odf", "[GameObjectClass]\r\n");
+    WriteFile(pack / "uarracda.lua", "-- not served");
+    WriteFile(other / "uarracda.vxt", "no bzn beside it");
+
+    Check(MapFolderItems::FindMapFolder({ other, pack }, "uarracda") == pack,
+          "the map folder needs both <map>.vxt and <map>.bzn");
+    Check(MapFolderItems::FindMapFolder({ other }, "uarracda").empty(), "a lone .vxt is no map folder");
+    Check(MapFolderItems::FindMapFolder({ pack }, "..\\uarracda").empty(), "a path is never a map name");
+
+    ResetEngine();
+    OdfItemHookTest::SetOptions(true, false, false);
+    MapFolderItems::ResetForTesting();
+    FakeItem& stockTank = AddItem("avtank.odf", "[GameObjectClass]\r\nstock\r\n");
+
+    MapFolderItems::SetFolder(pack);
+    Check(!MapFolderItems::CanServe("uarracda.vxt"), "no index probe means nothing is served");
+    MapFolderItems::SetIndexCheck(&FakeIndexHas);
+
+    Check(MapFolderItems::CanServe("uarracda.vxt"), "an index gap in the map folder is servable");
+    Check(!MapFolderItems::CanServe("avtank.odf"), "a name the index has is never shadowed");
+    Check(!MapFolderItems::CanServe("uarracda.lua"), "only .vxt/.des/.odf are served");
+    Check(!MapFolderItems::CanServe("missing.des"), "a file the folder lacks is not servable");
+
+    // The loader asks the size before UseItem for each .des.
+    Check(OdfGetItemSizeDetour("avobserv.des") == std::strlen("NSDF Observer"),
+          "GetItemSize reports the folder file's size");
+    void* vxt = OdfUseItemDetour("UARRACDA.VXT");
+    Check(vxt && std::strcmp(static_cast<const char*>(vxt), kVxt) == 0,
+          "UseItem serves the folder bytes, NUL-terminated, case-insensitively");
+    void* again = OdfUseItemDetour("uarracda.vxt");
+    Check(again == vxt && MapFolderItems::Refcount("uarracda.vxt") == 2, "a second holder shares the copy");
+
+    void* tank = OdfUseItemDetour("avtank.odf");
+    Check(tank && stockTank.useCalls == 1, "an indexed name still reaches the engine");
+    OdfUnlockItemDetour("avtank.odf");
+    Check(stockTank.locks == 0, "the engine releases its own item");
+
+    // Switching maps keeps a held copy valid until its last Release.
+    MapFolderItems::SetFolder({});
+    Check(!MapFolderItems::CanServe("avobserv.des"), "a cleared folder serves nothing new");
+    Check(static_cast<const char*>(vxt)[0] == 'a', "a held copy outlives the folder switch");
+    OdfUnlockItemDetour("uarracda.vxt");
+    OdfUnlockItemDetour("uarracda.vxt");
+    Check(MapFolderItems::Refcount("uarracda.vxt") == -1, "the last Release frees a retired copy");
+    Check(g_unknownUnlocks == 0, "no served name's unlock reaches the engine");
+    Check(OdfUseItemDetour("uarracda.vxt") == nullptr, "with no folder the stock miss returns");
+
+    MapFolderItems::ResetForTesting();
+    fs::remove_all(root, ec);
+}
+
 } // namespace
 
 int main()
@@ -354,6 +436,7 @@ int main()
     TestUnreadableBytesStillTakeARecord();
     TestEngineNullOnAHitIsMirrored();
     TestOwnedOdfRead();
+    TestMapFolderItemsServeOnlyIndexGaps();
 
     OdfItemHookTest::ResetCache();
     if (OpenShimTest::FailureCount() == 0)
