@@ -11,13 +11,15 @@
 
 namespace BZROpenShim::PlanetEnvironment
 {
-    // Two-letter world prefixes Redux ships a terrain atlas for.
+    // Two-letter world prefixes Redux ships a terrain atlas for. Each one's
+    // env maps are mandatory Enhanced resources (render_profile_resources.cpp).
+    inline constexpr const char* kKnownWorldCodes[] = {
+        "mn", "ma", "ve", "io", "eu", "ti", "ga", "ac", "el",
+    };
+
     inline bool IsKnownWorldCode(const std::string& code)
     {
-        static const char* const kCodes[] = {
-            "mn", "ma", "ve", "io", "eu", "ti", "ga", "ac", "el",
-        };
-        for (const char* known : kCodes)
+        for (const char* known : kKnownWorldCodes)
             if (code == known)
                 return true;
         return false;
