@@ -169,12 +169,31 @@ Step 4 needs a terrain parity check as well.
 
 ## Prototype results
 
-See `Docs/images/redux_grizzly_shading/` for `bzr_enhanced_before_*` and
-`bzr_enhanced_after_*`, captured with the same mission, camera and Enhanced
-settings. The only change between them is the roughness mapping.
+Shots are in `Docs/images/redux_grizzly_shading/`. They come from the GOG
+install on stock `lcbmars.bzn` (Mars, sun time 0900, fog 120-250) with the
+Enhanced profile, captured by `reverse_engineering/capture_grizzly_reference.ps1`.
 
-Captures are pending. They will be added to this PR once the capture run
-finishes.
+- `bzr_enhanced_before_*.jpg` show the stock material. The Grizzly falls back to
+  stock `BaseHighPSSM_*` (finding 0).
+- `bzr_ose_before_*` / `bzr_ose_after_*` are the A/B pair. For these runs only,
+  CR's `avtank.material` and a trimmed `CR_BZBase.material` were overlaid into
+  `BZ_ASSETS\pc\materials`, so the Grizzly took the `en-high-pssm` pass
+  (`OSE_BaseENHighPSSMV2_vertex` / `OSE_BaseENHighPSSM_fragment`). The trim removed
+  the CR-only `CR_BaseIBL*` overrides and renamed `CR_Textured_*` to `Textured_*`.
+  The only difference between A and B is `legacy_shininess_to_roughness`. The
+  shader cache was set aside, and its fingerprint changed, so the shaders
+  recompiled. Every install file was restored and hash-verified afterwards.
+- `bzr_ose_ab_*_crop3x.png` show the tank at 3x, before on the left and after on
+  the right.
+
+![rear A/B](images/redux_grizzly_shading/bzr_ose_ab_rear_close_crop3x.png)
+
+Result: the hot white glint along the turret rim and top edges becomes a
+broader, softer sheen. In the `front_close` tank crop, pixels with luminance
+above 150 fell from 1688 to 650 while mean luminance barely moved (68.7 to
+68.5), so the energy is spread out rather than removed. This narrows the
+biggest single gap. The planet-tinted environment sheen BZCC shows (finding 2)
+is still missing.
 
 ## Follow-ups outside this change
 
