@@ -830,7 +830,8 @@ Piece CasingMesh(unsigned sides)
     // Unit-length shell along local +Z, centred on the origin: a rim and base
     // at z = -0.5, a straight body, a short shoulder and a neck to the mouth
     // at z = +0.5. Two submeshes so the brass and the darker rim, base and
-    // open mouth take separate materials.
+    // hollow mouth take separate materials. The UV atlas carries brushed
+    // brass, machined rims, soot and a recessed primer without extra passes.
     constexpr float kRim = 0.225f, kBody = 0.2f, kNeck = 0.165f;
     constexpr float kBase = -0.5f, kRimTop = -0.44f, kShoulder = 0.36f, kNeckStart = 0.42f, kMouth = 0.5f;
     constexpr float kPi = 3.14159265358979f;
@@ -856,29 +857,35 @@ Piece CasingMesh(unsigned sides)
     };
     // A band between two rings, outward facing. Normals tilt with the slope
     // so the shoulder shades as a cone.
-    auto band = [&](std::vector<Vertex> &out, float z0, float r0, float z1, float r1) {
+    auto band = [&](std::vector<Vertex> &out, float z0, float r0, float z1, float r1,
+                    bool inward = false, float detailV = 0.62f) {
         for (unsigned i = 0; i < sides; ++i)
         {
             const float u0 = static_cast<float>(i) / static_cast<float>(sides);
             const float u1 = static_cast<float>(i + 1) / static_cast<float>(sides);
             const V d0 = ring(i, 1.0f), d1 = ring(i + 1, 1.0f);
-            const V n0 = norm({d0[0] * (z1 - z0), d0[1] * (z1 - z0), r0 - r1});
-            const V n1 = norm({d1[0] * (z1 - z0), d1[1] * (z1 - z0), r0 - r1});
-            const Vertex a0{at(ring(i, r0), z0), n0, u0, z0 + 0.5f}, a1{at(ring(i + 1, r0), z0), n1, u1, z0 + 0.5f};
-            const Vertex b0{at(ring(i, r1), z1), n0, u0, z1 + 0.5f}, b1{at(ring(i + 1, r1), z1), n1, u1, z1 + 0.5f};
-            tri(out, a0, a1, b1);
-            tri(out, a0, b1, b0);
+            const float sign = inward ? -1.0f : 1.0f;
+            const V n0 = norm({sign * d0[0] * (z1 - z0), sign * d0[1] * (z1 - z0), sign * (r0 - r1)});
+            const V n1 = norm({sign * d1[0] * (z1 - z0), sign * d1[1] * (z1 - z0), sign * (r0 - r1)});
+            const float v0 = &out == &brass ? 0.02f + 0.46f * (z0 + 0.5f) : detailV;
+            const float v1 = &out == &brass ? 0.02f + 0.46f * (z1 + 0.5f) : detailV;
+            const Vertex a0{at(ring(i, r0), z0), n0, u0, v0}, a1{at(ring(i + 1, r0), z0), n1, u1, v0};
+            const Vertex b0{at(ring(i, r1), z1), n0, u0, v1}, b1{at(ring(i + 1, r1), z1), n1, u1, v1};
+            if (inward) { tri(out, a0, b1, a1); tri(out, a0, b0, b1); }
+            else { tri(out, a0, a1, b1); tri(out, a0, b1, b0); }
         }
     };
     // A flat ring between two radii at one z, facing +Z or -Z.
-    auto annulus = [&](std::vector<Vertex> &out, float z, float inner, float outer, bool up) {
+    auto annulus = [&](std::vector<Vertex> &out, float z, float inner, float outer, bool up,
+                       float detailV = 0.62f) {
         const V n{0, 0, up ? 1.0f : -1.0f};
         for (unsigned i = 0; i < sides; ++i)
         {
             const V in0 = at(ring(i, inner), z), in1 = at(ring(i + 1, inner), z);
             const V out0 = at(ring(i, outer), z), out1 = at(ring(i + 1, outer), z);
-            const Vertex vi0{in0, n, in0[0] + 0.5f, in0[1] + 0.5f}, vi1{in1, n, in1[0] + 0.5f, in1[1] + 0.5f};
-            const Vertex vo0{out0, n, out0[0] + 0.5f, out0[1] + 0.5f}, vo1{out1, n, out1[0] + 0.5f, out1[1] + 0.5f};
+            const auto uv = [&](V p) { return Vertex{p, n, 0.5f + p[0] * 0.47f / outer,
+                detailV + p[1] * 0.02f / outer}; };
+            const Vertex vi0 = uv(in0), vi1 = uv(in1), vo0 = uv(out0), vo1 = uv(out1);
             // A disc (inner radius 0) is a fan: its second triangle would
             // be degenerate.
             if (up)
@@ -900,8 +907,14 @@ Piece CasingMesh(unsigned sides)
     band(brass, kNeckStart, kNeck, kMouth, kNeck);
     band(rim, kBase, kRim, kRimTop, kRim);
     annulus(rim, kRimTop, kBody, kRim, true);
-    annulus(rim, kBase, 0.0f, kRim, false);
-    annulus(rim, kMouth, 0.0f, kNeck, true);
+    constexpr float kPrimer = 0.065f, kPrimerInset = kBase + 0.012f;
+    annulus(rim, kBase, kPrimer, kRim, false);
+    band(rim, kBase, kPrimer, kPrimerInset, kPrimer, true, 0.76f);
+    annulus(rim, kPrimerInset, 0.0f, kPrimer, false, 0.90f);
+    constexpr float kInside = kNeck * 0.82f, kCupFloor = 0.38f;
+    annulus(rim, kMouth, kInside, kNeck, true);
+    band(rim, kCupFloor, kInside, kMouth, kInside, true, 0.76f);
+    annulus(rim, kCupFloor, 0.0f, kInside, true, 0.76f);
 
     V lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
     float radius = 0;

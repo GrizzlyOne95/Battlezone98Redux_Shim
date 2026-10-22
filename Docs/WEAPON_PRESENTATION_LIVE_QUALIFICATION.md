@@ -139,6 +139,14 @@ evidence privately before proposing a gate change.
 
 ## Tooling verification
 
+The 2026-10-21 casing coexistence follow-up uses one registry-owned firing
+bridge. The Win32 ABI harness covers casings only, flashes only, both and neither,
+including a null native factory result. See `SHELL_CASING_WEAPON_PRESENTATION.md`.
+These synthetic checks do not replace live qualification. Pending: enable both
+features, alternate minigun/AT/SP and plasma weapons, verify each accepted shot
+has one projectile/flash and the intended casing count, then exercise pause,
+save/load, weapon swaps, owner destruction and mission/scene transitions.
+
 Host tests use synthetic memory and mock Frida sessions; they require no game
 or private binary. Run both directly, or through CTest when Python and Node are
 available:

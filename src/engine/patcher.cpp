@@ -11,6 +11,7 @@
 #include "d3d_startup_hooks.h"
 #include "file_io_hooks.h"
 #include "bzr_hooks.h"
+#include "bzr_options_ui.h"
 #include "openshim_preset_migration.h"
 #include "shim_log.h"
 #include "sun_flash.h"
@@ -19,6 +20,8 @@
 #include "redux_compatibility.h"
 #include "p2p_reliable_send_fix.h"
 #include "shell_casing_config.h"
+#include "weapon_presentation_call_bridges.h"
+#include "weapon_presentation_native.h"
 #include "deferred_modable_rebuild.h"
 #include "gas_copy_pool.h"
 
@@ -426,7 +429,7 @@ namespace BZROpenShim
     static bool IsShellCasingPatchName(const char* name) { return name && strncmp(name, "Shell Casings ", 14) == 0; }
 
     // [General] ShellCasings (default OFF) arrives inverted through the env
-    // mapping; off means the two shot calls are never redirected.
+    // mapping. The shared shot sites also serve MuzzleFlash/MeshRecoil.
     static bool ShouldEnableShellCasings() {
         static int s_cached = -1;
         if (s_cached < 0)
@@ -567,7 +570,10 @@ namespace BZROpenShim
         if (!ShouldEnableDisableControlSmoothing()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsDisableControlSmoothingPatchName(p.name.c_str()); }), patches.end());
         }
-        if (!ShouldEnableShellCasings()) {
+        bool muzzleFlash = false, meshRecoil = false;
+        TryGetUserConfigBool("SinglePlayer", "MuzzleFlash", muzzleFlash);
+        TryGetUserConfigBool("SinglePlayer", "MeshRecoil", meshRecoil);
+        if (!ShouldEnableShellCasings() && !muzzleFlash && !meshRecoil) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsShellCasingPatchName(p.name.c_str()); }), patches.end());
         }
         if (!ShouldEnablePathBlockFaces()) {
@@ -1616,12 +1622,18 @@ namespace BZROpenShim
             const auto& p = patches[i];
             if (applied[i]) {
                 app++;
+                if (IsShellCasingPatchName(p.name.c_str()))
+                    WeaponPresentation::NativeBridges::RecordShotSite(
+                        p.name == "Shell Casings MachineGun Shot Call", p.address - 1);
                 if (p.name == "Sun Screen Flash Contribution Hook") SunFlash::SetPatchInstalled(true);
                 Log(L"[OK]   %hs wrote %u bytes to 0x%08X\n", p.name.c_str(), static_cast<unsigned>(p.payload.size()), p.address);
             } else {
                 Log(L"[SKIP] %hs address=0x%08X verified=%hs payload=%u\n", p.name.c_str(), p.address, p.verified ? "yes" : "no", static_cast<unsigned>(p.payload.size()));
             }
         }
+        // Shared firing sites must be committed before the ODF/presentation
+        // installer validates/adopts them; it never competes for these calls.
+        Hooks::InstallWeaponPresentationNativeIfRequested();
         Log(L"[DONE] Applied=%d of %u\n", app, static_cast<unsigned>(patches.size()));
         // A patch this build knows about that still sits at address 0 either had
         // no scripts/patches.json entry (a deploy where winmm.dll moved and the
