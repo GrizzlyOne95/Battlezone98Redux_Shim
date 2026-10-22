@@ -168,7 +168,8 @@ highlights. Cheap to add: one dot product per light.
    (finding 4). Ambient stays undecoded (finding 3). Also check that the
    Enhanced colour and normal samplers use 16x anisotropic filtering like BZCC,
    and that MSAA is on: BZCC renders FP16 at 8x MSAA with no post stack.
-5. Per-planet environment maps (finding 2.3).
+5. Per-planet environment maps (finding 2.3). Done for IBL materials; see
+   below.
 
 Steps 2 and 3 should each get a before/after capture with the recipe below.
 Step 4 needs a terrain parity check as well.
@@ -248,6 +249,86 @@ Left is prototype 1, right is prototype 2 (run D). Full frames are
 sRGB moves from (87, 66, 54) to (93, 68, 56) and saturation from 39.7 to 40.8.
 The sheen is additive but small. The clouds move between runs, so compare the
 tank only.
+
+## Per-planet environment maps
+
+Every Enhanced IBL material samples the same pair of neutral cubemaps,
+`openshim_ibl_neutral_{prefilter,irradiance}.dds`, so a Grizzly on Mars
+reflected a grey sky. This change adds one baked pair per world and swaps it
+in at runtime. This covers finding 2.3.
+
+**Bake.** `tools/ibl/bake_planet_env.py` writes
+`resources/renderer/enhanced/openshim_env_<code>_{prefilter,irradiance}.dds`
+for the nine worlds (mn ma ve io eu ti ga ac el); see `tools/ibl/README.md`.
+For each world it builds a 1024x512 linear equirect radiance map from the
+stock sky textures, cloud layers, fog colour and the terrain atlas mean for
+the lower hemisphere. It then runs the GGX prefilter and cosine irradiance
+from CR's `Generate-StaticIBL.py`. The cubes keep the neutral sizes and BC1
+format. The irradiance cube now carries a full mip chain. The 18 files total
+630 KB.
+
+![contact sheet](images/redux_grizzly_shading/planet_env_contact_sheet.jpg)
+
+**Runtime.** `src/patches/planet_environment.cpp` does the swap:
+
+- The file-open hooks record the world code when the engine opens
+  `<code>_detail_atlas.csv`.
+- A render-frame tick applies a pending change once the neutral cubes exist.
+  It retries every 30 frames, up to 40 attempts. The mission seam alone isn't
+  enough: a session that boots straight into a mission never sees a
+  RUN_STARTED transition, and the textures load after it.
+- The swap needs Enhanced on Direct3D 11. It finds each neutral texture
+  through Ogre's `TextureManager`, snapshots it once into a backup, and copies
+  the planet file in with `CopySubresourceRegion`.
+- A world with no file gets the neutral contents back from the backup.
+- Every D3D11 call is SEH-guarded and fails closed. One line per change is
+  logged under `planet-env`, for example
+  `[PLANET-ENV] world=ma prefilter=applied irradiance=applied`.
+
+Ogre loads both neutral cubes with its default of 6 mip levels. That means
+128..4 px for the prefilter, which drops the file's 2 px and 1 px levels. The
+32 px irradiance, which has 1 mip on disk, gets expanded to 6. So the copy
+uses the destination's mip count, and a planet file needs at least that many
+mips. The roughest prefilter levels are clamped the same way for the neutral
+map; this was already the case before this change.
+
+**Result.** The same `lcbmars` recipe was run with CR's `CR_BaseIBL` tank
+material active through a test overlay (CR's `CR_BZBase.material` and
+`CR_static_ibl.program` plus the OSE HLSL files in `pc/materials`). N is the
+neutral cube and P the Mars pair.
+
+![front N/P](images/redux_grizzly_shading/bzr_ibl_np_front_close_crop2x.png)
+![rear N/P](images/redux_grizzly_shading/bzr_ibl_np_rear_close_crop2x.png)
+
+On the right, the hull takes a rust tint from the Mars sky and ground, and
+faces turned away from the sun lose the grey lift.
+
+| Crop | Mean sRGB, N | Mean sRGB, P | Saturation, N → P |
+|---|---|---|---|
+| Front | (85, 62, 51) | (85, 59, 47) | 39.4 → 40.1 |
+| Rear | (86, 57, 43) | (77, 48, 34) | 46.8 → 44.1 |
+
+The rear crop includes the cliff behind the tank. Its brightness change is
+mostly a passing cloud shadow, not the swap: CR's terrain IBL programs didn't
+compile in this overlay, so terrain stays on the non-IBL path. Full frames
+are `bzr_ibl_{neutral,planet}_*.jpg`.
+
+Limits:
+
+- Only IBL materials see the maps. In this configuration that means CR's
+  `CR_Base*IBL` materials. The stock-material redirect (#574) drops the IBL
+  texture units, so stock materials keep the hemisphere fallback from
+  prototype 2, which is tinted by fog and ambient. If #574 keeps those units,
+  the stock path gets planet maps with no shader change.
+- Unchecked bake guesses:
+  - The azimuth convention.
+  - Io's Jupiter disc placement.
+  - Sky tile size taken as `SkyHeight`.
+  - Three cloud layers at 0.35.
+  - Achilles' map reads near-white and may be too bright.
+- Not yet captured: any world other than Mars, and a mid-session world
+  change. The restore and re-apply path is exercised only through the
+  dirty-generation logic.
 
 ## Follow-ups outside this change
 
