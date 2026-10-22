@@ -1781,14 +1781,16 @@ namespace BZROpenShim
             }
 
             // Changes for entities not yet converted (or skipped this frame)
-            // stay pending for a bounded number of frames, then expire.
+            // stay pending for a bounded number of frames, then expire. An
+            // entity that has left the arena is dropped at once: its address
+            // can be reused, and a stale change must not land on the new one.
             if (!variants.empty())
             {
                 uint32_t expired=0;
                 std::lock_guard<std::mutex> lock(g_variantMutex);
                 for (auto& entry:variants)
                 {
-                    if (variantsHandled.count(entry.first)) continue;
+                    if (variantsHandled.count(entry.first) || !live.count(entry.first)) continue;
                     for (auto& change:entry.second)
                     {
                         auto& slot=g_pendingVariants[entry.first];
