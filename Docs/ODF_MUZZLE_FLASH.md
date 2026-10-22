@@ -93,6 +93,26 @@ the authored shape remains in the mesh. See EXU's example README for setup and
 the shared-Toolbox mesh generator. Replace the ODF mesh selection rather than
 overwriting BZ2 artwork.
 
+### Per-craft flash offset
+
+A shared weapon ODF cannot know how deep each model's hardpoint sits inside its
+barrel. A craft ODF may override the flash placement per weapon slot:
+
+```ini
+[CraftClass]
+flashOffset1 = "0.20 0.10 2.41"
+```
+
+`flashOffset<N>` (N = 1..5, the weapon slot, same suffix as `recoilName<N>`)
+takes the same `"right up forward"` metres as `flashOffset`, each within
+-20..20. When present and valid for the slot that fires, it replaces the
+weapon's mesh-flash offset for that craft's shots. It also replaces the
+`muzzleRender` offset when that offset was defaulted from `flashOffset`; an
+explicit `muzzleRenderOffset` on the weapon wins. A malformed value logs one
+`flashOffset<N> rejected` warning and the weapon's own offset is used. Absent
+keys change nothing. The effective offset is shown in the `presentation bound`
+log line (`flashOffset=x,y,z`).
+
 The avtank/gatstab visual preset uses `flashOffset = "0.20 0.10 2.41"` to reach
 the stock model's visible barrel tip from its native weapon hardpoint. This
 is craft-specific and must be measured for another model. Existing stock

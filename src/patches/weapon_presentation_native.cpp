@@ -151,7 +151,12 @@ namespace BZROpenShim::Hooks
             }
         }
 
-        struct ClassFlash { uint64_t name = 0; WP::FlashConfig config; };
+        struct ClassFlash
+        {
+            uint64_t name = 0;
+            WP::FlashConfig config;
+            bool renderOffsetDefaulted = false; // render offset came from the mesh offset, not muzzleRenderOffset
+        };
         struct RecoilSlot
         {
             std::optional<WP::MeshId> node;
@@ -159,6 +164,7 @@ namespace BZROpenShim::Hooks
             WP::AnimationBinding animation;
             float distance = WP::kRecoilKick;
             float returnSpeed = WP::kRecoilReturnSpeed;
+            std::optional<WeaponConvergence::Vec3> flashOffset; // craft override, valid only
         };
         struct CraftConfig { uint64_t name = 0; std::array<RecoilSlot, 5> slots; };
         struct WeaponState
@@ -242,10 +248,15 @@ namespace BZROpenShim::Hooks
                 if (!Read(objectClass, kWeaponClassName, result.name) ||
                     !Read(objectClass, kClassParent, parent)) return;
                 WP::FlashConfig inherited;
+                bool inheritedRenderDefaulted = false;
                 auto found = g_FlashClasses.find(parent);
                 uint64_t parentName = 0;
                 if (found != g_FlashClasses.end() && Read(parent, kWeaponClassName, parentName) &&
-                    parentName == found->second.name) inherited = found->second.config;
+                    parentName == found->second.name)
+                {
+                    inherited = found->second.config;
+                    inheritedRenderDefaulted = found->second.renderOffsetDefaulted;
+                }
                 char name[kMaxValueBytes] = {}, duration[kMaxValueBytes] = {};
                 const auto ns = ReadValue(scope, Policy::Hash("WeaponClass"), Policy::Hash("flashName"), name);
                 const auto ds = ReadValue(scope, Policy::Hash("WeaponClass"), Policy::Hash("flashDuration"), duration);
@@ -304,6 +315,8 @@ namespace BZROpenShim::Hooks
                 }
                 result.config.muzzleRender = Policy::ResolveMuzzleRenderConfig(inherited.muzzleRender,
                     {renderFields[0], renderFields[1], renderFields[2]}, result.config.offset);
+                result.renderOffsetDefaulted = result.config.muzzleRender.Valid() && !renderFields[2] &&
+                    (!inherited.muzzleRender.Valid() || inheritedRenderDefaulted);
                 if (result.config.muzzleRender.Valid())
                 {
                     char odf[9] = {}; std::memcpy(odf, &result.name, 8);
@@ -350,6 +363,16 @@ namespace BZROpenShim::Hooks
                     {
                         const auto name = Policy::Name(value);
                         if (name) slot.node = WP::ParseMeshId(*name);
+                    }
+                    if (ReadValue(scope, Policy::Hash("CraftClass"), Policy::Hash("flashOffset" + suffix), value) !=
+                        ValueStatus::Missing)
+                    {
+                        slot.flashOffset = Policy::Offset(value);
+                        if (!slot.flashOffset)
+                        {
+                            char odf[9] = {}; std::memcpy(odf, &result.name, 8);
+                            LogShimA(LogLevel::Warn, "WEAPONFX", "ODF=%s flashOffset%s rejected; expected \"right up forward\" within -20..20; weapon flashOffset kept", odf, suffix.c_str());
+                        }
                     }
                     const auto animStatus = ReadValue(scope, Policy::Hash("CraftClass"),
                         Policy::Hash("recoilAnimation" + suffix), value);
@@ -429,9 +452,9 @@ namespace BZROpenShim::Hooks
             __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
         }
 
-        void BindRecoil(void* weapon, WeaponState& state, WP::BindRequest& request)
+        void BindRecoil(void* weapon, WeaponState& state, WP::BindRequest& request, bool renderOffsetDefaulted)
         {
-            if (!g_Settings.meshRecoil) return;
+            if (!g_Settings.meshRecoil && !g_Settings.muzzleFlash) return;
             void* owner = reinterpret_cast<void*>(state.owner.address);
             void* carrier = nullptr;
             void* objectClass = nullptr;
@@ -453,6 +476,9 @@ namespace BZROpenShim::Hooks
             }
             if (selected < 0) return;
             const auto& slot = config->second.slots[selected];
+            if (slot.flashOffset && g_Settings.muzzleFlash)
+                WP::NativePolicy::ApplyCraftFlashOffset(request.flash, renderOffsetDefaulted, *slot.flashOffset);
+            if (!g_Settings.meshRecoil) return;
             if (slot.animationPresent)
             {
                 auto animation = slot.animation;
@@ -521,19 +547,25 @@ namespace BZROpenShim::Hooks
                     request.weapon = { reinterpret_cast<uintptr_t>(weapon), state.lifetime };
                     void* objectClass = nullptr;
                     uint64_t name = 0;
+                    bool renderDefaulted = false;
                     if (Read(weapon, kWeaponClass, objectClass))
                     {
                         const auto config = g_FlashClasses.find(objectClass);
                         if (config != g_FlashClasses.end() && Read(objectClass, kWeaponClassName, name) &&
-                            name == config->second.name) request.flash = config->second.config;
+                            name == config->second.name)
+                        {
+                            request.flash = config->second.config;
+                            renderDefaulted = config->second.renderOffsetDefaulted;
+                        }
                     }
-                    BindRecoil(weapon, state, request);
+                    BindRecoil(weapon, state, request, renderDefaulted);
                     const auto token = runtime->Bind(request);
                     if (!token) return;
                     state.token = *token;
-                    LogShimA(LogLevel::Info, "WEAPONFX", "presentation bound handle=%u recoil=%s clip=%s flashMesh=%s",
+                    LogShimA(LogLevel::Info, "WEAPONFX", "presentation bound handle=%u recoil=%s clip=%s flashMesh=%s flashOffset=%.2f,%.2f,%.2f",
                         static_cast<unsigned>(state.owner.lifetime), request.animation ? "animation" : request.recoil ? "node" : "none",
-                        request.animation ? request.animation->clip.c_str() : "", request.flash.mesh.c_str());
+                        request.animation ? request.animation->clip.c_str() : "", request.flash.mesh.c_str(),
+                        request.flash.offset.x, request.flash.offset.y, request.flash.offset.z);
                 }
                 WP::Matrix current;
                 if (!CurrentWeaponPose(weapon, state, current) || state.root != ownerRoot)
