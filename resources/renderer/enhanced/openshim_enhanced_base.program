@@ -2604,6 +2604,8 @@ fragment_program OSE_BaseENHighNoShadow_fragmentHLSL4 hlsl
         param_named surfaceImpactWeights float4 0 0 0 0
         param_named surfaceMuzzle0 float4 0 0 0 0
         param_named surfaceMuzzle1 float4 0 0 0 0
+        param_named surfaceBarrel0 float4 0 0 0 0
+        param_named surfaceBarrel1 float4 0 0 0 0
     }
 }
 
@@ -2625,6 +2627,8 @@ fragment_program OSE_BaseENHighShadow_fragmentHLSL4 hlsl
         param_named surfaceImpactWeights float4 0 0 0 0
         param_named surfaceMuzzle0 float4 0 0 0 0
         param_named surfaceMuzzle1 float4 0 0 0 0
+        param_named surfaceBarrel0 float4 0 0 0 0
+        param_named surfaceBarrel1 float4 0 0 0 0
     }
 }
 
@@ -2646,6 +2650,8 @@ fragment_program OSE_BaseENHighPSSM_fragmentHLSL4 hlsl
         param_named surfaceImpactWeights float4 0 0 0 0
         param_named surfaceMuzzle0 float4 0 0 0 0
         param_named surfaceMuzzle1 float4 0 0 0 0
+        param_named surfaceBarrel0 float4 0 0 0 0
+        param_named surfaceBarrel1 float4 0 0 0 0
     }
 }
 
@@ -2991,6 +2997,8 @@ fragment_program OSE_BaseENMediumNoShadow_fragmentHLSL4 hlsl
         param_named surfaceImpactWeights float4 0 0 0 0
         param_named surfaceMuzzle0 float4 0 0 0 0
         param_named surfaceMuzzle1 float4 0 0 0 0
+        param_named surfaceBarrel0 float4 0 0 0 0
+        param_named surfaceBarrel1 float4 0 0 0 0
     }
 }
 
@@ -3012,6 +3020,8 @@ fragment_program OSE_BaseENMediumShadow_fragmentHLSL4 hlsl
         param_named surfaceImpactWeights float4 0 0 0 0
         param_named surfaceMuzzle0 float4 0 0 0 0
         param_named surfaceMuzzle1 float4 0 0 0 0
+        param_named surfaceBarrel0 float4 0 0 0 0
+        param_named surfaceBarrel1 float4 0 0 0 0
     }
 }
 
@@ -3033,6 +3043,8 @@ fragment_program OSE_BaseENMediumPSSM_fragmentHLSL4 hlsl
         param_named surfaceImpactWeights float4 0 0 0 0
         param_named surfaceMuzzle0 float4 0 0 0 0
         param_named surfaceMuzzle1 float4 0 0 0 0
+        param_named surfaceBarrel0 float4 0 0 0 0
+        param_named surfaceBarrel1 float4 0 0 0 0
     }
 }
 
@@ -3054,6 +3066,8 @@ fragment_program OSE_BaseENLowNoShadow_fragmentHLSL4 hlsl
         param_named surfaceImpactWeights float4 0 0 0 0
         param_named surfaceMuzzle0 float4 0 0 0 0
         param_named surfaceMuzzle1 float4 0 0 0 0
+        param_named surfaceBarrel0 float4 0 0 0 0
+        param_named surfaceBarrel1 float4 0 0 0 0
     }
 }
 
@@ -3075,6 +3089,8 @@ fragment_program OSE_BaseENLowShadow_fragmentHLSL4 hlsl
         param_named surfaceImpactWeights float4 0 0 0 0
         param_named surfaceMuzzle0 float4 0 0 0 0
         param_named surfaceMuzzle1 float4 0 0 0 0
+        param_named surfaceBarrel0 float4 0 0 0 0
+        param_named surfaceBarrel1 float4 0 0 0 0
     }
 }
 
@@ -3096,5 +3112,7 @@ fragment_program OSE_BaseENLowPSSM_fragmentHLSL4 hlsl
         param_named surfaceImpactWeights float4 0 0 0 0
         param_named surfaceMuzzle0 float4 0 0 0 0
         param_named surfaceMuzzle1 float4 0 0 0 0
+        param_named surfaceBarrel0 float4 0 0 0 0
+        param_named surfaceBarrel1 float4 0 0 0 0
     }
 }
