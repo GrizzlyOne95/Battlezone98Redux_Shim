@@ -69,8 +69,8 @@ soft, Fresnel-driven lobe.
 BZCC detail: alpha^2 = 2/(2^(specTex.a * matSpec.w) + 2). DXBC `exp` is base 2,
 so the CPU stores log2(specular power) and this is exactly the Walter mapping.
 For the Grizzly's specularPower 38.44 (about 5.26 in log2, at full spec alpha)
-that gives alpha ~0.22. The CPU-side encoding is still to be confirmed with a
-frame capture.
+that gives alpha ~0.22. A frame capture confirms the encoding: terrain
+SpecularPower 1024 is uploaded as `.w` = 10.0.
 
 Prototype fix: return `sqrt(alpha)` so the squared value in the distribution is
 the Walter alpha. Shininess 127 -> perceptual 0.354 (alpha 0.125); stock
@@ -108,19 +108,21 @@ Recommendation, in order of effort:
 3. Per-planet environment maps (bake from the skydome, or reuse BZCC's sphere
    maps where licensing allows), selected per world like BZCC.
 
-### 3. Ambient and light colours are not decoded under linear light
+### 3. Ambient and light colours: at parity (withdrawn after capture)
 
 Under `OSE_LINEAR_LIGHT`, the engine RGB constants (`sceneAmbient`,
-`lightDiffuse`, `lightSpecular`) are passed through unchanged while textures and
-fog are decoded. Gamma-authored ambient therefore reads too bright relative to
-the sun, which flattens sun/shadow contrast. This is the open question in
-`Campaign-Reimagined/Docs/DX11_COLOR_SPACE_AUDIT.md`.
+`lightDiffuse`, `lightSpecular`) are passed through unchanged, while textures
+and fog are decoded. A RenderDoc capture of BZCC shows it does exactly the
+same. Ambient, sun, light and material colours are uploaded raw as v/255, and
+only fog is decoded with pow 2.2 (see the
+[capture answers](bzcc_shader_reference/README.md#cpu-side-state-renderdoc-capture)).
+So no ambient decode or calibration is needed to match BZCC. This settles the
+open question in `Campaign-Reimagined/Docs/DX11_COLOR_SPACE_AUDIT.md` in favour
+of today's behaviour.
 
-A full sRGB decode overshoots: the decode's toe crushes dark ambient and shadows
-go black. Recommendation: calibrate a partial decode (for example `pow(c, 1.6)`)
-or a per-planet ambient scale against the BZCC shots, behind a define. BZCC also
-multiplies ambient by `(1 - EnvBRDF)`, which darkens ambient on grazing,
-reflective faces. Adopt that together with finding 2.
+The remaining ambient difference is that BZCC multiplies ambient by
+`(1 - EnvBRDF)`, which darkens ambient on grazing, reflective faces. Adopt that
+together with finding 2.
 
 ### 4. Diffuse is normalised ~14% darker
 
@@ -160,8 +162,10 @@ highlights. Cheap to add: one dot product per light.
 2. EnvBRDF and a tinted hemisphere fallback (finding 2.1), with ambient
    `(1 - EnvBRDF)` (finding 3, second half).
 3. Normal sharpening down, plus the terminator smoothstep (findings 5 and 6).
-4. Exposure pass: diffuse normalisation and calibrated ambient decode for
-   objects and terrain together (findings 3 and 4).
+4. Exposure pass: diffuse normalisation for objects and terrain together
+   (finding 4). Ambient stays undecoded (finding 3). Also check that the
+   Enhanced colour and normal samplers use 16x anisotropic filtering like BZCC,
+   and that MSAA is on: BZCC renders FP16 at 8x MSAA with no post stack.
 5. Per-planet environment maps (finding 2.3).
 
 Steps 2 and 3 should each get a before/after capture with the recipe below.

@@ -68,26 +68,105 @@ The table compares BZCC with `openshim_enhanced_base-sm4.hlsl` and
 | Terminator | smoothstep on geometric N·L | none | Add; cheap |
 | Normal maps | BC5, no sharpening, detail ×4 on terrain | DXT1, XY×1.85 sharpening, variance roughness | Reduce sharpening; BC5 re-encode is an asset task |
 | Environment | per-world sphere map + analytic EnvBRDF + env tint | none on stock path; CR IBL = neutral cubemap, 18% tint | Port EnvBRDF; per-planet env source; ambient·(1−EnvBRDF) |
-| Ambient / light colour space | Unknown CPU-side; see below | not decoded under linear light | Settle with RenderDoc first |
+| Ambient / light colour space | raw v/255, not decoded; fog pow 2.2 (captured) | not decoded under linear light | At parity; keep |
 | Shadows | 4 cascades, 4-tap, light 0, normal-offset bias | 3 cascades PSSM v2, PCF 4, floor 0.22 | Normal-offset bias is worth trying |
 | Cutout | derivative coverage remap + mip-aware widening | no shader-side discard or coverage (material state only) | Port (objects.md §5.7) |
 | Two-sided | flip N on back faces | no `SV_IsFrontFace` use | Port for cull-none materials only |
 | Water | screen-copy refraction, `exp2(−9.28·|N·V|)` Fresnel, CPU UV matrices | none comparable | Separate project |
 
-## Open CPU-side questions (need a frame capture)
+## CPU-side state (RenderDoc capture)
 
-These cannot be read from DXBC. They are queued for a RenderDoc capture of a
-BZCC frame with the Grizzly in view:
+These values can't be read from DXBC. They come from a RenderDoc 1.46 D3D11
+capture of stock `isdf01.bzn` (Pluto), taken 2026-10-22. The capture was one
+frame at 1268x513 windowed. Confidence tags are as above.
 
-1. **Light and ambient colours.** Are `g_LightAmbient` and light `m_Color`
-   uploaded linear, or raw 8-bit gamma? The ambient calibration in BZR
-   depends on this.
-2. **Environment colour.** `g_EnvironmentColor` values per world, and which
-   materials get the `c`/`o` variants.
-3. **Specular power.** Confirm `matSpec.w = log2(specularPower)`. For the
-   Grizzly's 38.44 that is ≈ 5.26, giving α ≈ 0.22.
-4. **Light encodings.** How directional and point lights fill `Atten` and
-   `Spot`.
-5. **Pipeline state.** Sampler states, the shadow comparison function and
-   the cutout blend state.
-6. **Water's screen copy.** What `t10` holds and when it is captured.
+### Constant buffers
+
+The names below come from the shader reflection.
+
+| Buffer | Contents |
+|---|---|
+| PS `psfloats` (128 B) | `FogColor`@0, `FogParams`@16, `MaterialDiffuse`@32, `MaterialSpecular`@48, `MaterialEmissive`@64, `LightAmbient`@80 (float3), `LightCount`@92, `TeamColor`@96, `EnvironmentColor`@112 |
+| PS `pslights` | 16 lights × 80 B: `Pos` f4 @0, `Dir` f3 @16, `Color` f3 @32, `Attenuation` f4 @48, `Spot` f3 @64 |
+| PS `psshadow` | cascade split points, inverse shadow-map sizes |
+| PS `psview` | `g_View`, `g_Proj` |
+| PS `pswater` | `g_WaterColor1..3`, `g_WaterUVOffset1/2` |
+| VS `StdBuffer` | `g_World`, `g_WorldView`, `g_WorldViewProj`, `g_BackActive`, `g_ClipPlane` |
+| VS `psshadow` / `vsterrain` | `g_ShadowWorldViewProj1..4` / `g_ActiveLayers` |
+
+### Answers
+
+1. **Light and ambient colours are uploaded raw: v/255, with no decode [H].**
+   - For isdf01, ambient (10,15,15)/255 is uploaded as (0.0392, 0.0588,
+     0.0588).
+   - The sun colour is exactly 50/255.
+   - Material diffuse 204/255 is 0.8, and specular 10/255 is 0.0392.
+   - **Fog is the one exception:** `g_FogColor` is pow(v/255, 2.2). For
+     example, 8/255 is uploaded as 0.00049.
+   - Textures are `*_SRGB` views. So BZCC lights linear textures with
+     gamma-authored light colours, exactly as OpenShim Enhanced does today.
+     **There is no colour-space gap to close here.**
+2. **`g_EnvironmentColor` is (1,1,1,0) on every object, terrain and water draw [H].**
+   The env tint is white, and with w=0 the chrome (`c`) blend is off. The sphere
+   map is t27: 1024², BC1_SRGB, 11 mips. On Pluto it is probably the
+   `.sky`-listed `pluto_environ` [M]. So the planet colour of the sheen comes
+   entirely from the map itself.
+3. **Specular power: `MaterialSpecular.w = log2(specularPower)` [H].** Terrain
+   uses w=10.0 for `.trn` SpecularPower 1024. Objects use w = 4.32, 5.0 and
+   6.64 (powers 20, 32 and 100). Water uses w ≈ 11.97 (power ≈ 4000).
+4. **Light encoding.**
+   - **Layout [H].** The directional sun is always slot 0, with `Pos.w=0`.
+     `Pos` holds the unit vector towards the sun and `Dir = −Pos`.
+     `Attenuation` is (1,0,0,—) and `Spot` is (1,0,0).
+   - **Point-light attenuation [H].** Point lights have `Pos.w=1`, and
+     `Attenuation` = (c0, c1, c2, range) = (1, 0, 0.006, 50).
+   - **Point-light colour [H].** Colours may exceed 1. A red (3,0,0) light
+     appeared in the frame.
+   - **Spot [L].** Every point light had `Spot` = (0.969, 0.540, 1.0). The
+     frame had no true spotlight, so this field's meaning is unconfirmed.
+5. **Pipeline state [H].**
+   - **Samplers.** The PS has two:
+     - s0 is used for colour, normal, spec and env. It is anisotropic 16×,
+       wrap, LOD bias 0.
+     - s7 is the shadow sampler: linear min/mag, point mip, comparison
+       `GreaterEqual`, border clamp.
+   - **Depth.** Reverse-Z (`GreaterEqual`).
+   - **Shadows.** Four cascades at 4096² (R32), with splits at
+     14.8 / 44.5 / 133.3 / 400. The shadow pass has no PS, no cull and zero
+     raster depth bias, so all bias is the VS normal offset.
+   - **Cutout.** Cutout draws never use alpha-to-coverage, so cutout is the
+     shader's discard and coverage remap.
+   - **Blend.** Water is premultiplied (One / InvSrcAlpha). Particles are
+     additive.
+   - **Formats.** The scene target is R16G16B16A16_FLOAT with 8× MSAA and
+     D32. The backbuffer is R8G8B8A8_SRGB.
+6. **Post-processing: none [H].**
+   1. Shadows, then opaque objects and terrain.
+   2. MSAA resolve into the water copy.
+   3. Water, particles and HUD, drawn into the same target.
+   4. A second resolve.
+   5. One plain fullscreen quad into the sRGB swapchain.
+
+   There is no bloom, no tone map and no AA pass beyond the MSAA. HDR values
+   above 1 clip at output.
+7. **Water `t10` is a resolved FP16 copy of the scene colour [H].** It is taken
+   after all opaque objects and terrain, and before the first water draw.
+
+Still open:
+
+- The `Spot` semantics.
+- Which BZCC materials ship the `c`/`o` variants.
+- Values on other planets. Only Pluto was captured.
+
+### What this changes for the port
+
+- **Ambient and lights.** Finding 3 in
+  [the gap doc](../REDUX_GRIZZLY_BZCC_SHADING_GAP.md) is withdrawn: do not
+  decode the engine colours. Only `ambient·(1−EnvBRDF)` remains to port.
+- **Env tint.** `g_EnvironmentColor` = 1 means the env term is
+  `envMap · EnvBRDF` with no extra tint. The per-planet map is the part that
+  matters.
+- **Samplers.** Match 16× anisotropic filtering on the Enhanced colour and
+  normal samplers, if they use less.
+- **Render target.** 8× MSAA on an FP16 target with no tone map is BZCC's
+  whole "post" stack. Matching MSAA matters more than adding post effects.
