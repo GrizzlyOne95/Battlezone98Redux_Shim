@@ -1,0 +1,21 @@
+{
+  "schema": "bzr-openshim-terrain-autopaint-v1",
+  "material": "MA_DETAIL_ATLAS",
+  "diffuseResource": "mars_atlas_d.dds",
+  "typeNames": {"0": "Sandy", "1": "Rocky", "2": "Geyser", "3": "Rock mountain", "4": "Base"},
+  "typeWeights": {
+    "0": [1, 0, 0, 0],
+    "1": [0, 1, 0, 0],
+    "2": [0, 0, 1, 0],
+    "3": [0, 0, 0, 1],
+    "4": [0, 0, 1, 0]
+  },
+  "transition": {"cap": 0.3, "diagonal": 0.5},
+  "blurMeters": 14,
+  "layers": [
+    {"name":"Dune sand", "repeatMeters":24, "archive":"MarsDustySandDunes_PbrGenericSpecular4kBitmap.zip", "member":"MarsDustySandDunes_albedo.png"},
+    {"name":"Rocky soil", "repeatMeters":16, "archive":"MarsSoilWithRockyDebris_PbrGenericSpecular4kBitmap.zip", "member":"MarsSoilWithRockyDebris_albedo.png"},
+    {"name":"Gravel", "repeatMeters":12, "archive":"MarsGravel_PbrGenericSpecular4kBitmap.zip", "member":"MarsGravel_albedo.png"},
+    {"name":"Cracked rock", "repeatMeters":24, "archive":"MarsCrackedRock_PbrGenericSpecular4kBitmap.zip", "member":"MarsCrackedRock_albedo.png"}
+  ]
+}

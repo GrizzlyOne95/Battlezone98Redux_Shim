@@ -391,9 +391,28 @@ bool InstallNativeTerrainHd()
                 throw std::runtime_error("native HD source atlas does not match pack: expected=" +
                     binding->diffuseResource + " actual=" + (name ? *name : "<unavailable>"));
         }
+        std::optional<TerrainHdMaterialBinding> selectedBinding;
         if (binding->paint.enabled)
         {
             const auto map = CaptureTerrainPaintMap();
+            if (!binding->paint.maps.empty())
+            {
+                // Multi-map pack: take the entry matching this mission and bind
+                // its control image as slice 4; no match declines the whole pack.
+                const auto* entry = TerrainPaint::SelectMap(binding->paint,
+                    map.at("terrainFingerprint").get<std::string>(),
+                    map.at("boundsMeters").get<std::array<float, 4>>());
+                if (!entry)
+                    throw std::runtime_error("paint pack has no map entry for this mission: actual=" + map.dump());
+                selectedBinding = *binding;
+                selectedBinding->tiles[4] = entry->control;
+                selectedBinding->paint.fingerprint = entry->fingerprint;
+                selectedBinding->paint.bounds = entry->bounds;
+                selectedBinding->paint.maps.clear();
+                binding = &*selectedBinding;
+                LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-PAINT] multi-map entry selected fingerprint=%s control=\"%s\"",
+                    entry->fingerprint.c_str(), entry->control.c_str());
+            }
             if (map.at("terrainFingerprint").get<std::string>() != binding->paint.fingerprint ||
                 map.at("boundsMeters").get<std::array<float, 4>>() != binding->paint.bounds)
                 throw std::runtime_error("paint terrain fingerprint/bounds do not match this mission: expected=" +
