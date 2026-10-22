@@ -523,7 +523,10 @@ static const float OSE_LOD_MIN_ROUGHNESS = 0.18;
 
 static const float OSE_PBR_DEFAULT_F0 = 0.04;
 static const float OSE_PBR_MAX_LEGACY_F0 = 0.45;
-static const float OSE_PBR_DIFFUSE_COMPENSATION = 2.70;
+// Legacy light intensities were authored for non-normalized Lambert, so the
+// diffuse lobe is scaled by pi (diffuse weight (1-F), as in BZCC) while still
+// applying Fresnel energy sharing. Keep this equal in the base and terrain shaders.
+static const float OSE_PBR_DIFFUSE_COMPENSATION = OSE_PI;
 static const float OSE_PBR_SPECULAR_COMPENSATION = 1.00;
 
 // Static IBL calibration. Keep synchronized with openshim_enhanced_base-sm4.hlsl, including the
@@ -746,8 +749,8 @@ void compute_enhanced_atmosphere(
 // Terrain-specific legacy calibration. Vehicle/building materials keep the
 // broader object ranges in openshim_enhanced_base-sm4.hlsl; terrain is predominantly dusty
 // rock/soil and should remain a rough dielectric rather than reading as wet.
-static const float OSE_TERRAIN_PBR_MIN_ROUGHNESS = 0.56;
-static const float OSE_TERRAIN_PBR_MAX_F0 = 0.12;
+static const float OSE_TERRAIN_PBR_MIN_ROUGHNESS = 0.70;
+static const float OSE_TERRAIN_PBR_MAX_F0 = 0.04;
 static const float OSE_TERRAIN_IBL_SPECULAR_SCALE = 0.72;
 
 // -----------------------------------------------------------------------------
@@ -811,12 +814,16 @@ float3 sharpen_terrain_normal(float3 normalTex)
 }
 
 
-
+// Same mapping as the object shader: Blinn-Phong exponent n maps to GGX
+// alpha = sqrt(2 / (n + 2)) (Walter et al.; BZCC uses exactly this), returned as
+// perceptual roughness sqrt(alpha) because distribution_ggx squares it. Stock and
+// CR terrain shininess (31-127) lands below OSE_TERRAIN_PBR_MIN_ROUGHNESS either
+// way, so terrain shading today is set by that floor, not by this curve.
 float legacy_shininess_to_roughness(float shininess)
 {
     float scaledShininess = max(shininess * OSE_PBR_SHININESS_SCALE, 0.0);
-    float roughness = sqrt(2.0 / (scaledShininess + 2.0));
-    return clamp(roughness, OSE_PBR_MIN_ROUGHNESS, OSE_PBR_MAX_ROUGHNESS);
+    float alpha = sqrt(2.0 / (scaledShininess + 2.0));
+    return clamp(sqrt(alpha), OSE_PBR_MIN_ROUGHNESS, OSE_PBR_MAX_ROUGHNESS);
 }
 
 float3 legacy_specular_to_f0(float3 specularTex)

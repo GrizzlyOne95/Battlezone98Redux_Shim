@@ -4,6 +4,7 @@
 // Build+run via scripts/run_render_profile_tests.ps1.
 
 #include "render_profile_resources.h"
+#include "planet_environment_core.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -270,6 +271,26 @@ void TestAbsentDirectoryFails()
     std::filesystem::remove_all(dir, g_errc);
 }
 
+void TestEveryWorldEnvMapIsMandatory()
+{
+    std::printf("TestEveryWorldEnvMapIsMandatory\n");
+    auto required = [](const std::string& name) {
+        for (size_t i = 0; i < RequiredEnhancedResourceCount(); ++i)
+            if (name == RequiredEnhancedResourceAt(i))
+                return true;
+        return false;
+    };
+    for (const char* code : BZROpenShim::PlanetEnvironment::kKnownWorldCodes)
+    {
+        for (const char* kind : { "irradiance", "prefilter" })
+        {
+            const std::string name =
+                std::string("openshim_env_") + code + "_" + kind + ".dds";
+            Check(required(name), name.c_str());
+        }
+    }
+}
+
 int main()
 {
     TestCompleteSetValidates();
@@ -282,6 +303,7 @@ int main()
     TestLeftoverScriptShadowingPayloadFails();
     TestLeftoverScriptInSubdirectoryFails();
     TestAbsentDirectoryFails();
+    TestEveryWorldEnvMapIsMandatory();
 
     if (OpenShimTest::FailureCount() != 0)
     {

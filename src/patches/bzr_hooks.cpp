@@ -21,6 +21,7 @@
 #include "patches.h"
 #include "patcher.h"
 #include "fog_wake_feature.h"
+#include "planet_environment.h"
 #include "gpu_instancing.h"
 #include "gpu_skinning.h"
 #include "mp_vehicle_preview_fix.h"
@@ -1778,6 +1779,7 @@ namespace BZROpenShim
         FogWakeRenderFrameTick();
         GpuSkinningRenderFrameTick();
         GpuInstancingRenderFrameTick();
+        PlanetEnvironmentRenderFrameTick();
     }
 
     void __fastcall ChunkEffectSimulateHook(void* thisPtr, void* /*edx*/, float dt)

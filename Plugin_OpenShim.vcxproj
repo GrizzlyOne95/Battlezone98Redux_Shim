@@ -309,6 +309,7 @@
     <ClCompile Include="src\patches\pilot_fp_animation_trace.cpp">
       <LanguageStandard>stdcpp14</LanguageStandard>
     </ClCompile>
+    <ClCompile Include="src\patches\planet_environment.cpp" />
     <ClCompile Include="src\patches\pond_class_label.cpp" />
     <ClCompile Include="src\patches\redux_compatibility.cpp" />
     <ClCompile Include="src\patches\render_effect_intent_exports.cpp" />
@@ -370,6 +371,8 @@
     <ClInclude Include="include\bzr_options_ui.h" />
     <ClInclude Include="include\cli_multiparam_parser.h" />
     <ClInclude Include="include\terrain_atlas_rect_repair.h" />
+    <ClInclude Include="include\planet_environment.h" />
+    <ClInclude Include="include\planet_environment_core.h" />
     <ClInclude Include="include\terrain_tile_blend.h" />
     <ClInclude Include="include\render_profile.h" />
     <ClInclude Include="include\dx11_legacy_material_compat.h" />

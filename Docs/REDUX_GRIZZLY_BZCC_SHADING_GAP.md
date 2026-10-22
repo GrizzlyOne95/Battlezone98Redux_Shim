@@ -1,6 +1,7 @@
 # Redux Grizzly: BZCC vs BZR Enhanced shading gap
 
-Status: investigation + one prototype change (roughness mapping). Date: 2026-10-22.
+Status: investigation plus prototypes (roughness mapping; environment term,
+terminator and sharpening; per-planet environment maps). Date: 2026-10-22.
 
 ## Question
 
@@ -158,15 +159,17 @@ highlights. Cheap to add: one dot product per light.
 
 ## Suggested order of work
 
-1. Roughness mapping (this branch).
+1. Roughness mapping (prototype 1).
 2. EnvBRDF and a tinted hemisphere fallback (finding 2.1), with ambient
-   `(1 - EnvBRDF)` (finding 3, second half).
+   `(1 - EnvBRDF)` (finding 3, second half). Done in prototype 2.
 3. Normal sharpening down, plus the terminator smoothstep (findings 5 and 6).
+   Done in prototype 2.
 4. Exposure pass: diffuse normalisation for objects and terrain together
    (finding 4). Ambient stays undecoded (finding 3). Also check that the
    Enhanced colour and normal samplers use 16x anisotropic filtering like BZCC,
-   and that MSAA is on: BZCC renders FP16 at 8x MSAA with no post stack.
-5. Per-planet environment maps (finding 2.3).
+   and that MSAA is on: BZCC renders FP16 at 8x MSAA with no post stack. Done; see "Exposure pass" below.
+5. Per-planet environment maps (finding 2.3). Done for IBL materials; see
+   below.
 
 Steps 2 and 3 should each get a before/after capture with the recipe below.
 Step 4 needs a terrain parity check as well.
@@ -199,8 +202,287 @@ above 150 fell from 1688 to 650 while mean luminance barely moved (68.7 to
 biggest single gap. The planet-tinted environment sheen BZCC shows (finding 2)
 is still missing.
 
+## Prototype 2: environment term, terminator and normal sharpening
+
+Branch `agent/enhanced-env-brdf`, stacked on the roughness fix. It covers
+suggested-order steps 2 and 3, all in `openshim_enhanced_base-sm4.hlsl`:
+
+- **EnvBRDF.** `bzcc_env_brdf` is BZCC's analytic EnvBRDF with the constants
+  from [objects.md](bzcc_shader_reference/objects.md). Gloss is
+  `log2(power)/10`, recovered from our roughness, the same way BZCC encodes
+  `matSpec.w`.
+- **Hemisphere fallback.** The non-IBL Enhanced path (every `OSE_BaseEN*`
+  specular variant) replaces `sceneAmbient * fresnel * (1 - rough) * 0.2` with
+  `hemisphere(worldReflection.y) * EnvBRDF`.
+  - Above the horizon the hemisphere uses the linear fog colour, which is
+    already per-world. Below, it uses ground, which is
+    `0.15 * sky + 0.5 * ambient`.
+  - The blend width depends on gloss, and the whole term is scaled by 0.5.
+  - It is not shadowed and not multiplied by albedo, as in BZCC.
+  - This needs `inverseViewMatrix` on the nine `OSE_BaseEN*` HLSL4 fragment
+    programs.
+- **Ambient.** Ambient becomes `ambient * (1 - EnvBRDF)`, as in BZCC.
+- **F0 for the environment.** The environment term uses `F0 * 0.45`.
+  `legacy_specular_to_f0` reaches 0.45, while BZCC's F0 (`matSpec *
+  specTex`) is at most 0.2 on the Redux Grizzly.
+- **Terminator.** On normal-mapped variants, each light (diffuse and specular)
+  is multiplied by `smoothstep(sat((Ngeom·L + 0.1) * 10))`.
+- **Normal sharpening.** The factor drops from 1.85 to 1.25.
+
+The CR IBL path (`IBL_ENABLED`) is unchanged here. Per-planet maps for it are
+described below. The sm3, GLSL and terrain shaders are unchanged.
+
+Tuning, on the same `lcbmars` A/B recipe as prototype 1, with the stock
+Grizzly on `en-high-pssm`:
+
+| Run | Hemisphere scale | Ground | Env F0 | Result |
+|---|---|---|---|---|
+| B | 1.0 | 0.30 sky + 0.5 ambient | ×1 | Milky orange haze over the whole hull |
+| C | 1.0 | as B | ×0.45 | Almost the same as B. The grazing EnvBRDF term, which doesn't depend on F0, dominates against the dark green albedo |
+| D (kept) | 0.5 | 0.15 sky + 0.5 ambient | ×0.45 | Hull stays green. Upward-facing panels pick up a faint Mars sheen, and faces past the sun darken |
+
+![front A/D](images/redux_grizzly_shading/bzr_env_ab_front_close_crop3x.png)
+![rear A/D](images/redux_grizzly_shading/bzr_env_ab_rear_close_crop3x.png)
+
+Left is prototype 1, right is prototype 2 (run D). Full frames are
+`bzr_env_before_*.jpg` and `bzr_env_after_*.jpg`. In the tank crop, mean
+sRGB moves from (87, 66, 54) to (93, 68, 56) and saturation from 39.7 to 40.8.
+The sheen is additive but small. The clouds move between runs, so compare the
+tank only.
+
+## Per-planet environment maps
+
+Every Enhanced IBL material samples the same pair of neutral cubemaps,
+`openshim_ibl_neutral_{prefilter,irradiance}.dds`, so a Grizzly on Mars
+reflected a grey sky. This change adds one baked pair per world and swaps it
+in at runtime. This covers finding 2.3.
+
+**Bake.** `tools/ibl/bake_planet_env.py` writes
+`resources/renderer/enhanced/openshim_env_<code>_{prefilter,irradiance}.dds`
+for the nine worlds (mn ma ve io eu ti ga ac el); see `tools/ibl/README.md`.
+For each world it builds a 1024x512 linear equirect radiance map from the
+stock sky textures, cloud layers, fog colour and the terrain atlas mean for
+the lower hemisphere. It then runs the GGX prefilter and cosine irradiance
+from CR's `Generate-StaticIBL.py`. The cubes keep the neutral sizes and BC1
+format. The irradiance cube now carries a full mip chain. The 18 files total
+630 KB.
+
+![contact sheet](images/redux_grizzly_shading/planet_env_contact_sheet.jpg)
+
+**Runtime.** `src/patches/planet_environment.cpp` does the swap:
+
+- The file-open hooks record the world code when the engine opens
+  `<code>_detail_atlas.csv`.
+- A render-frame tick applies a pending change once the neutral cubes exist.
+  It retries every 30 frames, up to 40 attempts. The mission seam alone isn't
+  enough: a session that boots straight into a mission never sees a
+  RUN_STARTED transition, and the textures load after it.
+- The swap needs Enhanced on Direct3D 11. It finds each neutral texture
+  through Ogre's `TextureManager`, snapshots it once into a backup, and copies
+  the planet file in with `CopySubresourceRegion`.
+- A world with no file gets the neutral contents back from the backup.
+- Every D3D11 call is SEH-guarded and fails closed. One line per change is
+  logged under `planet-env`, for example
+  `[PLANET-ENV] world=ma prefilter=applied irradiance=applied`.
+
+Ogre loads both neutral cubes with its default of 6 mip levels. That means
+128..4 px for the prefilter, which drops the file's 2 px and 1 px levels. The
+32 px irradiance, which has 1 mip on disk, gets expanded to 6. So the copy
+uses the destination's mip count, and a planet file needs at least that many
+mips. The roughest prefilter levels are clamped the same way for the neutral
+map; this was already the case before this change.
+
+**Result.** The same `lcbmars` recipe was run with CR's `CR_BaseIBL` tank
+material active through a test overlay (CR's `CR_BZBase.material` and
+`CR_static_ibl.program` plus the OSE HLSL files in `pc/materials`). N is the
+neutral cube and P the Mars pair.
+
+![front N/P](images/redux_grizzly_shading/bzr_ibl_np_front_close_crop2x.png)
+![rear N/P](images/redux_grizzly_shading/bzr_ibl_np_rear_close_crop2x.png)
+
+On the right, the hull takes a rust tint from the Mars sky and ground, and
+faces turned away from the sun lose the grey lift.
+
+| Crop | Mean sRGB, N | Mean sRGB, P | Saturation, N → P |
+|---|---|---|---|
+| Front | (85, 62, 51) | (85, 59, 47) | 39.4 → 40.1 |
+| Rear | (86, 57, 43) | (77, 48, 34) | 46.8 → 44.1 |
+
+The rear crop includes the cliff behind the tank. Its brightness change is
+mostly a passing cloud shadow, not the swap: CR's terrain IBL programs didn't
+compile in this overlay, so terrain stays on the non-IBL path. Full frames
+are `bzr_ibl_{neutral,planet}_*.jpg`.
+
+### Other worlds
+
+The same recipe was run on `lcbio`, `lcbachil` and `lcbtitan`. Every run
+logged `prefilter=applied irradiance=applied` for its world.
+
+![Io, Achilles, Titan N/P](images/redux_grizzly_shading/bzr_ibl_np_worlds_crop2x.jpg)
+
+Rows from top: Io, Achilles, Titan. Neutral is on the left, the planet map on
+the right. Full frames are `bzr_ibl_np_<mission>_grid.jpg`.
+
+| World | Mean sRGB, N | Mean sRGB, P | Mean abs. difference |
+|---|---|---|---|
+| Io | (55, 33, 27) | (52, 30, 24) | 2.8 |
+| Achilles | (54, 57, 47) | (54, 57, 46) | 1.0 |
+| Titan | (66, 45, 29) | (64, 42, 24) | 3.5 |
+
+What the shots settled about the bake:
+
+- **Io.** The first bake guessed an 18° Jupiter disc at 40° elevation. In game,
+  `SkyType=1` stretches `jupiter.map` once over a sky plane centred on the
+  zenith. The banded disc then fills the sky down to about 20° elevation in
+  every direction, with black below. The bake now does the same
+  (`SKYTYPE1_HALF_EXTENT`). With the first bake the hull went darker than
+  neutral (difference 4.4); with this one it keeps more light on upward faces
+  (difference 2.8).
+- **Achilles.** It is not too bright. Its pale grey-green sky is close to the
+  neutral map, so the swap barely shows.
+- **Titan.** The orange sky warms the hull. In game, Saturn hangs about 15°
+  above the horizon. The bake leaves billboards out on worlds that have a
+  sky texture; at that size the effect on lighting is small.
+- **Azimuth convention.** Only billboards (Moon, Ganymede, Europa, Elysium)
+  depend on it, and it is still unverified.
+
+The change is a tint, not a relight. The CR IBL intensities (diffuse 0.20 to
+0.62, specular 0.25 to 0.82) keep the environment a minor term next to the
+sun and ambient.
+
+Limits:
+
+- Only IBL materials see the maps. In this configuration that means CR's
+  `CR_Base*IBL` materials. The stock-material redirect (#574) drops the IBL
+  texture units, so stock materials keep the hemisphere fallback from
+  prototype 2, which is tinted by fog and ambient. If #574 keeps those units,
+  the stock path gets planet maps with no shader change.
+- Moon, Venus, Europa, Ganymede and Elysium have not been captured.
+- A mid-session world change has not been tested. Restoring and re-applying
+  has only been exercised through the dirty-generation logic.
+
+## Exposure pass
+
+`OSE_PBR_DIFFUSE_COMPENSATION` is now `OSE_PI` in both
+`openshim_enhanced_base-sm4.hlsl` and `openshim_enhanced_terrain-sm4.hlsl`, so the
+diffuse weight is `(1 - F)` as in BZCC. Ambient is unchanged (finding 3).
+
+Measured on lcbmars and lcbtitan (Grizzly, close front and rear, linear light,
+pixels that changed between runs):
+
+| | 2.70 to pi |
+|---|---|
+| Grizzly | +3 to +5% (median per pixel +4 to +8%) |
+| Enhanced terrain | +9 to +10% |
+| Stock terrain | unchanged (pixel-identical) |
+
+The ceiling is +16% (pi / 2.70) on the direct sun term. The Grizzly gains less
+because ambient, environment and specular make up much of its lit colour. The
+ground gains nearly the full amount.
+
+Enhanced terrain is opt-in. By default (`enhanced-stock-base=on terrain=off` in
+openshim.log) stock objects get the Enhanced shader and terrain stays on the
+stock shader. Set `OPENSHIM_ENABLE_ENHANCED_STOCK_TERRAIN=1` to opt in. On the
+default path this change therefore brightens objects by about 4% against an
+unchanged ground. That is too small to make vehicles look like they float.
+
+![Stock terrain at 2.70; Enhanced terrain at 2.70; Enhanced terrain at pi](images/redux_grizzly_shading/bzr_exposure_pi_terrain.jpg)
+
+The capture shows a separate problem. With Enhanced terrain on, the Grizzly
+casts no shadow on the ground (rows 2 and 3), so it does look like it floats.
+The stock terrain shader receives the shadow (row 1). This has to be fixed
+before Enhanced terrain can be on by default. It is not caused by the diffuse
+change: the shadow is already missing at 2.70.
+
+These captures use the stock Mars atlas and heightmap. The painted HD Mars set
+(`openshim_mars_painted.json`) loads but is declined on lcbmars, because its
+terrain fingerprint belongs to another map.
+
+Filtering and MSAA:
+
+- Anisotropic filtering is at parity. At startup and when settings are applied,
+  the exe calls `MaterialManager::setDefaultTextureFiltering(TFO_ANISOTROPIC)`
+  and then `setDefaultAnisotropy(1 << (option - 1))`. Option 0 gives 1, which is
+  plain trilinear. No OpenShim material sets `filtering` or `max_anisotropy`, so
+  the Enhanced samplers follow the video option. 16x needs the top setting.
+- MSAA is at parity. The test install's `ogre.cfg` has `FSAA=8` for Direct3D11,
+  and the Ogre log confirms it. That matches BZCC's 8x.
+
+## Material inputs: same art, spec map now masks F0
+
+The BZCC addon's Grizzly (`ivgrzr00`) uses the same diffuse, specular and
+normal art as GOG's `avtank00`. Decoded top mips match (diffuse luminance
+correlation 0.9999, spec 0.9999, normal XY mean difference 0.005, same Y
+convention). Only the containers differ: BZCC stores colour maps as BC1 sRGB
+and normals as BC5; GOG uses DXT1 throughout. So the gap is in how each
+pipeline reads those maps, not in the maps.
+
+The Grizzly spec map has no alpha and its peak is 0.008/0.16/0.37 at
+p10/p50/p90. BZCC's F0 is `0.2 * specTex`, so dark texels (grime, seams,
+cavities) barely reflect: F0 0.002/0.032/0.072. Ours had a 0.04 floor:
+0.040/0.045/0.074. Every crevice reflected like clean paint.
+
+`legacy_specular_to_f0` now scales its result by
+`saturate(peak / OSE_PBR_SPEC_MASK_FULL)`, with `OSE_PBR_SPEC_MASK_FULL` set to
+0.20. That keeps the bright panels as before and keeps 80% of F0 on the
+median texel. Dark texels lose their reflection, which is what the spec map
+already meant in Classic Redux (`specTex * matSpec`). The mask feeds direct
+specular, the EnvBRDF fallback and IBL alike, because they all take
+`surfaceF0`. Materials without a spec map keep F0 0.04.
+
+![lcbmars front close: top before, bottom with the spec mask](images/redux_grizzly_shading/spec_mask_front_close.jpg)
+
+On lcbmars (sun behind the camera, per-planet IBL on) the change is small. On
+the hull, the darkest pixels drop about 12% (rear close, value 10 -> 8.8),
+mid-tones move less than 1%, and the bright panels do not move. Grime and seams
+read a little deeper, mostly where the environment reflection was lifting them.
+Expect more effect where the sun's highlight crosses grimy areas; a
+sun-facing view was not captured.
+
+Not changed:
+
+- Roughness. The addon bakes specularPower 38.44, giving roughness 0.47, while
+  the stock material says shininess 127, giving 0.38. The addon's value is its
+  author's retune, not a pipeline difference, so the stock shininess stays
+  authoritative.
+- Diffuse. BZCC's material diffuse is 0.8 against our 1.0. With our
+  diffuse normalisation (finding 4, exposure pass), the net hull albedo is
+  already within a few percent.
+- The sRGB question. If BZCC samples its BC1 sRGB spec map as sRGB, its F0
+  drops to about 0.004 at the median, nearly no specular at all. The raw-byte
+  reading is the one used above.
+
 ## Follow-ups outside this change
 
-- Apply the same mapping to CR's `CR_*` shader fork to restore parity.
-- Decide whether terrain should adopt the same mapping. Terrain shininess values
-  were tuned against the old curve.
+- CR's `CR_*` shader fork: no longer applies. CR has no base or terrain shader
+  of its own any more; `CR_BZBase`/`CR_BZTerrainBase` and `CR_static_ibl.program`
+  compile OpenShim's `openshim_enhanced_*-sm4.hlsl`, so CR already gets every
+  change here.
+- Terrain mapping: done; the terrain shader now uses the same Walter mapping.
+  It changes no pixel today. Stock atlases use shininess 63 (one uses 127) and
+  CR's terrain materials 31-127. Under either curve those map below
+  `OSE_TERRAIN_PBR_MIN_ROUGHNESS` (0.56; the new curve gives 0.35-0.49), so
+  terrain specular is set by that floor. The change keeps the two shaders
+  consistent if the floor is ever lowered.
+- Terrain gloss: lowered. BZCC stock terrain was measured from its 77 `.trn`
+  files and 109 terrain specular maps (`G = specTex.a * log2(SpecularPower)`,
+  per texel). Its median perceptual roughness is 0.78 (p10 0.45, p90 0.88).
+  Its F0 is about 0.001-0.02, because 55 of the 70 `.trn` files with specular
+  keys use SpecularColor 10/255 with power 1024 (a RenderDoc terrain draw
+  confirms `g_MaterialSpecular` = 0.039, w 10). Our terrain sat at roughness
+  0.56 with F0 about 0.12 (the stock `*_ATLAS_S.dds` maps are flat 0.51 grey
+  with alpha 1). That is far shinier than BZCC. `OSE_TERRAIN_PBR_MIN_ROUGHNESS`
+  is now 0.70 and `OSE_TERRAIN_PBR_MAX_F0` is 0.04, the standard dielectric
+  value for rock and inside BZCC's range.
+
+  ![lcbmars terrain: now 0.56/F0 0.12, 0.70/F0 0.04, 0.78/F0 0.02](images/redux_grizzly_shading/terrain_gloss_bzcc.jpg)
+
+  On lcbmars the effect is small with the sun behind the camera. The near
+  ground is about 1.5% brighter, because less light goes into the specular
+  term, and texture contrast rises slightly (std 15.1 -> 15.5). The sky
+  differences in the shots are cloud animation. A camera facing into the sun
+  was not captured.
+
+  Not ported: BZCC's per-texel gloss from the spec-map alpha. Our atlases carry
+  no gloss channel, so this would need authored or derived maps. With F0
+  capped at 0.04, terrain spec maps now only tint the highlight.
