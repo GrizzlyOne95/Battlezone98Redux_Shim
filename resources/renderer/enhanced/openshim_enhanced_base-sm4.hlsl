@@ -334,9 +334,14 @@ float3 linear_to_srgb(float3 c)
 #endif
 
 #if defined(ENHANCED_MODE)
+// Close-range normal-map boost. The legacy DXT1 normals carry block noise, so
+// a strong boost sharpens the artefacts as much as the detail (BZCC applies
+// none to its BC5 normals); 1.25 keeps some bite without the speckle.
+static const float OSE_NORMAL_SHARPEN = 1.25;
+
 float3 sharpen_normal_map(float3 normalTex)
 {
-    float2 sharpenedXY = normalTex.xy * 1.85;
+    float2 sharpenedXY = normalTex.xy * OSE_NORMAL_SHARPEN;
     float sharpenedZ = max(normalTex.z, 0.20);
     return safe_normalize(float3(sharpenedXY, sharpenedZ));
 }
@@ -718,6 +723,41 @@ float3 fresnel_schlick_roughness(float cosTheta, float3 F0, float roughness)
     return F0 + (grazing - F0) * m5;
 }
 
+// BZCC's analytic environment BRDF, with its constants unchanged
+// (Docs/bzcc_shader_reference/objects.md 5.6). gloss = log2(Blinn-Phong power) / 10.
+float3 bzcc_env_brdf(float3 F0, float gloss, float NdotV)
+{
+    float a = (25.0 / 24.0) * gloss * min(exp2(-9.28 * NdotV), 0.475)
+            + (7.0 / 384.0) * gloss - (1.0 / 64.0);
+    float b = 0.75 + 0.25 * gloss - a;
+    return saturate(F0 * b + a);
+}
+
+// Inverse of legacy_shininess_to_roughness: alpha = r^2 and power = 2 / alpha^2 - 2.
+float roughness_to_env_gloss(float roughness)
+{
+    float alpha = max(roughness * roughness, 1e-3);
+    float power = max(2.0 / (alpha * alpha) - 2.0, 1.0);
+    return saturate(log2(power) * 0.1);
+}
+
+// Without an environment map, reflect a sky/ground hemisphere: the linear
+// mission fog colour above the horizon, and a dim ground below it. Rough
+// surfaces get a wider transition. BZCC also fades downward reflections
+// towards its map's average colour, which the ground term stands in for.
+static const float OSE_ENV_HEMISPHERE_INTENSITY = 0.5;
+// legacy_specular_to_f0 reaches 0.45; BZCC's F0 is matSpec * specTex, which is
+// at most 0.2 on the Redux Grizzly. Scale F0 for the environment term only.
+static const float OSE_ENV_F0_SCALE = 0.45;
+
+float3 hemisphere_environment(float worldReflectionY, float3 skyLinear, float3 sceneAmbient, float gloss)
+{
+    float3 ground = skyLinear * 0.15 + sceneAmbient * 0.50;
+    float width = lerp(0.60, 0.12, gloss);
+    float t = smoothstep(-width, width * 0.5, worldReflectionY);
+    return lerp(ground, skyLinear, t) * OSE_ENV_HEMISPHERE_INTENSITY;
+}
+
 float3 ibl_scene_tint(float3 sceneAmbient, float3 fogColour)
 {
     // Static maps cannot switch a global object material per mission without an
@@ -977,6 +1017,9 @@ void base_fragment(
     uniform Texture2D brdfLut : register(t6),
     uniform SamplerState brdfLutSam : register(s6),
 #endif
+    uniform float4x4 inverseViewMatrix,
+#elif defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
+    // World-up for the hemisphere environment fallback.
     uniform float4x4 inverseViewMatrix,
 #endif
 
@@ -1272,6 +1315,15 @@ void base_fragment(
         specularAttenuation *= shadow;
 #endif
 
+#if defined(ENHANCED_MODE) && defined(NORMALMAP_ENABLED)
+        // BZCC's geometric terminator: a normal-mapped texel cannot be lit
+        // through a face whose geometric normal points away from the light.
+        float terminator = saturate((dot(safe_normalize(vViewNormal), pixelToLight) + 0.1) * 10.0);
+        terminator *= terminator * (3.0 - 2.0 * terminator);
+        attenuation *= terminator;
+        specularAttenuation *= terminator;
+#endif
+
 #if defined(ENHANCED_MODE) && (defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED))
         float3 diffuseWeight;
         float3 specularBRDF;
@@ -1386,8 +1438,20 @@ void base_fragment(
     // Enhanced delegate is selected). This preserves the previous visual floor.
     float NdotVForFill = saturate(dot(viewNormal, eyeDir));
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
-    float3 grazingFresnel = fresnel_schlick(NdotVForFill, surfaceF0);
-    lightResult.xyz += sceneAmbient.xyz * grazingFresnel * (1.0 - surfaceRoughness) * 0.20;
+    // BZCC's environment term with a hemisphere standing in for the sky map.
+    // As in BZCC, the reflection is not shadowed or multiplied by albedo, and
+    // ambient is reduced to ambient * (1 - envBRDF). lightResult started at
+    // sceneAmbient, so subtracting sceneAmbient * envBRDF achieves that.
+    float envGloss = roughness_to_env_gloss(surfaceRoughness);
+    float3 envBRDF = bzcc_env_brdf(surfaceF0 * OSE_ENV_F0_SCALE, envGloss, NdotVForFill);
+    float3 fillReflection = mul(inverseViewMatrix, float4(reflect(-eyeDir, viewNormal), 0.0)).xyz;
+    float3 skyLinear = saturate(fogColour.xyz);
+#if OSE_LINEAR_LIGHT_ACTIVE
+    skyLinear = srgb_to_linear(skyLinear);
+#endif
+    lightResult.xyz -= sceneAmbient.xyz * envBRDF;
+    specularResult.xyz += hemisphere_environment(
+        safe_normalize(fillReflection).y, skyLinear, sceneAmbient.xyz, envGloss) * envBRDF;
 #if OSE_ENHANCED_LOD_TIER == 0
     specularResult.xyz += sceneAmbient.xyz * reactiveWater.w *
         (0.08 + reactiveWater.y * 0.80 + reactiveWater.z * 0.65);

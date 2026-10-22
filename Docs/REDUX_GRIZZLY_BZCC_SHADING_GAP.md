@@ -1,6 +1,7 @@
 # Redux Grizzly: BZCC vs BZR Enhanced shading gap
 
-Status: investigation + one prototype change (roughness mapping). Date: 2026-10-22.
+Status: investigation plus prototypes (roughness mapping; environment term,
+terminator and sharpening; per-planet environment maps). Date: 2026-10-22.
 
 ## Question
 
@@ -158,10 +159,11 @@ highlights. Cheap to add: one dot product per light.
 
 ## Suggested order of work
 
-1. Roughness mapping (this branch).
+1. Roughness mapping (prototype 1).
 2. EnvBRDF and a tinted hemisphere fallback (finding 2.1), with ambient
-   `(1 - EnvBRDF)` (finding 3, second half).
+   `(1 - EnvBRDF)` (finding 3, second half). Done in prototype 2.
 3. Normal sharpening down, plus the terminator smoothstep (findings 5 and 6).
+   Done in prototype 2.
 4. Exposure pass: diffuse normalisation for objects and terrain together
    (finding 4). Ambient stays undecoded (finding 3). Also check that the
    Enhanced colour and normal samplers use 16x anisotropic filtering like BZCC,
@@ -198,6 +200,54 @@ above 150 fell from 1688 to 650 while mean luminance barely moved (68.7 to
 68.5), so the energy is spread out rather than removed. This narrows the
 biggest single gap. The planet-tinted environment sheen BZCC shows (finding 2)
 is still missing.
+
+## Prototype 2: environment term, terminator and normal sharpening
+
+Branch `agent/enhanced-env-brdf`, stacked on the roughness fix. It covers
+suggested-order steps 2 and 3, all in `openshim_enhanced_base-sm4.hlsl`:
+
+- **EnvBRDF.** `bzcc_env_brdf` is BZCC's analytic EnvBRDF with the constants
+  from [objects.md](bzcc_shader_reference/objects.md). Gloss is
+  `log2(power)/10`, recovered from our roughness, the same way BZCC encodes
+  `matSpec.w`.
+- **Hemisphere fallback.** The non-IBL Enhanced path (every `OSE_BaseEN*`
+  specular variant) replaces `sceneAmbient * fresnel * (1 - rough) * 0.2` with
+  `hemisphere(worldReflection.y) * EnvBRDF`.
+  - Above the horizon the hemisphere uses the linear fog colour, which is
+    already per-world. Below, it uses ground, which is
+    `0.15 * sky + 0.5 * ambient`.
+  - The blend width depends on gloss, and the whole term is scaled by 0.5.
+  - It is not shadowed and not multiplied by albedo, as in BZCC.
+  - This needs `inverseViewMatrix` on the nine `OSE_BaseEN*` HLSL4 fragment
+    programs.
+- **Ambient.** Ambient becomes `ambient * (1 - EnvBRDF)`, as in BZCC.
+- **F0 for the environment.** The environment term uses `F0 * 0.45`.
+  `legacy_specular_to_f0` reaches 0.45, while BZCC's F0 (`matSpec *
+  specTex`) is at most 0.2 on the Redux Grizzly.
+- **Terminator.** On normal-mapped variants, each light (diffuse and specular)
+  is multiplied by `smoothstep(sat((Ngeom·L + 0.1) * 10))`.
+- **Normal sharpening.** The factor drops from 1.85 to 1.25.
+
+The CR IBL path (`IBL_ENABLED`) is unchanged here. Per-planet maps for it are
+described below. The sm3, GLSL and terrain shaders are unchanged.
+
+Tuning, on the same `lcbmars` A/B recipe as prototype 1, with the stock
+Grizzly on `en-high-pssm`:
+
+| Run | Hemisphere scale | Ground | Env F0 | Result |
+|---|---|---|---|---|
+| B | 1.0 | 0.30 sky + 0.5 ambient | ×1 | Milky orange haze over the whole hull |
+| C | 1.0 | as B | ×0.45 | Almost the same as B. The grazing EnvBRDF term, which doesn't depend on F0, dominates against the dark green albedo |
+| D (kept) | 0.5 | 0.15 sky + 0.5 ambient | ×0.45 | Hull stays green. Upward-facing panels pick up a faint Mars sheen, and faces past the sun darken |
+
+![front A/D](images/redux_grizzly_shading/bzr_env_ab_front_close_crop3x.png)
+![rear A/D](images/redux_grizzly_shading/bzr_env_ab_rear_close_crop3x.png)
+
+Left is prototype 1, right is prototype 2 (run D). Full frames are
+`bzr_env_before_*.jpg` and `bzr_env_after_*.jpg`. In the tank crop, mean
+sRGB moves from (87, 66, 54) to (93, 68, 56) and saturation from 39.7 to 40.8.
+The sheen is additive but small. The clouds move between runs, so compare the
+tank only.
 
 ## Follow-ups outside this change
 
