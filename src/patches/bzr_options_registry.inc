@@ -522,7 +522,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "AI Multi-Producer", "Fixes", "AiMultiProducerMakers", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
-      "A built class gets every producer that can make it, not just the first one found." },
+      "A built class gets every producer that can make it, not just the first one found. "
+      "Single player only." },
     { "Neutral Attack Orders", "Gameplay", "AllowNeutralAttackOrders", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
