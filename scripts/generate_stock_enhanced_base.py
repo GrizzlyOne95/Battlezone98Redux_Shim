@@ -184,6 +184,9 @@ def generate(target, stock_dir, cr_dir, programs):
     for name in sorted(used_passes):
         s, e = find_block(cr, "abstract pass " + name)
         block = re.sub(r"//[^\n]*\n", "", cr[s:e])
+        # The OSE PSSM v2 shaders compare depth by hand through an ordinary
+        # SamplerState, so CR's hardware-comparison sampler state is dropped.
+        block = re.sub(r"^[ \t]*compare_(?:test|func)\b[^\n]*\n", "", block, flags=re.M)
         passes.append(pass_re.sub(target["pass_to"] + r"\1", block, count=1))
 
     out = stock.rstrip("\n") + "\n"

@@ -173,8 +173,10 @@ $terrainSource = Get-Content $terrainShader -Raw
 foreach ($source in @($baseSource, $terrainSource)) {
     Assert-True ($source -match '#define\s+OSE_ENHANCED_PSSM_V2\s+0') 'PSSM v2 does not default off.'
     Assert-True ($source -match 'defined\(ENHANCED_MODE\)[\s\S]{0,80}defined\(SHADOWRECEIVER\)') 'PSSM v2 activation is not gated by Enhanced + shadow receiver.'
-    Assert-True ($source -match 'SamplerComparisonState') 'PSSM v2 comparison sampler declaration is missing.'
-    Assert-True ([regex]::Matches($source, 'SampleCmpLevelZero').Count -eq 4) 'PSSM v2 must contain exactly four comparison taps in each shader source.'
+    # Hardware comparison samplers returned lit everywhere through these passes
+    # (Enhanced receivers lost every shadow), so v2 compares by hand.
+    Assert-True ($source -notmatch 'SamplerComparisonState|SampleCmpLevelZero\(') 'PSSM v2 must not use hardware comparison sampling.'
+    Assert-True ([regex]::Matches($source, 'PCF_CompareBilinear\(map,').Count -eq 4) 'PSSM v2 must contain exactly four bilinear comparison taps in each shader source.'
 }
 
 # The SM3 path is the DX9 backend and must stay untouched by any of this: a
@@ -225,8 +227,8 @@ if ($FxcPath -and (Test-Path $FxcPath)) {
         $branches = [regex]::Matches($assembly, '(?m)^\s*if_(?:nz|z)\s').Count
         $costRows += [pscustomobject]@{ Variant=$case.Name; Slots=$slots; Sample=$regularSamples; SampleCmp=$comparisonSamples; Branches=$branches }
         if ($case.Name -like '*-ps-v2' -or $case.Name -like '*-ibl-ps-v2') {
-            Assert-True ($assembly -match 'sampler_c') "$($case.Name) did not compile comparison samplers."
-            Assert-True ($comparisonSamples -gt 0) "$($case.Name) emitted no sample_c_lz instructions."
+            Assert-True ($assembly -notmatch 'sampler_c') "$($case.Name) compiled comparison samplers."
+            Assert-True ($comparisonSamples -eq 0) "$($case.Name) emitted sample_c_lz instructions."
         }
     }
 }

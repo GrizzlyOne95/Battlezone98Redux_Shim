@@ -198,9 +198,34 @@ float shadow_depth_bias(float NdotL)
 }
 
 #if OSE_ENHANCED_PSSM_V2_ACTIVE
+// One bilinear-weighted depth comparison, done by hand: the four texels around
+// uv are compared (lit when ref <= stored, as in the legacy filter) and the
+// results are blended. The shadow maps are sampled with an ordinary sampler.
+// Hardware comparison samplers (compare_test on) did not take effect through
+// these passes, so SampleCmp returned lit everywhere and Enhanced receivers
+// showed no shadows. Ground behind the cascade's far plane has ref clamped to
+// 1.0, which only an occluder's stored depth (< 1) can shadow.
+float PCF_CompareBilinear(
+    in Texture2D map,
+    in SamplerState sam,
+    in float2 uv,
+    in float ref,
+    in float2 invMapSize)
+{
+    float2 p = uv / invMapSize - 0.5;
+    float2 c = floor(p);
+    float2 f = p - c;
+    float2 t = (c + 0.5) * invMapSize;
+    float s00 = step(ref, map.SampleLevel(sam, t, 0).x);
+    float s10 = step(ref, map.SampleLevel(sam, t + float2(invMapSize.x, 0.0), 0).x);
+    float s01 = step(ref, map.SampleLevel(sam, t + float2(0.0, invMapSize.y), 0).x);
+    float s11 = step(ref, map.SampleLevel(sam, t + invMapSize, 0).x);
+    return lerp(lerp(s00, s10, f.x), lerp(s01, s11, f.x), f.y);
+}
+
 float PCF_Filter(
     in Texture2D map,
-    in SamplerComparisonState sam,
+    in SamplerState sam,
     in float4 uv,
     in float2 invMapSize,
     in float depthBias)
@@ -216,10 +241,10 @@ float PCF_Filter(
 
     float2 halfTexel = invMapSize * 0.5;
     float result = 0.0;
-    result += map.SampleCmpLevelZero(sam, uv.xy + float2(-halfTexel.x, -halfTexel.y), uv.z);
-    result += map.SampleCmpLevelZero(sam, uv.xy + float2( halfTexel.x, -halfTexel.y), uv.z);
-    result += map.SampleCmpLevelZero(sam, uv.xy + float2(-halfTexel.x,  halfTexel.y), uv.z);
-    result += map.SampleCmpLevelZero(sam, uv.xy + float2( halfTexel.x,  halfTexel.y), uv.z);
+    result += PCF_CompareBilinear(map, sam, uv.xy + float2(-halfTexel.x, -halfTexel.y), uv.z, invMapSize);
+    result += PCF_CompareBilinear(map, sam, uv.xy + float2( halfTexel.x, -halfTexel.y), uv.z, invMapSize);
+    result += PCF_CompareBilinear(map, sam, uv.xy + float2(-halfTexel.x,  halfTexel.y), uv.z, invMapSize);
+    result += PCF_CompareBilinear(map, sam, uv.xy + float2( halfTexel.x,  halfTexel.y), uv.z, invMapSize);
     return result * 0.25;
 }
 #else
@@ -1119,24 +1144,12 @@ void terrain_fragment(
 #endif
 #else
     uniform Texture2D shadowMap1 : register(t5),
-#if OSE_ENHANCED_PSSM_V2_ACTIVE
-    uniform SamplerComparisonState shadowSam1 : register(s5),
-#else
     uniform SamplerState shadowSam1 : register(s5),
-#endif
 #if defined(PSSM_ENABLED)
     uniform Texture2D shadowMap2 : register(t6),
-#if OSE_ENHANCED_PSSM_V2_ACTIVE
-    uniform SamplerComparisonState shadowSam2 : register(s6),
-#else
     uniform SamplerState shadowSam2 : register(s6),
-#endif
     uniform Texture2D shadowMap3 : register(t7),
-#if OSE_ENHANCED_PSSM_V2_ACTIVE
-    uniform SamplerComparisonState shadowSam3 : register(s7),
-#else
     uniform SamplerState shadowSam3 : register(s7),
-#endif
 #endif
 #endif
 

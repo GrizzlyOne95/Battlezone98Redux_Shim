@@ -630,8 +630,6 @@ abstract pass OSEPassSchemeENHighPSSMV2
 		tex_address_mode border
 		tex_border_colour 1.0 1.0 1.0 1.0
 		filtering bilinear
-		compare_test on
-		compare_func greater_equal
 	}
 
 	texture_unit shadowMap2
@@ -640,8 +638,6 @@ abstract pass OSEPassSchemeENHighPSSMV2
 		tex_address_mode border
 		tex_border_colour 1.0 1.0 1.0 1.0
 		filtering bilinear
-		compare_test on
-		compare_func greater_equal
 	}
 
 	texture_unit shadowMap3
@@ -650,8 +646,6 @@ abstract pass OSEPassSchemeENHighPSSMV2
 		tex_address_mode border
 		tex_border_colour 1.0 1.0 1.0 1.0
 		filtering bilinear
-		compare_test on
-		compare_func greater_equal
 	}
 }
 
