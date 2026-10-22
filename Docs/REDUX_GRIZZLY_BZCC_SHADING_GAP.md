@@ -420,7 +420,25 @@ Filtering and MSAA:
   `OSE_TERRAIN_PBR_MIN_ROUGHNESS` (0.56; the new curve gives 0.35-0.49), so
   terrain specular is set by that floor. The change keeps the two shaders
   consistent if the floor is ever lowered.
-- Open question: the 0.56 terrain floor is what decides terrain sheen. BZCC's
-  terrain uses specular power 1024 scaled by the spec map's alpha (alpha 0.24
-  at half spec alpha), which can be glossier than our floor. Matching it needs
-  a BZCC terrain capture, not a curve change.
+- Terrain gloss: lowered. BZCC stock terrain was measured from its 77 `.trn`
+  files and 109 terrain specular maps (`G = specTex.a * log2(SpecularPower)`,
+  per texel). Its median perceptual roughness is 0.78 (p10 0.45, p90 0.88).
+  Its F0 is about 0.001-0.02, because 55 of the 70 `.trn` files with specular
+  keys use SpecularColor 10/255 with power 1024 (a RenderDoc terrain draw
+  confirms `g_MaterialSpecular` = 0.039, w 10). Our terrain sat at roughness
+  0.56 with F0 about 0.12 (the stock `*_ATLAS_S.dds` maps are flat 0.51 grey
+  with alpha 1). That is far shinier than BZCC. `OSE_TERRAIN_PBR_MIN_ROUGHNESS`
+  is now 0.70 and `OSE_TERRAIN_PBR_MAX_F0` is 0.04, the standard dielectric
+  value for rock and inside BZCC's range.
+
+  ![lcbmars terrain: now 0.56/F0 0.12, 0.70/F0 0.04, 0.78/F0 0.02](images/redux_grizzly_shading/terrain_gloss_bzcc.jpg)
+
+  On lcbmars the effect is small with the sun behind the camera. The near
+  ground is about 1.5% brighter, because less light goes into the specular
+  term, and texture contrast rises slightly (std 15.1 -> 15.5). The sky
+  differences in the shots are cloud animation. A camera facing into the sun
+  was not captured.
+
+  Not ported: BZCC's per-texel gloss from the spec-map alpha. Our atlases carry
+  no gloss channel, so this would need authored or derived maps. With F0
+  capped at 0.04, terrain spec maps now only tint the highlight.

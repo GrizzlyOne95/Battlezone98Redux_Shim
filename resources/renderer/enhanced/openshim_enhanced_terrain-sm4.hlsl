@@ -749,8 +749,8 @@ void compute_enhanced_atmosphere(
 // Terrain-specific legacy calibration. Vehicle/building materials keep the
 // broader object ranges in openshim_enhanced_base-sm4.hlsl; terrain is predominantly dusty
 // rock/soil and should remain a rough dielectric rather than reading as wet.
-static const float OSE_TERRAIN_PBR_MIN_ROUGHNESS = 0.56;
-static const float OSE_TERRAIN_PBR_MAX_F0 = 0.12;
+static const float OSE_TERRAIN_PBR_MIN_ROUGHNESS = 0.70;
+static const float OSE_TERRAIN_PBR_MAX_F0 = 0.04;
 static const float OSE_TERRAIN_IBL_SPECULAR_SCALE = 0.72;
 
 // -----------------------------------------------------------------------------
