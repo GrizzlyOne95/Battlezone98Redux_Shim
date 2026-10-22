@@ -130,6 +130,11 @@ bool FileExistsNonEmpty(const std::filesystem::path& path)
 
 } // anonymous
 
+std::vector<std::filesystem::path> GetContentRootCandidates(const std::filesystem::path& gameDir)
+{
+    return GetCampaignContentRootCandidates(gameDir);
+}
+
 const char* AssetPackStateName(AssetPackState state) noexcept
 {
     switch (state)

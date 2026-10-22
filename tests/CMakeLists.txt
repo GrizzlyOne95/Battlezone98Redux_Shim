@@ -678,6 +678,7 @@ if(WIN32 AND MSVC)
     add_executable(odf_item_hooks_tests
         odf_item_hooks_tests.cpp
         ../src/patches/odf_item_hooks.cpp
+        ../src/patches/map_folder_items.cpp
         ../src/patches/odf_compat.cpp
         ../src/engine/shim_log_sink.cpp
         ../src/engine/shim_log_client.cpp)
