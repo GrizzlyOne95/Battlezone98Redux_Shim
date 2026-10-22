@@ -337,6 +337,13 @@ namespace BZROpenShim
             { "ODF", "LegacySectionRemap", "0", "1" },
         };
 
+        // Revision 5 -> 6. Enhanced became the default render profile at the
+        // user's request on 2026-10-22. Only the old shipped Redux moves;
+        // Retro is a deliberate choice and is kept.
+        const SurgicalEntry kRevision5SurgicalTable[] = {
+            { "Graphics", "RenderProfile", "Redux", "Enhanced" },
+        };
+
         // Narrow fixups that apply when migrating away from `fromRevision`:
         // that revision's table and every later one, in order, so a file
         // several revisions behind collects each step. Empty for an unknown
@@ -362,6 +369,9 @@ namespace BZROpenShim
             if (fromRevision <= 4)
                 append(kRevision4SurgicalTable,
                        sizeof(kRevision4SurgicalTable) / sizeof(kRevision4SurgicalTable[0]));
+            if (fromRevision <= 5)
+                append(kRevision5SurgicalTable,
+                       sizeof(kRevision5SurgicalTable) / sizeof(kRevision5SurgicalTable[0]));
             return entries;
         }
 

@@ -281,6 +281,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "General/EditorSaveToSourceFolder",
     # Acts only after a GPU reset, to keep the recreated D3D11 device alive.
     "Graphics/D3D11DeviceLossRecovery",
+    # Enhanced became the default render profile on 2026-10-22 at the user's
+    # request; it only takes effect on DX11 with a verified resource set. The
+    # marker records that the one-time Redux -> Enhanced move already ran.
+    "Graphics/RenderProfile",
     # Chooses how opt-in hit/contact feedback draws the stock reticle art;
     # inert while HitMarkers and ReactiveReticle stay at their shipped 0.
     "Display/StockReticleShader",
@@ -350,7 +354,6 @@ if ($unexpectedEnabledValues.Count -gt 0) {
 $stockValueChecks = @{
     "General/SoundChannels" = "0"
     "General/RawMouseInput" = "0"
-    "Graphics/RenderProfile" = "Redux"
     "Display/UnderAttackAlert" = "Normal"
     "Display/ExplosionFlash" = "Stock"
     "Display/DamageFlash" = "Stock"
@@ -431,6 +434,7 @@ $shippingPolicyChecks = @{
     "Network/ReliableSendBacklogFix" = "1"
     "Network/LuaMapObjectHandles" = "1"
     "Graphics/D3D11DeviceLossRecovery" = "1"
+    "Graphics/RenderProfile" = "Enhanced"
     "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "1"
     "Network/LobbyBanButton" = "0"

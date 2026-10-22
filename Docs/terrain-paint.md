@@ -13,6 +13,10 @@ There are no new INI keys. Stock heights, collision, indices, AI and gameplay
 terrain files are unchanged. Native packed UVs are still independently audited
 before installation and retained for auxiliary maps and shadow-only passes.
 
+Paint weights can be drawn by hand (below) or **generated from each map's own
+MAT tile layout** (see [Automatic paint](#automatic-paint-from-the-maps-mat-layout)),
+and one manifest can carry many maps (see [Multi-map manifests](#multi-map-manifests)).
+
 ## Build and paint
 
 1. Capture the target mission using `OPENSHIM_TERRAIN_HD_EXPORT` as described
@@ -47,7 +51,7 @@ python scripts/Build-TerrainPaintPack.py `
 The provided Mars recipe references the user's local 4K albedo ZIP members;
 it contains no artwork. It starts from rocky soil and adds several broad soft
 patches to demonstrate blending. It does **not** convert the mission's existing
-tile layout to weights. Preserve original gameplay MAT/HG2/TRN files. Artwork,
+tile layout to weights; `Build-TerrainAutoPaint.py` does. Preserve original gameplay MAT/HG2/TRN files. Artwork,
 game captures and generated packages remain local and are never committed.
 
 The adjacent project JSON records material sources/hashes, repeats, dimensions
@@ -57,6 +61,185 @@ have independent authoring resolutions. The browser's PNG codec stores raw
 RGBA bytes: PNG alpha represents the fourth layer's weight, so ordinary canvas
 export or image compositing would lose the first three channels wherever that
 weight is zero. Save/load preserves those transparent RGB pixels.
+
+## Automatic paint from the map's MAT layout
+
+`scripts/Build-TerrainAutoPaint.py` generates the RGBA control map, the terrain
+fingerprint and the bounds from the map files alone: no hand painting and no live
+capture. It only reads `<map>.hg2`, `<map>.mat` and `<map>.trn`.
+
+```powershell
+python scripts/Build-TerrainAutoPaint.py `
+  --recipe scripts/terrain-packs/mars-autopaint.json --source-root '<ground texture directory>' `
+  --output build/terrain-paint/mars-auto --prefix openshim_mars_auto `
+  --map misn04='<CR>/Missions/misn04' `
+  --map misn05='<CR>/Missions/misn05.hg2,<stock>/misn05.mat,<stock>/misn05.trn' `
+  --map misn06='<CR>/Missions/misn06' `
+  --map misn04_stock='<stock>/misn04' --map misn05_stock='<stock>/misn05' --map misn06_stock='<stock>/misn06'
+```
+
+`--map NAME=STEM` reads `STEM.hg2/.mat/.trn`; `--map NAME=HG2,MAT,TRN` names the
+three files, which is needed when a mission overrides only some of them (Campaign
+Reimagined overrides `misn05.hg2` but not its MAT or TRN). `--capture NAME=FILE`
+cross-checks that map against an `OPENSHIM_TERRAIN_HD_EXPORT` capture and
+declines on any disagreement. The output is one multi-map manifest
+(`<prefix>.json`), four layer PNGs shared by every map, one control PNG per
+distinct layout (maps with identical MAT layouts share one) and, for touch-up, one
+standalone editor per map preloaded with the generated weights. Install the
+manifest beside the executable and the PNGs next to it, as for a hand-painted pack.
+The recipe's layer art can be the same ZIP members as `mars-paint.json` or plain
+`file` entries.
+
+**Tile index to layer.** A MAT cell word holds base type (bits 15-12), next type
+(11-8) and a cap/diagonal bit (7); the TRN maps `(type, kind, next, variant)` to the
+atlas tile, so the atlas tile index carries no information beyond that key. The
+recipe therefore maps the TRN's texture *types* to the four layers
+(`typeWeights`, with `typeNames` as a guard that the TRN still means what the recipe
+assumes) and blends a transition cell between its two types (`transition.cap` and
+`transition.diagonal` give the next type's share). Mars: Sandy -> dune sand, Rocky ->
+rocky soil, Geyser and Base -> gravel, Rock mountain -> cracked rock. Cells naming a
+type the TRN never defines (stock `misn04` has nine, in its last column) take
+`undefinedTypeWeights`; a layout with more than 1% such cells is declined. The
+per-cell weights are rasterized into the map's world bounds and blurred with a
+Gaussian (`blurMeters`, default 12 m, about half a cell) for soft transitions.
+Skirt cells outside the file take `outsideWeights`.
+
+![Generated weights (misn04, misn05, CR misn06) beside the hand-painted misn04 set](images/terrain_autopaint/weights_overview.png)
+
+### Native terrain frame (measured)
+
+These facts were measured on stock `misn04` and are what the generator uses:
+
+- File sample `(sx, sz)` sits at world `X = 5 * (sx - 128 * zonesX)` and
+  `Z = -5 * (sz - 128 * zonesZ)` metres. **Rows run toward -Z**: HG2/MAT row 0 is the
+  most positive Z of the file. An `OPENSHIM_TERRAIN_GEOMETRY_EXPORT` snapshot of one
+  zone matched the HG2 heights at all 66,049 of its vertices for exactly this
+  mapping, and for no sign or offset variant around it. The first auto-paint draft
+  assumed rows ran toward +Z; the snapshot caught it.
+- The engine builds a `(zonesX + 1) x (zonesZ + 1)` grid of 256-sample zones. Zone
+  `i` starts at file sample `256 * i - 128` and its mesh vertices begin two samples
+  (10 m) later, so a MAT cell `c` covers mesh samples `4c + 2 .. 4c + 6`. Samples
+  outside the file read as zero. Stock `misn04` therefore has 20 zones and bounds
+  `-3190, -2570, 3210, 2550`; the general bounds are `5 * (-126 - 128 zx)`,
+  `-5 * (130 + 128 zz)`, `5 * (130 + 128 zx)`, `5 * (126 + 128 zz)`.
+- MAT cells align with the HG2 sample grid (cell `c` is sample `4c`): the correlation
+  between MAT rock cells and height slope is 0.69 at zero offset and 0.31 if the rows
+  are flipped.
+- Mission files are looked up by the name inside the BZN (`TerrainName` in a text
+  BZN, the embedded mission name in a 1.5-era binary one), not by the launch
+  argument. A test mission with its own terrain files needs a text BZN naming them.
+
+### Offline fingerprint
+
+`terrain_fingerprint()` reproduces `CaptureTerrainPaintMap()` from the HG2: FNV-1a
+over the zone count, then for each zone in `(x, z)` order its coordinates and its
+256 x 256 13-bit height samples (row-major, zero outside the file). It matches the
+in-game value for stock `misn04` (`73f9729303821983`, the hand-painted pack's
+fingerprint), confirmed again by a live capture (`zoneCount` 20, same bounds). No
+game launch is needed to author a pack for a map whose HG2 is at hand. The sample
+storage origin is still excluded, as in the runtime.
+
+The hash covers every height, so **Campaign Reimagined's own HG2s have different
+fingerprints from stock** even though their MAT/TRN may be identical. A pack built
+for stock `misn04` declines on the CR campaign mission (the guard working); list
+both versions as separate map entries.
+
+| Map | Zones | Stock fingerprint (live) | CR fingerprint (live) |
+|---|---|---|---|
+| `misn04` | 4x3 | `73f9729303821983` (matches offline) | `cd7f44e80ffb7fc1` (matches offline) |
+| `misn05` | 3x3 | `04e39ffb0e80a25e` (offline `087ff2851a95085e` **disagrees**) | `5e4ef40b581c2c36` (offline `b239c56fe89ebe36` **disagrees**) |
+| `misn06` | 4x4 | `9c77ccbdec3593fe` (matches offline) | `47910f1f7563463d` (matches offline) |
+
+The offline model reproduces four of the six maps. For `misn05` the bounds and
+zone count (16) match the live capture but the hash does not; the cause is not
+found (a 3x3 file is the only odd-sized one; a brute-force search over zone and
+sample offsets did not reproduce it). `--capture NAME=FILE --trust-capture` uses
+the live values for such a map, which is how `misn05` is packed here. Reading the
+live map from the decline message (it prints the actual fingerprint and bounds) or
+capturing once with `OPENSHIM_TERRAIN_HD_EXPORT` is the fallback.
+
+### In-game results (GOG, DX11 Enhanced, `OPENSHIM_ENABLE_ENHANCED_STOCK_TERRAIN=1`)
+
+Test missions were minimal text BZNs with the map's own terrain files and a Lua
+driver that teleported the player and parked a chase camera, so each run shows
+three spots. Before = HD tiles off; after = the generated multi-map pack.
+
+| Mission (terrain files) | Selected entry | Result |
+|---|---|---|
+| stock `misn04` | `73f9...` | painted; also compared with the hand-painted set |
+| CR `misn04` | `cd7f...` | painted |
+| CR `misn06` | `4791...` | painted |
+| stock `misn06` | `9c77...` | entry selected; shots not inspected |
+| stock and CR `misn05` | none | pack declined (offline fingerprint wrong); the packed live values were **not** re-run in game |
+
+![stock misn04: before, auto, hand-painted](images/terrain_autopaint/misn04_stock_before_auto_hand.jpg)
+![CR misn04: before, auto](images/terrain_autopaint/misn04_cr_before_after.jpg)
+![CR misn06: before, auto](images/terrain_autopaint/misn06_cr_before_after.jpg)
+
+What the shots show: paint boundaries follow the stock layout (pale sand patches
+and cliff/rock faces sit where the stock tiles put them), the selection logic
+binds the right entry, and the runtime logs `multi-map entry selected` for each.
+They do not show parity of look: the four recipe layers share one brown palette,
+so the stock atlas's dark and red rock tiles become a similar brown. That is an
+artwork choice (layers 2 and 3 need darker albedo to carry the stock contrast),
+not a layout error. The "hand-painted" Mars set is the recipe's demonstration
+blobs, not a map-specific paint, and at these spots it is visually close to the
+auto result; no quantitative comparison was made. Pre-generated outputs
+(manifest and control maps, no artwork) are in
+`scripts/terrain-packs/generated/mars-auto/`; the layer PNGs are local.
+
+Existing tooling: CR's `Build-MarsHdTileSources.py` / `Build-MoonHdTerrain.py` and
+the Toolbox `hd_tiles.py` author per-tile v2 packs, a different runtime format;
+none derives paint weights or fingerprints from MAT/HG2, so this script reuses only
+OpenShim's own `Build-TerrainHdPack.py` and `Build-TerrainPaintPack.py` helpers.
+
+### Extending to other worlds
+
+1. List the world's campaign missions in `Config/crcampgn.ini`; the TRN's
+   `[Atlases] MaterialName` (for example `ve_detail_atlas`) is the manifest material
+   key, so one manifest can hold every world as a separate `materials` entry.
+2. Copy `scripts/terrain-packs/mars-autopaint.json`: set `diffuseResource` to the
+   world's atlas diffuse texture, `typeNames` to the TRN `[TextureTypeN]` comments
+   and `typeWeights` to the four layers that best match each type. The script
+   declines a TRN whose type names differ from the recipe, so a new world cannot
+   silently get Mars' mapping.
+3. Run the script over every mission of that world, both the stock and the CR copy
+   of the HG2 where they differ, and merge the `materials` entry into the shared
+   manifest. Confirm one map per world live (the `[TERRAIN-PAINT] map accepted
+   fingerprint=...` log line prints the live value, or use
+   `OPENSHIM_TERRAIN_HD_EXPORT` and `--capture`) before trusting the offline
+   fingerprint for the others.
+4. The layer artwork is the only per-world creative input. A TRN with more than four
+   visually distinct materials needs a `typeWeights` that folds some together; four
+   layers is the runtime limit.
+
+## Multi-map manifests
+
+Several campaign missions share one atlas material (`MA_DETAIL_ATLAS` for all of
+Mars), so a one-fingerprint manifest could only ever cover one of them. `paint` may
+now carry a `maps` table instead of a single `terrainFingerprint`/`boundsMeters`:
+
+```json
+"paint": {
+  "schema": "bzr-openshim-terrain-paint-v1",
+  "rowZero": "minZ",
+  "repeatMeters": [24, 16, 12, 24],
+  "maps": [
+    {"terrainFingerprint": "73f9729303821983", "boundsMeters": [-3190, -2570, 3210, 2550], "control": "mars_misn04_control.png"},
+    {"terrainFingerprint": "087ff2851a95085e", "boundsMeters": [-2550, -2570, 2570, 2550], "control": "mars_misn05_control.png"}
+  ]
+}
+```
+
+`tiles` still lists exactly five slices; slice 4 names the default control image.
+At install the runtime computes the live fingerprint and bounds (unchanged) and
+binds the control image of the entry matching **both**; no entry means the whole
+pack declines before binding anything and the stock atlas stays. The layers, the
+five-slice array size and every other guard are unchanged, and the single-map form
+still works. Log lines: `[TERRAIN-PAINT] multi-map entry selected fingerprint=...
+control=...`, or on a mismatch the decline message with the live map. Entries must
+be unique per fingerprint and bounds; at most 64. Unit tests cover selection and
+validation.
 
 ## Runtime format and guards
 
@@ -110,8 +293,8 @@ The editor is a standalone authoring prototype. It has no game camera view,
 terrain contours, WorldBuilder integration, in-game brush or live reload.
 It supports four layers at a time and square 64..2048-pixel weight maps.
 It renders rectangular world bounds stretched into its square top-down view;
-brush distance is still calculated in world metres. The first prototype targets
-one captured terrain shape; maps sharing the exact geometry may reuse it. Steam, Proton/Wine, broad editor/mission lifecycle,
+brush distance is still calculated in world metres. A single-map pack targets one
+terrain shape; a multi-map pack selects among listed shapes. Steam, Proton/Wine, broad editor/mission lifecycle,
 artistic acceptance and performance qualification remain unverified.
 
 Automated checks cover the pack contract, soft brushes, normalized weights,

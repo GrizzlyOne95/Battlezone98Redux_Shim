@@ -54,6 +54,12 @@ if(Python3_Interpreter_FOUND)
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/frame_bridge_capture_pack_tests.py")
         add_test(NAME terrain_paint_pack_tests
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_paint_pack_tests.py")
+        execute_process(COMMAND "${Python3_EXECUTABLE}" -c "import numpy"
+            RESULT_VARIABLE OPENSHIM_NUMPY_IMPORT_RESULT OUTPUT_QUIET ERROR_QUIET)
+        if(OPENSHIM_NUMPY_IMPORT_RESULT EQUAL 0)
+            add_test(NAME terrain_autopaint_tests
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_autopaint_tests.py")
+        endif()
         add_test(NAME terrain_hd_pack_tests
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_hd_pack_tests.py")
         add_test(NAME terrain_surface_pack_tests
@@ -675,6 +681,12 @@ openshim_add_test(enhanced_resource_bootstrap_tests STD 20 SOURCES
     enhanced_resource_bootstrap_tests.cpp
     ../src/engine/enhanced_resource_bootstrap.cpp
 )
+
+openshim_add_test(stock_enhanced_base_redirect_tests STD 17 SOURCES
+    stock_enhanced_base_redirect_tests.cpp
+)
+target_compile_definitions(stock_enhanced_base_redirect_tests PRIVATE
+    OPENSHIM_ENHANCED_PAYLOAD_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced")
 
 # Regression: the ODF item-hook trampoline must relocate whole instructions.
 # Relocating five bytes split `mov eax,[ebp+8]` and made the trampoline eat its

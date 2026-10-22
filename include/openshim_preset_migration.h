@@ -62,6 +62,13 @@
 //              Only values still at the old shipped 0 move; a player who set
 //              anything else keeps it. The absent-key defaults are ON as well.
 //
+//   Revision 6: Enhanced became the default render profile at the user's
+//              request on 2026-10-22:
+//                 Graphics/RenderProfile          = Enhanced  (was Redux)
+//              Only a file still at the old shipped Redux moves; Retro, or a
+//              Redux chosen after this revision is stamped, is kept. Enhanced
+//              still resolves to Redux off DX11 or without a verified set.
+//
 // Migration policy is implemented here so it works for:
 //   - Campaign Reimagined Workshop users
 //   - standalone OpenShim releases
@@ -76,7 +83,7 @@
 namespace BZROpenShim
 {
 
-    constexpr int kCurrentPresetRevision = 5;
+    constexpr int kCurrentPresetRevision = 6;
     constexpr int kLegacyBadPresetRevision = 1;
 
     // SHA-256 of the exact e81d8b0a player preset as a Windows checkout

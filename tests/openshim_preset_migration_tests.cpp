@@ -484,8 +484,6 @@ int main()
               "6e: VehicleListModScoping on");
         Check(FileContains(r4, "LogUnknownOdfSections = 0"),
               "6e: LogUnknownOdfSections left off");
-        Check(FileContains(r4, "OpenShimPresetRevision = 5"),
-              "6e: marker becomes 5");
         Check(FileContains(r4, CurrentRevisionMarker()),
               "6e: marker is the current revision");
 
@@ -512,7 +510,7 @@ int main()
         // An already-current file is not touched again.
         fs::path r5 = tmpRoot / "rev5_player_off.ini";
         WriteLines(r5, {
-            "; OpenShimPresetRevision = 5",
+            "; " + CurrentRevisionMarker(),
             "",
             "[Fixes]",
             "TerrainAtlasRectRepair = 0",
@@ -520,7 +518,7 @@ int main()
         auto r5res = MigratePresetFileIfNeeded(r5, canonical);
         Check(r5res.action == MigrationAction::None &&
                   FileContains(r5, "TerrainAtlasRectRepair = 0"),
-              "6e: revision 5 player 0 is respected");
+              "6e: a current-revision player 0 is respected");
 
         // A revision 3 file collects the revision 3 -> 4 and 4 -> 5 steps.
         fs::path r3 = tmpRoot / "rev3_chain.ini";
@@ -557,6 +555,54 @@ int main()
                   FileContains(r1, "EarlyNakAccept = 1") &&
                   FileContains(r1, "LegacySectionRemap = 1"),
               "6e: revision 1 file collects every table");
+    }
+
+    // 6f. Revision 5 -> 6: Enhanced became the default render profile. The
+    // old shipped Redux moves once; Retro is kept, and a Redux the player
+    // picks after the revision is stamped is respected.
+    {
+        fs::path canonical = tmpRoot / "canonical6f.ini";
+        WriteLines(canonical, MakeCanonicalLines());
+        const auto profileFile = [&](const char* name, const char* value) {
+            fs::path path = tmpRoot / name;
+            WriteLines(path, {
+                "; OpenShimPresetRevision = 5",
+                "",
+                "[Graphics]",
+                std::string("RenderProfile = ") + value,
+            });
+            return path;
+        };
+        fs::path redux = profileFile("rev5_redux.ini", "Redux");
+        auto r = MigratePresetFileIfNeeded(redux, canonical);
+        Check(r.action == MigrationAction::SurgicalFixed && r.fromRevision == 5,
+              "6f: revision 5 file is migrated");
+        Check(FileContains(redux, "RenderProfile = Enhanced"),
+              "6f: shipped Redux becomes Enhanced");
+        Check(FileContains(redux, CurrentRevisionMarker()),
+              "6f: marker is the current revision");
+
+        fs::path lower = profileFile("rev5_redux_lower.ini", "redux");
+        MigratePresetFileIfNeeded(lower, canonical);
+        Check(FileContains(lower, "RenderProfile = Enhanced"),
+              "6f: Redux matches case-insensitively");
+
+        fs::path retro = profileFile("rev5_retro.ini", "Retro");
+        MigratePresetFileIfNeeded(retro, canonical);
+        Check(FileContains(retro, "RenderProfile = Retro"),
+              "6f: Retro is kept");
+
+        fs::path chosen = tmpRoot / "rev6_redux.ini";
+        WriteLines(chosen, {
+            "; " + CurrentRevisionMarker(),
+            "",
+            "[Graphics]",
+            "RenderProfile = Redux",
+        });
+        auto again = MigratePresetFileIfNeeded(chosen, canonical);
+        Check(again.action == MigrationAction::None &&
+                  FileContains(chosen, "RenderProfile = Redux"),
+              "6f: Redux chosen after the revision is respected");
     }
 
     // 7. unknown/custom file -> untouched

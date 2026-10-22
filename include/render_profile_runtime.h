@@ -48,6 +48,11 @@ namespace BZROpenShim::RenderProfiles
     // runs later on the caller thread when Modable is actually initialised.
     void InstallEnhancedResourceBootstrap();
 
+    // True once the OpenShimEnhanced resource group is registered and its
+    // canonical program resolved, i.e. OSE_* programs can be referenced by
+    // materials parsed from now on. Any thread.
+    bool AreEnhancedResourcesReady();
+
     // Re-reads openshim.ini and re-resolves. Called by the settings UI after a
     // lossless ini write (ShimSettingApplyGroup::RenderProfile).
     void ReloadRenderProfileConfig();

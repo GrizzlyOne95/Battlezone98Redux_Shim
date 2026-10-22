@@ -81,6 +81,12 @@ content intent. Campaign Reimagined owns content and art direction.**
 
 ## 3. RenderProfile semantics
 
+The default is **Enhanced** (since 2026-10-22; it was Redux), both in the
+shipped openshim.ini and when the key is absent. It only becomes effective on
+DX11 with a verified resource set; otherwise the session resolves to Redux.
+The installer never overwrites an existing openshim.ini, so installs made
+before the change keep the `RenderProfile` they already have.
+
 - **Redux** — stock Battlezone 98 Redux rendering behavior as closely as
   practical on the selected backend. The compatibility baseline; the engine's
   native scheme flow passes through untouched (fail-open by construction).
@@ -344,11 +350,12 @@ nothing on a CR install until the stock-material retrofit lands.
 `scripts/Get-RenderEvidence.ps1` reports parsed and rendering as separate
 fields for exactly this reason.
 
-**Retrofit contract.** PSSM v2 samples through `SamplerComparisonState`, so
-any pass bound to an `OSE_*ENHighPSSMV2_*` program must declare
-`compare_test on` / `compare_func greater_equal` the way `CR_BZBase.material`
-and `CR_BZTerrainBase.material` do. A retrofit that injects the technique
-without the pass state will not shadow correctly.
+**Retrofit contract.** The OSE PSSM v2 receivers compare depth by hand
+through an ordinary `SamplerState`, so passes bound to an
+`OSE_*ENHighPSSMV2_*` program must not declare `compare_test on`. Hardware
+comparison (`SampleCmpLevelZero`, as `CR_BZBase.material` and
+`CR_BZTerrainBase.material` still set up) returned lit everywhere through
+these passes; see `ENHANCED_RENDERER_MATERIAL_OWNERSHIP.md`.
 
 **Deployment.** `resources.version` is now `2`. The marker is compared in
 full rather than over the bytes read, so a payload that is a prefix of the

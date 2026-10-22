@@ -33,7 +33,26 @@ int main()
         std::uint64_t hash = UINT64_C(14695981039346656037);
         TerrainPaint::HashU32(hash, 0x12345678);
         check(TerrainPaint::HashString(hash) == "cccfd053e47c3365", "map fingerprint byte order changed");
-        std::cout << "PASS: map contracts, native cluster seam and preserved auxiliary UVs\n";
+        // Multi-map table: select by fingerprint and bounds, never by position or name.
+        TerrainPaint::Config table = config;
+        table.maps = {{"0123456789abcdef", {-320,-640,960,640}, "control_a.png"},
+                      {"fedcba9876543210", {-320,-640,960,640}, "control_b.png"},
+                      {"0123456789abcdef", {-3190,-2570,3210,2550}, "control_c.png"}};
+        table.Validate();
+        check(TerrainPaint::SelectMap(table, "fedcba9876543210", {-320,-640,960,640})->control == "control_b.png", "multi-map pick failed");
+        check(TerrainPaint::SelectMap(table, "0123456789abcdef", {-3190,-2570,3210,2550})->control == "control_c.png", "bounds must disambiguate");
+        check(!TerrainPaint::SelectMap(table, "0123456789abcdef", {-320,-640,960,641}), "bounds mismatch selected a map");
+        check(!TerrainPaint::SelectMap(table, "0000000000000000", {-320,-640,960,640}), "unknown fingerprint selected a map");
+        for (int bad = 0; bad < 3; ++bad)
+        {
+            TerrainPaint::Config broken = table;
+            if (bad == 0) broken.maps[1].control.clear();
+            if (bad == 1) broken.maps[1] = broken.maps[0];
+            if (bad == 2) broken.maps[1].fingerprint = "FEDCBA9876543210";
+            bool rejected = false; try { broken.Validate(); } catch (...) { rejected = true; }
+            check(rejected, "invalid multi-map table accepted");
+        }
+        std::cout << "PASS: map contracts, multi-map selection, native cluster seam and preserved auxiliary UVs\n";
         return 0;
     }
     catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

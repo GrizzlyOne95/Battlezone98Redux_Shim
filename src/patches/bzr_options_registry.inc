@@ -304,7 +304,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     // hidden until startup renderer selection is actually implemented
     // (hand-edited openshim.ini values remain parsed and reported).
     { "Render Profile", "Graphics", "RenderProfile", nullptr, 0,
-      kShimSettingsRenderProfileValues, kShimSettingsRenderProfileValues, 3, 1,
+      kShimSettingsRenderProfileValues, kShimSettingsRenderProfileValues, 3, 2,
       ShimSettingApplyGroup::RenderProfile,
       "Visual rendering policy: Redux (stock baseline), Enhanced, or Retro. Applies live." },
     // [DX11Enhanced] is the experimental DX11 pipeline. Both rows fail
