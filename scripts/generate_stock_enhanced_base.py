@@ -16,9 +16,11 @@ Each output is the stock base verbatim plus:
   - the abstract passes those techniques use, renamed BZPassScheme* ->
     OSEPassScheme* (BZTerrainPassScheme* -> OSETerrainPassScheme*) so they do
     not collide with the stock passes of the same file.
-CR's image-based-lighting fragment overrides (CR_BaseIBL*, CR_TerrainIBL*) are
-CR programs; they become the plain OSE_*EN* fragment of the same tier and their
-IBL texture units are dropped. Non-`en-*` techniques stay stock, so Classic,
+CR's image-based-lighting fragment overrides are CR programs. Object ones
+(CR_BaseIBL*) become OpenShim's OSE_BaseIBL* twins and keep their IBL texture
+units, so stock objects get the static and per-planet IBL without CR. Terrain
+ones (CR_TerrainIBL*) become the plain OSE_TerrainEN* fragment of the same
+tier and their IBL texture units are dropped. Non-`en-*` techniques stay stock, so Classic,
 Redux, Retro and glow rendering are unchanged.
 
 The outputs use a `.import` extension so no resource group parses them as
@@ -47,6 +49,7 @@ TARGETS = [
         "pass_from": "BZPassScheme",
         "pass_to": "OSEPassScheme",
         "materials": {"BZBase": "CR_BZBase", "BZBaseCockpit": "CR_BZBaseCockpit"},
+        "keep_ibl": True,
     },
     {
         "stock": "BZTerrainBase.material",
@@ -59,7 +62,7 @@ TARGETS = [
 ]
 
 IBL_FRAGMENTS = [
-    (re.compile(r"\bCR_BaseIBLHigh(PSSM|Shadow|NoShadow)_fragment\b"), r"OSE_BaseENHigh\1_fragment"),
+    (re.compile(r"\bCR_BaseIBLHigh(PSSM|Shadow|NoShadow)_fragment\b"), r"OSE_BaseIBLHigh\1_fragment"),
     (re.compile(r"\bCR_TerrainIBLHigh(PSSM|Shadow|NoShadow)_fragment\b"), r"OSE_TerrainENHigh\1_fragment"),
 ]
 IBL_UNITS = ("irradianceMap", "prefilteredEnvMap", "brdfLut")
@@ -171,7 +174,8 @@ def generate(target, stock_dir, cr_dir, programs):
             technique = re.sub(r"//[^\n]*\n", "", technique)
             for pattern, replacement in IBL_FRAGMENTS:
                 technique = pattern.sub(replacement, technique)
-            technique = drop_ibl_units(technique)
+            if not target.get("keep_ibl"):
+                technique = drop_ibl_units(technique)
             used_passes.update(m.group(0) for m in pass_re.finditer(technique))
             technique = pass_re.sub(target["pass_to"] + r"\1", technique)
             techniques.append(technique)

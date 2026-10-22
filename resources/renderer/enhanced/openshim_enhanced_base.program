@@ -3116,3 +3116,164 @@ fragment_program OSE_BaseENLowPSSM_fragmentHLSL4 hlsl
         param_named surfaceBarrel1 float4 0 0 0 0
     }
 }
+
+// -----------------------------------------------------------------------------
+// Enhanced High tier with static image-based lighting (DX11 only)
+// -----------------------------------------------------------------------------
+// OpenShim-owned twins of Campaign Reimagined's CR_BaseIBLHigh* programs, so
+// stock materials redirected to openshim_stock_bzbase.import keep the IBL
+// technique without CR. The SM4 program adds IBL_ENABLED; other render systems
+// fall back to the plain OSE_BaseENHigh* delegates. The IBL cubemaps are the
+// openshim_ibl_neutral_* textures, which the planet environment swaps per world.
+
+fragment_program OSE_BaseIBLHighNoShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,IBL_ENABLED,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1
+
+    default_params
+    {
+        param_named_auto inverseViewMatrix inverse_view_matrix
+        param_named_auto surfaceViewToLocal inverse_worldview_matrix
+        param_named_auto surfaceRainTime time_0_x 4000
+        param_named surfaceState float4 0 0 0 0
+        param_named surfaceMode float4 0 0 0 0
+        param_named surfaceImpact0 float4 0 0 0 0
+        param_named surfaceImpact1 float4 0 0 0 0
+        param_named surfaceImpactWeights float4 0 0 0 0
+        param_named surfaceMuzzle0 float4 0 0 0 0
+        param_named surfaceMuzzle1 float4 0 0 0 0
+        param_named surfaceBarrel0 float4 0 0 0 0
+        param_named surfaceBarrel1 float4 0 0 0 0
+    }
+}
+
+fragment_program OSE_BaseIBLHighShadow_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PCF_SIZE=4,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,IBL_ENABLED,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1
+
+    default_params
+    {
+        param_named_auto inverseViewMatrix inverse_view_matrix
+        param_named_auto surfaceViewToLocal inverse_worldview_matrix
+        param_named_auto surfaceRainTime time_0_x 4000
+        param_named surfaceState float4 0 0 0 0
+        param_named surfaceMode float4 0 0 0 0
+        param_named surfaceImpact0 float4 0 0 0 0
+        param_named surfaceImpact1 float4 0 0 0 0
+        param_named surfaceImpactWeights float4 0 0 0 0
+        param_named surfaceMuzzle0 float4 0 0 0 0
+        param_named surfaceMuzzle1 float4 0 0 0 0
+        param_named surfaceBarrel0 float4 0 0 0 0
+        param_named surfaceBarrel1 float4 0 0 0 0
+    }
+}
+
+fragment_program OSE_BaseIBLHighPSSM_fragmentHLSL4 hlsl
+{
+	source openshim_enhanced_base-sm4.hlsl
+	target ps_4_0
+	entry_point base_fragment
+	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER,PSSM_ENABLED,PCF_SIZE=4,NORMALMAP_ENABLED,SPECULARMAP_ENABLED,EMISSIVEMAP_ENABLED,ENHANCED_MODE,IBL_ENABLED,OSE_LINEAR_LIGHT=1,OSE_RADIAL_FOG=1,OSE_ENHANCED_PSSM_V2=1
+
+    default_params
+    {
+        param_named_auto inverseViewMatrix inverse_view_matrix
+        param_named_auto surfaceViewToLocal inverse_worldview_matrix
+        param_named_auto surfaceRainTime time_0_x 4000
+        param_named surfaceState float4 0 0 0 0
+        param_named surfaceMode float4 0 0 0 0
+        param_named surfaceImpact0 float4 0 0 0 0
+        param_named surfaceImpact1 float4 0 0 0 0
+        param_named surfaceImpactWeights float4 0 0 0 0
+        param_named surfaceMuzzle0 float4 0 0 0 0
+        param_named surfaceMuzzle1 float4 0 0 0 0
+        param_named surfaceBarrel0 float4 0 0 0 0
+        param_named surfaceBarrel1 float4 0 0 0 0
+    }
+}
+
+fragment_program OSE_BaseIBLHighNoShadow_fragment unified
+{
+	delegate OSE_BaseIBLHighNoShadow_fragmentHLSL4
+	delegate OSE_BaseENHighNoShadow_fragmentGLSLES
+	delegate OSE_BaseENHighNoShadow_fragmentGLSL
+	delegate OSE_BaseENHighNoShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto materialEmissive surface_emissive_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseIBLHighShadow_fragment unified
+{
+	delegate OSE_BaseIBLHighShadow_fragmentHLSL4
+	delegate OSE_BaseENHighShadow_fragmentGLSLES
+	delegate OSE_BaseENHighShadow_fragmentGLSL
+	delegate OSE_BaseENHighShadow_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto materialEmissive surface_emissive_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
+
+fragment_program OSE_BaseIBLHighPSSM_fragment unified
+{
+	delegate OSE_BaseIBLHighPSSM_fragmentHLSL4
+	delegate OSE_BaseENHighPSSM_fragmentGLSLES
+	delegate OSE_BaseENHighPSSM_fragmentGLSL
+	delegate OSE_BaseENHighPSSM_fragmentHLSL
+	default_params
+	{
+		param_named_auto sceneAmbient derived_ambient_light_colour
+		param_named_auto diffuseColor surface_diffuse_colour
+		param_named_auto materialShininess surface_shininess
+		param_named_auto materialEmissive surface_emissive_colour
+		param_named_auto lightDiffuse derived_light_diffuse_colour_array 24
+		param_named_auto lightSpecular derived_light_specular_colour_array 24
+		param_named_auto lightAttenuation light_attenuation_array 24
+		param_named_auto spotLightParams spotlight_params_array 24
+		param_named_auto lightPosition light_position_view_space_array 24
+		param_named_auto lightDirection light_direction_view_space_array 24
+		param_named_auto fogColour fog_colour
+		param_named_auto fogParams fog_params
+		param_named_auto invShadowMapSize1 inverse_texture_size 4
+		param_named_auto invShadowMapSize2 inverse_texture_size 5
+		param_named_auto invShadowMapSize3 inverse_texture_size 6
+		param_named pssmSplitPoints float4 0.1 16.0 64.0 256.0
+		param_named_auto lightCount light_count
+		param_named transparency float 0.0
+	}
+}
