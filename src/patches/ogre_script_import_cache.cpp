@@ -135,7 +135,7 @@ namespace BZROpenShim
         bool g_Installed = false;
         bool g_CacheEnabled = false;
         bool g_RedirectEnabled = false;
-        bool g_TerrainOptedIn = false;
+        bool g_TerrainDisabled = false;
         bool g_FailureLogged = false;
         bool g_DisabledLogged = false;
         // Set once at runtime if the layout check fails; hooks then pass through.
@@ -242,9 +242,9 @@ namespace BZROpenShim
             const char* file = entry->payloadFile;
 
             Policy::RedirectInputs in;
-            in.optInRequired = entry->optIn;
-            in.optedIn = g_TerrainOptedIn;
-            if (in.optInRequired && !in.optedIn)
+            in.terrain = entry->terrain;
+            in.terrainDisabled = g_TerrainDisabled;
+            if (in.terrain && in.terrainDisabled)
                 return false;
             in.enhancedResourcesReady = RenderProfiles::AreEnhancedResourcesReady();
             if (!in.enhancedResourcesReady)
@@ -442,8 +442,7 @@ namespace BZROpenShim
 
         g_CacheEnabled = cacheEnabled;
         g_RedirectEnabled = redirectEnabled && redirectResolved;
-        // Same "=1" test as the disable switches, read as an opt-in.
-        g_TerrainOptedIn = DisabledByEnvironment(StockEnhancedBase::kTerrainOptInSwitch);
+        g_TerrainDisabled = DisabledByEnvironment(StockEnhancedBase::kTerrainDisableSwitch);
         g_Installed = true;
         LogShimA(LogLevel::Info, kComponent,
                  "[SCRIPTIMPORT] installed loadImportPath=0x%08X parse=0x%08X (wave gap %u ms) cache=%s "
@@ -452,6 +451,6 @@ namespace BZROpenShim
                  static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parse)),
                  static_cast<unsigned>(kWaveGapMs), g_CacheEnabled ? "on" : "off",
                  g_RedirectEnabled ? "on" : "off",
-                 g_RedirectEnabled && g_TerrainOptedIn ? "on" : "off (opt in with OPENSHIM_ENABLE_ENHANCED_STOCK_TERRAIN=1)");
+                 g_RedirectEnabled && !g_TerrainDisabled ? "on" : "off");
     }
 }

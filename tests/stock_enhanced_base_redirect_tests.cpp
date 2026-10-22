@@ -68,21 +68,25 @@ void TestEveryGateFailsClosed()
     Check(!ShouldRedirect(in), "payload missing from the deployment");
 }
 
-void TestTerrainIsOptIn()
+void TestTerrainIsOnWithItsOwnKillSwitch()
 {
-    std::printf("TestTerrainIsOptIn\n");
+    std::printf("TestTerrainIsOnWithItsOwnKillSwitch\n");
     const Redirect* base = RedirectForImport("BZBase.material");
     const Redirect* terrain = RedirectForImport("BZTerrainBase.material");
-    Check(base && !base->optIn, "vehicle base on by default");
-    Check(terrain && terrain->optIn, "terrain base needs the opt-in");
+    Check(base && !base->terrain, "vehicle base ignores the terrain switch");
+    Check(terrain && terrain->terrain, "terrain base honours the terrain switch");
 
     RedirectInputs in = AllGood();
-    in.optInRequired = true;
-    Check(!ShouldRedirect(in), "terrain stays stock without the opt-in");
-    in.optedIn = true;
-    Check(ShouldRedirect(in), "terrain redirects when opted in");
+    in.terrain = true;
+    Check(ShouldRedirect(in), "terrain redirects by default");
+    in.terrainDisabled = true;
+    Check(!ShouldRedirect(in), "terrain switch keeps terrain stock");
+    in.terrain = false;
+    Check(ShouldRedirect(in), "terrain switch leaves the vehicle base alone");
+    in.terrain = true;
+    in.terrainDisabled = false;
     in.disabled = true;
-    Check(!ShouldRedirect(in), "kill switch beats the opt-in");
+    Check(!ShouldRedirect(in), "global kill switch covers terrain");
 }
 
 void TestPayloadsAreCheckedIn()
@@ -116,7 +120,7 @@ int main()
 {
     TestOnlyStockBasesRedirect();
     TestEveryGateFailsClosed();
-    TestTerrainIsOptIn();
+    TestTerrainIsOnWithItsOwnKillSwitch();
     TestPayloadsAreCheckedIn();
 
     if (OpenShimTest::FailureCount() != 0)

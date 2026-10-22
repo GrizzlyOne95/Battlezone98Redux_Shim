@@ -21,16 +21,16 @@ namespace BZROpenShim::StockEnhancedBase
     // Kill switch: =1 keeps every stock base import stock.
     constexpr const char* kDisableSwitch = "OPENSHIM_DISABLE_ENHANCED_STOCK_BASE";
 
-    // Opt-in for the terrain base: =1 redirects BZTerrainBase.material too.
-    // Off by default because stock terrain on the OSE terrain passes receives
-    // no PSSM shadows yet (lcbmars A/B, 2026-10-22).
-    constexpr const char* kTerrainOptInSwitch = "OPENSHIM_ENABLE_ENHANCED_STOCK_TERRAIN";
+    // Kill switch for the terrain base only: =1 keeps BZTerrainBase.material
+    // stock while vehicles stay Enhanced. On by default since the PSSM v2
+    // manual-compare fix gave Enhanced terrain its shadows back.
+    constexpr const char* kTerrainDisableSwitch = "OPENSHIM_DISABLE_ENHANCED_STOCK_TERRAIN";
 
     struct Redirect
     {
         const char* stockImport;
         const char* payloadFile;
-        bool optIn; // needs kTerrainOptInSwitch
+        bool terrain; // also honours kTerrainDisableSwitch
     };
 
     constexpr Redirect kRedirects[] = {
@@ -80,8 +80,8 @@ namespace BZROpenShim::StockEnhancedBase
     struct RedirectInputs
     {
         bool disabled = false;               // kill switch set
-        bool optInRequired = false;          // Redirect::optIn
-        bool optedIn = false;                // kTerrainOptInSwitch set
+        bool terrain = false;                // Redirect::terrain
+        bool terrainDisabled = false;        // kTerrainDisableSwitch set
         bool enhancedResourcesReady = false; // OpenShimEnhanced group registered and probed
         bool shadowedInCompilingGroup = false; // a mod ships its own base in this group
         bool payloadPresent = false;         // the .import file is in some resource group
@@ -93,7 +93,7 @@ namespace BZROpenShim::StockEnhancedBase
     // (the OSE_* programs the payload references would not resolve).
     inline bool ShouldRedirect(const RedirectInputs& in) noexcept
     {
-        return !in.disabled && (!in.optInRequired || in.optedIn) && in.enhancedResourcesReady &&
+        return !in.disabled && !(in.terrain && in.terrainDisabled) && in.enhancedResourcesReady &&
                !in.shadowedInCompilingGroup && in.payloadPresent;
     }
 }
