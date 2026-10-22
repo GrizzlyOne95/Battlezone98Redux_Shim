@@ -401,7 +401,7 @@ namespace BZROpenShim
             return 0;
 
         const uint32_t found = g_BzrFn_AiFindObjectClass(objClass, buildClass);
-        if (g_AiMultiProducerMakersEnabled && (found & 0xFFu) != 0 &&
+        if ((found & 0xFFu) != 0 && RefreshAiMultiProducerMakersState() &&
             objClass && buildClass && objClass != buildClass &&
             g_AiExtraMakerPairs.size() < 4096)
         {
@@ -423,7 +423,7 @@ namespace BZROpenShim
     {
         if (g_BzrFn_AiUnitsInit)
             g_BzrFn_AiUnitsInit();
-        if (g_AiMultiProducerMakersEnabled && !g_AiExtraMakerPairs.empty())
+        if (!g_AiExtraMakerPairs.empty() && RefreshAiMultiProducerMakersState())
             AiApplyExtraMakers();
         g_AiExtraMakerPairs.clear();
     }

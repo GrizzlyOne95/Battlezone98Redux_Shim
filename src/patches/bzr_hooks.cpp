@@ -998,6 +998,7 @@ namespace BZROpenShim
              "OPENSHIM_DISABLE_CINECAM_FIX", "BZR_DISABLE_CINECAM_FIX"},
         };
         EnvSwitches::Apply(kFixKillSwitches, EnvFlagEnabled);
+        RefreshProducerScriptPredicatesState();
         RefreshTugCargoPostLoadFixState();
         RefreshConstructorRecycleStaleTargetFixState();
         RefreshApcAlliedTargetDeployFixState();

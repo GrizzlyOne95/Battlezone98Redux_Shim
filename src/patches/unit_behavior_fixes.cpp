@@ -92,8 +92,9 @@ namespace BZROpenShim
         bool g_ProducerScriptPredicateHooksInstalled = false;
         // [Fixes] ProducerScriptPredicates. Extends the script-facing CanBuild /
         // IsBusy predicates to base producers. Default on; switchable because it
-        // changes what mission Lua observes, in single-player and multiplayer
-        // alike, and it had no opt-out at all before.
+        // changes what mission Lua observes. Single player only: in a network
+        // game the hooks return the stock answer so every peer's script
+        // branches the same way.
         bool g_ProducerScriptPredicateHooksEnabled = true;
 		bool g_SprayBuildingSimulateHookInstalled = false;
 		bool g_TugCargoPostLoadFixInstalled = false;
@@ -346,6 +347,8 @@ namespace BZROpenShim
             {
                 return true;
             }
+            if (!RefreshProducerScriptPredicatesState())
+                return false;
 
             return CallProducerPredicateForBaseProducer(
                 handle,
@@ -359,6 +362,8 @@ namespace BZROpenShim
             {
                 return true;
             }
+            if (!RefreshProducerScriptPredicatesState())
+                return false;
 
             return CallProducerPredicateForBaseProducer(
                 handle,
