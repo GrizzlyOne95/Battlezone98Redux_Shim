@@ -75,9 +75,9 @@ namespace BZROpenShim::TerrainPaint
             std::string fingerprint;
             std::array<float, 4> bounds = {};
             std::string control;
-            std::string control2;
+            std::string control2 = {};
         };
-        std::vector<MapEntry> maps;
+        std::vector<MapEntry> maps = {};
         void Validate() const
         {
             if (fingerprint.size() != 16 || fingerprint.find_first_not_of("0123456789abcdef") != std::string::npos)
