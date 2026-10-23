@@ -83,25 +83,98 @@
       ]
     }
   },
-  "shape": {
-    "radiusMeters": 120,
-    "rangeMeters": 6,
-    "amount": 0.5,
-    "types": [
-      0
-    ],
-    "hollow": [
-      1,
-      0,
-      0,
-      0
-    ],
-    "ridge": [
-      0.5,
-      0,
-      0.1,
-      0.4
-    ]
+  "shape": [
+    {
+      "radiusMeters": 120,
+      "rangeMeters": 6,
+      "amount": 0.5,
+      "types": [
+        0
+      ],
+      "hollow": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "ridge": [
+        0.5,
+        0,
+        0.1,
+        0.4
+      ]
+    },
+    {
+      "radiusMeters": 40,
+      "rangeMeters": 2.5,
+      "amount": 0.3,
+      "types": [
+        0,
+        1
+      ],
+      "hollow": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "ridge": [
+        0.5,
+        0,
+        0.2,
+        0.3
+      ]
+    }
+  ],
+  "erosion": {
+    "talus": {
+      "weights": [
+        0,
+        0,
+        0.7,
+        0.3
+      ],
+      "amount": 0.6,
+      "coverage": 0.06,
+      "radiusMeters": 60
+    },
+    "deposit": {
+      "weights": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "amount": 0.45,
+      "coverage": 0.08,
+      "types": [
+        0
+      ]
+    },
+    "channel": {
+      "weights": [
+        0,
+        0,
+        0.3,
+        0.7
+      ],
+      "amount": 0.6,
+      "startHectares": 3,
+      "fullHectares": 30
+    },
+    "scour": {
+      "weights": [
+        0.3,
+        0,
+        0.1,
+        0.6
+      ],
+      "amount": 0.35,
+      "coverage": 0.06,
+      "types": [
+        0
+      ]
+    }
   },
   "slope": {
     "weights": [

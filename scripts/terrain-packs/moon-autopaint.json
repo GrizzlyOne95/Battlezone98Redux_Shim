@@ -85,6 +85,21 @@
       ]
     }
   },
+  "erosion": {
+    "talus": {
+      "weights": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "amount": 0.5,
+      "coverage": 0.05,
+      "types": [
+        0
+      ]
+    }
+  },
   "slope": {
     "weights": [
       0,

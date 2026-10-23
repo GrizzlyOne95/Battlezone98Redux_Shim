@@ -276,6 +276,29 @@ mission on it. Mars uses the older `mars-autopaint.json` form.
   across, blends cells of the listed types toward `hollow` where the ground
   sits lower and `ridge` where it stands higher, reaching `amount` at
   `rangeMeters` of difference. Applied after `variation` and before `slope`.
+  A list of shape rules applies each in turn, for example a wide one for
+  valleys and a narrow one (about 40 m) for crevices and worn crests.
+- `erosion`: masks from one water and sediment routing pass over the HG2 at
+  MAT-cell size (20 m). Pits are filled so water drains to the map edge.
+  Water then spreads downhill to every lower neighbour, weighted toward the
+  steepest. Each cell carries sediment up to its stream power (the square root
+  of upstream area times its slope); it scours below that and deposits above
+  it. Each rule has `weights`, `amount` and optional `types`:
+  - `talus`: scree at the foot of slopes steeper than about 30 degrees, within
+    `radiusMeters` (default 60), on ground lower than its surroundings.
+  - `deposit`: where sediment settles (slope feet, valley floors, filled pits).
+  - `channel`: upstream area from `startHectares` to `fullHectares` (log
+    ramp), faded out on dead-flat ground and across filled pits, where the
+    routed path is a straight line rather than a stream bed.
+  - `scour`: where water picks sediment up (upper slopes, steep gullies).
+
+  `talus`, `deposit` and `scour` take `coverage`, the fraction of the map's
+  cells that get the full effect, ramping over the next `coverage`. Using a
+  fraction keeps one setting usable across maps of very different relief.
+  Cells below 5% of the map's strongest signal stay untouched. Applied after
+  `shape` and before `slope`. The stock maps were not built with drainage in
+  mind, so channels are rare (under 1% of cells). Talus, deposit and scour do
+  most of the work, following every hill.
 - `layers`: four layers with art, `repeatMeters`, `matchMean` (the stock tile
   whose mean colour the layer is matched to), height and specular.
 - `heightBlend`, `far`, `macro` and (Moon only) `craters`.
@@ -296,6 +319,17 @@ the CR Achilles maps paint almost no river cells, so the layer now serves the
 crests, banks and variation patches. A first try with `amount` 0.7, shape on
 forest too and 40% earth on slopes turned misn18's hillsides tan; the control
 map preview (each channel tinted) catches that before a game run.
+
+Achilles also uses erosion:
+
+- talus goes to mossy rock and earth, at 6% coverage and 0.6.
+- deposits on grass go to forest floor, at 8% coverage and 0.45, which gives
+  lush bands at the foot of the hills.
+- channels go to earth and rock, from 3 to 30 ha.
+- scour on grass goes to earth, at 6% coverage and 0.35.
+
+A second, 40 m shape rule darkens crevices toward forest floor and wears small
+crests toward earth.
 
 **Build.**
 

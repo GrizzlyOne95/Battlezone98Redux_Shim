@@ -153,6 +153,53 @@ class AutoPaintTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "shape"):
                 auto.validate_recipe(dict(self.recipe, shape=bad))
 
+    def test_shape_rules_apply_in_turn(self):
+        cells = np.zeros((32, 32), dtype=np.uint16)
+        plane = np.full((128, 128), 1000, dtype=np.uint16)
+        plane[28:36, 28:36] = 800
+        wide = {"radiusMeters": 60, "rangeMeters": 6, "amount": 1, "hollow": [0, 1, 0, 0]}
+        narrow = {"radiusMeters": 40, "rangeMeters": 6, "amount": 1, "hollow": [0, 0, 1, 0]}
+        recipe = dict(self.recipe, shape=[wide, narrow])
+        auto.validate_recipe(recipe)
+        np.testing.assert_allclose(auto.cell_field(cells, plane, recipe, seed=0)[8, 8], (0, 0, 1, 0), atol=1e-6)
+        with self.assertRaisesRegex(ValueError, "shape"):
+            auto.validate_recipe(dict(self.recipe, shape=[wide, dict(narrow, radiusMeters=5)]))
+
+    def test_erosion_masks_follow_water_and_sediment(self):
+        # A valley: two 30-degree flanks falling to a floor that runs gently toward -row.
+        rows = cols = 64
+        r, c = np.mgrid[0:rows * 4, 0:cols * 4].astype(np.float64)
+        flank = np.abs(c - cols * 2) * 5 * np.tan(np.radians(30))
+        heights = np.minimum(flank, 120) + r * 5 * 0.02 + 50
+        plane = np.rint(heights / auto.HEIGHT_UNIT_METERS).astype(np.uint16)
+        area, deposit, scour, fill = auto.erosion_fields(auto.cell_heights_meters(plane, (rows, cols)))
+        self.assertGreater(area[2, 32], area[2, 16] * 20, "water gathers on the valley floor")
+        self.assertGreater(area[2, 32], area[60, 32], "and grows downstream")
+        self.assertLess(fill.max(), 0.5, "a valley that drains needs no filling")
+        floor, flanks = deposit[:, 30:35].sum(), deposit[:, 5:25].sum() + deposit[:, 40:60].sum()
+        self.assertGreater(floor, flanks, "sediment settles where the slope eases")
+        self.assertGreater(scour[:, 5:25].sum(), scour[:, 30:35].sum(), "and is picked up on the flanks")
+        # A closed pit is filled and drains to the edge; its floor collects sediment.
+        pit = np.full((rows * 4, cols * 4), 2000, dtype=np.uint16)
+        pit[96:160, 96:160] = 1500
+        area, deposit, scour, fill = auto.erosion_fields(auto.cell_heights_meters(pit, (rows, cols)))
+        self.assertGreater(fill[32, 32], 40)
+        erosion = {"channel": {"weights": [0, 0, 0, 1], "amount": 1, "startHectares": 5, "fullHectares": 20},
+                   "talus": {"weights": [0, 0, 1, 0], "amount": 1, "coverage": 0.1}}
+        recipe = dict(self.recipe, erosion=erosion)
+        auto.validate_recipe(recipe)
+        field = auto.cell_field(np.zeros((rows, cols), dtype=np.uint16), plane, recipe, seed=0)
+        self.assertGreater(field[4, 32, 3], 0.5, "the valley floor is a channel")
+        self.assertGreater(field[4, 10, 0], 0.99, "sheet flow on the plateau is no channel")
+        talus = auto.erosion_masks(plane, (rows, cols), erosion)["talus"]
+        self.assertGreater(talus[4, 32], 0.4, "scree at the foot of the flanks")
+        self.assertEqual(talus[4, 21], 0, "but not on their rims")
+        np.testing.assert_allclose(field.sum(axis=2), 1)
+        for bad in ({}, {"gully": erosion["channel"]}, {"channel": dict(erosion["channel"], fullHectares=0.5)},
+                    {"talus": dict(erosion["talus"], coverage=0.9)}, {"talus": dict(erosion["talus"], types=[9])}):
+            with self.assertRaisesRegex(ValueError, "erosion"):
+                auto.validate_recipe(dict(self.recipe, erosion=bad))
+
     def test_multi_map_manifest_shares_identical_controls(self):
         files = (self.root / "m.hg2", self.root / "m.mat", self.root / "m.trn")
         maps = [auto.load_map(name, files, self.recipe, None, 64) for name in ("alpha", "beta")]

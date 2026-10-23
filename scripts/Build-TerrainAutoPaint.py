@@ -16,6 +16,7 @@ files are only read. Artwork and generated packs stay local.
 """
 import argparse
 import base64
+import heapq
 import importlib.util
 import io
 import json
@@ -227,10 +228,128 @@ def cell_slope_degrees(plane, cell_shape):
 def cell_relief_meters(plane, cell_shape, radius_meters):
     """Each MAT cell's mean height minus its surroundings about `radius_meters` across:
     negative in hollows and valleys, positive on ridges and hilltops."""
-    heights = plane.astype(np.float64) * HEIGHT_UNIT_METERS
-    rows, cols = cell_shape
-    cells = heights[:rows * CELL_SAMPLES, :cols * CELL_SAMPLES].reshape(rows, CELL_SAMPLES, cols, CELL_SAMPLES).mean(axis=(1, 3))
+    cells = cell_heights_meters(plane, cell_shape)
     return cells - blur(cells, radius_meters / (CELL_SAMPLES * SAMPLE_METERS))
+
+
+def cell_heights_meters(plane, cell_shape):
+    rows, cols = cell_shape
+    heights = plane.astype(np.float64) * HEIGHT_UNIT_METERS
+    return heights[:rows * CELL_SAMPLES, :cols * CELL_SAMPLES].reshape(rows, CELL_SAMPLES, cols, CELL_SAMPLES).mean(axis=(1, 3))
+
+
+_NEIGHBOURS = [(dr, dc, math.hypot(dr, dc) * CELL_SAMPLES * SAMPLE_METERS)
+               for dr in (-1, 0, 1) for dc in (-1, 0, 1) if dr or dc]
+
+
+def fill_depressions(heights, rise=1e-3):
+    """Priority flood from the map edge: every cell is raised to at least `rise`
+    metres above the lowest neighbour it can drain through, so each cell has a
+    downhill path off the map and filled pits slope gently to their outlets."""
+    rows, cols = heights.shape
+    h = heights.ravel().tolist()
+    filled, done = list(h), [False] * (rows * cols)
+    queue = []
+    for i in range(rows * cols):
+        r, c = divmod(i, cols)
+        if r in (0, rows - 1) or c in (0, cols - 1):
+            queue.append((h[i], i)); done[i] = True
+    heapq.heapify(queue)
+    while queue:
+        z, i = heapq.heappop(queue)
+        r, c = divmod(i, cols)
+        for dr, dc, _ in _NEIGHBOURS:
+            rr, cc = r + dr, c + dc
+            j = rr * cols + cc
+            if 0 <= rr < rows and 0 <= cc < cols and not done[j]:
+                done[j] = True
+                filled[j] = max(h[j], z + rise)
+                heapq.heappush(queue, (filled[j], j))
+    return np.reshape(filled, heights.shape)
+
+
+def erosion_fields(heights):
+    """One water and sediment routing pass over the cell grid, highest cell first.
+
+    Pits are filled first (fill_depressions), so water crosses them toward the
+    map edge instead of stopping in every hollow. Water spreads to every lower
+    neighbour in proportion to the drop per metre to the fourth power: mostly
+    downhill, so it gathers into channels. Each cell carries up to its
+    stream-power capacity, sqrt(upstream area) x steepest drop; below capacity
+    it picks up sediment (scour), above it it drops some (deposit), which
+    happens where slopes ease and across filled pits. Returns upstream area in
+    cells, deposit, scour and how deep each cell was filled, all on the cell grid.
+    """
+    rows, cols = heights.shape
+    n = rows * cols
+    smooth = blur(heights, 0.75)
+    filled = fill_depressions(smooth)
+    h = filled.ravel().tolist()
+    area, carried, deposit, scour = [1.0] * n, [0.0] * n, [0.0] * n, [0.0] * n
+    for i in np.argsort(-np.asarray(h), kind="stable").tolist():
+        r, c = divmod(i, cols)
+        lower, total, steepest = [], 0.0, 0.0
+        for dr, dc, dist in _NEIGHBOURS:
+            rr, cc = r + dr, c + dc
+            if 0 <= rr < rows and 0 <= cc < cols:
+                drop = (h[i] - h[rr * cols + cc]) / dist
+                if drop > 0:
+                    lower.append((rr * cols + cc, drop ** 4)); total += drop ** 4
+                    steepest = max(steepest, drop)
+        if not lower:   # an outlet on the map edge: what it carries leaves
+            continue
+        capacity = math.sqrt(area[i]) * steepest
+        if carried[i] > capacity:
+            dropped = 0.5 * (carried[i] - capacity); deposit[i] += dropped; carried[i] -= dropped
+        else:
+            picked = 0.3 * (capacity - carried[i]); scour[i] += picked; carried[i] += picked
+        for j, w in lower:
+            area[j] += area[i] * w / total
+            carried[j] += carried[i] * w / total
+    shape = heights.shape
+    return np.reshape(area, shape), np.reshape(deposit, shape), np.reshape(scour, shape), filled - smooth
+
+
+def coverage_mask(raw, coverage):
+    """0..1 mask that is full on the top `coverage` fraction of cells by `raw`
+    and fades out over the next `coverage`. Cells below 5% of the strongest
+    signal stay 0, so a map with few such features is not filled with noise."""
+    flat = raw.ravel()
+    rank = np.empty(flat.size)
+    rank[np.argsort(flat, kind="stable")] = np.arange(flat.size) / max(flat.size - 1, 1)
+    floor = max(0.05 * np.percentile(flat, 99.5), 1e-12)
+    return np.where(raw > floor, smoothstep(1 - 2 * coverage, 1 - coverage, rank.reshape(raw.shape)), 0.0)
+
+
+def erosion_masks(plane, cell_shape, erosion):
+    """The recipe's erosion masks on the cell grid, keyed like the recipe."""
+    heights = cell_heights_meters(plane, cell_shape)
+    area, deposit, scour, fill = erosion_fields(heights)
+    masks = {}
+    if "channel" in erosion:
+        rule = erosion["channel"]
+        hectares = area * (CELL_SAMPLES * SAMPLE_METERS) ** 2 / 10000
+        # Across a filled pit or dead-flat ground the routed path is a straight line,
+        # not a stream bed, so channels fade out there.
+        gz, gx = np.gradient(blur(heights, 1.5), CELL_SAMPLES * SAMPLE_METERS)
+        sloped = smoothstep(0.5, 2, np.degrees(np.arctan(np.hypot(gx, gz))))
+        masks["channel"] = (smoothstep(math.log(rule["startHectares"]), math.log(rule["fullHectares"]), np.log(hectares))
+                            * (1 - smoothstep(0.2, 1, fill)) * sloped)
+    if "deposit" in erosion:
+        masks["deposit"] = coverage_mask(deposit, erosion["deposit"]["coverage"])
+    if "scour" in erosion:
+        masks["scour"] = coverage_mask(scour, erosion["scour"]["coverage"])
+    if "talus" in erosion:
+        rule = erosion["talus"]
+        steep = smoothstep(28, 40, cell_slope_degrees(plane, cell_shape))
+        sigma = rule.get("radiusMeters", 60) / (CELL_SAMPLES * SAMPLE_METERS)
+        below = heights - blur(heights, sigma) < 0   # the foot of the slope, not its rim
+        masks["talus"] = coverage_mask(np.clip(blur(steep, sigma) - steep, 0, None) * below, rule["coverage"])
+    # Soften the 20 m cell edges a little; the weight map is blurred again later.
+    return {key: blur(mask, 0.7) for key, mask in masks.items()}
+
+
+EROSION_RULES = ("talus", "deposit", "channel", "scour")
 
 
 def variation_noise(cell_shape, meters, seed):
@@ -251,6 +370,11 @@ def cell_field(cells, plane, recipe, seed):
     blends cells of the listed types (all when omitted) toward `hollow` where the
     ground sits below its surroundings and toward `ridge` where it stands above,
     reaching `amount` at `rangeMeters` of difference: lush valleys, dry crests.
+    A list of such rules applies each in turn (say a wide one for valleys and a
+    narrow one for crevices and worn crests).
+    erosion: {"talus", "deposit", "channel", "scour"}, each {"weights", "amount",
+    optional "types"} plus its threshold (see erosion_masks), blends cells toward
+    `weights` by masks from a water and sediment routing pass over the HG2.
     slope: {"weights", "startDegrees", "fullDegrees"} blends steep cells toward
     a rock layer whatever their MAT type.
     """
@@ -265,14 +389,23 @@ def cell_field(cells, plane, recipe, seed):
             alternate[int(index)] = [(1 - amount) * a + amount * b for a, b in zip(types[int(index)], vector)]
         patches = variation_noise(cells.shape, variation.get("meters", 150), seed)[..., None]
         weights = weights * (1 - patches) + cell_weights(cells, alternate, recipe["transition"], fallback) * patches
-    shape = recipe.get("shape")
-    if shape and plane is not None:
+    def type_mask(rule):
+        return np.isin((cells >> 12) & 15, rule["types"]) if "types" in rule else np.ones(cells.shape, dtype=bool)
+    shapes = recipe.get("shape", [])
+    for shape in (shapes if isinstance(shapes, list) else [shapes]) if plane is not None else []:
         relief = cell_relief_meters(plane, cells.shape, shape["radiusMeters"])
-        mask = np.isin((cells >> 12) & 15, shape["types"]) if "types" in shape else np.ones(cells.shape, dtype=bool)
         for key, sign in (("hollow", -1), ("ridge", 1)):
             if key in shape:
-                t = (shape.get("amount", 0.5) * smoothstep(0, shape["rangeMeters"], sign * relief) * mask)[..., None]
+                t = (shape.get("amount", 0.5) * smoothstep(0, shape["rangeMeters"], sign * relief) * type_mask(shape))[..., None]
                 weights = weights * (1 - t) + np.asarray(shape[key], dtype=np.float64) * t
+    erosion = recipe.get("erosion")
+    if erosion and plane is not None:
+        masks = erosion_masks(plane, cells.shape, erosion)
+        for key in EROSION_RULES:
+            if key in erosion:
+                rule = erosion[key]
+                t = (rule.get("amount", 0.5) * masks[key] * type_mask(rule))[..., None]
+                weights = weights * (1 - t) + np.asarray(rule["weights"], dtype=np.float64) * t
     slope = recipe.get("slope")
     if slope and plane is not None:
         steep = smoothstep(slope["startDegrees"], slope["fullDegrees"], cell_slope_degrees(plane, cells.shape))[..., None]
@@ -369,15 +502,32 @@ def validate_recipe(recipe):
         slope = recipe["slope"]
         if not weight_vector(slope.get("weights")) or not 0 <= slope.get("startDegrees", -1) < slope.get("fullDegrees", -1) <= 90:
             raise ValueError("slope needs four weights and 0 <= startDegrees < fullDegrees <= 90")
+    known = {int(k) for k in recipe["typeWeights"]}
+    def mapped_types(rule):
+        return all(isinstance(t, int) and t in known for t in rule.get("types", []))
     if "shape" in recipe:
-        shape = recipe["shape"]
-        known = {int(k) for k in recipe["typeWeights"]}
-        if not (20 <= shape.get("radiusMeters", 0) <= 1000 and 0 < shape.get("rangeMeters", 0) <= 100
-                and 0 < shape.get("amount", 0.5) <= 1 and ("hollow" in shape or "ridge" in shape)
-                and all(weight_vector(shape[k]) for k in ("hollow", "ridge") if k in shape)
-                and all(isinstance(t, int) and t in known for t in shape.get("types", []))):
-            raise ValueError("shape needs radiusMeters 20..1000, rangeMeters (0,100], amount (0,1], "
-                             "hollow and/or ridge weights and mapped types")
+        shapes = recipe["shape"] if isinstance(recipe["shape"], list) else [recipe["shape"]]
+        for shape in shapes:
+            if not (isinstance(shape, dict) and 20 <= shape.get("radiusMeters", 0) <= 1000 and 0 < shape.get("rangeMeters", 0) <= 100
+                    and 0 < shape.get("amount", 0.5) <= 1 and ("hollow" in shape or "ridge" in shape)
+                    and all(weight_vector(shape[k]) for k in ("hollow", "ridge") if k in shape) and mapped_types(shape)):
+                raise ValueError("shape needs radiusMeters 20..1000, rangeMeters (0,100], amount (0,1], "
+                                 "hollow and/or ridge weights and mapped types")
+    if "erosion" in recipe:
+        erosion = recipe["erosion"]
+        if not erosion or set(erosion) - set(EROSION_RULES):
+            raise ValueError(f"erosion needs one or more of {', '.join(EROSION_RULES)}")
+        for key, rule in erosion.items():
+            if not (weight_vector(rule.get("weights")) and 0 < rule.get("amount", 0.5) <= 1 and mapped_types(rule)):
+                raise ValueError(f"erosion.{key} needs four weights, amount (0,1] and mapped types")
+        channel = erosion.get("channel", {"startHectares": 1, "fullHectares": 2})
+        if not 0 < channel.get("startHectares", 0) < channel.get("fullHectares", 0) <= 100000:
+            raise ValueError("erosion.channel needs 0 < startHectares < fullHectares <= 100000")
+        for key in ("deposit", "scour", "talus"):
+            if key in erosion and not 0 < erosion[key].get("coverage", 0) <= 0.5:
+                raise ValueError(f"erosion.{key} needs coverage (0,0.5]")
+        if "talus" in erosion and not 20 <= erosion["talus"].get("radiusMeters", 60) <= 1000:
+            raise ValueError("erosion.talus needs radiusMeters 20..1000")
 
 
 def load_map(name, files, recipe, capture_path, weight_size, trust_capture=False):

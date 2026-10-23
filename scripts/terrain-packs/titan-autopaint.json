@@ -67,6 +67,32 @@
       ]
     }
   },
+  "erosion": {
+    "talus": {
+      "weights": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "amount": 0.5,
+      "coverage": 0.05
+    },
+    "channel": {
+      "weights": [
+        0,
+        0,
+        1,
+        0
+      ],
+      "amount": 0.5,
+      "startHectares": 3,
+      "fullHectares": 30,
+      "types": [
+        3
+      ]
+    }
+  },
   "slope": {
     "weights": [
       0,
