@@ -252,15 +252,19 @@ void UpdateNativeHdZone(void* zone, bool dirty)
         const auto audit = TerrainSemantic::ValidatePackedUv(vertices, bytes.data(), 4, 0);
         if (audit.checked != TerrainSemantic::kVertexCount || audit.mismatches)
             throw std::runtime_error("native HD packed UV parity failed");
-        std::vector<uint8_t> positions;
+        std::vector<uint8_t> positions, heights;
         Vector3 translation = {};
         if (g_HdPaint.enabled)
         {
-            void* buffer = nullptr;
+            void* buffer = nullptr; void* heightBuffer = nullptr;
             const auto* p = g_ogre.getNodePosition(candidate.node);
             if (!p || !GetVertexBuffer(operation, 0, buffer) || g_ogre.getVertexSize(buffer) != 16 ||
                 !ReadD3D11VertexBuffer(buffer, uint32_t(TerrainSemantic::kVertexCount * 16), positions))
                 throw std::runtime_error("paint native position stream unavailable");
+            // The released terrain VS replaces object Y with this stream.
+            if (!GetVertexBuffer(operation, 2, heightBuffer) || g_ogre.getVertexSize(heightBuffer) != 4 ||
+                !ReadD3D11VertexBuffer(heightBuffer, uint32_t(TerrainSemantic::kVertexCount * 4), heights))
+                throw std::runtime_error("paint native height stream unavailable");
             translation = *p;
         }
         std::vector<TerrainSemantic::GpuVertex> upload;
@@ -272,10 +276,15 @@ void UpdateNativeHdZone(void* zone, bool dirty)
             {
                 // Copy actual native POSITION.xz, not tile UV or camera-relative
                 // positions. This preserves duplicated seams and native spacing.
-                float x = 0, z = 0;
+                // The atlas rect is unused here; its x carries world Y (the
+                // native height stream) for the triplanar side projections.
+                float x = 0, y = 0, z = 0;
                 memcpy(&x, positions.data() + i*16, 4); memcpy(&z, positions.data() + i*16+8, 4);
+                memcpy(&y, heights.data() + i*4, 4);
+                if (!std::isfinite(y) || std::abs(y) > 1000000) throw std::runtime_error("paint native height invalid");
                 const auto world = TerrainPaint::WorldXZ(x, z, translation.x, translation.z);
                 gpu.localU = world[0]; gpu.localV = world[1]; gpu.tileIndex = 0;
+                gpu.atlasU = y + translation.y;
             }
             else if (!g_HdTileMapped[gpu.tileIndex] ||
                 !TerrainHdMaterial::Remap(g_HdSliceRemap, gpu.tileIndex, g_proxy.hdSliceCount, gpu.tileIndex))

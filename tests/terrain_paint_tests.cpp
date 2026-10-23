@@ -28,6 +28,7 @@ int main(int argc, char** argv)
             "    vTexCoord = (openShimPackedUV + 0.5) / 160.0;\nuntouched();";
         check(TerrainPaint::Specialize(vertex, false, config), "paint vertex specialization failed");
         check(vertex.find("vTexCoord = openShimStockUV;") != std::string::npos &&
+            vertex.find("openShimTileSlice = openShimAtlasRect.x;") != std::string::npos &&
             vertex.find("float2 openShimStockUV = nativePackedUV;") != std::string::npos &&
             vertex.find("untouched();") != std::string::npos && vertex.find("orientation") == std::string::npos,
             "paint specialization corrupted stock auxiliary coordinates");
@@ -80,8 +81,9 @@ int main(int argc, char** argv)
         check(plain.find("normalMap.Sample(normalSam, vTexCoord)") != std::string::npos &&
             plain.find("#define OPENSHIM_PAINT_MATERIAL 0") != std::string::npos, "diffuse-only paint touched stock normals");
         check(full.find("normalMap.Sample") == std::string::npos && full.find("specularMap.Sample") == std::string::npos &&
-            full.find("OpenShimSampleTerrainPaintNormal(diffuseMap, diffuseSam, openShimHdUV)") != std::string::npos &&
-            full.find("cotangent_frame(geometryNormal, vViewPosition.xyz, openShimHdUV)") != std::string::npos &&
+            full.find("OpenShimSampleTerrainPaintNormal(diffuseMap, diffuseSam, OPENSHIM_PAINT_GEO)") != std::string::npos &&
+            full.find("float3x3 tbn = OPENSHIM_PAINT_TBN(geometryNormal);") != std::string::npos &&
+            full.find("#define OPENSHIM_PAINT_TRIPLANAR_SOURCE 0") != std::string::npos &&
             full.find("vTexCoord * 8.0") != std::string::npos &&
             full.find("#define OPENSHIM_PAINT_MATERIAL 1") != std::string::npos, "material paint specialization incomplete");
         // A colour-only pass (terrain glow) keeps working; a normal sample in
@@ -106,8 +108,10 @@ int main(int argc, char** argv)
             "in float2 vTexCoord : TEXCOORD0,\n in float2 openShimHdUV : TEXCOORD9,\n in float openShimTileSlice : TEXCOORD10,");
         rewrite("diffuseMap.Sample(diffuseSam, vTexCoord)", "diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice))");
         check(TerrainPaint::Specialize(shipping, true, material), "shipping terrain PS rejected the material form");
+        check(shipping.find("#define OPENSHIM_PAINT_TRIPLANAR_SOURCE 1") != std::string::npos,
+            "shipping terrain PS lost the view normal or inverse view triplanar needs");
         if (argc == 2) { std::ofstream out(argv[1]); out << shipping; check(bool(out), "specialized PS export failed"); }
-        std::cout << "PASS: material form, map contracts, multi-map selection, native cluster seam and preserved auxiliary UVs\n";
+        std::cout << "PASS: material form, triplanar inputs, map contracts, multi-map selection, native cluster seam and preserved auxiliary UVs\n";
         return 0;
     }
     catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

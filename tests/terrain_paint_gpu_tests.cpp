@@ -24,13 +24,16 @@ RWStructuredBuffer<float4> results : register(u0);
 float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXCOORD10) : SV_TARGET
 { return diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice)); }
 [numthreads(1,1,1)] void ComputeMain(uint3 id : SV_DispatchThreadID)
-{ results[id.x] = OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, points[id.x]); }
+{ results[id.x] = OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, OpenShimPaintGeometry(points[id.x], 0, float3(0,1,0))); }
 )";
         check(TerrainPaint::Specialize(source, true, config), "paint PS source specialization failed");
         ComPtr<ID3DBlob> code, errors;
         // Compile the derivative-based shipping sampler at the native target.
         ok(D3DCompile(source.data(),source.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors));
-        const std::string compute = "#define OPENSHIM_PAINT_SAMPLE(tex,sam,uv) tex.SampleLevel(sam,float3(frac((uv).xy),(uv).z),0)\n" + source;
+        // Compute has no derivatives: sample level zero with zero gradients.
+        const std::string noDerivatives = "#define OPENSHIM_PAINT_SAMPLE(tex,sam,uv,gx,gy) tex.SampleLevel(sam,float3(frac((uv).xy),(uv).z),0)\n"
+            "#define OPENSHIM_PAINT_DDX(v) ((v) * 0)\n#define OPENSHIM_PAINT_DDY(v) ((v) * 0)\n";
+        const std::string compute = noDerivatives + source;
         HRESULT compiled = D3DCompile(compute.data(),compute.size(),nullptr,nullptr,nullptr,"ComputeMain","cs_5_0",0,0,&code,&errors);
         if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
         ok(compiled);
@@ -106,7 +109,7 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
   float4 n = normalMap.Sample(normalSam, vTexCoord); float3 s = specularMap.Sample(specularSam, vTexCoord).xyz;
   return diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice)) + n + float4(mul(s, tbn), 0); }
 [numthreads(1,1,1)] void ComputeMain(uint3 id : SV_DispatchThreadID)
-{ float2 at = float2(1.5, 1.5); results[0] = OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, at);
+{ OpenShimPaintGeo at = OpenShimPaintGeometry(float2(1.5, 1.5), 0, float3(0,1,0)); results[0] = OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, at);
   results[1] = OpenShimSampleTerrainPaintNormal(diffuseMap, diffuseSam, at);
   results[2] = float4(OpenShimSampleTerrainPaintSpecular(diffuseMap, diffuseSam, at), 1); }
 )";
@@ -116,7 +119,7 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
         check(TerrainPaint::Specialize(materialSource, true, material), "material PS specialization failed");
         materialSource = frame + materialSource;
         ok(D3DCompile(materialSource.data(),materialSource.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors));
-        const std::string materialCompute = "#define OPENSHIM_PAINT_SAMPLE(tex,sam,uv) tex.SampleLevel(sam,float3(frac((uv).xy),(uv).z),0)\n" + materialSource;
+        const std::string materialCompute = noDerivatives + materialSource;
         compiled = D3DCompile(materialCompute.data(),materialCompute.size(),nullptr,nullptr,nullptr,"ComputeMain","cs_5_0",0,0,&code,&errors);
         if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
         ok(compiled);
@@ -140,7 +143,61 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
         const Pixel taller[]={{0,1,0,1},{1,.5f,.5f,1},{.7f,.7f,.7f,1}};
         for(UINT i=0;i<3;++i)for(unsigned c=0;c<4;++c)check(std::abs((&values[i].r)[c]-(&taller[i].r)[c])<1e-5f,"height blend/material channels failed");
         context->Unmap(staging.Get(),0);
-        std::cout<<"PASS: native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
+        // Triplanar: an IBL pass with a view normal and inverse view projects
+        // walls sideways. Flat ground keeps the original XZ mapping exactly.
+        std::string triplanarSource = R"(
+Texture2DArray diffuseMap : register(t0);
+SamplerState diffuseSam : register(s0);
+RWStructuredBuffer<float4> results : register(u0);
+float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXCOORD10,
+    in float3 vViewNormal : TEXCOORD2, uniform float4x4 inverseViewMatrix) : SV_TARGET
+{ float3 geometryNormal = normalize(vViewNormal);
+  float3x3 tbn = cotangent_frame(geometryNormal, vViewPosition.xyz, vTexCoord);
+  float4 n = normalMap.Sample(normalSam, vTexCoord);
+  return diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice)) + float4(mul(n.xyz * 2 - 1, tbn), 0); }
+[numthreads(1,1,1)] void ComputeMain(uint3 id : SV_DispatchThreadID)
+{ OpenShimPaintGeo flat = OpenShimPaintGeometry(float2(1.25, 0.25), 0.75, float3(0,1,0));
+  OpenShimPaintGeo east = OpenShimPaintGeometry(float2(1.25, 0.25), 0.75, float3(1,0,0));
+  OpenShimPaintGeo west = OpenShimPaintGeometry(float2(1.25, 0.25), 0.75, float3(-1,0,0));
+  OpenShimPaintGeo north = OpenShimPaintGeometry(float2(1.25, 0.25), 0.75, float3(0,0,1));
+  results[0] = OpenShimSampleTerrainPaintNormal(diffuseMap, diffuseSam, flat);
+  results[1] = OpenShimSampleTerrainPaintNormal(diffuseMap, diffuseSam, north);
+  results[2] = OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, flat);
+  results[3] = OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, east);
+  results[4] = OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, west);
+  results[5] = OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, north); }
+)";
+        check(TerrainPaint::Specialize(triplanarSource, true, material) &&
+            triplanarSource.find("#define OPENSHIM_PAINT_TRIPLANAR_SOURCE 1") != std::string::npos, "triplanar PS specialization failed");
+        triplanarSource = "#define IBL_ENABLED\n#define ENHANCED_MODE\n" + triplanarSource;
+        compiled = D3DCompile(triplanarSource.data(),triplanarSource.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        const std::string triplanarCompute = noDerivatives + triplanarSource;
+        compiled = D3DCompile(triplanarCompute.data(),triplanarCompute.size(),nullptr,nullptr,nullptr,"ComputeMain","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ComPtr<ID3D11ComputeShader> triplanarShader;
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&triplanarShader));
+        // Layer zero only: colour encodes the texel, its normal leans to +x.
+        for (unsigned y=0;y<4;++y) for (unsigned x=0;x<4;++x)
+        {
+            const unsigned i=y*4+x;
+            layers[i]={float(x+1)/4,float(y+1)/4,0,0}; layers[5*16+i]={1,.5f,.5f,0}; layers[64+i]={1,0,0,0};
+        }
+        for(unsigned i=0;i<9;++i)context->UpdateSubresource(materialTexture.Get(),i,nullptr,layers.data()+16*i,4*sizeof(Pixel),0);
+        context->CSSetShader(triplanarShader.Get(),nullptr,0);
+        sd.AddressU=sd.AddressV=sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;
+        sampler.Reset();ok(device->CreateSamplerState(&sd,&sampler));sample=sampler.Get();context->CSSetSamplers(0,1,&sample);
+        dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));values=static_cast<const Pixel*>(mapped.pData);
+        // Flat (x,z)=(1.25,.25) is texel (2,0); the east wall projects (z,y)
+        // to texel (0,1), the west wall mirrors u to texel (3,1) and the north
+        // wall projects (-x,y) to texel (1,1). On the north wall the +x lean
+        // points along world -X, which is -t in its frame.
+        const Pixel projected[]={{1,.5f,.5f,1},{0,.5f,.5f,1},{.75f,.25f,0,1},{.25f,.5f,0,1},{1,.5f,0,1},{.5f,.5f,0,1}};
+        for(UINT i=0;i<6;++i)for(unsigned c=0;c<4;++c)check(std::abs((&values[i].r)[c]-(&projected[i].r)[c])<1e-5f,"triplanar projection/normal failed");
+        context->Unmap(staging.Get(),0);
+        std::cout<<"PASS: triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
         return 0;
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

@@ -387,30 +387,48 @@ _SIBLINGS = {"normal": ("Normal", "normal", "nor_gl", "nor_dx"),
 _COLOR_SUFFIXES = ("BaseColor", "Albedo", "albedo", "diff", "diffuse")
 
 
+def _sibling_names(name, kind):
+    """Candidate names for a colour map's sibling, swapping the colour token.
+
+    The token may end the stem (Megascans _BaseColor.jpg) or precede a
+    resolution tag (Poly Haven _diff_2k.png).
+    """
+    stem, dot, extension = name.rpartition(".")
+    for color in _COLOR_SUFFIXES:
+        head, found, tail = stem.rpartition(color)
+        if found and (not tail or re.fullmatch(r"_\d+[kK]", tail)):
+            for suffix in _SIBLINGS[kind]:
+                for ext in (extension, "jpg", "png", "exr"):
+                    yield f"{head}{suffix}{tail}.{ext}"
+
+
 def material_source(root, layer, kind):
     """Source entry for a layer's normal/height/roughness map, or None.
 
     An explicit layer[kind] is a member of the layer's archive (string) or a
-    full source entry (dict). Without one, archive members are found by the
-    usual suffix swap, for example _BaseColor.jpg -> _Normal.jpg.
+    full source entry (dict). Without one, siblings are found by the usual
+    token swap, for example _BaseColor.jpg -> _Normal.jpg or
+    _diff_2k.png -> _nor_gl_2k.png, among archive members or next to a file.
     """
     explicit = layer.get(kind)
     if isinstance(explicit, dict):
         return explicit
     if "archive" not in layer:
-        return {"file": explicit} if isinstance(explicit, str) else None
+        if isinstance(explicit, str):
+            return {"file": explicit}
+        if not layer.get("file"):
+            return None
+        for candidate in _sibling_names(layer["file"], kind):
+            if _hd.source_path(root, candidate).is_file():
+                return {"file": candidate}
+        return None
     if isinstance(explicit, str):
         return {"archive": layer["archive"], "member": explicit}
     with zipfile.ZipFile(_hd.source_path(root, layer["archive"])) as archive:
         names = set(archive.namelist())
-    stem, dot, extension = layer["member"].rpartition(".")
-    for color in _COLOR_SUFFIXES:
-        if stem.endswith(color):
-            for suffix in _SIBLINGS[kind]:
-                for ext in (extension, "jpg", "png", "exr"):
-                    candidate = f"{stem[:-len(color)]}{suffix}.{ext}"
-                    if candidate in names:
-                        return {"archive": layer["archive"], "member": candidate}
+    for candidate in _sibling_names(layer["member"], kind):
+        if candidate in names:
+            return {"archive": layer["archive"], "member": candidate}
     return None
 
 
@@ -516,21 +534,29 @@ def material_maps(root, layer, diffuse, size, repeat):
             ImageFilter.GaussianBlur(max(size / 32, 1))), dtype=np.float64) / 255
         height = normalize_height(lum - blur)
         identity["height"] = "derived from colour luminance"
+    normal_image = load("normal")
+    source = None
+    if normal_image is not None:
+        source = np.asarray(normal_image.convert("RGB").resize((size, size), Image.Resampling.LANCZOS), dtype=np.float64) / 127.5 - 1
+        source, flips = orient_normal(source, height)
+        identity["normalFlipXY"] = flips
     if layer.get("craters"):
         # Craters carry the shape; the source height stays as fine texture.
         craters = crater_field(size, repeat, layer["craters"])
-        height = normalize_height(craters / max(np.ptp(craters), 1e-6) + (height - 0.5) * layer["craters"].get("detail", 0.1), 0.05)
+        detail = layer["craters"].get("detail", 0.1)
+        height = normalize_height(craters / max(np.ptp(craters), 1e-6) + (height - 0.5) * detail, 0.05)
         identity["craters"] = layer["craters"]
-    normal_image = None if layer.get("craters") else load("normal")
-    if normal_image is not None:
-        n = np.asarray(normal_image.convert("RGB").resize((size, size), Image.Resampling.LANCZOS), dtype=np.float64) / 127.5 - 1
-        n, flips = orient_normal(n, height)
-        identity["normalFlipXY"] = flips
+    if source is not None and not layer.get("craters"):
+        n = source
     else:
         # Bump strength for derived normals: a few decimetres over the repeat.
         dx, dy = height_slopes(height, layer.get("derivedReliefMeters", 0.25), repeat)
         n = np.dstack((-dx, -dy, np.ones_like(dx)))
         identity["normal"] = "derived from height"
+        if source is not None:
+            # The source normal keeps its fine detail on top of the crater shape.
+            n[..., :2] += source[..., :2] / np.maximum(source[..., 2:], 0.2)
+            identity["normal"] = "derived from height plus source detail"
     rough_image = load("roughness")
     if rough_image is not None:
         specular = (1 - gray(rough_image, size)) * layer.get("specularScale", 1)

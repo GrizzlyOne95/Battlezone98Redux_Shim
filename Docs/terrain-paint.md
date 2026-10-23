@@ -181,14 +181,36 @@ Each layer reads one fixed mip, chosen from the tessellated vertex spacing and
 repeat length, so shared patch edges always agree and no cracks open.
 
 In the material form the paint replaces the stock normal and specular atlas
-samples, and the cotangent frame follows the paint UVs. Layer recipe fields:
+samples, and the cotangent frame follows the paint UVs.
+
+### Triplanar slopes
+
+In Enhanced passes with IBL (which declare the view normal and the inverse
+view), every layer is projected three ways and blended by `|n|^4` of the world
+normal, with slivers under 3% dropped. Ground flatter than about 30 degrees
+keeps the single top projection, which is the original world-XZ mapping, so
+flat terrain looks and costs the same. Cliffs get side projections, (z, y)
+and (x, y), instead of stretched XZ streaks; u is mirrored on far faces.
+Colour, specular and the height-blend heights use all three; normals are
+combined per projection with the whiteout blend and returned in a frame around
+the geometry normal that matches the original +X/+Z frame on flat ground.
+Native world Y reaches the pixel shader through the atlas rect's x and the
+slice index, both unused in paint mode, so camera-relative rendering does not
+matter. The control weights and the domain-shader displacement stay in world
+XZ. Glow, vertex-lit and retro passes keep the top projection.
+
+Layer recipe fields:
 
 - `normal`, `height`, `roughness`: an archive member name, or a full source
   entry. When omitted, members are found by suffix swap (`_BaseColor` to
   `_Normal`, `_Displacement`, `_Roughness`; Poly Haven `diff` to `nor_gl`,
-  `disp`, `rough`).
+  `disp`, `rough`, also next to a loose `file`, as in `_diff_2k.png`).
 - Normal X and Y are each checked against the height gradient and flipped when
   they disagree, so DirectX- and OpenGL-convention maps both work.
+- `craters` (`count`, `minMeters`, `maxMeters`, `seed`, `detail`) stamps a
+  tileable field of rimmed impact bowls, power-law sized with depth a fifth of
+  the diameter, into the height; the source height stays as `detail`. The
+  normal is derived from that height, with the source normal's detail on top.
 - Missing maps are derived: height from the colour's high-passed luminance, the
   normal from that height (`derivedReliefMeters`, default 0.25), and specular as
   0.5.
